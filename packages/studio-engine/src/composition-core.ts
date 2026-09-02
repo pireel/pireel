@@ -520,7 +520,7 @@ export interface Composition {
   audioTracks?: import('./audio-tracks').AudioClip[];
   /** Narration denoise (MAIN source; baked in the browser — the wet file is cached, strength is a
    *  bake-time dry/wet blend so preview and export play one identical blended file). 0 < strength ≤ 1. */
-  audioDenoise?: { strength: number; mode?: 'light' | 'strong' };
+  audioDenoise?: { strength: number };
 }
 
 /** Person-effect config (global style; matte on/off is per-segment, see VideoShot.personMatte).

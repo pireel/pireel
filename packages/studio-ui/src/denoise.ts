@@ -7,19 +7,14 @@
  * no WebAudio takeover of the decode elements. Changing strength only re-blends from the cached
  * wet (seconds), never re-runs inference.
  *
- * Engines behind the `denoiseWetPcm` seam: light = spectral floor reduction, strong = DeepFilterNet3
- * on onnxruntime-web (dfn3-denoise.ts), RNNoise only as the strong fallback — everything around
- * it (bake/cache/blend/wav) is engine-agnostic. Output is 48 kHz MONO wav: speech-first tradeoff, stereo sources downmix.
+ * Engine behind the `denoiseWetPcm` seam: DeepFilterNet3 on onnxruntime-web (dfn3-denoise.ts),
+ * RNNoise only as the load-failure fallback — everything around it (bake/cache/blend/wav) is
+ * engine-agnostic. Output is 48 kHz MONO wav: speech-first tradeoff, stereo sources downmix.
  */
 
 export const DENOISE_RATE = 48000;
+/** Same default as the reference desktop NLE's denoise amount. */
 export const DENOISE_DEFAULT_STRENGTH = 0.6;
-/** light = stationary spectral floor reduction (fast, keeps the room's own tone — what a one-click
- *  NLE denoise does); strong = RNNoise neural enhancement (rebuilds the signal, can change the
- *  ambience). Light is the default. */
-export type DenoiseMode = 'light' | 'strong';
-export const DENOISE_DEFAULT_MODE: DenoiseMode = 'light';
-export const DENOISE_MODES: readonly DenoiseMode[] = ['light', 'strong'];
 const FRAME = 480; // rnnoise contract: 10 ms frames at 48 kHz
 const YIELD_EVERY = 400; // frames between event-loop yields (~4 s of audio)
 
@@ -39,13 +34,9 @@ export async function decodeMono48k(blob: Blob): Promise<Float32Array> {
 
 /** Run RNNoise over mono 48 kHz PCM → WET PCM (same length). Yields to the event loop between
  *  batches so a long bake doesn't freeze the tab; onProgress gets 0..1. */
-export async function denoiseWetPcm(dry: Float32Array, onProgress?: (p: number) => void, mode: DenoiseMode = DENOISE_DEFAULT_MODE): Promise<Float32Array> {
-  if (mode === 'light') {
-    const { spectralDenoise } = await import('./spectral-denoise');
-    return spectralDenoise(dry, { reductionDb: 15, onProgress });
-  }
-  // strong = DeepFilterNet3 (same model and pipeline constants as the reference desktop NLE).
-  // RNNoise stays only as the fallback when the graphs cannot load (offline, blocked CDN).
+export async function denoiseWetPcm(dry: Float32Array, onProgress?: (p: number) => void): Promise<Float32Array> {
+  // DeepFilterNet3 (same model and pipeline constants as the reference desktop NLE). RNNoise
+  // stays only as the fallback when the graphs cannot load (offline, blocked CDN).
   try {
     const { dfn3Enhance } = await import('./dfn3-denoise');
     return await dfn3Enhance(dry, onProgress);

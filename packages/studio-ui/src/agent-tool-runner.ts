@@ -430,7 +430,7 @@ export interface AgentToolCtx {
   audioRemoveMany: (ids: readonly string[]) => { ok: boolean; error?: string };
   audioSplit: (id: string, atSec: number) => { ok: boolean; error?: string; newClipId?: string };
   /** Narration denoise (use-denoise.ts): strength = on/retune, null = off; bakes in the background. */
-  setDenoise: (strength: number | null, mode?: 'light' | 'strong') => void;
+  setDenoise: (strength: number | null) => void;
   splitAtPlayhead: () => void;
   trimAtPlayhead: (side: 'left' | 'right') => { ok: boolean; error?: string };
   deleteShot: (sid: string) => { ok: boolean; error?: string };
@@ -3696,8 +3696,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               return { ok: false, error: narrationOnLane ? t('workbench.denoiseNotForLaneNarration') : t('workbench.denoiseNeedsMainSource') };
             }
             const s = typeof input.strength === 'number' && Number.isFinite(input.strength) ? Math.max(0.05, Math.min(1, input.strength)) : 0.6;
-            const mode = input.mode === 'strong' || input.mode === 'light' ? input.mode : undefined;
-            setDenoise(s, mode);
+            setDenoise(s);
             return { ok: true, summary: t('workbench.denoiseTurnedOn', { pct: Math.round(s * 100) }) };
           }
           case 'set_bgm': {

@@ -173,11 +173,6 @@ export const PANELS_EN: Record<string, string> = {
   "panels.denoiseReadyHint":
     "Active: preview and export both play the denoised audio",
   "panels.denoiseStrength": "Strength",
-  "panels.denoiseMode": "Denoise mode",
-  "panels.denoiseModeLight": "Light",
-  "panels.denoiseModeStrong": "Strong",
-  "panels.denoiseModeLightHint": "Removes only the steady noise floor (hiss, hum, fan) and keeps the room's own tone",
-  "panels.denoiseModeStrongHint": "Deep-learning speech enhancement (DeepFilterNet3) for very noisy recordings; ambience is reduced along with the noise",
   "panels.dropAudioHere": "Drop audio here",
   "panels.emptyPrimaryTrackDropVideo": "Primary track is empty · Drop in a video to start",
   "panels.releaseVideoOnPrimaryTrack": "Release to add to the primary track",
