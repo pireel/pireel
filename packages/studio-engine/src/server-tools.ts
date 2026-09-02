@@ -120,6 +120,7 @@ import { normalizeProjectOutputs, projectOutputPositionMap } from './project-out
 import { AGENT_TIMELINE_TOOL_IDS, runAgentTimelineTool } from './agent-timeline';
 import { planScriptCaptionSegments, splitScriptLines } from './script-captions';
 import { isDisplayTextFontId } from './display-text-presets';
+import { describeAudioTargets, resolveAudioTarget } from './audio-target';
 
 // Ensure the template registry is ready at module load. The MCP worker path
 // doesn't go through UI mounting; this un-tree-shakeable call pulls templates.ts
@@ -869,10 +870,15 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         ...(typeof input.startSec === 'number' && Number.isFinite(input.startSec) ? { startSec: Math.max(0, input.startSec) } : {}),
         ...(typeof input.mute === 'boolean' ? { muted: input.mute } : {}),
       };
+      // trackId = an audio clip id OR a lane id (track_music …): a lane resolves to the audio
+      // clips on it. An unknown id names what would have worked so the retry is exact.
+      const audioIds = tracks.map((x) => x.id);
+      const resolved = trackIdIn ? resolveAudioTarget(p.document, audioIds, trackIdIn) : null;
+      const notFound = `audio track not found: ${trackIdIn} — ${describeAudioTargets(p.document, audioIds)}`;
       if (input.off === true) {
           if (!tracks.length) return { result: { ok: false, error: 'no audio tracks yet' } };
-          if (trackIdIn && !tracks.some((x) => x.id === trackIdIn)) return { result: { ok: false, error: 'audio track not found' } };
-          const removed = removeAudioDocumentClips(p.document, trackIdIn ? [trackIdIn] : tracks.map((track) => track.id));
+          if (resolved && !resolved.clipIds.length) return { result: { ok: false, error: notFound } };
+          const removed = removeAudioDocumentClips(p.document, resolved ? resolved.clipIds : audioIds);
           if (!removed.ok) return { result: { ok: false, error: removed.error.message, data: { code: removed.error.code, trackIds: removed.error.trackIds } } };
           return {
             result: { ok: true, summary: trackIdIn ? 'Removed the audio track' : 'Removed all audio tracks' },
@@ -891,9 +897,13 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
             document: added.document,
           };
       }
-      const target = trackIdIn ? tracks.find((x) => x.id === trackIdIn) : tracks.length === 1 ? tracks[0] : null;
       if (!tracks.length) return { result: { ok: false, error: 'no audio tracks yet — pass a url to add one' } };
-      if (!target) return { result: { ok: false, error: 'pass trackId (several tracks exist)' } };
+      if (resolved && !resolved.clipIds.length) return { result: { ok: false, error: notFound } };
+      if (resolved && resolved.clipIds.length > 1) {
+        return { result: { ok: false, error: `${resolved.laneId} holds ${resolved.clipIds.length} clips — pass one clip id: ${resolved.clipIds.join(', ')}` } };
+      }
+      const target = resolved ? tracks.find((x) => x.id === resolved.clipIds[0]) : tracks.length === 1 ? tracks[0] : null;
+      if (!target) return { result: { ok: false, error: `pass trackId (several tracks exist) — ${describeAudioTargets(p.document, audioIds)}` } };
       const splitAt = Number(input.splitAtSec);
       if (Number.isFinite(splitAt)) {
           const split = splitAudioDocumentClip(p.document, target.id, splitAt);

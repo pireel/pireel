@@ -1375,7 +1375,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     inputSchema: obj(
       {
         url: { type: 'string', description: 'Audio url to ADD as a new track. Omit to adjust an existing one.' },
-        trackId: { type: 'string', description: 'Target track id (from the snapshot / add receipt).' },
+        trackId: { type: 'string', description: 'Target: the audio clip id from the add receipt / snapshot, or a music lane id (track_music …) when that lane holds one clip. Omit when exactly one audio track exists.' },
         startSec: { type: 'number', description: 'Position on the edited timeline (seconds).' },
         volumeDb: { type: 'number', description: 'Level dB, clamped -60..+20 (0 = source level, -60 = silent). Omit on add = auto level from loudness measurement.' },
         fadeInSec: { type: 'number' },

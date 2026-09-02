@@ -157,6 +157,7 @@ import { withEditableBlockGeometry } from './editable-block-geometry';
 import { placementPercentToBox } from '@pireel/studio-engine/overlay-placement';
 import { getStudioSpaceId, listStudioGens, pollCreation, startGeneration } from './gen-api';
 import { isDisplayTextFontId } from '@pireel/studio-engine/display-text-presets';
+import { describeAudioTargets, resolveAudioTarget } from '@pireel/studio-engine/audio-target';
 
 const PROJECT_MUTATION_TOOLS = new Set(['create_output', 'duplicate_output', 'switch_output', 'rename_output', 'delete_output']);
 const NO_UNDO_TOOLS = new Set(['get_block', 'get_timeline', 'read_director_plan', 'read_scene_designs', 'inspect_media', 'inspect_images', 'get_transcript', 'get_beat_grid', 'list_assets', 'search_assets', 'prepare_local_image', 'search_media', 'list_outputs', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_music', 'generate_foley', 'get_generation_jobs', 'list_voices', 'clone_voice', 'design_voice', 'delete_voice', 'generate_speech', 'lip_sync', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_visual', 'export_video', 'track_export', 'ask_user', 'request_approval']);
@@ -3701,10 +3702,17 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               ...(typeof input.startSec === 'number' && Number.isFinite(input.startSec) ? { startSec: Math.max(0, input.startSec) } : {}),
               ...(typeof input.mute === 'boolean' ? { muted: input.mute } : {}),
             };
+            // trackId = an audio clip id OR a lane id (track_music …): a lane resolves to the audio
+            // clips on it. An unknown id names what would have worked so the retry is exact.
+            const audioIds = tracks.map((x) => x.id);
+            const resolved = trackIdIn ? resolveAudioTarget(documentRef.current, audioIds, trackIdIn) : null;
+            const notFound = () => ({ ok: false as const, error: `${t('workbench.audioTrackNotFound')}: ${trackIdIn} — ${describeAudioTargets(documentRef.current, audioIds)}` });
             if (input.off === true) {
               if (!tracks.length) return { ok: false, error: t('workbench.noBgmYet') };
-              if (trackIdIn && !tracks.some((x) => x.id === trackIdIn)) return { ok: false, error: t('workbench.audioTrackNotFound') };
-              const removed = trackIdIn ? audioRemove(trackIdIn) : audioRemoveMany(tracks.map((track) => track.id));
+              if (resolved && !resolved.clipIds.length) return notFound();
+              const removed = resolved
+                ? (resolved.clipIds.length === 1 ? audioRemove(resolved.clipIds[0]!) : audioRemoveMany(resolved.clipIds))
+                : audioRemoveMany(audioIds);
               if (!removed.ok) return { ok: false, error: removed.error ?? t('workbench.audioTrackNotFound') };
               return { ok: true, summary: t('workbench.bgmRemoved') };
             }
@@ -3737,9 +3745,13 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const db = (compRef.current.audioTracks ?? []).find((x) => x.id === newId)?.volumeDb;
               return { ok: true, summary: t('workbench.bgmMounted', { db: db != null ? String(r1(db)) : String(-18) }), data: { trackId: newId } };
             }
-            const target = trackIdIn ? tracks.find((x) => x.id === trackIdIn) : tracks.length === 1 ? tracks[0] : null;
             if (!tracks.length) return { ok: false, error: t('workbench.noBgmYet') };
-            if (!target) return { ok: false, error: t('workbench.audioTrackNotFound') };
+            if (resolved && !resolved.clipIds.length) return notFound();
+            if (resolved && resolved.clipIds.length > 1) {
+              return { ok: false, error: `${resolved.laneId} holds ${resolved.clipIds.length} clips — pass one clip id: ${resolved.clipIds.join(', ')}` };
+            }
+            const target = resolved ? tracks.find((x) => x.id === resolved.clipIds[0]) : tracks.length === 1 ? tracks[0] : null;
+            if (!target) return { ok: false, error: `${t('workbench.audioTrackNotFound')} — ${describeAudioTargets(documentRef.current, audioIds)}` };
             // Split changes the track COUNT, so it stands alone rather than combining with the knobs
             const splitAt = Number(input.splitAtSec);
             if (Number.isFinite(splitAt)) {
