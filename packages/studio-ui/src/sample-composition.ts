@@ -640,6 +640,20 @@ export const PREVIEW_RUNTIME = `
         seekTimelines(lastSeekT);
       } catch (err) {}
     }
+    else if (d.type === 'hf:fonts' && Array.isArray(d.hrefs)) {
+      // Web font stylesheets for an in-place swap: the swapped caption/text nodes may reference a
+      // library face this document never linked (only a full rebuild bakes <link>s into <head>).
+      try {
+        for (var fi = 0; fi < d.hrefs.length; fi++) {
+          var fh = String(d.hrefs[fi] || '');
+          if (!fh || document.querySelector('link[href="' + fh.replace(/"/g, '') + '"]')) continue;
+          var fl = document.createElement('link');
+          fl.rel = 'stylesheet';
+          fl.href = fh;
+          document.head.appendChild(fl);
+        }
+      } catch (err) {}
+    }
     else if (d.type === 'hf:setVars' && typeof d.css === 'string') {
       // Instant theme/palette recolor: inline vars on #root override the baked stylesheet rule;
       // native media compositions keep the iframe/root transparent: the canvas owns the pixels.
