@@ -70,6 +70,9 @@ export interface V3Delta {
   clips?: V3ClipView[];
   shifted?: Array<{ trackId: string; fromFrame: number; byFrames: number; count: number }>;
   removedClipIds?: string[];
+  /** Source spans that left the timeline (removed or trimmed clips). Re-insert one forward with
+   *  insert_clips/add_clips + source instead of undoing. */
+  removedSource?: Array<{ clipId: string; assetId: string; source: [number, number]; fromFrame: number }>;
   createdTracks?: Array<{ id: string; type: string; role?: string; order: number }>;
   removedTrackIds?: string[];
   captions?: { cueCount: number; change: 'relaid' | 'shifted' | 'removed' | 'restyled' };
@@ -306,14 +309,35 @@ export function documentDelta(before: EditorDocumentV2, after: EditorDocumentV2)
   const touched: V3ClipView[] = [];
   const shiftGroups = new Map<string, { trackId: string; byFrames: number; fromFrame: number; count: number; ids: string[] }>();
   const removedClipIds: string[] = [];
+  const removedSource: NonNullable<V3Delta['removedSource']> = [];
+  const sourceOf = (clip: TimelineClip): [string, number, number] | null => {
+    if (clip.kind !== 'narrative' && clip.kind !== 'media' && clip.kind !== 'audio') return null;
+    const outSec = clip.sourceOutSec ?? clip.sourceInSec + clip.durationFrames / Math.max(1, before.canvas.fps);
+    return [clip.assetId, round3(clip.sourceInSec), round3(outSec)];
+  };
   for (const [id, entry] of beforeClips) {
     if (entry.caption) continue;
     const next = afterClips.get(id);
-    if (!next) { removedClipIds.push(id); continue; }
+    if (!next) {
+      removedClipIds.push(id);
+      const src = sourceOf(entry.clip);
+      if (src) removedSource.push({ clipId: id, assetId: src[0], source: [src[1], src[2]], fromFrame: entry.clip.startFrame });
+      continue;
+    }
     const { startFrame: s0, ...rest0 } = entry.clip as unknown as Record<string, unknown>;
     const { startFrame: s1, ...rest1 } = next.clip as unknown as Record<string, unknown>;
     const contentChanged = entry.trackId !== next.trackId || JSON.stringify(rest0) !== JSON.stringify(rest1);
-    if (contentChanged) { touched.push(renderV3Clip(next.clip, next.trackId)); continue; }
+    if (contentChanged) {
+      touched.push(renderV3Clip(next.clip, next.trackId));
+      const was = sourceOf(entry.clip);
+      const now = sourceOf(next.clip);
+      // A trimmed clip lost part of its source: report the span that left so it can be re-inserted forward.
+      if (was && now && (now[1] > was[1] || now[2] < was[2])) {
+        if (now[1] > was[1]) removedSource.push({ clipId: id, assetId: was[0], source: [was[1], now[1]], fromFrame: entry.clip.startFrame });
+        if (now[2] < was[2]) removedSource.push({ clipId: id, assetId: was[0], source: [now[2], was[2]], fromFrame: next.clip.startFrame + next.clip.durationFrames });
+      }
+      continue;
+    }
     const by = (s1 as number) - (s0 as number);
     if (by !== 0) {
       const key = `${next.trackId}:${by}`;
@@ -340,6 +364,7 @@ export function documentDelta(before: EditorDocumentV2, after: EditorDocumentV2)
   }
   if (shifted.length) delta.shifted = shifted.sort((left, right) => left.fromFrame - right.fromFrame);
   if (removedClipIds.length) delta.removedClipIds = removedClipIds;
+  if (removedSource.length) delta.removedSource = removedSource;
   if (removedTracks.length || createdTracks.length) notes.push('Track set changed — track order values may have moved; re-read get_state before order-based calls.');
   if (delta.captions && delta.captions.change !== 'restyled') notes.push('Caption cues were re-derived; never address individual cues.');
   if (notes.length) delta.notes = notes;

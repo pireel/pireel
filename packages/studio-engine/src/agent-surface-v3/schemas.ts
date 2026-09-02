@@ -539,7 +539,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   undo: {
     description:
-      'Revert the latest composition change — one step per call, shared with the user’s own history. Use it when the user rejects a change or an inspected result was wrong; then re-read get_state before editing again.',
+      'Revert the latest change — one step per call — ONLY when the user explicitly asks to undo. Never undo on your own: when a result is wrong or the user wants something different, make the forward edit instead (set the value again, move the clip, or re-insert a removed source span from the delta’s removedSource). The history is shared with the user’s own edits, so an unrequested undo can erase their work; in offline mode it reverts the latest cloud version, which may be their own save. Re-read get_state afterwards.',
     inputSchema: obj({}),
   },
   ask_user: {

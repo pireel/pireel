@@ -123,6 +123,19 @@ describe('documentDelta', () => {
     ]));
   });
 
+  it('reports the source spans that left the timeline so they can be re-inserted forward', () => {
+    const before = base();
+    const after = base();
+    // c1 trimmed at the head (source 0–5s → 2–5s), c3 removed entirely
+    after.timeline.tracks[0]!.clips = [narrative('c1', 0, 540, { sourceInSec: 2, sourceOutSec: 20 }), narrative('c2', 540, 600)];
+    const delta = documentDelta(before, after)!;
+    expect(delta.removedClipIds).toEqual(['c3']);
+    expect(delta.removedSource).toEqual([
+      { clipId: 'c1', assetId: 'a1', source: [0, 2], fromFrame: 0 },
+      { clipId: 'c3', assetId: 'a1', source: [0, 20], fromFrame: 1200 },
+    ]);
+  });
+
   it('describes caption layer removal and restyle without enumerating cues', () => {
     const before = base();
     const removed = base();
