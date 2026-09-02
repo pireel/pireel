@@ -530,6 +530,8 @@ export interface PreparedEditorialPlacement {
     durationSec: number;
     score: number;
     facing?: string;
+    wardrobe?: string;
+    setting?: string;
     role?: string;
     action?: string;
     endingFit: number;
@@ -779,6 +781,8 @@ export function prepareEditorialPlacement(
       durationSec: Math.round((Number(clip.sourceOutSec) - Number(clip.sourceInSec)) * 10) / 10,
       score: candidate?.score ?? 0,
       ...(candidate?.facing ? { facing: candidate.facing } : {}),
+      ...(candidate?.log?.wardrobe ? { wardrobe: candidate.log.wardrobe.slice(0, 60) } : {}),
+      ...(candidate?.log?.setting ? { setting: candidate.log.setting.slice(0, 60) } : {}),
       ...(candidate?.contentRole ? { role: candidate.contentRole } : {}),
       ...(candidate?.action ? { action: String(candidate.action).slice(0, 90) } : {}),
       endingFit: (candidate?.roleFit ?? []).find((fit) => fit.role === 'ending')?.score ?? 0,

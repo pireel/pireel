@@ -93,6 +93,23 @@ describe('editorial candidate review contract', () => {
     expect(reviews[1]).toMatchObject({ candidateId: 'candidate-2', verdict: 'unreviewed', score: 0 });
   });
 
+  it('keeps the neutral shot log as bounded pixel facts and tolerates its absence', () => {
+    const specs = buildEditorialCandidateSpecs([window(1, 0, 4, 90)]);
+    const [logged] = normalizeEditorialCandidateReviews(specs, [{
+      candidateId: specs[0]!.id, rank: 1, verdict: 'strong', score: 90, contentRole: 'person-primary',
+      log: { subject: 'one woman, long dark hair', wardrobe: 'white linen shirt, beige trousers', setting: 'sunlit café terrace', props: 'coffee cup', shotSize: 'medium', camera: 'static', lighting: 'x'.repeat(200) },
+    }]);
+    expect(logged!.log).toMatchObject({ wardrobe: 'white linen shirt, beige trousers', setting: 'sunlit café terrace', shotSize: 'medium', camera: 'static' });
+    expect(logged!.log!.lighting).toHaveLength(80);
+    const [unknownEnums] = normalizeEditorialCandidateReviews(specs, [{
+      candidateId: specs[0]!.id, rank: 1, verdict: 'strong', score: 90, contentRole: 'person-primary',
+      log: { subject: 'x', wardrobe: 'y', setting: 'z', props: 'none', shotSize: 'portrait', camera: 'drone', lighting: 'dusk' },
+    }]);
+    expect(unknownEnums!.log).toMatchObject({ shotSize: 'mixed', camera: 'mixed' });
+    const [legacy] = normalizeEditorialCandidateReviews(specs, [{ candidateId: specs[0]!.id, rank: 1, verdict: 'strong', score: 90, contentRole: 'person-primary' }]);
+    expect(legacy!.log).toBeUndefined();
+  });
+
   it('preserves the explicit open-mouth rejection reason', () => {
     const specs = buildEditorialCandidateSpecs([window(1, 0, 2)]);
     const reviews = normalizeEditorialCandidateReviews(specs, [{

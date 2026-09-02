@@ -1235,9 +1235,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const editorialReview = input.mode === 'editorial';
             const modelBrief = typeof input.brief === 'string' ? input.brief.trim().slice(0, 2_000) : '';
             // Selection criteria are the active Skill's data, applied verbatim; the model-authored
-            // brief is demoted to bounded session notes (a re-authored brief drifted in practice —
-            // it invented topical constraints the Skill never asked for). Batch fan-out re-enters
-            // this case without opts.skillId, so composition happens exactly once per call.
+            // brief is bounded and carries the USER's explicit requirements, which win on conflict.
+            // (A freely re-authored brief once invented topical constraints the Skill never asked
+            // for — hence the Skill block is verbatim and the model text is scoped to user asks.)
+            // Batch fan-out re-enters this case without opts.skillId, so composition happens
+            // exactly once per call.
             const skillBrief = editorialReview && opts?.skillId
               ? await fetchSkillReviewBrief(opts.skillId)
               : null;

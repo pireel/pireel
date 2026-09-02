@@ -25,11 +25,11 @@ describe('skill review brief', () => {
     expect(extractSkillReviewBrief(null)).toBeNull();
   });
 
-  it('keeps skill criteria first and demotes the model brief to bounded session notes', () => {
+  it('keeps skill criteria first and appends the user requirements as the authoritative, bounded tail', () => {
     const composed = composeEditorialBrief('CRITERIA', 'session facts');
     expect(composed.startsWith('CRITERIA')).toBe(true);
     expect(composed).toContain('session facts');
-    expect(composed).toContain('criteria above always take precedence');
+    expect(composed).toContain('take precedence over the criteria above');
 
     const long = 'x'.repeat(MAX_REVIEW_SESSION_NOTES_CHARS + 100);
     expect(composeEditorialBrief('CRITERIA', long).length)

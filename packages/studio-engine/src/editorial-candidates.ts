@@ -80,6 +80,26 @@ export interface EditorialCutOption {
   reason: string;
 }
 
+export const EDITORIAL_SHOT_SIZES = ['wide', 'medium', 'close-up', 'extreme-close-up', 'mixed'] as const;
+export type EditorialShotSize = (typeof EDITORIAL_SHOT_SIZES)[number];
+export const EDITORIAL_CAMERA_MOVES = ['static', 'handheld', 'pan', 'tilt', 'dolly', 'zoom', 'mixed'] as const;
+export type EditorialCameraMove = (typeof EDITORIAL_CAMERA_MOVES)[number];
+
+/** Neutral shot record — the assistant editor's log line for a candidate. Pixel facts only, no
+ * judgement: what the person wears, where they are, what they hold, how it is framed and lit.
+ * Selection criteria change per instruction ("only the white outfit", "no back views", "the
+ * café ones"); the log lets those be answered by FILTERING existing evidence instead of paying
+ * for another review, so it deliberately records the dimensions instructions tend to name. */
+export interface EditorialShotLog {
+  subject: string;
+  wardrobe: string;
+  setting: string;
+  props: string;
+  shotSize: EditorialShotSize;
+  camera: EditorialCameraMove;
+  lighting: string;
+}
+
 export interface EditorialCandidateReview {
   candidateId: string;
   startSec: number;
@@ -96,6 +116,8 @@ export interface EditorialCandidateReview {
   contentRole: EditorialContentRole;
   /** Main person's dominant orientation across the interval, judged from pixels. */
   facing?: EditorialFacing;
+  /** Neutral shot record (see EditorialShotLog); absent on reviews cached before it existed. */
+  log?: EditorialShotLog;
   action: string;
   rationale: string;
   /** Provider semantic boundaries mapped back onto the original source clock by the host. */
@@ -935,6 +957,7 @@ export type RawCandidateReview = {
   verdict?: unknown;
   contentRole?: unknown;
   facing?: unknown;
+  log?: { subject?: unknown; wardrobe?: unknown; setting?: unknown; props?: unknown; shotSize?: unknown; camera?: unknown; lighting?: unknown } | null;
   score?: unknown;
   action?: unknown;
   rationale?: unknown;
@@ -1013,6 +1036,19 @@ export function mapEditorialCandidateReviewsFromRelativeClock(
 }
 
 /** Keep provider output bounded and total: a missing candidate is explicit, never silently promoted. */
+const logText = (value: unknown) => (typeof value === 'string' ? value.trim().slice(0, 80) : '');
+function normalizeShotLog(raw: NonNullable<RawCandidateReview['log']>): EditorialShotLog {
+  return {
+    subject: logText(raw.subject),
+    wardrobe: logText(raw.wardrobe),
+    setting: logText(raw.setting),
+    props: logText(raw.props),
+    shotSize: (EDITORIAL_SHOT_SIZES as readonly string[]).includes(String(raw.shotSize)) ? String(raw.shotSize) as EditorialShotSize : 'mixed',
+    camera: (EDITORIAL_CAMERA_MOVES as readonly string[]).includes(String(raw.camera)) ? String(raw.camera) as EditorialCameraMove : 'mixed',
+    lighting: logText(raw.lighting),
+  };
+}
+
 export function normalizeEditorialCandidateReviews(
   specs: readonly EditorialCandidateSpec[],
   raw: readonly RawCandidateReview[],
@@ -1107,6 +1143,7 @@ export function normalizeEditorialCandidateReviews(
       ...( (EDITORIAL_FACINGS as readonly string[]).includes(String(candidate?.facing))
         ? { facing: String(candidate!.facing) as EditorialFacing }
         : {}),
+      ...(candidate?.log && typeof candidate.log === 'object' ? { log: normalizeShotLog(candidate.log) } : {}),
       contentRole: allowedContentRoles.has(String(candidate?.contentRole))
         ? String(candidate!.contentRole) as EditorialContentRole
         : 'other',
