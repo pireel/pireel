@@ -13,6 +13,7 @@
  */
 
 import { V3_TOOL_IDS } from './registry';
+import { TREATMENT_IDS } from './schemas';
 
 export type V3ClipKind = 'narrative' | 'media' | 'graphic' | 'audio' | 'text' | 'caption';
 
@@ -620,7 +621,6 @@ function translateAddClips(input: Input, ctx: V3AdapterContext, tool: 'add_clips
   return { status: 'ok', calls };
 }
 
-const TREATMENT_VALUES = ['full', 'punch-in', 'corner-tl', 'corner-tr', 'corner-bl', 'corner-br', 'split-l', 'split-r', 'split-t', 'split-b'];
 
 function translateSetClipFraming(input: Input, ctx: V3AdapterContext): V3Translation {
   const bad = assertFps(ctx);
@@ -651,8 +651,8 @@ function translateSetClipFraming(input: Input, ctx: V3AdapterContext): V3Transla
       continue;
     }
     if (isNonEmptyString(row.treatment) || isFiniteNumber(row.size) || isFiniteNumber(row.crop) || isFiniteNumber(row.scale) || isFiniteNumber(row.anchorX) || isFiniteNumber(row.anchorY) || row.resetPrecision === true) {
-      if (isNonEmptyString(row.treatment) && !TREATMENT_VALUES.includes(row.treatment)) {
-        return { status: 'error', error: 'invalid_value', path: `items[${index}].treatment`, value: row.treatment, allowed: TREATMENT_VALUES };
+      if (isNonEmptyString(row.treatment) && !(TREATMENT_IDS as readonly string[]).includes(row.treatment)) {
+        return { status: 'error', error: 'invalid_value', path: `items[${index}].treatment`, value: row.treatment, allowed: TREATMENT_IDS };
       }
       const framing: Input = { shotId: row.clipId };
       for (const key of ['treatment', 'size', 'crop', 'scale', 'anchorX', 'anchorY', 'coordinateSpace', 'resetPrecision']) if (row[key] !== undefined) framing[key] = row[key];
@@ -742,7 +742,6 @@ function translateReadSkill(input: Input): V3Translation {
 }
 
 const PASSTHROUGH: Record<string, string> = {
-  search_media: 'search_media',
   get_beat_grid: 'get_beat_grid',
   organize_media: 'organize_media',
   get_icons: 'get_icons',
@@ -774,6 +773,10 @@ export function translateV3Call(name: string, rawInput: unknown, ctx: V3AdapterC
   if (PASSTHROUGH[name]) return { status: 'ok', calls: [{ tool: PASSTHROUGH[name]!, input }] };
   switch (name) {
     case 'get_state': return translateGetState(input);
+    case 'search_media': {
+      const { clipId, ...rest } = input;
+      return { status: 'ok', calls: [{ tool: 'search_media', input: { ...rest, ...(isNonEmptyString(clipId) ? { shotId: clipId } : {}) } }] };
+    }
     case 'inspect_media': return translateInspectMedia(input);
     case 'search_assets': return translateSearchAssets(input);
     case 'register_media': return translateRegisterMedia(input);

@@ -217,6 +217,10 @@ describe('v3 adapter translations', () => {
     expect(translateV3Call('set_captions', {}, ctx)).toMatchObject({ status: 'error', error: 'nothing_to_change' });
   });
 
+  it('maps search_media clipId onto the legacy source selector', () => {
+    expect(ok(translateV3Call('search_media', { query: 'budget', clipId: 'n1', limit: 4 }, ctx))).toEqual([{ tool: 'search_media', input: { query: 'budget', limit: 4, shotId: 'n1' } }]);
+  });
+
   it('reads skills and the speech-cleanup guide through one tool', () => {
     expect(ok(translateV3Call('read_skill', { id: 'usk_1' }, ctx))).toEqual([{ tool: 'read_skill', input: { skill_id: 'usk_1' } }]);
     expect(ok(translateV3Call('read_skill', { id: 'speech-cleanup' }, ctx))).toEqual([{ tool: 'read_editing_guide', input: {} }]);

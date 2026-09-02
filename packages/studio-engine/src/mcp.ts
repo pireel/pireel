@@ -20,6 +20,7 @@
 
 import { translateV3Call, type V3AdapterContext, type LegacyCall } from './agent-surface-v3/adapter';
 import { V3_TOOL_IDS, V3_TOOLS } from './agent-surface-v3/registry';
+import { V3_TOOL_SCHEMAS } from './agent-surface-v3/schemas';
 import { MCP_DESCRIPTION_OVERRIDES, STUDIO_TOOLS, STUDIO_TOOL_MAP, mcpInstructions } from './prompts';
 
 /* ============================ JSON-RPC shapes ============================ */
@@ -586,16 +587,15 @@ async function callLegacyTool(name: string, args: Record<string, unknown>, deps:
   return (result);
 }
 
-/** Preview tool list for the v3 surface: the consolidated registry with permissive schemas until the
- *  per-tool schemas land next to each translation. */
+/** Tool list for the v3 surface: the consolidated registry with its own descriptions and schemas. */
 export function buildMcpToolsV3(): McpToolDef[] {
   return V3_TOOLS
     .filter((tool) => !tool.chatOnly)
-    .map((tool) => ({
-      name: tool.id,
-      description: `${tool.charges ? "[CHARGES the user's Pireel account.] " : ''}v3 ${tool.group} tool (preview schema). Replaces: ${tool.replaces.join(', ')}. Timeline positions are integer frames [start, end); source positions are seconds.`,
-      inputSchema: { type: 'object', additionalProperties: true, properties: {} },
-    }));
+    .map((tool) => {
+      const spec = V3_TOOL_SCHEMAS[tool.id];
+      if (!spec) throw new Error(`v3 tool ${tool.id} has no schema`);
+      return { name: tool.id, description: spec.description, inputSchema: spec.inputSchema };
+    });
 }
 
 function readPath(value: unknown, path: string): unknown {
