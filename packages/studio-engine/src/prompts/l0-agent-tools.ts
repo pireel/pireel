@@ -26,8 +26,16 @@
  */
 
 import { CAPTION_PRESETS } from '../caption-presets';
+import { WEB_FONTS } from '../font-library';
 import { PLACE_ANCHORS } from '../composition-core';
 import { BROLL_DECISIONS, NARRATIVE_ROLES, SCENE_FAMILIES, VIEWER_TASKS } from '../director-plan';
+
+/** Font ids every text surface accepts (set_captions font, add_texts/update_text fontFamily). The
+ * library ids are listed with their names so the model can match a font the user asks for by name;
+ * a `web:` face is served from the CDN and renders on every device and in export, whereas a
+ * `local:` face only renders where that family is installed. */
+export const WEB_FONT_CATALOG = WEB_FONTS.map((font) => `web:${font.id} (${font.label.zh} / ${font.label.en})`).join(', ');
+export const FONT_ID_HELP = `'sans' | 'serif' | 'mono' | 'web:<library id>' (CDN-served, works everywhere: ${WEB_FONT_CATALOG}) | 'local:<installed family, URL-encoded>' (renders only on devices that have it). When the user names a font, match it against the library names first and send that web: id.`;
 
 export type StudioToolKind = 'badge' | 'card';
 
@@ -661,7 +669,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
           accentColor: { type: 'string', description: 'Optional #RGB/#RRGGBB accent/highlight override.' },
           fontSize: { type: 'number', description: 'Optional 24–180 px size inside the text Component.' },
           fontWeight: { type: 'number', description: 'Optional 300–950 font weight.' },
-          fontFamily: { type: 'string', enum: ['preset', 'sans', 'serif', 'mono'], description: 'Export-safe font family. preset follows the selected display style.' },
+          fontFamily: { type: 'string', description: `Font family id: 'preset' (follows the selected display style) | ${FONT_ID_HELP}` },
           align: { type: 'string', enum: ['left', 'center', 'right'] },
           placement: { type: 'object', additionalProperties: false, properties: {
             xPct: { type: 'number' }, yPct: { type: 'number' }, widthPct: { type: 'number' }, heightPct: { type: 'number' },
@@ -684,7 +692,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
           preset: { type: 'string', enum: ['clean', 'editorial', 'headline', 'outline', 'marker', 'label'] },
           animation: { type: 'string', enum: ['none', 'popIn', 'slideUp', 'typewriter', 'wordReveal', 'wordSlide', 'highlightPop', 'highlightBlock'] },
           color: { type: 'string' }, accentColor: { type: 'string' }, fontSize: { type: 'number' }, fontWeight: { type: 'number' },
-          fontFamily: { type: 'string', enum: ['preset', 'sans', 'serif', 'mono'] },
+          fontFamily: { type: 'string', description: "Font family id: 'preset' or any id add_texts accepts (sans | serif | mono | web:<library id> | local:<family>)." },
           align: { type: 'string', enum: ['left', 'center', 'right'] },
           placement: { type: 'object', additionalProperties: false, properties: {
             xPct: { type: 'number' }, yPct: { type: 'number' }, widthPct: { type: 'number' }, heightPct: { type: 'number' },
@@ -1146,7 +1154,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
         preset: { type: 'string', enum: CAPTION_PRESETS.map((p) => p.id), description: 'Caption style id from <caption_catalog>. Omit to only reposition/resize the current captions.' },
         yPct: { type: 'number', description: "Caption baseline's % from the top (smaller = higher). Omit to keep." },
         scale: { type: 'number', description: 'Size multiplier, 1 = preset default. Omit to keep.' },
-        font: { type: 'string', description: "Font override for the caption layer: 'sans' | 'serif' | 'mono' | 'local:<encoded family>' (same ids as display text), or 'preset' to return to the preset's own font. Omit to keep." },
+        font: { type: 'string', description: `Font override for the caption layer: ${FONT_ID_HELP} Or 'preset' to return to the preset's own font. Omit to keep.` },
         source: { type: 'string', enum: ['auto', 'track', 'clip'], description: 'Caption source selector. Omit to preserve the current selection, or auto-select on first use.' },
         trackId: { type: 'string', description: 'Required with source=track.' },
         clipId: { type: 'string', description: 'Required with source=clip.' },

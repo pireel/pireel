@@ -24,6 +24,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "displayText.loadMoreFonts": "加载更多字体",
   "displayText.reloadSystemFonts": "重新加载系统字体",
   "displayText.loadingSystemFonts": "读取中…",
+  "displayText.fontLoading": "字体加载中…",
   "displayText.fontPermissionDenied": "未获得本地字体权限，可在浏览器站点设置中重新授权。",
   "displayText.systemFontsUnsupported": "当前浏览器不支持读取系统字体。",
   "displayText.font.preset": "跟随花字样式",

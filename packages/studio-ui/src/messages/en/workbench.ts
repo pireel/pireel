@@ -24,6 +24,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "displayText.loadMoreFonts": "Load more fonts",
   "displayText.reloadSystemFonts": "Reload system fonts",
   "displayText.loadingSystemFonts": "Loading…",
+  "displayText.fontLoading": "Loading font…",
   "displayText.fontPermissionDenied": "Local font access was not granted. You can allow it in the browser site settings.",
   "displayText.systemFontsUnsupported": "This browser cannot read system fonts.",
   "displayText.font.preset": "Follow display style",

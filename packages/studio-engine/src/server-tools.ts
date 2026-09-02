@@ -1189,7 +1189,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (typeof input.font === 'string') {
         if (input.font === 'preset') patch.font = undefined;
         else if (isDisplayTextFontId(input.font)) patch.font = input.font;
-        else return { result: { ok: false, error: `unknown caption font: ${input.font} (use sans | serif | mono | local:<family> | preset)` } };
+        else return { result: { ok: false, error: `unknown caption font: ${input.font} (use sans | serif | mono | web:<library id> | local:<family> | preset)` } };
       }
       const script = typeof input.script === 'string' ? input.script.trim() : '';
       if (script) {

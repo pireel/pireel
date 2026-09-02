@@ -478,7 +478,7 @@ export interface CaptionStyle {
   color?: string;
   /** Bold override: true = force bold (800), false = force regular (500); unset = the preset's own weight. */
   bold?: boolean;
-  /** Font override: a display-text font id ('sans' | 'serif' | 'mono' | 'local:<family>'); unset/'preset' = the preset's own font. */
+  /** Font override: a display-text font id ('sans' | 'serif' | 'mono' | 'web:<library id>' | 'local:<family>'); unset/'preset' = the preset's own font. */
   font?: string;
   /** Backdrop plate override: a CSS color, or null = force no plate (defaults to the preset's plate). */
   bg?: string | null;

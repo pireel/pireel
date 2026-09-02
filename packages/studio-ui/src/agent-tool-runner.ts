@@ -2940,7 +2940,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (typeof input.font === 'string') {
               if (input.font === 'preset') patch.font = undefined;
               else if (isDisplayTextFontId(input.font)) patch.font = input.font;
-              else return { ok: false, error: `unknown caption font: ${input.font} (use sans | serif | mono | local:<family> | preset)` };
+              else return { ok: false, error: `unknown caption font: ${input.font} (use sans | serif | mono | web:<library id> | local:<family> | preset)` };
             }
             const script = typeof input.script === 'string' ? input.script.trim() : '';
             if (script) {

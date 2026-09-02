@@ -12,10 +12,11 @@ import {
   type DisplayTextFontId,
   type DisplayTextPresetId,
 } from '@pireel/studio-engine/composition';
-import { AlignCenter, AlignLeft, AlignRight, Check, ChevronDown, Plus, Search, Type } from 'lucide-react';
+import { AlignCenter, AlignLeft, AlignRight, Check, ChevronDown, Loader2, Plus, Search, Type } from 'lucide-react';
 import { WEB_FONTS, webFontFontId, webFontIdOf } from '@pireel/studio-engine/font-library';
 import { studioLocale, t } from './i18n';
-import { ensureWebFontStylesheets } from './web-fonts';
+import { loadWebFont } from './web-fonts';
+import type { FontPreview } from './font-previews';
 import {
   cachedLocalFontFamilies,
   loadLocalFontFamilies,
@@ -167,6 +168,8 @@ function ColorSwatches({
   );
 }
 
+let fontPreviewsCache: Readonly<Record<string, FontPreview>> | null = null;
+
 export function fontChoiceLabel(value: DisplayTextFontId): string {
   const webId = webFontIdOf(value);
   if (webId) {
@@ -196,9 +199,19 @@ export function FontChoiceList({
   autoFocus?: boolean;
 }) {
   const [query, setQuery] = useState('');
-  // Library faces render their own name in their own face; the stylesheets are chunked, so
-  // loading all of them costs a few small CSS files and only the glyphs on screen.
-  useEffect(() => { ensureWebFontStylesheets(); }, []);
+  // Library faces show a baked SVG outline of their name (scripts/build-font-previews.py) instead
+  // of rendering in their own face: opening the list downloads no font at all. The previews are a
+  // separate chunk, pulled in the background; rows fall back to a plain label until it arrives.
+  const [previews, setPreviews] = useState<Readonly<Record<string, FontPreview>> | null>(fontPreviewsCache);
+  useEffect(() => {
+    if (previews) return;
+    let alive = true;
+    void import('./font-previews').then((module) => {
+      fontPreviewsCache = module.FONT_PREVIEWS;
+      if (alive) setPreviews(module.FONT_PREVIEWS);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [previews]);
   const zh = studioLocale().toLowerCase().startsWith('zh');
   const selectedFamily = displayTextLocalFontFamily(value);
   const commonSet = new Set(COMMON_FONT_FAMILIES.map((family) => family.toLocaleLowerCase()));
@@ -215,7 +228,7 @@ export function FontChoiceList({
   const common = COMMON_FONT_FAMILIES.filter(matches);
   const system = selectedMissing.filter((font) => matches(font.family));
 
-  const fontRow = (id: DisplayTextFontId, label: string, family?: string) => {
+  const fontRow = (id: DisplayTextFontId, label: string, family?: string, preview?: FontPreview) => {
     const selected = id === value;
     return (
       <button
@@ -223,12 +236,28 @@ export function FontChoiceList({
         type="button"
         role="option"
         aria-selected={selected}
+        aria-label={label}
+        title={label}
         onClick={() => onChoose(id)}
         className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] ${selected ? 'bg-panel-2 text-ink' : 'text-ink-3 hover:bg-panel-2/70 hover:text-ink'}`}
       >
-        <span className="min-w-0 flex-1 truncate" style={family ? { fontFamily: `"${family}", sans-serif` } : undefined}>
-          {label}
-        </span>
+        {preview ? (
+          <span className="flex min-w-0 flex-1 items-center gap-2">
+            <svg
+              viewBox={preview.viewBox}
+              preserveAspectRatio="xMinYMid meet"
+              aria-hidden="true"
+              className="h-4 w-auto max-w-full shrink fill-current"
+            >
+              <path d={preview.d} />
+            </svg>
+            {label !== preview.text && <span className="text-ink-4 truncate text-[10px]">{label}</span>}
+          </span>
+        ) : (
+          <span className="min-w-0 flex-1 truncate" style={family ? { fontFamily: `"${family}", sans-serif` } : undefined}>
+            {label}
+          </span>
+        )}
         {selected && <Check size={12} className="text-accent shrink-0" />}
       </button>
     );
@@ -253,7 +282,7 @@ export function FontChoiceList({
         {webFonts.length > 0 && (
           <div>
             <div className="text-ink-4 px-2 pb-1 pt-2 text-[9px] tracking-[0.1em] uppercase">{t('displayText.webFonts')}</div>
-            {webFonts.map((font) => fontRow(webFontFontId(font), zh ? font.label.zh : font.label.en, font.family))}
+            {webFonts.map((font) => fontRow(webFontFontId(font), zh ? font.label.zh : font.label.en, undefined, previews?.[font.id]))}
           </div>
         )}
         {builtins.length > 0 && (
@@ -315,15 +344,31 @@ export function FontPicker({
   accessState,
   onChoose,
   onLoadMore,
+  sampleText,
 }: {
   value: DisplayTextFontId;
   localFonts: LocalFontFamilyOption[];
   accessState: 'idle' | 'loading' | 'loaded' | 'denied' | 'unsupported';
   onChoose: (font: DisplayTextFontId) => void;
   onLoadMore: () => void;
+  /** Text the chosen face will render (its glyph chunks are what the loading state waits for);
+   *  defaults to the font's own label. */
+  sampleText?: string;
 }) {
   const [open, setOpen] = useState(false);
+  // Library id whose glyphs are still downloading after being applied (spinner on the trigger).
+  const [loadingFont, setLoadingFont] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const choose = (font: DisplayTextFontId) => {
+    onChoose(font);
+    setOpen(false);
+    const webId = webFontIdOf(font);
+    if (!webId) return;
+    setLoadingFont(webId);
+    void loadWebFont(webId, sampleText).finally(() => {
+      setLoadingFont((current) => (current === webId ? null : current));
+    });
+  };
   const selectedWeb = webFontIdOf(value);
   const selectedFamily = selectedWeb ? WEB_FONTS.find((font) => font.id === selectedWeb)!.family : displayTextLocalFontFamily(value);
 
@@ -354,7 +399,11 @@ export function FontPicker({
         onClick={() => setOpen((current) => !current)}
         className="bg-canvas/70 text-ink hover:bg-panel-2 flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-left text-[12px]"
       >
-        <span className="text-ink-4 text-[10px]">Aa</span>
+        {loadingFont ? (
+          <Loader2 size={12} className="text-ink-4 shrink-0 animate-spin" aria-label={t('displayText.fontLoading')} />
+        ) : (
+          <span className="text-ink-4 text-[10px]">Aa</span>
+        )}
         <span className="min-w-0 flex-1 truncate" style={selectedFamily ? { fontFamily: `"${selectedFamily}", sans-serif` } : undefined}>
           {fontChoiceLabel(value)}
         </span>
@@ -367,7 +416,7 @@ export function FontPicker({
           localFonts={localFonts}
           accessState={accessState}
           onLoadMore={onLoadMore}
-          onChoose={(font) => { onChoose(font); setOpen(false); }}
+          onChoose={choose}
         />
       </div>
     </div>
