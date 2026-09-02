@@ -1137,7 +1137,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '💬',
     label: 'tools.set_captions.label',
     description:
-      "Turn sentence captions ON and/or restyle/reposition the GLOBAL subtitle layer from transcript truth. Source defaults to auto: placed visual speech first, then narration audio, then the longest transcript-bearing media lane. To caption a specific audio/video source pass source=track with trackId or source=clip with clipId. TTS audio should be registered with its exact transcriptText before placement, avoiding another paid ASR call. ONE setting styles the whole managed layer; turn it off with remove_captions.",
+      "Turn sentence captions ON and/or restyle/reposition the GLOBAL subtitle layer from transcript truth. Source defaults to auto: placed visual speech first, then narration audio, then the longest transcript-bearing media lane. To caption a specific audio/video source pass source=track with trackId or source=clip with clipId. TTS audio should be registered with its exact transcriptText before placement, avoiding another paid ASR call. A SILENT montage (no narration, no speech) is captioned from copy instead: pass script — the lines to show, one per caption (newline-separated; a single block is split at sentence punctuation). The runtime times the lines across the placed picture proportionally to their length, snaps each inside one shot, and makes them the caption truth of the picture clips, so presets, edit_caption_text and translations work unchanged; re-issue script to re-time after the picture changes. ONE setting styles the whole managed layer; turn it off with remove_captions.",
     inputSchema: obj(
       {
         preset: { type: 'string', enum: CAPTION_PRESETS.map((p) => p.id), description: 'Caption style id from <caption_catalog>. Omit to only reposition/resize the current captions.' },
@@ -1146,6 +1146,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
         source: { type: 'string', enum: ['auto', 'track', 'clip'], description: 'Caption source selector. Omit to preserve the current selection, or auto-select on first use.' },
         trackId: { type: 'string', description: 'Required with source=track.' },
         clipId: { type: 'string', description: 'Required with source=clip.' },
+        script: { type: 'string', description: 'Silent montage only: the caption copy, one line per caption. Timed across the placed picture and stored as the picture clips\' transcript truth.' },
       },
       [],
     ),

@@ -94,6 +94,7 @@ import { exportRecommendations } from '@pireel/studio-engine/export-options';
 import { parkInteraction } from './interaction-store';
 import { interpretApplyRaw } from '@pireel/studio-engine/briefs';
 import { composeEditorialBrief } from '@pireel/studio-engine/review-brief';
+import { planScriptCaptionSegments, splitScriptLines } from '@pireel/studio-engine/script-captions';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { compositionRevision } from '@pireel/studio-engine/analysis-jobs';
 import { compactAssetSearchElementResults, searchAssetLibrary } from '@pireel/studio-engine/asset-search';
@@ -2872,6 +2873,38 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const patch: Parameters<typeof setCaptionStyle>[0] = {};
             if (yPct != null) patch.yPct = yPct;
             if (Number.isFinite(scale)) patch.scale = scale;
+            const script = typeof input.script === 'string' ? input.script.trim() : '';
+            if (script) {
+              // Silent montage: the copy becomes transcript truth of the placed picture clips
+              // (script-captions.ts), so the whole caption chain works unchanged. The primary
+              // track is selected explicitly — automatic source selection rightly skips muted
+              // clips, and montage picture is muted by construction.
+              const lines = splitScriptLines(script);
+              if (!lines.length) return { ok: false, error: t('workbench.scriptEmpty') };
+              const shots = ensureShots(compRef.current);
+              const trackId = documentRef.current.semantics.primaryNarrativeTrackId;
+              if (!shots.length || !trackId) return { ok: false, error: t('workbench.scriptCaptionsNoPicture') };
+              const plan = planScriptCaptionSegments(shots, lines);
+              const nextClipAsr = { ...clipAsrRef.current, ...plan.clips };
+              const nextMain = plan.main.length ? plan.main : asrRef.current;
+              const edit = applyCaptionDocumentEdit({
+                document: documentRef.current,
+                patch: { on: true, ...(preset ? { preset, color: undefined, bg: undefined } : {}), ...patch },
+                source: { mode: 'track', trackId },
+                mainTranscript: nextMain,
+                clipTranscripts: captionTranscriptsByAsset(documentRef.current, compRef.current, nextClipAsr),
+              });
+              if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error), data: edit.error };
+              clipAsrRef.current = nextClipAsr;
+              setClipAsr(nextClipAsr);
+              if (plan.main.length) {
+                asrRef.current = plan.main;
+                setAsrSentences(plan.main);
+              }
+              setDocument(edit.document);
+              if (!compRef.current.blocks.some(isSentenceCaption)) return { ok: false, error: t('workbench.scriptCaptionsNoPicture') };
+              return { ok: true, summary: t('workbench.scriptCaptionsSet', { n: plan.lineCount }), data: { source: 'script', lines: plan.lineCount } };
+            }
             if (!preset && !Object.keys(patch).length) return { ok: false, error: t('workbench.nothingSetGiveLeast') };
             const source = input.source === 'track' && typeof input.trackId === 'string'
               ? { mode: 'track' as const, trackId: input.trackId }

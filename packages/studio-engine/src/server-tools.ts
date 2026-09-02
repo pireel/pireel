@@ -118,6 +118,7 @@ import { ensureTemplatesRegistered } from './templates';
 import { mediaSearchTranscriptsFromDocument, searchProjectMedia } from './media-search';
 import { normalizeProjectOutputs, projectOutputPositionMap } from './project-outputs';
 import { AGENT_TIMELINE_TOOL_IDS, runAgentTimelineTool } from './agent-timeline';
+import { planScriptCaptionSegments, splitScriptLines } from './script-captions';
 
 // Ensure the template registry is ready at module load. The MCP worker path
 // doesn't go through UI mounting; this un-tree-shakeable call pulls templates.ts
@@ -1174,6 +1175,42 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const patch: Record<string, number> = {};
       if (yPct != null) patch.yPct = yPct;
       if (Number.isFinite(scale)) patch.scale = scale;
+      const script = typeof input.script === 'string' ? input.script.trim() : '';
+      if (script) {
+        // Silent montage: the copy becomes transcript truth of the placed picture clips (see
+        // script-captions.ts). Document-side shots are the primary lane's narrative clips; the
+        // lane is selected explicitly because automatic selection rightly skips muted clips.
+        const lines = splitScriptLines(script);
+        if (!lines.length) return { result: { ok: false, error: 'script is empty: provide the lines to show' } };
+        const trackId = p.document.semantics.primaryNarrativeTrackId;
+        const primary = trackId ? p.document.timeline.tracks.find((track) => track.id === trackId) : undefined;
+        const shots = [...(primary?.clips ?? [])]
+          .filter((clip) => clip.kind === 'narrative' && clip.enabled !== false)
+          .sort((left, right) => left.startFrame - right.startFrame)
+          .map((clip) => (clip.kind === 'narrative'
+            ? { src: clip.assetId, srcStart: clip.sourceInSec, srcEnd: clip.sourceOutSec }
+            : { srcStart: 0, srcEnd: 0 }));
+        if (!trackId || !shots.length) return { result: { ok: false, error: 'no picture clips on the timeline can carry captions: assemble the picture first' } };
+        const plan = planScriptCaptionSegments(shots, lines);
+        const edit = applyCaptionDocumentEdit({
+          document: p.document,
+          patch: { on: true, ...(preset ? { preset, color: undefined, bg: undefined } : {}), ...patch },
+          source: { mode: 'track', trackId },
+          mainTranscript: null,
+          clipTranscripts: plan.clips,
+        });
+        if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+        const captionTrack = edit.document.semantics.managedCaptionTrackId
+          ? edit.document.timeline.tracks.find((track) => track.id === edit.document.semantics.managedCaptionTrackId)
+          : undefined;
+        if (!captionTrack?.clips.length) return { result: { ok: false, error: 'no picture clip could carry the script (sources without an audio track cannot hold transcript truth)' } };
+        const comp = projectDocumentToComposition(edit.document);
+        return {
+          result: { ok: true, summary: `Captions laid from the script: ${plan.lineCount} lines`, data: { source: 'script', lines: plan.lineCount } },
+          comp,
+          document: edit.document,
+        };
+      }
       if (!preset && !Object.keys(patch).length) return { result: { ok: false, error: 'nothing to set: provide at least one of preset / yPct / scale' } };
       const sourceDocument = p.document;
       const source = input.source === 'track' && typeof input.trackId === 'string'
