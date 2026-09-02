@@ -16,6 +16,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "displayText.customColor": "Custom color",
   "displayText.fontFamily": "Font",
   "displayText.builtInFonts": "Built-in fonts",
+  "displayText.webFonts": "Display fonts",
   "displayText.commonFonts": "Common fonts",
   "displayText.systemFonts": "System fonts",
   "displayText.searchFonts": "Search fonts",

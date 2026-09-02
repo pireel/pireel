@@ -25,6 +25,7 @@ import { GL_MIXER_SRC, TRANSITION_GLSL, glDirection } from './transition-gl';
 import { SOURCE_DRAW_RECT_FUNCTION } from './source-framing';
 import { compositionVisualLayerPlan, type SupplementalVisualMediaClip } from './visual-layer-plan';
 import { BLOCK_TEXT_BASELINE_PX } from './block-typography';
+import { webFontStylesheetUrls } from './font-library';
 
 /* ============================ Assembly ============================ */
 
@@ -690,6 +691,14 @@ export function assembleHtml(
   // the parent video canvas can show through; graphics-only compositions use the same black ground
   // instead of unexpectedly exposing the attached theme's paper color as soon as an element appears.
   const documentBg = placedVideoShots.length || supplementalVisuals.length ? 'transparent' : '#000000';
+  // Library ("花字") web fonts the composition uses — captions (main + translation line) and
+  // display-text blocks — plus the CJK partner behind any local Latin face. Chunked CSS: only the
+  // glyph blocks actually rendered are fetched.
+  const webFontLinks = webFontStylesheetUrls([
+    comp.captionStyle?.font,
+    comp.captionStyle?.sub?.font,
+    ...comp.blocks.map((block) => block.slots?.fontFamily),
+  ]).map((href) => `<link href="${href}" rel="stylesheet" />\n`).join('');
   return `<!doctype html>
 <html lang="zh">
 <head>
@@ -697,7 +706,7 @@ export function assembleHtml(
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="${STUDIO_FONTS_HREF}" rel="stylesheet" />
-<style>
+${webFontLinks}<style>
   * { margin: 0; box-sizing: border-box; }
   html, body { width: ${W}px; height: ${H}px; overflow: hidden; background: ${documentBg}; }
   #root { position: relative; width: ${W}px; height: ${H}px; background: ${documentBg}; overflow: hidden;

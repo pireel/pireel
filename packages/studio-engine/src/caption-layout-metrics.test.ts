@@ -21,8 +21,9 @@ describe('caption font override', () => {
     expect(captionFontCss(preset)).toBe('var(--font-body)');
     expect(captionFontCss(preset, 'serif')).toContain('Noto Serif SC');
     expect(captionCanvasFontFamilies(preset, 'serif')).toContain('Noto Serif SC');
-    expect(captionFontCss(preset, 'local:Avenir%20Next')).toBe('"Avenir Next",sans-serif');
-    expect(captionCanvasFontFamilies(preset, 'local:Avenir%20Next')).toBe('"Avenir Next",sans-serif');
+    // A local (typically Latin-only) face carries the CJK display partner behind it.
+    expect(captionFontCss(preset, 'local:Avenir%20Next')).toBe('"Avenir Next","Smiley Sans",sans-serif');
+    expect(captionCanvasFontFamilies(preset, 'local:Avenir%20Next')).toBe('"Avenir Next","Smiley Sans",sans-serif');
     expect(captionFontCss(preset, 'preset')).toBe('var(--font-body)');
     expect(captionFontCss(preset, 'nonsense')).toBe('var(--font-body)');
   });

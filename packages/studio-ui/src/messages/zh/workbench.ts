@@ -16,6 +16,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "displayText.customColor": "自定义颜色",
   "displayText.fontFamily": "字体",
   "displayText.builtInFonts": "内置字体",
+  "displayText.webFonts": "花字",
   "displayText.commonFonts": "常见字体",
   "displayText.systemFonts": "系统字体",
   "displayText.searchFonts": "搜索字体",

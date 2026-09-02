@@ -13,7 +13,9 @@ import {
   type DisplayTextPresetId,
 } from '@pireel/studio-engine/composition';
 import { AlignCenter, AlignLeft, AlignRight, Check, ChevronDown, Plus, Search, Type } from 'lucide-react';
-import { t } from './i18n';
+import { WEB_FONTS, webFontFontId, webFontIdOf } from '@pireel/studio-engine/font-library';
+import { studioLocale, t } from './i18n';
+import { ensureWebFontStylesheets } from './web-fonts';
 import {
   cachedLocalFontFamilies,
   loadLocalFontFamilies,
@@ -166,6 +168,11 @@ function ColorSwatches({
 }
 
 export function fontChoiceLabel(value: DisplayTextFontId): string {
+  const webId = webFontIdOf(value);
+  if (webId) {
+    const font = WEB_FONTS.find((candidate) => candidate.id === webId)!;
+    return studioLocale().toLowerCase().startsWith('zh') ? font.label.zh : font.label.en;
+  }
   const selectedFamily = displayTextLocalFontFamily(value);
   const builtin = (DISPLAY_TEXT_FONT_IDS as readonly string[]).includes(value) ? value : null;
   return builtin ? t(`displayText.font.${builtin}`) : selectedFamily ?? t('displayText.font.preset');
@@ -189,6 +196,10 @@ export function FontChoiceList({
   autoFocus?: boolean;
 }) {
   const [query, setQuery] = useState('');
+  // Library faces render their own name in their own face; the stylesheets are chunked, so
+  // loading all of them costs a few small CSS files and only the glyphs on screen.
+  useEffect(() => { ensureWebFontStylesheets(); }, []);
+  const zh = studioLocale().toLowerCase().startsWith('zh');
   const selectedFamily = displayTextLocalFontFamily(value);
   const commonSet = new Set(COMMON_FONT_FAMILIES.map((family) => family.toLocaleLowerCase()));
   const systemFonts = localFonts.filter((font) => !commonSet.has(font.family.toLocaleLowerCase()));
@@ -200,6 +211,7 @@ export function FontChoiceList({
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const matches = (label: string) => !normalizedQuery || label.toLocaleLowerCase().includes(normalizedQuery);
   const builtins = DISPLAY_TEXT_FONT_IDS.filter((id) => matches(t(`displayText.font.${id}`)));
+  const webFonts = WEB_FONTS.filter((font) => matches(zh ? font.label.zh : font.label.en) || matches(font.family));
   const common = COMMON_FONT_FAMILIES.filter(matches);
   const system = selectedMissing.filter((font) => matches(font.family));
 
@@ -238,6 +250,12 @@ export function FontChoiceList({
       </div>
 
       <div role="listbox" aria-label={t('displayText.fontFamily')} className="max-h-56 overflow-y-auto px-2 pb-2">
+        {webFonts.length > 0 && (
+          <div>
+            <div className="text-ink-4 px-2 pb-1 pt-2 text-[9px] tracking-[0.1em] uppercase">{t('displayText.webFonts')}</div>
+            {webFonts.map((font) => fontRow(webFontFontId(font), zh ? font.label.zh : font.label.en, font.family))}
+          </div>
+        )}
         {builtins.length > 0 && (
           <div>
             <div className="text-ink-4 px-2 pb-1 pt-2 text-[9px] tracking-[0.1em] uppercase">{t('displayText.builtInFonts')}</div>
@@ -306,7 +324,8 @@ export function FontPicker({
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const selectedFamily = displayTextLocalFontFamily(value);
+  const selectedWeb = webFontIdOf(value);
+  const selectedFamily = selectedWeb ? WEB_FONTS.find((font) => font.id === selectedWeb)!.family : displayTextLocalFontFamily(value);
 
   useEffect(() => {
     if (!open) return;

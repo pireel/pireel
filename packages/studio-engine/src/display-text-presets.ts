@@ -1,3 +1,4 @@
+import { cjkPartnerFamilyCss, webFontFamilyCss, webFontIdOf } from './font-library';
 /** Deterministic native display-text vocabulary shared by tools, renderer and future preset UI. */
 export const DISPLAY_TEXT_PRESET_IDS = [
   'clean',
@@ -32,7 +33,7 @@ export const DISPLAY_TEXT_FONT_IDS = [
 ] as const;
 
 export type BuiltInDisplayTextFontId = (typeof DISPLAY_TEXT_FONT_IDS)[number];
-export type DisplayTextFontId = BuiltInDisplayTextFontId | `local:${string}`;
+export type DisplayTextFontId = BuiltInDisplayTextFontId | `local:${string}` | `web:${string}`;
 
 const DISPLAY_TEXT_FONT_CSS: Record<BuiltInDisplayTextFontId, string | null> = {
   preset: null,
@@ -72,12 +73,17 @@ export function isDisplayTextFontId(value: unknown): value is DisplayTextFontId 
   return typeof value === 'string' && (
     (DISPLAY_TEXT_FONT_IDS as readonly string[]).includes(value)
     || displayTextLocalFontFamily(value) !== null
+    || webFontIdOf(value) !== null
   );
 }
 
 export function displayTextFontCss(value: unknown): string | null {
+  const web = webFontFamilyCss(value);
+  if (web) return web;
   const localFamily = displayTextLocalFontFamily(value);
-  if (localFamily) return `"${localFamily.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}",sans-serif`;
+  // A local (usually Latin-only) face gets the CJK display partner behind it, so Han glyphs
+  // render in a matching display face instead of falling back to the system body font.
+  if (localFamily) return `"${localFamily.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}",${cjkPartnerFamilyCss()},sans-serif`;
   const builtin = (DISPLAY_TEXT_FONT_IDS as readonly string[]).includes(String(value))
     ? value as BuiltInDisplayTextFontId
     : 'preset';
