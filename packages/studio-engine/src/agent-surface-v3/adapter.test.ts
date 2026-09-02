@@ -215,6 +215,9 @@ describe('v3 adapter translations', () => {
       { tool: 'relayout_captions', input: {} },
     ]);
     expect(translateV3Call('set_captions', {}, ctx)).toMatchObject({ status: 'error', error: 'nothing_to_change' });
+    // on:true alone switches the layer on with the default preset (the legacy tool refuses an empty style).
+    expect(ok(translateV3Call('set_captions', { on: true }, ctx))).toEqual([{ tool: 'set_captions', input: { preset: 'em-yellow' } }]);
+    expect(ok(translateV3Call('set_captions', { on: true, yPct: 80 }, ctx))).toEqual([{ tool: 'set_captions', input: { yPct: 80 } }]);
   });
 
   it('maps search_media clipId onto the legacy source selector', () => {

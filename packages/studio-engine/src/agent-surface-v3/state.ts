@@ -96,6 +96,29 @@ function stripDefaults(value: Record<string, unknown> | undefined, defaults: Rec
 }
 
 const NARRATIVE_DEFAULTS: Record<string, unknown> = { treatment: 'full', speed: 1, volumeDb: 0, audioMuted: false, treatSize: 50, treatCrop: 50 };
+
+const isZero = (value: unknown) => value === undefined || value === 0;
+/** Identity layer geometry (no crop, no rounding, unit transform) is the default and stays out of receipts. */
+function isIdentityFraming(framing: unknown): boolean {
+  const f = framing as { crop?: Record<string, unknown>; rounding?: unknown; transform?: Record<string, unknown> } | undefined;
+  if (!f) return true;
+  const crop = f.crop ?? {};
+  const transform = f.transform ?? {};
+  return isZero(f.rounding)
+    && ['top', 'left', 'right', 'bottom'].every((side) => isZero(crop[side]))
+    && (transform.scale === undefined || transform.scale === 1) && isZero(transform.offsetX) && isZero(transform.offsetY);
+}
+/** Subject framing at unit scale centred on the source is the default. */
+function isIdentityPreciseFraming(value: unknown): boolean {
+  const p = value as { scale?: unknown; anchorX?: unknown; anchorY?: unknown } | undefined;
+  if (!p) return true;
+  return (p.scale === undefined || p.scale === 1) && (p.anchorX === undefined || p.anchorX === 0.5) && (p.anchorY === undefined || p.anchorY === 0.5);
+}
+function stripIdentityGeometry(view: V3ClipView, mediaFraming: unknown): void {
+  if (mediaFraming && !isIdentityFraming(mediaFraming)) view.framing = mediaFraming;
+  const props = view as unknown as Record<string, unknown>;
+  if ('preciseFraming' in props && isIdentityPreciseFraming(props.preciseFraming)) delete props.preciseFraming;
+}
 const AUDIO_DEFAULTS: Record<string, unknown> = { speed: 1, muted: false, fadeInSec: 0, fadeOutSec: 0 };
 
 function isManagedCaptionTrack(document: EditorDocumentV2, track: EditorTrack): boolean {
@@ -114,7 +137,7 @@ export function renderV3Clip(clip: TimelineClip, trackId: string): V3ClipView {
       if (clip.box) view.box = clip.box;
       const { transIn: _transIn, ...rest } = (clip.properties ?? {}) as Record<string, unknown>;
       Object.assign(view, stripDefaults(rest, NARRATIVE_DEFAULTS));
-      if (clip.mediaFraming) view.framing = clip.mediaFraming;
+      stripIdentityGeometry(view, clip.mediaFraming);
       break;
     }
     case 'media': {
@@ -126,7 +149,7 @@ export function renderV3Clip(clip: TimelineClip, trackId: string): V3ClipView {
       if (clip.anchorX !== undefined && clip.anchorX !== 0.5) view.anchorX = clip.anchorX;
       if (clip.anchorY !== undefined && clip.anchorY !== 0.5) view.anchorY = clip.anchorY;
       if (clip.video) Object.assign(view, stripDefaults(clip.video as Record<string, unknown>, NARRATIVE_DEFAULTS));
-      if (clip.mediaFraming) view.framing = clip.mediaFraming;
+      stripIdentityGeometry(view, clip.mediaFraming);
       if (clip.keyframes && (clip.keyframes.box?.length || clip.keyframes.opacity?.length)) view.keyframes = clip.keyframes;
       break;
     }

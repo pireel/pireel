@@ -12,6 +12,7 @@
  * remaining set.
  */
 
+import { DEFAULT_CAPTION_PRESET } from '../caption-presets';
 import { V3_TOOL_IDS } from './registry';
 import { TREATMENT_IDS } from './schemas';
 
@@ -714,6 +715,8 @@ function translateSetCaptions(input: Input): V3Translation {
     else if (isNonEmptyString(source.clipId)) { style.source = 'clip'; style.clipId = source.clipId; }
     else style.source = 'auto';
   }
+  // "Turn captions on" with no style is a complete instruction: the legacy tool needs a preset to switch on, so supply the default.
+  if (input.on === true && style.preset === undefined && style.yPct === undefined && style.scale === undefined) style.preset = DEFAULT_CAPTION_PRESET;
   if (input.on === true || Object.keys(style).length) calls.push({ tool: 'set_captions', input: style });
   if (Array.isArray(input.corrections) && input.corrections.length) {
     calls.push({ tool: 'edit_caption_text', input: { items: input.corrections, ...(isNonEmptyString(input.clipId) ? { shotId: input.clipId } : {}) } });

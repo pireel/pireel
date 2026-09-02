@@ -62,6 +62,21 @@ describe('renderV3State', () => {
     expect(state.assets[0]).toEqual({ id: 'a1', kind: 'video', label: 'talk.mp4', durationSec: 118.4, hasAudio: true });
   });
 
+  it('omits identity geometry and keeps a real crop or subject framing', () => {
+    const identity = narrative('c1', 0, 300, {
+      mediaFraming: { crop: { top: 0, left: 0, right: 0, bottom: 0 }, rounding: 0, transform: { scale: 1, offsetX: 0, offsetY: 0 } },
+      properties: { treatment: 'full', speed: 1, preciseFraming: { scale: 1, anchorX: 0.5, anchorY: 0.5, coordinateSpace: 'source-normalized' } },
+    });
+    const framed = narrative('c2', 300, 300, {
+      mediaFraming: { crop: { top: 0.1, left: 0, right: 0, bottom: 0 }, rounding: 0, transform: { scale: 1, offsetX: 0, offsetY: 0 } },
+      properties: { treatment: 'full', speed: 1, preciseFraming: { scale: 1.3, anchorX: 0.5, anchorY: 0.4, coordinateSpace: 'source-normalized' } },
+    });
+    const state = renderV3State(doc([track('t1', 'visual', [identity, framed], { role: 'primaryNarrative' })]));
+    expect(state.tracks[0]!.clips![0]).not.toHaveProperty('framing');
+    expect(state.tracks[0]!.clips![0]).not.toHaveProperty('preciseFraming');
+    expect(state.tracks[0]!.clips![1]).toMatchObject({ framing: { crop: { top: 0.1 } }, preciseFraming: { scale: 1.3 } });
+  });
+
   it('flags library media that is not placed on any track', () => {
     const document = doc([track('t1', 'visual', [narrative('c1', 0, 300)], { role: 'primaryNarrative' })]);
     document.assets.lib1 = { id: 'lib1', kind: 'video', label: 'raw.mov', locator: {} as never, metadata: {}, library: { createdAt: 1 } } as never;

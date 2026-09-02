@@ -4501,7 +4501,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           const result = EXTERNAL_ONLY_TOOLS.has(call.tool)
             ? await runExternalToolInner(ctx, call.tool, stepInput)
             : await runStudioTool(ctx, call.tool, stepInput, { surface: stepSurface });
-          steps.push({ tool: call.tool, ok: result.ok, ...(result.summary ? { summary: result.summary } : {}), ...(result.error ? { error: result.error } : {}), ...(result.data !== undefined && translation.calls.length === 1 ? { data: result.data } : {}) });
+          steps.push({ tool: call.tool, ok: result.ok, ...(result.summary ? { summary: result.summary } : {}), ...(result.error ? { error: result.error } : {}) });
           if (!result.ok) return { ok: false, error: result.error ?? 'step_failed', data: { detail: `${call.tool} failed after ${steps.length - 1} completed step(s)`, steps } };
           previous = result;
         }
@@ -4514,6 +4514,10 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         const delta = documentDelta(before, documentRef.current);
         const single = translation.calls.length === 1 ? previous : null;
         const passthrough = single && !delta ? single : null;
+        // The v3 delta supersedes the legacy per-tool delta (seconds, shot vocabulary); carry the rest of the result.
+        const singleData = single && single.data && typeof single.data === 'object' && !Array.isArray(single.data)
+          ? Object.fromEntries(Object.entries(single.data as Record<string, unknown>).filter(([key]) => !(delta && key === 'delta')))
+          : single?.data;
         if (passthrough) {
           if (!translation.note) return passthrough;
           const base = passthrough.data && typeof passthrough.data === 'object' && !Array.isArray(passthrough.data) ? (passthrough.data as Record<string, unknown>) : {};
@@ -4524,7 +4528,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           summary: steps.map((step) => step.summary).filter(Boolean).join('; ') || `${name} applied`,
           ...(single?.image ? { image: single.image } : {}),
           ...(single?.images ? { images: single.images } : {}),
-          data: { ...(single && single.data !== undefined ? { result: single.data } : {}), steps, ...(delta ? { delta } : {}), ...(translation.note ? { note: translation.note } : {}) },
+          data: { ...(singleData !== undefined && (typeof singleData !== 'object' || Object.keys(singleData as object).length) ? { result: singleData } : {}), steps, ...(delta ? { delta } : {}), ...(translation.note ? { note: translation.note } : {}) },
         };
       }
       default:
