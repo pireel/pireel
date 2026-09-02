@@ -17,8 +17,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Bold, Check, ChevronDown, Languages, Loader2, RefreshCw } from 'lucide-react';
-import { FontChoiceList, fontChoiceLabel } from './display-text-panel';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@pireel/ui/dialog';
+import { FontPicker } from './display-text-panel';
 import { cachedLocalFontFamilies, loadLocalFontFamilies, supportsLocalFontAccess, type LocalFontFamilyOption } from './local-font-access';
 import { Switch } from '@pireel/ui/switch';
 import { t } from './i18n';
@@ -427,7 +426,6 @@ function StyleRow({ label, style, active, isSub, leading, trailing, styleHidden,
 }) {
   const [pop, setPop] = useState<null | 'preset' | 'size' | 'color' | 'bg'>(null);
   const [expanded, setExpanded] = useState(false);
-  const [fontDialog, setFontDialog] = useState(false);
   // Font picker shares the display-text picker (built-ins + common + system fonts via Local Font Access).
   const [localFonts, setLocalFonts] = useState<LocalFontFamilyOption[]>(cachedLocalFontFamilies);
   const [fontAccess, setFontAccess] = useState<'idle' | 'loading' | 'loaded' | 'denied' | 'unsupported'>('idle');
@@ -585,34 +583,18 @@ function StyleRow({ label, style, active, isSub, leading, trailing, styleHidden,
           </div>
           <div className="mt-1.5 flex items-center gap-1.5">
             <span className="text-ink-3 w-14 shrink-0 truncate text-[11px]">{t('captions.fontFamily')}</span>
-            <button
-              type="button"
-              onClick={() => setFontDialog(true)}
-              title={t('captions.fontFamily')}
-              className="border-line hover:border-accent text-ink flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md border px-2 text-left text-[11px]"
-            >
-              <span className="text-ink-4 text-[10px]">Aa</span>
-              <span className="min-w-0 flex-1 truncate">{fontChoiceLabel(fontId)}</span>
-              <ChevronDown size={11} className="text-ink-4 shrink-0" />
-            </button>
+            <div className="min-w-0 flex-1">
+              <FontPicker
+                value={fontId}
+                localFonts={localFonts}
+                accessState={fontAccess}
+                onLoadMore={() => void requestLocalFonts()}
+                onChoose={(font) => onPatch({ font: font === 'preset' ? undefined : font })}
+              />
+            </div>
           </div>
         </div>
       )}
-      <Dialog open={fontDialog} onOpenChange={setFontDialog}>
-        <DialogContent className="bg-panel border-line w-[min(420px,calc(100vw-2rem))] gap-0 overflow-hidden p-0">
-          <DialogHeader className="border-line border-b px-4 pb-3 pt-4 pr-12">
-            <DialogTitle className="text-ink text-[14px] leading-tight">{t('captions.fontFamily')}</DialogTitle>
-          </DialogHeader>
-          <FontChoiceList
-            value={fontId}
-            localFonts={localFonts}
-            accessState={fontAccess}
-            autoFocus
-            onLoadMore={() => void requestLocalFonts()}
-            onChoose={(font) => { onPatch({ font: font === 'preset' ? undefined : font }); setFontDialog(false); }}
-          />
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

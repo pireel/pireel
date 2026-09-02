@@ -310,9 +310,6 @@ export function FontPicker({
 
   useEffect(() => {
     if (!open) return;
-    const scrollFrame = window.requestAnimationFrame(() => {
-      rootRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    });
     const close = (event: MouseEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
     };
@@ -322,14 +319,15 @@ export function FontPicker({
     document.addEventListener('mousedown', close);
     document.addEventListener('keydown', escape);
     return () => {
-      window.cancelAnimationFrame(scrollFrame);
       document.removeEventListener('mousedown', close);
       document.removeEventListener('keydown', escape);
     };
   }, [open]);
 
+  // A select-style dropdown: the list floats over the content below the trigger instead of
+  // pushing it down. Always mounted (hidden when closed) so the selected option stays in the DOM.
   return (
-    <div ref={rootRef}>
+    <div ref={rootRef} className="relative">
       <button
         type="button"
         aria-haspopup="listbox"
@@ -344,8 +342,7 @@ export function FontPicker({
         <ChevronDown size={12} className={`text-ink-4 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
-      {/* Always mounted (hidden when closed): the selected option stays in the DOM for a11y/tests. */}
-      <div className={open ? 'bg-canvas/55 mt-2 overflow-hidden rounded-lg shadow-md' : 'hidden'}>
+      <div className={open ? 'border-line bg-panel absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-lg border shadow-xl' : 'hidden'}>
         <FontChoiceList
           value={value}
           localFonts={localFonts}
