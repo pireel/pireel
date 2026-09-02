@@ -40,6 +40,15 @@ const base = () => matteBase || (typeof location !== 'undefined' ? location.orig
 
 export const modnetUrl = () => `${base()}/models/modnet_portrait.onnx?v=${MODNET_REV}`;
 
+/** DeepFilterNet3 (strong narration denoise): the official ONNX export split into its three graphs.
+ *  Bump when the files change (+1 like MODNET_REV). */
+export const DFN3_MODEL_REV = '1';
+export const dfn3ModelUrls = () => ({
+  enc: `${base()}/models/dfn3/enc.onnx?v=${DFN3_MODEL_REV}`,
+  erbDec: `${base()}/models/dfn3/erb_dec.onnx?v=${DFN3_MODEL_REV}`,
+  dfDec: `${base()}/models/dfn3/df_dec.onnx?v=${DFN3_MODEL_REV}`,
+});
+
 /** jsep build pair (WebGPU EP; wasm EP fallback uses the same files). Pass the runtime's real version as rev. */
 export const ortWasmUrls = (rev: string = ORT_ASSET_REV) => ({
   wasm: `${base()}/ort/ort-wasm-simd-threaded.jsep.wasm?v=${rev}`,

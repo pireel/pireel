@@ -7,9 +7,9 @@
  * no WebAudio takeover of the decode elements. Changing strength only re-blends from the cached
  * wet (seconds), never re-runs inference.
  *
- * RNNoise is the v1 engine (self-contained wasm, works blind); the processor seam (`denoiseWetPcm`)
- * is where DeepFilterNet3-on-ort-web slots in later — everything around it (bake/cache/blend/wav)
- * is engine-agnostic. Output is 48 kHz MONO wav: speech-first tradeoff, stereo sources downmix.
+ * Engines behind the `denoiseWetPcm` seam: light = spectral floor reduction, strong = DeepFilterNet3
+ * on onnxruntime-web (dfn3-denoise.ts), RNNoise only as the strong fallback — everything around
+ * it (bake/cache/blend/wav) is engine-agnostic. Output is 48 kHz MONO wav: speech-first tradeoff, stereo sources downmix.
  */
 
 export const DENOISE_RATE = 48000;
@@ -43,6 +43,14 @@ export async function denoiseWetPcm(dry: Float32Array, onProgress?: (p: number) 
   if (mode === 'light') {
     const { spectralDenoise } = await import('./spectral-denoise');
     return spectralDenoise(dry, { reductionDb: 15, onProgress });
+  }
+  // strong = DeepFilterNet3 (same model and pipeline constants as the reference desktop NLE).
+  // RNNoise stays only as the fallback when the graphs cannot load (offline, blocked CDN).
+  try {
+    const { dfn3Enhance } = await import('./dfn3-denoise');
+    return await dfn3Enhance(dry, onProgress);
+  } catch (error) {
+    console.warn('[denoise] DeepFilterNet3 unavailable, falling back to RNNoise', error);
   }
   const { default: factory } = await import('@jitsi/rnnoise-wasm/dist/rnnoise-sync');
   const mod = await factory();
