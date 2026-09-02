@@ -1355,7 +1355,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎙️',
     label: 'tools.denoise_audio.label',
     description:
-      'Remove background noise from the MAIN narration (on-device speech-denoise model, bakes in the background — takes a moment on long videos). strength 0..1 = dry/wet blend (default 0.6; lower it if the voice sounds thin). off:true restores the original audio. Preview and export both play the denoised result once baking finishes.',
+      'Remove background noise from the MAIN VIDEO\'s own recording (on-device speech-denoise model, bakes in the background — takes a moment on long videos). Scope: the main source\'s audio only — generated speech and audio-lane narration are already clean and are not processed; a montage without a mounted main recording has nothing to denoise, and the tool says so. strength 0..1 = dry/wet blend (default 0.6; lower it if the voice sounds thin). off:true restores the original audio. Preview and export both play the denoised result once baking finishes.',
     inputSchema: obj(
       {
         strength: { type: 'number', description: 'Blend 0..1 (default 0.6). Re-tuning is fast — inference is cached per source.' },

@@ -400,6 +400,8 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.audioMuted": "静音",
   "workbench.audioUnmuted": "取消静音",
   "workbench.audioTrackNotFound": "找不到这条音轨",
+  "workbench.denoiseNotForLaneNarration": "降噪只作用于主视频的原声录音;当前旁白在音频轨(生成语音或导入音频),本身不经过降噪",
+  "workbench.denoiseNeedsMainSource": "没有可降噪的主视频原声(多源画面或画面静音);降噪只处理主视频自带的录音",
   "workbench.bgmAdjusted": "已调整音轨",
   "workbench.bgmSplit": "已分割音轨",
   "workbench.bgmTrimmed": "已裁剪音轨",

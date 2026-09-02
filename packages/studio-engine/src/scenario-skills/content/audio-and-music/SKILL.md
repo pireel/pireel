@@ -115,7 +115,7 @@ let some motion cross the bar so the viewer feels momentum rather than a metrono
 
 ## Cleanup and speed
 
-- `denoise_audio {strength}` (default 0.6) cleans noisy narration; re-tune is cheap. Turn it `off` if it
+- `denoise_audio {strength}` (default 0.6) cleans noisy narration; re-tune is cheap. Turn it `off` if it It processes the main video's own recording only: generated speech and audio-lane narration are already clean, skip it there.
   thins the voice.
 - `set_video_speed {shotIds|all, speed}` for slow-mo (0.25–1) or speed-ups (1–4); primary narrative ripples
   later material by default, B-roll does not.

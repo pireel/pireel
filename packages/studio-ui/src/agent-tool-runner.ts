@@ -3686,7 +3686,13 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               setDenoise(null);
               return { ok: true, summary: t('workbench.denoiseTurnedOff') };
             }
-            if (!videoFileRef.current) return { ok: false, error: t('common.localSourceVideoMissing') };
+            if (!videoFileRef.current) {
+              // Denoise bakes the MAIN video's own recording. Say what is actually true instead of
+              // "local video lost": generated/audio-lane narration is outside its scope, and a
+              // montage without a mounted main source has no recording to clean.
+              const narrationOnLane = (c.audioTracks ?? []).some((clip) => clip.role === 'narration');
+              return { ok: false, error: narrationOnLane ? t('workbench.denoiseNotForLaneNarration') : t('workbench.denoiseNeedsMainSource') };
+            }
             const s = typeof input.strength === 'number' && Number.isFinite(input.strength) ? Math.max(0.05, Math.min(1, input.strength)) : 0.6;
             setDenoise(s);
             return { ok: true, summary: t('workbench.denoiseTurnedOn', { pct: Math.round(s * 100) }) };

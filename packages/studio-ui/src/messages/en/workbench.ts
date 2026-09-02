@@ -445,6 +445,8 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.audioMuted": "muted",
   "workbench.audioUnmuted": "unmuted",
   "workbench.audioTrackNotFound": "Audio track not found",
+  "workbench.denoiseNotForLaneNarration": "Denoise applies to the main video's own recording; the current narration is on the audio lane (generated speech or imported audio) and does not go through it",
+  "workbench.denoiseNeedsMainSource": "No main-video recording to denoise (multi-source picture or muted picture); denoise processes the main video's own audio only",
   "workbench.bgmAdjusted": "Audio track adjusted",
   "workbench.bgmSplit": "Audio track split",
   "workbench.bgmTrimmed": "Audio track trimmed",
