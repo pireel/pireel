@@ -21,6 +21,7 @@
 import { translateV3Call, type V3AdapterContext, type LegacyCall } from './agent-surface-v3/adapter';
 import { V3_TOOL_IDS, V3_TOOLS } from './agent-surface-v3/registry';
 import { V3_TOOL_SCHEMAS } from './agent-surface-v3/schemas';
+import { v3Instructions } from './agent-surface-v3/instructions';
 import { MCP_DESCRIPTION_OVERRIDES, STUDIO_TOOLS, STUDIO_TOOL_MAP, mcpInstructions } from './prompts';
 
 /* ============================ JSON-RPC shapes ============================ */
@@ -672,7 +673,9 @@ export async function handleMcpRequest(raw: JsonRpcRequest, deps: McpDeps): Prom
         protocolVersion: typeof requested === 'string' ? requested : MCP_PROTOCOL_VERSION,
         capabilities: { tools: { listChanged: false } },
         serverInfo: MCP_SERVER_INFO,
-        instructions: mcpInstructions(deps.skillVersion, deps.editingExpertise),
+        instructions: deps.agentSurface === 'v3'
+          ? v3Instructions({ surface: 'mcp', skillVersion: deps.skillVersion, ...(deps.editingExpertise ? { editingExpertise: deps.editingExpertise } : {}) })
+          : mcpInstructions(deps.skillVersion, deps.editingExpertise),
       });
     }
     case 'ping':

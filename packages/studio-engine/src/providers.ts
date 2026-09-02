@@ -123,6 +123,9 @@ export interface StudioProviders {
   curatedAssets?: CuratedAssetProvider;
   /** Endpoint for the built-in agent chat (a hosted-LLM feature; OSS shells may omit and rely on external agents via MCP). */
   chatEndpoint?: string;
+  /** Which agent tool surface the host's chat route speaks. Resolved once per session so the client can
+   *  route tool calls (`v3` names execute through the v3 adapter). Absent = legacy. */
+  agentSurface?: () => Promise<'legacy' | 'v3'>;
   /** Cloud undo fallback: pop the newest entry off the project's server-side history ring and
    *  return the restored V2 document (null = ring empty). Absent = in-memory undo only (OSS shell).
    *  The server marks the restore as consumed — repeated calls walk strictly backward. */

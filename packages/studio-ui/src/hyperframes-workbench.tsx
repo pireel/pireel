@@ -7046,7 +7046,11 @@ export function HyperframesWorkbench({
     toolId: string,
     input: Record<string, unknown>,
     opts?: { signal?: AbortSignal; surface?: "chat" | "bridge"; skillId?: string },
-  ) => persistToolMutation(runAgentStudioTool(agentToolCtx, toolId, input, opts));
+  ) => (toolId === "run_v3"
+    // v3 surface from the chat: same executor as the external bridge, with the chat surface carried in the input
+    // so parked interactions (ask_user / approvals) render as chat cards.
+    ? persistToolMutation(runAgentExternalTool(agentToolCtx, "run_v3", { ...input, surface: opts?.surface ?? "chat" }))
+    : persistToolMutation(runAgentStudioTool(agentToolCtx, toolId, input, opts)));
   runToolRef.current = runStudioTool; // break the hook↔dispatcher cycle (assigned every render before any handler can fire)
   const runExternalTool = (tool: string, input: Record<string, unknown>) =>
     persistToolMutation(runAgentExternalTool(agentToolCtx, tool, input));

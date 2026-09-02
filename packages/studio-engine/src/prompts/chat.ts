@@ -419,11 +419,11 @@ const captionPresetFacts = (p: (typeof CAPTION_PRESETS)[number]): string => [
 ].join(', ');
 export const CAPTION_CATALOG_BLOCK = `\n\n<caption_catalog>\nCaption style presets for set_captions — two modes: emphasis (word-by-word: whole line shown, the spoken word highlighted) / line (clean full-line fade-in). Each row lists the preset's concrete look. Ids are opaque — NEVER infer colors from an id; match the stated facts against the task or the selected Skill's caption rules. NEVER invent an id. yPct/scale tune position & size separately.\n${CAPTION_PRESETS.map((p) => `- ${p.id} · ${p.mode} · ${captionPresetFacts(p)}`).join("\n")}\n</caption_catalog>`;
 
-export function buildChatSystem(
+/** The situational blocks appended to the identity on every surface: attached Frame / catalog, selected Skill / catalog. */
+export function buildChatContextBlocks(
   frame?: ResolvedFrame | null,
   frameCatalog?: string,
   scenarioSkill?: StudioScenarioSkill | null,
-  editingExpertise?: string,
   scenarioSkillCatalog?: readonly {
     id: string;
     title: string;
@@ -442,5 +442,19 @@ export function buildChatSystem(
     !scenarioSkill && scenarioSkillCatalog?.length
       ? `\n\n<studio_skill_catalog>\nNo Studio Skill is selected. Do not infer, auto-select, or claim that a Skill is active. The generic editing expert remains fully usable for ordinary requests. When a broad request would materially benefit from one of the available complete workflows below, recommend the single best fit once and tell the user they can select it from the Skill picker; do not block safe inspection or a requested local edit, and do not attach the Skill yourself.\n${scenarioSkillCatalog.map((skill) => `- ${skill.id} · ${skill.title} — ${skill.summary}`).join("\n")}\n</studio_skill_catalog>`
       : "";
-  return `${CHAT_IDENTITY}${CAPTION_CATALOG_BLOCK}${editingExpertiseBlock(editingExpertise)}${skillBlock}${skillCatalogBlock}${frameBlock}`;
+  return `${skillBlock}${skillCatalogBlock}${frameBlock}`;
+}
+
+export function buildChatSystem(
+  frame?: ResolvedFrame | null,
+  frameCatalog?: string,
+  scenarioSkill?: StudioScenarioSkill | null,
+  editingExpertise?: string,
+  scenarioSkillCatalog?: readonly {
+    id: string;
+    title: string;
+    summary: string;
+  }[],
+): string {
+  return `${CHAT_IDENTITY}${CAPTION_CATALOG_BLOCK}${editingExpertiseBlock(editingExpertise)}${buildChatContextBlocks(frame, frameCatalog, scenarioSkill, scenarioSkillCatalog)}`;
 }

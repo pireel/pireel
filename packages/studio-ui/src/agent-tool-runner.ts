@@ -4059,6 +4059,9 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
   /** External-agent-only bridge operations (MCP-only, invisible to the internal chat) — the browser half of the BYO-brain contract:
    *  compose_context fetches live context; apply_block receives the model output and runs it through
    *  the same parseBlockResponse+lintBlock validation as the in-house path. Other tools fall back to runStudioTool. */
+/** Bridge-only operations that have no runStudioTool implementation. */
+const EXTERNAL_ONLY_TOOLS = new Set(['compose_context', 'apply_block', 'visual_brief', 'submit_visual', 'capture_frame', 'review_sequence']);
+
 async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Record<string, unknown>): Promise<StudioToolResult> {
   const {
     compRef, documentRef, setDocument, setSelectedId, setSelectedShotId, applyT, tRef,
@@ -4461,6 +4464,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         // (the caller wraps this whole case in runAtomicCompositionTool).
         const name = typeof input.name === 'string' ? input.name : '';
         const args = input.args && typeof input.args === 'object' && !Array.isArray(input.args) ? (input.args as Record<string, unknown>) : {};
+        const stepSurface: 'chat' | 'bridge' = input.surface === 'chat' ? 'chat' : 'bridge';
         const before = documentRef.current;
         if (name === 'get_state') {
           const window = args.window && typeof args.window === 'object' ? (args.window as { tracks?: string[]; fromFrame?: number; toFrame?: number }) : undefined;
@@ -4482,7 +4486,9 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             if (carried === undefined) return { ok: false, error: 'chain_broken', data: { detail: `${call.tool} needed ${call.usePrevious.resultPath}`, steps } };
             stepInput[call.usePrevious.inputKey] = call.usePrevious.asArray ? [carried] : carried;
           }
-          const result = await runExternalToolInner(ctx, call.tool, stepInput);
+          const result = EXTERNAL_ONLY_TOOLS.has(call.tool)
+            ? await runExternalToolInner(ctx, call.tool, stepInput)
+            : await runStudioTool(ctx, call.tool, stepInput, { surface: stepSurface });
           steps.push({ tool: call.tool, ok: result.ok, ...(result.summary ? { summary: result.summary } : {}), ...(result.error ? { error: result.error } : {}), ...(result.data !== undefined && translation.calls.length === 1 ? { data: result.data } : {}) });
           if (!result.ok) return { ok: false, error: result.error ?? 'step_failed', data: { detail: `${call.tool} failed after ${steps.length - 1} completed step(s)`, steps } };
           previous = result;

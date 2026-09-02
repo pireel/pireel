@@ -119,3 +119,11 @@ export function v3ReplacementIndex(): ReadonlyMap<string, string> {
   }
   return index;
 }
+
+/** v3 tools that never change the output (reads, searches, inspection, skills, preview, session queries). */
+const V3_READ_ONLY = new Set(['get_state', 'get_transcript', 'search_media', 'inspect_media', 'inspect_timeline', 'get_beat_grid', 'search_assets', 'get_icons', 'create_browser_handoff', 'prepare_local_asset', 'list_models', 'list_skills', 'read_skill', 'preview', 'ask_user', 'compose_component']);
+
+export function v3ToolCanMutate(id: string): boolean {
+  return V3_TOOL_IDS.has(id) && !V3_READ_ONLY.has(id);
+}
+
