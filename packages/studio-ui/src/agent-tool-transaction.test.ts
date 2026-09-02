@@ -694,7 +694,7 @@ describe('Agent composition transaction boundary', () => {
     expect(skill).not.toContain('picture-change contract');
     expect(skill).toContain('roughly every 5–10 seconds');
     expect(skill).toContain('never loop or stretch one short clip as wallpaper');
-    expect(skill).toContain('inspect local images with `inspect_images`, then place them by assetId');
+    expect(skill).toContain('place only the chosen footage, stills, or audio by asset id');
 
     const componentSystem = buildHtmlSystem({ componentIds: [] });
     expect(componentSystem).toContain('participating in a video scene');

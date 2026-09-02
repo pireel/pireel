@@ -35,10 +35,10 @@ Montage decisions are often carried by visuals and sound that transcripts miss: 
 
 Use the tools that expose the material:
 
-- `get_timeline` for existing sequence, tracks, outputs, and media usage;
-- `inspect_media` and `analyze_visual` for shot content, movement, composition, quality, and usable spans;
-- `get_transcript` or `read_script` only when speech may provide a spine or meaningful fragments;
-- `inspect_images` for the actual pixels of candidate stills; for device-local sources preserve the exact project-local `assetId`: inspect local video with `analyze_visual`, then place chosen footage directly with `add_clips`/`insert_clips`; inspect local images with `inspect_images`, then place them by assetId; place local audio by assetId with real timing. Never pre-call `register_media`, print/copy `contentSig`/`localSig`, or metadata-register local video with placeholder duration;
+- `get_state` for the existing sequence, tracks, outputs, and media usage, including library media not yet placed;
+- `inspect_media` for shot content, movement, composition, quality, and usable spans — metadata first, frames for the actual pixels of candidate stills, geometry for cuts and subject tracks; the semantic and editorial modes charge and are for content understanding or a comparative review against a brief;
+- `get_transcript` only when speech may provide a spine or meaningful fragments;
+- project-library media is already registered: place chosen footage, stills, and audio directly by asset id with `add_clips`/`insert_clips` at real timing. Use `register_media` only for generated or remote media carrying an exact returned locator, never a locator built by hand;
 - `organize_media` to make large source collections navigable by truthful editorial groupings.
 
 Do not organize only by filename or camera. Build a perceptual understanding of the material:
@@ -56,7 +56,7 @@ Do not organize only by filename or camera. Build a perceptual understanding of 
 
 Keep a loose motif ledger in working context. It can be prose. It should make visible the recurring visual or sonic ideas the edit can develop, not trap the film inside a taxonomy.
 
-For a complete montage, commit the chosen sequence and audiovisual contrast with `set_director_plan` before building the draft. Pass exact `sceneId` values to planned visual placements so later review can repair scenes without flattening the whole edit.
+For a complete montage, settle the chosen sequence and audiovisual contrast in working context before building the draft — a few sentences naming the governing gesture, the order of movements, and where sound leads. Then build the draft in as few passes as possible, and repair a passage by its clips rather than rebuilding the whole edit.
 
 ## Find the governing gesture
 
@@ -205,7 +205,7 @@ Do not stack impacts, risers, and whooshes on every transition. Repetition makes
 
 Text can establish occasion, location, time, thesis, chapter, attribution, or final invitation. It should not explain every image.
 
-Keep copy short enough to read at the actual pace. Use `add_texts` for native editable text and `add_block` when a custom title, typographic composition, or richer graphic is justified. Preserve safe areas and required logos or sponsor language.
+Keep copy short enough to read at the actual pace. Use `set_texts` for native editable text and `compose_component` → `apply_component` when a custom title, typographic composition, or richer graphic is justified. Preserve safe areas and required logos or sponsor language.
 
 Narration should create coherence, interpretation, or information the images cannot carry. It should not describe obvious actions shot by shot.
 
@@ -215,12 +215,12 @@ If exact names, dates, spellings, credits, sponsor hierarchy, or legal language 
 
 Choose tools based on the sequence being built:
 
-- use `add_clips` for a deliberately rebuilt track, understanding that it replaces track contents;
+- use `add_clips` to place material where nothing should shift (same-track overlaps are refused);
 - use `insert_clips` when adding material into an existing sequence should ripple later clips;
-- use `split_clips`, `move_clips`, and `remove_clips` for structural refinement;
-- use `set_clip_properties` and `set_keyframes` for motivated reframes or motion;
-- use `manage_tracks`, `manage_clip_links`, and `sync_clips` to protect audio relationships and layered constructions;
-- use `add_texts` or `update_text` for editable typography;
+- use `split_clips`, `move_clips`, `remove_clips`, and `ripple_delete_ranges` for structural refinement;
+- use `set_clip_framing` for motivated reframes, `set_keyframes` for motion, and `set_clip_properties` for speed, level, and retrims;
+- use `manage_tracks` and `manage_clip_links` (link, unlink, sync) to protect audio relationships and layered constructions;
+- use `set_texts` for editable typography, adding and updating in one call;
 - use `search_media` or `search_assets` only after identifying the concrete visual job missing from the source.
 
 Private official media may arrive through runtime context. Do not assume it belongs in the open-source Studio repository, and do not use it merely because it is available.
@@ -273,4 +273,4 @@ Review at normal speed from a clean start, then inspect details.
 - Is text readable on the destination surface?
 - Did any unresolved user decision get guessed instead of surfaced?
 
-Use `review_visuals` and timeline inspection where available. A good montage may finish as a complete film, a tone proof awaiting approval, or a material audit with one precise request. The correct pause is part of the craft.
+Use `inspect_timeline` on the composited result where available. A good montage may finish as a complete film, a tone proof awaiting approval, or a material audit with one precise request. The correct pause is part of the craft.

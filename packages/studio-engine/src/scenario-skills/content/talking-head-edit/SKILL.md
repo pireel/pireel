@@ -54,7 +54,7 @@ If the recording, transcript, or requested asset scope cannot support a confiden
 
 ## Step 2: Read the material as an editor
 
-For a complete edit, read the full transcript and inspect the full visual coverage before committing semantic cuts or a visual plan. Initial analysis is read-only. After the user approves the whole-piece proposal, when dead-air cleanup or tighter pacing is in scope, run `remove_silence` before transcript-driven timeline mutations. Use transcript evidence for language decisions and visual observations for framing, continuity, and asset decisions. If `read_script` fails while transcribing, do not retry it in the same user request: continue only with transcript-independent work, state that semantic cleanup remains pending, and let a later user turn try again.
+For a complete edit, read the full transcript and inspect the full visual coverage before committing semantic cuts or a visual plan. Initial analysis is read-only. After the user approves the whole-piece proposal, when dead-air cleanup or tighter pacing is in scope, run `remove_silence` before transcript-driven timeline mutations. Use transcript evidence for language decisions and visual observations for framing, continuity, and asset decisions. If `get_transcript` fails while transcribing, do not retry it in the same user request: continue only with transcript-independent work, state that semantic cleanup remains pending, and let a later user turn try again.
 
 Identify:
 
@@ -223,19 +223,19 @@ Use a cut by default. Add a transition only when it communicates a real change o
 
 Use only the tools needed for the current judgment.
 
-For conservative speech cleanup, load `read_editing_guide` once, use real audio and the transcript, apply supported silence and semantic cuts in batches, enable or reflow captions when requested, and review the resulting speech. Run this path directly without a proposal, persisted planning artifacts, or whole-film visual analysis.
+For conservative speech cleanup, read the `speech-cleanup` skill once, use real audio and the transcript, apply supported silence and semantic cuts in batches, enable or reflow captions when requested, and review the resulting speech. Run this path directly without a proposal, persisted planning artifacts, or whole-film visual analysis.
 
 For a complete edit, usually:
 
-1. Gather transcript and visual evidence with `read_script` and `analyze_visual` as needed. If `read_script` fails while transcribing, do not retry it in the same user request.
-2. Form the complete proposal, call `request_approval`, and wait.
+1. Gather transcript and visual evidence with `get_transcript` and `inspect_media` as needed. If `get_transcript` fails while transcribing, do not retry it in the same user request.
+2. Form the complete proposal, call `ask_user` with kind approval, and wait.
 3. After Approve, run `remove_silence` first when dead-air cleanup or tighter pacing is in scope; it uses the real audio and does not need transcript arithmetic. Initial transcript reading is inspection; this still happens before transcript-driven timeline mutations.
-4. Shape speech semantically with `list_words`, `delete_words`, and `cut_narration` only where the transcript supports it.
+4. Shape speech semantically with `remove_words` — segment ranges for whole ideas, retakes and dead passages, word ids for exact words — only where the transcript supports it. Word ids shift after each cut; re-read `get_transcript` words before another word cut.
 5. Retrieve evidence with `search_media` and `search_assets` in the permitted scope.
-6. Compile each meaningful beat directly with the lightest fitting mix of native timeline atoms and designed graphics. Use `get_timeline` when lane or clip identity matters. For device-local evidence, preserve the exact project-local `assetId`: inspect local video with `analyze_visual`, then place only chosen footage directly with `add_clips`/`insert_clips`; inspect local images with `inspect_images`, then place them by assetId; place local audio by assetId with real timing. Never pre-call `register_media` or print/copy `contentSig`/`localSig` for device-local assets. Use `register_media` followed by `add_clips` only for newly generated/remote evidence carrying an exact returned locator; `add_texts` for ordinary native titles; and `add_block` for custom designed graphics. Combine these with framing, layout, captions, audio, and transitions as needed.
-7. Review ordered temporal states with `review_visuals`; repair fragmented ideas or abrupt handoffs in the affected timeline range rather than adding indiscriminate decoration.
+6. Compile each meaningful beat directly with the lightest fitting mix of native timeline atoms and designed graphics. Use `get_state` when lane or clip identity matters. Project-library media is already registered: inspect it with `inspect_media`, then place only the chosen footage, stills, or audio by asset id with `add_clips`/`insert_clips` at real timing. Use `register_media` followed by `add_clips` only for newly generated or remote evidence carrying an exact returned locator; never construct a locator by hand. Use `set_texts` for ordinary native titles and `compose_component` → `apply_component` for custom designed graphics. Combine these with framing (`set_clip_framing`, `apply_layout`), captions, audio, and transitions as needed.
+7. Review ordered temporal states with `inspect_timeline`; repair fragmented ideas or abrupt handoffs in the affected timeline range rather than adding indiscriminate decoration.
 
-This is guidance, not a mandatory call sequence. Reuse evidence already present in the conversation. Batch related changes when that preserves clarity. Keep source-clock transcript ranges distinct from edited-timeline times. Ordinary complete edits do not create or depend on persisted planning artifacts.
+This is guidance, not a mandatory call sequence. Reuse evidence already present in the conversation. Batch related changes when that preserves clarity. Keep source-second transcript ranges distinct from timeline frames. Ordinary complete edits do not create or depend on persisted planning artifacts.
 
 ## Content-specific directing patterns
 
