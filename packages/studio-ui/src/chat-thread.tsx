@@ -1427,7 +1427,9 @@ export function ChatThread({
               <span className="min-w-0 flex-1 truncate text-destructive">
                 {error.message?.includes("insufficient_tokens")
                   ? t("chatGen.notEnoughCreditsTop")
-                  : t("chatGen.interruptedStatePreserved")}
+                  : error.message?.includes("studio_upstream_busy")
+                    ? t("chatGen.upstreamBusy")
+                    : t("chatGen.interruptedStatePreserved")}
               </span>
               {!error.message?.includes("insufficient_tokens") && (
                 <button

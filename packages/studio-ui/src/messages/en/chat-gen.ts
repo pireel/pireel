@@ -95,6 +95,7 @@ export const CHATGEN_EN: Record<string, string> = {
   'chatGen.continueFromCurrentState': 'Continue from current progress',
   'chatGen.continueAfterInterruptionPrompt': 'Continue the interrupted work. Inspect the current project state first, complete only what remains, and do not repeat changes that already landed.',
   'chatGen.interruptedStatePreserved': 'The connection was interrupted. Changes that already landed are still preserved.',
+  'chatGen.upstreamBusy': 'The model service is busy. Try again in a moment; changes that already landed are still preserved.',
   'chatGen.expand': 'Expand',
   'chatGen.failed': 'Failed',
   'chatGen.fillEdit': 'Fill in & edit',
