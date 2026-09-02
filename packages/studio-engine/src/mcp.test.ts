@@ -45,6 +45,66 @@ function deps(overrides: Partial<McpDeps> = {}): McpDeps {
   };
 }
 
+describe('MCP v3 surface', () => {
+  const v3ctx = async () => ({ fps: 30, kindOf: (id: string) => (id.startsWith('g') ? 'graphic' as const : id.startsWith('a') ? 'audio' as const : 'narrative' as const) });
+
+  it('lists the consolidated tools only when the session speaks v3', async () => {
+    const legacy = await handleMcpRequest({ id: 1, method: 'tools/list' }, deps());
+    const v3 = await handleMcpRequest({ id: 2, method: 'tools/list' }, deps({ agentSurface: 'v3', resolveV3Context: v3ctx }));
+    const legacyNames = (legacy!.result as { tools: { name: string }[] }).tools.map((t) => t.name);
+    const v3Names = (v3!.result as { tools: { name: string }[] }).tools.map((t) => t.name);
+    expect(legacyNames).toContain('set_shot_treatment');
+    expect(v3Names).not.toContain('set_shot_treatment');
+    expect(v3Names).toEqual(expect.arrayContaining(['get_state', 'set_clip_framing', 'ripple_delete_ranges', 'manage_project']));
+    expect(v3Names).not.toContain('generate_foley'); // chat-only stays off MCP
+    expect(v3Names.length).toBe(47); // 50 minus the three chat-only tools
+  });
+
+  it('translates frame-based v3 calls onto legacy seconds and routes by clip kind', async () => {
+    const d = deps({ agentSurface: 'v3', resolveV3Context: v3ctx });
+    const response = await handleMcpRequest({ id: 3, method: 'tools/call', params: { name: 'move_clips', arguments: { items: [{ clipId: 'n1', startFrame: 90 }, { clipId: 'g1', startFrame: 120 }] } } }, d);
+    expect(d.callBridge).toHaveBeenNthCalledWith(1, 'move_clips', { items: [{ clipId: 'n1', startSec: 3 }] }, expect.any(Number));
+    expect(d.callBridge).toHaveBeenNthCalledWith(2, 'move_block', { blockId: 'g1', startSec: 4 }, expect.any(Number));
+    const body = JSON.parse((response!.result as { content: { text: string }[] }).content[0]!.text) as { ok: boolean; data: { steps: unknown[] } };
+    expect(body.ok).toBe(true);
+    expect(body.data.steps).toHaveLength(2);
+  });
+
+  it('chains a stock import into register_media using the previous result', async () => {
+    const d = deps({ agentSurface: 'v3', resolveV3Context: v3ctx });
+    const payload = { query: 'city night', kind: 'video', page: 1, limit: 12, assetId: 'px_1' };
+    await handleMcpRequest({ id: 4, method: 'tools/call', params: { name: 'register_media', arguments: { stock: payload } } }, d);
+    expect(d.importStock).toHaveBeenCalledWith(payload);
+    expect(d.callBridge).toHaveBeenCalledWith('register_media', { assets: [{ id: 'up_1', kind: 'image', url: 'https://cdn.example/stock.jpg' }] }, expect.any(Number));
+  });
+
+  it('returns the adapter error shape and never calls the engine on bad input', async () => {
+    const d = deps({ agentSurface: 'v3' });
+    const response = await handleMcpRequest({ id: 5, method: 'tools/call', params: { name: 'ripple_delete_ranges', arguments: { ranges: [[30, 60]] } } }, d);
+    const body = JSON.parse((response!.result as { content: { text: string }[] }).content[0]!.text) as Record<string, unknown>;
+    expect(body).toMatchObject({ ok: false, error: 'fps_unavailable' });
+    expect(d.callBridge).not.toHaveBeenCalled();
+    expect((response!.result as { isError: boolean }).isError).toBe(true);
+  });
+
+  it('stops a multi-step call at the first failure and reports what was applied', async () => {
+    const callBridge = vi.fn(async (tool: string) => (tool === 'delete_blocks' ? { ok: true, summary: 'blocks gone' } : { ok: false, error: 'locked track' }));
+    const d = deps({ agentSurface: 'v3', resolveV3Context: v3ctx, callBridge });
+    const response = await handleMcpRequest({ id: 6, method: 'tools/call', params: { name: 'remove_clips', arguments: { clipIds: ['g1', 'n1'] } } }, d);
+    const body = JSON.parse((response!.result as { content: { text: string }[] }).content[0]!.text) as { ok: boolean; error: string; detail: string; data: { steps: { tool: string; ok: boolean }[] } };
+    expect(body.ok).toBe(false);
+    expect(body.error).toBe('locked track');
+    expect(body.detail).toContain('after 1 completed step');
+    expect(body.data.steps.map((step) => [step.tool, step.ok])).toEqual([['delete_blocks', true], ['remove_clips', false]]);
+  });
+
+  it('keeps legacy names working when the session is not on v3', async () => {
+    const d = deps();
+    await handleMcpRequest({ id: 7, method: 'tools/call', params: { name: 'move_clips', arguments: { items: [{ clipId: 'n1', startSec: 3 }] } } }, d);
+    expect(d.callBridge).toHaveBeenCalledWith('move_clips', { items: [{ clipId: 'n1', startSec: 3 }] }, expect.any(Number));
+  });
+});
+
 describe('MCP 工具面', () => {
   it('STUDIO_TOOLS 全量映射 + MCP 专属工具(registry 加工具这里自动长出来)', () => {
     const names = new Set(buildMcpTools().map((t) => t.name));

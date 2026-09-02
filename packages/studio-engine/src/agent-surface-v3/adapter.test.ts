@@ -144,6 +144,85 @@ describe('v3 adapter translations', () => {
     expect(ok(translateV3Call('manage_clip_links', { action: 'sync', referenceClipId: 'n1', targets: [] }, ctx))).toEqual([{ tool: 'sync_clips', input: { referenceClipId: 'n1', targets: [] } }]);
   });
 
+  it('inspects media by mode', () => {
+    expect(ok(translateV3Call('inspect_media', { ids: ['a1', 'a2'] }, ctx))).toEqual([{ tool: 'inspect_media', input: { assetIds: ['a1', 'a2'] } }]);
+    expect(ok(translateV3Call('inspect_media', { mode: 'frames', ids: ['img1'] }, ctx))).toEqual([{ tool: 'inspect_images', input: { refs: ['img1'] } }]);
+    expect(ok(translateV3Call('inspect_media', { mode: 'geometry', ids: ['a1'] }, ctx))).toEqual([{ tool: 'analyze_visual', input: { mode: 'geometry', assetId: 'a1' } }]);
+    expect(ok(translateV3Call('inspect_media', { mode: 'component', ids: ['g1'] }, ctx))).toEqual([{ tool: 'get_block', input: { blockId: 'g1' } }]);
+    expect(ok(translateV3Call('inspect_media', { mode: 'generation' }, ctx))).toEqual([{ tool: 'get_generation_jobs', input: {} }]);
+    expect(ok(translateV3Call('inspect_media', { mode: 'labels', labels: [{ index: 0, content: 'talkinghead', person: 'center', safe: 'left' }] }, ctx))[0]!.tool).toBe('submit_visual');
+    expect(translateV3Call('inspect_media', { mode: 'frames', ids: [] }, ctx)).toMatchObject({ status: 'error', path: 'ids' });
+  });
+
+  it('searches or lists one asset scope, including stock', () => {
+    expect(ok(translateV3Call('search_assets', { scope: 'official', kind: 'audio' }, ctx))).toEqual([{ tool: 'list_assets', input: { scope: 'official', kind: 'audio' } }]);
+    expect(ok(translateV3Call('search_assets', { scope: 'mine', query: 'whoosh', limit: 5 }, ctx))).toEqual([{ tool: 'search_assets', input: { query: 'whoosh', scope: 'mine', limit: 5 } }]);
+    expect(ok(translateV3Call('search_assets', { scope: 'stock', query: 'city night', kind: 'video' }, ctx))).toEqual([{ tool: 'search_stock', input: { query: 'city night', kind: 'video' } }]);
+    expect(translateV3Call('search_assets', { scope: 'all' }, ctx)).toMatchObject({ status: 'error', path: 'query' });
+  });
+
+  it('registers direct assets and chains a stock import into register_media', () => {
+    const payload = { query: 'city night', kind: 'video', page: 1, limit: 12, assetId: 'px_1' };
+    expect(ok(translateV3Call('register_media', { stock: payload, assets: [{ id: 'gen_1', kind: 'audio', url: 'https://cdn/x.mp3' }] }, ctx))).toEqual([
+      { tool: 'import_stock', input: payload },
+      { tool: 'register_media', input: {}, usePrevious: { resultPath: 'data.registration', inputKey: 'assets', asArray: true } },
+      { tool: 'register_media', input: { assets: [{ id: 'gen_1', kind: 'audio', url: 'https://cdn/x.mp3' }] } },
+    ]);
+  });
+
+  it('adds and inserts clips with frame timing and graphic duplication', () => {
+    expect(ok(translateV3Call('add_clips', { clips: [{ assetId: 'a4', role: 'broll', startFrame: 900, durationFrames: 120, source: [3, 7], fades: { in: 9 }, mute: true }] }, ctx))).toEqual([
+      { tool: 'add_clips', input: { clips: [{ assetId: 'a4', role: 'broll', startSec: 30, durationSec: 4, sourceInSec: 3, sourceOutSec: 7, fadeInSec: 0.3, muted: true }] } },
+    ]);
+    expect(ok(translateV3Call('insert_clips', { clips: [{ assetId: 'a9', role: 'music' }], atFrame: 60 }, ctx))).toEqual([
+      { tool: 'insert_clips', input: { clips: [{ assetId: 'a9', role: 'music' }], atSec: 2 } },
+    ]);
+    expect(ok(translateV3Call('add_clips', { duplicate: [{ clipId: 'g1', startFrame: 300 }] }, ctx))).toEqual([{ tool: 'duplicate_block', input: { blockId: 'g1', atSec: 10 } }]);
+    expect(translateV3Call('add_clips', { duplicate: [{ clipId: 'b1' }] }, ctx)).toMatchObject({ status: 'error', error: 'unsupported' });
+    expect(translateV3Call('add_clips', { clips: [{ role: 'broll' }] }, ctx)).toMatchObject({ status: 'error', path: 'clips[0].assetId' });
+  });
+
+  it('frames media clips with recipes or exact transform/crop and places graphics by box', () => {
+    expect(ok(translateV3Call('set_clip_framing', { items: [
+      { clipId: 'n1', treatment: 'punch-in', scale: 1.3, anchorX: 0.5, anchorY: 0.3 },
+      { clipId: 'b1', transform: { scale: 1.2, offsetX: 0.1 }, cropInsets: { top: 0.1 } },
+      { clipId: 'g1', box: { x: 0.06, y: 0.62, w: 0.5, h: 0.2 } },
+    ] }, ctx))).toEqual([
+      { tool: 'set_shot_framing', input: { updates: [{ shotId: 'n1', treatment: 'punch-in', scale: 1.3, anchorX: 0.5, anchorY: 0.3 }] } },
+      { tool: 'set_media_transform', input: { items: [{ clipId: 'b1', scale: 1.2, offsetX: 0.1 }] } },
+      { tool: 'set_media_crop', input: { items: [{ clipId: 'b1', top: 0.1 }] } },
+      { tool: 'place_block', input: { blockId: 'g1', xPct: 6, yPct: 62, widthPct: 50, heightPct: 20 } },
+    ]);
+    expect(translateV3Call('set_clip_framing', { items: [{ clipId: 'n1', treatment: 'zoom' }] }, ctx)).toMatchObject({ status: 'error', path: 'items[0].treatment' });
+    expect(translateV3Call('set_clip_framing', { items: [{ clipId: 'b1' }] }, ctx)).toMatchObject({ status: 'error', error: 'nothing_to_change' });
+  });
+
+  it('applies BYO components and routes the hosted generator fallback', () => {
+    expect(ok(translateV3Call('apply_component', { raw: 'note\n```html\n<div/>\n```', atFrame: 600, durationFrames: 120, placement: { xPct: 6, yPct: 62, widthPct: 50, heightPct: 20 } }, ctx))).toEqual([
+      { tool: 'apply_block', input: { raw: 'note\n```html\n<div/>\n```', atSec: 20, durationSec: 4, placement: { xPct: 6, yPct: 62, widthPct: 50, heightPct: 20 } } },
+    ]);
+    expect(ok(translateV3Call('apply_component', { generate: true, clipId: 'g1', instruction: 'make the number bigger' }, ctx))).toEqual([{ tool: 'edit_block', input: { blockId: 'g1', instruction: 'make the number bigger' } }]);
+    expect(ok(translateV3Call('apply_component', { generate: true, instruction: 'a stat card', atFrame: 30 }, ctx))).toEqual([{ tool: 'add_block', input: { instruction: 'a stat card', atSec: 1 } }]);
+    expect(translateV3Call('apply_component', {}, ctx)).toMatchObject({ status: 'error', path: 'raw' });
+  });
+
+  it('drives the caption layer as one object', () => {
+    expect(ok(translateV3Call('set_captions', { on: false }, ctx))).toEqual([{ tool: 'remove_captions', input: {} }]);
+    expect(ok(translateV3Call('set_captions', { on: true, preset: 'ln-clean', yPct: 82, source: { trackId: 't1' }, corrections: [{ index: 3, text: 'Fixed.' }], translations: { lang: 'English', items: [{ index: 3, text: 'Fixed.' }] }, relayout: true }, ctx))).toEqual([
+      { tool: 'set_captions', input: { preset: 'ln-clean', yPct: 82, source: 'track', trackId: 't1' } },
+      { tool: 'edit_caption_text', input: { items: [{ index: 3, text: 'Fixed.' }] } },
+      { tool: 'set_caption_translations', input: { items: [{ index: 3, text: 'Fixed.' }], lang: 'English' } },
+      { tool: 'relayout_captions', input: {} },
+    ]);
+    expect(translateV3Call('set_captions', {}, ctx)).toMatchObject({ status: 'error', error: 'nothing_to_change' });
+  });
+
+  it('reads skills and the speech-cleanup guide through one tool', () => {
+    expect(ok(translateV3Call('read_skill', { id: 'usk_1' }, ctx))).toEqual([{ tool: 'read_skill', input: { skill_id: 'usk_1' } }]);
+    expect(ok(translateV3Call('read_skill', { id: 'speech-cleanup' }, ctx))).toEqual([{ tool: 'read_editing_guide', input: {} }]);
+    expect(ok(translateV3Call('prepare_local_asset', { assetId: 'local:img' }, ctx))).toEqual([{ tool: 'prepare_local_image', input: { assetId: 'local:img' } }]);
+  });
+
   it('refuses frame math without fps and unknown tools', () => {
     expect(translateV3Call('move_clips', { items: [{ clipId: 'n1', startFrame: 1 }] }, { fps: 0, kindOf: () => 'narrative' })).toMatchObject({ status: 'error', error: 'fps_unavailable' });
     expect(translateV3Call('set_director_plan', {}, ctx)).toMatchObject({ status: 'error', error: 'unknown_tool' });

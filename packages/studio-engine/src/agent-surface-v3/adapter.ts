@@ -26,6 +26,12 @@ export interface V3AdapterContext {
 export interface LegacyCall {
   tool: string;
   input: Record<string, unknown>;
+  /**
+   * Feed a field of the previous call's result into this call's input before running it. The
+   * applying surface resolves `resultPath` (dot path, e.g. `data.registration`) on the previous
+   * legacy result and writes it to `inputKey` (wrapped in an array when `asArray` is set).
+   */
+  usePrevious?: { resultPath: string; inputKey: string; asArray?: boolean };
 }
 
 export type V3Translation =
@@ -468,6 +474,273 @@ function translateManageTracks(input: Input): V3Translation {
   return { status: 'ok', calls: [{ tool: 'manage_tracks', input: { ...rest, ...(isFiniteNumber(order) ? { stackOrder: order } : {}) } }] };
 }
 
+function translateInspectMedia(input: Input): V3Translation {
+  const mode = input.mode ?? 'metadata';
+  const ids = Array.isArray(input.ids) ? (input.ids as unknown[]).filter(isNonEmptyString) : [];
+  switch (mode) {
+    case 'metadata': {
+      const call: Input = {};
+      if (Array.isArray(input.assetIds)) call.assetIds = input.assetIds;
+      if (Array.isArray(input.clipIds)) call.clipIds = input.clipIds;
+      if (ids.length) call.assetIds = [...(Array.isArray(call.assetIds) ? (call.assetIds as string[]) : []), ...ids];
+      return { status: 'ok', calls: [{ tool: 'inspect_media', input: call }] };
+    }
+    case 'frames':
+      if (!ids.length || ids.length > 8) return { status: 'error', error: 'invalid_ids', path: 'ids', value: input.ids, fix: 'frames mode inspects 1–8 image asset ids.' };
+      return { status: 'ok', calls: [{ tool: 'inspect_images', input: { refs: ids } }] };
+    case 'geometry':
+    case 'semantic':
+    case 'editorial': {
+      const call: Input = { mode };
+      for (const key of ['brief', 'maxCandidates', 'assessAudio', 'items']) if (input[key] !== undefined) call[key] = input[key];
+      if (ids.length === 1) call.assetId = ids[0];
+      else if (ids.length > 1) call.items = ids.map((id) => ({ assetId: id }));
+      if (isNonEmptyString(input.clipId)) call.clipId = input.clipId;
+      return { status: 'ok', calls: [{ tool: 'analyze_visual', input: call }] };
+    }
+    case 'component':
+      if (ids.length !== 1) return { status: 'error', error: 'invalid_ids', path: 'ids', value: input.ids, fix: 'component mode inspects exactly one graphic clip id.' };
+      return { status: 'ok', calls: [{ tool: 'get_block', input: { blockId: ids[0] } }] };
+    case 'generation':
+      return { status: 'ok', calls: [{ tool: 'get_generation_jobs', input: ids.length ? { ids } : {} }] };
+    case 'brief':
+      return { status: 'ok', calls: [{ tool: 'visual_brief', input: {} }], note: 'Label the returned frames, then call inspect_media with mode "labels".' };
+    case 'labels':
+      if (!Array.isArray(input.labels)) return { status: 'error', error: 'missing_field', path: 'labels' };
+      return { status: 'ok', calls: [{ tool: 'submit_visual', input: { labels: input.labels } }] };
+    default:
+      return { status: 'error', error: 'invalid_value', path: 'mode', value: mode, allowed: ['metadata', 'frames', 'geometry', 'semantic', 'editorial', 'component', 'generation', 'brief', 'labels'] };
+  }
+}
+
+function translateSearchAssets(input: Input): V3Translation {
+  const scope = input.scope ?? 'mine';
+  const allowed = ['mine', 'cloud', 'official', 'all', 'stock'];
+  if (typeof scope !== 'string' || !allowed.includes(scope)) return { status: 'error', error: 'invalid_value', path: 'scope', value: scope, allowed };
+  const query = isNonEmptyString(input.query) ? input.query.trim() : '';
+  if (scope === 'stock') {
+    if (!query) return { status: 'error', error: 'missing_field', path: 'query', fix: 'Stock search needs a concrete visual query.' };
+    const call: Input = { query };
+    if (isNonEmptyString(input.kind) && input.kind !== 'all') call.kind = input.kind;
+    if (isFiniteNumber(input.page)) call.page = input.page;
+    if (isFiniteNumber(input.limit)) call.limit = input.limit;
+    return { status: 'ok', calls: [{ tool: 'search_stock', input: call }] };
+  }
+  if (!query) {
+    if (scope === 'all') return { status: 'error', error: 'missing_field', path: 'query', fix: 'Listing needs one explicit scope: mine, cloud or official.' };
+    const call: Input = { scope };
+    if (isNonEmptyString(input.kind)) call.kind = input.kind;
+    if (isFiniteNumber(input.limit)) call.limit = input.limit;
+    return { status: 'ok', calls: [{ tool: 'list_assets', input: call }] };
+  }
+  const call: Input = { query, scope };
+  if (isNonEmptyString(input.kind)) call.kind = input.kind;
+  if (isFiniteNumber(input.limit)) call.limit = input.limit;
+  return { status: 'ok', calls: [{ tool: 'search_assets', input: call }] };
+}
+
+function translateRegisterMedia(input: Input): V3Translation {
+  const calls: LegacyCall[] = [];
+  if (input.stock && typeof input.stock === 'object') {
+    // Durable stock copy first, then register the returned identity in the active output.
+    calls.push({ tool: 'import_stock', input: input.stock as Input });
+    calls.push({ tool: 'register_media', input: {}, usePrevious: { resultPath: 'data.registration', inputKey: 'assets', asArray: true } });
+  }
+  if (Array.isArray(input.assets) && input.assets.length) calls.push({ tool: 'register_media', input: { assets: input.assets } });
+  if (!calls.length) return { status: 'error', error: 'missing_field', path: 'assets|stock', fix: 'Pass assets[] to register, or stock (an exact search_assets scope:"stock" import payload).' };
+  return { status: 'ok', calls };
+}
+
+function translateImportMedia(input: Input): V3Translation {
+  return { status: 'ok', calls: [{ tool: 'import_media', input }], note: 'Returns the helper token; imported local sigs are placed with add_clips.' };
+}
+
+function translatePrepareLocalAsset(input: Input): V3Translation {
+  if (!isNonEmptyString(input.assetId)) return { status: 'error', error: 'missing_field', path: 'assetId' };
+  return { status: 'ok', calls: [{ tool: 'prepare_local_image', input: { assetId: input.assetId } }] };
+}
+
+function clipItemsToLegacy(rows: Input[], ctx: V3AdapterContext, path: string): Input[] | V3Translation {
+  const out: Input[] = [];
+  for (const [index, row] of rows.entries()) {
+    const { startFrame, durationFrames, source, fades, mute, ...rest } = row ?? {};
+    const item: Input = { ...rest };
+    if (startFrame !== undefined) {
+      const start = frameField(row, 'startFrame', ctx);
+      if (isTranslation(start)) return withPath(start, `${path}[${index}].startFrame`);
+      item.startSec = framesToSec(start as number, ctx.fps);
+    }
+    if (durationFrames !== undefined) {
+      const duration = frameField(row, 'durationFrames', ctx, { min: 1 });
+      if (isTranslation(duration)) return withPath(duration, `${path}[${index}].durationFrames`);
+      item.durationSec = framesToSec(duration as number, ctx.fps);
+    }
+    if (Array.isArray(source) && source.length === 2 && source.every(isFiniteNumber)) {
+      item.sourceInSec = source[0];
+      item.sourceOutSec = source[1];
+    }
+    if (fades && typeof fades === 'object') {
+      const f = fades as Input;
+      if (isFiniteNumber(f.in)) item.fadeInSec = framesToSec(f.in, ctx.fps);
+      if (isFiniteNumber(f.out)) item.fadeOutSec = framesToSec(f.out, ctx.fps);
+    }
+    if (typeof mute === 'boolean') item.muted = mute;
+    if (!isNonEmptyString(item.assetId)) return { status: 'error', error: 'missing_field', path: `${path}[${index}].assetId` };
+    out.push(item);
+  }
+  return out;
+}
+
+function translateAddClips(input: Input, ctx: V3AdapterContext, tool: 'add_clips' | 'insert_clips'): V3Translation {
+  const bad = assertFps(ctx);
+  if (bad) return bad;
+  const calls: LegacyCall[] = [];
+  if (tool === 'add_clips' && Array.isArray(input.duplicate) && input.duplicate.length) {
+    for (const [index, row] of (input.duplicate as Input[]).entries()) {
+      if (!isNonEmptyString(row?.clipId)) return { status: 'error', error: 'missing_field', path: `duplicate[${index}].clipId` };
+      if (ctx.kindOf(row.clipId) !== 'graphic') return { status: 'error', error: 'unsupported', path: `duplicate[${index}].clipId`, value: row.clipId, fix: 'Only graphic clips can be duplicated today; re-add media clips with clips[].' };
+      const start = frameField(row, 'startFrame', ctx);
+      if (isTranslation(start)) return withPath(start, `duplicate[${index}].startFrame`);
+      calls.push({ tool: 'duplicate_block', input: { blockId: row.clipId, ...(start !== undefined ? { atSec: framesToSec(start as number, ctx.fps) } : {}) } });
+    }
+  }
+  if (Array.isArray(input.clips) && input.clips.length) {
+    const items = clipItemsToLegacy(input.clips as Input[], ctx, 'clips');
+    if (isTranslation(items)) return items;
+    const call: Input = { clips: items };
+    if (input.includeLinked === false) call.includeLinked = false;
+    if (input.atFrame !== undefined) {
+      const at = frameField(input, 'atFrame', ctx);
+      if (isTranslation(at)) return at;
+      call.atSec = framesToSec(at as number, ctx.fps);
+    }
+    calls.push({ tool, input: call });
+  }
+  if (!calls.length) return { status: 'error', error: 'missing_field', path: 'clips', fix: 'Pass clips: [{assetId, role?, startFrame?, …}] (or duplicate: [{clipId, startFrame?}] on add_clips).' };
+  return { status: 'ok', calls };
+}
+
+const TREATMENT_VALUES = ['full', 'punch-in', 'corner-tl', 'corner-tr', 'corner-bl', 'corner-br', 'split-l', 'split-r', 'split-t', 'split-b'];
+
+function translateSetClipFraming(input: Input, ctx: V3AdapterContext): V3Translation {
+  const bad = assertFps(ctx);
+  if (bad) return bad;
+  const items = input.items;
+  if (!Array.isArray(items) || !items.length) return { status: 'error', error: 'missing_field', path: 'items', fix: 'Pass items: [{clipId, treatment? | box? | transform? | crop?}].' };
+  const framingRows: Input[] = [];
+  const transformRows: Input[] = [];
+  const cropRows: Input[] = [];
+  const blockCalls: LegacyCall[] = [];
+  for (const [index, row] of (items as Input[]).entries()) {
+    if (!isNonEmptyString(row?.clipId)) return { status: 'error', error: 'missing_field', path: `items[${index}].clipId` };
+    const kind = ctx.kindOf(row.clipId);
+    if (!kind) return { status: 'error', error: 'unknown_clip_id', path: `items[${index}].clipId`, value: row.clipId, fix: 'Re-read get_state.' };
+    if (kind === 'graphic' || kind === 'text') {
+      const box = row.box && typeof row.box === 'object' ? (row.box as Input) : undefined;
+      const place: Input = { blockId: row.clipId };
+      if (isNonEmptyString(row.anchor)) place.anchor = row.anchor;
+      if (box) {
+        if (isFiniteNumber(box.x)) place.xPct = box.x * 100;
+        if (isFiniteNumber(box.y)) place.yPct = box.y * 100;
+        if (isFiniteNumber(box.w)) place.widthPct = box.w * 100;
+        if (isFiniteNumber(box.h)) place.heightPct = box.h * 100;
+      }
+      if (isFiniteNumber(row.scale)) place.scale = row.scale;
+      if (Object.keys(place).length === 1) return { status: 'error', error: 'nothing_to_change', path: `items[${index}]`, fix: 'A graphic/text clip takes box {x,y,w,h} in canvas units, anchor, or scale.' };
+      blockCalls.push({ tool: 'place_block', input: place });
+      continue;
+    }
+    if (isNonEmptyString(row.treatment) || isFiniteNumber(row.size) || isFiniteNumber(row.crop) || isFiniteNumber(row.scale) || isFiniteNumber(row.anchorX) || isFiniteNumber(row.anchorY) || row.resetPrecision === true) {
+      if (isNonEmptyString(row.treatment) && !TREATMENT_VALUES.includes(row.treatment)) {
+        return { status: 'error', error: 'invalid_value', path: `items[${index}].treatment`, value: row.treatment, allowed: TREATMENT_VALUES };
+      }
+      const framing: Input = { shotId: row.clipId };
+      for (const key of ['treatment', 'size', 'crop', 'scale', 'anchorX', 'anchorY', 'coordinateSpace', 'resetPrecision']) if (row[key] !== undefined) framing[key] = row[key];
+      framingRows.push(framing);
+    }
+    if (row.transform && typeof row.transform === 'object') transformRows.push({ clipId: row.clipId, ...(row.transform as Input) });
+    if (row.cropInsets && typeof row.cropInsets === 'object') cropRows.push({ clipId: row.clipId, ...(row.cropInsets as Input) });
+    if (!framingRows.some((r) => r.shotId === row.clipId) && !transformRows.some((r) => r.clipId === row.clipId) && !cropRows.some((r) => r.clipId === row.clipId)) {
+      return { status: 'error', error: 'nothing_to_change', path: `items[${index}]`, fix: 'A media clip takes a treatment recipe (treatment/size/crop/scale/anchorX/anchorY), transform {scale,offsetX,offsetY}, or cropInsets {top,right,bottom,left}.' };
+    }
+  }
+  const calls: LegacyCall[] = [];
+  if (framingRows.length) calls.push({ tool: 'set_shot_framing', input: { updates: framingRows } });
+  if (transformRows.length) calls.push({ tool: 'set_media_transform', input: { items: transformRows } });
+  if (cropRows.length) calls.push({ tool: 'set_media_crop', input: { items: cropRows } });
+  calls.push(...blockCalls);
+  return { status: 'ok', calls };
+}
+
+function translateApplyComponent(input: Input, ctx: V3AdapterContext): V3Translation {
+  const bad = assertFps(ctx);
+  if (bad) return bad;
+  const timing: Input = {};
+  if (input.atFrame !== undefined) {
+    const at = frameField(input, 'atFrame', ctx);
+    if (isTranslation(at)) return at;
+    timing.atSec = framesToSec(at as number, ctx.fps);
+  }
+  if (input.durationFrames !== undefined) {
+    const duration = frameField(input, 'durationFrames', ctx, { min: 1 });
+    if (isTranslation(duration)) return duration;
+    timing.durationSec = framesToSec(duration as number, ctx.fps);
+  }
+  if (input.generate === true) {
+    // Hosted generator fallback (charges credits): edit when a clip id is given, otherwise add.
+    if (!isNonEmptyString(input.instruction)) return { status: 'error', error: 'missing_field', path: 'instruction', fix: 'The hosted generator needs a concrete instruction.' };
+    if (isNonEmptyString(input.clipId)) return { status: 'ok', calls: [{ tool: 'edit_block', input: { blockId: input.clipId, instruction: input.instruction } }] };
+    const call: Input = { instruction: input.instruction, ...timing };
+    if (input.placement && typeof input.placement === 'object') call.placement = input.placement;
+    if (isNonEmptyString(input.backdrop)) call.backdrop = input.backdrop;
+    return { status: 'ok', calls: [{ tool: 'add_block', input: call }] };
+  }
+  if (!isNonEmptyString(input.raw)) return { status: 'error', error: 'missing_field', path: 'raw', fix: 'Pass the full generated text from compose_component, or set generate:true with an instruction.' };
+  const call: Input = { raw: input.raw, ...timing };
+  if (isNonEmptyString(input.clipId)) call.blockId = input.clipId;
+  if (input.placement && typeof input.placement === 'object') call.placement = input.placement;
+  if (isNonEmptyString(input.label)) call.label = input.label;
+  return { status: 'ok', calls: [{ tool: 'apply_block', input: call }] };
+}
+
+function translateSetCaptions(input: Input): V3Translation {
+  const calls: LegacyCall[] = [];
+  if (input.on === false) return { status: 'ok', calls: [{ tool: 'remove_captions', input: {} }] };
+  const style: Input = {};
+  for (const key of ['preset', 'yPct', 'scale']) if (input[key] !== undefined) style[key] = input[key];
+  if (input.source && typeof input.source === 'object') {
+    const source = input.source as Input;
+    if (isNonEmptyString(source.trackId)) { style.source = 'track'; style.trackId = source.trackId; }
+    else if (isNonEmptyString(source.clipId)) { style.source = 'clip'; style.clipId = source.clipId; }
+    else style.source = 'auto';
+  }
+  if (input.on === true || Object.keys(style).length) calls.push({ tool: 'set_captions', input: style });
+  if (Array.isArray(input.corrections) && input.corrections.length) {
+    calls.push({ tool: 'edit_caption_text', input: { items: input.corrections, ...(isNonEmptyString(input.clipId) ? { shotId: input.clipId } : {}) } });
+  }
+  if (input.translations && typeof input.translations === 'object') {
+    const t = input.translations as Input;
+    const call: Input = {};
+    if (t.clear === true) call.clear = true;
+    if (Array.isArray(t.items)) call.items = t.items;
+    if (isNonEmptyString(t.lang)) call.lang = t.lang;
+    if (isNonEmptyString(input.clipId)) call.shotId = input.clipId;
+    if (call.clear !== true && !Array.isArray(call.items)) return { status: 'error', error: 'missing_field', path: 'translations.items' };
+    calls.push({ tool: 'set_caption_translations', input: call });
+  }
+  if (input.relayout === true) calls.push({ tool: 'relayout_captions', input: {} });
+  if (!calls.length) return { status: 'error', error: 'nothing_to_change', fix: 'Pass on, preset/yPct/scale, source, corrections, translations or relayout.' };
+  return { status: 'ok', calls };
+}
+
+function translateReadSkill(input: Input): V3Translation {
+  const id = isNonEmptyString(input.id) ? input.id.trim() : isNonEmptyString(input.skill_id) ? input.skill_id.trim() : '';
+  if (!id) return { status: 'error', error: 'missing_field', path: 'id', fix: 'Pass the exact id from list_skills or the system-prompt skill index.' };
+  // The speech-cleanup guide is served as an official skill until it moves into the content layer.
+  if (id === 'speech-cleanup' || id === 'read_editing_guide') return { status: 'ok', calls: [{ tool: 'read_editing_guide', input: {} }] };
+  return { status: 'ok', calls: [{ tool: 'read_skill', input: { skill_id: id } }] };
+}
+
 const PASSTHROUGH: Record<string, string> = {
   search_media: 'search_media',
   get_beat_grid: 'get_beat_grid',
@@ -491,19 +764,7 @@ const PASSTHROUGH: Record<string, string> = {
 };
 
 /** v3 tools whose translation is not written yet (tracked by the registry test). */
-export const V3_PENDING_TRANSLATIONS: readonly string[] = [
-  'inspect_media',
-  'search_assets',
-  'register_media',
-  'import_media',
-  'prepare_local_asset',
-  'add_clips',
-  'insert_clips',
-  'set_clip_framing',
-  'apply_component',
-  'set_captions',
-  'read_skill',
-];
+export const V3_PENDING_TRANSLATIONS: readonly string[] = [];
 
 /** Translate one v3 call into legacy calls. Pure; never touches the document. */
 export function translateV3Call(name: string, rawInput: unknown, ctx: V3AdapterContext): V3Translation {
@@ -513,6 +774,17 @@ export function translateV3Call(name: string, rawInput: unknown, ctx: V3AdapterC
   if (PASSTHROUGH[name]) return { status: 'ok', calls: [{ tool: PASSTHROUGH[name]!, input }] };
   switch (name) {
     case 'get_state': return translateGetState(input);
+    case 'inspect_media': return translateInspectMedia(input);
+    case 'search_assets': return translateSearchAssets(input);
+    case 'register_media': return translateRegisterMedia(input);
+    case 'import_media': return translateImportMedia(input);
+    case 'prepare_local_asset': return translatePrepareLocalAsset(input);
+    case 'add_clips': return translateAddClips(input, ctx, 'add_clips');
+    case 'insert_clips': return translateAddClips(input, ctx, 'insert_clips');
+    case 'set_clip_framing': return translateSetClipFraming(input, ctx);
+    case 'apply_component': return translateApplyComponent(input, ctx);
+    case 'set_captions': return translateSetCaptions(input);
+    case 'read_skill': return translateReadSkill(input);
     case 'get_transcript': return translateGetTranscript(input, ctx);
     case 'inspect_timeline': return translateInspectTimeline(input, ctx);
     case 'manage_project': return translateManageProject(input);

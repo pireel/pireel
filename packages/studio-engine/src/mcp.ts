@@ -18,6 +18,8 @@
  * the DO — that's the routing layer's job, injected via McpDeps so vitest can pin the contract directly.
  */
 
+import { translateV3Call, type V3AdapterContext, type LegacyCall } from './agent-surface-v3/adapter';
+import { V3_TOOL_IDS, V3_TOOLS } from './agent-surface-v3/registry';
 import { MCP_DESCRIPTION_OVERRIDES, STUDIO_TOOLS, STUDIO_TOOL_MAP, mcpInstructions } from './prompts';
 
 /* ============================ JSON-RPC shapes ============================ */
@@ -55,6 +57,12 @@ export interface McpDeps {
   skillVersion: string;
   /** Optional private foundational editing judgment injected by the host into initialize instructions. */
   editingExpertise?: string;
+  /** Which tool surface this session speaks. `legacy` (default) is the current tool table; `v3` is the
+   *  consolidated fifty-tool surface, translated onto legacy operations by the v3 adapter. */
+  agentSurface?: 'legacy' | 'v3';
+  /** v3 only: fps of the active output and a clip-id → kind resolver, read from the latest project
+   *  document. Without it every frame-based v3 call fails with `fps_unavailable`. */
+  resolveV3Context?: () => Promise<V3AdapterContext>;
   /** Execute over the bridge (routing layer = StudioBridge DO stub fetch /call). */
   callBridge: (tool: string, input: Record<string, unknown>, timeoutMs: number) => Promise<McpBridgeResult>;
   /** Frame catalog (routing layer = frameRegistry.list()). */
@@ -503,6 +511,136 @@ function toolResponse(id: JsonRpcRequest['id'], r: McpBridgeResult): JsonRpcResp
   return rpcResult(id, { content: [{ type: 'text', text }], isError: !r.ok });
 }
 
+/** Dispatch one legacy tool call (server-direct, BYO brief, or bridge). `null` = unknown tool. */
+async function callLegacyTool(name: string, args: Record<string, unknown>, deps: McpDeps): Promise<McpBridgeResult | null> {
+
+  if (MCP_SERVER_TOOL_IDS.has(name)) {
+    if (name === 'list_frames') {
+      const frames = deps.listFrames();
+      return ({ ok: true, summary: `${frames.length} frames`, data: frames });
+    }
+    if (name === 'read_frame') {
+      const fid = args.frame_id;
+      if (typeof fid !== 'string' || !fid) return ({ ok: false, error: 'frame_id required (ids via list_frames)' });
+      return (deps.readFrame(fid));
+    }
+    if (name === 'list_skills') return (await deps.listSkills(args));
+    if (name === 'read_skill') {
+      const skillId = args.skill_id;
+      if (typeof skillId !== 'string' || !skillId) return ({ ok: false, error: 'skill_id required (ids via list_skills)' });
+      return (await deps.readSkill(skillId));
+    }
+    if (name === 'get_icons') {
+      const names = Array.isArray(args.names) ? (args.names as unknown[]).map(String).filter(Boolean) : [];
+      if (!names.length) return ({ ok: false, error: 'names required (up to 8 icon names)' });
+      return (deps.lookupIcons(names, typeof args.kind === 'string' ? args.kind : undefined));
+    }
+    if (name === 'import_media') return (await deps.importMedia(args));
+    if (name === 'create_browser_handoff') return (await deps.createBrowserHandoff(args));
+    if (name === 'create_project') return (await deps.createProject(args));
+    if (name === 'list_projects') return (await deps.listProjects(args));
+    if (name === 'switch_project') return (await deps.switchProject(args));
+    if (name === 'rename_project') return (await deps.renameProject(args));
+    if (name === 'list_assets') return (await deps.listAssets(args));
+    if (name === 'search_assets') return (await deps.searchAssets(args));
+    if (name === 'search_stock') return (await deps.searchStock(args));
+    if (name === 'import_stock') return (await deps.importStock(args));
+    if (name === 'list_models') return (await deps.listModels(args));
+    if (name === 'generate_image') return (await deps.generateImage(args));
+    if (name === 'generate_video') return (await deps.generateVideo(args));
+    if (name === 'generate_music') return (await deps.generateMusic(args));
+    if (name === 'generate_sfx') return (await deps.generateSfx(args));
+    if (name === 'get_generation_jobs') return (await deps.getGenerationJobs(args));
+    if (name === 'list_voices') return (await deps.listVoices(args));
+    if (name === 'clone_voice') return (await deps.cloneVoice(args));
+    if (name === 'design_voice') return (await deps.designVoice(args));
+    if (name === 'delete_voice') return (await deps.deleteVoice(args));
+    if (name === 'generate_speech') return (await deps.generateSpeech(args));
+    if (name === 'lip_sync') return (await deps.lipSync(args));
+    return (deps.readEditingGuide());
+  }
+
+  // BYO brief (composite: bridge-fetch context → server-assemble prompt): the LLM belongs to the caller, no credits burned
+  if (MCP_BRIEF_TOOLS[name]) {
+    const ctx = await deps.callBridge(MCP_BRIEF_TOOLS[name], args, BADGE_TIMEOUT_MS);
+    if (!ctx.ok) return (ctx);
+    const data = (ctx.data ?? {}) as Record<string, unknown>;
+    const instruction = typeof args.instruction === 'string' ? args.instruction.trim() : '';
+    if (!instruction) return ({ ok: false, error: 'instruction required' });
+    const format = args.format === 'html' || args.format === 'kit' ? { format: args.format } : {};
+    return (deps.assembleComposeBrief({ ...data, ...format }, instruction));
+  }
+
+  if (!MCP_BRIDGE_EXTRA_TOOL_IDS.has(name) && !STUDIO_TOOL_MAP[name]) return null;
+  const result = await deps.callBridge(name, args, MCP_BRIDGE_EXTRA_TOOL_IDS.has(name) && name !== 'visual_brief' && name !== 'review_sequence' ? BADGE_TIMEOUT_MS : bridgeTimeoutMs(name));
+  if (name === 'get_state' && result.ok && typeof result.state === 'string') {
+    // The initialize-time version broadcast reaches only fresh connections; a long-lived
+    // session spanning a release never sees it. get_state opens (and re-anchors) every
+    // working session, so the baseline rides its receipt — same trust model, delivered at
+    // the moment of use. The tag is opaque (different string = update, no ordering), and
+    // the update COMMAND is deliberately not prescribed here: the installed skill's own
+    // distribution section routes Plugin bundles to the host Plugin manager and standalone
+    // Skills to their Skill installer — this line must stay channel-neutral.
+    result.state = `Pireel workflow baseline: ${deps.skillVersion} — if the VERSION next to your loaded Pireel SKILL.md differs, update through YOUR distribution's channel per that skill's update section (then re-read the files) before continuing. If it matches, ignore this line.\n\n${result.state}`;
+  }
+  return (result);
+}
+
+/** Preview tool list for the v3 surface: the consolidated registry with permissive schemas until the
+ *  per-tool schemas land next to each translation. */
+export function buildMcpToolsV3(): McpToolDef[] {
+  return V3_TOOLS
+    .filter((tool) => !tool.chatOnly)
+    .map((tool) => ({
+      name: tool.id,
+      description: `${tool.charges ? "[CHARGES the user's Pireel account.] " : ''}v3 ${tool.group} tool (preview schema). Replaces: ${tool.replaces.join(', ')}. Timeline positions are integer frames [start, end); source positions are seconds.`,
+      inputSchema: { type: 'object', additionalProperties: true, properties: {} },
+    }));
+}
+
+function readPath(value: unknown, path: string): unknown {
+  return path.split('.').reduce<unknown>((cursor, key) => (cursor && typeof cursor === 'object' ? (cursor as Record<string, unknown>)[key] : undefined), value);
+}
+
+/** Run one v3 call: translate to legacy calls, apply them in order (chaining results where the adapter
+ *  asks), and fold the receipts into one result. Delta shaping lands with the receipt contract. */
+export async function runV3Tool(name: string, args: Record<string, unknown>, deps: McpDeps): Promise<McpBridgeResult> {
+  const ctx: V3AdapterContext = deps.resolveV3Context
+    ? await deps.resolveV3Context()
+    : { fps: Number.NaN, kindOf: () => undefined };
+  const translation = translateV3Call(name, args, ctx);
+  if (translation.status === 'error') {
+    const { status: _status, ...rest } = translation;
+    return { ok: false, ...rest };
+  }
+  if (translation.status === 'pending') return { ok: false, error: 'not_available_yet', detail: translation.reason };
+  const steps: Array<{ tool: string; ok: boolean; summary?: string; error?: string; data?: unknown }> = [];
+  let previous: McpBridgeResult | null = null;
+  for (const call of translation.calls as LegacyCall[]) {
+    const input: Record<string, unknown> = { ...call.input };
+    if (call.usePrevious) {
+      const carried = readPath(previous, call.usePrevious.resultPath);
+      if (carried === undefined) {
+        return { ok: false, error: 'chain_broken', detail: `${call.tool} needed ${call.usePrevious.resultPath} from the previous step`, data: { steps } };
+      }
+      input[call.usePrevious.inputKey] = call.usePrevious.asArray ? [carried] : carried;
+    }
+    const result = await callLegacyTool(call.tool, input, deps);
+    if (result === null) return { ok: false, error: 'adapter_mapped_unknown_tool', detail: call.tool, data: { steps } };
+    if (translation.calls.length === 1) return translation.note ? { ...result, note: translation.note } : result;
+    steps.push({ tool: call.tool, ok: result.ok, ...(result.summary ? { summary: result.summary } : {}), ...(result.error ? { error: result.error } : {}), ...(result.data !== undefined ? { data: result.data } : {}) });
+    if (!result.ok) {
+      return { ok: false, error: result.error ?? 'step_failed', detail: `${call.tool} failed after ${steps.length - 1} completed step(s); earlier steps are applied`, data: { steps } };
+    }
+    previous = result;
+  }
+  return {
+    ok: true,
+    summary: steps.map((step) => step.summary).filter(Boolean).join('; ') || `${name} applied ${steps.length} steps`,
+    data: { steps, ...(translation.note ? { note: translation.note } : {}) },
+  };
+}
+
 /** Handle one JSON-RPC message. Returns null = a notification, routed back as an empty 202 response. */
 export async function handleMcpRequest(raw: JsonRpcRequest, deps: McpDeps): Promise<JsonRpcResponse | null> {
   const method = raw.method;
@@ -524,83 +662,14 @@ export async function handleMcpRequest(raw: JsonRpcRequest, deps: McpDeps): Prom
     case 'ping':
       return rpcResult(raw.id, {});
     case 'tools/list':
-      return rpcResult(raw.id, { tools: buildMcpTools() });
+      return rpcResult(raw.id, { tools: deps.agentSurface === 'v3' ? buildMcpToolsV3() : buildMcpTools() });
     case 'tools/call': {
       const name = (raw.params as { name?: unknown } | undefined)?.name;
       const args = ((raw.params as { arguments?: unknown } | undefined)?.arguments ?? {}) as Record<string, unknown>;
       if (typeof name !== 'string') return rpcError(raw.id, -32602, 'tools/call: name required');
-
-      if (MCP_SERVER_TOOL_IDS.has(name)) {
-        if (name === 'list_frames') {
-          const frames = deps.listFrames();
-          return toolResponse(raw.id, { ok: true, summary: `${frames.length} frames`, data: frames });
-        }
-        if (name === 'read_frame') {
-          const fid = args.frame_id;
-          if (typeof fid !== 'string' || !fid) return toolResponse(raw.id, { ok: false, error: 'frame_id required (ids via list_frames)' });
-          return toolResponse(raw.id, deps.readFrame(fid));
-        }
-        if (name === 'list_skills') return toolResponse(raw.id, await deps.listSkills(args));
-        if (name === 'read_skill') {
-          const skillId = args.skill_id;
-          if (typeof skillId !== 'string' || !skillId) return toolResponse(raw.id, { ok: false, error: 'skill_id required (ids via list_skills)' });
-          return toolResponse(raw.id, await deps.readSkill(skillId));
-        }
-        if (name === 'get_icons') {
-          const names = Array.isArray(args.names) ? (args.names as unknown[]).map(String).filter(Boolean) : [];
-          if (!names.length) return toolResponse(raw.id, { ok: false, error: 'names required (up to 8 icon names)' });
-          return toolResponse(raw.id, deps.lookupIcons(names, typeof args.kind === 'string' ? args.kind : undefined));
-        }
-        if (name === 'import_media') return toolResponse(raw.id, await deps.importMedia(args));
-        if (name === 'create_browser_handoff') return toolResponse(raw.id, await deps.createBrowserHandoff(args));
-        if (name === 'create_project') return toolResponse(raw.id, await deps.createProject(args));
-        if (name === 'list_projects') return toolResponse(raw.id, await deps.listProjects(args));
-        if (name === 'switch_project') return toolResponse(raw.id, await deps.switchProject(args));
-        if (name === 'rename_project') return toolResponse(raw.id, await deps.renameProject(args));
-        if (name === 'list_assets') return toolResponse(raw.id, await deps.listAssets(args));
-        if (name === 'search_assets') return toolResponse(raw.id, await deps.searchAssets(args));
-        if (name === 'search_stock') return toolResponse(raw.id, await deps.searchStock(args));
-        if (name === 'import_stock') return toolResponse(raw.id, await deps.importStock(args));
-        if (name === 'list_models') return toolResponse(raw.id, await deps.listModels(args));
-        if (name === 'generate_image') return toolResponse(raw.id, await deps.generateImage(args));
-        if (name === 'generate_video') return toolResponse(raw.id, await deps.generateVideo(args));
-        if (name === 'generate_music') return toolResponse(raw.id, await deps.generateMusic(args));
-        if (name === 'generate_sfx') return toolResponse(raw.id, await deps.generateSfx(args));
-        if (name === 'get_generation_jobs') return toolResponse(raw.id, await deps.getGenerationJobs(args));
-        if (name === 'list_voices') return toolResponse(raw.id, await deps.listVoices(args));
-        if (name === 'clone_voice') return toolResponse(raw.id, await deps.cloneVoice(args));
-        if (name === 'design_voice') return toolResponse(raw.id, await deps.designVoice(args));
-        if (name === 'delete_voice') return toolResponse(raw.id, await deps.deleteVoice(args));
-        if (name === 'generate_speech') return toolResponse(raw.id, await deps.generateSpeech(args));
-        if (name === 'lip_sync') return toolResponse(raw.id, await deps.lipSync(args));
-        return toolResponse(raw.id, deps.readEditingGuide());
-      }
-
-      // BYO brief (composite: bridge-fetch context → server-assemble prompt): the LLM belongs to the caller, no credits burned
-      if (MCP_BRIEF_TOOLS[name]) {
-        const ctx = await deps.callBridge(MCP_BRIEF_TOOLS[name], args, BADGE_TIMEOUT_MS);
-        if (!ctx.ok) return toolResponse(raw.id, ctx);
-        const data = (ctx.data ?? {}) as Record<string, unknown>;
-        const instruction = typeof args.instruction === 'string' ? args.instruction.trim() : '';
-        if (!instruction) return toolResponse(raw.id, { ok: false, error: 'instruction required' });
-        const format = args.format === 'html' || args.format === 'kit' ? { format: args.format } : {};
-        return toolResponse(raw.id, deps.assembleComposeBrief({ ...data, ...format }, instruction));
-      }
-
-      if (!MCP_BRIDGE_EXTRA_TOOL_IDS.has(name) && !STUDIO_TOOL_MAP[name]) {
-        return rpcError(raw.id, -32602, `unknown tool: ${name}`);
-      }
-      const result = await deps.callBridge(name, args, MCP_BRIDGE_EXTRA_TOOL_IDS.has(name) && name !== 'visual_brief' && name !== 'review_sequence' ? BADGE_TIMEOUT_MS : bridgeTimeoutMs(name));
-      if (name === 'get_state' && result.ok && typeof result.state === 'string') {
-        // The initialize-time version broadcast reaches only fresh connections; a long-lived
-        // session spanning a release never sees it. get_state opens (and re-anchors) every
-        // working session, so the baseline rides its receipt — same trust model, delivered at
-        // the moment of use. The tag is opaque (different string = update, no ordering), and
-        // the update COMMAND is deliberately not prescribed here: the installed skill's own
-        // distribution section routes Plugin bundles to the host Plugin manager and standalone
-        // Skills to their Skill installer — this line must stay channel-neutral.
-        result.state = `Pireel workflow baseline: ${deps.skillVersion} — if the VERSION next to your loaded Pireel SKILL.md differs, update through YOUR distribution's channel per that skill's update section (then re-read the files) before continuing. If it matches, ignore this line.\n\n${result.state}`;
-      }
+      if (deps.agentSurface === 'v3' && V3_TOOL_IDS.has(name)) return toolResponse(raw.id, await runV3Tool(name, args, deps));
+      const result = await callLegacyTool(name, args, deps);
+      if (result === null) return rpcError(raw.id, -32602, `unknown tool: ${name}`);
       return toolResponse(raw.id, result);
     }
     default:
