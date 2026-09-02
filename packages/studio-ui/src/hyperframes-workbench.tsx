@@ -5715,6 +5715,7 @@ export function HyperframesWorkbench({
     videoFileRef,
     videoSigRef,
     videoEngineRef,
+    clipFilesRef,
     pushUndoSnapshot,
   });
   denoiseExportRef.current = denoiseOps.denoiseForExport;

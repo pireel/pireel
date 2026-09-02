@@ -30,11 +30,13 @@ export interface DenoiseDeps {
   videoFileRef: MutableRefObject<File | null>;
   videoSigRef: MutableRefObject<string | null>;
   videoEngineRef: MutableRefObject<VideoTrackEngine | null>;
+  /** Source url → File, as mounted for playback: identifies which segment keys carry the main file. */
+  clipFilesRef: MutableRefObject<Map<string, File>>;
   pushUndoSnapshot: () => void;
 }
 
 export function useDenoise(deps: DenoiseDeps) {
-  const { comp, compRef, documentRef, setDocument, videoFile, videoFileRef, videoSigRef, videoEngineRef, pushUndoSnapshot } = deps;
+  const { comp, compRef, documentRef, setDocument, videoFile, videoFileRef, videoSigRef, videoEngineRef, clipFilesRef, pushUndoSnapshot } = deps;
   const [status, setStatus] = useState<'baking' | 'ready' | 'failed' | null>(null);
   const [progress, setProgress] = useState(0);
   /** Blended output of the last successful bake: what preview plays and export substitutes. */
@@ -51,6 +53,28 @@ export function useDenoise(deps: DenoiseDeps) {
   const srcSig = (): string | null => {
     const f = videoFileRef.current;
     return f ? (videoSigRef.current ?? fileSig(f)) : null;
+  };
+  /** Playback keys the main file is mounted under. Segments are keyed by their source url in the
+   *  multi-source model ('main' only for legacy single-source shots), so the dub must be registered
+   *  under every url that resolves to this file — a dub under 'main' alone never plays. */
+  const playbackKeys = (): string[] => {
+    const f = videoFileRef.current;
+    const urls = f ? [...clipFilesRef.current.entries()].filter(([, file]) => file === f).map(([url]) => url) : [];
+    return ['main', ...urls];
+  };
+  /** Export rigs are keyed 'main' for src-less shots and clip_<shotId> per src-bearing shot. */
+  const exportKeys = (): string[] => {
+    const urls = new Set(playbackKeys());
+    const shots = compRef.current.shots ?? [];
+    return ['main', ...shots.filter((shot) => shot.src && urls.has(shot.src)).map((shot) => `clip_${shot.id}`)];
+  };
+  const dubKeysRef = useRef<string[]>([]);
+  const setDub = (url: string | null) => {
+    const eng = videoEngineRef.current;
+    if (!eng) return;
+    const keys = url ? playbackKeys() : dubKeysRef.current;
+    for (const key of new Set([...dubKeysRef.current, ...keys])) eng.setNarrationDub(key, keys.includes(key) ? url : null);
+    dubKeysRef.current = url ? keys : [];
   };
 
   const bake = async (strength: number, runId: number) => {
@@ -105,7 +129,7 @@ export function useDenoise(deps: DenoiseDeps) {
     const runId = ++runIdRef.current;
     if (strength == null) {
       setStatus(null);
-      videoEngineRef.current?.setNarrationDub('main', null);
+      setDub(null);
       return;
     }
     void bake(strength, runId);
@@ -117,8 +141,8 @@ export function useDenoise(deps: DenoiseDeps) {
     const eng = videoEngineRef.current;
     if (!eng) return;
     const b = blendedRef.current;
-    if (strength != null && status === 'ready' && b) eng.setNarrationDub('main', b.url);
-    else if (strength == null || status === 'failed') eng.setNarrationDub('main', null);
+    if (strength != null && status === 'ready' && b) setDub(b.url);
+    else if (strength == null || status === 'failed') setDub(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, strength]);
 
@@ -128,7 +152,7 @@ export function useDenoise(deps: DenoiseDeps) {
     const b = blendedRef.current;
     const on = compRef.current.audioDenoise?.strength != null;
     if (!on || !b || b.sig !== srcSig() || b.strength !== compRef.current.audioDenoise!.strength) return null;
-    return new Map([['main', b.file]]);
+    return new Map(exportKeys().map((key) => [key, b.file] as const));
   };
 
   /** Panel/agent entry: strength = turn on / retune (0 < s ≤ 1), null = off. */
