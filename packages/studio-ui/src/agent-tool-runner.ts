@@ -4211,7 +4211,7 @@ export function studioToolResultStopsAgentTurn(result: StudioToolResult): boolea
   return data?.decision === 'rejected';
 }
 
-export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal; surface?: 'chat' | 'bridge'; skillId?: string }): Promise<StudioToolResult> {
+export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal; surface?: 'chat' | 'bridge'; skillId?: string; reportProgress?: StudioToolRunInternalOptions['reportProgress'] }): Promise<StudioToolResult> {
   const result = QUERY_TOOLS.has(toolId) || PROJECT_MUTATION_TOOLS.has(toolId)
     ? await runStudioToolInner(ctx, toolId, input, opts)
     : await runAtomicCompositionTool(ctx, () => runStudioToolInner(ctx, toolId, input, opts));
@@ -4666,6 +4666,9 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         const steps: Array<{ tool: string; ok: boolean; summary?: string; error?: string; data?: unknown }> = [];
         let previous: StudioToolResult | null = null;
         const undoDepth = ctx.undoStackRef.current.length;
+        // Legacy steps report progress under their own names; the feed renders the v3 card, so re-key every report.
+        const reportAsV3: StudioToolRunInternalOptions['reportProgress'] = (text, frac, extra) => setToolProgress({ id: name, text, ...(frac != null ? { frac } : {}), ...(extra ?? {}) });
+        try {
         for (const call of translation.calls) {
           const stepInput: Record<string, unknown> = { ...call.input };
           if (call.usePrevious) {
@@ -4675,11 +4678,14 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           }
           const result = EXTERNAL_ONLY_TOOLS.has(call.tool)
             ? await runExternalToolInner(ctx, call.tool, stepInput)
-            : await runStudioTool(ctx, call.tool, stepInput, { surface: stepSurface });
+            : await runStudioTool(ctx, call.tool, stepInput, { surface: stepSurface, reportProgress: reportAsV3 });
           // Multi-step translations (one analysis per source) keep each step's data; a single step reports it once under result.
           steps.push({ tool: call.tool, ok: result.ok, ...(result.summary ? { summary: result.summary } : {}), ...(result.error ? { error: result.error } : {}), ...(translation.calls.length > 1 && result.data !== undefined ? { data: result.data } : {}) });
           if (!result.ok) return { ok: false, error: result.error ?? 'step_failed', data: { detail: `${call.tool} failed after ${steps.length - 1} completed step(s)`, steps } };
           previous = result;
+        }
+        } finally {
+          clearToolProgress(name);
         }
         // Legacy library receipts explain themselves in legacy tool names; restate the hint in v3 vocabulary.
         if (name === 'search_assets' && previous?.data && typeof previous.data === 'object' && 'usageHint' in (previous.data as object)) {
