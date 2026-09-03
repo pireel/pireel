@@ -127,6 +127,26 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
     }
     drawPlain(liveBmp, liveFraming, liveSourceW, liveSourceH); // GL unavailable / ghost not warm and no frozen frame: hard cut
   };
+  // The frame is drawn ONCE for the canvas's CSS box at push time (layerRect pre-compensates that box).
+  // The framing timeline rewrites left/top/width/height afterwards (a document that booted before its
+  // first seek, a canvas-ratio switch, a framing edit) and the already-rendered pixels would stretch
+  // with the box — and stay stretched until the next frame happens to arrive (a hover-seek). Redraw the
+  // retained bitmaps whenever the box changes; no decode is needed, the frame is still in memory.
+  try {
+    var RO = window.ResizeObserver;
+    if (RO) {
+      var lastBoxKey = '';
+      new RO(function () {
+        var bs = window.getComputedStyle(c);
+        var key = bs.width + 'x' + bs.height;
+        if (key === lastBoxKey) return;
+        lastBoxKey = key;
+        if (!liveBmp || !(lastT >= 0)) return;
+        stagedLiveVer = -1; stagedGhostVer = -1; // staged covers were built for the old box
+        try { render(lastT); } catch (eR) {}
+      }).observe(c);
+    }
+  } catch (eO) {}
   // current frame's source info (personCut needs it for the mask): elKey='main'|clip_<shotId>, srcT=time within that source file
   window.__vidSrc = null;
   window.addEventListener('message', function (e) {

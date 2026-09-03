@@ -55,6 +55,48 @@ describe('sourceDrawRect', () => {
     expect(draws.at(-1)).toEqual([codedLandscapeFrame, 0, 0, 1080, 1920]);
   });
 
+  it('画布盒子在帧推送之后被改写时，用保留的位图按新盒子重画，不让已画像素被拉伸', () => {
+    const draws: unknown[][] = [];
+    let onMessage: ((event: { data: Record<string, unknown> }) => void) | undefined;
+    let onResize: (() => void) | undefined;
+    const box = { width: '1080px', height: '1920px' };
+    const context = {
+      clearRect: () => {},
+      drawImage: (...args: unknown[]) => draws.push(args),
+    };
+    const mainCanvas = { width: 1080, height: 1920, getContext: () => context };
+    const documentLike = {
+      getElementById: (id: string) => (id === 'vidEl' ? mainCanvas : null),
+      createElement: () => ({ width: 0, height: 0, getContext: (kind: string) => (kind === '2d' ? context : null) }),
+    };
+    class ResizeObserverLike {
+      constructor(callback: () => void) { onResize = callback; }
+      observe() {}
+    }
+    const windowLike: Record<string, unknown> = {
+      ResizeObserver: ResizeObserverLike,
+      getComputedStyle: () => box,
+      addEventListener: (type: string, listener: (event: { data: Record<string, unknown> }) => void) => {
+        if (type === 'message') onMessage = listener;
+      },
+    };
+    new Function('window', 'document', videoFrameShim([]))(windowLike, documentLike);
+    const frame = { width: 1080, height: 1920, close: () => {} };
+    onMessage?.({ data: { type: 'hf:frame', frame, sourceWidth: 1080, sourceHeight: 1920, t: 2 } });
+    expect(draws).toHaveLength(1);
+
+    // the framing timeline halves the media layer's width after the frame was drawn
+    box.width = '540px';
+    onResize?.();
+    const expected = sourceDrawRect(1080, 1920, 540, 1920);
+    expect(draws).toHaveLength(2);
+    expect(draws[1]).toEqual([frame, expected.x / 0.5, expected.y, expected.width / 0.5, expected.height]);
+
+    // same box again → no redundant redraw
+    onResize?.();
+    expect(draws).toHaveLength(2);
+  });
+
   it('画布改成竖屏后按等比横屏图层预补偿，不把视频像素一起拉成竖屏', () => {
     const draws: unknown[][] = [];
     let onMessage: ((event: { data: Record<string, unknown> }) => void) | undefined;
