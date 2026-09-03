@@ -498,10 +498,14 @@ function translateInspectMedia(input: Input, ctx: V3AdapterContext): V3Translati
     case 'editorial': {
       const call: Input = { mode };
       for (const key of ['brief', 'maxCandidates', 'assessAudio', 'items']) if (input[key] !== undefined) call[key] = input[key];
-      if (ids.length === 1) call.assetId = ids[0];
-      else if (ids.length > 1) call.items = ids.map((id) => ({ assetId: id }));
       if (isNonEmptyString(input.clipId)) call.clipId = input.clipId;
-      return { status: 'ok', calls: [{ tool: 'analyze_visual', input: call }] };
+      if (ids.length <= 1) {
+        if (ids.length === 1) call.assetId = ids[0];
+        return { status: 'ok', calls: [{ tool: 'analyze_visual', input: call }] };
+      }
+      // Only the editorial review is a comparative batch; geometry and semantic analyses run per source.
+      if (mode === 'editorial') return { status: 'ok', calls: [{ tool: 'analyze_visual', input: { ...call, items: ids.map((id) => ({ assetId: id })) } }] };
+      return { status: 'ok', calls: ids.map((id) => ({ tool: 'analyze_visual', input: { ...call, assetId: id } })), note: `${mode} analysis ran once per source; each step carries that source's result.` };
     }
     case 'component':
       if (ids.length !== 1) return { status: 'error', error: 'invalid_ids', path: 'ids', value: input.ids, fix: 'component mode inspects exactly one graphic clip id.' };

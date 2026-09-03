@@ -2363,7 +2363,13 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   blob = await loadLocalAssetFile(projectId, localEntry);
                 } else {
                   const asset = documentRef.current.assets[ref];
-                  if (!asset || asset.kind !== 'image') {
+                  const otherKind = matchedLocal?.kind && matchedLocal.kind !== 'image' ? matchedLocal.kind : asset && asset.kind !== 'image' ? asset.kind : null;
+                  if (otherKind) {
+                    // Models send video sources here; name the right mode instead of "not found".
+                    failed.push({ ref, error: `${ref} is a ${otherKind}, not an image — review video with inspect_media mode "editorial" (all candidates in one call) or describe it with mode "semantic"` });
+                    continue;
+                  }
+                  if (!asset) {
                     failed.push({ ref, error: 'image ref not found' });
                     continue;
                   }
@@ -4670,7 +4676,8 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           const result = EXTERNAL_ONLY_TOOLS.has(call.tool)
             ? await runExternalToolInner(ctx, call.tool, stepInput)
             : await runStudioTool(ctx, call.tool, stepInput, { surface: stepSurface });
-          steps.push({ tool: call.tool, ok: result.ok, ...(result.summary ? { summary: result.summary } : {}), ...(result.error ? { error: result.error } : {}) });
+          // Multi-step translations (one analysis per source) keep each step's data; a single step reports it once under result.
+          steps.push({ tool: call.tool, ok: result.ok, ...(result.summary ? { summary: result.summary } : {}), ...(result.error ? { error: result.error } : {}), ...(translation.calls.length > 1 && result.data !== undefined ? { data: result.data } : {}) });
           if (!result.ok) return { ok: false, error: result.error ?? 'step_failed', data: { detail: `${call.tool} failed after ${steps.length - 1} completed step(s)`, steps } };
           previous = result;
         }

@@ -222,6 +222,15 @@ describe('v3 adapter translations', () => {
     expect(ok(translateV3Call('set_captions', { on: true, script: '第一句\n第二句', font: 'serif' }, ctx))).toEqual([{ tool: 'set_captions', input: { font: 'serif', script: '第一句\n第二句' } }]);
   });
 
+  it('batches only the editorial review; semantic and geometry run once per source', () => {
+    const editorial = ok(translateV3Call('inspect_media', { mode: 'editorial', ids: ['a1', 'a2'], brief: 'b' }, ctx));
+    expect(editorial).toHaveLength(1);
+    expect(editorial[0]!.input).toMatchObject({ mode: 'editorial', brief: 'b', items: [{ assetId: 'a1' }, { assetId: 'a2' }] });
+    const semantic = translateV3Call('inspect_media', { mode: 'semantic', ids: ['a1', 'a2'] }, ctx);
+    expect(ok(semantic).map((call) => call.input)).toEqual([{ mode: 'semantic', assetId: 'a1' }, { mode: 'semantic', assetId: 'a2' }]);
+    expect(semantic).toMatchObject({ note: expect.stringContaining('once per source') });
+  });
+
   it('treats a clipId that is not a clip as a library asset id', () => {
     const inspect = ok(translateV3Call('inspect_media', { mode: 'editorial', clipId: 'local_abc', brief: 'b' }, ctx));
     expect(inspect[0]!.input).toMatchObject({ mode: 'editorial', assetId: 'local_abc' });
