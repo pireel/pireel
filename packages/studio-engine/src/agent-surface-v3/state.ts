@@ -392,7 +392,7 @@ export function documentDelta(before: EditorDocumentV2, after: EditorDocumentV2)
   if (shifted.length) delta.shifted = shifted.sort((left, right) => left.fromFrame - right.fromFrame);
   if (removedClipIds.length) delta.removedClipIds = removedClipIds;
   if (removedSource.length) delta.removedSource = removedSource;
-  if (removedTracks.length || createdTracks.length) notes.push('Track set changed — track order values may have moved; re-read get_state before order-based calls.');
+  if (removedTracks.length || createdTracks.length) notes.push('Track set changed — track order values may have moved; re-read get_state only before a manage_tracks order call, not for clip edits.');
   if (delta.captions && delta.captions.change !== 'restyled') notes.push('Caption cues were re-derived; never address individual cues.');
   if (notes.length) delta.notes = notes;
   return Object.keys(delta).length ? delta : null;

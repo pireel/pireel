@@ -32,7 +32,8 @@ describe('agent surface v3 instructions', () => {
       'An empty timeline is not a blocker',
       'read_skill it once and apply it',
       'wait for confirmation',
-      'A successful call is not proof',
+      'Before reporting done, check once',
+      'never after every change',
       'lead with the outcome',
     ]) expect(V3_INSTRUCTIONS_BODY).toContain(rule);
   });

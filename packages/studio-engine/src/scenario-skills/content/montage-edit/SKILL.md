@@ -284,4 +284,4 @@ Review at normal speed from a clean start, then inspect details.
 - Is text readable on the destination surface?
 - Did any unresolved user decision get guessed instead of surfaced?
 
-Use `inspect_timeline` on the composited result where available. A good montage may finish as a complete film, a tone proof awaiting approval, or a material audit with one precise request. The correct pause is part of the craft.
+Check the finished sequence once from the receipts (coverage, order, muted sources); look at frames with `inspect_timeline` only where a visual could be wrong. A good montage may finish as a complete film, a tone proof awaiting approval, or a material audit with one precise request. The correct pause is part of the craft.

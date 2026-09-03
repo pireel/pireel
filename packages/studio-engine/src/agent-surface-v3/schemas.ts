@@ -115,7 +115,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   inspect_timeline: {
     description:
-      'See the composited output — footage with framing, overlays, text, captions — at exact frames[] (1–12) or sampled evenly across [fromFrame, toFrame) with maxFrames. Each image carries its frame number; the receipt lists the clip ids visible on screen so what you see maps back to what you can edit. With no frames the whole output is reviewed as a sequence (every visible clip, or each planned scene when a legacy plan exists; sceneIds narrows that). Use it to verify placement, overlap, legibility and continuity after visible changes; nothing here hears audio — read levels from get_state.',
+      'See the composited output — footage with framing, overlays, text, captions — at exact frames[] (1–12) or sampled evenly across [fromFrame, toFrame) with maxFrames. Each image carries its frame number; the receipt lists the clip ids visible on screen so what you see maps back to what you can edit. With no frames the whole output is reviewed as a sequence (every visible clip, or each planned scene when a legacy plan exists; sceneIds narrows that). Use it when a visual could be wrong — a placement, an overlap, a component\'s box, caption legibility — one look at the frames that matter, not after every change; nothing here hears audio — read levels from get_state.',
     inputSchema: obj({
       frames: arr({ type: 'integer', minimum: 0 }, { minItems: 1, maxItems: 12, description: 'Exact timeline frames to render.' }),
       fromFrame: FRAME('Sampling window start'),
@@ -298,7 +298,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   set_clip_framing: {
     description:
-      `Decide where a clip sits in the picture. Media clips take a treatment recipe (${TREATMENT_IDS.join(' / ')}) with size, crop, scale (1–4) and subject anchorX/anchorY, or an exact transform {scale, offsetX, offsetY} and cropInsets {top,right,bottom,left} in 0–1 fractions. Graphic and text clips take box {x,y,w,h} in canvas units, a 3×3 anchor, or scale. For several clips sharing one arrangement (PiP, split, grid) use apply_layout. Verify with inspect_timeline afterwards.`,
+      `Decide where a clip sits in the picture. Media clips take a treatment recipe (${TREATMENT_IDS.join(' / ')}) with size, crop, scale (1–4) and subject anchorX/anchorY, or an exact transform {scale, offsetX, offsetY} and cropInsets {top,right,bottom,left} in 0–1 fractions. Graphic and text clips take box {x,y,w,h} in canvas units, a 3×3 anchor, or scale. For several clips sharing one arrangement (PiP, split, grid) use apply_layout.`,
     inputSchema: obj({
       items: arr(obj({
         clipId: str(),
@@ -362,7 +362,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   set_canvas: {
     description:
-      'Change the output canvas. preset source/auto/follow-source matches the first placed video (the default), or choose portrait 9:16, landscape 16:9, square 1:1, or exact width×height (240–7680). Normalized boxes are preserved; re-check framing with inspect_timeline after a ratio change.',
+      'Change the output canvas. preset source/auto/follow-source matches the first placed video (the default), or choose portrait 9:16, landscape 16:9, square 1:1, or exact width×height (240–7680). Normalized boxes are preserved; after a ratio change one look at a busy frame is enough.',
     inputSchema: obj({
       preset: enumOf(['source', 'auto', 'follow-source', 'portrait', 'vertical', '9:16', 'landscape', 'horizontal', '16:9', 'square', '1:1']),
       width: num('', { min: 240, max: 7680 }), height: num('', { min: 240, max: 7680 }),
@@ -407,7 +407,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   apply_component: {
     description:
-      `Validate and place the component you generated from compose_component: pass raw (your full generated text) with the target clipId, atFrame, durationFrames and placement copied unchanged. Lint rejections list exact issues — fix only those and re-apply with the same clipId. generate=true instead asks Pireel's own model to author or rewrite from instruction (${CHARGE_MARKER} use only when the BYO path fails repeatedly). Verify with inspect_timeline afterwards.`,
+      `Validate and place the component you generated from compose_component: pass raw (your full generated text) with the target clipId, atFrame, durationFrames and placement copied unchanged. Lint rejections list exact issues — fix only those and re-apply with the same clipId. generate=true instead asks Pireel's own model to author or rewrite from instruction (${CHARGE_MARKER} use only when the BYO path fails repeatedly).`,
     inputSchema: obj({
       raw: str('Your full generated text in the contract compose_component returned.'),
       clipId: str('Target from compose_component, or the graphic clip to edit.'),
@@ -551,7 +551,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   undo: {
     description:
-      'Revert the latest change — one step per call — ONLY when the user explicitly asks to undo. Never undo on your own: when a result is wrong or the user wants something different, make the forward edit instead (set the value again, move the clip, or re-insert a removed source span from the delta’s removedSource). The history is shared with the user’s own edits, so an unrequested undo can erase their work; in offline mode it reverts the latest cloud version, which may be their own save. Re-read get_state afterwards.',
+      'Revert the latest change — one step per call — ONLY when the user explicitly asks to undo. Never undo on your own: when a result is wrong or the user wants something different, make the forward edit instead (set the value again, move the clip, or re-insert a removed source span from the delta’s removedSource). The history is shared with the user’s own edits, so an unrequested undo can erase their work; in offline mode it reverts the latest cloud version, which may be their own save. Re-read get_state afterwards: the state is restored, not patched, and ids may differ.',
     inputSchema: obj({}),
   },
   ask_user: {
