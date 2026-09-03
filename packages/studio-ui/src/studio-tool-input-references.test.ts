@@ -36,9 +36,10 @@ describe('Studio tool input reference normalization', () => {
     });
   });
 
-  it('resolves old sig tokens only while the content match is unambiguous', () => {
+  it('resolves an exact signature only while unique and never a signature-derived mention token', () => {
     const legacyToken = localAssetMentionId(sig);
-    expect(resolveLocalAssetReference(`@${legacyToken}`, assets)?.assetId).toBe(assetId);
+    expect(resolveLocalAssetReference(`@${legacyToken}`, assets)).toBeNull();
+    expect(resolveLocalAssetReference(sig, assets)?.assetId).toBe(assetId);
     expect(resolveLocalAssetReference(sig, [
       ...assets,
       { ...assets[0]!, assetId: 'asset-same-content' },

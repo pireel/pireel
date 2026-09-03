@@ -7,7 +7,7 @@ import {
 } from './chat-local-asset-mention';
 
 describe('Studio local-asset @ mentions', () => {
-  it('accepts a sig-only legacy draft without crashing the refreshed workbench', () => {
+  it('ignores a sig-only legacy draft entry instead of inventing an id for it', () => {
     const legacy = {
       sig: 'legacy.mov:10:1',
       label: 'legacy.mov',
@@ -15,11 +15,7 @@ describe('Studio local-asset @ mentions', () => {
       createdAt: 1,
     } as unknown as Parameters<typeof localAssetMentionRef>[0];
 
-    expect(() => buildChatMentionElements([legacy], [])).not.toThrow();
-    expect(buildChatMentionElements([legacy], [])[0]?.localAsset).toMatchObject({
-      assetId: expect.stringMatching(/^local_/),
-      contentSig: legacy.sig,
-    });
+    expect(buildChatMentionElements([legacy], [])).toEqual([]);
   });
 
   it('turns a local library entry into a stable picker candidate', () => {

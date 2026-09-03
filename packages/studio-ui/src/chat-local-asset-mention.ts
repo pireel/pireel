@@ -1,7 +1,4 @@
-import {
-  legacyLocalAssetId,
-  type LocalAssetIndexEntry,
-} from '@pireel/studio-engine/project-dto';
+import { type LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 
 /** One item that can be inserted into the Studio composer through the @ picker. */
 export interface StudioElementRef {
@@ -31,16 +28,13 @@ export function localAssetMentionId(sig: string): string {
 }
 
 export function localAssetMentionRef(entry: LocalAssetIndexEntry): StudioElementRef {
-  const legacy = entry as Partial<LocalAssetIndexEntry>;
-  const contentSig = legacy.contentSig || legacy.sig || '';
-  const assetId = legacy.assetId || legacyLocalAssetId(legacy);
-  const kind = legacy.kind ?? 'video';
+  const kind = entry.kind ?? 'video';
   return {
-    id: localAssetMentionId(assetId),
-    label: legacy.label || contentSig,
+    id: localAssetMentionId(entry.assetId),
+    label: entry.label || entry.contentSig,
     kind,
     isShot: false,
-    localAsset: { assetId, contentSig, kind },
+    localAsset: { assetId: entry.assetId, contentSig: entry.contentSig, kind },
   };
 }
 
@@ -52,7 +46,7 @@ export function buildChatMentionElements(
 ): StudioElementRef[] {
   return [
     ...localAssets
-      .filter((entry) => Boolean((entry as Partial<LocalAssetIndexEntry>).contentSig || entry.sig))
+      .filter((entry) => Boolean(entry.assetId && entry.contentSig))
       .map(localAssetMentionRef),
     ...outputElements,
   ];

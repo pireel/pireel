@@ -471,8 +471,7 @@ export function relayManagedCaptionTrack(
     const sourceRef: CaptionSourceRef | undefined = ref && assetId
       ? { assetId, segmentIndex: ref.seg, wordStart: ref.w0, wordEnd: ref.w1 }
       : undefined;
-    const legacyId = ref ? `capd_main_${ref.seg}_${ref.w0}` : undefined;
-    const previousByGeneratedId = existingById.get(block.id) ?? (legacyId ? existingById.get(legacyId) : undefined);
+    const previousByGeneratedId = existingById.get(block.id);
     const previous = previousByGeneratedId?.kind === 'caption'
       && (!previousByGeneratedId.sourceRef || sameSourceRef(previousByGeneratedId.sourceRef, sourceRef))
       ? previousByGeneratedId

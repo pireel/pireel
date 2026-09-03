@@ -12,20 +12,13 @@ const sharedAsset = {
 };
 
 describe('project-level local asset directory', () => {
-  it('canonicalizes a sig-only local draft before it reaches refreshed UI state', () => {
+  it('drops a sig-only local draft entry instead of deriving an id for it', () => {
     const legacyContext = {
       schemaVersion: 3,
       localAssets: [{ sig: 'legacy.mp4:4:7', label: 'legacy.mp4', kind: 'video', createdAt: 7 }],
     } as unknown as StudioProjectContext;
 
-    expect(nativeProjectSharedLocalAssets(emptyProjectDocument(), legacyContext)).toEqual([{
-      assetId: expect.stringMatching(/^local_/),
-      contentSig: 'legacy.mp4:4:7',
-      sig: 'legacy.mp4:4:7',
-      label: 'legacy.mp4',
-      kind: 'video',
-      createdAt: 7,
-    }]);
+    expect(nativeProjectSharedLocalAssets(emptyProjectDocument(), legacyContext)).toEqual([]);
   });
 
   it('adopts assets from inactive output snapshots when upgrading a pre-v3 project', () => {
@@ -60,7 +53,7 @@ describe('project-level local asset directory', () => {
     expect(nativeProjectSharedLocalAssets(active, { schemaVersion: 3, localAssets: [] })).toEqual([]);
   });
 
-  it('does not duplicate a synced library entry when an older document used another asset id', () => {
+  it('adopts the document asset id when a synced entry names the same file under another id', () => {
     const active = emptyProjectDocument();
     active.assets['legacy-document-id'] = {
       ...sharedAsset,
@@ -85,7 +78,7 @@ describe('project-level local asset directory', () => {
       schemaVersion: 3,
       localAssets: [synced],
     })).toEqual([expect.objectContaining({
-      assetId: synced.assetId,
+      assetId: 'legacy-document-id',
       contentSig: synced.contentSig,
       label: synced.label,
       w: 1080,

@@ -4640,8 +4640,8 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           // the agent must see unplaced footage here or it goes hunting through cloud scopes.
           const knownSigs = new Set(Object.values(before.assets).map((asset) => asset.locator.localSig).filter(Boolean));
           for (const entry of ctx.localAssetIndexRef?.current ?? []) {
-            const id = entry.assetId || entry.sig;
-            if (!id || before.assets[id] || knownSigs.has(entry.contentSig || entry.sig)) continue;
+            const id = entry.assetId;
+            if (!id || before.assets[id] || knownSigs.has(entry.contentSig)) continue;
             state.assets.push({ id, kind: entry.kind ?? 'video', ...(entry.label ? { label: entry.label } : {}), library: true });
           }
           return { ok: true, summary: `${state.tracks.length} tracks · ${state.durationFrames} frames @ ${state.canvas.fps}fps`, data: { ...state, playhead: Math.round((ctx.tRef?.current ?? 0) * before.canvas.fps) } };

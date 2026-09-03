@@ -4249,7 +4249,7 @@ export function HyperframesWorkbench({
         const direct = await loadLocalVideo(asset.locator.localSig);
         if (direct) return direct;
         const entry = localAssetIndexRef.current.find(
-          (item) => item.sig === asset.locator.localSig,
+          (item) => item.contentSig === asset.locator.localSig,
         );
         if (entry?.folder) {
           const folder = await loadLocalFolderFile(
@@ -6058,7 +6058,7 @@ export function HyperframesWorkbench({
    *  vault, then a manual re-pick verified against the sig. src = null targets the main source. */
   const reconnectSource = async (src: string | null, sig?: string | null) => {
     const indexedKind = sig
-      ? localAssetIndexRef.current.find((entry) => entry.sig === sig)?.kind
+      ? localAssetIndexRef.current.find((entry) => entry.contentSig === sig)?.kind
       : undefined;
     let f = sig ? await loadLocalVideo(sig) : null;
     if (!f && sig) {

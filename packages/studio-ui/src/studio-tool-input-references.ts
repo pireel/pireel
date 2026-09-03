@@ -1,7 +1,4 @@
-import {
-  legacyLocalAssetId,
-  type LocalAssetIndexEntry,
-} from '@pireel/studio-engine/project-dto';
+import { type LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 import { localAssetMentionId } from './chat-local-asset-mention';
 
 const idShapedKey = (key: string) =>
@@ -16,17 +13,8 @@ const stripAt = (value: string) => value.startsWith('@') ? value.slice(1) : valu
 export const localAssetReference = (entry: Pick<LocalAssetIndexEntry, 'assetId'>): string =>
   `local:${entry.assetId}`;
 
-function canonicalLocalAsset(entry: LocalAssetIndexEntry): LocalAssetIndexEntry | null {
-  const legacy = entry as Partial<LocalAssetIndexEntry>;
-  const contentSig = legacy.contentSig || legacy.sig;
-  if (!contentSig) return null;
-  return {
-    ...entry,
-    assetId: legacy.assetId || legacyLocalAssetId(legacy),
-    contentSig,
-    sig: contentSig,
-  };
-}
+/** An entry is addressable only through its logical id; content signatures never travel through tool inputs. */
+const addressableLocalAsset = (entry: LocalAssetIndexEntry): boolean => !!entry.assetId && !!entry.contentSig;
 
 const sharedPrefixLength = (left: string, right: string): number => {
   let index = 0;
@@ -39,23 +27,21 @@ const sharedPrefixLength = (left: string, right: string): number => {
 // uuid group still identifies the asset when exactly one registered id shares it.
 const UNIQUE_PREFIX_MIN = 'local_'.length + 8;
 
-/** Resolve current asset ids, new mention tokens, and unambiguous legacy sig references. */
+/** Resolve a project asset id (bare, `local:`-prefixed, `@`-prefixed), its mention token, or — for the
+ * fields that are declared as signatures (localSig / sig on import registrations) — an exact content
+ * signature while it names one entry. Mention tokens derived from a signature are no longer accepted. */
 export function resolveLocalAssetReference(
   value: string,
   localAssets: readonly LocalAssetIndexEntry[],
 ): LocalAssetIndexEntry | null {
-  const assets = localAssets
-    .map(canonicalLocalAsset)
-    .filter((entry): entry is LocalAssetIndexEntry => !!entry);
+  const assets = localAssets.filter(addressableLocalAsset);
   const trimmed = value.trim();
   const withoutScheme = trimmed.startsWith('local:') ? trimmed.slice('local:'.length) : trimmed;
   const bare = stripAt(withoutScheme);
   const direct = assets.find((entry) => entry.assetId === bare || localAssetMentionId(entry.assetId) === bare);
   if (direct) return direct;
-  const legacyMatches = assets.filter(
-    (entry) => entry.contentSig === withoutScheme || localAssetMentionId(entry.contentSig) === bare,
-  );
-  if (legacyMatches.length === 1) return legacyMatches[0]!;
+  const bySignature = assets.filter((entry) => entry.contentSig === withoutScheme);
+  if (bySignature.length === 1) return bySignature[0]!;
   if (bare.startsWith('local_') && bare.length >= UNIQUE_PREFIX_MIN) {
     let best: LocalAssetIndexEntry | null = null;
     let bestLength = 0;

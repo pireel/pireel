@@ -22,7 +22,6 @@ import { canonicalJson, hashSection } from './stable-json';
 export {
   sanitizeProjectContext,
   STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION,
-  legacyLocalAssetId,
   type LocalAssetIndexEntry,
   type StudioProjectContext,
 } from './project-context';

@@ -121,7 +121,12 @@ export function nativeProjectSharedLocalAssets(
         (candidate) => candidate.contentSig === entry.contentSig,
       );
       if (sameContent.length === 1) {
-        mergeMetadata(sameContent[0]!.assetId, sameContent[0]!, entry);
+        // One file, two ids: the document key is the id every clip, transcript and receipt already
+        // uses, so the directory adopts it and keeps its own metadata (label, folder). Device
+        // bindings under the old id fall back to the content-signature store.
+        const previous = sameContent[0]!;
+        merged.delete(previous.assetId);
+        mergeMetadata(entry.assetId, previous, entry);
         continue;
       }
       // When multiple logical entries intentionally share bytes, an old document id cannot tell

@@ -229,14 +229,7 @@ describe('save request boundary', () => {
       },
     })?.context).toEqual({
       schemaVersion: 3,
-      localAssets: [{
-        assetId: expect.stringMatching(/^local_/),
-        contentSig: 'shared.mp4:9:1',
-        sig: 'shared.mp4:9:1',
-        label: 'shared.mp4',
-        kind: 'video',
-        createdAt: 9,
-      }],
+      localAssets: [],
     });
   });
 
@@ -258,25 +251,15 @@ describe('save request boundary', () => {
     });
   });
 
-  it('derives the same legacy asset id on every device and preserves the compatibility sig', () => {
+  it('drops directory entries that carry no logical id instead of deriving one', () => {
     const legacy = {
       schemaVersion: 3,
-      localAssets: [{
-        sig: 'shared.mp4:9:1',
-        label: 'shared.mp4',
-        folder: { id: 'folder-a', name: 'A', path: 'clips/shared.mp4' },
-        createdAt: 9,
-      }],
+      localAssets: [
+        { sig: 'shared.mp4:9:1', label: 'shared.mp4', createdAt: 9 },
+        { assetId: 'local_keep', contentSig: 'kept.mp4:9:1', label: 'kept.mp4', createdAt: 8 },
+      ],
     };
-
-    const first = sanitizeProjectContext(legacy).localAssets?.[0];
-    const second = sanitizeProjectContext(structuredClone(legacy)).localAssets?.[0];
-    expect(first?.assetId).toMatch(/^local_/);
-    expect(second?.assetId).toBe(first?.assetId);
-    expect(first).toMatchObject({
-      contentSig: legacy.localAssets[0]!.sig,
-      sig: legacy.localAssets[0]!.sig,
-    });
+    expect(sanitizeProjectContext(legacy).localAssets?.map((entry) => entry.assetId)).toEqual(['local_keep']);
   });
 
   it('rejects stale/corrupt patches and patched legacy top-level fields', () => {

@@ -567,7 +567,7 @@ export function MyAssetsPanel({
         // second card. The EXISTING entry keeps its assetId (timeline references stay valid);
         // only its byte liveness is refreshed from the just-picked file.
         const existing = regRef.current.find(
-          (x) => (x.contentSig || x.sig) === asset.contentSig,
+          (x) => x.contentSig === asset.contentSig,
         );
         if (existing) {
           duplicates += 1;

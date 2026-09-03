@@ -293,7 +293,7 @@ describe('EditorDocument V2 managed caption command', () => {
     expect(dominantTimelineSpeechTrack(document)?.trackId).toBe('mic-track');
   });
 
-  it('derives through native gaps and retiming while preserving track and clip flags', () => {
+  it('derives through native gaps and retiming; a legacy capd_main cue id is re-derived rather than aliased', () => {
     const document = documentWithCaptions();
     const result = applyEditorCommand(document, { type: 'captions.relay' });
     expect(result.ok).toBe(true);
@@ -301,10 +301,10 @@ describe('EditorDocument V2 managed caption command', () => {
     const track = result.document.timeline.tracks.find((candidate) => candidate.id === 'managed-captions')!;
     expect(track).toMatchObject({ muted: true, hidden: true, stackOrder: 8 });
     expect(track.clips).toMatchObject([
-      { id: 'capd_main_0_0', startFrame: 0, durationFrames: 39, enabled: false, sourceRef: { assetId: 'main-asset' } },
+      { id: 'capd_emainasset_0_0', startFrame: 0, durationFrames: 39, sourceRef: { assetId: 'main-asset' } },
       { id: 'capd_emainasset_0_1', startFrame: 120, durationFrames: 24, enabled: true, sourceRef: { assetId: 'main-asset' } },
     ]);
-    expect(result.receipt).toMatchObject({ affectedTrackIds: ['managed-captions'], createdClipIds: ['capd_emainasset_0_1'] });
+    expect(result.receipt).toMatchObject({ affectedTrackIds: ['managed-captions'], createdClipIds: ['capd_emainasset_0_0', 'capd_emainasset_0_1'] });
   });
 
   it('clears stale managed captions when the primary lane is deliberately empty', () => {

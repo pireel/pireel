@@ -44,7 +44,6 @@ export * from './media-framing-edit';
 export * from './media-video-edit';
 export * from './generated-draft-document-edit';
 export * from './project-document';
-export * from './transcript-address';
 export * from './transcript-context';
 export * from './local-asset-locator';
 export * from './templates';
