@@ -132,7 +132,8 @@ function translateGetTranscript(input: Input, ctx: V3AdapterContext): V3Translat
   if (granularity === 'segments') {
     const call: Input = {};
     if (isNonEmptyString(input.assetId)) call.assetId = input.assetId;
-    if (isNonEmptyString(input.clipId)) call.clipId = input.clipId;
+    // A clipId that is not a clip on the active output is a library asset id.
+    if (isNonEmptyString(input.clipId)) { if (ctx.kindOf(input.clipId)) call.clipId = input.clipId; else if (!call.assetId) call.assetId = input.clipId; }
     return { status: 'ok', calls: [{ tool: 'read_script', input: call }] };
   }
   const call: Input = {};
@@ -476,9 +477,11 @@ function translateManageTracks(input: Input): V3Translation {
   return { status: 'ok', calls: [{ tool: 'manage_tracks', input: { ...rest, ...(isFiniteNumber(order) ? { stackOrder: order } : {}) } }] };
 }
 
-function translateInspectMedia(input: Input): V3Translation {
+function translateInspectMedia(input: Input, ctx: V3AdapterContext): V3Translation {
   const mode = input.mode ?? 'metadata';
   const ids = Array.isArray(input.ids) ? (input.ids as unknown[]).filter(isNonEmptyString) : [];
+  // Models put library asset ids into clipId; an id that is not a clip on the active output is an asset.
+  if (isNonEmptyString(input.clipId) && !ctx.kindOf(input.clipId)) { ids.push(input.clipId); input = { ...input, clipId: undefined }; }
   switch (mode) {
     case 'metadata': {
       const call: Input = {};
@@ -785,7 +788,7 @@ export function translateV3Call(name: string, rawInput: unknown, ctx: V3AdapterC
       const { clipId, ...rest } = input;
       return { status: 'ok', calls: [{ tool: 'search_media', input: { ...rest, ...(isNonEmptyString(clipId) ? { shotId: clipId } : {}) } }] };
     }
-    case 'inspect_media': return translateInspectMedia(input);
+    case 'inspect_media': return translateInspectMedia(input, ctx);
     case 'search_assets': return translateSearchAssets(input);
     case 'register_media': return translateRegisterMedia(input);
     case 'import_media': return translateImportMedia(input);

@@ -971,8 +971,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                     .find((clip) => clip.id === requestedClipId)
                 : undefined;
               const clipAssetId = requestedClip && 'assetId' in requestedClip ? requestedClip.assetId : undefined;
-              const targetAssetId = requestedAssetId || clipAssetId;
-              if (requestedClipId && !clipAssetId) return { ok: false, error: `clip not found or has no media asset: ${requestedClipId}` };
+              // Models put asset ids into clipId; a registered asset by that id is what they meant.
+              const clipIdAsAsset = requestedClipId && !clipAssetId && documentRef.current.assets[requestedClipId] ? requestedClipId : '';
+              const targetAssetId = requestedAssetId || clipAssetId || clipIdAsAsset;
+              if (requestedClipId && !clipAssetId && !clipIdAsAsset) return { ok: false, error: `clip not found or has no media asset: ${requestedClipId} — pass timeline clip ids as clipId and asset ids as assetId` };
               if (targetAssetId) {
                 const asset = documentRef.current.assets[targetAssetId];
                 if (!asset) return { ok: false, error: `asset not found: ${targetAssetId}` };
@@ -1612,15 +1614,21 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 if (!opts?.reportProgress) clearToolProgress(toolId);
               }
             }
-            const requestedClipId = typeof input.clipId === 'string' ? input.clipId.trim() : '';
-            const requestedAssetId = typeof input.assetId === 'string' ? input.assetId.trim() : '';
+            let requestedClipId = typeof input.clipId === 'string' ? input.clipId.trim() : '';
+            let requestedAssetId = typeof input.assetId === 'string' ? input.assetId.trim() : '';
             const requestedClip = requestedClipId
               ? documentRef.current.timeline.tracks
                   .flatMap((track) => track.clips)
                   .find((clip) => clip.id === requestedClipId)
               : undefined;
             const clipAssetId = requestedClip && 'assetId' in requestedClip ? requestedClip.assetId : undefined;
-            if (requestedClipId && !clipAssetId) return { ok: false, error: `clip not found or has no media asset: ${requestedClipId}` };
+            if (requestedClipId && !clipAssetId) {
+              // Models put asset ids into clipId; a registered or library asset by that id is what they meant.
+              const asAsset = documentRef.current.assets[requestedClipId] ? requestedClipId : resolveLocalAssetReference(requestedClipId, ctx.localAssetIndexRef?.current ?? [])?.assetId;
+              if (!asAsset) return { ok: false, error: `clip not found or has no media asset: ${requestedClipId} — pass timeline clip ids as clipId and asset ids as ids[]/assetId` };
+              requestedAssetId = requestedAssetId || asAsset;
+              requestedClipId = '';
+            }
             const primaryAssetId = firstNarrativeAssetId(documentRef.current);
             const videoAssets = Object.values(documentRef.current.assets)
               .filter((asset): asset is EditorMediaAsset => asset.kind === 'video');

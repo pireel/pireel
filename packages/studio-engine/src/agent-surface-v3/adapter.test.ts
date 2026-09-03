@@ -222,6 +222,14 @@ describe('v3 adapter translations', () => {
     expect(ok(translateV3Call('set_captions', { on: true, script: '第一句\n第二句', font: 'serif' }, ctx))).toEqual([{ tool: 'set_captions', input: { font: 'serif', script: '第一句\n第二句' } }]);
   });
 
+  it('treats a clipId that is not a clip as a library asset id', () => {
+    const inspect = ok(translateV3Call('inspect_media', { mode: 'editorial', clipId: 'local_abc', brief: 'b' }, ctx));
+    expect(inspect[0]!.input).toMatchObject({ mode: 'editorial', assetId: 'local_abc' });
+    expect(inspect[0]!.input).not.toHaveProperty('clipId');
+    const transcript = ok(translateV3Call('get_transcript', { clipId: 'local_abc' }, ctx));
+    expect(transcript[0]!.input).toEqual({ assetId: 'local_abc' });
+  });
+
   it('carries the silent-montage picture target on add_clips in frames', () => {
     const calls = ok(translateV3Call('add_clips', { clips: [{ assetId: 'a1', role: 'primary', source: [0, 4] }], targetDurationFrames: 900 }, ctx));
     expect(calls[0]!.tool).toBe('add_clips');
