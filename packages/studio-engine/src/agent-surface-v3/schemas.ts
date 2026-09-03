@@ -214,7 +214,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   /* ------------------------------------------------------------------ clips */
   add_clips: {
     description:
-      'Place registered assets on the timeline without opening time (existing material is untouched; same-track overlaps are refused). role picks the lane: primary is the full-frame story spine, broll a concurrent overlay/PiP lane, narration/music/sfx the typed audio lanes; omit trackId to reuse or create the role lane. Timing is startFrame + durationFrames (defaults to the source remainder) with optional source [inSec,outSec]. duplicate[] copies existing graphic clips to a new start. One call, many clips, one undo step.',
+      'Place registered assets on the timeline without opening time (existing material is untouched). role picks the lane: primary is the full-frame story spine, broll the B-roll lane, narration/music/sfx the typed audio lanes; omit trackId to reuse or create the role lane. A full-frame B-roll video that overlaps another full-frame B-roll video is refused and nothing is placed — fix the frames or remove_clips the old clip first; only an explicit trackId overwrites that lane. Boxed (PiP) clips and images may sit over other B-roll. Timing is startFrame + durationFrames (defaults to the source remainder) with optional source [inSec,outSec]. duplicate[] copies existing graphic clips to a new start. One call, many clips, one undo step.',
     inputSchema: obj({
       clips: arr(obj({
         id: str('Optional new clip id.'), assetId: str(), trackId: str(), role: enumOf(CLIP_ROLES),

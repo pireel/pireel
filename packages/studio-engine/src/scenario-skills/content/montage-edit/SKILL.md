@@ -215,7 +215,7 @@ If exact names, dates, spellings, credits, sponsor hierarchy, or legal language 
 
 Choose tools based on the sequence being built:
 
-- use `add_clips` to place material where nothing should shift (same-track overlaps are refused);
+- use `add_clips` to place material where nothing should shift (a full-frame B-roll video overlapping another is refused: fix the frames or `remove_clips` the old clip first — never re-send a placement that already succeeded);
 - use `insert_clips` when adding material into an existing sequence should ripple later clips;
 - use `split_clips`, `move_clips`, `remove_clips`, and `ripple_delete_ranges` for structural refinement;
 - use `set_clip_framing` for motivated reframes, `set_keyframes` for motion, and `set_clip_properties` for speed, level, and retrims;

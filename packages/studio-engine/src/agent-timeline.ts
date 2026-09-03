@@ -365,6 +365,32 @@ function ensureTrack(
     return { document: allocated.document, track: allocated.track, receipts: allocated.receipts };
   }
   const useFreeLane = !!placement && desired.type === 'visual' && desired.role !== 'primaryNarrative';
+  if (useFreeLane && asset.kind === 'video' && item.box === undefined) {
+    // A full-frame B-roll video never stacks on another full-frame B-roll video: the upper lane hides
+    // the lower one completely, so the overlap is always a contradiction in the caller's plan (a
+    // re-placement of what is already there, or a batch that overlaps itself) — never a composition.
+    // Silently opening one more lane per attempt let an agent pile seven layers of "B-roll" on one
+    // narration. Refuse with the exact conflict so the caller fixes the frames or removes the earlier
+    // clip; an explicit trackId remains the deliberate overwrite path. Boxed inserts (PiP, evidence
+    // over a background) and images keep their parallel lanes.
+    const endFrame = placement.startFrame + placement.durationFrames;
+    const overlaps = roleTracks.flatMap((track) => track.clips.flatMap((clip) => (
+      clip.kind === 'media'
+      && !clip.box
+      && document.assets[clip.assetId]?.kind === 'video'
+      && clip.startFrame < endFrame
+      && clip.startFrame + clip.durationFrames > placement.startFrame
+        ? [{ trackId: track.id, clipId: clip.id, assetId: clip.assetId, frames: [clip.startFrame, clip.startFrame + clip.durationFrames] as [number, number] }]
+        : []
+    )));
+    if (overlaps.length) {
+      const first = overlaps[0]!;
+      return fail(
+        `${asset.id} at frames ${placement.startFrame}–${endFrame} overlaps the full-frame B-roll video ${first.clipId} (frames ${first.frames[0]}–${first.frames[1]}) on ${first.trackId}${overlaps.length > 1 ? ` and ${overlaps.length - 1} more` : ''}. Full-frame B-roll videos never stack: the upper one would hide the lower one completely. Choose frames inside a free gap, remove or move the existing clip first, or pass trackId: '${first.trackId}' to overwrite that lane deliberately. Nothing was placed.`,
+        { reason: 'broll_overlap', overlaps },
+      );
+    }
+  }
   const existing = desired.role === 'primaryNarrative'
     ? roleTracks[0]
     : useFreeLane

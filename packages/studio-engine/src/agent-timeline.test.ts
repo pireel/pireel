@@ -476,6 +476,60 @@ describe('shared agent timeline atoms', () => {
     expect(evidence.data).not.toHaveProperty('overwrittenClipIds');
   });
 
+  it('refuses a full-frame B-roll video over another full-frame B-roll video and names the conflict', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', {
+      assets: [
+        { id: 'news', kind: 'video', url: 'https://cdn.example/news.mp4', durationSec: 30 },
+        { id: 'peach', kind: 'video', url: 'https://cdn.example/peach.mp4', durationSec: 30 },
+        { id: 'logo', kind: 'image', url: 'https://cdn.example/logo.png' },
+      ],
+    }).document!;
+    const first = runAgentTimelineTool(document, 'add_clips', {
+      clips: [{ id: 'news-clip', assetId: 'news', startSec: 4.8, sourceInSec: 9.6, sourceOutSec: 12.1 }],
+    });
+    expect(first.ok).toBe(true);
+
+    // A re-placement of the same span (the classic "place it again" loop) is refused, nothing changes.
+    const again = runAgentTimelineTool(first.document!, 'add_clips', {
+      clips: [{ assetId: 'news', startSec: 4.8, sourceInSec: 9.6, sourceOutSec: 12.1 }],
+    });
+    expect(again.ok).toBe(false);
+    expect(again.error).toContain('news-clip');
+    expect(again.error).toContain("trackId: 'track_broll'");
+    expect(again.data).toMatchObject({ reason: 'broll_overlap', overlaps: [{ clipId: 'news-clip', trackId: 'track_broll', frames: [144, 219] }] });
+    expect(again.document).toBeUndefined();
+
+    // A batch that overlaps itself fails on the offending row instead of opening a second lane.
+    const selfOverlap = runAgentTimelineTool(first.document!, 'add_clips', {
+      clips: [
+        { assetId: 'peach', startSec: 26.5, sourceInSec: 2, sourceOutSec: 4.7 },
+        { assetId: 'news', startSec: 28.1, sourceInSec: 1.5, sourceOutSec: 3.5 },
+      ],
+    });
+    expect(selfOverlap.ok).toBe(false);
+    expect(selfOverlap.error).toContain('clip_peach');
+
+    // Boxed inserts and images keep their parallel lane over the B-roll.
+    const boxed = runAgentTimelineTool(first.document!, 'add_clips', {
+      clips: [
+        { assetId: 'peach', startSec: 5, durationSec: 2, box: { x: 0.6, y: 0.6, w: 0.35, h: 0.35 } },
+        { assetId: 'logo', startSec: 5, durationSec: 2 },
+      ],
+    });
+    expect(boxed.ok).toBe(true);
+    // Each parallel insert lands on its own free lane (pre-existing behaviour); the full-frame clip stays.
+    expect(boxed.document!.timeline.tracks.filter((track) => track.role === 'broll')).toHaveLength(3);
+    expect(boxed.document!.timeline.tracks[1]!.clips.map((clip) => clip.id)).toEqual(['news-clip']);
+
+    // An explicit trackId is still the deliberate overwrite path.
+    const overwrite = runAgentTimelineTool(first.document!, 'add_clips', {
+      clips: [{ assetId: 'peach', trackId: 'track_broll', startSec: 4.8, sourceInSec: 2, sourceOutSec: 4.5 }],
+    });
+    expect(overwrite.ok).toBe(true);
+    expect(overwrite.data).toMatchObject({ overwrittenClipIds: ['news-clip'] });
+  });
+
   it('uses the real source duration for contiguous repeated video coverage', () => {
     let document = emptyEditorDocumentV2({ fps: 30 });
     document = runAgentTimelineTool(document, 'register_media', {

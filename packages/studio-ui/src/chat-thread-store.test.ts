@@ -188,18 +188,38 @@ describe('compactStudioChatMessagesForModel', () => {
     expect(((message.parts[0] as { output: { data: Record<string, unknown> } }).output.data.subjectTracks as unknown[])).toHaveLength(100);
   });
 
-  it('does not replay visible progress chatter that precedes tool receipts', () => {
+  it('replays the assistant\'s own progress prose between receipts, capped', () => {
+    const plan = '方案：第 2 句配新闻画面，第 4 句配桃子特写。'.repeat(200);
     const message = assistant([
-      { type: 'text', text: '这里是一大段过程说明。' },
-      { type: 'tool-list_assets', toolCallId: 'list-1', state: 'output-available', input: {}, output: { ok: true } },
+      { type: 'text', text: '先落主轨，再审片。' },
+      { type: 'tool-add_clips', toolCallId: 'add-1', state: 'output-available', input: {}, output: { ok: true } },
+      { type: 'text', text: plan },
+      { type: 'tool-add_clips', toolCallId: 'add-2', state: 'output-available', input: {}, output: { ok: true } },
       { type: 'text', text: '最终总结。' },
     ] as UIMessage['parts']);
     const [forModel] = compactStudioChatMessagesForModel([message]);
-    expect(forModel!.parts).toEqual([
-      message.parts[1],
-      { type: 'text', text: '最终总结。' },
-    ]);
-    expect(message.parts[0]).toEqual({ type: 'text', text: '这里是一大段过程说明。' });
+    expect(forModel!.parts).toHaveLength(5);
+    expect(forModel!.parts[0]).toEqual({ type: 'text', text: '先落主轨，再审片。' });
+    const replayedPlan = (forModel!.parts[2] as { text: string }).text;
+    expect(replayedPlan.length).toBeLessThan(plan.length);
+    expect(replayedPlan.startsWith(plan.slice(0, 2_000))).toBe(true);
+    expect(replayedPlan.endsWith('[…]')).toBe(true);
+    expect(forModel!.parts[4]).toEqual({ type: 'text', text: '最终总结。' });
+    expect((message.parts[2] as { text: string }).text).toBe(plan);
+  });
+
+  it('treats v3 get_state snapshots like get_timeline: only the newest is replayed', () => {
+    const older = {
+      type: 'tool-get_state', toolCallId: 'state-old', state: 'output-available', input: {},
+      output: { ok: true, data: { tracks: [{ role: 'primaryNarrative', clips: [] }], dense: 'x'.repeat(20_000) } },
+    };
+    const newest = {
+      type: 'tool-get_state', toolCallId: 'state-new', state: 'output-available', input: {},
+      output: { ok: true, data: { tracks: [{ role: 'primaryNarrative', clips: [{ id: 'clip-1' }] }] } },
+    };
+    const [forModel] = compactStudioChatMessagesForModel([assistant([older, newest] as UIMessage['parts'])]);
+    expect((forModel!.parts[0] as { output: { data: Record<string, unknown> } }).output.data).toEqual(expect.objectContaining({ superseded: true }));
+    expect((forModel!.parts[1] as { output: unknown }).output).toEqual(newest.output);
   });
 
   it('compacts every source receipt in one editorial batch without dropping verdicts', () => {

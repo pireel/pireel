@@ -28,6 +28,10 @@ export interface StoredThread {
 
 /** Editorial evidence arrives as analyze_visual receipts on the legacy surface and as inspect_media
  * (mode editorial) receipts on v3; both carry the same editorialCandidates payload. */
+/** Whole-output state reads: legacy get_timeline and its v3 successor get_state. Both answer the same
+ * question, so the unchanged-dedupe, read-block and superseded-snapshot machinery treats them alike. */
+export const isTimelineReadToolId = (id: string): boolean => id === 'get_timeline' || id === 'get_state';
+
 export const isVisualAnalysisToolId = (id: string | undefined): boolean => id === 'analyze_visual' || id === 'inspect_media';
 
 export const MAX_VISUAL_REVIEWS_PER_USER_TURN = 2;
@@ -207,7 +211,7 @@ export function recordStudioTurnToolResult(
   }
 
   let timelineUnchanged = false;
-  if (record.toolId === 'get_timeline' && !failed) {
+  if (isTimelineReadToolId(record.toolId) && !failed) {
     const fingerprint = studioTimelineFingerprint(data);
     timelineUnchanged = !!fingerprint && fingerprint === ledger.lastTimelineFingerprint;
     if (fingerprint) ledger.lastTimelineFingerprint = fingerprint;
@@ -460,6 +464,8 @@ function compactVisualAnalysisData(data: Record<string, unknown>): Record<string
 /** Keep the full visual receipt in the UI/persisted thread, but send only reusable evidence back to
  * the model on later tool-continuation requests. Replaying dense per-frame tracks made real Studio
  * turns grow from ~110k to ~190k input tokens without adding editorial information. */
+const MAX_REPLAYED_PROGRESS_TEXT_CHARS = 2_500;
+
 export function compactStudioChatMessagesForModel(messages: UIMessage[]): UIMessage[] {
   return compactStudioChatMessages(messages).map((message) => {
     if (message.role !== 'assistant') return message;
@@ -476,7 +482,7 @@ export function compactStudioChatMessagesForModel(messages: UIMessage[]): UIMess
         : candidate.type?.startsWith('tool-')
           ? candidate.type.slice('tool-'.length)
           : '';
-      return toolId === 'get_timeline' ? index : latest;
+      return isTimelineReadToolId(toolId ?? '') ? index : latest;
     }, -1);
     return {
       ...message,
@@ -487,15 +493,25 @@ export function compactStudioChatMessagesForModel(messages: UIMessage[]): UIMess
           output?: unknown;
           text?: string;
         };
-        // Progress prose before a tool remains in the persisted/UI thread, but replaying it gives
-        // the next model round thousands of tokens of obsolete deliberation. Receipts are the state.
         if (candidate.type === 'text') {
-          if (index <= lastToolIndex) return [];
+          const text = candidate.text ?? '';
+          // The prose between receipts is the model's own memory of what it decided and did. Dropping
+          // it (an earlier token economy) turned a long tool turn into a bare burst of calls with no
+          // narration: every round then re-planned from scratch, re-placed what it had already placed,
+          // and attributed its own earlier calls to "accidental" triggers. Replay it, capped so one
+          // runaway plan table cannot dominate the request; receipts stay the authority on state.
+          if (index <= lastToolIndex) {
+            return [{
+              ...part,
+              text: text.length > MAX_REPLAYED_PROGRESS_TEXT_CHARS
+                ? `${text.slice(0, MAX_REPLAYED_PROGRESS_TEXT_CHARS)}\n[…]`
+                : text,
+            } as typeof part];
+          }
           // A provider can exhaust its output budget in visible scratchpad prose after the last
           // receipt. Keep that text in the UI for diagnosis, but do not feed it back as if it were
           // an authoritative final instruction when the recovery turn resumes from live state.
           if (unfinishedVisibleTail) return [];
-          const text = candidate.text ?? '';
           return [{ ...part, text: text.length > 6_000 ? text.slice(-6_000) : text } as typeof part];
         }
         const toolId = candidate.type === 'dynamic-tool'
@@ -506,7 +522,7 @@ export function compactStudioChatMessagesForModel(messages: UIMessage[]): UIMess
         // A long tool turn may request the timeline repeatedly. Replaying every complete snapshot
         // makes mutually obsolete project states dominate the next model request; only the newest
         // snapshot is authoritative. The UI/persisted history still keeps every original receipt.
-        if (toolId === 'get_timeline' && index !== lastTimelineIndex && candidate.output && typeof candidate.output === 'object') {
+        if (isTimelineReadToolId(toolId ?? '') && index !== lastTimelineIndex && candidate.output && typeof candidate.output === 'object') {
           const output = candidate.output as { ok?: unknown; summary?: unknown; error?: unknown };
           return [{
             ...part,
@@ -883,7 +899,7 @@ export function hasPostAssemblyTimelineSnapshot(allMessages: readonly UIMessage[
         ? (output.data as { editorialAssembly?: unknown }).editorialAssembly
         : null;
       if (assembly && editorialAssemblyCoversTarget(assembly)) pictureLocked = true;
-      if (pictureLocked && toolId === 'get_timeline' && candidate.state === 'output-available' && output?.ok === true) return true;
+      if (pictureLocked && isTimelineReadToolId(toolId ?? "") && candidate.state === 'output-available' && output?.ok === true) return true;
     }
   }
   return false;
