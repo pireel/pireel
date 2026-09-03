@@ -1509,7 +1509,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const annotatedResults = comparableResults.map((result) => {
                 const receipt = result as Record<string, unknown>;
                 if (receipt.ok !== true || !Array.isArray(receipt.editorialCandidates)) return result;
-                return { ...result, acceptedDurationSec: sourceAcceptedSec(receipt) };
+                // The brief and the usage note ride once at batch level; repeated per source they were
+                // ~12% of a 20k-token receipt without adding information.
+                const { editorialBrief: _brief, note: _note, ...rest } = receipt;
+                return { ...rest, acceptedDurationSec: sourceAcceptedSec(receipt) };
               });
               const acceptedDurationSec = Math.round(annotatedResults.reduce((total, result) => (
                 total + sourceAcceptedSec(result as Record<string, unknown>)
