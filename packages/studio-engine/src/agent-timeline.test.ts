@@ -802,6 +802,29 @@ describe('shared agent timeline atoms', () => {
     expect(removed.document!.timeline.tracks.flatMap((track) => track.clips)).toEqual([]);
   });
 
+  it('skips clip ids that are already gone and removes the rest, naming the misses', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', { assets: [
+      { id: 'a', kind: 'video', url: 'https://cdn.example/a.mp4', durationSec: 5 },
+      { id: 'b', kind: 'video', url: 'https://cdn.example/b.mp4', durationSec: 5 },
+    ] }).document!;
+    document = runAgentTimelineTool(document, 'add_clips', { clips: [
+      { id: 'a-clip', assetId: 'a', role: 'broll', startSec: 0, durationSec: 2 },
+      { id: 'b-clip', assetId: 'b', role: 'broll', startSec: 3, durationSec: 2 },
+    ] }).document!;
+    document = runAgentTimelineTool(document, 'remove_clips', { clipIds: ['a-clip'] }).document!;
+
+    const removed = runAgentTimelineTool(document, 'remove_clips', { clipIds: ['a-clip', 'b-clip'] });
+    expect(removed.ok).toBe(true);
+    expect(removed.data).toEqual({ removedClipIds: ['b-clip'], missingClipIds: ['a-clip'] });
+    expect(removed.summary).toContain('already gone: a-clip');
+    expect(removed.document!.timeline.tracks.flatMap((track) => track.clips)).toEqual([]);
+
+    const nothingLeft = runAgentTimelineTool(removed.document!, 'remove_clips', { clipIds: ['a-clip', 'b-clip'] });
+    expect(nothingLeft.ok).toBe(false);
+    expect(nothingLeft.error).toContain('clip not found');
+  });
+
   it('removes the entire primary picture when asked — remove is an honest primitive', () => {
     let document = emptyEditorDocumentV2({ fps: 30 });
     document = runAgentTimelineTool(document, 'register_media', { assets: [
