@@ -355,12 +355,50 @@ const MAX_REPLAYED_TEXT_CHARS = 4_000;
  * the cache from the first rewrite onward (real turns re-paid 40–60k tokens per step) and erased the
  * model's memory of what it had already done. The only reduction is the visual receipts' dense
  * per-frame payload, trimmed the same way every time. */
+const isToolPart = (part: { type?: string }): boolean => part.type === 'dynamic-tool' || !!part.type?.startsWith('tool-');
+
+/** Step boundaries decide how the SDK converts one UI assistant message into provider messages: every
+ * `step-start` closes an assistant turn (its text + tool calls) and its tool results. Without them the
+ * whole multi-round message folds into ONE assistant message carrying every tool call, followed by
+ * every result — the model then reads its own earlier rounds as a single parallel burst, and the
+ * assistant message's bytes change every step, so the provider's prompt cache stops right before it.
+ * Live SDK messages carry step-start parts; persisted threads were saved without them, so the
+ * boundaries are re-derived: a text after a tool result starts a step, and so does a tool call whose
+ * id restarts the per-step numbering (DeepSeek ids are call_<stepIndex>_…). */
+export function withStepBoundaries(parts: UIMessage['parts']): UIMessage['parts'] {
+  const out: UIMessage['parts'] = [];
+  let previousWasTool = false;
+  for (const part of parts) {
+    const candidate = part as { type?: string; toolCallId?: string };
+    if (candidate.type === 'step-start') {
+      if ((out.at(-1) as { type?: string } | undefined)?.type !== 'step-start') out.push(part);
+      previousWasTool = false;
+      continue;
+    }
+    const tool = isToolPart(candidate);
+    const startsStep = previousWasTool && (candidate.type === 'text' || (tool && /^call_00_/.test(candidate.toolCallId ?? '')));
+    if (startsStep && (out.at(-1) as { type?: string } | undefined)?.type !== 'step-start') out.push({ type: 'step-start' } as UIMessage['parts'][number]);
+    out.push(part);
+    previousWasTool = tool;
+  }
+  return out;
+}
+
 export function compactStudioChatMessagesForModel(messages: UIMessage[]): UIMessage[] {
-  return compactStudioChatMessages(messages).map((message) => {
+  return messages.map((message) => {
     if (message.role !== 'assistant') return message;
+    const parts = (message.parts ?? []).flatMap((part) => {
+      const candidate = part as { type?: string; text?: string };
+      if (candidate.type === 'reasoning') return [];
+      if (candidate.type === 'text') {
+        const text = stripLeakedToolProtocolText(candidate.text ?? '');
+        return text.trim() ? [{ ...part, text } as typeof part] : [];
+      }
+      return [part];
+    });
     return {
       ...message,
-      parts: (message.parts ?? []).map((part) => {
+      parts: withStepBoundaries(parts).map((part) => {
         const candidate = part as { type?: string; toolName?: string; output?: unknown; text?: string };
         if (candidate.type === 'text') {
           const text = candidate.text ?? '';

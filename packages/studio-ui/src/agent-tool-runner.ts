@@ -4180,8 +4180,15 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             },
           };
         }
-        return { ok: false, error: t('editorError.operationFailed') };
+        return { ok: false, error: withFailureCause(t('editorError.operationFailed'), e) };
       }
+}
+
+/** A swallowed cause turns every failure into "操作失败，请重试" and hides deterministic ones (a file
+ * the browser cannot decode fails identically on retry). Keep the message, bounded. */
+function withFailureCause(base: string, error: unknown): string {
+  const detail = (error instanceof Error ? error.message : typeof error === 'string' ? error : '').trim().replace(/\s+/g, ' ').slice(0, 240);
+  return detail && detail !== base ? `${base} (${detail})` : base;
 }
 
 const cloneComposition = (comp: Composition): Composition => JSON.parse(JSON.stringify(comp)) as Composition;
@@ -4207,7 +4214,7 @@ export async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () =>
   } catch (error) {
     console.warn('[studio-tool] synchronous operation failed', error);
     restore();
-    return { ok: false, error: t('editorError.operationFailed') };
+    return { ok: false, error: withFailureCause(t('editorError.operationFailed'), error) };
   }
   const afterSyncJson = JSON.stringify(ctx.compRef.current);
   const afterSyncDocument = ctx.documentRef.current;
@@ -4240,7 +4247,7 @@ export async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () =>
     }
     console.warn('[studio-tool] asynchronous operation failed', error);
     rollbackFailure();
-    return { ok: false, error: t('editorError.operationFailed') };
+    return { ok: false, error: withFailureCause(t('editorError.operationFailed'), error) };
   }
   if (!result.ok) {
     // Synchronous mutation branches (including every P0 primitive) can be rolled back exactly. A

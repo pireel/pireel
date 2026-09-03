@@ -307,6 +307,9 @@ function translateSetClipProperties(input: Input, ctx: V3AdapterContext): V3Tran
     if (!kind) return { status: 'error', error: 'unknown_clip_id', path: `items[${index}].clipId`, value: row.clipId, fix: 'Re-read get_state.' };
     if (isNonEmptyString(row.assetId)) calls.push({ tool: 'swap_clip_media', input: { clipId: row.clipId, assetId: row.assetId } });
     const typed: Input = { clipId: row.clipId };
+    if (row.source !== undefined && !(Array.isArray(row.source) && row.source.length === 2 && row.source.every(isFiniteNumber))) {
+      return { status: 'error', error: 'invalid_value', path: `items[${index}].source`, value: row.source, fix: 'source is a two-number array [inSec, outSec], not a string.' };
+    }
     if (Array.isArray(row.source) && row.source.length === 2 && row.source.every(isFiniteNumber)) {
       typed.sourceInSec = row.source[0];
       typed.sourceOutSec = row.source[1];
@@ -583,6 +586,9 @@ function clipItemsToLegacy(rows: Input[], ctx: V3AdapterContext, path: string): 
       const duration = frameField(row, 'durationFrames', ctx, { min: 1 });
       if (isTranslation(duration)) return withPath(duration, `${path}[${index}].durationFrames`);
       item.durationSec = framesToSec(duration as number, ctx.fps);
+    }
+    if (source !== undefined && !(Array.isArray(source) && source.length === 2 && source.every(isFiniteNumber))) {
+      return { status: 'error', error: 'invalid_value', path: `${path}[${index}].source`, value: source, fix: 'source is a two-number array [inSec, outSec], not a string.' };
     }
     if (Array.isArray(source) && source.length === 2 && source.every(isFiniteNumber)) {
       item.sourceInSec = source[0];

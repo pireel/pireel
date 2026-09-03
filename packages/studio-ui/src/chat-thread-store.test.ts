@@ -134,6 +134,32 @@ describe('assistant work duration', () => {
 });
 
 describe('compactStudioChatMessagesForModel', () => {
+  it('replays each tool round as its own step: sequential assistant/tool messages and a stable prefix', async () => {
+    const { convertToModelMessages } = await import('ai');
+    const round = (n: number, text: string) => ([
+      { type: 'text', text },
+      { type: 'tool-add_clips', toolCallId: `call_00_r${n}`, state: 'output-available', input: { n }, output: { ok: true } },
+    ]);
+    // Persisted shape: no step-start parts at all.
+    const persisted = assistant([...round(1, '第一步'), ...round(2, '第二步'), ...round(3, '第三步')] as UIMessage['parts']);
+    const model = await convertToModelMessages(compactStudioChatMessagesForModel([persisted]));
+    expect(model.map((m) => m.role)).toEqual(['assistant', 'tool', 'assistant', 'tool', 'assistant', 'tool']);
+    // Each earlier step's serialization is unchanged once later steps exist.
+    const twoRounds = assistant([...round(1, '第一步'), ...round(2, '第二步')] as UIMessage['parts']);
+    const shorter = await convertToModelMessages(compactStudioChatMessagesForModel([twoRounds]));
+    expect(shorter.map((m) => JSON.stringify(m))).toEqual(model.slice(0, 4).map((m) => JSON.stringify(m)));
+    // Live shape: the SDK's own step-start parts win, never doubled.
+    const live = assistant([{ type: 'step-start' }, ...round(1, 'a'), { type: 'step-start' }, ...round(2, 'b')] as UIMessage['parts']);
+    expect(compactStudioChatMessagesForModel([live])[0]!.parts.filter((part) => (part as { type: string }).type === 'step-start')).toHaveLength(2);
+    // Parallel calls inside one step (ids call_00 / call_01) stay in one step.
+    const parallel = assistant([
+      { type: 'text', text: 'both' },
+      { type: 'tool-get_state', toolCallId: 'call_00_p', state: 'output-available', input: {}, output: { ok: true } },
+      { type: 'tool-get_transcript', toolCallId: 'call_01_p', state: 'output-available', input: {}, output: { ok: true } },
+    ] as UIMessage['parts']);
+    expect((await convertToModelMessages(compactStudioChatMessagesForModel([parallel]))).map((m) => m.role)).toEqual(['assistant', 'tool']);
+  });
+
   it('replays every timeline snapshot unchanged so the request prefix stays byte-stable', () => {
     const oldTimeline = {
       type: 'tool-get_timeline', toolCallId: 'timeline-old', state: 'output-available', input: {},
@@ -190,13 +216,14 @@ describe('compactStudioChatMessagesForModel', () => {
       { type: 'text', text: '最终总结。' },
     ] as UIMessage['parts']);
     const [forModel] = compactStudioChatMessagesForModel([message]);
-    expect(forModel!.parts).toHaveLength(5);
-    expect(forModel!.parts[0]).toEqual({ type: 'text', text: '先落主轨，再审片。' });
-    const replayedPlan = (forModel!.parts[2] as { text: string }).text;
+    const replayed = forModel!.parts.filter((part) => (part as { type: string }).type !== 'step-start');
+    expect(replayed).toHaveLength(5);
+    expect(replayed[0]).toEqual({ type: 'text', text: '先落主轨，再审片。' });
+    const replayedPlan = (replayed[2] as { text: string }).text;
     expect(replayedPlan.length).toBeLessThan(plan.length);
     expect(replayedPlan.startsWith(plan.slice(0, 2_000))).toBe(true);
     expect(replayedPlan.endsWith('[…]')).toBe(true);
-    expect(forModel!.parts[4]).toEqual({ type: 'text', text: '最终总结。' });
+    expect(replayed[4]).toEqual({ type: 'text', text: '最终总结。' });
     expect((message.parts[2] as { text: string }).text).toBe(plan);
   });
 
@@ -356,7 +383,7 @@ describe('assistantMessageSuggestsContinuation', () => {
       { type: 'text', text: `${'继续计算镜头顺序。'.repeat(900)}clip_local_c` },
     ] as UIMessage['parts']);
     expect(assistantMessageSuggestsContinuation(truncated)).toBe(true);
-    const replayed = compactStudioChatMessagesForModel([truncated])[0]!.parts;
+    const replayed = compactStudioChatMessagesForModel([truncated])[0]!.parts.filter((part) => (part as { type: string }).type !== 'step-start');
     expect(replayed[0]).toEqual(truncated.parts[0]);
     expect((replayed[1] as { text: string }).text.endsWith('[…]')).toBe(true);
   });
