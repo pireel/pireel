@@ -6,10 +6,67 @@ import type { SceneCut, SceneSegment } from './types';
  * ContentDetector, default threshold 27.
  *
  * Path: sampled frames → 64×64 canvas → HSV three-channel mean abs diff →
- * mark a cut where it exceeds the threshold.
+ * mark a cut where it exceeds the threshold → consolidate (see consolidateSceneCuts).
  *
  * Performance: a 30s video @ 5fps sampling = 150 frames → ~500ms-1s.
  */
+
+/** Bump when the cut logic changes: caches keyed on a file's analysis carry the cuts, so a
+ * stale entry would keep serving the old boundaries. */
+export const SCENE_DETECTION_VERSION = 2;
+
+/** PySceneDetect's min_scene_len (15 frames at 30fps). */
+const DEFAULT_MIN_SCENE_LEN_SEC = 0.5;
+/** A sample inside a run of over-threshold samples counts as a hard cut only when it stands this
+ * far above its in-run neighbours; otherwise the run is continuous change (a pan, handheld sway,
+ * a subject crossing the frame), not a sequence of cuts. */
+const RUN_SPIKE_RATIO = 1.8;
+
+/**
+ * Turn raw over-threshold samples into edit boundaries.
+ *
+ * The raw detector flags every sample whose difference to the previous one exceeds the threshold.
+ * Handheld or fast-moving footage exceeds it on sample after sample, which used to yield a "cut"
+ * every 0.2s and downstream a longest usable interval of a fraction of a second. Two rules fix it:
+ *
+ * 1. Runs of consecutive flagged samples are motion. Only a spike that stands well above its
+ *    neighbours inside the run is kept as a cut (a hard cut followed by movement); an isolated
+ *    flagged sample is always a cut.
+ * 2. Minimum scene length: a cut closer than `minSceneLenSec` to the previous kept cut is dropped.
+ */
+export function consolidateSceneCuts(
+  candidates: readonly SceneCut[],
+  sampleIntervalSec: number,
+  opts: { minSceneLenSec?: number } = {},
+): SceneCut[] {
+  const minSceneLen = opts.minSceneLenSec ?? DEFAULT_MIN_SCENE_LEN_SEC;
+  const sorted = [...candidates].sort((a, b) => a.timestamp - b.timestamp);
+  const runs: SceneCut[][] = [];
+  for (const cut of sorted) {
+    const run = runs[runs.length - 1];
+    if (run && cut.timestamp - run[run.length - 1]!.timestamp <= sampleIntervalSec * 1.5) run.push(cut);
+    else runs.push([cut]);
+  }
+  const kept: SceneCut[] = [];
+  for (const run of runs) {
+    if (run.length === 1) {
+      kept.push(run[0]!);
+      continue;
+    }
+    for (let i = 0; i < run.length; i++) {
+      const neighbours = [run[i - 1], run[i + 1]].filter((c): c is SceneCut => !!c);
+      const reference = neighbours.reduce((sum, c) => sum + c.score, 0) / neighbours.length;
+      if (run[i]!.score >= reference * RUN_SPIKE_RATIO) kept.push(run[i]!);
+    }
+  }
+  const out: SceneCut[] = [];
+  for (const cut of kept) {
+    const last = out[out.length - 1];
+    if (last && cut.timestamp - last.timestamp < minSceneLen) continue;
+    out.push(cut);
+  }
+  return out;
+}
 export async function detectScenes(
   file: File,
   opts: {
@@ -19,6 +76,8 @@ export async function detectScenes(
     threshold?: number;
     /** Size the sampled image is scaled to for comparison (default 64) */
     thumbSize?: number;
+    /** Shortest scene a cut may open (default 0.5s); see consolidateSceneCuts. */
+    minSceneLenSec?: number;
     onProgress?: (p: number) => void;
   } = {},
 ): Promise<SceneCut[]> {
@@ -65,7 +124,7 @@ export async function detectScenes(
         sample.close();
       }
     }
-    return cuts;
+    return consolidateSceneCuts(cuts, interval, { minSceneLenSec: opts.minSceneLenSec });
   } finally {
     await input.dispose();
   }

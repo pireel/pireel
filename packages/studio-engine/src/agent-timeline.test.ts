@@ -313,6 +313,28 @@ describe('shared agent timeline atoms', () => {
     expect(narration.clips[0]).toMatchObject({ sourceInSec: 0, sourceOutSec: 46.1 });
   });
 
+  it('stores muted on overlay (broll) media clips as the shot-scoped audio mute', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', {
+      assets: [
+        { id: 'local:quiet', kind: 'video', localSig: 'quiet.mp4:100:1', durationSec: 5 },
+        { id: 'local:loud', kind: 'video', localSig: 'loud.mp4:200:2', durationSec: 5 },
+      ],
+    }).document!;
+    const placed = runAgentTimelineTool(document, 'add_clips', {
+      clips: [
+        { id: 'quiet-clip', role: 'broll', assetId: 'local:quiet', startSec: 1, muted: true },
+        { id: 'loud-clip', role: 'broll', assetId: 'local:loud', startSec: 8 },
+      ],
+    });
+    expect(placed.ok).toBe(true);
+    const broll = placed.document!.timeline.tracks.find((track) => track.role === 'broll')!;
+    const quiet = broll.clips.find((clip) => clip.id === 'quiet-clip') as { video?: { audioMuted?: boolean } };
+    const loud = broll.clips.find((clip) => clip.id === 'loud-clip') as { video?: { audioMuted?: boolean } };
+    expect(quiet.video?.audioMuted).toBe(true);
+    expect(loud.video?.audioMuted).toBeUndefined();
+  });
+
   it('keeps an overwrite destination track alive when a later clip fully replaces its contents', () => {
     let document = emptyEditorDocumentV2({ fps: 30 });
     document = runAgentTimelineTool(document, 'register_media', {

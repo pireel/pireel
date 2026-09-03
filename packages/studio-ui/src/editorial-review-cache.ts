@@ -16,6 +16,7 @@
  */
 
 import type { EditorialCandidateReview } from '@pireel/studio-engine/editorial-candidates';
+import { SCENE_DETECTION_VERSION } from '@pireel/studio-engine/video-edit/scene-detection';
 import { kvDelete, kvGet, kvSet } from './idb-kv';
 import { remoteDerivedGet, remoteDerivedPut } from './derived-cache-remote';
 import type { VisualQuestionAnswer } from '@pireel/studio-engine/visual-question';
@@ -49,7 +50,9 @@ function fnv(value: string): string {
 }
 
 export function editorialReviewCacheKey(fileSigValue: string, maxCandidates: number): string {
-  return `${fnv(fileSigValue)}_${maxCandidates}_${fileSigValue.length.toString(36)}`;
+  // Candidates are cut on the detector's scene boundaries, so its version is part of the key:
+  // reviews produced from the old fragmented cuts must miss instead of resurfacing 0.3s "shots".
+  return `${fnv(fileSigValue)}_${maxCandidates}_${fileSigValue.length.toString(36)}_c${SCENE_DETECTION_VERSION}`;
 }
 
 export function editorialBriefHash(brief: string): string {
