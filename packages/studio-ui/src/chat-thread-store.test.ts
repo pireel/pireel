@@ -16,7 +16,6 @@ import {
   editorialPlacementIssue,
   effectiveStudioTurnMessages,
   hasCompletedEditorialPlacement,
-  hasPostAssemblyTimelineSnapshot,
   MAX_STUDIO_TOOL_CALLS_PER_USER_TURN,
   narrationDurationFromMessages,
   recordStudioTurnToolResult,
@@ -141,7 +140,7 @@ describe('assistant work duration', () => {
 });
 
 describe('compactStudioChatMessagesForModel', () => {
-  it('replays only the newest full timeline snapshot in a long tool turn', () => {
+  it('replays every timeline snapshot unchanged so the request prefix stays byte-stable', () => {
     const oldTimeline = {
       type: 'tool-get_timeline', toolCallId: 'timeline-old', state: 'output-available', input: {},
       output: { ok: true, data: { durationSec: 0, tracks: [{ role: 'primaryNarrative', clips: [] }], dense: 'x'.repeat(20_000) } },
@@ -153,9 +152,8 @@ describe('compactStudioChatMessagesForModel', () => {
     const message = assistant([oldTimeline, currentTimeline] as UIMessage['parts']);
 
     const [forModel] = compactStudioChatMessagesForModel([message]);
-    expect((forModel!.parts[0] as { output: { data: Record<string, unknown> } }).output.data).toEqual(expect.objectContaining({ superseded: true }));
+    expect((forModel!.parts[0] as { output: unknown }).output).toEqual(oldTimeline.output);
     expect((forModel!.parts[1] as { output: unknown }).output).toEqual(currentTimeline.output);
-    expect((message.parts[0] as { output: unknown }).output).toEqual(oldTimeline.output);
   });
 
   it('keeps the complete visual receipt for display but replays only editorial verdict evidence', () => {
@@ -208,7 +206,7 @@ describe('compactStudioChatMessagesForModel', () => {
     expect((message.parts[2] as { text: string }).text).toBe(plan);
   });
 
-  it('treats v3 get_state snapshots like get_timeline: only the newest is replayed', () => {
+  it('replays v3 get_state snapshots unchanged as well', () => {
     const older = {
       type: 'tool-get_state', toolCallId: 'state-old', state: 'output-available', input: {},
       output: { ok: true, data: { tracks: [{ role: 'primaryNarrative', clips: [] }], dense: 'x'.repeat(20_000) } },
@@ -218,7 +216,7 @@ describe('compactStudioChatMessagesForModel', () => {
       output: { ok: true, data: { tracks: [{ role: 'primaryNarrative', clips: [{ id: 'clip-1' }] }] } },
     };
     const [forModel] = compactStudioChatMessagesForModel([assistant([older, newest] as UIMessage['parts'])]);
-    expect((forModel!.parts[0] as { output: { data: Record<string, unknown> } }).output.data).toEqual(expect.objectContaining({ superseded: true }));
+    expect((forModel!.parts[0] as { output: unknown }).output).toEqual(older.output);
     expect((forModel!.parts[1] as { output: unknown }).output).toEqual(newest.output);
   });
 
@@ -346,12 +344,6 @@ describe('editorial placement receipts', () => {
       output: { ok: true, data: { editorialAssembly: { targetDurationSec: 1.8, actualDurationSec: 1.8 } } },
     }] as UIMessage['parts']);
     expect(hasCompletedEditorialPlacement([review, completed])).toBe(true);
-    expect(hasPostAssemblyTimelineSnapshot([review, completed])).toBe(false);
-    const verified = assistant([{
-      type: 'tool-get_timeline', toolCallId: 'timeline-after-assembly', state: 'output-available', input: {},
-      output: { ok: true, data: { durationSec: 1.8, tracks: [] } },
-    }] as UIMessage['parts']);
-    expect(hasPostAssemblyTimelineSnapshot([review, completed, verified])).toBe(true);
   });
 
   it('stamps pool-completion filler clips with their OWN asset id and passes the placement guard', () => {
@@ -528,48 +520,6 @@ describe('editorial placement receipts', () => {
 });
 
 describe('synchronous studio turn ledger', () => {
-  it('locks picture immediately and detects one unchanged timeline re-read', () => {
-    const ledger = createStudioTurnLedger();
-    recordStudioTurnToolResult(ledger, {
-      toolId: 'add_clips',
-      toolCallId: 'assembly-live',
-      input: {},
-      output: { ok: true, data: { delta: { duration: [0, 4] }, editorialAssembly: { actualDurationSec: 4 } } },
-      canMutate: true,
-    });
-    expect(ledger.pictureLocked).toBe(true);
-
-    const first = recordStudioTurnToolResult(ledger, {
-      toolId: 'get_timeline', toolCallId: 'timeline-1', input: {},
-      output: { ok: true, data: { durationSec: 4, tracks: [{ id: 'primary' }] } }, canMutate: false,
-    });
-    const repeated = recordStudioTurnToolResult(ledger, {
-      toolId: 'get_timeline', toolCallId: 'timeline-2', input: {},
-      output: { ok: true, data: { durationSec: 4, tracks: [{ id: 'primary' }] } }, canMutate: false,
-    });
-    expect(first.timelineUnchanged).toBe(false);
-    expect(repeated.timelineUnchanged).toBe(true);
-    expect(ledger.blockFurtherTimelineReads).toBe(true);
-  });
-
-  it('forces the final response only after persistently refused timeline reads', () => {
-    const ledger = createStudioTurnLedger();
-    const read = (id: string) => recordStudioTurnToolResult(ledger, {
-      toolId: 'get_timeline', toolCallId: id, input: {},
-      output: { ok: true, data: { durationSec: 4, tracks: [] } }, canMutate: false,
-    });
-    read('t1'); read('t2'); read('t3');
-    expect(ledger.forceFinalResponse).toBe(false);
-    // A real edit re-arms the read budget instead of counting toward the loop breaker.
-    recordStudioTurnToolResult(ledger, {
-      toolId: 'add_clips', toolCallId: 'edit', input: {},
-      output: { ok: true, data: { delta: { durationSec: [4, 6] } } }, canMutate: true,
-    });
-    expect(ledger.refusedTimelineReads).toBe(0);
-    read('t4'); read('t5'); read('t6'); read('t7');
-    expect(ledger.forceFinalResponse).toBe(true);
-  });
-
   it('marks pool exhaustion on an under-target assembly and clears it on new speech or coverage', () => {
     const ledger = createStudioTurnLedger();
     recordStudioTurnToolResult(ledger, {
@@ -683,27 +633,6 @@ describe('synchronous studio turn ledger', () => {
       output: { ok: true, data: { editorialAssembly: { targetDurationSec: 53.8, actualDurationSec: 35.95 } } },
     }] as UIMessage['parts']);
     expect(hasCompletedEditorialPlacement([shortReceipt])).toBe(false);
-    expect(hasPostAssemblyTimelineSnapshot([shortReceipt])).toBe(false);
-  });
-
-  it('invalidates the read snapshot when a NO_UNDO tool still changes state (undo, output switch)', () => {
-    const ledger = createStudioTurnLedger();
-    const snapshot = { ok: true, data: { durationSec: 4, tracks: [{ id: 'primary' }] } };
-    recordStudioTurnToolResult(ledger, {
-      toolId: 'get_timeline', toolCallId: 'timeline-1', input: {}, output: snapshot, canMutate: false,
-    });
-    recordStudioTurnToolResult(ledger, {
-      toolId: 'get_timeline', toolCallId: 'timeline-2', input: {}, output: snapshot, canMutate: false,
-    });
-    expect(ledger.blockFurtherTimelineReads).toBe(true);
-
-    // undo carries a delta but sits outside the composition undo roster (canMutate=false).
-    recordStudioTurnToolResult(ledger, {
-      toolId: 'undo', toolCallId: 'undo-1', input: {},
-      output: { ok: true, data: { delta: { durationSec: [4, 0.1] } } }, canMutate: false,
-    });
-    expect(ledger.blockFurtherTimelineReads).toBe(false);
-    expect(ledger.lastTimelineFingerprint).toBeNull();
   });
 
   it('recovers the narration target from speech receipts when the clip is absent from the timeline', () => {
@@ -738,7 +667,6 @@ describe('synchronous studio turn ledger', () => {
     };
     expect(hasCompletedEditorialPlacement([oldAssembly])).toBe(true);
     expect(hasCompletedEditorialPlacement([oldAssembly, newUserRequest])).toBe(false);
-    expect(hasPostAssemblyTimelineSnapshot([oldAssembly, newUserRequest])).toBe(false);
   });
 
   it('blocks undo after a failed mutation until another mutation actually succeeds', () => {
@@ -867,13 +795,15 @@ describe('assistantMessageSuggestsContinuation', () => {
     ] as UIMessage['parts']))).toBe(true);
   });
 
-  it('detects an output-limit truncation and omits its scratchpad from model replay', () => {
+  it('detects an output-limit truncation but still replays its text (capped, byte-stable)', () => {
     const truncated = assistant([
       { type: 'tool-get_timeline', toolCallId: 'timeline-1', state: 'output-available', input: {}, output: {} },
       { type: 'text', text: `${'继续计算镜头顺序。'.repeat(900)}clip_local_c` },
     ] as UIMessage['parts']);
     expect(assistantMessageSuggestsContinuation(truncated)).toBe(true);
-    expect(compactStudioChatMessagesForModel([truncated])[0]!.parts).toEqual([truncated.parts[0]]);
+    const replayed = compactStudioChatMessagesForModel([truncated])[0]!.parts;
+    expect(replayed[0]).toEqual(truncated.parts[0]);
+    expect((replayed[1] as { text: string }).text.endsWith('[…]')).toBe(true);
   });
 
   it('does not annotate a completed answer or duplicate an approval interaction', () => {

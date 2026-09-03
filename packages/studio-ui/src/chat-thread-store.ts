@@ -28,10 +28,6 @@ export interface StoredThread {
 
 /** Editorial evidence arrives as analyze_visual receipts on the legacy surface and as inspect_media
  * (mode editorial) receipts on v3; both carry the same editorialCandidates payload. */
-/** Whole-output state reads: legacy get_timeline and its v3 successor get_state. Both answer the same
- * question, so the unchanged-dedupe, read-block and superseded-snapshot machinery treats them alike. */
-export const isTimelineReadToolId = (id: string): boolean => id === 'get_timeline' || id === 'get_state';
-
 export const isVisualAnalysisToolId = (id: string | undefined): boolean => id === 'analyze_visual' || id === 'inspect_media';
 
 export const MAX_VISUAL_REVIEWS_PER_USER_TURN = 2;
@@ -44,7 +40,6 @@ export const MAX_STUDIO_TOOL_CALLS_PER_USER_TURN = 40;
 /** A model that keeps re-reading an unchanged timeline after being told to stop is looping, not
  * verifying — a real turn burned ~28 of its 40 calls on refused reads and died mid-edit. After
  * this many consecutive refusals with no mutation in between, the turn goes final-only. */
-export const MAX_STUDIO_REFUSED_TIMELINE_READS = 3;
 /** A call that failed with the exact same tool and input will fail the exact same way; a model
  * re-firing it verbatim (e.g. removing already-removed clip ids seven times) is looping. */
 export const MAX_STUDIO_IDENTICAL_FAILURES = 3;
@@ -60,12 +55,7 @@ export interface StudioTurnLedger {
   toolCallCount: number;
   forceFinalResponse: boolean;
   pictureLocked: boolean;
-  postAssemblyTimelineRead: boolean;
-  blockFurtherTimelineReads: boolean;
   unsafeUndoBlocked: boolean;
-  lastTimelineFingerprint: string | null;
-  /** Consecutive get_timeline calls answered with a refusal (unchanged-dedupe or read-block). */
-  refusedTimelineReads: number;
   /** Signature (tool + input) of the most recent failed call, for detecting verbatim retries. */
   lastFailureSig: string | null;
   /** How many consecutive times that same failing call has been fired. */
@@ -116,11 +106,7 @@ export function createStudioTurnLedger(): StudioTurnLedger {
     toolCallCount: 0,
     forceFinalResponse: false,
     pictureLocked: false,
-    postAssemblyTimelineRead: false,
-    blockFurtherTimelineReads: false,
     unsafeUndoBlocked: false,
-    lastTimelineFingerprint: null,
-    refusedTimelineReads: 0,
     lastFailureSig: null,
     repeatedFailureCount: 0,
     lastFailureToolId: null,
@@ -161,7 +147,7 @@ function studioTimelineFingerprint(data: unknown): string | null {
 export function recordStudioTurnToolResult(
   ledger: StudioTurnLedger,
   record: StudioTurnToolResultRecord,
-): { timelineUnchanged: boolean; repeatedFailureCount: number; sameToolFailureCount: number } {
+): { repeatedFailureCount: number; sameToolFailureCount: number } {
   const failed = !!record.errorText || record.output?.ok === false;
   if (failed) {
     const failureSig = `${record.toolId}:${studioTimelineFingerprint(record.input) ?? ''}`;
@@ -184,8 +170,7 @@ export function recordStudioTurnToolResult(
     : null;
   // Mutation is judged by the receipt's delta, not by the undo-stack roster: undo and the
   // output-scope tools sit outside canMutate yet genuinely change project state, and their
-  // receipts carry a delta. Gating on canMutate left the read-snapshot fingerprint live across
-  // those changes, so the next get_timeline was refused against a stale world.
+  // receipts carry a delta.
   const didMutate = !failed && !!data?.delta && typeof data.delta === 'object';
   const editorialAssembly = data?.editorialAssembly;
   if (!failed && editorialAssembly && typeof editorialAssembly === 'object') {
@@ -201,31 +186,7 @@ export function recordStudioTurnToolResult(
   if (record.toolId === 'generate_speech' && !failed) ledger.assemblyCapacityExhausted = false;
 
   if (record.canMutate && failed) ledger.unsafeUndoBlocked = true;
-  if (didMutate) {
-    ledger.unsafeUndoBlocked = false;
-    // A real state change invalidates the previous read snapshot and permits one fresh verification.
-    ledger.lastTimelineFingerprint = null;
-    ledger.blockFurtherTimelineReads = false;
-    ledger.postAssemblyTimelineRead = false;
-    ledger.refusedTimelineReads = 0;
-  }
-
-  let timelineUnchanged = false;
-  if (isTimelineReadToolId(record.toolId) && !failed) {
-    const fingerprint = studioTimelineFingerprint(data);
-    timelineUnchanged = !!fingerprint && fingerprint === ledger.lastTimelineFingerprint;
-    if (fingerprint) ledger.lastTimelineFingerprint = fingerprint;
-    if (ledger.pictureLocked) ledger.postAssemblyTimelineRead = true;
-    if (timelineUnchanged) ledger.blockFurtherTimelineReads = true;
-    // Refusals include both the unchanged-dedupe and pre-execution read-block receipts (the
-    // latter arrive here as skipped successes). Persistent defiance ends the turn's tool budget.
-    if (timelineUnchanged || record.output?.skipped === true) {
-      ledger.refusedTimelineReads += 1;
-      if (ledger.refusedTimelineReads >= MAX_STUDIO_REFUSED_TIMELINE_READS) ledger.forceFinalResponse = true;
-    } else {
-      ledger.refusedTimelineReads = 0;
-    }
-  }
+  if (didMutate) ledger.unsafeUndoBlocked = false;
 
   ledger.receipts.push((record.errorText
     ? {
@@ -242,7 +203,7 @@ export function recordStudioTurnToolResult(
         input: record.input,
         output: record.output ?? { ok: true },
       }) as UIMessage['parts'][number]);
-  return { timelineUnchanged, repeatedFailureCount: ledger.repeatedFailureCount, sameToolFailureCount: ledger.sameToolFailureCount };
+  return { repeatedFailureCount: ledger.repeatedFailureCount, sameToolFailureCount: ledger.sameToolFailureCount };
 }
 
 export function shouldBlockStudioTurnUndo(ledger: StudioTurnLedger): boolean {
@@ -427,7 +388,7 @@ function compactVisualAnalysisData(data: Record<string, unknown>): Record<string
   for (const key of [
     'analysisMode', 'assetId', 'localAssetId', 'label', 'durationSec', 'hasAudio',
     'audioAssessment', 'speechLikely', 'audibleSec', 'speechSec', 'editorialBrief',
-    'editorialComparisonSummary', 'editorialReviewReused', 'acceptedDurationSec', 'instruction', 'ok', 'error',
+    'editorialComparisonSummary', 'editorialReviewReused', 'acceptedDurationSec', 'note', 'ok', 'error',
   ]) {
     if (data[key] !== undefined) compactData[key] = data[key];
   }
@@ -464,81 +425,39 @@ function compactVisualAnalysisData(data: Record<string, unknown>): Record<string
 /** Keep the full visual receipt in the UI/persisted thread, but send only reusable evidence back to
  * the model on later tool-continuation requests. Replaying dense per-frame tracks made real Studio
  * turns grow from ~110k to ~190k input tokens without adding editorial information. */
-const MAX_REPLAYED_PROGRESS_TEXT_CHARS = 2_500;
+/** Cap on any replayed text part. Per-part and deterministic, so the same part is sent identically
+ * at every step. */
+const MAX_REPLAYED_TEXT_CHARS = 4_000;
 
+/** What the model replays: the persisted thread, byte-stable across steps. Every transform here is
+ * per-part and deterministic — a part sent at step N is sent unchanged at step N+1 — so the
+ * provider's prompt cache keeps the whole prefix. Never drop or rewrite earlier parts by position:
+ * stripping the assistant's own progress prose and marking older snapshots "superseded" invalidated
+ * the cache from the first rewrite onward (real turns re-paid 40–60k tokens per step) and erased the
+ * model's memory of what it had already done. The only reduction is the visual receipts' dense
+ * per-frame payload, trimmed the same way every time. */
 export function compactStudioChatMessagesForModel(messages: UIMessage[]): UIMessage[] {
   return compactStudioChatMessages(messages).map((message) => {
     if (message.role !== 'assistant') return message;
-    const sourceParts = message.parts ?? [];
-    const unfinishedVisibleTail = assistantMessageSuggestsContinuation(message);
-    const lastToolIndex = sourceParts.reduce((latest, part, index) => {
-      const type = (part as { type?: string }).type ?? '';
-      return type === 'dynamic-tool' || type.startsWith('tool-') ? index : latest;
-    }, -1);
-    const lastTimelineIndex = sourceParts.reduce((latest, part, index) => {
-      const candidate = part as { type?: string; toolName?: string };
-      const toolId = candidate.type === 'dynamic-tool'
-        ? candidate.toolName
-        : candidate.type?.startsWith('tool-')
-          ? candidate.type.slice('tool-'.length)
-          : '';
-      return isTimelineReadToolId(toolId ?? '') ? index : latest;
-    }, -1);
     return {
       ...message,
-      parts: sourceParts.flatMap((part, index) => {
-        const candidate = part as {
-          type?: string;
-          toolName?: string;
-          output?: unknown;
-          text?: string;
-        };
+      parts: (message.parts ?? []).map((part) => {
+        const candidate = part as { type?: string; toolName?: string; output?: unknown; text?: string };
         if (candidate.type === 'text') {
           const text = candidate.text ?? '';
-          // The prose between receipts is the model's own memory of what it decided and did. Dropping
-          // it (an earlier token economy) turned a long tool turn into a bare burst of calls with no
-          // narration: every round then re-planned from scratch, re-placed what it had already placed,
-          // and attributed its own earlier calls to "accidental" triggers. Replay it, capped so one
-          // runaway plan table cannot dominate the request; receipts stay the authority on state.
-          if (index <= lastToolIndex) {
-            return [{
-              ...part,
-              text: text.length > MAX_REPLAYED_PROGRESS_TEXT_CHARS
-                ? `${text.slice(0, MAX_REPLAYED_PROGRESS_TEXT_CHARS)}\n[…]`
-                : text,
-            } as typeof part];
-          }
-          // A provider can exhaust its output budget in visible scratchpad prose after the last
-          // receipt. Keep that text in the UI for diagnosis, but do not feed it back as if it were
-          // an authoritative final instruction when the recovery turn resumes from live state.
-          if (unfinishedVisibleTail) return [];
-          return [{ ...part, text: text.length > 6_000 ? text.slice(-6_000) : text } as typeof part];
+          return text.length > MAX_REPLAYED_TEXT_CHARS
+            ? { ...part, text: `${text.slice(0, MAX_REPLAYED_TEXT_CHARS)}\n[…]` } as typeof part
+            : part;
         }
         const toolId = candidate.type === 'dynamic-tool'
           ? candidate.toolName
           : candidate.type?.startsWith('tool-')
             ? candidate.type.slice('tool-'.length)
             : '';
-        // A long tool turn may request the timeline repeatedly. Replaying every complete snapshot
-        // makes mutually obsolete project states dominate the next model request; only the newest
-        // snapshot is authoritative. The UI/persisted history still keeps every original receipt.
-        if (isTimelineReadToolId(toolId ?? '') && index !== lastTimelineIndex && candidate.output && typeof candidate.output === 'object') {
-          const output = candidate.output as { ok?: unknown; summary?: unknown; error?: unknown };
-          return [{
-            ...part,
-            output: {
-              ...output,
-              data: {
-                superseded: true,
-                instruction: 'A newer timeline snapshot is present later in this message. Ignore this snapshot.',
-              },
-            },
-          } as typeof part];
-        }
-        if (!isVisualAnalysisToolId(toolId) || !candidate.output || typeof candidate.output !== 'object') return [part];
+        if (!isVisualAnalysisToolId(toolId ?? '') || !candidate.output || typeof candidate.output !== 'object') return part;
         const output = candidate.output as { ok?: unknown; summary?: unknown; error?: unknown; data?: unknown };
-        if (!output.data || typeof output.data !== 'object') return [part];
-        return [{ ...part, output: { ...output, data: compactVisualAnalysisData(output.data as Record<string, unknown>) } } as typeof part];
+        if (!output.data || typeof output.data !== 'object') return part;
+        return { ...part, output: { ...output, data: compactVisualAnalysisData(output.data as Record<string, unknown>) } } as typeof part;
       }),
     };
   });
@@ -877,33 +796,6 @@ export function hasCompletedEditorialPlacement(allMessages: readonly UIMessage[]
   }));
 }
 
-/** One authoritative timeline read after picture lock is enough for deterministic delivery checks. */
-export function hasPostAssemblyTimelineSnapshot(allMessages: readonly UIMessage[]): boolean {
-  const messages = currentTurnMessages(allMessages);
-  let pictureLocked = false;
-  for (const message of messages) {
-    if (message.role !== 'assistant') continue;
-    for (const part of message.parts ?? []) {
-      const candidate = part as { type?: string; toolName?: string; state?: string; output?: unknown };
-      const toolId = candidate.type === 'dynamic-tool'
-        ? candidate.toolName
-        : candidate.type?.startsWith('tool-')
-          ? candidate.type.slice('tool-'.length)
-          : '';
-      const output = candidate.output as { ok?: unknown; data?: unknown } | undefined;
-      const assembly = toolId === 'add_clips'
-        && candidate.state === 'output-available'
-        && output?.ok === true
-        && output.data
-        && typeof output.data === 'object'
-        ? (output.data as { editorialAssembly?: unknown }).editorialAssembly
-        : null;
-      if (assembly && editorialAssemblyCoversTarget(assembly)) pictureLocked = true;
-      if (pictureLocked && isTimelineReadToolId(toolId ?? "") && candidate.state === 'output-available' && output?.ok === true) return true;
-    }
-  }
-  return false;
-}
 
 /**
  * Once a source has an editorial receipt in this conversation, picture placement must honor it.

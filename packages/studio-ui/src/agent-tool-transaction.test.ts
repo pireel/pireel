@@ -1079,7 +1079,7 @@ describe('Agent composition transaction boundary', () => {
         speechLikely: true,
         sceneCutsSec: [6],
         segments: [{ description: 'Hands demonstrate the product.' }],
-        instruction: expect.stringContaining('Descriptive content observations only'),
+        note: expect.stringContaining('Content description only'),
       },
     });
     expect(Object.keys(h.documentRef.current.assets)).toEqual(assetIdsBefore);
@@ -1207,7 +1207,7 @@ describe('Agent composition transaction boundary', () => {
         analysisMode: 'local-geometry',
         sceneCutsSec: [4],
         subjectTracks: [{ subject: { coordinateSpace: 'source-normalized' } }],
-        instruction: expect.stringContaining('Technical measurements only'),
+        note: expect.stringContaining('Measurements only'),
       },
     });
     expect((result as { data?: Record<string, unknown> }).data).not.toHaveProperty('segments');
@@ -1261,7 +1261,7 @@ describe('Agent composition transaction boundary', () => {
         analysisMode: 'editorial-candidates',
         editorialComparisonSummary: expect.stringContaining('intentional pose'),
         editorialCandidates: [{ candidateId: 'candidate-1', verdict: 'strong', roleFit: [{ role: 'hook' }] }],
-        instruction: expect.stringContaining('Do not run another visual review after placement'),
+        note: expect.stringContaining('Editorial verdicts per candidate'),
       },
     });
     expect(editorialReviewMocks.reviewEditorialCandidates).toHaveBeenCalledWith(
@@ -1375,7 +1375,7 @@ describe('Agent composition transaction boundary', () => {
             { sourceId: 'asset-first', rank: 2, openingFrameScore: 84 },
           ],
         },
-        instruction: expect.stringContaining('shared cross-source visual comparison'),
+        note: expect.stringContaining('openingComparison ranks the opening'),
       },
     });
     expect(visualMocks.analyzeVisualGeometry).toHaveBeenCalledTimes(2);

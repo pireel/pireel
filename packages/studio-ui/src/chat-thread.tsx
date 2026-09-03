@@ -77,11 +77,9 @@ import {
   editorialPlacementIssue,
   effectiveStudioTurnMessages,
   hasCompletedEditorialPlacement,
-  hasPostAssemblyTimelineSnapshot,
   isRecoverableStudioChatError,
   narrationDurationFromMessages,
   prepareEditorialPlacement,
-  isTimelineReadToolId,
   recordStudioTurnToolResult,
   reserveStudioTurnToolCall,
   shouldBlockStudioTurnUndo,
@@ -271,22 +269,7 @@ export function ChatThread({
           output,
           canMutate,
         });
-        let reported = output;
-        if (recorded.timelineUnchanged) {
-          reported = {
-            ok: true,
-            summary: studioLocale().toLowerCase().startsWith("zh")
-              ? `时间线和上次读取完全一致。不要再调用 ${id}——立即执行下一步编辑，或给出最终回复`
-              : `The timeline is exactly as your last read reported. Do not call ${id} again — take the next editing action or write the final reply.`,
-            data: {
-              unchanged: true,
-              instruction: `The preceding timeline snapshot is still authoritative. Do NOT call ${id} again this turn: your next call MUST be an editing tool, or you must write the final user-facing reply. Repeated reads end this turn's tool budget.`,
-            },
-          };
-          const lastReceipt = ledger.receipts.at(-1) as { output?: unknown } | undefined;
-          if (lastReceipt) lastReceipt.output = reported;
-        }
-        addToolOutput({ tool: id, toolCallId: toolCall.toolCallId, output: reported });
+        addToolOutput({ tool: id, toolCallId: toolCall.toolCallId, output });
         return recorded;
       };
       const publishError = (errorText: string) => {
@@ -423,25 +406,6 @@ export function ChatThread({
             : "Picture judgment is complete; delivery uses deterministic state checks only.",
           data: {
             instruction: "Do not run another visual review or rebuild the montage. Verify coverage, canvas fill, muted source audio, and track boundaries from the current project state, then finish.",
-          },
-        });
-        return;
-      }
-      if (
-        isTimelineReadToolId(id)
-        && (ledger.blockFurtherTimelineReads || (
-          editorialPictureLocked
-          && (ledger.postAssemblyTimelineRead || hasPostAssemblyTimelineSnapshot(effectiveMessages))
-        ))
-      ) {
-        publishSuccess({
-          ok: true,
-          skipped: true,
-          summary: studioLocale().toLowerCase().startsWith("zh")
-            ? `基础状态已核对完毕。不要再调用 ${id}——继续未完成的编辑，或给出最终回复`
-            : `The delivery state is verified. Do not call ${id} again — continue unfinished edits or write the final reply.`,
-          data: {
-            instruction: `Do NOT call ${id} again this turn. Use the latest authoritative snapshot already present: your next call MUST be an editing tool, or you must write the final user-facing reply. Repeated reads end this turn's tool budget.`,
           },
         });
         return;

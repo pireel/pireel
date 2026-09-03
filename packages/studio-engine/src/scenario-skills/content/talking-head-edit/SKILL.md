@@ -199,6 +199,16 @@ When narration is longer than the supplied demonstration footage, never loop or 
 
 Search from the scene's evidence and asset strategy, not from one noun in the transcript. Check identity, time, place, product, and causal relevance before inserting.
 
+### Placing from a review
+
+inspect_media mode:editorial returns, per source, candidate ranges with a verdict (strong / usable / reject), refined startSec/endSec, scores, and reserve:true on secondary ranges; a batch adds acceptedDurationSec and, when several sources qualify, an openingComparison ranked across sources. Read it as the complete selection result:
+
+- Place only strong or usable ranges, inside their refined bounds; no score overrides a reject.
+- Open with openingComparison rank 1 when present; otherwise the accepted range with the highest openingFrameScore.
+- Order the rest by score and by visible continuity of action and setting; cut a scored child range rather than consuming a whole reservoir.
+- Use a reserve range only when accepted capacity falls short of the narration or a deliberate echo needs it.
+- Place everything in one add_clips batch, muted (source audio was excluded from the review). Do not review again or retry the selection after placing; leave rejected sources unused.
+
 ## Step 9: Direct captions, sound, and transitions
 
 ### Captions

@@ -1526,7 +1526,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                       })),
                     },
                   } : {}),
-                  instruction: `This batch is the complete source-selection review. The non-overlapping accepted source capacity is ${acceptedDurationSec}s. ${openingComparison?.contenders.length ? `Use openingComparison rank 1 as the opening; it was selected by one shared cross-source visual comparison, so do not re-rank independent per-source scores.` : 'Only one accepted opening contender was available, or the shared opening comparison was unavailable; use the strongest accepted candidate without another review.'} Then order the remaining strong or usable ranges by score and visible action/setting continuity. Choose an appropriate scored child cut instead of consuming every reservoir whole. Ranges marked reserve:true are secondary accepted ranges from the same source: use one only when the accepted capacity falls short of the narration or a deliberate structural echo needs it; otherwise leave reserves unused. Place the selected source-video clips in one batch with muted=true. Source audio was excluded and must not affect ranking. Do not run another visual review or retry the selection after placement; leave failed or fully rejected sources unused.`,
+                  note: `Complete review of this batch; accepted capacity ${acceptedDurationSec}s${openingComparison?.contenders.length ? '; openingComparison ranks the opening across sources' : ''}. Selection rules are in the talking-head-edit / montage-edit skill (Placing from a review).`,
                 },
               };
               clearToolProgress(toolId);
@@ -1601,11 +1601,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                           ...(opts?.collectOpeningEvidence ? {
                             __openingEvidence: editorialOpeningEvidence(file, entry.assetId, entry.label, reviewed.candidates),
                           } : {}),
-                          instruction: 'Use this as the complete selection result. Place only final verdict strong or usable inside its refined startSec/endSec; aestheticScore and roleFit never override reject. For an opening, prefer the accepted range with the highest openingFrameScore that satisfies the requested face/composition preference. Place source video with muted=true because source audio was excluded. Do not run another visual review after placement.',
+                          note: 'Editorial verdicts per candidate range; the selection rules are in the talking-head-edit / montage-edit skill (Placing from a review).',
                         } : geometryOnly ? {
-                          instruction: 'Technical measurements only. They do not approve a source range for aesthetic or action-based selection; request one editorial review before placing any visually selected interval.',
+                          note: 'Measurements only, not an editorial verdict.',
                         } : {
-                          instruction: 'Descriptive content observations only. They do not approve a source range for aesthetic or action-based selection; request one editorial review before placing any visually selected interval.',
+                          note: 'Content description only, not an editorial verdict.',
                         }),
                       },
                     }
@@ -1769,11 +1769,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                         ...(opts?.collectOpeningEvidence ? {
                           __openingEvidence: editorialOpeningEvidence(sourceFile!, targetAssetId, targetAsset.label || targetAssetId, reviewed.candidates),
                         } : {}),
-                        instruction: 'Use this as the complete selection result. Place only final verdict strong or usable inside its refined startSec/endSec; aestheticScore and roleFit never override reject. For an opening, prefer the accepted range with the highest openingFrameScore that satisfies the requested face/composition preference. Place source video with muted=true because source audio was excluded. Do not run another visual review after placement.',
+                        note: 'Editorial verdicts per candidate range; the selection rules are in the talking-head-edit / montage-edit skill (Placing from a review).',
                       } : geometryOnly ? {
-                        instruction: 'Technical measurements only. They do not approve a source range for aesthetic or action-based selection; request one editorial review before placing any visually selected interval.',
+                        note: 'Measurements only, not an editorial verdict.',
                       } : {
-                        instruction: 'Descriptive content observations only. They do not approve a source range for aesthetic or action-based selection; request one editorial review before placing any visually selected interval.',
+                        note: 'Content description only, not an editorial verdict.',
                       }),
                     },
                   }
