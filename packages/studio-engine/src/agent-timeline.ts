@@ -122,7 +122,7 @@ function uniqueId(stem: string, used: ReadonlySet<string>): string {
   return id;
 }
 
-function splitSpeechSentences(text: string): string[] {
+export function splitSpeechSentences(text: string): string[] {
   const normalized = text.trim().replace(/\s+/g, ' ');
   if (!normalized) return [];
   return normalized.match(/[^。！？!?；;\n]+[。！？!?；;]?/g)?.map((part) => part.trim()).filter(Boolean) ?? [normalized];
@@ -138,7 +138,7 @@ export function transcriptFromExactText(text: string, durationSec: number): Tran
   let cursor = 0;
   return sentences.map((sentence, index) => {
     const end = index === sentences.length - 1 ? duration : cursor + duration * (weights[index]! / total);
-    const segment = { start: cursor, end, text: sentence };
+    const segment: TranscriptSegment = { start: cursor, end, text: sentence, scripted: true };
     cursor = end;
     return segment;
   });
@@ -260,6 +260,7 @@ function importAssets(document: EditorDocumentV2, input: Input): AgentTimelineOu
       ...(string(item.description) ? { description: string(item.description) } : {}),
       ...(Array.isArray(item.tags) ? { tags: item.tags.map(string).filter((tag): tag is string => !!tag).slice(0, 30) } : {}),
       ...(string(item.collection) ? { collection: string(item.collection) } : {}),
+      ...(string(item.transcriptText) ? { transcriptText: string(item.transcriptText)! } : {}),
       ...(sec(item.bpm, -1) > 0 ? { bpm: sec(item.bpm) } : {}),
       ...(Number.isFinite(Number(item.beatOffsetSec)) ? { beatOffsetSec: Math.max(0, sec(item.beatOffsetSec)) } : {}),
     };

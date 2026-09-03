@@ -19,6 +19,7 @@ import {
 } from '@pireel/studio-engine/composition';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { studioProviders } from '@pireel/studio-engine/providers';
+import { measuredSpeechTranscript } from '@pireel/studio-engine/script-alignment';
 import { type VisualTimeline, analyzeVisual } from './visual';
 import { t } from './i18n';
 import { deleteCachedAsr } from './asr-cache';
@@ -102,7 +103,8 @@ export function useMediaAnalysis(deps: MediaAnalysisDeps) {
             : await speechFileForAsset(asset);
           if (!file) continue;
           if (refreshThisAsset) deleteCachedAsr(fileSig(file));
-          transcripts[target.assetId] = await studioProviders().transcriber.transcribe(file);
+          // Script-backed speech (TTS) keeps its exact text; ASR only lends the timing.
+          transcripts[target.assetId] = measuredSpeechTranscript(asset, current.semantics.transcripts[target.assetId], await studioProviders().transcriber.transcribe(file));
         } catch (error) {
           firstError ??= error;
         }

@@ -1404,13 +1404,18 @@ describe('Agent composition transaction boundary', () => {
 
     expect(result).toMatchObject({
       ok: true,
-      data: { assetId: 'tts-audio', durationSec: 12.4, transcript: expect.stringContaining('实际发音') },
+      // Script-backed speech: the exact text is immutable, ASR only measures its timing.
+      data: { assetId: 'tts-audio', durationSec: 12.4, transcript: expect.stringContaining('原始文稿') },
     });
+    expect(result.data).toMatchObject({ transcript: expect.not.stringContaining('实际发音') });
     expect(providerMocks.transcribe).toHaveBeenCalledWith(expect.objectContaining({ type: 'audio/mpeg' }), expect.anything());
-    expect(h.documentRef.current.assets['tts-audio']?.metadata).toMatchObject({ durationSec: 12.4, hasAudio: true });
-    expect(h.documentRef.current.semantics.transcripts['tts-audio']).toEqual([
-      { start: 0.2, end: 1.4, text: '实际发音', words: [{ start: 0.2, end: 0.8, text: '实际' }] },
-    ]);
+    expect(h.documentRef.current.assets['tts-audio']?.metadata).toMatchObject({ durationSec: 12.4, hasAudio: true, transcriptText: '原始文稿' });
+    const measured = h.documentRef.current.semantics.transcripts['tts-audio']!;
+    expect(measured).toHaveLength(1);
+    expect(measured[0]).toMatchObject({ text: '原始文稿' });
+    expect(measured[0]!.start).toBeCloseTo(0.2, 6);
+    expect(measured[0]!.end).toBeCloseTo(0.8, 6);
+    expect(measured[0]!.words?.map((word) => word.text)).toEqual(['原', '始', '文', '稿']);
     const placed = runAgentTimelineTool(h.documentRef.current, 'add_clips', {
       clips: [{ id: 'narration-clip', assetId: 'tts-audio', role: 'narration', startSec: 0 }],
     });

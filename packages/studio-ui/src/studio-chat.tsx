@@ -146,6 +146,8 @@ export interface StudioChatProps {
   onThreadChange?: (thread: StoredThread) => void;
   /** Close the chat area (header X; workbench collapses the right region to free up screen). Omit to not render the close button. */
   onClose?: () => void;
+  /** Streaming/tool-running state of the active thread (workbench pauses output switching while true). */
+  onBusyChange?: (busy: boolean) => void;
 }
 
 /* ============================ Multi-session shell ============================ */
@@ -170,6 +172,7 @@ export const StudioChat = memo(
       initialThreads,
       onThreadChange,
       onClose,
+      onBusyChange,
     },
     ref,
   ) {
@@ -429,6 +432,7 @@ export const StudioChat = memo(
           timelineFramePickAvailable={timelineFramePickAvailable}
           onTimelineFramePickActiveChange={onTimelineFramePickActiveChange}
           onSnapshot={onSnapshot}
+          onBusyChange={onBusyChange}
           handleRef={innerRef}
         />
       </div>

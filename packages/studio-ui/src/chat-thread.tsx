@@ -121,6 +121,7 @@ export function ChatThread({
   onTimelineFramePickActiveChange,
   elements,
   onSnapshot,
+  onBusyChange,
   handleRef,
 }: {
   projectId?: string;
@@ -147,6 +148,7 @@ export function ChatThread({
     frame: AttachedFrame | null,
     skillId: StudioScenarioSkillId,
   ) => void;
+  onBusyChange?: (busy: boolean) => void;
   handleRef: React.MutableRefObject<StudioChatHandle | null>;
 }) {
   const runToolRef = useRef(runTool);
@@ -663,6 +665,14 @@ export function ChatThread({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
   const busy = status === "streaming" || status === "submitted";
+  // The workbench pauses output switching while a turn runs: a mid-run switch retargets every
+  // later tool call (a real run dropped one output's picture-in-picture into another).
+  const onBusyChangeRef = useRef(onBusyChange);
+  onBusyChangeRef.current = onBusyChange;
+  useEffect(() => {
+    onBusyChangeRef.current?.(busy);
+    return () => onBusyChangeRef.current?.(false);
+  }, [busy]);
 
   const workTimingActivationRef = useRef<DeferredActivation | null>(null);
   if (!workTimingActivationRef.current)

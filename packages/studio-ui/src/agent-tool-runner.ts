@@ -125,6 +125,7 @@ import { t } from './i18n';
 import { type ComposeMode, type ComposedBlock, composedBlockFields, GeneratedBlockValidationError, kitChoiceOf, newBlockComposeMode } from './compose-result';
 import { clearToolProgress, setToolProgress, type ToolProgress } from './tool-progress';
 import { fileSig, probeVideoFile } from './media';
+import { measuredSpeechTranscript } from '@pireel/studio-engine/script-alignment';
 import { deleteCachedTts, getCachedTts, setCachedTts, ttsCacheKey, type CachedTtsAsset } from './tts-cache';
 import { loadLocalAssetFile, loadLocalVideo, saveLocalVideo } from './local-media';
 import { materializeRemoteMedia } from './remote-media';
@@ -986,7 +987,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   }
                 }
                 const probe = await probeVideoFile(file).catch(() => null);
-                const segs = await race(studioProviders().transcriber.transcribe(file, { projectId }));
+                // Script-backed speech (TTS) keeps its exact text; ASR only lends the timing.
+                const segs = measuredSpeechTranscript(asset, documentRef.current.semantics.transcripts[targetAssetId], await race(studioProviders().transcriber.transcribe(file, { projectId })));
                 const current = documentRef.current;
                 const primaryClipsForAsset = current.timeline.tracks
                   .filter((track) => track.role === 'primaryNarrative')

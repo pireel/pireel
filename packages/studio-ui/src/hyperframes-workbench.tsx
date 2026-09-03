@@ -468,6 +468,9 @@ type FloatKind =
   | "transition"
   | "captions";
 
+/** Bridge tools that report/choose the active output; they re-anchor the agent instead of being gated by it. */
+const OUTPUT_ANCHOR_TOOLS = new Set(["get_state", "list_outputs", "switch_output", "create_output", "duplicate_output", "delete_output"]);
+
 export function HyperframesWorkbench({
   projectId,
   agentView = false,
@@ -1524,6 +1527,10 @@ export function HyperframesWorkbench({
     total: 0,
   });
   const chatRef = useRef<StudioChatHandle | null>(null); // lets workbench actions coordinate with the active chat thread
+  // Agent activity gates output switching (chat turn streaming, or a bridge tool executing).
+  const [chatBusy, setChatBusy] = useState(false);
+  const [bridgeToolsInFlight, setBridgeToolsInFlight] = useState(0);
+  const bridgeOutputAnchorRef = useRef<{ id: string; title: string } | null>(null);
   // Export (state + submit/poll/cancel) — see use-export.ts
   /** Files for locally-inserted clips (key = blob URL; the two split halves share one src so they share naturally):
    *  same "keep local, don't upload" mode as the main video, injected into preview via hf:clipFile and read directly
@@ -7066,8 +7073,29 @@ export function HyperframesWorkbench({
     opts?: { signal?: AbortSignal; surface?: "chat" | "bridge"; skillId?: string },
   ) => persistToolMutation(runAgentStudioTool(agentToolCtx, toolId, input, opts));
   runToolRef.current = runStudioTool; // break the hook↔dispatcher cycle (assigned every render before any handler can fire)
-  const runExternalTool = (tool: string, input: Record<string, unknown>) =>
-    persistToolMutation(runAgentExternalTool(agentToolCtx, tool, input));
+  // Bridge (MCP) calls span many turns with the tab live in between, so the user can switch
+  // outputs mid-task. The agent's edits stay anchored to the output it last observed: tools that
+  // report the active output re-anchor; anything else is refused when the tab has moved on, and
+  // the error names both outputs so the agent can switch back or adopt the current one.
+  const runExternalTool = async (tool: string, input: Record<string, unknown>) => {
+    const activeBefore = projectOutputs.outputsRef.current.active;
+    const anchored = bridgeOutputAnchorRef.current;
+    if (!OUTPUT_ANCHOR_TOOLS.has(tool) && anchored && anchored.id !== activeBefore.id) {
+      return {
+        ok: false,
+        error: t("workbench.outputChangedUnderAgent", { active: activeBefore.title || t("workbench.untitledOutput"), anchored: anchored.title || t("workbench.untitledOutput") }),
+        data: { activeOutputId: activeBefore.id, anchoredOutputId: anchored.id },
+      } satisfies StudioToolResult;
+    }
+    setBridgeToolsInFlight((n) => n + 1);
+    try {
+      return await persistToolMutation(runAgentExternalTool(agentToolCtx, tool, input));
+    } finally {
+      setBridgeToolsInFlight((n) => Math.max(0, n - 1));
+      const activeAfter = projectOutputs.outputsRef.current.active;
+      bridgeOutputAnchorRef.current = { id: activeAfter.id, title: activeAfter.title };
+    }
+  };
 
   // External agent bridge (Codex/Claude Code/any MCP client via /api/studio/mcp → StudioBridge DO → this tab):
   // the exact same execution surface as the internal chat + BYO-only operations; get_state returns the same situation snapshot as chat.
@@ -7079,6 +7107,7 @@ export function HyperframesWorkbench({
     getState: () => {
       const outputs = listProjectOutputsForAgent();
       const activeOutput = outputs.find((output) => output.active)!;
+      bridgeOutputAnchorRef.current = { id: activeOutput.id, title: activeOutput.title };
       return `<composition_state>\nLIVE — the studio tab is open on project ${projectId}; bridge tools edit THIS project (switch_project only retargets OFFLINE mode).\nActive output: #${activeOutput.position} · ${activeOutput.id} · ${activeOutput.title} (${outputs.length} total; use list_outputs/switch_output for deliverables).\n${buildSituation(getChatBody() as ChatSituation)}\n</composition_state>`;
     },
     onDisplaced: () => {
@@ -8196,6 +8225,7 @@ export function HyperframesWorkbench({
                 initialThreads={initialChatThreads}
                 onThreadChange={persistChatThread}
                 onClose={closeChat}
+                onBusyChange={setChatBusy}
               />
             ) : (
               <div className="text-ink-4 flex h-full w-full items-center justify-center">
@@ -8235,6 +8265,8 @@ export function HyperframesWorkbench({
               deleteLabel={t("workbench.deleteOutput")}
               untitledLabel={t("workbench.untitledOutput")}
               switching={outputRuntime.switching}
+              locked={chatBusy || bridgeToolsInFlight > 0}
+              lockedHint={t("workbench.outputSwitchPausedByAgent")}
               onSwitch={switchOutput}
               onCreate={createOutput}
               onDelete={requestDeleteOutput}

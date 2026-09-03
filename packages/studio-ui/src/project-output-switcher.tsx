@@ -60,6 +60,8 @@ export function ProjectOutputSwitcher({
   deleteLabel,
   untitledLabel,
   switching,
+  locked,
+  lockedHint,
   onSwitch,
   onCreate,
   onDelete,
@@ -71,6 +73,9 @@ export function ProjectOutputSwitcher({
   deleteLabel: string;
   untitledLabel: string;
   switching?: boolean;
+  /** An agent turn is running: switching/creating/deleting would retarget its remaining tool calls. */
+  locked?: boolean;
+  lockedHint?: string;
   onSwitch: (id: string) => void;
   onCreate: () => void;
   onDelete: (id: string) => void;
@@ -112,8 +117,8 @@ export function ProjectOutputSwitcher({
       type="button"
       data-output-create-card
       aria-label={newLabel}
-      title={newLabel}
-      disabled={switching}
+      title={locked && lockedHint ? lockedHint : newLabel}
+      disabled={switching || locked}
       onClick={onCreate}
       className="group/create flex w-full shrink-0 rounded-md px-2 py-1.5 transition-transform active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ink/40 disabled:cursor-wait disabled:opacity-50"
     >
@@ -140,8 +145,8 @@ export function ProjectOutputSwitcher({
           role="tab"
           aria-selected={active}
           aria-label={accessibleTitle}
-          title={accessibleTitle}
-          disabled={switching}
+          title={locked && lockedHint ? lockedHint : accessibleTitle}
+          disabled={switching || locked}
           onClick={() => onSwitch(output.id)}
           className={`relative flex w-full items-start rounded-md px-2 py-1.5 text-left transition-[background-color,transform] active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/40 disabled:cursor-wait ${
             active ? 'bg-panel-2 text-ink' : 'text-ink-2 hover:bg-panel-2 hover:text-ink'
@@ -182,7 +187,7 @@ export function ProjectOutputSwitcher({
             data-output-delete
             aria-label={`${deleteLabel}: ${accessibleTitle}`}
             title={deleteLabel}
-            disabled={switching}
+            disabled={switching || locked}
             onClick={() => onDelete(output.id)}
             className="border-line bg-panel/95 text-red-500 hover:border-red-500 hover:bg-red-500 hover:text-white absolute right-3 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-sm border opacity-0 shadow-sm backdrop-blur-sm transition-[background-color,border-color,color,opacity,transform] active:scale-95 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30 group-focus-within:opacity-100 group-hover:opacity-100 disabled:cursor-wait disabled:opacity-40"
           >

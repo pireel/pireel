@@ -49,6 +49,9 @@ export interface TranscriptSegment {
   cueTexts?: Record<string, string>;
   /** Stable display-cue boundaries encoded as source word ranges "w0:w1". */
   cueLayout?: string[];
+  /** Provisional timing derived from an exact script (TTS text) — no ASR has measured it yet. Once
+   *  measured, the script text stays and only the timing changes (script-alignment.ts). */
+  scripted?: boolean;
   /** Target language sub/cueSubs were translated into (unset = unknown/legacy — displayed as-is). */
   subLang?: string;
   /** Short-lived extraction-cueing scheme flag (desegmentCues merges these back into sentences on load). */
