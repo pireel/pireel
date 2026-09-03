@@ -137,7 +137,8 @@ let some motion cross the bar so the viewer feels momentum rather than a metrono
 ## Cleanup and speed
 
 - `denoise_audio {strength}` (default 0.6) cleans noisy narration; re-tune is cheap. Turn it off if it
-  thins the voice.
+  thins the voice. It processes the primary footage's own recording only: generated speech and
+  audio-lane narration are already clean — skip it there.
 - `set_clip_properties {speed}` for slow-mo (0.25–1) or speed-ups (1–4); the story spine ripples later
   material by default, other lanes do not.
 

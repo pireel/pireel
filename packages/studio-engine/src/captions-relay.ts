@@ -180,7 +180,7 @@ export function displayCuesFromMappedSegs(
     style?.wPct ?? DEFAULT_CAPTION_WIDTH_PCT,
     style?.scale ?? 1,
     opts?.canvasW ?? 1080,
-    { bold: style?.bold },
+    { bold: style?.bold, font: style?.font },
   );
   const out: DisplayCue[] = [];
   for (const g of mapped) {

@@ -15,7 +15,9 @@ import { fileMatchesSig, fileNameFromSig, fileSig, rememberDurableFileSig } from
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 
 const DIR = 'local-videos';
-const MAX_FILES = 12; // Videos are large — keep only the most recent N (LRU by write time); beyond that, purge with their meta
+// No count-based eviction: a project can legitimately hold a hundred local videos (a real 100-clip
+// montage lost its 13th import to the old 12-file LRU). The browser's storage quota is the only cap;
+// a failed write surfaces to the caller instead of silently evicting someone else's footage.
 
 /* ---------- Native file handles (File System Access API, Chromium) ----------
  * Preferred backend: persist the picked file's HANDLE in IndexedDB and read straight from the
@@ -262,7 +264,6 @@ export async function saveLocalVideo(
     await w.write(file);
     await w.close();
     await writeStoredMeta(dir, key, meta);
-    await prune(dir);
     return true;
   } catch (e) {
     console.warn('[studio] save local video failed', e);
@@ -371,7 +372,6 @@ export async function saveLocalStream(
     await writable.close();
     closed = true;
     await writeStoredMeta(dir, key, meta);
-    await prune(dir);
     const stored = await fh.getFile();
     return alignFileToSig(
       new File([stored], meta.name, {
@@ -512,27 +512,3 @@ export async function deleteLocalVideo(sig: string): Promise<void> {
   }
 }
 
-/** LRU cleanup: keep the most recent ordinary files plus every pinned folder-input copy. */
-async function prune(dir: FileSystemDirectoryHandle): Promise<void> {
-  try {
-    const files: { name: string; mtime: number; pinned: boolean }[] = [];
-    const iter = (dir as unknown as { values(): AsyncIterable<FileSystemHandle> }).values();
-    for await (const h of iter) {
-      if (h.kind !== 'file' || h.name.endsWith('.meta.json')) continue;
-      const f = await (h as FileSystemFileHandle).getFile();
-      const meta = await readStoredMeta(dir, h.name);
-      files.push({ name: h.name, mtime: f.lastModified, pinned: meta?.pinned === true });
-    }
-    const ordinary = files.filter((file) => !file.pinned).sort((a, b) => b.mtime - a.mtime);
-    for (const f of ordinary.slice(MAX_FILES)) {
-      try {
-        await dir.removeEntry(f.name);
-        await dir.removeEntry(`${f.name}.meta.json`);
-      } catch {
-        /* If it can't be removed, leave it — try again next time */
-      }
-    }
-  } catch {
-    /* best-effort */
-  }
-}

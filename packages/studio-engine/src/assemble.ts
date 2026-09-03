@@ -25,6 +25,7 @@ import { GL_MIXER_SRC, TRANSITION_GLSL, glDirection } from './transition-gl';
 import { SOURCE_DRAW_RECT_FUNCTION } from './source-framing';
 import { compositionVisualLayerPlan, type SupplementalVisualMediaClip } from './visual-layer-plan';
 import { BLOCK_TEXT_BASELINE_PX } from './block-typography';
+import { webFontStylesheetUrls } from './font-library';
 
 /* ============================ Assembly ============================ */
 
@@ -126,6 +127,26 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
     }
     drawPlain(liveBmp, liveFraming, liveSourceW, liveSourceH); // GL unavailable / ghost not warm and no frozen frame: hard cut
   };
+  // The frame is drawn ONCE for the canvas's CSS box at push time (layerRect pre-compensates that box).
+  // The framing timeline rewrites left/top/width/height afterwards (a document that booted before its
+  // first seek, a canvas-ratio switch, a framing edit) and the already-rendered pixels would stretch
+  // with the box — and stay stretched until the next frame happens to arrive (a hover-seek). Redraw the
+  // retained bitmaps whenever the box changes; no decode is needed, the frame is still in memory.
+  try {
+    var RO = window.ResizeObserver;
+    if (RO) {
+      var lastBoxKey = '';
+      new RO(function () {
+        var bs = window.getComputedStyle(c);
+        var key = bs.width + 'x' + bs.height;
+        if (key === lastBoxKey) return;
+        lastBoxKey = key;
+        if (!liveBmp || !(lastT >= 0)) return;
+        stagedLiveVer = -1; stagedGhostVer = -1; // staged covers were built for the old box
+        try { render(lastT); } catch (eR) {}
+      }).observe(c);
+    }
+  } catch (eO) {}
   // current frame's source info (personCut needs it for the mask): elKey='main'|clip_<shotId>, srcT=time within that source file
   window.__vidSrc = null;
   window.addEventListener('message', function (e) {
@@ -474,7 +495,7 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
       : kitBase;
     const rb =
       cs && isSentenceCaption(b)
-        ? { ...capBase, slots: { ...capBase.slots, preset: cs.preset, yPct: cs.yPct, xPct: cs.xPct ?? 50, wPct: cs.wPct ?? 56, scale: cs.scale, ...(cs.hPct ? { hPct: cs.hPct } : {}), ...(cs.color != null ? { color: cs.color } : {}), ...(cs.bg !== undefined ? { bg: cs.bg } : {}), ...(cs.bold != null ? { bold: cs.bold } : {}), ...(cs.sub?.preset != null ? { subPreset: cs.sub.preset } : {}), ...(cs.sub?.color != null ? { subColor: cs.sub.color } : {}), ...(cs.sub?.bg !== undefined ? { subBg: cs.sub.bg } : {}), ...(cs.sub?.bold != null ? { subBold: cs.sub.bold } : {}), ...(cs.sub?.yPct != null ? { subYPct: cs.sub.yPct } : {}), ...(cs.sub?.xPct != null ? { subXPct: cs.sub.xPct } : {}), ...(cs.sub?.wPct != null ? { subWPct: cs.sub.wPct } : {}), ...(cs.sub?.scale != null ? { subScale: cs.sub.scale } : {}), ...(cs.sub?.hPct != null ? { subHPct: cs.sub.hPct } : {}) } }
+        ? { ...capBase, slots: { ...capBase.slots, preset: cs.preset, yPct: cs.yPct, xPct: cs.xPct ?? 50, wPct: cs.wPct ?? 56, scale: cs.scale, ...(cs.hPct ? { hPct: cs.hPct } : {}), ...(cs.color != null ? { color: cs.color } : {}), ...(cs.bg !== undefined ? { bg: cs.bg } : {}), ...(cs.bold != null ? { bold: cs.bold } : {}), ...(cs.font != null ? { font: cs.font } : {}), ...(cs.sub?.preset != null ? { subPreset: cs.sub.preset } : {}), ...(cs.sub?.color != null ? { subColor: cs.sub.color } : {}), ...(cs.sub?.bg !== undefined ? { subBg: cs.sub.bg } : {}), ...(cs.sub?.bold != null ? { subBold: cs.sub.bold } : {}), ...(cs.sub?.font != null ? { subFont: cs.sub.font } : {}), ...(cs.sub?.yPct != null ? { subYPct: cs.sub.yPct } : {}), ...(cs.sub?.xPct != null ? { subXPct: cs.sub.xPct } : {}), ...(cs.sub?.wPct != null ? { subWPct: cs.sub.wPct } : {}), ...(cs.sub?.scale != null ? { subScale: cs.sub.scale } : {}), ...(cs.sub?.hPct != null ? { subHPct: cs.sub.hPct } : {}) } }
         : capBase;
     const { innerHtml, timelineBody } = renderBlock(rb);
     // autofit: when content overflows, scale the whole thing to just fit the box (measured empirically), preview = export
@@ -690,6 +711,14 @@ export function assembleHtml(
   // the parent video canvas can show through; graphics-only compositions use the same black ground
   // instead of unexpectedly exposing the attached theme's paper color as soon as an element appears.
   const documentBg = placedVideoShots.length || supplementalVisuals.length ? 'transparent' : '#000000';
+  // Library ("花字") web fonts the composition uses — captions (main + translation line) and
+  // display-text blocks — plus the CJK partner behind any local Latin face. Chunked CSS: only the
+  // glyph blocks actually rendered are fetched.
+  const webFontLinks = webFontStylesheetUrls([
+    comp.captionStyle?.font,
+    comp.captionStyle?.sub?.font,
+    ...comp.blocks.map((block) => block.slots?.fontFamily),
+  ]).map((href) => `<link href="${href}" rel="stylesheet" />\n`).join('');
   return `<!doctype html>
 <html lang="zh">
 <head>
@@ -697,7 +726,7 @@ export function assembleHtml(
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="${STUDIO_FONTS_HREF}" rel="stylesheet" />
-<style>
+${webFontLinks}<style>
   * { margin: 0; box-sizing: border-box; }
   html, body { width: ${W}px; height: ${H}px; overflow: hidden; background: ${documentBg}; }
   #root { position: relative; width: ${W}px; height: ${H}px; background: ${documentBg}; overflow: hidden;

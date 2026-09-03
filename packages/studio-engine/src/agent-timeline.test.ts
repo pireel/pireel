@@ -313,6 +313,28 @@ describe('shared agent timeline atoms', () => {
     expect(narration.clips[0]).toMatchObject({ sourceInSec: 0, sourceOutSec: 46.1 });
   });
 
+  it('stores muted on overlay (broll) media clips as the shot-scoped audio mute', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', {
+      assets: [
+        { id: 'local:quiet', kind: 'video', localSig: 'quiet.mp4:100:1', durationSec: 5 },
+        { id: 'local:loud', kind: 'video', localSig: 'loud.mp4:200:2', durationSec: 5 },
+      ],
+    }).document!;
+    const placed = runAgentTimelineTool(document, 'add_clips', {
+      clips: [
+        { id: 'quiet-clip', role: 'broll', assetId: 'local:quiet', startSec: 1, muted: true },
+        { id: 'loud-clip', role: 'broll', assetId: 'local:loud', startSec: 8 },
+      ],
+    });
+    expect(placed.ok).toBe(true);
+    const broll = placed.document!.timeline.tracks.find((track) => track.role === 'broll')!;
+    const quiet = broll.clips.find((clip) => clip.id === 'quiet-clip') as { video?: { audioMuted?: boolean } };
+    const loud = broll.clips.find((clip) => clip.id === 'loud-clip') as { video?: { audioMuted?: boolean } };
+    expect(quiet.video?.audioMuted).toBe(true);
+    expect(loud.video?.audioMuted).toBeUndefined();
+  });
+
   it('keeps an overwrite destination track alive when a later clip fully replaces its contents', () => {
     let document = emptyEditorDocumentV2({ fps: 30 });
     document = runAgentTimelineTool(document, 'register_media', {
@@ -778,6 +800,29 @@ describe('shared agent timeline atoms', () => {
     const removed = runAgentTimelineTool(document, 'remove_clips', { clipIds: ['image-clip', 'audio-clip'] });
     expect(removed.ok).toBe(true);
     expect(removed.document!.timeline.tracks.flatMap((track) => track.clips)).toEqual([]);
+  });
+
+  it('skips clip ids that are already gone and removes the rest, naming the misses', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', { assets: [
+      { id: 'a', kind: 'video', url: 'https://cdn.example/a.mp4', durationSec: 5 },
+      { id: 'b', kind: 'video', url: 'https://cdn.example/b.mp4', durationSec: 5 },
+    ] }).document!;
+    document = runAgentTimelineTool(document, 'add_clips', { clips: [
+      { id: 'a-clip', assetId: 'a', role: 'broll', startSec: 0, durationSec: 2 },
+      { id: 'b-clip', assetId: 'b', role: 'broll', startSec: 3, durationSec: 2 },
+    ] }).document!;
+    document = runAgentTimelineTool(document, 'remove_clips', { clipIds: ['a-clip'] }).document!;
+
+    const removed = runAgentTimelineTool(document, 'remove_clips', { clipIds: ['a-clip', 'b-clip'] });
+    expect(removed.ok).toBe(true);
+    expect(removed.data).toEqual({ removedClipIds: ['b-clip'], missingClipIds: ['a-clip'] });
+    expect(removed.summary).toContain('already gone: a-clip');
+    expect(removed.document!.timeline.tracks.flatMap((track) => track.clips)).toEqual([]);
+
+    const nothingLeft = runAgentTimelineTool(removed.document!, 'remove_clips', { clipIds: ['a-clip', 'b-clip'] });
+    expect(nothingLeft.ok).toBe(false);
+    expect(nothingLeft.error).toContain('clip not found');
   });
 
   it('removes the entire primary picture when asked — remove is an honest primitive', () => {

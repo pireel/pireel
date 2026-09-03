@@ -17,6 +17,8 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Bold, Check, ChevronDown, Languages, Loader2, RefreshCw } from 'lucide-react';
+import { FontPicker } from './display-text-panel';
+import { cachedLocalFontFamilies, loadLocalFontFamilies, supportsLocalFontAccess, type LocalFontFamilyOption } from './local-font-access';
 import { Switch } from '@pireel/ui/switch';
 import { t } from './i18n';
 import {
@@ -27,7 +29,9 @@ import {
   CAPTION_PRESETS,
   getCaptionPreset,
   isCaptionsOn,
+  isDisplayTextFontId,
   resolveCaptionStyle,
+  type DisplayTextFontId,
 } from '@pireel/studio-engine/composition';
 
 /** One editable caption line = one DISPLAY CUE (derived by displayCues in edited-timeline order across
@@ -87,8 +91,8 @@ export interface CaptionStyleCtl {
   sub: CaptionStyle;
   /** A translation target language is active — only then does the translation-line row show (per user). */
   bilingualOn: boolean;
-  onMainPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined }) => void;
-  onSubPatch: (patch: { preset?: string | undefined; scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined; lang?: string | undefined }) => void;
+  onMainPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined; font?: string | undefined }) => void;
+  onSubPatch: (patch: { preset?: string | undefined; scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined; font?: string | undefined; lang?: string | undefined }) => void;
 }
 
 export function CaptionsPanel({
@@ -418,9 +422,27 @@ function StyleRow({ label, style, active, isSub, leading, trailing, styleHidden,
   styleHidden?: boolean;
   /** Preset picked (null = follow main; only offered on the translation row). */
   onPreset: (id: string | null) => void;
-  onPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined }) => void;
+  onPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined; font?: string | undefined }) => void;
 }) {
   const [pop, setPop] = useState<null | 'preset' | 'size' | 'color' | 'bg'>(null);
+  const [expanded, setExpanded] = useState(false);
+  // Font picker shares the display-text picker (built-ins + common + system fonts via Local Font Access).
+  const [localFonts, setLocalFonts] = useState<LocalFontFamilyOption[]>(cachedLocalFontFamilies);
+  const [fontAccess, setFontAccess] = useState<'idle' | 'loading' | 'loaded' | 'denied' | 'unsupported'>('idle');
+  const requestLocalFonts = async () => {
+    if (!supportsLocalFontAccess()) {
+      setFontAccess('unsupported');
+      return;
+    }
+    setFontAccess('loading');
+    try {
+      setLocalFonts(await loadLocalFontFamilies());
+      setFontAccess('loaded');
+    } catch {
+      setFontAccess('denied');
+    }
+  };
+  const fontId: DisplayTextFontId = isDisplayTextFontId(style.font) ? style.font : 'preset';
   const rootRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!pop) return;
@@ -441,8 +463,13 @@ function StyleRow({ label, style, active, isSub, leading, trailing, styleHidden,
     const k = px / BASE_CAPTION_FONT_PX;
     return k >= 0.4 && k <= 4;
   });
+  // Anything beyond preset + size lives behind the expand chevron: the inline row stays one
+  // line wide, and the extras (weight, colors, font) open as a block under it — the font picker
+  // sits there directly, one dropdown level, never a list inside a popover.
+  const extrasActive = effBold || style.color != null || style.bg !== undefined || fontId !== 'preset';
   return (
-    <div ref={rootRef} className="relative mb-1.5 flex items-center gap-1.5">
+    <div ref={rootRef} className="relative mb-1.5">
+      <div className="flex items-center gap-1.5">
       <span className="text-ink-3 w-14 shrink-0 truncate text-[11px]">{label}</span>
       {leading}
       {!styleHidden && (
@@ -489,54 +516,85 @@ function StyleRow({ label, style, active, isSub, leading, trailing, styleHidden,
       </div>
       <button
         type="button"
-        title={t('captions.bold')}
-        aria-pressed={effBold}
-        onClick={() => onPatch({ bold: !effBold })}
-        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border ${effBold ? 'border-accent text-ink bg-panel-2/60' : 'border-line text-ink-3 hover:border-accent'}`}
+        title={t('captions.moreStyle')}
+        aria-expanded={expanded}
+        onClick={() => { setPop(null); setExpanded((current) => !current); }}
+        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border ${expanded || extrasActive ? 'border-accent text-ink' : 'border-line text-ink-3 hover:border-accent hover:text-ink'}`}
       >
-        <Bold size={12} strokeWidth={2.6} />
-      </button>
-      <button
-        type="button"
-        title={t('captions.textColor')}
-        onClick={() => setPop(pop === 'color' ? null : 'color')}
-        className={`hover:border-accent h-7 w-7 shrink-0 rounded-md border p-1 ${pop === 'color' ? 'border-accent' : 'border-line'}`}
-      >
-        <span className="block h-full w-full rounded-sm border border-white/15" style={{ background: effColor }} />
-      </button>
-      <button
-        type="button"
-        title={t('captions.plate')}
-        onClick={() => setPop(pop === 'bg' ? null : 'bg')}
-        className={`hover:border-accent h-7 w-7 shrink-0 rounded-md border p-1 ${pop === 'bg' ? 'border-accent' : 'border-line'}`}
-      >
-        <span className="block h-full w-full rounded-sm border border-white/15" style={effBg ? { background: effBg } : NO_COLOR_CHECKER} />
+        <ChevronDown size={12} className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />
       </button>
       {pop === 'preset' && (
         <PresetPop current={style.preset} onPick={(id) => { setPop(null); onPreset(id); }} />
       )}
-      {pop === 'color' && (
-        <SwatchPop
-          title={t('captions.textColor')}
-          swatches={TEXT_SWATCHES}
-          value={style.color}
-          onPick={(c) => { setPop(null); onPatch({ color: c }); }}
-        />
-      )}
-      {pop === 'bg' && (
-        <SwatchPop
-          title={t('captions.plate')}
-          swatches={BG_SWATCHES}
-          value={style.bg === null ? undefined : style.bg}
-          allowNone
-          noneActive={style.bg === null}
-          onNone={() => { setPop(null); onPatch({ bg: null }); }}
-          onPick={(c) => { setPop(null); onPatch({ bg: c }); }}
-        />
-      )}
       </>
       )}
       {trailing}
+      </div>
+      {!styleHidden && expanded && (
+        <div className="bg-panel-2/40 mt-1.5 rounded-lg p-2">
+          <div className="relative flex items-center gap-1.5">
+            <span className="text-ink-3 w-14 shrink-0 truncate text-[11px]">{t('captions.bold')}</span>
+            <button
+              type="button"
+              title={t('captions.bold')}
+              aria-pressed={effBold}
+              onClick={() => onPatch({ bold: !effBold })}
+              className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border ${effBold ? 'border-accent text-ink bg-panel-2/60' : 'border-line text-ink-3 hover:border-accent'}`}
+            >
+              <Bold size={12} strokeWidth={2.6} />
+            </button>
+            <span className="text-ink-3 ml-2 shrink-0 text-[11px]">{t('captions.textColor')}</span>
+            <button
+              type="button"
+              title={t('captions.textColor')}
+              onClick={() => setPop(pop === 'color' ? null : 'color')}
+              className={`hover:border-accent h-7 w-7 shrink-0 rounded-md border p-1 ${pop === 'color' ? 'border-accent' : 'border-line'}`}
+            >
+              <span className="block h-full w-full rounded-sm border border-white/15" style={{ background: effColor }} />
+            </button>
+            <span className="text-ink-3 ml-2 shrink-0 text-[11px]">{t('captions.plate')}</span>
+            <button
+              type="button"
+              title={t('captions.plate')}
+              onClick={() => setPop(pop === 'bg' ? null : 'bg')}
+              className={`hover:border-accent h-7 w-7 shrink-0 rounded-md border p-1 ${pop === 'bg' ? 'border-accent' : 'border-line'}`}
+            >
+              <span className="block h-full w-full rounded-sm border border-white/15" style={effBg ? { background: effBg } : NO_COLOR_CHECKER} />
+            </button>
+            {pop === 'color' && (
+              <SwatchPop
+                title={t('captions.textColor')}
+                swatches={TEXT_SWATCHES}
+                value={style.color}
+                onPick={(c) => { setPop(null); onPatch({ color: c }); }}
+              />
+            )}
+            {pop === 'bg' && (
+              <SwatchPop
+                title={t('captions.plate')}
+                swatches={BG_SWATCHES}
+                value={style.bg === null ? undefined : style.bg}
+                allowNone
+                noneActive={style.bg === null}
+                onNone={() => { setPop(null); onPatch({ bg: null }); }}
+                onPick={(c) => { setPop(null); onPatch({ bg: c }); }}
+              />
+            )}
+          </div>
+          <div className="mt-1.5 flex items-center gap-1.5">
+            <span className="text-ink-3 w-14 shrink-0 truncate text-[11px]">{t('captions.fontFamily')}</span>
+            <div className="min-w-0 flex-1">
+              <FontPicker
+                value={fontId}
+                localFonts={localFonts}
+                accessState={fontAccess}
+                onLoadMore={() => void requestLocalFonts()}
+                onChoose={(font) => onPatch({ font: font === 'preset' ? undefined : font })}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

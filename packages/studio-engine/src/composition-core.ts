@@ -478,6 +478,8 @@ export interface CaptionStyle {
   color?: string;
   /** Bold override: true = force bold (800), false = force regular (500); unset = the preset's own weight. */
   bold?: boolean;
+  /** Font override: a display-text font id ('sans' | 'serif' | 'mono' | 'web:<library id>' | 'local:<family>'); unset/'preset' = the preset's own font. */
+  font?: string;
   /** Backdrop plate override: a CSS color, or null = force no plate (defaults to the preset's plate). */
   bg?: string | null;
   /** Independent position/font for the translation line (bilingual second line): independent of the main line, dragged/scaled separately on canvas.
@@ -485,7 +487,7 @@ export interface CaptionStyle {
    *  xPct = line-center distance from left %, scale = font factor (same convention as the main line's scale, 1 = preset's original size).
    *  preset/color/bg = independent visual overrides for the translation line; unset = derived from the main line's (overridden) look.
    *  lang = target language chosen in the UI (panel chip selected state + auto-translate for newly inserted segments). */
-  sub?: { preset?: string; color?: string; bg?: string | null; bold?: boolean; yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number; lang?: string };
+  sub?: { preset?: string; color?: string; bg?: string | null; bold?: boolean; font?: string; yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number; lang?: string };
 }
 
 export interface Composition {
@@ -1306,6 +1308,7 @@ export function resolveSubCaptionStyle(comp: Composition): CaptionStyle {
     ...(sub.color != null ? { color: sub.color } : {}),
     ...(sub.bg !== undefined ? { bg: sub.bg } : {}),
     ...(sub.bold != null ? { bold: sub.bold } : {}),
+    ...(sub.font != null ? { font: sub.font } : {}),
   };
 }
 

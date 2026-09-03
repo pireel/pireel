@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { FileVideo2, Plus, Trash2 } from 'lucide-react';
+import { imageThumb } from '@pireel/ui/image-url';
 
 export interface ProjectOutputTab {
   id: string;
@@ -160,7 +161,7 @@ export function ProjectOutputSwitcher({
                 {String(index + 1).padStart(2, '0')}
               </span>
               {output.coverThumb ? (
-                <img src={output.coverThumb} alt="" className="h-full w-full object-cover" draggable={false} />
+                <img src={/^(?:data:|blob:|https?:)/.test(output.coverThumb) ? output.coverThumb : imageThumb(output.coverThumb, 'list')} alt="" className="h-full w-full object-cover" draggable={false} />
               ) : (
                 <FileVideo2 size={18} className="text-white/45" />
               )}

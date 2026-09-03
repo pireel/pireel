@@ -144,7 +144,7 @@ describe('assembleHtml', () => {
       text: '系统字体', startSec: 0, durationSec: 2,
       preset: 'clean', fontFamily: fontFamily!,
     })];
-    expect(assembleHtml(c)).toContain('font-family:"PingFang SC",sans-serif');
+    expect(assembleHtml(c)).toContain('font-family:"PingFang SC","Smiley Sans",sans-serif');
   });
 
   it('荧光和标签花字使用用户选择的文字色而不是固定反色', () => {

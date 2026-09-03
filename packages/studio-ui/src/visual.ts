@@ -48,7 +48,8 @@ export async function mapWithConcurrency<T, R>(
 
 /* ---------- Visual-analysis cache (localStorage, keyed by file fingerprint; same clip doesn't rerun the VLM) ---------- */
 // v6: quality windows also carry subject-centeredness for brief-specific editorial ranking.
-const VPREFIX = 'pinshot:studio:visual:v6:';
+// v7: scene cuts consolidated (SCENE_DETECTION_VERSION 2) — v6 entries carry fragmented boundaries.
+const VPREFIX = 'pinshot:studio:visual:v7:';
 export function getCachedVisual(sig: string): VisualTimeline | null {
   if (!sig || typeof localStorage === 'undefined') return null;
   try {

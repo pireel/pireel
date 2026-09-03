@@ -94,6 +94,7 @@ import { exportRecommendations } from '@pireel/studio-engine/export-options';
 import { parkInteraction } from './interaction-store';
 import { interpretApplyRaw } from '@pireel/studio-engine/briefs';
 import { composeEditorialBrief } from '@pireel/studio-engine/review-brief';
+import { planScriptCaptionSegments, splitScriptLines } from '@pireel/studio-engine/script-captions';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { compositionRevision } from '@pireel/studio-engine/analysis-jobs';
 import { compactAssetSearchElementResults, searchAssetLibrary } from '@pireel/studio-engine/asset-search';
@@ -140,6 +141,7 @@ import {
   editorialOpeningEvidence,
   reviewEditorialCandidates,
   type EditorialOpeningEvidence,
+  askEditorialQuestion,
 } from './editorial-review';
 import { type ExportRenderOpts, captureCompositionFrame } from './client-export';
 import { compositionRenderView } from './composition-render-view';
@@ -159,6 +161,8 @@ import {
 import { withEditableBlockGeometry } from './editable-block-geometry';
 import { placementPercentToBox } from '@pireel/studio-engine/overlay-placement';
 import { getStudioSpaceId, listStudioGens, pollCreation, startGeneration } from './gen-api';
+import { isDisplayTextFontId } from '@pireel/studio-engine/display-text-presets';
+import { describeAudioTargets, resolveAudioTarget } from '@pireel/studio-engine/audio-target';
 
 const PROJECT_MUTATION_TOOLS = new Set(['create_output', 'duplicate_output', 'switch_output', 'rename_output', 'delete_output']);
 const NO_UNDO_TOOLS = new Set(['get_block', 'get_timeline', 'read_director_plan', 'read_scene_designs', 'inspect_media', 'inspect_images', 'get_transcript', 'get_beat_grid', 'list_assets', 'search_assets', 'prepare_local_image', 'search_media', 'list_outputs', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_music', 'generate_sfx', 'generate_foley', 'get_generation_jobs', 'list_voices', 'clone_voice', 'design_voice', 'delete_voice', 'generate_speech', 'lip_sync', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_visual', 'export_video', 'track_export', 'ask_user', 'request_approval']);
@@ -1270,11 +1274,41 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           case 'analyze_visual': {
             const geometryOnly = input.mode === 'geometry';
             const editorialReview = input.mode === 'editorial';
+            const questionMode = input.mode === 'question';
+            const questionText = typeof input.question === 'string' ? input.question.trim() : '';
+            if (questionMode && !questionText) return { ok: false, error: 'analyze_visual mode="question" requires question: one concrete, visually checkable question' };
+            const questionRanges = (list: unknown) => (Array.isArray(list) ? list : [])
+              .map((row) => ({ startSec: Number((row as { startSec?: unknown })?.startSec), endSec: Number((row as { endSec?: unknown })?.endSec) }))
+              .filter((range) => Number.isFinite(range.startSec) && Number.isFinite(range.endSec) && range.endSec > range.startSec);
+            // Targeted question over a source: five stills per range, cached by question. The receipt's
+            // answers are the reusable evidence — selection filters on them, no re-review needed.
+            const answerVisualQuestion = async (file: File, assetId: string, label?: string): Promise<StudioToolResult> => {
+              const explicitRanges = questionRanges(input.ranges);
+              const wholeSourceSec = explicitRanges.length ? 0 : ((await probeVideoFile(file).catch(() => null))?.durationSec ?? 0);
+              const ranges = explicitRanges.length ? explicitRanges : [{ startSec: 0, endSec: wholeSourceSec }];
+              if (!(ranges[0]!.endSec > 0)) return { ok: false, error: `video duration unavailable: ${assetId}` };
+              const asked = await race(askEditorialQuestion(file, ranges, questionText, { projectId, ...(signal ? { signal } : {}) }));
+              return {
+                ok: true,
+                summary: t('workbench.visualQuestionAnswered', { n: asked.answers.length }),
+                data: {
+                  analysisMode: 'question',
+                  assetId,
+                  ...(label ? { label } : {}),
+                  question: asked.question,
+                  answers: asked.answers,
+                  ...(asked.reused ? { visualQuestionReused: true } : {}),
+                  instruction: 'These answers are evidence for THIS question: filter or narrow your selection with them (yes/partial ranges are the usable parts, on the source clock). Do not re-run the review to ask the same thing.',
+                },
+              };
+            };
             const modelBrief = typeof input.brief === 'string' ? input.brief.trim().slice(0, 2_000) : '';
             // Selection criteria are the active Skill's data, applied verbatim; the model-authored
-            // brief is demoted to bounded session notes (a re-authored brief drifted in practice —
-            // it invented topical constraints the Skill never asked for). Batch fan-out re-enters
-            // this case without opts.skillId, so composition happens exactly once per call.
+            // brief is bounded and carries the USER's explicit requirements, which win on conflict.
+            // (A freely re-authored brief once invented topical constraints the Skill never asked
+            // for — hence the Skill block is verbatim and the model text is scoped to user asks.)
+            // Batch fan-out re-enters this case without opts.skillId, so composition happens
+            // exactly once per call.
             const skillBrief = editorialReview && opts?.skillId
               ? await fetchSkillReviewBrief(opts.skillId)
               : null;
@@ -1285,7 +1319,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               ? input.items.filter((value): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value))
               : [];
             if (batchItems.length) {
-              if (!editorialReview) return { ok: false, error: 'analyze_visual items[] is available only with mode="editorial"' };
+              if (!editorialReview && !questionMode) return { ok: false, error: 'analyze_visual items[] is available only with mode="editorial" or mode="question"' };
               if (batchItems.length > EDITORIAL_BATCH_MAX_SOURCES) {
                 return { ok: false, error: `analyze_visual items[] accepts at most ${EDITORIAL_BATCH_MAX_SOURCES} sources per call` };
               }
@@ -1299,12 +1333,14 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 if (seen.has(selectors[0]!)) return { ok: false, error: `duplicate analyze_visual batch source: ${selectors[0]}` };
                 seen.add(selectors[0]!);
               }
-              const baseInput = {
-                mode: 'editorial',
-                brief: reviewBrief,
-                maxCandidates: maxReviewCandidates,
-                assessAudio: input.assessAudio === true,
-              };
+              const baseInput = questionMode
+                ? { mode: 'question', question: questionText }
+                : {
+                  mode: 'editorial',
+                  brief: reviewBrief,
+                  maxCandidates: maxReviewCandidates,
+                  assessAudio: input.assessAudio === true,
+                };
               const progressByItem = batchItems.map(() => 0);
               const sourceLabel = (item: Record<string, unknown>, index: number) => {
                 const explicitLocalReference = typeof item.localAssetId === 'string'
@@ -1384,6 +1420,16 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               } catch (error) {
                 clearToolProgress(toolId);
                 throw error;
+              }
+              if (questionMode) {
+                clearToolProgress(toolId);
+                const answered = results.filter((result) => result.ok).length;
+                const reusedAnswers = results.filter((result) => (result as Record<string, unknown>).visualQuestionReused === true).length;
+                return {
+                  ok: true,
+                  summary: `answered for ${answered}/${batchItems.length} video sources${reusedAnswers ? ` (${reusedAnswers} reused from cache, no charge)` : ''}`,
+                  data: { analysisMode: 'question-batch', question: questionText, items: results },
+                };
               }
               const openingEvidence = results.flatMap((result): EditorialOpeningEvidence[] => {
                 const receipt = result as Record<string, unknown>;
@@ -1499,6 +1545,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               if (!entry) return { ok: false, error: `project-library video not found or ambiguous: ${requestedLocalReference}. Refresh list_assets and retry with its exact id; do not register or place the asset as a workaround` };
               const file = await loadLocalAssetFile(projectId, entry);
               if (!file) return { ok: false, error: 'local video access is unavailable — ask the user to restore access in Materials, then retry. Do not place the asset on the timeline; placement cannot restore file access' };
+              if (questionMode) return await answerVisualQuestion(file, entry.assetId, entry.label);
               try {
                 const probe = await probeVideoFile(file).catch(() => null);
                 const durationSec = probe?.durationSec;
@@ -1602,6 +1649,26 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const targetAsset = documentRef.current.assets[targetAssetId];
             if (!targetAsset) return { ok: false, error: `asset not found: ${targetAssetId}` };
             if (targetAsset.kind !== 'video') return { ok: false, error: `analyze_visual requires a video asset: ${targetAssetId}` };
+            if (questionMode) {
+              const useMounted = targetAssetId === primaryAssetId && !!videoFileRef.current;
+              const source = resolveAssetUrl(targetAsset);
+              let file: File | null = useMounted ? videoFileRef.current : (source ? clipFilesRef.current.get(source) ?? null : null);
+              if (!file) file = await loadProjectAssetFile(targetAsset);
+              if (!file && source) {
+                try {
+                  file = (await race(materializeRemoteMedia(source, {
+                    name: `${targetAsset.label || targetAssetId}.mp4`,
+                    type: 'video/mp4',
+                    sig: targetAsset.locator.localSig,
+                    signal,
+                  }))).file;
+                } catch (error) {
+                  return { ok: false, error: `video fetch failed: ${error instanceof Error ? error.message : String(error)}` };
+                }
+              }
+              if (!file) return { ok: false, error: `video bytes unavailable: ${targetAssetId}` };
+              return await answerVisualQuestion(file, targetAssetId, targetAsset.label);
+            }
             try {
               const useMountedPrimary = targetAssetId === primaryAssetId && !!videoFileRef.current && !!currentVideo();
               let vis: VisualTimeline | null;
@@ -2940,6 +3007,43 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const patch: Parameters<typeof setCaptionStyle>[0] = {};
             if (yPct != null) patch.yPct = yPct;
             if (Number.isFinite(scale)) patch.scale = scale;
+            if (typeof input.font === 'string') {
+              if (input.font === 'preset') patch.font = undefined;
+              else if (isDisplayTextFontId(input.font)) patch.font = input.font;
+              else return { ok: false, error: `unknown caption font: ${input.font} (use sans | serif | mono | web:<library id> | local:<family> | preset)` };
+            }
+            const script = typeof input.script === 'string' ? input.script.trim() : '';
+            if (script) {
+              // Silent montage: the copy becomes transcript truth of the placed picture clips
+              // (script-captions.ts), so the whole caption chain works unchanged. The primary
+              // track is selected explicitly — automatic source selection rightly skips muted
+              // clips, and montage picture is muted by construction.
+              const lines = splitScriptLines(script);
+              if (!lines.length) return { ok: false, error: t('workbench.scriptEmpty') };
+              const shots = ensureShots(compRef.current);
+              const trackId = documentRef.current.semantics.primaryNarrativeTrackId;
+              if (!shots.length || !trackId) return { ok: false, error: t('workbench.scriptCaptionsNoPicture') };
+              const plan = planScriptCaptionSegments(shots, lines);
+              const nextClipAsr = { ...clipAsrRef.current, ...plan.clips };
+              const nextMain = plan.main.length ? plan.main : asrRef.current;
+              const edit = applyCaptionDocumentEdit({
+                document: documentRef.current,
+                patch: { on: true, ...(preset ? { preset, color: undefined, bg: undefined } : {}), ...patch },
+                source: { mode: 'track', trackId },
+                mainTranscript: nextMain,
+                clipTranscripts: captionTranscriptsByAsset(documentRef.current, compRef.current, nextClipAsr),
+              });
+              if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error), data: edit.error };
+              clipAsrRef.current = nextClipAsr;
+              setClipAsr(nextClipAsr);
+              if (plan.main.length) {
+                asrRef.current = plan.main;
+                setAsrSentences(plan.main);
+              }
+              setDocument(edit.document);
+              if (!compRef.current.blocks.some(isSentenceCaption)) return { ok: false, error: t('workbench.scriptCaptionsNoPicture') };
+              return { ok: true, summary: t('workbench.scriptCaptionsSet', { n: plan.lineCount }), data: { source: 'script', lines: plan.lineCount } };
+            }
             if (!preset && !Object.keys(patch).length) return { ok: false, error: t('workbench.nothingSetGiveLeast') };
             const source = input.source === 'track' && typeof input.trackId === 'string'
               ? { mode: 'track' as const, trackId: input.trackId }
@@ -3653,7 +3757,15 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               setDenoise(null);
               return { ok: true, summary: t('workbench.denoiseTurnedOff') };
             }
-            if (!videoFileRef.current) return { ok: false, error: t('common.localSourceVideoMissing') };
+            const mainMounted = !!videoFileRef.current || (c.shots ?? []).some((shot) => shot.src && clipFilesRef.current.has(shot.src));
+            const pictureSoundInMix = (c.shots ?? []).some((shot) => !shot.audioMuted);
+            if (!mainMounted || !pictureSoundInMix) {
+              // Denoise bakes the MAIN video's own recording. Say what is actually true instead of
+              // "local video lost": generated/audio-lane narration is outside its scope, and a
+              // montage without a mounted main source has no recording to clean.
+              const narrationOnLane = (c.audioTracks ?? []).some((clip) => clip.role === 'narration');
+              return { ok: false, error: narrationOnLane ? t('workbench.denoiseNotForLaneNarration') : t('workbench.denoiseNeedsMainSource') };
+            }
             const s = typeof input.strength === 'number' && Number.isFinite(input.strength) ? Math.max(0.05, Math.min(1, input.strength)) : 0.6;
             setDenoise(s);
             return { ok: true, summary: t('workbench.denoiseTurnedOn', { pct: Math.round(s * 100) }) };
@@ -3669,10 +3781,17 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               ...(typeof input.startSec === 'number' && Number.isFinite(input.startSec) ? { startSec: Math.max(0, input.startSec) } : {}),
               ...(typeof input.mute === 'boolean' ? { muted: input.mute } : {}),
             };
+            // trackId = an audio clip id OR a lane id (track_music …): a lane resolves to the audio
+            // clips on it. An unknown id names what would have worked so the retry is exact.
+            const audioIds = tracks.map((x) => x.id);
+            const resolved = trackIdIn ? resolveAudioTarget(documentRef.current, audioIds, trackIdIn) : null;
+            const notFound = () => ({ ok: false as const, error: `${t('workbench.audioTrackNotFound')}: ${trackIdIn} — ${describeAudioTargets(documentRef.current, audioIds)}` });
             if (input.off === true) {
               if (!tracks.length) return { ok: false, error: t('workbench.noBgmYet') };
-              if (trackIdIn && !tracks.some((x) => x.id === trackIdIn)) return { ok: false, error: t('workbench.audioTrackNotFound') };
-              const removed = trackIdIn ? audioRemove(trackIdIn) : audioRemoveMany(tracks.map((track) => track.id));
+              if (resolved && !resolved.clipIds.length) return notFound();
+              const removed = resolved
+                ? (resolved.clipIds.length === 1 ? audioRemove(resolved.clipIds[0]!) : audioRemoveMany(resolved.clipIds))
+                : audioRemoveMany(audioIds);
               if (!removed.ok) return { ok: false, error: removed.error ?? t('workbench.audioTrackNotFound') };
               return { ok: true, summary: t('workbench.bgmRemoved') };
             }
@@ -3705,9 +3824,13 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const db = (compRef.current.audioTracks ?? []).find((x) => x.id === newId)?.volumeDb;
               return { ok: true, summary: t('workbench.bgmMounted', { db: db != null ? String(r1(db)) : String(-18) }), data: { trackId: newId } };
             }
-            const target = trackIdIn ? tracks.find((x) => x.id === trackIdIn) : tracks.length === 1 ? tracks[0] : null;
             if (!tracks.length) return { ok: false, error: t('workbench.noBgmYet') };
-            if (!target) return { ok: false, error: t('workbench.audioTrackNotFound') };
+            if (resolved && !resolved.clipIds.length) return notFound();
+            if (resolved && resolved.clipIds.length > 1) {
+              return { ok: false, error: `${resolved.laneId} holds ${resolved.clipIds.length} clips — pass one clip id: ${resolved.clipIds.join(', ')}` };
+            }
+            const target = resolved ? tracks.find((x) => x.id === resolved.clipIds[0]) : tracks.length === 1 ? tracks[0] : null;
+            if (!target) return { ok: false, error: `${t('workbench.audioTrackNotFound')} — ${describeAudioTargets(documentRef.current, audioIds)}` };
             // Split changes the track COUNT, so it stands alone rather than combining with the knobs
             const splitAt = Number(input.splitAtSec);
             if (Number.isFinite(splitAt)) {

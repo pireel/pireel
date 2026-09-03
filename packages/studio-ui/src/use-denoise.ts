@@ -30,11 +30,13 @@ export interface DenoiseDeps {
   videoFileRef: MutableRefObject<File | null>;
   videoSigRef: MutableRefObject<string | null>;
   videoEngineRef: MutableRefObject<VideoTrackEngine | null>;
+  /** Source url → File, as mounted for playback: identifies which segment keys carry the main file. */
+  clipFilesRef: MutableRefObject<Map<string, File>>;
   pushUndoSnapshot: () => void;
 }
 
 export function useDenoise(deps: DenoiseDeps) {
-  const { comp, compRef, documentRef, setDocument, videoFile, videoFileRef, videoSigRef, videoEngineRef, pushUndoSnapshot } = deps;
+  const { comp, compRef, documentRef, setDocument, videoFile, videoFileRef, videoSigRef, videoEngineRef, clipFilesRef, pushUndoSnapshot } = deps;
   const [status, setStatus] = useState<'baking' | 'ready' | 'failed' | null>(null);
   const [progress, setProgress] = useState(0);
   /** Blended output of the last successful bake: what preview plays and export substitutes. */
@@ -48,15 +50,56 @@ export function useDenoise(deps: DenoiseDeps) {
     blendedRef.current = null;
   }, []);
 
-  const srcSig = (): string | null => {
+  /** The main narration source = the primary track's first video source. videoFileRef only holds a
+   *  file picked in THIS session; after a refresh the source comes back from the local library into
+   *  clipFilesRef under its src url, so the composition — not the legacy ref — is the authority. */
+  const mainSource = (): { file: File; sig: string; urls: string[] } | null => {
+    const shots = compRef.current.shots ?? [];
+    // Prefer a shot whose own sound is in the mix (the recording being cleaned); muted montage
+    // picture is only a last resort so a legacy single-source project still resolves.
+    const mounted = shots.filter((shot) => shot.src && clipFilesRef.current.has(shot.src));
+    const lead = mounted.find((shot) => !shot.audioMuted) ?? mounted[0];
+    if (lead?.src) {
+      const file = clipFilesRef.current.get(lead.src)!;
+      const urls = [...clipFilesRef.current.entries()].filter(([, candidate]) => candidate === file).map(([url]) => url);
+      return { file, sig: lead.srcSig ?? fileSig(file), urls };
+    }
     const f = videoFileRef.current;
-    return f ? (videoSigRef.current ?? fileSig(f)) : null;
+    if (!f) return null;
+    const urls = [...clipFilesRef.current.entries()].filter(([, candidate]) => candidate === f).map(([url]) => url);
+    return { file: f, sig: videoSigRef.current ?? fileSig(f), urls };
+  };
+  const srcSig = (): string | null => mainSource()?.sig ?? null;
+  /** Playback keys the main file is mounted under. Segments are keyed by their source url in the
+   *  multi-source model ('main' only for legacy single-source shots), so the dub must be registered
+   *  under every url that resolves to this file — a dub under 'main' alone never plays. */
+  const playbackKeys = (): string[] => ['main', ...(mainSource()?.urls ?? [])];
+  /** Export rigs are keyed 'main' for src-less shots and clip_<shotId> per src-bearing shot. */
+  const exportKeys = (): string[] => {
+    const urls = new Set(playbackKeys());
+    const shots = compRef.current.shots ?? [];
+    return ['main', ...shots.filter((shot) => shot.src && urls.has(shot.src)).map((shot) => `clip_${shot.id}`)];
+  };
+  const dubKeysRef = useRef<string[]>([]);
+  const setDub = (url: string | null) => {
+    const eng = videoEngineRef.current;
+    if (!eng) return;
+    const keys = url ? playbackKeys() : dubKeysRef.current;
+    for (const key of new Set([...dubKeysRef.current, ...keys])) eng.setNarrationDub(key, keys.includes(key) ? url : null);
+    dubKeysRef.current = url ? keys : [];
   };
 
   const bake = async (strength: number, runId: number) => {
-    const f = videoFileRef.current;
-    const sig = srcSig();
-    if (!f || !sig) return;
+    const source = mainSource();
+    if (!source) {
+      // Not an error yet: on restore the knob is already on before the primary source is
+      // mounted; the effect re-runs (leadSrc) once it lands. A source that never mounts leaves
+      // the toggle on with no bake — the tool entry reports that case explicitly.
+      setStatus(null);
+      return;
+    }
+    const f = source.file;
+    const sig = source.sig;
     const cached = blendedRef.current;
     if (cached && cached.sig === sig && cached.strength === strength) {
       setStatus('ready');
@@ -70,8 +113,8 @@ export function useDenoise(deps: DenoiseDeps) {
       if (!dryBuf) throw new Error('source has no audio track');
       const dry = await toMono(dryBuf, DENOISE_RATE);
       if (runId !== runIdRef.current) return;
-      // wet: OPFS cache by source sig — inference runs once per source ever
-      const wetKey = `dnwet:${sig}`;
+      // wet: OPFS cache by source sig (+ engine tag) — inference runs once per source ever
+      const wetKey = `dnwet:dfn3:${sig}`;
       let wet: Float32Array | null = null;
       const wetCached = await loadLocalVideo(wetKey);
       if (wetCached) wet = await decodeMono48k(wetCached);
@@ -101,24 +144,26 @@ export function useDenoise(deps: DenoiseDeps) {
 
   // Watch the comp knob: on → ensure a bake for (sig, strength); off → drop the dub, sound returns to the element.
   const strength = comp.audioDenoise?.strength ?? null;
+  // Re-bake when the lead source changes (restore mounted it after the knob was already on).
+  const leadSrc = (comp.shots ?? []).find((shot) => shot.src)?.src ?? null;
   useEffect(() => {
     const runId = ++runIdRef.current;
     if (strength == null) {
       setStatus(null);
-      videoEngineRef.current?.setNarrationDub('main', null);
+      setDub(null);
       return;
     }
     void bake(strength, runId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [strength, videoFile]);
+  }, [strength, videoFile, leadSrc]);
 
   // Feed the engine once a blend is ready (status flips drive this; failure keeps the original audio — honest degrade).
   useEffect(() => {
     const eng = videoEngineRef.current;
     if (!eng) return;
     const b = blendedRef.current;
-    if (strength != null && status === 'ready' && b) eng.setNarrationDub('main', b.url);
-    else if (strength == null || status === 'failed') eng.setNarrationDub('main', null);
+    if (strength != null && status === 'ready' && b) setDub(b.url);
+    else if (strength == null || status === 'failed') setDub(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, strength]);
 
@@ -128,7 +173,7 @@ export function useDenoise(deps: DenoiseDeps) {
     const b = blendedRef.current;
     const on = compRef.current.audioDenoise?.strength != null;
     if (!on || !b || b.sig !== srcSig() || b.strength !== compRef.current.audioDenoise!.strength) return null;
-    return new Map([['main', b.file]]);
+    return new Map(exportKeys().map((key) => [key, b.file] as const));
   };
 
   /** Panel/agent entry: strength = turn on / retune (0 < s ≤ 1), null = off. */

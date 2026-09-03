@@ -12,8 +12,11 @@ import {
   type DisplayTextFontId,
   type DisplayTextPresetId,
 } from '@pireel/studio-engine/composition';
-import { AlignCenter, AlignLeft, AlignRight, Check, ChevronDown, Plus, Search, Type } from 'lucide-react';
-import { t } from './i18n';
+import { AlignCenter, AlignLeft, AlignRight, Check, ChevronDown, Loader2, Plus, Search, Type } from 'lucide-react';
+import { WEB_FONTS, webFontFontId, webFontIdOf } from '@pireel/studio-engine/font-library';
+import { studioLocale, t } from './i18n';
+import { loadWebFont } from './web-fonts';
+import type { FontPreview } from './font-previews';
 import {
   cachedLocalFontFamilies,
   loadLocalFontFamilies,
@@ -165,25 +168,56 @@ function ColorSwatches({
   );
 }
 
-function FontPicker({
+let fontPreviewsCache: Readonly<Record<string, FontPreview>> | null = null;
+
+export function fontChoiceLabel(value: DisplayTextFontId): string {
+  const webId = webFontIdOf(value);
+  if (webId) {
+    const font = WEB_FONTS.find((candidate) => candidate.id === webId)!;
+    return studioLocale().toLowerCase().startsWith('zh') ? font.label.zh : font.label.en;
+  }
+  const selectedFamily = displayTextLocalFontFamily(value);
+  const builtin = (DISPLAY_TEXT_FONT_IDS as readonly string[]).includes(value) ? value : null;
+  return builtin ? t(`displayText.font.${builtin}`) : selectedFamily ?? t('displayText.font.preset');
+}
+
+/** The font list itself (search + built-in / common / system groups + system-font loading). Hosts
+ *  decide the surface: the display-text panel drops it under a trigger, captions open it in a dialog. */
+export function FontChoiceList({
   value,
   localFonts,
   accessState,
   onChoose,
   onLoadMore,
+  autoFocus,
+  loadingFont,
 }: {
   value: DisplayTextFontId;
   localFonts: LocalFontFamilyOption[];
   accessState: 'idle' | 'loading' | 'loaded' | 'denied' | 'unsupported';
   onChoose: (font: DisplayTextFontId) => void;
   onLoadMore: () => void;
+  autoFocus?: boolean;
+  /** Library id whose glyphs are still downloading after being applied: its row shows a spinner
+   *  where the check mark goes, so the user can keep switching fonts and watch each one land. */
+  loadingFont?: string | null;
 }) {
-  const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const rootRef = useRef<HTMLDivElement>(null);
+  // Library faces show a baked SVG outline of their name (scripts/build-font-previews.py) instead
+  // of rendering in their own face: opening the list downloads no font at all. The previews are a
+  // separate chunk, pulled in the background; rows fall back to a plain label until it arrives.
+  const [previews, setPreviews] = useState<Readonly<Record<string, FontPreview>> | null>(fontPreviewsCache);
+  useEffect(() => {
+    if (previews) return;
+    let alive = true;
+    void import('./font-previews').then((module) => {
+      fontPreviewsCache = module.FONT_PREVIEWS;
+      if (alive) setPreviews(module.FONT_PREVIEWS);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [previews]);
+  const zh = studioLocale().toLowerCase().startsWith('zh');
   const selectedFamily = displayTextLocalFontFamily(value);
-  const builtin = (DISPLAY_TEXT_FONT_IDS as readonly string[]).includes(value) ? value : null;
-  const selectedLabel = builtin ? t(`displayText.font.${builtin}`) : selectedFamily ?? t('displayText.font.preset');
   const commonSet = new Set(COMMON_FONT_FAMILIES.map((family) => family.toLocaleLowerCase()));
   const systemFonts = localFonts.filter((font) => !commonSet.has(font.family.toLocaleLowerCase()));
   const selectedMissing = selectedFamily
@@ -194,14 +228,160 @@ function FontPicker({
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const matches = (label: string) => !normalizedQuery || label.toLocaleLowerCase().includes(normalizedQuery);
   const builtins = DISPLAY_TEXT_FONT_IDS.filter((id) => matches(t(`displayText.font.${id}`)));
+  const webFonts = WEB_FONTS.filter((font) => matches(zh ? font.label.zh : font.label.en) || matches(font.family));
   const common = COMMON_FONT_FAMILIES.filter(matches);
   const system = selectedMissing.filter((font) => matches(font.family));
 
+  const fontRow = (id: DisplayTextFontId, label: string, family?: string, preview?: FontPreview) => {
+    const selected = id === value;
+    const loading = selected && loadingFont != null && webFontIdOf(id) === loadingFont;
+    return (
+      <button
+        key={id}
+        type="button"
+        role="option"
+        aria-selected={selected}
+        aria-label={label}
+        title={label}
+        onClick={() => onChoose(id)}
+        className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] ${selected ? 'bg-panel-2 text-ink' : 'text-ink-3 hover:bg-panel-2/70 hover:text-ink'}`}
+      >
+        {preview ? (
+          <span className="flex min-w-0 flex-1 items-center gap-2">
+            <svg
+              viewBox={preview.viewBox}
+              preserveAspectRatio="xMinYMid meet"
+              aria-hidden="true"
+              className="h-4 w-auto max-w-full shrink fill-current"
+            >
+              <path d={preview.d} />
+            </svg>
+            {label !== preview.text && <span className="text-ink-4 truncate text-[10px]">{label}</span>}
+          </span>
+        ) : (
+          <span className="min-w-0 flex-1 truncate" style={family ? { fontFamily: `"${family}", sans-serif` } : undefined}>
+            {label}
+          </span>
+        )}
+        {loading
+          ? <Loader2 size={12} className="text-ink-4 shrink-0 animate-spin" aria-label={t('displayText.fontLoading')} />
+          : selected && <Check size={12} className="text-accent shrink-0" />}
+      </button>
+    );
+  };
+
+  return (
+    <>
+      <div className="p-2 pb-1">
+        <label className="bg-panel/70 flex h-8 items-center gap-2 rounded-md px-2">
+          <Search size={12} className="text-ink-4" />
+          <input
+            value={query}
+            autoFocus={autoFocus}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={t('displayText.searchFonts')}
+            className="text-ink placeholder:text-ink-5 min-w-0 flex-1 bg-transparent text-[11px] outline-none"
+          />
+        </label>
+      </div>
+
+      <div role="listbox" aria-label={t('displayText.fontFamily')} className="max-h-56 overflow-y-auto px-2 pb-2">
+        {webFonts.length > 0 && (
+          <div>
+            <div className="text-ink-4 px-2 pb-1 pt-2 text-[9px] tracking-[0.1em] uppercase">{t('displayText.webFonts')}</div>
+            {webFonts.map((font) => fontRow(webFontFontId(font), zh ? font.label.zh : font.label.en, undefined, previews?.[font.id]))}
+          </div>
+        )}
+        {builtins.length > 0 && (
+          <div>
+            <div className="text-ink-4 px-2 pb-1 pt-2 text-[9px] tracking-[0.1em] uppercase">{t('displayText.builtInFonts')}</div>
+            {builtins.map((id) => fontRow(id, t(`displayText.font.${id}`)))}
+          </div>
+        )}
+        {common.length > 0 && (
+          <div>
+            <div className="text-ink-4 px-2 pb-1 pt-3 text-[9px] tracking-[0.1em] uppercase">{t('displayText.commonFonts')}</div>
+            {common.map((family) => {
+              const id = localDisplayTextFontId(family);
+              return id ? fontRow(id, family, family) : null;
+            })}
+          </div>
+        )}
+        {system.length > 0 && (
+          <div>
+            <div className="text-ink-4 px-2 pb-1 pt-3 text-[9px] tracking-[0.1em] uppercase">{t('displayText.systemFonts')}</div>
+            {system.map((font) => {
+              const id = localDisplayTextFontId(font.family);
+              return id ? fontRow(id, font.family, font.family) : null;
+            })}
+          </div>
+        )}
+        {builtins.length === 0 && common.length === 0 && system.length === 0 && (
+          <div className="text-ink-4 px-2 py-6 text-center text-[11px]">{t('displayText.noMatchingFonts')}</div>
+        )}
+      </div>
+
+      <div className="bg-panel/75 p-2">
+        <button
+          type="button"
+          onClick={onLoadMore}
+          disabled={accessState === 'loading' || accessState === 'unsupported'}
+          className="bg-panel-2 text-ink-2 hover:bg-panel hover:text-ink disabled:text-ink-5 flex h-8 w-full items-center justify-center rounded-md px-2 text-[11px] disabled:cursor-not-allowed"
+        >
+          {accessState === 'loading'
+            ? t('displayText.loadingSystemFonts')
+            : localFonts.length > 0
+              ? t('displayText.reloadSystemFonts')
+              : t('displayText.loadMoreFonts')}
+        </button>
+        {accessState === 'denied' && (
+          <p className="text-ink-4 mt-1.5 px-1 text-[10px] leading-4">{t('displayText.fontPermissionDenied')}</p>
+        )}
+        {accessState === 'unsupported' && (
+          <p className="text-ink-4 mt-1.5 px-1 text-[10px] leading-4">{t('displayText.systemFontsUnsupported')}</p>
+        )}
+      </div>
+    </>
+  );
+}
+
+export function FontPicker({
+  value,
+  localFonts,
+  accessState,
+  onChoose,
+  onLoadMore,
+  sampleText,
+}: {
+  value: DisplayTextFontId;
+  localFonts: LocalFontFamilyOption[];
+  accessState: 'idle' | 'loading' | 'loaded' | 'denied' | 'unsupported';
+  onChoose: (font: DisplayTextFontId) => void;
+  onLoadMore: () => void;
+  /** Text the chosen face will render (its glyph chunks are what the loading state waits for);
+   *  defaults to the font's own label. */
+  sampleText?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  // Library id whose glyphs are still downloading after being applied (spinner on the trigger).
+  const [loadingFont, setLoadingFont] = useState<string | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  // Picking keeps the list open: switching between several faces to compare them is the normal
+  // flow, so the dropdown only closes on outside click / Escape / the trigger.
+  const choose = (font: DisplayTextFontId) => {
+    onChoose(font);
+    const webId = webFontIdOf(font);
+    if (!webId) return;
+    setLoadingFont(webId);
+    void loadWebFont(webId, sampleText).finally(() => {
+      setLoadingFont((current) => (current === webId ? null : current));
+    });
+  };
+  const selectedWeb = webFontIdOf(value);
+  const selectedFamily = selectedWeb ? WEB_FONTS.find((font) => font.id === selectedWeb)!.family : displayTextLocalFontFamily(value);
+
   useEffect(() => {
     if (!open) return;
-    const scrollFrame = window.requestAnimationFrame(() => {
-      rootRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    });
     const close = (event: MouseEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
     };
@@ -211,39 +391,15 @@ function FontPicker({
     document.addEventListener('mousedown', close);
     document.addEventListener('keydown', escape);
     return () => {
-      window.cancelAnimationFrame(scrollFrame);
       document.removeEventListener('mousedown', close);
       document.removeEventListener('keydown', escape);
     };
   }, [open]);
 
-  const choose = (font: DisplayTextFontId) => {
-    onChoose(font);
-    setOpen(false);
-    setQuery('');
-  };
-
-  const fontRow = (id: DisplayTextFontId, label: string, family?: string) => {
-    const selected = id === value;
-    return (
-      <button
-        key={id}
-        type="button"
-        role="option"
-        aria-selected={selected}
-        onClick={() => choose(id)}
-        className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] ${selected ? 'bg-panel-2 text-ink' : 'text-ink-3 hover:bg-panel-2/70 hover:text-ink'}`}
-      >
-        <span className="min-w-0 flex-1 truncate" style={family ? { fontFamily: `"${family}", sans-serif` } : undefined}>
-          {label}
-        </span>
-        {selected && <Check size={12} className="text-accent shrink-0" />}
-      </button>
-    );
-  };
-
+  // A select-style dropdown: the list floats over the content below the trigger instead of
+  // pushing it down. Always mounted (hidden when closed) so the selected option stays in the DOM.
   return (
-    <div ref={rootRef}>
+    <div ref={rootRef} className="relative">
       <button
         type="button"
         aria-haspopup="listbox"
@@ -253,74 +409,20 @@ function FontPicker({
       >
         <span className="text-ink-4 text-[10px]">Aa</span>
         <span className="min-w-0 flex-1 truncate" style={selectedFamily ? { fontFamily: `"${selectedFamily}", sans-serif` } : undefined}>
-          {selectedLabel}
+          {fontChoiceLabel(value)}
         </span>
         <ChevronDown size={12} className={`text-ink-4 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
-      <div className={open ? 'bg-canvas/55 mt-2 overflow-hidden rounded-lg shadow-md' : 'hidden'}>
-        <div className="p-2 pb-1">
-          <label className="bg-panel/70 flex h-8 items-center gap-2 rounded-md px-2">
-            <Search size={12} className="text-ink-4" />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={t('displayText.searchFonts')}
-              className="text-ink placeholder:text-ink-5 min-w-0 flex-1 bg-transparent text-[11px] outline-none"
-            />
-          </label>
-        </div>
-
-        <div role="listbox" aria-label={t('displayText.fontFamily')} className="max-h-56 overflow-y-auto px-2 pb-2">
-          {builtins.length > 0 && (
-            <div>
-              <div className="text-ink-4 px-2 pb-1 pt-2 text-[9px] tracking-[0.1em] uppercase">{t('displayText.builtInFonts')}</div>
-              {builtins.map((id) => fontRow(id, t(`displayText.font.${id}`)))}
-            </div>
-          )}
-          {common.length > 0 && (
-            <div>
-              <div className="text-ink-4 px-2 pb-1 pt-3 text-[9px] tracking-[0.1em] uppercase">{t('displayText.commonFonts')}</div>
-              {common.map((family) => {
-                const id = localDisplayTextFontId(family);
-                return id ? fontRow(id, family, family) : null;
-              })}
-            </div>
-          )}
-          {system.length > 0 && (
-            <div>
-              <div className="text-ink-4 px-2 pb-1 pt-3 text-[9px] tracking-[0.1em] uppercase">{t('displayText.systemFonts')}</div>
-              {system.map((font) => {
-                const id = localDisplayTextFontId(font.family);
-                return id ? fontRow(id, font.family, font.family) : null;
-              })}
-            </div>
-          )}
-          {builtins.length === 0 && common.length === 0 && system.length === 0 && (
-            <div className="text-ink-4 px-2 py-6 text-center text-[11px]">{t('displayText.noMatchingFonts')}</div>
-          )}
-        </div>
-
-        <div className="bg-panel/75 p-2">
-          <button
-            type="button"
-            onClick={onLoadMore}
-            disabled={accessState === 'loading' || accessState === 'unsupported'}
-            className="bg-panel-2 text-ink-2 hover:bg-panel hover:text-ink disabled:text-ink-5 flex h-8 w-full items-center justify-center rounded-md px-2 text-[11px] disabled:cursor-not-allowed"
-          >
-            {accessState === 'loading'
-              ? t('displayText.loadingSystemFonts')
-              : localFonts.length > 0
-                ? t('displayText.reloadSystemFonts')
-                : t('displayText.loadMoreFonts')}
-          </button>
-          {accessState === 'denied' && (
-            <p className="text-ink-4 mt-1.5 px-1 text-[10px] leading-4">{t('displayText.fontPermissionDenied')}</p>
-          )}
-          {accessState === 'unsupported' && (
-            <p className="text-ink-4 mt-1.5 px-1 text-[10px] leading-4">{t('displayText.systemFontsUnsupported')}</p>
-          )}
-        </div>
+      <div className={open ? 'border-line bg-panel absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-lg border shadow-xl' : 'hidden'}>
+        <FontChoiceList
+          value={value}
+          localFonts={localFonts}
+          accessState={accessState}
+          onLoadMore={onLoadMore}
+          onChoose={choose}
+          loadingFont={loadingFont}
+        />
       </div>
     </div>
   );

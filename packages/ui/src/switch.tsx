@@ -50,10 +50,13 @@ const Switch = React.forwardRef<HTMLButtonElement, SwitchProps>(function Switch(
       <span
         aria-hidden="true"
         className={cn(
-          'pointer-events-none absolute rounded-full shadow-sm transition-[transform,background-color] duration-150',
+          // Centered on the track's padding box (absolute offsets ignore the 1px border, so a
+          // top-[2px] thumb in an 18px track sat 2px high); translate-y composes with the
+          // horizontal travel below.
+          'pointer-events-none absolute top-1/2 -translate-y-1/2 rounded-full shadow-sm transition-[transform,background-color] duration-150',
           compact
-            ? 'left-[2px] top-[2px] size-[14px]'
-            : 'left-1 top-1 size-4',
+            ? 'left-[1px] size-[14px]'
+            : 'left-[3px] size-4',
           checked
             ? cn(
                 'bg-switch-thumb-on',

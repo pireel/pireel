@@ -230,8 +230,6 @@ export const PANELS_ZH: Record<string, string> = {
   "panels.muted": "已静音",
   "panels.removeMusic": "删除音轨",
   "panels.selectShotOrAudioFirst": "先在时间轴上选中分镜或音频",
-  "panels.soloListen": "独听",
-  "panels.soloListenHint": "只试听这一段,画面声音和其他音频暂时静音;不影响导出",
   "panels.trackMutedHint": "该轨已静音,在时间轴轨道前的图标处解除",
   "panels.unmuteTrack": "取消静音",
   "panels.showTrack": "显示该轨",

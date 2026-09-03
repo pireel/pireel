@@ -162,7 +162,7 @@ describe('local media persistence', () => {
     expect(await loadLocalVideo(sig)).not.toBeNull();
   });
 
-  it('keeps every retained folder copy when the ordinary 12-file LRU is pruned', async () => {
+  it('keeps every stored file — there is no count-based eviction (a 100-video project must not lose its 13th import)', async () => {
     const dir = new MemoryDirectoryHandle();
     vi.stubGlobal('indexedDB', undefined);
     vi.stubGlobal('navigator', {
@@ -187,7 +187,7 @@ describe('local media persistence', () => {
     const retained = await Promise.all(folderFiles.map((file) => loadLocalVideo(fileSig(file))));
     const ordinary = await Promise.all(ordinaryFiles.map((file) => loadLocalVideo(fileSig(file))));
     expect(retained.every(Boolean)).toBe(true);
-    expect(ordinary.filter(Boolean)).toHaveLength(12);
+    expect(ordinary.every(Boolean)).toBe(true);
   });
 
   it('keeps distinct non-ASCII locators separate even when size and mtime match', async () => {

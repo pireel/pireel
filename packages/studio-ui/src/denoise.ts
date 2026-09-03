@@ -1,5 +1,5 @@
 /**
- * Narration denoise — RNNoise (wasm, Apache-2.0, fully in-browser) with a swappable seam.
+ * Narration denoise — DeepFilterNet3 (onnxruntime-web, fully in-browser) behind a swappable seam.
  *
  * Shape mirrors the reference NLE's bake: the expensive inference runs ONCE per source into a
  * cached WET file; "strength" is a dry/wet blend done at BAKE time (sample-accurate PCM sum), so
@@ -7,15 +7,13 @@
  * no WebAudio takeover of the decode elements. Changing strength only re-blends from the cached
  * wet (seconds), never re-runs inference.
  *
- * RNNoise is the v1 engine (self-contained wasm, works blind); the processor seam (`denoiseWetPcm`)
- * is where DeepFilterNet3-on-ort-web slots in later — everything around it (bake/cache/blend/wav)
- * is engine-agnostic. Output is 48 kHz MONO wav: speech-first tradeoff, stereo sources downmix.
+ * Engine behind the `denoiseWetPcm` seam: DeepFilterNet3 on onnxruntime-web (dfn3-denoise.ts);
+ * everything around it (bake/cache/blend/wav) is engine-agnostic. Output is 48 kHz MONO wav: speech-first tradeoff, stereo sources downmix.
  */
 
 export const DENOISE_RATE = 48000;
+/** Same default as the reference desktop NLE's denoise amount. */
 export const DENOISE_DEFAULT_STRENGTH = 0.6;
-const FRAME = 480; // rnnoise contract: 10 ms frames at 48 kHz
-const YIELD_EVERY = 400; // frames between event-loop yields (~4 s of audio)
 
 /** Decode an audio blob to 48 kHz mono Float32 (mixdown across channels). */
 export async function decodeMono48k(blob: Blob): Promise<Float32Array> {
@@ -34,36 +32,10 @@ export async function decodeMono48k(blob: Blob): Promise<Float32Array> {
 /** Run RNNoise over mono 48 kHz PCM → WET PCM (same length). Yields to the event loop between
  *  batches so a long bake doesn't freeze the tab; onProgress gets 0..1. */
 export async function denoiseWetPcm(dry: Float32Array, onProgress?: (p: number) => void): Promise<Float32Array> {
-  const { default: factory } = await import('@jitsi/rnnoise-wasm/dist/rnnoise-sync');
-  const mod = await factory();
-  const state = mod._rnnoise_create();
-  const inPtr = mod._malloc(FRAME * 4);
-  const outPtr = mod._malloc(FRAME * 4);
-  const wet = new Float32Array(dry.length);
-  const frame = new Float32Array(FRAME);
-  try {
-    const frames = Math.ceil(dry.length / FRAME);
-    for (let f = 0; f < frames; f++) {
-      const off = f * FRAME;
-      const n = Math.min(FRAME, dry.length - off);
-      // rnnoise speaks float-in-int16-range
-      for (let i = 0; i < FRAME; i++) frame[i] = i < n ? dry[off + i]! * 32767 : 0;
-      mod.HEAPF32.set(frame, inPtr >> 2);
-      mod._rnnoise_process_frame(state, outPtr, inPtr);
-      const out = mod.HEAPF32.subarray(outPtr >> 2, (outPtr >> 2) + n);
-      for (let i = 0; i < n; i++) wet[off + i] = out[i]! / 32767;
-      if (f % YIELD_EVERY === YIELD_EVERY - 1) {
-        onProgress?.(f / frames);
-        await new Promise((r) => setTimeout(r, 0));
-      }
-    }
-    onProgress?.(1);
-    return wet;
-  } finally {
-    mod._free(inPtr);
-    mod._free(outPtr);
-    mod._rnnoise_destroy(state);
-  }
+  // DeepFilterNet3 (same model and pipeline constants as the reference desktop NLE). A load
+  // failure (offline, blocked CDN) fails the bake — the panel shows it and the original audio plays.
+  const { dfn3Enhance } = await import('./dfn3-denoise');
+  return dfn3Enhance(dry, onProgress);
 }
 
 /** Sample-accurate dry/wet blend: out = dry·(1−s) + wet·s (clamped 0..1). */

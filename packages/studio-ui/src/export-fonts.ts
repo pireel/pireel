@@ -8,6 +8,7 @@
  */
 
 import { registeredLocalFontFace } from './local-font-access';
+import { DEFAULT_CJK_PARTNER_ID, webFontCssUrl, webFontIdOf } from '@pireel/studio-engine/font-library';
 
 export interface FontFace {
   family: string;
@@ -36,11 +37,14 @@ function parseRange(spec: string): [number, number] | null {
   return [lo, m[2] ? parseInt(m[2], 16) : lo];
 }
 
-export function parseFontFaces(css: string): FontFace[] {
+export function parseFontFaces(css: string, baseUrl?: string): FontFace[] {
   const faces: FontFace[] = [];
   for (const block of css.match(/@font-face\s*\{[^}]*\}/g) ?? []) {
-    const family = /font-family:\s*'([^']+)'/.exec(block)?.[1];
-    const url = /src:\s*url\(([^)]+)\)/.exec(block)?.[1];
+    const family = /font-family:\s*['"]([^'"]+)['"]/.exec(block)?.[1];
+    // Google: `src: url(...)`. cn-font-split: `src:local("F"),url("./hash.woff2")format("woff2")` —
+    // take the first url() wherever it sits and resolve it against the stylesheet's own URL.
+    const rawUrl = /url\(\s*['"]?([^'")]+)['"]?\s*\)/.exec(/src:\s*([^;]+);/.exec(block)?.[1] ?? '')?.[1];
+    const url = rawUrl && baseUrl ? new URL(rawUrl, baseUrl).toString() : rawUrl;
     if (!family || !url) continue;
     const style = /font-style:\s*([^;]+);/.exec(block)?.[1]?.trim() ?? 'normal';
     const weight = /font-weight:\s*([^;]+);/.exec(block)?.[1]?.trim() ?? '400';
@@ -113,6 +117,39 @@ async function fetchFont(url: string): Promise<Response | null> {
   return null;
 }
 
+const rangeDecl = (f: FontFace) => (f.ranges
+  ? `unicode-range:${f.ranges.map(([a, b]) => (a === b ? `U+${a.toString(16)}` : `U+${a.toString(16)}-${b.toString(16)}`)).join(',')};`
+  : '');
+
+/** Library ("花字") web fonts: same unicode-range hit test over cn-font-split's chunked CSS, chunks
+ *  inlined as data: URIs. A 13MB face costs only the blocks the used glyphs fall in. */
+async function buildInlineWebFontCss(
+  webFontIds: string[],
+  used: Set<number>,
+  log: (m: string) => void,
+): Promise<string> {
+  const ids = [...new Set(webFontIds.map((id) => webFontIdOf(id) ?? '').filter(Boolean))];
+  if (!ids.length) return '';
+  const parts = await Promise.all(ids.map(async (id) => {
+    const cssUrl = webFontCssUrl(id);
+    const res = await fetchFont(cssUrl);
+    if (!res) {
+      log(`web font css unavailable for export: ${id}`);
+      return '';
+    }
+    const faces = parseFontFaces(await res.text(), cssUrl);
+    const kept = faces.filter((f) => !f.ranges || f.ranges.some(([lo, hi]) => { for (const cp of used) if (cp >= lo && cp <= hi) return true; return false; }));
+    const rules = await Promise.all(kept.map(async (f) => {
+      const buf = await fetchFont(f.url).then((response) => response?.arrayBuffer() ?? null).catch(() => null);
+      if (!buf) return '';
+      return `@font-face{font-family:"${f.family}";font-style:${f.style};font-weight:${f.weight};src:url(data:font/woff2;base64,${toBase64(buf)}) format('woff2');${rangeDecl(f)}}`;
+    }));
+    log(`web font embedded: ${id} · ${rules.filter(Boolean).length} of ${faces.length} chunks`);
+    return rules.filter(Boolean).join('\n');
+  }));
+  return parts.filter(Boolean).join('\n');
+}
+
 /**
  * Build inline font CSS: fetch css2 → keep subsets hit by usedText's code points → fetch each woff2 and base64 it.
  * Returns an @font-face string ready to drop into an SVG <style>.
@@ -121,6 +158,7 @@ export async function buildInlineFontCss(
   usedText: string,
   log: (m: string) => void = () => {},
   localFamilies: string[] = [],
+  webFontIds: string[] = [],
 ): Promise<string> {
   const t0 = performance.now();
   // DOM textContent keeps formatting newlines even when the composition has no visible text.
@@ -131,7 +169,15 @@ export async function buildInlineFontCss(
     log('font inlining skipped: no visible glyphs');
     return '';
   }
-  const localCss = await buildInlineLocalFontCss(localFamilies, log);
+  const usedCodePoints = new Set<number>();
+  for (const ch of glyphText) usedCodePoints.add(ch.codePointAt(0)!);
+  // A local (usually Latin-only) face is rendered with the CJK partner behind it (see
+  // font-library): the export must carry the partner's glyph blocks too.
+  const webIds = localFamilies.length ? [...webFontIds, `web:${DEFAULT_CJK_PARTNER_ID}`] : webFontIds;
+  const [localCss, webCss] = await Promise.all([
+    buildInlineLocalFontCss(localFamilies, log),
+    buildInlineWebFontCss(webIds, usedCodePoints, log),
+  ]);
   // Exact subset: text= makes Google's server cut glyphs per character (a few hundred KB per CJK subset →
   // tens of KB total). The inline string is part of every changed frame's SVG data URI, so its size
   // multiplies directly into per-frame parse cost.
@@ -149,7 +195,7 @@ export async function buildInlineFontCss(
     // instead of throwing: the frame/export still renders with system fallback fonts. A hard
     // "Failed to fetch" here used to kill capture_frame outright.
     log('font CSS fetch failed — falling back to system fonts (no inlining)');
-    return localCss;
+    return [webCss, localCss].filter(Boolean).join('\n');
   }
   const faces = parseFontFaces(await res.text());
 
@@ -177,11 +223,10 @@ export async function buildInlineFontCss(
     kept.map(async (f) => {
       const buf = await loadFont(f.url);
       if (!buf) return ''; // one woff2 failing (blocked/flaky) shouldn't kill the whole capture/export
-      const range = f.ranges ? `unicode-range:${f.ranges.map(([a, b]) => (a === b ? `U+${a.toString(16)}` : `U+${a.toString(16)}-${b.toString(16)}`)).join(',')};` : '';
-      return `@font-face{font-family:'${f.family}';font-style:${f.style};font-weight:${f.weight};src:url(data:font/woff2;base64,${toBase64(buf)}) format('woff2');${range}}`;
+      return `@font-face{font-family:'${f.family}';font-style:${f.style};font-weight:${f.weight};src:url(data:font/woff2;base64,${toBase64(buf)}) format('woff2');${rangeDecl(f)}}`;
     }),
   );
-  const css = [parts.filter(Boolean).join('\n'), localCss].filter(Boolean).join('\n');
+  const css = [parts.filter(Boolean).join('\n'), webCss, localCss].filter(Boolean).join('\n');
   log(`font inlining done: ${(css.length / 1024 / 1024).toFixed(2)}MB css · ${((performance.now() - t0) / 1000).toFixed(2)}s`);
   return css;
 }

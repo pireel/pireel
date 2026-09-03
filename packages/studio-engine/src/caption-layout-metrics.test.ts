@@ -12,3 +12,19 @@ describe('captionLineSegments', () => {
     expect(measured.length).toBeGreaterThan(estimated.length);
   });
 });
+
+describe('caption font override', () => {
+  it('renders and measures with the same overridden face, and falls back to the preset font', async () => {
+    const { captionCanvasFontFamilies, captionFontCss } = await import('./caption-layout-metrics');
+    const { getCaptionPreset } = await import('./caption-presets');
+    const preset = getCaptionPreset('ln-clean');
+    expect(captionFontCss(preset)).toBe('var(--font-body)');
+    expect(captionFontCss(preset, 'serif')).toContain('Noto Serif SC');
+    expect(captionCanvasFontFamilies(preset, 'serif')).toContain('Noto Serif SC');
+    // A local (typically Latin-only) face carries the CJK display partner behind it.
+    expect(captionFontCss(preset, 'local:Avenir%20Next')).toBe('"Avenir Next","Smiley Sans",sans-serif');
+    expect(captionCanvasFontFamilies(preset, 'local:Avenir%20Next')).toBe('"Avenir Next","Smiley Sans",sans-serif');
+    expect(captionFontCss(preset, 'preset')).toBe('var(--font-body)');
+    expect(captionFontCss(preset, 'nonsense')).toBe('var(--font-body)');
+  });
+});

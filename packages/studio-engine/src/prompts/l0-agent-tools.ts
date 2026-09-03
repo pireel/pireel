@@ -26,8 +26,16 @@
  */
 
 import { CAPTION_PRESETS } from '../caption-presets';
+import { WEB_FONTS } from '../font-library';
 import { PLACE_ANCHORS } from '../composition-core';
 import { BROLL_DECISIONS, NARRATIVE_ROLES, SCENE_FAMILIES, VIEWER_TASKS } from '../director-plan';
+
+/** Font ids every text surface accepts (set_captions font, add_texts/update_text fontFamily). The
+ * library ids are listed with their names so the model can match a font the user asks for by name;
+ * a `web:` face is served from the CDN and renders on every device and in export, whereas a
+ * `local:` face only renders where that family is installed. */
+export const WEB_FONT_CATALOG = WEB_FONTS.map((font) => `web:${font.id} (${font.label.zh} / ${font.label.en})`).join(', ');
+export const FONT_ID_HELP = `'sans' | 'serif' | 'mono' | 'web:<library id>' (CDN-served, works everywhere: ${WEB_FONT_CATALOG}) | 'local:<installed family, URL-encoded>' (renders only on devices that have it). When the user names a font, match it against the library names first and send that web: id.`;
 
 export type StudioToolKind = 'badge' | 'card';
 
@@ -387,14 +395,16 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     description:
       'Analyze video sources. mode="geometry" is token-free and browser-local: real scene cuts, qualityWindows from a bounded coarse-to-fine sharpness/exposure/stability scan, plus MediaPipe subject/face tracks and representative empty regions. qualityWindows pass absolute weak-frame, entry/exit and per-metric gates; an empty list means no technically acceptable range was found and must never be treated as permission to force-select the least-bad source. subjectPresence is reported separately when available. mode="editorial" first builds maximal continuous local quality intervals, then CHARGES the account for one comparative temporal review under the required brief; use it DIRECTLY when choosing or ranking source ranges by aesthetic fit, expression, subject state, action completeness, composition or role suitability. The model splits each clipped interval at natural action boundaries on a 0-based interval clock, and the host maps every returned boundary back to source time. It returns a general evidence contract (action phases, suggested and rejected source ranges, entry/exit state, camera motion, subject placement, score breakdown, best use and comparative verdict) while the brief supplies task- or Skill-specific taste and hard gates. This is the one complete source-selection pass: reuse editorialCandidates directly for ordering and placement instead of running a later detailed review. For a multi-source selection, pass every relevant source once in items[] under one mode="editorial" call; the runtime analyzes them with bounded concurrency. Do not inspect only the current top few, and do not precede or follow the batch with per-source geometry/semantic/editorial calls for the same selection question. It requires one shared brief and accepts maxCandidates=1..6 per source. Default review keeps ONE primary accepted range per source plus at most one non-overlapping reserve:true range for capacity shortfall or a structural echo; when the task genuinely needs several distinct ranges from one raw take, say so explicitly in the brief (e.g. "multiple distinct moments from the same source"). Editorial review skips source-audio classification by default; pass assessAudio=true only when the edit genuinely depends on the source soundtrack. When audio is intentionally discarded, it must not affect scoring or ordering. mode="semantic" (default) adds sparse hosted content/text descriptions and is required when planning needs to know what the footage depicts or which evidence/B-roll carries the Scene, but it is not a substitute for editorial candidate review and never authorizes visually selected source ranges. Long takes are sampled across time even without hard cuts; semantic intervals are observations, while only sceneCutsSec are real cut points. Never substitute geometry for semantic/editorial understanding merely to save tokens. For an unplaced device-local video, pass its exact assetId from list_assets/search_assets directly: project-library membership is sufficient, so never register it, promote it to primary, or place it on the timeline merely for analysis. If byte access is unavailable, ask the user to restore access in Materials; timeline placement cannot restore access. Semantic analysis normally includes local PCM/RNNoise audioAssessment: no-audio, effectively-silent, and non-speech-or-noise must not be followed by transcript tools; only speech-likely may justify read_script, and only when existing spoken wording matters. Pass assessAudio=false when a semantic workflow intentionally discards source audio. Otherwise omit selectors when the project has one video or pass an exact registered assetId/clipId. Audio-led projects may analyze their B-roll video directly; it does not need to be promoted to the primary lane. Returns source-normalized subjectTracks already clustered locally; consume them directly and do not create cuts where the track remains stable. A selected Skill may explicitly finish a direct source-led assembly with deterministic timeline/canvas/audio checks instead of review_visuals.',
     inputSchema: obj({
-      mode: { type: 'string', enum: ['geometry', 'semantic', 'editorial'], description: 'geometry = local measurements; semantic = sparse hosted content understanding (default); editorial = local shortlist plus comparative temporal aesthetic review.' },
-      brief: { type: 'string', description: 'Required for editorial mode, including items[]: concrete visible selection criteria, intended tone and editorial roles. Do not include unsupported identity claims. When the active Skill declares its own review brief, the runtime applies the Skill criteria verbatim and your text becomes supplementary session notes — pass only per-session facts (available material, explicit user asks), never restated or invented criteria.' },
+      mode: { type: 'string', enum: ['geometry', 'semantic', 'editorial', 'question'], description: 'geometry = local measurements; semantic = sparse hosted content understanding (default); editorial = local shortlist plus comparative temporal aesthetic review; question = answer ONE concrete visual question over already-reviewed source ranges (cheap stills, cached by question) — use it when a user instruction names something the review evidence and shot log do not record, then FILTER your selection with the answers instead of re-reviewing.' },
+      question: { type: 'string', description: 'Required for mode=question: one concrete, visually checkable question (≤300 chars). Pass ranges on each item (or top-level ranges for a single asset); omitted ranges mean the whole source.' },
+      ranges: { type: 'array', maxItems: 8, description: 'mode=question, single asset: the source ranges to answer over (seconds).', items: { type: 'object', additionalProperties: false, properties: { startSec: { type: 'number' }, endSec: { type: 'number' } }, required: ['startSec', 'endSec'] } },
+      brief: { type: 'string', description: 'Required for editorial mode, including items[]: concrete visible selection criteria, intended tone and editorial roles. Do not include unsupported identity claims. When the active Skill declares its own review brief, the runtime applies the Skill criteria verbatim and your text is appended as the USER\'s requirements for this session, which override the Skill criteria wherever they conflict: quote the user\'s own explicit asks verbatim plus per-session facts (available material). Never restate the Skill, and never add selection criteria of your own — a topical frame you invented is not a user requirement.' },
       maxCandidates: { type: 'number', description: 'Editorial mode only: number of locally shortlisted ranges to compare, 1–6 (default 6).' },
       assessAudio: { type: 'boolean', description: 'Editorial mode defaults to false. Use true only when source sound affects selection; false skips local speech classification and forbids transcript tools for that source.' },
       items: {
         type: 'array',
         maxItems: 24,
-        description: 'Multi-source editorial selection only. Include every relevant video exactly once in one call. Shared brief/maxCandidates/assessAudio apply to all items.',
+        description: 'Multi-source editorial selection or question. Include every relevant video exactly once in one call. Shared brief/maxCandidates/assessAudio (editorial) or question (question) apply to all items.',
         items: {
           type: 'object',
           additionalProperties: false,
@@ -402,6 +412,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
             assetId: { type: 'string', description: 'Exact project-local or registered video asset id.' },
             clipId: { type: 'string', description: 'Exact timeline clip id whose source video should be analyzed.' },
             localSig: { type: 'string', description: 'Legacy compatibility only: an unambiguous device-local content signature.' },
+            ranges: { type: 'array', maxItems: 8, description: 'mode=question: the source ranges of this item to answer over (seconds); omit for the whole source.', items: { type: 'object', additionalProperties: false, properties: { startSec: { type: 'number' }, endSec: { type: 'number' } }, required: ['startSec', 'endSec'] } },
           },
         },
       },
@@ -658,7 +669,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
           accentColor: { type: 'string', description: 'Optional #RGB/#RRGGBB accent/highlight override.' },
           fontSize: { type: 'number', description: 'Optional 24–180 px size inside the text Component.' },
           fontWeight: { type: 'number', description: 'Optional 300–950 font weight.' },
-          fontFamily: { type: 'string', enum: ['preset', 'sans', 'serif', 'mono'], description: 'Export-safe font family. preset follows the selected display style.' },
+          fontFamily: { type: 'string', description: `Font family id: 'preset' (follows the selected display style) | ${FONT_ID_HELP}` },
           align: { type: 'string', enum: ['left', 'center', 'right'] },
           placement: { type: 'object', additionalProperties: false, properties: {
             xPct: { type: 'number' }, yPct: { type: 'number' }, widthPct: { type: 'number' }, heightPct: { type: 'number' },
@@ -681,7 +692,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
           preset: { type: 'string', enum: ['clean', 'editorial', 'headline', 'outline', 'marker', 'label'] },
           animation: { type: 'string', enum: ['none', 'popIn', 'slideUp', 'typewriter', 'wordReveal', 'wordSlide', 'highlightPop', 'highlightBlock'] },
           color: { type: 'string' }, accentColor: { type: 'string' }, fontSize: { type: 'number' }, fontWeight: { type: 'number' },
-          fontFamily: { type: 'string', enum: ['preset', 'sans', 'serif', 'mono'] },
+          fontFamily: { type: 'string', description: "Font family id: 'preset' or any id add_texts accepts (sans | serif | mono | web:<library id> | local:<family>)." },
           align: { type: 'string', enum: ['left', 'center', 'right'] },
           placement: { type: 'object', additionalProperties: false, properties: {
             xPct: { type: 'number' }, yPct: { type: 'number' }, widthPct: { type: 'number' }, heightPct: { type: 'number' },
@@ -694,8 +705,13 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   {
     id: 'add_clips', kind: 'badge', icon: '➕', label: 'tools.add_clips.label',
     skillContract: { version: 1, stability: 'stable' },
-    description: 'Place one or more registered assets without opening timeline time. Device-local image, audio, and video bytes are prepared before commit; unavailable access fails without changing the timeline. Use role=primary for the continuous full-frame video story spine; use role=broll only for deliberate concurrent overlay/PiP evidence. Primary clips are always placed at natural speed and cover the canvas: when sourceInSec/sourceOutSec are supplied, durationSec must agree with that source range (within frame rounding), and speed must be omitted. Never stretch picture, repeat a source span, or slow footage merely to fill narration time; add a distinct usable interval or revise narration first. Intentional creative retiming is a separate set_video_speed decision. When trackId is omitted, overlapping broll and overlapping role=sfx audio are placed on free semantic lanes so every item is preserved; non-overlapping SFX reuse an existing free SFX lane. Pass an exact trackId only when replacement is intentional. The receipt returns the actual placed timeline/source ranges and any overwritten clip ids. A 5-second fallback is only an editable initial duration, never proof of source length or coverage. Reuse is valid only when the repeated occurrence has a distinct editorial job or treatment; inspect the source, pass deliberate duration/source ranges, and verify placements instead of looping one span as filler. Use insert_clips to open time. Each clip is typed from its asset; missing semantic lanes are created transactionally. Optional sceneId preserves ownership supplied by an explicitly selected Skill or legacy saved plan. Audio must declare narration/music/sfx when the default narration role is not intended. Omit initial volumeDb unless the user specified a level: narration defaults to a clarity lift, and music is capped to a speech-safe bed while narration exists. One output may mix BGM/source sound with narration, but it cannot contain time-overlapping audible narration tracks. Replace or remove the current narration; if the user requested another finished version, create and switch to its independent output before placing that version\'s narration.',
-    inputSchema: obj({ clips: { type: 'array', items: AGENT_CLIP_ITEM_SCHEMA }, atSec: { type: 'number' }, includeLinked: { type: 'boolean' } }, ['clips']),
+    description: 'Place one or more registered assets without opening timeline time. Device-local image, audio, and video bytes are prepared before commit; unavailable access fails without changing the timeline. Use role=primary for the continuous full-frame video story spine; use role=broll only for deliberate concurrent overlay/PiP evidence. Primary clips are always placed at natural speed and cover the canvas: when sourceInSec/sourceOutSec are supplied, durationSec must agree with that source range (within frame rounding), and speed must be omitted. Never stretch picture, repeat a source span, or slow footage merely to fill narration time; add a distinct usable interval or revise narration first. Intentional creative retiming is a separate set_video_speed decision. For reviewed sources (analyze_visual editorial evidence exists) your sourceInSec/sourceOutSec are placed as written — the runtime only cuts them back to legal action territory (static or broken-action ranges are never placed) and the 1s shot floor, keeps your row order, and completes ONLY the target time you leave open from the unclaimed reviewed pool. So the user\'s own constraints are yours to express in the rows; the receipt reports what was placed as written, snapped, dropped, or completed. targetDurationSec sets the picture target when no narration defines it (a silent product montage cut to a user-specified length); placed narration always wins, then this value, then the music bed. When trackId is omitted, overlapping broll and overlapping role=sfx audio are placed on free semantic lanes so every item is preserved; non-overlapping SFX reuse an existing free SFX lane. Pass an exact trackId only when replacement is intentional. The receipt returns the actual placed timeline/source ranges and any overwritten clip ids. A 5-second fallback is only an editable initial duration, never proof of source length or coverage. Reuse is valid only when the repeated occurrence has a distinct editorial job or treatment; inspect the source, pass deliberate duration/source ranges, and verify placements instead of looping one span as filler. Use insert_clips to open time. Each clip is typed from its asset; missing semantic lanes are created transactionally. Optional sceneId preserves ownership supplied by an explicitly selected Skill or legacy saved plan. Audio must declare narration/music/sfx when the default narration role is not intended. Omit initial volumeDb unless the user specified a level: narration defaults to a clarity lift, and music is capped to a speech-safe bed while narration exists. One output may mix BGM/source sound with narration, but it cannot contain time-overlapping audible narration tracks. Replace or remove the current narration; if the user requested another finished version, create and switch to its independent output before placing that version\'s narration.',
+    inputSchema: obj({
+      clips: { type: 'array', items: AGENT_CLIP_ITEM_SCHEMA },
+      atSec: { type: 'number' },
+      includeLinked: { type: 'boolean' },
+      targetDurationSec: { type: 'number', description: 'Picture target length in seconds when no narration defines it (silent montage cut to a user spec). Ignored while narration is on the timeline.' },
+    }, ['clips']),
   },
   {
     id: 'insert_clips', kind: 'badge', icon: '↪️', label: 'tools.insert_clips.label',
@@ -1148,15 +1164,17 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '💬',
     label: 'tools.set_captions.label',
     description:
-      "Turn sentence captions ON and/or restyle/reposition the GLOBAL subtitle layer from transcript truth. Source defaults to auto: placed visual speech first, then narration audio, then the longest transcript-bearing media lane. To caption a specific audio/video source pass source=track with trackId or source=clip with clipId. TTS audio should be registered with its exact transcriptText before placement, avoiding another paid ASR call. ONE setting styles the whole managed layer; turn it off with remove_captions.",
+      "Turn sentence captions ON and/or restyle/reposition the GLOBAL subtitle layer from transcript truth. Source defaults to auto: placed visual speech first, then narration audio, then the longest transcript-bearing media lane. To caption a specific audio/video source pass source=track with trackId or source=clip with clipId. TTS audio should be registered with its exact transcriptText before placement, avoiding another paid ASR call. A SILENT montage (no narration, no speech) is captioned from copy instead: pass script — the lines to show, one per caption (newline-separated; a single block is split at sentence punctuation). The runtime times the lines across the placed picture proportionally to their length, snaps each inside one shot, and makes them the caption truth of the picture clips, so presets, edit_caption_text and translations work unchanged; re-issue script to re-time after the picture changes. ONE setting styles the whole managed layer; turn it off with remove_captions.",
     inputSchema: obj(
       {
         preset: { type: 'string', enum: CAPTION_PRESETS.map((p) => p.id), description: 'Caption style id from <caption_catalog>. Omit to only reposition/resize the current captions.' },
         yPct: { type: 'number', description: "Caption baseline's % from the top (smaller = higher). Omit to keep." },
         scale: { type: 'number', description: 'Size multiplier, 1 = preset default. Omit to keep.' },
+        font: { type: 'string', description: `Font override for the caption layer: ${FONT_ID_HELP} Or 'preset' to return to the preset's own font. Omit to keep.` },
         source: { type: 'string', enum: ['auto', 'track', 'clip'], description: 'Caption source selector. Omit to preserve the current selection, or auto-select on first use.' },
         trackId: { type: 'string', description: 'Required with source=track.' },
         clipId: { type: 'string', description: 'Required with source=clip.' },
+        script: { type: 'string', description: 'Silent montage only: the caption copy, one line per caption. Timed across the placed picture and stored as the picture clips\' transcript truth.' },
       },
       [],
     ),
@@ -1361,10 +1379,10 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎙️',
     label: 'tools.denoise_audio.label',
     description:
-      'Remove background noise from the MAIN narration (on-device speech-denoise model, bakes in the background — takes a moment on long videos). strength 0..1 = dry/wet blend (default 0.6; lower it if the voice sounds thin). off:true restores the original audio. Preview and export both play the denoised result once baking finishes.',
+      'Remove background noise from the MAIN VIDEO\'s own recording (on-device DeepFilterNet3 speech enhancement, bakes in the background — a moment on long videos). Scope: the main source\'s audio only — generated speech and audio-lane narration are already clean and are not processed; a montage without a mounted main recording has nothing to denoise, and the tool says so. strength 0..1 = dry/wet blend (default 0.6; lower it if the voice sounds thin). off:true restores the original audio. Preview and export both play the denoised result once baking finishes.',
     inputSchema: obj(
       {
-        strength: { type: 'number', description: 'Blend 0..1 (default 0.6). Re-tuning is fast — inference is cached per source.' },
+        strength: { type: 'number', description: 'Dry/wet blend 0..1 (default 0.6; lower it if the voice sounds thin). Re-tuning is fast — inference is cached per source.' },
         off: { type: 'boolean', description: 'true = turn denoise off.' },
       },
       [],
@@ -1381,7 +1399,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     inputSchema: obj(
       {
         url: { type: 'string', description: 'Audio url to ADD as a new track. Omit to adjust an existing one.' },
-        trackId: { type: 'string', description: 'Target track id (from the snapshot / add receipt).' },
+        trackId: { type: 'string', description: 'Target: the audio clip id from the add receipt / snapshot, or a music lane id (track_music …) when that lane holds one clip. Omit when exactly one audio track exists.' },
         startSec: { type: 'number', description: 'Position on the edited timeline (seconds).' },
         volumeDb: { type: 'number', description: 'Level dB, clamped -60..+20 (0 = source level, -60 = silent). Omit on add = auto level from loudness measurement.' },
         fadeInSec: { type: 'number' },

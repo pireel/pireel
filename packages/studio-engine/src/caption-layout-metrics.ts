@@ -8,23 +8,35 @@ import {
   CAPTION_WEIGHT_REGULAR,
   type CaptionPreset,
 } from './caption-presets';
+import { displayTextFontCss, displayTextLocalFontFamily } from './display-text-presets';
+import { cjkPartnerFamilyCss, webFontFamilyCss } from './font-library';
 
-/** Preset font family used by rendered CSS. */
-export function captionFontCss(preset: CaptionPreset): string {
+/** Font family used by rendered CSS: the user's override (same font ids as display text —
+ *  built-in sans/serif/mono or a local family) when set, else the preset's own font. */
+export function captionFontCss(preset: CaptionPreset, font?: string): string {
+  const override = font ? displayTextFontCss(font) : null;
+  if (override) return override;
   if (preset.font === 'serif') return `'Noto Serif SC','Songti SC',serif`;
   if (preset.font === 'mono') return 'var(--font-num)';
   return 'var(--font-body)';
 }
 
 /** Concrete equivalent for CanvasRenderingContext2D (CSS variables are invalid in ctx.font). */
-export function captionCanvasFontFamilies(preset: CaptionPreset): string {
-  if (preset.font === 'serif') return "'Noto Serif SC','Songti SC',serif";
-  if (preset.font === 'mono') return "'IBM Plex Mono',ui-monospace,monospace";
+export function captionCanvasFontFamilies(preset: CaptionPreset, font?: string): string {
+  const web = font ? webFontFamilyCss(font) : null;
+  if (web) return web;
+  const localFamily = font ? displayTextLocalFontFamily(font) : null;
+  if (localFamily) return `"${localFamily.replaceAll('"', '\\"')}",${cjkPartnerFamilyCss()},sans-serif`;
+  const kind = font === 'sans' || font === 'serif' || font === 'mono' ? font : preset.font;
+  if (kind === 'serif') return "'Noto Serif SC','Songti SC',serif";
+  if (kind === 'mono') return "'IBM Plex Mono',ui-monospace,monospace";
   return "'Noto Sans SC','PingFang SC',sans-serif";
 }
 
 export interface CaptionLineMetricsOptions {
   bold?: boolean;
+  /** Font override id (see captionFontCss); measurement must use the same face the renderer draws. */
+  font?: string;
   /** Test seam; production uses the browser canvas and falls back to glyph estimates in Node. */
   measureText?: (text: string, font: string) => number | null;
 }
@@ -46,7 +58,7 @@ export function captionLineSegments<W extends FxWord>(
   const spacePx = Math.round(fontPx * 0.3);
   const paddingPx = preset.bg ? Math.round(fontPx * 0.42) * 2 : 0;
   const weight = options.bold ? CAPTION_WEIGHT_BOLD : CAPTION_WEIGHT_REGULAR;
-  const canvasFont = `${preset.italic ? 'italic ' : ''}${weight} ${fontPx}px ${captionCanvasFontFamilies(preset)}`;
+  const canvasFont = `${preset.italic ? 'italic ' : ''}${weight} ${fontPx}px ${captionCanvasFontFamilies(preset, options.font)}`;
   const measure = options.measureText ?? measureTextPx;
   const indexByWord = new Map(words.map((word, index) => [word, index] as const));
   const widthOf = (word: W) => {

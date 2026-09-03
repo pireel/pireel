@@ -117,7 +117,6 @@ export function supplementalVisualAudioMixSegments(
  */
 export function supplementalVisualAudioSpecs(
   visuals: readonly SupplementalVisualMediaClip[],
-  monitorMuted: () => boolean = () => false,
 ): EngineAudioClip[] {
   const segments = new Map(supplementalVisualAudioMixSegments(visuals).map((segment) => [segment.clipId, segment]));
   return visuals.filter((visual) => visual.kind === 'video').map((visual) => {
@@ -130,7 +129,7 @@ export function supplementalVisualAudioSpecs(
       id: `visual-audio:${visual.clipId}`,
       url: visual.source,
       speed: Math.min(16, Math.max(0.0625, rate || 1)),
-      gainAt: (time) => (!activeAt(time) || monitorMuted()
+      gainAt: (time) => (!activeAt(time)
         ? 0
         : segment.gain * (segment.fadeAt ? segment.fadeAt(time - visual.startSec) : 1)),
       srcTimeAt: (time) => {

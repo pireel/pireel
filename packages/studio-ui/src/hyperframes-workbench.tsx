@@ -423,6 +423,8 @@ import {
   fitEditableBoxIntoSafeArea,
   withEditableBlockGeometry,
 } from "./editable-block-geometry";
+import { webFontStylesheetUrls } from '@pireel/studio-engine/font-library';
+import { ensureWebFontStylesheets } from './web-fonts';
 
 // The workbench calls semantic template helpers during its first render. Keep the
 // registration call in this concrete client entry as well as the engine barrel:
@@ -2191,6 +2193,16 @@ export function HyperframesWorkbench({
   // box width (wPct)/preset can't skip — segmentation is derived live from box width ÷ font size, so a rebuild must
   // re-segment (the instant path gives the feel first, then a seamless swap-in after the 300ms debounce).
   const lastBuiltCompRef = useRef<Composition | null>(null);
+  // In-place swap paths bypass the full rebuild, so the active preview document never gets the
+  // <link>s assemble.ts bakes for library ("花字") fonts — push them explicitly before swapping nodes.
+  const postWebFonts = (pcomp: Composition) => {
+    const hrefs = webFontStylesheetUrls([
+      pcomp.captionStyle?.font,
+      pcomp.captionStyle?.sub?.font,
+      ...pcomp.blocks.map((block) => block.slots?.fontFamily),
+    ]);
+    if (hrefs.length) postPreview({ type: "hf:fonts", hrefs });
+  };
   const lastBuiltRenderInputsRef = useRef<{
     videoPlacements: typeof renderVideoPlacements;
     supplementalVisuals: typeof supplementalVisuals;
@@ -2210,6 +2222,9 @@ export function HyperframesWorkbench({
       l.setAttribute("data-studio-fonts", "1");
       document.head.appendChild(l);
     }
+    // Library ("花字") stylesheets in the parent too: caption segmentation measures here, and the
+    // font picker sets each name in its own face. Chunked CSS — only rendered glyph blocks load.
+    ensureWebFontStylesheets();
     let alive = true;
     void Promise.all([
       document.fonts.load("700 40px 'Noto Sans SC'"),
@@ -2382,6 +2397,7 @@ export function HyperframesWorkbench({
           // sentence-caption nodes with the new resolved style and swap them in place — segmentation
           // re-runs inside the render, so even size/width changes stay off the rebuild path
           const pcomp = previewCompOf(renderComposition);
+          postWebFonts(pcomp);
           for (const cb of pcomp.blocks) {
             if (!isSentenceCaption(cb)) continue;
             const r = assembleBlockHtml(cb, pcomp);
@@ -2427,6 +2443,7 @@ export function HyperframesWorkbench({
             );
             const domIndexOf = (id: string) =>
               sorted.findIndex((x) => x.id === id);
+            postWebFonts(pcomp);
             const sendNode = (id: string, withIndex: boolean) => {
               const pb = pblockOf(id);
               if (!pb) return;
@@ -5698,6 +5715,7 @@ export function HyperframesWorkbench({
     videoFileRef,
     videoSigRef,
     videoEngineRef,
+    clipFilesRef,
     pushUndoSnapshot,
   });
   denoiseExportRef.current = denoiseOps.denoiseForExport;
@@ -8586,7 +8604,7 @@ export function HyperframesWorkbench({
                                   csSel.wPct ?? 56,
                                   csSel.scale,
                                   comp.width,
-                                  { bold: csSel.bold },
+                                  { bold: csSel.bold, font: csSel.font },
                                 ).length,
                               )
                             : 1;
@@ -8612,7 +8630,7 @@ export function HyperframesWorkbench({
                               base.wPct ?? 56,
                               base.scale,
                               comp.width,
-                              { bold: base.bold },
+                              { bold: base.bold, font: base.font },
                             ).length,
                           );
                           if (n0 <= 1) return base;
@@ -8652,7 +8670,7 @@ export function HyperframesWorkbench({
                                 subStyleSel.wPct ?? 56,
                                 subStyleSel.scale,
                                 comp.width,
-                                { bold: subStyleSel.bold },
+                                { bold: subStyleSel.bold, font: subStyleSel.font },
                               ).length,
                             )
                           : 1;
@@ -9864,8 +9882,6 @@ export function HyperframesWorkbench({
                     selectedId={selectedAudioId}
                     usable={audioOps.clipUsable}
                     onPatch={audioOps.patchClip}
-                    soloId={audioOps.soloId}
-                    onSolo={audioOps.setSoloId}
                     peakOf={(c) =>
                       c.sig ? (audioOps.clipPeaks.get(c.sig) ?? null) : null
                     }

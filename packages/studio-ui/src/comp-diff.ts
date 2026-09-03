@@ -227,12 +227,14 @@ export function capPosOnlyChange(a: Composition | null, b: Composition): boolean
     previewDataEqual(ca.color, cb.color) &&
     previewDataEqual(ca.bg, cb.bg) &&
     previewDataEqual(ca.bold, cb.bold) &&
+    previewDataEqual(ca.font, cb.font) &&
     previewDataEqual(sa.scale, sb.scale) &&
     previewDataEqual(sa.wPct, sb.wPct) &&
     previewDataEqual(sa.preset, sb.preset) &&
     previewDataEqual(sa.color, sb.color) &&
     previewDataEqual(sa.bg, sb.bg) &&
     previewDataEqual(sa.bold, sb.bold) &&
+    previewDataEqual(sa.font, sb.font) &&
     // sub going from absent to present / present to absent (first drag-out of an independent position / clearing) also needs a rebuild: the anchoring changes (top↔bottom)
     !!ca.sub === !!cb.sub
   );

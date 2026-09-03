@@ -488,6 +488,9 @@ function placementFor(document: EditorDocumentV2, asset: EditorMediaAsset, item:
     ...(anchorX != null ? { anchorX } : {}),
     ...(anchorY != null ? { anchorY } : {}),
     ...(opacity != null ? { opacity } : {}),
+    // Overlay media keeps its audio settings under `video` (the shot-scoped controls); without this
+    // a `muted: true` on a broll row was silently dropped and the source sound played over narration.
+    ...(typeof item.muted === 'boolean' ? { video: { treatment: 'full', audioMuted: item.muted } } : {}),
   } as MediaTimelineClip & { offsetFrames: number };
 }
 
@@ -1001,11 +1004,19 @@ function removeClips(document: EditorDocumentV2, input: Input): AgentTimelineOut
   let next = document;
   const receipts: EditorCommandReceipt[] = [];
   const byTrack = new Map<string, string[]>();
+  // Ids that no longer exist are skipped, not fatal: an agent correcting its own work often
+  // re-lists a clip it already removed, and failing the whole batch on that stale id left the
+  // rest in place (and the agent retrying the identical call). The receipt names the misses.
+  const missingClipIds: string[] = [];
   for (const id of clipIds) {
     const found = locatedClip(next, id);
-    if (!found) return fail(`clip not found: ${id}`);
+    if (!found) {
+      missingClipIds.push(id);
+      continue;
+    }
     byTrack.set(found.track.id, [...(byTrack.get(found.track.id) ?? []), id]);
   }
+  if (!byTrack.size) return fail(`clip not found: ${missingClipIds.join(', ')}`);
   for (const [trackId, ids] of byTrack) {
     // An earlier group may already remove linked partners on this track. Re-resolve against the
     // current document so a cross-track linked batch stays idempotent within this transaction.
@@ -1020,7 +1031,10 @@ function removeClips(document: EditorDocumentV2, input: Input): AgentTimelineOut
   // agent self-demolition is the per-turn harness lock's job (it knows intent and turn state);
   // an engine-level veto also blocked legitimate clears from the UI, MCP agents and other flows,
   // and removals stay recoverable through undo.
-  return mutation(next, `Removed ${clipIds.length} clip${clipIds.length === 1 ? '' : 's'}`, receipts);
+  const removedCount = clipIds.length - missingClipIds.length;
+  const summary = `Removed ${removedCount} clip${removedCount === 1 ? '' : 's'}`
+    + (missingClipIds.length ? ` (${missingClipIds.length} already gone: ${missingClipIds.join(', ')})` : '');
+  return mutation(next, summary, receipts, missingClipIds.length ? { removedClipIds: clipIds.filter((id) => !missingClipIds.includes(id)), missingClipIds } : undefined);
 }
 
 function splitClips(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {

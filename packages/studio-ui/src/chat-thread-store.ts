@@ -13,6 +13,7 @@ import {
   type EditorialAssemblySource,
   type EditorialCandidateReview,
 } from '@pireel/studio-engine/editorial-candidates';
+import { MAX_VISUAL_QUESTION_RANGES } from '@pireel/studio-engine/visual-question';
 
 export interface StoredThread {
   id: string;
@@ -72,6 +73,10 @@ export interface StudioTurnLedger {
    * pool-level fact: re-running placement cannot add coverage. Further prepared placements are
    * refused with an ask-the-user instruction until the narration changes (new speech). */
   assemblyCapacityExhausted: boolean;
+  /** Picture target the latest prepared placement was fitted to (narration, an explicit
+   * targetDurationSec, or the music bed) so post-assembly coverage checks measure against the
+   * same spine even when no narration is on the timeline. 0 = none this turn. */
+  pictureTargetSec: number;
 }
 
 export interface StudioTurnToolResultRecord {
@@ -114,6 +119,7 @@ export function createStudioTurnLedger(): StudioTurnLedger {
     sameToolFailureCount: 0,
     pictureRepairArmed: false,
     assemblyCapacityExhausted: false,
+    pictureTargetSec: 0,
   };
 }
 
@@ -425,6 +431,16 @@ function compactVisualAnalysisData(data: Record<string, unknown>): Record<string
   } else if (data.analysisMode === 'editorial-candidates') {
     const editorialCandidates = takeArray(data.editorialCandidates, 8);
     if (editorialCandidates) compactData.editorialCandidates = editorialCandidates;
+  } else if (data.analysisMode === 'question' || data.analysisMode === 'question-batch') {
+    // Answers ARE the reusable evidence: a later selection filters on them without re-asking.
+    if (data.question !== undefined) compactData.question = data.question;
+    const answers = takeArray(data.answers, MAX_VISUAL_QUESTION_RANGES);
+    if (answers) compactData.answers = answers;
+    if (data.visualQuestionReused !== undefined) compactData.visualQuestionReused = data.visualQuestionReused;
+    const items = takeArray(data.items, 24);
+    if (items) compactData.items = items.map((item) => item && typeof item === 'object' && !Array.isArray(item)
+      ? compactVisualAnalysisData(item as Record<string, unknown>)
+      : item);
   } else if (data.analysisMode === 'semantic') {
     const segments = takeArray(data.segments, 20);
     if (segments) compactData.segments = segments;
@@ -525,33 +541,45 @@ export interface PreparedEditorialPlacement {
   droppedClipCount: number;
   /** Rows before the picture montage in input.clips (narration and other pass-through rows). */
   passthroughCount: number;
-  /** Ordering handle: one entry per planned picture clip, in the deterministic order. Selection
-   * and durations are locked; a model may permute these (opening stays first) for narrative
-   * taste, applied via applyEditorialShotOrder. */
+  /** Authored rows placed with their own span; of those, how many were snapped to legal action
+   * territory; and how many clips the planner added from the reviewed pool to complete coverage. */
+  explicitClipCount: number;
+  snappedClipCount: number;
+  fillerClipCount: number;
+  /** Ordering handle: one entry per planned picture clip. `batch` shots are the author's — their
+   * order is authored and stays; `pool` shots are completion, and a model pass may permute those
+   * (applied via applyEditorialShotOrder). */
   shots: Array<{
     id: string;
     assetId: string;
+    origin: 'batch' | 'pool';
     durationSec: number;
     score: number;
     facing?: string;
+    wardrobe?: string;
+    setting?: string;
     role?: string;
     action?: string;
     endingFit: number;
   }>;
 }
 
-/** Apply a model-chosen narrative order to a prepared montage. The order must be a permutation
- * of every shot id with the evidence-locked opening kept first; anything else returns null and
- * the deterministic order stands. Timeline starts are recomputed for the new sequence. */
+/** Apply a model-chosen narrative order to a prepared montage. Authored (`batch`) shots keep
+ * their authored order and lead; `order` must be a permutation of the pool shot ids. When no
+ * authored shot survived, `order` is a permutation of every shot with the evidence-locked
+ * opening kept first. Anything else returns null and the deterministic order stands. Timeline
+ * starts are recomputed for the new sequence. */
 export function applyEditorialShotOrder(
   prepared: PreparedEditorialPlacement,
   order: readonly string[],
 ): Record<string, unknown> | null {
   const ids = prepared.shots.map((shot) => shot.id);
-  if (order.length !== ids.length
-    || new Set(order).size !== ids.length
-    || !order.every((id) => ids.includes(id))
-    || order[0] !== ids[0]) return null;
+  const authoredIds = prepared.shots.filter((shot) => shot.origin === 'batch').map((shot) => shot.id);
+  const orderableIds = authoredIds.length ? ids.filter((id) => !authoredIds.includes(id)) : ids;
+  if (order.length !== orderableIds.length
+    || new Set(order).size !== orderableIds.length
+    || !order.every((id) => orderableIds.includes(id))
+    || (!authoredIds.length && order[0] !== ids[0])) return null;
   const clips = prepared.input.clips;
   if (!Array.isArray(clips)) return null;
   const passthrough = clips.slice(0, prepared.passthroughCount);
@@ -559,7 +587,7 @@ export function applyEditorialShotOrder(
   if (planned.length !== ids.length) return null;
   const byId = new Map(ids.map((id, index) => [id, planned[index]!]));
   let atSec = Math.min(...planned.map((clip) => Number(clip.startSec) || 0));
-  const reordered = order.map((id) => {
+  const reordered = [...authoredIds, ...order].map((id) => {
     const clip = byId.get(id)!;
     const durationSec = Number(clip.sourceOutSec) - Number(clip.sourceInSec);
     const placed = { ...clip, startSec: Math.round(atSec * 1_000) / 1_000 };
@@ -775,9 +803,12 @@ export function prepareEditorialPlacement(
     return {
       id: `shot-${index + 1}`,
       assetId: canonical,
+      origin: plan.clips[index]?.origin ?? 'pool',
       durationSec: Math.round((Number(clip.sourceOutSec) - Number(clip.sourceInSec)) * 10) / 10,
       score: candidate?.score ?? 0,
       ...(candidate?.facing ? { facing: candidate.facing } : {}),
+      ...(candidate?.log?.wardrobe ? { wardrobe: candidate.log.wardrobe.slice(0, 60) } : {}),
+      ...(candidate?.log?.setting ? { setting: candidate.log.setting.slice(0, 60) } : {}),
       ...(candidate?.contentRole ? { role: candidate.contentRole } : {}),
       ...(candidate?.action ? { action: String(candidate.action).slice(0, 90) } : {}),
       endingFit: (candidate?.roleFit ?? []).find((fit) => fit.role === 'ending')?.score ?? 0,
@@ -786,6 +817,9 @@ export function prepareEditorialPlacement(
   return {
     input: { ...input, clips: [...passthroughRows, ...clips], __replacePrimaryTrack: true },
     passthroughCount: passthroughRows.length,
+    explicitClipCount: plan.explicitClipCount ?? 0,
+    snappedClipCount: plan.snappedClipCount ?? 0,
+    fillerClipCount: plan.fillerClipCount ?? 0,
     shots,
     changed: plan.changed,
     actualDurationSec: plan.actualDurationSec,
