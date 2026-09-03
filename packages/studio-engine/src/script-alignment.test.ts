@@ -20,26 +20,29 @@ describe('script alignment', () => {
     const out = alignTranscriptToScript('再看食用说明和保质期。', asr);
     expect(out).toHaveLength(1);
     expect(out[0]!.text).toBe('再看食用说明和保质期。');
-    expect(out[0]!.words!.map((w) => w.text).join('')).toBe('再看食用说明和保质期');
+    // Words are caption tokens (ICU, punctuation attached), the same shape the no-ASR fallback produces.
+    expect(out[0]!.words!.map((w) => w.text).join('')).toBe('再看食用说明和保质期。');
     expect(out[0]!.start).toBeCloseTo(0, 6);
     expect(out[0]!.end).toBeCloseTo(2.0, 6);
 
     const misheard = [heard('再看使用说明和保质期')]; // 食 → 使
     const fixed = alignTranscriptToScript('再看食用说明和保质期。', misheard);
     expect(fixed[0]!.text).toBe('再看食用说明和保质期。');
-    const shi = fixed[0]!.words!.find((w) => w.text === '食')!;
-    expect(shi.start).toBeCloseTo(0.4, 6); // the slot the recogniser spent on 使
-    expect(shi.end).toBeCloseTo(0.6, 6);
+    const shi = fixed[0]!.words!.find((w) => w.text.includes('食'))!;
+    expect(shi.start).toBeLessThanOrEqual(0.4 + 1e-9); // covers the slot the recogniser spent on 使
+    expect(shi.end).toBeGreaterThanOrEqual(0.6 - 1e-9);
+    expect(shi.start).toBeGreaterThanOrEqual(0.2 - 1e-9); // and never reaches back before 看
   });
 
   it('gives a misheard brand name the span of the homophone it replaced', () => {
     const asr = [heard('以肤契水晶白番茄为例')]; // Foochy → 肤契 (two characters)
     const out = alignTranscriptToScript('以 Foochy 水晶白番茄为例。', asr);
-    const brand = out[0]!.words!.find((w) => w.text === 'Foochy')!;
+    const brand = out[0]!.words!.find((w) => w.text.includes('Foochy'))!;
     expect(brand.start).toBeCloseTo(0.2, 6);
     expect(brand.end).toBeCloseTo(0.6, 6);
-    const shui = out[0]!.words!.find((w) => w.text === '水')!;
+    const shui = out[0]!.words!.find((w) => w.text.startsWith('水'))!;
     expect(shui.start).toBeCloseTo(0.6, 6);
+    expect(out[0]!.words!.map((w) => w.text).join('')).toBe('以Foochy水晶白番茄为例。');
   });
 
   it('splits sentences by the script punctuation, not the recogniser segmentation', () => {

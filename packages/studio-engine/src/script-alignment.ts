@@ -10,11 +10,14 @@
  */
 import type { TranscriptSegment } from './project-dto';
 import { splitSpeechSentences } from './agent-timeline';
+import { segmentTokens } from './caption-fx';
 
 interface Unit {
   text: string;
   key: string;
   sentence: number;
+  /** Index of the caption word (ICU token) this unit belongs to, within its sentence. */
+  token: number;
 }
 
 interface TimedUnit {
@@ -35,12 +38,50 @@ export function alignmentUnits(text: string): string[] {
   return (text.match(TOKEN) ?? []).filter((token) => token.length > 0 && (CJK.test(token) || /[\p{L}\p{N}]/u.test(token)));
 }
 
-function scriptUnits(sentences: readonly string[]): Unit[] {
-  const out: Unit[] = [];
+/** Script units grouped the way captions tokenise text (ICU words with trailing punctuation
+ *  attached, caption-fx segmentTokens): stored words then match the no-ASR fallback token for
+ *  token, so cue references and locks survive the provisional → measured transition. */
+function scriptUnits(sentences: readonly string[]): { units: Unit[]; tokens: string[][] } {
+  const units: Unit[] = [];
+  const tokens: string[][] = [];
   sentences.forEach((sentence, index) => {
-    for (const text of alignmentUnits(sentence)) out.push({ text, key: keyOf(text), sentence: index });
+    const sentenceTokens = segmentTokens(sentence);
+    tokens.push(sentenceTokens);
+    sentenceTokens.forEach((token, tokenIndex) => {
+      for (const text of alignmentUnits(token)) units.push({ text, key: keyOf(text), sentence: index, token: tokenIndex });
+    });
   });
-  return out;
+  return { units, tokens };
+}
+
+/** Caption words for one sentence: each ICU token spans its units' time; a unit-less token
+ *  (leading punctuation) sits at the previous word's end. */
+function tokenWords(
+  tokens: readonly string[],
+  units: readonly Unit[],
+  starts: ArrayLike<number>,
+  ends: ArrayLike<number>,
+  sentenceIndex: number,
+  cursor: { value: number },
+  fallbackStart: number,
+): { text: string; start: number; end: number }[] {
+  const words: { text: string; start: number; end: number }[] = [];
+  tokens.forEach((token, tokenIndex) => {
+    let start = Number.NaN;
+    let end = Number.NaN;
+    while (cursor.value < units.length && units[cursor.value]!.sentence === sentenceIndex && units[cursor.value]!.token === tokenIndex) {
+      if (Number.isNaN(start)) start = starts[cursor.value]!;
+      end = ends[cursor.value]!;
+      cursor.value += 1;
+    }
+    if (Number.isNaN(start)) {
+      const previous = words.length ? words[words.length - 1]!.end : fallbackStart;
+      start = previous;
+      end = previous;
+    }
+    words.push({ text: token, start, end });
+  });
+  return words;
 }
 
 /** Flatten ASR segments into timed units. Multi-unit words share their span evenly; segments
@@ -91,24 +132,36 @@ function matchUnits(script: readonly Unit[], asr: readonly TimedUnit[]): Map<num
   return matches;
 }
 
+/** No usable anchors: spread the span over sentences by unit count, then over each sentence's words. */
 function proportional(sentences: readonly string[], start: number, end: number): TranscriptSegment[] {
-  const weights = sentences.map((sentence) => Math.max(1, alignmentUnits(sentence).length));
+  const { units, tokens } = scriptUnits(sentences);
+  const weights = sentences.map((_, index) => Math.max(1, units.filter((unit) => unit.sentence === index).length));
   const total = weights.reduce((sum, weight) => sum + weight, 0);
   const span = Math.max(0, end - start);
+  const starts = new Float64Array(units.length);
+  const ends = new Float64Array(units.length);
+  const bounds: { start: number; end: number }[] = [];
   let cursor = start;
-  return sentences.map((sentence, index) => {
+  let unitIndex = 0;
+  sentences.forEach((_, index) => {
     const segEnd = index === sentences.length - 1 ? end : cursor + (span * weights[index]!) / total;
-    const units = alignmentUnits(sentence);
-    const width = Math.max(0, segEnd - cursor) / Math.max(1, units.length);
-    const segment: TranscriptSegment = {
-      start: cursor,
-      end: segEnd,
-      text: sentence,
-      words: units.map((unit, k) => ({ text: unit, start: cursor + width * k, end: cursor + width * (k + 1) })),
-    };
+    const count = units.filter((unit) => unit.sentence === index).length;
+    const width = Math.max(0, segEnd - cursor) / Math.max(1, count);
+    for (let k = 0; k < count; k += 1) {
+      starts[unitIndex] = cursor + width * k;
+      ends[unitIndex] = cursor + width * (k + 1);
+      unitIndex += 1;
+    }
+    bounds.push({ start: cursor, end: segEnd });
     cursor = segEnd;
-    return segment;
   });
+  const walker = { value: 0 };
+  return sentences.map((sentence, index) => ({
+    start: bounds[index]!.start,
+    end: bounds[index]!.end,
+    text: sentence,
+    words: tokenWords(tokens[index]!, units, starts, ends, index, walker, bounds[index]!.start),
+  }));
 }
 
 /**
@@ -122,7 +175,7 @@ export function alignTranscriptToScript(script: string, asr: readonly Transcript
   if (!timed.length) return [];
   const first = timed[0]!.start;
   const last = timed[timed.length - 1]!.end;
-  const units = scriptUnits(sentences);
+  const { units, tokens } = scriptUnits(sentences);
   if (!units.length) return proportional(sentences, first, last);
   const matches = matchUnits(units, timed);
   if (!matches.size) return proportional(sentences, first, last);
@@ -162,15 +215,12 @@ export function alignTranscriptToScript(script: string, asr: readonly Transcript
 
   const lang = asr.find((segment) => segment.lang)?.lang;
   const out: TranscriptSegment[] = [];
-  let cursor = 0;
+  const walker = { value: 0 };
   sentences.forEach((sentence, sentenceIndex) => {
-    const words: { text: string; start: number; end: number }[] = [];
-    while (cursor < units.length && units[cursor]!.sentence === sentenceIndex) {
-      words.push({ text: units[cursor]!.text, start: starts[cursor]!, end: ends[cursor]! });
-      cursor += 1;
-    }
-    if (!words.length) return; // punctuation-only sentence: nothing spoken to time
-    const previousEnd = out.length ? out[out.length - 1]!.end : -Infinity;
+    const spoken = units.some((unit) => unit.sentence === sentenceIndex);
+    const previousEnd = out.length ? out[out.length - 1]!.end : first;
+    const words = tokenWords(tokens[sentenceIndex]!, units, starts, ends, sentenceIndex, walker, previousEnd);
+    if (!spoken || !words.length) return; // punctuation-only sentence: nothing spoken to time
     const start = Math.max(words[0]!.start, previousEnd);
     const end = Math.max(words[words.length - 1]!.end, start);
     out.push({ start, end, text: sentence, words, ...(lang ? { lang } : {}) });

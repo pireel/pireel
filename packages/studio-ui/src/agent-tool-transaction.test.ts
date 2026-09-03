@@ -1415,7 +1415,7 @@ describe('Agent composition transaction boundary', () => {
     expect(measured[0]).toMatchObject({ text: '原始文稿' });
     expect(measured[0]!.start).toBeCloseTo(0.2, 6);
     expect(measured[0]!.end).toBeCloseTo(0.8, 6);
-    expect(measured[0]!.words?.map((word) => word.text)).toEqual(['原', '始', '文', '稿']);
+    expect(measured[0]!.words?.map((word) => word.text).join('')).toBe('原始文稿');
     const placed = runAgentTimelineTool(h.documentRef.current, 'add_clips', {
       clips: [{ id: 'narration-clip', assetId: 'tts-audio', role: 'narration', startSec: 0 }],
     });
