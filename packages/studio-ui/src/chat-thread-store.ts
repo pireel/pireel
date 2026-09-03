@@ -8,11 +8,6 @@ import {
   isStudioScenarioSkillId,
   type StudioScenarioSkillId,
 } from '@pireel/studio-engine/scenario-skills';
-import {
-  planEditorialAssembly,
-  type EditorialAssemblySource,
-  type EditorialCandidateReview,
-} from '@pireel/studio-engine/editorial-candidates';
 import { MAX_VISUAL_QUESTION_RANGES } from '@pireel/studio-engine/visual-question';
 
 export interface StoredThread {
@@ -31,7 +26,6 @@ export interface StoredThread {
 export const isVisualAnalysisToolId = (id: string | undefined): boolean => id === 'analyze_visual' || id === 'inspect_media';
 
 export const MAX_VISUAL_REVIEWS_PER_USER_TURN = 2;
-export const MAX_EDITORIAL_ANALYSES_PER_USER_TURN = 1;
 /** Circuit breaker, not a governor: a legitimate full montage turn runs ~15–20 calls, so the
  * ceiling sits well above that and only trips a genuinely runaway loop. Duplicate-read and
  * unsafe-undo guards handle discipline; keep in sync with MAX_STUDIO_TOOL_RECEIPTS_PER_TURN
@@ -54,7 +48,6 @@ export interface StudioTurnLedger {
   receipts: UIMessage['parts'];
   toolCallCount: number;
   forceFinalResponse: boolean;
-  pictureLocked: boolean;
   unsafeUndoBlocked: boolean;
   /** Signature (tool + input) of the most recent failed call, for detecting verbatim retries. */
   lastFailureSig: string | null;
@@ -64,17 +57,6 @@ export interface StudioTurnLedger {
   lastFailureToolId: string | null;
   /** How many consecutive failures the same tool has produced, regardless of input. */
   sameToolFailureCount: number;
-  /** A post-assembly edit reopened a picture-vs-narration gap: the assembly gate stands down so
-   * one repair add_clips batch can close it. Cleared when a covering assembly lands. */
-  pictureRepairArmed: boolean;
-  /** The planner already fills from the ENTIRE reviewed pool, so an under-target assembly is a
-   * pool-level fact: re-running placement cannot add coverage. Further prepared placements are
-   * refused with an ask-the-user instruction until the narration changes (new speech). */
-  assemblyCapacityExhausted: boolean;
-  /** Picture target the latest prepared placement was fitted to (narration, an explicit
-   * targetDurationSec, or the music bed) so post-assembly coverage checks measure against the
-   * same spine even when no narration is on the timeline. 0 = none this turn. */
-  pictureTargetSec: number;
 }
 
 export interface StudioTurnToolResultRecord {
@@ -87,33 +69,16 @@ export interface StudioTurnToolResultRecord {
   canMutate: boolean;
 }
 
-/** The picture lock means "this montage is DONE". It must NOT engage on an under-target assembly:
- * locking a 36s picture against a 54s narration walls off the only legal fix (placing more
- * accepted/reserve ranges) and the turn dead-ends into a black tail — a real incident. Receipts
- * without both numbers lock conservatively (legacy shape). Tolerance mirrors the assembly's own
- * duration-fitting tolerance. */
-export function editorialAssemblyCoversTarget(assembly: unknown): boolean {
-  const row = assembly as { targetDurationSec?: unknown; actualDurationSec?: unknown } | null;
-  const target = Number(row?.targetDurationSec);
-  const actual = Number(row?.actualDurationSec);
-  if (!Number.isFinite(target) || target <= 0 || !Number.isFinite(actual)) return true;
-  return actual >= target - Math.max(1, target * 0.03);
-}
-
 export function createStudioTurnLedger(): StudioTurnLedger {
   return {
     receipts: [],
     toolCallCount: 0,
     forceFinalResponse: false,
-    pictureLocked: false,
     unsafeUndoBlocked: false,
     lastFailureSig: null,
     repeatedFailureCount: 0,
     lastFailureToolId: null,
     sameToolFailureCount: 0,
-    pictureRepairArmed: false,
-    assemblyCapacityExhausted: false,
-    pictureTargetSec: 0,
   };
 }
 
@@ -172,19 +137,6 @@ export function recordStudioTurnToolResult(
   // output-scope tools sit outside canMutate yet genuinely change project state, and their
   // receipts carry a delta.
   const didMutate = !failed && !!data?.delta && typeof data.delta === 'object';
-  const editorialAssembly = data?.editorialAssembly;
-  if (!failed && editorialAssembly && typeof editorialAssembly === 'object') {
-    if (editorialAssemblyCoversTarget(editorialAssembly)) {
-      ledger.pictureLocked = true;
-      ledger.pictureRepairArmed = false;
-      ledger.assemblyCapacityExhausted = false;
-    } else {
-      ledger.assemblyCapacityExhausted = true;
-    }
-  }
-  // A new narration changes the target, so a previous pool-exhaustion verdict no longer holds.
-  if (record.toolId === 'generate_speech' && !failed) ledger.assemblyCapacityExhausted = false;
-
   if (record.canMutate && failed) ledger.unsafeUndoBlocked = true;
   if (didMutate) ledger.unsafeUndoBlocked = false;
 
@@ -215,34 +167,6 @@ export function shouldBlockStudioTurnUndo(ledger: StudioTurnLedger): boolean {
  * disengages at target=0 and placement degrades to freehand. Recover the target from the most
  * recent narration audio this turn produced: a generate_speech receipt's measured duration, or a
  * register_media call for a transcript-bearing audio asset. */
-export function narrationDurationFromMessages(messages: readonly UIMessage[]): number {
-  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
-    const message = messages[messageIndex]!;
-    if (message.role !== 'assistant') continue;
-    const parts = message.parts ?? [];
-    for (let partIndex = parts.length - 1; partIndex >= 0; partIndex -= 1) {
-      const part = parts[partIndex] as { type?: string; state?: string; output?: unknown; input?: unknown };
-      if (part.type === 'tool-generate_speech' && part.state === 'output-available') {
-        const asset = ((part.output as { data?: { asset?: { durationSec?: unknown } } } | undefined)?.data)?.asset;
-        const durationSec = Number(asset?.durationSec);
-        if (Number.isFinite(durationSec) && durationSec > 0) return durationSec;
-      }
-      if (part.type === 'tool-register_media' && part.state === 'output-available') {
-        const assets = (part.input as { assets?: unknown } | undefined)?.assets;
-        if (!Array.isArray(assets)) continue;
-        for (const row of assets) {
-          const asset = row as { kind?: unknown; durationSec?: unknown; transcriptText?: unknown; transcript?: unknown };
-          if (asset.kind !== 'audio') continue;
-          if (typeof asset.transcriptText !== 'string' && !Array.isArray(asset.transcript)) continue;
-          const durationSec = Number(asset.durationSec);
-          if (Number.isFinite(durationSec) && durationSec > 0) return durationSec;
-        }
-      }
-    }
-  }
-  return 0;
-}
-
 /** Merge receipts that may not have reached React state yet. De-duplicate once useChat catches up. */
 export function effectiveStudioTurnMessages(
   messages: readonly UIMessage[],
@@ -266,11 +190,6 @@ export function effectiveStudioTurnMessages(
 
 export function canRunVisualReview(completedReviews: number): boolean {
   return completedReviews < MAX_VISUAL_REVIEWS_PER_USER_TURN;
-}
-
-/** A source-selection pass is paid, exhaustive evidence for the current turn, not a retry loop. */
-export function canRunEditorialAnalysis(completedAnalyses: number): boolean {
-  return completedAnalyses < MAX_EDITORIAL_ANALYSES_PER_USER_TURN;
 }
 
 export interface AssistantWorkFold {
@@ -463,99 +382,19 @@ export function compactStudioChatMessagesForModel(messages: UIMessage[]): UIMess
   });
 }
 
-export interface EditorialPlacementIssue {
-  assetId: string;
-  reason: 'review-rejected' | 'range-required' | 'outside-accepted-range';
-  /** The offending clip's requested source window, when one was supplied. */
-  requestedRange?: { sourceInSec: number; sourceOutSec: number };
-  /** Accepted source windows for this asset, so the retry can be exact instead of guessed. */
-  acceptedRanges?: Array<{ startSec: number; endSec: number }>;
-}
-
-export interface PreparedEditorialPlacement {
-  input: Record<string, unknown>;
-  changed: boolean;
-  actualDurationSec: number;
-  targetDurationSec: number;
-  droppedClipCount: number;
-  /** Rows before the picture montage in input.clips (narration and other pass-through rows). */
-  passthroughCount: number;
-  /** Authored rows placed with their own span; of those, how many were snapped to legal action
-   * territory; and how many clips the planner added from the reviewed pool to complete coverage. */
-  explicitClipCount: number;
-  snappedClipCount: number;
-  fillerClipCount: number;
-  /** Ordering handle: one entry per planned picture clip. `batch` shots are the author's — their
-   * order is authored and stays; `pool` shots are completion, and a model pass may permute those
-   * (applied via applyEditorialShotOrder). */
-  shots: Array<{
-    id: string;
-    assetId: string;
-    origin: 'batch' | 'pool';
-    durationSec: number;
-    score: number;
-    facing?: string;
-    wardrobe?: string;
-    setting?: string;
-    role?: string;
-    action?: string;
-    endingFit: number;
-  }>;
-}
-
-/** Apply a model-chosen narrative order to a prepared montage. Authored (`batch`) shots keep
- * their authored order and lead; `order` must be a permutation of the pool shot ids. When no
- * authored shot survived, `order` is a permutation of every shot with the evidence-locked
- * opening kept first. Anything else returns null and the deterministic order stands. Timeline
- * starts are recomputed for the new sequence. */
-export function applyEditorialShotOrder(
-  prepared: PreparedEditorialPlacement,
-  order: readonly string[],
-): Record<string, unknown> | null {
-  const ids = prepared.shots.map((shot) => shot.id);
-  const authoredIds = prepared.shots.filter((shot) => shot.origin === 'batch').map((shot) => shot.id);
-  const orderableIds = authoredIds.length ? ids.filter((id) => !authoredIds.includes(id)) : ids;
-  if (order.length !== orderableIds.length
-    || new Set(order).size !== orderableIds.length
-    || !order.every((id) => orderableIds.includes(id))
-    || (!authoredIds.length && order[0] !== ids[0])) return null;
-  const clips = prepared.input.clips;
-  if (!Array.isArray(clips)) return null;
-  const passthrough = clips.slice(0, prepared.passthroughCount);
-  const planned = clips.slice(prepared.passthroughCount) as Array<Record<string, unknown>>;
-  if (planned.length !== ids.length) return null;
-  const byId = new Map(ids.map((id, index) => [id, planned[index]!]));
-  let atSec = Math.min(...planned.map((clip) => Number(clip.startSec) || 0));
-  const reordered = [...authoredIds, ...order].map((id) => {
-    const clip = byId.get(id)!;
-    const durationSec = Number(clip.sourceOutSec) - Number(clip.sourceInSec);
-    const placed = { ...clip, startSec: Math.round(atSec * 1_000) / 1_000 };
-    atSec += durationSec;
-    return placed;
-  });
-  return { ...prepared.input, clips: [...passthrough, ...reordered] };
-}
-
-/** Return only a material shortage after deterministic picture assembly has finished.
- * This is presentation metadata, never a gate: the best available edit remains complete and the
- * user can decide later whether to add footage or adjust the timeline manually. */
+/** Return only a material shortage after assemble_from_review has finished. Presentation metadata,
+ * never a gate: the best available edit remains complete and the user decides whether to add footage. */
 export function assistantEditorialCapacityShortfall(message: UIMessage): number | null {
   if (message.role !== 'assistant') return null;
   let latest: { targetDurationSec: number; actualDurationSec: number } | null = null;
   for (const part of message.parts ?? []) {
-    const candidate = part as { type?: string; toolName?: string; state?: string; output?: unknown };
-    const toolId = candidate.type === 'dynamic-tool'
-      ? candidate.toolName
-      : candidate.type?.startsWith('tool-')
-        ? candidate.type.slice('tool-'.length)
-        : '';
-    if (toolId !== 'add_clips' || candidate.state !== 'output-available') continue;
-    const output = candidate.output as { ok?: unknown; data?: unknown } | undefined;
-    if (output?.ok !== true || !output.data || typeof output.data !== 'object') continue;
-    const assembly = (output.data as { editorialAssembly?: unknown }).editorialAssembly;
-    if (!assembly || typeof assembly !== 'object') continue;
-    const targetDurationSec = Number((assembly as { targetDurationSec?: unknown }).targetDurationSec);
-    const actualDurationSec = Number((assembly as { actualDurationSec?: unknown }).actualDurationSec);
+    const candidate = part as { type?: string; state?: string; output?: unknown };
+    if (candidate.type !== 'tool-assemble_from_review' || candidate.state !== 'output-available') continue;
+    const output = candidate.output as { ok?: unknown; data?: { coverage?: unknown; result?: { coverage?: unknown } } } | undefined;
+    if (output?.ok !== true) continue;
+    const coverage = (output.data?.coverage ?? output.data?.result?.coverage) as { targetDurationSec?: unknown; actualDurationSec?: unknown } | undefined;
+    const targetDurationSec = Number(coverage?.targetDurationSec);
+    const actualDurationSec = Number(coverage?.actualDurationSec);
     if (Number.isFinite(targetDurationSec) && targetDurationSec > 0 && Number.isFinite(actualDurationSec)) {
       latest = { targetDurationSec, actualDurationSec };
     }
@@ -564,279 +403,6 @@ export function assistantEditorialCapacityShortfall(message: UIMessage): number 
   const shortfallSec = Math.max(0, latest.targetDurationSec - latest.actualDurationSec);
   const toleranceSec = Math.max(1, latest.targetDurationSec * 0.03);
   return shortfallSec > toleranceSec ? Math.round(shortfallSec * 10) / 10 : null;
-}
-
-const canonicalEditorialAssetId = (value: unknown) => typeof value === 'string'
-  ? value.trim().replace(/^@/, '').replace(/^local:/, '')
-  : '';
-
-// Mirrors the execution-boundary resolver's typo repair: an id garbled in its uuid TAIL still
-// names its source when the intact prefix (at least the full first uuid group) matches exactly
-// one reviewed source. Repairing during classification keeps the row inside the planner; left
-// as a passthrough row it poisons the atomic batch or places a duplicate outside the plan.
-const EDITORIAL_ID_PREFIX_MIN = 'local_'.length + 8;
-function uniquePrefixSourceId(canonical: string, sourceIds: ReadonlySet<string>): string | null {
-  if (canonical.length < EDITORIAL_ID_PREFIX_MIN) return null;
-  let best: string | null = null;
-  let bestLength = 0;
-  let ambiguous = false;
-  for (const id of sourceIds) {
-    let length = 0;
-    while (length < canonical.length && length < id.length && canonical[length] === id[length]) length += 1;
-    if (length > bestLength) {
-      best = id;
-      bestLength = length;
-      ambiguous = false;
-    } else if (length === bestLength && best && id !== best) {
-      ambiguous = true;
-    }
-  }
-  return !ambiguous && bestLength >= EDITORIAL_ID_PREFIX_MIN ? best : null;
-}
-
-function reviewedEditorialSources(messages: readonly UIMessage[]): EditorialAssemblySource[] {
-  const reviewed = new Map<string, EditorialCandidateReview[]>();
-  for (const message of messages) {
-    if (message.role !== 'assistant') continue;
-    for (const part of message.parts ?? []) {
-      const candidate = part as { type?: string; toolName?: string; state?: string; output?: unknown };
-      const partToolId = candidate.type === 'dynamic-tool'
-        ? candidate.toolName
-        : candidate.type?.startsWith('tool-')
-          ? candidate.type.slice('tool-'.length)
-          : '';
-      if (!isVisualAnalysisToolId(partToolId) || candidate.state !== 'output-available') continue;
-      const output = candidate.output as { ok?: unknown; data?: unknown } | undefined;
-      if (output?.ok !== true || !output.data || typeof output.data !== 'object') continue;
-      const data = output.data as Record<string, unknown>;
-      const receipts = data.analysisMode === 'editorial-batch' && Array.isArray(data.items)
-        ? data.items.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item))
-        : [data];
-      for (const receipt of receipts) {
-        const assetId = canonicalEditorialAssetId(receipt.localAssetId ?? receipt.assetId);
-        if (!assetId || !Array.isArray(receipt.editorialCandidates)) continue;
-        reviewed.set(assetId, receipt.editorialCandidates as EditorialCandidateReview[]);
-      }
-    }
-  }
-  return [...reviewed].map(([assetId, candidates]) => ({ assetId, candidates }));
-}
-
-/** Rank-ordered cross-source opening contenders from the batch review's shared comparison. */
-export function reviewedOpeningContenders(
-  messages: readonly UIMessage[],
-): Array<{ assetId: string; candidateId: string }> {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index]!;
-    if (message.role !== 'assistant') continue;
-    for (const part of message.parts ?? []) {
-      const candidate = part as { type?: string; toolName?: string; state?: string; output?: unknown };
-      const toolId = candidate.type === 'dynamic-tool'
-        ? candidate.toolName
-        : candidate.type?.startsWith('tool-')
-          ? candidate.type.slice('tool-'.length)
-          : '';
-      if (!isVisualAnalysisToolId(toolId) || candidate.state !== 'output-available') continue;
-      const output = candidate.output as { ok?: unknown; data?: unknown } | undefined;
-      if (output?.ok !== true || !output.data || typeof output.data !== 'object') continue;
-      const comparison = (output.data as { openingComparison?: { contenders?: unknown } }).openingComparison;
-      if (!comparison || !Array.isArray(comparison.contenders)) continue;
-      return [...comparison.contenders]
-        .filter((row): row is { sourceId: unknown; candidateId: unknown; rank: unknown } => !!row && typeof row === 'object')
-        .sort((left, right) => Number(left.rank) - Number(right.rank))
-        .flatMap((row) => (typeof row.sourceId === 'string' && typeof row.candidateId === 'string'
-          ? [{ assetId: canonicalEditorialAssetId(row.sourceId), candidateId: row.candidateId }]
-          : []));
-    }
-  }
-  return [];
-}
-
-/** Turn the one editorial review receipt into the actual narrated montage before the write tool
- * runs. Qwen supplies semantic phases and aesthetic scores; deterministic local optimization owns
- * source-clock reconciliation, duplicate removal, natural-speed placement, and duration fitting. */
-export function prepareEditorialPlacement(
-  messages: readonly UIMessage[],
-  toolId: string,
-  input: Record<string, unknown>,
-  targetDurationSec: number,
-): PreparedEditorialPlacement | null {
-  if (toolId !== 'add_clips' || !Number.isFinite(targetDurationSec) || targetDurationSec <= 0) return null;
-  const sources = reviewedEditorialSources(messages);
-  if (!sources.length || !Array.isArray(input.clips)) return null;
-  const sourceIds = new Set(sources.map((source) => source.assetId));
-  const rows = input.clips
-    .filter((value): value is Record<string, unknown> => (
-      !!value && typeof value === 'object' && !Array.isArray(value)
-    ))
-    .map((row) => {
-      const rawId = typeof row.assetId === 'string' ? row.assetId.trim() : '';
-      const canonical = canonicalEditorialAssetId(rawId);
-      if (!canonical || sourceIds.has(canonical)) return row;
-      const healed = uniquePrefixSourceId(canonical, sourceIds);
-      return healed ? { ...row, assetId: rawId.slice(0, rawId.length - canonical.length) + healed } : row;
-    });
-  if (!rows.length || rows.length !== input.clips.length) return null;
-  // The optimizer owns the reviewed primary-picture rows; audio, overlays and unreviewed footage
-  // ride along with their authored semantics. A mixed batch (narration + picture in one call, a
-  // common model shape) must engage assembly for its picture rows, not disable it wholesale.
-  const isPictureRow = (clip: Record<string, unknown>) => (
-    (clip.role == null || clip.role === 'primary')
-    && sourceIds.has(canonicalEditorialAssetId(clip.assetId))
-  );
-  const pictureRows = rows.filter(isPictureRow);
-  if (!pictureRows.length) return null;
-  if (!pictureRows.every((clip) => (
-    Number.isFinite(Number(clip.sourceInSec))
-    && Number.isFinite(Number(clip.sourceOutSec))
-  ))) return null;
-  const passthroughRows = rows.filter((clip) => !isPictureRow(clip));
-  // Models often batch picture without startSec, intending sequential placement. Synthesize the
-  // sequence so assembly engages; freehand placement of an unanchored batch is never the intent.
-  let appendCursorSec = 0;
-  const orderedPicture = pictureRows.map((clip) => {
-    const spanSec = Math.max(0, Number(clip.sourceOutSec) - Number(clip.sourceInSec));
-    const startSec = Number.isFinite(Number(clip.startSec)) ? Number(clip.startSec) : appendCursorSec;
-    appendCursorSec = Math.max(appendCursorSec, startSec) + spanSec;
-    return { row: clip, startSec };
-  });
-  const plan = planEditorialAssembly({
-    targetDurationSec,
-    sources,
-    opening: reviewedOpeningContenders(messages),
-    clips: orderedPicture.map(({ row, startSec }) => ({
-      assetId: canonicalEditorialAssetId(row.assetId),
-      startSec,
-      sourceInSec: Number(row.sourceInSec),
-      sourceOutSec: Number(row.sourceOutSec),
-    })),
-  });
-  const unusedRows = orderedPicture.map(({ row }) => row);
-  const clips = plan.clips.map((planned) => {
-    const matchIndex = unusedRows.findIndex((row) => canonicalEditorialAssetId(row.assetId) === planned.assetId);
-    // Pool-completion filler clips have NO batch row: they must carry the PLANNER's asset id.
-    // Falling back to another row's fields once stamped the batch's first asset id onto every
-    // filler clip — foreign ranges under the wrong asset, killed by the placement guard.
-    const original = matchIndex >= 0 ? unusedRows.splice(matchIndex, 1)[0]! : null;
-    const durationSec = Math.round((planned.sourceOutSec - planned.sourceInSec) * 1_000) / 1_000;
-    const { speed: _discardSpeed, ...naturalSpeed } = original ?? {};
-    return {
-      ...naturalSpeed,
-      role: 'primary',
-      assetId: original ? original.assetId : planned.assetId,
-      startSec: planned.startSec,
-      sourceInSec: planned.sourceInSec,
-      sourceOutSec: planned.sourceOutSec,
-      durationSec,
-      muted: true,
-    };
-  });
-  // Ordering handle: describe each planned picture clip from its reviewed candidate so a
-  // narrative-ordering pass has facing/role/action evidence without re-deriving anything.
-  const shots = clips.map((clip, index) => {
-    const canonical = canonicalEditorialAssetId(clip.assetId);
-    const candidate = (sources.find((source) => source.assetId === canonical)?.candidates ?? [])
-      .find((row) => (row.verdict === 'strong' || row.verdict === 'usable')
-        && Number(clip.sourceInSec) >= row.startSec - 0.06
-        && Number(clip.sourceOutSec) <= row.endSec + 0.06);
-    return {
-      id: `shot-${index + 1}`,
-      assetId: canonical,
-      origin: plan.clips[index]?.origin ?? 'pool',
-      durationSec: Math.round((Number(clip.sourceOutSec) - Number(clip.sourceInSec)) * 10) / 10,
-      score: candidate?.score ?? 0,
-      ...(candidate?.facing ? { facing: candidate.facing } : {}),
-      ...(candidate?.log?.wardrobe ? { wardrobe: candidate.log.wardrobe.slice(0, 60) } : {}),
-      ...(candidate?.log?.setting ? { setting: candidate.log.setting.slice(0, 60) } : {}),
-      ...(candidate?.contentRole ? { role: candidate.contentRole } : {}),
-      ...(candidate?.action ? { action: String(candidate.action).slice(0, 90) } : {}),
-      endingFit: (candidate?.roleFit ?? []).find((fit) => fit.role === 'ending')?.score ?? 0,
-    };
-  });
-  return {
-    input: { ...input, clips: [...passthroughRows, ...clips], __replacePrimaryTrack: true },
-    passthroughCount: passthroughRows.length,
-    explicitClipCount: plan.explicitClipCount ?? 0,
-    snappedClipCount: plan.snappedClipCount ?? 0,
-    fillerClipCount: plan.fillerClipCount ?? 0,
-    shots,
-    changed: plan.changed,
-    actualDurationSec: plan.actualDurationSec,
-    targetDurationSec: plan.targetDurationSec,
-    droppedClipCount: plan.droppedClipCount,
-  };
-}
-
-/** The lock is per user turn: a NEW user request (e.g. "re-cut the picture") must be allowed to
- * assemble again from the persisted editorial evidence. Only receipts after the latest user
- * message count; earlier turns' receipts are history, not a standing prohibition. */
-function currentTurnMessages(messages: readonly UIMessage[]): readonly UIMessage[] {
-  const latestUserIndex = messages.findLastIndex((message) => message.role === 'user');
-  return latestUserIndex < 0 ? messages : messages.slice(latestUserIndex + 1);
-}
-
-/** A successful deterministic montage receipt is the picture lock for this user turn. The model
- * may continue with captions, typography, sound and delivery checks, but must not rebuild picture
- * from another interpretation of the same editorial evidence. */
-export function hasCompletedEditorialPlacement(allMessages: readonly UIMessage[]): boolean {
-  const messages = currentTurnMessages(allMessages);
-  return messages.some((message) => message.role === 'assistant' && (message.parts ?? []).some((part) => {
-    const candidate = part as { type?: string; toolName?: string; state?: string; output?: unknown };
-    const toolId = candidate.type === 'dynamic-tool'
-      ? candidate.toolName
-      : candidate.type?.startsWith('tool-')
-        ? candidate.type.slice('tool-'.length)
-        : '';
-    if (toolId !== 'add_clips' || candidate.state !== 'output-available') return false;
-    const output = candidate.output as { ok?: unknown; data?: unknown } | undefined;
-    const assembly = output?.ok === true && output.data && typeof output.data === 'object'
-      ? (output.data as { editorialAssembly?: unknown }).editorialAssembly
-      : null;
-    return !!assembly && editorialAssemblyCoversTarget(assembly);
-  }));
-}
-
-
-/**
- * Once a source has an editorial receipt in this conversation, picture placement must honor it.
- * This makes the persisted verdict authoritative instead of trusting a later model step to
- * remember that a high aesthetic score can still have a rejected usable range.
- */
-export function editorialPlacementIssue(
-  messages: readonly UIMessage[],
-  toolId: string,
-  input: Record<string, unknown>,
-): EditorialPlacementIssue | null {
-  if (toolId !== 'add_clips' && toolId !== 'insert_clips') return null;
-  const reviewed = new Map(reviewedEditorialSources(messages).map((source) => [source.assetId, source.candidates]));
-  const clips = Array.isArray(input.clips) ? input.clips : [];
-  for (const value of clips) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
-    const clip = value as Record<string, unknown>;
-    const assetId = canonicalEditorialAssetId(clip.assetId);
-    const candidates = reviewed.get(assetId);
-    if (!candidates) continue;
-    const accepted = candidates.filter((candidate) => candidate.verdict === 'strong' || candidate.verdict === 'usable');
-    if (!accepted.length) return { assetId, reason: 'review-rejected' };
-    const allAcceptedRanges = accepted
-      .map((candidate) => ({ startSec: Number(candidate.startSec), endSec: Number(candidate.endSec) }))
-      .filter((range) => Number.isFinite(range.startSec) && Number.isFinite(range.endSec));
-    // Validation uses every accepted window; the receipt reports a bounded sample.
-    const acceptedRanges = allAcceptedRanges.slice(0, 8);
-    const sourceInSec = Number(clip.sourceInSec);
-    const sourceOutSec = Number(clip.sourceOutSec);
-    if (!Number.isFinite(sourceInSec) || !Number.isFinite(sourceOutSec) || sourceOutSec <= sourceInSec) {
-      return { assetId, reason: 'range-required', acceptedRanges };
-    }
-    const tolerance = 0.06;
-    const insideAcceptedRange = allAcceptedRanges.some((range) => (
-      sourceInSec >= range.startSec - tolerance && sourceOutSec <= range.endSec + tolerance
-    ));
-    if (!insideAcceptedRange) {
-      return { assetId, reason: 'outside-accepted-range', requestedRange: { sourceInSec, sourceOutSec }, acceptedRanges };
-    }
-  }
-  return null;
 }
 
 export function normalizeStoredThreads(value: unknown, availableSkillIds: readonly string[] = []): StoredThread[] {

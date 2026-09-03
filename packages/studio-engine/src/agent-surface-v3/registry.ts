@@ -50,8 +50,10 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   { id: 'prepare_local_asset', group: 'assets', chatOnly: true, replaces: ['prepare_local_image'] },
   { id: 'get_icons', group: 'assets', serverDirect: true, replaces: ['get_icons'] },
   { id: 'create_browser_handoff', group: 'assets', serverDirect: true, replaces: ['create_browser_handoff'] },
-  // ---- clips and tracks (14)
+  // ---- clips and tracks (15)
   { id: 'add_clips', group: 'clips', replaces: ['add_clips', 'set_bgm', 'duplicate_block'] },
+  // The deterministic montage assembler as a visible capability (it used to be a hidden client-side rewrite of add_clips).
+  { id: 'assemble_from_review', group: 'clips', replaces: [] },
   { id: 'insert_clips', group: 'clips', replaces: ['insert_clips'] },
   { id: 'move_clips', group: 'clips', replaces: ['move_clips', 'move_block'] },
   { id: 'remove_clips', group: 'clips', replaces: ['remove_clips', 'delete_block', 'delete_blocks', 'delete_shot', 'remove_captions'] },
@@ -101,7 +103,7 @@ export const V3_RETIRED_TOOL_IDS: readonly string[] = [
   'read_scene_designs',
 ];
 
-export const V3_TOOL_LIMIT = 50;
+export const V3_TOOL_LIMIT = 51;
 
 export const V3_TOOL_IDS: ReadonlySet<string> = new Set(V3_TOOLS.map((tool) => tool.id));
 

@@ -229,6 +229,15 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       targetDurationFrames: FRAME('Picture target length when no narration defines it (a silent montage cut to a user spec); ignored while narration is on the timeline'),
     }),
   },
+  assemble_from_review: {
+    description:
+      'Build the primary picture track from the reviewed pool in one call (montage work; B-roll over a talking head is add_clips). clips[] are your ordered picks from inspect_media mode:editorial — source [inSec,outSec] inside accepted ranges — placed as written and snapped to legal action boundaries at most; the remaining target time is completed from unclaimed reviewed capacity at natural speed; the current primary picture is replaced (one undo step). Target = targetDurationFrames, else the narration on the timeline. Receipt: coverage {targetDurationSec, actualDurationSec, shortfallSec, covered} and placed[] (each clip with origin batch|pool and its review evidence). A shortfall means the reviewed pool is exhausted — repeating cannot add coverage; ask the user for more footage or a shorter script. Omit clips to let the review\'s opening choice lead.',
+    inputSchema: obj({
+      clips: arr(obj({ assetId: str(), startFrame: FRAME('Start'), source: SOURCE_RANGE }, ['assetId'])),
+      assetIds: arr(str('Restrict the pool to these reviewed sources.')),
+      targetDurationFrames: FRAME('Picture length when no narration is on the timeline'),
+    }),
+  },
   insert_clips: {
     description:
       'Insert registered assets and push later material on sync-locked lanes to make room (ripple). Same clip shape as add_clips. Use add_clips when nothing should shift.',

@@ -635,6 +635,24 @@ function translateAddClips(input: Input, ctx: V3AdapterContext, tool: 'add_clips
 }
 
 
+function translateAssembleFromReview(input: Input, ctx: V3AdapterContext): V3Translation {
+  const bad = assertFps(ctx);
+  if (bad) return bad;
+  const call: Input = {};
+  if (Array.isArray(input.clips) && input.clips.length) {
+    const items = clipItemsToLegacy(input.clips as Input[], ctx, 'clips');
+    if (isTranslation(items)) return items;
+    call.clips = items;
+  }
+  if (Array.isArray(input.assetIds)) call.assetIds = input.assetIds;
+  if (input.targetDurationFrames !== undefined) {
+    const target = frameField(input, 'targetDurationFrames', ctx);
+    if (isTranslation(target)) return target;
+    call.targetDurationSec = framesToSec(target as number, ctx.fps);
+  }
+  return { status: 'ok', calls: [{ tool: 'assemble_from_review', input: call }] };
+}
+
 function translateSetClipFraming(input: Input, ctx: V3AdapterContext): V3Translation {
   const bad = assertFps(ctx);
   if (bad) return bad;
@@ -799,6 +817,7 @@ export function translateV3Call(name: string, rawInput: unknown, ctx: V3AdapterC
     case 'prepare_local_asset': return translatePrepareLocalAsset(input);
     case 'add_clips': return translateAddClips(input, ctx, 'add_clips');
     case 'insert_clips': return translateAddClips(input, ctx, 'insert_clips');
+    case 'assemble_from_review': return translateAssembleFromReview(input, ctx);
     case 'set_clip_framing': return translateSetClipFraming(input, ctx);
     case 'apply_component': return translateApplyComponent(input, ctx);
     case 'set_captions': return translateSetCaptions(input);

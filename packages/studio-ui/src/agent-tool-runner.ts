@@ -143,6 +143,8 @@ import {
   type EditorialOpeningEvidence,
   askEditorialQuestion,
 } from './editorial-review';
+import { openingContendersFor, recordOpeningComparison, recordReviewedSource, reviewedSourcesFor } from './editorial-review-store';
+import { buildAssemblyFromReview, describeReviewedPlacementIssue, reviewedPlacementIssue } from './editorial-assembly-tool';
 import { type ExportRenderOpts, captureCompositionFrame } from './client-export';
 import { compositionRenderView } from './composition-render-view';
 import { groupSimilarReviewFrames } from './review-similarity';
@@ -608,6 +610,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
         }
       }
       if (toolId === 'add_clips' || toolId === 'insert_clips') {
+        // A reviewed source is placed inside its accepted ranges or not at all: the persisted verdict
+        // outranks a later step's memory of it. The assembler's own rows are planner-legal.
+        if (input.__replacePrimaryTrack !== true) {
+          const issue = reviewedPlacementIssue(reviewedSourcesFor(projectId), Array.isArray(input.clips) ? input.clips : []);
+          if (issue) return { ok: false, error: describeReviewedPlacementIssue(issue), data: { reason: issue.reason, assetId: issue.assetId } };
+        }
         const referencedAssetIds = [
           ...new Set(
             (Array.isArray(input.clips) ? input.clips : [])
@@ -1509,6 +1517,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const reusedCount = annotatedResults.filter((result) => (
                 (result as Record<string, unknown>).editorialReviewReused === true
               )).length;
+              if (openingComparison?.contenders.length) recordOpeningComparison(projectId, openingComparison.contenders);
               const batchResult: StudioToolResult = {
                 ok: true,
                 summary: `analyzed ${completed}/${batchItems.length} video sources${reusedCount ? ` (${reusedCount} reused from cache, no charge)` : ''}`,
@@ -1572,6 +1581,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                       ...(signal ? { signal } : {}),
                     }))
                   : null;
+                if (reviewed) recordReviewedSource(projectId, { assetId: entry.assetId, candidates: reviewed.candidates, comparisonSummary: reviewed.comparisonSummary });
                 return vis
                   ? {
                       ok: true,
@@ -1753,6 +1763,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                     ...(signal ? { signal } : {}),
                   }))
                 : null;
+              if (reviewed) recordReviewedSource(projectId, { assetId: targetAssetId, candidates: reviewed.candidates, comparisonSummary: reviewed.comparisonSummary });
               return vis
                 ? {
                     ok: true,
@@ -3333,6 +3344,66 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 ? t('workbench.cutNarrationRemovedKeep', { n: cuts.length, sec: removedTotalSec.toFixed(1), kg: String(kg) })
                 : t('workbench.cutNarrationRemoved', { n: cuts.length, sec: removedTotalSec.toFixed(1) });
             return withDelta({ ok: true, summary, data: { cuts, removedTotalSec, ...(Number.isFinite(kg) && kg > 0 ? { keepGapSec: kg } : {}) } });
+          }
+          case 'assemble_from_review': {
+            const requestedPool = Array.isArray(input.assetIds) ? new Set(input.assetIds.map(String)) : null;
+            const sources = reviewedSourcesFor(projectId).filter((source) => !requestedPool || requestedPool.has(source.assetId));
+            if (!sources.length) {
+              return { ok: false, error: 'No reviewed sources in this session. Run inspect_media mode:editorial on the candidate footage first (a repeat review of the same files is served from cache at no charge).', data: { reason: 'no_reviewed_sources' } };
+            }
+            const doc = documentRef.current;
+            const fps = doc.canvas.fps;
+            const narrationEndSec = doc.timeline.tracks
+              .filter((track) => track.role === 'narration' && !track.muted)
+              .flatMap((track) => track.clips.filter((clip) => clip.kind === 'audio' && clip.enabled).map((clip) => (clip.startFrame + clip.durationFrames) / fps))
+              .reduce((latest, end) => Math.max(latest, end), 0);
+            const explicitTarget = Number(input.targetDurationSec);
+            const targetDurationSec = Number.isFinite(explicitTarget) && explicitTarget > 0 ? explicitTarget : narrationEndSec;
+            if (!(targetDurationSec > 0)) {
+              return { ok: false, error: 'No picture target: place the narration first, or pass targetDurationFrames for a silent montage.', data: { reason: 'no_target' } };
+            }
+            const rows = (Array.isArray(input.clips) ? input.clips : [])
+              .filter((row): row is Record<string, unknown> => !!row && typeof row === 'object' && !Array.isArray(row))
+              .map((row) => ({
+                assetId: String(row.assetId ?? ''),
+                ...(row.startSec !== undefined ? { startSec: Number(row.startSec) } : {}),
+                ...(row.sourceInSec !== undefined ? { sourceInSec: Number(row.sourceInSec) } : {}),
+                ...(row.sourceOutSec !== undefined ? { sourceOutSec: Number(row.sourceOutSec) } : {}),
+              }));
+            const built = buildAssemblyFromReview({ sources, opening: openingContendersFor(projectId), rows, targetDurationSec });
+            if ('error' in built) {
+              const detail = built.error === 'unreviewed_source'
+                ? `clips[] names ${built.assetId}, which has no editorial review in this session; review it first or leave it out.`
+                : built.error === 'range_required'
+                  ? `clips[] row for ${built.assetId} needs source [inSec, outSec] inside an accepted range.`
+                  : built.error === 'no_target'
+                    ? 'No picture target.'
+                    : 'No accepted ranges in the reviewed pool.';
+              return { ok: false, error: detail, data: { reason: built.error } };
+            }
+            const undoDepth = undoStackRef.current.length;
+            const placed = await runStudioToolInner(ctx, 'add_clips', built.input, opts);
+            // One tool, one undo step: this case and the delegated add_clips both snapshotted the same document.
+            if (undoStackRef.current.length > undoDepth && undoStackRef.current.at(-1) === undoStackRef.current.at(-2)) undoStackRef.current.pop();
+            if (!placed.ok) return placed;
+            const placedData = placed.data && typeof placed.data === 'object' && !Array.isArray(placed.data) ? placed.data as Record<string, unknown> : {};
+            const { coverage } = built;
+            return {
+              ok: true,
+              summary: `Assembled ${built.placed.length} clips · ${coverage.actualDurationSec}s of ${coverage.targetDurationSec}s`,
+              data: {
+                ...placedData,
+                coverage,
+                explicitClipCount: built.explicitClipCount,
+                snappedClipCount: built.snappedClipCount,
+                fillerClipCount: built.fillerClipCount,
+                droppedClipCount: built.droppedClipCount,
+                placed: built.placed,
+                note: coverage.covered
+                  ? 'The picture covers the target at natural speed; the primary track was replaced. Change specific clips with remove/trim/move; a repeat call rebuilds from the same pool.'
+                  : `Reviewed capacity falls ${coverage.shortfallSec}s short of the target; repeating cannot add coverage. Ask the user for more footage or a shorter script.`,
+              },
+            };
           }
           case 'undo': {
             // No rollback while generating: after a snapshot restores the old comp, a running worker still writes its result back, scrambling state

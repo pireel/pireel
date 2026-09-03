@@ -41,9 +41,7 @@ import {
   STUDIO_CREATE_SKILL_ACTION,
   latestStudioMetaAction,
 } from "@pireel/studio-engine/skill-actions";
-import { audioClipWindow } from "@pireel/studio-engine/composition";
 import { v3ToolCanMutate, V3_TOOL_IDS } from "@pireel/studio-engine/agent-surface-v3/registry";
-import { translateV3Call } from "@pireel/studio-engine/agent-surface-v3/adapter";
 import type { FrameCatalogItem } from "./use-frame-catalog";
 import {
   CHAT_ACTION_PILL_CLASS,
@@ -68,18 +66,11 @@ import {
   assistantMessageSuggestsContinuation,
   assistantWorkDurationMs,
   assistantWorkFold,
-  canRunEditorialAnalysis,
   canRunVisualReview,
   compactStudioChatMessages,
   compactStudioChatMessagesForModel,
   createStudioTurnLedger,
-  applyEditorialShotOrder,
-  editorialPlacementIssue,
-  effectiveStudioTurnMessages,
-  hasCompletedEditorialPlacement,
   isRecoverableStudioChatError,
-  narrationDurationFromMessages,
-  prepareEditorialPlacement,
   recordStudioTurnToolResult,
   reserveStudioTurnToolCall,
   shouldBlockStudioTurnUndo,
@@ -116,7 +107,6 @@ export function ChatThread({
   runTool,
   getBody,
   getComp,
-  getFps,
   timelineFramePickActive,
   timelineFramePickBusy,
   timelineFramePickAvailable,
@@ -139,7 +129,6 @@ export function ChatThread({
   runTool: StudioChatProps["runTool"];
   getBody: StudioChatProps["getBody"];
   getComp?: StudioChatProps["getComp"];
-  getFps?: StudioChatProps["getFps"];
   timelineFramePickActive: boolean;
   timelineFramePickBusy: boolean;
   timelineFramePickAvailable: boolean;
@@ -160,7 +149,6 @@ export function ChatThread({
   const toolAbortRef = useRef<AbortController | null>(null);
   const userStoppedRef = useRef(false);
   const visualReviewCountRef = useRef(0);
-  const editorialAnalysisCountRef = useRef(0);
   const interactionWaitDurationRef = useRef(0);
   const autoRecoveryAttemptedRef = useRef(false);
   const turnLedgerRef = useRef(createStudioTurnLedger());
@@ -312,48 +300,6 @@ export function ChatThread({
         });
         return;
       }
-      const effectiveMessages = effectiveStudioTurnMessages(messagesRef.current, ledger);
-      const comp = getComp?.();
-      const placedNarrationEndSec = comp?.audioTracks
-        ?.filter((clip) => clip.role === "narration" && !clip.muted)
-        .reduce((latest, clip) => Math.max(latest, audioClipWindow(clip, 0).end), 0) ?? 0;
-      // The picture spine, in order of authority: placed narration; narration audio produced this
-      // session but not (yet) on the timeline; an explicit targetDurationSec on the call (a
-      // silent product montage cut to a user spec); the music bed's end. Without any spine the
-      // deterministic assembly cannot engage and placement is freehand — the case to avoid.
-      // The v3 surface speaks frames and its own row shape; the editorial assembly below reasons in
-      // legacy seconds, so a v3 add_clips is translated once here and executed as that legacy call
-      // (run_v3 legacyInput) — receipt and undo stay v3.
-      const fps = Math.max(1, getFps?.() ?? 30);
-      const v3LegacyInput = v3 && id === "add_clips"
-        ? (() => {
-            const translated = translateV3Call(id, requestedInput, { fps, kindOf: () => undefined });
-            return translated.status === "ok" && translated.calls.length === 1 && translated.calls[0]!.tool === "add_clips"
-              ? translated.calls[0]!.input
-              : null;
-          })()
-        : null;
-      const assemblyInput = v3LegacyInput ?? requestedInput;
-      const explicitTargetSec = Number((assemblyInput as { targetDurationSec?: unknown }).targetDurationSec);
-      const musicEndSec = comp?.audioTracks
-        ?.filter((clip) => clip.role === "music" && !clip.muted)
-        .reduce((latest, clip) => Math.max(latest, audioClipWindow(clip, 0).end), 0) ?? 0;
-      const narrationEndSec = placedNarrationEndSec > 0
-        ? placedNarrationEndSec
-        : narrationDurationFromMessages(effectiveMessages)
-          || (Number.isFinite(explicitTargetSec) && explicitTargetSec > 0 ? explicitTargetSec : 0)
-          || musicEndSec;
-      const preparedPlacement = prepareEditorialPlacement(
-        effectiveMessages,
-        id,
-        assemblyInput,
-        narrationEndSec,
-      );
-      if (preparedPlacement) ledger.pictureTargetSec = preparedPlacement.targetDurationSec;
-      // Repair arming (a detected coverage gap) stands the assembly gate down so the one legal
-      // fix — an add_clips batch from the same review evidence — is not blocked by its own lock.
-      const editorialPictureLocked = !ledger.pictureRepairArmed
-        && (ledger.pictureLocked || hasCompletedEditorialPlacement(effectiveMessages));
       if (id === "undo" && shouldBlockStudioTurnUndo(ledger)) {
         publishSuccess({
           ok: true,
@@ -364,99 +310,6 @@ export function ChatThread({
           data: { skipped: true, reason: "previous-mutation-failed", didMutate: false },
         });
         return;
-      }
-      // The planner fills from the whole reviewed pool, so an under-target assembly is a
-      // pool-level fact — re-running placement is idempotent and cannot add coverage. Route the
-      // model to the user instead of letting it grind retries.
-      if (preparedPlacement && ledger.assemblyCapacityExhausted) {
-        publishSuccess({
-          ok: true,
-          skipped: true,
-          summary: studioLocale().toLowerCase().startsWith("zh")
-            ? "已审素材容量低于旁白时长，重拼不会改变结果——请询问用户"
-            : "The reviewed footage cannot cover the narration; re-running placement cannot change that — ask the user.",
-          data: {
-            skipped: true,
-            reason: "assembly-capacity-exhausted",
-            instruction: "The deterministic assembly already used the ENTIRE reviewed pool and still falls short of the narration. Do not retry placement. Use ask_user to offer the user a choice: add more footage for review, or shorten the narration script (then regenerate speech, which re-opens assembly).",
-          },
-        });
-        return;
-      }
-      if (preparedPlacement && editorialPictureLocked) {
-        publishSuccess({
-          ok: true,
-          summary: studioLocale().toLowerCase().startsWith("zh")
-            ? "主画面已经完成，本轮不再重复重建"
-            : "The primary picture is already assembled; it will not be rebuilt again in this turn.",
-          data: {
-            skipped: true,
-            reason: "editorial-picture-locked",
-            instruction: "The picture already covers the target; a second full batch would only rebuild it. To change specific shots, lengths or order, edit those clips directly (remove, trim, move) — coverage is re-measured after each edit and a gap opens the gate for one repair batch. Otherwise continue with unfinished captions, typography, sound, deterministic delivery checks, and a concise final summary.",
-          },
-        });
-        return;
-      }
-      if (isSequenceReview && editorialPictureLocked) {
-        publishSuccess({
-          ok: true,
-          skipped: true,
-          summary: studioLocale().toLowerCase().startsWith("zh")
-            ? "选片阶段已完成画面判断，成片仅做基础状态验收"
-            : "Picture judgment is complete; delivery uses deterministic state checks only.",
-          data: {
-            instruction: "Do not run another visual review or rebuild the montage. Verify coverage, canvas fill, muted source audio, and track boundaries from the current project state, then finish.",
-          },
-        });
-        return;
-      }
-      const executionInput = preparedPlacement?.input ?? assemblyInput;
-      const placementIssue = editorialPlacementIssue(
-        effectiveMessages,
-        id,
-        executionInput,
-      );
-      if (placementIssue) {
-        const zh = studioLocale().toLowerCase().startsWith("zh");
-        const sec = (value: number) => `${Math.round(value * 100) / 100}s`;
-        const acceptedList = placementIssue.acceptedRanges?.length
-          ? placementIssue.acceptedRanges.map((range) => `${sec(range.startSec)}–${sec(range.endSec)}`).join(", ")
-          : null;
-        const requested = placementIssue.requestedRange
-          ? `${sec(placementIssue.requestedRange.sourceInSec)}–${sec(placementIssue.requestedRange.sourceOutSec)}`
-          : null;
-        const detail = placementIssue.reason === "review-rejected"
-          ? (zh
-            ? `素材 ${placementIssue.assetId} 本轮没有通过审片的可用区间。`
-            : `Source ${placementIssue.assetId} has no accepted editorial range in this turn.`)
-          : placementIssue.reason === "range-required"
-            ? (zh
-              ? `素材 ${placementIssue.assetId} 已经审片，放入时间线时必须填写通过审片的源区间${acceptedList ? `（可用：${acceptedList}）` : ""}。`
-              : `Source ${placementIssue.assetId} is reviewed; placing it requires an explicit accepted source range${acceptedList ? ` (accepted: ${acceptedList})` : ""}.`)
-            : (zh
-              ? `素材 ${placementIssue.assetId} 请求的源区间${requested ? ` ${requested}` : ""}超出了本轮通过审片的范围${acceptedList ? `（可用：${acceptedList}）` : ""}。`
-              : `Source ${placementIssue.assetId} requested range${requested ? ` ${requested}` : ""} falls outside this turn's accepted editorial range${acceptedList ? ` (accepted: ${acceptedList})` : ""}.`);
-        // The guard rejected the call before execution: nothing changed, so an undo here would
-        // revert the previous SUCCESSFUL operation — say so explicitly instead of relying on the
-        // model to know failed calls apply nothing.
-        const noMutation = zh
-          ? "本次调用没有改动时间线，不要撤销；请改用通过审片的区间重新调用。"
-          : "This call changed nothing on the timeline — do not undo; retry with an accepted range.";
-        publishError(zh ? `${detail}${noMutation}` : `${detail} ${noMutation}`);
-        return;
-      }
-      if ((id === "analyze_visual" || id === "inspect_media") && (toolCall.input as { mode?: unknown } | undefined)?.mode === "editorial") {
-        if (!canRunEditorialAnalysis(editorialAnalysisCountRef.current)) {
-          publishSuccess({
-            ok: true,
-            skipped: true,
-            summary: studioLocale().toLowerCase().startsWith("zh")
-              ? "本轮完整审片已经完成；继续使用已有可用区间、容量和分段评分，不再重复审片。"
-              : "This turn's complete source review already exists. Reuse its accepted reservoirs, capacity, and cut scores instead of reviewing again.",
-          });
-          return;
-        }
-        editorialAnalysisCountRef.current += 1;
       }
       if (isSequenceReview) {
         if (!canRunVisualReview(visualReviewCountRef.current)) {
@@ -470,45 +323,6 @@ export function ChatThread({
           return;
         }
         visualReviewCountRef.current += 1;
-      }
-      // Narrative ordering of what the planner ADDED is delegated taste: the authored batch keeps
-      // its authored order and leads, and a lightweight model pass may permute only the pool
-      // completion that follows it — anchored on the last authored shot so the tail continues
-      // from it. With no authored shot the whole montage is orderable (opening stays pinned).
-      // Any failure — timeout, bad output, non-permutation — falls back silently to the
-      // deterministic order; correctness never depends on this call.
-      let orderedInput = executionInput;
-      let orderingSource: "model" | "deterministic" | undefined;
-      const authoredShots = preparedPlacement?.shots.filter((shot) => shot.origin === "batch") ?? [];
-      const poolShots = preparedPlacement?.shots.filter((shot) => shot.origin === "pool") ?? [];
-      const anchorShot = authoredShots.length ? authoredShots[authoredShots.length - 1] : null;
-      const orderableShots = anchorShot ? [anchorShot, ...poolShots] : preparedPlacement?.shots ?? [];
-      if (preparedPlacement && poolShots.length >= 3 && orderableShots.length >= 4) {
-        orderingSource = "deterministic";
-        try {
-          const orderCtrl = new AbortController();
-          const orderTimer = setTimeout(() => orderCtrl.abort(), 8_000);
-          const response = await fetch("/api/studio/order-shots", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ shots: orderableShots, ...(projectId ? { projectId } : {}) }),
-            signal: orderCtrl.signal,
-          });
-          clearTimeout(orderTimer);
-          if (response.ok) {
-            const bodyJson = (await response.json()) as { order?: unknown };
-            const returned = Array.isArray(bodyJson.order) ? bodyJson.order.map(String) : [];
-            // The anchor is context for the model, not part of the permutation it owns.
-            const order = anchorShot ? returned.filter((shotId) => shotId !== anchorShot.id) : returned;
-            const applied = applyEditorialShotOrder(preparedPlacement, order);
-            if (applied) {
-              orderedInput = applied;
-              orderingSource = "model";
-            }
-          }
-        } catch {
-          /* deterministic order stands */
-        }
       }
       // Fresh controller per tool run: the stop button aborts it so long tools can stand down at
       // their safe boundaries instead of holding the turn hostage until they finish
@@ -525,81 +339,11 @@ export function ChatThread({
         };
         // v3 names execute through the v3 adapter (frames in, one undo step, delta out); legacy names run as before.
         const out = v3
-          ? await runToolRef.current("run_v3", v3LegacyInput ? { name: id, legacyInput: orderedInput } : { name: id, args: orderedInput }, runOpts)
-          : await runToolRef.current(id, orderedInput, runOpts);
-        const assemblyShortfallSec = preparedPlacement
-          ? Math.max(0, preparedPlacement.targetDurationSec - preparedPlacement.actualDurationSec)
-          : 0;
-        const assemblyCovered = !preparedPlacement
-          || assemblyShortfallSec <= Math.max(1, preparedPlacement.targetDurationSec * 0.03);
-        // Coverage self-heal replaces the demolition veto: trims are legitimate editing (bad
-        // frames DO get cut), so instead of forbidding picture surgery the turn re-measures the
-        // picture against the narration after each successful non-assembly mutation. A reopened
-        // gap arms repair — the receipt orders one add_clips batch from the same review evidence
-        // and the assembly gate stands down for exactly that fix.
-        let pictureCoverageGapSec = 0;
-        if (out.ok && !preparedPlacement
-          && (ledger.pictureLocked || hasCompletedEditorialPlacement(effectiveStudioTurnMessages(messagesRef.current, ledger)))) {
-          const compAfter = getComp?.();
-          const narrationEnd = compAfter?.audioTracks
-            ?.filter((clip) => clip.role === "narration" && !clip.muted)
-            .reduce((latest, clip) => Math.max(latest, audioClipWindow(clip, 0).end), 0) ?? 0;
-          // Same spine the assembly was fitted to: narration when present, else the target the
-          // planner recorded (explicit spec or music bed) — a silent montage is measured too.
-          const spineEnd = narrationEnd > 0 ? narrationEnd : ledger.pictureTargetSec;
-          const pictureSec = (compAfter?.shots ?? [])
-            .reduce((sum, shot) => sum + Math.max(0, shot.srcEnd - shot.srcStart), 0);
-          const gap = spineEnd - pictureSec;
-          if (spineEnd > 0 && gap > Math.max(1, spineEnd * 0.03)) {
-            pictureCoverageGapSec = Math.round(gap * 10) / 10;
-            ledger.pictureRepairArmed = true;
-          }
-        }
-        const outWithGap = pictureCoverageGapSec > 0
-          ? {
-              ...out,
-              data: {
-                ...(out.data && typeof out.data === "object" ? out.data : {}),
-                pictureCoverageGap: {
-                  gapSec: pictureCoverageGapSec,
-                  instruction: `This edit left the picture ${pictureCoverageGapSec}s SHORT of the target length. If that is not what the user asked for, close the gap in ONE add_clips batch using unplaced accepted or reserve:true ranges from the existing review receipt (your spans are placed as written; the planner completes only what you leave open); never stretch, slow down, or repeat already-placed shots. The assembly gate is open for exactly this repair.`,
-                },
-              },
-            }
-          : out;
-        const composition = preparedPlacement
-          ? `${preparedPlacement.explicitClipCount} shot(s) are your explicit spans${preparedPlacement.snappedClipCount ? ` (${preparedPlacement.snappedClipCount} snapped to legal action boundaries — static or broken-action territory is never placed)` : ""}${preparedPlacement.droppedClipCount ? `, ${preparedPlacement.droppedClipCount} requested row(s) could not be placed (no legal remainder, or no time left)` : ""}${preparedPlacement.fillerClipCount ? `, ${preparedPlacement.fillerClipCount} completed from the reviewed pool in the time you left open` : ""}.`
-          : "";
-        const reportedOut = out.ok && preparedPlacement
-          ? {
-              ...out,
-              data: {
-                ...(out.data && typeof out.data === "object" ? out.data : {}),
-                editorialAssembly: {
-                  targetDurationSec: preparedPlacement.targetDurationSec,
-                  actualDurationSec: preparedPlacement.actualDurationSec,
-                  droppedClipCount: preparedPlacement.droppedClipCount,
-                  explicitClipCount: preparedPlacement.explicitClipCount,
-                  snappedClipCount: preparedPlacement.snappedClipCount,
-                  fillerClipCount: preparedPlacement.fillerClipCount,
-                  naturalSpeed: true,
-                  ...(orderingSource ? { ordering: orderingSource } : {}),
-                  // An under-target assembly is NOT a finished picture: say so in the receipt and
-                  // name the one legal fix. A covered assembly says what is the author's and what
-                  // is completion, and stays editable — coverage is re-measured after every edit.
-                  ...(assemblyCovered ? {
-                    instruction: `The picture covers the full ${preparedPlacement.targetDurationSec}s target at natural speed (${preparedPlacement.actualDurationSec}s placed). ${composition} Your authored order was kept. Selection criteria were applied during review and are settled; if the user's instructions call for different shots, lengths or order, edit the specific clips (remove, trim, move, or one add_clips batch of explicit spans) — coverage is re-measured after each edit and any gap is reported. Otherwise continue with captions, typography, sound, and the final summary.`,
-                  } : {
-                    shortfallSec: Math.round(assemblyShortfallSec * 10) / 10,
-                    instruction: `The picture covers ${preparedPlacement.actualDurationSec}s of the ${preparedPlacement.targetDurationSec}s target. ${composition} Completion already drew on the ENTIRE reviewed pool — retrying placement cannot add coverage. Never stretch, slow down, or repeat shots. If the shortfall follows from the user's own constraints (e.g. a fixed length per shot), say so; otherwise use ask_user to offer a choice: add more footage for review, or shorten the narration script and regenerate speech.`,
-                  }),
-                },
-              },
-            }
-          : outWithGap;
+          ? await runToolRef.current("run_v3", { name: id, args: requestedInput }, runOpts)
+          : await runToolRef.current(id, requestedInput, runOpts);
         const stopAfterReceipt = studioToolResultStopsAgentTurn(out);
         if (stopAfterReceipt) userStoppedRef.current = true;
-        if (out.ok) publishSuccess(reportedOut as unknown as Record<string, unknown>);
+        if (out.ok) publishSuccess(out as unknown as Record<string, unknown>);
         else publishError(out.error ?? t("chatGen.executionFailed"));
         if (stopAfterReceipt) void stop();
       } catch (e) {
@@ -814,7 +558,6 @@ export function ChatThread({
         autoRecoveryAttemptedRef.current = false;
       userStoppedRef.current = false; // a new message re-arms the continuation safety net
       visualReviewCountRef.current = 0;
-      editorialAnalysisCountRef.current = 0;
       interactionWaitDurationRef.current = 0;
       turnLedgerRef.current = createStudioTurnLedger();
       finalOnlyRef.current = false;
