@@ -164,6 +164,7 @@ export function ChatThread({
   const autoRecoveryAttemptedRef = useRef(false);
   const turnLedgerRef = useRef(createStudioTurnLedger());
   const finalOnlyRef = useRef(false);
+  const turnLimitNoticeRef = useRef<string | null>(null);
   const timelineFrameInspectionRef = useRef<AbortController | null>(null);
   const [timelineFrameInspectionError, setTimelineFrameInspectionError] = useState(false);
   // Completed work stays visible by default. The arrow is an explicit user collapse, not an
@@ -754,6 +755,21 @@ export function ChatThread({
       const last = msgs[msgs.length - 1];
       if (!last || last.role !== "assistant") return;
       const key = `${last.id}:${last.parts.length}`;
+      // A turn forced into final-only mode (tool budget spent, timeline reads refused) can come
+      // back with no text at all — the user then sees a silent stop and reaches for "continue".
+      // Say what happened in the thread itself so the stop reads as a conclusion, not a crash.
+      if (
+        finalOnlyRef.current
+        && !last.parts.some((p) => p.type === "text" && (p as { text?: string }).text?.trim())
+        && turnLimitNoticeRef.current !== last.id
+      ) {
+        turnLimitNoticeRef.current = last.id;
+        finalOnlyRef.current = false;
+        setMessages((s) => s.map((m) => (m.id === last.id
+          ? { ...m, parts: [...m.parts, { type: "text", text: t("chatGen.turnLimitFinal") }] }
+          : m)));
+        return;
+      }
       const completedToolNeedsFollowup = lastAssistantMessageIsCompleteWithToolCalls({ messages: msgs });
       if (!completedToolNeedsFollowup || autoResumedRef.current === key) return;
       autoResumedRef.current = key;

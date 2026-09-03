@@ -875,6 +875,35 @@ export function hasPostAssemblyTimelineSnapshot(allMessages: readonly UIMessage[
  * This makes the persisted verdict authoritative instead of trusting a later model step to
  * remember that a high aesthetic score can still have a rejected usable range.
  */
+/** Sources whose spoken content is on record this thread (a read_script receipt carrying a
+ *  transcript). A speaker's own footage is timed by what is said: editorial candidates on it
+ *  guide openings and B-roll picks, never which spoken sentences may be kept — a real run gated
+ *  the closing call-to-action out of a talking-head edit because the review only listed its
+ *  three best-looking windows. */
+export function speechBearingSources(messages: readonly UIMessage[]): Set<string> {
+  const speech = new Set<string>();
+  for (const message of messages) {
+    if (message.role !== 'assistant') continue;
+    for (const part of message.parts ?? []) {
+      const candidate = part as { type?: string; toolName?: string; state?: string; output?: unknown };
+      const partToolId = candidate.type === 'dynamic-tool'
+        ? candidate.toolName
+        : candidate.type?.startsWith('tool-')
+          ? candidate.type.slice('tool-'.length)
+          : '';
+      if ((partToolId !== 'read_script' && partToolId !== 'extract_asr') || candidate.state !== 'output-available') continue;
+      const output = candidate.output as { ok?: unknown; data?: unknown } | undefined;
+      if (output?.ok !== true || !output.data || typeof output.data !== 'object') continue;
+      const data = output.data as { localAssetId?: unknown; assetId?: unknown; transcript?: unknown; speechDetected?: unknown };
+      if (data.speechDetected === false) continue;
+      if (typeof data.transcript !== 'string' || !data.transcript.trim()) continue;
+      const assetId = canonicalEditorialAssetId(data.localAssetId ?? data.assetId);
+      if (assetId) speech.add(assetId);
+    }
+  }
+  return speech;
+}
+
 export function editorialPlacementIssue(
   messages: readonly UIMessage[],
   toolId: string,
@@ -882,6 +911,7 @@ export function editorialPlacementIssue(
 ): EditorialPlacementIssue | null {
   if (toolId !== 'add_clips' && toolId !== 'insert_clips') return null;
   const reviewed = new Map(reviewedEditorialSources(messages).map((source) => [source.assetId, source.candidates]));
+  const speech = speechBearingSources(messages);
   const clips = Array.isArray(input.clips) ? input.clips : [];
   for (const value of clips) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
@@ -889,6 +919,7 @@ export function editorialPlacementIssue(
     const assetId = canonicalEditorialAssetId(clip.assetId);
     const candidates = reviewed.get(assetId);
     if (!candidates) continue;
+    if (speech.has(assetId)) continue; // spoken footage: the transcript decides, not the picture review
     const accepted = candidates.filter((candidate) => candidate.verdict === 'strong' || candidate.verdict === 'usable');
     if (!accepted.length) return { assetId, reason: 'review-rejected' };
     const allAcceptedRanges = accepted

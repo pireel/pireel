@@ -274,6 +274,29 @@ describe('editorial placement receipts', () => {
     })).toMatchObject({ reason: 'outside-accepted-range' });
   });
 
+  it('never gates a source whose transcript is on record: spoken footage is timed by the script', () => {
+    const script = assistant([{
+      type: 'tool-read_script',
+      toolCallId: 'script-1',
+      state: 'output-available',
+      input: { assetId: 'local:asset-beach' },
+      output: { ok: true, summary: 'transcribed', data: { localAssetId: 'asset-beach', transcript: 'AUDIO TRANSCRIPT\n  0. [0.0–2.0s] hello' } },
+    }] as UIMessage['parts']);
+    expect(editorialPlacementIssue([review, script], 'add_clips', {
+      clips: [{ assetId: 'asset-beach', role: 'primary', sourceInSec: 4.2, sourceOutSec: 5.8 }],
+    })).toBeNull();
+    const silent = assistant([{
+      type: 'tool-read_script',
+      toolCallId: 'script-2',
+      state: 'output-available',
+      input: { assetId: 'local:asset-beach' },
+      output: { ok: true, summary: 'no speech', data: { assetId: 'asset-beach', speechDetected: false } },
+    }] as UIMessage['parts']);
+    expect(editorialPlacementIssue([review, silent], 'add_clips', {
+      clips: [{ assetId: 'asset-beach', role: 'primary', sourceInSec: 4.2, sourceOutSec: 5.8 }],
+    })).toMatchObject({ reason: 'outside-accepted-range' });
+  });
+
   it('enforces accepted ranges returned inside one batch review receipt', () => {
     const batchReview = assistant([{
       type: 'tool-analyze_visual',

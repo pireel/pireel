@@ -428,7 +428,7 @@ describe('Agent composition transaction boundary', () => {
 
     const skill = readFileSync(new URL('../../studio-engine/src/scenario-skills/content/talking-head-edit/SKILL.md', import.meta.url), 'utf8');
     const execute = skill.slice(skill.indexOf('## Step 10: Execute with tool discipline'));
-    expect(execute).toContain('After Approve, run `remove_silence` first');
+    expect(execute).toContain('Place the narration spine first, then run `remove_silence`');
     expect(execute).toContain('do not retry it in the same user request');
     expect(buildChatSystem(null)).toContain('run remove_silence before transcript-driven edits');
     expect(buildChatSystem(null)).not.toContain('planning artifact');
