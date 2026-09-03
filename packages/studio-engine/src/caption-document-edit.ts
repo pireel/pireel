@@ -93,6 +93,14 @@ export type CaptionDocumentEditResult =
   | { ok: true; document: EditorDocumentV2; receipts: EditorCommandReceipt[] }
   | { ok: false; document: EditorDocumentV2; error: EditorCommandError };
 
+/** Callers use reference identity as "nothing changed" (the workbench relays captions from a reactive
+ * effect and publishes whenever the returned document differs). A pipeline stage that rebuilt the
+ * document without changing its content must therefore hand back the caller's own object. */
+function settleUnchanged(input: EditorDocumentV2, output: EditorDocumentV2): EditorDocumentV2 {
+  if (output === input) return output;
+  return JSON.stringify(output) === JSON.stringify(input) ? input : output;
+}
+
 function uniqueTrackId(document: EditorDocumentV2): string {
   const used = new Set(document.timeline.tracks.map((track) => track.id));
   const stem = 'track_managed_captions';
@@ -157,7 +165,7 @@ export function applyCaptionDocumentEdit(input: CaptionDocumentEditInput): Capti
       document = removed.document;
       receipts.push(removed.receipt);
     }
-    return { ok: true, document, receipts };
+    return { ok: true, document: settleUnchanged(input.document, document), receipts };
   }
 
   if (input.relayout) document = clearManagedCaptionLayout(document);
@@ -172,5 +180,5 @@ export function applyCaptionDocumentEdit(input: CaptionDocumentEditInput): Capti
     document = copyRelaid.document;
     receipts.push(copyRelaid.receipt);
   }
-  return { ok: true, document: lockManagedCaptionLayout(document), receipts };
+  return { ok: true, document: settleUnchanged(input.document, lockManagedCaptionLayout(document)), receipts };
 }

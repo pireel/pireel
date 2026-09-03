@@ -468,6 +468,9 @@ type FloatKind =
   | "transition"
   | "captions";
 
+/** Consecutive caption-derivation passes allowed to start from the effect's own publish before it stops relaying. */
+const CAPTION_DERIVE_MAX_CHAIN = 8;
+
 /** Bridge tools that report/choose the active output; they re-anchor the agent instead of being gated by it. */
 const OUTPUT_ANCHOR_TOOLS = new Set(["get_state", "list_outputs", "switch_output", "create_output", "duplicate_output", "delete_output"]);
 
@@ -7915,15 +7918,37 @@ export function HyperframesWorkbench({
   // comp.blocks for every consumer (preview/timeline/selection/agent) but NEVER persisted — autosave
   // strips them; the transcript is the single stored source. This one reactive effect replaces the old
   // scattered manual re-lays: any transcript/cut/toggle change re-derives, so blocks can't go stale.
+  // Self-trigger breaker: this effect's own publish re-projects comp.blocks, which re-arms the
+  // effect. The engine promises reference identity when nothing changed, but a pipeline that
+  // fails to reach a fixed point (two writers of one transcript, a relay/lock pair that keep
+  // normalizing each other) would otherwise publish on every pass until React throws
+  // "Maximum update depth exceeded" and the whole editor unmounts. Count consecutive passes that
+  // start from our own last publish; past the cap, stop relaying and surface the diff instead.
+  const captionDeriveRunRef = useRef<{ published: EditorDocumentV2 | null; runs: number }>({ published: null, runs: 0 });
   useEffect(() => {
     if (!bootDataReady) return;
+    const before = editorDocumentRef.current;
+    const chain = captionDeriveRunRef.current;
+    chain.runs = chain.published === before ? chain.runs + 1 : 0;
+    if (chain.runs >= CAPTION_DERIVE_MAX_CHAIN) {
+      if (chain.runs === CAPTION_DERIVE_MAX_CHAIN) {
+        console.error("[studio] caption derivation did not settle; relay paused for this document", {
+          transcripts: JSON.stringify(before.semantics.transcripts).length,
+          managedCaptionTrackId: before.semantics.managedCaptionTrackId,
+          managedCaptionSource: before.semantics.managedCaptionSource,
+        });
+      }
+      return;
+    }
     const edit = applyCaptionDocumentEdit({
-      document: editorDocumentRef.current,
+      document: before,
       mainTranscript: asrRef.current,
       clipTranscripts: clipAsrRef.current,
     });
-    if (edit.ok && edit.document !== editorDocumentRef.current)
+    if (edit.ok && edit.document !== before) {
       setEditorDocument(edit.document);
+      chain.published = editorDocumentRef.current; // publish() stores the canonical document synchronously
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     bootDataReady,

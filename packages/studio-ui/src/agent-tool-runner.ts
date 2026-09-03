@@ -3029,14 +3029,18 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               .filter((item) => Number.isInteger(item.index) && item.index >= 0 && item.text.length > 0);
             if (!items.length) return { ok: false, error: t('workbench.itemsEmptyInvalidNeed') };
             const shotIdIn = typeof input.shotId === 'string' ? input.shotId : undefined;
-            const src = shotIdIn ? ensureShots(compRef.current).find((shot) => shot.id === shotIdIn)?.src : undefined;
-            if (shotIdIn && !src) return { ok: false, error: t('workbench.shotIdNotInsertClip') };
+            const shotSrc = shotIdIn ? ensureShots(compRef.current).find((shot) => shot.id === shotIdIn)?.src : undefined;
+            if (shotIdIn && !shotSrc) return { ok: false, error: t('workbench.shotIdNotInsertClip') };
             const primaryTrack = documentRef.current.timeline.tracks.find((track) => track.id === documentRef.current.semantics.primaryNarrativeTrackId);
             const targetNarrativeClip = shotIdIn ? primaryTrack?.clips.find((clip) => clip.id === shotIdIn) : undefined;
             const assetId = shotIdIn
               ? (targetNarrativeClip?.kind === 'narrative' ? targetNarrativeClip.assetId : undefined)
               : firstNarrativeAssetId(documentRef.current);
             if (!assetId) return { ok: false, error: shotIdIn ? t('workbench.shotIdNotInsertClip') : t('workbench.noTranscriptYetRun') };
+            // The first narrative asset's transcript is owned by the main copy (asrSentences), even when
+            // addressed through its shot id: the runtime clip copy of the same source is a cache the
+            // engine ignores while a main copy exists, so an edit written there would never land.
+            const src = shotSrc && assetId === firstNarrativeAssetId(documentRef.current) && asrRef.current?.length ? undefined : shotSrc;
             const segments = captionTranscriptForEdit(
               documentRef.current,
               assetId,
@@ -3097,8 +3101,16 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               summary = t('workbench.clearedAllCaptionTranslations');
             } else {
               const shotIdIn = typeof input.shotId === 'string' ? input.shotId : undefined;
-              const src = shotIdIn ? ensureShots(compRef.current).find((s) => s.id === shotIdIn)?.src : undefined;
-              if (shotIdIn && !src) return { ok: false, error: t('workbench.shotIdNotInsertClip') };
+              const shotSrc = shotIdIn ? ensureShots(compRef.current).find((s) => s.id === shotIdIn)?.src : undefined;
+              if (shotIdIn && !shotSrc) return { ok: false, error: t('workbench.shotIdNotInsertClip') };
+              // Same ownership rule as edit_caption_text: the first narrative asset lives on the main copy.
+              const shotClip = shotIdIn
+                ? documentRef.current.timeline.tracks
+                  .find((track) => track.id === documentRef.current.semantics.primaryNarrativeTrackId)
+                  ?.clips.find((clip) => clip.id === shotIdIn)
+                : undefined;
+              const shotAssetId = shotClip?.kind === 'narrative' ? shotClip.assetId : undefined;
+              const src = shotSrc && shotAssetId === firstNarrativeAssetId(documentRef.current) && asrRef.current?.length ? undefined : shotSrc;
               const segs = src ? clipAsrRef.current[src] : asrRef.current;
               if (!segs?.length) return { ok: false, error: src ? t('workbench.insertClipNoTranscript') : t('workbench.noTranscriptYetRun') };
               const bad = items.filter((it) => it.index >= segs.length);
