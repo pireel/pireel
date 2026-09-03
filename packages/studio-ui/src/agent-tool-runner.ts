@@ -120,7 +120,7 @@ import {
   sceneVisualRepairScope,
   type SceneVisualReviewPhase,
 } from '@pireel/studio-engine/scene-visual-qa';
-import { translateV3Call, type V3ClipKind } from '@pireel/studio-engine/agent-surface-v3/adapter';
+import { translateV3Call, type LegacyCall, type V3ClipKind } from '@pireel/studio-engine/agent-surface-v3/adapter';
 import { documentDelta, renderV3State } from '@pireel/studio-engine/agent-surface-v3/state';
 
 /** v3 wording for the library receipts (the legacy hint names legacy tools). */
@@ -4640,7 +4640,13 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         }
         const kinds = new Map<string, V3ClipKind>();
         for (const track of before.timeline.tracks) for (const clip of track.clips) kinds.set(clip.id, clip.kind);
-        const translation = translateV3Call(name, args, { fps: before.canvas.fps, kindOf: (id) => kinds.get(id) });
+        // The chat surface may hand over an already-translated legacy call (the editorial assembly
+        // rewrites add_clips rows against reviewed evidence before execution); it still gets the
+        // v3 receipt and the single undo step.
+        const legacyInput = input.legacyInput && typeof input.legacyInput === 'object' && !Array.isArray(input.legacyInput) ? (input.legacyInput as Record<string, unknown>) : null;
+        const translation = legacyInput
+          ? { status: 'ok' as const, calls: [{ tool: name, input: legacyInput }] as LegacyCall[] }
+          : translateV3Call(name, args, { fps: before.canvas.fps, kindOf: (id) => kinds.get(id) });
         if (translation.status === 'error') { const { status: _s, ...rest } = translation; return { ok: false, ...rest }; }
         if (translation.status === 'pending') return { ok: false, error: 'not_available_yet', data: { detail: translation.reason } };
         const steps: Array<{ tool: string; ok: boolean; summary?: string; error?: string; data?: unknown }> = [];

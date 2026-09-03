@@ -218,6 +218,14 @@ describe('v3 adapter translations', () => {
     // on:true alone switches the layer on with the default preset (the legacy tool refuses an empty style).
     expect(ok(translateV3Call('set_captions', { on: true }, ctx))).toEqual([{ tool: 'set_captions', input: { preset: 'em-yellow' } }]);
     expect(ok(translateV3Call('set_captions', { on: true, yPct: 80 }, ctx))).toEqual([{ tool: 'set_captions', input: { yPct: 80 } }]);
+    // A silent montage captions its own copy; the font travels with the style.
+    expect(ok(translateV3Call('set_captions', { on: true, script: '第一句\n第二句', font: 'serif' }, ctx))).toEqual([{ tool: 'set_captions', input: { font: 'serif', script: '第一句\n第二句' } }]);
+  });
+
+  it('carries the silent-montage picture target on add_clips in frames', () => {
+    const calls = ok(translateV3Call('add_clips', { clips: [{ assetId: 'a1', role: 'primary', source: [0, 4] }], targetDurationFrames: 900 }, ctx));
+    expect(calls[0]!.tool).toBe('add_clips');
+    expect(calls[0]!.input.targetDurationSec).toBe(30);
   });
 
   it('maps search_media clipId onto the legacy source selector', () => {

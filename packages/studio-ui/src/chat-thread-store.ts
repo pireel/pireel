@@ -26,6 +26,10 @@ export interface StoredThread {
   skillId?: StudioScenarioSkillId;
 }
 
+/** Editorial evidence arrives as analyze_visual receipts on the legacy surface and as inspect_media
+ * (mode editorial) receipts on v3; both carry the same editorialCandidates payload. */
+export const isVisualAnalysisToolId = (id: string | undefined): boolean => id === 'analyze_visual' || id === 'inspect_media';
+
 export const MAX_VISUAL_REVIEWS_PER_USER_TURN = 2;
 export const MAX_EDITORIAL_ANALYSES_PER_USER_TURN = 1;
 /** Circuit breaker, not a governor: a legitimate full montage turn runs ~15–20 calls, so the
@@ -515,7 +519,7 @@ export function compactStudioChatMessagesForModel(messages: UIMessage[]): UIMess
             },
           } as typeof part];
         }
-        if (toolId !== 'analyze_visual' || !candidate.output || typeof candidate.output !== 'object') return [part];
+        if (!isVisualAnalysisToolId(toolId) || !candidate.output || typeof candidate.output !== 'object') return [part];
         const output = candidate.output as { ok?: unknown; summary?: unknown; error?: unknown; data?: unknown };
         if (!output.data || typeof output.data !== 'object') return [part];
         return [{ ...part, output: { ...output, data: compactVisualAnalysisData(output.data as Record<string, unknown>) } } as typeof part];
@@ -666,7 +670,7 @@ function reviewedEditorialSources(messages: readonly UIMessage[]): EditorialAsse
         : candidate.type?.startsWith('tool-')
           ? candidate.type.slice('tool-'.length)
           : '';
-      if (partToolId !== 'analyze_visual' || candidate.state !== 'output-available') continue;
+      if (!isVisualAnalysisToolId(partToolId) || candidate.state !== 'output-available') continue;
       const output = candidate.output as { ok?: unknown; data?: unknown } | undefined;
       if (output?.ok !== true || !output.data || typeof output.data !== 'object') continue;
       const data = output.data as Record<string, unknown>;
@@ -697,7 +701,7 @@ export function reviewedOpeningContenders(
         : candidate.type?.startsWith('tool-')
           ? candidate.type.slice('tool-'.length)
           : '';
-      if (toolId !== 'analyze_visual' || candidate.state !== 'output-available') continue;
+      if (!isVisualAnalysisToolId(toolId) || candidate.state !== 'output-available') continue;
       const output = candidate.output as { ok?: unknown; data?: unknown } | undefined;
       if (output?.ok !== true || !output.data || typeof output.data !== 'object') continue;
       const comparison = (output.data as { openingComparison?: { contenders?: unknown } }).openingComparison;

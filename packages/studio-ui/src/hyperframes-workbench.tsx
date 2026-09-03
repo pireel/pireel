@@ -8189,6 +8189,7 @@ export function HyperframesWorkbench({
                 runTool={chatCbs.runTool}
                 getBody={getChatBody}
                 getComp={getChatComp}
+                getFps={() => editorDocumentRef.current.canvas.fps}
                 timelineFramePickActive={timelineFramePickActive}
                 timelineFramePickBusy={timelineFramePickBusy}
                 timelineFramePickAvailable={

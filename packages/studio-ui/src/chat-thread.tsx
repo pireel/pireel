@@ -43,6 +43,7 @@ import {
 } from "@pireel/studio-engine/skill-actions";
 import { audioClipWindow } from "@pireel/studio-engine/composition";
 import { v3ToolCanMutate, V3_TOOL_IDS } from "@pireel/studio-engine/agent-surface-v3/registry";
+import { translateV3Call } from "@pireel/studio-engine/agent-surface-v3/adapter";
 import type { FrameCatalogItem } from "./use-frame-catalog";
 import {
   CHAT_ACTION_PILL_CLASS,
@@ -116,6 +117,7 @@ export function ChatThread({
   runTool,
   getBody,
   getComp,
+  getFps,
   timelineFramePickActive,
   timelineFramePickBusy,
   timelineFramePickAvailable,
@@ -138,6 +140,7 @@ export function ChatThread({
   runTool: StudioChatProps["runTool"];
   getBody: StudioChatProps["getBody"];
   getComp?: StudioChatProps["getComp"];
+  getFps?: StudioChatProps["getFps"];
   timelineFramePickActive: boolean;
   timelineFramePickBusy: boolean;
   timelineFramePickAvailable: boolean;
@@ -255,6 +258,9 @@ export function ChatThread({
       const requestedInput = (toolCall.input ?? {}) as Record<string, unknown>;
       const ledger = turnLedgerRef.current;
       const v3 = agentSurfaceRef.current === "v3" && V3_TOOL_IDS.has(id);
+      // A whole-output review: legacy review_visuals, or a v3 inspect_timeline with no frame selection.
+      const isSequenceReview = id === "review_visuals"
+        || (id === "inspect_timeline" && !Array.isArray(requestedInput.frames) && requestedInput.fromFrame === undefined);
       const canMutate = v3 ? v3ToolCanMutate(id) : studioToolCanMutate(id);
       const publishSuccess = (output: Record<string, unknown>) => {
         const recorded = recordStudioTurnToolResult(ledger, {
@@ -331,7 +337,20 @@ export function ChatThread({
       // session but not (yet) on the timeline; an explicit targetDurationSec on the call (a
       // silent product montage cut to a user spec); the music bed's end. Without any spine the
       // deterministic assembly cannot engage and placement is freehand — the case to avoid.
-      const explicitTargetSec = Number((requestedInput as { targetDurationSec?: unknown }).targetDurationSec);
+      // The v3 surface speaks frames and its own row shape; the editorial assembly below reasons in
+      // legacy seconds, so a v3 add_clips is translated once here and executed as that legacy call
+      // (run_v3 legacyInput) — receipt and undo stay v3.
+      const fps = Math.max(1, getFps?.() ?? 30);
+      const v3LegacyInput = v3 && id === "add_clips"
+        ? (() => {
+            const translated = translateV3Call(id, requestedInput, { fps, kindOf: () => undefined });
+            return translated.status === "ok" && translated.calls.length === 1 && translated.calls[0]!.tool === "add_clips"
+              ? translated.calls[0]!.input
+              : null;
+          })()
+        : null;
+      const assemblyInput = v3LegacyInput ?? requestedInput;
+      const explicitTargetSec = Number((assemblyInput as { targetDurationSec?: unknown }).targetDurationSec);
       const musicEndSec = comp?.audioTracks
         ?.filter((clip) => clip.role === "music" && !clip.muted)
         .reduce((latest, clip) => Math.max(latest, audioClipWindow(clip, 0).end), 0) ?? 0;
@@ -343,7 +362,7 @@ export function ChatThread({
       const preparedPlacement = prepareEditorialPlacement(
         effectiveMessages,
         id,
-        requestedInput,
+        assemblyInput,
         narrationEndSec,
       );
       if (preparedPlacement) ledger.pictureTargetSec = preparedPlacement.targetDurationSec;
@@ -394,7 +413,7 @@ export function ChatThread({
         });
         return;
       }
-      if (id === "review_visuals" && editorialPictureLocked) {
+      if (isSequenceReview && editorialPictureLocked) {
         publishSuccess({
           ok: true,
           skipped: true,
@@ -426,7 +445,7 @@ export function ChatThread({
         });
         return;
       }
-      const executionInput = preparedPlacement?.input ?? requestedInput;
+      const executionInput = preparedPlacement?.input ?? assemblyInput;
       const placementIssue = editorialPlacementIssue(
         effectiveMessages,
         id,
@@ -461,7 +480,7 @@ export function ChatThread({
         publishError(zh ? `${detail}${noMutation}` : `${detail} ${noMutation}`);
         return;
       }
-      if (id === "analyze_visual" && (toolCall.input as { mode?: unknown } | undefined)?.mode === "editorial") {
+      if ((id === "analyze_visual" || id === "inspect_media") && (toolCall.input as { mode?: unknown } | undefined)?.mode === "editorial") {
         if (!canRunEditorialAnalysis(editorialAnalysisCountRef.current)) {
           publishSuccess({
             ok: true,
@@ -474,7 +493,7 @@ export function ChatThread({
         }
         editorialAnalysisCountRef.current += 1;
       }
-      if (id === "review_visuals") {
+      if (isSequenceReview) {
         if (!canRunVisualReview(visualReviewCountRef.current)) {
           publishSuccess({
             ok: true,
@@ -541,7 +560,7 @@ export function ChatThread({
         };
         // v3 names execute through the v3 adapter (frames in, one undo step, delta out); legacy names run as before.
         const out = v3
-          ? await runToolRef.current("run_v3", { name: id, args: orderedInput }, runOpts)
+          ? await runToolRef.current("run_v3", v3LegacyInput ? { name: id, legacyInput: orderedInput } : { name: id, args: orderedInput }, runOpts)
           : await runToolRef.current(id, orderedInput, runOpts);
         const assemblyShortfallSec = preparedPlacement
           ? Math.max(0, preparedPlacement.targetDurationSec - preparedPlacement.actualDurationSec)

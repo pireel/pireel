@@ -226,6 +226,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       duplicate: arr(obj({ clipId: str('Graphic clip to copy.'), startFrame: FRAME('New start') }, ['clipId'])),
       atFrame: FRAME('Default start for clips that omit startFrame'),
       includeLinked: bool('Default true: linked partners move together.'),
+      targetDurationFrames: FRAME('Picture target length when no narration defines it (a silent montage cut to a user spec); ignored while narration is on the timeline'),
     }),
   },
   insert_clips: {
@@ -426,6 +427,8 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
     inputSchema: obj({
       on: bool(),
       preset: enumOf(CAPTION_PRESET_IDS), yPct: num('', { min: 0, max: 100 }), scale: num('', { min: 0.5, max: 2 }),
+      font: str('Caption font: sans | serif | mono | web:<library id> | local:<family>; "preset" restores the preset\'s own font.'),
+      script: str('Silent montage only (no spoken transcript): the caption copy, one line per caption, timed across the placed picture by character share; the copy becomes the transcript truth of those clips.'),
       source: obj({ trackId: str(), clipId: str() }),
       clipId: str('corrections / translations: an inserted clip’s transcript instead of the main narration.'),
       corrections: arr(obj({ index: int('Transcript row.'), text: str('Complete corrected sentence.') }, ['index', 'text'])),

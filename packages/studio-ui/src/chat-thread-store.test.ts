@@ -265,6 +265,17 @@ describe('editorial placement receipts', () => {
     })).toBeNull();
   });
 
+  it('reads the same evidence from a v3 inspect_media receipt', () => {
+    const v3Review = { ...review, parts: review.parts.map((part) => ({ ...part, type: 'tool-inspect_media', input: { ids: ['asset-beach'], mode: 'editorial' } })) } as UIMessage;
+    expect(editorialPlacementIssue([v3Review], 'add_clips', {
+      clips: [{ assetId: 'asset-beach', role: 'primary', sourceInSec: 0.4, sourceOutSec: 2 }],
+    })).toBeNull();
+    expect(editorialPlacementIssue([v3Review], 'add_clips', {
+      clips: [{ assetId: 'asset-beach', role: 'primary', sourceInSec: 4, sourceOutSec: 6 }],
+    })).toMatchObject({ assetId: 'asset-beach' });
+    expect(prepareEditorialPlacement([v3Review], 'add_clips', { clips: [{ assetId: 'asset-beach', role: 'primary', sourceInSec: 0.3, sourceOutSec: 2.1 }] }, 1.8)).not.toBeNull();
+  });
+
   it('blocks whole-source or rejected-range placement after review', () => {
     expect(editorialPlacementIssue([review], 'add_clips', {
       clips: [{ assetId: 'asset-beach', role: 'primary' }],

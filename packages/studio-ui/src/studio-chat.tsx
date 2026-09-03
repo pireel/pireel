@@ -135,6 +135,8 @@ export interface StudioChatProps {
   /** Live composition accessor (stable identity, reads a ref): tool receipt cards preview blocks
    *  without linking chat re-renders to comp state. Optional — the preview strip hides without it. */
   getComp?: () => Composition;
+  /** Output fps for surfaces that must convert v3 frames to seconds before execution (editorial assembly). */
+  getFps?: () => number;
   /** Exact-frame picking happens on the real Studio timeline; Chat only owns its mode button and draft attachment. */
   timelineFramePickActive?: boolean;
   timelineFramePickBusy?: boolean;
@@ -162,6 +164,7 @@ export const StudioChat = memo(
       getBody,
       elements,
       getComp,
+      getFps,
       timelineFramePickActive = false,
       timelineFramePickBusy = false,
       timelineFramePickAvailable = false,
@@ -424,6 +427,7 @@ export const StudioChat = memo(
           getBody={getBody}
           elements={elements}
           getComp={getComp}
+          getFps={getFps}
           timelineFramePickActive={timelineFramePickActive}
           timelineFramePickBusy={timelineFramePickBusy}
           timelineFramePickAvailable={timelineFramePickAvailable}

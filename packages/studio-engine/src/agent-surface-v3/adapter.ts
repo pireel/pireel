@@ -616,6 +616,11 @@ function translateAddClips(input: Input, ctx: V3AdapterContext, tool: 'add_clips
       if (isTranslation(at)) return at;
       call.atSec = framesToSec(at as number, ctx.fps);
     }
+    if (tool === 'add_clips' && input.targetDurationFrames !== undefined) {
+      const target = frameField(input, 'targetDurationFrames', ctx);
+      if (isTranslation(target)) return target;
+      call.targetDurationSec = framesToSec(target as number, ctx.fps);
+    }
     calls.push({ tool, input: call });
   }
   if (!calls.length) return { status: 'error', error: 'missing_field', path: 'clips', fix: 'Pass clips: [{assetId, role?, startFrame?, …}] (or duplicate: [{clipId, startFrame?}] on add_clips).' };
@@ -708,7 +713,7 @@ function translateSetCaptions(input: Input): V3Translation {
   const calls: LegacyCall[] = [];
   if (input.on === false) return { status: 'ok', calls: [{ tool: 'remove_captions', input: {} }] };
   const style: Input = {};
-  for (const key of ['preset', 'yPct', 'scale']) if (input[key] !== undefined) style[key] = input[key];
+  for (const key of ['preset', 'yPct', 'scale', 'font', 'script']) if (input[key] !== undefined) style[key] = input[key];
   if (input.source && typeof input.source === 'object') {
     const source = input.source as Input;
     if (isNonEmptyString(source.trackId)) { style.source = 'track'; style.trackId = source.trackId; }
@@ -716,7 +721,7 @@ function translateSetCaptions(input: Input): V3Translation {
     else style.source = 'auto';
   }
   // "Turn captions on" with no style is a complete instruction: the legacy tool needs a preset to switch on, so supply the default.
-  if (input.on === true && style.preset === undefined && style.yPct === undefined && style.scale === undefined) style.preset = DEFAULT_CAPTION_PRESET;
+  if (input.on === true && style.preset === undefined && style.yPct === undefined && style.scale === undefined && style.font === undefined && style.script === undefined) style.preset = DEFAULT_CAPTION_PRESET;
   if (input.on === true || Object.keys(style).length) calls.push({ tool: 'set_captions', input: style });
   if (Array.isArray(input.corrections) && input.corrections.length) {
     calls.push({ tool: 'edit_caption_text', input: { items: input.corrections, ...(isNonEmptyString(input.clipId) ? { shotId: input.clipId } : {}) } });
