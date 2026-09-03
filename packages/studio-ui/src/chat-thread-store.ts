@@ -26,11 +26,11 @@ export interface StoredThread {
 export const isVisualAnalysisToolId = (id: string | undefined): boolean => id === 'analyze_visual' || id === 'inspect_media';
 
 export const MAX_VISUAL_REVIEWS_PER_USER_TURN = 2;
-/** Circuit breaker, not a governor: a legitimate full montage turn runs ~15–20 calls, so the
- * ceiling sits well above that and only trips a genuinely runaway loop. Duplicate-read and
- * unsafe-undo guards handle discipline; keep in sync with MAX_STUDIO_TOOL_RECEIPTS_PER_TURN
- * enforced server-side. */
-export const MAX_STUDIO_TOOL_CALLS_PER_USER_TURN = 40;
+/** Runaway ceiling, never a governor: neither reference product caps tool calls per turn at all
+ * (the user's stop button is the limit), and a real montage turn has legitimately run 40 calls.
+ * The ceiling exists only so an automation that truly loops cannot spend indefinitely; keep in
+ * sync with MAX_STUDIO_TOOL_RECEIPTS_PER_TURN enforced server-side. */
+export const MAX_STUDIO_TOOL_CALLS_PER_USER_TURN = 200;
 /** A model that keeps re-reading an unchanged timeline after being told to stop is looping, not
  * verifying — a real turn burned ~28 of its 40 calls on refused reads and died mid-edit. After
  * this many consecutive refusals with no mutation in between, the turn goes final-only. */

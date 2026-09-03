@@ -294,9 +294,9 @@ export function ChatThread({
           ok: true,
           skipped: true,
           summary: studioLocale().toLowerCase().startsWith("zh")
-            ? "本轮处理次数已达上限，正在收尾"
-            : "This turn reached its processing limit and is finishing now.",
-          data: { reason: "turn-tool-limit", instruction: "Do not call more tools. Summarize the authoritative current state." },
+            ? "这一轮已经运行很久了，先向用户汇报现状"
+            : "This turn has been running for a long time; report where things stand to the user.",
+          data: { reason: "turn-tool-limit", instruction: "Stop calling tools. Tell the user what is done and what is not, from the receipts you already have." },
         });
         return;
       }
