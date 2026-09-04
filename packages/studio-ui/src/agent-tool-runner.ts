@@ -3373,7 +3373,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 ...(row.sourceInSec !== undefined ? { sourceInSec: Number(row.sourceInSec) } : {}),
                 ...(row.sourceOutSec !== undefined ? { sourceOutSec: Number(row.sourceOutSec) } : {}),
               }));
-            const built = buildAssemblyFromReview({ sources, opening: openingContendersFor(projectId), rows, targetDurationSec });
+            const built = buildAssemblyFromReview({ sources, opening: openingContendersFor(projectId), rows, targetDurationSec, fps });
             if ('error' in built) {
               const detail = built.error === 'unreviewed_source'
                 ? `clips[] names ${built.assetId}, which has no editorial review in this session; review it first or leave it out.`

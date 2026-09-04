@@ -81,6 +81,39 @@ export function healReviewedSourceId(raw: string, sourceIds: ReadonlySet<string>
   return !ambiguous && bestLength >= REVIEWED_ID_PREFIX_MIN ? best : null;
 }
 
+/** Quantize the planned clips to whole frames, lay them end to end, and absorb the rounding
+ * remainder (a frame here and there on the longest clips) so the last clip ends on the target frame.
+ * Without fps the seconds plan is returned unchanged. */
+export function tileToFrames<T extends { startSec: number; sourceInSec: number; sourceOutSec: number }>(
+  clips: readonly T[],
+  targetDurationSec: number,
+  fps?: number,
+): T[] {
+  if (!fps || !Number.isFinite(fps) || fps <= 0 || !clips.length) return [...clips];
+  const frames = clips.map((clip) => Math.max(1, Math.round((clip.sourceOutSec - clip.sourceInSec) * fps)));
+  const targetFrames = Math.round(targetDurationSec * fps);
+  let total = frames.reduce((sum, value) => sum + value, 0);
+  // Only close a rounding-sized gap (a few frames); a real shortfall stays visible as coverage.
+  const byLength = frames.map((value, index) => index).sort((left, right) => frames[right]! - frames[left]!);
+  let guard = 0;
+  while (total < targetFrames && targetFrames - total <= clips.length && guard < 64) {
+    for (const index of byLength) { if (total >= targetFrames) break; frames[index] += 1; total += 1; }
+    guard += 1;
+  }
+  guard = 0;
+  while (total > targetFrames && total - targetFrames <= clips.length && guard < 64) {
+    for (const index of byLength) { if (total <= targetFrames || frames[index]! <= 1) continue; frames[index] -= 1; total -= 1; }
+    guard += 1;
+  }
+  let cursor = 0;
+  return clips.map((clip, index) => {
+    const durationSec = frames[index]! / fps;
+    const placed = { ...clip, startSec: Math.round((cursor / fps) * 1_000) / 1_000, sourceOutSec: Math.round((clip.sourceInSec + durationSec) * 1_000) / 1_000 };
+    cursor += frames[index]!;
+    return placed;
+  });
+}
+
 const accepted = (candidates: readonly EditorialCandidateReview[]) => candidates
   .filter((candidate) => candidate.verdict === 'strong' || candidate.verdict === 'usable');
 
@@ -108,6 +141,9 @@ export function buildAssemblyFromReview(params: {
   opening: readonly ReviewedOpeningContender[];
   rows: readonly AssemblyRow[];
   targetDurationSec: number;
+  /** Timeline fps: when given, clips are tiled in whole frames so the picture ends exactly on the
+   * target frame (independent second→frame rounding per clip left 1–3 frame gaps). */
+  fps?: number;
 }): AssemblyBuild | AssemblyBuildError {
   const { sources, opening } = params;
   const targetDurationSec = Number(params.targetDurationSec);
@@ -133,7 +169,8 @@ export function buildAssemblyFromReview(params: {
     return { assetId: row.assetId, startSec, sourceInSec: Number(row.sourceInSec), sourceOutSec: Number(row.sourceOutSec) };
   });
   const plan = planEditorialAssembly({ targetDurationSec, sources, opening, clips: ordered });
-  const clips = plan.clips.map((planned) => ({
+  const tiled = tileToFrames(plan.clips, targetDurationSec, params.fps);
+  const clips = tiled.map((planned) => ({
     role: 'primary',
     assetId: planned.assetId,
     startSec: planned.startSec,

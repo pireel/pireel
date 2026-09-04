@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { EditorialCandidateReview } from '@pireel/studio-engine/editorial-candidates';
-import { buildAssemblyFromReview, healReviewedSourceId, reviewedPlacementIssue } from './editorial-assembly-tool';
+import { buildAssemblyFromReview, healReviewedSourceId, reviewedPlacementIssue, tileToFrames } from './editorial-assembly-tool';
 
 const candidate = (overrides: Partial<EditorialCandidateReview>): EditorialCandidateReview => ({
   candidateId: 'candidate-1', verdict: 'strong', startSec: 0.3, endSec: 2.1,
@@ -75,5 +75,26 @@ describe('buildAssemblyFromReview', () => {
     if ('error' in built) return;
     expect(built.coverage.covered).toBe(false);
     expect(built.coverage.shortfallSec).toBeGreaterThan(20);
+  });
+});
+
+describe('tileToFrames', () => {
+  it('lays clips end to end in whole frames and closes a rounding-sized gap on the target frame', () => {
+    const clips = [
+      { assetId: 'a', startSec: 0, sourceInSec: 1, sourceOutSec: 2.9 },     // 57 frames
+      { assetId: 'b', startSec: 1.9, sourceInSec: 5, sourceOutSec: 5.88 },  // 26.4 → 26 frames
+      { assetId: 'c', startSec: 2.78, sourceInSec: 9, sourceOutSec: 9.95 }, // 28.5 → 29 frames (rounded)
+    ];
+    const tiled = tileToFrames(clips, 3.8, 30); // target 114 frames; raw sum 112
+    const frames = tiled.map((clip) => Math.round((clip.sourceOutSec - clip.sourceInSec) * 30));
+    expect(frames.reduce((sum, value) => sum + value, 0)).toBe(114);
+    expect(tiled.map((clip) => Math.round(clip.startSec * 30))).toEqual([0, frames[0], frames[0]! + frames[1]!]);
+    // The extra frames went to the longest clips first.
+    expect(frames[0]).toBe(58);
+    // A real shortfall is not papered over.
+    const short = tileToFrames(clips, 30, 30);
+    expect(short.reduce((sum, clip) => sum + Math.round((clip.sourceOutSec - clip.sourceInSec) * 30), 0)).toBeLessThan(200);
+    // Without fps the plan is untouched.
+    expect(tileToFrames(clips, 3.8)).toEqual(clips);
   });
 });

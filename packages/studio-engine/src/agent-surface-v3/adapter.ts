@@ -337,6 +337,9 @@ function translateSetClipProperties(input: Input, ctx: V3AdapterContext): V3Tran
       if (fadeOut !== undefined) typed.audioFadeOutSec = fadeOut;
     }
     if (isFiniteNumber(row.opacity)) typed.opacity = row.opacity;
+    if (kind !== 'graphic' && row.durationFrames !== undefined && row.source === undefined) {
+      return { status: 'error', error: 'invalid_value', path: `items[${index}].durationFrames`, value: row.durationFrames, fix: 'A media clip\'s length follows its source span: pass source [inSec, outSec] (natural speed) instead of durationFrames. durationFrames alone applies to graphic and text clips.' };
+    }
     if (kind === 'graphic' && Number.isInteger(row.durationFrames)) {
       calls.push({ tool: 'resize_block', input: { blockId: row.clipId, durationSec: framesToSec(row.durationFrames as number, ctx.fps) } });
     }

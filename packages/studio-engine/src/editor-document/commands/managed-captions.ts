@@ -489,7 +489,14 @@ export function relayManagedCaptionTrack(
     const derivedStartFrame = secondsToTimelineFrames(block.startSec, document.canvas.fps);
     const derivedEndFrame = derivedStartFrame + positiveDurationFrames(block.durationSec, document.canvas.fps);
     const startFrame = Math.max(0, derivedStartFrame + (timingOverride?.startOffsetFrames ?? 0));
-    const endFrame = Math.max(startFrame + 1, derivedEndFrame + (timingOverride?.endOffsetFrames ?? 0));
+    // ASR word timings can run past the end of the audio they describe; a cue that outlives the
+    // picture and narration would extend the output by a few silent frames (observed: 1588 → 1597)
+    // and send the agent chasing a phantom tail. Cues end where the material ends.
+    const materialEndFrame = document.timeline.tracks
+      .filter((candidate) => candidate.type !== 'caption')
+      .reduce((end, candidate) => candidate.clips.reduce((inner, clip) => Math.max(inner, clip.startFrame + clip.durationFrames), end), 0);
+    const unboundedEndFrame = Math.max(startFrame + 1, derivedEndFrame + (timingOverride?.endOffsetFrames ?? 0));
+    const endFrame = materialEndFrame > startFrame ? Math.min(unboundedEndFrame, materialEndFrame) : unboundedEndFrame;
     return {
       id,
       kind: 'caption',
