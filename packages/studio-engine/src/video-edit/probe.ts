@@ -1,3 +1,4 @@
+import './mediabunny-warnings';
 import { ALL_FORMATS, BlobSource, Input } from 'mediabunny';
 import type { ClipMeta } from './types';
 

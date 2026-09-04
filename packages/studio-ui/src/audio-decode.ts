@@ -1,3 +1,4 @@
+import '@pireel/studio-engine/video-edit/mediabunny-warnings';
 /**
  * Audio decoding for local analysis (waveforms, loudness, denoise) — as opposed to extract-audio.ts,
  * which re-encodes to AAC because its job is to UPLOAD a small file for ASR.
