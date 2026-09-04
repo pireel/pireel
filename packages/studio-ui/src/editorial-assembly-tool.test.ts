@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { EditorialCandidateReview } from '@pireel/studio-engine/editorial-candidates';
-import { buildAssemblyFromReview, healReviewedSourceId, reviewedPlacementIssue, tileToFrames } from './editorial-assembly-tool';
+import { buildAssemblyFromReview, healReviewedSourceId, tileToFrames } from './editorial-assembly-tool';
 
 const candidate = (overrides: Partial<EditorialCandidateReview>): EditorialCandidateReview => ({
   candidateId: 'candidate-1', verdict: 'strong', startSec: 0.3, endSec: 2.1,
@@ -22,17 +22,6 @@ const street = {
   assetId: 'local_0123456789ab-street',
   candidates: [candidate({ candidateId: 'street-1', startSec: 1, endSec: 4, score: 70 })],
 };
-
-describe('reviewedPlacementIssue', () => {
-  it('accepts an interval inside an accepted candidate and refuses everything else for a reviewed source', () => {
-    expect(reviewedPlacementIssue([beach], [{ assetId: 'asset-beach', sourceInSec: 0.4, sourceOutSec: 2 }])).toBeNull();
-    expect(reviewedPlacementIssue([beach], [{ assetId: 'asset-beach' }])).toMatchObject({ reason: 'range-required' });
-    expect(reviewedPlacementIssue([beach], [{ assetId: 'asset-beach', sourceInSec: 4, sourceOutSec: 6 }])).toMatchObject({ reason: 'outside-accepted-range' });
-    expect(reviewedPlacementIssue([{ assetId: 'x', candidates: [candidate({ verdict: 'reject' })] }], [{ assetId: 'x', sourceInSec: 0, sourceOutSec: 1 }])).toMatchObject({ reason: 'review-rejected' });
-    // Unreviewed sources are not the guard's business.
-    expect(reviewedPlacementIssue([beach], [{ assetId: 'other' }])).toBeNull();
-  });
-});
 
 describe('buildAssemblyFromReview', () => {
   it('places the authored picks in order, fills from the pool, and reports coverage', () => {

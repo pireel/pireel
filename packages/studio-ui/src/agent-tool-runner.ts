@@ -145,7 +145,7 @@ import {
   askEditorialQuestion,
 } from './editorial-review';
 import { openingContendersFor, recordOpeningComparison, recordReviewedSource, reviewedSourcesFor } from './editorial-review-store';
-import { buildAssemblyFromReview, describeReviewedPlacementIssue, reviewedPlacementIssue } from './editorial-assembly-tool';
+import { buildAssemblyFromReview } from './editorial-assembly-tool';
 import { type ExportRenderOpts, captureCompositionFrame } from './client-export';
 import { compositionRenderView } from './composition-render-view';
 import { groupSimilarReviewFrames } from './review-similarity';
@@ -611,21 +611,6 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
         }
       }
       if (toolId === 'add_clips' || toolId === 'insert_clips') {
-        // A reviewed source is placed inside its accepted ranges or not at all: the persisted verdict
-        // outranks a later step's memory of it. The assembler's own rows are planner-legal.
-        if (input.__replacePrimaryTrack !== true) {
-          // A speaker's own footage is timed by what is said: its picture review guides openings
-          // and B-roll picks, never which spoken sentences may be kept (a real run gated a closing
-          // call-to-action out because the review only listed the three best-looking windows).
-          const speechBearing = new Set(Object.keys(documentRef.current.semantics.transcripts));
-          for (const key of localTranscriptCacheRef.current.keys()) speechBearing.add(key);
-          const reviewedNonSpeech = reviewedSourcesFor(projectId).filter((source) => {
-            const asset = documentRef.current.assets[source.assetId];
-            return !speechBearing.has(source.assetId) && !(asset?.locator.localSig && speechBearing.has(asset.locator.localSig));
-          });
-          const issue = reviewedPlacementIssue(reviewedNonSpeech, Array.isArray(input.clips) ? input.clips : []);
-          if (issue) return { ok: false, error: describeReviewedPlacementIssue(issue), data: { reason: issue.reason, assetId: issue.assetId } };
-        }
         const referencedAssetIds = [
           ...new Set(
             (Array.isArray(input.clips) ? input.clips : [])
