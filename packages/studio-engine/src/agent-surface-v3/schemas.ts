@@ -139,7 +139,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   manage_project: {
     description:
-      'Choose what you are editing. scope=project: list, switch, create or rename cloud projects (the newest-touched project is active). scope=output (default): list, create an empty deliverable, duplicate one as a variant, switch, rename or delete inside the active project. Switching returns the new get_state; clip and track ids are output-local, so never carry ids across a switch. Works without an open Studio tab.',
+      'Choose what you are editing. scope=project: list, switch, create or rename cloud projects (the newest-touched project is active). scope=output (default): list, create an empty deliverable, duplicate one (the versioning primitive: copy, then edit the copy), switch, rename or delete inside the active project. Switching returns the new get_state; clip and track ids are output-local, so never carry ids across a switch. Works without an open Studio tab.',
     inputSchema: obj({
       scope: enumOf(['project', 'output']),
       action: enumOf(['list', 'create', 'duplicate', 'switch', 'rename', 'delete']),
