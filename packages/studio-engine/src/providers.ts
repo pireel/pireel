@@ -48,10 +48,19 @@ export interface Transcriber {
   transcribe(file: File, opts?: { projectId?: string }): Promise<AsrSegment[]>;
 }
 
-/** Source-video byte vault (content-addressed by signature). Null results = degrade to local-only. */
+/** Cloud byte rendezvous (content-addressed by signature): video, image and audio alike. Null results
+ * = degrade to device-local. backup progress is reported in [0,1]; fetch prefers an explicit cloud
+ * key when the caller has one (a key survives signature-format changes). */
 export interface MediaVault {
-  backup(file: File, sig: string): Promise<{ key: string } | null>;
-  fetch(sig: string): Promise<File | null>;
+  backup(file: File, sig: string, options?: { onProgress?: (fraction: number) => void; signal?: AbortSignal }): Promise<{ key: string } | null>;
+  fetch(sig: string, options?: { cloudKey?: string; label?: string }): Promise<File | null>;
+}
+
+/** A host that can read media bytes from the device itself (a desktop shell serving the user's
+ * disk). Consulted by the byte-resolution chain after the OPFS cache and before the cloud. Return
+ * a File, or a URL the media runtimes can stream directly; null = not on this device. */
+export interface LocalByteProvider {
+  resolve(contentSig: string): Promise<File | { url: string } | null>;
 }
 
 /** Project persistence beyond the current device. */
@@ -113,6 +122,12 @@ export interface StudioProviders {
   composer: BlockComposer;
   transcriber: Transcriber;
   vault: MediaVault;
+  /** Device-native byte source (desktop shells). Absent in the browser: OPFS cache + cloud only. */
+  localBytes?: LocalByteProvider;
+  /** 'always' (default): every import uploads to the rendezvous in the background. 'lazy': a host
+   * whose bytes are durably local (desktop) may defer uploads until another device or an agent
+   * needs them. */
+  uploadPolicy?: 'always' | 'lazy';
   projects: ProjectStore;
   /** Built-in chat persistence, independent from project document/version sync. */
   chats?: ChatThreadStore;

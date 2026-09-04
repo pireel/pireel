@@ -211,11 +211,11 @@ import {
 } from "./media";
 import {
   alignFileToSig,
-  loadLocalAssetFile,
-  loadLocalFolderFile,
   loadLocalVideo,
+  resolveAssetBytes,
   saveLocalVideo,
 } from "./local-media";
+import { assetUploadQueue } from "./asset-upload-queue";
 import { materializeRemoteMedia } from "./remote-media";
 import {
   shouldReconnectNarrativeSource,
@@ -1575,8 +1575,8 @@ export function HyperframesWorkbench({
     [setLocalAssetIndex],
   );
 
-  /** Resolve a persisted device-local image identity without ever minting a cloud URL. Folder
-   * handles are pinned into OPFS after the first explicit access so later capture/export is stable. */
+  /** Resolve a persisted image identity: device cache first, then the cloud rendezvous (written
+   * back into the cache so later capture/export is stable). Never mints a cloud URL. */
   const resolveLocalImageFile = useCallback(
     async (sig: string): Promise<File | null> => {
       const direct = await loadLocalVideo(sig);
@@ -1584,17 +1584,9 @@ export function HyperframesWorkbench({
       const entry = localAssetIndexRef.current.find(
         (item) => item.contentSig === sig && item.kind === "image",
       );
-      if (!entry?.folder) return null;
-      const folder = await loadLocalFolderFile(
-        entry.folder.id,
-        entry.folder.path,
-        sig,
-      );
-      if (!folder?.file) return null;
-      await saveLocalVideo(folder.file, sig, undefined, { pinned: true });
-      return folder.file;
+      return entry ? resolveAssetBytes(entry, { projectId }) : null;
     },
-    [],
+    [projectId],
   );
   const localRuntimePreparingRef = useRef<Map<string, Promise<
     | { ok: true; prepared: boolean; file?: File }
@@ -1641,9 +1633,9 @@ export function HyperframesWorkbench({
           : sameContent.length === 1
             ? sameContent[0]
             : undefined;
-        const local = entry ? await loadLocalAssetFile(projectId, entry) : await loadLocalVideo(sig);
+        const local = entry ? await resolveAssetBytes(entry, { projectId }) : await loadLocalVideo(sig);
         const cloud = !local && asset.locator.cloudKey
-          ? await studioProviders().vault.fetch(sig)
+          ? await studioProviders().vault.fetch(sig, { cloudKey: asset.locator.cloudKey, label: asset.label })
           : null;
         const file = local ?? cloud ?? null;
         if (generation !== localRuntimeGenerationRef.current) {
@@ -1660,15 +1652,11 @@ export function HyperframesWorkbench({
             error: `local ${asset.kind} access is unavailable — restore access to “${asset.label || sig}”, then retry`,
           };
         }
-        // OPFS pinning improves refresh recovery, but a full local cache must not prevent the
-        // currently authorized File/folder handle from being used in this session.
+        // Device caching improves refresh recovery; a full cache must not block this session.
         try {
-          await saveLocalVideo(file, sig, undefined, {
-            pinned: asset.kind === "image" || asset.kind === "audio",
-            ...(entry ? { binding: { projectId, assetId: entry.assetId } } : {}),
-          });
+          await saveLocalVideo(file, sig);
         } catch {
-          // The authorized File remains usable for this session even when the local cache is full.
+          // The File remains usable for this session even when the local cache is full.
         }
         // The Materials panel may have already rendered a restore card before this tool-driven
         // recovery completed. Publish a new registry identity so its byte-resolution effect retries
@@ -1754,29 +1742,32 @@ export function HyperframesWorkbench({
     videoSig: videoSigRef.current,
     videoDurationSec: firstNarrativeDurationSec(editorDocumentRef.current),
   };
-  /** Silently back up a source video to R2 (content-addressed, dup = instant); on success record the index and trigger a cloud sync. */
+  /** Back up media to the cloud rendezvous through the tab-wide queue (content-addressed, dup =
+   * instant, retried in the background). The queue's onUploaded handler below records the key. */
   const backupMediaToCloud = (
     file: File,
     sig: string,
-    kind: "video" | "clip",
+    _kind: "video" | "clip",
   ) => {
-    void studioProviders()
-      .vault.backup(file, sig)
-      .then((r) => {
-        if (!r) return; // silent degrade: local works as usual, retry on next open (idempotent)
-        if (kind === "video")
-          cloudMediaRef.current = {
-            ...cloudMediaRef.current,
-            video: { sig, key: r.key },
-          };
-        else
-          cloudMediaRef.current = {
-            ...cloudMediaRef.current,
-            clips: { ...cloudMediaRef.current.clips, [sig]: { key: r.key } },
-          };
-        setCloudMediaRev((v) => v + 1);
-      });
+    assetUploadQueue().enqueue({ sig, file });
   };
+  // The ONE place an upload result becomes project state: the transient cloud index (folded into
+  // V2 locators + the project asset index at persistence) and the in-memory index the panel reads.
+  useEffect(
+    () =>
+      assetUploadQueue().onUploaded(({ sig, key }) => {
+        cloudMediaRef.current = videoSigRef.current === sig
+          ? { ...cloudMediaRef.current, video: { sig, key } }
+          : { ...cloudMediaRef.current, clips: { ...cloudMediaRef.current.clips, [sig]: { key } } };
+        setCloudMediaRev((v) => v + 1);
+        if (localAssetIndexRef.current.some((entry) => entry.contentSig === sig && entry.cloudKey !== key)) {
+          changeLocalAssetIndex(
+            localAssetIndexRef.current.map((entry) => (entry.contentSig === sig ? { ...entry, cloudKey: key } : entry)),
+          );
+        }
+      }),
+    [changeLocalAssetIndex],
+  );
   /** Export-time audio/denoise payload getters; filled by useBgm/useDenoise below (hook order: they need consts defined later). */
   const audioExportRef = useRef<
     (() => Promise<{ clip: AudioClip; file: File }[] | null>) | null
@@ -2121,7 +2112,7 @@ export function HyperframesWorkbench({
       if (asset.kind !== "image") return;
       // Heal legacy handle-only imports when their bytes become readable again. New image imports
       // are already pinned in local-import-session; this repeat is idempotent by sig and size.
-      void saveLocalVideo(asset.file, asset.sig, undefined, { pinned: true });
+      void saveLocalVideo(asset.file, asset.sig);
       if (!localImagePreviewUrlsRef.current.has(asset.sig)) {
         localImagePreviewUrlsRef.current.set(
           asset.sig,
@@ -4135,10 +4126,10 @@ export function HyperframesWorkbench({
 
       void saveLocalVideo(file, sig).then((stored) => {
         if (!stored) toast.info(t("workbench.localPersistenceUnavailable"));
-      }); // OPFS local library: draft restore auto-reconnects after refresh, no re-pick needed
-      // Main video stays LOCAL (no auto R2 backup) — kept off deliberately; cross-device video
-      // persistence is reserved for a future paid feature. Same-device reconnect uses OPFS above.
-      // Inserted clips still back up (insert_clip fetches them from the cloud in another session).
+      }); // device cache: draft restore reopens instantly on this device
+      // Cloud rendezvous: the queue uploads in the background (content-addressed, duplicate = instant)
+      // so the project reopens on any device and offline agents can reach the bytes.
+      assetUploadQueue().enqueue({ sig, file, label: file.name });
 
       const dur = p.durationSec || 30;
       const pr = pendingRestoreRef.current;
@@ -4261,14 +4252,12 @@ export function HyperframesWorkbench({
         const entry = localAssetIndexRef.current.find(
           (item) => item.contentSig === asset.locator.localSig,
         );
-        if (entry?.folder) {
-          const folder = await loadLocalFolderFile(
-            entry.folder.id,
-            entry.folder.path,
-            asset.locator.localSig,
-          );
-          if (folder?.file) return folder.file;
-        }
+        const resolved = entry
+          ? await resolveAssetBytes(entry, { projectId })
+          : asset.locator.cloudKey
+            ? await studioProviders().vault.fetch(asset.locator.localSig, { cloudKey: asset.locator.cloudKey, label: asset.label })
+            : null;
+        if (resolved) return resolved;
       }
       const source = resolveAssetUrl(asset);
       if (!source) return null;
@@ -4905,9 +4894,10 @@ export function HyperframesWorkbench({
       i.click();
     });
   /** Keep a user-picked image on this device and persist only its stable identity in the project.
-   * This is the browser-picker counterpart of the agent helper's register-local-assets path. */
+   * This is the browser-picker counterpart of the agent helper's register-asset path. */
   const preparePickedLocalImage = async (file: File): Promise<string> => {
-    const asset = await importLocalSource({ type: "browser", file }, projectId);
+    const asset = await importLocalSource({ type: "browser", file });
+    assetUploadQueue().enqueue({ sig: asset.contentSig, file: asset.file, label: asset.label });
     if (asset.kind !== "image")
       throw new Error("selected file is not an image");
     let dims: { width?: number; height?: number } = {};
@@ -6070,7 +6060,10 @@ export function HyperframesWorkbench({
     const indexedKind = sig
       ? localAssetIndexRef.current.find((entry) => entry.contentSig === sig)?.kind
       : undefined;
-    let f = sig ? await loadLocalVideo(sig) : null;
+    const indexed = sig
+      ? localAssetIndexRef.current.find((entry) => entry.contentSig === sig)
+      : undefined;
+    let f = sig ? (indexed ? await resolveAssetBytes(indexed, { projectId }) : await loadLocalVideo(sig)) : null;
     if (!f && sig) {
       const vaulted =
         src == null
@@ -6078,7 +6071,7 @@ export function HyperframesWorkbench({
           : !!cloudMediaRef.current.clips?.[sig];
       if (vaulted) {
         const cf = await studioProviders().vault.fetch(sig);
-        if (cf) f = alignFileToSig(cf, sig); // vault files carry their own name/mtime — realign or the identity drifts
+        if (cf) f = alignFileToSig(cf, sig, indexed?.label); // vault files carry their own name/mtime — realign or the identity drifts
       }
     }
     if (!f) {
@@ -7893,9 +7886,10 @@ export function HyperframesWorkbench({
           }
           if (f) return;
           // Not in OPFS (device switch / cleared cache) → fetch from the cloud byte rendezvous; only a miss falls back to manual re-pick
-          if (cloudMediaRef.current.video?.sig === mainSig) {
+          const primaryCloudKey = primaryId ? restoredDocument.assets[primaryId]?.locator.cloudKey : undefined;
+          if (cloudMediaRef.current.video?.sig === mainSig || primaryCloudKey) {
             toast.info(t("workbench.retrievingVideoFromCloud"));
-            const cf = await studioProviders().vault.fetch(mainSig);
+            const cf = await studioProviders().vault.fetch(mainSig, primaryCloudKey ? { cloudKey: primaryCloudKey } : undefined);
             if (cf && pendingRestoreRef.current === d) {
               void pickVideoFile(cf, { asSig: mainSig, reconnect: true });
               return;
@@ -7918,6 +7912,24 @@ export function HyperframesWorkbench({
   // the cloud request itself to settle or a slow response can resurrect cross-browser deletions.
   const [localAssetIndexSyncReady, setLocalAssetIndexSyncReady] =
     useState(false);
+  // Cloud self-heal: assets imported before cloud-by-default (or whose upload never finished) are
+  // uploaded as soon as this device can read their bytes. Device-only lanes: no prompts, no network.
+  useEffect(() => {
+    if (!localAssetIndexSyncReady) return;
+    let cancelled = false;
+    void (async () => {
+      for (const entry of localAssetIndexRef.current) {
+        if (cancelled) return;
+        if (entry.cloudKey || assetUploadQueue().state(entry.contentSig)) continue;
+        const file = await resolveAssetBytes(entry, { projectId, deviceOnly: true });
+        if (cancelled) return;
+        if (file) assetUploadQueue().enqueue({ sig: entry.contentSig, file, label: entry.label });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, localAssetIndexSyncReady, localAssetIndexRev]);
   // CAPTIONS ARE DERIVED STATE: transcript × shots × captionStyle.on → display cues, materialized into
   // comp.blocks for every consumer (preview/timeline/selection/agent) but NEVER persisted — autosave
   // strips them; the transcript is the single stored source. This one reactive effect replaces the old

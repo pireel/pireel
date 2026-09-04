@@ -1,27 +1,28 @@
 'use client';
 
 /**
- * My assets — the CURRENT PROJECT's local media (video / image / audio), never uploaded.
+ * My assets — the CURRENT PROJECT's media (video / image / audio). Cloud is the source of truth
+ * for bytes (every import uploads in the background), the device OPFS is a cache.
  *
  * STATE MODEL (two pieces, everything else is derived):
- *  - `reg` — the per-project import registry ({sig, label, dims, createdAt}[]), mirrored to
- *    localStorage through ONE writer (updateReg). It remembers WHICH files, never bytes.
- *  - `links` — sig → live blob URL for registry entries whose bytes are currently reachable
- *    (native handle / OPFS via loadLocalVideo). Rehydrated on mount; a registry entry without
- *    a link renders as a "click to restore" card (the click is the permission re-grant gesture).
+ *  - `reg` — the per-project asset index (LocalAssetIndexEntry[]: identity, cloudKey, display
+ *    facts), mirrored to localStorage through ONE writer (updateReg) and published to the project
+ *    context (cloud sync). It remembers WHICH files, never bytes.
+ *  - `links` — assetId → live blob URL for entries whose bytes are in hand (device cache or cloud
+ *    retrieval). Rehydrated on mount through resolveAssetBytes; an entry that resolves nowhere
+ *    renders as a "re-import" card (legacy assets imported before cloud-by-default).
  *  Track sources are derived from comp every render and never stored. One file = one card, and the
  *  IMPORT card represents the asset (an inserted image stays an image card — its derived 5s still
  *  clip is an implementation detail); track cards only show for sources without a live import twin,
  *  and an on-track import's delete also runs the track surgery (trackSrcBySig).
  *
- * ONE add path (addEntries: native picker handle = zero-copy, <input> fallback = OPFS copy),
- * ONE removal path (evict: handle + OPFS bytes + registry entry + link; doDelete = confirm +
- * track surgery + evict), ONE insert payload (mediaOf: click-insert defaults to the MAIN
- * TRACK via onInsertClip, dragging is what targets the stage/other lanes).
+ * ONE add path (addEntries: classify → device cache → index → upload queue), ONE removal path
+ * (evict: registry entry + link; doDelete = confirm + track surgery + evict), ONE insert payload
+ * (mediaOf: click-insert defaults to the MAIN TRACK via onInsertClip, dragging targets the stage/lanes).
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Clapperboard, FolderOpen, Image as ImageIcon, Loader2, MoreHorizontal, Music, Search, SlidersHorizontal, Trash2, Upload } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { Check, Clapperboard, CloudUpload, FolderOpen, Image as ImageIcon, Loader2, MoreHorizontal, Music, Search, SlidersHorizontal, Upload } from 'lucide-react';
 import { toast } from '@pireel/ui/toast';
 import { confirm } from '@pireel/ui/confirm';
 import {
@@ -58,15 +59,8 @@ import {
   useAudioPreview,
 } from './asset-card';
 import { audioCoverUrl, fileMatchesSig, fileNameFromSig } from './media';
-import {
-  getLocalFolderHandle,
-  deleteLocalAssetBinding,
-  loadLocalAssetFile,
-  loadLocalFolderFile,
-  loadLocalVideo,
-  requestLocalFolderAccess,
-  saveLocalFolderHandle,
-} from './local-media';
+import { resolveAssetBytes } from './local-media';
+import { assetUploadQueue, type AssetUploadState } from './asset-upload-queue';
 import {
   localAssetIndexEntry,
   localAssetKindOf,
@@ -77,13 +71,11 @@ import {
 } from './local-import-session';
 import {
   folderImportTriggerProps,
-  groupFolderRestoreEntries,
   LOCAL_ASSET_LABEL_MAX_LENGTH,
   pendingLocalAssetEntries,
   reconcileLocalAssetRegistry,
   renameLocalAssetEntry,
   triggerFolderInput,
-  type FolderRestoreGroup,
 } from './local-asset-folders';
 import { useLocalVisualModel } from './local-visual-search-model';
 import { t } from './i18n';
@@ -97,26 +89,12 @@ const KIND_FILTERS: { value: KindFilter; label: string }[] = [
 ];
 const LOCAL_FILTER_ITEM_CLASS = 'pl-2 text-[10.5px] data-[state=checked]:bg-panel-2 data-[state=checked]:text-ink [&>span:first-child]:hidden';
 
-/** File System Access picker (Chromium) — typed minimally; absence = fall back to <input type=file>. */
-type ShowOpenFilePicker = (opts?: {
-  multiple?: boolean;
-  types?: { description?: string; accept: Record<string, string[]> }[];
-}) => Promise<FileSystemFileHandle[]>;
-
-const MEDIA_PICKER_TYPES = [
-  { description: 'Media', accept: {
-    'video/*': ['.mp4', '.mov', '.webm', '.m4v', '.mkv'],
-    'image/*': ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif'],
-    'audio/*': ['.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg'],
-  } },
-];
-
 type LocalKind = LocalAssetKind;
 
-/** Recover the display filename from legacy or content-fingerprinted durable locators. */
+/** Display filename for legacy locators; content sigs carry no name (the index label is used). */
 const sigName = (sig: string) => fileNameFromSig(sig);
 
-/** One import-registry entry: WHICH file (identity + display facts), never bytes. */
+/** One index entry: WHICH file (identity + display facts + cloud key), never bytes. */
 type RegEntry = LocalAssetIndexEntry;
 type AddEntry = Omit<BrowserLocalImportSource, 'type'>;
 const newFolderId = () => globalThis.crypto?.randomUUID?.() ?? `folder-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -132,6 +110,12 @@ const readReg = (pid?: string): RegEntry[] => {
     return [];
   }
 };
+
+/** Upload progress per content sig, from the tab-wide queue. */
+function useUploadStates(): ReadonlyMap<string, AssetUploadState> {
+  const queue = assetUploadQueue();
+  return useSyncExternalStore(queue.subscribe, queue.snapshot, queue.snapshot);
+}
 
 /** Ephemeral bottom status: mounting this component starts the fail-soft background download. It
  * disappears as soon as the cache is ready (and stays out of the way when storage/network fails). */
@@ -158,15 +142,16 @@ function LocalVisualSearchLoading() {
   );
 }
 
-/** Missing-source card (per-asset, dashed): click = restore access (permission re-grant / vault / re-pick), hover ✕ = drop. */
-function RestoreTile({ label, kind = 'video', onRestore, onRename, onDelete }: { label: string; kind?: LocalKind; onRestore: () => void; onRename?: () => void; onDelete: () => void }) {
+/** Asset whose bytes are reachable nowhere yet (legacy import that never reached the cloud, or a
+ * cloud retrieval still in flight): click = pick the original file once, after which it uploads. */
+function RestoreTile({ label, kind = 'video', busy, onRestore, onRename, onDelete }: { label: string; kind?: LocalKind; busy?: boolean; onRestore: () => void; onRename?: () => void; onDelete: () => void }) {
   const Icon = kind === 'image' ? ImageIcon : kind === 'audio' ? Music : Clapperboard;
   return (
     <div className="border-line hover:border-accent group relative w-full overflow-hidden rounded-md border border-dashed transition">
-      <button type="button" onClick={onRestore} title={t('panels.localReconnect')} className="block w-full text-left">
+      <button type="button" disabled={busy} onClick={onRestore} title={busy ? undefined : t('panels.localReconnect')} className="block w-full text-left disabled:opacity-70">
         <div className="bg-panel-2 flex aspect-video flex-col items-center justify-center gap-1">
-          <Icon size={16} className="text-ink-4" />
-          <span className="text-ink-4 text-[10px]">{t('panels.localReconnect')}</span>
+          {busy ? <Loader2 size={16} className="text-ink-4 animate-spin" /> : <Icon size={16} className="text-ink-4" />}
+          <span className="text-ink-4 text-[10px]">{busy ? t('common.loading') : t('panels.needsReimport')}</span>
         </div>
         <div className="text-ink-3 h-6 truncate px-1.5 py-1 text-[10px] leading-4">{label}</div>
       </button>
@@ -175,27 +160,32 @@ function RestoreTile({ label, kind = 'video', onRestore, onRename, onDelete }: {
   );
 }
 
-/** One restore affordance per imported folder, regardless of how many indexed files are missing. */
-function FolderRestoreTile({ name, count, busy, onRestore, onDelete }: { name: string; count: number; busy: boolean; onRestore: () => void; onDelete: () => void }) {
-  return (
-    <div className="border-line hover:border-accent group relative w-full overflow-hidden rounded-md border border-dashed transition">
-      <button type="button" disabled={busy} onClick={onRestore} title={t('panels.restoreFolder')} className="block w-full text-left disabled:opacity-60">
-        <div className="bg-panel-2 flex aspect-video flex-col items-center justify-center gap-1">
-          {busy ? <Loader2 size={17} className="text-ink-4 animate-spin" /> : <FolderOpen size={17} className="text-ink-4" />}
-          <span className="text-ink-4 text-[10px]">{t('panels.restoreFolder')}</span>
-          <span className="text-ink-4 text-[9px]">{t('panels.folderAssetCount', { n: count })}</span>
-        </div>
-        <div className="text-ink-3 h-6 truncate px-1.5 py-1 text-[10px] leading-4">{name}</div>
-      </button>
+/** Thin upload status strip over a live card: progress while the bytes travel to the cloud, a retry
+ * affordance when every attempt failed. Silent once done. */
+function UploadBadge({ state, onRetry }: { state: AssetUploadState | undefined; onRetry: () => void }) {
+  if (!state || state.status === 'done') return null;
+  if (state.status === 'failed') {
+    return (
       <button
         type="button"
-        onClick={onDelete}
-        title={t('panels.deleteAsset')}
-        aria-label={t('panels.deleteAsset')}
-        className="absolute left-1 top-1 hidden h-5 w-5 items-center justify-center rounded bg-black/55 text-white hover:bg-red-600 group-hover:inline-flex"
+        onClick={onRetry}
+        title={t('panels.uploadFailed')}
+        className="absolute inset-x-1 bottom-7 z-10 flex h-4 items-center justify-center gap-1 rounded bg-red-600/85 text-[9px] text-white"
       >
-        <Trash2 size={11} />
+        <CloudUpload size={9} /> {t('panels.uploadFailed')}
       </button>
+    );
+  }
+  const pct = Math.round(state.fraction * 100);
+  return (
+    <div className="pointer-events-none absolute inset-x-1 bottom-7 z-10 rounded bg-black/55 px-1 py-0.5 text-[9px] text-white" aria-label={t('panels.uploading', { pct })} role="progressbar" aria-valuenow={pct}>
+      <div className="flex items-center gap-1">
+        <CloudUpload size={9} />
+        <span className="tabular-nums">{t('panels.uploading', { pct })}</span>
+      </div>
+      <div className="mt-0.5 h-0.5 overflow-hidden rounded-full bg-white/25">
+        <div className="bg-accent h-full transition-[width]" style={{ width: `${pct}%` }} />
+      </div>
     </div>
   );
 }
@@ -239,13 +229,13 @@ export function MyAssetsPanel({
 }: {
   /** Lightbox preview needs theme/canvas context. */
   comp: Composition;
-  /** Scopes the import registry (imports persist per project across refreshes). */
+  /** Scopes the asset index (imports persist per project across refreshes). */
   projectId?: string;
-  /** Metadata-only registry hydrated from the project cloud context; bytes never ride this prop. */
+  /** Index hydrated from the project cloud context; bytes never ride this prop. */
   cloudRegistry?: LocalAssetIndexEntry[];
   registrySyncReady?: boolean;
   onRegistryChange?: (entries: LocalAssetIndexEntry[]) => void;
-  /** Reports recovered local bytes to the workbench render runtimes. */
+  /** Reports resolved bytes to the workbench render runtimes. */
   onLocalAssetAvailable?: (asset: { sig: string; kind: LocalKind; file: File }) => void;
   /** First-loaded source's fileSig (workbench-held, not in comp) — labels it by filename + keys its eviction. */
   videoSig?: string | null;
@@ -255,13 +245,13 @@ export function MyAssetsPanel({
   onDeleteAsset?: (src: string | null, sig?: string | null) => boolean | void;
   /** Per-asset liveness of a track source's bytes in this session (workbench-held Files). */
   isSrcLive?: (url: string) => boolean;
-  /** Per-asset reconnect for a track source whose bytes are missing (handle/OPFS/vault → re-pick). null = main. */
+  /** Per-asset reconnect for a track source whose bytes are missing (cache/cloud → re-pick). null = main. */
   onReconnectSource?: (src: string | null, sig?: string | null) => void;
   /** Stage-side insert (media block) — fallback when no onInsertClip is wired. */
   onInsert: (asset: MediaRef, label?: string, dims?: { w: number; h: number }) => void;
   /** Click-insert default: MAIN TRACK at the playhead (drag is what targets the stage/other lanes). */
   onInsertClip?: (asset: PanelMediaAsset) => void;
-  /** Audio asset's primary action: mount on the music lane (workbench → use-bgm). sig = local byte identity. */
+  /** Audio asset's primary action: mount on the music lane (workbench → use-bgm). sig = byte identity. */
   onUseAudio?: (url: string, label?: string, sig?: string | null) => void;
   onDragAsset?: (asset: PanelDragAsset | null) => void;
 }) {
@@ -273,10 +263,11 @@ export function MyAssetsPanel({
   /** assetId → embedded cover art object URL (audio only) — derived whenever the File is in hand. */
   const [covers, setCovers] = useState<ReadonlyMap<string, string>>(new Map());
   const coversRef = useRef<ReadonlyMap<string, string>>(new Map());
+  /** Entries whose bytes are being resolved (cache/cloud) right now: their card shows a spinner, not "re-import". */
+  const [resolving, setResolving] = useState<ReadonlySet<string>>(new Set());
   const objectUrlsAliveRef = useRef(true);
   const coverGenerationRef = useRef(0);
   const [importing, setImporting] = useState(false);
-  const [restoringFolderId, setRestoringFolderId] = useState<string | null>(null);
   const [preview, setPreview] = useState<LibraryItem | null>(null);
   const [renaming, setRenaming] = useState<{ assetId: string; contentSig: string; label: string; kind: LocalKind } | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
@@ -285,12 +276,11 @@ export function MyAssetsPanel({
     return new URLSearchParams(window.location.hash.slice(1)).get('local-import');
   });
   const { playingUrl: audioPlaying, toggle: toggleAudio } = useAudioPreview();
+  const uploadStates = useUploadStates();
   const inputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const restoreInputRef = useRef<HTMLInputElement>(null);
-  const restoreFolderInputRef = useRef<HTMLInputElement>(null);
   const restoreTargetRef = useRef<RegEntry | null>(null);
-  const restoreFolderTargetRef = useRef<FolderRestoreGroup | null>(null);
   const loadedProjectRef = useRef<string | undefined>(undefined);
   const normalizedCloudRegistry = useMemo(() => normalizeReg(cloudRegistry), [cloudRegistry]);
   const cloudRegistryKnown = cloudRegistry !== undefined;
@@ -367,9 +357,15 @@ export function MyAssetsPanel({
     setLinks(next);
   };
 
+  /** Upload (or re-upload) an asset's bytes to the cloud; the workbench folds the key into the index. */
+  const enqueueUpload = (sig: string, file: File, label?: string) => {
+    if (regRef.current.find((entry) => entry.contentSig === sig)?.cloudKey) return;
+    assetUploadQueue().enqueue({ sig, file, label });
+  };
+
   // Refresh/cloud rehydrate: local cache is an offline bootstrap only. Once project hydration has
   // confirmed a cloud index, that exact list wins so cross-browser deletions stay deleted. Then
-  // retry every entry that still lacks a live link; no bytes cross this boundary.
+  // resolve every entry that still lacks a live link: device cache first, then the cloud copy.
   useEffect(() => {
     let dead = false;
     const projectChanged = loadedProjectRef.current !== projectId;
@@ -401,13 +397,21 @@ export function MyAssetsPanel({
       setCovers(coversRef.current);
     }
     void (async () => {
-      for (const e of pendingLocalAssetEntries(entries, new Set(linksRef.current.keys()))) {
-        const f = projectId ? await loadLocalAssetFile(projectId, e) : await loadLocalVideo(e.contentSig);
+      const pending = pendingLocalAssetEntries(entries, new Set(linksRef.current.keys()));
+      if (pending.length) setResolving(new Set(pending.map((e) => e.assetId)));
+      for (const e of pending) {
+        const f = await resolveAssetBytes(e, { projectId });
         if (dead) return;
+        setResolving((current) => {
+          const next = new Set(current);
+          next.delete(e.assetId);
+          return next;
+        });
         if (f) {
           link(e.assetId, URL.createObjectURL(f));
           noteCover(e.assetId, f, e.kind ?? 'video');
           onLocalAssetAvailable?.({ sig: e.contentSig, kind: e.kind ?? 'video', file: f });
+          if (!e.cloudKey) enqueueUpload(e.contentSig, f, e.label);
         }
       }
     })();
@@ -449,7 +453,7 @@ export function MyAssetsPanel({
           origin: 'upload',
           insertUrl: url,
           thumbSrc: null,
-          label: semanticLabel(videoSig, videoSig ? sigName(videoSig) : t('panels.video')),
+          label: semanticLabel(videoSig, (videoSig && sigName(videoSig)) || t('panels.video')),
           createdAt: 0,
           deletable: true,
           sig: videoSig,
@@ -473,7 +477,7 @@ export function MyAssetsPanel({
           origin: 'upload',
           insertUrl: s.src,
           thumbSrc: null,
-          label: semanticLabel(s.srcSig, s.srcSig ? sigName(s.srcSig) : t('panels.video')),
+          label: semanticLabel(s.srcSig, (s.srcSig && sigName(s.srcSig)) || t('panels.video')),
           createdAt: 0,
           deletable: true,
           sig: s.srcSig,
@@ -537,17 +541,12 @@ export function MyAssetsPanel({
   const needle = query.trim().toLocaleLowerCase();
   const matchesQuery = (label: string) => !needle || label.toLocaleLowerCase().includes(needle);
   const registrySigs = useMemo(() => new Set(reg.map((entry) => entry.contentSig)), [reg]);
-  const folderRestoreGroups = useMemo(() => groupFolderRestoreEntries(restoreCards), [restoreCards]);
   const visibleImports = liveImports.filter((it) => kindShows(it.kind as LocalKind) && matchesQuery(it.label));
   const visibleTrackCards = kindShows('video')
     ? trackCards.filter((c) => !(c.it.sig && registrySigs.has(c.it.sig)) && matchesQuery(c.it.label))
     : [];
-  const visibleFolderRestoreGroups = folderRestoreGroups.filter((group) =>
-    group.entries.some((e) => kindShows(e.kind ?? 'video') && matchesQuery(e.label)),
-  );
-  const visibleRestoreCards = restoreCards.filter((e) => !e.folder && kindShows(e.kind ?? 'video') && matchesQuery(e.label));
-  const hasVisible =
-    visibleImports.length > 0 || visibleTrackCards.length > 0 || visibleFolderRestoreGroups.length > 0 || visibleRestoreCards.length > 0;
+  const visibleRestoreCards = restoreCards.filter((e) => kindShows(e.kind ?? 'video') && matchesQuery(e.label));
+  const hasVisible = visibleImports.length > 0 || visibleTrackCards.length > 0 || visibleRestoreCards.length > 0;
 
   // ---- add -------------------------------------------------------------------------------------
 
@@ -562,10 +561,9 @@ export function MyAssetsPanel({
       if (session.rejected.length) toast.error(t('panels.localVideoOnly'));
       let duplicates = 0;
       for (const asset of session.imported) {
-        // Content dedupe (regressed when identity moved from sig to assetId — the id-based
-        // filter never matched a fresh import): re-importing the same bytes must not mint a
-        // second card. The EXISTING entry keeps its assetId (timeline references stay valid);
-        // only its byte liveness is refreshed from the just-picked file.
+        // Content dedupe: re-importing the same bytes must not mint a second card. The EXISTING
+        // entry keeps its assetId (timeline references stay valid); only its byte liveness is
+        // refreshed from the just-picked file — and its upload starts if it never reached the cloud.
         const existing = regRef.current.find(
           (x) => x.contentSig === asset.contentSig,
         );
@@ -575,10 +573,11 @@ export function MyAssetsPanel({
           link(existing.assetId, url);
           noteCover(existing.assetId, asset.file, existing.kind ?? asset.kind);
           onLocalAssetAvailable?.({ sig: asset.contentSig, kind: asset.kind, file: asset.file });
+          enqueueUpload(asset.contentSig, asset.file, existing.label);
           continue;
         }
         const url = URL.createObjectURL(asset.file);
-        const dims = await mediaDims(url, asset.kind);
+        const dims = asset.width && asset.height ? { w: asset.width, h: asset.height } : await mediaDims(url, asset.kind);
         updateReg((r) => [
           localAssetIndexEntry(asset, { width: dims?.w, height: dims?.h }),
           ...r.filter((x) => x.assetId !== asset.assetId),
@@ -586,6 +585,7 @@ export function MyAssetsPanel({
         link(asset.assetId, url);
         noteCover(asset.assetId, asset.file, asset.kind);
         onLocalAssetAvailable?.({ sig: asset.contentSig, kind: asset.kind, file: asset.file });
+        enqueueUpload(asset.contentSig, asset.file, asset.label);
       }
       if (duplicates) toast.info(t('panels.duplicateImportsSkipped', { n: duplicates }));
     } finally {
@@ -594,36 +594,19 @@ export function MyAssetsPanel({
     }
   };
 
-  /** Import: native picker first (handle + bounded OPFS fallback); <input> fallback elsewhere. */
-  const pickImport = async () => {
-    const picker = (window as { showOpenFilePicker?: ShowOpenFilePicker }).showOpenFilePicker;
-    if (!picker) {
-      inputRef.current?.click();
-      return;
-    }
-    let handles: FileSystemFileHandle[];
-    try {
-      handles = await picker({
-        multiple: true,
-        types: MEDIA_PICKER_TYPES,
-      });
-    } catch {
-      return; // cancelled (or picker unavailable in this context)
-    }
-    await addEntries(await Promise.all(handles.map(async (h) => ({ file: await h.getFile(), handle: h }))));
-  };
+  /** Import: the ordinary file chooser (no persisted handles — bytes go to the device cache + cloud). */
+  const pickImport = () => inputRef.current?.click();
 
   /** Folder import goes through webkitdirectory on every browser. Some embedded Chromium shells
    *  expose showDirectoryPicker but never complete its native dialog, while their ordinary file-
-   *  chooser bridge works. The cloud index still records one logical folder plus relative paths.
+   *  chooser bridge works. The index records one logical folder plus relative paths as grouping.
    *  The cap is a runaway-folder backstop, NOT a product limit — customers cut from 100+ clips
    *  (a 50 cap forced them into multiple passes, reported 2026-09-01). */
   const FOLDER_CAP = 500;
   const pickFolder = () => triggerFolderInput(folderInputRef.current);
 
-  /** Skill/service handoff entry point. The manifest capability rides in the URL fragment (never
-   * sent as a referrer); the signed-in page submits it through the same API → bridge path as the
-   * headless helper, so this is also a real end-to-end diagnostic surface. */
+  /** Legacy helper handoff (pre-cloud plugins): the manifest capability rides in the URL fragment
+   * (never sent as a referrer); the signed-in page submits it through the same API → bridge path. */
   const importFromLocalService = async () => {
     const manifestUrl = serviceManifestUrl ? loopbackImportUrl(serviceManifestUrl) : null;
     if (!manifestUrl || importing) {
@@ -654,7 +637,7 @@ export function MyAssetsPanel({
     }
   };
 
-  const finishReconnect = async (e: RegEntry, f: File, handle?: FileSystemFileHandle) => {
+  const finishReconnect = async (e: RegEntry, f: File) => {
     if (!(await fileMatchesSig(f, e.contentSig))) {
       toast.error(t('workbench.checksumMismatch'));
       return false;
@@ -662,7 +645,6 @@ export function MyAssetsPanel({
     const session = await runLocalImportSession([{
       type: 'browser',
       file: f,
-      handle,
       folder: e.folder,
       assetId: e.assetId,
     }], projectId);
@@ -671,75 +653,12 @@ export function MyAssetsPanel({
     link(e.assetId, URL.createObjectURL(asset.file));
     noteCover(e.assetId, asset.file, asset.kind);
     onLocalAssetAvailable?.({ sig: e.contentSig, kind: asset.kind, file: asset.file });
+    enqueueUpload(e.contentSig, asset.file, e.label);
     const sameContentCount = regRef.current.filter((entry) => entry.contentSig === e.contentSig).length;
     if (sameContentCount === 1 && trackSrcBySig.has(e.contentSig)) {
       onReconnectSource?.(trackSrcBySig.get(e.contentSig) ?? null, e.contentSig);
     }
     return true;
-  };
-
-  const reportFolderRestore = (restored: number, total: number) => {
-    if (restored === total) toast.success(t('panels.folderRestoreDone', { n: restored }));
-    else if (restored > 0) toast.info(t('panels.folderRestorePartial', { restored, total }));
-    else toast.error(t('panels.folderRestoreNone'));
-  };
-
-  const restoreFolderFromFiles = async (group: FolderRestoreGroup, files: File[]) => {
-    setRestoringFolderId(group.folder.id);
-    try {
-      const byPath = new Map<string, File>();
-      for (const file of files) {
-        const parts = file.webkitRelativePath.split('/').filter(Boolean);
-        byPath.set(parts.length > 1 ? parts.slice(1).join('/') : file.name, file);
-      }
-      let restored = 0;
-      for (const e of group.entries) {
-        const file = e.folder ? byPath.get(e.folder.path) : undefined;
-        if (file && (await fileMatchesSig(file, e.contentSig)) && (await finishReconnect(e, file))) restored += 1;
-      }
-      reportFolderRestore(restored, group.entries.length);
-    } finally {
-      setRestoringFolderId(null);
-    }
-  };
-
-  const restoreFolderFromHandle = async (group: FolderRestoreGroup, dir: FileSystemDirectoryHandle): Promise<number> => {
-    await saveLocalFolderHandle(group.folder.id, dir).catch(() => {});
-    let restored = 0;
-    for (const entry of group.entries) {
-      if (!entry.folder) continue;
-      const found = await loadLocalFolderFile(
-        entry.folder.id,
-        entry.folder.path,
-        entry.contentSig,
-        dir,
-        projectId ? { projectId, assetId: entry.assetId } : undefined,
-      );
-      if (found && (await finishReconnect(entry, found.file, found.handle))) restored += 1;
-    }
-    return restored;
-  };
-
-  /** Restore an existing saved root handle first. If it is absent/denied/stale, reselect the folder
-   *  once through the portable directory input and reconnect every indexed child as one group. */
-  const reconnectFolder = async (group: FolderRestoreGroup) => {
-    const previous = await getLocalFolderHandle(group.folder.id);
-    if (previous) {
-      setRestoringFolderId(group.folder.id);
-      try {
-        if (await requestLocalFolderAccess(previous)) {
-          const restored = await restoreFolderFromHandle(group, previous);
-          if (restored > 0) {
-            reportFolderRestore(restored, group.entries.length);
-            return;
-          }
-        }
-      } finally {
-        setRestoringFolderId(null);
-      }
-    }
-    restoreFolderTargetRef.current = group;
-    triggerFolderInput(restoreFolderInputRef.current);
   };
 
   const importFolderInputFiles = async (files: File[]) => {
@@ -767,40 +686,27 @@ export function MyAssetsPanel({
     );
   };
 
-  /** Click-to-restore (user gesture): existing handle/OPFS first; on a new browser, open a real file
-   *  picker and verify the selected file against the cloud-synced sig before reconnecting it. */
+  /** Re-import (user gesture): one last resolve attempt (cache/cloud), then a real file picker whose
+   *  selection is verified against the synced sig before it is cached and uploaded. */
   const reconnect = async (e: RegEntry) => {
-    const cached = projectId ? await loadLocalAssetFile(projectId, e) : await loadLocalVideo(e.contentSig);
+    const cached = await resolveAssetBytes(e, { projectId });
     if (cached) {
       await finishReconnect(e, cached);
       return;
     }
-    const picker = (window as { showOpenFilePicker?: ShowOpenFilePicker }).showOpenFilePicker;
-    if (!picker) {
-      restoreTargetRef.current = e;
-      restoreInputRef.current?.click();
-      return;
-    }
-    let handles: FileSystemFileHandle[];
-    try {
-      handles = await picker({ multiple: false, types: MEDIA_PICKER_TYPES });
-    } catch {
-      return;
-    }
-    const handle = handles[0];
-    if (!handle) return;
-    await finishReconnect(e, await handle.getFile(), handle);
+    restoreTargetRef.current = e;
+    restoreInputRef.current?.click();
   };
 
   // ---- remove ----------------------------------------------------------------------------------
 
-  /** Remove this project's registry/link. OPFS and native-handle entries are shared recovery caches:
-   * deleting them here can break another project that references the same local file, so lifecycle
-   * pruning owns physical eviction instead. The original device file is never touched. */
+  /** Remove this project's index entry/link. OPFS and cloud objects are shared content-addressed
+   * caches: deleting them here could break another project that references the same bytes, so
+   * lifecycle pruning owns physical eviction. The original device file is never touched. */
   const evict = (entry: RegEntry) => {
     updateReg((r) => r.filter((x) => x.assetId !== entry.assetId));
     unlink(entry.assetId);
-    if (projectId) void deleteLocalAssetBinding({ projectId, assetId: entry.assetId });
+    if (!regRef.current.some((x) => x.contentSig === entry.contentSig)) assetUploadQueue().cancel(entry.contentSig);
     const u = coversRef.current.get(entry.assetId);
     if (u) {
       URL.revokeObjectURL(u);
@@ -893,6 +799,13 @@ export function MyAssetsPanel({
       if (it.insertUrl) toggleAudio(it.insertUrl);
     } else setPreview(it);
   };
+  const retryUpload = (it: LibraryItem) => {
+    if (!it.sig || !it.insertUrl) return;
+    void fetch(it.insertUrl)
+      .then((r) => r.blob())
+      .then((blob) => assetUploadQueue().enqueue({ sig: it.sig!, file: new File([blob], it.label, { type: blob.type }), label: it.label }))
+      .catch(() => {});
+  };
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
@@ -938,7 +851,7 @@ export function MyAssetsPanel({
           <div className="flex shrink-0 items-center">
             <button
               type="button"
-              onClick={() => void pickImport()}
+              onClick={pickImport}
               disabled={importing}
               className="border-line text-ink-2 hover:text-ink inline-flex h-[24px] shrink-0 items-center gap-1 whitespace-nowrap rounded-l-md border px-2 text-[11px] disabled:opacity-40"
             >
@@ -988,7 +901,7 @@ export function MyAssetsPanel({
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => void pickImport()}
+                onClick={pickImport}
                 disabled={importing}
                 className="bg-accent text-accent-foreground inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-medium transition-opacity hover:opacity-90 disabled:cursor-wait disabled:opacity-50"
               >
@@ -1011,24 +924,26 @@ export function MyAssetsPanel({
         ) : (
           <div className={RESPONSIVE_ASSET_CARD_GRID}>
             {visibleImports.map((it) => (
-                <AssetCard
-                  key={it.id}
-                  item={it}
-                  playing={it.kind === 'audio' && audioPlaying === it.insertUrl}
-                  onActivate={() => activate(it)}
-                  onInsert={() => insertOf(it)}
-                  onRename={it.localAssetId && it.sig
-                    ? () => beginRename(it.localAssetId!, it.sig!, it.label, it.kind as LocalKind)
-                    : undefined}
-                  onDelete={() => void doDelete(
-                    it,
-                    it.sig && registryCountByContent.get(it.sig) === 1 && trackSrcBySig.has(it.sig)
-                      ? trackSrcBySig.get(it.sig)!
-                      : undefined,
-                  )}
-                  dragProps={dragPropsFor(it, onDragAsset)}
-                  insertLabel={it.kind === 'audio' ? t('panels.useAsBgm') : t('panels.insert')}
-                />
+                <div key={it.id} className="relative">
+                  <AssetCard
+                    item={it}
+                    playing={it.kind === 'audio' && audioPlaying === it.insertUrl}
+                    onActivate={() => activate(it)}
+                    onInsert={() => insertOf(it)}
+                    onRename={it.localAssetId && it.sig
+                      ? () => beginRename(it.localAssetId!, it.sig!, it.label, it.kind as LocalKind)
+                      : undefined}
+                    onDelete={() => void doDelete(
+                      it,
+                      it.sig && registryCountByContent.get(it.sig) === 1 && trackSrcBySig.has(it.sig)
+                        ? trackSrcBySig.get(it.sig)!
+                        : undefined,
+                    )}
+                    dragProps={dragPropsFor(it, onDragAsset)}
+                    insertLabel={it.kind === 'audio' ? t('panels.useAsBgm') : t('panels.insert')}
+                  />
+                  {it.sig ? <UploadBadge state={uploadStates.get(it.sig)} onRetry={() => retryUpload(it)} /> : null}
+                </div>
               ))}
             {visibleTrackCards.map((c) =>
                 c.live ? (
@@ -1063,22 +978,13 @@ export function MyAssetsPanel({
                   />
                 ),
               )}
-            {visibleFolderRestoreGroups.map((group) => (
-              <FolderRestoreTile
-                key={`restore-folder:${group.folder.id}`}
-                name={group.folder.name}
-                count={group.entries.length}
-                busy={restoringFolderId === group.folder.id}
-                onRestore={() => void reconnectFolder(group)}
-                onDelete={() => group.entries.forEach(evictRestoreEntry)}
-              />
-            ))}
-            {/* Registry entries whose bytes need a re-grant gesture (or are gone): click restores access in place */}
+            {/* Index entries whose bytes resolved nowhere (or are still being retrieved): click re-imports the original once */}
             {visibleRestoreCards.map((e) => (
                 <RestoreTile
                   key={`restore:${e.assetId}`}
                   label={e.label}
                   kind={e.kind ?? 'video'}
+                  busy={resolving.has(e.assetId)}
                   onRestore={() => void reconnect(e)}
                   onRename={() => beginRename(e.assetId, e.contentSig, e.label, e.kind ?? 'video')}
                   onDelete={() => evictRestoreEntry(e)}
@@ -1117,20 +1023,6 @@ export function MyAssetsPanel({
             restoreTargetRef.current = null;
             event.target.value = '';
             if (target && file) void finishReconnect(target, file);
-          }}
-        />
-        <input
-          ref={restoreFolderInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          {...({ webkitdirectory: '' } as Record<string, string>)}
-          onChange={(event) => {
-            const target = restoreFolderTargetRef.current;
-            const files = Array.from(event.target.files ?? []);
-            restoreFolderTargetRef.current = null;
-            event.target.value = '';
-            if (target && files.length) void restoreFolderFromFiles(target, files);
           }}
         />
       </div>

@@ -181,9 +181,9 @@ export const PANELS_EN: Record<string, string> = {
   "panels.generatingMusic": "Generating…",
   "panels.musicFileMissingShort": "file missing",
   "panels.music": "Audio",
-  "panels.myAssets": "Local",
+  "panels.myAssets": "Assets",
   "panels.officialAssets": "Official",
-  "panels.cloudAssets": "Cloud",
+  "panels.cloudAssets": "Library",
   "panels.officialComponents": "Motion Graphics",
   "panels.searchOfficialAssets": "Search official assets",
   "panels.searchOfficialComponents": "Search Motion Graphics",
@@ -205,12 +205,15 @@ export const PANELS_EN: Record<string, string> = {
     "On-device visual search model download progress",
   "panels.localDeleteBody":
     "Also removes it from this project's timeline. The original file on your device is unchanged.",
+  "panels.uploading": "Uploading {pct}%",
+  "panels.uploadFailed": "Upload failed — click to retry",
+  "panels.needsReimport": "Needs re-import",
   "panels.assetUsedByOtherOutput":
     "This asset is still used by another output. Remove it there first.",
   "panels.filterAssets": "Filter assets",
-  "panels.localReconnect": "Click to restore",
+  "panels.localReconnect": "Re-import",
   "panels.localReconnectFailed":
-    "Couldn’t restore access — the file may have moved or been deleted",
+    "Couldn’t re-import — the file may have moved or been deleted",
   "panels.import": "Import",
   "panels.uploadFile": "Upload file",
   "panels.chooseFolder": "Folder",
@@ -221,7 +224,7 @@ export const PANELS_EN: Record<string, string> = {
   "panels.localServiceFailed":
     "Local import failed. Check the local service and try again.",
   "panels.moreImportOptions": "More import options",
-  "panels.noLocalAssets": "No local assets yet",
+  "panels.noLocalAssets": "No assets yet",
   "panels.folderNoMedia": "No importable media in that folder",
   "panels.folderCapped": "Large folder — imported the first {n}",
   "panels.restoreFolder": "Re-authorize folder",

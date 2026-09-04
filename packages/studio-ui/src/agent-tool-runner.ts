@@ -908,13 +908,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 const localKind = entry.kind ?? 'video';
                 const file = await loadLocalAssetFile(projectId, entry);
                 if (!file) {
-                  return { ok: false, error: 'local media access is unavailable — ask the user to restore access in Materials, then retry. Do not place the asset on the timeline; placement cannot restore file access' };
+                  return { ok: false, error: 'media bytes are unavailable on this device and in the cloud — ask the user to re-import that asset in Materials, then retry. Do not place the asset on the timeline; placement cannot restore the bytes' };
                 }
                 try {
-                  await saveLocalVideo(file, entry.contentSig, undefined, {
-                    pinned: localKind === 'audio',
-                    binding: { projectId, assetId: entry.assetId },
-                  });
+                  await saveLocalVideo(file, entry.contentSig);
                 } catch {
                   // The authorized File remains usable for this ASR call even when the local cache is full.
                 }
@@ -2362,15 +2359,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (!entry) return { ok: false, error: 'local image not found or ambiguous — search the mine scope and use its exact asset id' };
             const file = await loadLocalAssetFile(projectId, entry);
             if (!file) {
-              return { ok: false, error: 'local image access is unavailable — ask the user to click “restore access” on that exact local asset, then retry; do not use another image' };
+              return { ok: false, error: 'image bytes are unavailable on this device and in the cloud — ask the user to re-import that exact asset, then retry; do not use another image' };
             }
-            // A readable native handle is not durable permission. Pin every explicitly prepared
-            // image in OPFS, including the direct-handle path, so a refresh cannot leave a valid
+            // Keep the prepared image in the device cache so a refresh cannot leave a valid
             // timeline clip pointing at bytes the preview/export pipeline can no longer reach.
-            await saveLocalVideo(file, entry.contentSig, undefined, {
-              pinned: true,
-              binding: { projectId, assetId: entry.assetId },
-            });
+            await saveLocalVideo(file, entry.contentSig);
             return {
               ok: true,
               summary: t('workbench.preparedLocalImage', { name: entry.label }),
