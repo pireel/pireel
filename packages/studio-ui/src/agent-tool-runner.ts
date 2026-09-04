@@ -130,6 +130,7 @@ import { t } from './i18n';
 import { type ComposeMode, type ComposedBlock, composedBlockFields, GeneratedBlockValidationError, kitChoiceOf, newBlockComposeMode } from './compose-result';
 import { clearToolProgress, setToolProgress, type ToolProgress } from './tool-progress';
 import { fileSig, probeVideoFile } from './media';
+import { measuredSpeechTranscript } from '@pireel/studio-engine/script-alignment';
 import { deleteCachedTts, getCachedTts, setCachedTts, ttsCacheKey, type CachedTtsAsset } from './tts-cache';
 import { loadLocalAssetFile, loadLocalVideo, saveLocalVideo } from './local-media';
 import { materializeRemoteMedia } from './remote-media';
@@ -613,7 +614,16 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
         // A reviewed source is placed inside its accepted ranges or not at all: the persisted verdict
         // outranks a later step's memory of it. The assembler's own rows are planner-legal.
         if (input.__replacePrimaryTrack !== true) {
-          const issue = reviewedPlacementIssue(reviewedSourcesFor(projectId), Array.isArray(input.clips) ? input.clips : []);
+          // A speaker's own footage is timed by what is said: its picture review guides openings
+          // and B-roll picks, never which spoken sentences may be kept (a real run gated a closing
+          // call-to-action out because the review only listed the three best-looking windows).
+          const speechBearing = new Set(Object.keys(documentRef.current.semantics.transcripts));
+          for (const key of localTranscriptCacheRef.current.keys()) speechBearing.add(key);
+          const reviewedNonSpeech = reviewedSourcesFor(projectId).filter((source) => {
+            const asset = documentRef.current.assets[source.assetId];
+            return !speechBearing.has(source.assetId) && !(asset?.locator.localSig && speechBearing.has(asset.locator.localSig));
+          });
+          const issue = reviewedPlacementIssue(reviewedNonSpeech, Array.isArray(input.clips) ? input.clips : []);
           if (issue) return { ok: false, error: describeReviewedPlacementIssue(issue), data: { reason: issue.reason, assetId: issue.assetId } };
         }
         const referencedAssetIds = [
@@ -1024,7 +1034,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   }
                 }
                 const probe = await probeVideoFile(file).catch(() => null);
-                const segs = await race(studioProviders().transcriber.transcribe(file, { projectId }));
+                // Script-backed speech (TTS) keeps its exact text; ASR only lends the timing.
+                const segs = measuredSpeechTranscript(asset, documentRef.current.semantics.transcripts[targetAssetId], await race(studioProviders().transcriber.transcribe(file, { projectId })));
                 const current = documentRef.current;
                 const primaryClipsForAsset = current.timeline.tracks
                   .filter((track) => track.role === 'primaryNarrative')
@@ -3125,14 +3136,18 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               .filter((item) => Number.isInteger(item.index) && item.index >= 0 && item.text.length > 0);
             if (!items.length) return { ok: false, error: t('workbench.itemsEmptyInvalidNeed') };
             const shotIdIn = typeof input.shotId === 'string' ? input.shotId : undefined;
-            const src = shotIdIn ? ensureShots(compRef.current).find((shot) => shot.id === shotIdIn)?.src : undefined;
-            if (shotIdIn && !src) return { ok: false, error: t('workbench.shotIdNotInsertClip') };
+            const shotSrc = shotIdIn ? ensureShots(compRef.current).find((shot) => shot.id === shotIdIn)?.src : undefined;
+            if (shotIdIn && !shotSrc) return { ok: false, error: t('workbench.shotIdNotInsertClip') };
             const primaryTrack = documentRef.current.timeline.tracks.find((track) => track.id === documentRef.current.semantics.primaryNarrativeTrackId);
             const targetNarrativeClip = shotIdIn ? primaryTrack?.clips.find((clip) => clip.id === shotIdIn) : undefined;
             const assetId = shotIdIn
               ? (targetNarrativeClip?.kind === 'narrative' ? targetNarrativeClip.assetId : undefined)
               : firstNarrativeAssetId(documentRef.current);
             if (!assetId) return { ok: false, error: shotIdIn ? t('workbench.shotIdNotInsertClip') : t('workbench.noTranscriptYetRun') };
+            // The first narrative asset's transcript is owned by the main copy (asrSentences), even when
+            // addressed through its shot id: the runtime clip copy of the same source is a cache the
+            // engine ignores while a main copy exists, so an edit written there would never land.
+            const src = shotSrc && assetId === firstNarrativeAssetId(documentRef.current) && asrRef.current?.length ? undefined : shotSrc;
             const segments = captionTranscriptForEdit(
               documentRef.current,
               assetId,
@@ -3193,8 +3208,16 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               summary = t('workbench.clearedAllCaptionTranslations');
             } else {
               const shotIdIn = typeof input.shotId === 'string' ? input.shotId : undefined;
-              const src = shotIdIn ? ensureShots(compRef.current).find((s) => s.id === shotIdIn)?.src : undefined;
-              if (shotIdIn && !src) return { ok: false, error: t('workbench.shotIdNotInsertClip') };
+              const shotSrc = shotIdIn ? ensureShots(compRef.current).find((s) => s.id === shotIdIn)?.src : undefined;
+              if (shotIdIn && !shotSrc) return { ok: false, error: t('workbench.shotIdNotInsertClip') };
+              // Same ownership rule as edit_caption_text: the first narrative asset lives on the main copy.
+              const shotClip = shotIdIn
+                ? documentRef.current.timeline.tracks
+                  .find((track) => track.id === documentRef.current.semantics.primaryNarrativeTrackId)
+                  ?.clips.find((clip) => clip.id === shotIdIn)
+                : undefined;
+              const shotAssetId = shotClip?.kind === 'narrative' ? shotClip.assetId : undefined;
+              const src = shotSrc && shotAssetId === firstNarrativeAssetId(documentRef.current) && asrRef.current?.length ? undefined : shotSrc;
               const segs = src ? clipAsrRef.current[src] : asrRef.current;
               if (!segs?.length) return { ok: false, error: src ? t('workbench.insertClipNoTranscript') : t('workbench.noTranscriptYetRun') };
               const bad = items.filter((it) => it.index >= segs.length);

@@ -33,6 +33,8 @@ export interface EditorMediaAsset {
     description?: string;
     tags?: string[];
     collection?: string;
+    /** Exact spoken text of a synthesised speech asset. ASR only ever measures timing against it. */
+    transcriptText?: string;
     /** Optional precomputed/declared musical grid metadata; media-byte analysis stays outside the document. */
     bpm?: number;
     beatOffsetSec?: number;

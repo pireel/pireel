@@ -661,6 +661,10 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.outputNotFound": "Output not found",
   "workbench.outputNotFoundOrActive":
     "Output not found, or it is already active",
+  "workbench.outputSwitchPausedByAgent":
+    "The assistant is editing — output switching resumes when it finishes",
+  "workbench.outputChangedUnderAgent":
+    "The active output is now “{active}” but you were editing “{anchored}”. Call switch_output to go back, or get_state / list_outputs to adopt the current output",
   "workbench.outputRenamedNamed": "Renamed output to “{title}”",
   "workbench.outputSwitched": "Switched output",
   "workbench.outputSwitcher": "Project outputs",

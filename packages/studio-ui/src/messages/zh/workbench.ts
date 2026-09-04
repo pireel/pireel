@@ -598,6 +598,8 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.untitledOutput": "未命名成片",
   "workbench.outputNotFound": "找不到这个成片",
   "workbench.outputNotFoundOrActive": "找不到这个成片，或它已经是当前成片",
+  "workbench.outputSwitchPausedByAgent": "AI 正在编辑，先等它完成再切换成片",
+  "workbench.outputChangedUnderAgent": "当前成片已切到「{active}」，而你正在编辑「{anchored}」。用 switch_output 切回去继续，或用 get_state / list_outputs 以当前成片为准",
   "workbench.outputRenamedNamed": "已重命名为「{title}」",
   "workbench.outputSwitched": "已切换成片",
   "workbench.outputSwitcher": "项目成片",

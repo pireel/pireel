@@ -4,7 +4,7 @@ import { applyCaptionDocumentEdit, resizeManagedCaptionTiming } from './caption-
 import { applyCaptionTextEdits } from './caption-text-edit';
 import { emptyComposition } from './composition-core';
 import { compositionToEditorDocument, projectDocumentToComposition } from './project-document';
-import { firstNarrativeAssetId } from './editor-document';
+import { firstNarrativeAssetId, syncCaptionTranscripts } from './editor-document';
 
 const transcript: AsrSegment[] = [{
   start: 0,
@@ -36,6 +36,39 @@ function captionFixture() {
 }
 
 describe('native caption lifecycle transaction', () => {
+  it('settles when the main transcript also arrives as a runtime clip copy of the same source', () => {
+    const on = applyCaptionDocumentEdit({
+      document: captionFixture(), patch: { on: true, preset: 'ln-clean' }, mainTranscript: transcript, clipTranscripts: {},
+    });
+    expect(on.ok).toBe(true);
+    if (!on.ok) return;
+    const main = firstNarrativeAssetId(on.document)!;
+    // The agent corrected the main copy; the clip copy (every placed source is transcribed) is still raw.
+    const corrected = applyCaptionTextEdits(transcript, [{ index: 0, text: 'ONE two three four' }]);
+    const first = applyCaptionDocumentEdit({
+      document: on.document, mainTranscript: corrected, clipTranscripts: { [main]: transcript },
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    // The main copy owns the first narrative asset: the correction lands instead of being overwritten.
+    expect(first.document.semantics.transcripts[main]![0]!.cueTexts).toEqual({ '0:3': 'ONE two three four' });
+    // A second pass with the same inputs is a reference-level no-op (the workbench relays on identity).
+    const rerun = applyCaptionDocumentEdit({
+      document: first.document, mainTranscript: corrected, clipTranscripts: { [main]: transcript },
+    });
+    expect(rerun.ok).toBe(true);
+    if (rerun.ok) expect(rerun.document).toBe(first.document);
+    expect(syncCaptionTranscripts(first.document, corrected, { [main]: transcript })).toBe(first.document);
+  });
+
+  it('accepts the clip copy of the first narrative asset when no main transcript is supplied', () => {
+    const document = captionFixture();
+    const main = firstNarrativeAssetId(document)!;
+    const synced = syncCaptionTranscripts(document, null, { [main]: transcript });
+    expect(synced.semantics.transcripts[main]).toEqual(transcript);
+    expect(syncCaptionTranscripts(synced, null, { [main]: transcript })).toBe(synced);
+  });
+
   it('creates and relays a managed lane while applying one complete sparse style patch', () => {
     const document = captionFixture();
     const result = applyCaptionDocumentEdit({

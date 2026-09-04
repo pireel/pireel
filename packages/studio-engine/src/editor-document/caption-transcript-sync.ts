@@ -51,26 +51,28 @@ export function syncCaptionTranscripts(
     if (typeof ref?.src === 'string' && ref.src) assetBySourceKey.set(ref.src, clip.sourceRef.assetId);
   }
 
-  let changed = false;
-  const transcripts = { ...document.semantics.transcripts };
+  const original = document.semantics.transcripts;
+  const transcripts = { ...original };
   // `mainTranscript` is a legacy browser DTO field. Lane order supplies its one-time import target;
   // the canonical document stores the result only under that clip's asset id.
   const mainAssetId = firstNarrativeAssetId(document);
+  const mainOwned = Boolean(mainAssetId && mainTranscript?.length);
   if (mainAssetId && mainTranscript?.length) {
-    const merged = withDocumentLayout(transcripts[mainAssetId] as AsrSegment[] | undefined, mainTranscript);
-    if (!sameTranscript(transcripts[mainAssetId], merged)) {
-      transcripts[mainAssetId] = merged;
-      changed = true;
-    }
+    transcripts[mainAssetId] = withDocumentLayout(original[mainAssetId] as AsrSegment[] | undefined, mainTranscript);
   }
   for (const [sourceKey, segments] of Object.entries(clipTranscripts)) {
     const assetId = assetBySourceKey.get(sourceKey);
     if (!assetId || !(narrativeAssetIds.has(assetId) || captionSourceAssetIds.has(assetId)) || !segments.length) continue;
-    const merged = withDocumentLayout(transcripts[assetId] as AsrSegment[] | undefined, segments);
-    if (sameTranscript(transcripts[assetId], merged)) continue;
-    transcripts[assetId] = merged;
-    changed = true;
+    // The first narrative asset is owned by `mainTranscript` whenever the caller supplies one. A
+    // runtime clip copy of that same source (every placed source gets transcribed) must neither
+    // override edits made on the main copy nor flip the stored value back and forth: writing A then
+    // B and reporting "changed" would hand callers a new document with identical content, which
+    // identity-guarded relays treat as a real change on every pass.
+    if (mainOwned && assetId === mainAssetId) continue;
+    transcripts[assetId] = withDocumentLayout(original[assetId] as AsrSegment[] | undefined, segments);
   }
+  // Compare the settled value against the stored one, never against an intermediate write.
+  const changed = Object.keys(transcripts).some((assetId) => !sameTranscript(original[assetId], transcripts[assetId]!));
   if (!changed) return document;
   return { ...document, semantics: { ...document.semantics, transcripts } };
 }
