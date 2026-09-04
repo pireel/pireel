@@ -1359,12 +1359,15 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 }
                 const aggregate = progressByItem.reduce((total, value) => total + value, 0) / batchItems.length;
                 const done = progressByItem.filter((value) => value >= 1).length;
+                // An editorial batch still has the cross-source opening comparison ahead of it (one
+                // long vision call): keep the bar short of 100% until that lands, or the card looks stuck.
+                const overall = editorialReview ? aggregate * 0.9 : aggregate;
                 report(t('common.analyzingVisualBatchProgress', {
                   done,
                   total: batchItems.length,
-                  pct: Math.round(aggregate * 100),
+                  pct: Math.round(overall * 100),
                   label: sourceLabel(batchItems[index]!, index),
-                }), aggregate, {
+                }), overall, {
                   items: batchItems.map((item, itemIndex) => ({
                     id: `${itemIndex}`,
                     label: sourceLabel(item, itemIndex),
@@ -1428,6 +1431,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               });
               let openingComparison: Awaited<ReturnType<typeof compareEditorialOpenings>> | null = null;
               if (openingEvidence.length) {
+                // The per-source bars sit at 100% here while one long cross-source vision call runs
+                // (30–90 s); without a line of its own the card looks stuck.
+                const batchItemsProgress = batchItems.map((item, itemIndex) => ({ id: `${itemIndex}`, label: sourceLabel(item, itemIndex), frac: progressByItem[itemIndex] ?? 1 }));
+                report(t('common.comparingOpenings', { total: batchItems.length }), 0.95, { items: batchItemsProgress });
                 try {
                   openingComparison = await race(compareEditorialOpenings(openingEvidence, reviewBrief, {
                     projectId,
@@ -1436,6 +1443,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 } catch (error) {
                   console.warn('[studio/editorial-review] cross-source opening comparison failed', error);
                 }
+                report(t('common.analyzingVisualBatchProgress', { done: batchItems.length, total: batchItems.length, pct: 100, label: sourceLabel(batchItems[batchItems.length - 1]!, batchItems.length - 1) }), 1, { items: batchItemsProgress });
               }
               const openingBySource = new Map(openingComparison?.contenders.map((row) => [row.sourceId, row]) ?? []);
               const comparableResults = results.map((result) => {

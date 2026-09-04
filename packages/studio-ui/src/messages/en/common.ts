@@ -5,6 +5,7 @@ export const COMMON_EN: Record<string, string> = {
   'common.analyzingVisualSemanticsColor': 'Analyzing visual semantics and color…',
   'common.analyzingVisualsPctSec': 'Analyzing visuals {pct}% · ~{sec}s left',
   'common.analyzingVisualBatchProgress': 'Batch visual analysis · {done}/{total} done · {pct}% overall · Current: {label}',
+  'common.comparingOpenings': 'All {total} sources analyzed; comparing opening frames across sources (about half a minute)…',
   'common.bigNumber': 'Big number',
   'common.blinds': 'Blinds',
   'common.bulletList': 'Bullet list',
