@@ -220,6 +220,7 @@ inspect_media mode:editorial returns, per source, candidate ranges with a verdic
 - Order the rest by score and by visible continuity of action and setting; cut a scored child range rather than consuming a whole reservoir.
 - Use a reserve range only when accepted capacity falls short of the narration or a deliberate echo needs it.
 - Place everything in one add_clips batch, muted (source audio was excluded from the review). Do not review again or retry the selection after placing; leave rejected sources unused.
+- For a montage whose first shot is picture, run the batch review with compareOpenings: true so openingComparison exists; it is one extra vision call.
 - For a montage whose picture IS the primary track, call assemble_from_review once instead of hand-placing: your ordered picks are placed as written, the rest of the target is completed from the reviewed pool at natural speed, and the receipt reports coverage. B-roll over a talking head stays add_clips.
 
 ## Work with the timeline intentionally

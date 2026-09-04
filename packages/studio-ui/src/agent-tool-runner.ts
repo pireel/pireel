@@ -1391,7 +1391,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                     try {
                       const result = await runStudioToolInner(ctx, 'analyze_visual', { ...baseInput, ...item }, {
                         ...opts,
-                        collectOpeningEvidence: true,
+                        // The cross-source opening ranking is one more long vision call; only a montage
+                        // whose first shot is picture needs it, so the caller opts in.
+                        collectOpeningEvidence: input.compareOpenings === true,
                         reportProgress: (_text, fraction) => reportBatchProgress(index, fraction),
                       });
                       return result.ok

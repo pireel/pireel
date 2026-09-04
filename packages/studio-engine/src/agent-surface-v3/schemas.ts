@@ -101,6 +101,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       clipIds: arr(str(), { description: 'metadata: clips whose source to inspect.' }),
       clipId: str('geometry/semantic/editorial: analyse the source behind this clip.'),
       brief: str('editorial: what the review should judge.'),
+      compareOpenings: bool('editorial batch only: also rank the opening frame across all sources in one extra vision call (30–90 s). For a montage whose first shot is picture; leave off for B-roll reviews.'),
       maxCandidates: int('geometry/editorial: cap on returned ranges.', 1),
       assessAudio: bool('geometry: also assess audio quality.'),
       labels: arr(obj({

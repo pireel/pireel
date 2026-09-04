@@ -503,7 +503,7 @@ function translateInspectMedia(input: Input, ctx: V3AdapterContext): V3Translati
     case 'semantic':
     case 'editorial': {
       const call: Input = { mode };
-      for (const key of ['brief', 'maxCandidates', 'assessAudio', 'items']) if (input[key] !== undefined) call[key] = input[key];
+      for (const key of ['brief', 'maxCandidates', 'assessAudio', 'items', 'compareOpenings']) if (input[key] !== undefined) call[key] = input[key];
       if (isNonEmptyString(input.clipId)) call.clipId = input.clipId;
       if (ids.length <= 1) {
         if (ids.length === 1) call.assetId = ids[0];

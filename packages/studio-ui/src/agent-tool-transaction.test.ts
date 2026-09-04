@@ -1354,6 +1354,7 @@ describe('Agent composition transaction boundary', () => {
     const pending = runStudioTool(h.ctx, 'analyze_visual', {
       mode: 'editorial',
       brief: 'Choose complete, polished performance ranges.',
+      compareOpenings: true,
       items: [{ assetId: 'asset-first' }, { assetId: 'asset-second' }],
     });
     await vi.waitFor(() => expect(started).toBe(2));
