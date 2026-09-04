@@ -1,16 +1,13 @@
-import {
-  planEditorialAssembly,
-  type EditorialAssemblySource,
-  type EditorialCandidateReview,
-} from '@pireel/studio-engine/editorial-candidates';
+import type { EditorialAssemblySource, EditorialCandidateReview } from '@pireel/studio-engine/editorial-candidates';
 import { canonicalReviewedAssetId, type ReviewedOpeningContender } from './editorial-review-store';
 
 /**
- * assemble_from_review — the deterministic montage assembler as a tool. The agent's ordered picks
- * are placed as written (snapped to legal action territory at most); the remaining target time is
- * completed from unclaimed reviewed capacity; the primary picture track is replaced atomically. It
- * used to run as a hidden client-side rewrite of add_clips; as a tool its receipt is the contract
- * and the agent decides when to call it.
+ * assemble_from_review — place the agent's ordered picks as a montage picture track. Every range is
+ * placed exactly as given, in the given order, at natural speed, tiled to whole frames; the platform
+ * keeps only legality and numbers (coverage, what is left in the reviewed pool) and says in notes
+ * where a pick disagrees with the review's evidence. It never chooses, snaps, drops or fills:
+ * the model holding the script owns every content decision (neither reference product has an
+ * assembly planner; the earlier one here silently trimmed and dropped the agent's own picks).
  */
 
 export interface AssemblyRow {
@@ -23,7 +20,6 @@ export interface AssemblyRow {
 export interface AssemblyPlacedClip {
   id: string;
   assetId: string;
-  origin: 'batch' | 'pool';
   durationSec: number;
   score: number;
   facing?: string;
@@ -58,10 +54,9 @@ export interface AssemblyBuild {
   /** Accepted reviewed ranges (or the parts of them) not used by this assembly, so the agent can
    * choose what closes a gap instead of a score doing it. */
   remaining: RemainingRange[];
-  explicitClipCount: number;
-  snappedClipCount: number;
-  fillerClipCount: number;
-  droppedClipCount: number;
+  /** Where a pick disagrees with the review evidence (outside accepted bounds, inside a rejected
+   * range, shorter than a readable shot). Information for the agent, never a correction. */
+  notes: string[];
   placed: AssemblyPlacedClip[];
 }
 
@@ -215,17 +210,17 @@ export function buildAssemblyFromReview(params: {
   }
   const rows = healed.length ? healed : (() => { const seed = seedRow(sources, opening); return seed ? [seed] : []; })();
   if (!rows.length) return { error: 'no_reviewed_sources' };
-  // Rows without startSec mean "in this order": synthesize the sequence so the planner treats the
-  // batch as an authored order rather than a freehand pile at 0.
+  // Rows without startSec mean "in this order": lay them end to end.
   let cursorSec = 0;
   const ordered = rows.map((row) => {
-    const spanSec = Math.max(0, Number(row.sourceOutSec) - Number(row.sourceInSec));
+    const sourceInSec = Number(row.sourceInSec);
+    const sourceOutSec = Number(row.sourceOutSec);
+    const spanSec = Math.max(0, sourceOutSec - sourceInSec);
     const startSec = Number.isFinite(Number(row.startSec)) ? Number(row.startSec) : cursorSec;
     cursorSec = Math.max(cursorSec, startSec) + spanSec;
-    return { assetId: row.assetId, startSec, sourceInSec: Number(row.sourceInSec), sourceOutSec: Number(row.sourceOutSec) };
+    return { assetId: row.assetId, startSec, sourceInSec, sourceOutSec };
   });
-  const plan = planEditorialAssembly({ targetDurationSec, sources, opening, clips: ordered, completeFromPool: false });
-  const tiled = tileToFrames(plan.clips, targetDurationSec, params.fps);
+  const tiled = tileToFrames(ordered, targetDurationSec, params.fps);
   const clips = tiled.map((planned) => ({
     role: 'primary',
     assetId: planned.assetId,
@@ -235,15 +230,25 @@ export function buildAssemblyFromReview(params: {
     durationSec: Math.round((planned.sourceOutSec - planned.sourceInSec) * 1_000) / 1_000,
     muted: true,
   }));
+  const notes: string[] = [];
   const placed: AssemblyPlacedClip[] = clips.map((clip, index) => {
-    const candidate = (sources.find((source) => source.assetId === clip.assetId)?.candidates ?? [])
-      .find((row) => (row.verdict === 'strong' || row.verdict === 'usable')
-        && clip.sourceInSec >= row.startSec - 0.06
-        && clip.sourceOutSec <= row.endSec + 0.06);
+    const candidates = sources.find((source) => source.assetId === clip.assetId)?.candidates ?? [];
+    const acceptedRows = accepted(candidates);
+    const inside = acceptedRows.find((row) => clip.sourceInSec >= row.startSec - 0.06 && clip.sourceOutSec <= row.endSec + 0.06);
+    const touching = inside ?? acceptedRows.find((row) => clip.sourceInSec < row.endSec && clip.sourceOutSec > row.startSec);
+    const label = `clips[${index}] ${clip.assetId} ${clip.sourceInSec}–${clip.sourceOutSec}s`;
+    if (!touching) {
+      notes.push(`${label}: outside every accepted range of this source${acceptedRows.length ? ` (accepted: ${acceptedRows.map((row) => `${row.startSec}–${row.endSec}s`).join(', ')})` : ''}.`);
+    } else if (!inside) {
+      notes.push(`${label}: extends past the accepted range ${touching.startSec}–${touching.endSec}s.`);
+    }
+    const rejected = candidates.flatMap((row) => row.rejectedRanges ?? []).find((range) => clip.sourceInSec < range.endSec && clip.sourceOutSec > range.startSec);
+    if (rejected) notes.push(`${label}: overlaps a range the review rejected (${rejected.startSec}–${rejected.endSec}s${rejected.reason ? `: ${rejected.reason}` : ''}).`);
+    if (clip.durationSec < 1) notes.push(`${label}: ${clip.durationSec}s reads as a flash.`);
+    const candidate = touching;
     return {
       id: `placed-${index + 1}`,
       assetId: clip.assetId,
-      origin: plan.clips[index]?.origin ?? 'pool',
       durationSec: Math.round(clip.durationSec * 10) / 10,
       score: candidate?.score ?? 0,
       ...(candidate?.facing ? { facing: candidate.facing } : {}),
@@ -252,21 +257,21 @@ export function buildAssemblyFromReview(params: {
       ...(candidate?.log?.setting ? { setting: candidate.log.setting.slice(0, 60) } : {}),
     };
   });
-  const shortfallSec = Math.max(0, Math.round((plan.targetDurationSec - plan.actualDurationSec) * 10) / 10);
+  const actualDurationSec = clips.length
+    ? Math.round((clips[clips.length - 1]!.startSec + clips[clips.length - 1]!.durationSec - clips[0]!.startSec) * 1_000) / 1_000
+    : 0;
+  const shortfallSec = Math.max(0, Math.round((targetDurationSec - actualDurationSec) * 10) / 10);
   const remaining = remainingAcceptedRanges(sources, clips);
   return {
     input: { clips, __replacePrimaryTrack: true },
     remaining,
+    notes,
     coverage: {
-      targetDurationSec: plan.targetDurationSec,
-      actualDurationSec: plan.actualDurationSec,
+      targetDurationSec: Math.round(targetDurationSec * 1_000) / 1_000,
+      actualDurationSec,
       shortfallSec,
-      covered: shortfallSec <= Math.max(1, plan.targetDurationSec * 0.03),
+      covered: shortfallSec <= Math.max(1, targetDurationSec * 0.03),
     },
-    explicitClipCount: plan.explicitClipCount ?? 0,
-    snappedClipCount: plan.snappedClipCount ?? 0,
-    fillerClipCount: plan.fillerClipCount ?? 0,
-    droppedClipCount: plan.droppedClipCount,
     placed,
   };
 }

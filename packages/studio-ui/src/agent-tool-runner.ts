@@ -3397,11 +3397,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               data: {
                 ...placedData,
                 coverage,
-                explicitClipCount: built.explicitClipCount,
-                snappedClipCount: built.snappedClipCount,
-                fillerClipCount: built.fillerClipCount,
-                droppedClipCount: built.droppedClipCount,
                 placed: built.placed,
+                ...(built.notes.length ? { notes: built.notes } : {}),
                 ...(coverage.covered ? {} : { remaining: built.remaining.slice(0, 40) }),
                 note: coverage.covered
                   ? 'The picture covers the target at natural speed; the primary track was replaced. Change specific clips with remove/trim/move; a repeat call with a new ordered list rebuilds it.'

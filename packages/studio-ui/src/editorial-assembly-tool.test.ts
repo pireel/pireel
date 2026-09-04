@@ -24,7 +24,7 @@ const street = {
 };
 
 describe('buildAssemblyFromReview', () => {
-  it('places the authored picks in order, never chooses shots itself, and lists what is left to pick', () => {
+  it('places the picks exactly as given, notes disagreements with the review, and lists what is left to pick', () => {
     const built = buildAssemblyFromReview({
       sources: [beach, street],
       opening: [],
@@ -36,8 +36,8 @@ describe('buildAssemblyFromReview', () => {
     expect(built.input.__replacePrimaryTrack).toBe(true);
     const clips = built.input.clips as Array<Record<string, unknown>>;
     expect(clips[0]).toMatchObject({ assetId: 'asset-beach', startSec: 0, muted: true, role: 'primary' });
-    expect(built.placed[0]).toMatchObject({ origin: 'batch', assetId: 'asset-beach' });
-    expect(built.placed.every((shot) => shot.origin === 'batch')).toBe(true);
+    expect(built.placed[0]).toMatchObject({ assetId: 'asset-beach', score: 90 });
+    expect(built.notes).toEqual([]);
     expect(built.coverage.covered).toBe(false);
     expect(built.remaining.map((row) => row.assetId)).toContain(street.assetId);
     expect(built.remaining.find((row) => row.assetId === street.assetId)).toMatchObject({ startSec: 1, endSec: 4, score: 70 });
@@ -45,8 +45,12 @@ describe('buildAssemblyFromReview', () => {
     expect(built.remaining.some((row) => row.assetId === beach.assetId)).toBe(false);
     expect(built.coverage.targetDurationSec).toBe(4.5);
     expect(built.coverage.actualDurationSec).toBeCloseTo(1.8, 1);
-    // Filler clips carry their OWN asset id, never the first authored row's.
-    for (const clip of clips) expect([beach.assetId, street.assetId]).toContain(clip.assetId);
+    // A pick the review would argue with is placed anyway and flagged, never trimmed or dropped.
+    const argued = buildAssemblyFromReview({ sources: [beach, street], opening: [], rows: [{ assetId: 'asset-beach', sourceInSec: 4, sourceOutSec: 6 }, { assetId: 'asset-beach', sourceInSec: 0.3, sourceOutSec: 0.9 }], targetDurationSec: 2.6 });
+    if ('error' in argued) throw new Error(argued.error);
+    expect((argued.input.clips as Array<Record<string, unknown>>).map((clip) => [clip.sourceInSec, clip.sourceOutSec])).toEqual([[4, 6], [0.3, 0.9]]);
+    expect(argued.notes.some((note) => note.includes('outside every accepted range'))).toBe(true);
+    expect(argued.notes.some((note) => note.includes('reads as a flash'))).toBe(true);
   });
 
   it('heals a garbled reviewed id, refuses unreviewed sources, and seeds from the opening when nothing is authored', () => {
