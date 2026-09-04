@@ -90,3 +90,24 @@ export function webFontStylesheetUrls(fontIds: ReadonlyArray<unknown>): string[]
   }
   return [...ids].map(webFontCssUrl);
 }
+
+/** `web:<anything the user calls it>` → `web:<id>`: the id, the CSS family, or a zh/en label
+ * (case-insensitive). An agent that only knows the font by its display name should not have to
+ * guess the slug. Null when nothing in the library matches. */
+export function resolveWebFontReference(value: unknown): `web:${string}` | null {
+  if (typeof value !== 'string' || !value.startsWith('web:')) return null;
+  const needle = value.slice(4).trim().toLowerCase();
+  if (!needle) return null;
+  const hit = WEB_FONTS.find((font) => (
+    font.id.toLowerCase() === needle
+    || font.family.toLowerCase() === needle
+    || font.label.zh.toLowerCase() === needle
+    || font.label.en.toLowerCase() === needle
+  ));
+  return hit ? webFontFontId(hit) : null;
+}
+
+/** One line per library font for error messages: `web:lxgw-wenkai (霞鹜文楷 / LXGW WenKai)`. */
+export function webFontCatalogHint(): string {
+  return WEB_FONTS.map((font) => `web:${font.id} (${font.label.zh} / ${font.label.en})`).join(', ');
+}

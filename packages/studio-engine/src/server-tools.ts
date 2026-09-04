@@ -18,6 +18,7 @@
  */
 
 import { documentDelta, renderV3State } from './agent-surface-v3/state';
+import { resolveWebFontReference, webFontCatalogHint } from './font-library';
 import { interpretApplyRaw } from './briefs';
 import { placementPercentToBox } from './overlay-placement';
 import { formatDirectorSceneContext, resolveDirectorSceneContext } from './semantic-scenes';
@@ -1206,7 +1207,8 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (typeof input.font === 'string') {
         if (input.font === 'preset') patch.font = undefined;
         else if (isDisplayTextFontId(input.font)) patch.font = input.font;
-        else return { result: { ok: false, error: `unknown caption font: ${input.font} (use sans | serif | mono | web:<library id> | local:<family> | preset)` } };
+        else if (resolveWebFontReference(input.font)) patch.font = resolveWebFontReference(input.font)!;
+        else return { result: { ok: false, error: `unknown caption font: ${input.font}. Use sans | serif | mono | local:<family> | preset, or a library font by id or name: ${webFontCatalogHint()}` } };
       }
       const script = typeof input.script === 'string' ? input.script.trim() : '';
       if (script) {

@@ -857,6 +857,63 @@ function closestAssetId(assets: EditorDocumentV2['assets'], requested: string): 
   return !ambiguous && bestLength >= 'local_'.length + 8 ? bestPrefix : null;
 }
 
+/** Validate a whole batch before mutating anything: every full-frame B-roll video row that would
+ * overlap an existing full-frame B-roll video, or another row of the same batch, is listed at once
+ * with the lane's free gaps — one correction instead of one error per conflict. */
+function brollBatchOverlaps(document: EditorDocumentV2, items: Input[], input: Input): AgentTimelineOutcome | null {
+  const fps = document.canvas.fps;
+  type Span = { label: string; assetId: string; start: number; end: number; clipId?: string; trackId?: string };
+  const existing: Span[] = document.timeline.tracks
+    .filter((track) => track.type === 'visual' && track.role === 'broll')
+    .flatMap((track) => track.clips.flatMap((clip) => (
+      clip.kind === 'media' && !clip.box && document.assets[clip.assetId]?.kind === 'video'
+        ? [{ label: `${clip.id} on ${track.id}`, assetId: clip.assetId, start: clip.startFrame, end: clip.startFrame + clip.durationFrames, clipId: clip.id, trackId: track.id }]
+        : []
+    )));
+  const planned: Span[] = [];
+  const conflicts: string[] = [];
+  const overlaps: Array<{ clipId: string; trackId: string; assetId: string; frames: [number, number] }> = [];
+  for (const [index, raw] of items.entries()) {
+    const item = (raw ?? {}) as Input;
+    const asset = string(item.assetId) ? document.assets[string(item.assetId)!] : undefined;
+    if (!asset || asset.kind !== 'video' || item.box !== undefined || string(item.trackId)) continue;
+    const role = string(item.role);
+    if (role === 'primary' || role === 'narration' || role === 'music' || role === 'sfx') continue;
+    const hasExplicitStart = item.startSec != null || input.atSec != null;
+    if (!hasExplicitStart) continue;
+    const sourceInSec = Math.max(0, sec(item.sourceInSec));
+    const sourceOutSec = Number(item.sourceOutSec);
+    const durationSec = Number.isFinite(Number(item.durationSec))
+      ? Number(item.durationSec)
+      : Number.isFinite(sourceOutSec) && sourceOutSec > sourceInSec
+        ? sourceOutSec - sourceInSec
+        : asset.metadata.durationSec != null ? asset.metadata.durationSec - sourceInSec : 5;
+    const start = secondsToTimelineFrames(Math.max(0, sec(item.startSec, sec(input.atSec))), fps);
+    const end = start + positiveDurationFrames(durationSec, fps);
+    const hit = [...existing, ...planned].find((span) => span.start < end && span.end > start);
+    if (hit) {
+      conflicts.push(`clips[${index}] ${asset.id} at frames ${start}–${end} overlaps ${hit.label} (frames ${hit.start}–${hit.end})`);
+      if (hit.clipId && hit.trackId) overlaps.push({ clipId: hit.clipId, trackId: hit.trackId, assetId: hit.assetId, frames: [hit.start, hit.end] });
+    }
+    planned.push({ label: `clips[${index}] (${string(item.id) ?? `clip_${asset.id}`}, ${asset.id})`, assetId: asset.id, start, end });
+  }
+  if (!conflicts.length) return null;
+  const outputEnd = document.timeline.tracks.reduce((end, track) => track.clips.reduce((inner, clip) => Math.max(inner, clip.startFrame + clip.durationFrames), end), 0);
+  const occupied = [...existing].sort((left, right) => left.start - right.start);
+  const gaps: string[] = [];
+  let cursor = 0;
+  for (const span of occupied) {
+    if (span.start > cursor) gaps.push(`${cursor}–${span.start}`);
+    cursor = Math.max(cursor, span.end);
+  }
+  if (outputEnd > cursor) gaps.push(`${cursor}–${outputEnd}`);
+  const lane = overlaps[0]?.trackId ?? 'track_broll';
+  return fail(
+    `Nothing was placed: ${conflicts.length} full-frame B-roll overlap${conflicts.length === 1 ? '' : 's'} in this batch. ${conflicts.join('; ')}. Full-frame B-roll never stacks. Free B-roll frames right now: ${gaps.length ? gaps.join(', ') : 'none'}. Fix every row and send the batch again, remove or move the existing clip first, or pass trackId: '${lane}' on a row to overwrite that lane deliberately.`,
+    { reason: 'broll_overlap', overlaps, conflicts, freeGaps: gaps },
+  );
+}
+
 function placeClips(document: EditorDocumentV2, input: Input, mode: 'overwrite' | 'ripple'): AgentTimelineOutcome {
   document = normalizePeerNarrativeSources(document);
   const items = Array.isArray(input.clips) ? input.clips : [];
@@ -866,6 +923,10 @@ function placeClips(document: EditorDocumentV2, input: Input, mode: 'overwrite' 
     return document.assets[clip.assetId]?.kind === 'video';
   }));
   const used = new Set(document.timeline.tracks.flatMap((track) => track.clips.map((clip) => clip.id)));
+  if (mode === 'overwrite') {
+    const conflicts = brollBatchOverlaps(document, items as Input[], input);
+    if (conflicts) return conflicts;
+  }
   let next = document;
   const receipts: EditorCommandReceipt[] = [];
   const created: string[] = [];

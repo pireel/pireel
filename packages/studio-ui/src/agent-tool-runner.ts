@@ -7,6 +7,7 @@
  */
 
 import type { MutableRefObject } from 'react';
+import { resolveWebFontReference, webFontCatalogHint } from '@pireel/studio-engine/font-library';
 import { editorErrorMessage } from './editor-error';
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 import { directorPlanFromDocument } from '@pireel/studio-engine/director-plan-artifact';
@@ -2957,6 +2958,18 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               applyT(sp.editedStart + 0.01);
               return { ok: true, summary: t('workbench.focusedShotN', { n: sp.index + 1 }) };
             }
+            // Any other visual clip (B-roll media, graphics on a lane the legacy selection model
+            // does not address): park the playhead at its first frame so the agent can look at it.
+            const visualClip = documentRef.current.timeline.tracks
+              .filter((track) => track.type === 'visual' || track.type === 'graphics')
+              .flatMap((track) => track.clips)
+              .find((clip) => clip.id === id);
+            if (visualClip) {
+              setSelectedId(null);
+              setSelectedShotId(null);
+              applyT(visualClip.startFrame / documentRef.current.canvas.fps + 0.01);
+              return { ok: true, summary: t('workbench.jumpedTo', { t: r1(visualClip.startFrame / documentRef.current.canvas.fps) }) };
+            }
             return { ok: false, error: t('workbench.focusTargetNotFound') };
           }
           case 'seek': {
@@ -3012,7 +3025,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (typeof input.font === 'string') {
               if (input.font === 'preset') patch.font = undefined;
               else if (isDisplayTextFontId(input.font)) patch.font = input.font;
-              else return { ok: false, error: `unknown caption font: ${input.font} (use sans | serif | mono | web:<library id> | local:<family> | preset)` };
+              else if (resolveWebFontReference(input.font)) patch.font = resolveWebFontReference(input.font)!;
+              else return { ok: false, error: `unknown caption font: ${input.font}. Use sans | serif | mono | local:<family> | preset, or a library font by id or name: ${webFontCatalogHint()}` };
             }
             const script = typeof input.script === 'string' ? input.script.trim() : '';
             if (script) {

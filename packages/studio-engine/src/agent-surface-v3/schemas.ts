@@ -437,7 +437,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
     inputSchema: obj({
       on: bool(),
       preset: enumOf(CAPTION_PRESET_IDS), yPct: num('', { min: 0, max: 100 }), scale: num('', { min: 0.5, max: 2 }),
-      font: str('Caption font: sans | serif | mono | web:<library id> | local:<family>; "preset" restores the preset\'s own font.'),
+      font: str('Caption font: sans | serif | mono | web:<library font id or its display name, e.g. web:lxgw-wenkai or web:霞鹜文楷> | local:<family>; "preset" restores the preset\'s own font.'),
       script: str('Silent montage only (no spoken transcript): the caption copy, one line per caption, timed across the placed picture by character share; the copy becomes the transcript truth of those clips.'),
       source: obj({ trackId: str(), clipId: str() }),
       clipId: str('corrections / translations: an inserted clip’s transcript instead of the main narration.'),
@@ -557,7 +557,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   ask_user: {
     description:
-      'Studio Chat only. kind=question renders a small set of clickable options for a decision only the user can make; kind=approval pauses for consent before a consequential or paid proposal (title + content). Ask one thing at a time and stop the turn after asking.',
+      'Studio Chat only. kind=question renders a small set of clickable options for a decision only the user can make — a creative fork with no reasonable default, which of several plausible sources to use; kind=approval pauses for consent before a paid or irreversible proposal (title + content). Never use it to confirm a plan, an observation or a verified fact you could simply carry out: state it once and proceed. Ask one thing at a time and stop the turn after asking.',
     inputSchema: obj({
       kind: enumOf(['question', 'approval']),
       question: str(), options: arr(str(), { maxItems: 6 }), multiSelect: bool(),
