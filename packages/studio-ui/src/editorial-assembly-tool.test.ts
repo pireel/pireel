@@ -24,7 +24,7 @@ const street = {
 };
 
 describe('buildAssemblyFromReview', () => {
-  it('places the authored picks in order, fills from the pool, and reports coverage', () => {
+  it('places the authored picks in order, never chooses shots itself, and lists what is left to pick', () => {
     const built = buildAssemblyFromReview({
       sources: [beach, street],
       opening: [],
@@ -37,9 +37,14 @@ describe('buildAssemblyFromReview', () => {
     const clips = built.input.clips as Array<Record<string, unknown>>;
     expect(clips[0]).toMatchObject({ assetId: 'asset-beach', startSec: 0, muted: true, role: 'primary' });
     expect(built.placed[0]).toMatchObject({ origin: 'batch', assetId: 'asset-beach' });
-    expect(built.placed.some((shot) => shot.origin === 'pool' && shot.assetId === street.assetId)).toBe(true);
+    expect(built.placed.every((shot) => shot.origin === 'batch')).toBe(true);
+    expect(built.coverage.covered).toBe(false);
+    expect(built.remaining.map((row) => row.assetId)).toContain(street.assetId);
+    expect(built.remaining.find((row) => row.assetId === street.assetId)).toMatchObject({ startSec: 1, endSec: 4, score: 70 });
+    // The beach candidate is fully used by the authored pick and does not reappear.
+    expect(built.remaining.some((row) => row.assetId === beach.assetId)).toBe(false);
     expect(built.coverage.targetDurationSec).toBe(4.5);
-    expect(built.coverage.actualDurationSec).toBeGreaterThan(1.8);
+    expect(built.coverage.actualDurationSec).toBeCloseTo(1.8, 1);
     // Filler clips carry their OWN asset id, never the first authored row's.
     for (const clip of clips) expect([beach.assetId, street.assetId]).toContain(clip.assetId);
   });

@@ -575,6 +575,11 @@ export function planEditorialAssembly(input: {
   /** Cross-source opening contenders in rank order (from the shared opening comparison); the
    * highest-ranked contender whose chain survived selection is pinned as the first shot. */
   opening?: ReadonlyArray<{ assetId: string; candidateId: string }>;
+  /** Default true (legacy): unclaimed reviewed capacity fills the target by score. false = the
+   * caller's rows are the whole selection; what they do not cover stays uncovered and is reported,
+   * so the choice of every shot stays with the agent (the platform keeps legality and coverage
+   * numbers, the model keeps content). */
+  completeFromPool?: boolean;
 }): EditorialAssemblyPlan {
   const targetDurationSec = round3(Math.max(0, Number(input.targetDurationSec) || 0));
   if (!targetDurationSec || !input.clips.length) {
@@ -702,6 +707,7 @@ export function planEditorialAssembly(input: {
   // An under-target plan therefore means the POOL is exhausted — a fact to surface to the
   // user — never that the model under-sampled its batch.
   for (const entry of chainPool) {
+    if (input.completeFromPool === false) break;
     if (entry.used) continue;
     const baseClip: EditorialAssemblyClip = {
       assetId: entry.assetId, startSec: 0, sourceInSec: entry.startSec, sourceOutSec: entry.endSec,

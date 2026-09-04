@@ -39,10 +39,25 @@ export interface AssemblyCoverage {
   covered: boolean;
 }
 
+export interface RemainingRange {
+  assetId: string;
+  candidateId: string;
+  startSec: number;
+  endSec: number;
+  score: number;
+  verdict: string;
+  action?: string;
+  facing?: string;
+  role?: string;
+}
+
 export interface AssemblyBuild {
   /** Legacy add_clips input; `__replacePrimaryTrack` clears the current primary picture first. */
   input: Record<string, unknown>;
   coverage: AssemblyCoverage;
+  /** Accepted reviewed ranges (or the parts of them) not used by this assembly, so the agent can
+   * choose what closes a gap instead of a score doing it. */
+  remaining: RemainingRange[];
   explicitClipCount: number;
   snappedClipCount: number;
   fillerClipCount: number;
@@ -117,6 +132,47 @@ export function tileToFrames<T extends { startSec: number; sourceInSec: number; 
 const accepted = (candidates: readonly EditorialCandidateReview[]) => candidates
   .filter((candidate) => candidate.verdict === 'strong' || candidate.verdict === 'usable');
 
+const MIN_REMAINING_SEC = 1;
+
+/** Accepted candidate ranges minus what the assembly used from the same source, as pickable rows. */
+export function remainingAcceptedRanges(
+  sources: readonly EditorialAssemblySource[],
+  placed: ReadonlyArray<{ assetId: string; sourceInSec: number; sourceOutSec: number }>,
+): RemainingRange[] {
+  const out: RemainingRange[] = [];
+  for (const source of sources) {
+    const used = placed.filter((clip) => clip.assetId === source.assetId).map((clip) => [clip.sourceInSec, clip.sourceOutSec] as const);
+    for (const candidate of accepted(source.candidates)) {
+      let free: Array<[number, number]> = [[candidate.startSec, candidate.endSec]];
+      for (const [inSec, outSec] of used) {
+        free = free.flatMap(([start, end]) => {
+          if (outSec <= start || inSec >= end) return [[start, end]];
+          const parts: Array<[number, number]> = [];
+          if (inSec > start) parts.push([start, inSec]);
+          if (outSec < end) parts.push([outSec, end]);
+          return parts;
+        });
+      }
+      for (const [start, end] of free) {
+        if (end - start < MIN_REMAINING_SEC) continue;
+        const ending = (candidate.roleFit ?? []).reduce((best, fit) => (fit.score > (best?.score ?? -1) ? fit : best), undefined as { role: string; score: number } | undefined);
+        out.push({
+          assetId: source.assetId,
+          candidateId: candidate.candidateId,
+          startSec: Math.round(start * 1_000) / 1_000,
+          endSec: Math.round(end * 1_000) / 1_000,
+          score: candidate.score ?? 0,
+          verdict: candidate.verdict,
+          ...(candidate.action ? { action: String(candidate.action).slice(0, 90) } : {}),
+          ...(candidate.facing ? { facing: candidate.facing } : {}),
+          ...(ending ? { role: ending.role } : {}),
+        });
+      }
+    }
+  }
+  return out.sort((left, right) => right.score - left.score);
+}
+
 /** The opening seed when the caller authored nothing: the shared comparison's rank 1, else the
  * highest-scored accepted candidate across sources. */
 function seedRow(sources: readonly EditorialAssemblySource[], opening: readonly ReviewedOpeningContender[]): AssemblyRow | null {
@@ -168,7 +224,7 @@ export function buildAssemblyFromReview(params: {
     cursorSec = Math.max(cursorSec, startSec) + spanSec;
     return { assetId: row.assetId, startSec, sourceInSec: Number(row.sourceInSec), sourceOutSec: Number(row.sourceOutSec) };
   });
-  const plan = planEditorialAssembly({ targetDurationSec, sources, opening, clips: ordered });
+  const plan = planEditorialAssembly({ targetDurationSec, sources, opening, clips: ordered, completeFromPool: false });
   const tiled = tileToFrames(plan.clips, targetDurationSec, params.fps);
   const clips = tiled.map((planned) => ({
     role: 'primary',
@@ -197,8 +253,10 @@ export function buildAssemblyFromReview(params: {
     };
   });
   const shortfallSec = Math.max(0, Math.round((plan.targetDurationSec - plan.actualDurationSec) * 10) / 10);
+  const remaining = remainingAcceptedRanges(sources, clips);
   return {
     input: { clips, __replacePrimaryTrack: true },
+    remaining,
     coverage: {
       targetDurationSec: plan.targetDurationSec,
       actualDurationSec: plan.actualDurationSec,

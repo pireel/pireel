@@ -3388,9 +3388,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 fillerClipCount: built.fillerClipCount,
                 droppedClipCount: built.droppedClipCount,
                 placed: built.placed,
+                ...(coverage.covered ? {} : { remaining: built.remaining.slice(0, 40) }),
                 note: coverage.covered
-                  ? 'The picture covers the target at natural speed; the primary track was replaced. Change specific clips with remove/trim/move; a repeat call rebuilds from the same pool.'
-                  : `Reviewed capacity falls ${coverage.shortfallSec}s short of the target; repeating cannot add coverage. Ask the user for more footage or a shorter script.`,
+                  ? 'The picture covers the target at natural speed; the primary track was replaced. Change specific clips with remove/trim/move; a repeat call with a new ordered list rebuilds it.'
+                  : built.remaining.length
+                    ? `Your picks cover ${coverage.actualDurationSec}s of ${coverage.targetDurationSec}s (${coverage.shortfallSec}s open). Nothing was chosen for you: remaining lists the unused accepted ranges with their notes — add your picks and call again with the complete ordered list, or tell the user what is missing.`
+                    : `Your picks cover ${coverage.actualDurationSec}s of ${coverage.targetDurationSec}s and the reviewed pool has nothing left; ask the user for more footage or a shorter script.`,
               },
             };
           }
