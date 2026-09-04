@@ -269,7 +269,7 @@ function compactVisualAnalysisData(data: Record<string, unknown>): Record<string
   for (const key of [
     'analysisMode', 'assetId', 'localAssetId', 'label', 'durationSec', 'hasAudio',
     'audioAssessment', 'speechLikely', 'audibleSec', 'speechSec', 'editorialBrief',
-    'editorialComparisonSummary', 'editorialReviewReused', 'acceptedDurationSec', 'note', 'ok', 'error',
+    'editorialComparisonSummary', 'editorialReviewReused', 'reviewBasis', 'acceptedDurationSec', 'note', 'ok', 'error',
   ]) {
     if (data[key] !== undefined) compactData[key] = data[key];
   }

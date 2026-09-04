@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  synthesizeEvenWindows,
   editorialBriefFaceRequirements,
   editorialContentRoleUsesFaceGates,
   openingComparisonVisualIndex,
@@ -39,5 +40,14 @@ describe('editorialContentRoleUsesFaceGates', () => {
     expect(editorialContentRoleUsesFaceGates('transition')).toBe(false);
     expect(editorialContentRoleUsesFaceGates('person-primary')).toBe(true);
     expect(editorialContentRoleUsesFaceGates('mixed')).toBe(true);
+  });
+});
+
+describe('synthesizeEvenWindows', () => {
+  it('splits a source without motion windows into at most six spans of at most eight seconds', () => {
+    expect(synthesizeEvenWindows(19, 6).map((w) => [w.startSec, w.endSec])).toEqual([[0, 6.333], [6.333, 12.667], [12.667, 19]]);
+    expect(synthesizeEvenWindows(3, 6)).toHaveLength(1);
+    expect(synthesizeEvenWindows(120, 6)).toHaveLength(6);
+    expect(synthesizeEvenWindows(19, 6).every((w) => w.score === 50)).toBe(true);
   });
 });

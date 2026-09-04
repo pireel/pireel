@@ -49,6 +49,9 @@ export interface EditorialCandidateReviewResult {
   candidates: EditorialCandidateReview[];
   /** True when this result came from the persistent review cache (no provider charge). */
   reused?: true;
+  /** The local motion pre-pass found no windows (static screen recording, slow pan): the source
+   * was reviewed on evenly split spans instead of being skipped. */
+  windowsSynthesized?: true;
 }
 
 export interface EditorialOpeningEvidence {
@@ -271,20 +274,46 @@ export function editorialContentRoleUsesFaceGates(role: EditorialCandidateReview
  * silent low-resolution proxy reel so the model sees continuous setup/performance/exit motion.
  * Five still observations remain a compatibility fallback when proxy rendering/upload is unavailable.
  */
+/** Evenly split spans of at most 8 s (at most `limit` of them), scored neutrally, for sources
+ * without motion windows. */
+export function synthesizeEvenWindows(durationSec: number, limit: number): VisualQualityWindow[] {
+  const count = Math.max(1, Math.min(Math.max(1, limit), Math.ceil(durationSec / 8)));
+  const span = durationSec / count;
+  return Array.from({ length: count }, (_, index) => ({
+    rank: index + 1,
+    startSec: Math.round(index * span * 1_000) / 1_000,
+    endSec: Math.round(Math.min(durationSec, (index + 1) * span) * 1_000) / 1_000,
+    // Neutral technical readings: nothing was measured, nothing is claimed.
+    score: 50,
+    sharpness: 50,
+    exposure: 50,
+    stability: 50,
+    sampleCount: 0,
+    worstFrameScore: 50,
+    edgeScore: 50,
+    hardFailureFraction: 0,
+  }));
+}
+
 export async function reviewEditorialCandidates(
   file: File,
   qualityWindows: readonly VisualQualityWindow[],
   brief: string,
-  options: { maxCandidates?: number; signal?: AbortSignal; projectId?: string } = {},
+  options: { maxCandidates?: number; signal?: AbortSignal; projectId?: string; durationSec?: number } = {},
 ): Promise<EditorialCandidateReviewResult> {
   const normalizedBrief = brief.trim().slice(0, 2_000);
   if (!normalizedBrief) throw new Error('editorial review brief is required');
   const explicitlyRequestsMultipleFromSource = /(?:multiple|several|two|three)\s+(?:distinct\s+)?(?:moments|ranges|clips)\s+from\s+(?:the\s+)?same source|同一(?:原始)?素材.{0,12}(?:多段|多个片段|两个片段|两段)/i.test(normalizedBrief);
   const prefersCenteredSubject = /centered|centred|center composition|subject in (?:the )?center|居中|中心构图|主体在中间|主角在中间/i.test(normalizedBrief);
-  const specs = buildEditorialCandidateSpecs(rankEditorialWindows(qualityWindows, {
+  // A source with no motion-based windows (a news page screen recording, a slow pan) is still
+  // footage an editor would look at; never skip it silently. Split it evenly and review that.
+  const windowsSynthesized = !qualityWindows.length && (options.durationSec ?? 0) > 0.5;
+  const windows = windowsSynthesized ? synthesizeEvenWindows(options.durationSec!, options.maxCandidates ?? 6) : qualityWindows;
+  const specs = buildEditorialCandidateSpecs(rankEditorialWindows(windows, {
     preferCenteredSubject: prefersCenteredSubject,
   }), options.maxCandidates ?? 6);
   if (!specs.length) return { brief: normalizedBrief, comparisonSummary: '', candidates: [] };
+  const synthesizedFlag = windowsSynthesized ? { windowsSynthesized: true as const } : {};
 
   // Same file already reviewed → reuse the stored result instead of re-paying the provider.
   // Exact (same brief + same intervals) reuse is always safe; dev builds additionally tolerate
@@ -299,7 +328,7 @@ export async function reviewEditorialCandidates(
     // console (stale bundle, unseeded store, or a key drift) without replaying the whole flow.
     console.debug(`[editorial-review] cache ${cachedReview ? (cachedReview.exact ? 'hit' : 'hit-cross-brief') : 'miss'} key=${reviewCacheKey} file=${file.name}`);
   }
-  if (cachedReview) return { ...cachedReview.result, reused: true };
+  if (cachedReview) return { ...cachedReview.result, ...synthesizedFlag, reused: true };
 
   const { requiresClosedMouth, requiresSoloSubject } = editorialBriefFaceRequirements(normalizedBrief);
   const faceScanRanges = specs.map((candidate) => ({
@@ -467,6 +496,7 @@ export async function reviewEditorialCandidates(
       brief: normalizedBrief,
       comparisonSummary,
       candidates: normalized,
+      ...synthesizedFlag,
     };
   } finally {
     thumbnails.forEach((thumbnail) => URL.revokeObjectURL(thumbnail.url));

@@ -1619,6 +1619,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   ? await race(reviewEditorialCandidates(file, vis.qualityWindows ?? [], reviewBrief, {
                       maxCandidates: maxReviewCandidates,
                       projectId,
+                      durationSec,
                       ...(signal ? { signal } : {}),
                     }))
                   : null;
@@ -1649,6 +1650,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                           editorialComparisonSummary: reviewed.comparisonSummary,
                           editorialCandidates: reviewed.candidates,
                           ...(reviewed.reused ? { editorialReviewReused: true } : {}),
+                          ...(reviewed.windowsSynthesized ? { reviewBasis: 'even-split: no motion-based windows in this source (static or screen recording); the review looked at evenly split spans' } : {}),
                           ...(opts?.collectOpeningEvidence ? {
                             __openingEvidence: editorialOpeningEvidence(file, entry.assetId, entry.label, reviewed.candidates),
                           } : {}),
@@ -1801,6 +1803,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 ? await race(reviewEditorialCandidates(sourceFile, vis.qualityWindows ?? [], reviewBrief, {
                     maxCandidates: maxReviewCandidates,
                     projectId,
+                    durationSec: sourceDurationSec,
                     ...(signal ? { signal } : {}),
                   }))
                 : null;
@@ -1818,6 +1821,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                         editorialComparisonSummary: reviewed.comparisonSummary,
                         editorialCandidates: reviewed.candidates,
                         ...(reviewed.reused ? { editorialReviewReused: true } : {}),
+                        ...(reviewed.windowsSynthesized ? { reviewBasis: 'even-split: no motion-based windows in this source (static or screen recording); the review looked at evenly split spans' } : {}),
                         ...(opts?.collectOpeningEvidence ? {
                           __openingEvidence: editorialOpeningEvidence(sourceFile!, targetAssetId, targetAsset.label || targetAssetId, reviewed.candidates),
                         } : {}),
