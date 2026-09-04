@@ -96,7 +96,6 @@ export const CHATGEN_ZH: Record<string, string> = {
   'chatGen.continueAfterInterruptionPrompt': '继续完成刚才中断的工作。先检查当前项目状态，只做剩余部分，不要重复已经完成的修改。',
   'chatGen.interruptedStatePreserved': '连接中断，已经完成的修改仍然保留。',
   'chatGen.upstreamBusy': '模型服务繁忙，请稍后重试；已经完成的修改仍然保留。',
-  'chatGen.turnLimitFinal': '这一轮已经运行很久，先停在这里；已完成的修改都在时间线上。告诉我下一步要改什么，我从当前状态继续。',
   'chatGen.expand': '展开',
   'chatGen.failed': '失败',
   'chatGen.fillEdit': '填入并编辑',

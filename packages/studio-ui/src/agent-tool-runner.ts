@@ -101,8 +101,8 @@ import { compactAssetSearchElementResults, searchAssetLibrary } from '@pireel/st
 import { mediaSearchTranscriptsFromDocument, searchProjectMedia } from '@pireel/studio-engine/media-search';
 import {
   STUDIO_AGENT_EXECUTION_LIMITS,
-  reviewMomentKey,
-  selectReviewMoments,
+
+
 } from '@pireel/studio-engine/agent-execution-budget';
 import { type StudioToolResult, wrapAgentTranscript } from '@pireel/studio-engine/prompts';
 import { rejectStableFramingSplits, visualGeometryForAgent, visualTimelineForAgent } from '@pireel/studio-engine/visual-types';
@@ -264,9 +264,7 @@ async function imageBlobForInspection(blob: Blob): Promise<{ base64: string; mim
   const base64 = btoa(binary);
   if (base64.length > IMAGE_INSPECTION_MAX_BASE64_CHARS) throw new Error('image is too large to inspect');
   return { base64, mime: inspectionBlob.type || blob.type || 'image/jpeg' };
-}
-const reviewAttemptsByComposition = new WeakMap<object, Map<string, Map<number, number>>>();
-/** Runtime observation cache: a local source that ASR positively classified as speech-free starts
+}/** Runtime observation cache: a local source that ASR positively classified as speech-free starts
  * muted when it is later placed. The user/agent can deliberately unmute useful product sound. */
 const speechFreeLocalSigsByDocumentRef = new WeakMap<object, Set<string>>();
 
@@ -282,21 +280,6 @@ function speechFreeLocalSigs(documentRef: object): Set<string> {
 function isNoSpeechAsrResult(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /SUCCESS_WITH_NO_VALID_FRAGMENT|no valid fragment|no speech detected/i.test(message);
-}
-
-function reviewMomentAttempts(compRef: object, compositionHash: string): Map<number, number> {
-  let byComposition = reviewAttemptsByComposition.get(compRef);
-  if (!byComposition) {
-    byComposition = new Map();
-    reviewAttemptsByComposition.set(compRef, byComposition);
-  }
-  let attempts = byComposition.get(compositionHash);
-  if (!attempts) {
-    if (byComposition.size >= 20) byComposition.delete(byComposition.keys().next().value!);
-    attempts = new Map();
-    byComposition.set(compositionHash, attempts);
-  }
-  return attempts;
 }
 
 function canonicalRenderTimeline(
@@ -2034,16 +2017,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               if (!momentByAt.has(at)) momentByAt.set(at, { ...moment, atSec: at });
             }
             const requestedAts = [...momentByAt.keys()].slice(0, 18);
-            const compHash = renderTimeline.fingerprint;
-            const momentAttempts = reviewMomentAttempts(compRef, compHash);
-            const { allowedAtSecs: ats, repeatedAtSecs } = selectReviewMoments(requestedAts, momentAttempts);
-            if (!ats.length) {
-              return {
-                ok: false,
-                error: t('workbench.reviewBudgetUnchanged'),
-                data: { repeatedAtSecs, limit: STUDIO_AGENT_EXECUTION_LIMITS.reviewsPerUnchangedMoment },
-              };
-            }
+            const ats = requestedAts;
             let reviewPhase: StudioReviewFailurePhase = 'capture';
             try {
               const candidates: {
@@ -2106,8 +2080,6 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 capturedFrames: candidates.length,
                 cloudReviewedFrames: frames.length,
                 skippedAsSimilar: candidates.length - frames.length,
-                skippedAsRepeated: repeatedAtSecs.length,
-                ...(repeatedAtSecs.length ? { repeatedAtSecs } : {}),
                 groups: groups
                   .filter((group) => group.similar.length > 0)
                   .map((group) => ({
@@ -2135,11 +2107,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const sequenceIssues = j.sequenceIssues ?? [];
               const repairScope = sceneVisualRepairScope([...structuralIssues, ...visualIssues, ...sequenceIssues]);
               const total = visualIssues.length + structuralIssues.length + sequenceIssues.length;
-              for (const at of ats) {
-                const key = reviewMomentKey(at);
-                momentAttempts!.set(key, (momentAttempts!.get(key) ?? 0) + 1);
-              }
-              const summary = localComparison.skippedAsSimilar > 0 || localComparison.skippedAsRepeated > 0
+              const summary = localComparison.skippedAsSimilar > 0
                 ? total
                   ? t('workbench.reviewedDedupIssues', { requested: localComparison.capturedFrames, reviewed: localComparison.cloudReviewedFrames, m: total })
                   : t('workbench.reviewedDedupClean', { requested: localComparison.capturedFrames, reviewed: localComparison.cloudReviewedFrames })
@@ -4548,17 +4516,6 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         // The external agent's "eye": capture a frame via the same render pipeline as export (BYO self-checks visuals after writing a block)
         const renderTimeline = canonicalRenderTimeline(c2, ctx.documentRef.current, ctx.resolveAssetUrl);
         const at = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), renderTimeline.durationSec) : tRef.current;
-        const momentAttempts = reviewMomentAttempts(
-          compRef,
-          renderTimeline.fingerprint,
-        );
-        if (!selectReviewMoments([at], momentAttempts).allowedAtSecs.length) {
-          return {
-            ok: false,
-            error: t('workbench.reviewBudgetUnchanged'),
-            data: { repeatedAtSecs: [at], limit: STUDIO_AGENT_EXECUTION_LIMITS.reviewsPerUnchangedMoment },
-          };
-        }
         try {
           const label = `${Math.round(at * 10) / 10}s`;
           const shot = await captureCompositionFrame({
@@ -4585,8 +4542,6 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             ...(span ? { shot: { id: span.clip.id, treatment: span.clip.treatment } } : {}),
             captionsOn: c2.blocks.some(isSentenceCaption),
           };
-          const key = reviewMomentKey(at);
-          momentAttempts.set(key, (momentAttempts.get(key) ?? 0) + 1);
           return {
             ok: true,
             summary: t('workbench.capturedFrameSecS', { sec: Math.round(at * 10) / 10 }),
@@ -4631,18 +4586,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           ...moment,
           atSec: Math.min(Math.max(0, moment.atSec), renderTimeline.durationSec),
         }));
-        const requestedAts = [...new Set(moments.map((moment) => moment.atSec))];
-        const momentAttempts = reviewMomentAttempts(compRef, renderTimeline.fingerprint);
-        const { allowedAtSecs, repeatedAtSecs } = selectReviewMoments(requestedAts, momentAttempts);
-        if (!allowedAtSecs.length) {
-          return {
-            ok: false,
-            error: t('workbench.reviewBudgetUnchanged'),
-            data: { repeatedAtSecs, limit: STUDIO_AGENT_EXECUTION_LIMITS.reviewsPerUnchangedMoment },
-          };
-        }
-        const allowed = new Set(allowedAtSecs);
-        const selected = moments.filter((moment) => allowed.has(moment.atSec));
+        const selected = moments;
         try {
           const frames: Array<{
             index: number;
@@ -4696,8 +4640,6 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
               data: shot.dataUrl.slice(shot.dataUrl.indexOf(',') + 1),
               mimeType: 'image/jpeg',
             });
-            const key = reviewMomentKey(moment.atSec);
-            momentAttempts.set(key, (momentAttempts.get(key) ?? 0) + 1);
           }
           const reviewedSceneIds = new Set(selected.map((moment) => moment.sceneId));
           const structuralIssues = auditSceneVisualStructure(documentRef.current)
@@ -4710,7 +4652,6 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
               frames,
               structuralIssues,
               repairScope,
-              ...(repeatedAtSecs.length ? { skippedUnchangedAtSecs: repeatedAtSecs } : {}),
               instruction:
                 'Inspect every attached image in index order as one moving sequence. Judge visual hierarchy, legibility, protected subjects, source truth, continuity between phases, whether motion builds to a readable payoff, holds long enough, and clears cleanly. Treat structuralIssues as deterministic. Repair only affected Semantic Scenes, preserve the rest, then re-run review_sequence for those sceneIds.',
             },

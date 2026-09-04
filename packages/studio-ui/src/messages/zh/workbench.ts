@@ -524,8 +524,6 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.reviewJudgingN": "云端视觉模型复检 {n} 帧…",
   "workbench.reviewNeedsAtSecs":
     "缺少 atSecs:传要查看的时间点(通常是新动态图形的中点)",
-  "workbench.reviewBudgetUnchanged":
-    "这些未变化的时间点已经复检两次。请先修改画面或改查其他时间点,再继续复检。",
   "workbench.scriptCut": "剪口播",
   "workbench.scrollPlayhead": "定位到播放头",
   "workbench.sendBackward": "下移一层",

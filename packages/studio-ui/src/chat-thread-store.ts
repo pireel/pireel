@@ -25,29 +25,11 @@ export interface StoredThread {
  * (mode editorial) receipts on v3; both carry the same editorialCandidates payload. */
 export const isVisualAnalysisToolId = (id: string | undefined): boolean => id === 'analyze_visual' || id === 'inspect_media';
 
-export const MAX_VISUAL_REVIEWS_PER_USER_TURN = 2;
-/** Runaway ceiling, never a governor: neither reference product caps tool calls per turn at all
- * (the user's stop button is the limit), and a real montage turn has legitimately run 40 calls.
- * The ceiling exists only so an automation that truly loops cannot spend indefinitely; keep in
- * sync with MAX_STUDIO_TOOL_RECEIPTS_PER_TURN enforced server-side. */
-export const MAX_STUDIO_TOOL_CALLS_PER_USER_TURN = 200;
-/** A model that keeps re-reading an unchanged timeline after being told to stop is looping, not
- * verifying — a real turn burned ~28 of its 40 calls on refused reads and died mid-edit. After
- * this many consecutive refusals with no mutation in between, the turn goes final-only. */
-/** A call that failed with the exact same tool and input will fail the exact same way; a model
- * re-firing it verbatim (e.g. removing already-removed clip ids seven times) is looping. */
-export const MAX_STUDIO_IDENTICAL_FAILURES = 3;
-/** Rewording the same failing call is still the same loop: a real turn spent 36 of its 40 calls on
- * ask_user with a slightly different option text each time and never reached the user. After this
- * many consecutive failures of one tool — whatever the inputs — the turn goes final-only. */
-export const MAX_STUDIO_SAME_TOOL_FAILURES = 4;
 
 
 export interface StudioTurnLedger {
   /** Tool receipts published synchronously, before React/useChat commits them to message state. */
   receipts: UIMessage['parts'];
-  toolCallCount: number;
-  forceFinalResponse: boolean;
   unsafeUndoBlocked: boolean;
   /** Signature (tool + input) of the most recent failed call, for detecting verbatim retries. */
   lastFailureSig: string | null;
@@ -72,26 +54,12 @@ export interface StudioTurnToolResultRecord {
 export function createStudioTurnLedger(): StudioTurnLedger {
   return {
     receipts: [],
-    toolCallCount: 0,
-    forceFinalResponse: false,
     unsafeUndoBlocked: false,
     lastFailureSig: null,
     repeatedFailureCount: 0,
     lastFailureToolId: null,
     sameToolFailureCount: 0,
   };
-}
-
-/** Reserve one client tool execution. Once the bounded budget is consumed, the next HTTP request
- * is final-only; a provider cannot turn a bad plan into an unbounded paid continuation loop. */
-export function reserveStudioTurnToolCall(ledger: StudioTurnLedger): { allowed: boolean; forceFinalResponse: boolean } {
-  if (ledger.toolCallCount >= MAX_STUDIO_TOOL_CALLS_PER_USER_TURN) {
-    ledger.forceFinalResponse = true;
-    return { allowed: false, forceFinalResponse: true };
-  }
-  ledger.toolCallCount += 1;
-  if (ledger.toolCallCount >= MAX_STUDIO_TOOL_CALLS_PER_USER_TURN) ledger.forceFinalResponse = true;
-  return { allowed: true, forceFinalResponse: ledger.forceFinalResponse };
 }
 
 function studioTimelineFingerprint(data: unknown): string | null {
@@ -120,8 +88,6 @@ export function recordStudioTurnToolResult(
     ledger.lastFailureSig = failureSig;
     ledger.sameToolFailureCount = record.toolId === ledger.lastFailureToolId ? ledger.sameToolFailureCount + 1 : 1;
     ledger.lastFailureToolId = record.toolId;
-    if (ledger.repeatedFailureCount >= MAX_STUDIO_IDENTICAL_FAILURES) ledger.forceFinalResponse = true;
-    if (ledger.sameToolFailureCount >= MAX_STUDIO_SAME_TOOL_FAILURES) ledger.forceFinalResponse = true;
   } else if (record.output?.skipped !== true) {
     // Only a genuinely executed success clears the streak — refused/skipped no-ops interleaved
     // between verbatim retries must not disarm the breaker.
@@ -186,10 +152,6 @@ export function effectiveStudioTurnMessages(
   });
   if (!pending.length) return messages as UIMessage[];
   return [...messages, { id: '__studio-turn-ledger__', role: 'assistant', parts: pending }];
-}
-
-export function canRunVisualReview(completedReviews: number): boolean {
-  return completedReviews < MAX_VISUAL_REVIEWS_PER_USER_TURN;
 }
 
 export interface AssistantWorkFold {

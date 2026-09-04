@@ -66,13 +66,11 @@ import {
   assistantMessageSuggestsContinuation,
   assistantWorkDurationMs,
   assistantWorkFold,
-  canRunVisualReview,
   compactStudioChatMessages,
   compactStudioChatMessagesForModel,
   createStudioTurnLedger,
   isRecoverableStudioChatError,
   recordStudioTurnToolResult,
-  reserveStudioTurnToolCall,
   shouldBlockStudioTurnUndo,
   stampLatestAssistantWorkDuration,
 } from "./chat-thread-store";
@@ -150,12 +148,9 @@ export function ChatThread({
   // safety net from resurrecting a turn the user just killed.
   const toolAbortRef = useRef<AbortController | null>(null);
   const userStoppedRef = useRef(false);
-  const visualReviewCountRef = useRef(0);
   const interactionWaitDurationRef = useRef(0);
   const autoRecoveryAttemptedRef = useRef(false);
   const turnLedgerRef = useRef(createStudioTurnLedger());
-  const finalOnlyRef = useRef(false);
-  const turnLimitNoticeRef = useRef<string | null>(null);
   const timelineFrameInspectionRef = useRef<AbortController | null>(null);
   const [timelineFrameInspectionError, setTimelineFrameInspectionError] = useState(false);
   // Completed work stays visible by default. The arrow is an explicit user collapse, not an
@@ -201,7 +196,6 @@ export function ChatThread({
           ...(skillRef.current !== STUDIO_AUTO_SKILL_ID
             ? { skillId: skillRef.current }
             : {}),
-          ...(finalOnlyRef.current ? { finalOnly: true } : {}),
         }),
         prepareSendMessagesRequest: ({
           body,
@@ -248,9 +242,6 @@ export function ChatThread({
       const requestedInput = (toolCall.input ?? {}) as Record<string, unknown>;
       const ledger = turnLedgerRef.current;
       const v3 = agentSurfaceRef.current === "v3" && V3_TOOL_IDS.has(id);
-      // A whole-output review: legacy review_visuals, or a v3 inspect_timeline with no frame selection.
-      const isSequenceReview = id === "review_visuals"
-        || (id === "inspect_timeline" && !Array.isArray(requestedInput.frames) && requestedInput.fromFrame === undefined);
       const canMutate = v3 ? v3ToolCanMutate(id) : studioToolCanMutate(id);
       const publishSuccess = (output: Record<string, unknown>) => {
         const recorded = recordStudioTurnToolResult(ledger, {
@@ -290,19 +281,6 @@ export function ChatThread({
           errorText,
         });
       };
-      const reservation = reserveStudioTurnToolCall(ledger);
-      finalOnlyRef.current = reservation.forceFinalResponse;
-      if (!reservation.allowed) {
-        publishSuccess({
-          ok: true,
-          skipped: true,
-          summary: studioLocale().toLowerCase().startsWith("zh")
-            ? "这一轮已经运行很久了，先向用户汇报现状"
-            : "This turn has been running for a long time; report where things stand to the user.",
-          data: { reason: "turn-tool-limit", instruction: "Stop calling tools. Tell the user what is done and what is not, from the receipts you already have." },
-        });
-        return;
-      }
       if (id === "undo" && shouldBlockStudioTurnUndo(ledger)) {
         publishSuccess({
           ok: true,
@@ -313,19 +291,6 @@ export function ChatThread({
           data: { skipped: true, reason: "previous-mutation-failed", didMutate: false },
         });
         return;
-      }
-      if (isSequenceReview) {
-        if (!canRunVisualReview(visualReviewCountRef.current)) {
-          publishSuccess({
-            ok: true,
-            skipped: true,
-            summary: studioLocale().toLowerCase().startsWith("zh")
-              ? "本轮画面检查已经完成，请根据现有检查结果修复或如实说明未完成项。"
-              : "This turn's visual review is complete. Use the existing evidence to repair the edit or state what remains unfinished.",
-          });
-          return;
-        }
-        visualReviewCountRef.current += 1;
       }
       // Fresh controller per tool run: the stop button aborts it so long tools can stand down at
       // their safe boundaries instead of holding the turn hostage until they finish
@@ -498,21 +463,6 @@ export function ChatThread({
       const last = msgs[msgs.length - 1];
       if (!last || last.role !== "assistant") return;
       const key = `${last.id}:${last.parts.length}`;
-      // A turn forced into final-only mode (tool budget spent, timeline reads refused) can come
-      // back with no text at all — the user then sees a silent stop and reaches for "continue".
-      // Say what happened in the thread itself so the stop reads as a conclusion, not a crash.
-      if (
-        finalOnlyRef.current
-        && !last.parts.some((p) => p.type === "text" && (p as { text?: string }).text?.trim())
-        && turnLimitNoticeRef.current !== last.id
-      ) {
-        turnLimitNoticeRef.current = last.id;
-        finalOnlyRef.current = false;
-        setMessages((s) => s.map((m) => (m.id === last.id
-          ? { ...m, parts: [...m.parts, { type: "text", text: t("chatGen.turnLimitFinal") }] }
-          : m)));
-        return;
-      }
       const completedToolNeedsFollowup = lastAssistantMessageIsCompleteWithToolCalls({ messages: msgs });
       if (!completedToolNeedsFollowup || autoResumedRef.current === key) return;
       autoResumedRef.current = key;
@@ -583,10 +533,8 @@ export function ChatThread({
       if (!options.preserveAutoRecoveryAttempt)
         autoRecoveryAttemptedRef.current = false;
       userStoppedRef.current = false; // a new message re-arms the continuation safety net
-      visualReviewCountRef.current = 0;
       interactionWaitDurationRef.current = 0;
       turnLedgerRef.current = createStudioTurnLedger();
-      finalOnlyRef.current = false;
       // Snapshot the current situation at send time: only the latest one represents reality (situations in old messages are history, identity accounts for it)
       const attachedTimelineFrames = draftParts
         .filter(

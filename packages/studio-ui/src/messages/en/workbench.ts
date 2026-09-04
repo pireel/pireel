@@ -570,8 +570,6 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.reviewJudgingN": "Cloud vision reviewing {n} frames…",
   "workbench.reviewNeedsAtSecs":
     "Missing atSecs: pass the moments to review (typically new blocks' midpoints)",
-  "workbench.reviewBudgetUnchanged":
-    "These unchanged moments have already been reviewed twice. Edit the composition or inspect different moments before reviewing again.",
   "workbench.safe": "Safe",
   "workbench.saveAsElement": "Save as element",
   "workbench.saveAsElementKeep":

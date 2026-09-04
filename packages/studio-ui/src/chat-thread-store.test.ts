@@ -7,14 +7,11 @@ import {
   assistantMessageSuggestsContinuation,
   assistantWorkDurationMs,
   assistantWorkFold,
-  canRunVisualReview,
   createStudioTurnLedger,
   compactStudioChatMessages,
   compactStudioChatMessagesForModel,
   effectiveStudioTurnMessages,
-  MAX_STUDIO_TOOL_CALLS_PER_USER_TURN,
   recordStudioTurnToolResult,
-  reserveStudioTurnToolCall,
   shouldBlockStudioTurnUndo,
   isRecoverableStudioChatError,
   sanitizeRestored,
@@ -290,14 +287,6 @@ describe('synchronous studio turn ledger', () => {
     expect(shouldBlockStudioTurnUndo(ledger)).toBe(false);
   });
 
-  it('forces the next request to be final-only after the bounded tool budget', () => {
-    const ledger = createStudioTurnLedger();
-    for (let index = 0; index < MAX_STUDIO_TOOL_CALLS_PER_USER_TURN; index += 1) {
-      expect(reserveStudioTurnToolCall(ledger).allowed).toBe(true);
-    }
-    expect(ledger.forceFinalResponse).toBe(true);
-    expect(reserveStudioTurnToolCall(ledger).allowed).toBe(false);
-  });
 });
 
 describe('analyze visual card context', () => {
@@ -318,14 +307,6 @@ describe('editorial capacity notice', () => {
     expect(assistantEditorialCapacityShortfall(assistant([covered] as UIMessage['parts']))).toBeNull();
     expect(assistantEditorialCapacityShortfall(assistant([covered, short] as UIMessage['parts']))).toBe(18);
     expect(assistantEditorialCapacityShortfall(assistant([short, covered] as UIMessage['parts']))).toBeNull();
-  });
-});
-
-describe('visual review budget', () => {
-  it('allows one broad review and one targeted recheck per user turn', () => {
-    expect(canRunVisualReview(0)).toBe(true);
-    expect(canRunVisualReview(1)).toBe(true);
-    expect(canRunVisualReview(2)).toBe(false);
   });
 });
 

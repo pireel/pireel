@@ -74,17 +74,15 @@ vi.mock("./chat-thread-store", () => ({
   assistantMessageSuggestsContinuation: mocks.suggestsContinuation,
   assistantWorkDurationMs: () => null,
   assistantWorkFold: () => null,
-  canRunVisualReview: () => true,
   compactStudioChatMessages: (messages: unknown) => messages,
   compactStudioChatMessagesForModel: (messages: unknown) => messages,
   createStudioTurnLedger: () => ({
-    receipts: [], toolCallCount: 0, forceFinalResponse: false,
+    receipts: [],
     unsafeUndoBlocked: false,
   }),
   effectiveStudioTurnMessages: (messages: unknown) => messages,
   isRecoverableStudioChatError: () => false,
   recordStudioTurnToolResult: () => ({ repeatedFailureCount: 0, sameToolFailureCount: 0 }),
-  reserveStudioTurnToolCall: () => ({ allowed: true, forceFinalResponse: false }),
   shouldBlockStudioTurnUndo: () => false,
   stampLatestAssistantWorkDuration: (messages: unknown) => messages,
 }));

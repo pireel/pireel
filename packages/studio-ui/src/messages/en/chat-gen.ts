@@ -94,7 +94,6 @@ export const CHATGEN_EN: Record<string, string> = {
   'chatGen.executionFailed': 'Execution failed',
   'chatGen.continueFromCurrentState': 'Continue from current progress',
   'chatGen.continueAfterInterruptionPrompt': 'Continue the interrupted work. Inspect the current project state first, complete only what remains, and do not repeat changes that already landed.',
-  'chatGen.turnLimitFinal': 'This turn has been running for a long time, so it stops here; every change that landed is on the timeline. Tell me what to change next and I will continue from the current state.',
   'chatGen.interruptedStatePreserved': 'The connection was interrupted. Changes that already landed are still preserved.',
   'chatGen.upstreamBusy': 'The model service is busy. Try again in a moment; changes that already landed are still preserved.',
   'chatGen.expand': 'Expand',
