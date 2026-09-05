@@ -9,6 +9,8 @@
 import { localizedTemplatePrompt, TEMPLATES_BY_TYPE } from './gen-templates';
 
 export type GenerationIntent = 'image' | 'video' | 'audio' | 'element';
+/** Composer mode: plain chat, or one generation intent that reshapes the composer. */
+export type ChatMode = 'chat' | GenerationIntent;
 
 export interface GenerationParams {
   /** image / video */

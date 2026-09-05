@@ -3,8 +3,9 @@
 /** Studio chat input: contenteditable composer with @ element pills and the theme (frame) picker. */
 
 import { useImperativeHandle, useRef, useState } from "react";
-import { AtSign, ArrowUp, Square, Palette, Sparkles, X } from "lucide-react";
-import { GENERATION_INTENTS, generationIntentLine, generationTemplatePrompts, type GenerationIntent, type GenerationParams } from "./chat-generation-intent";
+import { AtSign, ArrowUp, Square, Palette } from "lucide-react";
+import { generationIntentLine, generationTemplatePrompts, type ChatMode, type GenerationIntent, type GenerationParams } from "./chat-generation-intent";
+import { ChatModePicker } from "./chat-mode-picker";
 import type { ChatStatus } from "ai";
 import {
   STUDIO_CREATE_SKILL_ACTION,
@@ -134,7 +135,8 @@ export function Composer({
   const [submitting, setSubmitting] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
   const [customStyle, saveCustomStyle] = useCustomFrameStyle();
-  const [intent, setIntent] = useState<GenerationIntent | null>(null);
+  const [mode, setMode] = useState<ChatMode>("chat");
+  const intent: GenerationIntent | null = mode === "chat" ? null : mode;
   const [genParams, setGenParams] = useState<GenerationParams>({});
   const isBusy = submitting || status === "streaming" || status === "submitted";
 
@@ -333,10 +335,7 @@ export function Composer({
       const accepted = studioAction
         ? await onSubmit(final, { studioAction })
         : await onSubmit(final);
-      if (accepted) {
-        clear();
-        setIntent(null);
-      }
+      if (accepted) clear(); // the mode stays armed: generation is iterative, switch back by hand
     } finally {
       setSubmitting(false);
     }
@@ -681,7 +680,7 @@ export function Composer({
         removeTimelineFramePill(id);
       },
       beginGeneration: (nextIntent, prompt) => {
-        setIntent(nextIntent);
+        setMode(nextIntent);
         setGenParams({});
         if (prompt) {
           suggestedSkillPromptRef.current = null;
@@ -713,7 +712,11 @@ export function Composer({
         <div className="relative">
           {empty && !studioActionActive && (
             <div className="text-ink-4 pointer-events-none absolute left-3 top-2.5 text-[13px]">
-              {placeholder}
+              {intent === "image" ? t("chatGen.placeholderImage")
+                : intent === "video" ? t("chatGen.placeholderVideo")
+                  : intent === "audio" ? t("chatGen.placeholderAudio")
+                    : intent === "element" ? t("chatGen.placeholderElement")
+                      : placeholder}
             </div>
           )}
           <div
@@ -741,67 +744,37 @@ export function Composer({
             className="max-h-[220px] min-h-[80px] overflow-y-auto whitespace-pre-wrap px-3 pb-2 pt-2.5 text-[13px] outline-none"
           />
         </div>
-        {/* Generation intent: which kind + the few parameters a form used to hold. The message still
-            goes to the agent as one instruction (intent line appended on submit); no second UI. */}
-        <div className="flex flex-wrap items-center gap-1 px-2 pb-1">
-          {GENERATION_INTENTS.map((option) => {
-            const active = intent === option.id;
-            return (
-              <button
-                key={option.id}
-                type="button"
-                disabled={isBusy}
-                onClick={() => {
-                  setIntent(active ? null : option.id);
-                  setGenParams({});
-                }}
-                className={`inline-flex h-6 items-center gap-1 rounded-full border px-2 text-[11px] transition disabled:opacity-40 ${
-                  active ? "border-accent bg-accent/12 text-accent" : "border-line text-ink-3 hover:text-ink"
-                }`}
-              >
-                {active ? <Sparkles className="h-3 w-3" /> : null}
-                {t(option.label)}
-              </button>
-            );
-          })}
-          {intent ? (
-            <>
-              {(intent === "image" || intent === "video") && (
-                <ParamGroup
-                  label={t("chatGen.paramRatio")}
-                  options={["9:16", "16:9", "1:1"]}
-                  value={genParams.ratio}
-                  onChange={(ratio) => setGenParams((p) => ({ ...p, ratio: ratio as GenerationParams["ratio"] }))}
-                />
-              )}
-              {intent === "image" && (
-                <ParamGroup
-                  label={t("chatGen.paramCount")}
-                  options={["1", "2", "4"]}
-                  value={genParams.count ? String(genParams.count) : undefined}
-                  onChange={(count) => setGenParams((p) => ({ ...p, count: Number(count) }))}
-                />
-              )}
-              {(intent === "video" || intent === "audio") && (
-                <ParamGroup
-                  label={t("chatGen.paramDuration")}
-                  options={(intent === "video" ? [5, 10, 15] : [30, 60, 120]).map((n) => `${n}s`)}
-                  value={genParams.durationSec ? `${genParams.durationSec}s` : undefined}
-                  onChange={(value) => setGenParams((p) => ({ ...p, durationSec: Number(value.replace(/s$/, "")) }))}
-                />
-              )}
-              <button
-                type="button"
-                onClick={() => setIntent(null)}
-                title={t("chatGen.intentClear")}
-                aria-label={t("chatGen.intentClear")}
-                className="text-ink-4 hover:text-ink inline-flex h-6 w-6 items-center justify-center rounded-full"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </>
-          ) : null}
-        </div>
+        {/* Generation modes reshape the composer: the parameters a form used to hold, then template
+            chips while the box is empty. The message still goes to the agent as one instruction (the
+            intent line is appended on submit) — one tool chain, one history. */}
+        {intent ? (
+          <div className="flex flex-wrap items-center gap-1 px-2 pb-1">
+            {(intent === "image" || intent === "video") && (
+              <ParamGroup
+                label={t("chatGen.paramRatio")}
+                options={["9:16", "16:9", "1:1"]}
+                value={genParams.ratio}
+                onChange={(ratio) => setGenParams((p) => ({ ...p, ratio: ratio as GenerationParams["ratio"] }))}
+              />
+            )}
+            {intent === "image" && (
+              <ParamGroup
+                label={t("chatGen.paramCount")}
+                options={["1", "2", "4"]}
+                value={genParams.count ? String(genParams.count) : undefined}
+                onChange={(count) => setGenParams((p) => ({ ...p, count: Number(count) }))}
+              />
+            )}
+            {(intent === "video" || intent === "audio") && (
+              <ParamGroup
+                label={t("chatGen.paramDuration")}
+                options={(intent === "video" ? [5, 10, 15] : [30, 60, 120]).map((n) => `${n}s`)}
+                value={genParams.durationSec ? `${genParams.durationSec}s` : undefined}
+                onChange={(value) => setGenParams((p) => ({ ...p, durationSec: Number(value.replace(/s$/, "")) }))}
+              />
+            )}
+          </div>
+        ) : null}
         {intent && empty ? (
           <div className="flex flex-wrap items-center gap-1 px-2 pb-1.5">
             <span className="text-ink-4 text-[10.5px]">{t("chatGen.templatesLabel")}</span>
@@ -824,6 +797,16 @@ export function Composer({
         ) : null}
         <div className="flex items-center justify-between gap-2 px-2 pb-2 pt-1">
           <div className="flex items-center gap-0.5">
+            <ChatModePicker
+              editorRef={editorRef}
+              mode={mode}
+              disabled={isBusy}
+              onChange={(next) => {
+                setMode(next);
+                setGenParams({});
+                editorRef.current?.focus();
+              }}
+            />
             <button
               type="button"
               className="text-ink-3 hover:bg-line hover:text-ink inline-flex h-7 w-7 items-center justify-center rounded-md"
@@ -833,7 +816,9 @@ export function Composer({
               <AtSign className="h-3.5 w-3.5" strokeWidth={2.2} />
             </button>
             {/* Visual-style button opens the unified direction + controls dialog. Disabled while the
-                turn is running because a mid-generation direction switch would split one batch. */}
+                turn is running because a mid-generation direction switch would split one batch.
+                Only chat and graphic generation are theme-directed. */}
+            {intent && intent !== "element" ? null : (
             <button
               type="button"
               disabled={isBusy}
@@ -851,6 +836,8 @@ export function Composer({
             >
               <Palette className="h-3.5 w-3.5" strokeWidth={2.2} />
             </button>
+            )}
+            {intent ? null : (
             <ChatTimelineFramePicker
               disabled={isBusy}
               available={timelineFramePickAvailable}
@@ -864,6 +851,8 @@ export function Composer({
                 );
               }}
             />
+            )}
+            {intent ? null : (
             <ChatSkillPicker
               editorRef={editorRef}
               skillId={skillId}
@@ -878,6 +867,7 @@ export function Composer({
                 recomputeEmpty();
               }}
             />
+            )}
           </div>
           {isBusy ? (
             <button
