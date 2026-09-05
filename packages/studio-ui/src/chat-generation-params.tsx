@@ -5,7 +5,7 @@
  * panel held, collapsed into icons on the input's bottom row (like the theme button in Agent mode):
  *  - Ideas: a large dialog of template cards (image/video previews, prompt cards for audio/graphics);
  *  - Settings: a popover with model (image/video), aspect / count / quality (image), aspect /
- *    duration / resolution (video), duration (music / sfx).
+ *    duration / resolution (video), voice + a duration ladder (audio: short = sfx, long = music).
  * The credit estimate (useQuote) renders next to the send button. Options come from the same sources
  * as before (`/api/models?kind=…`, the shell's per-model tables); the chosen values ride in the
  * message's intent line.
@@ -19,7 +19,7 @@ import { imageThumb } from '@pireel/ui/image-url';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@pireel/ui/dialog';
 import { useStudioShell } from './shell-context';
 import { studioLocale, t } from './i18n';
-import { generationTemplates, type GenerationIntent, type GenerationParams } from './chat-generation-intent';
+import { AUDIO_DURATION_LADDER, audioKindFor, generationTemplates, type GenerationIntent, type GenerationParams } from './chat-generation-intent';
 
 const RATIOS: NonNullable<GenerationParams['ratio']>[] = ['9:16', '16:9', '1:1'];
 const TOOL_BUTTON = 'text-ink-3 hover:bg-line hover:text-ink inline-flex h-7 w-7 items-center justify-center rounded-md disabled:pointer-events-none disabled:opacity-30';
@@ -190,16 +190,33 @@ export function GenerationControls({
 }) {
   const shell = useStudioShell();
   const [ideasOpen, setIdeasOpen] = useState(false);
+  // Voices for the audio mode: choosing one turns the message into a narration script.
+  const [voices, setVoices] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    if (intent !== 'audio') return;
+    let cancelled = false;
+    void fetch('/api/studio/voices?limit=50')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { voices?: Array<Record<string, unknown>> } | null) => {
+        if (cancelled || !Array.isArray(j?.voices)) return;
+        setVoices(j.voices
+          .filter((voice) => typeof voice.id === 'string')
+          .map((voice) => ({ id: String(voice.id), name: String(voice.name ?? voice.label ?? voice.id) })));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [intent]);
+  const audioKind = intent === 'audio' ? audioKindFor(params) : null;
   const modelId = params.modelId ?? models[0]?.id ?? '';
   const qualityCfg = intent === 'image' ? (shell.modelParams?.qualityConfigFor(modelId) ?? null) : null;
   const resolutionOptions = intent === 'video' ? (shell.modelParams?.videoResolutionOptions(modelId) ?? []) : [];
   const durationOptions = intent === 'video'
     ? (shell.modelParams?.videoDurationOptions(modelId) ?? ['5', '10'])
-    : intent === 'music'
-      ? ['30', '60', '120', '180']
-      : intent === 'sfx'
-        ? ['3', '5', '10', '15']
-        : [];
+    : intent === 'audio'
+      ? AUDIO_DURATION_LADDER.map(String)
+      : [];
 
   // Switching model (or arming the mode) settles the dependent fields on that model's defaults, the
   // way the panel did: quality tier for images, a supported resolution/duration tier for video.
@@ -211,8 +228,8 @@ export function GenerationControls({
       const resolution = resolutionOptions.includes(params.resolution ?? '') ? params.resolution : resolutionOptions.includes('720p') ? '720p' : resolutionOptions[0];
       const duration = params.durationSec && durationOptions.includes(String(params.durationSec)) ? params.durationSec : Number(durationOptions[0] ?? 5);
       if (resolution !== params.resolution || duration !== params.durationSec || modelId !== params.modelId) onChange({ ...params, ...(modelId ? { modelId } : {}), resolution, durationSec: duration });
-    } else if (intent === 'music' || intent === 'sfx') {
-      if (!params.durationSec || !durationOptions.includes(String(params.durationSec))) onChange({ ...params, durationSec: Number(durationOptions[1] ?? durationOptions[0] ?? 60) });
+    } else if (intent === 'audio') {
+      if (!params.durationSec || !durationOptions.includes(String(params.durationSec))) onChange({ ...params, durationSec: 60 });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intent, modelId]);
@@ -275,13 +292,34 @@ export function GenerationControls({
               onChange={(value) => onChange({ ...params, quality: value })}
             />
           ) : null}
-          {intent === 'video' || intent === 'music' || intent === 'sfx' ? (
+          {intent === 'audio' && voices.length ? (
+            <div className="flex items-center gap-1 py-0.5">
+              <span className="text-ink-4 w-12 shrink-0 text-[10.5px]">{t('chatGen.paramVoice')}</span>
+              <select
+                value={params.voiceId ?? ''}
+                onChange={(event) => onChange({ ...params, voiceId: event.target.value || undefined })}
+                aria-label={t('chatGen.paramVoice')}
+                className="border-line bg-panel text-ink h-6 min-w-0 flex-1 rounded-md border px-1 text-[10.5px] outline-none"
+              >
+                <option value="">{t('chatGen.voiceNone')}</option>
+                {voices.map((voice) => (
+                  <option key={voice.id} value={voice.id}>{voice.name}</option>
+                ))}
+              </select>
+            </div>
+          ) : null}
+          {intent === 'video' || (intent === 'audio' && audioKind !== 'speech') ? (
             <Row
               label={t('chatGen.paramDuration')}
               options={durationOptions.map((option) => ({ value: option, label: `${option}s` }))}
               value={String(params.durationSec ?? durationOptions[0] ?? '')}
               onChange={(value) => onChange({ ...params, durationSec: Number(value) })}
             />
+          ) : null}
+          {intent === 'audio' ? (
+            <div className="text-ink-4 pt-1 text-[10px]">
+              {audioKind === 'speech' ? t('chatGen.audioKindSpeechHint') : audioKind === 'sfx' ? t('chatGen.audioKindSfxHint') : t('chatGen.audioKindMusicHint')}
+            </div>
           ) : null}
           {intent === 'video' && resolutionOptions.length > 1 ? (
             <Row
@@ -305,15 +343,21 @@ export function GenerationCreditsBadge({ intent, params, models }: { intent: Gen
     const ratio = params.ratio ?? '9:16';
     if (intent === 'image') return { n: Math.min(4, Math.max(1, params.count ?? 1)), size: imageSizeParam(modelId, ratio), ...(params.quality ? { quality: params.quality } : {}) };
     if (intent === 'video') return { duration_sec: String(params.durationSec ?? 5), count: 1, resolution: params.resolution ?? '720p', aspect_ratio: ratio === '1:1' ? '9:16' : ratio, generate_audio: false };
-    if (intent === 'music') return { tier: 'song' }; // 30 s floor → always the full-track tier
-    if (intent === 'sfx') return { duration_tier: sfxDurationTier(params.durationSec ?? 5) };
+    if (intent === 'audio') {
+      const kind = audioKindFor(params);
+      if (kind === 'sfx') return { duration_tier: sfxDurationTier(params.durationSec ?? 5) };
+      if (kind === 'music') return { tier: 'song' }; // 30 s floor → always the full-track tier
+      return {};
+    }
     return {};
   }, [intent, params, modelId]);
+  const audioKind = intent === 'audio' ? audioKindFor(params) : null;
   const credits = useQuote({
-    toolId: intent === 'video' ? 'video-gen' : intent === 'music' ? 'music-gen' : intent === 'sfx' ? 'sfx-gen' : 'image-gen',
+    toolId: intent === 'video' ? 'video-gen' : audioKind === 'music' ? 'music-gen' : audioKind === 'sfx' ? 'sfx-gen' : audioKind === 'speech' ? 'speech-gen-unquoted' : 'image-gen',
     modelId: intent === 'image' || intent === 'video' ? modelId : '',
     params: quoteParams,
   });
+  if (audioKind === 'speech') return null; // priced by text length at synthesis time
   if (credits == null) return null;
   return <span className="text-ink-4 text-[10.5px] tabular-nums">{t('chatGen.estimatedCredits', { n: credits })}</span>;
 }

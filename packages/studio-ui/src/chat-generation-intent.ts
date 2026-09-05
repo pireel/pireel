@@ -9,7 +9,7 @@
 import { localizedTemplatePrompt, TEMPLATES_BY_TYPE } from './gen-templates';
 import { t } from './i18n';
 
-export type GenerationIntent = 'image' | 'video' | 'music' | 'sfx' | 'element';
+export type GenerationIntent = 'image' | 'video' | 'audio' | 'element';
 /** Composer mode: plain chat, or one generation intent that reshapes the composer. */
 export type ChatMode = 'chat' | GenerationIntent;
 
@@ -24,23 +24,30 @@ export interface GenerationParams {
   quality?: string;
   /** video only */
   resolution?: string;
-  /** video 4–15 s · music 30–300 s · sfx 0.5–22 s */
+  /** video 4–15 s · audio: ≤ 22 s is a sound effect, ≥ 30 s a music track (the ladder decides the model) */
   durationSec?: number;
+  /** audio only: a chosen voice turns the message into a narration script (speech synthesis). */
+  voiceId?: string;
+}
+
+/** Audio has one mode; the duration ladder picks the generator: short = sound effect, long = music. */
+export const AUDIO_DURATION_LADDER = [3, 5, 10, 15, 30, 60, 120, 180] as const;
+export type AudioKind = 'music' | 'sfx' | 'speech';
+export function audioKindFor(params: GenerationParams): AudioKind {
+  if (params.voiceId) return 'speech';
+  return (params.durationSec ?? 60) <= 22 ? 'sfx' : 'music';
 }
 
 export const GENERATION_INTENTS: readonly { id: GenerationIntent; label: string }[] = [
   { id: 'image', label: 'chatGen.intentImage' },
   { id: 'video', label: 'chatGen.intentVideo' },
-  { id: 'music', label: 'chatGen.intentMusic' },
-  { id: 'sfx', label: 'chatGen.intentSfx' },
+  { id: 'audio', label: 'chatGen.intentAudio' },
   { id: 'element', label: 'chatGen.intentElement' },
 ];
 
 export const RATIO_OPTIONS: readonly NonNullable<GenerationParams['ratio']>[] = ['9:16', '16:9', '1:1'];
 export const IMAGE_COUNT_OPTIONS = [1, 2, 4] as const;
 export const VIDEO_DURATION_OPTIONS = [5, 10, 15] as const;
-export const MUSIC_DURATION_OPTIONS = [30, 60, 120, 180] as const;
-export const SFX_DURATION_OPTIONS = [3, 5, 10, 15] as const;
 
 /** The trailing instruction line appended to the user's message. English on purpose: it is read by
  * the model, not shown as UI; the user's own words above it stay in their language. */
@@ -51,12 +58,15 @@ export function generationIntentLine(intent: GenerationIntent, params: Generatio
   if (params.count && intent === 'image') facts.push(`count ${params.count}`);
   if (params.quality && intent === 'image') facts.push(`quality ${params.quality}`);
   if (params.resolution && intent === 'video') facts.push(`resolution ${params.resolution}`);
-  if (params.durationSec && (intent === 'video' || intent === 'music' || intent === 'sfx')) facts.push(`duration ${params.durationSec}s`);
+  const audioKind = intent === 'audio' ? audioKindFor(params) : null;
+  if (audioKind === 'speech' && params.voiceId) facts.push(`voice ${params.voiceId}`);
+  if (params.durationSec && (intent === 'video' || (intent === 'audio' && audioKind !== 'speech'))) facts.push(`duration ${params.durationSec}s`);
   const kind: Record<GenerationIntent, string> = {
     image: 'an image',
     video: 'a video clip',
-    music: 'a music track (kind music)',
-    sfx: 'a sound effect (kind sfx)',
+    audio: audioKind === 'speech'
+      ? 'narration speech from my text as the exact script'
+      : audioKind === 'sfx' ? 'a sound effect (kind sfx)' : 'a music track (kind music)',
     element: 'an on-screen graphic element',
   };
   return `(Generate ${kind[intent]}${facts.length ? ` — ${facts.join(', ')}` : ''}; register the result in the project media and place it only if I asked.)`;
@@ -74,10 +84,8 @@ export interface GenerationTemplateCard {
 /** Curated prompts for the armed intent (the old panel's template library): image/video/graphic
  * templates from the bundled catalog, built-in ideas for audio. */
 export function generationTemplates(intent: GenerationIntent, locale: string, limit = 24): GenerationTemplateCard[] {
-  if (intent === 'music' || intent === 'sfx') {
-    const keys = intent === 'music'
-      ? ['chatGen.audioIdea1', 'chatGen.audioIdea2', 'chatGen.audioIdea3']
-      : ['chatGen.audioIdea4', 'chatGen.sfxIdea2', 'chatGen.sfxIdea3'];
+  if (intent === 'audio') {
+    const keys = ['chatGen.audioIdea1', 'chatGen.audioIdea2', 'chatGen.audioIdea3', 'chatGen.audioIdea4', 'chatGen.sfxIdea2', 'chatGen.sfxIdea3'];
     return keys.slice(0, limit).map((key) => {
       const prompt = t(key);
       return { id: key, title: prompt.slice(0, 24), prompt };

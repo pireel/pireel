@@ -8,7 +8,7 @@
  */
 
 import { useRef, type RefObject } from 'react';
-import { Check, Image as ImageIcon, Music, Shapes, Sparkles, Video, Volume2 } from 'lucide-react';
+import { Check, Image as ImageIcon, Music, Shapes, Sparkles, Video } from 'lucide-react';
 import { TriggerPopover, type TriggerPopoverHandle } from '@pireel/ui/trigger-popover';
 import { t } from './i18n';
 import type { ChatMode } from './chat-generation-intent';
@@ -23,8 +23,7 @@ const MODE_ICON = {
   chat: Sparkles,
   image: ImageIcon,
   video: Video,
-  music: Music,
-  sfx: Volume2,
+  audio: Music,
   element: Shapes,
 } as const;
 
@@ -33,24 +32,22 @@ export function chatModeLabel(mode: ChatMode): string {
     mode === 'chat' ? 'chatGen.modeChat'
       : mode === 'image' ? 'chatGen.intentImage'
         : mode === 'video' ? 'chatGen.intentVideo'
-          : mode === 'music' ? 'chatGen.intentMusic'
-            : mode === 'sfx' ? 'chatGen.intentSfx'
-              : 'chatGen.intentElement',
+          : mode === 'audio' ? 'chatGen.intentAudio'
+            : 'chatGen.intentElement',
   );
 }
 
 export function ChatModePicker({ editorRef, mode, disabled, onChange }: { editorRef: RefObject<HTMLElement | null>; mode: ChatMode; disabled?: boolean; onChange: (mode: ChatMode) => void }) {
   const popoverRef = useRef<TriggerPopoverHandle>(null);
-  const options: ModeOption[] = (['chat', 'image', 'video', 'music', 'sfx', 'element'] as ChatMode[]).map((id) => ({
+  const options: ModeOption[] = (['chat', 'image', 'video', 'audio', 'element'] as ChatMode[]).map((id) => ({
     id,
     label: chatModeLabel(id),
     summary: t(
       id === 'chat' ? 'chatGen.modeChatSummary'
         : id === 'image' ? 'chatGen.modeImageSummary'
           : id === 'video' ? 'chatGen.modeVideoSummary'
-            : id === 'music' ? 'chatGen.modeMusicSummary'
-              : id === 'sfx' ? 'chatGen.modeSfxSummary'
-                : 'chatGen.modeElementSummary',
+            : id === 'audio' ? 'chatGen.modeAudioSummary'
+              : 'chatGen.modeElementSummary',
     ),
   }));
   const Icon = MODE_ICON[mode];
