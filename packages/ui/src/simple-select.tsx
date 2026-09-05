@@ -26,8 +26,10 @@ export function SimpleSelect({
   placeholder?: string;
   className?: string;
 }) {
+  // `items` lets Select.Value render the selected option's label; without it
+  // the trigger shows the raw value string after a pick.
   return (
-    <BaseSelect.Root value={value} onValueChange={(v) => onValueChange?.(v ?? '')}>
+    <BaseSelect.Root value={value} items={options} onValueChange={(v) => onValueChange?.(v ?? '')}>
       <BaseSelect.Trigger
         className={`border-line-2 bg-panel hover:bg-panel-2 focus:border-accent focus:ring-accent/15 flex w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-[13px] outline-none transition-[border-color,box-shadow] focus:ring-4 ${className}`}
       >
