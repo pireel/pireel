@@ -702,7 +702,7 @@ describe('Agent composition transaction boundary', () => {
     expect(componentSystem).toContain('not a dashboard widget');
   });
 
-  it('pins every explicitly prepared local image even when its native handle is currently readable', async () => {
+  it('caches every explicitly prepared local image on the device', async () => {
     const h = harness();
     const sig = 'platform-data.jpg:12:7';
     const assetId = 'asset-platform-data';
@@ -724,10 +724,7 @@ describe('Agent composition transaction boundary', () => {
     expect(legacyResult.ok, JSON.stringify(legacyResult)).toBe(true);
     expect(JSON.stringify(result)).not.toContain('contentSig');
     expect(localMediaMocks.loadLocalFolderFile).not.toHaveBeenCalled();
-    expect(localMediaMocks.saveLocalVideo).toHaveBeenCalledWith(image, sig, undefined, {
-      pinned: true,
-      binding: { projectId: 'test', assetId },
-    });
+    expect(localMediaMocks.saveLocalVideo).toHaveBeenCalledWith(image, sig);
   });
 
   it('inspects local image pixels before timeline placement without uploading them to the media library', async () => {
@@ -827,10 +824,7 @@ describe('Agent composition transaction boundary', () => {
       },
     });
     expect(providerMocks.transcribe).toHaveBeenCalledWith(video, expect.anything());
-    expect(localMediaMocks.saveLocalVideo).toHaveBeenCalledWith(video, sig, undefined, {
-      pinned: false,
-      binding: { projectId: 'test', assetId },
-    });
+    expect(localMediaMocks.saveLocalVideo).toHaveBeenCalledWith(video, sig);
     expect(h.ctx.localTranscriptCacheRef.current.get(assetId)).toEqual([
       { start: 0.2, end: 2.4, text: '先用结果抓住观众' },
     ]);
@@ -994,7 +988,7 @@ describe('Agent composition transaction boundary', () => {
     expect(videoFileRef.current).toBe(video);
   });
 
-  it('asks for access restoration instead of timeline placement when an unplaced local source is unavailable', async () => {
+  it('asks for a re-import instead of timeline placement when an unplaced source is unavailable everywhere', async () => {
     const h = harness();
     const sig = 'offline-reference.mp4:240:12';
     const assetId = 'asset-offline-reference';
@@ -1010,7 +1004,7 @@ describe('Agent composition transaction boundary', () => {
 
     const result = await runStudioTool(h.ctx, 'read_script', { assetId: `local:${assetId}` });
 
-    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('restore access in Materials') });
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('re-import that asset in Materials') });
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('Do not place the asset on the timeline') });
     expect(Object.keys(h.documentRef.current.assets)).toEqual(assetIdsBefore);
   });

@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 import {
   folderImportTriggerProps,
-  groupFolderRestoreEntries,
   pendingLocalAssetEntries,
   reconcileLocalAssetRegistry,
   renameLocalAssetEntry,
@@ -32,20 +31,6 @@ describe('local folder recovery', () => {
     const cached = [entry('offline.png:1:1')];
 
     expect(reconcileLocalAssetRegistry(cached, undefined, true)).toEqual(cached);
-  });
-
-  it('collapses every missing child from one imported folder into one recovery group', () => {
-    const groups = groupFolderRestoreEntries([
-      entry('a.png:1:1', 'folder-a', 'a.png'),
-      entry('b.png:2:2', 'folder-a', 'nested/b.png'),
-      entry('c.png:3:3', 'folder-b', 'c.png'),
-      entry('legacy.png:4:4'),
-    ]);
-
-    expect(groups).toHaveLength(2);
-    expect(groups[0]?.folder.id).toBe('folder-a');
-    expect(groups[0]?.entries.map((item) => item.sig)).toEqual(['a.png:1:1', 'b.png:2:2']);
-    expect(groups[1]?.entries).toHaveLength(1);
   });
 
   it('opens the folder picker during the trusted click capture, before dropdown selection', () => {

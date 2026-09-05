@@ -1,5 +1,5 @@
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
-import { durableFileSig } from './media';
+import { durableFileSig, probeVideoFile } from './media';
 import { saveLocalStream, saveLocalVideo } from './local-media';
 
 export type LocalAssetKind = 'video' | 'image' | 'audio';
@@ -26,11 +26,12 @@ export function localAssetKindOf(
 export interface BrowserLocalImportSource {
   type: 'browser';
   file: File;
-  handle?: FileSystemFileHandle;
   folder?: LocalFolderSource;
   assetId?: string;
 }
 
+/** Legacy helper lane (plugin versions before the cloud import): bytes served by a one-time
+ * loopback server on the agent's machine. Kept so older plugins keep working for one release. */
 export interface SkillLoopbackImportSource {
   type: 'skill-loopback';
   localUrl: string;
@@ -55,6 +56,13 @@ export interface ImportedLocalAsset {
   kind: LocalAssetKind;
   folder?: LocalFolderSource;
   source: LocalImportSource['type'];
+  /** Probed at import (video/audio); images are measured by the panel. */
+  durationSec?: number | null;
+  width?: number | null;
+  height?: number | null;
+  /** True when the device cache could not hold the bytes: the in-memory File is the only local copy
+   * until the cloud upload lands. */
+  cacheMiss: boolean;
 }
 
 /** Uniqueness domain is one project's asset set (content identity travels via contentSig), so
@@ -95,7 +103,7 @@ export function loopbackImportUrl(raw: string): URL | null {
 
 const expectedSizeFromSig = (sig: string): number | null => {
   const parts = sig.split(':');
-  const size = Number(parts[parts.length - 2]);
+  const size = Number(sig.startsWith('pireel2:') ? parts[parts.length - 1] : parts[parts.length - 2]);
   return Number.isSafeInteger(size) && size >= 0 ? size : null;
 };
 
@@ -145,38 +153,41 @@ async function materialize(
     name: source.filename || 'import',
     type,
     expectedSize,
-    pinned: sourceKind === 'image' || Boolean(source.folder),
   });
   return { file, sig: source.sig, persisted: true };
 }
 
-/** Browser picker files and Skill loopback files converge here. Source permission/materialization is
- * adapter-specific; classification, OPFS/handle persistence and index entry creation are shared. */
+/** Duration/dimensions for video and audio, measured locally. Images are measured by the caller
+ * (needs a DOM Image); a probe failure is not an import failure. */
+async function probeFacts(file: File, kind: LocalAssetKind): Promise<Pick<ImportedLocalAsset, 'durationSec' | 'width' | 'height'>> {
+  // No real container fits in a few KB; skipping keeps the demuxer off truncated/placeholder bytes.
+  if (kind === 'image' || file.size < 4096) return {};
+  try {
+    const probe = await probeVideoFile(file);
+    return {
+      durationSec: probe.durationSec > 0 ? probe.durationSec : null,
+      ...(probe.width > 0 && probe.height > 0 ? { width: probe.width, height: probe.height } : {}),
+    };
+  } catch {
+    return {};
+  }
+}
+
+/** Browser picker files and legacy loopback files converge here: classification, content identity,
+ * device caching and index entry creation are shared. The cloud upload is NOT started here — the
+ * caller hands the returned File to the asset upload queue so importing never waits on the network. */
 export async function importLocalSource(
   source: LocalImportSource,
-  projectId?: string,
 ): Promise<ImportedLocalAsset> {
   const { file, sig, persisted } = await materialize(source);
   const assetId = source.assetId || newLocalAssetId();
   const kind = localAssetKindOf(file);
   if (!kind) throw new Error(`unsupported local media: ${file.name}`);
-  const handle = source.type === 'browser' ? source.handle : undefined;
   const folder = source.folder;
-  if (!persisted) {
-    const stored = await saveLocalVideo(file, sig, handle, {
-      // Still images are small enough to keep durably and are rendered from several runtimes
-      // (parent timeline + opaque preview iframe). Never make their availability depend only on a
-      // native handle whose permission can fall back to "prompt" after a refresh.
-      pinned: kind === 'image' || Boolean(folder && !handle),
-      // A single-file handle keeps a bounded fallback. Images keep one even when they came from a
-      // folder handle so a hot reload does not turn a valid clip into an unresolved locator.
-      fallbackCopy: kind === 'image' || Boolean(handle && !folder),
-      ...(projectId ? { binding: { projectId, assetId } } : {}),
-    });
-    if (!stored) {
-      throw new Error('local media could not be persisted on this device');
-    }
-  }
+  // The device cache is a convenience (instant reopen on this device). A full or unavailable cache
+  // must not fail the import: the File stays usable in memory and the cloud copy is the durable one.
+  const cached = persisted ? true : await saveLocalVideo(file, sig);
+  const facts = await probeFacts(file, kind);
   return {
     assetId,
     contentSig: sig,
@@ -186,6 +197,8 @@ export async function importLocalSource(
     kind,
     ...(folder ? { folder } : {}),
     source: source.type,
+    ...facts,
+    cacheMiss: !cached,
   };
 }
 
@@ -198,13 +211,13 @@ export interface LocalImportSessionResult {
  * spikes in embedded browsers. One bad file does not abort the rest of the import session. */
 export async function runLocalImportSession(
   sources: LocalImportSource[],
-  projectId?: string,
+  _projectId?: string,
 ): Promise<LocalImportSessionResult> {
   const imported: ImportedLocalAsset[] = [];
   const rejected: LocalImportSessionResult['rejected'] = [];
   for (const source of sources) {
     try {
-      imported.push(await importLocalSource(source, projectId));
+      imported.push(await importLocalSource(source));
     } catch (error) {
       rejected.push({
         source,
@@ -217,16 +230,22 @@ export async function runLocalImportSession(
 
 export function localAssetIndexEntry(
   asset: ImportedLocalAsset,
-  facts?: { width?: number | null; height?: number | null; createdAt?: number },
+  facts?: { width?: number | null; height?: number | null; createdAt?: number; cloudKey?: string },
 ): LocalAssetIndexEntry {
+  const w = facts?.width ?? asset.width ?? null;
+  const h = facts?.height ?? asset.height ?? null;
   return {
     assetId: asset.assetId,
     contentSig: asset.contentSig,
     sig: asset.sig,
+    ...(facts?.cloudKey ? { cloudKey: facts.cloudKey } : {}),
     label: asset.label,
     kind: asset.kind,
-    w: facts?.width ?? null,
-    h: facts?.height ?? null,
+    w,
+    h,
+    ...(asset.durationSec ? { durationSec: asset.durationSec } : {}),
+    size: asset.file.size,
+    ...(asset.file.type ? { mime: asset.file.type } : {}),
     ...(asset.folder ? { folder: asset.folder } : {}),
     createdAt: facts?.createdAt ?? Date.now(),
   };

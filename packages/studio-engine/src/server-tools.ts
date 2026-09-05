@@ -391,6 +391,19 @@ export function runServerTool(tool: string, input: Record<string, unknown>, p: S
   if (p.receipt === 'v3' && tool === 'get_state') {
     const window = input.window && typeof input.window === 'object' ? (input.window as { tracks?: string[]; fromFrame?: number; toFrame?: number }) : undefined;
     const state = renderV3State(p.document, window ? { window } : {});
+    // The project library (imported but unplaced media) lives in the project context; the offline
+    // agent must see it here exactly like the live tab does, or it goes hunting through cloud scopes.
+    const knownSigs = new Set(Object.values(p.document.assets).map((asset) => asset.locator.localSig).filter(Boolean));
+    for (const entry of p.context.localAssets ?? []) {
+      if (!entry.assetId || p.document.assets[entry.assetId] || knownSigs.has(entry.contentSig)) continue;
+      state.assets.push({
+        id: entry.assetId,
+        kind: entry.kind ?? 'video',
+        ...(entry.label ? { label: entry.label } : {}),
+        ...(entry.durationSec ? { durationSec: entry.durationSec } : {}),
+        library: true,
+      });
+    }
     return {
       result: {
         ok: true,

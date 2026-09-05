@@ -4,6 +4,10 @@
 
 import { useImperativeHandle, useRef, useState } from "react";
 import { AtSign, ArrowUp, Square, Palette } from "lucide-react";
+import { generationIntentLine, type ChatMode, type GenerationIntent, type GenerationParams } from "./chat-generation-intent";
+import { ChatModePicker } from "./chat-mode-picker";
+import { GenerationControls, GenerationCreditsBadge } from "./chat-generation-params";
+import { useEffect } from "react";
 import type { ChatStatus } from "ai";
 import {
   STUDIO_CREATE_SKILL_ACTION,
@@ -67,6 +71,9 @@ export interface ComposerHandle {
   beginTimelineFrameCapture(frame: PendingTimelineFrame): void;
   resolveTimelineFrameCapture(frame: AttachedTimelineFrame): void;
   failTimelineFrameCapture(id: string): void;
+  /** Arm a generation intent (image/video/audio/element) below the input, optionally with a prompt.
+   * Generation is an agent tool call; the intent only tells the agent what kind and which parameters. */
+  beginGeneration(intent: GenerationIntent, prompt?: string): void;
 }
 
 export function Composer({
@@ -130,6 +137,28 @@ export function Composer({
   const [submitting, setSubmitting] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
   const [customStyle, saveCustomStyle] = useCustomFrameStyle();
+  const [mode, setMode] = useState<ChatMode>("chat");
+  const intent: GenerationIntent | null = mode === "chat" ? null : mode;
+  const [genParams, setGenParams] = useState<GenerationParams>({});
+  // Hosted model catalog for the armed kind (image/video only), same source the retired panel used.
+  const [genModels, setGenModels] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    if (intent !== "image" && intent !== "video") {
+      setGenModels([]);
+      return;
+    }
+    let cancelled = false;
+    void fetch(`/api/models?kind=${intent}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { models?: Array<{ id?: string; name?: string }> } | null) => {
+        if (cancelled || !Array.isArray(j?.models)) return;
+        setGenModels(j.models.filter((m): m is { id: string; name?: string } => typeof m?.id === "string").map((m) => ({ id: m.id, name: m.name ?? m.id })));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [intent]);
   const isBusy = submitting || status === "streaming" || status === "submitted";
 
   function recomputeEmpty() {
@@ -316,13 +345,18 @@ export function Composer({
       (part) => part.type !== "text" || part.text.length > 0,
     );
     if (!final.length) return;
+    if (intent) {
+      // The intent rides in the user's own message (never in the system prompt, so the prefix cache
+      // stays byte-stable): one compact trailing line the agent reads as kind + parameters.
+      final.push({ type: "text", text: `\n${generationIntentLine(intent, genParams)}` });
+    }
     const studioAction = currentStudioAction();
     setSubmitting(true);
     try {
       const accepted = studioAction
         ? await onSubmit(final, { studioAction })
         : await onSubmit(final);
-      if (accepted) clear();
+      if (accepted) clear(); // the mode stays armed: generation is iterative, switch back by hand
     } finally {
       setSubmitting(false);
     }
@@ -666,6 +700,16 @@ export function Composer({
       failTimelineFrameCapture: (id) => {
         removeTimelineFramePill(id);
       },
+      beginGeneration: (nextIntent, prompt) => {
+        clear();
+        setMode(nextIntent);
+        setGenParams({});
+        if (prompt) {
+          suggestedSkillPromptRef.current = null;
+          replaceEditorText(prompt);
+        }
+        editorRef.current?.focus();
+      },
     }),
     // DOM-backed composer state deliberately lives in refs; keep the imperative surface stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -690,7 +734,11 @@ export function Composer({
         <div className="relative">
           {empty && !studioActionActive && (
             <div className="text-ink-4 pointer-events-none absolute left-3 top-2.5 text-[13px]">
-              {placeholder}
+              {intent === "image" ? t("chatGen.placeholderImage")
+                : intent === "video" ? t("chatGen.placeholderVideo")
+                  : intent === "audio" ? t("chatGen.placeholderAudio")
+                    : intent === "element" ? t("chatGen.placeholderElement")
+                      : placeholder}
             </div>
           )}
           <div
@@ -718,8 +766,22 @@ export function Composer({
             className="max-h-[220px] min-h-[80px] overflow-y-auto whitespace-pre-wrap px-3 pb-2 pt-2.5 text-[13px] outline-none"
           />
         </div>
+        {/* Generation modes reshape the composer's toolbar (ideas / model / settings icons below); the
+            message still goes to the agent as one instruction — the intent line is appended on submit. */}
         <div className="flex items-center justify-between gap-2 px-2 pb-2 pt-1">
           <div className="flex items-center gap-0.5">
+            <ChatModePicker
+              editorRef={editorRef}
+              mode={mode}
+              disabled={isBusy}
+              onChange={(next) => {
+                if (next === mode) return;
+                clear(); // a mode is a different task: never carry a half-typed draft across
+                setMode(next);
+                setGenParams({});
+                editorRef.current?.focus();
+              }}
+            />
             <button
               type="button"
               className="text-ink-3 hover:bg-line hover:text-ink inline-flex h-7 w-7 items-center justify-center rounded-md"
@@ -728,8 +790,24 @@ export function Composer({
             >
               <AtSign className="h-3.5 w-3.5" strokeWidth={2.2} />
             </button>
+            {intent ? (
+              <GenerationControls
+                intent={intent}
+                params={genParams}
+                models={genModels}
+                disabled={isBusy}
+                onChange={setGenParams}
+                onUseTemplate={(prompt) => {
+                  suggestedSkillPromptRef.current = null;
+                  replaceEditorText(prompt);
+                  editorRef.current?.focus();
+                }}
+              />
+            ) : null}
             {/* Visual-style button opens the unified direction + controls dialog. Disabled while the
-                turn is running because a mid-generation direction switch would split one batch. */}
+                turn is running because a mid-generation direction switch would split one batch.
+                Only chat and graphic generation are theme-directed. */}
+            {intent && intent !== "element" ? null : (
             <button
               type="button"
               disabled={isBusy}
@@ -747,6 +825,8 @@ export function Composer({
             >
               <Palette className="h-3.5 w-3.5" strokeWidth={2.2} />
             </button>
+            )}
+            {intent ? null : (
             <ChatTimelineFramePicker
               disabled={isBusy}
               available={timelineFramePickAvailable}
@@ -760,6 +840,8 @@ export function Composer({
                 );
               }}
             />
+            )}
+            {intent ? null : (
             <ChatSkillPicker
               editorRef={editorRef}
               skillId={skillId}
@@ -774,7 +856,10 @@ export function Composer({
                 recomputeEmpty();
               }}
             />
+            )}
           </div>
+          <div className="flex items-center gap-2">
+          {intent ? <GenerationCreditsBadge intent={intent} params={genParams} models={genModels} /> : null}
           {isBusy ? (
             <button
               type="button"
@@ -795,6 +880,7 @@ export function Composer({
               <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
             </button>
           )}
+          </div>
         </div>
       </div>
 
@@ -999,3 +1085,4 @@ function findElementPill(
     ) ?? null
   );
 }
+

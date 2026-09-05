@@ -1,16 +1,11 @@
 'use client';
 
 /**
- * Cloud assets — personal uploads (/api/me/materials) + the current project's generated
- * images/videos/audio (/api/create project space history) + project components
+ * Library — personal uploads across projects (/api/me/materials) + project components
  * (element-history), merged into one reverse-chronological grid distinguished by origin.
- * Pending gens hold a placeholder at the top and turn into assets in place after 4s polling.
  *
- * Host-curated content is injected separately through StudioShell;
- * the current project's local, never-uploaded media lives in MyAssetsPanel.
- *
- * Generation has its own primary-nav panel in the workbench. Generated results still appear
- * here as cloud assets; leaving the generation panel bumps genRefreshTick to refetch them.
+ * Host-curated content is injected separately through StudioShell. The current project's media —
+ * imports AND generated outputs — lives in MyAssetsPanel (the project media directory).
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -34,7 +29,6 @@ import {
   DialogTitle,
 } from '@pireel/ui/dialog';
 import type { Composition, MediaRef } from '@pireel/studio-engine/composition';
-import { type GenJob, listStudioGens, pollCreation } from './gen-api';
 import {
   addElementEntry,
   type ElementEntry,
@@ -121,20 +115,6 @@ function materialToItem(it: MaterialItem): LibraryItem | null {
   };
 }
 
-function genToItems(job: GenJob, kind: 'image' | 'video' | 'audio'): LibraryItem[] {
-  if (job.status !== 'succeeded') return [];
-  return job.assets.map((a, i) => ({
-    id: `gen:${job.id}:${i}`,
-    kind,
-    origin: 'gen' as const,
-    insertUrl: a.url, // gen-api already returns a full-res direct URL
-    thumbSrc: kind === 'image' ? a.key : null, // generated video has no extracted frame; thumbnail uses <video> first frame
-    label: job.prompt.slice(0, 60) || (kind === 'video' ? t('common.videoGeneration') : kind === 'audio' ? t('panels.music') : t('common.imageGeneration')),
-    createdAt: job.createdAt,
-    deletable: false,
-  }));
-}
-
 function elementToItem(e: ElementEntry): LibraryItem {
   return {
     id: `el:${e.id}`,
@@ -178,9 +158,7 @@ export function CloudAssetsPanel({
   const { playingUrl: audioPlaying, toggle: toggleAudio } = useAudioPreview();
   const [q, setQ] = useState('');
   const [uploads, setUploads] = useState<LibraryItem[]>([]);
-  const [gens, setGens] = useState<GenJob[]>([]); // image+video stored together, tagged by kind when itemized
   const [elements, setElements] = useState<ElementEntry[]>([]);
-  const genKindRef = useRef<Map<string, 'image' | 'video' | 'audio'>>(new Map());
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState<LibraryItem | null>(null);
@@ -231,72 +209,25 @@ export function CloudAssetsPanel({
   // for instant open, then fetch and merge cloud (cloud wins; local-only entries backfill to cloud, see element-history)
   useEffect(() => {
     let gone = false;
-    genKindRef.current.clear();
-    setGens([]);
     setElements(loadElementEntries(projectId));
     void syncElementEntries(projectId).then((merged) => {
       if (merged && !gone) setElements(merged);
     });
-    void Promise.all([listStudioGens(projectId, 'image').catch(() => []), listStudioGens(projectId, 'video').catch(() => []), listStudioGens(projectId, 'audio').catch(() => [])]).then(
-      ([imgs, vids, auds]) => {
-        for (const j of imgs) genKindRef.current.set(j.id, 'image');
-        for (const j of vids) genKindRef.current.set(j.id, 'video');
-        for (const j of auds) genKindRef.current.set(j.id, 'audio');
-        setGens([...imgs, ...vids, ...auds]);
-      },
-    );
     return () => {
       gone = true;
     };
   }, [genRefreshTick, projectId]);
 
-  const gensRef = useRef(gens);
-  gensRef.current = gens;
-  useEffect(() => {
-    const pending = gens.filter((g) => g.status === 'pending');
-    if (pending.length === 0) return;
-    let stopped = false;
-    const tick = async () => {
-      const ids = gensRef.current.filter((g) => g.status === 'pending').map((g) => g.id);
-      if (ids.length === 0) return;
-      const fresh = await Promise.all(ids.map((id) => pollCreation(id).catch(() => null)));
-      if (stopped) return;
-      setGens((cur) =>
-        cur.map((g) => {
-          const f = fresh.find((x) => x?.id === g.id);
-          return f && f.status !== g.status ? f : g;
-        }),
-      );
-    };
-    const timer = setInterval(() => void tick(), 4000);
-    return () => {
-      stopped = true;
-      clearInterval(timer);
-    };
-  }, [gens]);
-
-  const items = useMemo(() => {
-    const genItems = gens.flatMap((j) => {
-      const k = genKindRef.current.get(j.id);
-      return k ? genToItems(j, k) : [];
-    });
-    return [...uploads, ...genItems, ...elements.map(elementToItem)].sort((a, b) => b.createdAt - a.createdAt);
-  }, [uploads, gens, elements]);
+  const items = useMemo(
+    () => [...uploads, ...elements.map(elementToItem)].sort((a, b) => b.createdAt - a.createdAt),
+    [uploads, elements],
+  );
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return items.filter((it) => (kind === 'all' || it.kind === kind) && (!needle || it.label.toLowerCase().includes(needle)));
   }, [items, kind, q]);
 
-  const pendingJobs = useMemo(
-    () =>
-      gens.filter((g) => {
-        if (g.status !== 'pending') return false;
-        const k = genKindRef.current.get(g.id) ?? 'image';
-        return kind === 'all' || kind === k;
-      }),
-    [gens, kind],
-  );
 
   /** Body click: audio toggles inline playback (its "preview"), everything else opens the lightbox. */
   const activate = (it: LibraryItem) => {
@@ -508,31 +439,11 @@ export function CloudAssetsPanel({
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto p-2">
-        {/* Pending gens: placeholder card pinned to top, turns into an asset in place when ready */}
-        {pendingJobs.length > 0 && (
-          <div className="mb-1.5 space-y-1.5">
-            {pendingJobs.map((g) => (
-              <div key={g.id} className="border-line flex items-center gap-2 rounded-md border p-2">
-                <Loader2 size={13} className="text-ink-4 shrink-0 animate-spin" />
-                <div className="min-w-0 flex-1">
-                  <div className="text-ink-3 truncate text-[11px]">{g.prompt || t('panels.generating')}</div>
-                  <div className="text-ink-4 text-[10px]">
-                    {(genKindRef.current.get(g.id) ?? 'image') === 'video'
-                      ? t('panels.generatingVideo')
-                      : (genKindRef.current.get(g.id) ?? 'image') === 'audio'
-                        ? t('panels.generatingAudio')
-                        : t('panels.generatingImage')}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
         {loading && items.length === 0 ? (
           <div className="text-ink-4 flex items-center justify-center gap-2 pt-10 text-[11.5px]">
             <Loader2 size={13} className="animate-spin" /> {t('panels.loadingAssets')}
           </div>
-        ) : shown.length === 0 && pendingJobs.length === 0 ? (
+        ) : shown.length === 0 ? (
           <div className="text-ink-4 pt-10 text-center text-[11.5px]">
             {items.length === 0 ? (
               <>

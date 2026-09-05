@@ -17,6 +17,7 @@
  * This file keeps the public types + the multi-session shell.
  */
 
+import type { GenerationIntent } from "./chat-generation-intent";
 import {
   forwardRef,
   memo,
@@ -114,6 +115,8 @@ export interface StudioChatHandle {
   resolveTimelineFrameCapture(frame: AttachedTimelineFrame): void;
   /** Remove a failed loading tag. */
   failTimelineFrameCapture(id: string): void;
+  /** Arm a generation intent in the composer (the generation entry point: one chat, one tool chain). */
+  beginGeneration(intent: GenerationIntent, prompt?: string): void;
 }
 
 export interface StudioChatProps {
@@ -331,6 +334,7 @@ export const StudioChat = memo(
           innerRef.current?.resolveTimelineFrameCapture(frame),
         failTimelineFrameCapture: (id) =>
           innerRef.current?.failTimelineFrameCapture(id),
+        beginGeneration: (intent, prompt) => innerRef.current?.beginGeneration(intent, prompt),
       }),
       [],
     );

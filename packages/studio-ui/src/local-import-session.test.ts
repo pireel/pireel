@@ -171,22 +171,33 @@ describe('unified local import session', () => {
     });
   });
 
-  it('pins a folder-handle image in OPFS so a refresh does not require permission again', async () => {
+  it('caches a picked file on the device and reports probe facts without any persisted handle', async () => {
     installMemoryOpfs();
     const image = new File(['image-pixels'], 'traffic.png', {
       type: 'image/png',
       lastModified: 17,
     });
-    const handle = { getFile: async () => image } as FileSystemFileHandle;
     const session = await runLocalImportSession([{
       type: 'browser',
       file: image,
-      handle,
       folder: { id: 'folder-data', name: '数据图', path: 'traffic.png' },
     }]);
 
     expect(session.rejected).toEqual([]);
-    expect(await (await loadLocalVideo(session.imported[0]!.sig))?.text()).toBe('image-pixels');
+    const asset = session.imported[0]!;
+    expect(asset.cacheMiss).toBe(false);
+    expect(asset.sig).toMatch(/^pireel2:/);
+    expect(await (await loadLocalVideo(asset.sig))?.text()).toBe('image-pixels');
+    expect(localAssetIndexEntry(asset)).toMatchObject({ size: image.size, mime: 'image/png', kind: 'image' });
+  });
+
+  it('keeps the import usable when the device cache is unavailable (the cloud copy is the durable one)', async () => {
+    vi.stubGlobal('indexedDB', undefined);
+    vi.stubGlobal('navigator', { storage: {} });
+    const image = new File(['no-cache'], 'logo.png', { type: 'image/png' });
+    const session = await runLocalImportSession([{ type: 'browser', file: image }]);
+    expect(session.rejected).toEqual([]);
+    expect(session.imported[0]?.cacheMiss).toBe(true);
   });
 
   it('streams loopback response chunks into OPFS without materializing a Blob', async () => {

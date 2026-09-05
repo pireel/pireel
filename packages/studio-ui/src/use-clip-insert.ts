@@ -35,7 +35,7 @@ import {
   fileSig,
   filmstripTimestampsForRanges,
 } from './media';
-import { alignFileToSig, loadLocalAssetFile, loadLocalVideo, saveLocalVideo } from './local-media';
+import { alignFileToSig, loadLocalVideo, resolveAssetBytes, saveLocalVideo } from './local-media';
 import { materializeRemoteMedia } from './remote-media';
 import {
   isDeviceLocalLibraryAsset,
@@ -509,9 +509,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
       return '';
     }
     clipFilesRef.current.set(input.url, input.file);
-    void saveLocalVideo(input.file, durableSig, undefined, localEntry ? {
-      binding: { projectId, assetId: localEntry.assetId },
-    } : undefined).catch(() => {});
+    void saveLocalVideo(input.file, durableSig).catch(() => {});
     pushUndoSnapshot();
     rememberAssetUrl(assetId, input.url);
     setDocument(inserted.document);
@@ -536,7 +534,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
     const localEntry = a.localAssetId
       ? localAssetIndexRef.current.find((entry) => entry.assetId === a.localAssetId)
       : undefined;
-    if (!file && localEntry) file = await loadLocalAssetFile(projectId, localEntry);
+    if (!file && localEntry) file = await resolveAssetBytes(localEntry, { projectId });
     if (!file && locatorSig) file = await loadLocalVideo(locatorSig);
     const local = isDeviceLocalLibraryAsset(a);
     if (!file && !local) {
@@ -623,11 +621,11 @@ export function useClipInsert(deps: ClipInsertDeps) {
           }
         }
       }
-      // Local asset with a sig: reuse the on-device file (native handle / OPFS) — zero-copy, original
-      // identity kept (srcSig === panel sig), no fetch. Falls through to the byte-fetch lane on a miss.
+      // Local asset with a sig: reuse the device cache (or the cloud copy by key) — original identity
+      // kept (srcSig === panel sig). Falls through to the byte-fetch lane on a miss.
       if (a.type === 'video' && a.sig) {
         const f = localEntry
-          ? await loadLocalAssetFile(projectId, localEntry)
+          ? await resolveAssetBytes(localEntry, { projectId })
           : await loadLocalVideo(a.sig);
         if (f) {
           const url = createClipObjectUrl(f);
@@ -677,9 +675,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
           toast.error(t('workbench.couldNotReadDuration'));
           return;
         }
-        void saveLocalVideo(f, fileSig(f), undefined, localEntry ? {
-          binding: { projectId, assetId: localEntry.assetId },
-        } : undefined).catch(() => {});
+        void saveLocalVideo(f, fileSig(f)).catch(() => {});
         insertClipCore(url, Math.round(meta.dur * 100) / 100, at, f, meta, effectiveSig, coreOptions);
       } else {
         const f = await stillClipFromImage(sourceFile, a.label);
@@ -694,9 +690,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
           // phantom "5s video" card); the image bytes persist through the local handle/OPFS only,
           // and recovery re-derives the still clip from them.
           const img = alignFileToSig(sourceFile, effectiveSig);
-          void saveLocalVideo(img, effectiveSig, undefined, localEntry ? {
-            binding: { projectId, assetId: localEntry.assetId },
-          } : undefined).catch(() => {});
+          void saveLocalVideo(img, effectiveSig).catch(() => {});
           insertClipCore(url, STILL_CLIP_SEC, at, f, a.dims ? { w: a.dims.w, h: a.dims.h } : null, effectiveSig, coreOptions);
         } else {
           void saveLocalVideo(f, fileSig(f)).catch(() => {});

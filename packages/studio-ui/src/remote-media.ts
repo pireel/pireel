@@ -1,7 +1,7 @@
 'use client';
 
 import { alignFileToSig, deleteLocalVideo, loadLocalVideo, saveLocalStream, saveLocalVideo } from './local-media';
-import { fileNameFromSig } from './media';
+import { fileNameFromSig, sigSize } from './media';
 
 export interface MaterializedRemoteMedia {
   file: File;
@@ -15,12 +15,6 @@ interface MaterializeRemoteMediaOptions {
   pinned?: boolean;
   signal?: AbortSignal;
 }
-
-const sizeFromSig = (sig: string): number | null => {
-  const parts = sig.split(':');
-  const size = Number(parts[parts.length - 2]);
-  return Number.isSafeInteger(size) && size >= 0 ? size : null;
-};
 
 const safeName = (value: string, fallback: string): string => {
   const clean = value.replace(/[\\/:*?"<>|\p{Cc}]+/gu, '-').trim();
@@ -70,7 +64,7 @@ export async function materializeRemoteMedia(
   const headerSize = headerRaw == null || headerRaw.trim() === '' ? Number.NaN : Number(headerRaw);
   const responseSize = Number.isSafeInteger(headerSize) && headerSize >= 0 ? headerSize : null;
   const requestedSig = options.sig?.trim() || null;
-  const requestedSize = requestedSig ? sizeFromSig(requestedSig) : null;
+  const requestedSize = requestedSig ? sigSize(requestedSig) : null;
   const expectedSize = requestedSize ?? responseSize;
   const contentType = response.headers.get('content-type')?.split(';')[0]?.trim() || options.type || 'application/octet-stream';
   const baseName = safeName(options.name || urlName(url), contentType.startsWith('audio/') ? 'audio' : contentType.startsWith('image/') ? 'image' : 'video');
@@ -104,7 +98,7 @@ export async function materializeRemoteMedia(
     expectedSize: null,
   });
   const sig = `${durableName}:${temporary.size}:0`;
-  const stored = await saveLocalVideo(alignFileToSig(temporary, sig), sig, undefined, { pinned: options.pinned });
+  const stored = await saveLocalVideo(alignFileToSig(temporary, sig), sig);
   if (!stored) {
     await deleteLocalVideo(temporarySig);
     throw new Error('remote media could not be persisted on this device');

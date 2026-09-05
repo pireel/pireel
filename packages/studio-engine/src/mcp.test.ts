@@ -166,11 +166,11 @@ describe('MCP 工具面', () => {
     expect(t.description).not.toContain('<frame_catalog>');
     expect(t.description).toContain('list_frames');
   });
-  it('本地导入先用内置浏览器,仅在明确回环错误后切换受控浏览器', () => {
+  it('本地导入走云端字节汇合,不再要求打开标签页或本地回环', () => {
     const tool = buildMcpTools().find((candidate) => candidate.name === 'import_media')!;
-    expect(tool.description).toContain('built-in/embedded browser first');
-    expect(tool.description).toContain('local loopback is unreachable from this browser');
-    expect(tool.description).toContain('If and only if');
+    expect(tool.description).toContain('cloud media store');
+    expect(tool.description).toContain('No studio tab needs to be open');
+    expect(tool.description).not.toMatch(/loopback|127\.0\.0\.1|OPFS/);
     expect(tool.description).not.toContain('prefer connected Chrome');
   });
   it('外部 Agent 能保存同一套 Director Plan 与开放式 Scene 设计', () => {

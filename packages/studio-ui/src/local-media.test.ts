@@ -1,13 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { setStudioProviders, unavailableProviders } from '@pireel/studio-engine/providers';
 import { durableFileSig, fileSig } from './media';
-import {
-  loadLocalAssetFile,
-  loadLocalVideo,
-  localAssetBindingKey,
-  saveLocalFolderHandle,
-  saveLocalHandle,
-  saveLocalVideo,
-} from './local-media';
+import { alignFileToSig, loadLocalVideo, resolveAssetBytes, saveLocalVideo } from './local-media';
 
 class MemoryFileHandle {
   readonly kind = 'file' as const;
@@ -51,14 +45,30 @@ class MemoryDirectoryHandle {
   async removeEntry(name: string) {
     if (!this.files.delete(name)) throw new DOMException('Not found', 'NotFoundError');
   }
-
-  async *values() {
-    for (const name of this.files.keys()) yield new MemoryFileHandle(name, this.files, () => ++this.mtime);
-  }
 }
 
-function installMemoryIndexedDb(): void {
-  const values = new Map<IDBValidKey, unknown>();
+function installMemoryOpfs(): MemoryDirectoryHandle {
+  const dir = new MemoryDirectoryHandle();
+  vi.stubGlobal('indexedDB', undefined);
+  vi.stubGlobal('navigator', {
+    storage: {
+      getDirectory: async () => ({ getDirectoryHandle: async () => dir }),
+      persist: async () => true,
+    },
+  });
+  return dir;
+}
+
+/** Legacy handle store with ONE file handle whose permission state is scripted. */
+function installLegacyHandle(key: string, file: File, permission: PermissionState) {
+  const requestPermission = vi.fn(async () => 'granted' as PermissionState);
+  const handle = {
+    kind: 'file',
+    getFile: async () => file,
+    queryPermission: async () => permission,
+    requestPermission,
+  };
+  const values = new Map<IDBValidKey, unknown>([[key, handle]]);
   const database = {
     createObjectStore: vi.fn(),
     close: vi.fn(),
@@ -68,19 +78,13 @@ function installMemoryIndexedDb(): void {
         onerror: null as ((event: Event) => void) | null,
         onabort: null as ((event: Event) => void) | null,
         objectStore: () => ({
-          get: (key: IDBValidKey) => {
-            const request = { result: values.get(key) } as IDBRequest<unknown>;
+          get: (k: IDBValidKey) => {
+            const request = { result: values.get(k) } as IDBRequest<unknown>;
             queueMicrotask(() => transaction.oncomplete?.({} as Event));
             return request;
           },
-          put: (value: unknown, key: IDBValidKey) => {
-            values.set(key, value);
-            const request = { result: key } as IDBRequest<IDBValidKey>;
-            queueMicrotask(() => transaction.oncomplete?.({} as Event));
-            return request;
-          },
-          delete: (key: IDBValidKey) => {
-            values.delete(key);
+          delete: (k: IDBValidKey) => {
+            values.delete(k);
             const request = { result: undefined } as IDBRequest<undefined>;
             queueMicrotask(() => transaction.oncomplete?.({} as Event));
             return request;
@@ -98,108 +102,38 @@ function installMemoryIndexedDb(): void {
         onsuccess: null as ((event: Event) => void) | null,
         onerror: null as ((event: Event) => void) | null,
       };
-      queueMicrotask(() => {
-        request.onupgradeneeded?.({} as Event);
-        request.onsuccess?.({} as Event);
-      });
+      queueMicrotask(() => request.onsuccess?.({} as Event));
       return request;
     },
   });
+  return { requestPermission };
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  setStudioProviders(unavailableProviders());
+});
 
-describe('local media persistence', () => {
-  it('keeps device bindings project- and asset-scoped while content signatures remain shareable', () => {
-    expect(localAssetBindingKey({ projectId: 'project-1', assetId: 'asset-a' }))
-      .not.toBe(localAssetBindingKey({ projectId: 'project-2', assetId: 'asset-a' }));
-    expect(localAssetBindingKey({ projectId: 'project-1', assetId: 'asset-a' }))
-      .not.toBe(localAssetBindingKey({ projectId: 'project-1', assetId: 'asset-b' }));
-  });
-
-  it('tries the selected project folder before a legacy same-signature handle', async () => {
-    installMemoryIndexedDb();
-    const legacyDirectory = new MemoryDirectoryHandle();
-    const selectedDirectory = new MemoryDirectoryHandle();
-    const legacy = new File(['AAAA'], 'clip.mp4', { type: 'video/mp4', lastModified: 7 });
-    const selected = new File(['BBBB'], 'clip.mp4', { type: 'video/mp4', lastModified: 7 });
-    const sig = fileSig(legacy);
-    legacyDirectory.files.set(legacy.name, legacy);
-    selectedDirectory.files.set(selected.name, selected);
-    const legacyHandle = await legacyDirectory.getFileHandle(legacy.name);
-
-    await saveLocalHandle(sig, legacyHandle as unknown as FileSystemFileHandle);
-    await saveLocalFolderHandle('folder-b', selectedDirectory as unknown as FileSystemDirectoryHandle);
-
-    const resolved = await loadLocalAssetFile('project-2', {
-      assetId: 'asset-b',
-      contentSig: sig,
-      folder: { id: 'folder-b', name: 'B', path: 'clip.mp4' },
-    });
-
-    expect(await resolved?.text()).toBe('BBBB');
-  });
+describe('device byte cache', () => {
   it('gives different content distinct durable identities even when file metadata is identical', async () => {
     const first = new File(['AAAA'], 'clip.mp4', { type: 'video/mp4', lastModified: 7 });
     const second = new File(['BBBB'], 'clip.mp4', { type: 'video/mp4', lastModified: 7 });
     expect(await durableFileSig(first)).not.toBe(await durableFileSig(second));
   });
 
-  it('keeps an OPFS fallback for a native single-file picker handle', async () => {
-    const dir = new MemoryDirectoryHandle();
-    vi.stubGlobal('indexedDB', undefined);
-    vi.stubGlobal('navigator', {
-      storage: {
-        getDirectory: async () => ({ getDirectoryHandle: async () => dir }),
-        persist: async () => true,
-      },
-    });
-
-    const file = new File(['single-file'], 'single.png', { type: 'image/png', lastModified: 7 });
-    const sig = fileSig(file);
-    await saveLocalVideo(file, sig, {} as FileSystemFileHandle, { fallbackCopy: true });
-
-    expect(await loadLocalVideo(sig)).not.toBeNull();
-  });
-
   it('keeps every stored file — there is no count-based eviction (a 100-video project must not lose its 13th import)', async () => {
-    const dir = new MemoryDirectoryHandle();
-    vi.stubGlobal('indexedDB', undefined);
-    vi.stubGlobal('navigator', {
-      storage: {
-        getDirectory: async () => ({ getDirectoryHandle: async () => dir }),
-        persist: async () => true,
-      },
-    });
-
-    const folderFiles = Array.from(
-      { length: 13 },
-      (_, i) => new File([`folder-${i}`], `folder-${i}.png`, { type: 'image/png', lastModified: i + 1 }),
+    installMemoryOpfs();
+    const files = Array.from(
+      { length: 26 },
+      (_, i) => new File([`bytes-${i}`], `clip-${i}.png`, { type: 'image/png', lastModified: i + 1 }),
     );
-    for (const file of folderFiles) await saveLocalVideo(file, fileSig(file), undefined, { pinned: true });
-
-    const ordinaryFiles = Array.from(
-      { length: 13 },
-      (_, i) => new File([`ordinary-${i}`], `ordinary-${i}.png`, { type: 'image/png', lastModified: 100 + i }),
-    );
-    for (const file of ordinaryFiles) await saveLocalVideo(file, fileSig(file));
-
-    const retained = await Promise.all(folderFiles.map((file) => loadLocalVideo(fileSig(file))));
-    const ordinary = await Promise.all(ordinaryFiles.map((file) => loadLocalVideo(fileSig(file))));
+    for (const file of files) await saveLocalVideo(file, fileSig(file));
+    const retained = await Promise.all(files.map((file) => loadLocalVideo(fileSig(file))));
     expect(retained.every(Boolean)).toBe(true);
-    expect(ordinary.every(Boolean)).toBe(true);
   });
 
   it('keeps distinct non-ASCII locators separate even when size and mtime match', async () => {
-    const dir = new MemoryDirectoryHandle();
-    vi.stubGlobal('indexedDB', undefined);
-    vi.stubGlobal('navigator', {
-      storage: {
-        getDirectory: async () => ({ getDirectoryHandle: async () => dir }),
-        persist: async () => true,
-      },
-    });
-
+    installMemoryOpfs();
     const first = new File(['甲'], '中文.png', { type: 'image/png', lastModified: 9 });
     const second = new File(['乙'], '日文.png', { type: 'image/png', lastModified: 9 });
     expect(first.size).toBe(second.size);
@@ -211,14 +145,7 @@ describe('local media persistence', () => {
   });
 
   it('reads and migrates the legacy sanitized OPFS key used by existing projects', async () => {
-    const dir = new MemoryDirectoryHandle();
-    vi.stubGlobal('indexedDB', undefined);
-    vi.stubGlobal('navigator', {
-      storage: {
-        getDirectory: async () => ({ getDirectoryHandle: async () => dir }),
-        persist: async () => true,
-      },
-    });
+    const dir = installMemoryOpfs();
     const original = new File(['legacy-bytes'], '旧素材.mp4', { type: 'video/mp4', lastModified: 23 });
     const sig = fileSig(original);
     const legacyKey = sig.replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -238,5 +165,69 @@ describe('local media persistence', () => {
     vi.stubGlobal('navigator', { storage: {} });
     const file = new File(['bytes'], 'offline.mp4', { type: 'video/mp4', lastModified: 1 });
     await expect(saveLocalVideo(file, fileSig(file))).resolves.toBe(false);
+  });
+
+  it('restores a content-sig file under its label without changing its identity', async () => {
+    const original = new File(['hello'], 'talk.mp4', { type: 'video/mp4', lastModified: 5 });
+    const sig = await durableFileSig(original);
+    const fetched = new File([original], 'cloud-restore.mp4', { type: 'video/mp4', lastModified: 999 });
+    const aligned = alignFileToSig(fetched, sig, 'talk.mp4');
+    expect(aligned.name).toBe('talk.mp4');
+    expect(fileSig(aligned)).toBe(sig);
+    // Different bytes must never be re-labelled into the addressed identity.
+    const other = new File(['hello!!'], 'x.mp4', { type: 'video/mp4' });
+    expect(alignFileToSig(other, sig).name).toBe('x.mp4');
+  });
+});
+
+describe('byte resolution chain', () => {
+  it('reads a legacy handle only while the browser still reports access as granted — never prompting', async () => {
+    const file = new File(['handle-bytes'], 'clip.mp4', { type: 'video/mp4', lastModified: 3 });
+    const sig = fileSig(file);
+    vi.stubGlobal('navigator', { storage: {} });
+    const granted = installLegacyHandle(sig, file, 'granted');
+    expect(await (await loadLocalVideo(sig))?.text()).toBe('handle-bytes');
+    expect(granted.requestPermission).not.toHaveBeenCalled();
+
+    const prompt = installLegacyHandle(sig, file, 'prompt');
+    expect(await loadLocalVideo(sig)).toBeNull();
+    expect(prompt.requestPermission).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the cloud rendezvous by cloudKey and caches the retrieved bytes on the device', async () => {
+    installMemoryOpfs();
+    const original = new File(['cloud-bytes'], 'broll.mp4', { type: 'video/mp4', lastModified: 1 });
+    const sig = await durableFileSig(original);
+    const fetch = vi.fn(async (_sig: string, options?: { cloudKey?: string }) =>
+      options?.cloudKey === 'studio-src/u/abc' ? new File([original], 'cloud-restore.mp4', { type: 'video/mp4' }) : null,
+    );
+    setStudioProviders({ ...unavailableProviders(), vault: { backup: async () => null, fetch } });
+
+    const entry = { assetId: 'local_1', contentSig: sig, cloudKey: 'studio-src/u/abc', label: 'broll.mp4' };
+    expect(await resolveAssetBytes(entry, { deviceOnly: true })).toBeNull();
+    const resolved = await resolveAssetBytes(entry);
+    expect(await resolved?.text()).toBe('cloud-bytes');
+    expect(resolved?.name).toBe('broll.mp4');
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    // Second resolve is served by the device cache: no second cloud fetch.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(await (await resolveAssetBytes(entry))?.text()).toBe('cloud-bytes');
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('consults a desktop byte provider before the cloud', async () => {
+    installMemoryOpfs();
+    const original = new File(['disk-bytes'], 'clip.mp4', { type: 'video/mp4', lastModified: 1 });
+    const sig = await durableFileSig(original);
+    const fetch = vi.fn(async () => null);
+    setStudioProviders({
+      ...unavailableProviders(),
+      vault: { backup: async () => null, fetch },
+      localBytes: { resolve: async (requested) => (requested === sig ? original : null) },
+    });
+    const resolved = await resolveAssetBytes({ assetId: 'a', contentSig: sig, cloudKey: 'studio-src/u/k', label: 'clip.mp4' });
+    expect(await resolved?.text()).toBe('disk-bytes');
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
