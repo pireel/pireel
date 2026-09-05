@@ -61,12 +61,16 @@ describe('asset upload queue', () => {
     expect(queue.state('sig-c')).toBeUndefined();
   });
 
-  it('does nothing under a lazy upload policy (desktop hosts decide when to upload)', async () => {
+  it('does nothing under a lazy upload policy unless the upload is forced (the manual affordance)', async () => {
     const backup = vi.fn(async () => ({ key: 'k' }));
     const queue = createAssetUploadQueue({ backup, policy: () => 'lazy' });
     queue.enqueue({ sig: 'sig-d', file: file('d') });
     await flush();
     expect(backup).not.toHaveBeenCalled();
     expect(queue.state('sig-d')).toBeUndefined();
+    expect(queue.policy()).toBe('lazy');
+    queue.enqueue({ sig: 'sig-d', file: file('d') }, { force: true });
+    await flush();
+    expect(queue.state('sig-d')?.status).toBe('done');
   });
 });

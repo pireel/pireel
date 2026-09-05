@@ -161,8 +161,21 @@ function RestoreTile({ label, kind = 'video', busy, onRestore, onRename, onDelet
 }
 
 /** Thin upload status strip over a live card: progress while the bytes travel to the cloud, a retry
- * affordance when every attempt failed. Silent once done. */
-function UploadBadge({ state, onRetry }: { state: AssetUploadState | undefined; onRetry: () => void }) {
+ * affordance when every attempt failed, and — on hosts that keep bytes local (lazy policy) — the
+ * manual "upload to cloud" affordance for assets that never reached the cloud. Silent once done. */
+function UploadBadge({ state, pending, onRetry }: { state: AssetUploadState | undefined; pending: boolean; onRetry: () => void }) {
+  if (!state && pending) {
+    return (
+      <button
+        type="button"
+        onClick={onRetry}
+        title={t('panels.uploadToCloud')}
+        className="absolute right-1 top-1 z-10 hidden h-5 w-5 items-center justify-center rounded bg-black/55 text-white hover:bg-black/75 group-hover:inline-flex"
+      >
+        <CloudUpload size={11} />
+      </button>
+    );
+  }
   if (!state || state.status === 'done') return null;
   if (state.status === 'failed') {
     return (
@@ -799,13 +812,16 @@ export function MyAssetsPanel({
       if (it.insertUrl) toggleAudio(it.insertUrl);
     } else setPreview(it);
   };
+  /** Retry a failed upload, or start one by hand on a lazy host: bytes come back from the live URL. */
   const retryUpload = (it: LibraryItem) => {
     if (!it.sig || !it.insertUrl) return;
     void fetch(it.insertUrl)
       .then((r) => r.blob())
-      .then((blob) => assetUploadQueue().enqueue({ sig: it.sig!, file: new File([blob], it.label, { type: blob.type }), label: it.label }))
+      .then((blob) => assetUploadQueue().enqueue({ sig: it.sig!, file: new File([blob], it.label, { type: blob.type }), label: it.label }, { force: true }))
       .catch(() => {});
   };
+  const lazyHost = assetUploadQueue().policy() === 'lazy';
+  const cloudKeyBySig = useMemo(() => new Map(reg.map((entry) => [entry.contentSig, entry.cloudKey] as const)), [reg]);
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
@@ -924,7 +940,7 @@ export function MyAssetsPanel({
         ) : (
           <div className={RESPONSIVE_ASSET_CARD_GRID}>
             {visibleImports.map((it) => (
-                <div key={it.id} className="relative">
+                <div key={it.id} className="group relative">
                   <AssetCard
                     item={it}
                     playing={it.kind === 'audio' && audioPlaying === it.insertUrl}
@@ -942,7 +958,7 @@ export function MyAssetsPanel({
                     dragProps={dragPropsFor(it, onDragAsset)}
                     insertLabel={it.kind === 'audio' ? t('panels.useAsBgm') : t('panels.insert')}
                   />
-                  {it.sig ? <UploadBadge state={uploadStates.get(it.sig)} onRetry={() => retryUpload(it)} /> : null}
+                  {it.sig ? <UploadBadge state={uploadStates.get(it.sig)} pending={lazyHost && !cloudKeyBySig.get(it.sig)} onRetry={() => retryUpload(it)} /> : null}
                 </div>
               ))}
             {visibleTrackCards.map((c) =>

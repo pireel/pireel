@@ -33,7 +33,11 @@ const MAX_ATTEMPTS = 4;
 const BACKOFF_MS = [1_000, 4_000, 16_000];
 
 export interface AssetUploadQueue {
-  enqueue(job: AssetUploadJob): void;
+  /** Queue an upload. Under a 'lazy' host policy nothing happens unless `force` is set — that is
+   * the manual "upload to cloud" affordance a desktop host exposes per asset. */
+  enqueue(job: AssetUploadJob, options?: { force?: boolean }): void;
+  /** The host's upload policy as the queue sees it (the panel decides which affordance to show). */
+  policy(): 'always' | 'lazy';
   /** Current state for a sig (undefined = never seen by this tab). */
   state(sig: string): AssetUploadState | undefined;
   /** Snapshot for React (useSyncExternalStore): a new Map identity on every change. */
@@ -108,8 +112,8 @@ export function createAssetUploadQueue(deps?: {
   };
 
   return {
-    enqueue(job) {
-      if (policy() === 'lazy') return;
+    enqueue(job, options) {
+      if (policy() === 'lazy' && !options?.force) return;
       const current = states.get(job.sig);
       if (current && current.status !== 'failed') return; // queued/uploading/done: nothing to add
       states.set(job.sig, { status: 'queued', fraction: 0, attempts: current?.attempts ?? 0 });
@@ -117,6 +121,7 @@ export function createAssetUploadQueue(deps?: {
       publish();
       pump();
     },
+    policy,
     state: (sig) => states.get(sig),
     snapshot: () => snapshotCache,
     subscribe(listener) {

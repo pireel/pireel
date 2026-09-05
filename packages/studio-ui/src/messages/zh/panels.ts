@@ -195,6 +195,7 @@ export const PANELS_ZH: Record<string, string> = {
   "panels.localDeleteBody": "会同时从当前项目的时间轴移除，不会修改设备上的原文件",
   "panels.uploading": "上传中 {pct}%",
   "panels.uploadFailed": "上传失败,点击重试",
+  "panels.uploadToCloud": "上传到云端",
   "panels.needsReimport": "需要重新导入",
   "panels.assetUsedByOtherOutput": "其他成片仍在使用这个素材，请先从对应成片中移除",
   "panels.filterAssets": "筛选素材",

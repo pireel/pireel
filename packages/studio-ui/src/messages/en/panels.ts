@@ -207,6 +207,7 @@ export const PANELS_EN: Record<string, string> = {
     "Also removes it from this project's timeline. The original file on your device is unchanged.",
   "panels.uploading": "Uploading {pct}%",
   "panels.uploadFailed": "Upload failed — click to retry",
+  "panels.uploadToCloud": "Upload to cloud",
   "panels.needsReimport": "Needs re-import",
   "panels.assetUsedByOtherOutput":
     "This asset is still used by another output. Remove it there first.",
