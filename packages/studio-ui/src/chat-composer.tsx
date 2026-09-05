@@ -3,7 +3,8 @@
 /** Studio chat input: contenteditable composer with @ element pills and the theme (frame) picker. */
 
 import { useImperativeHandle, useRef, useState } from "react";
-import { AtSign, ArrowUp, Square, Palette } from "lucide-react";
+import { AtSign, ArrowUp, Square, Palette, Sparkles, X } from "lucide-react";
+import { GENERATION_INTENTS, generationIntentLine, generationTemplatePrompts, type GenerationIntent, type GenerationParams } from "./chat-generation-intent";
 import type { ChatStatus } from "ai";
 import {
   STUDIO_CREATE_SKILL_ACTION,
@@ -26,7 +27,7 @@ import {
   elementIcon,
   makeElementPill,
 } from "./chat-format";
-import { t } from "./i18n";
+import { studioLocale, t } from "./i18n";
 import type {
   AttachedFrame,
   AttachedTimelineFrame,
@@ -67,6 +68,9 @@ export interface ComposerHandle {
   beginTimelineFrameCapture(frame: PendingTimelineFrame): void;
   resolveTimelineFrameCapture(frame: AttachedTimelineFrame): void;
   failTimelineFrameCapture(id: string): void;
+  /** Arm a generation intent (image/video/audio/element) below the input, optionally with a prompt.
+   * Generation is an agent tool call; the intent only tells the agent what kind and which parameters. */
+  beginGeneration(intent: GenerationIntent, prompt?: string): void;
 }
 
 export function Composer({
@@ -130,6 +134,8 @@ export function Composer({
   const [submitting, setSubmitting] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
   const [customStyle, saveCustomStyle] = useCustomFrameStyle();
+  const [intent, setIntent] = useState<GenerationIntent | null>(null);
+  const [genParams, setGenParams] = useState<GenerationParams>({});
   const isBusy = submitting || status === "streaming" || status === "submitted";
 
   function recomputeEmpty() {
@@ -316,13 +322,21 @@ export function Composer({
       (part) => part.type !== "text" || part.text.length > 0,
     );
     if (!final.length) return;
+    if (intent) {
+      // The intent rides in the user's own message (never in the system prompt, so the prefix cache
+      // stays byte-stable): one compact trailing line the agent reads as kind + parameters.
+      final.push({ type: "text", text: `\n${generationIntentLine(intent, genParams)}` });
+    }
     const studioAction = currentStudioAction();
     setSubmitting(true);
     try {
       const accepted = studioAction
         ? await onSubmit(final, { studioAction })
         : await onSubmit(final);
-      if (accepted) clear();
+      if (accepted) {
+        clear();
+        setIntent(null);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -666,6 +680,15 @@ export function Composer({
       failTimelineFrameCapture: (id) => {
         removeTimelineFramePill(id);
       },
+      beginGeneration: (nextIntent, prompt) => {
+        setIntent(nextIntent);
+        setGenParams({});
+        if (prompt) {
+          suggestedSkillPromptRef.current = null;
+          replaceEditorText(prompt);
+        }
+        editorRef.current?.focus();
+      },
     }),
     // DOM-backed composer state deliberately lives in refs; keep the imperative surface stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -718,6 +741,87 @@ export function Composer({
             className="max-h-[220px] min-h-[80px] overflow-y-auto whitespace-pre-wrap px-3 pb-2 pt-2.5 text-[13px] outline-none"
           />
         </div>
+        {/* Generation intent: which kind + the few parameters a form used to hold. The message still
+            goes to the agent as one instruction (intent line appended on submit); no second UI. */}
+        <div className="flex flex-wrap items-center gap-1 px-2 pb-1">
+          {GENERATION_INTENTS.map((option) => {
+            const active = intent === option.id;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                disabled={isBusy}
+                onClick={() => {
+                  setIntent(active ? null : option.id);
+                  setGenParams({});
+                }}
+                className={`inline-flex h-6 items-center gap-1 rounded-full border px-2 text-[11px] transition disabled:opacity-40 ${
+                  active ? "border-accent bg-accent/12 text-accent" : "border-line text-ink-3 hover:text-ink"
+                }`}
+              >
+                {active ? <Sparkles className="h-3 w-3" /> : null}
+                {t(option.label)}
+              </button>
+            );
+          })}
+          {intent ? (
+            <>
+              {(intent === "image" || intent === "video") && (
+                <ParamGroup
+                  label={t("chatGen.paramRatio")}
+                  options={["9:16", "16:9", "1:1"]}
+                  value={genParams.ratio}
+                  onChange={(ratio) => setGenParams((p) => ({ ...p, ratio: ratio as GenerationParams["ratio"] }))}
+                />
+              )}
+              {intent === "image" && (
+                <ParamGroup
+                  label={t("chatGen.paramCount")}
+                  options={["1", "2", "4"]}
+                  value={genParams.count ? String(genParams.count) : undefined}
+                  onChange={(count) => setGenParams((p) => ({ ...p, count: Number(count) }))}
+                />
+              )}
+              {(intent === "video" || intent === "audio") && (
+                <ParamGroup
+                  label={t("chatGen.paramDuration")}
+                  options={(intent === "video" ? [5, 10, 15] : [30, 60, 120]).map((n) => `${n}s`)}
+                  value={genParams.durationSec ? `${genParams.durationSec}s` : undefined}
+                  onChange={(value) => setGenParams((p) => ({ ...p, durationSec: Number(value.replace(/s$/, "")) }))}
+                />
+              )}
+              <button
+                type="button"
+                onClick={() => setIntent(null)}
+                title={t("chatGen.intentClear")}
+                aria-label={t("chatGen.intentClear")}
+                className="text-ink-4 hover:text-ink inline-flex h-6 w-6 items-center justify-center rounded-full"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </>
+          ) : null}
+        </div>
+        {intent && empty ? (
+          <div className="flex flex-wrap items-center gap-1 px-2 pb-1.5">
+            <span className="text-ink-4 text-[10.5px]">{t("chatGen.templatesLabel")}</span>
+            {generationTemplatePrompts(intent, studioLocale()).map((template) => (
+              <button
+                key={template.id}
+                type="button"
+                onClick={() => {
+                  suggestedSkillPromptRef.current = null;
+                  replaceEditorText(template.prompt);
+                  editorRef.current?.focus();
+                }}
+                className="border-line text-ink-3 hover:text-ink max-w-[180px] truncate rounded-full border px-2 py-0.5 text-[10.5px]"
+                title={template.prompt}
+              >
+                {template.title}
+              </button>
+            ))}
+          </div>
+        ) : null}
         <div className="flex items-center justify-between gap-2 px-2 pb-2 pt-1">
           <div className="flex items-center gap-0.5">
             <button
@@ -997,5 +1101,24 @@ function findElementPill(
       (pill) =>
         pill.dataset.refId === id && (includeAuto || !pill.dataset.auto),
     ) ?? null
+  );
+}
+
+/** One labelled row of exclusive parameter chips (aspect, count, duration). */
+function ParamGroup({ label, options, value, onChange }: { label: string; options: readonly string[]; value: string | undefined; onChange: (value: string) => void }) {
+  return (
+    <span className="inline-flex items-center gap-0.5 pl-1">
+      <span className="text-ink-4 text-[10.5px]">{label}</span>
+      {options.map((option) => (
+        <button
+          key={option}
+          type="button"
+          onClick={() => onChange(option)}
+          className={`h-6 rounded-md px-1.5 text-[10.5px] transition ${value === option ? "bg-panel-2 text-ink font-medium" : "text-ink-4 hover:text-ink-2"}`}
+        >
+          {option}
+        </button>
+      ))}
+    </span>
   );
 }

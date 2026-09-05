@@ -307,7 +307,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@pireel/ui/dialog";
-import { GenChatPanel, type GenElementResult } from "./gen-chat-panel";
 import { generatedAssetIndexEntry, type GeneratedAssetRecord } from "./gen-api";
 import { KIT_INSERT_DURATION, kitSampleProps } from "./kit-ui";
 import { wordsFromText } from "@pireel/studio-engine/caption-fx";
@@ -1065,7 +1064,7 @@ export function HyperframesWorkbench({
     setLocateSignal((n) => n + 1);
   };
   const [libTab, setLibTab] = useState<
-    "assets" | "frames" | "script" | "captions" | "audio" | "text" | "gen" | "avatar"
+    "assets" | "frames" | "script" | "captions" | "audio" | "text" | "avatar"
   >("assets"); // rail primary-nav tab (themes hidden)
   const [libCollapsed, setLibCollapsed] = useState(false); // asset rail collapsed (narrow strip + expand button; content hidden but state kept)
   const selectedDisplayTextBlock = useMemo(
@@ -1142,13 +1141,6 @@ export function HyperframesWorkbench({
   // (setFloatWin handles the exit settlement uniformly).
   const [floatWin, setFloatWinRaw] = useState<FloatKind | null>(null);
   const floatWinRef = useRef<FloatKind | null>(null);
-  const [genType, setGenType] = useState<GenType>("image"); // current tab inside the gen panel
-  const [genSeedPrompt, setGenSeedPrompt] = useState<{
-    type: GenType;
-    prompt: string;
-    revision: number;
-  } | null>(null);
-  const genSeedRevisionRef = useRef(0);
   const [genRefreshTick, setGenRefreshTick] = useState(0);
   /** The rail was "auto-expanded just to dock a panel" — collapse it back after the panel closes (leave user-expanded ones alone). */
   const libAutoExpandedRef = useRef(false);
@@ -3121,14 +3113,11 @@ export function HyperframesWorkbench({
   const openFloatAt = (kind: FloatKind, _anchor?: DOMRect | null) => {
     setFloatWin(kind);
   };
+  /** Generation has ONE entry: the chat. Arm the intent (kind + parameters) in the composer; the
+   * agent runs the generation tool and the output lands in the project media directory. */
   const openGeneration = (type: GenType = "image", prompt?: string) => {
-    setGenType(type);
-    setGenSeedPrompt(
-      prompt ? { type, prompt, revision: ++genSeedRevisionRef.current } : null,
-    );
     setFloatWin(null);
-    setLibTab("gen");
-    if (libCollapsed) setLibCollapsedManual(false);
+    chatRef.current?.beginGeneration(type, prompt);
   };
   // The person panel depends on a selected shot (its entry is disabled without one): if the selection is lost while open → just close it
   useEffect(() => {
@@ -5443,28 +5432,6 @@ export function HyperframesWorkbench({
   };
   /** Generated video → set as the main video. The CDN has no CORS headers, so fetch bytes through the /api/media/fetch same-origin proxy.
    *  Swapping the main video = a new project (pickVideoFile clears shots/blocks) — confirm first if there's content. */
-  const setMainVideoFromUrl = async (url: string) => {
-    const c = compRef.current;
-    if (editorDocumentRenderPlan(editorDocumentRef.current).durationSec > 0) {
-      const ok = await confirm({
-        title: t("workbench.replaceMainVideo"),
-        description: t("workbench.replacingMainVideoStarts"),
-        confirmLabel: t("panels.replace"),
-        tone: "danger",
-      });
-      if (!ok) return;
-    }
-    try {
-      const materialized = await materializeRemoteMedia(url, {
-        name: "generated.mp4",
-        type: "video/mp4",
-      });
-      await pickVideoFile(materialized.file, { asSig: materialized.sig });
-    } catch (e) {
-      console.warn("[studio] set main video failed", e);
-      toast.error(t("workbench.couldNotReplaceMain"));
-    }
-  };
   /** Frame panel "use" → attach the frame as a tag in chat (the request carries frameId to inject the playbook), switch back to chat. */
   const useFrameInChat = (f: FrameCatalogItem) => {
     openChat();
@@ -10025,64 +9992,6 @@ export function HyperframesWorkbench({
                     }
                   />
                 )}
-                {!floatWin && libTab === "gen" && (
-                  <div className="flex min-h-0 flex-1 flex-col">
-                    <div className="bg-panel flex h-8 shrink-0 items-center gap-1 px-2.5">
-                      {(
-                        [
-                          { v: "image", label: "panels.image" },
-                          { v: "video", label: "panels.video" },
-                          { v: "element", label: "panels.element" },
-                          { v: "audio", label: "panels.music" },
-                        ] as { v: GenType; label: string }[]
-                      ).map((gt) => (
-                        <button
-                          key={gt.v}
-                          type="button"
-                          onClick={() => {
-                            setGenSeedPrompt(null);
-                            setGenType(gt.v);
-                          }}
-                          className={`rounded-md px-2.5 py-1 text-[12px] transition ${
-                            genType === gt.v
-                              ? "bg-panel-2 text-ink font-medium"
-                              : "text-ink-4 hover:text-ink-2"
-                          }`}
-                        >
-                          {t(gt.label)}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="flex min-h-0 flex-1">
-                      <GenChatPanel
-                        key={genType}
-                        projectId={projectId}
-                        type={genType}
-                        seedPrompt={
-                          genSeedPrompt?.type === genType
-                            ? genSeedPrompt
-                            : undefined
-                        }
-                        comp={comp}
-                        onInsertMedia={(m, l, d) =>
-                          void insertPanelMedia(m, l, undefined, d)
-                        }
-                        onGenerated={registerGeneratedAssets}
-                        onDragAsset={setDragAsset}
-                        onSetMainVideo={setMainVideoFromUrl}
-                        onInsertElement={insertGeneratedElement}
-                        onMention={mentionAsset}
-                        generateElement={generateElementStandalone}
-                        generateAudio={audioOps.generateAudioAsset}
-                        onInsertAudio={(url, label) =>
-                          void audioOps
-                            .mountAudioFromUrl(url, label)
-                            .then((id) => id && setSelectedAudioId(id))
-                        }
-                      />
-                    </div>
-                  </div>
-                )}
                 {!floatWin && libTab === "avatar" && <AvatarPanel />}
                 {floatWin && (
                   <div className="flex min-h-0 flex-1">
@@ -10330,7 +10239,6 @@ export function HyperframesWorkbench({
                       },
                       { v: "text", icon: Type, label: "displayText.title" },
                       { v: "audio", icon: Music, label: "panels.music" },
-                      { v: "gen", icon: Sparkles, label: "common.generate" },
                       {
                         v: "avatar",
                         icon: AudioLines,
@@ -10344,7 +10252,6 @@ export function HyperframesWorkbench({
                         | "captions"
                         | "text"
                         | "audio"
-                        | "gen"
                         | "avatar";
                       icon: typeof LayoutGrid;
                       label: string;
@@ -10354,8 +10261,6 @@ export function HyperframesWorkbench({
                       key={n.v}
                       type="button"
                       onClick={() => {
-                        if (libTab === "gen" && n.v !== "gen")
-                          setGenRefreshTick((value) => value + 1);
                         setFloatWin(null);
                         setLibTab(n.v);
                         if (libCollapsed) setLibCollapsedManual(false);

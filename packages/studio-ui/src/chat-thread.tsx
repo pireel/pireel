@@ -764,6 +764,9 @@ export function ChatThread({
       focusInput() {
         composerRef.current?.focusInput();
       },
+      beginGeneration(intent, prompt) {
+        composerRef.current?.beginGeneration(intent, prompt);
+      },
       attachFrame(s) {
         applyFrame(s);
       },
