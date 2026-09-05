@@ -4,9 +4,9 @@
 
 import { useImperativeHandle, useRef, useState } from "react";
 import { AtSign, ArrowUp, Square, Palette } from "lucide-react";
-import { generationIntentLine, generationTemplatePrompts, type ChatMode, type GenerationIntent, type GenerationParams } from "./chat-generation-intent";
+import { generationIntentLine, type ChatMode, type GenerationIntent, type GenerationParams } from "./chat-generation-intent";
 import { ChatModePicker } from "./chat-mode-picker";
-import { GenerationParamsBar } from "./chat-generation-params";
+import { GenerationControls } from "./chat-generation-params";
 import { useEffect } from "react";
 import type { ChatStatus } from "ai";
 import {
@@ -30,7 +30,7 @@ import {
   elementIcon,
   makeElementPill,
 } from "./chat-format";
-import { studioLocale, t } from "./i18n";
+import { t } from "./i18n";
 import type {
   AttachedFrame,
   AttachedTimelineFrame,
@@ -765,32 +765,8 @@ export function Composer({
             className="max-h-[220px] min-h-[80px] overflow-y-auto whitespace-pre-wrap px-3 pb-2 pt-2.5 text-[13px] outline-none"
           />
         </div>
-        {/* Generation modes reshape the composer: the parameters a form used to hold, then template
-            chips while the box is empty. The message still goes to the agent as one instruction (the
-            intent line is appended on submit) — one tool chain, one history. */}
-        {intent ? (
-          <GenerationParamsBar intent={intent} params={genParams} models={genModels} onChange={setGenParams} />
-        ) : null}
-        {intent && empty ? (
-          <div className="flex flex-wrap items-center gap-1 px-2 pb-1.5">
-            <span className="text-ink-4 text-[10.5px]">{t("chatGen.templatesLabel")}</span>
-            {generationTemplatePrompts(intent, studioLocale()).map((template) => (
-              <button
-                key={template.id}
-                type="button"
-                onClick={() => {
-                  suggestedSkillPromptRef.current = null;
-                  replaceEditorText(template.prompt);
-                  editorRef.current?.focus();
-                }}
-                className="border-line text-ink-3 hover:text-ink max-w-[180px] truncate rounded-full border px-2 py-0.5 text-[10.5px]"
-                title={template.prompt}
-              >
-                {template.title}
-              </button>
-            ))}
-          </div>
-        ) : null}
+        {/* Generation modes reshape the composer's toolbar (ideas / model / settings icons below); the
+            message still goes to the agent as one instruction — the intent line is appended on submit. */}
         <div className="flex items-center justify-between gap-2 px-2 pb-2 pt-1">
           <div className="flex items-center gap-0.5">
             <ChatModePicker
@@ -811,6 +787,20 @@ export function Composer({
             >
               <AtSign className="h-3.5 w-3.5" strokeWidth={2.2} />
             </button>
+            {intent ? (
+              <GenerationControls
+                intent={intent}
+                params={genParams}
+                models={genModels}
+                disabled={isBusy}
+                onChange={setGenParams}
+                onUseTemplate={(prompt) => {
+                  suggestedSkillPromptRef.current = null;
+                  replaceEditorText(prompt);
+                  editorRef.current?.focus();
+                }}
+              />
+            ) : null}
             {/* Visual-style button opens the unified direction + controls dialog. Disabled while the
                 turn is running because a mid-generation direction switch would split one batch.
                 Only chat and graphic generation are theme-directed. */}

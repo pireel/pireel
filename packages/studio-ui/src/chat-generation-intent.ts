@@ -61,8 +61,18 @@ export function generationIntentLine(intent: GenerationIntent, params: Generatio
   return `(Generate ${kind[intent]}${facts.length ? ` — ${facts.join(', ')}` : ''}; register the result in the project media and place it only if I asked.)`;
 }
 
-/** A handful of curated prompts for the armed intent (the old panel's template library, as chips). */
-export function generationTemplatePrompts(intent: GenerationIntent, locale: string, limit = 6): { id: string; title: string; prompt: string }[] {
+export interface GenerationTemplateCard {
+  id: string;
+  title: string;
+  prompt: string;
+  /** Bare storage keys for previews (image templates / finished video templates). */
+  image?: string;
+  video?: string;
+}
+
+/** Curated prompts for the armed intent (the old panel's template library): image/video/graphic
+ * templates from the bundled catalog, built-in ideas for audio. */
+export function generationTemplates(intent: GenerationIntent, locale: string, limit = 24): GenerationTemplateCard[] {
   if (intent === 'audio') {
     return ['chatGen.audioIdea1', 'chatGen.audioIdea2', 'chatGen.audioIdea3', 'chatGen.audioIdea4'].slice(0, limit).map((key) => {
       const prompt = t(key);
@@ -72,6 +82,16 @@ export function generationTemplatePrompts(intent: GenerationIntent, locale: stri
   const source = TEMPLATES_BY_TYPE[intent] ?? [];
   return source.slice(0, limit).map((template) => {
     const prompt = localizedTemplatePrompt(template, locale);
-    return { id: template.id, title: template.title || prompt.slice(0, 24), prompt };
+    return {
+      id: template.id,
+      title: template.title ? t(template.title) : prompt.slice(0, 24),
+      prompt,
+      ...(template.image ? { image: template.image } : {}),
+      ...(template.video ? { video: template.video } : {}),
+    };
   });
 }
+
+/** @deprecated use generationTemplates. */
+export const generationTemplatePrompts = (intent: GenerationIntent, locale: string, limit = 6) =>
+  generationTemplates(intent, locale, limit).map(({ id, title, prompt }) => ({ id, title, prompt }));
