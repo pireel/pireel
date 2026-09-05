@@ -162,6 +162,7 @@ import { loadLocalAssetFile, loadLocalVideo, saveLocalVideo } from './local-medi
 import { materializeRemoteMedia } from './remote-media';
 import { localAssetIndexEntry, runLocalImportSession } from './local-import-session';
 import { localAssetReference, normalizeStudioToolInputReferences, resolveLocalAssetReference } from './studio-tool-input-references';
+import { resolveGenerationReferences } from './generation-reference';
 import { analyzeVisual, analyzeVisualGeometry, type VisualLabel, type VisualPrep, type VisualTimeline, finishVisualAnalysis, prepareVisualAnalysis } from './visual';
 import {
   compareEditorialOpenings,
@@ -2493,11 +2494,25 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (!prompt) return { ok: false, error: 'prompt required' };
             report(generationKind === 'image' ? 'Starting image generation…' : 'Starting video generation…');
             try {
+              // References arrive as project asset ids (from @ mentions or get_state) or URLs; the
+              // generation service needs fetchable URLs. Unresolvable ones are reported, not dropped.
+              const referenceDeps = {
+                localAssets: ctx.localAssetIndexRef?.current ?? [],
+                documentAssets: documentRef.current.assets,
+                presign: async (key: string) => {
+                  const r = await fetch('/api/studio/media', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'get', key }) });
+                  if (!r.ok) return null;
+                  const j = (await r.json().catch(() => null)) as { url?: string } | null;
+                  return j?.url ?? null;
+                },
+              };
+              const images = await resolveGenerationReferences(input.referenceImages, referenceDeps, 9);
+              const unresolvedReferences = [...images.unresolved];
               const params: Record<string, unknown> = {
                 prompt,
                 user_prompt: prompt,
                 ...(typeof input.modelId === 'string' && input.modelId ? { model_id: input.modelId } : {}),
-                ...(Array.isArray(input.referenceImages) ? { reference_images: input.referenceImages.filter((url): url is string => typeof url === 'string').slice(0, 9) } : {}),
+                ...(images.urls.length ? { reference_images: images.urls } : {}),
               };
               if (generationKind === 'image') {
                 params.n = 1;
@@ -2513,8 +2528,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 params.resolution = input.resolution === '480p' || input.resolution === '720p' || input.resolution === '1080p'
                   ? input.resolution
                   : adaptive.resolution;
-                if (Array.isArray(input.referenceVideos)) params.reference_videos = input.referenceVideos.filter((url): url is string => typeof url === 'string').slice(0, 3);
-                if (Array.isArray(input.referenceAudios)) params.reference_audios = input.referenceAudios.filter((url): url is string => typeof url === 'string').slice(0, 3);
+                const videos = await resolveGenerationReferences(input.referenceVideos, referenceDeps, 3);
+                const audios = await resolveGenerationReferences(input.referenceAudios, referenceDeps, 3);
+                unresolvedReferences.push(...videos.unresolved, ...audios.unresolved);
+                if (videos.urls.length) params.reference_videos = videos.urls;
+                if (audios.urls.length) params.reference_audios = audios.urls;
               }
               const started = await startGeneration(projectId, generationKind === 'image' ? 'image-gen' : 'video-gen', params);
               if (!started.ok) {
@@ -2529,6 +2547,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   status: 'pending',
                   kind: generationKind,
                   projectId,
+                  ...(unresolvedReferences.length ? { unresolvedReferences } : {}),
                   next: 'The asynchronous task is already in Generate history. Do not poll repeatedly in this turn; call get_generation_jobs with these ids later, then register_media and add_clips after success.',
                 },
               };
