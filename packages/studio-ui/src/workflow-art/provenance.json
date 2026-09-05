@@ -1,0 +1,23 @@
+{
+  "generator": "Built-in image_gen",
+  "date": "2026-09-05",
+  "processing": "Resized to 512 × 512 and encoded as WebP for product UI.",
+  "assets": [
+    {
+      "file": "pause-cleanup.webp",
+      "prompt": "A premium compact 3D editorial product illustration for a video editing app task called tighten pauses. A sculptural coral-orange waveform made from rounded solid ceramic bars, with a small precision brushed-aluminum cutting blade separating a quiet gap between the bars. Cream-light neutral background #f5f3ee, soft studio shadows, tactile physical materials, refined minimal composition. Single square asset, object centered with generous margin, readable at 100px. No words, no letters, no logos, no UI, no gradients as decoration. A polished image for a workflow launcher, not a screenshot."
+    },
+    {
+      "file": "captions.webp",
+      "prompt": "A premium compact 3D editorial product illustration for a video editing app task called style captions. Two offset ivory ceramic subtitle strips floating gently above a small coral-orange rounded rectangular video plate. Each strip has three simple recessed charcoal typographic blocks suggesting caption rhythm, absolutely no actual letters or words. Cream-light neutral background #f5f3ee, soft studio shadows, brushed aluminum edge details, tactile precision physical materials, refined minimal composition. Single square asset, object centered with generous margin, readable at 100px. No logos, no UI, no screenshot."
+    },
+    {
+      "file": "frame-video.webp",
+      "prompt": "A premium compact 3D editorial product illustration for a video editing app task called resize video. Three nested precision aluminum and coral-orange camera viewfinder frames, a wide frame becoming a portrait frame in an elegant sculptural arrangement, one tiny dark video pane. Cream-light neutral background #f5f3ee, soft studio shadows, tactile physical materials, refined minimal composition matching premium software launcher art. Single square asset, objects centered with generous margin, readable at 100px. No words, no letters, no logos, no UI, no screenshot."
+    },
+    {
+      "file": "search.webp",
+      "prompt": "A premium compact 3D editorial product illustration for a video editing app task called find spoken moments. A brushed-aluminum magnifying glass angled over two small coral-orange video film strips, with a tiny ivory audio waveform inset into the film. Cream-light neutral background #f5f3ee, soft studio shadows, tactile ceramic and precision metal materials. Refined minimal composition matching a family of coral ceramic audio and video tools. Single square asset, complete object centered with generous margin on all sides, readable at 100px. No words, letters, logos, UI, or screenshot."
+    }
+  ]
+}

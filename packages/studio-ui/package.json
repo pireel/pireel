@@ -37,6 +37,9 @@
     "./timeline-audio-lane": "./src/timeline-audio-lane.tsx",
     "./timeline-overlays": "./src/timeline-overlays.tsx",
     "./transition-panel": "./src/transition-panel.tsx",
+    "./workflow-launcher": "./src/workflow-launcher.tsx",
+    "./captions-entry": "./src/captions-entry.tsx",
+    "./workflow-panel": "./src/workflow-panel.tsx",
     "./workbench-controls": "./src/workbench-controls.tsx",
     "./*": "./src/*.ts"
   },

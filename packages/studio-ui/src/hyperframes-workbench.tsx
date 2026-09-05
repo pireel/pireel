@@ -313,6 +313,10 @@ import { wordsFromText } from "@pireel/studio-engine/caption-fx";
 import { AssetsPanel, type GenType, type PanelDragAsset } from "./assets-panel";
 import { addElementEntry } from "./element-history";
 import { useStudioShell } from "./shell-context";
+import { WorkflowPanel } from "./workflow-panel";
+import { CaptionsEntry } from "./captions-entry";
+import { workflowDocumentRevision } from "./workflow-studio-adapter";
+import { Captions as CaptionsEntryIcon } from "lucide-react";
 import { ScriptPanel, TimelineScriptPanel } from "./script-panel";
 import { CaptionsPanel } from "./captions-panel";
 import { FramePanel } from "./frame-panel";
@@ -477,11 +481,20 @@ const OUTPUT_ANCHOR_TOOLS = new Set(["get_state", "list_outputs", "switch_output
 export function HyperframesWorkbench({
   projectId,
   agentView = false,
+  initialWorkflowId,
 }: {
   projectId: string;
   agentView?: boolean;
+  initialWorkflowId?: string;
 }) {
   const shell = useStudioShell();
+  const [workflowOpen, setWorkflowOpen] = useState(!!initialWorkflowId);
+  const [workflowEntryId, setWorkflowEntryId] = useState(initialWorkflowId ?? "captions");
+  const WorkflowEntry = workflowEntryId === "captions" ? CaptionsEntry : WorkflowPanel;
+  const [workflowBusy, setWorkflowBusy] = useState(false);
+  const workflowBusyRef = useRef(false);
+  const workflowOpenRef = useRef(workflowOpen);
+  workflowOpenRef.current = workflowOpen;
   const locale = useLocale(); // note/reply language follows UI locale (on-screen text follows the narration script language)
   const localeRef = useRef(locale);
   localeRef.current = locale;
@@ -3936,6 +3949,7 @@ export function HyperframesWorkbench({
   }, [beginPlayback, postPreview]);
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (workflowOpenRef.current) return;
       const el = document.activeElement as HTMLElement | null;
       const typing =
         !!el &&
@@ -7074,7 +7088,7 @@ export function HyperframesWorkbench({
     toolId: string,
     input: Record<string, unknown>,
     opts?: { signal?: AbortSignal; surface?: "chat" | "bridge"; skillId?: string },
-  ) => (toolId === "run_v3"
+  ) => workflowBusyRef.current ? Promise.resolve({ ok: false, error: "A workflow is running. Wait for it to finish before editing." } satisfies StudioToolResult) : (toolId === "run_v3"
     // v3 surface from the chat: same executor as the external bridge, with the chat surface carried in the input
     // so parked interactions (ask_user / approvals) render as chat cards.
     ? persistToolMutation(runAgentExternalTool(agentToolCtx, "run_v3", { ...input, surface: opts?.surface ?? "chat" }))
@@ -7085,6 +7099,7 @@ export function HyperframesWorkbench({
   // report the active output re-anchor; anything else is refused when the tab has moved on, and
   // the error names both outputs so the agent can switch back or adopt the current one.
   const runExternalTool = async (tool: string, input: Record<string, unknown>) => {
+    if (workflowBusyRef.current) return { ok: false, error: "A workflow is running. Wait for it to finish before editing." } satisfies StudioToolResult;
     const activeBefore = projectOutputs.outputsRef.current.active;
     const anchored = bridgeOutputAnchorRef.current;
     if (!OUTPUT_ANCHOR_TOOLS.has(tool) && anchored && anchored.id !== activeBefore.id) {
@@ -8169,6 +8184,48 @@ export function HyperframesWorkbench({
 
   return (
     <div className="studio-scope bg-bg relative flex h-full min-h-0 w-full gap-1.5 overflow-hidden p-1.5">
+      {workflowOpen && <WorkflowEntry
+        projectId={projectId}
+        initialTemplateId={workflowEntryId}
+        open={workflowOpen}
+        onOpenChange={setWorkflowOpen}
+        blocked={!bootDataReady || busyImport || chatBusy || bridgeToolsInFlight > 0 || displaced}
+        onBusyChange={(value) => { workflowBusyRef.current = value; setWorkflowBusy(value); }}
+        onImport={() => fileInputRef.current?.click()}
+        host={{
+          context: () => {
+            const document = editorDocumentRef.current;
+            const sourceId = firstNarrativeAssetId(document);
+            return {
+              source: { projectId, outputId: projectOutputs.outputsRef.current.active.id, revision: workflowDocumentRevision(document) },
+              title: projectOutputs.outputsRef.current.active.title,
+              sourceLabel: sourceId ? document.assets[sourceId]?.label : undefined,
+              hasContent: hasTimelineContent(compRef.current),
+              hasNarration: !!sourceId,
+              hasTranscript: !!sourceId && !!document.semantics.transcripts[sourceId]?.length,
+            };
+          },
+          assertWritable: () => {
+            if (displacedRef.current || chatBusy || bridgeToolsInFlight > 0) throw new Error(locale === 'zh' ? '当前作品正在被其他任务编辑。' : 'Another task is editing this output.');
+          },
+          prepareMedia: async () => {
+            const document = editorDocumentRef.current;
+            const sourceId = firstNarrativeAssetId(document);
+            const asset = sourceId ? document.assets[sourceId] : undefined;
+            const file = asset ? await speechFileForAsset(asset) : null;
+            if (!file) throw new Error(locale === 'zh' ? '无法读取原素材，请在素材面板恢复文件。' : 'Source media is unavailable. Restore the file in Materials.');
+          },
+          call: async (name, args) => {
+            const result = await persistToolMutation(runAgentExternalTool(agentToolCtx, 'run_v3', { name, args, surface: 'bridge' }));
+            // Output duplication changes project metadata even when the document delta is empty.
+            if (result.ok && cloudSaveQueueRef.current) {
+              cloudSaveQueueRef.current.markDirty();
+              await cloudSaveQueueRef.current.flush();
+            }
+            return result;
+          },
+        }}
+      />}
       {/* Entry boot layer: heavy-resource warmup + project-data double gate, covers the whole workbench (incl. the chat bar), self-unmounts when done */}
       <StudioBootOverlay dataReady={bootDataReady} />
       {/* Agent file injection: the stable input and empty-canvas trigger below let an external agent
@@ -8294,7 +8351,7 @@ export function HyperframesWorkbench({
               deleteLabel={t("workbench.deleteOutput")}
               untitledLabel={t("workbench.untitledOutput")}
               switching={outputRuntime.switching}
-              locked={chatBusy || bridgeToolsInFlight > 0}
+              locked={chatBusy || bridgeToolsInFlight > 0 || workflowBusy}
               lockedHint={t("workbench.outputSwitchPausedByAgent")}
               onSwitch={switchOutput}
               onCreate={createOutput}
@@ -8350,6 +8407,13 @@ export function HyperframesWorkbench({
                 {/* Floating entries on the preview (outside the toolbar's TooltipProvider scope, use native title — Tooltip would crash):
               top-left = reopen chat (the chat area is on the left, returns to the same side; theme black primary button).
               Icon-only (per user): no text floating over the frame — the label lives in title/aria. */}
+                <button
+                  type="button"
+                  onClick={() => { setPlaying(false); setWorkflowEntryId("captions"); setWorkflowOpen(true); }}
+                  title={locale === 'zh' ? 'AI 字幕' : 'AI captions'}
+                  aria-label={locale === 'zh' ? 'AI 字幕' : 'AI captions'}
+                  className="bg-panel text-ink border-line absolute right-3 top-2 z-20 flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs shadow-sm hover:bg-panel-2"
+                ><CaptionsEntryIcon size={14} />{locale === 'zh' ? 'AI 字幕' : 'AI captions'}</button>
                 {!panelOpen && (
                   <button
                     type="button"
