@@ -3,16 +3,16 @@
 /**
  * Toolbar controls of the composer's generation modes — the configuration the retired generation
  * panel held, collapsed into icons on the input's bottom row (like the theme button in Agent mode):
- *  - Ideas: a dialog of template cards (image/video previews, text cards for audio/graphics);
- *  - Model: a popover list of the hosted catalog for image/video;
- *  - Settings: a popover with aspect / count / quality (image), aspect / duration / resolution
- *    (video), type / duration (audio).
- * Options come from the same sources as before (`/api/models?kind=…`, the shell's per-model tables)
- * and the credit estimate reuses useQuote. The chosen values ride in the message's intent line.
+ *  - Ideas: a large dialog of template cards (image/video previews, prompt cards for audio/graphics);
+ *  - Settings: a popover with model (image/video), aspect / count / quality (image), aspect /
+ *    duration / resolution (video), type / duration (audio).
+ * The credit estimate (useQuote) renders next to the send button. Options come from the same sources
+ * as before (`/api/models?kind=…`, the shell's per-model tables); the chosen values ride in the
+ * message's intent line.
  */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Check, Cpu, Lightbulb, SlidersHorizontal } from 'lucide-react';
+import { Lightbulb, SlidersHorizontal } from 'lucide-react';
 import { useQuote } from '@pireel/ui/use-quote';
 import { imageThumb } from '@pireel/ui/image-url';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@pireel/ui/dialog';
@@ -97,11 +97,11 @@ function IdeasDialog({ intent, open, onClose, onUse }: { intent: GenerationInten
   const templates = useMemo(() => generationTemplates(intent, studioLocale(), 24), [intent]);
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="bg-panel border-line w-[min(720px,calc(100vw-2rem))] gap-3 p-4">
+      <DialogContent className="bg-panel border-line w-[min(1120px,calc(100vw-2rem))] gap-3 p-4">
         <DialogHeader className="pr-7">
           <DialogTitle className="text-ink text-[14px]">{t('chatGen.templates')}</DialogTitle>
         </DialogHeader>
-        <div className="grid max-h-[60vh] grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4">
+        <div className="grid max-h-[78vh] grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4 lg:grid-cols-6">
           {templates.map((template) => (
             <button
               key={template.id}
@@ -131,13 +131,9 @@ function IdeasDialog({ intent, open, onClose, onUse }: { intent: GenerationInten
                 <img src={imageThumb(template.image, 'list')} alt="" loading="lazy" className="aspect-[4/5] w-full bg-[#f3f3f0] object-cover" />
               ) : (
                 <div className="bg-panel-2 flex aspect-[4/5] flex-col justify-end p-2.5">
-                  <div className="text-ink text-[12px] font-medium leading-tight">{template.title}</div>
-                  <div className="text-ink-4 mt-1 line-clamp-4 text-[10px] leading-snug">{template.prompt}</div>
+                  <div className="text-ink-2 line-clamp-6 text-[11px] leading-snug">{template.prompt}</div>
                 </div>
               )}
-              {template.image || template.video ? (
-                <div className="text-ink-3 truncate px-1.5 py-1 text-[10px] leading-4">{template.title}</div>
-              ) : null}
             </button>
           ))}
         </div>
@@ -189,22 +185,8 @@ export function GenerationControls({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intent, modelId, params.audioKind]);
 
-  const quoteParams = useMemo<Record<string, unknown>>(() => {
-    const ratio = params.ratio ?? '9:16';
-    if (intent === 'image') return { n: Math.min(4, Math.max(1, params.count ?? 1)), size: imageSizeParam(modelId, ratio), ...(params.quality ? { quality: params.quality } : {}) };
-    if (intent === 'video') return { duration_sec: String(params.durationSec ?? 5), count: 1, resolution: params.resolution ?? '720p', aspect_ratio: ratio === '1:1' ? '9:16' : ratio, generate_audio: false };
-    if (intent === 'audio') return { tier: 'song' };
-    return {};
-  }, [intent, params, modelId]);
-  const credits = useQuote({
-    toolId: intent === 'video' ? 'video-gen' : intent === 'audio' ? 'music-gen' : 'image-gen',
-    modelId: intent === 'element' || intent === 'audio' ? '' : modelId,
-    params: quoteParams,
-  });
-
   const hasSettings = intent !== 'element';
   const hasIdeas = generationTemplates(intent, studioLocale(), 1).length > 0;
-  const currentModel = models.find((model) => model.id === modelId);
 
   return (
     <>
@@ -220,24 +202,23 @@ export function GenerationControls({
           <Lightbulb className="h-3.5 w-3.5" strokeWidth={2.2} />
         </button>
       ) : null}
-      {models.length > 1 && (intent === 'image' || intent === 'video') ? (
-        <PopButton icon={<Cpu className="h-3.5 w-3.5" strokeWidth={2.2} />} title={currentModel ? `${t('chatGen.model')}: ${currentModel.name}` : t('chatGen.chooseModel')} disabled={disabled}>
-          <div className="text-ink-4 px-1 pb-1 text-[10.5px]">{t('chatGen.chooseModel')}</div>
-          {models.map((model) => (
-            <button
-              key={model.id}
-              type="button"
-              onClick={() => onChange({ ...params, modelId: model.id })}
-              className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[11.5px] ${model.id === modelId ? 'bg-panel-2 text-ink font-medium' : 'text-ink-2 hover:bg-panel-2'}`}
-            >
-              <span className="truncate">{model.name}</span>
-              {model.id === modelId ? <Check className="h-3 w-3 shrink-0" /> : null}
-            </button>
-          ))}
-        </PopButton>
-      ) : null}
       {hasSettings ? (
         <PopButton icon={<SlidersHorizontal className="h-3.5 w-3.5" strokeWidth={2.2} />} title={t('chatGen.generationSettings')} disabled={disabled}>
+          {models.length > 1 && (intent === 'image' || intent === 'video') ? (
+            <div className="flex items-center gap-1 py-0.5">
+              <span className="text-ink-4 w-12 shrink-0 text-[10.5px]">{t('chatGen.model')}</span>
+              <select
+                value={modelId}
+                onChange={(event) => onChange({ ...params, modelId: event.target.value })}
+                aria-label={t('chatGen.chooseModel')}
+                className="border-line bg-panel text-ink h-6 min-w-0 flex-1 rounded-md border px-1 text-[10.5px] outline-none"
+              >
+                {models.map((model) => (
+                  <option key={model.id} value={model.id}>{model.name}</option>
+                ))}
+              </select>
+            </div>
+          ) : null}
           {intent === 'audio' ? (
             <Row
               label={t('chatGen.paramAudioKind')}
@@ -286,10 +267,28 @@ export function GenerationControls({
               onChange={(value) => onChange({ ...params, resolution: value })}
             />
           ) : null}
-          {credits != null ? <div className="text-ink-4 border-line mt-1 border-t pt-1.5 text-right text-[10.5px] tabular-nums">{t('chatGen.estimatedCredits', { n: credits })}</div> : null}
         </PopButton>
       ) : null}
       {hasIdeas ? <IdeasDialog intent={intent} open={ideasOpen} onClose={() => setIdeasOpen(false)} onUse={onUseTemplate} /> : null}
     </>
   );
+}
+
+/** Credit estimate for the armed generation, shown next to the send button. */
+export function GenerationCreditsBadge({ intent, params, models }: { intent: GenerationIntent; params: GenerationParams; models: { id: string; name: string }[] }) {
+  const modelId = params.modelId ?? models[0]?.id ?? '';
+  const quoteParams = useMemo<Record<string, unknown>>(() => {
+    const ratio = params.ratio ?? '9:16';
+    if (intent === 'image') return { n: Math.min(4, Math.max(1, params.count ?? 1)), size: imageSizeParam(modelId, ratio), ...(params.quality ? { quality: params.quality } : {}) };
+    if (intent === 'video') return { duration_sec: String(params.durationSec ?? 5), count: 1, resolution: params.resolution ?? '720p', aspect_ratio: ratio === '1:1' ? '9:16' : ratio, generate_audio: false };
+    if (intent === 'audio') return { tier: 'song' };
+    return {};
+  }, [intent, params, modelId]);
+  const credits = useQuote({
+    toolId: intent === 'video' ? 'video-gen' : intent === 'audio' ? 'music-gen' : 'image-gen',
+    modelId: intent === 'element' || intent === 'audio' ? '' : modelId,
+    params: quoteParams,
+  });
+  if (credits == null) return null;
+  return <span className="text-ink-4 text-[10.5px] tabular-nums">{t('chatGen.estimatedCredits', { n: credits })}</span>;
 }

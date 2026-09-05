@@ -6,7 +6,7 @@ import { useImperativeHandle, useRef, useState } from "react";
 import { AtSign, ArrowUp, Square, Palette } from "lucide-react";
 import { generationIntentLine, type ChatMode, type GenerationIntent, type GenerationParams } from "./chat-generation-intent";
 import { ChatModePicker } from "./chat-mode-picker";
-import { GenerationControls } from "./chat-generation-params";
+import { GenerationControls, GenerationCreditsBadge } from "./chat-generation-params";
 import { useEffect } from "react";
 import type { ChatStatus } from "ai";
 import {
@@ -855,6 +855,8 @@ export function Composer({
             />
             )}
           </div>
+          <div className="flex items-center gap-2">
+          {intent ? <GenerationCreditsBadge intent={intent} params={genParams} models={genModels} /> : null}
           {isBusy ? (
             <button
               type="button"
@@ -875,6 +877,7 @@ export function Composer({
               <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
             </button>
           )}
+          </div>
         </div>
       </div>
 
