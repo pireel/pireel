@@ -12,6 +12,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Lightbulb, SlidersHorizontal } from 'lucide-react';
 import { useQuote } from '@pireel/ui/use-quote';
 import { imageThumb } from '@pireel/ui/image-url';
@@ -31,28 +32,42 @@ function imageSizeParam(modelId: string, ratio: string): string {
   return ratio;
 }
 
-/** Icon button with a small anchored popover (click-outside / Escape close). */
+/** Icon button with an anchored popover. The panel is portaled to <body> and fixed above the trigger,
+ * so the chat column's scroll/overflow clipping cannot cut it off (click-outside / Escape close). */
 function PopButton({ icon, title, active, disabled, children }: { icon: ReactNode; title: string; active?: boolean; disabled?: boolean; children: ReactNode }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [anchor, setAnchor] = useState<{ left: number; bottom: number } | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
+    const place = () => {
+      const rect = triggerRef.current?.getBoundingClientRect();
+      if (rect) setAnchor({ left: Math.max(8, Math.min(rect.left, window.innerWidth - 280)), bottom: window.innerHeight - rect.top + 6 });
+    };
+    place();
     const onDoc = (event: MouseEvent) => {
-      if (!ref.current?.contains(event.target as HTMLElement)) setOpen(false);
+      const target = event.target as HTMLElement;
+      if (!triggerRef.current?.contains(target) && !panelRef.current?.contains(target)) setOpen(false);
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setOpen(false);
     };
     document.addEventListener('mousedown', onDoc);
     document.addEventListener('keydown', onKey);
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
     return () => {
       document.removeEventListener('mousedown', onDoc);
       document.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
     };
   }, [open]);
   return (
-    <div ref={ref} className="relative inline-flex">
+    <>
       <button
+        ref={triggerRef}
         type="button"
         title={title}
         aria-label={title}
@@ -62,12 +77,19 @@ function PopButton({ icon, title, active, disabled, children }: { icon: ReactNod
       >
         {icon}
       </button>
-      {open ? (
-        <div className="border-line bg-panel absolute bottom-[calc(100%+6px)] left-0 z-40 min-w-[220px] rounded-lg border p-2 shadow-lg">
-          {children}
-        </div>
-      ) : null}
-    </div>
+      {open && anchor && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              ref={panelRef}
+              style={{ position: 'fixed', left: anchor.left, bottom: anchor.bottom }}
+              className="border-line bg-panel z-[70] min-w-[260px] max-w-[min(420px,calc(100vw-16px))] rounded-lg border p-2 shadow-lg"
+            >
+              {children}
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
   );
 }
 

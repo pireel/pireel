@@ -701,6 +701,7 @@ export function Composer({
         removeTimelineFramePill(id);
       },
       beginGeneration: (nextIntent, prompt) => {
+        clear();
         setMode(nextIntent);
         setGenParams({});
         if (prompt) {
@@ -774,6 +775,8 @@ export function Composer({
               mode={mode}
               disabled={isBusy}
               onChange={(next) => {
+                if (next === mode) return;
+                clear(); // a mode is a different task: never carry a half-typed draft across
                 setMode(next);
                 setGenParams({});
                 editorRef.current?.focus();
