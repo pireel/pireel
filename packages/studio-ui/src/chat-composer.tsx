@@ -736,7 +736,8 @@ export function Composer({
             <div className="text-ink-4 pointer-events-none absolute left-3 top-2.5 text-[13px]">
               {intent === "image" ? t("chatGen.placeholderImage")
                 : intent === "video" ? t("chatGen.placeholderVideo")
-                  : intent === "audio" ? t("chatGen.placeholderAudio")
+                  : intent === "music" ? t("chatGen.placeholderMusic")
+                    : intent === "sfx" ? t("chatGen.placeholderSfx")
                     : intent === "element" ? t("chatGen.placeholderElement")
                       : placeholder}
             </div>

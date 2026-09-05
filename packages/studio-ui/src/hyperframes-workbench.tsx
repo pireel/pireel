@@ -3117,7 +3117,7 @@ export function HyperframesWorkbench({
    * agent runs the generation tool and the output lands in the project media directory. */
   const openGeneration = (type: GenType = "image", prompt?: string) => {
     setFloatWin(null);
-    chatRef.current?.beginGeneration(type, prompt);
+    chatRef.current?.beginGeneration(type === "audio" ? "music" : type, prompt);
   };
   // The person panel depends on a selected shot (its entry is disabled without one): if the selection is lost while open → just close it
   useEffect(() => {

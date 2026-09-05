@@ -5,7 +5,7 @@
  * panel held, collapsed into icons on the input's bottom row (like the theme button in Agent mode):
  *  - Ideas: a large dialog of template cards (image/video previews, prompt cards for audio/graphics);
  *  - Settings: a popover with model (image/video), aspect / count / quality (image), aspect /
- *    duration / resolution (video), type / duration (audio).
+ *    duration / resolution (video), duration (music / sfx).
  * The credit estimate (useQuote) renders next to the send button. Options come from the same sources
  * as before (`/api/models?kind=…`, the shell's per-model tables); the chosen values ride in the
  * message's intent line.
@@ -23,6 +23,14 @@ import { generationTemplates, type GenerationIntent, type GenerationParams } fro
 
 const RATIOS: NonNullable<GenerationParams['ratio']>[] = ['9:16', '16:9', '1:1'];
 const TOOL_BUTTON = 'text-ink-3 hover:bg-line hover:text-ink inline-flex h-7 w-7 items-center justify-center rounded-md disabled:pointer-events-none disabled:opacity-30';
+
+/** Five-second ceiling tiers of the SFX billing row (same as the server's sfxDurationTier). */
+function sfxDurationTier(durationSec: number): 's5' | 's10' | 's15' | 's22' {
+  if (durationSec <= 5) return 's5';
+  if (durationSec <= 10) return 's10';
+  if (durationSec <= 15) return 's15';
+  return 's22';
+}
 
 /** gpt-image needs a concrete size for both the provider and the billing tier; other models take an aspect. */
 function imageSizeParam(modelId: string, ratio: string): string {
@@ -187,9 +195,11 @@ export function GenerationControls({
   const resolutionOptions = intent === 'video' ? (shell.modelParams?.videoResolutionOptions(modelId) ?? []) : [];
   const durationOptions = intent === 'video'
     ? (shell.modelParams?.videoDurationOptions(modelId) ?? ['5', '10'])
-    : intent === 'audio'
-      ? ((params.audioKind ?? 'music') === 'sfx' ? ['1', '3', '5'] : ['30', '60', '120', '180'])
-      : [];
+    : intent === 'music'
+      ? ['30', '60', '120', '180']
+      : intent === 'sfx'
+        ? ['3', '5', '10', '15']
+        : [];
 
   // Switching model (or arming the mode) settles the dependent fields on that model's defaults, the
   // way the panel did: quality tier for images, a supported resolution/duration tier for video.
@@ -201,11 +211,11 @@ export function GenerationControls({
       const resolution = resolutionOptions.includes(params.resolution ?? '') ? params.resolution : resolutionOptions.includes('720p') ? '720p' : resolutionOptions[0];
       const duration = params.durationSec && durationOptions.includes(String(params.durationSec)) ? params.durationSec : Number(durationOptions[0] ?? 5);
       if (resolution !== params.resolution || duration !== params.durationSec || modelId !== params.modelId) onChange({ ...params, ...(modelId ? { modelId } : {}), resolution, durationSec: duration });
-    } else if (intent === 'audio') {
+    } else if (intent === 'music' || intent === 'sfx') {
       if (!params.durationSec || !durationOptions.includes(String(params.durationSec))) onChange({ ...params, durationSec: Number(durationOptions[1] ?? durationOptions[0] ?? 60) });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [intent, modelId, params.audioKind]);
+  }, [intent, modelId]);
 
   const hasSettings = intent !== 'element';
   const hasIdeas = generationTemplates(intent, studioLocale(), 1).length > 0;
@@ -241,14 +251,6 @@ export function GenerationControls({
               </select>
             </div>
           ) : null}
-          {intent === 'audio' ? (
-            <Row
-              label={t('chatGen.paramAudioKind')}
-              options={[{ value: 'music', label: t('chatGen.audioKindMusic') }, { value: 'sfx', label: t('chatGen.audioKindSfx') }]}
-              value={params.audioKind ?? 'music'}
-              onChange={(value) => onChange({ ...params, audioKind: value as 'music' | 'sfx', durationSec: undefined })}
-            />
-          ) : null}
           {intent === 'image' || intent === 'video' ? (
             <Row
               label={t('chatGen.paramRatio')}
@@ -273,7 +275,7 @@ export function GenerationControls({
               onChange={(value) => onChange({ ...params, quality: value })}
             />
           ) : null}
-          {intent === 'video' || intent === 'audio' ? (
+          {intent === 'video' || intent === 'music' || intent === 'sfx' ? (
             <Row
               label={t('chatGen.paramDuration')}
               options={durationOptions.map((option) => ({ value: option, label: `${option}s` }))}
@@ -303,12 +305,13 @@ export function GenerationCreditsBadge({ intent, params, models }: { intent: Gen
     const ratio = params.ratio ?? '9:16';
     if (intent === 'image') return { n: Math.min(4, Math.max(1, params.count ?? 1)), size: imageSizeParam(modelId, ratio), ...(params.quality ? { quality: params.quality } : {}) };
     if (intent === 'video') return { duration_sec: String(params.durationSec ?? 5), count: 1, resolution: params.resolution ?? '720p', aspect_ratio: ratio === '1:1' ? '9:16' : ratio, generate_audio: false };
-    if (intent === 'audio') return { tier: 'song' };
+    if (intent === 'music') return { tier: 'song' }; // 30 s floor → always the full-track tier
+    if (intent === 'sfx') return { duration_tier: sfxDurationTier(params.durationSec ?? 5) };
     return {};
   }, [intent, params, modelId]);
   const credits = useQuote({
-    toolId: intent === 'video' ? 'video-gen' : intent === 'audio' ? 'music-gen' : 'image-gen',
-    modelId: intent === 'element' || intent === 'audio' ? '' : modelId,
+    toolId: intent === 'video' ? 'video-gen' : intent === 'music' ? 'music-gen' : intent === 'sfx' ? 'sfx-gen' : 'image-gen',
+    modelId: intent === 'image' || intent === 'video' ? modelId : '',
     params: quoteParams,
   });
   if (credits == null) return null;
