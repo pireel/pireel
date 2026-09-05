@@ -6,6 +6,8 @@ import { useImperativeHandle, useRef, useState } from "react";
 import { AtSign, ArrowUp, Square, Palette } from "lucide-react";
 import { generationIntentLine, generationTemplatePrompts, type ChatMode, type GenerationIntent, type GenerationParams } from "./chat-generation-intent";
 import { ChatModePicker } from "./chat-mode-picker";
+import { GenerationParamsBar } from "./chat-generation-params";
+import { useEffect } from "react";
 import type { ChatStatus } from "ai";
 import {
   STUDIO_CREATE_SKILL_ACTION,
@@ -138,6 +140,25 @@ export function Composer({
   const [mode, setMode] = useState<ChatMode>("chat");
   const intent: GenerationIntent | null = mode === "chat" ? null : mode;
   const [genParams, setGenParams] = useState<GenerationParams>({});
+  // Hosted model catalog for the armed kind (image/video only), same source the retired panel used.
+  const [genModels, setGenModels] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    if (intent !== "image" && intent !== "video") {
+      setGenModels([]);
+      return;
+    }
+    let cancelled = false;
+    void fetch(`/api/models?kind=${intent}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { models?: Array<{ id?: string; name?: string }> } | null) => {
+        if (cancelled || !Array.isArray(j?.models)) return;
+        setGenModels(j.models.filter((m): m is { id: string; name?: string } => typeof m?.id === "string").map((m) => ({ id: m.id, name: m.name ?? m.id })));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [intent]);
   const isBusy = submitting || status === "streaming" || status === "submitted";
 
   function recomputeEmpty() {
@@ -748,32 +769,7 @@ export function Composer({
             chips while the box is empty. The message still goes to the agent as one instruction (the
             intent line is appended on submit) — one tool chain, one history. */}
         {intent ? (
-          <div className="flex flex-wrap items-center gap-1 px-2 pb-1">
-            {(intent === "image" || intent === "video") && (
-              <ParamGroup
-                label={t("chatGen.paramRatio")}
-                options={["9:16", "16:9", "1:1"]}
-                value={genParams.ratio}
-                onChange={(ratio) => setGenParams((p) => ({ ...p, ratio: ratio as GenerationParams["ratio"] }))}
-              />
-            )}
-            {intent === "image" && (
-              <ParamGroup
-                label={t("chatGen.paramCount")}
-                options={["1", "2", "4"]}
-                value={genParams.count ? String(genParams.count) : undefined}
-                onChange={(count) => setGenParams((p) => ({ ...p, count: Number(count) }))}
-              />
-            )}
-            {(intent === "video" || intent === "audio") && (
-              <ParamGroup
-                label={t("chatGen.paramDuration")}
-                options={(intent === "video" ? [5, 10, 15] : [30, 60, 120]).map((n) => `${n}s`)}
-                value={genParams.durationSec ? `${genParams.durationSec}s` : undefined}
-                onChange={(value) => setGenParams((p) => ({ ...p, durationSec: Number(value.replace(/s$/, "")) }))}
-              />
-            )}
-          </div>
+          <GenerationParamsBar intent={intent} params={genParams} models={genModels} onChange={setGenParams} />
         ) : null}
         {intent && empty ? (
           <div className="flex flex-wrap items-center gap-1 px-2 pb-1.5">
@@ -1094,21 +1090,3 @@ function findElementPill(
   );
 }
 
-/** One labelled row of exclusive parameter chips (aspect, count, duration). */
-function ParamGroup({ label, options, value, onChange }: { label: string; options: readonly string[]; value: string | undefined; onChange: (value: string) => void }) {
-  return (
-    <span className="inline-flex items-center gap-0.5 pl-1">
-      <span className="text-ink-4 text-[10.5px]">{label}</span>
-      {options.map((option) => (
-        <button
-          key={option}
-          type="button"
-          onClick={() => onChange(option)}
-          className={`h-6 rounded-md px-1.5 text-[10.5px] transition ${value === option ? "bg-panel-2 text-ink font-medium" : "text-ink-4 hover:text-ink-2"}`}
-        >
-          {option}
-        </button>
-      ))}
-    </span>
-  );
-}

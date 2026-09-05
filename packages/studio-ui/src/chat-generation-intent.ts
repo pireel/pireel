@@ -7,18 +7,27 @@
  */
 
 import { localizedTemplatePrompt, TEMPLATES_BY_TYPE } from './gen-templates';
+import { t } from './i18n';
 
 export type GenerationIntent = 'image' | 'video' | 'audio' | 'element';
 /** Composer mode: plain chat, or one generation intent that reshapes the composer. */
 export type ChatMode = 'chat' | GenerationIntent;
 
 export interface GenerationParams {
+  /** image / video: hosted model id from the catalog (omit = default) */
+  modelId?: string;
   /** image / video */
   ratio?: '9:16' | '16:9' | '1:1';
   /** image only, 1–4 */
   count?: number;
-  /** video 4–15 s · audio 30–300 s */
+  /** image only: model quality tier */
+  quality?: string;
+  /** video only */
+  resolution?: string;
+  /** video 4–15 s · audio: music 30–300 s, sfx 0.5–22 s */
   durationSec?: number;
+  /** audio only */
+  audioKind?: 'music' | 'sfx';
 }
 
 export const GENERATION_INTENTS: readonly { id: GenerationIntent; label: string }[] = [
@@ -37,13 +46,16 @@ export const AUDIO_DURATION_OPTIONS = [30, 60, 120] as const;
  * the model, not shown as UI; the user's own words above it stay in their language. */
 export function generationIntentLine(intent: GenerationIntent, params: GenerationParams): string {
   const facts: string[] = [];
+  if (params.modelId && (intent === 'image' || intent === 'video')) facts.push(`model ${params.modelId}`);
   if (params.ratio && (intent === 'image' || intent === 'video')) facts.push(`aspect ${params.ratio}`);
   if (params.count && intent === 'image') facts.push(`count ${params.count}`);
+  if (params.quality && intent === 'image') facts.push(`quality ${params.quality}`);
+  if (params.resolution && intent === 'video') facts.push(`resolution ${params.resolution}`);
   if (params.durationSec && (intent === 'video' || intent === 'audio')) facts.push(`duration ${params.durationSec}s`);
   const kind: Record<GenerationIntent, string> = {
     image: 'an image',
     video: 'a video clip',
-    audio: 'an audio track',
+    audio: (params.audioKind ?? 'music') === 'sfx' ? 'a sound effect (kind sfx)' : 'a music track (kind music)',
     element: 'an on-screen graphic element',
   };
   return `(Generate ${kind[intent]}${facts.length ? ` — ${facts.join(', ')}` : ''}; register the result in the project media and place it only if I asked.)`;
@@ -51,6 +63,12 @@ export function generationIntentLine(intent: GenerationIntent, params: Generatio
 
 /** A handful of curated prompts for the armed intent (the old panel's template library, as chips). */
 export function generationTemplatePrompts(intent: GenerationIntent, locale: string, limit = 6): { id: string; title: string; prompt: string }[] {
+  if (intent === 'audio') {
+    return ['chatGen.audioIdea1', 'chatGen.audioIdea2', 'chatGen.audioIdea3', 'chatGen.audioIdea4'].slice(0, limit).map((key) => {
+      const prompt = t(key);
+      return { id: key, title: prompt.slice(0, 24), prompt };
+    });
+  }
   const source = TEMPLATES_BY_TYPE[intent] ?? [];
   return source.slice(0, limit).map((template) => {
     const prompt = localizedTemplatePrompt(template, locale);
