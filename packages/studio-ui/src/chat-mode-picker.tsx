@@ -8,7 +8,7 @@
  */
 
 import { useRef, type RefObject } from 'react';
-import { Check, Image as ImageIcon, MessageSquare, Music, Shapes, Video } from 'lucide-react';
+import { Check, Image as ImageIcon, Music, Shapes, Sparkles, Video } from 'lucide-react';
 import { TriggerPopover, type TriggerPopoverHandle } from '@pireel/ui/trigger-popover';
 import { t } from './i18n';
 import type { ChatMode } from './chat-generation-intent';
@@ -20,7 +20,7 @@ interface ModeOption {
 }
 
 const MODE_ICON = {
-  chat: MessageSquare,
+  chat: Sparkles,
   image: ImageIcon,
   video: Video,
   audio: Music,
