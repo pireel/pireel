@@ -111,10 +111,11 @@ const readReg = (pid?: string): RegEntry[] => {
   }
 };
 
-/** Upload progress per content sig, from the tab-wide queue. */
-function useUploadStates(): ReadonlyMap<string, AssetUploadState> {
+/** Upload state of ONE sig from the tab-wide queue. The selector returns a stable object until that
+ * sig changes, so progress on one upload never re-renders the other cards. */
+function useUploadState(sig: string): AssetUploadState | undefined {
   const queue = assetUploadQueue();
-  return useSyncExternalStore(queue.subscribe, queue.snapshot, queue.snapshot);
+  return useSyncExternalStore(queue.subscribe, () => queue.state(sig), () => queue.state(sig));
 }
 
 /** Ephemeral bottom status: mounting this component starts the fail-soft background download. It
@@ -163,7 +164,8 @@ function RestoreTile({ label, kind = 'video', busy, onRestore, onRename, onDelet
 /** Thin upload status strip over a live card: progress while the bytes travel to the cloud, a retry
  * affordance when every attempt failed, and — on hosts that keep bytes local (lazy policy) — the
  * manual "upload to cloud" affordance for assets that never reached the cloud. Silent once done. */
-function UploadBadge({ state, pending, onRetry }: { state: AssetUploadState | undefined; pending: boolean; onRetry: () => void }) {
+function UploadBadge({ sig, pending, onRetry }: { sig: string; pending: boolean; onRetry: () => void }) {
+  const state = useUploadState(sig);
   if (!state && pending) {
     return (
       <button
@@ -289,7 +291,6 @@ export function MyAssetsPanel({
     return new URLSearchParams(window.location.hash.slice(1)).get('local-import');
   });
   const { playingUrl: audioPlaying, toggle: toggleAudio } = useAudioPreview();
-  const uploadStates = useUploadStates();
   const inputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const restoreInputRef = useRef<HTMLInputElement>(null);
@@ -958,7 +959,7 @@ export function MyAssetsPanel({
                     dragProps={dragPropsFor(it, onDragAsset)}
                     insertLabel={it.kind === 'audio' ? t('panels.useAsBgm') : t('panels.insert')}
                   />
-                  {it.sig ? <UploadBadge state={uploadStates.get(it.sig)} pending={lazyHost && !cloudKeyBySig.get(it.sig)} onRetry={() => retryUpload(it)} /> : null}
+                  {it.sig ? <UploadBadge sig={it.sig} pending={lazyHost && !cloudKeyBySig.get(it.sig)} onRetry={() => retryUpload(it)} /> : null}
                 </div>
               ))}
             {visibleTrackCards.map((c) =>

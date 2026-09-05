@@ -1,3 +1,4 @@
+import { imageThumb } from '@pireel/ui/image-url';
 import { materializeRemoteMedia } from './remote-media';
 
 /**
@@ -90,6 +91,15 @@ export async function cloudBackupMedia(file: File, sig: string, options?: CloudB
  * else by sig. Returns null on miss/failure. */
 export async function cloudFetchMedia(sig: string, options?: { cloudKey?: string; label?: string }): Promise<File | null> {
   try {
+    // Generated / library objects live on the public CDN namespace (bare key → imageThumb 'original');
+    // only the private rendezvous prefix needs a presigned read.
+    if (options?.cloudKey && !options.cloudKey.startsWith('studio-src/')) {
+      const materialized = await materializeRemoteMedia(imageThumb(options.cloudKey, 'original'), {
+        sig,
+        name: options.label || options.cloudKey.split('/').pop() || 'media',
+      });
+      return materialized.file;
+    }
     const r = await fetch('/api/studio/media', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

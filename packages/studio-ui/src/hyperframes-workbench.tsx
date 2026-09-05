@@ -308,6 +308,7 @@ import {
   DialogTitle,
 } from "@pireel/ui/dialog";
 import { GenChatPanel, type GenElementResult } from "./gen-chat-panel";
+import { generatedAssetIndexEntry, type GeneratedAssetRecord } from "./gen-api";
 import { KIT_INSERT_DURATION, kitSampleProps } from "./kit-ui";
 import { wordsFromText } from "@pireel/studio-engine/caption-fx";
 import { AssetsPanel, type GenType, type PanelDragAsset } from "./assets-panel";
@@ -1567,6 +1568,18 @@ export function HyperframesWorkbench({
     localAssetIndexKnownRef.current = true;
     setLocalAssetIndexRev((value) => value + 1);
   }, []);
+  /** The index as persisted: the in-memory entries plus every cloud key the upload queue reported
+   * this session. Keys are merged here (not written into the in-memory index) so a finished upload
+   * never hands the panel a new registry — the next save carries the key to every other device. */
+  const persistedLocalAssets = (): LocalAssetIndexEntry[] => {
+    const clips = cloudMediaRef.current.clips ?? {};
+    const video = cloudMediaRef.current.video;
+    return localAssetIndexRef.current.map((entry) => {
+      if (entry.cloudKey) return entry;
+      const key = clips[entry.contentSig]?.key ?? (video?.sig === entry.contentSig ? video.key : undefined);
+      return key ? { ...entry, cloudKey: key } : entry;
+    });
+  };
   const changeLocalAssetIndex = useCallback(
     (entries: LocalAssetIndexEntry[]) => {
       localAssetIndexMutationRevRef.current += 1;
@@ -1737,7 +1750,7 @@ export function HyperframesWorkbench({
       ? { cloudMedia: cloudMediaRef.current }
       : {}),
     ...(localAssetIndexKnownRef.current
-      ? { localAssets: localAssetIndexRef.current }
+      ? { localAssets: persistedLocalAssets() }
       : {}),
     videoSig: videoSigRef.current,
     videoDurationSec: firstNarrativeDurationSec(editorDocumentRef.current),
@@ -1751,8 +1764,11 @@ export function HyperframesWorkbench({
   ) => {
     assetUploadQueue().enqueue({ sig, file });
   };
-  // The ONE place an upload result becomes project state: the transient cloud index (folded into
-  // V2 locators + the project asset index at persistence) and the in-memory index the panel reads.
+  // The ONE place an upload result becomes project state: the transient cloud index, folded into
+  // V2 locators AND the project asset index at persistence (project-document.ts). The in-memory
+  // index is deliberately NOT rewritten here: replacing it would hand the panel a new registry and
+  // re-render every card for a field only the next save needs; the queue's own state already tells
+  // the card the upload is done.
   useEffect(
     () =>
       assetUploadQueue().onUploaded(({ sig, key }) => {
@@ -1760,13 +1776,8 @@ export function HyperframesWorkbench({
           ? { ...cloudMediaRef.current, video: { sig, key } }
           : { ...cloudMediaRef.current, clips: { ...cloudMediaRef.current.clips, [sig]: { key } } };
         setCloudMediaRev((v) => v + 1);
-        if (localAssetIndexRef.current.some((entry) => entry.contentSig === sig && entry.cloudKey !== key)) {
-          changeLocalAssetIndex(
-            localAssetIndexRef.current.map((entry) => (entry.contentSig === sig ? { ...entry, cloudKey: key } : entry)),
-          );
-        }
       }),
-    [changeLocalAssetIndex],
+    [],
   );
   /** Export-time audio/denoise payload getters; filled by useBgm/useDenoise below (hook order: they need consts defined later). */
   const audioExportRef = useRef<
@@ -3010,7 +3021,7 @@ export function HyperframesWorkbench({
       schemaVersion: STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION,
       outputs: projectOutputs.outputsRef.current,
       ...(localAssetIndexKnownRef.current
-        ? { localAssets: localAssetIndexRef.current }
+        ? { localAssets: persistedLocalAssets() }
         : {}),
     }),
     projectOutputs.outputs,
@@ -6918,6 +6929,16 @@ export function HyperframesWorkbench({
   const dominantScriptTrack = dominantTimelineSpeechTrack(editorDocument);
   const useNativeScriptPanel = !primaryNarrativeClips(editorDocument).length
     || (!!dominantScriptTrack && dominantScriptTrack.trackId !== editorDocument.semantics.primaryNarrativeTrackId);
+  /** Generated outputs follow the project like imports: one directory entry per output, keyed by its
+   * storage key (already in the cloud, nothing to upload). Idempotent by asset id, one publish per batch. */
+  const registerGeneratedAssets = useCallback((records: GeneratedAssetRecord[]) => {
+    const known = new Set(localAssetIndexRef.current.map((entry) => entry.assetId));
+    const fresh = records
+      .map((record) => generatedAssetIndexEntry(record, record.kind === 'video' ? t('common.videoGeneration') : record.kind === 'audio' ? t('panels.music') : t('common.imageGeneration')))
+      .filter((entry) => !known.has(entry.assetId));
+    if (!fresh.length) return;
+    changeLocalAssetIndex([...fresh, ...localAssetIndexRef.current]);
+  }, [changeLocalAssetIndex]);
   const registerLocalAsset = (entry: LocalAssetIndexEntry) => {
     const previous = localAssetIndexRef.current.find(
       (item) => item.assetId === entry.assetId,
@@ -7177,7 +7198,7 @@ export function HyperframesWorkbench({
               schemaVersion: STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION,
               outputs: projectOutputs.outputsRef.current,
               ...(localAssetIndexKnownRef.current
-                ? { localAssets: localAssetIndexRef.current }
+                ? { localAssets: persistedLocalAssets() }
                 : {}),
             },
             videoSig: videoSigRef.current,
@@ -7196,7 +7217,7 @@ export function HyperframesWorkbench({
         schemaVersion: STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION,
         outputs: projectOutputs.outputsRef.current,
         ...(localAssetIndexKnownRef.current
-          ? { localAssets: localAssetIndexRef.current }
+          ? { localAssets: persistedLocalAssets() }
           : {}),
       },
       videoSig:
@@ -10046,6 +10067,7 @@ export function HyperframesWorkbench({
                         onInsertMedia={(m, l, d) =>
                           void insertPanelMedia(m, l, undefined, d)
                         }
+                        onGenerated={registerGeneratedAssets}
                         onDragAsset={setDragAsset}
                         onSetMainVideo={setMainVideoFromUrl}
                         onInsertElement={insertGeneratedElement}

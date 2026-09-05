@@ -427,7 +427,11 @@ export function alignFileToSig(f: File, sig: string, label?: string): File {
   }
   const p = sig.split(':');
   const mt = Number(p[p.length - 1]);
-  if (p.length < 3 || !Number.isFinite(mt)) return f;
+  if (p.length < 3 || !Number.isFinite(mt)) {
+    // Opaque locator (e.g. `gen:<key>` for generated media): no name/mtime to restore, just bind.
+    if (label && f.name !== label) return rememberDurableFileSig(new File([f], label, { type: f.type, lastModified: f.lastModified }), sig);
+    return rememberDurableFileSig(f, sig);
+  }
   if (fileSig(f) === sig) return rememberDurableFileSig(f, sig);
   return rememberDurableFileSig(
     new File([f], fileNameFromSig(sig), { type: f.type, lastModified: mt }),

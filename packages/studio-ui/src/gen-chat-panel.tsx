@@ -22,7 +22,7 @@ import { useStudioShell } from './shell-context';
 import { useQuote } from '@pireel/ui/use-quote';
 import { imageThumb } from '@pireel/ui/image-url';
 import { type Composition, type MediaRef } from '@pireel/studio-engine/composition';
-import { type GenAsset, listStudioGens, pollCreation, startGeneration } from './gen-api';
+import { type GenAsset, type GeneratedAssetRecord, listStudioGens, pollCreation, startGeneration } from './gen-api';
 import { BlockPreviewFrame } from './block-preview-card';
 import { type GenTemplate, localizedTemplatePrompt, TEMPLATES_BY_TYPE, zhCategory } from './gen-templates';
 import { ElementTemplateCard, ElementTemplatePreview } from './gen-templates/element-card';
@@ -49,6 +49,8 @@ interface Entry {
 }
 
 export interface GenChatPanelProps {
+  /** Settled image/video/audio outputs, reported once each so the project media directory can list them. */
+  onGenerated?: (records: GeneratedAssetRecord[]) => void;
   /** Generation history belongs to this Studio project. */
   projectId: string;
   /** Type this panel generates/shows (one per rail entry, never mixed). */
@@ -188,7 +190,7 @@ const TYPE_META: Record<AssetType, { ph: string; empty: string }> = {
   audio: { ph: 'panels.musicPromptPlaceholder', empty: '' },
 };
 
-export function GenChatPanel({ projectId, type, seedPrompt, comp, onInsertMedia, onDragAsset, onInsertElement, generateElement, generateAudio, onInsertAudio }: GenChatPanelProps) {
+export function GenChatPanel({ projectId, type, seedPrompt, comp, onInsertMedia, onDragAsset, onInsertElement, generateElement, generateAudio, onInsertAudio, onGenerated }: GenChatPanelProps) {
   const [entries, setEntries] = useState<Entry[]>([]);
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
@@ -354,6 +356,24 @@ export function GenChatPanel({ projectId, type, seedPrompt, comp, onInsertMedia,
   // poll pending jobs (server-side)
   // Audio settles in-place through one awaited call (its aud_ placeholder is never a server
   // job), and elements are client-side — neither has anything to poll at /api/create/:id.
+  // Generated media belongs to the project like an import: report each settled output exactly once
+  // (history reload, polling and the in-place audio settle all land here).
+  const reportedRef = useRef<Set<string>>(new Set());
+  const onGeneratedRef = useRef(onGenerated);
+  onGeneratedRef.current = onGenerated;
+  useEffect(() => {
+    const fresh: GeneratedAssetRecord[] = [];
+    for (const e of entries) {
+      if (e.status !== 'succeeded' || e.type === 'element' || !e.assets?.length) continue;
+      e.assets.forEach((asset, index) => {
+        const tag = `${e.id}:${index}`;
+        if (reportedRef.current.has(tag) || !asset.key) return;
+        reportedRef.current.add(tag);
+        fresh.push({ jobId: e.id, index, kind: e.type as 'image' | 'video' | 'audio', key: asset.key, mime: asset.mime, prompt: e.prompt, createdAt: e.createdAt });
+      });
+    }
+    if (fresh.length) onGeneratedRef.current?.(fresh);
+  }, [entries]);
   const pendingKey = entries
     .filter((e) => e.status === 'pending' && e.type !== 'element' && e.type !== 'audio')
     .map((e) => e.id)

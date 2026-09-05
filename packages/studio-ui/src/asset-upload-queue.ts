@@ -31,6 +31,8 @@ type UploadedHandler = (result: { sig: string; key: string; file: File }) => voi
 const CONCURRENCY = 2;
 const MAX_ATTEMPTS = 4;
 const BACKOFF_MS = [1_000, 4_000, 16_000];
+/** XHR fires progress dozens of times per second; the cards only need a few frames of it. */
+const PROGRESS_PUBLISH_MS = 200;
 
 export interface AssetUploadQueue {
   /** Queue an upload. Under a 'lazy' host policy nothing happens unless `force` is set — that is
@@ -38,7 +40,8 @@ export interface AssetUploadQueue {
   enqueue(job: AssetUploadJob, options?: { force?: boolean }): void;
   /** The host's upload policy as the queue sees it (the panel decides which affordance to show). */
   policy(): 'always' | 'lazy';
-  /** Current state for a sig (undefined = never seen by this tab). */
+  /** Current state for a sig (undefined = never seen by this tab). The object identity only changes
+   * when THAT sig's state changes, so a per-sig selector re-renders one card, not the list. */
   state(sig: string): AssetUploadState | undefined;
   /** Snapshot for React (useSyncExternalStore): a new Map identity on every change. */
   snapshot(): ReadonlyMap<string, AssetUploadState>;
@@ -68,8 +71,15 @@ export function createAssetUploadQueue(deps?: {
     snapshotCache = new Map(states);
     for (const listener of listeners) listener();
   };
+  const lastProgressPublish = new Map<string, number>();
   const set = (sig: string, patch: Partial<AssetUploadState>) => {
     const previous = states.get(sig) ?? { status: 'queued' as const, fraction: 0, attempts: 0 };
+    const progressOnly = Object.keys(patch).length === 1 && 'fraction' in patch;
+    if (progressOnly) {
+      const now = Date.now();
+      if (now - (lastProgressPublish.get(sig) ?? 0) < PROGRESS_PUBLISH_MS && (patch.fraction ?? 0) < 1) return;
+      lastProgressPublish.set(sig, now);
+    }
     states.set(sig, { ...previous, ...patch });
     publish();
   };

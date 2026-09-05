@@ -12,6 +12,7 @@
  */
 
 import { imageThumb } from '@pireel/ui/image-url';
+import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 import { t } from './i18n';
 
 const SPACE_LS_PREFIX = 'pireel.studio.gen-space:v3:';
@@ -27,6 +28,37 @@ export interface GenAsset {
 }
 
 export type GenStatus = 'pending' | 'succeeded' | 'failed';
+
+/** One settled generated media output, as reported to the project media directory. */
+export interface GeneratedAssetRecord {
+  jobId: string;
+  index: number;
+  kind: 'image' | 'video' | 'audio';
+  /** Bare storage key (public CDN object). */
+  key: string;
+  mime: string;
+  prompt: string;
+  createdAt: number;
+}
+
+/** Generated media follows the project like any import: one directory entry per output, addressed
+ * by its storage key (no upload — the bytes are already in the cloud). Deterministic ids keep
+ * history reloads idempotent. */
+export function generatedAssetIndexEntry(record: GeneratedAssetRecord, fallbackLabel: string): LocalAssetIndexEntry {
+  const jobId = record.jobId.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'job';
+  return {
+    assetId: `gen_${jobId}_${record.index}`,
+    contentSig: `gen:${record.key}`,
+    sig: `gen:${record.key}`,
+    cloudKey: record.key,
+    label: record.prompt.trim().slice(0, 60) || fallbackLabel,
+    kind: record.kind,
+    w: null,
+    h: null,
+    ...(record.mime ? { mime: record.mime } : {}),
+    createdAt: record.createdAt,
+  };
+}
 
 export interface GenJob {
   id: string;
