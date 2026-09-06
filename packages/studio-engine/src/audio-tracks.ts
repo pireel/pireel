@@ -6,9 +6,10 @@
  * fade-in/out durations and a playback-speed multiplier. No looping, no auto-ducking — what
  * you place is what plays. Clips may overlap (sounds sum).
  *
- * Speed changes PITCH on both ends by design: export resamples PCM linearly, so preview sets
- * preservesPitch=false on the element — the two stay identical (a pitch-preserving stretch in
- * preview would lie about the export).
+ * Speed keeps PITCH on both ends: the preview relies on the element's preservesPitch time stretch,
+ * the export bakes a pitch-preserving stretch (studio-ui time-stretch.ts) — a 1.5× voice still
+ * sounds like the same person. (Earlier both ends pitch-shifted via linear resample; that survives
+ * only as the export's fallback when no AudioWorklet can run.)
  *
  * Both ends render from the same pure envelope below: preview drives per-clip <audio> elements,
  * export bakes identical gains into the PCM mix.
@@ -37,7 +38,7 @@ export interface AudioClip {
   /** Fade edges in seconds. Absent resolves from role: music fades, narration/SFX stay dry. */
   fadeInSec?: number;
   fadeOutSec?: number;
-  /** Playback-speed multiplier (absent = 1; clamped AUDIO_SPEED_MIN..MAX). Changes pitch, see header. */
+  /** Playback-speed multiplier (absent = 1; clamped AUDIO_SPEED_MIN..MAX). Pitch-preserving, see header. */
   speed?: number;
   /** Trim in/out points in SOURCE seconds (lane edge handles). in absent = 0, out absent = durationSec.
    *  Timeline length = (out − in) ÷ speed. */

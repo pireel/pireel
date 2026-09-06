@@ -1,4 +1,5 @@
 import { validateEditorDocumentV2 } from '../validation';
+import { managedCaptionTrack, pinCaptionsOnTop } from '../caption-stack';
 import type { EditorDocumentV2, EditorTrack, EditorTrackRole, EditorTrackType, TimelineClip } from '../types';
 import {
   commandFailure,
@@ -85,11 +86,16 @@ export function insertEditorTrack(
   if (track.role === 'managedCaptions') {
     next = { ...next, semantics: { ...next.semantics, managedCaptionTrackId: track.id } };
   }
+  // Captions are pinned above picture: a new visual lane defaulting to max+1 (or asked for a
+  // stackOrder at/above the caption lane) takes that slot and the caption lane moves back on top.
+  const pinned = pinCaptionsOnTop(next);
+  const captionsMoved = pinned !== next;
+  next = pinned;
   const outputIssue = validateEditorDocumentV2(next).find((candidate) => candidate.severity === 'error');
   if (outputIssue) return commandFailure(document, 'invalid-command', outputIssue.message, { path: outputIssue.path });
 
   const receipt = emptyCommandReceipt('track.insert');
-  receipt.affectedTrackIds = [track.id];
+  receipt.affectedTrackIds = captionsMoved ? [track.id, managedCaptionTrack(next)!.id] : [track.id];
   receipt.createdClipIds = track.clips.map((clip) => clip.id);
   return { ok: true, document: next, receipt };
 }
@@ -173,9 +179,13 @@ export function patchEditorTrack(document: EditorDocumentV2, trackId: string, pa
 
   const tracks = [...document.timeline.tracks];
   tracks[trackIndex] = nextTrack;
-  const next = withTracks(document, tracks);
+  let next = withTracks(document, tracks);
+  // A stackOrder patch (agent update_track, lane reorder) never lifts picture above the captions.
+  const pinned = pinCaptionsOnTop(next);
+  const captionsMoved = pinned !== next;
+  next = pinned;
   const receipt = emptyCommandReceipt('track.patch');
-  receipt.affectedTrackIds = [trackId];
+  receipt.affectedTrackIds = captionsMoved && managedCaptionTrack(next)!.id !== trackId ? [trackId, managedCaptionTrack(next)!.id] : [trackId];
   return { ok: true, document: next, receipt };
 }
 

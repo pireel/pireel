@@ -48,8 +48,8 @@ overlapping clips sum.** So:
   the last repeat to the picture end. Compute every start before placing; place them in one
   `add_clips` call.
 - **Music longer than the picture**: one clip, duration to the picture end, fade out.
-- **Speed** (`set_clip_properties speed` 0.5–2) changes pitch on purpose; use it only when the user
-  wants that effect.
+- **Speed** (`set_clip_properties speed` 0.5–2) keeps the pitch (time stretch, not resample); use
+  it only when the user asks for a retime.
 
 ## Levels: sit under the voice
 

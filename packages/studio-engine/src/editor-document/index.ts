@@ -27,5 +27,6 @@ export * from './render-plan';
 export * from './source-peer-normalization';
 export * from './time';
 export * from './track-compatibility';
+export * from './caption-stack';
 export * from './types';
 export * from './validation';

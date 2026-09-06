@@ -1458,7 +1458,10 @@ function StudioTimelineImpl({
       const dy = ev.clientY - sy;
       const center = rowTop(track) + rowH(track) / 2 + dy;
       const others = reorderableTracks.filter((candidate) => candidate !== track);
-      const toIndex = others.filter((candidate) => center > rowTop(candidate) + rowH(candidate) / 2).length;
+      let toIndex = others.filter((candidate) => center > rowTop(candidate) + rowH(candidate) / 2).length;
+      // Nothing lands above the pinned caption lane
+      const captionIdx = others.indexOf(CAP_LANE);
+      if (captionIdx >= 0 && toIndex <= captionIdx) toIndex = captionIdx + 1;
       const before = others[toIndex];
       const after = others[toIndex - 1];
       const toSlot = before != null ? dispIdx.get(before)! : after != null ? dispIdx.get(after)! + 1 : fromSlot;
@@ -1758,7 +1761,8 @@ function StudioTimelineImpl({
                       : KIND_META[k];
                 const Icon = meta.icon;
                 const dragging = trackDrag?.track === track;
-                const draggable = nativeTrack != null;
+                // The caption lane is pinned on top (engine caption-stack): no drag handle for it.
+                const draggable = nativeTrack != null && track !== CAP_LANE;
                 return (
                   <div
                     key={track}

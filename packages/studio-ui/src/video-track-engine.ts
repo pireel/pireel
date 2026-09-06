@@ -53,7 +53,7 @@ export interface EngineSeg {
 export interface EngineAudioClip {
   id: string;
   url: string;
-  /** Playback speed (element playbackRate; preservesPitch=false so preview matches the export's resample). */
+  /** Playback speed (element playbackRate; preservesPitch stays ON — the export runs a pitch-preserving stretch too). */
   speed: number;
   /** Full envelope at edited time t (level × fades); 0 outside the clip's window, may exceed 1 (boost). */
   gainAt: (t: number) => number;
@@ -418,7 +418,7 @@ export class VideoTrackEngine {
     if (!dub) return false;
     this.setElGain(dub.el, gain);
     dub.el.playbackRate = videoEl.playbackRate;
-    (dub.el as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch = false;
+    (dub.el as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch = true; // same rule as the decode element: speed keeps the voice's pitch
     if (!dub.el.seeking && Math.abs(dub.el.currentTime - videoEl.currentTime) > 0.08) {
       try {
         dub.el.currentTime = videoEl.currentTime;
@@ -474,7 +474,7 @@ export class VideoTrackEngine {
   }
 
   /** Per-tick / on-seek clip sync: volume from the envelope closure, playbackRate = speed with
-   *  preservesPitch OFF (matches the export resample); drift correction only past 0.35s. force = hard seek. */
+   *  preservesPitch ON (the export stretches pitch-preserving too); drift correction only past 0.35s. force = hard seek. */
   private syncAudioClips(t: number, wantPlay: boolean, force = false): void {
     if (wantPlay && this.actx?.state === 'suspended') void this.actx.resume(); // play is a user gesture
     for (const entry of this.audioClips.values()) {
@@ -496,7 +496,7 @@ export class VideoTrackEngine {
       }
       setGain(spec.gainAt(t));
       el.playbackRate = spec.speed;
-      (el as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch = false;
+      (el as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch = true;
       if ((force || Math.abs(el.currentTime - srcT) > 0.35) && !el.seeking) {
         try {
           el.currentTime = srcT;
@@ -658,6 +658,8 @@ export class VideoTrackEngine {
     if (!el) return;
     const rate = segmentSourceRate(this.segs[i]!, this.starts[i]!, this.ends[i]!);
     el.playbackRate = rate > 1e-9 ? rate : 1;
+    // Explicit: a retimed shot keeps the speaker's pitch here AND in the export (time-stretch.ts)
+    (el as HTMLVideoElement & { preservesPitch?: boolean }).preservesPitch = true;
     try {
       el.currentTime = Math.max(0, srcT);
     } catch {
