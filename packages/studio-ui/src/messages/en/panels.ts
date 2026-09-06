@@ -67,6 +67,7 @@ export const PANELS_EN: Record<string, string> = {
   "panels.brightness": "Brightness",
   "panels.bRollModeSec": "B-roll ({mode}) · {sec}s",
   "panels.captions": "Captions",
+  "panels.captionsPinnedTop": "Captions always render on top",
   "panels.cardView": "Card view",
   "panels.circularIrisOpens": "Circular iris opens",
   "panels.clickWordHint":

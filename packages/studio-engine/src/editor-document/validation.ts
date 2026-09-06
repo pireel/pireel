@@ -1,7 +1,7 @@
 import { isFinitePositive } from './time';
 import { normalizeEditorDocumentArtifacts } from '../director-plan-artifact';
 import { normalizePeerNarrativeSources } from './source-peer-normalization';
-import { liftCaptionsAboveFullFrameMedia } from './caption-stack';
+import { pinCaptionsOnTop } from './caption-stack';
 import {
   EDITOR_DOCUMENT_VERSION,
   type EditorDocumentIssue,
@@ -172,9 +172,9 @@ export function validateEditorDocumentV2(document: EditorDocumentV2): EditorDocu
 /** Decode the stable editor envelope, then canonicalize optional artifacts independently. */
 export function parseEditorDocumentV2(value: unknown): EditorDocumentV2 | null {
   if (!isEditorDocumentV2(value)) return null;
-  // Load-time repair: lanes inserted before the caption-stack rule existed could sit above the
-  // captions with full-frame B-roll; captions come back on top of those (see caption-stack.ts).
-  return liftCaptionsAboveFullFrameMedia(normalizePeerNarrativeSources(normalizeEditorDocumentArtifacts(value).document));
+  // Load-time repair: lanes inserted before the caption pin existed could sit above the captions;
+  // the captions come back on top (see caption-stack.ts).
+  return pinCaptionsOnTop(normalizePeerNarrativeSources(normalizeEditorDocumentArtifacts(value).document));
 }
 
 export function editorTimelineTotalFrames(document: EditorDocumentV2): number {

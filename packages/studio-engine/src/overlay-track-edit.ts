@@ -325,10 +325,13 @@ export function reorderOverlayDocumentTracks(
   document: EditorDocumentV2,
   topToBottomTrackIds: readonly string[],
 ): OverlayDocumentEditResult {
+  // The managed caption lane is pinned on top (caption-stack.ts): it is neither reordered nor
+  // required in the list, so a caller may pass the full visual order including it.
+  const captionId = document.semantics.managedCaptionTrackId;
   const graphics = document.timeline.tracks.filter((track) =>
-    track.type !== 'audio' && track.role !== 'primaryNarrative');
-  const ids = [...new Set(topToBottomTrackIds)];
-  if (ids.length !== topToBottomTrackIds.length || ids.length !== graphics.length) {
+    track.type !== 'audio' && track.role !== 'primaryNarrative' && track.role !== 'managedCaptions' && track.id !== captionId);
+  const ids = [...new Set(topToBottomTrackIds)].filter((id) => id !== captionId && document.timeline.tracks.find((track) => track.id === id)?.role !== 'managedCaptions');
+  if (ids.length !== new Set(ids).size || ids.length !== graphics.length) {
     return failure(document, 'invalid-command', 'Visual reorder must contain every non-primary visual lane exactly once.', { path: 'topToBottomTrackIds' });
   }
   const byId = new Map(graphics.map((track) => [track.id, track] as const));

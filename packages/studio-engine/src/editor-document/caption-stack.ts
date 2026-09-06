@@ -1,15 +1,12 @@
 /**
- * Managed captions vs. the visual stack.
+ * Managed captions are pinned above every visual lane.
  *
- * Captions are a real track with a stackOrder (the legacy "always on top" special case was
- * migrated into data so the user can reorder the lane). Two things keep that data honest:
- *
- * - `captionsAreTopmost`: captions sit above every other non-audio track. New lanes inserted while
- *   this holds must not slide above them (the default stackOrder is max+1, which would).
- * - `liftCaptionsAboveFullFrameMedia`: a full-frame media lane (B-roll video/image without a box)
- *   above the captions hides them completely — never a composition anyone wants — so at load time
- *   captions are lifted back above such lanes. Boxed (PiP) media and graphics above captions are
- *   left alone: a lower third over captions can be deliberate.
+ * Captions are a real track with a stackOrder (the legacy "always on top" renderer special case was
+ * migrated into data), but the product rule matches Premiere / DaVinci: the caption lane never sits
+ * under picture. The timeline does not let the user drag the caption lane, and every command that
+ * can change a stackOrder (insert, patch, reorder, load) re-pins the captions to max + 1 through
+ * `pinCaptionsOnTop`. A lane can therefore be dropped "at the top" of the visual stack and still
+ * end up right under the captions.
  */
 
 import type { EditorDocumentV2, EditorTrack } from './types';
@@ -29,25 +26,17 @@ export function captionsAreTopmost(document: EditorDocumentV2, captions = manage
   );
 }
 
-/** Non-primary visual lanes carrying at least one full-frame media clip (no canvas box). */
-function fullFrameMediaStackOrders(document: EditorDocumentV2): number[] {
-  return document.timeline.tracks.flatMap((track) => {
-    if (track.type === 'audio' || track.type === 'caption' || track.id === document.semantics.primaryNarrativeTrackId) return [];
-    const fullFrame = track.clips.some((clip) => clip.kind === 'media' && !clip.box);
-    return fullFrame ? [track.stackOrder] : [];
-  });
-}
-
 /**
- * Lift the managed caption lane above any full-frame media lane that currently covers it.
- * Returns the same document instance when nothing needs to change.
+ * Re-pin the managed caption lane to max(other non-audio lanes) + 1. Returns the same document
+ * instance when the captions are already strictly on top (or there is no caption lane).
  */
-export function liftCaptionsAboveFullFrameMedia(document: EditorDocumentV2): EditorDocumentV2 {
+export function pinCaptionsOnTop(document: EditorDocumentV2): EditorDocumentV2 {
   const captions = managedCaptionTrack(document);
-  if (!captions) return document;
-  const covering = fullFrameMediaStackOrders(document);
-  if (!covering.some((stackOrder) => stackOrder >= captions.stackOrder)) return document;
-  const top = document.timeline.tracks.reduce((max, track) => Math.max(max, track.stackOrder), 0);
+  if (!captions || captionsAreTopmost(document, captions)) return document;
+  const top = document.timeline.tracks.reduce(
+    (max, track) => (track.id === captions.id || track.type === 'audio' ? max : Math.max(max, track.stackOrder)),
+    0,
+  );
   return {
     ...document,
     timeline: {

@@ -7815,7 +7815,7 @@ export function HyperframesWorkbench({
       // the user's requested timeline order.
       const visualIds = targetIds.filter((id) => {
         const track = tracks.find((candidate) => candidate.id === id);
-        return track?.type !== "audio" && track?.role !== "primaryNarrative";
+        return track?.type !== "audio" && track?.role !== "primaryNarrative" && track?.role !== "managedCaptions";
       });
       const visualEdit = reorderOverlayDocumentTracks(current, visualIds);
       if (!visualEdit.ok) {

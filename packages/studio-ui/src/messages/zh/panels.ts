@@ -65,6 +65,7 @@ export const PANELS_ZH: Record<string, string> = {
   "panels.brightness": "亮度",
   "panels.bRollModeSec": "插入片段({mode})· {sec}s",
   "panels.captions": "字幕",
+  "panels.captionsPinnedTop": "字幕始终在最上层",
   "panels.cardView": "卡片式",
   "panels.circularIrisOpens": "圆形光圈打开",
   "panels.clickWordHint": "点词删/换 · 划词批量删 · (…s)=空白",
