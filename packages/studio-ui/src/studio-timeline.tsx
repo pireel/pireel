@@ -1768,7 +1768,7 @@ function StudioTimelineImpl({
                     key={track}
                     data-audio-track-id={audioId && audioId !== '__fallback__' ? audioId : undefined}
                     onPointerDown={draggable ? (e) => startTrackDrag(e, track) : undefined}
-                    title={track === CAP_LANE ? t('panels.captionsPinnedTop') : t(meta.label)}
+                    title={t(meta.label)}
                     className={`grid grid-cols-[16px_16px_16px] items-center gap-0.5 px-2 text-[11px] ${draggable ? 'cursor-grab active:cursor-grabbing' : ''} ${dragging ? 'bg-panel-2 relative z-10 rounded' : ''}`}
                     style={{ height: rowH(track), marginTop: displayIndex === 0 ? 0 : ROW_GAP, transform: dragging ? `translateY(${trackDrag!.dy}px)` : undefined }}
                   >
