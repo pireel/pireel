@@ -1362,7 +1362,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '⏩',
     label: 'tools.set_video_speed.label',
     description:
-      "Set constant playback speed for video clips on any visual lane. The source range stays fixed while timeline duration, picture, and the clip's own audio retime together. Use only for an intentional, visible creative retime supported by the source/action or explicitly requested by the user; never use it to make picture reach narration length. Batch with shotIds or all:true. speed accepts 0.25..4. ripple defaults to true for primary narrative clips and false for B-roll/overlay video; set it explicitly to override. This is constant speed only; speed ramps are not supported.",
+      "Set constant playback speed for video clips on any visual lane. The source range stays fixed while timeline duration, picture, and the clip's own audio retime together (audio keeps its pitch). Use only for an intentional, visible creative retime supported by the source/action or explicitly requested by the user; never use it to make picture reach narration length. Batch with shotIds or all:true. speed accepts 0.25..4. ripple defaults to true for primary narrative clips and false for B-roll/overlay video; set it explicitly to override. This is constant speed only; speed ramps are not supported.",
     inputSchema: obj(
       {
         shotIds: { type: 'array', items: { type: 'string' }, description: 'Target video clip ids (omit when using all).' },
@@ -1395,7 +1395,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎵',
     label: 'tools.set_bgm.label',
     description:
-      "Audio tracks on the music lane (plain clips: no looping, no auto-ducking; overlapping clips sum). Add: pass url (audio on Pireel storage / a generated track) + optional startSec — the initial level auto-balances against the measured narration loudness; the receipt returns trackId. Adjust: pass trackId (or omit when exactly one track exists) + any of volumeDb (-60..+20; 0 = source level, -60 = silent), fadeInSec, fadeOutSec (≤10s each), speed (0.5..2, pitch shifts), startSec, mute. Shorten a track: headSec/tailSec move that EDGE to a timeline second, dropping the audio outside it (a bed that outruns the video: pass tailSec = the video's duration). splitAtSec cuts one track into two independent ones at that second — the way to give the halves different levels or drop the middle. Remove: off:true with trackId (or without = remove all). Current tracks show in the snapshot; users' own uploads appear in list_assets.",
+      "Audio tracks on the music lane (plain clips: no looping, no auto-ducking; overlapping clips sum). Add: pass url (audio on Pireel storage / a generated track) + optional startSec — the initial level auto-balances against the measured narration loudness; the receipt returns trackId. Adjust: pass trackId (or omit when exactly one track exists) + any of volumeDb (-60..+20; 0 = source level, -60 = silent), fadeInSec, fadeOutSec (≤10s each), speed (0.5..2, pitch preserved), startSec, mute. Shorten a track: headSec/tailSec move that EDGE to a timeline second, dropping the audio outside it (a bed that outruns the video: pass tailSec = the video's duration). splitAtSec cuts one track into two independent ones at that second — the way to give the halves different levels or drop the middle. Remove: off:true with trackId (or without = remove all). Current tracks show in the snapshot; users' own uploads appear in list_assets.",
     inputSchema: obj(
       {
         url: { type: 'string', description: 'Audio url to ADD as a new track. Omit to adjust an existing one.' },
@@ -1404,7 +1404,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
         volumeDb: { type: 'number', description: 'Level dB, clamped -60..+20 (0 = source level, -60 = silent). Omit on add = auto level from loudness measurement.' },
         fadeInSec: { type: 'number' },
         fadeOutSec: { type: 'number' },
-        speed: { type: 'number', description: 'Playback-rate multiplier 0.5..2 (changes pitch on purpose — matches export).' },
+        speed: { type: 'number', description: 'Playback-rate multiplier 0.5..2 (pitch preserved; preview and export agree).' },
         mute: { type: 'boolean', description: 'Silence the track while keeping it (and its level) in place.' },
         headSec: { type: 'number', description: 'Move the track\'s START to this edited-timeline second, trimming the audio before it.' },
         tailSec: { type: 'number', description: 'Move the track\'s END to this edited-timeline second, trimming the audio after it.' },

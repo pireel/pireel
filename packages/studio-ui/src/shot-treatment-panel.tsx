@@ -21,6 +21,11 @@ import {
 
 type FramingLayoutId = Exclude<LayoutStrategyPreviewId, 'smart'>;
 
+/** Same bounds as the agent's set_video_speed. Presets are the speech-friendly stops. */
+const SPEED_MIN = 0.25;
+const SPEED_MAX = 4;
+const SPEED_PRESETS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
+
 const FRAMING_LAYOUTS: { id: FramingLayoutId; label: string }[] = [
   { id: 'none', label: 'common.none' },
   { id: 'zoom', label: 'common.zoomIn' },
@@ -79,6 +84,8 @@ export function ShotTreatmentPanel({
   onSetFilter,
   onPreviewFilter,
   onSetAudio,
+  speed,
+  onSetSpeed,
 }: {
   shot: VideoShot;
   onSetTreatment: (shotId: string, t: ShotTreatment) => void;
@@ -93,6 +100,10 @@ export function ShotTreatmentPanel({
   onPreviewFilter: (shotId: string, f: ShotFilter) => void;
   /** Per-shot audio level (dB). Muting is a TRACK action and lives on the timeline's track header. */
   onSetAudio: (shotId: string, patch: { volumeDb?: number; mute?: boolean }) => void;
+  /** Current constant playback speed (source seconds per timeline second); 1 = natural. */
+  speed?: number;
+  /** Commit a constant speed for this shot (picture + its own audio, pitch preserved). Absent = no control. */
+  onSetSpeed?: (shotId: string, speed: number) => void;
 }) {
   // Size slider: local value + live iframe preview while dragging (zero setState); commits to comp on release / after keyboard adjust
   const committedSize = shot.treatSize ?? TREAT_SIZE_DEFAULT[shot.treatment];
@@ -108,6 +119,16 @@ export function ShotTreatmentPanel({
   const committedCrop = shot.treatCrop ?? 50;
   const [dragCrop, setDragCrop] = useState<number | null>(null);
   useEffect(() => setDragCrop(null), [shot.id, shot.treatment]);
+  // Speed: local value while dragging; commit on release (a retime rebuilds the timeline, not per-tick work)
+  const committedSpeed = Number.isFinite(speed) && speed! > 0 ? speed! : 1;
+  const [dragSpeed, setDragSpeed] = useState<number | null>(null);
+  useEffect(() => setDragSpeed(null), [shot.id, committedSpeed]);
+  const speedValue = dragSpeed ?? committedSpeed;
+  const commitSpeed = (v: number) => {
+    const next = Math.max(SPEED_MIN, Math.min(SPEED_MAX, Math.round(v * 100) / 100));
+    setDragSpeed(null);
+    if (Math.abs(next - committedSpeed) > 0.005) onSetSpeed?.(shot.id, next);
+  };
   const cropValue = dragCrop ?? committedCrop;
   const commitCrop = () => {
     if (dragCrop != null && dragCrop !== committedCrop) onSetTreatCrop(shot.id, dragCrop);
@@ -251,6 +272,46 @@ export function ShotTreatmentPanel({
             );
           })}
         </section>
+
+        {/* Speed: constant retime of picture + this segment's own audio. Pitch is preserved on both the
+            preview and the export, so a 1.25× voice is still the same voice. Presets cover the useful
+            range for speech; the slider reaches the agent's full 0.25..4. */}
+        {onSetSpeed && (
+          <section className="flex flex-col gap-1.5">
+            <div className="text-ink flex items-center justify-between font-medium">
+              <span>{t('panels.speedRate')}</span>
+              <span className="text-ink-3 tabular-nums">{speedValue.toFixed(2).replace(/\.?0+$/, '')}×</span>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {SPEED_PRESETS.map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => commitSpeed(v)}
+                  className={`rounded-md border px-2 py-0.5 text-[11px] tabular-nums transition-colors ${
+                    Math.abs(speedValue - v) < 0.005 ? 'border-ink bg-ink text-bg' : 'border-line-2 hover:bg-panel-2'
+                  }`}
+                >
+                  {v}×
+                </button>
+              ))}
+            </div>
+            <input
+              type="range"
+              min={SPEED_MIN}
+              max={SPEED_MAX}
+              step={0.05}
+              value={speedValue}
+              onChange={(e) => setDragSpeed(Number(e.target.value))}
+              onPointerUp={() => commitSpeed(dragSpeed ?? speedValue)}
+              onKeyUp={() => commitSpeed(dragSpeed ?? speedValue)}
+              onBlur={() => commitSpeed(dragSpeed ?? speedValue)}
+              className="zoom-range w-full"
+              aria-label={t('panels.speedRate')}
+            />
+            <div className="text-ink-4 text-[10.5px]">{t('panels.speedPitchNote')}</div>
+          </section>
+        )}
 
         {/* Sound (whole shot, this segment's own audio): the SAME level control the audio panel uses —
             one slider, one dB scale, one implementation. Muting is per track, up on the timeline. */}

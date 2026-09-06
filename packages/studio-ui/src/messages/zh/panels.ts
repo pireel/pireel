@@ -422,7 +422,7 @@ export const PANELS_ZH: Record<string, string> = {
   "panels.smartCutoutToggle": "智能抠像开关",
   "panels.softEdgedDiagonalWipe": "柔边斜向擦过",
   "panels.solid": "实线",
-  "panels.speedPitchNote": "变速会同时改变音调(与导出一致)",
+  "panels.speedPitchNote": "变速保持音调不变(与导出一致)",
   "panels.speedRate": "变速",
   "panels.stickers": "贴纸",
   "panels.still5s": "5s 静帧",

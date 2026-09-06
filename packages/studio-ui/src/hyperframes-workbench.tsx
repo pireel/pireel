@@ -85,6 +85,7 @@ import {
   STUDIO_FONTS_HREF,
   CAPTION_PRESETS,
   applyEditorCommand,
+  runAgentTimelineTool,
   applyCanvasDocumentEdit,
   applyCaptionDocumentEdit,
   resizeManagedCaptionTiming,
@@ -168,6 +169,19 @@ import {
   displayTextPreset,
   titleBlock,
 } from "@pireel/studio-engine/composition";
+
+/** Constant speed of a placed video clip = source seconds per timeline second (1 = natural). */
+function clipSpeedInDocument(document: EditorDocumentV2, clipId: string): number {
+  for (const track of document.timeline.tracks) {
+    for (const clip of track.clips) {
+      if (clip.id !== clipId || (clip.kind !== "narrative" && clip.kind !== "media")) continue;
+      const timelineSec = clip.durationFrames / document.canvas.fps;
+      const sourceSec = clip.sourceOutSec - clip.sourceInSec;
+      return timelineSec > 1e-9 && sourceSec > 0 ? Math.round((sourceSec / timelineSec) * 100) / 100 : 1;
+    }
+  }
+  return 1;
+}
 import { getTheme, themeVarsCss } from "@pireel/studio-engine/theme";
 import {
   restoreSrcRange,
@@ -4659,6 +4673,19 @@ export function HyperframesWorkbench({
     });
   };
   /** Per-shot audio commit (volume/mute): the engine-segment effect refeeds gains from comp.shots. */
+  /** Constant speed for one video clip (any visual lane): the engine's set_video_speed retime — the
+   *  same op the agent uses — so UI and agent produce identical documents; one undo step. */
+  const setShotSpeed = (sid: string, speed: number) => {
+    const current = editorDocumentRef.current;
+    const outcome = runAgentTimelineTool(current, "set_video_speed", { shotIds: [sid], speed });
+    if (!outcome.ok || !outcome.document) {
+      if (outcome.error) toast.error(outcome.error);
+      return;
+    }
+    if (outcome.document === current) return;
+    pushUndoSnapshot();
+    setEditorDocument(outcome.document);
+  };
   const setShotAudio = (
     sid: string,
     patch: {
@@ -10146,6 +10173,8 @@ export function HyperframesWorkbench({
                           onSetFilter={setShotFilter}
                           onPreviewFilter={previewShotFilter}
                           onSetAudio={setShotAudio}
+                          speed={clipSpeedInDocument(editorDocument, selectedShot.id)}
+                          onSetSpeed={setShotSpeed}
                         />
                       </div>
                     )}

@@ -453,7 +453,7 @@ export const PANELS_EN: Record<string, string> = {
   "panels.smartCutoutToggle": "Smart cutout toggle",
   "panels.softEdgedDiagonalWipe": "Soft-edged diagonal wipe",
   "panels.solid": "Solid",
-  "panels.speedPitchNote": "Speed also shifts pitch (matches the export)",
+  "panels.speedPitchNote": "Speed keeps the pitch (matches the export)",
   "panels.speedRate": "Speed",
   "panels.stickers": "Stickers",
   "panels.still5s": "5s still",
