@@ -1,4 +1,5 @@
 import { validateEditorDocumentV2 } from '../validation';
+import { captionsAreTopmost, managedCaptionTrack } from '../caption-stack';
 import type { EditorDocumentV2, EditorTrack, EditorTrackRole, EditorTrackType, TimelineClip } from '../types';
 import {
   commandFailure,
@@ -79,8 +80,20 @@ export function insertEditorTrack(
   const insertAt = index == null
     ? document.timeline.tracks.length
     : Math.min(document.timeline.tracks.length, Math.max(0, Math.trunc(index)));
-  const tracks = [...document.timeline.tracks];
+  let tracks = [...document.timeline.tracks];
   tracks.splice(insertAt, 0, track);
+  // Captions that are on top stay on top: a new visual lane defaulting to max+1 (or asked for a
+  // stackOrder at/above the caption lane) would otherwise cover the subtitles. The caption lane
+  // moves up one step instead; the user demotes captions by reordering that lane, not by adding B-roll.
+  const captions = managedCaptionTrack(document);
+  const keepCaptionsOnTop = !!captions
+    && track.role !== 'managedCaptions'
+    && track.type !== 'audio'
+    && track.stackOrder >= captions.stackOrder
+    && captionsAreTopmost(document, captions);
+  if (keepCaptionsOnTop) {
+    tracks = tracks.map((candidate) => (candidate.id === captions!.id ? { ...candidate, stackOrder: track.stackOrder + 1 } : candidate));
+  }
   let next = withTracks(document, tracks);
   if (track.role === 'managedCaptions') {
     next = { ...next, semantics: { ...next.semantics, managedCaptionTrackId: track.id } };
@@ -89,7 +102,7 @@ export function insertEditorTrack(
   if (outputIssue) return commandFailure(document, 'invalid-command', outputIssue.message, { path: outputIssue.path });
 
   const receipt = emptyCommandReceipt('track.insert');
-  receipt.affectedTrackIds = [track.id];
+  receipt.affectedTrackIds = keepCaptionsOnTop ? [track.id, captions!.id] : [track.id];
   receipt.createdClipIds = track.clips.map((clip) => clip.id);
   return { ok: true, document: next, receipt };
 }
