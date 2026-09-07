@@ -1,7 +1,7 @@
 import type { CaptionStyle } from './composition-core';
 import { getCaptionPreset, BASE_CAPTION_FONT_PX } from './caption-presets';
 import { captionCanvasFontFamilies, captionLineSegments } from './caption-layout-metrics';
-import { easeOutCubic, latinJoin, type FxWord } from './caption-fx';
+import { latinJoin, type FxWord } from './caption-fx';
 
 export function captionWordHighlighted(words: readonly FxWord[], index: number, time: number, keywords: boolean): boolean {
   const word = words[index];
@@ -25,8 +25,8 @@ export function drawPresetCaption(ctx: CanvasRenderingContext2D, words: FxWord[]
   const lineHeight = size * 1.35 + paddingY * 2;
   const gap = size * .15;
   let y = height * (style.yPct ?? 86) / 100 - lines.length * lineHeight - Math.max(0, lines.length - 1) * gap;
-  const alpha = easeOutCubic((time - words[0]!.start) / .18);
-  ctx.globalAlpha = alpha;
+  // Style previews keep the line visible while the active word advances.
+  ctx.globalAlpha = 1;
   let index = 0;
   for (const line of lines) {
     const widths = line.map((word) => ctx.measureText(word.text).width);

@@ -24,8 +24,8 @@ export function CanvasCaptionPreview({ style, locale, tile = false, aspect = 9 /
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
-    const words: FxWord[] = (locale === 'zh' ? ['让', '每句话', '都被', '看见'] : ['MAKE', 'EVERY', 'WORD', 'COUNT']).map((text, index) => ({ text, start: .15 + index * .6, end: .15 + (index + 1) * .6, emphasis: index >= 2 }));
-    const viewStyle = tile ? { ...style, scale: 2.4, xPct: 50, yPct: 66, wPct: 78 } : style;
+    const words: FxWord[] = (locale === 'zh' ? ['让', '每句话', '都被', '看见'] : ['MAKE', 'EVERY', 'WORD', 'COUNT']).map((text, index) => ({ text, start: index * .6, end: (index + 1) * .6, emphasis: index >= 2 }));
+    const viewStyle = tile ? { ...style, scale: 3.2, xPct: 50, yPct: 66, wPct: 78 } : style;
     const designWidth = 1080;
     const designHeight = tile ? designWidth / 1.15 : designWidth / aspect;
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
@@ -36,7 +36,7 @@ export function CanvasCaptionPreview({ style, locale, tile = false, aspect = 9 /
       const dpr = Math.min(devicePixelRatio || 1, 2);
       ctx.setTransform(dpr * width / designWidth, 0, 0, dpr * height / designHeight, 0, 0);
       ctx.clearRect(0, 0, designWidth, designHeight);
-      drawPresetCaption(ctx, words, viewStyle, reduced.matches ? 1.5 : clock % 3.3, designWidth, designHeight);
+      drawPresetCaption(ctx, words, viewStyle, reduced.matches ? 1.5 : clock % 2.4, designWidth, designHeight);
     };
     const update = () => { unsubscribe?.(); unsubscribe = undefined; draw(1.5); if (visible && !reduced.matches) unsubscribe = subscribe(draw); };
     const resize = new ResizeObserver(([entry]) => {

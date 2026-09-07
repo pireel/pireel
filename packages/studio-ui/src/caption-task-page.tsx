@@ -144,7 +144,7 @@ export function CaptionTaskPage({ locale, onBack, onOpenEditor }: { locale: 'zh'
   const disabled = busy || preparing;
   const usePreset = (id: string) => { setOptions((current) => ({ ...current, presetId: id, custom: undefined })); };
 
-  return <section className="studio-scope mx-auto max-w-[1200px] px-5 py-8 sm:px-10">
+  return <section className="studio-scope mx-auto w-full max-w-[1200px] px-5 py-8 sm:px-10">
     <button type="button" disabled={busy} onClick={onBack} className="text-ink-3 mb-6 inline-flex items-center gap-2 text-sm disabled:opacity-40"><ArrowLeft size={15} />{say('返回首页', 'Back to home')}</button>
     <header className="mb-8"><h1 className="text-ink text-3xl font-semibold tracking-tight">AI Captions</h1><p className="text-ink-3 mt-2 text-sm">{say('上传视频，选一个喜欢的样式，其余交给我们。', 'Add your video, choose a style, and leave the rest to us.')}</p></header>
     <input ref={inputRef} type="file" accept="video/*" className="hidden" aria-label={say('选择视频文件', 'Choose a video file')} onChange={(event) => { const next = event.target.files?.[0]; event.target.value = ''; if (next) void pickFile(next); }} />
@@ -169,9 +169,9 @@ export function CaptionTaskPage({ locale, onBack, onOpenEditor }: { locale: 'zh'
           {!busy && <button type="button" onClick={() => { setTask(null); setFile(null); setProbe(null); setResult(null); setError(''); }} className="text-ink-3 mt-4 text-xs underline">{say('处理另一个视频', 'Start another video')}</button>}
         </div> : <>
           <h2 className="text-ink mb-4 text-sm font-medium">{say('选一个字幕样式', 'Choose a caption style')}</h2>
-          <div role="region" aria-label={say('滚动浏览字幕样式', 'Scroll caption styles')} tabIndex={0} className="max-h-[350px] overflow-y-auto overscroll-contain pr-2 [scrollbar-width:thin] focus-visible:outline-accent">
-            <div className="grid grid-cols-3 gap-x-3 gap-y-4 sm:grid-cols-4" role="group" aria-label={say('字幕预设', 'Caption presets')}>{CAPTION_TASK_PRESETS.filter((item) => item.id !== 'keywords' || !!studioProviders().captionEmphasis).map((item) => <button type="button" key={item.id} disabled={disabled} aria-pressed={options.presetId === item.id} onClick={() => usePreset(item.id)} className="group min-w-0 text-center focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
-              <span className={'bg-panel block aspect-[1.15] overflow-hidden rounded-xl border-2 ' + (options.presetId === item.id ? 'border-ink' : 'border-transparent group-hover:border-ink-4')}><CanvasCaptionPreview style={options.presetId === item.id ? previewStyle : item.style} locale={locale} tile /></span><span className="text-ink-3 mt-2 block truncate text-xs">{item.name[locale]}</span>
+          <div role="region" aria-label={say('滚动浏览字幕样式', 'Scroll caption styles')} tabIndex={0} className="max-h-[260px] overflow-y-auto overscroll-contain pr-2 [scrollbar-width:thin] focus-visible:outline-accent">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(88px,1fr))] gap-x-2 gap-y-3" role="group" aria-label={say('字幕预设', 'Caption presets')}>{CAPTION_TASK_PRESETS.filter((item) => item.id !== 'keywords' || !!studioProviders().captionEmphasis).map((item) => <button type="button" key={item.id} disabled={disabled} aria-pressed={options.presetId === item.id} onClick={() => usePreset(item.id)} className="group min-w-0 text-center focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+              <span className={'bg-panel block aspect-[1.15] overflow-hidden rounded-lg border-2 ' + (options.presetId === item.id ? 'border-ink' : 'border-transparent group-hover:border-ink-4')}><CanvasCaptionPreview style={options.presetId === item.id ? previewStyle : item.style} locale={locale} tile /></span><span className="text-ink-3 mt-2 block truncate text-xs">{item.name[locale]}</span>
             </button>)}</div>
           </div>
           <p className="text-ink-4 mt-2 text-xs">{say('动态效果预览 · 滚动查看更多样式', 'Animated previews · Scroll for more styles')}</p>
