@@ -89,7 +89,7 @@ export function CaptionTaskPage({ locale, onBack, onOpenEditor }: { locale: 'zh'
     busyRef.current = true; setBusy(true); setError(''); setStopping(false); setFraction(0); setOriginal(false);
     const controller = new AbortController(); abortRef.current = controller;
     const next: CaptionTaskRecord = resume && taskRef.current ? { ...taskRef.current, stage: 'ready', error: undefined } : {
-      id: crypto.randomUUID(), scope, name: file.name, sourceSig: fileSig(file), ...probe, options: { ...options }, stage: 'ready', updatedAt: Date.now(),
+      id: crypto.randomUUID(), scope, name: file.name, sourceSig: fileSig(file), ...probe, options: { ...options, aspect: 'original' }, stage: 'ready', updatedAt: Date.now(),
     };
     try {
       await persist(next);
@@ -138,7 +138,7 @@ export function CaptionTaskPage({ locale, onBack, onOpenEditor }: { locale: 'zh'
     finally { setPreparing(false); }
   };
   const previewStyle = captionTaskStyle(options);
-  const dimensions = captionTaskCanvas(options.aspect, probe ?? { width: 9, height: 16 });
+  const dimensions = captionTaskCanvas(task?.options.aspect ?? 'original', probe ?? { width: 9, height: 16 });
   const completed = task?.stage === 'completed' && !!resultUrl;
   const taskMode = !!task && !['ready'].includes(task.stage);
   const disabled = busy || preparing;
@@ -176,7 +176,7 @@ export function CaptionTaskPage({ locale, onBack, onOpenEditor }: { locale: 'zh'
           </div>
           <p className="text-ink-4 mt-2 text-xs">{say('动态效果预览 · 滚动查看更多样式', 'Animated previews · Scroll for more styles')}</p>
           <CaptionTaskCustomize options={options} locale={locale} disabled={disabled} onChange={(patch) => setOptions((current) => ({ ...current, custom: { ...current.custom, ...patch } }))} onReset={() => setOptions((current) => ({ ...current, custom: undefined }))} />
-          <div className="border-line mt-6 space-y-5 border-t pt-5"><label className="text-ink flex items-center justify-between gap-3 text-sm"><span>{say('画幅', 'Aspect ratio')}</span><select value={options.aspect} disabled={disabled} onChange={(event) => setOptions((current) => ({ ...current, aspect: event.target.value as CaptionTaskOptions['aspect'] }))} className="border-line bg-bg rounded-md border px-3 py-2 text-sm"><option value="original">{say('保持原画幅', 'Original')}</option><option value="portrait">9:16</option><option value="landscape">16:9</option><option value="square">1:1</option></select></label><label className="text-ink flex cursor-pointer items-start gap-3"><input type="checkbox" checked={options.shortenPauses} disabled={disabled} onChange={(event) => setOptions((current) => ({ ...current, shortenPauses: event.target.checked }))} className="mt-1 size-4 accent-[var(--color-accent)]" /><span className="text-sm">{say('AI 去停顿', 'Shorten pauses')}<span className="text-ink-3 mt-1 block text-xs">{say('缩短长停顿，保留自然语气。', 'Trim long pauses while keeping speech natural.')}</span></span></label></div>
+          <div className="border-line mt-6 space-y-5 border-t pt-5"><label className="text-ink flex cursor-pointer items-start gap-3"><input type="checkbox" checked={options.shortenPauses} disabled={disabled} onChange={(event) => setOptions((current) => ({ ...current, shortenPauses: event.target.checked }))} className="mt-1 size-4 accent-[var(--color-accent)]" /><span className="text-sm">{say('AI 去停顿', 'Shorten pauses')}<span className="text-ink-3 mt-1 block text-xs">{say('缩短长停顿，保留自然语气。', 'Trim long pauses while keeping speech natural.')}</span></span></label></div>
           <button type="button" disabled={!file || !scope || disabled} onClick={() => void start()} className={actionClass + ' mt-7 w-full'}>{preparing ? <Loader2 size={16} className="animate-spin" /> : null}{preparing ? say('准备视频…', 'Preparing video…') : say('一键生成字幕视频', 'Add captions in one click')}</button><p className="text-ink-4 mt-3 text-center text-xs">{say('语音识别和重点词选择可能消耗积分。', 'Transcription and key phrase selection may use credits.')}</p>
         </>}
         {error && <p role="alert" className="text-ink mt-4 text-sm leading-relaxed">{error}</p>}{storageNote && <p role="status" className="text-ink-3 mt-3 text-xs leading-relaxed">{storageNote}</p>}
