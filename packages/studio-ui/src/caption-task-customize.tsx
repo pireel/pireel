@@ -1,3 +1,4 @@
+import { CanvasCaptionPreview } from './canvas-caption-preview';
 import { WEB_FONTS } from '@pireel/studio-engine/font-library';
 import { captionTaskStyle, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
 import { getCaptionPreset } from '@pireel/studio-engine/caption-presets';
@@ -16,6 +17,10 @@ export function CaptionTaskCustomize({ options, locale, disabled, onChange, onRe
   const swatch = (label: string, value: string, change: (color: string) => void) => <label className="text-ink flex items-center justify-between gap-2 text-xs">{label}<input type="color" value={value} onChange={(event) => change(event.target.value)} className="border-line bg-panel h-7 w-9 cursor-pointer rounded border p-0.5" /></label>;
   return <details className="border-line mt-5 border-t pt-4">
     <summary className="text-ink cursor-pointer text-sm font-medium">{say('自定义样式', 'Customize style')}{options.custom && <span className="text-ink-3 ml-2 text-xs">{say('已调整', 'Edited')}</span>}</summary>
+    <div role="region" aria-label={say('自定义字幕实时预览', 'Live custom caption preview')} className="border-line bg-bg sticky top-3 z-10 mt-4 rounded-lg border p-3 shadow-sm">
+      <div className="text-ink-3 mb-2 flex items-center justify-between gap-3 text-xs"><span>{say('实时预览', 'Live preview')}</span><span className="text-ink-4">{say('示例文字', 'Sample text')}</span></div>
+      <div className="bg-panel aspect-[2.4] w-full overflow-hidden rounded-md"><CanvasCaptionPreview style={{ ...style, xPct: 50, yPct: 75 }} locale={locale} aspect={2.4} sampleText={say('字幕|效果', 'Your|words')} /></div>
+    </div>
     <fieldset disabled={disabled} className="mt-4 space-y-4 disabled:opacity-50">
       <label className="text-ink flex items-center justify-between gap-4 text-xs">{say('字体', 'Font')}<select value={style.font ?? 'sans'} onChange={(event) => onChange({ font: event.target.value })} className="border-line bg-bg max-w-[220px] rounded-md border px-2 py-1.5 text-xs"><option value="sans">{say('现代黑体', 'Sans serif')}</option><option value="serif">{say('经典宋体', 'Serif')}</option><option value="mono">{say('等宽字体', 'Monospace')}</option>{WEB_FONTS.map((font) => <option key={font.id} value={'web:' + font.id}>{font.label[locale]}</option>)}</select></label>
       <div className="grid grid-cols-2 gap-5">{range(say('字号', 'Size'), style.scale ?? 1, .5, 2, .05, (scale) => onChange({ scale }), String(Math.round(48 * (style.scale ?? 1))))}{range(say('每行宽度', 'Line width'), style.wPct ?? 84, 40, 94, 1, (wPct) => onChange({ wPct }), `${style.wPct ?? 84}%`)}</div>
