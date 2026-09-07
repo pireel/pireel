@@ -155,7 +155,7 @@ export class VideoTrackEngine {
   // (element.volume caps at 1). The takeover is permanent per element, so every lane clip goes through
   // the graph — never half native, half routed. Video elements get the same treatment, but lazily
   // (setElGain): footage is usually attenuated, and an unnecessary AudioContext is a liability.
-  private audioClips = new Map<string, { el: HTMLAudioElement; spec: EngineAudioClip; gain?: GainNode }>();
+  private audioClips = new Map<string, { el: HTMLAudioElement; spec: EngineAudioClip; gain?: GainNode; maskDebug?: WordAudioMask | null }>();
   private actx: AudioContext | null = null;
   // Narration dub: a processed-audio stand-in (denoise bake) keyed by source. While a dub exists for a
   // source, its decode element is force-muted and the dub carries the sound in SOURCE seconds — lip-sync
@@ -384,6 +384,9 @@ export class VideoTrackEngine {
 
   /** Replace a source's word-mask spans (source seconds). Empty removes them. */
   setAudioMasks(key: string, ranges: readonly MaskedAudioRange[]): void {
+    if ((window as unknown as { __hfMaskDebug?: boolean }).__hfMaskDebug) {
+      console.debug('[mask:narration]', { key: key.slice(0, 60), ranges: ranges.map((r) => `${r.audio} ${r.start.toFixed(2)}-${r.end.toFixed(2)}`), sources: [...this.els.keys()].map((k) => k.slice(0, 60)), segments: this.segs.length });
+    }
     if (ranges.length) this.audioMasks.set(key, ranges);
     else this.audioMasks.delete(key);
     if (!this.audioMasks.size) this.setBeep(false);
@@ -591,6 +594,10 @@ export class VideoTrackEngine {
       const maskSrcT = wantPlay && spec.maskAt ? spec.srcTimeAt(t + MASK_PREVIEW_LEAD_SEC) : null;
       const mask = maskSrcT != null && spec.maskAt ? spec.maskAt(maskSrcT) : null;
       if (mask === 'beep') clipBeep = true;
+      if ((window as unknown as { __hfMaskDebug?: boolean }).__hfMaskDebug && mask !== entry.maskDebug) {
+        entry.maskDebug = mask;
+        console.debug('[mask:clip]', { id: spec.id, srcT: srcT.toFixed(3), mask, graph: !!gainNode, ctx: this.actx?.state, volume: el.volume, muted: el.muted, paused: el.paused, src: el.currentSrc.slice(0, 60) });
+      }
       setGain(mask ? 0 : spec.gainAt(t));
       el.playbackRate = spec.speed;
       (el as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch = true;

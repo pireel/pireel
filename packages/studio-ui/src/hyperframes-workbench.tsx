@@ -5743,6 +5743,17 @@ export function HyperframesWorkbench({
     const eng = videoEngineRef.current;
     if (!eng) return;
     const masks = previewAudioMasks(editorDocument, comp, maskEnergy);
+    if ((window as unknown as { __hfMaskDebug?: boolean }).__hfMaskDebug) {
+      const byClip = clipAudioMasks(editorDocument, maskEnergy);
+      console.debug('[mask:doc]', {
+        maskedClips: [...byClip.keys()],
+        narrationKeys: [...masks.keys()].map((k) => k.slice(0, 60)),
+        shots: videoTrackShots(comp).map((shot) => `${shot.id}:${(shot.src ?? 'main').slice(0, 40)}`),
+        visuals: supplementalVisuals.map((visual) => `${visual.clipId}:${visual.kind}:${visual.muted ? 'muted' : 'audible'}`),
+        audioClips: (comp.audioTracks ?? []).map((clip) => clip.id),
+        energy: [...maskEnergy.keys()],
+      });
+    }
     for (const key of engineMaskKeysRef.current) if (!masks.has(key)) eng.setAudioMasks(key, []);
     for (const [key, ranges] of masks) eng.setAudioMasks(key, ranges);
     engineMaskKeysRef.current = new Set(masks.keys());
