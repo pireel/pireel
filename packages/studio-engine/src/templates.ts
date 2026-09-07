@@ -338,9 +338,17 @@ ${decoCss}
     });
   }
   if (p.mode === 'emphasis') {
+    const selected = p.id === 'kw-yellow';
     words.forEach((w, i) => {
+      if (selected && !w.emphasis) return;
+      if (!selected && w.timing === 'estimated') return;
       const ws = w.start - start;
-      const we = Math.max(w.start - start + 0.15, w.end - start);
+      const we = Math.max(ws, (words[i + 1]?.start ?? w.end) - start);
+      if (selected) {
+        if (p.emphasis) lines.push(`gsap.set('#${id}-w${i} .t', { color:'${p.emphasis}' });`);
+        if (p.deco) lines.push(`gsap.set('#${id}-w${i} .deco', { scaleX:1 });`);
+        return;
+      }
       if (p.emphasis) {
         // Current word color change (karaoke-style: lights up when spoken, reverts after)
         lines.push(`tl.set('#${id}-w${i} .t', { color:'${p.emphasis}' }, ${n(ws)});`);

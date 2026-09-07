@@ -148,6 +148,29 @@ function cueChunksRespectingLocks(
   return chunks;
 }
 
+/** Reading phrases stay within a speech turn; layout only breaks them further when necessary. */
+export function speechPhraseChunks<W extends { text: string; start: number; end: number }>(words: W[]): W[][] {
+  const result: W[][] = [];
+  const text = joinWords(words.map((word) => word.text));
+  const sentenceEnds = new Set<number>();
+  try {
+    for (const part of new Intl.Segmenter(undefined, { granularity: 'sentence' }).segment(text)) sentenceEnds.add(part.index + part.segment.trimEnd().length);
+  } catch { /* Timed pause and width limits remain available without ICU sentence segmentation. */ }
+  let current: W[] = [];
+  let offset = 0;
+  words.forEach((word, index) => {
+    current.push(word);
+    const next = words[index + 1];
+    offset += word.text.length;
+    const sentenceEnd = sentenceEnds.has(offset);
+    if (next) offset += joinWords([word.text, next.text]).length - word.text.length - next.text.length;
+    if (!next || sentenceEnd || next.start - word.end >= 0.5 || next.end - current[0]!.start > 6) {
+      result.push(current); current = [];
+    }
+  });
+  return result;
+}
+
 export interface DisplayCueOptions {
   subLang?: string;
   canvasW?: number;
@@ -174,14 +197,14 @@ export function displayCuesFromMappedSegs(
   const style = opts?.style;
   let preset = getCaptionPreset(style?.preset);
   if (style?.bg !== undefined) preset = { ...preset, bg: style.bg ?? undefined };
-  const split = (words: CueWord[]) => captionLineSegments(
-    words,
+  const split = (words: CueWord[]) => speechPhraseChunks(words).flatMap((phrase) => captionLineSegments(
+    phrase,
     preset,
     style?.wPct ?? DEFAULT_CAPTION_WIDTH_PCT,
     style?.scale ?? 1,
     opts?.canvasW ?? 1080,
     { bold: style?.bold, font: style?.font },
-  );
+  ));
   const out: DisplayCue[] = [];
   for (const g of mapped) {
     const words = g.words;
@@ -206,6 +229,7 @@ export function displayCuesFromMappedSegs(
         end: Math.max(c[c.length - 1]!.end, c[0]!.start + 0.3),
         text,
         words: c,
+        ...(srcSeg?.cueEmphasis?.[`${w0}:${w1}`]?.text === text ? { emphasisIndices: srcSeg.cueEmphasis[`${w0}:${w1}`]!.words } : {}),
         cue: true,
         ...(g.lang ? { lang: g.lang } : {}),
         ...(g.speaker ? { speaker: g.speaker } : {}),

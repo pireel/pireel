@@ -152,6 +152,7 @@ export interface ManagedCaptionLineRow {
   w1: number;
   text: string;
   sub?: string;
+  words?: import('../../caption-fx').FxWord[];
   editedStartSec: number;
   durationSec: number;
 }
@@ -192,6 +193,7 @@ export function managedCaptionLineRows(document: EditorDocumentV2): ManagedCapti
         w0: Number(ref.w0) || 0,
         w1: Number(ref.w1) || 0,
         text,
+        ...(Array.isArray(slots.words) ? { words: slots.words as import('../../caption-fx').FxWord[] } : {}),
         ...(typeof slots.sub === 'string' && slots.sub.trim() ? { sub: slots.sub.trim() } : {}),
         editedStartSec: timelineFramesToSeconds(clip.startFrame, fps),
         durationSec: Math.max(0.1, timelineFramesToSeconds(clip.durationFrames, fps)),

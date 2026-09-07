@@ -504,7 +504,7 @@ export function HyperframesWorkbench({
   const shell = useStudioShell();
   const [workflowOpen, setWorkflowOpen] = useState(!!initialWorkflowId);
   const [workflowEntryId, setWorkflowEntryId] = useState(initialWorkflowId ?? "captions");
-  const WorkflowEntry = workflowEntryId === "captions" ? CaptionsEntry : WorkflowPanel;
+  const WorkflowEntry = ["captions", "talking-head"].includes(workflowEntryId) ? CaptionsEntry : WorkflowPanel;
   const [workflowBusy, setWorkflowBusy] = useState(false);
   const workflowBusyRef = useRef(false);
   const workflowOpenRef = useRef(workflowOpen);
@@ -6664,6 +6664,7 @@ export function HyperframesWorkbench({
     relayCaptionLayer,
     captionLineRows,
     captionsPanelProps,
+    emphasizeCaptions,
     applyCaptionPreset,
     relayoutCaptions,
     removeCaptionLayer,
@@ -8220,6 +8221,7 @@ export function HyperframesWorkbench({
         onBusyChange={(value) => { workflowBusyRef.current = value; setWorkflowBusy(value); }}
         onImport={() => fileInputRef.current?.click()}
         host={{
+          ...(studioProviders().captionEmphasis ? { emphasizeCaptions } : {}),
           context: () => {
             const document = editorDocumentRef.current;
             const sourceId = firstNarrativeAssetId(document);
@@ -8441,6 +8443,7 @@ export function HyperframesWorkbench({
                   aria-label={locale === 'zh' ? 'AI 字幕' : 'AI captions'}
                   className="bg-panel text-ink border-line absolute right-3 top-2 z-20 flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs shadow-sm hover:bg-panel-2"
                 ><CaptionsEntryIcon size={14} />{locale === 'zh' ? 'AI 字幕' : 'AI captions'}</button>
+                <button type="button" onClick={() => { setWorkflowEntryId('talking-head'); setWorkflowOpen(true); }} className="text-ink-3 hover:text-ink inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs">{locale === 'zh' ? '口播精剪' : 'Talking-head edit'}</button>
                 {!panelOpen && (
                   <button
                     type="button"

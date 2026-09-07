@@ -7,6 +7,7 @@ export const STUDIO_WORKFLOW_CAPABILITIES: readonly WorkflowCapability[] = [
   { id: 'transcript.ensure', version: 1, label: label('读取或生成转写', 'Read or generate transcript'), requirements: ['project-document'], environments: ['browser', 'desktop', 'cloud'], effect: 'generate', retry: 'reconcile-first', available: true },
   { id: 'speech.tighten-pauses', version: 1, label: label('精简无声停顿', 'Tighten silent pauses'), requirements: ['project-document', 'media-bytes', 'audio-decoder'], environments: ['browser', 'desktop'], effect: 'edit', retry: 'reconcile-first', available: true },
   { id: 'captions.style', version: 1, label: label('应用字幕样式', 'Apply caption style'), requirements: ['project-document', 'transcript-index'], environments: ['browser', 'desktop', 'cloud'], effect: 'edit', retry: 'safe', available: true },
+  { id: 'captions.emphasize', version: 1, label: label('选择字幕重点词', 'Select caption emphasis'), requirements: ['transcript-index', 'language-model'], environments: ['browser', 'desktop', 'cloud'], effect: 'generate', retry: 'reconcile-first', available: true },
   { id: 'canvas.resize', version: 1, label: label('调整画幅', 'Resize canvas'), requirements: ['project-document'], environments: ['browser', 'desktop', 'cloud'], effect: 'edit', retry: 'safe', available: true },
   { id: 'media.search-transcript', version: 1, label: label('搜索已转写的片段', 'Search transcribed moments'), requirements: ['project-document', 'transcript-index'], environments: ['browser', 'desktop', 'cloud'], effect: 'read', retry: 'safe', available: true },
   // Contracts for future adapters. Registering a contract does NOT advertise an installed executor.
@@ -55,10 +56,22 @@ export const STUDIO_WORKFLOW_TEMPLATES: readonly StudioWorkflowTemplate[] = [
     definition: { ...definition('captions', 'Captioned video', {
       captionStyle,
       shortenPauses: boolean('AI 去停顿', 'Shorten pauses', false),
+      highlightKeywords: boolean('突出重点词', 'Emphasize key phrases', false),
     }, [duplicate, {
       id: 'pauses', capability: 'speech.tighten-pauses', version: 1, dependsOn: ['version'], enabledBy: 'shortenPauses',
       arguments: { minimumPauseSec: literal(0.7), speechPaddingSec: literal(0.15) },
-    }, transcript(['pauses']), captions(['transcript'])]), version: 2 },
+    }, transcript(['pauses']), captions(['transcript']), { id: 'emphasis', capability: 'captions.emphasize', version: 1, dependsOn: ['captions'], enabledBy: 'highlightKeywords', arguments: {} }]), version: 3 },
+  },
+  {
+    id: 'talking-head', art: 'pause-cleanup', title: label('口播精剪', 'Polish a talking-head video'),
+    description: label('把录好的口播，整理成节奏顺畅、字幕清晰的视频。', 'Turn your recording into a fluent, captioned video.'),
+    detail: label('整理长停顿、生成字幕与重点词，保留完整观点和可编辑素材。', 'Shorten pauses and add editable captions and key phrases while keeping your message intact.'),
+    definition: definition('talking-head', 'Polished talking-head video', {
+      captionStyle,
+      minimumPauseSec: { type: 'number', label: label('停顿门槛', 'Pause threshold'), default: 0.7, min: 0.25, max: 3 },
+      speechPaddingSec: { type: 'number', label: label('语音留白', 'Speech padding'), default: 0.15, min: 0, max: 0.5 },
+      highlightKeywords: boolean('突出重点词', 'Emphasize key phrases', false),
+    }, [duplicate, { id: 'pauses', capability: 'speech.tighten-pauses', version: 1, dependsOn: ['version'], arguments: { minimumPauseSec: input('minimumPauseSec'), speechPaddingSec: input('speechPaddingSec') } }, transcript(['pauses']), captions(['transcript']), { id: 'emphasis', capability: 'captions.emphasize', version: 1, dependsOn: ['captions'], enabledBy: 'highlightKeywords', arguments: {} }]),
   },
   {
     id: 'frame-video', art: 'frame-video', title: label('适配视频画幅', 'Fit another format'),

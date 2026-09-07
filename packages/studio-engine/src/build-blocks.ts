@@ -13,11 +13,14 @@
  *                                  persistence boundary.
  */
 
+import { editedCaptionWords } from './caption-word-edit';
 import { joinWords, wordsFromText } from './caption-fx';
 import { type Block, captionBlock } from './composition';
 
 /** One persisted transcript word (source seconds). */
 export interface TranscriptWord {
+  emphasis?: boolean;
+  timing?: 'estimated';
   text: string;
   start: number;
   end: number;
@@ -45,6 +48,8 @@ export interface AsrSegment {
   /** Audience-facing copy overrides keyed by source word range "w0:w1". Copy and layout are kept
    *  separate so an explicit re-layout can move cue boundaries without losing spelling fixes. */
   cueTexts?: Record<string, string>;
+  /** Selected display-word positions per source cue range; independent of immutable ASR tokens. */
+  cueEmphasis?: Record<string, { text: string; words: number[] }>;
   /** Stable display-cue boundaries, each encoded as source word range "w0:w1". Once materialized,
    *  ordinary style/copy edits preserve these ranges; only an explicit re-layout replaces them. */
   cueLayout?: string[];
@@ -77,20 +82,21 @@ export interface DisplayCue extends Omit<AsrSegment, 'words' | 'cueSubs' | 'capt
   cue: true;
   /** Source-sentence pointer for edit/translation write-back (absent only for ref-less legacy inputs). */
   ref?: CueRef;
+  emphasisIndices?: number[];
 }
 
 /** Persistence guard: the transcript that lands in storage carries ONLY persisted fields — runtime
  *  derivation markers (cue / ref / per-word si) are stripped, whatever upstream produced. Returns the
  *  same array reference when nothing needed cleaning (cheap no-op for the common case). */
 export function sanitizeTranscriptSegs(segs: AsrSegment[]): AsrSegment[] {
-  const dirty = segs.some((s) => s.cue !== undefined || (s as DisplayCue).ref !== undefined || s.words?.some((w) => (w as CueWord).si !== undefined));
+  const dirty = segs.some((s) => s.cue !== undefined || (s as DisplayCue).ref !== undefined || (s as DisplayCue).emphasisIndices !== undefined || s.words?.some((w) => (w as CueWord).si !== undefined));
   if (!dirty) return segs;
   return segs.map((s) => {
     const { cue: _cue, ...rest } = s as DisplayCue;
-    const { ref: _ref, ...clean } = rest;
+    const { ref: _ref, emphasisIndices: _emphasis, ...clean } = rest;
     return {
       ...clean,
-      ...(s.words ? { words: s.words.map((w) => ({ text: w.text, start: w.start, end: w.end })) } : {}),
+      ...(s.words ? { words: s.words.map((w) => ({ text: w.text, start: w.start, end: w.end, ...(typeof w.emphasis === 'boolean' ? { emphasis: w.emphasis } : {}), ...(w.timing ? { timing: w.timing } : {}) })) } : {}),
     } as AsrSegment;
   });
 }
@@ -182,9 +188,12 @@ export function captionBlocksFromAsr(segments: (AsrSegment | DisplayCue)[], opts
       // A manually edited cue keeps its source-word ref/start/end, but its render words belong to
       // the audience-facing copy. Re-tokenizing INSIDE this fixed window drives karaoke only; it
       // never feeds cue derivation and therefore cannot move either neighboring boundary.
-      const words = s.cue && s.text.trim() !== joinWords(sourceWords.map((word) => word.text)).trim()
-        ? wordsFromText(s.text, s.start, s.end)
+      const displayWords = s.cue && s.text.trim() !== joinWords(sourceWords.map((word) => word.text)).trim()
+        ? editedCaptionWords(s.text, sourceWords, s.start, s.end)
         : sourceWords;
+      const emphasisIndices = (s as DisplayCue).emphasisIndices;
+      const selected = emphasisIndices ? new Set(emphasisIndices) : null;
+      const words = selected ? displayWords.map((word, index) => ({ ...word, emphasis: selected.has(index) })) : displayWords;
       const ref = (s as DisplayCue).ref;
       // Derived cues get a deterministic id from their source pointer: re-derivations keep the same id
       // (selection, preview double-buffer diffing and hf:* messages stay stable). Non-alnum chars in the

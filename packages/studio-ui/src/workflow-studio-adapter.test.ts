@@ -35,6 +35,16 @@ describe('workflow Studio adapter', () => {
     expect(result.steps[1].artifact?.data.outputId).toBe('copy');
     expect(result.source.outputId).toBe('original');
   });
+  it('runs the talking-head scene through the same pause and caption operations', async () => {
+    const { host, run } = fixture('talking-head');
+    host.emphasizeCaptions = vi.fn(async () => {});
+    run.inputs.highlightKeywords = true;
+    const result = await executeWorkflow(run, catalog, createStudioWorkflowExecutor(host, true), store);
+    expect(result.status).toBe('completed');
+    expect(host.call).toHaveBeenNthCalledWith(2, 'remove_silence', { minimumPauseSec: 0.7, speechPaddingSec: 0.15 });
+    expect(host.call).toHaveBeenNthCalledWith(3, 'set_captions', expect.objectContaining({ on: true }));
+    expect(host.emphasizeCaptions).toHaveBeenCalledOnce();
+  });
   it('refuses to edit a different output or revision', async () => {
     const { host, run, change } = fixture('frame-video');
     change({ source: { ...run.source, revision: 'changed' } });

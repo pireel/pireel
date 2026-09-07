@@ -33,6 +33,7 @@ import { editorErrorMessage } from './editor-error';
 import type { CaptionLineRow } from './captions-panel';
 import { inspectCaptionDocument } from './caption-document-state';
 import { captionTranscriptsByAsset, captionTranscriptsFromDocument } from './caption-transcript-bridge';
+import { emphasizeCaptionDocument } from './caption-emphasis-operation';
 import { replaceCaptionTranslationsTransaction } from './caption-translation-transaction';
 
 /** Everything the caption ops borrow from the workbench (values are per-render, refs/handlers are stable-by-ref). */
@@ -253,7 +254,23 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       onSubPatch: (patch: { preset?: string | undefined; scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined; font?: string | undefined; lang?: string | undefined }) =>
         setCaptionStyle({ sub: { ...(compRef.current.captionStyle?.sub ?? {}), ...patch } }),
     },
-    rows: captionLineRows,
+    rows: captionLineRows.map((row) => ({ ...row, ...(row.words && resolveCaptionStyle(comp).preset === 'kw-yellow' ? { emphasisWords: row.words.map((word) => ({ text: word.text, selected: word.emphasis === true })) } : {}) })),
+    onToggleEmphasis: (row: CaptionLineRow, offset: number) => {
+      if (!row.assetId || !row.words?.[offset]) return;
+      const before = documentRef.current;
+      const transcripts = structuredClone(before.semantics.transcripts);
+      const segment = transcripts[row.assetId]?.[row.index];
+      if (!segment) return;
+      const key = `${row.w0}:${row.w1}`;
+      const selected = new Set(segment.cueEmphasis?.[key]?.text === row.text ? segment.cueEmphasis[key]!.words : []);
+      if (selected.has(offset)) selected.delete(offset); else selected.add(offset);
+      segment.cueEmphasis = { ...segment.cueEmphasis, [key]: { text: row.text, words: [...selected].sort((a, b) => a - b) } };
+      const edit = applyCaptionDocumentEdit({ document: { ...before, semantics: { ...before.semantics, transcripts } }, mainTranscript: null, clipTranscripts: {} });
+      if (!edit.ok) { toast.error(editorErrorMessage(edit.error)); return; }
+      const runtime = captionTranscriptsFromDocument(edit.document, compRef.current, clipAsrRef.current);
+      pushUndoSnapshot(); asrRef.current = runtime.main; clipAsrRef.current = runtime.clips;
+      setAsrSentences(runtime.main); setClipAsr(runtime.clips); setDocument(edit.document);
+    },
     activeKey: (() => {
       let hit: string | null = null;
       for (const r of captionLineRows) if (r.editedStart <= tSec + 0.001) hit = r.key;
@@ -467,6 +484,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
         w0: row.w0,
         w1: row.w1,
         text: row.text,
+        words: row.words,
         ...(row.sub ? { sub: row.sub } : {}),
         editedStart: row.editedStartSec,
         dur: row.durationSec,
@@ -547,5 +565,18 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       setCapTransBusy(false);
     }
   };
-  return { setCaptionStyle, mappedCaptionSegs, relayCaptionLayer, captionLineRows, captionsPanelProps, applyCaptionPreset, relayoutCaptions, removeCaptionLayer };
+  const emphasizeCaptions = async () => {
+    const select = studioProviders().captionEmphasis;
+    if (!select) throw new Error('当前环境尚未连接重点词服务。');
+    const before = documentRef.current;
+    const fingerprint = JSON.stringify(before);
+    const after = await emphasizeCaptionDocument(before, (rows) => select(rows));
+    if (JSON.stringify(documentRef.current) !== fingerprint) throw new Error('字幕已发生变化，请重新选择重点词。');
+    if (after === before) return;
+    const transcripts = captionTranscriptsFromDocument(after, compRef.current, clipAsrRef.current);
+    pushUndoSnapshot();
+    asrRef.current = transcripts.main; clipAsrRef.current = transcripts.clips;
+    setAsrSentences(transcripts.main); setClipAsr(transcripts.clips); setDocument(after);
+  };
+  return { emphasizeCaptions, setCaptionStyle, mappedCaptionSegs, relayCaptionLayer, captionLineRows, captionsPanelProps, applyCaptionPreset, relayoutCaptions, removeCaptionLayer };
 }

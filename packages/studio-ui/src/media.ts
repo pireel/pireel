@@ -1,5 +1,7 @@
 'use client';
 
+import { groupAsrWords } from '@pireel/studio-engine/caption-fx';
+
 /**
  * Studio media pipeline — the browser reads the local file directly for preview/probing; the bytes are
  * backed up to the cloud rendezvous in the background (asset-upload-queue) so any device can reopen the project.
@@ -221,7 +223,7 @@ export async function transcribeFile(file: File, opts?: { projectId?: string }):
         text: s.text.trim(),
         ...(lang ? { lang } : {}),
         ...(s.speaker ? { speaker: s.speaker } : {}),
-        ...(words.length ? { words } : {}),
+        ...(words.length ? { words: groupAsrWords(s.text, words) } : {}),
       };
     });
   // Empty is a durable verdict too — without caching it, every later pass re-uploads,

@@ -50,6 +50,7 @@ export interface CaptionPreset {
 export const CAPTION_PRESETS: CaptionPreset[] = [
   // —— Word emphasis ——
   { id: 'em-yellow', name: 'engine.yellowPop', mode: 'emphasis', text: '#ffffff', emphasis: '#ffe34f' },
+  { id: 'kw-yellow', name: 'engine.keyPhrases', mode: 'emphasis', text: '#ffffff', emphasis: '#ffe34f' },
   { id: 'em-green', name: 'engine.neonGreen', mode: 'emphasis', text: '#ffffff', emphasis: '#5affb6' },
   { id: 'em-purple-black', name: 'engine.purpleBlack', mode: 'emphasis', text: '#ffffff', emphasis: '#cf96ff', bg: 'rgba(0,0,0,0.72)' },
   { id: 'em-serif-black', name: 'engine.mintSerif', mode: 'emphasis', text: '#ffffff', emphasis: '#63ffc7', bg: 'rgba(0,0,0,0.72)', font: 'serif' },

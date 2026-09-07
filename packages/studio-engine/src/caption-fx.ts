@@ -22,6 +22,7 @@ export interface FxWord {
   start: number;
   end: number;
   emphasis?: boolean;
+  timing?: 'estimated';
   /** Original index within the source sentence's words (stamped on mapped/derived copies; edit/translation write-back key). */
   si?: number;
 }
@@ -102,11 +103,25 @@ export function segmentTokens(text: string): string[] {
     return toks;
   }
   const toks: string[] = [];
-  for (const g of icuSegmenter.segment(t)) {
-    const piece = g.segment.trim();
-    if (!piece) continue;
-    if (g.isWordLike || !toks.length) toks.push(piece);
-    else toks[toks.length - 1] += piece;
+  // Protect identifiers and quantities before ICU finds ordinary linguistic boundaries.
+  const protectedText = /(?:[A-Za-z][A-Za-z0-9]*(?:[-_.+'’][A-Za-z0-9]+)*|[￥¥$€£]?[-+]?\d+(?:[.,]\d+)*(?:%|％|[万亿千百]?(?:元|块|美元|人民币|人|个|倍|次|年|月|天|秒|分钟|小时|公斤|公里)|[万亿])?)/g;
+  const append = (part: string) => {
+    for (const g of icuSegmenter!.segment(part)) {
+      const piece = g.segment.trim();
+      if (!piece) continue;
+      if (g.isWordLike || !toks.length || /[（(「『“‘《]$/.test(piece)) toks.push(piece);
+      else toks[toks.length - 1] += piece;
+    }
+  };
+  let offset = 0;
+  for (const match of t.matchAll(protectedText)) {
+    append(t.slice(offset, match.index));
+    toks.push(match[0]);
+    offset = match.index! + match[0].length;
+  }
+  append(t.slice(offset));
+  for (let i = toks.length - 2; i >= 0; i--) {
+    if (/^[（(「『“‘《]+$/.test(toks[i]!)) toks.splice(i, 2, toks[i]! + toks[i + 1]!);
   }
   return toks;
 }
@@ -120,12 +135,12 @@ export function wordsFromText(text: string, start: number, end: number): FxWord[
   const toks = segmentTokens(text);
   if (toks.length === 0) return [];
   const totalLen = toks.reduce((n, t) => n + t.length, 0) || 1;
-  const span = Math.max(0.0001, end - start);
+  const span = Math.max(0, end - start);
   let cur = start;
   const out: FxWord[] = [];
   for (const tk of toks) {
     const dur = (tk.length / totalLen) * span;
-    out.push({ text: tk, start: round3(cur), end: round3(cur + dur) });
+    out.push({ text: tk, start: round3(cur), end: round3(cur + dur), timing: 'estimated' });
     cur += dur;
   }
   return out;
@@ -157,45 +172,31 @@ export function detectLang(text: string): string | undefined {
   return undefined;
 }
 
-/** Letters+digits only (any script) — the alignment currency between ASR tokens and ICU words:
- *  punctuation/space counts are unreliable across tokenizers, letter counts are not. */
-const alnumCount = (s: string): number => {
-  let n = 0;
-  for (const ch of s) if (/[\p{L}\p{N}]/u.test(ch)) n++;
-  return n;
-};
+/** Punctuation may differ between an ASR tokenizer and display copy; spoken characters must agree. */
+const alignmentText = (text: string) => text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 
-/** ASR word tokens (zh models often emit per-char/per-morpheme pieces) → ICU-word groups with merged
- *  timings: re-segment the sentence text into real words, then walk the ASR token stream and consume
- *  tokens by letter/digit count until each word is covered (first token's start / last token's end
- *  become the word's window). Any mismatch → return the raw ASR tokens unchanged (real timing beats
- *  pretty grouping). */
+/** Merge complete ASR tokens only. Never invent sub-token time or match by length alone. */
 export function groupAsrWords(text: string, asr: { text: string; start: number; end: number }[]): FxWord[] {
-  const flat = asr.filter((w) => w.text.trim() && w.end > w.start);
+  const flat = asr.filter((w) => w.text.trim() && Number.isFinite(w.start) && Number.isFinite(w.end) && w.end > w.start)
+    .map((w) => ({ ...w, text: w.text.trim() }));
   const toks = segmentTokens(text);
-  if (!toks.length || !flat.length) return flat.map((w) => ({ text: w.text.trim(), start: w.start, end: w.end }));
+  if (!flat.length || !toks.length || alignmentText(text) !== flat.map((w) => alignmentText(w.text)).join('')) return flat;
   const out: FxWord[] = [];
   let i = 0;
   for (const tk of toks) {
-    const want = alnumCount(tk);
-    if (want === 0) {
-      // pure-punctuation token (only possible at sentence start — elsewhere punctuation is glued): merge into the previous word
-      if (out.length) out[out.length - 1]!.text += tk;
-      continue;
+    const want = alignmentText(tk);
+    if (!want) { if (out.length) out[out.length - 1]!.text += tk; continue; }
+    const first = i;
+    let got = '';
+    while (i < flat.length && got.length < want.length) {
+      got += alignmentText(flat[i++]!.text);
+      if (!want.startsWith(got)) return flat;
     }
-    let got = 0;
-    let first: number | null = null;
-    let last = 0;
-    while (i < flat.length && got < want) {
-      if (first == null) first = flat[i]!.start;
-      last = flat[i]!.end;
-      got += alnumCount(flat[i]!.text);
-      i++;
-    }
-    if (first == null) break;
-    out.push({ text: tk, start: round3(first), end: round3(Math.max(first, last)) });
+    if (got !== want || first === i) return flat;
+    while (i < flat.length && !alignmentText(flat[i]!.text)) i++;
+    out.push({ text: tk, start: flat[first]!.start, end: flat[i - 1]!.end });
   }
-  return out.length === toks.length ? out : flat.map((w) => ({ text: w.text.trim(), start: w.start, end: w.end }));
+  return i === flat.length ? out : flat;
 }
 
 function round3(x: number): number {

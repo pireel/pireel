@@ -181,6 +181,9 @@ importers:
       '@pireel/studio-kit':
         specifier: workspace:*
         version: link:../studio-kit
+      diff:
+        specifier: 8.0.4
+        version: 8.0.4
       fast-json-patch:
         specifier: ^3.1.1
         version: 3.1.1
@@ -3379,6 +3382,11 @@ packages:
     resolution: {integrity: sha512-RWmIqhcFf1lRYBvNmr7qTNuyCt/7/ns2jbpp1+PalgE/rDQcBT0fioSMUpJ93irlUhC5hrg4cYqe6U+0ImW0rA==}
     dependencies:
       dequal: 2.0.3
+    dev: false
+
+  /diff@8.0.4:
+    resolution: {integrity: sha512-DPi0FmjiSU5EvQV0++GFDOJ9ASQUVFh5kD+OzOnYdi7n3Wpm9hWWGfB/O2blfHcMVTL5WkQXSnRiK9makhrcnw==}
+    engines: {node: '>=0.3.1'}
     dev: false
 
   /dompurify@3.4.12:

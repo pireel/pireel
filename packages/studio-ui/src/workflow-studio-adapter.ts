@@ -12,6 +12,7 @@ export interface WorkflowStudioContext {
 export interface WorkflowStudioHost {
   context(): WorkflowStudioContext;
   assertWritable(): void;
+  emphasizeCaptions?(): Promise<void>;
   prepareMedia(): Promise<void>;
   call(name: string, args: Record<string, unknown>): Promise<{ ok: boolean; error?: string; summary?: string; data?: unknown }>;
 }
@@ -53,10 +54,14 @@ export function createStudioWorkflowExecutor(host: WorkflowStudioHost, zh: boole
       if (step.capability === 'media.search-transcript' && !String(run.inputs.query ?? '').trim()) fail('请输入要搜索的关键词。', 'Enter a keyword to search.');
     },
     async execute(step, args, { run }) {
-      const name = TOOLS[step.capability];
+      const name = step.capability === 'captions.emphasize' ? 'captions.emphasize' : TOOLS[step.capability];
       if (!name) fail('此能力尚未接入当前运行环境。', 'This capability is not connected to this executor.');
       let result: { ok: boolean; error?: string; summary?: string; data?: unknown };
-      if (step.capability === 'transcript.ensure' && host.context().hasTranscript) {
+      if (step.capability === 'captions.emphasize') {
+        if (!host.emphasizeCaptions) fail('当前环境尚未连接重点词服务。', 'Keyword emphasis is unavailable in this environment.');
+        await host.emphasizeCaptions!();
+        result = { ok: true, summary: zh ? '已选择字幕重点词' : 'Caption emphasis is ready' };
+      } else if (step.capability === 'transcript.ensure' && host.context().hasTranscript) {
         result = { ok: true, summary: zh ? '已复用现有转写' : 'Reused the existing transcript' };
       } else {
         const input = step.capability === 'output.duplicate'

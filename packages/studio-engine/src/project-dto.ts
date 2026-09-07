@@ -37,7 +37,7 @@ export interface TranscriptSegment {
   lang?: string;
   /** Speaker id (diarization; absent = single speaker / not enabled). */
   speaker?: string;
-  words?: { text: string; start: number; end: number }[];
+  words?: { text: string; start: number; end: number; emphasis?: boolean; timing?: 'estimated' }[];
   /** Bilingual whole-sentence translation (shows only when the sentence maps to a single display cue). */
   sub?: string;
   /** Per-cue translations keyed by word range "w0:w1" (UI translate flow / set_caption_translations with a range). */
@@ -46,6 +46,8 @@ export interface TranscriptSegment {
   captionText?: string;
   /** User-locked cue copy keyed by the source word range "w0:w1". */
   cueTexts?: Record<string, string>;
+  /** Selected display-word positions per source cue range; independent of immutable ASR tokens. */
+  cueEmphasis?: Record<string, { text: string; words: number[] }>;
   /** Stable display-cue boundaries encoded as source word ranges "w0:w1". */
   cueLayout?: string[];
   /** Provisional timing derived from an exact script (TTS text) — no ASR has measured it yet. Once

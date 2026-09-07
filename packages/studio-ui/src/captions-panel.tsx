@@ -50,6 +50,8 @@ export interface CaptionLineRow {
   w0: number;
   w1: number;
   text: string;
+  words?: import('@pireel/studio-engine/caption-fx').FxWord[];
+  emphasisWords?: { text: string; selected: boolean }[];
   /** Bilingual second line (this cue's translation), when present. */
   sub?: string;
   /** Edited-timeline seconds (for the timecode + seek). */
@@ -106,6 +108,7 @@ export function CaptionsPanel({
   rows,
   activeKey,
   onEditLine,
+  onToggleEmphasis,
   onEditSubLine,
   onSeekTo,
   onRetranslateLine,
@@ -131,6 +134,7 @@ export function CaptionsPanel({
   activeKey?: string | null;
   /** Write an edited line back to the transcript (timing untouched). The panel publishes only
    *  `commit`; `revert` is retained for callers that want to observe Esc. */
+  onToggleEmphasis?: (row: CaptionLineRow, offset: number) => void;
   onEditLine?: (row: CaptionLineRow, text: string, phase?: 'live' | 'commit' | 'revert') => void;
   /** Manually edit a cue's translation (bilingual second row); null clears it. Same phases as onEditLine. */
   onEditSubLine?: (row: CaptionLineRow, text: string | null, phase?: 'live' | 'commit' | 'revert') => void;
@@ -337,6 +341,14 @@ export function CaptionsPanel({
                 >
                   {editing ? frozenTextRef.current : row.text}
                 </div>
+                {row.emphasisWords && onToggleEmphasis && (
+                  <details className="text-ink-3 mt-1 text-[11px]">
+                    <summary className="cursor-pointer">{t('engine.keyPhrases')}</summary>
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {row.emphasisWords.map((word, offset) => <button type="button" key={offset} aria-pressed={word.selected} onClick={() => onToggleEmphasis(row, offset)} className={'rounded border px-2 py-1 ' + (word.selected ? 'border-accent text-ink bg-accent/15' : 'border-line text-ink-3')}>{word.text}</button>)}
+                    </div>
+                  </details>
+                )}
                 {translation?.lang && (
                   <div
                     data-edit-sub

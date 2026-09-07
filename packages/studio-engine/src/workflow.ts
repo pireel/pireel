@@ -7,7 +7,7 @@ export type WorkflowInputs = Record<string, WorkflowValue>;
 export type WorkflowEnvironment = 'browser' | 'desktop' | 'cloud';
 export type WorkflowRequirement =
   | 'project-document' | 'media-bytes' | 'audio-decoder' | 'video-decoder'
-  | 'transcription-provider' | 'transcript-index' | 'visual-index'
+  | 'language-model' | 'transcription-provider' | 'transcript-index' | 'visual-index'
   | 'local-vision-model' | 'render-engine' | 'folder-access' | 'social-connection';
 export type WorkflowBinding =
   | { kind: 'literal'; value: WorkflowValue }

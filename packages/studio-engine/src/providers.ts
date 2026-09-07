@@ -146,6 +146,7 @@ export interface StudioProviders {
    *  The server marks the restore as consumed — repeated calls walk strictly backward. */
   historyUndo?: (projectId: string) => Promise<{ document: EditorDocumentV2; version: number } | null>;
   /** Sentence translator for bilingual captions (hosted-LLM feature; absent = the captions panel hides its translation section — BYO agents translate themselves via set_caption_translations). */
+  captionEmphasis?: (rows: import('./caption-emphasis').EmphasisRow[], projectId?: string) => Promise<import('./caption-emphasis').EmphasisSelection[]>;
   translate?: (rows: { index: number; text: string }[], targetLanguage: string) => Promise<{ index: number; text: string }[]>;
   /** Fill a component's text slots from the narration around its time window (hosted-LLM feature;
    *  absent = the toolbar hides its sync button — BYO agents edit blocks themselves). */

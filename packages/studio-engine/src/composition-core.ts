@@ -1319,6 +1319,7 @@ export interface FxWord {
   start: number;
   end: number;
   emphasis?: boolean;
+  timing?: 'estimated';
 }
 
 let _uid = 0;
