@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Check, Download, Loader2, Upload, X } from 'lucide-react';
+import { ArrowLeft, Check, Download, Loader2, Upload, X, Sparkles } from 'lucide-react';
 import { CAPTION_TASK_PRESETS, captionTaskCanvas, captionTaskStyle, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
 import { CanvasCaptionPreview } from './canvas-caption-preview';
+import { createCaptionAgentRemix } from './caption-agent-remix';
 import { CaptionTaskCustomize } from './caption-task-customize';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { fileSig, probeVideoFile, type ProbedFile } from './media';
@@ -43,6 +44,7 @@ export function CaptionTaskPage({ taskId, locale, onBack, onOpenEditor }: { task
   const taskRef = useRef(task);
   const alive = useRef(true);
   const busyRef = useRef(false);
+  const remixingRef = useRef(false);
   const importGeneration = useRef(0);
   taskRef.current = task;
 
@@ -133,23 +135,13 @@ export function CaptionTaskPage({ taskId, locale, onBack, onOpenEditor }: { task
     return () => clearTimeout(timer);
   }, [options, loadingProject, busy, scope, task?.id, task?.stage]);
   const editInStudio = async () => {
-    if (!task?.document || !file || busyRef.current) return;
-    setPreparing(true); setError('');
+    if (!task || !file || busyRef.current || remixingRef.current) return;
+    remixingRef.current = true; setPreparing(true); setError('');
     try {
-      const { cacheProjectLocally, newProjectId, serverSaveProject, serverLoadProject } = await import('./use-draft-persist');
-      const id = task.projectId ?? newProjectId();
-      const document = task.document;
-      if (!(await saveLocalVideo(file, task.sourceSig))) throw new Error(say('请释放本机存储空间后再进入编辑器。', 'Free some local storage before opening the editor.'));
-      const payload = { document, title: task.name.replace(/\.[^.]+$/, '') + say(' · 字幕版', ' · Captions'), videoSig: task.sourceSig, videoDurationSec: task.durationSec };
-      const saved = await serverSaveProject(id, payload);
-      if (saved !== 'ok') throw new Error(say('作品暂时无法保存，请重试。成片仍可下载。', 'Could not save the editable project. Retry, or download your video.'));
-      const stored = await serverLoadProject(id);
-      if (!stored) throw new Error(say('无法读取已保存的作品，请重试。', 'Could not load the saved project. Try again.'));
-      cacheProjectLocally(stored);
-      await persist({ ...task, projectId: id });
-      onOpenEditor(id);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
-    finally { setPreparing(false); }
+      const id = await createCaptionAgentRemix({ ...task, options }, file);
+      if (alive.current) onOpenEditor(id);
+    } catch (reason) { if (alive.current) setError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { remixingRef.current = false; if (alive.current) setPreparing(false); }
   };
   const previewStyle = captionTaskStyle(options);
   const dimensions = captionTaskCanvas(task?.options.aspect ?? 'original', probe ?? { width: 9, height: 16 });
@@ -163,7 +155,7 @@ export function CaptionTaskPage({ taskId, locale, onBack, onOpenEditor }: { task
 
   return <section className="studio-scope mx-auto w-full max-w-[1200px] px-5 py-8 sm:px-10">
     <button type="button" disabled={busy} onClick={onBack} className="text-ink-3 mb-6 inline-flex items-center gap-2 text-sm disabled:opacity-40"><ArrowLeft size={15} />{say('返回首页', 'Back to home')}</button>
-    <header className="mb-8"><h1 className="text-ink text-3xl font-semibold tracking-tight">AI Captions</h1><p className="text-ink-3 mt-2 truncate text-sm">{task.name}</p></header>
+    <header className="mb-8 flex flex-wrap items-start justify-between gap-4"><div><h1 className="text-ink text-3xl font-semibold tracking-tight">AI Captions</h1><p className="text-ink-3 mt-2 truncate text-sm">{task.name}</p></div><button type="button" disabled={!file || disabled} onClick={() => void editInStudio()} className="border-line text-ink inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-medium disabled:opacity-40"><Sparkles size={14} />Agent Remix</button></header>
     <input ref={inputRef} type="file" accept="video/*" className="hidden" aria-label={say('选择视频文件', 'Choose a video file')} onChange={(event) => { const next = event.target.files?.[0]; event.target.value = ''; if (next) void pickFile(next); }} />
     <div className="grid items-start gap-6 md:grid-cols-[minmax(280px,360px)_minmax(0,1fr)] lg:grid-cols-[380px_minmax(0,1fr)]">
       <section className="min-w-0 md:max-h-[calc(100dvh-190px)] md:overflow-y-auto md:pr-2" aria-label={taskMode ? say('字幕任务', 'Caption task') : say('字幕设置', 'Caption settings')}>
@@ -171,7 +163,7 @@ export function CaptionTaskPage({ taskId, locale, onBack, onOpenEditor }: { task
           <h2 className="text-ink flex items-center gap-2 text-xl font-semibold">{completed ? <Check size={20} /> : busy ? <Loader2 className="animate-spin" size={20} /> : null}{stageNames[task.stage][zh ? 0 : 1]}</h2>
           <div className="my-6 space-y-4">{stages.filter((stage) => stage !== 'cleaning' || task.options.shortenPauses).map((stage) => <div key={stage} className={'flex items-center gap-3 text-sm ' + (stage === task.stage || completed ? 'text-ink' : 'text-ink-3')}><span className={'size-2 rounded-full ' + (completed || stages.indexOf(stage) < stages.indexOf(task.stage) ? 'bg-accent' : 'bg-ink-4')} />{stageNames[stage][zh ? 0 : 1]}{stage === 'rendering' && task.stage === stage && <span className="ml-auto font-mono text-xs">{Math.round(fraction * 100)}%</span>}</div>)}</div>
           {busy && <><progress aria-label={say('视频生成进度', 'Video rendering progress')} value={task.stage === 'rendering' ? fraction : undefined} max={1} className="h-1.5 w-full accent-[var(--color-accent)]" /><p className="text-ink-3 mt-3 text-xs leading-relaxed">{say('处理期间请保持页面打开。', 'Keep this page open while processing.')}</p><button type="button" disabled={stopping} onClick={() => { abortRef.current?.abort(); setStopping(true); }} className="text-ink-3 mt-5 inline-flex items-center gap-2 text-xs"><X size={13} />{stopping ? say('正在停止…', 'Stopping…') : say('停止处理', 'Stop processing')}</button></>}
-          {completed && <div className="space-y-3"><a href={resultUrl} download={task.name.replace(/\.[^.]+$/, '') + '-captions.mp4'} className={actionClass + ' w-full'}><Download size={16} />{say('下载视频', 'Download video')}</a><button type="button" disabled={!file || preparing} onClick={() => void editInStudio()} className="text-ink border-line h-10 w-full rounded-lg border text-sm disabled:opacity-40">{say('需要精修？进入编辑器', 'Fine-tune in the editor')}</button><button type="button" disabled={!file || preparing} onClick={() => { void persist({ ...task, stage: 'ready', document: undefined, error: undefined }); setResult(null); }} className="text-ink-3 w-full py-1 text-xs underline">{say('调整样式再生成', 'Try another style')}</button><p className="text-ink-4 text-xs leading-relaxed">{say('结果保存在此浏览器，建议下载留存。', 'Results are saved in this browser. Download a copy to keep.')}</p></div>}
+          {completed && <div className="space-y-3"><a href={resultUrl} download={task.name.replace(/\.[^.]+$/, '') + '-captions.mp4'} className={actionClass + ' w-full'}><Download size={16} />{say('下载视频', 'Download video')}</a><button type="button" disabled={!file || preparing} onClick={() => { void persist({ ...task, stage: 'ready', document: undefined, error: undefined }); setResult(null); }} className="text-ink-3 w-full py-1 text-xs underline">{say('调整样式再生成', 'Try another style')}</button><p className="text-ink-4 text-xs leading-relaxed">{say('结果保存在此浏览器，建议下载留存。', 'Results are saved in this browser. Download a copy to keep.')}</p></div>}
           {!busy && !completed && <button type="button" disabled={!file || preparing} onClick={() => void start(true)} className={actionClass + ' w-full'}>{say('继续处理', 'Resume processing')}</button>}
           {!busy && <button type="button" onClick={onBack} className="text-ink-3 mt-4 text-xs underline">{say('处理另一个视频', 'Start another video')}</button>}
         </div> : <>

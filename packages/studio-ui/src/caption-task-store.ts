@@ -6,7 +6,7 @@ export type CaptionTaskStage = 'ready' | 'transcribing' | 'cleaning' | 'styling'
 export interface CaptionTaskRecord {
   id: string; scope: string; name: string; sourceSig: string; width: number; height: number; durationSec: number;
   options: CaptionTaskOptions; stage: CaptionTaskStage; updatedAt: number; error?: string; transcript?: AsrSegment[];
-  cuts?: { fromSec: number; toSec: number }[]; document?: EditorDocumentV2; projectId?: string;
+  cuts?: { fromSec: number; toSec: number }[]; document?: EditorDocumentV2; projectId?: string; archivedAt?: number; metadataUpdatedAt?: number;
 }
 const database = () => new Promise<IDBDatabase>((resolve, reject) => {
   const request = indexedDB.open('pireel-caption-tasks', 2);
@@ -23,7 +23,9 @@ export async function saveCaptionTask(task: CaptionTaskRecord, result?: Blob) {
   const db = await database();
   try { await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(['tasks', 'results'], 'readwrite');
-    tx.objectStore('tasks').put({ key: key(task.scope, task.id), task });
+    const tasks = tx.objectStore('tasks');
+    const request = tasks.get(key(task.scope, task.id));
+    request.onsuccess = () => tasks.put({ key: key(task.scope, task.id), task: mergeCaptionProjectMetadata(task, request.result?.task) });
     if (result) tx.objectStore('results').put(result, key(task.scope, task.id));
     tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error);
   }); } finally { db.close(); }
@@ -32,7 +34,7 @@ export async function listCaptionTasks(scope: string): Promise<CaptionTaskRecord
   const db = await database();
   try { return await new Promise((resolve, reject) => {
     const request = db.transaction('tasks').objectStore('tasks').index('scope').getAll(IDBKeyRange.only(scope));
-    request.onsuccess = () => resolve(request.result.map((row) => row.task as CaptionTaskRecord).filter((task) => task.scope === scope).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 12).map((task) => ['transcribing', 'cleaning', 'styling', 'rendering'].includes(task.stage) ? { ...task, stage: 'interrupted' } : task));
+    request.onsuccess = () => resolve(request.result.map((row) => row.task as CaptionTaskRecord).filter((task) => task.scope === scope && !task.archivedAt).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 12).map((task) => ['transcribing', 'cleaning', 'styling', 'rendering'].includes(task.stage) ? { ...task, stage: 'interrupted' } : task));
     request.onerror = () => reject(request.error);
   }); } finally { db.close(); }
 }
@@ -50,8 +52,48 @@ export async function loadCaptionTask(scope: string, id: string): Promise<Captio
     const request = db.transaction('tasks').objectStore('tasks').get(key(scope, id));
     request.onsuccess = () => {
       const task = request.result?.task as CaptionTaskRecord | undefined;
-      resolve(task && task.scope === scope ? (['transcribing', 'cleaning', 'styling', 'rendering'].includes(task.stage) ? { ...task, stage: 'interrupted' } : task) : undefined);
+      resolve(task && task.scope === scope && !task.archivedAt ? (['transcribing', 'cleaning', 'styling', 'rendering'].includes(task.stage) ? { ...task, stage: 'interrupted' } : task) : undefined);
     };
     request.onerror = () => reject(request.error);
   }); } finally { db.close(); }
+}
+
+export type CaptionProjectSummary = Pick<CaptionTaskRecord, 'id' | 'scope' | 'name' | 'updatedAt' | 'durationSec' | 'stage'>;
+export async function listCaptionProjectSummaries(scope: string): Promise<CaptionProjectSummary[]> {
+  const db = await database();
+  try { return await new Promise((resolve, reject) => {
+    const rows: CaptionProjectSummary[] = [];
+    const request = db.transaction('tasks').objectStore('tasks').index('scope').openCursor(IDBKeyRange.only(scope));
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) { resolve(rows); return; }
+      const task = cursor.value.task as CaptionTaskRecord;
+      if (task.scope === scope && !task.archivedAt) rows.push({ id: task.id, scope: task.scope, name: task.name, updatedAt: task.updatedAt, durationSec: task.durationSec, stage: task.stage });
+      cursor.continue();
+    };
+    request.onerror = () => reject(request.error);
+  }); } finally { db.close(); }
+}
+
+/** Metadata changes preserve the current execution record within one transaction. */
+export async function patchCaptionProjectMetadata(scope: string, id: string, patch: { name?: string; archivedAt?: number }): Promise<void> {
+  const db = await database();
+  try { await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction('tasks', 'readwrite');
+    const store = tx.objectStore('tasks');
+    const request = store.get(key(scope, id));
+    request.onsuccess = () => {
+      const row = request.result;
+      if (!row || row.task.scope !== scope) { tx.abort(); return; }
+      row.task = { ...row.task, ...patch, updatedAt: Date.now(), metadataUpdatedAt: Date.now() };
+      store.put(row);
+    };
+    tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error ?? new Error('Caption project not found'));
+  }); } finally { db.close(); }
+}
+
+/** A late processing checkpoint cannot undo a newer rename or archive. */
+export function mergeCaptionProjectMetadata(incoming: CaptionTaskRecord, stored?: CaptionTaskRecord): CaptionTaskRecord {
+  if (!stored || stored.scope !== incoming.scope || stored.id !== incoming.id || (stored.metadataUpdatedAt ?? 0) <= (incoming.metadataUpdatedAt ?? 0)) return incoming;
+  return { ...incoming, name: stored.name, archivedAt: stored.archivedAt, metadataUpdatedAt: stored.metadataUpdatedAt, updatedAt: Math.max(incoming.updatedAt, stored.updatedAt) };
 }
