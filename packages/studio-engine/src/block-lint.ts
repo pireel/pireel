@@ -186,7 +186,7 @@ export function lintBlock(args: { blockId: string; innerHtml: string; timelineBo
   }
 
   if (/<script\b/i.test(innerHtml)) {
-    issues.push({ code: 'script-tag', message: 'innerHtml must not contain <script> — animation belongs in the timeline body' });
+    issues.push({ code: 'script-tag', message: 'innerHtml must not contain <script> — the runtime loads nothing beyond GSAP (no external libraries, canvas/WebGL or iframes); animation belongs in the timeline body, visuals in markup/CSS/SVG' });
   }
 
   const cssSources: string[] = [];

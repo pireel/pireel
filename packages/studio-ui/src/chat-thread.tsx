@@ -296,7 +296,8 @@ export function ChatThread({
       // their safe boundaries instead of holding the turn hostage until they finish
       const ctrl = new AbortController();
       toolAbortRef.current = ctrl;
-      const interactionWaitStartedAt = id === "ask_user" || id === "request_approval"
+      // Parked tools wait on the user, not on work: keep that time out of the tool-duration ETA memory
+      const interactionWaitStartedAt = id === "ask_user" || id === "request_approval" || id === "export" || id === "export_video"
         ? Date.now()
         : null;
       try {

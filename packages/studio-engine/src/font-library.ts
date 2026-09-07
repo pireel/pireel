@@ -11,6 +11,8 @@
  * publishes them. Font ids are persisted as `web:<id>` in caption/display-text styles.
  */
 
+import { googleFontCssUrl, googleFontRowOf, searchGoogleFonts, type FontSearchHit, type FontSearchOptions } from './google-fonts';
+
 export interface WebFont {
   id: string;
   /** CSS font-family name baked into the split CSS. */
@@ -32,6 +34,13 @@ export const WEB_FONTS: readonly WebFont[] = [
   { id: 'zhi-mang-xing', family: 'Zhi Mang Xing', label: { zh: '志莽行书', en: 'Zhi Mang Xing' }, license: 'OFL', source: 'google/fonts ofl/zhimangxing' },
   { id: 'long-cang', family: 'Long Cang', label: { zh: '龙藏体', en: 'Long Cang' }, license: 'OFL', source: 'google/fonts ofl/longcang' },
   { id: 'liu-jian-mao-cao', family: 'Liu Jian Mao Cao', label: { zh: '刘建毛草', en: 'Liu Jian Mao Cao' }, license: 'OFL', source: 'google/fonts ofl/liujianmaocao' },
+  { id: 'douyin-sans', family: 'Douyin Sans', label: { zh: '抖音美好体', en: 'Douyin Sans' }, license: 'OFL', source: 'bytedance/fonts DouyinSans' },
+  { id: 'qingsong-handwriting-1', family: 'Qingsong Handwriting 1', label: { zh: '清松手写体1', en: 'Qingsong Handwriting 1' }, license: 'OFL', source: 'jasonhandwriting/JasonHandwriting' },
+  { id: 'xiangcui-zero-hei', family: 'Xiangcui Zero Hei', label: { zh: '香萃零度黑', en: 'Xiangcui Zero Hei' }, license: 'OFL', source: 'Miiiller/Xiangcui-ZeroHei' },
+  { id: 'xiangcui-jixue-song', family: 'Xiangcui Jixue Song', label: { zh: '香萃积雪宋', en: 'Xiangcui Jixue Song' }, license: 'OFL', source: 'Miiiller/Xiangcui-Jixuesong' },
+  { id: 'huxiaobo-nanshen', family: 'Huxiaobo Nanshen Ti', label: { zh: '胡晓波男神体', en: 'Huxiaobo Nanshen Ti' }, license: 'free-commercial', source: '胡晓波 (作者声明永久免费商用)' },
+  { id: 'honglei-zhuoshu', family: 'Honglei Zhuoshu', label: { zh: '鸿雷拙书简体', en: 'Honglei Zhuoshu' }, license: 'free-commercial', source: '鸿雷字迹 (作者声明免费商用)' },
+  { id: 'alimama-fangyuan', family: 'Alimama FangYuan Ti', label: { zh: '阿里妈妈方圆体', en: 'Alimama FangYuan Ti' }, license: 'free-commercial', source: '阿里妈妈 © Alimama (永久免费商用, 需标注版权所有人)' },
 ];
 
 /** The CJK face paired behind a Latin-only local font, so Han glyphs stop falling back to the system body face. */
@@ -60,6 +69,12 @@ export function webFontFontId(font: WebFont): `web:${string}` {
   return `${WEB_FONT_PREFIX}${font.id}`;
 }
 
+/** Agent-facing catalog rows (get_state.fonts): the id every text surface accepts plus both labels,
+ *  so tool descriptions can state the id grammar once instead of enumerating the library. */
+export function webFontCatalog(): Array<{ id: `web:${string}`; zh: string; en: string }> {
+  return WEB_FONTS.map((font) => ({ id: webFontFontId(font), zh: font.label.zh, en: font.label.en }));
+}
+
 export function webFontCssUrl(id: string): string {
   return `${webFontBase}/${id}/result.css`;
 }
@@ -83,12 +98,44 @@ export function cjkPartnerFamilyCss(): string {
  * partner whenever a local font is in play). Deduplicated, stable order. */
 export function webFontStylesheetUrls(fontIds: ReadonlyArray<unknown>): string[] {
   const ids = new Set<string>();
+  const google = new Map<string, string>();
   for (const value of fontIds) {
     const id = webFontIdOf(value);
+    const row = id ? null : googleFontRowOf(value);
     if (id) ids.add(id);
-    else if (typeof value === 'string' && value.startsWith('local:')) ids.add(DEFAULT_CJK_PARTNER_ID);
+    else if (row) {
+      // A Google face renders with the CJK partner behind it, exactly like a local face.
+      google.set(row.f, googleFontCssUrl(row));
+      ids.add(DEFAULT_CJK_PARTNER_ID);
+    } else if (typeof value === 'string' && value.startsWith('local:')) ids.add(DEFAULT_CJK_PARTNER_ID);
   }
-  return [...ids].map(webFontCssUrl);
+  return [...[...ids].map(webFontCssUrl), ...google.values()];
+}
+
+/** The stylesheet one font id needs (library chunked CSS or the Google css2 request); null for builtin/local ids. */
+export function fontStylesheetUrlFor(value: unknown): string | null {
+  const id = webFontIdOf(value);
+  if (id) return webFontCssUrl(id);
+  const row = googleFontRowOf(value);
+  return row ? googleFontCssUrl(row) : null;
+}
+
+/** Combined font search: library faces first (matched on id, family, zh/en label), then the Google
+ *  snapshot ranked by popularity. `script` narrows to faces that carry that writing system; every
+ *  library face is CJK. */
+export function searchFonts(query: string, options: FontSearchOptions = {}): FontSearchHit[] {
+  const needle = query.trim().toLowerCase();
+  const limit = Math.min(Math.max(options.limit ?? 12, 1), 40);
+  const library: FontSearchHit[] = [];
+  if (!options.script || options.script === 'zh-Hans' || options.script === 'zh-Hant' || options.script === 'latin') {
+    for (const font of WEB_FONTS) {
+      const hay = [font.id, font.family, font.label.zh, font.label.en].join(' ').toLowerCase();
+      if (needle && !hay.includes(needle)) continue;
+      library.push({ id: webFontFontId(font), family: font.family, label: font.label.zh, source: 'library', scripts: ['latin', 'zh-Hans'] });
+    }
+  }
+  if (options.category) library.length = 0; // categories are a Google notion; library faces are display faces
+  return [...library, ...searchGoogleFonts(query, { ...options, limit })].slice(0, limit);
 }
 
 /** `web:<anything the user calls it>` → `web:<id>`: the id, the CSS family, or a zh/en label

@@ -45,6 +45,8 @@ export interface ComposeContext {
   designDirection?: string;
   /** What the generated layer sits over and which subjects/zones must remain unobstructed. */
   backdrop?: string;
+  /** The caller's chosen display face: what var(--font-display) resolves to on this component's root. */
+  displayFont?: { id: string; family: string; label: string };
 }
 
 /* ============================ Single-block edit (shot block) ============================ */
@@ -71,6 +73,10 @@ function momentParts(args: { block: BlockEdit; context?: ComposeContext }): stri
   const parts: string[] = [];
   if (args.context?.designDirection) parts.push(args.context.designDirection);
   if (args.context?.backdrop) parts.push(`BACKDROP AND PROTECTED ZONES:\n${args.context.backdrop}`);
+  if (args.context?.displayFont)
+    parts.push(
+      `DISPLAY FONT: var(--font-display) is defined on this component's root and resolves to "${args.context.displayFont.family}" (${args.context.displayFont.label}). Set the hero/headline type in var(--font-display); body, labels and numerals keep the theme tokens. Never write a font-family name literally.`,
+    );
   if (args.block.durationSec)
     parts.push(
       `This fragment is on screen for about ${args.block.durationSec.toFixed(1)}s. When timed SPOKEN BEATS are supplied below, they own reveal timing. Otherwise, for SEQUENTIAL content (steps / numbered list / pipeline / timeline), reveal the items ONE BY ONE spread ACROSS this whole duration (PPT / presenter rhythm — advance through them over the seconds), and highlight the active item; do NOT reveal them all at time 0. Genuinely single-beat content gets one calm reveal near the start then holds still.`,

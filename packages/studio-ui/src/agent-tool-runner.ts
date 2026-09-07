@@ -191,7 +191,8 @@ import {
 import { withEditableBlockGeometry } from './editable-block-geometry';
 import { placementPercentToBox } from '@pireel/studio-engine/overlay-placement';
 import { getStudioSpaceId, listStudioGens, pollCreation, startGeneration } from './gen-api';
-import { isDisplayTextFontId } from '@pireel/studio-engine/display-text-presets';
+import { componentFontSlot, displayFontContext, isDisplayTextFontId } from '@pireel/studio-engine/display-text-presets';
+import { searchFontsTool } from '@pireel/studio-engine/font-search-tool';
 import { describeAudioTargets, resolveAudioTarget } from '@pireel/studio-engine/audio-target';
 
 const PROJECT_MUTATION_TOOLS = new Set(['create_output', 'duplicate_output', 'switch_output', 'rename_output', 'delete_output']);
@@ -360,6 +361,15 @@ type Report = (text: string, frac?: number) => void;
  * Everything the dispatcher borrows from the workbench: refs for the latest state (tool runs are async, setState
  * is not), state setters, and the workbench's own editing handlers. Built fresh each render by the workbench.
  */
+/** Agent export task state (export_video / track_export). */
+export interface AgentExportJob {
+  running: boolean;
+  filename: string | null;
+  error: string | null;
+  delivered?: 'local_sink' | 'browser_download';
+  sinkError?: string;
+}
+
 export interface AgentToolCtx {
   // Composition state
   compRef: MutableRefObject<Composition>;
@@ -460,7 +470,7 @@ export interface AgentToolCtx {
   relayoutCaptions: () => { ok: boolean; error?: string };
   removeCaptionLayer: () => void;
   // Export
-  agentExportRef: MutableRefObject<{ running: boolean; filename: string | null; error: string | null; delivered?: 'local_sink' | 'browser_download'; sinkError?: string }>;
+  agentExportRef: MutableRefObject<AgentExportJob>;
   exportPctRef: MutableRefObject<number>;
   exportVideo: (opts: ExportRenderOpts, sinkUrl?: string) => Promise<{ ok: boolean; filename?: string; error?: string; delivered?: 'local_sink' | 'browser_download'; sinkError?: string }>;
   // Frames + chat handle
@@ -832,6 +842,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             return { ok: true, summary: t('workbench.outputDuplicatedNamed', { title: duplicated.title }), data: { output_id: duplicated.id, active: true } };
           }
           case 'switch_output': {
+            // Switching resets the editor and drops the source file under a running render.
+            if (agentExportRef.current.running) return { ok: false, error: 'an export is running on this project; switching outputs would break it. Poll track_export / export status until it finishes, then switch.' };
             const id = resolveProjectOutput(outputReference(), false);
             if (!id) return { ok: false, error: t('workbench.outputReferenceRequired') };
             const changed = await switchProjectOutput(id);
@@ -2280,6 +2292,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             };
           }
           case 'search_assets': {
+            if (input.kind === 'font') {
+              const found = searchFontsTool(input);
+              return { ...found, summary: found.data.fonts.length ? t('workbench.searchedFontsN', { n: found.data.fonts.length }) : t('workbench.searchedFontsNoMatch') };
+            }
             const scope = input.scope === 'cloud' || input.scope === 'official' || input.scope === 'all' ? input.scope : 'mine';
             const query = typeof input.query === 'string' ? input.query : '';
             const kind = input.kind === 'image' || input.kind === 'video' || input.kind === 'audio' || input.kind === 'element' ? input.kind : 'all';
@@ -2478,6 +2494,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             } finally {
               clearToolProgress(toolId);
             }
+          }
+          case 'search_fonts': {
+            const found = searchFontsTool(input);
+            return { ...found, summary: found.data.fonts.length ? t('workbench.searchedFontsN', { n: found.data.fonts.length }) : t('workbench.searchedFontsNoMatch') };
           }
           case 'list_models': {
             const kind = input.kind === 'image' || input.kind === 'video' ? `?kind=${input.kind}` : '';
@@ -4426,6 +4446,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             ...(beats.length ? { beats } : {}),
             ...(sceneContext ? { designDirection: formatDirectorSceneContext(sceneContext) } : {}),
             ...(typeof input.backdrop === 'string' && input.backdrop.trim() ? { backdrop: input.backdrop.trim() } : {}),
+            ...(displayFontContext(input.fontFamily) ? { displayFont: displayFontContext(input.fontFamily)! } : {}),
           };
         };
         const base = {
@@ -4571,7 +4592,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         pushUndoSnapshot();
         if (target) {
           const editable = withEditableBlockGeometry(
-              { ...target, templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, authoredDurationSec: target.durationSec }, ...(requestedLabel ? { label: requestedLabel } : {}) },
+              { ...target, templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, authoredDurationSec: target.durationSec, ...componentFontSlot(input.fontFamily, target.slots.fontFamily) }, ...(requestedLabel ? { label: requestedLabel } : {}) },
             c2.width,
             c2.height,
           );
@@ -4587,7 +4608,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         const nb = withEditableBlockGeometry({
           id: applyId,
           templateId: 'custom',
-          slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, authoredDurationSec: dur },
+          slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, authoredDurationSec: dur, ...componentFontSlot(input.fontFamily) },
           startSec: at,
           durationSec: dur,
           trackIndex: freeTrack(c2.blocks, at, dur),

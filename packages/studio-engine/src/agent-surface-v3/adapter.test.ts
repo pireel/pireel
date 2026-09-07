@@ -120,6 +120,12 @@ describe('v3 adapter translations', () => {
     expect(translateV3Call('manage_project', { scope: 'project', action: 'delete' }, ctx)).toMatchObject({ status: 'error', allowed: ['list', 'switch', 'create', 'rename'] });
   });
 
+  it('routes search_assets kind font to the pure font catalog lookup', () => {
+    expect(ok(translateV3Call('search_assets', { scope: 'official', kind: 'font', query: 'inter', script: 'latin', category: 'sans', limit: 5 }, ctx))).toEqual([
+      { tool: 'search_fonts', input: { query: 'inter', script: 'latin', category: 'sans', limit: 5 } },
+    ]);
+  });
+
   it('splits set_texts into adds and updates and converts timing', () => {
     expect(ok(translateV3Call('set_texts', { items: [
       { text: 'Hook', startFrame: 6, durationFrames: 108, preset: 'headline' },
@@ -204,6 +210,9 @@ describe('v3 adapter translations', () => {
     expect(ok(translateV3Call('apply_component', { generate: true, clipId: 'g1', instruction: 'make the number bigger' }, ctx))).toEqual([{ tool: 'edit_block', input: { blockId: 'g1', instruction: 'make the number bigger' } }]);
     expect(ok(translateV3Call('apply_component', { generate: true, instruction: 'a stat card', atFrame: 30 }, ctx))).toEqual([{ tool: 'add_block', input: { instruction: 'a stat card', atSec: 1 } }]);
     expect(translateV3Call('apply_component', {}, ctx)).toMatchObject({ status: 'error', path: 'raw' });
+    expect(ok(translateV3Call('apply_component', { raw: 'note\n```html\n<div/>\n```', clipId: 'g1', fontFamily: 'web:douyin-sans' }, ctx))).toEqual([
+      { tool: 'apply_block', input: { raw: 'note\n```html\n<div/>\n```', blockId: 'g1', fontFamily: 'web:douyin-sans' } },
+    ]);
   });
 
   it('drives the caption layer as one object', () => {

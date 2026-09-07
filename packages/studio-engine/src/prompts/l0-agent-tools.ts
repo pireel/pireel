@@ -35,7 +35,7 @@ import { BROLL_DECISIONS, NARRATIVE_ROLES, SCENE_FAMILIES, VIEWER_TASKS } from '
  * a `web:` face is served from the CDN and renders on every device and in export, whereas a
  * `local:` face only renders where that family is installed. */
 export const WEB_FONT_CATALOG = WEB_FONTS.map((font) => `web:${font.id} (${font.label.zh} / ${font.label.en})`).join(', ');
-export const FONT_ID_HELP = `'sans' | 'serif' | 'mono' | 'web:<library id>' (CDN-served, works everywhere: ${WEB_FONT_CATALOG}) | 'local:<installed family, URL-encoded>' (renders only on devices that have it). When the user names a font, match it against the library names first and send that web: id.`;
+export const FONT_ID_HELP = `'sans' | 'serif' | 'mono' | 'web:<library id>' (CDN-served, works everywhere: ${WEB_FONT_CATALOG}) | 'google:<Family>' (any Google Fonts family, found with search_assets kind:"font"; renders Chinese through the library partner face) | 'local:<installed family, URL-encoded>' (renders only on devices that have it). When the user names a font, match it against the library names first and send that web: id.`;
 
 export type StudioToolKind = 'badge' | 'card';
 
@@ -850,7 +850,9 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
       {
         query: { type: 'string', description: 'Natural-language asset description, name, category, mood, or use case (max 200 characters).' },
         scope: { type: 'string', enum: ['mine', 'cloud', 'official', 'all'], description: 'Required scope. Use mine for local/device/my, cloud only for explicit cloud/uploaded/generated material, official for curated Motion Graphics/media, and all only for an explicit cross-library request.' },
-        kind: { type: 'string', enum: ['all', 'image', 'video', 'audio', 'element'], description: 'Optional asset-kind filter.' },
+        kind: { type: 'string', enum: ['all', 'image', 'video', 'audio', 'element', 'font'], description: 'Optional asset-kind filter. font searches the font catalog instead (library faces + Google Fonts) and returns web:/google: font ids; scope is ignored.' },
+        script: { type: 'string', enum: ['latin', 'zh-Hans', 'zh-Hant', 'ja', 'ko'], description: 'kind font only: faces that carry this writing system.' },
+        category: { type: 'string', enum: ['sans', 'serif', 'display', 'handwriting', 'mono'], description: 'kind font only: Google category.' },
         limit: { type: 'number', description: 'Maximum matches (default 12, max 30).' },
       },
       ['query', 'scope'],

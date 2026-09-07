@@ -1,4 +1,5 @@
-import { cjkPartnerFamilyCss, webFontFamilyCss, webFontIdOf } from './font-library';
+import { cjkPartnerFamilyCss, webFontById, webFontFamilyCss, webFontFontId, webFontIdOf } from './font-library';
+import { googleFontFamilyCss, googleFontRowOf } from './google-fonts';
 /** Deterministic native display-text vocabulary shared by tools, renderer and future preset UI. */
 export const DISPLAY_TEXT_PRESET_IDS = [
   'clean',
@@ -33,7 +34,7 @@ export const DISPLAY_TEXT_FONT_IDS = [
 ] as const;
 
 export type BuiltInDisplayTextFontId = (typeof DISPLAY_TEXT_FONT_IDS)[number];
-export type DisplayTextFontId = BuiltInDisplayTextFontId | `local:${string}` | `web:${string}`;
+export type DisplayTextFontId = BuiltInDisplayTextFontId | `local:${string}` | `web:${string}` | `google:${string}`;
 
 const DISPLAY_TEXT_FONT_CSS: Record<BuiltInDisplayTextFontId, string | null> = {
   preset: null,
@@ -74,20 +75,45 @@ export function isDisplayTextFontId(value: unknown): value is DisplayTextFontId 
     (DISPLAY_TEXT_FONT_IDS as readonly string[]).includes(value)
     || displayTextLocalFontFamily(value) !== null
     || webFontIdOf(value) !== null
+    || googleFontRowOf(value) !== null
   );
 }
 
 export function displayTextFontCss(value: unknown): string | null {
   const web = webFontFamilyCss(value);
   if (web) return web;
-  const localFamily = displayTextLocalFontFamily(value);
-  // A local (usually Latin-only) face gets the CJK display partner behind it, so Han glyphs
+  // A Google or local (usually Latin-only) face gets the CJK display partner behind it, so Han glyphs
   // render in a matching display face instead of falling back to the system body font.
+  const google = googleFontFamilyCss(value);
+  if (google) return `${google},${cjkPartnerFamilyCss()},sans-serif`;
+  const localFamily = displayTextLocalFontFamily(value);
   if (localFamily) return `"${localFamily.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}",${cjkPartnerFamilyCss()},sans-serif`;
   const builtin = (DISPLAY_TEXT_FONT_IDS as readonly string[]).includes(String(value))
     ? value as BuiltInDisplayTextFontId
     : 'preset';
   return DISPLAY_TEXT_FONT_CSS[builtin];
+}
+
+/** What a component's `--font-display` token will resolve to, for the generation brief. null when
+ *  the value is not a font id or is 'preset' (no dedicated display face; the theme tokens apply). */
+export function displayFontContext(value: unknown): { id: string; family: string; label: string } | null {
+  if (!isDisplayTextFontId(value) || value === 'preset') return null;
+  const webId = webFontIdOf(value);
+  const web = webId ? webFontById(webId) : null;
+  if (web) return { id: webFontFontId(web), family: web.family, label: web.label.zh };
+  const google = googleFontRowOf(value);
+  if (google) return { id: `google:${google.f}`, family: google.f, label: google.f };
+  const local = displayTextLocalFontFamily(value);
+  if (local) return { id: value, family: local, label: local };
+  return { id: value, family: DISPLAY_TEXT_FONT_CSS[value as BuiltInDisplayTextFontId] ?? value, label: value };
+}
+
+/** slots.fontFamily for a bespoke component: the caller's valid font id, else the existing one (an
+ *  edit that names no font keeps the face it had), else nothing. */
+export function componentFontSlot(requested: unknown, existing?: unknown): { fontFamily: DisplayTextFontId } | Record<string, never> {
+  if (isDisplayTextFontId(requested) && requested !== 'preset') return { fontFamily: requested };
+  if (isDisplayTextFontId(existing) && existing !== 'preset') return { fontFamily: existing };
+  return {};
 }
 
 function hasUnsafeFontFamilyChars(value: string): boolean {

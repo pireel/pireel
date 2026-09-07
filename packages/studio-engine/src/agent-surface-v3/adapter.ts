@@ -529,6 +529,15 @@ function translateInspectMedia(input: Input, ctx: V3AdapterContext): V3Translati
 }
 
 function translateSearchAssets(input: Input): V3Translation {
+  if (input.kind === 'font') {
+    // Fonts are a catalog, not a library scope: one pure server-direct lookup.
+    const call: Input = {};
+    if (isNonEmptyString(input.query)) call.query = input.query.trim();
+    if (isNonEmptyString(input.script)) call.script = input.script;
+    if (isNonEmptyString(input.category)) call.category = input.category;
+    if (isFiniteNumber(input.limit)) call.limit = input.limit;
+    return { status: 'ok', calls: [{ tool: 'search_fonts', input: call }] };
+  }
   const scope = input.scope ?? 'mine';
   const allowed = ['mine', 'cloud', 'official', 'all', 'stock'];
   if (typeof scope !== 'string' || !allowed.includes(scope)) return { status: 'error', error: 'invalid_value', path: 'scope', value: scope, allowed };
@@ -740,6 +749,7 @@ function translateApplyComponent(input: Input, ctx: V3AdapterContext): V3Transla
   if (isNonEmptyString(input.clipId)) call.blockId = input.clipId;
   if (input.placement && typeof input.placement === 'object') call.placement = input.placement;
   if (isNonEmptyString(input.label)) call.label = input.label;
+  if (isNonEmptyString(input.fontFamily)) call.fontFamily = input.fontFamily;
   return { status: 'ok', calls: [{ tool: 'apply_block', input: call }] };
 }
 
