@@ -436,8 +436,14 @@ export class VideoTrackEngine {
   private applyMask(key: string, el: HTMLMediaElement, srcT: number, dubbed: boolean): void {
     const rate = el.playbackRate > 1e-9 ? el.playbackRate : 1;
     const mask = this.maskAt(key, srcT + MASK_PREVIEW_LEAD_SEC * rate);
+    if ((window as unknown as { __hfMaskDebug?: boolean }).__hfMaskDebug && (mask !== this.maskActive)) {
+      console.debug('[mask]', { key, srcT: srcT.toFixed(3), mask, muted: el.muted, volume: el.volume, routed: this.elGains.has(el), dubbed, clips: this.audioClips.size });
+    }
     if (mask) {
+      // Belt and braces: mute AND zero the level. An element that was ever routed through the WebAudio
+      // graph (a boost) carries its level on the gain node, where `muted` alone is not guaranteed to bite.
       if (!el.muted) el.muted = true;
+      this.setElGain(el, 0);
       const dub = this.dubs.get(key);
       if (dub) this.setElGain(dub.el, 0);
       if (mask !== this.maskActive) {
@@ -449,6 +455,7 @@ export class VideoTrackEngine {
     if (!this.maskActive) return;
     this.maskActive = null;
     this.updateBeep();
+    this.setElGain(el, this.segGain(this.curIdx)); // level back to the shot's own envelope
     el.muted = dubbed; // a mounted dub keeps carrying the sound; otherwise the element speaks again
   }
 
