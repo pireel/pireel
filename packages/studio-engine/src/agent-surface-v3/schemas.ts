@@ -9,6 +9,7 @@
 import { CAPTION_PRESETS } from '../caption-presets';
 import { CUT_TRANSITION_EFFECTS, MAX_TRANSITION_SEC, PLACE_ANCHORS, SHOT_TREATMENTS } from '../composition-core';
 import { DISPLAY_TEXT_ANIMATION_IDS, DISPLAY_TEXT_PRESETS } from '../display-text-presets';
+import { MG_RUNTIME_CAPABILITIES } from '../prompts/block-system';
 
 export const CHARGE_MARKER = "[CHARGES the user's Pireel account.]";
 
@@ -397,23 +398,25 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   /* ------------------------------------------------------------------ components */
   compose_component: {
     description:
-      'Get the generation contract {system, prompt, target} for one Motion Graphic component, assembled from the live output: the real box, the backdrop under it, the active frame and the spoken beats in its window. Decide atFrame, durationFrames, placement and backdrop first; pass clipId to rewrite an existing component (its timing and box are supplied). Generate the response yourself with your own model, then submit it with apply_component. No credits are charged here.',
+      'Get the generation contract {system, prompt, target} for one Motion Graphic component, assembled from the live output: the real box, the backdrop under it, the active frame and the spoken beats in its window. Decide atFrame, durationFrames, placement and backdrop first; pass clipId to rewrite an existing component (its timing and box are supplied). Generate the response yourself with your own model, then submit it with apply_component. No credits are charged here. ' + MG_RUNTIME_CAPABILITIES,
     inputSchema: obj({
       instruction: str('What the component must communicate, in one concrete sentence.'),
       clipId: str('Existing graphic clip to rewrite.'),
       atFrame: FRAME('New component start'), durationFrames: int('New component duration in frames.', 1),
       placement: PLACEMENT_PCT, backdrop: str('What sits under the box and which zones must stay clear.'),
       format: enumOf(['html', 'kit'], 'html = bespoke markup; kit = a registered component (JSON props).'),
+      fontFamily: str('Optional display face for the component: a web:<id> from get_state.fonts (or local:<family>). The brief then defines var(--font-display); copy the same value to apply_component.'),
     }, ['instruction']),
   },
   apply_component: {
     description:
-      `Validate and place the component you generated from compose_component: pass raw (your full generated text) with the target clipId, atFrame, durationFrames and placement copied unchanged. Lint rejections list exact issues — fix only those and re-apply with the same clipId. generate=true instead asks Pireel's own model to author or rewrite from instruction (${CHARGE_MARKER} use only when the BYO path fails repeatedly).`,
+      `Validate and place the component you generated from compose_component: pass raw (your full generated text) with the target clipId, atFrame, durationFrames and placement copied unchanged. Lint rejections list exact issues — fix only those and re-apply with the same clipId. generate=true instead asks Pireel's own model to author or rewrite from instruction (${CHARGE_MARKER} use only when the BYO path fails repeatedly). A rejection for <script>, an external library, canvas/WebGL, an iframe or embedded video is not fixable by retrying — the runtime is closed (see compose_component); rebuild that visual in markup, CSS and SVG.`,
     inputSchema: obj({
       raw: str('Your full generated text in the contract compose_component returned.'),
       clipId: str('Target from compose_component, or the graphic clip to edit.'),
       atFrame: FRAME('Start'), durationFrames: int('Duration in frames.', 1),
       placement: PLACEMENT_PCT, label: str('Short timeline label.'),
+      fontFamily: str('The fontFamily passed to compose_component, copied unchanged; it binds var(--font-display) on the placed component.'),
       generate: bool('Hosted generator fallback.'), instruction: str('generate: what to author or change.'), backdrop: str('generate: what sits under the box.'),
     }),
   },
@@ -426,7 +429,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
         startFrame: FRAME('Start'), durationFrames: int('Duration in frames.', 1), trackId: str(),
         preset: enumOf(TEXT_PRESET_IDS), animation: enumOf(TEXT_ANIMATION_IDS),
         color: str('#RGB / #RRGGBB'), accentColor: str('#RGB / #RRGGBB'), fontSize: num('', { min: 24, max: 180 }), fontWeight: num('', { min: 300, max: 950 }),
-        fontFamily: enumOf(['preset', 'sans', 'serif', 'mono']), align: enumOf(['left', 'center', 'right']),
+        fontFamily: str('preset (the preset’s own face) | sans | serif | mono | web:<library id from get_state.fonts> | local:<installed family>.'), align: enumOf(['left', 'center', 'right']),
         placement: PLACEMENT_PCT,
       }), { minItems: 1 }),
     }, ['items']),
@@ -437,7 +440,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
     inputSchema: obj({
       on: bool(),
       preset: enumOf(CAPTION_PRESET_IDS), yPct: num('', { min: 0, max: 100 }), scale: num('', { min: 0.5, max: 2 }),
-      font: str('Caption font: sans | serif | mono | web:<library font id or its display name, e.g. web:lxgw-wenkai or web:霞鹜文楷> | local:<family>; "preset" restores the preset\'s own font.'),
+      font: str('Caption font: sans | serif | mono | web:<library id from get_state.fonts, or its display name> | local:<family>; "preset" restores the preset\'s own font.'),
       script: str('Silent montage only (no spoken transcript): the caption copy, one line per caption, timed across the placed picture by character share; the copy becomes the transcript truth of those clips.'),
       source: obj({ trackId: str(), clipId: str() }),
       clipId: str('corrections / translations: an inserted clip’s transcript instead of the main narration.'),

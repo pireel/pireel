@@ -23,6 +23,7 @@ import { V3_RETIRED_TOOL_IDS, V3_TOOL_IDS, V3_TOOLS, v3ReplacementIndex } from '
 import { V3_TOOL_SCHEMAS } from './agent-surface-v3/schemas';
 import { v3Instructions } from './agent-surface-v3/instructions';
 import { MCP_DESCRIPTION_OVERRIDES, STUDIO_TOOLS, STUDIO_TOOL_MAP, mcpInstructions } from './prompts';
+import { MG_RUNTIME_CAPABILITIES } from './prompts/block-system';
 
 /* ============================ JSON-RPC shapes ============================ */
 
@@ -260,7 +261,7 @@ export function buildMcpTools(): McpToolDef[] {
     {
       name: 'compose_block_brief',
       description:
-        'Get the generation contract {system, prompt} for ONE Component, assembled from the live composition. This is a layer inside an approved composed Scene, not a standalone card: for new work decide atSec/durationSec, intended placement, real backdrop/protected zones and optional Director sceneId BEFORE generation. The brief then supplies the actual box, whole-film design system, Scene treatment and spoken beats. Component is the broad extensible visual-element concept; Motion Graphics are the primary family available here: typography, numbers, comparisons, charts, processes, diagrams, authentic device/interface source treatments, source annotations, identity and content-specific forms. The capability map is open, not a fixed type list. Relevant registered schemas are retrieved from the current moment (maximum three), while bespoke generation separately retrieves at most four structural form references; neither dumps the full library or limits invention. New Motion Graphic work gets the markup contract (note + ```html + ```js) even without a Frame; the host visual-craft baseline supplies neutral quality and an attached Frame supplies the authored visual world. An existing registered Component keeps the typed contract (one ```json fence with {component, props}) so edits preserve its props. Use format:"kit" only for an explicit registered-Component choice. YOU generate the response with your own model, following the contract exactly, then submit the raw text via apply_block with the returned target unchanged. The default way to create/edit Component content — charges no Pireel credits.',
+        'Get the generation contract {system, prompt} for ONE Component, assembled from the live composition. This is a layer inside an approved composed Scene, not a standalone card: for new work decide atSec/durationSec, intended placement, real backdrop/protected zones and optional Director sceneId BEFORE generation. The brief then supplies the actual box, whole-film design system, Scene treatment and spoken beats. Component is the broad extensible visual-element concept; Motion Graphics are the primary family available here: typography, numbers, comparisons, charts, processes, diagrams, authentic device/interface source treatments, source annotations, identity and content-specific forms. The capability map is open, not a fixed type list. Relevant registered schemas are retrieved from the current moment (maximum three), while bespoke generation separately retrieves at most four structural form references; neither dumps the full library or limits invention. New Motion Graphic work gets the markup contract (note + ```html + ```js) even without a Frame; the host visual-craft baseline supplies neutral quality and an attached Frame supplies the authored visual world. An existing registered Component keeps the typed contract (one ```json fence with {component, props}) so edits preserve its props. Use format:"kit" only for an explicit registered-Component choice. YOU generate the response with your own model, following the contract exactly, then submit the raw text via apply_block with the returned target unchanged. The default way to create/edit Component content — charges no Pireel credits. ' + MG_RUNTIME_CAPABILITIES,
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -280,6 +281,7 @@ export function buildMcpTools(): McpToolDef[] {
           },
           backdrop: { type: 'string', description: 'New element only: describe the real footage/background under this region and any face, product, caption or evidence zones that must stay clear.' },
           instruction: { type: 'string', description: 'What to build or change.' },
+          fontFamily: { type: 'string', description: 'Optional display face for the Component: web:<library id> (ids in get_state fonts) or local:<installed family>. The brief then defines var(--font-display); copy the same value to apply_block.' },
           format: { type: 'string', enum: ['kit', 'html'], description: 'Override the contract. Default: existing registered Component → kit; every new or custom Motion Graphic Component → html, with or without a Frame. Use kit only for an explicit registered-Component choice.' },
         },
         required: ['instruction'],
@@ -288,7 +290,7 @@ export function buildMcpTools(): McpToolDef[] {
     {
       name: 'apply_block',
       description:
-        'Validate and place a Component you generated from compose_block_brief. Copy the returned target blockId/atSec/durationSec unchanged, and set `raw` to your full generated text in whichever contract the brief carried (registered Component JSON or fenced Motion Graphic markup). On lint failure you get the issues back — fix ONLY those and re-apply. A blockId that names an existing element overwrites it; the minted blockId returned for new work inserts a new element. Optional label renames either an existing or new timeline element.',
+        'Validate and place a Component you generated from compose_block_brief. Copy the returned target blockId/atSec/durationSec unchanged, and set `raw` to your full generated text in whichever contract the brief carried (registered Component JSON or fenced Motion Graphic markup). On lint failure you get the issues back — fix ONLY those and re-apply. A blockId that names an existing element overwrites it; the minted blockId returned for new work inserts a new element. Optional label renames either an existing or new timeline element. A rejection for <script>, an external library, canvas/WebGL, an iframe or embedded video is not fixable by retrying — the runtime is closed (see compose_block_brief); rebuild that visual in markup, CSS and SVG.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -306,6 +308,7 @@ export function buildMcpTools(): McpToolDef[] {
             description: 'Copy the placement returned by compose_block_brief unchanged.',
           },
           label: { type: 'string', description: 'Optional short timeline label; applies to both existing and new elements.' },
+          fontFamily: { type: 'string', description: 'The fontFamily passed to compose_block_brief, copied unchanged; binds var(--font-display) on the placed Component.' },
           raw: { type: 'string', description: 'Your full generated text: note, then ```html fence, then ```js fence.' },
         },
         required: ['raw'],

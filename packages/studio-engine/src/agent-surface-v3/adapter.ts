@@ -740,6 +740,7 @@ function translateApplyComponent(input: Input, ctx: V3AdapterContext): V3Transla
   if (isNonEmptyString(input.clipId)) call.blockId = input.clipId;
   if (input.placement && typeof input.placement === 'object') call.placement = input.placement;
   if (isNonEmptyString(input.label)) call.label = input.label;
+  if (isNonEmptyString(input.fontFamily)) call.fontFamily = input.fontFamily;
   return { status: 'ok', calls: [{ tool: 'apply_block', input: call }] };
 }
 

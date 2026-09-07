@@ -190,7 +190,7 @@ import {
 import { withEditableBlockGeometry } from './editable-block-geometry';
 import { placementPercentToBox } from '@pireel/studio-engine/overlay-placement';
 import { getStudioSpaceId, listStudioGens, pollCreation, startGeneration } from './gen-api';
-import { isDisplayTextFontId } from '@pireel/studio-engine/display-text-presets';
+import { componentFontSlot, displayFontContext, isDisplayTextFontId } from '@pireel/studio-engine/display-text-presets';
 import { describeAudioTargets, resolveAudioTarget } from '@pireel/studio-engine/audio-target';
 
 const PROJECT_MUTATION_TOOLS = new Set(['create_output', 'duplicate_output', 'switch_output', 'rename_output', 'delete_output']);
@@ -4414,6 +4414,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             ...(beats.length ? { beats } : {}),
             ...(sceneContext ? { designDirection: formatDirectorSceneContext(sceneContext) } : {}),
             ...(typeof input.backdrop === 'string' && input.backdrop.trim() ? { backdrop: input.backdrop.trim() } : {}),
+            ...(displayFontContext(input.fontFamily) ? { displayFont: displayFontContext(input.fontFamily)! } : {}),
           };
         };
         const base = {
@@ -4559,7 +4560,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         pushUndoSnapshot();
         if (target) {
           const editable = withEditableBlockGeometry(
-              { ...target, templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, authoredDurationSec: target.durationSec }, ...(requestedLabel ? { label: requestedLabel } : {}) },
+              { ...target, templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, authoredDurationSec: target.durationSec, ...componentFontSlot(input.fontFamily, target.slots.fontFamily) }, ...(requestedLabel ? { label: requestedLabel } : {}) },
             c2.width,
             c2.height,
           );
@@ -4575,7 +4576,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         const nb = withEditableBlockGeometry({
           id: applyId,
           templateId: 'custom',
-          slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, authoredDurationSec: dur },
+          slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, authoredDurationSec: dur, ...componentFontSlot(input.fontFamily) },
           startSec: at,
           durationSec: dur,
           trackIndex: freeTrack(c2.blocks, at, dur),

@@ -60,6 +60,9 @@ describe('renderV3State', () => {
     expect(t6).not.toHaveProperty('clips');
     expect(state.tracks.find((t) => t.id === 't3')!.clips![0]).toMatchObject({ kind: 'graphic', component: { componentId: 'kit.number', box: { x: 0.1, y: 0.6, w: 0.5, h: 0.2 } } });
     expect(state.assets[0]).toEqual({ id: 'a1', kind: 'video', label: 'talk.mp4', durationSec: 118.4, hasAudio: true });
+    // the font catalog rides on get_state so tool descriptions state the id grammar instead of a list
+    expect(state.fonts.length).toBeGreaterThanOrEqual(10);
+    expect(state.fonts).toContainEqual({ id: 'web:lxgw-wenkai', zh: '霞鹜文楷', en: 'LXGW WenKai' });
   });
 
   it('omits identity geometry and keeps a real crop or subject framing', () => {

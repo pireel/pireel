@@ -13,11 +13,20 @@
 
 import { BLOCK_MIN_READABLE_FONT_PX, BLOCK_TEXT_BASELINE_PX } from '../block-typography';
 
+/** The closed runtime the markup contract runs in. One sentence, shared by the brief's system text and by
+ *  every tool that hands out or accepts that contract (MCP compose_block_brief/apply_block, v3
+ *  compose_component/apply_component), so an external agent learns the boundary before authoring instead
+ *  of discovering it through a lint rejection. Word choice matters: the v3 vocabulary test forbids
+ *  "block"/"shot" in tool descriptions, so this text says "component". */
+export const MG_RUNTIME_CAPABILITIES = `The runtime is a closed HTML document Studio assembles: HTML, CSS (inline SVG, container queries, custom properties, the theme's var(--*) tokens) and GSAP 3 driving the pre-created paused timeline \`tl\`, seeked frame by frame. Nothing else is loaded or loadable — no <script> tags, external scripts, ES modules, import maps or CDN libraries (Three.js, Lottie, D3/chart libraries, React), no <canvas>/WebGL, no <iframe>, no <video> inside the component, no @import/@font-face, no fetch. Build every visual from markup, CSS and SVG and animate it on \`tl\`; the lint rejects anything outside this boundary outright, so design within it instead of discovering it through a rejection.`;
+
 export const BLOCK_HTML_BODY = `You author/edit one Motion Graphic Component as MARKUP. Component is Studio's broader extensible element model; Motion Graphic is the family this contract is designing. It is ONE editable visual composition participating in a video scene: open typography, source annotation, a relationship or process, a data explanation, a transition plate, a full-field chapter/payoff, or a contained information surface when containment is genuinely needed. It is NOT a generic UI widget, a default rounded card, or a paragraph with decoration.
 
 A block has two parts:
 1) INNER HTML: markup + ONE <style> whose selectors are ALL scoped under #BLOCK_ID (e.g. #b7 .num {…}). Never unscoped/global selectors.
 2) TIMELINE BODY: GSAP statements against an already-created paused timeline named \`tl\`, in LOCAL time (0 = block start). e.g. tl.from('#b7 .num',{autoAlpha:0,y:40,duration:0.4},0). No gsap.timeline() call, no registration — body statements only. Deterministic only (no setTimeout/Date/Math.random).
+
+RUNTIME — ${MG_RUNTIME_CAPABILITIES}
 
 SIZING — the canvas is a FIXED 1080px-wide reference (height follows the video aspect, ≈1920 for 9:16) and is scaled uniformly for preview/export, so use PLAIN px tuned to that 1080-wide reference (a 72px headline reads the same in every fragment). Do NOT scale type to the box SIZE; DO adapt the LAYOUT to the box's ASPECT RATIO.
 - Studio supplies a ${BLOCK_TEXT_BASELINE_PX}px inherited fallback on every component. Text without a local font-size inherits that stable baseline instead of the browser's 16px default. Every explicit \`font-size\` and every \`--type-*\` token must resolve directly to px and must never be smaller than ${BLOCK_MIN_READABLE_FONT_PX}px. Prefer a small semantic scale declared on the component root, for example \`--type-display:144px; --type-headline:76px; --type-body:38px; --type-meta:28px\`, then apply it with \`font-size:var(--type-headline)\`. A one-off focal size may use literal px. Do not use the \`font\` shorthand, unresolved variables, \`inherit\` as an explicit value, or responsive font formulas.
@@ -66,7 +75,7 @@ LAYOUT ARCHETYPES — same Motion Graphic job, DIFFERENT stagings. Pick the ONE 
 Rotate alignment too (left-rail / centered / right-weighted) — 7 fragments that are all centered cards read as ONE template repeated.
 
 TYPOGRAPHY
-- Headings/keywords var(--font-head) weight 800, tight leading. Numbers/stats var(--font-num) weight 700–800, oversized, tabular (font-feature-settings:"tnum"). Body/labels var(--font-body) weight 400–600, short. CJK-safe families come from the tokens.
+- Headings/keywords var(--font-head) weight 800, tight leading. Numbers/stats var(--font-num) weight 700–800, oversized, tabular (font-feature-settings:"tnum"). Body/labels var(--font-body) weight 400–600, short. CJK-safe families come from the tokens. When the prompt names a DISPLAY FONT, var(--font-display) exists on this component's root for its hero type; otherwise it is undefined — never write a font-family name literally.
 - Editorial devices to reach for (pick 1–2, not all): mono kicker with letter-spacing · index numeral ("02 /") · unit as superscript/small · accent underline under the keyword · a 2px accent tick on the rule.
 
 ICONS & LOGOS — fetched via the get_icons tool; NEVER drawn freehand, NEVER emoji

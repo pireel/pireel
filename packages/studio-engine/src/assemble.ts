@@ -26,6 +26,7 @@ import { SOURCE_DRAW_RECT_FUNCTION } from './source-framing';
 import { compositionVisualLayerPlan, type SupplementalVisualMediaClip } from './visual-layer-plan';
 import { BLOCK_TEXT_BASELINE_PX } from './block-typography';
 import { webFontStylesheetUrls } from './font-library';
+import { displayFontContext, displayTextFontCss } from './display-text-presets';
 
 /* ============================ Assembly ============================ */
 
@@ -527,7 +528,11 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
     // theme vars — a later theme mount recolors #root (and future blocks) but never this one. Emitted
     // inside the container so the in-place patch channel (hf:blockAdd/hf:blockHtml) carries it too.
     // The user's explicit bg/border stay on inline style, which beats this rule.
-    const varsTag = b.vars ? `<style>#${b.id}{${varsDeclCss(b.vars)}}</style>\n` : '';
+    // A bespoke component's chosen display face: the brief promised var(--font-display) on its root, and
+    // the stylesheet for a library face is already linked (webFontStylesheetUrls reads slots.fontFamily).
+    const displayFontCss = b.templateId === 'custom' && displayFontContext(b.slots.fontFamily) ? displayTextFontCss(b.slots.fontFamily) : null;
+    const varDecls = `${b.vars ? varsDeclCss(b.vars) : ''}${displayFontCss ? `--font-display:${displayFontCss};` : ''}`;
+    const varsTag = varDecls ? `<style>#${b.id}{${varDecls}}</style>\n` : '';
     let html: string;
     if (b.box) {
       // box block = two layers: the container is the crop window (overflow:hidden, dragging edges/corners only moves the window), the content layer

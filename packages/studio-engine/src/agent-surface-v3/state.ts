@@ -7,6 +7,7 @@
  * touched/created clips (capped), uniform shifts compressed to rules, removed ids, created tracks,
  * caption changes, and notes telling the agent exactly when to re-read. Pure; no I/O.
  */
+import { webFontCatalog } from '../font-library';
 
 import type {
   EditorDocumentV2,
@@ -65,6 +66,8 @@ export interface V3StateView {
   /** `library: true` marks project-library media not yet placed on any track — the footage to start from. */
   assets: Array<{ id: string; kind: string; label?: string; durationSec?: number; hasAudio?: boolean; library?: true }>;
   semantics: { primaryTrackId: string; sceneIds: string[] };
+  /** Library fonts every text surface accepts (set_texts/set_captions font ids, compose_component fontFamily); sans/serif/mono/local:<family> need no catalog. */
+  fonts: Array<{ id: string; zh: string; en: string }>;
 }
 
 export interface V3Delta {
@@ -295,6 +298,7 @@ export function renderV3State(
       ...(!placedAssetIds.has(asset.id) ? { library: true as const } : {}),
     })),
     semantics: { primaryTrackId: document.semantics.primaryNarrativeTrackId, sceneIds: document.semantics.scenes.map((scene) => scene.id) },
+    fonts: webFontCatalog(),
   };
 }
 

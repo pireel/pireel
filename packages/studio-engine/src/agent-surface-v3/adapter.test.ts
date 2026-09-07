@@ -204,6 +204,9 @@ describe('v3 adapter translations', () => {
     expect(ok(translateV3Call('apply_component', { generate: true, clipId: 'g1', instruction: 'make the number bigger' }, ctx))).toEqual([{ tool: 'edit_block', input: { blockId: 'g1', instruction: 'make the number bigger' } }]);
     expect(ok(translateV3Call('apply_component', { generate: true, instruction: 'a stat card', atFrame: 30 }, ctx))).toEqual([{ tool: 'add_block', input: { instruction: 'a stat card', atSec: 1 } }]);
     expect(translateV3Call('apply_component', {}, ctx)).toMatchObject({ status: 'error', path: 'raw' });
+    expect(ok(translateV3Call('apply_component', { raw: 'note\n```html\n<div/>\n```', clipId: 'g1', fontFamily: 'web:douyin-sans' }, ctx))).toEqual([
+      { tool: 'apply_block', input: { raw: 'note\n```html\n<div/>\n```', blockId: 'g1', fontFamily: 'web:douyin-sans' } },
+    ]);
   });
 
   it('drives the caption layer as one object', () => {

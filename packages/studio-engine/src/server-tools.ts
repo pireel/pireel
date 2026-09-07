@@ -121,7 +121,7 @@ import { mediaSearchTranscriptsFromDocument, searchProjectMedia } from './media-
 import { normalizeProjectOutputs, projectOutputPositionMap } from './project-outputs';
 import { AGENT_TIMELINE_TOOL_IDS, runAgentTimelineTool } from './agent-timeline';
 import { planScriptCaptionSegments, splitScriptLines } from './script-captions';
-import { isDisplayTextFontId } from './display-text-presets';
+import { componentFontSlot, displayFontContext, isDisplayTextFontId } from './display-text-presets';
 import { describeAudioTargets, resolveAudioTarget } from './audio-target';
 
 // Ensure the template registry is ready at module load. The MCP worker path
@@ -1483,7 +1483,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (target) {
         const edit = applyOverlayDocumentEdits({
           document: p.document,
-          updates: [{ clipId: target.id, block: { templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, authoredDurationSec: target.durationSec }, ...(requestedLabel ? { label: requestedLabel } : {}) } }],
+          updates: [{ clipId: target.id, block: { templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, authoredDurationSec: target.durationSec, ...componentFontSlot(input.fontFamily, target.slots.fontFamily) }, ...(requestedLabel ? { label: requestedLabel } : {}) } }],
         });
         if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
         return {
@@ -1497,7 +1497,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const nb: Block = {
         id: applyId,
         templateId: 'custom',
-        slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, authoredDurationSec: dur },
+        slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, authoredDurationSec: dur, ...componentFontSlot(input.fontFamily) },
         startSec: at,
         durationSec: dur,
         trackIndex: freeTrack(c.blocks, at, dur),
@@ -1543,6 +1543,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
           ...(resolvedBeats.length ? { beats: resolvedBeats } : {}),
           ...(sceneContext ? { designDirection: formatDirectorSceneContext(sceneContext) } : {}),
           ...(typeof input.backdrop === 'string' && input.backdrop.trim() ? { backdrop: input.backdrop.trim() } : {}),
+          ...(displayFontContext(input.fontFamily) ? { displayFont: displayFontContext(input.fontFamily)! } : {}),
         };
       };
       const base = {

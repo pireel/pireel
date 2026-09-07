@@ -1,4 +1,4 @@
-import { cjkPartnerFamilyCss, webFontFamilyCss, webFontIdOf } from './font-library';
+import { cjkPartnerFamilyCss, webFontById, webFontFamilyCss, webFontFontId, webFontIdOf } from './font-library';
 /** Deterministic native display-text vocabulary shared by tools, renderer and future preset UI. */
 export const DISPLAY_TEXT_PRESET_IDS = [
   'clean',
@@ -88,6 +88,26 @@ export function displayTextFontCss(value: unknown): string | null {
     ? value as BuiltInDisplayTextFontId
     : 'preset';
   return DISPLAY_TEXT_FONT_CSS[builtin];
+}
+
+/** What a component's `--font-display` token will resolve to, for the generation brief. null when
+ *  the value is not a font id or is 'preset' (no dedicated display face; the theme tokens apply). */
+export function displayFontContext(value: unknown): { id: string; family: string; label: string } | null {
+  if (!isDisplayTextFontId(value) || value === 'preset') return null;
+  const webId = webFontIdOf(value);
+  const web = webId ? webFontById(webId) : null;
+  if (web) return { id: webFontFontId(web), family: web.family, label: web.label.zh };
+  const local = displayTextLocalFontFamily(value);
+  if (local) return { id: value, family: local, label: local };
+  return { id: value, family: DISPLAY_TEXT_FONT_CSS[value as BuiltInDisplayTextFontId] ?? value, label: value };
+}
+
+/** slots.fontFamily for a bespoke component: the caller's valid font id, else the existing one (an
+ *  edit that names no font keeps the face it had), else nothing. */
+export function componentFontSlot(requested: unknown, existing?: unknown): { fontFamily: DisplayTextFontId } | Record<string, never> {
+  if (isDisplayTextFontId(requested) && requested !== 'preset') return { fontFamily: requested };
+  if (isDisplayTextFontId(existing) && existing !== 'preset') return { fontFamily: existing };
+  return {};
 }
 
 function hasUnsafeFontFamilyChars(value: string): boolean {
