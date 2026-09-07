@@ -32,6 +32,13 @@ export const WEB_FONTS: readonly WebFont[] = [
   { id: 'zhi-mang-xing', family: 'Zhi Mang Xing', label: { zh: '志莽行书', en: 'Zhi Mang Xing' }, license: 'OFL', source: 'google/fonts ofl/zhimangxing' },
   { id: 'long-cang', family: 'Long Cang', label: { zh: '龙藏体', en: 'Long Cang' }, license: 'OFL', source: 'google/fonts ofl/longcang' },
   { id: 'liu-jian-mao-cao', family: 'Liu Jian Mao Cao', label: { zh: '刘建毛草', en: 'Liu Jian Mao Cao' }, license: 'OFL', source: 'google/fonts ofl/liujianmaocao' },
+  { id: 'douyin-sans', family: 'Douyin Sans', label: { zh: '抖音美好体', en: 'Douyin Sans' }, license: 'OFL', source: 'bytedance/fonts DouyinSans' },
+  { id: 'qingsong-handwriting-1', family: 'Qingsong Handwriting 1', label: { zh: '清松手写体1', en: 'Qingsong Handwriting 1' }, license: 'OFL', source: 'jasonhandwriting/JasonHandwriting' },
+  { id: 'xiangcui-zero-hei', family: 'Xiangcui Zero Hei', label: { zh: '香萃零度黑', en: 'Xiangcui Zero Hei' }, license: 'OFL', source: 'Miiiller/Xiangcui-ZeroHei' },
+  { id: 'xiangcui-jixue-song', family: 'Xiangcui Jixue Song', label: { zh: '香萃积雪宋', en: 'Xiangcui Jixue Song' }, license: 'OFL', source: 'Miiiller/Xiangcui-Jixuesong' },
+  { id: 'huxiaobo-nanshen', family: 'Huxiaobo Nanshen Ti', label: { zh: '胡晓波男神体', en: 'Huxiaobo Nanshen Ti' }, license: 'free-commercial', source: '胡晓波 (作者声明永久免费商用)' },
+  { id: 'honglei-zhuoshu', family: 'Honglei Zhuoshu', label: { zh: '鸿雷拙书简体', en: 'Honglei Zhuoshu' }, license: 'free-commercial', source: '鸿雷字迹 (作者声明免费商用)' },
+  { id: 'alimama-fangyuan', family: 'Alimama FangYuan Ti', label: { zh: '阿里妈妈方圆体', en: 'Alimama FangYuan Ti' }, license: 'free-commercial', source: '阿里妈妈 © Alimama (永久免费商用, 需标注版权所有人)' },
 ];
 
 /** The CJK face paired behind a Latin-only local font, so Han glyphs stop falling back to the system body face. */
@@ -58,6 +65,12 @@ export function webFontById(id: string): WebFont | null {
 
 export function webFontFontId(font: WebFont): `web:${string}` {
   return `${WEB_FONT_PREFIX}${font.id}`;
+}
+
+/** Agent-facing catalog rows (get_state.fonts): the id every text surface accepts plus both labels,
+ *  so tool descriptions can state the id grammar once instead of enumerating the library. */
+export function webFontCatalog(): Array<{ id: `web:${string}`; zh: string; en: string }> {
+  return WEB_FONTS.map((font) => ({ id: webFontFontId(font), zh: font.label.zh, en: font.label.en }));
 }
 
 export function webFontCssUrl(id: string): string {
