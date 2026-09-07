@@ -26,9 +26,9 @@ describe('single video style showcase', () => {
   it('cycles the active style without replacing the video', () => {
     const video = container.querySelector('video');
     expect(active()).toBe('clean');
-    act(() => vi.advanceTimersByTime(2800));
+    act(() => vi.advanceTimersByTime(1400));
     expect(active()).toBe('keywords');
-    expect(container.querySelector('[data-preview-style]')?.getAttribute('data-preview-style')).toBe('kw-yellow');
+    expect(container.querySelector('[data-caption-demo-frame] [data-preview-style]')?.getAttribute('data-preview-style')).toBe('kw-yellow');
     expect(container.querySelector('video')).toBe(video);
   });
   it('applies hovered styles, pauses the style cycle, and resumes on exit while video keeps playing', () => {
@@ -39,7 +39,7 @@ describe('single video style showcase', () => {
     expect(active()).toBe('cinema');
     expect(HTMLMediaElement.prototype.pause).not.toHaveBeenCalled();
     act(() => pointer(target, 'pointerout'));
-    act(() => vi.advanceTimersByTime(2800));
+    act(() => vi.advanceTimersByTime(1400));
     expect(active()).toBe('paper');
   });
 });
