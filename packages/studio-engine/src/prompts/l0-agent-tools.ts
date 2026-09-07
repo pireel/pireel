@@ -1534,7 +1534,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🔇',
     label: 'tools.mask_words.label',
     description:
-      "Mask exact spoken words WITHOUT cutting them, by stable ids from list_words: audio replaces the words' sound with a censor beep ('beep') or silence ('mute'); caption swaps the words' caption text for the given string (default '**') while the spoken transcript and timing stay untouched. Pass 'original' to restore the sound or the caption text. Use this for platform-sensitive or private words the user wants bleeped or starred out; which words qualify is the user's call — there is no built-in word list. delete_words removes words from the cut instead.",
+      "Mask exact spoken words WITHOUT cutting them, by stable ids from list_words: audio replaces the words' sound with a censor beep ('beep', the default and what the user means by 消音 / bleep) or silence ('mute', only when they ask for silence); caption swaps the words' caption text for the given string (default '**') while the spoken transcript and timing stay untouched. Pass 'original' to restore the sound or the caption text. Use this for platform-sensitive or private words the user wants bleeped or starred out; which words qualify is the user's call — there is no built-in word list. delete_words removes words from the cut instead.",
     inputSchema: obj(
       {
         wordIds: { type: 'array', items: { type: 'string' }, description: 'Stable ids copied from list_words.' },

@@ -393,10 +393,10 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   mask_words: {
     description:
-      "Mask exact spoken words without cutting them. wordIds are stable ids from get_transcript words. audio replaces the words' sound with a censor beep or silence; caption swaps their caption text (default '**') while the transcript and timing stay the spoken words. 'original' restores either side. For words the user wants bleeped or starred out — the platform keeps no word list, the user (or you, when asked) decides which words. Use remove_words to cut words out instead.",
+      "Mask exact spoken words without cutting them. wordIds are stable ids from get_transcript words. audio replaces the words' sound with a censor beep (default — what 消音 / bleep means here) or silence (only when asked for silence); caption swaps their caption text (default '**') while the transcript and timing stay the spoken words. 'original' restores either side. For words the user wants bleeped or starred out — the platform keeps no word list, the user (or you, when asked) decides which words. Use remove_words to cut words out instead.",
     inputSchema: obj({
       wordIds: ids('Exact words to mask.'),
-      audio: enumOf(['beep', 'mute', 'original'], "Replace the sound with a beep tone or silence; 'original' restores it."),
+      audio: enumOf(['beep', 'mute', 'original'], "Replace the sound with a beep tone (default) or silence; 'original' restores it."),
       caption: str("Caption text shown instead of the words, or 'original' to show the spoken words again."),
     }, ['wordIds']),
   },

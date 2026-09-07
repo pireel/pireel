@@ -159,7 +159,7 @@ import { t } from './i18n';
 import { type ComposeMode, type ComposedBlock, composedBlockFields, GeneratedBlockValidationError, kitChoiceOf, newBlockComposeMode } from './compose-result';
 import { clearToolProgress, setToolProgress, type ToolProgress } from './tool-progress';
 import { fileSig, probeVideoFile } from './media';
-import { measuredSpeechTranscript } from '@pireel/studio-engine/script-alignment';
+import { measuredSpeechTranscript, storedScriptText } from '@pireel/studio-engine/script-alignment';
 import { deleteCachedTts, getCachedTts, setCachedTts, ttsCacheKey, type CachedTtsAsset } from './tts-cache';
 import { loadLocalAssetFile, loadLocalVideo, saveLocalVideo } from './local-media';
 import { materializeRemoteMedia } from './remote-media';
@@ -1067,7 +1067,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 }
                 const probe = await probeVideoFile(file).catch(() => null);
                 // Script-backed speech (TTS) keeps its exact text; ASR only lends the timing.
-                const segs = measuredSpeechTranscript(asset, documentRef.current.semantics.transcripts[targetAssetId], await race(studioProviders().transcriber.transcribe(file, { projectId })));
+                const storedBefore = documentRef.current.semantics.transcripts[targetAssetId];
+                const segs = measuredSpeechTranscript(asset, storedBefore, await race(studioProviders().transcriber.transcribe(file, { projectId })));
+                // A script recovered from the stored transcript becomes the asset's own script, so a later
+                // re-measure still keeps the exact text instead of storing what the recogniser heard.
+                const recoveredScript = asset.metadata.transcriptText ? '' : storedScriptText(storedBefore);
                 const current = documentRef.current;
                 const primaryClipsForAsset = current.timeline.tracks
                   .filter((track) => track.role === 'primaryNarrative')
@@ -1127,6 +1131,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                     transcripts: { ...current.semantics.transcripts, [targetAssetId]: segs },
                   },
                 };
+                if (recoveredScript) {
+                  const entry = nextDocument.assets[targetAssetId]!;
+                  nextDocument.assets = { ...nextDocument.assets, [targetAssetId]: { ...entry, metadata: { ...entry.metadata, transcriptText: recoveredScript } } };
+                }
                 if (targetAssetId === firstNarrativeAssetId(current)) {
                   videoFileRef.current = file;
                   asrRef.current = segs;

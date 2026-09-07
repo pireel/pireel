@@ -19,7 +19,7 @@ import {
 } from '@pireel/studio-engine/composition';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { studioProviders } from '@pireel/studio-engine/providers';
-import { measuredSpeechTranscript } from '@pireel/studio-engine/script-alignment';
+import { measuredSpeechTranscript, storedScriptText } from '@pireel/studio-engine/script-alignment';
 import { type VisualTimeline, analyzeVisual } from './visual';
 import { t } from './i18n';
 import { deleteCachedAsr } from './asr-cache';
@@ -91,6 +91,7 @@ export function useMediaAnalysis(deps: MediaAnalysisDeps) {
       report?.(t('common.transcribing'));
       const firstAssetId = firstNarrativeAssetId(current);
       const transcripts = { ...current.semantics.transcripts };
+      const recoveredScripts = new Map<string, string>();
       let firstError: unknown;
       for (const target of targets) {
         const refreshThisAsset = force;
@@ -104,7 +105,12 @@ export function useMediaAnalysis(deps: MediaAnalysisDeps) {
           if (!file) continue;
           if (refreshThisAsset) deleteCachedAsr(fileSig(file));
           // Script-backed speech (TTS) keeps its exact text; ASR only lends the timing.
-          transcripts[target.assetId] = measuredSpeechTranscript(asset, current.semantics.transcripts[target.assetId], await studioProviders().transcriber.transcribe(file));
+          const storedBefore = current.semantics.transcripts[target.assetId];
+          transcripts[target.assetId] = measuredSpeechTranscript(asset, storedBefore, await studioProviders().transcriber.transcribe(file));
+          if (!asset.metadata.transcriptText) {
+            const recoveredScript = storedScriptText(storedBefore);
+            if (recoveredScript) recoveredScripts.set(target.assetId, recoveredScript);
+          }
         } catch (error) {
           firstError ??= error;
         }
@@ -125,8 +131,14 @@ export function useMediaAnalysis(deps: MediaAnalysisDeps) {
         if (!latest.assets[target.assetId] || !Object.prototype.hasOwnProperty.call(transcripts, target.assetId)) continue;
         mergedTranscripts[target.assetId] = transcripts[target.assetId]!;
       }
+      const mergedAssets = { ...latest.assets };
+      for (const [assetId, script] of recoveredScripts) {
+        const entry = mergedAssets[assetId];
+        if (entry && !entry.metadata.transcriptText) mergedAssets[assetId] = { ...entry, metadata: { ...entry.metadata, transcriptText: script } };
+      }
       const document = {
         ...latest,
+        assets: mergedAssets,
         semantics: { ...latest.semantics, transcripts: mergedTranscripts },
       };
       const latestFirstAssetId = firstNarrativeAssetId(latest);

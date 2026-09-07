@@ -18,7 +18,8 @@ export function parseMaskWordsInput(input: Record<string, unknown>): { ids: stri
     else if (typeof input.caption === 'string') patch.text = input.caption.trim() || DEFAULT_MASK_TEXT;
     else return { error: "caption must be a string or 'original'" };
   }
-  if (patch.audio === undefined && patch.text === undefined) return { error: "pass audio ('beep' | 'mute' | 'original') and/or caption (text | 'original')" };
+  // The product's default replacement is the censor beep (what "消音 / bleep" means in the studio UI).
+  if (patch.audio === undefined && patch.text === undefined) patch.audio = 'beep';
   return { ids, patch };
 }
 

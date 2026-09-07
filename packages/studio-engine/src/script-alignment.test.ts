@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { alignTranscriptToScript, alignmentUnits, measuredSpeechTranscript } from './script-alignment';
+import { alignTranscriptToScript, alignmentUnits, carryWordMasks, measuredSpeechTranscript, storedScriptText } from './script-alignment';
 import { transcriptFromExactText } from './agent-timeline';
 import type { TranscriptSegment } from './project-dto';
 
@@ -75,5 +75,28 @@ describe('script alignment', () => {
     expect(measuredSpeechTranscript({ metadata: {} }, provisional, asr)[0]!.text).toBe('再看食用说明。');
     const recorded = measuredSpeechTranscript({ metadata: {} }, [{ start: 0, end: 1, text: '旧转写', words: [{ text: '旧', start: 0, end: 1 }] }], asr);
     expect(recorded[0]!.text).toBe('再看使用说明');
+  });
+
+  it('treats an unflagged transcript without word timing as the script', () => {
+    const asr = [heard('再看使用说明')];
+    const unflagged: TranscriptSegment[] = [{ start: 0, end: 1.2, text: '再看食用说明。' }];
+    expect(storedScriptText(unflagged)).toBe('再看食用说明。');
+    const measured = measuredSpeechTranscript({ metadata: {} }, unflagged, asr);
+    expect(measured[0]!.text).toBe('再看食用说明。');
+    expect(measured[0]!.words!.map((word) => word.text)).toEqual(alignTranscriptToScript('再看食用说明。', asr)[0]!.words!.map((word) => word.text));
+  });
+
+  it('carries word masks from the provisional words onto the measured words by character', () => {
+    const asr = [heard('再看使用说明')];
+    const provisional = transcriptFromExactText('再看食用说明。', 1.2).map((segment) => ({ ...segment, masks: { '1': { audio: 'beep' as const } } }));
+    // Provisional words are estimated ICU tokens: index 1 = '看' … whichever token holds those characters.
+    const measured = measuredSpeechTranscript({ metadata: {} }, provisional, asr);
+    const maskedChars = Object.keys(measured[0]!.masks ?? {}).map((index) => measured[0]!.words![Number(index)]!.text).join('');
+    const provisionalWords = alignTranscriptToScript('再看食用说明。', asr)[0]!.words!;
+    expect(maskedChars.length).toBeGreaterThan(0);
+    expect('再看食用说明'.includes(maskedChars.replace(/[^\p{L}\p{N}]/gu, ''))).toBe(true);
+    expect(provisionalWords.length).toBeGreaterThan(0);
+    // Different text carries nothing.
+    expect(carryWordMasks(provisional, [{ start: 0, end: 1, text: '完全不同的一句', words: [{ text: '完全', start: 0, end: 1 }] }])[0]!.masks).toBeUndefined();
   });
 });
