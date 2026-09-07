@@ -11,6 +11,8 @@
  * publishes them. Font ids are persisted as `web:<id>` in caption/display-text styles.
  */
 
+import { googleFontCssUrl, googleFontRowOf, searchGoogleFonts, type FontSearchHit, type FontSearchOptions } from './google-fonts';
+
 export interface WebFont {
   id: string;
   /** CSS font-family name baked into the split CSS. */
@@ -96,12 +98,44 @@ export function cjkPartnerFamilyCss(): string {
  * partner whenever a local font is in play). Deduplicated, stable order. */
 export function webFontStylesheetUrls(fontIds: ReadonlyArray<unknown>): string[] {
   const ids = new Set<string>();
+  const google = new Map<string, string>();
   for (const value of fontIds) {
     const id = webFontIdOf(value);
+    const row = id ? null : googleFontRowOf(value);
     if (id) ids.add(id);
-    else if (typeof value === 'string' && value.startsWith('local:')) ids.add(DEFAULT_CJK_PARTNER_ID);
+    else if (row) {
+      // A Google face renders with the CJK partner behind it, exactly like a local face.
+      google.set(row.f, googleFontCssUrl(row));
+      ids.add(DEFAULT_CJK_PARTNER_ID);
+    } else if (typeof value === 'string' && value.startsWith('local:')) ids.add(DEFAULT_CJK_PARTNER_ID);
   }
-  return [...ids].map(webFontCssUrl);
+  return [...[...ids].map(webFontCssUrl), ...google.values()];
+}
+
+/** The stylesheet one font id needs (library chunked CSS or the Google css2 request); null for builtin/local ids. */
+export function fontStylesheetUrlFor(value: unknown): string | null {
+  const id = webFontIdOf(value);
+  if (id) return webFontCssUrl(id);
+  const row = googleFontRowOf(value);
+  return row ? googleFontCssUrl(row) : null;
+}
+
+/** Combined font search: library faces first (matched on id, family, zh/en label), then the Google
+ *  snapshot ranked by popularity. `script` narrows to faces that carry that writing system; every
+ *  library face is CJK. */
+export function searchFonts(query: string, options: FontSearchOptions = {}): FontSearchHit[] {
+  const needle = query.trim().toLowerCase();
+  const limit = Math.min(Math.max(options.limit ?? 12, 1), 40);
+  const library: FontSearchHit[] = [];
+  if (!options.script || options.script === 'zh-Hans' || options.script === 'zh-Hant' || options.script === 'latin') {
+    for (const font of WEB_FONTS) {
+      const hay = [font.id, font.family, font.label.zh, font.label.en].join(' ').toLowerCase();
+      if (needle && !hay.includes(needle)) continue;
+      library.push({ id: webFontFontId(font), family: font.family, label: font.label.zh, source: 'library', scripts: ['latin', 'zh-Hans'] });
+    }
+  }
+  if (options.category) library.length = 0; // categories are a Google notion; library faces are display faces
+  return [...library, ...searchGoogleFonts(query, { ...options, limit })].slice(0, limit);
 }
 
 /** `web:<anything the user calls it>` → `web:<id>`: the id, the CSS family, or a zh/en label

@@ -191,6 +191,7 @@ import { withEditableBlockGeometry } from './editable-block-geometry';
 import { placementPercentToBox } from '@pireel/studio-engine/overlay-placement';
 import { getStudioSpaceId, listStudioGens, pollCreation, startGeneration } from './gen-api';
 import { componentFontSlot, displayFontContext, isDisplayTextFontId } from '@pireel/studio-engine/display-text-presets';
+import { searchFontsTool } from '@pireel/studio-engine/font-search-tool';
 import { describeAudioTargets, resolveAudioTarget } from '@pireel/studio-engine/audio-target';
 
 const PROJECT_MUTATION_TOOLS = new Set(['create_output', 'duplicate_output', 'switch_output', 'rename_output', 'delete_output']);
@@ -2282,6 +2283,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             };
           }
           case 'search_assets': {
+            if (input.kind === 'font') {
+              const found = searchFontsTool(input);
+              return { ...found, summary: found.data.fonts.length ? t('workbench.searchedFontsN', { n: found.data.fonts.length }) : t('workbench.searchedFontsNoMatch') };
+            }
             const scope = input.scope === 'cloud' || input.scope === 'official' || input.scope === 'all' ? input.scope : 'mine';
             const query = typeof input.query === 'string' ? input.query : '';
             const kind = input.kind === 'image' || input.kind === 'video' || input.kind === 'audio' || input.kind === 'element' ? input.kind : 'all';
@@ -2484,6 +2489,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             } finally {
               clearToolProgress(toolId);
             }
+          }
+          case 'search_fonts': {
+            const found = searchFontsTool(input);
+            return { ...found, summary: found.data.fonts.length ? t('workbench.searchedFontsN', { n: found.data.fonts.length }) : t('workbench.searchedFontsNoMatch') };
           }
           case 'list_models': {
             const kind = input.kind === 'image' || input.kind === 'video' ? `?kind=${input.kind}` : '';

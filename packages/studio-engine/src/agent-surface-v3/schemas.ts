@@ -158,7 +158,9 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
     inputSchema: obj({
       scope: enumOf(['mine', 'cloud', 'official', 'all', 'stock']),
       query: str('Name, category, mood or use case (≤200 characters); stock needs a concrete visual query.'),
-      kind: enumOf(['all', 'image', 'video', 'audio', 'element', 'sticker']),
+      kind: enumOf(['all', 'image', 'video', 'audio', 'element', 'sticker', 'font'], 'font searches the font catalog instead (scope ignored): library faces plus the Google Fonts snapshot, matched on family name or Chinese label, optionally narrowed by script/category; returns web:<id> / google:<Family> ids for set_texts, set_captions and compose_component.'),
+      script: enumOf(['latin', 'zh-Hans', 'zh-Hant', 'ja', 'ko'], 'kind font only: faces that carry this writing system.'),
+      category: enumOf(['sans', 'serif', 'display', 'handwriting', 'mono'], 'kind font only: Google category.'),
       page: int('stock only: result page.', 1),
       limit: int('Max results.', 1),
     }, ['scope']),
@@ -405,7 +407,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       atFrame: FRAME('New component start'), durationFrames: int('New component duration in frames.', 1),
       placement: PLACEMENT_PCT, backdrop: str('What sits under the box and which zones must stay clear.'),
       format: enumOf(['html', 'kit'], 'html = bespoke markup; kit = a registered component (JSON props).'),
-      fontFamily: str('Optional display face for the component: a web:<id> from get_state.fonts (or local:<family>). The brief then defines var(--font-display); copy the same value to apply_component.'),
+      fontFamily: str('Optional display face for the component: web:<id> from get_state.fonts, google:<Family> from search_assets kind font, or local:<family>. The brief then defines var(--font-display); copy the same value to apply_component.'),
     }, ['instruction']),
   },
   apply_component: {
@@ -429,7 +431,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
         startFrame: FRAME('Start'), durationFrames: int('Duration in frames.', 1), trackId: str(),
         preset: enumOf(TEXT_PRESET_IDS), animation: enumOf(TEXT_ANIMATION_IDS),
         color: str('#RGB / #RRGGBB'), accentColor: str('#RGB / #RRGGBB'), fontSize: num('', { min: 24, max: 180 }), fontWeight: num('', { min: 300, max: 950 }),
-        fontFamily: str('preset (the preset’s own face) | sans | serif | mono | web:<library id from get_state.fonts> | local:<installed family>.'), align: enumOf(['left', 'center', 'right']),
+        fontFamily: str('preset (the preset’s own face) | sans | serif | mono | web:<library id from get_state.fonts> | google:<Family from search_assets kind font> | local:<installed family>.'), align: enumOf(['left', 'center', 'right']),
         placement: PLACEMENT_PCT,
       }), { minItems: 1 }),
     }, ['items']),
@@ -440,7 +442,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
     inputSchema: obj({
       on: bool(),
       preset: enumOf(CAPTION_PRESET_IDS), yPct: num('', { min: 0, max: 100 }), scale: num('', { min: 0.5, max: 2 }),
-      font: str('Caption font: sans | serif | mono | web:<library id from get_state.fonts, or its display name> | local:<family>; "preset" restores the preset\'s own font.'),
+      font: str('Caption font: sans | serif | mono | web:<library id from get_state.fonts, or its display name> | google:<Family from search_assets kind font> | local:<family>; "preset" restores the preset\'s own font.'),
       script: str('Silent montage only (no spoken transcript): the caption copy, one line per caption, timed across the placed picture by character share; the copy becomes the transcript truth of those clips.'),
       source: obj({ trackId: str(), clipId: str() }),
       clipId: str('corrections / translations: an inserted clip’s transcript instead of the main narration.'),

@@ -220,7 +220,7 @@ describe('MCP 协议处理', () => {
     expect(d.listSkills).toHaveBeenCalledWith({ query: '大女主' });
     expect(d.readSkill).toHaveBeenCalledWith('usk_1');
     // 服务端直答集合与 dispatch 的特判保持同步
-    expect([...MCP_SERVER_TOOL_IDS].sort()).toEqual(['clone_voice', 'create_browser_handoff', 'create_project', 'delete_voice', 'design_voice', 'generate_image', 'generate_music', 'generate_sfx', 'generate_speech', 'generate_video', 'get_generation_jobs', 'get_icons', 'import_media', 'import_stock', 'lip_sync', 'list_assets', 'list_frames', 'list_models', 'list_projects', 'list_skills', 'list_voices', 'read_editing_guide', 'read_frame', 'read_skill', 'rename_project', 'search_assets', 'search_stock', 'switch_project']);
+    expect([...MCP_SERVER_TOOL_IDS].sort()).toEqual(['clone_voice', 'create_browser_handoff', 'create_project', 'delete_voice', 'design_voice', 'generate_image', 'generate_music', 'generate_sfx', 'generate_speech', 'generate_video', 'get_generation_jobs', 'get_icons', 'import_media', 'import_stock', 'lip_sync', 'list_assets', 'list_frames', 'list_models', 'list_projects', 'list_skills', 'list_voices', 'read_editing_guide', 'read_frame', 'read_skill', 'rename_project', 'search_assets', 'search_fonts', 'search_stock', 'switch_project']);
     // import_media 服务端直答(登记进项目行,不过桥)
     const d2 = deps();
     await handleMcpRequest({ id: 100, method: 'tools/call', params: { name: 'import_media', arguments: { sig: 'a.mp4:1:2' } } }, d2);

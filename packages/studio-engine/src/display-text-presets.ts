@@ -1,4 +1,5 @@
 import { cjkPartnerFamilyCss, webFontById, webFontFamilyCss, webFontFontId, webFontIdOf } from './font-library';
+import { googleFontFamilyCss, googleFontRowOf } from './google-fonts';
 /** Deterministic native display-text vocabulary shared by tools, renderer and future preset UI. */
 export const DISPLAY_TEXT_PRESET_IDS = [
   'clean',
@@ -33,7 +34,7 @@ export const DISPLAY_TEXT_FONT_IDS = [
 ] as const;
 
 export type BuiltInDisplayTextFontId = (typeof DISPLAY_TEXT_FONT_IDS)[number];
-export type DisplayTextFontId = BuiltInDisplayTextFontId | `local:${string}` | `web:${string}`;
+export type DisplayTextFontId = BuiltInDisplayTextFontId | `local:${string}` | `web:${string}` | `google:${string}`;
 
 const DISPLAY_TEXT_FONT_CSS: Record<BuiltInDisplayTextFontId, string | null> = {
   preset: null,
@@ -74,15 +75,18 @@ export function isDisplayTextFontId(value: unknown): value is DisplayTextFontId 
     (DISPLAY_TEXT_FONT_IDS as readonly string[]).includes(value)
     || displayTextLocalFontFamily(value) !== null
     || webFontIdOf(value) !== null
+    || googleFontRowOf(value) !== null
   );
 }
 
 export function displayTextFontCss(value: unknown): string | null {
   const web = webFontFamilyCss(value);
   if (web) return web;
-  const localFamily = displayTextLocalFontFamily(value);
-  // A local (usually Latin-only) face gets the CJK display partner behind it, so Han glyphs
+  // A Google or local (usually Latin-only) face gets the CJK display partner behind it, so Han glyphs
   // render in a matching display face instead of falling back to the system body font.
+  const google = googleFontFamilyCss(value);
+  if (google) return `${google},${cjkPartnerFamilyCss()},sans-serif`;
+  const localFamily = displayTextLocalFontFamily(value);
   if (localFamily) return `"${localFamily.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}",${cjkPartnerFamilyCss()},sans-serif`;
   const builtin = (DISPLAY_TEXT_FONT_IDS as readonly string[]).includes(String(value))
     ? value as BuiltInDisplayTextFontId
@@ -97,6 +101,8 @@ export function displayFontContext(value: unknown): { id: string; family: string
   const webId = webFontIdOf(value);
   const web = webId ? webFontById(webId) : null;
   if (web) return { id: webFontFontId(web), family: web.family, label: web.label.zh };
+  const google = googleFontRowOf(value);
+  if (google) return { id: `google:${google.f}`, family: google.f, label: google.f };
   const local = displayTextLocalFontFamily(value);
   if (local) return { id: value, family: local, label: local };
   return { id: value, family: DISPLAY_TEXT_FONT_CSS[value as BuiltInDisplayTextFontId] ?? value, label: value };

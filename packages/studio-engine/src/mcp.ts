@@ -24,6 +24,7 @@ import { V3_TOOL_SCHEMAS } from './agent-surface-v3/schemas';
 import { v3Instructions } from './agent-surface-v3/instructions';
 import { MCP_DESCRIPTION_OVERRIDES, STUDIO_TOOLS, STUDIO_TOOL_MAP, mcpInstructions } from './prompts';
 import { MG_RUNTIME_CAPABILITIES } from './prompts/block-system';
+import { searchFontsTool } from './font-search-tool';
 
 /* ============================ JSON-RPC shapes ============================ */
 
@@ -129,7 +130,7 @@ export interface McpDeps {
 /* ============================ Tool surface ============================ */
 
 /** Tools answered directly on the server (body only on server / pure catalog / direct cloud-state ops): no bridge. */
-export const MCP_SERVER_TOOL_IDS = new Set(['read_editing_guide', 'read_frame', 'list_frames', 'list_skills', 'read_skill', 'get_icons', 'import_media', 'create_browser_handoff', 'create_project', 'list_projects', 'switch_project', 'rename_project', 'list_assets', 'search_assets', 'search_stock', 'import_stock', 'list_models', 'generate_image', 'generate_video', 'generate_music', 'generate_sfx', 'get_generation_jobs', 'list_voices', 'clone_voice', 'design_voice', 'delete_voice', 'generate_speech', 'lip_sync']);
+export const MCP_SERVER_TOOL_IDS = new Set(['read_editing_guide', 'read_frame', 'list_frames', 'list_skills', 'read_skill', 'get_icons', 'search_fonts', 'import_media', 'create_browser_handoff', 'create_project', 'list_projects', 'switch_project', 'rename_project', 'list_assets', 'search_assets', 'search_stock', 'import_stock', 'list_models', 'generate_image', 'generate_video', 'generate_music', 'generate_sfx', 'get_generation_jobs', 'list_voices', 'clone_voice', 'design_voice', 'delete_voice', 'generate_speech', 'lip_sync']);
 
 /** MCP-only bridge tools (not in STUDIO_TOOLS, invisible to internal chat):
  *  get_state=state snapshot; apply_block=the validate-and-place surface for BYO generation output;
@@ -281,7 +282,7 @@ export function buildMcpTools(): McpToolDef[] {
           },
           backdrop: { type: 'string', description: 'New element only: describe the real footage/background under this region and any face, product, caption or evidence zones that must stay clear.' },
           instruction: { type: 'string', description: 'What to build or change.' },
-          fontFamily: { type: 'string', description: 'Optional display face for the Component: web:<library id> (ids in get_state fonts) or local:<installed family>. The brief then defines var(--font-display); copy the same value to apply_block.' },
+          fontFamily: { type: 'string', description: 'Optional display face for the Component: web:<library id> (ids in get_state fonts), google:<Family> from search_fonts, or local:<installed family>. The brief then defines var(--font-display); copy the same value to apply_block.' },
           format: { type: 'string', enum: ['kit', 'html'], description: 'Override the contract. Default: existing registered Component → kit; every new or custom Motion Graphic Component → html, with or without a Frame. Use kit only for an explicit registered-Component choice.' },
         },
         required: ['instruction'],
@@ -432,6 +433,21 @@ export function buildMcpTools(): McpToolDef[] {
       },
     },
     {
+      name: 'search_fonts',
+      description:
+        'Search the font catalog by family name, writing system and category: the self-hosted Chinese display library plus the Google Fonts snapshot. Returns ids every text surface accepts (web:<id> or google:<Family>) for set_captions font, add_texts/update_text fontFamily and compose_block_brief/apply_block fontFamily. Pass script zh-Hans when the on-screen text is Chinese; an empty query lists the most used faces that pass the filters. Answered on the server, no credits charged.',
+      inputSchema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          query: { type: 'string', description: 'Family name fragment or Chinese label; empty lists by popularity.' },
+          script: { type: 'string', enum: ['latin', 'zh-Hans', 'zh-Hant', 'ja', 'ko'], description: 'Only faces that carry this writing system.' },
+          category: { type: 'string', enum: ['sans', 'serif', 'display', 'handwriting', 'mono'], description: 'Google category filter.' },
+          limit: { type: 'number', description: 'Max results (default 12, max 40).' },
+        },
+      },
+    },
+    {
       name: 'create_project',
       description:
         "Create a NEW empty Pireel project — no browser needed; it immediately becomes your ACTIVE project for offline tools. Use when the user starts fresh or offline tools report 'no cloud project'. Add footage with import_media; open live with create_browser_handoff {project_id}.",
@@ -535,6 +551,7 @@ async function callLegacyTool(name: string, args: Record<string, unknown>, deps:
       if (typeof skillId !== 'string' || !skillId) return ({ ok: false, error: 'skill_id required (ids via list_skills)' });
       return (await deps.readSkill(skillId));
     }
+    if (name === 'search_fonts') return searchFontsTool(args);
     if (name === 'get_icons') {
       const names = Array.isArray(args.names) ? (args.names as unknown[]).map(String).filter(Boolean) : [];
       if (!names.length) return ({ ok: false, error: 'names required (up to 8 icon names)' });

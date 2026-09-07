@@ -77,6 +77,7 @@ import { injectPreviewRuntime } from './sample-composition';
 import { materializeRemoteMedia } from './remote-media';
 import { buildInlineFontCss } from './export-fonts';
 import { webFontIdOf } from '@pireel/studio-engine/font-library';
+import { googleFontRowOf } from '@pireel/studio-engine/google-fonts';
 import { t } from './i18n';
 import {
   browserVisualLayerPlan,
@@ -117,7 +118,7 @@ function compositionLocalFontFamilies(comp: Composition): string[] {
 
 function compositionWebFontIds(comp: Composition): string[] {
   return [...new Set(compositionFontIds(comp)
-    .filter((value): value is string => typeof value === 'string' && webFontIdOf(value) !== null))];
+    .filter((value): value is string => typeof value === 'string' && (webFontIdOf(value) !== null || googleFontRowOf(value) !== null)))];
 }
 
 /* ============================ Sources and segments ============================ */

@@ -120,6 +120,12 @@ describe('v3 adapter translations', () => {
     expect(translateV3Call('manage_project', { scope: 'project', action: 'delete' }, ctx)).toMatchObject({ status: 'error', allowed: ['list', 'switch', 'create', 'rename'] });
   });
 
+  it('routes search_assets kind font to the pure font catalog lookup', () => {
+    expect(ok(translateV3Call('search_assets', { scope: 'official', kind: 'font', query: 'inter', script: 'latin', category: 'sans', limit: 5 }, ctx))).toEqual([
+      { tool: 'search_fonts', input: { query: 'inter', script: 'latin', category: 'sans', limit: 5 } },
+    ]);
+  });
+
   it('splits set_texts into adds and updates and converts timing', () => {
     expect(ok(translateV3Call('set_texts', { items: [
       { text: 'Hook', startFrame: 6, durationFrames: 108, preset: 'headline' },

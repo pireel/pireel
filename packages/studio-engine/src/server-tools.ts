@@ -122,6 +122,7 @@ import { normalizeProjectOutputs, projectOutputPositionMap } from './project-out
 import { AGENT_TIMELINE_TOOL_IDS, runAgentTimelineTool } from './agent-timeline';
 import { planScriptCaptionSegments, splitScriptLines } from './script-captions';
 import { componentFontSlot, displayFontContext, isDisplayTextFontId } from './display-text-presets';
+import { searchFontsTool } from './font-search-tool';
 import { describeAudioTargets, resolveAudioTarget } from './audio-target';
 
 // Ensure the template registry is ready at module load. The MCP worker path
@@ -156,6 +157,7 @@ export interface ServerToolOutcome {
 
 /** The set of offline-executable tools (route uses this to decide between fallback and returning studio_not_open as-is). */
 export const SERVER_EXECUTABLE_TOOLS: ReadonlySet<string> = new Set([
+  'search_fonts',
   'get_state',
   'get_timeline',
   'read_director_plan',
@@ -469,6 +471,8 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
   }
 
   switch (tool) {
+    case 'search_fonts':
+      return { result: searchFontsTool(input) };
     case 'get_state':
       return { result: { ok: true, state: offlineState(p) } };
     case 'set_director_plan': {

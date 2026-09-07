@@ -43,7 +43,7 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
     replaces: ['list_projects', 'switch_project', 'create_project', 'rename_project', 'create_output', 'duplicate_output', 'switch_output', 'rename_output', 'delete_output'],
   },
   // ---- assets (7)
-  { id: 'search_assets', group: 'assets', serverDirect: true, replaces: ['list_assets', 'search_assets', 'search_stock'] },
+  { id: 'search_assets', group: 'assets', serverDirect: true, replaces: ['list_assets', 'search_assets', 'search_stock', 'search_fonts'] },
   { id: 'register_media', group: 'assets', serverDirect: true, replaces: ['register_media', 'import_stock'] },
   { id: 'import_media', group: 'assets', serverDirect: true, replaces: ['import_media', 'insert_clip'] },
   { id: 'organize_media', group: 'assets', replaces: ['organize_media'] },

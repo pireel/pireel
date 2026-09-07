@@ -8,7 +8,8 @@
  */
 
 import { registeredLocalFontFace } from './local-font-access';
-import { DEFAULT_CJK_PARTNER_ID, webFontCssUrl, webFontIdOf } from '@pireel/studio-engine/font-library';
+import { DEFAULT_CJK_PARTNER_ID, fontStylesheetUrlFor, webFontIdOf } from '@pireel/studio-engine/font-library';
+import { googleFontRowOf } from '@pireel/studio-engine/google-fonts';
 
 export interface FontFace {
   family: string;
@@ -128,10 +129,11 @@ async function buildInlineWebFontCss(
   used: Set<number>,
   log: (m: string) => void,
 ): Promise<string> {
-  const ids = [...new Set(webFontIds.map((id) => webFontIdOf(id) ?? '').filter(Boolean))];
+  // Library ids and google:<Family> ids alike: each resolves to one stylesheet whose @font-face rules are subset-tested.
+  const ids = [...new Set(webFontIds.filter((id) => webFontIdOf(id) !== null || googleFontRowOf(id) !== null))];
   if (!ids.length) return '';
   const parts = await Promise.all(ids.map(async (id) => {
-    const cssUrl = webFontCssUrl(id);
+    const cssUrl = fontStylesheetUrlFor(id)!;
     const res = await fetchFont(cssUrl);
     if (!res) {
       log(`web font css unavailable for export: ${id}`);
@@ -173,7 +175,9 @@ export async function buildInlineFontCss(
   for (const ch of glyphText) usedCodePoints.add(ch.codePointAt(0)!);
   // A local (usually Latin-only) face is rendered with the CJK partner behind it (see
   // font-library): the export must carry the partner's glyph blocks too.
-  const webIds = localFamilies.length ? [...webFontIds, `web:${DEFAULT_CJK_PARTNER_ID}`] : webFontIds;
+  // Local and Google faces both render with the CJK partner behind them: the export must carry its glyph blocks.
+  const partnerNeeded = localFamilies.length > 0 || webFontIds.some((id) => googleFontRowOf(id) !== null);
+  const webIds = partnerNeeded ? [...webFontIds, `web:${DEFAULT_CJK_PARTNER_ID}`] : webFontIds;
   const [localCss, webCss] = await Promise.all([
     buildInlineLocalFontCss(localFamilies, log),
     buildInlineWebFontCss(webIds, usedCodePoints, log),

@@ -10,6 +10,7 @@ import {
 } from './caption-presets';
 import { displayTextFontCss, displayTextLocalFontFamily } from './display-text-presets';
 import { cjkPartnerFamilyCss, webFontFamilyCss } from './font-library';
+import { googleFontFamilyCss } from './google-fonts';
 
 /** Font family used by rendered CSS: the user's override (same font ids as display text —
  *  built-in sans/serif/mono or a local family) when set, else the preset's own font. */
@@ -25,6 +26,8 @@ export function captionFontCss(preset: CaptionPreset, font?: string): string {
 export function captionCanvasFontFamilies(preset: CaptionPreset, font?: string): string {
   const web = font ? webFontFamilyCss(font) : null;
   if (web) return web;
+  const google = font ? googleFontFamilyCss(font) : null;
+  if (google) return `${google},${cjkPartnerFamilyCss()},sans-serif`;
   const localFamily = font ? displayTextLocalFontFamily(font) : null;
   if (localFamily) return `"${localFamily.replaceAll('"', '\\"')}",${cjkPartnerFamilyCss()},sans-serif`;
   const kind = font === 'sans' || font === 'serif' || font === 'mono' ? font : preset.font;
