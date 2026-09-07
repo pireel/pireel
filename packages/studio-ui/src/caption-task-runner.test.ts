@@ -1,0 +1,42 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CaptionTaskRecord } from './caption-task-store';
+const mock = vi.hoisted(() => ({ transcribe: vi.fn(), clean: vi.fn(), render: vi.fn(), font: vi.fn() }));
+vi.mock('./media', () => ({ transcribeFile: mock.transcribe }));
+vi.mock('./speech-silence', () => ({ detectSpeechSilenceCuts: mock.clean }));
+vi.mock('./client-export', () => ({ clientExportVideo: mock.render }));
+vi.mock('./web-fonts', () => ({ loadFont: mock.font }));
+import { runCaptionTask } from './caption-task-runner';
+const transcript = [{ text: 'Hello world', start: 0, end: 3, words: [{ text: 'Hello', start: 0, end: 1 }, { text: 'world', start: 2, end: 3 }] }];
+const task = (): CaptionTaskRecord => ({ id: 'task', scope: 'account', name: 'video.mp4', sourceSig: 'sig', width: 1080, height: 1920, durationSec: 4, stage: 'ready', updatedAt: 0, options: { presetId: 'clean', aspect: 'original', shortenPauses: true } });
+const file = new File(['test'], 'video.mp4', { type: 'video/mp4' });
+beforeEach(() => {
+  vi.clearAllMocks(); vi.stubGlobal('document', { fonts: { ready: Promise.resolve() } });
+  mock.transcribe.mockResolvedValue(transcript); mock.clean.mockResolvedValue([{ fromSec: 1, toSec: 2 }]);
+  mock.render.mockResolvedValue(new Blob(['video'], { type: 'video/mp4' })); mock.font.mockResolvedValue(undefined);
+});
+afterEach(() => vi.unstubAllGlobals());
+describe('standalone caption task execution', () => {
+  it('runs without a workbench and produces a downloadable video with a native document', async () => {
+    const records: CaptionTaskRecord[] = [];
+    const result = await runCaptionTask(task(), file, { signal: new AbortController().signal, checkpoint: async (record) => { records.push(structuredClone(record)); }, progress: vi.fn() });
+    expect(records.map((record) => record.stage)).toEqual(['transcribing', 'cleaning', 'styling', 'rendering']);
+    expect(result.task.stage).toBe('completed'); expect(result.video.type).toBe('video/mp4');
+    expect(result.task.document?.semantics.managedCaptionTrackId).toBeTruthy();
+    expect(mock.render.mock.calls[0]![0].videoFile).toBe(file);
+    expect(records.at(-1)?.document).toBeTruthy();
+  });
+  it('resumes cached transcript and cleanup without repeating those operations', async () => {
+    await runCaptionTask({ ...task(), transcript, cuts: [] }, file, { signal: new AbortController().signal, checkpoint: async () => {}, progress: vi.fn() });
+    expect(mock.transcribe).not.toHaveBeenCalled(); expect(mock.clean).not.toHaveBeenCalled(); expect(mock.render).toHaveBeenCalledOnce();
+  });
+  it('does not start a paid operation when already cancelled', async () => {
+    const abort = new AbortController(); abort.abort();
+    await expect(runCaptionTask(task(), file, { signal: abort.signal, checkpoint: async () => {}, progress: vi.fn() })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(mock.transcribe).not.toHaveBeenCalled();
+  });
+  it('never reports completion if cancellation arrives during rendering', async () => {
+    const abort = new AbortController();
+    mock.render.mockImplementationOnce(async () => { abort.abort(); return new Blob(['late video']); });
+    await expect(runCaptionTask(task(), file, { signal: abort.signal, checkpoint: async () => {}, progress: vi.fn() })).rejects.toMatchObject({ name: 'AbortError' });
+  });
+});

@@ -41,7 +41,8 @@
     "./captions-entry": "./src/captions-entry.tsx",
     "./workflow-panel": "./src/workflow-panel.tsx",
     "./workbench-controls": "./src/workbench-controls.tsx",
-    "./*": "./src/*.ts"
+    "./*": "./src/*.ts",
+    "./caption-task-page": "./src/caption-task-page.tsx"
   },
   "sideEffects": [
     "./src/i18n.ts"

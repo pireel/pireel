@@ -13,6 +13,8 @@ function patchError(patch: CaptionStylePatch): string | null {
   for (const key of ['yPct', 'xPct', 'wPct', 'scale', 'hPct'] as const) {
     if (patch[key] != null && !Number.isFinite(patch[key])) return `Caption ${key} must be finite.`;
   }
+  if (patch.strokeWidth != null && (!Number.isFinite(patch.strokeWidth) || patch.strokeWidth < 0 || patch.strokeWidth > 8)) return 'Caption outline width must be from 0 to 8.';
+  for (const key of ['accentColor', 'strokeColor'] as const) if (patch[key] != null && !/^#[a-f0-9]{6}$/i.test(patch[key]!)) return 'Caption color must be a six-digit hex color.';
   if (patch.sub != null && (typeof patch.sub !== 'object' || Array.isArray(patch.sub))) return 'Caption sub style must be an object.';
   if (patch.sub?.preset != null && !presetIds.has(patch.sub.preset)) return `Unknown subtitle preset: ${patch.sub.preset}`;
   return null;

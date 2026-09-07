@@ -476,6 +476,9 @@ export interface CaptionStyle {
   hPct?: number;
   /** Text color override (defaults to the preset's color). Optional and additive — existing projects render unchanged. */
   color?: string;
+  accentColor?: string;
+  strokeColor?: string;
+  strokeWidth?: number;
   /** Bold override: true = force bold (800), false = force regular (500); unset = the preset's own weight. */
   bold?: boolean;
   /** Font override: a display-text font id ('sans' | 'serif' | 'mono' | 'web:<library id>' | 'local:<family>'); unset/'preset' = the preset's own font. */

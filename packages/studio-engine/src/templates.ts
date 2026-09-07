@@ -208,6 +208,9 @@ function renderCaption(slots: Slots, id: string): Rendered {
   const ov = {
     ...(typeof slots.color === 'string' ? { color: slots.color as string } : {}),
     ...(slots.bg === null || typeof slots.bg === 'string' ? { bg: slots.bg as string | null } : {}),
+    ...(typeof slots.accentColor === 'string' && /^#[a-f0-9]{6}$/i.test(slots.accentColor) ? { accentColor: slots.accentColor } : {}),
+    ...(typeof slots.strokeColor === 'string' && /^#[a-f0-9]{6}$/i.test(slots.strokeColor) ? { strokeColor: slots.strokeColor } : {}),
+    ...(typeof slots.strokeWidth === 'number' && Number.isFinite(slots.strokeWidth) ? { strokeWidth: Math.min(8, Math.max(0, slots.strokeWidth)) } : {}),
     ...(typeof slots.bold === 'boolean' ? { bold: slots.bold as boolean } : {}),
     ...(typeof slots.font === 'string' ? { font: slots.font as string } : {}),
   };
@@ -244,10 +247,11 @@ function renderCaption(slots: Slots, id: string): Rendered {
  *     env has no canvas → deterministic glyph-class estimate table fallback.
  */
 
-function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xPct: number, wPct: number, scale: number, id: string, hPct = 0, sub?: string, subStyle?: { yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number }, canvasW = 1080, ov: { color?: string; bg?: string | null; bold?: boolean; font?: string } = {}, subOv: { preset?: string; color?: string; bg?: string | null; bold?: boolean; font?: string } = {}, cue = false): Rendered {
+function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xPct: number, wPct: number, scale: number, id: string, hPct = 0, sub?: string, subStyle?: { yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number }, canvasW = 1080, ov: { color?: string; bg?: string | null; bold?: boolean; font?: string; accentColor?: string; strokeColor?: string; strokeWidth?: number } = {}, subOv: { preset?: string; color?: string; bg?: string | null; bold?: boolean; font?: string } = {}, cue = false): Rendered {
   // Effective preset = preset + user overrides (text color / plate). Reassigning p keeps every existing
   // use (segmentation budget, pill, css, karaoke revert color) consistent with the overridden look.
   if (ov.color != null || ov.bg !== undefined) p = { ...p, ...(ov.color != null ? { text: ov.color } : {}), ...(ov.bg !== undefined ? { bg: ov.bg ?? undefined } : {}) };
+  if (ov.accentColor) p = { ...p, emphasis: ov.accentColor, decoColor: ov.accentColor };
   const { start } = span2(words);
   // scale = FONT-SIZE coefficient (user-set: scaling adjusts font size, not a region transform) —
   // size/plate padding/decoration all lay out from the scaled font size, text truly reflows, not a bitmap-style scale of the whole block
@@ -321,7 +325,7 @@ ${stackCss}
 #${id} .cap-line { ${cue ? 'position:relative; max-width:100%;' : `position:absolute; left:${n(xPct)}%; bottom:${n(100 - yPct)}%; transform:translateX(-50%); transform-origin:center bottom; width:${n(wPct)}%; ${hPct > 0 ? `min-height:${n(hPct)}%; ` : ''}`}display:flex; flex-wrap:nowrap; align-items:center; justify-content:center; pointer-events:auto; ${cue ? '' : pill} }
 #${id} .w { position:relative; top:-0.04em; flex:none; white-space:nowrap; color:${p.text}; font-family:${presetFontCss(p, ov.font)}; font-size:${fs}px; font-weight:${mainWeight}; ${p.italic ? 'font-style:italic;' : ''} line-height:1.2; ${!p.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8);' : ''} }
 ${decoCss}
-#${id} .w .t { position:relative; z-index:1; }\n#${id} .w.sp { margin-right:${Math.round(fs * 0.3)}px; }${subCss}`.trim();
+#${id} .w .t { position:relative; z-index:1; ${ov.strokeWidth ? `-webkit-text-stroke:${n(ov.strokeWidth * scale)}px ${ov.strokeColor ?? '#000000'};paint-order:stroke fill;` : ''} }\n#${id} .w.sp { margin-right:${Math.round(fs * 0.3)}px; }${subCss}`.trim();
 
   // Legacy segment cycling: all hidden first; each segment enters at its first word's time, and goes
   // dark when the next enters (last segment stays with the block to the end). Enter/exit are hard cuts
