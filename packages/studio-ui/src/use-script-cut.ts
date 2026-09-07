@@ -27,7 +27,7 @@ import { removeSrcRanges, restoreSrcRange, spans as clipSpans } from '@pireel/st
 import { wordsFromText } from '@pireel/studio-engine/caption-fx';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { type WordMaskPatch, applyWordMasks } from '@pireel/studio-engine/word-masks';
-import type { ScriptCut, ScriptMaskTarget, TimelineScriptCut } from './script-panel';
+import type { ScriptCut, ScriptMaskTarget, TimelineMaskTarget, TimelineScriptCut } from './script-panel';
 import { t } from './i18n';
 import { editorErrorMessage } from './editor-error';
 
@@ -364,6 +364,39 @@ export function useScriptCut(deps: ScriptCutDeps) {
     setDocument(captions.document);
     toast.success(t('workbench.replacedText', { text: txt }));
   };
+  /** Native-panel mask writer: masks live on the document transcripts; the main copy mirrors the first
+   *  narrative asset so the semantic panel and captions relay see the same state. */
+  const maskTimelineScriptWords = (targets: TimelineMaskTarget[], patch: WordMaskPatch, msg: string) => {
+    if (!targets.length) return;
+    const current = documentRef.current;
+    const byAsset = new Map<string, { sentenceIndex: number; wordIndex: number }[]>();
+    for (const target of targets) byAsset.set(target.assetId, [...(byAsset.get(target.assetId) ?? []), { sentenceIndex: target.si, wordIndex: target.wi }]);
+    const transcripts = { ...current.semantics.transcripts };
+    let changed = false;
+    for (const [assetId, list] of byAsset) {
+      const segments = transcripts[assetId] as AsrSegment[] | undefined;
+      if (!segments) continue;
+      const next = applyWordMasks(segments, list, patch);
+      if (next === segments) continue;
+      transcripts[assetId] = next;
+      changed = true;
+    }
+    if (!changed) return;
+    const patched: EditorDocumentV2 = { ...current, semantics: { ...current.semantics, transcripts } };
+    const captions = applyEditorCommand(patched, { type: 'captions.relay' });
+    if (!captions.ok) {
+      toast.error(editorErrorMessage(captions.error));
+      return;
+    }
+    const mainAssetId = firstNarrativeAssetId(current);
+    if (mainAssetId && transcripts[mainAssetId] && transcripts[mainAssetId] !== current.semantics.transcripts[mainAssetId]) {
+      const main = transcripts[mainAssetId] as AsrSegment[];
+      asrRef.current = main;
+      setAsrSentences(main);
+    }
+    setDocument(captions.document);
+    toast.success(msg);
+  };
   /** The script panel's "extract narration script" (spinner prevents double-clicks; errors toast). */
   const [asrBusy, setAsrBusy] = useState(false);
   const asrBusyRef = useRef(false);
@@ -406,6 +439,7 @@ export function useScriptCut(deps: ScriptCutDeps) {
     restoreSrcRanges,
     replaceScriptWord,
     maskScriptWords,
+    maskTimelineScriptWords,
     replaceTimelineScriptWord,
     extractForScript,
     asrBusy,

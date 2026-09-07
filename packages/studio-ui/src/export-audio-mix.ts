@@ -23,6 +23,7 @@
 import { AudioSample, AudioSampleSink } from 'mediabunny';
 import type { InputAudioTrack } from 'mediabunny';
 import { type AudioClip, audioClipDefaults, audioClipGainAt, audioClipSrcTimeAt } from '@pireel/studio-engine/composition';
+import { type MaskedAudioRange, maskedAudioAt } from '@pireel/studio-engine/word-masks';
 import {
   segmentSourceRate,
   segmentSourceTimeAt,
@@ -121,6 +122,8 @@ export interface MixAudioClip {
   clip: AudioClip;
   /** Decoded media (decodeAudioData at any rate — read generically). */
   buffer: MixPcmBuffer;
+  /** Word masks on this clip's source (source seconds): silenced in the envelope, beeps become tones. */
+  masks?: readonly MaskedAudioRange[];
 }
 
 /** The slice of AudioBuffer the mixer reads — so tests (and pre-stretched PCM) can stand in for one. */
@@ -196,7 +199,7 @@ export async function mixAudioTrack(args: {
   tones?: MixTone[];
 }): Promise<void> {
   const { segs, audioTracks, totalSec, push } = args;
-  const tones = args.tones ?? [];
+  const tones = [...(args.tones ?? [])];
   const stretch = args.stretch ?? defaultTimeStretch;
   // Native timeline starts; missing values retain the legacy contiguous fallback.
   const segStarts: number[] = [];
@@ -240,11 +243,31 @@ export async function mixAudioTrack(args: {
   }
   // Per-clip envelope precompute (same audioClipGainAt as preview) — from the ORIGINAL clip, whose
   // timeline span already reflects its speed; the read side may swap in a pre-stretched copy.
-  const envs = args.clips.map(({ clip }) => {
+  const envs = args.clips.map(({ clip, masks }) => {
     const env = new Float32Array(Math.ceil(totalSec * ENV_RATE) + 2);
-    for (let i = 0; i < env.length; i++) env[i] = audioClipGainAt(clip, i / ENV_RATE, totalSec);
+    for (let i = 0; i < env.length; i++) {
+      const t = i / ENV_RATE;
+      let g = audioClipGainAt(clip, t, totalSec);
+      if (g > 0 && masks?.length) {
+        const srcT = audioClipSrcTimeAt(clip, t);
+        if (srcT != null && maskedAudioAt(masks, srcT)) g = 0;
+      }
+      env[i] = g;
+    }
     return env;
   });
+  // Beeped words on audio-lane clips: their source spans become tones on the timeline (clip speed/trim honoured).
+  for (const { clip, masks } of args.clips) {
+    if (!masks?.length || clip.muted) continue;
+    const d = audioClipDefaults(clip);
+    for (const range of masks) {
+      if (range.audio !== 'beep') continue;
+      const a = Math.max(range.start, d.inSec);
+      const b = Math.min(range.end, d.outSec);
+      if (b <= a) continue;
+      tones.push({ timelineStart: d.startSec + (a - d.inSec) / d.speed, timelineEnd: d.startSec + (b - d.inSec) / d.speed });
+    }
+  }
   const clips: MixAudioClip[] = [];
   for (const entry of args.clips) clips.push(await prestretchClip(entry, stretch));
 

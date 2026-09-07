@@ -394,6 +394,8 @@ export interface ClientExportOpts {
   /** Word masks: source key ('main' / clip_<shotId>) → source-seconds spans whose sound is replaced.
    *  Both kinds silence the source; 'beep' additionally lays a tone on the timeline. */
   audioMasks?: Map<string, readonly MaskedAudioRange[]> | null;
+  /** Word masks keyed by timeline clip id, for visual-lane videos and audio-lane clips (see clipAudioMasks). */
+  clipMasks?: Map<string, readonly MaskedAudioRange[]> | null;
   /** Resolution/fps/format (default 1080p·30·MP4). */
   render?: ExportRenderOpts;
   onProgress?: (done: number, total: number) => void;
@@ -773,7 +775,8 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     const videoSource = new CanvasSource(canvas, { codec: render.format === 'webm' ? 'vp9' : 'avc', bitrate: QUALITY_HIGH });
     output.addVideoTrack(videoSource, { frameRate: FPS });
     const withClips = !!opts.audio?.length;
-    const needsTimelineMix = withClips || visualVideos.length > 0 || tones.length > 0 || segs.some((segment) =>
+    const clipMaskBeep = [...(opts.clipMasks?.values() ?? [])].some((ranges) => ranges.some((range) => range.audio === 'beep'));
+    const needsTimelineMix = withClips || visualVideos.length > 0 || tones.length > 0 || clipMaskBeep || segs.some((segment) =>
       Math.abs(segmentSourceRate(segment, segment.timelineStart, segment.timelineEnd) - 1) > 1e-6,
     );
     const anyAudio = withClips
@@ -1078,17 +1081,37 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     if (audioSource && needsTimelineMix) {
       const audioTracks = new Map<string, NonNullable<SourceRig['audio']>>();
       for (const [key, r] of rigs) if (r.audio && !key.startsWith('g_')) audioTracks.set(key, r.audio);
-      const clips: { clip: AudioClip; buffer: AudioBuffer }[] = [];
-      for (const a of opts.audio ?? []) clips.push({ clip: a.clip, buffer: await decodeAudioFile(a.file) });
-      const supplementalAudioSegs = supplementalVisualAudioMixSegments(visualVideos).map((segment) => ({
-        srcStart: segment.sourceInSec,
-        srcEnd: segment.sourceOutSec,
-        key: visualVideoKeys.get(segment.clipId)!,
-        timelineStart: segment.timelineStart,
-        timelineEnd: segment.timelineEnd,
-        gain: segment.gain,
-        ...(segment.fadeAt ? { fadeAt: segment.fadeAt } : {}),
-      }));
+      const clips: { clip: AudioClip; buffer: AudioBuffer; masks?: readonly MaskedAudioRange[] }[] = [];
+      for (const a of opts.audio ?? []) {
+        const masks = opts.clipMasks?.get(a.clip.id);
+        clips.push({ clip: a.clip, buffer: await decodeAudioFile(a.file), ...(masks?.length ? { masks } : {}) });
+      }
+      const supplementalAudioSegs = supplementalVisualAudioMixSegments(visualVideos).map((segment) => {
+        const masks = opts.clipMasks?.get(segment.clipId);
+        const timelineLen = segment.timelineEnd - segment.timelineStart;
+        const fadeAt = masks?.length && segment.gain > 0
+          ? maskedSegmentEnvelope(masks, segment.sourceInSec, segment.sourceOutSec, timelineLen, segment.fadeAt)
+          : segment.fadeAt;
+        if (masks?.length && segment.gain > 0) {
+          const rate = (segment.sourceOutSec - segment.sourceInSec) / Math.max(1e-6, timelineLen);
+          for (const range of masks) {
+            if (range.audio !== 'beep') continue;
+            const a = Math.max(range.start, segment.sourceInSec);
+            const b = Math.min(range.end, segment.sourceOutSec);
+            if (b <= a) continue;
+            tones.push({ timelineStart: segment.timelineStart + (a - segment.sourceInSec) / rate, timelineEnd: segment.timelineStart + (b - segment.sourceInSec) / rate });
+          }
+        }
+        return {
+          srcStart: segment.sourceInSec,
+          srcEnd: segment.sourceOutSec,
+          key: visualVideoKeys.get(segment.clipId)!,
+          timelineStart: segment.timelineStart,
+          timelineEnd: segment.timelineEnd,
+          gain: segment.gain,
+          ...(fadeAt ? { fadeAt } : {}),
+        };
+      });
       await mixAudioTrack({
         segs: [
           ...segs.map((s) => ({

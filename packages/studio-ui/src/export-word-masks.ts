@@ -3,38 +3,45 @@ import { type Composition, videoTrackShots } from '@pireel/studio-engine/composi
 import type { EditorDocumentV2 } from '@pireel/studio-engine/editor-document/types';
 import { type MaskedAudioRange, maskedAudioRanges } from '@pireel/studio-engine/word-masks';
 
-/** Word-mask spans per export source key ('main' for the src-less main shot, clip_<shotId> otherwise),
- *  read from the canonical document transcript of each shot's asset. */
-export function exportAudioMasks(document: EditorDocumentV2, comp: Composition): Map<string, MaskedAudioRange[]> {
-  const primary = document.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId);
-  const assetIdByClipId = new Map<string, string>();
-  for (const clip of primary?.clips ?? []) if (clip.kind === 'narrative') assetIdByClipId.set(clip.id, clip.assetId);
+/** Word-mask spans (source seconds) for every timeline clip whose asset has a transcript, keyed by
+ *  clip id — narrative shots, visual-lane videos and audio-lane clips alike. */
+export function clipAudioMasks(document: EditorDocumentV2): Map<string, MaskedAudioRange[]> {
   const byAsset = new Map<string, MaskedAudioRange[]>();
   const out = new Map<string, MaskedAudioRange[]>();
-  for (const shot of videoTrackShots(comp)) {
-    const assetId = assetIdByClipId.get(shot.id);
-    if (!assetId) continue;
-    let ranges = byAsset.get(assetId);
-    if (!ranges) {
-      ranges = maskedAudioRanges(document.semantics.transcripts[assetId] as AsrSegment[] | undefined);
-      byAsset.set(assetId, ranges);
+  for (const track of document.timeline.tracks) {
+    for (const clip of track.clips) {
+      if (clip.kind !== 'narrative' && clip.kind !== 'media' && clip.kind !== 'audio') continue;
+      const segments = document.semantics.transcripts[clip.assetId] as AsrSegment[] | undefined;
+      if (!segments?.length) continue;
+      let ranges = byAsset.get(clip.assetId);
+      if (!ranges) {
+        ranges = maskedAudioRanges(segments);
+        byAsset.set(clip.assetId, ranges);
+      }
+      if (ranges.length) out.set(clip.id, ranges);
     }
-    if (ranges.length) out.set(shot.src ? `clip_${shot.id}` : 'main', ranges);
   }
   return out;
 }
 
-/** Same spans keyed the way the preview engine keys its sources (the shot's src URL). */
-export function previewAudioMasks(document: EditorDocumentV2, comp: Composition): Map<string, MaskedAudioRange[]> {
-  const primary = document.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId);
-  const assetIdByClipId = new Map<string, string>();
-  for (const clip of primary?.clips ?? []) if (clip.kind === 'narrative') assetIdByClipId.set(clip.id, clip.assetId);
+/** Narrative spans keyed the way the exporter keys its sources ('main' for the src-less main shot, clip_<shotId> otherwise). */
+export function exportAudioMasks(document: EditorDocumentV2, comp: Composition): Map<string, MaskedAudioRange[]> {
+  const byClip = clipAudioMasks(document);
   const out = new Map<string, MaskedAudioRange[]>();
   for (const shot of videoTrackShots(comp)) {
-    const assetId = shot.src ? assetIdByClipId.get(shot.id) : undefined;
-    if (!assetId || out.has(shot.src!)) continue;
-    const ranges = maskedAudioRanges(document.semantics.transcripts[assetId] as AsrSegment[] | undefined);
-    if (ranges.length) out.set(shot.src!, ranges);
+    const ranges = byClip.get(shot.id);
+    if (ranges) out.set(shot.src ? `clip_${shot.id}` : 'main', ranges);
+  }
+  return out;
+}
+
+/** Narrative spans keyed the way the preview engine keys its sources (the shot's src URL). */
+export function previewAudioMasks(document: EditorDocumentV2, comp: Composition): Map<string, MaskedAudioRange[]> {
+  const byClip = clipAudioMasks(document);
+  const out = new Map<string, MaskedAudioRange[]>();
+  for (const shot of videoTrackShots(comp)) {
+    const ranges = shot.src ? byClip.get(shot.id) : undefined;
+    if (ranges && !out.has(shot.src!)) out.set(shot.src!, ranges);
   }
   return out;
 }

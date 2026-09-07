@@ -36,6 +36,8 @@ import { materializeRemoteMedia } from './remote-media';
 import { t } from './i18n';
 import { editorErrorMessage } from './editor-error';
 import { supplementalVisualAudioSpecs } from './visual-render-plan';
+import { clipAudioMasks } from './export-word-masks';
+import { maskedAudioAt } from '@pireel/studio-engine/word-masks';
 import { audioExportPayload } from './audio-export-payload';
 
 export interface AudioTracksDeps {
@@ -279,19 +281,29 @@ export function useAudioTracks(deps: AudioTracksDeps) {
   const engineSpecs = (): EngineAudioClip[] => {
     const c = compRef.current;
     const total = timelineDurationSec ?? totalDuration(c);
+    // Word masks (beeped / muted words) per clip: the engine silences the span and plays the tone.
+    const clipMasks = clipAudioMasks(documentRef.current);
     const laneSpecs = (renderAudioTracksRef.current ?? c.audioTracks ?? [])
       .filter(clipUsable)
-      .map((clip) => ({
-        id: clip.id,
-        url: clip.src,
-        speed: Math.max(0.5, Math.min(2, clip.speed ?? 1)),
-        gainAt: (tt: number) => audioClipGainAt(clip, tt, total),
-        srcTimeAt: (tt: number) => audioClipSrcTimeAt(clip, tt),
-      }));
+      .map((clip) => {
+        const masks = clipMasks.get(clip.id);
+        return {
+          id: clip.id,
+          url: clip.src,
+          speed: Math.max(0.5, Math.min(2, clip.speed ?? 1)),
+          gainAt: (tt: number) => audioClipGainAt(clip, tt, total),
+          srcTimeAt: (tt: number) => audioClipSrcTimeAt(clip, tt),
+          ...(masks?.length ? { maskAt: (srcT: number) => maskedAudioAt(masks, srcT) } : {}),
+        };
+      });
     return [
       ...laneSpecs,
-      ...supplementalVisualAudioSpecs(visualMediaClips ?? []),
+      ...supplementalVisualAudioSpecs(visualMediaClips ?? [], clipMasks),
     ];
+  };
+  /** Re-feed the engine's clip specs (word masks live on the document, outside this hook's deps). */
+  const resyncEngineClips = () => {
+    videoEngineRef.current?.setAudioClips(engineSpecs());
   };
 
   // Engine sync: respec on any clip/timeline/bytes change (same-url respec swaps only closures — no reload).
@@ -427,6 +439,7 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     patchClip,
     splitClip,
     audioForExport,
+    resyncEngineClips,
     mountAudioFile,
     mountAudioFromUrl,
     generateAudioAsset,

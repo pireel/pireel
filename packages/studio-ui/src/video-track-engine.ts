@@ -60,6 +60,8 @@ export interface EngineAudioClip {
   gainAt: (t: number) => number;
   /** Edited time → source seconds; null = outside the playable range (element parks paused). */
   srcTimeAt: (t: number) => number | null;
+  /** Word mask at a source time (beeped / muted words on this clip's transcript); absent = none. */
+  maskAt?: (srcT: number) => WordAudioMask | null;
 }
 
 /** WebAudio requires CORS-clean media even when a plain <audio> element can play the same URL.
@@ -158,6 +160,8 @@ export class VideoTrackEngine {
   private audioMasks = new Map<string, readonly MaskedAudioRange[]>();
   /** The mask currently applied to the active element (null = source sound plays). */
   private maskActive: WordAudioMask | null = null;
+  /** Whether any audio-lane / visual-lane clip is inside a beeped span this tick. */
+  private clipBeep = false;
   /** Beep tone: its own tiny graph, never attached to a media element (see setElGain for why that matters). */
   private beep: { ctx: AudioContext; gain: GainNode } | null = null;
   // Per-element gain nodes for the VIDEO/dub side, created only when a level above source is asked for
@@ -385,6 +389,11 @@ export class VideoTrackEngine {
     return ranges ? maskedAudioAt(ranges, srcT) : null;
   }
 
+  /** One tone for every masked source: on while the narration or any clip sits inside a beeped span. */
+  private updateBeep(): void {
+    this.setBeep(this.maskActive === 'beep' || this.clipBeep);
+  }
+
   /** Beep on/off with short ramps (no clicks). The oscillator runs only while a beep is audible. */
   private setBeep(on: boolean): void {
     if (!on) {
@@ -425,13 +434,15 @@ export class VideoTrackEngine {
       if (!el.muted) el.muted = true;
       const dub = this.dubs.get(key);
       if (dub) this.setElGain(dub.el, 0);
-      if (mask !== this.maskActive) this.setBeep(mask === 'beep');
-      this.maskActive = mask;
+      if (mask !== this.maskActive) {
+        this.maskActive = mask;
+        this.updateBeep();
+      }
       return;
     }
     if (!this.maskActive) return;
     this.maskActive = null;
-    this.setBeep(false);
+    this.updateBeep();
     el.muted = dubbed; // a mounted dub keeps carrying the sound; otherwise the element speaks again
   }
 
@@ -546,6 +557,7 @@ export class VideoTrackEngine {
    *  preservesPitch ON (the export stretches pitch-preserving too); drift correction only past 0.35s. force = hard seek. */
   private syncAudioClips(t: number, wantPlay: boolean, force = false): void {
     if (wantPlay && this.actx?.state === 'suspended') void this.actx.resume(); // play is a user gesture
+    let clipBeep = false;
     for (const entry of this.audioClips.values()) {
       const { el, spec } = entry;
       const srcT = spec.srcTimeAt(t);
@@ -563,7 +575,9 @@ export class VideoTrackEngine {
         if (!el.paused) el.pause();
         continue;
       }
-      setGain(spec.gainAt(t));
+      const mask = wantPlay && spec.maskAt ? spec.maskAt(srcT) : null;
+      if (mask === 'beep') clipBeep = true;
+      setGain(mask ? 0 : spec.gainAt(t));
       el.playbackRate = spec.speed;
       (el as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch = true;
       if ((force || Math.abs(el.currentTime - srcT) > 0.35) && !el.seeking) {
@@ -575,6 +589,10 @@ export class VideoTrackEngine {
       }
       if (wantPlay && el.paused) el.play().catch(() => {});
       else if (!wantPlay && !el.paused) el.pause();
+    }
+    if (clipBeep !== this.clipBeep) {
+      this.clipBeep = clipBeep;
+      this.updateBeep();
     }
   }
 
@@ -740,7 +758,7 @@ export class VideoTrackEngine {
     el.muted = dubbed || !wantPlay; // only the active element makes sound during playback
     if (this.maskActive) {
       this.maskActive = null;
-      this.setBeep(false);
+      this.updateBeep();
     }
     if (wantPlay && this.audioMasks.size) this.applyMask(key, el, Math.max(0, srcT), dubbed);
     if (wantPlay) {
@@ -1056,6 +1074,7 @@ export class VideoTrackEngine {
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
     this.maskActive = null;
+    this.clipBeep = false;
     this.setBeep(false);
     for (const el of this.els.values()) {
       el.muted = true;

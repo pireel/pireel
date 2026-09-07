@@ -242,7 +242,7 @@ import {
   localAssetIndexEntry,
 } from "./local-import-session";
 import { VideoTrackEngine } from "./video-track-engine";
-import { previewAudioMasks } from "./export-word-masks";
+import { clipAudioMasks, previewAudioMasks } from "./export-word-masks";
 import { segmentSourceRate } from "./video-segment-time";
 import { compositionRenderView } from "./composition-render-view";
 import { primaryNarrativeRenderPlan } from "./primary-render-plan";
@@ -1844,16 +1844,6 @@ export function HyperframesWorkbench({
   useEffect(() => {
     videoEngineRef.current?.setTimelineDuration(duration);
   }, [duration]);
-  // Word masks (beeped / muted words) per source: the engine silences the span as the clock crosses it.
-  const engineMaskKeysRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    const eng = videoEngineRef.current;
-    if (!eng) return;
-    const masks = previewAudioMasks(editorDocument, comp);
-    for (const key of engineMaskKeysRef.current) if (!masks.has(key)) eng.setAudioMasks(key, []);
-    for (const [key, ranges] of masks) eng.setAudioMasks(key, ranges);
-    engineMaskKeysRef.current = new Set(masks.keys());
-  }, [editorDocument, comp]);
   // Engine segment table + other sources: refeed the whole table whenever shots change (split/trim/insert/delete); push the current frame when paused
   useEffect(() => {
     const eng = videoEngineRef.current;
@@ -5729,6 +5719,25 @@ export function HyperframesWorkbench({
     pushUndoSnapshot,
   });
   audioExportRef.current = audioOps.audioForExport;
+  // Word masks (beeped / muted words): narrative sources are keyed by src in the engine; audio-lane and
+  // visual-lane clips carry theirs inside their engine specs, which are re-fed here since masks live on
+  // the document, outside the audio hook's own deps.
+  const engineMaskKeysRef = useRef<Set<string>>(new Set());
+  const engineMaskSigRef = useRef('');
+  useEffect(() => {
+    const eng = videoEngineRef.current;
+    if (!eng) return;
+    const masks = previewAudioMasks(editorDocument, comp);
+    for (const key of engineMaskKeysRef.current) if (!masks.has(key)) eng.setAudioMasks(key, []);
+    for (const [key, ranges] of masks) eng.setAudioMasks(key, ranges);
+    engineMaskKeysRef.current = new Set(masks.keys());
+    const clipSig = JSON.stringify([...clipAudioMasks(editorDocument)]);
+    if (clipSig !== engineMaskSigRef.current) {
+      engineMaskSigRef.current = clipSig;
+      audioOps.resyncEngineClips();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorDocument, comp]);
   /** Switch the rail to the audio settings tab (expanding the rail if the user had collapsed it). */
   const openAudioTab = () => {
     setFloatWin(null);
@@ -7033,6 +7042,7 @@ export function HyperframesWorkbench({
     restoreSrcRanges,
     replaceScriptWord,
     maskScriptWords,
+    maskTimelineScriptWords,
     replaceTimelineScriptWord,
     extractForScript,
     asrBusy,
@@ -10065,6 +10075,7 @@ export function HyperframesWorkbench({
                         }}
                         onCut={cutTimelineRanges}
                         onReplaceWord={replaceTimelineScriptWord}
+                        onMaskWords={maskTimelineScriptWords}
                       />
                     )}
                   </div>
@@ -10217,6 +10228,7 @@ export function HyperframesWorkbench({
                           }}
                           onCut={cutTimelineRanges}
                           onReplaceWord={replaceTimelineScriptWord}
+                        onMaskWords={maskTimelineScriptWords}
                         />
                       )
                     )}

@@ -612,14 +612,20 @@ type TimelineScriptItem = {
   assetId: string;
   si: number;
   words: Word[];
+  /** Source word index of each entry in `words` (the visible words are a filtered slice of the sentence). */
+  wordIndexes: number[];
+  segment: AsrSegment;
   at: number;
   clip: SpeechTimelineClip;
   hasTrueWords: boolean;
 };
 
+/** One word addressed for a mask edit on the native panel: the asset's sentence and source word index. */
+export type TimelineMaskTarget = { assetId: string; si: number; wi: number };
+
 type TimelineScriptPopover =
-  | { kind: 'word'; item: TimelineScriptItem; word: Word; x: number; y: number }
-  | { kind: 'selection'; cuts: TimelineScriptCut[]; count: number; x: number; y: number };
+  | { kind: 'word'; item: TimelineScriptItem; word: Word; wi: number; x: number; y: number }
+  | { kind: 'selection'; cuts: TimelineScriptCut[]; count: number; mask: { targets: TimelineMaskTarget[]; anyMasked: boolean } | null; x: number; y: number };
 
 function speechClipSourceRange(clip: SpeechTimelineClip, fps: number): SrcRange {
   const speed = clip.kind === 'audio' && Number.isFinite(clip.properties.speed) && clip.properties.speed! > 0
@@ -647,6 +653,7 @@ export function TimelineScriptPanel({
   onSeek,
   onCut,
   onReplaceWord,
+  onMaskWords,
 }: {
   document: EditorDocumentV2;
   extracting: boolean;
@@ -654,6 +661,8 @@ export function TimelineScriptPanel({
   onSeek: (timelineSec: number) => void;
   onCut: (cuts: TimelineScriptCut[], msg: string) => void;
   onReplaceWord: (assetId: string, sentenceIndex: number, word: Word, text: string) => void;
+  /** Beep/mute the words' sound and/or mask their caption text (patch semantics: null clears); msg = success toast. */
+  onMaskWords: (targets: TimelineMaskTarget[], patch: WordMaskPatch, msg: string) => void;
 }) {
   const speechTrack = useMemo(() => dominantTimelineSpeechTrack(document), [document]);
   const items = useMemo(() => {
@@ -664,9 +673,12 @@ export function TimelineScriptPanel({
       const segments = document.semantics.transcripts[clip.assetId] as AsrSegment[] | undefined;
       for (const [si, segment] of (segments ?? []).entries()) {
         const rawWords = segment.words?.length ? segment.words : wordsFromText(segment.text, segment.start, segment.end);
-        const words = rawWords.filter((word) => {
+        const wordIndexes: number[] = [];
+        const words = rawWords.filter((word, wi) => {
           const midpoint = (word.start + word.end) / 2;
-          return midpoint >= sourceIn && midpoint <= sourceOut;
+          const inside = midpoint >= sourceIn && midpoint <= sourceOut;
+          if (inside) wordIndexes.push(wi);
+          return inside;
         });
         if (!words.length) continue;
         out.push({
@@ -675,6 +687,8 @@ export function TimelineScriptPanel({
           assetId: clip.assetId,
           si,
           words,
+          wordIndexes,
+          segment,
           at: speechSourceToTimelineSec(clip, words[0]!.start, document.canvas.fps),
           clip,
           hasTrueWords: !!segment.words?.length,
@@ -741,6 +755,8 @@ export function TimelineScriptPanel({
     const nodes = [...rootRef.current.querySelectorAll<HTMLElement>('[data-timeline-word]')]
       .filter((element) => selection.containsNode(element, true));
     if (nodes.length < 2) return;
+    const maskTargets: TimelineMaskTarget[] = [];
+    let anyMasked = false;
     const cuts = nodes.flatMap((element): TimelineScriptCut[] => {
       const wordStart = Number(element.dataset.wordStart);
       const wordEnd = Number(element.dataset.wordEnd);
@@ -748,11 +764,17 @@ export function TimelineScriptPanel({
       const clipId = element.dataset.clipId;
       const assetId = element.dataset.assetId;
       if (!trackId || !clipId || !assetId || !Number.isFinite(wordStart) || !Number.isFinite(wordEnd)) return [];
+      const si = Number(element.dataset.si);
+      const wi = Number(element.dataset.wi);
+      if (Number.isInteger(si) && Number.isInteger(wi)) {
+        maskTargets.push({ assetId, si, wi });
+        if (element.dataset.masked) anyMasked = true;
+      }
       return [{ trackId, clipId, assetId, range: wordCutRange({ start: wordStart, end: wordEnd }) }];
     });
     if (!cuts.length) return;
     const { x, y } = localXY(event.clientX, event.clientY);
-    setPopover({ kind: 'selection', cuts, count: cuts.length, x, y: y + 14 });
+    setPopover({ kind: 'selection', cuts, count: cuts.length, mask: maskTargets.length ? { targets: maskTargets, anyMasked } : null, x, y: y + 14 });
   };
 
   if (!items.length) {
@@ -792,7 +814,15 @@ export function TimelineScriptPanel({
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden break-words px-3 py-2.5 text-[13px] leading-[1.9]" onMouseUp={onMouseUp}>
         {items.map((item) => (
           <span key={`${item.clipId}:${item.si}`}>
-            {item.words.map((word, wordIndex) => (
+            {item.words.map((word, wordIndex) => {
+              const wi = item.wordIndexes[wordIndex]!;
+              const mask = wordMaskAt(item.segment, wi);
+              const maskTitle = mask
+                ? [mask.audio ? t(mask.audio === 'beep' ? 'panels.maskedBeep' : 'panels.maskedMute') : '', mask.text !== undefined ? t('panels.captionShowsAs', { text: mask.text }) : '']
+                  .filter(Boolean)
+                  .join(' · ')
+                : undefined;
+              return (
               <span key={`${wordIndex}:${word.start}:${word.end}`}>
                 <span
                   data-timeline-word
@@ -801,21 +831,26 @@ export function TimelineScriptPanel({
                   data-track-id={item.trackId}
                   data-clip-id={item.clipId}
                   data-asset-id={item.assetId}
+                  data-si={item.si}
+                  data-wi={wi}
+                  data-masked={mask ? '1' : undefined}
+                  title={maskTitle}
                   onClick={(event) => {
                     event.stopPropagation();
                     const { x, y } = localXY(event.clientX, event.clientY);
-                    setPopover({ kind: 'word', item, word, x, y: y + 14 });
+                    setPopover({ kind: 'word', item, word, wi, x, y: y + 14 });
                     setReplaceMode(false);
                     setReplacement(word.text);
                     onSeek(speechSourceToTimelineSec(item.clip, word.start, document.canvas.fps));
                   }}
-                  className="text-ink hover:bg-accent/15 cursor-pointer rounded-sm px-[1px]"
+                  className={`text-ink hover:bg-accent/15 cursor-pointer rounded-sm px-[1px]${mask?.audio ? ' underline decoration-amber-500/80 decoration-dotted decoration-2 underline-offset-2' : ''}${mask?.text !== undefined ? ' bg-amber-500/15' : ''}`}
                 >
                   {word.text}
                 </span>
                 {wordIndex < item.words.length - 1 && needsSpace(word.text, item.words[wordIndex + 1]!.text) ? ' ' : null}
               </span>
-            ))}{' '}
+              );
+            })}{' '}
           </span>
         ))}
       </div>
@@ -828,6 +863,37 @@ export function TimelineScriptPanel({
               </button>
               <div className="bg-line h-3.5 w-px" />
               <button type="button" onClick={() => setReplaceMode(true)} className="text-ink-2 hover:text-ink px-1.5 py-0.5 text-[11.5px]">{t('panels.replace')}</button>
+              <div className="bg-line h-3.5 w-px" />
+              {(() => {
+                const mask = wordMaskAt(popover.item.segment, popover.wi);
+                const target = [{ assetId: popover.item.assetId, si: popover.item.si, wi: popover.wi }];
+                return (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (mask?.audio) onMaskWords(target, { audio: null }, t('panels.unmaskedAudioWord', { word: popover.word.text }));
+                        else onMaskWords(target, { audio: 'beep' }, t('panels.maskedAudioWord', { word: popover.word.text }));
+                        setPopover(null);
+                      }}
+                      className="text-ink-2 hover:text-ink px-1.5 py-0.5 text-[11.5px]"
+                    >
+                      {mask?.audio ? t('panels.unmaskAudio') : t('panels.maskAudio')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (mask?.text !== undefined) onMaskWords(target, { text: null }, t('panels.unmaskedTextWord', { word: popover.word.text }));
+                        else onMaskWords(target, { text: DEFAULT_MASK_TEXT }, t('panels.maskedTextWord', { word: popover.word.text }));
+                        setPopover(null);
+                      }}
+                      className="text-ink-2 hover:text-ink px-1.5 py-0.5 text-[11.5px]"
+                    >
+                      {mask?.text !== undefined ? t('panels.unmaskText') : t('panels.maskText')}
+                    </button>
+                  </>
+                );
+              })()}
             </>
           )}
           {popover.kind === 'word' && replaceMode && (
@@ -837,9 +903,27 @@ export function TimelineScriptPanel({
             </>
           )}
           {popover.kind === 'selection' && (
-            <button type="button" onClick={() => { onCut(popover.cuts, t('panels.deletedNSelectedWords', { n: popover.count })); setPopover(null); window.getSelection()?.removeAllRanges(); }} className="text-ink-2 hover:text-destructive px-1.5 py-0.5 text-[11.5px]">
-              {t('panels.deleteSelectedNWords', { n: popover.count })}
-            </button>
+            <>
+              <button type="button" onClick={() => { onCut(popover.cuts, t('panels.deletedNSelectedWords', { n: popover.count })); setPopover(null); window.getSelection()?.removeAllRanges(); }} className="text-ink-2 hover:text-destructive px-1.5 py-0.5 text-[11.5px]">
+                {t('panels.deleteSelectedNWords', { n: popover.count })}
+              </button>
+              {popover.mask && (
+                <>
+                  <div className="bg-line h-3.5 w-px" />
+                  <button type="button" onClick={() => { onMaskWords(popover.mask!.targets, { audio: 'beep' }, t('panels.maskedAudioNWords', { n: popover.mask!.targets.length })); setPopover(null); window.getSelection()?.removeAllRanges(); }} className="text-ink-2 hover:text-ink px-1.5 py-0.5 text-[11.5px]">
+                    {t('panels.maskAudioSelectedN', { n: popover.mask.targets.length })}
+                  </button>
+                  <button type="button" onClick={() => { onMaskWords(popover.mask!.targets, { text: DEFAULT_MASK_TEXT }, t('panels.maskedTextNWords', { n: popover.mask!.targets.length })); setPopover(null); window.getSelection()?.removeAllRanges(); }} className="text-ink-2 hover:text-ink px-1.5 py-0.5 text-[11.5px]">
+                    {t('panels.maskTextSelectedN', { n: popover.mask.targets.length })}
+                  </button>
+                  {popover.mask.anyMasked && (
+                    <button type="button" onClick={() => { onMaskWords(popover.mask!.targets, { audio: null, text: null }, t('panels.unmaskedNWords', { n: popover.mask!.targets.length })); setPopover(null); window.getSelection()?.removeAllRanges(); }} className="text-ink-2 hover:text-ink px-1.5 py-0.5 text-[11.5px]">
+                      {t('panels.unmaskSelected')}
+                    </button>
+                  )}
+                </>
+              )}
+            </>
           )}
         </div>
       )}
