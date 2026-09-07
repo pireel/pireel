@@ -247,8 +247,13 @@ export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocat
     && (part.state === 'input-available' || part.state === 'input-streaming')) {
     return <div key={key}><ApprovalCard part={part} /></div>;
   }
-  // export_video: parks on a one-click card with adaptive specs, then shows the started confirmation
-  if (id === 'export_video' && part.state !== 'output-error') return <div key={key}><ExportSettingsCard part={part} /></div>;
+  // export_video (legacy) / export action:start (v3): parks on a one-click card with adaptive specs,
+  // then shows the started confirmation. The runner parks the SAME way under both names, so the
+  // card must render for both — without it the turn waits on a click nobody can make.
+  // export action:status is the track_export poll and stays a plain badge.
+  const isExportStart = id === 'export_video'
+    || (id === 'export' && (part.input as { action?: unknown } | undefined)?.action !== 'status');
+  if (isExportStart && part.state !== 'output-error') return <div key={key}><ExportSettingsCard part={part} /></div>;
   // Narration cuts get their own receipt: a per-cut list with click-to-seek, not one collapsed line
   if (id === 'cut_narration' && part.state === 'output-available') {
     const rows = cutRowsOf(part.output);
