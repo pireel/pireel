@@ -571,7 +571,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   export: {
     description:
-      'start renders the active output as a file (adaptive source-quality settings; resolution / fps / format are explicit user overrides only; sink_url sends the file to the export-sink helper instead of a browser download). status reports the running export: running | done | idle with progress. Export only when the user asks for a deliverable; the editable output is the default result of an edit.',
+      'start renders the active output as a file (adaptive source-quality settings; resolution / fps / format are explicit user overrides only; sink_url sends the file to the export-sink helper instead of a browser download). status reports the running export: running | done | idle with progress. One export at a time: to deliver several outputs, switch, start, poll to done, then the next — switching outputs while an export runs is refused. Export only when the user asks for a deliverable; the editable output is the default result of an edit.',
     inputSchema: obj({
       action: enumOf(['start', 'status']),
       resolution: { type: 'number', enum: [2160, 1440, 1080, 720, 540] }, fps: { type: 'number', enum: [24, 30, 60] }, format: enumOf(['mp4', 'webm', 'mov']),

@@ -410,6 +410,7 @@ import {
   TimeReadout,
 } from "./workbench-controls";
 import {
+  type AgentExportJob,
   type AgentToolCtx,
   runStudioTool as runAgentStudioTool,
   runExternalTool as runAgentExternalTool,
@@ -1825,13 +1826,7 @@ export function HyperframesWorkbench({
   });
   // Agent export task (export_video/track_export): compose + browser download runs via exportVideo, this only tracks task state;
   // exportPct mirrored into a ref for the progress query inside runStudioTool (the switch closure can't read state)
-  const agentExportRef = useRef<{
-    running: boolean;
-    filename: string | null;
-    error: string | null;
-    delivered?: "local_sink" | "browser_download";
-    sinkError?: string;
-  }>({
+  const agentExportRef = useRef<AgentExportJob>({
     running: false,
     filename: null,
     error: null,
@@ -6852,6 +6847,11 @@ export function HyperframesWorkbench({
     })),
   ].sort((a, b) => a.order - b.order || a.createdAt - b.createdAt);
   const switchOutput = (id: string) => {
+    // A switch resets the editor and drops the source file under a running render.
+    if (exporting || publishing || agentExportRef.current.running) {
+      toast.info(t("workbench.switchBlockedByExport"));
+      return;
+    }
     void outputRuntime.switchOutput(id);
   };
   const createOutput = () => {

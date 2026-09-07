@@ -360,6 +360,15 @@ type Report = (text: string, frac?: number) => void;
  * Everything the dispatcher borrows from the workbench: refs for the latest state (tool runs are async, setState
  * is not), state setters, and the workbench's own editing handlers. Built fresh each render by the workbench.
  */
+/** Agent export task state (export_video / track_export). */
+export interface AgentExportJob {
+  running: boolean;
+  filename: string | null;
+  error: string | null;
+  delivered?: 'local_sink' | 'browser_download';
+  sinkError?: string;
+}
+
 export interface AgentToolCtx {
   // Composition state
   compRef: MutableRefObject<Composition>;
@@ -460,7 +469,7 @@ export interface AgentToolCtx {
   relayoutCaptions: () => { ok: boolean; error?: string };
   removeCaptionLayer: () => void;
   // Export
-  agentExportRef: MutableRefObject<{ running: boolean; filename: string | null; error: string | null; delivered?: 'local_sink' | 'browser_download'; sinkError?: string }>;
+  agentExportRef: MutableRefObject<AgentExportJob>;
   exportPctRef: MutableRefObject<number>;
   exportVideo: (opts: ExportRenderOpts, sinkUrl?: string) => Promise<{ ok: boolean; filename?: string; error?: string; delivered?: 'local_sink' | 'browser_download'; sinkError?: string }>;
   // Frames + chat handle
@@ -832,6 +841,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             return { ok: true, summary: t('workbench.outputDuplicatedNamed', { title: duplicated.title }), data: { output_id: duplicated.id, active: true } };
           }
           case 'switch_output': {
+            // Switching resets the editor and drops the source file under a running render.
+            if (agentExportRef.current.running) return { ok: false, error: 'an export is running on this project; switching outputs would break it. Poll track_export / export status until it finishes, then switch.' };
             const id = resolveProjectOutput(outputReference(), false);
             if (!id) return { ok: false, error: t('workbench.outputReferenceRequired') };
             const changed = await switchProjectOutput(id);
