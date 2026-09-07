@@ -24,8 +24,9 @@ export interface WordMask {
 /** Default caption replacement when a text mask is requested without wording. */
 export const DEFAULT_MASK_TEXT = '**';
 
-/** Pad each masked span so ASR word boundaries (typically 20–50 ms early/late) never leave a syllable audible. */
-export const MASK_AUDIO_PAD_SEC = 0.05;
+/** Padding for a masked span, applied ONLY into the silence between words: ASR boundaries run a little
+ *  early/late, but a neighbouring word that is not masked keeps every millisecond of its own span. */
+export const MASK_AUDIO_PAD_SEC = 0.04;
 
 /** Patch semantics: undefined = leave as is; null = clear that replacement. */
 export interface WordMaskPatch {
@@ -104,9 +105,18 @@ export function maskedAudioRanges(segments: readonly AsrSegment[] | null | undef
     const words = wordsOfSegment(segment);
     for (const [key, mask] of Object.entries(segment.masks)) {
       if (!mask.audio) continue;
-      const word = words[Number(key)];
+      const wi = Number(key);
+      const word = words[wi];
       if (!word) continue;
-      raw.push({ start: Math.max(0, word.start - MASK_AUDIO_PAD_SEC), end: Math.max(word.start, word.end) + MASK_AUDIO_PAD_SEC, audio: mask.audio });
+      const wordEnd = Math.max(word.start, word.end);
+      // Pad into the gaps only: an unmasked neighbour bounds the span at its own edge.
+      const prev = words[wi - 1];
+      const next = words[wi + 1];
+      let start = word.start - MASK_AUDIO_PAD_SEC;
+      if (prev && !segment.masks[String(wi - 1)]?.audio) start = Math.max(start, Math.min(word.start, prev.end));
+      let end = wordEnd + MASK_AUDIO_PAD_SEC;
+      if (next && !segment.masks[String(wi + 1)]?.audio) end = Math.min(end, Math.max(wordEnd, next.start));
+      raw.push({ start: Math.max(0, start), end, audio: mask.audio });
     }
   }
   raw.sort((a, b) => a.start - b.start || a.end - b.end);

@@ -37,15 +37,23 @@ describe('word masks', () => {
     expect(segs[0]!.words![3]!.text).toBe('damn');
   });
 
-  it('pads and merges masked spans of the same kind', () => {
+  it('merges masked spans of the same kind and never invades an unmasked neighbour', () => {
     const segs = applyWordMasks([sentence()], [{ sentenceIndex: 0, wordIndex: 3 }, { sentenceIndex: 0, wordIndex: 4 }], { audio: 'beep' });
     const ranges = maskedAudioRanges(segs);
     expect(ranges).toHaveLength(1);
     expect(ranges[0]!.audio).toBe('beep');
-    expect(ranges[0]!.start).toBeCloseTo(0.55, 6);
-    expect(ranges[0]!.end).toBeCloseTo(1.25, 6);
+    // 'a' ends exactly where 'damn' starts and 'take' starts where 'good' ends: no padding leaks into them
+    expect(ranges[0]!.start).toBeCloseTo(0.6, 6);
+    expect(ranges[0]!.end).toBeCloseTo(1.2, 6);
     expect(maskedAudioAt(ranges, 0.7)).toBe('beep');
-    expect(maskedAudioAt(ranges, 0.5)).toBeNull();
+    expect(maskedAudioAt(ranges, 0.55)).toBeNull();
+    // With silence around the word, the padding is used
+    const gapped: AsrSegment = { start: 0, end: 3, text: 'one damn two', words: [
+      { text: 'one', start: 0, end: 0.4 }, { text: 'damn', start: 1, end: 1.4 }, { text: 'two', start: 2, end: 2.4 },
+    ] };
+    const padded = maskedAudioRanges(applyWordMasks([gapped], [{ sentenceIndex: 0, wordIndex: 1 }], { audio: 'mute' }));
+    expect(padded[0]!.start).toBeCloseTo(0.96, 6);
+    expect(padded[0]!.end).toBeCloseTo(1.44, 6);
     const mixed = applyWordMasks(segs, [{ sentenceIndex: 0, wordIndex: 4 }], { audio: 'mute' });
     expect(maskedAudioRanges(mixed).map((r) => r.audio)).toEqual(['beep', 'mute']);
   });
