@@ -572,6 +572,8 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (!Object.values(document.semantics.transcripts).some((segments) => segments.length)) return { result: { ok: false, error: 'no transcript in the cloud project — call read_script in the studio first' } };
       const query = {
         ...(typeof input.shotId === 'string' ? { shotId: input.shotId } : {}),
+        ...(typeof input.assetId === 'string' ? { assetId: input.assetId } : {}),
+        ...(typeof input.trackId === 'string' ? { trackId: input.trackId } : {}),
         ...(Array.isArray(input.sentenceIndexes) ? { sentenceIndexes: input.sentenceIndexes.map(Number).filter(Number.isInteger) } : {}),
         ...(typeof input.fromSec === 'number' && Number.isFinite(input.fromSec) ? { fromSec: input.fromSec } : {}),
         ...(typeof input.toSec === 'number' && Number.isFinite(input.toSec) ? { toSec: input.toSec } : {}),
@@ -584,7 +586,9 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         result: {
           ok: true,
           summary: `Listed ${listed.words.length} transcript words`,
-          data: listed,
+          data: listed.wordTiming === 'estimated'
+            ? { ...listed, hint: 'word timing is ESTIMATED from sentence timing (script-backed source, not yet measured); open the studio tab and call read_script {assetId, measuredTiming:true} for real word timing before exact edits' }
+            : listed,
         },
       };
     }

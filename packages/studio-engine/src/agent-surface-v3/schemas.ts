@@ -75,7 +75,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       granularity: enumOf(['segments', 'words'], 'segments (default) for meaning; words for exact wordIds.'),
       assetId: str('Speech-bearing asset; omit to prefer the primary narration.'),
       clipId: str('Narrow to the source behind this clip.'),
-      trackId: str('Narrow to one track (segments only).'),
+      trackId: str('Narrow to one track; for words, its speech clip with the most words picks the source.'),
       segmentIndexes: arr({ type: 'integer', minimum: 0 }, { description: 'words only: sentence rows to expand.' }),
       fromFrame: FRAME('words only: window start'),
       toFrame: FRAME('words only: window end (exclusive)'),

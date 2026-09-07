@@ -69,6 +69,8 @@ import {
   duplicateOverlayDocumentClip,
   insertOverlayDocumentClip,
   resolveDocumentWordIds,
+  resolveWordQueryAsset,
+  transcriptWordTiming,
   documentWordRanges,
   documentWordRangesToTimeline,
   splitBlockedByTransition,
@@ -1171,6 +1173,31 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             }
           }
           case 'list_words': {
+            // An explicitly addressed source (assetId / trackId) lists on ANY lane — the audio-lane
+            // narration included — and a script-backed source is measured first so the ids carry real
+            // word timing (a mask or cut placed on estimated timing lands on the wrong syllables).
+            if (typeof input.assetId === 'string' || typeof input.trackId === 'string') {
+              const target = resolveWordQueryAsset(documentRef.current, {
+                ...(typeof input.assetId === 'string' ? { assetId: input.assetId } : {}),
+                ...(typeof input.trackId === 'string' ? { trackId: input.trackId } : {}),
+              });
+              if ('error' in target) return { ok: false, error: target.error };
+              const storedTiming = transcriptWordTiming(documentRef.current.semantics.transcripts[target.assetId] as AsrSegment[] | undefined);
+              if (storedTiming !== 'measured') {
+                const measured = await runStudioToolInner(ctx, 'read_script', { assetId: target.assetId, ...(storedTiming === 'estimated' ? { measuredTiming: true } : {}) }, opts);
+                if (!measured.ok) return measured;
+              }
+              const listed = listDocumentAddressedWords(documentRef.current, {
+                assetId: target.assetId,
+                ...(Array.isArray(input.sentenceIndexes) ? { sentenceIndexes: input.sentenceIndexes.map(Number).filter(Number.isInteger) } : {}),
+                ...(typeof input.fromSec === 'number' && Number.isFinite(input.fromSec) ? { fromSec: input.fromSec } : {}),
+                ...(typeof input.toSec === 'number' && Number.isFinite(input.toSec) ? { toSec: input.toSec } : {}),
+                ...(typeof input.offset === 'number' && Number.isInteger(input.offset) ? { offset: input.offset } : {}),
+                ...(typeof input.limit === 'number' && Number.isInteger(input.limit) ? { limit: input.limit } : {}),
+              });
+              if ('error' in listed) return { ok: false, error: listed.error };
+              return { ok: true, summary: surface === 'chat' ? t('tools.list_words.label') : `Listed ${listed.words.length} transcript words`, data: listed };
+            }
             const primaryAssetId = firstNarrativeAssetId(documentRef.current);
             const storedPrimary = primaryAssetId
               ? documentRef.current.semantics.transcripts[primaryAssetId] as AsrSegment[] | undefined
@@ -3358,12 +3385,21 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               }
               const src = srcByAsset.get(assetId);
               const prev = src ? clipAsrRef.current[src] : undefined;
-              if (!src || !prev) return { ok: false, error: `transcript for asset ${assetId} is not loaded in the tab` };
-              const next = applyWordMasks(prev, words, parsed.patch);
-              if (next === prev) continue;
-              const nextClips = { ...clipAsrRef.current, [src]: next };
-              setClipAsr(nextClips);
-              clipAsrRef.current = nextClips;
+              if (src && prev) {
+                const next = applyWordMasks(prev, words, parsed.patch);
+                if (next === prev) continue;
+                const nextClips = { ...clipAsrRef.current, [src]: next };
+                setClipAsr(nextClips);
+                clipAsrRef.current = nextClips;
+                changed = true;
+                continue;
+              }
+              // No runtime copy (audio-lane narration, visual-lane video): the document transcript is the only copy.
+              const stored = documentRef.current.semantics.transcripts[assetId] as AsrSegment[] | undefined;
+              if (!stored) return { ok: false, error: `no transcript for asset ${assetId}` };
+              const next = applyWordMasks(stored, words, parsed.patch);
+              if (next === stored) continue;
+              setDocument({ ...documentRef.current, semantics: { ...documentRef.current.semantics, transcripts: { ...documentRef.current.semantics.transcripts, [assetId]: next } } });
               changed = true;
             }
             const summary = maskWordsSummary(parsed.ids.length, parsed.patch);

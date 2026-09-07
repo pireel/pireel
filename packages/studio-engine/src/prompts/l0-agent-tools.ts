@@ -373,10 +373,12 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🔤',
     label: 'tools.list_words.label',
     description:
-      'Resolve an ALREADY IDENTIFIED transcript passage into STABLE wordIds and source timestamps for exact text-based editing. This is an address resolver before delete_words, NOT a content-search tool: first reason over the read_script transcript, choose the relevant sentenceIndexes or source fromSec/toSec, then call this exactly once with that narrow range. sentenceIndexes accepts every chosen non-contiguous row in one array; NEVER issue several list_words calls in parallel or one call per sentence. Never call it unfiltered to scan the whole transcript, and never invent or cache positional word indexes. Pass shotId only when the chosen passage belongs to an inserted clip. IDs survive timeline cuts because they address the source transcript, not edited positions.',
+      'Resolve an ALREADY IDENTIFIED transcript passage into STABLE wordIds and source timestamps for exact text-based editing. This is an address resolver before delete_words / mask_words, NOT a content-search tool: first reason over the read_script transcript, choose the relevant sentenceIndexes or source fromSec/toSec, then call this exactly once with that narrow range. sentenceIndexes accepts every chosen non-contiguous row in one array; NEVER issue several list_words calls in parallel or one call per sentence. Never call it unfiltered to scan the whole transcript, and never invent or cache positional word indexes. Any speech-bearing source works: pass assetId (or trackId) for narration on the audio lane or a video on another lane, shotId for an inserted clip, nothing for the primary footage. A script-backed (TTS) source is measured first so the ids carry real word timing; the result reports wordTiming. IDs survive timeline cuts because they address the source transcript, not edited positions.',
     inputSchema: obj(
       {
-        shotId: { type: 'string', description: "A shot id whose source transcript to list. Omit for main narration." },
+        shotId: { type: 'string', description: "A placed clip id (any lane) whose source transcript to list. Omit for the primary footage." },
+        assetId: { type: 'string', description: 'A speech-bearing asset id (e.g. the audio-lane narration). Overrides shotId / trackId.' },
+        trackId: { type: 'string', description: 'A track id: its speech-bearing clip with the most words picks the source.' },
         sentenceIndexes: { type: 'array', items: { type: 'number' }, description: 'Chosen read_script/search_media sentence row indexes. Required unless both fromSec and toSec are supplied.' },
         fromSec: { type: 'number', description: 'Chosen source-clock lower bound. Must be paired with toSec unless sentenceIndexes is supplied.' },
         toSec: { type: 'number', description: 'Chosen source-clock upper bound. Must be paired with fromSec unless sentenceIndexes is supplied.' },
