@@ -42,7 +42,9 @@
     "./workflow-panel": "./src/workflow-panel.tsx",
     "./workbench-controls": "./src/workbench-controls.tsx",
     "./*": "./src/*.ts",
-    "./caption-task-page": "./src/caption-task-page.tsx"
+    "./caption-task-page": "./src/caption-task-page.tsx",
+    "./caption-upload-dialog": "./src/caption-upload-dialog.tsx",
+    "./caption-project-list": "./src/caption-project-list.tsx"
   },
   "sideEffects": [
     "./src/i18n.ts"

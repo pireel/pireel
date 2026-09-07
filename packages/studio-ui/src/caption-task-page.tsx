@@ -8,7 +8,7 @@ import { fileSig, probeVideoFile, type ProbedFile } from './media';
 import { loadCurrentUser } from './current-user';
 import { loadLocalVideo, saveLocalVideo } from './local-media';
 import { ensureFontStylesheet } from './web-fonts';
-import { listCaptionTasks, loadCaptionTaskResult, saveCaptionTask, type CaptionTaskRecord, type CaptionTaskStage } from './caption-task-store';
+import { loadCaptionTask, loadCaptionTaskResult, saveCaptionTask, type CaptionTaskRecord, type CaptionTaskStage } from './caption-task-store';
 
 const defaults: CaptionTaskOptions = { presetId: 'clean', aspect: 'original', shortenPauses: false };
 const stages: CaptionTaskStage[] = ['transcribing', 'cleaning', 'styling', 'rendering'];
@@ -19,7 +19,7 @@ const stageNames: Record<CaptionTaskStage, [string, string]> = {
 };
 const actionClass = 'bg-ink text-bg inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40';
 
-export function CaptionTaskPage({ locale, onBack, onOpenEditor }: { locale: 'zh' | 'en'; onBack: () => void; onOpenEditor: (projectId: string) => void }) {
+export function CaptionTaskPage({ taskId, locale, onBack, onOpenEditor }: { taskId: string; locale: 'zh' | 'en'; onBack: () => void; onOpenEditor: (projectId: string) => void }) {
   const zh = locale === 'zh';
   const say = (cn: string, en: string) => zh ? cn : en;
   const [scope, setScope] = useState<string | null>(null);
@@ -27,7 +27,7 @@ export function CaptionTaskPage({ locale, onBack, onOpenEditor }: { locale: 'zh'
   const [probe, setProbe] = useState<ProbedFile | null>(null);
   const [options, setOptions] = useState<CaptionTaskOptions>(defaults);
   const [task, setTask] = useState<CaptionTaskRecord | null>(null);
-  const [history, setHistory] = useState<CaptionTaskRecord[]>([]);
+  const [loadingProject, setLoadingProject] = useState(true);
   const [busy, setBusy] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [stopping, setStopping] = useState(false);
@@ -45,16 +45,15 @@ export function CaptionTaskPage({ locale, onBack, onOpenEditor }: { locale: 'zh'
   const busyRef = useRef(false);
   const importGeneration = useRef(0);
   taskRef.current = task;
-  const refreshHistory = async (owner: string) => { const records = await listCaptionTasks(owner); if (alive.current) setHistory(records); };
 
   useEffect(() => {
     alive.current = true;
     loadCurrentUser().then(async (user) => {
       if (!alive.current) return;
-      if (!user || user.auth_method === 'anon') { setError(zh ? '请先登录，再处理字幕。' : 'Sign in to add captions.'); return; }
+      if (!user || user.auth_method === 'anon') { setError(zh ? '请先登录，再处理字幕。' : 'Sign in to add captions.'); setLoadingProject(false); return; }
       setScope(user.user_id);
-      try { await refreshHistory(user.user_id); } catch { setStorageNote(zh ? '本机记录暂不可用，完成后请直接下载视频。' : 'Local history is unavailable. Download your video when ready.'); }
-    }).catch(() => { if (alive.current) setError(zh ? '无法读取登录状态，请刷新重试。' : 'Could not load your session. Refresh and try again.'); });
+
+    }).catch(() => { if (alive.current) { setError(zh ? '无法读取登录状态，请刷新重试。' : 'Could not load your session. Refresh and try again.'); setLoadingProject(false); } });
     const preventLeave = (event: BeforeUnloadEvent) => { if (busyRef.current) { event.preventDefault(); event.returnValue = ''; } };
     window.addEventListener('beforeunload', preventLeave);
     return () => { alive.current = false; abortRef.current?.abort(); window.removeEventListener('beforeunload', preventLeave); };
@@ -74,7 +73,8 @@ export function CaptionTaskPage({ locale, onBack, onOpenEditor }: { locale: 'zh'
       if (!alive.current || generation !== importGeneration.current) return;
       if (!Number.isFinite(metadata.durationSec) || metadata.durationSec <= 0 || !Number.isFinite(metadata.width) || metadata.width <= 0 || !Number.isFinite(metadata.height) || metadata.height <= 0) throw new Error(say('无法读取这个视频，请尝试其他文件。', 'Could not read this video. Try another file.'));
       if (!metadata.hasAudio) throw new Error(say('这个视频没有音轨，请选择有讲话内容的视频。', 'This video has no audio track. Choose a video with speech.'));
-      setFile(next); setProbe(metadata); setTask(null); setResult(null); setOriginal(false);
+      if (taskRef.current && fileSig(next) !== taskRef.current.sourceSig) throw new Error(say('请选择这个字幕项目的原视频。其他视频请从首页新建。', 'Select this caption project’s original video. Start a new project for another video.'));
+      setFile(next); setProbe(metadata); setOriginal(false);
     } catch (reason) { if (alive.current && generation === importGeneration.current) setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { if (alive.current && generation === importGeneration.current) setPreparing(false); }
   };
@@ -89,7 +89,7 @@ export function CaptionTaskPage({ locale, onBack, onOpenEditor }: { locale: 'zh'
     busyRef.current = true; setBusy(true); setError(''); setStopping(false); setFraction(0); setOriginal(false);
     const controller = new AbortController(); abortRef.current = controller;
     const next: CaptionTaskRecord = resume && taskRef.current ? { ...taskRef.current, stage: 'ready', error: undefined } : {
-      id: crypto.randomUUID(), scope, name: file.name, sourceSig: fileSig(file), ...probe, options: { ...options, aspect: 'original' }, stage: 'ready', updatedAt: Date.now(),
+      ...taskRef.current, id: taskId, scope, name: taskRef.current?.name ?? file.name, sourceSig: taskRef.current?.sourceSig ?? fileSig(file), ...probe, options: { ...options, aspect: 'original' }, document: undefined, stage: 'ready', updatedAt: Date.now(),
     };
     try {
       await persist(next);
@@ -99,25 +99,39 @@ export function CaptionTaskPage({ locale, onBack, onOpenEditor }: { locale: 'zh'
       if (!alive.current || controller.signal.aborted) return;
       setResult(completed.video);
       await persist(completed.task, completed.video);
-      await refreshHistory(scope).catch(() => {});
+
     } catch (reason) {
       const message = controller.signal.aborted ? say('已停止。重新打开任务可以继续处理。', 'Stopped. You can resume this task.') : reason instanceof Error ? reason.message : String(reason);
       const readable = message === 'Failed to fetch' ? say('连接失败，请检查网络后重试。已完成的步骤会保留。', 'Connection failed. Check your network and retry. Completed steps are kept.') : message;
       await persist({ ...(taskRef.current ?? next), stage: controller.signal.aborted ? 'interrupted' : 'failed', error: readable, updatedAt: Date.now() });
       if (alive.current) setError(readable);
-      await refreshHistory(scope).catch(() => {});
+
     } finally { busyRef.current = false; if (alive.current) { setBusy(false); setStopping(false); } abortRef.current = null; }
   };
-  const openTask = async (record: CaptionTaskRecord) => {
-    if (busyRef.current || !scope || record.scope !== scope) return;
-    setPreparing(true); setError('');
-    try {
+  useEffect(() => {
+    if (!scope) return;
+    let current = true;
+    setLoadingProject(true);
+    (async () => {
+      const record = await loadCaptionTask(scope, taskId);
+      if (!record) throw new Error(say('找不到这个字幕项目，请返回首页重新添加视频。', 'This caption project is unavailable. Add a video from the home page.'));
       const [source, video] = await Promise.all([loadLocalVideo(record.sourceSig), loadCaptionTaskResult(scope, record.id)]);
+      if (!current) return;
       setTask(record); setOptions(record.options); setFile(source); setProbe({ width: record.width, height: record.height, durationSec: record.durationSec, hasAudio: true }); setResult(video ?? null); setOriginal(false);
-      if (!source && !video) setError(say('本机已没有这个任务的文件，请重新选择原视频。', 'The local files are unavailable. Select the source video again.'));
-    } catch { setError(say('无法读取本机任务，请重试。', 'Could not open the local task. Try again.')); }
-    finally { setPreparing(false); }
-  };
+      if (!source) setError(say('请重新选择原视频以继续配置；已有成片仍可下载。', 'Re-select the original video to continue. An existing result can still be downloaded.'));
+    })().catch((reason) => { if (current) setError(reason instanceof Error ? reason.message : String(reason)); })
+      .finally(() => { if (current) setLoadingProject(false); });
+    return () => { current = false; };
+  }, [scope, taskId]);
+  useEffect(() => {
+    if (loadingProject || busy || !scope || task?.stage !== 'ready') return;
+    const timer = setTimeout(() => {
+      const current = taskRef.current;
+      if (!current || current.stage !== 'ready' || busyRef.current) return;
+      void persist({ ...current, options, updatedAt: Date.now() });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [options, loadingProject, busy, scope, task?.id, task?.stage]);
   const editInStudio = async () => {
     if (!task?.document || !file || busyRef.current) return;
     setPreparing(true); setError('');
@@ -144,29 +158,22 @@ export function CaptionTaskPage({ locale, onBack, onOpenEditor }: { locale: 'zh'
   const disabled = busy || preparing;
   const usePreset = (id: string) => { setOptions((current) => ({ ...current, presetId: id, custom: undefined })); };
 
+  if (loadingProject) return <section className="studio-scope p-10" role="status">{error || say('正在打开字幕项目…', 'Opening caption project…')}</section>;
+  if (!task) return <section className="studio-scope p-10"><p role="alert">{error}</p><button type="button" onClick={onBack} className={actionClass + ' mt-5'}>{say('返回首页', 'Back to home')}</button></section>;
+
   return <section className="studio-scope mx-auto w-full max-w-[1200px] px-5 py-8 sm:px-10">
     <button type="button" disabled={busy} onClick={onBack} className="text-ink-3 mb-6 inline-flex items-center gap-2 text-sm disabled:opacity-40"><ArrowLeft size={15} />{say('返回首页', 'Back to home')}</button>
-    <header className="mb-8"><h1 className="text-ink text-3xl font-semibold tracking-tight">AI Captions</h1><p className="text-ink-3 mt-2 text-sm">{say('上传视频，选一个喜欢的样式，其余交给我们。', 'Add your video, choose a style, and leave the rest to us.')}</p></header>
+    <header className="mb-8"><h1 className="text-ink text-3xl font-semibold tracking-tight">AI Captions</h1><p className="text-ink-3 mt-2 truncate text-sm">{task.name}</p></header>
     <input ref={inputRef} type="file" accept="video/*" className="hidden" aria-label={say('选择视频文件', 'Choose a video file')} onChange={(event) => { const next = event.target.files?.[0]; event.target.value = ''; if (next) void pickFile(next); }} />
-    <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(360px,1.1fr)]">
-      <section aria-label={say('视频预览', 'Video preview')} className="min-w-0">
-        <div className="bg-panel border-line flex min-h-[360px] items-center justify-center overflow-hidden rounded-xl border p-4" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const next = event.dataTransfer.files[0]; if (next) void pickFile(next); }}>
-          {(sourceUrl || resultUrl) ? <div className="relative mx-auto w-full max-w-[380px] overflow-hidden rounded-lg bg-black" style={{ aspectRatio: dimensions.width / dimensions.height, width: Math.min(380, 490 * dimensions.width / dimensions.height), maxWidth: '100%' }}>
-            <video key={completed && !original ? resultUrl : sourceUrl} src={completed && !original ? resultUrl : sourceUrl} controls playsInline className="h-full w-full object-cover" />
-            {!taskMode && !original && <div className="pointer-events-none absolute inset-0" aria-hidden><CanvasCaptionPreview style={previewStyle} locale={locale} aspect={dimensions.width / dimensions.height} /></div>}
-          </div> : <button type="button" disabled={disabled} onClick={() => inputRef.current?.click()} className="text-ink flex min-h-72 w-full flex-col items-center justify-center gap-4 rounded-lg border border-dashed border-[var(--color-line)] p-8 text-center"><Upload size={30} strokeWidth={1.5} /><span className="text-lg font-medium">{say('选择视频，或拖到这里', 'Choose a video or drop it here')}</span><span className="text-ink-3 text-xs">{say('无需打开编辑器', 'No editing workspace needed')}</span></button>}
-        </div>
-        <div className="text-ink-3 mt-3 flex items-center justify-between gap-3 text-xs"><span className="truncate">{task?.name ?? file?.name ?? say('支持有讲话内容的视频', 'Choose a video with speech')}</span>{sourceUrl && <button type="button" onClick={() => setOriginal((value) => !value)} aria-pressed={original} className="shrink-0 underline underline-offset-4">{original ? say('查看效果', 'Show captions') : say('对比原视频', 'Show original')}</button>}</div>
-        {!taskMode && sourceUrl && <p className="text-ink-4 mt-2 text-xs">{say('当前为样式示例，提交后识别真实字幕。', 'Sample text previews the style. Your speech is transcribed after submission.')}</p>}
-      </section>
-      <section className="min-w-0" aria-label={taskMode ? say('字幕任务', 'Caption task') : say('字幕设置', 'Caption settings')}>
+    <div className="grid items-start gap-6 md:grid-cols-[minmax(280px,360px)_minmax(0,1fr)] lg:grid-cols-[380px_minmax(0,1fr)]">
+      <section className="min-w-0 md:max-h-[calc(100dvh-190px)] md:overflow-y-auto md:pr-2" aria-label={taskMode ? say('字幕任务', 'Caption task') : say('字幕设置', 'Caption settings')}>
         {taskMode ? <div className="border-line bg-panel rounded-xl border p-6">
           <h2 className="text-ink flex items-center gap-2 text-xl font-semibold">{completed ? <Check size={20} /> : busy ? <Loader2 className="animate-spin" size={20} /> : null}{stageNames[task.stage][zh ? 0 : 1]}</h2>
           <div className="my-6 space-y-4">{stages.filter((stage) => stage !== 'cleaning' || task.options.shortenPauses).map((stage) => <div key={stage} className={'flex items-center gap-3 text-sm ' + (stage === task.stage || completed ? 'text-ink' : 'text-ink-3')}><span className={'size-2 rounded-full ' + (completed || stages.indexOf(stage) < stages.indexOf(task.stage) ? 'bg-accent' : 'bg-ink-4')} />{stageNames[stage][zh ? 0 : 1]}{stage === 'rendering' && task.stage === stage && <span className="ml-auto font-mono text-xs">{Math.round(fraction * 100)}%</span>}</div>)}</div>
           {busy && <><progress aria-label={say('视频生成进度', 'Video rendering progress')} value={task.stage === 'rendering' ? fraction : undefined} max={1} className="h-1.5 w-full accent-[var(--color-accent)]" /><p className="text-ink-3 mt-3 text-xs leading-relaxed">{say('请保持此页打开，视频正在当前设备上处理。', 'Keep this page open while your video is processed on this device.')}</p><button type="button" disabled={stopping} onClick={() => { abortRef.current?.abort(); setStopping(true); }} className="text-ink-3 mt-5 inline-flex items-center gap-2 text-xs"><X size={13} />{stopping ? say('正在停止…', 'Stopping…') : say('停止处理', 'Stop processing')}</button></>}
-          {completed && <div className="space-y-3"><a href={resultUrl} download={task.name.replace(/\.[^.]+$/, '') + '-captions.mp4'} className={actionClass + ' w-full'}><Download size={16} />{say('下载视频', 'Download video')}</a><button type="button" disabled={!file || preparing} onClick={() => void editInStudio()} className="text-ink border-line h-10 w-full rounded-lg border text-sm disabled:opacity-40">{say('需要精修？进入编辑器', 'Fine-tune in the editor')}</button><button type="button" disabled={!file || preparing} onClick={() => { setTask(null); setResult(null); }} className="text-ink-3 w-full py-1 text-xs underline">{say('调整样式再生成', 'Try another style')}</button><p className="text-ink-4 text-xs leading-relaxed">{say('结果保存在此浏览器，建议下载留存。', 'Results are saved in this browser. Download a copy to keep.')}</p></div>}
+          {completed && <div className="space-y-3"><a href={resultUrl} download={task.name.replace(/\.[^.]+$/, '') + '-captions.mp4'} className={actionClass + ' w-full'}><Download size={16} />{say('下载视频', 'Download video')}</a><button type="button" disabled={!file || preparing} onClick={() => void editInStudio()} className="text-ink border-line h-10 w-full rounded-lg border text-sm disabled:opacity-40">{say('需要精修？进入编辑器', 'Fine-tune in the editor')}</button><button type="button" disabled={!file || preparing} onClick={() => { void persist({ ...task, stage: 'ready', document: undefined, error: undefined }); setResult(null); }} className="text-ink-3 w-full py-1 text-xs underline">{say('调整样式再生成', 'Try another style')}</button><p className="text-ink-4 text-xs leading-relaxed">{say('结果保存在此浏览器，建议下载留存。', 'Results are saved in this browser. Download a copy to keep.')}</p></div>}
           {!busy && !completed && <button type="button" disabled={!file || preparing} onClick={() => void start(true)} className={actionClass + ' w-full'}>{say('继续处理', 'Resume processing')}</button>}
-          {!busy && <button type="button" onClick={() => { setTask(null); setFile(null); setProbe(null); setResult(null); setError(''); }} className="text-ink-3 mt-4 text-xs underline">{say('处理另一个视频', 'Start another video')}</button>}
+          {!busy && <button type="button" onClick={onBack} className="text-ink-3 mt-4 text-xs underline">{say('处理另一个视频', 'Start another video')}</button>}
         </div> : <>
           <h2 className="text-ink mb-4 text-sm font-medium">{say('选一个字幕样式', 'Choose a caption style')}</h2>
           <div role="region" aria-label={say('滚动浏览字幕样式', 'Scroll caption styles')} tabIndex={0} className="max-h-[260px] overflow-y-auto overscroll-contain pr-2 [scrollbar-width:thin] focus-visible:outline-accent">
@@ -181,7 +188,17 @@ export function CaptionTaskPage({ locale, onBack, onOpenEditor }: { locale: 'zh'
         </>}
         {error && <p role="alert" className="text-ink mt-4 text-sm leading-relaxed">{error}</p>}{storageNote && <p role="status" className="text-ink-3 mt-3 text-xs leading-relaxed">{storageNote}</p>}
       </section>
+      <section aria-label={say('视频预览', 'Video preview')} className="min-w-0 md:sticky md:top-6">
+        <div className="bg-panel border-line flex min-h-[360px] items-center justify-center overflow-hidden rounded-xl border p-4" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const next = event.dataTransfer.files[0]; if (next) void pickFile(next); }}>
+          {(sourceUrl || resultUrl) ? <div className="relative mx-auto w-full max-w-[380px] overflow-hidden rounded-lg bg-black" style={{ aspectRatio: dimensions.width / dimensions.height, width: Math.min(380, 490 * dimensions.width / dimensions.height), maxWidth: '100%' }}>
+            <video key={completed && !original ? resultUrl : sourceUrl} src={completed && !original ? resultUrl : sourceUrl} controls playsInline className="h-full w-full object-cover" />
+            {!taskMode && !original && <div className="pointer-events-none absolute inset-0" aria-hidden><CanvasCaptionPreview style={previewStyle} locale={locale} aspect={dimensions.width / dimensions.height} /></div>}
+          </div> : <button type="button" disabled={disabled} onClick={() => inputRef.current?.click()} className="text-ink flex min-h-72 w-full flex-col items-center justify-center gap-4 rounded-lg border border-dashed border-[var(--color-line)] p-8 text-center"><Upload size={30} strokeWidth={1.5} /><span className="text-lg font-medium">{say('选择视频，或拖到这里', 'Choose a video or drop it here')}</span><span className="text-ink-3 text-xs">{say('无需打开编辑器', 'No editing workspace needed')}</span></button>}
+        </div>
+        <div className="text-ink-3 mt-3 flex items-center justify-between gap-3 text-xs"><span className="truncate">{task?.name ?? file?.name ?? say('支持有讲话内容的视频', 'Choose a video with speech')}</span>{sourceUrl && <button type="button" onClick={() => setOriginal((value) => !value)} aria-pressed={original} className="shrink-0 underline underline-offset-4">{original ? say('查看效果', 'Show captions') : say('对比原视频', 'Show original')}</button>}</div>
+        {!taskMode && sourceUrl && <p className="text-ink-4 mt-2 text-xs">{say('当前为样式示例，提交后识别真实字幕。', 'Sample text previews the style. Your speech is transcribed after submission.')}</p>}
+      </section>
     </div>
-    {!!history.length && <section className="border-line mt-12 border-t pt-6"><h2 className="text-ink mb-3 text-sm font-medium">{say('最近的字幕任务', 'Recent caption tasks')}</h2><div className="space-y-1">{history.map((record) => <button type="button" key={record.id} disabled={disabled} onClick={() => void openTask(record)} className="text-ink hover:bg-panel flex w-full items-center justify-between gap-4 rounded-lg px-3 py-3 text-left text-sm disabled:opacity-40"><span className="truncate">{record.name}</span><span className="text-ink-3 shrink-0 text-xs">{stageNames[record.stage][zh ? 0 : 1]}</span></button>)}</div></section>}
+
   </section>;
 }

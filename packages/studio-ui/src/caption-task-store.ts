@@ -43,3 +43,15 @@ export async function loadCaptionTaskResult(scope: string, id: string): Promise<
     request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
   }); } finally { db.close(); }
 }
+
+export async function loadCaptionTask(scope: string, id: string): Promise<CaptionTaskRecord | undefined> {
+  const db = await database();
+  try { return await new Promise((resolve, reject) => {
+    const request = db.transaction('tasks').objectStore('tasks').get(key(scope, id));
+    request.onsuccess = () => {
+      const task = request.result?.task as CaptionTaskRecord | undefined;
+      resolve(task && task.scope === scope ? (['transcribing', 'cleaning', 'styling', 'rendering'].includes(task.stage) ? { ...task, stage: 'interrupted' } : task) : undefined);
+    };
+    request.onerror = () => reject(request.error);
+  }); } finally { db.close(); }
+}

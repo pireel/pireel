@@ -36,7 +36,7 @@ export async function runCaptionTask(task: CaptionTaskRecord, file: File, hooks:
   await document.fonts.ready;
   const url = URL.createObjectURL(file);
   try {
-    next.document ??= buildCaptionTaskDocument({ ...next, projectId: next.projectId ?? next.id, sourceUrl: url, sourceName: file.name, sourceSig: next.sourceSig, options: next.options, transcript: next.transcript!, cuts: next.options.shortenPauses ? next.cuts : [] });
+    next.document ??= buildCaptionTaskDocument({ ...next, projectId: next.projectId ?? next.id, sourceUrl: url, sourceName: next.name, sourceSig: next.sourceSig, options: next.options, transcript: next.transcript!, cuts: next.options.shortenPauses ? next.cuts : [] });
     if (captionTaskPreset(next.options.presetId).style.preset === 'kw-yellow') {
       const select = studioProviders().captionEmphasis;
       if (!select) throw new Error('重点词服务尚未连接，请选择其他字幕样式。');
