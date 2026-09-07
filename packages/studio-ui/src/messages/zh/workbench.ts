@@ -613,6 +613,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.batchExportProgress": "{done}/{total} · 当前 {pct}%",
   "workbench.batchExportSummary": "完成 {done} 个，失败 {failed} 个",
   "workbench.batchExportNoOutputs": "没有可导出的成片",
+  "workbench.moreExportOptions": "更多导出方式",
   "workbench.updatedLabel": "已更新「{label}」",
   "workbench.preparedLocalImage": "已准备本地图片「{name}」",
   "workbench.updatingCanvas": "画面更新中…",

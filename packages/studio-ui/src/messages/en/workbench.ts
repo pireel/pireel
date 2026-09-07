@@ -678,6 +678,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.batchExportProgress": "{done}/{total} · current {pct}%",
   "workbench.batchExportSummary": "{done} done, {failed} failed",
   "workbench.batchExportNoOutputs": "No outputs to export",
+  "workbench.moreExportOptions": "More export options",
   "workbench.updatedLabel": 'Updated "{label}"',
   "workbench.preparedLocalImage": "Prepared local image “{name}”",
   "workbench.updatingCanvas": "Updating the canvas…",

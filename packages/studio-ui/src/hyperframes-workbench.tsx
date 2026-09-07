@@ -42,6 +42,7 @@ import {
   ChevronUp,
   ChevronDown,
   Layers,
+  MoreHorizontal,
   UserRound,
   AudioLines,
   Frame,
@@ -10790,60 +10791,59 @@ export function HyperframesWorkbench({
               edge IS the visible edge and nothing can show through beside the button; bg-panel matches
               the column surface, masking buttons that pass underneath without a visible block. */}
             <div className="sticky right-0 z-10 ml-auto flex shrink-0 items-center gap-3 bg-panel pl-2 pr-4">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={() => setExportOpen(true)}
-                    disabled={exporting || publishing || !hasContent}
-                    className="border-line text-ink-2 hover:text-ink inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px] disabled:opacity-50"
-                  >
-                    {exporting || publishing ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      <FileVideo size={14} />
-                    )}{" "}
-                    {exporting
-                      ? t("workbench.exportingPctShort", { pct: exportPct })
-                      : publishing
-                        ? t("workbench.renderingPct", { pct: exportPct })
-                        : t("workbench.export")}
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>{t("tools.export_video.label")}</TooltipContent>
-              </Tooltip>
-              {/* "More" menu hangs off the export button: batch export over the project's outputs */}
-              <DropdownMenu>
+              {/* Split button like the asset panel's import control: main half exports the active
+                output, the attached "more" half opens batch export over the project's outputs. */}
+              <div className="flex shrink-0 items-center">
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        disabled={exporting || publishing}
-                        aria-label={t("panels.more")}
-                        className="border-line text-ink-3 hover:text-ink -ml-3 inline-flex shrink-0 items-center rounded-md border px-1 py-1.5 disabled:opacity-50 data-[state=open]:text-ink"
-                      >
-                        <ChevronDown size={14} />
-                      </button>
-                    </DropdownMenuTrigger>
+                    <button
+                      type="button"
+                      onClick={() => setExportOpen(true)}
+                      disabled={exporting || publishing || !hasContent}
+                      className="border-line text-ink-2 hover:text-ink inline-flex shrink-0 items-center gap-1.5 rounded-l-md border px-2.5 py-1.5 text-[12px] disabled:opacity-50"
+                    >
+                      {exporting || publishing ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <FileVideo size={14} />
+                      )}{" "}
+                      {exporting
+                        ? t("workbench.exportingPctShort", { pct: exportPct })
+                        : publishing
+                          ? t("workbench.renderingPct", { pct: exportPct })
+                          : t("workbench.export")}
+                    </button>
                   </TooltipTrigger>
-                  <TooltipContent>{t("panels.more")}</TooltipContent>
+                  <TooltipContent>{t("tools.export_video.label")}</TooltipContent>
                 </Tooltip>
-                <DropdownMenuContent
-                  align="end"
-                  sideOffset={4}
-                  className="min-w-[140px] text-[12px]"
-                >
-                  <DropdownMenuItem
-                    disabled={!batchExportableOutputs.length}
-                    onSelect={openBatchExport}
-                    className="text-[12px]"
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      disabled={exporting || publishing}
+                      title={t("workbench.moreExportOptions")}
+                      aria-label={t("workbench.moreExportOptions")}
+                      className="border-line text-ink-3 hover:text-ink -ml-px inline-flex shrink-0 items-center justify-center self-stretch rounded-r-md border px-1.5 disabled:opacity-50 data-[state=open]:text-ink"
+                    >
+                      <MoreHorizontal size={13} />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    sideOffset={5}
+                    className="min-w-[140px] text-[12px]"
                   >
-                    <Layers size={13} />
-                    {t("workbench.batchExport")}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                    <DropdownMenuItem
+                      disabled={!batchExportableOutputs.length}
+                      onSelect={openBatchExport}
+                      className="text-[12px]"
+                    >
+                      <Layers size={13} />
+                      {t("workbench.batchExport")}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
               <BatchExportDialog
                 open={batchExportOpen}
                 onOpenChange={setBatchExportOpen}
