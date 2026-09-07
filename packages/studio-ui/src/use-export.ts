@@ -30,6 +30,7 @@ import { compositionRenderView } from './composition-render-view';
 import { primaryNarrativeRenderPlan } from './primary-render-plan';
 import { supplementalVisualMedia } from './visual-render-plan';
 import type { AudioExportEntry } from './audio-export-payload';
+import { exportAudioMasks } from './export-word-masks';
 
 /** presign's hard cap (413 past it); intercept early to give a human message. */
 const MAX_PUBLISH_BYTES = 200 * 1024 * 1024;
@@ -149,6 +150,7 @@ export function useStudioExport(deps: {
       clipFiles: clipFilesRef?.current ?? new Map(),
       audio,
       denoise: denoiseExportRef?.current?.() ?? null,
+      audioMasks: exportAudioMasks(documentRef.current, c),
       render: opts,
       onProgress: (done, total) => setExportPct(Math.round((done / total) * 100)),
       shouldCancel: () => exportCancelRef.current,

@@ -510,6 +510,7 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
       "cut_narration",
       "list_words",
       "delete_words",
+      "mask_words",
     ]) {
       expect(STUDIO_TOOLS.some((t) => t.id === id)).toBe(true);
     }

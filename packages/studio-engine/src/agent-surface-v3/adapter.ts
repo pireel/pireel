@@ -802,6 +802,7 @@ const PASSTHROUGH: Record<string, string> = {
   set_keyframes: 'set_keyframes',
   set_canvas: 'set_canvas',
   remove_silence: 'remove_silence',
+  mask_words: 'mask_words',
   denoise_audio: 'denoise_audio',
   compose_component: 'compose_block_brief',
   list_models: 'list_models',

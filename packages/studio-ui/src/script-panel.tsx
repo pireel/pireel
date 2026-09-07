@@ -21,6 +21,7 @@ import {
 } from '@pireel/studio-engine/composition';
 import { narrationGaps, srcToEditedLoose, tightenCutRanges } from '@pireel/studio-engine/trim';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
+import { DEFAULT_MASK_TEXT, type WordMaskPatch, wordMaskAt } from '@pireel/studio-engine/word-masks';
 import { t } from './i18n';
 
 /** A pause counts as dead air from this length up (sec); shorter than this is breathing, leave it alone. */
@@ -90,11 +91,14 @@ function srcAliveDur(shots: VideoShot[], src: string | null, s: number, e: numbe
 type SentItem = { src: string | null; si: number; seg: AsrSegment; words: Word[]; at: number };
 
 type Popover =
-  | { kind: 'word'; src: string | null; si: number; word: Word; x: number; y: number }
+  | { kind: 'word'; src: string | null; si: number; wi: number; word: Word; x: number; y: number }
   | { kind: 'deadword'; src: string | null; word: Word; x: number; y: number }
   | { kind: 'gap'; range: SrcRange; x: number; y: number }
   | { kind: 'deadgap'; range: SrcRange; x: number; y: number }
-  | { kind: 'sel'; cut: { items: ScriptCut[]; count: number } | null; restore: { items: ScriptCut[]; count: number } | null; x: number; y: number };
+  | { kind: 'sel'; cut: { items: ScriptCut[]; count: number } | null; restore: { items: ScriptCut[]; count: number } | null; mask: { targets: ScriptMaskTarget[]; count: number; anyMasked: boolean } | null; x: number; y: number };
+
+/** One word addressed for a mask edit: which source's sentence and which word in it. */
+export type ScriptMaskTarget = { src: string | null; si: number; wi: number };
 
 export function ScriptPanel({
   sentences,
@@ -107,6 +111,7 @@ export function ScriptPanel({
   onCut,
   onRestore,
   onReplaceWord,
+  onMaskWords,
 }: {
   sentences: AsrSegment[] | null;
   /** Inserted-source transcripts (keyed by shot.src): sentence times are on that source file's own timeline. */
@@ -124,6 +129,8 @@ export function ScriptPanel({
   onRestore: (cuts: ScriptCut[], msg: string) => void;
   /** Replace one word in a given source's sentence (located by word timestamp; syncs already-laid captions). */
   onReplaceWord: (src: string | null, si: number, word: Word, text: string) => void;
+  /** Beep/mute the words' sound and/or mask their caption text (patch semantics: null clears); msg = success toast. */
+  onMaskWords: (targets: ScriptMaskTarget[], patch: WordMaskPatch, msg: string) => void;
 }) {
   const sents = useMemo(() => sentences ?? [], [sentences]);
   // All-source sentence stream: talking-head sentences + each inserted source's sentences (prefer true word-level word streams,
@@ -217,10 +224,10 @@ export function ScriptPanel({
     return { x: clientX - (r?.left ?? 0), y: clientY - (r?.top ?? 0) };
   };
 
-  const openWordPop = (e: React.MouseEvent, it: SentItem, word: Word) => {
+  const openWordPop = (e: React.MouseEvent, it: SentItem, word: Word, wi: number) => {
     e.stopPropagation();
     const { x, y } = localXY(e.clientX, e.clientY);
-    setPop({ kind: 'word', src: it.src, si: it.si, word, x, y: y + 14 });
+    setPop({ kind: 'word', src: it.src, si: it.si, wi, word, x, y: y + 14 });
     setReplaceMode(false);
     setReplacing(word.text);
     onSeek(srcToEditedLoose(shots, word.start, inSrcOf(it.src)));
@@ -243,6 +250,8 @@ export function ScriptPanel({
     if (nodes.length < 2) return; // a single word goes through the click popover
     const aliveBySrc = new Map<string | null, { lo: number; hi: number; n: number }>();
     const deadBySrc = new Map<string | null, SrcRange[]>();
+    const maskTargets: ScriptMaskTarget[] = [];
+    let anyMasked = false;
     let deadN = 0;
     for (const el of nodes) {
       const ws = Number(el.dataset.ws);
@@ -255,6 +264,12 @@ export function ScriptPanel({
         g.hi = Math.max(g.hi, we);
         g.n++;
         aliveBySrc.set(src, g);
+        const si = Number(el.dataset.si);
+        const wi = Number(el.dataset.wi);
+        if (Number.isInteger(si) && Number.isInteger(wi)) {
+          maskTargets.push({ src, si, wi });
+          if (el.dataset.masked) anyMasked = true;
+        }
       } else {
         // Adjacent deleted words' pads overlap -> merge into one continuous range (restoreSrcRange is already idempotent to repeated restores)
         const a = Math.max(0, ws - 0.02);
@@ -271,8 +286,9 @@ export function ScriptPanel({
     const cut = aliveN > 0 ? { items: [...aliveBySrc.entries()].map(([src, g]) => ({ src, range: [Math.max(0, g.lo - 0.02), g.hi + 0.02] as SrcRange })), count: aliveN } : null;
     const restore = deadN > 0 ? { items: [...deadBySrc.entries()].flatMap(([src, rs]) => rs.map((range) => ({ src, range }))), count: deadN } : null;
     if (!cut && !restore) return;
+    const mask = maskTargets.length ? { targets: maskTargets, count: maskTargets.length, anyMasked } : null;
     const { x, y } = localXY(e.clientX, e.clientY);
-    setPop({ kind: 'sel', cut, restore, x, y: y + 14 });
+    setPop({ kind: 'sel', cut, restore, mask, x, y: y + 14 });
   };
 
   if (!items.length) {
@@ -332,6 +348,12 @@ export function ScriptPanel({
               const alive = wordAlive(shots, it.src, w);
               const picked = pop?.kind === 'word' && pop.src === it.src && pop.si === it.si && Math.abs(pop.word.start - w.start) < 1e-3 && Math.abs(pop.word.end - w.end) < 1e-3;
               const pickedDead = pop?.kind === 'deadword' && pop.src === it.src && Math.abs(pop.word.start - w.start) < 1e-3 && Math.abs(pop.word.end - w.end) < 1e-3;
+              const mask = wordMaskAt(it.seg, wi);
+              const maskTitle = mask
+                ? [mask.audio ? t(mask.audio === 'beep' ? 'panels.maskedBeep' : 'panels.maskedMute') : '', mask.text !== undefined ? t('panels.captionShowsAs', { text: mask.text }) : '']
+                  .filter(Boolean)
+                  .join(' · ')
+                : undefined;
               return (
                 <span
                   key={wi}
@@ -339,18 +361,21 @@ export function ScriptPanel({
                   data-ws={w.start}
                   data-we={w.end}
                   data-src={it.src ?? ''}
+                  data-si={it.si}
+                  data-wi={wi}
+                  data-masked={mask ? '1' : undefined}
                   onClick={(e) => {
                     if (alive) {
-                      openWordPop(e, it, w);
+                      openWordPop(e, it, w, wi);
                     } else {
                       e.stopPropagation();
                       setPop({ kind: 'deadword', src: it.src, word: w, ...localXY(e.clientX, e.clientY + 14) });
                     }
                   }}
-                  title={alive ? undefined : t('panels.deletedClickRestore')}
+                  title={alive ? maskTitle : t('panels.deletedClickRestore')}
                   className={
                     alive
-                      ? `text-ink cursor-pointer rounded-sm px-[1px] ${picked ? 'bg-accent/25 ring-accent/60 ring-1' : 'hover:bg-accent/15'}`
+                      ? `text-ink cursor-pointer rounded-sm px-[1px] ${picked ? 'bg-accent/25 ring-accent/60 ring-1' : 'hover:bg-accent/15'}${mask?.audio ? ' underline decoration-amber-500/80 decoration-dotted decoration-2 underline-offset-2' : ''}${mask?.text !== undefined ? ' bg-amber-500/15' : ''}`
                       : `text-ink-4 cursor-pointer rounded-sm px-[1px] line-through opacity-60 ${pickedDead ? 'bg-accent/20 ring-accent/50 ring-1' : 'hover:opacity-90'}`
                   }
                 >
@@ -400,6 +425,38 @@ export function ScriptPanel({
               <button type="button" onClick={() => setReplaceMode(true)} className="text-ink-2 hover:text-ink px-1.5 py-0.5 text-[11.5px]">
                 {t('panels.replace')}
               </button>
+              <div className="bg-line h-3.5 w-px" />
+              {(() => {
+                const seg = pop.src == null ? sents[pop.si] : clipSentences[pop.src]?.[pop.si];
+                const mask = seg ? wordMaskAt(seg, pop.wi) : undefined;
+                const target = [{ src: pop.src, si: pop.si, wi: pop.wi }];
+                return (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (mask?.audio) onMaskWords(target, { audio: null }, t('panels.unmaskedAudioWord', { word: pop.word.text }));
+                        else onMaskWords(target, { audio: 'beep' }, t('panels.maskedAudioWord', { word: pop.word.text }));
+                        setPop(null);
+                      }}
+                      className="text-ink-2 hover:text-ink px-1.5 py-0.5 text-[11.5px]"
+                    >
+                      {mask?.audio ? t('panels.unmaskAudio') : t('panels.maskAudio')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (mask?.text !== undefined) onMaskWords(target, { text: null }, t('panels.unmaskedTextWord', { word: pop.word.text }));
+                        else onMaskWords(target, { text: DEFAULT_MASK_TEXT }, t('panels.maskedTextWord', { word: pop.word.text }));
+                        setPop(null);
+                      }}
+                      className="text-ink-2 hover:text-ink px-1.5 py-0.5 text-[11.5px]"
+                    >
+                      {mask?.text !== undefined ? t('panels.unmaskText') : t('panels.maskText')}
+                    </button>
+                  </>
+                );
+              })()}
             </>
           )}
           {pop.kind === 'word' && replaceMode && (
@@ -500,6 +557,46 @@ export function ScriptPanel({
                 >
                   {t('panels.restoreSelectedNWords', { n: pop.restore.count })}
                 </button>
+              )}
+              {pop.mask && (
+                <>
+                  <div className="bg-line h-3.5 w-px" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onMaskWords(pop.mask!.targets, { audio: 'beep' }, t('panels.maskedAudioNWords', { n: pop.mask!.count }));
+                      setPop(null);
+                      window.getSelection()?.removeAllRanges();
+                    }}
+                    className="text-ink-2 hover:text-ink px-1.5 py-0.5 text-[11.5px]"
+                  >
+                    {t('panels.maskAudioSelectedN', { n: pop.mask.count })}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onMaskWords(pop.mask!.targets, { text: DEFAULT_MASK_TEXT }, t('panels.maskedTextNWords', { n: pop.mask!.count }));
+                      setPop(null);
+                      window.getSelection()?.removeAllRanges();
+                    }}
+                    className="text-ink-2 hover:text-ink px-1.5 py-0.5 text-[11.5px]"
+                  >
+                    {t('panels.maskTextSelectedN', { n: pop.mask.count })}
+                  </button>
+                  {pop.mask.anyMasked && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onMaskWords(pop.mask!.targets, { audio: null, text: null }, t('panels.unmaskedNWords', { n: pop.mask!.count }));
+                        setPop(null);
+                        window.getSelection()?.removeAllRanges();
+                      }}
+                      className="text-ink-2 hover:text-ink px-1.5 py-0.5 text-[11.5px]"
+                    >
+                      {t('panels.unmaskSelected')}
+                    </button>
+                  )}
+                </>
               )}
             </>
           )}

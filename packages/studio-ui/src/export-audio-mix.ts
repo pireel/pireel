@@ -161,6 +161,27 @@ async function prestretchClip(entry: MixAudioClip, stretch: TimeStretch): Promis
   };
 }
 
+/** A synthesized tone on the timeline (word masks: the beep that replaces a muted word). */
+export interface MixTone {
+  timelineStart: number;
+  timelineEnd: number;
+}
+
+/** Classic censor tone: 1 kHz sine, well below full scale, with short edge ramps so it never clicks. */
+export const TONE_HZ = 1000;
+export const TONE_LEVEL = 0.22;
+export const TONE_RAMP_SEC = 0.008;
+
+function toneGainAt(tone: MixTone, t: number): number {
+  const local = t - tone.timelineStart;
+  const len = tone.timelineEnd - tone.timelineStart;
+  if (local < 0 || local >= len) return 0;
+  const ramp = Math.min(TONE_RAMP_SEC, len / 2);
+  if (local < ramp) return local / ramp;
+  if (len - local < ramp) return (len - local) / ramp;
+  return 1;
+}
+
 /** Mix narration segments + audio clips into the output audio track. push receives ready samples in order. */
 export async function mixAudioTrack(args: {
   segs: MixSeg[];
@@ -171,8 +192,11 @@ export async function mixAudioTrack(args: {
   push: (sample: AudioSample) => Promise<void>;
   /** Pitch-preserving retime for speed ≠ 1 material; defaults to Signalsmith with a resample fallback. */
   stretch?: TimeStretch;
+  /** Synthesized tones added on top of the mix (beeped words). */
+  tones?: MixTone[];
 }): Promise<void> {
   const { segs, audioTracks, totalSec, push } = args;
+  const tones = args.tones ?? [];
   const stretch = args.stretch ?? defaultTimeStretch;
   // Native timeline starts; missing values retain the legacy contiguous fallback.
   const segStarts: number[] = [];
@@ -269,6 +293,23 @@ export async function mixAudioTrack(args: {
         (k) => s.gain * (s.fadeAt ? s.fadeAt(localAt + k / MIX_RATE) : 1),
         sourceRate,
       );
+    }
+
+    // Beep tones (word masks): pure sine on the timeline grid, phase continuous across chunks
+    for (const tone of tones) {
+      const a = Math.max(t0, tone.timelineStart);
+      const b = Math.min(t0 + frames / MIX_RATE, tone.timelineEnd);
+      if (b <= a) continue;
+      const k0 = Math.max(0, Math.round((a - t0) * MIX_RATE));
+      const k1 = Math.min(frames, Math.round((b - t0) * MIX_RATE));
+      for (let k = k0; k < k1; k++) {
+        const t = t0 + k / MIX_RATE;
+        const g = TONE_LEVEL * toneGainAt(tone, t);
+        if (g <= 0) continue;
+        const v = Math.sin(2 * Math.PI * TONE_HZ * t) * g;
+        const o = k * MIX_CH;
+        for (let ch = 0; ch < MIX_CH; ch++) buf[o + ch]! += v;
+      }
     }
 
     // Audio clips (overlaps simply sum)

@@ -15,6 +15,7 @@
 
 import { joinWords, wordsFromText } from './caption-fx';
 import { type Block, captionBlock } from './composition';
+import type { WordMask } from './word-masks';
 
 /** One persisted transcript word (source seconds). */
 export interface TranscriptWord {
@@ -52,6 +53,9 @@ export interface AsrSegment {
    *  displayed as-is; when both this and the current target language are known and differ, the
    *  translation is treated as stale and hidden (mixed-language second lines are worse than none). */
   subLang?: string;
+  /** Per-word replacements keyed by word index (see word-masks.ts): the word's sound is beeped or
+   *  muted and/or its caption text is swapped. The spoken transcript above stays untouched. */
+  masks?: Record<string, WordMask>;
   /** Legacy flag from the short-lived extraction-cueing scheme (desegmentCues merges those back on load). Never written anew. */
   cue?: boolean;
 }

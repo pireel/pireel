@@ -15,6 +15,7 @@ import { type CaptionStyle, DEFAULT_CAPTION_WIDTH_PCT } from './composition-core
 import { type Block, type VideoShot, isSentenceCaption } from './composition';
 import { spans as clipSpans, srcToEditedLoose } from './trim';
 import { type AsrSegment, type CueRef, type CueWord, type DisplayCue, captionBlocksFromAsr } from './build-blocks';
+import { maskCueText, maskedWordText } from './word-masks';
 import { joinWords } from './caption-fx';
 import { captionLineSegments } from './caption-layout-metrics';
 
@@ -38,7 +39,8 @@ export function mapTranscriptSegsToEdited(
         const end = mapSourceSec(w.end);
         // Word width only shrinks, never grows: when a cut / insert lands mid-word,
         // the loose mapping would swallow the whole inserted duration into the word.
-        return { ...w, si: (w as CueWord).si ?? wi, start, end: Math.min(end, start + (w.end - w.start) + 0.05) };
+        // A text mask swaps the caption copy only; timing stays the spoken word's.
+        return { ...w, text: maskedWordText(s, wi, w.text), si: (w as CueWord).si ?? wi, start, end: Math.min(end, start + (w.end - w.start) + 0.05) };
       })
       .filter((w) => w.end - w.start > 0.03);
     if (!words.length) continue;
@@ -199,7 +201,8 @@ export function displayCuesFromMappedSegs(
     for (const [ci, c] of chunks.entries()) {
       const w0 = c[0]!.si ?? 0;
       const w1 = c[c.length - 1]!.si ?? 0;
-      const text = srcSeg?.cueTexts?.[`${w0}:${w1}`] ?? joinWords(c.map((w) => w.text));
+      const override = srcSeg?.cueTexts?.[`${w0}:${w1}`];
+      const text = override !== undefined && srcSeg ? maskCueText(srcSeg, override, w0, w1) : joinWords(c.map((w) => w.text));
       const sub = subFresh ? (srcSeg?.cueSubs?.[`${w0}:${w1}`] ?? pieces?.[ci]) : undefined;
       out.push({
         start: c[0]!.start,

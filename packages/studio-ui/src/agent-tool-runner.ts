@@ -87,6 +87,7 @@ import { type CutSeamEntry, finalizeCutSeams, spans as clipSpans, tightenCutRang
 import { parseBlockResponse } from '@pireel/studio-engine/compose';
 import { HARD_LINT_CODES, lintBlock } from '@pireel/studio-engine/block-lint';
 import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations } from '@pireel/studio-engine/build-blocks';
+import { applyWordMasks, groupWordsByAsset, maskWordsSummary, parseMaskWordsInput } from '@pireel/studio-engine/word-masks-tool';
 import { beatsForWindow } from '@pireel/studio-engine/captions-relay';
 import { captionYPctForCanvas } from '@pireel/studio-engine/delivery-safety';
 import { applyCaptionTextEdits } from '@pireel/studio-engine/caption-text-edit';
@@ -3318,6 +3319,63 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             setSelectedShotId(null);
             if (Number.isFinite(firstCut)) applyT(firstCut);
             return { ok: true, summary: `Deleted ${ids.length} transcript word${ids.length === 1 ? '' : 's'}`, data: { wordIds: ids, cuts: finalizeCutSeams(seams) } };
+          }
+          case 'mask_words': {
+            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: t('workbench.noVideoYet') };
+            const parsed = parseMaskWordsInput(input);
+            if ('error' in parsed) return { ok: false, error: parsed.error };
+            await ensureClipTranscripts();
+            const transcriptDocument = syncCaptionTranscripts(
+              documentRef.current,
+              asrRef.current,
+              captionTranscriptsByAsset(documentRef.current, compRef.current, clipAsrRef.current),
+            );
+            if (transcriptDocument !== documentRef.current) setDocument(transcriptDocument);
+            const resolved = resolveDocumentWordIds(transcriptDocument, parsed.ids);
+            if (resolved.missing.length) return { ok: false, error: `unknown or stale word ids: ${resolved.missing.join(', ')}`, data: { missing: resolved.missing } };
+            // Runtime transcripts are the live truth in the tab: the main copy owns the first narrative
+            // asset, every other asset maps to its shot's src key (same ownership rule as edit_caption_text).
+            const mainAssetId = firstNarrativeAssetId(transcriptDocument);
+            const srcByAsset = new Map<string, string>();
+            const shotsNow = ensureShots(compRef.current);
+            for (const track of transcriptDocument.timeline.tracks) {
+              if (track.id !== transcriptDocument.semantics.primaryNarrativeTrackId) continue;
+              for (const clip of track.clips) {
+                if (clip.kind !== 'narrative') continue;
+                const src = shotsNow.find((shot) => shot.id === clip.id)?.src;
+                if (src && !srcByAsset.has(clip.assetId)) srcByAsset.set(clip.assetId, src);
+              }
+            }
+            let changed = false;
+            for (const [assetId, words] of groupWordsByAsset(resolved.words)) {
+              if (assetId === mainAssetId && asrRef.current?.length) {
+                const next = applyWordMasks(asrRef.current, words, parsed.patch);
+                if (next === asrRef.current) continue;
+                setAsrSentences(next);
+                asrRef.current = next;
+                changed = true;
+                continue;
+              }
+              const src = srcByAsset.get(assetId);
+              const prev = src ? clipAsrRef.current[src] : undefined;
+              if (!src || !prev) return { ok: false, error: `transcript for asset ${assetId} is not loaded in the tab` };
+              const next = applyWordMasks(prev, words, parsed.patch);
+              if (next === prev) continue;
+              const nextClips = { ...clipAsrRef.current, [src]: next };
+              setClipAsr(nextClips);
+              clipAsrRef.current = nextClips;
+              changed = true;
+            }
+            const summary = maskWordsSummary(parsed.ids.length, parsed.patch);
+            if (!changed) return { ok: true, summary: `${summary} (already so)`, data: { wordIds: parsed.ids, ...parsed.patch } };
+            const maskEdit = applyCaptionDocumentEdit({
+              document: documentRef.current,
+              mainTranscript: asrRef.current,
+              clipTranscripts: clipAsrRef.current,
+            });
+            if (!maskEdit.ok) return { ok: false, error: editorErrorMessage(maskEdit.error), data: { code: maskEdit.error.code, trackIds: maskEdit.error.trackIds } };
+            setDocument(maskEdit.document);
+            return { ok: true, summary, data: { wordIds: parsed.ids, ...parsed.patch } };
           }
           case 'remove_silence': {
             if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: t('workbench.noVideoYet') };

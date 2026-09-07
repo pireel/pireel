@@ -26,7 +26,8 @@ import {
 import { removeSrcRanges, restoreSrcRange, spans as clipSpans } from '@pireel/studio-engine/trim';
 import { wordsFromText } from '@pireel/studio-engine/caption-fx';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
-import type { ScriptCut, TimelineScriptCut } from './script-panel';
+import { type WordMaskPatch, applyWordMasks } from '@pireel/studio-engine/word-masks';
+import type { ScriptCut, ScriptMaskTarget, TimelineScriptCut } from './script-panel';
 import { t } from './i18n';
 import { editorErrorMessage } from './editor-error';
 
@@ -285,6 +286,46 @@ export function useScriptCut(deps: ScriptCutDeps) {
     setDocument(edit.document);
     toast.success(t('workbench.replacedText', { text: txt }));
   };
+  /** Mask words (beep/mute their sound, swap their caption text) on the runtime transcripts, then
+   *  publish through the caption transaction so the document, captions and export all follow. */
+  const maskScriptWords = (targets: ScriptMaskTarget[], patch: WordMaskPatch, msg: string) => {
+    if (!targets.length) return;
+    const bySrc = new Map<string | null, { sentenceIndex: number; wordIndex: number }[]>();
+    for (const target of targets) bySrc.set(target.src, [...(bySrc.get(target.src) ?? []), { sentenceIndex: target.si, wordIndex: target.wi }]);
+    let changed = false;
+    for (const [src, list] of bySrc) {
+      if (src == null) {
+        const prev = asrRef.current;
+        if (!prev) continue;
+        const next = applyWordMasks(prev, list, patch);
+        if (next === prev) continue;
+        setAsrSentences(next);
+        asrRef.current = next;
+        changed = true;
+      } else {
+        const prev = clipAsrRef.current[src];
+        if (!prev) continue;
+        const next = applyWordMasks(prev, list, patch);
+        if (next === prev) continue;
+        const nextClips = { ...clipAsrRef.current, [src]: next };
+        setClipAsr(nextClips);
+        clipAsrRef.current = nextClips;
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    const edit = applyCaptionDocumentEdit({
+      document: documentRef.current,
+      mainTranscript: asrRef.current,
+      clipTranscripts: clipAsrRef.current,
+    });
+    if (!edit.ok) {
+      toast.error(editorErrorMessage(edit.error));
+      return;
+    }
+    setDocument(edit.document);
+    toast.success(msg);
+  };
   const replaceTimelineScriptWord = (
     assetId: string,
     si: number,
@@ -364,6 +405,7 @@ export function useScriptCut(deps: ScriptCutDeps) {
     cutTimelineRanges,
     restoreSrcRanges,
     replaceScriptWord,
+    maskScriptWords,
     replaceTimelineScriptWord,
     extractForScript,
     asrBusy,

@@ -242,6 +242,7 @@ import {
   localAssetIndexEntry,
 } from "./local-import-session";
 import { VideoTrackEngine } from "./video-track-engine";
+import { previewAudioMasks } from "./export-word-masks";
 import { segmentSourceRate } from "./video-segment-time";
 import { compositionRenderView } from "./composition-render-view";
 import { primaryNarrativeRenderPlan } from "./primary-render-plan";
@@ -1843,6 +1844,16 @@ export function HyperframesWorkbench({
   useEffect(() => {
     videoEngineRef.current?.setTimelineDuration(duration);
   }, [duration]);
+  // Word masks (beeped / muted words) per source: the engine silences the span as the clock crosses it.
+  const engineMaskKeysRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const eng = videoEngineRef.current;
+    if (!eng) return;
+    const masks = previewAudioMasks(editorDocument, comp);
+    for (const key of engineMaskKeysRef.current) if (!masks.has(key)) eng.setAudioMasks(key, []);
+    for (const [key, ranges] of masks) eng.setAudioMasks(key, ranges);
+    engineMaskKeysRef.current = new Set(masks.keys());
+  }, [editorDocument, comp]);
   // Engine segment table + other sources: refeed the whole table whenever shots change (split/trim/insert/delete); push the current frame when paused
   useEffect(() => {
     const eng = videoEngineRef.current;
@@ -7021,6 +7032,7 @@ export function HyperframesWorkbench({
     cutTimelineRanges,
     restoreSrcRanges,
     replaceScriptWord,
+    maskScriptWords,
     replaceTimelineScriptWord,
     extractForScript,
     asrBusy,
@@ -10040,6 +10052,7 @@ export function HyperframesWorkbench({
                         onCut={cutSrcRanges}
                         onRestore={restoreSrcRanges}
                         onReplaceWord={replaceScriptWord}
+                        onMaskWords={maskScriptWords}
                       />
                     ) : (
                       <TimelineScriptPanel
@@ -10191,6 +10204,7 @@ export function HyperframesWorkbench({
                           onCut={cutSrcRanges}
                           onRestore={restoreSrcRanges}
                           onReplaceWord={replaceScriptWord}
+                        onMaskWords={maskScriptWords}
                         />
                       ) : (
                         <TimelineScriptPanel

@@ -1526,6 +1526,23 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     ),
   },
   {
+    id: 'mask_words',
+    skillContract: { version: 1, stability: 'stable' },
+    kind: 'badge',
+    icon: '🔇',
+    label: 'tools.mask_words.label',
+    description:
+      "Mask exact spoken words WITHOUT cutting them, by stable ids from list_words: audio replaces the words' sound with a censor beep ('beep') or silence ('mute'); caption swaps the words' caption text for the given string (default '**') while the spoken transcript and timing stay untouched. Pass 'original' to restore the sound or the caption text. Use this for platform-sensitive or private words the user wants bleeped or starred out; which words qualify is the user's call — there is no built-in word list. delete_words removes words from the cut instead.",
+    inputSchema: obj(
+      {
+        wordIds: { type: 'array', items: { type: 'string' }, description: 'Stable ids copied from list_words.' },
+        audio: { type: 'string', enum: ['beep', 'mute', 'original'], description: "Replace the words' sound: beep tone, silence, or 'original' to restore. Omit to leave the sound as is." },
+        caption: { type: 'string', description: "Caption text shown instead of the words (e.g. '**' or '[bleep]'), or 'original' to show the spoken words again. Omit to leave captions as they are." },
+      },
+      ['wordIds'],
+    ),
+  },
+  {
     id: 'insert_clip',
     kind: 'card',
     busyText: 'tools.insert_clip.busy',

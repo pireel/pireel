@@ -61,7 +61,9 @@ import {
   videoShotTimelineSpans,
 } from '@pireel/studio-engine/composition';
 import { decodeAudioFile } from './audio-decode';
-import { mixAudioTrack } from './export-audio-mix';
+import {
+  type MixTone, mixAudioTrack } from './export-audio-mix';
+import { type MaskedAudioRange, maskedAudioAt } from '@pireel/studio-engine/word-masks';
 import { supplementalVisualAudioMixSegments } from './visual-render-plan';
 import {
   activeVisualMedia,
@@ -138,6 +140,19 @@ interface ExpSeg {
   fadeAt?: (tLocal: number) => number;
   /** Source-normalized precision is drawn before the element-level framing matrix. */
   framing?: ShotPreciseFraming;
+}
+
+/** Segment-local envelope that silences the masked source seconds of a segment (on top of its fades).
+ *  tLocal is timeline seconds from the segment start; the source time follows the segment's rate. */
+export function maskedSegmentEnvelope(
+  masks: readonly MaskedAudioRange[],
+  srcStart: number,
+  srcEnd: number,
+  timelineLen: number,
+  base?: (tLocal: number) => number,
+): (tLocal: number) => number {
+  const rate = (srcEnd - srcStart) / Math.max(1e-6, timelineLen);
+  return (tLocal) => (maskedAudioAt(masks, srcStart + tLocal * rate) ? 0 : (base ? base(tLocal) : 1));
 }
 
 /** Rewrite an audio sample's PCM through a gain ENVELOPE (interleaved f32 round-trip; format/rate/channels
@@ -376,6 +391,9 @@ export interface ClientExportOpts {
   /** Denoise substitution: source key → baked blended audio file. That source's audio track is read
    *  from this file instead of the source video (video decode untouched) — preview's dub, verbatim. */
   denoise?: Map<string, File> | null;
+  /** Word masks: source key ('main' / clip_<shotId>) → source-seconds spans whose sound is replaced.
+   *  Both kinds silence the source; 'beep' additionally lays a tone on the timeline. */
+  audioMasks?: Map<string, readonly MaskedAudioRange[]> | null;
   /** Resolution/fps/format (default 1080p·30·MP4). */
   render?: ExportRenderOpts;
   onProgress?: (done: number, total: number) => void;
@@ -623,6 +641,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
 
   // Segment table (edited order) + each source's File
   const segs: ExpSeg[] = [];
+  const tones: MixTone[] = [];
   const files = new Map<string, File>();
   if (videoFile) files.set('main', videoFile);
   const spans = videoShotTimelineSpans(shots, opts.videoPlacements);
@@ -641,14 +660,28 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       !!prev && (!shotsContiguous(prev, s) || Math.abs(spans[i - 1]!.editedEnd - spans[i]!.editedStart) > 1e-3),
       !!next && (!shotsContiguous(s, next) || Math.abs(spans[i]!.editedEnd - spans[i + 1]!.editedStart) > 1e-3),
     );
-    const fade = fadeFn ? { fadeAt: fadeFn } : {};
     const framing = s.preciseFraming?.coordinateSpace === 'source-normalized' ? { framing: s.preciseFraming } : {};
     const placement = { timelineStart: spans[i]!.editedStart, timelineEnd: spans[i]!.editedEnd };
+    const key = !s.src ? 'main' : `clip_${s.id}`;
+    // Word masks ride the same envelope as the fades: the masked source seconds read as silence
+    // (a beep, when asked for, is laid on the timeline by the mixer instead).
+    const masks = opts.audioMasks?.get(key);
+    const masked = masks?.length ? maskedSegmentEnvelope(masks, s.srcStart, s.srcEnd, placement.timelineEnd - placement.timelineStart, fadeFn ?? undefined) : fadeFn;
+    const fade = masked ? { fadeAt: masked } : {};
+    if (masks?.length) {
+      for (const range of masks) {
+        if (range.audio !== 'beep') continue;
+        const a = Math.max(range.start, s.srcStart);
+        const b = Math.min(range.end, s.srcEnd);
+        if (b <= a) continue;
+        const rate = (s.srcEnd - s.srcStart) / Math.max(1e-6, placement.timelineEnd - placement.timelineStart);
+        tones.push({ timelineStart: placement.timelineStart + (a - s.srcStart) / rate, timelineEnd: placement.timelineStart + (b - s.srcStart) / rate });
+      }
+    }
     if (!s.src) {
-      segs.push({ srcStart: s.srcStart, srcEnd: s.srcEnd, key: 'main', ...placement, ...filter, ...gain, ...fade, ...framing });
+      segs.push({ srcStart: s.srcStart, srcEnd: s.srcEnd, key, ...placement, ...filter, ...gain, ...fade, ...framing });
       continue;
     }
-    const key = `clip_${s.id}`;
     segs.push({ srcStart: s.srcStart, srcEnd: s.srcEnd, key, ...placement, ...filter, ...gain, ...fade, ...framing });
     if (!files.has(key)) {
       files.set(key, await loadExportVideoFile(s.src, clipFiles));
@@ -740,10 +773,11 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     const videoSource = new CanvasSource(canvas, { codec: render.format === 'webm' ? 'vp9' : 'avc', bitrate: QUALITY_HIGH });
     output.addVideoTrack(videoSource, { frameRate: FPS });
     const withClips = !!opts.audio?.length;
-    const needsTimelineMix = withClips || visualVideos.length > 0 || segs.some((segment) =>
+    const needsTimelineMix = withClips || visualVideos.length > 0 || tones.length > 0 || segs.some((segment) =>
       Math.abs(segmentSourceRate(segment, segment.timelineStart, segment.timelineEnd) - 1) > 1e-6,
     );
     const anyAudio = withClips
+      || tones.length > 0
       || segs.some((s) => (s.gain ?? 1) > 0 && rigs.get(s.key)?.audio)
       || visualVideos.some((visual) => !visual.muted && rigs.get(visualVideoKeys.get(visual.clipId)!)?.audio);
     // webm container can't hold aac, so audio switches to opus for that format
@@ -1071,6 +1105,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
         audioTracks,
         clips,
         totalSec: durationSec,
+        tones,
         push: (sample) => audioSource.add(sample).then(() => sample.close()),
       });
     } else if (audioSource) {
