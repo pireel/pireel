@@ -77,7 +77,7 @@ import { disposeSourceRig, openSource, sampleAt, type SourceRig } from './export
 import { createGlMixer, glDirection } from '@pireel/studio-engine/transition-gl';
 import { injectPreviewRuntime } from './sample-composition';
 import { materializeRemoteMedia } from './remote-media';
-import { buildInlineFontCss } from './export-fonts';
+import { buildInlineFontCss, warmupFontMarkup } from './export-fonts';
 import { webFontIdOf } from '@pireel/studio-engine/font-library';
 import { googleFontRowOf } from '@pireel/studio-engine/google-fonts';
 import { t } from './i18n';
@@ -294,6 +294,23 @@ async function rasterize(uri: string): Promise<HTMLImageElement> {
   img.src = uri;
   await img.decode();
   return img;
+}
+
+/** Decode every inlined face before the first real frame (see warmupFontMarkup). Two passes with a
+ *  short pause: the first triggers the lazy font loads, the second confirms they are cached; the
+ *  cost is two throwaway rasterizations per export. */
+async function warmInlineFonts(css: string, text: string, W: number, H: number, outW: number, outH: number): Promise<void> {
+  const markup = warmupFontMarkup(css, text);
+  if (!markup) return;
+  const uri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgOpen(W, H, outW, outH, css) + markup + SVG_CLOSE);
+  for (let pass = 0; pass < 2; pass += 1) {
+    try {
+      await rasterize(uri);
+    } catch {
+      return; // a warm-up that fails to decode must never block the export itself
+    }
+    if (pass === 0) await new Promise((resolve) => setTimeout(resolve, 120));
+  }
 }
 
 /** Canonical ground for composition pixels not covered by video, graphics, or a theme surface. */
@@ -518,6 +535,7 @@ export async function captureCompositionFrame(opts: {
       compositionWebFontIds(comp),
     );
     const css = `${fontCss}\n${overlay.headCss}\n#root{background:transparent !important;}`;
+    await warmInlineFonts(css, overlay.root.textContent ?? '', W, H, outW, outH);
     overlay.win.__hfPreview!.seekTimelines(t);
     const el = overlay.doc.getElementById('vidEl');
     const vs = readTransform(overlay.win, el, W, H);
@@ -755,6 +773,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       compositionWebFontIds(comp),
     );
     const css = `${fontCss}\n${overlay.headCss}\n#root{background:transparent !important;}`;
+    await warmInlineFonts(css, overlay.root.textContent ?? '', W, H, outW, outH);
     // Layout coordinate system is always comp's W×H (font-size calibration unchanged); device size =
     // output outW×outH → vectors rasterize crisply at 4K
     const preEnc = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgOpen(W, H, outW, outH, css));
