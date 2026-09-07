@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AsrSegment } from './build-blocks';
 import { displayCues } from './captions-relay';
 import type { VideoShot } from './composition';
-import { applyWordMasks, maskCueText, maskedAudioAt, maskedAudioRanges, patchWordMask, snapRunToEnergy } from './word-masks';
+import { MASK_LEAD_SEC, MASK_TAIL_SEC, applyWordMasks, maskCueText, maskedAudioAt, maskedAudioRanges, patchWordMask } from './word-masks';
 
 const sentence = (): AsrSegment => ({
   start: 0,
@@ -37,26 +37,22 @@ describe('word masks', () => {
     expect(segs[0]!.words![3]!.text).toBe('damn');
   });
 
-  it('merges masked spans of the same kind and never invades an unmasked neighbour', () => {
+  it('covers a run of masked words with the broadcast margins and merges overlaps', () => {
     const segs = applyWordMasks([sentence()], [{ sentenceIndex: 0, wordIndex: 3 }, { sentenceIndex: 0, wordIndex: 4 }], { audio: 'beep' });
     const ranges = maskedAudioRanges(segs);
     expect(ranges).toHaveLength(1);
     expect(ranges[0]!.audio).toBe('beep');
-    // 'a' ends exactly where 'damn' starts: no padding leaks into it. 'take' starts where 'good' ends,
-    // a shared ASR cut, so the span stops 60 ms before that boundary.
-    expect(ranges[0]!.start).toBeCloseTo(0.6, 6);
-    expect(ranges[0]!.end).toBeCloseTo(1.14, 6);
+    // 'damn good' spans 0.6–1.2: the mask starts a little before and ends a little after
+    expect(ranges[0]!.start).toBeCloseTo(0.6 - MASK_LEAD_SEC, 6);
+    expect(ranges[0]!.end).toBeCloseTo(1.2 + MASK_TAIL_SEC, 6);
     expect(maskedAudioAt(ranges, 0.7)).toBe('beep');
-    expect(maskedAudioAt(ranges, 0.55)).toBeNull();
-    // With silence around the word, the padding is used
-    const gapped: AsrSegment = { start: 0, end: 3, text: 'one damn two', words: [
-      { text: 'one', start: 0, end: 0.4 }, { text: 'damn', start: 1, end: 1.4 }, { text: 'two', start: 2, end: 2.4 },
-    ] };
-    const padded = maskedAudioRanges(applyWordMasks([gapped], [{ sentenceIndex: 0, wordIndex: 1 }], { audio: 'mute' }));
-    expect(padded[0]!.start).toBeCloseTo(0.96, 6);
-    expect(padded[0]!.end).toBeCloseTo(1.44, 6);
+    expect(maskedAudioAt(ranges, 0.5)).toBeNull();
+    // A different kind next to it keeps its own span
     const mixed = applyWordMasks(segs, [{ sentenceIndex: 0, wordIndex: 4 }], { audio: 'mute' });
     expect(maskedAudioRanges(mixed).map((r) => r.audio)).toEqual(['beep', 'mute']);
+    // Two beeped words with a short gap between them overlap through the margins and merge
+    const apart = applyWordMasks([sentence()], [{ sentenceIndex: 0, wordIndex: 1 }, { sentenceIndex: 0, wordIndex: 3 }], { audio: 'beep' });
+    expect(maskedAudioRanges(apart)).toHaveLength(1);
   });
 
   it('masks the caption copy while keeping word timing', () => {
@@ -77,43 +73,4 @@ describe('word masks', () => {
     expect(maskCueText(seg, 'unrelated', 0, 5)).toBe('unrelated');
   });
 
-  it('snaps a masked word to the audio onset and decay when the envelope is known', () => {
-    // 100 bins/s over 3 s. ASR says the word spans 1.00–1.40, but the voice starts at 1.05 and has
-    // decayed by 1.30; the next word starts at 1.40 per ASR and sounds from 1.45.
-    const peaks = new Float32Array(300);
-    for (let i = 105; i < 130; i++) peaks[i] = 0.8;
-    for (let i = 130; i < 145; i++) peaks[i] = 0.05;
-    for (let i = 145; i < 170; i++) peaks[i] = 0.8;
-    const energy = { peaks, durationSec: 3 };
-    const snapped = snapRunToEnergy(energy, 1, 1.4)!;
-    expect(snapped.start).toBeCloseTo(1.05 - 0.012, 3);
-    expect(snapped.end).toBeCloseTo(1.30 + 0.012, 3);
-    const seg: AsrSegment = { start: 0, end: 3, text: 'one two three', words: [
-      { text: 'one', start: 0.5, end: 1 }, { text: 'two', start: 1, end: 1.4 }, { text: 'three', start: 1.4, end: 1.7 },
-    ] };
-    const ranges = maskedAudioRanges(applyWordMasks([seg], [{ sentenceIndex: 0, wordIndex: 1 }], { audio: 'beep' }), energy);
-    expect(ranges[0]!.start).toBeCloseTo(1.038, 3);
-    expect(ranges[0]!.end).toBeCloseTo(1.312, 3);
-    // No decay before the next onset: the end falls back to the boundary heuristic
-    peaks.fill(0.8, 130, 145);
-    expect(Number.isNaN(snapRunToEnergy(energy, 1, 1.4)!.end)).toBe(true);
-    // A short dip inside the word is not a gap
-    peaks.fill(0.8, 105, 145);
-    peaks[118] = 0.05;
-    expect(Number.isNaN(snapRunToEnergy(energy, 1, 1.4)!.end)).toBe(true);
-    // A run of masked words stays ONE span: a real gap between its words never re-opens the audio
-    // (estimated word boundaries make in-run gaps common). Only the outer edges move.
-    peaks.fill(0);
-    peaks.fill(0.8, 52, 70); peaks.fill(0.8, 78, 96); peaks.fill(0.8, 104, 122); peaks.fill(0.8, 130, 148);
-    const runSeg: AsrSegment = { start: 0.5, end: 1.5, text: 'a b c d', words: [
-      { text: 'a', start: 0.5, end: 0.75 }, { text: 'b', start: 0.75, end: 1 }, { text: 'c', start: 1, end: 1.25 }, { text: 'd', start: 1.25, end: 1.5 },
-    ] };
-    const run = maskedAudioRanges(applyWordMasks([runSeg], [1, 2].map((wordIndex) => ({ sentenceIndex: 0, wordIndex })), { audio: 'beep' }), energy);
-    expect(run).toHaveLength(1);
-    expect(run[0]!.start).toBeCloseTo(0.78 - 0.012, 3);
-    expect(run[0]!.end).toBeCloseTo(1.22 + 0.012, 3);
-    expect(maskedAudioRanges(applyWordMasks([seg], [{ sentenceIndex: 0, wordIndex: 1 }], { audio: 'beep' }), energy)[0]!.end).toBeCloseTo(1.34, 3);
-    // Silence where the word should be: nothing to snap to
-    expect(snapRunToEnergy({ peaks: new Float32Array(300), durationSec: 3 }, 1, 1.4)).toBeNull();
-  });
 });

@@ -31,7 +31,6 @@ import { decodeAudioFile, decodeVideoAudio } from './audio-decode';
 import { bgmAutoVolumeDb, measureBufferLoudnessDb } from './loudness';
 import { fileSig } from './media';
 import { peaksOf } from './audio-peaks';
-import type { AudioEnergy } from '@pireel/studio-engine/word-masks';
 import { loadLocalVideo, saveLocalVideo } from './local-media';
 import { getStudioSpaceId } from './gen-api';
 import { materializeRemoteMedia } from './remote-media';
@@ -52,8 +51,6 @@ export interface AudioTracksDeps {
   visualMediaClips?: readonly SupplementalVisualMediaClip[];
   timelineDurationSec?: number;
   documentRef: MutableRefObject<EditorDocumentV2>;
-  /** Source envelopes for masked clips (word masks snap to the real onset/decay); absent = heuristic boundaries. */
-  maskEnergyRef?: MutableRefObject<ReadonlyMap<string, AudioEnergy>>;
   setDocument: (document: EditorDocumentV2, runtimeComposition?: Composition) => void;
   videoFile: File | null;
   videoFileRef: MutableRefObject<File | null>;
@@ -71,7 +68,7 @@ export interface AudioTracksDeps {
 export function useAudioTracks(deps: AudioTracksDeps) {
   const {
     projectId, comp, compRef, renderAudioTracks, visualMediaClips, timelineDurationSec, documentRef, setDocument, videoFile, videoFileRef,
-    videoSigRef, videoEngineRef, clipFilesRef, tRef, pickFile, backupMediaToCloud, pushUndoSnapshot, maskEnergyRef,
+    videoSigRef, videoEngineRef, clipFilesRef, tRef, pickFile, backupMediaToCloud, pushUndoSnapshot,
   } = deps;
   const renderAudioTracksRef = useRef(renderAudioTracks);
   renderAudioTracksRef.current = renderAudioTracks;
@@ -266,7 +263,7 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     const c = compRef.current;
     const total = timelineDurationSec ?? totalDuration(c);
     // Word masks (beeped / muted words) per clip: the engine silences the span and plays the tone.
-    const clipMasks = clipAudioMasks(documentRef.current, maskEnergyRef?.current);
+    const clipMasks = clipAudioMasks(documentRef.current);
     const laneSpecs = (renderAudioTracksRef.current ?? c.audioTracks ?? [])
       .filter(clipUsable)
       .map((clip) => {

@@ -243,8 +243,6 @@ import {
 } from "./local-import-session";
 import { VideoTrackEngine } from "./video-track-engine";
 import { clipAudioMasks, previewAudioMasks } from "./export-word-masks";
-import { useMaskEnergy } from "./use-mask-energy";
-import type { AudioEnergy } from "@pireel/studio-engine/word-masks";
 import { segmentSourceRate } from "./video-segment-time";
 import { compositionRenderView } from "./composition-render-view";
 import { primaryNarrativeRenderPlan } from "./primary-render-plan";
@@ -1811,8 +1809,6 @@ export function HyperframesWorkbench({
   const denoiseExportRef = useRef<(() => Map<string, File> | null) | null>(
     null,
   );
-  // Source envelopes for masked clips (word masks snap to the voice's real onset/decay); filled once audioOps exists
-  const maskEnergyRef = useRef<ReadonlyMap<string, AudioEnergy>>(new Map());
   const {
     exporting,
     publishing,
@@ -1828,7 +1824,6 @@ export function HyperframesWorkbench({
     clipFilesRef,
     audioExportRef,
     denoiseExportRef,
-    maskEnergyRef,
   });
   // Agent export task (export_video/track_export): compose + browser download runs via exportVideo, this only tracks task state;
   // exportPct mirrored into a ref for the progress query inside runStudioTool (the switch closure can't read state)
@@ -5705,7 +5700,6 @@ export function HyperframesWorkbench({
   // Audio tracks orchestration (upload/generate/clips/engine sync/export payload — see use-bgm.ts).
   // Called here (not earlier) because pushUndoSnapshot is a const — TDZ before its definition.
   const audioOps = useAudioTracks({
-    maskEnergyRef,
     projectId,
     comp,
     compRef,
@@ -5727,43 +5721,32 @@ export function HyperframesWorkbench({
   audioExportRef.current = audioOps.audioForExport;
   // Word masks (beeped / muted words): narrative sources are keyed by src in the engine; audio-lane and
   // visual-lane clips carry theirs inside their engine specs, which are re-fed here since masks live on
-  // the document, outside the audio hook's own deps. Spans follow the source envelope once decoded.
-  const maskEnergy = useMaskEnergy({
-    document: editorDocument,
-    comp,
-    visualMediaClips: supplementalVisuals,
-    videoFileRef,
-    clipFilesRef,
-    audioForExport: audioOps.audioForExport,
-  });
-  maskEnergyRef.current = maskEnergy;
+  // the document, outside the audio hook's own deps.
   const engineMaskKeysRef = useRef<Set<string>>(new Set());
   const engineMaskSigRef = useRef('');
   useEffect(() => {
     const eng = videoEngineRef.current;
     if (!eng) return;
-    const masks = previewAudioMasks(editorDocument, comp, maskEnergy);
+    const masks = previewAudioMasks(editorDocument, comp);
     if ((window as unknown as { __hfMaskDebug?: boolean }).__hfMaskDebug) {
-      const byClip = clipAudioMasks(editorDocument, maskEnergy);
       console.info('[mask:doc]', {
-        maskedClips: [...byClip.keys()],
+        maskedClips: [...clipAudioMasks(editorDocument).keys()],
         narrationKeys: [...masks.keys()].map((k) => k.slice(0, 60)),
         shots: videoTrackShots(comp).map((shot) => `${shot.id}:${(shot.src ?? 'main').slice(0, 40)}`),
         visuals: supplementalVisuals.map((visual) => `${visual.clipId}:${visual.kind}:${visual.muted ? 'muted' : 'audible'}`),
         audioClips: (comp.audioTracks ?? []).map((clip) => clip.id),
-        energy: [...maskEnergy.keys()],
       });
     }
     for (const key of engineMaskKeysRef.current) if (!masks.has(key)) eng.setAudioMasks(key, []);
     for (const [key, ranges] of masks) eng.setAudioMasks(key, ranges);
     engineMaskKeysRef.current = new Set(masks.keys());
-    const clipSig = JSON.stringify([...clipAudioMasks(editorDocument, maskEnergy)]);
+    const clipSig = JSON.stringify([...clipAudioMasks(editorDocument)]);
     if (clipSig !== engineMaskSigRef.current) {
       engineMaskSigRef.current = clipSig;
       audioOps.resyncEngineClips();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editorDocument, comp, maskEnergy]);
+  }, [editorDocument, comp]);
   /** Switch the rail to the audio settings tab (expanding the rail if the user had collapsed it). */
   const openAudioTab = () => {
     setFloatWin(null);

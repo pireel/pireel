@@ -31,7 +31,6 @@ import { primaryNarrativeRenderPlan } from './primary-render-plan';
 import { supplementalVisualMedia } from './visual-render-plan';
 import type { AudioExportEntry } from './audio-export-payload';
 import { clipAudioMasks, exportAudioMasks } from './export-word-masks';
-import type { AudioEnergy } from '@pireel/studio-engine/word-masks';
 
 /** presign's hard cap (413 past it); intercept early to give a human message. */
 const MAX_PUBLISH_BYTES = 200 * 1024 * 1024;
@@ -90,10 +89,8 @@ export function useStudioExport(deps: {
   audioExportRef?: MutableRefObject<(() => Promise<AudioExportEntry[] | null>) | null>;
   /** Denoise substitution getter (source key → baked blended audio); null = original audio. */
   denoiseExportRef?: MutableRefObject<(() => Map<string, File> | null) | null>;
-  /** Source envelopes for masked clips (see useMaskEnergy). */
-  maskEnergyRef?: MutableRefObject<ReadonlyMap<string, AudioEnergy>>;
 }) {
-  const { compRef, documentRef, resolveAssetUrl, videoFileRef, clipFilesRef, audioExportRef, denoiseExportRef, maskEnergyRef } = deps;
+  const { compRef, documentRef, resolveAssetUrl, videoFileRef, clipFilesRef, audioExportRef, denoiseExportRef } = deps;
   const [exporting, setExporting] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [exportPct, setExportPct] = useState(0);
@@ -153,8 +150,8 @@ export function useStudioExport(deps: {
       clipFiles: clipFilesRef?.current ?? new Map(),
       audio,
       denoise: denoiseExportRef?.current?.() ?? null,
-      audioMasks: exportAudioMasks(documentRef.current, c, maskEnergyRef?.current),
-      clipMasks: clipAudioMasks(documentRef.current, maskEnergyRef?.current),
+      audioMasks: exportAudioMasks(documentRef.current, c),
+      clipMasks: clipAudioMasks(documentRef.current),
       render: opts,
       onProgress: (done, total) => setExportPct(Math.round((done / total) * 100)),
       shouldCancel: () => exportCancelRef.current,
