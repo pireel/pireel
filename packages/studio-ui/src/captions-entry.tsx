@@ -16,8 +16,6 @@ import { CAPTION_EXAMPLES } from './caption-examples';
 export function CaptionsEntry(props: WorkflowPanelProps) {
   const locale = studioLocale() === 'zh' ? 'zh' : 'en';
   const zh = locale === 'zh';
-  const talkingHead = props.initialTemplateId === 'talking-head';
-  const [pace, setPace] = useState<'natural' | 'tight'>('natural');
   const say = (cn: string, en: string) => zh ? cn : en;
   const [preset, setPreset] = useState(props.host.emphasizeCaptions ? 'kw-yellow' : 'em-yellow');
   const [shortenPauses, setShortenPauses] = useState(false);
@@ -66,8 +64,8 @@ export function CaptionsEntry(props: WorkflowPanelProps) {
     try {
       const source = host.context();
       if (!source.hasNarration) throw new Error(say('请先添加有讲话内容的视频。', 'Add a video with spoken content first.'));
-      const definition = { ...workflowTemplate(talkingHead ? 'talking-head' : 'captions')!.definition, title: talkingHead ? say('口播精剪版', 'Polished talking-head version') : say('字幕版', 'Captioned version') };
-      const next = createWorkflowRun(definition, { captionStyle: preset, highlightKeywords: preset === 'kw-yellow', ...(talkingHead ? { minimumPauseSec: pace === 'tight' ? 0.45 : 0.7, speechPaddingSec: pace === 'tight' ? 0.1 : 0.15 } : { shortenPauses }) }, source.source, STUDIO_WORKFLOW_CAPABILITIES, crypto.randomUUID());
+      const definition = { ...workflowTemplate('captions')!.definition, title: say('字幕版', 'Captioned version') };
+      const next = createWorkflowRun(definition, { captionStyle: preset, highlightKeywords: preset === 'kw-yellow', shortenPauses }, source.source, STUDIO_WORKFLOW_CAPABILITIES, crypto.randomUUID());
       localStorage.setItem(storageKey + ':captions', JSON.stringify({ preset }));
       setRun(next);
       const result = await executeWorkflow(next, STUDIO_WORKFLOW_CAPABILITIES, createStudioWorkflowExecutor(host, zh), {
@@ -97,19 +95,9 @@ export function CaptionsEntry(props: WorkflowPanelProps) {
     <Dialog open={props.open} onOpenChange={(open) => { if (!busyRef.current) props.onOpenChange(open); }}>
       <DialogContent overlayClassName="z-[190]" className="studio-scope bg-bg border-line z-[200] flex max-h-[92dvh] flex-col gap-0 overflow-y-auto p-6 sm:max-w-[540px]" showCloseButton={!busy}>
         <DialogHeader className="pr-6 text-left">
-          <DialogTitle className="text-ink text-xl font-semibold">{talkingHead ? say('口播精剪', 'Polish your talking-head video') : say('AI 字幕', 'AI captions')}</DialogTitle>
-          <DialogDescription className="text-ink-3 mt-1 text-sm">{talkingHead ? say('把录好的口播，变成节奏顺畅、字幕清晰的视频。', 'Give your recording a smoother pace and clear captions.') : say('让每一句话，都被看见。', 'Make every word stand out.')}</DialogDescription>
+          <DialogTitle className="text-ink text-xl font-semibold">{say('AI 字幕', 'AI Captions')}</DialogTitle>
+          <DialogDescription className="text-ink-3 mt-1 text-sm">{say('自动识别讲话，配上喜欢的字幕样式。', 'Turn speech into styled, editable captions.')}</DialogDescription>
         </DialogHeader>
-        {talkingHead && <fieldset className="mt-5">
-          <legend className="text-ink mb-2 text-sm">{say('你希望是什么节奏？', 'How should it feel?')}</legend>
-          <div className="grid grid-cols-2 gap-2">
-            {(['natural', 'tight'] as const).map((value) => <label key={value} className={'cursor-pointer rounded-lg border p-3 ' + (pace === value ? 'border-accent bg-accent/5' : 'border-line')}>
-              <input type="radio" name="talking-head-pace" checked={pace === value} disabled={busy || completed} onChange={() => { setPace(value); resetResult(); }} className="mr-2 accent-[var(--color-accent)]" />
-              <span className="text-ink text-sm font-medium">{value === 'natural' ? say('自然讲述', 'Natural') : say('紧凑利落', 'Brisk')}</span>
-              <span className="text-ink-3 mt-1 block text-xs leading-relaxed">{value === 'natural' ? say('留一点停顿，让观点有余地', 'Leave room for your message') : say('减少等待，让表达更干脆', 'Less waiting between ideas')}</span>
-            </label>)}
-          </div>
-        </fieldset>}
         <div className="mt-6">
           <div className="mb-3 flex items-center justify-between gap-3 text-xs"><span className="text-ink-3">{say('选择字幕样式', 'Choose your caption style')}</span><button type="button" aria-pressed={showOriginal} onClick={() => setShowOriginal((value) => !value)} className="text-ink underline underline-offset-4 focus-visible:outline-accent">{showOriginal ? say('查看字幕效果', 'Show captions') : say('对比无字幕', 'Compare without captions')}</button></div>
           <CaptionExampleCards allowKeywords={!!props.host.emphasizeCaptions} locale={locale} selected={preset} disabled={busy || completed} showCaptions={!showOriginal} onSelect={(value) => { styleTouchedRef.current = true; setPreset(value); setShowOriginal(false); resetResult(); }} />
@@ -126,20 +114,19 @@ export function CaptionsEntry(props: WorkflowPanelProps) {
               <Upload size={21} />{say('上传视频', 'Upload video')}
             </button>
           )}
-          {!talkingHead && <label className="text-ink mt-4 flex cursor-pointer items-start gap-2.5">
+          <label className="text-ink mt-4 flex cursor-pointer items-start gap-2.5">
             <input type="checkbox" checked={shortenPauses} disabled={busy || completed} onChange={(event) => { setShortenPauses(event.target.checked); resetResult(); }} className="mt-0.5 size-4 shrink-0 accent-[var(--color-accent)]" />
             <span><span className="text-sm font-medium">{say('AI 去停顿', 'Shorten pauses')}</span><span className="text-ink-3 mt-1 block text-xs leading-relaxed">{say('缩短说话间的长停顿，保留自然语气。', 'Trim long pauses while keeping speech natural.')}</span></span>
-          </label>}
-          {talkingHead && <p className="text-ink-3 mt-3 text-xs leading-relaxed">{say('自动整理长停顿并添加字幕。讲过的内容和原有画幅会保留，完成后可继续精修。', 'Long pauses are shortened and captions added. Your spoken content and framing stay intact, ready for your final edits.')}</p>}
+          </label>
         </div>
         {failure && <p role="alert" data-workflow-stage={failedStep} className="text-ink mt-4 text-sm leading-relaxed">{failureText}</p>}
         {run?.status === 'cancelled' && <p role="status" className="text-ink-3 mt-4 text-sm">{say('已停止，已完成的处理保留在新版本中。', 'Stopped. Completed changes remain in the new version.')}</p>}
         {busy && <p role="status" aria-live="polite" className="text-ink mt-4 flex items-center gap-2 text-sm"><Loader2 size={15} className="animate-spin" />{progress}</p>}
-        {completed && <p role="status" className="text-ink mt-4 flex items-center gap-2 text-sm"><CheckCircle2 size={16} />{talkingHead ? say('口播初稿已完成', 'Your first cut is ready') : say('字幕已加好', 'Your captions are ready')}</p>}
+        {completed && <p role="status" className="text-ink mt-4 flex items-center gap-2 text-sm"><CheckCircle2 size={16} />{say('字幕已加好', 'Your captions are ready')}</p>}
         <div className="mt-5">
           {completed ? <button type="button" onClick={() => props.onOpenChange(false)} className="bg-ink text-bg h-11 w-full rounded-md text-sm font-semibold">{say('查看视频', 'View video')}</button>
             : busy ? <button type="button" disabled={stopping} onClick={() => { abortRef.current?.abort(); setStopping(true); }} className="border-line text-ink h-11 w-full rounded-md border text-sm disabled:opacity-50">{say('停止处理', 'Stop processing')}</button>
-            : <button type="button" disabled={!current.hasNarration || !storageKey || props.blocked} onClick={() => void start()} className="bg-ink text-bg h-11 w-full rounded-md text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-35">{talkingHead ? say('生成口播初稿', 'Create my first cut') : say('开始加字幕', 'Add captions')}</button>}
+            : <button type="button" disabled={!current.hasNarration || !storageKey || props.blocked} onClick={() => void start()} className="bg-ink text-bg h-11 w-full rounded-md text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-35">{say('开始加字幕', 'Add captions')}</button>}
         </div>
         <p className="text-ink-4 mt-3 text-center text-[11px] leading-relaxed">{props.blocked ? say('视频准备中，请稍候…', 'Preparing your video…') : say('处理时请保持页面打开。语音识别与重点词选择可能消耗积分。', 'Keep this page open. Transcription and key phrase selection may use credits.')}</p>
       </DialogContent>

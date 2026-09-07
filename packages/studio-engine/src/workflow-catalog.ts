@@ -50,7 +50,7 @@ export const STUDIO_WORKFLOW_TEMPLATES: readonly StudioWorkflowTemplate[] = [
     }, [duplicate, { id: 'pauses', capability: 'speech.tighten-pauses', version: 1, dependsOn: ['version'], arguments: { minimumPauseSec: input('minimumPauseSec'), speechPaddingSec: input('speechPaddingSec') } }, transcript(['pauses'], 'addCaptions'), captions(['transcript'], 'addCaptions')]),
   },
   {
-    id: 'captions', art: 'captions', title: label('AI 字幕', 'AI captions'),
+    id: 'captions', art: 'captions', title: label('AI 字幕', 'AI Captions'),
     description: label('识别讲话，套用喜欢的字幕样式。', 'Turn spoken words into styled captions.'),
     detail: label('优先复用已有转写，缺少时再识别。所有字幕仍可在编辑器中修改。', 'Reuse existing transcripts or transcribe when missing. Every caption stays editable in Studio.'),
     definition: { ...definition('captions', 'Captioned video', {
@@ -61,17 +61,6 @@ export const STUDIO_WORKFLOW_TEMPLATES: readonly StudioWorkflowTemplate[] = [
       id: 'pauses', capability: 'speech.tighten-pauses', version: 1, dependsOn: ['version'], enabledBy: 'shortenPauses',
       arguments: { minimumPauseSec: literal(0.7), speechPaddingSec: literal(0.15) },
     }, transcript(['pauses']), captions(['transcript']), { id: 'emphasis', capability: 'captions.emphasize', version: 1, dependsOn: ['captions'], enabledBy: 'highlightKeywords', arguments: {} }]), version: 3 },
-  },
-  {
-    id: 'talking-head', art: 'pause-cleanup', title: label('口播精剪', 'Polish a talking-head video'),
-    description: label('把录好的口播，整理成节奏顺畅、字幕清晰的视频。', 'Turn your recording into a fluent, captioned video.'),
-    detail: label('整理长停顿、生成字幕与重点词，保留完整观点和可编辑素材。', 'Shorten pauses and add editable captions and key phrases while keeping your message intact.'),
-    definition: definition('talking-head', 'Polished talking-head video', {
-      captionStyle,
-      minimumPauseSec: { type: 'number', label: label('停顿门槛', 'Pause threshold'), default: 0.7, min: 0.25, max: 3 },
-      speechPaddingSec: { type: 'number', label: label('语音留白', 'Speech padding'), default: 0.15, min: 0, max: 0.5 },
-      highlightKeywords: boolean('突出重点词', 'Emphasize key phrases', false),
-    }, [duplicate, { id: 'pauses', capability: 'speech.tighten-pauses', version: 1, dependsOn: ['version'], arguments: { minimumPauseSec: input('minimumPauseSec'), speechPaddingSec: input('speechPaddingSec') } }, transcript(['pauses']), captions(['transcript']), { id: 'emphasis', capability: 'captions.emphasize', version: 1, dependsOn: ['captions'], enabledBy: 'highlightKeywords', arguments: {} }]),
   },
   {
     id: 'frame-video', art: 'frame-video', title: label('适配视频画幅', 'Fit another format'),
