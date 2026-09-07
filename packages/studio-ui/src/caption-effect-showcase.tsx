@@ -60,7 +60,7 @@ export function CaptionEffectShowcase({ locale, suspended = false }: { locale: '
     </div>
     <div data-caption-demo-frame className="relative w-full self-start overflow-hidden rounded-lg bg-panel" style={{ aspectRatio: '16 / 9' }}>
       <video ref={video} src={demoUrl} autoPlay loop muted playsInline preload="auto" aria-label={locale === 'zh' ? '字幕视频预览' : 'Caption video preview'} className="absolute inset-0 h-full w-full object-cover" />
-      <div className="pointer-events-none absolute inset-0"><CanvasCaptionPreview style={{ ...active.style, scale: 1.7, yPct: 83, wPct: 90 }} locale={locale} aspect={16 / 9} playbackTime={playbackTime} paused={paused || suspended || reduced} /></div>
+      <div className="pointer-events-none absolute inset-0"><CanvasCaptionPreview style={{ ...active.style, scale: 1, yPct: 83, wPct: 90 }} locale={locale} aspect={16 / 9} playbackTime={playbackTime} paused={paused || suspended || reduced} /></div>
       {!reduced && <button type="button" onClick={() => setPaused((value) => !value)} aria-label={paused ? (locale === 'zh' ? '播放预览' : 'Play preview') : (locale === 'zh' ? '暂停预览' : 'Pause preview')} className="absolute bottom-2 right-2 flex size-7 items-center justify-center rounded-full bg-black/40 text-white">{paused ? <Play size={12} /> : <Pause size={12} />}</button>}
     </div>
   </div>;
