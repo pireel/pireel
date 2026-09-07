@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AsrSegment } from './build-blocks';
 import { displayCues } from './captions-relay';
 import type { VideoShot } from './composition';
-import { applyWordMasks, maskCueText, maskedAudioAt, maskedAudioRanges, patchWordMask } from './word-masks';
+import { applyWordMasks, maskCueText, maskedAudioAt, maskedAudioRanges, patchWordMask, snapWordToEnergy } from './word-masks';
 
 const sentence = (): AsrSegment => ({
   start: 0,
@@ -75,5 +75,34 @@ describe('word masks', () => {
     const seg = applyWordMasks([sentence()], [{ sentenceIndex: 0, wordIndex: 3 }], { text: '[bleep]' })[0]!;
     expect(maskCueText(seg, 'This is a damn good take!', 0, 5)).toBe('This is a [bleep] good take!');
     expect(maskCueText(seg, 'unrelated', 0, 5)).toBe('unrelated');
+  });
+
+  it('snaps a masked word to the audio onset and decay when the envelope is known', () => {
+    // 100 bins/s over 3 s. ASR says the word spans 1.00–1.40, but the voice starts at 1.05 and has
+    // decayed by 1.30; the next word starts at 1.40 per ASR and sounds from 1.45.
+    const peaks = new Float32Array(300);
+    for (let i = 105; i < 130; i++) peaks[i] = 0.8;
+    for (let i = 130; i < 145; i++) peaks[i] = 0.05;
+    for (let i = 145; i < 170; i++) peaks[i] = 0.8;
+    const energy = { peaks, durationSec: 3 };
+    const snapped = snapWordToEnergy(energy, 1, 1.4)!;
+    expect(snapped.start).toBeCloseTo(1.05 - 0.012, 3);
+    expect(snapped.end).toBeCloseTo(1.30 + 0.012, 3);
+    const seg: AsrSegment = { start: 0, end: 3, text: 'one two three', words: [
+      { text: 'one', start: 0.5, end: 1 }, { text: 'two', start: 1, end: 1.4 }, { text: 'three', start: 1.4, end: 1.7 },
+    ] };
+    const ranges = maskedAudioRanges(applyWordMasks([seg], [{ sentenceIndex: 0, wordIndex: 1 }], { audio: 'beep' }), energy);
+    expect(ranges[0]!.start).toBeCloseTo(1.038, 3);
+    expect(ranges[0]!.end).toBeCloseTo(1.312, 3);
+    // No decay before the next onset: the end falls back to the boundary heuristic
+    peaks.fill(0.8, 130, 145);
+    expect(Number.isNaN(snapWordToEnergy(energy, 1, 1.4)!.end)).toBe(true);
+    // A short dip inside the word is not a gap
+    peaks.fill(0.8, 105, 145);
+    peaks[118] = 0.05;
+    expect(Number.isNaN(snapWordToEnergy(energy, 1, 1.4)!.end)).toBe(true);
+    expect(maskedAudioRanges(applyWordMasks([seg], [{ sentenceIndex: 0, wordIndex: 1 }], { audio: 'beep' }), energy)[0]!.end).toBeCloseTo(1.34, 3);
+    // Silence where the word should be: nothing to snap to
+    expect(snapWordToEnergy({ peaks: new Float32Array(300), durationSec: 3 }, 1, 1.4)).toBeNull();
   });
 });

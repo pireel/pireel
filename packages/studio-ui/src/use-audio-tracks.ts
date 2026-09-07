@@ -30,6 +30,8 @@ import type { EngineAudioClip, VideoTrackEngine } from './video-track-engine';
 import { decodeAudioFile, decodeVideoAudio } from './audio-decode';
 import { bgmAutoVolumeDb, measureBufferLoudnessDb } from './loudness';
 import { fileSig } from './media';
+import { peaksOf } from './audio-peaks';
+import type { AudioEnergy } from '@pireel/studio-engine/word-masks';
 import { loadLocalVideo, saveLocalVideo } from './local-media';
 import { getStudioSpaceId } from './gen-api';
 import { materializeRemoteMedia } from './remote-media';
@@ -50,6 +52,8 @@ export interface AudioTracksDeps {
   visualMediaClips?: readonly SupplementalVisualMediaClip[];
   timelineDurationSec?: number;
   documentRef: MutableRefObject<EditorDocumentV2>;
+  /** Source envelopes for masked clips (word masks snap to the real onset/decay); absent = heuristic boundaries. */
+  maskEnergyRef?: MutableRefObject<ReadonlyMap<string, AudioEnergy>>;
   setDocument: (document: EditorDocumentV2, runtimeComposition?: Composition) => void;
   videoFile: File | null;
   videoFileRef: MutableRefObject<File | null>;
@@ -67,7 +71,7 @@ export interface AudioTracksDeps {
 export function useAudioTracks(deps: AudioTracksDeps) {
   const {
     projectId, comp, compRef, renderAudioTracks, visualMediaClips, timelineDurationSec, documentRef, setDocument, videoFile, videoFileRef,
-    videoSigRef, videoEngineRef, clipFilesRef, tRef, pickFile, backupMediaToCloud, pushUndoSnapshot,
+    videoSigRef, videoEngineRef, clipFilesRef, tRef, pickFile, backupMediaToCloud, pushUndoSnapshot, maskEnergyRef,
   } = deps;
   const renderAudioTracksRef = useRef(renderAudioTracks);
   renderAudioTracksRef.current = renderAudioTracks;
@@ -130,26 +134,6 @@ export function useAudioTracks(deps: AudioTracksDeps) {
 
   /** Absolute-peak envelope over the whole file (~100 points/s, capped) for the lane waveform — dense
    *  enough that a zoomed-in chip still gets a distinct bar per column instead of repeating buckets. */
-  const peaksOf = (buf: AudioBuffer): Float32Array => {
-    const n = Math.min(30000, Math.max(200, Math.round(buf.duration * 100)));
-    const ch0 = buf.getChannelData(0);
-    const ch1 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : ch0;
-    const out = new Float32Array(n);
-    const step = ch0.length / n;
-    for (let i = 0; i < n; i++) {
-      const a = Math.floor(i * step);
-      const b = Math.min(ch0.length, Math.floor((i + 1) * step));
-      let peak = 0;
-      // stride-sample long windows: a 5-minute track has ~1M samples per bucket, full scan is wasteful
-      const stride = Math.max(1, Math.floor((b - a) / 400));
-      for (let j = a; j < b; j += stride) {
-        const v = Math.max(Math.abs(ch0[j]!), Math.abs(ch1[j]!));
-        if (v > peak) peak = v;
-      }
-      out[i] = peak;
-    }
-    return out;
-  };
 
   /** Mount music bytes as a NEW clip on the lane: measure → initial level → OPFS → comp.audioTracks.
    *  A supplied sig means this is a project-local asset: metadata syncs, bytes stay on-device. */
@@ -282,7 +266,7 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     const c = compRef.current;
     const total = timelineDurationSec ?? totalDuration(c);
     // Word masks (beeped / muted words) per clip: the engine silences the span and plays the tone.
-    const clipMasks = clipAudioMasks(documentRef.current);
+    const clipMasks = clipAudioMasks(documentRef.current, maskEnergyRef?.current);
     const laneSpecs = (renderAudioTracksRef.current ?? c.audioTracks ?? [])
       .filter(clipUsable)
       .map((clip) => {
