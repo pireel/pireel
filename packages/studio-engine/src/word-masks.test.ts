@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AsrSegment } from './build-blocks';
 import { displayCues } from './captions-relay';
 import type { VideoShot } from './composition';
-import { applyWordMasks, maskCueText, maskedAudioAt, maskedAudioRanges, patchWordMask, snapWordToEnergy } from './word-masks';
+import { applyWordMasks, maskCueText, maskedAudioAt, maskedAudioRanges, patchWordMask, snapRunToEnergy } from './word-masks';
 
 const sentence = (): AsrSegment => ({
   start: 0,
@@ -85,7 +85,7 @@ describe('word masks', () => {
     for (let i = 130; i < 145; i++) peaks[i] = 0.05;
     for (let i = 145; i < 170; i++) peaks[i] = 0.8;
     const energy = { peaks, durationSec: 3 };
-    const snapped = snapWordToEnergy(energy, 1, 1.4)!;
+    const snapped = snapRunToEnergy(energy, 1, 1.4)!;
     expect(snapped.start).toBeCloseTo(1.05 - 0.012, 3);
     expect(snapped.end).toBeCloseTo(1.30 + 0.012, 3);
     const seg: AsrSegment = { start: 0, end: 3, text: 'one two three', words: [
@@ -96,13 +96,24 @@ describe('word masks', () => {
     expect(ranges[0]!.end).toBeCloseTo(1.312, 3);
     // No decay before the next onset: the end falls back to the boundary heuristic
     peaks.fill(0.8, 130, 145);
-    expect(Number.isNaN(snapWordToEnergy(energy, 1, 1.4)!.end)).toBe(true);
+    expect(Number.isNaN(snapRunToEnergy(energy, 1, 1.4)!.end)).toBe(true);
     // A short dip inside the word is not a gap
     peaks.fill(0.8, 105, 145);
     peaks[118] = 0.05;
-    expect(Number.isNaN(snapWordToEnergy(energy, 1, 1.4)!.end)).toBe(true);
+    expect(Number.isNaN(snapRunToEnergy(energy, 1, 1.4)!.end)).toBe(true);
+    // A run of masked words stays ONE span: a real gap between its words never re-opens the audio
+    // (estimated word boundaries make in-run gaps common). Only the outer edges move.
+    peaks.fill(0);
+    peaks.fill(0.8, 52, 70); peaks.fill(0.8, 78, 96); peaks.fill(0.8, 104, 122); peaks.fill(0.8, 130, 148);
+    const runSeg: AsrSegment = { start: 0.5, end: 1.5, text: 'a b c d', words: [
+      { text: 'a', start: 0.5, end: 0.75 }, { text: 'b', start: 0.75, end: 1 }, { text: 'c', start: 1, end: 1.25 }, { text: 'd', start: 1.25, end: 1.5 },
+    ] };
+    const run = maskedAudioRanges(applyWordMasks([runSeg], [1, 2].map((wordIndex) => ({ sentenceIndex: 0, wordIndex })), { audio: 'beep' }), energy);
+    expect(run).toHaveLength(1);
+    expect(run[0]!.start).toBeCloseTo(0.78 - 0.012, 3);
+    expect(run[0]!.end).toBeCloseTo(1.22 + 0.012, 3);
     expect(maskedAudioRanges(applyWordMasks([seg], [{ sentenceIndex: 0, wordIndex: 1 }], { audio: 'beep' }), energy)[0]!.end).toBeCloseTo(1.34, 3);
     // Silence where the word should be: nothing to snap to
-    expect(snapWordToEnergy({ peaks: new Float32Array(300), durationSec: 3 }, 1, 1.4)).toBeNull();
+    expect(snapRunToEnergy({ peaks: new Float32Array(300), durationSec: 3 }, 1, 1.4)).toBeNull();
   });
 });

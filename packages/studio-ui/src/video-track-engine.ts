@@ -385,7 +385,7 @@ export class VideoTrackEngine {
   /** Replace a source's word-mask spans (source seconds). Empty removes them. */
   setAudioMasks(key: string, ranges: readonly MaskedAudioRange[]): void {
     if ((window as unknown as { __hfMaskDebug?: boolean }).__hfMaskDebug) {
-      console.debug('[mask:narration]', { key: key.slice(0, 60), ranges: ranges.map((r) => `${r.audio} ${r.start.toFixed(2)}-${r.end.toFixed(2)}`), sources: [...this.els.keys()].map((k) => k.slice(0, 60)), segments: this.segs.length });
+      console.info('[mask:narration]', { key: key.slice(0, 60), ranges: ranges.map((r) => `${r.audio} ${r.start.toFixed(2)}-${r.end.toFixed(2)}`), sources: [...this.els.keys()].map((k) => k.slice(0, 60)), segments: this.segs.length });
     }
     if (ranges.length) this.audioMasks.set(key, ranges);
     else this.audioMasks.delete(key);
@@ -440,7 +440,7 @@ export class VideoTrackEngine {
     const rate = el.playbackRate > 1e-9 ? el.playbackRate : 1;
     const mask = this.maskAt(key, srcT + MASK_PREVIEW_LEAD_SEC * rate);
     if ((window as unknown as { __hfMaskDebug?: boolean }).__hfMaskDebug && (mask !== this.maskActive)) {
-      console.debug('[mask]', { key, srcT: srcT.toFixed(3), mask, muted: el.muted, volume: el.volume, routed: this.elGains.has(el), dubbed, clips: this.audioClips.size });
+      console.info('[mask]', { key, srcT: srcT.toFixed(3), mask, muted: el.muted, volume: el.volume, routed: this.elGains.has(el), dubbed, clips: this.audioClips.size });
     }
     if (mask) {
       // Belt and braces: mute AND zero the level. An element that was ever routed through the WebAudio
@@ -596,7 +596,7 @@ export class VideoTrackEngine {
       if (mask === 'beep') clipBeep = true;
       if ((window as unknown as { __hfMaskDebug?: boolean }).__hfMaskDebug && mask !== entry.maskDebug) {
         entry.maskDebug = mask;
-        console.debug('[mask:clip]', { id: spec.id, srcT: srcT.toFixed(3), mask, graph: !!gainNode, ctx: this.actx?.state, volume: el.volume, muted: el.muted, paused: el.paused, src: el.currentSrc.slice(0, 60) });
+        console.info('[mask:clip]', { id: spec.id, srcT: srcT.toFixed(3), mask, graph: !!gainNode, ctx: this.actx?.state, volume: el.volume, muted: el.muted, paused: el.paused, src: el.currentSrc.slice(0, 60) });
       }
       setGain(mask ? 0 : spec.gainAt(t));
       el.playbackRate = spec.speed;

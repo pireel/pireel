@@ -5745,7 +5745,7 @@ export function HyperframesWorkbench({
     const masks = previewAudioMasks(editorDocument, comp, maskEnergy);
     if ((window as unknown as { __hfMaskDebug?: boolean }).__hfMaskDebug) {
       const byClip = clipAudioMasks(editorDocument, maskEnergy);
-      console.debug('[mask:doc]', {
+      console.info('[mask:doc]', {
         maskedClips: [...byClip.keys()],
         narrationKeys: [...masks.keys()].map((k) => k.slice(0, 60)),
         shots: videoTrackShots(comp).map((shot) => `${shot.id}:${(shot.src ?? 'main').slice(0, 40)}`),

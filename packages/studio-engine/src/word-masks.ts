@@ -61,61 +61,62 @@ const ENERGY_LOOK_BEFORE_SEC = 0.06;
 const ENERGY_LOOK_AFTER_SEC = 0.05;
 const ENERGY_EDGE_SEC = 0.012;
 const ENERGY_MIN_GAP_SEC = 0.03;
+/** How far INSIDE the run each edge may move: enough to shave a late cut, never enough to lose a syllable. */
+const ENERGY_LOOK_INSIDE_SEC = 0.12;
 
-/** Snap one word's span to what the audio actually does. Returns null when the envelope cannot tell
- *  (no data or a silent word); start/end are NaN individually when that edge has no clear gap —
- *  the caller keeps its heuristic for that edge. */
-export function snapWordToEnergy(
+/** Snap a masked run's OUTER edges to what the audio actually does, searching only near each ASR
+ *  boundary (never inside the run: a run of masked words stays one span). Each edge is NaN when no
+ *  clear quiet gap sits near it, so the caller keeps its heuristic for that edge; null = no data. */
+export function snapRunToEnergy(
   energy: AudioEnergy,
-  wordStart: number,
-  wordEnd: number,
+  runStart: number,
+  runEnd: number,
 ): { start: number; end: number } | null {
   const { peaks, durationSec } = energy;
-  if (!peaks.length || durationSec <= 0 || wordEnd <= wordStart) return null;
+  if (!peaks.length || durationSec <= 0 || runEnd <= runStart) return null;
   const rate = peaks.length / durationSec;
   const bin = (t: number) => Math.min(peaks.length - 1, Math.max(0, Math.round(t * rate)));
-  const b0 = bin(wordStart);
-  const b1 = bin(wordEnd);
-  let wordMax = 0;
-  let peakBin = b0;
-  for (let i = b0; i <= b1; i++) {
-    if (peaks[i]! > wordMax) {
-      wordMax = peaks[i]!;
-      peakBin = i;
-    }
-  }
-  if (wordMax < 0.02) return null;
-  const threshold = wordMax * ENERGY_THRESHOLD;
-  const lo = bin(wordStart - ENERGY_LOOK_BEFORE_SEC);
-  const hi = bin(wordEnd + ENERGY_LOOK_AFTER_SEC);
+  const b0 = bin(runStart);
+  const b1 = bin(runEnd);
+  let runMax = 0;
+  for (let i = b0; i <= b1; i++) runMax = Math.max(runMax, peaks[i]!);
+  if (runMax < 0.02) return null;
+  const threshold = runMax * ENERGY_THRESHOLD;
   const minGapBins = Math.max(2, Math.round(ENERGY_MIN_GAP_SEC * rate));
-  // Quiet runs (below the threshold) are the gaps between words; a short dip inside a word does not
-  // count. The word starts where the last gap before its peak ends and ends where the first gap
-  // after its peak begins.
+  const quiet = (i: number) => peaks[i]! < threshold;
+  // Start: the last quiet gap (≥ minGap) that ENDS inside [runStart − lookBefore, runStart + lookInside].
   let start = Number.NaN;
-  let runStart = -1;
-  for (let i = lo; i <= peakBin; i++) {
-    const quiet = peaks[i]! < threshold;
-    if (quiet && runStart < 0) runStart = i;
-    if ((!quiet || i === peakBin) && runStart >= 0) {
-      const runEnd = quiet ? i : i; // exclusive end of the quiet run
-      if (runEnd - runStart >= minGapBins || runStart === lo) start = runEnd / rate - ENERGY_EDGE_SEC;
-      runStart = -1;
+  {
+    const lo = bin(runStart - ENERGY_LOOK_BEFORE_SEC);
+    const hi = Math.min(b1, bin(runStart + ENERGY_LOOK_INSIDE_SEC));
+    let runQ = -1;
+    for (let i = lo; i <= hi + 1; i++) {
+      const q = i <= hi && quiet(i);
+      if (q && runQ < 0) runQ = i;
+      if (!q && runQ >= 0) {
+        if (i - runQ >= minGapBins || runQ === lo) start = i / rate - ENERGY_EDGE_SEC;
+        runQ = -1;
+      }
     }
   }
+  // End: the first quiet gap (≥ minGap, or running past the window) that STARTS inside
+  // [runEnd − lookInside, runEnd + lookAfter].
   let end = Number.NaN;
-  runStart = -1;
-  for (let i = peakBin; i <= hi; i++) {
-    const quiet = peaks[i]! < threshold;
-    if (quiet && runStart < 0) runStart = i;
-    const closes = !quiet || i === hi;
-    if (closes && runStart >= 0) {
-      const runEnd = quiet ? i + 1 : i;
-      if (runEnd - runStart >= minGapBins || runEnd > hi) {
-        end = runStart / rate + ENERGY_EDGE_SEC;
-        break;
+  {
+    const lo = Math.max(b0, bin(runEnd - ENERGY_LOOK_INSIDE_SEC));
+    const hi = bin(runEnd + ENERGY_LOOK_AFTER_SEC);
+    let runQ = -1;
+    for (let i = lo; i <= hi + 1; i++) {
+      const q = i <= hi && quiet(i);
+      if (q && runQ < 0) runQ = i;
+      if ((!q || i === hi) && runQ >= 0) {
+        const runLen = (q ? i + 1 : i) - runQ;
+        if (runLen >= minGapBins || (q && i === hi)) {
+          end = runQ / rate + ENERGY_EDGE_SEC;
+          break;
+        }
+        runQ = -1;
       }
-      runStart = -1;
     }
   }
   return { start, end };
@@ -183,41 +184,50 @@ export function maskedAudioRanges(segments: readonly AsrSegment[] | null | undef
   for (const segment of segments) {
     if (!segment.masks) continue;
     const words = wordsOfSegment(segment);
-    for (const [key, mask] of Object.entries(segment.masks)) {
-      if (!mask.audio) continue;
-      const wi = Number(key);
-      const word = words[wi];
-      if (!word) continue;
-      const wordEnd = Math.max(word.start, word.end);
+    const audioAt = (wi: number): WordAudioMask | undefined => segment.masks?.[String(wi)]?.audio;
+    // Runs of consecutively masked words (same kind) are one span: the audio inside never comes back.
+    let wi = 0;
+    while (wi < words.length) {
+      const audio = audioAt(wi);
+      if (!audio) {
+        wi += 1;
+        continue;
+      }
+      let last = wi;
+      while (last + 1 < words.length && audioAt(last + 1) === audio) last += 1;
+      const first = words[wi]!;
+      const runStart = first.start;
+      const runEnd = Math.max(runStart, words[last]!.end);
       const prev = words[wi - 1];
-      const next = words[wi + 1];
-      const prevMasked = !!segment.masks[String(wi - 1)]?.audio;
-      const nextMasked = !!segment.masks[String(wi + 1)]?.audio;
+      const next = words[last + 1];
+      const prevMasked = !!audioAt(wi - 1);
+      const nextMasked = !!audioAt(last + 1);
       // Heuristic boundaries: pad into the gaps only (an unmasked neighbour bounds the span at its own
       // edge), and stop early at a shared ASR cut because the voice has decayed before it.
-      let start = word.start - MASK_AUDIO_PAD_SEC;
-      if (prev && !prevMasked) start = Math.max(start, Math.min(word.start, prev.end));
-      let end = wordEnd + MASK_AUDIO_PAD_SEC;
+      let start = runStart - MASK_AUDIO_PAD_SEC;
+      if (prev && !prevMasked) start = Math.max(start, Math.min(runStart, prev.end));
+      let end = runEnd + MASK_AUDIO_PAD_SEC;
       if (next && !nextMasked) {
-        const contiguous = next.start <= wordEnd + 0.02;
+        const contiguous = next.start <= runEnd + 0.02;
         end = contiguous
-          ? Math.max(word.start + (wordEnd - word.start) * MASK_AUDIO_MIN_KEEP, wordEnd - MASK_AUDIO_END_TRIM_SEC)
+          ? Math.max(runStart + (runEnd - runStart) * MASK_AUDIO_MIN_KEEP, runEnd - MASK_AUDIO_END_TRIM_SEC)
           : Math.min(end, next.start);
       }
-      // With the source's envelope at hand, the real onset and decay win over the alignment cuts.
-      const snapped = energy ? snapWordToEnergy(energy, word.start, wordEnd) : null;
+      // With the source's envelope at hand, the real onset and decay near each edge win over the cuts.
+      const snapped = energy ? snapRunToEnergy(energy, runStart, runEnd) : null;
       if (snapped) {
         if (Number.isFinite(snapped.start)) {
           start = snapped.start;
-          if (prev && !prevMasked) start = Math.max(start, Math.min(word.start, prev.end) - 0.03);
+          if (prev && !prevMasked) start = Math.max(start, Math.min(runStart, prev.end) - 0.03);
         }
         if (Number.isFinite(snapped.end)) {
           end = snapped.end;
-          if (next && !nextMasked) end = Math.min(end, Math.max(wordEnd, next.start) + 0.03);
+          if (next && !nextMasked) end = Math.min(end, Math.max(runEnd, next.start) + 0.03);
         }
         end = Math.max(end, start + 0.04);
       }
-      raw.push({ start: Math.max(0, start), end, audio: mask.audio });
+      raw.push({ start: Math.max(0, start), end, audio });
+      wi = last + 1;
     }
   }
   raw.sort((a, b) => a.start - b.start || a.end - b.end);
