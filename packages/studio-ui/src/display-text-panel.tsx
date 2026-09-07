@@ -14,8 +14,9 @@ import {
 } from '@pireel/studio-engine/composition';
 import { AlignCenter, AlignLeft, AlignRight, Check, ChevronDown, Loader2, Plus, Search, Type } from 'lucide-react';
 import { WEB_FONTS, webFontFontId, webFontIdOf } from '@pireel/studio-engine/font-library';
+import { googleFontFontId, googleFontRowOf, googleFontsForScripts, type GoogleFontRow } from '@pireel/studio-engine/google-fonts';
 import { studioLocale, t } from './i18n';
-import { loadWebFont } from './web-fonts';
+import { ensureGoogleFontPreview, loadFont } from './web-fonts';
 import type { FontPreview } from './font-previews';
 import {
   cachedLocalFontFamilies,
@@ -176,9 +177,37 @@ export function fontChoiceLabel(value: DisplayTextFontId): string {
     const font = WEB_FONTS.find((candidate) => candidate.id === webId)!;
     return studioLocale().toLowerCase().startsWith('zh') ? font.label.zh : font.label.en;
   }
+  const google = googleFontRowOf(value);
+  if (google) return google.f;
   const selectedFamily = displayTextLocalFontFamily(value);
   const builtin = (DISPLAY_TEXT_FONT_IDS as readonly string[]).includes(value) ? value : null;
   return builtin ? t(`displayText.font.${builtin}`) : selectedFamily ?? t('displayText.font.preset');
+}
+
+/** One Google row: its name set in its own face, the tiny name-only subset linked on first paint. */
+function GoogleFontOption({ row, selected, loading, onChoose }: { row: GoogleFontRow; selected: boolean; loading: boolean; onChoose: (id: DisplayTextFontId) => void }) {
+  useEffect(() => { ensureGoogleFontPreview(row.f); }, [row.f]);
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={selected}
+      aria-label={row.f}
+      title={row.f}
+      onClick={() => onChoose(googleFontFontId(row))}
+      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] ${selected ? 'bg-panel-2 text-ink' : 'text-ink-3 hover:bg-panel-2/70 hover:text-ink'}`}
+    >
+      <span className="min-w-0 flex-1 truncate" style={{ fontFamily: `"${row.f}", sans-serif` }}>{row.f}</span>
+      {loading
+        ? <Loader2 size={12} className="text-ink-4 shrink-0 animate-spin" aria-label={t('displayText.fontLoading')} />
+        : selected && <Check size={12} className="text-accent shrink-0" />}
+    </button>
+  );
+}
+
+/** Script bits a UI locale's users write in first: Chinese UI → Chinese-capable Google faces, else Latin. */
+function localeScriptBits(zh: boolean): number {
+  return zh ? 2 | 4 : 1;
 }
 
 /** The font list itself (search + built-in / common / system groups + system-font loading). Hosts
@@ -198,8 +227,8 @@ export function FontChoiceList({
   onChoose: (font: DisplayTextFontId) => void;
   onLoadMore: () => void;
   autoFocus?: boolean;
-  /** Library id whose glyphs are still downloading after being applied: its row shows a spinner
-   *  where the check mark goes, so the user can keep switching fonts and watch each one land. */
+  /** Font id (library or Google) whose glyphs are still downloading after being applied: its row shows
+   *  a spinner where the check mark goes, so the user can keep switching fonts and watch each one land. */
   loadingFont?: string | null;
 }) {
   const [query, setQuery] = useState('');
@@ -231,10 +260,20 @@ export function FontChoiceList({
   const webFonts = WEB_FONTS.filter((font) => matches(zh ? font.label.zh : font.label.en) || matches(font.family));
   const common = COMMON_FONT_FAMILIES.filter(matches);
   const system = selectedMissing.filter((font) => matches(font.family));
+  // Google: a query searches every script ("inter" from a Chinese UI is a legitimate ask); the idle
+  // list shows the locale's natural faces by popularity. A selected Google face stays visible.
+  const googleRows = normalizedQuery ? googleFontsForScripts(1 | 2 | 4 | 8 | 16, normalizedQuery, 30) : googleFontsForScripts(localeScriptBits(zh), '', zh ? 12 : 24);
+  const selectedGoogle = googleFontRowOf(value);
+  const google = selectedGoogle && !googleRows.some((row) => row.f === selectedGoogle.f) && matches(selectedGoogle.f) ? [selectedGoogle, ...googleRows] : googleRows;
+  // Order follows the UI language, not the text being styled: a Chinese UI leads with the Chinese
+  // display library, a Latin UI with Latin faces; the CJK system list is last there.
+  const groupOrder: Array<'web' | 'google' | 'builtin' | 'common' | 'system'> = zh
+    ? ['web', 'builtin', 'google', 'common', 'system']
+    : ['google', 'builtin', 'system', 'web', 'common'];
 
   const fontRow = (id: DisplayTextFontId, label: string, family?: string, preview?: FontPreview) => {
     const selected = id === value;
-    const loading = selected && loadingFont != null && webFontIdOf(id) === loadingFont;
+    const loading = selected && loadingFont != null && id === loadingFont;
     return (
       <button
         key={id}
@@ -286,37 +325,49 @@ export function FontChoiceList({
       </div>
 
       <div role="listbox" aria-label={t('displayText.fontFamily')} className="max-h-56 overflow-y-auto px-2 pb-2">
-        {webFonts.length > 0 && (
-          <div>
-            <div className="text-ink-4 px-2 pb-1 pt-2 text-[9px] tracking-[0.1em] uppercase">{t('displayText.webFonts')}</div>
-            {webFonts.map((font) => fontRow(webFontFontId(font), zh ? font.label.zh : font.label.en, undefined, previews?.[font.id]))}
-          </div>
-        )}
-        {builtins.length > 0 && (
-          <div>
-            <div className="text-ink-4 px-2 pb-1 pt-2 text-[9px] tracking-[0.1em] uppercase">{t('displayText.builtInFonts')}</div>
-            {builtins.map((id) => fontRow(id, t(`displayText.font.${id}`)))}
-          </div>
-        )}
-        {common.length > 0 && (
-          <div>
-            <div className="text-ink-4 px-2 pb-1 pt-3 text-[9px] tracking-[0.1em] uppercase">{t('displayText.commonFonts')}</div>
-            {common.map((family) => {
-              const id = localDisplayTextFontId(family);
-              return id ? fontRow(id, family, family) : null;
-            })}
-          </div>
-        )}
-        {system.length > 0 && (
-          <div>
-            <div className="text-ink-4 px-2 pb-1 pt-3 text-[9px] tracking-[0.1em] uppercase">{t('displayText.systemFonts')}</div>
-            {system.map((font) => {
-              const id = localDisplayTextFontId(font.family);
-              return id ? fontRow(id, font.family, font.family) : null;
-            })}
-          </div>
-        )}
-        {builtins.length === 0 && common.length === 0 && system.length === 0 && (
+        {groupOrder.map((group) => {
+          if (group === 'web' && webFonts.length > 0) return (
+            <div key={group}>
+              <div className="text-ink-4 px-2 pb-1 pt-2 text-[9px] tracking-[0.1em] uppercase">{t('displayText.webFonts')}</div>
+              {webFonts.map((font) => fontRow(webFontFontId(font), zh ? font.label.zh : font.label.en, undefined, previews?.[font.id]))}
+            </div>
+          );
+          if (group === 'google' && google.length > 0) return (
+            <div key={group}>
+              <div className="text-ink-4 px-2 pb-1 pt-2 text-[9px] tracking-[0.1em] uppercase">{t('displayText.googleFonts')}</div>
+              {google.map((row) => {
+                const id = googleFontFontId(row);
+                return <GoogleFontOption key={id} row={row} selected={id === value} loading={id === value && loadingFont === id} onChoose={onChoose} />;
+              })}
+            </div>
+          );
+          if (group === 'builtin' && builtins.length > 0) return (
+            <div key={group}>
+              <div className="text-ink-4 px-2 pb-1 pt-2 text-[9px] tracking-[0.1em] uppercase">{t('displayText.builtInFonts')}</div>
+              {builtins.map((id) => fontRow(id, t(`displayText.font.${id}`)))}
+            </div>
+          );
+          if (group === 'common' && common.length > 0) return (
+            <div key={group}>
+              <div className="text-ink-4 px-2 pb-1 pt-3 text-[9px] tracking-[0.1em] uppercase">{t('displayText.commonFonts')}</div>
+              {common.map((family) => {
+                const id = localDisplayTextFontId(family);
+                return id ? fontRow(id, family, family) : null;
+              })}
+            </div>
+          );
+          if (group === 'system' && system.length > 0) return (
+            <div key={group}>
+              <div className="text-ink-4 px-2 pb-1 pt-3 text-[9px] tracking-[0.1em] uppercase">{t('displayText.systemFonts')}</div>
+              {system.map((font) => {
+                const id = localDisplayTextFontId(font.family);
+                return id ? fontRow(id, font.family, font.family) : null;
+              })}
+            </div>
+          );
+          return null;
+        })}
+        {webFonts.length === 0 && google.length === 0 && builtins.length === 0 && common.length === 0 && system.length === 0 && (
           <div className="text-ink-4 px-2 py-6 text-center text-[11px]">{t('displayText.noMatchingFonts')}</div>
         )}
       </div>
@@ -370,15 +421,14 @@ export function FontPicker({
   // flow, so the dropdown only closes on outside click / Escape / the trigger.
   const choose = (font: DisplayTextFontId) => {
     onChoose(font);
-    const webId = webFontIdOf(font);
-    if (!webId) return;
-    setLoadingFont(webId);
-    void loadWebFont(webId, sampleText).finally(() => {
-      setLoadingFont((current) => (current === webId ? null : current));
+    if (!webFontIdOf(font) && !googleFontRowOf(font)) return;
+    setLoadingFont(font);
+    void loadFont(font, sampleText).finally(() => {
+      setLoadingFont((current) => (current === font ? null : current));
     });
   };
   const selectedWeb = webFontIdOf(value);
-  const selectedFamily = selectedWeb ? WEB_FONTS.find((font) => font.id === selectedWeb)!.family : displayTextLocalFontFamily(value);
+  const selectedFamily = selectedWeb ? WEB_FONTS.find((font) => font.id === selectedWeb)!.family : googleFontRowOf(value)?.f ?? displayTextLocalFontFamily(value);
 
   useEffect(() => {
     if (!open) return;

@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { titleBlock } from '@pireel/studio-engine/composition';
-import { DisplayTextPanel } from './display-text-panel';
+import { DisplayTextPanel, FontChoiceList, fontChoiceLabel } from './display-text-panel';
 import { setStudioLocale } from './i18n';
 
 describe('DisplayTextPanel', () => {
@@ -66,5 +66,25 @@ describe('DisplayTextPanel', () => {
     }));
     expect(html).toContain('aria-label="文字色 #FFFFFF"');
     expect(html).toContain('aria-label="强调色 #FFFFFF"');
+  });
+});
+
+describe('FontChoiceList ordering', () => {
+  const list = () => ({
+    html: renderToStaticMarkup(createElement(FontChoiceList, { value: 'preset', localFonts: [], accessState: 'idle', onChoose: () => {}, onLoadMore: () => {} })),
+    fontChoiceLabel,
+  });
+
+  it('follows the UI language, not the text: a Chinese UI leads with the display library, a Latin UI with Google faces', () => {
+    setStudioLocale('zh');
+    const zh = list().html;
+    expect(zh.indexOf('花字')).toBeGreaterThan(-1);
+    expect(zh.indexOf('花字')).toBeLessThan(zh.indexOf('Google 字体'));
+    setStudioLocale('en');
+    const en = list().html;
+    expect(en.indexOf('Google Fonts')).toBeGreaterThan(-1);
+    expect(en.indexOf('Google Fonts')).toBeLessThan(en.indexOf('Display fonts'));
+    expect(en).toContain('Roboto'); // Latin popularity order, not the Chinese-capable subset
+    expect(list().fontChoiceLabel('google:Inter')).toBe('Inter');
   });
 });
