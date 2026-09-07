@@ -43,8 +43,9 @@ export function CaptionEffectShowcase({ locale, suspended = false }: { locale: '
     if (row.bottom > viewport.bottom) list.current.scrollTop += row.bottom - viewport.bottom;
     if (row.top < viewport.top) list.current.scrollTop -= viewport.top - row.top;
   }, [active.id, cycling]);
-  return <div className="my-2 grid grid-cols-[minmax(0,1fr)_minmax(0,180px)] gap-4">
-    <div ref={list} role="group" aria-label={locale === 'zh' ? '字幕效果' : 'Caption styles'} className="max-h-80 space-y-1 overflow-y-auto overscroll-contain pr-1 [scrollbar-width:thin]" onPointerLeave={() => setHovered(null)}>
+  return <div className="my-2 grid grid-cols-[100px_minmax(0,1fr)] gap-3 sm:grid-cols-[120px_minmax(0,1fr)]">
+    <div className="relative min-h-0">
+    <div ref={list} role="group" aria-label={locale === 'zh' ? '字幕效果' : 'Caption styles'} className="absolute inset-0 space-y-1 overflow-y-auto overscroll-contain pr-1 [scrollbar-width:thin]" onPointerLeave={() => setHovered(null)}>
       {CAPTION_TASK_PRESETS.map((item, index) => <button key={item.id} type="button" data-preset={item.id} aria-pressed={active.id === item.id} aria-label={item.name[locale]}
         onPointerEnter={(event) => { if (event.pointerType !== 'touch') { setAutomatic(index); setHovered(item.id); } }}
         onPointerDown={(event) => { lastPointer.current = event.pointerType; }}
@@ -56,9 +57,10 @@ export function CaptionEffectShowcase({ locale, suspended = false }: { locale: '
         <span className="block aspect-[4] w-full"><CanvasCaptionPreview style={{ ...item.style, scale: 2.4, xPct: 50, yPct: 78, wPct: 94 }} locale={locale} aspect={4} sampleText={locale === 'zh' ? '让表达|更精彩' : 'YOUR|WORDS'} playbackTime={playbackTime} paused={paused || suspended || reduced} /></span>
       </button>)}
     </div>
-    <div data-caption-demo-frame className="relative w-full self-start overflow-hidden rounded-lg bg-panel" style={{ aspectRatio: '9 / 16' }}>
+    </div>
+    <div data-caption-demo-frame className="relative w-full self-start overflow-hidden rounded-lg bg-panel" style={{ aspectRatio: '16 / 9' }}>
       <video ref={video} src={demoUrl} autoPlay loop muted playsInline preload="auto" aria-label={locale === 'zh' ? '字幕视频预览' : 'Caption video preview'} className="absolute inset-0 h-full w-full object-cover" />
-      <div className="pointer-events-none absolute inset-0"><CanvasCaptionPreview style={{ ...active.style, scale: 1.7, yPct: 83, wPct: 90 }} locale={locale} aspect={9 / 16} playbackTime={playbackTime} paused={paused || suspended || reduced} /></div>
+      <div className="pointer-events-none absolute inset-0"><CanvasCaptionPreview style={{ ...active.style, scale: 1.7, yPct: 83, wPct: 90 }} locale={locale} aspect={16 / 9} playbackTime={playbackTime} paused={paused || suspended || reduced} /></div>
       {!reduced && <button type="button" onClick={() => setPaused((value) => !value)} aria-label={paused ? (locale === 'zh' ? '播放预览' : 'Play preview') : (locale === 'zh' ? '暂停预览' : 'Pause preview')} className="absolute bottom-2 right-2 flex size-7 items-center justify-center rounded-full bg-black/40 text-white">{paused ? <Play size={12} /> : <Pause size={12} />}</button>}
     </div>
   </div>;

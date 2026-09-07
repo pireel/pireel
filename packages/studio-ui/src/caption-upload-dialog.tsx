@@ -44,7 +44,7 @@ export function CaptionUploadDialog({ open, locale, onOpenChange, onContinue }: 
     finally { creating.current = false; if (current === generation.current) setBusy(false); }
   };
   return <Dialog open={open} onOpenChange={(value) => { if (!creating.current) onOpenChange(value); }}>
-    <DialogContent onOpenAutoFocus={(event) => { event.preventDefault(); uploadButton.current?.focus(); }} aria-describedby={undefined} className="studio-scope bg-bg border-line max-h-[90dvh] overflow-y-auto p-6 sm:max-w-[480px]" showCloseButton={!busy}>
+    <DialogContent onOpenAutoFocus={(event) => { event.preventDefault(); uploadButton.current?.focus(); }} aria-describedby={undefined} className="studio-scope bg-bg border-line max-h-[90dvh] overflow-y-auto p-6 sm:max-w-[520px]" showCloseButton={!busy}>
       <DialogHeader className="text-left"><DialogTitle className="text-ink text-2xl font-semibold">AI Captions</DialogTitle></DialogHeader>
       {open && <CaptionEffectShowcase locale={locale} suspended={busy} />}
       <input ref={input} type="file" accept="video/*" className="hidden" aria-label={say('选择视频文件', 'Choose a video file')} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void choose(file); }} />
