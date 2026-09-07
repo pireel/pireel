@@ -18,7 +18,6 @@ export function CaptionTaskCustomize({ options, locale, disabled, onChange, onRe
   return <details className="border-line mt-5 border-t pt-4">
     <summary className="text-ink cursor-pointer text-sm font-medium">{say('自定义样式', 'Customize style')}{options.custom && <span className="text-ink-3 ml-2 text-xs">{say('已调整', 'Edited')}</span>}</summary>
     <div role="region" aria-label={say('自定义字幕实时预览', 'Live custom caption preview')} className="border-line bg-bg sticky top-3 z-10 mt-4 rounded-lg border p-3 shadow-sm">
-      <div className="text-ink-3 mb-2 flex items-center justify-between gap-3 text-xs"><span>{say('实时预览', 'Live preview')}</span><span className="text-ink-4">{say('示例文字', 'Sample text')}</span></div>
       <div className="bg-panel aspect-[2.4] w-full overflow-hidden rounded-md"><CanvasCaptionPreview style={{ ...style, xPct: 50, yPct: 75 }} locale={locale} aspect={2.4} sampleText={say('字幕|效果', 'Your|words')} /></div>
     </div>
     <fieldset disabled={disabled} className="mt-4 space-y-4 disabled:opacity-50">

@@ -16,8 +16,8 @@ function subscribe(draw: (time: number) => void) {
   return () => { listeners.delete(draw); if (!listeners.size && frame) { cancelAnimationFrame(frame); frame = 0; } };
 }
 
-export function CanvasCaptionPreview({ style, locale, tile = false, aspect = 9 / 16, sampleText }: {
-  style: Partial<CaptionStyle>; locale: 'zh' | 'en'; tile?: boolean; aspect?: number; sampleText?: string;
+export function CanvasCaptionPreview({ style, locale, tile = false, aspect = 9 / 16, sampleText, playbackTime, paused = false }: {
+  style: Partial<CaptionStyle>; locale: 'zh' | 'en'; tile?: boolean; aspect?: number; sampleText?: string; playbackTime?: () => number; paused?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
@@ -36,9 +36,9 @@ export function CanvasCaptionPreview({ style, locale, tile = false, aspect = 9 /
       const dpr = Math.min(devicePixelRatio || 1, 2);
       ctx.setTransform(dpr * width / designWidth, 0, 0, dpr * height / designHeight, 0, 0);
       ctx.clearRect(0, 0, designWidth, designHeight);
-      drawPresetCaption(ctx, words, viewStyle, reduced.matches ? 1.5 : clock % (words.length * .6), designWidth, designHeight);
+      drawPresetCaption(ctx, words, viewStyle, reduced.matches ? 1.5 : (playbackTime?.() ?? clock) % (words.length * .6), designWidth, designHeight);
     };
-    const update = () => { unsubscribe?.(); unsubscribe = undefined; draw(1.5); if (visible && !reduced.matches) unsubscribe = subscribe(draw); };
+    const update = () => { unsubscribe?.(); unsubscribe = undefined; draw(1.5); if (visible && !reduced.matches && !paused) unsubscribe = subscribe(draw); };
     const resize = new ResizeObserver(([entry]) => {
       if (!entry) return;
       width = entry.contentRect.width; height = entry.contentRect.height;
@@ -50,6 +50,6 @@ export function CanvasCaptionPreview({ style, locale, tile = false, aspect = 9 /
     const fontReady = style.font ? loadFont(style.font, words.map((word) => word.text).join('')) : document.fonts.ready;
     void fontReady.then(() => { if (!disposed) draw(1.5); });
     return () => { disposed = true; unsubscribe?.(); resize.disconnect(); observer.disconnect(); reduced.removeEventListener('change', update); };
-  }, [style, locale, tile, aspect, sampleText]);
+  }, [style, locale, tile, aspect, sampleText, playbackTime, paused]);
   return <canvas ref={canvasRef} className="h-full w-full" aria-hidden="true" />;
 }
