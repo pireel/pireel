@@ -28,6 +28,12 @@ export const DEFAULT_MASK_TEXT = '**';
  *  early/late, but a neighbouring word that is not masked keeps every millisecond of its own span. */
 export const MASK_AUDIO_PAD_SEC = 0.04;
 
+/** When a word's end coincides with the next word's start, the ASR boundary is a shared cut, not the
+ *  word's real end: the voice has already decayed into the next onset, so the mask stops this much
+ *  earlier (never shorter than the kept minimum share of the word). */
+export const MASK_AUDIO_END_TRIM_SEC = 0.06;
+const MASK_AUDIO_MIN_KEEP = 0.55;
+
 /** Patch semantics: undefined = leave as is; null = clear that replacement. */
 export interface WordMaskPatch {
   audio?: WordAudioMask | null;
@@ -115,7 +121,12 @@ export function maskedAudioRanges(segments: readonly AsrSegment[] | null | undef
       let start = word.start - MASK_AUDIO_PAD_SEC;
       if (prev && !segment.masks[String(wi - 1)]?.audio) start = Math.max(start, Math.min(word.start, prev.end));
       let end = wordEnd + MASK_AUDIO_PAD_SEC;
-      if (next && !segment.masks[String(wi + 1)]?.audio) end = Math.min(end, Math.max(wordEnd, next.start));
+      if (next && !segment.masks[String(wi + 1)]?.audio) {
+        const contiguous = next.start <= wordEnd + 0.02;
+        end = contiguous
+          ? Math.max(word.start + (wordEnd - word.start) * MASK_AUDIO_MIN_KEEP, wordEnd - MASK_AUDIO_END_TRIM_SEC)
+          : Math.min(end, next.start);
+      }
       raw.push({ start: Math.max(0, start), end, audio: mask.audio });
     }
   }

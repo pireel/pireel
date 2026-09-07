@@ -42,9 +42,10 @@ describe('word masks', () => {
     const ranges = maskedAudioRanges(segs);
     expect(ranges).toHaveLength(1);
     expect(ranges[0]!.audio).toBe('beep');
-    // 'a' ends exactly where 'damn' starts and 'take' starts where 'good' ends: no padding leaks into them
+    // 'a' ends exactly where 'damn' starts: no padding leaks into it. 'take' starts where 'good' ends,
+    // a shared ASR cut, so the span stops 60 ms before that boundary.
     expect(ranges[0]!.start).toBeCloseTo(0.6, 6);
-    expect(ranges[0]!.end).toBeCloseTo(1.2, 6);
+    expect(ranges[0]!.end).toBeCloseTo(1.14, 6);
     expect(maskedAudioAt(ranges, 0.7)).toBe('beep');
     expect(maskedAudioAt(ranges, 0.55)).toBeNull();
     // With silence around the word, the padding is used
