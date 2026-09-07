@@ -28,6 +28,11 @@ import {
   segmentTimelineTimeAt,
 } from './video-segment-time';
 
+/** Preview lead for word masks: muting a media element and ramping the tone take a couple of audio
+ *  buffers to be heard, so the mask is evaluated this far AHEAD of the clock — the replacement then
+ *  lands on the word instead of trailing it at both ends. Export renders sample-exact and needs none. */
+export const MASK_PREVIEW_LEAD_SEC = 0.09;
+
 export interface EngineSeg {
   /** Source key: 'main' or this segment's src (blob/remote URL). */
   key: string;
@@ -429,7 +434,8 @@ export class VideoTrackEngine {
   /** Per tick: silence the active element (and its dub) across a masked span, play the tone for a beep,
    *  and hand the sound back the moment the clock leaves the span. */
   private applyMask(key: string, el: HTMLMediaElement, srcT: number, dubbed: boolean): void {
-    const mask = this.maskAt(key, srcT);
+    const rate = el.playbackRate > 1e-9 ? el.playbackRate : 1;
+    const mask = this.maskAt(key, srcT + MASK_PREVIEW_LEAD_SEC * rate);
     if (mask) {
       if (!el.muted) el.muted = true;
       const dub = this.dubs.get(key);
@@ -575,7 +581,8 @@ export class VideoTrackEngine {
         if (!el.paused) el.pause();
         continue;
       }
-      const mask = wantPlay && spec.maskAt ? spec.maskAt(srcT) : null;
+      const maskSrcT = wantPlay && spec.maskAt ? spec.srcTimeAt(t + MASK_PREVIEW_LEAD_SEC) : null;
+      const mask = maskSrcT != null && spec.maskAt ? spec.maskAt(maskSrcT) : null;
       if (mask === 'beep') clipBeep = true;
       setGain(mask ? 0 : spec.gainAt(t));
       el.playbackRate = spec.speed;
