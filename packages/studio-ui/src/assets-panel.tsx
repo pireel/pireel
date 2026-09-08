@@ -43,8 +43,11 @@ export function AssetsPanel({
   onDragAsset,
   onOpenGeneration,
   onUseAudio,
+  onUseAsReference,
   genRefreshTick = 0,
 }: {
+  /** "Use as reference": arm the chat's image generation with this asset mentioned. */
+  onUseAsReference?: (entry: LocalAssetIndexEntry) => void;
   /** Element live preview needs theme/canvas (BlockPreviewFrame). */
   comp: Composition;
   /** Scopes "My"'s local-import registry (imports persist per project across refreshes). */
@@ -136,6 +139,7 @@ export function AssetsPanel({
           onInsertClip={onInsertClip}
           onUseAudio={onUseAudio}
           onDragAsset={onDragAsset}
+          onUseAsReference={onUseAsReference}
         />
       </div>
       {officialMounted && CuratedAssetsPanel && (

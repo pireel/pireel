@@ -13,7 +13,7 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Lightbulb, SlidersHorizontal } from 'lucide-react';
+import { Lightbulb, Play, Search, SlidersHorizontal } from 'lucide-react';
 import { useQuote } from '@pireel/ui/use-quote';
 import { imageThumb } from '@pireel/ui/image-url';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@pireel/ui/dialog';
@@ -124,15 +124,31 @@ function Row({ label, options, value, onChange }: { label: string; options: read
 
 /** The ideas dialog: template cards for the armed kind; a click fills the composer. */
 function IdeasDialog({ intent, open, onClose, onUse }: { intent: GenerationIntent; open: boolean; onClose: () => void; onUse: (prompt: string) => void }) {
-  const templates = useMemo(() => generationTemplates(intent, studioLocale(), 24), [intent]);
+  const templates = useMemo(() => generationTemplates(intent, studioLocale(), 60), [intent]);
+  const [query, setQuery] = useState('');
+  const shown = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase();
+    return needle ? templates.filter((template) => `${template.title} ${template.prompt}`.toLocaleLowerCase().includes(needle)) : templates;
+  }, [templates, query]);
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
       <DialogContent className="bg-panel border-line w-[min(1120px,calc(100vw-2rem))] gap-3 p-4">
         <DialogHeader className="pr-7">
           <DialogTitle className="text-ink text-[14px]">{t('chatGen.templates')}</DialogTitle>
         </DialogHeader>
+        <label className="border-line focus-within:border-accent relative block rounded-md border">
+          <Search size={12} className="text-ink-4 pointer-events-none absolute left-2 top-1/2 -translate-y-1/2" />
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={t('chatGen.searchIdeas')}
+            aria-label={t('chatGen.searchIdeas')}
+            className="text-ink placeholder:text-ink-4 h-7 w-full bg-transparent pl-7 pr-2 text-[12px] outline-none"
+          />
+        </label>
         <div className="grid max-h-[78vh] grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4 lg:grid-cols-6">
-          {templates.map((template) => (
+          {shown.map((template) => (
             <button
               key={template.id}
               type="button"
@@ -306,6 +322,20 @@ export function GenerationControls({
                   <option key={voice.id} value={voice.id}>{voice.name}</option>
                 ))}
               </select>
+              {params.voiceId ? (
+                <button
+                  type="button"
+                  title={t('chatGen.previewVoice')}
+                  aria-label={t('chatGen.previewVoice')}
+                  onClick={() => {
+                    const audio = new Audio(`/api/studio/voice-preview?voiceId=${encodeURIComponent(params.voiceId!)}`);
+                    void audio.play().catch(() => {});
+                  }}
+                  className="text-ink-3 hover:text-ink inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md"
+                >
+                  <Play className="h-3 w-3" />
+                </button>
+              ) : null}
             </div>
           ) : null}
           {intent === 'video' || (intent === 'audio' && audioKind !== 'speech') ? (
@@ -320,6 +350,14 @@ export function GenerationControls({
             <div className="text-ink-4 pt-1 text-[10px]">
               {audioKind === 'speech' ? t('chatGen.audioKindSpeechHint') : audioKind === 'sfx' ? t('chatGen.audioKindSfxHint') : t('chatGen.audioKindMusicHint')}
             </div>
+          ) : null}
+          {intent === 'video' ? (
+            <Row
+              label={t('chatGen.paramSound')}
+              options={[{ value: 'on', label: t('chatGen.soundOn') }, { value: 'off', label: t('chatGen.soundOff') }]}
+              value={params.generateAudio ? 'on' : 'off'}
+              onChange={(value) => onChange({ ...params, generateAudio: value === 'on' })}
+            />
           ) : null}
           {intent === 'video' && resolutionOptions.length > 1 ? (
             <Row

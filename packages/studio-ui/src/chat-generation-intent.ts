@@ -28,6 +28,8 @@ export interface GenerationParams {
   durationSec?: number;
   /** audio only: a chosen voice turns the message into a narration script (speech synthesis). */
   voiceId?: string;
+  /** video only: synthesize sound with the picture. */
+  generateAudio?: boolean;
 }
 
 /** Audio has one mode; the duration ladder picks the generator: short = sound effect, long = music. */
@@ -61,13 +63,14 @@ export function generationIntentLine(intent: GenerationIntent, params: Generatio
   const audioKind = intent === 'audio' ? audioKindFor(params) : null;
   if (audioKind === 'speech' && params.voiceId) facts.push(`voice ${params.voiceId}`);
   if (params.durationSec && (intent === 'video' || (intent === 'audio' && audioKind !== 'speech'))) facts.push(`duration ${params.durationSec}s`);
+  if (intent === 'video' && params.generateAudio !== undefined) facts.push(params.generateAudio ? 'with sound' : 'no sound');
   const kind: Record<GenerationIntent, string> = {
     image: 'an image',
     video: 'a video clip',
     audio: audioKind === 'speech'
       ? 'narration speech from my text as the exact script'
       : audioKind === 'sfx' ? 'a sound effect (kind sfx)' : 'a music track (kind music)',
-    element: 'an on-screen graphic element',
+    element: 'an on-screen graphic element (compose_component)',
   };
   return `(Generate ${kind[intent]}${facts.length ? ` — ${facts.join(', ')}` : ''}; register the result in the project media and place it only if I asked.)`;
 }
@@ -107,3 +110,16 @@ export function generationTemplates(intent: GenerationIntent, locale: string, li
 /** @deprecated use generationTemplates. */
 export const generationTemplatePrompts = (intent: GenerationIntent, locale: string, limit = 6) =>
   generationTemplates(intent, locale, limit).map(({ id, title, prompt }) => ({ id, title, prompt }));
+
+/** Recognize the intent line inside a user message so the chat can render it as a chip. */
+export function describeGenerationIntentLine(text: string): { intent: GenerationIntent | 'speech'; facts: string } | null {
+  const match = /^\s*\(Generate (an image|a video clip|a music track \(kind music\)|a sound effect \(kind sfx\)|narration speech[^—;]*|an on-screen graphic element[^—;]*)(?: — ([^;]+))?;/.exec(text);
+  if (!match) return null;
+  const head = match[1]!;
+  const intent: GenerationIntent | 'speech' = head.startsWith('an image') ? 'image'
+    : head.startsWith('a video') ? 'video'
+      : head.startsWith('narration') ? 'speech'
+        : head.startsWith('an on-screen') ? 'element'
+          : 'audio';
+  return { intent, facts: (match[2] ?? '').trim() };
+}

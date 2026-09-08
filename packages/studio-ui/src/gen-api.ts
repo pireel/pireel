@@ -39,6 +39,22 @@ export interface GeneratedAssetRecord {
   mime: string;
   prompt: string;
   createdAt: number;
+  durationSec?: number;
+}
+
+/** Settled outputs of generation jobs as directory records; kind falls back to the asset MIME when
+ * the job list does not carry it (jobs polled by id). */
+export function generatedRecordsFromJobs(jobs: readonly (GenJob & { kind?: 'image' | 'video' | 'audio' })[]): GeneratedAssetRecord[] {
+  const records: GeneratedAssetRecord[] = [];
+  for (const job of jobs) {
+    if (job.status !== 'succeeded') continue;
+    job.assets.forEach((asset, index) => {
+      if (!asset.key) return;
+      const kind = job.kind ?? (asset.mime.startsWith('video/') ? 'video' : asset.mime.startsWith('audio/') ? 'audio' : 'image');
+      records.push({ jobId: job.id, index, kind, key: asset.key, mime: asset.mime, prompt: job.prompt, createdAt: job.createdAt });
+    });
+  }
+  return records;
 }
 
 /** Generated media follows the project like any import: one directory entry per output, addressed
@@ -56,6 +72,7 @@ export function generatedAssetIndexEntry(record: GeneratedAssetRecord, fallbackL
     w: null,
     h: null,
     ...(record.mime ? { mime: record.mime } : {}),
+    ...(record.durationSec ? { durationSec: record.durationSec } : {}),
     createdAt: record.createdAt,
   };
 }

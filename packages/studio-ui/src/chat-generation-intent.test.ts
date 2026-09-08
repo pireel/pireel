@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { generationIntentLine, generationTemplatePrompts, GENERATION_INTENTS } from './chat-generation-intent';
+import { describeGenerationIntentLine, generationIntentLine, generationTemplatePrompts, GENERATION_INTENTS } from './chat-generation-intent';
 
 describe('chat generation intent', () => {
   it('appends one compact instruction line carrying kind and only the parameters that apply', () => {
@@ -15,8 +15,17 @@ describe('chat generation intent', () => {
       '(Generate narration speech from my text as the exact script — voice v_1; register the result in the project media and place it only if I asked.)',
     );
     expect(generationIntentLine('element', {})).toBe(
-      '(Generate an on-screen graphic element; register the result in the project media and place it only if I asked.)',
+      '(Generate an on-screen graphic element (compose_component); register the result in the project media and place it only if I asked.)',
     );
+    expect(generationIntentLine('video', { durationSec: 5, generateAudio: true })).toContain('duration 5s, with sound');
+  });
+
+  it('recognizes its own line so the chat can render it as a chip', () => {
+    expect(describeGenerationIntentLine(generationIntentLine('image', { ratio: '9:16', count: 2 }))).toEqual({ intent: 'image', facts: 'aspect 9:16, count 2' });
+    expect(describeGenerationIntentLine(generationIntentLine('audio', { durationSec: 3 }))).toEqual({ intent: 'audio', facts: 'duration 3s' });
+    expect(describeGenerationIntentLine(generationIntentLine('audio', { voiceId: 'v1' }))).toEqual({ intent: 'speech', facts: 'voice v1' });
+    expect(describeGenerationIntentLine(generationIntentLine('element', {}))).toEqual({ intent: 'element', facts: '' });
+    expect(describeGenerationIntentLine('make me a poster')).toBeNull();
   });
 
   it('offers a few localized template prompts per intent, built-in ideas for audio', () => {

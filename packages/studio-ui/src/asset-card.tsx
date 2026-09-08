@@ -304,6 +304,7 @@ export function AssetCard({
   onInsert,
   onRename,
   onDelete,
+  onUseAsReference,
   dragProps,
   insertLabel,
 }: {
@@ -311,6 +312,8 @@ export function AssetCard({
   playing?: boolean;
   onActivate: () => void;
   onInsert: () => void;
+  /** Arm image generation with this asset as a reference (image/video assets). */
+  onUseAsReference?: () => void;
   /** Semantic rename. When present, rename/delete live in one compact menu. */
   onRename?: () => void;
   /** Absent = no delete affordance (deletable items pass a handler). */
@@ -319,7 +322,7 @@ export function AssetCard({
   insertLabel: string;
 }) {
   const audio = it.kind === 'audio';
-  const hasOptionsMenu = Boolean(onRename);
+  const hasOptionsMenu = Boolean(onRename || onUseAsReference);
   return (
     <div className="bg-panel-2/55 hover:bg-panel-2 group relative w-full overflow-hidden rounded-md transition-colors">
       <button
@@ -342,7 +345,7 @@ export function AssetCard({
       {/* Action chrome sits inside the thumb area (label strip is h-6 below). Video/audio move the
           duration badge left when the top-right options menu is present. */}
       {hasOptionsMenu ? (
-        <AssetCardMoreMenu onRename={onRename} onDelete={onDelete} />
+        <AssetCardMoreMenu onRename={onRename} onDelete={onDelete} onUseAsReference={onUseAsReference} />
       ) : onDelete ? (
         <button
           type="button"
@@ -372,17 +375,20 @@ export function AssetCard({
 export function AssetCardMoreMenu({
   onRename,
   onDelete,
+  onUseAsReference,
   optionsLabel,
   renameLabel,
   deleteLabel,
 }: {
   onRename?: () => void;
   onDelete?: () => void;
+  /** Arm the chat's image generation with this asset as a reference. */
+  onUseAsReference?: () => void;
   optionsLabel?: string;
   renameLabel?: string;
   deleteLabel?: string;
 }) {
-  if (!onRename && !onDelete) return null;
+  if (!onRename && !onDelete && !onUseAsReference) return null;
   const resolvedOptionsLabel = optionsLabel ?? t('panels.assetOptions');
   return (
     <DropdownMenu>
@@ -398,6 +404,11 @@ export function AssetCardMoreMenu({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" sideOffset={4} className="min-w-[132px] text-[11px]">
+        {onUseAsReference ? (
+          <DropdownMenuItem onSelect={onUseAsReference}>
+            <Sparkles size={13} /> {t('panels.useAsReference')}
+          </DropdownMenuItem>
+        ) : null}
         {onRename ? (
           <DropdownMenuItem onSelect={onRename} className="text-[11px]">
             <Pencil size={12} />

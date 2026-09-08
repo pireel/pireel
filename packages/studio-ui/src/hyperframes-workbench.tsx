@@ -287,7 +287,7 @@ import {
   type StudioChatHandle,
   type StudioElementRef,
 } from "./studio-chat";
-import { buildChatMentionElements } from "./chat-local-asset-mention";
+import { buildChatMentionElements, localAssetMentionRef } from "./chat-local-asset-mention";
 import { resolveLocalAssetReference } from "./studio-tool-input-references";
 import { shouldCollapseChatForTimelineFramePick } from "./chat-timeline-frame-picker";
 import { ElementSourceEditor, type SourceDraft } from "./element-source-editor";
@@ -324,7 +324,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@pireel/ui/dialog";
-import { generatedAssetIndexEntry, type GeneratedAssetRecord } from "./gen-api";
+import { generatedAssetIndexEntry, generatedRecordsFromJobs, listStudioGens, type GeneratedAssetRecord } from "./gen-api";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -8091,6 +8091,27 @@ export function HyperframesWorkbench({
   // the cloud request itself to settle or a slow response can resurrect cross-browser deletions.
   const [localAssetIndexSyncReady, setLocalAssetIndexSyncReady] =
     useState(false);
+  // Generation history joins the project media directory (outputs made before the directory existed,
+  // or by an agent in another session). Idempotent: registerGeneratedAssets skips known ids.
+  useEffect(() => {
+    if (!localAssetIndexSyncReady || !projectId) return;
+    let cancelled = false;
+    void Promise.all([
+      listStudioGens(projectId, "image", 60).catch(() => []),
+      listStudioGens(projectId, "video", 60).catch(() => []),
+      listStudioGens(projectId, "audio", 60).catch(() => []),
+    ]).then(([images, videos, audios]) => {
+      if (cancelled) return;
+      registerGeneratedAssets(generatedRecordsFromJobs([
+        ...images.map((job) => ({ ...job, kind: "image" as const })),
+        ...videos.map((job) => ({ ...job, kind: "video" as const })),
+        ...audios.map((job) => ({ ...job, kind: "audio" as const })),
+      ]));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, localAssetIndexSyncReady, registerGeneratedAssets]);
   // Cloud self-heal: assets imported before cloud-by-default (or whose upload never finished) are
   // uploaded as soon as this device can read their bytes. Device-only lanes: no prompts, no network.
   useEffect(() => {
@@ -8474,6 +8495,8 @@ export function HyperframesWorkbench({
                 key={chatEpoch}
                 ref={chatRef}
                 projectId={projectId}
+                onInsertMedia={(m) => void insertPanelMedia({ type: m.type, url: m.url }, m.label)}
+                onUseAudio={(url, label) => void audioOps.mountAudioFromUrl(url, label)}
                 runTool={chatCbs.runTool}
                 getBody={getChatBody}
                 getComp={getChatComp}
@@ -10096,6 +10119,11 @@ export function HyperframesWorkbench({
                     localAssetIndexSyncReady={localAssetIndexSyncReady}
                     onLocalAssetIndexChange={changeLocalAssetIndex}
                     onLocalAssetAvailable={acceptLocalAssetFile}
+                    onUseAsReference={(entry) => {
+                      openChat();
+                      chatRef.current?.beginGeneration("image");
+                      chatRef.current?.insertMention(localAssetMentionRef(entry));
+                    }}
                     videoSig={null}
                     mainSourceUrl={null}
                     hasMainSource={false}
