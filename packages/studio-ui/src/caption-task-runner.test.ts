@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CaptionTaskRecord } from './caption-task-store';
+import type { CaptionTaskRecord, CaptionTaskProgress } from './caption-task-store';
 const mock = vi.hoisted(() => ({ transcribe: vi.fn(), clean: vi.fn(), render: vi.fn(), font: vi.fn(), translate: vi.fn() }));
 vi.mock('@pireel/studio-engine/providers', () => ({ studioProviders: () => ({ translate: mock.translate }) }));
 vi.mock('./media', () => ({ transcribeFile: mock.transcribe }));
@@ -18,6 +18,17 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 describe('standalone caption task execution', () => {
+  it('reports observed stage work and leaves opaque recognition indeterminate', async () => {
+    const observed: CaptionTaskProgress[] = [];
+    mock.transcribe.mockImplementationOnce(async (_file, options) => { options.onPhase('recognizing'); return transcript; });
+    mock.clean.mockImplementationOnce(async (_file, options) => { options.onProgress(20, 100); return []; });
+    mock.render.mockImplementationOnce(async (options) => { options.onProgress(42, 100); return new Blob(['video']); });
+    await runCaptionTask(task(), file, { signal: new AbortController().signal, checkpoint: async () => {}, progress: vi.fn(), stageProgress: (value) => observed.push(structuredClone(value)) });
+    expect(observed.find((value) => value.transcribing?.detail === 'recognizing')?.transcribing?.fraction).toBeUndefined();
+    expect(observed.some((value) => value.cleaning?.fraction === .2)).toBe(true);
+    expect(observed.some((value) => value.rendering?.fraction === .42)).toBe(true);
+    expect(Object.values(observed.at(-1)!).every((value) => value?.status === 'completed')).toBe(true);
+  });
   it('runs without a workbench and produces a downloadable video with a native document', async () => {
     const records: CaptionTaskRecord[] = [];
     const result = await runCaptionTask(task(), file, { signal: new AbortController().signal, checkpoint: async (record) => { records.push(structuredClone(record)); }, progress: vi.fn() });

@@ -6,7 +6,7 @@ import type { CaptionTaskRecord } from './caption-task-store';
 type Translate = (rows: { index: number; text: string }[], language: string) => Promise<{ index: number; text: string }[]>;
 
 /** Translate surviving sentences, keeping original word timestamps and publishing all rows atomically. */
-export async function translateCaptionTask(task: CaptionTaskRecord, document: EditorDocumentV2, translate: Translate, check: () => void) {
+export async function translateCaptionTask(task: CaptionTaskRecord, document: EditorDocumentV2, translate: Translate, check: () => void, onProgress?: (done: number, total: number) => void) {
   const target = task.options.translationLanguage!;
   const composition = projectDocumentToComposition(document);
   // Standalone tasks have one source. Native projected shots carry explicit source IDs,
@@ -16,6 +16,7 @@ export async function translateCaptionTask(task: CaptionTaskRecord, document: Ed
   if (task.translation?.language === target && task.translation.sourceKey === sourceKey) return { document, transcript: task.transcript!, translation: task.translation };
   if (!groups.length) throw new Error('没有可翻译的字幕。');
   if (groups.some((group) => group.text.length > 400)) throw new Error('字幕句子过长，请先重新断句再翻译。');
+  onProgress?.(0, groups.length);
   const rows: { index: number; text: string }[] = [];
   // 250 × 400 UTF-16 characters stays below the hosted endpoint's 512 KiB limit.
   for (let offset = 0; offset < groups.length; offset += 250) {
@@ -30,6 +31,7 @@ export async function translateCaptionTask(task: CaptionTaskRecord, document: Ed
     }
     if (expected.size) throw new Error('翻译结果不完整，请重试。');
     rows.push(...translated);
+    onProgress?.(rows.length, groups.length);
   }
   const result = replaceCaptionTranslationsTransaction({ document, composition, groups, rows, target, mainTranscript: task.transcript!, clipTranscripts: {} });
   if (!result.ok) throw new Error(result.error);

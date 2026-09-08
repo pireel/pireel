@@ -170,7 +170,9 @@ export async function probeVideoFile(file: File): Promise<ProbedFile> {
 }
 
 /** Extract audio (upload audio only) → ASR → sentence-level shots. Cached by fileSig (same clip transcribed once). */
-export async function transcribeFile(file: File, opts?: { projectId?: string }): Promise<AsrSegment[]> {
+export async function transcribeFile(file: File, opts?: { projectId?: string; signal?: AbortSignal; onPhase?: (phase: 'checking' | 'extracting' | 'uploading' | 'recognizing' | 'aligning') => void }): Promise<AsrSegment[]> {
+  const phase = (value: 'checking' | 'extracting' | 'uploading' | 'recognizing' | 'aligning') => { opts?.signal?.throwIfAborted(); opts?.onPhase?.(value); };
+  phase('checking');
   const sig = fileSig(file);
   const cached = await getCachedAsr(sig);
   if (cached) return cached;
@@ -183,9 +185,13 @@ export async function transcribeFile(file: File, opts?: { projectId?: string }):
     return [];
   }
   const durationSec = probe?.durationSec;
+  phase('extracting');
   const audio = await extractAudio(file);
+  phase('uploading');
   const { url } = await studioProviders().uploads.upload(audio, { contentType: audio.type || 'audio/mp4', filename: 'studio-audio.m4a' });
+  phase('recognizing');
   const r = await fetch('/api/auto-edit/asr', {
+    signal: opts?.signal,
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ audio_url: url, duration_sec: durationSec, ...(opts?.projectId ? { projectId: opts.projectId } : {}) }),
@@ -206,6 +212,7 @@ export async function transcribeFile(file: File, opts?: { projectId?: string }):
   // ASR times are in the "audio track's own zero" frame (audio extraction subtracts the audio track's first
   // packet), while playback is in "earliest sample across all tracks". Files whose two tracks' first packets
   // are out of sync need this delta added back, or captions/cut points shift wholesale.
+  phase('aligning');
   const off = await audioPlaybackOffset(file);
   // Language: provider-reported when available, script-detection fallback otherwise (feeds translate
   // defaults / segmentation hints; per-segment so mixed-language sources stay honest).

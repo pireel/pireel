@@ -1,0 +1,87 @@
+// @vitest-environment jsdom
+import { act, createElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CaptionTaskRecord } from './caption-task-store';
+import type { runCaptionTask } from './caption-task-runner';
+const mocks = vi.hoisted(() => ({ run: vi.fn(), remix: vi.fn(), source: vi.fn(), cache: vi.fn() }));
+vi.mock('./caption-task-runner', () => ({ runCaptionTask: mocks.run }));
+vi.mock('./caption-agent-remix', () => ({ createCaptionAgentRemix: mocks.remix }));
+vi.mock('./current-user', () => ({ loadCurrentUser: async () => ({ user_id: 'owner', auth_method: 'session' }) }));
+vi.mock('./local-media', () => ({ loadLocalVideo: mocks.source, saveLocalVideo: mocks.cache }));
+vi.mock('./media', () => ({ fileSig: () => 'source', probeVideoFile: async () => ({ width: 1920, height: 1080, durationSec: 5, hasAudio: true }) }));
+vi.mock('./web-fonts', () => ({ ensureFontStylesheet: async () => {} }));
+vi.mock('./caption-project-cover', () => ({ captureCaptionCover: async () => 'data:image/jpeg;base64,poster' }));
+vi.mock('./canvas-caption-preview', () => ({ CanvasCaptionPreview: () => createElement('canvas') }));
+vi.mock('@pireel/studio-engine/providers', () => ({ studioProviders: () => ({ translate: vi.fn(), captionEmphasis: vi.fn() }) }));
+import { CaptionTaskPage } from './caption-task-page';
+import { saveCaptionTask, listCaptionVersions, loadCaptionVersion } from './caption-task-store';
+let root: Root; let container: HTMLDivElement;
+let runs: { task: CaptionTaskRecord; hooks: Parameters<typeof runCaptionTask>[2]; resolve: (value: Awaited<ReturnType<typeof runCaptionTask>>) => void; reject: (error: Error) => void }[];
+const fixture = (): CaptionTaskRecord => ({ id: 'task', scope: 'owner', name: 'demo.mp4', sourceSig: 'source', width: 1920, height: 1080, durationSec: 5, stage: 'ready', updatedAt: 1, coverThumb: 'data:image/jpeg;base64,poster', options: { presetId: 'clean', aspect: 'original', shortenPauses: false } });
+const button = (name: string) => [...container.querySelectorAll('button')].find((element) => element.textContent?.trim() === name)!;
+const click = async (element: HTMLElement) => { await act(async () => element.click()); };
+const settled = async (check: () => void) => vi.waitFor(async () => { await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); }); check(); });
+beforeEach(async () => {
+  vi.clearAllMocks(); runs = [];
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.stubGlobal('indexedDB', new IDBFactory()); vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('matchMedia', () => ({ matches: true }));
+  let urlId = 0; vi.stubGlobal('URL', { createObjectURL: () => `blob:result-${++urlId}`, revokeObjectURL: vi.fn() });
+  mocks.source.mockResolvedValue(new File(['source'], 'demo.mp4')); mocks.cache.mockResolvedValue(true); mocks.remix.mockResolvedValue('remixed');
+  mocks.run.mockImplementation((task, _file, hooks) => new Promise((resolve, reject) => runs.push({ task, hooks, resolve, reject })));
+  await saveCaptionTask(fixture());
+  container = document.createElement('div'); document.body.append(container); root = createRoot(container);
+  await act(async () => root.render(createElement(CaptionTaskPage, { taskId: 'task', locale: 'zh', onBack: vi.fn(), onOpenEditor: vi.fn() })));
+  await settled(() => expect(button('生成字幕视频')).toBeTruthy());
+});
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
+async function complete(index: number) {
+  await act(async () => runs[index]!.resolve({ task: { ...runs[index]!.task, stage: 'completed', updatedAt: 10 + index }, video: new Blob([`video-${index}`], { type: 'video/mp4' }) }));
+  await settled(() => expect(container.querySelector('video[controls]')).not.toBeNull());
+}
+describe('caption versions and preview UI', () => {
+  it('only enables playback after generation, shows real stage progress, and preserves selectable versions', async () => {
+    expect(container.querySelector('video')).toBeNull();
+    expect(container.querySelector('img[alt="视频封面"]')).not.toBeNull();
+    await click(button('生成字幕视频'));
+    await settled(() => expect(runs).toHaveLength(1));
+    await act(async () => runs[0]!.hooks.stageProgress?.({ transcribing: { status: 'completed', fraction: 1 }, styling: { status: 'completed', fraction: 1 }, rendering: { status: 'running', fraction: .42 } }));
+    expect(container.querySelector('[aria-label="字幕生成进度"]')).not.toBeNull();
+    expect(container.querySelector('progress[aria-label="生成视频"]')?.getAttribute('value')).toBe('0.42');
+    expect(container.querySelector('video')).toBeNull();
+    await complete(0);
+    expect(container.querySelector('[aria-label="字幕生成进度"]')).toBeNull();
+    await click(button('荧光绿'));
+    expect(container.querySelector('video')).toBeNull();
+    await click(button('生成新版本'));
+    await settled(() => expect(runs).toHaveLength(2));
+    await complete(1);
+    expect(runs[0]!.task.generationId).not.toBe(runs[1]!.task.generationId);
+    expect(await listCaptionVersions('owner', 'task')).toHaveLength(2);
+    const select = container.querySelector<HTMLSelectElement>('[aria-label="视频版本"]')!;
+    await act(async () => { select.value = runs[0]!.task.generationId!; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    await settled(() => expect(button('清爽白字').getAttribute('aria-pressed')).toBe('true'));
+    expect(container.querySelector('a[download]')?.getAttribute('download')).toBe('demo-v1.mp4');
+    await click(button('Agent Remix'));
+    await settled(() => expect(mocks.remix).toHaveBeenCalled());
+    expect(mocks.remix.mock.calls[0]![0].generationId).toBe(runs[0]!.task.generationId);
+    expect((await loadCaptionVersion('owner', 'task', runs[1]!.task.generationId!))!.version.task.options.presetId).toBe('neon');
+    await act(async () => root.render(null));
+    await act(async () => root.render(createElement(CaptionTaskPage, { taskId: 'task', locale: 'zh', onBack: vi.fn(), onOpenEditor: vi.fn() })));
+    await settled(() => expect(container.querySelector<HTMLSelectElement>('[aria-label="视频版本"]')?.value).toBe(runs[1]!.task.generationId));
+    expect(container.querySelectorAll('[aria-label="视频版本"] option')).toHaveLength(3);
+    expect(container.querySelector('video[controls]')).not.toBeNull();
+  });
+  it('keeps completed versions available when regeneration fails', async () => {
+    await click(button('生成字幕视频')); await settled(() => expect(runs).toHaveLength(1)); await complete(0);
+    await click(button('生成新版本')); await settled(() => expect(runs).toHaveLength(2));
+    await act(async () => runs[1]!.reject(new Error('Rendering failed')));
+    await settled(() => expect(button('继续上次处理')).toBeTruthy());
+    expect(await listCaptionVersions('owner', 'task')).toHaveLength(1);
+    const select = container.querySelector<HTMLSelectElement>('[aria-label="视频版本"]')!;
+    await act(async () => { select.value = runs[0]!.task.generationId!; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    await settled(() => expect(container.querySelector('video[controls]')).not.toBeNull());
+  });
+});
