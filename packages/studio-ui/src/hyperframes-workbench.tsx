@@ -242,6 +242,7 @@ import {
   localAssetIndexEntry,
 } from "./local-import-session";
 import { VideoTrackEngine } from "./video-track-engine";
+import { clipAudioMasks, previewAudioMasks } from "./export-word-masks";
 import { segmentSourceRate } from "./video-segment-time";
 import { compositionRenderView } from "./composition-render-view";
 import { primaryNarrativeRenderPlan } from "./primary-render-plan";
@@ -1759,6 +1760,26 @@ export function HyperframesWorkbench({
     })();
     return () => { cancelled = true; };
   }, [editorDocument, localAssetIndexRev, prepareLocalAssetRuntime, resolveAssetUrl, setEditorDocument]);
+  /** Export-time readiness: the same restore as the effect above, awaited. An output switch clears the
+   *  runtime and the effect restores it asynchronously; an export started in between (batch export,
+   *  an agent's export right after switch_output) must not read a plan with unresolved sources. */
+  const prepareExportAssets = useCallback(
+    async (document: EditorDocumentV2) => {
+      const referenced = new Set(
+        document.timeline.tracks.flatMap((track) =>
+          track.clips.flatMap((clip) => ("assetId" in clip && clip.assetId ? [clip.assetId] : [])),
+        ),
+      );
+      for (const assetId of referenced) {
+        const asset = document.assets[assetId];
+        if (!asset?.locator.localSig || asset.kind === "image") continue;
+        if (localRuntimeReadyAssetIdsRef.current.has(asset.id)) continue;
+        const result = await prepareLocalAssetRuntime(asset, { asPrimary: false });
+        if (!result.ok) console.warn(`[studio] export: local ${asset.kind} source not ready for ${asset.id}: ${result.error}`);
+      }
+    },
+    [prepareLocalAssetRuntime],
+  );
   // Persistence metadata is folded into V2 synchronously without coupling the live-document module
   // to workbench feature refs.
   livePersistenceMetadataRef.current = {
@@ -1830,6 +1851,7 @@ export function HyperframesWorkbench({
     clipFilesRef,
     audioExportRef,
     denoiseExportRef,
+    prepareExportAssets,
   });
   // Agent export task (export_video/track_export): compose + browser download runs via exportVideo, this only tracks task state;
   // exportPct mirrored into a ref for the progress query inside runStudioTool (the switch closure can't read state)
@@ -5700,6 +5722,34 @@ export function HyperframesWorkbench({
     pushUndoSnapshot,
   });
   audioExportRef.current = audioOps.audioForExport;
+  // Word masks (beeped / muted words): narrative sources are keyed by src in the engine; audio-lane and
+  // visual-lane clips carry theirs inside their engine specs, which are re-fed here since masks live on
+  // the document, outside the audio hook's own deps.
+  const engineMaskKeysRef = useRef<Set<string>>(new Set());
+  const engineMaskSigRef = useRef('');
+  useEffect(() => {
+    const eng = videoEngineRef.current;
+    if (!eng) return;
+    const masks = previewAudioMasks(editorDocument, comp);
+    if ((window as unknown as { __hfMaskDebug?: boolean }).__hfMaskDebug) {
+      console.info('[mask:doc]', {
+        maskedClips: [...clipAudioMasks(editorDocument).keys()],
+        narrationKeys: [...masks.keys()].map((k) => k.slice(0, 60)),
+        shots: videoTrackShots(comp).map((shot) => `${shot.id}:${(shot.src ?? 'main').slice(0, 40)}`),
+        visuals: supplementalVisuals.map((visual) => `${visual.clipId}:${visual.kind}:${visual.muted ? 'muted' : 'audible'}`),
+        audioClips: (comp.audioTracks ?? []).map((clip) => clip.id),
+      });
+    }
+    for (const key of engineMaskKeysRef.current) if (!masks.has(key)) eng.setAudioMasks(key, []);
+    for (const [key, ranges] of masks) eng.setAudioMasks(key, ranges);
+    engineMaskKeysRef.current = new Set(masks.keys());
+    const clipSig = JSON.stringify([...clipAudioMasks(editorDocument)]);
+    if (clipSig !== engineMaskSigRef.current) {
+      engineMaskSigRef.current = clipSig;
+      audioOps.resyncEngineClips();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorDocument, comp]);
   /** Switch the rail to the audio settings tab (expanding the rail if the user had collapsed it). */
   const openAudioTab = () => {
     setFloatWin(null);
@@ -7007,6 +7057,8 @@ export function HyperframesWorkbench({
     cutTimelineRanges,
     restoreSrcRanges,
     replaceScriptWord,
+    maskScriptWords,
+    maskTimelineScriptWords,
     replaceTimelineScriptWord,
     extractForScript,
     asrBusy,
@@ -10106,6 +10158,7 @@ export function HyperframesWorkbench({
                         onCut={cutSrcRanges}
                         onRestore={restoreSrcRanges}
                         onReplaceWord={replaceScriptWord}
+                        onMaskWords={maskScriptWords}
                       />
                     ) : (
                       <TimelineScriptPanel
@@ -10118,6 +10171,7 @@ export function HyperframesWorkbench({
                         }}
                         onCut={cutTimelineRanges}
                         onReplaceWord={replaceTimelineScriptWord}
+                        onMaskWords={maskTimelineScriptWords}
                       />
                     )}
                   </div>
@@ -10200,6 +10254,7 @@ export function HyperframesWorkbench({
                           onCut={cutSrcRanges}
                           onRestore={restoreSrcRanges}
                           onReplaceWord={replaceScriptWord}
+                        onMaskWords={maskScriptWords}
                         />
                       ) : (
                         <TimelineScriptPanel
@@ -10212,6 +10267,7 @@ export function HyperframesWorkbench({
                           }}
                           onCut={cutTimelineRanges}
                           onReplaceWord={replaceTimelineScriptWord}
+                        onMaskWords={maskTimelineScriptWords}
                         />
                       )
                     )}

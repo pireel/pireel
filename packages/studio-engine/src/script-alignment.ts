@@ -10,7 +10,7 @@
  */
 import type { TranscriptSegment } from './project-dto';
 import { splitSpeechSentences } from './agent-timeline';
-import { segmentTokens } from './caption-fx';
+import { segmentTokens, wordsFromText } from './caption-fx';
 
 interface Unit {
   text: string;
@@ -228,10 +228,61 @@ export function alignTranscriptToScript(script: string, asr: readonly Transcript
   return out;
 }
 
+/** The script a stored transcript stands for. Flagged scripted segments are the script; so is a
+ *  transcript that was never measured (no word timing anywhere — every recogniser pass carries
+ *  words, so a word-less transcript can only have come from text). '' = a recorded transcript. */
+export function storedScriptText(stored: readonly TranscriptSegment[] | undefined): string {
+  if (!stored?.length) return '';
+  const scripted = stored.every((segment) => segment.scripted || !segment.words?.length);
+  return scripted ? stored.map((segment) => segment.text.trim()).filter(Boolean).join('\n') : '';
+}
+
+const SPAN_CHAR = /[\p{L}\p{N}]/u;
+
+/** Character spans (letters/digits only, punctuation and spaces skipped) of every word of a
+ *  transcript over its concatenated text, so two tokenisations of the same script can be matched. */
+function wordCharSpans(segments: readonly TranscriptSegment[]): { segment: number; word: number; from: number; to: number }[] {
+  const out: { segment: number; word: number; from: number; to: number }[] = [];
+  let cursor = 0;
+  segments.forEach((segment, segmentIndex) => {
+    const words = segment.words?.length ? segment.words : wordsFromText(segment.text, segment.start, segment.end);
+    words.forEach((word, wordIndex) => {
+      const count = [...word.text].filter((char) => SPAN_CHAR.test(char)).length;
+      out.push({ segment: segmentIndex, word: wordIndex, from: cursor, to: cursor + count });
+      cursor += count;
+    });
+  });
+  return out;
+}
+
+const strippedText = (segments: readonly TranscriptSegment[]) => segments.map((segment) => [...segment.text].filter((char) => SPAN_CHAR.test(char)).join('')).join('');
+
+/** Carry word masks across a re-tokenisation of the SAME text (provisional → measured): a new word
+ *  inherits the mask of any old word whose characters it shares. Different text = nothing to carry. */
+export function carryWordMasks(from: readonly TranscriptSegment[], to: TranscriptSegment[]): TranscriptSegment[] {
+  if (!from.some((segment) => segment.masks && Object.keys(segment.masks).length)) return to;
+  if (strippedText(from) !== strippedText(to)) return to;
+  const masked = wordCharSpans(from).flatMap((span) => {
+    const mask = from[span.segment]!.masks?.[String(span.word)];
+    return mask && span.to > span.from ? [{ ...span, mask }] : [];
+  });
+  if (!masked.length) return to;
+  const next = to.map((segment) => ({ ...segment }));
+  for (const span of wordCharSpans(to)) {
+    if (span.to <= span.from) continue;
+    const hit = masked.find((old) => old.from < span.to && span.from < old.to);
+    if (!hit) continue;
+    const segment = next[span.segment]!;
+    segment.masks = { ...(segment.masks ?? {}), [String(span.word)]: { ...hit.mask } };
+  }
+  return next;
+}
+
 /**
  * Transcript to store for a speech asset once ASR has measured it. A script-backed asset (exact
  * TTS text in its metadata, or a provisional scripted transcript generated from that text)
- * keeps its text and takes ASR timing; anything else stores the ASR result as heard.
+ * keeps its text and takes ASR timing; anything else stores the ASR result as heard. Word masks
+ * placed on the provisional transcript move onto the measured words.
  */
 export function measuredSpeechTranscript(
   asset: { metadata?: { transcriptText?: string } } | undefined,
@@ -239,10 +290,8 @@ export function measuredSpeechTranscript(
   measured: readonly TranscriptSegment[],
 ): TranscriptSegment[] {
   const exact = asset?.metadata?.transcriptText?.trim();
-  const provisional = stored?.length && stored.every((segment) => segment.scripted)
-    ? stored.map((segment) => segment.text.trim()).filter(Boolean).join('\n')
-    : '';
-  const script = exact || provisional;
+  const script = exact || storedScriptText(stored);
   if (!script) return [...measured];
-  return alignTranscriptToScript(script, measured);
+  const aligned = alignTranscriptToScript(script, measured);
+  return stored?.length ? carryWordMasks(stored, aligned) : aligned;
 }

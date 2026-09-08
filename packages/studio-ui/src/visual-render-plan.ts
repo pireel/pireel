@@ -1,3 +1,4 @@
+import { type MaskedAudioRange, maskedAudioAt } from '@pireel/studio-engine/word-masks';
 import type {
   EditorRenderPlan,
   MediaTimelineClip,
@@ -117,10 +118,12 @@ export function supplementalVisualAudioMixSegments(
  */
 export function supplementalVisualAudioSpecs(
   visuals: readonly SupplementalVisualMediaClip[],
+  clipMasks?: ReadonlyMap<string, readonly MaskedAudioRange[]>,
 ): EngineAudioClip[] {
   const segments = new Map(supplementalVisualAudioMixSegments(visuals).map((segment) => [segment.clipId, segment]));
   return visuals.filter((visual) => visual.kind === 'video').map((visual) => {
     const segment = segments.get(visual.clipId)!;
+    const masks = clipMasks?.get(visual.clipId);
     const timelineDuration = Math.max(1e-9, visual.endSec - visual.startSec);
     const sourceDuration = Math.max(0, visual.sourceOutSec - visual.sourceInSec);
     const rate = sourceDuration / timelineDuration;
@@ -136,6 +139,7 @@ export function supplementalVisualAudioSpecs(
         if (!activeAt(time)) return null;
         return Math.min(visual.sourceOutSec, Math.max(visual.sourceInSec, visual.sourceInSec + (time - visual.startSec) * rate));
       },
+      ...(masks?.length ? { maskAt: (srcT: number) => maskedAudioAt(masks, srcT) } : {}),
     };
   });
 }

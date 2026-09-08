@@ -5,6 +5,7 @@
  * monotonically for optimistic concurrency (client save carries baseVersion, server 409s if larger).
  */
 
+import type { WordMask } from './word-masks';
 import { applyPatch, type Operation } from 'fast-json-patch';
 import { create as createDiffer } from 'jsondiffpatch';
 import { format as formatJsonPatch } from 'jsondiffpatch/formatters/jsonpatch';
@@ -33,6 +34,8 @@ export interface TranscriptSegment {
   start: number;
   end: number;
   text: string;
+  /** Per-word replacements keyed by word index (see word-masks.ts). */
+  masks?: Record<string, WordMask>;
   /** Spoken language of this sentence (provider-reported or script-detected). */
   lang?: string;
   /** Speaker id (diarization; absent = single speaker / not enabled). */

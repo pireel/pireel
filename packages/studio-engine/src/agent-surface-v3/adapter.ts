@@ -137,6 +137,8 @@ function translateGetTranscript(input: Input, ctx: V3AdapterContext): V3Translat
     return { status: 'ok', calls: [{ tool: 'read_script', input: call }] };
   }
   const call: Input = {};
+  if (isNonEmptyString(input.assetId)) call.assetId = input.assetId;
+  if (isNonEmptyString(input.trackId)) call.trackId = input.trackId;
   if (isNonEmptyString(input.clipId)) call.shotId = input.clipId;
   if (Array.isArray(input.segmentIndexes)) call.sentenceIndexes = input.segmentIndexes;
   const from = frameField(input, 'fromFrame', ctx);
@@ -802,6 +804,7 @@ const PASSTHROUGH: Record<string, string> = {
   set_keyframes: 'set_keyframes',
   set_canvas: 'set_canvas',
   remove_silence: 'remove_silence',
+  mask_words: 'mask_words',
   denoise_audio: 'denoise_audio',
   compose_component: 'compose_block_brief',
   list_models: 'list_models',

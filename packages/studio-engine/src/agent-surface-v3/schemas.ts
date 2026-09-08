@@ -75,7 +75,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       granularity: enumOf(['segments', 'words'], 'segments (default) for meaning; words for exact wordIds.'),
       assetId: str('Speech-bearing asset; omit to prefer the primary narration.'),
       clipId: str('Narrow to the source behind this clip.'),
-      trackId: str('Narrow to one track (segments only).'),
+      trackId: str('Narrow to one track; for words, its speech clip with the most words picks the source.'),
       segmentIndexes: arr({ type: 'integer', minimum: 0 }, { description: 'words only: sentence rows to expand.' }),
       fromFrame: FRAME('words only: window start'),
       toFrame: FRAME('words only: window end (exclusive)'),
@@ -390,6 +390,15 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       wordIds: arr(str(), { description: 'Exact words to remove.' }),
       keepGapSec: num('Breathing room kept at each seam.', { min: 0, max: 2 }),
     }),
+  },
+  mask_words: {
+    description:
+      "Mask exact spoken words without cutting them. wordIds are stable ids from get_transcript words. audio replaces the words' sound with a censor beep (default — what 消音 / bleep means here) or silence (only when asked for silence); caption swaps their caption text (default '**') while the transcript and timing stay the spoken words. 'original' restores either side. For words the user wants bleeped or starred out — the platform keeps no word list, the user (or you, when asked) decides which words. Use remove_words to cut words out instead.",
+    inputSchema: obj({
+      wordIds: ids('Exact words to mask.'),
+      audio: enumOf(['beep', 'mute', 'original'], "Replace the sound with a beep tone (default) or silence; 'original' restores it."),
+      caption: str("Caption text shown instead of the words, or 'original' to show the spoken words again."),
+    }, ['wordIds']),
   },
   denoise_audio: {
     description:

@@ -30,12 +30,15 @@ import type { EngineAudioClip, VideoTrackEngine } from './video-track-engine';
 import { decodeAudioFile, decodeVideoAudio } from './audio-decode';
 import { bgmAutoVolumeDb, measureBufferLoudnessDb } from './loudness';
 import { fileSig } from './media';
+import { peaksOf } from './audio-peaks';
 import { loadLocalVideo, saveLocalVideo } from './local-media';
 import { getStudioSpaceId } from './gen-api';
 import { materializeRemoteMedia } from './remote-media';
 import { t } from './i18n';
 import { editorErrorMessage } from './editor-error';
 import { supplementalVisualAudioSpecs } from './visual-render-plan';
+import { clipAudioMasks } from './export-word-masks';
+import { maskedAudioAt } from '@pireel/studio-engine/word-masks';
 import { audioExportPayload } from './audio-export-payload';
 
 export interface AudioTracksDeps {
@@ -128,26 +131,6 @@ export function useAudioTracks(deps: AudioTracksDeps) {
 
   /** Absolute-peak envelope over the whole file (~100 points/s, capped) for the lane waveform — dense
    *  enough that a zoomed-in chip still gets a distinct bar per column instead of repeating buckets. */
-  const peaksOf = (buf: AudioBuffer): Float32Array => {
-    const n = Math.min(30000, Math.max(200, Math.round(buf.duration * 100)));
-    const ch0 = buf.getChannelData(0);
-    const ch1 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : ch0;
-    const out = new Float32Array(n);
-    const step = ch0.length / n;
-    for (let i = 0; i < n; i++) {
-      const a = Math.floor(i * step);
-      const b = Math.min(ch0.length, Math.floor((i + 1) * step));
-      let peak = 0;
-      // stride-sample long windows: a 5-minute track has ~1M samples per bucket, full scan is wasteful
-      const stride = Math.max(1, Math.floor((b - a) / 400));
-      for (let j = a; j < b; j += stride) {
-        const v = Math.max(Math.abs(ch0[j]!), Math.abs(ch1[j]!));
-        if (v > peak) peak = v;
-      }
-      out[i] = peak;
-    }
-    return out;
-  };
 
   /** Mount music bytes as a NEW clip on the lane: measure → initial level → OPFS → comp.audioTracks.
    *  A supplied sig means this is a project-local asset: metadata syncs, bytes stay on-device. */
@@ -279,19 +262,29 @@ export function useAudioTracks(deps: AudioTracksDeps) {
   const engineSpecs = (): EngineAudioClip[] => {
     const c = compRef.current;
     const total = timelineDurationSec ?? totalDuration(c);
+    // Word masks (beeped / muted words) per clip: the engine silences the span and plays the tone.
+    const clipMasks = clipAudioMasks(documentRef.current);
     const laneSpecs = (renderAudioTracksRef.current ?? c.audioTracks ?? [])
       .filter(clipUsable)
-      .map((clip) => ({
-        id: clip.id,
-        url: clip.src,
-        speed: Math.max(0.5, Math.min(2, clip.speed ?? 1)),
-        gainAt: (tt: number) => audioClipGainAt(clip, tt, total),
-        srcTimeAt: (tt: number) => audioClipSrcTimeAt(clip, tt),
-      }));
+      .map((clip) => {
+        const masks = clipMasks.get(clip.id);
+        return {
+          id: clip.id,
+          url: clip.src,
+          speed: Math.max(0.5, Math.min(2, clip.speed ?? 1)),
+          gainAt: (tt: number) => audioClipGainAt(clip, tt, total),
+          srcTimeAt: (tt: number) => audioClipSrcTimeAt(clip, tt),
+          ...(masks?.length ? { maskAt: (srcT: number) => maskedAudioAt(masks, srcT) } : {}),
+        };
+      });
     return [
       ...laneSpecs,
-      ...supplementalVisualAudioSpecs(visualMediaClips ?? []),
+      ...supplementalVisualAudioSpecs(visualMediaClips ?? [], clipMasks),
     ];
+  };
+  /** Re-feed the engine's clip specs (word masks live on the document, outside this hook's deps). */
+  const resyncEngineClips = () => {
+    videoEngineRef.current?.setAudioClips(engineSpecs());
   };
 
   // Engine sync: respec on any clip/timeline/bytes change (same-url respec swaps only closures — no reload).
@@ -427,6 +420,7 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     patchClip,
     splitClip,
     audioForExport,
+    resyncEngineClips,
     mountAudioFile,
     mountAudioFromUrl,
     generateAudioAsset,

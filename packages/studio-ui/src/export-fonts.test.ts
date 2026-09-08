@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildInlineFontCss } from './export-fonts';
+import { buildInlineFontCss, warmupFontMarkup } from './export-fonts';
 import { loadLocalFontFamilies } from './local-font-access';
 
 afterEach(() => {
@@ -88,5 +88,22 @@ describe('library web fonts in export', () => {
     await buildInlineFontCss('中', undefined, ['Impact']);
 
     expect(requested.some((url) => url.endsWith('/fonts/smiley-sans/result.css'))).toBe(true);
+  });
+});
+
+describe('warmupFontMarkup', () => {
+  it('emits one span per inlined face carrying every used glyph, and nothing without faces', () => {
+    const css = [
+      '@font-face{font-family:"Huxiaobo Nanshen Ti";font-style:normal;font-weight:400;src:url(data:font/woff2;base64,AA)}',
+      '@font-face{font-family:"Huxiaobo Nanshen Ti";font-style:normal;font-weight:400;src:url(data:font/woff2;base64,BB)}',
+      '@font-face{font-family:"Alimama FangYuan Ti";font-style:normal;font-weight:200 700;src:url(data:font/woff2;base64,CC)}',
+    ].join('\n');
+    const markup = warmupFontMarkup(css, '你好 <b> & 你');
+    expect(markup.match(/<span/g)?.length).toBe(2); // same face twice (two chunks) warms once
+    expect(markup).toContain("font-family:'Huxiaobo Nanshen Ti';font-style:normal;font-weight:400;");
+    expect(markup).toContain("font-family:'Alimama FangYuan Ti';font-style:normal;font-weight:450;");
+    expect(markup).toContain('你好&lt;B&gt;&amp;');
+    expect(markup).not.toContain('<b>');
+    expect(warmupFontMarkup('', 'x')).toBe('');
   });
 });

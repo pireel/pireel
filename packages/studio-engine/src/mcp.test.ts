@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { V3_TOOLS } from './agent-surface-v3/registry';
 import { STUDIO_TOOLS } from './prompts';
 import {
   type McpDeps,
@@ -57,7 +58,7 @@ describe('MCP v3 surface', () => {
     expect(v3Names).not.toContain('set_shot_treatment');
     expect(v3Names).toEqual(expect.arrayContaining(['get_state', 'set_clip_framing', 'ripple_delete_ranges', 'manage_project']));
     expect(v3Names).not.toContain('generate_foley'); // chat-only stays off MCP
-    expect(v3Names.length).toBe(48); // 50 minus the three chat-only tools
+    expect(v3Names.length).toBe(V3_TOOLS.filter((tool) => !tool.chatOnly).length); // every v3 tool except the chat-only ones
   });
 
   it('sends v3 calls to the live tab as one run_v3 bridge call when a tab is open', async () => {

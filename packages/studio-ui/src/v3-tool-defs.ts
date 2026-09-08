@@ -17,7 +17,7 @@ const CARD_TOOLS = new Set([
 
 const ICONS: Record<string, string> = {
   get_state: '🗂️', manage_project: '📁', inspect_timeline: '🎞️', import_media: '📥', prepare_local_asset: '📎', get_icons: '🔣',
-  create_browser_handoff: '🌐', ripple_delete_ranges: '✂️', set_clip_framing: '🖼️', remove_words: '✂️',
+  create_browser_handoff: '🌐', ripple_delete_ranges: '✂️', set_clip_framing: '🖼️', remove_words: '✂️', mask_words: '🔇',
   compose_component: '📐', apply_component: '🧩', set_texts: '🔤', manage_frame: '🎨', generate_audio: '🎵',
   manage_voices: '🎙️', list_skills: '📚', read_skill: '📖', preview: '▶️', export: '📤',
 };

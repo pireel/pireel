@@ -23,6 +23,7 @@
 import { AudioSample, AudioSampleSink } from 'mediabunny';
 import type { InputAudioTrack } from 'mediabunny';
 import { type AudioClip, audioClipDefaults, audioClipGainAt, audioClipSrcTimeAt } from '@pireel/studio-engine/composition';
+import { type MaskedAudioRange, maskedAudioAt } from '@pireel/studio-engine/word-masks';
 import {
   segmentSourceRate,
   segmentSourceTimeAt,
@@ -121,6 +122,8 @@ export interface MixAudioClip {
   clip: AudioClip;
   /** Decoded media (decodeAudioData at any rate — read generically). */
   buffer: MixPcmBuffer;
+  /** Word masks on this clip's source (source seconds): silenced in the envelope, beeps become tones. */
+  masks?: readonly MaskedAudioRange[];
 }
 
 /** The slice of AudioBuffer the mixer reads — so tests (and pre-stretched PCM) can stand in for one. */
@@ -161,6 +164,27 @@ async function prestretchClip(entry: MixAudioClip, stretch: TimeStretch): Promis
   };
 }
 
+/** A synthesized tone on the timeline (word masks: the beep that replaces a muted word). */
+export interface MixTone {
+  timelineStart: number;
+  timelineEnd: number;
+}
+
+/** Classic censor tone: 1 kHz sine, well below full scale, with short edge ramps so it never clicks. */
+export const TONE_HZ = 1000;
+export const TONE_LEVEL = 0.22;
+export const TONE_RAMP_SEC = 0.008;
+
+function toneGainAt(tone: MixTone, t: number): number {
+  const local = t - tone.timelineStart;
+  const len = tone.timelineEnd - tone.timelineStart;
+  if (local < 0 || local >= len) return 0;
+  const ramp = Math.min(TONE_RAMP_SEC, len / 2);
+  if (local < ramp) return local / ramp;
+  if (len - local < ramp) return (len - local) / ramp;
+  return 1;
+}
+
 /** Mix narration segments + audio clips into the output audio track. push receives ready samples in order. */
 export async function mixAudioTrack(args: {
   segs: MixSeg[];
@@ -171,8 +195,11 @@ export async function mixAudioTrack(args: {
   push: (sample: AudioSample) => Promise<void>;
   /** Pitch-preserving retime for speed ≠ 1 material; defaults to Signalsmith with a resample fallback. */
   stretch?: TimeStretch;
+  /** Synthesized tones added on top of the mix (beeped words). */
+  tones?: MixTone[];
 }): Promise<void> {
   const { segs, audioTracks, totalSec, push } = args;
+  const tones = [...(args.tones ?? [])];
   const stretch = args.stretch ?? defaultTimeStretch;
   // Native timeline starts; missing values retain the legacy contiguous fallback.
   const segStarts: number[] = [];
@@ -216,11 +243,31 @@ export async function mixAudioTrack(args: {
   }
   // Per-clip envelope precompute (same audioClipGainAt as preview) — from the ORIGINAL clip, whose
   // timeline span already reflects its speed; the read side may swap in a pre-stretched copy.
-  const envs = args.clips.map(({ clip }) => {
+  const envs = args.clips.map(({ clip, masks }) => {
     const env = new Float32Array(Math.ceil(totalSec * ENV_RATE) + 2);
-    for (let i = 0; i < env.length; i++) env[i] = audioClipGainAt(clip, i / ENV_RATE, totalSec);
+    for (let i = 0; i < env.length; i++) {
+      const t = i / ENV_RATE;
+      let g = audioClipGainAt(clip, t, totalSec);
+      if (g > 0 && masks?.length) {
+        const srcT = audioClipSrcTimeAt(clip, t);
+        if (srcT != null && maskedAudioAt(masks, srcT)) g = 0;
+      }
+      env[i] = g;
+    }
     return env;
   });
+  // Beeped words on audio-lane clips: their source spans become tones on the timeline (clip speed/trim honoured).
+  for (const { clip, masks } of args.clips) {
+    if (!masks?.length || clip.muted) continue;
+    const d = audioClipDefaults(clip);
+    for (const range of masks) {
+      if (range.audio !== 'beep') continue;
+      const a = Math.max(range.start, d.inSec);
+      const b = Math.min(range.end, d.outSec);
+      if (b <= a) continue;
+      tones.push({ timelineStart: d.startSec + (a - d.inSec) / d.speed, timelineEnd: d.startSec + (b - d.inSec) / d.speed });
+    }
+  }
   const clips: MixAudioClip[] = [];
   for (const entry of args.clips) clips.push(await prestretchClip(entry, stretch));
 
@@ -269,6 +316,23 @@ export async function mixAudioTrack(args: {
         (k) => s.gain * (s.fadeAt ? s.fadeAt(localAt + k / MIX_RATE) : 1),
         sourceRate,
       );
+    }
+
+    // Beep tones (word masks): pure sine on the timeline grid, phase continuous across chunks
+    for (const tone of tones) {
+      const a = Math.max(t0, tone.timelineStart);
+      const b = Math.min(t0 + frames / MIX_RATE, tone.timelineEnd);
+      if (b <= a) continue;
+      const k0 = Math.max(0, Math.round((a - t0) * MIX_RATE));
+      const k1 = Math.min(frames, Math.round((b - t0) * MIX_RATE));
+      for (let k = k0; k < k1; k++) {
+        const t = t0 + k / MIX_RATE;
+        const g = TONE_LEVEL * toneGainAt(tone, t);
+        if (g <= 0) continue;
+        const v = Math.sin(2 * Math.PI * TONE_HZ * t) * g;
+        const o = k * MIX_CH;
+        for (let ch = 0; ch < MIX_CH; ch++) buf[o + ch]! += v;
+      }
     }
 
     // Audio clips (overlaps simply sum)

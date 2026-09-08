@@ -19,6 +19,7 @@
  */
 
 import type { ShotPreciseFraming } from '@pireel/studio-engine/composition';
+import { type MaskedAudioRange, type WordAudioMask, maskedAudioAt } from '@pireel/studio-engine/word-masks';
 import {
   segmentSourceRate,
   segmentSourceTimeAt,
@@ -26,6 +27,11 @@ import {
   segmentTimelineStart,
   segmentTimelineTimeAt,
 } from './video-segment-time';
+
+/** Preview lead for word masks: muting a media element and ramping the tone take a couple of audio
+ *  buffers to be heard, so the mask is evaluated this far AHEAD of the clock — the replacement then
+ *  lands on the word instead of trailing it at both ends. Export renders sample-exact and needs none. */
+export const MASK_PREVIEW_LEAD_SEC = 0.09;
 
 export interface EngineSeg {
   /** Source key: 'main' or this segment's src (blob/remote URL). */
@@ -59,6 +65,8 @@ export interface EngineAudioClip {
   gainAt: (t: number) => number;
   /** Edited time → source seconds; null = outside the playable range (element parks paused). */
   srcTimeAt: (t: number) => number | null;
+  /** Word mask at a source time (beeped / muted words on this clip's transcript); absent = none. */
+  maskAt?: (srcT: number) => WordAudioMask | null;
 }
 
 /** WebAudio requires CORS-clean media even when a plain <audio> element can play the same URL.
@@ -147,12 +155,20 @@ export class VideoTrackEngine {
   // (element.volume caps at 1). The takeover is permanent per element, so every lane clip goes through
   // the graph — never half native, half routed. Video elements get the same treatment, but lazily
   // (setElGain): footage is usually attenuated, and an unnecessary AudioContext is a liability.
-  private audioClips = new Map<string, { el: HTMLAudioElement; spec: EngineAudioClip; gain?: GainNode }>();
+  private audioClips = new Map<string, { el: HTMLAudioElement; spec: EngineAudioClip; gain?: GainNode; maskDebug?: WordAudioMask | null }>();
   private actx: AudioContext | null = null;
   // Narration dub: a processed-audio stand-in (denoise bake) keyed by source. While a dub exists for a
   // source, its decode element is force-muted and the dub carries the sound in SOURCE seconds — lip-sync
   // matters here, so drift correction is tight (0.08s) against the video element's own clock.
   private dubs = new Map<string, { el: HTMLAudioElement; url: string }>();
+  /** Word masks per source key (source seconds): the sound is replaced while the clock crosses a span. */
+  private audioMasks = new Map<string, readonly MaskedAudioRange[]>();
+  /** The mask currently applied to the active element (null = source sound plays). */
+  private maskActive: WordAudioMask | null = null;
+  /** Whether any audio-lane / visual-lane clip is inside a beeped span this tick. */
+  private clipBeep = false;
+  /** Beep tone: its own tiny graph, never attached to a media element (see setElGain for why that matters). */
+  private beep: { ctx: AudioContext; gain: GainNode } | null = null;
   // Per-element gain nodes for the VIDEO/dub side, created only when a level above source is asked for
   // (see setElGain). Keyed by element so a recreated element simply gets a fresh chain.
   private elGains = new WeakMap<HTMLMediaElement, { el: HTMLMediaElement; gain?: GainNode }>();
@@ -366,6 +382,86 @@ export class VideoTrackEngine {
     this.syncAudioClips(this.tEdited, this.playing, true);
   }
 
+  /** Replace a source's word-mask spans (source seconds). Empty removes them. */
+  setAudioMasks(key: string, ranges: readonly MaskedAudioRange[]): void {
+    if ((window as unknown as { __hfMaskDebug?: boolean }).__hfMaskDebug) {
+      console.info('[mask:narration]', { key: key.slice(0, 60), ranges: ranges.map((r) => `${r.audio} ${r.start.toFixed(2)}-${r.end.toFixed(2)}`), sources: [...this.els.keys()].map((k) => k.slice(0, 60)), segments: this.segs.length });
+    }
+    if (ranges.length) this.audioMasks.set(key, ranges);
+    else this.audioMasks.delete(key);
+    if (!this.audioMasks.size) this.setBeep(false);
+  }
+
+  private maskAt(key: string, srcT: number): WordAudioMask | null {
+    const ranges = this.audioMasks.get(key);
+    return ranges ? maskedAudioAt(ranges, srcT) : null;
+  }
+
+  /** One tone for every masked source: on while the narration or any clip sits inside a beeped span. */
+  private updateBeep(): void {
+    this.setBeep(this.maskActive === 'beep' || this.clipBeep);
+  }
+
+  /** Beep on/off with short ramps (no clicks). The oscillator runs only while a beep is audible. */
+  private setBeep(on: boolean): void {
+    if (!on) {
+      if (!this.beep) return;
+      const now = this.beep.ctx.currentTime;
+      this.beep.gain.gain.cancelScheduledValues(now);
+      this.beep.gain.gain.setTargetAtTime(0, now, 0.004);
+      return;
+    }
+    if (!this.beep) {
+      try {
+        const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!Ctor) return;
+        const ctx = new Ctor();
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = 1000;
+        const gain = ctx.createGain();
+        gain.gain.value = 0;
+        osc.connect(gain).connect(ctx.destination);
+        osc.start();
+        this.beep = { ctx, gain };
+      } catch {
+        return; // no context: the word is still muted, only the tone is missing in preview
+      }
+    }
+    if (this.beep.ctx.state === 'suspended') void this.beep.ctx.resume();
+    const now = this.beep.ctx.currentTime;
+    this.beep.gain.gain.cancelScheduledValues(now);
+    this.beep.gain.gain.setTargetAtTime(0.22, now, 0.004);
+  }
+
+  /** Per tick: silence the active element (and its dub) across a masked span, play the tone for a beep,
+   *  and hand the sound back the moment the clock leaves the span. */
+  private applyMask(key: string, el: HTMLMediaElement, srcT: number, dubbed: boolean): void {
+    const rate = el.playbackRate > 1e-9 ? el.playbackRate : 1;
+    const mask = this.maskAt(key, srcT + MASK_PREVIEW_LEAD_SEC * rate);
+    if ((window as unknown as { __hfMaskDebug?: boolean }).__hfMaskDebug && (mask !== this.maskActive)) {
+      console.info('[mask]', { key, srcT: srcT.toFixed(3), mask, muted: el.muted, volume: el.volume, routed: this.elGains.has(el), dubbed, clips: this.audioClips.size });
+    }
+    if (mask) {
+      // Belt and braces: mute AND zero the level. An element that was ever routed through the WebAudio
+      // graph (a boost) carries its level on the gain node, where `muted` alone is not guaranteed to bite.
+      if (!el.muted) el.muted = true;
+      this.setElGain(el, 0);
+      const dub = this.dubs.get(key);
+      if (dub) this.setElGain(dub.el, 0);
+      if (mask !== this.maskActive) {
+        this.maskActive = mask;
+        this.updateBeep();
+      }
+      return;
+    }
+    if (!this.maskActive) return;
+    this.maskActive = null;
+    this.updateBeep();
+    this.setElGain(el, this.segGain(this.curIdx)); // level back to the shot's own envelope
+    el.muted = dubbed; // a mounted dub keeps carrying the sound; otherwise the element speaks again
+  }
+
   /** Mount/swap/remove a source's narration dub (baked processed audio, same source-seconds timeline).
    *  Same-url is idempotent; url change swaps the element src in place (re-blend after a strength change). */
   setNarrationDub(key: string, url: string | null): void {
@@ -477,6 +573,7 @@ export class VideoTrackEngine {
    *  preservesPitch ON (the export stretches pitch-preserving too); drift correction only past 0.35s. force = hard seek. */
   private syncAudioClips(t: number, wantPlay: boolean, force = false): void {
     if (wantPlay && this.actx?.state === 'suspended') void this.actx.resume(); // play is a user gesture
+    let clipBeep = false;
     for (const entry of this.audioClips.values()) {
       const { el, spec } = entry;
       const srcT = spec.srcTimeAt(t);
@@ -494,7 +591,14 @@ export class VideoTrackEngine {
         if (!el.paused) el.pause();
         continue;
       }
-      setGain(spec.gainAt(t));
+      const maskSrcT = wantPlay && spec.maskAt ? spec.srcTimeAt(t + MASK_PREVIEW_LEAD_SEC) : null;
+      const mask = maskSrcT != null && spec.maskAt ? spec.maskAt(maskSrcT) : null;
+      if (mask === 'beep') clipBeep = true;
+      if ((window as unknown as { __hfMaskDebug?: boolean }).__hfMaskDebug && mask !== entry.maskDebug) {
+        entry.maskDebug = mask;
+        console.info('[mask:clip]', { id: spec.id, srcT: srcT.toFixed(3), mask, graph: !!gainNode, ctx: this.actx?.state, volume: el.volume, muted: el.muted, paused: el.paused, src: el.currentSrc.slice(0, 60) });
+      }
+      setGain(mask ? 0 : spec.gainAt(t));
       el.playbackRate = spec.speed;
       (el as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch = true;
       if ((force || Math.abs(el.currentTime - srcT) > 0.35) && !el.seeking) {
@@ -506,6 +610,10 @@ export class VideoTrackEngine {
       }
       if (wantPlay && el.paused) el.play().catch(() => {});
       else if (!wantPlay && !el.paused) el.pause();
+    }
+    if (clipBeep !== this.clipBeep) {
+      this.clipBeep = clipBeep;
+      this.updateBeep();
     }
   }
 
@@ -669,6 +777,11 @@ export class VideoTrackEngine {
     // a mounted dub carries this source's sound → the decode element stays muted no matter what
     const dubbed = this.syncDub(key, el, this.segGain(i), wantPlay);
     el.muted = dubbed || !wantPlay; // only the active element makes sound during playback
+    if (this.maskActive) {
+      this.maskActive = null;
+      this.updateBeep();
+    }
+    if (wantPlay && this.audioMasks.size) this.applyMask(key, el, Math.max(0, srcT), dubbed);
     if (wantPlay) {
       const p = el.play();
       if (p?.catch) p.catch(() => {});
@@ -901,7 +1014,9 @@ export class VideoTrackEngine {
         this.syncGhost(ts); // transition ghost time-sync (all auto-paused outside the window)
         this.syncAudioClips(ts, true);
         if (this.segs[idx]?.fadeAt && !el.muted) this.setElGain(el, this.segGain(idx, ts)); // shot audio fades ride the clock
-        if (this.dubs.size && this.syncDub(sg.key, el, this.segGain(this.curIdx), true)) el.muted = true;
+        const dubbedNow = this.dubs.size > 0 && this.syncDub(sg.key, el, this.segGain(this.curIdx), true);
+        if (dubbedNow) el.muted = true;
+        if (this.audioMasks.size || this.maskActive) this.applyMask(sg.key, el, ct, dubbedNow);
         this.pushFrame(ts);
         // segment-end detection, three checks: (1) reached segment end; (2) element fires ended;
         // (3) stall backstop — streaming webm duration is estimated via Infinity-seek and may be too
@@ -979,6 +1094,9 @@ export class VideoTrackEngine {
     this.playing = false;
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
+    this.maskActive = null;
+    this.clipBeep = false;
+    this.setBeep(false);
     for (const el of this.els.values()) {
       el.muted = true;
       if (!el.paused) el.pause();
@@ -996,6 +1114,10 @@ export class VideoTrackEngine {
 
   dispose(): void {
     this.pause();
+    if (this.beep) {
+      void this.beep.ctx.close().catch(() => {});
+      this.beep = null;
+    }
     for (const c of this.audioClips.values()) {
       c.gain?.disconnect();
       releaseMediaElement(c.el);

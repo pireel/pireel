@@ -69,6 +69,8 @@ import {
   duplicateOverlayDocumentClip,
   insertOverlayDocumentClip,
   resolveDocumentWordIds,
+  resolveWordQueryAsset,
+  transcriptWordTiming,
   documentWordRanges,
   documentWordRangesToTimeline,
   splitBlockedByTransition,
@@ -87,6 +89,7 @@ import { type CutSeamEntry, finalizeCutSeams, spans as clipSpans, tightenCutRang
 import { parseBlockResponse } from '@pireel/studio-engine/compose';
 import { HARD_LINT_CODES, lintBlock } from '@pireel/studio-engine/block-lint';
 import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations } from '@pireel/studio-engine/build-blocks';
+import { applyWordMasks, groupWordsByAsset, maskWordsSummary, parseMaskWordsInput } from '@pireel/studio-engine/word-masks-tool';
 import { beatsForWindow } from '@pireel/studio-engine/captions-relay';
 import { captionYPctForCanvas } from '@pireel/studio-engine/delivery-safety';
 import { applyCaptionTextEdits } from '@pireel/studio-engine/caption-text-edit';
@@ -156,7 +159,7 @@ import { t } from './i18n';
 import { type ComposeMode, type ComposedBlock, composedBlockFields, GeneratedBlockValidationError, kitChoiceOf, newBlockComposeMode } from './compose-result';
 import { clearToolProgress, setToolProgress, type ToolProgress } from './tool-progress';
 import { fileSig, probeVideoFile } from './media';
-import { measuredSpeechTranscript } from '@pireel/studio-engine/script-alignment';
+import { measuredSpeechTranscript, storedScriptText } from '@pireel/studio-engine/script-alignment';
 import { deleteCachedTts, getCachedTts, setCachedTts, ttsCacheKey, type CachedTtsAsset } from './tts-cache';
 import { loadLocalAssetFile, loadLocalVideo, saveLocalVideo } from './local-media';
 import { materializeRemoteMedia } from './remote-media';
@@ -1062,7 +1065,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 }
                 const probe = await probeVideoFile(file).catch(() => null);
                 // Script-backed speech (TTS) keeps its exact text; ASR only lends the timing.
-                const segs = measuredSpeechTranscript(asset, documentRef.current.semantics.transcripts[targetAssetId], await race(studioProviders().transcriber.transcribe(file, { projectId })));
+                const storedBefore = documentRef.current.semantics.transcripts[targetAssetId];
+                const segs = measuredSpeechTranscript(asset, storedBefore, await race(studioProviders().transcriber.transcribe(file, { projectId })));
+                // A script recovered from the stored transcript becomes the asset's own script, so a later
+                // re-measure still keeps the exact text instead of storing what the recogniser heard.
+                const recoveredScript = asset.metadata.transcriptText ? '' : storedScriptText(storedBefore);
                 const current = documentRef.current;
                 const primaryClipsForAsset = current.timeline.tracks
                   .filter((track) => track.role === 'primaryNarrative')
@@ -1122,6 +1129,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                     transcripts: { ...current.semantics.transcripts, [targetAssetId]: segs },
                   },
                 };
+                if (recoveredScript) {
+                  const entry = nextDocument.assets[targetAssetId]!;
+                  nextDocument.assets = { ...nextDocument.assets, [targetAssetId]: { ...entry, metadata: { ...entry.metadata, transcriptText: recoveredScript } } };
+                }
                 if (targetAssetId === firstNarrativeAssetId(current)) {
                   videoFileRef.current = file;
                   asrRef.current = segs;
@@ -1168,6 +1179,31 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             }
           }
           case 'list_words': {
+            // An explicitly addressed source (assetId / trackId) lists on ANY lane — the audio-lane
+            // narration included — and a script-backed source is measured first so the ids carry real
+            // word timing (a mask or cut placed on estimated timing lands on the wrong syllables).
+            if (typeof input.assetId === 'string' || typeof input.trackId === 'string') {
+              const target = resolveWordQueryAsset(documentRef.current, {
+                ...(typeof input.assetId === 'string' ? { assetId: input.assetId } : {}),
+                ...(typeof input.trackId === 'string' ? { trackId: input.trackId } : {}),
+              });
+              if ('error' in target) return { ok: false, error: target.error };
+              const storedTiming = transcriptWordTiming(documentRef.current.semantics.transcripts[target.assetId] as AsrSegment[] | undefined);
+              if (storedTiming !== 'measured') {
+                const measured = await runStudioToolInner(ctx, 'read_script', { assetId: target.assetId, ...(storedTiming === 'estimated' ? { measuredTiming: true } : {}) }, opts);
+                if (!measured.ok) return measured;
+              }
+              const listed = listDocumentAddressedWords(documentRef.current, {
+                assetId: target.assetId,
+                ...(Array.isArray(input.sentenceIndexes) ? { sentenceIndexes: input.sentenceIndexes.map(Number).filter(Number.isInteger) } : {}),
+                ...(typeof input.fromSec === 'number' && Number.isFinite(input.fromSec) ? { fromSec: input.fromSec } : {}),
+                ...(typeof input.toSec === 'number' && Number.isFinite(input.toSec) ? { toSec: input.toSec } : {}),
+                ...(typeof input.offset === 'number' && Number.isInteger(input.offset) ? { offset: input.offset } : {}),
+                ...(typeof input.limit === 'number' && Number.isInteger(input.limit) ? { limit: input.limit } : {}),
+              });
+              if ('error' in listed) return { ok: false, error: listed.error };
+              return { ok: true, summary: surface === 'chat' ? t('tools.list_words.label') : `Listed ${listed.words.length} transcript words`, data: listed };
+            }
             const primaryAssetId = firstNarrativeAssetId(documentRef.current);
             const storedPrimary = primaryAssetId
               ? documentRef.current.semantics.transcripts[primaryAssetId] as AsrSegment[] | undefined
@@ -3330,6 +3366,72 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             setSelectedShotId(null);
             if (Number.isFinite(firstCut)) applyT(firstCut);
             return { ok: true, summary: `Deleted ${ids.length} transcript word${ids.length === 1 ? '' : 's'}`, data: { wordIds: ids, cuts: finalizeCutSeams(seams) } };
+          }
+          case 'mask_words': {
+            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: t('workbench.noVideoYet') };
+            const parsed = parseMaskWordsInput(input);
+            if ('error' in parsed) return { ok: false, error: parsed.error };
+            await ensureClipTranscripts();
+            const transcriptDocument = syncCaptionTranscripts(
+              documentRef.current,
+              asrRef.current,
+              captionTranscriptsByAsset(documentRef.current, compRef.current, clipAsrRef.current),
+            );
+            if (transcriptDocument !== documentRef.current) setDocument(transcriptDocument);
+            const resolved = resolveDocumentWordIds(transcriptDocument, parsed.ids);
+            if (resolved.missing.length) return { ok: false, error: `unknown or stale word ids: ${resolved.missing.join(', ')}`, data: { missing: resolved.missing } };
+            // Runtime transcripts are the live truth in the tab: the main copy owns the first narrative
+            // asset, every other asset maps to its shot's src key (same ownership rule as edit_caption_text).
+            const mainAssetId = firstNarrativeAssetId(transcriptDocument);
+            const srcByAsset = new Map<string, string>();
+            const shotsNow = ensureShots(compRef.current);
+            for (const track of transcriptDocument.timeline.tracks) {
+              if (track.id !== transcriptDocument.semantics.primaryNarrativeTrackId) continue;
+              for (const clip of track.clips) {
+                if (clip.kind !== 'narrative') continue;
+                const src = shotsNow.find((shot) => shot.id === clip.id)?.src;
+                if (src && !srcByAsset.has(clip.assetId)) srcByAsset.set(clip.assetId, src);
+              }
+            }
+            let changed = false;
+            for (const [assetId, words] of groupWordsByAsset(resolved.words)) {
+              if (assetId === mainAssetId && asrRef.current?.length) {
+                const next = applyWordMasks(asrRef.current, words, parsed.patch);
+                if (next === asrRef.current) continue;
+                setAsrSentences(next);
+                asrRef.current = next;
+                changed = true;
+                continue;
+              }
+              const src = srcByAsset.get(assetId);
+              const prev = src ? clipAsrRef.current[src] : undefined;
+              if (src && prev) {
+                const next = applyWordMasks(prev, words, parsed.patch);
+                if (next === prev) continue;
+                const nextClips = { ...clipAsrRef.current, [src]: next };
+                setClipAsr(nextClips);
+                clipAsrRef.current = nextClips;
+                changed = true;
+                continue;
+              }
+              // No runtime copy (audio-lane narration, visual-lane video): the document transcript is the only copy.
+              const stored = documentRef.current.semantics.transcripts[assetId] as AsrSegment[] | undefined;
+              if (!stored) return { ok: false, error: `no transcript for asset ${assetId}` };
+              const next = applyWordMasks(stored, words, parsed.patch);
+              if (next === stored) continue;
+              setDocument({ ...documentRef.current, semantics: { ...documentRef.current.semantics, transcripts: { ...documentRef.current.semantics.transcripts, [assetId]: next } } });
+              changed = true;
+            }
+            const summary = maskWordsSummary(parsed.ids.length, parsed.patch);
+            if (!changed) return { ok: true, summary: `${summary} (already so)`, data: { wordIds: parsed.ids, ...parsed.patch } };
+            const maskEdit = applyCaptionDocumentEdit({
+              document: documentRef.current,
+              mainTranscript: asrRef.current,
+              clipTranscripts: clipAsrRef.current,
+            });
+            if (!maskEdit.ok) return { ok: false, error: editorErrorMessage(maskEdit.error), data: { code: maskEdit.error.code, trackIds: maskEdit.error.trackIds } };
+            setDocument(maskEdit.document);
+            return { ok: true, summary, data: { wordIds: parsed.ids, ...parsed.patch } };
           }
           case 'remove_silence': {
             if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: t('workbench.noVideoYet') };

@@ -109,6 +109,9 @@ describe('v3 adapter translations', () => {
 
   it('reads transcripts as segments or words with frame windows converted to seconds', () => {
     expect(ok(translateV3Call('get_transcript', { clipId: 'n1' }, ctx))).toEqual([{ tool: 'read_script', input: { clipId: 'n1' } }]);
+    expect(ok(translateV3Call('get_transcript', { granularity: 'words', assetId: 'up_1', trackId: 'track_narration' }, ctx))).toEqual([
+      { tool: 'list_words', input: { assetId: 'up_1', trackId: 'track_narration' } },
+    ]);
     expect(ok(translateV3Call('get_transcript', { granularity: 'words', clipId: 'n1', fromFrame: 300, toFrame: 450, limit: 80 }, ctx))).toEqual([
       { tool: 'list_words', input: { shotId: 'n1', fromSec: 10, toSec: 15, limit: 80 } },
     ]);

@@ -113,6 +113,7 @@ import { buildSituation, wrapAgentTranscript } from './prompts';
 import type { StudioProjectContext, TranscriptSegment } from './project-dto';
 import { type CutSeamEntry, finalizeCutSeams, narrationRowMarks, spans as clipSpans, tightenCutRanges } from './trim';
 import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations, desegmentCues } from './build-blocks';
+import { applyWordMasks, groupWordsByAsset, maskWordsSummary, parseMaskWordsInput } from './word-masks-tool';
 import { beatsForWindow } from './captions-relay';
 import { captionYPctForCanvas } from './delivery-safety';
 import { applyCaptionTextEdits } from './caption-text-edit';
@@ -209,6 +210,7 @@ export const SERVER_EXECUTABLE_TOOLS: ReadonlySet<string> = new Set([
   'cut_range',
   'cut_narration',
   'delete_words',
+  'mask_words',
   'add_transition',
   'set_captions',
   'relayout_captions',
@@ -583,6 +585,8 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (!Object.values(document.semantics.transcripts).some((segments) => segments.length)) return { result: { ok: false, error: 'no transcript in the cloud project — call read_script in the studio first' } };
       const query = {
         ...(typeof input.shotId === 'string' ? { shotId: input.shotId } : {}),
+        ...(typeof input.assetId === 'string' ? { assetId: input.assetId } : {}),
+        ...(typeof input.trackId === 'string' ? { trackId: input.trackId } : {}),
         ...(Array.isArray(input.sentenceIndexes) ? { sentenceIndexes: input.sentenceIndexes.map(Number).filter(Number.isInteger) } : {}),
         ...(typeof input.fromSec === 'number' && Number.isFinite(input.fromSec) ? { fromSec: input.fromSec } : {}),
         ...(typeof input.toSec === 'number' && Number.isFinite(input.toSec) ? { toSec: input.toSec } : {}),
@@ -595,7 +599,9 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         result: {
           ok: true,
           summary: `Listed ${listed.words.length} transcript words`,
-          data: listed,
+          data: listed.wordTiming === 'estimated'
+            ? { ...listed, hint: 'word timing is ESTIMATED from sentence timing (script-backed source, not yet measured); open the studio tab and call read_script {assetId, measuredTiming:true} for real word timing before exact edits' }
+            : listed,
         },
       };
     }
@@ -1098,6 +1104,31 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         },
         comp: command.composition,
         document: command.document,
+      };
+    }
+    case 'mask_words': {
+      const parsed = parseMaskWordsInput(input);
+      if ('error' in parsed) return { result: { ok: false, error: parsed.error } };
+      const resolved = resolveDocumentWordIds(p.document, parsed.ids);
+      if (resolved.missing.length) {
+        return { result: { ok: false, error: `unknown or stale word ids: ${resolved.missing.join(', ')}`, data: { missing: resolved.missing } } };
+      }
+      const transcripts = { ...p.document.semantics.transcripts };
+      for (const [assetId, words] of groupWordsByAsset(resolved.words)) {
+        const segs = transcripts[assetId] as AsrSegment[] | undefined;
+        if (!segs) continue;
+        transcripts[assetId] = applyWordMasks(segs, words, parsed.patch);
+      }
+      const edit = applyCaptionDocumentEdit({
+        document: { ...p.document, semantics: { ...p.document.semantics, transcripts } },
+        mainTranscript: null,
+        clipTranscripts: {},
+      });
+      if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+      return {
+        result: { ok: true, summary: maskWordsSummary(parsed.ids.length, parsed.patch), data: { wordIds: parsed.ids, ...parsed.patch } },
+        comp: projectDocumentToComposition(edit.document),
+        document: edit.document,
       };
     }
     case 'remove_silence':
