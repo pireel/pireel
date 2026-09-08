@@ -6,7 +6,7 @@ export type CaptionTaskStage = 'ready' | 'transcribing' | 'cleaning' | 'styling'
 export interface CaptionTaskRecord {
   id: string; scope: string; name: string; sourceSig: string; width: number; height: number; durationSec: number;
   options: CaptionTaskOptions; stage: CaptionTaskStage; updatedAt: number; error?: string; transcript?: AsrSegment[];
-  cuts?: { fromSec: number; toSec: number }[]; document?: EditorDocumentV2; projectId?: string; archivedAt?: number; metadataUpdatedAt?: number;
+  cuts?: { fromSec: number; toSec: number }[]; document?: EditorDocumentV2; projectId?: string; archivedAt?: number; metadataUpdatedAt?: number; coverThumb?: string;
 }
 const database = () => new Promise<IDBDatabase>((resolve, reject) => {
   const request = indexedDB.open('pireel-caption-tasks', 2);
@@ -58,7 +58,7 @@ export async function loadCaptionTask(scope: string, id: string): Promise<Captio
   }); } finally { db.close(); }
 }
 
-export type CaptionProjectSummary = Pick<CaptionTaskRecord, 'id' | 'scope' | 'name' | 'updatedAt' | 'durationSec' | 'stage'>;
+export type CaptionProjectSummary = Pick<CaptionTaskRecord, 'id' | 'scope' | 'name' | 'updatedAt' | 'durationSec' | 'stage' | 'coverThumb'>;
 export async function listCaptionProjectSummaries(scope: string): Promise<CaptionProjectSummary[]> {
   const db = await database();
   try { return await new Promise((resolve, reject) => {
@@ -68,7 +68,7 @@ export async function listCaptionProjectSummaries(scope: string): Promise<Captio
       const cursor = request.result;
       if (!cursor) { resolve(rows); return; }
       const task = cursor.value.task as CaptionTaskRecord;
-      if (task.scope === scope && !task.archivedAt) rows.push({ id: task.id, scope: task.scope, name: task.name, updatedAt: task.updatedAt, durationSec: task.durationSec, stage: task.stage });
+      if (task.scope === scope && !task.archivedAt) rows.push({ id: task.id, scope: task.scope, name: task.name, updatedAt: task.updatedAt, durationSec: task.durationSec, stage: task.stage, coverThumb: task.coverThumb });
       cursor.continue();
     };
     request.onerror = () => reject(request.error);
@@ -76,7 +76,7 @@ export async function listCaptionProjectSummaries(scope: string): Promise<Captio
 }
 
 /** Metadata changes preserve the current execution record within one transaction. */
-export async function patchCaptionProjectMetadata(scope: string, id: string, patch: { name?: string; archivedAt?: number }): Promise<void> {
+export async function patchCaptionProjectMetadata(scope: string, id: string, patch: { name?: string; archivedAt?: number; coverThumb?: string }): Promise<void> {
   const db = await database();
   try { await new Promise<void>((resolve, reject) => {
     const tx = db.transaction('tasks', 'readwrite');
@@ -85,7 +85,9 @@ export async function patchCaptionProjectMetadata(scope: string, id: string, pat
     request.onsuccess = () => {
       const row = request.result;
       if (!row || row.task.scope !== scope) { tx.abort(); return; }
-      row.task = { ...row.task, ...patch, updatedAt: Date.now(), metadataUpdatedAt: Date.now() };
+      const changedAt = Date.now();
+      const userEdit = patch.name !== undefined || patch.archivedAt !== undefined;
+      row.task = { ...row.task, ...patch, ...(userEdit ? { updatedAt: changedAt, metadataUpdatedAt: changedAt } : {}) };
       store.put(row);
     };
     tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error ?? new Error('Caption project not found'));
@@ -94,6 +96,9 @@ export async function patchCaptionProjectMetadata(scope: string, id: string, pat
 
 /** A late processing checkpoint cannot undo a newer rename or archive. */
 export function mergeCaptionProjectMetadata(incoming: CaptionTaskRecord, stored?: CaptionTaskRecord): CaptionTaskRecord {
-  if (!stored || stored.scope !== incoming.scope || stored.id !== incoming.id || (stored.metadataUpdatedAt ?? 0) <= (incoming.metadataUpdatedAt ?? 0)) return incoming;
+  if (!stored || stored.scope !== incoming.scope || stored.id !== incoming.id) return incoming;
+  // Background cover extraction must survive an already-running job's next checkpoint.
+  if (!incoming.coverThumb && stored.coverThumb && stored.sourceSig === incoming.sourceSig) incoming = { ...incoming, coverThumb: stored.coverThumb };
+  if ((stored.metadataUpdatedAt ?? 0) <= (incoming.metadataUpdatedAt ?? 0)) return incoming;
   return { ...incoming, name: stored.name, archivedAt: stored.archivedAt, metadataUpdatedAt: stored.metadataUpdatedAt, updatedAt: Math.max(incoming.updatedAt, stored.updatedAt) };
 }

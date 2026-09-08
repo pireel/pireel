@@ -6,6 +6,7 @@ import { loadCurrentUser } from './current-user';
 import { fileSig, probeVideoFile } from './media';
 import { saveLocalVideo } from './local-media';
 import { saveCaptionTask } from './caption-task-store';
+import { captureCaptionCover } from './caption-project-cover';
 
 export function CaptionUploadDialog({ open, locale, onOpenChange, onContinue }: {
   open: boolean; locale: 'zh' | 'en'; onOpenChange: (open: boolean) => void; onContinue: (id: string) => void;
@@ -38,7 +39,9 @@ export function CaptionUploadDialog({ open, locale, onOpenChange, onContinue }: 
       if (!(await saveLocalVideo(file, sig))) throw new Error(say('本机空间不足，请清理后重试。', 'Free some local storage and retry.'));
       if (current !== generation.current) return;
       const id = crypto.randomUUID();
-      await saveCaptionTask({ id, scope: user.user_id, name: file.name, sourceSig: sig, ...data, options: { presetId: 'clean', aspect: 'original', shortenPauses: false }, stage: 'ready', updatedAt: Date.now() });
+      const coverThumb = await captureCaptionCover(file, data.durationSec).catch(() => undefined);
+      if (current !== generation.current) return;
+      await saveCaptionTask({ id, scope: user.user_id, name: file.name, sourceSig: sig, ...data, coverThumb, options: { presetId: 'clean', aspect: 'original', shortenPauses: false }, stage: 'ready', updatedAt: Date.now() });
       if (current === generation.current) { onOpenChange(false); onContinue(id); }
     } catch (reason) { if (current === generation.current) setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { creating.current = false; if (current === generation.current) setBusy(false); }

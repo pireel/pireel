@@ -2,7 +2,8 @@
 import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ probe: vi.fn(), user: vi.fn(), cache: vi.fn(), save: vi.fn() }));
+const mocks = vi.hoisted(() => ({ probe: vi.fn(), user: vi.fn(), cache: vi.fn(), save: vi.fn(), cover: vi.fn() }));
+vi.mock('./caption-project-cover', () => ({ captureCaptionCover: mocks.cover }));
 vi.mock('./caption-effect-showcase', () => ({ CaptionEffectShowcase: () => null }));
 vi.mock('./media', () => ({ probeVideoFile: mocks.probe, fileSig: () => 'source-sig' }));
 vi.mock('./current-user', () => ({ loadCurrentUser: mocks.user }));
@@ -23,6 +24,7 @@ beforeEach(() => {
   mocks.probe.mockResolvedValue({ durationSec: 3, width: 1080, height: 1920, hasAudio: true });
   mocks.user.mockResolvedValue({ user_id: 'account', auth_method: 'session' });
   mocks.cache.mockResolvedValue(true); mocks.save.mockResolvedValue(undefined);
+  mocks.cover.mockResolvedValue('data:image/jpeg;base64,cover');
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
@@ -40,7 +42,12 @@ describe('automatic caption upload transition', () => {
     expect(mocks.cache).toHaveBeenCalledOnce(); expect(continued).not.toHaveBeenCalled();
     await act(async () => finishSave());
     expect(continued).toHaveBeenCalledOnce();
-    expect(mocks.save.mock.calls[0]![0]).toMatchObject({ scope: 'account', sourceSig: 'source-sig', stage: 'ready' });
+    expect(mocks.save.mock.calls[0]![0]).toMatchObject({ scope: 'account', sourceSig: 'source-sig', stage: 'ready', coverThumb: 'data:image/jpeg;base64,cover' });
+  });
+  it('still imports the video when thumbnail decoding fails', async () => {
+    mocks.cover.mockRejectedValueOnce(new Error('Decoder unavailable'));
+    await render(); await upload();
+    expect(mocks.save).toHaveBeenCalledOnce(); expect(continued).toHaveBeenCalledOnce();
   });
   it('stays on upload if the video is silent or cannot be cached', async () => {
     await render();
