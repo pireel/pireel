@@ -209,6 +209,7 @@ export const PANELS_EN: Record<string, string> = {
   "panels.uploadFailed": "Upload failed — click to retry",
   "panels.uploadToCloud": "Upload to cloud",
   "panels.needsReimport": "Needs re-import",
+  "panels.useAsReference": "Generate with this as reference",
   "panels.assetUsedByOtherOutput":
     "This asset is still used by another output. Remove it there first.",
   "panels.filterAssets": "Filter assets",

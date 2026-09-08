@@ -270,7 +270,7 @@ import {
   type StudioChatHandle,
   type StudioElementRef,
 } from "./studio-chat";
-import { buildChatMentionElements } from "./chat-local-asset-mention";
+import { buildChatMentionElements, localAssetMentionRef } from "./chat-local-asset-mention";
 import { resolveLocalAssetReference } from "./studio-tool-input-references";
 import { shouldCollapseChatForTimelineFramePick } from "./chat-timeline-frame-picker";
 import { ElementSourceEditor, type SourceDraft } from "./element-source-editor";
@@ -8261,6 +8261,8 @@ export function HyperframesWorkbench({
                 key={chatEpoch}
                 ref={chatRef}
                 projectId={projectId}
+                onInsertMedia={(m) => void insertPanelMedia({ type: m.type, url: m.url }, m.label)}
+                onUseAudio={(url, label) => void audioOps.mountAudioFromUrl(url, label)}
                 runTool={chatCbs.runTool}
                 getBody={getChatBody}
                 getComp={getChatComp}
@@ -9876,6 +9878,11 @@ export function HyperframesWorkbench({
                     localAssetIndexSyncReady={localAssetIndexSyncReady}
                     onLocalAssetIndexChange={changeLocalAssetIndex}
                     onLocalAssetAvailable={acceptLocalAssetFile}
+                    onUseAsReference={(entry) => {
+                      openChat();
+                      chatRef.current?.beginGeneration("image");
+                      chatRef.current?.insertMention(localAssetMentionRef(entry));
+                    }}
                     videoSig={null}
                     mainSourceUrl={null}
                     hasMainSource={false}

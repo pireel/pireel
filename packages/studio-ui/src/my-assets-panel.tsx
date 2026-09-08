@@ -241,7 +241,10 @@ export function MyAssetsPanel({
   onInsertClip,
   onUseAudio,
   onDragAsset,
+  onUseAsReference,
 }: {
+  /** "Use as reference": arm the chat's image generation with this asset mentioned. */
+  onUseAsReference?: (entry: LocalAssetIndexEntry) => void;
   /** Lightbox preview needs theme/canvas context. */
   comp: Composition;
   /** Scopes the asset index (imports persist per project across refreshes). */
@@ -949,6 +952,12 @@ export function MyAssetsPanel({
                     onInsert={() => insertOf(it)}
                     onRename={it.localAssetId && it.sig
                       ? () => beginRename(it.localAssetId!, it.sig!, it.label, it.kind as LocalKind)
+                      : undefined}
+                    onUseAsReference={onUseAsReference && it.localAssetId && it.kind !== 'audio'
+                      ? () => {
+                          const entry = regRef.current.find((candidate) => candidate.assetId === it.localAssetId);
+                          if (entry) onUseAsReference(entry);
+                        }
                       : undefined}
                     onDelete={() => void doDelete(
                       it,

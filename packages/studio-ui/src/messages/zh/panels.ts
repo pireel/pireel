@@ -197,6 +197,7 @@ export const PANELS_ZH: Record<string, string> = {
   "panels.uploadFailed": "上传失败,点击重试",
   "panels.uploadToCloud": "上传到云端",
   "panels.needsReimport": "需要重新导入",
+  "panels.useAsReference": "以此为参考生成",
   "panels.assetUsedByOtherOutput": "其他成片仍在使用这个素材，请先从对应成片中移除",
   "panels.filterAssets": "筛选素材",
   "panels.localReconnect": "重新导入",

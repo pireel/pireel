@@ -3,7 +3,7 @@
 /** Studio chat input: contenteditable composer with @ element pills and the theme (frame) picker. */
 
 import { useImperativeHandle, useRef, useState } from "react";
-import { AtSign, ArrowUp, Square, Palette } from "lucide-react";
+import { AtSign, ArrowUp, Square, Palette, Sparkles } from "lucide-react";
 import { generationIntentLine, type ChatMode, type GenerationIntent, type GenerationParams } from "./chat-generation-intent";
 import { ChatModePicker } from "./chat-mode-picker";
 import { GenerationControls, GenerationCreditsBadge } from "./chat-generation-params";
@@ -74,6 +74,8 @@ export interface ComposerHandle {
   /** Arm a generation intent (image/video/audio/element) below the input, optionally with a prompt.
    * Generation is an agent tool call; the intent only tells the agent what kind and which parameters. */
   beginGeneration(intent: GenerationIntent, prompt?: string): void;
+  /** Insert an @ mention pill at the caret (a reference the agent resolves), without sending. */
+  insertMention(el: StudioElementRef): void;
 }
 
 export function Composer({
@@ -700,6 +702,11 @@ export function Composer({
       failTimelineFrameCapture: (id) => {
         removeTimelineFramePill(id);
       },
+      insertMention: (el) => {
+        insertPillAtCursor(makeEditableElementPill(el));
+        recomputeEmpty();
+        editorRef.current?.focus();
+      },
       beginGeneration: (nextIntent, prompt) => {
         clear();
         setMode(nextIntent);
@@ -875,9 +882,9 @@ export function Composer({
               className="bg-ink text-bg inline-flex h-7 w-7 items-center justify-center rounded-md transition-opacity hover:opacity-85 disabled:pointer-events-none disabled:opacity-25"
               disabled={empty || timelineFramePickBusy}
               onClick={() => void fireSubmit()}
-              title={t("chatGen.sendEnter")}
+              title={intent ? t("chatGen.generateSend") : t("chatGen.sendEnter")}
             >
-              <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
+              {intent ? <Sparkles className="h-4 w-4" strokeWidth={2.5} /> : <ArrowUp className="h-4 w-4" strokeWidth={2.5} />}
             </button>
           )}
           </div>
@@ -888,7 +895,9 @@ export function Composer({
         ref={refPopoverRef}
         trigger="@"
         editorRef={editorRef}
-        items={elements}
+        items={intent && intent !== "element"
+          ? elements.filter((el) => el.localAsset && (intent === "image" ? el.localAsset.kind === "image" : intent === "video" ? el.localAsset.kind !== "audio" : el.localAsset.kind === "audio"))
+          : elements}
         itemSearchText={(el) => `${el.label} ${el.kind}`}
         itemKey={(el) => el.id}
         title={t("chatGen.mentionElementN", { n: elements.length })}
