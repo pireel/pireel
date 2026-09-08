@@ -1,4 +1,4 @@
-import { buildCaptionTaskDocument, captionTaskPreset, captionTaskStyle } from '@pireel/studio-engine/caption-task';
+import { buildCaptionTaskDocument, captionTaskPreset, captionTaskStyle, fitCaptionTaskDocumentLayout } from '@pireel/studio-engine/caption-task';
 import { projectDocumentToComposition } from '@pireel/studio-engine/composition';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { emphasizeCaptionDocument } from './caption-emphasis-operation';
@@ -73,6 +73,7 @@ export async function runCaptionTask(task: CaptionTaskRecord, file: File, hooks:
       const document = await emphasizeCaptionDocument(next.document!, (rows) => { check(); return select(rows); }, (done, total) => count('emphasizing', done, total));
       next = { ...next, document }; finish('emphasizing');
     }
+    next = { ...next, document: fitCaptionTaskDocumentLayout(next.document!, next.options) };
     await checkpoint('rendering');
     const { clientExportVideo } = await import('./client-export');
     const comp = projectDocumentToComposition(next.document!);

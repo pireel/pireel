@@ -1,15 +1,19 @@
 import { CanvasCaptionPreview } from './canvas-caption-preview';
 import { WEB_FONTS } from '@pireel/studio-engine/font-library';
-import { CAPTION_TRANSLATION_LANGUAGES, captionTaskStyle, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
+import { CAPTION_TRANSLATION_LANGUAGES, captionTaskStyle, captionTaskCanvas, captionTaskGroupBottom, type CaptionTaskDimensions, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
 import { getCaptionPreset } from '@pireel/studio-engine/caption-presets';
 
-export function CaptionTaskCustomize({ options, locale, disabled, onChange, onReset }: {
-  options: CaptionTaskOptions; locale: 'zh' | 'en'; disabled: boolean;
+export function CaptionTaskCustomize({ options, locale, disabled, source, onChange, onReset }: {
+  options: CaptionTaskOptions; locale: 'zh' | 'en'; disabled: boolean; source?: CaptionTaskDimensions;
   onChange: (patch: NonNullable<CaptionTaskOptions['custom']>) => void; onReset: () => void;
 }) {
   const zh = locale === 'zh';
   const say = (cn: string, en: string) => zh ? cn : en;
-  const style = captionTaskStyle(options);
+  const canvas = captionTaskCanvas(options.aspect, source ?? { width: 1080, height: 1920 });
+  const style = captionTaskStyle(options, canvas);
+  const outputScale = 1080 / Math.min(canvas.width, canvas.height);
+  const outputFontPx = Math.round(48 * (style.scale ?? 1) * outputScale);
+  const groupBottom = captionTaskGroupBottom(options, canvas);
   const preset = getCaptionPreset(style.preset);
   const bg = style.bg === undefined ? preset.bg : style.bg;
   const color = (value: string | undefined | null, fallback: string) => value && /^#[a-f0-9]{6}$/i.test(value) ? value : fallback;
@@ -18,16 +22,16 @@ export function CaptionTaskCustomize({ options, locale, disabled, onChange, onRe
   return <details className="border-line mt-5 border-t pt-4">
     <summary className="text-ink cursor-pointer text-sm font-medium">{say('自定义样式', 'Customize style')}{options.custom && <span className="text-ink-3 ml-2 text-xs">{say('已调整', 'Edited')}</span>}</summary>
     <div role="region" aria-label={say('自定义字幕实时预览', 'Live custom caption preview')} className="border-line bg-bg sticky top-3 z-10 mt-4 rounded-lg border p-3 shadow-sm">
-      <div className="bg-panel aspect-[2.4] w-full overflow-hidden rounded-md"><CanvasCaptionPreview style={{ ...style, xPct: 50, yPct: 75 }} locale={locale} aspect={2.4} sampleText={say('字幕|预览', 'Caption|preview')} sampleSubText={CAPTION_TRANSLATION_LANGUAGES.find((language) => language.id === options.translationLanguage)?.sample} /></div>
+      <div className="bg-panel aspect-[2.4] w-full overflow-hidden rounded-md"><CanvasCaptionPreview style={{ ...style, xPct: 50, yPct: 75, sub: style.sub ? { ...style.sub, xPct: 50, yPct: options.layoutVersion === 2 ? 90 : undefined } : undefined }} locale={locale} aspect={2.4} sampleText={say('字幕|预览', 'Caption|preview')} sampleSubText={CAPTION_TRANSLATION_LANGUAGES.find((language) => language.id === options.translationLanguage)?.sample} /></div>
     </div>
     <fieldset disabled={disabled} className="mt-4 space-y-4 disabled:opacity-50">
       <label className="text-ink flex items-center justify-between gap-4 text-xs">{say('字体', 'Font')}<select value={style.font ?? 'sans'} onChange={(event) => onChange({ font: event.target.value })} className="border-line bg-bg max-w-[220px] rounded-md border px-2 py-1.5 text-xs"><option value="sans">{say('现代黑体', 'Sans serif')}</option><option value="serif">{say('经典宋体', 'Serif')}</option><option value="mono">{say('等宽字体', 'Monospace')}</option>{WEB_FONTS.map((font) => <option key={font.id} value={'web:' + font.id}>{font.label[locale]}</option>)}</select></label>
-      <div className="grid grid-cols-2 gap-5">{range(say('字号', 'Size'), style.scale ?? 1, .5, 2, .05, (scale) => onChange({ scale }), String(Math.round(48 * (style.scale ?? 1))))}{range(say('每行宽度', 'Line width'), style.wPct ?? 84, 40, 94, 1, (wPct) => onChange({ wPct }), `${style.wPct ?? 84}%`)}</div>
+      <div className="grid grid-cols-2 gap-5">{range(say('字号', 'Size'), outputFontPx, 24, 192, 1, (pixels) => onChange({ scale: pixels / outputScale / 48 }), `${outputFontPx}px`)}{range(say('每行宽度', 'Line width'), style.wPct ?? 84, 40, 94, 1, (wPct) => onChange({ wPct }), `${style.wPct ?? 84}%`)}</div>
       <div className="grid grid-cols-2 gap-5">{swatch(say('文字颜色', 'Text color'), color(style.color ?? preset.text, '#ffffff'), (value) => onChange({ color: value }))}{preset.mode === 'emphasis' && swatch(say('高亮颜色', 'Accent color'), color(style.accentColor ?? preset.emphasis, '#ffe34f'), (accentColor) => onChange({ accentColor }))}</div>
       <div className="grid grid-cols-2 gap-5">{range(say('描边粗细', 'Outline'), style.strokeWidth ?? 0, 0, 8, .5, (strokeWidth) => onChange({ strokeWidth }), String(style.strokeWidth ?? 0))}{swatch(say('描边颜色', 'Outline color'), color(style.strokeColor, '#000000'), (strokeColor) => onChange({ strokeColor }))}</div>
       <div className="grid grid-cols-2 gap-5"><label className="text-ink flex items-center gap-2 text-xs"><input type="checkbox" checked={!!style.bold} onChange={(event) => onChange({ bold: event.target.checked })} className="accent-[var(--color-accent)]" />{say('加粗', 'Bold')}</label><label className="text-ink flex items-center gap-2 text-xs"><input type="checkbox" checked={!!bg} onChange={(event) => onChange({ bg: event.target.checked ? '#000000' : null })} className="accent-[var(--color-accent)]" />{say('背景底色', 'Background')}</label></div>
       {!!bg && swatch(say('背景颜色', 'Background color'), color(bg, '#000000'), (value) => onChange({ bg: value }))}
-      {range(say('上下位置', 'Vertical position'), style.yPct ?? 86, 15, 95, 1, (yPct) => onChange({ yPct }), `${style.yPct ?? 86}%`)}
+      {range(say(options.layoutVersion === 2 ? '整组位置' : '上下位置', options.layoutVersion === 2 ? 'Caption group position' : 'Vertical position'), groupBottom, 15, 95, 1, (yPct) => onChange({ yPct }), `${Math.round(groupBottom)}%`)}
       <button type="button" onClick={onReset} className="text-ink-3 text-xs underline underline-offset-4">{say('恢复预设', 'Reset to preset')}</button>
     </fieldset>
   </details>;

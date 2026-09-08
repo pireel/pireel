@@ -41,7 +41,7 @@ export function CaptionUploadDialog({ open, locale, onOpenChange, onContinue }: 
       const id = crypto.randomUUID();
       const coverThumb = await captureCaptionCover(file, data.durationSec).catch(() => undefined);
       if (current !== generation.current) return;
-      await saveCaptionTask({ id, scope: user.user_id, name: file.name, sourceSig: sig, ...data, coverThumb, options: { presetId: 'clean', aspect: 'original', shortenPauses: false }, stage: 'ready', updatedAt: Date.now() });
+      await saveCaptionTask({ id, scope: user.user_id, name: file.name, sourceSig: sig, ...data, coverThumb, options: { layoutVersion: 2, presetId: 'clean', aspect: 'original', shortenPauses: false }, stage: 'ready', updatedAt: Date.now() });
       if (current === generation.current) { onOpenChange(false); onContinue(id); }
     } catch (reason) { if (current === generation.current) setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { creating.current = false; if (current === generation.current) setBusy(false); }

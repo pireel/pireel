@@ -42,6 +42,22 @@ async function complete(index: number) {
   await settled(() => expect(container.querySelector('video[controls]')).not.toBeNull());
 }
 describe('caption versions and preview UI', () => {
+  it('uses recommended defaults for drafts while preserving legacy version settings', async () => {
+    expect(container.querySelector<HTMLInputElement>('[aria-label="字号"]')?.value).toBe('64');
+    expect(container.querySelector<HTMLInputElement>('[aria-label="整组位置"]')?.value).toBe('89');
+    expect(container.querySelector('[data-caption-safe-area]')).not.toBeNull();
+    await click(container.querySelector<HTMLInputElement>('label[title] input')!);
+    expect(container.querySelector('[data-caption-safe-area]')).toBeNull();
+    await act(async () => root.render(null));
+    await saveCaptionTask({ ...fixture(), generationId: 'old-version', stage: 'completed' }, new Blob(['old video']));
+    await act(async () => root.render(createElement(CaptionTaskPage, { taskId: 'task', locale: 'zh', onBack: vi.fn(), onOpenEditor: vi.fn() })));
+    await settled(() => expect(container.querySelector('video[controls]')).not.toBeNull());
+    expect(container.querySelector<HTMLInputElement>('[aria-label="字号"]')?.value).toBe('85');
+    expect(container.querySelector<HTMLInputElement>('[aria-label="上下位置"]')?.value).toBe('86');
+    await click(button('荧光绿'));
+    expect(container.querySelector<HTMLInputElement>('[aria-label="字号"]')?.value).toBe('64');
+    expect((await loadCaptionVersion('owner', 'task', 'old-version'))!.version.task.options.layoutVersion).toBeUndefined();
+  });
   it('only enables playback after generation, shows real stage progress, and preserves selectable versions', async () => {
     expect(container.querySelector('video')).toBeNull();
     expect(container.querySelector('img[alt="视频首帧"]')?.getAttribute('src')).toBe('data:image/jpeg;base64,first-frame');

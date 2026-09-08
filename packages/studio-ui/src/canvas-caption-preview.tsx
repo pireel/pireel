@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { fitCaptionTaskBilingualStyle } from '@pireel/studio-engine/caption-task';
 import { drawPresetCaption } from '@pireel/studio-engine/caption-canvas';
 import { emptyComposition, resolveSubCaptionStyle, type CaptionStyle } from '@pireel/studio-engine/composition';
 import { loadFont } from './web-fonts';
@@ -25,9 +26,10 @@ export function CanvasCaptionPreview({ style, locale, tile = false, aspect = 9 /
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
     const words: FxWord[] = (sampleText ? sampleText.split('|') : locale === 'zh' ? ['让', '每句话', '都被', '看见'] : ['MAKE', 'EVERY', 'WORD', 'COUNT']).map((text, index) => ({ text, start: index * .6, end: (index + 1) * .6, emphasis: sampleText ? index === 1 : index >= 2 }));
-    const viewStyle = tile ? { ...style, scale: 3.2, xPct: 50, yPct: 66, wPct: 78 } : style;
+    let viewStyle = tile ? { ...style, scale: 3.2, xPct: 50, yPct: 66, wPct: 78 } : style;
     const designWidth = 1080;
     const designHeight = tile ? designWidth / 1.15 : designWidth / aspect;
+    if (!tile && sampleSubText) viewStyle = fitCaptionTaskBilingualStyle(viewStyle, { width: designWidth, height: designHeight }, [sampleSubText]);
     const subStyle = sampleSubText && style.sub?.lang ? resolveSubCaptionStyle({ ...emptyComposition(), width: designWidth, height: designHeight, captionStyle: viewStyle }) : null;
     const subWords: FxWord[] = sampleSubText ? [{ text: sampleSubText, start: 0, end: words.length * .6 }] : [];
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
