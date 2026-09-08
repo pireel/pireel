@@ -1,6 +1,6 @@
 import { CanvasCaptionPreview } from './canvas-caption-preview';
 import { WEB_FONTS } from '@pireel/studio-engine/font-library';
-import { CAPTION_TRANSLATION_LANGUAGES, captionTaskStyle, captionTaskCanvas, captionTaskGroupBottom, type CaptionTaskDimensions, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
+import { CAPTION_TRANSLATION_LANGUAGES, captionTaskStyle, captionTaskCanvas, type CaptionTaskDimensions, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
 import { getCaptionPreset } from '@pireel/studio-engine/caption-presets';
 
 export function CaptionTaskCustomize({ options, locale, disabled, source, onChange, onReset }: {
@@ -13,7 +13,6 @@ export function CaptionTaskCustomize({ options, locale, disabled, source, onChan
   const style = captionTaskStyle(options, canvas);
   const outputScale = 1080 / Math.min(canvas.width, canvas.height);
   const outputFontPx = Math.round(48 * (style.scale ?? 1) * outputScale);
-  const groupBottom = captionTaskGroupBottom(options, canvas);
   const preset = getCaptionPreset(style.preset);
   const bg = style.bg === undefined ? preset.bg : style.bg;
   const color = (value: string | undefined | null, fallback: string) => value && /^#[a-f0-9]{6}$/i.test(value) ? value : fallback;
@@ -31,7 +30,6 @@ export function CaptionTaskCustomize({ options, locale, disabled, source, onChan
       <div className="grid grid-cols-2 gap-5">{range(say('描边粗细', 'Outline'), style.strokeWidth ?? 0, 0, 8, .5, (strokeWidth) => onChange({ strokeWidth }), String(style.strokeWidth ?? 0))}{swatch(say('描边颜色', 'Outline color'), color(style.strokeColor, '#000000'), (strokeColor) => onChange({ strokeColor }))}</div>
       <div className="grid grid-cols-2 gap-5"><label className="text-ink flex items-center gap-2 text-xs"><input type="checkbox" checked={!!style.bold} onChange={(event) => onChange({ bold: event.target.checked })} className="accent-[var(--color-accent)]" />{say('加粗', 'Bold')}</label><label className="text-ink flex items-center gap-2 text-xs"><input type="checkbox" checked={!!bg} onChange={(event) => onChange({ bg: event.target.checked ? '#000000' : null })} className="accent-[var(--color-accent)]" />{say('背景底色', 'Background')}</label></div>
       {!!bg && swatch(say('背景颜色', 'Background color'), color(bg, '#000000'), (value) => onChange({ bg: value }))}
-      {range(say(options.layoutVersion === 2 ? '整组位置' : '上下位置', options.layoutVersion === 2 ? 'Caption group position' : 'Vertical position'), groupBottom, 15, 95, 1, (yPct) => onChange({ yPct }), `${Math.round(groupBottom)}%`)}
       <button type="button" onClick={onReset} className="text-ink-3 text-xs underline underline-offset-4">{say('恢复预设', 'Reset to preset')}</button>
     </fieldset>
   </details>;

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Download, Loader2, Upload, Sparkles } from 'lucide-react';
-import { CAPTION_TASK_PRESETS, CAPTION_TRANSLATION_LANGUAGES, captionTaskStyle, captionTaskSafeArea, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
-import { CanvasCaptionPreview } from './canvas-caption-preview';
+import { CAPTION_TASK_PRESETS, CAPTION_TRANSLATION_LANGUAGES, captionTaskGroupBottom, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
+import { CaptionPositionPreview } from './caption-position-preview';
 import { CaptionPresetCarousel } from './caption-preset-carousel';
 import { CaptionProgressOverlay } from './caption-progress-overlay';
 import { createCaptionAgentRemix } from './caption-agent-remix';
@@ -34,7 +34,6 @@ export function CaptionTaskPage({ taskId, locale, onBack, onOpenEditor }: { task
   const [resultUrl, setResultUrl] = useState('');
   const [cover, setCover] = useState('');
   const [firstFrame, setFirstFrame] = useState('');
-  const [showSafeArea, setShowSafeArea] = useState(true);
   const [versions, setVersions] = useState<CaptionVersionSummary[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<CaptionTaskVersion | null>(null);
   const [drafting, setDrafting] = useState(true);
@@ -147,9 +146,9 @@ export function CaptionTaskPage({ taskId, locale, onBack, onOpenEditor }: { task
     return () => { current = false; versionRequest.current++; };
   }, [scope, taskId]);
 
-  const changeOptions = (update: (current: CaptionTaskOptions) => CaptionTaskOptions) => {
+  const changeOptions = (update: (current: CaptionTaskOptions) => CaptionTaskOptions, keepLayout = false) => {
     if (busyRef.current) return;
-    versionRequest.current++; setVersionLoading(false); setDrafting(true); setOptions((current) => update({ ...current, layoutVersion: 2 }));
+    versionRequest.current++; setVersionLoading(false); setDrafting(true); setOptions((current) => update(keepLayout ? current : { ...current, layoutVersion: 2 }));
   };
   useEffect(() => {
     if (loadingProject || busy || !scope || !drafting) return;
@@ -187,7 +186,6 @@ export function CaptionTaskPage({ taskId, locale, onBack, onOpenEditor }: { task
     finally { remixingRef.current = false; if (alive.current) setPreparing(false); }
   };
   const ratio = probe && probe.width > 0 && probe.height > 0 ? probe.width / probe.height : 9 / 16;
-  const safeArea = captionTaskSafeArea(probe ?? { width: 1080, height: 1920 });
   const playable = !drafting && !!resultUrl && !busy && !versionLoading;
   const disabled = busy || preparing || versionLoading;
   const resumable = drafting && task && ['failed', 'interrupted'].includes(task.stage) && !task.draftOptions && JSON.stringify(options) === JSON.stringify(task.options);
@@ -218,19 +216,22 @@ export function CaptionTaskPage({ taskId, locale, onBack, onOpenEditor }: { task
         {error && <p role="alert" className="text-ink mt-4 text-sm leading-relaxed">{error}</p>}{storageNote && <p role="status" className="text-ink-3 mt-3 text-xs leading-relaxed">{storageNote}</p>}
       </section>
       <section aria-label={say('视频预览', 'Video preview')} className="min-w-0 md:sticky md:top-5">
-        {drafting && !busy && <label className="text-ink-3 mb-3 flex cursor-pointer items-center justify-end gap-2 text-xs" title={say('通用参考，平台按钮和文案可能占用更多空间。', 'General guide; platform controls and descriptions can cover more space.')}><input type="checkbox" checked={showSafeArea} onChange={(event) => setShowSafeArea(event.target.checked)} className="accent-[var(--color-accent)]" />{say('参考安全区', 'Safe area guide')}</label>}
         {versions.length > 0 && <div className="mb-3 flex items-center justify-between gap-3">
           <select aria-label={say('视频版本', 'Video version')} disabled={busy || versionLoading} value={drafting ? 'draft' : selectedVersion?.id ?? 'draft'} onChange={(event) => void selectVersion(event.target.value)} className="border-line bg-bg text-ink rounded-md border px-3 py-2 text-xs">
             <option value="draft">{say('当前配置', 'Current settings')}</option>{versions.map((version) => <option key={version.id} value={version.id}>{say('版本', 'Version')} {version.number}</option>)}
           </select>
           {playable && selectedVersion && <a href={resultUrl} download={`${task.name.replace(/\.[^.]+$/, '')}-v${selectedVersion.number}.mp4`} className="text-ink inline-flex items-center gap-1.5 text-xs"><Download size={14} />{say('下载', 'Download')}</a>}
         </div>}
-        <div className="relative mx-auto overflow-hidden rounded-lg bg-black" style={{ aspectRatio: ratio, width: `min(100%, calc((100dvh - ${versions.length ? 275 : 225}px) * ${ratio}))` }}>
+        <div className="relative mx-auto overflow-hidden rounded-lg bg-black" style={{ aspectRatio: ratio, width: `min(100%, calc((100dvh - ${versions.length ? 245 : 195}px) * ${ratio}))` }}>
           {playable ? <video key={resultUrl} src={resultUrl} controls playsInline className="h-full w-full object-contain" /> : <>
             {(firstFrame || cover) ? <img src={firstFrame || cover} alt={say('视频首帧', 'First video frame')} className="h-full w-full object-contain" /> : <div className="bg-panel h-full w-full" />}
-            {!busy && !versionLoading && <div className="pointer-events-none absolute inset-0" aria-hidden><CanvasCaptionPreview paused style={captionTaskStyle(options, probe ?? undefined)} locale={locale} aspect={ratio} sampleText={say('字幕|预览', 'Caption|preview')} sampleSubText={CAPTION_TRANSLATION_LANGUAGES.find((language) => language.id === options.translationLanguage)?.sample} /></div>}
+            {!busy && !versionLoading && <CaptionPositionPreview options={options} source={probe ?? { width: 1080, height: 1920 }} locale={locale} disabled={disabled} onChange={(yPct) => changeOptions((current) => {
+              const custom = { ...current.custom };
+              if (yPct === captionTaskGroupBottom({ ...current, custom: undefined }, probe ?? { width: 1080, height: 1920 })) delete custom.yPct;
+              else custom.yPct = yPct;
+              return { ...current, custom: Object.keys(custom).length ? custom : undefined };
+            }, true)} />}
           </>}
-          {drafting && showSafeArea && !busy && !versionLoading && <div aria-hidden data-caption-safe-area className="pointer-events-none absolute z-10 rounded-sm border border-dashed border-white/65 shadow-[0_0_0_1px_rgba(0,0,0,0.2)]" style={{ left: `${safeArea.left}%`, top: `${safeArea.top}%`, width: `${safeArea.right - safeArea.left}%`, height: `${safeArea.bottom - safeArea.top}%` }} />}
           {versionLoading && <div role="status" className="absolute inset-0 flex items-center justify-center bg-black/70 text-white"><Loader2 size={24} className="animate-spin" /><span className="sr-only">{say('读取版本', 'Loading version')}</span></div>}
           {busy && <CaptionProgressOverlay options={task.options} progress={progress} locale={locale} stopping={stopping} onStop={() => { abortRef.current?.abort(); setStopping(true); }} />}
         </div>

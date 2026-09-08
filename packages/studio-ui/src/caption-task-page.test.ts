@@ -16,7 +16,7 @@ vi.mock('./caption-project-cover', () => ({ captureCaptionFirstFrame: async () =
 vi.mock('./canvas-caption-preview', () => ({ CanvasCaptionPreview: () => createElement('canvas') }));
 vi.mock('@pireel/studio-engine/providers', () => ({ studioProviders: () => ({ translate: vi.fn(), captionEmphasis: vi.fn() }) }));
 import { CaptionTaskPage } from './caption-task-page';
-import { saveCaptionTask, listCaptionVersions, loadCaptionVersion } from './caption-task-store';
+import { saveCaptionTask, loadCaptionTask, listCaptionVersions, loadCaptionVersion } from './caption-task-store';
 let root: Root; let container: HTMLDivElement;
 let runs: { task: CaptionTaskRecord; hooks: Parameters<typeof runCaptionTask>[2]; resolve: (value: Awaited<ReturnType<typeof runCaptionTask>>) => void; reject: (error: Error) => void }[];
 const fixture = (): CaptionTaskRecord => ({ id: 'task', scope: 'owner', name: 'demo.mp4', sourceSig: 'source', width: 1920, height: 1080, durationSec: 5, stage: 'ready', updatedAt: 1, coverThumb: 'data:image/jpeg;base64,poster', options: { presetId: 'clean', aspect: 'original', shortenPauses: false } });
@@ -25,6 +25,7 @@ const click = async (element: HTMLElement) => { await act(async () => element.cl
 const settled = async (check: () => void) => vi.waitFor(async () => { await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); }); check(); });
 beforeEach(async () => {
   vi.clearAllMocks(); runs = [];
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ measureText: (text: string) => ({ width: text.length * 24 }) } as never);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.stubGlobal('indexedDB', new IDBFactory()); vi.stubGlobal('IDBKeyRange', IDBKeyRange);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   vi.stubGlobal('matchMedia', () => ({ matches: true }));
@@ -36,24 +37,37 @@ beforeEach(async () => {
   await act(async () => root.render(createElement(CaptionTaskPage, { taskId: 'task', locale: 'zh', onBack: vi.fn(), onOpenEditor: vi.fn() })));
   await settled(() => expect(button('生成字幕视频')).toBeTruthy());
 });
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 async function complete(index: number) {
   await act(async () => runs[index]!.resolve({ task: { ...runs[index]!.task, stage: 'completed', updatedAt: 10 + index }, video: new Blob([`video-${index}`], { type: 'video/mp4' }) }));
   await settled(() => expect(container.querySelector('video[controls]')).not.toBeNull());
 }
 describe('caption versions and preview UI', () => {
+  it('saves preview positioning to the draft and passes it to generation', async () => {
+    const position = container.querySelector<HTMLElement>('[role="slider"][aria-label="字幕位置"]')!;
+    await act(async () => position.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true })));
+    expect(position.getAttribute('aria-valuenow')).toBe('88');
+    await vi.waitFor(async () => {
+      let saved: CaptionTaskRecord | undefined;
+      await act(async () => { saved = await loadCaptionTask('owner', 'task'); });
+      expect(saved?.draftOptions?.custom?.yPct).toBe(88);
+    });
+    await click(button('生成字幕视频')); await settled(() => expect(runs).toHaveLength(1));
+    expect(runs[0]!.task.options.custom?.yPct).toBe(88);
+    expect(container.querySelector('[aria-label="字幕位置"]')).toBeNull();
+    await complete(0);
+  });
   it('uses recommended defaults for drafts while preserving legacy version settings', async () => {
     expect(container.querySelector<HTMLInputElement>('[aria-label="字号"]')?.value).toBe('64');
-    expect(container.querySelector<HTMLInputElement>('[aria-label="整组位置"]')?.value).toBe('89');
-    expect(container.querySelector('[data-caption-safe-area]')).not.toBeNull();
-    await click(container.querySelector<HTMLInputElement>('label[title] input')!);
+    expect(container.querySelector('[aria-label="字幕位置"]')?.getAttribute('aria-valuenow')).toBe('89');
+    expect(container.querySelector('[aria-label="整组位置"]')).toBeNull();
     expect(container.querySelector('[data-caption-safe-area]')).toBeNull();
     await act(async () => root.render(null));
     await saveCaptionTask({ ...fixture(), generationId: 'old-version', stage: 'completed' }, new Blob(['old video']));
     await act(async () => root.render(createElement(CaptionTaskPage, { taskId: 'task', locale: 'zh', onBack: vi.fn(), onOpenEditor: vi.fn() })));
     await settled(() => expect(container.querySelector('video[controls]')).not.toBeNull());
     expect(container.querySelector<HTMLInputElement>('[aria-label="字号"]')?.value).toBe('85');
-    expect(container.querySelector<HTMLInputElement>('[aria-label="上下位置"]')?.value).toBe('86');
+    expect(container.querySelector('[aria-label="上下位置"]')).toBeNull();
     await click(button('荧光绿'));
     expect(container.querySelector<HTMLInputElement>('[aria-label="字号"]')?.value).toBe('64');
     expect((await loadCaptionVersion('owner', 'task', 'old-version'))!.version.task.options.layoutVersion).toBeUndefined();
