@@ -27,7 +27,7 @@ export const CAPTION_TRANSLATION_LANGUAGES = [
   { id: '한국어', name: { zh: '韩语', en: 'Korean' }, sample: '자막 미리보기' },
 ] as const;
 export type CaptionTranslationLanguage = typeof CAPTION_TRANSLATION_LANGUAGES[number]['id'];
-export interface CaptionTaskOptions { layoutVersion?: 2; presetId: string; aspect: 'original' | 'portrait' | 'landscape' | 'square'; shortenPauses: boolean; translationLanguage?: CaptionTranslationLanguage; custom?: Pick<Partial<CaptionStyle>, 'font' | 'scale' | 'bold' | 'color' | 'accentColor' | 'bg' | 'strokeColor' | 'strokeWidth' | 'xPct' | 'yPct' | 'wPct'> }
+export interface CaptionTaskOptions { dubbing?: import('./dubbing-task').DubbingOptions; layoutVersion?: 2; presetId: string; aspect: 'original' | 'portrait' | 'landscape' | 'square'; shortenPauses: boolean; translationLanguage?: CaptionTranslationLanguage; custom?: Pick<Partial<CaptionStyle>, 'font' | 'scale' | 'bold' | 'color' | 'accentColor' | 'bg' | 'strokeColor' | 'strokeWidth' | 'xPct' | 'yPct' | 'wPct'> }
 export function captionTaskPreset(id: string): CaptionTaskPreset {
   const preset = CAPTION_TASK_PRESETS.find((item) => item.id === id);
   if (!preset) throw new Error('Unknown caption preset');

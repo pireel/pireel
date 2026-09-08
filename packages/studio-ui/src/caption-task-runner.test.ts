@@ -36,6 +36,8 @@ describe('standalone caption task execution', () => {
     expect(result.task.stage).toBe('completed'); expect(result.video.type).toBe('video/mp4');
     expect(result.task.document?.semantics.managedCaptionTrackId).toBeTruthy();
     expect(mock.render.mock.calls[0]![0].videoFile).toBe(file);
+    const exported = mock.render.mock.calls[0]![0];
+    expect(exported.comp.shots.every((shot: { src?: string }) => !shot.src || exported.clipFiles.get(shot.src) === file)).toBe(true);
     expect(records.at(-1)?.document).toBeTruthy();
   });
   it('checkpoints bilingual subtitles before rendering and reuses them on a retry', async () => {

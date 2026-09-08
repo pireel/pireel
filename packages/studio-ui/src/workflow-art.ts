@@ -7,3 +7,5 @@ export const WORKFLOW_ART = {
 
 export const CAPTIONS_ENTRY_ICON = new URL('./workflow-art/captions-cc-v4.png', import.meta.url).href;
 export const AGENT_ENTRY_ICON = new URL('./workflow-art/agent-editor-v2.png', import.meta.url).href;
+
+export const DUBBING_ENTRY_ICON = new URL('./workflow-art/dubbing-v1.png', import.meta.url).href;

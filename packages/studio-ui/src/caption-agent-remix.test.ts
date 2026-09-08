@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { dubbingVideoDocument } from '@pireel/studio-engine/dubbing-task';
 import { firstNarrativeAssetId } from '@pireel/studio-engine/composition';
 import type { CaptionTaskRecord } from './caption-task-store';
 const mock = vi.hoisted(() => ({ user: vi.fn(), file: vi.fn(), cache: vi.fn(), save: vi.fn(), load: vi.fn(), local: vi.fn(), id: vi.fn() }));
@@ -36,6 +37,17 @@ describe('Agent Remix', () => {
     copy.canvas.width = 720;
     expect(original.document.canvas.width).toBe(1080);
     expect(copy.semantics.transcripts).not.toBe(original.document.semantics.transcripts);
+  });
+  it('remixes the dubbed output instead of reverting to the original voice', async () => {
+    const original = task(); original.scene = 'dubbing';
+    original.options.dubbing = { language: 'English', voiceId: 'voice', lipSync: false };
+    original.dubbing = { outputSig: 'dubbed-output', outputWidth: 640, outputHeight: 360 };
+    original.document = dubbingVideoDocument(original.id, 'dubbed-output', 'blob:dubbed', 'dubbed.mp4', 640, 360, 4);
+    const dubbed = new File(['dubbed voice'], 'dubbed.mp4', { type: 'video/mp4' });
+    mock.file.mockResolvedValueOnce(dubbed);
+    await createCaptionAgentRemix(original, new File(['original voice'], 'original.mp4'));
+    expect(mock.cache).toHaveBeenCalledWith(dubbed, 'dubbed-output');
+    expect(mock.save.mock.calls[0]![1]).toMatchObject({ videoSig: 'dubbed-output', context: { localAssets: [{ w: 640, h: 360 }] } });
   });
   it('refuses a different account or missing source instead of making an empty project', async () => {
     mock.user.mockResolvedValueOnce({ user_id: 'other', auth_method: 'session' });

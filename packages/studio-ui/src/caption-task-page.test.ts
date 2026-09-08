@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CaptionTaskRecord } from './caption-task-store';
 import type { runCaptionTask } from './caption-task-runner';
 const mocks = vi.hoisted(() => ({ run: vi.fn(), remix: vi.fn(), source: vi.fn(), cache: vi.fn() }));
+vi.mock('./dubbing-task-runner', () => ({ runDubbingTask: mocks.run }));
 vi.mock('./caption-task-runner', () => ({ runCaptionTask: mocks.run }));
 vi.mock('./caption-agent-remix', () => ({ createCaptionAgentRemix: mocks.remix }));
 vi.mock('./current-user', () => ({ loadCurrentUser: async () => ({ user_id: 'owner', auth_method: 'session' }) }));
@@ -43,6 +44,23 @@ async function complete(index: number) {
   await settled(() => expect(container.querySelector('video[controls]')).not.toBeNull());
 }
 describe('caption versions and preview UI', () => {
+  it('opens dubbing settings, requires a voice, and dispatches the dubbing runner', async () => {
+    await act(async () => root.render(null));
+    vi.stubGlobal('fetch', vi.fn(async (url) => new Response(JSON.stringify(String(url).includes('dubbing-lipsync') ? { lipSyncAvailable: true } : { voices: [{ id: 'en-voice', label: 'English voice', status: 'ready', sampleUrl: 'https://example.test/sample.mp3' }] }))));
+    await saveCaptionTask({ ...fixture(), scene: 'dubbing', options: { ...fixture().options, dubbing: { language: 'English', voiceId: '', lipSync: false } } });
+    await act(async () => root.render(createElement(CaptionTaskPage, { taskId: 'task', scene: 'dubbing', locale: 'zh', onBack: vi.fn(), onOpenEditor: vi.fn() })));
+    await settled(() => expect(container.querySelector('[aria-label="声音"] option[value="en-voice"]')).not.toBeNull());
+    expect(button('生成译制视频').disabled).toBe(true);
+    expect(container.querySelector('[aria-label="字幕位置"]')).toBeNull();
+    expect(container.querySelector('[aria-label="字幕样式列表"]')).toBeNull();
+    const voice = container.querySelector<HTMLSelectElement>('[aria-label="声音"]')!;
+    await act(async () => { voice.value = 'en-voice'; voice.dispatchEvent(new Event('change', { bubbles: true })); });
+    await click(button('生成译制视频')); await settled(() => expect(runs).toHaveLength(1));
+    expect(runs[0]!.task.scene).toBe('dubbing'); expect(runs[0]!.task.options.dubbing?.voiceId).toBe('en-voice');
+    expect(container.querySelector('[aria-label="译制生成进度"]')).not.toBeNull();
+    await complete(0);
+    expect(container.querySelector('video[controls]')).not.toBeNull();
+  });
   it('saves preview positioning to the draft and passes it to generation', async () => {
     const position = container.querySelector<HTMLElement>('[role="slider"][aria-label="字幕位置"]')!;
     await act(async () => position.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true })));

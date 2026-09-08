@@ -28,7 +28,7 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
-async function render() { await act(async () => root.render(createElement(CaptionUploadDialog, { open: true, locale: 'zh', onOpenChange: () => {}, onContinue: continued }))); }
+async function render(scene: 'captions' | 'dubbing' = 'captions') { await act(async () => root.render(createElement(CaptionUploadDialog, { open: true, scene, locale: 'zh', onOpenChange: () => {}, onContinue: continued }))); }
 async function upload() {
   const input = container.querySelector('input[type=file]')!;
   Object.defineProperty(input, 'files', { configurable: true, value: [new File(['video'], 'demo.mp4', { type: 'video/mp4' })] });
@@ -48,6 +48,14 @@ describe('automatic caption upload transition', () => {
     mocks.cover.mockRejectedValueOnce(new Error('Decoder unavailable'));
     await render(); await upload();
     expect(mocks.save).toHaveBeenCalledOnce(); expect(continued).toHaveBeenCalledOnce();
+  });
+  it('creates a dubbing project with explicit scene metadata and enforces the first-release limit', async () => {
+    await render('dubbing');
+    mocks.probe.mockResolvedValueOnce({ durationSec: 121, width: 1080, height: 1920, hasAudio: true });
+    await upload(); expect(mocks.save).not.toHaveBeenCalled();
+    await upload();
+    expect(mocks.save.mock.calls[0]![0]).toMatchObject({ scene: 'dubbing', options: { dubbing: { language: 'English', voiceId: '', lipSync: false } } });
+    expect(continued).toHaveBeenCalledOnce();
   });
   it('stays on upload if the video is silent or cannot be cached', async () => {
     await render();

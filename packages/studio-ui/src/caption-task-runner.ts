@@ -78,7 +78,8 @@ export async function runCaptionTask(task: CaptionTaskRecord, file: File, hooks:
     const { clientExportVideo } = await import('./client-export');
     const comp = projectDocumentToComposition(next.document!);
     if (comp.video) comp.video = { ...comp.video, url };
-    const video = await clientExportVideo({ comp, videoFile: file, clipFiles: new Map(), render: { res: 1080, fps: 30, format: 'mp4' }, shouldCancel: () => hooks.signal.aborted, onProgress: (done, total) => {
+    const clipFiles = new Map((comp.shots ?? []).flatMap((shot) => shot.src ? [[shot.src, file] as const] : []));
+    const video = await clientExportVideo({ comp, videoFile: file, clipFiles, render: { res: 1080, fps: 30, format: 'mp4' }, shouldCancel: () => hooks.signal.aborted, onProgress: (done, total) => {
       count('rendering', done, total, done === total ? 'finishing' : undefined); hooks.progress(total ? done / total : 0);
     } });
     check(); finish('rendering');
