@@ -89,8 +89,12 @@ export function useStudioExport(deps: {
   audioExportRef?: MutableRefObject<(() => Promise<AudioExportEntry[] | null>) | null>;
   /** Denoise substitution getter (source key → baked blended audio); null = original audio. */
   denoiseExportRef?: MutableRefObject<(() => Map<string, File> | null) | null>;
+  /** Make every local asset the document references resolvable before the render plan is read.
+   *  Right after an output switch the runtime is still restoring sources asynchronously; exporting
+   *  before that finishes silently drops the clips whose source is not ready yet (a PIP video). */
+  prepareExportAssets?: (document: EditorDocumentV2) => Promise<void>;
 }) {
-  const { compRef, documentRef, resolveAssetUrl, videoFileRef, clipFilesRef, audioExportRef, denoiseExportRef } = deps;
+  const { compRef, documentRef, resolveAssetUrl, videoFileRef, clipFilesRef, audioExportRef, denoiseExportRef, prepareExportAssets } = deps;
   const [exporting, setExporting] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [exportPct, setExportPct] = useState(0);
@@ -165,6 +169,10 @@ export function useStudioExport(deps: {
    *  Returns a result for the agent export tools (export_video/track_export): on success includes the
    *  saved filename and how the file was delivered. */
   async function exportVideo(opts: ExportRenderOpts, sinkUrl?: string): Promise<{ ok: boolean; filename?: string; error?: string } & Partial<ExportDelivery>> {
+    if (exporting || publishing) return { ok: false, error: t('common.exportAlreadyProgress') };
+    // Every referenced local source must be resolvable BEFORE the plan is read, or the plan omits
+    // the clip (batch export right after an output switch used to lose the picture-in-picture video).
+    await prepareExportAssets?.(documentRef.current);
     const c = compRef.current;
     // Snapshot the canonical document once. Edits made while encoding belong to the next export;
     // they must not change placements under an already-computed cache key.
@@ -174,7 +182,6 @@ export function useStudioExport(deps: {
       toast.error(t('common.nothingToExport'));
       return { ok: false, error: t('common.nothingToExport') };
     }
-    if (exporting || publishing) return { ok: false, error: t('common.exportAlreadyProgress') };
     if (!canClientExport(c, plan)) {
       toast.error(noExportReason(c, plan));
       return { ok: false, error: noExportReason(c, plan) };

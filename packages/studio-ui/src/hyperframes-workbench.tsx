@@ -1754,6 +1754,26 @@ export function HyperframesWorkbench({
     })();
     return () => { cancelled = true; };
   }, [editorDocument, localAssetIndexRev, prepareLocalAssetRuntime, resolveAssetUrl, setEditorDocument]);
+  /** Export-time readiness: the same restore as the effect above, awaited. An output switch clears the
+   *  runtime and the effect restores it asynchronously; an export started in between (batch export,
+   *  an agent's export right after switch_output) must not read a plan with unresolved sources. */
+  const prepareExportAssets = useCallback(
+    async (document: EditorDocumentV2) => {
+      const referenced = new Set(
+        document.timeline.tracks.flatMap((track) =>
+          track.clips.flatMap((clip) => ("assetId" in clip && clip.assetId ? [clip.assetId] : [])),
+        ),
+      );
+      for (const assetId of referenced) {
+        const asset = document.assets[assetId];
+        if (!asset?.locator.localSig || asset.kind === "image") continue;
+        if (localRuntimeReadyAssetIdsRef.current.has(asset.id)) continue;
+        const result = await prepareLocalAssetRuntime(asset, { asPrimary: false });
+        if (!result.ok) console.warn(`[studio] export: local ${asset.kind} source not ready for ${asset.id}: ${result.error}`);
+      }
+    },
+    [prepareLocalAssetRuntime],
+  );
   // Persistence metadata is folded into V2 synchronously without coupling the live-document module
   // to workbench feature refs.
   livePersistenceMetadataRef.current = {
@@ -1824,6 +1844,7 @@ export function HyperframesWorkbench({
     clipFilesRef,
     audioExportRef,
     denoiseExportRef,
+    prepareExportAssets,
   });
   // Agent export task (export_video/track_export): compose + browser download runs via exportVideo, this only tracks task state;
   // exportPct mirrored into a ref for the progress query inside runStudioTool (the switch closure can't read state)
