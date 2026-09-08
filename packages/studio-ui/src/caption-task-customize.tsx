@@ -1,3 +1,4 @@
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@pireel/ui/select';
 import { CanvasCaptionPreview } from './canvas-caption-preview';
 import { WEB_FONTS } from '@pireel/studio-engine/font-library';
 import { CAPTION_TRANSLATION_LANGUAGES, captionTaskStyle, captionTaskCanvas, type CaptionTaskDimensions, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
@@ -24,7 +25,15 @@ export function CaptionTaskCustomize({ options, locale, disabled, source, onChan
       <div className="bg-panel aspect-[2.4] w-full overflow-hidden rounded-md"><CanvasCaptionPreview style={{ ...style, xPct: 50, yPct: 75, sub: style.sub ? { ...style.sub, xPct: 50, yPct: options.layoutVersion === 2 ? 90 : undefined } : undefined }} locale={locale} aspect={2.4} sampleText={say('字幕|预览', 'Caption|preview')} sampleSubText={CAPTION_TRANSLATION_LANGUAGES.find((language) => language.id === options.translationLanguage)?.sample} /></div>
     </div>
     <fieldset disabled={disabled} className="mt-4 space-y-4 disabled:opacity-50">
-      <label className="text-ink flex items-center justify-between gap-4 text-xs">{say('字体', 'Font')}<select value={style.font ?? 'sans'} onChange={(event) => onChange({ font: event.target.value })} className="border-line bg-bg max-w-[220px] rounded-md border px-2 py-1.5 text-xs"><option value="sans">{say('现代黑体', 'Sans serif')}</option><option value="serif">{say('经典宋体', 'Serif')}</option><option value="mono">{say('等宽字体', 'Monospace')}</option>{WEB_FONTS.map((font) => <option key={font.id} value={'web:' + font.id}>{font.label[locale]}</option>)}</select></label>
+      <div className="text-ink flex items-center justify-between gap-4 text-xs"><span>{say('字体', 'Font')}</span>
+        <Select disabled={disabled} value={style.font ?? 'sans'} onValueChange={(font) => onChange({ font })}>
+          <SelectTrigger aria-label={say('字体', 'Font')} className="border-line bg-bg w-[220px] max-w-[75%] text-xs shadow-none hover:bg-panel-2"><SelectValue /></SelectTrigger>
+          <SelectContent className="max-h-72">
+            <SelectItem value="sans">{say('现代黑体', 'Sans serif')}</SelectItem><SelectItem value="serif">{say('经典宋体', 'Serif')}</SelectItem><SelectItem value="mono">{say('等宽字体', 'Monospace')}</SelectItem>
+            {WEB_FONTS.map((font) => <SelectItem key={font.id} value={'web:' + font.id}>{font.label[locale]}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
       <div className="grid grid-cols-2 gap-5">{range(say('字号', 'Size'), outputFontPx, 24, 192, 1, (pixels) => onChange({ scale: pixels / outputScale / 48 }), `${outputFontPx}px`)}{range(say('每行宽度', 'Line width'), style.wPct ?? 84, 40, 94, 1, (wPct) => onChange({ wPct }), `${style.wPct ?? 84}%`)}</div>
       <div className="grid grid-cols-2 gap-5">{swatch(say('文字颜色', 'Text color'), color(style.color ?? preset.text, '#ffffff'), (value) => onChange({ color: value }))}{preset.mode === 'emphasis' && swatch(say('高亮颜色', 'Accent color'), color(style.accentColor ?? preset.emphasis, '#ffe34f'), (accentColor) => onChange({ accentColor }))}</div>
       <div className="grid grid-cols-2 gap-5">{range(say('描边粗细', 'Outline'), style.strokeWidth ?? 0, 0, 8, .5, (strokeWidth) => onChange({ strokeWidth }), String(style.strokeWidth ?? 0))}{swatch(say('描边颜色', 'Outline color'), color(style.strokeColor, '#000000'), (strokeColor) => onChange({ strokeColor }))}</div>

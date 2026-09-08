@@ -145,6 +145,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.voiceSampleTypeError": "请使用 MP3、M4A 或 WAV 文件",
   "workbench.voiceUploadFailed": "声音样本上传失败",
   "workbench.voiceSearchPlaceholder": "搜索名称、音色或场景",
+  "workbench.voiceSampleLanguage": "样本语言",
   "workbench.voiceLanguageAll": "全部",
   "workbench.voiceOfficialPreview": "官方试听",
   "workbench.voiceOfficial": "官方",

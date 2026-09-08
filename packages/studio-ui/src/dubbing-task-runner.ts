@@ -1,4 +1,4 @@
-import { dubbingRate, dubbingSpeechWindow, dubbingVideoDocument, DUBBING_LANGUAGES } from '@pireel/studio-engine/dubbing-task';
+import { dubbingRate, dubbingSpeakers, dubbingTurns, dubbingVoiceFor, dubbingVoicesReady, dubbingSpeechWindow, dubbingVideoDocument, splitDubbingScript, DUBBING_MAX_DURATION_SEC, DUBBING_MAX_VIDEO_BYTES, DUBBING_LANGUAGES } from '@pireel/studio-engine/dubbing-task';
 import { projectDocumentToComposition } from '@pireel/studio-engine/composition';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import type { CaptionTaskRecord, CaptionProcessingStage, CaptionTaskProgress } from './caption-task-store';
@@ -25,7 +25,8 @@ export async function runDubbingTask(task: CaptionTaskRecord, file: File, hooks:
   let next = structuredClone(task); const config = next.options.dubbing!;
   if (!DUBBING_LANGUAGES.some((language) => language.id === config.language) || !config.voiceId) throw new Error('请选择目标语言和声音。');
   if (config.script !== undefined && !config.script.trim()) throw new Error('配音文案不能为空。');
-  if (task.durationSec > 120) throw new Error('首版支持 2 分钟以内的单人口播。');
+  if (!Number.isFinite(task.durationSec) || task.durationSec <= 0 || task.durationSec > DUBBING_MAX_DURATION_SEC) throw new Error('支持 30 分钟以内的视频。');
+  if (file.size > DUBBING_MAX_VIDEO_BYTES) throw new Error('请选择 1GB 以下的视频。');
   next.dubbing ??= {};
   next.progress = Object.fromEntries(captionProcessingStages(next.options).map((stage) => [stage, { status: 'pending' }]));
   const check = () => { if (hooks.signal.aborted) throw new DOMException('Cancelled', 'AbortError'); };
@@ -38,47 +39,76 @@ export async function runDubbingTask(task: CaptionTaskRecord, file: File, hooks:
   if (!next.transcript?.length) next.transcript = await transcribeFile(file, { signal: hooks.signal, onPhase: (detail) => report('transcribing', 'running', undefined, detail) });
   check(); const window = dubbingSpeechWindow(next.transcript, next.durationSec);
   report('transcribing', 'completed', 1);
+  const speakers = dubbingSpeakers(next.transcript); const multiple = speakers.length > 1;
+  if (multiple && (!dubbingVoicesReady(next.transcript, config) || config.lipSync)) {
+    next = { ...next, stage: 'ready' }; await hooks.checkpoint(next); check();
+    throw Object.assign(new Error(config.lipSync ? '识别到多位说话人，请关闭口型同步，并为每个人选择音色。' : '识别到多位说话人，请为每个人选择音色。'), { code: 'dubbing_setup_required' });
+  }
   await checkpoint('translating');
   const sourceText = next.transcript.map((segment) => segment.text).join('\n');
-  let text = config.script?.trim();
-  if (!text && next.dubbing?.language === config.language && next.dubbing.sourceText === sourceText) text = next.dubbing.translatedText;
-  if (!text) {
+  const translateTexts = async (texts: string[]) => {
     const translate = studioProviders().translate;
     if (!translate) throw new Error('翻译服务尚未连接。');
-    const rows = next.transcript.flatMap((segment) => segment.text.match(/[^\n]{1,350}/gu) ?? []).map((text, index) => ({ text, index }));
-    const translated: string[] = [];
+    const rows = texts.flatMap((text, parent) => (text.match(/[^\n]{1,350}/gu) ?? []).map((text) => ({ text, parent }))).map((row, index) => ({ ...row, index }));
+    const translated = texts.map(() => [] as string[]);
     for (let i = 0; i < rows.length; i += 250) {
-      check(); const batch = rows.slice(i, i + 250); const output = await translate(batch, config.language); check();
+      check(); const batch = rows.slice(i, i + 250); const output = await translate(batch.map(({ text, index }) => ({ text, index })), config.language); check();
       const byId = new Map<number, string>();
       for (const row of output) {
         if (!batch.some((source) => source.index === row.index) || byId.has(row.index) || !row.text?.trim()) throw new Error('译文不完整，请重试。');
         byId.set(row.index, row.text.trim());
       }
       if (byId.size !== batch.length) throw new Error('译文不完整，请重试。');
-      translated.push(...batch.map((row) => byId.get(row.index)!));
-      report('translating', 'running', translated.length / rows.length);
+      for (const row of batch) translated[row.parent].push(byId.get(row.index)!);
+      report('translating', 'running', Math.min(rows.length, i + batch.length) / rows.length);
     }
-    text = translated.join('\n');
+    return translated.map((parts) => parts.join('\n'));
+  };
+  let text: string;
+  let speechPlan: { text: string; voiceId: string; group: number; start: number; end: number }[];
+  if (multiple) {
+    const turns = dubbingTurns(next.transcript, next.durationSec); const turnsKey = JSON.stringify(turns);
+    const translated = next.dubbing.language === config.language && next.dubbing.turnsKey === turnsKey && next.dubbing.translatedTurns?.length === turns.length
+      ? next.dubbing.translatedTurns : await translateTexts(turns.map((turn) => turn.text));
+    const edited = turns.map((turn, index) => (config.turnScripts?.[turn.id] ?? translated[index]).trim());
+    if (edited.some((part) => !part)) throw new Error('发言文案不能为空。');
+    text = edited.join('\n'); splitDubbingScript(text);
+    speechPlan = turns.flatMap((turn, index) => splitDubbingScript(edited[index]).map((text) => ({ text, voiceId: dubbingVoiceFor(turn.speaker, speakers, config), group: index, start: turn.start, end: turn.end })));
+    next.dubbing = { ...next.dubbing, language: config.language, sourceText, translatedText: text, translatedTurns: translated, turnsKey };
+  } else {
+    text = config.script?.trim() || (next.dubbing.language === config.language && next.dubbing.sourceText === sourceText ? next.dubbing.translatedText : '') || (await translateTexts([sourceText]))[0];
+    speechPlan = splitDubbingScript(text).map((text) => ({ text, voiceId: config.voiceId, group: 0, start: window.start, end: window.end }));
+    next.dubbing = { ...next.dubbing, language: config.language, sourceText, translatedText: text };
   }
-  if (!text || text.length > 5000) throw new Error('配音文案需为 1–5000 字。');
-  next.dubbing = { ...next.dubbing, language: config.language, sourceText, translatedText: text };
+  const speechTexts = speechPlan.map((part) => part.text);
   report('translating', 'completed', 1);
   await checkpoint('voicing');
-  const signature = JSON.stringify([text, config.voiceId]);
-  if (next.dubbing.speech?.signature !== signature) {
-    let body = await jsonRequest('/api/studio/dubbing-speech', { runId: next.generationId, projectId: next.id, text, voiceId: config.voiceId, name: `${next.name} · ${config.language}` }, hooks.signal);
+  const signature = multiple ? JSON.stringify(speechPlan) : JSON.stringify([text, config.voiceId]);
+  if (next.dubbing.speechSignature !== signature) {
+    const legacy = speechTexts.length === 1 && next.dubbing.speech?.signature === signature ? next.dubbing.speech : undefined;
+    next.dubbing = { language: config.language, sourceText, translatedText: text, translatedTurns: next.dubbing.translatedTurns, turnsKey: next.dubbing.turnsKey,
+      sourceVideoKey: next.dubbing.sourceVideoKey, sourceVideoUrl: next.dubbing.sourceVideoUrl,
+      speechSignature: signature, speechParts: legacy ? [legacy] : [] };
+  }
+  next.dubbing.speechParts ??= [];
+  for (let index = 0; index < speechTexts.length; index++) {
     check();
-    while (body.status === 'pending') {
-      await pause(hooks.signal);
-      const response = await fetch(`/api/studio/dubbing-speech?id=${encodeURIComponent(body.id)}`, { signal: hooks.signal });
-      body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? '配音进度暂时无法读取。');
+    if (!next.dubbing.speechParts[index]) {
+      let body = await jsonRequest('/api/studio/dubbing-speech', { runId: next.generationId, projectId: next.id, chunkIndex: index, text: speechTexts[index], voiceId: speechPlan[index].voiceId, name: `${next.name} · ${config.language}` }, hooks.signal);
+      check();
+      while (body.status === 'pending') {
+        await pause(hooks.signal);
+        const response = await fetch(`/api/studio/dubbing-speech?id=${encodeURIComponent(body.id)}`, { signal: hooks.signal });
+        body = await response.json();
+        if (!response.ok) throw new Error(body.error ?? '配音进度暂时无法读取。');
+      }
+      check();
+      if (body.status === 'failed') throw new Error(body.error ?? '配音生成失败。');
+      if (!body.asset?.url || !Number.isFinite(body.asset.durationSec) || !(body.asset.durationSec > 0)) throw new Error('配音未返回有效音频。');
+      next.dubbing.speechParts[index] = { url: body.asset.url, key: body.asset.key, durationSec: body.asset.durationSec, signature: JSON.stringify([speechTexts[index], speechPlan[index].voiceId]) };
+      await hooks.checkpoint(next); check();
     }
-    check();
-    if (body.status === 'failed') throw new Error(body.error ?? '配音生成失败。');
-    if (!body.asset?.url || !(body.asset.durationSec > 0)) throw new Error('配音未返回有效音频。');
-    next.dubbing = { language: config.language, sourceText, translatedText: text, sourceVideoKey: next.dubbing.sourceVideoKey, sourceVideoUrl: next.dubbing.sourceVideoUrl,
-      speech: { url: body.asset.url, key: body.asset.key, durationSec: body.asset.durationSec, signature } };
+    report('voicing', 'running', (index + 1) / speechTexts.length);
   }
   report('voicing', 'completed', 1);
   await checkpoint('aligning');
@@ -87,14 +117,34 @@ export async function runDubbingTask(task: CaptionTaskRecord, file: File, hooks:
     const { decodeAudioFile, toMono } = await import('./audio-decode');
     const { signalsmithStretch, tiledStretch } = await import('./time-stretch');
     const { encodeWavMono } = await import('./denoise');
-    const speech = await materializeRemoteMedia(next.dubbing.speech!.url, { name: 'dub-speech.mp3', signal: hooks.signal });
-    const audio = await decodeAudioFile(speech.file); const sampleRate = 24000; const pcm = await toMono(audio, sampleRate); check();
-    const rate = dubbingRate(pcm.length / sampleRate, window.duration);
-    const fitted = Math.abs(rate - 1) < .001 ? pcm : (await tiledStretch(signalsmithStretch)({ channels: [pcm], sampleRate, rate }))[0]!;
-    check();
-    const output = new Float32Array(Math.ceil(next.durationSec * sampleRate)); const start = Math.round(window.start * sampleRate);
-    if (fitted.length > output.length - start + sampleRate * .05) throw new Error('配音无法完整放入原片，请调整文案。');
-    output.set(fitted.subarray(0, Math.min(fitted.length, output.length - start)), start);
+    const sampleRate = 24000;
+    const parts = next.dubbing.speechParts;
+    const output = new Float32Array(Math.ceil(next.durationSec * sampleRate));
+    const groups = new Map<number, { total: number; elapsed: number; start: number; end: number; cursor: number; last: number }>();
+    speechPlan.forEach((entry, index) => {
+      const group = groups.get(entry.group) ?? { total: 0, elapsed: 0, start: Math.round(entry.start * sampleRate), end: Math.min(output.length, Math.round(entry.end * sampleRate)), cursor: Math.round(entry.start * sampleRate), last: index };
+      group.total += parts[index].durationSec; group.last = index; groups.set(entry.group, group);
+    });
+    for (const group of groups.values()) dubbingRate(group.total * sampleRate, group.end - group.start);
+    // Decode one part at a time, preserving pitch and a continuous picture clock.
+    for (let index = 0; index < parts.length; index++) {
+      check(); const part = parts[index];
+      const speech = await materializeRemoteMedia(part.url, { name: `dub-speech-${index}.mp3`, signal: hooks.signal });
+      const audio = await decodeAudioFile(speech.file); const pcm = await toMono(audio, sampleRate); check();
+      const group = groups.get(speechPlan[index].group)!;
+      group.elapsed += part.durationSec;
+      const end = index === group.last ? group.end : group.start + Math.round((group.end - group.start) * group.elapsed / group.total);
+      const targetLength = end - group.cursor;
+      const rate = dubbingRate(pcm.length, targetLength);
+      const fitted = Math.abs(rate - 1) < .001 ? pcm : (await tiledStretch(signalsmithStretch)({ channels: [pcm], sampleRate, rate }))[0]!;
+      check();
+      if (Math.abs(fitted.length - targetLength) > sampleRate * .05) throw new Error('配音无法完整适配原片，请调整文案。');
+      for (let sample = 0; sample < Math.min(fitted.length, targetLength); sample++) output[group.cursor + sample] += fitted[sample];
+      group.cursor = end;
+      report('aligning', 'running', (index + 1) / parts.length);
+    }
+    let peak = 1; for (const sample of output) peak = Math.max(peak, Math.abs(sample));
+    if (peak > 1) for (let sample = 0; sample < output.length; sample++) output[sample] /= peak;
     aligned = new File([encodeWavMono(output, sampleRate)], `${next.id}-${next.generationId}.wav`, { type: 'audio/wav' });
     const sig = fileSig(aligned); if (await saveLocalVideo(aligned, sig)) next.dubbing = { ...next.dubbing, alignedAudioSig: sig };
   }

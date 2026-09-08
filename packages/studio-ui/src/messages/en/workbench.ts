@@ -152,6 +152,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.voiceSampleTypeError": "Use an MP3, M4A, or WAV file",
   "workbench.voiceUploadFailed": "Voice sample upload failed",
   "workbench.voiceSearchPlaceholder": "Search names, traits, or scenes",
+  "workbench.voiceSampleLanguage": "Sample language",
   "workbench.voiceLanguageAll": "All",
   "workbench.voiceOfficialPreview": "Official previews",
   "workbench.voiceOfficial": "Official",

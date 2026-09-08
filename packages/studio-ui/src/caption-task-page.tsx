@@ -1,7 +1,8 @@
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@pireel/ui/select';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Download, Loader2, Upload, Sparkles } from 'lucide-react';
 import { CAPTION_TASK_PRESETS, CAPTION_TRANSLATION_LANGUAGES, captionTaskGroupBottom, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
-import { DEFAULT_DUBBING_OPTIONS } from '@pireel/studio-engine/dubbing-task';
+import { DEFAULT_DUBBING_OPTIONS, dubbingVoicesReady } from '@pireel/studio-engine/dubbing-task';
 import { DubbingSettings } from './dubbing-settings';
 import { CaptionPositionPreview } from './caption-position-preview';
 import { CaptionPresetCarousel } from './caption-preset-carousel';
@@ -123,9 +124,10 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
       setVersions(history.some((entry) => entry.id === summary.id) ? history : [summary, ...history]);
       setSelectedVersion(version); setResult(completed.video); setDrafting(false);
     } catch (reason) {
+      const setupRequired = reason instanceof Error && 'code' in reason && reason.code === 'dubbing_setup_required';
       const message = controller.signal.aborted ? say('已停止，可继续本次处理。', 'Stopped. You can resume this run.') : reason instanceof Error ? reason.message : String(reason);
       const readable = message === 'Failed to fetch' ? say('连接失败，请检查网络后重试。', 'Connection failed. Check your network and retry.') : message;
-      await persist({ ...(taskRef.current ?? next), stage: controller.signal.aborted ? 'interrupted' : 'failed', error: readable, updatedAt: Date.now() });
+      await persist({ ...(taskRef.current ?? next), stage: setupRequired ? 'ready' : controller.signal.aborted ? 'interrupted' : 'failed', error: setupRequired ? undefined : readable, updatedAt: Date.now() });
       if (alive.current) setError(readable);
     } finally { busyRef.current = false; if (alive.current) { setBusy(false); setStopping(false); } abortRef.current = null; }
   };
@@ -204,19 +206,20 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
     <input ref={inputRef} type="file" accept="video/*" className="hidden" aria-label={say('选择视频文件', 'Choose a video file')} onChange={(event) => { const next = event.target.files?.[0]; event.target.value = ''; if (next) void pickFile(next); }} />
     <div className="grid items-start gap-7 md:grid-cols-[minmax(260px,300px)_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]">
       <section className="min-w-0 md:max-h-[calc(100dvh-180px)] md:overflow-y-auto md:pr-2" aria-label={isDubbing ? say('译制设置', 'Dubbing settings') : say('字幕设置', 'Caption settings')}>
-        {isDubbing ? <DubbingSettings value={options.dubbing ?? DEFAULT_DUBBING_OPTIONS} translatedText={task.dubbing?.language === options.dubbing?.language ? task.dubbing?.translatedText : undefined} locale={locale} disabled={disabled} onChange={(dubbing) => changeOptions((current) => ({ ...current, dubbing }))} /> : <>
+        {isDubbing ? <DubbingSettings transcript={task.transcript} durationSec={task.durationSec} translatedTurns={task.dubbing?.language === options.dubbing?.language ? task.dubbing?.translatedTurns : undefined} value={options.dubbing ?? DEFAULT_DUBBING_OPTIONS} translatedText={task.dubbing?.language === options.dubbing?.language ? task.dubbing?.translatedText : undefined} locale={locale} disabled={disabled} onChange={(dubbing) => changeOptions((current) => ({ ...current, dubbing }))} /> : <>
         <CaptionPresetCarousel options={options} locale={locale} disabled={disabled} onSelect={(presetId) => changeOptions((current) => ({ ...current, presetId, custom: undefined }))} />
         {(!!studioProviders().translate || options.translationLanguage) && <div className="border-line mt-5 border-t pt-5">
-          <label className="text-ink flex items-center justify-between gap-4 text-sm">{say('双语字幕', 'Bilingual captions')}
-            <select aria-label={say('翻译语言', 'Translation language')} value={options.translationLanguage ?? ''} disabled={disabled} onChange={(event) => changeOptions((current) => ({ ...current, translationLanguage: CAPTION_TRANSLATION_LANGUAGES.find((language) => language.id === event.target.value)?.id }))} className="border-line bg-bg rounded-md border px-3 py-2 text-xs">
-              <option value="">{say('关闭', 'Off')}</option>{CAPTION_TRANSLATION_LANGUAGES.map((language) => <option key={language.id} disabled={!studioProviders().translate} value={language.id}>{language.name[locale]}</option>)}
-            </select>
-          </label>{options.translationLanguage && <p className="text-ink-3 mt-2 text-xs">{say('原文在上，译文在下。', 'Original above, translation below.')}</p>}
+          <div className="text-ink flex items-center justify-between gap-4 text-sm"><span>{say('双语字幕', 'Bilingual captions')}</span>
+            <Select value={options.translationLanguage ?? 'off'} disabled={disabled} onValueChange={(value) => changeOptions((current) => ({ ...current, translationLanguage: CAPTION_TRANSLATION_LANGUAGES.find((language) => language.id === value)?.id }))}>
+              <SelectTrigger aria-label={say('翻译语言', 'Translation language')} className="border-line bg-bg w-36 text-xs shadow-none hover:bg-panel-2"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="off">{say('关闭', 'Off')}</SelectItem>{CAPTION_TRANSLATION_LANGUAGES.map((language) => <SelectItem key={language.id} disabled={!studioProviders().translate} value={language.id}>{language.name[locale]}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>{options.translationLanguage && <p className="text-ink-3 mt-2 text-xs">{say('原文在上，译文在下。', 'Original above, translation below.')}</p>}
         </div>}
         <CaptionTaskCustomize options={options} source={probe ?? undefined} locale={locale} disabled={disabled} onChange={(patch) => changeOptions((current) => ({ ...current, custom: { ...current.custom, ...patch } }))} onReset={() => changeOptions((current) => ({ ...current, layoutVersion: 2, custom: undefined }))} />
         <div className="border-line mt-5 border-t pt-5"><label className="text-ink flex cursor-pointer items-start gap-3"><input type="checkbox" checked={options.shortenPauses} disabled={disabled} onChange={(event) => changeOptions((current) => ({ ...current, shortenPauses: event.target.checked }))} className="mt-1 size-4 accent-[var(--color-accent)]" /><span className="text-sm">{say('AI 去停顿', 'Shorten pauses')}<span className="text-ink-3 mt-1 block text-xs">{say('缩短长停顿，保留自然语气。', 'Trim long pauses while keeping speech natural.')}</span></span></label></div>
         </>}
-        <button type="button" disabled={!file || !scope || disabled || (isDubbing && !options.dubbing?.voiceId)} onClick={() => void start()} className={actionClass + ' mt-6 w-full'}>{busy || preparing ? <Loader2 size={16} className="animate-spin" /> : null}{busy ? say('正在生成…', 'Generating…') : versions.length ? say('生成新版本', 'Generate new version') : isDubbing ? say('生成译制视频', 'Generate dubbed video') : say('生成字幕视频', 'Generate captioned video')}</button>
+        <button type="button" disabled={!file || !scope || disabled || (isDubbing && (!options.dubbing || !dubbingVoicesReady(task.transcript ?? [], options.dubbing)))} onClick={() => void start()} className={actionClass + ' mt-6 w-full'}>{busy || preparing ? <Loader2 size={16} className="animate-spin" /> : null}{busy ? say('正在生成…', 'Generating…') : versions.length ? say('生成新版本', 'Generate new version') : isDubbing ? say('生成译制视频', 'Generate dubbed video') : say('生成字幕视频', 'Generate captioned video')}</button>
         {resumable && !busy && <button type="button" disabled={!file || disabled} onClick={() => void start(true)} className="text-ink-3 mt-3 w-full text-xs underline">{say('继续上次处理', 'Resume last run')}</button>}
         <p className="text-ink-4 mt-3 text-center text-xs">{isDubbing ? say('识别、翻译、配音和口型同步按实际使用计费。', 'Transcription, translation, speech and lip sync use credits.') : say('语音识别、翻译和重点词选择可能消耗积分。', 'Transcription, translation and key phrase selection may use credits.')}</p>
         {!file && <button type="button" disabled={disabled} onClick={() => inputRef.current?.click()} className="text-ink mt-4 flex items-center gap-2 text-sm"><Upload size={16} />{say('重新选择原视频', 'Re-select source video')}</button>}
@@ -224,9 +227,10 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
       </section>
       <section aria-label={say('视频预览', 'Video preview')} className="min-w-0 md:sticky md:top-5">
         {versions.length > 0 && <div className="mb-3 flex items-center justify-between gap-3">
-          <select aria-label={say('视频版本', 'Video version')} disabled={busy || versionLoading} value={drafting ? 'draft' : selectedVersion?.id ?? 'draft'} onChange={(event) => void selectVersion(event.target.value)} className="border-line bg-bg text-ink rounded-md border px-3 py-2 text-xs">
-            <option value="draft">{say('当前配置', 'Current settings')}</option>{versions.map((version) => <option key={version.id} value={version.id}>{say('版本', 'Version')} {version.number}</option>)}
-          </select>
+          <Select disabled={busy || versionLoading} value={drafting ? 'draft' : selectedVersion?.id ?? 'draft'} onValueChange={(value) => void selectVersion(value)}>
+            <SelectTrigger aria-label={say('视频版本', 'Video version')} className="border-line bg-bg text-ink w-36 text-xs shadow-none hover:bg-panel-2"><SelectValue /></SelectTrigger>
+            <SelectContent className="max-h-72"><SelectItem value="draft">{say('当前配置', 'Current settings')}</SelectItem>{versions.map((version) => <SelectItem key={version.id} value={version.id}>{say('版本', 'Version')} {version.number}</SelectItem>)}</SelectContent>
+          </Select>
           {playable && selectedVersion && <a href={resultUrl} download={`${task.name.replace(/\.[^.]+$/, '')}-v${selectedVersion.number}.mp4`} className="text-ink inline-flex items-center gap-1.5 text-xs"><Download size={14} />{say('下载', 'Download')}</a>}
         </div>}
         <div className="relative mx-auto overflow-hidden rounded-lg bg-black" style={{ aspectRatio: ratio, width: `min(100%, calc((100dvh - ${versions.length ? 245 : 195}px) * ${ratio}))` }}>
