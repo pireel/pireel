@@ -7,6 +7,8 @@ import { CanvasCaptionPreview } from './canvas-caption-preview';
 export function CaptionPresetCarousel({ options, locale, disabled, onSelect }: { options: CaptionTaskOptions; locale: 'zh' | 'en'; disabled: boolean; onSelect: (id: string) => void }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ start: true, end: false });
+  const presets = CAPTION_TASK_PRESETS.filter((item) => item.id !== 'keywords' || !!studioProviders().captionEmphasis);
+  const pages = Array.from({ length: Math.ceil(presets.length / 6) }, (_, index) => presets.slice(index * 6, index * 6 + 6));
   const measure = () => { const el = scrollRef.current; if (el) setEdges({ start: el.scrollLeft <= 2, end: el.scrollLeft + el.clientWidth >= el.scrollWidth - 2 }); };
   useEffect(() => {
     const el = scrollRef.current; if (!el) return;
@@ -33,10 +35,12 @@ export function CaptionPresetCarousel({ options, locale, disabled, onSelect }: {
       </div>
     </div>
     <div ref={scrollRef} onScroll={measure} role="region" aria-label={locale === 'zh' ? '字幕样式列表' : 'Caption styles'} tabIndex={0} className="relative flex snap-x snap-mandatory gap-2 overflow-x-auto overscroll-x-contain px-0.5 pb-2 pt-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      {CAPTION_TASK_PRESETS.filter((item) => item.id !== 'keywords' || !!studioProviders().captionEmphasis).map((item) => <button key={item.id} type="button" disabled={disabled} aria-pressed={options.presetId === item.id} onClick={() => onSelect(item.id)} className="group w-[92px] shrink-0 snap-start text-center focus-visible:outline-2 focus-visible:outline-accent">
+      {pages.map((items, index) => <div key={index} className="grid w-full shrink-0 snap-start grid-cols-3 grid-rows-2 gap-x-2 gap-y-3">
+      {items.map((item) => <button key={item.id} type="button" disabled={disabled} aria-pressed={options.presetId === item.id} onClick={() => onSelect(item.id)} className="group min-w-0 text-center focus-visible:outline-2 focus-visible:outline-accent">
         <span className={'bg-panel block aspect-[1.15] overflow-hidden rounded-lg border-2 ' + (options.presetId === item.id ? 'border-ink' : 'border-transparent group-hover:border-ink-4')}><CanvasCaptionPreview style={options.presetId === item.id ? captionTaskStyle(options) : item.style} locale={locale} tile /></span>
         <span className="text-ink-3 mt-2 block truncate text-xs">{item.name[locale]}</span>
       </button>)}
+      </div>)}
     </div>
   </div>;
 }
