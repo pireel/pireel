@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Check, Download, Loader2, Upload, X, Sparkles } from 'lucide-react';
-import { CAPTION_TASK_PRESETS, captionTaskCanvas, captionTaskStyle, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
+import { CAPTION_TASK_PRESETS, CAPTION_TRANSLATION_LANGUAGES, captionTaskCanvas, captionTaskStyle, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
 import { CanvasCaptionPreview } from './canvas-caption-preview';
 import { createCaptionAgentRemix } from './caption-agent-remix';
 import { CaptionTaskCustomize } from './caption-task-customize';
@@ -12,10 +12,10 @@ import { ensureFontStylesheet } from './web-fonts';
 import { loadCaptionTask, loadCaptionTaskResult, saveCaptionTask, type CaptionTaskRecord, type CaptionTaskStage } from './caption-task-store';
 
 const defaults: CaptionTaskOptions = { presetId: 'clean', aspect: 'original', shortenPauses: false };
-const stages: CaptionTaskStage[] = ['transcribing', 'cleaning', 'styling', 'rendering'];
+const stages: CaptionTaskStage[] = ['transcribing', 'cleaning', 'translating', 'styling', 'rendering'];
 const stageNames: Record<CaptionTaskStage, [string, string]> = {
   ready: ['准备就绪', 'Ready'], transcribing: ['识别讲话', 'Transcribing speech'], cleaning: ['整理长停顿', 'Shortening pauses'],
-  styling: ['添加字幕', 'Styling captions'], rendering: ['生成视频', 'Rendering video'], completed: ['字幕视频已完成', 'Your captioned video is ready'],
+  translating: ['翻译字幕', 'Translating captions'], styling: ['添加字幕', 'Styling captions'], rendering: ['生成视频', 'Rendering video'], completed: ['字幕视频已完成', 'Your captioned video is ready'],
   failed: ['处理未完成', 'Processing stopped'], interrupted: ['处理已中断', 'Processing interrupted'],
 };
 const actionClass = 'bg-ink text-bg inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40';
@@ -161,7 +161,7 @@ export function CaptionTaskPage({ taskId, locale, onBack, onOpenEditor }: { task
       <section className="min-w-0 md:max-h-[calc(100dvh-190px)] md:overflow-y-auto md:pr-2" aria-label={taskMode ? say('字幕任务', 'Caption task') : say('字幕设置', 'Caption settings')}>
         {taskMode ? <div className="border-line bg-panel rounded-xl border p-6">
           <h2 className="text-ink flex items-center gap-2 text-xl font-semibold">{completed ? <Check size={20} /> : busy ? <Loader2 className="animate-spin" size={20} /> : null}{stageNames[task.stage][zh ? 0 : 1]}</h2>
-          <div className="my-6 space-y-4">{stages.filter((stage) => stage !== 'cleaning' || task.options.shortenPauses).map((stage) => <div key={stage} className={'flex items-center gap-3 text-sm ' + (stage === task.stage || completed ? 'text-ink' : 'text-ink-3')}><span className={'size-2 rounded-full ' + (completed || stages.indexOf(stage) < stages.indexOf(task.stage) ? 'bg-accent' : 'bg-ink-4')} />{stageNames[stage][zh ? 0 : 1]}{stage === 'rendering' && task.stage === stage && <span className="ml-auto font-mono text-xs">{Math.round(fraction * 100)}%</span>}</div>)}</div>
+          <div className="my-6 space-y-4">{stages.filter((stage) => (stage !== 'cleaning' || task.options.shortenPauses) && (stage !== 'translating' || task.options.translationLanguage)).map((stage) => <div key={stage} className={'flex items-center gap-3 text-sm ' + (stage === task.stage || completed ? 'text-ink' : 'text-ink-3')}><span className={'size-2 rounded-full ' + (completed || stages.indexOf(stage) < stages.indexOf(task.stage) ? 'bg-accent' : 'bg-ink-4')} />{stageNames[stage][zh ? 0 : 1]}{stage === 'rendering' && task.stage === stage && <span className="ml-auto font-mono text-xs">{Math.round(fraction * 100)}%</span>}</div>)}</div>
           {busy && <><progress aria-label={say('视频生成进度', 'Video rendering progress')} value={task.stage === 'rendering' ? fraction : undefined} max={1} className="h-1.5 w-full accent-[var(--color-accent)]" /><p className="text-ink-3 mt-3 text-xs leading-relaxed">{say('处理期间请保持页面打开。', 'Keep this page open while processing.')}</p><button type="button" disabled={stopping} onClick={() => { abortRef.current?.abort(); setStopping(true); }} className="text-ink-3 mt-5 inline-flex items-center gap-2 text-xs"><X size={13} />{stopping ? say('正在停止…', 'Stopping…') : say('停止处理', 'Stop processing')}</button></>}
           {completed && <div className="space-y-3"><a href={resultUrl} download={task.name.replace(/\.[^.]+$/, '') + '-captions.mp4'} className={actionClass + ' w-full'}><Download size={16} />{say('下载视频', 'Download video')}</a><button type="button" disabled={!file || preparing} onClick={() => { void persist({ ...task, stage: 'ready', document: undefined, error: undefined }); setResult(null); }} className="text-ink-3 w-full py-1 text-xs underline">{say('调整样式再生成', 'Try another style')}</button><p className="text-ink-4 text-xs leading-relaxed">{say('结果保存在此浏览器，建议下载留存。', 'Results are saved in this browser. Download a copy to keep.')}</p></div>}
           {!busy && !completed && <button type="button" disabled={!file || preparing} onClick={() => void start(true)} className={actionClass + ' w-full'}>{say('继续处理', 'Resume processing')}</button>}
@@ -173,9 +173,19 @@ export function CaptionTaskPage({ taskId, locale, onBack, onOpenEditor }: { task
               <span className={'bg-panel block aspect-[1.15] overflow-hidden rounded-lg border-2 ' + (options.presetId === item.id ? 'border-ink' : 'border-transparent group-hover:border-ink-4')}><CanvasCaptionPreview style={options.presetId === item.id ? previewStyle : item.style} locale={locale} tile /></span><span className="text-ink-3 mt-2 block truncate text-xs">{item.name[locale]}</span>
             </button>)}</div>
           </div>
+          {!!studioProviders().translate && <div className="border-line mt-5 border-t pt-5">
+            <label className="text-ink flex items-center justify-between gap-4 text-sm">
+              {say('双语字幕', 'Bilingual captions')}
+              <select aria-label={say('翻译语言', 'Translation language')} value={options.translationLanguage ?? ''} disabled={disabled} onChange={(event) => setOptions((current) => ({ ...current, translationLanguage: CAPTION_TRANSLATION_LANGUAGES.find((language) => language.id === event.target.value)?.id }))} className="border-line bg-bg rounded-md border px-3 py-2 text-xs">
+                <option value="">{say('关闭', 'Off')}</option>
+                {CAPTION_TRANSLATION_LANGUAGES.map((language) => <option key={language.id} value={language.id}>{language.name[locale]}</option>)}
+              </select>
+            </label>
+            {options.translationLanguage && <p className="text-ink-3 mt-2 text-xs">{say('原文在上，译文在下。', 'Original above, translation below.')}</p>}
+          </div>}
           <CaptionTaskCustomize options={options} locale={locale} disabled={disabled} onChange={(patch) => setOptions((current) => ({ ...current, custom: { ...current.custom, ...patch } }))} onReset={() => setOptions((current) => ({ ...current, custom: undefined }))} />
           <div className="border-line mt-6 space-y-5 border-t pt-5"><label className="text-ink flex cursor-pointer items-start gap-3"><input type="checkbox" checked={options.shortenPauses} disabled={disabled} onChange={(event) => setOptions((current) => ({ ...current, shortenPauses: event.target.checked }))} className="mt-1 size-4 accent-[var(--color-accent)]" /><span className="text-sm">{say('AI 去停顿', 'Shorten pauses')}<span className="text-ink-3 mt-1 block text-xs">{say('缩短长停顿，保留自然语气。', 'Trim long pauses while keeping speech natural.')}</span></span></label></div>
-          <button type="button" disabled={!file || !scope || disabled} onClick={() => void start()} className={actionClass + ' mt-7 w-full'}>{preparing ? <Loader2 size={16} className="animate-spin" /> : null}{preparing ? say('准备视频…', 'Preparing video…') : say('一键生成字幕视频', 'Add captions in one click')}</button><p className="text-ink-4 mt-3 text-center text-xs">{say('语音识别和重点词选择可能消耗积分。', 'Transcription and key phrase selection may use credits.')}</p>
+          <button type="button" disabled={!file || !scope || disabled} onClick={() => void start()} className={actionClass + ' mt-7 w-full'}>{preparing ? <Loader2 size={16} className="animate-spin" /> : null}{preparing ? say('准备视频…', 'Preparing video…') : say('一键生成字幕视频', 'Add captions in one click')}</button><p className="text-ink-4 mt-3 text-center text-xs">{say('语音识别、翻译和重点词选择可能消耗积分。', 'Transcription, translation and key phrase selection may use credits.')}</p>
         </>}
         {error && <p role="alert" className="text-ink mt-4 text-sm leading-relaxed">{error}</p>}{storageNote && <p role="status" className="text-ink-3 mt-3 text-xs leading-relaxed">{storageNote}</p>}
       </section>
@@ -183,7 +193,7 @@ export function CaptionTaskPage({ taskId, locale, onBack, onOpenEditor }: { task
         <div className="bg-panel border-line flex min-h-[360px] items-center justify-center overflow-hidden rounded-xl border p-4" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const next = event.dataTransfer.files[0]; if (next) void pickFile(next); }}>
           {(sourceUrl || resultUrl) ? <div className="relative mx-auto w-full max-w-[380px] overflow-hidden rounded-lg bg-black" style={{ aspectRatio: dimensions.width / dimensions.height, width: Math.min(380, 490 * dimensions.width / dimensions.height), maxWidth: '100%' }}>
             <video key={completed && !original ? resultUrl : sourceUrl} src={completed && !original ? resultUrl : sourceUrl} controls playsInline className="h-full w-full object-cover" />
-            {!taskMode && !original && <div className="pointer-events-none absolute inset-0" aria-hidden><CanvasCaptionPreview style={previewStyle} locale={locale} aspect={dimensions.width / dimensions.height} sampleText={say('字幕|预览', 'Caption|preview')} /></div>}
+            {!taskMode && !original && <div className="pointer-events-none absolute inset-0" aria-hidden><CanvasCaptionPreview style={previewStyle} locale={locale} aspect={dimensions.width / dimensions.height} sampleText={say('字幕|预览', 'Caption|preview')} sampleSubText={CAPTION_TRANSLATION_LANGUAGES.find((language) => language.id === options.translationLanguage)?.sample} /></div>}
           </div> : <button type="button" disabled={disabled} onClick={() => inputRef.current?.click()} className="text-ink flex min-h-72 w-full flex-col items-center justify-center gap-4 rounded-lg border border-dashed border-[var(--color-line)] p-8 text-center"><Upload size={30} strokeWidth={1.5} /><span className="text-lg font-medium">{say('选择视频，或拖到这里', 'Choose a video or drop it here')}</span><span className="text-ink-3 text-xs">{say('无需打开编辑器', 'No editing workspace needed')}</span></button>}
         </div>
         <div className="text-ink-3 mt-3 flex items-center justify-between gap-3 text-xs"><span className="truncate">{task?.name ?? file?.name ?? say('支持有讲话内容的视频', 'Choose a video with speech')}</span>{sourceUrl && <button type="button" onClick={() => setOriginal((value) => !value)} aria-pressed={original} className="shrink-0 underline underline-offset-4">{original ? say('查看效果', 'Show captions') : say('对比原视频', 'Show original')}</button>}</div>

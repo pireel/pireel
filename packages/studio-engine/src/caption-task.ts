@@ -17,14 +17,21 @@ export const CAPTION_TASK_PRESETS: readonly CaptionTaskPreset[] = [
   { id: 'underline', name: { zh: '下划重点', en: 'Underline' }, style: { preset: 'em-underline', font: 'web:zcool-qingke-huangyou' } },
   { id: 'mint', name: { zh: '薄荷白字', en: 'Mint' }, style: { preset: 'ln-mint', font: 'web:smiley-sans', bold: true } },
 ];
-export interface CaptionTaskOptions { presetId: string; aspect: 'original' | 'portrait' | 'landscape' | 'square'; shortenPauses: boolean; custom?: Pick<Partial<CaptionStyle>, 'font' | 'scale' | 'bold' | 'color' | 'accentColor' | 'bg' | 'strokeColor' | 'strokeWidth' | 'xPct' | 'yPct' | 'wPct'> }
+export const CAPTION_TRANSLATION_LANGUAGES = [
+  { id: '中文', name: { zh: '中文', en: 'Chinese' }, sample: '字幕预览' },
+  { id: 'English', name: { zh: '英语', en: 'English' }, sample: 'Caption preview' },
+  { id: '日本語', name: { zh: '日语', en: 'Japanese' }, sample: '字幕プレビュー' },
+  { id: '한국어', name: { zh: '韩语', en: 'Korean' }, sample: '자막 미리보기' },
+] as const;
+export type CaptionTranslationLanguage = typeof CAPTION_TRANSLATION_LANGUAGES[number]['id'];
+export interface CaptionTaskOptions { presetId: string; aspect: 'original' | 'portrait' | 'landscape' | 'square'; shortenPauses: boolean; translationLanguage?: CaptionTranslationLanguage; custom?: Pick<Partial<CaptionStyle>, 'font' | 'scale' | 'bold' | 'color' | 'accentColor' | 'bg' | 'strokeColor' | 'strokeWidth' | 'xPct' | 'yPct' | 'wPct'> }
 export function captionTaskPreset(id: string): CaptionTaskPreset {
   const preset = CAPTION_TASK_PRESETS.find((item) => item.id === id);
   if (!preset) throw new Error('Unknown caption preset');
   return preset;
 }
 export function captionTaskStyle(options: CaptionTaskOptions): Partial<CaptionStyle> {
-  return { ...captionTaskPreset(options.presetId).style, wPct: 84, yPct: 86, ...options.custom };
+  return { ...captionTaskPreset(options.presetId).style, wPct: 84, yPct: 86, ...options.custom, sub: options.translationLanguage ? { lang: options.translationLanguage, font: 'sans' } : undefined };
 }
 export function captionTaskCanvas(aspect: CaptionTaskOptions['aspect'], source: { width: number; height: number }) {
   if (!(source.width > 0 && source.height > 0 && Number.isFinite(source.width) && Number.isFinite(source.height))) throw new Error('Invalid video dimensions');

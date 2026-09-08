@@ -23,20 +23,28 @@ export async function runCaptionTask(task: CaptionTaskRecord, file: File, hooks:
     const { detectSpeechSilenceCuts } = await import('./speech-silence');
     next.cuts = await detectSpeechSilenceCuts(file, { minimumPauseSec: 0.7, speechPaddingSec: 0.15 });
   }
-  await checkpoint('styling');
-  const { loadFont } = await import('./web-fonts');
-  const font = captionTaskStyle(next.options).font;
-  if (font) {
-    const glyphs = [...new Set([...next.transcript!.map((segment) => segment.text).join('')])];
-    for (let offset = 0; offset < glyphs.length; offset += 1000) {
-      check();
-      await Promise.race([loadFont(font, glyphs.slice(offset, offset + 1000).join('')), new Promise<void>((resolve) => setTimeout(resolve, 15_000))]);
-    }
-  }
-  await document.fonts.ready;
   const url = URL.createObjectURL(file);
   try {
     next.document ??= buildCaptionTaskDocument({ ...next, projectId: next.projectId ?? next.id, sourceUrl: url, sourceName: next.name, sourceSig: next.sourceSig, options: next.options, transcript: next.transcript!, cuts: next.options.shortenPauses ? next.cuts : [] });
+    if (next.options.translationLanguage) {
+      await checkpoint('translating');
+      const translate = studioProviders().translate;
+      if (!translate) throw new Error('翻译服务尚未连接，请关闭双语字幕后重试。');
+      const { translateCaptionTask } = await import('./caption-task-translation');
+      Object.assign(next, await translateCaptionTask(next, next.document!, translate, check));
+    }
+    await checkpoint('styling');
+    const { loadFont } = await import('./web-fonts');
+    const font = captionTaskStyle(next.options).font;
+    if (font) {
+      const glyphs = [...new Set([...next.transcript!.map((segment) => segment.text).join('')])];
+      for (let offset = 0; offset < glyphs.length; offset += 1000) {
+        check();
+        await Promise.race([loadFont(font, glyphs.slice(offset, offset + 1000).join('')), new Promise<void>((resolve) => setTimeout(resolve, 15_000))]);
+      }
+    }
+    await document.fonts.ready;
+    check();
     if (captionTaskPreset(next.options.presetId).style.preset === 'kw-yellow') {
       const select = studioProviders().captionEmphasis;
       if (!select) throw new Error('重点词服务尚未连接，请选择其他字幕样式。');

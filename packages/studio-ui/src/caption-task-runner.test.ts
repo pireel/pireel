@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CaptionTaskRecord } from './caption-task-store';
-const mock = vi.hoisted(() => ({ transcribe: vi.fn(), clean: vi.fn(), render: vi.fn(), font: vi.fn() }));
+const mock = vi.hoisted(() => ({ transcribe: vi.fn(), clean: vi.fn(), render: vi.fn(), font: vi.fn(), translate: vi.fn() }));
+vi.mock('@pireel/studio-engine/providers', () => ({ studioProviders: () => ({ translate: mock.translate }) }));
 vi.mock('./media', () => ({ transcribeFile: mock.transcribe }));
 vi.mock('./speech-silence', () => ({ detectSpeechSilenceCuts: mock.clean }));
 vi.mock('./client-export', () => ({ clientExportVideo: mock.render }));
@@ -11,6 +12,7 @@ const task = (): CaptionTaskRecord => ({ id: 'task', scope: 'account', name: 'vi
 const file = new File(['test'], 'video.mp4', { type: 'video/mp4' });
 beforeEach(() => {
   vi.clearAllMocks(); vi.stubGlobal('document', { fonts: { ready: Promise.resolve() } });
+  mock.translate.mockImplementation(async (rows) => rows.map((row: { index: number }) => ({ index: row.index, text: '你好世界' })));
   mock.transcribe.mockResolvedValue(transcript); mock.clean.mockResolvedValue([{ fromSec: 1, toSec: 2 }]);
   mock.render.mockResolvedValue(new Blob(['video'], { type: 'video/mp4' })); mock.font.mockResolvedValue(undefined);
 });
@@ -24,6 +26,23 @@ describe('standalone caption task execution', () => {
     expect(result.task.document?.semantics.managedCaptionTrackId).toBeTruthy();
     expect(mock.render.mock.calls[0]![0].videoFile).toBe(file);
     expect(records.at(-1)?.document).toBeTruthy();
+  });
+  it('checkpoints bilingual subtitles before rendering and reuses them on a retry', async () => {
+    const source = task(); source.options.translationLanguage = '中文';
+    const records: CaptionTaskRecord[] = [];
+    const hooks = { signal: new AbortController().signal, checkpoint: async (record: CaptionTaskRecord) => { records.push(structuredClone(record)); }, progress: vi.fn() };
+    const result = await runCaptionTask(source, file, hooks);
+    expect(records.map((record) => record.stage)).toEqual(['transcribing', 'cleaning', 'translating', 'styling', 'rendering']);
+    expect(records.find((record) => record.stage === 'styling')?.translation?.language).toBe('中文');
+    expect(mock.render.mock.calls[0]![0].comp.captionStyle.sub.lang).toBe('中文');
+    await runCaptionTask(result.task, file, hooks);
+    expect(mock.translate).toHaveBeenCalledOnce();
+  });
+  it('does not render a partial bilingual result when translation fails', async () => {
+    const source = task(); source.options.translationLanguage = '中文';
+    mock.translate.mockResolvedValueOnce([]);
+    await expect(runCaptionTask(source, file, { signal: new AbortController().signal, checkpoint: async () => {}, progress: vi.fn() })).rejects.toThrow('不完整');
+    expect(mock.render).not.toHaveBeenCalled(); expect(source.transcript).toBeUndefined();
   });
   it('resumes cached transcript and cleanup without repeating those operations', async () => {
     await runCaptionTask({ ...task(), transcript, cuts: [] }, file, { signal: new AbortController().signal, checkpoint: async () => {}, progress: vi.fn() });
