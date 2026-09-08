@@ -190,12 +190,48 @@ import {
 } from './speech-silence';
 import { withEditableBlockGeometry } from './editable-block-geometry';
 import { placementPercentToBox } from '@pireel/studio-engine/overlay-placement';
-import { getStudioSpaceId, listStudioGens, pollCreation, startGeneration } from './gen-api';
+import { generatedAssetIndexEntry, generatedRecordsFromJobs, getStudioSpaceId, listStudioGens, pollCreation, startGeneration, type GenJob } from './gen-api';
 import { isDisplayTextFontId } from '@pireel/studio-engine/display-text-presets';
 import { describeAudioTargets, resolveAudioTarget } from '@pireel/studio-engine/audio-target';
 
 const PROJECT_MUTATION_TOOLS = new Set(['create_output', 'duplicate_output', 'switch_output', 'rename_output', 'delete_output']);
 const NO_UNDO_TOOLS = new Set(['get_block', 'get_timeline', 'read_director_plan', 'read_scene_designs', 'inspect_media', 'inspect_images', 'get_transcript', 'get_beat_grid', 'list_assets', 'search_assets', 'prepare_local_image', 'search_media', 'list_outputs', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_music', 'generate_sfx', 'generate_foley', 'get_generation_jobs', 'list_voices', 'clone_voice', 'design_voice', 'delete_voice', 'generate_speech', 'lip_sync', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_visual', 'export_video', 'track_export', 'ask_user', 'request_approval']);
+
+/** Generated outputs join the project media directory the moment they are known — from a poll, a
+ * synchronous audio tool, or the background watcher below — so the Materials panel lists them
+ * without the agent having to register them by hand. Idempotent by asset id. */
+function registerGeneratedOutputs(
+  register: (entry: LocalAssetIndexEntry) => void,
+  jobs: readonly (GenJob & { kind?: 'image' | 'video' | 'audio' })[],
+): void {
+  for (const record of generatedRecordsFromJobs(jobs)) {
+    register(generatedAssetIndexEntry(record, record.kind === 'video' ? t('common.videoGeneration') : record.kind === 'audio' ? t('panels.music') : t('common.imageGeneration')));
+  }
+}
+
+const generationWatchers = new Map<string, number>();
+/** Follow a started job in the background (4 s cadence, 15 min cap) so its output is registered even
+ * when the agent never polls; the receipt still tells the agent to call get_generation_jobs later. */
+function watchGenerationJobs(ids: string[], register: (entry: LocalAssetIndexEntry) => void): void {
+  for (const id of ids) {
+    if (generationWatchers.has(id)) continue;
+    const startedAt = Date.now();
+    const tick = async () => {
+      const job = await pollCreation(id).catch(() => null);
+      if (job && job.status !== 'pending') {
+        generationWatchers.delete(id);
+        if (job.status === 'succeeded') registerGeneratedOutputs(register, [job]);
+        return;
+      }
+      if (Date.now() - startedAt > 15 * 60_000) {
+        generationWatchers.delete(id);
+        return;
+      }
+      generationWatchers.set(id, window.setTimeout(() => void tick(), 4000));
+    };
+    generationWatchers.set(id, window.setTimeout(() => void tick(), 4000));
+  }
+}
 
 export type StudioReviewFailurePhase = 'capture' | 'request' | 'response';
 
@@ -511,6 +547,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
     trimAtPlayhead, deleteShot, videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset,
     relayoutCaptions, removeCaptionLayer, agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
   } = ctx;
+  /** Directory registration of generated outputs; hosts without a media directory (tests, thin shells) simply skip it. */
+  const registerGeneratedEntry = (entry: LocalAssetIndexEntry) => {
+    if (typeof registerLocalAsset === 'function') registerLocalAsset(entry);
+  };
       // Chat pills are references, not storage ids. Normalize every top-level/nested tool argument
       // once here so individual tools never grow their own @ token / localSig compatibility rules.
       const localAssetIndex = ctx.localAssetIndexRef?.current ?? [];
@@ -2539,6 +2579,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 if (started.kind === 'credits') return { ok: false, error: `insufficient_tokens: need ${started.need}, balance ${started.balance}` };
                 return { ok: false, error: started.message };
               }
+              watchGenerationJobs(started.ids, registerGeneratedEntry);
               return {
                 ok: true,
                 summary: `${generationKind === 'image' ? 'Image' : 'Video'} generation started`,
@@ -2571,6 +2612,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 error?: string; detail?: string;
               };
               if (!res.ok || !body.asset) return { ok: false, error: body.detail || body.error || 'music generation failed' };
+              registerGeneratedEntry(generatedAssetIndexEntry({ jobId: body.asset.id, index: 0, kind: 'audio', key: body.asset.key, mime: body.asset.mime, prompt, createdAt: Date.now(), durationSec: body.asset.durationSec }, t('panels.music')));
               return {
                 ok: true, summary: 'Background music generated',
                 data: {
@@ -2604,6 +2646,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 error?: string; detail?: string;
               };
               if (!res.ok || !body.asset) return { ok: false, error: body.detail || body.error || 'sound effect generation failed' };
+              registerGeneratedEntry(generatedAssetIndexEntry({ jobId: body.asset.id, index: 0, kind: 'audio', key: body.asset.key, mime: body.asset.mime, prompt, createdAt: Date.now(), durationSec: body.asset.durationSec }, t('panels.music')));
               return {
                 ok: true, summary: 'Sound effect generated',
                 data: {
@@ -2793,6 +2836,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const ids = Array.isArray(input.ids) ? input.ids.filter((id): id is string => typeof id === 'string' && !!id).slice(0, 30) : [];
             if (ids.length) {
               const jobs = (await Promise.all(ids.map((id) => pollCreation(id).catch(() => null)))).filter((job): job is NonNullable<typeof job> => !!job);
+              registerGeneratedOutputs(registerGeneratedEntry, jobs);
               return { ok: true, summary: `${jobs.length} generation jobs`, data: { jobs } };
             }
             const [images, videos, audios] = await Promise.all([
@@ -2805,6 +2849,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               ...videos.map((job) => ({ ...job, kind: 'video' as const })),
               ...audios.map((job) => ({ ...job, kind: 'audio' as const })),
             ].sort((a, b) => b.createdAt - a.createdAt).slice(0, 30);
+            registerGeneratedOutputs(registerGeneratedEntry, jobs);
             return { ok: true, summary: `${jobs.length} recent generation jobs`, data: { jobs } };
           }
           case 'list_voices': {
@@ -2887,7 +2932,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const instruction = typeof input.instruction === 'string' ? input.instruction.trim().slice(0, 500) : '';
             const { action: _ignoredAction, instruction: _rawInstruction, ...speechArgs } = input;
             const speechInput = { ...speechArgs, text, voiceId, ...(instruction ? { instruction } : {}) };
-            const speechResult = (asset: CachedTtsAsset, reused: boolean) => ({
+            const speechResult = (asset: CachedTtsAsset, reused: boolean) => {
+              if (asset.key) registerGeneratedEntry(generatedAssetIndexEntry({ jobId: asset.id, index: 0, kind: 'audio', key: asset.key, mime: asset.mime, prompt: text, createdAt: Date.now(), durationSec: asset.durationSec }, t('panels.music')));
+              return speechReceipt(asset, reused);
+            };
+            const speechReceipt = (asset: CachedTtsAsset, reused: boolean) => ({
               ok: true as const,
               summary: t(reused ? 'workbench.speechReused' : 'workbench.speechGenerated'),
               data: {
