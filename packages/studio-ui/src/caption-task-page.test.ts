@@ -12,7 +12,7 @@ vi.mock('./current-user', () => ({ loadCurrentUser: async () => ({ user_id: 'own
 vi.mock('./local-media', () => ({ loadLocalVideo: mocks.source, saveLocalVideo: mocks.cache }));
 vi.mock('./media', () => ({ fileSig: () => 'source', probeVideoFile: async () => ({ width: 1920, height: 1080, durationSec: 5, hasAudio: true }) }));
 vi.mock('./web-fonts', () => ({ ensureFontStylesheet: async () => {} }));
-vi.mock('./caption-project-cover', () => ({ captureCaptionCover: async () => 'data:image/jpeg;base64,poster' }));
+vi.mock('./caption-project-cover', () => ({ captureCaptionFirstFrame: async () => 'data:image/jpeg;base64,first-frame' }));
 vi.mock('./canvas-caption-preview', () => ({ CanvasCaptionPreview: () => createElement('canvas') }));
 vi.mock('@pireel/studio-engine/providers', () => ({ studioProviders: () => ({ translate: vi.fn(), captionEmphasis: vi.fn() }) }));
 import { CaptionTaskPage } from './caption-task-page';
@@ -44,7 +44,7 @@ async function complete(index: number) {
 describe('caption versions and preview UI', () => {
   it('only enables playback after generation, shows real stage progress, and preserves selectable versions', async () => {
     expect(container.querySelector('video')).toBeNull();
-    expect(container.querySelector('img[alt="视频封面"]')).not.toBeNull();
+    expect(container.querySelector('img[alt="视频首帧"]')?.getAttribute('src')).toBe('data:image/jpeg;base64,first-frame');
     await click(button('生成字幕视频'));
     await settled(() => expect(runs).toHaveLength(1));
     await act(async () => runs[0]!.hooks.stageProgress?.({ transcribing: { status: 'completed', fraction: 1 }, styling: { status: 'completed', fraction: 1 }, rendering: { status: 'running', fraction: .42 } }));

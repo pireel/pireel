@@ -1,10 +1,20 @@
-import { extractThumbnails } from '@pireel/studio-engine/video-edit/thumbnails';
+import { extractFirstThumbnail, extractThumbnails } from '@pireel/studio-engine/video-edit/thumbnails';
+import type { Thumbnail } from '@pireel/studio-engine/video-edit/types';
 import { loadLocalVideo } from './local-media';
 import { loadCaptionTask, patchCaptionProjectMetadata } from './caption-task-store';
 
 /** A durable JPEG data URL, never an object URL that breaks after a refresh. */
 export async function captureCaptionCover(file: File, durationSec: number): Promise<string | undefined> {
   const frames = await extractThumbnails(file, [Math.min(1, Math.max(0, durationSec / 10))], { width: 480, quality: 0.78 });
+  return thumbnailDataUrl(frames);
+}
+
+/** Full preview reads the source's first frame independently of its small list cover. */
+export async function captureCaptionFirstFrame(file: File): Promise<string | undefined> {
+  return thumbnailDataUrl(await extractFirstThumbnail(file, { width: 1280, quality: 0.88 }));
+}
+
+async function thumbnailDataUrl(frames: Thumbnail[]): Promise<string | undefined> {
   try {
     if (!frames[0]) return undefined;
     return await new Promise<string>((resolve, reject) => {

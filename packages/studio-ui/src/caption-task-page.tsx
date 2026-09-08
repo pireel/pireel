@@ -10,7 +10,7 @@ import { studioProviders } from '@pireel/studio-engine/providers';
 import { fileSig, probeVideoFile, type ProbedFile } from './media';
 import { loadCurrentUser } from './current-user';
 import { loadLocalVideo, saveLocalVideo } from './local-media';
-import { captureCaptionCover } from './caption-project-cover';
+import { captureCaptionFirstFrame } from './caption-project-cover';
 import { ensureFontStylesheet } from './web-fonts';
 import { loadCaptionTask, saveCaptionTask, listCaptionVersions, loadCaptionVersion, type CaptionTaskRecord, type CaptionTaskProgress, type CaptionVersionSummary, type CaptionTaskVersion } from './caption-task-store';
 
@@ -33,6 +33,7 @@ export function CaptionTaskPage({ taskId, locale, onBack, onOpenEditor }: { task
   const [result, setResult] = useState<Blob | null>(null);
   const [resultUrl, setResultUrl] = useState('');
   const [cover, setCover] = useState('');
+  const [firstFrame, setFirstFrame] = useState('');
   const [versions, setVersions] = useState<CaptionVersionSummary[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<CaptionTaskVersion | null>(null);
   const [drafting, setDrafting] = useState(true);
@@ -65,11 +66,12 @@ export function CaptionTaskPage({ taskId, locale, onBack, onOpenEditor }: { task
   useEffect(() => { for (const preset of CAPTION_TASK_PRESETS) if (preset.style.font) void ensureFontStylesheet(preset.style.font); }, []);
   useEffect(() => { if (options.custom?.font) void ensureFontStylesheet(options.custom.font); }, [options.custom?.font]);
   useEffect(() => {
-    if (!file || cover) return;
+    setFirstFrame('');
+    if (!file) return;
     let current = true;
-    void captureCaptionCover(file, probe?.durationSec ?? 0).then((image) => { if (current && image) setCover(image); }).catch(() => {});
+    void captureCaptionFirstFrame(file).then((image) => { if (current && image) setFirstFrame(image); }).catch(() => {});
     return () => { current = false; };
-  }, [file, cover, probe?.durationSec]);
+  }, [file]);
 
   const pickFile = async (next: File) => {
     if (busyRef.current) return;
@@ -222,7 +224,7 @@ export function CaptionTaskPage({ taskId, locale, onBack, onOpenEditor }: { task
         </div>}
         <div className="relative mx-auto overflow-hidden rounded-lg bg-black" style={{ aspectRatio: ratio, width: `min(100%, calc((100dvh - ${versions.length ? 245 : 195}px) * ${ratio}))` }}>
           {playable ? <video key={resultUrl} src={resultUrl} controls playsInline className="h-full w-full object-contain" /> : <>
-            {cover ? <img src={cover} alt={say('视频封面', 'Video poster')} className="h-full w-full object-contain" /> : <div className="bg-panel h-full w-full" />}
+            {(firstFrame || cover) ? <img src={firstFrame || cover} alt={say('视频首帧', 'First video frame')} className="h-full w-full object-contain" /> : <div className="bg-panel h-full w-full" />}
             {!busy && !versionLoading && <div className="pointer-events-none absolute inset-0" aria-hidden><CanvasCaptionPreview paused style={captionTaskStyle(options)} locale={locale} aspect={ratio} sampleText={say('字幕|预览', 'Caption|preview')} sampleSubText={CAPTION_TRANSLATION_LANGUAGES.find((language) => language.id === options.translationLanguage)?.sample} /></div>}
           </>}
           {versionLoading && <div role="status" className="absolute inset-0 flex items-center justify-center bg-black/70 text-white"><Loader2 size={24} className="animate-spin" /><span className="sr-only">{say('读取版本', 'Loading version')}</span></div>}
