@@ -36,7 +36,7 @@ export function captionTaskPreset(id: string): CaptionTaskPreset {
 export interface CaptionTaskDimensions { width: number; height: number }
 /** Product reference zones, not a guarantee for every platform/ad placement. */
 export function captionTaskSafeArea(source: CaptionTaskDimensions) {
-  if (source.height > source.width) return { left: 8, right: 82, top: 12, bottom: 75 };
+  if (source.height > source.width) return { left: 13, right: 87, top: 12, bottom: 75 };
   if (source.height === source.width) return { left: 10, right: 90, top: 10, bottom: 85 };
   return { left: 12.5, right: 87.5, top: 5, bottom: 90 };
 }

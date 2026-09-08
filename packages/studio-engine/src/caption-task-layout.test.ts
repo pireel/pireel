@@ -17,6 +17,8 @@ describe('caption layout recommendations', () => {
     expect(Math.round(48 * style.scale!) * exportScale).toBeCloseTo(64, 0);
     expect(Math.round(48 * style.sub!.scale!) * exportScale).toBeCloseTo(48, 0);
     const safe = captionTaskSafeArea(source);
+    expect(style.xPct).toBe(50);
+    expect(safe.left).toBe(100 - safe.right);
     expect(style.xPct! - style.wPct! / 2).toBeGreaterThanOrEqual(safe.left);
     expect(style.xPct! + style.wPct! / 2).toBeLessThanOrEqual(safe.right);
     expect(style.sub!.yPct).toBe(safe.bottom - 1);
