@@ -74,6 +74,6 @@ export function CaptionPositionPreview({ options, source, locale, disabled = fal
       title={locale === 'zh' ? '上下拖动字幕' : 'Drag captions up or down'}
       onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={(event) => { if (drag.current?.pointerId === event.pointerId) cancel(); }} onLostPointerCapture={(event) => { if (drag.current?.pointerId === event.pointerId) cancel(); }} onKeyDown={key} data-dragging={position != null}
       className="absolute z-10 touch-none select-none rounded-md border border-transparent outline-none hover:border-white/50 focus-visible:border-white/70 data-[dragging=true]:border-white/70"
-      style={{ left: `${(style.xPct ?? 50) - (style.wPct ?? 84) / 2}%`, width: `${style.wPct ?? 84}%`, bottom: `${100 - bottom}%`, height: `max(44px, ${bottom - top}%)`, cursor: position != null ? 'grabbing' : 'ns-resize', pointerEvents: disabled ? 'none' : 'auto' }} />
+      style={{ left: `${(style.xPct ?? 50) - (style.wPct ?? 84) / 2}%`, width: `${style.wPct ?? 84}%`, top: `${(top + bottom) / 2}%`, transform: 'translateY(-50%)', height: `max(44px, ${bottom - top}%)`, cursor: position != null ? 'grabbing' : 'ns-resize', pointerEvents: disabled ? 'none' : 'auto' }} />
   </div>;
 }
