@@ -1,0 +1,8 @@
+{
+  "tool": "built-in image_gen",
+  "mode": "generate with style reference",
+  "created": "2026-09-08",
+  "asset": "agent-editor-v1.png",
+  "reference": "captions-muted-v2.png",
+  "prompt": "Use case: logo-brand. Create a companion Agent Editor app icon matching the attached AI Captions icon as a STYLE REFERENCE only. Use the same restrained matte ceramic material, soft beveled edges, front view, low saturation, gentle diffuse lighting, same scale and square composition. Subject: a compact rounded speech bubble with a large ivory video-play triangle centered inside and a small understated four-point ivory assistant sparkle integrated at its upper right. This is conversational AI video editing. Muted blue-grey teal body, ivory symbol, tiny dusty sand accent. No CC lettering, no letters or words at all, no robot face, no rainbow, vivid orange, neon, chrome shine, glow, scenery or outer background tile. Strong very simple silhouette readable at 56px on a dark interface. Single centered icon occupying about 80 percent of the canvas; genuine transparent background. Match the reference visual weight and polish."
+}

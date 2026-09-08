@@ -5,4 +5,5 @@ export const WORKFLOW_ART = {
   'frame-video': new URL('./workflow-art/frame-video.webp', import.meta.url).href,
 } as const;
 
-export const CAPTIONS_ENTRY_ICON = new URL('./workflow-art/captions-color-v1.png', import.meta.url).href;
+export const CAPTIONS_ENTRY_ICON = new URL('./workflow-art/captions-muted-v2.png', import.meta.url).href;
+export const AGENT_ENTRY_ICON = new URL('./workflow-art/agent-editor-v1.png', import.meta.url).href;
