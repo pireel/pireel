@@ -12,7 +12,9 @@
  *  - Images: every <img> slot of bespoke markup with its thumbnail; replace/remove go through the
  *    existing slot path.
  *
- * Same visual language as the other rail panels: sections are soft fills (`bg-canvas/45`), no borders.
+ * Layout: a labelled header anchors the panel, then hairline-separated groups of rows (label left,
+ * control right for compact controls; stacked for text / colour / images). Structure comes from the
+ * dividers and the header, not from boxes — so the panel reads as an editor, not an empty page.
  */
 
 import { useEffect, useState, type ReactNode } from 'react';
@@ -20,7 +22,7 @@ import type { Block } from '@pireel/studio-engine/composition';
 import type { DisplayTextFontId } from '@pireel/studio-engine/composition';
 import { dataEditFields, imageSlots } from '@pireel/studio-engine/component-props';
 import { componentSchemaOf } from '@pireel/studio-engine/component-schema';
-import { ImageIcon, RefreshCw, Trash2 } from 'lucide-react';
+import { ImageIcon, RefreshCw, Shapes, Trash2 } from 'lucide-react';
 import type { Block as EditorBlock } from '@pireel/studio-engine/composition';
 import { liveMessageFor } from './component-props-ui';
 import { FontPicker } from './display-text-panel';
@@ -56,29 +58,68 @@ export interface ComponentPropsPanelProps {
   onRemoveImage: (index: number) => void;
 }
 
-function TextField({ fieldKey, text, onCommit }: { fieldKey: string; text: string; onCommit: (value: string) => void }) {
+/** Author-chosen data-edit / prop keys are code tokens (`headline`, `cta-label`); show them as words. */
+function humanizeKey(key: string): string {
+  const spaced = key.replace(/[-_]+/g, ' ').replace(/([a-z0-9])([A-Z])/g, '$1 $2').trim();
+  return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : key;
+}
+
+const FIELD =
+  'bg-panel-2 text-ink placeholder:text-ink-5 w-full rounded-md px-2.5 py-1.5 text-[12px] leading-5 shadow-[inset_0_0_0_1px_var(--color-line-2)] outline-none focus:shadow-[inset_0_0_0_1px_var(--color-accent)]';
+const NUM = 'bg-panel-2 text-ink w-full rounded-md px-2 py-1 text-[12px] tabular-nums text-right shadow-[inset_0_0_0_1px_var(--color-line-2)] outline-none focus:shadow-[inset_0_0_0_1px_var(--color-accent)]';
+
+/** A hairline-topped group of rows. `first` drops the divider so the panel doesn't open on a line. */
+function Group({ label, first, children }: { label: string; first?: boolean; children: ReactNode }) {
+  return (
+    <section className="px-3">
+      <div className={`text-ink-4 flex items-center gap-2 pb-2 text-[10px] font-semibold tracking-[0.1em] uppercase ${first ? 'pt-1' : 'border-line mt-1 border-t pt-3'}`}>
+        {label}
+      </div>
+      <div className="flex flex-col gap-2.5 pb-1">{children}</div>
+    </section>
+  );
+}
+
+/** Label left, control right — the compact editor row (sliders, segmented enums, switches). */
+function Row({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex min-h-[28px] items-center gap-3">
+      <span className="text-ink-3 min-w-0 flex-1 truncate text-[11.5px]">{label}</span>
+      <div className="flex shrink-0 items-center gap-2">{children}</div>
+    </div>
+  );
+}
+
+/** Label above, control full width — for text, colour swatch rows and the name. */
+function Stack({ label, children }: { label?: string; children: ReactNode }) {
+  return (
+    <label className="flex flex-col gap-1.5">
+      {label ? <span className="text-ink-4 truncate text-[11px]">{label}</span> : null}
+      {children}
+    </label>
+  );
+}
+
+function TextField({ label, text, onCommit }: { label?: string; text: string; onCommit: (value: string) => void }) {
   const [draft, setDraft] = useState(text);
   useEffect(() => { setDraft(text); }, [text]);
   const commit = () => { if (draft !== text) onCommit(draft); };
   return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-ink-3 truncate text-[11px]">{fieldKey}</span>
+    <Stack label={label}>
       <textarea
         value={draft}
         rows={draft.length > 24 ? 2 : 1}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); (e.target as HTMLTextAreaElement).blur(); } }}
-        className="bg-canvas/70 text-ink placeholder:text-ink-5 focus:ring-ink-4/40 w-full resize-none rounded-md px-2.5 py-1.5 text-[12px] leading-5 outline-none focus:ring-1"
+        className={`${FIELD} resize-none`}
       />
-    </label>
+    </Stack>
   );
 }
 
-const INPUT = 'bg-canvas/70 text-ink placeholder:text-ink-5 focus:ring-ink-4/40 w-full rounded-md px-2 py-1 text-[12px] tabular-nums outline-none focus:ring-1';
-
-/** Compact numeric field: label above, commits on blur / Enter, shows the value the block actually has. */
-function NumberField({ label, value, unit, min, max, step = 1, onCommit }: { label: string; value: number; unit?: string; min?: number; max?: number; step?: number; onCommit: (next: number) => void }) {
+/** Compact numeric cell (used inside a grid): tiny label left, right-aligned value. */
+function NumCell({ label, value, unit, min, max, step = 1, onCommit }: { label: string; value: number; unit?: string; min?: number; max?: number; step?: number; onCommit: (next: number) => void }) {
   const [draft, setDraft] = useState(String(value));
   useEffect(() => { setDraft(String(value)); }, [value]);
   const commit = () => {
@@ -91,29 +132,19 @@ function NumberField({ label, value, unit, min, max, step = 1, onCommit }: { lab
     else setDraft(String(value));
   };
   return (
-    <label className="flex min-w-0 flex-col gap-1">
-      <span className="text-ink-4 text-[10px]">{label}{unit ? <span className="text-ink-5"> {unit}</span> : null}</span>
-      <input
-        type="number"
-        value={draft}
-        step={step}
-        min={min}
-        max={max}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-        className={INPUT}
-      />
+    <label className="flex items-center gap-2">
+      <span className="text-ink-3 shrink-0 text-[11px]">{label}{unit ? <span className="text-ink-5"> {unit}</span> : null}</span>
+      <input type="number" value={draft} step={step} min={min} max={max} onChange={(e) => setDraft(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} className={NUM} />
     </label>
   );
 }
 
 function Slider({ label, value, min, max, step, display, onCommit }: { label: string; value: number; min: number; max: number; step: number; display: string; onCommit: (next: number) => void }) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-baseline justify-between"><span className="text-ink-3 text-[11px]">{label}</span><span className="text-ink-4 text-[11px] tabular-nums">{display}</span></div>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onCommit(Number(e.target.value))} className="accent-accent h-1.5 w-full cursor-pointer" />
-    </div>
+    <Row label={label}>
+      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onCommit(Number(e.target.value))} className="accent-accent h-1.5 w-24 cursor-pointer" />
+      <span className="text-ink-4 w-10 text-right text-[11px] tabular-nums">{display}</span>
+    </Row>
   );
 }
 
@@ -123,8 +154,7 @@ function ColorRow({ label, value, swatches, noneTitle, onCommit }: { label: stri
   const swatch = 'h-6 w-6 shrink-0 rounded-full shadow-[inset_0_0_0_1px_rgba(127,127,127,0.25)] transition-transform hover:scale-105';
   const hex = /^#[0-9a-fA-F]{6}$/.test(value ?? '') ? value! : '#ffffff';
   return (
-    <div className="flex flex-col gap-1.5">
-      <span className="text-ink-3 text-[11px]">{label}</span>
+    <Stack label={label}>
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" onClick={() => onCommit(undefined)} title={noneTitle} aria-label={noneTitle} className={`${swatch} bg-[linear-gradient(135deg,transparent_44%,#f43f5e_44%,#f43f5e_56%,transparent_56%)] ${!value ? ring : ''}`} />
         {swatches.map((sw) => (
@@ -134,16 +164,7 @@ function ColorRow({ label, value, swatches, noneTitle, onCommit }: { label: stri
           <input type="color" value={hex} onChange={(e) => onCommit(e.target.value)} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" aria-label={t('kitProp.customColor')} />
         </label>
       </div>
-    </div>
-  );
-}
-
-function Section({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <section className="bg-canvas/45 rounded-lg p-3">
-      <div className="text-ink-4 mb-2.5 text-[10px] font-medium tracking-[0.12em] uppercase">{label}</div>
-      {children}
-    </section>
+    </Stack>
   );
 }
 
@@ -173,17 +194,30 @@ export function ComponentPropsPanel({ block, canvas, swatches, onBlockPatch, onV
     if (!box) return;
     onBlockPatch({ block: { box: { ...box, ...next } } });
   };
+  const isCustom = block.templateId === 'custom';
+  const headerName = block.label?.trim() || (isCustom ? t('workbench.componentHeaderCustom') : t('workbench.componentHeaderKit'));
+
   return (
     // Clicking inside the inspector must not clear the selection it edits (the workbench treats any
     // host-UI region without this marker as "blank page → deselect").
-    <div data-block-selection-keep className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3">
+    <div data-block-selection-keep className="flex h-full min-h-0 flex-col overflow-y-auto py-1">
+      <div className="flex items-center gap-2.5 px-3 pt-2 pb-1">
+        <div className="bg-accent/12 text-accent flex h-7 w-7 shrink-0 items-center justify-center rounded-lg">
+          <Shapes size={15} />
+        </div>
+        <div className="min-w-0">
+          <div className="text-ink truncate text-[13px] font-semibold leading-tight">{headerName}</div>
+          <div className="text-ink-4 truncate text-[10.5px]">{isCustom ? t('workbench.componentHeaderCustom') : t('workbench.componentHeaderKit')}</div>
+        </div>
+      </div>
+
       {view && (
-        <Section label={t('workbench.editableProperties')}>
+        <Group label={t('workbench.editableProperties')} first>
           <PropsForm
             schema={view.schema as PropsSchema}
             values={view.values}
             resetMode={view.source === 'kit' ? 'theme' : 'default'}
-            labelOf={(key) => { const k = `kitProp.${key}`; const l = t(k); return l === k ? key : l; }}
+            labelOf={(key) => { const k = `kitProp.${key}`; const l = t(k); return l === k ? humanizeKey(key) : l; }}
             onLive={view.source === 'manifest' ? (next) => { const message = liveMessageFor(block, next); if (message) onLive(message); } : undefined}
             onChange={onValues}
             renderFont={(key, value, commit) => (
@@ -196,72 +230,70 @@ export function ComponentPropsPanel({ block, canvas, swatches, onBlockPatch, onV
               />
             )}
           />
-        </Section>
+        </Group>
       )}
+
       {texts.length > 0 && (
-        <Section label={t('workbench.propsText')}>
-          <div className="flex flex-col gap-3">
-            {texts.map((field) => (
-              <TextField key={field.key} fieldKey={field.key} text={field.text} onCommit={(value) => onText(field.key, value)} />
-            ))}
-          </div>
-        </Section>
+        <Group label={t('workbench.propsText')} first={!view}>
+          {texts.map((field) => (
+            <TextField key={field.key} label={humanizeKey(field.key)} text={field.text} onCommit={(value) => onText(field.key, value)} />
+          ))}
+        </Group>
       )}
-      <Section label={t('workbench.propsLayout')}>
-        <div className="flex flex-col gap-3">
-          {box && (
-            <>
-              <div className="grid grid-cols-2 gap-2">
-                <NumberField label={t('workbench.propsX')} unit="%" value={pct(box.x)} step={0.5} min={-100} max={200} onCommit={(v) => patchBox({ x: v / 100 })} />
-                <NumberField label={t('workbench.propsY')} unit="%" value={pct(box.y)} step={0.5} min={-100} max={200} onCommit={(v) => patchBox({ y: v / 100 })} />
-                <NumberField label={t('workbench.propsW')} unit="%" value={pct(box.w)} step={0.5} min={2} max={200} onCommit={(v) => patchBox({ w: v / 100 })} />
-                <NumberField label={t('workbench.propsH')} unit="%" value={pct(box.h)} step={0.5} min={2} max={200} onCommit={(v) => patchBox({ h: v / 100 })} />
-              </div>
-              <div className="text-ink-5 text-[10px] tabular-nums">{Math.round(box.w * canvas.width)} × {Math.round(box.h * canvas.height)} px</div>
-            </>
-          )}
-          <div className="grid grid-cols-2 gap-2">
-            <NumberField label={t('workbench.propsScale')} unit="%" value={round((block.scale ?? 1) * 100, 0)} step={1} min={10} max={400} onCommit={(v) => onBlockPatch({ block: { scale: Math.abs(v / 100 - 1) < 0.005 ? undefined : v / 100 } })} />
-            <NumberField label={t('workbench.propsRotation')} unit="°" value={round(block.rotation ?? 0, 1)} step={1} min={-180} max={180} onCommit={(v) => onBlockPatch({ block: { rotation: v ? v : undefined } })} />
-          </div>
+
+      <Group label={t('workbench.propsLayout')} first={!view && texts.length === 0}>
+        {box && (
+          <>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">
+              <NumCell label={t('workbench.propsX')} unit="%" value={pct(box.x)} step={0.5} min={-100} max={200} onCommit={(v) => patchBox({ x: v / 100 })} />
+              <NumCell label={t('workbench.propsY')} unit="%" value={pct(box.y)} step={0.5} min={-100} max={200} onCommit={(v) => patchBox({ y: v / 100 })} />
+              <NumCell label={t('workbench.propsW')} unit="%" value={pct(box.w)} step={0.5} min={2} max={200} onCommit={(v) => patchBox({ w: v / 100 })} />
+              <NumCell label={t('workbench.propsH')} unit="%" value={pct(box.h)} step={0.5} min={2} max={200} onCommit={(v) => patchBox({ h: v / 100 })} />
+            </div>
+            <div className="text-ink-5 text-[10px] tabular-nums">{Math.round(box.w * canvas.width)} × {Math.round(box.h * canvas.height)} px</div>
+          </>
+        )}
+        <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">
+          <NumCell label={t('workbench.propsScale')} unit="%" value={round((block.scale ?? 1) * 100, 0)} step={1} min={10} max={400} onCommit={(v) => onBlockPatch({ block: { scale: Math.abs(v / 100 - 1) < 0.005 ? undefined : v / 100 } })} />
+          <NumCell label={t('workbench.propsRotation')} unit="°" value={round(block.rotation ?? 0, 1)} step={1} min={-180} max={180} onCommit={(v) => onBlockPatch({ block: { rotation: v ? v : undefined } })} />
         </div>
-      </Section>
-      <Section label={t('workbench.propsTiming')}>
-        <div className="grid grid-cols-2 gap-2">
-          <NumberField label={t('workbench.propsStart')} unit="s" value={round(block.startSec, 2)} step={0.1} min={0} onCommit={(v) => onBlockPatch({ startSec: v })} />
-          <NumberField label={t('workbench.propsDuration')} unit="s" value={round(block.durationSec, 2)} step={0.1} min={0.3} onCommit={(v) => onBlockPatch({ durationSec: v })} />
+      </Group>
+
+      <Group label={t('workbench.propsTiming')}>
+        <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">
+          <NumCell label={t('workbench.propsStart')} unit="s" value={round(block.startSec, 2)} step={0.1} min={0} onCommit={(v) => onBlockPatch({ startSec: v })} />
+          <NumCell label={t('workbench.propsDuration')} unit="s" value={round(block.durationSec, 2)} step={0.1} min={0.3} onCommit={(v) => onBlockPatch({ durationSec: v })} />
         </div>
-      </Section>
-      <Section label={t('workbench.propsAppearance')}>
-        <div className="flex flex-col gap-3">
-          <ColorRow label={t('workbench.propsBackground')} value={block.bg} swatches={swatches} noneTitle={t('workbench.noBackground')} onCommit={(bg) => onBlockPatch({ block: { bg } })} />
-          <ColorRow label={t('workbench.propsBorder')} value={block.border} swatches={swatches} noneTitle={t('workbench.propsNoBorder')} onCommit={(border) => onBlockPatch({ block: { border } })} />
-          <Slider label={t('workbench.propsRadius')} value={block.radius ?? 0} min={0} max={160} step={2} display={`${block.radius ?? 0} px`} onCommit={(v) => onBlockPatch({ block: { radius: v > 0 ? v : undefined } })} />
-          <Slider label={t('workbench.propsOpacity')} value={Math.round((block.opacity ?? 1) * 100)} min={5} max={100} step={5} display={`${Math.round((block.opacity ?? 1) * 100)}%`} onCommit={(v) => onBlockPatch({ block: { opacity: v >= 100 ? undefined : v / 100 } })} />
-        </div>
-      </Section>
-      <Section label={t('workbench.propsName')}>
-        <TextField fieldKey={t('workbench.propsNameHint')} text={block.label ?? ''} onCommit={(value) => onBlockPatch({ block: { label: value.trim().slice(0, 24) || undefined } })} />
-      </Section>
+      </Group>
+
+      <Group label={t('workbench.propsAppearance')}>
+        <ColorRow label={t('workbench.propsBackground')} value={block.bg} swatches={swatches} noneTitle={t('workbench.noBackground')} onCommit={(bg) => onBlockPatch({ block: { bg } })} />
+        <ColorRow label={t('workbench.propsBorder')} value={block.border} swatches={swatches} noneTitle={t('workbench.propsNoBorder')} onCommit={(border) => onBlockPatch({ block: { border } })} />
+        <Slider label={t('workbench.propsRadius')} value={block.radius ?? 0} min={0} max={160} step={2} display={`${block.radius ?? 0} px`} onCommit={(v) => onBlockPatch({ block: { radius: v > 0 ? v : undefined } })} />
+        <Slider label={t('workbench.propsOpacity')} value={Math.round((block.opacity ?? 1) * 100)} min={5} max={100} step={5} display={`${Math.round((block.opacity ?? 1) * 100)}%`} onCommit={(v) => onBlockPatch({ block: { opacity: v >= 100 ? undefined : v / 100 } })} />
+      </Group>
+
+      <Group label={t('workbench.propsName')}>
+        <TextField text={block.label ?? ''} onCommit={(value) => onBlockPatch({ block: { label: value.trim().slice(0, 24) || undefined } })} />
+      </Group>
+
       {images.length > 0 && (
-        <Section label={t('workbench.propsImages')}>
-          <div className="flex flex-col gap-2">
-            {images.map((img) => (
-              <div key={img.index} className="group flex items-center gap-2.5">
-                <div className="bg-canvas/70 flex h-11 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md">
-                  {img.src ? <img src={img.src} alt={img.alt} className="h-full w-full object-cover" /> : <ImageIcon size={14} className="text-ink-4" />}
-                </div>
-                <button type="button" onClick={() => onReplaceImage(img.index)} className="bg-panel-2 text-ink-2 hover:bg-panel hover:text-ink flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-[11px]">
-                  <RefreshCw size={11} />
-                  {t('workbench.propsReplaceImage')}
-                </button>
-                <button type="button" onClick={() => onRemoveImage(img.index)} aria-label={t('workbench.propsRemoveImage')} title={t('workbench.propsRemoveImage')} className="text-ink-4 hover:text-ink rounded-md p-1.5">
-                  <Trash2 size={13} />
-                </button>
+        <Group label={t('workbench.propsImages')}>
+          {images.map((img) => (
+            <div key={img.index} className="group flex items-center gap-2.5">
+              <div className="bg-panel-2 flex h-11 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md shadow-[inset_0_0_0_1px_var(--color-line-2)]">
+                {img.src ? <img src={img.src} alt={img.alt} className="h-full w-full object-cover" /> : <ImageIcon size={14} className="text-ink-4" />}
               </div>
-            ))}
-          </div>
-        </Section>
+              <button type="button" onClick={() => onReplaceImage(img.index)} className="bg-panel-2 text-ink-2 hover:text-ink flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-[11px] shadow-[inset_0_0_0_1px_var(--color-line-2)]">
+                <RefreshCw size={11} />
+                {t('workbench.propsReplaceImage')}
+              </button>
+              <button type="button" onClick={() => onRemoveImage(img.index)} aria-label={t('workbench.propsRemoveImage')} title={t('workbench.propsRemoveImage')} className="text-ink-4 hover:text-ink rounded-md p-1.5">
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ))}
+        </Group>
       )}
     </div>
   );

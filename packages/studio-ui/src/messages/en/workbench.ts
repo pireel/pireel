@@ -414,6 +414,8 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.searchedAssetsNoMatch": "No matching asset found",
   "workbench.searchedFontsN": "Found {n} fonts",
   "workbench.editableProperties": "Properties",
+  "workbench.componentHeaderCustom": "Custom component",
+  "workbench.componentHeaderKit": "Preset component",
   "workbench.resetProp": "Reset to default",
   "workbench.propsNoManifest": "This component declares no editable properties",
   "workbench.propsUnknownKeys": "Unknown properties: {keys}; declared: {declared}",

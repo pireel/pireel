@@ -377,6 +377,8 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.searchedAssetsNoMatch": "素材库中没有匹配项",
   "workbench.searchedFontsN": "找到 {n} 款字体",
   "workbench.editableProperties": "属性",
+  "workbench.componentHeaderCustom": "自定义组件",
+  "workbench.componentHeaderKit": "预设组件",
   "workbench.resetProp": "恢复默认",
   "workbench.propsNoManifest": "这个组件没有声明可编辑属性",
   "workbench.propsUnknownKeys": "未知属性：{keys}；已声明：{declared}",
