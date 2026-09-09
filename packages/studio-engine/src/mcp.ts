@@ -23,7 +23,7 @@ import { V3_RETIRED_TOOL_IDS, V3_TOOL_IDS, V3_TOOLS, v3ReplacementIndex } from '
 import { V3_TOOL_SCHEMAS } from './agent-surface-v3/schemas';
 import { v3Instructions } from './agent-surface-v3/instructions';
 import { MCP_DESCRIPTION_OVERRIDES, STUDIO_TOOLS, STUDIO_TOOL_MAP, mcpInstructions } from './prompts';
-import { MG_RUNTIME_CAPABILITIES } from './prompts/block-system';
+import { MG_BAKE_ROUTE, MG_RUNTIME_CAPABILITIES } from './prompts/block-system';
 import { searchFontsTool } from './font-search-tool';
 
 /* ============================ JSON-RPC shapes ============================ */
@@ -291,7 +291,7 @@ export function buildMcpTools(): McpToolDef[] {
     {
       name: 'apply_block',
       description:
-        'Validate and place a Component you generated from compose_block_brief. Copy the returned target blockId/atSec/durationSec unchanged, and set `raw` to your full generated text in whichever contract the brief carried (registered Component JSON or fenced Motion Graphic markup). On lint failure you get the issues back — fix ONLY those and re-apply. A blockId that names an existing element overwrites it; the minted blockId returned for new work inserts a new element. Optional label renames either an existing or new timeline element. A rejection for <script>, an external library, canvas/WebGL, an iframe or embedded video is not fixable by retrying — the runtime is closed (see compose_block_brief); rebuild that visual in markup, CSS and SVG.',
+        'Validate and place a Component you generated from compose_block_brief. Copy the returned target blockId/atSec/durationSec unchanged, and set `raw` to your full generated text in whichever contract the brief carried (registered Component JSON or fenced Motion Graphic markup). On lint failure you get the issues back — fix ONLY those and re-apply. A blockId that names an existing element overwrites it; the minted blockId returned for new work inserts a new element. Optional label renames either an existing or new timeline element. A rejection for <script>, an external library, canvas/WebGL, an iframe or embedded video is not fixable by retrying — the runtime is closed (see compose_block_brief); rebuild that visual in markup, CSS and SVG. ' + MG_BAKE_ROUTE + ' Here that means import_media, then place the registration as a boxed B-roll clip.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,

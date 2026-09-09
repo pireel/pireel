@@ -20,6 +20,14 @@ import { BLOCK_MIN_READABLE_FONT_PX, BLOCK_TEXT_BASELINE_PX } from '../block-typ
  *  "block"/"shot" in tool descriptions, so this text says "component". */
 export const MG_RUNTIME_CAPABILITIES = `The runtime is a closed HTML document Studio assembles: HTML, CSS (inline SVG, container queries, custom properties, the theme's var(--*) tokens) and GSAP 3 driving the pre-created paused timeline \`tl\`, seeked frame by frame. Nothing else is loaded or loadable — no <script> tags, external scripts, ES modules, import maps or CDN libraries (Three.js, Lottie, D3/chart libraries, React), no <canvas>/WebGL, no <iframe>, no <video> inside the component, no @import/@font-face, no fetch. Build every visual from markup, CSS and SVG and animate it on \`tl\`; the lint rejects anything outside this boundary outright, so design within it instead of discovering it through a rejection.`;
 
+/**
+ * The escape hatch for visuals the closed runtime cannot express (3D, particles, a charting or
+ * physics library, a shader): render them outside Studio and bring the result in as a clip.
+ * Appended to the apply descriptions on every agent surface; the generation brief never carries it
+ * because the model writing markup is not the one that can run a renderer.
+ */
+export const MG_BAKE_ROUTE = `When a visual genuinely needs what the runtime excludes (3D, particles, a charting or physics library, a shader), do not fight the lint: render it outside Studio to a video with an alpha channel — the Hyperframes CLI's \`render --format webm\` (VP9 alpha) or any renderer writing transparent WebM/MOV — sized to the intended box, not the full canvas, then import that file like any local video and place it as a boxed overlay clip at the same frames and box. Studio keeps its transparency in preview and export. The baked clip is footage, not a component: to change it, re-render and replace.`;
+
 export const BLOCK_HTML_BODY = `You author/edit one Motion Graphic Component as MARKUP. Component is Studio's broader extensible element model; Motion Graphic is the family this contract is designing. It is ONE editable visual composition participating in a video scene: open typography, source annotation, a relationship or process, a data explanation, a transition plate, a full-field chapter/payoff, or a contained information surface when containment is genuinely needed. It is NOT a generic UI widget, a default rounded card, or a paragraph with decoration.
 
 A block has two parts:

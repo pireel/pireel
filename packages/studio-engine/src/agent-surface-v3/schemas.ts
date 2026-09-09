@@ -9,7 +9,7 @@
 import { CAPTION_PRESETS } from '../caption-presets';
 import { CUT_TRANSITION_EFFECTS, MAX_TRANSITION_SEC, PLACE_ANCHORS, SHOT_TREATMENTS } from '../composition-core';
 import { DISPLAY_TEXT_ANIMATION_IDS, DISPLAY_TEXT_PRESETS } from '../display-text-presets';
-import { MG_RUNTIME_CAPABILITIES } from '../prompts/block-system';
+import { MG_BAKE_ROUTE, MG_RUNTIME_CAPABILITIES } from '../prompts/block-system';
 
 export const CHARGE_MARKER = "[CHARGES the user's Pireel account.]";
 
@@ -421,7 +421,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   apply_component: {
     description:
-      `Validate and place the component you generated from compose_component: pass raw (your full generated text) with the target clipId, atFrame, durationFrames and placement copied unchanged. Lint rejections list exact issues — fix only those and re-apply with the same clipId. generate=true instead asks Pireel's own model to author or rewrite from instruction (${CHARGE_MARKER} use only when the BYO path fails repeatedly). A rejection for <script>, an external library, canvas/WebGL, an iframe or embedded video is not fixable by retrying — the runtime is closed (see compose_component); rebuild that visual in markup, CSS and SVG.`,
+      `Validate and place the component you generated from compose_component: pass raw (your full generated text) with the target clipId, atFrame, durationFrames and placement copied unchanged. Lint rejections list exact issues — fix only those and re-apply with the same clipId. generate=true instead asks Pireel's own model to author or rewrite from instruction (${CHARGE_MARKER} use only when the BYO path fails repeatedly). A rejection for <script>, an external library, canvas/WebGL, an iframe or embedded video is not fixable by retrying — the runtime is closed (see compose_component); rebuild that visual in markup, CSS and SVG. ${MG_BAKE_ROUTE} Here that means import_media, then add_clips with role broll and the component's box.`,
     inputSchema: obj({
       raw: str('Your full generated text in the contract compose_component returned.'),
       clipId: str('Target from compose_component, or the graphic clip to edit.'),
