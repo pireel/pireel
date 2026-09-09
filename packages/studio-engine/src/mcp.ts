@@ -137,7 +137,9 @@ export const MCP_SERVER_TOOL_IDS = new Set(['read_editing_guide', 'read_frame', 
  *  capture_frame=one-moment visual verification; review_sequence=whole-Scene temporal verification
  *  (both return captured frames as image content so the agent can "see" its own edits).
  *  compose_block_brief is a "bridge-fetch context + server-assemble" composite tool, dispatched separately. */
-export const MCP_BRIDGE_EXTRA_TOOL_IDS = new Set(['get_state', 'apply_block', 'capture_frame', 'review_sequence', 'visual_brief', 'submit_visual', 'run_v3']);
+export const MCP_BRIDGE_EXTRA_TOOL_IDS = new Set(['get_state', 'apply_block', 'capture_frame', 'review_sequence', 'visual_brief', 'submit_visual', 'run_v3',
+  // Internal target of v3 set_clip_properties.props: a deterministic patch of a bespoke component's editable properties. Never advertised on its own.
+  'set_block_props']);
 
 /** Brief composite tools → bridge context-operation names (implemented browser-side in runExternalTool). */
 export const MCP_BRIEF_TOOLS: Record<string, string> = {

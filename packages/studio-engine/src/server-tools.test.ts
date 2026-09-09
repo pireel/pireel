@@ -129,11 +129,39 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
       id: 'empty-broll', type: 'visual', role: 'broll', muted: false, hidden: true,
       locked: false, syncLocked: false, stackOrder: 7, clips: [],
     });
-    const raw = 'native\n```html\n<div><style>#ai-native .t{color:red;font-size:36px}</style><div class="t">Native</div></div>\n```\n```js\ntl.to("#ai-native .t",{opacity:1,duration:.3});\n```';
+    const raw = 'native\n```html\n<div data-props=\'{"accent":{"type":"string","format":"color","title":"Accent","default":"#ff0000"}}\'><style>#ai-native .t{color:var(--p-accent);font-size:36px}</style><div class="t" data-edit="t">Native</div></div>\n```\n```js\ntl.to("#ai-native .t",{opacity:1,duration:.3});\n```';
     const applied = runServerTool('apply_block', { raw, blockId: 'ai-native', atSec: 2 }, p);
     expect(applied.result.ok, JSON.stringify(applied.result)).toBe(true);
     expect(applied.document?.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 'ai-native')).toMatchObject({ kind: 'graphic', startFrame: 60 });
     expect(applied.document?.timeline.tracks.find((track) => track.id === 'empty-broll')).toMatchObject({ hidden: true, syncLocked: false, clips: [] });
+  });
+  it('set_block_props patches a bespoke component’s editable properties; apply_block keeps them across a rewrite', () => {
+    const p = v2proj();
+    const manifest = JSON.stringify({ accent: { type: 'string', format: 'color', title: 'Accent', default: '#ff5a36' }, value: { type: 'number', title: 'Value', default: 72, minimum: 0, maximum: 100 } });
+    const markup = (extra = '') => `<div class="wrap" data-props='${manifest}'><style>#ai-p .t{color:var(--p-accent);font-size:36px;width:calc(var(--p-value) * 1%)}</style><div class="t" data-edit="t">十个以上的可见文字内容</div>${extra}</div>`;
+    const raw = (extra = '') => `note\n\`\`\`html\n${markup(extra)}\n\`\`\`\n\`\`\`js\ntl.to("#ai-p .t",{opacity:1,duration:.3});\n\`\`\``;
+    const applied = runServerTool('apply_block', { raw: raw(), blockId: 'ai-p', atSec: 1 }, p);
+    expect(applied.result.ok, JSON.stringify(applied.result)).toBe(true);
+    const withBlock = { ...p, document: applied.document! };
+    // unknown key / no manifest / kit are refused with pointed errors
+    expect(runServerTool('set_block_props', { blockId: 'ai-p', props: { ghost: 1 } }, withBlock).result).toMatchObject({ ok: false, error: expect.stringContaining('unknown properties: ghost') });
+    expect(runServerTool('set_block_props', { blockId: 's1', props: { accent: '#000000' } }, withBlock).result.ok).toBe(false); // a shot has no editable surface
+    // the happy path stores coerced, pruned overrides and reads them back
+    const set = runServerTool('set_block_props', { blockId: 'ai-p', props: { accent: '#000000', value: '250' } }, withBlock);
+    expect(set.result.ok, JSON.stringify(set.result)).toBe(true);
+    expect(set.result.data).toMatchObject({ blockId: 'ai-p', props: [{ key: 'accent', type: 'color', value: '#000000' }, { key: 'value', type: 'number', value: 100 }] });
+    const clip = set.document!.timeline.tracks.flatMap((track) => track.clips).find((c) => c.id === 'ai-p') as { block: { slots: Record<string, unknown> } };
+    expect(clip.block.slots.props).toEqual({ accent: '#000000', value: 100 });
+    // a second call merges; resetting to the default drops the key
+    const reset = runServerTool('set_block_props', { blockId: 'ai-p', props: { value: 72 } }, { ...p, document: set.document! });
+    const clip2 = reset.document!.timeline.tracks.flatMap((track) => track.clips).find((c) => c.id === 'ai-p') as { block: { slots: Record<string, unknown> } };
+    expect(clip2.block.slots.props).toEqual({ accent: '#000000' });
+    // a markup rewrite that keeps the keys keeps the tuned values
+    const rewritten = runServerTool('apply_block', { raw: raw('<i class="x"></i>'), blockId: 'ai-p' }, { ...p, document: set.document! });
+    expect(rewritten.result.ok, JSON.stringify(rewritten.result)).toBe(true);
+    const clip3 = rewritten.document!.timeline.tracks.flatMap((track) => track.clips).find((c) => c.id === 'ai-p') as { block: { slots: Record<string, unknown> } };
+    expect(clip3.block.slots.props).toEqual({ accent: '#000000', value: 100 });
+    expect(String(clip3.block.slots.innerHtml)).toContain('<i class="x">');
   });
   it('V2 apply_layout 原子更新镜头与覆盖层且不重建原生轨道', () => {
     const p = v2proj();
@@ -886,7 +914,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(r5.document!.semantics.transcripts[firstNarrativeAssetId(r5.document!)!]![0]!.sub).toBeUndefined();
   });
   it('apply_block:同一套 parse+lint;compose_context 占位带 suggested_instruction', () => {
-    const raw = '加一张卡\n```html\n<div id="nb" style="font-size:36px">OK</div>\n```\n```js\ntl.to("#nb", { opacity: 1, duration: 0.3 });\n```';
+    const raw = '加一张卡\n```html\n<div id="nb" data-props=\'{"accent":{"type":"string","format":"color","title":"Accent","default":"#ff0000"}}\' style="font-size:36px">OK</div>\n```\n```js\ntl.to("#nb", { opacity: 1, duration: 0.3 });\n```';
     const r = runServerTool('apply_block', {
       raw, atSec: 2, durationSec: 4,
       placement: { xPct: 60, yPct: 12, widthPct: 32, heightPct: 28 },
@@ -963,7 +991,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     ]);
   });
   it('apply_block 更新已有元素时同步应用明确提供的 label', () => {
-    const raw = '更新卡片\n```html\n<div><style>#b1 .title{color:red;font-size:36px}</style><div class="title">Updated</div></div>\n```\n```js\ntl.to("#b1 .title", {opacity:1,duration:.3});\n```';
+    const raw = '更新卡片\n```html\n<div data-props=\'{"accent":{"type":"string","format":"color","title":"Accent","default":"#ff0000"}}\'><style>#b1 .title{color:var(--p-accent);font-size:36px}</style><div class="title">Updated</div></div>\n```\n```js\ntl.to("#b1 .title", {opacity:1,duration:.3});\n```';
     const result = runServerTool('apply_block', { raw, blockId: 'b1', label: '新名称' }, proj());
     expect(result.result.ok, JSON.stringify(result.result)).toBe(true);
     expect(result.comp?.blocks.find((block) => block.id === 'b1')?.label).toBe('新名称');
@@ -972,12 +1000,12 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     // compose_context 给新元素铸的 id 不在 comp 里——apply 带这个"未知" id 必须原样采用,不许报找不到
     const rc = runServerTool('compose_context', {}, proj());
     const minted = (rc.result.data as { block: { id: string } }).block.id;
-    const rawOk = `note\n\`\`\`html\n<div><style>#${minted} .t{color:red;font-size:36px}</style><div class="t">x</div></div>\n\`\`\`\n\`\`\`js\ntl.to("#${minted} .t",{opacity:1,duration:.3});\n\`\`\``;
+    const rawOk = `note\n\`\`\`html\n<div data-props='{"accent":{"type":"string","format":"color","title":"Accent","default":"#ff0000"}}'><style>#${minted} .t{color:var(--p-accent);font-size:36px}</style><div class="t">x</div></div>\n\`\`\`\n\`\`\`js\ntl.to("#${minted} .t",{opacity:1,duration:.3});\n\`\`\``;
     const r1 = runServerTool('apply_block', { raw: rawOk, blockId: minted, atSec: 1 }, proj());
     expect(r1.result.ok).toBe(true);
     expect((r1.result.data as { newBlockId: string }).newBlockId).toBe(minted);
     // scope 错 id 且不带 blockId → lint 拦下,回执必须还一个稳定 id;按回执改一轮就收敛,新块用同一 id
-    const rawBad = 'note\n```html\n<div><style>#stale9 .t{color:red;font-size:36px}</style><div class="t">x</div></div>\n```\n```js\ntl.to("#stale9 .t",{opacity:1,duration:.3});\n```';
+    const rawBad = 'note\n```html\n<div data-props=\'{"accent":{"type":"string","format":"color","title":"Accent","default":"#ff0000"}}\'><style>#stale9 .t{color:var(--p-accent);font-size:36px}</style><div class="t">x</div></div>\n```\n```js\ntl.to("#stale9 .t",{opacity:1,duration:.3});\n```';
     const r2 = runServerTool('apply_block', { raw: rawBad, atSec: 1 }, proj());
     expect(r2.result.ok).toBe(false);
     const handed = (r2.result.data as { blockId: string }).blockId;

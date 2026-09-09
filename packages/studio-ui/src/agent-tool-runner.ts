@@ -194,6 +194,8 @@ import { withEditableBlockGeometry } from './editable-block-geometry';
 import { placementPercentToBox } from '@pireel/studio-engine/overlay-placement';
 import { getStudioSpaceId, listStudioGens, pollCreation, startGeneration } from './gen-api';
 import { componentFontSlot, displayFontContext, isDisplayTextFontId } from '@pireel/studio-engine/display-text-presets';
+import { componentPropsCarry } from '@pireel/studio-engine/component-props';
+import { applyComponentValues, blockPropsReadback, componentSchemaOf, componentValuesView } from '@pireel/studio-engine/component-schema';
 import { searchFontsTool } from '@pireel/studio-engine/font-search-tool';
 import { describeAudioTargets, resolveAudioTarget } from '@pireel/studio-engine/audio-target';
 
@@ -1993,6 +1995,20 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const framing = placementFramingNotes(ensureShots(c), next.startSec, next.durationSec);
             return { ok: true, summary: t('workbench.placedNameZone', { name: bname(b), zone: zoneOf(next.box!) }), data: { box: next.box, ...(framing.length ? { hint: framing.join('; ') } : {}) } };
           }
+          case 'set_block_props': {
+            const b = findBlock(input.blockId);
+            if (!b) return { ok: false, error: t('workbench.elementNotFound') };
+            const view = componentSchemaOf(b);
+            if (!view) return { ok: false, error: t('workbench.propsNoManifest') };
+            const requested = input.props && typeof input.props === 'object' && !Array.isArray(input.props) ? (input.props as Record<string, unknown>) : {};
+            const declared = Object.keys(view.schema.properties ?? {});
+            const unknown = Object.keys(requested).filter((key) => !declared.includes(key));
+            if (unknown.length) return { ok: false, error: t('workbench.propsUnknownKeys', { keys: unknown.join(', '), declared: declared.join(', ') }) };
+            const slots = applyComponentValues(b, requested)!;
+            const edit = commitOverlayEdits([{ clipId: b.id, block: { slots } }]);
+            if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error), data: { code: edit.error.code, trackIds: edit.error.trackIds } };
+            return { ok: true, summary: t('workbench.propsUpdated', { n: Object.keys(requested).length, name: bname(b) }), data: { blockId: b.id, props: componentValuesView(componentSchemaOf({ templateId: b.templateId, slots })!) } };
+          }
           case 'delete_block': {
             const b = findBlock(input.blockId);
             if (!b) return { ok: false, error: t('workbench.elementNotFound') };
@@ -2083,6 +2099,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 fitScale: b.fitScale ?? null,
                 innerHtml: cap(rendered.innerHtml, 1600),
                 timelineBody: cap(rendered.timelineBody, 800),
+                ...blockPropsReadback(b),
               },
             };
           }
@@ -4328,7 +4345,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               // exactly as it is (never silently convert a kit block to markup) and hand the note
               // back so the agent can rephrase or explain.
               if (parsed.declined) return { ok: false, error: parsed.note || t('workbench.aiEditFailed') };
-              const editable = withEditableBlockGeometry({ ...b, ...composedBlockFields(parsed, b.durationSec) }, c.width, c.height);
+              const editable = withEditableBlockGeometry({ ...b, ...composedBlockFields(parsed, b.durationSec, { props: b.slots.props }) }, c.width, c.height);
               const updated = commitOverlayEdits([{
                 clipId: b.id,
                 block: { templateId: editable.templateId, slots: editable.slots, box: editable.box },
@@ -4563,6 +4580,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
                 label: b.label,
                 durationSec: b.durationSec,
                 ...(b.box ? { boxPx: { w: Math.round(b.box.w * c2.width), h: Math.round(b.box.h * c2.height) } } : {}),
+                ...(blockPropsReadback(b).props ? { props: blockPropsReadback(b).props!.values } : {}),
               },
               // A kit block is edited as props: hand the brief what it currently shows, so an
               // external edit keeps unmentioned fields exactly like the in-app path does.
@@ -4672,7 +4690,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           return { ok: false, error: 'the model answered null (no graphic) — nothing was changed; delete_block the target yourself if you agree' };
         }
         const parsed = parseBlockResponse(raw, fb);
-        const issues = lintBlock({ blockId: applyId, innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody });
+        const issues = lintBlock({ blockId: applyId, innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, requireProps: true });
         // Same hard line as composeBlockChecked: hard problems are bounced back for the external model to fix itself (it is the "one fix round" model)
         const hard = issues.filter((i) => HARD_LINT_CODES.has(i.code));
         if (hard.length) {
@@ -4682,7 +4700,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         pushUndoSnapshot();
         if (target) {
           const editable = withEditableBlockGeometry(
-              { ...target, templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, authoredDurationSec: target.durationSec, ...componentFontSlot(input.fontFamily, target.slots.fontFamily) }, ...(requestedLabel ? { label: requestedLabel } : {}) },
+              { ...target, templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, authoredDurationSec: target.durationSec, ...componentFontSlot(input.fontFamily, target.slots.fontFamily), ...componentPropsCarry(parsed.innerHtml, target.slots.props) }, ...(requestedLabel ? { label: requestedLabel } : {}) },
             c2.width,
             c2.height,
           );

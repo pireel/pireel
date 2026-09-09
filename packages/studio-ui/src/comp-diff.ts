@@ -250,6 +250,7 @@ export interface BlockPatchPair {
   mediaTimeline: boolean; // media slots.anim only → replace the GSAP timeline, never the image/video DOM node
   slots: boolean; // slots changed → parent re-assembles the block and swaps the node in via hf:blockAdd (echo of an iframe text edit skips even that)
   kitProps: boolean; // kit block props → parent re-renders the one block's content via hf:blockHtml
+  props: boolean; // bespoke block slots.props only → hf:blockProps writes the container's inline custom properties/attributes, no node swap
   replace: boolean; // templateId swap → full node replace via hf:blockAdd
 }
 export interface BlockPatchChange {
@@ -261,6 +262,15 @@ const PATCH_GEOM = new Set(['box', 'contentBox', 'scale', 'rotation']);
 const PATCH_TIMING = new Set(['startSec', 'durationSec']);
 const PATCH_STYLE = new Set(['bg', 'border', 'radius', 'opacity']);
 const PATCH_IGNORE = new Set(['fitScale', 'label']); // not in the preview doc (fitScale goes through hf:fit separately; label only on the timeline)
+
+/** A bespoke component whose slots changed ONLY in `props` (the user's tuned property values): the
+ *  markup is identical, so the container's inline values can be rewritten in place. */
+function customPropsOnlyChange(a: Block, b: Block): boolean {
+  if (a.templateId !== 'custom' || b.templateId !== 'custom') return false;
+  const { props: aProps, ...aSlots } = a.slots;
+  const { props: bProps, ...bSlots } = b.slots;
+  return !previewDataEqual(aProps, bProps) && previewDataEqual(aSlots, bSlots);
+}
 
 function mediaAnimationOnlyChange(a: Block, b: Block): boolean {
   if (a.templateId !== 'media' || b.templateId !== 'media') return false;
@@ -300,7 +310,7 @@ export function blockPatchableChange(a: Composition | null, b: Composition): Blo
     last = i;
     const x = ba[i]!;
     if (x === y) continue;
-    const p: BlockPatchPair = { a: x, b: y, geom: false, timing: false, style: false, mediaTimeline: false, slots: false, kitProps: false, replace: false };
+    const p: BlockPatchPair = { a: x, b: y, geom: false, timing: false, style: false, mediaTimeline: false, slots: false, kitProps: false, props: false, replace: false };
     const ks = new Set([...Object.keys(x), ...Object.keys(y)]);
     for (const k of ks) {
       const xv = (x as unknown as Record<string, unknown>)[k];
@@ -318,11 +328,12 @@ export function blockPatchableChange(a: Composition | null, b: Composition): Blo
         // re-assembles the whole node (hf:blockAdd replace)
         if (y.templateId.startsWith('kit:')) p.kitProps = true;
         else if (mediaAnimationOnlyChange(x, y)) p.mediaTimeline = true;
+        else if (customPropsOnlyChange(x, y)) p.props = true;
         else p.slots = true;
       }
       else return null;
     }
-    if (p.geom || p.timing || p.style || p.mediaTimeline || p.slots || p.kitProps || p.replace) pairs.push(p);
+    if (p.geom || p.timing || p.style || p.mediaTimeline || p.slots || p.kitProps || p.props || p.replace) pairs.push(p);
   }
   // A blocks-array update that only changes ignored metadata (fitScale/label) is still a valid
   // no-op patch. Returning null would incorrectly fall through to a full double-buffer rebuild —

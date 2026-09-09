@@ -59,7 +59,7 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   { id: 'remove_clips', group: 'clips', replaces: ['remove_clips', 'delete_block', 'delete_blocks', 'delete_shot', 'remove_captions'] },
   { id: 'split_clips', group: 'clips', replaces: ['split_clips', 'split_shot'] },
   { id: 'ripple_delete_ranges', group: 'clips', replaces: ['cut_range', 'trim_shot'] },
-  { id: 'set_clip_properties', group: 'clips', replaces: ['set_clip_properties', 'resize_block', 'set_shot_audio', 'set_video_speed', 'set_video_filter', 'swap_clip_media'] },
+  { id: 'set_clip_properties', group: 'clips', replaces: ['set_clip_properties', 'resize_block', 'set_shot_audio', 'set_video_speed', 'set_video_filter', 'swap_clip_media', 'set_block_props'] },
   { id: 'set_clip_framing', group: 'clips', replaces: ['set_shot_framing', 'set_shot_treatment', 'set_media_transform', 'set_media_crop', 'place_block'] },
   { id: 'apply_layout', group: 'clips', replaces: ['apply_layout'] },
   { id: 'set_keyframes', group: 'clips', replaces: ['set_keyframes'] },

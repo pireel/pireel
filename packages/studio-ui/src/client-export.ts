@@ -80,6 +80,7 @@ import { materializeRemoteMedia } from './remote-media';
 import { buildInlineFontCss, warmupFontMarkup } from './export-fonts';
 import { webFontIdOf } from '@pireel/studio-engine/font-library';
 import { googleFontRowOf } from '@pireel/studio-engine/google-fonts';
+import { componentPropsFontIds } from '@pireel/studio-engine/component-props';
 import { t } from './i18n';
 import {
   browserVisualLayerPlan,
@@ -107,6 +108,7 @@ function assertExportableComposition(comp: Composition): void {
 function compositionFontIds(comp: Composition): unknown[] {
   return [
     ...comp.blocks.map((block) => block.slots.fontFamily),
+    ...comp.blocks.flatMap((block) => componentPropsFontIds(block)),
     comp.captionStyle?.font,
     comp.captionStyle?.sub?.font,
   ];

@@ -236,6 +236,10 @@ describe("静态提示词完整性", () => {
     );
     expect(CHAT_IDENTITY).not.toContain("OVERLAY BLOCKS");
     expect(BLOCK_SYSTEM).toContain("producing ONE Motion Graphic Component");
+    // editable properties: the manifest and the only two ways to consume it
+    expect(BLOCK_SYSTEM).toContain("data-props=");
+    expect(BLOCK_SYSTEM).toContain("var(--p-<key>)");
+    expect(BLOCK_SYSTEM).toContain('[data-p-<key>="v"]');
     expect(BLOCK_SYSTEM).not.toContain("same component");
     expect(mcpInstructions("test-version")).toContain(
       "Component is the broad extensible element concept",

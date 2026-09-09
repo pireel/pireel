@@ -8,6 +8,7 @@
  */
 
 import type { KitChoice } from '@pireel/studio-engine/compose';
+import { componentPropsCarry } from '@pireel/studio-engine/component-props';
 
 /** Safe, structured failure for generated markup that still violates hard static checks after repair. */
 export class GeneratedBlockValidationError extends Error {
@@ -50,7 +51,7 @@ export interface ComposedBlock {
 }
 
 /** The block fields a result becomes. Spread onto a block: `{ ...b, ...composedBlockFields(r) }`. */
-export function composedBlockFields(r: ComposedBlock, authoredDurationSec?: number): { templateId: string; slots: Record<string, unknown> } {
+export function composedBlockFields(r: ComposedBlock, authoredDurationSec?: number, carry?: { props?: unknown }): { templateId: string; slots: Record<string, unknown> } {
   return r.kit
     ? { templateId: `kit:${r.kit.component}`, slots: { props: r.kit.props } }
     : {
@@ -61,6 +62,8 @@ export function composedBlockFields(r: ComposedBlock, authoredDurationSec?: numb
           ...(typeof authoredDurationSec === 'number' && Number.isFinite(authoredDurationSec) && authoredDurationSec > 0
             ? { authoredDurationSec }
             : {}),
+          // An edit that kept the property keys keeps the user's tuned values (pruned against the new manifest).
+          ...componentPropsCarry(r.innerHtml, carry?.props),
         },
       };
 }

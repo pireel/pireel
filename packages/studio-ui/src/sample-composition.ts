@@ -1043,6 +1043,17 @@ export const PREVIEW_RUNTIME = `
         });
       }
     }
+    else if (d.type === 'hf:blockProps') {
+      // Editable properties of a bespoke component: the parent sends the full resolved set as
+      // inline custom properties + data-p-* attributes for the CONTAINER, formatted by the same
+      // engine helper the assembler uses. Named properties only — never cssText — so geometry,
+      // frame and bg patches written by the other branches survive untouched.
+      var bp = d.blockId ? document.querySelector('[data-composition-id="' + d.blockId + '"]') : null;
+      if (bp) {
+        Object.keys(d.vars || {}).forEach(function (k4) { bp.style.setProperty(k4, String(d.vars[k4])); });
+        Object.keys(d.attrs || {}).forEach(function (k5) { bp.setAttribute(k5, String(d.attrs[k5])); });
+      }
+    }
     else if (d.type === 'hf:boxSize') {
       // Parent move/edge/corner handles preview geometry in this doc (zero React re-render), then
       // commit Block.box once on release. A canonical box patch also clears a temporary body-drag

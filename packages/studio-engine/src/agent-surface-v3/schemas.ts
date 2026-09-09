@@ -289,7 +289,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   set_clip_properties: {
     description:
-      'Patch properties on clips in one undo step: source [inSec,outSec] retrims, durationFrames, speed (0.25–4; the spine ripples by default, other lanes do not), volumeDb (−60…+20, 0 = source level), mute, fades {in,out} in frames, opacity, filter {brightness,contrast,saturate} (1 = untouched), enabled, box, and assetId to swap the clip’s media while keeping its geometry. Layout and framing belong to set_clip_framing; timing moves to move_clips.',
+      'Patch properties on clips in one undo step: source [inSec,outSec] retrims, durationFrames, speed (0.25–4; the spine ripples by default, other lanes do not), volumeDb (−60…+20, 0 = source level), mute, fades {in,out} in frames, opacity, filter {brightness,contrast,saturate} (1 = untouched), enabled, box, and assetId to swap the clip’s media while keeping its geometry. props sets a graphic clip’s declared editable properties as [{key,value}] pairs — the keys, types and current values are listed under component.props in get_state; no regeneration. Layout and framing belong to set_clip_framing; timing moves to move_clips.',
     inputSchema: obj({
       items: arr(obj({
         clipId: str(), assetId: str('Swap the media identity.'), source: SOURCE_RANGE, durationFrames: int('New duration in frames.', 1),
@@ -297,6 +297,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
         volumeDb: num('', { min: -60, max: 20 }), mute: bool(), fades: FADES, opacity: num('', { min: 0, max: 1 }),
         filter: obj({ brightness: num(), contrast: num(), saturate: num() }),
         enabled: bool(), box: BOX,
+        props: arr(obj({ key: str('Property key from component.props.'), value: { anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }], description: 'New value: color as #rrggbb(aa) or var(--token), number, boolean, or a select option.' } }, ['key', 'value']), { minItems: 1, maxItems: 8, description: 'Graphic clips only: editable properties to set.' }),
       }, ['clipId']), { minItems: 1 }),
     }, ['items']),
   },

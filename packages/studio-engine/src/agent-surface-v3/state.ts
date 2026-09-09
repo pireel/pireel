@@ -8,6 +8,7 @@
  * caption changes, and notes telling the agent exactly when to re-read. Pure; no I/O.
  */
 import { webFontCatalog } from '../font-library';
+import { componentSchemaOf, componentValuesView, type ComponentValueType } from '../component-schema';
 
 import type {
   EditorDocumentV2,
@@ -30,7 +31,7 @@ export interface V3ClipView {
   audio?: { clipId: string; volumeDb?: number; mute?: boolean };
   linkGroupId?: string;
   enabled?: false;
-  component?: { componentId?: string; box?: unknown };
+  component?: { componentId?: string; box?: unknown; props?: Array<{ key: string; type: ComponentValueType; value: unknown }> };
   [property: string]: unknown;
 }
 
@@ -159,8 +160,12 @@ export function renderV3Clip(clip: TimelineClip, trackId: string): V3ClipView {
     case 'graphic': {
       if (clip.assetId) view.assetId = clip.assetId;
       view.anchor = clip.anchor;
-      const block = clip.block as unknown as { templateId?: string; box?: unknown; slots?: unknown };
+      const block = clip.block as unknown as { templateId?: string; box?: unknown; slots?: { innerHtml?: unknown; props?: unknown } };
       view.component = { ...(block.templateId ? { componentId: block.templateId } : {}), ...(block.box ? { box: block.box } : {}) };
+      // Editable properties (registered and bespoke alike): keys, types and effective values, so
+      // set_clip_properties.props needs no other lookup.
+      const editable = block.templateId ? componentSchemaOf({ templateId: block.templateId, slots: (block.slots ?? {}) as Record<string, unknown> }) : null;
+      if (editable) view.component.props = componentValuesView(editable);
       break;
     }
     case 'caption': {

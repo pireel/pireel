@@ -35,6 +35,7 @@ import {
   GripVertical,
   Trash2,
   Palette,
+  SlidersHorizontal,
   RefreshCw,
   Save,
   SendToBack,
@@ -449,6 +450,9 @@ import {
   withEditableBlockGeometry,
 } from "./editable-block-geometry";
 import { webFontStylesheetUrls } from '@pireel/studio-engine/font-library';
+import { componentPropsCarry, componentPropsFontIds, componentPropsLiveMessage, parseComponentProps, resolveComponentProps } from '@pireel/studio-engine/component-props';
+import { nextPropsSlots } from './component-props-ui';
+import { ComponentPropsPanel } from './component-props-panel';
 import { ensureWebFontStylesheets } from './web-fonts';
 
 // The workbench calls semantic template helpers during its first render. Keep the
@@ -1089,7 +1093,7 @@ export function HyperframesWorkbench({
     setLocateSignal((n) => n + 1);
   };
   const [libTab, setLibTab] = useState<
-    "assets" | "frames" | "script" | "captions" | "audio" | "text" | "gen" | "avatar"
+    "assets" | "frames" | "script" | "captions" | "audio" | "text" | "props" | "gen" | "avatar"
   >("assets"); // rail primary-nav tab (themes hidden)
   const [libCollapsed, setLibCollapsed] = useState(false); // asset rail collapsed (narrow strip + expand button; content hidden but state kept)
   const selectedDisplayTextBlock = useMemo(
@@ -1099,6 +1103,13 @@ export function HyperframesWorkbench({
     [comp.blocks, selectedId],
   );
   const selectedDisplayTextBlockId = selectedDisplayTextBlock?.id ?? null;
+  const selectedCustomBlock = useMemo(
+    () => selectedId
+      ? comp.blocks.find((block) => block.id === selectedId && (block.templateId === "custom" || block.templateId.startsWith("kit:"))) ?? null
+      : null,
+    [comp.blocks, selectedId],
+  );
+  const selectedCustomBlockId = selectedCustomBlock?.id ?? null;
   // Asset rail geometry: the expanded content width is drag-resizable and persists. Collapsing
   // keeps the primary-nav strip docked so navigation and the expand control stay in one place.
   const [railW, setRailW] = useState(() => {
@@ -2250,6 +2261,7 @@ export function HyperframesWorkbench({
       pcomp.captionStyle?.font,
       pcomp.captionStyle?.sub?.font,
       ...pcomp.blocks.map((block) => block.slots?.fontFamily),
+      ...pcomp.blocks.flatMap((block) => componentPropsFontIds(block)),
     ]);
     if (hrefs.length) postPreview({ type: "hf:fonts", hrefs });
   };
@@ -2577,6 +2589,19 @@ export function HyperframesWorkbench({
                   timelineBody: kr.timelineBody,
                 });
               }
+              if (p.props) {
+                // Tuned editable properties: rewrite the container's inline values in place, formatted
+                // exactly as the assembler would bake them — no node swap, no timeline rebuild.
+                const pb = p.b;
+                const specs = parseComponentProps(String((pb.slots as { innerHtml?: unknown }).innerHtml ?? "")).specs;
+                if (specs.length) {
+                  postPreview({
+                    type: "hf:blockProps",
+                    blockId: pb.id,
+                    ...componentPropsLiveMessage(specs, resolveComponentProps(specs, pb.slots.props)),
+                  });
+                }
+              }
               if (p.style) {
                 const nb = p.b;
                 const inner = String(
@@ -2610,7 +2635,7 @@ export function HyperframesWorkbench({
             if (
               patchable.added.length ||
               patchable.pairs.some(
-                (p) => p.geom || p.style || p.replace || p.slots || p.kitProps,
+                (p) => p.geom || p.style || p.replace || p.slots || p.kitProps || p.props,
               )
             )
               postPreview({ type: "hf:measureFit" });
@@ -3134,6 +3159,14 @@ export function HyperframesWorkbench({
     floatWinRef.current = next;
     setFloatWinRaw(next);
   };
+  // Selecting a bespoke component opens its inspector, the way a native text block opens the text panel.
+  useEffect(() => {
+    if (!selectedCustomBlockId) return;
+    setFloatWin(null);
+    setLibTab("props");
+    setLibCollapsed(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCustomBlockId]);
   useEffect(() => {
     if (!selectedDisplayTextBlockId) return;
     setFloatWin(null);
@@ -3346,13 +3379,17 @@ export function HyperframesWorkbench({
         clipId: id,
         block: {
           templateId: "custom",
-          slots: {
-            innerHtml: draft.innerHtml,
-            timelineBody: draft.timelineBody,
-          },
+          slots: sourceDraftSlots(id, draft),
         },
       },
     ]);
+  };
+  /** Slots for a source-editor draft: the draft's markup and timeline over the block's other slots
+   *  (authored duration, display font), with tuned property values kept only where the new markup
+   *  still declares the key. */
+  const sourceDraftSlots = (id: string, draft: SourceDraft): Record<string, unknown> => {
+    const { props, ...rest } = compRef.current.blocks.find((x) => x.id === id)?.slots ?? {};
+    return { ...rest, innerHtml: draft.innerHtml, timelineBody: draft.timelineBody, ...componentPropsCarry(draft.innerHtml, props) };
   };
   /** Commit: write back + advance the baseline to the applied state (closing after this no longer reverts). */
   const handleCodeApply = (id: string, draft: SourceDraft) => {
@@ -3364,7 +3401,7 @@ export function HyperframesWorkbench({
     codeOrigRef.current = {
       id,
       templateId: "custom",
-      slots: { innerHtml: draft.innerHtml, timelineBody: draft.timelineBody },
+      slots: sourceDraftSlots(id, draft),
     };
     codeDraftRef.current = null;
   };
@@ -4483,6 +4520,7 @@ export function HyperframesWorkbench({
         blockId: seed.id,
         innerHtml: parsed.innerHtml,
         timelineBody: parsed.timelineBody,
+        requireProps: true,
       });
       if (issues.length) {
         const fixSeed = {
@@ -4500,6 +4538,7 @@ export function HyperframesWorkbench({
           blockId: seed.id,
           innerHtml: parsed.innerHtml,
           timelineBody: parsed.timelineBody,
+          requireProps: true,
         });
         const hard = issues.filter((i) => HARD_LINT_CODES.has(i.code));
         if (hard.length)
@@ -5485,6 +5524,39 @@ export function HyperframesWorkbench({
             : {}),
         },
       }],
+    });
+    if (!edit.ok) {
+      toast.error(editorErrorMessage(edit.error));
+      return;
+    }
+    pushUndoSnapshot();
+    setEditorDocument(edit.document);
+  };
+  /** Commit the inspector's values on a component (registered or bespoke — the engine's unified
+   *  contract decides where they persist): one undo step. Deliberately not patchOverlays (which never
+   *  snapshots) — a colour or number the user tuned must undo. */
+  const patchComponentValues = (id: string, next: Record<string, unknown>) => {
+    const block = compRef.current.blocks.find((x) => x.id === id);
+    if (!block || genIdsRef.current.has(id)) return;
+    const edit = applyOverlayDocumentEdits({
+      document: editorDocumentRef.current,
+      updates: [{ clipId: id, block: { slots: nextPropsSlots(block, next) } }],
+    });
+    if (!edit.ok) {
+      toast.error(editorErrorMessage(edit.error));
+      return;
+    }
+    pushUndoSnapshot();
+    setEditorDocument(edit.document);
+  };
+  /** Inspector edits to whole-block fields (box, scale, rotation, opacity, bg, border, radius, label,
+   *  timing): one undo step through the document command, so the same patch pipeline that serves the
+   *  floating bar and the handles (hf:boxSize / hf:blockStyle / hf:blockTiming) paints the preview. */
+  const patchInspectorBlock = (id: string, patch: { startSec?: number; durationSec?: number; block?: Record<string, unknown> }) => {
+    if (genIdsRef.current.has(id)) return;
+    const edit = applyOverlayDocumentEdits({
+      document: editorDocumentRef.current,
+      updates: [{ clipId: id, ...(patch.startSec !== undefined ? { startSec: patch.startSec } : {}), ...(patch.durationSec !== undefined ? { durationSec: patch.durationSec } : {}), ...(patch.block ? { block: patch.block } : {}) }],
     });
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
@@ -9424,6 +9496,26 @@ export function HyperframesWorkbench({
                                 </TooltipContent>
                               </Tooltip>
                             )}
+                            {/* Editable properties live in the rail inspector; the bar only opens it. */}
+                            {(mb.templateId === "custom" || mb.templateId.startsWith("kit:")) && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setFloatWin(null);
+                                      setLibTab("props");
+                                      setLibCollapsed(false);
+                                    }}
+                                    aria-label={t("workbench.editableProperties")}
+                                    className={`rounded p-1 ${libTab === "props" ? "text-ink bg-panel-2" : "text-ink-3 hover:text-ink"}`}
+                                  >
+                                    <SlidersHorizontal size={13} />
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent>{t("workbench.editableProperties")}</TooltipContent>
+                              </Tooltip>
+                            )}
                             {/* Background / border / corners: block-level chrome for free-form elements.
                         Kit components carry these in their own props (each renders them in its own
                         design language), so the generic control would be a second, conflicting one. */}
@@ -10169,6 +10261,19 @@ export function HyperframesWorkbench({
                     }
                   />
                 )}
+                {!floatWin && libTab === "props" && (
+                  <ComponentPropsPanel
+                    block={selectedCustomBlock}
+                    canvas={{ width: comp.width, height: comp.height }}
+                    swatches={bgSwatches.map(([name, value]) => ({ label: t("panels.backgroundName", { name: t(name) }), value }))}
+                    onBlockPatch={(patch) => selectedCustomBlock && patchInspectorBlock(selectedCustomBlock.id, patch)}
+                    onValues={(next) => selectedCustomBlock && patchComponentValues(selectedCustomBlock.id, next)}
+                    onLive={(message) => selectedCustomBlock && postPreview({ type: "hf:blockProps", blockId: selectedCustomBlock.id, ...message })}
+                    onText={(key, value) => selectedCustomBlock && setSlot(selectedCustomBlock.id, key, value)}
+                    onReplaceImage={(index) => selectedCustomBlock && void replaceCustomImg(selectedCustomBlock.id, index)}
+                    onRemoveImage={(index) => selectedCustomBlock && patchCustomImg(selectedCustomBlock.id, index, () => "remove")}
+                  />
+                )}
                 {!floatWin && libTab === "gen" && (
                   <div className="flex min-h-0 flex-1 flex-col">
                     <div className="bg-panel flex h-8 shrink-0 items-center gap-1 px-2.5">
@@ -10476,6 +10581,7 @@ export function HyperframesWorkbench({
                         label: "panels.captions",
                       },
                       { v: "text", icon: Type, label: "displayText.title" },
+                      { v: "props", icon: SlidersHorizontal, label: "workbench.editableProperties" },
                       { v: "audio", icon: Music, label: "panels.music" },
                       { v: "gen", icon: Sparkles, label: "common.generate" },
                       {
@@ -10490,6 +10596,7 @@ export function HyperframesWorkbench({
                         | "script"
                         | "captions"
                         | "text"
+                        | "props"
                         | "audio"
                         | "gen"
                         | "avatar";
@@ -10500,6 +10607,8 @@ export function HyperframesWorkbench({
                     <button
                       key={n.v}
                       type="button"
+                      // The properties tab edits the current selection: switching to it must keep it.
+                      {...(n.v === "props" ? { "data-block-selection-keep": true } : {})}
                       onClick={() => {
                         if (libTab === "gen" && n.v !== "gen")
                           setGenRefreshTick((value) => value + 1);
