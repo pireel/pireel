@@ -321,9 +321,10 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.facesSafeZones": "人脸/安全区",
   "workbench.failedFetchInsertClip": "插入片段拉取失败",
   "workbench.failedStaticChecksFix":
-    '没通过静态检查——逐条修 data.issues 里的问题(常见:所有 CSS 选择器都要落在 #{blockId} 作用域下),其余保持原样,再带 blockId:"{blockId}" 调一次 apply_block',
+    '没通过静态检查——逐条修 data.issues 里的问题(常见:所有 CSS 选择器都要落在 #{blockId} 作用域下),其余保持原样,用同一个目标 id 重新提交一次',
   "workbench.fetchedBlockContext": "已取动态图形上下文",
   "workbench.fetchedNewElementContext": "已取新动态图形上下文",
+  "workbench.composeNeedsInstruction": "compose_component 需要一句具体的组件说明（instruction）",
   "workbench.fetchingClipBytes": "拉取片段字节…",
   "workbench.filledIntoElementCard": "已填入动态图形卡",
   "workbench.filledLabel": "已填充「{label}」",

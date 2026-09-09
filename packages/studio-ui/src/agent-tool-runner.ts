@@ -96,7 +96,9 @@ import { applyCaptionTextEdits } from '@pireel/studio-engine/caption-text-edit';
 import { resolveCaptionSentenceEdits } from '@pireel/studio-engine/caption-sentence-edit';
 import { exportRecommendations } from '@pireel/studio-engine/export-options';
 import { parkInteraction } from './interaction-store';
-import { interpretApplyRaw } from '@pireel/studio-engine/briefs';
+import { assembleComposeBrief, interpretApplyRaw, type ComposeBriefInput } from '@pireel/studio-engine/briefs';
+import { composeVisualDirectionContent, normalizeCustomVisualStyle } from '@pireel/studio-engine/visual-style';
+import { frameRegistry } from '@pireel/studio-frames/vite';
 import { composeEditorialBrief } from '@pireel/studio-engine/review-brief';
 import { planScriptCaptionSegments, splitScriptLines } from '@pireel/studio-engine/script-captions';
 import { studioProviders } from '@pireel/studio-engine/providers';
@@ -4684,7 +4686,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           return { ok: false, error: `unknown component "${shape.component}" — use an id from the brief's COMPONENTS list, answer {"custom": true} for a bespoke build, or null for no graphic` };
         }
         if (shape.kind === 'custom') {
-          return { ok: false, error: 'the model chose a bespoke build — call compose_block_brief again with format:"html" for the markup contract, generate against it, then apply_block with that raw text' };
+          return { ok: false, error: 'the model chose a bespoke build — request the brief again with format:"html" for the markup contract, generate against it, then submit that raw text' };
         }
         if (shape.kind === 'declined') {
           return { ok: false, error: 'the model answered null (no graphic) — nothing was changed; delete_block the target yourself if you agree' };
@@ -4899,6 +4901,58 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             state.assets.push({ id, kind: entry.kind ?? 'video', ...(entry.label ? { label: entry.label } : {}), library: true });
           }
           return { ok: true, summary: `${state.tracks.length} tracks · ${state.durationFrames} frames @ ${state.canvas.fps}fps`, data: { ...state, playhead: Math.round((ctx.tRef?.current ?? 0) * before.canvas.fps) } };
+        }
+        // compose_component is a composite: fetch the live context (compose_context, seconds) and
+        // server-assemble the {system, prompt} generation contract the agent authors against. The v3
+        // adapter alone only routes to compose_context, which returns raw context — without the
+        // assembled brief the model never sees the #BLOCK_ID scoping rule and emits unscoped CSS that
+        // the lint then rejects. Do the same assembly the MCP brief composite does, in v3 vocabulary.
+        if (name === 'compose_component') {
+          const fps = before.canvas.fps;
+          const instruction = typeof args.instruction === 'string' ? args.instruction.trim() : '';
+          if (!instruction) return { ok: false, error: t('workbench.composeNeedsInstruction') };
+          const ctxInput: Record<string, unknown> = {};
+          if (Number.isInteger(args.atFrame)) ctxInput.atSec = (args.atFrame as number) / fps;
+          if (Number.isInteger(args.durationFrames)) ctxInput.durationSec = (args.durationFrames as number) / fps;
+          if (typeof args.clipId === 'string' && args.clipId) ctxInput.blockId = args.clipId;
+          if (args.placement && typeof args.placement === 'object') ctxInput.placement = args.placement;
+          if (typeof args.backdrop === 'string') ctxInput.backdrop = args.backdrop;
+          if (typeof args.fontFamily === 'string') ctxInput.fontFamily = args.fontFamily;
+          const ctxRes = await runExternalToolInner(ctx, 'compose_context', ctxInput);
+          if (!ctxRes.ok) return ctxRes;
+          const d = (ctxRes.data ?? {}) as Record<string, unknown>;
+          const block = d.block as ComposeBriefInput['block'] | undefined;
+          if (!block) return { ok: false, error: t('workbench.elementNotFoundIds') };
+          const format = args.format === 'kit' || args.format === 'html' ? (args.format as 'kit' | 'html') : undefined;
+          const frame = typeof d.frameId === 'string' ? frameRegistry.get(d.frameId) : null;
+          const frameContent = composeVisualDirectionContent(
+            frame ? { title: frame.title, body: frame.body } : null,
+            normalizeCustomVisualStyle(d.customVisualStyle),
+          );
+          const brief = assembleComposeBrief({
+            block,
+            instruction,
+            ...(d.context ? { context: d.context as ComposeBriefInput['context'] } : {}),
+            ...(typeof d.theme === 'string' ? { theme: d.theme } : {}),
+            ...(d.palette ? { palette: d.palette as Record<string, string> } : {}),
+            ...(d.kitCurrent ? { kitCurrent: d.kitCurrent as ComposeBriefInput['kitCurrent'] } : {}),
+            ...(format ? { format } : {}),
+            frame: frameContent,
+          });
+          return {
+            ok: true,
+            summary: t('workbench.fetchedNewElementContext'),
+            data: {
+              ...brief,
+              target: {
+                clipId: block.id,
+                ...(typeof d.atSec === 'number' ? { atFrame: Math.round(d.atSec * fps) } : {}),
+                ...(typeof d.durationSec === 'number' ? { durationFrames: Math.max(1, Math.round(d.durationSec * fps)) } : {}),
+                ...(d.placement ? { placement: d.placement } : {}),
+              },
+              next: 'Generate the component yourself from system + prompt, then call apply_component with this target unchanged plus your full raw text.',
+            },
+          };
         }
         const kinds = new Map<string, V3ClipKind>();
         for (const track of before.timeline.tracks) for (const clip of track.clips) kinds.set(clip.id, clip.kind);
