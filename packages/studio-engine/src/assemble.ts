@@ -27,6 +27,7 @@ import { compositionVisualLayerPlan, type SupplementalVisualMediaClip } from './
 import { BLOCK_TEXT_BASELINE_PX } from './block-typography';
 import { webFontStylesheetUrls } from './font-library';
 import { displayFontContext, displayTextFontCss } from './display-text-presets';
+import { componentPropsAttrs, componentPropsFontIds, componentPropsInlineCss, parseComponentProps, resolveComponentProps } from './component-props';
 
 /* ============================ Assembly ============================ */
 
@@ -519,11 +520,18 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
     const authoredDuration = b.templateId === 'custom' && typeof b.slots.authoredDurationSec === 'number' && Number.isFinite(b.slots.authoredDurationSec) && b.slots.authoredDurationSec > 0
       ? `data-authored-duration="${n(b.slots.authoredDurationSec)}" `
       : '';
+    // Editable properties of a bespoke component: every declared property (override ?? default) lands
+    // on the CONTAINER as an inline custom property and a data-p-* attribute — inline beats the markup's
+    // own <style>, the live channel (hf:blockProps) writes the same names, the export serializes it.
+    const propSpecs = b.templateId === 'custom' && typeof b.slots.innerHtml === 'string' ? parseComponentProps(b.slots.innerHtml).specs : [];
+    const propValues = propSpecs.length ? resolveComponentProps(propSpecs, b.slots.props) : null;
+    const propsCss = propValues ? componentPropsInlineCss(propSpecs, propValues) : '';
+    const propsAttrs = propValues ? ` ${componentPropsAttrs(propSpecs, propValues)}` : '';
     const attrs =
       `id="${b.id}" data-composition-id="${b.id}" ${b.box ? 'data-hf-box="1" ' : ''}` +
       authoredDuration +
       `data-start="${n(b.startSec)}" data-duration="${n(b.durationSec)}" data-track-index="${b.trackIndex}" ` +
-      `data-width="${W}" data-height="${H}"`;
+      `data-width="${W}" data-height="${H}"${propsAttrs}`;
     // Frozen look (Block.vars): the block's insertion-time tokens, scoped to it, override #root's live
     // theme vars — a later theme mount recolors #root (and future blocks) but never this one. Emitted
     // inside the container so the in-place patch channel (hf:blockAdd/hf:blockHtml) carries it too.
@@ -542,14 +550,14 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
       const pos = `left:${pct(b.box.x)};top:${pct(b.box.y)};width:${pct(b.box.w)};height:${pct(b.box.h)};`;
       const rel = `left:${pct((cb.x - b.box.x) / b.box.w)};top:${pct((cb.y - b.box.y) / b.box.h)};width:${pct(cb.w / b.box.w)};height:${pct(cb.h / b.box.h)};`;
       html =
-        `<div class="comp" ${attrs} style="position:absolute;${pos}overflow:hidden;${frame.join('')}">\n${varsTag}` +
+        `<div class="comp" ${attrs} style="position:absolute;${propsCss}${pos}overflow:hidden;${frame.join('')}">\n${varsTag}` +
         `<div data-hf-content style="position:absolute;${rel}${bgCss}${scaleCss}${fit}">\n${innerHtml}\n</div>\n</div>`;
     } else {
       // Full-canvas block (caption layer, etc.): a single flat layer, no crop/scale semantics.
       // The sentence-caption container doesn't take clicks (pointer-events:none, .cap-line is auto): the container is inset:0 spanning
       // the whole canvas, and if it took clicks, clicking any blank area while captions are on-screen would hit it — "click blank to select a shot" would break entirely
       const pe = isSentenceCaption(b) ? 'pointer-events:none;' : '';
-      html = `<div class="comp" ${attrs} style="position:absolute;inset:0;${pe}${bgCss}${frame.join('')}${scaleCss}${fit}">\n${varsTag}${innerHtml}\n</div>`;
+      html = `<div class="comp" ${attrs} style="position:absolute;${propsCss}inset:0;${pe}${bgCss}${frame.join('')}${scaleCss}${fit}">\n${varsTag}${innerHtml}\n</div>`;
     }
     return { html, timelineBody };
 }
@@ -723,6 +731,7 @@ export function assembleHtml(
     comp.captionStyle?.font,
     comp.captionStyle?.sub?.font,
     ...comp.blocks.map((block) => block.slots?.fontFamily),
+    ...comp.blocks.flatMap((block) => componentPropsFontIds(block)),
   ]).map((href) => `<link href="${href}" rel="stylesheet" />\n`).join('');
   return `<!doctype html>
 <html lang="zh">

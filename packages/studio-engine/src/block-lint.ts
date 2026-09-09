@@ -9,6 +9,7 @@
  */
 
 import { BLOCK_MIN_READABLE_FONT_PX } from './block-typography';
+import { componentPropsRequirement, componentPropsUsage, hasComponentPropsManifest, parseComponentProps } from './component-props';
 
 export interface BlockLintIssue {
   code:
@@ -18,11 +19,18 @@ export interface BlockLintIssue {
     | 'too-small-font-size'
     | 'script-tag'
     | 'nondeterministic'
-    | 'no-data-edit';
+    | 'no-data-edit'
+    | 'props-invalid'
+    | 'props-unused'
+    | 'props-missing';
   message: string;
 }
 
-/** Hard errors rejected even after a fix round (bad CSS/script harms the whole document). */
+/** Hard errors rejected even after a fix round (bad CSS/script harms the whole document).
+ *  Editability findings (props-missing / props-invalid / props-unused / no-data-edit) are deliberately
+ *  SOFT: they go into the model's one fix round, but a component that still lacks them is placed
+ *  anyway — it just has fewer inspector controls. A generation that fails outright because the
+ *  model skipped a manifest is a worse outcome for the user than a component they cannot tune. */
 export const HARD_LINT_CODES: ReadonlySet<string> = new Set([
   'empty-content',
   'unscoped-selector',
@@ -172,7 +180,7 @@ function unscopedSelectors(css: string, blockId: string): string[] {
   return [...found];
 }
 
-export function lintBlock(args: { blockId: string; innerHtml: string; timelineBody: string }): BlockLintIssue[] {
+export function lintBlock(args: { blockId: string; innerHtml: string; timelineBody: string ; requireProps?: boolean }): BlockLintIssue[] {
   const { blockId, innerHtml, timelineBody } = args;
   const issues: BlockLintIssue[] = [];
 
@@ -271,6 +279,25 @@ export function lintBlock(args: { blockId: string; innerHtml: string; timelineBo
 
   if (/\b(setTimeout|setInterval|requestAnimationFrame|Date\.now|Math\.random)\b/.test(timelineBody)) {
     issues.push({ code: 'nondeterministic', message: 'timeline body must be deterministic — no timers / Date.now / Math.random / rAF' });
+  }
+
+  // Editable properties (only judged when the markup declares a data-props manifest). A broken manifest
+  // renders as "no properties" and is reported for the fix round; a value the model wrote itself
+  // (--p-* / data-p-* inside the markup) shadows the container's and defeats every override.
+  // The generation gate makes properties mandatory (a bespoke component without a manifest cannot be
+  // tuned in the inspector); everything already on the timeline is judged only when it declares one.
+  if (args.requireProps) {
+    const missing = componentPropsRequirement(innerHtml);
+    if (missing) issues.push({ code: 'props-missing', message: missing });
+  }
+  if (hasComponentPropsManifest(innerHtml)) {
+    const { specs, issues: manifestIssues } = parseComponentProps(innerHtml);
+    for (const issue of manifestIssues) issues.push({ code: 'props-invalid', message: `data-props: ${issue}` });
+    const usage = componentPropsUsage(innerHtml, specs);
+    for (const own of usage.ownDeclarations) {
+      issues.push({ code: 'props-invalid', message: `${own} must not be written inside the markup — Studio sets every declared property on #${blockId}; consume it with var(--p-<key>) / #${blockId}[data-p-<key>="v"]` });
+    }
+    for (const key of usage.unused) issues.push({ code: 'props-unused', message: `data-props declares "${key}" but the markup never reads var(--p-${key}) or [data-p-${key}]` });
   }
 
   // visible text with no data-edit handle → double-click in-place editing breaks

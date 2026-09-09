@@ -1,18 +1,27 @@
 'use client';
 
 /**
- * Kit block props editor — the schema IS the form. Fields are generated from the
- * component's JSON Schema (closed enums → pills, booleans → toggle, bounded numbers
- * → slider, strings → input/textarea), so new props/components appear here with
- * zero panel work. Every change patches slots.props; the block re-renders derived.
+ * Typed-props editor — the schema IS the form. Fields are generated from a JSON Schema (closed
+ * enums → segmented control, booleans → switch, bounded numbers → slider, colours → swatches +
+ * picker + alpha, fonts → the host's picker, row arrays → row list, strings → input/textarea), so
+ * new props appear with zero panel work.
+ *
+ * `PropsForm` is the pure control set; it knows nothing about blocks. Hosts: the kit component
+ * wrapper below (schema from the registry) and the component inspector (schema from the unified
+ * component contract). Range/colour drags report through `onLive` per input event and commit
+ * through `onChange` on release, so a host can paint the preview live and persist once.
+ *
+ * Visual language matches the other rail panels: no borders — fills (`bg-canvas/70`) separate
+ * controls from the panel, a focus ring replaces outlines, selection is a filled pill or a ring.
  */
 
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { kitComponents, kitSurfaceSwatches } from '@pireel/studio-engine/kit-templates';
 import type { Block } from '@pireel/studio-engine/composition';
+import { Plus, X } from 'lucide-react';
 import { t } from './i18n';
 
-interface FieldSchema {
+export interface FieldSchema {
   type?: string;
   format?: string;
   enum?: string[];
@@ -20,17 +29,313 @@ interface FieldSchema {
   showWhen?: { field: string; in: string[] };
   minimum?: number;
   maximum?: number;
+  multipleOf?: number;
   maxLength?: number;
   description?: string;
+  /** Human label (bespoke components declare one per property); falls back to the host's labelOf. */
+  title?: string;
+  default?: unknown;
+  /** Row arrays (kit `rows()`): each row is an object of primitive fields. */
+  items?: { properties?: Record<string, FieldSchema>; required?: string[] };
+  maxItems?: number;
+}
+
+export interface PropsSchema {
+  properties?: Record<string, FieldSchema>;
 }
 
 /** Field label: catalog key when we have one, else the raw prop name (dev-facing fallback). */
-function fieldLabel(key: string): string {
+function kitFieldLabel(key: string): string {
   const k = `kitProp.${key}`;
   const label = t(k);
   return label === k ? key : label;
 }
 
+const INPUT = 'bg-canvas/70 text-ink placeholder:text-ink-5 focus:ring-ink-4/40 w-full rounded-md px-2.5 py-1.5 text-[12px] outline-none focus:ring-1';
+const LABEL = 'text-ink-3 text-[11px]';
+
+function Field({ label, trailing, description, children }: { label: string; trailing?: ReactNode; description?: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1.5" title={description}>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className={LABEL}>{label}</span>
+        {trailing}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Switch({ on, label, onToggle }: { on: boolean; label: string; onToggle: (next: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      onClick={() => onToggle(!on)}
+      className={`relative h-[18px] w-8 shrink-0 rounded-full transition-colors ${on ? 'bg-accent' : 'bg-canvas/70'}`}
+    >
+      <span className={`absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white shadow-sm transition-[left] ${on ? 'left-[16px]' : 'left-[2px]'}`} />
+    </button>
+  );
+}
+
+export function PropsForm({
+  schema,
+  values,
+  onChange,
+  onLive,
+  labelOf = (key) => key,
+  swatches = kitSurfaceSwatches,
+  resetMode = 'theme',
+  className = 'flex flex-col gap-4',
+  renderFont,
+}: {
+  schema: PropsSchema;
+  /** Effective values (defaults already applied by the host). */
+  values: Record<string, unknown>;
+  /** Commit: the full next values object (the host persists it and owns undo). */
+  onChange: (next: Record<string, unknown>) => void;
+  /** Live preview while a range/colour input is being dragged; the host paints it without persisting. */
+  onLive?: (next: Record<string, unknown>) => void;
+  labelOf?: (key: string) => string;
+  swatches?: ReadonlyArray<{ name: string; value: string }>;
+  /** What the colour "reset" pill means: `theme` = empty string follows the theme token (kit);
+   *  `default` = restore the schema default (bespoke components). */
+  resetMode?: 'theme' | 'default';
+  className?: string;
+  /** Host-supplied control for `format:'font'` fields (the font picker lives in the host); absent → plain input. */
+  renderFont?: (key: string, value: string, commit: (next: string) => void) => ReactNode;
+}) {
+  const fields = Object.entries(schema.properties ?? {}).filter(
+    ([, f]) =>
+      // Row arrays without an object row shape have no control; the rows() shape below gets one.
+      (f.type !== 'array' || !!f.items?.properties) &&
+      // Dependency declared by the schema, not by this form — a new component that declares one
+      // hides correctly with no change here. The value is kept, just not shown.
+      (!f.showWhen || f.showWhen.in.includes(String(values[f.showWhen.field] ?? ''))),
+  );
+  const label = (key: string, f: FieldSchema) => f.title ?? labelOf(key);
+  const commit = (key: string, v: unknown) => onChange({ ...values, [key]: v });
+  const live = (key: string, v: unknown) => (onLive ?? onChange)({ ...values, [key]: v });
+
+  return (
+    <div className={className}>
+      {fields.map(([key, f]) => {
+        const v = values[key];
+        if (f.type === 'array' && f.items?.properties) {
+          // Row list: every primitive field of every row is an input; add/remove within maxItems. Rows
+          // are content (what the component says), so this is the panel-side twin of canvas text edits.
+          const rowsValue = Array.isArray(v) ? (v as Array<Record<string, unknown>>) : [];
+          const rowFields = Object.entries(f.items.properties).filter(([, rf]) => rf.type === 'string' || rf.type === 'number');
+          const setRows = (rows: Array<Record<string, unknown>>) => commit(key, rows);
+          const blankRow = () => Object.fromEntries(rowFields.map(([rk, rf]) => [rk, rf.type === 'number' ? (rf.minimum ?? 0) : '']));
+          const canAdd = f.maxItems === undefined || rowsValue.length < f.maxItems;
+          return (
+            <Field
+              key={key}
+              label={label(key, f)}
+              description={f.description}
+              trailing={canAdd && (
+                <button type="button" onClick={() => setRows([...rowsValue, blankRow()])} aria-label={t('workbench.propsAddRow')} title={t('workbench.propsAddRow')} className="text-ink-4 hover:text-ink rounded p-0.5">
+                  <Plus size={12} />
+                </button>
+              )}
+            >
+              <div className="flex flex-col gap-1.5">
+                {rowsValue.map((row, index) => (
+                  <div key={index} className="bg-canvas/45 group flex items-start gap-1.5 rounded-md p-1.5">
+                    <span className="text-ink-5 w-3 shrink-0 pt-1.5 text-center text-[10px] tabular-nums">{index + 1}</span>
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                      {rowFields.map(([rk, rf]) => (
+                        <input
+                          key={rk}
+                          value={row[rk] === undefined || row[rk] === null ? '' : String(row[rk])}
+                          placeholder={rf.title ?? labelOf(rk)}
+                          maxLength={rf.maxLength}
+                          onChange={(e) => {
+                            const next = rowsValue.map((r, i) => (i === index ? { ...r, [rk]: rf.type === 'number' ? Number(e.target.value) : e.target.value } : r));
+                            setRows(next);
+                          }}
+                          className={INPUT}
+                        />
+                      ))}
+                    </div>
+                    <button type="button" onClick={() => setRows(rowsValue.filter((_, i) => i !== index))} aria-label={t('workbench.propsRemoveRow')} className="text-ink-5 hover:text-ink mt-1 shrink-0 rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100">
+                      <X size={11} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </Field>
+          );
+        }
+        if (Array.isArray(f.enum)) {
+          return (
+            <Field key={key} label={label(key, f)} description={f.description}>
+              <div className="bg-canvas/70 flex rounded-md p-0.5">
+                {f.enum.map((opt) => (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => commit(key, opt)}
+                    className={`min-w-0 flex-1 truncate rounded px-2 py-1 text-[11px] transition-colors ${
+                      v === opt ? 'bg-panel-2 text-ink shadow-sm' : 'text-ink-3 hover:text-ink'
+                    }`}
+                  >
+                    {opt}
+                  </button>
+                ))}
+              </div>
+            </Field>
+          );
+        }
+        if (f.type === 'boolean') {
+          return (
+            <div key={key} className="flex items-center justify-between gap-2" title={f.description}>
+              <span className={LABEL}>{label(key, f)}</span>
+              <Switch on={v === true} label={label(key, f)} onToggle={(next) => commit(key, next)} />
+            </div>
+          );
+        }
+        if (f.type === 'number') {
+          const min = f.minimum ?? 0;
+          const max = f.maximum ?? 1;
+          const step = f.multipleOf ?? (max - min) / 100;
+          const num = typeof v === 'number' ? v : min;
+          return (
+            <Field key={key} label={label(key, f)} description={f.description} trailing={<span className="text-ink-4 text-[11px] tabular-nums">{Math.round(num * 100) / 100}</span>}>
+              <input
+                type="range"
+                min={min}
+                max={max}
+                step={step}
+                value={num}
+                onChange={(e) => live(key, Number(e.target.value))}
+                onPointerUp={(e) => commit(key, Number((e.target as HTMLInputElement).value))}
+                onKeyUp={(e) => commit(key, Number((e.target as HTMLInputElement).value))}
+                onBlur={(e) => commit(key, Number(e.target.value))}
+                className="accent-accent h-1.5 w-full cursor-pointer"
+              />
+            </Field>
+          );
+        }
+        if (f.format === 'font') {
+          const val = typeof v === 'string' ? v : String(f.default ?? 'sans');
+          return (
+            <Field key={key} label={label(key, f)} description={f.description}>
+              {renderFont ? renderFont(key, val, (next) => commit(key, next)) : <input value={val} onChange={(e) => commit(key, e.target.value)} className={INPUT} />}
+            </Field>
+          );
+        }
+        if (f.format === 'color') {
+          // Alpha rides on the same value as #rrggbbaa — a surface over busy footage often wants to
+          // let some through — and is only offered once a concrete colour is chosen. `var(--token)`
+          // values (bespoke defaults that follow the theme) show no swatch match and no alpha.
+          const val = typeof v === 'string' ? v : '';
+          const hex = /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(val);
+          const rgb = hex ? val.slice(0, 7) : '';
+          const alpha = hex && val.length === 9 ? Math.round((parseInt(val.slice(7, 9), 16) / 255) * 100) : 100;
+          const withAlpha = (hex6: string, a: number) =>
+            a >= 100 ? hex6 : hex6 + Math.round((a / 100) * 255).toString(16).padStart(2, '0');
+          const resetValue = resetMode === 'theme' ? '' : (f.default ?? '');
+          const isReset = resetMode === 'theme' ? !val : val === resetValue;
+          const resetTitle = resetMode === 'theme' ? t('kitProp.followTheme') : t('workbench.resetProp');
+          const ring = 'ring-accent ring-2 ring-offset-1 ring-offset-panel';
+          const swatch = 'h-6 w-6 shrink-0 rounded-full shadow-[inset_0_0_0_1px_rgba(127,127,127,0.25)] transition-transform hover:scale-105';
+          return (
+            <Field
+              key={key}
+              label={label(key, f)}
+              description={f.description}
+              trailing={hex && (
+                <span className="text-ink-4 flex items-center gap-1.5 text-[11px] tabular-nums">
+                  <span className="h-3 w-3 rounded-full shadow-[inset_0_0_0_1px_rgba(127,127,127,0.25)]" style={{ background: val }} />
+                  {rgb.toUpperCase()}{alpha < 100 ? ` · ${alpha}%` : ''}
+                </span>
+              )}
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => commit(key, resetValue)}
+                  title={resetTitle}
+                  aria-label={resetTitle}
+                  className={`${swatch} bg-[linear-gradient(135deg,transparent_44%,#f43f5e_44%,#f43f5e_56%,transparent_56%)] ${isReset ? ring : ''}`}
+                />
+                {swatches.map((sw) => (
+                  <button
+                    key={sw.value}
+                    type="button"
+                    onClick={() => commit(key, withAlpha(sw.value, alpha))}
+                    title={sw.name}
+                    aria-label={sw.name}
+                    className={`${swatch} ${rgb.toLowerCase() === sw.value.toLowerCase() ? ring : ''}`}
+                    style={{ background: sw.value }}
+                  />
+                ))}
+                <label
+                  title={t('kitProp.customColor')}
+                  className={`${swatch} relative cursor-pointer overflow-hidden bg-[conic-gradient(#ff6b5f,#ffd24d,#37d6b0,#4d7cfe,#b89cff,#ff6b5f)]`}
+                >
+                  <input
+                    type="color"
+                    value={rgb || '#ffffff'}
+                    onInput={(e) => live(key, withAlpha((e.target as HTMLInputElement).value, alpha))}
+                    onChange={(e) => commit(key, withAlpha(e.target.value, alpha))}
+                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                    aria-label={t('kitProp.customColor')}
+                  />
+                </label>
+              </div>
+              {hex && (
+                <div className="flex items-center gap-2">
+                  <span className="text-ink-4 shrink-0 text-[10px]">{t('kitProp.opacity')}</span>
+                  <input
+                    type="range"
+                    min={10}
+                    max={100}
+                    step={5}
+                    value={alpha}
+                    onChange={(e) => live(key, withAlpha(rgb, Number(e.target.value)))}
+                    onPointerUp={(e) => commit(key, withAlpha(rgb, Number((e.target as HTMLInputElement).value)))}
+                    onBlur={(e) => commit(key, withAlpha(rgb, Number(e.target.value)))}
+                    className="accent-accent h-1.5 min-w-0 flex-1 cursor-pointer"
+                  />
+                </div>
+              )}
+            </Field>
+          );
+        }
+        // string
+        const long = (f.maxLength ?? 0) >= 60;
+        return (
+          <Field key={key} label={label(key, f)} description={f.description}>
+            {long ? (
+              <textarea
+                value={typeof v === 'string' ? v : ''}
+                maxLength={f.maxLength}
+                rows={2}
+                onChange={(e) => commit(key, e.target.value)}
+                className={`${INPUT} resize-none leading-5`}
+              />
+            ) : (
+              <input
+                value={typeof v === 'string' ? v : ''}
+                maxLength={f.maxLength}
+                onChange={(e) => commit(key, e.target.value)}
+                className={INPUT}
+              />
+            )}
+          </Field>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Kit block wrapper: schema and defaults from the component registry. */
 export function KitPropsPanel({
   block,
   onPatch,
@@ -46,165 +351,15 @@ export function KitPropsPanel({
     [def, block.slots],
   );
   if (!def) return null;
-  // Row-array props (chart series, kpi cells, steps items) have no control yet — a text input
-  // would stringify and destroy the data on first keystroke. Content for those is edited on the
-  // canvas or via the agent until a row editor exists.
-  const fields = Object.entries((def.jsonSchema as { properties?: Record<string, FieldSchema> }).properties ?? {}).filter(
-    ([, f]) =>
-      f.type !== 'array' &&
-      // Dependency declared by the schema, not by this panel — a new component that declares one
-      // hides correctly with no change here. The value is kept, just not shown.
-      (!f.showWhen || f.showWhen.in.includes(String(current[f.showWhen.field] ?? ''))),
-  );
-
-  const set = (key: string, v: unknown) => {
-    const raw = ((block.slots as { props?: Record<string, unknown> }).props ?? {}) as Record<string, unknown>;
-    onPatch({ ...raw, [key]: v });
-  };
-
   return (
     // Scroll is each docked panel's own job (the shell is a plain min-h-0 flex row) — without
     // overflow here the fields past the viewport were simply clipped.
-    <div className="flex h-full min-h-0 w-60 flex-col gap-2.5 overflow-y-auto p-3">
-      {fields.map(([key, f]) => {
-        const v = current[key];
-        if (Array.isArray(f.enum)) {
-          return (
-            <div key={key} className="flex flex-col gap-1">
-              <span className="text-ink-4 text-[10px]" title={f.description}>{fieldLabel(key)}</span>
-              <div className="flex flex-wrap gap-1">
-                {f.enum.map((opt) => (
-                  <button
-                    key={opt}
-                    type="button"
-                    onClick={() => set(key, opt)}
-                    className={`rounded border px-1.5 py-0.5 text-[10.5px] transition-colors ${
-                      v === opt ? 'border-accent text-accent bg-accent/5' : 'border-line text-ink-3 hover:text-ink'
-                    }`}
-                  >
-                    {opt}
-                  </button>
-                ))}
-              </div>
-            </div>
-          );
-        }
-        if (f.type === 'boolean') {
-          return (
-            <label key={key} className="flex items-center justify-between gap-2" title={f.description}>
-              <span className="text-ink-4 text-[10px]">{fieldLabel(key)}</span>
-              <input type="checkbox" checked={v === true} onChange={(e) => set(key, e.target.checked)} className="accent-accent h-3.5 w-3.5" />
-            </label>
-          );
-        }
-        if (f.type === 'number') {
-          const min = f.minimum ?? 0;
-          const max = f.maximum ?? 1;
-          return (
-            <div key={key} className="flex flex-col gap-1" title={f.description}>
-              <span className="text-ink-4 text-[10px]">
-                {fieldLabel(key)} · {typeof v === 'number' ? v : min}
-              </span>
-              <input
-                type="range"
-                min={min}
-                max={max}
-                step={(max - min) / 100}
-                value={typeof v === 'number' ? v : min}
-                onChange={(e) => set(key, Number(e.target.value))}
-                className="accent-accent"
-              />
-            </div>
-          );
-        }
-        if (f.format === 'color') {
-          // Empty = follow the theme token (a theme swap restyles the component); an explicit
-          // colour survives it. Alpha rides on the same value as #rrggbbaa — a surface over busy
-          // footage often wants to let some through — and is only offered once a colour is chosen.
-          const val = typeof v === 'string' ? v : '';
-          const rgb = val.slice(0, 7);
-          const alpha = val.length === 9 ? Math.round((parseInt(val.slice(7, 9), 16) / 255) * 100) : 100;
-          const withAlpha = (hex6: string, a: number) =>
-            a >= 100 ? hex6 : hex6 + Math.round((a / 100) * 255).toString(16).padStart(2, '0');
-          return (
-            <div key={key} className="flex flex-col gap-1.5" title={f.description}>
-              <span className="text-ink-4 text-[10px]">{fieldLabel(key)}</span>
-              <div className="flex flex-wrap items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => set(key, '')}
-                  title={t('kitProp.followTheme')}
-                  aria-label={t('kitProp.followTheme')}
-                  className={`h-5 w-5 shrink-0 rounded-full border bg-[linear-gradient(135deg,transparent_44%,#f43f5e_44%,#f43f5e_56%,transparent_56%)] ${!val ? 'border-accent ring-accent ring-1' : 'border-line'}`}
-                />
-                {kitSurfaceSwatches.map((sw) => (
-                  <button
-                    key={sw.value}
-                    type="button"
-                    onClick={() => set(key, withAlpha(sw.value, alpha))}
-                    title={sw.name}
-                    aria-label={sw.name}
-                    className={`h-5 w-5 shrink-0 rounded-full border ${rgb.toLowerCase() === sw.value.toLowerCase() ? 'border-accent ring-accent ring-1' : 'border-line'}`}
-                    style={{ background: sw.value }}
-                  />
-                ))}
-                <label
-                  title={t('kitProp.customColor')}
-                  className="border-line relative h-5 w-5 shrink-0 cursor-pointer overflow-hidden rounded-full border"
-                  style={{ background: 'conic-gradient(#f43f5e,#f59e0b,#84cc16,#06b6d4,#6366f1,#d946ef,#f43f5e)' }}
-                >
-                  <input
-                    type="color"
-                    value={/^#[0-9a-fA-F]{6}$/.test(rgb) ? rgb : '#ffffff'}
-                    onChange={(e) => set(key, withAlpha(e.target.value, alpha))}
-                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                    aria-label={t('kitProp.customColor')}
-                  />
-                </label>
-              </div>
-              {val && (
-                <label className="flex items-center gap-1.5">
-                  <span className="text-ink-4 shrink-0 text-[10px]">
-                    {t('kitProp.opacity')} {alpha}%
-                  </span>
-                  <input
-                    type="range"
-                    min={10}
-                    max={100}
-                    step={5}
-                    value={alpha}
-                    onChange={(e) => set(key, withAlpha(rgb, Number(e.target.value)))}
-                    className="accent-accent min-w-0 flex-1"
-                  />
-                </label>
-              )}
-            </div>
-          );
-        }
-        // string
-        const long = (f.maxLength ?? 0) >= 60;
-        return (
-          <div key={key} className="flex flex-col gap-1" title={f.description}>
-            <span className="text-ink-4 text-[10px]">{fieldLabel(key)}</span>
-            {long ? (
-              <textarea
-                value={typeof v === 'string' ? v : ''}
-                maxLength={f.maxLength}
-                rows={2}
-                onChange={(e) => set(key, e.target.value)}
-                className="border-line bg-panel text-ink focus:border-accent resize-none rounded border px-1.5 py-1 text-[11.5px] outline-none"
-              />
-            ) : (
-              <input
-                value={typeof v === 'string' ? v : ''}
-                maxLength={f.maxLength}
-                onChange={(e) => set(key, e.target.value)}
-                className="border-line bg-panel text-ink focus:border-accent rounded border px-1.5 py-1 text-[11.5px] outline-none"
-              />
-            )}
-          </div>
-        );
-      })}
-    </div>
+    <PropsForm
+      schema={def.jsonSchema as PropsSchema}
+      values={current}
+      onChange={(next) => onPatch({ ...((block.slots as { props?: Record<string, unknown> }).props ?? {}), ...next })}
+      labelOf={kitFieldLabel}
+      className="flex h-full min-h-0 w-60 flex-col gap-4 overflow-y-auto p-3"
+    />
   );
 }

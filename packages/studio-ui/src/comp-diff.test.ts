@@ -219,6 +219,28 @@ describe('blockPatchableChange', () => {
     expect(patch?.pairs[0]).toMatchObject({ a: { id: 'kit1' }, b: { id: 'kit1' }, kitProps: true });
   });
 
+  it('routes a bespoke component whose only slots delta is props to the live props channel', () => {
+    const manifest = JSON.stringify({ accent: { type: 'string', format: 'color', title: 'Accent', default: '#ff5a36' } });
+    const innerHtml = `<div data-props='${manifest}'><style>#c1 .k{color:var(--p-accent)}</style><i class="k"></i></div>`;
+    const source: Composition = {
+      ...base(),
+      blocks: [{ id: 'c1', templateId: 'custom', slots: { innerHtml, timelineBody: '' }, startSec: 0, durationSec: 2, trackIndex: 2, box: { x: 0.1, y: 0.1, w: 0.4, h: 0.2 } }],
+    };
+    const document = compositionToEditorDocument({ projectId: 'projection-props-patch', composition: source }).document;
+    const before = projectDocumentToComposition(document);
+    const propsOnly = applyOverlayDocumentEdits({ document, updates: [{ clipId: 'c1', block: { slots: { innerHtml, timelineBody: '', props: { accent: '#000000' } } } }] });
+    expect(propsOnly.ok).toBe(true);
+    if (!propsOnly.ok) return;
+    const patch = blockPatchableChange(before, projectDocumentToComposition(propsOnly.document));
+    expect(patch?.pairs).toHaveLength(1);
+    expect(patch?.pairs[0]).toMatchObject({ props: true, slots: false, kitProps: false });
+    // props AND markup → the node is re-assembled as before
+    const both = applyOverlayDocumentEdits({ document, updates: [{ clipId: 'c1', block: { slots: { innerHtml: innerHtml + '<b></b>', timelineBody: '', props: { accent: '#000000' } } } }] });
+    expect(both.ok).toBe(true);
+    if (!both.ok) return;
+    expect(blockPatchableChange(before, projectDocumentToComposition(both.document))?.pairs[0]).toMatchObject({ props: false, slots: true });
+  });
+
   it('classifies a media animation edit as a timeline-only patch', () => {
     const media = {
       id: 'sticker',

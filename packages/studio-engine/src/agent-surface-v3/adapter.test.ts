@@ -86,6 +86,14 @@ describe('v3 adapter translations', () => {
     expect(translateV3Call('set_clip_properties', { items: [{ clipId: 'n1' }] }, ctx)).toMatchObject({ status: 'error', error: 'nothing_to_change' });
   });
 
+  it('folds editable-property pairs on a graphic clip into one set_block_props call', () => {
+    expect(ok(translateV3Call('set_clip_properties', { items: [{ clipId: 'g1', props: [{ key: 'accent', value: '#000000' }, { key: 'badge', value: false }] }] }, ctx))).toEqual([
+      { tool: 'set_block_props', input: { blockId: 'g1', props: { accent: '#000000', badge: false } } },
+    ]);
+    expect(translateV3Call('set_clip_properties', { items: [{ clipId: 'n1', props: [{ key: 'accent', value: '#000000' }] }] }, ctx)).toMatchObject({ status: 'error', error: 'invalid_value', path: 'items[0].props' });
+    expect(translateV3Call('set_clip_properties', { items: [{ clipId: 'g1', props: { accent: '#000000' } }] }, ctx)).toMatchObject({ status: 'error', error: 'invalid_value', path: 'items[0].props' });
+  });
+
   it('accepts both remove_words selectors and warns that positions shift', () => {
     const result = translateV3Call('remove_words', { ranges: [[12.4, 15.1]], wordIds: ['w7', 'w8'], keepGapSec: 0.35 }, ctx);
     expect(result).toMatchObject({ status: 'ok', note: expect.stringContaining('re-read get_transcript') });

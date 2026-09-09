@@ -59,6 +59,8 @@ export interface BlockEdit {
   label?: string;
   /** This fragment box's real pixel size inside the current canvas, so the model sizes type/components against the actual frame. */
   boxPx?: { w: number; h: number };
+  /** Editable properties the user has tuned on this component (effective values): an edit must keep the keys. */
+  props?: Array<{ key: string; type: string; value: string | number | boolean }>;
   /** On-screen duration (seconds): sequential content spreads its reveals across the whole span (PPT-style) instead of dumping all at once. */
   durationSec?: number;
 }
@@ -82,6 +84,10 @@ function momentParts(args: { block: BlockEdit; context?: ComposeContext }): stri
       `This fragment is on screen for about ${args.block.durationSec.toFixed(1)}s. When timed SPOKEN BEATS are supplied below, they own reveal timing. Otherwise, for SEQUENTIAL content (steps / numbered list / pipeline / timeline), reveal the items ONE BY ONE spread ACROSS this whole duration (PPT / presenter rhythm — advance through them over the seconds), and highlight the active item; do NOT reveal them all at time 0. Genuinely single-beat content gets one calm reveal near the start then holds still.`,
     );
   if (args.block.label) parts.push(`This block currently shows: ${args.block.label}`);
+  if (args.block.props?.length)
+    parts.push(
+      `Current EDITABLE PROPERTIES (the user tuned these through the data-props manifest — keep every key and its type in the new data-props so the values survive):\n${args.block.props.map((p) => `  ${p.key} (${p.type}) = ${JSON.stringify(p.value)}`).join('\n')}`,
+    );
   if (args.context?.neighbors?.length)
     parts.push(
       `OTHER FRAGMENTS in this video, in order («THIS» marks the one you are making). Design for THIS fragment's content first; then, all else equal, avoid looking identical to its neighbors (vary alignment / motion flavor / secondary devices; repeating an archetype is fine when it fits best):\n${args.context.neighbors

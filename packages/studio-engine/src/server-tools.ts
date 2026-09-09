@@ -124,6 +124,8 @@ import { AGENT_TIMELINE_TOOL_IDS, runAgentTimelineTool } from './agent-timeline'
 import { planScriptCaptionSegments, splitScriptLines } from './script-captions';
 import { componentFontSlot, displayFontContext, isDisplayTextFontId } from './display-text-presets';
 import { searchFontsTool } from './font-search-tool';
+import { componentPropsCarry } from './component-props';
+import { applyComponentValues, blockPropsReadback, componentSchemaOf, componentValuesView } from './component-schema';
 import { describeAudioTargets, resolveAudioTarget } from './audio-target';
 
 // Ensure the template registry is ready at module load. The MCP worker path
@@ -159,6 +161,7 @@ export interface ServerToolOutcome {
 /** The set of offline-executable tools (route uses this to decide between fallback and returning studio_not_open as-is). */
 export const SERVER_EXECUTABLE_TOOLS: ReadonlySet<string> = new Set([
   'search_fonts',
+  'set_block_props',
   'get_state',
   'get_timeline',
   'read_director_plan',
@@ -610,6 +613,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
             box: b.box ?? null,
             innerHtml: r.innerHtml.slice(0, 4000),
             timelineBody: r.timelineBody.slice(0, 2000),
+            ...blockPropsReadback(b),
           },
         },
       };
@@ -661,6 +665,25 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
       return {
         result: { ok: true, summary: `Placed "${bname(b)}" at ${zoneOf(next.box!)}`, data: { box: next.box, ...(framing.length ? { hint: framing.join('; ') } : {}) } },
+        comp: projectDocumentToComposition(edit.document),
+        document: edit.document,
+      };
+    }
+    case 'set_block_props': {
+      const b = findBlock(input.blockId);
+      if (!b) return { result: { ok: false, error: 'block not found' } };
+      const view = componentSchemaOf(b);
+      if (!view) return { result: { ok: false, error: 'this component has no editable properties (media, caption, or a bespoke component without a data-props manifest)' } };
+      const requested = input.props && typeof input.props === 'object' && !Array.isArray(input.props) ? (input.props as Record<string, unknown>) : {};
+      const declared = Object.keys(view.schema.properties ?? {});
+      const unknown = Object.keys(requested).filter((key) => !declared.includes(key));
+      if (unknown.length) return { result: { ok: false, error: `unknown properties: ${unknown.join(', ')} — declared: ${declared.join(', ')}` } };
+      const slots = applyComponentValues(b, requested)!;
+      const edit = applyOverlayDocumentEdits({ document: p.document, updates: [{ clipId: b.id, block: { slots } }] });
+      if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+      const after = componentSchemaOf({ templateId: b.templateId, slots })!;
+      return {
+        result: { ok: true, summary: `Set ${Object.keys(requested).length} propert${Object.keys(requested).length === 1 ? 'y' : 'ies'} on "${bname(b)}"`, data: { blockId: b.id, props: componentValuesView(after) } },
         comp: projectDocumentToComposition(edit.document),
         document: edit.document,
       };
@@ -1503,7 +1526,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       }
       const fb = target ? renderBlock(target) : { innerHtml: '<div></div>', timelineBody: '' };
       const parsed = parseBlockResponse(raw, fb);
-      const issues = lintBlock({ blockId: applyId, innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody });
+      const issues = lintBlock({ blockId: applyId, innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, requireProps: true });
       const hard = issues.filter((i) => HARD_LINT_CODES.has(i.code));
       if (hard.length) {
         return {
@@ -1518,7 +1541,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (target) {
         const edit = applyOverlayDocumentEdits({
           document: p.document,
-          updates: [{ clipId: target.id, block: { templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, authoredDurationSec: target.durationSec, ...componentFontSlot(input.fontFamily, target.slots.fontFamily) }, ...(requestedLabel ? { label: requestedLabel } : {}) } }],
+          updates: [{ clipId: target.id, block: { templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, authoredDurationSec: target.durationSec, ...componentFontSlot(input.fontFamily, target.slots.fontFamily), ...componentPropsCarry(parsed.innerHtml, target.slots.props) }, ...(requestedLabel ? { label: requestedLabel } : {}) } }],
         });
         if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
         return {
@@ -1605,6 +1628,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
                 label: b.label,
                 durationSec: b.durationSec,
                 ...(b.box ? { boxPx: { w: Math.round(b.box.w * c.width), h: Math.round(b.box.h * c.height) } } : {}),
+                ...(blockPropsReadback(b).props ? { props: blockPropsReadback(b).props!.values } : {}),
               },
               // A kit block edits as props — same as the bridge context (unmentioned fields survive).
               ...(b.templateId.startsWith('kit:') ? { kitCurrent: { component: b.templateId.slice(4), props: (b.slots as { props?: Record<string, unknown> }).props ?? {} } } : {}),

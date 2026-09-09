@@ -65,6 +65,18 @@ describe('renderV3State', () => {
     expect(state.fonts).toContainEqual({ id: 'web:lxgw-wenkai', zh: '霞鹜文楷', en: 'LXGW WenKai' });
   });
 
+  it('exposes a bespoke component’s editable properties with overrides applied and orphans dropped', () => {
+    const manifest = JSON.stringify({ accent: { type: 'string', format: 'color', title: 'Accent', default: '#ff5a36' }, badge: { type: 'boolean', title: 'Badge', default: true } });
+    const bespoke: TimelineClip = {
+      ...graphic('g9', 0, 60),
+      block: { templateId: 'custom', slots: { innerHtml: `<div data-props='${manifest}'></div>`, timelineBody: '', props: { badge: false, ghost: 1 } }, box: { x: 0, y: 0, w: 0.5, h: 0.2 } } as never,
+    } as TimelineClip;
+    const state = renderV3State(doc([track('t3', 'graphics', [bespoke, graphic('g1', 100, 60)], { role: 'graphics' })]));
+    const [tuned, kit] = state.tracks[0]!.clips!;
+    expect(tuned!.component?.props).toEqual([{ key: 'accent', type: 'color', value: '#ff5a36' }, { key: 'badge', type: 'boolean', value: false }]);
+    expect(kit!.component?.props).toBeUndefined();
+  });
+
   it('omits identity geometry and keeps a real crop or subject framing', () => {
     const identity = narrative('c1', 0, 300, {
       mediaFraming: { crop: { top: 0, left: 0, right: 0, bottom: 0 }, rounding: 0, transform: { scale: 1, offsetX: 0, offsetY: 0 } },

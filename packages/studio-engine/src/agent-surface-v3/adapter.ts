@@ -318,6 +318,14 @@ function translateSetClipProperties(input: Input, ctx: V3AdapterContext): V3Tran
     }
     if (typeof row.enabled === 'boolean') typed.enabled = row.enabled;
     if (row.box && typeof row.box === 'object') typed.box = row.box;
+    if (row.props !== undefined) {
+      // Editable properties of a bespoke graphic: pairs fold into one deterministic set_block_props call.
+      if (kind !== 'graphic') return { status: 'error', error: 'invalid_value', path: `items[${index}].props`, value: row.props, fix: 'props apply to graphic clips only.' };
+      const pairs = Array.isArray(row.props) ? (row.props as unknown[]) : [];
+      const valid = pairs.length > 0 && pairs.every((pair) => pair && typeof pair === 'object' && isNonEmptyString((pair as Input).key) && ['string', 'number', 'boolean'].includes(typeof (pair as Input).value));
+      if (!valid) return { status: 'error', error: 'invalid_value', path: `items[${index}].props`, value: row.props, fix: 'props is a non-empty array of {key, value} pairs; keys come from component.props in get_state.' };
+      calls.push({ tool: 'set_block_props', input: { blockId: row.clipId, props: Object.fromEntries(pairs.map((pair) => [(pair as Input).key as string, (pair as Input).value])) } });
+    }
     const fades = row.fades && typeof row.fades === 'object' ? (row.fades as Input) : undefined;
     const fadeIn = fades && isFiniteNumber(fades.in) ? framesToSec(fades.in, ctx.fps) : undefined;
     const fadeOut = fades && isFiniteNumber(fades.out) ? framesToSec(fades.out, ctx.fps) : undefined;
