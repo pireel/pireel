@@ -28,6 +28,12 @@ export interface GenAsset {
 
 export type GenStatus = 'pending' | 'succeeded' | 'failed';
 
+export {
+  generatedAssetIndexEntry,
+  generatedRecordsFromJobs,
+  type GeneratedAssetRecord,
+} from '@pireel/studio-engine/generated-assets';
+
 export interface GenJob {
   id: string;
   status: GenStatus;

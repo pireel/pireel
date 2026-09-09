@@ -28,7 +28,7 @@ import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { HARD_LINT_CODES, lintBlock } from '@pireel/studio-engine/block-lint';
 import { addElementEntry } from './element-history';
-import type { GenElementResult } from './gen-chat-panel';
+import type { GenElementResult } from './element-history';
 import { fitElementDesignBox } from './element-insert-geometry';
 import type { StudioChatHandle } from './studio-chat';
 import { t } from './i18n';

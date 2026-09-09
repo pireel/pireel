@@ -15,6 +15,7 @@ import { AskUserCard } from './chat-ask-card';
 import { ApprovalCard } from './chat-approval-card';
 import { ExportSettingsCard } from './chat-export-card';
 import { t } from './i18n';
+import { CreditsShortfallBody, GeneratedAudioBody, GenerationJobsBody, type GenerationCardActions } from './chat-generation-card';
 
 /* ============================ Tool-duration memory (for ETA) ============================ */
 
@@ -231,7 +232,7 @@ function ToolCard({ def, part, children }: { def: StudioToolDef; part: ToolPartL
   );
 }
 
-export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocate?: (sec: number) => void; getComp?: () => Composition }): React.ReactNode {
+export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocate?: (sec: number) => void; getComp?: () => Composition; generation?: GenerationCardActions }): React.ReactNode {
   const id = toolIdOf(part);
   const def = studioToolDefFor(id);
   if (!def) return null;
@@ -269,15 +270,32 @@ export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocat
   const speechAsset = id === 'generate_speech' && part.state === 'output-available'
     ? <SpeechAssetBody output={part.output} />
     : null;
+  // Generation receipts show the result itself (progress while the hosted job runs), plus the
+  // host's top-up card when the generation was refused for credits.
+  const args = ((part.input as { args?: Record<string, unknown> } | undefined)?.args ?? part.input ?? {}) as Record<string, unknown>;
+  const promptArg = typeof args.prompt === 'string' ? args.prompt : typeof args.text === 'string' ? args.text : '';
+  const out = part.output as StudioToolResult | undefined;
+  const shortfall = part.state === 'output-available' && out?.ok === false && typeof out.error === 'string' && /insufficient_tokens/i.test(out.error)
+    ? <CreditsShortfallBody error={out.error} />
+    : null;
+  const jobIds = part.state === 'output-available' && out?.ok !== false && (id === 'generate_image' || id === 'generate_video')
+    ? ((out?.data as { ids?: unknown } | undefined)?.ids as unknown[] | undefined)?.filter((value): value is string => typeof value === 'string') ?? []
+    : [];
+  const generation = jobIds.length && opts?.generation
+    ? <GenerationJobsBody ids={jobIds} kind={id === 'generate_video' ? 'video' : 'image'} prompt={promptArg} actions={opts.generation} />
+    : (id === 'generate_audio' || id === 'generate_music' || id === 'generate_sfx') && part.state === 'output-available' && opts?.generation
+      ? <GeneratedAudioBody output={part.output} prompt={promptArg} actions={opts.generation} />
+      : null;
+  const body = shortfall ?? preview ?? assetResults ?? speechAsset ?? generation;
   return (
     <div key={key}>
       {def.kind === 'card' ? (
         <ToolCard def={def} part={part}>
-          {preview ?? assetResults ?? speechAsset}
+          {body}
         </ToolCard>
       ) : (
         <ToolBadge def={def} part={part}>
-          {preview ?? assetResults ?? speechAsset}
+          {body}
         </ToolBadge>
       )}
     </div>

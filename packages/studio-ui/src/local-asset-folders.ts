@@ -2,11 +2,6 @@ import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 
 export type FolderSource = NonNullable<LocalAssetIndexEntry['folder']>;
 
-export interface FolderRestoreGroup {
-  folder: FolderSource;
-  entries: LocalAssetIndexEntry[];
-}
-
 export const LOCAL_ASSET_LABEL_MAX_LENGTH = 80;
 
 /** A user-authored semantic label is project metadata, not a filename mutation. Keep the stable
@@ -57,17 +52,4 @@ export function triggerFolderInput(input: Pick<HTMLInputElement, 'click'> | null
  * lacks a live object URL, even when the cloud/local registry contents themselves are unchanged. */
 export function pendingLocalAssetEntries<T extends { assetId: string }>(entries: T[], linkedAssetIds: ReadonlySet<string>): T[] {
   return entries.filter((entry) => !linkedAssetIds.has(entry.assetId));
-}
-
-/** Folder imports retain one logical folder id in the cloud-safe index. When its local root
- * authorization is unavailable, collapse every missing child into one recovery affordance. */
-export function groupFolderRestoreEntries(entries: LocalAssetIndexEntry[]): FolderRestoreGroup[] {
-  const groups = new Map<string, FolderRestoreGroup>();
-  for (const entry of entries) {
-    if (!entry.folder) continue;
-    const group = groups.get(entry.folder.id);
-    if (group) group.entries.push(entry);
-    else groups.set(entry.folder.id, { folder: entry.folder, entries: [entry] });
-  }
-  return [...groups.values()];
 }

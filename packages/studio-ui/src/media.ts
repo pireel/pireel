@@ -1,10 +1,11 @@
 'use client';
 
 /**
- * Studio local media pipeline — video is never uploaded to the cloud, only read in the browser.
+ * Studio media pipeline — the browser reads the local file directly for preview/probing; the bytes are
+ * backed up to the cloud rendezvous in the background (asset-upload-queue) so any device can reopen the project.
  *
  * Open → pick a local file (URL.createObjectURL for local preview playback) → MediaBunny probes metadata →
- * **audio only** (tens of MB) is uploaded for ASR → shots. The full source clip is uploaded only on Export.
+ * **audio only** (tens of MB) is uploaded for ASR → shots.
  * Reuses existing shared pieces: extractAudio (MediaBunny audio-track extraction) / studioProviders().uploads.upload
  * (clean intermediate-artifact path, doesn't pollute the material library).
  */
@@ -35,6 +36,9 @@ export function classifyAsrResponse(value: { asr_ok?: boolean; detail?: string }
 
 const durableFileSigs = new WeakMap<File, string>();
 const CONTENT_SIG_MARKER = '#pireel=';
+/** Name-free content identity: `pireel2:<hash>:<size>`. Same bytes → same asset on every device,
+ * regardless of filename, mtime or the MIME a particular picker reports. */
+const CONTENT_SIG_PREFIX = 'pireel2:';
 
 /** Legacy synchronous identity. Newly imported browser files are upgraded through durableFileSig;
  * callers that receive an aligned/restored File transparently get its remembered durable sig. */
@@ -42,12 +46,53 @@ export function fileSig(file: File): string {
   return durableFileSigs.get(file) ?? `${file.name}:${file.size}:${file.lastModified}`;
 }
 
-/** Stable lightweight content identity for newly imported files. Hashing three bounded slices keeps
- * multi-GB videos cheap while preventing unrelated same-name/size/mtime files from sharing OPFS,
- * ASR or cloud-vault entries. The final size/mtime fields preserve the legacy locator grammar. */
+export const isContentSig = (sig: string): boolean => sig.startsWith(CONTENT_SIG_PREFIX);
+
+/** Byte size encoded in any locator format (content sig: last field; legacy: second to last). */
+export function sigSize(sig: string): number | null {
+  const parts = sig.split(':');
+  const raw = Number(isContentSig(sig) ? parts[parts.length - 1] : parts[parts.length - 2]);
+  return Number.isSafeInteger(raw) && raw >= 0 ? raw : null;
+}
+
+async function sampledContentHash(file: File): Promise<string> {
+  const chunkSize = 64 * 1024;
+  const offsets = file.size <= chunkSize * 5
+    ? [0]
+    : [0, 0.25, 0.5, 0.75, 1].map((fraction) =>
+        Math.max(0, Math.min(file.size - chunkSize, Math.floor(file.size * fraction) - (fraction === 1 ? chunkSize : Math.floor(chunkSize / 2)))),
+      );
+  const slices = file.size <= chunkSize * 5
+    ? [await file.arrayBuffer()]
+    : await Promise.all(offsets.map((offset) => file.slice(offset, Math.min(file.size, offset + chunkSize)).arrayBuffer()));
+  const metadata = new TextEncoder().encode(`${file.size}\n`);
+  const total = metadata.byteLength + slices.reduce((sum, value) => sum + value.byteLength, 0);
+  const input = new Uint8Array(total);
+  let cursor = 0;
+  input.set(metadata, cursor);
+  cursor += metadata.byteLength;
+  for (const slice of slices) {
+    input.set(new Uint8Array(slice), cursor);
+    cursor += slice.byteLength;
+  }
+  const digest = await crypto.subtle.digest('SHA-256', input);
+  return [...new Uint8Array(digest)].slice(0, 16).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/** Stable lightweight content identity for imported files. Hashing five bounded slices keeps
+ * multi-GB videos cheap while preventing unrelated same-size files from sharing OPFS, ASR or cloud
+ * entries. Filename, mtime and MIME are deliberately NOT part of the identity: the same file imported
+ * from another device or after a rename must dedupe to one asset and one upload. */
 export async function durableFileSig(file: File): Promise<string> {
   const remembered = durableFileSigs.get(file);
   if (remembered) return remembered;
+  const sig = `${CONTENT_SIG_PREFIX}${await sampledContentHash(file)}:${file.size}`;
+  durableFileSigs.set(file, sig);
+  return sig;
+}
+
+/** Legacy fingerprint (`name#pireel=<hash>:size:mtime`) recomputed only to validate an old locator. */
+async function legacyDurableFileSig(file: File): Promise<string> {
   const chunkSize = 64 * 1024;
   const slices = file.size <= chunkSize * 3
     ? [await file.arrayBuffer()]
@@ -67,9 +112,7 @@ export async function durableFileSig(file: File): Promise<string> {
   }
   const digest = await crypto.subtle.digest('SHA-256', input);
   const hash = [...new Uint8Array(digest)].slice(0, 16).map((byte) => byte.toString(16).padStart(2, '0')).join('');
-  const sig = `${file.name}${CONTENT_SIG_MARKER}${hash}:${file.size}:${file.lastModified}`;
-  durableFileSigs.set(file, sig);
-  return sig;
+  return `${file.name}${CONTENT_SIG_MARKER}${hash}:${file.size}:${file.lastModified}`;
 }
 
 export function rememberDurableFileSig(file: File, sig: string): File {
@@ -77,7 +120,10 @@ export function rememberDurableFileSig(file: File, sig: string): File {
   return file;
 }
 
+/** Display filename recoverable from LEGACY locators only. Content sigs carry no name: callers fall
+ * back to the asset's label. */
 export function fileNameFromSig(sig: string): string {
+  if (isContentSig(sig)) return '';
   const raw = sig.split(':').slice(0, -2).join(':') || sig;
   const marker = raw.lastIndexOf(CONTENT_SIG_MARKER);
   return marker >= 0 && /^[0-9a-f]{32}$/.test(raw.slice(marker + CONTENT_SIG_MARKER.length))
@@ -86,9 +132,18 @@ export function fileNameFromSig(sig: string): string {
 }
 
 export async function fileMatchesSig(file: File, sig: string): Promise<boolean> {
-  return sig.includes(CONTENT_SIG_MARKER)
-    ? (await durableFileSig(file)) === sig
-    : `${file.name}:${file.size}:${file.lastModified}` === sig;
+  if (isContentSig(sig)) {
+    if (sigSize(sig) !== file.size) return false;
+    return (await durableFileSig(file)) === sig;
+  }
+  if (sig.includes(CONTENT_SIG_MARKER)) {
+    const remembered = durableFileSigs.get(file);
+    if (remembered) return remembered === sig;
+    const legacy = await legacyDurableFileSig(file);
+    if (legacy === sig) durableFileSigs.set(file, sig);
+    return legacy === sig;
+  }
+  return `${file.name}:${file.size}:${file.lastModified}` === sig;
 }
 
 /** Probe video metadata locally (MediaBunny dynamically loaded, no upload). */

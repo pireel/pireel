@@ -228,11 +228,11 @@ import {
 } from "./media";
 import {
   alignFileToSig,
-  loadLocalAssetFile,
-  loadLocalFolderFile,
   loadLocalVideo,
+  resolveAssetBytes,
   saveLocalVideo,
 } from "./local-media";
+import { assetUploadQueue } from "./asset-upload-queue";
 import { materializeRemoteMedia } from "./remote-media";
 import {
   shouldReconnectNarrativeSource,
@@ -288,7 +288,7 @@ import {
   type StudioChatHandle,
   type StudioElementRef,
 } from "./studio-chat";
-import { buildChatMentionElements } from "./chat-local-asset-mention";
+import { buildChatMentionElements, localAssetMentionRef } from "./chat-local-asset-mention";
 import { resolveLocalAssetReference } from "./studio-tool-input-references";
 import { shouldCollapseChatForTimelineFramePick } from "./chat-timeline-frame-picker";
 import { ElementSourceEditor, type SourceDraft } from "./element-source-editor";
@@ -332,7 +332,7 @@ import {
   DropdownMenuTrigger,
 } from "@pireel/ui/dropdown-menu";
 import { BatchExportDialog, type OutputBatchState } from "./batch-export-dialog";
-import { GenChatPanel, type GenElementResult } from "./gen-chat-panel";
+import { generatedAssetIndexEntry, generatedRecordsFromJobs, listStudioGens, type GeneratedAssetRecord } from "./gen-api";
 import { KIT_INSERT_DURATION, kitSampleProps } from "./kit-ui";
 import { wordsFromText } from "@pireel/studio-engine/caption-fx";
 import { AssetsPanel, type GenType, type PanelDragAsset } from "./assets-panel";
@@ -1093,7 +1093,7 @@ export function HyperframesWorkbench({
     setLocateSignal((n) => n + 1);
   };
   const [libTab, setLibTab] = useState<
-    "assets" | "frames" | "script" | "captions" | "audio" | "text" | "props" | "gen" | "avatar"
+    "assets" | "frames" | "script" | "captions" | "audio" | "text" | "props" | "avatar"
   >("assets"); // rail primary-nav tab (themes hidden)
   const [libCollapsed, setLibCollapsed] = useState(false); // asset rail collapsed (narrow strip + expand button; content hidden but state kept)
   const selectedDisplayTextBlock = useMemo(
@@ -1177,13 +1177,6 @@ export function HyperframesWorkbench({
   // (setFloatWin handles the exit settlement uniformly).
   const [floatWin, setFloatWinRaw] = useState<FloatKind | null>(null);
   const floatWinRef = useRef<FloatKind | null>(null);
-  const [genType, setGenType] = useState<GenType>("image"); // current tab inside the gen panel
-  const [genSeedPrompt, setGenSeedPrompt] = useState<{
-    type: GenType;
-    prompt: string;
-    revision: number;
-  } | null>(null);
-  const genSeedRevisionRef = useRef(0);
   const [genRefreshTick, setGenRefreshTick] = useState(0);
   /** The rail was "auto-expanded just to dock a panel" — collapse it back after the panel closes (leave user-expanded ones alone). */
   const libAutoExpandedRef = useRef(false);
@@ -1603,6 +1596,18 @@ export function HyperframesWorkbench({
     localAssetIndexKnownRef.current = true;
     setLocalAssetIndexRev((value) => value + 1);
   }, []);
+  /** The index as persisted: the in-memory entries plus every cloud key the upload queue reported
+   * this session. Keys are merged here (not written into the in-memory index) so a finished upload
+   * never hands the panel a new registry — the next save carries the key to every other device. */
+  const persistedLocalAssets = (): LocalAssetIndexEntry[] => {
+    const clips = cloudMediaRef.current.clips ?? {};
+    const video = cloudMediaRef.current.video;
+    return localAssetIndexRef.current.map((entry) => {
+      if (entry.cloudKey) return entry;
+      const key = clips[entry.contentSig]?.key ?? (video?.sig === entry.contentSig ? video.key : undefined);
+      return key ? { ...entry, cloudKey: key } : entry;
+    });
+  };
   const changeLocalAssetIndex = useCallback(
     (entries: LocalAssetIndexEntry[]) => {
       localAssetIndexMutationRevRef.current += 1;
@@ -1611,8 +1616,8 @@ export function HyperframesWorkbench({
     [setLocalAssetIndex],
   );
 
-  /** Resolve a persisted device-local image identity without ever minting a cloud URL. Folder
-   * handles are pinned into OPFS after the first explicit access so later capture/export is stable. */
+  /** Resolve a persisted image identity: device cache first, then the cloud rendezvous (written
+   * back into the cache so later capture/export is stable). Never mints a cloud URL. */
   const resolveLocalImageFile = useCallback(
     async (sig: string): Promise<File | null> => {
       const direct = await loadLocalVideo(sig);
@@ -1620,17 +1625,9 @@ export function HyperframesWorkbench({
       const entry = localAssetIndexRef.current.find(
         (item) => item.contentSig === sig && item.kind === "image",
       );
-      if (!entry?.folder) return null;
-      const folder = await loadLocalFolderFile(
-        entry.folder.id,
-        entry.folder.path,
-        sig,
-      );
-      if (!folder?.file) return null;
-      await saveLocalVideo(folder.file, sig, undefined, { pinned: true });
-      return folder.file;
+      return entry ? resolveAssetBytes(entry, { projectId }) : null;
     },
-    [],
+    [projectId],
   );
   const localRuntimePreparingRef = useRef<Map<string, Promise<
     | { ok: true; prepared: boolean; file?: File }
@@ -1677,9 +1674,9 @@ export function HyperframesWorkbench({
           : sameContent.length === 1
             ? sameContent[0]
             : undefined;
-        const local = entry ? await loadLocalAssetFile(projectId, entry) : await loadLocalVideo(sig);
+        const local = entry ? await resolveAssetBytes(entry, { projectId }) : await loadLocalVideo(sig);
         const cloud = !local && asset.locator.cloudKey
-          ? await studioProviders().vault.fetch(sig)
+          ? await studioProviders().vault.fetch(sig, { cloudKey: asset.locator.cloudKey, label: asset.label })
           : null;
         const file = local ?? cloud ?? null;
         if (generation !== localRuntimeGenerationRef.current) {
@@ -1696,15 +1693,11 @@ export function HyperframesWorkbench({
             error: `local ${asset.kind} access is unavailable — restore access to “${asset.label || sig}”, then retry`,
           };
         }
-        // OPFS pinning improves refresh recovery, but a full local cache must not prevent the
-        // currently authorized File/folder handle from being used in this session.
+        // Device caching improves refresh recovery; a full cache must not block this session.
         try {
-          await saveLocalVideo(file, sig, undefined, {
-            pinned: asset.kind === "image" || asset.kind === "audio",
-            ...(entry ? { binding: { projectId, assetId: entry.assetId } } : {}),
-          });
+          await saveLocalVideo(file, sig);
         } catch {
-          // The authorized File remains usable for this session even when the local cache is full.
+          // The File remains usable for this session even when the local cache is full.
         }
         // The Materials panel may have already rendered a restore card before this tool-driven
         // recovery completed. Publish a new registry identity so its byte-resolution effect retries
@@ -1805,34 +1798,35 @@ export function HyperframesWorkbench({
       ? { cloudMedia: cloudMediaRef.current }
       : {}),
     ...(localAssetIndexKnownRef.current
-      ? { localAssets: localAssetIndexRef.current }
+      ? { localAssets: persistedLocalAssets() }
       : {}),
     videoSig: videoSigRef.current,
     videoDurationSec: firstNarrativeDurationSec(editorDocumentRef.current),
   };
-  /** Silently back up a source video to R2 (content-addressed, dup = instant); on success record the index and trigger a cloud sync. */
+  /** Back up media to the cloud rendezvous through the tab-wide queue (content-addressed, dup =
+   * instant, retried in the background). The queue's onUploaded handler below records the key. */
   const backupMediaToCloud = (
     file: File,
     sig: string,
-    kind: "video" | "clip",
+    _kind: "video" | "clip",
   ) => {
-    void studioProviders()
-      .vault.backup(file, sig)
-      .then((r) => {
-        if (!r) return; // silent degrade: local works as usual, retry on next open (idempotent)
-        if (kind === "video")
-          cloudMediaRef.current = {
-            ...cloudMediaRef.current,
-            video: { sig, key: r.key },
-          };
-        else
-          cloudMediaRef.current = {
-            ...cloudMediaRef.current,
-            clips: { ...cloudMediaRef.current.clips, [sig]: { key: r.key } },
-          };
-        setCloudMediaRev((v) => v + 1);
-      });
+    assetUploadQueue().enqueue({ sig, file });
   };
+  // The ONE place an upload result becomes project state: the transient cloud index, folded into
+  // V2 locators AND the project asset index at persistence (project-document.ts). The in-memory
+  // index is deliberately NOT rewritten here: replacing it would hand the panel a new registry and
+  // re-render every card for a field only the next save needs; the queue's own state already tells
+  // the card the upload is done.
+  useEffect(
+    () =>
+      assetUploadQueue().onUploaded(({ sig, key }) => {
+        cloudMediaRef.current = videoSigRef.current === sig
+          ? { ...cloudMediaRef.current, video: { sig, key } }
+          : { ...cloudMediaRef.current, clips: { ...cloudMediaRef.current.clips, [sig]: { key } } };
+        setCloudMediaRev((v) => v + 1);
+      }),
+    [],
+  );
   /** Export-time audio/denoise payload getters; filled by useBgm/useDenoise below (hook order: they need consts defined later). */
   const audioExportRef = useRef<
     (() => Promise<{ clip: AudioClip; file: File }[] | null>) | null
@@ -2172,7 +2166,7 @@ export function HyperframesWorkbench({
       if (asset.kind !== "image") return;
       // Heal legacy handle-only imports when their bytes become readable again. New image imports
       // are already pinned in local-import-session; this repeat is idempotent by sig and size.
-      void saveLocalVideo(asset.file, asset.sig, undefined, { pinned: true });
+      void saveLocalVideo(asset.file, asset.sig);
       if (!localImagePreviewUrlsRef.current.has(asset.sig)) {
         localImagePreviewUrlsRef.current.set(
           asset.sig,
@@ -3084,7 +3078,7 @@ export function HyperframesWorkbench({
       schemaVersion: STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION,
       outputs: projectOutputs.outputsRef.current,
       ...(localAssetIndexKnownRef.current
-        ? { localAssets: localAssetIndexRef.current }
+        ? { localAssets: persistedLocalAssets() }
         : {}),
     }),
     projectOutputs.outputs,
@@ -3192,14 +3186,11 @@ export function HyperframesWorkbench({
   const openFloatAt = (kind: FloatKind, _anchor?: DOMRect | null) => {
     setFloatWin(kind);
   };
+  /** Generation has ONE entry: the chat. Arm the intent (kind + parameters) in the composer; the
+   * agent runs the generation tool and the output lands in the project media directory. */
   const openGeneration = (type: GenType = "image", prompt?: string) => {
-    setGenType(type);
-    setGenSeedPrompt(
-      prompt ? { type, prompt, revision: ++genSeedRevisionRef.current } : null,
-    );
     setFloatWin(null);
-    setLibTab("gen");
-    if (libCollapsed) setLibCollapsedManual(false);
+    chatRef.current?.beginGeneration(type, prompt);
   };
   // The person panel depends on a selected shot (its entry is disabled without one): if the selection is lost while open → just close it
   useEffect(() => {
@@ -4212,10 +4203,10 @@ export function HyperframesWorkbench({
 
       void saveLocalVideo(file, sig).then((stored) => {
         if (!stored) toast.info(t("workbench.localPersistenceUnavailable"));
-      }); // OPFS local library: draft restore auto-reconnects after refresh, no re-pick needed
-      // Main video stays LOCAL (no auto R2 backup) — kept off deliberately; cross-device video
-      // persistence is reserved for a future paid feature. Same-device reconnect uses OPFS above.
-      // Inserted clips still back up (insert_clip fetches them from the cloud in another session).
+      }); // device cache: draft restore reopens instantly on this device
+      // Cloud rendezvous: the queue uploads in the background (content-addressed, duplicate = instant)
+      // so the project reopens on any device and offline agents can reach the bytes.
+      assetUploadQueue().enqueue({ sig, file, label: file.name });
 
       const dur = p.durationSec || 30;
       const pr = pendingRestoreRef.current;
@@ -4338,14 +4329,12 @@ export function HyperframesWorkbench({
         const entry = localAssetIndexRef.current.find(
           (item) => item.contentSig === asset.locator.localSig,
         );
-        if (entry?.folder) {
-          const folder = await loadLocalFolderFile(
-            entry.folder.id,
-            entry.folder.path,
-            asset.locator.localSig,
-          );
-          if (folder?.file) return folder.file;
-        }
+        const resolved = entry
+          ? await resolveAssetBytes(entry, { projectId })
+          : asset.locator.cloudKey
+            ? await studioProviders().vault.fetch(asset.locator.localSig, { cloudKey: asset.locator.cloudKey, label: asset.label })
+            : null;
+        if (resolved) return resolved;
       }
       const source = resolveAssetUrl(asset);
       if (!source) return null;
@@ -4997,9 +4986,10 @@ export function HyperframesWorkbench({
       i.click();
     });
   /** Keep a user-picked image on this device and persist only its stable identity in the project.
-   * This is the browser-picker counterpart of the agent helper's register-local-assets path. */
+   * This is the browser-picker counterpart of the agent helper's register-asset path. */
   const preparePickedLocalImage = async (file: File): Promise<string> => {
-    const asset = await importLocalSource({ type: "browser", file }, projectId);
+    const asset = await importLocalSource({ type: "browser", file });
+    assetUploadQueue().enqueue({ sig: asset.contentSig, file: asset.file, label: asset.label });
     if (asset.kind !== "image")
       throw new Error("selected file is not an image");
     let dims: { width?: number; height?: number } = {};
@@ -5567,28 +5557,6 @@ export function HyperframesWorkbench({
   };
   /** Generated video → set as the main video. The CDN has no CORS headers, so fetch bytes through the /api/media/fetch same-origin proxy.
    *  Swapping the main video = a new project (pickVideoFile clears shots/blocks) — confirm first if there's content. */
-  const setMainVideoFromUrl = async (url: string) => {
-    const c = compRef.current;
-    if (editorDocumentRenderPlan(editorDocumentRef.current).durationSec > 0) {
-      const ok = await confirm({
-        title: t("workbench.replaceMainVideo"),
-        description: t("workbench.replacingMainVideoStarts"),
-        confirmLabel: t("panels.replace"),
-        tone: "danger",
-      });
-      if (!ok) return;
-    }
-    try {
-      const materialized = await materializeRemoteMedia(url, {
-        name: "generated.mp4",
-        type: "video/mp4",
-      });
-      await pickVideoFile(materialized.file, { asSig: materialized.sig });
-    } catch (e) {
-      console.warn("[studio] set main video failed", e);
-      toast.error(t("workbench.couldNotReplaceMain"));
-    }
-  };
   /** Frame panel "use" → attach the frame as a tag in chat (the request carries frameId to inject the playbook), switch back to chat. */
   const useFrameInChat = (f: FrameCatalogItem) => {
     openChat();
@@ -6223,7 +6191,10 @@ export function HyperframesWorkbench({
     const indexedKind = sig
       ? localAssetIndexRef.current.find((entry) => entry.contentSig === sig)?.kind
       : undefined;
-    let f = sig ? await loadLocalVideo(sig) : null;
+    const indexed = sig
+      ? localAssetIndexRef.current.find((entry) => entry.contentSig === sig)
+      : undefined;
+    let f = sig ? (indexed ? await resolveAssetBytes(indexed, { projectId }) : await loadLocalVideo(sig)) : null;
     if (!f && sig) {
       const vaulted =
         src == null
@@ -6231,7 +6202,7 @@ export function HyperframesWorkbench({
           : !!cloudMediaRef.current.clips?.[sig];
       if (vaulted) {
         const cf = await studioProviders().vault.fetch(sig);
-        if (cf) f = alignFileToSig(cf, sig); // vault files carry their own name/mtime — realign or the identity drifts
+        if (cf) f = alignFileToSig(cf, sig, indexed?.label); // vault files carry their own name/mtime — realign or the identity drifts
       }
     }
     if (!f) {
@@ -7172,6 +7143,16 @@ export function HyperframesWorkbench({
   const dominantScriptTrack = dominantTimelineSpeechTrack(editorDocument);
   const useNativeScriptPanel = !primaryNarrativeClips(editorDocument).length
     || (!!dominantScriptTrack && dominantScriptTrack.trackId !== editorDocument.semantics.primaryNarrativeTrackId);
+  /** Generated outputs follow the project like imports: one directory entry per output, keyed by its
+   * storage key (already in the cloud, nothing to upload). Idempotent by asset id, one publish per batch. */
+  const registerGeneratedAssets = useCallback((records: GeneratedAssetRecord[]) => {
+    const known = new Set(localAssetIndexRef.current.map((entry) => entry.assetId));
+    const fresh = records
+      .map((record) => generatedAssetIndexEntry(record, record.kind === 'video' ? t('common.videoGeneration') : record.kind === 'audio' ? t('panels.music') : t('common.imageGeneration')))
+      .filter((entry) => !known.has(entry.assetId));
+    if (!fresh.length) return;
+    changeLocalAssetIndex([...fresh, ...localAssetIndexRef.current]);
+  }, [changeLocalAssetIndex]);
   const registerLocalAsset = (entry: LocalAssetIndexEntry) => {
     const previous = localAssetIndexRef.current.find(
       (item) => item.assetId === entry.assetId,
@@ -7431,7 +7412,7 @@ export function HyperframesWorkbench({
               schemaVersion: STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION,
               outputs: projectOutputs.outputsRef.current,
               ...(localAssetIndexKnownRef.current
-                ? { localAssets: localAssetIndexRef.current }
+                ? { localAssets: persistedLocalAssets() }
                 : {}),
             },
             videoSig: videoSigRef.current,
@@ -7450,7 +7431,7 @@ export function HyperframesWorkbench({
         schemaVersion: STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION,
         outputs: projectOutputs.outputsRef.current,
         ...(localAssetIndexKnownRef.current
-          ? { localAssets: localAssetIndexRef.current }
+          ? { localAssets: persistedLocalAssets() }
           : {}),
       },
       videoSig:
@@ -8140,9 +8121,10 @@ export function HyperframesWorkbench({
           }
           if (f) return;
           // Not in OPFS (device switch / cleared cache) → fetch from the cloud byte rendezvous; only a miss falls back to manual re-pick
-          if (cloudMediaRef.current.video?.sig === mainSig) {
+          const primaryCloudKey = primaryId ? restoredDocument.assets[primaryId]?.locator.cloudKey : undefined;
+          if (cloudMediaRef.current.video?.sig === mainSig || primaryCloudKey) {
             toast.info(t("workbench.retrievingVideoFromCloud"));
-            const cf = await studioProviders().vault.fetch(mainSig);
+            const cf = await studioProviders().vault.fetch(mainSig, primaryCloudKey ? { cloudKey: primaryCloudKey } : undefined);
             if (cf && pendingRestoreRef.current === d) {
               void pickVideoFile(cf, { asSig: mainSig, reconnect: true });
               return;
@@ -8165,6 +8147,45 @@ export function HyperframesWorkbench({
   // the cloud request itself to settle or a slow response can resurrect cross-browser deletions.
   const [localAssetIndexSyncReady, setLocalAssetIndexSyncReady] =
     useState(false);
+  // Generation history joins the project media directory (outputs made before the directory existed,
+  // or by an agent in another session). Idempotent: registerGeneratedAssets skips known ids.
+  useEffect(() => {
+    if (!localAssetIndexSyncReady || !projectId) return;
+    let cancelled = false;
+    void Promise.all([
+      listStudioGens(projectId, "image", 60).catch(() => []),
+      listStudioGens(projectId, "video", 60).catch(() => []),
+      listStudioGens(projectId, "audio", 60).catch(() => []),
+    ]).then(([images, videos, audios]) => {
+      if (cancelled) return;
+      registerGeneratedAssets(generatedRecordsFromJobs([
+        ...images.map((job) => ({ ...job, kind: "image" as const })),
+        ...videos.map((job) => ({ ...job, kind: "video" as const })),
+        ...audios.map((job) => ({ ...job, kind: "audio" as const })),
+      ]));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, localAssetIndexSyncReady, registerGeneratedAssets]);
+  // Cloud self-heal: assets imported before cloud-by-default (or whose upload never finished) are
+  // uploaded as soon as this device can read their bytes. Device-only lanes: no prompts, no network.
+  useEffect(() => {
+    if (!localAssetIndexSyncReady) return;
+    let cancelled = false;
+    void (async () => {
+      for (const entry of localAssetIndexRef.current) {
+        if (cancelled) return;
+        if (entry.cloudKey || assetUploadQueue().state(entry.contentSig)) continue;
+        const file = await resolveAssetBytes(entry, { projectId, deviceOnly: true });
+        if (cancelled) return;
+        if (file) assetUploadQueue().enqueue({ sig: entry.contentSig, file, label: entry.label });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, localAssetIndexSyncReady, localAssetIndexRev]);
   // CAPTIONS ARE DERIVED STATE: transcript × shots × captionStyle.on → display cues, materialized into
   // comp.blocks for every consumer (preview/timeline/selection/agent) but NEVER persisted — autosave
   // strips them; the transcript is the single stored source. This one reactive effect replaces the old
@@ -8487,6 +8508,8 @@ export function HyperframesWorkbench({
                 key={chatEpoch}
                 ref={chatRef}
                 projectId={projectId}
+                onInsertMedia={(m) => void insertPanelMedia({ type: m.type, url: m.url }, m.label)}
+                onUseAudio={(url, label) => void audioOps.mountAudioFromUrl(url, label)}
                 runTool={chatCbs.runTool}
                 getBody={getChatBody}
                 getComp={getChatComp}
@@ -10122,6 +10145,11 @@ export function HyperframesWorkbench({
                     localAssetIndexSyncReady={localAssetIndexSyncReady}
                     onLocalAssetIndexChange={changeLocalAssetIndex}
                     onLocalAssetAvailable={acceptLocalAssetFile}
+                    onUseAsReference={(entry) => {
+                      openChat();
+                      chatRef.current?.beginGeneration("image");
+                      chatRef.current?.insertMention(localAssetMentionRef(entry));
+                    }}
                     videoSig={null}
                     mainSourceUrl={null}
                     hasMainSource={false}
@@ -10273,63 +10301,6 @@ export function HyperframesWorkbench({
                     onReplaceImage={(index) => selectedCustomBlock && void replaceCustomImg(selectedCustomBlock.id, index)}
                     onRemoveImage={(index) => selectedCustomBlock && patchCustomImg(selectedCustomBlock.id, index, () => "remove")}
                   />
-                )}
-                {!floatWin && libTab === "gen" && (
-                  <div className="flex min-h-0 flex-1 flex-col">
-                    <div className="bg-panel flex h-8 shrink-0 items-center gap-1 px-2.5">
-                      {(
-                        [
-                          { v: "image", label: "panels.image" },
-                          { v: "video", label: "panels.video" },
-                          { v: "element", label: "panels.element" },
-                          { v: "audio", label: "panels.music" },
-                        ] as { v: GenType; label: string }[]
-                      ).map((gt) => (
-                        <button
-                          key={gt.v}
-                          type="button"
-                          onClick={() => {
-                            setGenSeedPrompt(null);
-                            setGenType(gt.v);
-                          }}
-                          className={`rounded-md px-2.5 py-1 text-[12px] transition ${
-                            genType === gt.v
-                              ? "bg-panel-2 text-ink font-medium"
-                              : "text-ink-4 hover:text-ink-2"
-                          }`}
-                        >
-                          {t(gt.label)}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="flex min-h-0 flex-1">
-                      <GenChatPanel
-                        key={genType}
-                        projectId={projectId}
-                        type={genType}
-                        seedPrompt={
-                          genSeedPrompt?.type === genType
-                            ? genSeedPrompt
-                            : undefined
-                        }
-                        comp={comp}
-                        onInsertMedia={(m, l, d) =>
-                          void insertPanelMedia(m, l, undefined, d)
-                        }
-                        onDragAsset={setDragAsset}
-                        onSetMainVideo={setMainVideoFromUrl}
-                        onInsertElement={insertGeneratedElement}
-                        onMention={mentionAsset}
-                        generateElement={generateElementStandalone}
-                        generateAudio={audioOps.generateAudioAsset}
-                        onInsertAudio={(url, label) =>
-                          void audioOps
-                            .mountAudioFromUrl(url, label)
-                            .then((id) => id && setSelectedAudioId(id))
-                        }
-                      />
-                    </div>
-                  </div>
                 )}
                 {!floatWin && libTab === "avatar" && <AvatarPanel />}
                 {floatWin && (
@@ -10583,7 +10554,6 @@ export function HyperframesWorkbench({
                       { v: "text", icon: Type, label: "displayText.title" },
                       { v: "props", icon: SlidersHorizontal, label: "workbench.editableProperties" },
                       { v: "audio", icon: Music, label: "panels.music" },
-                      { v: "gen", icon: Sparkles, label: "common.generate" },
                       {
                         v: "avatar",
                         icon: AudioLines,
@@ -10598,7 +10568,6 @@ export function HyperframesWorkbench({
                         | "text"
                         | "props"
                         | "audio"
-                        | "gen"
                         | "avatar";
                       icon: typeof LayoutGrid;
                       label: string;
@@ -10610,8 +10579,6 @@ export function HyperframesWorkbench({
                       // The properties tab edits the current selection: switching to it must keep it.
                       {...(n.v === "props" ? { "data-block-selection-keep": true } : {})}
                       onClick={() => {
-                        if (libTab === "gen" && n.v !== "gen")
-                          setGenRefreshTick((value) => value + 1);
                         setFloatWin(null);
                         setLibTab(n.v);
                         if (libCollapsed) setLibCollapsedManual(false);

@@ -3,13 +3,17 @@ import { normalizeProjectOutputs, type StudioProjectOutputs } from './project-ou
 /** Increment only for destructive editor-context migrations that require stale tabs to reload. */
 export const STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION = 3;
 
-/** Metadata-only index of one project-local asset. The original bytes stay on the user's device;
- * syncing this record lets every deliverable and browser render the same project media library. */
+/** Index record of one project asset. Bytes live in the cloud rendezvous (cloudKey) with the device
+ * OPFS as a cache; syncing this record lets every deliverable, browser and offline agent see the
+ * same project media library. */
 export interface LocalAssetIndexEntry {
   /** Stable logical identity inside the project. Chat/timeline references use this, never a path. */
   assetId: string;
-  /** Content identity used only for byte validation, cache reuse and cloud deduplication. */
+  /** Content identity used for byte validation, cache reuse and cloud deduplication. */
   contentSig: string;
+  /** Cloud byte-rendezvous key (content-addressed R2 object). Present once the bytes were uploaded;
+   * any device can then retrieve the asset without the original file. */
+  cloudKey?: string;
   /** @deprecated Compatibility mirror for schema-v3 clients deployed before assetId existed. */
   sig: string;
   label: string;
@@ -17,6 +21,10 @@ export interface LocalAssetIndexEntry {
   kind?: 'video' | 'image' | 'audio';
   w?: number | null;
   h?: number | null;
+  /** Probed at import so offline placement and validation never need the bytes. */
+  durationSec?: number | null;
+  size?: number | null;
+  mime?: string | null;
   folder?: {
     id: string;
     name: string;
@@ -49,6 +57,12 @@ function sanitizeLocalAssets(value: unknown): LocalAssetIndexEntry[] {
     if (!assetId || seen.has(assetId)) continue;
     const kind = entry.kind === 'video' || entry.kind === 'image' || entry.kind === 'audio' ? entry.kind : undefined;
     const rawFolder = entry.folder;
+    const cloudKey = typeof entry.cloudKey === 'string' && entry.cloudKey ? entry.cloudKey.slice(0, 300) : '';
+    const durationSec = typeof entry.durationSec === 'number' && Number.isFinite(entry.durationSec) && entry.durationSec > 0
+      ? entry.durationSec
+      : undefined;
+    const size = typeof entry.size === 'number' && Number.isSafeInteger(entry.size) && entry.size > 0 ? entry.size : undefined;
+    const mime = typeof entry.mime === 'string' && entry.mime ? entry.mime.slice(0, 120) : undefined;
     const folder = rawFolder
       && typeof rawFolder.id === 'string' && rawFolder.id
       && typeof rawFolder.name === 'string' && rawFolder.name
@@ -60,10 +74,14 @@ function sanitizeLocalAssets(value: unknown): LocalAssetIndexEntry[] {
       assetId,
       contentSig,
       sig: contentSig,
+      ...(cloudKey ? { cloudKey } : {}),
       label: typeof entry.label === 'string' && entry.label ? entry.label : contentSig,
       ...(kind ? { kind } : {}),
       ...(typeof entry.w === 'number' || entry.w === null ? { w: entry.w } : {}),
       ...(typeof entry.h === 'number' || entry.h === null ? { h: entry.h } : {}),
+      ...(durationSec !== undefined ? { durationSec } : {}),
+      ...(size !== undefined ? { size } : {}),
+      ...(mime !== undefined ? { mime } : {}),
       ...(folder ? { folder } : {}),
       createdAt: typeof entry.createdAt === 'number' && Number.isFinite(entry.createdAt) ? entry.createdAt : 0,
     });

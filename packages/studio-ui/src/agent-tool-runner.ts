@@ -168,6 +168,7 @@ import { loadLocalAssetFile, loadLocalVideo, saveLocalVideo } from './local-medi
 import { materializeRemoteMedia } from './remote-media';
 import { localAssetIndexEntry, runLocalImportSession } from './local-import-session';
 import { localAssetReference, normalizeStudioToolInputReferences, resolveLocalAssetReference } from './studio-tool-input-references';
+import { resolveGenerationReferences } from './generation-reference';
 import { analyzeVisual, analyzeVisualGeometry, type VisualLabel, type VisualPrep, type VisualTimeline, finishVisualAnalysis, prepareVisualAnalysis } from './visual';
 import {
   compareEditorialOpenings,
@@ -195,7 +196,7 @@ import {
 } from './speech-silence';
 import { withEditableBlockGeometry } from './editable-block-geometry';
 import { placementPercentToBox } from '@pireel/studio-engine/overlay-placement';
-import { getStudioSpaceId, listStudioGens, pollCreation, startGeneration } from './gen-api';
+import { generatedAssetIndexEntry, generatedRecordsFromJobs, getStudioSpaceId, listStudioGens, pollCreation, startGeneration, type GenJob } from './gen-api';
 import { componentFontSlot, displayFontContext, isDisplayTextFontId } from '@pireel/studio-engine/display-text-presets';
 import { componentPropsCarry } from '@pireel/studio-engine/component-props';
 import { applyComponentValues, blockPropsReadback, componentSchemaOf, componentValuesView } from '@pireel/studio-engine/component-schema';
@@ -204,6 +205,42 @@ import { describeAudioTargets, resolveAudioTarget } from '@pireel/studio-engine/
 
 const PROJECT_MUTATION_TOOLS = new Set(['create_output', 'duplicate_output', 'switch_output', 'rename_output', 'delete_output']);
 const NO_UNDO_TOOLS = new Set(['get_block', 'get_timeline', 'read_director_plan', 'read_scene_designs', 'inspect_media', 'inspect_images', 'get_transcript', 'get_beat_grid', 'list_assets', 'search_assets', 'prepare_local_image', 'search_media', 'list_outputs', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_music', 'generate_sfx', 'generate_foley', 'get_generation_jobs', 'list_voices', 'clone_voice', 'design_voice', 'delete_voice', 'generate_speech', 'lip_sync', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_visual', 'export_video', 'track_export', 'ask_user', 'request_approval']);
+
+/** Generated outputs join the project media directory the moment they are known — from a poll, a
+ * synchronous audio tool, or the background watcher below — so the Materials panel lists them
+ * without the agent having to register them by hand. Idempotent by asset id. */
+function registerGeneratedOutputs(
+  register: (entry: LocalAssetIndexEntry) => void,
+  jobs: readonly (GenJob & { kind?: 'image' | 'video' | 'audio' })[],
+): void {
+  for (const record of generatedRecordsFromJobs(jobs)) {
+    register(generatedAssetIndexEntry(record, record.kind === 'video' ? t('common.videoGeneration') : record.kind === 'audio' ? t('panels.music') : t('common.imageGeneration')));
+  }
+}
+
+const generationWatchers = new Map<string, number>();
+/** Follow a started job in the background (4 s cadence, 15 min cap) so its output is registered even
+ * when the agent never polls; the receipt still tells the agent to call get_generation_jobs later. */
+function watchGenerationJobs(ids: string[], register: (entry: LocalAssetIndexEntry) => void): void {
+  for (const id of ids) {
+    if (generationWatchers.has(id)) continue;
+    const startedAt = Date.now();
+    const tick = async () => {
+      const job = await pollCreation(id).catch(() => null);
+      if (job && job.status !== 'pending') {
+        generationWatchers.delete(id);
+        if (job.status === 'succeeded') registerGeneratedOutputs(register, [job]);
+        return;
+      }
+      if (Date.now() - startedAt > 15 * 60_000) {
+        generationWatchers.delete(id);
+        return;
+      }
+      generationWatchers.set(id, window.setTimeout(() => void tick(), 4000));
+    };
+    generationWatchers.set(id, window.setTimeout(() => void tick(), 4000));
+  }
+}
 
 export type StudioReviewFailurePhase = 'capture' | 'request' | 'response';
 
@@ -528,6 +565,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
     trimAtPlayhead, deleteShot, videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset,
     relayoutCaptions, removeCaptionLayer, agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
   } = ctx;
+  /** Directory registration of generated outputs; hosts without a media directory (tests, thin shells) simply skip it. */
+  const registerGeneratedEntry = (entry: LocalAssetIndexEntry) => {
+    if (typeof registerLocalAsset === 'function') registerLocalAsset(entry);
+  };
       // Chat pills are references, not storage ids. Normalize every top-level/nested tool argument
       // once here so individual tools never grow their own @ token / localSig compatibility rules.
       const localAssetIndex = ctx.localAssetIndexRef?.current ?? [];
@@ -928,13 +969,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 const localKind = entry.kind ?? 'video';
                 const file = await loadLocalAssetFile(projectId, entry);
                 if (!file) {
-                  return { ok: false, error: 'local media access is unavailable — ask the user to restore access in Materials, then retry. Do not place the asset on the timeline; placement cannot restore file access' };
+                  return { ok: false, error: 'media bytes are unavailable on this device and in the cloud — ask the user to re-import that asset in Materials, then retry. Do not place the asset on the timeline; placement cannot restore the bytes' };
                 }
                 try {
-                  await saveLocalVideo(file, entry.contentSig, undefined, {
-                    pinned: localKind === 'audio',
-                    binding: { projectId, assetId: entry.assetId },
-                  });
+                  await saveLocalVideo(file, entry.contentSig);
                 } catch {
                   // The authorized File remains usable for this ASR call even when the local cache is full.
                 }
@@ -2434,15 +2472,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (!entry) return { ok: false, error: 'local image not found or ambiguous — search the mine scope and use its exact asset id' };
             const file = await loadLocalAssetFile(projectId, entry);
             if (!file) {
-              return { ok: false, error: 'local image access is unavailable — ask the user to click “restore access” on that exact local asset, then retry; do not use another image' };
+              return { ok: false, error: 'image bytes are unavailable on this device and in the cloud — ask the user to re-import that exact asset, then retry; do not use another image' };
             }
-            // A readable native handle is not durable permission. Pin every explicitly prepared
-            // image in OPFS, including the direct-handle path, so a refresh cannot leave a valid
+            // Keep the prepared image in the device cache so a refresh cannot leave a valid
             // timeline clip pointing at bytes the preview/export pipeline can no longer reach.
-            await saveLocalVideo(file, entry.contentSig, undefined, {
-              pinned: true,
-              binding: { projectId, assetId: entry.assetId },
-            });
+            await saveLocalVideo(file, entry.contentSig);
             return {
               ok: true,
               summary: t('workbench.preparedLocalImage', { name: entry.label }),
@@ -2576,11 +2610,25 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (!prompt) return { ok: false, error: 'prompt required' };
             report(generationKind === 'image' ? 'Starting image generation…' : 'Starting video generation…');
             try {
+              // References arrive as project asset ids (from @ mentions or get_state) or URLs; the
+              // generation service needs fetchable URLs. Unresolvable ones are reported, not dropped.
+              const referenceDeps = {
+                localAssets: ctx.localAssetIndexRef?.current ?? [],
+                documentAssets: documentRef.current.assets,
+                presign: async (key: string) => {
+                  const r = await fetch('/api/studio/media', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'get', key }) });
+                  if (!r.ok) return null;
+                  const j = (await r.json().catch(() => null)) as { url?: string } | null;
+                  return j?.url ?? null;
+                },
+              };
+              const images = await resolveGenerationReferences(input.referenceImages, referenceDeps, 9);
+              const unresolvedReferences = [...images.unresolved];
               const params: Record<string, unknown> = {
                 prompt,
                 user_prompt: prompt,
                 ...(typeof input.modelId === 'string' && input.modelId ? { model_id: input.modelId } : {}),
-                ...(Array.isArray(input.referenceImages) ? { reference_images: input.referenceImages.filter((url): url is string => typeof url === 'string').slice(0, 9) } : {}),
+                ...(images.urls.length ? { reference_images: images.urls } : {}),
               };
               if (generationKind === 'image') {
                 params.n = 1;
@@ -2596,14 +2644,18 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 params.resolution = input.resolution === '480p' || input.resolution === '720p' || input.resolution === '1080p'
                   ? input.resolution
                   : adaptive.resolution;
-                if (Array.isArray(input.referenceVideos)) params.reference_videos = input.referenceVideos.filter((url): url is string => typeof url === 'string').slice(0, 3);
-                if (Array.isArray(input.referenceAudios)) params.reference_audios = input.referenceAudios.filter((url): url is string => typeof url === 'string').slice(0, 3);
+                const videos = await resolveGenerationReferences(input.referenceVideos, referenceDeps, 3);
+                const audios = await resolveGenerationReferences(input.referenceAudios, referenceDeps, 3);
+                unresolvedReferences.push(...videos.unresolved, ...audios.unresolved);
+                if (videos.urls.length) params.reference_videos = videos.urls;
+                if (audios.urls.length) params.reference_audios = audios.urls;
               }
               const started = await startGeneration(projectId, generationKind === 'image' ? 'image-gen' : 'video-gen', params);
               if (!started.ok) {
                 if (started.kind === 'credits') return { ok: false, error: `insufficient_tokens: need ${started.need}, balance ${started.balance}` };
                 return { ok: false, error: started.message };
               }
+              watchGenerationJobs(started.ids, registerGeneratedEntry);
               return {
                 ok: true,
                 summary: `${generationKind === 'image' ? 'Image' : 'Video'} generation started`,
@@ -2612,6 +2664,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   status: 'pending',
                   kind: generationKind,
                   projectId,
+                  ...(unresolvedReferences.length ? { unresolvedReferences } : {}),
                   next: 'The asynchronous task is already in Generate history. Do not poll repeatedly in this turn; call get_generation_jobs with these ids later, then register_media and add_clips after success.',
                 },
               };
@@ -2635,6 +2688,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 error?: string; detail?: string;
               };
               if (!res.ok || !body.asset) return { ok: false, error: body.detail || body.error || 'music generation failed' };
+              registerGeneratedEntry(generatedAssetIndexEntry({ jobId: body.asset.id, index: 0, kind: 'audio', key: body.asset.key, mime: body.asset.mime, prompt, createdAt: Date.now(), durationSec: body.asset.durationSec }, t('panels.music')));
               return {
                 ok: true, summary: 'Background music generated',
                 data: {
@@ -2668,6 +2722,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 error?: string; detail?: string;
               };
               if (!res.ok || !body.asset) return { ok: false, error: body.detail || body.error || 'sound effect generation failed' };
+              registerGeneratedEntry(generatedAssetIndexEntry({ jobId: body.asset.id, index: 0, kind: 'audio', key: body.asset.key, mime: body.asset.mime, prompt, createdAt: Date.now(), durationSec: body.asset.durationSec }, t('panels.music')));
               return {
                 ok: true, summary: 'Sound effect generated',
                 data: {
@@ -2857,6 +2912,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const ids = Array.isArray(input.ids) ? input.ids.filter((id): id is string => typeof id === 'string' && !!id).slice(0, 30) : [];
             if (ids.length) {
               const jobs = (await Promise.all(ids.map((id) => pollCreation(id).catch(() => null)))).filter((job): job is NonNullable<typeof job> => !!job);
+              registerGeneratedOutputs(registerGeneratedEntry, jobs);
               return { ok: true, summary: `${jobs.length} generation jobs`, data: { jobs } };
             }
             const [images, videos, audios] = await Promise.all([
@@ -2869,6 +2925,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               ...videos.map((job) => ({ ...job, kind: 'video' as const })),
               ...audios.map((job) => ({ ...job, kind: 'audio' as const })),
             ].sort((a, b) => b.createdAt - a.createdAt).slice(0, 30);
+            registerGeneratedOutputs(registerGeneratedEntry, jobs);
             return { ok: true, summary: `${jobs.length} recent generation jobs`, data: { jobs } };
           }
           case 'list_voices': {
@@ -2951,7 +3008,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const instruction = typeof input.instruction === 'string' ? input.instruction.trim().slice(0, 500) : '';
             const { action: _ignoredAction, instruction: _rawInstruction, ...speechArgs } = input;
             const speechInput = { ...speechArgs, text, voiceId, ...(instruction ? { instruction } : {}) };
-            const speechResult = (asset: CachedTtsAsset, reused: boolean) => ({
+            const speechResult = (asset: CachedTtsAsset, reused: boolean) => {
+              if (asset.key) registerGeneratedEntry(generatedAssetIndexEntry({ jobId: asset.id, index: 0, kind: 'audio', key: asset.key, mime: asset.mime, prompt: text, createdAt: Date.now(), durationSec: asset.durationSec }, t('panels.music')));
+              return speechReceipt(asset, reused);
+            };
+            const speechReceipt = (asset: CachedTtsAsset, reused: boolean) => ({
               ok: true as const,
               summary: t(reused ? 'workbench.speechReused' : 'workbench.speechGenerated'),
               data: {

@@ -17,6 +17,7 @@
  * This file keeps the public types + the multi-session shell.
  */
 
+import type { GenerationIntent } from "./chat-generation-intent";
 import {
   forwardRef,
   memo,
@@ -114,6 +115,10 @@ export interface StudioChatHandle {
   resolveTimelineFrameCapture(frame: AttachedTimelineFrame): void;
   /** Remove a failed loading tag. */
   failTimelineFrameCapture(id: string): void;
+  /** Arm a generation intent in the composer (the generation entry point: one chat, one tool chain). */
+  beginGeneration(intent: GenerationIntent, prompt?: string): void;
+  /** Insert an @ mention pill into the draft (e.g. "use this asset as a reference"). */
+  insertMention(el: StudioElementRef): void;
 }
 
 export interface StudioChatProps {
@@ -149,6 +154,9 @@ export interface StudioChatProps {
   onClose?: () => void;
   /** Streaming/tool-running state of the active thread (workbench pauses output switching while true). */
   onBusyChange?: (busy: boolean) => void;
+  /** Generation receipts: insert an output into the timeline at the playhead / mount audio. */
+  onInsertMedia?: (asset: { type: 'image' | 'video'; url: string; label?: string }) => void;
+  onUseAudio?: (url: string, label?: string) => void;
 }
 
 /* ============================ Multi-session shell ============================ */
@@ -174,6 +182,10 @@ export const StudioChat = memo(
       onThreadChange,
       onClose,
       onBusyChange,
+
+      onInsertMedia,
+
+      onUseAudio,
     },
     ref,
   ) {
@@ -331,6 +343,8 @@ export const StudioChat = memo(
           innerRef.current?.resolveTimelineFrameCapture(frame),
         failTimelineFrameCapture: (id) =>
           innerRef.current?.failTimelineFrameCapture(id),
+        beginGeneration: (intent, prompt) => innerRef.current?.beginGeneration(intent, prompt),
+        insertMention: (el) => innerRef.current?.insertMention(el),
       }),
       [],
     );
@@ -434,6 +448,8 @@ export const StudioChat = memo(
           onTimelineFramePickActiveChange={onTimelineFramePickActiveChange}
           onSnapshot={onSnapshot}
           onBusyChange={onBusyChange}
+          onInsertMedia={onInsertMedia}
+          onUseAudio={onUseAudio}
           handleRef={innerRef}
         />
       </div>

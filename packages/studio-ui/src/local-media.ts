@@ -1,54 +1,44 @@
 /**
- * OPFS local video library: the persistence layer for the "keep local, don't upload" mode of the
- * main video / insert clips — recover by fileSig after refresh, so draft restore no longer asks the
- * user to re-pick the file. best-effort: unsupported / evicted / any failure silently degrades back
- * to the "re-import" prompt, never worse than not having it.
+ * Device byte cache for studio media (OPFS) + the ONE byte-resolution chain.
  *
- * Storage key = a hash of the durable media signature (new browser imports add a bounded content
- * fingerprint; legacy name:size:lastModified locators remain readable). The File metadata in OPFS is what
- * was written to disk, not the original file's — on retrieval the File is rebuilt from the sidecar meta
- * so that fileSig(retrieved) === original sig (draft reconnect validation, ASR/visual-analysis cache,
- * and autosave sig all depend on this identity).
+ * The cloud rendezvous (content-addressed R2, see cloud-media) is the source of truth for bytes;
+ * this module is the device-side cache so a project reopens instantly and offline. Everything is
+ * best-effort: an unsupported/evicted/failed cache degrades to a cloud fetch, never worse.
+ *
+ * Storage key = a hash of the durable media signature (content fingerprint; legacy
+ * name:size:lastModified locators remain readable). The File metadata in OPFS is what was written
+ * to disk — on retrieval the File is rebuilt from the sidecar meta so fileSig(retrieved) === sig
+ * (ASR/visual-analysis cache and autosave sig all depend on this identity).
+ *
+ * Native File System Access handles are NOT persisted anymore: re-granting read access after a
+ * browser restart needs a user gesture, which is exactly the "authorize again" prompt this design
+ * removes. Handles written by earlier versions are read only while the browser still reports the
+ * permission as granted — silently, never prompting — and only as a byte cache.
  */
 
-import { fileMatchesSig, fileNameFromSig, fileSig, rememberDurableFileSig } from './media';
+import { studioProviders } from '@pireel/studio-engine/providers';
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
+import { fileMatchesSig, fileNameFromSig, fileSig, isContentSig, rememberDurableFileSig, sigSize } from './media';
 
 const DIR = 'local-videos';
 // No count-based eviction: a project can legitimately hold a hundred local videos (a real 100-clip
 // montage lost its 13th import to the old 12-file LRU). The browser's storage quota is the only cap;
 // a failed write surfaces to the caller instead of silently evicting someone else's footage.
 
-/* ---------- Native file handles (File System Access API, Chromium) ----------
- * Preferred backend: persist the picked file's HANDLE in IndexedDB and read straight from the
- * user's disk — zero-copy, no LRU cap, no eviction. Individual file imports additionally keep an
- * ordinary OPFS fallback because embedded browsers may not retain handle permission across reloads. The
- * cost: after a restart the browser may ask to re-grant read access, which only works from a
- * user gesture — non-gesture loads (draft restore) just fall through to the OPFS copy / cloud /
- * re-import lanes. OPFS stays as the fallback backend (non-Chromium, handle-less files). */
+/* ---------- Legacy native handles (read-only, silent) ---------- */
 
 interface PermHandle extends FileSystemFileHandle {
   queryPermission?: (d: { mode: 'read' }) => Promise<PermissionState>;
-  requestPermission?: (d: { mode: 'read' }) => Promise<PermissionState>;
 }
 
 interface PermDirectoryHandle extends FileSystemDirectoryHandle {
   queryPermission?: (d: { mode: 'read' }) => Promise<PermissionState>;
-  requestPermission?: (d: { mode: 'read' }) => Promise<PermissionState>;
 }
 
 const HANDLE_DB = 'studio-local-handles';
 const HANDLE_STORE = 'handles';
 const folderHandleKey = (folderId: string) => `folder:${folderId}`;
-
-export interface LocalAssetDeviceBinding {
-  projectId: string;
-  assetId: string;
-}
-
-/** Device-only binding key. Neither folder paths nor native handles cross the cloud boundary. */
-export const localAssetBindingKey = ({ projectId, assetId }: LocalAssetDeviceBinding): string =>
-  `asset:${projectId}:${assetId}`;
+const legacyBindingKey = (projectId: string, assetId: string) => `asset:${projectId}:${assetId}`;
 
 function handleDb(): Promise<IDBDatabase | null> {
   return new Promise((res) => {
@@ -86,95 +76,52 @@ async function handleOp<T>(mode: IDBTransactionMode, op: (st: IDBObjectStore) =>
   });
 }
 
-/** Register a picked file's native handle for this sig (the zero-copy backend). */
-export async function saveLocalHandle(
-  sig: string,
-  handle: FileSystemFileHandle,
-  binding?: LocalAssetDeviceBinding,
-): Promise<boolean> {
-  return (await handleOp('readwrite', (st) => st.put(handle, binding ? localAssetBindingKey(binding) : sig))) != null;
-}
-
-/** Persist one folder authorization separately from its files. Structured-cloned handles stay on
- *  this browser only; the cloud index carries just folder id/name/path metadata. */
-export async function saveLocalFolderHandle(folderId: string, handle: FileSystemDirectoryHandle): Promise<void> {
-  await handleOp('readwrite', (st) => st.put(handle, folderHandleKey(folderId)));
-}
-
-/** Read the last directory handle without requesting permission. It can still be passed as the
- * picker's `startIn`, or explicitly re-authorized from a later user gesture. */
-export async function getLocalFolderHandle(folderId: string): Promise<FileSystemDirectoryHandle | null> {
-  return (await handleOp('readonly', (st) => st.get(folderHandleKey(folderId)))) as FileSystemDirectoryHandle | null;
-}
-
-/** Permission prompts are only useful from a click. Keeping this separate lets the folder restore
- * card re-authorize the saved root once, before resolving every indexed child beneath it. */
-export async function requestLocalFolderAccess(handle: FileSystemDirectoryHandle): Promise<boolean> {
+/** A handle counts only while the browser still reports read access as granted. No prompt, ever. */
+async function grantedSilently(handle: PermHandle | PermDirectoryHandle): Promise<boolean> {
   try {
-    const dir = handle as PermDirectoryHandle;
-    let permission = (await dir.queryPermission?.({ mode: 'read' })) ?? 'granted';
-    if (permission === 'prompt') permission = (await dir.requestPermission?.({ mode: 'read' })) ?? 'denied';
-    return permission === 'granted';
+    return ((await handle.queryPermission?.({ mode: 'read' })) ?? 'granted') === 'granted';
   } catch {
     return false;
   }
 }
 
-export async function deleteLocalFolderHandle(folderId: string): Promise<void> {
-  await handleOp('readwrite', (st) => st.delete(folderHandleKey(folderId)));
-}
-
-/** Resolve one indexed file beneath an authorized root without copying bytes. Supplying `root`
- *  is the explicit user-gesture restore path; otherwise the locally persisted root is tried. */
-export async function loadLocalFolderFile(
-  folderId: string,
-  relativePath: string,
-  sig: string,
-  root?: FileSystemDirectoryHandle,
-  binding?: LocalAssetDeviceBinding,
-): Promise<{ file: File; handle: FileSystemFileHandle } | null> {
-  const parts = relativePath.split('/').filter(Boolean);
-  if (!parts.length || parts.some((part) => part === '.' || part === '..')) return null;
-  const stored = root ?? (await getLocalFolderHandle(folderId));
-  if (!stored) return null;
-  try {
-    if (!(await requestLocalFolderAccess(stored))) return null;
-    let cursor: FileSystemDirectoryHandle = stored;
-    for (const segment of parts.slice(0, -1)) cursor = await cursor.getDirectoryHandle(segment);
-    const handle = await cursor.getFileHandle(parts[parts.length - 1]!);
-    const file = await handle.getFile();
-    if (!(await fileMatchesSig(file, sig))) return null;
-    await saveLocalHandle(sig, handle, binding);
-    return { file, handle };
-  } catch {
-    return null;
-  }
-}
-
-async function loadFromHandle(sig: string, binding?: LocalAssetDeviceBinding): Promise<File | null> {
-  const key = binding ? localAssetBindingKey(binding) : sig;
+async function loadFromLegacyHandle(sig: string, key = sig): Promise<File | null> {
   const h = (await handleOp('readonly', (st) => st.get(key))) as PermHandle | null;
   if (!h) return null;
   try {
-    let perm = (await h.queryPermission?.({ mode: 'read' })) ?? 'granted';
-    if (perm === 'prompt') {
-      // Re-grant needs a user gesture; elsewhere this rejects/denies and we fall through to OPFS.
-      perm = (await h.requestPermission?.({ mode: 'read' })) ?? 'denied';
-    }
-    if (perm !== 'granted') return null;
+    if (!(await grantedSilently(h))) return null;
     const f = await h.getFile();
-    if (!(await fileMatchesSig(f, sig))) return null; // moved/renamed/edited on disk: identity broken → treat as a miss (reconnect flow takes over)
+    if (!(await fileMatchesSig(f, sig))) return null; // moved/renamed/edited on disk: identity broken → miss
     return f;
   } catch {
     return null;
   }
 }
 
+async function loadFromLegacyFolder(folderId: string, relativePath: string, sig: string): Promise<File | null> {
+  const parts = relativePath.split('/').filter(Boolean);
+  if (!parts.length || parts.some((part) => part === '.' || part === '..')) return null;
+  const stored = (await handleOp('readonly', (st) => st.get(folderHandleKey(folderId)))) as PermDirectoryHandle | null;
+  if (!stored) return null;
+  try {
+    if (!(await grantedSilently(stored))) return null;
+    let cursor: FileSystemDirectoryHandle = stored;
+    for (const segment of parts.slice(0, -1)) cursor = await cursor.getDirectoryHandle(segment);
+    const handle = await cursor.getFileHandle(parts[parts.length - 1]!);
+    const file = await handle.getFile();
+    return (await fileMatchesSig(file, sig)) ? file : null;
+  } catch {
+    return null;
+  }
+}
+
+/* ---------- OPFS cache ---------- */
+
 interface StoredMeta {
   name: string;
   type: string;
   lastModified: number;
-  /** Folder-input imports have no reusable native handle, so their OPFS copy is the source of truth. */
+  /** Legacy flag from the handle era; ignored (every OPFS entry is a full copy now). */
   pinned?: boolean;
 }
 
@@ -213,23 +160,15 @@ async function dirHandle(): Promise<FileSystemDirectoryHandle | null> {
   }
 }
 
-export async function saveLocalVideo(
-  file: File,
-  sig: string,
-  handle?: FileSystemFileHandle,
-  options?: { pinned?: boolean; fallbackCopy?: boolean; binding?: LocalAssetDeviceBinding },
-): Promise<boolean> {
+export interface SaveLocalVideoOptions {
+  /** @deprecated no-op since handles were retired; every entry is a full copy. */
+  pinned?: boolean;
+}
+
+/** Cache a file's bytes on this device under its sig. Returns false when the cache is unavailable
+ * or full — callers must treat that as "no local cache", not as a failed import. */
+export async function saveLocalVideo(file: File, sig: string, _options?: SaveLocalVideoOptions): Promise<boolean> {
   file = alignFileToSig(file, sig); // stored meta must match the sig key, or later loads mint a different identity
-  if (handle) {
-    // A folder authorization can resolve every child zero-copy. Individual file handles also get
-    // a bounded OPFS fallback so a reload stays seamless when an embedded browser drops permission.
-    const handleSaved = await saveLocalHandle(sig, handle, options?.binding);
-    if (handleSaved && !options?.fallbackCopy) return true;
-  }
-  // A registered handle already covers this sig — bytes are reachable from disk, don't duplicate into OPFS.
-  // Pinned folder-input and requested fallback copies must survive even if a stale handle exists.
-  const handleKey = options?.binding ? localAssetBindingKey(options.binding) : sig;
-  if (!options?.pinned && !options?.fallbackCopy && (await handleOp('readonly', (st) => st.get(handleKey))) != null) return true;
   const dir = await dirHandle();
   if (!dir) return false;
   try {
@@ -238,27 +177,12 @@ export async function saveLocalVideo(
     const key = await sigKey(sig);
     try {
       const existing = await (await dir.getFileHandle(key)).getFile();
-      if (existing.size === file.size) {
-        if (options?.pinned) {
-          await writeStoredMeta(dir, key, {
-            name: file.name,
-            type: file.type,
-            lastModified: file.lastModified,
-            pinned: true,
-          });
-        }
-        return true; // Same sig fully on disk (content pinned by size+mtime): skip byte rewrite
-      }
+      if (existing.size === file.size) return true; // Same sig fully on disk: skip byte rewrite
       // Size mismatch = an interrupted earlier write; fall through and rewrite so the entry heals
     } catch {
       /* Not present → write it */
     }
-    const meta: StoredMeta = {
-      name: file.name,
-      type: file.type,
-      lastModified: file.lastModified,
-      ...(options?.pinned ? { pinned: true } : {}),
-    };
+    const meta: StoredMeta = { name: file.name, type: file.type, lastModified: file.lastModified };
     const fh = await dir.getFileHandle(key, { create: true });
     const w = await fh.createWritable();
     await w.write(file);
@@ -275,6 +199,7 @@ interface SaveLocalStreamOptions {
   name: string;
   type?: string;
   expectedSize?: number | null;
+  /** @deprecated no-op. */
   pinned?: boolean;
 }
 
@@ -313,8 +238,8 @@ async function consumeLocalStream(
   }
 }
 
-/** Stream a loopback helper response straight into OPFS. This deliberately accepts a stream rather
- * than a Blob/File so multi-GB local imports never need a second full-size browser memory buffer. */
+/** Stream a response straight into OPFS. This deliberately accepts a stream rather than a Blob/File
+ * so multi-GB cloud retrievals never need a second full-size browser memory buffer. */
 export async function saveLocalStream(
   stream: ReadableStream<Uint8Array<ArrayBuffer>>,
   sig: string,
@@ -327,16 +252,15 @@ export async function saveLocalStream(
   const key = await sigKey(sig);
   const expectedSize = options.expectedSize ?? null;
   const sigParts = sig.split(':');
-  const sigMtime = Number(sigParts[sigParts.length - 1]);
+  const sigMtime = isContentSig(sig) ? Number.NaN : Number(sigParts[sigParts.length - 1]);
   const meta: StoredMeta = {
     name: options.name || 'import',
     type: options.type || 'application/octet-stream',
     lastModified: Number.isSafeInteger(sigMtime) && sigMtime >= 0 ? sigMtime : Date.now(),
-    ...(options.pinned ? { pinned: true } : {}),
   };
 
-  // The same helper request may be retried. Consume and validate it, but keep an already-complete
-  // OPFS entry untouched so a broken retry cannot destroy the good local copy.
+  // The same request may be retried. Consume and validate it, but keep an already-complete OPFS
+  // entry untouched so a broken retry cannot destroy the good local copy.
   if (expectedSize != null) {
     let existing: File | null = null;
     try {
@@ -346,19 +270,8 @@ export async function saveLocalStream(
     }
     if (existing?.size === expectedSize) {
       await consumeLocalStream(stream, expectedSize);
-      const existingMeta = await readStoredMeta(dir, key);
-      const retainedMeta: StoredMeta = {
-        ...meta,
-        ...(meta.pinned || existingMeta?.pinned ? { pinned: true } : {}),
-      };
-      await writeStoredMeta(dir, key, retainedMeta);
-      return alignFileToSig(
-        new File([existing], retainedMeta.name, {
-          type: retainedMeta.type,
-          lastModified: retainedMeta.lastModified,
-        }),
-        sig,
-      );
+      await writeStoredMeta(dir, key, meta);
+      return alignFileToSig(new File([existing], meta.name, { type: meta.type, lastModified: meta.lastModified }), sig);
     }
   }
 
@@ -373,13 +286,7 @@ export async function saveLocalStream(
     closed = true;
     await writeStoredMeta(dir, key, meta);
     const stored = await fh.getFile();
-    return alignFileToSig(
-      new File([stored], meta.name, {
-        type: meta.type,
-        lastModified: meta.lastModified,
-      }),
-      sig,
-    );
+    return alignFileToSig(new File([stored], meta.name, { type: meta.type, lastModified: meta.lastModified }), sig);
   } catch (error) {
     if (!closed) {
       try {
@@ -425,7 +332,7 @@ async function loadFromOpfs(sig: string): Promise<File | null> {
         : stored;
       if (!stored.size || !(await fileMatchesSig(candidate, sig))) return null;
       const aligned = alignFileToSig(candidate, sig);
-      const migrated = await saveLocalVideo(aligned, sig, undefined, { pinned: meta?.pinned });
+      const migrated = await saveLocalVideo(aligned, sig);
       if (migrated) {
         try { await dir.removeEntry(oldKey); } catch { /* already absent */ }
         try { await dir.removeEntry(`${oldKey}.meta.json`); } catch { /* already absent */ }
@@ -437,50 +344,94 @@ async function loadFromOpfs(sig: string): Promise<File | null> {
   }
 }
 
-export async function loadLocalVideo(sig: string): Promise<File | null> {
-  const fromHandle = await loadFromHandle(sig);
-  if (fromHandle) return fromHandle;
-  return loadFromOpfs(sig);
-}
-
-/** Resolve one logical project asset. A project-scoped handle is authoritative on this device;
- * folder metadata and shared content bytes are recovery lanes. The old global sig handle is tried
- * last only as a validated byte cache, so it can no longer override a current project binding. */
-export async function loadLocalAssetFile(
-  projectId: string,
-  entry: Pick<LocalAssetIndexEntry, 'assetId' | 'contentSig' | 'folder'>,
-): Promise<File | null> {
-  const binding = { projectId, assetId: entry.assetId };
-  const bound = await loadFromHandle(entry.contentSig, binding);
-  if (bound) return bound;
-  if (entry.folder) {
-    const folder = await loadLocalFolderFile(
-      entry.folder.id,
-      entry.folder.path,
-      entry.contentSig,
-      undefined,
-      binding,
-    );
-    if (folder?.file) return folder.file;
+/** Is this sig cached on the device (OPFS)? Cheap existence check without materializing a File. */
+export async function hasLocalVideo(sig: string): Promise<boolean> {
+  const dir = await dirHandle();
+  if (!dir) return false;
+  try {
+    const stored = await (await dir.getFileHandle(await sigKey(sig))).getFile();
+    const expected = sigSize(sig);
+    return stored.size > 0 && (expected == null || stored.size === expected);
+  } catch {
+    return false;
   }
-  const cached = await loadFromOpfs(entry.contentSig);
-  if (cached) return cached;
-  return loadFromHandle(entry.contentSig);
 }
 
-export async function deleteLocalAssetBinding(binding: LocalAssetDeviceBinding): Promise<void> {
-  await handleOp('readwrite', (store) => store.delete(localAssetBindingKey(binding)));
+async function loadFromDeviceProvider(sig: string): Promise<File | null> {
+  const provider = studioProviders().localBytes;
+  if (!provider) return null;
+  try {
+    const found = await provider.resolve(sig);
+    if (!found) return null;
+    if (found instanceof File) return alignFileToSig(found, sig);
+    const response = await fetch(found.url);
+    if (!response.ok) return null;
+    return alignFileToSig(new File([await response.blob()], fileNameFromSig(sig) || 'media'), sig);
+  } catch {
+    return null;
+  }
 }
 
-/** Rebuild a File so its identity (fileSig) MATCHES the sig it is stored/addressed under. Cloud-vault
+/** Device-only lanes: OPFS cache → desktop provider → legacy granted handle. Never prompts, never
+ * touches the network. Use resolveAssetBytes when the cloud copy is an acceptable source. */
+export async function loadLocalVideo(sig: string): Promise<File | null> {
+  return (await loadFromOpfs(sig)) ?? (await loadFromDeviceProvider(sig)) ?? loadFromLegacyHandle(sig);
+}
+
+export interface ResolveAssetBytesOptions {
+  /** Skip the cloud lane (cheap device-only probe). */
+  deviceOnly?: boolean;
+  /** Legacy project-scoped handle key from the handle era. */
+  projectId?: string;
+}
+
+/** THE byte-resolution chain for one project asset: device cache → desktop provider → legacy
+ * silent handle/folder → cloud rendezvous (by cloudKey, or by sig when a copy is known to exist).
+ * Cloud retrievals are written back into the OPFS cache so the next open is instant. */
+export async function resolveAssetBytes(
+  entry: Pick<LocalAssetIndexEntry, 'assetId' | 'contentSig' | 'cloudKey' | 'folder' | 'label'>,
+  options?: ResolveAssetBytesOptions,
+): Promise<File | null> {
+  const sig = entry.contentSig;
+  const device = (await loadLocalVideo(sig))
+    ?? (options?.projectId ? await loadFromLegacyHandle(sig, legacyBindingKey(options.projectId, entry.assetId)) : null)
+    ?? (entry.folder ? await loadFromLegacyFolder(entry.folder.id, entry.folder.path, sig) : null);
+  if (device) return device;
+  if (options?.deviceOnly || !entry.cloudKey) return null;
+  const cloud = await studioProviders().vault.fetch(sig, { cloudKey: entry.cloudKey, label: entry.label });
+  if (!cloud) return null;
+  const aligned = alignFileToSig(cloud, sig, entry.label);
+  void saveLocalVideo(aligned, sig);
+  return aligned;
+}
+
+/** @deprecated use resolveAssetBytes; kept for call sites that still pass a projectId first. */
+export async function loadLocalAssetFile(
+  projectId: string | undefined,
+  entry: Pick<LocalAssetIndexEntry, 'assetId' | 'contentSig' | 'cloudKey' | 'folder' | 'label'>,
+): Promise<File | null> {
+  return resolveAssetBytes(entry, { projectId });
+}
+
+/** Rebuild a File so its identity (fileSig) MATCHES the sig it is stored/addressed under. Cloud
  *  fetches and stale OPFS meta otherwise carry their own name/mtime — downstream that mints a NEW
  *  srcSig for the same bytes, which is exactly the "same asset shows twice" bug. Size mismatch =
- *  genuinely different bytes: returned as-is (callers' checks handle it). */
-export function alignFileToSig(f: File, sig: string): File {
+ *  genuinely different bytes: returned as-is (callers' checks handle it). For name-free content
+ *  sigs the display name comes from `label` (or stays as is). */
+export function alignFileToSig(f: File, sig: string, label?: string): File {
+  const size = sigSize(sig);
+  if (size != null && f.size !== size) return f;
+  if (isContentSig(sig)) {
+    if (label && f.name !== label) return rememberDurableFileSig(new File([f], label, { type: f.type, lastModified: f.lastModified }), sig);
+    return rememberDurableFileSig(f, sig);
+  }
   const p = sig.split(':');
   const mt = Number(p[p.length - 1]);
-  const size = Number(p[p.length - 2]);
-  if (p.length < 3 || !Number.isFinite(mt) || f.size !== size) return f;
+  if (p.length < 3 || !Number.isFinite(mt)) {
+    // Opaque locator (e.g. `gen:<key>` for generated media): no name/mtime to restore, just bind.
+    if (label && f.name !== label) return rememberDurableFileSig(new File([f], label, { type: f.type, lastModified: f.lastModified }), sig);
+    return rememberDurableFileSig(f, sig);
+  }
   if (fileSig(f) === sig) return rememberDurableFileSig(f, sig);
   return rememberDurableFileSig(
     new File([f], fileNameFromSig(sig), { type: f.type, lastModified: mt }),
@@ -488,10 +439,10 @@ export function alignFileToSig(f: File, sig: string): File {
   );
 }
 
-/** Forced eviction (user deleted the asset): drop the bytes + meta sidecar. Same contract as LRU
- *  eviction — other projects referencing the sig degrade to the re-import prompt / cloud fallback. */
+/** Forced eviction (user deleted the asset): drop the bytes + meta sidecar and any legacy handle.
+ *  Other projects referencing the sig fall back to the cloud copy. */
 export async function deleteLocalVideo(sig: string): Promise<void> {
-  await handleOp('readwrite', (st) => st.delete(sig)); // drop the native handle too (only our reference — the file on disk is untouched)
+  await handleOp('readwrite', (st) => st.delete(sig)); // legacy handle reference only — the file on disk is untouched
   const dir = await dirHandle();
   if (!dir) return;
   const key = await sigKey(sig);
@@ -511,4 +462,3 @@ export async function deleteLocalVideo(sig: string): Promise<void> {
     try { await dir.removeEntry(`${oldKey}.meta.json`); } catch { /* already gone */ }
   }
 }
-

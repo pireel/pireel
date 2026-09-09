@@ -2,8 +2,8 @@
 
 /**
  * Assets library shell — the 素材 slot of the rail's primary nav:
- *  - My assets (the current project's LOCAL media, never uploaded)  → my-assets-panel
- *  - Cloud assets (uploads + generated media + saved elements)      → cloud-assets-panel
+ *  - My assets (the project media directory: imports + generated outputs, cloud-backed) → my-assets-panel
+ *  - Library (uploads across projects + saved components)                                 → cloud-assets-panel
  * A host may inject a curated-assets panel through StudioShell. The scope is a segmented switch.
  * Every Studio session starts from the project's local media and visited panels stay mounted.
  */
@@ -43,8 +43,11 @@ export function AssetsPanel({
   onDragAsset,
   onOpenGeneration,
   onUseAudio,
+  onUseAsReference,
   genRefreshTick = 0,
 }: {
+  /** "Use as reference": arm the chat's image generation with this asset mentioned. */
+  onUseAsReference?: (entry: LocalAssetIndexEntry) => void;
   /** Element live preview needs theme/canvas (BlockPreviewFrame). */
   comp: Composition;
   /** Scopes "My"'s local-import registry (imports persist per project across refreshes). */
@@ -136,6 +139,7 @@ export function AssetsPanel({
           onInsertClip={onInsertClip}
           onUseAudio={onUseAudio}
           onDragAsset={onDragAsset}
+          onUseAsReference={onUseAsReference}
         />
       </div>
       {officialMounted && CuratedAssetsPanel && (

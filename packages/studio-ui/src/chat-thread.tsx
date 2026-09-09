@@ -11,6 +11,7 @@ import {
   useState,
 } from "react";
 import { ChevronRight, Info, X } from "lucide-react";
+import { describeGenerationIntentLine } from "./chat-generation-intent";
 import { useChat } from "@ai-sdk/react";
 import {
   DefaultChatTransport,
@@ -112,8 +113,12 @@ export function ChatThread({
   elements,
   onSnapshot,
   onBusyChange,
+  onInsertMedia,
+  onUseAudio,
   handleRef,
 }: {
+  onInsertMedia?: StudioChatProps["onInsertMedia"];
+  onUseAudio?: StudioChatProps["onUseAudio"];
   projectId?: string;
   threadId: string;
   initialMessages: UIMessage[];
@@ -765,6 +770,12 @@ export function ChatThread({
       focusInput() {
         composerRef.current?.focusInput();
       },
+      beginGeneration(intent, prompt) {
+        composerRef.current?.beginGeneration(intent, prompt);
+      },
+      insertMention(el) {
+        composerRef.current?.insertMention(el);
+      },
       attachFrame(s) {
         applyFrame(s);
       },
@@ -998,6 +1009,24 @@ export function ChatThread({
                         if (part.type === "text") {
                           const text = (part as { text?: string }).text ?? "";
                           if (!text) return null;
+                          const intentLine = m.role === "user" ? describeGenerationIntentLine(text) : null;
+                          if (intentLine) {
+                            const kindLabel = t(
+                              intentLine.intent === "image" ? "chatGen.intentImage"
+                                : intentLine.intent === "video" ? "chatGen.intentVideo"
+                                  : intentLine.intent === "audio" ? "chatGen.intentAudio"
+                                    : intentLine.intent === "speech" ? "chatGen.intentSpeech"
+                                      : "chatGen.intentElement",
+                            );
+                            return (
+                              <MessageContent key={key}>
+                                <span className={CHAT_ACTION_PILL_CLASS}>
+                                  <span className={`${CHAT_PILL_ICON_CLASS} text-accent`}>✦</span>
+                                  <span className={CHAT_PILL_LABEL_CLASS}>{intentLine.facts ? `${kindLabel} · ${intentLine.facts}` : kindLabel}</span>
+                                </span>
+                              </MessageContent>
+                            );
+                          }
                           return m.role === "user" ? (
                             <MessageContent key={key}>
                               <div className="text-[13px] leading-relaxed">
@@ -1081,6 +1110,15 @@ export function ChatThread({
                                 },
                               )
                             : renderToolPart(part, key, {
+                                generation: {
+                                  onInsertMedia,
+                                  onUseAudio,
+                                  onUseAsReference: (ref) => {
+                                    composerRef.current?.beginGeneration("image");
+                                    composerRef.current?.insertMention(ref);
+                                  },
+                                  onRegenerate: (intent, prompt) => composerRef.current?.beginGeneration(intent, prompt),
+                                },
                                 onLocate: (sec) =>
                                   void runToolRef.current("seek", {
                                     toSec: sec,
