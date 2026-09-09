@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ extract: vi.fn(), load: vi.fn(), file: vi.fn(), patch: vi.fn() }));
 vi.mock('@pireel/studio-engine/video-edit/thumbnails', () => ({ extractThumbnails: mocks.extract }));
 vi.mock('./local-media', () => ({ loadLocalVideo: mocks.file }));
-vi.mock('./caption-task-store', () => ({ loadCaptionTask: mocks.load, patchCaptionProjectMetadata: mocks.patch }));
+vi.mock('./caption-task-store', () => ({ loadCaptionTask: mocks.load, loadCaptionMedia: mocks.file, patchCaptionProjectMetadata: mocks.patch }));
 import { ensureCaptionProjectCover } from './caption-project-cover';
 beforeEach(() => {
   vi.clearAllMocks();

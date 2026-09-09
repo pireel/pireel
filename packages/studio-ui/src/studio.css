@@ -40,10 +40,16 @@
  * 只给按钮/链接类:文本输入框不加 outline —— 浏览器把文本域的任何聚焦(含鼠标点入)
  * 都算 :focus-visible,点进输入框就套蓝框很吵;输入框的聚焦提示归各自的
  * focus-within:border-* 细边框 + 光标本身(用户定的:去掉输入框蓝框)。 */
-.studio-scope :is(button, a, [role='button'], [tabindex]):not(input):not(textarea):not([contenteditable='true']):focus-visible {
+.studio-scope :is(button, a, [role='button'], [tabindex]):not(input):not(textarea):not([contenteditable='true']):not([role='combobox']):focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 1px;
   border-radius: 4px;
+}
+
+/* Select triggers can sit flush with a scroll panel edge; keep their focus outline inside. */
+.studio-scope button[role='combobox']:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
 }
 
 /* 进场 boot 层(studio-boot.tsx):π 三笔按书写顺序循环描边(pathLength 已归一到 100)。 */
@@ -62,4 +68,20 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .sb-pi path { animation: none; stroke-dashoffset: 0; }
+}
+
+/* Stable-width language examples crossfade without shifting the upload dialog. */
+.dubbing-greeting-in { animation: dubbing-greeting-in 260ms ease-out both; }
+.dubbing-greeting-out { animation: dubbing-greeting-out 260ms ease-in both; }
+@keyframes dubbing-greeting-in {
+  from { opacity: 0; transform: translateY(7px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes dubbing-greeting-out {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-7px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dubbing-greeting-in { animation: none; }
+  .dubbing-greeting-out { display: none; animation: none; }
 }

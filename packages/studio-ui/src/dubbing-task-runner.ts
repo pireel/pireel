@@ -28,6 +28,7 @@ export async function runDubbingTask(task: CaptionTaskRecord, file: File, hooks:
   if (!Number.isFinite(task.durationSec) || task.durationSec <= 0 || task.durationSec > DUBBING_MAX_DURATION_SEC) throw new Error('支持 30 分钟以内的视频。');
   if (file.size > DUBBING_MAX_VIDEO_BYTES) throw new Error('请选择 1GB 以下的视频。');
   next.dubbing ??= {};
+  const previousLanguage = next.dubbing.language;
   next.progress = Object.fromEntries(captionProcessingStages(next.options).map((stage) => [stage, { status: 'pending' }]));
   const check = () => { if (hooks.signal.aborted) throw new DOMException('Cancelled', 'AbortError'); };
   const report = (stage: CaptionProcessingStage, status: 'running' | 'completed', fraction?: number, detail?: string) => {
@@ -83,9 +84,11 @@ export async function runDubbingTask(task: CaptionTaskRecord, file: File, hooks:
   const speechTexts = speechPlan.map((part) => part.text);
   report('translating', 'completed', 1);
   await checkpoint('voicing');
-  const signature = multiple ? JSON.stringify(speechPlan) : JSON.stringify([text, config.voiceId]);
+  const legacySignature = multiple ? JSON.stringify(speechPlan) : JSON.stringify([text, config.voiceId]);
+  const signature = multiple ? JSON.stringify([config.language, speechPlan]) : JSON.stringify([text, config.voiceId, config.language]);
+  if (previousLanguage === config.language && next.dubbing.speechSignature === legacySignature) next.dubbing.speechSignature = signature;
   if (next.dubbing.speechSignature !== signature) {
-    const legacy = speechTexts.length === 1 && next.dubbing.speech?.signature === signature ? next.dubbing.speech : undefined;
+    const legacy = speechTexts.length === 1 && previousLanguage === config.language && (next.dubbing.speech?.signature === signature || next.dubbing.speech?.signature === legacySignature) ? next.dubbing.speech : undefined;
     next.dubbing = { language: config.language, sourceText, translatedText: text, translatedTurns: next.dubbing.translatedTurns, turnsKey: next.dubbing.turnsKey,
       sourceVideoKey: next.dubbing.sourceVideoKey, sourceVideoUrl: next.dubbing.sourceVideoUrl,
       speechSignature: signature, speechParts: legacy ? [legacy] : [] };
@@ -94,7 +97,7 @@ export async function runDubbingTask(task: CaptionTaskRecord, file: File, hooks:
   for (let index = 0; index < speechTexts.length; index++) {
     check();
     if (!next.dubbing.speechParts[index]) {
-      let body = await jsonRequest('/api/studio/dubbing-speech', { runId: next.generationId, projectId: next.id, chunkIndex: index, text: speechTexts[index], voiceId: speechPlan[index].voiceId, name: `${next.name} · ${config.language}` }, hooks.signal);
+      let body = await jsonRequest('/api/studio/dubbing-speech', { runId: next.generationId, projectId: next.id, chunkIndex: index, language: DUBBING_LANGUAGES.find((language) => language.id === config.language)!.code, text: speechTexts[index], voiceId: speechPlan[index].voiceId, name: `${next.name} · ${config.language}` }, hooks.signal);
       check();
       while (body.status === 'pending') {
         await pause(hooks.signal);
@@ -105,7 +108,7 @@ export async function runDubbingTask(task: CaptionTaskRecord, file: File, hooks:
       check();
       if (body.status === 'failed') throw new Error(body.error ?? '配音生成失败。');
       if (!body.asset?.url || !Number.isFinite(body.asset.durationSec) || !(body.asset.durationSec > 0)) throw new Error('配音未返回有效音频。');
-      next.dubbing.speechParts[index] = { url: body.asset.url, key: body.asset.key, durationSec: body.asset.durationSec, signature: JSON.stringify([speechTexts[index], speechPlan[index].voiceId]) };
+      next.dubbing.speechParts[index] = { url: body.asset.url, key: body.asset.key, durationSec: body.asset.durationSec, signature: JSON.stringify([speechTexts[index], speechPlan[index].voiceId, config.language]) };
       await hooks.checkpoint(next); check();
     }
     report('voicing', 'running', (index + 1) / speechTexts.length);

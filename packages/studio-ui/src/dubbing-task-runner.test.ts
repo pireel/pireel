@@ -112,3 +112,12 @@ it('mixes overlapping speaker turns instead of overwriting either voice', async 
   const pcm = mocks.wav.mock.calls[0][0] as Float32Array;
   expect(pcm[24000]).toBeCloseTo(.2); expect(pcm[4 * 24000]).toBeCloseTo(.4); expect(pcm[8 * 24000]).toBeCloseTo(.2);
 });
+
+it('changes speech language without reusing another language’s audio for identical text', async () => {
+  const source = task(); source.options.dubbing!.script = 'Hello';
+  const hooks = { signal: new AbortController().signal, checkpoint: async () => {}, progress: vi.fn() };
+  const result = await runDubbingTask(source, file, hooks);
+  const french = structuredClone(result.task); french.generationId = 'next-run'; french.options.dubbing!.language = 'French';
+  await runDubbingTask(french, file, hooks);
+  expect(mocks.fetch.mock.calls.map(([, init]) => JSON.parse(init.body).language)).toEqual(['en', 'fr']);
+});

@@ -1,179 +1,201 @@
-import type { CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
-import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
-import type { EditorDocumentV2 } from '@pireel/studio-engine/composition';
+import { studioProviders } from '@pireel/studio-engine/providers';
+import type { CaptionTaskRecord, CaptionTaskVersion, CaptionProjectSummary, CaptionVersionSummary } from '@pireel/studio-engine/scene-project';
+import * as local from './caption-task-local';
+export type * from '@pireel/studio-engine/scene-project';
+export { mergeCaptionProjectMetadata } from './caption-task-local';
 
-export type CaptionTaskStage = 'ready' | 'preparing' | 'transcribing' | 'cleaning' | 'translating' | 'emphasizing' | 'voicing' | 'aligning' | 'lipsync' | 'styling' | 'rendering' | 'completed' | 'failed' | 'interrupted';
-export type CaptionProcessingStage = 'preparing' | 'transcribing' | 'cleaning' | 'translating' | 'styling' | 'emphasizing' | 'voicing' | 'aligning' | 'lipsync' | 'rendering';
-export interface CaptionStageProgress { status: 'pending' | 'running' | 'completed'; fraction?: number; detail?: string; done?: number; total?: number }
-export type CaptionTaskProgress = Partial<Record<CaptionProcessingStage, CaptionStageProgress>>;
-export interface CaptionTaskRecord {
-  scene?: 'captions' | 'dubbing'; dubbing?: import('@pireel/studio-engine/dubbing-task').DubbingState;
-  id: string; scope: string; name: string; sourceSig: string; width: number; height: number; durationSec: number;
-  options: CaptionTaskOptions; stage: CaptionTaskStage; updatedAt: number; error?: string; transcript?: AsrSegment[];
-  generationId?: string; draftOptions?: CaptionTaskOptions; progress?: CaptionTaskProgress;
-  translation?: { language: string; sourceKey: string };
-  cuts?: { fromSec: number; toSec: number }[]; document?: EditorDocumentV2; projectId?: string; archivedAt?: number; metadataUpdatedAt?: number; coverThumb?: string;
-}
-const database = () => new Promise<IDBDatabase>((resolve, reject) => {
-  const request = indexedDB.open('pireel-caption-tasks', 3);
-  request.onupgradeneeded = () => {
-    const tasks = request.result.objectStoreNames.contains('tasks') ? request.transaction!.objectStore('tasks') : request.result.createObjectStore('tasks', { keyPath: 'key' });
-    if (!tasks.indexNames.contains('scope')) tasks.createIndex('scope', 'task.scope');
-    if (!request.result.objectStoreNames.contains('versions')) {
-      const versions = request.result.createObjectStore('versions', { keyPath: 'key' });
-      versions.createIndex('project', 'project');
-    }
-    if (!request.result.objectStoreNames.contains('results')) request.result.createObjectStore('results');
-  };
-  request.onsuccess = () => resolve(request.result);
-  request.onerror = () => reject(request.error);
-});
+const cloud = () => studioProviders().sceneProjects;
+const chains = new Map<string, Promise<unknown>>();
+const migrations = new Set<string>();
+const writeRevisions = new Map<string, number>();
+let migrationTail = Promise.resolve();
 const key = (scope: string, id: string) => JSON.stringify([scope, id]);
-export async function saveCaptionTask(task: CaptionTaskRecord, result?: Blob) {
-  const db = await database();
-  try { await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(['tasks', 'results', 'versions'], 'readwrite');
-    const tasks = tx.objectStore('tasks');
-    const request = tasks.get(key(task.scope, task.id));
-    request.onsuccess = () => {
-      const previous = request.result?.task as CaptionTaskRecord | undefined;
-      tasks.put({ key: key(task.scope, task.id), task: mergeCaptionProjectMetadata(task, previous) });
-      if (result) withCaptionVersions(tx, previous ?? task, (versions) => {
-        const id = task.generationId ?? `generated-${task.updatedAt}`;
-        if (!versions.some((version) => version.id === id)) {
-          const version = { key: versionKey(task.scope, task.id, id), project: key(task.scope, task.id), id, number: Math.max(0, ...versions.map((entry) => entry.number)) + 1, createdAt: task.updatedAt, task: structuredClone(task) };
-          tx.objectStore('versions').add(version);
-          tx.objectStore('results').put(result, version.key);
-          tx.objectStore('results').put(result, key(task.scope, task.id));
-        }
-      });
-    };
-    tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error);
-  }); } finally { db.close(); }
+const changed = () => { if (typeof window !== 'undefined') window.dispatchEvent(new Event('pireel-scene-projects-changed')); };
+function serial<T>(scope: string, id: string, work: () => Promise<T>): Promise<T> {
+  const idKey = key(scope, id);
+  const next = (chains.get(idKey) ?? Promise.resolve()).catch(() => {}).then(work);
+  chains.set(idKey, next);
+  void next.finally(() => { if (chains.get(idKey) === next) chains.delete(idKey); }).catch(() => {});
+  return next;
+}
+const assertScope = (task: CaptionTaskRecord, scope: string) => { if (task.scope !== scope) throw new Error('项目不属于当前账号。'); };
+export async function loadCaptionMedia(scope: string, sig: string, label?: string): Promise<File | null> {
+  const { loadLocalVideo } = await import('./local-media');
+  const cached = await loadLocalVideo(sig);
+  if (cached) return cached;
+  if (!cloud()) return null;
+  if (await cloud()!.owner() !== scope) throw new Error('登录账号已变化，请重新打开项目。');
+  const file = await studioProviders().vault.fetch(sig, { label });
+  if (!file) return null;
+  const { saveLocalVideo, alignFileToSig } = await import('./local-media');
+  const aligned = alignFileToSig(file, sig);
+  await saveLocalVideo(aligned, sig).catch(() => false);
+  return aligned;
+}
+async function backup(file: File, sig: string) {
+  if (!await studioProviders().vault.backup(file, sig)) throw new Error('素材上传未完成，请重试同步。');
+}
+async function prepareTask(task: CaptionTaskRecord, sourceFile?: File) {
+  if ((!task.cloudRevision || task.coverThumb?.startsWith('data:image/')) && await cloud()!.owner() !== task.scope) throw new Error('登录账号已变化，请重新打开项目。');
+  let next = { ...task };
+  if (!next.cloudRevision) {
+    const file = sourceFile ?? await loadCaptionMedia(task.scope, task.sourceSig, task.name);
+    if (!file) throw new Error('请重新选择原视频，完成云端同步。');
+    await backup(file, task.sourceSig);
+  }
+  if (next.coverThumb?.startsWith('data:image/')) {
+    const blob = await (await fetch(next.coverThumb)).blob();
+    const file = new File([blob], 'cover.jpg', { type: blob.type || 'image/jpeg' });
+    const { durableFileSig } = await import('./media');
+    next.coverSig = await durableFileSig(file); await backup(file, next.coverSig);
+  }
+  return next;
+}
+async function saveVersionToCloud(scope: string, id: string, version: CaptionTaskVersion, video: Blob) {
+  assertScope(version.task, scope);
+  if (await cloud()!.owner() !== scope) throw new Error('登录账号已变化，请重新打开项目。');
+  const { durableFileSig } = await import('./media');
+  const file = video instanceof File ? video : new File([video], `${id}-${version.id}.mp4`, { type: 'video/mp4' });
+  const sig = await durableFileSig(file);
+  await backup(file, sig);
+  return cloud()!.saveVersion(id, version, sig);
+}
+async function recordError(task: CaptionTaskRecord, error: unknown) {
+  const latest = await local.loadCaptionTask(task.scope, task.id).catch(() => undefined);
+  if (latest) await local.saveCaptionTask({ ...latest, cloudPending: true, cloudError: error instanceof Error ? error.message : '云端同步未完成。' }).catch(() => {});
+  changed();
+}
+export async function saveCaptionTask(task: CaptionTaskRecord, result?: Blob, sourceFile?: File): Promise<void> {
+  if (!cloud()) return local.saveCaptionTask(task, result);
+  return serial(task.scope, task.id, async () => {
+    const previous = await local.loadCaptionTask(task.scope, task.id).catch(() => undefined);
+    const idKey = key(task.scope, task.id);
+    if (!previous && task.cloudRevision === undefined) writeRevisions.delete(idKey);
+    let pending = local.mergeCaptionProjectMetadata({ ...task, ...(previous?.coverSig ? { coverSig: previous.coverSig, coverThumb: previous.coverThumb } : {}), cloudRevision: writeRevisions.get(idKey) ?? task.cloudRevision ?? previous?.cloudRevision ?? 0, cloudPending: true, cloudError: undefined }, previous);
+    await local.saveCaptionTask(pending, result).catch(() => local.saveCaptionTask(pending).catch(() => {}));
+    try {
+      pending = await prepareTask(pending, sourceFile);
+      // Establish the parent before uploading immutable versions; don't advertise a cloud result before it exists.
+      if (!pending.cloudRevision && result) {
+        const created = await cloud()!.save({ ...pending, stage: 'ready' }, 0);
+        assertScope(created.task, task.scope); pending.cloudRevision = created.revision; writeRevisions.set(idKey, created.revision);
+        await local.saveCaptionTask(pending).catch(() => {});
+      }
+      if (result) await saveVersionToCloud(task.scope, task.id, { id: task.generationId ?? `generated-${task.updatedAt}`, number: 0, createdAt: task.updatedAt, task }, result);
+      const stored = await cloud()!.save(pending, pending.cloudRevision ?? 0);
+      assertScope(stored.task, task.scope); writeRevisions.set(idKey, stored.revision);
+      await local.saveCaptionTask({ ...stored.task, cloudRevision: stored.revision, cloudPending: false, cloudError: undefined }).catch(() => {});
+      changed();
+    } catch (error) { await recordError(pending, error); throw error; }
+  });
+}
+/** Explicit/background migration of an existing browser project, including all historical results. */
+export async function syncCaptionProject(scope: string, id: string) {
+  if (!cloud()) return;
+  return serial(scope, id, async () => {
+    let task = await local.loadCaptionTask(scope, id);
+    if (!task || task.archivedAt) return;
+    try {
+      task = await prepareTask({ ...task, cloudRevision: writeRevisions.get(key(scope, id)) ?? task.cloudRevision });
+      if (!task.cloudRevision) {
+        const created = await cloud()!.save({ ...task, stage: task.stage === 'completed' ? 'ready' : task.stage }, 0);
+        assertScope(created.task, scope); task.cloudRevision = created.revision; writeRevisions.set(key(scope, id), created.revision);
+        await local.saveCaptionTask({ ...task, cloudPending: true });
+      }
+      const remote = new Set((await cloud()!.versions(id)).map((version) => version.id));
+      const versions = (await local.listCaptionVersions(scope, id)).sort((a, b) => a.number - b.number);
+      for (const version of versions) if (!remote.has(version.id)) {
+        const stored = await local.loadCaptionVersion(scope, id, version.id);
+        if (stored) await saveVersionToCloud(scope, id, stored.version, stored.video);
+      }
+      const stored = await cloud()!.save(task, task.cloudRevision ?? 0);
+      assertScope(stored.task, scope); writeRevisions.set(key(scope, id), stored.revision);
+      await local.saveCaptionTask({ ...stored.task, cloudRevision: stored.revision, cloudPending: false, cloudError: undefined }).catch(() => {});
+      changed();
+    } catch (error) { await recordError(task, error); throw error; }
+  });
+}
+export async function loadCaptionTask(scope: string, id: string): Promise<CaptionTaskRecord | undefined> {
+  const cached = await local.loadCaptionTask(scope, id).catch(() => undefined);
+  if (!cloud()) return cached;
+  try {
+    const stored = await cloud()!.load(id);
+    if (stored) {
+      assertScope(stored.task, scope);
+      if (cached?.cloudPending) return cached;
+      writeRevisions.set(key(scope, id), stored.revision);
+      const task = { ...stored.task, cloudRevision: stored.revision, cloudPending: false };
+      await local.saveCaptionTask(task).catch(() => {});
+      const active = ['preparing', 'transcribing', 'cleaning', 'translating', 'styling', 'emphasizing', 'voicing', 'aligning', 'lipsync', 'rendering'].includes(task.stage);
+      return active ? { ...task, stage: 'interrupted' } : task;
+    }
+    if (cached?.cloudRevision) { await local.patchCaptionProjectMetadata(scope, id, { archivedAt: Date.now() }); return undefined; }
+    return cached ? { ...cached, cloudPending: true } : undefined;
+  } catch (error) {
+    if (!cached) throw error;
+    return { ...cached, cloudError: error instanceof Error ? error.message : '云端项目暂时无法读取。' };
+  }
+}
+export async function listCaptionProjectSummaries(scope: string): Promise<CaptionProjectSummary[]> {
+  const cached = await local.listCaptionProjectSummaries(scope).catch(() => []);
+  if (!cloud()) return cached;
+  let remote: CaptionProjectSummary[];
+  try { remote = await cloud()!.list(); } catch (error) { return cached.map((task) => ({ ...task, cloudError: error instanceof Error ? error.message : '云端项目暂时无法读取。' })); }
+  for (const row of remote) if (row.scope !== scope) throw new Error('项目不属于当前账号。');
+  const merged = new Map(remote.map((row) => [row.id, row]));
+  for (const row of cached) {
+    const task = await local.loadCaptionTask(scope, row.id);
+    if (!task) continue;
+    if (!task.cloudRevision || task.cloudPending) {
+      merged.set(row.id, { ...row, cloudPending: true });
+      const idKey = key(scope, row.id);
+      if ((!task.cloudRevision || task.cloudError) && !migrations.has(idKey)) { migrations.add(idKey); migrationTail = migrationTail.catch(() => {}).then(() => syncCaptionProject(scope, row.id)).catch(() => {}); }
+    }
+  }
+  return [...merged.values()].sort((a, b) => b.updatedAt - a.updatedAt);
 }
 export async function listCaptionTasks(scope: string): Promise<CaptionTaskRecord[]> {
-  const db = await database();
-  try { return await new Promise((resolve, reject) => {
-    const request = db.transaction('tasks').objectStore('tasks').index('scope').getAll(IDBKeyRange.only(scope));
-    request.onsuccess = () => resolve(request.result.map((row) => row.task as CaptionTaskRecord).filter((task) => task.scope === scope && !task.archivedAt).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 12).map((task) => ['preparing', 'transcribing', 'cleaning', 'translating', 'styling', 'emphasizing', 'voicing', 'aligning', 'lipsync', 'rendering'].includes(task.stage) ? { ...task, stage: 'interrupted' } : task));
-    request.onerror = () => reject(request.error);
-  }); } finally { db.close(); }
+  if (!cloud()) return local.listCaptionTasks(scope);
+  const summaries = (await listCaptionProjectSummaries(scope)).slice(0, 12);
+  return (await Promise.all(summaries.map((summary) => loadCaptionTask(scope, summary.id)))).filter((task): task is CaptionTaskRecord => !!task);
+}
+export async function patchCaptionProjectMetadata(scope: string, id: string, patch: { name?: string; archivedAt?: number; coverThumb?: string }) {
+  if (!cloud()) return local.patchCaptionProjectMetadata(scope, id, patch);
+  const task = await loadCaptionTask(scope, id);
+  if (!task) throw new Error('找不到项目。');
+  if (!task.cloudRevision) await syncCaptionProject(scope, id);
+  return serial(scope, id, async () => {
+    const cover = patch.coverThumb ? await prepareTask({ ...task, cloudRevision: task.cloudRevision || 1, coverThumb: patch.coverThumb }) : undefined;
+    const stored = await cloud()!.patch(id, { ...(patch.name !== undefined ? { name: patch.name } : {}), ...(patch.archivedAt ? { archivedAt: patch.archivedAt } : {}), ...(cover?.coverSig ? { coverSig: cover.coverSig } : {}) });
+    assertScope(stored.task, scope);
+    const pending = await local.loadCaptionTask(scope, id);
+    if (!pending?.cloudPending || patch.archivedAt) writeRevisions.set(key(scope, id), stored.revision);
+    await local.saveCaptionTask(pending?.cloudPending && !patch.archivedAt ? { ...local.mergeCaptionProjectMetadata(pending, stored.task), cloudPending: true } : { ...stored.task, cloudRevision: stored.revision, cloudPending: false }); changed();
+  });
+}
+export async function listCaptionVersions(scope: string, id: string): Promise<CaptionVersionSummary[]> {
+  const cached = await local.listCaptionVersions(scope, id).catch(() => []);
+  if (!cloud()) return cached;
+  const task = await loadCaptionTask(scope, id);
+  if (!task) return [];
+  if (!task.cloudRevision) return cached;
+  const remote = await cloud()!.versions(id);
+  return [...remote, ...cached.filter((version) => !remote.some((row) => row.id === version.id))].sort((a, b) => b.number - a.number);
+}
+export async function loadCaptionVersion(scope: string, id: string, versionId: string): Promise<{ version: CaptionTaskVersion; video: Blob } | undefined> {
+  const cached = await local.loadCaptionVersion(scope, id, versionId).catch(() => undefined);
+  if (!cloud()) return cached;
+  const task = await loadCaptionTask(scope, id);
+  if (!task) return undefined;
+  if (!task.cloudRevision) return cached;
+  const stored = await cloud()!.version(id, versionId);
+  if (!stored) return cached;
+  assertScope(stored.version.task, scope);
+  const video = cached?.video ?? await loadCaptionMedia(scope, stored.resultSig, `${task.name}-v${stored.version.number}.mp4`);
+  if (!video) throw new Error('成片暂时无法下载，请稍后重试。');
+  return { version: stored.version, video };
 }
 export async function loadCaptionTaskResult(scope: string, id: string): Promise<Blob | undefined> {
-  const db = await database();
-  try { return await new Promise((resolve, reject) => {
-    const request = db.transaction('results').objectStore('results').get(key(scope, id));
-    request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
-  }); } finally { db.close(); }
-}
-
-export async function loadCaptionTask(scope: string, id: string): Promise<CaptionTaskRecord | undefined> {
-  const db = await database();
-  try { return await new Promise((resolve, reject) => {
-    const request = db.transaction('tasks').objectStore('tasks').get(key(scope, id));
-    request.onsuccess = () => {
-      const task = request.result?.task as CaptionTaskRecord | undefined;
-      resolve(task && task.scope === scope && !task.archivedAt ? (['preparing', 'transcribing', 'cleaning', 'translating', 'styling', 'emphasizing', 'voicing', 'aligning', 'lipsync', 'rendering'].includes(task.stage) ? { ...task, stage: 'interrupted' } : task) : undefined);
-    };
-    request.onerror = () => reject(request.error);
-  }); } finally { db.close(); }
-}
-
-export type CaptionProjectSummary = Pick<CaptionTaskRecord, 'id' | 'scope' | 'name' | 'updatedAt' | 'durationSec' | 'stage' | 'coverThumb' | 'scene'>;
-export async function listCaptionProjectSummaries(scope: string): Promise<CaptionProjectSummary[]> {
-  const db = await database();
-  try { return await new Promise((resolve, reject) => {
-    const rows: CaptionProjectSummary[] = [];
-    const request = db.transaction('tasks').objectStore('tasks').index('scope').openCursor(IDBKeyRange.only(scope));
-    request.onsuccess = () => {
-      const cursor = request.result;
-      if (!cursor) { resolve(rows); return; }
-      const task = cursor.value.task as CaptionTaskRecord;
-      if (task.scope === scope && !task.archivedAt) rows.push({ id: task.id, scope: task.scope, name: task.name, updatedAt: task.updatedAt, durationSec: task.durationSec, stage: task.stage, scene: task.scene, coverThumb: task.coverThumb });
-      cursor.continue();
-    };
-    request.onerror = () => reject(request.error);
-  }); } finally { db.close(); }
-}
-
-/** Metadata changes preserve the current execution record within one transaction. */
-export async function patchCaptionProjectMetadata(scope: string, id: string, patch: { name?: string; archivedAt?: number; coverThumb?: string }): Promise<void> {
-  const db = await database();
-  try { await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction('tasks', 'readwrite');
-    const store = tx.objectStore('tasks');
-    const request = store.get(key(scope, id));
-    request.onsuccess = () => {
-      const row = request.result;
-      if (!row || row.task.scope !== scope) { tx.abort(); return; }
-      const changedAt = Date.now();
-      const userEdit = patch.name !== undefined || patch.archivedAt !== undefined;
-      row.task = { ...row.task, ...patch, ...(userEdit ? { updatedAt: changedAt, metadataUpdatedAt: changedAt } : {}) };
-      store.put(row);
-    };
-    tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error ?? new Error('Caption project not found'));
-  }); } finally { db.close(); }
-}
-
-/** A late processing checkpoint cannot undo a newer rename or archive. */
-export function mergeCaptionProjectMetadata(incoming: CaptionTaskRecord, stored?: CaptionTaskRecord): CaptionTaskRecord {
-  if (!stored || stored.scope !== incoming.scope || stored.id !== incoming.id) return incoming;
-  // Background cover extraction must survive an already-running job's next checkpoint.
-  if (!incoming.coverThumb && stored.coverThumb && stored.sourceSig === incoming.sourceSig) incoming = { ...incoming, coverThumb: stored.coverThumb };
-  if ((stored.metadataUpdatedAt ?? 0) <= (incoming.metadataUpdatedAt ?? 0)) return incoming;
-  return { ...incoming, name: stored.name, archivedAt: stored.archivedAt, metadataUpdatedAt: stored.metadataUpdatedAt, updatedAt: Math.max(incoming.updatedAt, stored.updatedAt) };
-}
-
-export interface CaptionTaskVersion { id: string; number: number; createdAt: number; task: CaptionTaskRecord }
-interface StoredCaptionVersion extends CaptionTaskVersion { key: string; project: string }
-export type CaptionVersionSummary = Pick<CaptionTaskVersion, 'id' | 'number' | 'createdAt'>;
-const versionKey = (scope: string, taskId: string, id: string) => JSON.stringify([scope, taskId, id]);
-
-/** Run inside a single transaction so legacy migration and repeated completion saves are idempotent. */
-function withCaptionVersions(tx: IDBTransaction, task: CaptionTaskRecord, done: (rows: CaptionVersionSummary[]) => void) {
-  const versions = tx.objectStore('versions');
-  const rows: CaptionVersionSummary[] = [];
-  const request = versions.index('project').openCursor(IDBKeyRange.only(key(task.scope, task.id)));
-  request.onsuccess = () => {
-    const cursor = request.result;
-    if (cursor) {
-      const { id, number, createdAt } = cursor.value as StoredCaptionVersion;
-      rows.push({ id, number, createdAt }); cursor.continue(); return;
-    }
-    if (rows.length) { done(rows); return; }
-    const legacy = tx.objectStore('results').get(key(task.scope, task.id));
-    legacy.onsuccess = () => {
-      if (!legacy.result) { done(rows); return; }
-      const row: StoredCaptionVersion = { key: versionKey(task.scope, task.id, 'legacy'), project: key(task.scope, task.id), id: 'legacy', number: 1, createdAt: task.updatedAt, task: structuredClone(task) };
-      versions.add(row); tx.objectStore('results').put(legacy.result, row.key);
-      done([row]);
-    };
-  };
-}
-
-export async function listCaptionVersions(scope: string, taskId: string): Promise<CaptionVersionSummary[]> {
-  const db = await database();
-  try { return await new Promise((resolve, reject) => {
-    const tx = db.transaction(['tasks', 'results', 'versions'], 'readwrite');
-    let rows: CaptionVersionSummary[] = [];
-    const request = tx.objectStore('tasks').get(key(scope, taskId));
-    request.onsuccess = () => {
-      const task = request.result?.task as CaptionTaskRecord | undefined;
-      if (!task || task.scope !== scope || task.archivedAt) return;
-      withCaptionVersions(tx, task, (versions) => { rows = versions.map(({ id, number, createdAt }) => ({ id, number, createdAt })).sort((a, b) => b.number - a.number); });
-    };
-    tx.oncomplete = () => resolve(rows); tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error);
-  }); } finally { db.close(); }
-}
-
-export async function loadCaptionVersion(scope: string, taskId: string, id: string): Promise<{ version: CaptionTaskVersion; video: Blob } | undefined> {
-  const db = await database();
-  try { return await new Promise((resolve, reject) => {
-    const tx = db.transaction(['tasks', 'versions', 'results']);
-    const task = tx.objectStore('tasks').get(key(scope, taskId));
-    const version = tx.objectStore('versions').get(versionKey(scope, taskId, id));
-    const video = tx.objectStore('results').get(versionKey(scope, taskId, id));
-    tx.oncomplete = () => resolve(task.result?.task?.scope === scope && !task.result.task.archivedAt && version.result && video.result ? { version: version.result, video: video.result } : undefined);
-    tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error);
-  }); } finally { db.close(); }
+  const versions = await listCaptionVersions(scope, id);
+  return versions[0] ? (await loadCaptionVersion(scope, id, versions[0].id))?.video : local.loadCaptionTaskResult(scope, id);
 }

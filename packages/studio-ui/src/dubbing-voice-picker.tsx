@@ -50,7 +50,7 @@ export function DubbingVoicePicker({ voices, value, loading, disabled, locale, l
     <Dialog open={cloneOpen} onOpenChange={(open) => { if (!cloneBusy) setCloneOpen(open); }}>
       <DialogContent aria-describedby={undefined} showCloseButton={!cloneBusy} className="bg-panel border-line max-h-[85dvh] overflow-y-auto sm:max-w-md">
         <DialogTitle className="text-ink text-base">{zh ? '克隆音色' : 'Clone voice'}</DialogTitle>
-        <Suspense fallback={<Loader2 size={18} className="animate-spin" />}><CloneVoicePanel mode="clone" initialLanguage={language} onBusyChange={setCloneBusy} onCreated={(voice) => { setCloneBusy(false); setCloneOpen(false); onCreated(voice); }} /></Suspense>
+        <Suspense fallback={<Loader2 size={18} className="animate-spin" />}><CloneVoicePanel mode="clone" initialLanguage={selected?.language ?? language} onBusyChange={setCloneBusy} onCreated={(voice) => { setCloneBusy(false); setCloneOpen(false); onCreated(voice); }} /></Suspense>
       </DialogContent>
     </Dialog>
     {error && <p role="alert" className="text-ink-3 text-xs">{error}</p>}

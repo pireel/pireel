@@ -1,8 +1,9 @@
+import { studioProviders } from '@pireel/studio-engine/providers';
 import { dubbingVideoDocument } from '@pireel/studio-engine/dubbing-task';
 import { buildCaptionTaskDocument } from '@pireel/studio-engine/caption-task';
 import { firstNarrativeAssetId, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import { STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION, type ProjectSavePayload } from '@pireel/studio-engine/project-dto';
-import { loadCaptionVersion, type CaptionTaskRecord } from './caption-task-store';
+import { loadCaptionVersion, loadCaptionMedia, type CaptionTaskRecord } from './caption-task-store';
 import { alignFileToSig, loadLocalVideo, saveLocalVideo } from './local-media';
 import { loadCurrentUser } from './current-user';
 import { cacheProjectLocally, newProjectId, serverSaveProject, serverLoadProject } from './use-draft-persist';
@@ -27,9 +28,10 @@ export async function createCaptionAgentRemix(task: CaptionTaskRecord, sourceFil
       if (stored?.video) sourceFile = alignFileToSig(new File([stored.video], 'dubbed.mp4', { type: 'video/mp4' }), task.sourceSig);
     }
   }
-  const file = sourceFile ?? await loadLocalVideo(task.sourceSig);
+  const file = sourceFile ?? await loadCaptionMedia(task.scope, task.sourceSig, task.name);
   if (!file) throw new Error(task.scene === 'dubbing' && task.dubbing?.outputSig ? '译制成片暂时无法读取，请下载该版本后重新导入。' : '请先打开项目，重新选择原视频。');
   if (!(await saveLocalVideo(file, task.sourceSig))) throw new Error('本机空间不足，请清理后重试。');
+  if (studioProviders().sceneProjects && !await studioProviders().vault.backup(file, task.sourceSig)) throw new Error('副本素材尚未同步到云端，请重试。');
   const id = newProjectId();
   const url = URL.createObjectURL(file);
   try {

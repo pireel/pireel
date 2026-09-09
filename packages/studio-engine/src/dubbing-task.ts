@@ -24,12 +24,7 @@ export function splitDubbingScript(text: string): string[] {
   return parts;
 }
 
-export const DUBBING_LANGUAGES = [
-  { id: 'English', code: 'en', zh: '英语', en: 'English' },
-  { id: '中文', code: 'zh', zh: '中文', en: 'Chinese' },
-  { id: '日本語', code: 'ja', zh: '日语', en: 'Japanese' },
-  { id: '한국어', code: 'ko', zh: '韩语', en: 'Korean' },
-] as const;
+export { DUBBING_LANGUAGES } from './scene-languages';
 export interface DubbingOptions { language: string; voiceId: string; lipSync: boolean; script?: string; speakerVoices?: Record<string, string>; turnScripts?: Record<string, string> }
 export interface DubbingSpeech { url: string; key: string; durationSec: number; signature: string }
 export interface DubbingState {

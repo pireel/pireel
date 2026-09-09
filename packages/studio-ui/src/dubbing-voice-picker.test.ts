@@ -43,7 +43,8 @@ it('auditions one sample at a time without selecting it and stops when disabled 
 
 it('opens the existing clone flow without submitting a paid operation', async () => {
   await render(); await click('克隆音色');
-  await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[role="dialog"] input[type="file"]')).not.toBeNull(); });
+  // The real lazy-loaded panel has a cold module graph under the full parallel suite.
+  await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[role="dialog"] input[type="file"]')).not.toBeNull(); }, { timeout: 5000 });
   const dialog = document.querySelector('[role="dialog"]')!;
   expect(dialog.querySelector('textarea')).toBeNull();
   expect([...dialog.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent === '创建克隆音色')?.disabled).toBe(true);

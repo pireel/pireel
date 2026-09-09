@@ -1,3 +1,5 @@
+import type { SceneCreditInput, SceneCreditEstimate } from './scene-credit-estimate';
+import type { SceneProjectStore } from './scene-project';
 /**
  * Provider contracts — the capability seams between the pure engine/editor and
  * whatever supplies LLM, ASR, storage, and persistence.
@@ -129,6 +131,8 @@ export interface StudioProviders {
    * needs them. */
   uploadPolicy?: 'always' | 'lazy';
   projects: ProjectStore;
+  sceneProjects?: SceneProjectStore;
+  estimateSceneCredits?(input: SceneCreditInput, signal?: AbortSignal): Promise<SceneCreditEstimate>;
   /** Built-in chat persistence, independent from project document/version sync. */
   chats?: ChatThreadStore;
   uploads: AssetUploader;

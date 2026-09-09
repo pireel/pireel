@@ -94,7 +94,7 @@ export function AvatarPanel({ mode = 'library', initialLanguage = 'zh', onCreate
     },
   );
   const [composerText, setComposerText] = useState('');
-  const [language, setLanguage] = useState(initialLanguage);
+  const [language, setLanguage] = useState((CUSTOM_VOICE_LANGUAGE_CODES as readonly string[]).includes(initialLanguage) ? initialLanguage : 'en');
   const [consent, setConsent] = useState(false);
   const [preprocess, setPreprocess] = useState(false);
   const [busy, setBusy] = useState(false);

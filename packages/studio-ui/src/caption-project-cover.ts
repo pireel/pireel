@@ -1,7 +1,6 @@
 import { extractFirstThumbnail, extractThumbnails } from '@pireel/studio-engine/video-edit/thumbnails';
 import type { Thumbnail } from '@pireel/studio-engine/video-edit/types';
-import { loadLocalVideo } from './local-media';
-import { loadCaptionTask, patchCaptionProjectMetadata } from './caption-task-store';
+import { loadCaptionTask, loadCaptionMedia, patchCaptionProjectMetadata } from './caption-task-store';
 
 /** A durable JPEG data URL, never an object URL that breaks after a refresh. */
 export async function captureCaptionCover(file: File, durationSec: number): Promise<string | undefined> {
@@ -35,7 +34,7 @@ export function ensureCaptionProjectCover(scope: string, id: string): Promise<st
   const work = (async () => {
     const task = await loadCaptionTask(scope, id);
     if (!task || task.coverThumb) return task?.coverThumb;
-    const file = await loadLocalVideo(task.sourceSig);
+    const file = await loadCaptionMedia(scope, task.sourceSig, task.name);
     if (!file) return undefined;
     const coverThumb = await captureCaptionCover(file, task.durationSec);
     if (coverThumb) await patchCaptionProjectMetadata(scope, id, { coverThumb });

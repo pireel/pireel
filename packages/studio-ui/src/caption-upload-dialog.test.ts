@@ -75,3 +75,10 @@ describe('automatic caption upload transition', () => {
     expect(continued).not.toHaveBeenCalled(); expect(mocks.save).not.toHaveBeenCalled();
   });
 });
+
+it('retries a failed project save without creating a duplicate project identity', async () => {
+  await render(); mocks.save.mockRejectedValueOnce(new Error('Sync failed'));
+  await upload(); expect(continued).not.toHaveBeenCalled();
+  const firstId = mocks.save.mock.calls[0][0].id;
+  await upload(); expect(mocks.save.mock.calls[1][0].id).toBe(firstId); expect(continued).toHaveBeenCalledWith(firstId);
+});

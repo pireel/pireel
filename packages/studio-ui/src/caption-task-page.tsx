@@ -1,3 +1,4 @@
+import { SceneCreditPreview } from './scene-credit-preview';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@pireel/ui/select';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Download, Loader2, Upload, Sparkles } from 'lucide-react';
@@ -12,10 +13,10 @@ import { CaptionTaskCustomize } from './caption-task-customize';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { fileSig, probeVideoFile, type ProbedFile } from './media';
 import { loadCurrentUser } from './current-user';
-import { loadLocalVideo, saveLocalVideo } from './local-media';
+import { saveLocalVideo } from './local-media';
 import { captureCaptionFirstFrame } from './caption-project-cover';
 import { ensureFontStylesheet } from './web-fonts';
-import { loadCaptionTask, saveCaptionTask, listCaptionVersions, loadCaptionVersion, type CaptionTaskRecord, type CaptionTaskProgress, type CaptionVersionSummary, type CaptionTaskVersion } from './caption-task-store';
+import { loadCaptionTask, saveCaptionTask, loadCaptionMedia, syncCaptionProject, listCaptionVersions, loadCaptionVersion, type CaptionTaskRecord, type CaptionTaskProgress, type CaptionVersionSummary, type CaptionTaskVersion } from './caption-task-store';
 
 const defaults: CaptionTaskOptions = { layoutVersion: 2, presetId: 'clean', aspect: 'original', shortenPauses: false };
 const actionClass = 'bg-ink text-bg inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40';
@@ -94,8 +95,8 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
   const persist = async (next: CaptionTaskRecord, video?: Blob) => {
     taskRef.current = next;
     if (alive.current) setTask(next);
-    try { await saveCaptionTask(next, video); return true; }
-    catch { if (alive.current) setStorageNote(say('本机空间不足，当前结果请直接下载保存。', 'Local storage is unavailable. Download the current result to keep it.')); return false; }
+    try { await saveCaptionTask(next, video); if (alive.current && studioProviders().sceneProjects) setStorageNote(''); return true; }
+    catch (error) { if (alive.current) setStorageNote(studioProviders().sceneProjects ? (error instanceof Error ? error.message : say('云端同步未完成，改动已保留在本机。', 'Cloud sync failed. Your changes are saved on this device.')) : say('本机空间不足，当前结果请直接下载保存。', 'Local storage is unavailable. Download the current result to keep it.')); return false; }
   };
   const start = async (resume = false) => {
     if (!file || !probe || !scope || busyRef.current) return;
@@ -138,8 +139,10 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
     (async () => {
       const record = await loadCaptionTask(scope, taskId);
       if (!record) throw new Error(say('找不到这个项目。', 'This caption project is unavailable.'));
+      if (alive.current && (record.cloudPending || record.cloudError)) setStorageNote(record.cloudError ?? say('这个项目尚未同步到云端。', 'This project has not synced to the cloud yet.'));
       if ((record.scene ?? 'captions') !== scene) throw new Error(say('项目类型不匹配，请从首页打开。', 'Open this project from the home page.'));
-      const [source, history] = await Promise.all([loadLocalVideo(record.sourceSig), listCaptionVersions(scope, taskId)]);
+      if (studioProviders().sceneProjects && record.cloudPending) void syncCaptionProject(scope, taskId).then(() => { if (current) setStorageNote(''); }).catch((error) => { if (current) setStorageNote(error instanceof Error ? error.message : say('云端同步未完成。', 'Cloud sync is incomplete.')); });
+      const [source, history] = await Promise.all([loadCaptionMedia(scope, record.sourceSig, record.name), listCaptionVersions(scope, taskId)]);
       const selected = history[0] ? await loadCaptionVersion(scope, taskId, history[0].id) : undefined;
       if (!current) return;
       setTask(record); setOptions(history.length === 0 && record.stage === 'ready' ? { ...(record.draftOptions ?? record.options), layoutVersion: 2 } : record.draftOptions ?? record.options); setFile(source); setCover(record.coverThumb ?? '');
@@ -221,9 +224,9 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
         </>}
         <button type="button" disabled={!file || !scope || disabled || (isDubbing && (!options.dubbing || !dubbingVoicesReady(task.transcript ?? [], options.dubbing)))} onClick={() => void start()} className={actionClass + ' mt-6 w-full'}>{busy || preparing ? <Loader2 size={16} className="animate-spin" /> : null}{busy ? say('正在生成…', 'Generating…') : versions.length ? say('生成新版本', 'Generate new version') : isDubbing ? say('生成译制视频', 'Generate dubbed video') : say('生成字幕视频', 'Generate captioned video')}</button>
         {resumable && !busy && <button type="button" disabled={!file || disabled} onClick={() => void start(true)} className="text-ink-3 mt-3 w-full text-xs underline">{say('继续上次处理', 'Resume last run')}</button>}
-        <p className="text-ink-4 mt-3 text-center text-xs">{isDubbing ? say('识别、翻译、配音和口型同步按实际使用计费。', 'Transcription, translation, speech and lip sync use credits.') : say('语音识别、翻译和重点词选择可能消耗积分。', 'Transcription, translation and key phrase selection may use credits.')}</p>
+        <SceneCreditPreview task={task} options={options} locale={locale} busy={busy || preparing} />
         {!file && <button type="button" disabled={disabled} onClick={() => inputRef.current?.click()} className="text-ink mt-4 flex items-center gap-2 text-sm"><Upload size={16} />{say('重新选择原视频', 'Re-select source video')}</button>}
-        {error && <p role="alert" className="text-ink mt-4 text-sm leading-relaxed">{error}</p>}{storageNote && <p role="status" className="text-ink-3 mt-3 text-xs leading-relaxed">{storageNote}</p>}
+        {error && <p role="alert" className="text-ink mt-4 text-sm leading-relaxed">{error}</p>}{storageNote && <p role="status" className="text-ink-3 mt-3 text-xs leading-relaxed">{storageNote}{studioProviders().sceneProjects && <button type="button" disabled={disabled} className="ml-2 underline" onClick={() => { setPreparing(true); void syncCaptionProject(scope!, taskId).then(() => setStorageNote('')).catch((error) => setStorageNote(error instanceof Error ? error.message : say('同步失败，请重试。', 'Sync failed. Try again.'))).finally(() => setPreparing(false)); }}>{say('重试同步', 'Retry sync')}</button>}</p>}
       </section>
       <section aria-label={say('视频预览', 'Video preview')} className="min-w-0 md:sticky md:top-5">
         {versions.length > 0 && <div className="mb-3 flex items-center justify-between gap-3">
