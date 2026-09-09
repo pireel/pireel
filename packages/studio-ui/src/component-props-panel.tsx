@@ -210,6 +210,7 @@ export function ComponentPropsPanel({ block, swatches, onBlockPatch, onValues, o
           <PropsForm
             schema={view.schema as PropsSchema}
             values={view.values}
+            className="flex flex-col gap-2.5"
             resetMode={view.source === 'kit' ? 'theme' : 'default'}
             labelOf={(key) => { const k = `kitProp.${key}`; const l = t(k); return l === k ? humanizeKey(key) : l; }}
             onLive={view.source === 'manifest' ? (next) => { const message = liveMessageFor(block, next); if (message) onLive(message); } : undefined}
@@ -248,10 +249,6 @@ export function ComponentPropsPanel({ block, swatches, onBlockPatch, onValues, o
         <ColorRow label={t('workbench.propsBorder')} value={block.border} swatches={swatches} noneTitle={t('workbench.propsNoBorder')} onCommit={(border) => onBlockPatch({ block: { border } })} />
         <Slider label={t('workbench.propsRadius')} value={block.radius ?? 0} min={0} max={160} step={2} display={`${block.radius ?? 0} px`} onCommit={(v) => onBlockPatch({ block: { radius: v > 0 ? v : undefined } })} />
         <Slider label={t('workbench.propsOpacity')} value={Math.round((block.opacity ?? 1) * 100)} min={5} max={100} step={5} display={`${Math.round((block.opacity ?? 1) * 100)}%`} onCommit={(v) => onBlockPatch({ block: { opacity: v >= 100 ? undefined : v / 100 } })} />
-      </Group>
-
-      <Group label={t('workbench.propsName')}>
-        <TextField text={block.label ?? ''} onCommit={(value) => onBlockPatch({ block: { label: value.trim().slice(0, 24) || undefined } })} />
       </Group>
 
       {images.length > 0 && (

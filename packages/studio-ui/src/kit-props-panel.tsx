@@ -51,9 +51,11 @@ function kitFieldLabel(key: string): string {
   return label === k ? key : label;
 }
 
-const INPUT = 'bg-canvas/70 text-ink placeholder:text-ink-5 focus:ring-ink-4/40 w-full rounded-md px-2.5 py-1.5 text-[12px] outline-none focus:ring-1';
-const LABEL = 'text-ink-3 text-[11px]';
+const INPUT =
+  'bg-panel-2 text-ink placeholder:text-ink-5 w-full rounded-md px-2.5 py-1.5 text-[12px] leading-5 shadow-[inset_0_0_0_1px_var(--color-line-2)] outline-none focus:shadow-[inset_0_0_0_1px_var(--color-accent)]';
+const LABEL = 'text-ink-4 text-[11px]';
 
+/** Label above, control full width — for colour, font, text and row lists. */
 function Field({ label, trailing, description, children }: { label: string; trailing?: ReactNode; description?: string; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5" title={description}>
@@ -62,6 +64,16 @@ function Field({ label, trailing, description, children }: { label: string; trai
         {trailing}
       </div>
       {children}
+    </div>
+  );
+}
+
+/** Label left, control right — the compact editor row (sliders, segmented enums, switches). */
+function Row({ label, title, children }: { label: string; title?: string; children: ReactNode }) {
+  return (
+    <div className="flex min-h-[28px] items-center gap-3" title={title}>
+      <span className="text-ink-3 min-w-0 flex-1 truncate text-[11.5px]">{label}</span>
+      <div className="flex shrink-0 items-center gap-2">{children}</div>
     </div>
   );
 }
@@ -173,30 +185,29 @@ export function PropsForm({
         }
         if (Array.isArray(f.enum)) {
           return (
-            <Field key={key} label={label(key, f)} description={f.description}>
-              <div className="bg-canvas/70 flex rounded-md p-0.5">
+            <Row key={key} label={label(key, f)} title={f.description}>
+              <div className="bg-panel-2 flex rounded-md p-0.5 shadow-[inset_0_0_0_1px_var(--color-line-2)]">
                 {f.enum.map((opt) => (
                   <button
                     key={opt}
                     type="button"
                     onClick={() => commit(key, opt)}
-                    className={`min-w-0 flex-1 truncate rounded px-2 py-1 text-[11px] transition-colors ${
-                      v === opt ? 'bg-panel-2 text-ink shadow-sm' : 'text-ink-3 hover:text-ink'
+                    className={`min-w-0 truncate rounded px-2.5 py-1 text-[11px] transition-colors ${
+                      v === opt ? 'bg-panel text-ink shadow-sm' : 'text-ink-3 hover:text-ink'
                     }`}
                   >
                     {opt}
                   </button>
                 ))}
               </div>
-            </Field>
+            </Row>
           );
         }
         if (f.type === 'boolean') {
           return (
-            <div key={key} className="flex items-center justify-between gap-2" title={f.description}>
-              <span className={LABEL}>{label(key, f)}</span>
+            <Row key={key} label={label(key, f)} title={f.description}>
               <Switch on={v === true} label={label(key, f)} onToggle={(next) => commit(key, next)} />
-            </div>
+            </Row>
           );
         }
         if (f.type === 'number') {
@@ -205,7 +216,7 @@ export function PropsForm({
           const step = f.multipleOf ?? (max - min) / 100;
           const num = typeof v === 'number' ? v : min;
           return (
-            <Field key={key} label={label(key, f)} description={f.description} trailing={<span className="text-ink-4 text-[11px] tabular-nums">{Math.round(num * 100) / 100}</span>}>
+            <Row key={key} label={label(key, f)} title={f.description}>
               <input
                 type="range"
                 min={min}
@@ -216,9 +227,10 @@ export function PropsForm({
                 onPointerUp={(e) => commit(key, Number((e.target as HTMLInputElement).value))}
                 onKeyUp={(e) => commit(key, Number((e.target as HTMLInputElement).value))}
                 onBlur={(e) => commit(key, Number(e.target.value))}
-                className="accent-accent h-1.5 w-full cursor-pointer"
+                className="accent-accent h-1.5 w-24 cursor-pointer"
               />
-            </Field>
+              <span className="text-ink-4 w-10 text-right text-[11px] tabular-nums">{Math.round(num * 100) / 100}</span>
+            </Row>
           );
         }
         if (f.format === 'font') {
