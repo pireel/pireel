@@ -99,6 +99,7 @@ import { parkInteraction } from './interaction-store';
 import { assembleComposeBrief, interpretApplyRaw, type ComposeBriefInput } from '@pireel/studio-engine/briefs';
 import { composeVisualDirectionContent, normalizeCustomVisualStyle } from '@pireel/studio-engine/visual-style';
 import { frameRegistry } from '@pireel/studio-frames/vite';
+import { visualCraftBaseline } from './visual-baseline';
 import { composeEditorialBrief } from '@pireel/studio-engine/review-brief';
 import { planScriptCaptionSegments, splitScriptLines } from '@pireel/studio-engine/script-captions';
 import { studioProviders } from '@pireel/studio-engine/providers';
@@ -4937,6 +4938,9 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             ...(d.palette ? { palette: d.palette as Record<string, string> } : {}),
             ...(d.kitCurrent ? { kitCurrent: d.kitCurrent as ComposeBriefInput['kitCurrent'] } : {}),
             ...(format ? { format } : {}),
+            // The shell injects the host visual-craft baseline; the server compose route folds the
+            // same text in, so BYO components get the same quality floor. Empty on an OSS shell.
+            ...(visualCraftBaseline() ? { visualBaseline: visualCraftBaseline() } : {}),
             frame: frameContent,
           });
           return {
