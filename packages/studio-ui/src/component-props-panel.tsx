@@ -172,7 +172,7 @@ function Empty({ text }: { text: string }) {
   return <div data-block-selection-keep className="text-ink-4 flex h-full items-center justify-center px-6 text-center text-[11px] leading-5">{text}</div>;
 }
 
-export function ComponentPropsPanel({ block, canvas, swatches, onBlockPatch, onValues, onLive, onText, onReplaceImage, onRemoveImage }: ComponentPropsPanelProps) {
+export function ComponentPropsPanel({ block, swatches, onBlockPatch, onValues, onLive, onText, onReplaceImage, onRemoveImage }: ComponentPropsPanelProps) {
   const [localFonts, setLocalFonts] = useState<LocalFontFamilyOption[]>(cachedLocalFontFamilies);
   const [fontAccessState, setFontAccessState] = useState<'idle' | 'loading' | 'loaded' | 'denied' | 'unsupported'>('idle');
   const requestLocalFonts = async () => {
@@ -188,12 +188,6 @@ export function ComponentPropsPanel({ block, canvas, swatches, onBlockPatch, onV
   const texts = dataEditFields(innerHtml);
   const images = imageSlots(innerHtml);
   const round = (n: number, d = 1) => Math.round(n * 10 ** d) / 10 ** d;
-  const box = block.box;
-  const pct = (n: number) => round(n * 100, 1);
-  const patchBox = (next: Partial<{ x: number; y: number; w: number; h: number }>) => {
-    if (!box) return;
-    onBlockPatch({ block: { box: { ...box, ...next } } });
-  };
   const isCustom = block.templateId === 'custom';
   const headerName = block.label?.trim() || (isCustom ? t('workbench.componentHeaderCustom') : t('workbench.componentHeaderKit'));
 
@@ -241,25 +235,8 @@ export function ComponentPropsPanel({ block, canvas, swatches, onBlockPatch, onV
         </Group>
       )}
 
-      <Group label={t('workbench.propsLayout')} first={!view && texts.length === 0}>
-        {box && (
-          <>
-            <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">
-              <NumCell label={t('workbench.propsX')} unit="%" value={pct(box.x)} step={0.5} min={-100} max={200} onCommit={(v) => patchBox({ x: v / 100 })} />
-              <NumCell label={t('workbench.propsY')} unit="%" value={pct(box.y)} step={0.5} min={-100} max={200} onCommit={(v) => patchBox({ y: v / 100 })} />
-              <NumCell label={t('workbench.propsW')} unit="%" value={pct(box.w)} step={0.5} min={2} max={200} onCommit={(v) => patchBox({ w: v / 100 })} />
-              <NumCell label={t('workbench.propsH')} unit="%" value={pct(box.h)} step={0.5} min={2} max={200} onCommit={(v) => patchBox({ h: v / 100 })} />
-            </div>
-            <div className="text-ink-5 text-[10px] tabular-nums">{Math.round(box.w * canvas.width)} × {Math.round(box.h * canvas.height)} px</div>
-          </>
-        )}
-        <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">
-          <NumCell label={t('workbench.propsScale')} unit="%" value={round((block.scale ?? 1) * 100, 0)} step={1} min={10} max={400} onCommit={(v) => onBlockPatch({ block: { scale: Math.abs(v / 100 - 1) < 0.005 ? undefined : v / 100 } })} />
-          <NumCell label={t('workbench.propsRotation')} unit="°" value={round(block.rotation ?? 0, 1)} step={1} min={-180} max={180} onCommit={(v) => onBlockPatch({ block: { rotation: v ? v : undefined } })} />
-        </div>
-      </Group>
-
-      <Group label={t('workbench.propsTiming')}>
+      {/* Position, size, scale and rotation are set by dragging the box in the preview, not typed here. */}
+      <Group label={t('workbench.propsTiming')} first={!view && texts.length === 0}>
         <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">
           <NumCell label={t('workbench.propsStart')} unit="s" value={round(block.startSec, 2)} step={0.1} min={0} onCommit={(v) => onBlockPatch({ startSec: v })} />
           <NumCell label={t('workbench.propsDuration')} unit="s" value={round(block.durationSec, 2)} step={0.1} min={0.3} onCommit={(v) => onBlockPatch({ durationSec: v })} />

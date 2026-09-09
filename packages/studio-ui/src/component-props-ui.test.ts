@@ -45,7 +45,8 @@ describe('editable properties on the UI side', () => {
   it('renders the same form for both kinds, plus text and image slots for bespoke markup', () => {
     setStudioLocale('zh');
     const html = panel(block);
-    for (const label of ['强调色', '数值', '角标', '布局', '文字', '图片', '恢复默认', '时间', '外观', '名称', '旋转', '不透明度']) expect(html).toContain(label);
+    // Position, size and rotation live on the preview (drag the box), not the panel.
+    for (const label of ['强调色', '数值', '角标', '布局', '文字', '图片', '恢复默认', '时间', '外观', '名称', '不透明度']) expect(html).toContain(label);
     expect(html).toContain('type="range"');
     expect(html).toContain('role="switch"');
     expect(html).toContain('type="color"');
