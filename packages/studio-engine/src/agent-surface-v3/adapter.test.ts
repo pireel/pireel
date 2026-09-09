@@ -226,6 +226,18 @@ describe('v3 adapter translations', () => {
     ]);
   });
 
+  it('composes a component brief through compose_context in seconds', () => {
+    // compose_component addresses the timeline in frames; compose_context (the browser/bridge
+    // handler) speaks seconds and blockId. A wrong target name (compose_block_brief) used to die
+    // as "unknown operation" on the chat surface — pin the real target and the field conversion.
+    expect(ok(translateV3Call('compose_component', { instruction: 'a lower third', atFrame: 0, durationFrames: 90, placement: { xPct: 6, yPct: 70, widthPct: 60, heightPct: 18 }, backdrop: 'speaker on the left', fontFamily: 'web:douyin-sans' }, ctx))).toEqual([
+      { tool: 'compose_context', input: { atSec: 0, durationSec: 3, placement: { xPct: 6, yPct: 70, widthPct: 60, heightPct: 18 }, backdrop: 'speaker on the left', fontFamily: 'web:douyin-sans' } },
+    ]);
+    expect(ok(translateV3Call('compose_component', { clipId: 'g1', instruction: 'rewrite the number' }, ctx))).toEqual([
+      { tool: 'compose_context', input: { blockId: 'g1' } },
+    ]);
+  });
+
   it('drives the caption layer as one object', () => {
     expect(ok(translateV3Call('set_captions', { on: false }, ctx))).toEqual([{ tool: 'remove_captions', input: {} }]);
     expect(ok(translateV3Call('set_captions', { on: true, preset: 'ln-clean', yPct: 82, source: { trackId: 't1' }, corrections: [{ index: 3, text: 'Fixed.' }], translations: { lang: 'English', items: [{ index: 3, text: 'Fixed.' }] }, relayout: true }, ctx))).toEqual([

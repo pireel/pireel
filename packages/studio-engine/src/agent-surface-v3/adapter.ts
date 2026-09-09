@@ -731,6 +731,31 @@ function translateSetClipFraming(input: Input, ctx: V3AdapterContext): V3Transla
   return { status: 'ok', calls };
 }
 
+function translateComposeComponent(input: Input, ctx: V3AdapterContext): V3Translation {
+  const bad = assertFps(ctx);
+  if (bad) return bad;
+  // compose_context is the browser/bridge tool that returns the generation contract; it speaks
+  // seconds and blockId. The old target name compose_block_brief was never a runStudioTool case,
+  // so every compose_component call died as "unknown operation" — route it here with the fields
+  // the handler actually reads.
+  const call: Input = {};
+  if (input.atFrame !== undefined) {
+    const at = frameField(input, 'atFrame', ctx);
+    if (isTranslation(at)) return at;
+    call.atSec = framesToSec(at as number, ctx.fps);
+  }
+  if (input.durationFrames !== undefined) {
+    const duration = frameField(input, 'durationFrames', ctx, { min: 1 });
+    if (isTranslation(duration)) return duration;
+    call.durationSec = framesToSec(duration as number, ctx.fps);
+  }
+  if (isNonEmptyString(input.clipId)) call.blockId = input.clipId;
+  if (input.placement && typeof input.placement === 'object') call.placement = input.placement;
+  if (isNonEmptyString(input.backdrop)) call.backdrop = input.backdrop;
+  if (isNonEmptyString(input.fontFamily)) call.fontFamily = input.fontFamily;
+  return { status: 'ok', calls: [{ tool: 'compose_context', input: call }] };
+}
+
 function translateApplyComponent(input: Input, ctx: V3AdapterContext): V3Translation {
   const bad = assertFps(ctx);
   if (bad) return bad;
@@ -814,7 +839,6 @@ const PASSTHROUGH: Record<string, string> = {
   remove_silence: 'remove_silence',
   mask_words: 'mask_words',
   denoise_audio: 'denoise_audio',
-  compose_component: 'compose_block_brief',
   list_models: 'list_models',
   generate_image: 'generate_image',
   generate_video: 'generate_video',
@@ -849,6 +873,7 @@ export function translateV3Call(name: string, rawInput: unknown, ctx: V3AdapterC
     case 'insert_clips': return translateAddClips(input, ctx, 'insert_clips');
     case 'assemble_from_review': return translateAssembleFromReview(input, ctx);
     case 'set_clip_framing': return translateSetClipFraming(input, ctx);
+    case 'compose_component': return translateComposeComponent(input, ctx);
     case 'apply_component': return translateApplyComponent(input, ctx);
     case 'set_captions': return translateSetCaptions(input);
     case 'read_skill': return translateReadSkill(input);
