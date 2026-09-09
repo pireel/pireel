@@ -66,7 +66,6 @@ function humanizeKey(key: string): string {
 
 const FIELD =
   'bg-panel-2 text-ink placeholder:text-ink-5 w-full rounded-md px-2.5 py-1.5 text-[12px] leading-5 shadow-[inset_0_0_0_1px_var(--color-line-2)] outline-none focus:shadow-[inset_0_0_0_1px_var(--color-accent)]';
-const NUM = 'bg-panel-2 text-ink w-full rounded-md px-2 py-1 text-[12px] tabular-nums text-right shadow-[inset_0_0_0_1px_var(--color-line-2)] outline-none focus:shadow-[inset_0_0_0_1px_var(--color-accent)]';
 
 /** A hairline-topped group of rows. `first` drops the divider so the panel doesn't open on a line. */
 function Group({ label, first, children }: { label: string; first?: boolean; children: ReactNode }) {
@@ -118,27 +117,6 @@ function TextField({ label, text, onCommit }: { label?: string; text: string; on
   );
 }
 
-/** Compact numeric cell (used inside a grid): tiny label left, right-aligned value. */
-function NumCell({ label, value, unit, min, max, step = 1, onCommit }: { label: string; value: number; unit?: string; min?: number; max?: number; step?: number; onCommit: (next: number) => void }) {
-  const [draft, setDraft] = useState(String(value));
-  useEffect(() => { setDraft(String(value)); }, [value]);
-  const commit = () => {
-    const parsed = Number(draft);
-    if (!Number.isFinite(parsed)) { setDraft(String(value)); return; }
-    let next = parsed;
-    if (min !== undefined) next = Math.max(min, next);
-    if (max !== undefined) next = Math.min(max, next);
-    if (next !== value) onCommit(next);
-    else setDraft(String(value));
-  };
-  return (
-    <label className="flex items-center gap-2">
-      <span className="text-ink-3 shrink-0 text-[11px]">{label}{unit ? <span className="text-ink-5"> {unit}</span> : null}</span>
-      <input type="number" value={draft} step={step} min={min} max={max} onChange={(e) => setDraft(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} className={NUM} />
-    </label>
-  );
-}
-
 function Slider({ label, value, min, max, step, display, onCommit }: { label: string; value: number; min: number; max: number; step: number; display: string; onCommit: (next: number) => void }) {
   return (
     <Row label={label}>
@@ -187,7 +165,6 @@ export function ComponentPropsPanel({ block, swatches, onBlockPatch, onValues, o
   const innerHtml = block.templateId === 'custom' && typeof block.slots.innerHtml === 'string' ? block.slots.innerHtml : '';
   const texts = dataEditFields(innerHtml);
   const images = imageSlots(innerHtml);
-  const round = (n: number, d = 1) => Math.round(n * 10 ** d) / 10 ** d;
   const isCustom = block.templateId === 'custom';
   const headerName = block.label?.trim() || (isCustom ? t('workbench.componentHeaderCustom') : t('workbench.componentHeaderKit'));
 
@@ -236,15 +213,8 @@ export function ComponentPropsPanel({ block, swatches, onBlockPatch, onValues, o
         </Group>
       )}
 
-      {/* Position, size, scale and rotation are set by dragging the box in the preview, not typed here. */}
-      <Group label={t('workbench.propsTiming')} first={!view && texts.length === 0}>
-        <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">
-          <NumCell label={t('workbench.propsStart')} unit="s" value={round(block.startSec, 2)} step={0.1} min={0} onCommit={(v) => onBlockPatch({ startSec: v })} />
-          <NumCell label={t('workbench.propsDuration')} unit="s" value={round(block.durationSec, 2)} step={0.1} min={0.3} onCommit={(v) => onBlockPatch({ durationSec: v })} />
-        </div>
-      </Group>
-
-      <Group label={t('workbench.propsAppearance')}>
+      {/* Box (position/size/rotation) is dragged on the preview; start/duration on the timeline. */}
+      <Group label={t('workbench.propsAppearance')} first={!view && texts.length === 0}>
         <ColorRow label={t('workbench.propsBackground')} value={block.bg} swatches={swatches} noneTitle={t('workbench.noBackground')} onCommit={(bg) => onBlockPatch({ block: { bg } })} />
         <ColorRow label={t('workbench.propsBorder')} value={block.border} swatches={swatches} noneTitle={t('workbench.propsNoBorder')} onCommit={(border) => onBlockPatch({ block: { border } })} />
         <Slider label={t('workbench.propsRadius')} value={block.radius ?? 0} min={0} max={160} step={2} display={`${block.radius ?? 0} px`} onCommit={(v) => onBlockPatch({ block: { radius: v > 0 ? v : undefined } })} />
