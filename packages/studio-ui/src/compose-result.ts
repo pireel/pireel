@@ -41,6 +41,8 @@ export function newBlockComposeMode(): undefined {
 export interface ComposedBlock {
   innerHtml: string;
   timelineBody: string;
+  /** The editable-properties JSON Schema (```json fence). '' when the component has none. */
+  propsSchema: string;
   note: string;
   /** Present on the kit path — the block stores props, not markup. */
   kit?: KitChoice;
@@ -59,11 +61,12 @@ export function composedBlockFields(r: ComposedBlock, authoredDurationSec?: numb
         slots: {
           innerHtml: r.innerHtml,
           timelineBody: r.timelineBody,
+          ...(r.propsSchema ? { propsSchema: r.propsSchema } : {}),
           ...(typeof authoredDurationSec === 'number' && Number.isFinite(authoredDurationSec) && authoredDurationSec > 0
             ? { authoredDurationSec }
             : {}),
-          // An edit that kept the property keys keeps the user's tuned values (pruned against the new manifest).
-          ...componentPropsCarry(r.innerHtml, carry?.props),
+          // An edit that kept the property keys keeps the user's tuned values (pruned against the new schema).
+          ...componentPropsCarry(r.propsSchema, carry?.props),
         },
       };
 }

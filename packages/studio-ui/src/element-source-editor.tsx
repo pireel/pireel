@@ -19,6 +19,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, Loader2, Repeat, Sparkles } from 'lucide-react';
 import { type Block, renderBlock } from '@pireel/studio-engine/composition';
+import { blockPropsSchema } from '@pireel/studio-engine/component-props';
 import { HARD_LINT_CODES, lintBlock } from '@pireel/studio-engine/block-lint';
 import { CodeEditor } from './code-editor';
 import { t } from './i18n';
@@ -49,8 +50,8 @@ interface Issue {
 }
 
 /** Static check on the draft: lintBlock (same contract as LLM output) + JS syntax compile (lint doesn't parse syntax). */
-function checkDraft(blockId: string, draft: SourceDraft): Issue[] {
-  const issues: Issue[] = lintBlock({ blockId, innerHtml: draft.innerHtml, timelineBody: draft.timelineBody }).map((i) => ({
+function checkDraft(blockId: string, draft: SourceDraft, propsSchema: string | undefined): Issue[] {
+  const issues: Issue[] = lintBlock({ blockId, innerHtml: draft.innerHtml, timelineBody: draft.timelineBody, propsSchema }).map((i) => ({
     hard: HARD_LINT_CODES.has(i.code),
     message: i.message,
   }));
@@ -90,7 +91,7 @@ export function ElementSourceEditor({ block, locked, onDraft, onApply, loop, onL
   useEffect(() => {
     if (!dirtyRef.current) return; // Don't check/push the initial value (erroring/rebuilding on open is annoying)
     const h = setTimeout(() => {
-      const found = checkDraft(block.id, draft);
+      const found = checkDraft(block.id, draft, blockPropsSchema(block));
       setIssues(found);
       if (!found.some((i) => i.hard) && !locked) onDraftRef.current(draft);
     }, 500);

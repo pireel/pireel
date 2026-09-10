@@ -686,7 +686,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const b = findBlock(input.blockId);
       if (!b) return { result: { ok: false, error: 'block not found' } };
       const view = componentSchemaOf(b);
-      if (!view) return { result: { ok: false, error: 'this component has no editable properties (media, caption, or a bespoke component without a data-props manifest)' } };
+      if (!view) return { result: { ok: false, error: 'this component has no editable properties (media, caption, or a bespoke component without a properties schema)' } };
       const requested = input.props && typeof input.props === 'object' && !Array.isArray(input.props) ? (input.props as Record<string, unknown>) : {};
       const declared = Object.keys(view.schema.properties ?? {});
       const unknown = Object.keys(requested).filter((key) => !declared.includes(key));
@@ -1539,7 +1539,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       }
       const fb = target ? renderBlock(target) : { innerHtml: '<div></div>', timelineBody: '' };
       const parsed = parseBlockResponse(raw, fb);
-      const issues = lintBlock({ blockId: applyId, innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, requireProps: true });
+      const issues = lintBlock({ blockId: applyId, innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, propsSchema: parsed.propsSchema, requireProps: true });
       const hard = issues.filter((i) => HARD_LINT_CODES.has(i.code));
       if (hard.length) {
         return {
@@ -1554,7 +1554,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (target) {
         const edit = applyOverlayDocumentEdits({
           document: p.document,
-          updates: [{ clipId: target.id, block: { templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, authoredDurationSec: target.durationSec, ...componentFontSlot(input.fontFamily, target.slots.fontFamily), ...componentPropsCarry(parsed.innerHtml, target.slots.props) }, ...(requestedLabel ? { label: requestedLabel } : {}) } }],
+          updates: [{ clipId: target.id, block: { templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, propsSchema: parsed.propsSchema, authoredDurationSec: target.durationSec, ...componentFontSlot(input.fontFamily, target.slots.fontFamily), ...componentPropsCarry(parsed.propsSchema, target.slots.props) }, ...(requestedLabel ? { label: requestedLabel } : {}) } }],
         });
         if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
         return {
@@ -1568,7 +1568,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const nb: Block = {
         id: applyId,
         templateId: 'custom',
-        slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, authoredDurationSec: dur, ...componentFontSlot(input.fontFamily) },
+        slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, ...(parsed.propsSchema ? { propsSchema: parsed.propsSchema } : {}), authoredDurationSec: dur, ...componentFontSlot(input.fontFamily) },
         startSec: at,
         durationSec: dur,
         trackIndex: freeTrack(c.blocks, at, dur),

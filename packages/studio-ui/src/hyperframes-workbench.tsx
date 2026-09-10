@@ -450,7 +450,7 @@ import {
   withEditableBlockGeometry,
 } from "./editable-block-geometry";
 import { webFontStylesheetUrls } from '@pireel/studio-engine/font-library';
-import { componentPropsCarry, componentPropsFontIds, componentPropsLiveMessage, parseComponentProps, resolveComponentProps } from '@pireel/studio-engine/component-props';
+import { blockPropsSchema, componentPropsCarry, componentPropsFontIds, componentPropsLiveMessage, parseComponentProps, resolveComponentProps } from '@pireel/studio-engine/component-props';
 import { nextPropsSlots } from './component-props-ui';
 import { ComponentPropsPanel } from './component-props-panel';
 import { ensureWebFontStylesheets } from './web-fonts';
@@ -2587,7 +2587,7 @@ export function HyperframesWorkbench({
                 // Tuned editable properties: rewrite the container's inline values in place, formatted
                 // exactly as the assembler would bake them — no node swap, no timeline rebuild.
                 const pb = p.b;
-                const specs = parseComponentProps(String((pb.slots as { innerHtml?: unknown }).innerHtml ?? "")).specs;
+                const specs = parseComponentProps(blockPropsSchema(pb)).specs;
                 if (specs.length) {
                   postPreview({
                     type: "hf:blockProps",
@@ -3379,8 +3379,11 @@ export function HyperframesWorkbench({
    *  (authored duration, display font), with tuned property values kept only where the new markup
    *  still declares the key. */
   const sourceDraftSlots = (id: string, draft: SourceDraft): Record<string, unknown> => {
-    const { props, ...rest } = compRef.current.blocks.find((x) => x.id === id)?.slots ?? {};
-    return { ...rest, innerHtml: draft.innerHtml, timelineBody: draft.timelineBody, ...componentPropsCarry(draft.innerHtml, props) };
+    const block = compRef.current.blocks.find((x) => x.id === id);
+    const { props, ...rest } = block?.slots ?? {};
+    // Source editing changes markup/timeline, not the properties schema — keep the existing schema
+    // (it rides along in `rest`) and prune the tuned values against it.
+    return { ...rest, innerHtml: draft.innerHtml, timelineBody: draft.timelineBody, ...componentPropsCarry(block ? blockPropsSchema(block) : undefined, props) };
   };
   /** Commit: write back + advance the baseline to the applied state (closing after this no longer reverts). */
   const handleCodeApply = (id: string, draft: SourceDraft) => {
@@ -4466,6 +4469,7 @@ export function HyperframesWorkbench({
         kind: string;
         innerHtml: string;
         timelineBody: string;
+        propsSchema?: string;
         label?: string;
         boxPx?: { w: number; h: number };
         durationSec?: number;
@@ -4485,6 +4489,7 @@ export function HyperframesWorkbench({
           return {
             innerHtml: seed.innerHtml,
             timelineBody: seed.timelineBody,
+            propsSchema: '',
             note,
             kit: choice,
           };
@@ -4493,6 +4498,7 @@ export function HyperframesWorkbench({
           return {
             innerHtml: seed.innerHtml,
             timelineBody: seed.timelineBody,
+            propsSchema: '',
             note,
             declined: true,
           };
@@ -4504,11 +4510,13 @@ export function HyperframesWorkbench({
       let parsed = parseBlockResponse(raw, {
         innerHtml: seed.innerHtml,
         timelineBody: seed.timelineBody,
+        propsSchema: seed.propsSchema,
       });
       let issues = lintBlock({
         blockId: seed.id,
         innerHtml: parsed.innerHtml,
         timelineBody: parsed.timelineBody,
+        propsSchema: parsed.propsSchema,
         requireProps: true,
       });
       if (issues.length) {
@@ -4522,11 +4530,13 @@ export function HyperframesWorkbench({
         parsed = parseBlockResponse(raw2, {
           innerHtml: fixSeed.innerHtml,
           timelineBody: fixSeed.timelineBody,
+          propsSchema: parsed.propsSchema,
         });
         issues = lintBlock({
           blockId: seed.id,
           innerHtml: parsed.innerHtml,
           timelineBody: parsed.timelineBody,
+          propsSchema: parsed.propsSchema,
           requireProps: true,
         });
         const hard = issues.filter((i) => HARD_LINT_CODES.has(i.code));

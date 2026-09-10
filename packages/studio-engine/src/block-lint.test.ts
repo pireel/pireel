@@ -116,23 +116,24 @@ describe('lintBlock(块产物静态检查)', () => {
   });
 });
 
-describe('editable properties manifest', () => {
+describe('editable properties schema', () => {
   const manifest = JSON.stringify({
     accent: { type: 'string', format: 'color', title: '强调色', default: '#ff5a36' },
     badge: { type: 'boolean', title: '角标', default: true },
   });
-  const good = `<div class="wrap" data-props='${manifest}'><style>#b1 .k{color:var(--p-accent)} #b1[data-p-badge="false"] .badge{display:none}</style><span data-edit="t" class="k">十个以上的可见文字内容</span><i class="badge"></i></div>`;
-  const codes = (html: string) => lintBlock({ blockId: 'b1', innerHtml: html, timelineBody: '' }).map((i) => i.code);
+  // The schema now arrives as its own slot (the ```json fence); the markup only consumes it.
+  const good = `<div class="wrap"><style>#b1 .k{color:var(--p-accent)} #b1[data-p-badge="false"] .badge{display:none}</style><span data-edit="t" class="k">十个以上的可见文字内容</span><i class="badge"></i></div>`;
+  const codes = (html: string, propsSchema: string | null = manifest) =>
+    lintBlock({ blockId: 'b1', innerHtml: html, timelineBody: '', propsSchema: propsSchema ?? undefined }).map((i) => i.code);
 
-  it('a well-formed manifest that is fully consumed lints clean', () => {
+  it('a well-formed schema that is fully consumed lints clean', () => {
     expect(codes(good)).toEqual([]);
-    expect(codes(good.replace(`data-props='${manifest}'`, `data-props="${manifest.replaceAll('"', '&quot;')}"`))).toEqual([]);
   });
 
-  it('a broken manifest and self-written values are reported for the fix round but never block placement', () => {
+  it('a broken schema and self-written values are reported for the fix round but never block placement', () => {
     expect(HARD_LINT_CODES.has('props-invalid')).toBe(false);
     expect(HARD_LINT_CODES.has('props-unused')).toBe(false);
-    expect(codes(good.replace(manifest, '[{oops'))).toContain('props-invalid');
+    expect(codes(good, '[{oops')).toContain('props-invalid');
     expect(codes(good.replace('<span data-edit="t" class="k">', '<span data-edit="t" class="k" style="--p-accent:#000">'))).toContain('props-invalid');
     expect(codes(good.replace('<i class="badge">', '<i class="badge" data-p-badge="false">'))).toContain('props-invalid');
     const lazy = codes(good.replace('#b1[data-p-badge="false"] .badge{display:none}', ''));
@@ -140,19 +141,20 @@ describe('editable properties manifest', () => {
     expect(lazy).not.toContain('props-invalid');
   });
 
-  it('the generation gate asks for a manifest with a colour (soft — the fix round, not a rejection); the timeline gate does not', () => {
+  it('the generation gate asks for a schema with a colour (soft — the fix round, not a rejection); the timeline gate does not', () => {
     const noManifest = `<div><style>#b1 .k{color:red}</style><span data-edit="t" class="k">十个以上的可见文字内容</span></div>`;
     expect(HARD_LINT_CODES.has('props-missing')).toBe(false);
     expect(lintBlock({ blockId: 'b1', innerHtml: noManifest, timelineBody: '', requireProps: true }).map((i) => i.code)).toEqual(['props-missing']);
-    expect(codes(noManifest)).toEqual([]);
-    const noColour = noManifest.replace('<div>', `<div data-props='{"n":{"type":"number","title":"n","default":1}}'>`).replace('color:red', 'width:calc(var(--p-n)*1px)');
-    expect(lintBlock({ blockId: 'b1', innerHtml: noColour, timelineBody: '', requireProps: true }).map((i) => i.code)).toEqual(['props-missing']);
-    expect(lintBlock({ blockId: 'b1', innerHtml: good, timelineBody: '', requireProps: true })).toEqual([]);
+    expect(codes(noManifest, null)).toEqual([]);
+    const noColourSchema = '{"n":{"type":"number","title":"n","default":1}}';
+    const noColour = noManifest.replace('color:red', 'width:calc(var(--p-n)*1px)');
+    expect(lintBlock({ blockId: 'b1', innerHtml: noColour, timelineBody: '', propsSchema: noColourSchema, requireProps: true }).map((i) => i.code)).toEqual(['props-missing']);
+    expect(lintBlock({ blockId: 'b1', innerHtml: good, timelineBody: '', propsSchema: manifest, requireProps: true })).toEqual([]);
     // text without a data-edit handle stays soft as well: the inspector just shows fewer text fields
     expect(HARD_LINT_CODES.has('no-data-edit')).toBe(false);
   });
 
-  it('markup without a manifest is untouched by the props rules', () => {
-    expect(codes(`<div><style>#b1 .k{color:red}</style><span data-edit="t" class="k">十个以上的可见文字内容</span></div>`)).toEqual([]);
+  it('markup without a schema is untouched by the props rules', () => {
+    expect(codes(`<div><style>#b1 .k{color:red}</style><span data-edit="t" class="k">十个以上的可见文字内容</span></div>`, null)).toEqual([]);
   });
 });

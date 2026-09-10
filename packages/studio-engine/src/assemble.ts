@@ -27,7 +27,7 @@ import { compositionVisualLayerPlan, type SupplementalVisualMediaClip } from './
 import { BLOCK_TEXT_BASELINE_PX } from './block-typography';
 import { webFontStylesheetUrls } from './font-library';
 import { displayFontContext, displayTextFontCss } from './display-text-presets';
-import { componentPropsAttrs, componentPropsFontIds, componentPropsInlineCss, parseComponentProps, resolveComponentProps } from './component-props';
+import { blockPropsSchema, componentPropsAttrs, componentPropsFontIds, componentPropsInlineCss, parseComponentProps, resolveComponentProps } from './component-props';
 
 /* ============================ Assembly ============================ */
 
@@ -523,7 +523,7 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
     // Editable properties of a bespoke component: every declared property (override ?? default) lands
     // on the CONTAINER as an inline custom property and a data-p-* attribute — inline beats the markup's
     // own <style>, the live channel (hf:blockProps) writes the same names, the export serializes it.
-    const propSpecs = b.templateId === 'custom' && typeof b.slots.innerHtml === 'string' ? parseComponentProps(b.slots.innerHtml).specs : [];
+    const propSpecs = b.templateId === 'custom' ? parseComponentProps(blockPropsSchema(b)).specs : [];
     const propValues = propSpecs.length ? resolveComponentProps(propSpecs, b.slots.props) : null;
     const propsCss = propValues ? componentPropsInlineCss(propSpecs, propValues) : '';
     const propsAttrs = propValues ? ` ${componentPropsAttrs(propSpecs, propValues)}` : '';

@@ -49,7 +49,8 @@ Prefer a registered Motion Graphic Component whenever one fits; custom is an esc
 const HTML_OUTPUT = `OUTPUT
 After the note line, in THIS order:
 - one \`\`\`html block = the full INNER HTML,
-- then one \`\`\`js block = the full TIMELINE BODY.`;
+- then one \`\`\`js block = the full TIMELINE BODY,
+- then one \`\`\`json block = the EDITABLE PROPERTIES schema (the JSON-Schema properties object). Omit this \`\`\`json block only when the component genuinely has no editable properties.`;
 
 /** The registered Component path's system prompt. It is currently used for an explicit Motion Graphic preset choice or
  *  editing an existing kit block; new generation uses the free-form path even without a Frame.

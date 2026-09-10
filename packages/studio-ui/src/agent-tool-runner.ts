@@ -4813,7 +4813,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           return { ok: false, error: 'the model answered null (no graphic) — nothing was changed; delete_block the target yourself if you agree' };
         }
         const parsed = parseBlockResponse(raw, fb);
-        const issues = lintBlock({ blockId: applyId, innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, requireProps: true });
+        const issues = lintBlock({ blockId: applyId, innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, propsSchema: parsed.propsSchema, requireProps: true });
         // Same hard line as composeBlockChecked: hard problems are bounced back for the external model to fix itself (it is the "one fix round" model)
         const hard = issues.filter((i) => HARD_LINT_CODES.has(i.code));
         if (hard.length) {
@@ -4823,7 +4823,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         pushUndoSnapshot();
         if (target) {
           const editable = withEditableBlockGeometry(
-              { ...target, templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, authoredDurationSec: target.durationSec, ...componentFontSlot(input.fontFamily, target.slots.fontFamily), ...componentPropsCarry(parsed.innerHtml, target.slots.props) }, ...(requestedLabel ? { label: requestedLabel } : {}) },
+              { ...target, templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, propsSchema: parsed.propsSchema, authoredDurationSec: target.durationSec, ...componentFontSlot(input.fontFamily, target.slots.fontFamily), ...componentPropsCarry(parsed.propsSchema, target.slots.props) }, ...(requestedLabel ? { label: requestedLabel } : {}) },
             c2.width,
             c2.height,
           );
@@ -4839,7 +4839,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         const nb = withEditableBlockGeometry({
           id: applyId,
           templateId: 'custom',
-          slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, authoredDurationSec: dur, ...componentFontSlot(input.fontFamily) },
+          slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, ...(parsed.propsSchema ? { propsSchema: parsed.propsSchema } : {}), authoredDurationSec: dur, ...componentFontSlot(input.fontFamily) },
           startSec: at,
           durationSec: dur,
           trackIndex: freeTrack(c2.blocks, at, dur),

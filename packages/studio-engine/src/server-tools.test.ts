@@ -138,8 +138,8 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
   it('set_block_props patches a bespoke component’s editable properties; apply_block keeps them across a rewrite', () => {
     const p = v2proj();
     const manifest = JSON.stringify({ accent: { type: 'string', format: 'color', title: 'Accent', default: '#ff5a36' }, value: { type: 'number', title: 'Value', default: 72, minimum: 0, maximum: 100 } });
-    const markup = (extra = '') => `<div class="wrap" data-props='${manifest}'><style>#ai-p .t{color:var(--p-accent);font-size:36px;width:calc(var(--p-value) * 1%)}</style><div class="t" data-edit="t">十个以上的可见文字内容</div>${extra}</div>`;
-    const raw = (extra = '') => `note\n\`\`\`html\n${markup(extra)}\n\`\`\`\n\`\`\`js\ntl.to("#ai-p .t",{opacity:1,duration:.3});\n\`\`\``;
+    const markup = (extra = '') => `<div class="wrap"><style>#ai-p .t{color:var(--p-accent);font-size:36px;width:calc(var(--p-value) * 1%)}</style><div class="t" data-edit="t">十个以上的可见文字内容</div>${extra}</div>`;
+    const raw = (extra = '') => `note\n\`\`\`html\n${markup(extra)}\n\`\`\`\n\`\`\`js\ntl.to("#ai-p .t",{opacity:1,duration:.3});\n\`\`\`\n\`\`\`json\n${manifest}\n\`\`\``;
     const applied = runServerTool('apply_block', { raw: raw(), blockId: 'ai-p', atSec: 1 }, p);
     expect(applied.result.ok, JSON.stringify(applied.result)).toBe(true);
     const withBlock = { ...p, document: applied.document! };

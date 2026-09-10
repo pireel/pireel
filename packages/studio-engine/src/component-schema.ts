@@ -2,14 +2,14 @@
  * ONE property contract for every component on the timeline.
  *
  * A registered (kit) component declares JSON Schema in code; a bespoke component declares the same
- * JSON Schema `properties` in its data-props manifest. Everything downstream — the inspector form,
- * the agent's set_block_props, the get_state read-back, the brief — consumes only the view this
- * module returns: `{ schema, values }` plus one `applyComponentValues` that knows where each kind
- * persists its values (kit: the full props object, parsed by the component; bespoke: overrides
- * pruned against the manifest). Adding a component of either kind costs no UI or tool work.
+ * JSON Schema `properties` in its `slots.propsSchema` (the ```json fence). Everything downstream —
+ * the inspector form, the agent's set_block_props, the get_state read-back, the brief — consumes only
+ * the view this module returns: `{ schema, values }` plus one `applyComponentValues` that knows where
+ * each kind persists its values (kit: the full props object, parsed by the component; bespoke:
+ * overrides pruned against the schema). Adding a component of either kind costs no UI or tool work.
  */
 import { kitComponents } from './kit-templates';
-import { componentPropsJsonSchema, parseComponentProps, pruneComponentProps, resolveComponentProps } from './component-props';
+import { blockPropsSchema, componentPropsJsonSchema, parseComponentProps, pruneComponentProps, resolveComponentProps } from './component-props';
 
 export interface ComponentSchemaView {
   source: 'kit' | 'manifest';
@@ -34,12 +34,12 @@ function storedProps(block: BlockLike): Record<string, unknown> {
   return props && typeof props === 'object' && !Array.isArray(props) ? (props as Record<string, unknown>) : {};
 }
 
-/** The editable surface of a block, or null when it has none (media, captions, a bespoke component without a manifest). */
+/** The editable surface of a block, or null when it has none (media, captions, a bespoke component without a properties schema). */
 export function componentSchemaOf(block: BlockLike): ComponentSchemaView | null {
   const kit = kitDefinition(block.templateId);
   if (kit) return { source: 'kit', schema: kit.jsonSchema as ComponentSchemaView['schema'], values: { ...kit.defaults, ...storedProps(block) } };
-  if (block.templateId !== 'custom' || typeof block.slots.innerHtml !== 'string') return null;
-  const specs = parseComponentProps(block.slots.innerHtml).specs;
+  if (block.templateId !== 'custom') return null;
+  const specs = parseComponentProps(blockPropsSchema(block)).specs;
   if (!specs.length) return null;
   return { source: 'manifest', schema: componentPropsJsonSchema(specs), values: resolveComponentProps(specs, block.slots.props) };
 }
@@ -56,7 +56,7 @@ export function applyComponentValues(block: BlockLike, next: Record<string, unkn
     const merged = { ...view.values, ...next };
     return { ...rest, props: kit.parse ? kit.parse(merged) : merged };
   }
-  const props = pruneComponentProps(String(block.slots.innerHtml), { ...view.values, ...next });
+  const props = pruneComponentProps(blockPropsSchema(block), { ...view.values, ...next });
   return props ? { ...rest, props } : rest;
 }
 

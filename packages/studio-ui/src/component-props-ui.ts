@@ -3,14 +3,13 @@
  * (component-schema.ts) plus the live-preview message a bespoke component's drag needs.
  */
 import type { Block } from '@pireel/studio-engine/composition';
-import { componentPropsLiveMessage, parseComponentProps, resolveComponentProps, type ComponentPropSpec } from '@pireel/studio-engine/component-props';
+import { blockPropsSchema, componentPropsLiveMessage, parseComponentProps, resolveComponentProps, type ComponentPropSpec } from '@pireel/studio-engine/component-props';
 import { applyComponentValues } from '@pireel/studio-engine/component-schema';
 
-/** The manifest of a bespoke block, or [] for anything else (kit, media, captions, no manifest). */
+/** The properties schema of a bespoke block, or [] for anything else (kit, media, captions, no schema). */
 export function blockPropSpecs(block: Pick<Block, 'templateId' | 'slots'>): ComponentPropSpec[] {
   if (block.templateId !== 'custom') return [];
-  const innerHtml = block.slots.innerHtml;
-  return typeof innerHtml === 'string' ? parseComponentProps(innerHtml).specs : [];
+  return parseComponentProps(blockPropsSchema(block)).specs;
 }
 
 /** Slots after the user set the form to `next` — one rule for registered and bespoke components. */

@@ -63,6 +63,22 @@ describe('parseBlockResponse', () => {
     expect(timelineBody).toBe('tl.from("#b .wrap",{autoAlpha:0},0)');
     expect(note).toBe('note');
   });
+
+  it('抽出 ```json 作为 editable-properties schema,三块互不干扰', () => {
+    const schema = '{"accent":{"type":"string","format":"color","title":"Accent","default":"#ff5a36"}}';
+    const text = `note\n\`\`\`html\n<div class="wrap"><style>#b .wrap{color:var(--p-accent)}</style></div>\n\`\`\`\n\`\`\`js\ntl.to("#b .wrap",{},0)\n\`\`\`\n\`\`\`json\n${schema}\n\`\`\``;
+    const { innerHtml, timelineBody, propsSchema, note } = parseBlockResponse(text, FB);
+    expect(innerHtml).toContain('var(--p-accent)');
+    expect(timelineBody).toBe('tl.to("#b .wrap",{},0)');
+    expect(propsSchema).toBe(schema);
+    expect(note).toBe('note');
+  });
+
+  it('无 json 块时 propsSchema 回退到 fb,两者都缺时为空串', () => {
+    const withFb = parseBlockResponse('```html\n<div>x</div>\n```', { ...FB, propsSchema: '{"n":{"type":"number","default":1}}' });
+    expect(withFb.propsSchema).toBe('{"n":{"type":"number","default":1}}');
+    expect(parseBlockResponse('```html\n<div>x</div>\n```', FB).propsSchema).toBe('');
+  });
 });
 
 describe('buildBlockPrompt', () => {

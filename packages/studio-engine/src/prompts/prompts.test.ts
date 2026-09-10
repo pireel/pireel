@@ -236,8 +236,8 @@ describe("静态提示词完整性", () => {
     );
     expect(CHAT_IDENTITY).not.toContain("OVERLAY BLOCKS");
     expect(BLOCK_SYSTEM).toContain("producing ONE Motion Graphic Component");
-    // editable properties: the manifest and the only two ways to consume it
-    expect(BLOCK_SYSTEM).toContain("data-props=");
+    // editable properties: the ```json schema fence and the only two ways to consume it in the markup
+    expect(BLOCK_SYSTEM).toContain("```json fence");
     expect(BLOCK_SYSTEM).toContain("var(--p-<key>)");
     expect(BLOCK_SYSTEM).toContain('[data-p-<key>="v"]');
     expect(BLOCK_SYSTEM).not.toContain("same component");

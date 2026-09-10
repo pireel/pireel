@@ -86,7 +86,7 @@ function momentParts(args: { block: BlockEdit; context?: ComposeContext }): stri
   if (args.block.label) parts.push(`This block currently shows: ${args.block.label}`);
   if (args.block.props?.length)
     parts.push(
-      `Current EDITABLE PROPERTIES (the user tuned these through the data-props manifest — keep every key and its type in the new data-props so the values survive):\n${args.block.props.map((p) => `  ${p.key} (${p.type}) = ${JSON.stringify(p.value)}`).join('\n')}`,
+      `Current EDITABLE PROPERTIES (the user tuned these through the properties schema — keep every key and its type in the schema so the values survive):\n${args.block.props.map((p) => `  ${p.key} (${p.type}) = ${JSON.stringify(p.value)}`).join('\n')}`,
     );
   if (args.context?.neighbors?.length)
     parts.push(
@@ -121,31 +121,37 @@ export function buildBlockPrompt(args: { block: BlockEdit; instruction: string; 
   parts.push(`Instruction: ${args.instruction}`);
   parts.push(`MANDATORY FINAL CSS AUDIT for this exact response: inspect EVERY selector in the <style>, including selectors after commas and selectors inside @container. Every one must start with #${args.block.id}. Rewrite any shorthand such as ".kicker", ".pf .logo", or ".rule" to "#${args.block.id} .kicker", "#${args.block.id} .pf .logo", and "#${args.block.id} .rule" before answering. One unscoped selector makes the component invalid.`);
   const noteLang = args.lang ? `the user's UI language "${args.lang}"` : 'the same language as the instruction above';
-  parts.push(`First reply with ONE short note in ${noteLang} describing the change, THEN the updated INNER HTML (\`\`\`html), THEN the updated TIMELINE BODY (\`\`\`js).`);
+  parts.push(`First reply with ONE short note in ${noteLang} describing the change, THEN the updated INNER HTML (\`\`\`html), THEN the updated TIMELINE BODY (\`\`\`js), THEN — if this component has editable properties — the properties schema (\`\`\`json). Omit the \`\`\`json fence only when the component has no editable properties.`);
   return parts.join('\n\n');
 }
 
 export function parseBlockResponse(
   text: string,
-  fb: { innerHtml: string; timelineBody: string },
-): { innerHtml: string; timelineBody: string; note: string } {
-  // The contract is ONE ```html + ONE ```js, but a model sometimes fumbles it — an empty `<div></div>`
-  // skeleton block before the real markup, or the <style> split into its own fence. Take the SUBSTANTIVE
-  // block of each kind (the longest), not the first, so that fumble doesn't send an empty component into
-  // the lint (which then rejects it for unscoped/absent CSS).
+  fb: { innerHtml: string; timelineBody: string; propsSchema?: string },
+): { innerHtml: string; timelineBody: string; propsSchema: string; note: string } {
+  // The contract is ONE ```html + ONE ```js + an OPTIONAL ```json (the editable-properties schema),
+  // but a model sometimes fumbles it — an empty `<div></div>` skeleton block before the real markup,
+  // or the <style> split into its own fence. Take the SUBSTANTIVE block of each kind (the longest), not
+  // the first, so that fumble doesn't send an empty component into the lint. `\b` after js/javascript
+  // keeps a ```json fence from being mistaken for a ```js one.
   const htmlBlocks = [...text.matchAll(/```html\s*([\s\S]*?)```/gi)];
-  const jsBlocks = [...text.matchAll(/```(?:js|javascript)\s*([\s\S]*?)```/gi)];
+  const jsBlocks = [...text.matchAll(/```(?:js|javascript)\b\s*([\s\S]*?)```/gi)];
+  const jsonBlocks = [...text.matchAll(/```json\s*([\s\S]*?)```/gi)];
   const longest = (blocks: RegExpMatchArray[]): RegExpMatchArray | null =>
     blocks.reduce<RegExpMatchArray | null>((best, m) => ((m[1]?.trim().length ?? 0) > (best?.[1]?.trim().length ?? 0) ? m : best), null);
   const html = longest(htmlBlocks);
   const js = longest(jsBlocks);
+  const json = longest(jsonBlocks);
   // note = the text left after removing every fenced block
   let note = text;
-  for (const m of [...htmlBlocks, ...jsBlocks]) note = note.replace(m[0], '');
+  for (const m of [...htmlBlocks, ...jsBlocks, ...jsonBlocks]) note = note.replace(m[0], '');
   note = note.trim() || 'Updated the block';
   return {
     innerHtml: html?.[1]?.trim() || fb.innerHtml,
     timelineBody: js?.[1]?.trim() || fb.timelineBody,
+    // Omitting the fence on an edit keeps the current schema (props survive); a new component with no
+    // properties yields ''.
+    propsSchema: json?.[1]?.trim() || fb.propsSchema || '',
     note,
   };
 }

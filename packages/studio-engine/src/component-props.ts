@@ -1,13 +1,15 @@
 /**
  * Editable properties of a bespoke Motion Graphic component.
  *
- * The generating model declares a small manifest ONCE, inside the markup, on the component's
- * root element, in the SAME vocabulary the registered (kit) components use — JSON Schema
- * `properties`: `data-props='{"accent":{"type":"string","format":"color","title":"强调色","default":"#ff5a36"},
+ * The generating model declares a small properties SCHEMA (JSON Schema `properties`) as its own
+ * fenced ```json block, and Studio stores it in `slots.propsSchema` — the SAME vocabulary the
+ * registered (kit) components use: `{"accent":{"type":"string","format":"color","title":"强调色","default":"#ff5a36"},
  * "value":{"type":"number","minimum":0,"maximum":100,"default":72},"badge":{"type":"boolean","default":true},
- * "layout":{"type":"string","enum":["row","column"],"default":"row"},"face":{"type":"string","format":"font","default":"sans"}}'`.
+ * "layout":{"type":"string","enum":["row","column"],"default":"row"},"face":{"type":"string","format":"font","default":"sans"}}`.
  * One schema vocabulary means one form, one agent tool, one read-back for bespoke and registered
- * components alike (see component-schema.ts).
+ * components alike (see component-schema.ts). Keeping the schema out of the markup — instead of an
+ * inline `data-props` attribute — avoids JSON-in-an-HTML-attribute escaping and lets the model emit
+ * it as a clean fence.
  * The markup consumes a property only through `var(--p-<key>)` (colour, unitless number) and
  * `#ID[data-p-<key>="v"]` attribute selectors (boolean "true"/"false", select option). It never
  * writes `--p-*` or `data-p-*` itself: the assembler materializes every declared property
@@ -15,7 +17,7 @@
  * CONTAINER, so inline beats every stylesheet, the live preview channel writes the same things
  * without a rebuild, and the export (which serializes the container verbatim) carries them.
  *
- * Overrides persist in `slots.props` (additive, optional); defaults live in the manifest. Text is
+ * Overrides persist in `slots.props` (additive, optional); defaults live in the schema. Text is
  * not a property — `data-edit` already covers it; images are `<img>` slots.
  *
  * This module imports only the two formatting helpers from composition-core so assemble, lint,
@@ -58,26 +60,63 @@ function decodeEntities(value: string): string {
     .replace(/&amp;/gi, '&');
 }
 
-export function hasComponentPropsManifest(innerHtml: string): boolean {
-  return MANIFEST_ATTR.test(innerHtml);
+/** The properties schema for a component: its own `slots.propsSchema` string, or — for a component
+ *  saved before the schema moved out of the markup — the legacy inline `data-props` attribute value
+ *  extracted from `slots.innerHtml`. Back-compat with zero migration. */
+export function blockPropsSchema(block: { templateId: string; slots: Record<string, unknown> }): string | undefined {
+  const schema = block.slots.propsSchema;
+  if (typeof schema === 'string' && schema.trim()) return schema;
+  const innerHtml = block.slots.innerHtml;
+  if (typeof innerHtml === 'string') {
+    const match = MANIFEST_ATTR.exec(innerHtml);
+    if (match) return decodeEntities(match[1] ?? match[2] ?? '');
+  }
+  return undefined;
+}
+
+/** Pull the bare `properties` map out of a schema string — accepting both `{properties:{…}}` (a whole
+ *  schema) and the bare map. `null` when the string is absent/empty or not a JSON object. */
+function propertiesOf(schemaJson: string | undefined): Record<string, unknown> | null {
+  if (!schemaJson || !schemaJson.trim()) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(schemaJson);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const obj = parsed as Record<string, unknown>;
+  const props = 'properties' in obj && obj.properties && typeof obj.properties === 'object' && !Array.isArray(obj.properties)
+    ? (obj.properties as Record<string, unknown>)
+    : obj;
+  return props && !Array.isArray(props) ? props : null;
+}
+
+/** Whether a component declares a properties schema (present and a non-empty object, or present but
+ *  malformed — still "declared", so the lint reports props-invalid rather than "missing"). */
+export function hasComponentPropsManifest(schemaJson: string | undefined): boolean {
+  if (!schemaJson || !schemaJson.trim()) return false;
+  const props = propertiesOf(schemaJson);
+  if (props) return Object.keys(props).length > 0;
+  // Non-empty string that is not a valid properties object: declared but broken.
+  return true;
 }
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
-/** Read the manifest (JSON Schema `properties`). Never throws: an invalid manifest yields `specs: []`
- *  plus one issue per problem, so rendering degrades to "no properties" while the lint reports
- *  exactly what to fix. Each property becomes a normalized spec the rest of the module works from. */
-export function parseComponentProps(innerHtml: string): { specs: ComponentPropSpec[]; issues: string[] } {
-  const match = MANIFEST_ATTR.exec(innerHtml);
-  if (!match) return { specs: [], issues: [] };
-  const raw = decodeEntities(match[1] ?? match[2] ?? '');
+/** Read the properties schema (JSON Schema `properties`). Never throws: an invalid schema yields
+ *  `specs: []` plus one issue per problem, so rendering degrades to "no properties" while the lint
+ *  reports exactly what to fix. Each property becomes a normalized spec the rest of the module works
+ *  from. `undefined`/empty → no properties (not an error). */
+export function parseComponentProps(schemaJson: string | undefined): { specs: ComponentPropSpec[]; issues: string[] } {
+  if (!schemaJson || !schemaJson.trim()) return { specs: [], issues: [] };
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(schemaJson);
   } catch {
-    return { specs: [], issues: ['data-props is not valid JSON (an object of JSON Schema properties: {"<key>":{"type":…,"default":…}})'] };
+    return { specs: [], issues: ['the properties schema is not valid JSON (an object of JSON Schema properties: {"<key>":{"type":…,"default":…}})'] };
   }
   // `{properties:{…}}` (a whole schema) and the bare properties map are both accepted.
   const props = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
@@ -85,11 +124,11 @@ export function parseComponentProps(innerHtml: string): { specs: ComponentPropSp
       ? (parsed as { properties: Record<string, unknown> }).properties
       : (parsed as Record<string, unknown>))
     : null;
-  if (!props || Array.isArray(props)) return { specs: [], issues: ['data-props must be a JSON object: {"<key>": {"type": …, "default": …}, …} (the same JSON Schema properties a registered component declares)'] };
+  if (!props || Array.isArray(props)) return { specs: [], issues: ['the properties schema must be a JSON object: {"<key>": {"type": …, "default": …}, …} (the same JSON Schema properties a registered component declares)'] };
   const issues: string[] = [];
   const specs: ComponentPropSpec[] = [];
   const keys = Object.keys(props);
-  if (keys.length > COMPONENT_PROPS_MAX) issues.push(`data-props declares ${keys.length} properties; at most ${COMPONENT_PROPS_MAX} are allowed`);
+  if (keys.length > COMPONENT_PROPS_MAX) issues.push(`the properties schema declares ${keys.length} properties; at most ${COMPONENT_PROPS_MAX} are allowed`);
   for (const key of keys.slice(0, COMPONENT_PROPS_MAX)) {
     const e = props[key];
     if (!COMPONENT_PROP_KEY.test(key)) {
@@ -230,10 +269,10 @@ export function resolveComponentProps(specs: readonly ComponentPropSpec[], overr
   return out;
 }
 
-/** Overrides worth persisting: only keys the current manifest declares, coerced, and only where
+/** Overrides worth persisting: only keys the current schema declares, coerced, and only where
  *  they differ from the default. Empty result means "delete slots.props". */
-export function pruneComponentProps(innerHtml: string, overrides: unknown): ComponentPropsOverrides | undefined {
-  const { specs } = parseComponentProps(innerHtml);
+export function pruneComponentProps(schemaJson: string | undefined, overrides: unknown): ComponentPropsOverrides | undefined {
+  const { specs } = parseComponentProps(schemaJson);
   if (!specs.length) return undefined;
   const source = overrides && typeof overrides === 'object' && !Array.isArray(overrides) ? (overrides as Record<string, unknown>) : {};
   const out: ComponentPropsOverrides = {};
@@ -246,9 +285,9 @@ export function pruneComponentProps(innerHtml: string, overrides: unknown): Comp
 }
 
 /** `{ props }` to spread into the slots of a rewritten component so the user's tuned values survive
- *  a regeneration that kept the keys — or `{}` when nothing applies to the new manifest. */
-export function componentPropsCarry(innerHtml: string, overrides: unknown): { props: ComponentPropsOverrides } | Record<string, never> {
-  const props = pruneComponentProps(innerHtml, overrides);
+ *  a regeneration that kept the keys — or `{}` when nothing applies to the new schema. */
+export function componentPropsCarry(schemaJson: string | undefined, overrides: unknown): { props: ComponentPropsOverrides } | Record<string, never> {
+  const props = pruneComponentProps(schemaJson, overrides);
   return props ? { props } : {};
 }
 
@@ -318,7 +357,7 @@ export function componentPropsJsonSchema(specs: readonly ComponentPropSpec[]): {
   return { type: 'object', additionalProperties: false, properties, required: [] };
 }
 
-/** How the markup uses its manifest. `unused` keys are never read (soft lint). `ownDeclarations` are
+/** How the markup uses its schema. `unused` keys are never read (soft lint). `ownDeclarations` are
  *  `--p-*:` declarations or `data-p-*=` attributes the model wrote itself: a value set on a descendant
  *  shadows the container's inherited one and silently defeats overrides and the live channel (hard lint).
  *  Attribute SELECTORS (`[data-p-key="v"]`) are the intended use and are not flagged. */
@@ -333,22 +372,21 @@ export function componentPropsUsage(innerHtml: string, specs: readonly Component
   return { unused, ownDeclarations: [...new Set(ownDeclarations)] };
 }
 
-/** Rewrite the manifest defaults to the given effective values (save-as-element bakes the tuned look
- *  into the library copy). Returns the markup unchanged when it declares no valid manifest. */
-export function bakeComponentPropsDefaults(innerHtml: string, values: Record<string, ComponentPropValue>): string {
-  const match = MANIFEST_ATTR.exec(innerHtml);
-  const { specs } = parseComponentProps(innerHtml);
-  if (!match || !specs.length) return innerHtml;
+/** Rewrite the schema defaults to the given effective values (save-as-element bakes the tuned look
+ *  into the library copy). Returns the baked schema string, or the input unchanged when it declares
+ *  no valid properties. */
+export function bakeComponentPropsDefaults(schemaJson: string | undefined, values: Record<string, ComponentPropValue>): string | undefined {
+  const { specs } = parseComponentProps(schemaJson);
+  if (!specs.length) return schemaJson;
   const baked = componentPropsJsonSchema(specs.map((spec) => ({ ...spec, default: spec.key in values ? coerce(spec, values[spec.key]) : spec.default }))).properties;
-  const json = JSON.stringify(baked).replaceAll("'", '&#39;');
-  return innerHtml.slice(0, match.index) + ` data-props='${json}'` + innerHtml.slice(match.index + match[0].length);
+  return JSON.stringify(baked);
 }
 
 /** Font ids a bespoke component's font-type properties resolve to (effective values), so the
  *  document, the parent page and the export load their stylesheets like any other font in use. */
 export function componentPropsFontIds(block: { templateId: string; slots: Record<string, unknown> }): string[] {
-  if (block.templateId !== 'custom' || typeof block.slots.innerHtml !== 'string') return [];
-  const specs = parseComponentProps(block.slots.innerHtml).specs.filter((spec) => spec.type === 'font');
+  if (block.templateId !== 'custom') return [];
+  const specs = parseComponentProps(blockPropsSchema(block)).specs.filter((spec) => spec.type === 'font');
   if (!specs.length) return [];
   const values = resolveComponentProps(specs, block.slots.props);
   return specs.map((spec) => String(values[spec.key]));
@@ -356,11 +394,11 @@ export function componentPropsFontIds(block: { templateId: string; slots: Record
 
 /** The generation contract's floor, checked by the lint gate when `requireProps` is on: a bespoke
  *  component must declare editable properties, and at least one of them a colour. */
-export function componentPropsRequirement(innerHtml: string): string | null {
-  if (!hasComponentPropsManifest(innerHtml)) return 'a bespoke component must declare editable properties: data-props=\'{"<key>":{"type":…,"default":…}}\' (JSON Schema properties, the vocabulary registered components use) on its root element with at least one color property (the accent), plus the number / boolean / enum / font values a user would tune';
-  const { specs, issues } = parseComponentProps(innerHtml);
+export function componentPropsRequirement(schemaJson: string | undefined): string | null {
+  if (!hasComponentPropsManifest(schemaJson)) return 'a bespoke component must declare editable properties as a ```json fence — {"<key>":{"type":…,"default":…}} (JSON Schema properties, the vocabulary registered components use) — with at least one color property (the accent), plus the number / boolean / enum / font values a user would tune';
+  const { specs, issues } = parseComponentProps(schemaJson);
   if (issues.length) return null; // reported as props-invalid already
-  if (!specs.some((spec) => spec.type === 'color')) return 'data-props must include at least one color property (the accent colour the user is most likely to change)';
+  if (!specs.some((spec) => spec.type === 'color')) return 'the properties schema must include at least one color property (the accent colour the user is most likely to change)';
   return null;
 }
 
