@@ -78,6 +78,19 @@ export interface ComposerHandle {
   insertMention(el: StudioElementRef): void;
 }
 
+/** Generation config (model, ratio, count, quality, resolution, duration, voice) is a user preference,
+ *  not per-project state — remember the last choices so the picker opens on them next time. */
+const GEN_PARAMS_KEY = 'pireel:studio:gen-params';
+function loadGenParams(): GenerationParams {
+  try {
+    const raw = localStorage.getItem(GEN_PARAMS_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as GenerationParams) : {};
+  } catch {
+    return {};
+  }
+}
+
 export function Composer({
   placeholder,
   status,
@@ -141,7 +154,11 @@ export function Composer({
   const [customStyle, saveCustomStyle] = useCustomFrameStyle();
   const [mode, setMode] = useState<ChatMode>("chat");
   const intent: GenerationIntent | null = mode === "chat" ? null : mode;
-  const [genParams, setGenParams] = useState<GenerationParams>({});
+  const [genParams, setGenParams] = useState<GenerationParams>(loadGenParams);
+  // Persist the generation config across sessions (per-viewer localStorage, best-effort).
+  useEffect(() => {
+    try { localStorage.setItem(GEN_PARAMS_KEY, JSON.stringify(genParams)); } catch { /* private mode / blocked */ }
+  }, [genParams]);
   // Hosted model catalog for the armed kind (image/video only), same source the retired panel used.
   const [genModels, setGenModels] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => {
@@ -154,7 +171,12 @@ export function Composer({
       .then((r) => (r.ok ? r.json() : null))
       .then((j: { models?: Array<{ id?: string; name?: string }> } | null) => {
         if (cancelled || !Array.isArray(j?.models)) return;
-        setGenModels(j.models.filter((m): m is { id: string; name?: string } => typeof m?.id === "string").map((m) => ({ id: m.id, name: m.name ?? m.id })));
+        const models = j.models.filter((m): m is { id: string; name?: string } => typeof m?.id === "string").map((m) => ({ id: m.id, name: m.name ?? m.id }));
+        setGenModels(models);
+        // A remembered model is intent-specific: drop it if it is not one of this kind's models, so
+        // an image model never leaks into a video generation. Everything else (ratio, quality, …) stays.
+        const ids = new Set(models.map((m) => m.id));
+        setGenParams((p) => (p.modelId && !ids.has(p.modelId) ? { ...p, modelId: undefined } : p));
       })
       .catch(() => {});
     return () => {
