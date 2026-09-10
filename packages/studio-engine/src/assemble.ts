@@ -825,3 +825,18 @@ addEventListener('message',function(e){var d=e&&e.data;if(!d||d.type!=='hf-loop'
   // afterwards only matters for media (video currentTime), which a single-block preview has none of.
   return html;
 }
+
+/**
+ * The composition HTML for BAKING one component to a transparent video (cloud render → VP9-alpha
+ * WebM). The block alone, on the project canvas, transparent ground, with its GSAP timeline `tl`
+ * intact so the render service plays it across the full duration — no preview boot-pause, no rAF
+ * loop wrapper (those are for the browser preview; the renderer drives the timeline itself). Render
+ * it at the project canvas size and overlay the result at 0,0: the block keeps its exact box, so the
+ * bake is pixel-identical to what the timeline shows. Duration/fps come from the caller (block
+ * durationSec, comp fps).
+ */
+export function bakeCompositionHtml(comp: Composition, block: Block): string {
+  const mini = previewMiniComp(comp, block);
+  const html = assembleHtml(mini);
+  return html.replace('</head>', `<style>html, body, #root { ${TRANSPARENT_CSS} }</style></head>`);
+}
