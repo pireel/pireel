@@ -129,11 +129,19 @@ export function parseBlockResponse(
   text: string,
   fb: { innerHtml: string; timelineBody: string },
 ): { innerHtml: string; timelineBody: string; note: string } {
-  const html = /```html\s*([\s\S]*?)```/i.exec(text);
-  const js = /```(?:js|javascript)\s*([\s\S]*?)```/i.exec(text);
-  // note = the text left after removing both fenced blocks
+  // The contract is ONE ```html + ONE ```js, but a model sometimes fumbles it — an empty `<div></div>`
+  // skeleton block before the real markup, or the <style> split into its own fence. Take the SUBSTANTIVE
+  // block of each kind (the longest), not the first, so that fumble doesn't send an empty component into
+  // the lint (which then rejects it for unscoped/absent CSS).
+  const htmlBlocks = [...text.matchAll(/```html\s*([\s\S]*?)```/gi)];
+  const jsBlocks = [...text.matchAll(/```(?:js|javascript)\s*([\s\S]*?)```/gi)];
+  const longest = (blocks: RegExpMatchArray[]): RegExpMatchArray | null =>
+    blocks.reduce<RegExpMatchArray | null>((best, m) => ((m[1]?.trim().length ?? 0) > (best?.[1]?.trim().length ?? 0) ? m : best), null);
+  const html = longest(htmlBlocks);
+  const js = longest(jsBlocks);
+  // note = the text left after removing every fenced block
   let note = text;
-  for (const m of [html, js]) if (m) note = note.replace(m[0], '');
+  for (const m of [...htmlBlocks, ...jsBlocks]) note = note.replace(m[0], '');
   note = note.trim() || 'Updated the block';
   return {
     innerHtml: html?.[1]?.trim() || fb.innerHtml,

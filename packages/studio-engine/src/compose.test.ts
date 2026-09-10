@@ -54,6 +54,15 @@ describe('parseBlockResponse', () => {
     expect(innerHtml).toBe('<div>only html</div>');
     expect(timelineBody).toBe(FB.timelineBody);
   });
+
+  it('多个 html 块时取有实质内容的那个(跳过空的 <div></div> 前导块)', () => {
+    const text = 'note\n```html\n<div></div>\n```\n```html\n<div class="wrap"><style>#b .wrap{color:red}</style></div>\n```\n```js\ntl.from("#b .wrap",{autoAlpha:0},0)\n```';
+    const { innerHtml, timelineBody, note } = parseBlockResponse(text, FB);
+    expect(innerHtml).toContain('.wrap{color:red}');
+    expect(innerHtml).not.toBe('<div></div>');
+    expect(timelineBody).toBe('tl.from("#b .wrap",{autoAlpha:0},0)');
+    expect(note).toBe('note');
+  });
 });
 
 describe('buildBlockPrompt', () => {
