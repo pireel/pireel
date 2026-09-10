@@ -2654,6 +2654,16 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const found = searchFontsTool(input);
             return { ...found, summary: found.data.fonts.length ? t('workbench.searchedFontsN', { n: found.data.fonts.length }) : t('workbench.searchedFontsNoMatch') };
           }
+          case 'get_icons': {
+            // Server-direct like search_fonts, but the icon catalog is server-side, so fetch it (the
+            // MCP surface answers the same lookup through its own dispatch).
+            const names = Array.isArray(input.names) ? (input.names as unknown[]).filter((n): n is string => typeof n === 'string' && n.trim().length > 0).slice(0, 8) : [];
+            if (!names.length) return { ok: false, error: t('workbench.getIconsNeedName') };
+            const res = await fetch('/api/studio/icons', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ names, ...(input.kind === 'brand' ? { kind: 'brand' } : {}) }), ...(signal ? { signal } : {}) });
+            const data = (await res.json().catch(() => ({}))) as { icons?: Array<{ name: string; svg: string }>; misses?: Array<{ name: string }>; error?: string };
+            if (!res.ok || !Array.isArray(data.icons)) return { ok: false, error: data.error || t('workbench.getIconsFailed') };
+            return { ok: true, summary: t('workbench.gotIcons', { n: data.icons.length }), data };
+          }
           case 'list_models': {
             const kind = input.kind === 'image' || input.kind === 'video' ? `?kind=${input.kind}` : '';
             const res = await fetch(`/api/models${kind}`, { ...(signal ? { signal } : {}) });
