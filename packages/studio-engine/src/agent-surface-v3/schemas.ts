@@ -484,7 +484,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
     inputSchema: obj({
       prompt: str(), modelId: str('From list_models; omit for the default.'),
       size: str('e.g. 1440x2560, 2560x1440, 2048x2048.'), quality: str('Model-specific tier.'),
-      referenceImages: arr(str(), { maxItems: 9 }),
+      referenceImages: arr(str('An asset id from get_state (or a URL). Pass it straight through — generation resolves it; no inspect_media first.'), { maxItems: 9 }),
     }, ['prompt']),
   },
   generate_video: {
@@ -493,7 +493,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
     inputSchema: obj({
       prompt: str(), modelId: str(), durationSec: num('4–15.', { min: 4, max: 15 }),
       aspectRatio: enumOf(['9:16', '16:9', '1:1']), resolution: enumOf(['480p', '720p', '1080p']),
-      referenceImages: arr(str(), { maxItems: 9 }), referenceVideos: arr(str(), { maxItems: 3 }), referenceAudios: arr(str(), { maxItems: 3 }),
+      referenceImages: arr(str('An asset id from get_state (or a URL). Pass it straight through — generation resolves it; no inspect_media first.'), { maxItems: 9 }), referenceVideos: arr(str(), { maxItems: 3 }), referenceAudios: arr(str(), { maxItems: 3 }),
     }, ['prompt']),
   },
   generate_audio: {
