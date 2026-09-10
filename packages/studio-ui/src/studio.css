@@ -70,18 +70,14 @@
   .sb-pi path { animation: none; stroke-dashoffset: 0; }
 }
 
-/* Stable-width language examples crossfade without shifting the upload dialog. */
-.dubbing-greeting-in { animation: dubbing-greeting-in 260ms ease-out both; }
-.dubbing-greeting-out { animation: dubbing-greeting-out 260ms ease-in both; }
-@keyframes dubbing-greeting-in {
-  from { opacity: 0; transform: translateY(7px); }
-  to { opacity: 1; transform: translateY(0); }
+/* All supported languages form a quiet, continuous backdrop around the dubbing mark. */
+.dubbing-language-field { mask-image: linear-gradient(90deg, transparent, black 8%, black 92%, transparent); }
+.dubbing-language-wall {
+  opacity: .55;
+  mask-image: radial-gradient(ellipse 88px 70px at center, transparent 45%, black 100%);
 }
-@keyframes dubbing-greeting-out {
-  from { opacity: 1; transform: translateY(0); }
-  to { opacity: 0; transform: translateY(-7px); }
-}
+.dubbing-language-row { animation: dubbing-language-drift linear infinite; }
+@keyframes dubbing-language-drift { to { transform: translateX(-50%); } }
 @media (prefers-reduced-motion: reduce) {
-  .dubbing-greeting-in { animation: none; }
-  .dubbing-greeting-out { display: none; animation: none; }
+  .dubbing-language-row { animation: none; }
 }

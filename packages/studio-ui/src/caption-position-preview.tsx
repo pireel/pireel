@@ -1,3 +1,4 @@
+import { dubbingCaptionSample } from './caption-preview-text';
 import { useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { CAPTION_TRANSLATION_LANGUAGES, captionTaskGroupBottom, captionTaskStyle, fitCaptionTaskBilingualStyle, type CaptionTaskDimensions, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
 import { emptyComposition, resolveSubCaptionStyle, type CaptionStyle } from '@pireel/studio-engine/composition';
@@ -26,7 +27,7 @@ export function CaptionPositionPreview({ options, source, locale, disabled = fal
   const canvas = { width: 1080, height: 1080 * source.height / source.width };
   const value = captionTaskGroupBottom(options, source);
   const shown = position ?? value;
-  const sample = locale === 'zh' ? '字幕|预览' : 'Caption|preview';
+  const sample = dubbingCaptionSample(options) ?? (locale === 'zh' ? '字幕|预览' : 'Caption|preview');
   const translation = CAPTION_TRANSLATION_LANGUAGES.find((language) => language.id === options.translationLanguage)?.sample;
   const style = useMemo(() => fitCaptionTaskBilingualStyle(captionTaskStyle(options, source), canvas, translation ? [translation] : []), [options, source.width, source.height, translation]);
   const subStyle = translation && style.sub?.lang ? resolveSubCaptionStyle({ ...emptyComposition(), ...canvas, captionStyle: style }) : null;

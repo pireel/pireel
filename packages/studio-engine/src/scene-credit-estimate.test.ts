@@ -5,7 +5,7 @@ const task = (): CaptionTaskRecord => ({ id: 'task', scope: 'owner', scene: 'dub
 it('estimates speech from duration before transcription, without exposing transcript text', () => {
   const source = task(); const input = sceneCreditInput(source, source.options);
   expect(input.asr).toBe(true); expect(input.translation).toBe(true);
-  expect(input.speech[0]).toMatchObject({ minUnits: 400, maxUnits: 1400 });
+  expect(input.speech[0]).toMatchObject({ minUnits: 400, maxUnits: 1400, estimatedUnits: 900, estimatedChunks: 1 });
 });
 it('uses actual billable characters and skips completed speech when reusable', () => {
   const source = task(); source.transcript = [{ text: 'hello', start: 0, end: 60 }]; source.options.dubbing!.script = '你好abc';
@@ -13,9 +13,20 @@ it('uses actual billable characters and skips completed speech when reusable', (
   expect(input.asr).toBe(false); expect(input.translation).toBe(false); expect(input.speech[0].minUnits).toBe(7);
   source.dubbing = { language: 'English', speechSignature: JSON.stringify(['你好abc', 'voice']), speechParts: [{ url: 'audio', key: 'audio', signature: '', durationSec: 1 }] };
   expect(sceneCreditInput(source, source.options).speech).toEqual([]);
+  const full = sceneCreditInput(source, source.options, false);
+  expect(full.asr).toBe(true);
+  expect(full.speech[0].minUnits).toBe(7);
 });
 it('does not charge ordinary style changes and identifies optional paid caption features', () => {
   const source = task(); source.scene = 'captions'; source.transcript = [{ text: 'hello', start: 0, end: 60 }];
   expect(sceneCreditInput(source, source.options)).toMatchObject({ asr: false, translation: false, emphasis: false, speech: [] });
   expect(sceneCreditInput(source, { ...source.options, presetId: 'keywords', translationLanguage: 'English' })).toMatchObject({ translation: true, emphasis: true });
+});
+
+it('uses explicit language budget assumptions and excludes known silent gaps', () => {
+  const source = task(); source.options.dubbing!.language = '中文';
+  expect(sceneCreditInput(source, source.options).speech[0].estimatedUnits).toBe(600);
+  source.options.dubbing!.language = 'English';
+  source.transcript = [{ text: 'first phrase', start: 0, end: 10 }, { text: 'second phrase', start: 50, end: 60 }];
+  expect(sceneCreditInput(source, source.options).speech[0].estimatedUnits).toBe(300);
 });

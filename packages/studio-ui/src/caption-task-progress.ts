@@ -2,7 +2,7 @@ import type { CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
 import type { CaptionProcessingStage } from './caption-task-store';
 
 export function captionProcessingStages(options: CaptionTaskOptions): CaptionProcessingStage[] {
-  if (options.dubbing) return ['preparing', 'transcribing', 'translating', 'voicing', 'aligning', ...(options.dubbing.lipSync ? ['lipsync' as const] : []), 'rendering'];
+  if (options.dubbing) return ['preparing', 'transcribing', 'translating', 'voicing', 'aligning', ...(options.dubbing.lipSync ? ['lipsync' as const] : []), ...(options.dubbing.captions ? ['styling' as const, ...(options.presetId === 'keywords' ? ['emphasizing' as const] : [])] : []), 'rendering'];
   return ['preparing', 'transcribing', ...(options.shortenPauses ? ['cleaning' as const] : []), ...(options.translationLanguage ? ['translating' as const] : []), 'styling', ...(options.presetId === 'keywords' ? ['emphasizing' as const] : []), 'rendering'];
 }
 export const CAPTION_STAGE_NAMES: Record<CaptionProcessingStage, [string, string]> = {

@@ -6,6 +6,7 @@ import { captionProcessingStages } from './caption-task-progress';
 import { fileSig, probeVideoFile, transcribeFile } from './media';
 import { saveLocalVideo, loadLocalVideo } from './local-media';
 import { materializeRemoteMedia } from './remote-media';
+import { buildCaptionTaskDocument } from '@pireel/studio-engine/caption-task';
 
 type Hooks = { signal: AbortSignal; checkpoint: (task: CaptionTaskRecord) => Promise<void>; progress: (fraction: number) => void; stageProgress?: (progress: CaptionTaskProgress) => void };
 async function jsonRequest(url: string, input: unknown, signal: AbortSignal) {
@@ -37,7 +38,12 @@ export async function runDubbingTask(task: CaptionTaskRecord, file: File, hooks:
   const checkpoint = async (stage: CaptionProcessingStage) => { report(stage, 'running'); next = { ...next, stage, error: undefined, updatedAt: Date.now() }; await hooks.checkpoint(next); check(); };
   report('preparing', 'completed', 1);
   await checkpoint('transcribing');
-  if (!next.transcript?.length) next.transcript = await transcribeFile(file, { signal: hooks.signal, onPhase: (detail) => report('transcribing', 'running', undefined, detail) });
+  if (!next.transcript?.length) {
+    const transcript = await transcribeFile(file, { signal: hooks.signal, onPhase: (detail) => report('transcribing', 'running', undefined, detail) });
+    check();
+    // Progress replaces `next` while ASR is pending; attach its result to the current snapshot.
+    next.transcript = transcript;
+  }
   check(); const window = dubbingSpeechWindow(next.transcript, next.durationSec);
   report('transcribing', 'completed', 1);
   const speakers = dubbingSpeakers(next.transcript); const multiple = speakers.length > 1;
@@ -183,16 +189,37 @@ export async function runDubbingTask(task: CaptionTaskRecord, file: File, hooks:
     if (Math.abs(metadata.durationSec - next.durationSec) > .4) throw new Error('口型结果时长不匹配，请重新生成。');
     report('lipsync', 'completed', 1);
   }
-  await checkpoint('rendering');
+  if (config.captions && (next.dubbing.captionSignature !== signature || !next.dubbing.captionTranscript?.length)) {
+    await checkpoint('styling');
+    const transcript = await transcribeFile(aligned, { signal: hooks.signal, onPhase: (detail) => report('styling', 'running', undefined, detail) });
+    check();
+    if (!transcript.length) throw new Error('未识别到配音字幕，请重试。');
+    next.dubbing = { ...next.dubbing, captionTranscript: transcript, captionSignature: signature };
+    await hooks.checkpoint(next); check();
+  }
   const videoUrl = URL.createObjectURL(picture); const audioUrl = URL.createObjectURL(aligned);
   try {
-    const document = dubbingVideoDocument(next.id, fileSig(picture), videoUrl, next.name, next.width, next.height, next.durationSec);
+    let document = config.captions
+      ? buildCaptionTaskDocument({ projectId: next.id, sourceSig: fileSig(picture), sourceUrl: videoUrl, sourceName: next.name, width: next.width, height: next.height, durationSec: next.durationSec, options: { ...next.options, translationLanguage: undefined, shortenPauses: false, aspect: 'original' }, transcript: next.dubbing.captionTranscript! })
+      : dubbingVideoDocument(next.id, fileSig(picture), videoUrl, next.name, next.width, next.height, next.durationSec);
+    if (config.captions) {
+      report('styling', 'completed', 1);
+      if (next.options.presetId === 'keywords') {
+        await checkpoint('emphasizing');
+        const select = studioProviders().captionEmphasis;
+        if (!select) throw new Error('重点词服务尚未连接，请选择其他字幕样式。');
+        const { emphasizeCaptionDocument } = await import('./caption-emphasis-operation');
+        document = await emphasizeCaptionDocument(document, (rows) => { check(); return select(rows); }, (done, total) => report('emphasizing', 'running', done / total));
+        report('emphasizing', 'completed', 1);
+      }
+    }
+    await checkpoint('rendering');
     const comp = projectDocumentToComposition(document);
     comp.shots = comp.shots?.map((shot) => ({ ...shot, audioMuted: true }));
     comp.audioTracks = [{ id: 'dub-audio', src: audioUrl, role: 'narration', durationSec: next.durationSec, startSec: 0, volumeDb: 0, fadeInSec: 0, fadeOutSec: 0 }];
     const { clientExportVideo } = await import('./client-export');
     const clipFiles = new Map((comp.shots ?? []).flatMap((shot) => shot.src ? [[shot.src, picture] as const] : []));
-    const video = await clientExportVideo({ comp, videoFile: picture, clipFiles, render: { res: 1080, fps: 30, format: 'mp4' }, shouldCancel: () => hooks.signal.aborted, onProgress: (done, total) => { report('rendering', 'running', total ? done / total : undefined); hooks.progress(total ? done / total : 0); } });
+    const video = await clientExportVideo({ comp, videoFile: picture, clipFiles, audio: [{ clip: comp.audioTracks[0], file: aligned }], render: { res: 1080, fps: 30, format: 'mp4' }, shouldCancel: () => hooks.signal.aborted, onProgress: (done, total) => { report('rendering', 'running', total ? done / total : undefined); hooks.progress(total ? done / total : 0); } });
     check(); const output = new File([video], `${next.name.replace(/\.[^.]+$/, '')}-${config.language}.mp4`, { type: 'video/mp4' });
     const sig = fileSig(output); const outputCached = await saveLocalVideo(output, sig).catch(() => false);
     const metadata = await probeVideoFile(output); const url = URL.createObjectURL(output);

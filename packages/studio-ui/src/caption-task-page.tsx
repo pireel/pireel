@@ -1,9 +1,10 @@
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@pireel/ui/dialog';
 import { SceneCreditPreview } from './scene-credit-preview';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@pireel/ui/select';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Download, Loader2, Upload, Sparkles } from 'lucide-react';
 import { CAPTION_TASK_PRESETS, CAPTION_TRANSLATION_LANGUAGES, captionTaskGroupBottom, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
-import { DEFAULT_DUBBING_OPTIONS, dubbingVoicesReady } from '@pireel/studio-engine/dubbing-task';
+import { DEFAULT_DUBBING_OPTIONS, dubbingVoicesReady, dubbingSceneOptions } from '@pireel/studio-engine/dubbing-task';
 import { DubbingSettings } from './dubbing-settings';
 import { CaptionPositionPreview } from './caption-position-preview';
 import { CaptionPresetCarousel } from './caption-preset-carousel';
@@ -32,6 +33,7 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
   const [task, setTask] = useState<CaptionTaskRecord | null>(null);
   const [loadingProject, setLoadingProject] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [confirmGenerate, setConfirmGenerate] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [progress, setProgress] = useState<CaptionTaskProgress>({});
@@ -98,8 +100,9 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
     try { await saveCaptionTask(next, video); if (alive.current && studioProviders().sceneProjects) setStorageNote(''); return true; }
     catch (error) { if (alive.current) setStorageNote(studioProviders().sceneProjects ? (error instanceof Error ? error.message : say('云端同步未完成，改动已保留在本机。', 'Cloud sync failed. Your changes are saved on this device.')) : say('本机空间不足，当前结果请直接下载保存。', 'Local storage is unavailable. Download the current result to keep it.')); return false; }
   };
-  const start = async (resume = false) => {
+  const start = async (resume = false, confirmed = false) => {
     if (!file || !probe || !scope || busyRef.current) return;
+    if (!resume && !confirmed && versions.length > 0) { setConfirmGenerate(true); return; }
     busyRef.current = true; versionRequest.current++;
     setBusy(true); setVersionLoading(false); setError(''); setStopping(false); setProgress({ preparing: { status: 'running' } }); setDrafting(true);
     const controller = new AbortController(); abortRef.current = controller;
@@ -108,6 +111,7 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
       ...current, scene, ...(isDubbing ? { dubbing: { ...current?.dubbing, lipJobId: undefined, lipResultUrl: undefined, outputSig: undefined } } : {}), id: taskId, scope, name: current?.name ?? file.name, sourceSig: current?.sourceSig ?? fileSig(file), ...probe,
       generationId: crypto.randomUUID(), options: structuredClone({ ...options, aspect: 'original' }), draftOptions: undefined, document: undefined, progress: { preparing: { status: 'running' } }, stage: 'preparing', updatedAt: Date.now(),
     };
+    if (isDubbing) next.options = { ...next.options, dubbing: dubbingSceneOptions(next.options.dubbing ?? DEFAULT_DUBBING_OPTIONS), translationLanguage: undefined };
     if (resume) setOptions(next.options);
     try {
       await persist(next);
@@ -145,12 +149,14 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
       const [source, history] = await Promise.all([loadCaptionMedia(scope, record.sourceSig, record.name), listCaptionVersions(scope, taskId)]);
       const selected = history[0] ? await loadCaptionVersion(scope, taskId, history[0].id) : undefined;
       if (!current) return;
-      setTask(record); setOptions(history.length === 0 && record.stage === 'ready' ? { ...(record.draftOptions ?? record.options), layoutVersion: 2 } : record.draftOptions ?? record.options); setFile(source); setCover(record.coverThumb ?? '');
+      const loadedOptions = record.draftOptions ?? record.options;
+      setTask(record); setOptions(isDubbing ? { ...loadedOptions, layoutVersion: 2, dubbing: dubbingSceneOptions(loadedOptions.dubbing ?? DEFAULT_DUBBING_OPTIONS), translationLanguage: undefined } : history.length === 0 && record.stage === 'ready' ? { ...loadedOptions, layoutVersion: 2 } : loadedOptions); setFile(source); setCover(record.coverThumb ?? '');
       setProbe({ width: record.width, height: record.height, durationSec: record.durationSec, hasAudio: true });
       setVersions(history); setSelectedVersion(selected?.version ?? null); setResult(selected?.video ?? null); setProgress(record.progress ?? {});
       setDrafting(!!record.draftOptions || !selected || record.stage !== 'completed');
       if (!source) setError(say('请重新选择原视频以继续配置；已有版本仍可下载。', 'Re-select the source to continue. Existing versions can still be downloaded.'));
-      else if (record.error) setError(record.error);
+      else if (record.error && !(isDubbing && record.options.dubbing?.lipSync && record.progress?.lipsync?.status === 'running')) setError(record.error);
+      else setError('');
     })().catch((reason) => { if (current) setError(reason instanceof Error ? reason.message : String(reason)); })
       .finally(() => { if (current) setLoadingProject(false); });
     return () => { current = false; versionRequest.current++; };
@@ -173,7 +179,7 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
   const selectVersion = async (id: string) => {
     if (!scope || busyRef.current) return;
     const request = ++versionRequest.current;
-    if (id === 'draft') { setDrafting(true); setVersionLoading(false); setOptions(taskRef.current?.draftOptions ?? taskRef.current?.options ?? defaults); return; }
+    if (id === 'draft') { setDrafting(true); setVersionLoading(false); const draft = taskRef.current?.draftOptions ?? taskRef.current?.options ?? defaults; setOptions(isDubbing ? { ...draft, dubbing: dubbingSceneOptions(draft.dubbing ?? DEFAULT_DUBBING_OPTIONS), translationLanguage: undefined } : draft); return; }
     setVersionLoading(true); setError('');
     try {
       const current = taskRef.current;
@@ -181,7 +187,7 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
       const loaded = inMemoryVersions.current.get(id) ?? await loadCaptionVersion(scope, taskId, id);
       if (!alive.current || request !== versionRequest.current) return;
       if (!loaded) throw new Error(say('这个版本暂时无法读取。', 'This version could not be loaded.'));
-      setSelectedVersion(loaded.version); setResult(loaded.video); setOptions(loaded.version.task.options); setDrafting(false);
+      setSelectedVersion(loaded.version); setResult(loaded.video); setOptions(isDubbing ? { ...loaded.version.task.options, dubbing: dubbingSceneOptions(loaded.version.task.options.dubbing ?? DEFAULT_DUBBING_OPTIONS), translationLanguage: undefined } : loaded.version.task.options); setDrafting(false);
     } catch (reason) { if (alive.current && request === versionRequest.current) setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { if (alive.current && request === versionRequest.current) setVersionLoading(false); }
   };
@@ -204,12 +210,24 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
   if (!task) return <section className="studio-scope p-10"><p role="alert">{error}</p><button type="button" onClick={onBack} className={actionClass + ' mt-5'}>{say('返回首页', 'Back to home')}</button></section>;
 
   return <section className="studio-scope mx-auto w-full max-w-[1440px] px-5 py-7 sm:px-10">
+    <Dialog open={confirmGenerate} onOpenChange={setConfirmGenerate}>
+      <DialogContent className="studio-scope bg-panel border-line sm:max-w-sm">
+        <DialogTitle className="text-ink">{say('重新生成？', 'Generate again?')}</DialogTitle>
+        <DialogDescription className="text-ink-3">{say('已有生成结果，继续将新增一个版本。', 'A result already exists. Continuing creates a new version.')}</DialogDescription>
+        <div className="flex justify-end gap-3"><button type="button" onClick={() => setConfirmGenerate(false)} className="text-ink-3 px-4 py-2 text-sm">{say('取消', 'Cancel')}</button><button type="button" disabled={busy} onClick={() => { setConfirmGenerate(false); void start(false, true); }} className={actionClass}>{say('确认生成', 'Generate')}</button></div>
+      </DialogContent>
+    </Dialog>
     <button type="button" disabled={busy} onClick={onBack} className="text-ink-3 mb-5 inline-flex items-center gap-2 text-sm disabled:opacity-40"><ArrowLeft size={15} />{say('返回首页', 'Back to home')}</button>
     <header className="mb-6 flex flex-wrap items-start justify-between gap-4"><div><h1 className="text-ink text-2xl font-semibold tracking-tight">{isDubbing ? 'Video Dubbing' : 'AI Captions'}</h1><p className="text-ink-3 mt-2 truncate text-sm">{task.name}</p></div><button type="button" disabled={!file || disabled} onClick={() => void editInStudio()} className="border-line text-ink inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-medium disabled:opacity-40"><Sparkles size={14} />Agent Remix</button></header>
     <input ref={inputRef} type="file" accept="video/*" className="hidden" aria-label={say('选择视频文件', 'Choose a video file')} onChange={(event) => { const next = event.target.files?.[0]; event.target.value = ''; if (next) void pickFile(next); }} />
     <div className="grid items-start gap-7 md:grid-cols-[minmax(260px,300px)_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]">
-      <section className="min-w-0 md:max-h-[calc(100dvh-180px)] md:overflow-y-auto md:pr-2" aria-label={isDubbing ? say('译制设置', 'Dubbing settings') : say('字幕设置', 'Caption settings')}>
-        {isDubbing ? <DubbingSettings transcript={task.transcript} durationSec={task.durationSec} translatedTurns={task.dubbing?.language === options.dubbing?.language ? task.dubbing?.translatedTurns : undefined} value={options.dubbing ?? DEFAULT_DUBBING_OPTIONS} translatedText={task.dubbing?.language === options.dubbing?.language ? task.dubbing?.translatedText : undefined} locale={locale} disabled={disabled} onChange={(dubbing) => changeOptions((current) => ({ ...current, dubbing }))} /> : <>
+      <section className="flex h-[calc(100dvh-180px)] min-h-[280px] min-w-0 flex-col" aria-label={isDubbing ? say('译制设置', 'Dubbing settings') : say('字幕设置', 'Caption settings')}>
+        <div className="min-h-0 flex-1 overflow-y-auto pb-5 pr-2">
+        {isDubbing ? <><DubbingSettings transcript={task.transcript} value={options.dubbing ?? DEFAULT_DUBBING_OPTIONS} locale={locale} disabled={disabled} onChange={(dubbing) => changeOptions((current) => ({ ...current, dubbing: dubbingSceneOptions(dubbing) }))} />
+        <div className="mt-5 space-y-4">
+          <label className="text-ink flex items-center gap-3 text-sm"><input type="checkbox" checked={!!options.dubbing?.captions} disabled={disabled} onChange={(event) => changeOptions((current) => ({ ...current, dubbing: { ...dubbingSceneOptions(current.dubbing ?? DEFAULT_DUBBING_OPTIONS), captions: event.target.checked } }))} />{say('字幕', 'Captions')}</label>
+          {options.dubbing?.captions && <><CaptionPresetCarousel options={options} locale={locale} disabled={disabled} onSelect={(presetId) => changeOptions((current) => ({ ...current, presetId, custom: undefined }))} /><CaptionTaskCustomize options={options} source={probe ?? undefined} locale={locale} disabled={disabled} onChange={(patch) => changeOptions((current) => ({ ...current, custom: { ...current.custom, ...patch } }))} onReset={() => changeOptions((current) => ({ ...current, layoutVersion: 2, custom: undefined }))} /></>}
+        </div></> : <>
         <CaptionPresetCarousel options={options} locale={locale} disabled={disabled} onSelect={(presetId) => changeOptions((current) => ({ ...current, presetId, custom: undefined }))} />
         {(!!studioProviders().translate || options.translationLanguage) && <div className="border-line mt-5 border-t pt-5">
           <div className="text-ink flex items-center justify-between gap-4 text-sm"><span>{say('双语字幕', 'Bilingual captions')}</span>
@@ -222,11 +240,14 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
         <CaptionTaskCustomize options={options} source={probe ?? undefined} locale={locale} disabled={disabled} onChange={(patch) => changeOptions((current) => ({ ...current, custom: { ...current.custom, ...patch } }))} onReset={() => changeOptions((current) => ({ ...current, layoutVersion: 2, custom: undefined }))} />
         <div className="border-line mt-5 border-t pt-5"><label className="text-ink flex cursor-pointer items-start gap-3"><input type="checkbox" checked={options.shortenPauses} disabled={disabled} onChange={(event) => changeOptions((current) => ({ ...current, shortenPauses: event.target.checked }))} className="mt-1 size-4 accent-[var(--color-accent)]" /><span className="text-sm">{say('AI 去停顿', 'Shorten pauses')}<span className="text-ink-3 mt-1 block text-xs">{say('缩短长停顿，保留自然语气。', 'Trim long pauses while keeping speech natural.')}</span></span></label></div>
         </>}
-        <button type="button" disabled={!file || !scope || disabled || (isDubbing && (!options.dubbing || !dubbingVoicesReady(task.transcript ?? [], options.dubbing)))} onClick={() => void start()} className={actionClass + ' mt-6 w-full'}>{busy || preparing ? <Loader2 size={16} className="animate-spin" /> : null}{busy ? say('正在生成…', 'Generating…') : versions.length ? say('生成新版本', 'Generate new version') : isDubbing ? say('生成译制视频', 'Generate dubbed video') : say('生成字幕视频', 'Generate captioned video')}</button>
-        {resumable && !busy && <button type="button" disabled={!file || disabled} onClick={() => void start(true)} className="text-ink-3 mt-3 w-full text-xs underline">{say('继续上次处理', 'Resume last run')}</button>}
-        <SceneCreditPreview task={task} options={options} locale={locale} busy={busy || preparing} />
         {!file && <button type="button" disabled={disabled} onClick={() => inputRef.current?.click()} className="text-ink mt-4 flex items-center gap-2 text-sm"><Upload size={16} />{say('重新选择原视频', 'Re-select source video')}</button>}
         {error && <p role="alert" className="text-ink mt-4 text-sm leading-relaxed">{error}</p>}{storageNote && <p role="status" className="text-ink-3 mt-3 text-xs leading-relaxed">{storageNote}{studioProviders().sceneProjects && <button type="button" disabled={disabled} className="ml-2 underline" onClick={() => { setPreparing(true); void syncCaptionProject(scope!, taskId).then(() => setStorageNote('')).catch((error) => setStorageNote(error instanceof Error ? error.message : say('同步失败，请重试。', 'Sync failed. Try again.'))).finally(() => setPreparing(false)); }}>{say('重试同步', 'Retry sync')}</button>}</p>}
+        </div>
+        <div className="bg-bg sticky bottom-0 z-20 shrink-0 pt-3 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+        {resumable && !busy && <button type="button" disabled={!file || disabled} onClick={() => void start(true)} className="text-ink-3 mt-3 w-full text-xs underline">{say('继续上次处理', 'Resume last run')}</button>}
+        <SceneCreditPreview task={task} options={options} locale={locale} busy={busy || preparing} />
+        <button type="button" disabled={!file || !scope || disabled || (isDubbing && (!options.dubbing || !dubbingVoicesReady(task.transcript ?? [], options.dubbing)))} onClick={() => void start()} className={actionClass + ' mt-3 w-full'}>{busy || preparing ? <Loader2 size={16} className="animate-spin" /> : null}{busy ? say('正在生成…', 'Generating…') : versions.length ? say('生成新版本', 'Generate new version') : isDubbing ? say('生成译制视频', 'Generate dubbed video') : say('生成字幕视频', 'Generate captioned video')}</button>
+        </div>
       </section>
       <section aria-label={say('视频预览', 'Video preview')} className="min-w-0 md:sticky md:top-5">
         {versions.length > 0 && <div className="mb-3 flex items-center justify-between gap-3">
@@ -239,7 +260,7 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
         <div className="relative mx-auto overflow-hidden rounded-lg bg-black" style={{ aspectRatio: ratio, width: `min(100%, calc((100dvh - ${versions.length ? 245 : 195}px) * ${ratio}))` }}>
           {playable ? <video key={resultUrl} src={resultUrl} controls playsInline className="h-full w-full object-contain" /> : <>
             {(firstFrame || cover) ? <img src={firstFrame || cover} alt={say('视频首帧', 'First video frame')} className="h-full w-full object-contain" /> : <div className="bg-panel h-full w-full" />}
-            {!isDubbing && !busy && !versionLoading && <CaptionPositionPreview options={options} source={probe ?? { width: 1080, height: 1920 }} locale={locale} disabled={disabled} onChange={(yPct) => changeOptions((current) => {
+            {(!isDubbing || options.dubbing?.captions) && !busy && !versionLoading && <CaptionPositionPreview options={options} source={probe ?? { width: 1080, height: 1920 }} locale={locale} disabled={disabled} onChange={(yPct) => changeOptions((current) => {
               const custom = { ...current.custom };
               if (yPct === captionTaskGroupBottom({ ...current, custom: undefined }, probe ?? { width: 1080, height: 1920 })) delete custom.yPct;
               else custom.yPct = yPct;

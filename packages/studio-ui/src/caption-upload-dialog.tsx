@@ -8,8 +8,7 @@ import { loadCurrentUser } from './current-user';
 import { fileSig, durableFileSig, probeVideoFile } from './media';
 import { saveLocalVideo } from './local-media';
 import { DEFAULT_DUBBING_OPTIONS, DUBBING_MAX_DURATION_SEC, DUBBING_MAX_VIDEO_BYTES } from '@pireel/studio-engine/dubbing-task';
-import { DUBBING_ENTRY_ICON } from './workflow-art';
-import { saveCaptionTask } from './caption-task-store';
+import { saveCaptionTask, type CaptionUploadProgress } from './caption-task-store';
 import { captureCaptionCover } from './caption-project-cover';
 
 export function CaptionUploadDialog({ open, locale, scene = 'captions', onOpenChange, onContinue }: {
@@ -20,6 +19,7 @@ export function CaptionUploadDialog({ open, locale, scene = 'captions', onOpenCh
   const say = (cn: string, en: string) => zh ? cn : en;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [progress, setProgress] = useState<CaptionUploadProgress>({ phase: 'preparing' });
   const input = useRef<HTMLInputElement>(null);
   const uploadButton = useRef<HTMLButtonElement>(null);
   const generation = useRef(0);
@@ -34,7 +34,12 @@ export function CaptionUploadDialog({ open, locale, scene = 'captions', onOpenCh
     if (creating.current) return;
     creating.current = true;
     const current = ++generation.current;
-    setBusy(true); setError('');
+    setBusy(true); setError(''); setProgress({ phase: 'preparing' });
+    const report = (value: CaptionUploadProgress) => {
+      if (current !== generation.current) return;
+      const fraction = value.fraction !== undefined && Number.isFinite(value.fraction) ? Math.max(0, Math.min(1, value.fraction)) : undefined;
+      setProgress({ ...value, fraction });
+    };
     try {
       const [data, user] = await Promise.all([probeVideoFile(file), loadCurrentUser()]);
       if (current !== generation.current) return;
@@ -49,19 +54,22 @@ export function CaptionUploadDialog({ open, locale, scene = 'captions', onOpenCh
       pendingProject.current = { sig, id };
       const coverThumb = await captureCaptionCover(file, data.durationSec).catch(() => undefined);
       if (current !== generation.current) return;
-      await saveCaptionTask({ id, scene, scope: user.user_id, name: file.name, sourceSig: sig, ...data, coverThumb, options: { ...(dubbing ? { dubbing: DEFAULT_DUBBING_OPTIONS } : {}), layoutVersion: 2, presetId: 'clean', aspect: 'original', shortenPauses: false }, stage: 'ready', updatedAt: Date.now() }, undefined, file);
+      await saveCaptionTask({ id, scene, scope: user.user_id, name: file.name, sourceSig: sig, ...data, coverThumb, options: { ...(dubbing ? { dubbing: DEFAULT_DUBBING_OPTIONS } : {}), layoutVersion: 2, presetId: 'clean', aspect: 'original', shortenPauses: false }, stage: 'ready', updatedAt: Date.now() }, undefined, file, report);
       if (current === generation.current) { pendingProject.current = null; onOpenChange(false); onContinue(id); }
     } catch (reason) { if (current === generation.current) setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { creating.current = false; if (current === generation.current) setBusy(false); }
   };
+  const busyLabel = progress.phase === 'uploading' ? `${say('正在上传', 'Uploading')}${progress.fraction === undefined ? '…' : ` ${Math.floor(progress.fraction * 100)}%`}` : progress.phase === 'saving' ? say('正在保存…', 'Saving…') : say('正在准备…', 'Preparing…');
   return <Dialog open={open} onOpenChange={(value) => { if (!creating.current) onOpenChange(value); }}>
     <DialogContent onOpenAutoFocus={(event) => { event.preventDefault(); uploadButton.current?.focus(); }} aria-describedby={undefined} className="studio-scope bg-bg border-line max-h-[90dvh] overflow-y-auto p-6 sm:max-w-[520px]" showCloseButton={!busy}>
       <DialogHeader className="text-left"><DialogTitle className="text-ink text-2xl font-semibold">{dubbing ? 'Video Dubbing' : 'AI Captions'}</DialogTitle></DialogHeader>
-      {open && (dubbing ? <div className="my-7 flex flex-col items-center gap-4"><img src={DUBBING_ENTRY_ICON} alt="" width={96} height={96} /><DubbingLanguageShowcase locale={locale} /><p className="text-ink-3 text-xs">{say('30 分钟以内的视频', 'Videos up to 30 minutes')}</p></div> : <CaptionEffectShowcase locale={locale} suspended={busy} />)}
+      {open && (dubbing ? <div className="my-7 flex flex-col items-center gap-4"><DubbingLanguageShowcase locale={locale} /></div> : <CaptionEffectShowcase locale={locale} suspended={busy} />)}
       <input ref={input} type="file" accept="video/*" className="hidden" aria-label={say('选择视频文件', 'Choose a video file')} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void choose(file); }} />
       <div onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (event.dataTransfer.files[0]) void choose(event.dataTransfer.files[0]); }}>
-        <button ref={uploadButton} type="button" disabled={busy} onClick={() => input.current?.click()} className="bg-ink text-bg flex min-h-12 w-full items-center justify-center gap-2 rounded-lg text-sm font-semibold disabled:opacity-50">
-          {busy ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}{busy ? say('正在导入…', 'Importing…') : say('上传视频', 'Upload video')}
+        {dubbing && <p className="text-ink-3 mb-3 text-center text-xs">{say('支持 40+ 种语言', 'Supports 40+ languages')}</p>}
+        <button ref={uploadButton} type="button" disabled={busy} onClick={() => input.current?.click()} className="bg-ink text-bg relative flex min-h-12 overflow-hidden w-full items-center justify-center gap-2 rounded-lg text-sm font-semibold disabled:cursor-wait">
+          {busy ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}{busy ? busyLabel : dubbing ? say('上传视频（30 分钟以内）', 'Upload video (up to 30 minutes)') : say('上传视频', 'Upload video')}
+          {busy && <progress aria-label={say('视频上传进度', 'Video upload progress')} max={1} value={progress.phase === 'uploading' ? progress.fraction : undefined} className="absolute inset-x-0 bottom-0 h-1 w-full appearance-none accent-[var(--color-accent)] [&::-webkit-progress-bar]:bg-black/10 [&::-webkit-progress-value]:bg-[var(--color-accent)] [&::-moz-progress-bar]:bg-[var(--color-accent)]" />}
         </button>
       </div>
       {error && <p role="alert" className="text-ink text-sm">{error}</p>}

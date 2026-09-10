@@ -25,9 +25,10 @@ export function splitDubbingScript(text: string): string[] {
 }
 
 export { DUBBING_LANGUAGES } from './scene-languages';
-export interface DubbingOptions { language: string; voiceId: string; lipSync: boolean; script?: string; speakerVoices?: Record<string, string>; turnScripts?: Record<string, string> }
+export interface DubbingOptions { language: string; voiceId: string; lipSync: boolean; captions?: boolean; script?: string; speakerVoices?: Record<string, string>; turnScripts?: Record<string, string> }
 export interface DubbingSpeech { url: string; key: string; durationSec: number; signature: string }
 export interface DubbingState {
+  captionTranscript?: AsrSegment[]; captionSignature?: string;
   language?: string; sourceText?: string; translatedText?: string; translatedTurns?: string[]; turnsKey?: string; speech?: DubbingSpeech; speechParts?: DubbingSpeech[]; speechSignature?: string;
   alignedAudioUrl?: string; alignedAudioKey?: string; alignedAudioSig?: string; sourceVideoUrl?: string; sourceVideoKey?: string; lipJobId?: string; lipResultUrl?: string;
   outputSig?: string; outputCached?: boolean; outputWidth?: number; outputHeight?: number;
@@ -84,4 +85,9 @@ export function dubbingVideoDocument(id: string, sig: string, url: string, name:
   const document = compositionToEditorDocument({ projectId: id, videoSig: sig, composition: { ...emptyComposition(), width, height, video: { url, durationSec }, shots: [{ id: 'dubbing-video', srcStart: 0, srcEnd: durationSec, treatment: 'full' }] } }).document;
   for (const asset of Object.values(document.assets)) if (asset.kind === 'video') asset.label = name;
   return document;
+}
+
+/** Current standalone UI keeps legacy lip jobs readable but never starts another one. */
+export function dubbingSceneOptions(options: DubbingOptions): DubbingOptions {
+  return { ...options, lipSync: false, captions: options.captions ?? true };
 }

@@ -92,3 +92,18 @@ it('uploads a completed result even when the browser cannot cache it in IndexedD
   expect(versions.has('uncached-result')).toBe(true);
   expect(await loadCaptionTask('owner', 'cloud-task')).toMatchObject({ stage: 'completed', cloudPending: false });
 });
+
+it('forwards storage transfer progress and only enters saving after source upload succeeds', async () => {
+  const progress = vi.fn();
+  let finishUpload!: () => void;
+  mocks.backup.mockImplementationOnce((_file, _sig, options) => {
+    options.onProgress(.42);
+    return new Promise<{ key: string }>((resolve) => { finishUpload = () => resolve({ key: 'owned/source' }); });
+  });
+  const saving = saveCaptionTask(fixture(), undefined, undefined, progress);
+  await vi.waitFor(() => expect(progress).toHaveBeenCalledWith({ phase: 'uploading', fraction: .42 }));
+  expect(mocks.save).not.toHaveBeenCalled();
+  finishUpload(); await saving;
+  expect(progress).toHaveBeenCalledWith({ phase: 'uploading', fraction: 1 });
+  expect(progress.mock.calls.at(-1)?.[0]).toEqual({ phase: 'saving' });
+});

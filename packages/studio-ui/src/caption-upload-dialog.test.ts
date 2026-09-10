@@ -82,3 +82,20 @@ it('retries a failed project save without creating a duplicate project identity'
   const firstId = mocks.save.mock.calls[0][0].id;
   await upload(); expect(mocks.save.mock.calls[1][0].id).toBe(firstId); expect(continued).toHaveBeenCalledWith(firstId);
 });
+
+it('shows real upload percentages and keeps saving indeterminate until navigation', async () => {
+  let finish!: () => void;
+  mocks.save.mockImplementationOnce((_task, _result, _source, report) => {
+    report({ phase: 'uploading', fraction: .37 });
+    return new Promise<void>((resolve) => { finish = resolve; });
+  });
+  await render('dubbing'); await upload();
+  expect(container.textContent).toContain('正在上传 37%');
+  expect(container.querySelector('progress')?.getAttribute('value')).toBe('0.37');
+  expect(continued).not.toHaveBeenCalled();
+  await act(async () => mocks.save.mock.calls[0][3]({ phase: 'saving' }));
+  expect(container.textContent).toContain('正在保存');
+  expect(container.querySelector('progress')?.hasAttribute('value')).toBe(false);
+  await act(async () => finish());
+  expect(continued).toHaveBeenCalledOnce();
+});

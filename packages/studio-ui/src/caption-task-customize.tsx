@@ -1,3 +1,4 @@
+import { dubbingCaptionSample } from './caption-preview-text';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@pireel/ui/select';
 import { CanvasCaptionPreview } from './canvas-caption-preview';
 import { WEB_FONTS } from '@pireel/studio-engine/font-library';
@@ -22,7 +23,7 @@ export function CaptionTaskCustomize({ options, locale, disabled, source, onChan
   return <details className="border-line mt-5 border-t pt-4">
     <summary className="text-ink cursor-pointer text-sm font-medium">{say('自定义样式', 'Customize style')}{options.custom && <span className="text-ink-3 ml-2 text-xs">{say('已调整', 'Edited')}</span>}</summary>
     <div role="region" aria-label={say('自定义字幕实时预览', 'Live custom caption preview')} className="border-line bg-bg sticky top-3 z-10 mt-4 rounded-lg border p-3 shadow-sm">
-      <div className="bg-panel aspect-[2.4] w-full overflow-hidden rounded-md"><CanvasCaptionPreview style={{ ...style, xPct: 50, yPct: 75, sub: style.sub ? { ...style.sub, xPct: 50, yPct: options.layoutVersion === 2 ? 90 : undefined } : undefined }} locale={locale} aspect={2.4} sampleText={say('字幕|预览', 'Caption|preview')} sampleSubText={CAPTION_TRANSLATION_LANGUAGES.find((language) => language.id === options.translationLanguage)?.sample} /></div>
+      <div className="bg-panel aspect-[2.4] w-full overflow-hidden rounded-md"><CanvasCaptionPreview style={{ ...style, xPct: 50, yPct: 75, sub: style.sub ? { ...style.sub, xPct: 50, yPct: options.layoutVersion === 2 ? 90 : undefined } : undefined }} locale={locale} aspect={2.4} sampleText={dubbingCaptionSample(options) ?? say('字幕|预览', 'Caption|preview')} sampleSubText={CAPTION_TRANSLATION_LANGUAGES.find((language) => language.id === options.translationLanguage)?.sample} /></div>
     </div>
     <fieldset disabled={disabled} className="mt-4 space-y-4 disabled:opacity-50">
       <div className="text-ink flex items-center justify-between gap-4 text-xs"><span>{say('字体', 'Font')}</span>

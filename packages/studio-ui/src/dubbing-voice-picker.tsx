@@ -19,7 +19,7 @@ export function DubbingVoicePicker({ voices, value, loading, disabled, locale, l
   const audio = useRef<HTMLAudioElement | null>(null);
   const stop = () => { const current = audio.current; audio.current = null; current?.pause(); setPlaying(''); setPending(''); };
   useEffect(() => () => { const current = audio.current; audio.current = null; current?.pause(); }, []);
-  useEffect(() => { if (disabled) stop(); }, [disabled]);
+  useEffect(() => { stop(); }, [disabled, language]);
   const preview = (voice: VoiceAsset) => {
     if (disabled || !voice.sampleUrl) return;
     const same = voice.id === playing || voice.id === pending;
@@ -38,7 +38,7 @@ export function DubbingVoicePicker({ voices, value, loading, disabled, locale, l
   const visible = [...voices.filter((voice) => voice.source !== 'system'), ...voices.filter((voice) => voice.source === 'system')];
   const selected = voices.find((voice) => voice.id === value);
   return <section aria-label={zh ? '音色选择' : 'Voice library'} className="space-y-3">
-    <SceneCardCarousel items={loading ? [] : visible} selectedId={value}
+    <SceneCardCarousel items={visible} selectedId={value}
       header={<div className="flex min-w-0 flex-1 items-center justify-between gap-3 text-sm"><span className="text-ink">{zh ? '音色' : 'Voice'}</span>
         <button type="button" disabled={disabled} onClick={() => { stop(); setCloneOpen(true); }} className="text-ink-3 hover:text-ink inline-flex items-center gap-1 text-xs"><Plus size={13} />{zh ? '克隆音色' : 'Clone voice'}</button>
       </div>}

@@ -1,40 +1,35 @@
 import { useEffect, useState } from 'react';
-import { ArrowRight } from 'lucide-react';
+import { DUBBING_LANGUAGES, type DubbingLanguageCode } from '@pireel/studio-engine/scene-languages';
+import { DUBBING_ENTRY_ICON } from './workflow-art';
 
-const GREETINGS = [
-  { text: 'Hello', lang: 'en' },
-  { text: 'Bonjour', lang: 'fr' },
-  { text: 'Hola', lang: 'es' },
-  { text: 'こんにちは', lang: 'ja' },
-  { text: '안녕하세요', lang: 'ko' },
-  { text: 'Olá', lang: 'pt' },
-  { text: 'مرحبًا', lang: 'ar' },
-  { text: 'Ciao', lang: 'it' },
-  { text: 'สวัสดี', lang: 'th' },
-  { text: 'Hallo', lang: 'de' },
-];
+const NATIVE_NAMES: Record<DubbingLanguageCode, string> = {
+  en: 'English', zh: '普通话', ja: '日本語', ko: '한국어', yue: '廣東話',
+  es: 'Español', fr: 'Français', de: 'Deutsch', pt: 'Português', ru: 'Русский',
+  it: 'Italiano', ar: 'العربية', id: 'Bahasa Indonesia', vi: 'Tiếng Việt', th: 'ไทย',
+  ms: 'Bahasa Melayu', hi: 'हिन्दी', tl: 'Filipino', tr: 'Türkçe', nl: 'Nederlands',
+  uk: 'Українська', pl: 'Polski', ro: 'Română', el: 'Ελληνικά', cs: 'Čeština',
+  fi: 'Suomi', bg: 'Български', da: 'Dansk', he: 'עברית', fa: 'فارسی',
+  sk: 'Slovenčina', sv: 'Svenska', hr: 'Hrvatski', hu: 'Magyar', nb: 'Norsk bokmål',
+  sl: 'Slovenščina', ca: 'Català', nn: 'Nynorsk', ta: 'தமிழ்', af: 'Afrikaans',
+};
+const ROWS = Array.from({ length: 5 }, (_, index) => DUBBING_LANGUAGES.slice(index * 8, index * 8 + 8));
 
 export function DubbingLanguageShowcase({ locale }: { locale: 'zh' | 'en' }) {
-  const [frame, setFrame] = useState({ current: 0, previous: -1 });
+  const [paused, setPaused] = useState(false);
   useEffect(() => {
-    const preference = window.matchMedia?.('(prefers-reduced-motion: reduce)');
-    let timer: ReturnType<typeof setInterval> | undefined;
-    const update = () => {
-      clearInterval(timer);
-      if (preference?.matches || document.visibilityState === 'hidden') return;
-      timer = setInterval(() => setFrame(({ current }) => ({ previous: current, current: (current + 1) % GREETINGS.length })), 1600);
-    };
-    update();
-    document.addEventListener('visibilitychange', update);
-    preference?.addEventListener?.('change', update);
-    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', update); preference?.removeEventListener?.('change', update); };
+    const update = () => setPaused(document.visibilityState === 'hidden');
+    update(); document.addEventListener('visibilitychange', update);
+    return () => document.removeEventListener('visibilitychange', update);
   }, []);
-  return <div role="img" aria-label={locale === 'zh' ? '多语言译制示例' : 'Multilingual dubbing preview'} className="text-ink grid w-full max-w-[360px] grid-cols-[1fr_24px_1fr] items-center gap-3 text-xl font-medium sm:text-2xl">
-    <span aria-hidden="true" lang="zh" className="text-right">你好</span>
-    <ArrowRight aria-hidden="true" size={22} className="text-ink-4" />
-    <span aria-hidden="true" className="relative block h-10 min-w-0 overflow-hidden">
-      {frame.previous >= 0 && <span key={`out-${frame.previous}`} lang={GREETINGS[frame.previous].lang} dir="auto" className="dubbing-greeting-out absolute inset-0 flex items-center whitespace-nowrap">{GREETINGS[frame.previous].text}</span>}
-      <span key={`in-${frame.current}`} lang={GREETINGS[frame.current].lang} dir="auto" className="dubbing-greeting-in absolute inset-0 flex items-center whitespace-nowrap">{GREETINGS[frame.current].text}</span>
-    </span>
+  return <div role="img" aria-label={locale === 'zh' ? '支持 40 种语言的视频译制' : 'Video dubbing in 40 languages'} className="relative grid h-44 w-full place-items-center overflow-hidden">
+    <div aria-hidden="true" className="dubbing-language-field pointer-events-none absolute inset-0"><div className="dubbing-language-wall absolute inset-0 flex flex-col justify-center gap-2.5">
+      {ROWS.map((languages, row) => <div key={row} className="dubbing-language-row flex w-max" style={{ animationDuration: `${44 + row * 5}s`, animationDirection: row % 2 ? 'reverse' : 'normal', animationPlayState: paused ? 'paused' : 'running' }}>
+        {[0, 1].map((copy) => <div key={copy} className="flex shrink-0 items-center gap-8 pr-8">
+          {languages.map((language) => <span key={language.code} lang={language.code} dir="auto" className="text-ink-3 whitespace-nowrap text-[15px] font-medium leading-6 sm:text-base">{NATIVE_NAMES[language.code]}</span>)}
+        </div>)}
+      </div>)}
+    </div>
+    </div>
+    <img src={DUBBING_ENTRY_ICON} alt="" width={104} height={104} className="relative size-[104px] object-contain" />
   </div>;
 }

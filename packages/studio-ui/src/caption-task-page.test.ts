@@ -53,21 +53,31 @@ async function complete(index: number) {
   await settled(() => expect(container.querySelector('video[controls]')).not.toBeNull());
 }
 describe('caption versions and preview UI', () => {
-  it('opens dubbing settings, requires a voice, and dispatches the dubbing runner', async () => {
+  it('defaults to the first displayed voice, preserves changes, and dispatches the dubbing runner', async () => {
     await act(async () => root.render(null));
     vi.stubGlobal('fetch', vi.fn(async (url) => new Response(JSON.stringify(String(url).includes('dubbing-lipsync') ? { lipSyncAvailable: true } : { voices: [{ id: 'en-voice', label: 'English voice', source: 'system', language: 'en', languages: ['en'], status: 'ready', sampleUrl: 'https://example.test/sample.mp3' }, { id: 'my-clone', label: '我的克隆', source: 'cloned', language: 'zh', languages: ['zh'], status: 'ready' }, { id: 'zh-system', label: '中文官方', source: 'system', language: 'zh', languages: ['zh'], status: 'ready' }] }))));
-    await saveCaptionTask({ ...fixture(), scene: 'dubbing', options: { ...fixture().options, dubbing: { language: 'English', voiceId: '', lipSync: false } } });
+    await saveCaptionTask({ ...fixture(), scene: 'dubbing', options: { ...fixture().options, dubbing: { language: 'English', voiceId: '', lipSync: true } } });
     await act(async () => root.render(createElement(CaptionTaskPage, { taskId: 'task', scene: 'dubbing', locale: 'zh', onBack: vi.fn(), onOpenEditor: vi.fn() })));
     await settled(() => expect(container.querySelector('button[aria-label="English voice"]')).not.toBeNull());
-    expect(button('生成译制视频').disabled).toBe(true);
+    await settled(() => expect(button('生成译制视频').disabled).toBe(false));
+    expect(container.querySelector('button[aria-label="我的克隆"]')?.getAttribute('aria-pressed')).toBe('true');
     const voiceCards = container.querySelector('[aria-label="音色列表"]')!;
     expect(voiceCards.firstElementChild?.querySelector('button')?.getAttribute('aria-label')).toBe('我的克隆');
     expect(container.querySelector('button[aria-label="中文官方"]')).toBeNull();
     expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/voices')).every(([url]) => !String(url).includes('language='))).toBe(true);
-    expect(container.querySelector('[aria-label="字幕位置"]')).toBeNull();
-    expect(container.querySelector('[aria-label="字幕样式列表"]')).toBeNull();
+    expect(container.querySelector('[aria-label="字幕位置"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="字幕样式列表"]')).not.toBeNull();
+    expect(container.textContent).not.toContain('口型同步');
     await click(container.querySelector<HTMLButtonElement>('button[aria-label="English voice"]')!);
+    const voiceList = container.querySelector('[aria-label="音色列表"]');
+    const fetchCount = vi.mocked(fetch).mock.calls.length;
+    await choose('目标语言', '日语');
+    expect(vi.mocked(fetch).mock.calls).toHaveLength(fetchCount);
+    expect(container.querySelector('[aria-label="音色列表"]')).toBe(voiceList);
+    expect(container.querySelector('button[aria-label="English voice"]')?.getAttribute('aria-pressed')).toBe('true');
+    await choose('目标语言', '英语');
     await click(button('生成译制视频')); await settled(() => expect(runs).toHaveLength(1));
+    expect(runs[0]!.task.options.dubbing).toMatchObject({ lipSync: false, captions: true });
     expect(runs[0]!.task.scene).toBe('dubbing'); expect(runs[0]!.task.options.dubbing?.voiceId).toBe('en-voice');
     expect(container.querySelector('[aria-label="译制生成进度"]')).not.toBeNull();
     await complete(0);
@@ -91,7 +101,7 @@ describe('caption versions and preview UI', () => {
     expect((await loadCaptionTask('owner', 'task'))?.stage).toBe('ready');
     expect(await listCaptionVersions('owner', 'task')).toHaveLength(0);
     expect(button('生成译制视频').disabled).toBe(true);
-    expect(container.querySelector<HTMLInputElement>('input[type="checkbox"]')?.disabled).toBe(true);
+    expect(container.querySelector<HTMLInputElement>('input[type="checkbox"]')?.disabled).toBe(false);
     await click(container.querySelectorAll<HTMLButtonElement>('[aria-label="说话人"] button')[1]);
     await settled(() => expect(container.querySelector('button[aria-label="Second voice"]')).not.toBeNull());
     await click(container.querySelector<HTMLButtonElement>('button[aria-label="Second voice"]')!);
@@ -143,6 +153,8 @@ describe('caption versions and preview UI', () => {
     await click(button('荧光绿'));
     expect(container.querySelector('video')).toBeNull();
     await click(button('生成新版本'));
+    expect(runs).toHaveLength(1);
+    await click([...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((button) => button.textContent === '确认生成')!);
     await settled(() => expect(runs).toHaveLength(2));
     await complete(1);
     expect(runs[0]!.task.generationId).not.toBe(runs[1]!.task.generationId);
@@ -161,7 +173,9 @@ describe('caption versions and preview UI', () => {
   });
   it('keeps completed versions available when regeneration fails', async () => {
     await click(button('生成字幕视频')); await settled(() => expect(runs).toHaveLength(1)); await complete(0);
-    await click(button('生成新版本')); await settled(() => expect(runs).toHaveLength(2));
+    await click(button('生成新版本'));
+    expect(runs).toHaveLength(1);
+    await click([...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((button) => button.textContent === '确认生成')!); await settled(() => expect(runs).toHaveLength(2));
     await act(async () => runs[1]!.reject(new Error('Rendering failed')));
     await settled(() => expect(button('继续上次处理')).toBeTruthy());
     expect(await listCaptionVersions('owner', 'task')).toHaveLength(1);

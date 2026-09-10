@@ -18,7 +18,14 @@ const response = (body: unknown) => new Response(JSON.stringify(body), { headers
 beforeEach(() => {
   vi.clearAllMocks(); cache.clear();
   mocks.wav.mockImplementation((data: Float32Array) => new Blob([new Float32Array(data).buffer], { type: 'audio/wav' })); vi.stubGlobal('fetch', mocks.fetch);
-  mocks.asr.mockResolvedValue([{ text: '你好', start: 1, end: 7 }]);
+  mocks.asr.mockImplementation(async (_file, options) => {
+    // Real transcription reports progress even when it returns a cached result.
+    options?.onPhase?.('checking');
+    await Promise.resolve();
+    options?.onPhase?.('recognizing');
+    options?.onPhase?.('aligning');
+    return [{ text: '你好', start: 1, end: 7 }];
+  });
   mocks.translate.mockResolvedValue([{ index: 0, text: 'Hello' }]);
   mocks.fetch.mockImplementation(async () => response({ status: 'succeeded', asset: { url: 'https://own/speech.mp3', key: 'uploads/owner/speech.mp3', durationSec: 6 } }));
   mocks.render.mockResolvedValue(new Blob(['dubbed video'], { type: 'video/mp4' }));
@@ -27,11 +34,35 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 describe('standalone video dubbing', () => {
+  it('renders captions aligned to the dubbed audio and reuses them when changing styles', async () => {
+    const source = task(); source.options.dubbing!.captions = true;
+    mocks.asr.mockImplementation(async (input, options) => {
+      options.onPhase('recognizing');
+      return input.type === 'audio/wav' ? [{ text: 'Hello world', start: 1, end: 7, words: [{ text: 'Hello', start: 1, end: 3 }, { text: 'world', start: 3, end: 7 }] }] : [{ text: '你好世界', start: 1, end: 7 }];
+    });
+    const hooks = { signal: new AbortController().signal, checkpoint: async () => {}, progress: vi.fn() };
+    const first = await runDubbingTask(source, file, hooks);
+    const comp = mocks.render.mock.calls[0][0].comp;
+    expect(JSON.stringify(comp)).toContain('Hello world');
+    expect(JSON.stringify(comp)).not.toContain('你好世界');
+    expect(comp.audioTracks[0].role).toBe('narration');
+    expect(first.task.dubbing?.captionTranscript?.[0].text).toBe('Hello world');
+    first.task.options.presetId = 'karaoke';
+    await runDubbingTask(first.task, file, hooks);
+    expect(mocks.asr).toHaveBeenCalledTimes(2);
+    expect(mocks.fetch).toHaveBeenCalledOnce();
+  });
   it('replaces source audio, creates a native output, and reuses completed speech on retry', async () => {
     const records: CaptionTaskRecord[] = []; const hooks = { signal: new AbortController().signal, checkpoint: async (record: CaptionTaskRecord) => { records.push(structuredClone(record)); }, progress: vi.fn() };
     const result = await runDubbingTask(task(), file, hooks);
+    expect(result.task.transcript).toEqual([{ text: '你好', start: 1, end: 7 }]);
+    expect(records.find((record) => record.stage === 'translating')?.transcript).toEqual(result.task.transcript);
     expect(records.map((record) => record.stage)).toEqual(['transcribing', 'translating', 'voicing', 'voicing', 'aligning', 'rendering']);
     const render = mocks.render.mock.calls[0]![0];
+    expect(render.audio).toHaveLength(1);
+    expect(render.audio[0].clip).toEqual(render.comp.audioTracks[0]);
+    expect(render.audio[0].file.type).toBe('audio/wav');
+    expect(render.audio[0].file.size).toBeGreaterThan(0);
     expect(render.comp.shots.every((shot: { src?: string }) => !shot.src || render.clipFiles.get(shot.src) === file)).toBe(true);
     expect(render.comp.shots.every((shot: { audioMuted: boolean }) => shot.audioMuted)).toBe(true);
     expect(render.comp.audioTracks[0]).toMatchObject({ role: 'narration', volumeDb: 0, durationSec: 8 });
@@ -55,6 +86,21 @@ describe('standalone video dubbing', () => {
     expect(records.some((record) => record.dubbing?.lipJobId === 'lip-job' && !record.dubbing.lipResultUrl)).toBe(true);
     expect(mocks.remote).toHaveBeenCalledWith('https://fal.media/output.mp4', expect.any(Object));
     expect(mocks.render.mock.calls[0]![0].comp.audioTracks[0].volumeDb).toBe(0);
+  });
+  it('reuses translation and speech when lip sync fails and the next version disables it', async () => {
+    const source = task(); source.options.dubbing!.lipSync = true;
+    mocks.fetch.mockImplementation(async (url) => String(url).includes('dubbing-speech')
+      ? response({ status: 'succeeded', asset: { url: 'https://own/speech.mp3', key: 'uploads/owner/speech.mp3', durationSec: 6 } })
+      : String(url).includes('?id=') ? response({ status: 'failed', error: '未检测到清晰人脸' }) : response({ id: 'lip-job', status: 'pending' }));
+    let saved = source;
+    const hooks = { signal: new AbortController().signal, checkpoint: async (record: CaptionTaskRecord) => { saved = structuredClone(record); }, progress: vi.fn() };
+    await expect(runDubbingTask(source, file, hooks)).rejects.toThrow('未检测到清晰人脸');
+    saved.generationId = 'new-version'; saved.options.dubbing!.lipSync = false;
+    const requestCount = mocks.fetch.mock.calls.length;
+    const result = await runDubbingTask(saved, file, hooks);
+    expect(result.task.stage).toBe('completed');
+    expect(mocks.asr).toHaveBeenCalledOnce(); expect(mocks.translate).toHaveBeenCalledOnce();
+    expect(mocks.fetch).toHaveBeenCalledTimes(requestCount);
   });
 });
 

@@ -4,6 +4,9 @@ import * as local from './caption-task-local';
 export type * from '@pireel/studio-engine/scene-project';
 export { mergeCaptionProjectMetadata } from './caption-task-local';
 
+export interface CaptionUploadProgress { phase: 'preparing' | 'uploading' | 'saving'; fraction?: number }
+type UploadProgress = (progress: CaptionUploadProgress) => void;
+
 const cloud = () => studioProviders().sceneProjects;
 const chains = new Map<string, Promise<unknown>>();
 const migrations = new Set<string>();
@@ -32,18 +35,22 @@ export async function loadCaptionMedia(scope: string, sig: string, label?: strin
   await saveLocalVideo(aligned, sig).catch(() => false);
   return aligned;
 }
-async function backup(file: File, sig: string) {
-  if (!await studioProviders().vault.backup(file, sig)) throw new Error('素材上传未完成，请重试同步。');
+async function backup(file: File, sig: string, onProgress?: (fraction: number) => void) {
+  const result = onProgress ? await studioProviders().vault.backup(file, sig, { onProgress }) : await studioProviders().vault.backup(file, sig);
+  if (!result) throw new Error('素材上传未完成，请重试同步。');
+  onProgress?.(1);
 }
-async function prepareTask(task: CaptionTaskRecord, sourceFile?: File) {
+async function prepareTask(task: CaptionTaskRecord, sourceFile?: File, onProgress?: UploadProgress) {
   if ((!task.cloudRevision || task.coverThumb?.startsWith('data:image/')) && await cloud()!.owner() !== task.scope) throw new Error('登录账号已变化，请重新打开项目。');
   let next = { ...task };
   if (!next.cloudRevision) {
     const file = sourceFile ?? await loadCaptionMedia(task.scope, task.sourceSig, task.name);
     if (!file) throw new Error('请重新选择原视频，完成云端同步。');
-    await backup(file, task.sourceSig);
+    onProgress?.({ phase: 'uploading' });
+    await backup(file, task.sourceSig, onProgress ? (fraction) => onProgress({ phase: 'uploading', fraction }) : undefined);
   }
   if (next.coverThumb?.startsWith('data:image/')) {
+    onProgress?.({ phase: 'saving' });
     const blob = await (await fetch(next.coverThumb)).blob();
     const file = new File([blob], 'cover.jpg', { type: blob.type || 'image/jpeg' });
     const { durableFileSig } = await import('./media');
@@ -65,8 +72,8 @@ async function recordError(task: CaptionTaskRecord, error: unknown) {
   if (latest) await local.saveCaptionTask({ ...latest, cloudPending: true, cloudError: error instanceof Error ? error.message : '云端同步未完成。' }).catch(() => {});
   changed();
 }
-export async function saveCaptionTask(task: CaptionTaskRecord, result?: Blob, sourceFile?: File): Promise<void> {
-  if (!cloud()) return local.saveCaptionTask(task, result);
+export async function saveCaptionTask(task: CaptionTaskRecord, result?: Blob, sourceFile?: File, onProgress?: UploadProgress): Promise<void> {
+  if (!cloud()) { onProgress?.({ phase: 'saving' }); return local.saveCaptionTask(task, result); }
   return serial(task.scope, task.id, async () => {
     const previous = await local.loadCaptionTask(task.scope, task.id).catch(() => undefined);
     const idKey = key(task.scope, task.id);
@@ -74,7 +81,8 @@ export async function saveCaptionTask(task: CaptionTaskRecord, result?: Blob, so
     let pending = local.mergeCaptionProjectMetadata({ ...task, ...(previous?.coverSig ? { coverSig: previous.coverSig, coverThumb: previous.coverThumb } : {}), cloudRevision: writeRevisions.get(idKey) ?? task.cloudRevision ?? previous?.cloudRevision ?? 0, cloudPending: true, cloudError: undefined }, previous);
     await local.saveCaptionTask(pending, result).catch(() => local.saveCaptionTask(pending).catch(() => {}));
     try {
-      pending = await prepareTask(pending, sourceFile);
+      pending = await prepareTask(pending, sourceFile, onProgress);
+      onProgress?.({ phase: 'saving' });
       // Establish the parent before uploading immutable versions; don't advertise a cloud result before it exists.
       if (!pending.cloudRevision && result) {
         const created = await cloud()!.save({ ...pending, stage: 'ready' }, 0);

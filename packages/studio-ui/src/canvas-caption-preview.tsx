@@ -4,6 +4,8 @@ import { drawPresetCaption } from '@pireel/studio-engine/caption-canvas';
 import { emptyComposition, resolveSubCaptionStyle, type CaptionStyle } from '@pireel/studio-engine/composition';
 import { loadFont } from './web-fonts';
 import type { FxWord } from '@pireel/studio-engine/caption-fx';
+import { captionLineSegments } from '@pireel/studio-engine/caption-layout-metrics';
+import { getCaptionPreset } from '@pireel/studio-engine/caption-presets';
 
 const listeners = new Set<(time: number) => void>();
 let frame = 0;
@@ -29,6 +31,21 @@ export function CanvasCaptionPreview({ style, locale, tile = false, aspect = 9 /
     let viewStyle = tile ? { ...style, scale: 3.2, xPct: 50, yPct: 66, wPct: 78 } : style;
     const designWidth = 1080;
     const designHeight = tile ? designWidth / 1.15 : designWidth / aspect;
+    const fitTile = () => {
+      if (!tile) return;
+      const base = getCaptionPreset(style.preset);
+      const preset = style.bg === undefined ? base : { ...base, bg: style.bg ?? undefined };
+      const fits = (scale: number) => captionLineSegments(words, preset, 78, scale, designWidth, {
+        font: style.font, bold: style.bold, measureText: (text, font) => { ctx.font = font; return ctx.measureText(text).width; },
+      }).length <= 2;
+      let low = .25; let high = 3.2;
+      for (let i = 0; i < 12; i++) {
+        const mid = (low + high) / 2;
+        if (fits(mid)) low = mid; else high = mid;
+      }
+      viewStyle = { ...viewStyle, scale: fits(3.2) ? 3.2 : low };
+    };
+    fitTile();
     if (!tile && sampleSubText) viewStyle = fitCaptionTaskBilingualStyle(viewStyle, { width: designWidth, height: designHeight }, [sampleSubText]);
     const subStyle = sampleSubText && style.sub?.lang ? resolveSubCaptionStyle({ ...emptyComposition(), width: designWidth, height: designHeight, captionStyle: viewStyle }) : null;
     const subWords: FxWord[] = sampleSubText ? [{ text: sampleSubText, start: 0, end: words.length * .6 }] : [];
@@ -53,7 +70,7 @@ export function CanvasCaptionPreview({ style, locale, tile = false, aspect = 9 /
     const observer = new IntersectionObserver(([entry]) => { visible = !!entry?.isIntersecting; update(); });
     resize.observe(canvas); observer.observe(canvas); reduced.addEventListener('change', update);
     const fontReady = Promise.all([style.font ? loadFont(style.font, words.map((word) => word.text).join('')) : document.fonts.ready, subStyle?.font ? loadFont(subStyle.font, sampleSubText) : Promise.resolve()]);
-    void fontReady.then(() => { if (!disposed) draw(1.5); });
+    void fontReady.then(() => { if (!disposed) { fitTile(); draw(1.5); } });
     return () => { disposed = true; unsubscribe?.(); resize.disconnect(); observer.disconnect(); reduced.removeEventListener('change', update); };
   }, [style, locale, tile, aspect, sampleText, sampleSubText, playbackTime, paused]);
   return <canvas ref={canvasRef} className="h-full w-full" aria-hidden="true" />;
