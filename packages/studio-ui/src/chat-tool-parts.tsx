@@ -133,7 +133,7 @@ function ToolBadge({ def, part, children }: { def: StudioToolDef; part: ToolPart
  * running = spinner + elapsed/remaining + stage text (stream note > progress text > busyText) + progress bar
  * (with frac: determinate, ETA extrapolated by rate; without: indeterminate slider + historical EMA for ETA).
  */
-function ToolCard({ def, part, children }: { def: StudioToolDef; part: ToolPartLike; children?: React.ReactNode }) {
+function ToolCard({ def, part, children, quiet }: { def: StudioToolDef; part: ToolPartLike; children?: React.ReactNode; quiet?: boolean }) {
   const st = toolStatus(part);
   const running = st.kind === 'running';
   const prog = useToolProgress(def.id);
@@ -187,8 +187,10 @@ function ToolCard({ def, part, children }: { def: StudioToolDef; part: ToolPartL
         </span>
       </div>
       {/* Done/failed: result text on its own full-width body row (same spec as the badge), wraps instead of hanging in the right column.
-          Skip it when the summary just repeats the tool label (e.g. generation cards, whose result is the media body below) — one title, not two. */}
-      {!running && st.text && st.text !== t(def.label) && (
+          Skip it when the summary just repeats the tool label, and (quiet) when the card already shows a
+          result — a generated image, a placed asset, an audio player. The media IS the receipt; a "done"
+          summary under it is noise. Errors always show. */}
+      {!running && st.text && st.text !== t(def.label) && !(quiet && st.kind !== 'error') && (
         <div className={`border-line/70 break-words border-t px-2.5 py-1.5 text-[12px] leading-relaxed ${st.kind === 'error' ? 'text-destructive' : 'text-ink-3'}`}>
           {st.text}
         </div>
@@ -288,10 +290,13 @@ export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocat
       ? <GeneratedAudioBody output={part.output} prompt={promptArg} actions={opts.generation} />
       : null;
   const body = shortfall ?? preview ?? assetResults ?? speechAsset ?? generation;
+  // A card that already renders a result (media tile, placed asset, audio player) is its own receipt —
+  // suppress the redundant "done" summary line under it. Not shortfall: that credits card wants its text.
+  const quiet = !!(preview ?? assetResults ?? speechAsset ?? generation);
   return (
     <div key={key}>
       {def.kind === 'card' ? (
-        <ToolCard def={def} part={part}>
+        <ToolCard def={def} part={part} quiet={quiet}>
           {body}
         </ToolCard>
       ) : (
