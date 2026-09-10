@@ -2639,7 +2639,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               }));
               return {
                 ok: true,
-                summary: `Inspected ${descriptions.length} image${descriptions.length === 1 ? '' : 's'}`,
+                summary: surface === 'chat' ? t('chatGen.inspectedImages', { n: descriptions.length }) : `Inspected ${descriptions.length} image${descriptions.length === 1 ? '' : 's'}`,
                 data: {
                   images: descriptions,
                   ...(failed.length ? { failed } : {}),
@@ -2660,7 +2660,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const body = (await res.json().catch(() => ({}))) as { models?: Array<{ id: string; name: string; kind: 'image' | 'video' }>; error?: string };
             if (!res.ok || !Array.isArray(body.models)) return { ok: false, error: body.error || 'generation model list unavailable' };
             const models = body.models.filter((model) => model.kind === 'image' || model.kind === 'video');
-            return { ok: true, summary: `${models.length} generation models available`, data: { models } };
+            return { ok: true, summary: surface === 'chat' ? t('chatGen.modelsAvailable', { n: models.length }) : `${models.length} generation models available`, data: { models } };
           }
           case 'generate_image':
           case 'generate_video': {
@@ -2717,7 +2717,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               watchGenerationJobs(started.ids, registerGeneratedEntry);
               return {
                 ok: true,
-                summary: `${generationKind === 'image' ? 'Image' : 'Video'} generation started`,
+                summary: surface === 'chat' ? t(generationKind === 'image' ? 'chatGen.imageGenStarted' : 'chatGen.videoGenStarted') : `${generationKind === 'image' ? 'Image' : 'Video'} generation started`,
                 data: {
                   ids: started.ids,
                   status: 'pending',
@@ -2749,7 +2749,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               if (!res.ok || !body.asset) return { ok: false, error: body.detail || body.error || 'music generation failed' };
               registerGeneratedEntry(generatedAssetIndexEntry({ jobId: body.asset.id, index: 0, kind: 'audio', key: body.asset.key, mime: body.asset.mime, prompt, createdAt: Date.now(), durationSec: body.asset.durationSec }, t('panels.music')));
               return {
-                ok: true, summary: 'Background music generated',
+                ok: true, summary: surface === 'chat' ? t('chatGen.musicGenerated') : 'Background music generated',
                 data: {
                   asset: body.asset,
                   next: 'To use it, call register_media with this id/url/durationSec and bpm when present, then add_clips with role=music. Set volume and fades separately; do not use set_bgm for newly generated Agent media.',
@@ -2783,7 +2783,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               if (!res.ok || !body.asset) return { ok: false, error: body.detail || body.error || 'sound effect generation failed' };
               registerGeneratedEntry(generatedAssetIndexEntry({ jobId: body.asset.id, index: 0, kind: 'audio', key: body.asset.key, mime: body.asset.mime, prompt, createdAt: Date.now(), durationSec: body.asset.durationSec }, t('panels.music')));
               return {
-                ok: true, summary: 'Sound effect generated',
+                ok: true, summary: surface === 'chat' ? t('chatGen.sfxGenerated') : 'Sound effect generated',
                 data: {
                   asset: body.asset,
                   next: 'To use it, call register_media with this id/url/durationSec, then add_clips with role=sfx at the editorial moment (omit trackId so overlapping hits land on parallel SFX lanes). Set level/fades with set_clip_properties.',
@@ -2972,7 +2972,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (ids.length) {
               const jobs = (await Promise.all(ids.map((id) => pollCreation(id).catch(() => null)))).filter((job): job is NonNullable<typeof job> => !!job);
               registerGeneratedOutputs(registerGeneratedEntry, jobs);
-              return { ok: true, summary: `${jobs.length} generation jobs`, data: { jobs } };
+              return { ok: true, summary: surface === 'chat' ? t('chatGen.generationJobs', { n: jobs.length }) : `${jobs.length} generation jobs`, data: { jobs } };
             }
             const [images, videos, audios] = await Promise.all([
               listStudioGens(projectId, 'image', 30).catch(() => []),
@@ -2985,7 +2985,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               ...audios.map((job) => ({ ...job, kind: 'audio' as const })),
             ].sort((a, b) => b.createdAt - a.createdAt).slice(0, 30);
             registerGeneratedOutputs(registerGeneratedEntry, jobs);
-            return { ok: true, summary: `${jobs.length} recent generation jobs`, data: { jobs } };
+            return { ok: true, summary: surface === 'chat' ? t('chatGen.recentGenerationJobs', { n: jobs.length }) : `${jobs.length} recent generation jobs`, data: { jobs } };
           }
           case 'list_voices': {
             const params = new URLSearchParams({ refresh: 'true', limit: String(Math.min(100, Math.max(1, Number(input.limit) || 20))) });
