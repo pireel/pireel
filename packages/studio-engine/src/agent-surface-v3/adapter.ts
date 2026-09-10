@@ -839,6 +839,7 @@ const PASSTHROUGH: Record<string, string> = {
   remove_silence: 'remove_silence',
   mask_words: 'mask_words',
   denoise_audio: 'denoise_audio',
+  bake_component: 'bake_component',
   list_models: 'list_models',
   generate_image: 'generate_image',
   generate_video: 'generate_video',

@@ -78,6 +78,7 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   { id: 'set_texts', group: 'components', replaces: ['add_texts', 'update_text'] },
   { id: 'set_captions', group: 'components', replaces: ['set_captions', 'relayout_captions', 'edit_caption_text', 'set_caption_translations'] },
   { id: 'manage_frame', group: 'components', replaces: ['list_frames', 'attach_frame', 'read_frame'] },
+  { id: 'bake_component', group: 'components', charges: true, replaces: [] },
   // ---- generation (8)
   { id: 'list_models', group: 'generation', serverDirect: true, replaces: ['list_models'] },
   { id: 'generate_image', group: 'generation', serverDirect: true, charges: true, replaces: ['generate_image'] },
@@ -104,7 +105,7 @@ export const V3_RETIRED_TOOL_IDS: readonly string[] = [
   'read_scene_designs',
 ];
 
-export const V3_TOOL_LIMIT = 52;
+export const V3_TOOL_LIMIT = 60;
 
 export const V3_TOOL_IDS: ReadonlySet<string> = new Set(V3_TOOLS.map((tool) => tool.id));
 

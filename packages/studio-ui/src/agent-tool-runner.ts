@@ -43,6 +43,7 @@ import {
   applyMediaCropInput,
   applyMediaTransformInput,
   audioTrimPatch,
+  bakeCompositionHtml,
   blockId,
   blockKind,
   compReceiptDelta,
@@ -2049,6 +2050,64 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const edit = commitOverlayEdits([{ clipId: b.id, block: { slots } }]);
             if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error), data: { code: edit.error.code, trackIds: edit.error.trackIds } };
             return { ok: true, summary: t('workbench.propsUpdated', { n: Object.keys(requested).length, name: bname(b) }), data: { blockId: b.id, props: componentValuesView(componentSchemaOf({ templateId: b.templateId, slots })!) } };
+          }
+          case 'bake_component': {
+            // Freeze a graphic component into a transparent video clip: assemble the single-block
+            // composition, cloud-render it (VP8-alpha WebM — the browser can't encode alpha itself),
+            // then register the result and overlay it full-frame at the component's frames. The block
+            // keeps its box inside the rendered canvas, so a full-frame overlay is pixel-identical.
+            const b = findBlock(input.clipId ?? input.blockId);
+            if (!b) return { ok: false, error: t('workbench.elementNotFoundIds') };
+            if (blockKind(b) !== 'custom' && !b.templateId.startsWith('kit:')) return { ok: false, error: t('workbench.bakeNotComponent') };
+            if (genIdsRef.current.has(b.id)) return { ok: false, error: t('workbench.blockGeneratingWaitFinish') };
+            const c = compRef.current;
+            const fps = documentRef.current.canvas.fps;
+            const html = bakeCompositionHtml(c, b);
+            report?.(t('workbench.bakeRendering'));
+            let job: { jobId?: string; status?: string; output?: { url?: string | null; durationSec?: number }; error?: string };
+            try {
+              const res = await fetch('/api/render/bake', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ html, width: c.width, height: c.height, durationSec: b.durationSec, fps }),
+                ...(opts?.signal ? { signal: opts.signal } : {}),
+              });
+              if (!res.ok) {
+                const j = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
+                return { ok: false, error: j.detail || j.error || t('workbench.bakeFailed') };
+              }
+              job = await res.json();
+            } catch (e) {
+              if (e instanceof DOMException && e.name === 'AbortError') throw e;
+              return { ok: false, error: t('workbench.bakeFailed') };
+            }
+            const jobId = job.jobId;
+            if (!jobId) return { ok: false, error: t('workbench.bakeFailed') };
+            // Poll to completion (a render is ~1–3 min); the bridge card timeout covers it.
+            for (let i = 0; i < 160 && job.status !== 'done' && job.status !== 'failed' && job.status !== 'canceled'; i++) {
+              await new Promise((r) => setTimeout(r, 2500));
+              if (opts?.signal?.aborted) throw new DOMException('aborted', 'AbortError');
+              report?.(t('workbench.bakeRendering'));
+              try {
+                const s = await fetch(`/api/render/${encodeURIComponent(jobId)}`, { ...(opts?.signal ? { signal: opts.signal } : {}) });
+                if (s.ok) job = await s.json();
+              } catch (e) {
+                if (e instanceof DOMException && e.name === 'AbortError') throw e;
+              }
+            }
+            if (job.status !== 'done' || !job.output?.url) return { ok: false, error: job.error || t('workbench.bakeFailed') };
+            // Register the render as a video asset, then overlay it full-frame at the block's window.
+            const assetId = `bake_${b.id}`;
+            const registered = runAgentTimelineTool(documentRef.current, 'register_media', {
+              assets: [{ id: assetId, kind: 'video', label: bname(b), url: job.output.url, durationSec: job.output.durationSec ?? b.durationSec, width: c.width, height: c.height }],
+            });
+            if (!registered.ok || !registered.document) return { ok: false, error: registered.error ?? t('workbench.bakeFailed') };
+            setDocument(registered.document);
+            const startFrame = Math.round(b.startSec * fps);
+            const durationFrames = Math.max(1, Math.round(b.durationSec * fps));
+            const placed = await runStudioToolInner(ctx, 'add_clips', { clips: [{ assetId, role: 'broll', startFrame, durationFrames, box: { x: 0, y: 0, w: 1, h: 1 } }] }, opts);
+            if (!placed.ok) return placed;
+            return { ok: true, summary: t('workbench.bakedName', { name: bname(b) }), data: { assetId, startFrame, durationFrames } };
           }
           case 'delete_block': {
             const b = findBlock(input.blockId);
