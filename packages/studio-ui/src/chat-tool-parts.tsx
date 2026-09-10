@@ -186,8 +186,9 @@ function ToolCard({ def, part, children }: { def: StudioToolDef; part: ToolPartL
           {running && <span className="tabular-nums">{timeText || t('chatGen.starting')}</span>}
         </span>
       </div>
-      {/* Done/failed: result text on its own full-width body row (same spec as the badge), wraps instead of hanging in the right column */}
-      {!running && st.text && (
+      {/* Done/failed: result text on its own full-width body row (same spec as the badge), wraps instead of hanging in the right column.
+          Skip it when the summary just repeats the tool label (e.g. generation cards, whose result is the media body below) — one title, not two. */}
+      {!running && st.text && st.text !== t(def.label) && (
         <div className={`border-line/70 break-words border-t px-2.5 py-1.5 text-[12px] leading-relaxed ${st.kind === 'error' ? 'text-destructive' : 'text-ink-3'}`}>
           {st.text}
         </div>
