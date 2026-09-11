@@ -434,7 +434,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   bake_component: {
     description:
-      `${CHARGE_MARKER} Render one graphic component to a transparent video and place it back at the same frames and box, over the original. A cloud render (about 1–3 minutes): it kicks the job, waits, imports the transparent result and overlays it. Use it to freeze a finished component into plain footage — to keep it identical across surfaces, to take a heavy composition off the live runtime for smooth playback, or to hand it to an editor that only takes video. The baked clip is footage, not a component: no editable properties and no re-compose, so keep the original if you may still want to tune it. A normal component stays fully editable, so bake only when you actually want it frozen.`,
+      `Render one graphic component to a transparent video and place it back at the same frames and box, over the original. A cloud render (about 1–3 minutes): it kicks the job, waits, imports the transparent result and overlays it. Use it to freeze a finished component into plain footage — to keep it identical across surfaces, to take a heavy composition off the live runtime for smooth playback, or to hand it to an editor that only takes video. The baked clip is footage, not a component: no editable properties and no re-compose, so keep the original if you may still want to tune it. A normal component stays fully editable, so bake only when you actually want it frozen.`,
     inputSchema: obj({ clipId: str('The graphic component to bake to a transparent video.') }, ['clipId']),
   },
   set_texts: {
