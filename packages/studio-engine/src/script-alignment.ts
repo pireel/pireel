@@ -27,7 +27,7 @@ interface TimedUnit {
 }
 
 const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
-const TOKEN = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]|[\p{L}\p{N}][\p{L}\p{N}'’\-]*/gu;
+const TOKEN = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]|[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu;
 /** Above this DP size the alignment falls back to proportional timing rather than freezing the tab. */
 const MAX_DP_CELLS = 6_000_000;
 
