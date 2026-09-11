@@ -4490,6 +4490,26 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               clearToolProgress(toolId);
             }
           }
+          // manage_project scope:'project' and create_browser_handoff are MCP/bridge-surface tools:
+          // the v3 schema advertises them to the chat model, but the in-chat client edits the single
+          // open project and cannot navigate projects or mint a handoff code. Decline with an
+          // actionable message (matching the manage_frame `*_not_available_in_chat` precedent) instead
+          // of the hard `unknownOperationTool` failure, which reads as an unrecoverable tool bug.
+          case 'list_projects':
+          case 'switch_project':
+          case 'create_project':
+          case 'rename_project':
+            return {
+              ok: false,
+              error: 'project_nav_not_available_in_chat',
+              fix: 'Listing, switching, creating or renaming projects is an MCP/bridge capability. This chat edits the currently open project — use manage_project scope:output to manage deliverables inside it, or switch projects from the app.',
+            };
+          case 'create_browser_handoff':
+            return {
+              ok: false,
+              error: 'handoff_not_available_in_chat',
+              fix: 'Browser handoff mints a one-time code so an external agent can open the editor in its own browser. In this chat the user is already in the editor, so no handoff is needed.',
+            };
           default:
             return { ok: false, error: t('workbench.unknownOperationTool', { tool: toolId }) };
         }

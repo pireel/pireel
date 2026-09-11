@@ -1725,6 +1725,8 @@ export interface StudioToolResult {
   summary?: string;
   /** Failure reason. */
   error?: string;
+  /** Actionable recovery hint fed to the model alongside `error` (same role as the v3 adapter's `fix`). */
+  fix?: string;
   /** Structured data for query tools (for the model, e.g. get_block's block detail; not rendered on the card). */
   data?: unknown;
   /** Captured-frame image (base64, no data: prefix) — MCP side turns it into image content for the external agent to "see". */
