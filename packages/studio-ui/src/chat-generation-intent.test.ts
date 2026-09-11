@@ -7,11 +7,14 @@ describe('chat generation intent', () => {
       '(Generate an image — model gpt-image-2, aspect 9:16, count 2, quality high; register the result in the project media and place it only if I asked.)',
     );
     expect(generationIntentLine('video', { ratio: '16:9', durationSec: 10, resolution: '1080p', count: 4 })).toContain('aspect 16:9, resolution 1080p, duration 10s');
-    expect(generationIntentLine('audio', { ratio: '1:1', durationSec: 60 })).toBe(
+    // Audio kind is the explicit choice, not inferred from duration or a leftover voiceId.
+    expect(generationIntentLine('audio', { audioKind: 'music', durationSec: 60 })).toBe(
       '(Generate a music track (kind music) — duration 60s; register the result in the project media and place it only if I asked.)',
     );
-    expect(generationIntentLine('audio', { durationSec: 3 })).toContain('a sound effect (kind sfx) — duration 3s');
-    expect(generationIntentLine('audio', { durationSec: 60, voiceId: 'v_1' })).toBe(
+    expect(generationIntentLine('audio', { audioKind: 'sfx', durationSec: 3 })).toContain('a sound effect (kind sfx) — duration 3s');
+    // Default kind is sfx: a plain audio prompt (even with a stale voiceId) is a sound effect, never narration.
+    expect(generationIntentLine('audio', { voiceId: 'v_1' })).toContain('a sound effect (kind sfx)');
+    expect(generationIntentLine('audio', { audioKind: 'speech', durationSec: 60, voiceId: 'v_1' })).toBe(
       '(Generate narration speech from my text as the exact script — voice v_1; register the result in the project media and place it only if I asked.)',
     );
     expect(generationIntentLine('element', {})).toBe(
@@ -22,8 +25,8 @@ describe('chat generation intent', () => {
 
   it('recognizes its own line so the chat can render it as a chip', () => {
     expect(describeGenerationIntentLine(generationIntentLine('image', { ratio: '9:16', count: 2 }))).toEqual({ intent: 'image', facts: 'aspect 9:16, count 2' });
-    expect(describeGenerationIntentLine(generationIntentLine('audio', { durationSec: 3 }))).toEqual({ intent: 'audio', facts: 'duration 3s' });
-    expect(describeGenerationIntentLine(generationIntentLine('audio', { voiceId: 'v1' }))).toEqual({ intent: 'speech', facts: 'voice v1' });
+    expect(describeGenerationIntentLine(generationIntentLine('audio', { audioKind: 'sfx', durationSec: 3 }))).toEqual({ intent: 'audio', facts: 'duration 3s' });
+    expect(describeGenerationIntentLine(generationIntentLine('audio', { audioKind: 'speech', voiceId: 'v1' }))).toEqual({ intent: 'speech', facts: 'voice v1' });
     expect(describeGenerationIntentLine(generationIntentLine('element', {}))).toEqual({ intent: 'element', facts: '' });
     expect(describeGenerationIntentLine('make me a poster')).toBeNull();
   });

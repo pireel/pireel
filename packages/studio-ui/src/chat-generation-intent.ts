@@ -26,18 +26,23 @@ export interface GenerationParams {
   resolution?: string;
   /** video 4–15 s · audio: ≤ 22 s is a sound effect, ≥ 30 s a music track (the ladder decides the model) */
   durationSec?: number;
-  /** audio only: a chosen voice turns the message into a narration script (speech synthesis). */
+  /** audio only: which kind to generate — an explicit user choice, never inferred from other params. */
+  audioKind?: AudioKind;
+  /** audio speech only: the voice to synthesize the text with (meaningful only when audioKind='speech'). */
   voiceId?: string;
   /** video only: synthesize sound with the picture. */
   generateAudio?: boolean;
 }
 
-/** Audio has one mode; the duration ladder picks the generator: short = sound effect, long = music. */
-export const AUDIO_DURATION_LADDER = [3, 5, 10, 15, 30, 60, 120, 180] as const;
 export type AudioKind = 'music' | 'sfx' | 'speech';
+/** Duration options per audio kind. Speech is timed and priced by its own text, so it has none. */
+export const SFX_DURATION_OPTIONS = [3, 5, 10, 15, 22] as const;
+export const MUSIC_DURATION_OPTIONS = [30, 60, 120, 180] as const;
+/** The audio kind is an EXPLICIT user choice, never inferred from a leftover voiceId or a duration
+ *  threshold. Absent choice defaults to a sound effect, so a plain prompt like "wind" is generated as
+ *  sound — never read aloud as narration. */
 export function audioKindFor(params: GenerationParams): AudioKind {
-  if (params.voiceId) return 'speech';
-  return (params.durationSec ?? 60) <= 22 ? 'sfx' : 'music';
+  return params.audioKind ?? 'sfx';
 }
 
 export const GENERATION_INTENTS: readonly { id: GenerationIntent; label: string }[] = [
