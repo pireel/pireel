@@ -32,6 +32,7 @@ import { X, MessageSquarePlus, History } from "lucide-react";
 import type { UIMessage } from "ai";
 import type { StudioToolResult } from "@pireel/studio-engine/prompts";
 import type { Composition } from "@pireel/studio-engine/composition";
+import type { LocalAssetIndexEntry } from "@pireel/studio-engine/project-dto";
 import type { CustomVisualStyle } from "@pireel/studio-engine/visual-style";
 import {
   STUDIO_AUTO_SKILL_ID,
@@ -124,6 +125,8 @@ export interface StudioChatHandle {
 export interface StudioChatProps {
   /** Billing attribution: which project this chat edits (rides every charged request). */
   projectId?: string;
+  /** Device-local asset index: lets search receipts resolve OPFS thumbnails for mine-scope hits. */
+  localAssetIndex?: readonly LocalAssetIndexEntry[];
   /** Client-side tool executor: mutates Composition state / calls compose to generate blocks, returns a summary. */
   runTool: (
     toolId: string,
@@ -169,6 +172,7 @@ export const StudioChat = memo(
   forwardRef<StudioChatHandle, StudioChatProps>(function StudioChat(
     {
       projectId,
+      localAssetIndex,
       runTool,
       getBody,
       elements,
@@ -424,6 +428,7 @@ export const StudioChat = memo(
         <ChatThread
           key={activeId}
           projectId={projectId}
+          localAssetIndex={localAssetIndex}
           threadId={activeId}
           initialMessages={restoredMessages}
           initialFrame={active?.frame ?? null}

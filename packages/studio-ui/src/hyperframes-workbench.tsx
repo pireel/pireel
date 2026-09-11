@@ -8518,6 +8518,10 @@ export function HyperframesWorkbench({
                 key={chatEpoch}
                 ref={chatRef}
                 projectId={projectId}
+                // updateLocalAssetIndex swaps in a NEW array and bumps localAssetIndexRev (re-rendering
+                // the workbench), so reading the ref here hands the memo'd chat the fresh identity and
+                // search receipts resolve OPFS thumbnails for mine-scope hits.
+                localAssetIndex={localAssetIndexRef.current}
                 onInsertMedia={(m) => void insertPanelMedia({ type: m.type, url: m.url }, m.label)}
                 onUseAudio={(url, label) => void audioOps.mountAudioFromUrl(url, label)}
                 runTool={chatCbs.runTool}

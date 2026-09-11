@@ -7,6 +7,7 @@ import { Check, X, Loader2 } from 'lucide-react';
 import { type StudioToolDef, type StudioToolResult } from '@pireel/studio-engine/prompts';
 import { studioToolDefFor } from './v3-tool-defs';
 import type { Composition } from '@pireel/studio-engine/composition';
+import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 import { useToolProgress } from './tool-progress';
 import { CutListCard, cutRowsOf } from './chat-cut-list';
 import { GraphicsPreviewBody } from './chat-graphics-card';
@@ -96,7 +97,7 @@ export function toolStatus(part: ToolPartLike): { kind: 'running' | 'done' | 'er
   return { kind: 'running', text: t('chatGen.running') };
 }
 
-function ToolBadge({ def, part, children }: { def: StudioToolDef; part: ToolPartLike; children?: React.ReactNode }) {
+function ToolBadge({ def, part, children, quiet }: { def: StudioToolDef; part: ToolPartLike; children?: React.ReactNode; quiet?: boolean }) {
   const st = toolStatus(part);
   const prog = useToolProgress(def.id);
   const live = st.kind === 'running' ? prog?.text ?? null : null;
@@ -109,7 +110,8 @@ function ToolBadge({ def, part, children }: { def: StudioToolDef; part: ToolPart
       <Check size={11} strokeWidth={2.2} />
     );
   const text = live ?? st.text;
-  // Same card language as ToolCard: header row (icon chip + name + status icon), result text on its own full-width body row (wraps)
+  // Same card language as ToolCard: header row (icon chip + name + status icon), result text on its own full-width body row (wraps).
+  // quiet: the done result already renders its own body (an asset grid, an icon set) — suppress the redundant summary line, same as ToolCard. Running progress and errors always show.
   return (
     <div className="border-line bg-panel-2 w-full overflow-hidden rounded-md border">
       <div className="flex items-center gap-2 px-2.5 py-1.5">
@@ -117,7 +119,7 @@ function ToolBadge({ def, part, children }: { def: StudioToolDef; part: ToolPart
         <span className="text-ink-2 shrink-0 text-[12px] font-semibold">{t(def.label)}</span>
         <span className={`ml-auto shrink-0 ${st.kind === 'error' ? 'text-destructive' : 'text-ink-3'}`}>{icon}</span>
       </div>
-      {text && (
+      {text && !(quiet && st.kind === 'done') && (
         <div className={`border-line/70 break-words border-t px-2.5 py-1.5 text-[12px] leading-relaxed ${st.kind === 'error' ? 'text-destructive' : 'text-ink-3'}`}>
           {text}
         </div>
@@ -235,7 +237,32 @@ function ToolCard({ def, part, children, quiet }: { def: StudioToolDef; part: To
   );
 }
 
-export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocate?: (sec: number) => void; getComp?: () => Composition; generation?: GenerationCardActions }): React.ReactNode {
+/** get_icons receipt: the inline SVGs it fetched (Lucide + Simple Icons resolved from the server-side
+ *  catalog, never user content) as a small grid, so the user sees which glyphs the model pulled. */
+function IconsBody({ output }: { output: unknown }) {
+  const data = (output as StudioToolResult | undefined)?.data as { icons?: Array<{ name?: unknown; svg?: unknown }> } | undefined;
+  const icons = Array.isArray(data?.icons)
+    ? data.icons.filter((i): i is { name: string; svg: string } => !!i && typeof i.name === 'string' && typeof i.svg === 'string')
+    : [];
+  if (!icons.length) return null;
+  return (
+    <div className="border-line/70 border-t p-2">
+      <div className="grid grid-cols-6 gap-1.5">
+        {icons.map((ic) => (
+          <div
+            key={ic.name}
+            title={ic.name}
+            className="border-line/70 bg-panel text-ink-2 grid aspect-square place-items-center rounded border p-2 [&_svg]:h-full [&_svg]:w-full"
+            // Catalog glyphs (Lucide / Simple Icons) resolved server-side from a fixed catalog — not user input.
+            dangerouslySetInnerHTML={{ __html: ic.svg }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocate?: (sec: number) => void; getComp?: () => Composition; generation?: GenerationCardActions; localAssetIndex?: readonly LocalAssetIndexEntry[]; projectId?: string }): React.ReactNode {
   const id = toolIdOf(part);
   const def = studioToolDefFor(id);
   if (!def) return null;
@@ -268,10 +295,13 @@ export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocat
   const preview =
     PREVIEW_TOOLS.has(id) && opts?.getComp ? <GraphicsPreviewBody toolId={id} part={part} getComp={opts.getComp} /> : null;
   const assetResults = id === 'search_assets' && part.state === 'output-available'
-    ? <AssetSearchResultsBody output={part.output} />
+    ? <AssetSearchResultsBody output={part.output} localAssetIndex={opts?.localAssetIndex} projectId={opts?.projectId} />
     : null;
   const speechAsset = id === 'generate_speech' && part.state === 'output-available'
     ? <SpeechAssetBody output={part.output} />
+    : null;
+  const iconsResults = id === 'get_icons' && part.state === 'output-available'
+    ? <IconsBody output={part.output} />
     : null;
   // Generation receipts show the result itself (progress while the hosted job runs), plus the
   // host's top-up card when the generation was refused for credits.
@@ -289,10 +319,10 @@ export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocat
     : (id === 'generate_audio' || id === 'generate_music' || id === 'generate_sfx') && part.state === 'output-available' && opts?.generation
       ? <GeneratedAudioBody output={part.output} prompt={promptArg} actions={opts.generation} />
       : null;
-  const body = shortfall ?? preview ?? assetResults ?? speechAsset ?? generation;
-  // A card that already renders a result (media tile, placed asset, audio player) is its own receipt —
-  // suppress the redundant "done" summary line under it. Not shortfall: that credits card wants its text.
-  const quiet = !!(preview ?? assetResults ?? speechAsset ?? generation);
+  const body = shortfall ?? preview ?? assetResults ?? speechAsset ?? iconsResults ?? generation;
+  // A card that already renders a result (media tile, placed asset, audio player, icon grid) is its own
+  // receipt — suppress the redundant "done" summary line under it. Not shortfall: that credits card wants its text.
+  const quiet = !!(preview ?? assetResults ?? speechAsset ?? iconsResults ?? generation);
   return (
     <div key={key}>
       {def.kind === 'card' ? (
@@ -300,7 +330,7 @@ export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocat
           {body}
         </ToolCard>
       ) : (
-        <ToolBadge def={def} part={part}>
+        <ToolBadge def={def} part={part} quiet={quiet}>
           {body}
         </ToolBadge>
       )}
@@ -314,7 +344,7 @@ export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocat
 export function renderToolPartGroup(
   parts: ToolPartLike[],
   key: string,
-  opts?: { onLocate?: (sec: number) => void; getComp?: () => Composition },
+  opts?: { onLocate?: (sec: number) => void; getComp?: () => Composition; localAssetIndex?: readonly LocalAssetIndexEntry[]; projectId?: string },
 ): React.ReactNode {
   if (parts.length <= 1) return parts[0] ? renderToolPart(parts[0], key, opts) : null;
   const statuses = parts.map(toolStatus);

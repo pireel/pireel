@@ -90,9 +90,11 @@ import type {
   StudioChatProps,
   StudioElementRef,
 } from "./studio-chat";
+import type { LocalAssetIndexEntry } from "@pireel/studio-engine/project-dto";
 
 export function ChatThread({
   projectId,
+  localAssetIndex,
   threadId,
   initialMessages,
   initialFrame,
@@ -120,6 +122,7 @@ export function ChatThread({
   onInsertMedia?: StudioChatProps["onInsertMedia"];
   onUseAudio?: StudioChatProps["onUseAudio"];
   projectId?: string;
+  localAssetIndex?: readonly LocalAssetIndexEntry[];
   threadId: string;
   initialMessages: UIMessage[];
   initialFrame: AttachedFrame | null;
@@ -1124,6 +1127,8 @@ export function ChatThread({
                                     toSec: sec,
                                   }),
                                 getComp,
+                                localAssetIndex,
+                                projectId,
                               });
                         return null;
                       })}
