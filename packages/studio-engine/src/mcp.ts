@@ -647,6 +647,11 @@ function readPath(value: unknown, path: string): unknown {
   return path.split('.').reduce<unknown>((cursor, key) => (cursor && typeof cursor === 'object' ? (cursor as Record<string, unknown>)[key] : undefined), value);
 }
 
+/** A live tab answering one of these is saying "not mine", the same as having no tab at all: project
+ *  navigation and handoff minting are account-level, not document-level, and only the server owns
+ *  them. Anything else the tab says is the answer. */
+const TAB_CANNOT_SERVE = new Set(['studio_not_open', 'project_nav_not_available_in_chat', 'handoff_not_available_in_chat']);
+
 /** Run one v3 call: translate to legacy calls, apply them in order (chaining results where the adapter
  *  asks), and fold the receipts into one result. Delta shaping lands with the receipt contract. */
 export async function runV3Tool(name: string, args: Record<string, unknown>, deps: McpDeps): Promise<McpBridgeResult> {
@@ -654,7 +659,7 @@ export async function runV3Tool(name: string, args: Record<string, unknown>, dep
   // every step inside one undo group and answers with the v3 receipt. studio_not_open falls through to
   // the server-side per-step path below (offline receipts carry the same delta vocabulary).
   const live = await deps.callBridge('run_v3', { name, args }, bridgeTimeoutMs(V3_BRIDGE_TIMEOUT_TOOL[name] ?? name));
-  if (!(live.ok === false && live.error === 'studio_not_open')) return live;
+  if (!(live.ok === false && TAB_CANNOT_SERVE.has(String(live.error)))) return live;
   const ctx: V3AdapterContext = deps.resolveV3Context
     ? await deps.resolveV3Context()
     : { fps: Number.NaN, kindOf: () => undefined };

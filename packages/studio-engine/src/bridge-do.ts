@@ -148,7 +148,11 @@ export class StudioBridge {
       const socketProject = this.projectOf(target);
       if (socketProject) {
         const anchor = (await this.state.storage?.get('anchorProject')) as string | undefined;
-        if (body.tool !== 'get_state' && anchor && anchor !== socketProject) {
+        // On the v3 surface every call arrives wrapped as run_v3, so the gate has to read the tool
+        // inside it. Comparing the outer name would block the re-anchor along with everything else
+        // and leave the session refusing edits for good, with no call left that could clear it.
+        const called = body.tool === 'run_v3' ? String(body.input?.name ?? body.tool) : body.tool;
+        if (called !== 'get_state' && anchor && anchor !== socketProject) {
           return Response.json({
             ok: false,
             error: 'project_switched',

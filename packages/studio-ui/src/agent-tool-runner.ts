@@ -4490,11 +4490,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               clearToolProgress(toolId);
             }
           }
-          // manage_project scope:'project' and create_browser_handoff are MCP/bridge-surface tools:
-          // the v3 schema advertises them to the chat model, but the in-chat client edits the single
-          // open project and cannot navigate projects or mint a handoff code. Decline with an
-          // actionable message (matching the manage_frame `*_not_available_in_chat` precedent) instead
-          // of the hard `unknownOperationTool` failure, which reads as an unrecoverable tool bug.
+          // manage_project scope:'project' and create_browser_handoff are account-level, not
+          // document-level: this runner edits the one open project and owns neither. These two error
+          // codes are a contract — mcp.ts TAB_CANNOT_SERVE reads them to fall an external agent's
+          // call through to the server, which does own them. Keep them in step.
           case 'list_projects':
           case 'switch_project':
           case 'create_project':

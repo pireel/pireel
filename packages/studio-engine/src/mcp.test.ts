@@ -69,6 +69,33 @@ describe('MCP v3 surface', () => {
     expect(callBridge).toHaveBeenCalledWith('run_v3', { name: 'move_clips', args: { items: [{ clipId: 'n1', startFrame: 90 }] } }, expect.any(Number));
   });
 
+  it('serves project navigation and handoff on the server when the open tab declines them', async () => {
+    // The tab runs the same tool table but edits one open document: it owns no account-level
+    // capability. Before this, an open tab turned those calls into a hard failure for an MCP
+    // client — the very tools an agent needs to start a project or open the editor.
+    const callBridge = vi.fn(async (_tool: string, input: unknown) => {
+      const name = (input as { name?: string }).name;
+      if (name === 'manage_project') return { ok: false, error: 'project_nav_not_available_in_chat' };
+      if (name === 'create_browser_handoff') return { ok: false, error: 'handoff_not_available_in_chat' };
+      return { ok: true, summary: 'done' };
+    });
+    const d = deps({ agentSurface: 'v3', resolveV3Context: v3ctx, callBridge });
+
+    const created = await handleMcpRequest({ id: 40, method: 'tools/call', params: { name: 'manage_project', arguments: { scope: 'project', action: 'create', title: 'T' } } }, d);
+    expect(d.createProject).toHaveBeenCalledWith({ title: 'T' });
+    expect(JSON.parse((created!.result as { content: { text: string }[] }).content[0]!.text)).toMatchObject({ ok: true });
+
+    await handleMcpRequest({ id: 41, method: 'tools/call', params: { name: 'create_browser_handoff', arguments: {} } }, d);
+    expect(d.createBrowserHandoff).toHaveBeenCalled();
+
+    // An ordinary edit the tab declines for its own reasons is still the tab's answer.
+    const refused = vi.fn(async () => ({ ok: false, error: 'locked track' }));
+    const d2 = deps({ agentSurface: 'v3', resolveV3Context: v3ctx, callBridge: refused });
+    const body = await handleMcpRequest({ id: 42, method: 'tools/call', params: { name: 'move_clips', arguments: { items: [{ clipId: 'n1', startFrame: 90 }] } } }, d2);
+    expect(refused).toHaveBeenCalledTimes(1);
+    expect(JSON.parse((body!.result as { content: { text: string }[] }).content[0]!.text)).toMatchObject({ ok: false, error: 'locked track' });
+  });
+
   it('translates frame-based v3 calls onto legacy seconds and routes by clip kind', async () => {
     const d = deps({ agentSurface: 'v3', resolveV3Context: v3ctx });
     const response = await handleMcpRequest({ id: 3, method: 'tools/call', params: { name: 'move_clips', arguments: { items: [{ clipId: 'n1', startFrame: 90 }, { clipId: 'g1', startFrame: 120 }] } } }, d);

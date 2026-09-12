@@ -43,6 +43,11 @@ function callReq(tool: string, timeoutMs?: number) {
   return new Request('https://do/call', { method: 'POST', body: JSON.stringify({ tool, input: { a: 1 }, timeoutMs }) });
 }
 
+/** How every v3 call reaches the bridge: the tool the agent asked for rides inside run_v3. */
+function v3Req(name: string) {
+  return new Request('https://do/call', { method: 'POST', body: JSON.stringify({ tool: 'run_v3', input: { name, args: {} } }) });
+}
+
 
 describe('StudioBridge DO', () => {
   it('无浏览器连接:/call 回 409 studio_not_open', async () => {
@@ -144,6 +149,29 @@ describe('StudioBridge DO', () => {
     const afterMsg = JSON.parse(sockets[1]!.sent[1]!) as { id: string };
     bridge.webSocketMessage(sockets[1], JSON.stringify({ id: afterMsg.id, ok: true }));
     expect(((await (await after).json()) as { ok: boolean }).ok).toBe(true);
+  });
+
+  it('项目锚:v3 面的调用裹在 run_v3 里,重锚看的是里面的工具名(否则永久卡死)', async () => {
+    const { state, sockets, stored } = makeState();
+    const bridge = new StudioBridge(state);
+    bridge.acceptBrowserSocket(new FakeSocket(), 'pmtaaa1111111');
+    const first = bridge.fetch(v3Req('add_clips'));
+    await until(() => sockets[0]!.sent.length > 0);
+    bridge.webSocketMessage(sockets[0], JSON.stringify({ id: (JSON.parse(sockets[0]!.sent[0]!) as { id: string }).id, ok: true }));
+    await first;
+    expect(stored.get('anchorProject')).toBe('pmtaaa1111111');
+
+    bridge.acceptBrowserSocket(new FakeSocket(), 'pmtbbb2222222');
+    const rejected = (await (await bridge.fetch(v3Req('add_clips'))).json()) as { ok: boolean; error: string };
+    expect(rejected).toMatchObject({ ok: false, error: 'project_switched' });
+    expect(sockets[1]!.sent.length).toBe(0);
+
+    // 同样裹在 run_v3 里的 get_state 必须放行并重锚,否则没有任何调用能解开这个状态
+    const reanchor = bridge.fetch(v3Req('get_state'));
+    await until(() => sockets[1]!.sent.length > 0);
+    bridge.webSocketMessage(sockets[1], JSON.stringify({ id: (JSON.parse(sockets[1]!.sent[0]!) as { id: string }).id, ok: true, state: 's' }));
+    await reanchor;
+    expect(stored.get('anchorProject')).toBe('pmtbbb2222222');
   });
 
   it('ping 兜底回 pong;非 JSON/无 id 的消息安全忽略', async () => {
