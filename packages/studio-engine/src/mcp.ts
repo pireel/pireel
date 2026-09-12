@@ -22,7 +22,7 @@ import { translateV3Call, type V3AdapterContext, type LegacyCall } from './agent
 import { V3_RETIRED_TOOL_IDS, V3_TOOL_IDS, V3_TOOLS, v3ReplacementIndex } from './agent-surface-v3/registry';
 import { V3_TOOL_SCHEMAS } from './agent-surface-v3/schemas';
 import { v3Instructions } from './agent-surface-v3/instructions';
-import { MCP_DESCRIPTION_OVERRIDES, STUDIO_TOOLS, STUDIO_TOOL_MAP, mcpInstructions } from './prompts';
+import { MCP_DESCRIPTION_OVERRIDES, STUDIO_TOOLS, STUDIO_TOOL_MAP, TAB_CANNOT_SERVE_ERRORS, mcpInstructions } from './prompts';
 import { MG_BAKE_ROUTE, MG_RUNTIME_CAPABILITIES } from './prompts/block-system';
 import { searchFontsTool } from './font-search-tool';
 
@@ -650,7 +650,7 @@ function readPath(value: unknown, path: string): unknown {
 /** A live tab answering one of these is saying "not mine", the same as having no tab at all: project
  *  navigation and handoff minting are account-level, not document-level, and only the server owns
  *  them. Anything else the tab says is the answer. */
-const TAB_CANNOT_SERVE = new Set(['studio_not_open', 'project_nav_not_available_in_chat', 'handoff_not_available_in_chat']);
+const TAB_CANNOT_SERVE: ReadonlySet<string> = new Set<string>(['studio_not_open', ...Object.values(TAB_CANNOT_SERVE_ERRORS)]);
 
 /** Run one v3 call: translate to legacy calls, apply them in order (chaining results where the adapter
  *  asks), and fold the receipts into one result. Delta shaping lands with the receipt contract. */
