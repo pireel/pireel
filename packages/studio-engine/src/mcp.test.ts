@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { V3_TOOLS } from './agent-surface-v3/registry';
-import { STUDIO_TOOLS } from './prompts';
+import { STUDIO_TOOLS, TAB_CANNOT_SERVE_ERRORS } from './prompts';
 import {
   type McpDeps,
   MCP_SERVER_TOOL_IDS,
@@ -96,8 +96,10 @@ describe('MCP v3 surface', () => {
     // client — the very tools an agent needs to start a project or open the editor.
     const callBridge = vi.fn(async (_tool: string, input: unknown) => {
       const name = (input as { name?: string }).name;
-      if (name === 'manage_project') return { ok: false, error: 'project_nav_not_available_in_chat' };
-      if (name === 'create_browser_handoff') return { ok: false, error: 'handoff_not_available_in_chat' };
+      // The codes come from the engine, not from a copy here: a rename must break this test rather
+      // than leave it green while the real handoff stops working.
+      if (name === 'manage_project') return { ok: false, error: TAB_CANNOT_SERVE_ERRORS.projectNav };
+      if (name === 'create_browser_handoff') return { ok: false, error: TAB_CANNOT_SERVE_ERRORS.handoff };
       return { ok: true, summary: 'done' };
     });
     const d = deps({ agentSurface: 'v3', resolveV3Context: v3ctx, callBridge });
