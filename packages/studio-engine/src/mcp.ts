@@ -59,6 +59,11 @@ export interface McpDeps {
    *  update on mismatch, not ordering; each release must announce a distinct string). The
    *  hosting route derives it from the shipped skill's VERSION file — the single source. */
   skillVersion: string;
+  /** How this client installed Pireel. `plugin` bundles have a host that owns updates, so the
+   *  workflow-baseline reminder is skipped for them; anything else (manual MCP registration, a
+   *  standalone Skill) has no update mechanism and still gets it. The hosting route reads it from
+   *  a request header the generated plugin manifests set; absent means standalone. */
+  distribution?: 'plugin' | 'standalone';
   /** Optional private foundational editing judgment injected by the host into initialize instructions. */
   editingExpertise?: string;
   /** Which tool surface this session speaks. `legacy` (default) is the current tool table; `v3` is the
@@ -597,7 +602,7 @@ async function callLegacyTool(name: string, args: Record<string, unknown>, deps:
 
   if (!MCP_BRIDGE_EXTRA_TOOL_IDS.has(name) && !STUDIO_TOOL_MAP[name]) return null;
   const result = await deps.callBridge(name, args, MCP_BRIDGE_EXTRA_TOOL_IDS.has(name) && name !== 'visual_brief' && name !== 'review_sequence' ? BADGE_TIMEOUT_MS : bridgeTimeoutMs(name));
-  if (name === 'get_state' && result.ok && typeof result.state === 'string') {
+  if (name === 'get_state' && result.ok && typeof result.state === 'string' && deps.distribution !== 'plugin') {
     // The initialize-time version broadcast reaches only fresh connections; a long-lived
     // session spanning a release never sees it. get_state opens (and re-anchors) every
     // working session, so the baseline rides its receipt — same trust model, delivered at
@@ -605,6 +610,12 @@ async function callLegacyTool(name: string, args: Record<string, unknown>, deps:
     // the update COMMAND is deliberately not prescribed here: the installed skill's own
     // distribution section routes Plugin bundles to the host Plugin manager and standalone
     // Skills to their Skill installer — this line must stay channel-neutral.
+    //
+    // Plugin installs are skipped: their host already owns updates (it orders versions and
+    // installs the newer one), and because a release deploys the server before publishing the
+    // plugin, this line would otherwise spend that window telling every Plugin user to update
+    // to a version that is not published yet. Standalone installs have no such mechanism, so
+    // this stays their only signal.
     result.state = `Pireel workflow baseline: ${deps.skillVersion} — if the VERSION next to your loaded Pireel SKILL.md differs, update through YOUR distribution's channel per that skill's update section (then re-read the files) before continuing. If it matches, ignore this line.\n\n${result.state}`;
   }
   return (result);
