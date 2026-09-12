@@ -1,3 +1,4 @@
+import { compileComponentStyles } from './component-styles';
 /**
  * Assembly layer: stitch a Composition into a complete Hyperframes document (preview iframe and export share the same source).
  * Depends on the template registry being ready — always go through the './composition' barrel externally (it imports './templates' first).
@@ -499,7 +500,9 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
       cs && isSentenceCaption(b)
         ? { ...capBase, slots: { ...capBase.slots, preset: cs.preset, yPct: cs.yPct, xPct: cs.xPct ?? 50, wPct: cs.wPct ?? 56, scale: cs.scale, ...(cs.hPct ? { hPct: cs.hPct } : {}), ...(cs.color != null ? { color: cs.color } : {}), ...(cs.bg !== undefined ? { bg: cs.bg } : {}), ...(cs.bold != null ? { bold: cs.bold } : {}), ...(cs.font != null ? { font: cs.font } : {}), ...(cs.sub?.preset != null ? { subPreset: cs.sub.preset } : {}), ...(cs.sub?.color != null ? { subColor: cs.sub.color } : {}), ...(cs.sub?.bg !== undefined ? { subBg: cs.sub.bg } : {}), ...(cs.sub?.bold != null ? { subBold: cs.sub.bold } : {}), ...(cs.sub?.font != null ? { subFont: cs.sub.font } : {}), ...(cs.sub?.yPct != null ? { subYPct: cs.sub.yPct } : {}), ...(cs.sub?.xPct != null ? { subXPct: cs.sub.xPct } : {}), ...(cs.sub?.wPct != null ? { subWPct: cs.sub.wPct } : {}), ...(cs.sub?.scale != null ? { subScale: cs.sub.scale } : {}), ...(cs.sub?.hPct != null ? { subHPct: cs.sub.hPct } : {}) } }
         : capBase;
-    const { innerHtml, timelineBody } = renderBlock(rb);
+    const rendered = renderBlock(rb);
+    const { html: innerHtml } = compileComponentStyles(rendered.innerHtml, b.id);
+    const { timelineBody } = rendered;
     // autofit: when content overflows, scale the whole thing to just fit the box (measured empirically), preview = export
     const fit = b.fitScale && b.fitScale < 0.999 ? `transform:scale(${n(b.fitScale)});transform-origin:center center;` : '';
     // Uniform content scaling: CSS scale property (around center), doesn't affect layout (autofit's scrollWidth measure stays uncontaminated),
@@ -827,7 +830,7 @@ addEventListener('message',function(e){var d=e&&e.data;if(!d||d.type!=='hf-loop'
 }
 
 /**
- * The composition HTML for BAKING one component to a transparent video (cloud render → VP9-alpha
+ * The composition HTML for BAKING one component to a transparent video (cloud render → VP8-alpha
  * WebM). The block alone, on the project canvas, transparent ground, with its GSAP timeline `tl`
  * intact so the render service plays it across the full duration — no preview boot-pause, no rAF
  * loop wrapper (those are for the browser preview; the renderer drives the timeline itself). Render
@@ -837,6 +840,10 @@ addEventListener('message',function(e){var d=e&&e.data;if(!d||d.type!=='hf-loop'
  */
 export function bakeCompositionHtml(comp: Composition, block: Block): string {
   const mini = previewMiniComp(comp, block);
-  const html = assembleHtml(mini);
-  return html.replace('</head>', `<style>html, body, #root { ${TRANSPARENT_CSS} }</style></head>`);
+  const html = assembleHtml(mini, './vendor/gsap.min.js');
+  // The cloud renderer drives the root composition timeline. Browser previews seek each block
+  // themselves; exporting only that child leaves entrance animations paused at their hidden state.
+  const rootTimeline = `<script>(function(){var child=window.__timelines[${JSON.stringify(block.id)}];var root=gsap.timeline({paused:true});if(child){child.to({},{duration:${n(block.durationSec)}},0);child.paused(false);root.add(child,0);}root.to({},{duration:${n(block.durationSec)}},0);window.__timelines.root=root;})();</script>`;
+  return html.replace('</head>', `<style>html, body, #root { ${TRANSPARENT_CSS} }</style></head>`)
+    .replace('</body>', `${rootTimeline}</body>`);
 }

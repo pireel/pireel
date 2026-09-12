@@ -5,6 +5,7 @@
  * monotonically for optimistic concurrency (client save carries baseVersion, server 409s if larger).
  */
 
+import { applyUploadedMediaKeys, collectUploadedMediaKeys } from './cloud-media-persistence';
 import type { WordMask } from './word-masks';
 import { applyPatch, type Operation } from 'fast-json-patch';
 import { create as createDiffer } from 'jsondiffpatch';
@@ -470,6 +471,9 @@ export function mergeSaveIntoRow(
     context = prepared;
   }
 
+  const enriched = applyUploadedMediaKeys(document, context, collectUploadedMediaKeys(existing.document, existing.context));
+  document = enriched.document;
+  context = enriched.context;
   const exDur = existing.videoDurationSec;
   return {
     title: p.title ?? existing.title,

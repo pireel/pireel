@@ -163,6 +163,23 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(clip3.block.slots.props).toEqual({ accent: '#000000', value: 100 });
     expect(String(clip3.block.slots.innerHtml)).toContain('<i class="x">');
   });
+  it('patches kit rows using their declared parser and rejects array values on bespoke scalar fields', () => {
+    const base = proj();
+    base.comp.blocks[0]!.templateId = 'kit:chart';
+    base.comp.blocks[0]!.slots = { props: { title: 'Keep title' } };
+    const p = proj({ comp: base.comp });
+    const result = runServerTool('set_block_props', { blockId: 'b1', props: { series: [{ label: 'Sales', value: -1 }, { label: 'Users', value: 12 }] } }, p);
+    expect(result.result.ok).toBe(true);
+    expect(result.comp!.blocks[0]!.slots.props).toMatchObject({ title: 'Keep title', series: [{ label: 'Sales', value: 0 }, { label: 'Users', value: 12 }] });
+    expect(result.result.data).toMatchObject({ props: expect.arrayContaining([{ key: 'series', type: 'rows', value: [{ label: 'Sales', value: 0 }, { label: 'Users', value: 12 }] }]) });
+    expect(runServerTool('set_block_props', { blockId: 'b1', props: { series: [{ value: { nested: true } }] } }, p).result.ok).toBe(false);
+    const custom = proj();
+    custom.comp.blocks[0]!.slots.propsSchema = JSON.stringify({ accent: { type: 'string', format: 'color', default: '#ff0000' } });
+    const rejected = runServerTool('set_block_props', { blockId: 'b1', props: { accent: [{ text: 'wrong' }] } }, proj({ comp: custom.comp }));
+    expect(rejected.result).toMatchObject({ ok: false, error: expect.stringContaining('expected a string') });
+    expect(rejected.document).toBeUndefined();
+  });
+
   it('V2 apply_layout 原子更新镜头与覆盖层且不重建原生轨道', () => {
     const p = v2proj();
     p.document!.timeline.tracks.push({
@@ -930,12 +947,11 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(r2.result.ok).toBe(true);
     expect((r2.result.data as { block: { id: string } }).block.id).toBe('b1');
   });
-  it('apply_block 与站内生成共享最小字号硬约束', () => {
+  it('apply_block reports small text as advice without forcing regeneration', () => {
     const raw = '小字\n```html\n<div data-edit="t">Too small</div><style>#small-type .t{font-size:18px}</style>\n```\n```js\n\n```';
     const result = runServerTool('apply_block', { raw, blockId: 'small-type', atSec: 1 }, proj());
-    expect(result.result.ok).toBe(false);
-    expect(result.result.data).toMatchObject({ blockId: 'small-type' });
-    expect((result.result.data as { issues: string[] }).issues.join(' ')).toContain('24px');
+    expect(result.result.ok).toBe(true);
+    expect((result.result.data as { warnings: string[] }).warnings.join(' ')).toContain('24px');
   });
   it('compose_context 按 atSec 读取长视频当前位置，而不是固定取文稿开头', () => {
     const transcript = Array.from({ length: 80 }, (_, index) => ({
@@ -990,11 +1006,32 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
       ['窗口外', 4],
     ]);
   });
+  it('preserves editable properties and tuned values when a component edit omits the JSON fence', () => {
+    const comp = proj().comp;
+    const propsSchema = JSON.stringify({ accent: { type: 'string', format: 'color', default: '#112233' } });
+    const p = proj({ comp: { ...comp, blocks: [{ ...comp.blocks[0]!, slots: {
+      innerHtml: '<div data-edit="title">Original title</div>', timelineBody: '', propsSchema, props: { accent: '#445566' },
+    } }] } });
+    const raw = 'Updated title.\n```html\n<div data-edit="title" style="color:var(--p-accent)">Changed title</div>\n```\n```js\n\n```';
+    const result = runServerTool('apply_block', { raw, blockId: 'b1' }, p);
+    expect(result.result.ok, JSON.stringify(result.result)).toBe(true);
+    expect(result.comp?.blocks.find((block) => block.id === 'b1')?.slots).toMatchObject({ propsSchema, props: { accent: '#445566' } });
+  });
+
   it('apply_block 更新已有元素时同步应用明确提供的 label', () => {
     const raw = '更新卡片\n```html\n<div data-props=\'{"accent":{"type":"string","format":"color","title":"Accent","default":"#ff0000"}}\'><style>#b1 .title{color:var(--p-accent);font-size:36px}</style><div class="title">Updated</div></div>\n```\n```js\ntl.to("#b1 .title", {opacity:1,duration:.3});\n```';
     const result = runServerTool('apply_block', { raw, blockId: 'b1', label: '新名称' }, proj());
     expect(result.result.ok, JSON.stringify(result.result)).toBe(true);
     expect(result.comp?.blocks.find((block) => block.id === 'b1')?.label).toBe('新名称');
+  });
+  it('apply_block accepts recoverable CSS on both creation and update', () => {
+    const raw = '```html\n<div data-edit="t">Text</div><style>???{color:red}.label{color:blue}</style>\n```';
+    for (const blockId of ['new-css', 'b1']) {
+      const result = runServerTool('apply_block', { raw, blockId, atSec: 1 }, proj());
+      expect(result.result.ok).toBe(true);
+      expect(result.comp?.blocks.find((block) => block.id === blockId)?.slots.innerHtml).toContain('.label{color:blue}');
+      expect(result.result.data).toMatchObject({ warnings: expect.arrayContaining([expect.stringContaining('CSS rule omitted')]) });
+    }
   });
   it('apply_block:新块 id 一轮收敛(未知 blockId 原样采用;lint 回执还稳定 id)', () => {
     // compose_context 给新元素铸的 id 不在 comp 里——apply 带这个"未知" id 必须原样采用,不许报找不到
@@ -1004,13 +1041,13 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     const r1 = runServerTool('apply_block', { raw: rawOk, blockId: minted, atSec: 1 }, proj());
     expect(r1.result.ok).toBe(true);
     expect((r1.result.data as { newBlockId: string }).newBlockId).toBe(minted);
-    // scope 错 id 且不带 blockId → lint 拦下,回执必须还一个稳定 id;按回执改一轮就收敛,新块用同一 id
-    const rawBad = 'note\n```html\n<div data-props=\'{"accent":{"type":"string","format":"color","title":"Accent","default":"#ff0000"}}\'><style>#stale9 .t{color:var(--p-accent);font-size:36px}</style><div class="t">x</div></div>\n```\n```js\ntl.to("#stale9 .t",{opacity:1,duration:.3});\n```';
+    // An executable-contract failure without a requested blockId returns a stable id for correction.
+    const rawBad = 'note\n```html\n<div data-props=\'{"accent":{"type":"string","format":"color","title":"Accent","default":"#ff0000"}}\'><script>alert(1)</script><style>.t{color:var(--p-accent);font-size:36px}</style><div class="t">x</div></div>\n```\n```js\ntl.to("#stale9 .t",{opacity:1,duration:.3});\n```';
     const r2 = runServerTool('apply_block', { raw: rawBad, atSec: 1 }, proj());
     expect(r2.result.ok).toBe(false);
     const handed = (r2.result.data as { blockId: string }).blockId;
     expect(handed).toBeTruthy();
-    const r3 = runServerTool('apply_block', { raw: rawBad.replaceAll('#stale9', `#${handed}`), blockId: handed, atSec: 1 }, proj());
+    const r3 = runServerTool('apply_block', { raw: rawBad.replace('<script>alert(1)</script>', '').replaceAll('#stale9', `#${handed}`), blockId: handed, atSec: 1 }, proj());
     expect(r3.result.ok).toBe(true);
     expect((r3.result.data as { newBlockId: string }).newBlockId).toBe(handed);
   });

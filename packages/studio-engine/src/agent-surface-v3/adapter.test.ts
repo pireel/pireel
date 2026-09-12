@@ -94,6 +94,14 @@ describe('v3 adapter translations', () => {
     expect(translateV3Call('set_clip_properties', { items: [{ clipId: 'g1', props: { accent: '#000000' } }] }, ctx)).toMatchObject({ status: 'error', error: 'invalid_value', path: 'items[0].props' });
   });
 
+  it('passes bounded kit row values through while rejecting nested objects and oversized arrays', () => {
+    const props = [{ key: 'items', value: [{ text: '第一步', note: '备注' }] }];
+    expect(ok(translateV3Call('set_clip_properties', { items: [{ clipId: 'g1', props }] }, ctx))).toEqual([{ tool: 'set_block_props', input: { blockId: 'g1', props: { items: props[0]!.value } } }]);
+    for (const value of [[{ text: { nested: true } }], Array(33).fill({ text: 'x' }), [{ value: Number.NaN }]]) {
+      expect(translateV3Call('set_clip_properties', { items: [{ clipId: 'g1', props: [{ key: 'items', value }] }] }, ctx)).toMatchObject({ status: 'error', error: 'invalid_value' });
+    }
+  });
+
   it('accepts both remove_words selectors and warns that positions shift', () => {
     const result = translateV3Call('remove_words', { ranges: [[12.4, 15.1]], wordIds: ['w7', 'w8'], keepGapSec: 0.35 }, ctx);
     expect(result).toMatchObject({ status: 'ok', note: expect.stringContaining('re-read get_transcript') });

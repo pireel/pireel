@@ -16,15 +16,15 @@ describe('lintBlock(块产物静态检查)', () => {
     expect(ok(html, "tl.from('#b7 .ul',{scaleX:0,duration:.4},0);")).toEqual([]);
   });
 
-  it('未作用域选择器 → unscoped-selector(会污染整个文档,硬错误)', () => {
+  it('local selectors are accepted because the renderer owns their scope', () => {
     const issues = ok(`<div data-edit="t">文字四个</div><style>.wrap{color:red} #b7 .x{color:blue}</style>`);
-    expect(issues.map((i) => i.code)).toContain('unscoped-selector');
-    expect(HARD_LINT_CODES.has('unscoped-selector')).toBe(true);
+    expect(issues.map((i) => i.code)).not.toContain('css-recovery');
+    expect(HARD_LINT_CODES.has('css-recovery')).toBe(false);
   });
 
-  it('逗号选择器逐项检查，不能由一个已作用域分支掩护全局分支', () => {
+  it('selector lists use the renderer scope instead of forcing model prefixes', () => {
     const mixed = ok(`<div data-edit="t">文字四个</div><style>#b7 .safe, .leak{font-size:36px}</style>`);
-    expect(mixed.map((issue) => issue.code)).toContain('unscoped-selector');
+    expect(mixed.map((issue) => issue.code)).not.toContain('css-recovery');
     expect(ok(`<div data-edit="t">文字四个</div><style>#b7 .a, #b7 .b{font-size:36px}</style>`)).toEqual([]);
   });
 
@@ -43,21 +43,21 @@ describe('lintBlock(块产物静态检查)', () => {
 
   it('@keyframes 里的百分比选择器不误报', () => {
     const issues = ok(`<div data-edit="t">文字四个字</div><style>@keyframes spin{0%{opacity:0}100%{opacity:1}} #b7 .x{color:blue}</style>`);
-    expect(issues.filter((i) => i.code === 'unscoped-selector')).toEqual([]);
+    expect(issues.filter((i) => i.code === 'css-recovery')).toEqual([]);
   });
 
-  it('@media/@container 内部的未作用域选择器同样命中(不被条件行掩护)', () => {
+  it('nested grouping rules remain valid local CSS', () => {
     const media = ok(`<div data-edit="t">文字四个字</div><style>@media (min-width:1px){ .card{position:absolute;inset:0} }</style>`);
-    expect(media.map((i) => i.code)).toContain('unscoped-selector');
+    expect(media.map((i) => i.code)).not.toContain('css-recovery');
     const container = ok(`<div data-edit="t">文字四个字</div><style>@container (aspect-ratio > 1.1){ .wrap{flex-direction:row} }</style>`);
-    expect(container.map((i) => i.code)).toContain('unscoped-selector');
+    expect(container.map((i) => i.code)).not.toContain('css-recovery');
   });
 
   it('非 px 长度、script、非确定性 API、缺 data-edit 各自命中', () => {
     for (const value of ['1cm', '12pt', '2rem', '5vw', '8cqmin']) {
       const issues = ok(`<div data-edit="t">文字四个字</div><style>#b7 .x{font-size:${value}}</style>`);
       expect(issues.map((i) => i.code), value).toContain('non-px-length-unit');
-      expect(HARD_LINT_CODES.has('non-px-length-unit')).toBe(true);
+      expect(HARD_LINT_CODES.has('non-px-length-unit')).toBe(false);
     }
     expect(ok(`<div data-edit="t">文</div><script>alert(1)</script>`).map((i) => i.code)).toContain('script-tag');
     expect(ok(`<div data-edit="t">文字四个字</div>`, 'setTimeout(()=>{},100)').map((i) => i.code)).toContain('nondeterministic');
@@ -69,7 +69,7 @@ describe('lintBlock(块产物静态检查)', () => {
     expect(ok(`<div data-edit="t">最小字号</div><style>#b7 .x{font-size:24px}</style>`)).toEqual([]);
     const tooSmall = ok(`<div data-edit="t">过小字号</div><style>#b7 .x{font-size:23px}</style>`);
     expect(tooSmall.map((issue) => issue.code)).toContain('too-small-font-size');
-    expect(HARD_LINT_CODES.has('too-small-font-size')).toBe(true);
+    expect(HARD_LINT_CODES.has('too-small-font-size')).toBe(false);
   });
 
   it('语义字号 token 必须在组件内解析为 px', () => {
@@ -156,5 +156,24 @@ describe('editable properties schema', () => {
 
   it('markup without a schema is untouched by the props rules', () => {
     expect(codes(`<div><style>#b1 .k{color:red}</style><span data-edit="t" class="k">十个以上的可见文字内容</span></div>`, null)).toEqual([]);
+  });
+});
+
+
+describe('scaled built-in SVG artboard text', () => {
+  const art = '<svg class="artboard-frame" data-pireel-art-preset="5" viewBox="0 0 120 67.5" preserveAspectRatio="none"><foreignObject x="0" y="0" width="120" height="67.5"><div data-edit="title">DATA STREAM</div></foreignObject></svg><style>#b7 .artboard-frame{width:100%;height:100%}#b7 div{font-size:5.2px}</style>';
+  it('checks the visible canvas size for the actual 580×326 component box', () => {
+    expect(lintBlock({ blockId: ID, innerHtml: art, timelineBody: '', boxPx: { w: 580.608, h: 326.592 } }).filter((issue) => HARD_LINT_CODES.has(issue.code))).toEqual([]);
+  });
+  it('still rejects text rendered too small and does not exempt unscaled or mixed markup', () => {
+    for (const innerHtml of [art, '<div data-edit="t" style="font-size:5px">Small text</div>']) {
+      expect(lintBlock({ blockId: ID, innerHtml, timelineBody: '', boxPx: { w: 120, h: 67.5 } }).some((issue) => issue.code === 'too-small-font-size')).toBe(true);
+    }
+    expect(lintBlock({ blockId: ID, innerHtml: art + '<b style="font-size:3px">Outside</b>', timelineBody: '', boxPx: { w: 600, h: 400 } }).some((issue) => issue.code === 'too-small-font-size')).toBe(true);
+    expect(lintBlock({ blockId: ID, innerHtml: art, timelineBody: '' }).some((issue) => issue.code === 'too-small-font-size')).toBe(true);
+  });
+  it('does not relax CSS scope or script checks for scaled presets', () => {
+    const issues = lintBlock({ blockId: ID, innerHtml: art + '<style>.leak{color:red}</style><script>bad()</script>', timelineBody: '', boxPx: { w: 600, h: 400 } });
+    expect(issues.map((issue) => issue.code)).toEqual(expect.arrayContaining(['script-tag']));
   });
 });

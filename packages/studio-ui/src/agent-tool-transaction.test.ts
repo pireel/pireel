@@ -16,6 +16,11 @@ import { localAssetMentionId } from './chat-local-asset-mention';
 import { resolveInteraction } from './interaction-store';
 
 const providerMocks = vi.hoisted(() => ({ transcribe: vi.fn() }));
+const captureMocks = vi.hoisted(() => ({ captureCompositionFrame: vi.fn() }));
+vi.mock('./client-export', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./client-export')>()),
+  captureCompositionFrame: captureMocks.captureCompositionFrame,
+}));
 const mediaMocks = vi.hoisted(() => ({ probeVideoFile: vi.fn() }));
 const visualMocks = vi.hoisted(() => ({ analyzeVisual: vi.fn(), analyzeVisualGeometry: vi.fn() }));
 const editorialReviewMocks = vi.hoisted(() => ({
@@ -131,6 +136,23 @@ function harness() {
 }
 
 describe('Agent composition transaction boundary', () => {
+  it('patches kit row properties through the live v3 surface and preserves them on readback', async () => {
+    if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
+    const { runExternalTool } = await import('./agent-tool-runner');
+    const h = harness();
+    h.ctx.genIdsRef = { current: new Set<string>() };
+    h.ctx.pushUndoSnapshot = () => { h.ctx.undoStackRef.current.push(h.ctx.documentRef.current); };
+    const comp = composition();
+    comp.blocks.push({ id: 'kit-steps', templateId: 'kit:steps', slots: { props: { variant: 'pipeline' } }, startSec: 0, durationSec: 3, trackIndex: 1 });
+    h.ctx.setDocument(compositionToEditorDocument({ projectId: 'test', composition: comp }).document);
+    const result = await runExternalTool(h.ctx, 'run_v3', { name: 'set_clip_properties', args: { items: [{ clipId: 'kit-steps', props: [{ key: 'items', value: [{ text: 'One', note: 'First' }, { text: 'Two', note: '' }] }] }] } });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(h.compRef.current.blocks.find((block) => block.id === 'kit-steps')!.slots.props).toMatchObject({ variant: 'pipeline', items: [{ text: 'One', note: 'First' }, { text: 'Two', note: '' }] });
+    const state = await runExternalTool(h.ctx, 'run_v3', { name: 'get_state', args: {} });
+    expect(JSON.stringify(state.data)).toContain('First');
+    expect(h.undoStackRef.current).toHaveLength(1);
+  });
+
   beforeEach(() => {
     speechMocks.assessLocalSpeechAudio.mockResolvedValue({
       classification: 'speech-likely', hasAudio: true, audible: true, speechLikely: true,
@@ -170,6 +192,36 @@ describe('Agent composition transaction boundary', () => {
     progressMocks.setToolProgress.mockReset();
     progressMocks.clearToolProgress.mockReset();
     vi.unstubAllGlobals();
+  });
+
+  it('bakes a component into its original lane and time using the render id envelope', async () => {
+    const h = harness();
+    const comp = { ...composition(), blocks: [{ id: 'graphic', templateId: 'custom', slots: { innerHtml: '<b>Test</b>', timelineBody: '' }, startSec: 4, durationSec: 2, trackIndex: 2, box: { x: 0.1, y: 0.2, w: 0.5, h: 0.4 } }] };
+    h.ctx.setDocument(compositionToEditorDocument({ projectId: 'test', composition: comp }).document);
+    const originalTrack = h.documentRef.current.timeline.tracks.find((track) => track.clips.some((clip) => clip.id === 'graphic'))!;
+    Object.assign(h.ctx, { projectId: 'test', genIdsRef: { current: new Set() }, pushUndoSnapshot: () => h.undoStackRef.current.push(h.documentRef.current) });
+    const fetch = vi.fn().mockResolvedValue(Response.json({ id: 'job-1', status: 'done', output: { url: 'https://cdn.pireel.com/baked.webm', durationSec: 2 } }));
+    vi.stubGlobal('fetch', fetch);
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const result = await runStudioTool(h.ctx, 'bake_component', { clipId: 'graphic' });
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true });
+    const track = h.documentRef.current.timeline.tracks.find((track) => track.id === originalTrack.id)!;
+    expect(track.stackOrder).toBe(originalTrack.stackOrder);
+    expect(track.clips.find((clip) => clip.id === 'graphic')).toMatchObject({ kind: 'media', startFrame: 120, durationFrames: 60, box: { x: 0, y: 0, w: 1, h: 1 } });
+    expect(h.documentRef.current.timeline.tracks.flatMap((track) => track.clips).filter((clip) => clip.id === 'graphic')).toHaveLength(1);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains the editable component and reports structured render failures', async () => {
+    const h = harness();
+    const comp = { ...composition(), blocks: [{ id: 'graphic', templateId: 'custom', slots: { innerHtml: '<b>Test</b>', timelineBody: '' }, startSec: 4, durationSec: 2, trackIndex: 2 }] };
+    h.ctx.setDocument(compositionToEditorDocument({ projectId: 'test', composition: comp }).document);
+    const before = h.documentRef.current;
+    Object.assign(h.ctx, { projectId: 'test', genIdsRef: { current: new Set() }, pushUndoSnapshot: () => h.undoStackRef.current.push(h.documentRef.current) });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ id: 'job-1', status: 'failed', error: { code: 'render_failed', message: 'Renderer unavailable' } })));
+    const { runStudioTool } = await import('./agent-tool-runner');
+    expect(await runStudioTool(h.ctx, 'bake_component', { clipId: 'graphic' })).toMatchObject({ ok: false, error: 'Renderer unavailable' });
+    expect(h.documentRef.current).toBe(before);
   });
 
   it('derives generated-video ratio and resolution from the active canvas', async () => {
@@ -571,6 +623,47 @@ describe('Agent composition transaction boundary', () => {
     expect(unplannedReviewAtSecs(withText.document!)).toEqual([2, 6]);
   });
 
+  it('accepts CSS recovery through the live v3 component submission without a failure receipt', async () => {
+    const h = harness();
+    Object.assign(h.ctx, {
+      genIdsRef: { current: new Set() }, t: (key: string) => key,
+      pushUndoSnapshot: () => h.undoStackRef.current.push(h.documentRef.current),
+      setSelectedShotId: vi.fn(), setSelectedId: vi.fn(), applyT: vi.fn(),
+    });
+    const { runExternalTool } = await import('./agent-tool-runner');
+    const result = await runExternalTool(h.ctx, 'run_v3', { name: 'apply_component', args: {
+      clipId: 'css-recovery', raw: '```html\n<div data-edit="t">Text</div><style>???{color:red}.label{color:blue}</style>\n```', atFrame: 0, durationFrames: 90,
+    } });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(h.compRef.current.blocks.find((block) => block.id === 'css-recovery')?.slots.innerHtml).toContain('Text');
+  });
+
+  it.each([
+    { name: 'manage_project', args: { scope: 'project', action: 'list' }, error: 'project_nav_not_available_in_chat', hint: 'use manage_project scope:output' },
+    { name: 'create_browser_handoff', args: {}, error: 'handoff_not_available_in_chat', hint: 'no handoff is needed' },
+  ])('passes $name recovery guidance all the way to the chat model error', async ({ name, args, error, hint }) => {
+    const h = harness();
+    h.ctx.pushUndoSnapshot = vi.fn();
+    const { runExternalTool } = await import('./agent-tool-runner');
+    const { studioToolFailureText } = await import('./chat-component-retries');
+    const result = await runExternalTool(h.ctx, 'run_v3', { name, args });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe(error);
+    // This is the same final serialization consumed by chat's addToolOutput(output-error).
+    expect(studioToolFailureText(result.error!, result.data)).toContain(hint);
+  });
+
+  it('returns concrete lint diagnostics through the live v3 failure receipt', async () => {
+    const h = harness();
+    Object.assign(h.ctx, { genIdsRef: { current: new Set() }, t: (key: string) => key });
+    const { runExternalTool } = await import('./agent-tool-runner');
+    const result = await runExternalTool(h.ctx, 'run_v3', { name: 'apply_component', args: {
+      clipId: 'bad-graphic', raw: '```html\n<div data-edit="t">Text</div><script>alert(1)</script>\n```', atFrame: 0, durationFrames: 90,
+    } });
+    expect(result.ok).toBe(false);
+    expect(result.data).toMatchObject({ blockId: 'bad-graphic', issues: expect.arrayContaining([expect.stringContaining('must not contain <script>')]) });
+  });
+
   it('run_v3 answers get_state in the v3 shape and applies a mutation as one delta-bearing step', async () => {
     const h = harness();
     h.ctx.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
@@ -587,7 +680,9 @@ describe('Agent composition transaction boundary', () => {
     const placed = await runExternalTool(h.ctx, 'add_clips', { clips: [{ assetId: 'local:first-video', role: 'primary', startSec: 0 }] });
     expect(placed.ok, JSON.stringify(placed)).toBe(true);
 
+    Object.assign(h.ctx, { projectId: 'project-identity', listProjectOutputs: () => [{ id: 'output-main', position: 1, title: 'Main', active: true, durationSec: 4 }] });
     const state = await runExternalTool(h.ctx, 'run_v3', { name: 'get_state', args: {} });
+    expect(state.data).toMatchObject({ project: { id: 'project-identity' }, output: { id: 'output-main' }, outputs: [{ id: 'output-main', active: true }] });
     expect(state.ok).toBe(true);
     const view = state.data as { canvas: { fps: number }; tracks: Array<{ clips?: Array<{ id: string; frames: [number, number] }> }>; playhead: number };
     expect(view.canvas.fps).toBe(30);
@@ -608,6 +703,27 @@ describe('Agent composition transaction boundary', () => {
     expect(patched.ok, JSON.stringify(patched).slice(0, 600)).toBe(true);
     expect((patched.data as { steps: unknown[] }).steps).toHaveLength(2);
     expect(h.ctx.undoStackRef.current.length).toBe(undoBefore + 1);
+  });
+
+  it('run_v3 returns all requested frame images in capture order with their metadata', async () => {
+    const h = harness();
+    Object.assign(h.ctx, {
+      t: (key: string) => key,
+      tRef: { current: 0 },
+      videoFileRef: { current: null },
+      clipFilesRef: { current: new Map() },
+    });
+    captureMocks.captureCompositionFrame.mockImplementation(async ({ atSec }: { atSec: number }) => ({
+      dataUrl: `data:image/jpeg;base64,frame-${atSec}`, width: 960, height: 540,
+    }));
+    const { runExternalTool } = await import('./agent-tool-runner');
+    const result = await runExternalTool(h.ctx, 'run_v3', { name: 'inspect_timeline', args: { frames: [30, 60] } });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(result.images).toEqual([
+      { data: 'frame-1', mimeType: 'image/jpeg' },
+      { data: 'frame-2', mimeType: 'image/jpeg' },
+    ]);
+    expect((result.data as { steps: Array<{ data: { atSec: number } }> }).steps.map((step) => step.data.atSec)).toEqual([1, 2]);
   });
 
   it('lists project-local assets without exposing device storage locators', async () => {

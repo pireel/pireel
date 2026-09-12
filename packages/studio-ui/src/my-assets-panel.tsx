@@ -40,6 +40,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@pireel/ui/dialog';
+import { studioProviders } from '@pireel/studio-engine/providers';
 import type { Composition, MediaRef } from '@pireel/studio-engine/composition';
 import {
   sanitizeProjectContext,
@@ -59,7 +60,7 @@ import {
   useAudioPreview,
 } from './asset-card';
 import { audioCoverUrl, fileMatchesSig, fileNameFromSig } from './media';
-import { resolveAssetBytes } from './local-media';
+import { resolveAssetBytes, resolveAssetPreview } from './local-media';
 import { assetUploadQueue, type AssetUploadState } from './asset-upload-queue';
 import {
   localAssetIndexEntry,
@@ -377,12 +378,13 @@ export function MyAssetsPanel({
   /** Upload (or re-upload) an asset's bytes to the cloud; the workbench folds the key into the index. */
   const enqueueUpload = (sig: string, file: File, label?: string) => {
     if (regRef.current.find((entry) => entry.contentSig === sig)?.cloudKey) return;
-    assetUploadQueue().enqueue({ sig, file, label });
+    assetUploadQueue().enqueue({ projectId, sig, file, label });
   };
 
   // Refresh/cloud rehydrate: local cache is an offline bootstrap only. Once project hydration has
   // confirmed a cloud index, that exact list wins so cross-browser deletions stay deleted. Then
-  // resolve every entry that still lacks a live link: device cache first, then the cloud copy.
+  // Resolve device bytes, then lightweight cloud preview URLs. Opening the panel never downloads
+  // the whole project library; insertion/export materialize only the requested assets.
   useEffect(() => {
     let dead = false;
     const projectChanged = loadedProjectRef.current !== projectId;
@@ -417,7 +419,7 @@ export function MyAssetsPanel({
       const pending = pendingLocalAssetEntries(entries, new Set(linksRef.current.keys()));
       if (pending.length) setResolving(new Set(pending.map((e) => e.assetId)));
       for (const e of pending) {
-        const f = await resolveAssetBytes(e, { projectId });
+        const { file: f, url: remoteUrl } = await resolveAssetPreview(e, { projectId });
         if (dead) return;
         setResolving((current) => {
           const next = new Set(current);
@@ -429,6 +431,8 @@ export function MyAssetsPanel({
           noteCover(e.assetId, f, e.kind ?? 'video');
           onLocalAssetAvailable?.({ sig: e.contentSig, kind: e.kind ?? 'video', file: f });
           if (!e.cloudKey) enqueueUpload(e.contentSig, f, e.label);
+        } else if (remoteUrl) {
+          link(e.assetId, remoteUrl);
         }
       }
     })();
@@ -723,7 +727,7 @@ export function MyAssetsPanel({
   const evict = (entry: RegEntry) => {
     updateReg((r) => r.filter((x) => x.assetId !== entry.assetId));
     unlink(entry.assetId);
-    if (!regRef.current.some((x) => x.contentSig === entry.contentSig)) assetUploadQueue().cancel(entry.contentSig);
+    if (!regRef.current.some((x) => x.contentSig === entry.contentSig)) assetUploadQueue().cancel(entry.contentSig, projectId);
     const u = coversRef.current.get(entry.assetId);
     if (u) {
       URL.revokeObjectURL(u);
@@ -801,7 +805,16 @@ export function MyAssetsPanel({
     localAssetId: it.localAssetId,
   });
   /** Primary action by kind: audio → the music lane; image/video → main-track clip (still-frame for images). */
-  const insertOf = (it: LibraryItem) => {
+  const freshItem = async (it: LibraryItem): Promise<LibraryItem> => {
+    const entry = regRef.current.find((candidate) => candidate.assetId === it.localAssetId);
+    if (!it.insertUrl?.startsWith('blob:') && entry?.cloudKey && studioProviders().vault.previewUrl) {
+      const url = await studioProviders().vault.previewUrl!(entry.contentSig, { cloudKey: entry.cloudKey });
+      if (url) { link(entry.assetId, url); return { ...it, insertUrl: url, ...(it.kind === 'image' ? { thumbSrc: url } : {}) }; }
+    }
+    return it;
+  };
+  const insertOf = async (item: LibraryItem) => {
+    const it = await freshItem(item);
     if (!it.insertUrl) return;
     if (it.kind === 'audio') {
       onUseAudio?.(it.insertUrl, it.label, it.sig);
@@ -811,7 +824,8 @@ export function MyAssetsPanel({
     else onInsert({ type: it.kind as 'image' | 'video', url: it.insertUrl }, it.label, dimsOf(it));
   };
   /** Card activate: audio toggles inline preview; visual media opens the lightbox. */
-  const activate = (it: LibraryItem) => {
+  const activate = async (item: LibraryItem) => {
+    const it = await freshItem(item);
     if (it.kind === 'audio') {
       if (it.insertUrl) toggleAudio(it.insertUrl);
     } else setPreview(it);
@@ -821,7 +835,7 @@ export function MyAssetsPanel({
     if (!it.sig || !it.insertUrl) return;
     void fetch(it.insertUrl)
       .then((r) => r.blob())
-      .then((blob) => assetUploadQueue().enqueue({ sig: it.sig!, file: new File([blob], it.label, { type: blob.type }), label: it.label }, { force: true }))
+      .then((blob) => assetUploadQueue().enqueue({ projectId, sig: it.sig!, file: new File([blob], it.label, { type: blob.type }), label: it.label }, { force: true }))
       .catch(() => {});
   };
   const lazyHost = assetUploadQueue().policy() === 'lazy';

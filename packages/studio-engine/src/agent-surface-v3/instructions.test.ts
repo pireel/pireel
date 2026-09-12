@@ -56,3 +56,13 @@ describe('agent surface v3 instructions', () => {
     expect(v3Instructions({ surface: 'chat', skillIndex: '- talking-head-edit: speech-led edits' })).toContain('# Skills\nPlaybooks for specific tasks');
   });
 });
+
+
+it('uses the short hosted path for selected graphic redesigns only in Studio Chat', () => {
+  const chat = v3Instructions({ surface: 'chat' });
+  const mcp = v3Instructions({ surface: 'mcp' });
+  expect(chat).toContain('call apply_component {clipId, generate:true, instruction} directly');
+  expect(chat).toContain('Review one meaningful rendered frame after it succeeds');
+  expect(mcp).not.toContain('generate:true, instruction} directly');
+  expect(mcp).toContain('compose_component → generate → apply_component');
+});

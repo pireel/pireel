@@ -52,6 +52,10 @@ export interface Transcriber {
  * = degrade to device-local. backup progress is reported in [0,1]; fetch prefers an explicit cloud
  * key when the caller has one (a key survives signature-format changes). */
 export interface MediaVault {
+  /** Persist a finished upload into its original project's existing media references. */
+  confirmUpload?(projectId: string, sig: string, key: string): Promise<boolean>;
+  /** Lightweight, short-lived URL for card thumbnails/preview. Does not download the media body. */
+  previewUrl?(sig: string, options: { cloudKey: string }): Promise<string | null>;
   backup(file: File, sig: string, options?: { onProgress?: (fraction: number) => void; signal?: AbortSignal }): Promise<{ key: string } | null>;
   fetch(sig: string, options?: { cloudKey?: string; label?: string }): Promise<File | null>;
 }

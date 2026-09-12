@@ -218,7 +218,11 @@ export function stampLatestAssistantWorkDuration(
   now = Date.now(),
   waitDurationMs = 0,
 ): UIMessage[] {
-  const assistantIndex = messages.findLastIndex((message) => message.role === 'assistant');
+  // Scan back for the latest assistant turn. (findLastIndex is ES2023; this package targets ES2022.)
+  let assistantIndex = -1;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]!.role === 'assistant') { assistantIndex = i; break; }
+  }
   if (assistantIndex < 0) return messages as UIMessage[];
   const assistant = messages[assistantIndex]!;
   if (!assistantWorkFold(assistant, true)) return messages as UIMessage[];

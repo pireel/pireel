@@ -20,6 +20,7 @@ export interface AssetUploadState {
 }
 
 export interface AssetUploadJob {
+  projectId?: string;
   sig: string;
   file: File;
   label?: string;
@@ -48,19 +49,22 @@ export interface AssetUploadQueue {
   subscribe(listener: Listener): () => void;
   onUploaded(handler: UploadedHandler): () => void;
   /** Forget a sig (e.g. the asset was deleted before its upload finished). */
-  cancel(sig: string): void;
+  cancel(sig: string, projectId?: string): void;
 }
 
 export function createAssetUploadQueue(deps?: {
   backup?: (file: File, sig: string, options: { onProgress: (fraction: number) => void; signal: AbortSignal }) => Promise<{ key: string } | null>;
+  confirmUpload?: (projectId: string, sig: string, key: string) => Promise<boolean>;
   policy?: () => 'always' | 'lazy';
   delay?: (ms: number) => Promise<void>;
 }): AssetUploadQueue {
   const backup = deps?.backup ?? ((file, sig, options) => studioProviders().vault.backup(file, sig, options));
+  const confirmUpload = deps?.confirmUpload ?? ((projectId: string, sig: string, key: string) => studioProviders().vault.confirmUpload?.(projectId, sig, key) ?? Promise.resolve(true));
   const policy = deps?.policy ?? (() => studioProviders().uploadPolicy ?? 'always');
   const delay = deps?.delay ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const states = new Map<string, AssetUploadState>();
   const pending: AssetUploadJob[] = [];
+  const projects = new Map<string, Set<string>>();
   const controllers = new Map<string, AbortController>();
   const listeners = new Set<Listener>();
   const uploadedHandlers = new Set<UploadedHandler>();
@@ -84,6 +88,19 @@ export function createAssetUploadQueue(deps?: {
     publish();
   };
 
+  const persistCompletion = async (sig: string, key: string) => {
+    const projectIds = projects.get(sig);
+    if (!projectIds) return;
+    // Iterate the live Set: another project may enqueue matching content while completion runs.
+    for (const projectId of projectIds) {
+      for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+        if (await Promise.resolve().then(() => confirmUpload(projectId, sig, key)).catch(() => false)) break;
+        if (attempt < MAX_ATTEMPTS - 1) await delay(BACKOFF_MS[attempt]!);
+        else if (projects.get(sig) === projectIds && states.get(sig)?.key === key) set(sig, { status: 'failed' }); // retry affordance also retries metadata completion
+      }
+    }
+  };
+
   const pump = () => {
     while (running < CONCURRENCY && pending.length) {
       const job = pending.shift()!;
@@ -103,29 +120,43 @@ export function createAssetUploadQueue(deps?: {
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
         if (controller.signal.aborted) return;
         set(job.sig, { status: 'uploading', attempts: attempt });
-        const result = await backup(job.file, job.sig, {
+        const result = await Promise.resolve().then(() => backup(job.file, job.sig, {
           signal: controller.signal,
-          onProgress: (fraction) => set(job.sig, { fraction }),
-        });
+          onProgress: (fraction) => {
+            if (!controller.signal.aborted) set(job.sig, { fraction });
+          },
+        })).catch(() => null);
         if (controller.signal.aborted) return;
         if (result) {
           set(job.sig, { status: 'done', fraction: 1, key: result.key });
           for (const handler of uploadedHandlers) handler({ sig: job.sig, key: result.key, file: job.file });
+          await persistCompletion(job.sig, result.key);
           return;
         }
         if (attempt < MAX_ATTEMPTS) await delay(BACKOFF_MS[Math.min(attempt - 1, BACKOFF_MS.length - 1)]!);
       }
       set(job.sig, { status: 'failed' });
     } finally {
-      controllers.delete(job.sig);
+      if (controllers.get(job.sig) === controller) controllers.delete(job.sig);
     }
   };
 
   return {
     enqueue(job, options) {
       if (policy() === 'lazy' && !options?.force) return;
+      if (job.projectId) {
+        const targets = projects.get(job.sig) ?? new Set<string>();
+        targets.add(job.projectId);
+        projects.set(job.sig, targets);
+      }
       const current = states.get(job.sig);
-      if (current && current.status !== 'failed') return; // queued/uploading/done: nothing to add
+      if (current?.status === 'done' && current.key) {
+        // Another project may import the same content after the original subscriber unmounted.
+        for (const handler of uploadedHandlers) handler({ sig: job.sig, key: current.key, file: job.file });
+        void persistCompletion(job.sig, current.key);
+        return;
+      }
+      if (current && current.status !== 'failed') return; // queued/uploading: nothing to add
       states.set(job.sig, { status: 'queued', fraction: 0, attempts: current?.attempts ?? 0 });
       pending.push(job);
       publish();
@@ -142,10 +173,16 @@ export function createAssetUploadQueue(deps?: {
       uploadedHandlers.add(handler);
       return () => uploadedHandlers.delete(handler);
     },
-    cancel(sig) {
+    cancel(sig, projectId) {
+      if (projectId) {
+        const targets = projects.get(sig);
+        targets?.delete(projectId);
+        if (targets?.size) return; // another project still needs this content upload
+      }
       controllers.get(sig)?.abort();
       const index = pending.findIndex((job) => job.sig === sig);
       if (index >= 0) pending.splice(index, 1);
+      projects.delete(sig);
       if (states.delete(sig)) publish();
     },
   };

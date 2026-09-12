@@ -124,8 +124,8 @@ import { AGENT_TIMELINE_TOOL_IDS, runAgentTimelineTool } from './agent-timeline'
 import { planScriptCaptionSegments, splitScriptLines } from './script-captions';
 import { componentFontSlot, displayFontContext, isDisplayTextFontId } from './display-text-presets';
 import { searchFontsTool } from './font-search-tool';
-import { componentPropsCarry } from './component-props';
-import { applyComponentValues, blockPropsReadback, componentSchemaOf, componentValuesView } from './component-schema';
+import { blockPropsSchema, componentPropsCarry } from './component-props';
+import { applyComponentValues, blockPropsReadback, componentSchemaOf, componentValuesView, componentPropertyInputError } from './component-schema';
 import { describeAudioTargets, resolveAudioTarget } from './audio-target';
 
 // Ensure the template registry is ready at module load. The MCP worker path
@@ -691,6 +691,8 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const declared = Object.keys(view.schema.properties ?? {});
       const unknown = Object.keys(requested).filter((key) => !declared.includes(key));
       if (unknown.length) return { result: { ok: false, error: `unknown properties: ${unknown.join(', ')} — declared: ${declared.join(', ')}` } };
+      const valueError = componentPropertyInputError(view, requested);
+      if (valueError) return { result: { ok: false, error: valueError } };
       const slots = applyComponentValues(b, requested)!;
       const edit = applyOverlayDocumentEdits({ document: p.document, updates: [{ clipId: b.id, block: { slots } }] });
       if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
@@ -1537,16 +1539,16 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (shape.kind === 'declined') {
         return { result: { ok: false, error: 'the model answered null (no graphic) — nothing was changed; delete_block the target yourself if you agree' } };
       }
-      const fb = target ? renderBlock(target) : { innerHtml: '<div></div>', timelineBody: '' };
+      const fb = target ? { ...renderBlock(target), propsSchema: blockPropsSchema(target) } : { innerHtml: '<div></div>', timelineBody: '' };
       const parsed = parseBlockResponse(raw, fb);
-      const issues = lintBlock({ blockId: applyId, innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, propsSchema: parsed.propsSchema, requireProps: true });
+      const issues = lintBlock({ blockId: applyId, innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, propsSchema: parsed.propsSchema, requireProps: true, boxPx: { w: (placement.box?.w ?? target?.box?.w ?? 1) * c.width, h: (placement.box?.h ?? target?.box?.h ?? 1) * c.height } });
       const hard = issues.filter((i) => HARD_LINT_CODES.has(i.code));
       if (hard.length) {
         return {
           result: {
             ok: false,
-            error: `failed static checks — fix each item in data.issues (common: scope every CSS selector to #${applyId}), keep everything else as-is, then apply_block once more with blockId:"${applyId}"`,
-            data: { blockId: applyId, issues: issues.map((i) => i.message) },
+            error: `component source failed validation — fix the concrete data.issues, preserve everything else, then apply_block using blockId:"${applyId}"`,
+            data: { blockId: applyId, issues: hard.map((i) => i.message) },
           },
         };
       }

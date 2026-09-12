@@ -1,3 +1,4 @@
+import { adaptiveGeneratedVideoSpec } from '@pireel/studio-engine/generated-video-spec';
 /**
  * Agent tool dispatcher: executes the studio's agent tools (chat + external MCP bridge) against the live
  * workbench. Extracted from hyperframes-workbench.tsx — the workbench builds an AgentToolCtx from its own
@@ -159,7 +160,7 @@ function rememberSearchedAssets(results: ReadonlyArray<Record<string, unknown>>)
 
 const V3_LIBRARY_USAGE_HINT = 'Each id is a complete reference: pass it as assetId to add_clips / insert_clips, or to inspect_media directly — placing is not required to inspect or transcribe. Byte access is resolved on demand; when it is unavailable, ask the user to restore the file in Materials. Never substitute cloud or official media for project-library media unless the user asks.';
 import { imageThumb, imgSourceBase } from '@pireel/ui/image-url';
-import { t } from './i18n';
+import { studioLocale, t } from './i18n';
 import { type ComposeMode, type ComposedBlock, composedBlockFields, GeneratedBlockValidationError, kitChoiceOf, newBlockComposeMode } from './compose-result';
 import { clearToolProgress, setToolProgress, type ToolProgress } from './tool-progress';
 import { fileSig, probeVideoFile } from './media';
@@ -199,8 +200,8 @@ import { withEditableBlockGeometry } from './editable-block-geometry';
 import { placementPercentToBox } from '@pireel/studio-engine/overlay-placement';
 import { generatedAssetIndexEntry, generatedRecordsFromJobs, getStudioSpaceId, listStudioGens, pollCreation, startGeneration, type GenJob } from './gen-api';
 import { componentFontSlot, displayFontContext, isDisplayTextFontId } from '@pireel/studio-engine/display-text-presets';
-import { componentPropsCarry } from '@pireel/studio-engine/component-props';
-import { applyComponentValues, blockPropsReadback, componentSchemaOf, componentValuesView } from '@pireel/studio-engine/component-schema';
+import { blockPropsSchema, componentPropsCarry } from '@pireel/studio-engine/component-props';
+import { applyComponentValues, blockPropsReadback, componentSchemaOf, componentValuesView, componentPropertyInputError } from '@pireel/studio-engine/component-schema';
 import { searchFontsTool } from '@pireel/studio-engine/font-search-tool';
 import { describeAudioTargets, resolveAudioTarget } from '@pireel/studio-engine/audio-target';
 
@@ -284,26 +285,7 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-export function adaptiveGeneratedVideoSpec(width: number, height: number): {
-  aspectRatio: '9:16' | '16:9' | '1:1';
-  resolution: '480p' | '720p' | '1080p';
-} {
-  const safeWidth = Number.isFinite(width) && width > 0 ? width : 1080;
-  const safeHeight = Number.isFinite(height) && height > 0 ? height : 1920;
-  const ratio = safeWidth / safeHeight;
-  const candidates = [
-    { aspectRatio: '9:16' as const, ratio: 9 / 16 },
-    { aspectRatio: '1:1' as const, ratio: 1 },
-    { aspectRatio: '16:9' as const, ratio: 16 / 9 },
-  ];
-  const aspectRatio = candidates
-    .slice()
-    .sort((a, b) => Math.abs(Math.log(ratio / a.ratio)) - Math.abs(Math.log(ratio / b.ratio)))[0]!
-    .aspectRatio;
-  const shortSide = Math.min(safeWidth, safeHeight);
-  const resolution = shortSide >= 1080 ? '1080p' : shortSide >= 720 ? '720p' : '480p';
-  return { aspectRatio, resolution };
-}
+export { adaptiveGeneratedVideoSpec } from '@pireel/studio-engine/generated-video-spec';
 
 async function imageBlobForInspection(blob: Blob): Promise<{ base64: string; mime: string }> {
   let inspectionBlob = blob;
@@ -487,7 +469,7 @@ export interface AgentToolCtx {
   applyVisualResult: (vis: VisualTimeline) => void;
   // Graphics generation
   composeBlockChecked: (
-    seed: { id: string; kind: string; innerHtml: string; timelineBody: string; label?: string; boxPx?: { w: number; h: number }; durationSec?: number; beats?: { text: string; start: number; end: number }[]; neighbors?: string[] },
+    seed: { id: string; kind: string; innerHtml: string; timelineBody: string; propsSchema?: string; label?: string; boxPx?: { w: number; h: number }; durationSec?: number; beats?: { text: string; start: number; end: number }[]; neighbors?: string[] },
     instruction: string,
     onDelta?: (raw: string) => void,
     opts?: ComposeMode,
@@ -2046,6 +2028,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const declared = Object.keys(view.schema.properties ?? {});
             const unknown = Object.keys(requested).filter((key) => !declared.includes(key));
             if (unknown.length) return { ok: false, error: t('workbench.propsUnknownKeys', { keys: unknown.join(', '), declared: declared.join(', ') }) };
+            const valueError = componentPropertyInputError(view, requested);
+            if (valueError) return { ok: false, error: valueError };
             const slots = applyComponentValues(b, requested)!;
             const edit = commitOverlayEdits([{ clipId: b.id, block: { slots } }]);
             if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error), data: { code: edit.error.code, trackIds: edit.error.trackIds } };
@@ -2064,7 +2048,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const fps = documentRef.current.canvas.fps;
             const html = bakeCompositionHtml(c, b);
             report?.(t('workbench.bakeRendering'));
-            let job: { jobId?: string; status?: string; output?: { url?: string | null; durationSec?: number }; error?: string };
+            let job: { id?: string; status?: string; output?: { url?: string | null; durationSec?: number }; error?: { message?: string } };
             try {
               const res = await fetch('/api/render/bake', {
                 method: 'POST',
@@ -2073,15 +2057,15 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 ...(opts?.signal ? { signal: opts.signal } : {}),
               });
               if (!res.ok) {
-                const j = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
-                return { ok: false, error: j.detail || j.error || t('workbench.bakeFailed') };
+                const j = (await res.json().catch(() => ({}))) as { error?: string };
+                return { ok: false, error: typeof j.error === 'string' ? j.error : t('workbench.bakeFailed') };
               }
               job = await res.json();
             } catch (e) {
               if (e instanceof DOMException && e.name === 'AbortError') throw e;
               return { ok: false, error: t('workbench.bakeFailed') };
             }
-            const jobId = job.jobId;
+            const jobId = job.id;
             if (!jobId) return { ok: false, error: t('workbench.bakeFailed') };
             // Poll to completion (a render is ~1–3 min); the bridge card timeout covers it.
             for (let i = 0; i < 160 && job.status !== 'done' && job.status !== 'failed' && job.status !== 'canceled'; i++) {
@@ -2090,23 +2074,54 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               report?.(t('workbench.bakeRendering'));
               try {
                 const s = await fetch(`/api/render/${encodeURIComponent(jobId)}`, { ...(opts?.signal ? { signal: opts.signal } : {}) });
-                if (s.ok) job = await s.json();
+                if (!s.ok) return { ok: false, error: `${t('workbench.bakeFailed')} (HTTP ${s.status})` };
+                job = await s.json();
               } catch (e) {
                 if (e instanceof DOMException && e.name === 'AbortError') throw e;
               }
             }
-            if (job.status !== 'done' || !job.output?.url) return { ok: false, error: job.error || t('workbench.bakeFailed') };
+            if (job.status !== 'done' || !job.output?.url) return { ok: false, error: job.error?.message || t('workbench.bakeFailed') };
             // Register the render as a video asset, then overlay it full-frame at the block's window.
-            const assetId = `bake_${b.id}`;
+            // A long render must not replace a component the user edited/deleted while waiting.
+            const currentBlock = compRef.current.blocks.find((block) => block.id === b.id);
+            if (!currentBlock || JSON.stringify(currentBlock) !== JSON.stringify(b)
+              || compRef.current.width !== c.width || compRef.current.height !== c.height
+              || documentRef.current.canvas.fps !== fps) {
+              return { ok: false, error: 'The component or canvas changed while baking; retry with the current component.' };
+            }
+            const originalTrack = documentRef.current.timeline.tracks.find((track) => track.clips.some((clip) => clip.id === b.id));
+            const originalClip = originalTrack?.clips.find((clip) => clip.id === b.id);
+            if (!originalTrack || !originalClip) return { ok: false, error: t('workbench.bakeFailed') };
+            const assetId = `bake_${b.id}_${jobId}`;
             const registered = runAgentTimelineTool(documentRef.current, 'register_media', {
               assets: [{ id: assetId, kind: 'video', label: bname(b), url: job.output.url, durationSec: job.output.durationSec ?? b.durationSec, width: c.width, height: c.height }],
             });
             if (!registered.ok || !registered.document) return { ok: false, error: registered.error ?? t('workbench.bakeFailed') };
-            setDocument(registered.document);
-            const startFrame = Math.round(b.startSec * fps);
-            const durationFrames = Math.max(1, Math.round(b.durationSec * fps));
-            const placed = await runStudioToolInner(ctx, 'add_clips', { clips: [{ assetId, role: 'broll', startFrame, durationFrames, box: { x: 0, y: 0, w: 1, h: 1 } }] }, opts);
-            if (!placed.ok) return placed;
+            if (originalTrack.locked) return { ok: false, error: 'The component track is locked.' };
+            const startFrame = originalClip.startFrame;
+            const durationFrames = originalClip.durationFrames;
+            // Replace in place as one document write: removing/reinserting would prune an empty
+            // lane and detach scene/clip anchors. The same identity and stack preserve those links.
+            const bakedDocument: EditorDocumentV2 = {
+              ...registered.document,
+              timeline: {
+                ...registered.document.timeline,
+                tracks: registered.document.timeline.tracks.map((track) => track.id !== originalTrack.id ? track : {
+                  ...track,
+                  clips: track.clips.map((clip) => clip.id !== b.id ? clip : {
+                    id: clip.id, kind: 'media', assetId, startFrame, durationFrames,
+                    enabled: clip.enabled,
+                    ...(clip.linkGroupId ? { linkGroupId: clip.linkGroupId } : {}),
+                    sourceInSec: 0, sourceOutSec: durationFrames / fps, fit: 'contain',
+                    box: { x: 0, y: 0, w: 1, h: 1 },
+                    video: { treatment: 'full', audioMuted: true },
+                  }),
+                }),
+              },
+            };
+            const issue = validateEditorDocumentV2(bakedDocument).find((issue) => issue.severity === 'error');
+            if (issue) return { ok: false, error: issue.message };
+            setDocument(bakedDocument);
             return { ok: true, summary: t('workbench.bakedName', { name: bname(b) }), data: { assetId, startFrame, durationFrames } };
           }
           case 'delete_block': {
@@ -4464,6 +4479,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 id: b.id,
                 kind: blockKind(b),
                 ...renderBlock(b),
+                propsSchema: blockPropsSchema(b),
                 label: b.label,
                 durationSec: b.durationSec,
                 beats: motionBeats(b.startSec, b.durationSec),
@@ -4501,13 +4517,13 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             return {
               ok: false,
               error: 'project_nav_not_available_in_chat',
-              fix: 'Listing, switching, creating or renaming projects is an MCP/bridge capability. This chat edits the currently open project — use manage_project scope:output to manage deliverables inside it, or switch projects from the app.',
+              data: { fix: 'Listing, switching, creating or renaming projects is an MCP/bridge capability. This chat edits the currently open project — use manage_project scope:output to manage deliverables inside it, or switch projects from the app.' },
             };
           case 'create_browser_handoff':
             return {
               ok: false,
               error: 'handoff_not_available_in_chat',
-              fix: 'Browser handoff mints a one-time code so an external agent can open the editor in its own browser. In this chat the user is already in the editor, so no handoff is needed.',
+              data: { fix: 'Browser handoff mints a one-time code so an external agent can open the editor in its own browser. In this chat the user is already in the editor, so no handoff is needed.' },
             };
           default:
             return { ok: false, error: t('workbench.unknownOperationTool', { tool: toolId }) };
@@ -4789,7 +4805,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         const placement = placementPercentToBox(input.placement, c2.width, c2.height);
         if (placement.error) return { ok: false, error: placement.error };
         if (target && genIdsRef.current.has(target.id)) return { ok: false, error: t('workbench.blockGeneratingWaitFinish') };
-        const fb = target ? renderBlock(target) : { innerHtml: '<div></div>', timelineBody: '' };
+        const fb = target ? { ...renderBlock(target), propsSchema: blockPropsSchema(target) } : { innerHtml: '<div></div>', timelineBody: '' };
         // Stable applyId (same fix as the offline executor in server-tools): an unknown bid IS the
         // new-block id — compose_context minted it for the brief, or a lint receipt handed it back.
         // Reuse it so the generated CSS's #id scope survives the retry instead of chasing a fresh
@@ -4842,11 +4858,11 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           return { ok: false, error: 'the model answered null (no graphic) — nothing was changed; delete_block the target yourself if you agree' };
         }
         const parsed = parseBlockResponse(raw, fb);
-        const issues = lintBlock({ blockId: applyId, innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, propsSchema: parsed.propsSchema, requireProps: true });
+        const issues = lintBlock({ blockId: applyId, innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, propsSchema: parsed.propsSchema, requireProps: true, boxPx: { w: (placement.box?.w ?? target?.box?.w ?? 1) * c2.width, h: (placement.box?.h ?? target?.box?.h ?? 1) * c2.height } });
         // Same hard line as composeBlockChecked: hard problems are bounced back for the external model to fix itself (it is the "one fix round" model)
         const hard = issues.filter((i) => HARD_LINT_CODES.has(i.code));
         if (hard.length) {
-          return { ok: false, error: t('workbench.failedStaticChecksFix', { blockId: applyId }), data: { blockId: applyId, issues: issues.map((i) => i.message) } };
+          return { ok: false, error: t('workbench.failedStaticChecksFix', { blockId: applyId }), data: { blockId: applyId, issues: hard.map((i) => i.message) } };
         }
         const warnings = issues.length ? { warnings: issues.map((i) => i.message) } : {};
         pushUndoSnapshot();
@@ -5050,7 +5066,9 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             if (!id || before.assets[id] || knownSigs.has(entry.contentSig)) continue;
             state.assets.push({ id, kind: entry.kind ?? 'video', ...(entry.label ? { label: entry.label } : {}), library: true });
           }
-          return { ok: true, summary: `${state.tracks.length} tracks · ${state.durationFrames} frames @ ${state.canvas.fps}fps`, data: { ...state, playhead: Math.round((ctx.tRef?.current ?? 0) * before.canvas.fps) } };
+          const outputs = ctx.listProjectOutputs?.();
+          const activeOutput = outputs?.find((output) => output.active);
+          return { ok: true, summary: `${state.tracks.length} tracks · ${state.durationFrames} frames @ ${state.canvas.fps}fps`, data: { ...state, ...(ctx.projectId ? { project: { id: ctx.projectId } } : {}), ...(outputs ? { outputs } : {}), ...(activeOutput ? { output: { id: activeOutput.id, title: activeOutput.title } } : {}), playhead: Math.round((ctx.tRef?.current ?? 0) * before.canvas.fps) } };
         }
         // compose_component is a composite: fetch the live context (compose_context, seconds) and
         // server-assemble the {system, prompt} generation contract the agent authors against. The v3
@@ -5082,6 +5100,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           const brief = assembleComposeBrief({
             block,
             instruction,
+            ...(stepSurface === 'chat' ? { lang: studioLocale() } : {}),
             ...(d.context ? { context: d.context as ComposeBriefInput['context'] } : {}),
             ...(typeof d.theme === 'string' ? { theme: d.theme } : {}),
             ...(d.palette ? { palette: d.palette as Record<string, string> } : {}),
@@ -5119,6 +5138,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         if (translation.status === 'error') { const { status: _s, ...rest } = translation; return { ok: false, ...rest }; }
         if (translation.status === 'pending') return { ok: false, error: 'not_available_yet', data: { detail: translation.reason } };
         const steps: Array<{ tool: string; ok: boolean; summary?: string; error?: string; data?: unknown }> = [];
+        const images: NonNullable<StudioToolResult['images']> = [];
         let previous: StudioToolResult | null = null;
         const undoDepth = ctx.undoStackRef.current.length;
         // Legacy steps report progress under their own names; the feed renders the v3 card, so re-key every report.
@@ -5134,9 +5154,11 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           const result = EXTERNAL_ONLY_TOOLS.has(call.tool)
             ? await runExternalToolInner(ctx, call.tool, stepInput)
             : await runStudioTool(ctx, call.tool, stepInput, { surface: stepSurface, reportProgress: reportAsV3 });
+          if (result.image) images.push(result.image);
+          if (result.images) images.push(...result.images);
           // Multi-step translations (one analysis per source) keep each step's data; a single step reports it once under result.
           steps.push({ tool: call.tool, ok: result.ok, ...(result.summary ? { summary: result.summary } : {}), ...(result.error ? { error: result.error } : {}), ...(translation.calls.length > 1 && result.data !== undefined ? { data: result.data } : {}) });
-          if (!result.ok) return { ok: false, error: result.error ?? 'step_failed', data: { detail: `${call.tool} failed after ${steps.length - 1} completed step(s)`, steps } };
+          if (!result.ok) return { ok: false, error: result.error ?? 'step_failed', data: { ...(result.data && typeof result.data === 'object' && !Array.isArray(result.data) ? result.data : {}), detail: `${call.tool} failed after ${steps.length - 1} completed step(s)`, steps } };
           previous = result;
         }
         } finally {
@@ -5164,7 +5186,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           ok: true,
           summary: steps.map((step) => step.summary).filter(Boolean).join('; ') || `${name} applied`,
           ...(single?.image ? { image: single.image } : {}),
-          ...(single?.images ? { images: single.images } : {}),
+          ...(single?.images ? { images: single.images } : !single && images.length ? { images } : {}),
           data: { ...(singleData !== undefined && (typeof singleData !== 'object' || Object.keys(singleData as object).length) ? { result: singleData } : {}), steps, ...(delta ? { delta } : {}), ...(translation.note ? { note: translation.note } : {}) },
         };
       }

@@ -31,6 +31,7 @@ export interface SourceDraft {
 
 interface ElementSourceEditorProps {
   block: Block;
+  boxPx?: { w: number; h: number };
   /** Generation lock: this component is being AI-generated/rewritten, editor is read-only */
   locked: boolean;
   /** Push draft to stage live (only called after debounce, with no hard lint errors) */
@@ -50,8 +51,8 @@ interface Issue {
 }
 
 /** Static check on the draft: lintBlock (same contract as LLM output) + JS syntax compile (lint doesn't parse syntax). */
-function checkDraft(blockId: string, draft: SourceDraft, propsSchema: string | undefined): Issue[] {
-  const issues: Issue[] = lintBlock({ blockId, innerHtml: draft.innerHtml, timelineBody: draft.timelineBody, propsSchema }).map((i) => ({
+function checkDraft(blockId: string, draft: SourceDraft, propsSchema: string | undefined, boxPx?: { w: number; h: number }): Issue[] {
+  const issues: Issue[] = lintBlock({ blockId, innerHtml: draft.innerHtml, timelineBody: draft.timelineBody, propsSchema, boxPx }).map((i) => ({
     hard: HARD_LINT_CODES.has(i.code),
     message: i.message,
   }));
@@ -64,7 +65,7 @@ function checkDraft(blockId: string, draft: SourceDraft, propsSchema: string | u
   return issues;
 }
 
-export function ElementSourceEditor({ block, locked, onDraft, onApply, loop, onLoop, runAi }: ElementSourceEditorProps) {
+export function ElementSourceEditor({ block, boxPx, locked, onDraft, onApply, loop, onLoop, runAi }: ElementSourceEditorProps) {
   // Draft is read once on mount (parent's key=block.id resets it on block change) — afterward,
   // changes to the block prop are our own live-apply reflow and must not flow back into the draft
   const [draft, setDraft] = useState<SourceDraft>(() => {
@@ -80,6 +81,9 @@ export function ElementSourceEditor({ block, locked, onDraft, onApply, loop, onL
   const [aiBusy, setAiBusy] = useState(false);
   const [aiNote, setAiNote] = useState('');
   const hardCount = issues.filter((i) => i.hard).length;
+  const propsSchema = blockPropsSchema(block);
+  const boxWidth = boxPx?.w;
+  const boxHeight = boxPx?.h;
 
   // Check + live push to stage: runs 500ms after typing stops; hard errors only report, don't push
   // (bad CSS/script never enters the composition).
@@ -91,12 +95,12 @@ export function ElementSourceEditor({ block, locked, onDraft, onApply, loop, onL
   useEffect(() => {
     if (!dirtyRef.current) return; // Don't check/push the initial value (erroring/rebuilding on open is annoying)
     const h = setTimeout(() => {
-      const found = checkDraft(block.id, draft, blockPropsSchema(block));
+      const found = checkDraft(block.id, draft, propsSchema, boxWidth !== undefined && boxHeight !== undefined ? { w: boxWidth, h: boxHeight } : undefined);
       setIssues(found);
       if (!found.some((i) => i.hard) && !locked) onDraftRef.current(draft);
     }, 500);
     return () => clearTimeout(h);
-  }, [draft, block.id, locked]);
+  }, [draft, block.id, locked, propsSchema, boxWidth, boxHeight]);
 
   const edit = (patch: Partial<SourceDraft>) => {
     setDraft((d) => ({ ...d, ...patch }));

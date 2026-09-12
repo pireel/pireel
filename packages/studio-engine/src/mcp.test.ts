@@ -49,6 +49,27 @@ function deps(overrides: Partial<McpDeps> = {}): McpDeps {
 describe('MCP v3 surface', () => {
   const v3ctx = async () => ({ fps: 30, kindOf: (id: string) => (id.startsWith('g') ? 'graphic' as const : id.startsWith('a') ? 'audio' as const : 'narrative' as const) });
 
+  it('assembles the offline component brief and returns frame-based apply_component targets', async () => {
+    const placement = { xPct: 5, yPct: 60, widthPct: 70, heightPct: 20 };
+    const d = deps({ agentSurface: 'v3', resolveV3Context: v3ctx,
+      callBridge: vi.fn(async (tool) => tool === 'run_v3' ? { ok: false, error: 'studio_not_open' } : { ok: true, data: { block: { id: 'gNew' }, atSec: 2, durationSec: 3, placement } }),
+      assembleComposeBrief: vi.fn((data, instruction) => ({ ok: true, data: { system: 'SYS', prompt: instruction, target: { blockId: 'gNew', atSec: data.atSec, durationSec: data.durationSec, placement } } })),
+    });
+    const response = await handleMcpRequest({ id: 1, method: 'tools/call', params: { name: 'compose_component', arguments: { instruction: 'lower third', atFrame: 60, durationFrames: 90, placement, format: 'html' } } }, d);
+    const result = JSON.parse((response!.result as { content: { text: string }[] }).content[0]!.text);
+    expect(result).toMatchObject({ ok: true, data: { system: 'SYS', prompt: 'lower third', target: { clipId: 'gNew', atFrame: 60, durationFrames: 90, placement } } });
+    expect(result.data.target).not.toHaveProperty('blockId');
+    expect(d.callBridge).toHaveBeenLastCalledWith('compose_context', expect.objectContaining({ atSec: 2, durationSec: 3, instruction: 'lower third', format: 'html' }), expect.any(Number));
+    expect(d.assembleComposeBrief).toHaveBeenCalledWith(expect.objectContaining({ format: 'html' }), 'lower third');
+  });
+
+  it('preserves offline component context failures instead of assembling a missing target', async () => {
+    const d = deps({ agentSurface: 'v3', resolveV3Context: v3ctx, callBridge: vi.fn(async () => ({ ok: false, error: 'studio_not_open' })) });
+    const response = await handleMcpRequest({ id: 1, method: 'tools/call', params: { name: 'compose_component', arguments: { instruction: 'lower third' } } }, d);
+    expect(JSON.parse((response!.result as { content: { text: string }[] }).content[0]!.text)).toMatchObject({ ok: false, error: 'studio_not_open' });
+    expect(d.assembleComposeBrief).not.toHaveBeenCalled();
+  });
+
   it('lists the consolidated tools only when the session speaks v3', async () => {
     const legacy = await handleMcpRequest({ id: 1, method: 'tools/list' }, deps());
     const v3 = await handleMcpRequest({ id: 2, method: 'tools/list' }, deps({ agentSurface: 'v3', resolveV3Context: v3ctx }));
@@ -96,6 +117,64 @@ describe('MCP v3 surface', () => {
     expect(JSON.parse((body!.result as { content: { text: string }[] }).content[0]!.text)).toMatchObject({ ok: false, error: 'locked track' });
   });
 
+  it.each([
+    ['manage_frame', { action: 'list' }, 'listFrames', undefined],
+    ['manage_frame', { action: 'read', id: 'f1' }, 'readFrame', 'f1'],
+    ['read_skill', { id: 'visual-craft' }, 'readSkill', 'visual-craft'],
+    ['list_models', { kind: 'all' }, 'listModels', { kind: 'all' }],
+    ['list_skills', {}, 'listSkills', {}],
+    ['manage_voices', { action: 'list' }, 'listVoices', {}],
+    ['get_icons', { names: ['play'] }, 'lookupIcons', ['play']],
+    ['import_media', {}, 'importMedia', {}],
+    ['create_browser_handoff', { project_id: 'p1' }, 'createBrowserHandoff', { project_id: 'p1' }],
+    ['generate_image', { prompt: 'test' }, 'generateImage', { prompt: 'test' }],
+    ['generate_video', { prompt: 'test' }, 'generateVideo', { prompt: 'test' }],
+    ['generate_speech', { text: 'test' }, 'generateSpeech', { text: 'test' }],
+    ['generate_audio', { kind: 'music', prompt: 'test' }, 'generateMusic', { prompt: 'test' }],
+    ['generate_audio', { kind: 'sfx', prompt: 'test' }, 'generateSfx', { prompt: 'test' }],
+    ['search_assets', { scope: 'official', kind: 'video' }, 'listAssets', { scope: 'official', kind: 'video' }],
+    ['search_assets', { scope: 'cloud', query: 'city' }, 'searchAssets', { scope: 'cloud', query: 'city' }],
+    ['search_assets', { scope: 'stock', query: 'ocean', kind: 'video' }, 'searchStock', { query: 'ocean', kind: 'video' }],
+    ['inspect_media', { mode: 'generation', ids: ['job1'] }, 'getGenerationJobs', { ids: ['job1'] }],
+    ['manage_project', { scope: 'project', action: 'create', title: 'New' }, 'createProject', { title: 'New' }],
+  ])('routes %s %j to its account service without sending it to the tab', async (name, args, handler, input) => {
+    // The live browser can return an unknown operation OR a plausible but wrong empty catalog.
+    const callBridge = vi.fn(async () => ({ ok: true, summary: 'empty browser catalog', data: { assets: [], models: [] } }));
+    const resolveV3Context = vi.fn(v3ctx);
+    const d = deps({ agentSurface: 'v3', resolveV3Context, callBridge });
+    const response = await handleMcpRequest({ id: 43, method: 'tools/call', params: { name, arguments: args } }, d);
+    expect((response!.result as { isError: boolean }).isError).toBe(false);
+    if (input === undefined) expect(d[handler as keyof McpDeps]).toHaveBeenCalledWith();
+    else if (handler === 'lookupIcons') expect(d.lookupIcons).toHaveBeenCalledWith(input, undefined);
+    else expect(d[handler as keyof McpDeps]).toHaveBeenCalledWith(input);
+    expect(callBridge).not.toHaveBeenCalled();
+    expect(resolveV3Context).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['search_assets', { scope: 'mine' }],
+    ['search_assets', { scope: 'mine', query: 'local' }],
+    ['manage_project', { scope: 'output', action: 'duplicate', title: 'Copy' }],
+    ['manage_frame', { action: 'attach', id: 'f1' }],
+    ['register_media', { assets: [{ id: 'a1', kind: 'image', url: 'https://example.com/a.png' }] }],
+  ])('keeps document-owned %s %j on the live tab', async (name, args) => {
+    const callBridge = vi.fn(async () => ({ ok: true, summary: 'live result' }));
+    const d = deps({ agentSurface: 'v3', callBridge });
+    await handleMcpRequest({ id: 44, method: 'tools/call', params: { name, arguments: args } }, d);
+    expect(callBridge).toHaveBeenCalledExactlyOnceWith('run_v3', { name, args }, expect.any(Number));
+  });
+
+  it('preserves every image and its frame metadata across offline multi-step captures', async () => {
+    const callBridge = vi.fn(async (tool: string, input: Record<string, unknown>) => tool === 'run_v3'
+      ? { ok: false, error: 'studio_not_open' }
+      : { ok: true, image: { data: `frame-${input.atSec}`, mimeType: 'image/jpeg' }, data: { atSec: input.atSec } });
+    const d = deps({ agentSurface: 'v3', resolveV3Context: v3ctx, callBridge });
+    const response = await handleMcpRequest({ id: 45, method: 'tools/call', params: { name: 'inspect_timeline', arguments: { frames: [60, 210] } } }, d);
+    const content = (response!.result as { content: Array<{ type: string; data?: string; text?: string }> }).content;
+    expect(content.filter((item) => item.type === 'image').map((item) => item.data)).toEqual(['frame-2', 'frame-7']);
+    expect(JSON.parse(content[0]!.text!).data.steps.map((step: { data: unknown }) => step.data)).toEqual([{ atSec: 2 }, { atSec: 7 }]);
+  });
+
   it('translates frame-based v3 calls onto legacy seconds and routes by clip kind', async () => {
     const d = deps({ agentSurface: 'v3', resolveV3Context: v3ctx });
     const response = await handleMcpRequest({ id: 3, method: 'tools/call', params: { name: 'move_clips', arguments: { items: [{ clipId: 'n1', startFrame: 90 }, { clipId: 'g1', startFrame: 120 }] } } }, d);
@@ -107,11 +186,15 @@ describe('MCP v3 surface', () => {
     expect(body.data.steps).toHaveLength(2);
   });
 
-  it('chains a stock import into register_media using the previous result', async () => {
-    const d = deps({ agentSurface: 'v3', resolveV3Context: v3ctx });
+  it('chains a stock import into live register_media using the previous result', async () => {
+    const callBridge = vi.fn(async (tool: string) => tool === 'run_v3'
+      ? { ok: false, error: 'unexpected browser stock import' }
+      : { ok: true, summary: 'registered' });
+    const d = deps({ agentSurface: 'v3', resolveV3Context: v3ctx, callBridge });
     const payload = { query: 'city night', kind: 'video', page: 1, limit: 12, assetId: 'px_1' };
     await handleMcpRequest({ id: 4, method: 'tools/call', params: { name: 'register_media', arguments: { stock: payload } } }, d);
     expect(d.importStock).toHaveBeenCalledWith(payload);
+    expect(callBridge).toHaveBeenCalledTimes(1);
     expect(d.callBridge).toHaveBeenCalledWith('register_media', { assets: [{ id: 'up_1', kind: 'image', url: 'https://cdn.example/stock.jpg' }] }, expect.any(Number));
   });
 

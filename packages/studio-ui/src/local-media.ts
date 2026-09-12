@@ -246,7 +246,13 @@ export async function saveLocalStream(
   options: SaveLocalStreamOptions,
 ): Promise<File> {
   const dir = await dirHandle();
-  if (!dir) throw new Error('local media storage is unavailable for streamed import');
+  if (!dir) {
+    // Private browsing/embedded webviews may expose no OPFS. Cloud bytes must still be usable;
+    // the cache is optional, so retain this retrieval in a session File instead.
+    const chunks: BlobPart[] = [];
+    await consumeLocalStream(stream, options.expectedSize ?? null, async (chunk) => { chunks.push(chunk); });
+    return alignFileToSig(new File(chunks, options.name || 'import', { type: options.type || 'application/octet-stream' }), sig);
+  }
 
   void navigator.storage.persist?.().catch(() => {});
   const key = await sigKey(sig);
@@ -317,7 +323,8 @@ async function loadFromOpfs(sig: string): Promise<File | null> {
     try {
       const fh = await dir.getFileHandle(key);
       const stored = await fh.getFile();
-      if (!stored.size) return null;
+      const expectedSize = sigSize(sig);
+      if (!stored.size || (expectedSize != null && stored.size !== expectedSize)) return null;
       const meta = await readStoredMeta(dir, key);
       return alignFileToSig(meta ? new File([stored], meta.name, { type: meta.type, lastModified: meta.lastModified }) : stored, sig);
     } catch {
@@ -403,6 +410,20 @@ export async function resolveAssetBytes(
   const aligned = alignFileToSig(cloud, sig, entry.label);
   void saveLocalVideo(aligned, sig);
   return aligned;
+}
+
+/** Library cards need a URL, not a full media download. Hosts without a lightweight read-link
+ * capability retain the existing byte-resolution fallback. */
+export async function resolveAssetPreview(
+  entry: Pick<LocalAssetIndexEntry, 'assetId' | 'contentSig' | 'cloudKey' | 'folder' | 'label'>,
+  options?: ResolveAssetBytesOptions,
+): Promise<{ file: File | null; url: string | null }> {
+  const previewUrl = studioProviders().vault.previewUrl;
+  const file = await resolveAssetBytes(entry, { ...options, deviceOnly: Boolean(previewUrl) });
+  const url = !file && entry.cloudKey && previewUrl
+    ? await previewUrl(entry.contentSig, { cloudKey: entry.cloudKey })
+    : null;
+  return { file, url };
 }
 
 /** @deprecated use resolveAssetBytes; kept for call sites that still pass a projectId first. */

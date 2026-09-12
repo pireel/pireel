@@ -99,7 +99,7 @@ export interface McpDeps {
   createProject: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
   /** List the current user's projects (routing layer = query studioProjects, lightweight metadata; most recent first = offline active project). */
   listProjects: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
-  /** Switch active project (routing layer = bump the project's updatedAt to newest → offline tools operate on it, and return its state). */
+  /** Switch active project (routing layer verifies ownership and pins the editing session to it, then returns its state). */
   switchProject: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
   /** Rename a project's title (routing layer = update title where id+userId). */
   renameProject: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
@@ -467,7 +467,7 @@ export function buildMcpTools(): McpToolDef[] {
     {
       name: 'list_projects',
       description:
-        "List the connected user's Pireel projects (id, title, updated time, has-video). Newest first — the top one is your current ACTIVE project for offline tools.",
+        "List the connected user's Pireel projects (id, title, updated time, has-video). Sorted by last update; active identifies your selected project (which may differ from the most recently saved one).",
       inputSchema: EMPTY_SCHEMA,
     },
     {
@@ -655,21 +655,49 @@ const TAB_CANNOT_SERVE = new Set(['studio_not_open', 'project_nav_not_available_
 /** Run one v3 call: translate to legacy calls, apply them in order (chaining results where the adapter
  *  asks), and fold the receipts into one result. Delta shaping lands with the receipt contract. */
 export async function runV3Tool(name: string, args: Record<string, unknown>, deps: McpDeps): Promise<McpBridgeResult> {
-  // Live tab first: the tab translates against its own document (exact fps, current clip kinds), applies
-  // every step inside one undo group and answers with the v3 receipt. studio_not_open falls through to
-  // the server-side per-step path below (offline receipts carry the same delta vocabulary).
-  const live = await deps.callBridge('run_v3', { name, args }, bridgeTimeoutMs(V3_BRIDGE_TIMEOUT_TOOL[name] ?? name));
-  if (!(live.ok === false && TAB_CANNOT_SERVE.has(String(live.error)))) return live;
-  const ctx: V3AdapterContext = deps.resolveV3Context
+  // Route account-owned steps before contacting the tab: its chat handlers may reject them,
+  // or worse, answer a cloud/official catalog request with a plausible empty local catalog.
+  // Probe without document context; frame/clip-dependent translations still run in the live tab.
+  const contextFree: V3AdapterContext = { fps: Number.NaN, kindOf: () => undefined };
+  const probe = translateV3Call(name, args, contextFree);
+  const serverOwned = probe.status === 'ok' && probe.calls.some((call) =>
+    MCP_SERVER_TOOL_IDS.has(call.tool)
+    // Project-local media includes unsaved device assets only the tab can see.
+    && !(['list_assets', 'search_assets'].includes(call.tool) && call.input.scope === 'mine'));
+  if (!serverOwned) {
+    // Document edits stay grouped against the live tab's exact fps, ids and undo history.
+    const live = await deps.callBridge('run_v3', { name, args }, bridgeTimeoutMs(V3_BRIDGE_TIMEOUT_TOOL[name] ?? name));
+    if (!(live.ok === false && TAB_CANNOT_SERVE.has(String(live.error)))) return live;
+  }
+  const ctx: V3AdapterContext = !serverOwned && deps.resolveV3Context
     ? await deps.resolveV3Context()
-    : { fps: Number.NaN, kindOf: () => undefined };
-  const translation = translateV3Call(name, args, ctx);
+    : contextFree;
+  const translation = serverOwned ? probe : translateV3Call(name, args, ctx);
   if (translation.status === 'error') {
     const { status: _status, ...rest } = translation;
     return { ok: false, ...rest };
   }
   if (translation.status === 'pending') return { ok: false, error: 'not_available_yet', detail: translation.reason };
+  if (name === 'compose_component') {
+    // The adapter yields raw context; offline callers need the same assembled authoring
+    // contract and frame-based target as the live run_v3 handler.
+    const result = await callLegacyTool('compose_block_brief', {
+      ...translation.calls[0]!.input,
+      instruction: args.instruction,
+      ...(args.format === 'kit' || args.format === 'html' ? { format: args.format } : {}),
+    }, deps);
+    if (!result?.ok) return result ?? { ok: false, error: 'adapter_mapped_unknown_tool' };
+    const data = (result.data ?? {}) as Record<string, unknown>;
+    const target = (data.target ?? {}) as Record<string, unknown>;
+    return { ...result, data: { ...data, target: {
+      clipId: target.blockId,
+      ...(typeof target.atSec === 'number' ? { atFrame: Math.round(target.atSec * ctx.fps) } : {}),
+      ...(typeof target.durationSec === 'number' ? { durationFrames: Math.max(1, Math.round(target.durationSec * ctx.fps)) } : {}),
+      ...(target.placement ? { placement: target.placement } : {}),
+    }, next: 'Generate the component yourself from system + prompt, then call apply_component with this target unchanged plus your full raw text.' } };
+  }
   const steps: Array<{ tool: string; ok: boolean; summary?: string; error?: string; data?: unknown }> = [];
+  const images: Array<{ data: string; mimeType?: string }> = [];
   let previous: McpBridgeResult | null = null;
   for (const call of translation.calls as LegacyCall[]) {
     const input: Record<string, unknown> = { ...call.input };
@@ -683,6 +711,8 @@ export async function runV3Tool(name: string, args: Record<string, unknown>, dep
     const result = await callLegacyTool(call.tool, input, deps);
     if (result === null) return { ok: false, error: 'adapter_mapped_unknown_tool', detail: call.tool, data: { steps } };
     if (translation.calls.length === 1) return translation.note ? { ...result, note: translation.note } : result;
+    if (result.image) images.push(result.image as { data: string; mimeType?: string });
+    if (Array.isArray(result.images)) images.push(...result.images as Array<{ data: string; mimeType?: string }>);
     steps.push({ tool: call.tool, ok: result.ok, ...(result.summary ? { summary: result.summary } : {}), ...(result.error ? { error: result.error } : {}), ...(result.data !== undefined ? { data: result.data } : {}) });
     if (!result.ok) {
       return { ok: false, error: result.error ?? 'step_failed', detail: `${call.tool} failed after ${steps.length - 1} completed step(s); earlier steps are applied`, data: { steps } };
@@ -693,6 +723,7 @@ export async function runV3Tool(name: string, args: Record<string, unknown>, dep
     ok: true,
     summary: steps.map((step) => step.summary).filter(Boolean).join('; ') || `${name} applied ${steps.length} steps`,
     data: { steps, ...(translation.note ? { note: translation.note } : {}) },
+    ...(images.length ? { images } : {}),
   };
 }
 

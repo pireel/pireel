@@ -93,12 +93,13 @@ describe('buildBlockPrompt', () => {
     expect(last.indexOf('```html')).toBeLessThan(last.indexOf('```js'));
   });
 
-  it('在具体块提示末尾重复不可违反的 CSS 作用域审计', () => {
+  it('supplies a concrete scoped example instead of a repeated self-audit loop', () => {
     const prompt = buildBlockPrompt({
       block: { id: 'block_scope', kind: 'custom', innerHtml: '<div></div>', timelineBody: '' },
       instruction: 'make a metric',
     });
-    expect(prompt).toContain('MANDATORY FINAL CSS AUDIT');
-    expect(prompt).toContain('Every one must start with #block_scope');
+    expect(prompt).toContain('.label{');
+    expect(prompt).toContain('Studio scopes the stylesheet');
+    expect(prompt).not.toContain('MANDATORY FINAL CSS AUDIT');
   });
 });

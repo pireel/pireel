@@ -217,12 +217,9 @@ describe("静态提示词完整性", () => {
     expect(schema).toContain('"placement"');
     expect(CHAT_IDENTITY).toContain("LIGHTWEIGHT DISPLAY TYPE IS NATIVE TEXT");
   });
-  it("回复语言优先跟随用户输入，无法判断时才用宿主 locale，不跟随英文工具回执", () => {
-    expect(CHAT_IDENTITY).toContain("host-supplied <reply_language> block");
-    expect(CHAT_IDENTITY).toContain("uses the selected Studio locale only when that input has no reliable language signal");
-    expect(CHAT_IDENTITY).toContain("latest USER-AUTHORED message");
-    expect(CHAT_IDENTITY).toContain("Tool calls, tool receipts, transcript envelopes");
-    expect(CHAT_IDENTITY).toContain("must never switch the reply language during a tool loop");
+  it("uses the shared user-authored language rule without an absent host policy block", () => {
+    expect(CHAT_IDENTITY).toContain('IMPORTANT: Your response must ALWAYS strictly follow the same major language as the user.');
+    expect(CHAT_IDENTITY).not.toContain("<reply_language>");
   });
   it("Chat 身份是剪辑专家，而不是被动助手或泛化导演", () => {
     expect(CHAT_IDENTITY).toContain("Studio's video editing expert");

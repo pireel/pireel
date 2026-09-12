@@ -1,5 +1,7 @@
 'use client';
 
+import { compileComponentStyles } from '@pireel/studio-engine/component-styles';
+
 /**
  * Shared geometry preparation for editable overlay components.
  *
@@ -60,7 +62,7 @@ export function normalizeElementForInsert(
     const root = document.createElement('div');
     root.id = el.seedId;
     root.style.cssText = 'position:absolute;inset:0;';
-    root.innerHTML = el.innerHtml;
+    root.innerHTML = compileComponentStyles(el.innerHtml, el.seedId).html;
     host.appendChild(root);
     document.body.appendChild(host);
     try {

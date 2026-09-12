@@ -238,7 +238,8 @@ export function GenerationControls({
   // way the panel did: quality tier for images, a supported resolution/duration tier for video.
   useEffect(() => {
     if (intent === 'image') {
-      const next = qualityCfg?.default ?? undefined;
+      const next = qualityCfg?.options.some((option) => option.value === params.quality)
+        ? params.quality : qualityCfg?.default ?? undefined;
       if (next !== params.quality || modelId !== params.modelId) onChange({ ...params, ...(modelId ? { modelId } : {}), quality: next });
     } else if (intent === 'video') {
       const resolution = resolutionOptions.includes(params.resolution ?? '') ? params.resolution : resolutionOptions.includes('720p') ? '720p' : resolutionOptions[0];
@@ -408,7 +409,7 @@ export function GenerationCreditsBadge({ intent, params, models }: { intent: Gen
   const quoteParams = useMemo<Record<string, unknown>>(() => {
     const ratio = params.ratio ?? '9:16';
     if (intent === 'image') return { n: Math.min(4, Math.max(1, params.count ?? 1)), size: imageSizeParam(modelId, ratio), ...(params.quality ? { quality: params.quality } : {}) };
-    if (intent === 'video') return { duration_sec: String(params.durationSec ?? 5), count: 1, resolution: params.resolution ?? '720p', aspect_ratio: ratio === '1:1' ? '9:16' : ratio, generate_audio: false };
+    if (intent === 'video') return { duration_sec: String(params.durationSec ?? 5), count: 1, resolution: params.resolution ?? '720p', aspect_ratio: ratio, generate_audio: params.generateAudio ?? false };
     if (intent === 'audio') {
       const kind = audioKindFor(params);
       if (kind === 'sfx') return { duration_tier: sfxDurationTier(params.durationSec ?? 5) };

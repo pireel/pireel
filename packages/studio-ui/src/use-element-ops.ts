@@ -324,7 +324,7 @@ export function useElementOps(deps: ElementOpsDeps) {
         // Component = strong reference: HTML may grow/shrink repeated units. If the structural
         // response is invalid, patch text nodes only and keep the authored layout and animation.
         const htmlHardIssues = typeof out.html === 'string'
-          ? lintBlock({ blockId: b.id, innerHtml: out.html, timelineBody: '' }).filter((issue) => HARD_LINT_CODES.has(issue.code))
+          ? lintBlock({ blockId: b.id, innerHtml: out.html, timelineBody: '', boxPx: { w: (b.box?.w ?? 1) * compRef.current.width, h: (b.box?.h ?? 1) * compRef.current.height } }).filter((issue) => HARD_LINT_CODES.has(issue.code))
           : [];
         const okHtml =
           typeof out.html === 'string' &&
@@ -342,7 +342,7 @@ export function useElementOps(deps: ElementOpsDeps) {
         // Only authored HTML owns an editable timeline body. Kit motion is derived from typed props.
         if (out.timeline) {
           try {
-            const timelineHardIssues = lintBlock({ blockId: b.id, innerHtml: nextHtml, timelineBody: out.timeline })
+            const timelineHardIssues = lintBlock({ blockId: b.id, innerHtml: nextHtml, timelineBody: out.timeline, boxPx: { w: (b.box?.w ?? 1) * compRef.current.width, h: (b.box?.h ?? 1) * compRef.current.height } })
               .filter((issue) => HARD_LINT_CODES.has(issue.code));
             if (timelineHardIssues.length) throw new Error(timelineHardIssues[0]!.message);
             new Function('tl', out.timeline);

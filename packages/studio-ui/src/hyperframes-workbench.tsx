@@ -192,18 +192,16 @@ import {
   srcToEditedLoose,
 } from "@pireel/studio-engine/trim";
 import {
-  parseBlockResponse,
   parseKitResponse,
 } from "@pireel/studio-engine/compose";
 import {
   type ComposeMode,
   type ComposedBlock,
-  GeneratedBlockValidationError,
   composedBlockFields,
   kitChoiceOf,
 } from "./compose-result";
 import { imageThumb, imgSourceBase } from "@pireel/ui/image-url";
-import { HARD_LINT_CODES, lintBlock } from "@pireel/studio-engine/block-lint";
+import { acceptGeneratedComponent } from "./compose-validation";
 import { clearToolProgress, setToolProgress } from "./tool-progress";
 import { injectPreviewRuntime } from "./sample-composition";
 import { monotonicPlaybackSecond, playhead } from "./playhead";
@@ -1604,7 +1602,8 @@ export function HyperframesWorkbench({
     const video = cloudMediaRef.current.video;
     return localAssetIndexRef.current.map((entry) => {
       if (entry.cloudKey) return entry;
-      const key = clips[entry.contentSig]?.key ?? (video?.sig === entry.contentSig ? video.key : undefined);
+      const key = clips[entry.contentSig]?.key ?? (video?.sig === entry.contentSig ? video.key : undefined)
+        ?? assetUploadQueue().state(entry.contentSig)?.key;
       return key ? { ...entry, cloudKey: key } : entry;
     });
   };
@@ -1810,7 +1809,7 @@ export function HyperframesWorkbench({
     sig: string,
     _kind: "video" | "clip",
   ) => {
-    assetUploadQueue().enqueue({ sig, file });
+    assetUploadQueue().enqueue({ projectId, sig, file });
   };
   // The ONE place an upload result becomes project state: the transient cloud index, folded into
   // V2 locators AND the project asset index at persistence (project-document.ts). The in-memory
@@ -1820,6 +1819,11 @@ export function HyperframesWorkbench({
   useEffect(
     () =>
       assetUploadQueue().onUploaded(({ sig, key }) => {
+        // Uploads outlive project navigation. Only the project that references this content
+        // should record its key; other projects reconcile completed queue state when reopened.
+        if (videoSigRef.current !== sig &&
+          !localAssetIndexRef.current.some((entry) => entry.contentSig === sig) &&
+          !Object.values(editorDocumentRef.current.assets).some((asset) => asset.locator.localSig === sig)) return;
         cloudMediaRef.current = videoSigRef.current === sig
           ? { ...cloudMediaRef.current, video: { sig, key } }
           : { ...cloudMediaRef.current, clips: { ...cloudMediaRef.current.clips, [sig]: { key } } };
@@ -3419,6 +3423,7 @@ export function HyperframesWorkbench({
         kind: "custom",
         innerHtml: draft.innerHtml,
         timelineBody: draft.timelineBody,
+        propsSchema: blockPropsSchema(b),
         label: b.label,
         durationSec: b.durationSec,
         beats: beatsForWindow(
@@ -4209,7 +4214,7 @@ export function HyperframesWorkbench({
       }); // device cache: draft restore reopens instantly on this device
       // Cloud rendezvous: the queue uploads in the background (content-addressed, duplicate = instant)
       // so the project reopens on any device and offline agents can reach the bytes.
-      assetUploadQueue().enqueue({ sig, file, label: file.name });
+      assetUploadQueue().enqueue({ projectId, sig, file, label: file.name });
 
       const dur = p.durationSec || 30;
       const pr = pendingRestoreRef.current;
@@ -4396,6 +4401,7 @@ export function HyperframesWorkbench({
         kind: string;
         innerHtml: string;
         timelineBody: string;
+        propsSchema?: string;
         label?: string;
         boxPx?: { w: number; h: number };
         durationSec?: number;
@@ -4424,6 +4430,7 @@ export function HyperframesWorkbench({
             kind: seed.kind,
             innerHtml: seed.innerHtml,
             timelineBody: seed.timelineBody,
+            ...(seed.propsSchema ? { propsSchema: seed.propsSchema } : {}),
             label: seed.label ?? t("workbench.newElement"),
             ...(seed.boxPx ? { boxPx: seed.boxPx } : {}),
             ...(seed.durationSec ? { durationSec: seed.durationSec } : {}),
@@ -4460,8 +4467,8 @@ export function HyperframesWorkbench({
     return (i === -1 ? raw : raw.slice(0, i)).trim().slice(0, 120);
   };
 
-  /** Generate/edit a block + static-check loop: on failure, feed the issues back for one fix round (bad output as the base, fix only the problems);
-   *  if hard errors (unscoped CSS/script/non-determinism) remain after the fix → throw instead of committing CSS that pollutes the whole document. */
+  /** New and edited components use the same source contract and one bounded runtime repair;
+   * typography/editability advice never starts another model call. */
   const composeBlockChecked = useCallback(
     async (
       seed: {
@@ -4507,50 +4514,13 @@ export function HyperframesWorkbench({
         // the same road as a plain hiccup. The lint loop below guards both.
       }
       const raw = await composeBlockRaw(seed, instruction, onDelta);
-      let parsed = parseBlockResponse(raw, {
-        innerHtml: seed.innerHtml,
-        timelineBody: seed.timelineBody,
-        propsSchema: seed.propsSchema,
+      return acceptGeneratedComponent({
+        seed,
+        raw,
+        repair: (parsed, fixInstruction) => composeBlockRaw({ ...seed, ...parsed }, fixInstruction, onDelta),
+        failureMessage: (message) => t("workbench.generatedBlockFailedChecks", { message }),
+        onWarnings: (issues) => console.warn("[studio] component advisory", seed.id, issues),
       });
-      let issues = lintBlock({
-        blockId: seed.id,
-        innerHtml: parsed.innerHtml,
-        timelineBody: parsed.timelineBody,
-        propsSchema: parsed.propsSchema,
-        requireProps: true,
-      });
-      if (issues.length) {
-        const fixSeed = {
-          ...seed,
-          innerHtml: parsed.innerHtml,
-          timelineBody: parsed.timelineBody,
-        };
-        const fixInstruction = `Your previous output failed these checks — fix ONLY these problems, keep everything else identical:\n${issues.map((i) => `- ${i.message}`).join("\n")}`;
-        const raw2 = await composeBlockRaw(fixSeed, fixInstruction, onDelta);
-        parsed = parseBlockResponse(raw2, {
-          innerHtml: fixSeed.innerHtml,
-          timelineBody: fixSeed.timelineBody,
-          propsSchema: parsed.propsSchema,
-        });
-        issues = lintBlock({
-          blockId: seed.id,
-          innerHtml: parsed.innerHtml,
-          timelineBody: parsed.timelineBody,
-          propsSchema: parsed.propsSchema,
-          requireProps: true,
-        });
-        const hard = issues.filter((i) => HARD_LINT_CODES.has(i.code));
-        if (hard.length)
-          throw new GeneratedBlockValidationError(
-            t("workbench.generatedBlockFailedChecks", {
-              message: hard[0]!.message,
-            }),
-            hard.map((issue) => issue.message),
-          );
-        if (issues.length)
-          console.warn("[studio] block lint soft issues", seed.id, issues);
-      }
-      return parsed;
     },
     [composeBlockRaw],
   );
@@ -4999,7 +4969,7 @@ export function HyperframesWorkbench({
    * This is the browser-picker counterpart of the agent helper's register-asset path. */
   const preparePickedLocalImage = async (file: File): Promise<string> => {
     const asset = await importLocalSource({ type: "browser", file });
-    assetUploadQueue().enqueue({ sig: asset.contentSig, file: asset.file, label: asset.label });
+    assetUploadQueue().enqueue({ projectId, sig: asset.contentSig, file: asset.file, label: asset.label });
     if (asset.kind !== "image")
       throw new Error("selected file is not an image");
     let dims: { width?: number; height?: number } = {};
@@ -6927,7 +6897,7 @@ export function HyperframesWorkbench({
     fetchCloudMedia: async (sig, cloudKey) => {
       const vaulted = cloudMediaRef.current.video?.sig === sig
         || Boolean(cloudMediaRef.current.clips?.[sig]);
-      return vaulted || cloudKey ? studioProviders().vault.fetch(sig) : null;
+      return vaulted || cloudKey ? studioProviders().vault.fetch(sig, cloudKey ? { cloudKey } : undefined) : null;
     },
     recoverLocalClips,
     resetEditor: resetForOutputChange,
@@ -8186,10 +8156,19 @@ export function HyperframesWorkbench({
     void (async () => {
       for (const entry of localAssetIndexRef.current) {
         if (cancelled) return;
-        if (entry.cloudKey || assetUploadQueue().state(entry.contentSig)) continue;
+        if (entry.cloudKey) continue;
+        const upload = assetUploadQueue().state(entry.contentSig);
+        if (upload?.status === "done" && upload.key) {
+          if (cloudMediaRef.current.clips?.[entry.contentSig]?.key !== upload.key) {
+            cloudMediaRef.current = { ...cloudMediaRef.current, clips: { ...cloudMediaRef.current.clips, [entry.contentSig]: { key: upload.key } } };
+            setCloudMediaRev((v) => v + 1);
+          }
+          continue;
+        }
+        if (upload) continue;
         const file = await resolveAssetBytes(entry, { projectId, deviceOnly: true });
         if (cancelled) return;
-        if (file) assetUploadQueue().enqueue({ sig: entry.contentSig, file, label: entry.label });
+        if (file) assetUploadQueue().enqueue({ projectId, sig: entry.contentSig, file, label: entry.label });
       }
     })();
     return () => {
@@ -10361,6 +10340,7 @@ export function HyperframesWorkbench({
                           <ElementSourceEditor
                             key={cb.id}
                             block={cb}
+                            boxPx={{ w: (cb.box?.w ?? 1) * comp.width, h: (cb.box?.h ?? 1) * comp.height }}
                             locked={genIds.has(cb.id)}
                             loop={codeLoop}
                             onLoop={toggleCodeLoop}

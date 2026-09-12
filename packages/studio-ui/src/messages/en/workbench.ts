@@ -352,7 +352,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.facesSafeZones": "Faces/safe zones",
   "workbench.failedFetchInsertClip": "Failed to fetch the insert clip",
   "workbench.failedStaticChecksFix":
-    'Failed static checks — fix each issue in data.issues (common: scope every CSS selector to #{blockId}), keep everything else as-is, then re-submit with the same target id',
+    'Component source failed validation: fix the concrete data.issues, preserve everything else, and re-submit using the same target {blockId}',
   "workbench.fetchedBlockContext": "Fetched block context",
   "workbench.fetchedNewElementContext": "Fetched new-element context",
   "workbench.composeNeedsInstruction": "compose_component needs a concrete instruction for the component.",

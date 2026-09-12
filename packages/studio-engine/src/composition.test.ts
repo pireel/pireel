@@ -306,8 +306,8 @@ describe('全局花字样式 captionStyle', () => {
     expect(html).toContain('background:#445566'); // 底板色覆盖
     c.captionStyle = { preset: 'ln-black', yPct: 88, scale: 1, bg: null };
     html = assembleHtml(c);
-    expect(html).toContain('.cap-line { position:absolute'); // 保护:选择器仍在(下一断言才有意义)
-    expect(/#cap_[^{]*\.cap-line[^}]*background:/.test(html)).toBe(false); // 无底:主行不再渲染底板
+    expect(html).toMatch(/\.cap-line\s*\{\s*position:absolute/); // 保护:选择器仍在(下一断言才有意义)
+    expect(html.match(/\.cap-line\s*\{([^}]*)\}/)?.[1]).not.toContain('background:'); // 无底:主行不再渲染底板
     // 老数据(无覆盖字段)完全走预设——向后兼容
     c.captionStyle = { preset: 'ln-black', yPct: 88, scale: 1 };
     expect(assembleHtml(c)).toContain('background:'); // ln-black 预设自带底板
@@ -327,9 +327,11 @@ describe('全局花字样式 captionStyle', () => {
     c.blocks = [captionBlock({ words, sub: 'Hello there' })];
     c.captionStyle = { preset: 'ln-black', yPct: 88, scale: 1, sub: { preset: 'ln-clean', color: '#ABCDEF', lang: 'English' } };
     const html = assembleHtml(c);
-    const subCss = html.slice(html.indexOf('.cap-sub-line {'));
+    const subCss = html.match(/\.cap-sub-line\s*\{([^}]*)\}/)?.[1];
+    expect(subCss).toBeDefined();
     expect(subCss).toContain('color:#ABCDEF'); // 译文行文字色覆盖
-    const mainCss = html.slice(html.indexOf(' .w {'), html.indexOf('.cap-sub'));
+    const mainCss = html.match(/ \.w\s*\{([^}]*)\}/)?.[1];
+    expect(mainCss).toBeDefined();
     expect(mainCss).not.toContain('#ABCDEF'); // 主行不受影响
   });
 

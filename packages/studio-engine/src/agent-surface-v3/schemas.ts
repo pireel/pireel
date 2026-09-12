@@ -1,3 +1,4 @@
+import { COMPONENT_PROPERTY_MAX_ROWS, COMPONENT_PROPERTY_MAX_FIELDS, COMPONENT_PROPERTY_MAX_TEXT } from '../component-property-input';
 /**
  * Agent surface v3 — tool descriptions and input schemas.
  *
@@ -47,6 +48,11 @@ const BOX = obj({
   w: num('Width in canvas units, > 0.'),
   h: num('Height in canvas units, > 0.'),
 }, ['x', 'y', 'w', 'h']);
+const PROPERTY_SCALAR: Schema = { anyOf: [{ type: 'string', maxLength: COMPONENT_PROPERTY_MAX_TEXT }, { type: 'number' }, { type: 'boolean' }] };
+const PROPERTY_VALUE: Schema = {
+  anyOf: [...(PROPERTY_SCALAR.anyOf as Schema[]), { type: 'array', maxItems: COMPONENT_PROPERTY_MAX_ROWS, items: { ...obj({ text: PROPERTY_SCALAR, note: PROPERTY_SCALAR, label: PROPERTY_SCALAR, value: PROPERTY_SCALAR, trend: PROPERTY_SCALAR }), maxProperties: COMPONENT_PROPERTY_MAX_FIELDS } }],
+  description: 'Scalar color, number, boolean, select or text; kit rows use an array of flat row objects matching the declared component schema.',
+};
 const FADES = obj({ in: int('Fade-in length in frames.'), out: int('Fade-out length in frames.') });
 const PLACEMENT_PCT = obj({ xPct: num(), yPct: num(), widthPct: num(), heightPct: num() }, ['xPct', 'yPct', 'widthPct', 'heightPct']);
 
@@ -297,7 +303,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
         volumeDb: num('', { min: -60, max: 20 }), mute: bool(), fades: FADES, opacity: num('', { min: 0, max: 1 }),
         filter: obj({ brightness: num(), contrast: num(), saturate: num() }),
         enabled: bool(), box: BOX,
-        props: arr(obj({ key: str('Property key from component.props.'), value: { anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }], description: 'New value: color as #rrggbb(aa) or var(--token), number, boolean, or a select option.' } }, ['key', 'value']), { minItems: 1, maxItems: 8, description: 'Graphic clips only: editable properties to set.' }),
+        props: arr(obj({ key: str('Property key from component.props.'), value: PROPERTY_VALUE }, ['key', 'value']), { minItems: 1, maxItems: 8, description: 'Graphic clips only: editable properties to set.' }),
       }, ['clipId']), { minItems: 1 }),
     }, ['items']),
   },
@@ -328,7 +334,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   set_keyframes: {
     description:
-      'Replace or clear the keyframe track of one visual property (box or opacity) on one clip. Keyframe times are clip-relative seconds; an empty list clears the track. For static values use set_clip_framing / set_clip_properties.',
+      'Replace or clear the keyframe track of one visual property (box or opacity) on one video or image clip. Graphic components, native titles, captions and audio clips are not supported; use compose_component / apply_component for component animation. Keyframe times are clip-relative seconds; an empty list clears the track. For static values use set_clip_framing / set_clip_properties.',
     inputSchema: obj({
       clipId: str(), property: enumOf(['box', 'opacity']),
       keyframes: arr(obj({ atSec: num('Clip-relative seconds.'), x: num(), y: num(), w: num(), h: num(), value: num() }, ['atSec'])),

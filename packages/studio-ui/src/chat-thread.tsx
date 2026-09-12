@@ -1,5 +1,7 @@
 "use client";
 
+import { collapsedComponentRetryIndexes, studioToolFailureText } from './chat-component-retries';
+
 /** Single-thread studio chat (useChat): stream rendering, client-side tool execution, persistence snapshots. */
 
 import {
@@ -321,7 +323,7 @@ export function ChatThread({
         const stopAfterReceipt = studioToolResultStopsAgentTurn(out);
         if (stopAfterReceipt) userStoppedRef.current = true;
         if (out.ok) publishSuccess(out as unknown as Record<string, unknown>);
-        else publishError(out.error ?? t("chatGen.executionFailed"));
+        else publishError(studioToolFailureText(out.error ?? t("chatGen.executionFailed"), out.data));
         if (stopAfterReceipt) void stop();
       } catch (e) {
         const isStop = e instanceof DOMException && e.name === "AbortError";
@@ -887,7 +889,7 @@ export function ChatThread({
               // Collapse consecutive track_export polls (only step-starts between them): render just
               // the last of each run — a polling agent otherwise buries the conversation in a column
               // of identical progress badges. Polls separated by real text keep rendering.
-              const collapsed = new Set<number>();
+              const collapsed = collapsedComponentRetryIndexes(parts);
               for (let i = 0; i < parts.length; i++) {
                 if (parts[i]!.type !== "tool-track_export") continue;
                 let j = i + 1;

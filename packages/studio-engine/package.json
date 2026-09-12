@@ -15,8 +15,12 @@
   ],
   "license": "AGPL-3.0-only",
   "dependencies": {
+    "@pireel/studio-kit": "workspace:*",
+    "css-tree": "3.2.1",
     "fast-json-patch": "^3.1.1",
-    "jsondiffpatch": "^0.7.6",
-    "@pireel/studio-kit": "workspace:*"
+    "jsondiffpatch": "^0.7.6"
+  },
+  "devDependencies": {
+    "@types/css-tree": "^3.2.0"
   }
 }

@@ -639,8 +639,9 @@ export function useClipInsert(deps: ClipInsertDeps) {
         }
       }
       let sourceFile: File | null = null;
-      if (locatorSig) sourceFile = await loadLocalVideo(locatorSig);
-      else if (!isDeviceLocalLibraryAsset(a)) {
+      if (localEntry) sourceFile = await resolveAssetBytes(localEntry, { projectId });
+      if (!sourceFile && locatorSig) sourceFile = await loadLocalVideo(locatorSig);
+      if (!sourceFile && !isDeviceLocalLibraryAsset(a)) {
         try {
           const materialized = await materializeRemoteMedia(a.url, {
             name: a.label || (a.type === 'video' ? 'video.mp4' : 'image'),

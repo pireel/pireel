@@ -113,6 +113,25 @@ export class StudioBridge {
   async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
 
+    // Internal server routing only: account services must share the editing session's
+    // project rather than guessing from unrelated tabs' autosave timestamps.
+    if (url.pathname === '/context' && req.method === 'GET') {
+      const sockets = this.state.getWebSockets();
+      const target = sockets[sockets.length - 1];
+      return Response.json({ connected: !!target, projectId: target ? this.projectOf(target) : null,
+        anchorProject: await this.state.storage?.get('anchorProject') ?? null,
+        explicitSelection: await this.state.storage?.get('anchorExplicit') === true });
+    }
+    if (url.pathname === '/anchor' && req.method === 'POST') {
+      const body = await req.json() as { projectId?: unknown; explicitSelection?: unknown };
+      if (typeof body.projectId !== 'string' || !body.projectId || body.projectId.length > 100) {
+        return Response.json({ ok: false, error: 'project_id_required' }, { status: 400 });
+      }
+      await this.state.storage?.put('anchorProject', body.projectId);
+      await this.state.storage?.put('anchorExplicit', body.explicitSelection === true);
+      return Response.json({ ok: true });
+    }
+
     if (url.pathname === '/ws') {
       if (req.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
         return new Response('expected websocket', { status: 426 });
@@ -160,6 +179,8 @@ export class StudioBridge {
           });
         }
         if (anchor !== socketProject) await this.state.storage?.put('anchorProject', socketProject);
+        // get_state deliberately adopts the live tab; later passive tab takeovers remain guarded.
+        if (called === 'get_state' || !anchor) await this.state.storage?.put('anchorExplicit', false);
       }
       const id = `c${++this.seq}`;
       const timeoutMs = Math.min(Math.max(body.timeoutMs ?? DEFAULT_TIMEOUT_MS, 1_000), 600_000);

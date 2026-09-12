@@ -16,6 +16,10 @@ describe('bakeCompositionHtml', () => {
     expect(html).toContain('background:transparent');
     // the block's own timeline statement is present (the renderer plays it)
     expect(html).toContain("#b1 .t");
+    expect(html).toContain('window.__timelines.root=root');
+    expect(html).toContain('child.to({},{duration:5},0)');
+    expect(html).toContain('root.to({},{duration:5},0)');
+    expect(html).toContain('./vendor/gsap.min.js');
     // the block keeps its box (pixel-identical overlay), not forced to fill
     expect(html).toContain('data-composition-id="b1"');
     // no browser-preview boot-pause or rAF loop wrapper leaks into the bake doc

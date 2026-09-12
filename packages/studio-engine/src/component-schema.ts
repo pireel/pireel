@@ -1,3 +1,4 @@
+import { isComponentPropertyRows, isComponentPropertyScalar } from './component-property-input';
 /**
  * ONE property contract for every component on the timeline.
  *
@@ -79,4 +80,17 @@ export function componentValuesView(view: ComponentSchemaView): Array<{ key: str
 export function blockPropsReadback(block: BlockLike): { props?: { schema: ComponentSchemaView['schema']; values: ReturnType<typeof componentValuesView> } } {
   const view = componentSchemaOf(block);
   return view ? { props: { schema: view.schema, values: componentValuesView(view) } } : {};
+}
+
+/** Validate transport shapes before the existing component parser normalizes declared values. */
+export function componentPropertyInputError(view: ComponentSchemaView, requested: Record<string, unknown>): string | null {
+  for (const [key, value] of Object.entries(requested)) {
+    const field = view.schema.properties?.[key];
+    if (view.source === 'kit' && field?.type === 'array') {
+      if (!isComponentPropertyRows(value)) return `invalid property ${key}: expected bounded rows of scalar fields`;
+    } else if (!isComponentPropertyScalar(value)) {
+      return `invalid property ${key}: expected a string, finite number or boolean`;
+    }
+  }
+  return null;
 }

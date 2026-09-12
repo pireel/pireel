@@ -15,6 +15,7 @@
  * the instruction's language).
  */
 
+import { componentContractExample, componentCoordinateContext } from './component-authoring-contract';
 import { BLOCK_SYSTEM, buildHtmlSystem, retrieveComponentCandidates, retrieveMotionGraphicPatterns, withActiveTheme } from './prompts';
 
 /** Minimal chat shape (matches @/lib/models ModelRouter.chat). */
@@ -56,6 +57,7 @@ export interface BlockEdit {
   kind: string;
   innerHtml: string;
   timelineBody: string;
+  propsSchema?: string;
   label?: string;
   /** This fragment box's real pixel size inside the current canvas, so the model sizes type/components against the actual frame. */
   boxPx?: { w: number; h: number };
@@ -108,19 +110,16 @@ function momentParts(args: { block: BlockEdit; context?: ComposeContext }): stri
 }
 
 export function buildBlockPrompt(args: { block: BlockEdit; instruction: string; context?: ComposeContext; lang?: string }): string {
-  const parts: string[] = [`BLOCK_ID = ${args.block.id} (scope all selectors under #${args.block.id})`, `Block kind: ${args.block.kind}`];
-  if (args.block.boxPx)
-    parts.push(
-      // "must not overflow" is a hard constraint: autofit (scroll size) can't detect overflow of absolutely-positioned content,
-      // and overflowing text obscures protected content or falls off-canvas — prefer too small over overflow; headline gets a hard cap
-      `This fragment's real authored box is ${args.block.boxPx.w}×${args.block.boxPx.h}px in the current canvas coordinate system (the full composition scales uniformly for preview/export). HARD CONSTRAINT: everything must fit INSIDE ${args.block.boxPx.w}×${args.block.boxPx.h}px — nothing may obscure a protected subject/evidence region or fall off-canvas; there is no auto-shrink for absolutely-positioned overflow. When unsure, size type one step SMALLER, never larger. Keep the largest headline ≤ ${Math.max(40, Math.round(args.block.boxPx.h / 4))}px and total content height (with margins) within the box. Adapt the layout to this box's aspect ratio.`,
-    );
+  const parts: string[] = [`BLOCK_ID = ${args.block.id} (use for timeline targets; Studio owns CSS isolation)`, `Block kind: ${args.block.kind}`];
+  parts.push(componentCoordinateContext(args.block));
+  parts.push(componentContractExample(args.block.id));
   parts.push(...momentParts(args));
   parts.push(`Current INNER HTML:\n\`\`\`html\n${args.block.innerHtml}\n\`\`\``);
   parts.push(`Current TIMELINE BODY:\n\`\`\`js\n${args.block.timelineBody}\n\`\`\``);
+  if (args.block.propsSchema) parts.push(`Current editable property schema (preserve these keys on an edit):\n\`\`\`json\n${args.block.propsSchema}\n\`\`\``);
   parts.push(`Instruction: ${args.instruction}`);
-  parts.push(`MANDATORY FINAL CSS AUDIT for this exact response: inspect EVERY selector in the <style>, including selectors after commas and selectors inside @container. Every one must start with #${args.block.id}. Rewrite any shorthand such as ".kicker", ".pf .logo", or ".rule" to "#${args.block.id} .kicker", "#${args.block.id} .pf .logo", and "#${args.block.id} .rule" before answering. One unscoped selector makes the component invalid.`);
-  const noteLang = args.lang ? `the user's UI language "${args.lang}"` : 'the same language as the instruction above';
+  parts.push(`Use local CSS selectors and #${args.block.id} for GSAP targets; Studio scopes the stylesheet. Return a complete component once; style warnings are not a request to rewrite it.`);
+  const noteLang = args.lang ? `the user's UI language "${args.lang}"` : "the user's conversation language (not the language of this internal design instruction)";
   parts.push(`First reply with ONE short note in ${noteLang} describing the change, THEN the updated INNER HTML (\`\`\`html), THEN the updated TIMELINE BODY (\`\`\`js), THEN — if this component has editable properties — the properties schema (\`\`\`json). Omit the \`\`\`json fence only when the component has no editable properties.`);
   return parts.join('\n\n');
 }
@@ -183,7 +182,7 @@ export function buildKitPrompt(args: {
   if (args.current)
     parts.push(`This graphic currently is:\n\`\`\`json\n${JSON.stringify(args.current, null, 2)}\n\`\`\`\nKeep everything the instruction does not mention.`);
   parts.push(`Instruction: ${args.instruction}`);
-  const noteLang = args.lang ? `the user's UI language "${args.lang}"` : 'the same language as the instruction above';
+  const noteLang = args.lang ? `the user's UI language "${args.lang}"` : "the user's conversation language (not the language of this internal design instruction)";
   parts.push(`Reply with ONE short note in ${noteLang}, then one \`\`\`json fence holding {"component":…,"props":{…}} — or null.`);
   return parts.join('\n\n');
 }
@@ -238,5 +237,5 @@ export async function composeBlock(
     ...(args.presetId ? { presetId: args.presetId } : {}),
   });
   const r = await models.chat({ system: withTheme(system, args.theme), prompt: buildBlockPrompt(args), hint: args.hint ?? HINT });
-  return parseBlockResponse(r.text, { innerHtml: args.block.innerHtml, timelineBody: args.block.timelineBody });
+  return parseBlockResponse(r.text, { innerHtml: args.block.innerHtml, timelineBody: args.block.timelineBody, propsSchema: args.block.propsSchema });
 }
