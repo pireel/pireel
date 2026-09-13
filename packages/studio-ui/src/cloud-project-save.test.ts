@@ -75,29 +75,6 @@ describe('CloudProjectSaveQueue', () => {
     expect(queue.hasPendingSave).toBe(false);
   });
 
-  it('observes the conflict retry and retries again when that request fails', async () => {
-    const onConflict = vi.fn();
-    const results: CloudProjectSaveResult[] = ['conflict', 'skip', 'ok'];
-    const save = vi.fn(async () => results.shift() ?? 'ok');
-    const queue = new CloudProjectSaveQueue({
-      getPayload: () => ({ title: 'latest' }),
-      save,
-      canWrite: () => true,
-      onConflict,
-    });
-    queue.markDirty();
-
-    await queue.flush();
-    expect(onConflict).toHaveBeenCalledOnce();
-    expect(save).toHaveBeenCalledTimes(2);
-    expect(queue.hasPendingSave).toBe(true);
-
-    await vi.advanceTimersByTimeAsync(1_000);
-    await queue.whenIdle();
-    expect(save).toHaveBeenCalledTimes(3);
-    expect(queue.hasPendingSave).toBe(false);
-  });
-
   it('keeps edits dirty while writing is disabled and flushes after reclaim', async () => {
     let canWrite = false;
     const save = vi.fn(async () => 'ok' as const);
@@ -167,23 +144,23 @@ describe('CloudProjectSaveQueue', () => {
     const first = new Promise<CloudProjectSaveResult>((resolve) => {
       finishSave = resolve;
     });
-    const onConflict = vi.fn();
+    const onSaved = vi.fn();
     const save = vi.fn().mockImplementationOnce(() => first).mockResolvedValue('ok');
     const queue = new CloudProjectSaveQueue({
       getPayload: () => ({ title: 'old project' }),
       save,
       canWrite: () => true,
-      onConflict,
+      onSaved,
     });
     queue.markDirty();
     const flushing = queue.flush();
     await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
 
     queue.dispose();
-    finishSave?.('conflict');
+    finishSave?.('ok');
     await flushing;
 
     expect(save).toHaveBeenCalledOnce();
-    expect(onConflict).not.toHaveBeenCalled();
+    expect(onSaved).not.toHaveBeenCalled();
   });
 });

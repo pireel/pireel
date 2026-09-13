@@ -507,8 +507,6 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.portrait": "人像",
   "workbench.portraitLayer": "人像层级",
   "workbench.preparedNSampledFrames": "备好 {n} 帧采样",
-  "workbench.projectAlsoEditedElsewhere":
-    "这个项目在别处也编辑过；以你这里的最新改动为准继续保存",
   "workbench.projectMigrationSaveBlocked":
     "项目数据版本需要迁移，已暂停云端保存；当前编辑内容仍保留。",
   "workbench.publishPrepareFailed": "发布准备失败，稍后重试",

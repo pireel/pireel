@@ -70,7 +70,7 @@ export interface LocalByteProvider {
 /** Project persistence beyond the current device. */
 export interface ProjectStore {
   load(id: string): Promise<StudioProjectDto | null>;
-  save(id: string, payload: ProjectSavePayload): Promise<'ok' | 'conflict' | 'migration-required' | 'skip'>;
+  save(id: string, payload: ProjectSavePayload): Promise<import('./project-dto').ProjectSaveResult>;
   remove(id: string): Promise<void>;
   /** Project-card cover as image BYTES (null clears). Kept out of the JSON save payload:
    * a base64 cover multiplies every project PUT/GET/list response. Optional — a shell

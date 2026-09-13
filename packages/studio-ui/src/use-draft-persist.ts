@@ -33,6 +33,8 @@ import {
   type StudioProjectMeta,
 } from '@pireel/studio-engine/project-dto';
 import { t } from './i18n';
+import { reconcileProjectSave } from '@pireel/studio-engine/project-reconcile';
+import type { ProjectSaveResult } from '@pireel/studio-engine/project-dto';
 
 const PREFIX = 'studio:draft:';
 const LEGACY_KEY = 'studio:draft:v1'; // single-draft era; 'v1' is a reserved id, skipped during scans
@@ -60,6 +62,8 @@ export interface StudioDraft {
    *  open via local autosave, so comparing it would make every browser think it's newest, each using
    *  its own copy and overwriting the cloud. Old drafts lack this field = cloud wins. */
   baseVersion?: number | null;
+  /** This draft contains edits not yet acknowledged by cloud storage. */
+  pending?: boolean;
   /** Project-level multi-output directory. */
   context?: StudioProjectContext;
 }
@@ -94,7 +98,7 @@ function rawDraft(id: string): StudioDraft | null {
 /** Only a draft with timeline content counts as recoverable (including audio-only projects). */
 export function loadDraft(id: string): StudioDraft | null {
   const d = rawDraft(id);
-  if (!d || (!hasTimelineContent(d.comp) && !d.context?.outputs?.inactive.length)) return null;
+  if (!d || (!d.pending && !hasTimelineContent(d.comp) && !d.context?.outputs?.inactive.length)) return null;
   return d;
 }
 
@@ -213,6 +217,8 @@ export const setProjectVersion = (id: string, v: number) => versions.set(id, v);
  * emit a full no-op PUT, advance the version, and race the first tab's pending real edit. */
 function rememberServerProject(p: StudioProjectDto): void {
   setProjectVersion(p.id, p.version);
+  remoteSnapshots.set(p.id, p);
+  localBaselines.set(p.id, p);
   try {
     sectionCache.set(p.id, ackedFromDto(p));
   } catch {
@@ -267,7 +273,8 @@ export async function serverLoadProject(id: string): Promise<StudioProjectDto | 
     const r = await fetch(`/api/studio/projects/${id}`);
     if (!r.ok) return null;
     const { project } = (await r.json()) as { project: StudioProjectDto };
-    if (project) rememberServerProject(project);
+    // A metadata refresh does not replace the editor's document. Only explicit adoption
+    // through cacheProjectLocally may advance its save baseline/version to this snapshot.
     return project ?? null;
   } catch {
     return null;
@@ -281,48 +288,9 @@ export type { ProjectSavePayload } from '@pireel/studio-engine/project-dto';
  *  reseeds from the server's returned full state (so the retry diff aligns with truth). */
 const sectionCache = new Map<string, AckedSections>();
 
-type SaveSectionMask = {
-  document: boolean;
-  context: boolean;
-  coverThumb: boolean;
-  meta: boolean;
-};
-
-/** Sections that the failed CAS attempt actually intended to change. A 409 re-seeds the diff
- * baseline from server truth; without this one-shot mask, the immediate retry mistakes every
- * remotely changed-but-locally-untouched section for a local edit and can restore a stale timeline. */
-const conflictRetrySections = new Map<string, SaveSectionMask>();
-
-const sectionsInWire = (wire: ProjectSaveWire): SaveSectionMask => ({
-  document: 'document' in wire || 'documentPatch' in wire,
-  context: 'context' in wire || 'contextPatch' in wire,
-  coverThumb: 'coverThumb' in wire,
-  meta: 'title' in wire || 'videoSig' in wire || 'videoDurationSec' in wire,
-});
-
-function restrictWireToSections(wire: ProjectSaveWire, sections: SaveSectionMask): ProjectSaveWire | null {
-  const next: ProjectSaveWire = {
-    documentSchemaVersion: 2,
-    baseVersion: wire.baseVersion,
-  };
-  if (sections.document) {
-    if ('document' in wire) next.document = wire.document;
-    if ('documentPatch' in wire) next.documentPatch = wire.documentPatch;
-    if ('documentHash' in wire) next.documentHash = wire.documentHash;
-  }
-  if (sections.context) {
-    if ('context' in wire) next.context = wire.context;
-    if ('contextPatch' in wire) next.contextPatch = wire.contextPatch;
-    if ('contextHash' in wire) next.contextHash = wire.contextHash;
-  }
-  if (sections.coverThumb && 'coverThumb' in wire) next.coverThumb = wire.coverThumb;
-  if (sections.meta) {
-    if ('title' in wire) next.title = wire.title;
-    if ('videoSig' in wire) next.videoSig = wire.videoSig;
-    if ('videoDurationSec' in wire) next.videoDurationSec = wire.videoDurationSec;
-  }
-  return Object.keys(next).length > 2 ? next : null;
-}
+const remoteSnapshots = new Map<string, StudioProjectDto>();
+const localBaselines = new Map<string, ProjectSavePayload>();
+const saveChains = new Map<string, Promise<unknown>>();
 
 /** PUT the diff body: large bodies use gzip (custom header; content-encoding risks a middlebox
  *  decompressing it on its own), environments without CompressionStream fall back to plaintext. */
@@ -343,89 +311,58 @@ async function putWire(id: string, wire: ProjectSaveWire): Promise<Response> {
   return fetch(`/api/studio/projects/${id}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: json });
 }
 
-/** Upsert to the server (diff: only send sections changed since the last successful save; nothing changed = zero requests).
- *  Sends the last-read baseVersion; on 409 (someone else wrote a newer version) record the new version and return
- *  'conflict' (caller retries immediately; section hashes not advanced = same sections resend). On 422 need_full
- *  (server has no such row) clear the baseline and resend in full. Network/db unavailable returns 'skip' (local cache covers it). */
-export async function serverSaveProject(id: string, p: ProjectSavePayload): Promise<'ok' | 'conflict' | 'migration-required' | 'skip'> {
-  const retrySections = conflictRetrySections.get(id);
-  if (retrySections) conflictRetrySections.delete(id);
+/** Serialize the project's saves and replay only edits since this editor's last acknowledgement.
+ * A network failure keeps the same local intent; identity-based reconciliation makes replay safe. */
+export function serverSaveProject(id: string, payload: ProjectSavePayload): Promise<ProjectSaveResult> {
+  const pending = (saveChains.get(id) ?? Promise.resolve()).then(() => saveProjectEdit(id, payload));
+  saveChains.set(id, pending);
+  void pending.finally(() => { if (saveChains.get(id) === pending) saveChains.delete(id); }).catch(() => {});
+  return pending;
+}
+
+async function saveProjectEdit(id: string, payload: ProjectSavePayload): Promise<ProjectSaveResult> {
+  const local = structuredClone(payload);
+  const base = localBaselines.get(id);
   try {
-    const built = buildSaveWire(p, projectVersion(id), sectionCache.get(id) ?? null);
-    if (!built) return 'ok'; // all four sections unchanged: zero requests
-    const wire = retrySections ? restrictWireToSections(built.wire, retrySections) : built.wire;
-    // The server changed only sections this client never touched. Rebasing made the stale local
-    // copies look different, but there is nothing from the original attempt left to retry.
-    if (!wire) return 'ok';
-    const attemptedSections = sectionsInWire(wire);
-    let r = await putWire(id, wire);
-    let acked = built.acked;
-    if (r.status === 422) {
-      // need_full: server has no such row / the patch doesn't apply (base drifted) — clear baseline and resend all sections
-      sectionCache.delete(id);
-      const full = buildSaveWire(p, projectVersion(id), null);
-      if (!full) return 'skip';
-      const fullWire = restrictWireToSections(full.wire, attemptedSections);
-      if (!fullWire) return 'ok';
-      r = await putWire(id, fullWire);
-      acked = full.acked;
-    }
-    if (r.status === 409) {
-      const body = (await r.json()) as {
-        error?: string;
-        saveBlocked?: boolean;
-        project?: StudioProjectDto;
-      };
-      // Keep the retired error name readable for a rolling deployment, but expose one stable
-      // client state: cloud writes are blocked until migration, without reloading the editor.
-      if (body.error === 'document_migration_required' || body.error === 'document_schema_upgraded' || body.saveBlocked) {
-        conflictRetrySections.delete(id);
-        return 'migration-required';
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const remote = remoteSnapshots.get(id);
+      const candidate = remote ? reconcileProjectSave(base ?? remote, local, remote, !base) : local;
+      const wireVersion = remote?.version ?? projectVersion(id);
+      const built = buildSaveWire(candidate, wireVersion, sectionCache.get(id) ?? null);
+      if (!built) {
+        localBaselines.set(id, local);
+        return remote ? { status: 'saved', project: remote } : 'ok';
       }
-      // Someone else wrote a newer version: record the new version + reseed the diff baseline from the server's
-      // full state — so the immediate retry's diff is computed against server truth (sections others changed
-      // but we didn't touch won't get overwritten; section-level convergence). Don't write back to local UI —
-      // the in-memory user edits are this session's truth.
-      const { project } = body;
-      if (project) {
-        setProjectVersion(id, project.version);
-        try {
-          sectionCache.set(id, ackedFromDto(project));
-        } catch {
-          sectionCache.delete(id);
-        }
+      let response = await putWire(id, built.wire);
+      if (response.status === 422) {
+        const full = buildSaveWire(candidate, wireVersion, null);
+        if (!full) return 'skip';
+        response = await putWire(id, full.wire);
       }
-      conflictRetrySections.set(id, attemptedSections);
-      return 'conflict';
-    }
-    if (!r.ok) {
-      if (retrySections) conflictRetrySections.set(id, retrySections);
-      return 'skip';
-    }
-    conflictRetrySections.delete(id);
-    const { project } = (await r.json()) as { project: StudioProjectDto };
-    if (project) {
-      setProjectVersion(id, project.version);
-      // The response is authoritative: it includes server defaults and normalization for fields
-      // omitted from this patch (notably title). Keeping the locally-built candidate here can make
-      // the next diff compare against a state the server never actually stored.
+      if (response.status === 409) {
+        const body = await response.json() as { error?: string; saveBlocked?: boolean; project?: StudioProjectDto };
+        if (body.saveBlocked || body.error === 'document_migration_required' || body.error === 'document_schema_upgraded') return 'migration-required';
+        if (!body.project) return 'skip';
+        remoteSnapshots.set(id, body.project);
+        sectionCache.set(id, ackedFromDto(body.project));
+        continue;
+      }
+      if (!response.ok) return 'skip';
+      const { project } = await response.json() as { project?: StudioProjectDto };
+      if (!project) return 'skip'; // no acknowledgement: leave the intent pending
+      remoteSnapshots.set(id, project);
       sectionCache.set(id, ackedFromDto(project));
-    } else {
-      // A filtered conflict retry may intentionally omit stale local sections. Without the
-      // authoritative response there is no safe complete baseline to cache.
-      if (retrySections) sectionCache.delete(id);
-      else sectionCache.set(id, acked);
+      localBaselines.set(id, local);
+      return { status: 'saved', project };
     }
-    return 'ok';
-  } catch {
-    if (retrySections) conflictRetrySections.set(id, retrySections);
-    return 'skip';
-  }
+  } catch { /* the save queue retries; the live/local draft stays authoritative for pending intent */ }
+  return 'skip';
 }
 
 export async function serverDeleteProject(id: string): Promise<void> {
   sectionCache.delete(id);
-  conflictRetrySections.delete(id);
+  remoteSnapshots.delete(id);
+  localBaselines.delete(id);
   try {
     await fetch(`/api/studio/projects/${id}`, { method: 'DELETE' });
   } catch {
@@ -451,6 +388,7 @@ export function cacheProjectLocally(p: StudioProjectDto): StudioDraft {
     videoDurationSec: p.videoDurationSec,
     savedAt: p.updatedAt,
     baseVersion: p.version,
+    pending: false,
     ...(p.context && Object.keys(p.context).length ? { context: p.context } : {}),
   };
   try {
@@ -459,6 +397,35 @@ export function cacheProjectLocally(p: StudioProjectDto): StudioDraft {
     /* quota full: only affects next instant-open; the caller applying the return value directly is unaffected */
   }
   return draft;
+}
+
+export function draftHasPendingEdits(id: string, document: EditorDocumentV2, context?: StudioProjectContext, fallback = true): boolean {
+  const remote = remoteSnapshots.get(id);
+  if (!remote) return fallback;
+  const built = buildSaveWire({ document, context, videoSig: remote.videoSig, videoDurationSec: remote.videoDurationSec }, remote.version, ackedFromDto(remote));
+  return !!built && ('document' in built.wire || 'documentPatch' in built.wire || 'context' in built.wire || 'contextPatch' in built.wire);
+}
+
+/** Seed the save base from cloud truth, but never discard an unacknowledged local draft.
+ * With no persisted base snapshot, keep both branches as normal outputs instead of guessing. */
+export function restoreCloudProject(remote: StudioProjectDto, local?: StudioDraft | null): StudioDraft {
+  const cloud = cacheProjectLocally(remote);
+  if (!local || !draftHasPendingEdits(remote.id, local.document, local.context)) return cloud;
+  const localPayload: ProjectSavePayload = { document: local.document, context: local.context,
+    videoSig: local.videoSig, videoDurationSec: local.videoDurationSec, coverThumb: local.coverThumb };
+  let next: ProjectSavePayload;
+  if (local.baseVersion === remote.version) next = localPayload;
+  else if (local.pending === false) return cloud;
+  else if (local.pending === true) next = reconcileProjectSave(remote, localPayload, remote, true);
+  else {
+    // A pre-upgrade draft has no dirty marker. Prefer cloud while preserving the unknown local branch.
+    const localSnapshot = { ...remote, ...localPayload, document: local.document, context: local.context ?? remote.context, updatedAt: local.savedAt } as StudioProjectDto;
+    next = reconcileProjectSave(localSnapshot, remote, localSnapshot, true);
+  }
+  const restored: StudioDraft = { ...cloud, document: next.document!, comp: projectDocumentToComposition(next.document!),
+    context: next.context, videoSig: next.videoSig, videoDurationSec: next.videoDurationSec, coverThumb: next.coverThumb ?? undefined, pending: true };
+  try { writeDraft(restored); } catch { /* live edit remains available */ }
+  return restored;
 }
 
 /** Debounced autosave: don't write an empty canvas (just-opened, don't clobber an existing draft); strip the blob
@@ -503,6 +470,7 @@ export function useDraftAutosave(
           videoDurationSec,
           savedAt: Date.now(),
           baseVersion: projectVersion(projectId) ?? prev?.baseVersion ?? null,
+          pending: draftHasPendingEdits(projectId, document, context, prev?.pending ?? true),
           ...(() => {
             const ctx = context;
             return ctx && Object.keys(ctx).length ? { context: ctx } : {};

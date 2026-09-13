@@ -172,6 +172,8 @@ import {
   displayTextPreset,
   titleBlock,
 } from "@pireel/studio-engine/composition";
+import { reconcileProjectSave } from '@pireel/studio-engine/project-reconcile';
+import { canonicalJson } from '@pireel/studio-engine/stable-json';
 
 /** Constant speed of a placed video clip = source seconds per timeline second (1 = natural). */
 function clipSpeedInDocument(document: EditorDocumentV2, clipId: string): number {
@@ -294,6 +296,7 @@ import { useStableCallbacks } from "./use-stable-callbacks";
 import {
   type StudioDraft,
   cacheProjectLocally,
+  restoreCloudProject,
   loadDraft,
   migrateLegacyDraft,
   saveCoverThumb,
@@ -989,7 +992,6 @@ export function HyperframesWorkbench({
   const pendingRestoreRef = useRef<StudioDraft | null>(null); // blocks restored, awaiting reconnection to the original video
   const [chatEpoch, setChatEpoch] = useState(0); // +1 after loading server sessions; remounts StudioChat with that snapshot
   const [initialChatThreads, setInitialChatThreads] = useState<readonly unknown[] | undefined>(undefined);
-  const conflictWarnedRef = useRef(false);
   const migrationWriteBlockedRef = useRef(false);
   const blockForDocumentMigration = () => {
     if (migrationWriteBlockedRef.current) return;
@@ -7436,12 +7438,24 @@ export function HyperframesWorkbench({
       );
       return request;
     },
-    onConflict: () => {
-      if (conflictWarnedRef.current) return;
-      conflictWarnedRef.current = true;
-      toast.info(t("workbench.projectAlsoEditedElsewhere"));
-    },
     onMigrationRequired: blockForDocumentMigration,
+    onSaved: (submitted: ProjectSavePayload, remote: StudioProjectDto) => {
+      const current = buildCloudPayload();
+      if (!current) return;
+      // Preserve edits made while this request was in flight, then adopt acknowledged remote
+      // changes. Updating the live document closes the loop; the next save cannot restore a stale copy.
+      const next = reconcileProjectSave(submitted, current, remote);
+      if (next.context && canonicalJson(current.context) !== canonicalJson(next.context)) {
+        projectOutputs.hydrate(next.context.outputs);
+        setLocalAssetIndex(nativeProjectSharedLocalAssets(next.document!, next.context));
+      }
+      if (next.document && canonicalJson(current.document) !== canonicalJson(next.document)) {
+        const projection = projectDocumentToComposition(next.document);
+        setEditorDocument(next.document, projection);
+        hydrateNativeSession(next.document, projection, true);
+      }
+      setProjectVersion(projectId, remote.version);
+    },
   };
   if (
     !cloudSaveQueueRef.current ||
@@ -8228,7 +8242,7 @@ export function HyperframesWorkbench({
     // Cloud project → straight into the workbench: use the in-memory draft returned by cacheProjectLocally directly, not
     // read back from localStorage — if the quota is full the write silently fails and you read a stale old draft, which autosave then writes back to the cloud.
     const applyRemote = (remote: StudioProjectDto) => {
-      applyDraft(cacheProjectLocally(remote));
+      applyDraft(restoreCloudProject(remote, draftOffer));
     };
     void (async () => {
       const local = draftOffer;
@@ -8244,24 +8258,13 @@ export function HyperframesWorkbench({
       ]);
       if (remote !== undefined) setLocalAssetIndexSyncReady(true);
       if (remote) {
-        setProjectVersion(projectId, remote.version);
-        // Judge newer/older by version number, not savedAt (local autosave self-refreshes savedAt on every open, so
-        // comparing by it makes every browser think "I'm newest" — each keeps its own, writes stale state back to the cloud, never converges).
-        // Cloud version ahead of the local draft's base = written elsewhere → cloud wins; equal = this browser is the last
-        // writer, and the local draft may still hold changes not yet pushed within the 1s pre-close debounce window → local wins.
-        const remoteNewer =
-          !local ||
-          local.baseVersion == null ||
-          remote.version > local.baseVersion;
-        if (remoteNewer) {
-          applyRemote(remote);
-          return;
-        }
+        applyRemote(remote);
+        return;
       }
       if (local) {
         // Opened offline / on cloud timeout: subsequent saves must carry the draft's base version so the server's 409 check has a basis
         // (the in-memory version table is empty on refresh, and a save without baseVersion unconditionally overwrites the cloud)
-        if (remote === undefined && local.baseVersion != null)
+        if (local.baseVersion != null)
           setProjectVersion(projectId, local.baseVersion);
         applyDraft(local); // local is newer / cloud unreachable → use local
       }
@@ -8274,7 +8277,8 @@ export function HyperframesWorkbench({
         void loadP.then((late) => {
           setLocalAssetIndexSyncReady(true);
           if (!late) return;
-          setProjectVersion(projectId, late.version);
+          // Receiving a late cloud snapshot does not mean the live local edit adopted it.
+          // applyRemote below advances the baseline only when the whole document is adopted.
           hydrateNativeSession(
             late.document,
             projectDocumentToComposition(late.document),

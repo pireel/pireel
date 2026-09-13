@@ -1,16 +1,16 @@
-export type CloudProjectSaveResult = 'ok' | 'conflict' | 'migration-required' | 'skip';
+import type { ProjectSaveResult, StudioProjectDto } from '@pireel/studio-engine/project-dto';
+export type CloudProjectSaveResult = ProjectSaveResult;
 
 export interface CloudProjectSaveQueueOptions<Payload> {
   getPayload: () => Payload | null;
   save: (payload: Payload) => Promise<CloudProjectSaveResult>;
   canWrite: () => boolean;
-  onConflict?: () => void;
+  onSaved?: (submitted: Payload, project: StudioProjectDto) => void;
   onMigrationRequired?: () => void;
 }
 
 const INITIAL_RETRY_MS = 1_000;
 const MAX_RETRY_MS = 30_000;
-const CONFLICT_RETRY_MS = 250;
 
 /** Defers effect cleanup by one microtask so React Strict Mode's setup-cleanup-setup probe
  * can retain the same resource. With no subsequent setup, the latest cleanup still runs. */
@@ -120,18 +120,10 @@ export class CloudProjectSaveQueue<Payload> {
       return;
     }
 
-    let result = await this.safeSave(payload);
+    const result = await this.safeSave(payload);
     // An in-flight request cannot be cancelled, but disposing the queue (project
     // navigation/unmount) must prevent every follow-up action for the old project.
     if (this.disposed) return;
-    if (result === 'conflict' && !this.blocked && this.options.canWrite()) {
-      this.options.onConflict?.();
-      // The provider rebases its diff baseline while returning `conflict`; the
-      // second call must stay in this queue and its result must be observed.
-      result = await this.safeSave(payload);
-      if (this.disposed) return;
-    }
-
     if (result === 'migration-required') {
       this.blocked = true;
       this.clearRetryTimer();
@@ -139,13 +131,14 @@ export class CloudProjectSaveQueue<Payload> {
       return;
     }
 
-    if (result === 'ok') {
+    if (result === 'ok' || (typeof result === 'object' && result.status === 'saved')) {
+      if (typeof result === 'object') this.options.onSaved?.(payload, result.project);
       this.savedRevision = Math.max(this.savedRevision, savingRevision);
       this.resetBackoff();
       return;
     }
 
-    this.scheduleRetry(result === 'conflict' ? CONFLICT_RETRY_MS : undefined);
+    this.scheduleRetry();
   }
 
   private async safeSave(payload: Payload): Promise<CloudProjectSaveResult> {
@@ -169,9 +162,7 @@ export class CloudProjectSaveQueue<Payload> {
       this.retryTimer = null;
       void this.flush();
     }, delayMs);
-    if (delayMs !== CONFLICT_RETRY_MS) {
-      this.retryMs = Math.min(MAX_RETRY_MS, Math.max(INITIAL_RETRY_MS, delayMs * 2));
-    }
+    this.retryMs = Math.min(MAX_RETRY_MS, Math.max(INITIAL_RETRY_MS, delayMs * 2));
   }
 
   private resetBackoff() {

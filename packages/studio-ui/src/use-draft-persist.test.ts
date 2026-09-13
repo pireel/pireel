@@ -7,6 +7,9 @@ import {
   migrateLegacyDraft,
   renameProject,
   serverSaveProject,
+  serverLoadProject,
+  projectVersion,
+  loadDraft,
 } from './use-draft-persist';
 
 class MemoryStorage implements Storage {
@@ -21,6 +24,18 @@ class MemoryStorage implements Storage {
 }
 
 describe('local project document persistence', () => {
+  it('does not authorize a stale editor to save over a metadata-only cloud refresh', async () => {
+    const id = createProject(emptyComposition(), 'Refresh');
+    const stored = JSON.parse(storage.getItem(`studio:draft:${id}`)!);
+    const dto = { id, title: 'Refresh', document: stored.document, context: sanitizeProjectContext({ schemaVersion: 3 }), videoSig: null, videoDurationSec: null, coverThumb: null, version: 1, updatedAt: Date.now() };
+    cacheProjectLocally(dto);
+    const remote = structuredClone(dto);
+    remote.version = 2;
+    remote.document.canvas.width += 1;
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ project: remote })));
+    expect(await serverLoadProject(id)).toMatchObject({ version: 2 });
+    expect(projectVersion(id)).toBe(1);
+  });
   let storage: MemoryStorage;
 
   beforeEach(() => {
@@ -35,6 +50,12 @@ describe('local project document persistence', () => {
     const stored = JSON.parse(storage.getItem(`studio:draft:${id}`)!) as Record<string, unknown>;
     expect(stored.document).toMatchObject({ version: 2 });
     expect(stored).not.toHaveProperty('comp');
+  });
+  it('restores a pending empty document so clearing the timeline is not lost on reload', () => {
+    const id = createProject(emptyComposition(), 'Cleared');
+    const key = `studio:draft:${id}`;
+    storage.setItem(key, JSON.stringify({ ...JSON.parse(storage.getItem(key)!), pending: true }));
+    expect(loadDraft(id)?.pending).toBe(true);
   });
 
   it('ignores a retired per-project V1 draft instead of recreating compatibility state', () => {
@@ -125,87 +146,8 @@ describe('local project document persistence', () => {
       coverThumb: null,
     });
 
-    expect(result).toBe('ok');
+    expect(result).toMatchObject({ status: 'saved' });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('does not turn an untouched stale timeline into a local edit after a 409 rebase', async () => {
-    const id = createProject(emptyComposition(), 'Conflict-safe');
-    const stored = JSON.parse(storage.getItem(`studio:draft:${id}`)!) as { document: EditorDocumentV2 };
-    const baselineContext = sanitizeProjectContext(null);
-    cacheProjectLocally({
-      id,
-      title: 'Conflict-safe',
-      document: stored.document,
-      context: baselineContext,
-      videoSig: null,
-      videoDurationSec: null,
-      coverThumb: null,
-      version: 3,
-      updatedAt: Date.now(),
-    });
-    const remoteDocument = structuredClone(stored.document);
-    remoteDocument.canvas = { ...remoteDocument.canvas, width: remoteDocument.canvas.width + 1 };
-    const changedContext = sanitizeProjectContext({
-      schemaVersion: 3,
-      localAssets: [{
-        assetId: 'asset-1',
-        contentSig: 'teacher.mov:1:1',
-        sig: 'teacher.mov:1:1',
-        label: 'teacher.mov',
-        createdAt: 1,
-      }],
-    });
-    const requestBodies: Record<string, unknown>[] = [];
-    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      requestBodies.push(body);
-      if (requestBodies.length === 1) {
-        return new Response(JSON.stringify({
-          error: 'version_conflict',
-          project: {
-            id,
-            title: 'Conflict-safe',
-            document: remoteDocument,
-            context: baselineContext,
-            videoSig: null,
-            videoDurationSec: null,
-            coverThumb: null,
-            version: 4,
-            updatedAt: Date.now(),
-          },
-        }), { status: 409, headers: { 'content-type': 'application/json' } });
-      }
-      return new Response(JSON.stringify({
-        project: {
-          id,
-          title: 'Conflict-safe',
-          document: remoteDocument,
-          context: changedContext,
-          videoSig: null,
-          videoDurationSec: null,
-          coverThumb: null,
-          version: 5,
-          updatedAt: Date.now(),
-        },
-      }), { status: 200, headers: { 'content-type': 'application/json' } });
-    }));
-
-    const payload = {
-      document: stored.document,
-      context: changedContext,
-      videoSig: null,
-      videoDurationSec: null,
-      coverThumb: null,
-    };
-    await expect(serverSaveProject(id, payload)).resolves.toBe('conflict');
-    await expect(serverSaveProject(id, payload)).resolves.toBe('ok');
-
-    expect(requestBodies).toHaveLength(2);
-    expect(requestBodies[0]).not.toHaveProperty('document');
-    expect(requestBodies[0]).not.toHaveProperty('documentPatch');
-    expect(requestBodies[1]).not.toHaveProperty('document');
-    expect(requestBodies[1]).not.toHaveProperty('documentPatch');
-    expect(requestBodies[1].context ?? requestBodies[1].contextPatch).toBeDefined();
-  });
 });

@@ -105,6 +105,10 @@ export interface ProjectSavePayload {
   coverThumb?: string | null;
 }
 
+/** A save acknowledgement carries server truth back to the live editor. Version races are
+ * resolved inside the provider, never exposed as a user-facing conflict state. */
+export type ProjectSaveResult = 'ok' | 'skip' | 'migration-required' | { status: 'saved'; project: StudioProjectDto };
+
 /** Save payload cap (document graphics can be sizable, but keep it bounded). */
 export const MAX_PROJECT_BYTES = 8 * 1024 * 1024;
 
