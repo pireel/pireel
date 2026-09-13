@@ -7,6 +7,17 @@ import { assembleHtml } from './assemble';
 function styleRoot(html: string) { return parse(/<style[^>]*>([\s\S]*?)<\/style>/.exec(html)![1]!) as StyleSheet; }
 
 describe('renderer-owned component styles', () => {
+  it('rebases legacy component-root selectors without touching descendants, colors or strings', () => {
+    const input = '<style>#title h1,#title .label{color:#abc;content:"#title"}#title{--ink:red}#child{color:blue}@media(min-width:1px){#title .label{font-size:120px}}</style>';
+    const result = compileComponentStyles(input, 'title');
+    expect(result.warnings).toEqual([]);
+    expect(result.html).toContain(':scope h1,:scope .label');
+    expect(result.html).toContain(':scope{--ink:red}');
+    expect(result.html).toContain('#child{color:blue}');
+    expect(result.html).toContain('color:#abc;content:"#title"');
+    expect(result.html).toContain(':scope .label{font-size:120px}');
+    expect(compileComponentStyles(result.html, 'title')).toEqual(result);
+  });
   it('scopes selector lists, pseudo selectors and nested groups as one subtree', () => {
     const input = '<div>Text</div><style>.a, :is(.b,.c){color:red}@media (min-width:1px){.x{color:blue}}</style>';
     const result = compileComponentStyles(input, 'real-id');

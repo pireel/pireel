@@ -53,6 +53,14 @@ export function compileComponentStyles(html: string, componentId: string): Compo
       walk(sheet, { visit: 'Raw', leave(node, item, list) {
         if (discarded.has(node) && item && list) list.remove(item);
       } });
+      // Inside @scope, a legacy #component selector does not select the scoping root.
+      // Rebase only that ID selector in the AST; local child IDs, declaration hashes and
+      // quoted strings must keep their original meaning. This also repairs built-in captions.
+      walk(sheet, { visit: 'IdSelector', enter(node, item) {
+        if (node.name === componentId && item) {
+          item.data = { type: 'PseudoClassSelector', name: 'scope', children: null };
+        }
+      } });
       if (sheet.children.isEmpty) return '';
       const wrapper = parse(`@scope ${anchor}{}`) as StyleSheet;
       const scope = wrapper.children.first;
