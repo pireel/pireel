@@ -113,7 +113,7 @@ import {
 
 
 } from '@pireel/studio-engine/agent-execution-budget';
-import { type StudioToolResult, wrapAgentTranscript } from '@pireel/studio-engine/prompts';
+import { type StudioToolResult, TAB_CANNOT_SERVE_ERRORS, wrapAgentTranscript } from '@pireel/studio-engine/prompts';
 import { rejectStableFramingSplits, visualGeometryForAgent, visualTimelineForAgent } from '@pireel/studio-engine/visual-types';
 import { directorPlanFromSeconds } from '@pireel/studio-engine/director-plan';
 import { applyDirectorPlanToDocument } from '@pireel/studio-engine/director-plan-document';
@@ -4507,22 +4507,22 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             }
           }
           // manage_project scope:'project' and create_browser_handoff are account-level, not
-          // document-level: this runner edits the one open project and owns neither. These two error
-          // codes are a contract — mcp.ts TAB_CANNOT_SERVE reads them to fall an external agent's
-          // call through to the server, which does own them. Keep them in step.
+          // document-level: this runner edits the one open project and owns neither. The codes come
+          // from the engine because mcp.ts reads the same ones to fall an external agent's call
+          // through to the server, which does own them.
           case 'list_projects':
           case 'switch_project':
           case 'create_project':
           case 'rename_project':
             return {
               ok: false,
-              error: 'project_nav_not_available_in_chat',
+              error: TAB_CANNOT_SERVE_ERRORS.projectNav,
               data: { fix: 'Listing, switching, creating or renaming projects is an MCP/bridge capability. This chat edits the currently open project — use manage_project scope:output to manage deliverables inside it, or switch projects from the app.' },
             };
           case 'create_browser_handoff':
             return {
               ok: false,
-              error: 'handoff_not_available_in_chat',
+              error: TAB_CANNOT_SERVE_ERRORS.handoff,
               data: { fix: 'Browser handoff mints a one-time code so an external agent can open the editor in its own browser. In this chat the user is already in the editor, so no handoff is needed.' },
             };
           default:

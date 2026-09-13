@@ -1718,6 +1718,15 @@ export const STUDIO_SKILL_CAPABILITY_CATALOG = STUDIO_SKILL_CAPABILITIES
   .map((capability) => `- ${capability.id}@${capability.version}`)
   .join('\n');
 
+/** Errors meaning "not the open document's to answer": the in-chat runner edits one project and owns
+ *  no account-level capability, so it declines these. mcp.ts reads the same codes off a bridge answer
+ *  to fall an external agent's call through to the server, which does own them. Both sides name them
+ *  from here, so a rename cannot break that handoff while types and tests stay green. */
+export const TAB_CANNOT_SERVE_ERRORS = {
+  projectNav: 'project_nav_not_available_in_chat',
+  handoff: 'handoff_not_available_in_chat',
+} as const;
+
 /** Tool result (client runTool returns → addToolOutput → shared by model + card render). */
 export interface StudioToolResult {
   ok: boolean;

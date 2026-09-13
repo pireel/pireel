@@ -1,4 +1,3 @@
-/// <reference path="./css-tree-subpaths.d.ts" />
 // Import only the platform-neutral transforms. The full css-tree entry also loads the lexer
 // and its Node createRequire() data files, which cannot be relocated by the Workers SSR runner.
 import parse from 'css-tree/parser';
