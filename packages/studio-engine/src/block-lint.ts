@@ -21,6 +21,7 @@ export interface BlockLintIssue {
     | 'script-tag'
     | 'nondeterministic'
     | 'no-data-edit'
+    | 'unsupported-element'
     | 'props-invalid'
     | 'props-unused'
     | 'props-missing';
@@ -32,6 +33,7 @@ export interface BlockLintIssue {
 export const HARD_LINT_CODES: ReadonlySet<string> = new Set([
   'empty-content',
   'script-tag',
+  'unsupported-element',
   'nondeterministic',
 ]);
 
@@ -84,13 +86,24 @@ export function lintBlock(args: { blockId: string; innerHtml: string; timelineBo
     .replace(/<!--([\s\S]*?)-->/g, '')
     .replace(/<style[\s\S]*?<\/style>/gi, '');
   const visibleText = contentMarkup.replace(/<[^>]+>/g, '').replace(/&nbsp;|\s+/gi, '');
-  const hasVisualContent = /<(?:svg|img|picture|video|canvas|path|circle|ellipse|rect|line|polyline|polygon)\b/i.test(contentMarkup);
+  const hasVisualContent = /<(?:svg|img|picture|path|circle|ellipse|rect|line|polyline|polygon)\b/i.test(contentMarkup);
   if (!visibleText && !hasVisualContent) {
     issues.push({ code: 'empty-content', message: 'generated block has no visible text or visual structure' });
   }
 
   if (/<script\b/i.test(innerHtml)) {
     issues.push({ code: 'script-tag', message: 'innerHtml must not contain <script> — the runtime loads nothing beyond GSAP (no external libraries, canvas/WebGL or iframes); animation belongs in the timeline body, visuals in markup/CSS/SVG' });
+  }
+
+  // The runtime's own text forbids these, but until now only the prompt said so. Export rasterizes
+  // the component through an SVG foreignObject, which paints none of them: the component would look
+  // right in preview and come out empty in the finished video, which is the worst way to find out.
+  const unsupported = /<(video|canvas|iframe|object|embed)\b/i.exec(innerHtml);
+  if (unsupported) {
+    issues.push({
+      code: 'unsupported-element',
+      message: `innerHtml must not contain <${unsupported[1]!.toLowerCase()}> — the component renders through markup, CSS and SVG only, and export paints nothing else, so it would survive preview and vanish from the exported video. Footage belongs on the timeline: place a media clip at the same frames and box instead.`,
+    });
   }
 
   const cssSources: string[] = [];

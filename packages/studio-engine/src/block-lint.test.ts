@@ -60,6 +60,14 @@ describe('lintBlock(块产物静态检查)', () => {
       expect(HARD_LINT_CODES.has('non-px-length-unit')).toBe(false);
     }
     expect(ok(`<div data-edit="t">文</div><script>alert(1)</script>`).map((i) => i.code)).toContain('script-tag');
+    // 预览能播、导出画不出来的元素:过去只有提示词禁,检查器放行,结果是成片里静默消失
+    for (const tag of ['video src="x.mp4"', 'canvas', 'iframe src="x"', 'object', 'embed']) {
+      const issues = ok(`<div data-edit="t">文字四个字</div><${tag}></${tag.split(' ')[0]}>`);
+      expect(issues.map((i) => i.code), tag).toContain('unsupported-element');
+    }
+    expect(HARD_LINT_CODES.has('unsupported-element')).toBe(true);
+    // 只有 video/canvas 撑场面的块不再算"有视觉内容",空内容也要报出来
+    expect(ok(`<video src="x.mp4"></video>`).map((i) => i.code)).toContain('empty-content');
     expect(ok(`<div data-edit="t">文字四个字</div>`, 'setTimeout(()=>{},100)').map((i) => i.code)).toContain('nondeterministic');
     expect(ok(`<div>这是一段没有句柄的可见文字</div>`).map((i) => i.code)).toContain('no-data-edit');
   });
