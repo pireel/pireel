@@ -53,6 +53,17 @@ describe('project edit reconciliation', () => {
     const repeated = reconcileProjectSave(base, local, { ...remote, ...next } as StudioProjectDto);
     expect(repeated.context!.outputs!.inactive).toHaveLength(1);
   });
+  it('leaves no recovery output when the server row was seeded outside the editor', () => {
+    // A generation or a chat thread creates the project row before the first save, so this tab
+    // saves against a row it never loaded: unknown base, and a remote document that is the seed.
+    // There is nothing to recover from it, and a "recovered" empty output would be noise.
+    const remote = snapshot();
+    const local = structuredClone(remote);
+    local.document.canvas.width = 800;
+    const next = reconcileProjectSave(remote, local, remote, true);
+    expect(next.document!.canvas.width).toBe(800);
+    expect(next.context!.outputs!.inactive).toHaveLength(0);
+  });
   it('does not merge the top-level documents of different active outputs', () => {
     const base = snapshot();
     base.context.outputs!.inactive.push({ id: 'second', title: 'Second', order: 1, createdAt: 1, updatedAt: 1,

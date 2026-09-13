@@ -1,7 +1,7 @@
 import { canonicalJson, hashSection } from './stable-json';
 import { parseEditorDocumentV2, validateEditorDocumentV2 } from './editor-document';
 import { normalizeProjectOutputs, type StudioProjectOutputSnapshot } from './project-outputs';
-import { prepareEditorDocumentForPersistence } from './project-document';
+import { emptyProjectDocument, prepareEditorDocumentForPersistence } from './project-document';
 import { sanitizeProjectContext, type ProjectSavePayload, type StudioProjectDto } from './project-dto';
 
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -56,6 +56,14 @@ export function reconcileValue(base: unknown, local: unknown, remote: unknown): 
   return { value: local, collided: true };
 }
 
+/** The seed document a project row is created with outside the editor — by a generation or a chat
+ * thread — holds nothing anyone could want back, so a first save against such a row must not leave
+ * a "recovered" output behind. Anything the user could have touched, including an empty timeline on
+ * a resized canvas, still counts as a branch worth keeping. */
+function worthRecovering(document: unknown): boolean {
+  return !equal(document, emptyProjectDocument());
+}
+
 /** Outputs are independent documents. Normalize them by id before merging so changing which
  * output is active never mixes one film's tracks into another film. */
 function outputState(p: ProjectSavePayload) {
@@ -94,7 +102,7 @@ export function reconcileProjectSave(base: ProjectSavePayload, local: ProjectSav
   if (merged.collided || invalid || unknownBase) {
     for (const source of rs.outputs) {
       const kept = source.id === activeId ? active : inactive.find(o => o.id === source.id);
-      if (equal(source.document, kept?.document)) continue;
+      if (equal(source.document, kept?.document) || !worthRecovering(source.document)) continue;
       const id = `recovery-${hashSection(canonicalJson({ id: source.id, document: source.document }))}`;
       if (!inactive.some(o => o.id === id)) inactive = [...inactive, { ...source, id,
         title: `${source.title || 'Output'} · recovered`, order: Math.max(0, ...outputs.map(o => o.order)) + 1,
