@@ -21,6 +21,25 @@ describe('frame ↔ second conversion', () => {
 });
 
 describe('v3 adapter translations', () => {
+  it('registers exact host-resolved catalog assets before placement and keeps existing assets', () => {
+    const music = { id: 'bgm:test', kind: 'audio', url: 'https://example.test/music.mp3', durationSec: 5 };
+    const input = { clips: [{ assetId: music.id, role: 'music', startFrame: 0, source: [0, 5] }] };
+    const calls = ok(translateV3Call('add_clips', input, { ...ctx, placementAssets: [music, { ...music, id: 'unreferenced' }] }));
+    expect(calls.map(call => call.tool)).toEqual(['register_media', 'add_clips']);
+    expect(calls[0].input.assets).toEqual([music]);
+    expect(ok(translateV3Call('add_clips', input, { ...ctx, placementAssets: [music], hasAsset: () => true })).map(call => call.tool)).toEqual(['add_clips']);
+  });
+  it('rejects invalid transition and generation-model enums before dispatch', () => {
+    for (const effect of ['dip-to-black', 'wipe', '', 42]) {
+      expect(translateV3Call('add_transition', { atFrame: 30, effect }, ctx)).toMatchObject({ status: 'error', error: 'invalid_value', path: 'effect' });
+    }
+    expect(translateV3Call('add_transition', { atFrame: 30, direction: 'diagonal' }, ctx)).toMatchObject({ status: 'error', path: 'direction' });
+    for (const kind of ['audio', 'speech', '', 42, null]) {
+      expect(translateV3Call('list_models', { kind }, ctx)).toMatchObject({ status: 'error', error: 'invalid_value', path: 'kind' });
+    }
+    expect(ok(translateV3Call('list_models', { kind: 'image' }, ctx))).toEqual([{ tool: 'list_models', input: { kind: 'image' } }]);
+    expect(ok(translateV3Call('list_models', {}, ctx))).toEqual([{ tool: 'list_models', input: {} }]);
+  });
   it('routes moves by clip kind: graphics to move_block, everything else to move_clips', () => {
     const calls = ok(translateV3Call('move_clips', { items: [{ clipId: 'n1', startFrame: 90 }, { clipId: 'g1', startFrame: 120 }, { clipId: 'a1', startFrame: 0, trackId: 'tA' }] }, ctx));
     expect(calls).toEqual([

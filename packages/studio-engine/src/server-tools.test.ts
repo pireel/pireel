@@ -50,6 +50,12 @@ function v2proj(over: Partial<ServerToolProject> & { transcript?: TranscriptSegm
 }
 
 describe('离线执行器(标签页关着时的 MCP fallback)', () => {
+  it('rejects unknown transition effects before mutating the project', () => {
+    const p = proj();
+    const result = runServerTool('add_transition', { atSec: 10, effect: 'dip-to-black' }, p);
+    expect(result.result).toMatchObject({ ok: false, error: 'invalid_transition_effect' });
+    expect(result.document).toBeUndefined();
+  });
   it('get_state:离线声明 + 与浏览器同源的局势快照', () => {
     const r = runServerTool('get_state', {}, proj());
     expect(r.result.ok).toBe(true);
@@ -1117,4 +1123,3 @@ describe('v3 receipts (receipt: "v3")', () => {
     expect(JSON.stringify(delta)).not.toMatch(/shotsUpdated|blocksShifted|fromSec/);
   });
 });
-

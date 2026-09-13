@@ -15,7 +15,7 @@ import { isComponentPropertyValue } from '../component-property-input';
 
 import { DEFAULT_CAPTION_PRESET } from '../caption-presets';
 import { V3_TOOL_IDS } from './registry';
-import { TREATMENT_IDS } from './schemas';
+import { TREATMENT_IDS, TRANSITION_EFFECT_IDS } from './schemas';
 
 export type V3ClipKind = 'narrative' | 'media' | 'graphic' | 'audio' | 'text' | 'caption';
 
@@ -24,6 +24,9 @@ export interface V3AdapterContext {
   fps: number;
   /** Resolves a clip id to its kind; `undefined` when the id is unknown. */
   kindOf: (clipId: string) => V3ClipKind | undefined;
+  /** Host-resolved catalog records for this placement, not model-authored locators. */
+  placementAssets?: ReadonlyArray<Record<string, unknown>>;
+  hasAsset?: (assetId: string) => boolean;
 }
 
 export interface LegacyCall {
@@ -374,6 +377,13 @@ function translateRemoveWords(input: Input): V3Translation {
 }
 
 function translateAddTransition(input: Input, ctx: V3AdapterContext): V3Translation {
+  if (input.effect !== undefined && !TRANSITION_EFFECT_IDS.includes(input.effect as string)) {
+    return { status: 'error', error: 'invalid_value', path: 'effect', value: input.effect, allowed: TRANSITION_EFFECT_IDS };
+  }
+  const directions = ['up', 'down', 'left', 'right'];
+  if (input.direction !== undefined && !directions.includes(input.direction as string)) {
+    return { status: 'error', error: 'invalid_value', path: 'direction', value: input.direction, allowed: directions };
+  }
   const bad = assertFps(ctx);
   if (bad) return bad;
   const at = frameField(input, 'atFrame', ctx, { required: true, min: 1 });
@@ -645,6 +655,9 @@ function translateAddClips(input: Input, ctx: V3AdapterContext, tool: 'add_clips
   if (Array.isArray(input.clips) && input.clips.length) {
     const items = clipItemsToLegacy(input.clips as Input[], ctx, 'clips');
     if (isTranslation(items)) return items;
+    const referenced = new Set((input.clips as Input[]).map((item) => item.assetId));
+    const assets = ctx.placementAssets?.filter((asset) => typeof asset.id === 'string' && referenced.has(asset.id) && !ctx.hasAsset?.(asset.id));
+    if (assets?.length) calls.push({ tool: 'register_media', input: { assets } });
     const call: Input = { clips: items };
     if (input.includeLinked === false) call.includeLinked = false;
     if (input.atFrame !== undefined) {
@@ -858,6 +871,9 @@ export const V3_PENDING_TRANSLATIONS: readonly string[] = [];
 export function translateV3Call(name: string, rawInput: unknown, ctx: V3AdapterContext): V3Translation {
   if (!V3_TOOL_IDS.has(name)) return { status: 'error', error: 'unknown_tool', value: name, fix: 'Use a tool from the v3 surface.' };
   const input: Input = rawInput && typeof rawInput === 'object' && !Array.isArray(rawInput) ? (rawInput as Input) : {};
+  if (name === 'list_models' && input.kind !== undefined && !['image', 'video', 'all'].includes(input.kind as string)) {
+    return { status: 'error', error: 'invalid_value', path: 'kind', value: input.kind, allowed: ['image', 'video', 'all'] };
+  }
   if (V3_PENDING_TRANSLATIONS.includes(name)) return { status: 'pending', reason: `${name} is not translated yet` };
   if (PASSTHROUGH[name]) return { status: 'ok', calls: [{ tool: PASSTHROUGH[name]!, input }] };
   switch (name) {

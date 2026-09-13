@@ -36,6 +36,8 @@ import {
   type VideoShot,
   type NarrativeClipPatchUpdate,
   CAPTION_PRESETS,
+  freezeEditorDocumentBlockVars,
+  CUT_TRANSITION_EFFECTS,
   DIRECTIONAL_TRANSITIONS,
   MAX_TRANSITION_SEC,
   VOLUME_DB_MAX,
@@ -63,7 +65,6 @@ import {
   removeOverlayDocumentClips,
   retimeOverlayDocumentClip,
   duplicateOverlayDocumentClip,
-  freezeEditorDocumentBlockVars,
   insertOverlayDocumentClip,
   audioClipId,
   audioClipWindow,
@@ -1241,6 +1242,12 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       };
     }
     case 'add_transition': {
+      if (input.effect !== undefined && input.effect !== 'none' && !CUT_TRANSITION_EFFECTS.some(({ id }) => id === input.effect)) {
+        return { result: { ok: false, error: 'invalid_transition_effect', data: { allowed: [...CUT_TRANSITION_EFFECTS.map(({ id }) => id), 'none'] } } };
+      }
+      if (input.direction !== undefined && !['up', 'down', 'left', 'right'].includes(input.direction as string)) {
+        return { result: { ok: false, error: 'invalid_transition_direction' } };
+      }
       const at = Number(input.atSec);
       if (!Number.isFinite(at) || at < 0) return { result: { ok: false, error: 'invalid atSec' } };
       const shots = shotsOf(p);

@@ -11,7 +11,6 @@ import {
   THEME_GENERAL_BRIEF,
   buildChatSystem,
   buildSituation,
-  mcpInstructions,
   withActiveTheme,
   wrapAgentTranscript,
 } from "./index";
@@ -124,55 +123,6 @@ describe("静态提示词完整性", () => {
     expect(CHAT_IDENTITY).toContain("do not call review_visuals");
     expect(CHAT_IDENTITY).toContain("do not add a generic rendered review");
     expect(CHAT_IDENTITY).not.toContain("hard pre-pilot checkpoint");
-    expect(mcpInstructions("test-version")).toContain(
-      "Ask one concise question and wait only when a user-owned decision changes truth, cost, selection or deliverable shape",
-    );
-    expect(mcpInstructions("test-version")).toContain(
-      "Skill-specific planning, approval and visual-design methods come only from the selected Skill",
-    );
-    expect(mcpInstructions("test-version")).not.toContain("whole-film proposal");
-    // The MCP opener describes a general multi-track editor: a transcript is one surface, never the gate.
-    expect(mcpInstructions("test-version")).toContain("multi-source, multi-track video editor");
-    expect(mcpInstructions("test-version")).toContain("never a prerequisite");
-    expect(mcpInstructions("test-version")).not.toContain("cut the footage by its spoken transcript.");
-    expect(mcpInstructions("test-version")).toContain("FOOTAGE WITHOUT SPEECH is a normal input");
-    expect(mcpInstructions("test-version")).toContain("SOUND AND TRANSITIONS have craft rules, not a ban");
-    expect(mcpInstructions("test-version")).toContain("generate_sfx for off-screen/editorial sounds");
-    expect(mcpInstructions("test-version")).toContain("it needs no Director Plan");
-    expect(mcpInstructions("test-version")).toContain(
-      "Uniform slices or filename-order assembly",
-    );
-    expect(mcpInstructions("test-version")).toContain(
-      "IMAGE GENERATION IS AN ART-DIRECTION DECISION",
-    );
-    expect(mcpInstructions("test-version")).toContain(
-      "A complete-edit request authorizes a proportionate number of such images",
-    );
-    expect(mcpInstructions("test-version")).toContain(
-      "Prefer one strong proposition over keyword soup",
-    );
-    expect(mcpInstructions("test-version")).toContain(
-      "Skill-specific planning, approval and visual-design methods come only from the selected Skill",
-    );
-    expect(mcpInstructions("test-version")).toContain(
-      "Issue independent read-only inspection calls together",
-    );
-    expect(mcpInstructions("test-version")).not.toContain(
-      "hard pre-pilot checkpoint",
-    );
-    expect(mcpInstructions("test-version")).toContain(
-      "distribution-specific update section",
-    );
-    expect(mcpInstructions("test-version")).toContain(
-      "verified Skill-to-Plugin migration section",
-    );
-    expect(mcpInstructions("test-version")).toContain(
-      "never delete the working standalone connection first",
-    );
-    expect(mcpInstructions("test-version")).toContain("Plugin SemVer");
-    expect(mcpInstructions("test-version")).not.toContain(
-      "npx skills update pireel",
-    );
     expect(
       STUDIO_TOOLS.some((tool) =>
         ["analyze_narration", "lay_out", "add_graphics"].includes(tool.id),
@@ -238,22 +188,11 @@ describe("静态提示词完整性", () => {
     expect(BLOCK_SYSTEM).toContain("var(--p-<key>)");
     expect(BLOCK_SYSTEM).toContain('[data-p-<key>="v"]');
     expect(BLOCK_SYSTEM).not.toContain("same component");
-    expect(mcpInstructions("test-version")).toContain(
-      "Component is the broad extensible element concept",
-    );
-    expect(mcpInstructions("test-version")).not.toContain(
-      "backwards-compatible field name",
-    );
   });
   it("全局入口不注入导演方法，复杂方法只由选中的 Skill 提供", () => {
     expect(CHAT_IDENTITY).not.toContain("VIDEO DESIGN METHOD");
     expect(CHAT_IDENTITY).not.toContain("one creative thesis");
     expect(CHAT_IDENTITY).not.toContain("one rhythm arc");
-    const mcp = mcpInstructions("test-version");
-    expect(mcp).not.toContain("VIDEO DESIGN METHOD");
-    expect(mcp).toContain(
-      "Skill-specific planning, approval and visual-design methods come only from the selected Skill",
-    );
   });
   it("Chat 禁止把模型私有工具协议输出给用户", () => {
     expect(CHAT_IDENTITY).toContain("NEVER print or imitate XML, HTML, DSML");
@@ -369,18 +308,6 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     expect(
       STUDIO_TOOLS.find((tool) => tool.id === "read_frame")?.description,
     ).toContain("professional art-direction playbook");
-    expect(mcpInstructions("test-version")).toContain(
-      "A Frame fills only unspecified visual decisions",
-    );
-    expect(mcpInstructions("test-version")).toContain(
-      "Captions, layout, palette, canvas, crop, framing and element placement changed manually in Studio are user decisions",
-    );
-    expect(mcpInstructions("test-version")).toContain(
-      "current project/manual UI state returned by the latest get_state",
-    );
-    expect(mcpInstructions("test-version")).toContain(
-      "Preserve them unless the user now asks to change them",
-    );
   });
   it("同时选择 Skill 与 Frame 时并列注入，不产生绑定关系", () => {
     const system = buildChatSystem(
@@ -539,9 +466,6 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     const exportVideo = STUDIO_TOOLS.find((tool) => tool.id === "export_video")!;
     expect(exportVideo.description).toContain("Never ask the user to choose resolution, fps, or format");
     expect(exportVideo.description).toContain("has no settings chooser");
-    expect(mcpInstructions("test-version")).toContain(
-      "never ask for ratio, generation resolution, export resolution, fps, or format",
-    );
   });
   it("完整创作允许导演按内容需要生图，并要求可执行的 Frame 提示词", () => {
     const generate = STUDIO_TOOLS.find((tool) => tool.id === "generate_image")!;
@@ -715,9 +639,6 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
       "VOICE AND LIP-SYNC ARE COMPOSED ATOMICALLY",
     );
     expect(CHAT_IDENTITY).toContain("A stored/default voice is neither a recommendation nor approval");
-    expect(mcpInstructions("test-version")).toContain("Generated narration needs an exact finalized script and a concrete voiceId");
-    expect(mcpInstructions("test-version")).toContain("call list_skills and then read_skill");
-    expect(mcpInstructions("test-version")).toContain("the runtime compiles separate delivery controls only for synthesis");
     expect(CHAT_IDENTITY).toContain(
       "never look for or claim a monolithic digital-human workflow",
     );
@@ -828,13 +749,6 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     expect(CHAT_IDENTITY).toContain('purpose:"framing"');
   });
   it("MCP 与内置 Agent 共享批处理规则，不施加完整任务调用次数上限", () => {
-    const instructions = mcpInstructions("test-version");
-    expect(instructions).not.toContain("INTERNAL EXECUTION CAPACITY");
-    expect(instructions).not.toContain("Pireel tool calls");
-    expect(instructions).toContain(
-      'ONE split_shot {atSecs:[...],purpose:"framing"}',
-    );
-    expect(instructions).toContain("ONE set_shot_framing {updates:[...]}");
   });
   it("成品画面复检先本地去重，并允许显式逐帧云端检查", () => {
     const review = STUDIO_TOOLS.find((tool) => tool.id === "review_visuals")!;

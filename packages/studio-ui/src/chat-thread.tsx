@@ -33,7 +33,6 @@ import {
 } from "@pireel/ui/ai-elements/message";
 import {
   type ChatSituation,
-  buildSituation,
 } from "@pireel/studio-engine/prompts";
 import {
   STUDIO_AUTO_SKILL_ID,
@@ -77,13 +76,12 @@ import {
   shouldBlockStudioTurnUndo,
   stampLatestAssistantWorkDuration,
 } from "./chat-thread-store";
-import { scopeSituationToThread } from "./chat-thread-context";
 import { studioLocale, t } from "./i18n";
 import type { StudioScenarioSkillOption } from "./shell-context";
 import { localAssetMentionContext } from "./chat-local-asset-mention";
 import { inspectTimelineFrameEvidence } from "./chat-timeline-frame-evidence";
 import { DeferredActivation } from "./deferred-activation";
-import { studioToolCanMutate, studioToolResultStopsAgentTurn } from "./agent-tool-runner";
+import { studioToolResultStopsAgentTurn } from "./agent-tool-runner";
 import type {
   AttachedFrame,
   ProgressHandle,
@@ -169,17 +167,7 @@ export function ChatThread({
   useEffect(() => () => timelineFrameInspectionRef.current?.abort(), []);
   const getBodyRef = useRef(getBody);
   getBodyRef.current = getBody;
-  // Which tool surface the chat route speaks. v3 names collide with legacy names (add_clips, get_state, …)
-  // under different contracts, so the client must know before it routes a tool call. Resolved once.
-  const agentSurfaceRef = useRef<"legacy" | "v3">("legacy");
-  useEffect(() => {
-    let cancelled = false;
-    void studioProviders().agentSurface?.().then((surface) => { if (!cancelled) agentSurfaceRef.current = surface; });
-    return () => { cancelled = true; };
-  }, []);
   const composerRef = useRef<ComposerHandle | null>(null);
-
-  // Frame attached to the session: input theme button highlights, every request carries frameId along (server injects the playbook)
   const [frame, setFrame] = useState<AttachedFrame | null>(initialFrame);
   const frameRef = useRef(frame);
   frameRef.current = frame;
@@ -251,8 +239,8 @@ export function ChatThread({
       const id = toolCall.toolName;
       const requestedInput = (toolCall.input ?? {}) as Record<string, unknown>;
       const ledger = turnLedgerRef.current;
-      const v3 = agentSurfaceRef.current === "v3" && V3_TOOL_IDS.has(id);
-      const canMutate = v3 ? v3ToolCanMutate(id) : studioToolCanMutate(id);
+      const v3 = V3_TOOL_IDS.has(id);
+      const canMutate = v3ToolCanMutate(id);
       const publishSuccess = (output: Record<string, unknown>) => {
         const recorded = recordStudioTurnToolResult(ledger, {
           toolId: id,
@@ -316,10 +304,9 @@ export function ChatThread({
           surface: "chat" as const,
           ...(skillRef.current !== STUDIO_AUTO_SKILL_ID ? { skillId: skillRef.current } : {}),
         };
-        // v3 names execute through the v3 adapter (frames in, one undo step, delta out); legacy names run as before.
         const out = v3
           ? await runToolRef.current("run_v3", { name: id, args: requestedInput }, runOpts)
-          : await runToolRef.current(id, requestedInput, runOpts);
+          : { ok: false, error: `Unknown tool: ${id}. Use the current tool list.` };
         const stopAfterReceipt = studioToolResultStopsAgentTurn(out);
         if (stopAfterReceipt) userStoppedRef.current = true;
         if (out.ok) publishSuccess(out as unknown as Record<string, unknown>);
@@ -575,38 +562,18 @@ export function ChatThread({
         draftParts.flatMap((part) => (part.type === "text" ? [part.text] : [])),
         elements,
       );
-      const previousMessages = messagesRef.current;
-      const situation = scopeSituationToThread(
-        getBodyRef.current() as ChatSituation,
-        previousMessages,
-      );
       // v3: no snapshot rides along (the agent pulls get_state); only a frozen hint naming what the user @mentioned,
       // so the cached prompt prefix stays byte-stable across turns.
       const mentionedIds = [...new Set(
         draftParts.flatMap((part) => (part.type === "text" ? [...part.text.matchAll(/@([A-Za-z0-9_:./-]+)/g)].map((m) => m[1]!) : [])),
       )];
-      const mentionHint = agentSurfaceRef.current === "v3"
-        ? [
-          mentionedIds.length ? `Referenced elements in this message (use these ids directly): ${JSON.stringify(mentionedIds)}` : "",
-          localAssetContext,
-        ].filter(Boolean).join("\n")
-        : "";
+      const mentionHint = [
+        mentionedIds.length ? `Referenced elements in this message (use these ids directly): ${JSON.stringify(mentionedIds)}` : "",
+        localAssetContext,
+      ].filter(Boolean).join("\n");
       const metadata = {
         workStartedAt: Date.now(),
-        ...(agentSurfaceRef.current === "v3"
-          ? (mentionHint ? { mentionHint } : {})
-          : {
-            situation: [
-              buildSituation(situation, {
-                freshConversation: !previousMessages.some(
-                  (message) => message.role === "user",
-                ),
-              }),
-              localAssetContext,
-            ]
-              .filter(Boolean)
-              .join("\n"),
-          }),
+        ...(mentionHint ? { mentionHint } : {}),
         ...(timelineFrames.length ? { timelineFrames } : {}),
         ...(options.studioAction ? { studioAction: options.studioAction } : {}),
       };

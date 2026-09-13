@@ -217,7 +217,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   create_browser_handoff: {
     description:
-      'Mint a single-use, pre-signed-in url (about 60 s) that opens the Studio editor on a project in your own embedded browser, so the user watches edits land live and byte-bound tools (import, capture, export) become available. Open it yourself immediately; never print it to the user or open it in their default browser. Omit project_id for a fresh project.',
+      'Mint a single-use, pre-signed-in url (about 60 s) that opens the Studio editor on a project in your own built-in/embedded browser, so the user watches edits land live and byte-bound tools (import, capture, export) become available. Open it yourself immediately; never print it to the user or open it in their default browser. Omit project_id for a fresh project.',
     inputSchema: obj({ project_id: str('Existing project id; omit to start a fresh one.') }),
   },
 

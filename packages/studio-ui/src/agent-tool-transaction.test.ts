@@ -136,6 +136,20 @@ function harness() {
 }
 
 describe('Agent composition transaction boundary', () => {
+  it('places an official audio ID from the host without any browser search cache', async () => {
+    const { runExternalTool } = await import('./agent-tool-runner');
+    const h = harness();
+    h.ctx.genIdsRef = { current: new Set<string>() };
+    h.ctx.pushUndoSnapshot = () => { h.undoStackRef.current.push(h.documentRef.current); };
+    const result = await runExternalTool(h.ctx, 'run_v3', { name: 'add_clips',
+      args: { clips: [{ assetId: 'bgm:host-test', role: 'music', startFrame: 0, source: [0, 5] }] },
+      placementAssets: [{ id: 'bgm:host-test', kind: 'audio', url: 'https://cdn.example/test.mp3', durationSec: 5 }],
+    });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(h.documentRef.current.assets['bgm:host-test'].locator.remoteUrl).toBe('https://cdn.example/test.mp3');
+    expect(h.documentRef.current.timeline.tracks.flatMap(t => t.clips).some(c => c.kind === 'audio' && c.assetId === 'bgm:host-test')).toBe(true);
+    expect(h.undoStackRef.current).toHaveLength(1);
+  });
   it('patches kit row properties through the live v3 surface and preserves them on readback', async () => {
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runExternalTool } = await import('./agent-tool-runner');

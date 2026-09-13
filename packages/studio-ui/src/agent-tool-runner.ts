@@ -25,6 +25,7 @@ import {
   type TransitionDirection,
   type VideoShot,
   CAPTION_PRESETS,
+  CUT_TRANSITION_EFFECTS,
   SHOT_TREATMENTS,
   VOLUME_DB_MAX,
   VOLUME_DB_MIN,
@@ -2174,6 +2175,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             return { ok: true, summary: t('workbench.duplicatedNameSecS', { name: bname(b), sec: r1(dupStart) }), data: { newBlockId: newClipId } };
           }
           case 'add_transition': {
+            if (input.effect !== undefined && input.effect !== 'none' && !CUT_TRANSITION_EFFECTS.some(({ id }) => id === input.effect)) {
+              return { ok: false, error: 'invalid_transition_effect', data: { allowed: [...CUT_TRANSITION_EFFECTS.map(({ id }) => id), 'none'] } };
+            }
+            if (input.direction !== undefined && !['up', 'down', 'left', 'right'].includes(input.direction as string)) {
+              return { ok: false, error: 'invalid_transition_direction' };
+            }
             const at = Number(input.atSec);
             if (!Number.isFinite(at) || at < 0) return { ok: false, error: t('workbench.invalidAtSec') };
             const sp = clipSpans(ensureShots(compRef.current));
@@ -5134,7 +5141,8 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         const legacyInput = input.legacyInput && typeof input.legacyInput === 'object' && !Array.isArray(input.legacyInput) ? (input.legacyInput as Record<string, unknown>) : null;
         const translation = legacyInput
           ? { status: 'ok' as const, calls: [{ tool: name, input: legacyInput }] as LegacyCall[] }
-          : translateV3Call(name, args, { fps: before.canvas.fps, kindOf: (id) => kinds.get(id) });
+          : translateV3Call(name, args, { fps: before.canvas.fps, kindOf: (id) => kinds.get(id), hasAsset: (id) => !!before.assets[id],
+              ...(Array.isArray(input.placementAssets) ? { placementAssets: input.placementAssets } : {}) });
         if (translation.status === 'error') { const { status: _s, ...rest } = translation; return { ok: false, ...rest }; }
         if (translation.status === 'pending') return { ok: false, error: 'not_available_yet', data: { detail: translation.reason } };
         const steps: Array<{ tool: string; ok: boolean; summary?: string; error?: string; data?: unknown }> = [];
