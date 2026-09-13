@@ -58,28 +58,30 @@ describe('StudioBridge DO', () => {
     const pin = await bridge.fetch(new Request('https://do/anchor', { method: 'POST', body: JSON.stringify({ projectId: 'project-B', explicitSelection: true }) }));
     expect(pin.ok).toBe(true);
     expect(stored.get('anchorProject')).toBe('project-B');
-    expect(await (await bridge.fetch(v3Req('add_clips'))).json()).toMatchObject({ ok: false, error: 'project_switched' });
+    expect(await (await bridge.fetch(v3Req('add_clips'))).json()).toMatchObject({ ok: false, error: 'studio_not_open' });
     expect(sockets[0]!.sent).toHaveLength(0);
     expect(stored.get('anchorExplicit')).toBe(true);
     sockets[0]!.closed = { code: 1000 };
     expect(await (await bridge.fetch(new Request('https://do/context'))).json()).toEqual({ connected: false, projectId: null, anchorProject: 'project-B', explicitSelection: true });
   });
 
-  it('get_state clears explicit selection provenance before a later unrelated tab takeover', async () => {
+  it('keeps explicit selection on reads and routes an unrelated tab to the offline fallback', async () => {
     const { state, sockets, stored } = makeState();
     const bridge = new StudioBridge(state);
     bridge.acceptBrowserSocket(new FakeSocket(), 'project-A');
     await bridge.fetch(new Request('https://do/anchor', { method: 'POST', body: JSON.stringify({ projectId: 'project-B', explicitSelection: true }) }));
-    const reanchor = bridge.fetch(v3Req('get_state'));
-    await until(() => sockets[0]!.sent.length > 0);
-    const message = JSON.parse(sockets[0]!.sent[0]!);
-    bridge.webSocketMessage(sockets[0], JSON.stringify({ id: message.id, ok: true }));
-    await reanchor;
-    expect(stored.get('anchorProject')).toBe('project-A');
-    expect(stored.get('anchorExplicit')).toBe(false);
-    bridge.acceptBrowserSocket(new FakeSocket(), 'project-C');
-    expect(await (await bridge.fetch(v3Req('add_clips'))).json()).toMatchObject({ error: 'project_switched' });
-    expect(await (await bridge.fetch(new Request('https://do/context'))).json()).toMatchObject({ projectId: 'project-C', anchorProject: 'project-A', explicitSelection: false });
+    expect(await (await bridge.fetch(v3Req('get_state'))).json()).toMatchObject({ ok: false, error: 'studio_not_open', projectId: 'project-B' });
+    expect(sockets[0]!.sent).toHaveLength(0);
+    expect(stored.get('anchorProject')).toBe('project-B');
+    expect(stored.get('anchorExplicit')).toBe(true);
+    bridge.acceptBrowserSocket(new FakeSocket(), 'project-B');
+    const reading = bridge.fetch(v3Req('get_state'));
+    await until(() => sockets[1]!.sent.length > 0);
+    const message = JSON.parse(sockets[1]!.sent[0]!);
+    bridge.webSocketMessage(sockets[1], JSON.stringify({ id: message.id, ok: true }));
+    await reading;
+    expect(stored.get('anchorExplicit')).toBe(true);
+    expect(stored.get('anchorProject')).toBe('project-B');
   });
 
   it('无浏览器连接:/call 回 409 studio_not_open', async () => {

@@ -165,8 +165,16 @@ export class StudioBridge {
       // get_state is the deliberate re-anchor — its receipt shows the LIVE project header, so
       // the agent continues with its eyes open. An untagged socket (legacy client) skips the gate.
       const socketProject = this.projectOf(target);
+      const selected = await this.state.storage?.get('anchorProject');
+      const explicitlySelected = await this.state.storage?.get('anchorExplicit') === true;
+      if (explicitlySelected && selected && selected !== socketProject) {
+        // Treat the unrelated tab as unavailable for this selection. The route can run
+        // data tools against the selected cloud project; get_state must not change it.
+        return Response.json({ ok: false, error: 'studio_not_open', projectId: selected,
+          hint: `The selected project ${selected} is not open in the connected tab. Offline tools keep this selection; open this project for browser-only tools.` }, { status: 409 });
+      }
       if (socketProject) {
-        const anchor = (await this.state.storage?.get('anchorProject')) as string | undefined;
+        const anchor = selected as string | undefined;
         // On the v3 surface every call arrives wrapped as run_v3, so the gate has to read the tool
         // inside it. Comparing the outer name would block the re-anchor along with everything else
         // and leave the session refusing edits for good, with no call left that could clear it.
@@ -180,7 +188,7 @@ export class StudioBridge {
         }
         if (anchor !== socketProject) await this.state.storage?.put('anchorProject', socketProject);
         // get_state deliberately adopts the live tab; later passive tab takeovers remain guarded.
-        if (called === 'get_state' || !anchor) await this.state.storage?.put('anchorExplicit', false);
+        if (!explicitlySelected && (called === 'get_state' || !anchor)) await this.state.storage?.put('anchorExplicit', false);
       }
       const id = `c${++this.seq}`;
       const timeoutMs = Math.min(Math.max(body.timeoutMs ?? DEFAULT_TIMEOUT_MS, 1_000), 600_000);
