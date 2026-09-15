@@ -2,6 +2,34 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { previewAudioSource, VideoTrackEngine } from './video-track-engine';
+import { SourceFrameDecoder } from './video-frame-decoder';
+
+/** A decoder whose cursors answer any source time with a stage canvas tagged by that time. */
+function fakeDecoder(width = 1080, height = 1920) {
+  const cursors: Array<{ reads: number[]; closed: boolean }> = [];
+  const decoder = {
+    width,
+    height,
+    durationSec: 10,
+    cursor: () => {
+      const entry = { reads: [] as number[], closed: false };
+      cursors.push(entry);
+      return {
+        frameAt: async (srcT: number) => {
+          entry.reads.push(srcT);
+          const canvas = document.createElement('canvas');
+          canvas.dataset.srcT = String(srcT);
+          return { canvas, timestamp: srcT, duration: 1 / 30, width, height };
+        },
+        covers: () => false,
+        close: () => { entry.closed = true; },
+      };
+    },
+    release: () => {},
+    close: vi.fn(),
+  };
+  return { decoder: decoder as unknown as SourceFrameDecoder, cursors };
+}
 
 describe('VideoTrackEngine timeline-only clock', () => {
   let now = 0;
@@ -185,5 +213,74 @@ describe('VideoTrackEngine timeline-only clock', () => {
     step(100);
     step(100);
     expect(ticks.at(-1)).toBeCloseTo(0.5);
+  });
+});
+
+describe('VideoTrackEngine WebCodecs picture', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    vi.stubGlobal('createImageBitmap', vi.fn(async (source: HTMLCanvasElement) => ({
+      width: 1080, height: 1920, srcT: Number(source.dataset.srcT), close: vi.fn(),
+    })));
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('pushes the seek frame from the decoder without waiting for the element, and both sides of a cut', async () => {
+    const { decoder } = fakeDecoder();
+    vi.spyOn(SourceFrameDecoder, 'open').mockResolvedValue(decoder);
+    const engine = new VideoTrackEngine();
+    const frames: Array<{ srcT: number; second: number | null; info: Record<string, unknown> }> = [];
+    engine.onFrame = (frame, info, frame2) => frames.push({
+      srcT: (frame as unknown as { srcT: number }).srcT,
+      second: frame2 ? (frame2 as unknown as { srcT: number }).srcT : null,
+      info: info as unknown as Record<string, unknown>,
+    });
+    engine.setSource('a', 'blob:a');
+    engine.setSegments([
+      { key: 'a', elKey: 'clip_1', srcStart: 1, srcEnd: 3, timelineStart: 0, timelineEnd: 2 },
+      { key: 'a', elKey: 'clip_2', srcStart: 7, srcEnd: 9, timelineStart: 2, timelineEnd: 4 },
+    ]);
+    engine.setTransitions([{ cut: 2, half: 0.25 }]);
+    await vi.waitFor(() => expect(engine.sourceState('a').decoder).toBe('ready'));
+    // The element never reached HAVE_CURRENT_DATA (jsdom) — the picture still lands.
+    engine.seek(0.5);
+    await vi.waitFor(() => expect(frames).toHaveLength(1));
+    expect(frames[0]).toMatchObject({ srcT: 1.5, second: null });
+    expect(frames[0]!.info).toMatchObject({ t: 0.5, elKey: 'clip_1', sourceWidth: 1080, sourceHeight: 1920 });
+    // Inside the transition window before the cut: the second picture is B's lead-in handle.
+    engine.seek(1.9);
+    await vi.waitFor(() => expect(frames).toHaveLength(2));
+    expect(frames[1]!.srcT).toBeCloseTo(2.9);
+    expect(frames[1]!.second).toBeCloseTo(6.9);
+    engine.dispose();
+    expect((decoder as unknown as { close: ReturnType<typeof vi.fn> }).close).toHaveBeenCalled();
+  });
+
+  it('drives overlay layers on their own canvases and clears them outside their window', async () => {
+    const { decoder, cursors } = fakeDecoder(640, 360);
+    vi.spyOn(SourceFrameDecoder, 'open').mockResolvedValue(decoder);
+    const engine = new VideoTrackEngine();
+    const pushed: Array<{ id: string; srcT: number; w: number }> = [];
+    const cleared: string[] = [];
+    engine.onLayerFrame = (layer, frame, info) => pushed.push({ id: layer.elKey, srcT: info.srcT, w: info.sourceWidth });
+    engine.onLayerBlank = (layer) => cleared.push(layer.elKey);
+    engine.setTimelineDuration(10);
+    engine.setSource('broll', 'https://cdn.test/b.mp4', 'layer');
+    engine.setLayers([{ id: 'b', elKey: 'hf-visual-b', key: 'broll', srcStart: 1, srcEnd: 3, timelineStart: 2, timelineEnd: 4 }]);
+    expect(document.querySelector('video')).toBeNull(); // a layer source has no media element
+    await vi.waitFor(() => expect(engine.sourceState('broll').decoder).toBe('ready'));
+    engine.seek(3);
+    await vi.waitFor(() => expect(pushed).toHaveLength(1));
+    expect(pushed[0]).toEqual({ id: 'hf-visual-b', srcT: 2, w: 640 });
+    engine.seek(5);
+    expect(cleared).toEqual(['hf-visual-b']);
+    engine.setLayers([]);
+    expect(cursors.some((cursor) => cursor.closed)).toBe(true);
+    engine.dispose();
   });
 });

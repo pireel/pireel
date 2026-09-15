@@ -118,31 +118,6 @@ export const PREVIEW_RUNTIME = `
     return max || 5;
   }
 
-  var timelinePlaying = false;
-  function syncTimelineMedia(t, wantPlay) {
-    media().forEach(function (m) {
-      if (!m.hasAttribute('data-hf-timeline-media')) return;
-      var s = num(m, 'data-start', 0);
-      var d = num(m, 'data-duration', 0);
-      var active = t >= s && t < s + d;
-      m.style.visibility = active ? 'visible' : 'hidden';
-      var sourceIn = num(m, 'data-source-in', 0);
-      var sourceOut = num(m, 'data-source-out', Infinity);
-      var rate = Math.max(0.0001, num(m, 'data-source-rate', 1));
-      var target = Math.min(sourceOut, Math.max(sourceIn, sourceIn + (t - s) * rate));
-      // Native media elements reject extreme playbackRate values. Keep native playback inside the
-      // interoperable range, while the independent target-time correction still follows exact V2
-      // source geometry for more extreme retimes.
-      try { m.playbackRate = Math.min(16, Math.max(0.0625, rate)); } catch (e) {}
-      try { if (!m.seeking && Math.abs(m.currentTime - target) > 0.18) m.currentTime = target; } catch (e2) {}
-      if (active && wantPlay) {
-        if (m.paused) { var p = m.play && m.play(); if (p && p.catch) p.catch(function () {}); }
-      } else if (!m.paused) {
-        try { m.pause(); } catch (e3) {}
-      }
-    });
-  }
-
   // align captions/layers only (GSAP timeline + visibility), don't touch video currentTime — called per frame during playback, smooth.
   function seekTimelines(t) {
     lastSeekT = t; // "latest render time" must include per-frame playback: capEdit/animPreview restore replays it;
@@ -176,13 +151,11 @@ export const PREVIEW_RUNTIME = `
     });
     media().forEach(function (m) {
       if (m.tagName === 'VIDEO') {
-        if (m.hasAttribute('data-hf-timeline-media')) return;
         var s = num(m, 'data-start', 0);
         var d = num(m, 'data-duration', 1e9);
         m.style.visibility = (t >= s && t < s + d) ? 'visible' : 'hidden';
       }
     });
-    syncTimelineMedia(t, timelinePlaying);
   }
 
   // full seek (including video currentTime, final-cut time) — for scrub/pause positioning.
@@ -190,11 +163,9 @@ export const PREVIEW_RUNTIME = `
   function seek(t) {
     lastSeekT = t;
     media().forEach(function (m) {
-      if (m.hasAttribute('data-hf-timeline-media')) return;
       var s = num(m, 'data-start', 0);
       try { m.currentTime = Math.max(0, t - s); } catch (e) {}
     });
-    syncTimelineMedia(t, timelinePlaying);
     seekTimelines(t);
   }
 
@@ -209,9 +180,7 @@ export const PREVIEW_RUNTIME = `
   var animPreviewTweens = {};
 
   function play(t) {
-    timelinePlaying = true;
     media().forEach(function (m) {
-      if (m.hasAttribute('data-hf-timeline-media')) return;
       var s = num(m, 'data-start', 0);
       try { m.currentTime = Math.max(0, t - s); } catch (e) {}
       var p = m.play && m.play();
@@ -222,7 +191,6 @@ export const PREVIEW_RUNTIME = `
         fpost({ type: 'playBlocked', name: err && err.name, msg: String((err && err.message) || '').slice(0, 140) });
       });
     });
-    syncTimelineMedia(t, true);
     // canvas render mode (__parentClock): clock/video frames belong to the parent engine; this doc doesn't self-drive or report clock/ended;
     // media() above holds only picture-in-picture assets, just start them normally. The parent sends hf:seekTimelines each frame to align overlays.
     if (window.__parentClock) { drive.on = false; return; }
@@ -230,7 +198,6 @@ export const PREVIEW_RUNTIME = `
   }
   function pause() {
     drive.on = false;
-    timelinePlaying = false;
     media().forEach(function (m) { try { m.pause(); } catch (e) {} });
     // pause = freeze at the current playback state (user's intent); we've been bitten by "animation jumps back to base state on pause".
   }
@@ -714,32 +681,24 @@ export const PREVIEW_RUNTIME = `
       // (the load event can be fooled by an empty-load race / font blocking, which once switched the picture to a deaf doc)
       fpost({ type: 'pong', nonce: d.nonce });
     }
-    else if (d.type === 'hf:video' && d.file) {
-      // local blob video: the sandboxed iframe is cross-origin from the parent, so the parent's blob: URL can't be read here →
-      // the parent structured-clones the File in, and this doc makes its own object URL (auto-reclaimed when the doc is destroyed).
-      // idempotent: skip if already injected (the parent's play watchdog re-sends, and resetting src would interrupt a playing video).
-      var v = document.getElementById('vidEl');
-      // force = the watchdog judged a decode zombie, force-rebuild src (new object URL + reload) to kick it awake
-      if (v && (!v.__hfInjected || d.force)) {
-        try {
-          if (d.force && v.src) { try { URL.revokeObjectURL(v.src); } catch (err2) {} }
-          v.src = URL.createObjectURL(d.file);
-          v.__hfInjected = true;
-          v.addEventListener('loadedmetadata', function () { try { if (v.paused) seek(lastSeekT); } catch (err) {} }, { once: true });
-        } catch (err) {}
-      }
+    else if (d.type === 'hf:layerFrame' && d.id && d.frame) {
+      // Overlay video layer frame from the parent engine: the layer is a plain canvas (see assemble's
+      // renderVisual); the backing store follows the frame's display size so object-fit keeps the aspect.
+      var lc = document.getElementById(String(d.id));
+      try {
+        if (lc && lc.getContext) {
+          var lw = d.frame.width, lh = d.frame.height;
+          if (lc.width !== lw) lc.width = lw;
+          if (lc.height !== lh) lc.height = lh;
+          var lctx = lc.getContext('2d');
+          if (lctx) { lctx.clearRect(0, 0, lw, lh); lctx.drawImage(d.frame, 0, 0); }
+        }
+      } catch (err) {}
+      try { d.frame.close && d.frame.close(); } catch (err2) {}
     }
-    else if (d.type === 'hf:clipFile' && d.file && d.id) {
-      // local external inserted clip (multi-source main track): same as hf:video — the file stays local, unuploaded; the File is structured-cloned
-      // in and this doc makes its own object URL. Idempotent: skip if already loaded.
-      var ce = document.getElementById(String(d.id));
-      if (ce && !ce.__hfInjected) {
-        try {
-          ce.src = URL.createObjectURL(d.file);
-          ce.__hfInjected = true;
-          ce.addEventListener('loadedmetadata', function () { try { if (ce.paused) seek(lastSeekT); } catch (err) {} }, { once: true });
-        } catch (err) {}
-      }
+    else if (d.type === 'hf:layerClear' && d.id) {
+      var lcc = document.getElementById(String(d.id));
+      try { if (lcc && lcc.getContext) { var lcx = lcc.getContext('2d'); if (lcx) lcx.clearRect(0, 0, lcc.width, lcc.height); } } catch (err) {}
     }
     else if (d.type === 'hf:imageFile' && d.file && d.sig) {
       // Device-local custom-block image. Persisted markup carries only a stable sig; this opaque

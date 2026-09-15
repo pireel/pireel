@@ -238,8 +238,9 @@ import { segmentSourceRate } from "./video-segment-time";
 import { compositionRenderView } from "./composition-render-view";
 import { primaryNarrativeRenderPlan } from "./primary-render-plan";
 import {
-  supplementalVisualFileBindings,
-  supplementalVisualMedia, sandboxSafePreviewDoc, } from "./visual-render-plan";
+  supplementalVisualLayers,
+  supplementalVisualMedia,
+} from "./visual-render-plan";
 import {
   type BakeSpec,
   type BakedWindow,
@@ -1440,6 +1441,8 @@ export function HyperframesWorkbench({
   useEffect(() => {
     const eng = new VideoTrackEngine();
     videoEngineRef.current = eng;
+    // Diagnostics handle: engine.sourceState(key) from the console when a picture goes missing.
+    (window as unknown as { __studioVideoEngine?: VideoTrackEngine }).__studioVideoEngine = eng;
     eng.onFrame = (frame, info, frame2) => {
       const pendingPrime = previewFramePrimeRef.current;
       const prime = pendingPrime
@@ -1543,6 +1546,27 @@ export function HyperframesWorkbench({
         queueMicrotask(prime.onDelivered);
       }
     };
+    // Overlay video layers: frames land on the layer's own canvas in the on-screen document. A pending
+    // back-buffer gets them after the swap, when the post-swap refresh re-pushes every layer.
+    eng.onLayerFrame = (layer, frame) => {
+      const w = iframesRef.current[bufsRef.current.active]?.contentWindow;
+      if (!w) {
+        frame.close();
+        return;
+      }
+      try {
+        w.postMessage({ type: "hf:layerFrame", id: layer.elKey, frame }, "*", [frame]);
+      } catch {
+        try {
+          frame.close();
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+    eng.onLayerBlank = (layer) => {
+      iframesRef.current[bufsRef.current.active]?.contentWindow?.postMessage({ type: "hf:layerClear", id: layer.elKey }, "*");
+    };
     // A resident element that failed to load (observed: a File handed out by the device cache whose
     // backing file changed → net::ERR_UPLOAD_FILE_CHANGED) leaves its clips blank until the source
     // is set again. Re-read the bytes from the device cache and re-seat the source, at most twice.
@@ -1617,6 +1641,7 @@ export function HyperframesWorkbench({
       previewFramePrimeRef.current = null;
       eng.dispose();
       videoEngineRef.current = null;
+      delete (window as unknown as { __studioVideoEngine?: VideoTrackEngine }).__studioVideoEngine;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -2029,10 +2054,24 @@ export function HyperframesWorkbench({
             half: tr.half,
           })),
     ); // window table for shadow decoding
+    // Overlay video layers decode in the same engine: register each layer's bytes (a File for a
+    // device-local source, the URL otherwise) and hand over the layer table. The picture of a layer
+    // never depends on a media element, so a layer whose bytes are missing simply stays blank.
+    const primaryFile = videoFileRef.current;
+    const primaryAssetId = firstNarrativeAssetId(editorDocumentRef.current);
+    const primaryAsset = primaryAssetId ? editorDocumentRef.current.assets[primaryAssetId] : undefined;
+    const primarySource = primaryAsset ? resolveAssetUrl(primaryAsset) : objectUrlRef.current;
+    const layers = supplementalVisualLayers(supplementalVisuals);
+    for (const layer of layers) {
+      const file = clipFilesRef.current.get(layer.key)
+        ?? ((layer.key === primarySource || layer.key === objectUrlRef.current) && primaryFile ? primaryFile : undefined);
+      eng.setSource(layer.key, file ?? (layer.key.startsWith("blob:") ? null : layer.key), "layer");
+    }
+    eng.setLayers(layers);
     // A level-only respec keeps the frame it already shows — re-pushing one per pointer move while dragging
     // a volume slider is work nobody can see.
     if (shapeChanged && !playingRef.current) eng.refresh();
-  }, [comp, primaryNarrative, renderVideoPlacements]);
+  }, [comp, primaryNarrative, renderVideoPlacements, supplementalVisuals, resolveAssetUrl]);
   /** Transition pre-bake cache (same idea as Premiere's "render preview"): baked in the background to a webp frame
    *  sequence, decoded to bitmaps only near the window and discarded once past; the signature includes cut/duration/
    *  effect/direction/both sides' source times and file fingerprints — any relevant edit auto-invalidates. While baking,
@@ -2751,12 +2790,12 @@ export function HyperframesWorkbench({
         }
         markBuilt();
         const doc = injectPreviewRuntime(
-          sandboxSafePreviewDoc(assembleHtml(
+          assembleHtml(
             previewCompOf(renderComposition),
             undefined,
             renderVideoPlacements,
             supplementalVisuals,
-          )),
+          ),
         );
         if (doc !== bufsRef.current.docs[bufsRef.current.active]) {
           pendingSwitchRef.current = true; // swap pending: patch path steps aside
@@ -2869,27 +2908,8 @@ export function HyperframesWorkbench({
           /* not ready */
         }
       };
-      // canvas render mode: video frames pushed by the parent engine (hf:frame), no longer inject the File into the doc
-      // for PRIMARY clips. Detached/native visual videos still live as <video> nodes inside the
-      // sandboxed iframe. A parent-created blob URL is unreadable from that opaque origin, so hand the
-      // File across and let the preview runtime create an iframe-owned URL for each visual node.
-      const document = editorDocumentRef.current;
-      const primaryAssetId = firstNarrativeAssetId(document);
-      const primaryAsset = primaryAssetId
-        ? document.assets[primaryAssetId]
-        : undefined;
-      const primarySource = primaryAsset
-        ? resolveAssetUrl(primaryAsset)
-        : objectUrlRef.current;
-      const fileBindings = supplementalVisualFileBindings(
-        supplementalVisuals,
-        [primarySource, objectUrlRef.current],
-        videoFileRef.current,
-        clipFilesRef.current,
-      );
-      for (const binding of fileBindings) {
-        post({ type: "hf:clipFile", id: binding.id, file: binding.file });
-      }
+      // Every video picture (primary lane and overlay layers) arrives from the parent engine as frames;
+      // the document carries no media element and no File has to cross the sandbox.
       postLocalImages(
         w,
         // The full document also covers media-slot images and the person-background layer; scanning
@@ -2908,7 +2928,7 @@ export function HyperframesWorkbench({
         if (b.fitScale && b.fitScale < 0.999) fits[b.id] = b.fitScale;
       if (Object.keys(fits).length) post({ type: "hf:fit", fits });
     },
-    [postLocalImages, resolveAssetUrl, supplementalVisuals],
+    [postLocalImages],
   );
 
   /** A buffer finished loading: inject video/seek/restore selection; if it's the background buffer, start the ping handshake (swap only after pong). */

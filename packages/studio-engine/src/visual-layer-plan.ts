@@ -6,6 +6,9 @@ export interface SupplementalVisualMediaClip {
   stackOrder: number;
   kind: 'image' | 'video';
   source: string;
+  /** Source picture size from asset metadata, when known: the preview canvas boots at this size until the first frame lands. */
+  sourceWidth?: number;
+  sourceHeight?: number;
   startSec: number;
   endSec: number;
   sourceInSec: number;

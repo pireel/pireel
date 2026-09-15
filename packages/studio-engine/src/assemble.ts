@@ -626,11 +626,15 @@ export function assembleHtml(
     if (visual.kind === 'image') {
       body.push(`<img class="comp hf-native-visual" ${common} src="${escapeAttr(visual.source)}" alt="" style="${mediaStyle}" />`);
     } else {
-      const rate = duration > 1e-9 ? Math.max(0, visual.sourceOutSec - visual.sourceInSec) / duration : 1;
+      // Overlay video is a picture-only canvas: the parent engine decodes the source and pushes frames
+      // (hf:layerFrame) exactly like the primary lane's #vidEl. No media element, no source URL in the
+      // document — so no File/blob has to cross the sandbox, and a document rebuild never touches a decoder.
+      // The backing store boots at the asset's size (object-fit needs an aspect) and follows the first frame.
+      const width = visual.sourceWidth && visual.sourceHeight ? visual.sourceWidth : 16;
+      const height = visual.sourceWidth && visual.sourceHeight ? visual.sourceHeight : 9;
       body.push(
-        `<video class="hf-native-visual hf-native-video" ${common} data-hf-timeline-media="1" ` +
-        `data-source-in="${n(visual.sourceInSec)}" data-source-out="${n(visual.sourceOutSec)}" data-source-rate="${n(rate)}" ` +
-        `src="${escapeAttr(visual.source)}" preload="auto" playsinline muted style="${mediaStyle}"></video>`,
+        `<canvas class="hf-native-visual hf-native-canvas" ${common} width="${n(width)}" height="${n(height)}" ` +
+        `data-source-in="${n(visual.sourceInSec)}" data-source-out="${n(visual.sourceOutSec)}" style="${mediaStyle}"></canvas>`,
       );
     }
     const motion: string[] = [`var el=document.getElementById(${JSON.stringify(id)});`];
