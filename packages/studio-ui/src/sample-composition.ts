@@ -86,6 +86,14 @@ export const PREVIEW_RUNTIME = `
 <script>
 (function () {
   try { document.body.classList.add('hf-editor'); } catch (e) {} // edit mode: show media-slot placeholders (export doesn't inject this runtime → placeholders not rendered)
+  // Stage-host seams: mounted in the page (Shadow DOM) the composition is scaled by a CSS transform, so
+  // element rects and pointer deltas convert to composition pixels through these; in a real document
+  // (export overlay, single-block previews) they are the identity.
+  function docRect(el) { var f = window.__hfDocRect; return f ? f(el) : el.getBoundingClientRect(); }
+  function docScale() { return window.__hfScale || 1; }
+  // Generated timeline bodies address elements by selector text; inside a stage host GSAP must resolve
+  // those within the stage, so timeline construction runs through the host's scoped runner.
+  function scoped(fn) { var r = window.__hfScopeRun; if (r) r(fn); else fn(); }
   function comps() { return Array.prototype.slice.call(document.querySelectorAll('[data-composition-id]')); }
   function media() { return Array.prototype.slice.call(document.querySelectorAll('video,audio')); }
   function num(el, a, d) { var v = parseFloat(el.getAttribute(a)); return isNaN(v) ? d : v; }
@@ -361,7 +369,7 @@ export const PREVIEW_RUNTIME = `
       // during framing-size drag: gsap.set the video framing transform directly (zero-setState contract, same as hf:capStyle);
       // on release the parent commits the comp, and the rebuilt timeline keyframes / inline transform match the final values here, so the switch has no jump.
       // target: an external inserted clip's framing is applied to its own clip <video> (defaults to the main video)
-      try { window.gsap && window.gsap.set(d.target || '#vidEl', d.vars); } catch (err) {}
+      try { if (window.gsap) scoped(function () { window.gsap.set(d.target || '#vidEl', d.vars); }); } catch (err) {}
     }
     else if (d.type === 'hf:mediaBox' && d.id && d.box) {
       // Direct canvas placement is independent from source framing: this only moves/resizes the
@@ -400,7 +408,7 @@ export const PREVIEW_RUNTIME = `
         var oldVt = window.__timelines && window.__timelines['vid'];
         if (oldVt && oldVt.kill) { try { oldVt.kill(); } catch (errK) {} }
         var nvt = window.gsap.timeline({ paused: true });
-        try { new Function('tl', String(d.body || ''))(nvt); } catch (errB) { console.warn('[hf] vidTimeline error', errB); }
+        try { scoped(function () { new Function('tl', String(d.body || ''))(nvt); }); } catch (errB) { console.warn('[hf] vidTimeline error', errB); }
         window.__timelines['vid'] = nvt;
         seekTimelines(lastSeekT);
       } catch (err) {}
@@ -531,7 +539,7 @@ export const PREVIEW_RUNTIME = `
         var msEl = document.getElementById(String(d.id));
         var msT = msEl && (d.sub ? msEl.querySelector('.cap-sub') : (msEl.querySelector('.cap-stack') || msEl.querySelector('.cap-line') || msEl));
         if (msT) {
-          var msR = msT.getBoundingClientRect();
+          var msR = docRect(msT);
           var msW = document.documentElement.clientWidth || 1;
           var msH = document.documentElement.clientHeight || 1;
           fpost({ type: 'measure', id: d.id, sub: !!d.sub, rect: { x: msR.left / msW, y: msR.top / msH, w: msR.width / msW, h: msR.height / msH } });
@@ -582,7 +590,7 @@ export const PREVIEW_RUNTIME = `
           }
           try {
             var baTl = gsap.timeline({ paused: true });
-            try { new Function('tl', String(d.timelineBody || ''))(baTl); } catch (e2) { console.warn('[hf] blockAdd timeline', d.blockId, e2); }
+            try { scoped(function () { new Function('tl', String(d.timelineBody || ''))(baTl); }); } catch (e2) { console.warn('[hf] blockAdd timeline', d.blockId, e2); }
             window.__timelines[d.blockId] = baTl;
             seekTimelines(lastSeekT);
           } catch (e3) { console.warn('[hf] blockAdd', d.blockId, e3); }
@@ -602,7 +610,7 @@ export const PREVIEW_RUNTIME = `
           delete window.__timelines[btId];
         }
         var btTl = gsap.timeline({ paused: true });
-        try { new Function('tl', String(d.timelineBody || ''))(btTl); } catch (e2) { console.warn('[hf] blockTimeline', btId, e2); }
+        try { scoped(function () { new Function('tl', String(d.timelineBody || ''))(btTl); }); } catch (e2) { console.warn('[hf] blockTimeline', btId, e2); }
         window.__timelines[btId] = btTl;
         seekTimelines(lastSeekT);
       } catch (err) {}
@@ -646,7 +654,7 @@ export const PREVIEW_RUNTIME = `
             delete window.__timelines[d.blockId];
           }
           var bhTl = gsap.timeline({ paused: true });
-          try { new Function('tl', String(d.timelineBody || ''))(bhTl); } catch (e2) { console.warn('[hf] blockHtml timeline', d.blockId, e2); }
+          try { scoped(function () { new Function('tl', String(d.timelineBody || ''))(bhTl); }); } catch (e2) { console.warn('[hf] blockHtml timeline', d.blockId, e2); }
           window.__timelines[d.blockId] = bhTl;
           seekTimelines(lastSeekT); // re-align the fresh paused timeline to the current playhead
         }
@@ -773,6 +781,9 @@ export const PREVIEW_RUNTIME = `
    child→parent: {source:'hf',type:'select'|'edit'|'boxDragStart'|'boxDrag'|'boxDragEnd',...}
    parent→child: {type:'hf:selectBlock'|'hf:clearSel'} */
 (function () {
+  // Same stage-host seams as the runtime section above (each section is its own closure).
+  function docRect(el) { var f = window.__hfDocRect; return f ? f(el) : el.getBoundingClientRect(); }
+  function docScale() { return window.__hfScale || 1; }
   var st = document.createElement('style');
   // selection outline: full-canvas blocks (captions etc.) rely on it to show selection, always on; for box blocks (cards) the parent already draws a selection frame when idle
   // (BoxEditOverlay, clearer), so this outline only lights up during body-drag (when the parent frame steps aside) — else it doubles up with the parent frame.
@@ -830,7 +841,7 @@ export const PREVIEW_RUNTIME = `
         var W0 = rootDim('data-width', 1080), H0 = rootDim('data-height', 1920);
         var imgs = comp.querySelectorAll('img'), idx = -1;
         for (var ii = 0; ii < imgs.length; ii++) if (imgs[ii] === im) idx = ii;
-        var ir = im.getBoundingClientRect();
+        var ir = docRect(im);
         post({ type: 'imgSel', blockId: comp.getAttribute('data-composition-id'), index: idx, rect: { x: ir.left / W0, y: ir.top / H0, w: ir.width / W0, h: ir.height / H0 } });
       }
     }
@@ -856,7 +867,7 @@ export const PREVIEW_RUNTIME = `
     var b = baseTranslate(el); // when the previous drag hasn't yet landed via doc rebuild, the new drag stacks on top of it
     nudge = {
       el: el, id: el.getAttribute('data-composition-id'),
-      rect0: el.getBoundingClientRect(), bx: b.x, by: b.y,
+      rect0: docRect(el), bx: b.x, by: b.y,
       W: rootDim('data-width', 1080), H: rootDim('data-height', 1920), dx: 0, dy: 0,
     };
     post({ type: 'boxDragStart', blockId: nudge.id });
@@ -895,7 +906,8 @@ export const PREVIEW_RUNTIME = `
     var sx = e.clientX, sy = e.clientY, started = false, raf = 0, lx = 0, ly = 0;
     function mv(ev) {
       if (ev.buttons === 0) { up(); return; } // button already released (missed up): finish immediately, don't follow bare movement
-      var dx = ev.clientX - sx, dy = ev.clientY - sy;
+      var sc = docScale();
+      var dx = (ev.clientX - sx) / sc, dy = (ev.clientY - sy) / sc;
       if (!started) {
         if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
         highlight(comp);
@@ -951,6 +963,7 @@ export const PREVIEW_RUNTIME = `
   // forward editing shortcuts back to the parent to handle uniformly; don't forward while editing in place (contenteditable).
   var FWD_KEYS = { ' ': 1, ArrowLeft: 1, ArrowRight: 1, ArrowUp: 1, ArrowDown: 1, Delete: 1, Backspace: 1, Escape: 1 };
   document.addEventListener('keydown', function (e) {
+    if (window.__hfInPage) return; // mounted in the page: the key already reaches the editor's own handler
     if (e.target && e.target.closest && e.target.closest('[contenteditable="true"]')) return;
     if (!FWD_KEYS[e.key]) return;
     e.preventDefault();

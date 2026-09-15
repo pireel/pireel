@@ -233,6 +233,7 @@ import {
   localAssetIndexEntry,
 } from "./local-import-session";
 import { VideoTrackEngine } from "./video-track-engine";
+import { PreviewStageHost, type PreviewContentWindow, type PreviewMessageEvent } from "./preview-stage-host";
 import { clipAudioMasks, previewAudioMasks } from "./export-word-masks";
 import { segmentSourceRate } from "./video-segment-time";
 import { compositionRenderView } from "./composition-render-view";
@@ -1347,16 +1348,14 @@ export function HyperframesWorkbench({
       visual,
     };
   }, [asrSentences, visual]);
-  // Preview double-buffering: after a comp change the new doc loads in a **background iframe** (inject video/seek/
-  // restore selection); it swaps atomically only when ready, keeping the old frame visible to the last moment —
+  // Preview double-buffering: after a comp change the new doc mounts in a **background stage** (seek/restore
+  // selection); it swaps atomically only when ready, keeping the old frame visible to the last moment —
   // eliminates the full-reload white flash (especially visible when a run of images completes).
   const [bufs, setBufs] = useState<{
     docs: [string, string];
     dims: [{ w: number; h: number }, { w: number; h: number }];
     active: 0 | 1;
-    /** Per-buffer doc revision: the iframe is keyed on it so a doc change REMOUNTS the frame.
-     *  Navigating a mounted iframe (srcDoc mutation) pushes a session-history entry each time —
-     *  minutes of editing made the browser Back button need dozens of presses to leave. */
+    /** Per-buffer doc revision: the stage element is keyed on it so a cleared slot gets a fresh host. */
     revs: [number, number];
   }>(() => ({
     docs: [injectPreviewRuntime(assembleHtml(starter)), ""],
@@ -1369,7 +1368,34 @@ export function HyperframesWorkbench({
   }));
   const bufsRef = useRef(bufs);
   bufsRef.current = bufs;
-  const iframesRef = useRef<(HTMLIFrameElement | null)[]>([null, null]);
+  // Mount each buffer's document in its stage host (an empty doc clears the stage).
+  useEffect(() => {
+    for (const idx of [0, 1] as const) {
+      const host = stageHostsRef.current[idx];
+      if (host && host.srcdoc !== bufs.docs[idx]) host.srcdoc = bufs.docs[idx];
+    }
+  }, [bufs.docs, bufs.revs]);
+  // Preview stages: two in-page Shadow DOM hosts (double buffer), driven through the same message
+  // protocol the sandboxed iframes used. See preview-stage-host.ts for the trust model.
+  const stageHostsRef = useRef<(PreviewStageHost | null)[]>([null, null]);
+  const previewMessageRef = useRef<((event: PreviewMessageEvent) => void) | null>(null);
+  /** The document whose swap handshake last completed (the load path must not start it again). */
+  const switchDoneDocRef = useRef<string>("");
+  const onBufLoadRef = useRef<((idx: 0 | 1) => void) | null>(null);
+  const attachStageHost = useCallback((idx: 0 | 1, el: HTMLDivElement | null) => {
+    if (!el) return; // the host disposes when its slot is replaced or the workbench unmounts
+    const previous = stageHostsRef.current[idx];
+    if (previous?.element === el) return;
+    previous?.dispose();
+    const host = new PreviewStageHost(el);
+    host.onMessage = (event) => previewMessageRef.current?.(event);
+    host.addEventListener("load", () => onBufLoadRef.current?.(idx));
+    stageHostsRef.current[idx] = host;
+    host.srcdoc = bufsRef.current.docs[idx];
+  }, []);
+  useEffect(() => () => {
+    for (const host of stageHostsRef.current) host?.dispose();
+  }, []);
   // Stage geometry = the ACTIVE buffer's canvas (see the note at the old fit site above)
   const activeDims = bufs.dims[bufs.active];
   const stageGeometry = previewStageGeometry({
@@ -1458,7 +1484,7 @@ export function HyperframesWorkbench({
       // Ordinarily push to the active buffer. During a pending structural rebuild, one current frame
       // is deliberately delivered to the proven-live back-buffer before it is allowed to debut.
       // frame2 = the "other side" shadow frame within a transition window (true dual-stream: before cut = B's lead-in, after cut = A's tail)
-      const w = iframesRef.current[targetIdx]?.contentWindow;
+      const w = stageHostsRef.current[targetIdx]?.contentWindow;
       if (!w) {
         // No target window (iframe torn down mid-decode): close instead of leaking the bitmaps
         frame.close();
@@ -1538,7 +1564,7 @@ export function HyperframesWorkbench({
         && bufsRef.current.active !== pendingPrime.idx
         ? pendingPrime
         : null;
-      const w = iframesRef.current[prime?.idx ?? bufsRef.current.active]?.contentWindow;
+      const w = stageHostsRef.current[prime?.idx ?? bufsRef.current.active]?.contentWindow;
       w?.postMessage({ type: "hf:clearFrame", t }, "*");
       if (w && prime && previewFramePrimeRef.current === prime) {
         if (prime.timer) clearTimeout(prime.timer);
@@ -1549,7 +1575,7 @@ export function HyperframesWorkbench({
     // Overlay video layers: frames land on the layer's own canvas in the on-screen document. A pending
     // back-buffer gets them after the swap, when the post-swap refresh re-pushes every layer.
     eng.onLayerFrame = (layer, frame) => {
-      const w = iframesRef.current[bufsRef.current.active]?.contentWindow;
+      const w = stageHostsRef.current[bufsRef.current.active]?.contentWindow;
       if (!w) {
         frame.close();
         return;
@@ -1565,7 +1591,7 @@ export function HyperframesWorkbench({
       }
     };
     eng.onLayerBlank = (layer) => {
-      iframesRef.current[bufsRef.current.active]?.contentWindow?.postMessage({ type: "hf:layerClear", id: layer.elKey }, "*");
+      stageHostsRef.current[bufsRef.current.active]?.contentWindow?.postMessage({ type: "hf:layerClear", id: layer.elKey }, "*");
     };
     // A resident element that failed to load (observed: a File handed out by the device cache whose
     // backing file changed → net::ERR_UPLOAD_FILE_CHANGED) leaves its clips blank until the source
@@ -2278,9 +2304,9 @@ export function HyperframesWorkbench({
     [],
   );
 
-  // Preview control: a sandboxed iframe (opaque origin) can't reach contentWindow.__hfPreview, so everything goes through postMessage commands (sent to the current active buffer)
+  // Preview control: every command goes to the active stage as a message (the same protocol the sandboxed iframe used; the stage host delivers it in-page)
   const postLocalImages = useCallback(
-    (win: Window | null | undefined, markup: string) => {
+    (win: PreviewContentWindow | null | undefined, markup: string) => {
       for (const sig of localImageLocatorSigs(markup)) {
         void resolveLocalImageFile(sig).then((file) => {
           if (!file) return;
@@ -2313,7 +2339,7 @@ export function HyperframesWorkbench({
       }
       // Active/background buffers can be at different rebuild phases. Sending to both is safe and
       // closes the race where the one-time load injection ran before the local bytes arrived.
-      for (const frame of iframesRef.current) {
+      for (const frame of stageHostsRef.current) {
         try {
           frame?.contentWindow?.postMessage(
             { type: "hf:imageFile", sig: asset.sig, file: asset.file },
@@ -2329,7 +2355,7 @@ export function HyperframesWorkbench({
   const postPreview = useCallback(
     (msg: Record<string, unknown>) => {
       try {
-        const win = iframesRef.current[bufsRef.current.active]?.contentWindow;
+        const win = stageHostsRef.current[bufsRef.current.active]?.contentWindow;
         win?.postMessage(msg, "*");
         const markup =
           typeof msg.html === "string"
@@ -2875,7 +2901,7 @@ export function HyperframesWorkbench({
           { idx, tries: st.tries },
         );
       try {
-        iframesRef.current[idx]?.contentWindow?.postMessage(
+        stageHostsRef.current[idx]?.contentWindow?.postMessage(
           { type: "hf:ping", nonce: st.nonce },
           "*",
         );
@@ -2900,7 +2926,7 @@ export function HyperframesWorkbench({
    *  load handler used to send, now shared by the load path and the runtime boot beacon. */
   const alignBackground = useCallback(
     (idx: 0 | 1) => {
-      const w = iframesRef.current[idx]?.contentWindow;
+      const w = stageHostsRef.current[idx]?.contentWindow;
       const post = (msg: Record<string, unknown>) => {
         try {
           w?.postMessage(msg, "*");
@@ -2936,15 +2962,19 @@ export function HyperframesWorkbench({
     (idx: 0 | 1) => {
       if (!bufsRef.current.docs[idx]) return; // empty load of a cleared old buffer (srcdoc=''), ignore
       if (idx !== bufsRef.current.active) {
+        // The runtime's boot beacon usually starts (and, in-page, often completes) the handshake
+        // before this load event fires; a second handshake for the same document would swap twice.
+        const doc = bufsRef.current.docs[idx];
+        if (switchPingRef.current?.doc === doc || switchDoneDocRef.current === doc) return;
         alignBackground(idx);
-        startSwitchPing(idx, bufsRef.current.docs[idx]);
+        startSwitchPing(idx, doc);
         return;
       }
       // The active buffer's own load (first load / video swap): resume playback if playing
       alignBackground(idx);
       if (playingRef.current) {
         try {
-          iframesRef.current[idx]?.contentWindow?.postMessage(
+          stageHostsRef.current[idx]?.contentWindow?.postMessage(
             { type: "hf:play", t: tRef.current },
             "*",
           );
@@ -2955,6 +2985,7 @@ export function HyperframesWorkbench({
     },
     [startSwitchPing, alignBackground],
   );
+  onBufLoadRef.current = onBufLoad;
 
   // In-preview edit bridge: write a block's slot back (supports items.N array paths).
   // custom blocks (LLM-generated components) have no semantic slots — the key is the text of [data-edit=key] inside
@@ -3594,13 +3625,13 @@ export function HyperframesWorkbench({
 
   // Listen to the iframe bridge: select → select block; edit → in-place write-back to slot; fit → autofit scale factor; clock → playback clock
   useEffect(() => {
-    function onMsg(e: MessageEvent) {
-      // Only trust the preview double buffers (component cards / hover mini-previews run the same runtime and also post; don't let them change state / forge edits)
+    function onMsg(e: PreviewMessageEvent) {
+      // Only the two preview stages reach this handler; the check still tells the on-screen stage from the one being prepared
       const fromActive =
-        e.source === iframesRef.current[bufsRef.current.active]?.contentWindow;
+        e.source === stageHostsRef.current[bufsRef.current.active]?.contentWindow;
       const fromBack =
         e.source ===
-        iframesRef.current[bufsRef.current.active === 0 ? 1 : 0]?.contentWindow;
+        stageHostsRef.current[bufsRef.current.active === 0 ? 1 : 0]?.contentWindow;
       if (!fromActive && !fromBack) return;
       const d = e.data as {
         source?: string;
@@ -3664,15 +3695,21 @@ export function HyperframesWorkbench({
           switchPingRef.current = null;
           if (st.timer) clearTimeout(st.timer);
           const { idx, doc } = st;
+          // The in-page stage answers within a microtask, so a second delivery can arrive before
+          // React has re-rendered the buffer state: commit exactly once per handshake.
+          let committed = false;
           const commitSwitch = () => {
             if (
+              committed ||
               bufsRef.current.docs[idx] !== doc ||
               bufsRef.current.active === idx
             )
               return;
+            committed = true;
+            switchDoneDocRef.current = doc;
             try {
               // teardown (includes pause): the old doc immediately releases media loads/decoder sessions, doesn't wait for async GC after srcdoc is cleared
-              iframesRef.current[
+              stageHostsRef.current[
                 bufsRef.current.active
               ]?.contentWindow?.postMessage({ type: "hf:teardown" }, "*");
             } catch {
@@ -3698,7 +3735,7 @@ export function HyperframesWorkbench({
             // deaf half-loaded doc (the known pit) and vanish — a paused boot then leaves caption timelines at
             // their initial hidden state (main segments gsap-hidden, sub line visible) until the first
             // hover/play seek (user-reported: captions missing after refresh until mousing over the timeline).
-            const w = iframesRef.current[idx]?.contentWindow;
+            const w = stageHostsRef.current[idx]?.contentWindow;
             try {
               w?.postMessage({ type: "hf:seek", t: tRef.current }, "*");
               // Re-assembly interrupted playback (e.g. AI edited a block) → resume from the current playhead
@@ -3762,7 +3799,7 @@ export function HyperframesWorkbench({
       // blank at the swap); if the track isn't ready return null and the iframe side backs off and re-asks. webp is
       // decoded on demand to an ImageBitmap and transferred, keeping only the compressed form in memory.
       if (d.type === "personMaskAt") {
-        const src = e.source as Window | null;
+        const src = e.source as { postMessage(message: unknown, targetOrigin?: string, transfer?: Transferable[]): void } | null;
         if (!src) return;
         const t = typeof d.t === "number" ? d.t : 0;
         // Multi-source: the iframe reports "which main-track element + its source file's time"; fetch the track by source, decide the segment by that source's shot toggle
@@ -3996,8 +4033,10 @@ export function HyperframesWorkbench({
         setPlaying(false);
       }
     }
-    window.addEventListener("message", onMsg);
-    return () => window.removeEventListener("message", onMsg);
+    previewMessageRef.current = onMsg;
+    return () => {
+      if (previewMessageRef.current === onMsg) previewMessageRef.current = null;
+    };
   }, [setSlot, applyFits, postPreview, toolbarXY]);
 
   // Safe-zone debug: when enabled, run one live detection on the **current frame** whenever the playhead settles (debounced; frequent t changes during playback auto-skip until it stops)
@@ -4056,9 +4095,9 @@ export function HyperframesWorkbench({
   // After a buffer swap: if focus is still on the retired background buffer, the keyboard feeds a dead doc (bridge
   // forwarding is dropped by fromActive → shortcuts all fail, observed: seek/space unresponsive) — hand focus to the new active buffer
   useEffect(() => {
-    const act = iframesRef.current[bufs.active];
-    const other = iframesRef.current[bufs.active === 0 ? 1 : 0];
-    if (act && other && document.activeElement === other) act.focus();
+    const act = stageHostsRef.current[bufs.active];
+    const other = stageHostsRef.current[bufs.active === 0 ? 1 : 0];
+    if (act && other && document.activeElement === other.element) act.focus();
     // The new doc's #vidEl canvas is empty: push the current frame right after the swap (during playback the next frame arrives naturally)
     videoEngineRef.current?.refresh();
   }, [bufs.active]);
@@ -4133,7 +4172,9 @@ export function HyperframesWorkbench({
   }, [beginPlayback, postPreview]);
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      const el = document.activeElement as HTMLElement | null;
+      // The preview stage is a shadow tree: an in-place text edit inside it shows up here as the host.
+      let el = document.activeElement as HTMLElement | null;
+      while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement as HTMLElement;
       const typing =
         !!el &&
         (el.tagName === "INPUT" ||
@@ -8639,23 +8680,15 @@ export function HyperframesWorkbench({
                         : undefined
                     }
                   >
-                    {/* Double-buffered iframes: load in the background then swap, eliminating the reload white flash.
-                    Trust boundary: LLM-generated block HTML/scripts run in a sandbox (opaque origin), can't reach the main app's DOM/localStorage/cookies;
-                    local blob videos aren't readable → onBufLoad hands the File in to build its own URL; the control protocol is all postMessage. */}
+                    {/* Double-buffered stages: the next document mounts in the background host, then the two swap, so a
+                    rebuild never shows a blank frame. Each stage is an in-page Shadow DOM (see preview-stage-host.ts):
+                    generated block code runs in the application's origin, styles stay isolated, and the control
+                    protocol is a direct call rather than a cross-document message. */}
                     {([0, 1] as const).map((i) => (
-                      <iframe
+                      <div
                         key={`${i}:${bufs.revs[i]}`}
-                        ref={(el) => {
-                          iframesRef.current[i] = el;
-                        }}
-                        title={`hyperframes-preview-${i}`}
-                        srcDoc={bufs.docs[i]}
-                        onLoad={() => onBufLoad(i)}
-                        sandbox="allow-scripts"
-                        // autoplay must be granted explicitly to any origin (*): the sandbox has no allow-same-origin → the doc
-                        // is an opaque origin, and a bare "autoplay" (default src origin) won't match → in a never-clicked new doc,
-                        // play() for a video with audio is silently rejected (the culprit behind "can't play" after a rebuild)
-                        allow="autoplay *"
+                        ref={(el) => attachStageHost(i, el)}
+                        data-hyperframes-preview={i}
                         className={
                           bufs.active === i ? "" : "pointer-events-none"
                         }
@@ -8665,16 +8698,12 @@ export function HyperframesWorkbench({
                           top: 0,
                           width: bufs.dims[i].w,
                           height: bufs.dims[i].h,
-                          border: 0,
                           background: "transparent",
                           transform: `scale(${fit})`,
                           transformOrigin: "top left",
-                          // The background buffer is pushed to the bottom by z-order, not opacity:0 — Chromium render-throttles /
-                          // media-suspends invisible cross-origin iframes, and a video loading in a hidden buffer enters a zombie
-                          // state ("paused:false, ready:4, currentTime frozen") that doesn't wake even when brought to front (only rebuilding src saves it, see the watchdog).
-                          // Pushed to the bottom = always rendering, just occluded by the same-size front iframe, so the decoder isn't suspended.
                           zIndex: bufs.active === i ? 2 : 1,
                           visibility: hasContent ? "visible" : "hidden",
+                          outline: "none",
                         }}
                       />
                     ))}
