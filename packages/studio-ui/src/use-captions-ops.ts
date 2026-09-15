@@ -25,6 +25,8 @@ import {
 } from '@pireel/studio-engine/composition';
 import { type AsrSegment, applyCaptionTranslations } from '@pireel/studio-engine/build-blocks';
 import { applyCaptionTextEdits } from '@pireel/studio-engine/caption-text-edit';
+import type { CaptionCueEdit } from '@pireel/studio-engine/caption-document-edit';
+import { firstNarrativeAssetId } from '@pireel/studio-engine/editor-document';
 import { joinWords, wordsFromText } from '@pireel/studio-engine/caption-fx';
 import { displayCues, mappedCaptionSegs as relayMappedCaptionSegs, relayCaptionLayer as relayCaptionLayerPure } from '@pireel/studio-engine/captions-relay';
 import { studioProviders } from '@pireel/studio-engine/providers';
@@ -144,9 +146,58 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       setCaptionLineBusyKey((k) => (k === key ? null : k));
     }
   };
+  /** The transcript owner of a caption row when the document holds it: edits then travel as cue
+   *  edits (a few bytes) and the runtime refs are refreshed from the result. */
+  const documentTranscriptOwner = (row: { src: string | null; assetId?: string }): string | null => {
+    const document = documentRef.current;
+    let assetId = row.assetId;
+    if (!assetId && row.src) {
+      const shot = compRef.current.shots?.find((candidate) => candidate.src === row.src);
+      const primary = document.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId);
+      const clip = shot ? primary?.clips.find((candidate) => candidate.id === shot.id) : undefined;
+      if (clip && clip.kind === 'narrative') assetId = clip.assetId;
+    }
+    if (!assetId && !row.src) assetId = firstNarrativeAssetId(document);
+    return assetId && document.semantics.transcripts[assetId] ? assetId : null;
+  };
+  /** Land cue edits on the document's transcript, then point the runtime refs at what the document holds. */
+  const commitCueEdits = (assetId: string, src: string | null, cueEdits: CaptionCueEdit[]): boolean => {
+    const edit = commit({ op: 'captions.edit', input: { cueEdits } });
+    if (!edit.ok) {
+      toast.error(editorErrorMessage(edit.error));
+      return false;
+    }
+    const stored = edit.document.semantics.transcripts[assetId] as AsrSegment[] | undefined;
+    if (!stored) return true;
+    if (src && clipAsrRef.current[src]) {
+      const nextClipAsr = { ...clipAsrRef.current, [src]: stored };
+      clipAsrRef.current = nextClipAsr;
+      setClipAsr(nextClipAsr);
+    } else if (!src && asrRef.current) {
+      asrRef.current = stored;
+      setAsrSentences(stored);
+    }
+    return true;
+  };
+  /** Every cue of the row's sentence, so the untouched ones are locked alongside the edited one
+   *  (locking only the edited range would let the tail rebalance around it on relay). */
+  const sentenceCueEdits = (assetId: string, row: { src: string | null; index: number }, override: (candidate: CaptionLineRow) => string | null | undefined): CaptionCueEdit[] =>
+    captionLineRows
+      .filter((candidate) => candidate.src === row.src && candidate.index === row.index)
+      .map((candidate) => {
+        const text = override(candidate);
+        return { assetId, index: candidate.index, w0: candidate.w0, w1: candidate.w1, text: text === undefined ? candidate.text : text };
+      });
   /** Edit one display cue's copy and publish the cue lock + managed caption relay atomically. */
   const editCaptionLine = (row: CaptionLineRow, nextText: string, phase: 'live' | 'commit' | 'revert' = 'commit') => {
     if (phase !== 'commit') return;
+    if (!nextText.trim()) return;
+    const owner = documentTranscriptOwner(row);
+    if (owner) {
+      commitCueEdits(owner, row.src, sentenceCueEdits(owner, row, (candidate) => (candidate.key === row.key ? nextText : undefined)));
+      return;
+    }
+    // The document does not hold this transcript yet (runtime-only): edit the runtime copy and fold it in.
     const src = row.src;
     const runtimeSegs = src ? clipAsrRef.current[src] : asrRef.current;
     // Document-derived rows (audio-lane narration) live in semantics.transcripts, not in the
@@ -190,8 +241,41 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       setAsrSentences(next);
     }
   };
+  /**
+   * Delete one caption cue from the timeline (the selected caption block). The words stay spoken;
+   * the cue renders nothing from now on. One undoable step, same write-back as a line edit.
+   */
+  const deleteCaptionCue = (clipId: string): boolean => {
+    const managed = managedCaptionLineRows(documentRef.current)?.find((row) => row.clipId === clipId);
+    const block = managed ? null : compRef.current.blocks.find((candidate) => candidate.id === clipId);
+    const ref = block?.slots.ref as { src?: unknown; seg?: unknown; w0?: unknown; w1?: unknown } | undefined;
+    const target = managed
+      ? { src: managed.src ?? null, assetId: managed.assetId, index: managed.seg, w0: managed.w0, w1: managed.w1 }
+      : ref && Number.isInteger(Number(ref.seg))
+        ? { src: typeof ref.src === 'string' && ref.src ? ref.src : null, assetId: undefined, index: Number(ref.seg), w0: Number(ref.w0) || 0, w1: Number(ref.w1) || 0 }
+        : null;
+    if (!target) return false;
+    const owner = documentTranscriptOwner(target);
+    if (!owner) {
+      toast.error(t('workbench.thereNoCaptionsRight'));
+      return false;
+    }
+    postPreview({ type: 'hf:remove', id: clipId });
+    const edits = sentenceCueEdits(owner, target, (candidate) => (candidate.w0 === target.w0 && candidate.w1 === target.w1 ? null : undefined));
+    if (!edits.some((edit) => edit.text === null)) edits.push({ assetId: owner, index: target.index, w0: target.w0, w1: target.w1, text: null });
+    return commitCueEdits(owner, target.src, edits);
+  };
   /** Captions panel empty-state "extract captions": run ASR in place (no style applied — the user
    *  may just want to edit lines; picking a style later re-lays from this transcript). */
+  /** A caption source whose container has no audio track cannot yield speech: say so instead of
+   *  leaving an empty panel (the transcript is stored as empty, which is correct but silent). */
+  const noticeWhenSourceHasNoAudio = (): boolean => {
+    const document = documentRef.current;
+    const targets = timelineTranscriptionTargets(document, document.semantics.managedCaptionSource ?? { mode: 'auto' });
+    if (!targets.length || !targets.every((target) => document.assets[target.assetId]?.metadata.hasAudio === false)) return false;
+    toast.info(t('captions.sourceHasNoAudio'));
+    return true;
+  };
   const extractCaptionsNow = async () => {
     const source = inspectCaptionDocument(documentRef.current);
     if (!source.hasSpeechTrack) {
@@ -202,8 +286,9 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     captionGenBusyRef.current = true;
     setCapGenBusy(true);
     try {
-      await stepAsr();
+      const segments = await stepAsr();
       await ensureClipTranscripts();
+      if (!segments.length) noticeWhenSourceHasNoAudio();
     } catch {
       toast.error(t('workbench.transcriptExtractionFailedTry'));
     } finally {
@@ -247,7 +332,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     comp,
     generating: capGenBusy,
     onPickPreset: applyCaptionPreset,
-    onRelayout: () => void relayoutCaptionsWithFeedback(),
+    onReextract: () => void reextractCaptionsNow(),
     onRemove: removeCaptionLayer,
     // Per-line style controls (main / translation): resolved current styles + patch callbacks.
     // Patches with an explicit undefined clear that override; sub patches deep-merge into captionStyle.sub.
@@ -400,30 +485,26 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     setClipAsr(transcripts.clips);
     return { ok: true };
   };
-  /** Panel refresh = RE-ACQUIRE, then re-lay. Refresh must survive a changed caption source:
-   * a pinned track/clip that no longer exists falls back to auto (the current audible source and
-   * the re-selection is persisted), a resolved source with no stored transcript is extracted
-   * first, and only then are cue boundaries regenerated. The busy overlay paints before the
-   * synchronous relayout (one macrotask so the sync work cannot block the paint), holds long
-   * enough to read as an action, and a toast confirms completion. */
-  const relayoutCaptionsWithFeedback = async () => {
+  /** Panel "re-extract": transcribe the speech again and rebuild every caption from the fresh
+   * transcript — a new set, the same as regenerating captions in a clip-based editor. Edited copy
+   * and removed cues are cleared with the old transcript; the boundaries are regenerated for the
+   * current canvas. A pinned source that no longer exists falls back to auto first. */
+  const reextractCaptionsNow = async () => {
     if (captionGenBusyRef.current) return;
     if (!isCaptionsOn(compRef.current)) {
       toast.error(t('workbench.thereNoCaptionsRight'));
       return;
     }
+    const source = inspectCaptionDocument(documentRef.current);
+    if (!source.hasSpeechTrack) {
+      toast.error(t('common.uploadVideoFirst'));
+      return;
+    }
     captionGenBusyRef.current = true;
     setCapGenBusy(true);
-    const shownAt = Date.now();
-    await new Promise((resolve) => setTimeout(resolve, 30));
     try {
       const selection = documentRef.current.semantics.managedCaptionSource ?? { mode: 'auto' as const };
-      let targets = timelineTranscriptionTargets(documentRef.current, selection);
-      const staleSource = !targets.length && selection.mode !== 'auto';
-      if (staleSource) {
-        targets = timelineTranscriptionTargets(documentRef.current, { mode: 'auto' });
-        // Extraction reads the persisted source: commit the auto re-selection first and let the
-        // render flush so documentRef reflects it before ASR resolves its targets.
+      if (selection.mode !== 'auto' && !timelineTranscriptionTargets(documentRef.current, selection).length) {
         const reselect = captionCommit({ source: { mode: 'auto' } }, 'none');
         if (!reselect.ok) {
           toast.error(editorErrorMessage(reselect.error));
@@ -431,17 +512,16 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
         }
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
-      const missingTranscript = targets.some(
-        (target) => !(documentRef.current.semantics.transcripts[target.assetId]?.length),
-      );
-      if (missingTranscript) await stepAsr();
+      const segments = await refreshAsr();
+      await ensureClipTranscripts();
+      if (!segments.length && noticeWhenSourceHasNoAudio()) return;
+      // The transcript refs changed; let the relay fold them in before regenerating the boundaries.
+      await new Promise((resolve) => setTimeout(resolve, 0));
       const result = relayoutCaptions();
-      if (result.ok) toast.success(t('captions.relayoutDone'));
+      if (result.ok) toast.success(t('captions.reextractDone'));
     } catch {
       toast.error(t('workbench.transcriptExtractionFailedTry'));
     } finally {
-      const holdRemainingMs = 350 - (Date.now() - shownAt);
-      if (holdRemainingMs > 0) await new Promise((resolve) => setTimeout(resolve, holdRemainingMs));
       captionGenBusyRef.current = false;
       setCapGenBusy(false);
     }
@@ -543,5 +623,5 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       setCapTransBusy(false);
     }
   };
-  return { setCaptionStyle, mappedCaptionSegs, relayCaptionLayer, captionLineRows, captionsPanelProps, applyCaptionPreset, relayoutCaptions, removeCaptionLayer };
+  return { setCaptionStyle, mappedCaptionSegs, relayCaptionLayer, captionLineRows, captionsPanelProps, applyCaptionPreset, relayoutCaptions, removeCaptionLayer, deleteCaptionCue };
 }

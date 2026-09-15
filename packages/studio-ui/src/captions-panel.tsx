@@ -98,7 +98,7 @@ export interface CaptionStyleCtl {
 export function CaptionsPanel({
   comp,
   onPickPreset,
-  onRelayout,
+  onReextract,
   onRemove,
   styleCtl,
   translation,
@@ -116,7 +116,8 @@ export function CaptionsPanel({
   /** Click a style card: globally swap the preset for all sentence-level captions (if none exist yet, lays a layer from the voiceover script). */
   onPickPreset: (presetId: string) => void;
   /** Explicitly regenerate cue boundaries from current canvas/font metrics. */
-  onRelayout?: () => void;
+  /** Transcribe the speech again and rebuild every caption: a fresh set, edits and removals cleared. */
+  onReextract?: () => void;
   /** Remove the whole sentence-level caption layer + clear global style. */
   onRemove: () => void;
   /** Per-line (main / translation) style state + patch callbacks. */
@@ -234,12 +235,12 @@ export function CaptionsPanel({
                   onChange={(v) => (v ? onPickPreset(styleCtl.main.preset) : onRemove())}
                 />
               }
-              trailing={hasCaptions && onRelayout ? (
+              trailing={hasCaptions && onReextract ? (
                 <button
                   type="button"
-                  onClick={onRelayout}
-                  title={t('captions.relayoutHint')}
-                  aria-label={t('captions.relayout')}
+                  onClick={onReextract}
+                  title={t('captions.reextractHint')}
+                  aria-label={t('captions.reextract')}
                   className="border-line text-ink-3 hover:border-accent hover:text-ink flex h-7 w-7 shrink-0 items-center justify-center rounded-md border"
                 >
                   <RefreshCw size={12} />

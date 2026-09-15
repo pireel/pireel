@@ -1,6 +1,7 @@
 /** Atomic managed-caption lifecycle over sparse appearance and a stable semantic lane. */
 
 import type { AsrSegment } from './build-blocks';
+import { applyCaptionTextEdits, removeCaptionCues } from './caption-text-edit';
 import {
   clearManagedCaptionLayout,
   lockManagedCaptionLayout,
@@ -87,6 +88,17 @@ export interface CaptionDocumentEditInput {
     | { mode: 'clip'; clipId: string };
   mainTranscript: readonly AsrSegment[] | null;
   clipTranscripts: Readonly<Record<string, readonly AsrSegment[]>>;
+  /** Per-cue copy edits applied to the transcript the document holds, so an edit travels as a few
+   *  bytes instead of the whole transcript. `text: null` removes the cue (the words stay spoken). */
+  cueEdits?: readonly CaptionCueEdit[];
+}
+
+export interface CaptionCueEdit {
+  assetId: string;
+  index: number;
+  w0?: number;
+  w1?: number;
+  text: string | null;
 }
 
 export type CaptionDocumentEditResult =
@@ -127,6 +139,24 @@ export function applyCaptionDocumentEdit(input: CaptionDocumentEditInput): Capti
   // patch so drafts created before cueLayout was introduced do not silently reflow on first touch.
   let document = lockManagedCaptionLayout(syncCaptionTranscripts(input.document, input.mainTranscript, input.clipTranscripts));
   const receipts: EditorCommandReceipt[] = [];
+  if (input.cueEdits?.length) {
+    const transcripts = { ...document.semantics.transcripts };
+    let changed = false;
+    for (const edit of input.cueEdits) {
+      const segments = transcripts[edit.assetId];
+      if (!segments) {
+        return { ok: false, document: input.document, error: { code: 'invalid-range', message: `No transcript for asset ${edit.assetId}` } };
+      }
+      const next = edit.text === null
+        ? removeCaptionCues(segments, [edit])
+        : applyCaptionTextEdits(segments, [{ index: edit.index, w0: edit.w0, w1: edit.w1, text: edit.text, lock: true }]);
+      if (next !== segments) {
+        transcripts[edit.assetId] = next;
+        changed = true;
+      }
+    }
+    if (changed) document = { ...document, semantics: { ...document.semantics, transcripts } };
+  }
   const nextOn = input.patch?.on ?? captionsOn(document);
   if (nextOn && !document.semantics.managedCaptionTrackId) {
     const inserted = applyEditorCommand(document, {

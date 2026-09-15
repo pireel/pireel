@@ -92,6 +92,19 @@ describe('captionBlocksFromAsr(一句一块;拆段在渲染期,不落数据)', (
   });
 });
 
+describe('displayCues: a removed cue', () => {
+  it('renders nothing for a cue the user removed while the neighbours keep their timing', () => {
+    const words = [
+      { text: 'one', start: 0, end: 1 }, { text: 'two', start: 1, end: 2 },
+      { text: 'three', start: 2, end: 3 }, { text: 'four', start: 3, end: 4 },
+    ];
+    const seg = { start: 0, end: 4, text: 'one two three four', words, cueTexts: { '0:1': '' }, cueLayout: ['0:1', '2:3'] };
+    const cues = displayCues(oneShot(4), [seg], {});
+    expect(cues.map((c) => c.text)).toEqual(['three four']);
+    expect(cues[0]!.start).toBe(2);
+  });
+});
+
 describe('displayCues(铺设期派生:剪辑后词流 → 一屏一行,列表与视频同一份)', () => {
   const longText = '这是一个非常非常长的句子它应该在铺设的时候被切成好几条独立的字幕';
   it('长句切成多条 cue:文本可拼回/ref 指回源句词范围/时间贴词', () => {

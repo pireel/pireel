@@ -202,6 +202,7 @@ export function displayCuesFromMappedSegs(
       const w0 = c[0]!.si ?? 0;
       const w1 = c[c.length - 1]!.si ?? 0;
       const override = srcSeg?.cueTexts?.[`${w0}:${w1}`];
+      if (override === '') continue; // removed by the user: the words are spoken, nothing is shown
       const text = override !== undefined && srcSeg ? maskCueText(srcSeg, override, w0, w1) : joinWords(c.map((w) => w.text));
       const sub = subFresh ? (srcSeg?.cueSubs?.[`${w0}:${w1}`] ?? pieces?.[ci]) : undefined;
       out.push({

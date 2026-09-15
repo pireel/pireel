@@ -75,6 +75,8 @@ function remapRangeText(
 ): Record<string, string> {
   if (!values && !wholeText) return {};
   const perWord = words.map((word) => useSourceDefaults ? word.text : '');
+  // Words of a removed cue (empty override) stay hidden whatever the new layout is.
+  const hidden = words.map(() => false);
   const sourceText = joinWords(words.map((word) => word.text));
   if (wholeText && !values && wholeText.trim() !== sourceText) {
     distributeLoose(wholeText, perWord.length).forEach((piece, index) => { perWord[index] = piece; });
@@ -82,12 +84,19 @@ function remapRangeText(
   for (const [key, text] of Object.entries(values ?? {})) {
     const range = parseRange(key, words.length);
     if (!range) continue;
+    if (useSourceDefaults && text === '') {
+      for (let index = range.start; index <= range.end; index += 1) hidden[index] = true;
+    }
     distributeLoose(text, range.end - range.start + 1).forEach((piece, offset) => {
       perWord[range.start + offset] = piece;
     });
   }
   const out: Record<string, string> = {};
   for (const range of nextRanges) {
+    if (hidden.slice(range.start, range.end + 1).every(Boolean)) {
+      out[range.key] = '';
+      continue;
+    }
     const text = joinedPieces(perWord.slice(range.start, range.end + 1)).trim();
     const original = useSourceDefaults
       ? joinWords(words.slice(range.start, range.end + 1).map((word) => word.text))
