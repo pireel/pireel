@@ -26,6 +26,8 @@ import {
   type DocumentTransaction,
   type DocumentTransactionOrigin,
 } from '@pireel/studio-engine/document-transaction';
+import { canonicalJson, hashSection } from '@pireel/studio-engine/stable-json';
+import { diffOps } from '@pireel/studio-engine/project-dto';
 
 export type CommitUndo = 'step' | 'none';
 
@@ -115,14 +117,20 @@ export class DocumentCommitter {
       last = outcome;
     }
     if (!last) return { ok: true, document: before };
-    const next = current === before ? before : normalizeCommittedDocument(current);
-    if (next === before && !options.runtimeComposition) return { ...last, document: before };
+    const normalized = current === before ? before : normalizeCommittedDocument(current);
     const origin = options.origin ?? (this.staging ? 'agent' : 'user');
+    // Derived relays (caption layout, metadata folds) rebuild the document on every run and
+    // usually change nothing; identity cannot tell, and a no-op transaction would still bump the
+    // server version and push a history entry.
+    const unchanged = normalized === before
+      || (origin === 'system' && canonicalJson(normalized) === canonicalJson(before));
+    const next = unchanged ? before : normalized;
+    if (unchanged && !options.runtimeComposition) return { ...last, document: before };
     if (origin === 'user' || origin === 'agent') this.deps.onBeforeMutation?.();
-    if ((options.undo ?? 'step') === 'step' && !this.staging) this.pushUndoSnapshot();
+    if (!unchanged && (options.undo ?? 'step') === 'step' && !this.staging) this.pushUndoSnapshot();
     this.deps.publish(next, options.runtimeComposition);
     const published = this.deps.getDocument();
-    if (next !== before) this.record({ id: createDocumentTransactionId(), origin, ops });
+    if (!unchanged) this.record({ id: createDocumentTransactionId(), origin, ops });
     return { ...last, document: published };
   }
 
@@ -134,7 +142,16 @@ export class DocumentCommitter {
     if (options.origin !== 'restore') return;
     const published = this.deps.getDocument();
     if (published === before) return;
-    this.record({ id: createDocumentTransactionId(), origin: 'restore', ops: [{ op: 'document.replace', input: { document: published } }] });
+    this.record({ id: createDocumentTransactionId(), origin: 'restore', ops: [restoreOp(before, published)] });
+  }
+
+  /**
+   * The whole current document as one `document.replace` transaction: the fallback when a
+   * `document.patch` was refused (the server did not hold the document it was made against). It
+   * supersedes everything still pending, since the document already includes those edits.
+   */
+  replaceTransaction(): DocumentTransaction {
+    return { id: createDocumentTransactionId(), origin: 'restore', ops: [{ op: 'document.replace', input: { document: this.deps.getDocument() } }] };
   }
 
   /** Re-publish the current document with a fresh runtime projection (media bytes arrived). */
@@ -188,6 +205,22 @@ export class DocumentCommitter {
     if (this.staging) this.staging.push(transaction);
     else this.deps.onTransaction(transaction);
   }
+}
+
+/** A patch bigger than this share of the document it produces is not worth sending over a snapshot. */
+const PATCH_WORTH_RATIO = 0.5;
+
+/** Undo, redo and restore as a JSON Patch when that is meaningfully smaller than the document. */
+export function restoreOp(before: EditorDocumentV2, after: EditorDocumentV2): DocumentOp {
+  const replace: DocumentOp = { op: 'document.replace', input: { document: after } };
+  let patch: ReturnType<typeof diffOps>;
+  try {
+    patch = diffOps(JSON.parse(canonicalJson(before)), JSON.parse(canonicalJson(after)));
+  } catch {
+    return replace;
+  }
+  if (!patch.length || JSON.stringify(patch).length > canonicalJson(after).length * PATCH_WORTH_RATIO) return replace;
+  return { op: 'document.patch', input: { baseHash: hashSection(canonicalJson(before)), patch } };
 }
 
 /** True when an operation failed only because its target is gone (safe to ignore on replay). */

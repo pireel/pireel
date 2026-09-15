@@ -1,9 +1,11 @@
 import type { AsrSegment } from '../build-blocks';
 import type { EditorDocumentV2, NarrativeTimelineClip } from './types';
 import { firstNarrativeAssetId } from './read-model';
+import { canonicalJson } from '../stable-json';
 
+/** By content: a stored copy comes back from jsonb with reordered keys and must not read as a change. */
 function sameTranscript(left: readonly AsrSegment[] | undefined, right: readonly AsrSegment[]): boolean {
-  return left === right || JSON.stringify(left ?? []) === JSON.stringify(right);
+  return left === right || canonicalJson(left ?? []) === canonicalJson(right);
 }
 
 /** Browser transcript refs can lag cuts/style transactions. Once the document owns a materialized

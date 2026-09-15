@@ -84,5 +84,6 @@ export const COMMON_EN: Record<string, string> = {
   'editorError.invalidTrackRole': 'That track type is not valid for this operation.',
   'editorError.primaryTrackRequired': 'The primary video track cannot be removed.',
   'editorError.trackLocked': 'This edit touches a locked track. Unlock it and try again.',
+  'editorError.staleBase': 'This step was made against an older copy of the project; the whole document is being sent instead.',
   'editorError.operationFailed': 'The operation failed. Please try again.',
 };

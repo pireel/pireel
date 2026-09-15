@@ -14,13 +14,16 @@
  * having to compare version numbers first.
  */
 
+import { applyPatch, type Operation as JsonPatchOperation } from 'fast-json-patch';
 import type { AsrSegment } from './build-blocks';
+import { canonicalJson, hashSection } from './stable-json';
 import type { Block, Composition, VideoShot } from './composition-core';
 import type { ProjectCloudMediaIndex } from './project-dto';
 import type { LocalAssetIndexEntry } from './project-context';
 import {
   applyEditorCommand,
   freezeEditorDocumentBlockVars,
+  parseEditorDocumentV2,
   pruneEmptyNonPrimaryTracks,
   pruneUnusedEditorAssets,
   syncCaptionTranscripts,
@@ -105,6 +108,10 @@ type WithoutDocument<T> = Omit<T, 'document'>;
 export interface DocumentOpInputs {
   /** Whole-document replacement: undo, redo, restore, output switch. The one operation that is a snapshot. */
   'document.replace': { document: EditorDocumentV2 };
+  /** The same restore as a JSON Patch against the document the writer held (`baseHash` = its
+   *  canonical hash). Applies only on that exact document; anywhere else it fails with
+   *  `stale-base` and the writer falls back to `document.replace`. */
+  'document.patch': { baseHash: string; patch: readonly JsonPatchOperation[] };
   /** Fold session metadata (transcripts, cloud keys, library directory, source sig) into the document. */
   'document.foldMetadata': Transcripts & {
     plan?: unknown;
@@ -173,6 +180,7 @@ export interface DocumentOp<N extends DocumentOpName = DocumentOpName> {
 /** Extra fields an operation reports next to the document when it succeeds. */
 export interface DocumentOpResults {
   'document.replace': Record<never, never>;
+  'document.patch': Record<never, never>;
   'document.foldMetadata': Record<never, never>;
   'command': Record<never, never>;
   'overlay.patch': Record<never, never>;
@@ -255,6 +263,20 @@ const strip = <T extends { ok: boolean; document: EditorDocumentV2 }>(result: T)
 
 const handlers: { [N in DocumentOpName]: Handler<N> } = {
   'document.replace': (_document, input) => ({ ok: true, document: input.document }),
+  'document.patch': (document, input) => {
+    if (hashSection(canonicalJson(document)) !== input.baseHash) {
+      return fail(document, 'stale-base', 'The patch was made against a document this host does not hold') as DocumentOpOutcome<'document.patch'>;
+    }
+    let patched: unknown;
+    try {
+      patched = applyPatch(structuredClone(document) as unknown, input.patch as JsonPatchOperation[], true, false).newDocument;
+    } catch (error) {
+      return fail(document, 'invalid-document', `Patch does not apply: ${error instanceof Error ? error.message : String(error)}`) as DocumentOpOutcome<'document.patch'>;
+    }
+    const parsed = parseEditorDocumentV2(patched);
+    if (!parsed) return fail(document, 'invalid-document', 'Patch result is not a V2 document') as DocumentOpOutcome<'document.patch'>;
+    return { ok: true, document: parsed };
+  },
   'document.foldMetadata': (document, input, ctx) => ({
     ok: true,
     document: applyEditorDocumentPersistenceMetadata({ projectId: ctx.projectId, document, ...input }),
@@ -563,11 +585,18 @@ export function transcriptInputsFor(
   mainTranscript: readonly AsrSegment[] | null | undefined,
   clipTranscripts: Readonly<Record<string, readonly AsrSegment[]>> | undefined,
 ): Transcripts {
-  const synced = syncCaptionTranscripts(document, mainTranscript ?? null, clipTranscripts ?? {});
+  const clips = clipTranscripts ?? {};
+  const synced = syncCaptionTranscripts(document, mainTranscript ?? null, clips);
   if (synced === document) return {};
+  // Only what changes the document travels: the browser's clip map covers every transcribed
+  // library clip, most of which are not on the timeline, and the main transcript is usually already
+  // folded. Each candidate is checked on its own against the document that already holds the main.
+  const withMain = syncCaptionTranscripts(document, mainTranscript ?? null, {});
+  const changedClips = Object.fromEntries(Object.entries(clips).filter(([key, segments]) =>
+    segments.length > 0 && syncCaptionTranscripts(withMain, mainTranscript ?? null, { [key]: segments }) !== withMain));
   return {
-    ...(mainTranscript?.length ? { mainTranscript } : {}),
-    ...(clipTranscripts && Object.keys(clipTranscripts).length ? { clipTranscripts } : {}),
+    ...(withMain !== document ? { mainTranscript } : {}),
+    ...(Object.keys(changedClips).length ? { clipTranscripts: changedClips } : {}),
   };
 }
 

@@ -12,6 +12,7 @@ const ERROR_KEYS: Record<EditorCommandErrorCode, string> = {
   'invalid-track-role': 'editorError.invalidTrackRole',
   'primary-track-required': 'editorError.primaryTrackRequired',
   'track-locked': 'editorError.trackLocked',
+  'stale-base': 'editorError.staleBase',
 };
 
 /** Convert engine diagnostics into locale-safe UI copy. Raw engine messages remain available for logs. */

@@ -217,6 +217,8 @@ import {
 import {
   alignFileToSig,
   loadLocalVideo,
+  fileOrigin,
+  markFileOrigin,
   resolveAssetBytes,
   saveLocalVideo,
 } from "./local-media";
@@ -237,8 +239,7 @@ import { compositionRenderView } from "./composition-render-view";
 import { primaryNarrativeRenderPlan } from "./primary-render-plan";
 import {
   supplementalVisualFileBindings,
-  supplementalVisualMedia,
-} from "./visual-render-plan";
+  supplementalVisualMedia, sandboxSafePreviewDoc, } from "./visual-render-plan";
 import {
   type BakeSpec,
   type BakedWindow,
@@ -487,6 +488,15 @@ const CAPTION_DERIVE_MAX_CHAIN = 8;
 /** Bridge tools that report/choose the active output; they re-anchor the agent instead of being gated by it. */
 const OUTPUT_ANCHOR_TOOLS = new Set(["get_state", "list_outputs", "switch_output", "create_output", "duplicate_output", "delete_output"]);
 
+/** The cover signature last uploaded for a project, remembered across opens (null when unknown). */
+function readCoverPushedSig(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
 export function HyperframesWorkbench({
   projectId,
   agentView = false,
@@ -701,6 +711,8 @@ export function HyperframesWorkbench({
   );
   const videoPlacementsRef = useRef(videoPlacements);
   videoPlacementsRef.current = videoPlacements;
+  const renderPlanRef = useRef(renderPlan);
+  renderPlanRef.current = renderPlan;
   const primaryHiddenRef = useRef(primaryNarrative.hidden);
   primaryHiddenRef.current = primaryNarrative.hidden;
   // Native visual-lane selection is independent from legacy shot/block projections: a clip remains
@@ -1498,6 +1510,25 @@ export function HyperframesWorkbench({
       }
     };
     eng.onBlank = (t) => {
+      // A blank inside a placed, enabled clip is not a gap: the engine has no playable source
+      // there (dropped, errored, or never registered). Say which clip so a white canvas is traceable.
+      const covering = renderPlanRef.current.narrative.find(
+        (entry) => entry.clip.enabled && t >= entry.startSec - 1e-6 && t < entry.endSec - 1e-6,
+      );
+      // Boot: the document is on screen before its device bytes are attached (resolvedSource is
+      // still empty while the runtime is being prepared); that blank clears itself and is not a fault.
+      const preparing = covering && !covering.resolvedSource
+        && !localRuntimeReadyAssetIdsRef.current.has(covering.clip.assetId);
+      if (covering && !preparing) {
+        const src = compRef.current.shots?.find((shot) => shot.id === covering.clipId)?.src;
+        console.warn("[studio] video engine has no playable source inside a placed clip", {
+          t: Math.round(t * 1000) / 1000,
+          clipId: covering.clipId,
+          assetId: covering.clip.assetId,
+          resolved: !!covering.resolvedSource,
+          ...(src ? { source: eng.sourceState(src) } : { source: "no shot src" }),
+        });
+      }
       const pendingPrime = previewFramePrimeRef.current;
       const prime = pendingPrime
         && bufsRef.current.docs[pendingPrime.idx] === pendingPrime.doc
@@ -1511,6 +1542,53 @@ export function HyperframesWorkbench({
         previewFramePrimeRef.current = null;
         queueMicrotask(prime.onDelivered);
       }
+    };
+    // A resident element that failed to load (observed: a File handed out by the device cache whose
+    // backing file changed → net::ERR_UPLOAD_FILE_CHANGED) leaves its clips blank until the source
+    // is set again. Re-read the bytes from the device cache and re-seat the source, at most twice.
+    const sourceRecoveries = new Map<string, number>();
+    eng.onSourceError = (key, error) => {
+      const attempts = sourceRecoveries.get(key) ?? 0;
+      const shot = compRef.current.shots?.find((candidate) => candidate.src === key);
+      const document = editorDocumentRef.current;
+      const primary = document.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId);
+      const clip = shot ? primary?.clips.find((candidate) => candidate.id === shot.id) : undefined;
+      const asset = clip && clip.kind === "narrative" ? document.assets[clip.assetId] : undefined;
+      const stale = clipFilesRef.current.get(key);
+      const source = eng.sourceState(key);
+      const report = (readable: string) => console.warn("[studio] video source failed to load", {
+        key: key.slice(0, 48),
+        code: error?.code ?? null,
+        message: error?.message ?? null,
+        assetId: asset?.id ?? null,
+        file: stale ? { name: stale.name, size: stale.size, lastModified: stale.lastModified, origin: fileOrigin(stale) } : null,
+        readable,
+        attempts,
+        source,
+      });
+      // First response is immediate and synchronous: rebuild the pipeline from the bytes the engine
+      // already holds, so the very next seek finds a live element (no dead window, no cleared canvas).
+      if (attempts === 0 && eng.reloadSource(key)) {
+        sourceRecoveries.set(key, 1);
+        eng.refresh();
+        report("reloaded in place");
+        return;
+      }
+      // Read a few bytes of the File the element was built from: a File whose backing changed
+      // (device cache rewritten, handle invalidated) fails here with the browser's own reason.
+      if (stale) stale.slice(0, 64).arrayBuffer().then(() => report("yes"), (e: unknown) => report(`no: ${e instanceof Error ? `${e.name}: ${e.message}` : String(e)}`));
+      else report("no file in registry");
+      if (!asset?.locator.localSig || attempts >= 3) return;
+      sourceRecoveries.set(key, attempts + 1);
+      void loadLocalVideo(asset.locator.localSig).then((file) => {
+        if (!file || videoEngineRef.current !== eng) return;
+        clipFilesRef.current.set(key, file);
+        localRuntimeFilesRef.current.set(asset.id, file);
+        if (asset.id === firstNarrativeAssetId(editorDocumentRef.current)) videoFileRef.current = file;
+        eng.setSource(key, file);
+        eng.refresh();
+        console.warn("[studio] video source re-seated from the device cache", { key: key.slice(0, 48), assetId: asset.id });
+      });
     };
     eng.onTick = (t) => {
       if (!playingRef.current) return;
@@ -1884,9 +1962,30 @@ export function HyperframesWorkbench({
       return shot ? [{ entry, shot }] : [];
     });
     const shots = entries.map(({ shot }) => shot);
-    for (const s of shots) {
+    for (const { shot: s, entry } of entries) {
       if (!s.src) continue;
-      const f = clipFilesRef.current.get(s.src);
+      let f = clipFilesRef.current.get(s.src);
+      if (!f && s.src.startsWith("blob:")) {
+        // A session URL whose File is not in the registry (re-asserted through another path, or
+        // minted outside the import/insert flows). Fall back to the bytes held for the asset before
+        // dropping the source: a dropped source blanks the canvas at this clip.
+        const assetId = entry.clip.assetId;
+        const held =
+          localRuntimeFilesRef.current.get(assetId) ??
+          (assetId === firstNarrativeAssetId(editorDocumentRef.current)
+            ? (videoFileRef.current ?? undefined)
+            : undefined);
+        if (held) {
+          clipFilesRef.current.set(s.src, held);
+          f = held;
+        } else if (!s.src.startsWith("blob:pireel-offline/")) {
+          console.warn("[studio] narrative source has no readable bytes; the canvas blanks on this clip", {
+            clipId: s.id,
+            assetId,
+            src: s.src.slice(0, 48),
+          });
+        }
+      }
       eng.setSource(s.src, f ?? (s.src.startsWith("blob:") ? null : s.src));
     }
     const shapeChanged = eng.setSegments(
@@ -2652,12 +2751,12 @@ export function HyperframesWorkbench({
         }
         markBuilt();
         const doc = injectPreviewRuntime(
-          assembleHtml(
+          sandboxSafePreviewDoc(assembleHtml(
             previewCompOf(renderComposition),
             undefined,
             renderVideoPlacements,
             supplementalVisuals,
-          ),
+          )),
         );
         if (doc !== bufsRef.current.docs[bufsRef.current.active]) {
           pendingSwitchRef.current = true; // swap pending: patch path steps aside
@@ -2896,7 +2995,10 @@ export function HyperframesWorkbench({
   // Cover BYTES travel their own debounced channel (providers.projects.saveCover → R2 key in the
   // row); the JSON save payload never carries base64 — it multiplied every project PUT/GET/list.
   const coverCloudTimerRef = useRef<number | null>(null);
-  const coverCloudPushedSigRef = useRef<string | null>(null);
+  // Remembered across opens: the cover is redrawn on every boot and would otherwise be re-uploaded
+  // (~140KB) each time the project is opened.
+  const coverPushedStorageKey = `studio:cover-pushed:${projectId}`;
+  const coverCloudPushedSigRef = useRef<string | null>(readCoverPushedSig(coverPushedStorageKey));
   const scheduleCoverCloudPush = (cover: Blob | null, sig: string | null) => {
     const saveCover = studioProviders().projects.saveCover;
     if (!saveCover || sig === coverCloudPushedSigRef.current) return;
@@ -2907,6 +3009,10 @@ export function HyperframesWorkbench({
       void saveCover(projectId, cover)
         .then(() => {
           coverCloudPushedSigRef.current = sig;
+          try {
+            if (sig) localStorage.setItem(coverPushedStorageKey, sig);
+            else localStorage.removeItem(coverPushedStorageKey);
+          } catch { /* storage is a convenience */ }
         })
         .catch(() => {}); // a cover is a bonus; the next redraw retries
     }, 2_500);
@@ -4168,6 +4274,7 @@ export function HyperframesWorkbench({
     durationSec: number;
   }) {
     objectUrlRef.current = source.url;
+    if (!fileOrigin(source.file)) markFileOrigin(source.file, "pick");
     clipFilesRef.current.set(source.url, source.file);
     // Retained only as a legacy panel cache for the last file picked by the user. Playback and
     // source identity are driven exclusively by clip asset URLs.
@@ -4365,7 +4472,7 @@ export function HyperframesWorkbench({
     setAsrSentences,
     setVisual,
     documentRef: editorDocumentRef,
-    setDocument: setEditorDocument,
+    commit,
     speechFileForAsset,
     currentVideo,
   });
@@ -4528,8 +4635,23 @@ export function HyperframesWorkbench({
    *  removes the block instantly — waiting for the 300ms debounced rebuild + double-buffer swap makes delete feel sticky. */
   const removeBlock = (id: string) => {
     if (genLockToast(id)) return;
+    // A sentence caption is derived from the transcript: deleting the selected one removes that
+    // cue (the words stay spoken), one undoable step. The whole layer is removed from the captions panel.
+    const block = compRef.current.blocks.find((b) => b.id === id);
+    if (block && isSentenceCaption(block)) {
+      if (deleteCaptionCue(id)) {
+        setSelectedIdRaw((s) => (s === id ? null : s));
+        setSelectedBlockIds((cur) => {
+          if (!cur.has(id)) return cur;
+          const n = new Set(cur);
+          n.delete(id);
+          return n;
+        });
+      }
+      return;
+    }
     postPreview({ type: "hf:remove", id });
-    const edit = commit({ op: "overlay.remove", input: { clipIds: [id] } }, { undo: "none" });
+    const edit = commit({ op: "overlay.remove", input: { clipIds: [id] } });
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return;
@@ -5599,17 +5721,23 @@ export function HyperframesWorkbench({
   /* ---------------- Unified gen panel (one chat interaction for image/video/component) ---------------- */
 
   // Timeline block drag: move (clamped to [0, dur]) / trim both ends. Don't move a generating block (its time window was already fed to the worker)
+  // The timeline reports a move once on release, a trim on every pointer move: one gesture = one undo step.
   const moveBlock = (id: string, startSec: number) => {
     if (genLockToast(id)) return;
     const edit = commit({ op: "overlay.patch", input: {
       updates: [
         { clipId: id, startSec: Math.max(0, Math.round(startSec * 100) / 100) },
       ],
-    } }, { undo: "none" });
+    } });
     if (!edit.ok) toast.error(editorErrorMessage(edit.error));
   };
+  const blockTrimGestureRef = useRef<{ id: string; at: number } | null>(null);
   const resizeBlock = (id: string, startSec: number, durationSec: number) => {
     if (genLockToast(id)) return;
+    const now = Date.now();
+    const gesture = blockTrimGestureRef.current;
+    const sameGesture = gesture?.id === id && now - gesture.at < 500;
+    blockTrimGestureRef.current = { id, at: now };
     const edit = commit({ op: "overlay.patch", input: {
       updates: [
         {
@@ -5618,7 +5746,7 @@ export function HyperframesWorkbench({
           durationSec: Math.max(0.3, Math.round(durationSec * 100) / 100),
         },
       ],
-    } }, { undo: "none" });
+    } }, { undo: sameGesture ? "none" : "step" });
     if (!edit.ok) toast.error(editorErrorMessage(edit.error));
   };
   const resizeCaption = (id: string, edge: "left" | "right", atSec: number) => {
@@ -6588,6 +6716,7 @@ export function HyperframesWorkbench({
     applyCaptionPreset,
     relayoutCaptions,
     removeCaptionLayer,
+    deleteCaptionCue,
   } = useCaptionsOps({
     comp,
     tSec,
@@ -6911,7 +7040,7 @@ export function HyperframesWorkbench({
     setGhostRect,
     setGuideVis,
     documentRef: editorDocumentRef,
-    setDocument: setEditorDocument,
+    commit,
     postPreview,
     setBlockRotation,
   });
@@ -7238,12 +7367,18 @@ export function HyperframesWorkbench({
     getDocument: () => editorDocumentRef.current,
     onMigrationRequired: blockForDocumentMigration,
     store: localPendingTransactionStore(projectId),
-    onAck: (ack, info) => {
+    load: () => studioProviders().projects.load(projectId),
+    recover: () => committer.replaceTransaction(),
+    onAck: (_ack, info) => {
       if (!info.diverged) return;
       // Another writer landed in between (an offline agent, an import), or something we sent did
       // not apply: adopt the server document and replay what is still pending on top, so nothing
       // done here is lost and nothing done elsewhere is overwritten.
-      const remote = ack.project;
+      const remote = info.project;
+      if (!remote) {
+        console.warn("[studio] server document diverged but could not be loaded; pending edits stay queued");
+        return;
+      }
       projectOutputs.hydrate(remote.context.outputs);
       setLocalAssetIndex(nativeProjectSharedLocalAssets(remote.document, remote.context));
       const { dropped } = committer.rebase(remote.document, info.pending);
@@ -7935,6 +8070,55 @@ export function HyperframesWorkbench({
       cancelled = true;
     };
   }, [projectId, localAssetIndexSyncReady, localAssetIndexRev]);
+  // Runtime transcript refs follow the document. A transcript the document changed on its own
+  // (re-extraction, an agent edit, a cue edit, a rebase onto the server copy) must not be re-imposed
+  // by a stale runtime copy on the next caption relay: the clip copies are matched by source and the
+  // main copy by the first narrative asset, and only a copy whose content differs is replaced.
+  useEffect(() => {
+    const document = editorDocumentRef.current;
+    const metadata = nativeProjectSessionMetadata(document, compRef.current);
+    const nextClips = { ...clipAsrRef.current };
+    let clipsChanged = false;
+    // A runtime copy may also sit under the asset id (a boot before the composition existed, an
+    // agent write-back): every alias of the same asset follows, or the stale one re-imposes itself.
+    const primary = document.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId);
+    const sourceByClipId = new Map((compRef.current.shots ?? []).map((shot) => [shot.id, shot.src] as const));
+    const aliasesByAsset = new Map<string, Set<string>>();
+    for (const clip of primary?.clips ?? []) {
+      if (clip.kind !== "narrative") continue;
+      const aliases = aliasesByAsset.get(clip.assetId) ?? new Set<string>();
+      // The same keys the engine's transcript sync accepts for this asset.
+      aliases.add(clip.assetId);
+      aliases.add(`blob:pireel-offline/${clip.assetId}`);
+      const remoteUrl = document.assets[clip.assetId]?.locator.remoteUrl;
+      if (remoteUrl) aliases.add(remoteUrl);
+      const source = sourceByClipId.get(clip.id);
+      if (source) aliases.add(source);
+      aliasesByAsset.set(clip.assetId, aliases);
+    }
+    for (const [assetId, aliases] of aliasesByAsset) {
+      const segments = document.semantics.transcripts[assetId] as AsrSegment[] | undefined;
+      if (!segments?.length) continue;
+      for (const alias of aliases) {
+        if (!(alias in nextClips) && !(alias in metadata.clipTranscripts)) continue;
+        if (canonicalJson(nextClips[alias] ?? null) === canonicalJson(segments)) continue;
+        nextClips[alias] = segments;
+        clipsChanged = true;
+      }
+    }
+    if (clipsChanged) {
+      clipAsrRef.current = nextClips;
+      setClipAsr(nextClips);
+    }
+    const mainId = firstNarrativeAssetId(document);
+    const main = mainId ? (document.semantics.transcripts[mainId] as AsrSegment[] | undefined) : undefined;
+    if (main && asrRef.current && canonicalJson(asrRef.current) !== canonicalJson(main)) {
+      asrRef.current = main;
+      setAsrSentences(main);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorDocument]);
+
   // CAPTIONS ARE DERIVED STATE: transcript × shots × captionStyle.on → display cues, materialized into
   // comp.blocks for every consumer (preview/timeline/selection/agent) but NEVER persisted — autosave
   // strips them; the transcript is the single stored source. This one reactive effect replaces the old

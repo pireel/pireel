@@ -109,7 +109,13 @@ export interface ProjectSavePayload {
 /** A save acknowledgement carries server truth back to the live editor. */
 export interface ProjectCommitAck {
   status: 'saved';
-  project: StudioProjectDto;
+  /** The stored revision after this batch. */
+  version: number;
+  updatedAt: number;
+  /** The whole project, only when the writer has to adopt it: it saved onto a version it did not
+   *  know (another writer landed in between), something was rejected, or it had no version yet.
+   *  Otherwise the acknowledgement stays a few hundred bytes however large the document is. */
+  project?: StudioProjectDto;
   /** Transaction ids the server has now applied, or already had from an earlier attempt. */
   applied: string[];
   /** Transactions that could not apply onto the current truth; their local effect is void. */
@@ -220,6 +226,10 @@ export interface AckedSections {
     /** Last server-acknowledged title. ProjectSavePayload.title is optional, where omission means
      * preserve — it must not be hashed as null or hydration emits a fake metadata change. */
     title?: string;
+    /** Last acknowledged media metadata. A payload carrying null means "not hydrated here, keep"
+     * (the server merges it the same way), so it must not hash as a change either. */
+    videoSig: string | null;
+    videoDurationSec: number | null;
   };
   hashes: SectionHashes;
 }
@@ -240,6 +250,8 @@ export function ackedFromDto(p: {
     values: {
       context: JSON.parse(contextCanon) as StudioProjectContext,
       title: p.title,
+      videoSig: p.videoSig,
+      videoDurationSec: p.videoDurationSec,
     },
     hashes: {
       context: hashSection(contextCanon),
@@ -297,6 +309,9 @@ export function buildSaveWire(
   // like a metadata edit, issuing a no-op PUT that advanced the cloud version and could race the
   // first timeline mutation.
   const effectiveTitle = p.title !== undefined ? p.title : acked?.values.title;
+  // Null media metadata means the saving tab has not hydrated it (same rule as the server merge).
+  const effectiveVideoSig = p.videoSig ?? acked?.values.videoSig ?? null;
+  const effectiveDuration = p.videoDurationSec ?? acked?.values.videoDurationSec ?? null;
   const hashes: SectionHashes = {
     context: contextCanon != null
       ? hashSection(contextCanon)
@@ -307,7 +322,7 @@ export function buildSaveWire(
     coverThumb: p.coverThumb !== undefined
       ? hashSection(p.coverThumb ?? '')
       : (acked?.hashes.coverThumb ?? hashSection('')),
-    meta: metaHashOf(effectiveTitle, p.videoSig, p.videoDurationSec),
+    meta: metaHashOf(effectiveTitle, effectiveVideoSig, effectiveDuration),
   };
   // JSON-clean current values (parsed from the canonical string: incidentally drops undefined, so diff is structurally comparable to the baseline)
   const values: AckedSections['values'] = {
@@ -315,6 +330,8 @@ export function buildSaveWire(
       ? (JSON.parse(contextCanon) as StudioProjectContext)
       : (acked?.values.context ?? sanitizeProjectContext(null)),
     ...(effectiveTitle !== undefined ? { title: effectiveTitle } : {}),
+    videoSig: effectiveVideoSig,
+    videoDurationSec: effectiveDuration,
   };
   const wire: ProjectSaveWire = { documentSchemaVersion: 2, knownVersion };
   const w = wire as unknown as Record<string, unknown>;
@@ -350,8 +367,8 @@ export function buildSaveWire(
   }
   if (!acked || acked.hashes.meta !== hashes.meta) {
     if (p.title !== undefined) wire.title = p.title;
-    wire.videoSig = p.videoSig;
-    wire.videoDurationSec = p.videoDurationSec;
+    wire.videoSig = effectiveVideoSig;
+    wire.videoDurationSec = effectiveDuration;
     changed = true;
   }
   return changed ? { wire, acked: { values, hashes } } : null;
@@ -540,6 +557,8 @@ export function applyProjectSave(
     applied: [...replay.applied, ...replay.duplicates],
     duplicates: replay.duplicates,
     rejected: replay.rejected.map(({ id, error }) => ({ id, error })),
-    documentChanged: replay.changed || merged.document !== replay.document,
+    // By content, not identity: a relay that rebuilt an identical document must not push a history entry.
+    documentChanged: (replay.changed || merged.document !== replay.document)
+      && canonicalJson(merged.document) !== canonicalJson(existing.document),
   };
 }

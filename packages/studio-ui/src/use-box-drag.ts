@@ -8,13 +8,14 @@
  */
 
 import type { MutableRefObject } from 'react';
-import { type Block, type Composition, type EditorDocumentV2, applyOverlayDocumentEdits, blockKind } from '@pireel/studio-engine/composition';
+import { type Block, type Composition, type EditorDocumentV2, blockKind } from '@pireel/studio-engine/composition';
 import { toast } from '@pireel/ui/toast';
 import { startPointerDrag } from './drag-shell';
 import { shiftBox } from './comp-diff';
 import { boxSelectionRect } from './edit-overlays';
 import { moveMediaCanvasBox, resizeMediaCanvasBox, scaleMediaCanvasBox, type MediaCanvasBox } from './media-box';
 import { editorErrorMessage } from './editor-error';
+import type { DocumentCommitter } from './document-commit';
 
 export interface CanvasBoxDragTarget {
   box: MediaCanvasBox;
@@ -36,7 +37,8 @@ export interface BoxDragDeps {
   setGhostRect: (g: { x: number; y: number; w: number; h: number } | null) => void;
   setGuideVis: (cx: boolean, cy: boolean) => void;
   documentRef: MutableRefObject<EditorDocumentV2>;
-  setDocument: (document: EditorDocumentV2) => void;
+  /** A released drag lands as one transaction (one undo step). */
+  commit: DocumentCommitter['commit'];
   postPreview: (msg: Record<string, unknown>) => void;
   setBlockRotation: (id: string, deg: number) => void;
 }
@@ -67,15 +69,11 @@ export function visualCornerScaleFactor(
 export function useBoxDrag(deps: BoxDragDeps) {
   const {
     fit, compRef, genIdsRef, stageBoxRef, rotateOverlayRef, rotateLabelRef, dragCursorRef,
-    setBodyDragging, setGhostRect, setGuideVis, documentRef, setDocument, postPreview, setBlockRotation,
+    setBodyDragging, setGhostRect, setGuideVis, documentRef, commit, postPreview, setBlockRotation,
   } = deps;
   const patchBlock = (clipId: string, block: Partial<Omit<Block, 'id' | 'startSec' | 'durationSec' | 'trackIndex'>>) => {
-    const edit = applyOverlayDocumentEdits({ document: documentRef.current, updates: [{ clipId, block }] });
-    if (!edit.ok) {
-      toast.error(editorErrorMessage(edit.error));
-      return;
-    }
-    setDocument(edit.document);
+    const edit = commit({ op: 'overlay.patch', input: { updates: [{ clipId, block }] } });
+    if (!edit.ok) toast.error(editorErrorMessage(edit.error));
   };
   /** Keep the one solid selection shell on the same live geometry as the iframe content.
    *  React still commits only on pointer-up; these four DOM writes avoid a second, stale baseline box. */

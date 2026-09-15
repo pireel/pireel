@@ -15,7 +15,7 @@ import {
   sanitizeSavePayload,
   type ProjectSavePayload,
 } from './project-dto';
-import type { DocumentTransaction } from './document-transaction';
+import { normalizeCommittedDocument, type DocumentTransaction } from './document-transaction';
 
 const document = () => {
   const value = emptyProjectDocument();
@@ -287,6 +287,15 @@ describe('applying a save to the stored row', () => {
     expect(applied.rejected.map((r) => r.id)).toEqual(['tx_0000000000000bad']);
     expect(applied.applied).toEqual(['tx_0000000000000002', 'tx_0000000000000001']);
     expect(applied.document.timeline.tracks[1]!.clips[0]!.startFrame).toBe(120);
+  });
+
+  it('acknowledges a transaction that rebuilt an identical document without counting it as a change', () => {
+    // A stored row is already in committed (normalized) form; the fixture is normalized the same way.
+    const row = { ...existing(), document: normalizeCommittedDocument(document()), appliedTransactionIds: [] };
+    const relay: DocumentTransaction = { id: 'tx_0000000000relay', origin: 'system', ops: [{ op: 'document.foldMetadata', input: {} }] };
+    const applied = applyProjectSave(row, sanitizeSavePayload({ documentSchemaVersion: 2, transactions: [relay] })!, ctx)!;
+    expect(applied.applied).toEqual(['tx_0000000000relay']);
+    expect(applied.documentChanged).toBe(false);
   });
 
   it('merges the small sections next to the replayed document', () => {

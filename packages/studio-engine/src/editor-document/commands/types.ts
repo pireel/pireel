@@ -198,7 +198,9 @@ export type EditorCommandErrorCode =
   | 'duplicate-clip-id'
   | 'invalid-track-role'
   | 'primary-track-required'
-  | 'track-locked';
+  | 'track-locked'
+  /** A document patch made against a document this host does not hold. */
+  | 'stale-base';
 
 export interface EditorCommandError {
   code: EditorCommandErrorCode;

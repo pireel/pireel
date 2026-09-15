@@ -272,13 +272,16 @@ export async function serverSaveProject(id: string, wire: ProjectSaveWire): Prom
     }
     if (!response.ok) return 'skip';
     const body = await response.json() as Partial<ProjectCommitAck> & { project?: StudioProjectDto };
-    if (!body.project) return 'skip'; // no acknowledgement: leave the intent pending
+    const version = typeof body.version === 'number' ? body.version : body.project?.version;
+    if (version == null || !Array.isArray(body.applied)) return 'skip'; // no acknowledgement: leave the intent pending
     return {
       status: 'saved',
-      project: body.project,
-      applied: Array.isArray(body.applied) ? body.applied : [],
+      version,
+      updatedAt: typeof body.updatedAt === 'number' ? body.updatedAt : (body.project?.updatedAt ?? 0),
+      ...(body.project ? { project: body.project } : {}),
+      applied: body.applied,
       rejected: Array.isArray(body.rejected) ? body.rejected : [],
-      baseVersion: typeof body.baseVersion === 'number' ? body.baseVersion : body.project.version - 1,
+      baseVersion: typeof body.baseVersion === 'number' ? body.baseVersion : version - 1,
       documentHash: typeof body.documentHash === 'string' ? body.documentHash : '',
     };
   } catch {

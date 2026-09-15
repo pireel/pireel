@@ -84,5 +84,6 @@ export const COMMON_ZH: Record<string, string> = {
   'editorError.invalidTrackRole': '该轨道类型不适用于这项操作。',
   'editorError.primaryTrackRequired': '不能移除主视频轨道。',
   'editorError.trackLocked': '这项编辑涉及已锁定轨道，请解锁后重试。',
+  'editorError.staleBase': '这一步基于旧版本的项目副本，已改为发送整份文档。',
   'editorError.operationFailed': '操作失败，请重试。',
 };

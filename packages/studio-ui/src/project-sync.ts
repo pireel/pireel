@@ -19,6 +19,7 @@ import {
   hashSection,
   type AckedSections,
   type ProjectCommitAck,
+  type StudioProjectDto,
   type ProjectSavePayload,
   type ProjectSaveResult,
   type ProjectSaveWire,
@@ -37,8 +38,14 @@ export interface ProjectSyncDeps {
   canWrite: () => boolean;
   /** The live document, hashed at send time to detect a server document that drifted. */
   getDocument: () => EditorDocumentV2;
-  /** Acknowledged. `diverged` means the caller must adopt `ack.project.document` and replay `pending`. */
-  onAck: (ack: ProjectCommitAck, info: { diverged: boolean; pending: DocumentTransaction[] }) => void;
+  /** Acknowledged. `diverged` means the caller must adopt `project.document` and replay `pending`;
+   *  the project is the acknowledgement's copy or, when the server sent none, freshly loaded. */
+  onAck: (ack: ProjectCommitAck, info: { diverged: boolean; pending: DocumentTransaction[]; project: StudioProjectDto | null }) => void;
+  /** Fetch the stored project when a divergence is detected on an acknowledgement that carried none. */
+  load?: () => Promise<StudioProjectDto | null>;
+  /** The whole current document as one transaction: sent when the server refused a `document.patch`
+   *  (it did not hold the document the patch was made against). Supersedes the pending list. */
+  recover?: () => DocumentTransaction;
   onMigrationRequired?: () => void;
   /** Where unacknowledged transactions survive a reload. */
   store?: PendingTransactionStore;
@@ -79,7 +86,7 @@ export class ProjectSync {
   }
 
   /** The server snapshot this session opened from, so the first push carries the right version hint. */
-  seed(project: { version: number; context: ProjectCommitAck['project']['context']; coverThumb: string | null; title: string; videoSig: string | null; videoDurationSec: number | null }): void {
+  seed(project: { version: number; context: StudioProjectDto['context']; coverThumb: string | null; title: string; videoSig: string | null; videoDurationSec: number | null }): void {
     this.knownVersion = project.version;
     this.acked = ackedFromDto(project);
     this.sectionsSavedRevision = this.sectionsRevision;
@@ -156,12 +163,14 @@ export class ProjectSync {
     const pendingAtSend = this.pending.length;
 
     let result: ProjectSyncSendResult;
+    let sentAcked = built.acked;
     try {
       result = await this.deps.send(built.wire);
       if (result === 'need-full') {
         // The section baseline drifted from the row; resend the sections whole, once.
         this.acked = null;
         const whole = buildSaveWire({ ...sections, ...(batch.length ? { transactions: batch } : {}) }, this.knownVersion, null);
+        if (whole) sentAcked = whole.acked;
         result = whole ? await this.deps.send(whole.wire) : 'ok';
       }
     } catch {
@@ -184,9 +193,21 @@ export class ProjectSync {
 
     const settled = new Set([...result.applied, ...result.rejected.map((entry) => entry.id)]);
     this.pending = this.pending.filter((transaction) => !settled.has(transaction.id));
+    this.knownVersion = result.version;
+    // The sections the server now holds: its copy when it sent one, else what this push carried.
+    this.acked = result.project ? ackedFromDto(result.project) : sentAcked;
+    // A refused restore patch: the server did not hold the document it was made against. The
+    // restore still stands here, so send the document itself; it already contains whatever was
+    // pending, which is therefore dropped rather than replayed twice.
+    const refusedPatch = result.rejected.some((entry) => batch.find((transaction) => transaction.id === entry.id)?.ops.some((op) => op.op === 'document.patch'));
+    if (refusedPatch && this.deps.recover) {
+      this.pending = [this.deps.recover()];
+      this.persist();
+      this.deps.onAck(result, { diverged: false, pending: [...this.pending], project: null });
+      this.schedule();
+      return;
+    }
     this.persist();
-    this.knownVersion = result.project.version;
-    this.acked = ackedFromDto(result.project);
     // Someone else wrote in between, or something we sent did not land, or the stored document is
     // not what we computed: the only honest move is to adopt the server's copy and replay what is
     // still pending. When edits arrived while the request was out, the local hash cannot be
@@ -195,7 +216,17 @@ export class ProjectSync {
     const diverged = (versionAtSend ?? 0) !== result.baseVersion
       || result.rejected.length > 0
       || (!editedMeanwhile && result.documentHash !== hashAtSend);
-    this.deps.onAck(result, { diverged, pending: [...this.pending] });
+    let project = result.project ?? null;
+    if (diverged && !project && this.deps.load) {
+      try {
+        project = await this.deps.load();
+      } catch {
+        project = null;
+      }
+      if (this.disposed) return;
+      if (project) this.acked = ackedFromDto(project);
+    }
+    this.deps.onAck(result, { diverged, pending: [...this.pending], project });
   }
 
   private schedule(): void {

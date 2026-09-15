@@ -63,6 +63,17 @@ describe('DocumentCommitter', () => {
     expect(h.undoStack.current).toHaveLength(1);
   });
 
+  it('records nothing for a system relay that rebuilds an identical document', () => {
+    const h = harness();
+    h.committer.commit(card('a'));
+    const before = h.document;
+    const result = h.committer.commit({ op: 'document.foldMetadata', input: {} }, { origin: 'system', undo: 'none' });
+    expect(result.ok).toBe(true);
+    expect(h.document).toBe(before);
+    expect(h.publish).toHaveBeenCalledOnce();
+    expect(h.transactions).toHaveLength(1);
+  });
+
   it('honours undo:none and clears the redo line on a real step', () => {
     const h = harness();
     h.redoStack.current = [h.document];
@@ -89,6 +100,24 @@ describe('DocumentCommitter', () => {
     expect(h.transactions).toHaveLength(2);
     expect(last.origin).toBe('restore');
     expect(last.ops[0]!.op).toBe('document.replace');
+  });
+
+  it('records a restore as a patch when that is small, as a snapshot when it is not', () => {
+    const h = harness();
+    for (let i = 0; i < 12; i += 1) h.committer.commit(card(`c${i}`, i));
+    const full = h.document;
+    const snapshot = h.undoStack.current.at(-1)!; // one card fewer: a small patch
+    h.committer.replace(snapshot, { origin: 'restore' });
+    const small = h.transactions.at(-1)!.ops[0]!;
+    expect(small.op).toBe('document.patch');
+    expect(JSON.stringify(small.input).length).toBeLessThan(JSON.stringify(snapshot).length / 2);
+    // Back to the full document from an empty one: a patch would carry everything, so the snapshot travels.
+    h.committer.replace(h.undoStack.current[0]!, { origin: 'restore' });
+    h.committer.replace(full, { origin: 'restore' });
+    expect(h.transactions.at(-1)!.ops[0]!.op).toBe('document.replace');
+    // The fallback transaction is the current document, whole.
+    const recovery = h.committer.replaceTransaction();
+    expect(recovery.ops[0]).toMatchObject({ op: 'document.replace', input: { document: full } });
   });
 
   it('stages a scope and keeps or discards it as a unit', () => {

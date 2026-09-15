@@ -14,6 +14,19 @@ vi.mock('@pireel/studio-engine/providers', () => ({
 vi.mock('./visual', () => ({ analyzeVisual: vi.fn() }));
 
 import { useMediaAnalysis } from './use-media-analysis';
+import { DocumentCommitter } from './document-commit';
+
+function committerFor(documentRef: { current: EditorDocumentV2 }) {
+  return new DocumentCommitter({
+    projectId: 'p',
+    getDocument: () => documentRef.current,
+    publish: (next) => { documentRef.current = next; },
+    undoStack: { current: [] },
+    redoStack: { current: [] },
+    undoCap: 20,
+    onTransaction: () => {},
+  });
+}
 
 describe('media analysis transcript outcomes', () => {
   let host: HTMLDivElement;
@@ -52,7 +65,7 @@ describe('media analysis transcript outcomes', () => {
       properties: { treatment: 'full' },
     }];
     const documentRef = { current: initial };
-    const setDocument = vi.fn((next: EditorDocumentV2) => { documentRef.current = next; });
+    const committer = committerFor(documentRef);
     const file = new File(['silent-video'], 'silent.mp4', { type: 'video/mp4', lastModified: 1 });
     mocks.transcribe.mockResolvedValue([]);
     let stepAsr: (() => Promise<unknown>) | undefined;
@@ -65,7 +78,7 @@ describe('media analysis transcript outcomes', () => {
         setAsrSentences: vi.fn(),
         setVisual: vi.fn(),
         documentRef,
-        setDocument,
+        commit: committer.commit.bind(committer),
         speechFileForAsset: async () => file,
         currentVideo: () => ({ url: 'blob:main', durationSec: 5, width: 1920, height: 1080 }),
       }).stepAsr;
@@ -99,7 +112,7 @@ describe('media analysis transcript outcomes', () => {
       properties: { treatment: 'full' },
     }];
     const documentRef = { current: initial };
-    const setDocument = vi.fn((next: EditorDocumentV2) => { documentRef.current = next; });
+    const committer = committerFor(documentRef);
     let stepAsr: (() => Promise<unknown>) | undefined;
 
     function Harness() {
@@ -110,7 +123,7 @@ describe('media analysis transcript outcomes', () => {
         setAsrSentences: vi.fn(),
         setVisual: vi.fn(),
         documentRef,
-        setDocument,
+        commit: committer.commit.bind(committer),
         speechFileForAsset: async () => null,
         currentVideo: () => ({ url: 'blob:main', durationSec: 5, width: 1920, height: 1080 }),
       }).stepAsr;

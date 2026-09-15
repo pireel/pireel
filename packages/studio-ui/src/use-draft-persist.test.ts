@@ -103,7 +103,7 @@ describe('local project document persistence', () => {
 
     const result = await serverSaveProject(id, { documentSchemaVersion: 2, knownVersion: 7, title: 'Acked' });
 
-    expect(result).toMatchObject({ status: 'saved', applied: ['tx_0000000000000001'], baseVersion: 7, documentHash: 'h', project: { version: 8 } });
+    expect(result).toMatchObject({ status: 'saved', version: 8, applied: ['tx_0000000000000001'], baseVersion: 7, documentHash: 'h', project: { version: 8 } });
   });
 
   it('answers need-full for a section patch the server could not apply', async () => {

@@ -23,6 +23,8 @@ function dto(document: EditorDocumentV2, version: number): StudioProjectDto {
 function ackFor(document: EditorDocumentV2, wire: ProjectSaveWire, baseVersion: number, extra: Partial<ProjectCommitAck> = {}): ProjectCommitAck {
   return {
     status: 'saved',
+    version: baseVersion + 1,
+    updatedAt: 1,
     project: dto(document, baseVersion + 1),
     applied: (wire.transactions ?? []).map((t) => t.id),
     rejected: [],
@@ -69,7 +71,7 @@ describe('ProjectSync', () => {
     expect(h.sync.pendingTransactions).toHaveLength(0);
     expect(h.store.value).toHaveLength(0);
     expect(h.sync.version).toBe(1);
-    expect(h.onAck).toHaveBeenCalledWith(expect.anything(), { diverged: false, pending: [] });
+    expect(h.onAck).toHaveBeenCalledWith(expect.anything(), { diverged: false, pending: [], project: expect.anything() });
   });
 
   it('keeps transactions pending across a failed push and resends the same ids', async () => {
@@ -127,6 +129,55 @@ describe('ProjectSync', () => {
     expect(onMigrationRequired).toHaveBeenCalledOnce();
     expect(h.send).toHaveBeenCalledOnce();
     expect(h.sync.pendingTransactions).toHaveLength(1);
+  });
+
+  it('loads the project itself when a slim acknowledgement reveals a divergence', async () => {
+    const h = harness([(wire) => {
+      const ack = ackFor(h.document, wire, 5);
+      delete ack.project; // routine acknowledgement: no document echoed back
+      return ack;
+    }]);
+    const load = vi.fn(async () => dto(h.document, 6));
+    h.sync.configure({ ...(h.sync as unknown as { deps: ConstructorParameters<typeof ProjectSync>[0] }).deps, load });
+    h.sync.seed(dto(h.document, 3));
+    h.sync.record(tx('tx_a_0000000000001'));
+    await h.sync.flush();
+    expect(load).toHaveBeenCalledOnce();
+    const [, info] = h.onAck.mock.calls[0]!;
+    expect(info.diverged).toBe(true);
+    expect(info.project?.version).toBe(6);
+    expect(h.sync.version).toBe(6);
+  });
+
+  it('keeps the sections it sent as the baseline when the acknowledgement carries no project', async () => {
+    const h = harness([(wire) => { const ack = ackFor(h.document, wire, 0); delete ack.project; return ack; }, () => 'ok']);
+    h.sync.record(tx('tx_a_0000000000001'));
+    await h.sync.flush();
+    expect(h.onAck.mock.calls[0]![1]).toMatchObject({ diverged: false, project: null });
+    // Nothing changed since: the next push finds no section drift and sends nothing.
+    h.sync.markDirty();
+    await h.sync.flush();
+    expect(h.send).toHaveBeenCalledOnce();
+  });
+
+  it('answers a refused restore patch with the whole document, superseding the pending list', async () => {
+    const patchTx: DocumentTransaction = { id: 'tx_patch_00000000001', origin: 'restore', ops: [{ op: 'document.patch', input: { baseHash: 'not-what-the-server-holds', patch: [] } }] };
+    const h = harness([
+      (wire) => ackFor(h.document, wire, 0, { applied: [], rejected: [{ id: patchTx.id, error: { code: 'stale-base', message: 'stale' } }] }),
+      (wire) => ackFor(h.document, wire, 1),
+    ]);
+    const recover = vi.fn((): DocumentTransaction => ({ id: 'tx_whole_00000000001', origin: 'restore', ops: [{ op: 'document.replace', input: { document: h.document } }] }));
+    h.sync.configure({ ...(h.sync as unknown as { deps: ConstructorParameters<typeof ProjectSync>[0] }).deps, recover });
+    h.sync.record(patchTx);
+    h.sync.record(tx('tx_after_0000000001'));
+    await h.sync.flush();
+    expect(recover).toHaveBeenCalledOnce();
+    expect(h.sync.pendingTransactions.map((t) => t.id)).toEqual(['tx_whole_00000000001']);
+    expect(h.onAck.mock.calls[0]![1].diverged).toBe(false);
+    await vi.advanceTimersByTimeAsync(100);
+    await h.sync.whenIdle();
+    expect(h.sent[1]!.transactions?.map((t) => t.id)).toEqual(['tx_whole_00000000001']);
+    expect(h.sync.pendingTransactions).toHaveLength(0);
   });
 
   it('reloads the pending list it persisted', () => {

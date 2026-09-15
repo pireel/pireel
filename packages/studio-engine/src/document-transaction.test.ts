@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { emptyComposition } from './composition-core';
 import { compositionToEditorDocument } from './project-document';
-import { canonicalJson } from './stable-json';
+import { diffOps } from './project-dto';
+import { canonicalJson, hashSection } from './stable-json';
 import {
   applyDocumentOp,
   applyDocumentTransaction,
@@ -164,6 +165,47 @@ describe('document transactions', () => {
     const folded = applyDocumentOp(seeded.document, { op: 'document.foldMetadata', input: { mainTranscript: main } }, ctx);
     if (!folded.ok) throw new Error('fold failed');
     expect(transcriptInputsFor(folded.document, main, {})).toEqual({});
+    // A stored copy with reordered keys (jsonb) is the same transcript.
+    const reordered = { ...folded.document, semantics: { ...folded.document.semantics, transcripts: Object.fromEntries(
+      Object.entries(folded.document.semantics.transcripts).map(([id, segs]) => [id, segs.map((s) => ({ text: s.text, end: s.end, start: s.start }))]),
+    ) } };
+    expect(transcriptInputsFor(reordered, main, {})).toEqual({});
+  });
+
+  it('sends only the clip transcripts that change the document, never the whole library map', () => {
+    const seeded = applyDocumentTransaction(emptyDocument(), { ops: [narration] }, ctx);
+    if (!seeded.ok) throw new Error('seed failed');
+    const main = [{ start: 0, end: 2, text: 'hello there' }];
+    const folded = applyDocumentOp(seeded.document, { op: 'document.foldMetadata', input: { mainTranscript: main } }, ctx);
+    if (!folded.ok) throw new Error('fold failed');
+    const assetId = Object.keys(folded.document.semantics.transcripts)[0]!;
+    const library = { 'https://cdn.test/unplaced.mp4': [{ start: 0, end: 1, text: 'library only' }] };
+    // Nothing on the timeline uses the library clip; the main transcript is already folded.
+    expect(transcriptInputsFor(folded.document, main, library)).toEqual({});
+    // A runtime copy of the main source is owned by the main transcript: still nothing.
+    expect(transcriptInputsFor(folded.document, main, { ...library, [assetId]: [{ start: 0, end: 2, text: 'edited' }] })).toEqual({});
+    // Without a main transcript, the changed copy travels alone.
+    expect(transcriptInputsFor(folded.document, null, { ...library, [assetId]: [{ start: 0, end: 2, text: 'edited' }] }))
+      .toEqual({ clipTranscripts: { [assetId]: [{ start: 0, end: 2, text: 'edited' }] } });
+  });
+
+  it('applies a restore patch only on the document it was made against', () => {
+    const seeded = applyDocumentTransaction(emptyDocument(), { ops: [narration] }, ctx);
+    if (!seeded.ok) throw new Error('seed failed');
+    const before = seeded.document;
+    const after = applyDocumentOp(before, { op: 'command', input: { command: { type: 'canvas.patch', patch: { width: 720, height: 1280 } } } }, ctx);
+    if (!after.ok) throw new Error('edit failed');
+    const patch = diffOps(JSON.parse(canonicalJson(before)), JSON.parse(canonicalJson(after.document)));
+    const op = { op: 'document.patch' as const, input: { baseHash: hashSection(canonicalJson(before)), patch } };
+    // The server holds a JSON round-tripped copy (key order, no undefined): the hash still matches.
+    const onServer = applyDocumentOp(overWire(before), overWire(op), ctx);
+    expect(onServer.ok).toBe(true);
+    expect(canonicalJson(onServer.document)).toBe(canonicalJson(after.document));
+    // Anywhere else it refuses instead of guessing.
+    const elsewhere = applyDocumentOp(after.document, op, ctx);
+    expect(elsewhere.ok).toBe(false);
+    if (!elsewhere.ok) expect(elsewhere.error.code).toBe('stale-base');
+    expect(sanitizeDocumentTransactions([{ id: 'tx_patch_000000001', origin: 'restore', ops: [op] }])).not.toBeNull();
   });
 
   it('keeps a clearing `undefined` alive across JSON so the server clears the same field', () => {
