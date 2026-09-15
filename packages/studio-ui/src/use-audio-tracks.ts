@@ -15,15 +15,12 @@ import {
   type Composition,
   type EditorDocumentV2,
   type SupplementalVisualMediaClip,
-  addAudioDocumentClip,
-  applyAudioDocumentEdits,
   audioClipGainAt,
   audioClipId,
   audioClipSrcTimeAt,
-  removeAudioDocumentClips,
-  splitAudioDocumentClip,
   totalDuration,
 } from '@pireel/studio-engine/composition';
+import type { DocumentCommitter } from './document-commit';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { toast } from '@pireel/ui/toast';
 import type { EngineAudioClip, VideoTrackEngine } from './video-track-engine';
@@ -51,7 +48,9 @@ export interface AudioTracksDeps {
   visualMediaClips?: readonly SupplementalVisualMediaClip[];
   timelineDurationSec?: number;
   documentRef: MutableRefObject<EditorDocumentV2>;
-  setDocument: (document: EditorDocumentV2, runtimeComposition?: Composition) => void;
+  commit: DocumentCommitter['commit'];
+  /** Re-project the current document with recovered session-only audio bytes. */
+  republishDocument: (runtimeComposition?: Composition) => void;
   videoFile: File | null;
   videoFileRef: MutableRefObject<File | null>;
   videoSigRef: MutableRefObject<string | null>;
@@ -62,13 +61,12 @@ export interface AudioTracksDeps {
   tRef: MutableRefObject<number>;
   pickFile: (accept: string) => Promise<File | null>;
   backupMediaToCloud: (file: File, sig: string, kind: 'video' | 'clip') => void;
-  pushUndoSnapshot: () => void;
 }
 
 export function useAudioTracks(deps: AudioTracksDeps) {
   const {
-    projectId, comp, compRef, renderAudioTracks, visualMediaClips, timelineDurationSec, documentRef, setDocument, videoFile, videoFileRef,
-    videoSigRef, videoEngineRef, clipFilesRef, tRef, pickFile, backupMediaToCloud, pushUndoSnapshot,
+    projectId, comp, compRef, renderAudioTracks, visualMediaClips, timelineDurationSec, documentRef, commit, republishDocument, videoFile, videoFileRef,
+    videoSigRef, videoEngineRef, clipFilesRef, tRef, pickFile, backupMediaToCloud,
   } = deps;
   const renderAudioTracksRef = useRef(renderAudioTracks);
   renderAudioTracksRef.current = renderAudioTracks;
@@ -171,7 +169,9 @@ export function useAudioTracks(deps: AudioTracksDeps) {
       ...(volumeDb != null && volumeDb !== 0 ? { volumeDb } : {}),
       ...(startSec != null ? { startSec } : {}),
     };
-    const edit = addAudioDocumentClip({ document: documentRef.current, clip });
+    const edit = commit({ op: 'audio.add', input: { clip } }, {
+      runtimeComposition: { ...compRef.current, audioTracks: [...(compRef.current.audioTracks ?? []), clip] },
+    });
     if (!edit.ok) {
       URL.revokeObjectURL(url);
       audioObjectUrlsRef.current.delete(url);
@@ -179,8 +179,6 @@ export function useAudioTracks(deps: AudioTracksDeps) {
       toast.error(editorErrorMessage(edit.error));
       return;
     }
-    pushUndoSnapshot();
-    setDocument(edit.document, { ...compRef.current, audioTracks: [...(compRef.current.audioTracks ?? []), clip] });
     return clip.id;
   };
 
@@ -228,32 +226,27 @@ export function useAudioTracks(deps: AudioTracksDeps) {
   };
 
   const removeClips = (ids: readonly string[]): { ok: boolean; error?: string } => {
-    const edit = removeAudioDocumentClips(documentRef.current, ids);
+    const edit = commit({ op: 'audio.remove', input: { clipIds: ids } });
     if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error) };
-    pushUndoSnapshot();
-    setDocument(edit.document);
     return { ok: true };
   };
 
   const removeClip = (id: string) => removeClips([id]);
 
+  /** `undo` = a discrete user action (one ⌘Z step); live drags pass false and snapshot at gesture start. */
   const patchClip = (
     id: string,
     patch: Partial<Pick<AudioClip, 'startSec' | 'volumeDb' | 'fadeInSec' | 'fadeOutSec' | 'speed' | 'inSec' | 'outSec' | 'muted'>>,
-    beforeCommit?: () => void,
+    undo = false,
   ): { ok: boolean; error?: string } => {
-    const edit = applyAudioDocumentEdits({ document: documentRef.current, updates: [{ clipId: id, patch }] });
+    const edit = commit({ op: 'audio.patch', input: { updates: [{ clipId: id, patch }] } }, { undo: undo ? 'step' : 'none' });
     if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error) };
-    beforeCommit?.();
-    setDocument(edit.document);
     return { ok: true };
   };
 
-  const splitClip = (id: string, atSec: number, beforeCommit?: () => void): { ok: boolean; error?: string; newClipId?: string } => {
-    const edit = splitAudioDocumentClip(documentRef.current, id, atSec);
+  const splitClip = (id: string, atSec: number, undo = false): { ok: boolean; error?: string; newClipId?: string } => {
+    const edit = commit({ op: 'audio.split', input: { clipId: id, atSec } }, { undo: undo ? 'step' : 'none' });
     if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error) };
-    beforeCommit?.();
-    setDocument(edit.document);
     return { ok: true, newClipId: edit.newClipId };
   };
 
@@ -321,7 +314,7 @@ export function useAudioTracks(deps: AudioTracksDeps) {
           ...compRef.current,
           audioTracks: (compRef.current.audioTracks ?? []).map((x) => (x.sig === sig ? { ...x, src: url } : x)),
         };
-        setDocument(documentRef.current, runtimeComposition);
+        republishDocument(runtimeComposition);
       })();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

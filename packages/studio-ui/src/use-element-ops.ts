@@ -17,11 +17,9 @@ import {
   blockId,
   blockKind,
   freeTrack,
-  applyOverlayDocumentEdits,
-  insertOverlayDocumentClip,
-  moveOverlayDocumentClip,
   isSentenceCaption,
 } from '@pireel/studio-engine/composition';
+import type { DocumentCommitter } from './document-commit';
 import { getTheme, themeVarsCss } from '@pireel/studio-engine/theme';
 import { kitElement } from '@pireel/studio-engine/kit-templates';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
@@ -45,13 +43,12 @@ export interface ElementOpsDeps {
   elementTargetRef: MutableRefObject<string | null>;
   chatRef: MutableRefObject<StudioChatHandle | null>;
   documentRef: MutableRefObject<EditorDocumentV2>;
-  setDocument: (document: EditorDocumentV2) => void;
+  commit: DocumentCommitter['commit'];
   setSelectedId: (id: string | null) => void;
   setSelectedShotId: (id: string | null) => void;
   setPendingInsert: (box: { x: number; y: number; w: number; h: number } | null) => void;
   setGenRefreshTick: (fn: (n: number) => number) => void;
   applyT: (v: number) => void;
-  pushUndoSnapshot: () => void;
   ensureShots: (c: Composition) => VideoShot[];
   mappedCaptionSegs: (shots: VideoShot[], narr: AsrSegment[] | null) => AsrSegment[];
   composeBlockChecked: (
@@ -67,8 +64,8 @@ export interface ElementOpsDeps {
 
 export function useElementOps(deps: ElementOpsDeps) {
   const {
-    projectId, playing, compRef, tRef, asrRef, elementTargetRef, chatRef, documentRef, setDocument, setSelectedId, setSelectedShotId,
-    setPendingInsert, setGenRefreshTick, applyT, pushUndoSnapshot, ensureShots, mappedCaptionSegs,
+    projectId, playing, compRef, tRef, asrRef, elementTargetRef, chatRef, documentRef, commit, setSelectedId, setSelectedShotId,
+    setPendingInsert, setGenRefreshTick, applyT, ensureShots, mappedCaptionSegs,
     composeBlockChecked, insertKitBlock, openChat,
   } = deps;
   /** Generate a standalone component (composeBlockChecked, not added to the video; only added via
@@ -138,8 +135,7 @@ export function useElementOps(deps: ElementOpsDeps) {
     const tbSlots = tb?.slots as { media?: { url?: string }; spec?: unknown } | undefined;
     if (tb && blockKind(tb) === 'media' && !tbSlots?.media?.url && typeof tbSlots?.spec !== 'string') {
       elementTargetRef.current = null;
-      const edit = applyOverlayDocumentEdits({
-        document: documentRef.current,
+      const edit = commit({ op: 'overlay.patch', input: {
         updates: [{
           clipId: tb.id,
           block: {
@@ -153,13 +149,11 @@ export function useElementOps(deps: ElementOpsDeps) {
             label: el.label || prompt.slice(0, 12),
           },
         }],
-      });
+      } });
       if (!edit.ok) {
         toast.error(editorErrorMessage(edit.error));
         return;
       }
-      pushUndoSnapshot();
-      setDocument(edit.document);
       setSelectedShotId(null);
       setSelectedId(tb.id);
       if (!playing) applyT(Math.max(0, tb.startSec + 0.01));
@@ -184,13 +178,11 @@ export function useElementOps(deps: ElementOpsDeps) {
       label: el.label || prompt.slice(0, 12),
       box: geom.box,
     };
-    const inserted = insertOverlayDocumentClip({ document: documentRef.current, block: nb });
+    const inserted = commit({ op: 'overlay.insert', input: { block: nb } });
     if (!inserted.ok) {
       toast.error(editorErrorMessage(inserted.error));
       return;
     }
-    pushUndoSnapshot();
-    setDocument(inserted.document);
     if (nb.box) setPendingInsert(nb.box);
     setSelectedShotId(null);
     setSelectedId(newId);
@@ -206,28 +198,23 @@ export function useElementOps(deps: ElementOpsDeps) {
     let trackId = `track_graphics_${stackOrder}`;
     let suffix = 2;
     while (used.has(trackId)) trackId = `track_graphics_${stackOrder}_${suffix++}`;
-    const edit = moveOverlayDocumentClip({
-      document: documentRef.current,
+    const edit = commit({ op: 'overlay.move', input: {
       clipId: b.id,
       ...(existing ? { toTrackId: existing.id } : { newTrack: { id: trackId, stackOrder, name: `Graphics ${stackOrder}` } }),
-    });
+    } });
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return;
     }
-    pushUndoSnapshot();
-    setDocument(edit.document);
   };
   /** Block-level person-layer override: toggle between on-top-of / behind the person (defaults to global personFront, see engine Block.personLayer). */
   const togglePersonLayer = (b: Block) => {
     const behindNow = b.personLayer ? b.personLayer === 'behind' : !!compRef.current.personFx?.personFront;
-    const edit = applyOverlayDocumentEdits({ document: documentRef.current, updates: [{ clipId: b.id, block: { personLayer: behindNow ? 'front' : 'behind' } }] });
+    const edit = commit({ op: 'overlay.patch', input: { updates: [{ clipId: b.id, block: { personLayer: behindNow ? 'front' : 'behind' } }] } });
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return;
     }
-    pushUndoSnapshot();
-    setDocument(edit.document);
   };
   /** Floating toolbar "save as component": save a canvas custom block as-is into the asset library (snapshot copy, later
    *  edits don't affect each other; seedId = block id, the insert side re-scopes as usual). Re-saving the same block = overwrites the same entry. */
@@ -353,18 +340,15 @@ export function useElementOps(deps: ElementOpsDeps) {
         }
         nextSlots = { ...b.slots, innerHtml: nextHtml, ...(nextTlb ? { timelineBody: nextTlb } : {}) };
       }
-      const edit = applyOverlayDocumentEdits({
-        document: documentRef.current,
+      const edit = commit({ op: 'overlay.patch', input: {
         updates: [{
           clipId: b.id,
           startSec: newStart,
           durationSec: newDur,
           block: { slots: nextSlots },
         }],
-      });
+      } });
       if (!edit.ok) throw new Error(editorErrorMessage(edit.error));
-      pushUndoSnapshot();
-      setDocument(edit.document);
       toast.success(nextTlb ? t('workbench.syncedContentTimingBlock') : t('workbench.syncedContentAlignedNarration'));
     } catch (e) {
       console.warn('[elements] sync failed', e);

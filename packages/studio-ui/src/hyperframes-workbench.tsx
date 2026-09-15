@@ -88,25 +88,11 @@ import {
   STUDIO_FONTS_HREF,
   CAPTION_PRESETS,
   applyEditorCommand,
-  runAgentTimelineTool,
-  applyCanvasDocumentEdit,
-  applyCaptionDocumentEdit,
-  resizeManagedCaptionTiming,
-  applyNarrationDocumentEdit,
   applyMediaVideoSettingsPatch,
-  addNarrativeDocumentClip,
-  moveAudioDocumentClip,
-  moveVisualDocumentClip,
-  applyOverlayDocumentEdits,
-  removeNarrationClipsWithoutRipple,
-  removeOverlayDocumentClips,
-  moveOverlayDocumentClip,
-  insertOverlayDocumentClip,
   reorderOverlayDocumentTracks,
   assembleHtml,
   blockBgCss,
   captionLineSegments,
-  patchNarrativeClips,
   customHasSurface,
   blockId,
   blockKind,
@@ -129,7 +115,6 @@ import {
   firstNarrativeAsset,
   firstNarrativeAssetId,
   primaryNarrativeClips,
-  pruneUnusedEditorAssets,
   projectDocumentToComposition,
   renderBlock,
   localImageLocator,
@@ -172,8 +157,11 @@ import {
   displayTextPreset,
   titleBlock,
 } from "@pireel/studio-engine/composition";
-import { reconcileProjectSave } from '@pireel/studio-engine/project-reconcile';
 import { canonicalJson } from '@pireel/studio-engine/stable-json';
+import { transcriptInputsFor, type DocumentOp } from '@pireel/studio-engine/document-transaction';
+import { applyEditorDocumentPersistenceMetadata } from '@pireel/studio-engine/project-document';
+import { DocumentCommitter } from './document-commit';
+import { ProjectSync, localPendingTransactionStore, type ProjectSyncDeps, type ProjectSyncSections } from './project-sync';
 
 /** Constant speed of a placed video clip = source seconds per timeline second (1 = natural). */
 function clipSpeedInDocument(document: EditorDocumentV2, clipId: string): number {
@@ -263,10 +251,7 @@ import {
   customVisualStylePalette,
   type CustomVisualStyle,
 } from "@pireel/studio-engine/visual-style";
-import {
-  CloudProjectSaveQueue,
-  DeferredEffectDisposer,
-} from "./cloud-project-save";
+import { DeferredEffectDisposer } from "./cloud-project-save";
 import { DeferredActivation } from "./deferred-activation";
 import { loadCurrentUser } from "./current-user";
 import {
@@ -296,11 +281,9 @@ import { useStableCallbacks } from "./use-stable-callbacks";
 import {
   type StudioDraft,
   cacheProjectLocally,
-  restoreCloudProject,
   loadDraft,
   migrateLegacyDraft,
   saveCoverThumb,
-  setProjectVersion,
   useDraftAutosave,
 } from "./use-draft-persist";
 import {
@@ -533,6 +516,30 @@ export function HyperframesWorkbench({
     initialComposition: starter,
     persistenceMetadataRef: livePersistenceMetadataRef,
   });
+  // Every document change goes through one committer: it applies the operations, publishes,
+  // takes the undo boundary and hands the transaction to sync. Undo is a snapshot stack of
+  // canonical V2 documents; runtime media URLs live outside history.
+  const undoStackRef = useRef<EditorDocumentV2[]>([]);
+  const redoStackRef = useRef<EditorDocumentV2[]>([]); // undone states; any new edit discards the whole redo line
+  const reclaimWritershipRef = useRef<() => void>(() => {});
+  const projectSyncRef = useRef<ProjectSync | null>(null);
+  const committerRef = useRef<DocumentCommitter | null>(null);
+  if (!committerRef.current || committerRef.current.projectId !== projectId) {
+    committerRef.current = new DocumentCommitter({
+      projectId,
+      getDocument: () => editorDocumentRef.current,
+      publish: (document, runtimeComposition) => setEditorDocument(document, runtimeComposition),
+      undoStack: undoStackRef,
+      redoStack: redoStackRef,
+      undoCap: UNDO_CAP,
+      onBeforeMutation: () => reclaimWritershipRef.current(),
+      onTransaction: (transaction) => projectSyncRef.current?.record(transaction),
+    });
+  }
+  const committer = committerRef.current;
+  const commit = committer.commit.bind(committer) as DocumentCommitter['commit'];
+  /** Undo boundary for gestures that commit per frame (drags) and snapshot once at gesture start. */
+  const pushUndoSnapshot = () => committer.pushUndoSnapshot();
   // The persisted local-image locator is deliberately not a browser URL. The sandboxed canvas
   // resolves it from a File message; the parent timeline needs its own object URL. Keep that runtime
   // URL map outside EditorDocument so autosave never persists session-only blob addresses.
@@ -543,18 +550,15 @@ export function HyperframesWorkbench({
   const patchOverlays = useCallback(
     (updates: readonly OverlayDocumentPatch[]): boolean => {
       if (!updates.length) return false;
-      const edit = applyOverlayDocumentEdits({
-        document: editorDocumentRef.current,
-        updates,
-      });
+      const edit = commit({ op: "overlay.patch", input: { updates } }, { undo: "none" });
       if (!edit.ok) {
         toast.error(editorErrorMessage(edit.error));
         return false;
       }
-      setEditorDocument(edit.document);
       return true;
     },
-    [setEditorDocument],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [committer],
   );
   const renderPlan = useMemo(
     () => editorDocumentRenderPlan(editorDocument, { resolveAssetUrl }),
@@ -1004,9 +1008,7 @@ export function HyperframesWorkbench({
   // reclaims writership on the next local edit intent (undo snapshot = the edit-intent signal).
   const [displaced, setDisplaced] = useState(false);
   const displacedRef = useRef(false);
-  const cloudSaveChainRef = useRef<Promise<void>>(Promise.resolve()); // serializes cloud PUTs (flush-on-evict must not race an in-flight save)
-  const cloudSaveQueueRef =
-    useRef<CloudProjectSaveQueue<ProjectSavePayload> | null>(null);
+  const cloudSaveQueueRef = useRef<ProjectSync | null>(null);
   const cloudSaveQueueProjectRef = useRef(projectId);
   const cloudAutosaveActivationRef = useRef<{
     projectId: string;
@@ -1029,10 +1031,11 @@ export function HyperframesWorkbench({
     if (!displacedRef.current) return;
     displacedRef.current = false;
     setDisplaced(false);
-    bridgeReclaimRef.current(); // evicts the other tab; conflicts with anything it wrote resolve via the 409 rebase-retry
-    void cloudSaveQueueRef.current?.flush(); // a failed pre-displacement save stays dirty until this tab can write again
+    bridgeReclaimRef.current(); // evicts the other tab; whatever it wrote replays under this tab's pending intents
+    void cloudSaveQueueRef.current?.flush(); // a failed pre-displacement save stays pending until this tab can write again
     toast.info(t("workbench.reclaimedWritership"));
   };
+  reclaimWritershipRef.current = reclaimWritership;
   const [busyImport, setBusyImport] = useState(false);
   const [asrSentences, setAsrSentences] = useState<AsrSegment[] | null>(null);
   /** Insert-source transcripts (key = shot.src, sentence times = that source file's own timeline). All sources transcribed when opening the captions / smart-cut panels. */
@@ -1075,15 +1078,14 @@ export function HyperframesWorkbench({
       return shifted;
     });
     if (!needsPacking || !clips[0]) return;
-    const edit = moveVisualDocumentClip({
-      document: editorDocument,
+    commit({ op: "visual.move", input: {
       clipId: clips[0].id,
       atSec: 0,
       target: { kind: "primary" },
       primaryOrder: clips.map((clip) => clip.id),
-    });
-    if (edit.ok) setEditorDocument(edit.document);
-  }, [editorDocument, setEditorDocument, timelineSnapEnabled]);
+    } }, { origin: "system", undo: "none" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorDocument, timelineSnapEnabled]);
   const [locateSignal, setLocateSignal] = useState(0); // increment = scroll timeline to the playhead
   // near=true: only scroll when the playhead would be off-screen (jumps made from another panel), vs the
   // transport readout, which always centres because that IS the request.
@@ -1215,20 +1217,15 @@ export function HyperframesWorkbench({
       editorDocumentRef.current.canvas.configured
     )
       return;
-    const edit = applyCanvasDocumentEdit({
-      projectId,
-      document: editorDocumentRef.current,
+    const edit = commit({ op: "canvas.resize", input: {
       width: w,
       height: h,
-      mainTranscript: asrRef.current,
-      clipTranscripts: clipAsrRef.current,
-    });
+      ...transcriptInputsFor(editorDocumentRef.current, asrRef.current, clipAsrRef.current),
+    } });
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return;
     }
-    pushUndoSnapshot();
-    setEditorDocument(edit.document);
   };
   const applySourceCanvasRatio = () => {
     if (!sourceCanvasSize) {
@@ -1405,11 +1402,7 @@ export function HyperframesWorkbench({
     setVisual(vis);
     // Attach the background-derived palette to the composition; don't override when a frame is mounted (a frame is a user-chosen design system)
     if (vis.palette && !editorDocumentRef.current.appearance.frameId) {
-      const command = applyEditorCommand(editorDocumentRef.current, {
-        type: "appearance.patch",
-        patch: { palette: vis.palette },
-      });
-      if (command.ok) setEditorDocument(command.document);
+      commit({ op: "command", input: { command: { type: "appearance.patch", patch: { palette: vis.palette } } } }, { origin: "system", undo: "none" });
     }
   };
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -1755,10 +1748,11 @@ export function HyperframesWorkbench({
           );
         }
       }
-      if (!cancelled && prepared) setEditorDocument(editorDocumentRef.current);
+      if (!cancelled && prepared) committer.republish();
     })();
     return () => { cancelled = true; };
-  }, [editorDocument, localAssetIndexRev, prepareLocalAssetRuntime, resolveAssetUrl, setEditorDocument]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorDocument, localAssetIndexRev, prepareLocalAssetRuntime, resolveAssetUrl]);
   /** Export-time readiness: the same restore as the effect above, awaited. An output switch clears the
    *  runtime and the effect restores it asynchronously; an export started in between (batch export,
    *  an agent's export right after switch_output) must not read a plan with unresolved sources. */
@@ -2125,8 +2119,7 @@ export function HyperframesWorkbench({
     id: string;
     box: { x: number; y: number; w: number; h: number };
   } | null>(null);
-  const undoStackRef = useRef<EditorDocumentV2[]>([]); // canonical V2 snapshots; runtime media URLs live outside history
-  const redoStackRef = useRef<EditorDocumentV2[]>([]); // undone states; any new edit (pushUndoSnapshot) discards the whole redo line
+
 
   // Revoke every workbench-owned blob URL on unmount. Inserted sources stay alive while
   // the project is open (including after deletion, because undo may restore them), but no
@@ -4252,22 +4245,23 @@ export function HyperframesWorkbench({
         const assetId =
           firstNarrativeAssetId(editorDocumentRef.current);
         if (assetId) rememberAssetUrl(assetId, url);
-        setEditorDocument(editorDocumentRef.current);
+        committer.republish();
         if (successNotices.reconnected)
           toast.success(t("workbench.originalVideoReconnectedDraft"));
       } else {
         if (pr) pendingRestoreRef.current = null; // picked a different video = give up reconnecting, treat as new project
         // A real source swap keeps the historical "new edit" behavior; filling an empty track keeps
         // graphics/audio and the canvas settings that the user established before importing footage.
-        const baseDocument = preserveEmptyTrackEdit
-          ? editorDocumentRef.current
-          : emptyEditorDocumentV2({
+        // A swapped source starts from a blank document at the footage's size (an explicit
+        // replace, so the server starts there too); an empty track keeps the user's setup.
+        const ops: DocumentOp[] = preserveEmptyTrackEdit
+          ? []
+          : [{ op: "document.replace", input: { document: emptyEditorDocumentV2({
               width: dims.width,
               height: dims.height,
               theme: editorDocumentRef.current.appearance.theme,
-            });
-        const edit = addNarrativeDocumentClip({
-          document: baseDocument,
+            }) } }];
+        ops.push({ op: "narrative.add", input: {
           shot: {
             id: shotId(),
             src: url,
@@ -4281,15 +4275,17 @@ export function HyperframesWorkbench({
           sourceHeight: dims.height,
           configureCanvas: !preserveEmptyTrackEdit,
           mode: "overwrite",
-        });
-        if (!edit.ok || !edit.assetId)
+        } });
+        const edit = commit(ops, { undo: "none" });
+        const assetId = edit.ok && "assetId" in edit ? edit.assetId : undefined;
+        if (!edit.ok || !assetId)
           throw new Error(
             edit.ok
               ? "Narrative source was not registered."
               : editorErrorMessage(edit.error),
           );
-        rememberAssetUrl(edit.assetId, url);
-        setEditorDocument(edit.document);
+        rememberAssetUrl(assetId, url);
+        committer.republish();
       }
       setSelectedId(null);
       setSelectedShotId(null);
@@ -4532,16 +4528,12 @@ export function HyperframesWorkbench({
    *  removes the block instantly — waiting for the 300ms debounced rebuild + double-buffer swap makes delete feel sticky. */
   const removeBlock = (id: string) => {
     if (genLockToast(id)) return;
-    const edit = removeOverlayDocumentClips({
-      document: editorDocumentRef.current,
-      clipIds: [id],
-    });
+    postPreview({ type: "hf:remove", id });
+    const edit = commit({ op: "overlay.remove", input: { clipIds: [id] } }, { undo: "none" });
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return;
     }
-    postPreview({ type: "hf:remove", id });
-    setEditorDocument(edit.document);
     setSelectedIdRaw((s) => (s === id ? null : s));
     setSelectedBlockIds((cur) => {
       if (!cur.has(id)) return cur;
@@ -4555,12 +4547,11 @@ export function HyperframesWorkbench({
   const commitNarrativePatches = (
     updates: NarrativeClipPatchUpdate[],
   ): boolean => {
-    const result = patchNarrativeClips(editorDocumentRef.current, updates);
+    const result = commit({ op: "narrative.patch", input: { updates } }, { undo: "none" });
     if (!result.ok) {
       toast.error(editorErrorMessage(result.error));
       return false;
     }
-    setEditorDocument(result.document);
     return true;
   };
   const selectShot = (id: string, additive = false) => {
@@ -4606,16 +4597,11 @@ export function HyperframesWorkbench({
   ): VideoShot | null => {
     const media = mediaVideoLocation(clipId);
     if (!media) return null;
-    const result = applyMediaVideoSettingsPatch(editorDocumentRef.current, {
-      trackId: media.trackId,
-      clipId,
-      patch,
-    });
+    const result = commit({ op: "media.videoSettings", input: { trackId: media.trackId, clipId, patch } }, { undo: "none" });
     if (!result.ok) {
-      toast.error(result.error);
+      toast.error(result.error.message);
       return null;
     }
-    setEditorDocument(result.document);
     return result.shot;
   };
   const setShotFraming = (sid: string, patch: ShotFramingPatch) => {
@@ -4712,15 +4698,8 @@ export function HyperframesWorkbench({
   /** Constant speed for one video clip (any visual lane): the engine's set_video_speed retime — the
    *  same op the agent uses — so UI and agent produce identical documents; one undo step. */
   const setShotSpeed = (sid: string, speed: number) => {
-    const current = editorDocumentRef.current;
-    const outcome = runAgentTimelineTool(current, "set_video_speed", { shotIds: [sid], speed });
-    if (!outcome.ok || !outcome.document) {
-      if (outcome.error) toast.error(outcome.error);
-      return;
-    }
-    if (outcome.document === current) return;
-    pushUndoSnapshot();
-    setEditorDocument(outcome.document);
+    const outcome = commit({ op: "agent.timeline", input: { tool: "set_video_speed", input: { shotIds: [sid], speed } } });
+    if (!outcome.ok) toast.error(outcome.error.message);
   };
   const setShotAudio = (
     sid: string,
@@ -4742,38 +4721,16 @@ export function HyperframesWorkbench({
     clipId: string,
     enabled: boolean,
   ) => {
-    const result = applyEditorCommand(editorDocumentRef.current, {
-      type: "clip.patch",
-      trackId,
-      clipId,
-      patch: { enabled },
-    });
-    if (!result.ok) {
-      toast.error(editorErrorMessage(result.error));
-      return;
-    }
-    pushUndoSnapshot();
-    setEditorDocument(result.document);
+    const result = commit({ op: "command", input: { command: { type: "clip.patch", trackId, clipId, patch: { enabled } } } });
+    if (!result.ok) toast.error(editorErrorMessage(result.error));
   };
   const setMediaCanvasBox = (
     trackId: string,
     clipId: string,
     box: MediaCanvasBox,
   ) => {
-    const current = editorDocumentRef.current;
-    const result = applyEditorCommand(current, {
-      type: "clip.patch",
-      trackId,
-      clipId,
-      patch: { box },
-    });
-    if (!result.ok) {
-      toast.error(editorErrorMessage(result.error));
-      return;
-    }
-    if (result.document === current) return;
-    pushUndoSnapshot();
-    setEditorDocument(result.document);
+    const result = commit({ op: "command", input: { command: { type: "clip.patch", trackId, clipId, patch: { box } } } });
+    if (!result.ok) toast.error(editorErrorMessage(result.error));
   };
   /** Track flags stay independent from per-shot audio settings. */
   const videoTrackMuted = primaryNarrative.muted;
@@ -4935,17 +4892,8 @@ export function HyperframesWorkbench({
     trackId: string,
     patch: { muted?: boolean; hidden?: boolean },
   ) => {
-    const result = applyEditorCommand(editorDocumentRef.current, {
-      type: "track.patch",
-      trackId,
-      patch,
-    });
-    if (!result.ok) {
-      toast.error(editorErrorMessage(result.error));
-      return;
-    }
-    pushUndoSnapshot();
-    setEditorDocument(result.document);
+    const result = commit({ op: "command", input: { command: { type: "track.patch", trackId, patch } } });
+    if (!result.ok) toast.error(editorErrorMessage(result.error));
   };
 
   /** Picked an image/video → write into a media-slot block's media slot. */
@@ -5073,12 +5021,7 @@ export function HyperframesWorkbench({
   };
   /* ---------------- Insert actions for the asset library / component / frame panels ---------------- */
 
-  const pushUndoSnapshot = () => {
-    if (displacedRef.current) reclaimWritership(); // every mutation passes here → the edit-intent hook of the single-writer handover
-    undoStackRef.current.push(editorDocumentRef.current);
-    if (undoStackRef.current.length > UNDO_CAP) undoStackRef.current.shift();
-    redoStackRef.current = []; // a new edit after undo → the old redo line no longer holds
-  };
+
   /** Natural dimensions of a remote image (null if unavailable → use the default placeholder, doesn't block insert). */
   const imageDims = (url: string): Promise<{ w: number; h: number } | null> =>
     new Promise((res) => {
@@ -5188,16 +5131,11 @@ export function HyperframesWorkbench({
           : t("workbench.graphic")),
     });
     const b: Block = { ...base, slots: { media } };
-    const inserted = insertOverlayDocumentClip({
-      document: editorDocumentRef.current,
-      block: b,
-    });
+    const inserted = commit({ op: "overlay.insert", input: { block: b } });
     if (!inserted.ok) {
       toast.error(editorErrorMessage(inserted.error));
       return;
     }
-    pushUndoSnapshot();
-    setEditorDocument(inserted.document);
     setMediaBusyPhase(b.id, "swap"); // URL ready, awaiting rebuild + CDN load to debut
     setSelectedShotId(null);
     setSelectedId(b.id);
@@ -5341,16 +5279,11 @@ export function HyperframesWorkbench({
       label: a.label,
     });
     const nb: Block = { ...base, slots: { media: dropMedia } };
-    const inserted = insertOverlayDocumentClip({
-      document: editorDocumentRef.current,
-      block: nb,
-    });
+    const inserted = commit({ op: "overlay.insert", input: { block: nb } });
     if (!inserted.ok) {
       toast.error(editorErrorMessage(inserted.error));
       return;
     }
-    pushUndoSnapshot();
-    setEditorDocument(inserted.document);
     setMediaBusyPhase(nb.id, "swap");
     setSelectedShotId(null);
     setSelectedId(nb.id);
@@ -5429,16 +5362,11 @@ export function HyperframesWorkbench({
         base.trackIndex,
       ),
     };
-    const inserted = insertOverlayDocumentClip({
-      document: editorDocumentRef.current,
-      block: b,
-    });
+    const inserted = commit({ op: "overlay.insert", input: { block: b } });
     if (!inserted.ok) {
       toast.error(editorErrorMessage(inserted.error));
       return;
     }
-    pushUndoSnapshot();
-    setEditorDocument(inserted.document);
     setSelectedShotId(null);
     setSelectedId(b.id);
     if (!playing) applyT(Math.max(0, startSec + 0.01));
@@ -5464,16 +5392,11 @@ export function HyperframesWorkbench({
       trackIndex: freeTrack(compRef.current.blocks, startSec, durationSec, 2),
     });
     block.box = { x: 0.1, y: 0.36, w: 0.8, h: 0.22 };
-    const inserted = insertOverlayDocumentClip({
-      document: editorDocumentRef.current,
-      block,
-    });
+    const inserted = commit({ op: "overlay.insert", input: { block } });
     if (!inserted.ok) {
       toast.error(editorErrorMessage(inserted.error));
       return;
     }
-    pushUndoSnapshot();
-    setEditorDocument(inserted.document);
     setSelectedShotId(null);
     setSelectedId(block.id);
     setFloatWin(null);
@@ -5485,8 +5408,7 @@ export function HyperframesWorkbench({
   const patchDisplayText = (patch: DisplayTextPatch) => {
     if (!selectedDisplayTextBlock) return;
     const slots = { ...selectedDisplayTextBlock.slots, ...patch };
-    const edit = applyOverlayDocumentEdits({
-      document: editorDocumentRef.current,
+    const edit = commit({ op: "overlay.patch", input: {
       updates: [{
         clipId: selectedDisplayTextBlock.id,
         block: {
@@ -5496,13 +5418,11 @@ export function HyperframesWorkbench({
             : {}),
         },
       }],
-    });
+    } });
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return;
     }
-    pushUndoSnapshot();
-    setEditorDocument(edit.document);
   };
   /** Commit the inspector's values on a component (registered or bespoke — the engine's unified
    *  contract decides where they persist): one undo step. Deliberately not patchOverlays (which never
@@ -5510,32 +5430,24 @@ export function HyperframesWorkbench({
   const patchComponentValues = (id: string, next: Record<string, unknown>) => {
     const block = compRef.current.blocks.find((x) => x.id === id);
     if (!block || genIdsRef.current.has(id)) return;
-    const edit = applyOverlayDocumentEdits({
-      document: editorDocumentRef.current,
-      updates: [{ clipId: id, block: { slots: nextPropsSlots(block, next) } }],
-    });
+    const edit = commit({ op: "overlay.patch", input: { updates: [{ clipId: id, block: { slots: nextPropsSlots(block, next) } }] } });
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return;
     }
-    pushUndoSnapshot();
-    setEditorDocument(edit.document);
   };
   /** Inspector edits to whole-block fields (box, scale, rotation, opacity, bg, border, radius, label,
    *  timing): one undo step through the document command, so the same patch pipeline that serves the
    *  floating bar and the handles (hf:boxSize / hf:blockStyle / hf:blockTiming) paints the preview. */
   const patchInspectorBlock = (id: string, patch: { startSec?: number; durationSec?: number; block?: Record<string, unknown> }) => {
     if (genIdsRef.current.has(id)) return;
-    const edit = applyOverlayDocumentEdits({
-      document: editorDocumentRef.current,
+    const edit = commit({ op: "overlay.patch", input: {
       updates: [{ clipId: id, ...(patch.startSec !== undefined ? { startSec: patch.startSec } : {}), ...(patch.durationSec !== undefined ? { durationSec: patch.durationSec } : {}), ...(patch.block ? { block: patch.block } : {}) }],
-    });
+    } });
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return;
     }
-    pushUndoSnapshot();
-    setEditorDocument(edit.document);
   };
   /** Generated video → set as the main video. The CDN has no CORS headers, so fetch bytes through the /api/media/fetch same-origin proxy.
    *  Swapping the main video = a new project (pickVideoFile clears shots/blocks) — confirm first if there's content. */
@@ -5570,7 +5482,7 @@ export function HyperframesWorkbench({
         toast.error(t("workbench.elementGeneratingThemeAfter"));
         return;
       }
-      const appearance = applyEditorCommand(editorDocumentRef.current, {
+      const appearance = commit({ op: "command", input: { command: {
         type: "appearance.patch",
         patch: {
           frameId: undefined,
@@ -5579,9 +5491,8 @@ export function HyperframesWorkbench({
           captionStyle: undefined,
           personFx: undefined,
         },
-      });
+      } } }, { undo: "none" });
       if (appearance.ok) {
-        setEditorDocument(appearance.document);
         toast.success(t("workbench.visualStyleDisabled"));
       } else {
         toast.error(editorErrorMessage(appearance.error));
@@ -5598,7 +5509,7 @@ export function HyperframesWorkbench({
         af.customVisualStyle,
         f?.palette,
       );
-      const appearance = applyEditorCommand(editorDocumentRef.current, {
+      const appearance = commit({ op: "command", input: { command: {
         type: "appearance.patch",
         patch: {
           frameId: af.id,
@@ -5610,9 +5521,8 @@ export function HyperframesWorkbench({
           ),
           personFx: undefined,
         },
-      });
-      if (appearance.ok) setEditorDocument(appearance.document);
-      else {
+      } } }, { undo: "none" });
+      if (!appearance.ok) {
         toast.error(editorErrorMessage(appearance.error));
         return;
       }
@@ -5648,16 +5558,15 @@ export function HyperframesWorkbench({
       return;
     }
     // Land palette + frameId together: palette drives the token layer, frameId gives compose the design-language brief
-    const appearance = applyEditorCommand(editorDocumentRef.current, {
+    const appearance = commit({ op: "command", input: { command: {
       type: "appearance.patch",
       patch: {
         frameId: f.id,
         customVisualStyle: undefined,
         ...(f.palette ? { palette: f.palette } : {}),
       },
-    });
-    if (appearance.ok) setEditorDocument(appearance.document);
-    else {
+    } } }, { undo: "none" });
+    if (!appearance.ok) {
       toast.error(editorErrorMessage(appearance.error));
       return;
     }
@@ -5692,22 +5601,16 @@ export function HyperframesWorkbench({
   // Timeline block drag: move (clamped to [0, dur]) / trim both ends. Don't move a generating block (its time window was already fed to the worker)
   const moveBlock = (id: string, startSec: number) => {
     if (genLockToast(id)) return;
-    const edit = applyOverlayDocumentEdits({
-      document: editorDocumentRef.current,
+    const edit = commit({ op: "overlay.patch", input: {
       updates: [
         { clipId: id, startSec: Math.max(0, Math.round(startSec * 100) / 100) },
       ],
-    });
-    if (!edit.ok) {
-      toast.error(editorErrorMessage(edit.error));
-      return;
-    }
-    setEditorDocument(edit.document);
+    } }, { undo: "none" });
+    if (!edit.ok) toast.error(editorErrorMessage(edit.error));
   };
   const resizeBlock = (id: string, startSec: number, durationSec: number) => {
     if (genLockToast(id)) return;
-    const edit = applyOverlayDocumentEdits({
-      document: editorDocumentRef.current,
+    const edit = commit({ op: "overlay.patch", input: {
       updates: [
         {
           clipId: id,
@@ -5715,27 +5618,12 @@ export function HyperframesWorkbench({
           durationSec: Math.max(0.3, Math.round(durationSec * 100) / 100),
         },
       ],
-    });
-    if (!edit.ok) {
-      toast.error(editorErrorMessage(edit.error));
-      return;
-    }
-    setEditorDocument(edit.document);
+    } }, { undo: "none" });
+    if (!edit.ok) toast.error(editorErrorMessage(edit.error));
   };
   const resizeCaption = (id: string, edge: "left" | "right", atSec: number) => {
-    const edit = resizeManagedCaptionTiming(
-      editorDocumentRef.current,
-      id,
-      edge,
-      atSec,
-    );
-    if (!edit.ok) {
-      toast.error(editorErrorMessage(edit.error));
-      return;
-    }
-    if (edit.document === editorDocumentRef.current) return;
-    pushUndoSnapshot();
-    setEditorDocument(edit.document);
+    const edit = commit({ op: "captions.resize", input: { clipId: id, edge, atSec } });
+    if (!edit.ok) toast.error(editorErrorMessage(edit.error));
   };
   // Materialize the legacy pre-shots representation only. An explicit [] is a real empty track.
   const ensureShots = (c: Composition): VideoShot[] => videoTrackShots(c);
@@ -5750,7 +5638,8 @@ export function HyperframesWorkbench({
     visualMediaClips: supplementalVisuals,
     timelineDurationSec: renderPlan.durationSec,
     documentRef: editorDocumentRef,
-    setDocument: setEditorDocument,
+    commit,
+    republishDocument: (runtimeComposition) => committer.republish(runtimeComposition),
     videoFile,
     videoFileRef,
     videoSigRef,
@@ -5759,7 +5648,6 @@ export function HyperframesWorkbench({
     tRef,
     pickFile,
     backupMediaToCloud,
-    pushUndoSnapshot,
   });
   audioExportRef.current = audioOps.audioForExport;
   // Word masks (beeped / muted words): narrative sources are keyed by src in the engine; audio-lane and
@@ -5823,13 +5711,12 @@ export function HyperframesWorkbench({
     comp,
     compRef,
     documentRef: editorDocumentRef,
-    setDocument: setEditorDocument,
+    commit,
     videoFile,
     videoFileRef,
     videoSigRef,
     videoEngineRef,
     clipFilesRef,
-    pushUndoSnapshot,
   });
   denoiseExportRef.current = denoiseOps.denoiseForExport;
 
@@ -5841,24 +5728,13 @@ export function HyperframesWorkbench({
    *  the metadata stage: seek to a huge value to force the browser to compute the real duration (classic fix), 3s fallback.
    *  A just-uploaded URL may hit CDN propagation delay (first fetch 404): retry 2 more times, 1.2s apart. */
 
-  const prepareNarrationRangeEdit = (
-    ranges: { fromSec: number; toSec: number }[],
-  ) =>
-    applyNarrationDocumentEdit({
-      projectId,
-      document: editorDocumentRef.current,
-      ranges,
-      mainTranscript: asrRef.current,
-      clipTranscripts: clipAsrRef.current,
-    });
-  const prepareNarrationClipRemoval = (clipIds: readonly string[]) =>
-    removeNarrationClipsWithoutRipple({
-      projectId,
-      document: editorDocumentRef.current,
-      clipIds,
-      mainTranscript: asrRef.current,
-      clipTranscripts: clipAsrRef.current,
-    });
+  /** Runtime transcript mirrors, carried into an operation only when the document lacks them. */
+  const currentTranscripts = () => transcriptInputsFor(editorDocumentRef.current, asrRef.current, clipAsrRef.current);
+  /** Remove narration ranges as one undo step; the receipt carries the resulting composition. */
+  const commitNarrationRanges = (ranges: { fromSec: number; toSec: number }[]) =>
+    commit({ op: "narration.removeRanges", input: { ranges, ...currentTranscripts() } });
+  const commitNarrationClipRemoval = (clipIds: readonly string[]) =>
+    commit({ op: "narration.removeClips", input: { clipIds, ...currentTranscripts() } });
 
   /** Split the selected timeline clip(s) at the playhead. Selection owns the operation; track type does not. */
   const splitAtPlayhead = () => {
@@ -5867,7 +5743,7 @@ export function HyperframesWorkbench({
     if (audId) {
       const clip = (c.audioTracks ?? []).find((x) => x.id === audId);
       if (!clip) return;
-      const split = audioOps.splitClip(audId, tRef.current, pushUndoSnapshot);
+      const split = audioOps.splitClip(audId, tRef.current, true);
       if (!split.ok)
         toast.error(split.error ?? t("workbench.movePlayheadToSplitAudio"));
       return;
@@ -5898,6 +5774,7 @@ export function HyperframesWorkbench({
 
     let next = current;
     let splitCount = 0;
+    const splitOps: DocumentOp[] = [];
     for (const clipId of selectedIds) {
       const track = next.timeline.tracks.find((candidate) =>
         candidate.clips.some(
@@ -5910,26 +5787,23 @@ export function HyperframesWorkbench({
       // A linked partner may already have been split by an earlier selected clip. Clips that do
       // not cross the playhead are intentionally left unchanged, matching NLE multi-selection.
       if (!track) continue;
-      const split = applyEditorCommand(next, {
-        type: "clip.split",
-        trackId: track.id,
-        clipId,
-        atFrame,
-        includeLinked: true,
-      });
+      const command = { type: "clip.split" as const, trackId: track.id, clipId, atFrame, includeLinked: true };
+      // Preview so a linked partner split by an earlier clip is seen; the commands land as one transaction.
+      const split = applyEditorCommand(next, command);
       if (!split.ok) {
         toast.error(editorErrorMessage(split.error));
         return;
       }
       next = split.document;
+      splitOps.push({ op: "command", input: { command } });
       splitCount += 1;
     }
     if (!splitCount) {
       toast.error(t("workbench.movePlayheadToSplitSelection"));
       return;
     }
-    pushUndoSnapshot();
-    setEditorDocument(next);
+    const landed = commit(splitOps);
+    if (!landed.ok) toast.error(editorErrorMessage(landed.error));
   };
   /** Trim left / right: cut the source footage on the left/right of the playhead in the current shot, everything after
    *  shifts left, captions/effect blocks compress along with it. Native publication updates compRef synchronously, so sequential Agent trims cannot swallow the previous step. */
@@ -5951,7 +5825,7 @@ export function HyperframesWorkbench({
       const edit = audioOps.patchClip(
         audId,
         audioTrimPatch(clip, side, tRef.current),
-        pushUndoSnapshot,
+        true,
       );
       if (!edit.ok) {
         toast.error(edit.error ?? t("workbench.movePlayheadToTrimAudio"));
@@ -5970,13 +5844,11 @@ export function HyperframesWorkbench({
       toast.error(t("workbench.movePlayheadToTrim"));
       return { ok: false, error: t("workbench.movePlayheadToTrim") };
     }
-    const edit = prepareNarrationRangeEdit([range]);
+    const edit = commitNarrationRanges([range]);
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return { ok: false, error: editorErrorMessage(edit.error) };
     }
-    pushUndoSnapshot();
-    setEditorDocument(edit.document);
     setSelectedShotId(null);
     applyT(range.fromSec); // playhead lands at the cut point
     return { ok: true };
@@ -5991,22 +5863,18 @@ export function HyperframesWorkbench({
       return { ok: false, error: t("workbench.shotNotFound") };
     }
     if (clips.length > 1) {
-      const edit = prepareNarrationRangeEdit([range]);
+      const edit = commitNarrationRanges([range]);
       if (!edit.ok) {
         toast.error(editorErrorMessage(edit.error));
         return { ok: false, error: editorErrorMessage(edit.error) };
       }
-      pushUndoSnapshot();
-      setEditorDocument(edit.document);
     } else {
       // Emptying the primary lane intentionally preserves every independent sibling lane.
-      const edit = prepareNarrationClipRemoval([sid]);
+      const edit = commitNarrationClipRemoval([sid]);
       if (!edit.ok) {
         toast.error(editorErrorMessage(edit.error));
         return { ok: false, error: editorErrorMessage(edit.error) };
       }
-      pushUndoSnapshot();
-      setEditorDocument(edit.document);
     }
     setSelectedShotId(null);
     applyT(range.fromSec);
@@ -6026,15 +5894,13 @@ export function HyperframesWorkbench({
     if (targets.length === 0) return;
     if (targets.length === 1) return deleteShot(targets[0]!.clip.id); // degrade to single delete (reuse guard/landing point)
     if (targets.length === clips.length) {
-      const edit = prepareNarrationClipRemoval(
+      const edit = commitNarrationClipRemoval(
         targets.map((target) => target.clip.id),
       );
       if (!edit.ok) {
         toast.error(editorErrorMessage(edit.error));
         return;
       }
-      pushUndoSnapshot();
-      setEditorDocument(edit.document);
       setSelectedShotId(null);
       applyT(0);
       toast.success(t("workbench.deletedNScenes", { n: targets.length }));
@@ -6042,13 +5908,11 @@ export function HyperframesWorkbench({
     }
     const removedRanges = targets.map((target) => target.range);
     const firstStart = Math.min(...removedRanges.map((range) => range.fromSec));
-    const edit = prepareNarrationRangeEdit(removedRanges);
+    const edit = commitNarrationRanges(removedRanges);
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return;
     }
-    pushUndoSnapshot();
-    setEditorDocument(edit.document);
     setSelectedShotId(null);
     applyT(Number.isFinite(firstStart) ? firstStart : 0);
     toast.success(t("workbench.deletedNScenes", { n: targets.length }));
@@ -6101,34 +5965,17 @@ export function HyperframesWorkbench({
       );
     }
     const firstStart = spans.length ? spans[spans.length - 1]!.editedStart : 0;
-    const common = {
-      projectId,
-      document: editorDocumentRef.current,
-      mainTranscript: asrRef.current,
-      clipTranscripts: clipAsrRef.current,
-    };
-    const edit =
-      spans.length === shots.length
-        ? removeNarrationClipsWithoutRipple({
-            ...common,
-            clipIds: spans.map((span) => span.clip.id),
-          })
-        : applyNarrationDocumentEdit({
-            ...common,
-            ranges: spans.map((span) => ({
-              fromSec: span.editedStart,
-              toSec: span.editedEnd,
-            })),
-          });
+    const removal: DocumentOp = spans.length === shots.length
+      ? { op: "narration.removeClips", input: { clipIds: spans.map((span) => span.clip.id), ...currentTranscripts() } }
+      : { op: "narration.removeRanges", input: {
+          ranges: spans.map((span) => ({ fromSec: span.editedStart, toSec: span.editedEnd })),
+          ...currentTranscripts(),
+        } };
+    const edit = commit([removal, { op: "assets.prune", input: { assetIds: [...deletedAssetIds] } }]);
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return false;
     }
-    pushUndoSnapshot();
-    const cleaned = pruneUnusedEditorAssets(edit.document, [
-      ...deletedAssetIds,
-    ]);
-    setEditorDocument(cleaned.document);
     // Drop the source's cloud byte-rendezvous index too — otherwise the next boot resurrects the
     // deleted source from the R2 vault (loadLocalVideo miss → vault hit → source re-appears).
     const deadSigs = new Set(
@@ -6219,17 +6066,12 @@ export function HyperframesWorkbench({
     if (targets.length === 0) return;
     if (targets.length === 1) return removeBlock(targets[0]!.id); // degrade to single delete (reuse instant-remove/guard)
     const kill = new Set(targets.map((b) => b.id));
-    const edit = removeOverlayDocumentClips({
-      document: editorDocumentRef.current,
-      clipIds: [...kill],
-    });
+    for (const b of targets) postPreview({ type: "hf:remove", id: b.id }); // remove blocks from the frame instantly, don't wait for the debounced rebuild
+    const edit = commit({ op: "overlay.remove", input: { clipIds: [...kill] } });
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return;
     }
-    pushUndoSnapshot();
-    for (const b of targets) postPreview({ type: "hf:remove", id: b.id }); // remove blocks from the frame instantly, don't wait for the debounced rebuild
-    setEditorDocument(edit.document);
     setSelectedIdRaw(null);
     setSelectedBlockIds(new Set());
     toast.success(t("workbench.deletedNElements", { n: targets.length }));
@@ -6243,25 +6085,14 @@ export function HyperframesWorkbench({
         candidate.clips.some((clip) => clip.id === clipId),
     );
     if (!track) return;
-    const removed = applyEditorCommand(editorDocumentRef.current, {
-      type: "clips.remove",
-      trackId: track.id,
-      clipIds: [clipId],
-      includeLinked: true,
-    });
+    const removed = commit([
+      { op: "command", input: { command: { type: "clips.remove", trackId: track.id, clipIds: [clipId], includeLinked: true } } },
+      { op: "command", input: { command: { type: "captions.relay" } } },
+    ]);
     if (!removed.ok) {
       toast.error(editorErrorMessage(removed.error));
       return;
     }
-    const captions = applyEditorCommand(removed.document, {
-      type: "captions.relay",
-    });
-    if (!captions.ok) {
-      toast.error(editorErrorMessage(captions.error));
-      return;
-    }
-    pushUndoSnapshot();
-    setEditorDocument(captions.document);
     setSelectedVisualClipId(null);
   };
   const selectedShot =
@@ -6288,7 +6119,7 @@ export function HyperframesWorkbench({
       return;
     }
     redoStackRef.current.push(editorDocumentRef.current);
-    setEditorDocument(prev);
+    committer.replace(prev, { origin: "restore" });
     // Transcript caches are runtime mirrors of V2. A caption-copy undo must restore them from the
     // same snapshot immediately; otherwise the caption relay effect would write the newer text back
     // over the restored document on the next render.
@@ -6316,7 +6147,7 @@ export function HyperframesWorkbench({
     }
     undoStackRef.current.push(editorDocumentRef.current);
     if (undoStackRef.current.length > UNDO_CAP) undoStackRef.current.shift();
-    setEditorDocument(next);
+    committer.replace(next, { origin: "restore" });
     activateOutputDocumentRef.current(next, compRef.current);
     setSelectedId(null);
     setSelectedShotId(null);
@@ -6405,12 +6236,8 @@ export function HyperframesWorkbench({
       strokeAlpha: fx?.stroke?.opacity ?? 1,
       bg,
     });
-    const command = applyEditorCommand(editorDocumentRef.current, {
-      type: "appearance.patch",
-      patch: { personFx: fx },
-    });
-    if (command.ok) setEditorDocument(command.document);
-    else toast.error(editorErrorMessage(command.error));
+    const command = commit({ op: "command", input: { command: { type: "appearance.patch", patch: { personFx: fx } } } }, { undo: "none" });
+    if (!command.ok) toast.error(editorErrorMessage(command.error));
   };
   setPersonFxRef.current = setPersonFx;
   /** Whether this range's (a source's) mask is mostly complete (≥80% of sample points have frames) — avoids re-running when the toggle is flipped again. */
@@ -6778,12 +6605,11 @@ export function HyperframesWorkbench({
     playingRef,
     tRef,
     documentRef: editorDocumentRef,
-    setDocument: setEditorDocument,
+    commit,
     ensureShots,
     stepAsr,
     refreshAsr,
     ensureClipTranscripts,
-    pushUndoSnapshot,
     postPreview,
     applyT,
     runTool: (toolId, input) => runToolRef.current(toolId, input),
@@ -6823,12 +6649,12 @@ export function HyperframesWorkbench({
     clipAsrRef,
     documentRef: editorDocumentRef,
     localAssetIndexRef,
-    setDocument: setEditorDocument,
+    commit,
+    republishDocument: () => committer.republish(),
     rememberAssetUrl,
     setSelectedId,
     setSelectedShotId,
     applyT,
-    pushUndoSnapshot,
     ensureClipTranscripts,
     backupMediaToCloud,
     runTool: (toolId, input) => runToolRef.current(toolId, input),
@@ -6886,7 +6712,7 @@ export function HyperframesWorkbench({
         .sort((a, b) => a.order - b.order || a.createdAt - b.createdAt)
         .map((output) => output.id),
     remove: projectOutputs.remove,
-    setDocument: setEditorDocument,
+    replaceDocument: (document) => committer.replace(document, { origin: "restore" }),
     getComposition: () => compRef.current,
     onDocumentActivated: (document, composition) =>
       activateOutputDocumentRef.current(document, composition),
@@ -7052,13 +6878,12 @@ export function HyperframesWorkbench({
     elementTargetRef,
     chatRef,
     documentRef: editorDocumentRef,
-    setDocument: setEditorDocument,
+    commit,
     setSelectedId,
     setSelectedShotId,
     setPendingInsert,
     setGenRefreshTick,
     applyT,
-    pushUndoSnapshot,
     ensureShots,
     mappedCaptionSegs,
     composeBlockChecked,
@@ -7114,11 +6939,10 @@ export function HyperframesWorkbench({
     setClipAsr,
     setAsrSentences,
     documentRef: editorDocumentRef,
-    setDocument: setEditorDocument,
+    commit,
     setSelectedId,
     setSelectedShotId,
     applyT,
-    pushUndoSnapshot,
     ensureShots,
     stepAsr,
   });
@@ -7194,7 +7018,9 @@ export function HyperframesWorkbench({
     documentRef: editorDocumentRef,
     resolveAssetUrl,
     prepareLocalAssetRuntime,
-    setDocument: setEditorDocument,
+    commit,
+    replaceDocument: (document, options) => committer.replace(document, options),
+    beginTransactionScope: () => committer.scope(),
     listProjectOutputs: listProjectOutputsForAgent,
     resolveProjectOutput: projectOutputs.resolve,
     createProjectOutput: createProjectOutputForAgent,
@@ -7273,11 +7099,7 @@ export function HyperframesWorkbench({
     // A successful tool receipt is allowed to drive the assistant's "done" response. Push the
     // matching document revision now instead of leaving it in the generic 1.2s UI debounce tail;
     // otherwise a refresh/window takeover can persist the chat while losing the timeline edit.
-    const queue = cloudSaveQueueRef.current;
-    if (queue) {
-      queue.markDirty();
-      await queue.flush();
-    }
+    await cloudSaveQueueRef.current?.flush();
     return result;
   };
   const runStudioTool = (
@@ -7329,20 +7151,11 @@ export function HyperframesWorkbench({
     },
     onDisplaced: () => {
       if (displacedRef.current) return;
+      // flush-on-evict: push what this tab still holds BEFORE it goes read-only. Intents replay
+      // onto whatever the taker wrote, so nothing here can clobber it.
+      void cloudSaveQueueRef.current?.flush();
       displacedRef.current = true;
       setDisplaced(true);
-      // flush-on-evict: push the debounce tail with our still-valid baseVersion BEFORE going
-      // read-only — serialized behind any in-flight save. A conflict here means the taker
-      // already wrote; ours is the stale one, drop it (no rebase-retry for non-writers).
-      const payload = buildCloudPayload();
-      if (payload) {
-        cloudSaveChainRef.current = cloudSaveChainRef.current.then(async () => {
-          const result = await studioProviders()
-            .projects.save(projectId, payload)
-            .catch(() => "skip" as const);
-          if (result === "migration-required") blockForDocumentMigration();
-        });
-      }
       toast.info(t("workbench.displacedByAnotherWindow"));
     },
     onExternalCall: (tool, result) => {
@@ -7373,8 +7186,9 @@ export function HyperframesWorkbench({
   });
   bridgeReclaimRef.current = agentBridge.reclaim;
 
-  /** Cloud-sync payload from the live refs (shared by the debounced autosave and flush-on-evict). */
-  function buildCloudPayload(): ProjectSavePayload | null {
+  /** The small project sections from the live refs (context / meta / cover). The document itself
+   *  never travels: its edits are transactions the committer already handed to sync. */
+  function buildCloudSections(): ProjectSyncSections | null {
     const c = compRef.current;
     if (!projectId) return null;
     const hasContent = hasTimelineContent(c);
@@ -7387,9 +7201,6 @@ export function HyperframesWorkbench({
         projectOutputs.outputsRef.current.inactive.length > 0;
       return hasLibraryState || hasInactiveOutputs
         ? {
-            ...(hasLibraryState
-              ? { document: persistableDocument(false) }
-              : {}),
             context: {
               schemaVersion: STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION,
               outputs: projectOutputs.outputsRef.current,
@@ -7404,11 +7215,7 @@ export function HyperframesWorkbench({
           }
         : null;
     }
-    const canDerive =
-      (asrRef.current?.length ?? 0) > 0 ||
-      Object.keys(clipAsrRef.current).length > 0;
     return {
-      document: persistableDocument(canDerive),
       context: {
         schemaVersion: STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION,
         outputs: projectOutputs.outputsRef.current,
@@ -7423,38 +7230,25 @@ export function HyperframesWorkbench({
     };
   }
 
-  const cloudSaveOptions = {
-    getPayload: buildCloudPayload,
+  const projectSyncDeps: ProjectSyncDeps = {
+    projectId,
+    send: (wire) => studioProviders().projects.save(projectId, wire),
+    sections: buildCloudSections,
     canWrite: () => !displacedRef.current && !migrationWriteBlockedRef.current,
-    save: (payload: ProjectSavePayload) => {
-      // Keep metadata refresh and the one-shot displacement flush behind the same
-      // request chain as retries; no project PUT/GET observes a half-finished save.
-      const request = cloudSaveChainRef.current.then(() =>
-        studioProviders().projects.save(projectId, payload),
-      );
-      cloudSaveChainRef.current = request.then(
-        () => undefined,
-        () => undefined,
-      );
-      return request;
-    },
+    getDocument: () => editorDocumentRef.current,
     onMigrationRequired: blockForDocumentMigration,
-    onSaved: (submitted: ProjectSavePayload, remote: StudioProjectDto) => {
-      const current = buildCloudPayload();
-      if (!current) return;
-      // Preserve edits made while this request was in flight, then adopt acknowledged remote
-      // changes. Updating the live document closes the loop; the next save cannot restore a stale copy.
-      const next = reconcileProjectSave(submitted, current, remote);
-      if (next.context && canonicalJson(current.context) !== canonicalJson(next.context)) {
-        projectOutputs.hydrate(next.context.outputs);
-        setLocalAssetIndex(nativeProjectSharedLocalAssets(next.document!, next.context));
-      }
-      if (next.document && canonicalJson(current.document) !== canonicalJson(next.document)) {
-        const projection = projectDocumentToComposition(next.document);
-        setEditorDocument(next.document, projection);
-        hydrateNativeSession(next.document, projection, true);
-      }
-      setProjectVersion(projectId, remote.version);
+    store: localPendingTransactionStore(projectId),
+    onAck: (ack, info) => {
+      if (!info.diverged) return;
+      // Another writer landed in between (an offline agent, an import), or something we sent did
+      // not apply: adopt the server document and replay what is still pending on top, so nothing
+      // done here is lost and nothing done elsewhere is overwritten.
+      const remote = ack.project;
+      projectOutputs.hydrate(remote.context.outputs);
+      setLocalAssetIndex(nativeProjectSharedLocalAssets(remote.document, remote.context));
+      const { dropped } = committer.rebase(remote.document, info.pending);
+      if (dropped.length) console.warn("[studio] pending edits could not be replayed onto the server document", dropped.map((tx) => tx.id));
+      hydrateNativeSession(editorDocumentRef.current, compRef.current, true);
     },
   };
   if (
@@ -7462,11 +7256,12 @@ export function HyperframesWorkbench({
     cloudSaveQueueProjectRef.current !== projectId
   ) {
     cloudSaveQueueRef.current?.dispose();
-    cloudSaveQueueRef.current = new CloudProjectSaveQueue(cloudSaveOptions);
+    cloudSaveQueueRef.current = new ProjectSync(projectSyncDeps);
     cloudSaveQueueProjectRef.current = projectId;
   } else {
-    cloudSaveQueueRef.current.configure(cloudSaveOptions);
+    cloudSaveQueueRef.current.configure(projectSyncDeps);
   }
+  projectSyncRef.current = cloudSaveQueueRef.current;
   const cloudSaveQueue = cloudSaveQueueRef.current;
 
   useEffect(() => {
@@ -7584,19 +7379,16 @@ export function HyperframesWorkbench({
       return shifted;
     });
     if (needsPacking && clips[0]) {
-      const edit = moveVisualDocumentClip({
-        document: editorDocumentRef.current,
+      const edit = commit({ op: "visual.move", input: {
         clipId: clips[0].id,
         atSec: 0,
         target: { kind: "primary" },
         primaryOrder: clips.map((clip) => clip.id),
-      });
+      } });
       if (!edit.ok) {
         toast.error(editorErrorMessage(edit.error));
         return;
       }
-      pushUndoSnapshot();
-      setEditorDocument(edit.document);
     }
     setTimelineSnapEnabled(true);
   };
@@ -7637,8 +7429,7 @@ export function HyperframesWorkbench({
           return ids;
         })()
       : undefined;
-    const edit = moveVisualDocumentClip({
-      document: editorDocumentRef.current,
+    const edit = commit({ op: "visual.move", input: {
       clipId,
       atSec: startSec,
       ...(primaryOrder ? { primaryOrder } : {}),
@@ -7654,13 +7445,11 @@ export function HyperframesWorkbench({
           : target.kind === "primary"
             ? { kind: "primary" }
             : target,
-    });
+    } });
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return;
     }
-    pushUndoSnapshot();
-    setEditorDocument(edit.document);
     if (target.kind === "primary") setSelectedShotId(clipId);
     else selectVisualClip(clipId);
   };
@@ -7670,18 +7459,11 @@ export function HyperframesWorkbench({
     edge: "left" | "right",
     atSec: number,
   ) => {
-    const edit = resizeVisualTimelineClip(
-      editorDocumentRef.current,
-      clipId,
-      edge,
-      atSec,
-    );
-    if (!edit.ok || !edit.document) {
-      toast.error(edit.error || t("editorError.operationFailed"));
+    const edit = commit({ op: "visual.resize", input: { clipId, edge, atSec } });
+    if (!edit.ok) {
+      toast.error(edit.error.message || t("editorError.operationFailed"));
       return;
     }
-    pushUndoSnapshot();
-    setEditorDocument(edit.document);
     selectVisualClip(clipId);
   };
 
@@ -7690,18 +7472,11 @@ export function HyperframesWorkbench({
     edge: "left" | "right",
     atSec: number,
   ) => {
-    const edit = resizeNarrativeTimelineClip(
-      editorDocumentRef.current,
-      clipId,
-      edge,
-      atSec,
-    );
-    if (!edit.ok || !edit.document) {
-      toast.error(edit.error || t("editorError.operationFailed"));
+    const edit = commit({ op: "narrative.resize", input: { clipId, edge, atSec } });
+    if (!edit.ok) {
+      toast.error(edit.error.message || t("editorError.operationFailed"));
       return;
     }
-    pushUndoSnapshot();
-    setEditorDocument(edit.document);
     setSelectedShotId(clipId);
   };
 
@@ -7731,17 +7506,11 @@ export function HyperframesWorkbench({
   /** Slip commit (alt-drag on a shot body): the source window shifts, timeline geometry is
    *  untouched, so no retime/ripple — the engine clamps the delta against the asset again. */
   const commitNarrativeClipSlip = (clipId: string, sourceDeltaSec: number) => {
-    const edit = slipNarrativeTimelineClip(
-      editorDocumentRef.current,
-      clipId,
-      sourceDeltaSec,
-    );
-    if (!edit.ok || !edit.document) {
-      toast.error(edit.error || t("editorError.operationFailed"));
+    const edit = commit({ op: "narrative.slip", input: { clipId, sourceDeltaSec } });
+    if (!edit.ok) {
+      toast.error(edit.error.message || t("editorError.operationFailed"));
       return;
     }
-    pushUndoSnapshot();
-    setEditorDocument(edit.document);
     setSelectedShotId(clipId);
   };
 
@@ -7834,18 +7603,8 @@ export function HyperframesWorkbench({
         toast.error(t("workbench.elementNotFound"));
         return;
       }
-      const edit = moveOverlayDocumentClip({
-        document: editorDocumentRef.current,
-        clipId: id,
-        toTrackId: target.id,
-        startSec,
-      });
-      if (!edit.ok) {
-        toast.error(editorErrorMessage(edit.error));
-        return;
-      }
-      pushUndoSnapshot();
-      setEditorDocument(edit.document);
+      const edit = commit({ op: "overlay.move", input: { clipId: id, toTrackId: target.id, startSec } });
+      if (!edit.ok) toast.error(editorErrorMessage(edit.error));
     },
     /** Dragging into any row boundary creates a graphics lane at that exact document position. */
     onMoveBlockNewTrack: (id: string, newTrackIndex: number, startSec: number) => {
@@ -7866,8 +7625,7 @@ export function HyperframesWorkbench({
               ? (above + 1) / 2
               : above - 1
             : (above + below) / 2;
-      const edit = moveOverlayDocumentClip({
-        document: editorDocumentRef.current,
+      const edit = commit({ op: "overlay.move", input: {
         clipId: id,
         newTrack: {
           id: `track_graphics_${blockId("lane")}`,
@@ -7876,13 +7634,8 @@ export function HyperframesWorkbench({
           index: insertAt,
         },
         startSec,
-      });
-      if (!edit.ok) {
-        toast.error(editorErrorMessage(edit.error));
-        return;
-      }
-      pushUndoSnapshot();
-      setEditorDocument(edit.document);
+      } });
+      if (!edit.ok) toast.error(editorErrorMessage(edit.error));
     },
     onOpenTransition: openTransitionAt,
     onResizeTransition: resizeCutTransition,
@@ -7922,20 +7675,14 @@ export function HyperframesWorkbench({
     // Audio uses the same native clip.move transaction as other timeline media. The pointer gesture
     // commits once on release; the shared audio edit also allocates a parallel lane on collision.
     onMoveAudio: (id, startSec, target) => {
-      const edit = moveAudioDocumentClip({
-        document: editorDocumentRef.current,
+      const edit = commit({ op: "audio.move", input: {
         clipId: id,
         startSec,
         ...(target?.kind === "track" ? { toTrackId: target.trackId } : {}),
         ...(target ? { newTrackIndex: target.newTrackIndex } : {}),
         ...(target?.kind === "new-track" ? { forceNewTrack: true } : {}),
-      });
-      if (!edit.ok) {
-        toast.error(editorErrorMessage(edit.error));
-        return;
-      }
-      pushUndoSnapshot();
-      setEditorDocument(edit.document);
+      } });
+      if (!edit.ok) toast.error(editorErrorMessage(edit.error));
     },
     onTrimAudio: (
       id: string,
@@ -8012,29 +7759,28 @@ export function HyperframesWorkbench({
         const track = tracks.find((candidate) => candidate.id === id);
         return track?.type !== "audio" && track?.role !== "primaryNarrative" && track?.role !== "managedCaptions";
       });
+      // Preview the lane reorder so each row move is computed against the reordered document;
+      // the whole sequence then lands as one transaction.
       const visualEdit = reorderOverlayDocumentTracks(current, visualIds);
       if (!visualEdit.ok) {
         toast.error(editorErrorMessage(visualEdit.error));
         return;
       }
-
+      const reorder: DocumentOp[] = [{ op: "overlay.reorderTracks", input: { topToBottomTrackIds: visualIds } }];
       let next = visualEdit.document;
       for (const [toIndex, trackId] of targetIds.entries()) {
         if (next.timeline.tracks[toIndex]?.id === trackId) continue;
-        const moved = applyEditorCommand(next, {
-          type: "track.move",
-          trackId,
-          toIndex,
-        });
+        const command = { type: "track.move" as const, trackId, toIndex };
+        const moved = applyEditorCommand(next, command);
         if (!moved.ok) {
           toast.error(editorErrorMessage(moved.error));
           return;
         }
         next = moved.document;
+        reorder.push({ op: "command", input: { command } });
       }
-
-      pushUndoSnapshot();
-      setEditorDocument(next);
+      const landed = commit(reorder);
+      if (!landed.ok) toast.error(editorErrorMessage(landed.error));
     },
   });
 
@@ -8102,10 +7848,10 @@ export function HyperframesWorkbench({
           ? restoredDocument.assets[primaryId]?.locator.localSig
           : undefined) ?? d.videoSig;
       if (mainSig && wantsMain) videoSigRef.current = mainSig;
-      setEditorDocument(restoredDocument, {
+      committer.replace(restoredDocument, { origin: "hydrate", runtimeComposition: {
         ...restoredComposition,
         video: null,
-      });
+      } });
       hydrateNativeSession(restoredDocument, restoredComposition);
       if (mainSig && wantsMain) {
         void loadLocalVideo(mainSig).then(async (f) => {
@@ -8215,13 +7961,8 @@ export function HyperframesWorkbench({
       }
       return;
     }
-    const edit = applyCaptionDocumentEdit({
-      document: before,
-      mainTranscript: asrRef.current,
-      clipTranscripts: clipAsrRef.current,
-    });
-    if (edit.ok && edit.document !== before) {
-      setEditorDocument(edit.document);
+    const edit = commit({ op: "captions.edit", input: { ...transcriptInputsFor(before, asrRef.current, clipAsrRef.current) } }, { origin: "system", undo: "none" });
+    if (edit.ok && editorDocumentRef.current !== before) {
       chain.published = editorDocumentRef.current; // publish() stores the canonical document synchronously
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -8242,7 +7983,15 @@ export function HyperframesWorkbench({
     // Cloud project → straight into the workbench: use the in-memory draft returned by cacheProjectLocally directly, not
     // read back from localStorage — if the quota is full the write silently fails and you read a stale old draft, which autosave then writes back to the cloud.
     const applyRemote = (remote: StudioProjectDto) => {
-      applyDraft(restoreCloudProject(remote, draftOffer));
+      // Cloud is the truth; whatever this browser still owes the cloud (unacknowledged
+      // transactions from a previous session) replays on top and is pushed right after.
+      cloudSaveQueue.seed(remote);
+      applyDraft(cacheProjectLocally(remote));
+      const pending = cloudSaveQueue.pendingTransactions;
+      if (pending.length) {
+        committer.rebase(editorDocumentRef.current, pending);
+        void cloudSaveQueue.flush();
+      }
     };
     void (async () => {
       const local = draftOffer;
@@ -8262,11 +8011,9 @@ export function HyperframesWorkbench({
         return;
       }
       if (local) {
-        // Opened offline / on cloud timeout: subsequent saves must carry the draft's base version so the server's 409 check has a basis
-        // (the in-memory version table is empty on refresh, and a save without baseVersion unconditionally overwrites the cloud)
-        if (local.baseVersion != null)
-          setProjectVersion(projectId, local.baseVersion);
-        applyDraft(local); // local is newer / cloud unreachable → use local
+        // Opened offline / on cloud timeout: the cached draft already reflects the pending
+        // transactions, which stay queued and are pushed once the cloud answers.
+        applyDraft(local);
       }
       // Both empty and it was a "timeout" (≠ definitely absent): the data is probably in the cloud, don't pretend it's a new empty project
       else if (remote === undefined)
@@ -8278,7 +8025,7 @@ export function HyperframesWorkbench({
           setLocalAssetIndexSyncReady(true);
           if (!late) return;
           // Receiving a late cloud snapshot does not mean the live local edit adopted it.
-          // applyRemote below advances the baseline only when the whole document is adopted.
+          // applyRemote below seeds the sync baseline only when the whole document is adopted.
           hydrateNativeSession(
             late.document,
             projectDocumentToComposition(late.document),
@@ -8311,19 +8058,19 @@ export function HyperframesWorkbench({
       const ticket = ++request;
       if (timer != null) window.clearTimeout(timer);
       timer = window.setTimeout(() => {
-        void cloudSaveChainRef.current.then(async () => {
+        void cloudSaveQueue.whenIdle().then(async () => {
           // Dirty-but-unflushed local state sits in the save queue's debounce, NOT in the save
           // chain — a remote snapshot fetched now predates local intent, and adopting it would
           // wipe just-imported assets (the panel treats a confirmed cloud index as exact).
           // Skip; the next focus/visibility event retries once the push has been acknowledged.
-          if (cloudSaveQueueRef.current?.hasPendingSave) return;
+          if (cloudSaveQueueRef.current?.hasPending) return;
           const mutationRev = localAssetIndexMutationRevRef.current;
           const remote = await studioProviders().projects.load(projectId);
           if (
             dead ||
             ticket !== request ||
             mutationRev !== localAssetIndexMutationRevRef.current ||
-            cloudSaveQueueRef.current?.hasPendingSave
+            cloudSaveQueueRef.current?.hasPending
           )
             return;
           if (remote)
@@ -8350,6 +8097,21 @@ export function HyperframesWorkbench({
   useEffect(() => {
     if (hasTimelineContent(comp)) everCanvasContentRef.current = true;
   }, [comp]);
+
+  // Session metadata (transcripts, cloud keys, library directory, source sig) used to be folded into
+  // the document at save time. The server never sees a saved document any more, so the fold is an
+  // operation like any other: when the runtime refs would change the document, commit that change.
+  useEffect(() => {
+    if (!bootDataReady || !projectId) return;
+    const activation = cloudAutosaveActivationRef.current!.activation;
+    if (!activation.active) return;
+    const metadata = livePersistenceMetadataRef.current;
+    const current = editorDocumentRef.current;
+    const folded = applyEditorDocumentPersistenceMetadata({ projectId, document: current, ...metadata });
+    if (canonicalJson(folded) === canonicalJson(current)) return;
+    commit({ op: "document.foldMetadata", input: metadata }, { origin: "system", undo: "none" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bootDataReady, projectId, editorDocument, asrSentences, clipAsr, cloudMediaRev, localAssetIndexRev, videoFile]);
 
   // Project sync (debounced): coalesce one PUT 1.2s after document/context changes. Chat uses its own immediate API.
   // local useDraftAutosave still writes localStorage as a cache, the two are independent. Don't push on an empty canvas (don't blank the cloud).

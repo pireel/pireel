@@ -52,7 +52,7 @@ describe('project output runtime', () => {
       create: vi.fn(),
       listOutputIds: () => ['output-main', 'output-three'],
       remove: vi.fn(),
-      setDocument: vi.fn(),
+      replaceDocument: vi.fn(),
       getComposition: () => composition,
       videoFileRef: { current: null },
       videoSigRef: { current: null },

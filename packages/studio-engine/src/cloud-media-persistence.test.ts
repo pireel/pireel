@@ -30,10 +30,12 @@ describe('durable cloud upload completion', () => {
   it('retains confirmed keys through a stale full autosave while honoring asset deletion', () => {
     const confirmed = applyUploadedMediaKeys(document(), sanitizeProjectContext({ localAssets: [entry] }), new Map([['sig', 'cloud/key']]));
     const existing = { title: 'Project', document: confirmed.document, context: confirmed.context, videoSig: null, videoDurationSec: null, coverThumb: null };
-    const merged = mergeSaveIntoRow(existing, sanitizeSavePayload({ documentSchemaVersion: 2, document: document(), context: sanitizeProjectContext({ localAssets: [{ ...entry, label: 'Renamed' }] }) })!);
+    // The document arrives already transacted; a stale copy of it (no cloud key yet) must still
+    // pick the confirmed key back up from the row when the sections merge.
+    const merged = mergeSaveIntoRow({ ...existing, document: document() }, sanitizeSavePayload({ documentSchemaVersion: 2, context: sanitizeProjectContext({ localAssets: [{ ...entry, label: 'Renamed' }] }) })!);
     expect(merged?.context.localAssets?.[0]).toMatchObject({ label: 'Renamed', cloudKey: 'cloud/key' });
     expect(merged?.document).toMatchObject({ assets: { a: { locator: { cloudKey: 'cloud/key' } } } });
-    const deleted = mergeSaveIntoRow(existing, sanitizeSavePayload({ documentSchemaVersion: 2, document: emptyEditorDocumentV2(), context: sanitizeProjectContext({ localAssets: [] }) })!);
+    const deleted = mergeSaveIntoRow({ ...existing, document: emptyEditorDocumentV2() }, sanitizeSavePayload({ documentSchemaVersion: 2, context: sanitizeProjectContext({ localAssets: [] }) })!);
     expect(deleted?.context.localAssets).toEqual([]);
     expect(deleted?.document).toMatchObject({ assets: {} });
   });

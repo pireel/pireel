@@ -5,6 +5,10 @@
  * (studio:draft:<id>), composition debounce-saved so a refresh doesn't lose it. The project
  * list is derived by scanning the key prefix, no separate index maintained.
  *
+ * The draft is a cache of the last published document, for an instant or offline open. It is
+ * never merged with the cloud copy: the cloud document is adopted and the unacknowledged
+ * transactions (see project-sync) are replayed on top.
+ *
  * The video itself is a local File and can't be stored — we store fileSig + duration; reselecting
  * the same file after restore snaps it fully back into place (pickVideoFile recognizes the restore
  * case by sig and skips the "new file = new project" clear).
@@ -22,19 +26,15 @@ import {
   firstNarrativeAsset,
   projectDocumentToComposition,
 } from '@pireel/studio-engine/composition';
-import {
-  type AckedSections,
-  ackedFromDto,
-  buildSaveWire,
-  type ProjectSavePayload,
-  type ProjectSaveWire,
-  type StudioProjectContext,
-  type StudioProjectDto,
-  type StudioProjectMeta,
+import type {
+  ProjectCommitAck,
+  ProjectSaveResult,
+  ProjectSaveWire,
+  StudioProjectContext,
+  StudioProjectDto,
+  StudioProjectMeta,
 } from '@pireel/studio-engine/project-dto';
 import { t } from './i18n';
-import { reconcileProjectSave } from '@pireel/studio-engine/project-reconcile';
-import type { ProjectSaveResult } from '@pireel/studio-engine/project-dto';
 
 const PREFIX = 'studio:draft:';
 const LEGACY_KEY = 'studio:draft:v1'; // single-draft era; 'v1' is a reserved id, skipped during scans
@@ -57,13 +57,6 @@ export interface StudioDraft {
   videoSig: string | null;
   videoDurationSec: number | null;
   savedAt: number;
-  /** The cloud version this draft is based on (the version at last successful fetch/save). The only
-   *  reliable basis for "cloud vs local, which is newer" at startup — savedAt self-refreshes on every
-   *  open via local autosave, so comparing it would make every browser think it's newest, each using
-   *  its own copy and overwriting the cloud. Old drafts lack this field = cloud wins. */
-  baseVersion?: number | null;
-  /** This draft contains edits not yet acknowledged by cloud storage. */
-  pending?: boolean;
   /** Project-level multi-output directory. */
   context?: StudioProjectContext;
 }
@@ -98,7 +91,7 @@ function rawDraft(id: string): StudioDraft | null {
 /** Only a draft with timeline content counts as recoverable (including audio-only projects). */
 export function loadDraft(id: string): StudioDraft | null {
   const d = rawDraft(id);
-  if (!d || (!d.pending && !hasTimelineContent(d.comp) && !d.context?.outputs?.inactive.length)) return null;
+  if (!d || (!hasTimelineContent(d.comp) && !d.context?.outputs?.inactive.length)) return null;
   return d;
 }
 
@@ -205,26 +198,7 @@ export function migrateLegacyDraft() {
   }
 }
 
-/* ============================ Server sync (cloud wins + local cache) ============================ */
-
-/** The version read from a project row (for optimistic concurrency): one per project, sent back on save, refreshed on conflict. */
-const versions = new Map<string, number>();
-export const projectVersion = (id: string) => versions.get(id) ?? null;
-export const setProjectVersion = (id: string, v: number) => versions.set(id, v);
-
-/** A loaded cloud row is already acknowledged server state. Seed both the optimistic version and
- * the differential-save baseline from that same snapshot, so merely hydrating a second tab cannot
- * emit a full no-op PUT, advance the version, and race the first tab's pending real edit. */
-function rememberServerProject(p: StudioProjectDto): void {
-  setProjectVersion(p.id, p.version);
-  remoteSnapshots.set(p.id, p);
-  localBaselines.set(p.id, p);
-  try {
-    sectionCache.set(p.id, ackedFromDto(p));
-  } catch {
-    sectionCache.delete(p.id);
-  }
-}
+/* ============================ Server transport ============================ */
 
 /** Server project list (visible across devices). Returns null on failure; caller falls back to local cache. */
 export async function serverListProjects(): Promise<StudioProjectMeta[] | null> {
@@ -238,29 +212,15 @@ export async function serverListProjects(): Promise<StudioProjectMeta[] | null> 
   }
 }
 
-/** List-page rename: title-only differential PUT (absent sections keep their server values).
- *  Deliberately NOT serverSaveProject — that's the workbench session's stateful diff stack;
- *  called without a hydrated session it would resend empty sections over the cloud state.
- *  409 (someone saved meanwhile) retries once against the server's version. Returns false
+/** List-page rename: title-only PUT (absent sections keep their server values). Returns false
  *  when the row doesn't exist yet — the first autosave carries the local title up anyway. */
-export async function serverRenameProject(id: string, title: string, baseVersion: number): Promise<boolean> {
-  const put = (v: number) =>
-    fetch(`/api/studio/projects/${encodeURIComponent(id)}`, {
+export async function serverRenameProject(id: string, title: string): Promise<boolean> {
+  try {
+    const r = await fetch(`/api/studio/projects/${encodeURIComponent(id)}`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        documentSchemaVersion: 2,
-        title,
-        baseVersion: v,
-      }),
+      body: JSON.stringify({ documentSchemaVersion: 2, knownVersion: null, title }),
     });
-  try {
-    let r = await put(baseVersion);
-    if (r.status === 409) {
-      const { project } = (await r.json()) as { project?: StudioProjectDto };
-      if (!project) return false;
-      r = await put(project.version);
-    }
     return r.ok;
   } catch {
     return false;
@@ -273,8 +233,6 @@ export async function serverLoadProject(id: string): Promise<StudioProjectDto | 
     const r = await fetch(`/api/studio/projects/${id}`);
     if (!r.ok) return null;
     const { project } = (await r.json()) as { project: StudioProjectDto };
-    // A metadata refresh does not replace the editor's document. Only explicit adoption
-    // through cacheProjectLocally may advance its save baseline/version to this snapshot.
     return project ?? null;
   } catch {
     return null;
@@ -283,16 +241,7 @@ export async function serverLoadProject(id: string): Promise<StudioProjectDto | 
 
 export type { ProjectSavePayload } from '@pireel/studio-engine/project-dto';
 
-/** The diff baseline from the last successful save (section hashes + section values, values being the base
- *  for JSON Patch diffs): only advanced on 'ok' — failed sections stay dirty and resend next time; a 409
- *  reseeds from the server's returned full state (so the retry diff aligns with truth). */
-const sectionCache = new Map<string, AckedSections>();
-
-const remoteSnapshots = new Map<string, StudioProjectDto>();
-const localBaselines = new Map<string, ProjectSavePayload>();
-const saveChains = new Map<string, Promise<unknown>>();
-
-/** PUT the diff body: large bodies use gzip (custom header; content-encoding risks a middlebox
+/** PUT the wire: large bodies use gzip (custom header; content-encoding risks a middlebox
  *  decompressing it on its own), environments without CompressionStream fall back to plaintext. */
 async function putWire(id: string, wire: ProjectSaveWire): Promise<Response> {
   const json = JSON.stringify(wire);
@@ -311,58 +260,33 @@ async function putWire(id: string, wire: ProjectSaveWire): Promise<Response> {
   return fetch(`/api/studio/projects/${id}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: json });
 }
 
-/** Serialize the project's saves and replay only edits since this editor's last acknowledgement.
- * A network failure keeps the same local intent; identity-based reconciliation makes replay safe. */
-export function serverSaveProject(id: string, payload: ProjectSavePayload): Promise<ProjectSaveResult> {
-  const pending = (saveChains.get(id) ?? Promise.resolve()).then(() => saveProjectEdit(id, payload));
-  saveChains.set(id, pending);
-  void pending.finally(() => { if (saveChains.get(id) === pending) saveChains.delete(id); }).catch(() => {});
-  return pending;
-}
-
-async function saveProjectEdit(id: string, payload: ProjectSavePayload): Promise<ProjectSaveResult> {
-  const local = structuredClone(payload);
-  const base = localBaselines.get(id);
+/** Transport for one save request. The sync layer owns retries, baselines and the pending list. */
+export async function serverSaveProject(id: string, wire: ProjectSaveWire): Promise<ProjectSaveResult | 'need-full'> {
   try {
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const remote = remoteSnapshots.get(id);
-      const candidate = remote ? reconcileProjectSave(base ?? remote, local, remote, !base) : local;
-      const wireVersion = remote?.version ?? projectVersion(id);
-      const built = buildSaveWire(candidate, wireVersion, sectionCache.get(id) ?? null);
-      if (!built) {
-        localBaselines.set(id, local);
-        return remote ? { status: 'saved', project: remote } : 'ok';
-      }
-      let response = await putWire(id, built.wire);
-      if (response.status === 422) {
-        const full = buildSaveWire(candidate, wireVersion, null);
-        if (!full) return 'skip';
-        response = await putWire(id, full.wire);
-      }
-      if (response.status === 409) {
-        const body = await response.json() as { error?: string; saveBlocked?: boolean; project?: StudioProjectDto };
-        if (body.saveBlocked || body.error === 'document_migration_required' || body.error === 'document_schema_upgraded') return 'migration-required';
-        if (!body.project) return 'skip';
-        remoteSnapshots.set(id, body.project);
-        sectionCache.set(id, ackedFromDto(body.project));
-        continue;
-      }
-      if (!response.ok) return 'skip';
-      const { project } = await response.json() as { project?: StudioProjectDto };
-      if (!project) return 'skip'; // no acknowledgement: leave the intent pending
-      remoteSnapshots.set(id, project);
-      sectionCache.set(id, ackedFromDto(project));
-      localBaselines.set(id, local);
-      return { status: 'saved', project };
+    const response = await putWire(id, wire);
+    if (response.status === 422) return 'need-full';
+    if (response.status === 409) {
+      const body = await response.json() as { error?: string; saveBlocked?: boolean };
+      if (body.saveBlocked || body.error === 'document_migration_required' || body.error === 'save_protocol_retired') return 'migration-required';
+      return 'skip';
     }
-  } catch { /* the save queue retries; the live/local draft stays authoritative for pending intent */ }
-  return 'skip';
+    if (!response.ok) return 'skip';
+    const body = await response.json() as Partial<ProjectCommitAck> & { project?: StudioProjectDto };
+    if (!body.project) return 'skip'; // no acknowledgement: leave the intent pending
+    return {
+      status: 'saved',
+      project: body.project,
+      applied: Array.isArray(body.applied) ? body.applied : [],
+      rejected: Array.isArray(body.rejected) ? body.rejected : [],
+      baseVersion: typeof body.baseVersion === 'number' ? body.baseVersion : body.project.version - 1,
+      documentHash: typeof body.documentHash === 'string' ? body.documentHash : '',
+    };
+  } catch {
+    return 'skip';
+  }
 }
 
 export async function serverDeleteProject(id: string): Promise<void> {
-  sectionCache.delete(id);
-  remoteSnapshots.delete(id);
-  localBaselines.delete(id);
   try {
     await fetch(`/api/studio/projects/${id}`, { method: 'DELETE' });
   } catch {
@@ -371,12 +295,10 @@ export async function serverDeleteProject(id: string): Promise<void> {
 }
 
 /** Server project → local localStorage cache: after opening on a new device there's a local
- *  copy too, for instant open next time and offline viewing. Also remembers version to send back on save.
+ *  copy too, for instant open next time and offline viewing.
  *  Returns the in-memory draft for the caller to apply directly — persistence can silently fail on quota, and
- *  reading back from localStorage afterward would yield a stale draft (then autosave would write that stale state
- *  back to cloud; don't go down that path). */
+ *  reading back from localStorage afterward would yield a stale draft. */
 export function cacheProjectLocally(p: StudioProjectDto): StudioDraft {
-  rememberServerProject(p);
   const document = p.document;
   const draft: StudioDraft = {
     id: p.id,
@@ -387,8 +309,6 @@ export function cacheProjectLocally(p: StudioProjectDto): StudioDraft {
     videoSig: p.videoSig,
     videoDurationSec: p.videoDurationSec,
     savedAt: p.updatedAt,
-    baseVersion: p.version,
-    pending: false,
     ...(p.context && Object.keys(p.context).length ? { context: p.context } : {}),
   };
   try {
@@ -397,35 +317,6 @@ export function cacheProjectLocally(p: StudioProjectDto): StudioDraft {
     /* quota full: only affects next instant-open; the caller applying the return value directly is unaffected */
   }
   return draft;
-}
-
-export function draftHasPendingEdits(id: string, document: EditorDocumentV2, context?: StudioProjectContext, fallback = true): boolean {
-  const remote = remoteSnapshots.get(id);
-  if (!remote) return fallback;
-  const built = buildSaveWire({ document, context, videoSig: remote.videoSig, videoDurationSec: remote.videoDurationSec }, remote.version, ackedFromDto(remote));
-  return !!built && ('document' in built.wire || 'documentPatch' in built.wire || 'context' in built.wire || 'contextPatch' in built.wire);
-}
-
-/** Seed the save base from cloud truth, but never discard an unacknowledged local draft.
- * With no persisted base snapshot, keep both branches as normal outputs instead of guessing. */
-export function restoreCloudProject(remote: StudioProjectDto, local?: StudioDraft | null): StudioDraft {
-  const cloud = cacheProjectLocally(remote);
-  if (!local || !draftHasPendingEdits(remote.id, local.document, local.context)) return cloud;
-  const localPayload: ProjectSavePayload = { document: local.document, context: local.context,
-    videoSig: local.videoSig, videoDurationSec: local.videoDurationSec, coverThumb: local.coverThumb };
-  let next: ProjectSavePayload;
-  if (local.baseVersion === remote.version) next = localPayload;
-  else if (local.pending === false) return cloud;
-  else if (local.pending === true) next = reconcileProjectSave(remote, localPayload, remote, true);
-  else {
-    // A pre-upgrade draft has no dirty marker. Prefer cloud while preserving the unknown local branch.
-    const localSnapshot = { ...remote, ...localPayload, document: local.document, context: local.context ?? remote.context, updatedAt: local.savedAt } as StudioProjectDto;
-    next = reconcileProjectSave(localSnapshot, remote, localSnapshot, true);
-  }
-  const restored: StudioDraft = { ...cloud, document: next.document!, comp: projectDocumentToComposition(next.document!),
-    context: next.context, videoSig: next.videoSig, videoDurationSec: next.videoDurationSec, coverThumb: next.coverThumb ?? undefined, pending: true };
-  try { writeDraft(restored); } catch { /* live edit remains available */ }
-  return restored;
 }
 
 /** Debounced autosave: don't write an empty canvas (just-opened, don't clobber an existing draft); strip the blob
@@ -469,8 +360,6 @@ export function useDraftAutosave(
           videoSig,
           videoDurationSec,
           savedAt: Date.now(),
-          baseVersion: projectVersion(projectId) ?? prev?.baseVersion ?? null,
-          pending: draftHasPendingEdits(projectId, document, context, prev?.pending ?? true),
           ...(() => {
             const ctx = context;
             return ctx && Object.keys(ctx).length ? { context: ctx } : {};

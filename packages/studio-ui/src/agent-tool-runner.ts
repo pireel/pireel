@@ -11,6 +11,9 @@ import type { MutableRefObject } from 'react';
 import { resolveWebFontReference, webFontCatalogHint } from '@pireel/studio-engine/font-library';
 import { editorErrorMessage } from './editor-error';
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
+import { transcriptInputsFor, type DocumentOp } from '@pireel/studio-engine/document-transaction';
+import type { AgentTimelineOutcome } from '@pireel/studio-engine/agent-timeline';
+import type { DocumentCommitter, ReplaceOptions, TransactionScope } from './document-commit';
 import { directorPlanFromDocument } from '@pireel/studio-engine/director-plan-artifact';
 import {
   type AudioClip,
@@ -30,20 +33,11 @@ import {
   VOLUME_DB_MAX,
   VOLUME_DB_MIN,
   applyBlockPlacement,
-  applyCanvasDocumentEdit,
-  applyCaptionDocumentEdit,
   applyCompositionLayout,
-  applyEditorCommand,
-  applyLayoutDocumentEdit,
-  applyNarrationDocumentEdit,
   applyOverlayDocumentEdits,
-  applyNarrationSplitCommands,
   normalizeNarrationSplitPoints,
   planNarrationCuts,
   applyShotFramingInput,
-  applyVideoClipSettingsPatches,
-  applyMediaCropInput,
-  applyMediaTransformInput,
   audioTrimPatch,
   bakeCompositionHtml,
   blockId,
@@ -66,11 +60,6 @@ import {
   listDocumentAddressedWords,
   localImageLocator,
   mediaVideoClipEntries,
-  patchNarrativeClips,
-  removeOverlayDocumentClips,
-  retimeOverlayDocumentClip,
-  duplicateOverlayDocumentClip,
-  insertOverlayDocumentClip,
   resolveDocumentWordIds,
   resolveWordQueryAsset,
   transcriptWordTiming,
@@ -82,9 +71,7 @@ import {
   transcriptContextAt,
   validateComposition,
   validateEditorDocumentV2,
-  syncCaptionTranscripts,
   AGENT_TIMELINE_TOOL_IDS,
-  runAgentTimelineTool,
   videoShotTimelineSpans,
   zoneOf,
 } from '@pireel/studio-engine/composition';
@@ -120,7 +107,6 @@ import { directorPlanFromSeconds } from '@pireel/studio-engine/director-plan';
 import { applyDirectorPlanToDocument } from '@pireel/studio-engine/director-plan-document';
 import {
   sceneDesignCollectionFromInput,
-  withSceneDesignsInSemantics,
 } from '@pireel/studio-engine/scene-design';
 import { formatDirectorSceneContext, resolveDirectorSceneContext } from '@pireel/studio-engine/semantic-scenes';
 import {
@@ -410,7 +396,12 @@ export interface AgentToolCtx {
     | { ok: true; prepared: boolean; file?: File }
     | { ok: false; error: string }
   >;
-  setDocument: (document: EditorDocumentV2, runtimeComposition?: Composition) => void;
+  /** The document's single mutation gateway: operations in, publish + sync out. */
+  commit: DocumentCommitter['commit'];
+  /** Whole-document replacement (undo / redo / cloud history restore, or a hydrate). */
+  replaceDocument: (document: EditorDocumentV2, options: ReplaceOptions) => void;
+  /** Stage the transactions of one tool call so a failed tool leaves nothing behind for sync. */
+  beginTransactionScope: () => TransactionScope;
   ensureShots: (c: Composition) => VideoShot[];
   /** Cloud project id — undo's history-ring fallback targets it when the in-memory stack is empty. */
   projectId: string;
@@ -538,7 +529,7 @@ function fetchSkillReviewBrief(skillId: string): Promise<string | null> {
 
 async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: StudioToolRunInternalOptions): Promise<StudioToolResult> {
   const {
-    compRef, documentRef, resolveAssetUrl, prepareLocalAssetRuntime, setDocument, ensureShots, projectId,
+    compRef, documentRef, resolveAssetUrl, prepareLocalAssetRuntime, commit, replaceDocument, ensureShots, projectId,
     listProjectOutputs, resolveProjectOutput, createProjectOutput, duplicateProjectOutput, switchProjectOutput, renameProjectOutput, deleteProjectOutput,
     setSelectedId, setSelectedShotId, selectedIdRef, applyT, tRef, playStopAtRef,
     playingRef, setPlaying, seekBlockSettled, postPreview, pushUndoSnapshot, undoStackRef, redoStackRef, genIdsRef,
@@ -620,36 +611,18 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
       // Kept as a semantic marker at ripple-heavy call sites; the outer transaction attaches the
       // final delta for every mutation after validation (not just footage edits).
       const withDelta = (res: StudioToolResult): StudioToolResult => res;
+      const currentTranscripts = () => transcriptInputsFor(documentRef.current, asrRef.current, clipAsrRef.current);
       const commitNarrationRanges = (ranges: { fromSec: number; toSec: number }[]) => {
-        const command = applyNarrationDocumentEdit({
-          projectId: ctx.projectId,
-          document: documentRef.current,
-          ranges,
-          mainTranscript: asrRef.current,
-          clipTranscripts: clipAsrRef.current,
-        });
+        const command = commit({ op: 'narration.removeRanges', input: { ranges, ...currentTranscripts() } });
         if (!command.ok) return command;
-        setDocument(command.document);
         return { ...command, composition: compRef.current };
       };
-      const commitOverlayEdits = (updates: Parameters<typeof applyOverlayDocumentEdits>[0]['updates']) => {
-        const command = applyOverlayDocumentEdits({ document: documentRef.current, updates });
-        if (!command.ok) return command;
-        setDocument(command.document);
-        return command;
-      };
-      const commitOverlayRemoval = (clipIds: readonly string[]) => {
-        const command = removeOverlayDocumentClips({ document: documentRef.current, clipIds });
-        if (!command.ok) return command;
-        setDocument(command.document);
-        return command;
-      };
-      const commitOverlayInsert = (block: Block, sceneId?: string) => {
-        const command = insertOverlayDocumentClip({ document: documentRef.current, block, ...(sceneId ? { sceneId } : {}) });
-        if (!command.ok) return command;
-        setDocument(command.document);
-        return command;
-      };
+      const commitOverlayEdits = (updates: Parameters<typeof applyOverlayDocumentEdits>[0]['updates']) =>
+        commit({ op: 'overlay.patch', input: { updates } });
+      const commitOverlayRemoval = (clipIds: readonly string[]) =>
+        commit({ op: 'overlay.remove', input: { clipIds } });
+      const commitOverlayInsert = (block: Block, sceneId?: string) =>
+        commit({ op: 'overlay.insert', input: { block, ...(sceneId ? { sceneId } : {}) } });
       // Mutating tools push an undo snapshot first (except query/locate/pure-analysis/undo itself); cap 20
       // Generation lock: the target block is held by an image-fill/rewrite worker → refuse the change (it would be overwritten by the result, or leave the generation with stale data)
       if (!NO_UNDO_TOOLS.has(toolId)) {
@@ -682,7 +655,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           .map((assetId) => resolveLocalAssetReference(assetId, ctx.localAssetIndexRef?.current ?? []))
           .filter((entry): entry is LocalAssetIndexEntry => !!entry);
         if (missingLocalAssets.length) {
-          const hydrated = runAgentTimelineTool(documentRef.current, 'register_media', {
+          const hydrated = commit({ op: 'agent.timeline', input: { tool: 'register_media', input: {
             assets: missingLocalAssets.map((entry) => ({
               id: entry.assetId,
               kind: entry.kind ?? 'video',
@@ -691,11 +664,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               ...(entry.w ? { width: entry.w } : {}),
               ...(entry.h ? { height: entry.h } : {}),
             })),
-          });
-          if (!hydrated.ok || !hydrated.document) {
-            return { ok: false, error: hydrated.error ?? t('chatGen.executionFailed') };
+          } } }, { undo: 'none' });
+          if (!hydrated.ok) {
+            return { ok: false, error: hydrated.error.message || t('chatGen.executionFailed') };
           }
-          setDocument(hydrated.document);
         }
         // Catalog results (official music, sound, stickers, cloud uploads) the agent found through
         // search_assets: register them from the receipt's locator right here, so a search result
@@ -704,7 +676,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           .filter((assetId) => !documentRef.current.assets[assetId] && searchedCatalogAssets.has(assetId))
           .map((assetId) => ({ id: assetId, ...searchedCatalogAssets.get(assetId)! }));
         if (missingCatalogAssets.length) {
-          const hydrated = runAgentTimelineTool(documentRef.current, 'register_media', {
+          const hydrated = commit({ op: 'agent.timeline', input: { tool: 'register_media', input: {
             assets: missingCatalogAssets.map((entry) => ({
               id: entry.id,
               kind: entry.kind,
@@ -714,11 +686,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               ...(entry.width ? { width: entry.width } : {}),
               ...(entry.height ? { height: entry.height } : {}),
             })),
-          });
-          if (!hydrated.ok || !hydrated.document) {
-            return { ok: false, error: hydrated.error ?? t('chatGen.executionFailed') };
+          } } }, { undo: 'none' });
+          if (!hydrated.ok) {
+            return { ok: false, error: hydrated.error.message || t('chatGen.executionFailed') };
           }
-          setDocument(hydrated.document);
         }
         const speechFree = speechFreeLocalSigs(documentRef);
         if (speechFree.size && Array.isArray(input.clips)) {
@@ -744,17 +715,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             inspectedTranscript
             && !Object.prototype.hasOwnProperty.call(documentRef.current.semantics.transcripts, assetId)
           ) {
-            const current = documentRef.current;
-            setDocument({
-              ...current,
-              semantics: {
-                ...current.semantics,
-                transcripts: {
-                  ...current.semantics.transcripts,
-                  [assetId]: inspectedTranscript,
-                },
-              },
-            });
+            commit({ op: 'transcripts.set', input: { transcripts: { [assetId]: inspectedTranscript } } }, { undo: 'none' });
           }
           const ready = await prepareLocalAssetRuntime(asset, { asPrimary: false });
           if (!ready.ok) {
@@ -775,24 +736,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const file = ready.file ?? await loadProjectAssetFile(asset);
             const probe = file ? await probeVideoFile(file).catch(() => null) : null;
             if (probe?.durationSec) {
-              const current = documentRef.current;
-              const currentAsset = current.assets[assetId]!;
-              setDocument({
-                ...current,
-                assets: {
-                  ...current.assets,
-                  [assetId]: {
-                    ...currentAsset,
-                    metadata: {
-                      ...currentAsset.metadata,
-                      durationSec: probe.durationSec,
-                      ...(probe.width > 0 ? { width: probe.width } : {}),
-                      ...(probe.height > 0 ? { height: probe.height } : {}),
-                      hasAudio: probe.hasAudio,
-                    },
-                  },
-                },
-              });
+              commit({ op: 'assets.patch', input: { assetId, metadata: {
+                durationSec: probe.durationSec,
+                ...(probe.width > 0 ? { width: probe.width } : {}),
+                ...(probe.height > 0 ? { height: probe.height } : {}),
+                hasAudio: probe.hasAudio,
+              } } }, { undo: 'none' });
             } else if (!asset.metadata.durationSec) {
               return { ok: false, error: `media duration unavailable: ${assetId}` };
             }
@@ -810,12 +759,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               track.id === documentRef.current.semantics.primaryNarrativeTrackId
             ));
             if (primaryTrack?.clips.length) {
-              const cleared = applyEditorCommand(documentRef.current, {
+              const cleared = commit({ op: 'command', input: { command: {
                 type: 'clips.remove',
                 trackId: primaryTrack.id,
                 clipIds: primaryTrack.clips.map((clip) => clip.id),
                 includeLinked: false,
-              });
+              } } }, { undo: 'none' });
               if (!cleared.ok) {
                 return {
                   ok: false,
@@ -823,11 +772,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   data: { code: cleared.error.code, trackIds: cleared.error.trackIds },
                 };
               }
-              setDocument(cleared.document);
             }
           }
-          let outcome = runAgentTimelineTool(documentRef.current, toolId, timelineInput);
-          if (outcome.ok && outcome.document && outcome.document !== documentRef.current) setDocument(outcome.document);
+          const applied = commit({ op: 'agent.timeline', input: { tool: toolId, input: timelineInput } }, { undo: 'none' });
+          let outcome: AgentTimelineOutcome = applied.ok
+            ? { ok: true, document: applied.document, ...(applied.summary ? { summary: applied.summary } : {}), ...(applied.data !== undefined ? { data: applied.data } : {}) }
+            : { ok: false, error: applied.error.message };
           // Project-library media is not in the document until placed; answer its metadata from the
           // device index instead of reporting the user's own footage as missing.
           if (toolId === 'inspect_media' && outcome.ok && Array.isArray((outcome.data as { assets?: unknown } | undefined)?.assets)) {
@@ -1115,59 +1065,31 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   && typeof legacyPrimaryClip.sourceOutSec === 'number'
                   && Math.abs(legacyPrimaryClip.sourceOutSec - 5) < 0.001
                   && legacyPrimaryClip.durationFrames === Math.round(current.canvas.fps * 5);
-                const nextDocument = {
-                  ...current,
-                  ...(probe?.durationSec
-                    ? {
-                        assets: {
-                          ...current.assets,
-                          [targetAssetId]: {
-                            ...current.assets[targetAssetId]!,
-                            metadata: {
-                              ...current.assets[targetAssetId]!.metadata,
-                              durationSec: probe.durationSec,
-                              ...(probe.width > 0 ? { width: probe.width } : {}),
-                              ...(probe.height > 0 ? { height: probe.height } : {}),
-                              hasAudio: probe.hasAudio,
-                            },
-                          },
-                        },
-                      }
-                    : {}),
-                  ...(legacyFiveSecondPlaceholder && probe?.durationSec
-                    ? {
-                        timeline: {
-                          ...current.timeline,
-                          tracks: current.timeline.tracks.map((track) => track.role === 'primaryNarrative'
-                            ? {
-                                ...track,
-                                clips: track.clips.map((clip) => clip.kind === 'narrative' && clip.assetId === targetAssetId
-                                  ? {
-                                      ...clip,
-                                      durationFrames: Math.max(1, Math.round(probe.durationSec * current.canvas.fps)),
-                                      sourceOutSec: probe.durationSec,
-                                    }
-                                  : clip),
-                              }
-                            : track),
-                        },
-                      }
-                    : {}),
-                  semantics: {
-                    ...current.semantics,
-                    transcripts: { ...current.semantics.transcripts, [targetAssetId]: segs },
-                  },
-                };
-                if (recoveredScript) {
-                  const entry = nextDocument.assets[targetAssetId]!;
-                  nextDocument.assets = { ...nextDocument.assets, [targetAssetId]: { ...entry, metadata: { ...entry.metadata, transcriptText: recoveredScript } } };
+                const adoption: DocumentOp[] = [];
+                if (probe?.durationSec) {
+                  adoption.push({ op: 'assets.patch', input: { assetId: targetAssetId, metadata: {
+                    durationSec: probe.durationSec,
+                    ...(probe.width > 0 ? { width: probe.width } : {}),
+                    ...(probe.height > 0 ? { height: probe.height } : {}),
+                    hasAudio: probe.hasAudio,
+                  } } });
                 }
+                if (legacyFiveSecondPlaceholder && probe?.durationSec && legacyPrimaryClip) {
+                  const primaryTrackId = current.timeline.tracks.find((track) => track.role === 'primaryNarrative')!.id;
+                  adoption.push(
+                    { op: 'command', input: { command: { type: 'clip.retime', trackId: primaryTrackId, clipId: legacyPrimaryClip.id, durationFrames: Math.max(1, Math.round(probe.durationSec * current.canvas.fps)), ripple: false } } },
+                    { op: 'command', input: { command: { type: 'clip.patch', trackId: primaryTrackId, clipId: legacyPrimaryClip.id, patch: { sourceOutSec: probe.durationSec } } } },
+                  );
+                }
+                adoption.push({ op: 'transcripts.set', input: { transcripts: { [targetAssetId]: segs } } });
+                if (recoveredScript) adoption.push({ op: 'assets.patch', input: { assetId: targetAssetId, metadata: { transcriptText: recoveredScript } } });
                 if (targetAssetId === firstNarrativeAssetId(current)) {
                   videoFileRef.current = file;
                   asrRef.current = segs;
                   setAsrSentences(segs);
                 }
-                setDocument(nextDocument);
+                const adopted = commit(adoption, { undo: 'none' });
+                if (!adopted.ok) return { ok: false, error: editorErrorMessage(adopted.error) };
                 if (!segs.length) {
                   return { ok: true, summary: t('workbench.noSpeechDetected'), data: { assetId: targetAssetId, speechDetected: false } };
                 }
@@ -1265,12 +1187,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               setAsrSentences(storedPrimary);
             }
             if (typeof input.shotId === 'string') await ensureClipTranscripts();
-            const transcriptDocument = syncCaptionTranscripts(
-              documentRef.current,
-              mainTranscript ?? null,
-              captionTranscriptsByAsset(documentRef.current, compRef.current, clipAsrRef.current),
-            );
-            if (transcriptDocument !== documentRef.current) setDocument(transcriptDocument);
+            {
+              const synced = transcriptInputsFor(documentRef.current, mainTranscript ?? null, captionTranscriptsByAsset(documentRef.current, compRef.current, clipAsrRef.current));
+              if (Object.keys(synced).length) commit({ op: 'document.foldMetadata', input: synced }, { undo: 'none' });
+            }
+            const transcriptDocument = documentRef.current;
             const listed = listDocumentAddressedWords(transcriptDocument, {
               ...(typeof input.shotId === 'string' ? { shotId: input.shotId } : {}),
               ...(Array.isArray(input.sentenceIndexes) ? { sentenceIndexes: input.sentenceIndexes.map(Number).filter(Number.isInteger) } : {}),
@@ -1855,23 +1776,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   }), fraction * 0.85);
                 }).catch(() => null));
                 if (probe?.durationSec && targetAsset.metadata.durationSec !== probe.durationSec) {
-                  const current = documentRef.current;
-                  setDocument({
-                    ...current,
-                    assets: {
-                      ...current.assets,
-                      [targetAssetId]: {
-                        ...current.assets[targetAssetId]!,
-                        metadata: {
-                          ...current.assets[targetAssetId]!.metadata,
-                          durationSec: probe.durationSec,
-                          ...(probe.width > 0 ? { width: probe.width } : {}),
-                          ...(probe.height > 0 ? { height: probe.height } : {}),
-                          hasAudio: probe.hasAudio,
-                        },
-                      },
-                    },
-                  });
+                  commit({ op: 'assets.patch', input: { assetId: targetAssetId, metadata: {
+                    durationSec: probe.durationSec,
+                    ...(probe.width > 0 ? { width: probe.width } : {}),
+                    ...(probe.height > 0 ? { height: probe.height } : {}),
+                    hasAudio: probe.hasAudio,
+                  } } }, { undo: 'none' });
                 }
               }
               const reviewed = editorialReview && vis && sourceFile && sourceDurationSec > 0
@@ -1985,9 +1895,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const value = Number(input.startSec);
             if (!Number.isFinite(value)) return { ok: false, error: 'invalid startSec' };
             const startSec = Math.max(0, Math.round(value * 100) / 100);
-            const edit = retimeOverlayDocumentClip({ document: documentRef.current, clipId: b.id, startSec });
+            const edit = commit({ op: 'overlay.retime', input: { clipId: b.id, startSec } }, { undo: 'none' });
             if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error), data: { code: edit.error.code, trackIds: edit.error.trackIds } };
-            setDocument(edit.document);
             return { ok: true, summary: t('workbench.movedNameSecS', { name: bname(b), sec: r1(startSec) }) };
           }
           case 'resize_block': {
@@ -1998,9 +1907,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (!Number.isFinite(s) || !Number.isFinite(d)) return { ok: false, error: 'invalid startSec/durationSec' };
             const startSec = Math.max(0, Math.round(s * 100) / 100);
             const durationSec = Math.max(0.3, Math.round(d * 100) / 100);
-            const edit = retimeOverlayDocumentClip({ document: documentRef.current, clipId: b.id, startSec, durationSec });
+            const edit = commit({ op: 'overlay.retime', input: { clipId: b.id, startSec, durationSec } }, { undo: 'none' });
             if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error), data: { code: edit.error.code, trackIds: edit.error.trackIds } };
-            setDocument(edit.document);
             return { ok: true, summary: t('workbench.setNameFromS', { name: bname(b), from: r1(startSec), to: r1(startSec + durationSec) }) };
           }
           case 'place_block': {
@@ -2094,35 +2002,14 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const originalClip = originalTrack?.clips.find((clip) => clip.id === b.id);
             if (!originalTrack || !originalClip) return { ok: false, error: t('workbench.bakeFailed') };
             const assetId = `bake_${b.id}_${jobId}`;
-            const registered = runAgentTimelineTool(documentRef.current, 'register_media', {
-              assets: [{ id: assetId, kind: 'video', label: bname(b), url: job.output.url, durationSec: job.output.durationSec ?? b.durationSec, width: c.width, height: c.height }],
-            });
-            if (!registered.ok || !registered.document) return { ok: false, error: registered.error ?? t('workbench.bakeFailed') };
             if (originalTrack.locked) return { ok: false, error: 'The component track is locked.' };
-            const startFrame = originalClip.startFrame;
-            const durationFrames = originalClip.durationFrames;
-            // Replace in place as one document write: removing/reinserting would prune an empty
-            // lane and detach scene/clip anchors. The same identity and stack preserve those links.
-            const bakedDocument: EditorDocumentV2 = {
-              ...registered.document,
-              timeline: {
-                ...registered.document.timeline,
-                tracks: registered.document.timeline.tracks.map((track) => track.id !== originalTrack.id ? track : {
-                  ...track,
-                  clips: track.clips.map((clip) => clip.id !== b.id ? clip : {
-                    id: clip.id, kind: 'media', assetId, startFrame, durationFrames,
-                    enabled: clip.enabled,
-                    ...(clip.linkGroupId ? { linkGroupId: clip.linkGroupId } : {}),
-                    sourceInSec: 0, sourceOutSec: durationFrames / fps, fit: 'contain',
-                    box: { x: 0, y: 0, w: 1, h: 1 },
-                    video: { treatment: 'full', audioMuted: true },
-                  }),
-                }),
-              },
-            };
-            const issue = validateEditorDocumentV2(bakedDocument).find((issue) => issue.severity === 'error');
-            if (issue) return { ok: false, error: issue.message };
-            setDocument(bakedDocument);
+            // Registers the render and swaps the clip in place as one operation: removing/reinserting
+            // would prune an empty lane and detach scene/clip anchors; the same identity keeps them.
+            const baked = commit({ op: 'overlay.bakeToMedia', input: { clipId: b.id, asset: {
+              id: assetId, label: bname(b), url: job.output.url, durationSec: job.output.durationSec ?? b.durationSec, width: c.width, height: c.height,
+            } } }, { undo: 'none' });
+            if (!baked.ok) return { ok: false, error: baked.error.message || t('workbench.bakeFailed') };
+            const { startFrame, durationFrames } = baked;
             return { ok: true, summary: t('workbench.bakedName', { name: bname(b) }), data: { assetId, startFrame, durationFrames } };
           }
           case 'delete_block': {
@@ -2158,8 +2045,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               ? sourceTrack
               : documentRef.current.timeline.tracks.find((track) =>
                   track.type !== 'audio' && track.role !== 'primaryNarrative' && track.stackOrder === stackOrder);
-            const edit = duplicateOverlayDocumentClip({
-              document: documentRef.current,
+            const edit = commit({ op: 'overlay.duplicate', input: {
               clipId: b.id,
               newClipId,
               startSec: dupStart,
@@ -2167,9 +2053,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               ...(target
                 ? { toTrackId: target.id }
                 : { newTrack: { id: `track_graphics_${blockId('lane')}`, name: 'Graphics', stackOrder } }),
-            });
+            } }, { undo: 'none' });
             if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error), data: { code: edit.error.code, trackIds: edit.error.trackIds } };
-            setDocument(edit.document);
             setSelectedShotId(null);
             setSelectedId(newClipId);
             return { ok: true, summary: t('workbench.duplicatedNameSecS', { name: bname(b), sec: r1(dupStart) }), data: { newBlockId: newClipId } };
@@ -3323,13 +3208,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const plan = planScriptCaptionSegments(shots, lines);
               const nextClipAsr = { ...clipAsrRef.current, ...plan.clips };
               const nextMain = plan.main.length ? plan.main : asrRef.current;
-              const edit = applyCaptionDocumentEdit({
-                document: documentRef.current,
+              const edit = commit({ op: 'captions.edit', input: {
                 patch: { on: true, ...(preset ? { preset, color: undefined, bg: undefined } : {}), ...patch },
                 source: { mode: 'track', trackId },
                 mainTranscript: nextMain,
                 clipTranscripts: captionTranscriptsByAsset(documentRef.current, compRef.current, nextClipAsr),
-              });
+              } }, { undo: 'none' });
               if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error), data: edit.error };
               clipAsrRef.current = nextClipAsr;
               setClipAsr(nextClipAsr);
@@ -3337,7 +3221,6 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 asrRef.current = plan.main;
                 setAsrSentences(plan.main);
               }
-              setDocument(edit.document);
               if (!compRef.current.blocks.some(isSentenceCaption)) return { ok: false, error: t('workbench.scriptCaptionsNoPicture') };
               return { ok: true, summary: t('workbench.scriptCaptionsSet', { n: plan.lineCount }), data: { source: 'script', lines: plan.lineCount } };
             }
@@ -3350,15 +3233,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if ((input.source === 'track' && !source) || (input.source === 'clip' && !source)) return { ok: false, error: 'trackId/clipId is required for the selected caption source' };
             const hasStoredTranscript = Object.values(documentRef.current.semantics.transcripts).some((segments) => segments.length);
             if (source || hasStoredTranscript) {
-              const edit = applyCaptionDocumentEdit({
-                document: documentRef.current,
+              const edit = commit({ op: 'captions.edit', input: {
                 patch: { ...(preset ? { on: true, preset, color: undefined, bg: undefined } : {}), ...patch },
                 ...(source ? { source } : {}),
-                mainTranscript: asrRef.current,
-                clipTranscripts: captionTranscriptsByAsset(documentRef.current, compRef.current, clipAsrRef.current),
-              });
+                ...transcriptInputsFor(documentRef.current, asrRef.current, captionTranscriptsByAsset(documentRef.current, compRef.current, clipAsrRef.current)),
+              } }, { undo: 'none' });
               if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error), data: edit.error };
-              setDocument(edit.document);
             } else if (preset) await applyCaptionPreset(preset, patch);
             else if (Object.keys(patch).length) setCaptionStyle(patch);
             if (!compRef.current.blocks.some(isSentenceCaption)) {
@@ -3419,11 +3299,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const next = applyCaptionTextEdits(segments, resolved.items);
             if (next === segments) return { ok: true, summary: t('workbench.captionTextAlreadyMatches') };
             const nextClipAsr = src ? { ...clipAsrRef.current, [src]: next } : clipAsrRef.current;
-            const captionEdit = applyCaptionDocumentEdit({
-              document: documentRef.current,
+            const captionEdit = commit({ op: 'captions.edit', input: {
               mainTranscript: src ? asrRef.current : next,
               clipTranscripts: captionTranscriptsByAsset(documentRef.current, compRef.current, nextClipAsr),
-            });
+            } }, { undo: 'none' });
             if (!captionEdit.ok) return { ok: false, error: editorErrorMessage(captionEdit.error), data: { code: captionEdit.error.code, trackIds: captionEdit.error.trackIds } };
             if (src) {
               clipAsrRef.current = nextClipAsr;
@@ -3432,7 +3311,6 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               asrRef.current = next;
               setAsrSentences(next);
             }
-            setDocument(captionEdit.document);
             return { ok: true, summary: t('workbench.updatedNCaptionLines', { n: items.length }) };
           }
           case 'set_caption_translations': {
@@ -3491,13 +3369,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               }
               summary = t('workbench.setNTranslationLines', { n: items.filter((it) => it.text).length });
             }
-            const captionEdit = applyCaptionDocumentEdit({
-              document: documentRef.current,
-              mainTranscript: asrRef.current,
-              clipTranscripts: clipAsrRef.current,
-            });
+            const captionEdit = commit({ op: 'captions.edit', input: { mainTranscript: asrRef.current, clipTranscripts: clipAsrRef.current } }, { undo: 'none' });
             if (!captionEdit.ok) return { ok: false, error: editorErrorMessage(captionEdit.error), data: { code: captionEdit.error.code, trackIds: captionEdit.error.trackIds } };
-            setDocument(captionEdit.document);
             if (compRef.current.blocks.some(isSentenceCaption)) return { ok: true, summary };
             return { ok: true, summary: summary + t('workbench.captionsOffTheyShow') };
           }
@@ -3506,12 +3379,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const ids = Array.isArray(input.wordIds) ? [...new Set(input.wordIds.map(String))] : [];
             if (!ids.length) return { ok: false, error: 'wordIds must contain at least one id from list_words' };
             await ensureClipTranscripts();
-            const transcriptDocument = syncCaptionTranscripts(
-              documentRef.current,
-              asrRef.current,
-              captionTranscriptsByAsset(documentRef.current, compRef.current, clipAsrRef.current),
-            );
-            if (transcriptDocument !== documentRef.current) setDocument(transcriptDocument);
+            {
+              const synced = transcriptInputsFor(documentRef.current, asrRef.current, captionTranscriptsByAsset(documentRef.current, compRef.current, clipAsrRef.current));
+              if (Object.keys(synced).length) commit({ op: 'document.foldMetadata', input: synced }, { undo: 'none' });
+            }
+            const transcriptDocument = documentRef.current;
             const resolved = resolveDocumentWordIds(transcriptDocument, ids);
             if (resolved.missing.length) return { ok: false, error: `unknown or stale word ids: ${resolved.missing.join(', ')}`, data: { missing: resolved.missing } };
             const mapped = documentWordRangesToTimeline(transcriptDocument, documentWordRanges(resolved.words));
@@ -3532,12 +3404,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const parsed = parseMaskWordsInput(input);
             if ('error' in parsed) return { ok: false, error: parsed.error };
             await ensureClipTranscripts();
-            const transcriptDocument = syncCaptionTranscripts(
-              documentRef.current,
-              asrRef.current,
-              captionTranscriptsByAsset(documentRef.current, compRef.current, clipAsrRef.current),
-            );
-            if (transcriptDocument !== documentRef.current) setDocument(transcriptDocument);
+            {
+              const synced = transcriptInputsFor(documentRef.current, asrRef.current, captionTranscriptsByAsset(documentRef.current, compRef.current, clipAsrRef.current));
+              if (Object.keys(synced).length) commit({ op: 'document.foldMetadata', input: synced }, { undo: 'none' });
+            }
+            const transcriptDocument = documentRef.current;
             const resolved = resolveDocumentWordIds(transcriptDocument, parsed.ids);
             if (resolved.missing.length) return { ok: false, error: `unknown or stale word ids: ${resolved.missing.join(', ')}`, data: { missing: resolved.missing } };
             // Runtime transcripts are the live truth in the tab: the main copy owns the first narrative
@@ -3579,18 +3450,13 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               if (!stored) return { ok: false, error: `no transcript for asset ${assetId}` };
               const next = applyWordMasks(stored, words, parsed.patch);
               if (next === stored) continue;
-              setDocument({ ...documentRef.current, semantics: { ...documentRef.current.semantics, transcripts: { ...documentRef.current.semantics.transcripts, [assetId]: next } } });
+              commit({ op: 'transcripts.set', input: { transcripts: { [assetId]: next } } }, { undo: 'none' });
               changed = true;
             }
             const summary = maskWordsSummary(parsed.ids.length, parsed.patch);
             if (!changed) return { ok: true, summary: `${summary} (already so)`, data: { wordIds: parsed.ids, ...parsed.patch } };
-            const maskEdit = applyCaptionDocumentEdit({
-              document: documentRef.current,
-              mainTranscript: asrRef.current,
-              clipTranscripts: clipAsrRef.current,
-            });
+            const maskEdit = commit({ op: 'captions.edit', input: { mainTranscript: asrRef.current, clipTranscripts: clipAsrRef.current } }, { undo: 'none' });
             if (!maskEdit.ok) return { ok: false, error: editorErrorMessage(maskEdit.error), data: { code: maskEdit.error.code, trackIds: maskEdit.error.trackIds } };
-            setDocument(maskEdit.document);
             return { ok: true, summary, data: { wordIds: parsed.ids, ...parsed.patch } };
           }
           case 'remove_silence': {
@@ -3771,7 +3637,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const entry = await pull(ctx.projectId).catch(() => null);
               if (!entry) return { ok: false, error: t('workbench.nothingUndoCloudEmpty') };
               redoStackRef.current.push(documentRef.current);
-              setDocument(entry.document);
+              replaceDocument(entry.document, { origin: 'restore' });
               setSelectedId(null);
               setSelectedShotId(null);
               return withDelta({
@@ -3780,7 +3646,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               });
             }
             redoStackRef.current.push(documentRef.current); // agent undo also feeds the redo line (redoable via ⇧⌘Z/button)
-            setDocument(prev);
+            replaceDocument(prev, { origin: 'restore' });
             setSelectedId(null);
             setSelectedShotId(null);
             return withDelta({ ok: true, summary: t('workbench.undidLastStep') + (stack.length ? t('workbench.nMoreUndoSteps', { n: stack.length }) : '') });
@@ -3956,17 +3822,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 data: { canvas: size, changed: false },
               };
             }
-            const edit = applyCanvasDocumentEdit({
-              projectId: ctx.projectId,
-              document: documentRef.current,
-              ...size,
-              mainTranscript: asrRef.current,
-              clipTranscripts: clipAsrRef.current,
-            });
+            const edit = commit({ op: 'canvas.resize', input: { ...size, ...transcriptInputsFor(documentRef.current, asrRef.current, clipAsrRef.current) } }, { undo: 'none' });
             if (!edit.ok) {
               return { ok: false, error: editorErrorMessage(edit.error), data: { code: edit.error.code, trackIds: edit.error.trackIds } };
             }
-            setDocument(edit.document);
             return { ok: true, summary: `Set canvas to ${size.width}×${size.height}`, data: { canvas: size } };
           }
           case 'set_shot_framing': {
@@ -3979,12 +3838,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const shots = explicitlyTargetsIds ? [...primaryShots, ...mediaEntries.map((entry) => entry.shot)] : primaryShots;
             const applied = applyShotFramingInput({ ...c, shots }, input, shots);
             if ('error' in applied) return { ok: false, error: applied.error };
-            const command = applyVideoClipSettingsPatches(documentRef.current, applied.patches.map(({ shotId, patch }) => ({
+            const command = commit({ op: 'media.settingsPatches', input: { updates: applied.patches.map(({ shotId, patch }) => ({
               clipId: shotId,
               patch: { framing: patch },
-            })));
-            if (!command.ok) return { ok: false, error: command.error, data: command.data };
-            setDocument(command.document);
+            })) } }, { undo: 'none' });
+            if (!command.ok) return { ok: false, error: command.error.message };
             const count = applied.updates.length;
             return {
               ok: true,
@@ -3994,11 +3852,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'set_media_transform':
           case 'set_media_crop': {
-            const edit = toolId === 'set_media_transform'
-              ? applyMediaTransformInput(documentRef.current, input)
-              : applyMediaCropInput(documentRef.current, input);
-            if (!edit.ok) return { ok: false, error: edit.error, data: edit.data };
-            setDocument(edit.document);
+            const edit = commit({ op: toolId === 'set_media_transform' ? 'media.transform' : 'media.crop', input: { input } }, { undo: 'none' });
+            if (!edit.ok) return { ok: false, error: edit.error.message };
             const count = edit.updates.length;
             return {
               ok: true,
@@ -4037,35 +3892,26 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const boxes = new Map(planned.comp.blocks
                 .filter((block) => layoutIds.includes(block.id) && block.box)
                 .map((block) => [block.id, block.box!] as const));
-              let next = documentRef.current;
+              const boxPatches: DocumentOp[] = [];
               for (const id of layoutIds) {
                 const location = mediaLocations.get(id)!;
                 const box = boxes.get(id);
                 if (!box) return { ok: false, error: `layout did not produce geometry for media clip: ${id}` };
-                const patched = applyEditorCommand(next, {
-                  type: 'clip.patch',
-                  trackId: location.trackId,
-                  clipId: id,
-                  patch: { box },
-                });
-                if (!patched.ok) return { ok: false, error: editorErrorMessage(patched.error), data: { code: patched.error.code, trackIds: patched.error.trackIds } };
-                next = patched.document;
+                boxPatches.push({ op: 'command', input: { command: { type: 'clip.patch', trackId: location.trackId, clipId: id, patch: { box } } } });
               }
-              setDocument(next);
+              const patched = commit(boxPatches, { undo: 'none' });
+              if (!patched.ok) return { ok: false, error: editorErrorMessage(patched.error), data: { code: patched.error.code, trackIds: patched.error.trackIds } };
               return { ok: true, summary: `Applied ${layout} layout`, data: { blockIds: layoutIds, mediaClipIds: layoutIds } };
             }
-            const edit = applyLayoutDocumentEdit({
-              document: documentRef.current,
-              composition: { ...c, shots: ensureShots(c) },
+            const edit = commit({ op: 'layout.apply', input: {
               layout: {
                 layout: layout as Parameters<typeof applyCompositionLayout>[1]['layout'],
                 blockIds: layoutIds,
                 ...(typeof input.shotId === 'string' ? { shotId: input.shotId } : {}),
                 ...(typeof input.videoPosition === 'string' ? { videoPosition: input.videoPosition as 'left' | 'right' | 'top' | 'bottom' } : {}),
               },
-            });
+            } }, { undo: 'none' });
             if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error), data: { code: edit.error.code, trackIds: edit.error.trackIds } };
-            setDocument(edit.document);
             if (edit.layout.shotId) setSelectedShotId(edit.layout.shotId);
             return { ok: true, summary: `Applied ${layout} layout`, data: edit.layout };
           }
@@ -4075,9 +3921,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (!s) return { ok: false, error: t('workbench.shotNotFound') };
             const tr = String(input.treatment) as ShotTreatment;
             if (!SHOT_TREATMENTS.some((item) => item.id === tr)) return { ok: false, error: `invalid treatment: ${tr}` };
-            const command = applyVideoClipSettingsPatches(documentRef.current, [{ clipId: s.id, patch: { framing: { treatment: tr } } }]);
-            if (!command.ok) return { ok: false, error: command.error, data: command.data };
-            setDocument(command.document);
+            const command = commit({ op: 'media.settingsPatches', input: { updates: [{ clipId: s.id, patch: { framing: { treatment: tr } } }] } }, { undo: 'none' });
+            if (!command.ok) return { ok: false, error: command.error.message };
             const name = SHOT_TREATMENTS.find((x) => x.id === tr)?.name ?? tr;
             return { ok: true, summary: t('workbench.framingChangedName', { name: t(name) }) };
           }
@@ -4120,9 +3965,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             }));
             const transitionPoint = splitPoints.find((atSec) => splitBlockedByTransition(shots, atSec, nativePlacements));
             if (transitionPoint != null) return { ok: false, error: `cannot split at ${transitionPoint}s because it is inside a transition region` };
-            const command = applyNarrationSplitCommands(documentRef.current, splitPoints);
+            const command = commit({ op: 'narration.split', input: { atSecs: splitPoints } }, { undo: 'none' });
             if (!command.ok) return { ok: false, error: editorErrorMessage(command.error), data: { code: command.error.code, trackIds: command.error.trackIds } };
-            setDocument(command.document);
             applyT(splitPoints[splitPoints.length - 1]!);
             return withDelta({
               ok: true,
@@ -4156,9 +4000,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               ...(num(input.saturate) != null ? { saturate: num(input.saturate) } : {}),
             };
             const css = shotFilterCss(f);
-            const command = applyVideoClipSettingsPatches(documentRef.current, [{ clipId: s.id, patch: { filter: css === 'none' ? null : f } }]);
-            if (!command.ok) return { ok: false, error: command.error, data: command.data };
-            setDocument(command.document);
+            const command = commit({ op: 'media.settingsPatches', input: { updates: [{ clipId: s.id, patch: { filter: css === 'none' ? null : f } }] } }, { undo: 'none' });
+            if (!command.ok) return { ok: false, error: command.error.message };
             return { ok: true, summary: css === 'none' ? t('workbench.resetColorGradeShot') : t('workbench.filtersAppliedCss', { css }) };
           }
           case 'set_shot_audio': {
@@ -4174,12 +4017,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               ...(typeof input.fadeOutSec === 'number' && Number.isFinite(input.fadeOutSec) ? { fadeOutSec: input.fadeOutSec } : {}),
             };
             if (!Object.keys(patch).length) return { ok: false, error: t('workbench.passVolumeOrMute') };
-            const command = applyVideoClipSettingsPatches(documentRef.current, hit.map((shot) => ({
+            const command = commit({ op: 'media.settingsPatches', input: { updates: hit.map((shot) => ({
               clipId: shot.id,
               patch: { audio: patch },
-            })));
-            if (!command.ok) return { ok: false, error: command.error, data: command.data };
-            setDocument(command.document);
+            })) } }, { undo: 'none' });
+            if (!command.ok) return { ok: false, error: command.error.message };
             const bits = [
               ...('volumeDb' in patch ? [`${r1(Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, patch.volumeDb!)))}dB`] : []),
               ...('mute' in patch ? [patch.mute ? t('workbench.audioMuted') : t('workbench.audioUnmuted')] : []),
@@ -4369,9 +4211,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (!parsed.plan) {
               return { ok: false, error: parsed.issues.map((issue) => `${issue.path || 'plan'}: ${issue.message}`).join(' · ') };
             }
-            const applied = applyDirectorPlanToDocument(documentRef.current, parsed.plan);
-            if (!applied.ok) return { ok: false, error: applied.error };
-            setDocument(applied.document);
+            const applied = commit({ op: 'director.setPlan', input: { plan: parsed.plan } }, { undo: 'none' });
+            if (!applied.ok) return { ok: false, error: applied.error.message };
             return {
               ok: true,
               summary: t('workbench.savedDirectorPlan', { n: parsed.plan.scenes.length }),
@@ -4388,10 +4229,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (!parsed.designs) {
               return { ok: false, error: parsed.issues.map((issue) => `${issue.path}: ${issue.message}`).join(' · ') };
             }
-            setDocument({
-              ...documentRef.current,
-              semantics: withSceneDesignsInSemantics(documentRef.current.semantics, parsed.designs),
-            });
+            const designed = commit({ op: 'director.setSceneDesigns', input: { designs: parsed.designs } }, { undo: 'none' });
+            if (!designed.ok) return { ok: false, error: designed.error.message };
             return {
               ok: true,
               summary: `Authored ${parsed.designs.scenes.length} complete Scene design${parsed.designs.scenes.length === 1 ? '' : 's'}`,
@@ -4571,8 +4410,19 @@ export async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () =>
   const beforeJson = JSON.stringify(before);
   const undoBefore = [...ctx.undoStackRef.current];
   const redoBefore = [...ctx.redoStackRef.current];
+  // Everything the tool commits is staged until it settles: a tool that fails or is rolled back
+  // leaves nothing for sync, a tool that lands hands its transactions over as a unit.
+  const scope = ctx.beginTransactionScope();
+  let settled = false;
+  const settle = <T,>(value: T): T => {
+    if (!settled) {
+      settled = true;
+      scope.end(ctx.documentRef.current === beforeDocument ? 'discard' : 'keep');
+    }
+    return value;
+  };
   const restore = () => {
-    if (ctx.documentRef.current !== beforeDocument) ctx.setDocument(beforeDocument);
+    if (ctx.documentRef.current !== beforeDocument) ctx.replaceDocument(beforeDocument, { origin: 'hydrate' });
     ctx.undoStackRef.current = undoBefore;
     ctx.redoStackRef.current = redoBefore;
   };
@@ -4584,7 +4434,7 @@ export async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () =>
   } catch (error) {
     console.warn('[studio-tool] synchronous operation failed', error);
     restore();
-    return { ok: false, error: withFailureCause(t('editorError.operationFailed'), error) };
+    return settle({ ok: false, error: withFailureCause(t('editorError.operationFailed'), error) });
   }
   const afterSyncJson = JSON.stringify(ctx.compRef.current);
   const afterSyncDocument = ctx.documentRef.current;
@@ -4613,18 +4463,19 @@ export async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () =>
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
       rollbackFailure();
+      settle(undefined);
       throw error;
     }
     console.warn('[studio-tool] asynchronous operation failed', error);
     rollbackFailure();
-    return { ok: false, error: withFailureCause(t('editorError.operationFailed'), error) };
+    return settle({ ok: false, error: withFailureCause(t('editorError.operationFailed'), error) });
   }
   if (!result.ok) {
     // Synchronous mutation branches (including every P0 primitive) can be rolled back exactly. A
     // long-running generator may have allowed an unrelated manual edit while awaiting a provider;
     // never erase that user edit merely because the generator later returned an error.
     rollbackFailure();
-    return result;
+    return settle(result);
   }
 
   const next = ctx.compRef.current;
@@ -4635,20 +4486,20 @@ export async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () =>
     // harmless no-op must not create a ghost history entry either.
     ctx.undoStackRef.current = undoBefore;
     ctx.redoStackRef.current = redoBefore;
-    return result;
+    return settle(result);
   }
   const issues = validateComposition(next);
   const documentIssues = validateEditorDocumentV2(ctx.documentRef.current).filter((issue) => issue.severity === 'error');
   if (issues.length || documentIssues.length) {
     restore();
-    return { ok: false, error: 'mutation rejected: editor invariants failed', data: { issues, documentIssues } };
+    return settle({ ok: false, error: 'mutation rejected: editor invariants failed', data: { issues, documentIssues } });
   }
   // A result that already carries its own delta (the v3 surface reports a document-level delta) keeps it;
   // legacy tools get the composition diff attached here.
   const existing = result.data && typeof result.data === 'object' && !Array.isArray(result.data) ? (result.data as Record<string, unknown>) : undefined;
-  if (existing?.delta !== undefined) return result;
+  if (existing?.delta !== undefined) return settle(result);
   const delta = compReceiptDelta(before, next) ?? { compositionUpdated: ['other'] };
-  return { ...result, data: { ...(existing ?? {}), delta } };
+  return settle({ ...result, data: { ...(existing ?? {}), delta } });
 }
 
 /** A rejected parked approval is a turn boundary, not an ordinary successful tool receipt. */
@@ -4685,7 +4536,7 @@ const EXTERNAL_ONLY_TOOLS = new Set(['compose_context', 'apply_block', 'visual_b
 
 async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Record<string, unknown>): Promise<StudioToolResult> {
   const {
-    compRef, documentRef, setDocument, setSelectedId, setSelectedShotId, applyT, tRef,
+    compRef, documentRef, commit, setSelectedId, setSelectedShotId, applyT, tRef,
     pushUndoSnapshot, genIdsRef, videoFileRef, clipFilesRef, asrRef, clipAsrRef,
   } = ctx;
     const c2 = compRef.current;
@@ -4695,16 +4546,9 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         ? native
         : beatsForWindow(c2.shots ?? [], asrRef.current, clipAsrRef.current, startSec, durationSec);
     };
-    const patchBlock = (clipId: string, block: Parameters<typeof applyOverlayDocumentEdits>[0]['updates'][number]['block']) => {
-      const edit = applyOverlayDocumentEdits({ document: documentRef.current, updates: [{ clipId, block }] });
-      if (edit.ok) setDocument(edit.document);
-      return edit;
-    };
-    const insertBlock = (block: Block) => {
-      const edit = insertOverlayDocumentClip({ document: documentRef.current, block });
-      if (edit.ok) setDocument(edit.document);
-      return edit;
-    };
+    const patchBlock = (clipId: string, block: Parameters<typeof applyOverlayDocumentEdits>[0]['updates'][number]['block']) =>
+      commit({ op: 'overlay.patch', input: { updates: [{ clipId, block }] } }, { undo: 'none' });
+    const insertBlock = (block: Block) => commit({ op: 'overlay.insert', input: { block } }, { undo: 'none' });
     switch (tool) {
       case 'compose_context': {
         const renderTimeline = canonicalRenderTimeline(c2, documentRef.current, ctx.resolveAssetUrl);

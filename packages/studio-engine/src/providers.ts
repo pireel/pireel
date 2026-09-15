@@ -12,7 +12,7 @@
 
 import type { BlockEdit, ComposeContext, KitChoice } from './compose';
 import type { AsrSegment } from './build-blocks';
-import type { ProjectSavePayload, StudioProjectDto } from './project-dto';
+import type { ProjectSaveResult, ProjectSaveWire, StudioProjectDto } from './project-dto';
 import type { EditorDocumentV2 } from './editor-document';
 import type { AssetSearchDocument } from './asset-search';
 import type { CustomVisualStyle } from './visual-style';
@@ -70,7 +70,10 @@ export interface LocalByteProvider {
 /** Project persistence beyond the current device. */
 export interface ProjectStore {
   load(id: string): Promise<StudioProjectDto | null>;
-  save(id: string, payload: ProjectSavePayload): Promise<import('./project-dto').ProjectSaveResult>;
+  /** Transport one save request (transactions + sections). Retries, baselines and the pending
+   *  list live in the sync layer; the store answers 'skip' when unreachable, 'need-full' when the
+   *  section baseline drifted, 'migration-required' when writes are blocked. */
+  save(id: string, wire: ProjectSaveWire): Promise<ProjectSaveResult | 'need-full'>;
   remove(id: string): Promise<void>;
   /** Project-card cover as image BYTES (null clears). Kept out of the JSON save payload:
    * a base64 cover multiplies every project PUT/GET/list response. Optional — a shell

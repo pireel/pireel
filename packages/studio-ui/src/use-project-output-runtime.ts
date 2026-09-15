@@ -17,7 +17,8 @@ export function useProjectOutputRuntime(deps: {
   create: (title: string, skill?: string) => StudioProjectOutputSnapshot;
   listOutputIds: () => string[];
   remove: (id: string) => void;
-  setDocument: (document: EditorDocumentV2) => void;
+  /** Checking out another deliverable replaces the whole document; it is a restore, not a hydrate. */
+  replaceDocument: (document: EditorDocumentV2) => void;
   getComposition: () => Composition;
   onDocumentActivated?: (document: EditorDocumentV2, composition: Composition) => void;
   videoFileRef: MutableRefObject<File | null>;
@@ -46,7 +47,7 @@ export function useProjectOutputRuntime(deps: {
 
         deps.resetEditor();
         deps.coverThumbRef.current = target.coverThumb;
-        deps.setDocument(target.document);
+        deps.replaceDocument(target.document);
         const composition = deps.getComposition();
         deps.onDocumentActivated?.(target.document, composition);
         const draft: StudioDraft = {
@@ -82,7 +83,7 @@ export function useProjectOutputRuntime(deps: {
       deps.pendingRestoreRef.current = null;
       deps.videoSigRef.current = null;
       deps.setVideoFile(null);
-      deps.setDocument(target.document);
+      deps.replaceDocument(target.document);
       const composition = deps.getComposition();
       deps.onDocumentActivated?.(target.document, composition);
       return target;

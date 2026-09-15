@@ -17,7 +17,6 @@ import {
   type MediaRef,
   type VideoShot,
   applyEditorCommand,
-  addNarrativeDocumentClip,
   isSentenceCaption,
   positiveDurationFrames,
   resolveCaptionStyle,
@@ -45,6 +44,8 @@ import { normalizeDims } from './workbench-utils';
 import { t } from './i18n';
 import { editorErrorMessage } from './editor-error';
 import { registerNarrativeSourceRuntime } from './clip-source-runtime';
+import type { DocumentOp } from '@pireel/studio-engine/document-transaction';
+import type { DocumentCommitter } from './document-commit';
 import type { TimelineInsertMode, TimelineMediaDropTarget, TimelineVisualDropTarget } from './timeline-asset-drop';
 
 interface InsertClipCoreOptions {
@@ -67,12 +68,13 @@ export interface ClipInsertDeps {
   clipAsrRef: MutableRefObject<Record<string, AsrSegment[]>>;
   documentRef: MutableRefObject<EditorDocumentV2>;
   localAssetIndexRef: MutableRefObject<LocalAssetIndexEntry[]>;
-  setDocument: (document: EditorDocumentV2) => void;
+  commit: DocumentCommitter['commit'];
+  /** Re-project the current document after session-only media bytes became resolvable. */
+  republishDocument: () => void;
   rememberAssetUrl: (assetId: string, url: string) => void;
   setSelectedId: (id: string | null) => void;
   setSelectedShotId: (id: string | null) => void;
   applyT: (v: number) => void;
-  pushUndoSnapshot: () => void;
   ensureClipTranscripts: () => Promise<void>;
   backupMediaToCloud: (file: File, sig: string, kind: 'video' | 'clip') => void;
   runTool: (toolId: string, input: Record<string, unknown>) => Promise<unknown>;
@@ -81,8 +83,8 @@ export interface ClipInsertDeps {
 
 export function useClipInsert(deps: ClipInsertDeps) {
   const {
-    projectId, compRef, clipFilesRef, cloudMediaRef, clipAsrRef, documentRef, localAssetIndexRef, setDocument,
-    rememberAssetUrl, setSelectedId, setSelectedShotId, applyT, pushUndoSnapshot, ensureClipTranscripts,
+    projectId, compRef, clipFilesRef, cloudMediaRef, clipAsrRef, documentRef, localAssetIndexRef, commit, republishDocument,
+    rememberAssetUrl, setSelectedId, setSelectedShotId, applyT, ensureClipTranscripts,
     backupMediaToCloud, runTool,
     filmstripDemand = {},
   } = deps;
@@ -234,8 +236,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
     const sg = srcSigOverride ?? (file ? fileSig(file) : undefined);
     const nb: VideoShot = { id: shotId(), src: url, ...(sg ? { srcSig: sg } : {}), srcStart: 0, srcEnd: clipDur, treatment: 'full' };
     const dims = srcDims ? normalizeDims(srcDims.w, srcDims.h) : undefined;
-    const edit = addNarrativeDocumentClip({
-      document: documentBeforeInsert,
+    const edit = commit({ op: 'narrative.add', input: {
       shot: nb,
       atSec: at,
       ...(options.mode ? { mode: options.mode } : {}),
@@ -249,7 +250,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
           ...(options.localAsset.folder ? { folder: options.localAsset.folder } : {}),
         },
       } : {}),
-    });
+    } });
     if (!edit.ok || !edit.assetId) {
       if (newlyOwnedObjectUrl) URL.revokeObjectURL(url);
       toast.error(edit.ok ? t('workbench.failedFetchInsertClip') : editorErrorMessage(edit.error));
@@ -265,9 +266,9 @@ export function useClipInsert(deps: ClipInsertDeps) {
     // persist bytes on-device and sync metadata only. Sig-less remote sources still use the legacy
     // cloud rendezvous so a fetched CDN asset does not turn into an unrecoverable document-local blob.
     if (file && !srcSigOverride) backupMediaToCloud(file, fileSig(file), 'clip');
-    pushUndoSnapshot();
+    // The asset id is minted by the insert; the session URL is attached after and re-projected.
     rememberAssetUrl(edit.assetId, url);
-    setDocument(edit.document);
+    republishDocument();
     setSelectedId(null);
     setSelectedShotId(nb.id);
     applyT(at + Math.min(0.1, clipDur / 2));
@@ -329,7 +330,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
         const clip = clipById.get(shot.id);
         if (url && clip?.kind === 'narrative') rememberAssetUrl(clip.assetId, url);
       }
-      setDocument(documentRef.current);
+      republishDocument();
     }
     // Unrecovered dead links (blob src with no File): say so plainly and point to reconnection — previously a silent black
     // segment, whereas the main video has a "re-import" prompt in the same case; equal-standing clips deserve their own repair path
@@ -389,7 +390,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
       const clip = clipById.get(shot.id);
       if (clip?.kind === 'narrative') rememberAssetUrl(clip.assetId, url);
     }
-    setDocument(documentRef.current);
+    republishDocument();
     toast.success(t('workbench.bRollReconnected'));
     return true;
   };
@@ -454,6 +455,8 @@ export function useClipInsert(deps: ClipInsertDeps) {
     let document: EditorDocumentV2 = existing
       ? before
       : { ...before, assets: { ...before.assets, [assetId]: mediaAsset } };
+    // Everything below previews against `document` and lands as one transaction.
+    const ops: DocumentOp[] = existing ? [] : [{ op: 'assets.register', input: { asset: mediaAsset } }];
     let trackId: string;
     if (input.target.kind === 'visual') {
       const requestedTrackId = input.target.trackId;
@@ -465,23 +468,26 @@ export function useClipInsert(deps: ClipInsertDeps) {
       trackId = track.id;
     } else {
       trackId = uniqueDocumentId(`track_visual_${shotId()}`, new Set(document.timeline.tracks.map((track) => track.id)));
-      const insertedTrack = applyEditorCommand(document, {
-        type: 'track.insert',
+      const trackCommand = {
+        type: 'track.insert' as const,
         index: input.target.slot,
         track: {
           id: trackId,
-          type: 'visual',
-          role: 'broll',
+          type: 'visual' as const,
+          role: 'broll' as const,
           name: 'Visual media',
           stackOrder: input.target.stackOrder,
           syncLocked: true,
         },
-      });
+      };
+      // Preview so the clip id derives from the lane; both commands land as one transaction below.
+      const insertedTrack = applyEditorCommand(document, trackCommand);
       if (!insertedTrack.ok) {
         toast.error(editorErrorMessage(insertedTrack.error));
         return '';
       }
       document = insertedTrack.document;
+      ops.push({ op: 'command', input: { command: trackCommand } });
     }
     const clipId = uniqueDocumentId(`clip_visual_${shotId()}`, new Set(document.timeline.tracks.flatMap((track) => track.clips.map((clip) => clip.id))));
     const durationFrames = positiveDurationFrames(input.durationSec, document.canvas.fps);
@@ -496,23 +502,23 @@ export function useClipInsert(deps: ClipInsertDeps) {
       sourceOutSec: input.durationSec,
       fit: 'cover',
     };
-    const inserted = applyEditorCommand(document, {
+    ops.push({ op: 'command', input: { command: {
       type: 'clips.insert',
       trackId,
       atFrame: secondsToTimelineFrames(Math.max(0, input.atSec), document.canvas.fps),
       clips: [clip],
       mode: input.mode,
       includeLinked: true,
-    });
+    } } });
+    const inserted = commit(ops);
     if (!inserted.ok) {
       toast.error(editorErrorMessage(inserted.error));
       return '';
     }
     clipFilesRef.current.set(input.url, input.file);
     void saveLocalVideo(input.file, durableSig).catch(() => {});
-    pushUndoSnapshot();
     rememberAssetUrl(assetId, input.url);
-    setDocument(inserted.document);
+    republishDocument();
     setSelectedId(null);
     setSelectedShotId(null);
     applyT(Math.max(0, input.atSec) + Math.min(0.1, input.durationSec / 2));

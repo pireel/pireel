@@ -3,10 +3,11 @@ import { directorPlanFromDocument } from './director-plan-artifact';
 import { emptyProjectDocument } from './project-document';
 import {
   ackedFromDto,
+  applyProjectSave,
   buildSaveWire,
   canonicalJson,
   diffOps,
-  hashSection,
+  isRetiredSaveProtocol,
   mergeSaveIntoRow,
   rowToDto,
   rowToMeta,
@@ -14,6 +15,7 @@ import {
   sanitizeSavePayload,
   type ProjectSavePayload,
 } from './project-dto';
+import type { DocumentTransaction } from './document-transaction';
 
 const document = () => {
   const value = emptyProjectDocument();
@@ -29,7 +31,6 @@ const document = () => {
 };
 
 const payload = (over: Partial<ProjectSavePayload> = {}): ProjectSavePayload => ({
-  document: document(),
   videoSig: 'sig1',
   videoDurationSec: 12.5,
   coverThumb: 'data:image/jpeg;base64,xxx',
@@ -115,52 +116,46 @@ describe('strict V2 project DTO', () => {
   });
 });
 
-describe('V2 incremental save wire', () => {
-  it('sends native document/meta on a cold baseline and skips an unchanged save', () => {
-    const first = buildSaveWire(payload(), 3, null)!;
-    expect(first.wire).toMatchObject({ baseVersion: 3, documentSchemaVersion: 2, videoSig: 'sig1' });
-    expect(first.wire.document).toBeDefined();
-    expect(first.wire).not.toHaveProperty('context');
+describe('save wire', () => {
+  const tx = (id: string, startSec = 1): DocumentTransaction => ({ id, origin: 'user', ops: [{
+    op: 'overlay.insert',
+    input: { block: { id: `card-${id.slice(-2)}`, templateId: 'custom', slots: {}, startSec, durationSec: 2, trackIndex: 5 } },
+  }] });
+
+  it('sends pending transactions plus meta on a cold baseline and nothing when idle', () => {
+    const first = buildSaveWire(payload({ transactions: [tx('tx_0000000000000001')] }), 3, null)!;
+    expect(first.wire).toMatchObject({ knownVersion: 3, documentSchemaVersion: 2, videoSig: 'sig1' });
+    expect(first.wire.transactions).toHaveLength(1);
+    expect(first.wire).not.toHaveProperty('document');
+    expect(first.wire).not.toHaveProperty('baseVersion');
     expect(buildSaveWire(payload(), 4, first.acked)).toBeNull();
   });
 
-  it('preserves an acknowledged title when a normal workbench save omits title', () => {
-    const current = payload();
-    const acked = ackedFromDto({
-      document: current.document!,
-      context: sanitizeProjectContext(null),
-      coverThumb: current.coverThumb ?? null,
-      title: 'Hydrated project',
-      videoSig: current.videoSig,
-      videoDurationSec: current.videoDurationSec,
-    });
+  it('always sends transactions even when every section is unchanged', () => {
+    const first = buildSaveWire(payload(), 3, null)!;
+    const next = buildSaveWire(payload({ transactions: [tx('tx_0000000000000002')] }), 4, first.acked)!;
+    expect(next.wire.transactions).toHaveLength(1);
+    expect(next.wire.videoSig).toBeUndefined();
+  });
 
-    expect(buildSaveWire(current, 7, acked)).toBeNull();
+  it('preserves an acknowledged title when a normal workbench save omits title', () => {
+    const acked = ackedFromDto({
+      context: sanitizeProjectContext(null), coverThumb: 'data:image/jpeg;base64,xxx',
+      title: 'Hydrated project', videoSig: 'sig1', videoDurationSec: 12.5,
+    });
+    expect(buildSaveWire(payload(), 7, acked)).toBeNull();
   });
 
   it('preserves a server-held cover key when the payload omits coverThumb entirely', () => {
     const current = payload();
     delete current.coverThumb;
     const acked = ackedFromDto({
-      document: current.document!,
-      context: sanitizeProjectContext(null),
-      coverThumb: 'studio-covers/u1/p1-abc.jpg',
-      title: 'Hydrated project',
-      videoSig: current.videoSig,
-      videoDurationSec: current.videoDurationSec,
+      context: sanitizeProjectContext(null), coverThumb: 'studio-covers/u1/p1-abc.jpg',
+      title: 'Hydrated project', videoSig: current.videoSig, videoDurationSec: current.videoDurationSec,
     });
     // Covers travel as bytes through saveCover; an absent field must neither clear the
     // server's cover key nor register as a changed section (fake no-op PUT churns versions).
     expect(buildSaveWire(current, 7, acked)).toBeNull();
-  });
-
-  it('keeps document absent for context-only saves', () => {
-    const contextOnly = payload({ document: undefined, context: { schemaVersion: 3 } });
-    const first = buildSaveWire(contextOnly, null, null)!;
-    expect(first.wire.document).toBeUndefined();
-    expect(first.wire.context).toBeDefined();
-    const next = buildSaveWire(payload(), 1, first.acked)!;
-    expect(next.wire.document ?? next.wire.documentPatch).toBeDefined();
   });
 
   it('emits only the changed section', () => {
@@ -170,29 +165,9 @@ describe('V2 incremental save wire', () => {
       localAssets: [{ assetId: 'asset-1', contentSig: 'clip.mp4:1:1', sig: 'clip.mp4:1:1', label: 'clip.mp4', createdAt: 1 }],
     } }), 4, first.acked)!;
     expect(next.wire.context ?? next.wire.contextPatch).toBeDefined();
-    expect(next.wire.document).toBeUndefined();
-    expect(next.wire.documentPatch).toBeUndefined();
+    expect(next.wire.transactions).toBeUndefined();
     expect(next.wire.coverThumb).toBeUndefined();
     expect(next.wire.videoSig).toBeUndefined();
-  });
-
-  it('uses a compact verified patch for a small native document edit', () => {
-    const base = document();
-    const many = {
-      ...base,
-      semantics: { ...base.semantics, plan: { rows: Array.from({ length: 100 }, (_, index) => ({ id: `row-${index}`, text: `long row ${index} ${'x'.repeat(40)}` })) } },
-    };
-    const first = buildSaveWire(payload({ document: many }), 1, null)!;
-    const changed = structuredClone(many);
-    (changed.semantics.plan as { rows: { text: string }[] }).rows[40]!.text = 'changed';
-    const next = buildSaveWire(payload({ document: changed }), 2, first.acked)!;
-    expect(next.wire.document).toBeUndefined();
-    expect(next.wire.documentPatch).toBeDefined();
-    const merged = mergeSaveIntoRow(
-      existing(first.acked.values.document),
-      sanitizeSavePayload({ baseVersion: 2, documentPatch: next.wire.documentPatch, documentHash: next.wire.documentHash })!,
-    );
-    expect(hashSection(canonicalJson(merged!.document))).toBe(next.wire.documentHash);
   });
 
   it('aligns stable-id arrays rather than replacing every shifted item', () => {
@@ -205,10 +180,17 @@ describe('V2 incremental save wire', () => {
 });
 
 describe('save request boundary', () => {
-  it('accepts only structurally valid V2 full documents', () => {
-    expect(sanitizeSavePayload({ document: document() })?.document?.version).toBe(2);
-    expect(sanitizeSavePayload({ document: { width: 1080, height: 1920, blocks: [] } })).toBeNull();
-    expect(sanitizeSavePayload({ document: { ...document(), timeline: { tracks: [] } } })).toBeNull();
+  it('parses transactions and refuses the retired snapshot protocol outright', () => {
+    const ok = sanitizeSavePayload({ documentSchemaVersion: 2, knownVersion: 4, transactions: [{
+      id: 'tx_0000000000000001', origin: 'user', ops: [{ op: 'command', input: { command: { type: 'canvas.patch', patch: { width: 720 } } } }],
+    }] })!;
+    expect(ok.transactions).toHaveLength(1);
+    expect(ok.knownVersion).toBe(4);
+    expect(sanitizeSavePayload({ transactions: 'nope' })).toBeNull();
+    expect(sanitizeSavePayload({ documentSchemaVersion: 2, document: document() })).toBeNull();
+    expect(sanitizeSavePayload({ documentSchemaVersion: 2, baseVersion: 3, title: 'x' })).toBeNull();
+    expect(isRetiredSaveProtocol({ documentSchemaVersion: 2, baseVersion: 3 })).toBe(true);
+    expect(isRetiredSaveProtocol({ documentSchemaVersion: 2, transactions: [] })).toBe(false);
   });
 
   it('rejects retired document/context wire fields instead of silently accepting them', () => {
@@ -262,17 +244,11 @@ describe('save request boundary', () => {
     expect(sanitizeProjectContext(legacy).localAssets?.map((entry) => entry.assetId)).toEqual(['local_keep']);
   });
 
-  it('rejects stale/corrupt patches and patched legacy top-level fields', () => {
+  it('rejects a stale context patch instead of applying it', () => {
     const wrongHash = sanitizeSavePayload({
-      documentPatch: [{ op: 'replace', path: '/canvas/width', value: 720 }], documentHash: 'wrong',
+      contextPatch: [{ op: 'add', path: '/localAssets', value: [] }], contextHash: 'wrong',
     })!;
     expect(mergeSaveIntoRow(existing(), wrongHash)).toBeNull();
-    const base = document();
-    const legacy = sanitizeSavePayload({
-      documentPatch: [{ op: 'add', path: '/video', value: { runtime: true } }],
-      documentHash: hashSection(canonicalJson({ ...base, video: { runtime: true } })),
-    })!;
-    expect(mergeSaveIntoRow(existing(base), legacy)).toBeNull();
   });
 
   it('clears an explicitly null cover while preserving unavailable media metadata', () => {
@@ -288,18 +264,36 @@ describe('save request boundary', () => {
   });
 });
 
-describe('conflict baseline', () => {
-  it('re-seeds from a server V2 DTO using the same canonical hashes', () => {
-    const value = payload();
-    const acked = ackedFromDto({
-      document: value.document!, context: { schemaVersion: 3 }, coverThumb: value.coverThumb ?? null,
-      title: '未命名项目', videoSig: value.videoSig, videoDurationSec: value.videoDurationSec,
-    });
-    const next = buildSaveWire(value, 9, acked);
-    if (next) {
-      expect(next.wire.document).toBeUndefined();
-      expect(next.wire.documentPatch).toBeUndefined();
-      expect(next.wire.coverThumb).toBeUndefined();
-    }
+describe('applying a save to the stored row', () => {
+  const ctx = { projectId: 'p1' };
+  const move = (id: string, startSec: number): DocumentTransaction => ({ id, origin: 'user', ops: [{
+    op: 'overlay.patch', input: { updates: [{ clipId: 'title', startSec }] },
+  }] });
+
+  it('replays transactions onto the stored document and remembers their ids', () => {
+    const row = { ...existing(), document: document(), appliedTransactionIds: [] };
+    const applied = applyProjectSave(row, sanitizeSavePayload({ documentSchemaVersion: 2, knownVersion: 1, transactions: [move('tx_0000000000000001', 3)] })!, ctx)!;
+    expect(applied.applied).toEqual(['tx_0000000000000001']);
+    expect(applied.appliedTransactionIds).toEqual(['tx_0000000000000001']);
+    expect(applied.documentChanged).toBe(true);
+    expect(applied.document.timeline.tracks[1]!.clips[0]!.startFrame).toBe(90);
+  });
+
+  it('answers a resend as done without applying twice and keeps going past a rejected one', () => {
+    const row = { ...existing(), document: document(), appliedTransactionIds: ['tx_0000000000000001'] };
+    const bad: DocumentTransaction = { id: 'tx_0000000000000bad', origin: 'user', ops: [{ op: 'canvas.resize', input: { width: 0, height: 0 } }] };
+    const applied = applyProjectSave(row, sanitizeSavePayload({ documentSchemaVersion: 2, transactions: [move('tx_0000000000000001', 9), bad, move('tx_0000000000000002', 4)] })!, ctx)!;
+    expect(applied.duplicates).toEqual(['tx_0000000000000001']);
+    expect(applied.rejected.map((r) => r.id)).toEqual(['tx_0000000000000bad']);
+    expect(applied.applied).toEqual(['tx_0000000000000002', 'tx_0000000000000001']);
+    expect(applied.document.timeline.tracks[1]!.clips[0]!.startFrame).toBe(120);
+  });
+
+  it('merges the small sections next to the replayed document', () => {
+    const row = { ...existing(), document: document(), appliedTransactionIds: [] };
+    const applied = applyProjectSave(row, sanitizeSavePayload({ documentSchemaVersion: 2, title: 'Renamed', videoSig: null, videoDurationSec: 42 })!, ctx)!;
+    expect(applied.title).toBe('Renamed');
+    expect(applied.videoSig).toBe('sig-old');
+    expect(applied.documentChanged).toBe(false);
   });
 });

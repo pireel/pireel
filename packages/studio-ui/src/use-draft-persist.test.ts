@@ -8,7 +8,6 @@ import {
   renameProject,
   serverSaveProject,
   serverLoadProject,
-  projectVersion,
   loadDraft,
 } from './use-draft-persist';
 
@@ -24,18 +23,6 @@ class MemoryStorage implements Storage {
 }
 
 describe('local project document persistence', () => {
-  it('does not authorize a stale editor to save over a metadata-only cloud refresh', async () => {
-    const id = createProject(emptyComposition(), 'Refresh');
-    const stored = JSON.parse(storage.getItem(`studio:draft:${id}`)!);
-    const dto = { id, title: 'Refresh', document: stored.document, context: sanitizeProjectContext({ schemaVersion: 3 }), videoSig: null, videoDurationSec: null, coverThumb: null, version: 1, updatedAt: Date.now() };
-    cacheProjectLocally(dto);
-    const remote = structuredClone(dto);
-    remote.version = 2;
-    remote.document.canvas.width += 1;
-    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ project: remote })));
-    expect(await serverLoadProject(id)).toMatchObject({ version: 2 });
-    expect(projectVersion(id)).toBe(1);
-  });
   let storage: MemoryStorage;
 
   beforeEach(() => {
@@ -51,13 +38,6 @@ describe('local project document persistence', () => {
     expect(stored.document).toMatchObject({ version: 2 });
     expect(stored).not.toHaveProperty('comp');
   });
-  it('restores a pending empty document so clearing the timeline is not lost on reload', () => {
-    const id = createProject(emptyComposition(), 'Cleared');
-    const key = `studio:draft:${id}`;
-    storage.setItem(key, JSON.stringify({ ...JSON.parse(storage.getItem(key)!), pending: true }));
-    expect(loadDraft(id)?.pending).toBe(true);
-  });
-
   it('ignores a retired per-project V1 draft instead of recreating compatibility state', () => {
     const legacy = {
       id: 'old-project',
@@ -93,9 +73,7 @@ describe('local project document persistence', () => {
     expect(storage.getItem('studio:draft:legacy-single')).toBeNull();
   });
 
-  it('returns the reload signal when autosave meets an online schema upgrade', async () => {
-    const id = createProject(emptyComposition(), 'Native');
-    const stored = JSON.parse(storage.getItem(`studio:draft:${id}`)!) as { document: EditorDocumentV2 };
+  it('maps a write-blocked answer to migration-required and sends transactions, never a document', async () => {
     let requestBody: Record<string, unknown> | undefined;
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
       requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -105,49 +83,31 @@ describe('local project document persistence', () => {
       });
     }));
 
-    const result = await serverSaveProject(id, {
-      document: stored.document,
-      videoSig: null,
-      videoDurationSec: null,
-      coverThumb: null,
+    const result = await serverSaveProject('p1', {
+      documentSchemaVersion: 2,
+      knownVersion: 3,
+      transactions: [{ id: 'tx_0000000000000001', origin: 'user', ops: [{ op: 'command', input: { command: { type: 'canvas.patch', patch: { width: 720, height: 1280 } } } }] }],
     });
 
     expect(result).toBe('migration-required');
-    expect(requestBody).toMatchObject({ documentSchemaVersion: 2, document: { version: 2 } });
-    expect(requestBody).not.toHaveProperty('comp');
-    expect(requestBody).not.toHaveProperty('context');
+    expect(requestBody).toMatchObject({ documentSchemaVersion: 2, knownVersion: 3 });
+    expect(requestBody).not.toHaveProperty('document');
+    expect(requestBody).not.toHaveProperty('baseVersion');
   });
 
-  it('does not write the unchanged cloud snapshot back after project hydration', async () => {
-    const id = createProject(emptyComposition(), 'Hydrated');
+  it('returns the acknowledgement fields the sync layer needs', async () => {
+    const id = createProject(emptyComposition(), 'Acked');
     const stored = JSON.parse(storage.getItem(`studio:draft:${id}`)!) as { document: EditorDocumentV2 };
-    const context = sanitizeProjectContext(null);
-    cacheProjectLocally({
-      id,
-      title: 'Hydrated',
-      document: stored.document,
-      context,
-      videoSig: null,
-      videoDurationSec: null,
-      coverThumb: null,
-      version: 7,
-      updatedAt: Date.now(),
-    });
-    const fetchSpy = vi.fn();
-    vi.stubGlobal('fetch', fetchSpy);
+    const project = { id, title: 'Acked', document: stored.document, context: sanitizeProjectContext(null), videoSig: null, videoDurationSec: null, coverThumb: null, version: 8, updatedAt: Date.now() };
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ project, applied: ['tx_0000000000000001'], rejected: [], baseVersion: 7, documentHash: 'h' })));
 
-    const result = await serverSaveProject(id, {
-      // Matches the workbench payload: title is intentionally omitted because this save is not a
-      // rename. Omission must mean "preserve", not hash as null and create a metadata-only PUT.
-      document: stored.document,
-      context,
-      videoSig: null,
-      videoDurationSec: null,
-      coverThumb: null,
-    });
+    const result = await serverSaveProject(id, { documentSchemaVersion: 2, knownVersion: 7, title: 'Acked' });
 
-    expect(result).toMatchObject({ status: 'saved' });
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ status: 'saved', applied: ['tx_0000000000000001'], baseVersion: 7, documentHash: 'h', project: { version: 8 } });
   });
 
+  it('answers need-full for a section patch the server could not apply', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'need_full' }), { status: 422 })));
+    expect(await serverSaveProject('p1', { documentSchemaVersion: 2, knownVersion: 1, contextPatch: [], contextHash: 'x' })).toBe('need-full');
+  });
 });

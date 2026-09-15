@@ -10,6 +10,7 @@ import {
 } from '@pireel/studio-engine/composition';
 import { buildChatSystem, buildHtmlSystem } from '@pireel/studio-engine/prompts';
 import type { AgentToolCtx } from './agent-tool-runner';
+import { DocumentCommitter } from './document-commit';
 import { GeneratedBlockValidationError } from './compose-result';
 import { classifyAsrResponse } from './media';
 import { localAssetMentionId } from './chat-local-asset-mention';
@@ -116,6 +117,16 @@ function harness() {
     documentRef.current = document;
     compRef.current = runtimeComposition ?? projectDocumentToComposition(document);
   };
+  // The real committer, wired to the refs: tools commit operations exactly as in the workbench.
+  const committer = new DocumentCommitter({
+    projectId: 'test',
+    getDocument: () => documentRef.current,
+    publish: setDocument,
+    undoStack: undoStackRef,
+    redoStack: redoStackRef,
+    undoCap: 20,
+    onTransaction: () => {},
+  });
   return {
     ctx: {
       compRef,
@@ -125,9 +136,14 @@ function harness() {
       asrRef,
       clipAsrRef,
       localTranscriptCacheRef: { current: new Map() },
-      setDocument,
+      commit: committer.commit.bind(committer),
+      replaceDocument: (document: EditorDocumentV2, options: Parameters<DocumentCommitter['replace']>[1]) => committer.replace(document, options),
+      beginTransactionScope: () => committer.scope(),
+      pushUndoSnapshot: () => committer.pushUndoSnapshot(),
       pickVideoFile: async () => {},
     } as unknown as AgentToolCtx,
+    /** Direct document write for test setup and for simulating a raw in-tool mutation. */
+    setDocument,
     compRef,
     documentRef,
     undoStackRef,
@@ -158,7 +174,7 @@ describe('Agent composition transaction boundary', () => {
     h.ctx.pushUndoSnapshot = () => { h.ctx.undoStackRef.current.push(h.ctx.documentRef.current); };
     const comp = composition();
     comp.blocks.push({ id: 'kit-steps', templateId: 'kit:steps', slots: { props: { variant: 'pipeline' } }, startSec: 0, durationSec: 3, trackIndex: 1 });
-    h.ctx.setDocument(compositionToEditorDocument({ projectId: 'test', composition: comp }).document);
+    h.setDocument(compositionToEditorDocument({ projectId: 'test', composition: comp }).document);
     const result = await runExternalTool(h.ctx, 'run_v3', { name: 'set_clip_properties', args: { items: [{ clipId: 'kit-steps', props: [{ key: 'items', value: [{ text: 'One', note: 'First' }, { text: 'Two', note: '' }] }] }] } });
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(h.compRef.current.blocks.find((block) => block.id === 'kit-steps')!.slots.props).toMatchObject({ variant: 'pipeline', items: [{ text: 'One', note: 'First' }, { text: 'Two', note: '' }] });
@@ -211,7 +227,7 @@ describe('Agent composition transaction boundary', () => {
   it('bakes a component into its original lane and time using the render id envelope', async () => {
     const h = harness();
     const comp = { ...composition(), blocks: [{ id: 'graphic', templateId: 'custom', slots: { innerHtml: '<b>Test</b>', timelineBody: '' }, startSec: 4, durationSec: 2, trackIndex: 2, box: { x: 0.1, y: 0.2, w: 0.5, h: 0.4 } }] };
-    h.ctx.setDocument(compositionToEditorDocument({ projectId: 'test', composition: comp }).document);
+    h.setDocument(compositionToEditorDocument({ projectId: 'test', composition: comp }).document);
     const originalTrack = h.documentRef.current.timeline.tracks.find((track) => track.clips.some((clip) => clip.id === 'graphic'))!;
     Object.assign(h.ctx, { projectId: 'test', genIdsRef: { current: new Set() }, pushUndoSnapshot: () => h.undoStackRef.current.push(h.documentRef.current) });
     const fetch = vi.fn().mockResolvedValue(Response.json({ id: 'job-1', status: 'done', output: { url: 'https://cdn.pireel.com/baked.webm', durationSec: 2 } }));
@@ -229,7 +245,7 @@ describe('Agent composition transaction boundary', () => {
   it('retains the editable component and reports structured render failures', async () => {
     const h = harness();
     const comp = { ...composition(), blocks: [{ id: 'graphic', templateId: 'custom', slots: { innerHtml: '<b>Test</b>', timelineBody: '' }, startSec: 4, durationSec: 2, trackIndex: 2 }] };
-    h.ctx.setDocument(compositionToEditorDocument({ projectId: 'test', composition: comp }).document);
+    h.setDocument(compositionToEditorDocument({ projectId: 'test', composition: comp }).document);
     const before = h.documentRef.current;
     Object.assign(h.ctx, { projectId: 'test', genIdsRef: { current: new Set() }, pushUndoSnapshot: () => h.undoStackRef.current.push(h.documentRef.current) });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ id: 'job-1', status: 'failed', error: { code: 'render_failed', message: 'Renderer unavailable' } })));
@@ -511,7 +527,7 @@ describe('Agent composition transaction boundary', () => {
     });
     expect(registered.ok).toBe(true);
     if (!registered.document) throw new Error('registration did not return a document');
-    h.ctx.setDocument(registered.document);
+    h.setDocument(registered.document);
     const prepareLocalAssetRuntime = vi.fn().mockResolvedValue({ ok: true, prepared: true });
     Object.assign(h.ctx, {
       prepareLocalAssetRuntime,
@@ -543,7 +559,7 @@ describe('Agent composition transaction boundary', () => {
 
   it('places a project-library asset in a fresh output without a separate register_media retry', async () => {
     const h = harness();
-    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1920, height: 1080, fps: 30 }));
+    h.setDocument(emptyEditorDocumentV2({ width: 1920, height: 1080, fps: 30 }));
     const assetId = 'shared-product-video';
     const sig = 'product.mp4:120:8';
     const video = new File(['full-source-video'], 'product.mp4', { type: 'video/mp4', lastModified: 8 });
@@ -586,7 +602,7 @@ describe('Agent composition transaction boundary', () => {
 
   it('mounts every montage source as a peer when several videos are placed together', async () => {
     const h = harness();
-    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1920, height: 1080, fps: 30 }));
+    h.setDocument(emptyEditorDocumentV2({ width: 1920, height: 1080, fps: 30 }));
     const first = new File(['first'], 'first.mov', { type: 'video/quicktime', lastModified: 1 });
     const second = new File(['second'], 'second.mov', { type: 'video/quicktime', lastModified: 2 });
     mediaMocks.probeVideoFile
@@ -680,7 +696,7 @@ describe('Agent composition transaction boundary', () => {
 
   it('run_v3 answers get_state in the v3 shape and applies a mutation as one delta-bearing step', async () => {
     const h = harness();
-    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
+    h.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
     const first = new File(['first'], 'first.mov', { type: 'video/quicktime', lastModified: 1 });
     mediaMocks.probeVideoFile.mockResolvedValueOnce({ durationSec: 4, width: 1080, height: 1920, hasAudio: true });
     Object.assign(h.ctx, {
@@ -793,7 +809,7 @@ describe('Agent composition transaction boundary', () => {
     });
     expect(registered.ok).toBe(true);
     if (!registered.document) throw new Error('registration did not return a document');
-    h.ctx.setDocument(registered.document);
+    h.setDocument(registered.document);
     const before = h.documentRef.current;
     Object.assign(h.ctx, {
       prepareLocalAssetRuntime: vi.fn().mockResolvedValue({ ok: false, error: 'restore local access' }),
@@ -963,7 +979,7 @@ describe('Agent composition transaction boundary', () => {
 
   it('reuses an unplaced local transcript after that asset becomes the primary source', async () => {
     const h = harness();
-    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1920, height: 1080, fps: 30 }));
+    h.setDocument(emptyEditorDocumentV2({ width: 1920, height: 1080, fps: 30 }));
     const assetId = 'asset-promoted-speaker';
     const sig = 'promoted-speaker.mp4:240:12';
     const video = new File(['video-with-speech'], 'promoted-speaker.mp4', { type: 'video/mp4', lastModified: 12 });
@@ -1006,7 +1022,7 @@ describe('Agent composition transaction boundary', () => {
 
   it('persists transcript state when a placed local video is referenced with its list_assets id', async () => {
     const h = harness();
-    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
+    h.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
     const assetId = 'asset-placed-speaker';
     const sig = 'placed-speaker.mp4:240:12';
     const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
@@ -1015,7 +1031,7 @@ describe('Agent composition transaction boundary', () => {
     const placed = runAgentTimelineTool(registered.document!, 'add_clips', {
       clips: [{ id: 'placed-speaker-clip', assetId, role: 'primary', startSec: 0, durationSec: 18 }],
     });
-    h.ctx.setDocument(placed.document!);
+    h.setDocument(placed.document!);
     const video = new File(['video-with-speech'], 'placed-speaker.mp4', { type: 'video/mp4', lastModified: 12 });
     localMediaMocks.loadLocalAssetFile.mockResolvedValue(video);
     mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 18, width: 1080, height: 1920, hasAudio: true });
@@ -1049,7 +1065,7 @@ describe('Agent composition transaction boundary', () => {
 
   it('lazily heals the exact legacy five-second primary placeholder after probing the real source', async () => {
     const h = harness();
-    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
+    h.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
     const assetId = 'asset-legacy-placeholder';
     const sig = 'legacy-placeholder.mp4:240:12';
     const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
@@ -1058,7 +1074,7 @@ describe('Agent composition transaction boundary', () => {
     const placed = runAgentTimelineTool(registered.document!, 'add_clips', {
       clips: [{ id: 'legacy-placeholder-clip', assetId, role: 'primary', startSec: 0 }],
     });
-    h.ctx.setDocument(placed.document!);
+    h.setDocument(placed.document!);
     expect(h.documentRef.current.timeline.tracks.flatMap((track) => track.clips)[0])
       .toMatchObject({ durationFrames: 150, sourceOutSec: 5 });
     const video = new File(['legacy-video'], 'legacy-placeholder.mp4', { type: 'video/mp4', lastModified: 12 });
@@ -1085,7 +1101,7 @@ describe('Agent composition transaction boundary', () => {
 
   it('removes silence from a placed local primary asset without relying on the legacy main-file ref', async () => {
     const h = harness();
-    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
+    h.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
     const assetId = 'asset-local-primary';
     const sig = 'local-primary.mp4:240:12';
     const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
@@ -1094,7 +1110,7 @@ describe('Agent composition transaction boundary', () => {
     const placed = runAgentTimelineTool(registered.document!, 'add_clips', {
       clips: [{ id: 'local-primary-clip', assetId, role: 'primary', startSec: 0, durationSec: 18 }],
     });
-    h.ctx.setDocument(placed.document!);
+    h.setDocument(placed.document!);
     const video = new File(['video-with-pauses'], 'local-primary.mp4', { type: 'video/mp4', lastModified: 12 });
     localMediaMocks.loadLocalAssetFile.mockResolvedValue(video);
     speechMocks.detectSpeechSilenceCuts.mockResolvedValue([{ fromSec: 4, toSec: 6 }]);
@@ -1141,7 +1157,7 @@ describe('Agent composition transaction boundary', () => {
 
   it('treats provider no-fragment as a speech-free observation and mutes that local source on placement', async () => {
     const h = harness();
-    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
+    h.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
     const sig = 'noise-only.mp4:240:12';
     const video = new File(['noise'], 'noise-only.mp4', { type: 'video/mp4', lastModified: 12 });
     localMediaMocks.loadLocalVideo.mockResolvedValue(video);
@@ -1541,7 +1557,7 @@ describe('Agent composition transaction boundary', () => {
     const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
       assets: [{ id: 'tts-audio', kind: 'audio', url: 'https://cdn.example/tts.mp3', transcriptText: '原始文稿' }],
     });
-    h.ctx.setDocument(registered.document!);
+    h.setDocument(registered.document!);
     mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 12.4, width: 0, height: 0, hasAudio: true });
     providerMocks.transcribe.mockResolvedValue([{ start: 0.2, end: 1.4, text: '实际发音', words: [{ start: 0.2, end: 0.8, text: '实际' }] }]);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(new Blob(['audio'], { type: 'audio/mpeg' }), {
@@ -1592,14 +1608,14 @@ describe('Agent composition transaction boundary', () => {
 
   it('transcribes a targeted registered video clip after get_transcript reports no stored transcript', async () => {
     const h = harness();
-    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
+    h.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
     const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
       assets: [{ id: 'speaker-video', kind: 'video', url: 'https://cdn.example/speaker.mp4', durationSec: 18, width: 1080, height: 1920, hasAudio: true }],
     });
     const placed = runAgentTimelineTool(registered.document!, 'add_clips', {
       clips: [{ id: 'speaker-clip', assetId: 'speaker-video', role: 'primary', startSec: 0, durationSec: 18 }],
     });
-    h.ctx.setDocument(placed.document!);
+    h.setDocument(placed.document!);
     providerMocks.transcribe.mockResolvedValue([{ start: 0.4, end: 2.1, text: '这是视频里的口播' }]);
     mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 18, width: 1080, height: 1920, hasAudio: true });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(new Blob(['video'], { type: 'video/mp4' }), {
@@ -1640,7 +1656,7 @@ describe('Agent composition transaction boundary', () => {
 
   it('analyzes the only B-roll video in an audio-led project without a mounted main video', async () => {
     const h = harness();
-    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
+    h.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
     const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
       assets: [
         { id: 'demo-video', kind: 'video', url: 'https://cdn.example/demo.mp4' },
@@ -1652,7 +1668,7 @@ describe('Agent composition transaction boundary', () => {
     const placed = runAgentTimelineTool(registered.document!, 'add_clips', {
       clips: [{ id: 'demo-clip', assetId: 'demo-video', role: 'broll', startSec: 0 }],
     });
-    h.ctx.setDocument(placed.document!);
+    h.setDocument(placed.document!);
     mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 30, width: 1280, height: 720, hasAudio: true });
     visualMocks.analyzeVisual.mockResolvedValue({
       cuts: [8.5],
@@ -1695,7 +1711,7 @@ describe('Agent composition transaction boundary', () => {
 
   it('keeps simultaneous visual evidence on separate lanes and lays media clips out directly', async () => {
     const h = harness();
-    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1920, height: 1080, fps: 30 }));
+    h.setDocument(emptyEditorDocumentV2({ width: 1920, height: 1080, fps: 30 }));
     const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
       assets: [
         { id: 'proof-xhs', kind: 'image', url: 'https://cdn.example/xhs.jpg' },
@@ -1711,7 +1727,7 @@ describe('Agent composition transaction boundary', () => {
       ],
     });
     expect(placed.ok, JSON.stringify(placed)).toBe(true);
-    h.ctx.setDocument(placed.document!);
+    h.setDocument(placed.document!);
     const visualTracks = h.documentRef.current.timeline.tracks.filter((track) => track.role === 'broll');
     expect(visualTracks).toHaveLength(3);
     expect(visualTracks.flatMap((track) => track.clips.map((clip) => clip.id)).sort()).toEqual([
@@ -1746,7 +1762,7 @@ describe('Agent composition transaction boundary', () => {
     const result = await runAtomicCompositionTool(h.ctx, async () => {
       h.undoStackRef.current.push(h.documentRef.current);
       h.redoStackRef.current = [];
-      h.ctx.setDocument({ ...h.documentRef.current, canvas: { ...h.documentRef.current.canvas, width: 1920 } });
+      h.setDocument({ ...h.documentRef.current, canvas: { ...h.documentRef.current.canvas, width: 1920 } });
       return { ok: false, error: 'bad input' };
     });
     expect(result.ok).toBe(false);
@@ -1759,7 +1775,7 @@ describe('Agent composition transaction boundary', () => {
     const invalid = harness();
     const rejected = await runAtomicCompositionTool(invalid.ctx, async () => {
       const primary = invalid.documentRef.current.timeline.tracks[0]!;
-      invalid.ctx.setDocument({
+      invalid.setDocument({
         ...invalid.documentRef.current,
         timeline: { tracks: [{ ...primary, clips: [...primary.clips, { ...primary.clips[0]! }] }] },
       });
@@ -1770,7 +1786,7 @@ describe('Agent composition transaction boundary', () => {
 
     const valid = harness();
     const committed = await runAtomicCompositionTool(valid.ctx, async () => {
-      valid.ctx.setDocument({ ...valid.documentRef.current, canvas: { ...valid.documentRef.current.canvas, width: 1920, height: 1080 } });
+      valid.setDocument({ ...valid.documentRef.current, canvas: { ...valid.documentRef.current.canvas, width: 1920, height: 1080 } });
       return { ok: true, summary: 'canvas' };
     });
     expect(committed.ok).toBe(true);
@@ -1781,7 +1797,7 @@ describe('Agent composition transaction boundary', () => {
     const h = harness();
     const before = h.documentRef.current;
     const result = await runAtomicCompositionTool(h.ctx, async () => {
-      h.ctx.setDocument({
+      h.setDocument({
         ...h.documentRef.current,
         timeline: {
           tracks: [
@@ -1829,9 +1845,15 @@ describe('Agent composition transaction boundary', () => {
   it('browser shot properties commit directly to V2 without collapsing a native gap', async () => {
     const h = harness();
     h.documentRef.current.timeline.tracks[0]!.clips[0]!.startFrame = 45;
+    // A populated sibling lane: every committed document is normalized, and an empty lane is pruned
+    // by design, so an occupied one is what proves the lane survives an unrelated edit.
+    h.documentRef.current.assets.broll = { id: 'broll', kind: 'video', locator: { remoteUrl: 'https://cdn.test/broll.mp4' }, metadata: { durationSec: 2 } };
     h.documentRef.current.timeline.tracks.push({
       id: 'broll', type: 'visual', role: 'broll', muted: false, hidden: false, locked: false,
-      syncLocked: false, stackOrder: 1, clips: [],
+      syncLocked: false, stackOrder: 1, clips: [{
+        id: 'broll-1', kind: 'media', assetId: 'broll', startFrame: 0, durationFrames: 30, enabled: true,
+        sourceInSec: 0, sourceOutSec: 1, fit: 'cover',
+      }],
     });
     Object.assign(h.ctx, {
       genIdsRef: { current: new Set<string>() },
@@ -1948,7 +1970,7 @@ describe('Agent composition transaction boundary', () => {
       return { ok: false, error: 'provider failed' };
     });
     h.undoStackRef.current.push(h.documentRef.current); // manual edit snapshot
-    h.ctx.setDocument({ ...h.documentRef.current, canvas: { ...h.documentRef.current.canvas, width: 1440 } });
+    h.setDocument({ ...h.documentRef.current, canvas: { ...h.documentRef.current.canvas, width: 1440 } });
     release();
     const result = await pending;
     expect(result.ok).toBe(false);

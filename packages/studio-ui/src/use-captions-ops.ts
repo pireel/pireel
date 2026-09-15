@@ -33,7 +33,9 @@ import { editorErrorMessage } from './editor-error';
 import type { CaptionLineRow } from './captions-panel';
 import { inspectCaptionDocument } from './caption-document-state';
 import { captionTranscriptsByAsset, captionTranscriptsFromDocument } from './caption-transcript-bridge';
-import { replaceCaptionTranslationsTransaction } from './caption-translation-transaction';
+import { stageCaptionTranslationReplacement } from './caption-translation-transaction';
+import { transcriptInputsFor, type DocumentOpInputs } from '@pireel/studio-engine/document-transaction';
+import type { DocumentCommitter } from './document-commit';
 
 /** Everything the caption ops borrow from the workbench (values are per-render, refs/handlers are stable-by-ref). */
 export interface CaptionsOpsDeps {
@@ -53,12 +55,11 @@ export interface CaptionsOpsDeps {
   playingRef: MutableRefObject<boolean>;
   tRef: MutableRefObject<number>;
   documentRef: MutableRefObject<EditorDocumentV2>;
-  setDocument: (document: EditorDocumentV2, runtimeComposition?: Composition) => void;
+  commit: DocumentCommitter['commit'];
   ensureShots: (c: Composition) => VideoShot[];
   stepAsr: () => Promise<AsrSegment[]>;
   refreshAsr: () => Promise<AsrSegment[]>;
   ensureClipTranscripts: () => Promise<void>;
-  pushUndoSnapshot: () => void;
   postPreview: (msg: Record<string, unknown>) => void;
   applyT: (v: number) => void;
   /** The agent tool dispatcher (set_caption_translations goes through the shared executor for undo/re-lay). */
@@ -68,25 +69,33 @@ export interface CaptionsOpsDeps {
 export function useCaptionsOps(deps: CaptionsOpsDeps) {
   const {
     comp, tSec, asrSentences, clipAsr, setClipAsr, setAsrSentences, setSelectedIdRaw, setSelectedBlockIds,
-    setPlaying, compRef, clipAsrRef, asrRef, videoFileRef, playingRef, tRef, documentRef, setDocument, ensureShots, stepAsr, refreshAsr,
-    ensureClipTranscripts, pushUndoSnapshot, postPreview, applyT, runTool,
+    setPlaying, compRef, clipAsrRef, asrRef, videoFileRef, playingRef, tRef, documentRef, commit, ensureShots, stepAsr, refreshAsr,
+    ensureClipTranscripts, postPreview, applyT, runTool,
   } = deps;
   const [capTransBusy, setCapTransBusy] = useState(false); // bilingual translation in progress (captions panel)
+  /** The runtime transcript mirrors, carried into an operation only when they differ from the document. */
+  const currentTranscripts = () => transcriptInputsFor(
+    documentRef.current,
+    asrRef.current,
+    captionTranscriptsByAsset(documentRef.current, compRef.current, clipAsrRef.current),
+  );
+  /** Pure preview of a style edit (inspected before committing); `captionCommit` lands the same edit. */
   const captionEdit = (patch: Partial<CaptionStyle>) => applyCaptionDocumentEdit({
     document: documentRef.current,
     patch,
     mainTranscript: asrRef.current,
     clipTranscripts: captionTranscriptsByAsset(documentRef.current, compRef.current, clipAsrRef.current),
   });
+  const captionCommit = (input: Omit<DocumentOpInputs['captions.edit'], 'mainTranscript' | 'clipTranscripts'>, undo: 'step' | 'none' = 'step') =>
+    commit({ op: 'captions.edit', input: { ...input, ...currentTranscripts() } }, { undo });
   const setCaptionStyle = useCallback((patch: Partial<CaptionStyle>) => {
     // SPARSE persistence: merge into the raw stored style, never the resolved one — defaults stay in
     // the resolver so future default changes reach projects that never explicitly set those fields.
-    const edit = captionEdit(patch);
+    const edit = captionCommit({ patch }, 'none');
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return;
     }
-    setDocument(edit.document);
   }, []);
   /** Caption re-lay/mapping: the pure functions live in captions-relay (reused by the offline MCP executor); this is a thin wrapper feeding refs. */
   const mappedCaptionSegs = (shots: VideoShot[], narr: AsrSegment[] | null): AsrSegment[] => relayMappedCaptionSegs(shots, narr, clipAsrRef.current);
@@ -162,19 +171,17 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     const next = applyCaptionTextEdits(segs, items);
     if (next === segs) return;
     const nextClipAsr = usesRuntime && src ? { ...clipAsrRef.current, [src]: next } : clipAsrRef.current;
-    const edit = applyCaptionDocumentEdit({
-      document: documentRef.current,
+    const edit = commit({ op: 'captions.edit', input: {
       mainTranscript: usesRuntime && !src ? next : asrRef.current,
       clipTranscripts: {
         ...captionTranscriptsByAsset(documentRef.current, compRef.current, nextClipAsr),
         ...(!usesRuntime && row.assetId ? { [row.assetId]: next } : {}),
       },
-    });
+    } });
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return;
     }
-    pushUndoSnapshot();
     if (usesRuntime && src) {
       clipAsrRef.current = nextClipAsr;
       setClipAsr(nextClipAsr);
@@ -182,7 +189,6 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       asrRef.current = next;
       setAsrSentences(next);
     }
-    setDocument(edit.document);
   };
   /** Captions panel empty-state "extract captions": run ASR in place (no style applied — the user
    *  may just want to edit lines; picking a style later re-lays from this transcript). */
@@ -333,8 +339,11 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
         toast.error(t('workbench.transcriptEmptyGenerateCaptions'));
         return;
       }
-      pushUndoSnapshot();
-      setDocument(edit.document);
+      const landed = captionCommit({ patch: { on: true, preset, color: undefined, bg: undefined, ...stylePatch } });
+      if (!landed.ok) {
+        toast.error(editorErrorMessage(landed.error));
+        return;
+      }
       // Let the user see the result immediately (same value as "select means visible"): if the playhead isn't in any
       // caption window, move it to the first caption — otherwise nothing on screen moves after laying and it feels like "clicked but no effect" (user reported)
       if (!playingRef.current && output.firstCaptionStartSec != null) {
@@ -362,14 +371,12 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
   const removeCaptionLayer = () => {
     if (!isCaptionsOn(compRef.current)) return;
     const ids = compRef.current.blocks.filter(isSentenceCaption).map((b) => b.id);
-    const edit = captionEdit({ on: false });
+    ids.forEach((id) => postPreview({ type: 'hf:remove', id }));
+    const edit = captionCommit({ patch: { on: false } });
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return;
     }
-    pushUndoSnapshot();
-    ids.forEach((id) => postPreview({ type: 'hf:remove', id }));
-    setDocument(edit.document);
     setSelectedIdRaw((s) => (s && ids.includes(s) ? null : s));
     setSelectedBlockIds((cur) => {
       const n = new Set([...cur].filter((x) => !ids.includes(x)));
@@ -381,23 +388,16 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
    * copy onto those ranges, then immediately freeze the new layout. Deliberately no success toast. */
   const relayoutCaptions = () => {
     if (!isCaptionsOn(compRef.current)) return { ok: false, error: t('workbench.thereNoCaptionsRight') };
-    const edit = applyCaptionDocumentEdit({
-      document: documentRef.current,
-      relayout: true,
-      mainTranscript: null,
-      clipTranscripts: {},
-    });
+    const edit = commit({ op: 'captions.edit', input: { relayout: true } });
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return { ok: false, error: editorErrorMessage(edit.error) };
     }
     const transcripts = captionTranscriptsFromDocument(edit.document, compRef.current, clipAsrRef.current);
-    pushUndoSnapshot();
     asrRef.current = transcripts.main;
     clipAsrRef.current = transcripts.clips;
     setAsrSentences(transcripts.main);
     setClipAsr(transcripts.clips);
-    setDocument(edit.document);
     return { ok: true };
   };
   /** Panel refresh = RE-ACQUIRE, then re-lay. Refresh must survive a changed caption source:
@@ -424,17 +424,11 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
         targets = timelineTranscriptionTargets(documentRef.current, { mode: 'auto' });
         // Extraction reads the persisted source: commit the auto re-selection first and let the
         // render flush so documentRef reflects it before ASR resolves its targets.
-        const reselect = applyCaptionDocumentEdit({
-          document: documentRef.current,
-          source: { mode: 'auto' },
-          mainTranscript: asrRef.current,
-          clipTranscripts: captionTranscriptsByAsset(documentRef.current, compRef.current, clipAsrRef.current),
-        });
+        const reselect = captionCommit({ source: { mode: 'auto' } }, 'none');
         if (!reselect.ok) {
           toast.error(editorErrorMessage(reselect.error));
           return;
         }
-        setDocument(reselect.document);
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
       const missingTranscript = targets.some(
@@ -523,22 +517,24 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       // Stage clear + all-source replacement + caption relay first, then publish refs/state exactly
       // once. A missing row, stale source, or locked caption lane leaves the old bilingual layer
       // untouched instead of clearing it and writing only the batches that happened to succeed.
-      const transaction = replaceCaptionTranslationsTransaction({
-        document: documentRef.current,
-        composition: compRef.current,
+      const staged = stageCaptionTranslationReplacement({
         groups,
         rows: out,
         target,
         mainTranscript: asrRef.current,
         clipTranscripts: clipAsrRef.current,
       });
-      if (!transaction.ok) throw new Error(transaction.error || t('workbench.translationFailedTryAgain'));
-      pushUndoSnapshot();
-      asrRef.current = transaction.mainTranscript;
-      clipAsrRef.current = transaction.clipTranscripts;
-      setAsrSentences(transaction.mainTranscript);
-      setClipAsr(transaction.clipTranscripts);
-      setDocument(transaction.document);
+      if (!staged.ok) throw new Error(staged.error || t('workbench.translationFailedTryAgain'));
+      const landed = commit({ op: 'captions.edit', input: {
+        patch: { sub: { ...(documentRef.current.appearance.captionStyle?.sub ?? {}), lang: target } },
+        mainTranscript: staged.mainTranscript,
+        clipTranscripts: captionTranscriptsByAsset(documentRef.current, compRef.current, staged.clipTranscripts),
+      } });
+      if (!landed.ok) throw new Error(editorErrorMessage(landed.error));
+      asrRef.current = staged.mainTranscript;
+      clipAsrRef.current = staged.clipTranscripts;
+      setAsrSentences(staged.mainTranscript);
+      setClipAsr(staged.clipTranscripts);
       toast.success(t('workbench.generatedLangTranslations', { lang: target }) + (isCaptionsOn(compRef.current) ? '' : t('workbench.enableCaptionsShowThem')));
     } catch (e) {
       console.warn('[captions] translation failed', e);
