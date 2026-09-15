@@ -181,6 +181,9 @@ export class VideoTrackEngine {
   onBlank?: (t: number) => void;
   onTick?: (t: number) => void;
   onEnded?: () => void;
+  /** A resident source element failed to load (a stale File handle, a revoked URL): the segment is
+   *  dead until the owner sets the source again from fresh bytes. */
+  onSourceError?: (key: string, error: MediaError | null) => void;
   /** Transition pre-bake provider (workbench): cut → decoded frame set; null = not baked/decoded (falls back to the ghost path).
    *  When baked, the window pushes finished frames and ghost decode stays idle — "on-the-fly scheduling" leaves the critical path. */
   bakeProvider?: (cut: number) => { fps: number; half: number; frames: ImageBitmap[] } | null;
@@ -205,6 +208,7 @@ export class VideoTrackEngine {
     const prev = this.els.get(key);
     if (source == null) {
       if (prev) {
+        this.trace(key, 'remove');
         this.bitmapModes.delete(prev);
         this.bitmapStages.delete(prev);
         releaseMediaElement(prev);
@@ -231,6 +235,7 @@ export class VideoTrackEngine {
     const url = typeof source === 'string' ? source : URL.createObjectURL(source);
     if (prev) {
       if (prev.dataset.hfSrcTag === url) return; // idempotent
+      this.trace(key, `swap src (${typeof source === 'string' ? 'url' : `file ${source.size}`}) rs=${prev.readyState} ct=${prev.currentTime.toFixed(2)}`);
       this.bitmapModes.delete(prev);
       this.bitmapStages.delete(prev);
       const old = this.urls.get(key);
@@ -251,15 +256,80 @@ export class VideoTrackEngine {
       }
       return;
     }
+    this.trace(key, `create (${typeof source === 'string' ? 'url' : `file ${source.size}`})`);
     const v = document.createElement('video');
     v.muted = true;
     v.playsInline = true;
     v.preload = 'auto';
+    v.addEventListener('error', () => {
+      if (this.els.get(key) === v) this.onSourceError?.(key, v.error);
+    });
     v.src = url;
     v.dataset.hfSrcTag = url;
     if (typeof source !== 'string') this.urls.set(key, url);
     this.ensureHost().appendChild(v);
     this.els.set(key, v);
+  }
+
+  /**
+   * Rebuild a resident element's pipeline from the bytes it already has (a fresh object URL for a
+   * File source, `load()` for a URL source). Synchronous, so a seek that follows an `error` event
+   * finds the element alive again instead of a dead window and a cleared canvas.
+   */
+  reloadSource(key: string): boolean {
+    const el = this.els.get(key);
+    const source = this.srcIds.get(key);
+    if (!el || source == null) return false;
+    this.trace(key, `reload after error rs=${el.readyState} ct=${el.currentTime.toFixed(2)} err=${el.error?.code ?? '-'}`);
+    for (const side of ['pre', 'post'] as const) {
+      const ghost = this.ghosts.get(`${key}::${side}`);
+      if (ghost) {
+        releaseMediaElement(ghost);
+        this.ghosts.delete(`${key}::${side}`);
+        if (this.activeGhost === ghost) this.activeGhost = null;
+      }
+    }
+    this.bitmapModes.delete(el);
+    this.bitmapStages.delete(el);
+    if (typeof source === 'string') {
+      el.load();
+      return true;
+    }
+    const old = this.urls.get(key);
+    if (old) URL.revokeObjectURL(old);
+    const url = URL.createObjectURL(source);
+    this.urls.set(key, url);
+    el.src = url;
+    el.dataset.hfSrcTag = url;
+    el.load();
+    return true;
+  }
+
+  /** Diagnostic view of one source's resident element, with the last operations the engine ran on it. */
+  sourceState(key: string): {
+    present: boolean; error: number | null; readyState: number | null; networkState: number | null; currentTime: number | null;
+    buffered: string; src: string; trace: string[];
+  } {
+    const el = this.els.get(key);
+    const buffered = el ? Array.from({ length: el.buffered.length }, (_, i) => `${el.buffered.start(i).toFixed(2)}-${el.buffered.end(i).toFixed(2)}`).join(',') : '';
+    return {
+      present: !!el,
+      error: el?.error?.code ?? null,
+      readyState: el?.readyState ?? null,
+      networkState: el?.networkState ?? null,
+      currentTime: el ? Math.round(el.currentTime * 1000) / 1000 : null,
+      buffered,
+      src: (el?.currentSrc || el?.src || '').slice(0, 48),
+      trace: [...(this.traces.get(key) ?? [])],
+    };
+  }
+
+  private traces = new Map<string, string[]>();
+  private trace(key: string, op: string): void {
+    const list = this.traces.get(key) ?? [];
+    list.push(`${(performance.now() / 1000).toFixed(2)}s ${op}`);
+    if (list.length > 16) list.shift();
+    this.traces.set(key, list);
   }
 
   setSegments(segs: EngineSeg[]): boolean {
@@ -944,6 +1014,7 @@ export class VideoTrackEngine {
     this.activateIdx(i, srcT, this.playing);
     const el = this.els.get(seg.key);
     if (!el) return;
+    this.trace(seg.key, `seek t=${this.tEdited.toFixed(2)} src=${srcT.toFixed(3)} rs=${el.readyState} seeking=${el.seeking}`);
     this.syncGhost(this.tEdited); // scrub into a transition window: ghost seeks along (no play while paused)
     this.syncAudioClips(this.tEdited, this.playing, true); // park the clips at the new position (aligned resume)
     const push = () => {
@@ -962,6 +1033,7 @@ export class VideoTrackEngine {
     this.tEdited = Math.max(0, Math.min(this.total, t));
     this.playing = true;
     const i = this.playableAt(this.tEdited);
+    if (i >= 0) this.trace(this.segs[i]!.key, `play t=${this.tEdited.toFixed(2)}`);
     if (i < 0) {
       this.enterBlank(this.tEdited);
     } else {

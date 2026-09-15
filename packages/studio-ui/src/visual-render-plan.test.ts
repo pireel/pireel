@@ -11,6 +11,7 @@ import {
   supplementalVisualAudioSpecs,
   supplementalVisualFileBindings,
   supplementalVisualMedia,
+  sandboxSafePreviewDoc,
 } from './visual-render-plan';
 
 describe('supplemental visual render plan', () => {
@@ -158,5 +159,24 @@ describe('supplemental visual render plan', () => {
     expect(html).toContain('data-start="0.5" data-duration="2"');
     expect(html).not.toContain('data-hf-timeline-media="1"');
     expect(html).not.toContain('window.__parentClock = true;');
+  });
+});
+
+describe('sandbox-safe preview document', () => {
+  it('moves a parent blob URL off native video nodes and leaves remote sources alone', () => {
+    const visual = (clipId: string, source: string): SupplementalVisualMediaClip => ({
+      clipId, trackId: 'visual-track', stackOrder: 1, kind: 'video', source, startSec: 0, endSec: 2,
+      sourceInSec: 0, sourceOutSec: 2, fit: 'cover', muted: false,
+    });
+    const html = assembleHtml(emptyComposition(), undefined, undefined, [
+      visual('local', 'blob:http://localhost:3005/abc'),
+      visual('remote', 'https://cdn.test/clip.mp4'),
+    ]);
+    expect(html).toContain('src="blob:http://localhost:3005/abc"');
+    const safe = sandboxSafePreviewDoc(html);
+    expect(safe).not.toMatch(/\ssrc="blob:/);
+    expect(safe).toContain('data-hf-src="blob:http://localhost:3005/abc"');
+    expect(safe).toContain('src="https://cdn.test/clip.mp4"');
+    expect(safe).toContain('id="hf-visual-local"');
   });
 });

@@ -143,3 +143,13 @@ export function supplementalVisualAudioSpecs(
     };
   });
 }
+
+/**
+ * The preview iframe is a sandboxed opaque origin: a parent-created `blob:` URL cannot be loaded
+ * there ("Not allowed to load local resource"), the File travels over `hf:clipFile` and the runtime
+ * mints its own URL. Keep the document from even attempting the parent URL: move it aside so the
+ * node stays source-less until the File lands. Export renders same-origin and keeps the URL.
+ */
+export function sandboxSafePreviewDoc(html: string): string {
+  return html.replace(/(<video\b[^>]*\bhf-native-video\b[^>]*?)\ssrc="(blob:[^"]*)"/g, '$1 data-hf-src="$2"');
+}

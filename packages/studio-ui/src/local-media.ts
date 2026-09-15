@@ -92,7 +92,7 @@ async function loadFromLegacyHandle(sig: string, key = sig): Promise<File | null
     if (!(await grantedSilently(h))) return null;
     const f = await h.getFile();
     if (!(await fileMatchesSig(f, sig))) return null; // moved/renamed/edited on disk: identity broken → miss
-    return f;
+    return markFileOrigin(f, 'legacy-handle');
   } catch {
     return null;
   }
@@ -167,6 +167,16 @@ export interface SaveLocalVideoOptions {
 
 /** Cache a file's bytes on this device under its sig. Returns false when the cache is unavailable
  * or full — callers must treat that as "no local cache", not as a failed import. */
+/** Which lane produced a File (diagnostics for a File that later fails to read). */
+const fileOrigins = new WeakMap<File, string>();
+export function markFileOrigin<T extends File>(file: T, origin: string): T {
+  fileOrigins.set(file, origin);
+  return file;
+}
+export function fileOrigin(file: File): string | undefined {
+  return fileOrigins.get(file);
+}
+
 export async function saveLocalVideo(file: File, sig: string, _options?: SaveLocalVideoOptions): Promise<boolean> {
   file = alignFileToSig(file, sig); // stored meta must match the sig key, or later loads mint a different identity
   const dir = await dirHandle();
@@ -277,7 +287,7 @@ export async function saveLocalStream(
     if (existing?.size === expectedSize) {
       await consumeLocalStream(stream, expectedSize);
       await writeStoredMeta(dir, key, meta);
-      return alignFileToSig(new File([existing], meta.name, { type: meta.type, lastModified: meta.lastModified }), sig);
+      return markFileOrigin(alignFileToSig(new File([existing], meta.name, { type: meta.type, lastModified: meta.lastModified }), sig), 'opfs-existing');
     }
   }
 
@@ -292,7 +302,7 @@ export async function saveLocalStream(
     closed = true;
     await writeStoredMeta(dir, key, meta);
     const stored = await fh.getFile();
-    return alignFileToSig(new File([stored], meta.name, { type: meta.type, lastModified: meta.lastModified }), sig);
+    return markFileOrigin(alignFileToSig(new File([stored], meta.name, { type: meta.type, lastModified: meta.lastModified }), sig), 'opfs-stream');
   } catch (error) {
     if (!closed) {
       try {
@@ -326,7 +336,7 @@ async function loadFromOpfs(sig: string): Promise<File | null> {
       const expectedSize = sigSize(sig);
       if (!stored.size || (expectedSize != null && stored.size !== expectedSize)) return null;
       const meta = await readStoredMeta(dir, key);
-      return alignFileToSig(meta ? new File([stored], meta.name, { type: meta.type, lastModified: meta.lastModified }) : stored, sig);
+      return markFileOrigin(alignFileToSig(meta ? new File([stored], meta.name, { type: meta.type, lastModified: meta.lastModified }) : stored, sig), 'opfs');
     } catch {
       // One-time compatibility read for files written before keys became collision-safe hashes.
       // Validate metadata before migrating because the old sanitizer could collapse two CJK names.
@@ -340,11 +350,23 @@ async function loadFromOpfs(sig: string): Promise<File | null> {
       if (!stored.size || !(await fileMatchesSig(candidate, sig))) return null;
       const aligned = alignFileToSig(candidate, sig);
       const migrated = await saveLocalVideo(aligned, sig);
-      if (migrated) {
-        try { await dir.removeEntry(oldKey); } catch { /* already absent */ }
-        try { await dir.removeEntry(`${oldKey}.meta.json`); } catch { /* already absent */ }
+      if (!migrated) return aligned;
+      // The File handed out must be backed by the entry that stays on disk. `candidate` still reads
+      // from the legacy entry; once that is removed, every later read of it fails
+      // (net::ERR_UPLOAD_FILE_CHANGED) and a resident decoder built on it goes dead mid-session.
+      let fresh: File = aligned;
+      try {
+        const migratedStored = await (await dir.getFileHandle(key)).getFile();
+        fresh = alignFileToSig(
+          meta ? new File([migratedStored], meta.name, { type: meta.type, lastModified: meta.lastModified }) : migratedStored,
+          sig,
+        );
+      } catch {
+        return aligned; // keep the legacy entry readable rather than hand out nothing
       }
-      return aligned;
+      try { await dir.removeEntry(oldKey); } catch { /* already absent */ }
+      try { await dir.removeEntry(`${oldKey}.meta.json`); } catch { /* already absent */ }
+      return markFileOrigin(fresh, 'opfs-migrated');
     }
   } catch {
     return null;

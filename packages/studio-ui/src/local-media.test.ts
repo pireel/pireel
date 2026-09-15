@@ -156,8 +156,16 @@ describe('device byte cache', () => {
       lastModified: original.lastModified,
     })], `${legacyKey}.meta.json`));
 
-    expect(await (await loadLocalVideo(sig))?.text()).toBe('legacy-bytes');
+    const loaded = await loadLocalVideo(sig);
+    expect(await loaded?.text()).toBe('legacy-bytes');
     expect(dir.files.has(legacyKey)).toBe(false);
+    // The File handed out is backed by the migrated entry, not the legacy one just removed: a
+    // decoder built on it keeps reading after the migration (the legacy-backed File goes dead).
+    const migratedKey = [...dir.files.keys()].find((name) => name !== legacyKey && !name.endsWith('.meta.json'))!;
+    expect(migratedKey).toBeDefined();
+    expect(await dir.files.get(migratedKey)!.text()).toBe('legacy-bytes');
+    expect(loaded?.name).toBe(original.name);
+    expect(loaded?.lastModified).toBe(original.lastModified);
   });
 
   it('reports persistence failure instead of pretending the local file was saved', async () => {
