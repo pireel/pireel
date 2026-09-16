@@ -19,6 +19,7 @@
  */
 
 import { translateV3Call, type V3AdapterContext, type LegacyCall } from './agent-surface-v3/adapter';
+import { describeStepFailure } from './agent-surface-v3/receipt-errors';
 import { V3_RETIRED_TOOL_IDS, V3_TOOL_IDS, V3_TOOLS, v3ReplacementIndex } from './agent-surface-v3/registry';
 import { V3_TOOL_SCHEMAS } from './agent-surface-v3/schemas';
 import { v3Instructions } from './agent-surface-v3/instructions';
@@ -436,12 +437,16 @@ export async function runV3Tool(name: string, args: Record<string, unknown>, dep
     }
     const result = await dispatchEditorTool(call.tool, input, deps);
     if (result === null) return { ok: false, error: 'adapter_mapped_unknown_tool', detail: call.tool, data: { steps } };
-    if (translation.calls.length === 1) return translation.note ? { ...result, note: translation.note } : result;
+    if (translation.calls.length === 1) {
+      if (!result.ok) return { ...result, ...describeStepFailure(name, args, typeof result.error === 'string' ? result.error : undefined, ctx) };
+      return translation.note ? { ...result, note: translation.note } : result;
+    }
     if (result.image) images.push(result.image as { data: string; mimeType?: string });
     if (Array.isArray(result.images)) images.push(...result.images as Array<{ data: string; mimeType?: string }>);
     steps.push({ tool: call.tool, ok: result.ok, ...(result.summary ? { summary: result.summary } : {}), ...(result.error ? { error: result.error } : {}), ...(result.data !== undefined ? { data: result.data } : {}) });
     if (!result.ok) {
-      return { ok: false, error: result.error ?? 'step_failed', detail: `${call.tool} failed after ${steps.length - 1} completed step(s); earlier steps are applied`, data: { steps } };
+      const failure = describeStepFailure(name, args, typeof result.error === 'string' ? result.error : undefined, ctx);
+      return { ok: false, ...failure, detail: `${failure.detail} — ${call.tool} failed after ${steps.length - 1} completed step(s); earlier steps are applied`, data: { steps } };
     }
     previous = result;
   }

@@ -1705,7 +1705,8 @@ function updateTexts(document: EditorDocumentV2, input: Input): AgentTimelineOut
     const item = (raw ?? {}) as Input;
     const clipId = string(item.clipId);
     const found = clipId ? locatedClip(document, clipId) : undefined;
-    if (!found || found.clip.kind !== 'graphic' || found.clip.block.templateId !== 'title') return fail(`items[${index}] is not a title text clip`);
+    if (!found) return fail(`items[${index}]: no clip with id ${clipId ? JSON.stringify(clipId) : '(missing)'} in this project`);
+    if (found.clip.kind !== 'graphic' || found.clip.block.templateId !== 'title') return fail(`items[${index}]: ${JSON.stringify(found.clip.id)} is not a title text clip`);
     const text = typeof item.text === 'string' ? item.text.trim() : undefined;
     const preset = isDisplayTextPresetId(item.preset) ? item.preset : undefined;
     const animation = isDisplayTextAnimationId(item.animation) ? item.animation : undefined;

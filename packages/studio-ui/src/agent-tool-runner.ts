@@ -117,6 +117,7 @@ import {
   type SceneVisualReviewPhase,
 } from '@pireel/studio-engine/scene-visual-qa';
 import { translateV3Call, type LegacyCall, type V3ClipKind } from '@pireel/studio-engine/agent-surface-v3/adapter';
+import { describeStepFailure } from '@pireel/studio-engine/agent-surface-v3/receipt-errors';
 import { documentDelta, renderV3State } from '@pireel/studio-engine/agent-surface-v3/state';
 
 /** v3 wording for the library receipts (the legacy hint names legacy tools). */
@@ -5009,7 +5010,12 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           if (result.images) images.push(...result.images);
           // Multi-step translations (one analysis per source) keep each step's data; a single step reports it once under result.
           steps.push({ tool: call.tool, ok: result.ok, ...(result.summary ? { summary: result.summary } : {}), ...(result.error ? { error: result.error } : {}), ...(translation.calls.length > 1 && result.data !== undefined ? { data: result.data } : {}) });
-          if (!result.ok) return { ok: false, error: result.error ?? 'step_failed', data: { ...(result.data && typeof result.data === 'object' && !Array.isArray(result.data) ? result.data : {}), detail: `${call.tool} failed after ${steps.length - 1} completed step(s)`, steps } };
+          if (!result.ok) {
+            // One correction contract for every refused step: a code the model can branch on and a fix
+            // that names the next move (an invented id → read state; a wrong kind → the right tool).
+            const failure = describeStepFailure(name, args, result.error, { kindOf: (id) => kinds.get(id), hasAsset: (id) => !!before.assets[id] });
+            return { ok: false, error: failure.error, ...(failure.fix ? { fix: failure.fix } : {}), data: { ...(result.data && typeof result.data === 'object' && !Array.isArray(result.data) ? result.data : {}), ...(failure.unknownIds ? { unknownIds: failure.unknownIds } : {}), detail: `${failure.detail} — ${call.tool} failed after ${steps.length - 1} completed step(s)`, steps } };
+          }
           previous = result;
         }
         } finally {

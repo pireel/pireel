@@ -14,7 +14,7 @@ describe('agent surface v3 instructions', () => {
     // every tool the text names exists on the surface
     const ids = new Set(V3_TOOLS.map((tool) => tool.id));
     for (const name of V3_INSTRUCTIONS_BODY.match(/\b[a-z]+(?:_[a-z0-9]+)+\b/g) ?? []) {
-      if (['mode', 'clip_id'].includes(name)) continue;
+      if (['mode', 'clip_id', 'unknown_id'].includes(name)) continue; // unknown_id is a receipt error code, not a tool
       expect(ids.has(name), `unknown tool in instructions: ${name}`).toBe(true);
     }
   });
