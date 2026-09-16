@@ -26,9 +26,15 @@ describe('validateV3Input', () => {
     expect(validateV3Input('set_clip_properties', { items: [{ clipId: 'c1', mute: true, source: [1, 2.5] }] })).toBeNull();
   });
 
-  it('leaves unknown tools, unknown fields and bounds to the adapter', () => {
+  it('refuses fields the schema does not declare and names the ones it does', () => {
+    const found = validateV3Input('inspect_media', { ids: ['a1'], mode: 'metadata', mode_extra: 'metadata' });
+    expect(found).toMatchObject({ error: 'unknown_field', path: 'mode_extra', allowed: expect.arrayContaining(['ids', 'mode', 'clipIds']) });
+    expect(validateV3Input('add_clips', { clips: [{ assetId: 'a1', startFrame: 0, muted: true }] })).toMatchObject({ error: 'unknown_field', path: 'clips[0].muted' });
+    expect(validateV3Input('add_clips', { clips: [{ assetId: 'a1', startFrame: 0, mute: true }] })).toBeNull();
+  });
+
+  it('leaves unknown tools and bounds to the executor', () => {
     expect(validateV3Input('not_a_tool', { anything: 1 })).toBeNull();
-    expect(validateV3Input('add_transition', { atFrame: 30, extra: 'ignored' })).toBeNull();
     expect(validateV3Input('set_clip_properties', { items: [{ clipId: 'c1', volumeDb: -999 }] })).toBeNull();
   });
 });

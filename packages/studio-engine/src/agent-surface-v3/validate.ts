@@ -12,7 +12,7 @@ import { V3_TOOL_SCHEMAS } from './schemas';
 
 export interface V3InputProblem {
   status: 'error';
-  error: 'invalid_value' | 'missing_field' | 'invalid_shape';
+  error: 'invalid_value' | 'missing_field' | 'invalid_shape' | 'unknown_field';
   path: string;
   value?: unknown;
   allowed?: readonly string[];
@@ -57,9 +57,17 @@ function check(schema: Schema, value: unknown, path: string): V3InputProblem | n
       for (const key of (schema.required as string[] | undefined) ?? []) {
         if (record[key] === undefined) return problem('missing_field', path === '' ? key : `${path}.${key}`, schema, undefined);
       }
-      for (const [key, child] of Object.entries((schema.properties as Record<string, Schema> | undefined) ?? {})) {
+      const properties = (schema.properties as Record<string, Schema> | undefined) ?? {};
+      for (const [key, child] of Object.entries(properties)) {
         const found = check(child, record[key], path === '' ? key : `${path}.${key}`);
         if (found) return found;
+      }
+      if (schema.additionalProperties === false) {
+        const unknown = Object.keys(record).find((key) => !(key in properties) && record[key] !== undefined);
+        if (unknown) {
+          const at = path === '' ? unknown : `${path}.${unknown}`;
+          return { status: 'error', error: 'unknown_field', path: at, value: record[unknown], allowed: Object.keys(properties), fix: `${at} is not a field of this call; use only: ${Object.keys(properties).join(', ')}.` };
+        }
       }
       return null;
     }
@@ -91,7 +99,7 @@ function check(schema: Schema, value: unknown, path: string): V3InputProblem | n
   }
 }
 
-/** Null when the input fits the tool's schema; unknown tools and unknown fields pass. */
+/** Null when the input fits the tool's schema; unknown tools pass, unknown fields are refused. */
 export function validateV3Input(tool: string, args: Record<string, unknown>): V3InputProblem | null {
   const schema = V3_TOOL_SCHEMAS[tool]?.inputSchema;
   if (!schema) return null;

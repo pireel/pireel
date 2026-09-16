@@ -467,9 +467,11 @@ function placementFor(document: EditorDocumentV2, asset: EditorMediaAsset, item:
     ...(anchorX != null ? { anchorX } : {}),
     ...(anchorY != null ? { anchorY } : {}),
     ...(opacity != null ? { opacity } : {}),
-    // Overlay media keeps its audio settings under `video` (the shot-scoped controls); without this
-    // a `muted: true` on a broll row was silently dropped and the source sound played over narration.
-    ...(typeof item.muted === 'boolean' ? { video: { treatment: 'full', audioMuted: item.muted } } : {}),
+    // Overlay media keeps its audio settings under `video` (the shot-scoped controls). B-roll footage
+    // is a cutaway under the narration: its own sound is off unless the caller asks for it (mute:false).
+    ...(typeof item.muted === 'boolean'
+      ? { video: { treatment: 'full', audioMuted: item.muted } }
+      : asset.kind === 'video' ? { video: { treatment: 'full', audioMuted: true } } : {}),
   } as MediaTimelineClip & { offsetFrames: number };
 }
 

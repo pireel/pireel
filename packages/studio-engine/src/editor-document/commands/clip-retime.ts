@@ -5,6 +5,8 @@ import {
 } from '../../director-plan-artifact';
 import type { EditorDocumentV2, EditorTrack, MediaTimelineClip, TimelineClip } from '../types';
 import { validateEditorDocumentV2 } from '../validation';
+import { clearRangeFromClip, clipOverlapsRange } from './clip-geometry';
+import { detachDanglingClipAnchors, updateScenesForClipChanges } from './clip-references';
 import { commandFailure, emptyCommandReceipt, type EditorCommandResult } from './types';
 
 export interface RetimeEditorClipOptions {
@@ -34,8 +36,11 @@ function withDuration(clip: TimelineClip, durationFrames: number): TimelineClip 
 /**
  * Change a video clip's timeline duration while keeping its source interval fixed. Preview and
  * export derive playback speed from source duration / timeline duration, so no duplicate speed
- * state is persisted. Optional ripple moves clips beginning at/after the selected ripple boundary;
- * material already overlapping that boundary is deliberately left untouched.
+ * state is persisted. Optional ripple moves clips beginning at/after the selected ripple boundary.
+ * When the clip gets shorter, the frames it gave up are removed from every sync-locked lane the way a
+ * ripple delete removes them — a narration clip spanning the boundary is split there, never left to
+ * overlap the material that moves up behind it. When it gets longer, material spanning the boundary
+ * is left untouched (it simply runs under the extension).
  */
 export function retimeEditorClip(document: EditorDocumentV2, options: RetimeEditorClipOptions): EditorCommandResult {
   const issue = validateEditorDocumentV2(document).find((candidate) => candidate.severity === 'error');
@@ -61,10 +66,15 @@ export function retimeEditorClip(document: EditorDocumentV2, options: RetimeEdit
   const oldEndFrame = target.startFrame + target.durationFrames;
   const rippleFromFrame = options.rippleFromFrame ?? oldEndFrame;
   const deltaFrames = options.durationFrames - target.durationFrames;
+  // Frames the clip gives up when shrinking; every sync-locked lane loses the same span.
+  const clearStart = rippleFromFrame + deltaFrames;
+  const clearEnd = rippleFromFrame;
+  const shrinking = ripple && deltaFrames < 0;
+  const spansCleared = (clip: TimelineClip) => shrinking && clip.id !== target.id && clip.startFrame < rippleFromFrame && clipOverlapsRange(clip, clearStart, clearEnd);
   const affectedTrackIds = new Set<string>([track.id]);
   if (ripple) {
     for (const candidate of document.timeline.tracks) {
-      if (candidate.syncLocked && candidate.clips.some((clip) => clip.startFrame >= rippleFromFrame)) affectedTrackIds.add(candidate.id);
+      if (candidate.syncLocked && candidate.clips.some((clip) => clip.startFrame >= rippleFromFrame || spansCleared(clip))) affectedTrackIds.add(candidate.id);
     }
   }
   const lockedTrackIds = document.timeline.tracks
@@ -75,18 +85,38 @@ export function retimeEditorClip(document: EditorDocumentV2, options: RetimeEdit
   }
 
   const shiftedClipIds: string[] = [];
-  const tracks = document.timeline.tracks.map((candidate): EditorTrack => {
+  const removedClipIds = new Set<string>();
+  const createdClipIds: string[] = [];
+  const splitPairs = new Map<string, string[]>();
+  const usedIds = new Set(document.timeline.tracks.flatMap((candidate) => candidate.clips.map((clip) => clip.id)));
+  let tracks = document.timeline.tracks.map((candidate): EditorTrack => {
     if (!affectedTrackIds.has(candidate.id)) return candidate;
-    const clips = candidate.clips.map((clip) => {
-      if (clip.id === target.id) return withDuration(clip, options.durationFrames);
-      if (!ripple || clip.startFrame < rippleFromFrame) return clip;
+    const clips = candidate.clips.flatMap((clip): TimelineClip[] => {
+      if (clip.id === target.id) return [withDuration(clip, options.durationFrames)];
+      if (!spansCleared(clip)) return [clip];
+      const edit = clearRangeFromClip(clip, clearStart, clearEnd, document.canvas.fps, usedIds);
+      for (const id of edit.removedClipIds) removedClipIds.add(id);
+      createdClipIds.push(...edit.createdClipIds);
+      for (const [originalId, rightId] of edit.splitPairs) splitPairs.set(originalId, [...(splitPairs.get(originalId) ?? []), rightId]);
+      return edit.clips;
+    }).map((clip) => {
+      if (clip.id === target.id || !ripple || clip.startFrame < rippleFromFrame) return clip;
       shiftedClipIds.push(clip.id);
       return { ...clip, startFrame: clip.startFrame + deltaFrames };
     }).sort((left, right) => left.startFrame - right.startFrame || left.id.localeCompare(right.id));
     return { ...candidate, clips };
   });
+  if (removedClipIds.size || createdClipIds.length) {
+    const survivingClipIds = new Set(tracks.flatMap((candidate) => candidate.clips.map((clip) => clip.id)));
+    const detached = detachDanglingClipAnchors(tracks, survivingClipIds);
+    if (detached.lockedTrackIds.length) {
+      return commandFailure(document, 'track-locked', `Clip retime would detach anchors on locked track(s): ${detached.lockedTrackIds.join(', ')}`, { trackIds: detached.lockedTrackIds });
+    }
+    tracks = detached.tracks;
+    for (const id of detached.changedTrackIds) affectedTrackIds.add(id);
+  }
 
-  let semantics = { ...document.semantics };
+  let semantics = { ...document.semantics, scenes: updateScenesForClipChanges(document.semantics.scenes, removedClipIds, splitPairs) };
   delete semantics.plan;
   const directorPlan = directorPlanFromDocument(document);
   if (target.kind === 'narrative' && directorPlan) {
@@ -114,5 +144,7 @@ export function retimeEditorClip(document: EditorDocumentV2, options: RetimeEdit
   const receipt = emptyCommandReceipt('clip.retime');
   receipt.affectedTrackIds = [...affectedTrackIds];
   receipt.shiftedClipIds = shiftedClipIds;
+  receipt.removedClipIds = [...removedClipIds];
+  receipt.createdClipIds = createdClipIds;
   return { ok: true, document: next, receipt };
 }
