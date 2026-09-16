@@ -11,7 +11,7 @@ import { outputSwitchVideoPickOptions, type VideoPickOptions } from './video-pic
 export function useProjectOutputRuntime(deps: {
   projectId: string;
   /** Read through the synchronous project-output ref. Chained agent tools can run before React
-   * commits the render that follows create_output or switch_output. */
+   * commits the render that follows manage_project output create/switch. */
   getActiveId: () => string;
   switchTo: (id: string) => StudioProjectOutputSnapshot | null;
   create: (title: string, skill?: string) => StudioProjectOutputSnapshot;

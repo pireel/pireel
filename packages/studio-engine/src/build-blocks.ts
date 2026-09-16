@@ -40,7 +40,7 @@ export interface AsrSegment {
   /** Per-cue translations keyed by word range "w0:w1" (UI translate flow / set_caption_translations with a range). */
   cueSubs?: Record<string, string>;
   /** Full caption copy after manual cue edits. The spoken transcript in `text` and ASR word timing
-   *  remain immutable; this field lets read_script/chat expose the audience-facing wording without
+   *  remain immutable; this field lets get_transcript/chat expose the audience-facing wording without
    *  turning a spelling correction into a transcript re-tokenization. */
   captionText?: string;
   /** Audience-facing copy overrides keyed by source word range "w0:w1". Copy and layout are kept

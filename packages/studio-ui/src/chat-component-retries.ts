@@ -11,8 +11,8 @@ export function studioToolFailureText(error: string, data?: unknown): string {
 
 function componentTarget(part: ToolPartLike): string | null {
   const tool = part.type === 'dynamic-tool' ? part.toolName : part.type.replace(/^tool-/, '');
-  if (!['apply_component', 'apply_block', 'edit_block'].includes(tool ?? '')) return null;
-  const id = part.input?.clipId ?? part.input?.blockId;
+  if (tool !== 'apply_component') return null;
+  const id = part.input?.clipId;
   return typeof id === 'string' && id ? id : null;
 }
 

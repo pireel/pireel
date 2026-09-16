@@ -12,7 +12,7 @@ describe('Studio tool input reference normalization', () => {
   const assets = [{ assetId, contentSig: sig, sig, label: '爆款视频', kind: 'video' as const, createdAt: 1 }];
 
   it('resolves a local @ token once at the tool boundary, including nested locators', () => {
-    expect(normalizeStudioToolInputReferences('read_script', {
+    expect(normalizeStudioToolInputReferences('get_transcript', {
       assetId: `@${token}`,
       refs: [`@${token}`, '@registered-image'],
       assets: [{ id: '@media-1', localSig: `@${token}` }],
@@ -55,7 +55,7 @@ describe('Studio tool input reference normalization', () => {
   });
 
   it('keeps a placed local asset on the canonical project path for analysis tools', () => {
-    expect(normalizeStudioToolInputReferences('read_script', {
+    expect(normalizeStudioToolInputReferences('get_transcript', {
       assetId: `local:${assetId}`,
     }, assets, new Map([[assetId, assetId]]))).toEqual({
       assetId,

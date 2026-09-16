@@ -18,7 +18,6 @@ function deps(overrides: Partial<McpDeps> = {}): McpDeps {
     listSkills: vi.fn(async () => ({ ok: true, summary: '1 skill', data: { skills: [{ id: 'usk_1', title: '大女主' }] } })),
     readSkill: vi.fn(async (id: string) => ({ ok: true, summary: id, data: { skill: { id, playbook: 'PB' } } })),
     readFrame: vi.fn((id: string) => ({ ok: true, summary: id, data: { playbook: 'PB' } })),
-    readEditingGuide: vi.fn(() => ({ ok: true, data: { guide: 'G' } })),
     assembleComposeBrief: vi.fn((_d: Record<string, unknown>, instruction: string) => ({ ok: true, data: { system: 'SYS', prompt: `P:${instruction}` } })),
     lookupIcons: vi.fn(() => ({ ok: true, data: { icons: [], misses: [] } })),
     importMedia: vi.fn(async () => ({ ok: true, summary: 'imported', data: { projectId: 'p1' } })),
@@ -57,15 +56,6 @@ describe('MCP v3 surface', () => {
     expect(d.callBridge).toHaveBeenCalledWith('run_v3', { name: 'add_clips', args, placementAssets: assets }, expect.any(Number));
   });
 
-  it('registers catalog assets before offline placement after the live fallback declines', async () => {
-    const assets = [{ id: 'bgm:test', kind: 'audio', url: 'https://cdn.example/music.mp3', durationSec: 5 }];
-    const d = deps({ resolvePlacementAssets: vi.fn(async () => assets), resolveV3Context: async () => ({ fps: 30, kindOf: () => undefined }) });
-    expect(await runV3Tool('add_clips', { clips: [{ assetId: 'bgm:test', startFrame: 0, role: 'music', source: [0, 5] }] }, d)).toMatchObject({ ok: true });
-    // The native placer registers the host-resolved records itself: one call, the assets ride along.
-    expect(vi.mocked(d.callBridge).mock.calls.map(call => call[0])).toEqual(['run_v3', 'add_clips']);
-    expect(vi.mocked(d.callBridge).mock.calls[1]![1]).toMatchObject({ placementAssets: assets });
-  });
-
   it('rejects invalid model kinds without contacting either the catalog or browser', async () => {
     const d = deps();
     expect(await runV3Tool('list_models', { kind: 'audio' }, d)).toMatchObject({ ok: false, error: 'invalid_value', path: 'kind' });
@@ -74,18 +64,25 @@ describe('MCP v3 surface', () => {
   });
   const v3ctx = async () => ({ fps: 30, kindOf: (id: string) => (id.startsWith('g') ? 'graphic' as const : id.startsWith('a') ? 'audio' as const : 'narrative' as const) });
 
-  it('assembles the offline component brief and returns frame-based apply_component targets', async () => {
+  it('assembles the brief from raw offline component context and returns a frame-based apply_component target', async () => {
     const placement = { xPct: 5, yPct: 60, widthPct: 70, heightPct: 20 };
+    const args = { instruction: 'lower third', atFrame: 60, durationFrames: 90, placement, format: 'html' };
     const d = deps({ resolveV3Context: v3ctx,
-      callBridge: vi.fn(async (tool) => tool === 'run_v3' ? { ok: false, error: 'studio_not_open' } : { ok: true, data: { block: { id: 'gNew' }, atSec: 2, durationSec: 3, placement } }),
+      // The offline executor answers with the raw context (no system); the live tab returns the assembled brief itself.
+      callBridge: vi.fn(async () => ({ ok: true, data: { block: { id: 'gNew' }, atSec: 2, durationSec: 3, placement } })),
       assembleComposeBrief: vi.fn((data, instruction) => ({ ok: true, data: { system: 'SYS', prompt: instruction, target: { blockId: 'gNew', atSec: data.atSec, durationSec: data.durationSec, placement } } })),
     });
-    const response = await handleMcpRequest({ id: 1, method: 'tools/call', params: { name: 'compose_component', arguments: { instruction: 'lower third', atFrame: 60, durationFrames: 90, placement, format: 'html' } } }, d);
+    const response = await handleMcpRequest({ id: 1, method: 'tools/call', params: { name: 'compose_component', arguments: args } }, d);
     const result = JSON.parse((response!.result as { content: { text: string }[] }).content[0]!.text);
     expect(result).toMatchObject({ ok: true, data: { system: 'SYS', prompt: 'lower third', target: { clipId: 'gNew', atFrame: 60, durationFrames: 90, placement } } });
     expect(result.data.target).not.toHaveProperty('blockId');
-    expect(d.callBridge).toHaveBeenLastCalledWith('compose_context', expect.objectContaining({ atSec: 2, durationSec: 3, instruction: 'lower third', format: 'html' }), expect.any(Number));
+    expect(d.callBridge).toHaveBeenCalledExactlyOnceWith('run_v3', { name: 'compose_component', args }, expect.any(Number));
     expect(d.assembleComposeBrief).toHaveBeenCalledWith(expect.objectContaining({ format: 'html' }), 'lower third');
+
+    const live = deps({ resolveV3Context: v3ctx, callBridge: vi.fn(async () => ({ ok: true, data: { system: 'TAB', prompt: 'P', target: { clipId: 'g1' } } })) });
+    const liveResponse = await handleMcpRequest({ id: 2, method: 'tools/call', params: { name: 'compose_component', arguments: args } }, live);
+    expect(JSON.parse((liveResponse!.result as { content: { text: string }[] }).content[0]!.text)).toMatchObject({ ok: true, data: { system: 'TAB' } });
+    expect(live.assembleComposeBrief).not.toHaveBeenCalled();
   });
 
   it('preserves offline component context failures instead of assembling a missing target', async () => {
@@ -191,41 +188,39 @@ describe('MCP v3 surface', () => {
     expect(callBridge).toHaveBeenCalledExactlyOnceWith('run_v3', { name, args }, expect.any(Number));
   });
 
-  it('preserves every image and its frame metadata across offline multi-step captures', async () => {
-    const callBridge = vi.fn(async (tool: string, input: Record<string, unknown>) => tool === 'run_v3'
-      ? { ok: false, error: 'studio_not_open' }
-      : { ok: true, image: { data: `frame-${input.atSec}`, mimeType: 'image/jpeg' }, data: { atSec: input.atSec } });
+  it('turns every returned frame into image content, in order, with the receipt first', async () => {
+    const callBridge = vi.fn(async () => ({
+      ok: true,
+      images: [{ data: 'frame-2', mimeType: 'image/jpeg' }, { data: 'frame-7', mimeType: 'image/jpeg' }],
+      data: { frames: [{ frame: 60, atSec: 2 }, { frame: 210, atSec: 7 }] },
+    }));
     const d = deps({ resolveV3Context: v3ctx, callBridge });
     const response = await handleMcpRequest({ id: 45, method: 'tools/call', params: { name: 'inspect_timeline', arguments: { frames: [60, 210] } } }, d);
     const content = (response!.result as { content: Array<{ type: string; data?: string; text?: string }> }).content;
+    expect(content[0]!.type).toBe('text');
     expect(content.filter((item) => item.type === 'image').map((item) => item.data)).toEqual(['frame-2', 'frame-7']);
-    expect(JSON.parse(content[0]!.text!).data.steps.map((step: { data: unknown }) => step.data)).toEqual([{ atSec: 2 }, { atSec: 7 }]);
+    expect(JSON.parse(content[0]!.text!).data.frames.map((frame: { frame: number }) => frame.frame)).toEqual([60, 210]);
   });
 
-  it('hands native document tools to the offline executor under their own name and shape', async () => {
-    const d = deps({ resolveV3Context: v3ctx });
+  it('sends document tools through the bridge under their own name and shape exactly once', async () => {
+    const d = deps({ resolveV3Context: v3ctx, callBridge: vi.fn(async () => ({ ok: true, summary: 'moved', data: { delta: {} } })) });
     const args = { items: [{ clipId: 'n1', startFrame: 90 }, { clipId: 'g1', startFrame: 120 }] };
     const response = await handleMcpRequest({ id: 3, method: 'tools/call', params: { name: 'move_clips', arguments: args } }, d);
-    expect(d.callBridge).toHaveBeenNthCalledWith(1, 'run_v3', expect.anything(), expect.any(Number));
-    expect(d.callBridge).toHaveBeenNthCalledWith(2, 'move_clips', args, expect.any(Number));
-    expect(d.callBridge).toHaveBeenCalledTimes(2);
+    expect(d.callBridge).toHaveBeenCalledExactlyOnceWith('run_v3', { name: 'move_clips', args }, expect.any(Number));
     const body = JSON.parse((response!.result as { content: { text: string }[] }).content[0]!.text) as { ok: boolean };
     expect(body.ok).toBe(true);
   });
 
-  it('chains a stock import into live register_media using the previous result', async () => {
-    const callBridge = vi.fn(async (tool: string) => tool === 'run_v3'
-      ? { ok: false, error: 'unexpected browser stock import' }
-      : { ok: true, summary: 'registered' });
+  it('chains a stock import into register_media using the imported registration', async () => {
+    const callBridge = vi.fn(async () => ({ ok: true, summary: 'registered' }));
     const d = deps({ resolveV3Context: v3ctx, callBridge });
     const payload = { query: 'city night', kind: 'video', page: 1, limit: 12, assetId: 'px_1' };
     await handleMcpRequest({ id: 4, method: 'tools/call', params: { name: 'register_media', arguments: { stock: payload } } }, d);
     expect(d.importStock).toHaveBeenCalledWith(payload);
-    expect(callBridge).toHaveBeenCalledTimes(1);
-    expect(d.callBridge).toHaveBeenCalledWith('register_media', { assets: [{ id: 'up_1', kind: 'image', url: 'https://cdn.example/stock.jpg' }] }, expect.any(Number));
+    expect(callBridge).toHaveBeenCalledExactlyOnceWith('run_v3', { name: 'register_media', args: { assets: [{ id: 'up_1', kind: 'image', url: 'https://cdn.example/stock.jpg' }] } }, expect.any(Number));
   });
 
-  it('returns the adapter error shape and never calls the engine on bad input', async () => {
+  it('returns the schema error shape and never calls the engine on bad input', async () => {
     const d = deps({  });
     const response = await handleMcpRequest({ id: 5, method: 'tools/call', params: { name: 'ripple_delete_ranges', arguments: { ranges: [{ fromFrame: 30, toFrame: 60 }] } } }, d);
     const body = JSON.parse((response!.result as { content: { text: string }[] }).content[0]!.text) as Record<string, unknown>;
@@ -235,7 +230,7 @@ describe('MCP v3 surface', () => {
   });
 
   it('stops a multi-step call at the first failure and reports what was applied', async () => {
-    const callBridge = vi.fn(async (tool: string) => (tool === 'run_v3' ? { ok: false, error: 'studio_not_open' } : { ok: false, error: 'locked track' }));
+    const callBridge = vi.fn(async () => ({ ok: false, error: 'locked track' }));
     const d = deps({ resolveV3Context: v3ctx, callBridge });
     const payload = { query: 'city night', kind: 'video', page: 1, limit: 12, assetId: 'px_1' };
     const response = await handleMcpRequest({ id: 6, method: 'tools/call', params: { name: 'register_media', arguments: { stock: payload } } }, d);

@@ -3,8 +3,8 @@ import { applyCaptionDocumentEdit } from './caption-document-edit';
 import { audioClipDefaults } from './audio-tracks';
 import { emptyEditorDocumentV2, parseEditorDocumentV2, projectV2ToLegacyComposition } from './editor-document';
 import { resizeNarrativeTimelineClip, resizeVisualTimelineClip, runAgentTimelineTool, slipNarrativeTimelineClip } from './agent-timeline';
-import { withDirectorPlanInSemantics } from './director-plan-artifact';
-import { withSceneDesignsInSemantics } from './scene-design';
+import { directorPlanFromDocument, withDirectorPlanInSemantics } from './director-plan-artifact';
+import { sceneDesignsFromDocument, withSceneDesignsInSemantics } from './scene-design';
 
 describe('shared agent timeline atoms', () => {
   it('binds planned native visuals and reassigns them when they move across Director scenes', () => {
@@ -47,20 +47,8 @@ describe('shared agent timeline atoms', () => {
     expect(placed.ok).toBe(true);
     expect(placed.document!.semantics.scenes.find((scene) => scene.id === 'claim')?.clipIds).toContain('evidence-clip');
     expect((placed.data as { clipIds: string[] }).clipIds).toEqual(['evidence-clip']);
-    const timeline = runAgentTimelineTool(placed.document!, 'get_timeline', {}).data as { semantics: { directorPlan?: unknown; sceneDesigns?: { sceneIds: string[] } } };
-    expect(timeline.semantics.directorPlan).toBeDefined();
-    expect(timeline.semantics.sceneDesigns?.sceneIds).toEqual(['claim', 'proof']);
-    const planFile = runAgentTimelineTool(placed.document!, 'read_director_plan', { sceneIds: ['proof'] });
-    expect(planFile.ok).toBe(true);
-    expect((planFile.data as { path: string; content: string }).path).toBe('director-plan.md');
-    expect((planFile.data as { content: string }).content).toContain('# Director Plan');
-    expect((planFile.data as { content: string }).content).toContain('#### Label\n\nProof');
-    expect((planFile.data as { content: string }).content).not.toContain('State the idea.');
-    const sceneFile = runAgentTimelineTool(placed.document!, 'read_scene_designs', { sceneIds: ['claim'] });
-    expect(sceneFile.ok).toBe(true);
-    expect(sceneFile.data).toMatchObject({ path: 'scene-designs.md', mediaType: 'text/markdown' });
-    expect((sceneFile.data as { content: string }).content).toContain('Keep the claim human.');
-    expect((sceneFile.data as { content: string }).content).not.toContain('Make proof inspectable.');
+    expect(directorPlanFromDocument(placed.document!)).toBeDefined();
+    expect(sceneDesignsFromDocument(placed.document!)?.scenes.map((scene) => scene.sceneId)).toEqual(['claim', 'proof']);
 
     const moved = runAgentTimelineTool(placed.document!, 'move_clips', {
       items: [{ clipId: 'evidence-clip', startFrame: 150 }],
@@ -849,9 +837,8 @@ describe('shared agent timeline atoms', () => {
         },
       },
     });
-    expect((runAgentTimelineTool(placed.document!, 'get_timeline', {}).data as {
-      tracks: Array<{ clips: Array<{ playbackSpeed?: number }> }>;
-    }).tracks[0]!.clips[0]!.playbackSpeed).toBeCloseTo(1, 8);
+    const hero = placed.document!.timeline.tracks[0]!.clips[0]! as { sourceInSec: number; sourceOutSec: number; durationFrames: number };
+    expect((hero.sourceOutSec - hero.sourceInSec) / (hero.durationFrames / 30)).toBeCloseTo(1, 8);
   });
 
   it('rejects primary duration fill disguised as an initial speed or mismatched source range', () => {

@@ -65,7 +65,7 @@ export interface ComposeBriefInput {
 }
 
 /** Block-generation brief: the caller takes system+prompt, generates with its OWN model, and passes
- *  the raw output back to apply_block. Routing mirrors the in-app client: a themed project
+ *  the raw output back to apply_component. Routing mirrors the in-app client: a themed project
  *  generates HTML (the optional Frame is a prose description the model builds from). Existing kit
  *  blocks keep their typed-props contract; new generation stays bespoke even without a Frame. The
  *  returned `format` names which contract the text will follow. */
@@ -125,9 +125,9 @@ export function assembleComposeBrief(input: ComposeBriefInput): {
   };
 }
 
-/* ============================ apply_block raw interpretation ============================ */
+/* ============================ apply_component raw interpretation ============================ */
 
-/** What a BYO agent's raw answer turned out to be. Shared by both apply_block executors (browser
+/** What a BYO agent's raw answer turned out to be. Shared by both apply_component executors (browser
  *  bridge + offline) so the three-way null semantics cannot drift between them. */
 export type ApplyRawOutcome =
   | { kind: 'html' }
@@ -136,7 +136,7 @@ export type ApplyRawOutcome =
   | { kind: 'custom'; note: string }
   | { kind: 'declined'; note: string };
 
-/** Shape-detect an apply_block payload. An html answer always carries a \`\`\`html fence and a kit
+/** Shape-detect an apply_component payload. An html answer always carries a \`\`\`html fence and a kit
  *  answer never does, so the fence decides; fenceless text that parses as neither falls back to
  *  the html path, whose own fallbacks and lint handle it (legacy behaviour). */
 export function interpretApplyRaw(raw: string): ApplyRawOutcome {

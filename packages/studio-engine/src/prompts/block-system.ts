@@ -14,7 +14,7 @@ import { COMPONENT_COORDINATE_CONTRACT } from '../component-authoring-contract';
 
 
 /** The closed runtime the markup contract runs in. One sentence, shared by the brief's system text and by
- *  every tool that hands out or accepts that contract (MCP compose_block_brief/apply_block, v3
+ *  every tool that hands out or accepts that contract (MCP compose_component/apply_component, v3
  *  compose_component/apply_component), so an external agent learns the boundary before authoring instead
  *  of discovering it through a lint rejection. Word choice matters: the v3 vocabulary test forbids
  *  "block"/"shot" in tool descriptions, so this text says "component". */

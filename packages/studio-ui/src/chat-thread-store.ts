@@ -21,9 +21,8 @@ export interface StoredThread {
   skillId?: StudioScenarioSkillId;
 }
 
-/** Editorial evidence arrives as analyze_visual receipts on the legacy surface and as inspect_media
- * (mode editorial) receipts on v3; both carry the same editorialCandidates payload. */
-export const isVisualAnalysisToolId = (id: string | undefined): boolean => id === 'analyze_visual' || id === 'inspect_media';
+/** Editorial evidence arrives as inspect_media (mode editorial) receipts carrying editorialCandidates. */
+export const isVisualAnalysisToolId = (id: string | undefined): boolean => id === 'inspect_media';
 
 
 

@@ -1115,7 +1115,7 @@ export function blockOverlapWarnings(blocks: Block[]): BlockOverlapWarning[] {
   return out;
 }
 
-/* ============================ Agent screen placement (place_block) ============================ */
+/* ============================ Agent screen placement (set_clip_framing box/anchor) ============================ */
 
 /** Canvas regions the agent can snap a block into (3×3 grid, safe margin). */
 export const PLACE_ANCHORS = ['top-left', 'top', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom', 'bottom-right'] as const;
@@ -1149,7 +1149,7 @@ export function zoneOf(box: NormBox): string {
 const PLACE_MARGIN = 0.03;
 const round4 = (v: number) => Math.round(v * 10000) / 10000;
 
-/** Framing context for place_block receipts: corner/split spans overlapping the block's time
+/** Framing context for placement receipts: corner/split spans overlapping the block's time
  *  window, phrased as where the video sits vs where the freed area is. Deliberately a receipt
  *  hint, not a remap — placement stays a pure canvas-space function; the agent re-aims when its
  *  target region turns out to be the video band. */

@@ -163,7 +163,7 @@ export function ScriptPanel({
     // Enumeration is the SHARED inventory (narrationGaps — same one the agent's transcript notes read
     // from; two lists of "where is the dead air" is how chat and this panel end up disagreeing).
     // This panel only adds its CUT POLICY on top: interior pauses go through the same margin math the
-    // agent's cut_narration uses; head/tail are asymmetric — cleared up to the speech guard.
+    // agent's remove_words uses; head/tail are asymmetric — cleared up to the speech guard.
     for (const g of narrationGaps(sents, videoDurationSec, MIN_PAUSE_SEC)) {
       const [from, to] = g.edge
         ? [g.edge === 'head' ? g.a : g.a + EDGE_PAD_SEC, g.edge === 'tail' ? g.b : g.b - EDGE_PAD_SEC]
@@ -173,7 +173,7 @@ export function ScriptPanel({
           })();
       if (to - from < 0.05) continue;
       // "Deleted" is a verdict on surviving AIR, not on whether OUR margin range is dead: the agent's
-      // cut_narration keeps its own keepGapSec (0.15–0.6) and a calmer margin than ours used to leave
+      // remove_words keeps its own keepGapSec (0.15–0.6) and a calmer margin than ours used to leave
       // slivers alive inside our range — the pause was genuinely tightened but never got its strike.
       // If what survives the raw gap is less than dead-air threshold, it's breathing room now → struck.
       const aliveDur = srcAliveDur(shots, null, g.a, g.b);

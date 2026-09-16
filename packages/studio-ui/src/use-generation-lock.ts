@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Generation lock: blocks held by the graphics worker (queued + running) / edit_block rewrite / editor AI
+ * Generation lock: blocks held by the graphics worker (queued + running) / apply_component rewrite / editor AI
  * edit are locked against all editing — the worker snapshots the placeholder's box/time window when the
  * task starts, so a mid-task edit would either feed the model stale data or be wholly overwritten by the result.
  *

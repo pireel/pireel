@@ -4,7 +4,7 @@
  * (idFromName(userId)).
  *
  * Why a bridge and not server-side execution: studio tool execution is deeply
- * tied to the browser (runStudioTool closes over React state, analyze_visual
+ * tied to the browser (runStudioTool closes over React state, inspect_media
  * runs MediaPipe, the preview iframe). The bridge keeps the MCP contract stable
  * with the executor in the browser — to move it server-side later, only change
  * where /call routes, not the external contract.

@@ -10,7 +10,7 @@
  *    hard errors don't hit the stage and block Apply (previously a human could paste unscoped CSS here
  *    that polluted the whole video, while the LLM couldn't).
  *  - AI present: one instruction input at the bottom runs compose on the **current draft** (equivalent
- *    to edit_block), result fills back into the draft (still via the same live-preview→apply flow),
+ *    to apply_component), result fills back into the draft (still via the same live-preview→apply flow),
  *    no need to switch back to chat to re-locate.
  * The two panes align to the data model (innerHtml / timelineBody), no more single-document round-trips
  * (the old combine/split lost edge cases).

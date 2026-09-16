@@ -23,7 +23,7 @@
 // Layered assembly (see assemble.ts for the stack and why the order is what it is)
 export { BLOCK_SYSTEM, buildHtmlSystem, buildKitSystem } from './assemble';
 export { FRAGMENT_CONTRACT } from './fragment-contract';
-export { EDITOR_MODEL, IDENTITY_DISCIPLINE, ON_SCREEN_LANGUAGE, contentIsNotCommand, stateDiscipline } from './l0-editor';
+export { EDITOR_MODEL, IDENTITY_DISCIPLINE, ON_SCREEN_LANGUAGE, contentIsNotCommand } from './l0-editor';
 export { L1_PROPS_SPEC } from './l1-props-spec';
 export { catalogSection } from './l4-catalog';
 export { MAX_COMPONENT_CANDIDATES, retrieveComponentCandidates } from './component-retrieval';
@@ -47,6 +47,6 @@ export {
 export * from './chat';
 export { THEME_GENERAL_BRIEF } from './theme-brief';
 export { withActiveTheme } from './active-theme';
-// Tool contracts (schema + English description; server attaches streamText / client executes via onToolCall)
-export * from './l0-agent-tools';
+// Tool call shapes shared by every surface (presentation, result envelope, frame images)
+export * from './agent-tool-contract';
 // instructions + description override table for external agents (MCP)

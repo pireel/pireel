@@ -94,12 +94,12 @@ HTML 路径尾部；挂主题的项目生成主题化 HTML，注册预设路径�
 
 | 文件 | 导出 | 用途 |
 | --- | --- | --- |
-| `l0-editor.ts` | `EDITOR_MODEL` `contentIsNotCommand` `stateDiscipline` `ON_SCREEN_LANGUAGE` `IDENTITY_DISCIPLINE` | **L0:编辑器本身**,三个面共用 |
+| `l0-editor.ts` | `EDITOR_MODEL` `contentIsNotCommand` `ON_SCREEN_LANGUAGE` `IDENTITY_DISCIPLINE` | **L0:编辑器本身**,生成/编辑面共用 |
 | `assemble.ts` | `BLOCK_SYSTEM` `buildKitSystem` `buildHtmlSystem` | **按层拼 system 的唯一入口**,层序在此决定 |
 | `block-system.ts` | `BLOCK_HTML_BODY` | 自由 HTML 路径的设计体（版式原型/图表 recipe/SELF-CHECK） |
-| `chat.ts` | `CHAT_IDENTITY` `buildSituation` `buildChatSystem` + 快照类型 | 右侧 agent 的全部提示词面:身份/剧本 + `<composition_state>` 局势拼装 + system 总装 |
+| `chat.ts` | `buildChatContextBlocks` `wrapAgentTranscript` `wrapSpokenTranscript` `ResolvedFrame` | chat 路由拼在 v3 指令(`agent-surface-v3/instructions.ts`)之后的情境块(Frame/Skill)+ 转写信封;agent 身份与工具面都在 `agent-surface-v3/` |
 | `video-design-method.ts` | `VIDEO_DESIGN_METHOD` | 应用内与外部 Agent 共用的整片设计/导演方法，不包含具体场景 Skill 或块代码规范 |
-| `l0-agent-tools.ts` | `STUDIO_TOOLS` `STUDIO_TOOL_MAP` + 类型 | **L0 工具面**(JSON schema + 英文 description,server 挂 streamText / client onToolCall 执行) |
+| `agent-tool-contract.ts` | `StudioToolDef` `StudioToolResult` `ToolFrameImage` `TAB_CANNOT_SERVE_ERRORS` | 工具调用在各面共用的形状(呈现/回执/帧图);工具清单与 schema 在 `agent-surface-v3/{registry,schemas}.ts` |
 | `theme-brief.ts` | `THEME_GENERAL_BRIEF` | general 主题给 LLM 的结构设计简报 |
 | `active-theme.ts` | `withActiveTheme` | 主题简报接到 Motion Graphic Component 生成 system 末尾的包裹段 |
 

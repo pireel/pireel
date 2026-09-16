@@ -65,9 +65,8 @@ import {
 } from "@pireel/ui/tooltip";
 
 import { toast } from "@pireel/ui/toast";
-import { studioLocale, t, tEnglish } from "./i18n";
+import { t, tEnglish } from "./i18n";
 import { editorErrorMessage } from "./editor-error";
-import { framePack } from "@pireel/studio-frames/locales";
 import {
   type Block,
   type CaptionStyle,
@@ -84,9 +83,7 @@ import {
   type ShotTreatment,
   type PersonFx,
   type VideoShot,
-  SHOT_TREATMENTS,
   STUDIO_FONTS_HREF,
-  CAPTION_PRESETS,
   applyEditorCommand,
   applyMediaVideoSettingsPatch,
   reorderOverlayDocumentTracks,
@@ -136,9 +133,6 @@ import {
   mediaFramingTransformVars,
   normalizeAtomicMediaFraming,
   resolveShotMediaFraming,
-  resizeNarrativeTimelineClip,
-  slipNarrativeTimelineClip,
-  resizeVisualTimelineClip,
   supplementalVisualStateAt,
   DIRECTIONAL_TRANSITIONS,
   MAX_TRANSITION_SEC,
@@ -149,7 +143,6 @@ import {
   hasVideoTrackContent,
   videoTrackShots,
   videoShotTimelineSpans,
-  treatmentVacancyBox,
   type MediaTimelineClip,
   canvasSizeFollowingFirstVideo,
   type DisplayTextAnimationId,
@@ -177,9 +170,7 @@ function clipSpeedInDocument(document: EditorDocumentV2, clipId: string): number
 }
 import { getTheme, themeVarsCss } from "@pireel/studio-engine/theme";
 import {
-  restoreSrcRange,
   spans as clipSpans,
-  srcToEditedLoose,
 } from "@pireel/studio-engine/trim";
 import {
   parseKitResponse,
@@ -187,12 +178,9 @@ import {
 import {
   type ComposeMode,
   type ComposedBlock,
-  composedBlockFields,
-  kitChoiceOf,
 } from "./compose-result";
-import { imageThumb, imgSourceBase } from "@pireel/ui/image-url";
+import { imageThumb } from "@pireel/ui/image-url";
 import { acceptGeneratedComponent } from "./compose-validation";
-import { clearToolProgress, setToolProgress } from "./tool-progress";
 import { injectPreviewRuntime } from "./sample-composition";
 import { monotonicPlaybackSecond, playhead } from "./playhead";
 import {
@@ -202,14 +190,9 @@ import {
 } from "@pireel/studio-engine/build-blocks";
 import { beatsForWindow } from "@pireel/studio-engine/captions-relay";
 import {
-  type Box as GraphicBox,
-  pickGraphicBox,
-} from "@pireel/studio-engine/graphics-layout";
-import {
   type FilmstripFrame,
   type FilmstripSourceRange,
   durableFileSig,
-  extractFilmstrip,
   fileSig,
   probeVideoFile,
   uploadVideoFile,
@@ -292,7 +275,6 @@ import {
 import {
   STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION,
   type LocalAssetIndexEntry,
-  type ProjectSavePayload,
   type StudioProjectDto,
 } from "@pireel/studio-engine/project-dto";
 
@@ -323,7 +305,6 @@ import { generatedAssetIndexEntry, generatedRecordsFromJobs, listStudioGens, typ
 import { KIT_INSERT_DURATION, kitSampleProps } from "./kit-ui";
 import { wordsFromText } from "@pireel/studio-engine/caption-fx";
 import { AssetsPanel, type GenType, type PanelDragAsset } from "./assets-panel";
-import { addElementEntry } from "./element-history";
 import { useStudioShell } from "./shell-context";
 import { ScriptPanel, TimelineScriptPanel } from "./script-panel";
 import { CaptionsPanel } from "./captions-panel";
@@ -340,26 +321,17 @@ import { type MatteFrame, MATTE_FPS, computeMatteTrack } from "./person-matte";
 import { type FrameCatalogItem, useFrameCatalog } from "./use-frame-catalog";
 import { StudioBootOverlay } from "./studio-boot";
 import { confirm } from "@pireel/ui/confirm";
-import {
-  type ChatSituation,
-  type StudioToolResult,
-  STUDIO_TOOL_MAP,
-  buildSituation,
-} from "@pireel/studio-engine/prompts";
+import type { StudioToolResult } from "@pireel/studio-engine/prompts";
+import { studioToolDefFor } from "./v3-tool-defs";
 import { useAgentBridge } from "./use-agent-bridge";
 import {
-  type VisualLabel,
   type VisualPrep,
   type VisualTimeline,
   analyzeVisual,
   clearVisualCache,
-  finishVisualAnalysis,
-  insertedClipSafeZone,
-  prepareVisualAnalysis,
 } from "./visual";
 import { type SafeZone, detectFrameAt, geomNote } from "./geometry";
 import {
-  REF_WIDTH,
   normalizeDims,
   personFxFromFrame,
   shotSpan,
@@ -488,7 +460,7 @@ type FloatKind =
 const CAPTION_DERIVE_MAX_CHAIN = 8;
 
 /** Bridge tools that report/choose the active output; they re-anchor the agent instead of being gated by it. */
-const OUTPUT_ANCHOR_TOOLS = new Set(["get_state", "list_outputs", "switch_output", "create_output", "duplicate_output", "delete_output"]);
+const OUTPUT_ANCHOR_TOOLS = new Set(["get_state", "manage_project"]);
 
 /** The cover signature last uploaded for a project, remembered across opens (null when unknown). */
 function readCoverPushedSig(key: string): string | null {
@@ -1435,7 +1407,7 @@ export function HyperframesWorkbench({
   }, [projectId]);
   const visualRef = useRef<VisualTimeline | null>(null);
   visualRef.current = visual;
-  // BYO visual analysis (visual_brief/submit_visual): the prepared-brief intermediate state awaiting the agent's labels
+  // BYO visual analysis (inspect_media brief then labels): the prepared-brief intermediate state awaiting the agent's labels
   const visualBriefRef = useRef<VisualPrep | null>(null);
   /** Land visual analysis results (shared by BYO submit and cache hit; same as stepVisual's finalization). */
   const applyVisualResult = (vis: VisualTimeline) => {
@@ -1889,7 +1861,7 @@ export function HyperframesWorkbench({
   }, [editorDocument, localAssetIndexRev, prepareLocalAssetRuntime, resolveAssetUrl]);
   /** Export-time readiness: the same restore as the effect above, awaited. An output switch clears the
    *  runtime and the effect restores it asynchronously; an export started in between (batch export,
-   *  an agent's export right after switch_output) must not read a plan with unresolved sources. */
+   *  an agent's export right after an output switch) must not read a plan with unresolved sources. */
   const prepareExportAssets = useCallback(
     async (document: EditorDocumentV2) => {
       const referenced = new Set(
@@ -1985,7 +1957,7 @@ export function HyperframesWorkbench({
     denoiseExportRef,
     prepareExportAssets,
   });
-  // Agent export task (export_video/track_export): compose + browser download runs via exportVideo, this only tracks task state;
+  // Agent export task (export action:start / action:status): compose + browser download runs via exportVideo, this only tracks task state;
   // exportPct mirrored into a ref for the progress query inside runStudioTool (the switch closure can't read state)
   const agentExportRef = useRef<AgentExportJob>({
     running: false,
@@ -6776,8 +6748,6 @@ export function HyperframesWorkbench({
   const {
     setCaptionStyle,
     mappedCaptionSegs,
-    relayCaptionLayer,
-    captionLineRows,
     captionsPanelProps,
     applyCaptionPreset,
     relayoutCaptions,
@@ -7056,14 +7026,12 @@ export function HyperframesWorkbench({
   };
   // Element generation / block element ops (gen panel, floating toolbar) — see use-element-ops.ts.
   const {
-    generateElementStandalone,
     insertGeneratedElement,
     bumpBlockLayer,
     togglePersonLayer,
     saveBlockAsElement,
     syncBlockContent,
     syncBusyId,
-    mentionAsset,
   } = useElementOps({
     projectId,
     playing,
@@ -7333,18 +7301,10 @@ export function HyperframesWorkbench({
   };
 
   // External agent bridge (Codex/Claude Code/any MCP client via /api/studio/mcp → StudioBridge DO → this tab):
-  // the exact same execution surface as the internal chat + BYO-only operations; get_state returns the same situation snapshot as chat.
+  // the exact same execution surface as the internal chat + BYO-only operations.
   const agentBridge = useAgentBridge({
     runTool: runExternalTool,
     projectId,
-    // LIVE header names the project this tab edits: an agent that switch_project'd for offline work must not
-    // assume the bridge follows — bridge tools always hit the OPEN tab. The id line lets it detect the mismatch.
-    getState: () => {
-      const outputs = listProjectOutputsForAgent();
-      const activeOutput = outputs.find((output) => output.active)!;
-      bridgeOutputAnchorRef.current = { id: activeOutput.id, title: activeOutput.title };
-      return `<composition_state>\nLIVE — the studio tab is open on project ${projectId}; bridge tools edit THIS project (switch_project only retargets OFFLINE mode).\nActive output: #${activeOutput.position} · ${activeOutput.id} · ${activeOutput.title} (${outputs.length} total; use list_outputs/switch_output for deliverables).\n${buildSituation(getChatBody() as ChatSituation)}\n</composition_state>`;
-    },
     onDisplaced: () => {
       if (displacedRef.current) return;
       // flush-on-evict: push what this tab still holds BEFORE it goes read-only. Intents replay
@@ -7354,13 +7314,14 @@ export function HyperframesWorkbench({
       setDisplaced(true);
       toast.info(t("workbench.displacedByAnotherWindow"));
     },
-    onExternalCall: (tool, result) => {
-      if (tool === "get_state" || tool === "compose_context") return; // pure queries don't interrupt
+    onExternalCall: (tool, result, input) => {
+      const called = tool === "run_v3" && typeof input.name === "string" ? input.name : tool;
+      if (called === "get_state" || called === "compose_component") return; // pure queries don't interrupt
       const EXTERNAL_LABELS: Record<string, string> = {
-        apply_block: "workbench.externalBlockApply",
+        apply_component: "workbench.externalBlockApply",
       };
       const label = t(
-        STUDIO_TOOL_MAP[tool]?.label ?? EXTERNAL_LABELS[tool] ?? tool,
+        EXTERNAL_LABELS[called] ?? studioToolDefFor(called)?.label ?? called,
       );
       if (result.ok)
         toast.info(

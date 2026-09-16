@@ -4,7 +4,7 @@ import { isComponentPropertyRows, isComponentPropertyScalar } from './component-
  *
  * A registered (kit) component declares JSON Schema in code; a bespoke component declares the same
  * JSON Schema `properties` in its `slots.propsSchema` (the ```json fence). Everything downstream —
- * the inspector form, the agent's set_block_props, the get_state read-back, the brief — consumes only
+ * the inspector form, the agent's set_clip_properties props, the get_state read-back, the brief — consumes only
  * the view this module returns: `{ schema, values }` plus one `applyComponentValues` that knows where
  * each kind persists its values (kit: the full props object, parsed by the component; bespoke:
  * overrides pruned against the schema). Adding a component of either kind costs no UI or tool work.
@@ -76,7 +76,7 @@ export function componentValuesView(view: ComponentSchemaView): Array<{ key: str
   return Object.entries(view.schema.properties ?? {}).map(([key, field]) => ({ key, type: typeOf(field), value: view.values[key] }));
 }
 
-/** `{ props: { schema, values } }` for get_block / compose_context read-back, or `{}` when the block has no editable surface. */
+/** `{ props: { schema, values } }` for inspect_media component / compose_component read-back, or `{}` when the block has no editable surface. */
 export function blockPropsReadback(block: BlockLike): { props?: { schema: ComponentSchemaView['schema']; values: ReturnType<typeof componentValuesView> } } {
   const view = componentSchemaOf(block);
   return view ? { props: { schema: view.schema, values: componentValuesView(view) } } : {};

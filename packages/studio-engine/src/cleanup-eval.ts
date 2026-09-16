@@ -69,7 +69,7 @@ const clampMerge = (ranges: CutRange[], max: number): CutRange[] => {
 
 const overlapSec = (a: CutRange, b: CutRange): number => Math.max(0, Math.min(a.to, b.to) - Math.max(a.from, b.from));
 
-/** 给模型出的转写文本(与 read_script 的 MAIN NARRATION 行格式一致,行号从 0)。 */
+/** 给模型出的转写文本(与 get_transcript 的 MAIN NARRATION 行格式一致,行号从 0)。 */
 export function fixtureTranscript(fx: CleanupFixture): string {
   const rd = (x: number) => Math.round(x * 10) / 10;
   return fx.rows.map((s, i) => `  ${i}. [${rd(s.start)}–${rd(s.end)}s] ${s.text}`).join('\n');

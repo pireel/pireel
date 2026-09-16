@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Narration-cut receipt list for the chat stream — cut_narration's dedicated message component.
+ * Narration-cut receipt list for the chat stream — remove_words' dedicated message component.
  * The generic tool badge collapses a multi-cut into one summary line; here every cut is a ROW
  * (final-timeline seam position + what was removed: a transcript snippet, or "silence" when the
  * range held no words), and clicking a row seeks the preview to that seam so the user can audit

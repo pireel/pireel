@@ -4,7 +4,7 @@ import type { AsrSegment, TranscriptWord } from './build-blocks';
 import { joinWords, wordsFromText } from './caption-fx';
 
 export interface CaptionTextEditItem {
-  /** Sentence row from read_script / the source transcript. */
+  /** Sentence row from get_transcript / the source transcript. */
   index: number;
   text: string;
   /** Stable source-word range of the existing display cue. Agent sentence edits are expanded to

@@ -54,17 +54,17 @@ export function validateStudioProposalBudget(operations: readonly StudioOperatio
       data: { operations: operations.length, limit: STUDIO_AGENT_EXECUTION_LIMITS.proposalOperations },
     };
   }
-  const splitCalls = operations.filter((operation) => operation.tool === 'split_shot');
+  const splitCalls = operations.filter((operation) => operation.tool === 'split_clips');
   if (splitCalls.length > STUDIO_AGENT_EXECUTION_LIMITS.proposalSplitCalls) {
     return {
       ok: false,
       code: 'too_many_split_calls',
-      error: 'batch framing split points into one split_shot {atSecs:[...], purpose:"framing"} operation',
+      error: 'batch framing split points into one split_clips {items:[{atFrame}], purpose:"framing"} operation',
       data: { calls: splitCalls.length, limit: STUDIO_AGENT_EXECUTION_LIMITS.proposalSplitCalls },
     };
   }
   const splitPoints = splitCalls.reduce(
-    (total, operation) => total + (Array.isArray(operation.input.atSecs) ? operation.input.atSecs.length : 1),
+    (total, operation) => total + (Array.isArray(operation.input.items) ? operation.input.items.length : 1),
     0,
   );
   if (splitPoints > STUDIO_AGENT_EXECUTION_LIMITS.splitPointsPerCall) {
@@ -75,17 +75,17 @@ export function validateStudioProposalBudget(operations: readonly StudioOperatio
       data: { points: splitPoints, limit: STUDIO_AGENT_EXECUTION_LIMITS.splitPointsPerCall },
     };
   }
-  const framingCalls = operations.filter((operation) => operation.tool === 'set_shot_framing');
+  const framingCalls = operations.filter((operation) => operation.tool === 'set_clip_framing');
   if (framingCalls.length > STUDIO_AGENT_EXECUTION_LIMITS.proposalFramingCalls) {
     return {
       ok: false,
       code: 'too_many_framing_calls',
-      error: 'batch every shot into one set_shot_framing {updates:[...]} operation',
+      error: 'batch every clip into one set_clip_framing {items:[...]} operation',
       data: { calls: framingCalls.length, limit: STUDIO_AGENT_EXECUTION_LIMITS.proposalFramingCalls },
     };
   }
   const framingUpdates = framingCalls.reduce(
-    (total, operation) => total + (Array.isArray(operation.input.updates) ? operation.input.updates.length : 1),
+    (total, operation) => total + (Array.isArray(operation.input.items) ? operation.input.items.length : 1),
     0,
   );
   if (framingUpdates > STUDIO_AGENT_EXECUTION_LIMITS.framingUpdatesPerCall) {

@@ -166,7 +166,7 @@ export function useStudioExport(deps: {
 
   /** Export = client compositing + delivery (local sink when requested, browser download otherwise).
    *  Unsupported → honest error (no longer silently routed to server render that produces a black clip).
-   *  Returns a result for the agent export tools (export_video/track_export): on success includes the
+   *  Returns a result for the agent export tools (export action:start / action:status): on success includes the
    *  saved filename and how the file was delivered. */
   async function exportVideo(opts: ExportRenderOpts, sinkUrl?: string): Promise<{ ok: boolean; filename?: string; error?: string } & Partial<ExportDelivery>> {
     if (exporting || publishing) return { ok: false, error: tEnglish('common.exportAlreadyProgress') };

@@ -4,7 +4,7 @@
  * them on both ends means passing the data as params).
  *
  * Consumers: workbench (thin wrapper feeding refs) + server-executor (offline MCP:
- * when the tab is closed, cut_narration/set_captions run server-side, data from
+ * when the tab is closed, remove_words/set_captions run server-side, data from
  * studio_projects.context). Pure-module discipline: zero react/browser deps (same
  * tier as build-blocks).
  */

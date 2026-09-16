@@ -12,7 +12,7 @@ export function normalizeNarrationSplitPoints(
   maxPoints = Number.POSITIVE_INFINITY,
 ): number[] | { error: string } {
   if (!atSecs.length) return { error: 'pass atSec or atSecs' };
-  if (atSecs.length > maxPoints) return { error: `split_shot supports at most ${maxPoints} points per call` };
+  if (atSecs.length > maxPoints) return { error: `split_clips supports at most ${maxPoints} points per call` };
   if (atSecs.some((atSec) => typeof atSec !== 'number' || !Number.isFinite(atSec))) {
     return { error: 'every split point must be a finite number' };
   }

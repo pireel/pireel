@@ -32,9 +32,6 @@ import {
   MessageResponse,
 } from "@pireel/ui/ai-elements/message";
 import {
-  type ChatSituation,
-} from "@pireel/studio-engine/prompts";
-import {
   STUDIO_AUTO_SKILL_ID,
   type StudioScenarioSkillId,
 } from "@pireel/studio-engine/scenario-skills";
@@ -295,7 +292,7 @@ export function ChatThread({
       const ctrl = new AbortController();
       toolAbortRef.current = ctrl;
       // Parked tools wait on the user, not on work: keep that time out of the tool-duration ETA memory
-      const interactionWaitStartedAt = id === "ask_user" || id === "request_approval" || id === "export" || id === "export_video"
+      const interactionWaitStartedAt = id === "ask_user" || id === "export"
         ? Date.now()
         : null;
       try {
@@ -853,15 +850,15 @@ export function ChatThread({
             messages.map((m, mi) => {
               const displayMessage = compactStudioChatMessages([m])[0] ?? m;
               const parts = (displayMessage.parts ?? []) as ToolPartLike[];
-              // Collapse consecutive track_export polls (only step-starts between them): render just
+              // Collapse consecutive export status polls (only step-starts between them): render just
               // the last of each run — a polling agent otherwise buries the conversation in a column
               // of identical progress badges. Polls separated by real text keep rendering.
               const collapsed = collapsedComponentRetryIndexes(parts);
               for (let i = 0; i < parts.length; i++) {
-                if (parts[i]!.type !== "tool-track_export") continue;
+                if (parts[i]!.type !== "tool-export") continue;
                 let j = i + 1;
                 while (j < parts.length && parts[j]!.type === "step-start") j++;
-                if (j < parts.length && parts[j]!.type === "tool-track_export")
+                if (j < parts.length && parts[j]!.type === "tool-export")
                   collapsed.add(i);
               }
               // Older runs (and a model ignoring the new vectorized schema) can emit one precise-
@@ -869,9 +866,9 @@ export function ChatThread({
               // visual receipt; message history/tool outputs remain untouched.
               const framingGroups = new Map<number, ToolPartLike[]>();
               const isFraming = (part: ToolPartLike) =>
-                part.type === "tool-set_shot_framing" ||
+                part.type === "tool-set_clip_framing" ||
                 (part.type === "dynamic-tool" &&
-                  part.toolName === "set_shot_framing");
+                  part.toolName === "set_clip_framing");
               for (let i = 0; i < parts.length; i++) {
                 if (collapsed.has(i) || !isFraming(parts[i]!)) continue;
                 const grouped = [parts[i]!];

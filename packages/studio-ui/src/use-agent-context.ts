@@ -91,7 +91,7 @@ export function useAgentContext(deps: AgentContextDeps) {
 
   /** The situation at the moment a chat message is sent (composition snapshot / selection / playhead / pipeline; attached
    *  as message metadata). The narration script isn't here — it's anchored to source time and doesn't change with editing,
-   *  so it enters the feed once via the read_script receipt, no need to resend each round (prompt-cache friendly). */
+   *  so it enters the feed once via the get_transcript receipt, no need to resend each round (prompt-cache friendly). */
   const getChatBody = useCallback((): Record<string, unknown> => {
     const c = compRef.current;
     const document = documentRef.current;
@@ -229,7 +229,7 @@ export function useAgentContext(deps: AgentContextDeps) {
     }
     // Generated/imported narration may be an audio-only lane. Its exact script is stored on the
     // canonical asset at registration time; a later targeted ASR replaces those estimated rows
-    // with measured audio timing. Expose either form through the same read_script surface.
+    // with measured audio timing. Expose either form through the same get_transcript surface.
     const audioByAsset = new Map<string, string[]>();
     for (const track of document.timeline.tracks) {
       if (track.type !== 'audio') continue;
@@ -242,14 +242,14 @@ export function useAgentContext(deps: AgentContextDeps) {
       const asset = document.assets[assetId];
       const segs = document.semantics.transcripts[assetId];
       const head = `AUDIO NARRATION ${asset?.label ? `"${asset.label}" ` : ''}for clip(s) ${clipIds.map((id) => `@${id}`).join(', ')} (asset source seconds)`;
-      if (!segs) parts.push(`${head}: (no transcript — call read_script with assetId when actual audio timing is needed)`);
+      if (!segs) parts.push(`${head}: (no transcript — call get_transcript with assetId when actual audio timing is needed)`);
       else if (!segs.length) parts.push(`${head}: (no speech detected)`);
       else parts.push(`${head}:\n${segs.map(row).join('\n')}`);
     }
     const out = parts.join('\n');
     return wrapAgentTranscript(out);
   };
-  /** Fill in insert-source transcripts (triggered on demand by read_script — policy: when captions are off, only transcribe when the LLM needs it).
+  /** Fill in insert-source transcripts (triggered on demand by get_transcript — policy: when captions are off, only transcribe when the LLM needs it).
    *  Shares the busy/fail lists with the panel transcription effect: failures don't re-burn ASR, in-flight ones are awaited. */
   const ensureClipTranscripts = async (): Promise<void> => {
     // Blacklist + tell the user (reported once per src: after blacklisting, the top continue won't reach here again) —
@@ -261,7 +261,7 @@ export function useAgentContext(deps: AgentContextDeps) {
     };
     // Muted inserted sources are outside the mix: captions, translation and spoken-word addressing
     // never derive from them, so bulk transcription skips them — a fully muted montage lane must
-    // not relaunch one ASR per source on every captions-panel action or read_script call.
+    // not relaunch one ASR per source on every captions-panel action or get_transcript call.
     const srcs = [...new Set((compRef.current.shots ?? []).filter((s) => s.src && !s.audioMuted).map((s) => s.src!))];
     for (const src of srcs) {
       if (clipAsrRef.current[src] || clipAsrFailRef.current.has(src)) continue;

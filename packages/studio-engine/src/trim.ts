@@ -345,7 +345,7 @@ export function removeEditedInterval<B extends Timed>(blocks: B[], a: number, b:
 }
 
 /**
- * Pause-tightening margin math (shared by cut_narration's two executors and the cleanup eval):
+ * Pause-tightening margin math (shared by remove_words' two executors and the cleanup eval):
  * the agent passes FULL gap ranges + keepGapSec, and the tool leaves the breathing room — the
  * model never does boundary arithmetic (mature cut planners keep their 60/150/320ms kept-gap
  * in code the same way). Each range shrinks symmetrically by keepGapSec/2 per side; ranges that

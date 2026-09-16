@@ -135,8 +135,7 @@ export interface StudioChatProps {
   ) => Promise<StudioToolResult>;
   /** Callback when a frame is attached (both panel "use" and the theme button): the workbench uses it to apply the theme palette to comp. */
   onFrameApplied?: (frame: AttachedFrame | null) => void;
-  /** The situation read at send time (composition snapshot/selection/playhead/pipeline): buildSituation
-   *  turns it into text on the user message's metadata.situation (not in request body, not in system). */
+  /** Request-body fields read at send time (session-level frame / skill selection). */
   getBody: () => Record<string, unknown>;
   /** Currently @-mentionable elements. */
   elements: StudioElementRef[];

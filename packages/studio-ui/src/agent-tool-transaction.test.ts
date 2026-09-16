@@ -9,7 +9,7 @@ import {
   runAgentTimelineTool,
   setClipPatches,
 } from '@pireel/studio-engine/composition';
-import { buildChatSystem, buildHtmlSystem } from '@pireel/studio-engine/prompts';
+import { buildHtmlSystem } from '@pireel/studio-engine/prompts';
 import type { AgentToolCtx } from './agent-tool-runner';
 import { DocumentCommitter } from './document-commit';
 import { GeneratedBlockValidationError } from './compose-result';
@@ -474,7 +474,8 @@ describe('Agent composition transaction boundary', () => {
     vi.stubGlobal('fetch', fetchMock);
     const { runStudioTool } = await import('./agent-tool-runner');
 
-    await expect(runStudioTool(h.ctx, 'design_voice', {
+    await expect(runStudioTool(h.ctx, 'manage_voices', {
+      action: 'design',
       prompt: 'Warm, credible English narrator',
       language: 'en',
       name: 'Warm narrator',
@@ -497,24 +498,10 @@ describe('Agent composition transaction boundary', () => {
     expect(classifyAsrResponse({ asr_ok: false, detail: 'dashscope_asr poll HTTP 503: busy' })).toBe('failed');
     expect(classifyAsrResponse({ asr_ok: false, detail: 'dashscope_asr returned no text' })).toBe('empty');
 
-    const h = harness();
-    Object.assign(h.ctx, {
-      videoFileRef: { current: new File(['video'], 'talking-head.mp4', { type: 'video/mp4' }) },
-      stepAsr: async () => { throw new Error('提取口播稿失败,稍后再试'); },
-      genIdsRef: { current: new Set<string>() },
-      pushUndoSnapshot: () => h.undoStackRef.current.push(h.documentRef.current),
-    });
-    if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
-    const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'read_script', {});
-    expect(result).toMatchObject({ ok: false, error: '提取口播稿失败,稍后再试' });
-
     const skill = readFileSync(new URL('../../studio-engine/src/scenario-skills/content/talking-head-edit/SKILL.md', import.meta.url), 'utf8');
     const execute = skill.slice(skill.indexOf('## Step 10: Execute with tool discipline'));
     expect(execute).toContain('Place the narration spine first, then run `remove_silence`');
     expect(execute).toContain('do not retry it in the same user request');
-    expect(buildChatSystem(null)).toContain('run remove_silence before transcript-driven edits');
-    expect(buildChatSystem(null)).not.toContain('planning artifact');
   });
 
   it('prepares every referenced device-local media asset before clips are committed', async () => {
@@ -713,7 +700,10 @@ describe('Agent composition transaction boundary', () => {
 
     Object.assign(h.ctx, { projectId: 'project-identity', listProjectOutputs: () => [{ id: 'output-main', position: 1, title: 'Main', active: true, durationSec: 4 }] });
     const state = await runExternalTool(h.ctx, 'run_v3', { name: 'get_state', args: {} });
-    expect(state.data).toMatchObject({ project: { id: 'project-identity' }, output: { id: 'output-main' }, outputs: [{ id: 'output-main', active: true }] });
+    expect(state.ok, JSON.stringify(state).slice(0, 600)).toBe(true);
+    expect((state.data as { project: unknown }).project).toEqual({ id: 'project-identity' });
+    expect((state.data as { output: unknown }).output).toEqual({ id: 'output-main', title: 'Main' });
+    expect((state.data as { outputs: Array<{ id: string; active: boolean }> }).outputs.map((output) => [output.id, output.active])).toEqual([['output-main', true]]);
     expect(state.ok).toBe(true);
     const view = state.data as { canvas: { fps: number }; tracks: Array<{ clips?: Array<{ id: string; frames: [number, number] }> }>; playhead: number };
     expect(view.canvas.fps).toBe(30);
@@ -722,8 +712,8 @@ describe('Agent composition transaction boundary', () => {
 
     const added = await runExternalTool(h.ctx, 'run_v3', { name: 'set_texts', args: { items: [{ text: 'Hook', startFrame: 6, durationFrames: 90, preset: 'headline' }] } });
     expect(added.ok, JSON.stringify(added)).toBe(true);
-    const data = added.data as { delta?: { clips?: Array<{ kind: string; frames: [number, number] }> }; steps: unknown[] };
-    expect(data.steps).toHaveLength(1);
+    const data = added.data as { delta?: { clips?: Array<{ kind: string; frames: [number, number] }> } };
+    expect(data).not.toHaveProperty('steps');
     expect(data.delta?.clips?.some((clip) => clip.frames[0] === 6), JSON.stringify(added).slice(0, 600)).toBe(true);
     expect(JSON.stringify(data.delta)).not.toContain('blocksAdded');
 
@@ -755,7 +745,7 @@ describe('Agent composition transaction boundary', () => {
       { data: 'frame-1', mimeType: 'image/jpeg', width: 960, height: 540 },
       { data: 'frame-2', mimeType: 'image/jpeg', width: 960, height: 540 },
     ]);
-    expect((result.data as { steps: Array<{ data: { atSec: number } }> }).steps.map((step) => step.data.atSec)).toEqual([1, 2]);
+    expect((result.data as { frames: Array<{ frame: number; atSec: number }> }).frames.map((frame) => [frame.frame, frame.atSec])).toEqual([[30, 1], [60, 2]]);
   });
 
   it('lists project-local assets without exposing device storage locators', async () => {
@@ -767,14 +757,14 @@ describe('Agent composition transaction boundary', () => {
       t: (key: string) => key,
     });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'list_assets', { scope: 'mine' });
+    const result = await runStudioTool(h.ctx, 'search_assets', { scope: 'mine' });
 
     expect(result).toMatchObject({
       ok: true,
       data: {
         assets: [{ id: `local:${assetId}`, kind: 'video', label: '商品展示' }],
         placementRequiredForInspection: false,
-        usageHint: expect.stringContaining('analyze_visual/read_script while unplaced'),
+        usageHint: expect.stringContaining('inspect_media/get_transcript while unplaced'),
       },
     });
     expect(JSON.stringify((result as { data?: { assets?: unknown } }).data?.assets))
@@ -865,8 +855,8 @@ describe('Agent composition transaction boundary', () => {
     });
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'prepare_local_image', { assetId });
-    const legacyResult = await runStudioTool(h.ctx, 'prepare_local_image', { sig });
+    const result = await runStudioTool(h.ctx, 'prepare_local_asset', { assetId });
+    const legacyResult = await runStudioTool(h.ctx, 'prepare_local_asset', { sig });
 
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(legacyResult.ok, JSON.stringify(legacyResult)).toBe(true);
@@ -904,12 +894,12 @@ describe('Agent composition transaction boundary', () => {
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
     const mentionId = localAssetMentionId(assetId);
-    const result = await runStudioTool(h.ctx, 'inspect_images', { refs: [mentionId] });
+    const result = await runStudioTool(h.ctx, 'inspect_media', { mode: 'frames', ids: [mentionId] });
 
     expect(result).toMatchObject({
       ok: true,
       data: {
-        images: [{ ref: `local:${assetId}`, label: '转化率数据', description: expect.stringContaining('12% to 31%') }],
+        images: [{ ref: assetId, label: '转化率数据', description: expect.stringContaining('12% to 31%') }],
       },
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -935,7 +925,7 @@ describe('Agent composition transaction boundary', () => {
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
     const controller = new AbortController();
-    const pending = runStudioTool(h.ctx, 'inspect_images', { refs: [localAssetMentionId(assetId)] }, { signal: controller.signal, surface: 'chat' });
+    const pending = runStudioTool(h.ctx, 'inspect_media', { mode: 'frames', ids: [localAssetMentionId(assetId)] }, { signal: controller.signal, surface: 'chat' });
 
     controller.abort();
 
@@ -959,7 +949,7 @@ describe('Agent composition transaction boundary', () => {
     const assetIdsBefore = Object.keys(h.documentRef.current.assets);
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'read_script', { assetId: localAssetMentionId(assetId) });
+    const result = await runStudioTool(h.ctx, 'get_transcript', { assetId: localAssetMentionId(assetId) });
 
     expect(result).toMatchObject({
       ok: true,
@@ -1006,15 +996,15 @@ describe('Agent composition transaction boundary', () => {
     });
     const { runStudioTool } = await import('./agent-tool-runner');
 
-    const read = await runStudioTool(h.ctx, 'read_script', { assetId: localAssetMentionId(assetId) });
+    const read = await runStudioTool(h.ctx, 'get_transcript', { assetId: localAssetMentionId(assetId) });
     expect(read.ok, JSON.stringify(read)).toBe(true);
     const placed = await runStudioTool(h.ctx, 'add_clips', {
       clips: [{ assetId: localAssetMentionId(assetId), role: 'primary', startFrame: 0 }],
     });
     expect(placed.ok, JSON.stringify(placed)).toBe(true);
-    const words = await runStudioTool(h.ctx, 'list_words', { sentenceIndexes: [0] }, { surface: 'chat' });
+    const words = await runStudioTool(h.ctx, 'get_transcript', { granularity: 'words', segmentIndexes: [0] }, { surface: 'chat' });
 
-    expect(words).toMatchObject({ ok: true, summary: '定位精确词语' });
+    expect(words.ok, JSON.stringify(words)).toBe(true);
     expect((words.data as { words: unknown[] }).words).toHaveLength(1);
     expect(providerMocks.transcribe).toHaveBeenCalledTimes(1);
     expect(h.ctx.asrRef.current).toEqual(transcript);
@@ -1049,11 +1039,11 @@ describe('Agent composition transaction boundary', () => {
     });
     const { runStudioTool } = await import('./agent-tool-runner');
 
-    const result = await runStudioTool(h.ctx, 'read_script', { assetId: `local:${assetId}` });
+    const result = await runStudioTool(h.ctx, 'get_transcript', { assetId: `local:${assetId}` });
 
     expect(result).toMatchObject({
       ok: true,
-      data: { assetId, transcript: expect.stringContaining('这段口播必须写回项目') },
+      data: { assetIds: [assetId], transcript: expect.stringContaining('这段口播必须写回项目') },
     });
     expect(localMediaMocks.loadLocalAssetFile).toHaveBeenCalledWith('test', expect.objectContaining({ assetId }));
     expect(h.documentRef.current.semantics.transcripts[assetId]).toEqual([
@@ -1093,7 +1083,7 @@ describe('Agent composition transaction boundary', () => {
     });
     const { runStudioTool } = await import('./agent-tool-runner');
 
-    const result = await runStudioTool(h.ctx, 'read_script', { assetId: `local:${assetId}` });
+    const result = await runStudioTool(h.ctx, 'get_transcript', { assetId: `local:${assetId}` });
 
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(h.documentRef.current.timeline.tracks.flatMap((track) => track.clips)[0])
@@ -1150,7 +1140,7 @@ describe('Agent composition transaction boundary', () => {
     const assetIdsBefore = Object.keys(h.documentRef.current.assets);
     const { runStudioTool } = await import('./agent-tool-runner');
 
-    const result = await runStudioTool(h.ctx, 'read_script', { assetId: `local:${assetId}` });
+    const result = await runStudioTool(h.ctx, 'get_transcript', { assetId: `local:${assetId}` });
 
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('re-import that asset in Materials') });
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('Do not place the asset on the timeline') });
@@ -1174,7 +1164,7 @@ describe('Agent composition transaction boundary', () => {
     });
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const observed = await runStudioTool(h.ctx, 'read_script', { localSig: sig });
+    const observed = await runStudioTool(h.ctx, 'get_transcript', { localSig: sig });
     expect(observed).toMatchObject({ ok: true, data: { speechDetected: false, defaultSourceAudio: 'muted' } });
 
     const registered = await runStudioTool(h.ctx, 'register_media', {
@@ -1208,7 +1198,7 @@ describe('Agent composition transaction boundary', () => {
     const assetIdsBefore = Object.keys(h.documentRef.current.assets);
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'analyze_visual', { localSig: sig });
+    const result = await runStudioTool(h.ctx, 'inspect_media', { mode: 'semantic', localSig: sig });
 
     expect(result).toMatchObject({
       ok: true,
@@ -1245,8 +1235,9 @@ describe('Agent composition transaction boundary', () => {
       pushUndoSnapshot: () => {},
     });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'analyze_visual', {
-      assetId: 'asset-muted-ad',
+    const result = await runStudioTool(h.ctx, 'inspect_media', {
+      mode: 'semantic',
+      ids: ['asset-muted-ad'],
       assessAudio: false,
     });
 
@@ -1275,7 +1266,7 @@ describe('Agent composition transaction boundary', () => {
       pushUndoSnapshot: () => {},
     });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'read_script', { localSig: sig });
+    const result = await runStudioTool(h.ctx, 'get_transcript', { localSig: sig });
 
     expect(result).toMatchObject({
       ok: true,
@@ -1306,7 +1297,7 @@ describe('Agent composition transaction boundary', () => {
       pushUndoSnapshot: () => {},
     });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'read_script', { localSig: sig });
+    const result = await runStudioTool(h.ctx, 'get_transcript', { localSig: sig });
 
     expect(result).toMatchObject({
       ok: true,
@@ -1341,7 +1332,7 @@ describe('Agent composition transaction boundary', () => {
       pushUndoSnapshot: () => {},
     });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'analyze_visual', { localSig: sig, mode: 'geometry' });
+    const result = await runStudioTool(h.ctx, 'inspect_media', { localSig: sig, mode: 'geometry' });
 
     expect(result).toMatchObject({
       ok: true,
@@ -1390,8 +1381,8 @@ describe('Agent composition transaction boundary', () => {
       pushUndoSnapshot: () => {},
     });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'analyze_visual', {
-      assetId: 'asset-female-lead',
+    const result = await runStudioTool(h.ctx, 'inspect_media', {
+      ids: ['asset-female-lead'],
       mode: 'editorial',
       brief: 'Confident, restrained female-lead footage; compare hook and ending suitability.',
       maxCandidates: 4,
@@ -1493,11 +1484,11 @@ describe('Agent composition transaction boundary', () => {
       pushUndoSnapshot: () => {},
     });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const pending = runStudioTool(h.ctx, 'analyze_visual', {
+    const pending = runStudioTool(h.ctx, 'inspect_media', {
       mode: 'editorial',
       brief: 'Choose complete, polished performance ranges.',
       compareOpenings: true,
-      items: [{ assetId: 'asset-first' }, { assetId: 'asset-second' }],
+      ids: ['asset-first', 'asset-second'],
     });
     await vi.waitFor(() => expect(started).toBe(2));
     release();
@@ -1531,7 +1522,7 @@ describe('Agent composition transaction boundary', () => {
     expect(fractions.every((value, index) => index === 0 || value >= fractions[index - 1]!)).toBe(true);
     expect(fractions.at(-1)).toBe(1);
     expect(progressMocks.setToolProgress).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'analyze_visual',
+      id: 'inspect_media',
       text: expect.stringContaining('第一段'),
     }));
     expect(progressMocks.setToolProgress).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -1548,7 +1539,7 @@ describe('Agent composition transaction boundary', () => {
     const h = harness();
     Object.assign(h.ctx, { projectId: 'test', genIdsRef: { current: new Set<string>() }, pushUndoSnapshot: () => {} });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'analyze_visual', { mode: 'editorial' });
+    const result = await runStudioTool(h.ctx, 'inspect_media', { mode: 'editorial' });
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('requires a concrete brief') });
     expect(visualMocks.analyzeVisualGeometry).not.toHaveBeenCalled();
     expect(editorialReviewMocks.reviewEditorialCandidates).not.toHaveBeenCalled();
@@ -1578,18 +1569,16 @@ describe('Agent composition transaction boundary', () => {
     });
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const cached = await runStudioTool(h.ctx, 'read_script', { assetId: 'tts-audio' });
-    expect(cached).toMatchObject({ ok: true, data: { assetId: 'tts-audio', transcript: expect.stringContaining('原始文稿') } });
+    const cached = await runStudioTool(h.ctx, 'get_transcript', { assetId: 'tts-audio' });
+    expect(cached).toMatchObject({ ok: true, data: { assetIds: ['tts-audio'], transcript: expect.stringContaining('原始文稿') } });
     expect(providerMocks.transcribe).not.toHaveBeenCalled();
 
-    const result = await runStudioTool(h.ctx, 'read_script', { assetId: 'tts-audio', measuredTiming: true });
+    // Exact words on script-backed speech exist only once ASR has measured the timing: a words
+    // read triggers that measurement; the text stays verbatim.
+    const result = await runStudioTool(h.ctx, 'get_transcript', { assetId: 'tts-audio', granularity: 'words' });
 
-    expect(result).toMatchObject({
-      ok: true,
-      // Script-backed speech: the exact text is immutable, ASR only measures its timing.
-      data: { assetId: 'tts-audio', durationSec: 12.4, transcript: expect.stringContaining('原始文稿') },
-    });
-    expect(result.data).toMatchObject({ transcript: expect.not.stringContaining('实际发音') });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(JSON.stringify(result.data)).not.toContain('实际发音');
     expect(providerMocks.transcribe).toHaveBeenCalledWith(expect.objectContaining({ type: 'audio/mpeg' }), expect.anything());
     expect(h.documentRef.current.assets['tts-audio']?.metadata).toMatchObject({ durationSec: 12.4, hasAudio: true, transcriptText: '原始文稿' });
     const measured = h.documentRef.current.semantics.transcripts['tts-audio']!;
@@ -1636,14 +1625,11 @@ describe('Agent composition transaction boundary', () => {
     });
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const before = await runStudioTool(h.ctx, 'get_transcript', { clipId: 'speaker-clip' });
-    expect(before).toMatchObject({ ok: false, error: 'transcript_missing', data: { assetIds: ['speaker-video'] } });
-
-    const result = await runStudioTool(h.ctx, 'read_script', { clipId: 'speaker-clip' });
+    const result = await runStudioTool(h.ctx, 'get_transcript', { clipId: 'speaker-clip' });
 
     expect(result, result.ok ? undefined : result.error).toMatchObject({
       ok: true,
-      data: { assetId: 'speaker-video', durationSec: 18, transcript: expect.stringContaining('这是视频里的口播') },
+      data: { assetIds: ['speaker-video'], transcript: expect.stringContaining('这是视频里的口播') },
     });
     expect(providerMocks.transcribe).toHaveBeenCalledWith(expect.objectContaining({ type: 'video/mp4' }), expect.anything());
     expect(h.documentRef.current.semantics.transcripts['speaker-video']).toEqual([
@@ -1696,7 +1682,7 @@ describe('Agent composition transaction boundary', () => {
     });
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'analyze_visual', {});
+    const result = await runStudioTool(h.ctx, 'inspect_media', { mode: 'semantic' });
 
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(result).toMatchObject({
@@ -1839,7 +1825,7 @@ describe('Agent composition transaction boundary', () => {
     });
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'cut_range', { fromSec: 0, toSec: 1 });
+    const result = await runStudioTool(h.ctx, 'ripple_delete_ranges', { ranges: [[0, 30]] });
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(h.documentRef.current.timeline.tracks.find((track) => track.id === 'broll')?.clips[0]).toMatchObject({ startFrame: 30 });
   });
@@ -1863,7 +1849,7 @@ describe('Agent composition transaction boundary', () => {
     });
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'set_video_filter', { shotId: 's1', contrast: 1.25 });
+    const result = await runStudioTool(h.ctx, 'set_clip_properties', { items: [{ clipId: 's1', filter: { contrast: 1.25 } }] });
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(h.documentRef.current.timeline.tracks[0]!.clips[0]).toMatchObject({
       id: 's1', startFrame: 45, properties: { filter: { contrast: 1.25 } },
@@ -1889,7 +1875,7 @@ describe('Agent composition transaction boundary', () => {
     });
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'add_block', { instruction: 'show 42', sceneId: 'output-ma' });
+    const result = await runStudioTool(h.ctx, 'apply_component', { generate: true, instruction: 'show 42', sceneId: 'output-ma' });
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(h.compRef.current.blocks).toHaveLength(1);
     expect(h.compRef.current.blocks[0]).toMatchObject({
@@ -1911,11 +1897,11 @@ describe('Agent composition transaction boundary', () => {
     });
     const { runStudioTool } = await import('./agent-tool-runner');
     const input = {
-      instruction: '做一个关系图', atSec: 8.8, durationSec: 3,
+      generate: true, instruction: '做一个关系图', atFrame: 264, durationFrames: 90,
       placement: { xPct: 12, yPct: 18, widthPct: 70, heightPct: 24 },
       backdrop: '人物在画面右侧',
     };
-    const result = await runStudioTool(h.ctx, 'add_block', input);
+    const result = await runStudioTool(h.ctx, 'apply_component', input);
     expect(result).toMatchObject({
       ok: false,
       error: expect.stringContaining('letter-spacing'),
@@ -1948,7 +1934,7 @@ describe('Agent composition transaction boundary', () => {
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
     const controller = new AbortController();
-    const pending = runStudioTool(h.ctx, 'add_block', { instruction: 'show 42' }, { signal: controller.signal, surface: 'chat' });
+    const pending = runStudioTool(h.ctx, 'apply_component', { generate: true, instruction: 'show 42' }, { signal: controller.signal, surface: 'chat' });
 
     controller.abort();
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' });

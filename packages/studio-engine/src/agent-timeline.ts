@@ -6,7 +6,6 @@ import { insertOverlayDocumentClip } from './overlay-track-edit';
 import { titleBlock } from './block-factory';
 import {
   applyEditorCommand,
-  editorTimelineTotalFrames,
   positiveDurationFrames,
   retimeEditorClip,
   secondsToTimelineFrames,
@@ -26,9 +25,6 @@ import {
   normalizePeerNarrativeSources,
 } from './editor-document';
 import type { TranscriptSegment } from './project-dto';
-import { directorPlanFromDocument } from './director-plan-artifact';
-import { directorPlanToMarkdown } from './director-plan-markdown';
-import { sceneDesignsFromDocument, sceneDesignsToMarkdown } from './scene-design';
 import { canvasSizeFollowingFirstVideo } from './editing-primitives';
 import { applyNarrationDocumentEdit } from './narration-document-edit';
 import { planNarrationCuts } from './editor-document/narration-cut-planner';
@@ -40,9 +36,6 @@ import { placementPercentToBox } from './overlay-placement';
 import { isDisplayTextAnimationId, isDisplayTextFontId, isDisplayTextPresetId } from './display-text-presets';
 
 export const AGENT_TIMELINE_TOOL_IDS = new Set([
-  'get_timeline',
-  'read_director_plan',
-  'read_scene_designs',
   'register_media',
   'organize_media',
   'add_clips',
@@ -167,57 +160,6 @@ function clipForAgent(clip: TimelineClip, fps: number) {
     durationSec,
     endSec: timelineFramesToSeconds(clip.startFrame + clip.durationFrames, fps),
     ...(playbackSpeed != null ? { playbackSpeed } : {}),
-  };
-}
-
-export function agentTimelineSnapshot(document: EditorDocumentV2) {
-  return {
-    version: document.version,
-    canvas: document.canvas,
-    durationSec: timelineFramesToSeconds(editorTimelineTotalFrames(document), document.canvas.fps),
-    tracks: document.timeline.tracks.map((track, index) => ({
-      id: track.id,
-      index,
-      type: track.type,
-      role: track.role,
-      name: track.name,
-      muted: track.muted,
-      hidden: track.hidden,
-      locked: track.locked,
-      syncLocked: track.syncLocked,
-      stackOrder: track.stackOrder,
-      clips: track.clips.map((clip) => clipForAgent(clip, document.canvas.fps)),
-    })),
-    assets: Object.values(document.assets),
-    semantics: {
-      primaryNarrativeTrackId: document.semantics.primaryNarrativeTrackId,
-      managedCaptionTrackId: document.semantics.managedCaptionTrackId,
-      managedCaptionSource: document.semantics.managedCaptionSource ?? { mode: 'auto' },
-      transcriptAssetIds: Object.entries(document.semantics.transcripts).filter(([, segments]) => segments.length).map(([assetId]) => assetId),
-      scenes: document.semantics.scenes,
-      directorPlan: (() => {
-        const plan = directorPlanFromDocument(document);
-        return plan ? {
-          available: true,
-          goal: plan.goal,
-          creativeThesis: plan.creativeThesis,
-          scenes: plan.scenes.map((scene) => ({
-            id: scene.id,
-            label: scene.label,
-            startSec: timelineFramesToSeconds(scene.startFrame, document.canvas.fps),
-            endSec: timelineFramesToSeconds(scene.startFrame + scene.durationFrames, document.canvas.fps),
-          })),
-        } : undefined;
-      })(),
-      sceneDesigns: (() => {
-        const designs = sceneDesignsFromDocument(document);
-        return designs?.scenes.length ? {
-          available: true,
-          path: 'scene-designs.md',
-          sceneIds: designs.scenes.map((scene) => scene.sceneId),
-        } : undefined;
-      })(),
-    },
   };
 }
 
@@ -1073,91 +1015,6 @@ export function placeClips(document: EditorDocumentV2, input: Input, mode: 'over
   );
 }
 
-function moveClips(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
-  const items = Array.isArray(input.items) ? input.items : [];
-  if (!items.length) return fail('items is required');
-  let next = document;
-  const receipts: EditorCommandReceipt[] = [];
-  for (const [index, raw] of items.entries()) {
-    const item = (raw ?? {}) as Input;
-    const clipId = string(item.clipId);
-    const found = clipId ? locatedClip(next, clipId) : undefined;
-    if (!found) return fail(`items[${index}] clip not found`);
-    const moved = applyEditorCommand(next, {
-      type: 'clip.move', trackId: found.track.id, clipId: found.clip.id,
-      startFrame: secondsToTimelineFrames(Math.max(0, sec(item.startSec)), next.canvas.fps),
-      ...(string(item.toTrackId) ? { toTrackId: string(item.toTrackId) } : {}),
-      includeLinked: input.includeLinked !== false,
-    });
-    if (!moved.ok) return fail(moved.error.message, moved.error);
-    next = moved.document;
-    receipts.push(moved.receipt);
-  }
-  return mutation(next, `Moved ${items.length} clip${items.length === 1 ? '' : 's'}`, receipts);
-}
-
-function removeClips(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
-  const clipIds = Array.isArray(input.clipIds) ? input.clipIds.map(string).filter((id): id is string => !!id) : [];
-  if (!clipIds.length) return fail('clipIds is required');
-  let next = document;
-  const receipts: EditorCommandReceipt[] = [];
-  const byTrack = new Map<string, string[]>();
-  // Ids that no longer exist are skipped, not fatal: an agent correcting its own work often
-  // re-lists a clip it already removed, and failing the whole batch on that stale id left the
-  // rest in place (and the agent retrying the identical call). The receipt names the misses.
-  const missingClipIds: string[] = [];
-  for (const id of clipIds) {
-    const found = locatedClip(next, id);
-    if (!found) {
-      missingClipIds.push(id);
-      continue;
-    }
-    byTrack.set(found.track.id, [...(byTrack.get(found.track.id) ?? []), id]);
-  }
-  if (!byTrack.size) return fail(`clip not found: ${missingClipIds.join(', ')}`);
-  for (const [trackId, ids] of byTrack) {
-    // An earlier group may already remove linked partners on this track. Re-resolve against the
-    // current document so a cross-track linked batch stays idempotent within this transaction.
-    const remaining = ids.filter((id) => locatedClip(next, id)?.track.id === trackId);
-    if (!remaining.length) continue;
-    const removed = applyEditorCommand(next, { type: 'clips.remove', trackId, clipIds: remaining, includeLinked: input.includeLinked !== false });
-    if (!removed.ok) return fail(removed.error.message, removed.error);
-    next = removed.document;
-    receipts.push(removed.receipt);
-  }
-  // remove means remove — no editorial-judgment guard here. Protecting an assembled cut from
-  // agent self-demolition is the per-turn harness lock's job (it knows intent and turn state);
-  // an engine-level veto also blocked legitimate clears from the UI, MCP agents and other flows,
-  // and removals stay recoverable through undo.
-  const removedCount = clipIds.length - missingClipIds.length;
-  const summary = `Removed ${removedCount} clip${removedCount === 1 ? '' : 's'}`
-    + (missingClipIds.length ? ` (${missingClipIds.length} already gone: ${missingClipIds.join(', ')})` : '');
-  return mutation(next, summary, receipts, missingClipIds.length ? { removedClipIds: clipIds.filter((id) => !missingClipIds.includes(id)), missingClipIds } : undefined);
-}
-
-function splitClips(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
-  const items = Array.isArray(input.items) ? input.items : [];
-  if (!items.length) return fail('items is required');
-  let next = document;
-  const receipts: EditorCommandReceipt[] = [];
-  const created: string[] = [];
-  for (const [index, raw] of items.entries()) {
-    const item = (raw ?? {}) as Input;
-    const clipId = string(item.clipId);
-    const found = clipId ? locatedClip(next, clipId) : undefined;
-    if (!found) return fail(`items[${index}] clip not found`);
-    const split = applyEditorCommand(next, {
-      type: 'clip.split', trackId: found.track.id, clipId: found.clip.id,
-      atFrame: secondsToTimelineFrames(sec(item.atSec), next.canvas.fps), includeLinked: input.includeLinked !== false,
-    });
-    if (!split.ok) return fail(split.error.message, split.error);
-    next = split.document;
-    receipts.push(split.receipt);
-    created.push(...split.receipt.createdClipIds);
-  }
-  return mutation(next, `Split ${items.length} clip${items.length === 1 ? '' : 's'}`, receipts, { createdClipIds: created });
-}
-
 export function setVideoSpeed(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const speed = Number(input.speed);
   if (!Number.isFinite(speed) || speed < 0.25 || speed > 4) return fail('speed must be within 0.25..4');
@@ -1274,7 +1131,7 @@ export function setClipPatches(document: EditorDocumentV2, input: Input): AgentT
     if (item.fit === 'contain' || item.fit === 'cover') {
       if (found.clip.kind === 'narrative') {
         if (item.fit === 'contain') {
-          return fail(`items[${index}] fit=contain is not supported for primary narrative clips; use box for canvas placement or set_shot_framing for source crop`);
+          return fail(`items[${index}] fit=contain is not supported for primary narrative clips; use box for canvas placement or set_clip_framing for source crop`);
         }
         // Primary narrative video is cover-filled by definition. Treat an explicit cover request as
         // confirmation, not as an invalid media-only patch that aborts the whole batch.
@@ -1480,42 +1337,6 @@ export function syncClips(document: EditorDocumentV2, input: Input): AgentTimeli
   return mutation(next, `Synced ${desired.size} clip${desired.size === 1 ? '' : 's'} to ${referenceClipId}`, receipts, {
     referenceClipId, targetClipIds: [...desired.keys()], shiftedFrames: shiftFrames,
   });
-}
-
-function getTranscript(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
-  const ids = new Set<string>();
-  const assetId = string(input.assetId);
-  const clipId = string(input.clipId);
-  const trackId = string(input.trackId);
-  if (assetId) ids.add(assetId);
-  if (clipId) {
-    const found = locatedClip(document, clipId);
-    if (!found || !('assetId' in found.clip) || !found.clip.assetId) return fail(`clip has no transcript-bearing asset: ${clipId}`);
-    ids.add(found.clip.assetId);
-  }
-  if (trackId) {
-    const track = document.timeline.tracks.find((candidate) => candidate.id === trackId);
-    if (!track) return fail(`track not found: ${trackId}`);
-    for (const clip of track.clips) if ('assetId' in clip && clip.assetId && document.semantics.transcripts[clip.assetId]?.length) ids.add(clip.assetId);
-  }
-  if (!ids.size) {
-    for (const clip of document.timeline.tracks
-      .find((track) => track.id === document.semantics.primaryNarrativeTrackId)
-      ?.clips ?? []) {
-      if (clip.kind === 'narrative' && document.semantics.transcripts[clip.assetId]?.length) ids.add(clip.assetId);
-    }
-    if (!ids.size) for (const [id, segments] of Object.entries(document.semantics.transcripts)) if (segments.length) ids.add(id);
-  }
-  const transcripts = [...ids].map((id) => ({
-    assetId: id,
-    asset: document.assets[id],
-    segments: document.semantics.transcripts[id] ?? [],
-    occurrences: document.timeline.tracks.flatMap((track) => track.clips
-      .filter((clip) => 'assetId' in clip && clip.assetId === id)
-      .map((clip) => ({ trackId: track.id, clipId: clip.id, startSec: timelineFramesToSeconds(clip.startFrame, document.canvas.fps), durationSec: timelineFramesToSeconds(clip.durationFrames, document.canvas.fps) }))),
-  }));
-  if (!transcripts.some((entry) => entry.segments.length)) return fail('no transcript for the selected source');
-  return { ok: true, summary: `Read ${transcripts.reduce((sum, entry) => sum + entry.segments.length, 0)} transcript segments`, data: { transcripts } };
 }
 
 function getBeatGrid(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
@@ -1865,29 +1686,6 @@ export function runAgentTimelineTool(document: EditorDocumentV2, tool: string, i
   const v3 = runV3DocumentTool(document, tool, input);
   if (v3) return v3;
   switch (tool) {
-    case 'get_timeline': return { ok: true, summary: `${document.timeline.tracks.length} timeline tracks`, data: agentTimelineSnapshot(document) };
-    case 'read_director_plan': {
-      const plan = directorPlanFromDocument(document);
-      if (!plan) return fail('No Director Plan is saved for this output');
-      const requested = Array.isArray(input.sceneIds)
-        ? [...new Set(input.sceneIds.filter((value): value is string => typeof value === 'string' && value.trim().length > 0).map((value) => value.trim()))]
-        : [];
-      const scenes = requested.length ? plan.scenes.filter((scene) => requested.includes(scene.id)) : plan.scenes;
-      if (!scenes.length) return fail(`No requested Director Scenes exist: ${requested.join(', ')}`);
-      const content = directorPlanToMarkdown({ ...plan, scenes });
-      return { ok: true, summary: `Loaded director-plan.md (${scenes.length} Scene${scenes.length === 1 ? '' : 's'})`, data: { path: 'director-plan.md', mediaType: 'text/markdown', content, sceneIds: scenes.map((scene) => scene.id), totalScenes: plan.scenes.length } };
-    }
-    case 'read_scene_designs': {
-      const designs = sceneDesignsFromDocument(document);
-      if (!designs) return fail('No Scene designs are saved for this output');
-      const requested = Array.isArray(input.sceneIds)
-        ? [...new Set(input.sceneIds.filter((value): value is string => typeof value === 'string' && value.trim().length > 0).map((value) => value.trim()))]
-        : [];
-      const scenes = requested.length ? designs.scenes.filter((scene) => requested.includes(scene.sceneId)) : designs.scenes;
-      if (!scenes.length) return fail(`No requested Scene designs exist: ${requested.join(', ')}`);
-      const content = sceneDesignsToMarkdown({ scenes });
-      return { ok: true, summary: `Loaded scene-designs.md (${scenes.length} Scene${scenes.length === 1 ? '' : 's'})`, data: { path: 'scene-designs.md', mediaType: 'text/markdown', content, sceneIds: scenes.map((scene) => scene.sceneId), totalScenes: designs.scenes.length } };
-    }
     case 'register_media': return importAssets(document, input);
     case 'organize_media': return organizeAssets(document, input);
     case 'set_keyframes': return setKeyframes(document, input);

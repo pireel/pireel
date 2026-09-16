@@ -3,28 +3,25 @@
  * drive studio's full editing toolset with their own models via /api/studio/mcp.
  *
  * Business-model cornerstone: LLM orchestration burns the user's own Codex/Claude subscription (this endpoint
- * bypasses the credits gate); block generation (add_block etc.) still bounces through the browser to
+ * bypasses the credits gate); hosted component generation still bounces through the browser to
  * /api/studio/compose on the existing session billing — generation still charges, orchestration is free.
  *
- * Architecture: the tool surface reuses STUDIO_TOOLS verbatim (same table as internal chat, so adding a tool
- * to the registry grows one here automatically); execution forwards through the StudioBridge DO back to the open
- * studio tab (bridge-do.ts's header comment explains why it's a bridge, not server-side execution). Only content
- * tools are answered directly on the server: read_editing_guide / read_frame (body lives only on the server) +
- * MCP-only list_frames. get_state goes over the bridge (state is in the browser) — MCP has no mechanism to inject
- * a snapshot into the system prompt, so this fills the gap.
+ * Architecture: the v3 tool surface (agent-surface-v3) is the only surface; every call keeps its own name and
+ * shape end to end. Account services (skills, frames, catalog search, generation, projects) are answered here;
+ * document and runtime tools travel through the StudioBridge DO to the open studio tab as run_v3 (bridge-do.ts's
+ * header explains why it is a bridge), and the routing layer runs the offline executor when no tab is open.
  *
  * Protocol: the stateless subset of MCP streamable HTTP (single request → single JSON response, no SSE/session
  * headers). Compatible with both Codex's and Claude Code's HTTP transports. This file does no auth / doesn't touch
  * the DO — that's the routing layer's job, injected via McpDeps so vitest can pin the contract directly.
  */
 
-import { translateV3Call, type V3AdapterContext, type LegacyCall } from './agent-surface-v3/adapter';
+import type { V3ToolContext } from './agent-surface-v3/context';
 import { describeStepFailure } from './agent-surface-v3/receipt-errors';
 import { validateV3Input } from './agent-surface-v3/validate';
-import { V3_RETIRED_TOOL_IDS, V3_TOOL_IDS, V3_TOOLS, v3ReplacementIndex } from './agent-surface-v3/registry';
+import { V3_TOOL_IDS, V3_TOOLS } from './agent-surface-v3/registry';
 import { V3_TOOL_SCHEMAS } from './agent-surface-v3/schemas';
 import { v3Instructions } from './agent-surface-v3/instructions';
-import { STUDIO_TOOL_MAP, TAB_CANNOT_SERVE_ERRORS } from './prompts';
 import { searchFontsTool } from './font-search-tool';
 
 /* ============================ JSON-RPC shapes ============================ */
@@ -69,7 +66,7 @@ export interface McpDeps {
   editingExpertise?: string;
   /** v3 only: fps of the active output and a clip-id → kind resolver, read from the latest project
    *  document. Without it every frame-based v3 call fails with `fps_unavailable`. */
-  resolveV3Context?: () => Promise<V3AdapterContext>;
+  resolveV3Context?: () => Promise<V3ToolContext>;
   /** Execute over the bridge (routing layer = StudioBridge DO stub fetch /call). */
   callBridge: (tool: string, input: Record<string, unknown>, timeoutMs: number) => Promise<McpBridgeResult>;
   /** Bytes of a captured frame the browser stored in the user's cloud media space (routing layer =
@@ -83,8 +80,6 @@ export interface McpDeps {
   readSkill: (skillId: string) => Promise<McpBridgeResult>;
   /** Frame playbook body (routing layer = frameRegistry.get). */
   readFrame: (frameId: string) => McpBridgeResult;
-  /** A-roll editing guide body (routing layer = AROLL_GUIDE). */
-  readEditingGuide: () => McpBridgeResult;
   /** BYO block brief: bridge-returned compose context + the agent's instruction → {system,prompt} (routing layer = briefs.assembleComposeBrief + frameRegistry). */
   assembleComposeBrief: (bridgeData: Record<string, unknown>, instruction: string) => McpBridgeResult;
   /** Icon lookup (routing layer = icons.lookupIcons) — get_icons, referenced by BLOCK_SYSTEM in BYO generation, is available under the same name on the MCP surface. */
@@ -137,30 +132,33 @@ export interface McpDeps {
 
 /* ============================ Tool surface ============================ */
 
-/** Tools answered directly on the server (body only on server / pure catalog / direct cloud-state ops): no bridge. */
-export const MCP_SERVER_TOOL_IDS = new Set(['read_editing_guide', 'read_frame', 'list_frames', 'list_skills', 'read_skill', 'get_icons', 'search_fonts', 'import_media', 'create_browser_handoff', 'create_project', 'list_projects', 'switch_project', 'rename_project', 'list_assets', 'search_assets', 'search_stock', 'import_stock', 'list_models', 'generate_image', 'generate_video', 'generate_music', 'generate_sfx', 'get_generation_jobs', 'list_voices', 'clone_voice', 'design_voice', 'delete_voice', 'generate_speech', 'lip_sync']);
+/** Tools the server answers itself (catalog, account and generation services). A call is server-owned
+ *  when its arguments fall in the server's half: project-scope management, non-local asset scopes,
+ *  stock imports, generation jobs. Everything else runs in the studio tab or the offline executor. */
+export const MCP_SERVER_TOOL_IDS = new Set(['list_skills', 'read_skill', 'get_icons', 'import_media', 'create_browser_handoff', 'manage_project', 'search_assets', 'register_media', 'inspect_media', 'list_models', 'generate_image', 'generate_video', 'generate_audio', 'generate_speech', 'lip_sync', 'manage_voices', 'manage_frame']);
 
-/** MCP-only bridge tools (not in STUDIO_TOOLS, invisible to internal chat):
- *  get_state=state snapshot; apply_block=the validate-and-place surface for BYO generation output;
- *  capture_frame=one-moment visual verification; review_sequence=whole-Scene temporal verification
- *  (both return captured frames as image content so the agent can "see" its own edits).
- *  compose_block_brief is a "bridge-fetch context + server-assemble" composite tool, dispatched separately. */
-export const MCP_BRIDGE_EXTRA_TOOL_IDS = new Set(['get_state', 'apply_block', 'capture_frame', 'review_sequence', 'visual_brief', 'submit_visual', 'run_v3',
-  // Internal target of v3 set_clip_properties.props: a deterministic patch of a bespoke component's editable properties. Never advertised on its own.
-  'set_block_props']);
+export function serverOwnsCall(name: string, args: Record<string, unknown>): boolean {
+  switch (name) {
+    case 'manage_project': return args.scope === 'project';
+    // Project-local media includes unsaved device assets only the tab can see.
+    case 'search_assets': return args.kind === 'font' || (args.scope !== undefined && args.scope !== 'mine');
+    case 'register_media': return !!args.stock && typeof args.stock === 'object';
+    case 'inspect_media': return args.mode === 'generation';
+    case 'manage_frame': return args.action === 'list' || args.action === 'read';
+    default: return MCP_SERVER_TOOL_IDS.has(name);
+  }
+}
 
-/** Brief composite tools → bridge context-operation names (implemented browser-side in runExternalTool). */
-export const MCP_BRIEF_TOOLS: Record<string, string> = {
-  compose_block_brief: 'compose_context',
-};
+/** Bridge-side system operations the server may send to the tab besides run_v3. */
+export const MCP_BRIDGE_EXTRA_TOOL_IDS = new Set(['get_state', 'run_v3', 'adopt_cloud_project', 'load_local_assets', 'load_local_source']);
 
 /** Bridge timeout for slow tools (generation/analysis in the browser, minutes-scale); instant ops get 60s. */
 const CARD_TIMEOUT_MS = 600_000;
 const BADGE_TIMEOUT_MS = 60_000;
+const LONG_RUNNING_V3 = new Set(['inspect_timeline', 'inspect_media', 'get_transcript', 'remove_silence', 'denoise_audio', 'bake_component', 'apply_component', 'export', 'generate_foley', 'assemble_from_review']);
 
 export function bridgeTimeoutMs(toolId: string): number {
-  if (toolId === 'visual_brief' || toolId === 'review_sequence') return CARD_TIMEOUT_MS; // multi-frame work can take minutes; don't cap it at extra's 60s
-  return STUDIO_TOOL_MAP[toolId]?.kind === 'card' ? CARD_TIMEOUT_MS : BADGE_TIMEOUT_MS;
+  return LONG_RUNNING_V3.has(toolId) ? CARD_TIMEOUT_MS : BADGE_TIMEOUT_MS;
 }
 
 export interface McpToolDef {
@@ -221,7 +219,7 @@ export async function hydrateFrameImages(r: McpBridgeResult, deps: Pick<McpDeps,
  *  Captured frames become image content (the agent "sees" directly); snapshots are given as raw body (not wrapped in JSON). */
 function toolResponse(id: JsonRpcRequest['id'], r: McpBridgeResult): JsonRpcResponse {
   if (r.ok && Array.isArray(r.images) && r.images.length) {
-    // multiple images (visual_brief sample frames): text (index/timestamp/labeling contract) first, frames follow in index order
+    // multiple images (inspect_media brief sample frames, inspect_timeline frames): text (index/timestamp/labeling contract) first, frames follow in index order
     const imgs = (r.images as { data: string; mimeType?: string }[]).filter((i) => typeof i?.data === 'string');
     const { images: _drop, ...rest } = r;
     return rpcResult(id, {
@@ -246,75 +244,102 @@ function toolResponse(id: JsonRpcRequest['id'], r: McpBridgeResult): JsonRpcResp
   return rpcResult(id, { content: [{ type: 'text', text }], isError: !r.ok });
 }
 
-/** Dispatch one legacy tool call (server-direct, BYO brief, or bridge). `null` = unknown tool. */
-async function dispatchEditorTool(name: string, args: Record<string, unknown>, deps: McpDeps): Promise<McpBridgeResult | null> {
-
-  if (MCP_SERVER_TOOL_IDS.has(name)) {
-    if (name === 'list_frames') {
-      const frames = deps.listFrames();
-      return ({ ok: true, summary: `${frames.length} frames`, data: frames });
+/** Answer a server-owned v3 call from the account services. `null` = this call is not the server's. */
+async function dispatchServerTool(name: string, args: Record<string, unknown>, deps: McpDeps): Promise<McpBridgeResult | null> {
+  if (!serverOwnsCall(name, args)) return null;
+  switch (name) {
+    case 'list_skills': return deps.listSkills(args);
+    case 'read_skill': {
+      const id = typeof args.id === 'string' ? args.id.trim() : '';
+      if (!id) return { ok: false, error: 'missing_field', path: 'id', fix: 'Pass the exact id from list_skills or the system-prompt skill index.' };
+      return deps.readSkill(id);
     }
-    if (name === 'read_frame') {
-      const fid = args.frame_id;
-      if (typeof fid !== 'string' || !fid) return ({ ok: false, error: 'frame_id required (ids via list_frames)' });
-      return (deps.readFrame(fid));
-    }
-    if (name === 'list_skills') return (await deps.listSkills(args));
-    if (name === 'read_skill') {
-      const skillId = args.skill_id;
-      if (typeof skillId !== 'string' || !skillId) return ({ ok: false, error: 'skill_id required (ids via list_skills)' });
-      return (await deps.readSkill(skillId));
-    }
-    if (name === 'search_fonts') return searchFontsTool(args);
-    if (name === 'get_icons') {
+    case 'get_icons': {
       const names = Array.isArray(args.names) ? (args.names as unknown[]).map(String).filter(Boolean) : [];
-      if (!names.length) return ({ ok: false, error: 'names required (up to 8 icon names)' });
-      return (deps.lookupIcons(names, typeof args.kind === 'string' ? args.kind : undefined));
+      if (!names.length) return { ok: false, error: 'missing_field', path: 'names', fix: 'Pass up to 8 icon names.' };
+      return deps.lookupIcons(names, typeof args.kind === 'string' ? args.kind : undefined);
     }
-    if (name === 'import_media') return (await deps.importMedia(args));
-    if (name === 'create_browser_handoff') return (await deps.createBrowserHandoff(args));
-    if (name === 'create_project') return (await deps.createProject(args));
-    if (name === 'list_projects') return (await deps.listProjects(args));
-    if (name === 'switch_project') return (await deps.switchProject(args));
-    if (name === 'rename_project') return (await deps.renameProject(args));
-    if (name === 'list_assets') return (await deps.listAssets(args));
-    if (name === 'search_assets') return (await deps.searchAssets(args));
-    if (name === 'search_stock') return (await deps.searchStock(args));
-    if (name === 'import_stock') return (await deps.importStock(args));
-    if (name === 'list_models') {
-      if (args.kind !== undefined && !['image', 'video', 'all'].includes(args.kind as string)) {
-        return { ok: false, error: 'invalid_value', path: 'kind', allowed: ['image', 'video', 'all'] };
+    case 'import_media': return deps.importMedia(args);
+    case 'create_browser_handoff': return deps.createBrowserHandoff(args);
+    case 'manage_frame': {
+      if (args.action === 'list') { const frames = deps.listFrames(); return { ok: true, summary: `${frames.length} frames`, data: frames }; }
+      const id = typeof args.id === 'string' ? args.id : '';
+      if (!id) return { ok: false, error: 'missing_field', path: 'id', fix: 'Pass the frame id from manage_frame action:list.' };
+      return deps.readFrame(id);
+    }
+    case 'manage_project': {
+      const action = String(args.action ?? 'list');
+      if (action === 'list') return deps.listProjects(args);
+      if (action === 'switch') return deps.switchProject({ project_id: args.id });
+      if (action === 'create') return deps.createProject({ ...(typeof args.title === 'string' && args.title.trim() ? { title: args.title } : {}) });
+      if (action === 'rename') return deps.renameProject({ ...(typeof args.id === 'string' && args.id ? { project_id: args.id } : {}), title: args.title });
+      return { ok: false, error: 'invalid_value', path: 'action', value: args.action, allowed: ['list', 'switch', 'create', 'rename'] };
+    }
+    case 'search_assets': {
+      if (args.kind === 'font') {
+        const call: Record<string, unknown> = {};
+        for (const key of ['query', 'script', 'category', 'limit']) if (args[key] !== undefined) call[key] = args[key];
+        return searchFontsTool(call);
       }
-      return await deps.listModels(args);
+      const query = typeof args.query === 'string' ? args.query.trim() : '';
+      if (args.scope === 'stock') {
+        if (!query) return { ok: false, error: 'missing_field', path: 'query', fix: 'Stock search needs a concrete visual query.' };
+        const call: Record<string, unknown> = { query };
+        if (typeof args.kind === 'string' && args.kind !== 'all') call.kind = args.kind;
+        for (const key of ['page', 'limit']) if (args[key] !== undefined) call[key] = args[key];
+        return deps.searchStock(call);
+      }
+      if (!query) {
+        if (args.scope === 'all') return { ok: false, error: 'missing_field', path: 'query', fix: 'Listing needs one explicit scope: mine, cloud or official.' };
+        const call: Record<string, unknown> = { scope: args.scope };
+        for (const key of ['kind', 'limit']) if (args[key] !== undefined) call[key] = args[key];
+        return deps.listAssets(call);
+      }
+      const call: Record<string, unknown> = { query, scope: args.scope };
+      for (const key of ['kind', 'limit']) if (args[key] !== undefined) call[key] = args[key];
+      return deps.searchAssets(call);
     }
-    if (name === 'generate_image') return (await deps.generateImage(args));
-    if (name === 'generate_video') return (await deps.generateVideo(args));
-    if (name === 'generate_music') return (await deps.generateMusic(args));
-    if (name === 'generate_sfx') return (await deps.generateSfx(args));
-    if (name === 'get_generation_jobs') return (await deps.getGenerationJobs(args));
-    if (name === 'list_voices') return (await deps.listVoices(args));
-    if (name === 'clone_voice') return (await deps.cloneVoice(args));
-    if (name === 'design_voice') return (await deps.designVoice(args));
-    if (name === 'delete_voice') return (await deps.deleteVoice(args));
-    if (name === 'generate_speech') return (await deps.generateSpeech(args));
-    if (name === 'lip_sync') return (await deps.lipSync(args));
-    return (deps.readEditingGuide());
+    case 'inspect_media': {
+      const ids = Array.isArray(args.ids) ? (args.ids as unknown[]).filter((id): id is string => typeof id === 'string' && !!id) : [];
+      return deps.getGenerationJobs(ids.length ? { ids } : {});
+    }
+    case 'list_models': return deps.listModels(args);
+    case 'generate_image': return deps.generateImage(args);
+    case 'generate_video': return deps.generateVideo(args);
+    case 'generate_audio': {
+      const { kind, ...rest } = args;
+      if (kind === 'music') return deps.generateMusic(rest);
+      if (kind === 'sfx') return deps.generateSfx(rest);
+      return { ok: false, error: 'invalid_value', path: 'kind', value: kind, allowed: ['music', 'sfx'] };
+    }
+    case 'generate_speech': return deps.generateSpeech(args);
+    case 'lip_sync': return deps.lipSync(args);
+    case 'manage_voices': {
+      const { action, ...rest } = args;
+      if (action === 'list') return deps.listVoices(rest);
+      if (action === 'clone') return deps.cloneVoice(rest);
+      if (action === 'design') return deps.designVoice(rest);
+      if (action === 'delete') return deps.deleteVoice(rest);
+      return { ok: false, error: 'invalid_value', path: 'action', value: action, allowed: ['list', 'clone', 'design', 'delete'] };
+    }
+    default: return null;
   }
+}
 
-  // BYO brief (composite: bridge-fetch context → server-assemble prompt): the LLM belongs to the caller, no credits burned
-  if (MCP_BRIEF_TOOLS[name]) {
-    const ctx = await deps.callBridge(MCP_BRIEF_TOOLS[name], args, BADGE_TIMEOUT_MS);
-    if (!ctx.ok) return (ctx);
-    const data = (ctx.data ?? {}) as Record<string, unknown>;
-    const instruction = typeof args.instruction === 'string' ? args.instruction.trim() : '';
-    if (!instruction) return ({ ok: false, error: 'instruction required' });
-    const format = args.format === 'html' || args.format === 'kit' ? { format: args.format } : {};
-    return (deps.assembleComposeBrief({ ...data, ...format }, instruction));
-  }
-
-  if (!MCP_BRIDGE_EXTRA_TOOL_IDS.has(name) && !STUDIO_TOOL_MAP[name]) return null;
-  const result = await deps.callBridge(name, args, MCP_BRIDGE_EXTRA_TOOL_IDS.has(name) && name !== 'visual_brief' && name !== 'review_sequence' ? BADGE_TIMEOUT_MS : bridgeTimeoutMs(name));
-  return withWorkflowBaseline(name, result, deps);
+/** Register a stock result: durable cloud copy first, then the registration lands in the project
+ *  (live tab or offline executor) together with any directly registered assets. */
+async function registerStock(args: Record<string, unknown>, deps: McpDeps): Promise<McpBridgeResult> {
+  const steps: Array<{ tool: string; ok: boolean; summary?: string; error?: string }> = [];
+  const imported = await deps.importStock(args.stock as Record<string, unknown>);
+  steps.push({ tool: 'import_stock', ok: imported.ok, ...(imported.summary ? { summary: imported.summary } : {}), ...(imported.error ? { error: imported.error } : {}) });
+  if (!imported.ok) return { ...imported, data: { ...(imported.data && typeof imported.data === 'object' ? imported.data as Record<string, unknown> : {}), steps } };
+  const registration = readPath(imported, 'data.registration');
+  if (registration === undefined) return { ok: false, error: 'chain_broken', detail: 'the stock import returned no registration', data: { steps } };
+  const assets = [registration, ...(Array.isArray(args.assets) ? args.assets : [])];
+  const registered = await deps.callBridge('run_v3', { name: 'register_media', args: { assets } }, bridgeTimeoutMs('register_media'));
+  steps.push({ tool: 'register_media', ok: registered.ok, ...(registered.summary ? { summary: registered.summary } : {}), ...(registered.error ? { error: registered.error } : {}) });
+  if (!registered.ok) return { ok: false, error: String(registered.error ?? 'register_failed'), detail: `register_media failed after 1 completed step; the stock copy is imported`, data: { steps } };
+  return { ...registered, data: { ...(registered.data && typeof registered.data === 'object' ? registered.data as Record<string, unknown> : {}), steps } };
 }
 
 function withWorkflowBaseline(name: string, result: McpBridgeResult, deps: McpDeps): McpBridgeResult {
@@ -348,28 +373,13 @@ export function buildMcpTools(): McpToolDef[] {
     });
 }
 
-/** v3 tools whose live execution can take minutes inherit a slow legacy tool's bridge timeout. */
-const V3_BRIDGE_TIMEOUT_TOOL: Record<string, string> = {
-  get_transcript: 'read_script',
-  inspect_media: 'analyze_visual',
-  inspect_timeline: 'review_sequence',
-  apply_component: 'apply_block',
-  remove_silence: 'remove_silence',
-  export: 'export_video',
-  denoise_audio: 'denoise_audio',
-};
-
 function readPath(value: unknown, path: string): unknown {
   return path.split('.').reduce<unknown>((cursor, key) => (cursor && typeof cursor === 'object' ? (cursor as Record<string, unknown>)[key] : undefined), value);
 }
 
-/** A live tab answering one of these is saying "not mine", the same as having no tab at all: project
- *  navigation and handoff minting are account-level, not document-level, and only the server owns
- *  them. Anything else the tab says is the answer. */
-const TAB_CANNOT_SERVE: ReadonlySet<string> = new Set<string>(['studio_not_open', ...Object.values(TAB_CANNOT_SERVE_ERRORS)]);
 
-/** Run one v3 call: translate to legacy calls, apply them in order (chaining results where the adapter
- *  asks), and fold the receipts into one result. Delta shaping lands with the receipt contract. */
+/** Run one v3 call: schema check, then the server's own services or the studio tab (whose bridge
+ *  falls back to the offline executor when no tab is open), and the receipt back as it came. */
 export async function runV3Tool(name: string, args: Record<string, unknown>, deps: McpDeps): Promise<McpBridgeResult> {
   // Schema-level refusals are decided here, before the live tab is involved: the tab runs whatever
   // bundle its page loaded, so a value the published schema forbids must not depend on it.
@@ -378,6 +388,9 @@ export async function runV3Tool(name: string, args: Record<string, unknown>, dep
     const { status: _status, ...rest } = invalid;
     return { ok: false, ...rest };
   }
+  if (name === 'register_media' && args.stock && typeof args.stock === 'object') return registerStock(args, deps);
+  const served = await dispatchServerTool(name, args, deps);
+  if (served) return served;
   let placementAssets: Array<Record<string, unknown>> | undefined;
   if ((name === 'add_clips' || name === 'insert_clips') && Array.isArray(args.clips) && deps.resolvePlacementAssets) {
     const ids = [...new Set(args.clips.flatMap((row) => row && typeof row === 'object' && typeof row.assetId === 'string' ? [row.assetId] : []))];
@@ -386,85 +399,31 @@ export async function runV3Tool(name: string, args: Record<string, unknown>, dep
       catch { return { ok: false, error: 'asset_resolution_failed', hint: 'Catalog lookup failed; retry before placing these clips.' }; }
     }
   }
-  // Route account-owned steps before contacting the tab: its chat handlers may reject them,
-  // or worse, answer a cloud/official catalog request with a plausible empty local catalog.
-  // Probe without document context; frame/clip-dependent translations still run in the live tab.
-  const contextFree: V3AdapterContext = { fps: Number.NaN, kindOf: () => undefined };
-  const probe = translateV3Call(name, args, contextFree);
-  if (name === 'list_models' && probe.status === 'error') {
-    const { status: _status, ...error } = probe;
-    return { ok: false, ...error };
-  }
-  const serverOwned = probe.status === 'ok' && probe.calls.some((call) =>
-    MCP_SERVER_TOOL_IDS.has(call.tool)
-    // Project-local media includes unsaved device assets only the tab can see.
-    && !(['list_assets', 'search_assets'].includes(call.tool) && call.input.scope === 'mine'));
-  if (!serverOwned) {
-    // Document edits stay grouped against the live tab's exact fps, ids and undo history.
-    const live = await deps.callBridge('run_v3', { name, args, ...(placementAssets?.length ? { placementAssets } : {}) }, bridgeTimeoutMs(V3_BRIDGE_TIMEOUT_TOOL[name] ?? name));
-    if (!(live.ok === false && TAB_CANNOT_SERVE.has(String(live.error)))) return withWorkflowBaseline(name, live, deps);
-  }
-  const ctx: V3AdapterContext = !serverOwned && deps.resolveV3Context
-    ? await deps.resolveV3Context()
-    : contextFree;
-  const placedArgs = placementAssets?.length && (name === 'add_clips' || name === 'insert_clips') ? { ...args, placementAssets } : args;
-  const translation = serverOwned ? probe : translateV3Call(name, placedArgs, { ...ctx, placementAssets });
-  if (translation.status === 'error') {
-    const { status: _status, ...rest } = translation;
-    return { ok: false, ...rest };
-  }
-  if (translation.status === 'pending') return { ok: false, error: 'not_available_yet', detail: translation.reason };
-  if (name === 'compose_component') {
-    // The adapter yields raw context; offline callers need the same assembled authoring
-    // contract and frame-based target as the live run_v3 handler.
-    const result = await dispatchEditorTool('compose_block_brief', {
-      ...translation.calls[0]!.input,
-      instruction: args.instruction,
-      ...(args.format === 'kit' || args.format === 'html' ? { format: args.format } : {}),
-    }, deps);
-    if (!result?.ok) return result ?? { ok: false, error: 'adapter_mapped_unknown_tool' };
-    const data = (result.data ?? {}) as Record<string, unknown>;
-    const target = (data.target ?? {}) as Record<string, unknown>;
-    return { ...result, data: { ...data, target: {
-      clipId: target.blockId,
-      ...(typeof target.atSec === 'number' ? { atFrame: Math.round(target.atSec * ctx.fps) } : {}),
-      ...(typeof target.durationSec === 'number' ? { durationFrames: Math.max(1, Math.round(target.durationSec * ctx.fps)) } : {}),
-      ...(target.placement ? { placement: target.placement } : {}),
-    }, next: 'Generate the component yourself from system + prompt, then call apply_component with this target unchanged plus your full raw text.' } };
-  }
-  const steps: Array<{ tool: string; ok: boolean; summary?: string; error?: string; data?: unknown }> = [];
-  const images: Array<{ data: string; mimeType?: string }> = [];
-  let previous: McpBridgeResult | null = null;
-  for (const call of translation.calls as LegacyCall[]) {
-    const input: Record<string, unknown> = { ...call.input };
-    if (call.usePrevious) {
-      const carried = readPath(previous, call.usePrevious.resultPath);
-      if (carried === undefined) {
-        return { ok: false, error: 'chain_broken', detail: `${call.tool} needed ${call.usePrevious.resultPath} from the previous step`, data: { steps } };
-      }
-      input[call.usePrevious.inputKey] = call.usePrevious.asArray ? [carried] : carried;
+  const live = await deps.callBridge('run_v3', { name, args, ...(placementAssets?.length ? { placementAssets } : {}) }, bridgeTimeoutMs(name));
+  if (name === 'compose_component' && live.ok) {
+    // The offline executor answers with raw context; the tab already returns the assembled brief.
+    const data = (live.data ?? {}) as Record<string, unknown>;
+    if (!('system' in data) && data.block) {
+      const instruction = typeof args.instruction === 'string' ? args.instruction.trim() : '';
+      if (!instruction) return { ok: false, error: 'missing_field', path: 'instruction' };
+      const format = args.format === 'html' || args.format === 'kit' ? { format: args.format } : {};
+      const brief = deps.assembleComposeBrief({ ...data, ...format }, instruction);
+      if (!brief.ok) return brief;
+      const fps = deps.resolveV3Context ? (await deps.resolveV3Context()).fps : Number.NaN;
+      const block = data.block as Record<string, unknown>;
+      return { ...brief, data: { ...(brief.data as Record<string, unknown>), target: {
+        clipId: block.id,
+        ...(typeof data.atSec === 'number' && Number.isFinite(fps) ? { atFrame: Math.round(data.atSec * fps) } : {}),
+        ...(typeof data.durationSec === 'number' && Number.isFinite(fps) ? { durationFrames: Math.max(1, Math.round(data.durationSec * fps)) } : {}),
+        ...(data.placement ? { placement: data.placement } : {}),
+      }, next: 'Generate the component yourself from system + prompt, then call apply_component with this target unchanged plus your full raw text.' } };
     }
-    const result = await dispatchEditorTool(call.tool, input, deps);
-    if (result === null) return { ok: false, error: 'adapter_mapped_unknown_tool', detail: call.tool, data: { steps } };
-    if (translation.calls.length === 1) {
-      if (!result.ok) return { ...result, ...describeStepFailure(name, args, typeof result.error === 'string' ? result.error : undefined, ctx, result.data) };
-      return translation.note ? { ...result, note: translation.note } : result;
-    }
-    if (result.image) images.push(result.image as { data: string; mimeType?: string });
-    if (Array.isArray(result.images)) images.push(...result.images as Array<{ data: string; mimeType?: string }>);
-    steps.push({ tool: call.tool, ok: result.ok, ...(result.summary ? { summary: result.summary } : {}), ...(result.error ? { error: result.error } : {}), ...(result.data !== undefined ? { data: result.data } : {}) });
-    if (!result.ok) {
-      const failure = describeStepFailure(name, args, typeof result.error === 'string' ? result.error : undefined, ctx, result.data);
-      return { ok: false, ...failure, detail: `${failure.detail} — ${call.tool} failed after ${steps.length - 1} completed step(s); earlier steps are applied`, data: { steps } };
-    }
-    previous = result;
   }
-  return {
-    ok: true,
-    summary: steps.map((step) => step.summary).filter(Boolean).join('; ') || `${name} applied ${steps.length} steps`,
-    data: { steps, ...(translation.note ? { note: translation.note } : {}) },
-    ...(images.length ? { images } : {}),
-  };
+  if (!live.ok) {
+    const ctx: V3ToolContext = deps.resolveV3Context ? await deps.resolveV3Context().catch(() => ({ fps: Number.NaN, kindOf: () => undefined })) : { fps: Number.NaN, kindOf: () => undefined };
+    return { ...live, ...describeStepFailure(name, args, typeof live.error === 'string' ? live.error : undefined, ctx, live.data) };
+  }
+  return withWorkflowBaseline(name, live, deps);
 }
 
 /** Handle one JSON-RPC message. Returns null = a notification, routed back as an empty 202 response. */
@@ -496,12 +455,7 @@ export async function handleMcpRequest(raw: JsonRpcRequest, deps: McpDeps): Prom
       if (V3_TOOL_IDS.has(name) && !V3_TOOLS.find(tool => tool.id === name)?.chatOnly) {
         return toolResponse(raw.id, await hydrateFrameImages(await runV3Tool(name, args, deps), deps));
       }
-      if (V3_RETIRED_TOOL_IDS.includes(name)) {
-        return toolResponse(raw.id, { ok: false, error: 'tool_retired', detail: `${name} no longer exists: keep the plan in your working context and build the edit directly with the clip tools; inspect_timeline reviews the whole output without a plan.` });
-      }
-      const replacement = v3ReplacementIndex().get(name);
-      return toolResponse(raw.id, { ok: false, error: 'unknown_tool',
-        detail: replacement ? `Use ${replacement}; the old ${name} protocol is no longer accepted.` : `Unknown tool: ${name}. Use tools/list.` });
+      return toolResponse(raw.id, { ok: false, error: 'unknown_tool', detail: `Unknown tool: ${name}. Use tools/list.` });
     }
     default:
       return rpcError(raw.id, -32601, `method not found: ${method}`);

@@ -1,4 +1,4 @@
-import type { V3ClipKind } from './adapter';
+import type { V3ClipKind } from './context';
 
 /**
  * Failure receipts are the agent's correction channel, so every refused call must say what to do

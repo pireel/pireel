@@ -427,7 +427,7 @@ export class ExportCanceled extends Error {
   }
 }
 
-/** Single-frame capture (used by the external agent's capture_frame verification tool): one frame
+/** Single-frame capture (used by the external agent's inspect_timeline verification tool): one frame
  *  from the same render pipeline as export — theme background + source video frame (with framing
  *  transform/rounded corners/shadow) + overlay foreignObject rasterization.
  *  Returns a downsampled JPEG dataURL (small enough for LLM context); with no video, draws only background + overlay. */

@@ -25,7 +25,7 @@ describe('component retry presentation', () => {
     expect([...collapsedComponentRetryIndexes([attempt('g1')])]).toEqual([]);
   });
   it('passes concrete repair diagnostics to the model rather than only a generic error', () => {
-    const text = studioToolFailureText('Fix data.issues', { blockId: 'g1', issues: ['font-size 4px is too small'], detail: 'apply_block failed', secretFixture: 'omit unrelated data' });
+    const text = studioToolFailureText('Fix data.issues', { blockId: 'g1', issues: ['font-size 4px is too small'], detail: 'apply_component failed', secretFixture: 'omit unrelated data' });
     expect(text).toContain('font-size 4px is too small');
     expect(text).toContain('g1');
     expect(text).not.toContain('secretFixture');

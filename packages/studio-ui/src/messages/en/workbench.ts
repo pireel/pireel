@@ -389,7 +389,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.geometryPassPct": "Geometry pass {pct}%",
   "workbench.graphic": "Graphic",
   "workbench.indexOutOfRange":
-    "index out of range: {list} (this transcript has {n} lines — see read_script)",
+    "index out of range: {list} (this transcript has {n} lines — see get_transcript)",
   "workbench.insertClipNoTranscript": "This insert B-roll has no transcript",
   "workbench.insertedBRoll": "Inserted B-roll",
   "workbench.insertedDurSClip": "Inserted a {dur}s clip at {at}s",
@@ -402,7 +402,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.invalidRange": "Invalid fromSec/toSec",
   "workbench.invalidToSec": "Invalid toSec",
   "workbench.itemsEmptyInvalidNeed":
-    "items is empty/invalid (need {index, text}[] — index is the line number from read_script)",
+    "items is empty/invalid (need {index, text}[] — index is the line number from get_transcript)",
   "workbench.jumpedTo": "Jumped to {t}s",
   "workbench.keepLeastOneScene": "Keep at least one scene",
   "workbench.labelsEmptyAllIndexes":
@@ -535,7 +535,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.noTranscriptShort": "No transcript yet — extract it first",
   "workbench.noTranscriptYetExtract":
     "No transcript yet — extract it first (Smart transcript cut / Captions panel), then sync",
-  "workbench.noTranscriptYetRun": "No transcript yet — get it with read_script first",
+  "workbench.noTranscriptYetRun": "No transcript yet — get it with get_transcript first",
   "workbench.noVideoYet": "No video yet",
   "workbench.openChat": "Open chat",
   "workbench.originalVideoReconnectedDraft":
@@ -563,7 +563,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.rangesEmptyInvalidThose":
     "ranges is empty/invalid, or those ranges no longer exist in the edit",
   "workbench.rawRequired":
-    "raw required (the text generated from the compose_block_brief brief)",
+    "raw required (the text generated from the compose_component contract)",
   "workbench.reading": "Reading…",
   "workbench.readingDuration": "Reading duration…",
   "workbench.readTranscript": "Read the transcript",
@@ -704,7 +704,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.outputSwitchPausedByAgent":
     "The assistant is editing — output switching resumes when it finishes",
   "workbench.outputChangedUnderAgent":
-    "The active output is now “{active}” but you were editing “{anchored}”. Call switch_output to go back, or get_state / list_outputs to adopt the current output",
+    "The active output is now “{active}” but you were editing “{anchored}”. Call manage_project to go back, or get_state to adopt the current output",
   "workbench.outputRenamedNamed": "Renamed output to “{title}”",
   "workbench.outputSwitched": "Switched output",
   "workbench.outputSwitcher": "Project outputs",

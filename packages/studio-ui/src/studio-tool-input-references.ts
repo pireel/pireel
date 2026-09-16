@@ -122,7 +122,7 @@ export function normalizeStudioToolInputReferences(
       };
     });
   }
-  if (toolId === 'read_script' || toolId === 'extract_asr' || toolId === 'analyze_visual') {
+  if (toolId === 'get_transcript' || toolId === 'inspect_media') {
     const assetId = typeof normalized.assetId === 'string' ? normalized.assetId : '';
     const fromAssetId = resolveLocalAssetReference(assetId, localAssets);
     const fromLocalSig = typeof normalized.localSig === 'string'

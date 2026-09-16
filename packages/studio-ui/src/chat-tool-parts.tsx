@@ -55,7 +55,7 @@ export interface ToolPartLike {
 }
 
 /** Tools whose receipt shows the component(s) they produced/changed as a live preview strip. */
-const PREVIEW_TOOLS = new Set(['add_block', 'edit_block', 'duplicate_block']);
+const PREVIEW_TOOLS = new Set(['apply_component']);
 
 function toolIdOf(part: ToolPartLike): string {
   if (part.type === 'dynamic-tool') return part.toolName ?? '';
@@ -141,7 +141,7 @@ function ToolCard({ def, part, children, quiet }: { def: StudioToolDef; part: To
   const prog = useToolProgress(def.id);
   const live = running ? prog : null;
   const instruction = typeof part.input?.instruction === 'string' ? (part.input.instruction as string) : '';
-  const contextLabel = def.id === 'analyze_visual' ? analyzeVisualSourceLabel(part) : instruction;
+  const contextLabel = def.id === 'inspect_media' ? analyzeVisualSourceLabel(part) : instruction;
 
   // Elapsed (clock starts once running is observed, ticks every 0.5s); on completion, record into the historical EMA
   const startRef = useRef<number | null>(null);
@@ -278,15 +278,13 @@ export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocat
     && (part.state === 'input-available' || part.state === 'input-streaming')) {
     return <div key={key}><ApprovalCard part={part} /></div>;
   }
-  // export_video (legacy) / export action:start (v3): parks on a one-click card with adaptive specs,
-  // then shows the started confirmation. The runner parks the SAME way under both names, so the
-  // card must render for both — without it the turn waits on a click nobody can make.
-  // export action:status is the track_export poll and stays a plain badge.
-  const isExportStart = id === 'export_video'
-    || (id === 'export' && (part.input as { action?: unknown } | undefined)?.action !== 'status');
+  // export action:start parks on a one-click card with adaptive specs, then shows the started
+  // confirmation — without the card the turn waits on a click nobody can make.
+  // export action:status is the progress poll and stays a plain badge.
+  const isExportStart = id === 'export' && (part.input as { action?: unknown } | undefined)?.action !== 'status';
   if (isExportStart && part.state !== 'output-error') return <div key={key}><ExportSettingsCard part={part} /></div>;
   // Narration cuts get their own receipt: a per-cut list with click-to-seek, not one collapsed line
-  if (id === 'cut_narration' && part.state === 'output-available') {
+  if (id === 'remove_words' && part.state === 'output-available') {
     const rows = cutRowsOf(part.output);
     const out = part.output as StudioToolResult | undefined;
     if (rows && out?.ok !== false) return <div key={key}><CutListCard summary={out?.summary ?? ''} rows={rows} onLocate={opts?.onLocate} /></div>;
@@ -316,7 +314,7 @@ export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocat
     : [];
   const generation = jobIds.length && opts?.generation
     ? <GenerationJobsBody ids={jobIds} kind={id === 'generate_video' ? 'video' : 'image'} prompt={promptArg} actions={opts.generation} />
-    : (id === 'generate_audio' || id === 'generate_music' || id === 'generate_sfx') && part.state === 'output-available' && opts?.generation
+    : id === 'generate_audio' && part.state === 'output-available' && opts?.generation
       ? <GeneratedAudioBody output={part.output} prompt={promptArg} actions={opts.generation} />
       : null;
   const body = shortfall ?? preview ?? assetResults ?? speechAsset ?? iconsResults ?? generation;
@@ -338,9 +336,9 @@ export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocat
   );
 }
 
-/** Presentation-only fallback for legacy/model-emitted scalar framing calls. New calls should use
- * set_shot_framing.updates[], but persisted conversations may already contain dozens of adjacent
- * receipts; summarize such a run as one card without rewriting the stored AI SDK message. */
+/** Presentation-only grouping for adjacent framing calls. A batch belongs in one
+ * set_clip_framing.items[] call, but a model may still emit one call per clip; summarize such a run
+ * as one card without rewriting the stored AI SDK message. */
 export function renderToolPartGroup(
   parts: ToolPartLike[],
   key: string,

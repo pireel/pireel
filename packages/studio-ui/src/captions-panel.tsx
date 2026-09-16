@@ -7,7 +7,7 @@
  * as the main body (no auto-collapse — the user folds it manually).
  * Line editing: click a line = seek the video to its spot + edit IN PLACE on the same node
  * (contentEditable; background-only editing state — no border, no size change, zero jitter). Edits
- * write back to the TRANSCRIPT (single source of truth: captions re-lay, agents' read_script and the
+ * write back to the TRANSCRIPT (single source of truth: captions re-lay, agents' get_transcript and the
  * script panel all see the fix; timing untouched). The editable DOM stays local for the entire input
  * session and publishes once on blur/Enter, so IME/native undo never triggers transcript re-tokenizing
  * while the user is still typing. With

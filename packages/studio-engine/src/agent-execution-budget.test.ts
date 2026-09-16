@@ -10,20 +10,20 @@ describe('Studio Agent operation safeguards', () => {
   it('requires persisted split/framing operations to use their vectorized forms', () => {
     expect(
       validateStudioProposalBudget([
-        { tool: 'split_shot', input: { atSec: 2 } },
-        { tool: 'split_shot', input: { atSec: 4 } },
+        { tool: 'split_clips', input: { items: [{ atFrame: 60 }] } },
+        { tool: 'split_clips', input: { items: [{ atFrame: 120 }] } },
       ]),
     ).toMatchObject({ ok: false, code: 'too_many_split_calls' });
     expect(
       validateStudioProposalBudget([
-        { tool: 'set_shot_framing', input: { shotId: 's1', scale: 2 } },
-        { tool: 'set_shot_framing', input: { shotId: 's2', scale: 2 } },
+        { tool: 'set_clip_framing', input: { items: [{ clipId: 's1', scale: 2 }] } },
+        { tool: 'set_clip_framing', input: { items: [{ clipId: 's2', scale: 2 }] } },
       ]),
     ).toMatchObject({ ok: false, code: 'too_many_framing_calls' });
     expect(
       validateStudioProposalBudget([
-        { tool: 'split_shot', input: { atSecs: [2, 4], purpose: 'framing' } },
-        { tool: 'set_shot_framing', input: { updates: [{ shotId: 's1', scale: 2 }, { shotId: 's2', scale: 2 }] } },
+        { tool: 'split_clips', input: { items: [{ atFrame: 60 }, { atFrame: 120 }], purpose: 'framing' } },
+        { tool: 'set_clip_framing', input: { items: [{ clipId: 's1', scale: 2 }, { clipId: 's2', scale: 2 }] } },
       ]),
     ).toEqual({ ok: true });
   });

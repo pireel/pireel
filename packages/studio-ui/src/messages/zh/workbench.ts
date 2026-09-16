@@ -354,7 +354,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.geometryPassPct": "几何分析 {pct}%",
   "workbench.graphic": "动态图形",
   "workbench.indexOutOfRange":
-    "index 越界:{list}(该转写共 {n} 句,行号见 read_script)",
+    "index 越界:{list}(该转写共 {n} 句,行号见 get_transcript)",
   "workbench.insertClipNoTranscript": "这个插入片段没有转写",
   "workbench.insertedBRoll": "已插入片段",
   "workbench.insertedDurSClip": "已在 {at}s 插入 {dur}s 的片段",
@@ -366,7 +366,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.invalidRange": "fromSec/toSec 不合法",
   "workbench.invalidToSec": "toSec 不合法",
   "workbench.itemsEmptyInvalidNeed":
-    "items 为空/不合法(要 {index, text}[],index 是 read_script 的行号)",
+    "items 为空/不合法(要 {index, text}[],index 是 get_transcript 的行号)",
   "workbench.jumpedTo": "已跳到 {t}s",
   "workbench.keepLeastOneScene": "至少保留一个场景",
   "workbench.labelsEmptyAllIndexes":
@@ -486,7 +486,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.noTranscriptShort": "还没有口播稿——先提取口播稿",
   "workbench.noTranscriptYetExtract":
     "还没有口播稿——先提取口播(智能剪口播/字幕面板)再同步",
-  "workbench.noTranscriptYetRun": "还没有口播稿,先调用 read_script 获取",
+  "workbench.noTranscriptYetRun": "还没有口播稿,先调用 get_transcript 获取",
   "workbench.speechReused": "同稿同音色已合成过,直接复用缓存语音(未扣费)",
   "workbench.wordCutNeedsPrimarySpeech":
     "逐词剪辑只针对主轨视频里的原声口播;当前旁白是生成的语音轨,要改内容请修改口播稿文本后重新生成语音",
@@ -513,7 +513,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.rangeDeletedMayCover": "这个区间没有命中当前视频剪辑",
   "workbench.rangesEmptyInvalidThose":
     "ranges 为空/不合法,或这些区间在成片里已不存在",
-  "workbench.rawRequired": "raw required(compose_block_brief 简报生成的原文)",
+  "workbench.rawRequired": "raw required(compose_component 契约生成的原文)",
   "workbench.reading": "读取中…",
   "workbench.readingDuration": "读取时长…",
   "workbench.readTranscript": "已读取口播稿",
@@ -639,7 +639,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.outputNotFound": "找不到这个成片",
   "workbench.outputNotFoundOrActive": "找不到这个成片，或它已经是当前成片",
   "workbench.outputSwitchPausedByAgent": "AI 正在编辑，先等它完成再切换成片",
-  "workbench.outputChangedUnderAgent": "当前成片已切到「{active}」，而你正在编辑「{anchored}」。用 switch_output 切回去继续，或用 get_state / list_outputs 以当前成片为准",
+  "workbench.outputChangedUnderAgent": "当前成片已切到「{active}」，而你正在编辑「{anchored}」。用 manage_project 切回去继续，或用 get_state 以当前成片为准",
   "workbench.outputRenamedNamed": "已重命名为「{title}」",
   "workbench.outputSwitched": "已切换成片",
   "workbench.outputSwitcher": "项目成片",

@@ -124,11 +124,11 @@ describe('analysis job state machine', () => {
     expect(() =>
       completeAnalysisJob(running, {
         operations: [
-          { tool: 'set_shot_framing', input: { shotId: 's1', scale: 2 } },
-          { tool: 'set_shot_framing', input: { shotId: 's2', scale: 2 } },
+          { tool: 'set_clip_framing', input: { items: [{ clipId: 's1', scale: 2 }] } },
+          { tool: 'set_clip_framing', input: { items: [{ clipId: 's2', scale: 2 }] } },
         ],
       }),
-    ).toThrow(/batch every shot/);
+    ).toThrow(/batch every clip/);
   });
 });
 
@@ -139,7 +139,7 @@ describe('edit proposal evaluation', () => {
       {
         operations: [
           { tool: 'set_canvas', input: { preset: 'portrait' } },
-          { tool: 'set_shot_framing', input: { shotId: 's1', scale: 2, anchorX: 0.3, anchorY: 0.4 } },
+          { tool: 'set_clip_framing', input: { items: [{ clipId: 's1', scale: 2, anchorX: 0.3, anchorY: 0.4 }] } },
         ],
       },
       { proposalId: 'prop1', now: 30 },
@@ -203,7 +203,7 @@ describe('edit proposal evaluation', () => {
       ...readyProposal(),
       operations: [
         { tool: 'set_canvas', input: { preset: 'portrait' } },
-        { tool: 'set_shot_framing', input: { shotId: 'missing', scale: 2 } },
+        { tool: 'set_clip_framing', input: { items: [{ clipId: 'missing', scale: 2 }] } },
       ],
     };
     const original = comp();
