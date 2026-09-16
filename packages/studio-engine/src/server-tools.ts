@@ -175,6 +175,7 @@ export const SERVER_EXECUTABLE_TOOLS: ReadonlySet<string> = new Set([
   'swap_clip_media',
   'add_texts',
   'update_text',
+  'remove_words',
   'add_clips',
   'insert_clips',
   'move_clips',

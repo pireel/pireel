@@ -365,27 +365,24 @@ function translateSetClipProperties(input: Input, ctx: V3AdapterContext): V3Tran
 }
 
 function translateRemoveWords(input: Input): V3Translation {
-  const calls: LegacyCall[] = [];
-  if (Array.isArray(input.ranges) && input.ranges.length) {
-    // v3 ranges are [inSec, outSec] pairs; the legacy cutter reads {fromSec, toSec} objects. The
-    // pairs used to pass through untouched and every range-based cut failed as "ranges empty".
-    const ranges: Array<{ fromSec: number; toSec: number }> = [];
-    for (const [index, range] of input.ranges.entries()) {
-      const pair = Array.isArray(range) ? range : (range && typeof range === 'object' ? [(range as Input).fromSec ?? (range as Input).inSec, (range as Input).toSec ?? (range as Input).outSec] : []);
-      const fromSec = pair[0];
-      const toSec = pair[1];
-      if (!isFiniteNumber(fromSec) || !isFiniteNumber(toSec) || fromSec < 0 || toSec <= fromSec) {
+  // Typed engine tool: ranges and words cut in one call (agent-timeline removeWords). Only the
+  // shape is checked here so a bad pair is refused before anything runs.
+  const hasRanges = Array.isArray(input.ranges) && input.ranges.length > 0;
+  const hasWords = Array.isArray(input.wordIds) && input.wordIds.length > 0;
+  if (!hasRanges && !hasWords) return { status: 'error', error: 'missing_field', path: 'wordIds|ranges', fix: 'Pass wordIds from get_transcript words, or ranges in source seconds.' };
+  if (hasRanges) {
+    for (const [index, range] of (input.ranges as unknown[]).entries()) {
+      const pair = Array.isArray(range) ? range : [];
+      if (!isFiniteNumber(pair[0]) || !isFiniteNumber(pair[1]) || (pair[0] as number) < 0 || (pair[1] as number) <= (pair[0] as number)) {
         return { status: 'error', error: 'invalid_value', path: `ranges[${index}]`, value: range, fix: 'Each range is a two-number array [inSec, outSec] in source seconds with outSec > inSec ≥ 0, taken from get_transcript segments.' };
       }
-      ranges.push({ fromSec, toSec });
     }
-    calls.push({ tool: 'cut_narration', input: { ranges, ...(isFiniteNumber(input.keepGapSec) ? { keepGapSec: input.keepGapSec } : {}) } });
   }
-  if (Array.isArray(input.wordIds) && input.wordIds.length) {
-    calls.push({ tool: 'delete_words', input: { wordIds: input.wordIds } });
-  }
-  if (!calls.length) return { status: 'error', error: 'missing_field', path: 'wordIds|ranges', fix: 'Pass wordIds from get_transcript words, or ranges in source seconds.' };
-  return { status: 'ok', calls, note: 'Word ids and transcript positions shift after this call; re-read get_transcript before the next remove_words.' };
+  const call: Input = {};
+  if (hasRanges) call.ranges = input.ranges;
+  if (hasWords) call.wordIds = input.wordIds;
+  if (isFiniteNumber(input.keepGapSec)) call.keepGapSec = input.keepGapSec;
+  return { status: 'ok', calls: [{ tool: 'remove_words', input: call }], note: 'Word ids and transcript positions shift after this call; re-read get_transcript before the next remove_words.' };
 }
 
 function translateAddTransition(input: Input, ctx: V3AdapterContext): V3Translation {

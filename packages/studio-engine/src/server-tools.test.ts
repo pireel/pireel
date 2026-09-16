@@ -1123,3 +1123,35 @@ describe('v3 receipts (receipt: "v3")', () => {
     expect(JSON.stringify(delta)).not.toMatch(/shotsUpdated|blocksShifted|fromSec/);
   });
 });
+
+describe('remove_words (typed)', () => {
+  it('cuts source-second pairs and exact words in one call, with the cuts in the receipt', () => {
+    const p = v2proj();
+    const byRange = runServerTool('remove_words', { ranges: [[0, 5]] }, p);
+    expect(byRange.result.ok).toBe(true);
+    expect(byRange.comp!.shots!.reduce((a, s) => a + (s.srcEnd - s.srcStart), 0)).toBeCloseTo(15, 1);
+    const cuts = (byRange.result.data as { cuts: Array<{ atSec: number; removedSec: number }>; removedTotalSec: number }).cuts;
+    expect(cuts).toHaveLength(1);
+    expect((byRange.result.data as { removedTotalSec: number }).removedTotalSec).toBeCloseTo(5, 1);
+
+    const fresh = v2proj({ transcript: [{ start: 0, end: 4, text: 'one two three', words: [
+      { text: 'one', start: 0.2, end: 0.8 }, { text: 'two', start: 1, end: 1.6 }, { text: 'three', start: 2, end: 2.8 },
+    ] }] });
+    const words = (runServerTool('list_words', { sentenceIndexes: [0] }, fresh).result.data as { words: Array<{ id: string }> }).words;
+    const byWord = runServerTool('remove_words', { wordIds: [words[1]!.id] }, fresh);
+    expect(byWord.result.ok).toBe(true);
+    expect(byWord.comp!.shots!.reduce((n, s) => n + s.srcEnd - s.srcStart, 0)).toBeCloseTo(19.4, 1);
+  });
+
+  it('refuses pairs that no longer map onto the timeline with a fix, and stale word ids by name', () => {
+    const p = v2proj();
+    const gone = runServerTool('remove_words', { ranges: [[40, 45]] }, p);
+    expect(gone.result.ok).toBe(false);
+    expect(gone.result.error).toBe('ranges_not_on_timeline');
+    expect((gone.result.data as { fix: string }).fix).toContain('get_transcript');
+    const stale = runServerTool('remove_words', { wordIds: ['word_stale'] }, p);
+    expect(stale.result.ok).toBe(false);
+    expect(stale.result.error).toContain('word_stale');
+    expect(runServerTool('remove_words', {}, p).result.ok).toBe(false);
+  });
+});

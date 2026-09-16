@@ -780,10 +780,23 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               }
             }
           }
+          if (toolId === 'remove_words') {
+            // The engine cuts by the document's transcripts: fold the runtime copies in first so
+            // word ids and segment positions match what get_transcript just reported.
+            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: tEnglish('workbench.noVideoYet') };
+            await ensureClipTranscripts();
+            const synced = transcriptInputsFor(documentRef.current, asrRef.current, captionTranscriptsByAsset(documentRef.current, compRef.current, clipAsrRef.current));
+            if (Object.keys(synced).length) commit({ op: 'document.foldMetadata', input: synced }, { undo: 'none' });
+          }
           const applied = commit({ op: 'agent.timeline', input: { tool: toolId, input: timelineInput } }, { undo: 'none' });
           let outcome: AgentTimelineOutcome = applied.ok
             ? { ok: true, document: applied.document, ...(applied.summary ? { summary: applied.summary } : {}), ...(applied.data !== undefined ? { data: applied.data } : {}) }
             : { ok: false, error: applied.error.message };
+          if (toolId === 'remove_words' && outcome.ok) {
+            const cuts = (outcome.data as { cuts?: Array<{ atSec: number }> } | undefined)?.cuts ?? [];
+            setSelectedShotId(null);
+            if (cuts.length) applyT(Math.min(...cuts.map((cut) => cut.atSec)));
+          }
           // Project-library media is not in the document until placed; answer its metadata from the
           // device index instead of reporting the user's own footage as missing.
           if (toolId === 'inspect_media' && outcome.ok && Array.isArray((outcome.data as { assets?: unknown } | undefined)?.assets)) {
