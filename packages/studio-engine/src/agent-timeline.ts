@@ -1618,10 +1618,10 @@ function addTexts(document: EditorDocumentV2, input: Input): AgentTimelineOutcom
   const receipts: EditorCommandReceipt[] = [];
   const clipIds: string[] = [];
   const skippedDuplicates: string[] = [];
-  // A track id the project does not have is not a request for a new lane per item (that once put
-  // five titles on five tracks). Placement falls back to the lane rule — the first graphics lane
-  // free over the text's window — and the receipt says the id was ignored.
-  const ignoredTrackIds = new Set<string>();
+  // A requested track is honoured: an unknown id is created once and every later item naming it
+  // lands there. A requested track already occupied over the text's window is not overwritten —
+  // that text goes to a free lane and the receipt says so.
+  const relocated: string[] = [];
   const used = new Set(next.timeline.tracks.flatMap((track) => track.clips.map((clip) => clip.id)));
   for (const [index, raw] of items.entries()) {
     const item = (raw ?? {}) as Input;
@@ -1677,12 +1677,15 @@ function addTexts(document: EditorDocumentV2, input: Input): AgentTimelineOutcom
     block.id = uniqueId(string(item.id) ?? block.id, used);
     used.add(block.id);
     const requestedTrackId = string(item.trackId);
-    const trackExists = !!requestedTrackId && next.timeline.tracks.some((track) => track.id === requestedTrackId);
-    if (requestedTrackId && !trackExists) ignoredTrackIds.add(requestedTrackId);
+    const requestedTrack = requestedTrackId ? next.timeline.tracks.find((track) => track.id === requestedTrackId) : undefined;
+    const startFrame = secondsToTimelineFrames(startSec, next.canvas.fps);
+    const endFrame = startFrame + positiveDurationFrames(durationSec, next.canvas.fps);
+    const occupied = !!requestedTrack && requestedTrack.clips.some((clip) => clip.startFrame < endFrame && clip.startFrame + clip.durationFrames > startFrame);
+    if (occupied) relocated.push(block.id);
     const inserted = insertOverlayDocumentClip({
       document: next,
       block,
-      ...(trackExists ? { toTrackId: requestedTrackId } : {}),
+      ...(requestedTrackId && !occupied ? { toTrackId: requestedTrackId } : {}),
       ...(string(item.sceneId) ? { sceneId: string(item.sceneId) } : {}),
     });
     if (!inserted.ok) return fail(inserted.error.message, inserted.error);
@@ -1700,9 +1703,9 @@ function addTexts(document: EditorDocumentV2, input: Input): AgentTimelineOutcom
         skippedDuplicates,
         instruction: 'Identical on-screen text already exists in that time window. Use update_texts to restyle or move the existing clip instead of adding a copy.',
       } : {}),
-      ...(ignoredTrackIds.size ? {
-        ignoredTrackIds: [...ignoredTrackIds],
-        note: `${[...ignoredTrackIds].map((id) => JSON.stringify(id)).join(', ')} ${ignoredTrackIds.size === 1 ? 'is not a track in this project' : 'are not tracks in this project'}; each text was placed on the first graphics lane free over its window (trackId in the delta). Omit trackId to let the lane rule place texts, or pass a track id from get_state.`,
+      ...(relocated.length ? {
+        relocatedClipIds: relocated,
+        note: `${relocated.map((id) => JSON.stringify(id)).join(', ')} ${relocated.length === 1 ? 'was' : 'were'} placed on a free lane instead of the requested track, which already has a clip in that time window (trackId in the delta). Nothing was overwritten.`,
       } : {}),
     },
   );

@@ -180,7 +180,7 @@ describe('shared agent timeline atoms', () => {
     expect((echo.data as { clipIds: string[] }).clipIds).toEqual(['line-echo']);
   });
 
-  it('ignores a track id the project does not have and places texts by the lane rule instead of one lane each', () => {
+  it('creates a requested track once under that id, reuses it, and never overwrites a text already there', () => {
     const document = emptyEditorDocumentV2({ fps: 30 });
     const placed = runAgentTimelineTool(document, 'add_texts', { items: [
       { id: 't1', text: '人生的奥德赛时期', startSec: 1, durationSec: 3.5, trackId: 'track_graphics' },
@@ -190,15 +190,22 @@ describe('shared agent timeline atoms', () => {
     ] });
     expect(placed.ok, JSON.stringify(placed)).toBe(true);
     const graphics = placed.document!.timeline.tracks.filter((track) => track.type === 'graphics');
-    // Three non-overlapping texts share one lane; the one that overlaps t3 in time gets a second lane.
+    expect(graphics.map((track) => track.id)).toContain('track_graphics');
+    const requested = graphics.find((track) => track.id === 'track_graphics')!;
+    // The three texts that fit share the requested lane; the one overlapping t3 in time goes elsewhere intact.
+    expect(requested.clips.map((clip) => clip.id)).toEqual(['t1', 't2', 't3']);
     expect(graphics).toHaveLength(2);
-    const laneOf = (id: string) => graphics.find((track) => track.clips.some((clip) => clip.id === id))!.id;
-    expect(laneOf('t1')).toBe(laneOf('t2'));
-    expect(laneOf('t2')).toBe(laneOf('t3'));
-    expect(laneOf('t4')).not.toBe(laneOf('t3'));
-    const data = placed.data as { ignoredTrackIds?: string[]; note?: string };
-    expect(data.ignoredTrackIds).toEqual(['track_graphics']);
-    expect(data.note).toContain('"track_graphics" is not a track in this project');
+    expect(graphics.find((track) => track.id !== 'track_graphics')!.clips.map((clip) => clip.id)).toEqual(['t4']);
+    const data = placed.data as { relocatedClipIds?: string[]; note?: string };
+    expect(data.relocatedClipIds).toEqual(['t4']);
+    expect(data.note).toContain('Nothing was overwritten');
+    // A later call naming the same track lands on it, no new lane.
+    const later = runAgentTimelineTool(placed.document!, 'add_texts', { items: [
+      { id: 't5', text: '依然值得被爱', startSec: 30, durationSec: 2, trackId: 'track_graphics' },
+    ] });
+    expect(later.ok).toBe(true);
+    expect(later.document!.timeline.tracks.filter((track) => track.type === 'graphics')).toHaveLength(2);
+    expect(later.document!.timeline.tracks.find((track) => track.id === 'track_graphics')!.clips.map((clip) => clip.id)).toEqual(['t1', 't2', 't5', 't3']);
   });
 
   it('keeps overlay text out of the caption band and off concurrent titles', () => {

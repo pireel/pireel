@@ -122,6 +122,11 @@ function insertTargetTrack(
   return { ok: true, document: inserted.document, trackId: newTrack.id, receipts: [inserted.receipt] };
 }
 
+/** Track ids travel through receipts, selectors and URLs: keep a caller-supplied one to a plain token. */
+function isSafeTrackId(id: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$/.test(id);
+}
+
 function uniqueTrackId(document: EditorDocumentV2, stackOrder: number): string {
   const used = new Set(document.timeline.tracks.map((track) => track.id));
   const stem = `track_graphics_${Math.max(1, Math.round(stackOrder))}`;
@@ -169,11 +174,15 @@ export function insertOverlayDocumentClip(input: InsertOverlayDocumentClipInput)
       ? input.document.timeline.tracks.find((track) =>
           track.type === 'graphics' && track.stackOrder === stackOrder)
       : undefined;
+  // A requested track that does not exist yet is created under that very id, once: the next
+  // insert naming it finds it. Creating it under a generated id instead had turned five texts
+  // asking for one lane into five lanes.
+  const requestedNewId = input.toTrackId && !existing && isSafeTrackId(input.toTrackId) ? input.toTrackId : undefined;
   const target = insertTargetTrack(input.document, existing
     ? { toTrackId: existing.id }
     : input.newTrack
       ? { newTrack: input.newTrack }
-      : { newTrack: { id: uniqueTrackId(input.document, stackOrder), stackOrder, name: `Graphics ${stackOrder}` } });
+      : { newTrack: { id: requestedNewId ?? uniqueTrackId(input.document, stackOrder), stackOrder, name: `Graphics ${stackOrder}` } });
   if (!target.ok) return target;
   const { id, startSec, durationSec, trackIndex: _trackIndex, ...block } = input.block;
   const startFrame = secondsToTimelineFrames(startSec, target.document.canvas.fps);

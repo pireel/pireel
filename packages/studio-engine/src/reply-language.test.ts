@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CHAT_RESPONSE_LANGUAGE, replyLanguageDirective } from './reply-language';
+import { CHAT_RESPONSE_LANGUAGE, replyLanguageDirective, replyLanguageReminder } from './reply-language';
 import { v3Instructions } from './agent-surface-v3/instructions';
 import { CHAT_IDENTITY } from './prompts/chat';
 import { buildBlockPrompt, buildKitPrompt } from './compose';
@@ -28,8 +28,9 @@ describe('one stable conversation-language rule', () => {
     expect(zh).toContain('interface language is Chinese');
     expect(zh).toContain('including the short lines you say while working');
     const prompt = v3Instructions({ surface: 'chat', replyLanguage: zh });
-    expect(prompt).toContain(zh);
+    expect(prompt.trimEnd().endsWith(zh)).toBe(true); // last thing the model reads before answering
     expect(prompt).not.toContain(CHAT_RESPONSE_LANGUAGE);
+    expect(replyLanguageReminder('zh')).toBe('（请始终用中文回复。）');
     expect(replyLanguageDirective('en')).toContain('interface language is English');
   });
 });
