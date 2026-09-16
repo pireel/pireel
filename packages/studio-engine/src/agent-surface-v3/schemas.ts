@@ -272,7 +272,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   remove_clips: {
     description:
-      'Remove clips of any kind. Default leaves a gap (later material stays put); ripple=true closes the gap on sync-locked lanes, which for story-spine clips means later footage plays earlier. Linked partners go with the clip unless includeLinked=false. To turn captions off use set_captions {on:false}.',
+      'Remove clips of any kind. Removing a story-spine clip always closes its gap on the spine (later footage plays earlier; the spine has no gaps) while speech, captions and graphics stay where they are. ripple=true additionally cuts that time span out of every sync-locked lane — narration and captions included — so use it only when the whole moment should disappear, not just the picture. Other lanes leave a gap unless ripple=true. Linked partners go with the clip unless includeLinked=false. To turn captions off use set_captions {on:false}.',
     inputSchema: obj({
       clipIds: ids('Clips to remove.'),
       ripple: bool('Close the gap on sync-locked lanes.'),
@@ -295,7 +295,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   set_clip_properties: {
     description:
-      'Patch properties on clips in one undo step: source [inSec,outSec] retrims, durationFrames, speed (0.25–4; the spine ripples by default, other lanes do not), volumeDb (−60…+20, 0 = source level), mute, fades {in,out} in frames, opacity, filter {brightness,contrast,saturate} (1 = untouched), enabled, box, and assetId to swap the clip’s media while keeping its geometry. props sets a graphic clip’s declared editable properties as [{key,value}] pairs — the keys, types and current values are listed under component.props in get_state; no regeneration. Layout and framing belong to set_clip_framing; timing moves to move_clips.',
+      'Patch properties on clips in one undo step: source [inSec,outSec] retrims a media clip (its length follows the span), durationFrames resizes graphic and text clips only, speed (0.25–4; the spine ripples by default, other lanes do not), volumeDb (−60…+20, 0 = source level), mute, fades {in,out} in frames, opacity, filter {brightness,contrast,saturate} (1 = untouched), enabled, box, and assetId to swap the clip’s media while keeping its geometry. props sets a graphic clip’s declared editable properties as [{key,value}] pairs — the keys, types and current values are listed under component.props in get_state; no regeneration. Layout and framing belong to set_clip_framing; timing moves to move_clips.',
     inputSchema: obj({
       items: arr(obj({
         clipId: str(), assetId: str('Swap the media identity.'), source: SOURCE_RANGE, durationFrames: int('New duration in frames.', 1),

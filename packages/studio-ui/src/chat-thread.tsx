@@ -61,6 +61,7 @@ import { Composer, type ComposerHandle } from "./chat-composer";
 import {
   assistantEditorialCapacityShortfall,
   assistantHasOpenOrInterruptedInteraction,
+  assistantTurnEndedWithAnswer,
   assistantMessageHasRenderableOutput,
   assistantMessageSuggestsContinuation,
   assistantWorkDurationMs,
@@ -625,6 +626,11 @@ export function ChatThread({
       !isRecoverableStudioChatError(error) ||
       assistantHasOpenOrInterruptedInteraction(
         messagesRef.current[messagesRef.current.length - 1],
+      ) ||
+      // A turn that already delivered its answer was not interrupted; a transport error after it
+      // must not re-prompt the model into "finishing" what it deliberately left to the user.
+      assistantTurnEndedWithAnswer(
+        messagesRef.current[messagesRef.current.length - 1],
       )
     ) return;
     const timer = setTimeout(() => {
@@ -633,6 +639,9 @@ export function ChatThread({
         userStoppedRef.current ||
         autoRecoveryAttemptedRef.current ||
         assistantHasOpenOrInterruptedInteraction(
+          messagesRef.current[messagesRef.current.length - 1],
+        ) ||
+        assistantTurnEndedWithAnswer(
           messagesRef.current[messagesRef.current.length - 1],
         )
       ) return;

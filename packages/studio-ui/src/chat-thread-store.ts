@@ -470,6 +470,9 @@ export function assistantMessageSuggestsContinuation(message: UIMessage): boolea
     .join('\n')
     .trim();
   if (!text) return false;
+  // An answer that hands a decision back to the user is a turn boundary, however much work it
+  // names: "continuing" it would perform the options the user has not chosen yet.
+  if (assistantTextAwaitsUserDecision(text)) return false;
   const parts = message.parts ?? [];
   const lastToolIndex = parts.reduce((latest, part, index) => {
     const type = (part as { type?: string }).type ?? '';
@@ -500,12 +503,35 @@ export function assistantMessageSuggestsContinuation(message: UIMessage): boolea
   if (text.length >= 6_000 && /[\p{L}\p{N}_-]$/u.test(text) && !/[。！？.!?…）)】\]"'”’]$/u.test(text)) return true;
   if (/(?:要不要|是否|如需|请|点击|回复|输入).{0,16}(?:继续|接着)|(?:click|reply|say).{0,20}continue/i.test(text)) return true;
   const tail = text.slice(-600);
-  if (/(?:让我|我(?:再|来|接着|继续|现在|接下来)|接着|随后)[^。！？!?\n]{0,180}(?:补上|添加|加上|加字幕|生成|处理|完成|修复|放置|执行|检查|核对)[^。！？!?\n]{0,100}[。！.!…]*$/i.test(tail)) return true;
+  if (/(?:(?<!你)让我|我(?:再|来|接着|继续|现在|接下来)|接着|随后)[^。！？!?\n]{0,180}(?:补上|添加|加上|加字幕|生成|处理|完成|修复|放置|执行|检查|核对)[^。！？!?\n]{0,100}[。！.!…]*$/i.test(tail)) return true;
   if (/(?:我(?:现在|接下来)?(?:会|来|开始)|接下来|下一步|next(?:,| step)?)[^。！？!?\n]{0,160}(?:开始|继续|完成|处理|组片|剪辑|修复|复检|生成|放置|执行|proceed|continue|finish|start|execute)[。！.!…]*$/i.test(tail)) return true;
   // Providers sometimes spend their whole response planning, then stop on a standalone action
   // cue instead of emitting the promised tool call. A completed recap says “已完成/已执行”; the
   // bare imperative below is an unfinished handoff and should be resumed automatically.
   return /(?:^|[\n。！？!?])\s*(?!(?:已|已经|完成|成功))(?:现在|立即|开始)?\s*(?:执行|开始放置|开始剪辑|继续处理|execute|executing now|proceeding now)[。！.!…]*$/i.test(tail);
+}
+
+/** The closing text asks the user to decide (which option, whether to proceed, what they meant):
+ * the assistant stopped on purpose and nothing is pending on its side. */
+export function assistantTextAwaitsUserDecision(text: string): boolean {
+  const tail = text.trim().slice(-400);
+  return /(?:要不要|是否(?:要|需要|也)|需要我|告诉我|你(?:想|要|希望|决定|说)|请(?:确认|告诉|选择|指定)|哪一?个|[？?]\s*(?:\*\*)?\s*$|do you want|would you like|let me know|tell me|should i|which (?:one|of)|your call)/i.test(tail);
+}
+
+/** A finished answer: the last part is text, every tool call has its receipt, and the text does not
+ * announce work still to come. Nothing about such a turn was interrupted, whatever the transport did
+ * afterwards, so no continuation prompt may be sent for it. */
+export function assistantTurnEndedWithAnswer(message: UIMessage | undefined): boolean {
+  if (!message || message.role !== 'assistant') return false;
+  const parts = message.parts ?? [];
+  const last = [...parts].reverse().find((part) => (part as { type?: string }).type !== 'step-start');
+  if (!last || (last as { type?: string }).type !== 'text' || !(last as { text?: string }).text?.trim()) return false;
+  const dangling = parts.some((part) => {
+    const candidate = part as { type?: string; state?: string };
+    const isTool = candidate.type === 'dynamic-tool' || !!candidate.type?.startsWith('tool-');
+    return isTool && candidate.state !== 'output-available' && candidate.state !== 'output-error';
+  });
+  return !dangling && !assistantMessageSuggestsContinuation(message);
 }
 
 /** An interaction boundary cannot be resumed safely without the user. Automatic stream recovery

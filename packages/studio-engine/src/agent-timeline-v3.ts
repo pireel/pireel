@@ -19,61 +19,24 @@ import {
   type EditorDocumentV2,
   type TimelineClip,
 } from './editor-document';
-import {
-  CAPTION_PRESETS,
-  CUT_TRANSITION_EFFECTS,
-  DIRECTIONAL_TRANSITIONS,
-  MAX_TRANSITION_SEC,
-  PLACE_ANCHORS,
-  SHOT_TREATMENTS,
-  applyBlockPlacement,
-  applyCanvasDocumentEdit,
-  applyCaptionDocumentEdit,
-  applyCompositionLayout,
-  applyLayoutDocumentEdit,
-  applyMediaCropInput,
-  applyMediaTransformInput,
-  applyNarrationDocumentEdit,
-  applyNarrationSplitCommands,
-  applyOverlayDocumentEdits,
-  applyShotFramingInput,
-  applyVideoClipSettingsPatches,
-  blockId,
-  blockKind,
-  canvasSizeFollowingFirstVideo,
-  canvasSizeFromInput,
-  duplicateOverlayDocumentClip,
-  editorDocumentRenderPlan,
-  firstNarrativeAssetId,
-  freeTrack,
-  getCaptionPreset,
-  isCaptionsOn,
-  isSentenceCaption,
-  listDocumentAddressedWords,
-  mediaVideoClipEntries,
-  narrativeClipTimelineRange,
-  normalizeNarrationSplitPoints,
-  patchNarrativeClips,
-  placementFramingNotes,
-  primaryNarrativeClips,
-  projectDocumentToComposition,
-  removeNarrationClipsWithoutRipple,
-  removeOverlayDocumentClips,
-  renderBlock,
-  resolveCaptionStyle,
-  resolveDocumentWordIds,
-  retimeOverlayDocumentClip,
-  shotFilterCss,
-  splitBlockedByTransition,
-  videoShotTimelineSpans,
-  zoneOf,
-  type Block,
-  type Composition,
-  type CutTransitionEffect,
-  type ShotFilter,
-  type TransitionDirection,
-  type VideoShot,
-} from './composition';
+import { narrativeClipTimelineRange } from './editor-document/read-model';
+import { CAPTION_PRESETS, getCaptionPreset } from './caption-presets';
+import { CUT_TRANSITION_EFFECTS, DIRECTIONAL_TRANSITIONS, MAX_TRANSITION_SEC, PLACE_ANCHORS, SHOT_TREATMENTS, applyBlockPlacement, blockId, blockKind, freeTrack, isCaptionsOn, isSentenceCaption, placementFramingNotes, renderBlock, resolveCaptionStyle, shotFilterCss, splitBlockedByTransition, videoShotTimelineSpans, zoneOf, type Block, type Composition, type CutTransitionEffect, type ShotFilter, type TransitionDirection, type VideoShot } from './composition-core';
+import { applyCanvasDocumentEdit } from './canvas-document-edit';
+import { applyCaptionDocumentEdit } from './caption-document-edit';
+import { applyCompositionLayout, applyShotFramingInput, canvasSizeFollowingFirstVideo, canvasSizeFromInput } from './editing-primitives';
+import { applyLayoutDocumentEdit } from './layout-document-edit';
+import { applyMediaCropInput, applyMediaTransformInput } from './media-framing-edit';
+import { applyNarrationDocumentEdit, removeNarrationClipsWithoutRipple } from './narration-document-edit';
+import { applyNarrationSplitCommands, normalizeNarrationSplitPoints } from './editor-document/commands/narration-split';
+import { applyOverlayDocumentEdits, removeOverlayDocumentClips } from './overlay-document-edit';
+import { applyVideoClipSettingsPatches, mediaVideoClipEntries } from './media-video-edit';
+import { duplicateOverlayDocumentClip, retimeOverlayDocumentClip } from './overlay-track-edit';
+import { editorDocumentRenderPlan } from './editor-document/render-plan';
+import { firstNarrativeAssetId, primaryNarrativeClips } from './editor-document/read-model';
+import { listDocumentAddressedWords, resolveDocumentWordIds } from './editor-document/transcript-address';
+import { patchNarrativeClips } from './editor-document/commands/narrative-patch';
+import { projectDocumentToComposition } from './project-document';
 import { STUDIO_AGENT_EXECUTION_LIMITS } from './agent-execution-budget';
 import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations, desegmentCues } from './build-blocks';
 import { applyCaptionTextEdits } from './caption-text-edit';

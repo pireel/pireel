@@ -5,6 +5,7 @@ import {
   assistantHasOpenOrInterruptedInteraction,
   assistantMessageHasRenderableOutput,
   assistantMessageSuggestsContinuation,
+  assistantTurnEndedWithAnswer,
   assistantWorkDurationMs,
   assistantWorkFold,
   createStudioTurnLedger,
@@ -372,6 +373,23 @@ describe('assistantMessageSuggestsContinuation', () => {
   it('does not annotate a completed answer or duplicate an approval interaction', () => {
     expect(assistantMessageSuggestsContinuation(assistant([
       { type: 'text', text: '已经完成剪辑并复检，字幕与视频等长。' },
+    ]))).toBe(false);
+    // An answer that hands the decision back names work it might do — that is a question, not a
+    // pending step (this exact shape re-prompted the model into unrequested edits on device).
+    expect(assistantMessageSuggestsContinuation(assistant([
+      { type: 'tool-remove_clips', toolCallId: 'rm-1', state: 'output-available', input: {}, output: { ok: true } },
+      { type: 'text', text: '第二个分镜已经删掉了。不过有两处问题：开头多了一张对比卡片，要不要我删掉？53 秒处结尾是全黑的，我可以把最后一个镜头的出点收回。你让我删第二个分镜，很可能就是因为看到了这个黑尾——如果是的话，告诉我，我按修正结尾来处理，而不是再去动分镜。' },
+    ] as UIMessage['parts']))).toBe(false);
+    expect(assistantTurnEndedWithAnswer(assistant([
+      { type: 'tool-remove_clips', toolCallId: 'rm-1', state: 'output-available', input: {}, output: { ok: true } },
+      { type: 'text', text: '第二个分镜已经删掉了，要不要我顺手把开头的卡片也删掉？' },
+    ] as UIMessage['parts']))).toBe(true);
+    expect(assistantTurnEndedWithAnswer(assistant([
+      { type: 'text', text: '先看一眼时间线。' },
+      { type: 'tool-get_state', toolCallId: 'gs-1', state: 'input-available', input: {} },
+    ] as UIMessage['parts']))).toBe(false);
+    expect(assistantTurnEndedWithAnswer(assistant([
+      { type: 'text', text: '让我用一条自然收尾的镜头补上这段，然后加字幕。' },
     ]))).toBe(false);
     expect(assistantMessageSuggestsContinuation(assistant([
       { type: 'text', text: '所有时间线操作均已执行。' },
