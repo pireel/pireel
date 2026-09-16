@@ -579,6 +579,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.framingGroupFailed":
     "已合并 {n} 次精确取景 · 成功 {done},失败 {failed}",
   "workbench.framingGroupRunning": "正在合并 {n} 次精确取景 · 已完成 {done}",
+  "workbench.brollClipN": "B-roll #{n}",
   "workbench.shotN": "分镜 #{n}",
   "workbench.shotNotFound": "找不到这个分镜",
   "workbench.smallerText": "字号调小",

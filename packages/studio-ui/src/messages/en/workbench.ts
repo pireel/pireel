@@ -635,6 +635,7 @@ export const WORKBENCH_EN: Record<string, string> = {
     "Grouped {n} precise-framing updates · {done} done, {failed} failed",
   "workbench.framingGroupRunning":
     "Grouping {n} precise-framing updates · {done} done",
+  "workbench.brollClipN": "B-roll #{n}",
   "workbench.shotN": "Shot #{n}",
   "workbench.shotNotFound": "Shot not found",
   "workbench.smallerText": "Smaller text",

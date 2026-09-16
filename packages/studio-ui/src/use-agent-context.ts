@@ -28,7 +28,7 @@ import { sceneDesignsFromDocument } from '@pireel/studio-engine/scene-design';
 import { wrapAgentTranscript } from '@pireel/studio-engine/prompts';
 import type { VisualTimeline } from './visual';
 import type { StudioElementRef } from './studio-chat';
-import { agentElementRosterKey, buildAgentElementRoster } from './agent-element-roster';
+import { agentElementRosterKey, agentMediaClipRefs, buildAgentElementRoster } from './agent-element-roster';
 import { blockDisplayTitle } from './block-display-title';
 import { loadCurrentUserBalance } from './current-user';
 import { t } from './i18n';
@@ -61,9 +61,12 @@ export function useAgentContext(deps: AgentContextDeps) {
   /* ---------- chat agent: can @ components + request context + client-executed tools ---------- */
   // Memo by **content key** (not array identity): box drag etc. changes the blocks array identity every frame but id/label/kind
   // don't change — keeping elements identity stable so the memoized StudioChat doesn't re-render every frame.
-  const chatElemsKey = agentElementRosterKey(comp.blocks, comp.shots ?? []);
+  // B-roll and image clips live only in the document (the legacy composition has no lane for them);
+  // they are @-mentionable and pinnable like blocks and spine shots.
+  const mediaClipRefs = agentMediaClipRefs(documentRef.current);
+  const chatElemsKey = agentElementRosterKey(comp.blocks, comp.shots ?? [], mediaClipRefs);
   const chatElements = useMemo<StudioElementRef[]>(
-    () => buildAgentElementRoster(compRef.current.blocks, compRef.current.shots ?? []),
+    () => buildAgentElementRoster(compRef.current.blocks, compRef.current.shots ?? [], agentMediaClipRefs(documentRef.current)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [chatElemsKey],
   );

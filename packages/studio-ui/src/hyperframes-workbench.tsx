@@ -323,6 +323,7 @@ import { StudioBootOverlay } from "./studio-boot";
 import { confirm } from "@pireel/ui/confirm";
 import type { StudioToolResult } from "@pireel/studio-engine/prompts";
 import { studioToolDefFor } from "./v3-tool-defs";
+import { agentMediaClipRefs } from "./agent-element-roster";
 import { useAgentBridge } from "./use-agent-bridge";
 import {
   type VisualPrep,
@@ -7476,9 +7477,20 @@ export function HyperframesWorkbench({
           kind: "shot",
           isShot: true,
         };
+    } else if (selectedVisualClipId) {
+      // B-roll and image clips are selected through their own channel; they pin like any element.
+      const clips = agentMediaClipRefs(editorDocumentRef.current);
+      const i = clips.findIndex((clip) => clip.id === selectedVisualClipId);
+      if (i >= 0)
+        el = {
+          id: selectedVisualClipId,
+          label: clips[i]!.label ?? t("workbench.brollClipN", { n: i + 1 }),
+          kind: clips[i]!.kind,
+          isShot: false,
+        };
     }
     chatRef.current?.insertElementPill(el);
-  }, [selectedId, selectedShotId]);
+  }, [selectedId, selectedShotId, selectedVisualClipId]);
 
   /** When hover-preview jumps to v seconds, whether to hide the selected component's edit box: outside its time window = hide.
    *  Sentence-level captions are the exception — the handle is global, so keep it if any sentence-level caption is present at v. v=null (hover ended) = don't hide. */
