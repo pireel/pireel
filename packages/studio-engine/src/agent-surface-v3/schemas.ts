@@ -504,7 +504,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   generate_audio: {
     description:
-      `${CHARGE_MARKER} Generate one audio asset from text and return it registered-ready. kind=music: an instrumental bed, 30–300 s, prompt = genre/instrumentation + energy + role under the picture + constraints. kind=sfx: one sound effect 0.5–22 s for off-screen or editorial sound (whoosh, ping, stinger, ambience) — describe the sound, not the scene; promptInfluence 0–1 (default 0.3), loop for seamless beds. Then register_media and add_clips with role music or sfx. Picture-synchronous sound is generate_foley. Search official assets first.`,
+      `${CHARGE_MARKER} Generate one audio asset from text and return it registered-ready. kind=music: an instrumental bed, 30–300 s, prompt = genre/instrumentation + energy + role under the picture + constraints. kind=sfx: one sound effect 0.5–22 s for off-screen or editorial sound (whoosh, ping, stinger, ambience) — describe the sound, not the scene; promptInfluence 0–1 (default 0.3), loop for seamless beds. Then register_media and add_clips with role music or sfx. Search official assets first. Picture-synchronous Foley timed to a clip's own motion is a Studio Chat capability (generate_foley), not available here: describe the audible event as kind=sfx and place it at the frame it belongs to.`,
     inputSchema: obj({
       kind: enumOf(['music', 'sfx']),
       prompt: str(),
