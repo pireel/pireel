@@ -100,7 +100,8 @@ describe('MCP v3 surface', () => {
     expect(legacyNames).toEqual(v3Names);
     expect(v3Names).not.toContain('set_shot_treatment');
     expect(v3Names).toEqual(expect.arrayContaining(['get_state', 'set_clip_framing', 'ripple_delete_ranges', 'manage_project']));
-    expect(v3Names).not.toContain('generate_foley'); // chat-only stays off MCP
+    expect(v3Names).not.toContain('ask_user'); // chat-only stays off MCP
+    expect(v3Names).toEqual(expect.arrayContaining(['generate_foley', 'prepare_local_asset'])); // tab-run tools are listed
     expect(v3Names.length).toBe(V3_TOOLS.filter((tool) => !tool.chatOnly).length); // every v3 tool except the chat-only ones
   });
 
@@ -249,7 +250,7 @@ describe('MCP v3 surface', () => {
   });
   it('rejects internal chat-only commands that are not in the public MCP catalog', async () => {
     const d = deps();
-    for (const name of ['generate_foley', 'run_v3']) {
+    for (const name of ['ask_user', 'run_v3']) {
       const response = await handleMcpRequest({ id: 1, method: 'tools/call', params: { name, arguments: {} } }, d);
       expect(JSON.parse((response!.result as { content: { text: string }[] }).content[0]!.text)).toMatchObject({ ok: false, error: 'unknown_tool' });
     }

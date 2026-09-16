@@ -2349,7 +2349,6 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             }
           }
           case 'generate_foley': {
-            if (surface !== 'chat') return { ok: false, error: 'generate_foley requires the in-Studio approval card; open Studio and run it in Chat' };
             try {
             const rawItems = Array.isArray(input.items) ? input.items.slice(0, 8) : [];
             const items = rawItems.flatMap((value, index) => {
@@ -2391,16 +2390,20 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const lines = items.map((item, index) =>
               `${index + 1}. ${item.name} — source ${item.sourceInSec.toFixed(2)}–${item.sourceOutSec.toFixed(2)}s (${item.durationSec.toFixed(2)}s), generate ${item.generationDurationSec}s\n   Sound: ${item.prompt}`,
             );
-            const decision = await parkInteraction<{ title: string; content: string }, 'approved' | 'rejected'>(
-              'approval',
-              {
-                title: `Generate ${items.length} Foley sound${items.length === 1 ? '' : 's'}?`,
-                content: `${lines.join('\n\n')}\n\nOnly these source spans will be uploaded for MMAudio V2. Total generated audio: ${totalSec}s. Generated AAC tracks will be saved to your reusable cross-project audio library.`,
-              },
-              { signal },
-            );
-            if (decision == null) throw abortErr();
-            if (decision !== 'approved') return { ok: true, summary: 'Foley generation rejected; nothing uploaded or generated', data: { decision: 'rejected' } };
+            // Studio Chat parks the batch on an approval card (the user sees spans and cost before any
+            // upload). An external agent approves in its own host, so over the bridge the call starts at once.
+            if (surface === 'chat') {
+              const decision = await parkInteraction<{ title: string; content: string }, 'approved' | 'rejected'>(
+                'approval',
+                {
+                  title: `Generate ${items.length} Foley sound${items.length === 1 ? '' : 's'}?`,
+                  content: `${lines.join('\n\n')}\n\nOnly these source spans will be uploaded for MMAudio V2. Total generated audio: ${totalSec}s. Generated AAC tracks will be saved to your reusable cross-project audio library.`,
+                },
+                { signal },
+              );
+              if (decision == null) throw abortErr();
+              if (decision !== 'approved') return { ok: true, summary: 'Foley generation rejected; nothing uploaded or generated', data: { decision: 'rejected' } };
+            }
 
             const { extractAudio, renderTimeline } = await import('@pireel/studio-engine/video-edit');
             const spaceId = await getStudioSpaceId(projectId);

@@ -116,7 +116,7 @@ export interface McpDeps {
   generateImage: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
   generateVideo: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
   generateMusic: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
-  /** Text-to-sound-effect primitive (server-direct; the picture-synchronous generate_foley stays chat-only). */
+  /** Text-to-sound-effect primitive (server-direct; picture-synchronous generate_foley runs in the tab over the bridge). */
   generateSfx: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
   getGenerationJobs: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
   /** Hosted TTS, server-direct so Studio need not be open. */

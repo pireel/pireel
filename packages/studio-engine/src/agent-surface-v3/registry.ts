@@ -25,7 +25,7 @@ export interface V3ToolSpec {
    *  name or payload. Stable contracts are append-only within one version; a breaking change needs a
    *  new capability id or a higher version with an explicit compatibility path. */
   skillContract?: { version: number; stability: 'stable' | 'experimental' };
-  /** Runs only inside Studio Chat (needs an in-app card). */
+  /** Runs only inside Studio Chat (needs an in-app card the other surfaces cannot show). */
   chatOnly?: boolean;
   /** Answered directly by the server on the MCP surface (no open tab needed). */
   serverDirect?: boolean;
@@ -47,7 +47,7 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   { id: 'register_media', group: 'assets', serverDirect: true },
   { id: 'import_media', group: 'assets', serverDirect: true },
   { id: 'organize_media', group: 'assets' },
-  { id: 'prepare_local_asset', group: 'assets', chatOnly: true },
+  { id: 'prepare_local_asset', group: 'assets' },
   { id: 'get_icons', group: 'assets', serverDirect: true },
   { id: 'create_browser_handoff', group: 'assets', serverDirect: true },
   // ---- clips and tracks (15)
@@ -85,7 +85,7 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   { id: 'generate_video', group: 'generation', serverDirect: true, charges: true },
   { id: 'generate_audio', group: 'generation', serverDirect: true, charges: true, skillContract: { version: 1, stability: 'stable' } },
   { id: 'generate_speech', group: 'generation', serverDirect: true, charges: true },
-  { id: 'generate_foley', group: 'generation', chatOnly: true, charges: true },
+  { id: 'generate_foley', group: 'generation', charges: true },
   { id: 'lip_sync', group: 'generation', serverDirect: true, charges: true },
   { id: 'manage_voices', group: 'generation', serverDirect: true, charges: true },
   // ---- skills, interaction, session (6)

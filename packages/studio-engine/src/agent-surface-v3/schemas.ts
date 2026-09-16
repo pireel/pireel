@@ -207,7 +207,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   prepare_local_asset: {
     description:
-      'Studio Chat only. Make one exact device-local image usable inside bespoke component markup. Call only when the user asked for that image; listing metadata does not grant access to its bytes, which stay on the device. If access needs a user gesture the call fails with a restore instruction — never substitute another image.',
+      'Make one exact device-local image usable inside bespoke component markup (needs the open Studio tab that holds the bytes). Call only when the user asked for that image; listing metadata does not grant access to its bytes, which stay on the device. If access needs a user gesture the call fails with a restore instruction — never substitute another image.',
     inputSchema: obj({ assetId: str('Exact local image asset id from search_assets.') }, ['assetId']),
   },
   get_icons: {
@@ -504,7 +504,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   generate_audio: {
     description:
-      `${CHARGE_MARKER} Generate one audio asset from text and return it registered-ready. kind=music: an instrumental bed, 30–300 s, prompt = genre/instrumentation + energy + role under the picture + constraints. kind=sfx: one sound effect 0.5–22 s for off-screen or editorial sound (whoosh, ping, stinger, ambience) — describe the sound, not the scene; promptInfluence 0–1 (default 0.3), loop for seamless beds. Then register_media and add_clips with role music or sfx. Search official assets first. Picture-synchronous Foley timed to a clip's own motion is a Studio Chat capability (generate_foley), not available here: describe the audible event as kind=sfx and place it at the frame it belongs to.`,
+      `${CHARGE_MARKER} Generate one audio asset from text and return it registered-ready. kind=music: an instrumental bed, 30–300 s, prompt = genre/instrumentation + energy + role under the picture + constraints. kind=sfx: one sound effect 0.5–22 s for off-screen or editorial sound (whoosh, ping, stinger, ambience) — describe the sound, not the scene; promptInfluence 0–1 (default 0.3), loop for seamless beds. Then register_media and add_clips with role music or sfx. Search official assets first. Picture-synchronous sound timed to a clip's own motion is generate_foley.`,
     inputSchema: obj({
       kind: enumOf(['music', 'sfx']),
       prompt: str(),
@@ -527,7 +527,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   generate_foley: {
     description:
-      `${CHARGE_MARKER} Studio Chat only. Generate picture-synchronous Foley for up to 8 exact source spans (1–30 s each) of video assets: it shows the event list and cost, waits for approval, uploads only those spans, generates, and saves each result to the reusable audio library with eventType/material/reusePolicy. Prompts name only audible events grounded in the picture. Then register_media and place all results in one add_clips call with role sfx and no trackId.`,
+      `${CHARGE_MARKER} Generate picture-synchronous Foley for up to 8 exact source spans (1–30 s each) of video assets: it uploads only those spans, generates, and saves each result to the reusable audio library with eventType/material/reusePolicy. Studio Chat shows the event list and cost on an approval card first; elsewhere the call starts at once, so quote the items to your operator before calling. Needs the open Studio tab (source bytes and trimming run there). Prompts name only audible events grounded in the picture. Then register_media and place all results in one add_clips call with role sfx and no trackId.`,
     inputSchema: obj({
       items: arr(obj({
         sourceAssetId: str(), sourceUrl: str(), sourceInSec: num(), sourceOutSec: num(),
