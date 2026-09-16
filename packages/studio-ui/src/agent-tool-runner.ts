@@ -149,7 +149,7 @@ function rememberSearchedAssets(results: ReadonlyArray<Record<string, unknown>>)
 
 const V3_LIBRARY_USAGE_HINT = 'Each id is a complete reference: pass it as assetId to add_clips / insert_clips, or to inspect_media directly — placing is not required to inspect or transcribe. Byte access is resolved on demand; when it is unavailable, ask the user to restore the file in Materials. Never substitute cloud or official media for project-library media unless the user asks.';
 import { imageThumb, imgSourceBase } from '@pireel/ui/image-url';
-import { studioLocale, t } from './i18n';
+import { studioLocale, t, tEnglish } from './i18n';
 import { type ComposeMode, type ComposedBlock, composedBlockFields, GeneratedBlockValidationError, kitChoiceOf, newBlockComposeMode } from './compose-result';
 import { clearToolProgress, setToolProgress, type ToolProgress } from './tool-progress';
 import { fileSig, probeVideoFile } from './media';
@@ -638,7 +638,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
         const hit = targetIds.find((id) => genIdsRef.current.has(id));
         if (hit) {
           const b = findBlock(hit);
-          return { ok: false, error: t('workbench.nameGeneratingEditAfter', { name: b ? bname(b) : hit }) };
+          return { ok: false, error: tEnglish('workbench.nameGeneratingEditAfter', { name: b ? bname(b) : hit }) };
         }
       }
       if (toolId === 'add_clips' || toolId === 'insert_clips') {
@@ -816,16 +816,16 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'create_output': {
             const title = typeof input.title === 'string' ? input.title.trim() : '';
-            if (!title) return { ok: false, error: t('workbench.outputTitleRequired') };
+            if (!title) return { ok: false, error: tEnglish('workbench.outputTitleRequired') };
             const created = createProjectOutput(title, typeof input.skill === 'string' ? input.skill : undefined);
             return { ok: true, summary: t('workbench.outputCreatedNamed', { title: created.title }), data: { output_id: created.id, active: true } };
           }
           case 'duplicate_output': {
             const title = typeof input.title === 'string' ? input.title.trim() : '';
-            if (!title) return { ok: false, error: t('workbench.outputTitleRequired') };
+            if (!title) return { ok: false, error: tEnglish('workbench.outputTitleRequired') };
             const sourceId = resolveProjectOutput(outputReference());
-            if (!sourceId) return { ok: false, error: t('workbench.outputNotFound') };
-            if (!(await switchProjectOutput(sourceId))) return { ok: false, error: t('workbench.outputNotFound') };
+            if (!sourceId) return { ok: false, error: tEnglish('workbench.outputNotFound') };
+            if (!(await switchProjectOutput(sourceId))) return { ok: false, error: tEnglish('workbench.outputNotFound') };
             const duplicated = duplicateProjectOutput(title);
             return { ok: true, summary: t('workbench.outputDuplicatedNamed', { title: duplicated.title }), data: { output_id: duplicated.id, active: true } };
           }
@@ -833,23 +833,23 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             // Switching resets the editor and drops the source file under a running render.
             if (agentExportRef.current.running) return { ok: false, error: 'an export is running on this project; switching outputs would break it. Poll track_export / export status until it finishes, then switch.' };
             const id = resolveProjectOutput(outputReference(), false);
-            if (!id) return { ok: false, error: t('workbench.outputReferenceRequired') };
+            if (!id) return { ok: false, error: tEnglish('workbench.outputReferenceRequired') };
             const changed = await switchProjectOutput(id);
-            if (!changed) return { ok: false, error: t('workbench.outputNotFoundOrActive') };
+            if (!changed) return { ok: false, error: tEnglish('workbench.outputNotFoundOrActive') };
             return { ok: true, summary: t('workbench.outputSwitched'), data: { output_id: id, active: true } };
           }
           case 'rename_output': {
             const id = resolveProjectOutput(outputReference());
             const title = typeof input.title === 'string' ? input.title.trim() : '';
-            if (!title) return { ok: false, error: t('workbench.outputTitleRequired') };
-            if (!id) return { ok: false, error: t('workbench.outputNotFound') };
-            if (!renameProjectOutput(id, title)) return { ok: false, error: t('workbench.outputNotFound') };
+            if (!title) return { ok: false, error: tEnglish('workbench.outputTitleRequired') };
+            if (!id) return { ok: false, error: tEnglish('workbench.outputNotFound') };
+            if (!renameProjectOutput(id, title)) return { ok: false, error: tEnglish('workbench.outputNotFound') };
             return { ok: true, summary: t('workbench.outputRenamedNamed', { title }) };
           }
           case 'delete_output': {
             const id = resolveProjectOutput(outputReference());
-            if (!id) return { ok: false, error: t('workbench.outputNotFound') };
-            if (!(await deleteProjectOutput(id))) return { ok: false, error: t('workbench.outputDeleteUnavailable') };
+            if (!id) return { ok: false, error: tEnglish('workbench.outputNotFound') };
+            if (!(await deleteProjectOutput(id))) return { ok: false, error: tEnglish('workbench.outputDeleteUnavailable') };
             return { ok: true, summary: t('workbench.outputDeleted') };
           }
           // `extract_asr` remains an execution alias for old/in-flight conversations. New tool
@@ -1113,7 +1113,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   },
                 };
               }
-              if (!videoFileRef.current) return { ok: false, error: t('common.uploadVideoFirst') };
+              if (!videoFileRef.current) return { ok: false, error: tEnglish('common.uploadVideoFirst') };
               const segs = await race(stepAsr(report));
               if (!segs.length) return { ok: true, summary: t('workbench.noSpeechDetected'), data: { speechDetected: false } };
               // Transcribe inserted clips too so the agent sees every source, including when the
@@ -1176,7 +1176,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   'assetId' in clip && ((doc.semantics.transcripts[(clip as { assetId: string }).assetId]?.length ?? 0) > 0)
                 ))
               ));
-              if (narrationHasTranscript) return { ok: false, error: t('workbench.wordCutNeedsPrimarySpeech') };
+              if (narrationHasTranscript) return { ok: false, error: tEnglish('workbench.wordCutNeedsPrimarySpeech') };
               // Primary footage that has simply not been transcribed yet: transcribe it here rather
               // than bouncing the model to a second call it cannot name on the v3 surface.
               if (primaryAssetId) {
@@ -1186,7 +1186,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   ? asrRef.current
                   : (documentRef.current.semantics.transcripts[primaryAssetId] as AsrSegment[] | undefined);
               }
-              if (!mainTranscript?.length) return { ok: false, error: t('workbench.noTranscriptYetRun') };
+              if (!mainTranscript?.length) return { ok: false, error: tEnglish('workbench.noTranscriptYetRun') };
             }
             if (!asrRef.current?.length && storedPrimary?.length) {
               asrRef.current = storedPrimary;
@@ -1675,7 +1675,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                         }),
                       },
                     }
-                  : { ok: false, error: t('workbench.visualAnalysisFoundNothingWhy') };
+                  : { ok: false, error: tEnglish('workbench.visualAnalysisFoundNothingWhy') };
               } finally {
                 if (!opts?.reportProgress) clearToolProgress(toolId);
               }
@@ -1718,7 +1718,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (!targetAssetId) {
               return videoAssetIds.length > 1
                 ? { ok: false, error: `analyze_visual needs assetId or clipId; video assets: ${videoAssetIds.join(', ')}` }
-                : { ok: false, error: t('common.uploadVideoFirst') };
+                : { ok: false, error: tEnglish('common.uploadVideoFirst') };
             }
             const targetAsset = documentRef.current.assets[targetAssetId];
             if (!targetAsset) return { ok: false, error: `asset not found: ${targetAssetId}` };
@@ -1835,7 +1835,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                       }),
                     },
                   }
-                : { ok: false, error: t('workbench.visualAnalysisFoundNothingWhy') };
+                : { ok: false, error: tEnglish('workbench.visualAnalysisFoundNothingWhy') };
             } finally {
               if (!opts?.reportProgress) clearToolProgress(toolId);
             }
@@ -1844,7 +1844,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             // BYO visual semantic analysis: the free parts (cuts/frame extraction/geometry/background) run locally, and the
             // sampled frames are returned as images for the external agent to look at itself — no in-house VLM burned. The agent submits labels via submit_visual after looking.
             const vv = currentVideo();
-            if (!videoFileRef.current || !vv) return { ok: false, error: t('common.uploadVideoFirst') };
+            if (!videoFileRef.current || !vv) return { ok: false, error: tEnglish('common.uploadVideoFirst') };
             if (visualRef.current) {
               return {
                 ok: true,
@@ -1879,7 +1879,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'submit_visual': {
             const prep = visualBriefRef.current;
-            if (!prep) return { ok: false, error: t('workbench.runVisualBriefFirst') };
+            if (!prep) return { ok: false, error: tEnglish('workbench.runVisualBriefFirst') };
             const rawLabels = Array.isArray(input.labels) ? (input.labels as Record<string, unknown>[]) : [];
             const CONTENTS = new Set(['talkinghead', 'screen', 'broll', 'slide', 'other']);
             const PERSONS = new Set(['left', 'center', 'right', 'none']);
@@ -1896,7 +1896,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 desc: typeof l.desc === 'string' ? l.desc.slice(0, 200) : '',
               };
             }
-            if (!labels.some(Boolean)) return { ok: false, error: t('workbench.labelsEmptyAllIndexes') };
+            if (!labels.some(Boolean)) return { ok: false, error: tEnglish('workbench.labelsEmptyAllIndexes') };
             const vis = finishVisualAnalysis(prep, labels);
             visualBriefRef.current = null;
             applyVisualResult(vis);
@@ -1908,7 +1908,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'move_block': {
             const b = findBlock(input.blockId);
-            if (!b) return { ok: false, error: t('workbench.elementNotFound') };
+            if (!b) return { ok: false, error: tEnglish('workbench.elementNotFound') };
             const value = Number(input.startSec);
             if (!Number.isFinite(value)) return { ok: false, error: 'invalid startSec' };
             const startSec = Math.max(0, Math.round(value * 100) / 100);
@@ -1918,7 +1918,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'resize_block': {
             const b = findBlock(input.blockId);
-            if (!b) return { ok: false, error: t('workbench.elementNotFound') };
+            if (!b) return { ok: false, error: tEnglish('workbench.elementNotFound') };
             const s = Number(input.startSec);
             const d = Number(input.durationSec);
             if (!Number.isFinite(s) || !Number.isFinite(d)) return { ok: false, error: 'invalid startSec/durationSec' };
@@ -1930,11 +1930,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'place_block': {
             const b = findBlock(input.blockId);
-            if (!b) return { ok: false, error: t('workbench.elementNotFound') };
-            if (isSentenceCaption(b)) return { ok: false, error: t('workbench.captionLayerPlaceHint') };
-            if (!b.box) return { ok: false, error: t('workbench.blockHasNoBox') };
+            if (!b) return { ok: false, error: tEnglish('workbench.elementNotFound') };
+            if (isSentenceCaption(b)) return { ok: false, error: tEnglish('workbench.captionLayerPlaceHint') };
+            if (!b.box) return { ok: false, error: tEnglish('workbench.blockHasNoBox') };
             const next = applyBlockPlacement(b, input as Parameters<typeof applyBlockPlacement>[1]);
-            if (!next) return { ok: false, error: t('workbench.placeNoDirective') };
+            if (!next) return { ok: false, error: tEnglish('workbench.placeNoDirective') };
             const edit = commitOverlayEdits([{
               clipId: b.id,
               block: { box: next.box, contentBox: next.contentBox },
@@ -1947,13 +1947,13 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'set_block_props': {
             const b = findBlock(input.blockId);
-            if (!b) return { ok: false, error: t('workbench.elementNotFound') };
+            if (!b) return { ok: false, error: tEnglish('workbench.elementNotFound') };
             const view = componentSchemaOf(b);
-            if (!view) return { ok: false, error: t('workbench.propsNoManifest') };
+            if (!view) return { ok: false, error: tEnglish('workbench.propsNoManifest') };
             const requested = input.props && typeof input.props === 'object' && !Array.isArray(input.props) ? (input.props as Record<string, unknown>) : {};
             const declared = Object.keys(view.schema.properties ?? {});
             const unknown = Object.keys(requested).filter((key) => !declared.includes(key));
-            if (unknown.length) return { ok: false, error: t('workbench.propsUnknownKeys', { keys: unknown.join(', '), declared: declared.join(', ') }) };
+            if (unknown.length) return { ok: false, error: tEnglish('workbench.propsUnknownKeys', { keys: unknown.join(', '), declared: declared.join(', ') }) };
             const valueError = componentPropertyInputError(view, requested);
             if (valueError) return { ok: false, error: valueError };
             const slots = applyComponentValues(b, requested)!;
@@ -1967,9 +1967,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             // then register the result and overlay it full-frame at the component's frames. The block
             // keeps its box inside the rendered canvas, so a full-frame overlay is pixel-identical.
             const b = findBlock(input.clipId ?? input.blockId);
-            if (!b) return { ok: false, error: t('workbench.elementNotFoundIds') };
-            if (blockKind(b) !== 'custom' && !b.templateId.startsWith('kit:')) return { ok: false, error: t('workbench.bakeNotComponent') };
-            if (genIdsRef.current.has(b.id)) return { ok: false, error: t('workbench.blockGeneratingWaitFinish') };
+            if (!b) return { ok: false, error: tEnglish('workbench.elementNotFoundIds') };
+            if (blockKind(b) !== 'custom' && !b.templateId.startsWith('kit:')) return { ok: false, error: tEnglish('workbench.bakeNotComponent') };
+            if (genIdsRef.current.has(b.id)) return { ok: false, error: tEnglish('workbench.blockGeneratingWaitFinish') };
             const c = compRef.current;
             const fps = documentRef.current.canvas.fps;
             const html = bakeCompositionHtml(c, b);
@@ -1989,10 +1989,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               job = await res.json();
             } catch (e) {
               if (e instanceof DOMException && e.name === 'AbortError') throw e;
-              return { ok: false, error: t('workbench.bakeFailed') };
+              return { ok: false, error: tEnglish('workbench.bakeFailed') };
             }
             const jobId = job.id;
-            if (!jobId) return { ok: false, error: t('workbench.bakeFailed') };
+            if (!jobId) return { ok: false, error: tEnglish('workbench.bakeFailed') };
             // Poll to completion (a render is ~1–3 min); the bridge card timeout covers it.
             for (let i = 0; i < 160 && job.status !== 'done' && job.status !== 'failed' && job.status !== 'canceled'; i++) {
               await new Promise((r) => setTimeout(r, 2500));
@@ -2017,7 +2017,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             }
             const originalTrack = documentRef.current.timeline.tracks.find((track) => track.clips.some((clip) => clip.id === b.id));
             const originalClip = originalTrack?.clips.find((clip) => clip.id === b.id);
-            if (!originalTrack || !originalClip) return { ok: false, error: t('workbench.bakeFailed') };
+            if (!originalTrack || !originalClip) return { ok: false, error: tEnglish('workbench.bakeFailed') };
             const assetId = `bake_${b.id}_${jobId}`;
             if (originalTrack.locked) return { ok: false, error: 'The component track is locked.' };
             // Registers the render and swaps the clip in place as one operation: removing/reinserting
@@ -2031,7 +2031,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'delete_block': {
             const b = findBlock(input.blockId);
-            if (!b) return { ok: false, error: t('workbench.elementNotFound') };
+            if (!b) return { ok: false, error: tEnglish('workbench.elementNotFound') };
             const edit = commitOverlayRemoval([b.id]);
             if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error), data: { code: edit.error.code, trackIds: edit.error.trackIds } };
             postPreview({ type: 'hf:remove', id: b.id });
@@ -2040,9 +2040,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'delete_blocks': {
             const ids = Array.isArray(input.blockIds) ? new Set((input.blockIds as unknown[]).map(String)) : null;
-            if (!ids?.size) return { ok: false, error: t('workbench.missingBlockidsWhichElements') };
+            if (!ids?.size) return { ok: false, error: tEnglish('workbench.missingBlockidsWhichElements') };
             const hit = c.blocks.filter((b) => ids.has(b.id));
-            if (!hit.length) return { ok: false, error: t('workbench.elementsNotFound') };
+            if (!hit.length) return { ok: false, error: tEnglish('workbench.elementsNotFound') };
             const edit = commitOverlayRemoval(hit.map((block) => block.id));
             if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error), data: { code: edit.error.code, trackIds: edit.error.trackIds } };
             hit.forEach((b) => postPreview({ type: 'hf:remove', id: b.id }));
@@ -2051,7 +2051,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'duplicate_block': {
             const b = findBlock(input.blockId);
-            if (!b) return { ok: false, error: t('workbench.elementNotFound') };
+            if (!b) return { ok: false, error: tEnglish('workbench.elementNotFound') };
             const at = typeof input.atSec === 'number' ? Math.max(0, input.atSec) : b.startSec + b.durationSec;
             const dupStart = Math.round(at * 100) / 100;
             const newClipId = blockId('dup');
@@ -2084,11 +2084,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               return { ok: false, error: 'invalid_transition_direction' };
             }
             const at = Number(input.atSec);
-            if (!Number.isFinite(at) || at < 0) return { ok: false, error: t('workbench.invalidAtSec') };
+            if (!Number.isFinite(at) || at < 0) return { ok: false, error: tEnglish('workbench.invalidAtSec') };
             const sp = clipSpans(ensureShots(compRef.current));
             const bounds = sp.slice(1).map((s) => s.editedStart);
             const cut = bounds.find((b) => Math.abs(b - at) < 0.3);
-            if (cut == null) return { ok: false, error: t('workbench.atSecMustBeCut', { bounds: bounds.map(r1).join(', ') }) };
+            if (cut == null) return { ok: false, error: tEnglish('workbench.atSecMustBeCut', { bounds: bounds.map(r1).join(', ') }) };
             const remove = input.effect === 'none' || input.remove === true;
             const effect: CutTransitionEffect = typeof input.effect === 'string' && ['fade', 'fadeblack', 'directional', 'directionalwipe', 'circleopen', 'windowslice', 'crosszoom', 'rotatescale', 'glitch', 'dreamy'].includes(input.effect) ? (input.effect as CutTransitionEffect) : 'fade';
             const dir = typeof input.direction === 'string' && ['up', 'down', 'left', 'right'].includes(input.direction) ? (input.direction as TransitionDirection) : undefined;
@@ -2101,7 +2101,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'get_block': {
             const b = findBlock(input.blockId);
-            if (!b) return { ok: false, error: t('workbench.elementNotFound') };
+            if (!b) return { ok: false, error: tEnglish('workbench.elementNotFound') };
             const s = b.slots as { innerHtml?: unknown; timelineBody?: unknown };
             const rendered =
               b.templateId === 'custom'
@@ -2160,7 +2160,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                     phase: 'scene' as SceneVisualReviewPhase,
                     expected: `unplanned timeline review; frameId: ${c.frameId ?? '(themeless)'}`,
                   }));
-            if (!requestedMoments.length) return { ok: false, error: t('workbench.reviewNeedsAtSecs') };
+            if (!requestedMoments.length) return { ok: false, error: tEnglish('workbench.reviewNeedsAtSecs') };
             const renderTimeline = canonicalRenderTimeline(c, documentRef.current, resolveAssetUrl);
             const dur = renderTimeline.durationSec;
             const momentByAt = new Map<number, (typeof requestedMoments)[number]>();
@@ -2251,7 +2251,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 error?: string;
                 detail?: string;
               };
-              if (!rr.ok || !j.frames) return { ok: false, error: t('workbench.reviewFailedMessage', { message: j.detail || j.error || String(rr.status) }) };
+              if (!rr.ok || !j.frames) return { ok: false, error: tEnglish('workbench.reviewFailedMessage', { message: j.detail || j.error || String(rr.status) }) };
               const reviewedSceneIds = new Set(candidates.map((candidate) => candidate.sceneId).filter(Boolean));
               const structuralIssues = auditSceneVisualStructure(documentRef.current)
                 .filter((issue) => !reviewedSceneIds.size || reviewedSceneIds.has(issue.sceneId));
@@ -2287,7 +2287,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               if (failure.code === 'review_network_error') {
                 return {
                   ok: false,
-                  error: t('tools.review_visuals.networkError'),
+                  error: tEnglish('tools.review_visuals.networkError'),
                   data: {
                     ...failure,
                     hint: failure.phase === 'request'
@@ -2298,7 +2298,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               }
               return {
                 ok: false,
-                error: t('workbench.reviewFailedMessage', { message: failure.detail }),
+                error: tEnglish('workbench.reviewFailedMessage', { message: failure.detail }),
                 data: failure,
               };
             } finally {
@@ -2582,7 +2582,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             // Server-direct like search_fonts, but the icon catalog is server-side, so fetch it (the
             // MCP surface answers the same lookup through its own dispatch).
             const names = Array.isArray(input.names) ? (input.names as unknown[]).filter((n): n is string => typeof n === 'string' && n.trim().length > 0).slice(0, 8) : [];
-            if (!names.length) return { ok: false, error: t('workbench.getIconsNeedName') };
+            if (!names.length) return { ok: false, error: tEnglish('workbench.getIconsNeedName') };
             const res = await fetch('/api/studio/icons', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ names, ...(input.kind === 'brand' ? { kind: 'brand' } : {}) }), ...(signal ? { signal } : {}) });
             const data = (await res.json().catch(() => ({}))) as { icons?: Array<{ name: string; svg: string }>; misses?: Array<{ name: string }>; error?: string };
             if (!res.ok || !Array.isArray(data.icons)) return { ok: false, error: data.error || t('workbench.getIconsFailed') };
@@ -3153,22 +3153,22 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               applyT(visualClip.startFrame / documentRef.current.canvas.fps + 0.01);
               return { ok: true, summary: t('workbench.jumpedTo', { t: r1(visualClip.startFrame / documentRef.current.canvas.fps) }) };
             }
-            return { ok: false, error: t('workbench.focusTargetNotFound') };
+            return { ok: false, error: tEnglish('workbench.focusTargetNotFound') };
           }
           case 'seek': {
             const to = Number(input.toSec);
-            if (!Number.isFinite(to)) return { ok: false, error: t('workbench.invalidToSec') };
+            if (!Number.isFinite(to)) return { ok: false, error: tEnglish('workbench.invalidToSec') };
             const v = Math.max(0, Math.min(totalDuration(c), to));
             applyT(v);
             return { ok: true, summary: t('workbench.jumpedTo', { t: r1(v) }) };
           }
           case 'play': {
             const D = totalDuration(c);
-            if (D < 0.1) return { ok: false, error: t('workbench.noVideoYet') };
+            if (D < 0.1) return { ok: false, error: tEnglish('workbench.noVideoYet') };
             const from = typeof input.fromSec === 'number' ? Math.max(0, Math.min(D, input.fromSec)) : undefined;
             const to = typeof input.toSec === 'number' ? Math.max(0, Math.min(D, input.toSec)) : undefined;
             const startAt = from ?? (tRef.current >= D - 0.02 ? 0 : tRef.current); // same replay-from-end rule as the transport button
-            if (to != null && to <= startAt + 0.05) return { ok: false, error: t('workbench.toSecAfterStart') };
+            if (to != null && to <= startAt + 0.05) return { ok: false, error: tEnglish('workbench.toSecAfterStart') };
             if (from != null) applyT(from);
             playStopAtRef.current = to ?? null;
             setPlaying(true);
@@ -3187,10 +3187,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             return { ok: true, summary: was ? t('workbench.pausedAt', { t: r1(tRef.current) }) : t('workbench.playbackAlreadyPaused') };
           }
           case 'cut_range': {
-            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: t('workbench.noVideoYet') };
+            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: tEnglish('workbench.noVideoYet') };
             const from = Number(input.fromSec);
             const to = Number(input.toSec);
-            if (!Number.isFinite(from) || !Number.isFinite(to) || to - from < 0.1) return { ok: false, error: t('workbench.invalidRange') };
+            if (!Number.isFinite(from) || !Number.isFinite(to) || to - from < 0.1) return { ok: false, error: tEnglish('workbench.invalidRange') };
             const committed = commitNarrationRanges([{ fromSec: from, toSec: to }]);
             if (!committed.ok) return { ok: false, error: editorErrorMessage(committed.error), data: { code: committed.error.code, trackIds: committed.error.trackIds } };
             setSelectedShotId(null);
@@ -3199,7 +3199,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'set_captions': {
             const preset = typeof input.preset === 'string' ? input.preset : undefined;
-            if (preset && !CAPTION_PRESETS.some((p) => p.id === preset)) return { ok: false, error: t('workbench.noSuchCaptionPreset', { preset }) };
+            if (preset && !CAPTION_PRESETS.some((p) => p.id === preset)) return { ok: false, error: tEnglish('workbench.noSuchCaptionPreset', { preset }) };
             const yPct = captionYPctForCanvas(documentRef.current.canvas, input.yPct);
             const scale = Number(input.scale);
             const patch: Parameters<typeof setCaptionStyle>[0] = {};
@@ -3218,10 +3218,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               // track is selected explicitly — automatic source selection rightly skips muted
               // clips, and montage picture is muted by construction.
               const lines = splitScriptLines(script);
-              if (!lines.length) return { ok: false, error: t('workbench.scriptEmpty') };
+              if (!lines.length) return { ok: false, error: tEnglish('workbench.scriptEmpty') };
               const shots = ensureShots(compRef.current);
               const trackId = documentRef.current.semantics.primaryNarrativeTrackId;
-              if (!shots.length || !trackId) return { ok: false, error: t('workbench.scriptCaptionsNoPicture') };
+              if (!shots.length || !trackId) return { ok: false, error: tEnglish('workbench.scriptCaptionsNoPicture') };
               const plan = planScriptCaptionSegments(shots, lines);
               const nextClipAsr = { ...clipAsrRef.current, ...plan.clips };
               const nextMain = plan.main.length ? plan.main : asrRef.current;
@@ -3238,10 +3238,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 asrRef.current = plan.main;
                 setAsrSentences(plan.main);
               }
-              if (!compRef.current.blocks.some(isSentenceCaption)) return { ok: false, error: t('workbench.scriptCaptionsNoPicture') };
+              if (!compRef.current.blocks.some(isSentenceCaption)) return { ok: false, error: tEnglish('workbench.scriptCaptionsNoPicture') };
               return { ok: true, summary: t('workbench.scriptCaptionsSet', { n: plan.lineCount }), data: { source: 'script', lines: plan.lineCount } };
             }
-            if (!preset && !Object.keys(patch).length) return { ok: false, error: t('workbench.nothingSetGiveLeast') };
+            if (!preset && !Object.keys(patch).length) return { ok: false, error: tEnglish('workbench.nothingSetGiveLeast') };
             const source = input.source === 'track' && typeof input.trackId === 'string'
               ? { mode: 'track' as const, trackId: input.trackId }
               : input.source === 'clip' && typeof input.clipId === 'string'
@@ -3264,20 +3264,20 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               // the model chases "empty transcript" while read_script keeps returning text.
               const narrationPlaced = (compRef.current.audioTracks ?? []).some((clip) => clip.role === 'narration');
               if (hasStoredTranscript && !narrationPlaced && !asrRef.current?.length) {
-                return { ok: false, error: t('workbench.captionsNeedNarrationOnTimeline') };
+                return { ok: false, error: tEnglish('workbench.captionsNeedNarrationOnTimeline') };
               }
-              return { ok: false, error: t('workbench.couldNotGenerateCaptions') };
+              return { ok: false, error: tEnglish('workbench.couldNotGenerateCaptions') };
             }
             const cs = resolveCaptionStyle(compRef.current);
             return { ok: true, summary: preset ? t('workbench.captionsSetName', { name: t(getCaptionPreset(cs.preset).name) }) : t('workbench.captionsAdjustedName', { name: t(getCaptionPreset(cs.preset).name) }) };
           }
           case 'remove_captions': {
-            if (!compRef.current.blocks.some(isSentenceCaption)) return { ok: false, error: t('workbench.thereNoCaptionsRight') };
+            if (!compRef.current.blocks.some(isSentenceCaption)) return { ok: false, error: tEnglish('workbench.thereNoCaptionsRight') };
             removeCaptionLayer();
             return { ok: true, summary: t('workbench.removedCaptions') };
           }
           case 'relayout_captions': {
-            if (!isCaptionsOn(compRef.current)) return { ok: false, error: t('workbench.thereNoCaptionsRight') };
+            if (!isCaptionsOn(compRef.current)) return { ok: false, error: tEnglish('workbench.thereNoCaptionsRight') };
             const result = relayoutCaptions();
             if (!result.ok) return result;
             return { ok: true, summary: t('workbench.reLaidCaptionsFrom') };
@@ -3289,10 +3289,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 return { index: Number(value.index), text: typeof value.text === 'string' ? value.text.trim() : '' };
               })
               .filter((item) => Number.isInteger(item.index) && item.index >= 0 && item.text.length > 0);
-            if (!items.length) return { ok: false, error: t('workbench.itemsEmptyInvalidNeed') };
+            if (!items.length) return { ok: false, error: tEnglish('workbench.itemsEmptyInvalidNeed') };
             const shotIdIn = typeof input.shotId === 'string' ? input.shotId : undefined;
             const shotSrc = shotIdIn ? ensureShots(compRef.current).find((shot) => shot.id === shotIdIn)?.src : undefined;
-            if (shotIdIn && !shotSrc) return { ok: false, error: t('workbench.shotIdNotInsertClip') };
+            if (shotIdIn && !shotSrc) return { ok: false, error: tEnglish('workbench.shotIdNotInsertClip') };
             const primaryTrack = documentRef.current.timeline.tracks.find((track) => track.id === documentRef.current.semantics.primaryNarrativeTrackId);
             const targetNarrativeClip = shotIdIn ? primaryTrack?.clips.find((clip) => clip.id === shotIdIn) : undefined;
             const assetId = shotIdIn
@@ -3310,7 +3310,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             );
             if (!segments?.length) return { ok: false, error: src ? t('workbench.insertClipNoTranscript') : t('workbench.noTranscriptYetRun') };
             const bad = items.filter((item) => item.index >= segments.length);
-            if (bad.length) return { ok: false, error: t('workbench.indexOutOfRange', { list: bad.map((item) => item.index).join(', '), n: segments.length }) };
+            if (bad.length) return { ok: false, error: tEnglish('workbench.indexOutOfRange', { list: bad.map((item) => item.index).join(', '), n: segments.length }) };
             const resolved = resolveCaptionSentenceEdits(documentRef.current, assetId, items);
             if (!resolved.ok) return { ok: false, error: resolved.error };
             const next = applyCaptionTextEdits(segments, resolved.items);
@@ -3347,7 +3347,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 };
               })
               .filter((it): it is { index: number; text: string; w0?: number; w1?: number } => Number.isInteger(it.index) && it.index >= 0 && it.text !== null);
-            if (!clear && !items.length) return { ok: false, error: t('workbench.itemsEmptyInvalidNeed') };
+            if (!clear && !items.length) return { ok: false, error: tEnglish('workbench.itemsEmptyInvalidNeed') };
             let summary: string;
             if (clear) {
               if (asrRef.current) {
@@ -3362,7 +3362,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             } else {
               const shotIdIn = typeof input.shotId === 'string' ? input.shotId : undefined;
               const shotSrc = shotIdIn ? ensureShots(compRef.current).find((s) => s.id === shotIdIn)?.src : undefined;
-              if (shotIdIn && !shotSrc) return { ok: false, error: t('workbench.shotIdNotInsertClip') };
+              if (shotIdIn && !shotSrc) return { ok: false, error: tEnglish('workbench.shotIdNotInsertClip') };
               // Same ownership rule as edit_caption_text: the first narrative asset lives on the main copy.
               const shotClip = shotIdIn
                 ? documentRef.current.timeline.tracks
@@ -3374,7 +3374,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const segs = src ? clipAsrRef.current[src] : asrRef.current;
               if (!segs?.length) return { ok: false, error: src ? t('workbench.insertClipNoTranscript') : t('workbench.noTranscriptYetRun') };
               const bad = items.filter((it) => it.index >= segs.length);
-              if (bad.length) return { ok: false, error: t('workbench.indexOutOfRange', { list: bad.map((b) => b.index).join(', '), n: segs.length }) };
+              if (bad.length) return { ok: false, error: tEnglish('workbench.indexOutOfRange', { list: bad.map((b) => b.index).join(', '), n: segs.length }) };
               const next = applyCaptionTranslations(segs, items, lang);
               if (src) {
                 const nextClips = { ...clipAsrRef.current, [src]: next };
@@ -3392,7 +3392,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             return { ok: true, summary: summary + t('workbench.captionsOffTheyShow') };
           }
           case 'delete_words': {
-            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: t('workbench.noVideoYet') };
+            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: tEnglish('workbench.noVideoYet') };
             const ids = Array.isArray(input.wordIds) ? [...new Set(input.wordIds.map(String))] : [];
             if (!ids.length) return { ok: false, error: 'wordIds must contain at least one id from list_words' };
             await ensureClipTranscripts();
@@ -3417,7 +3417,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             return { ok: true, summary: `Deleted ${ids.length} transcript word${ids.length === 1 ? '' : 's'}`, data: { wordIds: ids, cuts: finalizeCutSeams(seams) } };
           }
           case 'mask_words': {
-            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: t('workbench.noVideoYet') };
+            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: tEnglish('workbench.noVideoYet') };
             const parsed = parseMaskWordsInput(input);
             if ('error' in parsed) return { ok: false, error: parsed.error };
             await ensureClipTranscripts();
@@ -3477,12 +3477,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             return { ok: true, summary, data: { wordIds: parsed.ids, ...parsed.patch } };
           }
           case 'remove_silence': {
-            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: t('workbench.noVideoYet') };
+            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: tEnglish('workbench.noVideoYet') };
             const assetId = firstNarrativeAssetId(documentRef.current);
             const primaryAsset = assetId ? documentRef.current.assets[assetId] : undefined;
             const file = (primaryAsset?.kind === 'video' ? await loadProjectAssetFile(primaryAsset) : null)
               ?? videoFileRef.current;
-            if (!assetId || !file) return { ok: false, error: t('common.localSourceVideoMissing') };
+            if (!assetId || !file) return { ok: false, error: tEnglish('common.localSourceVideoMissing') };
             videoFileRef.current = file;
             const settings = resolveSpeechSilenceOptions({
               minimumPauseSec: Number(input.minimumPauseSec),
@@ -3522,7 +3522,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             });
           }
           case 'cut_narration': {
-            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: t('workbench.noVideoYet') };
+            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: tEnglish('workbench.noVideoYet') };
             const raw = Array.isArray(input.ranges) ? input.ranges : [];
             // Primary-asset source seconds → every surviving native-timeline occurrence.
             // Pause tightening: keepGapSec 的余量收缩在源秒时钟上做(与离线执行器/评测共用同一份数学)
@@ -3544,7 +3544,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               return joined.length > 16 ? `${joined.slice(0, 16)}…` : joined;
             };
             const assetId = firstNarrativeAssetId(documentRef.current);
-            if (!assetId) return { ok: false, error: t('workbench.noVideoYet') };
+            if (!assetId) return { ok: false, error: tEnglish('workbench.noVideoYet') };
             const tightened = Number.isFinite(kg) && kg > 0 ? tightenCutRanges(srcRanges, kg) : srcRanges;
             const plan = planNarrationCuts(documentRef.current, {
               assetId,
@@ -3645,7 +3645,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'undo': {
             // No rollback while generating: after a snapshot restores the old comp, a running worker still writes its result back, scrambling state
-            if (genIdsRef.current.size) return { ok: false, error: t('workbench.elementGeneratingUndoAfter') };
+            if (genIdsRef.current.size) return { ok: false, error: tEnglish('workbench.elementGeneratingUndoAfter') };
             const stack = undoStackRef.current;
             // A snapshot left by a tool that didn't change anything (returned failure/no-op) shares the current reference → dedup, doesn't count as a step
             while (stack.length && stack[stack.length - 1] === documentRef.current) stack.pop();
@@ -3655,9 +3655,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               // history ring: pop the newest server-kept version. Granularity is autosave versions,
               // not keystrokes — the receipt says where we landed and urges a re-read.
               const pull = studioProviders().historyUndo;
-              if (!pull) return { ok: false, error: t('workbench.nothingUndo') };
+              if (!pull) return { ok: false, error: tEnglish('workbench.nothingUndo') };
               const entry = await pull(ctx.projectId).catch(() => null);
-              if (!entry) return { ok: false, error: t('workbench.nothingUndoCloudEmpty') };
+              if (!entry) return { ok: false, error: tEnglish('workbench.nothingUndoCloudEmpty') };
               redoStackRef.current.push(documentRef.current);
               replaceDocument(entry.document, { origin: 'restore' });
               setSelectedId(null);
@@ -3691,7 +3691,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               })
               .filter((o) => o.label);
             if (surface !== 'chat') return { ok: false, error: 'ask_user is chat-surface only — ask in your own UI instead' };
-            if (!question || options.length < 2) return { ok: false, error: t('workbench.askNeedsQuestionOptions') };
+            if (!question || options.length < 2) return { ok: false, error: tEnglish('workbench.askNeedsQuestionOptions') };
             const selection = await parkInteraction<{ question: string; options: typeof options; multi: boolean }, string[]>(
               'ask',
               { question, options, multi: input.multiSelect === true },
@@ -3700,7 +3700,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (selection == null) throw abortErr();
             const labels = new Set(options.map((o) => o.label));
             const chosen = selection.filter((s) => labels.has(s));
-            if (!chosen.length) return { ok: false, error: t('workbench.askNoValidChoice') };
+            if (!chosen.length) return { ok: false, error: tEnglish('workbench.askNoValidChoice') };
             const selectedValues = chosen.flatMap((label) => {
               const value = options.find((option) => option.label === label)?.value;
               return value ? [value] : [];
@@ -3718,7 +3718,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const title = typeof input.title === 'string' ? input.title.trim().slice(0, 120) : '';
             const content = typeof input.content === 'string' ? input.content.trim().slice(0, 6000) : '';
             if (surface !== 'chat') return { ok: false, error: 'request_approval is chat-surface only — ask for approval in your own UI instead' };
-            if (!content) return { ok: false, error: t('workbench.approvalNeedsContent') };
+            if (!content) return { ok: false, error: tEnglish('workbench.approvalNeedsContent') };
             const decision = await parkInteraction<{ title: string; content: string }, 'approved' | 'rejected'>(
               'approval',
               { title, content },
@@ -3734,7 +3734,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           case 'export_video': {
             // Default local export (per user, same path in the OSS shell): the bridge drives this tab to run client-side compositing (WebCodecs),
             // the result goes straight to a browser download on the user's machine — no R2 upload, zero server cost. Poll via track_export.
-            if (editorDocumentRenderPlan(documentRef.current, { resolveAssetUrl }).durationSec <= 0) return { ok: false, error: t('common.uploadBeforeExport') };
+            if (editorDocumentRenderPlan(documentRef.current, { resolveAssetUrl }).durationSec <= 0) return { ok: false, error: tEnglish('common.uploadBeforeExport') };
             const job = agentExportRef.current;
             if (job.running) return { ok: true, summary: t('common.exportAlreadyProgress'), data: { status: 'running', progress: exportPctRef.current, hint: 'poll track_export' } };
             // Specs adapt to source quality and current canvas by default. Chat still requires one
@@ -3940,7 +3940,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           case 'set_shot_treatment': {
             const s = findShot(input.shotId)
               ?? mediaVideoClipEntries(documentRef.current).find((entry) => entry.shot.id === input.shotId)?.shot;
-            if (!s) return { ok: false, error: t('workbench.shotNotFound') };
+            if (!s) return { ok: false, error: tEnglish('workbench.shotNotFound') };
             const tr = String(input.treatment) as ShotTreatment;
             if (!SHOT_TREATMENTS.some((item) => item.id === tr)) return { ok: false, error: `invalid treatment: ${tr}` };
             const command = commit({ op: 'media.settingsPatches', input: { updates: [{ clipId: s.id, patch: { framing: { treatment: tr } } }] } }, { undo: 'none' });
@@ -3949,7 +3949,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             return { ok: true, summary: t('workbench.framingChangedName', { name: t(name) }) };
           }
           case 'split_shot': {
-            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: t('workbench.noVideoYet') };
+            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: tEnglish('workbench.noVideoYet') };
             if ('atSecs' in input && 'atSec' in input) return { ok: false, error: 'use either atSec or atSecs, not both' };
             const purpose = input.purpose == null ? 'editing' : String(input.purpose);
             if (purpose !== 'editing' && purpose !== 'framing') return { ok: false, error: `invalid split purpose: ${purpose}` };
@@ -3969,7 +3969,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 const first = rejected[0]!;
                 return {
                   ok: false,
-                  error: t('workbench.framingSplitStable', {
+                  error: tEnglish('workbench.framingSplitStable', {
                     at: r1(first.atSec),
                     from: r1(first.stableSourceRange[0]),
                     to: r1(first.stableSourceRange[1]),
@@ -3997,7 +3997,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             });
           }
           case 'trim_shot': {
-            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: t('workbench.noVideoYet') };
+            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: tEnglish('workbench.noVideoYet') };
             const side = input.side === 'left' ? 'left' : 'right';
             if (typeof input.atSec === 'number') applyT(Math.max(0, input.atSec));
             const trimmed = trimAtPlayhead(side);
@@ -4006,7 +4006,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'delete_shot': {
             const s = findShot(input.shotId);
-            if (!s) return { ok: false, error: t('workbench.shotNotFound') };
+            if (!s) return { ok: false, error: tEnglish('workbench.shotNotFound') };
             const deleted = deleteShot(s.id);
             if (!deleted.ok) return { ok: false, error: deleted.error ?? t('workbench.shotNotFound') };
             return withDelta({ ok: true, summary: t('workbench.deletedScene') });
@@ -4014,7 +4014,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           case 'set_video_filter': {
             const s = findShot(input.shotId)
               ?? mediaVideoClipEntries(documentRef.current).find((entry) => entry.shot.id === input.shotId)?.shot;
-            if (!s) return { ok: false, error: t('workbench.shotNotFound') };
+            if (!s) return { ok: false, error: tEnglish('workbench.shotNotFound') };
             const num = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? x : undefined);
             const f: ShotFilter = {
               ...(num(input.brightness) != null ? { brightness: num(input.brightness) } : {}),
@@ -4029,16 +4029,16 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           case 'set_shot_audio': {
             const shots = [...(c.shots ?? []), ...mediaVideoClipEntries(documentRef.current).map((entry) => entry.shot)];
             const ids = input.all ? new Set(shots.map((s) => s.id)) : new Set((Array.isArray(input.shotIds) ? input.shotIds : []).map(String));
-            if (!ids.size) return { ok: false, error: t('workbench.passShotIdsOrAll') };
+            if (!ids.size) return { ok: false, error: tEnglish('workbench.passShotIdsOrAll') };
             const hit = shots.filter((s) => ids.has(s.id));
-            if (!hit.length) return { ok: false, error: t('workbench.shotNotFound') };
+            if (!hit.length) return { ok: false, error: tEnglish('workbench.shotNotFound') };
             const patch = {
               ...(typeof input.volumeDb === 'number' && Number.isFinite(input.volumeDb) ? { volumeDb: input.volumeDb } : {}),
               ...(typeof input.mute === 'boolean' ? { mute: input.mute } : {}),
               ...(typeof input.fadeInSec === 'number' && Number.isFinite(input.fadeInSec) ? { fadeInSec: input.fadeInSec } : {}),
               ...(typeof input.fadeOutSec === 'number' && Number.isFinite(input.fadeOutSec) ? { fadeOutSec: input.fadeOutSec } : {}),
             };
-            if (!Object.keys(patch).length) return { ok: false, error: t('workbench.passVolumeOrMute') };
+            if (!Object.keys(patch).length) return { ok: false, error: tEnglish('workbench.passVolumeOrMute') };
             const command = commit({ op: 'media.settingsPatches', input: { updates: hit.map((shot) => ({
               clipId: shot.id,
               patch: { audio: patch },
@@ -4052,7 +4052,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'denoise_audio': {
             if (input.off === true) {
-              if (!c.audioDenoise) return { ok: false, error: t('workbench.denoiseNotOn') };
+              if (!c.audioDenoise) return { ok: false, error: tEnglish('workbench.denoiseNotOn') };
               setDenoise(null);
               return { ok: true, summary: t('workbench.denoiseTurnedOff') };
             }
@@ -4086,7 +4086,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const resolved = trackIdIn ? resolveAudioTarget(documentRef.current, audioIds, trackIdIn) : null;
             const notFound = () => ({ ok: false as const, error: `${t('workbench.audioTrackNotFound')}: ${trackIdIn} — ${describeAudioTargets(documentRef.current, audioIds)}` });
             if (input.off === true) {
-              if (!tracks.length) return { ok: false, error: t('workbench.noBgmYet') };
+              if (!tracks.length) return { ok: false, error: tEnglish('workbench.noBgmYet') };
               if (resolved && !resolved.clipIds.length) return notFound();
               const removed = resolved
                 ? (resolved.clipIds.length === 1 ? audioRemove(resolved.clipIds[0]!) : audioRemoveMany(resolved.clipIds))
@@ -4108,13 +4108,13 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               try {
                 materialized = await materializeRemoteMedia(urlIn, { name, type: 'audio/mpeg', signal });
               } catch {
-                return { ok: false, error: t('workbench.musicGenFailed') };
+                return { ok: false, error: tEnglish('workbench.musicGenFailed') };
               }
               const newId = await audioMount(materialized.file, undefined, {
                 ...(typeof knobs.startSec === 'number' ? { startSec: knobs.startSec } : {}),
                 sig: materialized.sig,
               });
-              if (!newId) return { ok: false, error: t('workbench.musicGenFailed') };
+              if (!newId) return { ok: false, error: tEnglish('workbench.musicGenFailed') };
               const { startSec: _s, ...rest } = knobs;
               if (Object.keys(rest).length) {
                 const patched = audioPatch(newId, rest);
@@ -4123,7 +4123,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const db = (compRef.current.audioTracks ?? []).find((x) => x.id === newId)?.volumeDb;
               return { ok: true, summary: t('workbench.bgmMounted', { db: db != null ? String(r1(db)) : String(-18) }), data: { trackId: newId } };
             }
-            if (!tracks.length) return { ok: false, error: t('workbench.noBgmYet') };
+            if (!tracks.length) return { ok: false, error: tEnglish('workbench.noBgmYet') };
             if (resolved && !resolved.clipIds.length) return notFound();
             if (resolved && resolved.clipIds.length > 1) {
               return { ok: false, error: `${resolved.laneId} holds ${resolved.clipIds.length} clips — pass one clip id: ${resolved.clipIds.join(', ')}` };
@@ -4144,7 +4144,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (Number.isFinite(headSec)) trimPatch = { ...trimPatch, ...audioTrimPatch(target, 'left', Math.max(0, headSec)) };
             if (Number.isFinite(tailSec)) trimPatch = { ...trimPatch, ...audioTrimPatch({ ...target, ...trimPatch }, 'right', Math.max(0, tailSec)) };
             const trimming = Object.keys(trimPatch).length > 0;
-            if (!Object.keys(knobs).length && !trimming) return { ok: false, error: t('workbench.passAudioKnobs') };
+            if (!Object.keys(knobs).length && !trimming) return { ok: false, error: tEnglish('workbench.passAudioKnobs') };
             const patched = audioPatch(target.id, { ...trimPatch, ...knobs });
             if (!patched.ok) return { ok: false, error: patched.error ?? t('workbench.passAudioKnobs') };
             return { ok: true, summary: trimming ? t('workbench.bgmTrimmed') : t('workbench.bgmAdjusted') };
@@ -4155,7 +4155,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             // a File and follows the same local-insert path as the manual "+" action.
             const sigIn = typeof input.sig === 'string' ? input.sig.trim() : '';
             const urlIn = typeof input.url === 'string' ? input.url.trim() : '';
-            if (!sigIn && !urlIn) return { ok: false, error: t('workbench.needUrlOrSig') };
+            if (!sigIn && !urlIn) return { ok: false, error: tEnglish('workbench.needUrlOrSig') };
             const at = typeof input.atSec === 'number' && Number.isFinite(input.atSec) ? Math.max(0, input.atSec) : tRef.current;
             const explicitSceneId = typeof input.sceneId === 'string' && input.sceneId.trim() ? input.sceneId.trim() : undefined;
             if (explicitSceneId && !directorPlanFromDocument(documentRef.current)?.scenes.some((scene) => scene.id === explicitSceneId)) {
@@ -4188,23 +4188,23 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   const base = imgSourceBase();
                   if (key && base) f = await proxyFetch(`${base}/${key}`);
                 }
-                if (!f) return { ok: false, error: t('workbench.noBytesFoundSig') };
+                if (!f) return { ok: false, error: tEnglish('workbench.noBytesFoundSig') };
               } else {
                 f = await proxyFetch(urlIn);
-                if (!f) return { ok: false, error: t('workbench.urlFetchFailedOnly') };
+                if (!f) return { ok: false, error: tEnglish('workbench.urlFetchFailedOnly') };
               }
               report(t('workbench.readingDuration'));
               const blobUrl = URL.createObjectURL(f);
               const dur = await videoDurationOf(blobUrl);
               if (!dur) {
                 URL.revokeObjectURL(blobUrl);
-                return { ok: false, error: t('workbench.couldNotReadDurationCodec') };
+                return { ok: false, error: tEnglish('workbench.couldNotReadDurationCodec') };
               }
               void saveLocalVideo(f, fileSig(f)).catch(() => {});
               const newShotId = insertClipCore(blobUrl, Math.round(dur * 100) / 100, at, f, null, null, {
                 ...(explicitSceneId ? { sceneId: explicitSceneId } : {}),
               });
-              if (!newShotId) return { ok: false, error: t('workbench.failedFetchInsertClip') };
+              if (!newShotId) return { ok: false, error: tEnglish('workbench.failedFetchInsertClip') };
               const sceneId = documentRef.current.semantics.scenes.find((scene) => scene.clipIds.includes(newShotId))?.id;
               return withDelta({
                 ok: true,
@@ -4221,10 +4221,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             // then onFrameApplied lands palette+frameId into comp. Next round <frame_attached> prompts it to read_frame.
             // Gate before tagging the session: onFrameApplied refuses mid-generation, and a tagged
             // session with an unapplied comp would disagree about the active theme.
-            if (genIdsRef.current.size) return { ok: false, error: t('workbench.elementGeneratingThemeAfter') };
+            if (genIdsRef.current.size) return { ok: false, error: tEnglish('workbench.elementGeneratingThemeAfter') };
             const fid = typeof input.frame_id === 'string' ? input.frame_id : '';
             const f = frameCatalogRef.current.find((x) => x.id === fid);
-            if (!f) return { ok: false, error: t('workbench.noSuchFrameId', { id: fid }) };
+            if (!f) return { ok: false, error: tEnglish('workbench.noSuchFrameId', { id: fid }) };
             chatRef.current?.attachFrame({ id: f.id, title: f.title, icon: f.icon, iconKey: f.iconKey ?? null });
             return { ok: true, summary: t('workbench.appliedThemeAlt', { title: f.title }) };
           }
@@ -4340,7 +4340,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'edit_block': {
             const b = findBlock(input.blockId);
-            if (!b) return { ok: false, error: t('workbench.elementNotFound') };
+            if (!b) return { ok: false, error: tEnglish('workbench.elementNotFound') };
             try {
               markGenerating([b.id], true); // lock editing during the rewrite too (the result replaces the whole slots)
               const seed = {
@@ -4394,7 +4394,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               data: { fix: 'Browser handoff mints a one-time code so an external agent can open the editor in its own browser. In this chat the user is already in the editor, so no handoff is needed.' },
             };
           default:
-            return { ok: false, error: t('workbench.unknownOperationTool', { tool: toolId }) };
+            return { ok: false, error: tEnglish('workbench.unknownOperationTool', { tool: toolId }) };
         }
       } catch (e) {
         if (e instanceof DOMException && e.name === 'AbortError') throw e;
@@ -4606,8 +4606,8 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         const bid = typeof input.blockId === 'string' ? input.blockId : undefined;
         if (bid) {
           const b = c2.blocks.find((x) => x.id === bid);
-          if (!b) return { ok: false, error: t('workbench.elementNotFoundIds') };
-          if (genIdsRef.current.has(b.id)) return { ok: false, error: t('workbench.blockGeneratingWaitFinish') };
+          if (!b) return { ok: false, error: tEnglish('workbench.elementNotFoundIds') };
+          if (genIdsRef.current.has(b.id)) return { ok: false, error: tEnglish('workbench.blockGeneratingWaitFinish') };
           const context = contextForWindow(b.startSec, b.durationSec);
           return {
             ok: true,
@@ -4669,7 +4669,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
       }
       case 'apply_block': {
         const raw = typeof input.raw === 'string' ? input.raw : '';
-        if (!raw.trim()) return { ok: false, error: t('workbench.rawRequired') };
+        if (!raw.trim()) return { ok: false, error: tEnglish('workbench.rawRequired') };
         const bid = typeof input.blockId === 'string' ? input.blockId : undefined;
         const target = bid ? c2.blocks.find((x) => x.id === bid) : undefined;
         const requestedLabel = typeof input.label === 'string' && input.label.trim()
@@ -4677,7 +4677,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           : undefined;
         const placement = placementPercentToBox(input.placement, c2.width, c2.height);
         if (placement.error) return { ok: false, error: placement.error };
-        if (target && genIdsRef.current.has(target.id)) return { ok: false, error: t('workbench.blockGeneratingWaitFinish') };
+        if (target && genIdsRef.current.has(target.id)) return { ok: false, error: tEnglish('workbench.blockGeneratingWaitFinish') };
         const fb = target ? { ...renderBlock(target), propsSchema: blockPropsSchema(target) } : { innerHtml: '<div></div>', timelineBody: '' };
         // Stable applyId (same fix as the offline executor in server-tools): an unknown bid IS the
         // new-block id — compose_context minted it for the brief, or a lint receipt handed it back.
@@ -4735,7 +4735,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         // Same hard line as composeBlockChecked: hard problems are bounced back for the external model to fix itself (it is the "one fix round" model)
         const hard = issues.filter((i) => HARD_LINT_CODES.has(i.code));
         if (hard.length) {
-          return { ok: false, error: t('workbench.failedStaticChecksFix', { blockId: applyId }), data: { blockId: applyId, issues: hard.map((i) => i.message) } };
+          return { ok: false, error: tEnglish('workbench.failedStaticChecksFix', { blockId: applyId }), data: { blockId: applyId, issues: hard.map((i) => i.message) } };
         }
         const warnings = issues.length ? { warnings: issues.map((i) => i.message) } : {};
         pushUndoSnapshot();
@@ -4809,7 +4809,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             data: { atSec: at, width: shot.width, height: shot.height, burnedLabel: label, visible },
           } as StudioToolResult;
         } catch (e) {
-          return { ok: false, error: t('workbench.frameCaptureFailedMessage', { message: e instanceof Error ? e.message : String(e) }) };
+          return { ok: false, error: tEnglish('workbench.frameCaptureFailedMessage', { message: e instanceof Error ? e.message : String(e) }) };
         }
       }
       case 'review_sequence': {
@@ -4915,7 +4915,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             images,
           };
         } catch (e) {
-          return { ok: false, error: t('workbench.frameCaptureFailedMessage', { message: e instanceof Error ? e.message : String(e) }) };
+          return { ok: false, error: tEnglish('workbench.frameCaptureFailedMessage', { message: e instanceof Error ? e.message : String(e) }) };
         }
       }
       case 'run_v3': {
@@ -4949,7 +4949,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         if (name === 'compose_component') {
           const fps = before.canvas.fps;
           const instruction = typeof args.instruction === 'string' ? args.instruction.trim() : '';
-          if (!instruction) return { ok: false, error: t('workbench.composeNeedsInstruction') };
+          if (!instruction) return { ok: false, error: tEnglish('workbench.composeNeedsInstruction') };
           const ctxInput: Record<string, unknown> = {};
           if (Number.isInteger(args.atFrame)) ctxInput.atSec = (args.atFrame as number) / fps;
           if (Number.isInteger(args.durationFrames)) ctxInput.durationSec = (args.durationFrames as number) / fps;
@@ -4961,7 +4961,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           if (!ctxRes.ok) return ctxRes;
           const d = (ctxRes.data ?? {}) as Record<string, unknown>;
           const block = d.block as ComposeBriefInput['block'] | undefined;
-          if (!block) return { ok: false, error: t('workbench.elementNotFoundIds') };
+          if (!block) return { ok: false, error: tEnglish('workbench.elementNotFoundIds') };
           const format = args.format === 'kit' || args.format === 'html' ? (args.format as 'kit' | 'html') : undefined;
           const frame = typeof d.frameId === 'string' ? frameRegistry.get(d.frameId) : null;
           const frameContent = composeVisualDirectionContent(

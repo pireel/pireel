@@ -65,7 +65,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   /* ------------------------------------------------------------------ state */
   get_state: {
     description:
-      'Read the active output: canvas (width, height, fps), durationFrames, playhead, canGenerate, the attached frame, every track with its role and clips, the asset inventory, and the outputs list. Clips carry frames:[start,end), source seconds, non-default properties only; linked audio is folded into its visual clip as audio:{clipId,…}; caption tracks appear as one captions object, never as cue clips. Call once per session, then patch your model from mutation deltas; re-read only when a receipt note or an error says the state is stale. window narrows to tracks and a frame range and adds totalClips per truncated track.',
+      'Read the active output: canvas (width, height, fps), durationFrames, playhead, account (plan, canGenerate, videoGeneration — check before a paid call), lateReceipts (outcomes of calls that timed out and finished since), the attached frame, every track with its role and clips, the asset inventory, and the outputs list. Clips carry frames:[start,end), source seconds, non-default properties only; linked audio is folded into its visual clip as audio:{clipId,…}; caption tracks appear as one captions object, never as cue clips. Call once per session, then patch your model from mutation deltas; re-read only when a receipt note or an error says the state is stale. window narrows to tracks and a frame range and adds totalClips per truncated track.',
     inputSchema: obj({
       window: obj({
         tracks: arr(str(), { description: 'Track ids to include; omit for all.' }),

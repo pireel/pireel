@@ -25,7 +25,7 @@ import {
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { fileSig } from './media';
 import { ExportCanceled, type ExportRenderOpts, clientExportVideo } from './client-export';
-import { t } from './i18n';
+import { t, tEnglish } from './i18n';
 import { compositionRenderView } from './composition-render-view';
 import { primaryNarrativeRenderPlan } from './primary-render-plan';
 import { supplementalVisualMedia } from './visual-render-plan';
@@ -169,7 +169,7 @@ export function useStudioExport(deps: {
    *  Returns a result for the agent export tools (export_video/track_export): on success includes the
    *  saved filename and how the file was delivered. */
   async function exportVideo(opts: ExportRenderOpts, sinkUrl?: string): Promise<{ ok: boolean; filename?: string; error?: string } & Partial<ExportDelivery>> {
-    if (exporting || publishing) return { ok: false, error: t('common.exportAlreadyProgress') };
+    if (exporting || publishing) return { ok: false, error: tEnglish('common.exportAlreadyProgress') };
     // Every referenced local source must be resolvable BEFORE the plan is read, or the plan omits
     // the clip (batch export right after an output switch used to lose the picture-in-picture video).
     await prepareExportAssets?.(documentRef.current);
@@ -180,7 +180,7 @@ export function useStudioExport(deps: {
     const plan = editorDocumentRenderPlan(document, { resolveAssetUrl });
     if (plan.durationFrames === 0) {
       toast.error(t('common.nothingToExport'));
-      return { ok: false, error: t('common.nothingToExport') };
+      return { ok: false, error: tEnglish('common.nothingToExport') };
     }
     if (!canClientExport(c, plan)) {
       toast.error(noExportReason(c, plan));
@@ -205,7 +205,7 @@ export function useStudioExport(deps: {
     } catch (e) {
       if (e instanceof ExportCanceled) {
         toast.info(t('common.exportCanceled'));
-        return { ok: false, error: t('common.exportWasCanceled') };
+        return { ok: false, error: tEnglish('common.exportWasCanceled') };
       }
       console.warn('[studio] client export failed', e);
       toast.error(t('common.exportFailedTryAgain'));

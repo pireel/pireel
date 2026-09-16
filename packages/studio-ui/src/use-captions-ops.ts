@@ -30,7 +30,7 @@ import { firstNarrativeAssetId } from '@pireel/studio-engine/editor-document';
 import { joinWords, wordsFromText } from '@pireel/studio-engine/caption-fx';
 import { displayCues, mappedCaptionSegs as relayMappedCaptionSegs, relayCaptionLayer as relayCaptionLayerPure } from '@pireel/studio-engine/captions-relay';
 import { studioProviders } from '@pireel/studio-engine/providers';
-import { t } from './i18n';
+import { t, tEnglish } from './i18n';
 import { editorErrorMessage } from './editor-error';
 import type { CaptionLineRow } from './captions-panel';
 import { inspectCaptionDocument } from './caption-document-state';
@@ -472,7 +472,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
   /** Explicit re-layout: regenerate boundaries from current canvas/font metrics, remap corrected
    * copy onto those ranges, then immediately freeze the new layout. Deliberately no success toast. */
   const relayoutCaptions = () => {
-    if (!isCaptionsOn(compRef.current)) return { ok: false, error: t('workbench.thereNoCaptionsRight') };
+    if (!isCaptionsOn(compRef.current)) return { ok: false, error: tEnglish('workbench.thereNoCaptionsRight') };
     const edit = commit({ op: 'captions.edit', input: { relayout: true } });
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));

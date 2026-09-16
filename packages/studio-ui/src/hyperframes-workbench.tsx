@@ -65,7 +65,7 @@ import {
 } from "@pireel/ui/tooltip";
 
 import { toast } from "@pireel/ui/toast";
-import { studioLocale, t } from "./i18n";
+import { studioLocale, t, tEnglish } from "./i18n";
 import { editorErrorMessage } from "./editor-error";
 import { framePack } from "@pireel/studio-frames/locales";
 import {
@@ -6010,11 +6010,11 @@ export function HyperframesWorkbench({
     if (audId) {
       const clip = (c.audioTracks ?? []).find((x) => x.id === audId);
       if (!clip)
-        return { ok: false, error: t("workbench.movePlayheadToTrimAudio") };
+        return { ok: false, error: tEnglish("workbench.movePlayheadToTrimAudio") };
       const w = audioClipWindow(clip, totalDuration(c));
       if (tRef.current <= w.start + 0.05 || tRef.current >= w.end - 0.05) {
         toast.error(t("workbench.movePlayheadToTrimAudio"));
-        return { ok: false, error: t("workbench.movePlayheadToTrimAudio") };
+        return { ok: false, error: tEnglish("workbench.movePlayheadToTrimAudio") };
       }
       const edit = audioOps.patchClip(
         audId,
@@ -6028,7 +6028,7 @@ export function HyperframesWorkbench({
       return { ok: true };
     }
     if (!primaryNarrativeClips(editorDocumentRef.current).length)
-      return { ok: false, error: t("workbench.noVideoYet") };
+      return { ok: false, error: tEnglish("workbench.noVideoYet") };
     const range = narrativeTrimRangeAtTimelineSecond(
       editorDocumentRef.current,
       tRef.current,
@@ -6036,7 +6036,7 @@ export function HyperframesWorkbench({
     );
     if (!range) {
       toast.error(t("workbench.movePlayheadToTrim"));
-      return { ok: false, error: t("workbench.movePlayheadToTrim") };
+      return { ok: false, error: tEnglish("workbench.movePlayheadToTrim") };
     }
     const edit = commitNarrationRanges([range]);
     if (!edit.ok) {
@@ -6054,7 +6054,7 @@ export function HyperframesWorkbench({
     const range = narrativeClipTimelineRange(editorDocumentRef.current, sid);
     if (!range) {
       toast.error(t("workbench.shotNotFound"));
-      return { ok: false, error: t("workbench.shotNotFound") };
+      return { ok: false, error: tEnglish("workbench.shotNotFound") };
     }
     if (clips.length > 1) {
       const edit = commitNarrationRanges([range]);
@@ -6771,7 +6771,7 @@ export function HyperframesWorkbench({
       input: Record<string, unknown>,
     ) => Promise<StudioToolResult>
   >(() =>
-    Promise.resolve({ ok: false, error: t("editorError.operationFailed") }),
+    Promise.resolve({ ok: false, error: tEnglish("editorError.operationFailed") }),
   );
   const {
     setCaptionStyle,
@@ -7318,7 +7318,7 @@ export function HyperframesWorkbench({
     if (!OUTPUT_ANCHOR_TOOLS.has(tool) && anchored && anchored.id !== activeBefore.id) {
       return {
         ok: false,
-        error: t("workbench.outputChangedUnderAgent", { active: activeBefore.title || t("workbench.untitledOutput"), anchored: anchored.title || t("workbench.untitledOutput") }),
+        error: tEnglish("workbench.outputChangedUnderAgent", { active: activeBefore.title || tEnglish("workbench.untitledOutput"), anchored: anchored.title || tEnglish("workbench.untitledOutput") }),
         data: { activeOutputId: activeBefore.id, anchoredOutputId: anchored.id },
       } satisfies StudioToolResult;
     }

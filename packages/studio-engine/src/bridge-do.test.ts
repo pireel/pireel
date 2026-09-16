@@ -106,7 +106,7 @@ describe('StudioBridge DO', () => {
     expect(body).toEqual({ ok: true, summary: '已移动' });
   });
 
-  it('超时:期限内无回执 → ok:false tool_timeout;迟到回执被忽略', async () => {
+  it('超时:期限内无回执 → ok:false tab_timeout 带 callId;迟到回执随下一次 get_state 交付', async () => {
     vi.useFakeTimers();
     try {
       const { state, sockets } = makeState();
@@ -114,11 +114,28 @@ describe('StudioBridge DO', () => {
       bridge.acceptBrowserSocket(new FakeSocket());
       const p = bridge.fetch(callReq('undo', 1_000));
       await vi.advanceTimersByTimeAsync(1_100); // fake timers 下 json 解析与定时器一起推进
-      const body = (await (await p).json()) as { ok: boolean; error: string };
+      const body = (await (await p).json()) as { ok: boolean; error: string; callId: string; hint: string };
       expect(body.ok).toBe(false);
-      expect(body.error).toContain('tool_timeout');
+      expect(body.error).toBe('tab_timeout');
+      expect(body.hint).toContain(body.callId);
       const msg = JSON.parse(sockets[0]!.sent[0]!) as { id: string };
-      expect(() => bridge.webSocketMessage(sockets[0], JSON.stringify({ id: msg.id, ok: true }))).not.toThrow();
+      expect(msg.id).toBe(body.callId);
+      // The tab finishes later: the outcome is kept, not dropped.
+      bridge.webSocketMessage(sockets[0], JSON.stringify({ id: msg.id, ok: true, summary: 'undone' }));
+      // The rest polls the socket with real timers (the late-reply window timer simply never fires).
+      vi.useRealTimers();
+      const stateCall = bridge.fetch(callReq('get_state', 1_000));
+      await until(() => sockets[0]!.sent.length > 1);
+      const stateMsg = JSON.parse(sockets[0]!.sent[1]!) as { id: string };
+      bridge.webSocketMessage(sockets[0], JSON.stringify({ id: stateMsg.id, ok: true, state: 'S' }));
+      const stateBody = (await (await stateCall).json()) as { ok: boolean; state: string; lateReceipts?: Array<{ callId: string; tool: string; ok: boolean; summary?: string }> };
+      expect(stateBody.state).toBe('S');
+      expect(stateBody.lateReceipts).toEqual([expect.objectContaining({ callId: body.callId, tool: 'undo', ok: true, summary: 'undone' })]);
+      // Delivered once.
+      const again = bridge.fetch(callReq('get_state', 1_000));
+      await until(() => sockets[0]!.sent.length > 2);
+      bridge.webSocketMessage(sockets[0], JSON.stringify({ id: (JSON.parse(sockets[0]!.sent[2]!) as { id: string }).id, ok: true, state: 'S' }));
+      expect(((await (await again).json()) as { lateReceipts?: unknown }).lateReceipts).toBeUndefined();
     } finally {
       vi.useRealTimers();
     }

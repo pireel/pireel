@@ -53,7 +53,26 @@ export interface BridgeResult {
   error?: string;
   data?: unknown;
   state?: string;
+  hint?: string;
+  /** tab_timeout: the id under which a late reply is reported by a later get_state. */
+  callId?: string;
+  /** get_state: outcomes of calls that timed out for the caller but finished in the tab since. */
+  lateReceipts?: LateReceipt[];
 }
+
+export interface LateReceipt {
+  callId: string;
+  tool: string;
+  startedAt: number;
+  finishedAt: number;
+  ok: boolean;
+  summary?: string;
+  error?: string;
+}
+
+/** How long a timed-out call keeps listening for the tab's reply. */
+const LATE_REPLY_WINDOW_MS = 10 * 60_000;
+const LATE_RECEIPTS_MAX = 20;
 
 interface BridgeCallBody {
   tool?: string;
@@ -64,7 +83,8 @@ interface BridgeCallBody {
 const DEFAULT_TIMEOUT_MS = 120_000;
 
 export class StudioBridge {
-  private pending = new Map<string, { resolve: (r: BridgeResult) => void; timer: ReturnType<typeof setTimeout> }>();
+  private pending = new Map<string, { resolve: (r: BridgeResult) => void; timer: ReturnType<typeof setTimeout>; tool: string; at: number; late?: boolean }>();
+  private late: LateReceipt[] = [];
   private seq = 0;
   /** In-memory project tag per socket; the serialized attachment is the hibernation-safe copy. */
   private socketProjects = new WeakMap<object, string>();
@@ -192,12 +212,26 @@ export class StudioBridge {
       }
       const id = `c${++this.seq}`;
       const timeoutMs = Math.min(Math.max(body.timeoutMs ?? DEFAULT_TIMEOUT_MS, 1_000), 600_000);
+      const called = body.tool === 'run_v3' ? String(body.input?.name ?? body.tool) : body.tool;
       const result = await new Promise<BridgeResult>((resolve) => {
         const timer = setTimeout(() => {
-          this.pending.delete(id);
-          resolve({ ok: false, error: `tool_timeout after ${Math.round(timeoutMs / 1000)}s` });
+          // The tab may still be working (a long cut, an export). The caller is told so and the
+          // entry stays open a while longer: a reply that arrives later is kept as a late receipt
+          // and handed over with the next get_state, so the agent can see whether the work landed
+          // instead of guessing from a stale read and running the edit twice.
+          const entry = this.pending.get(id);
+          if (entry) {
+            entry.late = true;
+            entry.timer = setTimeout(() => this.pending.delete(id), LATE_REPLY_WINDOW_MS);
+          }
+          resolve({
+            ok: false,
+            error: 'tab_timeout',
+            callId: id,
+            hint: `The studio tab has not answered ${called} within ${Math.round(timeoutMs / 1000)}s; it may still be working. Do not repeat the call. Call get_state: when the tab finishes, the receipt arrives under lateReceipts with callId ${id}.`,
+          });
         }, timeoutMs);
-        this.pending.set(id, { resolve, timer });
+        this.pending.set(id, { resolve, timer, tool: called, at: Date.now() });
         try {
           target.send(JSON.stringify({ id, tool: body.tool, input: body.input ?? {} }));
         } catch {
@@ -206,6 +240,10 @@ export class StudioBridge {
           resolve({ ok: false, error: 'bridge_send_failed' });
         }
       });
+      if (called === 'get_state' && result.ok && this.late.length) {
+        const lateReceipts = this.late.splice(0, this.late.length);
+        return Response.json({ ...result, lateReceipts });
+      }
       return Response.json(result);
     }
 
@@ -231,10 +269,16 @@ export class StudioBridge {
     }
     if (!m.id) return;
     const p = this.pending.get(m.id);
-    if (!p) return; // late reply for an already-timed-out call
+    if (!p) return; // reply for a call that timed out long ago
     this.pending.delete(m.id);
     clearTimeout(p.timer);
     const { id: _drop, ...result } = m;
+    if (p.late) {
+      // The caller already received tab_timeout; keep the outcome for the next get_state.
+      this.late.push({ callId: m.id, tool: p.tool, startedAt: p.at, finishedAt: Date.now(), ok: result.ok, ...(result.summary ? { summary: result.summary } : {}), ...(result.error ? { error: result.error } : {}) });
+      if (this.late.length > LATE_RECEIPTS_MAX) this.late.splice(0, this.late.length - LATE_RECEIPTS_MAX);
+      return;
+    }
     p.resolve(result);
   }
 

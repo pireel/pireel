@@ -10,7 +10,7 @@ import { registerMessages } from '@pireel/studio-engine/i18n';
 import { UI_ZH } from './messages/zh';
 import { UI_EN } from './messages/en';
 
-export { t, setStudioLocale, studioLocale, missingKeys, type StudioLocale } from '@pireel/studio-engine/i18n';
+export { t, tEnglish, setStudioLocale, studioLocale, missingKeys, type StudioLocale } from '@pireel/studio-engine/i18n';
 
 registerMessages('zh', UI_ZH);
 registerMessages('en', UI_EN);
