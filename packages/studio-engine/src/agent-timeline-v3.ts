@@ -19,7 +19,6 @@ import {
   type EditorDocumentV2,
   type TimelineClip,
 } from './editor-document';
-import { narrativeClipTimelineRange } from './editor-document/read-model';
 import { CAPTION_PRESETS, getCaptionPreset } from './caption-presets';
 import { CUT_TRANSITION_EFFECTS, DIRECTIONAL_TRANSITIONS, MAX_TRANSITION_SEC, PLACE_ANCHORS, SHOT_TREATMENTS, applyBlockPlacement, blockId, blockKind, freeTrack, isCaptionsOn, isSentenceCaption, placementFramingNotes, renderBlock, resolveCaptionStyle, shotFilterCss, splitBlockedByTransition, videoShotTimelineSpans, zoneOf, type Block, type Composition, type CutTransitionEffect, type ShotFilter, type TransitionDirection, type VideoShot } from './composition-core';
 import { applyCanvasDocumentEdit } from './canvas-document-edit';
@@ -27,7 +26,7 @@ import { applyCaptionDocumentEdit } from './caption-document-edit';
 import { applyCompositionLayout, applyShotFramingInput, canvasSizeFollowingFirstVideo, canvasSizeFromInput } from './editing-primitives';
 import { applyLayoutDocumentEdit } from './layout-document-edit';
 import { applyMediaCropInput, applyMediaTransformInput } from './media-framing-edit';
-import { applyNarrationDocumentEdit, removeNarrationClipsWithoutRipple } from './narration-document-edit';
+import { applyNarrationDocumentEdit } from './narration-document-edit';
 import { applyNarrationSplitCommands, normalizeNarrationSplitPoints } from './editor-document/commands/narration-split';
 import { applyOverlayDocumentEdits, removeOverlayDocumentClips } from './overlay-document-edit';
 import { applyVideoClipSettingsPatches, mediaVideoClipEntries } from './media-video-edit';
@@ -240,6 +239,42 @@ export function moveClipsV3(document: EditorDocumentV2, input: Input): AgentTime
   return mutation(next, `Moved ${items.length} clip${items.length === 1 ? '' : 's'}`, receipts);
 }
 
+/** Close every gap on the story spine by moving later spine clips earlier; other lanes stay put. */
+function packPrimaryNarrative(document: EditorDocumentV2): EditorDocumentV2 {
+  const trackId = document.semantics.primaryNarrativeTrackId;
+  let changed = false;
+  const tracks = document.timeline.tracks.map((track) => {
+    if (track.id !== trackId) return track;
+    let cursor = 0;
+    const clips = [...track.clips]
+      .sort((left, right) => left.startFrame - right.startFrame || left.id.localeCompare(right.id))
+      .map((clip) => {
+        const packed = clip.startFrame === cursor ? clip : { ...clip, startFrame: cursor };
+        if (packed !== clip) changed = true;
+        cursor += clip.durationFrames;
+        return packed;
+      });
+    return changed ? { ...track, clips } : track;
+  });
+  return changed ? { ...document, timeline: { ...document.timeline, tracks } } : document;
+}
+
+/** Replace a clip's media while keeping its slot: timing, framing, level, fades and keyframes stay. */
+export function swapClipMediaV3(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
+  const clipId = string(input.clipId);
+  const assetId = string(input.assetId);
+  if (!clipId) return fail('missing_field', { path: 'clipId', fix: 'Pass the clip whose media should change.' });
+  if (!assetId) return fail('missing_field', { path: 'assetId', fix: 'Pass the replacement asset id from get_state or search_assets.' });
+  const found = locatedClip(document, clipId);
+  if (!found) return fail(`clip not found: ${clipId}`);
+  if (!document.assets[assetId]) return fail('unknown_id', { path: 'assetId', value: assetId, fix: 'The replacement must be a registered asset: take its id from get_state (library entries included) or register_media it first.' });
+  const swapped = swapClipMedia(document, { clipId, assetId });
+  if (!swapped.ok) return swapped;
+  const after = locatedClip(swapped.document!, clipId)?.clip;
+  const span = after && 'sourceInSec' in after && 'sourceOutSec' in after ? { source: [after.sourceInSec, after.sourceOutSec] } : {};
+  return mutation(swapped.document!, `Swapped the media on ${clipId}`, [], { clipId, assetId, frames: after ? [after.startFrame, after.startFrame + after.durationFrames] : undefined, ...span });
+}
+
 export function removeClipsV3(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const clipIds = Array.isArray(input.clipIds) ? [...new Set(input.clipIds.map(string).filter((id): id is string => !!id))] : [];
   if (!clipIds.length) return fail('clipIds is required');
@@ -247,34 +282,19 @@ export function removeClipsV3(document: EditorDocumentV2, input: Input): AgentTi
   const receipts: EditorCommandReceipt[] = [];
   const missingClipIds: string[] = [];
   const overlays: string[] = [];
-  const rippled: string[] = [];
   const byTrack = new Map<string, string[]>();
   for (const id of clipIds) {
     const found = locatedClip(next, id);
     if (!found) { missingClipIds.push(id); continue; }
     if (isOverlayClip(found.clip)) overlays.push(id);
-    else if (found.clip.kind === 'narrative' && input.ripple === true) rippled.push(id);
     else byTrack.set(found.track.id, [...(byTrack.get(found.track.id) ?? []), id]);
   }
-  if (!overlays.length && !rippled.length && !byTrack.size) return fail(`clip not found: ${missingClipIds.join(', ')}`);
+  if (!overlays.length && !byTrack.size) return fail(`clip not found: ${missingClipIds.join(', ')}`);
   if (overlays.length) {
     const edit = removeOverlayDocumentClips({ document: next, clipIds: overlays });
     if (!edit.ok) return fail(edit.error.message, { code: edit.error.code, trackIds: edit.error.trackIds });
     next = edit.document;
     receipts.push(...edit.receipts);
-  }
-  for (const id of rippled) {
-    // Story-spine ripple: later footage plays earlier and overlays/captions re-lay (the same edit a
-    // transcript cut makes). The last remaining spine clip is removed without ripple.
-    const range = narrativeClipTimelineRange(next, id);
-    if (!range) continue;
-    const common = { projectId: '', document: next, mainTranscript: null, clipTranscripts: {} };
-    const command = primaryNarrativeClips(next).length > 1
-      ? applyNarrationDocumentEdit({ ...common, ranges: [range] })
-      : removeNarrationClipsWithoutRipple({ ...common, clipIds: [id] });
-    if (!command.ok) return fail(command.error.message, { code: command.error.code, trackIds: command.error.trackIds });
-    next = command.document;
-    receipts.push(...command.receipts);
   }
   for (const [trackId, ids] of byTrack) {
     const remaining = ids.filter((id) => locatedClip(next, id)?.track.id === trackId);
@@ -284,9 +304,18 @@ export function removeClipsV3(document: EditorDocumentV2, input: Input): AgentTi
     next = removed.document;
     receipts.push(removed.receipt);
   }
+  if (byTrack.has(document.semantics.primaryNarrativeTrackId)) {
+    // The story spine has no gaps: what follows a removed spine clip plays earlier. Only the spine
+    // moves — speech, captions and graphics keep their timeline positions (ripple_delete_ranges is
+    // the edit that takes a span out of every lane).
+    next = packPrimaryNarrative(next);
+    const relaid = applyEditorCommand(next, { type: 'captions.relay' });
+    if (!relaid.ok) return fail(relaid.error.message, relaid.error);
+    next = relaid.document;
+    receipts.push(relaid.receipt);
+  }
   const removedCount = clipIds.length - missingClipIds.length;
   const summary = `Removed ${removedCount} clip${removedCount === 1 ? '' : 's'}`
-    + (rippled.length ? ` (${rippled.length} rippled)` : '')
     + (missingClipIds.length ? ` (${missingClipIds.length} already gone: ${missingClipIds.join(', ')})` : '');
   return mutation(next, summary, receipts, {
     removedClipIds: clipIds.filter((id) => !missingClipIds.includes(id)),
@@ -422,7 +451,7 @@ export function setClipPropertiesV3(document: EditorDocumentV2, input: Input): A
     const video = isVideoClip(next, found.clip);
     let failed: AgentTimelineOutcome | null = null;
 
-    if (string(item.assetId)) failed = step(swapClipMedia(next, { clipId, assetId: string(item.assetId) }));
+    if (item.assetId !== undefined) return fail('unknown_field', { path: `items[${index}].assetId`, fix: 'Replacing a clip\'s media is swap_clip_media {clipId, assetId}.' });
     if (failed) return failed;
 
     if (item.source !== undefined) {
@@ -1070,7 +1099,7 @@ export function inspectMediaV3(document: EditorDocumentV2, input: Input): AgentT
 /* ================================ export ================================ */
 
 export const V3_DOCUMENT_TOOL_IDS: ReadonlySet<string> = new Set([
-  'add_clips', 'insert_clips', 'move_clips', 'remove_clips', 'split_clips', 'ripple_delete_ranges',
+  'add_clips', 'insert_clips', 'move_clips', 'remove_clips', 'split_clips', 'ripple_delete_ranges', 'swap_clip_media',
   'set_clip_properties', 'set_clip_framing', 'add_transition', 'set_canvas', 'apply_layout',
   'manage_tracks', 'manage_clip_links', 'set_texts', 'set_captions', 'mask_words', 'get_transcript', 'inspect_media',
 ]);
@@ -1079,6 +1108,7 @@ export function runV3DocumentTool(document: EditorDocumentV2, tool: string, inpu
   switch (tool) {
     case 'add_clips': return addClipsV3(document, input, 'overwrite');
     case 'insert_clips': return addClipsV3(document, input, 'ripple');
+    case 'swap_clip_media': return swapClipMediaV3(document, input);
     case 'move_clips': return moveClipsV3(document, input);
     case 'remove_clips': return removeClipsV3(document, input);
     case 'split_clips': return splitClipsV3(document, input);

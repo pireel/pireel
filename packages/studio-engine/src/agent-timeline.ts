@@ -45,6 +45,7 @@ export const AGENT_TIMELINE_TOOL_IDS = new Set([
   'split_clips',
   'ripple_delete_ranges',
   'set_clip_properties',
+  'swap_clip_media',
   'set_clip_framing',
   'add_transition',
   'set_canvas',

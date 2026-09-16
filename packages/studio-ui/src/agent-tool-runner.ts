@@ -1390,15 +1390,15 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           return { ok: false, error: tEnglish('workbench.nameGeneratingEditAfter', { name: b ? bname(b) : hit }) };
         }
       }
-      if (toolId === 'add_clips' || toolId === 'insert_clips') {
+      if (toolId === 'add_clips' || toolId === 'insert_clips' || toolId === 'swap_clip_media') {
         const referencedAssetIds = [
-          ...new Set(
-            (Array.isArray(input.clips) ? input.clips : [])
+          ...new Set([
+            ...(Array.isArray(input.clips) ? input.clips : [])
               .map((item) => (item && typeof item === 'object' && typeof (item as { assetId?: unknown }).assetId === 'string'
                 ? (item as { assetId: string }).assetId.trim()
-                : ''))
-              .filter(Boolean),
-          ),
+                : '')),
+            typeof input.assetId === 'string' ? input.assetId.trim() : '',
+          ].filter(Boolean)),
         ];
         // The project media directory is shared across outputs, while each output document keeps
         // only the assets it has used. A model should be able to place an exact search_assets id in a

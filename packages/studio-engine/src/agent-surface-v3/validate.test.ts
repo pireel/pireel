@@ -31,6 +31,8 @@ describe('validateV3Input', () => {
     expect(found).toMatchObject({ error: 'unknown_field', path: 'mode_extra', allowed: expect.arrayContaining(['ids', 'mode', 'clipIds']) });
     expect(validateV3Input('add_clips', { clips: [{ assetId: 'a1', startFrame: 0, muted: true }] })).toMatchObject({ error: 'unknown_field', path: 'clips[0].muted' });
     expect(validateV3Input('add_clips', { clips: [{ assetId: 'a1', startFrame: 0, mute: true }] })).toBeNull();
+    expect(validateV3Input('remove_clips', { clipIds: ['c1'], ripple: true })).toMatchObject({ error: 'unknown_field', path: 'ripple' });
+    expect(validateV3Input('swap_clip_media', { clipId: 'c1', assetId: 'a1' })).toBeNull();
   });
 
   it('leaves unknown tools and bounds to the executor', () => {

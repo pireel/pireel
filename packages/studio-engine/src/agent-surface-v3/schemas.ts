@@ -272,10 +272,9 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   remove_clips: {
     description:
-      'Remove clips of any kind. Removing a story-spine clip always closes its gap on the spine (later footage plays earlier; the spine has no gaps) while speech, captions and graphics stay where they are. ripple=true additionally cuts that time span out of every sync-locked lane — narration and captions included — so use it only when the whole moment should disappear, not just the picture. Other lanes leave a gap unless ripple=true. Linked partners go with the clip unless includeLinked=false. To turn captions off use set_captions {on:false}.',
+      'Remove clips of any kind, with their linked partners unless includeLinked=false. Removing a story-spine clip closes the spine — later footage plays earlier — while speech, captions and graphics keep their positions; on other lanes the clip simply disappears and leaves its time in place. To take a span of time out of every lane (speech included) use ripple_delete_ranges; to change what a clip shows without touching its slot use swap_clip_media. To turn captions off use set_captions {on:false}.',
     inputSchema: obj({
       clipIds: ids('Clips to remove.'),
-      ripple: bool('Close the gap on sync-locked lanes.'),
       includeLinked: bool(),
     }, ['clipIds']),
   },
@@ -295,10 +294,10 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   set_clip_properties: {
     description:
-      'Patch properties on clips in one undo step: source [inSec,outSec] retrims a media clip (its length follows the span), durationFrames resizes graphic and text clips only, speed (0.25–4; the spine ripples by default, other lanes do not), volumeDb (−60…+20, 0 = source level), mute, fades {in,out} in frames, opacity, filter {brightness,contrast,saturate} (1 = untouched), enabled, box, and assetId to swap the clip’s media while keeping its geometry. props sets a graphic clip’s declared editable properties as [{key,value}] pairs — the keys, types and current values are listed under component.props in get_state; no regeneration. Layout and framing belong to set_clip_framing; timing moves to move_clips.',
+      'Patch properties on clips in one undo step: source [inSec,outSec] retrims a media clip (its length follows the span), durationFrames resizes graphic and text clips only, speed (0.25–4; the spine ripples by default, other lanes do not), volumeDb (−60…+20, 0 = source level), mute, fades {in,out} in frames, opacity, filter {brightness,contrast,saturate} (1 = untouched), enabled and box. Replacing a clip’s media is swap_clip_media. props sets a graphic clip’s declared editable properties as [{key,value}] pairs — the keys, types and current values are listed under component.props in get_state; no regeneration. Layout and framing belong to set_clip_framing; timing moves to move_clips.',
     inputSchema: obj({
       items: arr(obj({
-        clipId: str(), assetId: str('Swap the media identity.'), source: SOURCE_RANGE, durationFrames: int('New duration in frames.', 1),
+        clipId: str(), source: SOURCE_RANGE, durationFrames: int('New duration in frames.', 1),
         speed: num('', { min: 0.25, max: 4 }), ripple: bool('speed on the spine: shift later material (default true).'),
         volumeDb: num('', { min: -60, max: 20 }), mute: bool(), fades: FADES, opacity: num('', { min: 0, max: 1 }),
         filter: obj({ brightness: num(), contrast: num(), saturate: num() }),
@@ -306,6 +305,14 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
         props: arr(obj({ key: str('Property key from component.props.'), value: PROPERTY_VALUE }, ['key', 'value']), { minItems: 1, maxItems: 8, description: 'Graphic clips only: editable properties to set.' }),
       }, ['clipId']), { minItems: 1 }),
     }, ['items']),
+  },
+  swap_clip_media: {
+    description:
+      'Replace what a clip shows or plays without touching its slot: the clip keeps its frames, source range, framing, level, fades, keyframes and links, only the asset behind it changes. Use it to fix a bad take, an upside-down or obstructed picture, or a placeholder — the edit around it stays intact. The replacement must be a registered asset of a compatible kind (video for story-spine clips, video or image for B-roll and graphics, audio for audio clips) that covers the current source range. Removing and re-adding a clip is never needed to change its picture.',
+    inputSchema: obj({
+      clipId: str('The clip whose media changes.'),
+      assetId: str('Replacement asset id from get_state or search_assets.'),
+    }, ['clipId', 'assetId']),
   },
   set_clip_framing: {
     description:

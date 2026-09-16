@@ -20,7 +20,7 @@ const ICONS: Record<string, string> = {
   manage_project: '📁', search_assets: '🗃️', register_media: '📎', import_media: '📥', organize_media: '🗂️', prepare_local_asset: '📎',
   get_icons: '🔣', create_browser_handoff: '🌐',
   add_clips: '➕', assemble_from_review: '🧮', insert_clips: '➕', move_clips: '↔️', remove_clips: '🗑️', split_clips: '✂️',
-  ripple_delete_ranges: '✂️', set_clip_properties: '🎚️', set_clip_framing: '🖼️', apply_layout: '📐', set_keyframes: '⏱️',
+  ripple_delete_ranges: '✂️', set_clip_properties: '🎚️', swap_clip_media: '🔁', set_clip_framing: '🖼️', apply_layout: '📐', set_keyframes: '⏱️',
   manage_tracks: '🛤️', manage_clip_links: '🔗', add_transition: '🌫️', set_canvas: '🖥️',
   remove_silence: '🤫', remove_words: '✂️', mask_words: '🔇', denoise_audio: '🎧',
   compose_component: '📐', apply_component: '🧩', set_texts: '🔤', set_captions: '💬', manage_frame: '🎨', bake_component: '🎬',

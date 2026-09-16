@@ -60,6 +60,7 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   { id: 'split_clips', group: 'clips', skillContract: { version: 1, stability: 'stable' } },
   { id: 'ripple_delete_ranges', group: 'clips', skillContract: { version: 1, stability: 'stable' } },
   { id: 'set_clip_properties', group: 'clips', skillContract: { version: 1, stability: 'stable' } },
+  { id: 'swap_clip_media', group: 'clips', skillContract: { version: 1, stability: 'stable' } },
   { id: 'set_clip_framing', group: 'clips', skillContract: { version: 1, stability: 'stable' } },
   { id: 'apply_layout', group: 'clips', skillContract: { version: 1, stability: 'stable' } },
   { id: 'set_keyframes', group: 'clips' },

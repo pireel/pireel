@@ -988,3 +988,50 @@ describe('asset-id typo suggestion', () => {
     expect((outcome as { error?: string }).error).toContain('Closest registered id: local_ef703761-8603-4562-af25-9973fdaae590');
   });
 });
+
+describe('remove_clips and swap_clip_media (v3)', () => {
+  const project = () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', { assets: [
+      { id: 'v', kind: 'video', url: 'https://cdn.example/v.mp4', durationSec: 30 },
+      { id: 'v2', kind: 'video', url: 'https://cdn.example/v2.mp4', durationSec: 30 },
+      { id: 'voice', kind: 'audio', url: 'https://cdn.example/voice.mp3', durationSec: 10 },
+    ] }).document!;
+    const placed = runAgentTimelineTool(document, 'add_clips', { clips: [
+      { id: 's1', role: 'primary', assetId: 'v', startFrame: 0, source: [0, 2] },
+      { id: 's2', role: 'primary', assetId: 'v', startFrame: 60, source: [2, 4] },
+      { id: 's3', role: 'primary', assetId: 'v', startFrame: 120, source: [4, 6] },
+      { id: 'n1', role: 'narration', assetId: 'voice', startFrame: 0, source: [0, 6] },
+    ] });
+    expect(placed.ok, JSON.stringify(placed)).toBe(true);
+    return placed.document!;
+  };
+  const spine = (document: ReturnType<typeof project>) => document.timeline.tracks
+    .find((track) => track.id === document.semantics.primaryNarrativeTrackId)!.clips
+    .map((clip) => [clip.id, clip.startFrame, clip.startFrame + clip.durationFrames]);
+
+  it('removing a spine clip closes the spine and leaves speech where it was', () => {
+    const document = project();
+    const out = runAgentTimelineTool(document, 'remove_clips', { clipIds: ['s2'] });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    expect(spine(out.document!)).toEqual([['s1', 0, 60], ['s3', 60, 120]]);
+    const narration = out.document!.timeline.tracks.find((track) => track.role === 'narration')!.clips[0] as { startFrame: number; durationFrames: number; sourceInSec: number; sourceOutSec: number };
+    expect([narration.startFrame, narration.durationFrames, narration.sourceInSec, narration.sourceOutSec]).toEqual([0, 180, 0, 6]);
+    expect(out.summary).not.toContain('rippled');
+  });
+
+  it('swap_clip_media keeps the slot and refuses unknown or incompatible assets', () => {
+    const document = project();
+    const swapped = runAgentTimelineTool(document, 'swap_clip_media', { clipId: 's2', assetId: 'v2' });
+    expect(swapped.ok, JSON.stringify(swapped)).toBe(true);
+    const clip = spine(swapped.document!).find(([id]) => id === 's2');
+    expect(clip).toEqual(['s2', 60, 120]);
+    const after = swapped.document!.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId)!.clips.find((c) => c.id === 's2') as { assetId: string; sourceInSec: number; sourceOutSec: number };
+    expect([after.assetId, after.sourceInSec, after.sourceOutSec]).toEqual(['v2', 2, 4]);
+    expect(swapped.data).toMatchObject({ clipId: 's2', assetId: 'v2', frames: [60, 120], source: [2, 4] });
+
+    expect(runAgentTimelineTool(document, 'swap_clip_media', { clipId: 's2', assetId: 'nope' })).toMatchObject({ ok: false, error: 'unknown_id', data: { path: 'assetId' } });
+    expect(runAgentTimelineTool(document, 'swap_clip_media', { clipId: 's2', assetId: 'voice' }).ok).toBe(false);
+    expect(runAgentTimelineTool(document, 'set_clip_properties', { items: [{ clipId: 's2', assetId: 'v2' }] })).toMatchObject({ ok: false, error: 'unknown_field' });
+  });
+});
