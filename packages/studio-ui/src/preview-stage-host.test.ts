@@ -86,6 +86,24 @@ describe('PreviewStageHost', () => {
     expect(document.head.querySelector('link[rel="stylesheet"]')?.getAttribute('href')).toBe('https://fonts.example/css?family=Stage+Test');
   });
 
+  it('keeps styles the runtime appends to the head inside the stage and sends only font links to the page', async () => {
+    const host = new PreviewStageHost();
+    document.body.appendChild(host.element);
+    host.srcdoc = DOC.replace('</body>', `<script>
+      var st = document.createElement('style'); st.id = 'hf-runtime-css';
+      st.textContent = '[contenteditable="true"]{outline:2px dashed cyan} body.hf-editor .x{}';
+      document.head.appendChild(st);
+      var fl = document.createElement('link'); fl.rel = 'stylesheet'; fl.href = 'https://fonts.example/css?family=Late';
+      document.head.appendChild(fl);
+    </script></body>`);
+    await flush();
+    const shadow = host.element.shadowRoot!;
+    expect(shadow.getElementById('hf-runtime-css')?.textContent).toBe('[contenteditable="true"]{outline:2px dashed cyan} .hf-stage-body.hf-editor .x{}');
+    expect(document.head.querySelector('#hf-runtime-css')).toBeNull();
+    expect(document.head.querySelector('link[href="https://fonts.example/css?family=Late"]')).not.toBeNull();
+    expect(shadow.querySelector('link')).toBeNull();
+  });
+
   it('clears the stage and reverts its animations when the document is replaced or removed', async () => {
     const host = new PreviewStageHost();
     document.body.appendChild(host.element);

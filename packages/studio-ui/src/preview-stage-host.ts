@@ -109,6 +109,7 @@ export class PreviewStageHost {
   private messageListeners: Listener[] = [];
   private loadListeners = new Set<() => void>();
   private facadeWindow: Record<string, unknown> | null = null;
+  private adoptStyle: ((node: HTMLStyleElement) => HTMLStyleElement) | null = null;
   private mountToken = 0;
   private srcdocValue = '';
 
@@ -209,6 +210,15 @@ export class PreviewStageHost {
     const height = Number(parsed.getElementById('root')?.getAttribute('data-height')) || this.element.offsetHeight || 1;
 
     const fragment = document.createDocumentFragment();
+    const adoptStyle = (node: HTMLStyleElement): HTMLStyleElement => {
+      const { css, fontFaces } = splitFontFaces(node.textContent ?? '');
+      fontFaces.forEach(hoistFontFace);
+      const style = document.createElement('style');
+      if (node.id) style.id = node.id;
+      style.textContent = rewriteDocumentSelectors(css);
+      return style;
+    };
+    this.adoptStyle = adoptStyle;
     const reset = document.createElement('style');
     reset.textContent = `:host{all:initial;display:block;position:relative;overflow:hidden;contain:layout paint;}` +
       `.${STAGE_BODY_CLASS}{position:relative;width:100%;height:100%;overflow:hidden;margin:0;}`;
@@ -219,11 +229,7 @@ export class PreviewStageHost {
     const scripts: Array<{ src: string | null; code: string }> = [];
     for (const node of Array.from(parsed.head.children)) {
       if (node instanceof HTMLStyleElement) {
-        const { css, fontFaces } = splitFontFaces(node.textContent ?? '');
-        fontFaces.forEach(hoistFontFace);
-        const style = document.createElement('style');
-        style.textContent = rewriteDocumentSelectors(css);
-        fragment.appendChild(style);
+        fragment.appendChild(adoptStyle(node));
       } else if (node instanceof HTMLLinkElement && node.rel === 'stylesheet') {
         hoistStylesheetLink(node);
       } else if (node instanceof HTMLScriptElement) {
@@ -238,9 +244,8 @@ export class PreviewStageHost {
         continue;
       }
       if (node instanceof HTMLStyleElement) {
-        const { css, fontFaces } = splitFontFaces(node.textContent ?? '');
-        fontFaces.forEach(hoistFontFace);
-        node.textContent = rewriteDocumentSelectors(css);
+        body.appendChild(adoptStyle(node));
+        continue;
       }
       body.appendChild(document.importNode(node, true));
     }
@@ -377,7 +382,22 @@ export class PreviewStageHost {
       contains: (node: Node) => shadow.contains(node),
       body,
       documentElement: host,
-      head: document.head,
+      // Runtime scripts append styles and font links to the head. Styles belong to this stage
+      // (a leaked `[contenteditable]` outline once dressed the page's own inputs); only font
+      // stylesheets go to the page, where @font-face takes effect.
+      head: {
+        appendChild: (node: Node) => {
+          if (node instanceof HTMLLinkElement && node.rel === 'stylesheet') {
+            hoistStylesheetLink(node);
+            return node;
+          }
+          const adopted = node instanceof HTMLStyleElement && this.adoptStyle ? this.adoptStyle(node) : node;
+          shadow.appendChild(adopted);
+          return node;
+        },
+        querySelector: (selector: string) => shadow.querySelector(selector) ?? document.head.querySelector(selector),
+        contains: (node: Node) => shadow.contains(node) || document.head.contains(node),
+      },
       fonts: document.fonts,
       defaultView: windowFacade,
     };
