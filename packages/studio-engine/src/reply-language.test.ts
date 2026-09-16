@@ -8,7 +8,7 @@ describe('one stable conversation-language rule', () => {
   it('is identical in legacy and v3, without a detector or dynamic policy injection', () => {
     expect(CHAT_IDENTITY).toContain(CHAT_RESPONSE_LANGUAGE);
     expect(v3Instructions({ surface: 'chat' })).toContain(CHAT_RESPONSE_LANGUAGE);
-    expect(CHAT_RESPONSE_LANGUAGE).toBe('IMPORTANT: Your response must ALWAYS strictly follow the same major language as the user. 重要：你的回复必须始终严格使用与用户相同的主要语言。');
+    expect(CHAT_RESPONSE_LANGUAGE).toBe('IMPORTANT: Your response must ALWAYS strictly follow the same major language as the user. 重要：你的回复必须始终严格使用与用户输入相同的语言。');
     expect(CHAT_IDENTITY).not.toContain('<reply_language>');
   });
   it('does not let internal English design instructions select the chat note language', () => {
