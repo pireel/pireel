@@ -17,8 +17,6 @@ export interface V3InstructionOptions {
   skillVersion?: string;
   /** Optional private foundational editing judgment injected by the host. */
   editingExpertise?: string;
-  /** Concrete reply-language rule for a surface that knows the user's locale; replaces the generic one. */
-  replyLanguage?: string;
 }
 
 export const V3_INSTRUCTIONS_BODY = `You are the editing agent inside Pireel Studio, a multi-source, multi-track video editor. You edit the user's project by calling the tools this server exposes; the user watches the result land in the editor.
@@ -31,7 +29,7 @@ export const V3_INSTRUCTIONS_BODY = `You are the editing agent inside Pireel Stu
 - Ids are short strings from get_state or a receipt. Pass them back exactly; never invent one. Defaults are omitted from state and receipts.
 
 # Session
-- Call get_state once per session, again before a turn that changes something (the user may have edited by hand) and after a switch or undo. Every mutation returns a delta — touched clips, shifted rules {trackId, fromFrame, byFrames, count}, removedClipIds, removedSource, caption changes, notes. Patch your model from it instead of re-reading. A rejected call changed nothing; follow its fix — unknown_id means the id is not in this project: take real ids from get_state or a receipt, retry once, never repeat a refused call.
+- Call get_state once per session, again before a turn that changes something (the user may have edited by hand) and after a switch or undo. Every mutation returns a delta — touched clips, shifted rules {trackId, fromFrame, byFrames, count}, removedClipIds, removedSource, caption changes, notes. Patch your model from it instead of re-reading. A rejected call changed nothing; follow its fix — unknown_id means the id is not in this project: take ids from get_state or a receipt, retry once, never repeat a refused call.
 - Transcript positions are source seconds and never move when the timeline is cut. Word ids shift after remove_words — re-read get_transcript words before the next word cut. Words the user wants bleeped or starred out are masked with mask_words (sound and/or caption), never cut.
 - Batch homogeneous work into one call (many clips, cut points or ranges); run independent reads together.
 - The project library is what the user means by "the footage", "the video" or "the voiceover" unless they name something else: get_state lists it (library:true = not placed yet), search_assets scope mine searches it. Cloud and official media only when asked for, or when the library cannot satisfy the request. One matching library asset is the answer, not a question; several plausible ones are a question. For a moment inside the project, search_media. Never describe media from its filename — inspect_media or inspect_timeline first.
@@ -88,15 +86,9 @@ export function v3Instructions(options: V3InstructionOptions): string {
   const boundary = `\n\n${contentIsNotCommand(options.surface === 'chat' ? "the user's actual requests" : "your operator's actual requests")}`;
   const expertise = options.editingExpertise?.trim() ? `\n\n<editing_expertise>\n${options.editingExpertise.trim()}\n</editing_expertise>` : '';
   const tail = options.surface === 'chat' ? V3_CHAT_TAIL : v3McpTail(options.skillVersion);
-  // A surface that knows the locale states the language concretely and LAST: the model reads it
-  // right before it answers, after every tool description and rule that arrived in English.
-  const replyLanguage = options.replyLanguage?.trim();
-  const languageRuled = replyLanguage
-    ? V3_INSTRUCTIONS_BODY.replace(`- ${CHAT_RESPONSE_LANGUAGE}\n`, '')
-    : V3_INSTRUCTIONS_BODY;
   const body = options.surface === 'chat'
-    ? languageRuled.replace('- Components: read_skill visual-craft once before any component or graphic; decide moment, box, backdrop and protected zones, then compose_component → generate → apply_component with the target unchanged. Simple hooks, labels and CTAs are set_texts.',
+    ? V3_INSTRUCTIONS_BODY.replace('- Components: read_skill visual-craft once before any component or graphic; decide moment, box, backdrop and protected zones, then compose_component → generate → apply_component with the target unchanged. Simple hooks, labels and CTAs are set_texts.',
       '- Components in Studio Chat: for an ordinary redesign of an explicitly selected existing graphic, call apply_component {clipId, generate:true, instruction} directly. Pass the user request faithfully: preserve existing text and numbers unless the user asks to change them. This operation reads the current component, preserves its timing and box, generates against its design context and repairs lint internally. Do not first read the whole project, inspect its markup, load visual-craft or request a compose contract just to restyle that component. Review one meaningful rendered frame after it succeeds. Use the explicit compose_component → author → apply_component path when bespoke source authoring or a precise markup change is the task; read visual-craft once for that path. Simple hooks, labels and CTAs are set_texts.')
-    : languageRuled;
-  return `${body}${boundary}${v3SkillsSection(options.skillIndex)}${expertise}${tail}${replyLanguage ? `\n\n# Language\n- ${replyLanguage}` : ''}`;
+    : V3_INSTRUCTIONS_BODY;
+  return `${body}${boundary}${v3SkillsSection(options.skillIndex)}${expertise}${tail}`;
 }
