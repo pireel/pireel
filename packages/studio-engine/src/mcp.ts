@@ -70,6 +70,9 @@ export interface McpDeps {
   resolveV3Context?: () => Promise<V3AdapterContext>;
   /** Execute over the bridge (routing layer = StudioBridge DO stub fetch /call). */
   callBridge: (tool: string, input: Record<string, unknown>, timeoutMs: number) => Promise<McpBridgeResult>;
+  /** Bytes of a captured frame the browser stored in the user's cloud media space (routing layer =
+   *  the object store, after an ownership check). Without it, keyed frames are reported as unavailable. */
+  readFrameImage?: (key: string) => Promise<{ data: string; mimeType: string } | null>;
   /** Frame catalog (routing layer = frameRegistry.list()). */
   listFrames: () => { id: string; title: string; summary: string }[];
   /** Account-scoped Studio Skill catalog and full playbook lookup. Catalog metadata is
@@ -174,6 +177,42 @@ function rpcResult(id: JsonRpcRequest['id'], result: unknown): JsonRpcResponse {
 }
 function rpcError(id: JsonRpcRequest['id'], code: number, message: string): JsonRpcResponse {
   return { jsonrpc: '2.0', id: id ?? null, error: { code, message } };
+}
+
+interface FrameImageRef { data?: unknown; key?: unknown; mimeType?: unknown }
+
+/** Resolve keyed frames to bytes so the agent receives image content; frames that cannot be read are dropped
+ *  and counted, never sent as a bare key the agent cannot open. */
+export async function hydrateFrameImages(r: McpBridgeResult, deps: Pick<McpDeps, 'readFrameImage'>): Promise<McpBridgeResult> {
+  const resolve = async (image: unknown): Promise<{ data: string; mimeType: string } | null> => {
+    if (!image || typeof image !== 'object') return null;
+    const ref = image as FrameImageRef;
+    const mimeType = typeof ref.mimeType === 'string' ? ref.mimeType : 'image/jpeg';
+    if (typeof ref.data === 'string' && ref.data) return { data: ref.data, mimeType };
+    if (typeof ref.key === 'string' && ref.key && deps.readFrameImage) {
+      const read = await deps.readFrameImage(ref.key).catch(() => null);
+      if (read) return { data: read.data, mimeType: read.mimeType || mimeType };
+    }
+    return null;
+  };
+  if (!r.ok) return r;
+  const out: McpBridgeResult = { ...r };
+  let unavailable = 0;
+  if (Array.isArray(r.images)) {
+    const resolved = await Promise.all(r.images.map(resolve));
+    unavailable += resolved.filter((image) => !image).length;
+    out.images = resolved.filter((image): image is { data: string; mimeType: string } => !!image);
+  }
+  if (r.image) {
+    const resolved = await resolve(r.image);
+    if (resolved) out.image = resolved;
+    else {
+      delete out.image;
+      unavailable += 1;
+    }
+  }
+  if (unavailable) out.framesUnavailable = unavailable;
+  return out;
 }
 
 /** Tool result → MCP content (text JSON; isError tells the agent to correct course rather than parrot it).
@@ -441,7 +480,7 @@ export async function handleMcpRequest(raw: JsonRpcRequest, deps: McpDeps): Prom
       const args = ((raw.params as { arguments?: unknown } | undefined)?.arguments ?? {}) as Record<string, unknown>;
       if (typeof name !== 'string') return rpcError(raw.id, -32602, 'tools/call: name required');
       if (V3_TOOL_IDS.has(name) && !V3_TOOLS.find(tool => tool.id === name)?.chatOnly) {
-        return toolResponse(raw.id, await runV3Tool(name, args, deps));
+        return toolResponse(raw.id, await hydrateFrameImages(await runV3Tool(name, args, deps), deps));
       }
       if (V3_RETIRED_TOOL_IDS.includes(name)) {
         return toolResponse(raw.id, { ok: false, error: 'tool_retired', detail: `${name} no longer exists: keep the plan in your working context and build the edit directly with the clip tools; inspect_timeline reviews the whole output without a plan.` });

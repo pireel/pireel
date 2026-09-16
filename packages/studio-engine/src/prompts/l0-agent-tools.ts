@@ -1736,8 +1736,22 @@ export interface StudioToolResult {
   error?: string;
   /** Structured data for query tools (for the model, e.g. get_block's block detail; not rendered on the card). */
   data?: unknown;
-  /** Captured-frame image (base64, no data: prefix) — MCP side turns it into image content for the external agent to "see". */
-  image?: { data: string; mimeType: string };
-  /** Multiple images (visual_brief sampled frames) — MCP side converts each into image content. */
-  images?: { data: string; mimeType: string }[];
+  /** Captured frame — the MCP side turns it into image content, the chat route hands it to the model as an image. */
+  image?: ToolFrameImage;
+  /** Multiple frames (inspect_timeline samples) — each becomes one image for the agent, in order. */
+  images?: ToolFrameImage[];
+}
+
+/**
+ * One frame a tool captured. Preferred form is a cloud key (the browser stored the JPEG in the
+ * user's content-addressed media space; the host reads the bytes when it builds a prompt), so a
+ * thread carries a few dozen bytes per frame instead of the picture. `data` (base64, no prefix)
+ * is the fallback when no cloud store is reachable.
+ */
+export interface ToolFrameImage {
+  mimeType: string;
+  key?: string;
+  data?: string;
+  width?: number;
+  height?: number;
 }

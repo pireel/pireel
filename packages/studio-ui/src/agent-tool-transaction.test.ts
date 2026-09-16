@@ -749,9 +749,10 @@ describe('Agent composition transaction boundary', () => {
     const { runExternalTool } = await import('./agent-tool-runner');
     const result = await runExternalTool(h.ctx, 'run_v3', { name: 'inspect_timeline', args: { frames: [30, 60] } });
     expect(result.ok, JSON.stringify(result)).toBe(true);
+    // No cloud store in this harness: frames stay inline, each with its capture size.
     expect(result.images).toEqual([
-      { data: 'frame-1', mimeType: 'image/jpeg' },
-      { data: 'frame-2', mimeType: 'image/jpeg' },
+      { data: 'frame-1', mimeType: 'image/jpeg', width: 960, height: 540 },
+      { data: 'frame-2', mimeType: 'image/jpeg', width: 960, height: 540 },
     ]);
     expect((result.data as { steps: Array<{ data: { atSec: number } }> }).steps.map((step) => step.data.atSec)).toEqual([1, 2]);
   });

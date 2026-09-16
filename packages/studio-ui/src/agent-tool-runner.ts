@@ -151,6 +151,7 @@ import { studioLocale, t } from './i18n';
 import { type ComposeMode, type ComposedBlock, composedBlockFields, GeneratedBlockValidationError, kitChoiceOf, newBlockComposeMode } from './compose-result';
 import { clearToolProgress, setToolProgress, type ToolProgress } from './tool-progress';
 import { fileSig, probeVideoFile } from './media';
+import { cloudToolFrame } from './agent-frame-upload';
 import { measuredSpeechTranscript, storedScriptText } from '@pireel/studio-engine/script-alignment';
 import { deleteCachedTts, getCachedTts, setCachedTts, ttsCacheKey, type CachedTtsAsset } from './tts-cache';
 import { loadLocalAssetFile, loadLocalVideo, saveLocalVideo } from './local-media';
@@ -4767,7 +4768,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             burnLabel: label,
             maxDim: 720, // the model reads a frame at ≤1024 tokens whatever its size; 720 keeps captions legible and the stored thread small
           });
-          const b64 = shot.dataUrl.slice(shot.dataUrl.indexOf(',') + 1);
+          const frameImage = await cloudToolFrame(shot.dataUrl, { width: shot.width, height: shot.height });
           // What the image SHOWS mapped back to what the agent can EDIT: overlay blocks visible at this
           // moment (with screen zone), the shot it lands in, and whether the caption layer is on
           const visBlocks = renderTimeline.composition.blocks
@@ -4783,7 +4784,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           return {
             ok: true,
             summary: t('workbench.capturedFrameSecS', { sec: Math.round(at * 10) / 10 }),
-            image: { data: b64, mimeType: 'image/jpeg' },
+            image: frameImage,
             data: { atSec: at, width: shot.width, height: shot.height, burnedLabel: label, visible },
           } as StudioToolResult;
         } catch (e) {
@@ -4835,7 +4836,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             expected: string;
             visible: unknown;
           }> = [];
-          const images: { data: string; mimeType: string }[] = [];
+          const images: NonNullable<StudioToolResult['images']> = [];
           for (let index = 0; index < selected.length; index++) {
             const moment = selected[index]!;
             const label = `${Math.round(moment.atSec * 10) / 10}s · ${moment.phase}`;
@@ -4874,10 +4875,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
                 captionsOn: c2.blocks.some(isSentenceCaption),
               },
             });
-            images.push({
-              data: shot.dataUrl.slice(shot.dataUrl.indexOf(',') + 1),
-              mimeType: 'image/jpeg',
-            });
+            images.push(await cloudToolFrame(shot.dataUrl, { width: shot.width, height: shot.height }));
           }
           const reviewedSceneIds = new Set(selected.map((moment) => moment.sceneId));
           const structuralIssues = auditSceneVisualStructure(documentRef.current)
