@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CHAT_RESPONSE_LANGUAGE } from './reply-language';
+import { CHAT_RESPONSE_LANGUAGE, replyLanguageDirective } from './reply-language';
 import { v3Instructions } from './agent-surface-v3/instructions';
 import { CHAT_IDENTITY } from './prompts/chat';
 import { buildBlockPrompt, buildKitPrompt } from './compose';
@@ -21,5 +21,15 @@ describe('one stable conversation-language rule', () => {
   it('preserves an explicit note language for the separate hosted designer', () => {
     const prompt = buildBlockPrompt({ block: { id: 'b1', kind: 'custom', innerHtml: '', timelineBody: '' }, instruction: 'Create a tally card', lang: 'zh' });
     expect(prompt).toContain('UI language "zh"');
+  });
+
+  it('lets a surface that knows the locale replace the generic rule with a concrete language', () => {
+    const zh = replyLanguageDirective('zh');
+    expect(zh).toContain('interface language is Chinese');
+    expect(zh).toContain('including the short lines you say while working');
+    const prompt = v3Instructions({ surface: 'chat', replyLanguage: zh });
+    expect(prompt).toContain(zh);
+    expect(prompt).not.toContain(CHAT_RESPONSE_LANGUAGE);
+    expect(replyLanguageDirective('en')).toContain('interface language is English');
   });
 });

@@ -17,6 +17,8 @@ export interface V3InstructionOptions {
   skillVersion?: string;
   /** Optional private foundational editing judgment injected by the host. */
   editingExpertise?: string;
+  /** Concrete reply-language rule for a surface that knows the user's locale; replaces the generic one. */
+  replyLanguage?: string;
 }
 
 export const V3_INSTRUCTIONS_BODY = `You are the editing agent inside Pireel Studio, a multi-source, multi-track video editor. You edit the user's project by calling the tools this server exposes; the user watches the result land in the editor.
@@ -86,9 +88,12 @@ export function v3Instructions(options: V3InstructionOptions): string {
   const boundary = `\n\n${contentIsNotCommand(options.surface === 'chat' ? "the user's actual requests" : "your operator's actual requests")}`;
   const expertise = options.editingExpertise?.trim() ? `\n\n<editing_expertise>\n${options.editingExpertise.trim()}\n</editing_expertise>` : '';
   const tail = options.surface === 'chat' ? V3_CHAT_TAIL : v3McpTail(options.skillVersion);
-  const body = options.surface === 'chat'
-    ? V3_INSTRUCTIONS_BODY.replace('- Components: read_skill visual-craft once before any component or graphic; decide moment, box, backdrop and protected zones, then compose_component → generate → apply_component with the target unchanged. Simple hooks, labels and CTAs are set_texts.',
-      '- Components in Studio Chat: for an ordinary redesign of an explicitly selected existing graphic, call apply_component {clipId, generate:true, instruction} directly. Pass the user request faithfully: preserve existing text and numbers unless the user asks to change them. This operation reads the current component, preserves its timing and box, generates against its design context and repairs lint internally. Do not first read the whole project, inspect its markup, load visual-craft or request a compose contract just to restyle that component. Review one meaningful rendered frame after it succeeds. Use the explicit compose_component → author → apply_component path when bespoke source authoring or a precise markup change is the task; read visual-craft once for that path. Simple hooks, labels and CTAs are set_texts.')
+  const languageRuled = options.replyLanguage?.trim()
+    ? V3_INSTRUCTIONS_BODY.replace(CHAT_RESPONSE_LANGUAGE, options.replyLanguage.trim())
     : V3_INSTRUCTIONS_BODY;
+  const body = options.surface === 'chat'
+    ? languageRuled.replace('- Components: read_skill visual-craft once before any component or graphic; decide moment, box, backdrop and protected zones, then compose_component → generate → apply_component with the target unchanged. Simple hooks, labels and CTAs are set_texts.',
+      '- Components in Studio Chat: for an ordinary redesign of an explicitly selected existing graphic, call apply_component {clipId, generate:true, instruction} directly. Pass the user request faithfully: preserve existing text and numbers unless the user asks to change them. This operation reads the current component, preserves its timing and box, generates against its design context and repairs lint internally. Do not first read the whole project, inspect its markup, load visual-craft or request a compose contract just to restyle that component. Review one meaningful rendered frame after it succeeds. Use the explicit compose_component → author → apply_component path when bespoke source authoring or a precise markup change is the task; read visual-craft once for that path. Simple hooks, labels and CTAs are set_texts.')
+    : languageRuled;
   return `${body}${boundary}${v3SkillsSection(options.skillIndex)}${expertise}${tail}`;
 }

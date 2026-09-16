@@ -3606,6 +3606,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (!placed.ok) return placed;
             const placedData = placed.data && typeof placed.data === 'object' && !Array.isArray(placed.data) ? placed.data as Record<string, unknown> : {};
             const { coverage } = built;
+            // A fresh cut is watched from its first frame. Trimming the old picture below the playhead
+            // had been leaving it clamped at the new end, so the user landed on the last frame instead.
+            if (!playingRef.current) applyT(0.01);
             return {
               ok: true,
               summary: `Assembled ${built.placed.length} clips · ${coverage.actualDurationSec}s of ${coverage.targetDurationSec}s`,

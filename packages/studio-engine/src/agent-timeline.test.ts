@@ -180,6 +180,27 @@ describe('shared agent timeline atoms', () => {
     expect((echo.data as { clipIds: string[] }).clipIds).toEqual(['line-echo']);
   });
 
+  it('ignores a track id the project does not have and places texts by the lane rule instead of one lane each', () => {
+    const document = emptyEditorDocumentV2({ fps: 30 });
+    const placed = runAgentTimelineTool(document, 'add_texts', { items: [
+      { id: 't1', text: '人生的奥德赛时期', startSec: 1, durationSec: 3.5, trackId: 'track_graphics' },
+      { id: 't2', text: '得到过，也失去过', startSec: 15, durationSec: 3, trackId: 'track_graphics' },
+      { id: 't3', text: '终点不是功成名就', startSec: 44, durationSec: 3, trackId: 'track_graphics' },
+      { id: 't4', text: '普通的人生', startSec: 46, durationSec: 8, trackId: 'track_graphics' },
+    ] });
+    expect(placed.ok, JSON.stringify(placed)).toBe(true);
+    const graphics = placed.document!.timeline.tracks.filter((track) => track.type === 'graphics');
+    // Three non-overlapping texts share one lane; the one that overlaps t3 in time gets a second lane.
+    expect(graphics).toHaveLength(2);
+    const laneOf = (id: string) => graphics.find((track) => track.clips.some((clip) => clip.id === id))!.id;
+    expect(laneOf('t1')).toBe(laneOf('t2'));
+    expect(laneOf('t2')).toBe(laneOf('t3'));
+    expect(laneOf('t4')).not.toBe(laneOf('t3'));
+    const data = placed.data as { ignoredTrackIds?: string[]; note?: string };
+    expect(data.ignoredTrackIds).toEqual(['track_graphics']);
+    expect(data.note).toContain('"track_graphics" is not a track in this project');
+  });
+
   it('keeps overlay text out of the caption band and off concurrent titles', () => {
     let document = emptyEditorDocumentV2({ fps: 30 });
     document = { ...document, appearance: { ...document.appearance, captionStyle: { on: true, preset: 'ln-clean', yPct: 84 } } };

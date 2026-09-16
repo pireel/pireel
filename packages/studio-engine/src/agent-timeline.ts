@@ -1618,6 +1618,10 @@ function addTexts(document: EditorDocumentV2, input: Input): AgentTimelineOutcom
   const receipts: EditorCommandReceipt[] = [];
   const clipIds: string[] = [];
   const skippedDuplicates: string[] = [];
+  // A track id the project does not have is not a request for a new lane per item (that once put
+  // five titles on five tracks). Placement falls back to the lane rule — the first graphics lane
+  // free over the text's window — and the receipt says the id was ignored.
+  const ignoredTrackIds = new Set<string>();
   const used = new Set(next.timeline.tracks.flatMap((track) => track.clips.map((clip) => clip.id)));
   for (const [index, raw] of items.entries()) {
     const item = (raw ?? {}) as Input;
@@ -1672,10 +1676,13 @@ function addTexts(document: EditorDocumentV2, input: Input): AgentTimelineOutcom
     );
     block.id = uniqueId(string(item.id) ?? block.id, used);
     used.add(block.id);
+    const requestedTrackId = string(item.trackId);
+    const trackExists = !!requestedTrackId && next.timeline.tracks.some((track) => track.id === requestedTrackId);
+    if (requestedTrackId && !trackExists) ignoredTrackIds.add(requestedTrackId);
     const inserted = insertOverlayDocumentClip({
       document: next,
       block,
-      ...(string(item.trackId) ? { toTrackId: string(item.trackId) } : {}),
+      ...(trackExists ? { toTrackId: requestedTrackId } : {}),
       ...(string(item.sceneId) ? { sceneId: string(item.sceneId) } : {}),
     });
     if (!inserted.ok) return fail(inserted.error.message, inserted.error);
@@ -1692,6 +1699,10 @@ function addTexts(document: EditorDocumentV2, input: Input): AgentTimelineOutcom
       ...(skippedDuplicates.length ? {
         skippedDuplicates,
         instruction: 'Identical on-screen text already exists in that time window. Use update_texts to restyle or move the existing clip instead of adding a copy.',
+      } : {}),
+      ...(ignoredTrackIds.size ? {
+        ignoredTrackIds: [...ignoredTrackIds],
+        note: `${[...ignoredTrackIds].map((id) => JSON.stringify(id)).join(', ')} ${ignoredTrackIds.size === 1 ? 'is not a track in this project' : 'are not tracks in this project'}; each text was placed on the first graphics lane free over its window (trackId in the delta). Omit trackId to let the lane rule place texts, or pass a track id from get_state.`,
       } : {}),
     },
   );
