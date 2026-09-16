@@ -4765,6 +4765,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             clipFiles: clipFilesRef.current,
             atSec: at,
             burnLabel: label,
+            maxDim: 720, // the model reads a frame at ≤1024 tokens whatever its size; 720 keeps captions legible and the stored thread small
           });
           const b64 = shot.dataUrl.slice(shot.dataUrl.indexOf(',') + 1);
           // What the image SHOWS mapped back to what the agent can EDIT: overlay blocks visible at this

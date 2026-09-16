@@ -123,7 +123,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   inspect_timeline: {
     description:
-      'See the composited output — footage with framing, overlays, text, captions — at exact frames[] (1–12) or sampled evenly across [fromFrame, toFrame) with maxFrames. Each image carries its frame number; the receipt lists the clip ids visible on screen so what you see maps back to what you can edit. With no frames the whole output is reviewed as a sequence (every visible clip, or each planned scene when a legacy plan exists; sceneIds narrows that). Use it when a visual could be wrong — a placement, an overlap, a component\'s box, caption legibility — one look at the frames that matter, not after every change; nothing here hears audio — read levels from get_state.',
+      'See the composited output — footage with framing, overlays, text, captions — at exact frames[] (1–12) or sampled evenly across [fromFrame, toFrame) with maxFrames. Each image carries its frame number; the receipt lists the clip ids visible on screen so what you see maps back to what you can edit. With no frames the whole output is reviewed as a sequence (every visible clip, or each planned scene when a legacy plan exists; sceneIds narrows that). Use it when a visual could be wrong — a placement, an overlap, a component\'s box, caption legibility — one look at the frames that matter, not after every change. The frames arrive as images in the message right after the receipt; nothing here hears audio — read levels from get_state.',
     inputSchema: obj({
       frames: arr({ type: 'integer', minimum: 0 }, { minItems: 1, maxItems: 12, description: 'Exact timeline frames to render.' }),
       fromFrame: FRAME('Sampling window start'),
