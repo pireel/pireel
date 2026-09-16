@@ -7,9 +7,10 @@ const words = (text: string) => text.split(/\s+/).filter(Boolean).length;
 
 describe('agent surface v3 instructions', () => {
   it('keeps the shared body under the budget and speaks only the v3 vocabulary', () => {
-    expect(words(V3_INSTRUCTIONS_BODY)).toBeLessThanOrEqual(1200);
-    expect(words(v3Instructions({ surface: 'chat' }))).toBeLessThanOrEqual(1500);
-    expect(words(v3Instructions({ surface: 'mcp', skillVersion: '2026-09-02.2' }))).toBeLessThanOrEqual(1500);
+    // A sprawl guard, not a target: rules that earn their place are worth their words.
+    expect(words(V3_INSTRUCTIONS_BODY)).toBeLessThanOrEqual(2000);
+    expect(words(v3Instructions({ surface: 'chat' }))).toBeLessThanOrEqual(2500);
+    expect(words(v3Instructions({ surface: 'mcp', skillVersion: '2026-09-02.2' }))).toBeLessThanOrEqual(2500);
     expect(V3_INSTRUCTIONS_BODY).not.toMatch(/\bshots?\b|\bblocks?\b|<composition_state>|Director Plan|storyboard/i);
     // every tool the text names exists on the surface
     const ids = new Set(V3_TOOLS.map((tool) => tool.id));

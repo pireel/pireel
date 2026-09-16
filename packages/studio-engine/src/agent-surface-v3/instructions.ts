@@ -1,6 +1,6 @@
 /**
  * Agent surface v3 — the system prompt. One body for both surfaces (Studio Chat and MCP), plus a short
- * per-surface tail. Budget: the body stays under 1,500 words; everything that is craft (how to cut a
+ * per-surface tail. Budget: the body stays under 2,000 words (a guard against sprawl, not a target); everything that is craft (how to cut a
  * talking head, how loud music sits) lives in skills, everything that is contract (units, fields,
  * refusals) lives in tool descriptions. This text carries only: the object model, session discipline,
  * how to act, how to talk. The untrusted-content boundary is shared with the legacy surfaces.
