@@ -52,8 +52,8 @@ function v2proj(over: Partial<ServerToolProject> & { transcript?: TranscriptSegm
 describe('离线执行器(标签页关着时的 MCP fallback)', () => {
   it('rejects unknown transition effects before mutating the project', () => {
     const p = proj();
-    const result = runServerTool('add_transition', { atSec: 10, effect: 'dip-to-black' }, p);
-    expect(result.result).toMatchObject({ ok: false, error: 'invalid_transition_effect' });
+    const result = runServerTool('add_transition', { atFrame: 300, effect: 'dip-to-black' }, p);
+    expect(result.result).toMatchObject({ ok: false, error: 'invalid_value' });
     expect(result.document).toBeUndefined();
   });
   it('get_state:离线声明 + 与浏览器同源的局势快照', () => {
@@ -884,21 +884,21 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
   });
   it('add_transition:内容级切点转场——挂后镜 transIn、prevId 锚前镜;非切点拒绝;none 移除;区内禁分割', () => {
     // proj 的切点在 10s(s1|s2)
-    const r = runServerTool('add_transition', { atSec: 10.1, effect: 'crosszoom', durationSec: 2 }, proj());
+    const r = runServerTool('add_transition', { atFrame: 303, effect: 'crosszoom', durationFrames: 60 }, proj());
     expect(r.result.ok).toBe(true);
     const s2 = r.comp!.shots!.find((s) => s.id === 's2')!;
     expect(s2.transIn).toEqual({ prevId: 's1', effect: 'crosszoom', durationSec: 2 });
     expect(cutTransitions(r.comp!.shots!)).toEqual([{ cut: 10, shotId: 's2', effect: 'crosszoom', half: 1, dir: 'left' }]);
     // 非切点拒绝并列出边界
-    const r2 = runServerTool('add_transition', { atSec: 5, effect: 'fadeblack' }, proj());
+    const r2 = runServerTool('add_transition', { atFrame: 150, effect: 'fadeblack' }, proj());
     expect(r2.result.ok).toBe(false);
-    expect(r2.result.error).toContain('10');
+    expect((r2.result.data as { boundaries: number[] }).boundaries).toEqual([300]);
     // 转场覆盖区内禁分割;区外照常
     const p2 = v2proj({ comp: { ...proj().comp, shots: r.comp!.shots } });
     expect(runServerTool('split_shot', { atSec: 10.5 }, p2).result.ok).toBe(false);
     expect(runServerTool('split_shot', { atSec: 15 }, p2).result.ok).toBe(true);
     // none 移除;删任一邻镜 → prevId 失配自动失效
-    const r3 = runServerTool('add_transition', { atSec: 10, effect: 'none' }, p2);
+    const r3 = runServerTool('add_transition', { atFrame: 300, effect: 'none' }, p2);
     expect(r3.comp!.shots!.find((s) => s.id === 's2')!.transIn).toBeUndefined();
     const r4 = runServerTool('delete_shot', { shotId: 's1' }, p2);
     expect(cutTransitions(r4.comp!.shots!)).toEqual([]);

@@ -35,6 +35,7 @@ import { planNarrationCuts } from './editor-document/narration-cut-planner';
 import { firstNarrativeAssetId } from './editor-document/read-model';
 import { documentWordRanges, documentWordRangesToTimeline, resolveDocumentWordIds } from './editor-document/transcript-address';
 import { type CutSeamEntry, finalizeCutSeams, tightenCutRanges } from './trim';
+import { runV3DocumentTool } from './agent-timeline-v3';
 import { placementPercentToBox } from './overlay-placement';
 import { isDisplayTextAnimationId, isDisplayTextFontId, isDisplayTextPresetId } from './display-text-presets';
 
@@ -43,25 +44,28 @@ export const AGENT_TIMELINE_TOOL_IDS = new Set([
   'read_director_plan',
   'read_scene_designs',
   'register_media',
-  'inspect_media',
   'organize_media',
   'add_clips',
   'insert_clips',
-  'remove_words',
   'move_clips',
   'remove_clips',
   'split_clips',
-  'set_video_speed',
+  'ripple_delete_ranges',
   'set_clip_properties',
+  'set_clip_framing',
+  'add_transition',
+  'set_canvas',
+  'apply_layout',
   'set_keyframes',
   'manage_tracks',
   'manage_clip_links',
-  'sync_clips',
-  'get_transcript',
+  'set_texts',
+  'set_captions',
+  'mask_words',
+  'remove_words',
   'get_beat_grid',
-  'swap_clip_media',
-  'add_texts',
-  'update_text',
+  'get_transcript',
+  'inspect_media',
 ]);
 
 export interface AgentTimelineOutcome {
@@ -73,13 +77,13 @@ export interface AgentTimelineOutcome {
   receipts?: EditorCommandReceipt[];
 }
 
-type Input = Record<string, unknown>;
+export type Input = Record<string, unknown>;
 
-function fail(error: string, data?: unknown): AgentTimelineOutcome {
+export function fail(error: string, data?: unknown): AgentTimelineOutcome {
   return { ok: false, error, ...(data === undefined ? {} : { data }) };
 }
 
-function mutation(document: EditorDocumentV2, summary: string, receipts: EditorCommandReceipt[], data?: unknown): AgentTimelineOutcome {
+export function mutation(document: EditorDocumentV2, summary: string, receipts: EditorCommandReceipt[], data?: unknown): AgentTimelineOutcome {
   return { ok: true, summary, document, receipts, ...(data === undefined ? {} : { data }) };
 }
 
@@ -92,7 +96,7 @@ function frameDeltaSec(frames: number, fps: number): number {
   return Number.isFinite(frames) && Number.isFinite(fps) && fps > 0 ? frames / fps : 0;
 }
 
-function string(value: unknown): string | undefined {
+export function string(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
@@ -107,7 +111,7 @@ function freeGraphicsStackOrder(document: EditorDocumentV2, startSec: number, du
   }
 }
 
-function mediaBox(value: unknown): { x: number; y: number; w: number; h: number } | undefined {
+export function mediaBox(value: unknown): { x: number; y: number; w: number; h: number } | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const raw = value as Record<string, unknown>;
   const x = Number(raw.x); const y = Number(raw.y); const w = Number(raw.w); const h = Number(raw.h);
@@ -217,7 +221,7 @@ export function agentTimelineSnapshot(document: EditorDocumentV2) {
   };
 }
 
-function locatedClip(document: EditorDocumentV2, clipId: string): { track: EditorTrack; clip: TimelineClip } | undefined {
+export function locatedClip(document: EditorDocumentV2, clipId: string): { track: EditorTrack; clip: TimelineClip } | undefined {
   for (const track of document.timeline.tracks) {
     const clip = track.clips.find((candidate) => candidate.id === clipId);
     if (clip) return { track, clip };
@@ -225,7 +229,7 @@ function locatedClip(document: EditorDocumentV2, clipId: string): { track: Edito
   return undefined;
 }
 
-function importAssets(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
+export function importAssets(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const items = Array.isArray(input.assets) ? input.assets : input.asset ? [input.asset] : [];
   if (!items.length) return fail('assets is required');
   let assets = document.assets;
@@ -284,7 +288,7 @@ function importAssets(document: EditorDocumentV2, input: Input): AgentTimelineOu
   return mutation(next, `Imported ${imported.length} media asset${imported.length === 1 ? '' : 's'}`, [], { assetIds: imported });
 }
 
-function inspectAssets(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
+export function inspectAssets(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const requested = Array.isArray(input.assetIds) ? input.assetIds.map(string).filter((id): id is string => !!id) : [];
   const clipIds = Array.isArray(input.clipIds) ? input.clipIds.map(string).filter((id): id is string => !!id) : [];
   const ids = new Set(requested);
@@ -920,7 +924,7 @@ function brollBatchOverlaps(document: EditorDocumentV2, items: Input[], input: I
   );
 }
 
-function placeClips(document: EditorDocumentV2, input: Input, mode: 'overwrite' | 'ripple'): AgentTimelineOutcome {
+export function placeClips(document: EditorDocumentV2, input: Input, mode: 'overwrite' | 'ripple'): AgentTimelineOutcome {
   document = normalizePeerNarrativeSources(document);
   const items = Array.isArray(input.clips) ? input.clips : [];
   if (!items.length) return fail('clips is required');
@@ -1154,7 +1158,7 @@ function splitClips(document: EditorDocumentV2, input: Input): AgentTimelineOutc
   return mutation(next, `Split ${items.length} clip${items.length === 1 ? '' : 's'}`, receipts, { createdClipIds: created });
 }
 
-function setVideoSpeed(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
+export function setVideoSpeed(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const speed = Number(input.speed);
   if (!Number.isFinite(speed) || speed < 0.25 || speed > 4) return fail('speed must be within 0.25..4');
   const requestedIds = Array.isArray(input.shotIds)
@@ -1206,7 +1210,8 @@ function setVideoSpeed(document: EditorDocumentV2, input: Input): AgentTimelineO
   });
 }
 
-function setClipProperties(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
+/** Second-based clip patches shared by the v3 tools (source range, fit, box, anchors, opacity, audio knobs). */
+export function setClipPatches(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const items = Array.isArray(input.items) ? input.items : [];
   if (!items.length) return fail('items is required');
   let next = document;
@@ -1376,7 +1381,7 @@ function setKeyframes(document: EditorDocumentV2, input: Input): AgentTimelineOu
   return mutation(result.document, `${ordered.length ? 'Set' : 'Cleared'} ${property} keyframes on clip ${clipId}`, [result.receipt], { clipId, property, keyframeCount: ordered.length });
 }
 
-function manageTracks(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
+export function manageTracks(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const action = string(input.action);
   let result;
   if (action === 'create') {
@@ -1410,7 +1415,7 @@ function manageTracks(document: EditorDocumentV2, input: Input): AgentTimelineOu
   return mutation(result.document, `${action === 'create' ? 'Created' : action === 'remove' ? 'Removed' : 'Updated'} track`, [result.receipt]);
 }
 
-function manageLinks(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
+export function manageLinks(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const clipIds = Array.isArray(input.clipIds) ? input.clipIds.map(string).filter((id): id is string => !!id) : [];
   const action = string(input.action);
   const result = action === 'link'
@@ -1424,7 +1429,7 @@ function manageLinks(document: EditorDocumentV2, input: Input): AgentTimelineOut
   return mutation(result.document, `${action === 'link' ? 'Linked' : 'Unlinked'} ${clipIds.length} clips`, [result.receipt], { clipIds, ...(groupId ? { groupId } : {}) });
 }
 
-function syncClips(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
+export function syncClips(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const referenceClipId = string(input.referenceClipId);
   const reference = referenceClipId ? locatedClip(document, referenceClipId) : undefined;
   const targets = Array.isArray(input.targets) ? input.targets : [];
@@ -1563,7 +1568,7 @@ function getBeatGrid(document: EditorDocumentV2, input: Input): AgentTimelineOut
   };
 }
 
-function swapClipMedia(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
+export function swapClipMedia(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const clipId = string(input.clipId);
   const assetId = string(input.assetId);
   const found = clipId ? locatedClip(document, clipId) : undefined;
@@ -1617,7 +1622,7 @@ function overlayTextLayoutGuard(
   return box;
 }
 
-function addTexts(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
+export function addTexts(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const items = Array.isArray(input.items) ? input.items : [];
   if (!items.length) return fail('items is required');
   let next = document;
@@ -1717,7 +1722,7 @@ function addTexts(document: EditorDocumentV2, input: Input): AgentTimelineOutcom
   );
 }
 
-function updateTexts(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
+export function updateTexts(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const items = Array.isArray(input.items) ? input.items : [];
   if (!items.length) return fail('items is required');
   const updates: Parameters<typeof applyOverlayDocumentEdits>[0]['updates'][number][] = [];
@@ -1857,6 +1862,8 @@ function removeWords(document: EditorDocumentV2, input: Input): AgentTimelineOut
 }
 
 export function runAgentTimelineTool(document: EditorDocumentV2, tool: string, input: Input): AgentTimelineOutcome {
+  const v3 = runV3DocumentTool(document, tool, input);
+  if (v3) return v3;
   switch (tool) {
     case 'get_timeline': return { ok: true, summary: `${document.timeline.tracks.length} timeline tracks`, data: agentTimelineSnapshot(document) };
     case 'read_director_plan': {
@@ -1882,24 +1889,9 @@ export function runAgentTimelineTool(document: EditorDocumentV2, tool: string, i
       return { ok: true, summary: `Loaded scene-designs.md (${scenes.length} Scene${scenes.length === 1 ? '' : 's'})`, data: { path: 'scene-designs.md', mediaType: 'text/markdown', content, sceneIds: scenes.map((scene) => scene.sceneId), totalScenes: designs.scenes.length } };
     }
     case 'register_media': return importAssets(document, input);
-    case 'inspect_media': return inspectAssets(document, input);
     case 'organize_media': return organizeAssets(document, input);
-    case 'add_clips': return placeClips(document, input, 'overwrite');
-    case 'insert_clips': return placeClips(document, input, 'ripple');
-    case 'move_clips': return moveClips(document, input);
-    case 'remove_clips': return removeClips(document, input);
-    case 'split_clips': return splitClips(document, input);
-    case 'set_video_speed': return setVideoSpeed(document, input);
-    case 'set_clip_properties': return setClipProperties(document, input);
     case 'set_keyframes': return setKeyframes(document, input);
-    case 'manage_tracks': return manageTracks(document, input);
-    case 'manage_clip_links': return manageLinks(document, input);
-    case 'sync_clips': return syncClips(document, input);
-    case 'get_transcript': return getTranscript(document, input);
     case 'get_beat_grid': return getBeatGrid(document, input);
-    case 'swap_clip_media': return swapClipMedia(document, input);
-    case 'add_texts': return addTexts(document, input);
-    case 'update_text': return updateTexts(document, input);
     case 'remove_words': return removeWords(document, input);
     default: return fail(`unsupported timeline tool: ${tool}`);
   }

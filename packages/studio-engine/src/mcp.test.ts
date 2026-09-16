@@ -61,7 +61,9 @@ describe('MCP v3 surface', () => {
     const assets = [{ id: 'bgm:test', kind: 'audio', url: 'https://cdn.example/music.mp3', durationSec: 5 }];
     const d = deps({ resolvePlacementAssets: vi.fn(async () => assets), resolveV3Context: async () => ({ fps: 30, kindOf: () => undefined }) });
     expect(await runV3Tool('add_clips', { clips: [{ assetId: 'bgm:test', startFrame: 0, role: 'music', source: [0, 5] }] }, d)).toMatchObject({ ok: true });
-    expect(vi.mocked(d.callBridge).mock.calls.map(call => call[0])).toEqual(['run_v3', 'register_media', 'add_clips']);
+    // The native placer registers the host-resolved records itself: one call, the assets ride along.
+    expect(vi.mocked(d.callBridge).mock.calls.map(call => call[0])).toEqual(['run_v3', 'add_clips']);
+    expect(vi.mocked(d.callBridge).mock.calls[1]![1]).toMatchObject({ placementAssets: assets });
   });
 
   it('rejects invalid model kinds without contacting either the catalog or browser', async () => {
@@ -200,15 +202,15 @@ describe('MCP v3 surface', () => {
     expect(JSON.parse(content[0]!.text!).data.steps.map((step: { data: unknown }) => step.data)).toEqual([{ atSec: 2 }, { atSec: 7 }]);
   });
 
-  it('translates frame-based v3 calls onto legacy seconds and routes by clip kind', async () => {
+  it('hands native document tools to the offline executor under their own name and shape', async () => {
     const d = deps({ resolveV3Context: v3ctx });
-    const response = await handleMcpRequest({ id: 3, method: 'tools/call', params: { name: 'move_clips', arguments: { items: [{ clipId: 'n1', startFrame: 90 }, { clipId: 'g1', startFrame: 120 }] } } }, d);
+    const args = { items: [{ clipId: 'n1', startFrame: 90 }, { clipId: 'g1', startFrame: 120 }] };
+    const response = await handleMcpRequest({ id: 3, method: 'tools/call', params: { name: 'move_clips', arguments: args } }, d);
     expect(d.callBridge).toHaveBeenNthCalledWith(1, 'run_v3', expect.anything(), expect.any(Number));
-    expect(d.callBridge).toHaveBeenNthCalledWith(2, 'move_clips', { items: [{ clipId: 'n1', startSec: 3 }] }, expect.any(Number));
-    expect(d.callBridge).toHaveBeenNthCalledWith(3, 'move_block', { blockId: 'g1', startSec: 4 }, expect.any(Number));
-    const body = JSON.parse((response!.result as { content: { text: string }[] }).content[0]!.text) as { ok: boolean; data: { steps: unknown[] } };
+    expect(d.callBridge).toHaveBeenNthCalledWith(2, 'move_clips', args, expect.any(Number));
+    expect(d.callBridge).toHaveBeenCalledTimes(2);
+    const body = JSON.parse((response!.result as { content: { text: string }[] }).content[0]!.text) as { ok: boolean };
     expect(body.ok).toBe(true);
-    expect(body.data.steps).toHaveLength(2);
   });
 
   it('chains a stock import into live register_media using the previous result', async () => {
@@ -225,22 +227,23 @@ describe('MCP v3 surface', () => {
 
   it('returns the adapter error shape and never calls the engine on bad input', async () => {
     const d = deps({  });
-    const response = await handleMcpRequest({ id: 5, method: 'tools/call', params: { name: 'ripple_delete_ranges', arguments: { ranges: [[30, 60]] } } }, d);
+    const response = await handleMcpRequest({ id: 5, method: 'tools/call', params: { name: 'ripple_delete_ranges', arguments: { ranges: [{ fromFrame: 30, toFrame: 60 }] } } }, d);
     const body = JSON.parse((response!.result as { content: { text: string }[] }).content[0]!.text) as Record<string, unknown>;
-    expect(body).toMatchObject({ ok: false, error: 'fps_unavailable' });
-    expect((d.callBridge as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[0])).toEqual(['run_v3']);
+    expect(body).toMatchObject({ ok: false, error: 'invalid_shape', path: 'ranges[0]' });
+    expect((d.callBridge as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
     expect((response!.result as { isError: boolean }).isError).toBe(true);
   });
 
   it('stops a multi-step call at the first failure and reports what was applied', async () => {
-    const callBridge = vi.fn(async (tool: string) => (tool === 'run_v3' ? { ok: false, error: 'studio_not_open' } : tool === 'delete_blocks' ? { ok: true, summary: 'blocks gone' } : { ok: false, error: 'locked track' }));
+    const callBridge = vi.fn(async (tool: string) => (tool === 'run_v3' ? { ok: false, error: 'studio_not_open' } : { ok: false, error: 'locked track' }));
     const d = deps({ resolveV3Context: v3ctx, callBridge });
-    const response = await handleMcpRequest({ id: 6, method: 'tools/call', params: { name: 'remove_clips', arguments: { clipIds: ['g1', 'n1'] } } }, d);
+    const payload = { query: 'city night', kind: 'video', page: 1, limit: 12, assetId: 'px_1' };
+    const response = await handleMcpRequest({ id: 6, method: 'tools/call', params: { name: 'register_media', arguments: { stock: payload } } }, d);
     const body = JSON.parse((response!.result as { content: { text: string }[] }).content[0]!.text) as { ok: boolean; error: string; detail: string; data: { steps: { tool: string; ok: boolean }[] } };
     expect(body.ok).toBe(false);
     expect(body.error).toBe('locked track');
     expect(body.detail).toContain('after 1 completed step');
-    expect(body.data.steps.map((step) => [step.tool, step.ok])).toEqual([['delete_blocks', true], ['remove_clips', false]]);
+    expect(body.data.steps.map((step) => [step.tool, step.ok])).toEqual([['import_stock', true], ['register_media', false]]);
   });
 
   it('rejects old protocol names without executing aliases', async () => {

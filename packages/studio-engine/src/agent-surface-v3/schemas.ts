@@ -448,7 +448,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       `Add or update native display-text components in one call: items without id are added (text + startFrame required), items with id update that clip. preset (${TEXT_PRESET_IDS.join(' / ')}) chooses the typography, animation (${TEXT_ANIMATION_IDS.join(' / ')}) the entrance; omit both for the preset default. placement is a percent box; color/accentColor/fontSize (24–180)/fontWeight/fontFamily/align are optional overrides. Simple hooks, labels and CTAs belong here, not in a bespoke component.`,
     inputSchema: obj({
       items: arr(obj({
-        id: str('Existing text clip to update.'), text: str(),
+        id: str('Text clip to update; an unknown id with text and startFrame creates the text under that id.'), text: str(),
         startFrame: FRAME('Start'), durationFrames: int('Duration in frames.', 1), trackId: str(),
         preset: enumOf(TEXT_PRESET_IDS), animation: enumOf(TEXT_ANIMATION_IDS),
         color: str('#RGB / #RRGGBB'), accentColor: str('#RGB / #RRGGBB'), fontSize: num('', { min: 24, max: 180 }), fontWeight: num('', { min: 300, max: 950 }),

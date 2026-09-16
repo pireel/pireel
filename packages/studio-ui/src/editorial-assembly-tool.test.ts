@@ -35,7 +35,7 @@ describe('buildAssemblyFromReview', () => {
     if ('error' in built) return;
     expect(built.input.__replacePrimaryTrack).toBe(true);
     const clips = built.input.clips as Array<Record<string, unknown>>;
-    expect(clips[0]).toMatchObject({ assetId: 'asset-beach', startSec: 0, muted: true, role: 'primary' });
+    expect(clips[0]).toMatchObject({ assetId: 'asset-beach', startFrame: 0, mute: true, role: 'primary' });
     expect(built.placed[0]).toMatchObject({ assetId: 'asset-beach', score: 90 });
     expect(built.notes).toEqual([]);
     expect(built.coverage.covered).toBe(false);
@@ -48,7 +48,7 @@ describe('buildAssemblyFromReview', () => {
     // A pick the review would argue with is placed anyway and flagged, never trimmed or dropped.
     const argued = buildAssemblyFromReview({ sources: [beach, street], opening: [], rows: [{ assetId: 'asset-beach', sourceInSec: 4, sourceOutSec: 6 }, { assetId: 'asset-beach', sourceInSec: 0.3, sourceOutSec: 0.9 }], targetDurationSec: 2.6 });
     if ('error' in argued) throw new Error(argued.error);
-    expect((argued.input.clips as Array<Record<string, unknown>>).map((clip) => [clip.sourceInSec, clip.sourceOutSec])).toEqual([[4, 6], [0.3, 0.9]]);
+    expect((argued.input.clips as Array<Record<string, unknown>>).map((clip) => clip.source)).toEqual([[4, 6], [0.3, 0.9]]);
     expect(argued.notes.some((note) => note.includes('outside every accepted range'))).toBe(true);
     expect(argued.notes.some((note) => note.includes('reads as a flash'))).toBe(true);
   });
@@ -64,7 +64,7 @@ describe('buildAssemblyFromReview', () => {
     const seeded = buildAssemblyFromReview({ sources: [beach, street], opening: [{ assetId: street.assetId, candidateId: 'street-1' }], rows: [], targetDurationSec: 3 });
     expect('error' in seeded).toBe(false);
     if ('error' in seeded) return;
-    expect((seeded.input.clips as Array<Record<string, unknown>>)[0]).toMatchObject({ assetId: street.assetId, sourceInSec: 1 });
+    expect((seeded.input.clips as Array<Record<string, unknown>>)[0]).toMatchObject({ assetId: street.assetId, source: [1, 4] });
   });
 
   it('reports a shortfall when the reviewed pool cannot cover the target', () => {

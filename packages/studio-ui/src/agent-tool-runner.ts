@@ -704,10 +704,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             clips: input.clips.map((value) => {
               if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
               const row = value as Record<string, unknown>;
-              if (typeof row.muted === 'boolean' || typeof row.assetId !== 'string') return row;
+              if (typeof row.mute === 'boolean' || typeof row.assetId !== 'string') return row;
               const asset = documentRef.current.assets[row.assetId];
               return asset?.kind === 'video' && asset.locator.localSig && speechFree.has(asset.locator.localSig)
-                ? { ...row, muted: true }
+                ? { ...row, mute: true }
                 : row;
             }),
           };
@@ -735,8 +735,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
             const row = value as Record<string, unknown>;
             return row.assetId === assetId
-              && !Number.isFinite(Number(row.durationSec))
-              && !Number.isFinite(Number(row.sourceOutSec));
+              && !Number.isFinite(Number(row.durationFrames))
+              && !(Array.isArray(row.source) && Number.isFinite(Number(row.source[1])));
           });
           if (implicitDuration && (asset.kind === 'video' || asset.kind === 'audio')) {
             const file = ready.file ?? await loadProjectAssetFile(asset);
@@ -780,22 +780,45 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               }
             }
           }
-          if (toolId === 'remove_words') {
-            // The engine cuts by the document's transcripts: fold the runtime copies in first so
-            // word ids and segment positions match what get_transcript just reported.
-            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: tEnglish('workbench.noVideoYet') };
+          if (toolId === 'remove_words' || toolId === 'mask_words' || toolId === 'set_captions') {
+            // The engine edits by the document's transcripts: fold the runtime copies in first so
+            // word ids, segment rows and caption sources match what get_transcript just reported.
+            if (toolId !== 'set_captions' && !hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: tEnglish('workbench.noVideoYet') };
             await ensureClipTranscripts();
             const synced = transcriptInputsFor(documentRef.current, asrRef.current, captionTranscriptsByAsset(documentRef.current, compRef.current, clipAsrRef.current));
             if (Object.keys(synced).length) commit({ op: 'document.foldMetadata', input: synced }, { undo: 'none' });
           }
+          if (toolId === 'split_clips' && input.purpose === 'framing' && visualRef.current) {
+            // Framing splits are guarded by browser-local visual analysis: a cut inside a stable
+            // subject range changes nothing on screen and is refused before the engine runs.
+            const fps = documentRef.current.canvas.fps;
+            const points = (Array.isArray(input.items) ? input.items : [])
+              .map((row) => Number((row as { atFrame?: unknown })?.atFrame) / fps)
+              .filter((point) => Number.isFinite(point));
+            const rejected = rejectStableFramingSplits(ensureShots(c), visualRef.current, points);
+            if (rejected.length) {
+              const first = rejected[0]!;
+              return { ok: false, error: tEnglish('workbench.framingSplitStable', { at: r1(first.atSec), from: r1(first.stableSourceRange[0]), to: r1(first.stableSourceRange[1]) }), data: { rejected } };
+            }
+          }
           const applied = commit({ op: 'agent.timeline', input: { tool: toolId, input: timelineInput } }, { undo: 'none' });
           let outcome: AgentTimelineOutcome = applied.ok
             ? { ok: true, document: applied.document, ...(applied.summary ? { summary: applied.summary } : {}), ...(applied.data !== undefined ? { data: applied.data } : {}) }
-            : { ok: false, error: applied.error.message };
+            : { ok: false, error: applied.error.message, ...(applied.error.details !== undefined ? { data: applied.error.details } : {}) };
           if (toolId === 'remove_words' && outcome.ok) {
             const cuts = (outcome.data as { cuts?: Array<{ atSec: number }> } | undefined)?.cuts ?? [];
             setSelectedShotId(null);
             if (cuts.length) applyT(Math.min(...cuts.map((cut) => cut.atSec)));
+          }
+          if (toolId === 'remove_clips' && outcome.ok) {
+            const removed = new Set(((outcome.data as { removedClipIds?: string[] } | undefined)?.removedClipIds) ?? []);
+            if (selectedIdRef.current && removed.has(selectedIdRef.current)) setSelectedId(null);
+            if (removed.size) setSelectedShotId(null);
+          }
+          if (toolId === 'ripple_delete_ranges' && outcome.ok) {
+            const ranges = (outcome.data as { ranges?: Array<[number, number]> } | undefined)?.ranges ?? [];
+            setSelectedShotId(null);
+            if (ranges.length) applyT(Math.min(...ranges.map(([from]) => from)) / documentRef.current.canvas.fps);
           }
           // Project-library media is not in the document until placed; answer its metadata from the
           // device index instead of reporting the user's own footage as missing.
@@ -5020,10 +5043,12 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           const invalid = validateV3Input(name, args);
           if (invalid) { const { status: _s, ...rest } = invalid; return { ok: false, ...rest }; }
         }
+        const placementAssets = Array.isArray(input.placementAssets) ? (input.placementAssets as Array<Record<string, unknown>>) : undefined;
+        const placedArgs = placementAssets && (name === 'add_clips' || name === 'insert_clips') ? { ...args, placementAssets } : args;
         const translation = legacyInput
           ? { status: 'ok' as const, calls: [{ tool: name, input: legacyInput }] as LegacyCall[] }
-          : translateV3Call(name, args, { fps: before.canvas.fps, kindOf: (id) => kinds.get(id), hasAsset: (id) => !!before.assets[id],
-              ...(Array.isArray(input.placementAssets) ? { placementAssets: input.placementAssets } : {}) });
+          : translateV3Call(name, placedArgs, { fps: before.canvas.fps, kindOf: (id) => kinds.get(id), hasAsset: (id) => !!before.assets[id],
+              ...(placementAssets ? { placementAssets } : {}) });
         if (translation.status === 'error') { const { status: _s, ...rest } = translation; return { ok: false, ...rest }; }
         if (translation.status === 'pending') return { ok: false, error: 'not_available_yet', data: { detail: translation.reason } };
         const steps: Array<{ tool: string; ok: boolean; summary?: string; error?: string; data?: unknown }> = [];

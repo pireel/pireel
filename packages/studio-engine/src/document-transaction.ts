@@ -244,7 +244,7 @@ function fromAgentOutcome(document: EditorDocumentV2, outcome: ReturnType<typeof
   if (!outcome.ok) {
     const message = outcome.error ?? 'agent timeline tool failed';
     const missing = /does not exist|not found|unknown clip|unknown track/i.test(message);
-    return { ok: false, document, error: { code: missing ? 'clip-not-found' : 'invalid-command', message } };
+    return { ok: false, document, error: { code: missing ? 'clip-not-found' : 'invalid-command', message, ...(outcome.data !== undefined ? { details: outcome.data } : {}) } };
   }
   return { ok: true, document: outcome.document ?? document, ...(outcome.summary ? { summary: outcome.summary } : {}), ...(outcome.data !== undefined ? { data: outcome.data } : {}) };
 }

@@ -20,117 +20,46 @@ describe('frame ↔ second conversion', () => {
   });
 });
 
-describe('v3 adapter translations', () => {
-  it('registers exact host-resolved catalog assets before placement and keeps existing assets', () => {
-    const music = { id: 'bgm:test', kind: 'audio', url: 'https://example.test/music.mp3', durationSec: 5 };
-    const input = { clips: [{ assetId: music.id, role: 'music', startFrame: 0, source: [0, 5] }] };
-    const calls = ok(translateV3Call('add_clips', input, { ...ctx, placementAssets: [music, { ...music, id: 'unreferenced' }] }));
-    expect(calls.map(call => call.tool)).toEqual(['register_media', 'add_clips']);
-    expect(calls[0].input.assets).toEqual([music]);
-    expect(ok(translateV3Call('add_clips', input, { ...ctx, placementAssets: [music], hasAsset: () => true })).map(call => call.tool)).toEqual(['add_clips']);
+describe('native document tools pass through untouched', () => {
+  it.each([
+    ['add_clips', { clips: [{ assetId: 'a4', role: 'broll', startFrame: 900, durationFrames: 120, source: [3, 7], fades: { in: 9 }, mute: true }], placementAssets: [{ id: 'a4', kind: 'video' }] }],
+    ['insert_clips', { clips: [{ assetId: 'a9', role: 'music' }], atFrame: 60 }],
+    ['move_clips', { items: [{ clipId: 'n1', startFrame: 90 }, { clipId: 'g1', startFrame: 120 }] }],
+    ['remove_clips', { clipIds: ['g1', 'n1'], ripple: true }],
+    ['split_clips', { items: [{ atFrame: 300 }, { clipId: 'b1', atFrame: 60 }] }],
+    ['ripple_delete_ranges', { ranges: [[30, 60], [300, 330]] }],
+    ['set_clip_properties', { items: [{ clipId: 'b1', volumeDb: -20, fades: { in: 9, out: 12 }, speed: 0.5, filter: { saturate: 0 } }] }],
+    ['set_clip_framing', { items: [{ clipId: 'n1', treatment: 'punch-in', scale: 1.3 }, { clipId: 'g1', box: { x: 0.06, y: 0.62, w: 0.5, h: 0.2 } }] }],
+    ['add_transition', { atFrame: 300, effect: 'fade', durationFrames: 30 }],
+    ['set_texts', { items: [{ text: 'Hook', startFrame: 6, durationFrames: 108, preset: 'headline' }, { id: 't1', text: 'Fixed wording' }] }],
+    ['set_captions', { on: true, preset: 'ln-clean', yPct: 82, corrections: [{ index: 3, text: 'Fixed.' }], relayout: true }],
+    ['manage_tracks', { action: 'update', trackId: 't3', order: 30 }],
+    ['manage_clip_links', { action: 'sync', referenceClipId: 'n1', targets: [] }],
+    ['mask_words', { wordIds: ['w1'], audio: 'beep' }],
+    ['set_canvas', { preset: 'portrait' }],
+    ['apply_layout', { layout: 'grid', blockIds: ['g1', 'g2'] }],
+    ['set_keyframes', { clipId: 'b1', property: 'opacity', keyframes: [] }],
+  ] as Array<[string, Record<string, unknown>]>)('%s reaches the engine under its own name with its own shape', (name, input) => {
+    expect(ok(translateV3Call(name, input, ctx))).toEqual([{ tool: name, input }]);
   });
-  it('rejects invalid transition and generation-model enums before dispatch', () => {
-    for (const effect of ['dip-to-black', 'wipe', '', 42]) {
-      expect(translateV3Call('add_transition', { atFrame: 30, effect }, ctx)).toMatchObject({ status: 'error', error: 'invalid_value', path: 'effect' });
-    }
-    expect(translateV3Call('add_transition', { atFrame: 30, direction: 'diagonal' }, ctx)).toMatchObject({ status: 'error', path: 'direction' });
+
+  it('checks remove_words pairs and hands both selectors to the one engine tool', () => {
+    const result = translateV3Call('remove_words', { ranges: [[12.4, 15.1]], wordIds: ['w7', 'w8'], keepGapSec: 0.35 }, ctx);
+    expect(result).toMatchObject({ status: 'ok', note: expect.stringContaining('re-read get_transcript') });
+    expect(ok(result)).toEqual([{ tool: 'remove_words', input: { ranges: [[12.4, 15.1]], wordIds: ['w7', 'w8'], keepGapSec: 0.35 } }]);
+    expect(translateV3Call('remove_words', {}, ctx)).toMatchObject({ status: 'error', error: 'missing_field' });
+    expect(translateV3Call('remove_words', { ranges: [[15.1, 12.4]] }, ctx)).toMatchObject({ status: 'error', error: 'invalid_value', path: 'ranges[0]' });
+    expect(translateV3Call('remove_words', { ranges: [{ fromFrame: 10, toFrame: 20 }] }, ctx)).toMatchObject({ status: 'error', error: 'invalid_value', path: 'ranges[0]' });
+  });
+});
+
+describe('remaining translations (runtime and account tools)', () => {
+  it('rejects invalid generation-model enums before dispatch', () => {
     for (const kind of ['audio', 'speech', '', 42, null]) {
       expect(translateV3Call('list_models', { kind }, ctx)).toMatchObject({ status: 'error', error: 'invalid_value', path: 'kind' });
     }
     expect(ok(translateV3Call('list_models', { kind: 'image' }, ctx))).toEqual([{ tool: 'list_models', input: { kind: 'image' } }]);
     expect(ok(translateV3Call('list_models', {}, ctx))).toEqual([{ tool: 'list_models', input: {} }]);
-  });
-  it('routes moves by clip kind: graphics to move_block, everything else to move_clips', () => {
-    const calls = ok(translateV3Call('move_clips', { items: [{ clipId: 'n1', startFrame: 90 }, { clipId: 'g1', startFrame: 120 }, { clipId: 'a1', startFrame: 0, trackId: 'tA' }] }, ctx));
-    expect(calls).toEqual([
-      { tool: 'move_clips', input: { items: [{ clipId: 'n1', startSec: 3 }, { clipId: 'a1', startSec: 0, toTrackId: 'tA' }] } },
-      { tool: 'move_block', input: { blockId: 'g1', startSec: 4 } },
-    ]);
-  });
-
-  it('rejects non-integer frames and unknown ids with a fix', () => {
-    const bad = translateV3Call('move_clips', { items: [{ clipId: 'n1', startFrame: 1.5 }] }, ctx);
-    expect(bad).toMatchObject({ status: 'error', error: 'invalid_frame', path: 'items[0].startFrame' });
-    const unknown = translateV3Call('remove_clips', { clipIds: ['zzz'] }, ctx);
-    expect(unknown).toMatchObject({ status: 'error', error: 'unknown_clip_id', value: ['zzz'] });
-  });
-
-  it('removes graphics, ripples narrative only when asked, and batches the rest', () => {
-    expect(ok(translateV3Call('remove_clips', { clipIds: ['g1', 'g2', 'b1', 'n1'] }, ctx))).toEqual([
-      { tool: 'delete_blocks', input: { blockIds: ['g1', 'g2'] } },
-      { tool: 'remove_clips', input: { clipIds: ['b1', 'n1'] } },
-    ]);
-    expect(ok(translateV3Call('remove_clips', { clipIds: ['n1', 'n2'], ripple: true }, ctx))).toEqual([
-      { tool: 'delete_shot', input: { shotId: 'n1' } },
-      { tool: 'delete_shot', input: { shotId: 'n2' } },
-    ]);
-  });
-
-  it('splits story-spine clips through split_shot (sorted, deduped) and others through split_clips', () => {
-    expect(ok(translateV3Call('split_clips', { items: [{ atFrame: 300 }, { clipId: 'n1', atFrame: 150 }, { clipId: 'b1', atFrame: 60 }, { atFrame: 300 }] }, ctx))).toEqual([
-      { tool: 'split_shot', input: { atSecs: [5, 10], purpose: 'editing' } },
-      { tool: 'split_clips', input: { items: [{ clipId: 'b1', atSec: 2 }] } },
-    ]);
-  });
-
-  it('cuts ripple ranges from the latest to the earliest so earlier frames stay valid', () => {
-    expect(ok(translateV3Call('ripple_delete_ranges', { ranges: [[30, 60], [300, 330], [150, 180]] }, ctx))).toEqual([
-      { tool: 'cut_range', input: { fromSec: 10, toSec: 11 } },
-      { tool: 'cut_range', input: { fromSec: 5, toSec: 6 } },
-      { tool: 'cut_range', input: { fromSec: 1, toSec: 2 } },
-    ]);
-    expect(translateV3Call('ripple_delete_ranges', { ranges: [[30, 90], [60, 120]] }, ctx)).toMatchObject({ status: 'error', error: 'overlapping_ranges' });
-    expect(translateV3Call('ripple_delete_ranges', { ranges: [[90, 90]] }, ctx)).toMatchObject({ status: 'error', error: 'invalid_frames', path: 'ranges[0]' });
-  });
-
-  it('fans set_clip_properties out by kind and field', () => {
-    const calls = ok(translateV3Call('set_clip_properties', {
-      items: [
-        { clipId: 'b1', volumeDb: -20, mute: true, fades: { in: 9, out: 12 }, speed: 0.5, filter: { saturate: 0 } },
-        { clipId: 'a1', volumeDb: -14, fades: { in: 45, out: 60 }, source: [3, 33], assetId: 'asset-9' },
-        { clipId: 'g1', durationFrames: 120, opacity: 0.8 },
-      ],
-    }, ctx));
-    expect(calls).toEqual([
-      { tool: 'set_clip_properties', input: { items: [
-        { clipId: 'a1', sourceInSec: 3, sourceOutSec: 33, volumeDb: -14, audioFadeInSec: 1.5, audioFadeOutSec: 2 },
-        { clipId: 'g1', opacity: 0.8 },
-      ] } },
-      { tool: 'set_shot_audio', input: { shotIds: ['b1'], volumeDb: -20, mute: true, fadeInSec: 0.3, fadeOutSec: 0.4 } },
-      { tool: 'set_video_speed', input: { shotIds: ['b1'], speed: 0.5 } },
-      { tool: 'set_video_filter', input: { shotId: 'b1', saturate: 0 } },
-      { tool: 'swap_clip_media', input: { clipId: 'a1', assetId: 'asset-9' } },
-      { tool: 'resize_block', input: { blockId: 'g1', durationSec: 4 } },
-    ]);
-    expect(translateV3Call('set_clip_properties', { items: [{ clipId: 'n1' }] }, ctx)).toMatchObject({ status: 'error', error: 'nothing_to_change' });
-  });
-
-  it('folds editable-property pairs on a graphic clip into one set_block_props call', () => {
-    expect(ok(translateV3Call('set_clip_properties', { items: [{ clipId: 'g1', props: [{ key: 'accent', value: '#000000' }, { key: 'badge', value: false }] }] }, ctx))).toEqual([
-      { tool: 'set_block_props', input: { blockId: 'g1', props: { accent: '#000000', badge: false } } },
-    ]);
-    expect(translateV3Call('set_clip_properties', { items: [{ clipId: 'n1', props: [{ key: 'accent', value: '#000000' }] }] }, ctx)).toMatchObject({ status: 'error', error: 'invalid_value', path: 'items[0].props' });
-    expect(translateV3Call('set_clip_properties', { items: [{ clipId: 'g1', props: { accent: '#000000' } }] }, ctx)).toMatchObject({ status: 'error', error: 'invalid_value', path: 'items[0].props' });
-  });
-
-  it('passes bounded kit row values through while rejecting nested objects and oversized arrays', () => {
-    const props = [{ key: 'items', value: [{ text: '第一步', note: '备注' }] }];
-    expect(ok(translateV3Call('set_clip_properties', { items: [{ clipId: 'g1', props }] }, ctx))).toEqual([{ tool: 'set_block_props', input: { blockId: 'g1', props: { items: props[0]!.value } } }]);
-    for (const value of [[{ text: { nested: true } }], Array(33).fill({ text: 'x' }), [{ value: Number.NaN }]]) {
-      expect(translateV3Call('set_clip_properties', { items: [{ clipId: 'g1', props: [{ key: 'items', value }] }] }, ctx)).toMatchObject({ status: 'error', error: 'invalid_value' });
-    }
-  });
-
-  it('accepts both remove_words selectors and warns that positions shift', () => {
-    const result = translateV3Call('remove_words', { ranges: [[12.4, 15.1]], wordIds: ['w7', 'w8'], keepGapSec: 0.35 }, ctx);
-    expect(result).toMatchObject({ status: 'ok', note: expect.stringContaining('re-read get_transcript') });
-    // One typed engine call carries both selectors; the pairs are checked, not rewritten.
-    expect(ok(result)).toEqual([
-      { tool: 'remove_words', input: { ranges: [[12.4, 15.1]], wordIds: ['w7', 'w8'], keepGapSec: 0.35 } },
-    ]);
-    expect(translateV3Call('remove_words', {}, ctx)).toMatchObject({ status: 'error', error: 'missing_field' });
-    expect(translateV3Call('remove_words', { ranges: [[15.1, 12.4]] }, ctx)).toMatchObject({ status: 'error', error: 'invalid_value', path: 'ranges[0]' });
-    expect(translateV3Call('remove_words', { ranges: [{ fromFrame: 10, toFrame: 20 }] }, ctx)).toMatchObject({ status: 'error', error: 'invalid_value', path: 'ranges[0]' });
   });
 
   it('samples inspect_timeline evenly inside a frame window, capped at 12', () => {
@@ -166,17 +95,6 @@ describe('v3 adapter translations', () => {
     ]);
   });
 
-  it('splits set_texts into adds and updates and converts timing', () => {
-    expect(ok(translateV3Call('set_texts', { items: [
-      { text: 'Hook', startFrame: 6, durationFrames: 108, preset: 'headline' },
-      { id: 't1', text: 'Fixed wording' },
-    ] }, ctx))).toEqual([
-      { tool: 'add_texts', input: { items: [{ text: 'Hook', preset: 'headline', startSec: 0.2, durationSec: 3.6 }] } },
-      { tool: 'update_text', input: { items: [{ clipId: 't1', text: 'Fixed wording' }] } },
-    ]);
-    expect(translateV3Call('set_texts', { items: [{ text: 'no start' }] }, ctx)).toMatchObject({ status: 'error', path: 'items[0]' });
-  });
-
   it('maps the small action tools', () => {
     expect(ok(translateV3Call('preview', { action: 'seek', frame: 450 }, ctx))).toEqual([{ tool: 'seek', input: { toSec: 15 } }]);
     expect(ok(translateV3Call('preview', { action: 'play', frame: 0, toFrame: 300 }, ctx))).toEqual([{ tool: 'play', input: { fromSec: 0, toSec: 10 } }]);
@@ -185,9 +103,6 @@ describe('v3 adapter translations', () => {
     expect(ok(translateV3Call('manage_voices', { action: 'list', query: 'warm' }, ctx))).toEqual([{ tool: 'list_voices', input: { query: 'warm' } }]);
     expect(ok(translateV3Call('ask_user', { kind: 'approval', title: 'Generate?', content: '3 clips' }, ctx))).toEqual([{ tool: 'request_approval', input: { title: 'Generate?', content: '3 clips' } }]);
     expect(ok(translateV3Call('manage_frame', { action: 'attach', id: 'editorial-mono' }, ctx))).toEqual([{ tool: 'attach_frame', input: { frame_id: 'editorial-mono' } }]);
-    expect(ok(translateV3Call('add_transition', { atFrame: 300, effect: 'fade', durationFrames: 30 }, ctx))).toEqual([{ tool: 'add_transition', input: { atSec: 10, effect: 'fade', durationSec: 1 } }]);
-    expect(ok(translateV3Call('manage_tracks', { action: 'update', trackId: 't3', order: 30 }, ctx))).toEqual([{ tool: 'manage_tracks', input: { action: 'update', trackId: 't3', stackOrder: 30 } }]);
-    expect(ok(translateV3Call('manage_clip_links', { action: 'sync', referenceClipId: 'n1', targets: [] }, ctx))).toEqual([{ tool: 'sync_clips', input: { referenceClipId: 'n1', targets: [] } }]);
   });
 
   it('inspects media by mode', () => {
@@ -216,33 +131,6 @@ describe('v3 adapter translations', () => {
     ]);
   });
 
-  it('adds and inserts clips with frame timing and graphic duplication', () => {
-    expect(ok(translateV3Call('add_clips', { clips: [{ assetId: 'a4', role: 'broll', startFrame: 900, durationFrames: 120, source: [3, 7], fades: { in: 9 }, mute: true }] }, ctx))).toEqual([
-      { tool: 'add_clips', input: { clips: [{ assetId: 'a4', role: 'broll', startSec: 30, durationSec: 4, sourceInSec: 3, sourceOutSec: 7, fadeInSec: 0.3, muted: true }] } },
-    ]);
-    expect(ok(translateV3Call('insert_clips', { clips: [{ assetId: 'a9', role: 'music' }], atFrame: 60 }, ctx))).toEqual([
-      { tool: 'insert_clips', input: { clips: [{ assetId: 'a9', role: 'music' }], atSec: 2 } },
-    ]);
-    expect(ok(translateV3Call('add_clips', { duplicate: [{ clipId: 'g1', startFrame: 300 }] }, ctx))).toEqual([{ tool: 'duplicate_block', input: { blockId: 'g1', atSec: 10 } }]);
-    expect(translateV3Call('add_clips', { duplicate: [{ clipId: 'b1' }] }, ctx)).toMatchObject({ status: 'error', error: 'unsupported' });
-    expect(translateV3Call('add_clips', { clips: [{ role: 'broll' }] }, ctx)).toMatchObject({ status: 'error', path: 'clips[0].assetId' });
-  });
-
-  it('frames media clips with recipes or exact transform/crop and places graphics by box', () => {
-    expect(ok(translateV3Call('set_clip_framing', { items: [
-      { clipId: 'n1', treatment: 'punch-in', scale: 1.3, anchorX: 0.5, anchorY: 0.3 },
-      { clipId: 'b1', transform: { scale: 1.2, offsetX: 0.1 }, cropInsets: { top: 0.1 } },
-      { clipId: 'g1', box: { x: 0.06, y: 0.62, w: 0.5, h: 0.2 } },
-    ] }, ctx))).toEqual([
-      { tool: 'set_shot_framing', input: { updates: [{ shotId: 'n1', treatment: 'punch-in', scale: 1.3, anchorX: 0.5, anchorY: 0.3 }] } },
-      { tool: 'set_media_transform', input: { items: [{ clipId: 'b1', scale: 1.2, offsetX: 0.1 }] } },
-      { tool: 'set_media_crop', input: { items: [{ clipId: 'b1', top: 0.1 }] } },
-      { tool: 'place_block', input: { blockId: 'g1', xPct: 6, yPct: 62, widthPct: 50, heightPct: 20 } },
-    ]);
-    expect(translateV3Call('set_clip_framing', { items: [{ clipId: 'n1', treatment: 'zoom' }] }, ctx)).toMatchObject({ status: 'error', path: 'items[0].treatment' });
-    expect(translateV3Call('set_clip_framing', { items: [{ clipId: 'b1' }] }, ctx)).toMatchObject({ status: 'error', error: 'nothing_to_change' });
-  });
-
   it('applies BYO components and routes the hosted generator fallback', () => {
     expect(ok(translateV3Call('apply_component', { raw: 'note\n```html\n<div/>\n```', atFrame: 600, durationFrames: 120, placement: { xPct: 6, yPct: 62, widthPct: 50, heightPct: 20 } }, ctx))).toEqual([
       { tool: 'apply_block', input: { raw: 'note\n```html\n<div/>\n```', atSec: 20, durationSec: 4, placement: { xPct: 6, yPct: 62, widthPct: 50, heightPct: 20 } } },
@@ -250,37 +138,13 @@ describe('v3 adapter translations', () => {
     expect(ok(translateV3Call('apply_component', { generate: true, clipId: 'g1', instruction: 'make the number bigger' }, ctx))).toEqual([{ tool: 'edit_block', input: { blockId: 'g1', instruction: 'make the number bigger' } }]);
     expect(ok(translateV3Call('apply_component', { generate: true, instruction: 'a stat card', atFrame: 30 }, ctx))).toEqual([{ tool: 'add_block', input: { instruction: 'a stat card', atSec: 1 } }]);
     expect(translateV3Call('apply_component', {}, ctx)).toMatchObject({ status: 'error', path: 'raw' });
-    expect(ok(translateV3Call('apply_component', { raw: 'note\n```html\n<div/>\n```', clipId: 'g1', fontFamily: 'web:douyin-sans' }, ctx))).toEqual([
-      { tool: 'apply_block', input: { raw: 'note\n```html\n<div/>\n```', blockId: 'g1', fontFamily: 'web:douyin-sans' } },
-    ]);
   });
 
   it('composes a component brief through compose_context in seconds', () => {
-    // compose_component addresses the timeline in frames; compose_context (the browser/bridge
-    // handler) speaks seconds and blockId. A wrong target name (compose_block_brief) used to die
-    // as "unknown operation" on the chat surface — pin the real target and the field conversion.
     expect(ok(translateV3Call('compose_component', { instruction: 'a lower third', atFrame: 0, durationFrames: 90, placement: { xPct: 6, yPct: 70, widthPct: 60, heightPct: 18 }, backdrop: 'speaker on the left', fontFamily: 'web:douyin-sans' }, ctx))).toEqual([
       { tool: 'compose_context', input: { atSec: 0, durationSec: 3, placement: { xPct: 6, yPct: 70, widthPct: 60, heightPct: 18 }, backdrop: 'speaker on the left', fontFamily: 'web:douyin-sans' } },
     ]);
-    expect(ok(translateV3Call('compose_component', { clipId: 'g1', instruction: 'rewrite the number' }, ctx))).toEqual([
-      { tool: 'compose_context', input: { blockId: 'g1' } },
-    ]);
-  });
-
-  it('drives the caption layer as one object', () => {
-    expect(ok(translateV3Call('set_captions', { on: false }, ctx))).toEqual([{ tool: 'remove_captions', input: {} }]);
-    expect(ok(translateV3Call('set_captions', { on: true, preset: 'ln-clean', yPct: 82, source: { trackId: 't1' }, corrections: [{ index: 3, text: 'Fixed.' }], translations: { lang: 'English', items: [{ index: 3, text: 'Fixed.' }] }, relayout: true }, ctx))).toEqual([
-      { tool: 'set_captions', input: { preset: 'ln-clean', yPct: 82, source: 'track', trackId: 't1' } },
-      { tool: 'edit_caption_text', input: { items: [{ index: 3, text: 'Fixed.' }] } },
-      { tool: 'set_caption_translations', input: { items: [{ index: 3, text: 'Fixed.' }], lang: 'English' } },
-      { tool: 'relayout_captions', input: {} },
-    ]);
-    expect(translateV3Call('set_captions', {}, ctx)).toMatchObject({ status: 'error', error: 'nothing_to_change' });
-    // on:true alone switches the layer on with the default preset (the legacy tool refuses an empty style).
-    expect(ok(translateV3Call('set_captions', { on: true }, ctx))).toEqual([{ tool: 'set_captions', input: { preset: 'em-yellow' } }]);
-    expect(ok(translateV3Call('set_captions', { on: true, yPct: 80 }, ctx))).toEqual([{ tool: 'set_captions', input: { yPct: 80 } }]);
-    // A silent montage captions its own copy; the font travels with the style.
-    expect(ok(translateV3Call('set_captions', { on: true, script: '第一句\n第二句', font: 'serif' }, ctx))).toEqual([{ tool: 'set_captions', input: { font: 'serif', script: '第一句\n第二句' } }]);
+    expect(ok(translateV3Call('compose_component', { clipId: 'g1', instruction: 'rewrite the number' }, ctx))).toEqual([{ tool: 'compose_context', input: { blockId: 'g1' } }]);
   });
 
   it('batches only the editorial review; semantic and geometry run once per source', () => {
@@ -300,12 +164,6 @@ describe('v3 adapter translations', () => {
     expect(transcript[0]!.input).toEqual({ assetId: 'local_abc' });
   });
 
-  it('carries the silent-montage picture target on add_clips in frames', () => {
-    const calls = ok(translateV3Call('add_clips', { clips: [{ assetId: 'a1', role: 'primary', source: [0, 4] }], targetDurationFrames: 900 }, ctx));
-    expect(calls[0]!.tool).toBe('add_clips');
-    expect(calls[0]!.input.targetDurationSec).toBe(30);
-  });
-
   it('maps search_media clipId onto the legacy source selector', () => {
     expect(ok(translateV3Call('search_media', { query: 'budget', clipId: 'n1', limit: 4 }, ctx))).toEqual([{ tool: 'search_media', input: { query: 'budget', limit: 4, shotId: 'n1' } }]);
   });
@@ -316,8 +174,7 @@ describe('v3 adapter translations', () => {
     expect(ok(translateV3Call('prepare_local_asset', { assetId: 'local:img' }, ctx))).toEqual([{ tool: 'prepare_local_image', input: { assetId: 'local:img' } }]);
   });
 
-  it('refuses frame math without fps and unknown tools', () => {
-    expect(translateV3Call('move_clips', { items: [{ clipId: 'n1', startFrame: 1 }] }, { fps: 0, kindOf: () => 'narrative' })).toMatchObject({ status: 'error', error: 'fps_unavailable' });
+  it('refuses unknown tools', () => {
     expect(translateV3Call('set_director_plan', {}, ctx)).toMatchObject({ status: 'error', error: 'unknown_tool' });
   });
 });

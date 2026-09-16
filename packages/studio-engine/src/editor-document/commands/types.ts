@@ -207,6 +207,8 @@ export interface EditorCommandError {
   message: string;
   path?: string;
   trackIds?: TrackId[];
+  /** Structured detail from the failing tool (a fix, unknown ids, conflicts) for the caller's receipt. */
+  details?: unknown;
 }
 
 export interface EditorCommandReceipt {

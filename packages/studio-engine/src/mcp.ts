@@ -407,7 +407,8 @@ export async function runV3Tool(name: string, args: Record<string, unknown>, dep
   const ctx: V3AdapterContext = !serverOwned && deps.resolveV3Context
     ? await deps.resolveV3Context()
     : contextFree;
-  const translation = serverOwned ? probe : translateV3Call(name, args, { ...ctx, placementAssets });
+  const placedArgs = placementAssets?.length && (name === 'add_clips' || name === 'insert_clips') ? { ...args, placementAssets } : args;
+  const translation = serverOwned ? probe : translateV3Call(name, placedArgs, { ...ctx, placementAssets });
   if (translation.status === 'error') {
     const { status: _status, ...rest } = translation;
     return { ok: false, ...rest };

@@ -228,7 +228,7 @@ describe('document transactions', () => {
 describe('ids minted inside a transaction', () => {
   const addText: DocumentOp<'agent.timeline'> = {
     op: 'agent.timeline',
-    input: { tool: 'add_texts', input: { items: [{ text: 'Hello', startSec: 1, durationSec: 2 }, { text: 'World', startSec: 4, durationSec: 2 }] } },
+    input: { tool: 'set_texts', input: { items: [{ text: 'Hello', startFrame: 30, durationFrames: 60 }, { text: 'World', startFrame: 120, durationFrames: 60 }] } },
   };
   const textIds = (document: ReturnType<typeof emptyDocument>) =>
     document.timeline.tracks.flatMap((track) => track.clips.filter((clip) => clip.kind === 'graphic').map((clip) => clip.id));
