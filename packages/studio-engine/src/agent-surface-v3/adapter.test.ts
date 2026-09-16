@@ -124,11 +124,15 @@ describe('v3 adapter translations', () => {
   it('accepts both remove_words selectors and warns that positions shift', () => {
     const result = translateV3Call('remove_words', { ranges: [[12.4, 15.1]], wordIds: ['w7', 'w8'], keepGapSec: 0.35 }, ctx);
     expect(result).toMatchObject({ status: 'ok', note: expect.stringContaining('re-read get_transcript') });
+    // The legacy cutter reads {fromSec, toSec}: the v3 pairs must be converted, not passed through.
     expect(ok(result)).toEqual([
-      { tool: 'cut_narration', input: { ranges: [[12.4, 15.1]], keepGapSec: 0.35 } },
+      { tool: 'cut_narration', input: { ranges: [{ fromSec: 12.4, toSec: 15.1 }], keepGapSec: 0.35 } },
       { tool: 'delete_words', input: { wordIds: ['w7', 'w8'] } },
     ]);
     expect(translateV3Call('remove_words', {}, ctx)).toMatchObject({ status: 'error', error: 'missing_field' });
+    expect(translateV3Call('remove_words', { ranges: [[15.1, 12.4]] }, ctx)).toMatchObject({ status: 'error', error: 'invalid_value', path: 'ranges[0]' });
+    expect(translateV3Call('remove_words', { ranges: [{ fromFrame: 10, toFrame: 20 }] }, ctx)).toMatchObject({ status: 'error', error: 'invalid_value', path: 'ranges[0]' });
+    expect(ok(translateV3Call('remove_words', { ranges: [{ fromSec: 1, toSec: 2 }] }, ctx))).toEqual([{ tool: 'cut_narration', input: { ranges: [{ fromSec: 1, toSec: 2 }] } }]);
   });
 
   it('samples inspect_timeline evenly inside a frame window, capped at 12', () => {

@@ -87,6 +87,7 @@ import { applyDirectorPlanToDocument } from './director-plan-document';
 import type { DirectorPlan } from './director-plan';
 import { withSceneDesignsInSemantics, type SceneDesignCollection } from './scene-design';
 import { bakeOverlayClipToMedia, type BakeOverlayClipToMediaInput } from './overlay-bake';
+import { withDeterministicIds } from './deterministic-ids';
 import {
   resizeNarrativeTimelineClip,
   resizeVisualTimelineClip,
@@ -491,28 +492,33 @@ export type ApplyTransactionResult =
 /** Apply a transaction atomically: any hard failure returns the input document unchanged. */
 export function applyDocumentTransaction(
   document: EditorDocumentV2,
-  transaction: Pick<DocumentTransaction, 'ops'>,
+  transaction: Pick<DocumentTransaction, 'ops'> & Partial<Omit<DocumentTransaction, 'ops'>>,
   ctx: DocumentOpContext,
   options: ApplyTransactionOptions = {},
 ): ApplyTransactionResult {
-  let current = document;
-  let skipped = 0;
-  const outcomes: DocumentOpOutcome[] = [];
-  for (const [opIndex, op] of transaction.ops.entries()) {
-    const outcome = applyDocumentOp(current, op, ctx);
-    if (!outcome.ok) {
-      if (options.skipMissing && isMissingTargetError(outcome.error)) {
-        skipped += 1;
-        outcomes.push(outcome);
-        continue;
+  // Ids minted by the operations follow the transaction id, so every host replaying this
+  // transaction lands on the ids the originating editor already reported.
+  const run = (): ApplyTransactionResult => {
+    let current = document;
+    let skipped = 0;
+    const outcomes: DocumentOpOutcome[] = [];
+    for (const [opIndex, op] of transaction.ops.entries()) {
+      const outcome = applyDocumentOp(current, op, ctx);
+      if (!outcome.ok) {
+        if (options.skipMissing && isMissingTargetError(outcome.error)) {
+          skipped += 1;
+          outcomes.push(outcome);
+          continue;
+        }
+        return { ok: false, document, error: outcome.error, opIndex };
       }
-      return { ok: false, document, error: outcome.error, opIndex };
+      outcomes.push(outcome);
+      current = outcome.document;
     }
-    outcomes.push(outcome);
-    current = outcome.document;
-  }
-  const next = options.raw || current === document ? current : normalizeCommittedDocument(current);
-  return { ok: true, document: next, outcomes, skipped, changed: next !== document };
+    const next = options.raw || current === document ? current : normalizeCommittedDocument(current);
+    return { ok: true, document: next, outcomes, skipped, changed: next !== document };
+  };
+  return transaction.id ? withDeterministicIds(transaction.id, run) : run();
 }
 
 export interface ReplayResult {

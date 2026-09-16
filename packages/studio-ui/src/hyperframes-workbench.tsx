@@ -535,6 +535,8 @@ export function HyperframesWorkbench({
   const redoStackRef = useRef<EditorDocumentV2[]>([]); // undone states; any new edit discards the whole redo line
   const reclaimWritershipRef = useRef<() => void>(() => {});
   const projectSyncRef = useRef<ProjectSync | null>(null);
+  /** Pull the cloud copy and rebase pending edits onto it; set once the sync queue exists below. */
+  const adoptCloudProjectRef = useRef<() => Promise<boolean>>(async () => false);
   const committerRef = useRef<DocumentCommitter | null>(null);
   if (!committerRef.current || committerRef.current.projectId !== projectId) {
     committerRef.current = new DocumentCommitter({
@@ -7249,6 +7251,7 @@ export function HyperframesWorkbench({
     pickVideoFile,
     registerLocalAsset,
     localAssetIndexRef,
+    adoptCloudProject: () => adoptCloudProjectRef.current(),
     ensureClipTranscripts,
     transcriptForAgent,
     stepAsr,
@@ -7450,6 +7453,9 @@ export function HyperframesWorkbench({
       hydrateNativeSession(editorDocumentRef.current, compRef.current, true);
     },
   };
+  // A server-side writer (the import helper registering media) asks the open tab to take the cloud
+  // copy now instead of waiting for the next save to notice the divergence.
+  adoptCloudProjectRef.current = () => cloudSaveQueueRef.current?.pullRemote() ?? Promise.resolve(false);
   if (
     !cloudSaveQueueRef.current ||
     cloudSaveQueueProjectRef.current !== projectId

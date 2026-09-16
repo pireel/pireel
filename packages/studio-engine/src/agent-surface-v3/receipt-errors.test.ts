@@ -43,3 +43,10 @@ describe('describeStepFailure', () => {
     expect(describeStepFailure('x', {}, undefined, ctx)).toEqual({ error: 'step_failed', detail: 'step_failed' });
   });
 });
+
+describe('describeStepFailure carried fix', () => {
+  it('lifts a legacy step\'s data.fix into the receipt when it has no better guidance', () => {
+    const failure = describeStepFailure('remove_words', { ranges: [[95.5, 106.7]] }, 'ranges_not_on_timeline', ctx, { fix: 'Re-read get_transcript.' });
+    expect(failure).toEqual({ error: 'ranges_not_on_timeline', detail: 'ranges_not_on_timeline', fix: 'Re-read get_transcript.' });
+  });
+});

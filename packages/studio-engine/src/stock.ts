@@ -324,7 +324,9 @@ async function wikimediaSearch(q: string, type: StockKind, page: number, per: nu
     formatversion: '2',
     origin: '*',
   })) url.searchParams.set(key, value);
-  const response = await fetch(url, { headers: { 'Api-User-Agent': 'Pireel/1.0 (https://pireel.com)' } });
+  // Wikimedia refuses requests without a real User-Agent (403); Api-User-Agent alone is not enough
+  // from a runtime that sends no default UA.
+  const response = await fetch(url, { headers: { 'User-Agent': 'Pireel/1.0 (https://pireel.com; hello@pireel.com)', 'Api-User-Agent': 'Pireel/1.0 (https://pireel.com; hello@pireel.com)' } });
   if (!response.ok) throw new Error(`wikimedia ${response.status}`);
   const body = (await response.json()) as { continue?: { gsroffset?: number }; query?: { pages?: WikimediaPage[] } };
   const items = (body.query?.pages ?? [])

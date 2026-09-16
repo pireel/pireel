@@ -142,6 +142,38 @@ export class ProjectSync {
     while (this.inflight) await this.inflight;
   }
 
+  /**
+   * Fetch the stored project now and hand it to `onAck` as a divergence, so the caller adopts it
+   * and replays what is still pending — the same move as after a diverged acknowledgement, taken
+   * because another writer (an import helper, an offline agent) says the cloud copy moved.
+   * False when nothing could be loaded; pending edits stay queued either way.
+   */
+  async pullRemote(): Promise<boolean> {
+    if (this.disposed || !this.deps.load) return false;
+    await this.whenIdle();
+    let project: StudioProjectDto | null = null;
+    try {
+      project = await this.deps.load();
+    } catch {
+      project = null;
+    }
+    if (this.disposed || !project) return false;
+    this.knownVersion = project.version;
+    this.acked = ackedFromDto(project);
+    const ack: ProjectCommitAck = {
+      status: 'saved',
+      version: project.version,
+      updatedAt: project.updatedAt,
+      baseVersion: project.version,
+      applied: [],
+      rejected: [],
+      documentHash: hashSection(canonicalJson(project.document)),
+      project,
+    };
+    this.deps.onAck(ack, { diverged: true, pending: [...this.pending], project });
+    return true;
+  }
+
   dispose(): void {
     this.disposed = true;
     this.clearDebounce();

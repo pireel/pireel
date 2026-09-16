@@ -69,9 +69,14 @@ export function describeStepFailure(
   args: Record<string, unknown>,
   legacyError: string | undefined,
   ctx: StepFailureContext,
+  legacyData?: unknown,
 ): StepFailure {
   const message = legacyError && legacyError.trim() ? legacyError.trim() : 'step_failed';
   const detail = message;
+  // A legacy step that already knows the next move says so under data.fix; it becomes the receipt's fix.
+  const carriedFix = legacyData && typeof legacyData === 'object' && typeof (legacyData as { fix?: unknown }).fix === 'string'
+    ? (legacyData as { fix: string }).fix
+    : undefined;
   const ids: string[] = [];
   collectIds(args, ids);
   const pointed = indexedId(message, args);
@@ -104,5 +109,5 @@ export function describeStepFailure(
     }
   }
 
-  return { error: message, detail };
+  return { error: message, detail, ...(carriedFix ? { fix: carriedFix } : {}) };
 }

@@ -154,7 +154,7 @@ describe('MCP v3 surface', () => {
     ['create_browser_handoff', { project_id: 'p1' }, 'createBrowserHandoff', { project_id: 'p1' }],
     ['generate_image', { prompt: 'test' }, 'generateImage', { prompt: 'test' }],
     ['generate_video', { prompt: 'test' }, 'generateVideo', { prompt: 'test' }],
-    ['generate_speech', { text: 'test' }, 'generateSpeech', { text: 'test' }],
+    ['generate_speech', { text: 'test', voiceId: 'v1' }, 'generateSpeech', { text: 'test', voiceId: 'v1' }],
     ['generate_audio', { kind: 'music', prompt: 'test' }, 'generateMusic', { prompt: 'test' }],
     ['generate_audio', { kind: 'sfx', prompt: 'test' }, 'generateSfx', { prompt: 'test' }],
     ['search_assets', { scope: 'official', kind: 'video' }, 'listAssets', { scope: 'official', kind: 'video' }],

@@ -20,6 +20,7 @@ import type { ThemeId } from './theme';
 import type { CustomVisualStyle } from './visual-style';
 import { type Clip, editedDuration, spans } from './trim';
 import { BASE_CAPTION_FONT_PX, DEFAULT_CAPTION_PRESET, DEFAULT_SUB_CAPTION_PRESET, getCaptionPreset } from './caption-presets';
+import { mintIdSuffix } from './deterministic-ids';
 
 export type BlockKind = 'caption' | 'title' | 'stat' | 'list' | 'transition' | 'custom' | 'media';
 
@@ -558,8 +559,7 @@ export function hasVideoTrackContent(comp: Composition): boolean {
 
 let _shotUid = 0;
 export function shotId(): string {
-  _shotUid += 1;
-  return `shot${_shotUid}_${Math.floor(performance.now())}`;
+  return `shot${mintIdSuffix(() => ({ ordinal: ++_shotUid, suffix: String(Math.floor(performance.now())) }))}`;
 }
 
 /** Auto-slice by shot (sentence): cut at each sentence start → continuous clips covering [0, video end], default fullscreen framing. */
@@ -1323,12 +1323,13 @@ export interface FxWord {
 
 let _uid = 0;
 export function blockId(prefix = 'b'): string {
-  _uid += 1;
   // Ids land in CSS selectors (#<id> .cls) — strip characters that would parse as
   // combinators/pseudo-classes there (a 'kit:metric' templateId prefix once produced
   // #kit:metric_… selectors that silently matched nothing → fully unstyled blocks).
   const safe = prefix.replace(/[^a-zA-Z0-9_-]/g, '_');
-  return `${safe}${_uid}_${Math.floor(performance.now())}`;
+  // Inside a document transaction the tail follows the transaction id, so the server's replay
+  // mints the same id the editor reported (see deterministic-ids.ts).
+  return `${safe}${mintIdSuffix(() => ({ ordinal: ++_uid, suffix: String(Math.floor(performance.now())) }))}`;
 }
 
 export function span2(words: FxWord[]): { start: number; end: number; dur: number } {

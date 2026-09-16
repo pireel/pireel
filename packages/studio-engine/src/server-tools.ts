@@ -531,7 +531,9 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         {
           output: outputs.active,
           active: true,
-          durationSec: totalDuration(c),
+          // Same measure as the inactive rows: every track counts, so a music bed that outruns the
+          // picture is reported, not hidden behind the visual end.
+          durationSec: editorDocumentRenderPlan(p.document).durationSec,
         },
         ...outputs.inactive.map((output) => ({
           output,
@@ -1210,7 +1212,15 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         if (!Number.isFinite(from) || !Number.isFinite(to) || to - from < 0.1) return { result: { ok: false, error: 'invalid fromSec/toSec' } };
         ranges = [{ from, to }];
       }
-      if (!ranges.length) return { result: { ok: false, error: 'ranges empty/invalid, or these ranges no longer exist in the edited video' } };
+      if (!ranges.length) {
+        // Tell the caller which of three different things happened; the old single message blamed
+        // the input for all of them and sent agents rewriting valid ranges.
+        return { result: { ok: false, error: 'ranges_not_on_timeline', data: {
+          fix: tool === 'cut_narration'
+            ? 'None of these source-second spans is still on the timeline: they were cut already, sit outside every remaining narrative clip of the primary footage, or lie entirely inside protected speech that is not fully covered. Re-read get_transcript for what remains, or pass wordIds for exact words.'
+            : 'This timeline span has no footage left to cut.',
+        } } };
+      }
       const command = applyNarrationDocumentEdit({
         projectId: p.id,
         document: p.document,

@@ -367,7 +367,19 @@ function translateSetClipProperties(input: Input, ctx: V3AdapterContext): V3Tran
 function translateRemoveWords(input: Input): V3Translation {
   const calls: LegacyCall[] = [];
   if (Array.isArray(input.ranges) && input.ranges.length) {
-    calls.push({ tool: 'cut_narration', input: { ranges: input.ranges, ...(isFiniteNumber(input.keepGapSec) ? { keepGapSec: input.keepGapSec } : {}) } });
+    // v3 ranges are [inSec, outSec] pairs; the legacy cutter reads {fromSec, toSec} objects. The
+    // pairs used to pass through untouched and every range-based cut failed as "ranges empty".
+    const ranges: Array<{ fromSec: number; toSec: number }> = [];
+    for (const [index, range] of input.ranges.entries()) {
+      const pair = Array.isArray(range) ? range : (range && typeof range === 'object' ? [(range as Input).fromSec ?? (range as Input).inSec, (range as Input).toSec ?? (range as Input).outSec] : []);
+      const fromSec = pair[0];
+      const toSec = pair[1];
+      if (!isFiniteNumber(fromSec) || !isFiniteNumber(toSec) || fromSec < 0 || toSec <= fromSec) {
+        return { status: 'error', error: 'invalid_value', path: `ranges[${index}]`, value: range, fix: 'Each range is a two-number array [inSec, outSec] in source seconds with outSec > inSec ≥ 0, taken from get_transcript segments.' };
+      }
+      ranges.push({ fromSec, toSec });
+    }
+    calls.push({ tool: 'cut_narration', input: { ranges, ...(isFiniteNumber(input.keepGapSec) ? { keepGapSec: input.keepGapSec } : {}) } });
   }
   if (Array.isArray(input.wordIds) && input.wordIds.length) {
     calls.push({ tool: 'delete_words', input: { wordIds: input.wordIds } });

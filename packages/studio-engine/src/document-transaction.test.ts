@@ -224,3 +224,33 @@ describe('document transactions', () => {
     expect(canonicalJson(there.document)).toBe(canonicalJson(here.document));
   });
 });
+
+describe('ids minted inside a transaction', () => {
+  const addText: DocumentOp<'agent.timeline'> = {
+    op: 'agent.timeline',
+    input: { tool: 'add_texts', input: { items: [{ text: 'Hello', startSec: 1, durationSec: 2 }, { text: 'World', startSec: 4, durationSec: 2 }] } },
+  };
+  const textIds = (document: ReturnType<typeof emptyDocument>) =>
+    document.timeline.tracks.flatMap((track) => track.clips.filter((clip) => clip.kind === 'graphic').map((clip) => clip.id));
+
+  it('come out identical wherever the same transaction is replayed', () => {
+    const transaction: DocumentTransaction = { id: 'tx_same_seed_0001', origin: 'agent', ops: [addText] };
+    const here = applyDocumentTransaction(emptyDocument(), transaction, ctx);
+    const there = applyDocumentTransaction(emptyDocument(), overWire(transaction), ctx);
+    expect(here.ok && there.ok).toBe(true);
+    if (!here.ok || !there.ok) return;
+    expect(textIds(here.document)).toHaveLength(2);
+    expect(textIds(there.document)).toEqual(textIds(here.document));
+  });
+
+  it('differ between transactions and still mint without a transaction id', () => {
+    const first = applyDocumentTransaction(emptyDocument(), { id: 'tx_seed_a', origin: 'agent', ops: [addText] }, ctx);
+    const second = applyDocumentTransaction(emptyDocument(), { id: 'tx_seed_b', origin: 'agent', ops: [addText] }, ctx);
+    const loose = applyDocumentTransaction(emptyDocument(), { ops: [addText] }, ctx);
+    expect(first.ok && second.ok && loose.ok).toBe(true);
+    if (!first.ok || !second.ok || !loose.ok) return;
+    expect(textIds(first.document)).not.toEqual(textIds(second.document));
+    expect(textIds(loose.document)).toHaveLength(2);
+    expect(new Set(textIds(loose.document)).size).toBe(2);
+  });
+});

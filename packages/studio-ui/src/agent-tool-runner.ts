@@ -117,6 +117,7 @@ import {
   type SceneVisualReviewPhase,
 } from '@pireel/studio-engine/scene-visual-qa';
 import { translateV3Call, type LegacyCall, type V3ClipKind } from '@pireel/studio-engine/agent-surface-v3/adapter';
+import { validateV3Input } from '@pireel/studio-engine/agent-surface-v3/validate';
 import { describeStepFailure } from '@pireel/studio-engine/agent-surface-v3/receipt-errors';
 import { documentDelta, renderV3State } from '@pireel/studio-engine/agent-surface-v3/state';
 
@@ -453,6 +454,9 @@ export interface AgentToolCtx {
   registerLocalAsset: (entry: LocalAssetIndexEntry) => void;
   /** Current metadata-only device library index; search reads it without copying file bytes. */
   localAssetIndexRef: MutableRefObject<LocalAssetIndexEntry[]>;
+  /** Take the cloud copy of this project now (a server-side writer changed it) and replay pending
+   * edits on top. Resolves false when the cloud copy could not be loaded. */
+  adoptCloudProject?: () => Promise<boolean>;
   ensureClipTranscripts: () => Promise<void>;
   transcriptForAgent: () => string;
   // Independent transcript and visual observations
@@ -1241,6 +1245,17 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             } catch (e) {
               return { ok: false, error: `local source load failed: ${e instanceof Error ? e.message : String(e)}` };
             }
+          }
+          case 'adopt_cloud_project': {
+            // The server registered media into this project's cloud copy (import helper, stock
+            // import) and asks the tab to pick it up now rather than at its next save.
+            const wanted = typeof input.projectId === 'string' ? input.projectId : undefined;
+            if (wanted && wanted !== ctx.projectId) return { ok: false, error: 'other_project', data: { open: ctx.projectId, requested: wanted } };
+            if (!ctx.adoptCloudProject) return { ok: false, error: 'adopt_unavailable' };
+            const adopted = await ctx.adoptCloudProject();
+            return adopted
+              ? { ok: true, summary: 'Adopted the cloud copy of this project' }
+              : { ok: false, error: 'adopt_failed', data: { fix: 'The cloud copy could not be loaded; the tab picks it up at its next save.' } };
           }
           case 'load_local_assets': {
             // Folder/batch counterpart of load_local_source. It deliberately stops at the asset
@@ -3543,7 +3558,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               to: mapped.toSec,
               text: snippetOf(mapped.sourceFromSec, mapped.sourceToSec),
             }));
-            if (!edited.length) return { ok: false, error: t('workbench.rangesEmptyInvalidThose') };
+            if (!edited.length) {
+              return { ok: false, error: 'ranges_not_on_timeline', data: { fix: 'None of these source-second spans is still on the timeline: they were cut already, sit outside every remaining narrative clip of the primary footage, or lie entirely inside protected speech that is not fully covered. Re-read get_transcript for what remains, or pass wordIds for exact words.' } };
+            }
             const seams: CutSeamEntry[] = edited.map((range) => ({
               at: range.from,
               len: range.to - range.from,
@@ -4986,6 +5003,10 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         // rewrites add_clips rows against reviewed evidence before execution); it still gets the
         // v3 receipt and the single undo step.
         const legacyInput = input.legacyInput && typeof input.legacyInput === 'object' && !Array.isArray(input.legacyInput) ? (input.legacyInput as Record<string, unknown>) : null;
+        if (!legacyInput) {
+          const invalid = validateV3Input(name, args);
+          if (invalid) { const { status: _s, ...rest } = invalid; return { ok: false, ...rest }; }
+        }
         const translation = legacyInput
           ? { status: 'ok' as const, calls: [{ tool: name, input: legacyInput }] as LegacyCall[] }
           : translateV3Call(name, args, { fps: before.canvas.fps, kindOf: (id) => kinds.get(id), hasAsset: (id) => !!before.assets[id],
@@ -5016,7 +5037,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           if (!result.ok) {
             // One correction contract for every refused step: a code the model can branch on and a fix
             // that names the next move (an invented id → read state; a wrong kind → the right tool).
-            const failure = describeStepFailure(name, args, result.error, { kindOf: (id) => kinds.get(id), hasAsset: (id) => !!before.assets[id] });
+            const failure = describeStepFailure(name, args, result.error, { kindOf: (id) => kinds.get(id), hasAsset: (id) => !!before.assets[id] }, result.data);
             return { ok: false, error: failure.error, ...(failure.fix ? { fix: failure.fix } : {}), data: { ...(result.data && typeof result.data === 'object' && !Array.isArray(result.data) ? result.data : {}), ...(failure.unknownIds ? { unknownIds: failure.unknownIds } : {}), detail: `${failure.detail} — ${call.tool} failed after ${steps.length - 1} completed step(s)`, steps } };
           }
           previous = result;

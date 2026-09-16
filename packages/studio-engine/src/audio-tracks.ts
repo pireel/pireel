@@ -16,6 +16,7 @@
  */
 
 import { SPLICE_FADE_SEC, VOLUME_DB_MAX, VOLUME_DB_MIN, dbToGain, fadeShape } from './composition-core';
+import { mintIdSuffix } from './deterministic-ids';
 
 export interface AudioClip {
   id: string;
@@ -70,8 +71,7 @@ export function audioFadeDefaults(role: AudioClipRole | undefined): { fadeInSec:
 
 let _audioUid = 0;
 export function audioClipId(): string {
-  _audioUid += 1;
-  return `aud${_audioUid}_${Math.floor(performance.now())}`;
+  return `aud${mintIdSuffix(() => ({ ordinal: ++_audioUid, suffix: String(Math.floor(performance.now())) }))}`;
 }
 
 /** Resolved knobs (defaults applied). outSec falls back to the media duration, or Infinity when unknown.

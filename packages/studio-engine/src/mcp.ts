@@ -20,6 +20,7 @@
 
 import { translateV3Call, type V3AdapterContext, type LegacyCall } from './agent-surface-v3/adapter';
 import { describeStepFailure } from './agent-surface-v3/receipt-errors';
+import { validateV3Input } from './agent-surface-v3/validate';
 import { V3_RETIRED_TOOL_IDS, V3_TOOL_IDS, V3_TOOLS, v3ReplacementIndex } from './agent-surface-v3/registry';
 import { V3_TOOL_SCHEMAS } from './agent-surface-v3/schemas';
 import { v3Instructions } from './agent-surface-v3/instructions';
@@ -370,6 +371,13 @@ const TAB_CANNOT_SERVE: ReadonlySet<string> = new Set<string>(['studio_not_open'
 /** Run one v3 call: translate to legacy calls, apply them in order (chaining results where the adapter
  *  asks), and fold the receipts into one result. Delta shaping lands with the receipt contract. */
 export async function runV3Tool(name: string, args: Record<string, unknown>, deps: McpDeps): Promise<McpBridgeResult> {
+  // Schema-level refusals are decided here, before the live tab is involved: the tab runs whatever
+  // bundle its page loaded, so a value the published schema forbids must not depend on it.
+  const invalid = validateV3Input(name, args);
+  if (invalid) {
+    const { status: _status, ...rest } = invalid;
+    return { ok: false, ...rest };
+  }
   let placementAssets: Array<Record<string, unknown>> | undefined;
   if ((name === 'add_clips' || name === 'insert_clips') && Array.isArray(args.clips) && deps.resolvePlacementAssets) {
     const ids = [...new Set(args.clips.flatMap((row) => row && typeof row === 'object' && typeof row.assetId === 'string' ? [row.assetId] : []))];
@@ -438,14 +446,14 @@ export async function runV3Tool(name: string, args: Record<string, unknown>, dep
     const result = await dispatchEditorTool(call.tool, input, deps);
     if (result === null) return { ok: false, error: 'adapter_mapped_unknown_tool', detail: call.tool, data: { steps } };
     if (translation.calls.length === 1) {
-      if (!result.ok) return { ...result, ...describeStepFailure(name, args, typeof result.error === 'string' ? result.error : undefined, ctx) };
+      if (!result.ok) return { ...result, ...describeStepFailure(name, args, typeof result.error === 'string' ? result.error : undefined, ctx, result.data) };
       return translation.note ? { ...result, note: translation.note } : result;
     }
     if (result.image) images.push(result.image as { data: string; mimeType?: string });
     if (Array.isArray(result.images)) images.push(...result.images as Array<{ data: string; mimeType?: string }>);
     steps.push({ tool: call.tool, ok: result.ok, ...(result.summary ? { summary: result.summary } : {}), ...(result.error ? { error: result.error } : {}), ...(result.data !== undefined ? { data: result.data } : {}) });
     if (!result.ok) {
-      const failure = describeStepFailure(name, args, typeof result.error === 'string' ? result.error : undefined, ctx);
+      const failure = describeStepFailure(name, args, typeof result.error === 'string' ? result.error : undefined, ctx, result.data);
       return { ok: false, ...failure, detail: `${failure.detail} — ${call.tool} failed after ${steps.length - 1} completed step(s); earlier steps are applied`, data: { steps } };
     }
     previous = result;

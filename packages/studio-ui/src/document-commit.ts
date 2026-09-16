@@ -28,6 +28,7 @@ import {
 } from '@pireel/studio-engine/document-transaction';
 import { canonicalJson, hashSection } from '@pireel/studio-engine/stable-json';
 import { diffOps } from '@pireel/studio-engine/project-dto';
+import { withDeterministicIds } from '@pireel/studio-engine/deterministic-ids';
 
 export type CommitUndo = 'step' | 'none';
 
@@ -107,15 +108,23 @@ export class DocumentCommitter {
     const ops = (Array.isArray(input) ? input : [input]).map((op) => encodeOpInput(op));
     const before = this.deps.getDocument();
     const ctx = { projectId: this.deps.projectId };
+    // The transaction id is minted before the operations run: ids the operations generate derive
+    // from it, so the server's replay of this same transaction produces the ids reported here.
+    const transactionId = createDocumentTransactionId();
     // Apply raw and normalize once: intermediate results stay visible to later ops in the same commit.
     let current = before;
-    let last: DocumentOpOutcome | null = null;
-    for (const op of ops) {
-      const outcome = applyDocumentOp(current, op, ctx);
-      if (!outcome.ok) return { ...outcome, document: before };
-      current = outcome.document;
-      last = outcome;
-    }
+    // Assigned inside the closure below; the assertion keeps TypeScript from narrowing it to null.
+    let last = null as DocumentOpOutcome | null;
+    const failed = withDeterministicIds(transactionId, (): DocumentOpOutcome | null => {
+      for (const op of ops) {
+        const outcome = applyDocumentOp(current, op, ctx);
+        if (!outcome.ok) return outcome;
+        current = outcome.document;
+        last = outcome;
+      }
+      return null;
+    });
+    if (failed) return { ...failed, document: before };
     if (!last) return { ok: true, document: before };
     const normalized = current === before ? before : normalizeCommittedDocument(current);
     const origin = options.origin ?? (this.staging ? 'agent' : 'user');
@@ -130,7 +139,7 @@ export class DocumentCommitter {
     if (!unchanged && (options.undo ?? 'step') === 'step' && !this.staging) this.pushUndoSnapshot();
     this.deps.publish(next, options.runtimeComposition);
     const published = this.deps.getDocument();
-    if (!unchanged) this.record({ id: createDocumentTransactionId(), origin, ops });
+    if (!unchanged) this.record({ id: transactionId, origin, ops });
     return { ...last, document: published };
   }
 
