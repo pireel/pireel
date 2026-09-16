@@ -1606,7 +1606,10 @@ export function HyperframesWorkbench({
       const asset = clip && clip.kind === "narrative" ? document.assets[clip.assetId] : undefined;
       const stale = clipFilesRef.current.get(key);
       const source = eng.sourceState(key);
-      const report = (readable: string) => console.warn("[studio] video source failed to load", {
+      // With the WebCodecs decoder up, an element error costs sound until the reload, not picture.
+      const pictureUnaffected = source.decoder === "ready";
+      const report = (readable: string) => (pictureUnaffected ? console.info : console.warn)(
+        pictureUnaffected ? "[studio] sound element failed to load; picture unaffected (decoder ready)" : "[studio] video source failed to load", {
         key: key.slice(0, 48),
         code: error?.code ?? null,
         message: error?.message ?? null,

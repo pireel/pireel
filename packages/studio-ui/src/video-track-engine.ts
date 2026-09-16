@@ -982,10 +982,16 @@ export class VideoTrackEngine {
     el.playbackRate = rate > 1e-9 ? rate : 1;
     // Explicit: a retimed shot keeps the speaker's pitch here AND in the export (time-stretch.ts)
     (el as HTMLVideoElement & { preservesPitch?: boolean }).preservesPitch = true;
-    try {
-      el.currentTime = Math.max(0, srcT);
-    } catch {
-      /* metadata not ready: the next seek after loadedmetadata covers it */
+    // While the decoder holds the picture, the element only matters for sound and the playback
+    // clock: a paused seek (hover scrubbing fires dozens per second) leaves it alone, and play()
+    // positions it once. Seeking a large file on every hover is what tripped the browser's demuxer.
+    const elementSeeks = wantPlay || !this.decoderFor(key);
+    if (elementSeeks && Math.abs(el.currentTime - Math.max(0, srcT)) > 0.01) {
+      try {
+        el.currentTime = Math.max(0, srcT);
+      } catch {
+        /* metadata not ready: the next seek after loadedmetadata covers it */
+      }
     }
     this.setElGain(el, this.segGain(i));
     // a mounted dub carries this source's sound → the decode element stays muted no matter what
