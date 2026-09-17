@@ -42,34 +42,34 @@ describe('sentenceTranslationUnits', () => {
     ref: { src, seg, w0: words[0]!.si, w1: words[words.length - 1]!.si },
   });
 
-  it('joins the cut fragments of one segment and the pause-split segments of one sentence', () => {
-    // ASR broke "…寄来的 | 一张纸。" at a pause into two segments, and a cut removed 一 from the
-    // second; the translator must see one sentence.
+  it('joins the cut fragments of one segment and keeps every segment its own unit, in edited order', () => {
+    // ASR broke "…寄来的 | 一张纸。" at a pause into two segments and a cut removed 一 from the second;
+    // each segment stays a row of its own (the translator gets the neighbour as context), so the
+    // translation writes back to the segment it belongs to and never by word share.
     const units = sentenceTranslationUnits([
       fragment(null, 0, 0, [word('大家好', 0, 0), word('，', 1, 0.3), word('客时间', 2, 0.4), word('寄来的', 3, 0.7)]),
       fragment(null, 1, 1.0, [word('张纸', 1, 1.0), word('。', 2, 1.2)]),
       fragment(null, 2, 1.6, [word('还', 0, 1.6), word('一个', 1, 1.8)]),
       fragment(null, 2, 2.4, [word('包包。', 3, 2.4)]),
     ] as never);
-    expect(units.map((u) => u.text)).toEqual(['大家好，客时间寄来的张纸。', '还一个包包。']);
-    expect(units[0]!.members).toEqual([{ seg: 0, wordCount: 4 }, { seg: 1, wordCount: 2 }]);
-    expect(units[1]!.members).toEqual([{ seg: 2, wordCount: 3 }]);
+    expect(units.map((u) => u.text)).toEqual(['大家好，客时间寄来的', '张纸。', '还一个包包。']);
+    expect(units.map((u) => u.members)).toEqual([[{ seg: 0, wordCount: 4 }], [{ seg: 1, wordCount: 2 }], [{ seg: 2, wordCount: 3 }]]);
   });
 
-  it('keeps segments apart across a pause of a second or more and across sources', () => {
+  it('orders units by where they play, so a reordered cut never swaps two halves of one translation', () => {
+    // Source sentence 1 ("就") now plays before sentence 0 ("好"): two units, in timeline order.
     const units = sentenceTranslationUnits([
-      fragment(null, 0, 0, [word('第一段没有标点', 0, 0)]),
-      fragment(null, 1, 1.5, [word('第二段。', 0, 1.5)]),
+      fragment(null, 1, 38.4, [word('就', 0, 38.4)]),
+      fragment(null, 0, 43.0, [word('好', 0, 43.0)]),
       fragment('blob:b', 0, 3, [word('B roll line', 0, 3)]),
     ] as never);
-    expect(units.map((u) => [u.src, u.text])).toEqual([[null, '第一段没有标点'], [null, '第二段。'], ['blob:b', 'B roll line']]);
+    expect(units.map((u) => [u.src, u.text, u.members[0]!.seg])).toEqual([['blob:b', 'B roll line', 0], [null, '就', 1], [null, '好', 0]]);
   });
 
-  it('bounds a source that never punctuates', () => {
+  it('never merges a source that does not punctuate', () => {
     const fragments = Array.from({ length: 12 }, (_, seg) => fragment(null, seg, seg * 0.5, [word('二十个字'.repeat(5), 0, seg * 0.5)]));
     const units = sentenceTranslationUnits(fragments as never);
-    expect(units.length).toBeGreaterThan(1);
-    expect(units.every((u) => u.text.length <= 200)).toBe(true);
+    expect(units).toHaveLength(12);
     expect(units.flatMap((u) => u.members.map((m) => m.seg))).toEqual(fragments.map((f) => f.ref.seg));
   });
 });

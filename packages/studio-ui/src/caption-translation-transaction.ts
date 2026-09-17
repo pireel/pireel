@@ -55,10 +55,6 @@ export function sentenceBreaksBetween(left: string, right: string, lang?: string
   return false;
 }
 /** Segments closer than this are one utterance; mirrors the transcript de-segmentation rule. */
-const UTTERANCE_GAP_SEC = 1.0;
-/** A source with no punctuation at all must still produce bounded rows. */
-const UNIT_MAX_CHARS = 200;
-
 export function sentenceTranslationUnits(fragments: readonly MappedSeg[]): TranslationUnit[] {
   // 1. Cut fragments of one segment → the segment's surviving words in source order.
   const segments = new Map<string, { src: string | null; seg: number; words: MappedSeg['words']; start: number; end: number; lang?: string }>();
@@ -73,41 +69,17 @@ export function sentenceTranslationUnits(fragments: readonly MappedSeg[]): Trans
       segments.set(key, { src: fragment.ref.src, seg: fragment.ref.seg, words: [...fragment.words].sort((left, right) => (left.si ?? 0) - (right.si ?? 0)), start: fragment.start, end: fragment.end, ...(fragment.lang ? { lang: fragment.lang } : {}) });
     }
   }
-  // 2. Consecutive segments of one source → a sentence, closed at sentence-final punctuation, a
-  //    pause, or a length bound.
-  const bySource = new Map<string | null, typeof segments extends Map<string, infer V> ? V[] : never>();
-  for (const segment of segments.values()) bySource.set(segment.src, [...(bySource.get(segment.src) ?? []), segment]);
+  // 2. One unit per surviving segment, in edited-timeline order. A segment is the recognizer's own
+  //    sentence and the unit the translation is written back to by id, so the mapping is exact by
+  //    construction: nothing is ever split across segments by word share, and a cut that reorders
+  //    two fragments cannot swap their halves. The translator still sees the neighbouring rows as
+  //    read-only context (the batch planner adds them), which covers a sentence the recognizer
+  //    broke at a pause.
   const units: TranslationUnit[] = [];
-  for (const rows of bySource.values()) {
-    rows.sort((left, right) => left.seg - right.seg);
-    let open: { rows: typeof rows; text: string } | null = null;
-    const close = () => {
-      if (!open) return;
-      units.push({
-        src: open.rows[0]!.src,
-        start: Math.min(...open.rows.map((row) => row.start)),
-        end: Math.max(...open.rows.map((row) => row.end)),
-        text: open.text,
-        members: open.rows.map((row) => ({ seg: row.seg, wordCount: row.words.length })),
-      });
-      open = null;
-    };
-    for (const row of rows) {
-      const text = joinWords(row.words.map((word) => word.text));
-      if (!text) continue;
-      if (open) {
-        const previous = open.rows[open.rows.length - 1]!;
-        const joined = joinWords([open.text, text]);
-        if (sentenceBreaksBetween(open.text, text, row.lang) || row.start - previous.end >= UTTERANCE_GAP_SEC || joined.length > UNIT_MAX_CHARS) close();
-        else {
-          open.rows.push(row);
-          open.text = joined;
-          continue;
-        }
-      }
-      open = { rows: [row], text };
-    }
-    close();
+  for (const segment of segments.values()) {
+    const text = joinWords(segment.words.map((word) => word.text));
+    if (!text) continue;
+    units.push({ src: segment.src, start: segment.start, end: segment.end, text, members: [{ seg: segment.seg, wordCount: segment.words.length }] });
   }
   return units.sort((left, right) => left.start - right.start);
 }
