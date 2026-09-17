@@ -396,7 +396,10 @@ export const PREVIEW_RUNTIME = `
         if (pv) fpost({ type: 'selectVisual', clipId: pv.getAttribute('data-hf-visual-clip') });
         else {
           var pc = closestSelectableComp(pe);
-          fpost({ type: 'select', blockId: pc ? pc.getAttribute('data-composition-id') : null });
+          // Same sub-targeting as a direct click: landing on the translation line selects the
+          // second caption, so the first click through the shell does not fall back to the main line.
+          var pcPart = pe && pe.closest && pe.closest('.cap-sub') ? 'sub' : 'main';
+          fpost({ type: 'select', blockId: pc ? pc.getAttribute('data-composition-id') : null, part: pcPart });
         }
       } catch (err) {}
     }

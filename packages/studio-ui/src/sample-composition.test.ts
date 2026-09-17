@@ -73,7 +73,7 @@ describe('preview runtime', () => {
     postMessage.mockClear();
     dom.window.dispatchEvent(new dom.window.MessageEvent('message', { data: { type: 'hf:pickAt', x: 0.5, y: 0.5 } }));
 
-    expect(postMessage).toHaveBeenCalledWith({ source: 'hf', type: 'select', blockId: 'overlay' }, '*');
+    expect(postMessage).toHaveBeenCalledWith({ source: 'hf', type: 'select', blockId: 'overlay', part: 'main' }, '*');
     dom.window.close();
   });
 
