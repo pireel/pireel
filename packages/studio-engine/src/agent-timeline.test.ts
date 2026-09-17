@@ -98,7 +98,29 @@ describe('shared agent timeline atoms', () => {
     ] });
     expect(placed.ok).toBe(true);
     expect(placed.document!.timeline.tracks.find((track) => track.role === 'narration')?.clips[0]).toMatchObject({ properties: { volumeDb: 4 } });
-    expect(placed.document!.timeline.tracks.find((track) => track.role === 'music')?.clips[0]).toMatchObject({ properties: { volumeDb: -24 } });
+    // An explicit level is honoured, not clamped to the role default.
+    expect(placed.document!.timeline.tracks.find((track) => track.role === 'music')?.clips[0]).toMatchObject({ properties: { volumeDb: -14 } });
+    expect(placed.data).not.toHaveProperty('autoMix');
+  });
+
+  it('reports the music it ducks under new narration and a clip that runs past the picture', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', { assets: [
+      { id: 'cam', kind: 'video', url: 'https://cdn.example/cam.mp4', durationSec: 10 },
+      { id: 'voice', kind: 'audio', url: 'https://cdn.example/voice.mp3', durationSec: 12 },
+      { id: 'music', kind: 'audio', url: 'https://cdn.example/music.mp3', durationSec: 30 },
+    ] }).document!;
+    document = runAgentTimelineTool(document, 'add_clips', { clips: [
+      { id: 'cam-clip', assetId: 'cam', startFrame: 0, durationFrames: 300 },
+      { id: 'bed', assetId: 'music', role: 'music', startFrame: 0, durationFrames: 300 },
+    ] }).document!;
+    expect(document.timeline.tracks.find((track) => track.role === 'music')?.clips[0]).toMatchObject({ properties: { volumeDb: -24 } });
+    document = runAgentTimelineTool(document, 'set_clip_properties', { items: [{ clipId: 'bed', volumeDb: -18 }] }).document!;
+    const placed = runAgentTimelineTool(document, 'add_clips', { clips: [{ id: 'vo', assetId: 'voice', role: 'narration', startFrame: 0, durationFrames: 360 }] });
+    expect(placed.ok, JSON.stringify(placed)).toBe(true);
+    expect(placed.data).toMatchObject({ autoMix: [{ clipId: 'bed', fromDb: -18, toDb: -24 }], pastPictureEnd: [{ clipId: 'vo', byFrames: 60 }] });
+    expect(placed.summary).toContain('music ducked to -24 dB');
+    expect(placed.summary).toContain('runs 60 frames past the last picture clip');
   });
 
   it('rejects overlapping audible narration on parallel tracks while allowing music underneath', () => {

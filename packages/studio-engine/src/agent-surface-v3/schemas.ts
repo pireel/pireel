@@ -65,7 +65,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   /* ------------------------------------------------------------------ state */
   get_state: {
     description:
-      'Read the active output: canvas (width, height, fps), durationFrames, playhead, account (plan, canGenerate, videoGeneration — check before a paid call), lateReceipts (outcomes of calls that timed out and finished since), the attached frame, every track with its role and clips, the asset inventory, and the outputs list. Clips carry frames:[start,end), source seconds, non-default properties only; linked audio is folded into its visual clip as audio:{clipId,…}; caption tracks appear as one captions object, never as cue clips. Call once per session, then patch your model from mutation deltas; re-read only when a receipt note or an error says the state is stale. window narrows to tracks and a frame range and adds totalClips per truncated track.',
+      'Read the active output: canvas (width, height, fps), durationFrames, playhead, account (plan, canGenerate, imageGeneration, videoGeneration — credits and an enabled model per kind; check before a paid call), lateReceipts (outcomes of calls that timed out and finished since), the attached frame, every track with its role and clips, the asset inventory, and the outputs list. Clips carry frames:[start,end), source seconds, non-default properties only; linked audio is folded into its visual clip as audio:{clipId,…}; caption tracks appear as one captions object, never as cue clips. Call once per session, then patch your model from mutation deltas; re-read only when a receipt note or an error says the state is stale. window narrows to tracks and a frame range and adds totalClips per truncated track.',
     inputSchema: obj({
       window: obj({
         tracks: arr(str(), { description: 'Track ids to include; omit for all.' }),
@@ -544,7 +544,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   generate_foley: {
     description:
-      `${CHARGE_MARKER} Generate picture-synchronous Foley for up to 8 exact source spans (1–30 s each) of video assets: it uploads only those spans, generates, and saves each result to the reusable audio library with eventType/material/reusePolicy. Studio Chat shows the event list and cost on an approval card first; elsewhere the call starts at once, so quote the items to your operator before calling. Needs the open Studio tab (source bytes and trimming run there). Prompts name only audible events grounded in the picture. Then register_media and place all results in one add_clips call with role sfx and no trackId.`,
+      `${CHARGE_MARKER} Generate picture-synchronous Foley for up to 8 exact source spans (1–30 s each, generated in whole seconds rounded up: a 1.5 s span yields a 2 s asset — trim on add_clips) of video assets: it uploads only those spans, generates, and saves each result to the reusable audio library with eventType/material/reusePolicy. Studio Chat shows the event list and cost on an approval card first; elsewhere the call starts at once, so quote the items to your operator before calling. Needs the open Studio tab (source bytes and trimming run there). Prompts name only audible events grounded in the picture. Then register_media and place all results in one add_clips call with role sfx and no trackId.`,
     inputSchema: obj({
       items: arr(obj({
         sourceAssetId: str(), sourceUrl: str(), sourceInSec: num(), sourceOutSec: num(),

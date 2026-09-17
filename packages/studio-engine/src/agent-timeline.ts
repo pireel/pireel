@@ -1,5 +1,6 @@
 /** Shared pure Agent timeline executor. Live UI, offline server, and MCP all call this contract. */
 
+import { AUDIO_DEFAULT_DB } from './audio-tracks';
 import { applyAudioDocumentEdits, ensureFreeAudioDocumentTrack } from './audio-document-edit';
 import { applyOverlayDocumentEdits } from './overlay-document-edit';
 import { insertOverlayDocumentClip } from './overlay-track-edit';
@@ -388,12 +389,9 @@ function placementFor(document: EditorDocumentV2, asset: EditorMediaAsset, item:
   };
   if (asset.kind === 'audio') {
     const role = string(item.role) ?? 'narration';
+    // An explicit level is the caller's decision; the role default applies only when none was given.
     const requestedVolumeDb = typeof item.volumeDb === 'number' ? item.volumeDb : undefined;
-    const initialVolumeDb = role === 'narration'
-      ? Math.max(4, requestedVolumeDb ?? 4)
-      : role === 'music'
-        ? Math.min(-24, requestedVolumeDb ?? -24)
-        : requestedVolumeDb;
+    const initialVolumeDb = requestedVolumeDb ?? (role === 'narration' ? 4 : role === 'music' ? -24 : undefined);
     const sourceOutSec = sec(item.sourceOutSec, sourceInSec + requestedDuration * Math.max(0.5, sec(item.speed, 1)));
     const clip: TimelineClipPlacement = {
       ...common,
@@ -976,13 +974,21 @@ export function placeClips(document: EditorDocumentV2, input: Input, mode: 'over
       );
     }
   }
+  // Music under narration sits at -24 dB unless a level was set on purpose: a clip placed in this
+  // batch with an explicit volumeDb keeps it. Whatever the sweep changes is reported, never silent.
+  const explicitLevelClipIds = new Set(items.flatMap((item) => (typeof item.volumeDb === 'number' && string(item.id) ? [string(item.id)!] : [])));
+  const autoMix: { clipId: string; fromDb: number; toDb: number }[] = [];
   const hasNarration = next.timeline.tracks.some((track) => track.role === 'narration' && track.clips.some((clip) => clip.kind === 'audio' && clip.enabled));
   if (hasNarration) {
     const musicUpdates = next.timeline.tracks
       .filter((track) => track.role === 'music')
-      .flatMap((track) => track.clips.flatMap((clip) => clip.kind === 'audio' && (clip.properties.volumeDb ?? 0) > -24
-        ? [{ clipId: clip.id, patch: { volumeDb: -24 } }]
-        : []));
+      .flatMap((track) => track.clips.flatMap((clip) => {
+        if (clip.kind !== 'audio' || explicitLevelClipIds.has(clip.id)) return [];
+        const fromDb = clip.properties.volumeDb ?? AUDIO_DEFAULT_DB;
+        if (fromDb <= -24) return [];
+        autoMix.push({ clipId: clip.id, fromDb, toDb: -24 });
+        return [{ clipId: clip.id, patch: { volumeDb: -24 } }];
+      }));
     if (musicUpdates.length) {
       const mixed = applyAudioDocumentEdits({ document: next, updates: musicUpdates });
       if (!mixed.ok) return fail(mixed.error.message, mixed.error);
@@ -1006,11 +1012,28 @@ export function placeClips(document: EditorDocumentV2, input: Input, mode: 'over
     }];
   });
   const overwrittenClipIds = [...new Set(receipts.flatMap((receipt) => receipt.removedClipIds))];
+  // Sound that runs past the last picture is sometimes wanted (a tail under the outro), so it is a
+  // note, not a refusal — but the agent must hear about it.
+  const pictureEndFrame = Math.max(0, ...next.timeline.tracks.flatMap((track) => track.type === 'audio' ? [] : track.clips
+    .filter((clip) => (clip.kind === 'narrative' || clip.kind === 'media') && clip.enabled)
+    .map((clip) => clip.startFrame + clip.durationFrames)));
+  const pastPictureEnd = created.flatMap((clipId) => {
+    const found = locatedClip(next, clipId);
+    if (!found || found.clip.kind !== 'audio' || !pictureEndFrame) return [];
+    const byFrames = found.clip.startFrame + found.clip.durationFrames - pictureEndFrame;
+    return byFrames > 0 ? [{ clipId, byFrames }] : [];
+  });
+  const notes = [
+    ...(autoMix.length ? [`music ducked to -24 dB under narration: ${autoMix.map((entry) => `${entry.clipId} (was ${entry.fromDb})`).join(', ')}; set volumeDb explicitly to override`] : []),
+    ...pastPictureEnd.map((entry) => `${entry.clipId} runs ${entry.byFrames} frames past the last picture clip`),
+  ];
   return mutation(
     next,
-    `${mode === 'ripple' ? 'Inserted' : 'Added'} ${activePlacements.length} clip${activePlacements.length === 1 ? '' : 's'}${overwrittenClipIds.length ? `; replaced ${overwrittenClipIds.length}` : ''}`,
+    `${mode === 'ripple' ? 'Inserted' : 'Added'} ${activePlacements.length} clip${activePlacements.length === 1 ? '' : 's'}${overwrittenClipIds.length ? `; replaced ${overwrittenClipIds.length}` : ''}${notes.length ? `. ${notes.join('. ')}` : ''}`,
     receipts,
     {
+      ...(autoMix.length ? { autoMix } : {}),
+      ...(pastPictureEnd.length ? { pastPictureEnd } : {}),
       clipIds: activePlacements.map((placement) => placement.clipId),
       placements: activePlacements,
       ...(overwrittenClipIds.length ? { overwrittenClipIds } : {}),
