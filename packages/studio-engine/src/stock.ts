@@ -15,6 +15,10 @@
 export type StockKind = 'image' | 'video' | 'sticker';
 export type StockProvider = 'pexels' | 'pixabay' | 'wikimedia';
 
+/** Wikimedia refuses requests without a descriptive User-Agent (403); the search and the byte
+ *  fetch must send the same one. */
+export const STOCK_FETCH_USER_AGENT = 'Pireel/1.0 (https://pireel.com; hello@pireel.com)';
+
 export interface StockLicense {
   name: string;
   url: string;
@@ -326,7 +330,7 @@ async function wikimediaSearch(q: string, type: StockKind, page: number, per: nu
   })) url.searchParams.set(key, value);
   // Wikimedia refuses requests without a real User-Agent (403); Api-User-Agent alone is not enough
   // from a runtime that sends no default UA.
-  const response = await fetch(url, { headers: { 'User-Agent': 'Pireel/1.0 (https://pireel.com; hello@pireel.com)', 'Api-User-Agent': 'Pireel/1.0 (https://pireel.com; hello@pireel.com)' } });
+  const response = await fetch(url, { headers: { 'User-Agent': STOCK_FETCH_USER_AGENT, 'Api-User-Agent': STOCK_FETCH_USER_AGENT } });
   if (!response.ok) throw new Error(`wikimedia ${response.status}`);
   const body = (await response.json()) as { continue?: { gsroffset?: number }; query?: { pages?: WikimediaPage[] } };
   const items = (body.query?.pages ?? [])
@@ -367,16 +371,17 @@ export async function searchStock(q: string, type: StockKind, page = 1, per = 24
     try {
       const result = await pexelsSearch(pexels, q, type, page, per);
       if (result.items.length) return result;
-    } catch {
-      // Provider outage or quota exhaustion must not remove all online search.
+    } catch (error) {
+      // Provider outage or quota exhaustion must not remove all online search — but it must be visible.
+      console.warn('[stock] pexels search failed, falling through', error instanceof Error ? error.message : String(error));
     }
   }
   if (pixabay) {
     try {
       const result = await pixabaySearch(pixabay, q, type, page, per);
       if (result.items.length) return result;
-    } catch {
-      // Fall through to Wikimedia Commons.
+    } catch (error) {
+      console.warn('[stock] pixabay search failed, falling through to Wikimedia', error instanceof Error ? error.message : String(error));
     }
   }
   return wikimediaSearch(q, type, page, per);
