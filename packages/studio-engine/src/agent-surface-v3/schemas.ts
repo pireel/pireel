@@ -104,7 +104,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       `${CHARGE_MARKER} only when transcription must run. Read spoken words for any speech-bearing asset, clip or track. granularity=segments (default) returns sentence rows with source-second timing — enough for meaning and for remove_words ranges. granularity=words returns stable wordIds with frame positions for exact word cuts; narrow it with clipId plus fromFrame/toFrame or segmentIndexes and page with offset/limit instead of scanning a whole transcript. Transcript positions are source seconds and never move when the timeline is cut. Word ids shift after remove_words — re-read before the next word cut.`,
     inputSchema: obj({
       granularity: enumOf(['segments', 'words'], 'segments (default) for meaning; words for exact wordIds.'),
-      assetId: str('Speech-bearing asset; omit to prefer the primary narration.'),
+      assetId: str('Speech-bearing asset; omit for the source the captions follow (the audible source with the most words — the narration over muted footage).'),
       clipId: str('Narrow to the source behind this clip.'),
       trackId: str('Narrow to one track; for words, its speech clip with the most words picks the source.'),
       segmentIndexes: arr({ type: 'integer', minimum: 0 }, { description: 'words only: sentence rows to expand.' }),

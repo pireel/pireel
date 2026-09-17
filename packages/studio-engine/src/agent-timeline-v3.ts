@@ -574,6 +574,9 @@ export function setClipFramingV3(document: EditorDocumentV2, input: Input): Agen
     if (!clipId) return fail(`items[${index}].clipId is required`);
     const found = locatedClip(next, clipId);
     if (!found) return fail(`items[${index}] clip not found: ${clipId}`);
+    // A push-in animates decoded picture; anything else is refused before the kind branches so
+    // the refusal names the tool that animates that kind.
+    if (item.zoom !== undefined && !isVideoClip(next, found.clip)) return fail('unknown_field', { path: `items[${index}].zoom`, fix: 'zoom animates video clips; animate an image or graphic clip with set_keyframes box or through its component.' });
     if (isOverlayClip(found.clip)) {
       const block = projectOverlayBlockById(next, clipId);
       if (!block) return fail(`items[${index}] graphic clip not found: ${clipId}`);
@@ -610,7 +613,6 @@ export function setClipFramingV3(document: EditorDocumentV2, input: Input): Agen
       const preset = string(zoom.preset);
       const presetIds = ZOOM_PRESETS.map((entry) => entry.id) as readonly string[];
       if (!preset || (preset !== 'none' && !presetIds.includes(preset))) return fail('invalid_value', { path: `items[${index}].zoom.preset`, value: zoom.preset, allowed: [...presetIds, 'none'] });
-      if (!isVideoClip(next, found.clip)) return fail('unknown_field', { path: `items[${index}].zoom`, fix: 'zoom animates video clips; animate an image or graphic clip with set_keyframes box or through its component.' });
       if (preset === 'none') {
         const cleared = applyVideoClipSettingsPatches(next, [{ clipId, patch: { zoom: null } }]);
         if (!cleared.ok) return fail(cleared.error, cleared.data);

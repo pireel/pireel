@@ -80,6 +80,32 @@ export function resolveWordQueryAsset(document: EditorDocumentV2, query: Pick<Do
     }
     return { error: 'shot not found' };
   }
+  // Default: the speech source the captions follow — among placed, audible, transcript-bearing
+  // clips, the asset with the most surviving words (the narration over muted footage); the first
+  // narrative clip only when nothing placed carries a transcript.
+  const spoken = new Map<string, number>();
+  for (const track of document.timeline.tracks) {
+    if (track.muted) continue;
+    for (const clip of track.clips) {
+      if ((clip.kind !== 'narrative' && clip.kind !== 'media' && clip.kind !== 'audio') || !clip.enabled) continue;
+      const muted = clip.kind === 'audio'
+        ? (clip.properties as { muted?: boolean }).muted === true
+        : clip.kind === 'narrative'
+          ? clip.properties.audioMuted === true
+          : clip.video?.audioMuted === true;
+      if (muted) continue;
+      const segments = transcripts[clip.assetId] as AsrSegment[] | undefined;
+      if (!segments?.length) continue;
+      const speech = clip as SpeechClip;
+      const speed = speech.kind === 'audio' && Number.isFinite(speech.properties.speed) && speech.properties.speed! > 0 ? speech.properties.speed! : 1;
+      const start = speech.sourceInSec;
+      const end = speech.sourceOutSec ?? start + timelineFramesToSeconds(speech.durationFrames, document.canvas.fps) * speed;
+      const count = assetWords(clip.assetId, segments).filter((word) => word.end > start + 0.03 && word.start < end - 0.03).length;
+      spoken.set(clip.assetId, (spoken.get(clip.assetId) ?? 0) + count);
+    }
+  }
+  const dominant = [...spoken.entries()].sort((left, right) => right[1] - left[1])[0];
+  if (dominant && dominant[1] > 0) return { assetId: dominant[0] };
   const assetId = primaryNarrativeClips(document)[0]?.assetId;
   return assetId ? { assetId } : { error: 'narrative source not found' };
 }

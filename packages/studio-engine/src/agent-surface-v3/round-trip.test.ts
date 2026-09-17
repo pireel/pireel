@@ -156,9 +156,11 @@ describe('v3 round trips: written value → document → get_state → delta', (
     expect(t.data).toMatchObject({ updates: [{ clipId: 'spine-a', zoom: { preset: 'punch' } }, { clipId: 'broll', zoom: { preset: 'slow-push', atFrame: 60 } }] });
     const cleared = trip(t.document, 'set_clip_framing', { items: [{ clipId: 'spine-a', zoom: { preset: 'none' } }] });
     expect(cleared.clip('spine-a')).not.toHaveProperty('zoom');
-    // a still cannot be pushed in; the refusal names the tool that animates it
-    expect(runAgentTimelineTool(project(), 'set_clip_framing', { items: [{ clipId: 'still-clip', zoom: { preset: 'punch' } }] }))
-      .toMatchObject({ ok: false, error: 'unknown_field', data: { path: 'items[0].zoom', fix: expect.stringContaining('set_keyframes') } });
+    // a still or a graphic cannot be pushed in; the refusal names the tool that animates it
+    for (const clipId of ['still-clip', 'title']) {
+      expect(runAgentTimelineTool(project(), 'set_clip_framing', { items: [{ clipId, zoom: { preset: 'punch' } }] }), clipId)
+        .toMatchObject({ ok: false, error: 'unknown_field', data: { path: 'items[0].zoom', fix: expect.stringContaining('set_keyframes') } });
+    }
   });
 
   it('swap_clip_media: the asset changes, frames and source stay', () => {

@@ -29,12 +29,17 @@ function narratedMontage(): EditorDocumentV2 {
 }
 
 describe('transcript word addressing on any lane', () => {
-  it('defaults to the primary footage', () => {
+  it('defaults to the speech source the captions follow: the narration over muted footage', () => {
     const listed = listDocumentAddressedWords(narratedMontage());
     expect('error' in listed).toBe(false);
     if ('error' in listed) return;
-    expect(listed.assetId).toBe('broll');
-    expect(listed.wordTiming).toBe('measured');
+    expect(listed.assetId).toBe('voice');
+    expect(listed.wordTiming).toBe('estimated');
+    // With the narration gone, the audible primary footage is the default again.
+    const document = narratedMontage();
+    document.timeline.tracks = document.timeline.tracks.filter((track) => track.role !== 'narration');
+    (document.timeline.tracks[0]!.clips[0] as { properties: { audioMuted?: boolean } }).properties.audioMuted = false;
+    expect(resolveWordQueryAsset(document, {})).toEqual({ assetId: 'broll' });
   });
 
   it('addresses the audio-lane narration by assetId or trackId and reports estimated timing', () => {
