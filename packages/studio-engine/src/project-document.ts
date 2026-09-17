@@ -146,6 +146,7 @@ export function applyEditorDocumentPersistenceMetadata(
           ...existing.metadata,
           ...(entry.w && entry.w > 0 ? { width: entry.w } : {}),
           ...(entry.h && entry.h > 0 ? { height: entry.h } : {}),
+          ...(entry.durationSec && entry.durationSec > 0 ? { durationSec: entry.durationSec } : {}),
         },
         library: {
           createdAt: entry.createdAt,
@@ -167,6 +168,7 @@ export function applyEditorDocumentPersistenceMetadata(
       metadata: {
         ...(entry.w && entry.w > 0 ? { width: entry.w } : {}),
         ...(entry.h && entry.h > 0 ? { height: entry.h } : {}),
+        ...(entry.durationSec && entry.durationSec > 0 ? { durationSec: entry.durationSec } : {}),
       },
       library: {
         createdAt: entry.createdAt,

@@ -31,7 +31,7 @@ describe('collectAssetSearchDocuments scope boundary', () => {
 
     expect(documents).toHaveLength(1);
     expect(documents[0]).toMatchObject({
-      assetId: 'local:poster-asset',
+      assetId: 'poster-asset',
       scope: 'mine',
       label: '活动海报.jpg',
     });

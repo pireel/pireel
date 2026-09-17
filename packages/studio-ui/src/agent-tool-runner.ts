@@ -116,7 +116,7 @@ import { deleteCachedTts, getCachedTts, setCachedTts, ttsCacheKey, type CachedTt
 import { loadLocalAssetFile, loadLocalVideo, saveLocalVideo } from './local-media';
 import { materializeRemoteMedia } from './remote-media';
 import { localAssetIndexEntry, runLocalImportSession } from './local-import-session';
-import { localAssetReference, normalizeStudioToolInputReferences, resolveLocalAssetReference } from './studio-tool-input-references';
+import { normalizeStudioToolInputReferences, resolveLocalAssetReference } from './studio-tool-input-references';
 import { resolveGenerationReferences } from './generation-reference';
 import { analyzeVisual, analyzeVisualGeometry, type VisualLabel, type VisualPrep, type VisualTimeline, finishVisualAnalysis, prepareVisualAnalysis } from './visual';
 import {
@@ -1614,10 +1614,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 kind: entry.kind ?? 'video',
                 label: entry.label,
                 ...(entry.w && entry.h ? { width: entry.w, height: entry.h } : {}),
+                ...(entry.durationSec ? { durationSec: entry.durationSec } : {}),
                 library: true,
                 availability: 'metadata-only',
                 occurrences: [],
-                hint: 'Project-library media: place it by this id with add_clips / insert_clips, or read speech with get_transcript {assetId}. Duration and pixels resolve on demand.',
+                hint: 'Project-library media: place it by this id with add_clips / insert_clips, or read speech with get_transcript {assetId}.',
               };
             });
             outcome = { ...outcome, data: { ...(outcome.data as Record<string, unknown>), assets: rows } };
@@ -2144,7 +2145,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 .sort((a, b) => b.createdAt - a.createdAt)
                 .slice(0, limit)
                 .map((entry) => ({
-                  id: localAssetReference(entry),
+                  id: entry.assetId,
                   kind: entry.kind ?? 'video',
                   label: entry.label,
                   availability: 'metadata-only' as const,
@@ -2292,7 +2293,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               summary: t('workbench.preparedLocalImage', { name: entry.label }),
               data: {
                 scope: 'mine',
-                assetId: localAssetReference(entry),
+                assetId: entry.assetId,
                 label: entry.label,
                 url: localImageLocator(entry.contentSig),
                 urlKind: 'device-local',

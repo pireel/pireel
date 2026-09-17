@@ -54,7 +54,7 @@ export async function collectAssetSearchDocuments(
   ]);
 
   const docs: AssetSearchDocument[] = (includeMine ? localAssets : []).map((entry) => ({
-    assetId: `local:${entry.assetId}`,
+    assetId: entry.assetId,
     scope: 'mine',
     kind: entry.kind ?? 'video',
     origin: entry.folder ? 'local-folder' : 'local-file',

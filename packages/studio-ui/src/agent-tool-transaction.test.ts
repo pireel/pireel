@@ -762,7 +762,7 @@ describe('Agent composition transaction boundary', () => {
     expect(result).toMatchObject({
       ok: true,
       data: {
-        assets: [{ id: `local:${assetId}`, kind: 'video', label: '商品展示' }],
+        assets: [{ id: assetId, kind: 'video', label: '商品展示' }],
         placementRequiredForInspection: false,
         usageHint: expect.stringContaining('inspect_media/get_transcript while unplaced'),
       },

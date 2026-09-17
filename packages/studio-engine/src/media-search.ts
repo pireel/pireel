@@ -32,6 +32,8 @@ export interface MediaSearchProject {
   clipTranscripts: Record<string, AsrSegment[]>;
   /** Legacy visual analysis may describe only the first source in lane order. */
   visualTimeline?: VisualTimeline | null;
+  /** Projected source URL → document asset id, so results carry the id every other tool accepts. */
+  assetIdBySource?: Record<string, string>;
 }
 
 export interface MediaEditedRange {
@@ -95,7 +97,7 @@ export interface MediaSearchOptions {
 export function mediaSearchTranscriptsFromDocument(
   document: EditorDocumentV2,
   shots: readonly VideoShot[],
-): Pick<MediaSearchProject, 'mainTranscript' | 'clipTranscripts'> {
+): Pick<MediaSearchProject, 'mainTranscript' | 'clipTranscripts' | 'assetIdBySource'> {
   const asAsr = (segments: EditorDocumentV2['semantics']['transcripts'][string] | undefined): AsrSegment[] =>
     desegmentCues((segments ?? []) as AsrSegment[]);
   const primary = document.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId);
@@ -105,9 +107,11 @@ export function mediaSearchTranscriptsFromDocument(
       .map((clip) => [clip.id, clip.assetId] as const),
   );
   const clipTranscripts: Record<string, AsrSegment[]> = {};
+  const assetIdBySource: Record<string, string> = {};
   let compatibilityMainTranscript: AsrSegment[] = [];
   for (const shot of shots) {
     const assetId = assetIdByClipId.get(shot.id);
+    if (assetId && shot.src) assetIdBySource[shot.src] = assetId;
     const segments = assetId ? asAsr(document.semantics.transcripts[assetId]) : [];
     if (!segments.length) continue;
     if (shot.src) clipTranscripts[shot.src] = segments;
@@ -119,6 +123,7 @@ export function mediaSearchTranscriptsFromDocument(
   return {
     mainTranscript: compatibilityMainTranscript,
     clipTranscripts,
+    assetIdBySource,
   };
 }
 
@@ -435,7 +440,9 @@ export function searchProjectMedia(
     if (picked.length >= limit) break;
   }
 
-  const assetId = (source: SourceDescriptor) => `${project.projectId}:${source.token}`;
+  // The document asset id when the caller supplied the mapping; the index token is the fallback
+  // for a pre-normalization snapshot that has no asset behind a source.
+  const assetId = (source: SourceDescriptor) => (source.source && project.assetIdBySource?.[source.source]) || `${project.projectId}:${source.token}`;
   return {
     indexVersion: MEDIA_SEARCH_INDEX_VERSION,
     query: rawQuery,
