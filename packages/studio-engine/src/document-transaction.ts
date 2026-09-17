@@ -27,6 +27,7 @@ import {
   pruneEmptyNonPrimaryTracks,
   pruneUnusedEditorAssets,
   syncCaptionTranscripts,
+  carryCaptionEdits,
   type EditorCommand,
   type EditorCommandError,
   type EditorDocumentV2,
@@ -344,7 +345,9 @@ const handlers: { [N in DocumentOpName]: Handler<N> } = {
   'agent.timeline': (document, input) => fromAgentOutcome(document, runAgentTimelineTool(document, input.tool, input.input)),
   'transcripts.set': (document, input) => {
     const transcripts = { ...document.semantics.transcripts };
-    for (const [assetId, segments] of Object.entries(input.transcripts)) transcripts[assetId] = [...segments];
+    // A replacement never discards the document's caption edits on unchanged sentences: the copy
+    // comes from a recognizer or a runtime ref and knows nothing about translations or cue edits.
+    for (const [assetId, segments] of Object.entries(input.transcripts)) transcripts[assetId] = carryCaptionEdits(transcripts[assetId], segments);
     return { ok: true, document: { ...document, semantics: { ...document.semantics, transcripts } } };
   },
   'assets.patch': (document, input) => {

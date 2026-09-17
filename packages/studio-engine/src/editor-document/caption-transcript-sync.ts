@@ -8,10 +8,37 @@ function sameTranscript(left: readonly AsrSegment[] | undefined, right: readonly
   return left === right || canonicalJson(left ?? []) === canonicalJson(right);
 }
 
+/** The translation the document owns on a transcript segment: whole-sentence, per-cue, and its
+ * language. Cue text edits and removals are deliberately not here: re-extracting captions is a new
+ * set (see caption-document-edit), while a translation of unchanged words is still the translation. */
+const CAPTION_EDIT_KEYS = ['sub', 'cueSubs', 'subLang'] as const;
+
+/**
+ * Carry the document's translations over to a replacement transcript. A transcript arrives again
+ * whenever speech is (re)recognized — the ASR cache answering a boot-time relay, a re-measure, a
+ * runtime copy folded back — and that copy never carries translations. When the spoken text of a
+ * segment is unchanged the translation is still true, so it stays; a segment whose text changed
+ * keeps only what the incoming copy says.
+ */
+export function carryCaptionEdits(existing: readonly AsrSegment[] | undefined, incoming: readonly AsrSegment[]): AsrSegment[] {
+  if (!existing?.length) return [...incoming];
+  return incoming.map((segment, index) => {
+    const previous = existing[index];
+    if (!previous || previous.text !== segment.text) return segment;
+    let merged: AsrSegment | null = null;
+    for (const key of CAPTION_EDIT_KEYS) {
+      if (previous[key] === undefined || segment[key] !== undefined) continue;
+      merged ??= { ...segment };
+      (merged as unknown as Record<string, unknown>)[key] = previous[key];
+    }
+    return merged ?? segment;
+  });
+}
+
 /** Browser transcript refs can lag cuts/style transactions. Once the document owns a materialized
  * cue layout it is authoritative; explicit unlocking happens inside applyCaptionDocumentEdit. */
 function withDocumentLayout(existing: readonly AsrSegment[] | undefined, incoming: readonly AsrSegment[]): AsrSegment[] {
-  return incoming.map((segment, index) => (
+  return carryCaptionEdits(existing, incoming).map((segment, index) => (
     existing?.[index]?.cueLayout === undefined
       ? segment
       : { ...segment, cueLayout: existing[index]!.cueLayout }

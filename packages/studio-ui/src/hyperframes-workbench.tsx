@@ -6529,8 +6529,13 @@ export function HyperframesWorkbench({
   const captionsOn = isCaptionsOn(comp);
   useEffect(() => {
     if (floatWin !== "script" && !captionsOn) return;
+    const assetIdByClipId = new Map(primaryNarrativeClips(editorDocumentRef.current).map((clip) => [clip.id, clip.assetId]));
     for (const shot of (comp.shots ?? []).filter((s) => s.src)) {
       const src = shot.src!;
+      // The document owns the transcript: a source it already holds (even an empty "no speech"
+      // result) is never recognized again just because the runtime copy sits under another key.
+      const assetId = assetIdByClipId.get(shot.id);
+      if (assetId && Object.prototype.hasOwnProperty.call(editorDocumentRef.current.semantics.transcripts, assetId)) continue;
       if (
         clipAsrRef.current[src] ||
         clipAsrBusyRef.current.has(src) ||
