@@ -447,7 +447,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   bake_component: {
     description:
-      `Render one graphic component to a transparent video and place it back at the same frames and box, over the original. A cloud render (about 1–3 minutes): it kicks the job, waits, imports the transparent result and overlays it. Use it to freeze a finished component into plain footage — to keep it identical across surfaces, to take a heavy composition off the live runtime for smooth playback, or to hand it to an editor that only takes video. The baked clip is footage, not a component: no editable properties and no re-compose, so keep the original if you may still want to tune it. A normal component stays fully editable, so bake only when you actually want it frozen.`,
+      `Render one graphic component to a transparent video and swap the clip in place: same clip id, lane, frames and links, now full-frame footage. A cloud render (about 1–3 minutes): it kicks the job, waits, imports the transparent result and swaps it in. Use it to freeze a finished component into plain footage — to keep it identical across surfaces, to take a heavy composition off the live runtime for smooth playback, or to hand it to an editor that only takes video. The baked clip is footage, not a component: no editable properties and no re-compose, and the editable component is not kept — duplicate it first (add_clips duplicate) if you may still want to tune it. A normal component stays fully editable, so bake only when you actually want it frozen.`,
     inputSchema: obj({ clipId: str('The graphic component to bake to a transparent video.') }, ['clipId']),
   },
   set_texts: {
@@ -470,7 +470,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
     inputSchema: obj({
       on: bool(),
       preset: enumOf(CAPTION_PRESET_IDS), yPct: num('', { min: 0, max: 100 }), scale: num('', { min: 0.5, max: 2 }),
-      font: str('Caption font: sans | serif | mono | web:<library id from get_state.fonts, or its display name> | google:<Family from search_assets kind font> | local:<family>; "preset" restores the preset\'s own font.'),
+      font: str('Caption font: sans | serif | mono | web:<library id from get_state.fonts> or that font’s display name (web:lxgw-wenkai or 霞鹜文楷) | google:<Family from search_assets kind font> | local:<family>; "preset" restores the preset\'s own font.'),
       script: str('Silent montage only (no spoken transcript): the caption copy, one line per caption, timed across the placed picture by character share; the copy becomes the transcript truth of those clips.'),
       source: obj({ trackId: str(), clipId: str() }),
       clipId: str('corrections / translations: an inserted clip’s transcript instead of the main narration.'),

@@ -142,8 +142,9 @@ export function searchFonts(query: string, options: FontSearchOptions = {}): Fon
  * (case-insensitive). An agent that only knows the font by its display name should not have to
  * guess the slug. Null when nothing in the library matches. */
 export function resolveWebFontReference(value: unknown): `web:${string}` | null {
-  if (typeof value !== 'string' || !value.startsWith('web:')) return null;
-  const needle = value.slice(4).trim().toLowerCase();
+  if (typeof value !== 'string') return null;
+  // The bare display name is accepted too: search_fonts finds "霞鹜文楷", so set_captions must take it.
+  const needle = (value.startsWith('web:') ? value.slice(4) : value).trim().toLowerCase();
   if (!needle) return null;
   const hit = WEB_FONTS.find((font) => (
     font.id.toLowerCase() === needle

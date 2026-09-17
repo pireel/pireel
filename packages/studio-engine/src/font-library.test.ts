@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { displayTextFontCss, isDisplayTextFontId } from './display-text-presets';
 import { captionCanvasFontFamilies, captionFontCss } from './caption-layout-metrics';
 import { getCaptionPreset } from './caption-presets';
-import { setWebFontBase, webFontCssUrl, webFontIdOf, webFontStylesheetUrls } from './font-library';
+import { setWebFontBase, webFontCssUrl, webFontIdOf, webFontStylesheetUrls, resolveWebFontReference } from './font-library';
 
 describe('web font library', () => {
   afterEach(() => setWebFontBase(''));
@@ -28,5 +28,15 @@ describe('web font library', () => {
     expect(webFontStylesheetUrls(['local:Futura'])).toEqual(['https://cdn.pireel.com/fonts/smiley-sans/result.css']);
     setWebFontBase('https://static.example/f/');
     expect(webFontCssUrl('ximaiti')).toBe('https://static.example/f/ximaiti/result.css');
+  });
+});
+
+describe('resolveWebFontReference', () => {
+  it('resolves the id, the family, and either display name, with or without the web: prefix', () => {
+    for (const value of ['web:lxgw-wenkai', 'lxgw-wenkai', 'LXGW WenKai', '霞鹜文楷', 'web:霞鹜文楷', 'lxgw wenkai']) {
+      expect(resolveWebFontReference(value), value).toBe('web:lxgw-wenkai');
+    }
+    expect(resolveWebFontReference('Comic Sans')).toBeNull();
+    expect(resolveWebFontReference('sans')).toBeNull();
   });
 });

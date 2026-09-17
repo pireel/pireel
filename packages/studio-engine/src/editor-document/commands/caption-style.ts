@@ -3,6 +3,8 @@ import type { CaptionStyle } from '../../composition-core';
 import type { EditorDocumentV2 } from '../types';
 import { validateEditorDocumentV2 } from '../validation';
 import { commandFailure, emptyCommandReceipt, type CaptionStylePatch, type EditorCommandResult } from './types';
+import { isDisplayTextFontId } from '../../display-text-presets';
+import { resolveWebFontReference } from '../../font-library';
 
 const presetIds = new Set(CAPTION_PRESETS.map((preset) => preset.id));
 
@@ -14,6 +16,10 @@ function patchError(patch: CaptionStylePatch): string | null {
     if (patch[key] != null && !Number.isFinite(patch[key])) return `Caption ${key} must be finite.`;
   }
   if (patch.sub != null && (typeof patch.sub !== 'object' || Array.isArray(patch.sub))) return 'Caption sub style must be an object.';
+  // A font id the renderer cannot resolve falls back to the preset font in silence; refuse it here.
+  if (patch.font != null && (typeof patch.font !== 'string' || (!isDisplayTextFontId(patch.font) && !resolveWebFontReference(patch.font)))) {
+    return `Unknown caption font: ${String(patch.font)}`;
+  }
   if (patch.sub?.preset != null && !presetIds.has(patch.sub.preset)) return `Unknown subtitle preset: ${patch.sub.preset}`;
   return null;
 }
