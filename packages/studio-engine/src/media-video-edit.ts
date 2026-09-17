@@ -4,6 +4,7 @@ import {
   shotFilterCss,
   type ShotFilter,
   type ShotFramingPatch,
+  type ShotZoom,
   type VideoShot,
 } from './composition-core';
 import {
@@ -18,6 +19,8 @@ export interface MediaVideoSettingsPatch {
   framing?: ShotFramingPatch;
   filter?: ShotFilter | null;
   audio?: { volumeDb?: number; mute?: boolean; fadeInSec?: number; fadeOutSec?: number };
+  /** An animated push-in on top of the static framing; null removes it. */
+  zoom?: ShotZoom | null;
 }
 
 export type MediaVideoEditResult =
@@ -71,6 +74,7 @@ export function mediaVideoPropertiesFromShot(shot: VideoShot): MediaVideoPropert
     ...(shot.treatCrop != null ? { treatCrop: shot.treatCrop } : {}),
     ...(shot.preciseFraming ? { preciseFraming: shot.preciseFraming } : {}),
     ...(shot.filter ? { filter: shot.filter } : {}),
+    ...(shot.zoom ? { zoom: shot.zoom } : {}),
     ...(shot.volumeDb != null ? { volumeDb: shot.volumeDb } : {}),
     ...(shot.audioMuted ? { audioMuted: true } : {}),
     ...(shot.audioFadeInSec ? { audioFadeInSec: shot.audioFadeInSec } : {}),
@@ -100,6 +104,10 @@ export function applyMediaVideoSettingsPatch(
       : withoutFilter as VideoShot;
   }
   if (input.patch.audio) shot = patchShotAudio(shot, input.patch.audio);
+  if ('zoom' in input.patch) {
+    const { zoom: _zoom, ...withoutZoom } = shot;
+    shot = input.patch.zoom ? { ...withoutZoom, zoom: input.patch.zoom } : withoutZoom as VideoShot;
+  }
 
   const result = applyEditorCommand(document, {
     type: 'clip.patch',
@@ -149,7 +157,12 @@ export function applyVideoClipSettingsPatches(
 
   let next = document;
   if (narrative.length) {
-    const result = patchNarrativeClips(next, narrative);
+    // The narrative patch command carries the zoom as a plain property (undefined removes it).
+    const result = patchNarrativeClips(next, narrative.map(({ clipId, patch }) => {
+      if (!('zoom' in patch)) return { clipId, patch };
+      const { zoom, ...rest } = patch;
+      return { clipId, patch: { ...rest, properties: { zoom: zoom ?? undefined } } };
+    }));
     if (!result.ok) {
       return {
         ok: false,

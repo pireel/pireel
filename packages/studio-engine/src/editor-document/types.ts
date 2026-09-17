@@ -121,7 +121,7 @@ export interface NarrativeTimelineClip extends TimelineClipBase {
  * `mediaFraming` remains the canonical layer geometry; these values preserve preset intent and
  * the clip's own grade/audio settings across multi-track moves. */
 export type MediaVideoProperties = Pick<VideoShot, 'treatment'> & Partial<Pick<VideoShot,
-  'treatSize' | 'treatCrop' | 'preciseFraming' | 'filter'
+  'treatSize' | 'treatCrop' | 'preciseFraming' | 'filter' | 'zoom'
   | 'volumeDb' | 'audioMuted' | 'audioFadeInSec' | 'audioFadeOutSec'
 >>;
 

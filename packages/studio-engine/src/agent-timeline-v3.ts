@@ -20,7 +20,7 @@ import {
   type TimelineClip,
 } from './editor-document';
 import { CAPTION_PRESETS, getCaptionPreset } from './caption-presets';
-import { CUT_TRANSITION_EFFECTS, DIRECTIONAL_TRANSITIONS, MAX_TRANSITION_SEC, PLACE_ANCHORS, SHOT_TREATMENTS, applyBlockPlacement, blockId, blockKind, isSentenceCaption, placementFramingNotes, renderBlock, shotFilterCss, splitBlockedByTransition, videoShotTimelineSpans, zoneOf, type Block, type Composition, type CutTransitionEffect, type ShotFilter, type TransitionDirection, type VideoShot } from './composition-core';
+import { CUT_TRANSITION_EFFECTS, DIRECTIONAL_TRANSITIONS, MAX_TRANSITION_SEC, PLACE_ANCHORS, SHOT_TREATMENTS, ZOOM_PRESETS, ZOOM_SCALE_MAX, ZOOM_SCALE_MIN, applyBlockPlacement, blockId, blockKind, isSentenceCaption, placementFramingNotes, renderBlock, shotFilterCss, splitBlockedByTransition, videoShotTimelineSpans, zoneOf, type Block, type Composition, type CutTransitionEffect, type ShotFilter, type TransitionDirection, type VideoShot } from './composition-core';
 import { applyCanvasDocumentEdit } from './canvas-document-edit';
 import { applyCaptionDocumentEdit } from './caption-document-edit';
 import { applyCompositionLayout, applyShotFramingInput, canvasSizeFollowingFirstVideo, canvasSizeFromInput } from './editing-primitives';
@@ -583,6 +583,46 @@ export function setClipFramingV3(document: EditorDocumentV2, input: Input): Agen
     }
     if (found.clip.kind !== 'narrative' && found.clip.kind !== 'media') return fail(`items[${index}] framing applies to video, image and graphic clips`);
     let touched = false;
+    if (item.zoom !== undefined) {
+      // An animated push-in is intent on the clip: preset + where it starts (timeline frame inside
+      // the clip) + how long + how far; the stage and the export expand the same moves.
+      const zoom = item.zoom && typeof item.zoom === 'object' ? (item.zoom as Input) : {};
+      const preset = string(zoom.preset);
+      const presetIds = ZOOM_PRESETS.map((entry) => entry.id) as readonly string[];
+      if (!preset || (preset !== 'none' && !presetIds.includes(preset))) return fail('invalid_value', { path: `items[${index}].zoom.preset`, value: zoom.preset, allowed: [...presetIds, 'none'] });
+      if (!isVideoClip(next, found.clip)) return fail('unknown_field', { path: `items[${index}].zoom`, fix: 'zoom animates video clips; animate an image or graphic clip with set_keyframes box or through its component.' });
+      if (preset === 'none') {
+        const cleared = applyVideoClipSettingsPatches(next, [{ clipId, patch: { zoom: null } }]);
+        if (!cleared.ok) return fail(cleared.error, cleared.data);
+        next = cleared.document;
+        updates.push({ clipId, zoom: null });
+      } else {
+        const fps = next.canvas.fps;
+        const clipStart = found.clip.startFrame;
+        const clipEnd = found.clip.startFrame + found.clip.durationFrames;
+        const atFrame = zoom.atFrame === undefined ? clipStart : zoom.atFrame;
+        if (!isFrame(atFrame) || atFrame < clipStart || atFrame >= clipEnd) return fail('invalid_value', { path: `items[${index}].zoom.atFrame`, value: zoom.atFrame, fix: `atFrame is a timeline frame inside the clip: ${clipStart} ≤ atFrame < ${clipEnd}.` });
+        if (zoom.durationFrames !== undefined && !isFrame(zoom.durationFrames, 1)) return fail('invalid_value', { path: `items[${index}].zoom.durationFrames`, value: zoom.durationFrames, fix: 'durationFrames is an integer frame count ≥ 1; omit it to run to the end of the clip.' });
+        const scale = zoom.scale === undefined ? ZOOM_PRESETS.find((entry) => entry.id === preset)!.scale : zoom.scale;
+        if (!isFiniteNumber(scale) || scale < ZOOM_SCALE_MIN || scale > ZOOM_SCALE_MAX) return fail('invalid_value', { path: `items[${index}].zoom.scale`, value: zoom.scale, fix: `scale is a magnification between ${ZOOM_SCALE_MIN} and ${ZOOM_SCALE_MAX} on top of the clip's framing.` });
+        for (const axis of ['anchorX', 'anchorY'] as const) {
+          if (zoom[axis] !== undefined && (!isFiniteNumber(zoom[axis]) || (zoom[axis] as number) < 0 || (zoom[axis] as number) > 1)) return fail('invalid_value', { path: `items[${index}].zoom.${axis}`, value: zoom[axis], fix: `${axis} is the layer point 0–1 that stays still while zooming.` });
+        }
+        const value = {
+          preset: preset as (typeof ZOOM_PRESETS)[number]['id'],
+          atSec: framesToSec((atFrame as number) - clipStart, fps),
+          ...(zoom.durationFrames !== undefined ? { durationSec: framesToSec(zoom.durationFrames as number, fps) } : {}),
+          scale,
+          ...(zoom.anchorX !== undefined ? { anchorX: zoom.anchorX as number } : {}),
+          ...(zoom.anchorY !== undefined ? { anchorY: zoom.anchorY as number } : {}),
+        };
+        const applied = applyVideoClipSettingsPatches(next, [{ clipId, patch: { zoom: value } }]);
+        if (!applied.ok) return fail(applied.error, applied.data);
+        next = applied.document;
+        updates.push({ clipId, zoom: { preset, atFrame, ...(zoom.durationFrames !== undefined ? { durationFrames: zoom.durationFrames } : {}), scale, ...(zoom.anchorX !== undefined ? { anchorX: zoom.anchorX } : {}), ...(zoom.anchorY !== undefined ? { anchorY: zoom.anchorY } : {}) } });
+      }
+      touched = true;
+    }
     const recipe = ['treatment', 'size', 'crop', 'scale', 'anchorX', 'anchorY', 'coordinateSpace', 'resetPrecision'].filter((key) => item[key] !== undefined);
     if (recipe.length) {
       if (string(item.treatment) && !treatmentIds.includes(string(item.treatment)!)) return fail(`items[${index}].treatment must be one of ${treatmentIds.join(' / ')}`);

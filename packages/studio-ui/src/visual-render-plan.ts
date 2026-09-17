@@ -47,6 +47,7 @@ export function supplementalVisualMedia(plan: EditorRenderPlan): SupplementalVis
         ...(video?.audioFadeInSec ? { audioFadeInSec: video.audioFadeInSec } : {}),
         ...(video?.audioFadeOutSec ? { audioFadeOutSec: video.audioFadeOutSec } : {}),
         ...(video?.filter ? { filter: video.filter } : {}),
+        ...(video?.zoom ? { zoom: video.zoom } : {}),
         ...(clip.box ? { box: clip.box } : {}),
         ...(clip.mediaFraming ? { mediaFraming: clip.mediaFraming } : {}),
         ...(clip.anchorX != null ? { anchorX: clip.anchorX } : {}),

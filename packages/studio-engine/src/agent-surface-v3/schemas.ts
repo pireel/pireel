@@ -8,7 +8,7 @@ import { COMPONENT_PROPERTY_MAX_ROWS, COMPONENT_PROPERTY_MAX_FIELDS, COMPONENT_P
  */
 
 import { CAPTION_PRESETS } from '../caption-presets';
-import { CUT_TRANSITION_EFFECTS, MAX_TRANSITION_SEC, PLACE_ANCHORS, SHOT_TREATMENTS } from '../composition-core';
+import { CUT_TRANSITION_EFFECTS, MAX_TRANSITION_SEC, PLACE_ANCHORS, SHOT_TREATMENTS, ZOOM_PRESETS, ZOOM_SCALE_MAX, ZOOM_SCALE_MIN } from '../composition-core';
 import { DISPLAY_TEXT_ANIMATION_IDS, DISPLAY_TEXT_PRESETS } from '../display-text-presets';
 import { MG_BAKE_ROUTE, MG_RUNTIME_CAPABILITIES } from '../prompts/block-system';
 import { CLIP_PROPERTIES, CLIP_PROPERTY_REDIRECTS, clipPropertySummary, type ClipPropertyKey } from './clip-properties';
@@ -32,6 +32,7 @@ const ids = (description: string): Schema => arr(str(), { minItems: 1, descripti
 
 export const TREATMENT_IDS = SHOT_TREATMENTS.map((entry) => entry.id);
 export const TRANSITION_EFFECT_IDS = [...CUT_TRANSITION_EFFECTS.map((entry) => entry.id), 'none'];
+export const ZOOM_PRESET_IDS = [...ZOOM_PRESETS.map((entry) => entry.id), 'none'];
 export const CAPTION_PRESET_IDS = CAPTION_PRESETS.map((preset) => preset.id);
 export const TEXT_PRESET_IDS = DISPLAY_TEXT_PRESETS.map((preset) => preset.id);
 export const TEXT_ANIMATION_IDS = [...DISPLAY_TEXT_ANIMATION_IDS];
@@ -333,7 +334,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   set_clip_framing: {
     description:
-      `Decide where a clip sits in the picture. Media clips take a treatment recipe (${TREATMENT_IDS.join(' / ')}) with size, crop, scale (1–4) and subject anchorX/anchorY, or an exact transform {scale, offsetX, offsetY} and cropInsets {top,right,bottom,left} in 0–1 fractions. Graphic and text clips take box {x,y,w,h} in canvas units, a 3×3 anchor, or scale. For several clips sharing one arrangement (PiP, split, grid) use apply_layout.`,
+      `Decide where a clip sits in the picture. Media clips take a treatment recipe (${TREATMENT_IDS.join(' / ')}) with size, crop, scale (1–4) and subject anchorX/anchorY, or an exact transform {scale, offsetX, offsetY} and cropInsets {top,right,bottom,left} in 0–1 fractions. Graphic and text clips take box {x,y,w,h} in canvas units, a 3×3 anchor, or scale. zoom animates a push-in on a video clip on top of its framing: preset punch (eases in fast, holds), instant (cuts in), slow-push (eases across the span), in-out (returns by the end) or none to remove; atFrame is the timeline frame where it starts (default the clip start), durationFrames how long it runs or holds (default to the clip end), scale the magnification (preset default), anchorX/anchorY the point that stays still. For several clips sharing one arrangement (PiP, split, grid) use apply_layout.`,
     inputSchema: obj({
       items: arr(obj({
         clipId: str(),
@@ -343,6 +344,12 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
         transform: obj({ scale: num('', { min: 0.05, max: 20 }), offsetX: num(), offsetY: num(), reset: bool() }),
         cropInsets: obj({ top: num('', { min: 0, max: 1 }), right: num('', { min: 0, max: 1 }), bottom: num('', { min: 0, max: 1 }), left: num('', { min: 0, max: 1 }), reset: bool() }),
         box: BOX, anchor: enumOf(PLACE_ANCHORS),
+        zoom: obj({
+          preset: enumOf(ZOOM_PRESET_IDS), atFrame: FRAME('Timeline frame inside the clip where the move starts'),
+          durationFrames: int('How long the move runs or holds; omit to reach the clip end.', 1),
+          scale: num('Magnification on top of the framing.', { min: ZOOM_SCALE_MIN, max: ZOOM_SCALE_MAX }),
+          anchorX: num('Layer point 0–1 that stays still.', { min: 0, max: 1 }), anchorY: num('Layer point 0–1 that stays still.', { min: 0, max: 1 }),
+        }, ['preset']),
       }, ['clipId']), { minItems: 1, maxItems: 120 }),
     }, ['items']),
   },

@@ -178,6 +178,99 @@ export interface VideoShot extends Clip {
    *  the audio lane; preview and export both evaluate shotGainAt. */
   audioFadeInSec?: number;
   audioFadeOutSec?: number;
+  /** An animated push-in on top of the shot's static framing (see ShotZoom). */
+  zoom?: ShotZoom;
+}
+
+export type ZoomPreset = 'punch' | 'instant' | 'slow-push' | 'in-out';
+
+/** An animated push-in stored as intent, not as keyframes: the move re-expands after any retime and
+ * reads back exactly as it was written. Times are clip-local edited seconds; `scale` multiplies the
+ * shot's static framing scale; the anchor is the layer point (0..1) that stays put while zooming. */
+export interface ShotZoom {
+  preset: ZoomPreset;
+  atSec: number;
+  /** Move length. Absent: the move runs (or holds) to the end of the clip. */
+  durationSec?: number;
+  scale: number;
+  anchorX?: number;
+  anchorY?: number;
+}
+
+export const ZOOM_PRESETS: { id: ZoomPreset; name: string; scale: number }[] = [
+  { id: 'punch', name: 'common.zoomPunch', scale: 1.25 },
+  { id: 'instant', name: 'common.zoomInstant', scale: 1.25 },
+  { id: 'slow-push', name: 'common.zoomSlowPush', scale: 1.15 },
+  { id: 'in-out', name: 'common.zoomInOut', scale: 1.2 },
+];
+export const ZOOM_SCALE_MIN = 1.02;
+export const ZOOM_SCALE_MAX = 4;
+/** A punch eases in over this many seconds; a hold that ends before the clip eases back over the same. */
+export const ZOOM_PUNCH_SEC = 0.25;
+
+export type ZoomEase = 'none' | 'power2.inOut' | 'power3.out';
+/** One tween of the zoom multiplier: from wherever it was to `scale`, over `duration` from `at` (clip-local seconds). */
+export interface ZoomMove { at: number; duration: number; ease: ZoomEase; scale: number }
+
+/** The moves a zoom expands to inside a clip of `clipLenSec`. The same plan drives the stage
+ * timeline (GSAP tweens) and the canvas export (zoomScaleAt), so both draw the same frame. */
+export function zoomMoves(zoom: ShotZoom | undefined, clipLenSec: number): ZoomMove[] {
+  if (!zoom || !(clipLenSec > 0)) return [];
+  const scale = clamp(Number.isFinite(zoom.scale) ? zoom.scale : 1, ZOOM_SCALE_MIN, ZOOM_SCALE_MAX);
+  const at = clamp(Number.isFinite(zoom.atSec) ? zoom.atSec : 0, 0, clipLenSec);
+  const end = zoom.durationSec != null && Number.isFinite(zoom.durationSec) && zoom.durationSec > 0
+    ? Math.min(clipLenSec, at + zoom.durationSec)
+    : clipLenSec;
+  const span = Math.max(0, end - at);
+  const holdsToEnd = end >= clipLenSec - 1e-6;
+  const moves: ZoomMove[] = [];
+  switch (zoom.preset) {
+    case 'instant':
+      moves.push({ at, duration: 0, ease: 'none', scale });
+      if (!holdsToEnd) moves.push({ at: end, duration: 0, ease: 'none', scale: 1 });
+      break;
+    case 'punch': {
+      const ease = Math.min(ZOOM_PUNCH_SEC, span / 2);
+      moves.push({ at, duration: ease, ease: 'power3.out', scale });
+      if (!holdsToEnd) moves.push({ at: end - ease, duration: ease, ease: 'power2.inOut', scale: 1 });
+      break;
+    }
+    case 'slow-push':
+      moves.push({ at, duration: span, ease: 'none', scale });
+      break;
+    case 'in-out':
+      moves.push({ at, duration: span / 2, ease: 'power2.inOut', scale });
+      moves.push({ at: at + span / 2, duration: span / 2, ease: 'power2.inOut', scale: 1 });
+      break;
+  }
+  return moves;
+}
+
+function zoomEase(ease: ZoomEase, p: number): number {
+  const t = clamp(p, 0, 1);
+  if (ease === 'power3.out') return 1 - (1 - t) ** 3;
+  if (ease === 'power2.inOut') return t < 0.5 ? 2 * t * t : 1 - ((-2 * t + 2) ** 2) / 2;
+  return t;
+}
+
+/** The zoom multiplier at a clip-local second (1 = the static framing), evaluated from the same
+ * moves the stage timeline plays. */
+export function zoomScaleAt(zoom: ShotZoom | undefined, localSec: number, clipLenSec: number): number {
+  const moves = zoomMoves(zoom, clipLenSec);
+  let value = 1;
+  for (const move of moves) {
+    if (localSec < move.at) break;
+    const from = value;
+    const progress = move.duration <= 0 ? 1 : (localSec - move.at) / move.duration;
+    value = from + (move.scale - from) * zoomEase(move.ease, progress);
+    if (progress < 1) break;
+  }
+  return value;
+}
+
+/** Percent shift that keeps the anchor point still while the layer scale goes from `base` to `total`. */
+export function zoomAnchorShiftPercent(anchor: number | undefined, base: number, total: number): number {
+  return r4((0.5 - clamp(anchor ?? 0.5, 0, 1)) * (total - base) * 100);
 }
 
 export interface ShotPreciseFraming {
@@ -926,6 +1019,25 @@ export function videoFrameTimelineBody(shots: VideoShot[], placements?: readonly
       && (previousBox?.w ?? 1) === (nextBox?.w ?? 1)
       && (previousBox?.h ?? 1) === (nextBox?.h ?? 1);
     if (!sameBox) lines.push(`tl.to('#vidEl', Object.assign({ duration: ${n(dur)}, ease: 'power2.inOut' }, ${shotPlacementVars(nextBox)}), ${n(final[i]!.at)});`);
+  }
+  // Animated push-ins: tweens on top of the shot's static framing, in edited time. The move ends
+  // inside its own clip (an explicit set at the clip end restores the static framing, so a deduped
+  // neighbour that shares the framing does not inherit the zoom).
+  for (const { clip, editedStart, editedEnd } of sp) {
+    const shot = clip as VideoShot;
+    const moves = zoomMoves(shot.zoom, editedEnd - editedStart);
+    if (!moves.length) continue;
+    const base = mediaFramingTransformVars(resolveShotMediaFraming(shot));
+    const vars = (multiplier: number) => {
+      const total = r4(base.scale * multiplier);
+      return `{ scale: ${n(total)}, xPercent: ${n(r4(base.xPercent + zoomAnchorShiftPercent(shot.zoom!.anchorX, base.scale, total)))}, yPercent: ${n(r4(base.yPercent + zoomAnchorShiftPercent(shot.zoom!.anchorY, base.scale, total)))} }`;
+    };
+    for (const move of moves) {
+      const at = n(editedStart + move.at);
+      if (move.duration <= 0) lines.push(`tl.set('#vidEl', ${vars(move.scale)}, ${at});`);
+      else lines.push(`tl.to('#vidEl', Object.assign({ duration: ${n(move.duration)}, ease: '${move.ease}' }, ${vars(move.scale)}), ${at});`);
+    }
+    if (moves[moves.length - 1]!.scale !== 1) lines.push(`tl.set('#vidEl', ${vars(1)}, ${n(editedEnd)});`);
   }
   // Color-grade keyframes (deduped independently of framing): jump-cut semantics — swap at the cut (set), no transition tween.
   // No grading anywhere = no lines emitted; if any, neutral segments emit a 'none' reset, otherwise the prior shot's filter leaks into the next.

@@ -145,6 +145,20 @@ function soundView(properties: Record<string, unknown>, fps: number): Record<str
   return out;
 }
 
+/** An animated push-in as set_clip_framing wrote it: timeline frame in, frames long. */
+function zoomView(zoom: unknown, clipStartFrame: number, fps: number): Record<string, unknown> | undefined {
+  const z = zoom as { preset?: string; atSec?: number; durationSec?: number; scale?: number; anchorX?: number; anchorY?: number } | undefined;
+  if (!z || !z.preset) return undefined;
+  return {
+    preset: z.preset,
+    atFrame: clipStartFrame + Math.round((z.atSec ?? 0) * fps),
+    ...(z.durationSec != null ? { durationFrames: Math.round(z.durationSec * fps) } : {}),
+    scale: z.scale,
+    ...(z.anchorX != null ? { anchorX: z.anchorX } : {}),
+    ...(z.anchorY != null ? { anchorY: z.anchorY } : {}),
+  };
+}
+
 /** The cut transition into a story-spine clip, as add_transition wrote it. */
 function transitionView(transIn: unknown, fps: number): Record<string, unknown> | undefined {
   const t = transIn as { effect?: string; durationSec?: number; direction?: string } | undefined;
@@ -162,10 +176,12 @@ export function renderV3Clip(clip: TimelineClip, trackId: string, trackRole?: st
       view.assetId = clip.assetId;
       view.source = [round3(clip.sourceInSec), round3(clip.sourceOutSec)];
       if (clip.box) view.box = clip.box;
-      const { transIn, ...rest } = (clip.properties ?? {}) as Record<string, unknown>;
+      const { transIn, zoom, ...rest } = (clip.properties ?? {}) as Record<string, unknown>;
       Object.assign(view, soundView(stripDefaults(rest, NARRATIVE_DEFAULTS), fps));
       const transitionIn = transitionView(transIn, fps);
       if (transitionIn) view.transitionIn = transitionIn;
+      const zoomed = zoomView(zoom, clip.startFrame, fps);
+      if (zoomed) view.zoom = zoomed;
       stripIdentityGeometry(view, clip.mediaFraming);
       break;
     }
@@ -174,7 +190,12 @@ export function renderV3Clip(clip: TimelineClip, trackId: string, trackRole?: st
       view.source = [round3(clip.sourceInSec), round3(clip.sourceOutSec)];
       if (clip.box) view.box = clip.box;
       Object.assign(view, stripDefaults({ fit: clip.fit, opacity: clip.opacity, anchorX: clip.anchorX, anchorY: clip.anchorY }, MEDIA_DEFAULTS));
-      if (clip.video) Object.assign(view, soundView(stripDefaults(clip.video as Record<string, unknown>, MEDIA_DEFAULTS), fps));
+      if (clip.video) {
+        const { zoom, ...video } = clip.video as Record<string, unknown>;
+        Object.assign(view, soundView(stripDefaults(video, MEDIA_DEFAULTS), fps));
+        const zoomed = zoomView(zoom, clip.startFrame, fps);
+        if (zoomed) view.zoom = zoomed;
+      }
       stripIdentityGeometry(view, clip.mediaFraming);
       if (clip.keyframes && (clip.keyframes.box?.length || clip.keyframes.opacity?.length)) view.keyframes = clip.keyframes;
       break;

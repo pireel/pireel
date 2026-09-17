@@ -124,6 +124,22 @@ describe('v3 round trips: written value → document → get_state → delta', (
     expect(t.touched('spine-a')).toMatchObject({ treatment: 'punch-in' });
   });
 
+  it('set_clip_framing zoom: a push-in reads back in timeline frames on spine and B-roll clips, and none removes it', () => {
+    const t = trip(project(), 'set_clip_framing', { items: [
+      { clipId: 'spine-a', zoom: { preset: 'punch', atFrame: 45, durationFrames: 60, scale: 1.3, anchorY: 0.4 } },
+      { clipId: 'broll', zoom: { preset: 'slow-push' } },
+    ] });
+    expect(t.clip('spine-a')!.zoom).toEqual({ preset: 'punch', atFrame: 45, durationFrames: 60, scale: 1.3, anchorY: 0.4 });
+    expect(t.clip('broll')!.zoom).toEqual({ preset: 'slow-push', atFrame: 60, scale: 1.15 });
+    expect(t.touched('spine-a')).toMatchObject({ zoom: { preset: 'punch', atFrame: 45 } });
+    expect(t.data).toMatchObject({ updates: [{ clipId: 'spine-a', zoom: { preset: 'punch' } }, { clipId: 'broll', zoom: { preset: 'slow-push', atFrame: 60 } }] });
+    const cleared = trip(t.document, 'set_clip_framing', { items: [{ clipId: 'spine-a', zoom: { preset: 'none' } }] });
+    expect(cleared.clip('spine-a')).not.toHaveProperty('zoom');
+    // a still cannot be pushed in; the refusal names the tool that animates it
+    expect(runAgentTimelineTool(project(), 'set_clip_framing', { items: [{ clipId: 'still-clip', zoom: { preset: 'punch' } }] }))
+      .toMatchObject({ ok: false, error: 'unknown_field', data: { path: 'items[0].zoom', fix: expect.stringContaining('set_keyframes') } });
+  });
+
   it('swap_clip_media: the asset changes, frames and source stay', () => {
     const t = trip(project(), 'swap_clip_media', { clipId: 'broll', assetId: 'cam' });
     expect(t.clip('broll')).toMatchObject({ assetId: 'cam', frames: [60, 150] });

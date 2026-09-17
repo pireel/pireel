@@ -14,6 +14,8 @@ import {
   isSentenceCaption,
   IDENTITY_MEDIA_FRAMING,
   mediaFramingTransformVars,
+  zoomAnchorShiftPercent,
+  zoomMoves,
   n,
   pct,
   renderBlock,
@@ -661,6 +663,20 @@ export function assembleHtml(
         if (at <= previous.atSec + 1e-9) motion.push(`tl.set(el,{opacity:${n(row.value)}},${n(at)});`);
         else motion.push(`tl.to(el,{duration:${n(at - previous.atSec)},ease:'none',opacity:${n(row.value)}},${n(previous.atSec)});`);
         previous = { ...row, atSec: at };
+      }
+    }
+    // Animated push-in: scale tweens on the element's own timeline, on top of its static framing,
+    // the same moves the canvas export evaluates through zoomScaleAt.
+    const moves = visual.kind === 'video' ? zoomMoves(visual.zoom, duration) : [];
+    if (moves.length) {
+      const zoomVars = (multiplier: number) => {
+        const total = Math.round(framing.scale * multiplier * 10000) / 10000;
+        return `{scale:${n(total)},xPercent:${n(framing.xPercent + zoomAnchorShiftPercent(visual.zoom!.anchorX, framing.scale, total))},yPercent:${n(framing.yPercent + zoomAnchorShiftPercent(visual.zoom!.anchorY, framing.scale, total))}}`;
+      };
+      motion.push(`tl.set(el,${zoomVars(1)},0);`);
+      for (const move of moves) {
+        if (move.duration <= 0) motion.push(`tl.set(el,${zoomVars(move.scale)},${n(move.at)});`);
+        else motion.push(`tl.to(el,Object.assign({duration:${n(move.duration)},ease:'${move.ease}'},${zoomVars(move.scale)}),${n(move.at)});`);
       }
     }
     if (motion.length > 1) scripts.push(timelineScript(id, motion.join('')));
