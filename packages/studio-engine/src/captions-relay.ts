@@ -247,20 +247,41 @@ export function displayCuesFromMappedSegs(
     opts?.canvasW ?? 1080,
     { bold: style?.bold, font: style?.font },
   );
-  const out: DisplayCue[] = [];
-  for (const g of mapped) {
+  // Pass 1: cue chunks per fragment. Pass 2: one sentence, one distribution — a sentence cut into
+  // several surviving fragments still carries a single translation, spread once across every cue
+  // of that sentence in play order; distributing per fragment repeated the whole sentence under
+  // each fragment.
+  const prepared = mapped.flatMap((g) => {
     const words = g.words;
-    if (!words.length) continue;
+    if (!words.length) return [];
     const gRef = g.ref;
     const srcSeg = gRef ? sourceSegment(gRef) : undefined;
-    const subFresh = !srcSeg?.subLang || !opts?.subLang || srcSeg.subLang === opts.subLang;
     // An explicit empty cueLayout means "temporarily unlocked" during a controlled re-layout.
     // Missing cueLayout falls back to cueTexts for drafts written by the short-lived combined
     // copy/layout format; every new write persists the two concerns separately.
     const layoutKeys = srcSeg?.cueLayout ?? (srcSeg?.cueTexts ? Object.keys(srcSeg.cueTexts) : undefined);
-    const chunks = cueChunksRespectingLocks(words, layoutKeys, split);
-    const groupSub = subFresh ? (srcSeg?.cueSubs?.[`${gRef?.w0}:${gRef?.w1}`] ?? srcSeg?.sub) : undefined;
-    const pieces = groupSub ? distributeSub(groupSub, chunks.map((c) => c.length)) : undefined;
+    return [{ g, gRef, srcSeg, chunks: cueChunksRespectingLocks(words, layoutKeys, split) }];
+  });
+  const sentencePieces = new Map<string, string[]>();
+  const sentenceKey = (gRef: CueRef | undefined) => `${gRef?.src ?? ''}|${gRef?.seg ?? -1}`;
+  const chunksBySentence = new Map<string, number[]>();
+  for (const entry of prepared) chunksBySentence.set(sentenceKey(entry.gRef), [...(chunksBySentence.get(sentenceKey(entry.gRef)) ?? []), ...entry.chunks.map((c) => c.length)]);
+  const out: DisplayCue[] = [];
+  const consumed = new Map<string, number>();
+  for (const { g, gRef, srcSeg, chunks } of prepared) {
+    const subFresh = !srcSeg?.subLang || !opts?.subLang || srcSeg.subLang === opts.subLang;
+    const key = sentenceKey(gRef);
+    // A translation stored for this exact fragment range wins for the fragment; otherwise the
+    // sentence translation is distributed once over all the sentence's cues.
+    const fragmentSub = subFresh ? srcSeg?.cueSubs?.[`${gRef?.w0}:${gRef?.w1}`] : undefined;
+    let pieces: string[] | undefined;
+    if (fragmentSub) pieces = distributeSub(fragmentSub, chunks.map((c) => c.length));
+    else if (subFresh && srcSeg?.sub) {
+      if (!sentencePieces.has(key)) sentencePieces.set(key, distributeSub(srcSeg.sub, chunksBySentence.get(key) ?? []));
+      const offset = consumed.get(key) ?? 0;
+      pieces = sentencePieces.get(key)!.slice(offset, offset + chunks.length);
+    }
+    consumed.set(key, (consumed.get(key) ?? 0) + chunks.length);
     for (const [ci, c] of chunks.entries()) {
       const w0 = c[0]!.si ?? 0;
       const w1 = c[c.length - 1]!.si ?? 0;
