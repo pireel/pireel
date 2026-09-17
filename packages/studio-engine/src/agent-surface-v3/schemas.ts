@@ -492,7 +492,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   manage_frame: {
     description:
       'Visual direction. list returns the available frames (design-system content packs); attach applies one by id, filling unspecified art-direction decisions while the user’s explicit choices and manual project values stay authoritative; read returns the attached frame’s playbook to design against. A frame never authorises resetting palette, captions or layout the user set by hand.',
-    inputSchema: obj({ action: enumOf(['list', 'attach', 'read']), id: str('Frame id for attach / read.') }, ['action']),
+    inputSchema: obj({ action: enumOf(['list', 'attach', 'read']), id: str('attach: required. read: omit to read the attached frame.') }, ['action']),
   },
 
   /* ------------------------------------------------------------------ generation */

@@ -142,6 +142,17 @@ describe('MCP v3 surface', () => {
     expect(JSON.parse((body!.result as { content: { text: string }[] }).content[0]!.text)).toMatchObject({ ok: false, error: 'locked track' });
   });
 
+  it('manage_frame read without an id reads the attached frame, or says none is attached', async () => {
+    const attached = deps({ attachedFrameId: vi.fn(async () => 'f9') });
+    const body = await handleMcpRequest({ id: 44, method: 'tools/call', params: { name: 'manage_frame', arguments: { action: 'read' } } }, attached);
+    expect(attached.readFrame).toHaveBeenCalledWith('f9');
+    expect(JSON.parse((body!.result as { content: { text: string }[] }).content[0]!.text)).toMatchObject({ ok: true, summary: 'f9' });
+    const bare = deps({ attachedFrameId: vi.fn(async () => null) });
+    const none = await handleMcpRequest({ id: 45, method: 'tools/call', params: { name: 'manage_frame', arguments: { action: 'read' } } }, bare);
+    expect(JSON.parse((none!.result as { content: { text: string }[] }).content[0]!.text)).toMatchObject({ ok: false, error: 'no_frame_attached' });
+    expect(bare.readFrame).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['manage_frame', { action: 'list' }, 'listFrames', undefined],
     ['manage_frame', { action: 'read', id: 'f1' }, 'readFrame', 'f1'],

@@ -80,6 +80,8 @@ export interface McpDeps {
   readSkill: (skillId: string) => Promise<McpBridgeResult>;
   /** Frame playbook body (routing layer = frameRegistry.get). */
   readFrame: (frameId: string) => McpBridgeResult;
+  /** The frame attached to the active project, for manage_frame read without an id. */
+  attachedFrameId?: () => Promise<string | null>;
   /** BYO block brief: bridge-returned compose context + the agent's instruction → {system,prompt} (routing layer = briefs.assembleComposeBrief + frameRegistry). */
   assembleComposeBrief: (bridgeData: Record<string, unknown>, instruction: string) => McpBridgeResult;
   /** Icon lookup (routing layer = icons.lookupIcons) — get_icons, referenced by BLOCK_SYSTEM in BYO generation, is available under the same name on the MCP surface. */
@@ -264,8 +266,13 @@ async function dispatchServerTool(name: string, args: Record<string, unknown>, d
     case 'manage_frame': {
       if (args.action === 'list') { const frames = deps.listFrames(); return { ok: true, summary: `${frames.length} frames`, data: frames }; }
       const id = typeof args.id === 'string' ? args.id : '';
-      if (!id) return { ok: false, error: 'missing_field', path: 'id', fix: 'Pass the frame id from manage_frame action:list.' };
-      return deps.readFrame(id);
+      if (id) return deps.readFrame(id);
+      if (args.action === 'read') {
+        const attached = await deps.attachedFrameId?.();
+        if (attached) return deps.readFrame(attached);
+        return { ok: false, error: 'no_frame_attached', fix: 'Attach a frame first (manage_frame action:attach with an id from action:list), or pass id to read a specific one.' };
+      }
+      return { ok: false, error: 'missing_field', path: 'id', fix: 'Pass the frame id from manage_frame action:list.' };
     }
     case 'manage_project': {
       const action = String(args.action ?? 'list');
