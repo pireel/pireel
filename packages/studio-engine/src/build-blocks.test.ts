@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chunkWordsByWidth, detectLang } from './caption-fx';
+import { chunkWordsBalanced, chunkWordsByWidth, detectLang, estWordEm } from './caption-fx';
 import { type AsrSegment, applyCaptionTranslations, captionBlocksFromAsr, clearCaptionTranslations, desegmentCues, sanitizeTranscriptSegs } from './build-blocks';
 import { displayCues } from './captions-relay';
 import { type VideoShot, renderBlock } from './composition';
@@ -39,6 +39,21 @@ describe('chunkWordsByWidth(长句拆段——渲染期实时计算)', () => {
     const groups = chunkWordsByWidth(words);
     expect(groups).toHaveLength(2);
     expect(groups[0]![groups[0]!.length - 1]!.text).toBe('了,');
+  });
+
+  it('一行提前断掉(宽词放不下)时余量给后面的行,末行不留单字', () => {
+    // A real sentence from a user project: three Latin tokens (VIP/InfoQ/QCon+AICon) force early
+    // breaks; the fixed-boundary planner then left "票。" alone on the last line at every width.
+    const chars = '哦，/里/面/是/一/个/极/客/时/间/的/VIP/年/卡，/价/值/一/千/九/百/九/十/九，/还/有/一/个/InfoQ/技/术/大/会/的/年/卡，/价/值/三/万/四/千/八/百/元，/畅/行/全/年/的/QCon/AICon/的/线/下/大/会/门/票。'.split('/');
+    const words = chars.map((text, i) => w(text, i, i + 1));
+    for (const limit of [8, 11, 13, 17]) {
+      const lines = chunkWordsBalanced(words, limit, (word) => estWordEm(word.text) + (/[A-Za-z0-9]$/.test(word.text) ? 0.3 : 0));
+      const widths = lines.map((line) => line.reduce((sum, word) => sum + estWordEm(word.text), 0));
+      expect(lines.flat()).toEqual(words);
+      expect(lines[lines.length - 1]!.length, `limit ${limit}: ${lines.map((l) => l.map((x) => x.text).join('')).join(' | ')}`).toBeGreaterThan(1);
+      // No line takes less than half the widest line's share.
+      expect(Math.min(...widths) * 2, `limit ${limit}`).toBeGreaterThanOrEqual(Math.max(...widths) * 0.8);
+    }
   });
 
   it('整句放得下 = 不拆;西文按半宽算', () => {

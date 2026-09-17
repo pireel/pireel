@@ -217,44 +217,53 @@ const visualWidth = (t: string) => [...t].reduce((a, ch) => a + (ch.charCodeAt(0
 const PUNCT_END = /[,。,.!?!?;;、::…]$/;
 
 /**
- * Balanced line-breaking core (pretext-style: measure the whole sentence's total width → decide segment count →
- * break each segment near equal width, no "13+2" orphan tail; punctuation near the target width breaks first).
- * Don't split if the whole sentence fits. ONLY breaks within a sentence, NEVER pads across sentences (caller calls per sentence).
- * widthOf's unit is the caller's choice (coarse visual units / pixel estimate); limit shares widthOf's unit.
+ * Balanced line-breaking core (pretext-style): measure the whole sentence, then cut each line as
+ * close as possible to an equal share of what is still left, never past the limit. The share is
+ * re-planned after every cut from the actual remaining width, so a line that had to end early (a
+ * wide word would not fit) hands its slack to the lines after it instead of leaving the last word
+ * alone on the last line. Punctuation near the share wins over a nearer plain break. The whole
+ * sentence stays one line when it fits; this only breaks within a sentence, never across sentences
+ * (callers call per sentence). widthOf's unit is the caller's choice; limit shares it.
  */
 export function chunkWordsBalanced<W extends { text: string }>(words: W[], limit: number, widthOf: (w: W) => number): W[][] {
+  if (!words.length) return [];
   const widths = words.map(widthOf);
   const total = widths.reduce((a, b) => a + b, 0);
-  if (total <= limit) return words.length ? [words] : [];
-  const nSeg = Math.ceil(total / limit);
-  const target = total / nSeg;
+  if (total <= limit) return [words];
   const punctTol = limit * 0.15; // punctuation-priority band (scales with the unit)
   const out: W[][] = [];
-  let cur: W[] = [];
-  let len = 0; // current segment width
-  let acc = 0; // total width consumed
-  let segIdx = 1;
-  for (let i = 0; i < words.length; i++) {
-    cur.push(words[i]!);
-    len += widths[i]!;
-    acc += widths[i]!;
-    if (i === words.length - 1) break;
-    const boundary = segIdx * target;
-    const nextW = widths[i + 1]!;
-    // Break when: (1) punctuation and already near target, (2) current position is closer to the equal-width boundary than "swallow one more word", (3) hard-limit fallback.
-    // If a balanced break is right next to punctuation, defer one word to break at the punctuation (readability first, still within tolerance).
-    const punctBreak = PUNCT_END.test(words[i]!.text) && acc >= boundary - punctTol;
-    const balancedBreak = acc >= boundary - target * 0.04 && Math.abs(acc + nextW - boundary) >= Math.abs(acc - boundary);
-    const deferToPunct =
-      !punctBreak && PUNCT_END.test(words[i + 1]!.text) && acc + nextW <= boundary + punctTol && len + nextW <= limit;
-    if (!deferToPunct && (punctBreak || balancedBreak || len + nextW > limit + 1e-6)) {
-      out.push(cur);
-      cur = [];
-      len = 0;
-      segIdx++;
+  let from = 0;
+  let remaining = total;
+  while (from < words.length) {
+    const linesLeft = Math.max(1, Math.ceil(remaining / limit - 1e-9));
+    if (linesLeft === 1) {
+      out.push(words.slice(from));
+      break;
     }
+    const target = remaining / linesLeft;
+    let len = 0;
+    let best = -1;
+    let bestScore = Infinity;
+    // Every line but the last leaves at least one word for the lines after it.
+    for (let at = from; at < words.length - 1; at++) {
+      len += widths[at]!;
+      if (len > limit + 1e-6) {
+        if (best < 0) best = at; // a single word wider than the line stands alone
+        break;
+      }
+      const distance = Math.abs(len - target);
+      const punct = PUNCT_END.test(words[at]!.text) && distance <= punctTol;
+      const score = punct ? distance - punctTol : distance;
+      if (score < bestScore) {
+        bestScore = score;
+        best = at;
+      }
+    }
+    if (best < 0) best = from;
+    out.push(words.slice(from, best + 1));
+    for (let at = from; at <= best; at++) remaining -= widths[at]!;
+    from = best + 1;
   }
-  if (cur.length) out.push(cur);
   return out;
 }
 
