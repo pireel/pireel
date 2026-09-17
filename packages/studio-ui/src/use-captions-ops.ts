@@ -34,7 +34,7 @@ import { t, tEnglish } from './i18n';
 import { editorErrorMessage } from './editor-error';
 import type { CaptionLineRow } from './captions-panel';
 import { inspectCaptionDocument } from './caption-document-state';
-import { captionTranscriptsByAsset, captionTranscriptsFromDocument } from './caption-transcript-bridge';
+import { captionTranscriptsByAsset, captionTranscriptsFromDocument, captionTranslationSources } from './caption-transcript-bridge';
 import { stageCaptionTranslationReplacement } from './caption-translation-transaction';
 import { transcriptInputsFor, type DocumentOpInputs } from '@pireel/studio-engine/document-transaction';
 import type { DocumentCommitter } from './document-commit';
@@ -577,18 +577,22 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
   const translateCaptionsTo = async (target: string) => {
     const tr = studioProviders().translate;
     if (!tr) return;
-    if (!asrRef.current?.length) {
+    // The document owns the script; browser refs are a cache that is empty on a restored project.
+    const sourcesFor = () => captionTranslationSources(documentRef.current, compRef.current, asrRef.current, clipAsrRef.current);
+    const known = sourcesFor();
+    if (!known.main?.length && !Object.values(known.clips).some((segments) => segments.length)) {
       toast.error(t('workbench.noTranscriptShort'));
       return;
     }
     setCapTransBusy(true);
     try {
       await ensureClipTranscripts(); // translate insert sources too, don't produce half-done bilingual
+      const sources = sourcesFor();
       // Translate SENTENCE FRAGMENTS as they survive the edit (mappedCaptionSegs): the post-cut
       // sentence text, in edited order — the unit the audience actually hears. NOT display cues:
       // cue-fragment translation is linguistically unsound across word-order-divergent language
       // pairs, and hundreds of cue rows blew up the request (truncated output → translate_empty).
-      const groups = relayMappedCaptionSegs(ensureShots(compRef.current), asrRef.current, clipAsrRef.current);
+      const groups = relayMappedCaptionSegs(ensureShots(compRef.current), sources.main, sources.clips);
       if (!groups.length) {
         toast.error(t('workbench.noTranscriptShort'));
         return;
@@ -601,8 +605,8 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
         groups,
         rows: out,
         target,
-        mainTranscript: asrRef.current,
-        clipTranscripts: clipAsrRef.current,
+        mainTranscript: sources.main,
+        clipTranscripts: sources.clips,
       });
       if (!staged.ok) throw new Error(staged.error || t('workbench.translationFailedTryAgain'));
       const landed = commit({ op: 'captions.edit', input: {
@@ -611,9 +615,13 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
         clipTranscripts: captionTranscriptsByAsset(documentRef.current, compRef.current, staged.clipTranscripts),
       } });
       if (!landed.ok) throw new Error(editorErrorMessage(landed.error));
-      asrRef.current = staged.mainTranscript;
+      // Runtime copies follow what landed; a main copy the relay did not need stays as it was and
+      // keeps following the document through the workbench's transcript-sync effect.
+      if (staged.mainTranscript) {
+        asrRef.current = staged.mainTranscript;
+        setAsrSentences(staged.mainTranscript);
+      }
       clipAsrRef.current = staged.clipTranscripts;
-      setAsrSentences(staged.mainTranscript);
       setClipAsr(staged.clipTranscripts);
       toast.success(t('workbench.generatedLangTranslations', { lang: target }) + (isCaptionsOn(compRef.current) ? '' : t('workbench.enableCaptionsShowThem')));
     } catch (e) {

@@ -4,6 +4,7 @@ import type {
   EditorDocumentV2,
   NarrativeTimelineClip,
 } from '@pireel/studio-engine/composition';
+import { firstNarrativeAssetId } from '@pireel/studio-engine/editor-document';
 
 /**
  * Add stable asset-id aliases for legacy runtime transcript keys before a native caption command.
@@ -71,4 +72,27 @@ export function captionTranscriptsFromDocument(
     if (segments) clips[shot.src] = segments as AsrSegment[];
   }
   return { main: null, clips };
+}
+
+/**
+ * Every transcript a whole-timeline caption operation (translation) reads, in the shape the relay
+ * consumes: sourced shots by their runtime src, src-less narration through the main copy. The
+ * document is the durable owner, so a restored project whose browser refs are empty still has its
+ * script; the main copy is only supplied when a src-less shot needs it — handing one in otherwise
+ * would let the caption command's main-owner rule overwrite the first source's clip copy.
+ */
+export function captionTranslationSources(
+  document: EditorDocumentV2,
+  composition: Composition,
+  runtimeMain: readonly AsrSegment[] | null,
+  runtimeClips: Readonly<Record<string, AsrSegment[]>>,
+): { main: AsrSegment[] | null; clips: Record<string, AsrSegment[]> } {
+  const { clips } = captionTranscriptsFromDocument(document, composition, runtimeClips);
+  const shots = composition.shots ?? [];
+  const needsMain = shots.length === 0 || shots.some((shot) => !shot.src);
+  if (!needsMain) return { main: null, clips };
+  const mainAssetId = firstNarrativeAssetId(document);
+  const stored = mainAssetId ? document.semantics.transcripts[mainAssetId] : undefined;
+  const main = stored?.length ? (stored as AsrSegment[]) : runtimeMain?.length ? [...runtimeMain] : null;
+  return { main, clips };
 }
