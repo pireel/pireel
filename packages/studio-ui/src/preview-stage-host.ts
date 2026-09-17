@@ -355,7 +355,14 @@ export class PreviewStageHost {
       querySelectorAll: (selector: string) => shadow.querySelectorAll(selector),
       elementFromPoint: (x: number, y: number) => {
         const [px, py] = toPage(x, y);
-        return shadow.elementFromPoint(px, py);
+        // Hit-test the stage itself, not whatever the page stacks above it. With a shot selected,
+        // the parent-side transform shell (a transparent move surface) covers the stage, and a
+        // single-element hit test retargets it to the host: a click meant for a caption or a
+        // component under that shell would select nothing. Walk the whole stack instead and take
+        // the topmost node that lives in this shadow tree.
+        const stack = typeof shadow.elementsFromPoint === 'function' ? shadow.elementsFromPoint(px, py) : [];
+        const inside = stack.find((candidate) => candidate.getRootNode() === shadow);
+        return inside ?? shadow.elementFromPoint(px, py);
       },
       createElement: (tag: string) => document.createElement(tag),
       createElementNS: (ns: string, tag: string) => document.createElementNS(ns, tag),
