@@ -35,7 +35,7 @@ import { editorErrorMessage } from './editor-error';
 import type { CaptionLineRow } from './captions-panel';
 import { inspectCaptionDocument } from './caption-document-state';
 import { captionTranscriptsByAsset, captionTranscriptsFromDocument, captionTranslationSources } from './caption-transcript-bridge';
-import { sentenceTranslationGroups, stageCaptionTranslationReplacement } from './caption-translation-transaction';
+import { sentenceTranslationUnits, stageCaptionTranslationReplacement } from './caption-translation-transaction';
 import { transcriptInputsFor, type DocumentOpInputs } from '@pireel/studio-engine/document-transaction';
 import type { DocumentCommitter } from './document-commit';
 
@@ -592,17 +592,17 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       // words in source order. Not display cues (linguistically unsound across word-order-divergent
       // pairs, and hundreds of rows blew up the request) and not cut fragments (a translator merges
       // the halves of one sentence back together and renumbers everything after them).
-      const groups = sentenceTranslationGroups(relayMappedCaptionSegs(ensureShots(compRef.current), sources.main, sources.clips));
-      if (!groups.length) {
+      const units = sentenceTranslationUnits(relayMappedCaptionSegs(ensureShots(compRef.current), sources.main, sources.clips));
+      if (!units.length) {
         toast.error(t('workbench.noTranscriptShort'));
         return;
       }
-      const out = await tr(groups.map((g, i) => ({ index: i, text: g.text })), target);
+      const out = await tr(units.map((unit, i) => ({ index: i, text: unit.text })), target);
       // Stage clear + all-source replacement + caption relay first, then publish refs/state exactly
       // once. A missing row, stale source, or locked caption lane leaves the old bilingual layer
       // untouched instead of clearing it and writing only the batches that happened to succeed.
       const staged = stageCaptionTranslationReplacement({
-        groups,
+        units,
         rows: out,
         target,
         mainTranscript: sources.main,

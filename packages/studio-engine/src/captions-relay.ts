@@ -85,7 +85,7 @@ export function mappedCaptionSegs(shots: VideoShot[], narr: AsrSegment[] | null,
  *  the source words, on the translation's own token boundaries (same tokenizer as captions). The
  *  second line follows the cue rhythm 1:1 — approximate by nature (word order diverges across
  *  languages); translation still happens at sentence level upstream for quality. */
-function distributeSub(sub: string, weights: number[]): string[] {
+export function distributeSub(sub: string, weights: number[]): string[] {
   const tokens = wordsFromText(sub, 0, 1).map((w) => w.text);
   const total = weights.reduce((a, b) => a + b, 0);
   if (!tokens.length || !total) return weights.map(() => '');
