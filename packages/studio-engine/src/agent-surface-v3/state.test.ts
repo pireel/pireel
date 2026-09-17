@@ -57,7 +57,8 @@ describe('renderV3State', () => {
     // A music bed fades 1.5 s out by default and the document stores no fadeOutSec for it; the
     // reader still sees the effective value (an agent that asked for exactly the default must not
     // read it back as "no fade").
-    expect(t5.clips![0]).toMatchObject({ volumeDb: -14, fadeInSec: 1.5, fadeOutSec: 1.5 });
+    expect(t5.clips![0]).toMatchObject({ volumeDb: -14, fades: { in: 45, out: 45 } });
+    expect(t5.clips![0]).not.toHaveProperty('fadeInSec');
     const t6 = state.tracks.find((t) => t.id === 't6')!;
     expect(t6.captions).toMatchObject({ on: true, cueCount: 2, preview: 'So today … we start' });
     expect(t6).not.toHaveProperty('clips');

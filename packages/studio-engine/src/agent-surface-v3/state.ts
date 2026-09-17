@@ -132,8 +132,28 @@ function isManagedCaptionTrack(document: EditorDocumentV2, track: EditorTrack): 
   return track.id === document.semantics.managedCaptionTrackId || track.role === 'managedCaptions';
 }
 
+/** The sound fields in the vocabulary set_clip_properties writes them: `mute` and `fades {in, out}`
+ * in frames, never the storage names (`audioMuted` / `muted`, `audioFadeInSec` / `fadeInSec`), so a
+ * value an agent wrote reads back under the name it wrote. */
+function soundView(properties: Record<string, unknown>, fps: number): Record<string, unknown> {
+  const { audioMuted, muted, audioFadeInSec, fadeInSec, audioFadeOutSec, fadeOutSec, ...rest } = properties;
+  const out: Record<string, unknown> = rest;
+  if (audioMuted === true || muted === true) out.mute = true;
+  const inSec = Number(audioFadeInSec ?? fadeInSec ?? 0);
+  const outSec = Number(audioFadeOutSec ?? fadeOutSec ?? 0);
+  if (inSec > 0 || outSec > 0) out.fades = { in: Math.round(inSec * fps), out: Math.round(outSec * fps) };
+  return out;
+}
+
+/** The cut transition into a story-spine clip, as add_transition wrote it. */
+function transitionView(transIn: unknown, fps: number): Record<string, unknown> | undefined {
+  const t = transIn as { effect?: string; durationSec?: number; direction?: string } | undefined;
+  if (!t || !t.effect) return undefined;
+  return { effect: t.effect, durationFrames: Math.round((t.durationSec ?? 1) * fps), ...(t.direction ? { direction: t.direction } : {}) };
+}
+
 /** Render one clip in the v3 shape. Linked audio partners are folded by the caller. */
-export function renderV3Clip(clip: TimelineClip, trackId: string, trackRole?: string): V3ClipView {
+export function renderV3Clip(clip: TimelineClip, trackId: string, trackRole?: string, fps = 30): V3ClipView {
   const view: V3ClipView = { id: clip.id, kind: clip.kind, trackId, frames: [clip.startFrame, clip.startFrame + clip.durationFrames] };
   if (!clip.enabled) view.enabled = false;
   if (clip.linkGroupId) view.linkGroupId = clip.linkGroupId;
@@ -142,8 +162,10 @@ export function renderV3Clip(clip: TimelineClip, trackId: string, trackRole?: st
       view.assetId = clip.assetId;
       view.source = [round3(clip.sourceInSec), round3(clip.sourceOutSec)];
       if (clip.box) view.box = clip.box;
-      const { transIn: _transIn, ...rest } = (clip.properties ?? {}) as Record<string, unknown>;
-      Object.assign(view, stripDefaults(rest, NARRATIVE_DEFAULTS));
+      const { transIn, ...rest } = (clip.properties ?? {}) as Record<string, unknown>;
+      Object.assign(view, soundView(stripDefaults(rest, NARRATIVE_DEFAULTS), fps));
+      const transitionIn = transitionView(transIn, fps);
+      if (transitionIn) view.transitionIn = transitionIn;
       stripIdentityGeometry(view, clip.mediaFraming);
       break;
     }
@@ -152,7 +174,7 @@ export function renderV3Clip(clip: TimelineClip, trackId: string, trackRole?: st
       view.source = [round3(clip.sourceInSec), round3(clip.sourceOutSec)];
       if (clip.box) view.box = clip.box;
       Object.assign(view, stripDefaults({ fit: clip.fit, opacity: clip.opacity, anchorX: clip.anchorX, anchorY: clip.anchorY }, MEDIA_DEFAULTS));
-      if (clip.video) Object.assign(view, stripDefaults(clip.video as Record<string, unknown>, MEDIA_DEFAULTS));
+      if (clip.video) Object.assign(view, soundView(stripDefaults(clip.video as Record<string, unknown>, MEDIA_DEFAULTS), fps));
       stripIdentityGeometry(view, clip.mediaFraming);
       if (clip.keyframes && (clip.keyframes.box?.length || clip.keyframes.opacity?.length)) view.keyframes = clip.keyframes;
       break;
@@ -180,7 +202,7 @@ export function renderV3Clip(clip: TimelineClip, trackId: string, trackRole?: st
       view.anchor = clip.anchor;
       // Effective values (lane fade defaults applied), then only what differs from the audio defaults.
       const effective = effectiveAudioClipProperties((clip.properties ?? {}) as Record<string, unknown>, trackRole);
-      Object.assign(view, stripDefaults(effective.properties, AUDIO_DEFAULTS));
+      Object.assign(view, soundView(stripDefaults(effective.properties, AUDIO_DEFAULTS), fps));
       break;
     }
   }
@@ -267,7 +289,7 @@ export function renderV3State(
         if (partners.length === 1 && visual.length === 1) { folded.add(clip.id); continue; }
       }
       if (!inWindow(clip)) continue;
-      const rendered = renderV3Clip(clip, track.id, track.role);
+      const rendered = renderV3Clip(clip, track.id, track.role, document.canvas.fps);
       if (clip.kind !== 'audio' && clip.linkGroupId) {
         const partner = (audioByGroup.get(clip.linkGroupId) ?? [])[0];
         if (partner && partner.kind === 'audio') {
@@ -366,7 +388,7 @@ export function documentDelta(before: EditorDocumentV2, after: EditorDocumentV2)
     const { startFrame: s1, ...rest1 } = next.clip as unknown as Record<string, unknown>;
     const contentChanged = entry.trackId !== next.trackId || JSON.stringify(rest0) !== JSON.stringify(rest1);
     if (contentChanged) {
-      touched.push(renderV3Clip(next.clip, next.trackId, next.trackRole));
+      touched.push(renderV3Clip(next.clip, next.trackId, next.trackRole, after.canvas.fps));
       const was = sourceOf(entry.clip);
       const now = sourceOf(next.clip);
       // A trimmed clip lost part of its source: report the span that left so it can be re-inserted forward.
@@ -388,12 +410,12 @@ export function documentDelta(before: EditorDocumentV2, after: EditorDocumentV2)
   }
   for (const [id, entry] of afterClips) {
     if (entry.caption || beforeClips.has(id)) continue;
-    touched.push(renderV3Clip(entry.clip, entry.trackId, entry.trackRole));
+    touched.push(renderV3Clip(entry.clip, entry.trackId, entry.trackRole, after.canvas.fps));
   }
   const shifted: V3Delta['shifted'] = [];
   for (const group of shiftGroups.values()) {
     if (group.count >= V3_SHIFT_RULE_MIN) shifted.push({ trackId: group.trackId, fromFrame: group.fromFrame, byFrames: group.byFrames, count: group.count });
-    else for (const id of group.ids) { const entry = afterClips.get(id)!; touched.push(renderV3Clip(entry.clip, entry.trackId, entry.trackRole)); }
+    else for (const id of group.ids) { const entry = afterClips.get(id)!; touched.push(renderV3Clip(entry.clip, entry.trackId, entry.trackRole, after.canvas.fps)); }
   }
   touched.sort((left, right) => left.frames[0] - right.frames[0]);
   if (touched.length) {

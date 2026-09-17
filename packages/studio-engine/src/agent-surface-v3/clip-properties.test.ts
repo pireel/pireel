@@ -94,7 +94,7 @@ describe('clip capability table', () => {
     expect(media).not.toHaveProperty('fit');
     expect(clipPropertyDefaults('media')).toMatchObject({ opacity: 1, fit: 'cover' });
     const bed = clips.find((clip) => clip.id === clipIds.audio)!;
-    expect(bed).toMatchObject({ fadeInSec: 0.5, fadeOutSec: 1 });
+    expect(bed).toMatchObject({ fades: { in: 15, out: 30 } });
     expect(clipPropertyDefaults('audio', 'music')).toMatchObject({ fadeInSec: expect.any(Number), fadeOutSec: expect.any(Number) });
   });
 });
