@@ -277,8 +277,8 @@ describe('全局花字样式 captionStyle', () => {
     c.captionStyle = { preset: 'em-purple-black', yPct: 60, scale: 1.5 };
     const html = assembleHtml(c);
     expect(html).toContain('bottom:40%'); // 100 - yPct
-    // scale=字号系数(不是区域 transform):全局基准 48px × 1.5 = 72px(字号不随预设——预设只管颜色/动效)
-    expect(html).toContain('font-size:72px');
+    // scale=字号系数(不是区域 transform):全局基准 64px × 1.5 = 96px(字号不随预设——预设只管颜色/动效)
+    expect(html).toContain('font-size:96px');
     expect(html).not.toContain('scale(1.5)');
     expect(html).toContain('#cf96ff'); // 预设的强调色进了逐词变色时间轴
     expect(html).not.toContain('scaleX:1'); // 旧 highlight 的扫光动画没了 → 真走了预设通道

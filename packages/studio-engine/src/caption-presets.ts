@@ -17,11 +17,11 @@
  * templates / panels all read from here, don't inline color values elsewhere.
  */
 
-/** Global caption font-size base (px on the width-normalized 1080 canvas, scale=1) — every preset
- *  renders at this size; user scaling multiplies it. 48 matches the short-video industry default
- *  (a mainstream editor portrait captions land at ~48px on a 1080-wide canvas). Layout math (line split budget /
- *  size dropdown / selection box) all anchor here. */
-export const BASE_CAPTION_FONT_PX = 48;
+/** Global caption font-size base (canvas px at scale=1) — every preset renders at this size; user
+ *  scaling multiplies it. 64 is 6% of a 1080-wide portrait canvas: between the 4% a mainstream
+ *  web editor defaults to and the ~8% a desktop NLE lands on for portrait (it sizes by height).
+ *  Layout math (line split budget / size dropdown / selection box) all anchor here. */
+export const BASE_CAPTION_FONT_PX = 64;
 /** Default (non-bold) caption weight — medium 500 reads cleanly on video; the bold toggle jumps to 800 (sub line 700). */
 export const CAPTION_WEIGHT_REGULAR = 500;
 export const CAPTION_WEIGHT_BOLD = 800;
