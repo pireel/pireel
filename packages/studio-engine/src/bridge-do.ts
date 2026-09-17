@@ -142,6 +142,13 @@ export class StudioBridge {
         anchorProject: await this.state.storage?.get('anchorProject') ?? null,
         explicitSelection: await this.state.storage?.get('anchorExplicit') === true });
     }
+    // Outcomes of calls that timed out for the caller and finished in the tab since. The route
+    // attaches them to a get_state it answered offline (no tab connected right now), so a receipt
+    // is never stranded behind the one call that could not reach the bridge.
+    if (url.pathname === '/late' && req.method === 'GET') {
+      const lateReceipts = this.late.splice(0, this.late.length);
+      return Response.json({ lateReceipts });
+    }
     if (url.pathname === '/anchor' && req.method === 'POST') {
       const body = await req.json() as { projectId?: unknown; explicitSelection?: unknown };
       if (typeof body.projectId !== 'string' || !body.projectId || body.projectId.length > 100) {
@@ -286,6 +293,10 @@ export class StudioBridge {
     // Tab closed: pending calls can no longer get a browser reply; failing fast beats waiting for timeout for the agent
     if (!this.state.getWebSockets().length) {
       for (const [id, p] of this.pending) {
+        // A call that already timed out for its caller keeps listening: the tab may only have
+        // dropped the socket while still working (a long cut, a mask) and reports the outcome on
+        // its next connection. Dropping the entry here silently lost that receipt.
+        if (p.late) continue;
         clearTimeout(p.timer);
         p.resolve({ ok: false, error: 'studio_tab_closed' });
         this.pending.delete(id);

@@ -7303,6 +7303,12 @@ export function HyperframesWorkbench({
       setDisplaced(true);
       toast.info(t("workbench.displacedByAnotherWindow"));
     },
+    onConnection: (state) => {
+      // Without this the user sees an agent's edits land "elsewhere" (the cloud copy) while this
+      // page keeps showing its own, and learns about it only when the two are reconciled.
+      if (state === "lost") toast.warn(t("workbench.agentBridgeLost"));
+      else toast.success(t("workbench.agentBridgeRestored"));
+    },
     onExternalCall: (tool, result, input) => {
       const called = tool === "run_v3" && typeof input.name === "string" ? input.name : tool;
       if (called === "get_state" || called === "compose_component") return; // pure queries don't interrupt

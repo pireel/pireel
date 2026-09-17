@@ -141,6 +141,31 @@ describe('StudioBridge DO', () => {
     }
   });
 
+  it('a call that timed out keeps its receipt across a socket drop and hands it to an offline read', async () => {
+    vi.useFakeTimers();
+    try {
+      const { state, sockets } = makeState();
+      const bridge = new StudioBridge(state);
+      bridge.acceptBrowserSocket(new FakeSocket());
+      const p = bridge.fetch(callReq('mask_words', 1_000));
+      await vi.advanceTimersByTimeAsync(1_100);
+      const body = (await (await p).json()) as { ok: boolean; error: string; callId: string };
+      expect(body.error).toBe('tab_timeout');
+      // The tab drops its socket while still working (a heavy tool), then comes back and reports.
+      sockets[0]!.closed = { code: 1006 };
+      bridge.webSocketClose();
+      const again = new FakeSocket();
+      bridge.acceptBrowserSocket(again);
+      bridge.webSocketMessage(again, JSON.stringify({ id: body.callId, ok: true, summary: 'masked 2 words' }));
+      // A get_state answered offline (no tab at that moment) still gets the receipt through /late.
+      const late = (await (await bridge.fetch(new Request('https://do/late'))).json()) as { lateReceipts: Array<{ callId: string; ok: boolean; summary?: string }> };
+      expect(late.lateReceipts).toEqual([expect.objectContaining({ callId: body.callId, ok: true, summary: 'masked 2 words' })]);
+      expect(((await (await bridge.fetch(new Request('https://do/late'))).json()) as { lateReceipts: unknown[] }).lateReceipts).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('单活跃 socket:新标签页顶旧(旧的 close 4000,reason 带新 tab 的 projectId 供同项目判定)', async () => {
     const { state, sockets } = makeState();
     const bridge = new StudioBridge(state);

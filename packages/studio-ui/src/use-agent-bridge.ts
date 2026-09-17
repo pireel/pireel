@@ -28,6 +28,9 @@ export interface AgentBridgeOpts {
    *  project — the single-writer demotion signal: the workbench stops cloud autosave on it.
    *  (An empty/unknown evictor project counts as same-project: demote conservatively.) */
   onDisplaced?: () => void;
+  /** The bridge dropped unexpectedly ('lost': reconnecting in the background; external calls
+   *  fall back to the cloud copy meanwhile) or came back ('restored'). Not fired for eviction. */
+  onConnection?: (state: 'lost' | 'restored') => void;
 }
 
 export interface AgentBridgeHandle {
@@ -47,6 +50,7 @@ export function useAgentBridge(opts: AgentBridgeOpts): AgentBridgeHandle {
     let retries = 0;
     let everConnected = false;
     let queue: Promise<void> = Promise.resolve();
+    let lostNotified = false;
 
     const connect = () => {
       if (!alive) return;
@@ -61,6 +65,10 @@ export function useAgentBridge(opts: AgentBridgeOpts): AgentBridgeHandle {
       }
       ws = sock;
       sock.onopen = () => {
+        if (everConnected && lostNotified) {
+          lostNotified = false;
+          optsRef.current.onConnection?.('restored');
+        }
         everConnected = true;
         retries = 0;
       };
@@ -107,6 +115,10 @@ export function useAgentBridge(opts: AgentBridgeOpts): AgentBridgeHandle {
           return;
         }
         if (!everConnected && retries >= 6) return; // never connected (not logged in, etc.): don't spin
+        if (everConnected && !lostNotified) {
+          lostNotified = true;
+          optsRef.current.onConnection?.('lost');
+        }
         setTimeout(connect, Math.min(30_000, 1_000 * 2 ** retries++));
       };
     };

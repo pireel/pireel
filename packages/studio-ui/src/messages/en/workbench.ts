@@ -366,6 +366,8 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.fetchingClipBytes": "Fetching clip bytes…",
   "workbench.filledIntoElementCard": "Filled into the element card",
   "workbench.filledLabel": 'Filled "{label}"',
+  "workbench.agentBridgeLost": "Connection to the agent dropped; reconnecting. Meanwhile its edits land on the cloud copy.",
+  "workbench.agentBridgeRestored": "Reconnected to the agent",
   "workbench.reclaimedWritership":
     "Took over editing — cloud sync resumed in this window",
   "workbench.nSlotsSkippedNothingToSay":

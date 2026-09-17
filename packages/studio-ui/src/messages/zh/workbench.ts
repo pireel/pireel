@@ -335,6 +335,8 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.fetchingClipBytes": "拉取片段字节…",
   "workbench.filledIntoElementCard": "已填入动态图形卡",
   "workbench.filledLabel": "已填充「{label}」",
+  "workbench.agentBridgeLost": "与 agent 的连接断开,正在重连;此间 agent 的改动会落到云端副本",
+  "workbench.agentBridgeRestored": "已重新连接 agent",
   "workbench.reclaimedWritership": "已接管编辑,本窗口恢复云同步",
   "workbench.nSlotsSkippedNothingToSay": "、{n} 段无可上屏内容已跳过",
   "workbench.slotRemovedNothingToSay": "该时刻无可上屏内容,已移除空占位",
