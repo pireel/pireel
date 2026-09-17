@@ -10,7 +10,7 @@ import { adaptiveGeneratedVideoSpec } from '@pireel/studio-engine/generated-vide
 import type { MutableRefObject } from 'react';
 import { editorErrorMessage } from './editor-error';
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
-import { transcriptInputsFor, type DocumentOp } from '@pireel/studio-engine/document-transaction';
+import type { DocumentOp } from '@pireel/studio-engine/document-transaction';
 import type { AgentTimelineOutcome } from '@pireel/studio-engine/agent-timeline';
 import type { DocumentCommitter, ReplaceOptions, TransactionScope } from './document-commit';
 import { directorPlanFromDocument } from '@pireel/studio-engine/director-plan-artifact';
@@ -39,7 +39,6 @@ import {
   localImageLocator,
   spokenTimelineBeats,
   totalDuration,
-  transcriptContextAt,
   validateComposition,
   validateEditorDocumentV2,
   AGENT_TIMELINE_TOOL_IDS,
@@ -50,7 +49,7 @@ import { type CutSeamEntry, finalizeCutSeams, spans as clipSpans } from '@pireel
 import { parseBlockResponse } from '@pireel/studio-engine/compose';
 import { HARD_LINT_CODES, lintBlock } from '@pireel/studio-engine/block-lint';
 import { type AsrSegment } from '@pireel/studio-engine/build-blocks';
-import { beatsForWindow } from '@pireel/studio-engine/captions-relay';
+import { documentTranscriptContextAt } from '@pireel/studio-engine/spoken-context';
 import { exportRecommendations } from '@pireel/studio-engine/export-options';
 import { parkInteraction } from './interaction-store';
 import { assembleComposeBrief, interpretApplyRaw, type ComposeBriefInput } from '@pireel/studio-engine/briefs';
@@ -134,7 +133,6 @@ import type { FrameCatalogItem } from './use-frame-catalog';
 import type { StudioChatHandle } from './studio-chat';
 import { primaryNarrativeRenderPlan } from './primary-render-plan';
 import { supplementalVisualMedia } from './visual-render-plan';
-import { captionTranscriptsByAsset } from './caption-transcript-bridge';
 import { collectAssetSearchDocuments } from './asset-search-collector';
 import { getLocalVisualModelSnapshot } from './local-visual-search-model';
 import {
@@ -391,10 +389,6 @@ export interface AgentToolCtx {
   // Sources + transcript
   videoFileRef: MutableRefObject<File | null>;
   clipFilesRef: MutableRefObject<Map<string, File>>;
-  asrRef: MutableRefObject<AsrSegment[] | null>;
-  setAsrSentences: (segs: AsrSegment[] | null) => void;
-  clipAsrRef: MutableRefObject<Record<string, AsrSegment[]>>;
-  setClipAsr: (v: Record<string, AsrSegment[]>) => void;
   /** Session cache for project-library speech inspected before timeline placement. Promoting that
    * asset to primary must adopt this transcript instead of asking the provider a second time. */
   localTranscriptCacheRef: MutableRefObject<Map<string, AsrSegment[]>>;
@@ -494,7 +488,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
     listProjectOutputs, resolveProjectOutput, createProjectOutput, duplicateProjectOutput, switchProjectOutput, renameProjectOutput, deleteProjectOutput,
     setSelectedId, setSelectedShotId, selectedIdRef, applyT, tRef, playStopAtRef,
     playingRef, setPlaying, seekBlockSettled, pushUndoSnapshot, undoStackRef, redoStackRef, genIdsRef,
-    markGenerating, videoFileRef, clipFilesRef, asrRef, setAsrSentences, clipAsrRef, localTranscriptCacheRef, currentVideo, pickVideoFile, registerLocalAsset,
+    markGenerating, videoFileRef, clipFilesRef, localTranscriptCacheRef, currentVideo, pickVideoFile, registerLocalAsset,
     ensureClipTranscripts, transcriptForAgent, stepAsr, stepVisual, visualRef, visualBriefRef,
     applyVisualResult, composeBlockChecked,
     noteOf, setDenoise,
@@ -524,12 +518,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
         return (entry ? await loadLocalAssetFile(projectId, entry) : null)
           ?? await loadLocalVideo(asset.locator.localSig);
       };
-      const motionBeats = (startSec: number, durationSec: number) => {
-        const native = spokenTimelineBeats(documentRef.current, startSec, durationSec);
-        return native.length
-          ? native
-          : beatsForWindow(c.shots ?? [], asrRef.current, clipAsrRef.current, startSec, durationSec);
-      };
+      const motionBeats = (startSec: number, durationSec: number) => spokenTimelineBeats(documentRef.current, startSec, durationSec);
       const r1 = (x: unknown) => Math.round(Number(x) * 10) / 10;
       const findBlock = (id: unknown) => c.blocks.find((b) => b.id === id);
       const outputReference = () => ({
@@ -570,9 +559,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
       // Kept as a semantic marker at ripple-heavy call sites; the outer transaction attaches the
       // final delta for every mutation after validation (not just footage edits).
       const withDelta = (res: StudioToolResult): StudioToolResult => res;
-      const currentTranscripts = () => transcriptInputsFor(documentRef.current, asrRef.current, clipAsrRef.current);
       const commitNarrationRanges = (ranges: { fromSec: number; toSec: number }[]) => {
-        const command = commit({ op: 'narration.removeRanges', input: { ranges, ...currentTranscripts() } });
+        const command = commit({ op: 'narration.removeRanges', input: { ranges } });
         if (!command.ok) return command;
         return { ...command, composition: compRef.current };
       };
@@ -607,24 +595,17 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const primaryKnown = !!primaryAssetId
               && Object.prototype.hasOwnProperty.call(current.semantics.transcripts, primaryAssetId);
             const hasStoredTranscript = Object.values(current.semantics.transcripts).some((segments) => segments.length > 0);
-            if (!measuredTiming && (primaryKnown || hasStoredTranscript || !!asrRef.current?.length)) {
-              const storedPrimary = primaryAssetId ? current.semantics.transcripts[primaryAssetId] : undefined;
-              if (!asrRef.current?.length && storedPrimary?.length) {
-                asrRef.current = storedPrimary;
-                setAsrSentences(storedPrimary);
-              }
+            if (!measuredTiming && (primaryKnown || hasStoredTranscript)) {
               await ensureClipTranscripts();
               return {
                 ok: true,
-                summary: hasStoredTranscript || !!asrRef.current?.length
-                  ? t('workbench.readTranscript')
-                  : t('workbench.noSpeechDetected'),
+                summary: hasStoredTranscript ? t('workbench.readTranscript') : t('workbench.noSpeechDetected'),
                 data: { transcript: transcriptForAgent() },
               };
             }
             // Footage placed from the project library has no legacy "main video" file behind it:
             // transcribe the primary asset itself instead of asking the user to add a video.
-            if (primaryAssetId && !primaryKnown && !asrRef.current?.length && !videoFileRef.current) requestedAssetId = primaryAssetId;
+            if (primaryAssetId && !primaryKnown && !videoFileRef.current) requestedAssetId = primaryAssetId;
           }
           if (requestedLocalReference) {
             const resolved = resolveLocalAssetReference(requestedLocalReference, ctx.localAssetIndexRef.current);
@@ -813,11 +794,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             }
             adoption.push({ op: 'transcripts.set', input: { transcripts: { [targetAssetId]: segs } } });
             if (recoveredScript) adoption.push({ op: 'assets.patch', input: { assetId: targetAssetId, metadata: { transcriptText: recoveredScript } } });
-            if (targetAssetId === firstNarrativeAssetId(current)) {
-              videoFileRef.current = file;
-              asrRef.current = segs;
-              setAsrSentences(segs);
-            }
+            if (targetAssetId === firstNarrativeAssetId(current)) videoFileRef.current = file;
             const adopted = commit(adoption, { undo: 'none' });
             if (!adopted.ok) return { ok: false, error: editorErrorMessage(adopted.error) };
             if (!segs.length) {
@@ -842,7 +819,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           if (!segs.length) return { ok: true, summary: t('workbench.noSpeechDetected'), data: { speechDetected: false } };
           // Transcribe inserted clips too so the agent sees every source, including when the
           // user immediately asks what an inserted clip says.
-          if ((compRef.current.shots ?? []).some((s) => s.src)) await ensureClipTranscripts();
+          await ensureClipTranscripts();
           // The full text enters the feed with the receipt (injected once, cached after): the situation snapshot doesn't carry the script
           return { ok: true, summary: t('workbench.transcribedNLines', { n: segs.length }), data: { transcript: transcriptForAgent() } };
         } catch (error) {
@@ -1531,14 +1508,6 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const transcribed = await transcribeForAgent({ assetId, ...(needsMeasure ? { measuredTiming: true } : {}) });
               if (!transcribed.ok) return transcribed;
             }
-            // The primary narrative's stored transcript is also the tab's live main transcript (captions,
-            // script panel): a transcript that arrived unplaced and became primary is adopted here.
-            const primaryAssetId = firstNarrativeAssetId(documentRef.current);
-            const storedPrimary = primaryAssetId ? documentRef.current.semantics.transcripts[primaryAssetId] : undefined;
-            if (!asrRef.current?.length && storedPrimary?.length) {
-              asrRef.current = storedPrimary;
-              setAsrSentences(storedPrimary);
-            }
           }
           if (toolId === 'add_clips' && input.__replacePrimaryTrack === true) {
             const { __replacePrimaryTrack: _privateReplace, ...publicInput } = input;
@@ -1563,12 +1532,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             }
           }
           if (toolId === 'remove_words' || toolId === 'mask_words' || toolId === 'set_captions') {
-            // The engine edits by the document's transcripts: fold the runtime copies in first so
-            // word ids, segment rows and caption sources match what get_transcript just reported.
+            // The engine edits by the document's transcripts; every placed source is transcribed into
+            // the document first so word ids, segment rows and caption sources match what
+            // get_transcript just reported.
             if (toolId !== 'set_captions' && !hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: tEnglish('workbench.noVideoYet') };
             await ensureClipTranscripts();
-            const synced = transcriptInputsFor(documentRef.current, asrRef.current, captionTranscriptsByAsset(documentRef.current, compRef.current, clipAsrRef.current));
-            if (Object.keys(synced).length) commit({ op: 'document.foldMetadata', input: synced }, { undo: 'none' });
           }
           if (toolId === 'split_clips' && input.purpose === 'framing' && visualRef.current) {
             // Framing splits are guarded by browser-local visual analysis: a cut inside a stable
@@ -1705,12 +1673,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const height = typeof input.height === 'number' && Number.isFinite(input.height) ? input.height : null;
               registerLocalAsset(localAssetIndexEntry(imported, { width, height }));
               await pickVideoFile(imported.file, { asSig: sig });
-              // Seed the transcript the helper already produced (pickVideoFile cleared it) so the
+              // Store the transcript the helper already produced on the mounted source so the
               // agent's get_transcript/remove_words work without re-running ASR in the browser.
               const segs = Array.isArray(input.transcript) ? (input.transcript as AsrSegment[]) : [];
-              if (segs.length) {
-                setAsrSentences(segs);
-                asrRef.current = segs;
+              const mountedAssetId = firstNarrativeAssetId(documentRef.current);
+              if (segs.length && mountedAssetId) {
+                commit({ op: 'transcripts.set', input: { transcripts: { [mountedAssetId]: segs } } }, { undo: 'none' });
               }
               return { ok: true, summary: `local source loaded into the studio${segs.length ? ` · ${segs.length} transcript sentences` : ''}` };
             } catch (e) {
@@ -2171,18 +2139,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   url: imageThumb(m.url, 'original'),
                   ...(m.width && m.height ? { w: m.width, h: m.height } : {}),
                 }));
-              // Project-scoped sources: main video + inserted clips (same letter tags as the state snapshot)
-              const tag = new Map<string, string>();
-              for (const s of c.shots ?? []) if (s.src && !tag.has(s.src)) tag.set(s.src, String.fromCharCode(65 + tag.size));
               const mainAssetId = firstNarrativeAssetId(documentRef.current);
               const mainDurationSec = mainAssetId
                 ? documentRef.current.assets[mainAssetId]?.metadata.durationSec
                 : undefined;
               const project = {
                 ...(mainDurationSec ? { mainVideo: { durationSec: r1(mainDurationSec) } } : {}),
-                ...(tag.size
-                  ? { insertedClips: [...tag.entries()].map(([src, tg]) => ({ clip: tg, transcribed: !!clipAsrRef.current[src]?.length })) }
-                  : {}),
               };
               const assets = scope === 'mine' ? localAssets : cloudAssets;
               return {
@@ -2923,11 +2885,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               speechPaddingSec: Number(input.speechPaddingSec),
             });
             const detectedRanges = await race(detectSpeechSilenceCuts(file, settings));
-            const transcriptRows = asrRef.current ?? [];
             const plan = planNarrationCuts(documentRef.current, {
               assetId,
               sourceRanges: detectedRanges,
-              transcriptSegments: transcriptRows,
+              transcriptSegments: documentRef.current.semantics.transcripts[assetId] ?? [],
               transcriptProtection: 'all',
               bridgeSpeechlessIslandSec: 0.5,
             });
@@ -3539,15 +3500,10 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
 async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Record<string, unknown>): Promise<StudioToolResult> {
   const {
     compRef, documentRef, commit, setSelectedId, setSelectedShotId, applyT, tRef,
-    pushUndoSnapshot, genIdsRef, videoFileRef, clipFilesRef, asrRef, clipAsrRef,
+    pushUndoSnapshot, genIdsRef, videoFileRef, clipFilesRef,
   } = ctx;
     const c2 = compRef.current;
-    const motionBeats = (startSec: number, durationSec: number) => {
-      const native = spokenTimelineBeats(documentRef.current, startSec, durationSec);
-      return native.length
-        ? native
-        : beatsForWindow(c2.shots ?? [], asrRef.current, clipAsrRef.current, startSec, durationSec);
-    };
+    const motionBeats = (startSec: number, durationSec: number) => spokenTimelineBeats(documentRef.current, startSec, durationSec);
     const patchBlock = (clipId: string, block: Parameters<typeof applyOverlayDocumentEdits>[0]['updates'][number]['block']) =>
       commit({ op: 'overlay.patch', input: { updates: [{ clipId, block }] } }, { undo: 'none' });
     const insertBlock = (block: Block) => commit({ op: 'overlay.insert', input: { block } }, { undo: 'none' });
@@ -3565,14 +3521,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           };
         }
         const composeContext = (): StudioToolResult => {
-          const renderTimeline = canonicalRenderTimeline(c2, documentRef.current, ctx.resolveAssetUrl);
-          const scriptAt = (atSec: number) => transcriptContextAt({
-            shots: c2.shots ?? [],
-            placements: renderTimeline.placements,
-            mainTranscript: asrRef.current ?? [],
-            clipTranscripts: clipAsrRef.current,
-            atSec,
-          });
+          const scriptAt = (atSec: number) => documentTranscriptContextAt(documentRef.current, atSec);
           const contextForWindow = (startSec: number, durationSec: number, sceneId?: string) => {
             const script = scriptAt(startSec);
             const beats = motionBeats(startSec, durationSec);

@@ -151,6 +151,7 @@ import {
   titleBlock,
 } from "@pireel/studio-engine/composition";
 import { canonicalJson } from '@pireel/studio-engine/stable-json';
+import { runtimeTranscriptsFollowingDocument } from './runtime-transcripts';
 import { transcriptInputsFor, type DocumentOp } from '@pireel/studio-engine/document-transaction';
 import { applyEditorDocumentPersistenceMetadata } from '@pireel/studio-engine/project-document';
 import { DocumentCommitter } from './document-commit';
@@ -6545,8 +6546,15 @@ export function HyperframesWorkbench({
             return;
           }
           const segs = await studioProviders().transcriber.transcribe(got.file, { projectId });
+          // The document owns the transcript: land it on the clip's asset if the source is still
+          // placed, then mirror the runtime copy so the re-lay below can read it right away.
+          const landedAssetId = primaryNarrativeClips(editorDocumentRef.current)
+            .find((clip) => clip.id === shot.id || compRef.current.shots?.some((s) => s.id === clip.id && s.src === src))?.assetId;
+          if (landedAssetId) {
+            commit({ op: "transcripts.set", input: { transcripts: { [landedAssetId]: segs } } }, { undo: "none" });
+          }
           setClipAsr((m) => ({ ...m, [src]: segs }));
-          clipAsrRef.current = { ...clipAsrRef.current, [src]: segs }; // mirror immediately: the re-lay below needs to read it
+          clipAsrRef.current = { ...clipAsrRef.current, [src]: segs };
           // The native caption derivation effect observes clipAsr and relays this source atomically.
         } catch (e) {
           console.warn("[studio] clip transcribe failed", e);
@@ -6625,7 +6633,6 @@ export function HyperframesWorkbench({
     selectedIdRef,
     selectedShotIdRef,
     tRef,
-    asrRef,
     visualRef,
     videoSigRef,
     videoFileRef,
@@ -6633,6 +6640,7 @@ export function HyperframesWorkbench({
     clipAsrBusyRef,
     clipAsrFailRef,
     setClipAsr,
+    commit,
     matteFileForShot,
     getActiveOutput: getActiveOutputForAgent,
   });
@@ -7199,10 +7207,6 @@ export function HyperframesWorkbench({
     markGenerating,
     videoFileRef,
     clipFilesRef,
-    asrRef,
-    setAsrSentences,
-    clipAsrRef,
-    setClipAsr,
     localTranscriptCacheRef,
     currentVideo,
     pickVideoFile,
@@ -8109,49 +8113,21 @@ export function HyperframesWorkbench({
   }, [projectId, localAssetIndexSyncReady, localAssetIndexRev]);
   // Runtime transcript refs follow the document. A transcript the document changed on its own
   // (re-extraction, an agent edit, a cue edit, a rebase onto the server copy) must not be re-imposed
-  // by a stale runtime copy on the next caption relay: the clip copies are matched by source and the
-  // main copy by the first narrative asset, and only a copy whose content differs is replaced.
+  // by a stale runtime copy on the next caption relay, and a transcript that arrived through a tool
+  // while the runtime copy was empty is adopted here.
   useEffect(() => {
-    const document = editorDocumentRef.current;
-    const metadata = nativeProjectSessionMetadata(document, compRef.current);
-    const nextClips = { ...clipAsrRef.current };
-    let clipsChanged = false;
-    // A runtime copy may also sit under the asset id (a boot before the composition existed, an
-    // agent write-back): every alias of the same asset follows, or the stale one re-imposes itself.
-    const primary = document.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId);
-    const sourceByClipId = new Map((compRef.current.shots ?? []).map((shot) => [shot.id, shot.src] as const));
-    const aliasesByAsset = new Map<string, Set<string>>();
-    for (const clip of primary?.clips ?? []) {
-      if (clip.kind !== "narrative") continue;
-      const aliases = aliasesByAsset.get(clip.assetId) ?? new Set<string>();
-      // The same keys the engine's transcript sync accepts for this asset.
-      aliases.add(clip.assetId);
-      aliases.add(`blob:pireel-offline/${clip.assetId}`);
-      const remoteUrl = document.assets[clip.assetId]?.locator.remoteUrl;
-      if (remoteUrl) aliases.add(remoteUrl);
-      const source = sourceByClipId.get(clip.id);
-      if (source) aliases.add(source);
-      aliasesByAsset.set(clip.assetId, aliases);
+    const next = runtimeTranscriptsFollowingDocument(editorDocumentRef.current, compRef.current, {
+      main: asrRef.current,
+      clips: clipAsrRef.current,
+    });
+    if (!next) return;
+    if (next.clips !== clipAsrRef.current) {
+      clipAsrRef.current = next.clips;
+      setClipAsr(next.clips);
     }
-    for (const [assetId, aliases] of aliasesByAsset) {
-      const segments = document.semantics.transcripts[assetId] as AsrSegment[] | undefined;
-      if (!segments?.length) continue;
-      for (const alias of aliases) {
-        if (!(alias in nextClips) && !(alias in metadata.clipTranscripts)) continue;
-        if (canonicalJson(nextClips[alias] ?? null) === canonicalJson(segments)) continue;
-        nextClips[alias] = segments;
-        clipsChanged = true;
-      }
-    }
-    if (clipsChanged) {
-      clipAsrRef.current = nextClips;
-      setClipAsr(nextClips);
-    }
-    const mainId = firstNarrativeAssetId(document);
-    const main = mainId ? (document.semantics.transcripts[mainId] as AsrSegment[] | undefined) : undefined;
-    if (main && asrRef.current && canonicalJson(asrRef.current) !== canonicalJson(main)) {
-      asrRef.current = main;
-      setAsrSentences(main);
+    if (next.main !== asrRef.current) {
+      asrRef.current = next.main;
+      setAsrSentences(next.main);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editorDocument]);

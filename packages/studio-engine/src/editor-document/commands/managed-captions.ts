@@ -351,6 +351,33 @@ export function spokenTimelineBeats(
   });
 }
 
+/**
+ * The speech clip playing at a timeline second under the managed caption source selection, with
+ * the source-clock second it maps to. A moment in a gap resolves to the nearest selected clip so a
+ * component placed over silence still describes the speech around it. Null when no selected clip
+ * carries a transcript.
+ */
+export function spokenSourceAtTimelineSecond(
+  document: EditorDocumentV2,
+  atSec: number,
+): { clip: SpeechTimelineClip; sourceSec: number; distanceSec: number } | null {
+  if (!Number.isFinite(atSec)) return null;
+  const fps = document.canvas.fps;
+  const selection = document.semantics.managedCaptionSource ?? { mode: 'auto' as const };
+  let best: { clip: SpeechTimelineClip; sourceSec: number; distanceSec: number } | null = null;
+  for (const clip of selectedSpeechClips(document, selection)) {
+    if (!(document.semantics.transcripts[clip.assetId]?.length)) continue;
+    const startSec = timelineFramesToSeconds(clip.startFrame, fps);
+    const endSec = timelineFramesToSeconds(clip.startFrame + clip.durationFrames, fps);
+    const distanceSec = atSec < startSec ? startSec - atSec : atSec > endSec ? atSec - endSec : 0;
+    if (best && distanceSec >= best.distanceSec) continue;
+    const range = sourceRange(clip, fps);
+    const progress = endSec > startSec ? Math.min(1, Math.max(0, (atSec - startSec) / (endSec - startSec))) : 0;
+    best = { clip, sourceSec: range.start + progress * (range.end - range.start), distanceSec };
+  }
+  return best;
+}
+
 function priorSourceKeys(document: EditorDocumentV2, clips: readonly TimelineClip[]): Map<string, string> {
   const keys = new Map<string, string>();
   for (const clip of clips) {

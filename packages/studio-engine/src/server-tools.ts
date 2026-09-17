@@ -35,7 +35,6 @@ import {
   renderBlock,
   spokenTimelineBeats,
   totalDuration,
-  transcriptContextAt,
   validateComposition,
   validateEditorDocumentV2,
 } from './composition';
@@ -43,7 +42,7 @@ import { parseBlockResponse } from './compose';
 import { HARD_LINT_CODES, lintBlock } from './block-lint';
 import type { StudioProjectContext, TranscriptSegment } from './project-dto';
 import { type AsrSegment, desegmentCues } from './build-blocks';
-import { beatsForWindow } from './captions-relay';
+import { documentTranscriptContextAt } from './spoken-context';
 import { ensureTemplatesRegistered } from './templates';
 import { mediaSearchTranscriptsFromDocument, searchProjectMedia } from './media-search';
 import { normalizeProjectOutputs } from './project-outputs';
@@ -97,16 +96,6 @@ const tabRequired = (detail: string, fix = TAB_REQUIRED_FIX): ServerToolOutcome 
 // the short-lived cue-split extraction scheme merge back to sentences, so offline get_transcript / cut ranges / captions
 // see the SAME rows as the browser. Idempotent — sentence transcripts pass through by reference.
 const asAsr = (segs: TranscriptSegment[] | undefined): AsrSegment[] => desegmentCues((segs ?? []) as AsrSegment[]);
-
-/** Temporary runtime projection for prompt helpers that still label inserted sources by render URL. */
-const projectedClipTranscripts = (project: ServerToolProject): Record<string, AsrSegment[]> => {
-  const assetIdByClipId = new Map(primaryNarrativeClips(project.document).map((clip) => [clip.id, clip.assetId]));
-  return Object.fromEntries((projectDocumentToComposition(project.document).shots ?? []).flatMap((shot) => {
-    const assetId = assetIdByClipId.get(shot.id);
-    const segments = assetId ? project.document.semantics.transcripts[assetId] : undefined;
-    return shot.src && segments?.length ? [[shot.src, asAsr(segments)] as const] : [];
-  }));
-};
 
 function shotsOf(p: ServerToolProject): VideoShot[] {
   return projectDocumentToComposition(p.document).shots ?? [];
@@ -380,26 +369,12 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const fps = p.document.canvas.fps;
       const atSecIn = Number.isInteger(input.atFrame) ? (input.atFrame as number) / fps : undefined;
       const durationSecIn = Number.isInteger(input.durationFrames) ? (input.durationFrames as number) / fps : undefined;
-      const mainTranscript: AsrSegment[] = [];
-      const clipTranscripts = projectedClipTranscripts(p);
-      const placements = editorDocumentRenderPlan(p.document).narrative.map((entry) => ({
-        shotId: entry.clipId,
-        startSec: entry.startSec,
-        endSec: entry.endSec,
-      }));
-      const scriptAt = (atSec: number) => transcriptContextAt({
-        shots: c.shots ?? [],
-        placements,
-        mainTranscript,
-        clipTranscripts,
-        atSec,
-      });
+      // Spoken context and beats come from the document's transcripts through native clip
+      // placement: the same words the tab and the bridge read, with no projected shot vocabulary.
+      const scriptAt = (atSec: number) => documentTranscriptContextAt(p.document, atSec);
       const contextForWindow = (startSec: number, durationSec: number, sceneId?: string) => {
         const script = scriptAt(startSec);
-        const beats = spokenTimelineBeats(p.document, startSec, durationSec);
-        const resolvedBeats = beats.length
-          ? beats
-          : beatsForWindow(c.shots ?? [], mainTranscript, clipTranscripts, startSec, durationSec);
+        const resolvedBeats = spokenTimelineBeats(p.document, startSec, durationSec);
         const sceneContext = resolveDirectorSceneContext(p.document, {
           ...(sceneId ? { sceneId } : {}),
           startFrame: Math.round(startSec * p.document.canvas.fps),

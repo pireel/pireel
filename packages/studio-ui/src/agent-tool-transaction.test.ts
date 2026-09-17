@@ -1007,9 +1007,9 @@ describe('Agent composition transaction boundary', () => {
     expect(words.ok, JSON.stringify(words)).toBe(true);
     expect((words.data as { words: unknown[] }).words).toHaveLength(1);
     expect(providerMocks.transcribe).toHaveBeenCalledTimes(1);
-    expect(h.ctx.asrRef.current).toEqual(transcript);
+    // The document owns the transcript; the tab's runtime copies follow it outside the tool layer.
     expect(h.documentRef.current.semantics.transcripts[assetId]).toEqual(transcript);
-    expect(setAsrSentences).toHaveBeenCalledWith(transcript);
+    expect(setAsrSentences).not.toHaveBeenCalled();
   });
 
   it('persists transcript state when a placed local video is referenced with its list_assets id', async () => {
@@ -1049,10 +1049,7 @@ describe('Agent composition transaction boundary', () => {
     expect(h.documentRef.current.semantics.transcripts[assetId]).toEqual([
       { start: 0.2, end: 2.4, text: '这段口播必须写回项目' },
     ]);
-    expect(h.ctx.asrRef.current).toEqual([
-      { start: 0.2, end: 2.4, text: '这段口播必须写回项目' },
-    ]);
-    expect(setAsrSentences).toHaveBeenCalled();
+    expect(setAsrSentences).not.toHaveBeenCalled();
   });
 
   it('lazily heals the exact legacy five-second primary placeholder after probing the real source', async () => {
