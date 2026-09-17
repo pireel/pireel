@@ -6,6 +6,7 @@ import {
 } from '@pireel/studio-engine/build-blocks';
 import { applyCaptionDocumentEdit, type Composition, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import type { MappedSeg } from '@pireel/studio-engine/captions-relay';
+import { joinWords } from '@pireel/studio-engine/caption-fx';
 import { captionTranscriptsByAsset } from './caption-transcript-bridge';
 import { editorErrorMessage } from './editor-error';
 
@@ -107,4 +108,36 @@ export function replaceCaptionTranslationsTransaction(input: {
   });
   if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error) };
   return { ...staged, document: edit.document };
+}
+
+/**
+ * The translation unit is the sentence, never the cut fragment. A removed word in the middle of a
+ * sentence leaves two surviving runs of words, and the relay maps them as two fragments; sent as
+ * two rows ("大家好，客时间寄来的" / "张纸。") the translator merges them back into one sentence and
+ * renumbers everything after it. Fold the fragments of one source sentence into a single row (words
+ * in source order) so each row is a complete sentence; the stored sentence translation is then
+ * distributed over the fragments' cues at render time.
+ */
+export function sentenceTranslationGroups(fragments: readonly MappedSeg[]): MappedSeg[] {
+  const bySentence = new Map<string, MappedSeg[]>();
+  for (const fragment of fragments) {
+    const key = `${fragment.ref.src ?? ''}|${fragment.ref.seg}`;
+    bySentence.set(key, [...(bySentence.get(key) ?? []), fragment]);
+  }
+  const out: MappedSeg[] = [];
+  for (const parts of bySentence.values()) {
+    const words = parts
+      .flatMap((part) => part.words)
+      .sort((left, right) => (left.si ?? 0) - (right.si ?? 0));
+    const first = parts.reduce((earliest, part) => (part.start < earliest.start ? part : earliest));
+    out.push({
+      ...first,
+      words,
+      text: joinWords(words.map((word) => word.text)),
+      ref: { ...first.ref, w0: words[0]!.si ?? 0, w1: words[words.length - 1]!.si ?? 0 },
+      start: Math.min(...parts.map((part) => part.start)),
+      end: Math.max(...parts.map((part) => part.end)),
+    });
+  }
+  return out.sort((left, right) => left.start - right.start);
 }

@@ -35,7 +35,7 @@ import { editorErrorMessage } from './editor-error';
 import type { CaptionLineRow } from './captions-panel';
 import { inspectCaptionDocument } from './caption-document-state';
 import { captionTranscriptsByAsset, captionTranscriptsFromDocument, captionTranslationSources } from './caption-transcript-bridge';
-import { stageCaptionTranslationReplacement } from './caption-translation-transaction';
+import { sentenceTranslationGroups, stageCaptionTranslationReplacement } from './caption-translation-transaction';
 import { transcriptInputsFor, type DocumentOpInputs } from '@pireel/studio-engine/document-transaction';
 import type { DocumentCommitter } from './document-commit';
 
@@ -588,11 +588,11 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     try {
       await ensureClipTranscripts(); // translate insert sources too, don't produce half-done bilingual
       const sources = sourcesFor();
-      // Translate SENTENCE FRAGMENTS as they survive the edit (mappedCaptionSegs): the post-cut
-      // sentence text, in edited order — the unit the audience actually hears. NOT display cues:
-      // cue-fragment translation is linguistically unsound across word-order-divergent language
-      // pairs, and hundreds of cue rows blew up the request (truncated output → translate_empty).
-      const groups = relayMappedCaptionSegs(ensureShots(compRef.current), sources.main, sources.clips);
+      // Translate SENTENCES as they survive the edit: one row per source sentence, its surviving
+      // words in source order. Not display cues (linguistically unsound across word-order-divergent
+      // pairs, and hundreds of rows blew up the request) and not cut fragments (a translator merges
+      // the halves of one sentence back together and renumbers everything after them).
+      const groups = sentenceTranslationGroups(relayMappedCaptionSegs(ensureShots(compRef.current), sources.main, sources.clips));
       if (!groups.length) {
         toast.error(t('workbench.noTranscriptShort'));
         return;
