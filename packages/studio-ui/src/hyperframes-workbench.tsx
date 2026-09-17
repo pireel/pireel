@@ -8728,7 +8728,21 @@ export function HyperframesWorkbench({
                         overlayRef={rotateOverlayRef}
                         bodyMove
                         outset={0}
-                        onMovePointerDown={(event) =>
+                        onMovePointerDown={(event) => {
+                          // Point what you see: the shell exists to drag the picture, but anything
+                          // drawn above the picture under the pointer (a caption line, a component,
+                          // another visual clip) takes the click as if the shell were not there.
+                          const host = stageHostsRef.current[bufsRef.current.active];
+                          const hit = host?.hitTest(event.clientX, event.clientY);
+                          if (hit?.closest("[data-composition-id], [data-hf-visual-clip]")) {
+                            const rect = host!.element.getBoundingClientRect();
+                            postPreview({
+                              type: "hf:pickAt",
+                              x: (event.clientX - rect.left) / Math.max(1, rect.width),
+                              y: (event.clientY - rect.top) / Math.max(1, rect.height),
+                            });
+                            return;
+                          }
                           canvasGripDrag(event, {
                             box: selectedCanvasMedia.box,
                             onLive: (box) =>
@@ -8747,8 +8761,8 @@ export function HyperframesWorkbench({
                               ),
                             onPick: (x, y) =>
                               postPreview({ type: "hf:pickAt", x, y }),
-                          })
-                        }
+                          });
+                        }}
                         onScalePointerDown={(event, sgnX, sgnY) =>
                           canvasScaleDrag(
                             event,

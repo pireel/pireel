@@ -161,6 +161,14 @@ export class PreviewStageHost {
     this.element.focus({ preventScroll: true });
   }
 
+  /** The topmost stage element under a page point, looking through whatever the page stacks above
+   * the stage (a selection shell, a toolbar): the element the user sees at that point. */
+  hitTest(clientX: number, clientY: number): Element | null {
+    const shadow = this.shadow as ShadowRoot & { elementsFromPoint?: (x: number, y: number) => Element[] };
+    const stack = typeof shadow.elementsFromPoint === 'function' ? shadow.elementsFromPoint(clientX, clientY) : [];
+    return stack.find((candidate) => candidate.getRootNode() === shadow) ?? null;
+  }
+
   /** Current scale between composition pixels and page pixels (the host's CSS transform). */
   scale(): number {
     const layoutWidth = this.element.offsetWidth || 1;
