@@ -84,6 +84,8 @@ export interface EditorTrack {
   syncLocked: boolean;
   /** Global order across non-primary visual, graphics and caption tracks. Larger renders above smaller. */
   stackOrder: number;
+  /** A lane created on purpose (manage_tracks) survives commits while empty; derived lanes are pruned. */
+  keepEmpty?: boolean;
   clips: TimelineClip[];
 }
 

@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { normalizeCommittedDocument } from './document-transaction';
+import { compositionToEditorDocument, projectDocumentToComposition } from './project-document';
+import { emptyComposition } from './composition-core';
 import { applyCaptionDocumentEdit } from './caption-document-edit';
 import { audioClipDefaults } from './audio-tracks';
 import { emptyEditorDocumentV2, parseEditorDocumentV2, projectV2ToLegacyComposition } from './editor-document';
@@ -937,6 +940,33 @@ describe('shared agent timeline atoms', () => {
     expect(clips.find((clip) => clip.id === 'camera-clip')).toMatchObject({ startFrame: 30 });
     expect(clips.find((clip) => clip.id === 'mic-clip')).toMatchObject({ startFrame: 0 });
     expect(clips.find((clip) => clip.id === 'camera-clip')!.linkGroupId).toBe(clips.find((clip) => clip.id === 'mic-clip')!.linkGroupId);
+    expect(synced.data).toMatchObject({ moves: [
+      { clipId: 'camera-clip', fromFrame: 30, toFrame: 30, byFrames: 0 },
+      { clipId: 'mic-clip', fromFrame: 0, toFrame: 0, byFrames: 0 },
+    ] });
+  });
+
+  it('sync reports the frames each target actually moved by', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', { assets: [
+      { id: 'camera', kind: 'video', url: 'https://cdn.example/camera.mp4', durationSec: 40 },
+      { id: 'hit', kind: 'audio', url: 'https://cdn.example/hit.wav', durationSec: 2 },
+    ] }).document!;
+    document = runAgentTimelineTool(document, 'add_clips', { clips: [
+      { id: 'camera-clip', assetId: 'camera', startFrame: 0, durationFrames: 1200 },
+      { id: 'hit-clip', assetId: 'hit', startFrame: 690, durationFrames: 60 },
+    ] }).document!;
+    // The hit's transient sits 0.5 s into its clip; it must land on the impact at 24 s → clip starts at 705.
+    const synced = runAgentTimelineTool(document, 'manage_clip_links', {
+      action: 'sync', referenceClipId: 'camera-clip', referenceMarkerSec: 24,
+      targets: [{ clipId: 'hit-clip', markerSec: 0.5 }],
+    });
+    expect(synced.ok).toBe(true);
+    expect(synced.data).toMatchObject({ moves: [
+      { clipId: 'camera-clip', fromFrame: 0, toFrame: 0, byFrames: 0 },
+      { clipId: 'hit-clip', fromFrame: 690, toFrame: 705, byFrames: 15 },
+    ] });
+    expect(synced.data).not.toHaveProperty('shiftedFrames');
   });
 
   it('maps a declared source BPM grid through a trimmed/retimed audio clip', () => {
@@ -1033,5 +1063,43 @@ describe('remove_clips and swap_clip_media (v3)', () => {
     expect(runAgentTimelineTool(document, 'swap_clip_media', { clipId: 's2', assetId: 'nope' })).toMatchObject({ ok: false, error: 'unknown_id', data: { path: 'assetId' } });
     expect(runAgentTimelineTool(document, 'swap_clip_media', { clipId: 's2', assetId: 'voice' }).ok).toBe(false);
     expect(runAgentTimelineTool(document, 'set_clip_properties', { items: [{ clipId: 's2', assetId: 'v2' }] })).toMatchObject({ ok: false, error: 'unknown_field' });
+  });
+});
+
+describe('manage_tracks create (agent-created lanes)', () => {
+  it('returns the new track id and the empty lane survives the commit normalizer', () => {
+    const document = emptyEditorDocumentV2({ fps: 30 });
+    const created = runAgentTimelineTool(document, 'manage_tracks', { action: 'create', type: 'audio', role: 'narration', name: '临时旁白轨' });
+    expect(created.ok).toBe(true);
+    const trackId = (created.data as { trackId: string }).trackId;
+    expect(trackId).toMatch(/^track_audio/);
+    const committed = normalizeCommittedDocument(created.document!);
+    expect(committed.timeline.tracks.find((track) => track.id === trackId)).toMatchObject({ type: 'audio', role: 'narration', clips: [] });
+    // Removing it is still an explicit act.
+    const removed = runAgentTimelineTool(committed, 'manage_tracks', { action: 'remove', trackId });
+    expect(removed.ok).toBe(true);
+    expect((removed.data as { trackId: string }).trackId).toBe(trackId);
+    expect(removed.document!.timeline.tracks.some((track) => track.id === trackId)).toBe(false);
+  });
+});
+
+describe('add_clips duplicate (graphics lane selection)', () => {
+  it('copies a graphic onto a graphics lane even when a B-roll lane shares the stack order', () => {
+    const composition = {
+      ...emptyComposition(),
+      video: { url: 'blob:main', durationSec: 20 },
+      shots: [{ id: 'main', srcStart: 0, srcEnd: 20, treatment: 'full' as const }],
+      blocks: [{ id: 'card', templateId: 'custom', slots: { innerHtml: '<div>1</div>', timelineBody: '' }, startSec: 1, durationSec: 3, trackIndex: 2 }],
+    };
+    let document = compositionToEditorDocument({ projectId: 'dup', composition, videoSig: 'sig' }).document;
+    const graphicsOrder = document.timeline.tracks.find((track) => track.clips.some((clip) => clip.id === 'card'))!.stackOrder;
+    const broll = runAgentTimelineTool(document, 'manage_tracks', { action: 'create', type: 'visual', role: 'broll', trackId: 'track_broll', stackOrder: graphicsOrder });
+    expect(broll.ok).toBe(true);
+    document = broll.document!;
+    const copied = runAgentTimelineTool(document, 'add_clips', { duplicate: [{ clipId: 'card', startFrame: 300 }] });
+    expect(copied.ok, JSON.stringify(copied)).toBe(true);
+    const owner = copied.document!.timeline.tracks.find((track) => track.clips.some((clip) => clip.kind === 'graphic' && clip.startFrame === 300));
+    expect(owner?.type).toBe('graphics');
+    expect(projectDocumentToComposition(copied.document!).blocks).toHaveLength(2);
   });
 });

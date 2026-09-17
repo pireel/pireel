@@ -75,6 +75,7 @@ export function insertEditorTrack(
     locked: input.locked ?? false,
     syncLocked: input.syncLocked ?? true,
     stackOrder: input.stackOrder ?? maxStackOrder + 1,
+    ...(input.keepEmpty ? { keepEmpty: true } : {}),
     clips: input.clips ? [...input.clips] : [],
   };
   const insertAt = index == null

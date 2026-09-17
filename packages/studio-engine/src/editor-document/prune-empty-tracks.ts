@@ -23,6 +23,7 @@ export function pruneEmptyNonPrimaryTracks(
   const removedTrackIds = document.timeline.tracks
     .filter((track) => (
       track.clips.length === 0
+      && !track.keepEmpty
       && track.id !== document.semantics.primaryNarrativeTrackId
       && track.role !== 'primaryNarrative'
       && !(preserveManagedCaptions && track.role === 'managedCaptions')

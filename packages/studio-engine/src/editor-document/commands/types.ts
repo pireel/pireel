@@ -52,6 +52,8 @@ export interface InsertTrackInput {
   syncLocked?: boolean;
   stackOrder?: number;
   clips?: TimelineClip[];
+  /** Keep the lane through commits while it holds no clips. */
+  keepEmpty?: boolean;
 }
 
 export type TrackPatch = Partial<Pick<EditorTrack,

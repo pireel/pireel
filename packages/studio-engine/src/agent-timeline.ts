@@ -1253,6 +1253,9 @@ export function manageTracks(document: EditorDocumentV2, input: Input): AgentTim
       ...(typeof input.muted === 'boolean' ? { muted: input.muted } : {}), ...(typeof input.hidden === 'boolean' ? { hidden: input.hidden } : {}),
       ...(typeof input.locked === 'boolean' ? { locked: input.locked } : {}), ...(typeof input.syncLocked === 'boolean' ? { syncLocked: input.syncLocked } : {}),
       ...(typeof input.stackOrder === 'number' ? { stackOrder: Math.trunc(input.stackOrder) } : {}),
+      // A lane the agent asked for is meant to be filled later; the commit normalizer must not
+      // prune it the moment it is created.
+      keepEmpty: true,
     } });
   } else if (action === 'update') {
     const trackId = string(input.trackId);
@@ -1272,7 +1275,8 @@ export function manageTracks(document: EditorDocumentV2, input: Input): AgentTim
     result = applyEditorCommand(document, { type: 'track.remove', trackId });
   } else return fail('action must be create, update, move, or remove');
   if (!result.ok) return fail(result.error.message, result.error);
-  return mutation(result.document, `${action === 'create' ? 'Created' : action === 'remove' ? 'Removed' : 'Updated'} track`, [result.receipt]);
+  const trackId = action === 'create' ? result.receipt.affectedTrackIds[0] : string(input.trackId);
+  return mutation(result.document, `${action === 'create' ? 'Created' : action === 'remove' ? 'Removed' : 'Updated'} track`, [result.receipt], { trackId });
 }
 
 export function manageLinks(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
@@ -1298,11 +1302,13 @@ export function syncClips(document: EditorDocumentV2, input: Input): AgentTimeli
   if (referenceMarkerSec > timelineFramesToSeconds(reference.clip.durationFrames, document.canvas.fps)) return fail('referenceMarkerSec falls after the reference clip');
   const referenceMarkerFrame = reference.clip.startFrame + secondsToTimelineFrames(referenceMarkerSec, document.canvas.fps);
   const desired = new Map<string, number>();
+  const before = new Map<string, number>([[referenceClipId!, reference.clip.startFrame]]);
   for (const [index, raw] of targets.entries()) {
     const target = (raw ?? {}) as Input;
     const clipId = string(target.clipId);
     const found = clipId ? locatedClip(document, clipId) : undefined;
     if (!found || clipId === referenceClipId) return fail(`targets[${index}] must identify a different clip`);
+    before.set(clipId!, found.clip.startFrame);
     const markerSec = Number(target.markerSec);
     if (!Number.isFinite(markerSec) || markerSec < 0 || markerSec > timelineFramesToSeconds(found.clip.durationFrames, document.canvas.fps)) {
       return fail(`targets[${index}].markerSec must be inside the clip`);
@@ -1337,8 +1343,13 @@ export function syncClips(document: EditorDocumentV2, input: Input): AgentTimeli
     next = linked.document;
     receipts.push(linked.receipt);
   }
+  // Each clip's real move: the reference only moves when the group had to be pushed off frame 0.
+  const moves = [...before].map(([clipId, fromFrame]) => {
+    const toFrame = clipId === referenceClipId ? fromFrame + shiftFrames : desired.get(clipId)! + shiftFrames;
+    return { clipId, fromFrame, toFrame, byFrames: toFrame - fromFrame };
+  });
   return mutation(next, `Synced ${desired.size} clip${desired.size === 1 ? '' : 's'} to ${referenceClipId}`, receipts, {
-    referenceClipId, targetClipIds: [...desired.keys()], shiftedFrames: shiftFrames,
+    referenceClipId, targetClipIds: [...desired.keys()], moves,
   });
 }
 
