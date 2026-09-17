@@ -1125,3 +1125,15 @@ describe('add_clips duplicate (graphics lane selection)', () => {
     expect(projectDocumentToComposition(copied.document!).blocks).toHaveLength(2);
   });
 });
+
+describe('set_clip_properties on the story spine', () => {
+  it('names the field a spine clip does not take instead of a generic refusal', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', { assets: [{ id: 'cam', kind: 'video', url: 'https://cdn.example/cam.mp4', durationSec: 10 }] }).document!;
+    document = runAgentTimelineTool(document, 'add_clips', { clips: [{ id: 'cam-clip', assetId: 'cam', role: 'primary', startFrame: 0, durationFrames: 300 }] }).document!;
+    const refused = runAgentTimelineTool(document, 'set_clip_properties', { items: [{ clipId: 'cam-clip', opacity: 1, fades: { in: 12, out: 18 } }] });
+    expect(refused).toMatchObject({ ok: false, error: 'unknown_field', data: { path: 'items[0].opacity' } });
+    const ok = runAgentTimelineTool(document, 'set_clip_properties', { items: [{ clipId: 'cam-clip', fades: { in: 12, out: 18 } }] });
+    expect(ok.ok, JSON.stringify(ok)).toBe(true);
+  });
+});

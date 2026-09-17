@@ -515,6 +515,10 @@ export function setClipPropertiesV3(document: EditorDocumentV2, input: Input): A
     }
     const common: Input = { clipId };
     if (typeof item.enabled === 'boolean') common.enabled = item.enabled;
+    if (kind === 'narrative' && (item.opacity !== undefined || item.keyframes !== undefined)) {
+      const field = item.opacity !== undefined ? 'opacity' : 'keyframes';
+      return fail('unknown_field', { path: `items[${index}].${field}`, fix: `${field} applies to B-roll, image and graphic clips. A story-spine clip is framed with set_clip_framing / box; its level and fades are set here with volumeDb / fades.` });
+    }
     if (isFiniteNumber(item.opacity)) common.opacity = item.opacity;
     if (item.box !== undefined) {
       if (!mediaBox(item.box)) return fail(`items[${index}].box must be a positive normalized rect inside the canvas`);
@@ -899,11 +903,25 @@ export function setCaptionsV3(document: EditorDocumentV2, input: Input): AgentTi
     else return fail(`unknown caption font: ${input.font}. Use sans | serif | mono | local:<family> | preset, or a library font by id or name: ${webFontCatalogHint()}`);
   }
   const source = input.source && typeof input.source === 'object' ? (input.source as Input) : undefined;
-  const captionSource = source
+  let captionSource = source
     ? string(source.trackId) ? { mode: 'track' as const, trackId: string(source.trackId)! }
       : string(source.clipId) ? { mode: 'clip' as const, clipId: string(source.clipId)! }
         : { mode: 'auto' as const }
     : undefined;
+  // Agents place narration by asset id and refer to it the same way; resolve the asset to the
+  // clip (or lane) that plays it.
+  const sourceAssetId = source && captionSource?.mode === 'auto' ? string(source.assetId) : undefined;
+  if (sourceAssetId) {
+    const carriers = next.timeline.tracks.flatMap((track) => track.clips.flatMap((clip) => ('assetId' in clip && clip.assetId === sourceAssetId ? [{ trackId: track.id, clipId: clip.id }] : [])));
+    if (!carriers.length) return fail('unknown_id', { path: 'source.assetId', value: sourceAssetId, fix: 'Place the asset with add_clips first, or pass source.clipId / source.trackId.' });
+    const trackIds = new Set(carriers.map((carrier) => carrier.trackId));
+    if (carriers.length > 1 && trackIds.size > 1) {
+      return fail('ambiguous', { path: 'source.assetId', value: sourceAssetId, fix: `The asset plays on ${trackIds.size} tracks; pass source.trackId (${[...trackIds].join(', ')}) or source.clipId.` });
+    }
+    captionSource = carriers.length === 1
+      ? { mode: 'clip' as const, clipId: carriers[0]!.clipId }
+      : { mode: 'track' as const, trackId: carriers[0]!.trackId };
+  }
   const script = typeof input.script === 'string' ? input.script.trim() : '';
   const styling = input.on === true || !!preset || Object.keys(patch).length > 0 || !!captionSource || !!script;
 

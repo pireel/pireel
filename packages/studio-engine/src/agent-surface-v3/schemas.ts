@@ -466,13 +466,13 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   set_captions: {
     description:
-      `Drive the managed subtitle layer as one object. on turns it on or off; preset (${CAPTION_PRESET_IDS.length} built-in styles from get_state’s caption catalog), yPct (baseline % from the top) and scale restyle it; source picks the transcript (auto, or a trackId / clipId); corrections fix caption wording by transcript row without touching the spoken audio; translations {lang, items} add a second line per row (clear removes all); relayout regenerates cue boundaries after canvas or font changes. Cues re-derive after every cut — never edit them individually.`,
+      `Drive the managed subtitle layer as one object. on turns it on or off; preset (${CAPTION_PRESET_IDS.length} built-in styles from get_state’s caption catalog), yPct (baseline % from the top) and scale restyle it; source picks the transcript (auto, or a trackId / clipId / assetId); corrections fix caption wording by transcript row without touching the spoken audio; translations {lang, items} add a second line per row (clear removes all); relayout regenerates cue boundaries after canvas or font changes. Cues re-derive after every cut — never edit them individually.`,
     inputSchema: obj({
       on: bool(),
       preset: enumOf(CAPTION_PRESET_IDS), yPct: num('', { min: 0, max: 100 }), scale: num('', { min: 0.5, max: 2 }),
       font: str('Caption font: sans | serif | mono | web:<library id from get_state.fonts> or that font’s display name (web:lxgw-wenkai or 霞鹜文楷) | google:<Family from search_assets kind font> | local:<family>; "preset" restores the preset\'s own font.'),
       script: str('Silent montage only (no spoken transcript): the caption copy, one line per caption, timed across the placed picture by character share; the copy becomes the transcript truth of those clips.'),
-      source: obj({ trackId: str(), clipId: str() }),
+      source: obj({ trackId: str(), clipId: str(), assetId: str('A placed, transcribed asset; resolved to the clip or track that plays it.') }),
       clipId: str('corrections / translations: an inserted clip’s transcript instead of the main narration.'),
       corrections: arr(obj({ index: int('Transcript row.'), text: str('Complete corrected sentence.') }, ['index', 'text'])),
       translations: obj({

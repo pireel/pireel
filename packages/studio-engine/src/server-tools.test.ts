@@ -372,3 +372,15 @@ describe('set_captions translations (offline: the writer every entry shares)', (
     expect(cleared.document!.appearance.captionStyle?.sub?.lang).toBeUndefined();
   });
 });
+
+describe('set_captions source by asset', () => {
+  it('resolves source.assetId to the clip that plays it', () => {
+    const p = proj();
+    const assetId = firstNarrativeAssetId(p.document)!;
+    const r = runServerTool('set_captions', { on: true, source: { assetId } }, p);
+    expect(r.result.ok, JSON.stringify(r.result)).toBe(true);
+    expect(r.document!.semantics.managedCaptionSource).toMatchObject({ mode: 'track' });
+    const missing = runServerTool('set_captions', { on: true, source: { assetId: 'nope' } }, p);
+    expect(missing.result).toMatchObject({ ok: false, error: 'unknown_id' });
+  });
+});
