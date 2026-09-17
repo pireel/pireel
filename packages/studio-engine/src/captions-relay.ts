@@ -25,6 +25,11 @@ export const inNarrationSource = (c: VideoShot): boolean => !c.src;
 /** Intermediate derived shape: an edited-timeline sentence fragment with si-stamped words + source pointer. */
 export type MappedSeg = Omit<AsrSegment, 'words'> & { words: CueWord[]; ref: CueRef };
 
+/** Floor width for a provider word stamp; below the cut threshold a mistimed word would read as cut. */
+const MIN_WORD_SEC = 0.06;
+/** A word whose mapped span is this short or shorter was removed by the edit. */
+const CUT_WORD_MAX_SEC = 0.03;
+
 /** Map one transcript source through an arbitrary source-time → edited-time function. */
 export function mapTranscriptSegsToEdited(
   segs: AsrSegment[],
@@ -35,14 +40,20 @@ export function mapTranscriptSegsToEdited(
   for (const [segIdx, s] of segs.entries()) {
     const words: CueWord[] = (s.words?.length ? s.words : wordsFromText(s.text, s.start, s.end))
       .map((w, wi) => {
+        // A spoken word is never a point in time; providers do return zero-width stamps for short
+        // syllables. Give the word a floor width in SOURCE time before mapping, so the cut filter
+        // below removes only words whose time was actually cut, never words the provider mistimed.
+        const sourceEnd = Math.max(w.end, w.start + MIN_WORD_SEC);
         const start = mapSourceSec(w.start);
-        const end = mapSourceSec(w.end);
+        const end = mapSourceSec(sourceEnd);
         // Word width only shrinks, never grows: when a cut / insert lands mid-word,
         // the loose mapping would swallow the whole inserted duration into the word.
         // A text mask swaps the caption copy only; timing stays the spoken word's.
-        return { ...w, text: maskedWordText(s, wi, w.text), si: (w as CueWord).si ?? wi, start, end: Math.min(end, start + (w.end - w.start) + 0.05) };
+        return { ...w, text: maskedWordText(s, wi, w.text), si: (w as CueWord).si ?? wi, start, end: Math.min(end, start + (sourceEnd - w.start) + 0.05) };
       })
-      .filter((w) => w.end - w.start > 0.03);
+      // Words whose mapped span collapsed were cut away (the loose mapping folds a removed range
+      // onto one edited instant).
+      .filter((w) => w.end - w.start > CUT_WORD_MAX_SEC);
     if (!words.length) continue;
     const groups: (typeof words)[] = [[words[0]!]];
     for (let i = 1; i < words.length; i++) {
