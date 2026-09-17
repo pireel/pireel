@@ -7,6 +7,34 @@ import type {
 import { secondsToTimelineFrames } from './time';
 import { primaryNarrativeTrack } from './create';
 
+/**
+ * First stack order at or above `preferred` (never below 1) with no graphic or caption clip in
+ * the [startFrame, startFrame + durationFrames) window. Lanes are layers, not categories; the
+ * caller places or mints the lane at the returned order, so the lane it addresses is the one
+ * this computed.
+ */
+export function freeOverlayStackOrder(document: EditorDocumentV2, startFrame: number, durationFrames: number, preferred = 2): number {
+  const end = startFrame + Math.max(1, durationFrames);
+  const occupied = new Set<number>();
+  for (const track of document.timeline.tracks) {
+    const order = Math.max(1, track.stackOrder);
+    if (occupied.has(order)) continue;
+    const clash = track.clips.some((clip) => (
+      (clip.kind === 'graphic' || clip.kind === 'caption')
+      && clip.startFrame < end
+      && clip.startFrame + clip.durationFrames > startFrame
+    ));
+    if (clash) occupied.add(order);
+  }
+  for (let order = Math.max(1, preferred); ; order += 1) if (!occupied.has(order)) return order;
+}
+
+/** `freeOverlayStackOrder` for callers that still hold seconds. */
+export function freeOverlayTrackIndex(document: EditorDocumentV2, startSec: number, durationSec: number, preferred = 2): number {
+  const fps = document.canvas.fps;
+  return freeOverlayStackOrder(document, secondsToTimelineFrames(startSec, fps), Math.max(1, secondsToTimelineFrames(durationSec, fps)), preferred);
+}
+
 export interface NarrativeTimelineHit {
   track: EditorTrack;
   clip: NarrativeTimelineClip;

@@ -31,7 +31,6 @@ import {
   blockKind,
   compReceiptDelta,
   editorDocumentRenderPlan,
-  freeTrack,
   hasPrimaryNarrativeClips,
   firstNarrativeAssetId,
   primaryNarrativeClips,
@@ -39,7 +38,6 @@ import {
   renderBlock,
   localImageLocator,
   spokenTimelineBeats,
-  totalDuration,
   validateComposition,
   validateEditorDocumentV2,
   AGENT_TIMELINE_TOOL_IDS,
@@ -51,6 +49,9 @@ import { parseBlockResponse } from '@pireel/studio-engine/compose';
 import { HARD_LINT_CODES, lintBlock } from '@pireel/studio-engine/block-lint';
 import { type AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { documentTranscriptContextAt } from '@pireel/studio-engine/spoken-context';
+import { projectNarrativeShots, projectOverlayBlockById } from '@pireel/studio-engine/editor-document/legacy-projection';
+import { freeOverlayTrackIndex } from '@pireel/studio-engine/editor-document/read-model';
+import { documentCaptionsOn } from '@pireel/studio-engine/editor-document/caption-state';
 import { exportRecommendations } from '@pireel/studio-engine/export-options';
 import { parkInteraction } from './interaction-store';
 import { assembleComposeBrief, interpretApplyRaw, type ComposeBriefInput } from '@pireel/studio-engine/briefs';
@@ -359,7 +360,6 @@ export interface AgentToolCtx {
   replaceDocument: (document: EditorDocumentV2, options: ReplaceOptions) => void;
   /** Stage the transactions of one tool call so a failed tool leaves nothing behind for sync. */
   beginTransactionScope: () => TransactionScope;
-  ensureShots: (c: Composition) => VideoShot[];
   /** Cloud project id — undo's history-ring fallback targets it when the in-memory stack is empty. */
   projectId: string;
   // Project deliverables (outside Composition undo: switching changes which composition is checked out)
@@ -484,7 +484,7 @@ function fetchSkillReviewBrief(skillId: string): Promise<string | null> {
 
 async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: StudioToolRunInternalOptions): Promise<StudioToolResult> {
   const {
-    compRef, documentRef, resolveAssetUrl, prepareLocalAssetRuntime, commit, replaceDocument, ensureShots, projectId,
+    compRef, documentRef, resolveAssetUrl, prepareLocalAssetRuntime, commit, replaceDocument, projectId,
     listProjectOutputs, resolveProjectOutput, createProjectOutput, duplicateProjectOutput, switchProjectOutput, renameProjectOutput, deleteProjectOutput,
     setSelectedId, setSelectedShotId, selectedIdRef, applyT, tRef, playStopAtRef,
     playingRef, setPlaying, seekBlockSettled, pushUndoSnapshot, undoStackRef, redoStackRef, genIdsRef,
@@ -511,7 +511,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
         if (local) registeredAssetIdByLocalAssetId.set(local.assetId, asset.id);
       }
       input = normalizeStudioToolInputReferences(toolId, input, localAssetIndex, registeredAssetIdByLocalAssetId);
-      const c = compRef.current;
+      /** Canvas geometry and overlay lookups read the document at the moment they are needed, so a
+       * commit earlier in the same tool is already visible (the runtime composition follows only
+       * on the next render). The runtime composition remains the input of the render pipeline. */
+      const canvasSize = () => documentRef.current.canvas;
+      const narrativeShots = () => projectNarrativeShots(documentRef.current, { resolveAssetUrl });
+      const timelineDurationSec = () => editorDocumentRenderPlan(documentRef.current, { resolveAssetUrl }).durationSec;
       /** Resolve local bytes by canonical project asset identity first. The legacy sig cache stays
        * as a fallback for projects created before project-scoped asset bindings existed. */
       const loadProjectAssetFile = async (asset: EditorMediaAsset): Promise<File | null> => {
@@ -522,7 +527,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
       };
       const motionBeats = (startSec: number, durationSec: number) => spokenTimelineBeats(documentRef.current, startSec, durationSec);
       const r1 = (x: unknown) => Math.round(Number(x) * 10) / 10;
-      const findBlock = (id: unknown) => c.blocks.find((b) => b.id === id);
+      const findBlock = (id: unknown) => (typeof id === 'string' && id ? projectOverlayBlockById(documentRef.current, id, { resolveAssetUrl }) : undefined);
       const outputReference = () => ({
         ...(typeof input.output_id === 'string' && input.output_id.trim() ? { id: input.output_id.trim() } : {}),
         ...(typeof input.position === 'number' ? { position: input.position } : {}),
@@ -1519,7 +1524,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const points = (Array.isArray(input.items) ? input.items : [])
               .map((row) => Number((row as { atFrame?: unknown })?.atFrame) / fps)
               .filter((point) => Number.isFinite(point));
-            const rejected = rejectStableFramingSplits(ensureShots(c), visualRef.current, points);
+            const rejected = rejectStableFramingSplits(narrativeShots(), visualRef.current, points);
             if (rejected.length) {
               const first = rejected[0]!;
               return { ok: false, error: tEnglish('workbench.framingSplitStable', { at: r1(first.atSec), from: r1(first.stableSourceRange[0]), to: r1(first.stableSourceRange[1]) }), data: { rejected } };
@@ -1996,16 +2001,16 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (!b) return { ok: false, error: tEnglish('workbench.elementNotFoundIds') };
             if (blockKind(b) !== 'custom' && !b.templateId.startsWith('kit:')) return { ok: false, error: tEnglish('workbench.bakeNotComponent') };
             if (genIdsRef.current.has(b.id)) return { ok: false, error: tEnglish('workbench.blockGeneratingWaitFinish') };
-            const c = compRef.current;
-            const fps = documentRef.current.canvas.fps;
-            const html = bakeCompositionHtml(c, b);
+            const canvas = canvasSize();
+            const fps = canvas.fps;
+            const html = bakeCompositionHtml(compRef.current, b);
             report?.(t('workbench.bakeRendering'));
             let job: { id?: string; status?: string; output?: { url?: string | null; durationSec?: number }; error?: { message?: string } };
             try {
               const res = await fetch('/api/render/bake', {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ html, width: c.width, height: c.height, durationSec: b.durationSec, fps }),
+                body: JSON.stringify({ html, width: canvas.width, height: canvas.height, durationSec: b.durationSec, fps }),
                 ...(opts?.signal ? { signal: opts.signal } : {}),
               });
               if (!res.ok) {
@@ -2035,10 +2040,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (job.status !== 'done' || !job.output?.url) return { ok: false, error: job.error?.message || t('workbench.bakeFailed') };
             // Register the render as a video asset, then overlay it full-frame at the block's window.
             // A long render must not replace a component the user edited/deleted while waiting.
-            const currentBlock = compRef.current.blocks.find((block) => block.id === b.id);
+            const currentBlock = findBlock(b.id);
             if (!currentBlock || JSON.stringify(currentBlock) !== JSON.stringify(b)
-              || compRef.current.width !== c.width || compRef.current.height !== c.height
-              || documentRef.current.canvas.fps !== fps) {
+              || canvasSize().width !== canvas.width || canvasSize().height !== canvas.height
+              || canvasSize().fps !== fps) {
               return { ok: false, error: 'The component or canvas changed while baking; retry with the current component.' };
             }
             const originalTrack = documentRef.current.timeline.tracks.find((track) => track.clips.some((clip) => clip.id === b.id));
@@ -2049,7 +2054,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             // Registers the render and swaps the clip in place as one operation: removing/reinserting
             // would prune an empty lane and detach scene/clip anchors; the same identity keeps them.
             const baked = commit({ op: 'overlay.bakeToMedia', input: { clipId: b.id, asset: {
-              id: assetId, label: bname(b), url: job.output.url, durationSec: job.output.durationSec ?? b.durationSec, width: c.width, height: c.height,
+              id: assetId, label: bname(b), url: job.output.url, durationSec: job.output.durationSec ?? b.durationSec, width: canvas.width, height: canvas.height,
             } } }, { undo: 'none' });
             if (!baked.ok) return { ok: false, error: baked.error.message || t('workbench.bakeFailed') };
             const { startFrame, durationFrames } = baked;
@@ -2273,7 +2278,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 params.size = typeof input.size === 'string' ? input.size : '1440x2560';
                 if (typeof input.quality === 'string' && input.quality) params.quality = input.quality;
               } else {
-                const adaptive = adaptiveGeneratedVideoSpec(compRef.current.width, compRef.current.height);
+                const adaptive = adaptiveGeneratedVideoSpec(canvasSize().width, canvasSize().height);
                 params.count = 1;
                 params.duration_sec = String(Math.max(4, Math.min(15, Math.round(Number(input.durationSec) || 10))));
                 params.aspect_ratio = input.aspectRatio === '9:16' || input.aspectRatio === '16:9' || input.aspectRatio === '1:1'
@@ -2688,7 +2693,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           case 'lip_sync': {
             report(t('workbench.startingLipSync'));
             try {
-              const adaptive = adaptiveGeneratedVideoSpec(compRef.current.width, compRef.current.height);
+              const adaptive = adaptiveGeneratedVideoSpec(canvasSize().width, canvasSize().height);
               const res = await fetch('/api/studio/lip-sync', {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
@@ -2728,7 +2733,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'search_media': {
             const scope = input.scope === 'narrative' ? input.scope : 'all';
-            const shots = ensureShots(c);
+            const shots = narrativeShots();
             const result = searchProjectMedia(
               {
                 projectId,
@@ -2774,7 +2779,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   seekBlockSettled(b.id);
                   return { ok: true, summary: t('workbench.focusedName', { name: bname(b) }) };
                 }
-                const sp = clipSpans(ensureShots(c)).find((x) => x.clip.id === id);
+                const sp = clipSpans(narrativeShots()).find((x) => x.clip.id === id);
                 if (sp) {
                   setSelectedId(null);
                   setSelectedShotId(id);
@@ -2800,13 +2805,13 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 input = { ...input, toSec: frameSec(input.frame) };
                 const to = Number(input.toSec);
                 if (!Number.isFinite(to)) return { ok: false, error: tEnglish('workbench.invalidToSec') };
-                const v = Math.max(0, Math.min(totalDuration(c), to));
+                const v = Math.max(0, Math.min(timelineDurationSec(), to));
                 applyT(v);
                 return { ok: true, summary: t('workbench.jumpedTo', { t: r1(v) }) };
               }
               case 'play': {
                 input = { ...input, ...(frameSec(input.frame) !== undefined ? { fromSec: frameSec(input.frame) } : {}), ...(frameSec(input.toFrame) !== undefined ? { toSec: frameSec(input.toFrame) } : {}) };
-                const D = totalDuration(c);
+                const D = timelineDurationSec();
                 if (D < 0.1) return { ok: false, error: tEnglish('workbench.noVideoYet') };
                 const from = typeof input.fromSec === 'number' ? Math.max(0, Math.min(D, input.fromSec)) : undefined;
                 const to = typeof input.toSec === 'number' ? Math.max(0, Math.min(D, input.toSec)) : undefined;
@@ -2923,7 +2928,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               setSelectedShotId(null);
               return withDelta({
                 ok: true,
-                summary: t('workbench.undidCloudVersion', { sec: (Math.round(totalDuration(compRef.current) * 10) / 10).toFixed(1) }),
+                summary: t('workbench.undidCloudVersion', { sec: (Math.round(timelineDurationSec() * 10) / 10).toFixed(1) }),
               });
             }
             redoStackRef.current.push(documentRef.current); // agent undo also feeds the redo line (redoable via ⇧⌘Z/button)
@@ -3197,7 +3202,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   label: b.label,
                   durationSec: b.durationSec,
                   beats: motionBeats(b.startSec, b.durationSec),
-                  ...(b.box ? { boxPx: { w: Math.round(b.box.w * c.width), h: Math.round(b.box.h * c.height) } } : {}),
+                  ...(b.box ? { boxPx: { w: Math.round(b.box.w * canvasSize().width), h: Math.round(b.box.h * canvasSize().height) } } : {}),
                 };
                 // A kit block is edited as props; anything else keeps writing markup. Editing follows
                 // what the block already IS — silently converting one into the other would throw away
@@ -3208,7 +3213,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 // exactly as it is (never silently convert a kit block to markup) and hand the note
                 // back so the agent can rephrase or explain.
                 if (parsed.declined) return { ok: false, error: parsed.note || t('workbench.aiEditFailed') };
-                const editable = withEditableBlockGeometry({ ...b, ...composedBlockFields(parsed, b.durationSec, { props: b.slots.props }) }, c.width, c.height);
+                const editable = withEditableBlockGeometry({ ...b, ...composedBlockFields(parsed, b.durationSec, { props: b.slots.props }) }, canvasSize().width, canvasSize().height);
                 const updated = commitOverlayEdits([{
                   clipId: b.id,
                   block: { templateId: editable.templateId, slots: editable.slots, box: editable.box },
@@ -3221,11 +3226,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               }
             }
             try {
-              const at = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), totalDuration(c)) : r1(tRef.current);
+              const at = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), timelineDurationSec()) : r1(tRef.current);
               const durationSec = typeof input.durationSec === 'number' && Number.isFinite(input.durationSec)
                 ? Math.max(0.3, Math.round(input.durationSec * 100) / 100)
                 : 3;
-              const plannedPlacement = placementPercentToBox(input.placement, c.width, c.height);
+              const plannedPlacement = placementPercentToBox(input.placement, canvasSize().width, canvasSize().height);
               if (plannedPlacement.error) return { ok: false, error: plannedPlacement.error };
               const plannedBox = plannedPlacement.box;
               const requestedSceneId = typeof input.sceneId === 'string' && input.sceneId.trim() ? input.sceneId.trim() : undefined;
@@ -3248,7 +3253,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 timelineBody: '',
                 label: t('workbench.newElement'),
                 ...(plannedBox
-                  ? { boxPx: { w: Math.round(plannedBox.w * c.width), h: Math.round(plannedBox.h * c.height) } }
+                  ? { boxPx: { w: Math.round(plannedBox.w * canvasSize().width), h: Math.round(plannedBox.h * canvasSize().height) } }
                   : {}),
                 durationSec,
                 beats: motionBeats(at, durationSec),
@@ -3280,10 +3285,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 ...composedBlockFields(parsed, durationSec),
                 startSec: at,
                 durationSec,
-                trackIndex: freeTrack(compRef.current.blocks, at, durationSec),
+                trackIndex: freeOverlayTrackIndex(documentRef.current, at, durationSec),
                 label: String(input.instruction ?? t('workbench.newElement')).slice(0, 12),
                 ...(plannedBox ? { box: plannedBox } : {}),
-              }, c.width, c.height);
+              }, canvasSize().width, canvasSize().height);
               const inserted = commitOverlayInsert(nb, sceneContext?.scene.id);
               if (!inserted.ok) return { ok: false, error: editorErrorMessage(inserted.error), data: { code: inserted.error.code, trackIds: inserted.error.trackIds } };
               setSelectedShotId(null);
@@ -3469,7 +3474,9 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
     compRef, documentRef, commit, setSelectedId, setSelectedShotId, applyT, tRef,
     pushUndoSnapshot, genIdsRef, videoFileRef, clipFilesRef,
   } = ctx;
-    const c2 = compRef.current;
+    const canvasSize = () => documentRef.current.canvas;
+    const timelineDurationSec = () => editorDocumentRenderPlan(documentRef.current, { resolveAssetUrl: ctx.resolveAssetUrl }).durationSec;
+    const findBlock = (id: string) => projectOverlayBlockById(documentRef.current, id, { resolveAssetUrl: ctx.resolveAssetUrl });
     const motionBeats = (startSec: number, durationSec: number) => spokenTimelineBeats(documentRef.current, startSec, durationSec);
     const patchBlock = (clipId: string, block: Parameters<typeof applyOverlayDocumentEdits>[0]['updates'][number]['block']) =>
       commit({ op: 'overlay.patch', input: { updates: [{ clipId, block }] } }, { undo: 'none' });
@@ -3505,15 +3512,16 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
               ...(displayFontContext(input.fontFamily) ? { displayFont: displayFontContext(input.fontFamily)! } : {}),
             };
           };
+          const appearance = documentRef.current.appearance;
           const base = {
-            theme: c2.theme,
-            ...(c2.palette ? { palette: c2.palette } : {}),
-            ...(c2.frameId ? { frameId: c2.frameId } : {}),
-            ...(c2.customVisualStyle ? { customVisualStyle: c2.customVisualStyle } : {}),
+            theme: appearance.theme,
+            ...(appearance.palette ? { palette: appearance.palette } : {}),
+            ...(appearance.frameId ? { frameId: appearance.frameId } : {}),
+            ...(appearance.customVisualStyle ? { customVisualStyle: appearance.customVisualStyle } : {}),
           };
           const bid = typeof input.blockId === 'string' ? input.blockId : undefined;
           if (bid) {
-            const b = c2.blocks.find((x) => x.id === bid);
+            const b = findBlock(bid);
             if (!b) return { ok: false, error: tEnglish('workbench.elementNotFoundIds') };
             if (genIdsRef.current.has(b.id)) return { ok: false, error: tEnglish('workbench.blockGeneratingWaitFinish') };
             const context = contextForWindow(b.startSec, b.durationSec);
@@ -3528,7 +3536,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
                   ...renderBlock(b),
                   label: b.label,
                   durationSec: b.durationSec,
-                  ...(b.box ? { boxPx: { w: Math.round(b.box.w * c2.width), h: Math.round(b.box.h * c2.height) } } : {}),
+                  ...(b.box ? { boxPx: { w: Math.round(b.box.w * canvasSize().width), h: Math.round(b.box.h * canvasSize().height) } } : {}),
                   ...(blockPropsReadback(b).props ? { props: blockPropsReadback(b).props!.values } : {}),
                 },
                 // A kit block is edited as props: hand the brief what it currently shows, so an
@@ -3538,7 +3546,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
               },
             };
           }
-          const at = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), totalDuration(c2)) : Math.round(tRef.current * 10) / 10;
+          const at = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), timelineDurationSec()) : Math.round(tRef.current * 10) / 10;
           const durationSec = typeof input.durationSec === 'number' && Number.isFinite(input.durationSec)
             ? Math.max(0.3, Math.round(input.durationSec * 100) / 100)
             : 3;
@@ -3549,7 +3557,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             durationFrames: Math.max(1, Math.round(durationSec * documentRef.current.canvas.fps)),
           }) : undefined;
           if (sceneId && !sceneContext) return { ok: false, error: `Director scene does not exist: ${sceneId}` };
-          const placement = placementPercentToBox(input.placement, c2.width, c2.height);
+          const placement = placementPercentToBox(input.placement, canvasSize().width, canvasSize().height);
           if (placement.error) return { ok: false, error: placement.error };
           const context = contextForWindow(at, durationSec, sceneId);
           return {
@@ -3566,7 +3574,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
                 timelineBody: '',
                 label: t('workbench.newElement'),
                 durationSec,
-                ...(placement.box ? { boxPx: { w: Math.round(placement.box.w * c2.width), h: Math.round(placement.box.h * c2.height) } } : {}),
+                ...(placement.box ? { boxPx: { w: Math.round(placement.box.w * canvasSize().width), h: Math.round(placement.box.h * canvasSize().height) } } : {}),
               },
               ...(input.placement ? { placement: input.placement } : {}),
               ...(sceneId ? { sceneId } : {}),
@@ -3626,11 +3634,11 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         const raw = typeof input.raw === 'string' ? input.raw : '';
         if (!raw.trim()) return { ok: false, error: tEnglish('workbench.rawRequired') };
         const bid = typeof input.blockId === 'string' ? input.blockId : undefined;
-        const target = bid ? c2.blocks.find((x) => x.id === bid) : undefined;
+        const target = bid ? findBlock(bid) : undefined;
         const requestedLabel = typeof input.label === 'string' && input.label.trim()
           ? input.label.trim().slice(0, 12)
           : undefined;
-        const placement = placementPercentToBox(input.placement, c2.width, c2.height);
+        const placement = placementPercentToBox(input.placement, canvasSize().width, canvasSize().height);
         if (placement.error) return { ok: false, error: placement.error };
         if (target && genIdsRef.current.has(target.id)) return { ok: false, error: tEnglish('workbench.blockGeneratingWaitFinish') };
         const fb = target ? { ...renderBlock(target), propsSchema: blockPropsSchema(target) } : { innerHtml: '<div></div>', timelineBody: '' };
@@ -3647,8 +3655,8 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           if (target) {
             const editable = withEditableBlockGeometry(
               { ...target, templateId: `kit:${shape.component}`, slots: { props: shape.props }, ...(requestedLabel ? { label: requestedLabel } : {}) },
-              c2.width,
-              c2.height,
+              canvasSize().width,
+              canvasSize().height,
             );
             const updated = patchBlock(target.id, { templateId: editable.templateId, slots: editable.slots, box: editable.box, ...(requestedLabel ? { label: requestedLabel } : {}) });
             if (!updated.ok) return { ok: false, error: editorErrorMessage(updated.error), data: { code: updated.error.code, trackIds: updated.error.trackIds } };
@@ -3657,7 +3665,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             applyT(Math.max(0, target.startSec + 0.01));
             return { ok: true, summary: t('workbench.updatedLabel', { label: target.label?.slice(0, 10) || blockKind(target) }), data: { blockId: target.id } };
           }
-          const kAt = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), totalDuration(c2)) : Math.round(tRef.current * 10) / 10;
+          const kAt = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), timelineDurationSec()) : Math.round(tRef.current * 10) / 10;
           const kDur = typeof input.durationSec === 'number' && input.durationSec >= 0.3 ? input.durationSec : 3;
           const kb = withEditableBlockGeometry({
             id: applyId,
@@ -3665,10 +3673,10 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             slots: { props: shape.props },
             startSec: kAt,
             durationSec: kDur,
-            trackIndex: freeTrack(c2.blocks, kAt, kDur),
+            trackIndex: freeOverlayTrackIndex(documentRef.current, kAt, kDur),
             label: (typeof input.label === 'string' && input.label ? input.label : t('workbench.newElement')).slice(0, 12),
             ...(placement.box ? { box: placement.box } : {}),
-          }, c2.width, c2.height);
+          }, canvasSize().width, canvasSize().height);
           const inserted = insertBlock(kb);
           if (!inserted.ok) return { ok: false, error: editorErrorMessage(inserted.error), data: { code: inserted.error.code, trackIds: inserted.error.trackIds } };
           setSelectedShotId(null);
@@ -3686,7 +3694,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           return { ok: false, error: 'the model answered null (no graphic) — nothing was changed; remove_clips the target yourself if you agree' };
         }
         const parsed = parseBlockResponse(raw, fb);
-        const issues = lintBlock({ blockId: applyId, innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, propsSchema: parsed.propsSchema, requireProps: true, boxPx: { w: (placement.box?.w ?? target?.box?.w ?? 1) * c2.width, h: (placement.box?.h ?? target?.box?.h ?? 1) * c2.height } });
+        const issues = lintBlock({ blockId: applyId, innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, propsSchema: parsed.propsSchema, requireProps: true, boxPx: { w: (placement.box?.w ?? target?.box?.w ?? 1) * canvasSize().width, h: (placement.box?.h ?? target?.box?.h ?? 1) * canvasSize().height } });
         // Same hard line as composeBlockChecked: hard problems are bounced back for the external model to fix itself (it is the "one fix round" model)
         const hard = issues.filter((i) => HARD_LINT_CODES.has(i.code));
         if (hard.length) {
@@ -3697,8 +3705,8 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         if (target) {
           const editable = withEditableBlockGeometry(
               { ...target, templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, propsSchema: parsed.propsSchema, authoredDurationSec: target.durationSec, ...componentFontSlot(input.fontFamily, target.slots.fontFamily), ...componentPropsCarry(parsed.propsSchema, target.slots.props) }, ...(requestedLabel ? { label: requestedLabel } : {}) },
-            c2.width,
-            c2.height,
+            canvasSize().width,
+            canvasSize().height,
           );
           const updated = patchBlock(target.id, { templateId: editable.templateId, slots: editable.slots, box: editable.box, ...(requestedLabel ? { label: requestedLabel } : {}) });
           if (!updated.ok) return { ok: false, error: editorErrorMessage(updated.error), data: { code: updated.error.code, trackIds: updated.error.trackIds } };
@@ -3707,7 +3715,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           applyT(Math.max(0, target.startSec + 0.01));
           return { ok: true, summary: t('workbench.updatedLabel', { label: target.label?.slice(0, 10) || blockKind(target) }), data: { blockId: target.id, ...warnings } };
         }
-        const at = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), totalDuration(c2)) : Math.round(tRef.current * 10) / 10;
+        const at = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), timelineDurationSec()) : Math.round(tRef.current * 10) / 10;
         const dur = typeof input.durationSec === 'number' && input.durationSec >= 0.3 ? input.durationSec : 3;
         const nb = withEditableBlockGeometry({
           id: applyId,
@@ -3715,10 +3723,10 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, ...(parsed.propsSchema ? { propsSchema: parsed.propsSchema } : {}), authoredDurationSec: dur, ...componentFontSlot(input.fontFamily) },
           startSec: at,
           durationSec: dur,
-          trackIndex: freeTrack(c2.blocks, at, dur),
+          trackIndex: freeOverlayTrackIndex(documentRef.current, at, dur),
           label: (typeof input.label === 'string' && input.label ? input.label : t('workbench.newElement')).slice(0, 12),
           ...(placement.box ? { box: placement.box } : {}),
-        }, c2.width, c2.height);
+        }, canvasSize().width, canvasSize().height);
         const inserted = insertBlock(nb);
         if (!inserted.ok) return { ok: false, error: editorErrorMessage(inserted.error), data: { code: inserted.error.code, trackIds: inserted.error.trackIds } };
         setSelectedShotId(null);
@@ -3730,7 +3738,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         const fps = documentRef.current.canvas.fps;
         const captureAt = async (atSec: number): Promise<StudioToolResult> => {
           // The external agent's "eye": capture a frame via the same render pipeline as export (BYO self-checks visuals after writing a block)
-          const renderTimeline = canonicalRenderTimeline(c2, ctx.documentRef.current, ctx.resolveAssetUrl);
+          const renderTimeline = canonicalRenderTimeline(compRef.current, ctx.documentRef.current, ctx.resolveAssetUrl);
           const at = Math.min(Math.max(0, atSec), renderTimeline.durationSec);
           try {
             const label = `${Math.round(at * 10) / 10}s`;
@@ -3752,12 +3760,12 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             const visBlocks = renderTimeline.composition.blocks
               .filter((b) => !isSentenceCaption(b) && at >= b.startSec && at < b.startSec + b.durationSec)
               .map((b) => ({ id: b.id, kind: blockKind(b), ...(b.label ? { label: b.label } : {}), ...(b.box ? { zone: zoneOf(b.box) } : {}) }));
-            const span = videoShotTimelineSpans(c2.shots ?? [], renderTimeline.placements)
+            const span = videoShotTimelineSpans(renderTimeline.composition.shots ?? [], renderTimeline.placements)
               .find((sp) => at >= sp.editedStart - 1e-6 && at < sp.editedEnd + 1e-6);
             const visible = {
               blocks: visBlocks,
               ...(span ? { shot: { id: span.clip.id, treatment: span.clip.treatment } } : {}),
-              captionsOn: c2.blocks.some(isSentenceCaption),
+              captionsOn: documentCaptionsOn(documentRef.current),
             };
             return {
               ok: true,
@@ -3823,7 +3831,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         if (!reviewMoments.length) {
           return { ok: false, error: 'inspect_timeline found no visible clips to review on the active output' };
         }
-        const renderTimeline = canonicalRenderTimeline(c2, documentRef.current, ctx.resolveAssetUrl);
+        const renderTimeline = canonicalRenderTimeline(compRef.current, documentRef.current, ctx.resolveAssetUrl);
         const moments = reviewMoments.map((moment) => ({
           ...moment,
           atSec: Math.min(Math.max(0, moment.atSec), renderTimeline.durationSec),
@@ -3863,7 +3871,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
                 ...(block.label ? { label: block.label } : {}),
                 ...(block.box ? { zone: zoneOf(block.box) } : {}),
               }));
-            const span = videoShotTimelineSpans(c2.shots ?? [], renderTimeline.placements)
+            const span = videoShotTimelineSpans(renderTimeline.composition.shots ?? [], renderTimeline.placements)
               .find((candidate) => moment.atSec >= candidate.editedStart - 1e-6 && moment.atSec < candidate.editedEnd + 1e-6);
             frames.push({
               index,
@@ -3875,7 +3883,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
               visible: {
                 blocks,
                 ...(span ? { shot: { id: span.clip.id, treatment: span.clip.treatment } } : {}),
-                captionsOn: c2.blocks.some(isSentenceCaption),
+                captionsOn: documentCaptionsOn(documentRef.current),
               },
             });
             images.push(await cloudToolFrame(shot.dataUrl, { width: shot.width, height: shot.height }));

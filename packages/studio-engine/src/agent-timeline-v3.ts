@@ -20,7 +20,7 @@ import {
   type TimelineClip,
 } from './editor-document';
 import { CAPTION_PRESETS, getCaptionPreset } from './caption-presets';
-import { CUT_TRANSITION_EFFECTS, DIRECTIONAL_TRANSITIONS, MAX_TRANSITION_SEC, PLACE_ANCHORS, SHOT_TREATMENTS, applyBlockPlacement, blockId, blockKind, freeTrack, isCaptionsOn, isSentenceCaption, placementFramingNotes, renderBlock, resolveCaptionStyle, shotFilterCss, splitBlockedByTransition, videoShotTimelineSpans, zoneOf, type Block, type Composition, type CutTransitionEffect, type ShotFilter, type TransitionDirection, type VideoShot } from './composition-core';
+import { CUT_TRANSITION_EFFECTS, DIRECTIONAL_TRANSITIONS, MAX_TRANSITION_SEC, PLACE_ANCHORS, SHOT_TREATMENTS, applyBlockPlacement, blockId, blockKind, isSentenceCaption, placementFramingNotes, renderBlock, shotFilterCss, splitBlockedByTransition, videoShotTimelineSpans, zoneOf, type Block, type Composition, type CutTransitionEffect, type ShotFilter, type TransitionDirection, type VideoShot } from './composition-core';
 import { applyCanvasDocumentEdit } from './canvas-document-edit';
 import { applyCaptionDocumentEdit } from './caption-document-edit';
 import { applyCompositionLayout, applyShotFramingInput, canvasSizeFollowingFirstVideo, canvasSizeFromInput } from './editing-primitives';
@@ -32,7 +32,9 @@ import { applyOverlayDocumentEdits, removeOverlayDocumentClips } from './overlay
 import { applyVideoClipSettingsPatches, mediaVideoClipEntries } from './media-video-edit';
 import { duplicateOverlayDocumentClip, retimeOverlayDocumentClip } from './overlay-track-edit';
 import { editorDocumentRenderPlan } from './editor-document/render-plan';
-import { firstNarrativeAssetId, narrativeAtTimelineSecond, primaryNarrativeClips } from './editor-document/read-model';
+import { firstNarrativeAssetId, freeOverlayStackOrder, narrativeAtTimelineSecond, primaryNarrativeClips } from './editor-document/read-model';
+import { projectNarrativeShots, projectOverlayBlockById } from './editor-document/legacy-projection';
+import { documentCaptionsOn, documentCaptionStyle } from './editor-document/caption-state';
 import { listDocumentAddressedWords, resolveDocumentWordIds } from './editor-document/transcript-address';
 import { patchNarrativeClips } from './editor-document/commands/narrative-patch';
 import { projectDocumentToComposition } from './project-document';
@@ -83,9 +85,8 @@ const isOverlayClip = (clip: TimelineClip): boolean => OVERLAY_KINDS.has(clip.ki
 const isVideoClip = (document: EditorDocumentV2, clip: TimelineClip): boolean =>
   (clip.kind === 'narrative' || clip.kind === 'media') && document.assets[clip.assetId]?.kind === 'video';
 
-const composition = (document: EditorDocumentV2): Composition => projectDocumentToComposition(document);
-const allVideoShots = (document: EditorDocumentV2, c: Composition): VideoShot[] => [
-  ...(c.shots ?? []),
+const allVideoShots = (document: EditorDocumentV2): VideoShot[] => [
+  ...projectNarrativeShots(document),
   ...mediaVideoClipEntries(document).map((entry) => entry.shot),
 ];
 const blockName = (block: Block): string => block.label?.slice(0, 10) || blockKind(block);
@@ -131,13 +132,13 @@ const isOutcome = (value: unknown): value is AgentTimelineOutcome =>
 /* ================================ clips ================================ */
 
 function duplicateGraphic(document: EditorDocumentV2, clipId: string, startFrame: number | undefined): AgentTimelineOutcome & { newClipId?: string } {
-  const c = composition(document);
-  const block = c.blocks.find((candidate) => candidate.id === clipId);
   const found = locatedClip(document, clipId);
+  const block = projectOverlayBlockById(document, clipId);
   if (!block || !found || !isOverlayClip(found.clip)) return fail(`duplicate: ${clipId} is not a graphic or text clip`);
-  const at = startFrame !== undefined ? framesToSec(startFrame, document.canvas.fps) : block.startSec + block.durationSec;
+  const atFrame = startFrame !== undefined ? startFrame : found.clip.startFrame + found.clip.durationFrames;
+  const at = framesToSec(atFrame, document.canvas.fps);
   const newClipId = blockId('ai');
-  const stackOrder = freeTrack(c.blocks, at, block.durationSec, block.trackIndex);
+  const stackOrder = freeOverlayStackOrder(document, atFrame, found.clip.durationFrames, block.trackIndex);
   // Stack order is shared across visual, graphics and caption lanes: a B-roll lane can sit at the
   // order the graphic wants. Only a graphics lane may take the copy; otherwise a new one is minted
   // at that order (the same rule insert_clips applies).
@@ -349,9 +350,9 @@ export function splitClipsV3(document: EditorDocumentV2, input: Input): AgentTim
     if (!primaryNarrativeClips(next).length) return fail('no story-spine footage to split');
     const points = normalizeNarrationSplitPoints(spinePoints, STUDIO_AGENT_EXECUTION_LIMITS.splitPointsPerCall);
     if ('error' in points) return fail(points.error);
-    const c = composition(next);
     const placements = editorDocumentRenderPlan(next).narrative.map((entry) => ({ shotId: entry.clipId, startSec: entry.startSec, endSec: entry.endSec }));
-    const blocked = points.find((atSec) => splitBlockedByTransition(c.shots ?? [], atSec, placements));
+    const shots = projectNarrativeShots(next);
+    const blocked = points.find((atSec) => splitBlockedByTransition(shots, atSec, placements));
     if (blocked != null) return fail(`cannot split at frame ${secondsToTimelineFrames(blocked, fps)}: it is inside a transition region`);
     const command = applyNarrationSplitCommands(next, points);
     if (!command.ok) return fail(command.error.message, { code: command.error.code, trackIds: command.error.trackIds });
@@ -411,7 +412,7 @@ function setComponentProps(document: EditorDocumentV2, clipId: string, pairs: un
   const rows = Array.isArray(pairs) ? (pairs as unknown[]) : [];
   const valid = rows.length > 0 && rows.length <= 8 && rows.every((pair) => pair && typeof pair === 'object' && string((pair as Input).key) && isComponentPropertyValue((pair as Input).value));
   if (!valid) return fail('props is a non-empty array of {key, value} pairs; keys come from component.props in get_state');
-  const block = composition(document).blocks.find((candidate) => candidate.id === clipId);
+  const block = projectOverlayBlockById(document, clipId);
   if (!block) return fail(`graphic clip not found: ${clipId}`);
   const view = componentSchemaOf(block);
   if (!view) return fail('this component has no editable properties (media, caption, or a bespoke component without a properties schema)');
@@ -556,8 +557,7 @@ export function setClipFramingV3(document: EditorDocumentV2, input: Input): Agen
     const found = locatedClip(next, clipId);
     if (!found) return fail(`items[${index}] clip not found: ${clipId}`);
     if (isOverlayClip(found.clip)) {
-      const c = composition(next);
-      const block = c.blocks.find((candidate) => candidate.id === clipId);
+      const block = projectOverlayBlockById(next, clipId);
       if (!block) return fail(`items[${index}] graphic clip not found: ${clipId}`);
       if (isSentenceCaption(block)) return fail(`items[${index}] is the caption layer — position it with set_captions yPct/scale`);
       if (!block.box) return fail(`items[${index}] has no screen box (full-canvas element) and cannot be repositioned`);
@@ -579,7 +579,7 @@ export function setClipFramingV3(document: EditorDocumentV2, input: Input): Agen
       if (!edit.ok) return fail(edit.error.message, { code: edit.error.code, trackIds: edit.error.trackIds });
       next = edit.document;
       receipts.push(...edit.receipts);
-      const framing = placementFramingNotes(c.shots ?? [], placed.startSec, placed.durationSec);
+      const framing = placementFramingNotes(projectNarrativeShots(next), placed.startSec, placed.durationSec);
       updates.push({ clipId, box: placed.box, zone: zoneOf(placed.box!), ...(framing.length ? { hint: framing.join('; ') } : {}) });
       continue;
     }
@@ -588,8 +588,8 @@ export function setClipFramingV3(document: EditorDocumentV2, input: Input): Agen
     const recipe = ['treatment', 'size', 'crop', 'scale', 'anchorX', 'anchorY', 'coordinateSpace', 'resetPrecision'].filter((key) => item[key] !== undefined);
     if (recipe.length) {
       if (string(item.treatment) && !treatmentIds.includes(string(item.treatment)!)) return fail(`items[${index}].treatment must be one of ${treatmentIds.join(' / ')}`);
-      const c = composition(next);
-      const shots = allVideoShots(next, c);
+      const c = projectDocumentToComposition(next);
+      const shots = allVideoShots(next);
       const row: Input = { shotId: clipId };
       for (const key of recipe) row[key] = item[key];
       const applied = applyShotFramingInput({ ...c, shots }, { updates: [row] }, shots);
@@ -629,9 +629,8 @@ export function addTransitionV3(document: EditorDocumentV2, input: Input): Agent
   if (input.durationFrames !== undefined && !isFrame(input.durationFrames, 1)) return fail('durationFrames must be an integer frame count ≥ 1');
   const fps = document.canvas.fps;
   const at = framesToSec(input.atFrame, fps);
-  const c = composition(document);
   const placements = editorDocumentRenderPlan(document).narrative.map((entry) => ({ shotId: entry.clipId, startSec: entry.startSec, endSec: entry.endSec }));
-  const spans = videoShotTimelineSpans(c.shots ?? [], placements);
+  const spans = videoShotTimelineSpans(projectNarrativeShots(document), placements);
   const boundaryIndex = spans.findIndex((span, idx) => idx >= 1 && Math.abs(span.editedStart - at) < 0.3);
   if (boundaryIndex < 1) {
     const boundaries = spans.slice(1).map((span) => secondsToTimelineFrames(span.editedStart, fps));
@@ -676,7 +675,7 @@ export function applyLayoutV3(document: EditorDocumentV2, input: Input): AgentTi
   if (!layout || !layouts.includes(layout)) return fail('invalid_value', { path: 'layout', value: input.layout, allowed: layouts });
   const blockIds = Array.isArray(input.blockIds) ? input.blockIds.map(string).filter((id): id is string => !!id) : [];
   if (!blockIds.length) return fail('blockIds is required');
-  const c = composition(document);
+  const c = projectDocumentToComposition(document);
   const mediaLocations = new Map(document.timeline.tracks.flatMap((track) => track.clips.filter((clip) => clip.kind === 'media').map((clip) => [clip.id, { trackId: track.id, clip }] as const)));
   const layoutKind = layout as Parameters<typeof applyCompositionLayout>[1]['layout'];
   if (!input.shotId && blockIds.every((id) => mediaLocations.has(id))) {
@@ -863,7 +862,7 @@ function captionTranslations(document: EditorDocumentV2, translations: Input, cl
   }
   const edit = applyCaptionDocumentEdit({ document: next, ...(subPatch ? { patch: subPatch } : {}), mainTranscript: null, clipTranscripts: {} });
   if (!edit.ok) return fail(edit.error.message, { code: edit.error.code, trackIds: edit.error.trackIds });
-  return mutation(edit.document, isCaptionsOn(composition(edit.document)) ? summary : `${summary} (captions are off; they show after set_captions on:true)`, edit.receipts);
+  return mutation(edit.document, documentCaptionsOn(edit.document) ? summary : `${summary} (captions are off; they show after set_captions on:true)`, edit.receipts);
 }
 
 export function setCaptionsV3(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
@@ -882,7 +881,7 @@ export function setCaptionsV3(document: EditorDocumentV2, input: Input): AgentTi
   const clipId = string(input.clipId);
 
   if (input.on === false) {
-    if (isCaptionsOn(composition(next))) {
+    if (documentCaptionsOn(next)) {
       const edit = applyCaptionDocumentEdit({ document: next, patch: { on: false }, mainTranscript: null, clipTranscripts: {} });
       if (!edit.ok) return fail(edit.error.message, { code: edit.error.code, trackIds: edit.error.trackIds });
       next = edit.document; receipts.push(...edit.receipts);
@@ -953,7 +952,7 @@ export function setCaptionsV3(document: EditorDocumentV2, input: Input): AgentTi
     const turningOn = input.on === true || !!preset || !!captionSource;
     const stylePatch = { ...(turningOn ? { on: true } : {}), ...(preset ? { preset, color: undefined, bg: undefined } : {}), ...patch };
     // "Turn captions on" with no style is complete: the layer needs a preset to start, so use the default.
-    if (input.on === true && !preset && !isCaptionsOn(composition(next))) stylePatch.preset = resolveCaptionStyle(composition(next)).preset;
+    if (input.on === true && !preset && !documentCaptionsOn(next)) stylePatch.preset = documentCaptionStyle(next).preset;
     const edit = applyCaptionDocumentEdit({ document: next, patch: stylePatch, ...(captionSource ? { source: captionSource } : {}), mainTranscript: null, clipTranscripts: {} });
     if (!edit.ok) return fail(edit.error.message, { code: edit.error.code, trackIds: edit.error.trackIds });
     if (turningOn) {
@@ -961,7 +960,7 @@ export function setCaptionsV3(document: EditorDocumentV2, input: Input): AgentTi
       if (!captionTrack?.clips.length) return fail('no transcript for a placed caption source — read get_transcript (it transcribes when needed) or pass script for silent picture');
     }
     next = edit.document; receipts.push(...edit.receipts);
-    const style = resolveCaptionStyle(composition(next));
+    const style = documentCaptionStyle(next);
     summaries.push(`${turningOn ? 'Captions on' : 'Captions adjusted'}: ${getCaptionPreset(style.preset).name}`);
   }
 
@@ -974,7 +973,7 @@ export function setCaptionsV3(document: EditorDocumentV2, input: Input): AgentTi
     if (failed) return failed;
   }
   if (input.relayout === true) {
-    if (!isCaptionsOn(composition(next))) return fail('no captions to re-lay: turn them on first');
+    if (!documentCaptionsOn(next)) return fail('no captions to re-lay: turn them on first');
     const edit = applyCaptionDocumentEdit({ document: next, relayout: true, mainTranscript: null, clipTranscripts: {} });
     if (!edit.ok) return fail(edit.error.message, { code: edit.error.code, trackIds: edit.error.trackIds });
     next = edit.document; receipts.push(...edit.receipts);
@@ -1010,7 +1009,7 @@ const asAsr = (segments: TranscriptSegment[] | undefined): AsrSegment[] => deseg
 function formatTranscript(document: EditorDocumentV2, assetIds: readonly string[]): string {
   const rd = (x: number) => Math.round(x * 10) / 10;
   const copy = (segment: TranscriptSegment) => segment.captionText && segment.captionText !== segment.text ? `${segment.captionText} 〈ASR: ${segment.text}〉` : segment.text;
-  const c = composition(document);
+  const narrativeShots = projectNarrativeShots(document);
   const spine = primaryNarrativeClips(document);
   const parts: string[] = [];
   for (const assetId of assetIds) {
@@ -1019,7 +1018,7 @@ function formatTranscript(document: EditorDocumentV2, assetIds: readonly string[
     const spineClips = spine.filter((clip) => clip.assetId === assetId);
     const label = JSON.stringify(asset?.label || assetId);
     if (spineClips.length) {
-      const shots = (c.shots ?? []).filter((shot) => spineClips.some((clip) => clip.id === shot.id));
+      const shots = narrativeShots.filter((shot) => spineClips.some((clip) => clip.id === shot.id));
       const marks = narrationRowMarks(segments, shots, () => true, asset?.metadata.durationSec);
       const rows = segments.map((segment, index) => `  ${index}. [${rd(segment.start)}–${rd(segment.end)}s] ${marks.rows[index]!.prefix}${copy(segment)}${marks.rows[index]!.gapNote}`);
       const lines = [...(marks.head ? [`  ${marks.head}`] : []), ...rows, ...(marks.tail ? [`  ${marks.tail}`] : [])];
@@ -1119,7 +1118,7 @@ export function inspectMediaV3(document: EditorDocumentV2, input: Input): AgentT
   }
   if (mode === 'component') {
     if (ids.length !== 1) return fail('component mode inspects exactly one graphic clip id', { path: 'ids' });
-    const block = composition(document).blocks.find((candidate) => candidate.id === ids[0]);
+    const block = projectOverlayBlockById(document, ids[0]!);
     if (!block) return fail(`graphic clip not found: ${ids[0]}`, { unknownIds: ids });
     const slots = block.slots as { innerHtml?: unknown; timelineBody?: unknown };
     const rendered = block.templateId === 'custom'

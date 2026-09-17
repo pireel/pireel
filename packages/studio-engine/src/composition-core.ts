@@ -1253,7 +1253,7 @@ export function applyBlockPlacement(block: Block, input: PlaceBlockInput): Block
  *  later be changed; cue layout always derives from the current canvas geometry. */
 export const DEFAULT_CAPTION_WIDTH_PCT = 56;
 
-export function resolveCaptionStyle(comp: Composition): CaptionStyle {
+export function resolveCaptionStyle(comp: Pick<Composition, 'captionStyle' | 'blocks'>): CaptionStyle {
   if (comp.captionStyle) return { preset: DEFAULT_CAPTION_PRESET, yPct: 88, scale: 1, xPct: 50, wPct: DEFAULT_CAPTION_WIDTH_PCT, ...comp.captionStyle };
   const first = comp.blocks.find(isSentenceCaption);
   const preset = typeof first?.slots.preset === 'string' ? (first.slots.preset as string) : DEFAULT_CAPTION_PRESET;
@@ -1264,7 +1264,7 @@ export function resolveCaptionStyle(comp: Composition): CaptionStyle {
 /** Is the captions layer on? The stored truth is captionStyle.on (captions derive from the transcript
  *  at runtime; blocks are a runtime materialization, never persisted). Legacy comps that predate the
  *  flag carry persisted caption blocks instead — their presence reads as "on". */
-export function isCaptionsOn(comp: Composition): boolean {
+export function isCaptionsOn(comp: Pick<Composition, 'captionStyle' | 'blocks'>): boolean {
   return comp.captionStyle?.on ?? comp.blocks.some(isSentenceCaption);
 }
 

@@ -7189,7 +7189,6 @@ export function HyperframesWorkbench({
     renameProjectOutput: renameProjectOutputForAgent,
     deleteProjectOutput: deleteProjectOutputForAgent,
     compRef,
-    ensureShots,
     setSelectedId,
     setSelectedShotId,
     selectedIdRef,

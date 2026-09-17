@@ -15,6 +15,7 @@
 
 export * from './create';
 export * from './commands/index';
+export * from './caption-state';
 export * from './caption-transcript-sync';
 export * from './frozen-block-vars';
 export * from './legacy-projection';
