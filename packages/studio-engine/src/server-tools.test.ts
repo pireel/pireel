@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type Composition, applyEditorDocumentPersistenceMetadata, compositionToEditorDocument } from './composition';
+import { type Composition, applyEditorDocumentPersistenceMetadata, compositionToEditorDocument, firstNarrativeAssetId } from './composition';
 import { STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION, type TranscriptSegment } from './project-dto';
 import { SERVER_EXECUTABLE_TOOLS, type ServerToolProject, runServerTool } from './server-tools';
 
@@ -333,5 +333,42 @@ describe('remove_words (typed)', () => {
     expect(stale.result.ok).toBe(false);
     expect(stale.result.error).toContain('word_stale');
     expect(runServerTool('remove_words', {}, p).result.ok).toBe(false);
+  });
+});
+
+describe('set_captions translations (offline: the writer every entry shares)', () => {
+  const segs = (r: ReturnType<typeof runServerTool>) => {
+    const assetId = firstNarrativeAssetId(r.document!)!;
+    return r.document!.semantics.transcripts[assetId]!;
+  };
+
+  it('writes sentence translations by row and switches the second line to that language', () => {
+    const r = runServerTool('set_captions', { translations: { lang: 'English', items: [{ index: 0, text: 'First sentence.' }, { index: 2, text: 'Third sentence.' }] } }, proj());
+    expect(r.result.ok, JSON.stringify(r.result)).toBe(true);
+    expect(segs(r).map((seg) => seg.sub)).toEqual(['First sentence.', undefined, 'Third sentence.']);
+    expect(segs(r)[0]).toMatchObject({ subLang: 'English' });
+    expect(r.document!.appearance.captionStyle?.sub?.lang).toBe('English');
+  });
+
+  it('writes a per-cue line with w0/w1 and rejects a half range', () => {
+    const ok = runServerTool('set_captions', { translations: { lang: 'English', items: [{ index: 1, w0: 0, w1: 1, text: 'Second' }] } }, proj());
+    expect(ok.result.ok).toBe(true);
+    expect(segs(ok)[1]!.cueSubs).toEqual({ '0:1': 'Second' });
+    const bad = runServerTool('set_captions', { translations: { lang: 'English', items: [{ index: 1, w0: 3, text: 'x' }] } }, proj());
+    expect(bad.result).toMatchObject({ ok: false, error: 'invalid_value' });
+  });
+
+  it('targets an explicit asset, refuses a row past the transcript, and clear removes the second line', () => {
+    const p = proj();
+    const assetId = firstNarrativeAssetId(p.document)!;
+    const r = runServerTool('set_captions', { translations: { lang: 'English', assetId, items: [{ index: 1, text: 'Second sentence.' }] } }, p);
+    expect(r.result.ok).toBe(true);
+    const past = runServerTool('set_captions', { translations: { lang: 'English', items: [{ index: 9, text: 'x' }] } }, p);
+    expect(past.result.ok).toBe(false);
+    expect(String((past.result as { error?: string }).error)).toContain('index out of range');
+    const cleared = runServerTool('set_captions', { translations: { clear: true } }, { ...p, document: r.document! });
+    expect(cleared.result.ok).toBe(true);
+    expect(segs(cleared).some((seg) => seg.sub || seg.subLang)).toBe(false);
+    expect(cleared.document!.appearance.captionStyle?.sub?.lang).toBeUndefined();
   });
 });

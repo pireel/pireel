@@ -1,78 +1,37 @@
 import { describe, expect, it } from 'vitest';
-import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
-import { sentenceBreaksBetween, sentenceTranslationUnits, stageCaptionTranslationReplacement, type TranslationUnit } from './caption-translation-transaction';
+import { captionTranslationWrites, sentenceBreaksBetween, sentenceTranslationUnits, type TranslationUnit } from './caption-translation-transaction';
 
-const seg = (text: string, sub?: string): AsrSegment => ({ start: 0, end: 1, text, ...(sub ? { sub, subLang: 'old' } : {}) });
 const unit = (src: string | null, segs: number[], text = 'x'): TranslationUnit => ({
   src, start: 0, end: 1, text, members: segs.map((s) => ({ seg: s, wordCount: 1 })),
 });
 
-describe('stageCaptionTranslationReplacement', () => {
-  it('replaces translations across main and inserted sources as one staged value', () => {
-    const main = [seg('main zero', 'old main'), seg('main one', 'old one')];
-    const clip = [seg('clip zero', 'old clip')];
-    const result = stageCaptionTranslationReplacement({
-      units: [unit(null, [0]), unit('blob:clip', [0])],
-      rows: [{ index: 1, text: 'New clip' }, { index: 0, text: 'New main' }],
-      target: 'English',
-      mainTranscript: main,
-      clipTranscripts: { 'blob:clip': clip },
-    });
-
-    expect(result).toMatchObject({
-      ok: true,
-      mainTranscript: [{ sub: 'New main', subLang: 'English' }, { text: 'main one' }],
-      clipTranscripts: { 'blob:clip': [{ sub: 'New clip', subLang: 'English' }] },
-    });
-    expect(main[0]?.sub).toBe('old main');
-    expect(clip[0]?.sub).toBe('old clip');
+describe('captionTranslationWrites', () => {
+  it('groups items by source, one per transcript segment', () => {
+    const result = captionTranslationWrites(
+      [unit(null, [0]), unit('blob:clip', [0]), unit(null, [2])],
+      [{ index: 1, text: 'New clip' }, { index: 0, text: 'New main' }, { index: 2, text: 'Third' }],
+    );
+    expect(result).toEqual({ ok: true, writes: [
+      { src: null, items: [{ index: 0, text: 'New main' }, { index: 2, text: 'Third' }] },
+      { src: 'blob:clip', items: [{ index: 0, text: 'New clip' }] },
+    ] });
   });
 
   it('spreads a sentence that spans two transcript segments over both by word share', () => {
-    const main = [seg('大家好，客时间寄来的'), seg('张纸。')];
-    const result = stageCaptionTranslationReplacement({
-      units: [{ src: null, start: 0, end: 2, text: '大家好，客时间寄来的张纸。', members: [{ seg: 0, wordCount: 4 }, { seg: 1, wordCount: 2 }] }],
-      rows: [{ index: 0, text: 'Hello everyone, a sheet of paper from Geektime.' }],
-      target: 'English',
-      mainTranscript: main,
-      clipTranscripts: {},
-    });
+    const result = captionTranslationWrites(
+      [{ src: null, start: 0, end: 2, text: '大家好，客时间寄来的张纸。', members: [{ seg: 0, wordCount: 4 }, { seg: 1, wordCount: 2 }] }],
+      [{ index: 0, text: 'Hello everyone, a sheet of paper from Geektime.' }],
+    );
     expect(result.ok).toBe(true);
-    const staged = (result as { mainTranscript: AsrSegment[] }).mainTranscript;
-    expect(staged[0]!.sub).toBeTruthy();
-    expect(staged[1]!.sub).toBeTruthy();
-    expect(`${staged[0]!.sub} ${staged[1]!.sub}`).toBe('Hello everyone, a sheet of paper from Geektime.');
-    expect(staged[0]!.cueSubs).toBeUndefined();
+    const items = (result as { writes: { items: { index: number; text: string }[] }[] }).writes[0]!.items;
+    expect(items.map((item) => item.index)).toEqual([0, 1]);
+    expect(items.map((item) => item.text).join(' ')).toBe('Hello everyone, a sheet of paper from Geektime.');
   });
 
-  it('rejects a missing result without clearing any existing translation', () => {
-    const main = [seg('zero', 'keep zero'), seg('one', 'keep one')];
-    const result = stageCaptionTranslationReplacement({
-      units: [unit(null, [0]), unit(null, [1])],
-      rows: [{ index: 0, text: 'only one row' }],
-      target: 'English',
-      mainTranscript: main,
-      clipTranscripts: {},
-    });
-
-    expect(result.ok).toBe(false);
-    expect(main.map((item) => item.sub)).toEqual(['keep zero', 'keep one']);
-  });
-
-  it('rejects a stale inserted source without mutating main or clip transcripts', () => {
-    const main = [seg('main', 'keep main')];
-    const clips = { present: [seg('clip', 'keep clip')] };
-    const result = stageCaptionTranslationReplacement({
-      units: [unit('missing', [0])],
-      rows: [{ index: 0, text: 'translation' }],
-      target: 'English',
-      mainTranscript: main,
-      clipTranscripts: clips,
-    });
-
-    expect(result.ok).toBe(false);
-    expect(main[0]?.sub).toBe('keep main');
-    expect(clips.present[0]?.sub).toBe('keep clip');
+  it('refuses a missing, duplicate, or out-of-range row so nothing half-lands', () => {
+    expect(captionTranslationWrites([unit(null, [0]), unit(null, [1])], [{ index: 0, text: 'only one row' }]).ok).toBe(false);
+    expect(captionTranslationWrites([unit(null, [0])], [{ index: 0, text: 'a' }, { index: 0, text: 'b' }]).ok).toBe(false);
+    expect(captionTranslationWrites([unit(null, [0])], [{ index: 5, text: 'a' }]).ok).toBe(false);
   });
 });
 

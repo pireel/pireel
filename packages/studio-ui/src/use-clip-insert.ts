@@ -289,7 +289,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
       const t = studioProviders().translate;
       if (lang && t) {
         const out = await t(segs.map((x, i) => ({ index: i, text: x.text })), lang);
-        if (out.length) await runTool('set_caption_translations', { shotId: insertedShotId, items: out });
+        if (out.length) await runTool('set_captions', { clipId: insertedShotId, translations: { lang, items: out } });
       }
     } catch {
       /* auto-complete failure is silent: the captions panel / agent can fill manually */

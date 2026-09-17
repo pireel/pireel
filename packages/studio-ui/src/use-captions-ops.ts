@@ -35,7 +35,7 @@ import { editorErrorMessage } from './editor-error';
 import type { CaptionLineRow } from './captions-panel';
 import { inspectCaptionDocument } from './caption-document-state';
 import { captionTranscriptsByAsset, captionTranscriptsFromDocument, captionTranslationSources } from './caption-transcript-bridge';
-import { sentenceTranslationUnits, stageCaptionTranslationReplacement } from './caption-translation-transaction';
+import { captionTranslationWrites, sentenceTranslationUnits } from './caption-translation-transaction';
 import { transcriptInputsFor, type DocumentOpInputs } from '@pireel/studio-engine/document-transaction';
 import type { DocumentCommitter } from './document-commit';
 
@@ -64,7 +64,7 @@ export interface CaptionsOpsDeps {
   ensureClipTranscripts: () => Promise<void>;
   postPreview: (msg: Record<string, unknown>) => void;
   applyT: (v: number) => void;
-  /** The agent tool dispatcher (set_caption_translations goes through the shared executor for undo/re-lay). */
+  /** The agent tool dispatcher: caption writes go through set_captions, the same tool chat and MCP use. */
   runTool: (toolId: string, input: Record<string, unknown>) => Promise<unknown>;
 }
 
@@ -133,12 +133,9 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       const textOut = out.find((o) => o.index === index)?.text?.trim();
       if (!textOut) throw new Error(t('workbench.translationFailedTryAgain'));
       const item = { index, w0, w1, text: textOut };
-      if (src) {
-        const shot = ensureShots(compRef.current).find((s) => s.src === src);
-        if (shot) await runTool('set_caption_translations', { shotId: shot.id, items: [item], lang });
-      } else {
-        await runTool('set_caption_translations', { items: [item], lang });
-      }
+      const shot = src ? ensureShots(compRef.current).find((s) => s.src === src) : undefined;
+      if (src && !shot) throw new Error(t('workbench.translationFailedTryAgain'));
+      await runTool('set_captions', { ...(shot ? { clipId: shot.id } : {}), translations: { lang, items: [item] } });
     } catch (e) {
       console.warn('[captions] line translation failed', e);
       toast.error(t('workbench.translationFailedTryAgain'));
@@ -366,7 +363,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
           busy: capTransBusy,
           lang: resolveCaptionStyle(comp).sub?.lang,
           onTranslate: (lang: string) => void translateCaptionsTo(lang),
-          onClear: () => void runTool('set_caption_translations', { clear: true }),
+          onClear: () => void runTool('set_captions', { translations: { clear: true } }),
         }
       : undefined,
   });
@@ -573,7 +570,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     // caption relays re-derive the rows even when no legacy field changed.
   }, [comp, comp.shots, comp.width, comp.height, comp.captionStyle, asrSentences, clipAsr]);
   /* ---------- Bilingual translation (the captions panel "bilingual" section): translations come from the in-house LLM
-     (providers.translate; the OSS shell's default hides this section), data lands via the same set_caption_translations executor (undo/re-lay shared). ---------- */
+     (providers.translate; the OSS shell's default hides this section), data lands through set_captions, the same tool chat and MCP use. ---------- */
   const translateCaptionsTo = async (target: string) => {
     const tr = studioProviders().translate;
     if (!tr) return;
@@ -598,31 +595,20 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
         return;
       }
       const out = await tr(units.map((unit, i) => ({ index: i, text: unit.text })), target);
-      // Stage clear + all-source replacement + caption relay first, then publish refs/state exactly
-      // once. A missing row, stale source, or locked caption lane leaves the old bilingual layer
-      // untouched instead of clearing it and writing only the batches that happened to succeed.
-      const staged = stageCaptionTranslationReplacement({
-        units,
-        rows: out,
-        target,
-        mainTranscript: sources.main,
-        clipTranscripts: sources.clips,
-      });
-      if (!staged.ok) throw new Error(staged.error || t('workbench.translationFailedTryAgain'));
-      const landed = commit({ op: 'captions.edit', input: {
-        patch: { sub: { ...(documentRef.current.appearance.captionStyle?.sub ?? {}), lang: target } },
-        mainTranscript: staged.mainTranscript,
-        clipTranscripts: captionTranscriptsByAsset(documentRef.current, compRef.current, staged.clipTranscripts),
-      } });
-      if (!landed.ok) throw new Error(editorErrorMessage(landed.error));
-      // Runtime copies follow what landed; a main copy the relay did not need stays as it was and
-      // keeps following the document through the workbench's transcript-sync effect.
-      if (staged.mainTranscript) {
-        asrRef.current = staged.mainTranscript;
-        setAsrSentences(staged.mainTranscript);
+      // One transaction through the same tool every entry uses (chat, MCP, this panel): clear the
+      // old bilingual layer, then write each source. A missing row or a vanished source lands
+      // nothing, so a failed run never leaves a half-translated layer behind.
+      const writes = captionTranslationWrites(units, out);
+      if (!writes.ok) throw new Error(writes.error || t('workbench.translationFailedTryAgain'));
+      const shots = ensureShots(compRef.current);
+      const ops: Parameters<DocumentCommitter['commit']>[0] = [{ op: 'agent.timeline', input: { tool: 'set_captions', input: { translations: { clear: true } } } }];
+      for (const write of writes.writes) {
+        const clipId = write.src ? shots.find((shot) => shot.src === write.src)?.id : undefined;
+        if (write.src && !clipId) throw new Error(`Translation source is no longer available: ${write.src}`);
+        ops.push({ op: 'agent.timeline', input: { tool: 'set_captions', input: { ...(clipId ? { clipId } : {}), translations: { lang: target, items: write.items } } } });
       }
-      clipAsrRef.current = staged.clipTranscripts;
-      setClipAsr(staged.clipTranscripts);
+      const landed = commit(ops, { origin: 'user' });
+      if (!landed.ok) throw new Error(editorErrorMessage(landed.error));
       toast.success(t('workbench.generatedLangTranslations', { lang: target }) + (isCaptionsOn(compRef.current) ? '' : t('workbench.enableCaptionsShowThem')));
     } catch (e) {
       console.warn('[captions] translation failed', e);

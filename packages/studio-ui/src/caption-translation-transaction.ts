@@ -1,27 +1,11 @@
-import {
-  type AsrSegment,
-  applyCaptionTranslations,
-  clearCaptionTranslations,
-  type CaptionTranslationItem,
-} from '@pireel/studio-engine/build-blocks';
-import { applyCaptionDocumentEdit, type Composition, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
+import type { CaptionTranslationItem } from '@pireel/studio-engine/build-blocks';
 import { distributeSub, type MappedSeg } from '@pireel/studio-engine/captions-relay';
 import { joinWords } from '@pireel/studio-engine/caption-fx';
-import { captionTranscriptsByAsset } from './caption-transcript-bridge';
-import { editorErrorMessage } from './editor-error';
 
 export interface CaptionTranslationRow {
   index: number;
   text: string;
 }
-
-export type CaptionTranslationStageResult =
-  | { ok: true; mainTranscript: AsrSegment[] | null; clipTranscripts: Record<string, AsrSegment[]> }
-  | { ok: false; error: string };
-
-export type CaptionTranslationTransactionResult =
-  | { ok: true; document: EditorDocumentV2; mainTranscript: AsrSegment[] | null; clipTranscripts: Record<string, AsrSegment[]> }
-  | { ok: false; error: string };
 
 /**
  * One row sent to the translator: a complete sentence of one source, with the transcript segments
@@ -139,28 +123,22 @@ function completeByPosition(count: number, rows: readonly CaptionTranslationRow[
   return byPosition.size === count ? byPosition : null;
 }
 
-/**
- * Build the complete replacement in memory. No ref/state is mutated until every translated row and
- * every transcript target has been validated, so callers can safely abandon an invalid result.
- */
-export function stageCaptionTranslationReplacement(input: {
-  units: readonly TranslationUnit[];
-  rows: readonly CaptionTranslationRow[];
-  target: string;
-  mainTranscript: readonly AsrSegment[] | null;
-  clipTranscripts: Readonly<Record<string, readonly AsrSegment[]>>;
-}): CaptionTranslationStageResult {
-  const translated = completeByPosition(input.units.length, input.rows);
-  if (!translated) return { ok: false, error: 'Translation response was incomplete or contained invalid row ids.' };
+/** Translations to write, grouped by source (null = the main narration), one item per transcript
+ * segment. A sentence that spans several segments hands each segment the share of the translation
+ * its words account for. Nothing is written until every row validated. */
+export type CaptionTranslationWrites =
+  | { ok: true; writes: { src: string | null; items: CaptionTranslationItem[] }[] }
+  | { ok: false; error: string };
 
+export function captionTranslationWrites(units: readonly TranslationUnit[], rows: readonly CaptionTranslationRow[]): CaptionTranslationWrites {
+  const translated = completeByPosition(units.length, rows);
+  if (!translated) return { ok: false, error: 'Translation response was incomplete or contained invalid row ids.' };
   const bySource = new Map<string | null, CaptionTranslationItem[]>();
-  input.units.forEach((unit, position) => {
+  units.forEach((unit, position) => {
     const items = bySource.get(unit.src) ?? [];
     const text = translated.get(position)!;
     if (unit.members.length === 1) items.push({ index: unit.members[0]!.seg, text });
     else {
-      // A sentence that spans several transcript segments: each segment keeps the share of the
-      // translation its words account for, so the bilingual line follows the speech.
       const pieces = distributeSub(text, unit.members.map((member) => member.wordCount));
       unit.members.forEach((member, at) => {
         if (pieces[at]) items.push({ index: member.seg, text: pieces[at]! });
@@ -168,49 +146,5 @@ export function stageCaptionTranslationReplacement(input: {
     }
     bySource.set(unit.src, items);
   });
-
-  let mainTranscript = input.mainTranscript ? clearCaptionTranslations([...input.mainTranscript]) : null;
-  const clipTranscripts = Object.fromEntries(Object.entries(input.clipTranscripts).map(([source, segments]) => [
-    source,
-    clearCaptionTranslations([...segments]),
-  ]));
-
-  for (const [source, items] of bySource) {
-    const segments = source ? clipTranscripts[source] : mainTranscript;
-    if (!segments?.length) return { ok: false, error: source ? `Translation source is no longer available: ${source}` : 'The main transcript is no longer available.' };
-    if (items.some((item) => item.index < 0 || item.index >= segments.length)) {
-      return { ok: false, error: 'The transcript changed while it was being translated.' };
-    }
-    const next = applyCaptionTranslations(segments, items, input.target);
-    if (source) clipTranscripts[source] = next;
-    else mainTranscript = next;
-  }
-
-  return { ok: true, mainTranscript, clipTranscripts };
+  return { ok: true, writes: [...bySource].map(([src, items]) => ({ src, items })) };
 }
-
-/** Apply transcript replacement, caption relay, and target-language style in one document edit. */
-export function replaceCaptionTranslationsTransaction(input: {
-  document: EditorDocumentV2;
-  composition: Composition;
-  units: readonly TranslationUnit[];
-  rows: readonly CaptionTranslationRow[];
-  target: string;
-  mainTranscript: readonly AsrSegment[] | null;
-  clipTranscripts: Readonly<Record<string, readonly AsrSegment[]>>;
-}): CaptionTranslationTransactionResult {
-  const staged = stageCaptionTranslationReplacement(input);
-  if (!staged.ok) return staged;
-
-  const edit = applyCaptionDocumentEdit({
-    document: input.document,
-    patch: {
-      sub: { ...(input.document.appearance.captionStyle?.sub ?? {}), lang: input.target },
-    },
-    mainTranscript: staged.mainTranscript,
-    clipTranscripts: captionTranscriptsByAsset(input.document, input.composition, staged.clipTranscripts),
-  });
-  if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error) };
-  return { ...staged, document: edit.document };
-}
-

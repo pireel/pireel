@@ -475,7 +475,17 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       source: obj({ trackId: str(), clipId: str() }),
       clipId: str('corrections / translations: an inserted clip’s transcript instead of the main narration.'),
       corrections: arr(obj({ index: int('Transcript row.'), text: str('Complete corrected sentence.') }, ['index', 'text'])),
-      translations: obj({ lang: str('Target language name.'), items: arr(obj({ index: int('Transcript row.'), text: str('Translation; empty removes.') }, ['index', 'text'])), clear: bool() }),
+      translations: obj({
+        lang: str('Target language name; also selects the second caption line’s language.'),
+        assetId: str('Transcribed source to write. Default: the story spine, or the inserted clip named by clipId.'),
+        items: arr(obj({
+          index: int('Transcript row.'),
+          text: str('Translation; empty removes.'),
+          w0: int('With w1: first word of one cue, for a per-cue line that overrides the row’s translation.'),
+          w1: int('With w0: last word of that cue.'),
+        }, ['index', 'text'])),
+        clear: bool('Remove every translation and the second line.'),
+      }),
       relayout: bool(),
     }),
   },

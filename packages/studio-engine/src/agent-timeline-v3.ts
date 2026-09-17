@@ -37,7 +37,7 @@ import { listDocumentAddressedWords, resolveDocumentWordIds } from './editor-doc
 import { patchNarrativeClips } from './editor-document/commands/narrative-patch';
 import { projectDocumentToComposition } from './project-document';
 import { STUDIO_AGENT_EXECUTION_LIMITS } from './agent-execution-budget';
-import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations, desegmentCues } from './build-blocks';
+import { type AsrSegment, applyCaptionTranslations, type CaptionTranslationItem, clearCaptionTranslations, desegmentCues } from './build-blocks';
 import { applyCaptionTextEdits } from './caption-text-edit';
 import { resolveCaptionSentenceEdits } from './caption-sentence-edit';
 import { captionYPctForCanvas } from './delivery-safety';
@@ -804,27 +804,47 @@ function captionCorrections(document: EditorDocumentV2, rows: unknown[], clipId:
 
 function captionTranslations(document: EditorDocumentV2, translations: Input, clipId: string | undefined): AgentTimelineOutcome {
   const clear = translations.clear === true;
-  const lang = string(translations.lang);
-  const items = (Array.isArray(translations.items) ? translations.items : [])
-    .map((row) => { const o = (row ?? {}) as Input; return { index: Number(o.index), text: typeof o.text === 'string' ? o.text.trim() : null }; })
-    .filter((row): row is { index: number; text: string } => Number.isInteger(row.index) && row.index >= 0 && row.text !== null);
+  const currentSub = document.appearance.captionStyle?.sub ?? {};
+  const lang = string(translations.lang) ?? currentSub.lang;
+  const items: CaptionTranslationItem[] = [];
+  for (const row of Array.isArray(translations.items) ? translations.items : []) {
+    const o = (row ?? {}) as Input;
+    const index = Number(o.index);
+    const text = typeof o.text === 'string' ? o.text.trim() : null;
+    if (!Number.isInteger(index) || index < 0 || text === null) continue;
+    const w0 = o.w0 === undefined ? undefined : Number(o.w0);
+    const w1 = o.w1 === undefined ? undefined : Number(o.w1);
+    if ((w0 === undefined) !== (w1 === undefined) || (w0 !== undefined && (!Number.isInteger(w0) || !Number.isInteger(w1) || w0 < 0 || w1! < w0))) {
+      return fail('invalid_value', { path: 'translations.items', value: { index, w0, w1 }, fix: 'w0 and w1 are optional together: the first and last word of one cue, w0 <= w1' });
+    }
+    items.push(w0 === undefined ? { index, text } : { index, text, w0, w1: w1! });
+  }
   if (!clear && !items.length) return fail('translations need {lang, items:[{index, text}]} or clear:true');
   let next = document;
   let summary: string;
+  let subPatch: Record<string, unknown> | undefined;
   if (clear) {
     next = { ...next, semantics: { ...next.semantics, transcripts: Object.fromEntries(Object.entries(next.semantics.transcripts).map(([assetId, segments]) => [assetId, clearCaptionTranslations(segments as AsrSegment[])])) } };
+    // The second line has nothing left to show; bilingual display follows the data.
+    if (currentSub.lang) { const { lang: _lang, ...rest } = currentSub; subPatch = { sub: rest }; }
     summary = 'Cleared all caption translations';
   } else {
-    const assetId = clipId ? primaryNarrativeClips(next).find((clip) => clip.id === clipId)?.assetId : firstNarrativeAssetId(next);
+    if (!lang) return fail('translations need lang: the target language name (it also becomes the second caption line’s language)');
+    const explicitAsset = string(translations.assetId);
+    const assetId = explicitAsset
+      ?? (clipId ? primaryNarrativeClips(next).find((clip) => clip.id === clipId)?.assetId : firstNarrativeAssetId(next));
     if (!assetId) return fail(clipId ? `clip not found on the story spine: ${clipId}` : 'no narrative source on the timeline');
     const segments = next.semantics.transcripts[assetId] as AsrSegment[] | undefined;
-    if (!segments?.length) return fail('no transcript for this source — read get_transcript first');
+    if (!segments?.length) return fail(explicitAsset ? `no transcript for asset ${assetId}` : 'no transcript for this source — read get_transcript first');
     const bad = items.filter((row) => row.index >= segments.length);
     if (bad.length) return fail(`index out of range: ${bad.map((row) => row.index).join(', ')} (this transcript has ${segments.length} rows)`);
     next = { ...next, semantics: { ...next.semantics, transcripts: { ...next.semantics.transcripts, [assetId]: applyCaptionTranslations(segments, items, lang) } } };
+    // Every entry (panel, chat, MCP) lands here, so the display language follows the write: a
+    // translation nobody can see is not delivered.
+    if (currentSub.lang !== lang) subPatch = { sub: { ...currentSub, lang } };
     summary = `Set ${items.filter((row) => row.text).length} translation${items.length === 1 ? '' : 's'}`;
   }
-  const edit = applyCaptionDocumentEdit({ document: next, mainTranscript: null, clipTranscripts: {} });
+  const edit = applyCaptionDocumentEdit({ document: next, ...(subPatch ? { patch: subPatch } : {}), mainTranscript: null, clipTranscripts: {} });
   if (!edit.ok) return fail(edit.error.message, { code: edit.error.code, trackIds: edit.error.trackIds });
   return mutation(edit.document, isCaptionsOn(composition(edit.document)) ? summary : `${summary} (captions are off; they show after set_captions on:true)`, edit.receipts);
 }
