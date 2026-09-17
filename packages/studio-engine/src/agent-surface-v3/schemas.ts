@@ -11,6 +11,7 @@ import { CAPTION_PRESETS } from '../caption-presets';
 import { CUT_TRANSITION_EFFECTS, MAX_TRANSITION_SEC, PLACE_ANCHORS, SHOT_TREATMENTS } from '../composition-core';
 import { DISPLAY_TEXT_ANIMATION_IDS, DISPLAY_TEXT_PRESETS } from '../display-text-presets';
 import { MG_BAKE_ROUTE, MG_RUNTIME_CAPABILITIES } from '../prompts/block-system';
+import { CLIP_PROPERTIES, CLIP_PROPERTY_REDIRECTS, clipPropertySummary, type ClipPropertyKey } from './clip-properties';
 
 export const CHARGE_MARKER = "[CHARGES the user's Pireel account.]";
 
@@ -59,7 +60,29 @@ const PLACEMENT_PCT = obj({ xPct: num(), yPct: num(), widthPct: num(), heightPct
 export interface V3ToolSchema {
   description: string;
   inputSchema: Schema;
+  /** Fields the schema refuses that belong to another tool: the refusal's fix names that tool. */
+  redirects?: Readonly<Record<string, string>>;
 }
+
+/** set_clip_properties fields come from the clip capability table; this map only gives each its shape. */
+const CLIP_PROPERTY_FIELD_SCHEMAS: Record<ClipPropertyKey, Schema> = {
+  source: SOURCE_RANGE,
+  durationFrames: int('New duration in frames.', 1),
+  speed: num('', { min: 0.25, max: 4 }),
+  ripple: bool('speed on the spine: shift later material (default true).'),
+  volumeDb: num('', { min: -60, max: 20 }),
+  mute: bool(),
+  fades: FADES,
+  filter: obj({ brightness: num(), contrast: num(), saturate: num() }),
+  opacity: num('', { min: 0, max: 1 }),
+  enabled: bool(),
+  box: BOX,
+  props: arr(obj({ key: str('Property key from component.props.'), value: PROPERTY_VALUE }, ['key', 'value']), { minItems: 1, maxItems: 8, description: 'Graphic clips only: editable properties to set.' }),
+};
+const CLIP_PROPERTY_ITEM: Schema = obj({
+  clipId: str(),
+  ...Object.fromEntries(CLIP_PROPERTIES.map((spec) => [spec.key, CLIP_PROPERTY_FIELD_SCHEMAS[spec.key]])),
+}, ['clipId']);
 
 export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   /* ------------------------------------------------------------------ state */
@@ -294,17 +317,11 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   set_clip_properties: {
     description:
-      'Patch properties on clips in one undo step: source [inSec,outSec] retrims a media clip (its length follows the span), durationFrames resizes graphic and text clips only, speed (0.25–4; the spine ripples by default, other lanes do not), volumeDb (−60…+20, 0 = source level), mute, fades {in,out} in frames, opacity, filter {brightness,contrast,saturate} (1 = untouched), enabled and box. Replacing a clip’s media is swap_clip_media. props sets a graphic clip’s declared editable properties as [{key,value}] pairs — the keys, types and current values are listed under component.props in get_state; no regeneration. Layout and framing belong to set_clip_framing; timing moves to move_clips.',
+      `Patch properties on clips in one undo step: source [inSec,outSec] retrims a media clip (its length follows the span), durationFrames resizes graphic and text clips only, speed (0.25–4; the spine ripples by default, other lanes do not), volumeDb (−60…+20, 0 = source level), mute, fades {in,out} in frames, opacity, filter {brightness,contrast,saturate} (1 = untouched), enabled and box. props sets a graphic clip’s declared editable properties as [{key,value}] pairs — the keys, types and current values are listed under component.props in get_state; no regeneration. What each kind takes: ${clipPropertySummary()} A field a kind does not take is refused with the tool that does. Replacing a clip’s media is swap_clip_media; layout and framing are set_clip_framing; timing moves are move_clips.`,
     inputSchema: obj({
-      items: arr(obj({
-        clipId: str(), source: SOURCE_RANGE, durationFrames: int('New duration in frames.', 1),
-        speed: num('', { min: 0.25, max: 4 }), ripple: bool('speed on the spine: shift later material (default true).'),
-        volumeDb: num('', { min: -60, max: 20 }), mute: bool(), fades: FADES, opacity: num('', { min: 0, max: 1 }),
-        filter: obj({ brightness: num(), contrast: num(), saturate: num() }),
-        enabled: bool(), box: BOX,
-        props: arr(obj({ key: str('Property key from component.props.'), value: PROPERTY_VALUE }, ['key', 'value']), { minItems: 1, maxItems: 8, description: 'Graphic clips only: editable properties to set.' }),
-      }, ['clipId']), { minItems: 1 }),
+      items: arr(CLIP_PROPERTY_ITEM, { minItems: 1 }),
     }, ['items']),
+    redirects: CLIP_PROPERTY_REDIRECTS,
   },
   swap_clip_media: {
     description:

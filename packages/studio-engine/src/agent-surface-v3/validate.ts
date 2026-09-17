@@ -99,9 +99,16 @@ function check(schema: Schema, value: unknown, path: string): V3InputProblem | n
   }
 }
 
-/** Null when the input fits the tool's schema; unknown tools pass, unknown fields are refused. */
+/** Null when the input fits the tool's schema; unknown tools pass, unknown fields are refused. A
+ * refused field the tool's redirect table knows gets the fix naming the tool it belongs to. */
 export function validateV3Input(tool: string, args: Record<string, unknown>): V3InputProblem | null {
-  const schema = V3_TOOL_SCHEMAS[tool]?.inputSchema;
-  if (!schema) return null;
-  return check(schema as Schema, args ?? {}, '');
+  const entry = V3_TOOL_SCHEMAS[tool];
+  if (!entry) return null;
+  const found = check(entry.inputSchema as Schema, args ?? {}, '');
+  if (found?.error === 'unknown_field' && entry.redirects) {
+    const key = found.path.split('.').pop() ?? '';
+    const redirect = entry.redirects[key];
+    if (redirect) return { ...found, fix: redirect };
+  }
+  return found;
 }

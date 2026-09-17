@@ -9,7 +9,7 @@
  */
 import { webFontCatalog } from '../font-library';
 import { componentSchemaOf, componentValuesView, type ComponentValueType } from '../component-schema';
-import { audioFadeDefaults, type AudioClipRole } from '../audio-tracks';
+import { clipPropertyDefaults, effectiveAudioClipProperties } from './clip-properties';
 
 import type {
   EditorDocumentV2,
@@ -100,7 +100,9 @@ function stripDefaults(value: Record<string, unknown> | undefined, defaults: Rec
   return out;
 }
 
-const NARRATIVE_DEFAULTS: Record<string, unknown> = { treatment: 'full', speed: 1, volumeDb: 0, audioMuted: false, treatSize: 50, treatCrop: 50 };
+// Read-back defaults come from the clip capability table, the one declaration of what each kind carries.
+const NARRATIVE_DEFAULTS = clipPropertyDefaults('narrative');
+const MEDIA_DEFAULTS = clipPropertyDefaults('media');
 
 const isZero = (value: unknown) => value === undefined || value === 0;
 /** Identity layer geometry (no crop, no rounding, unit transform) is the default and stays out of receipts. */
@@ -124,18 +126,7 @@ function stripIdentityGeometry(view: V3ClipView, mediaFraming: unknown): void {
   const props = view as unknown as Record<string, unknown>;
   if ('preciseFraming' in props && isIdentityPreciseFraming(props.preciseFraming)) delete props.preciseFraming;
 }
-const AUDIO_DEFAULTS: Record<string, unknown> = { speed: 1, muted: false, fadeInSec: 0, fadeOutSec: 0 };
-
-/** The document stores a fade only when it differs from the lane's default (a music bed fades
- *  0.8 s in / 1.5 s out on its own); the reader gets the effective value, never the storage rule. */
-function effectiveAudioProperties(properties: Record<string, unknown>, trackRole: string | undefined): Record<string, unknown> {
-  const role: AudioClipRole | undefined = typeof properties.role === 'string'
-    ? properties.role as AudioClipRole
-    : trackRole === 'narration' || trackRole === 'sfx' ? trackRole : trackRole === 'music' ? undefined : 'audio';
-  const fades = audioFadeDefaults(role);
-  const { role: _role, ...rest } = properties;
-  return { ...rest, fadeInSec: properties.fadeInSec ?? fades.fadeInSec, fadeOutSec: properties.fadeOutSec ?? fades.fadeOutSec };
-}
+const AUDIO_DEFAULTS = clipPropertyDefaults('audio', 'audio');
 
 function isManagedCaptionTrack(document: EditorDocumentV2, track: EditorTrack): boolean {
   return track.id === document.semantics.managedCaptionTrackId || track.role === 'managedCaptions';
@@ -160,11 +151,8 @@ export function renderV3Clip(clip: TimelineClip, trackId: string, trackRole?: st
       view.assetId = clip.assetId;
       view.source = [round3(clip.sourceInSec), round3(clip.sourceOutSec)];
       if (clip.box) view.box = clip.box;
-      if (clip.fit && clip.fit !== 'cover') view.fit = clip.fit;
-      if (clip.opacity !== undefined && clip.opacity !== 1) view.opacity = clip.opacity;
-      if (clip.anchorX !== undefined && clip.anchorX !== 0.5) view.anchorX = clip.anchorX;
-      if (clip.anchorY !== undefined && clip.anchorY !== 0.5) view.anchorY = clip.anchorY;
-      if (clip.video) Object.assign(view, stripDefaults(clip.video as Record<string, unknown>, NARRATIVE_DEFAULTS));
+      Object.assign(view, stripDefaults({ fit: clip.fit, opacity: clip.opacity, anchorX: clip.anchorX, anchorY: clip.anchorY }, MEDIA_DEFAULTS));
+      if (clip.video) Object.assign(view, stripDefaults(clip.video as Record<string, unknown>, MEDIA_DEFAULTS));
       stripIdentityGeometry(view, clip.mediaFraming);
       if (clip.keyframes && (clip.keyframes.box?.length || clip.keyframes.opacity?.length)) view.keyframes = clip.keyframes;
       break;
@@ -190,7 +178,9 @@ export function renderV3Clip(clip: TimelineClip, trackId: string, trackRole?: st
       if (clip.sourceOutSec !== undefined) view.source = [round3(clip.sourceInSec), round3(clip.sourceOutSec)];
       else if (clip.sourceInSec) view.sourceInSec = round3(clip.sourceInSec);
       view.anchor = clip.anchor;
-      Object.assign(view, stripDefaults(effectiveAudioProperties((clip.properties ?? {}) as Record<string, unknown>, trackRole), AUDIO_DEFAULTS));
+      // Effective values (lane fade defaults applied), then only what differs from the audio defaults.
+      const effective = effectiveAudioClipProperties((clip.properties ?? {}) as Record<string, unknown>, trackRole);
+      Object.assign(view, stripDefaults(effective.properties, AUDIO_DEFAULTS));
       break;
     }
   }

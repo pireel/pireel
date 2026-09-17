@@ -35,6 +35,7 @@ import { editorDocumentRenderPlan } from './editor-document/render-plan';
 import { firstNarrativeAssetId, freeOverlayStackOrder, narrativeAtTimelineSecond, primaryNarrativeClips } from './editor-document/read-model';
 import { projectNarrativeShots, projectOverlayBlockById } from './editor-document/legacy-projection';
 import { documentCaptionsOn, documentCaptionStyle } from './editor-document/caption-state';
+import { clipCapabilityContext, clipFieldRefusal } from './agent-surface-v3/clip-properties';
 import { listDocumentAddressedWords, resolveDocumentWordIds } from './editor-document/transcript-address';
 import { patchNarrativeClips } from './editor-document/commands/narrative-patch';
 import { projectDocumentToComposition } from './project-document';
@@ -455,8 +456,13 @@ export function setClipPropertiesV3(document: EditorDocumentV2, input: Input): A
     const video = isVideoClip(next, found.clip);
     let failed: AgentTimelineOutcome | null = null;
 
-    if (item.assetId !== undefined) return fail('unknown_field', { path: `items[${index}].assetId`, fix: 'Replacing a clip\'s media is swap_clip_media {clipId, assetId}.' });
-    if (failed) return failed;
+    // The capability table decides what this kind takes; the code below only knows how to apply it.
+    const capability = clipCapabilityContext(next, found.clip);
+    for (const key of Object.keys(item)) {
+      if (key === 'clipId' || item[key] === undefined) continue;
+      const refusal = clipFieldRefusal(capability, key);
+      if (refusal) return fail('unknown_field', { path: `items[${index}].${key}`, fix: refusal.fix });
+    }
 
     if (item.source !== undefined) {
       if (!Array.isArray(item.source) || item.source.length !== 2 || !item.source.every(isFiniteNumber)) return fail(`items[${index}].source is a two-number array [inSec, outSec], not a string`);
@@ -465,15 +471,13 @@ export function setClipPropertiesV3(document: EditorDocumentV2, input: Input): A
     }
     if (item.durationFrames !== undefined) {
       if (!isFrame(item.durationFrames, 1)) return fail(`items[${index}].durationFrames must be an integer frame count ≥ 1`);
-      if (!overlay) return fail(`items[${index}].durationFrames applies to graphic and text clips; a media clip's length follows its source span — pass source [inSec, outSec] instead`);
       const edit = retimeOverlayDocumentClip({ document: next, clipId, durationSec: framesToSec(item.durationFrames, fps) });
       if (!edit.ok) return fail(edit.error.message, { code: edit.error.code, trackIds: edit.error.trackIds });
       next = edit.document; receipts.push(...edit.receipts); changes += 1;
     }
     if (isFiniteNumber(item.speed)) {
       if (video) failed = step(setVideoSpeed(next, { shotIds: [clipId], speed: item.speed, ...(typeof item.ripple === 'boolean' ? { ripple: item.ripple } : {}) }));
-      else if (kind === 'audio') failed = step(setClipPatches(next, { items: [{ clipId, speed: item.speed }] }));
-      else return fail(`items[${index}].speed applies to video and audio clips`);
+      else failed = step(setClipPatches(next, { items: [{ clipId, speed: item.speed }] }));
       if (failed) return failed;
     }
     const fades = item.fades && typeof item.fades === 'object' ? (item.fades as Input) : undefined;
@@ -490,7 +494,7 @@ export function setClipPropertiesV3(document: EditorDocumentV2, input: Input): A
         const native = applyVideoClipSettingsPatches(next, [{ clipId, patch: { audio: soundPatch } }]);
         if (!native.ok) return fail(native.error, native.data);
         next = native.document; changes += 1;
-      } else if (kind === 'audio') {
+      } else {
         failed = step(setClipPatches(next, { items: [{ clipId,
           ...(soundPatch.volumeDb !== undefined ? { volumeDb: soundPatch.volumeDb } : {}),
           ...(soundPatch.mute !== undefined ? { muted: soundPatch.mute } : {}),
@@ -498,10 +502,9 @@ export function setClipPropertiesV3(document: EditorDocumentV2, input: Input): A
           ...(fadeOutSec !== undefined ? { fadeOutSec } : {}),
         }] }));
         if (failed) return failed;
-      } else return fail(`items[${index}] volumeDb / mute / fades apply to clips with sound (video or audio)`);
+      }
     }
     if (item.filter && typeof item.filter === 'object') {
-      if (!video) return fail(`items[${index}].filter applies to video clips`);
       const f = item.filter as Input;
       const filter: ShotFilter = {
         ...(isFiniteNumber(f.brightness) ? { brightness: f.brightness } : {}),
@@ -516,10 +519,6 @@ export function setClipPropertiesV3(document: EditorDocumentV2, input: Input): A
     }
     const common: Input = { clipId };
     if (typeof item.enabled === 'boolean') common.enabled = item.enabled;
-    if (kind === 'narrative' && (item.opacity !== undefined || item.keyframes !== undefined)) {
-      const field = item.opacity !== undefined ? 'opacity' : 'keyframes';
-      return fail('unknown_field', { path: `items[${index}].${field}`, fix: `${field} applies to B-roll, image and graphic clips. A story-spine clip is framed with set_clip_framing / box; its level and fades are set here with volumeDb / fades.` });
-    }
     if (isFiniteNumber(item.opacity)) common.opacity = item.opacity;
     if (item.box !== undefined) {
       if (!mediaBox(item.box)) return fail(`items[${index}].box must be a positive normalized rect inside the canvas`);
@@ -534,7 +533,6 @@ export function setClipPropertiesV3(document: EditorDocumentV2, input: Input): A
       if (failed) return failed;
     }
     if (item.props !== undefined) {
-      if (!overlay) return fail(`items[${index}].props apply to graphic clips only`);
       failed = step(setComponentProps(next, clipId, item.props));
       if (failed) return failed;
     }
