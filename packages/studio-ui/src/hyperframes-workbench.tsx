@@ -7208,7 +7208,6 @@ export function HyperframesWorkbench({
     videoFileRef,
     clipFilesRef,
     localTranscriptCacheRef,
-    currentVideo,
     pickVideoFile,
     registerLocalAsset,
     localAssetIndexRef,

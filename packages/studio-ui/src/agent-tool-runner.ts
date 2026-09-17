@@ -34,6 +34,7 @@ import {
   freeTrack,
   hasPrimaryNarrativeClips,
   firstNarrativeAssetId,
+  primaryNarrativeClips,
   isSentenceCaption,
   renderBlock,
   localImageLocator,
@@ -392,7 +393,6 @@ export interface AgentToolCtx {
   /** Session cache for project-library speech inspected before timeline placement. Promoting that
    * asset to primary must adopt this transcript instead of asking the provider a second time. */
   localTranscriptCacheRef: MutableRefObject<Map<string, AsrSegment[]>>;
-  currentVideo: () => { url: string; durationSec: number; width: number; height: number } | null;
   pickVideoFile: (file: File, opts?: {
     asSig?: string;
     reconnect?: boolean;
@@ -488,7 +488,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
     listProjectOutputs, resolveProjectOutput, createProjectOutput, duplicateProjectOutput, switchProjectOutput, renameProjectOutput, deleteProjectOutput,
     setSelectedId, setSelectedShotId, selectedIdRef, applyT, tRef, playStopAtRef,
     playingRef, setPlaying, seekBlockSettled, pushUndoSnapshot, undoStackRef, redoStackRef, genIdsRef,
-    markGenerating, videoFileRef, clipFilesRef, localTranscriptCacheRef, currentVideo, pickVideoFile, registerLocalAsset,
+    markGenerating, videoFileRef, clipFilesRef, localTranscriptCacheRef, pickVideoFile, registerLocalAsset,
     ensureClipTranscripts, transcriptForAgent, stepAsr, stepVisual, visualRef, visualBriefRef,
     applyVisualResult, composeBlockChecked,
     noteOf, setDenoise,
@@ -501,10 +501,13 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
       // Chat pills are references, not storage ids. Normalize every top-level/nested tool argument
       // once here so individual tools never grow their own @ token / localSig compatibility rules.
       const localAssetIndex = ctx.localAssetIndexRef?.current ?? [];
+      /** Project-library lookup by the id or content sig a tool received. The library is the one
+       * store outside the document; every tool resolves it through this single closure. */
+      const libraryEntry = (reference: string) => resolveLocalAssetReference(reference, ctx.localAssetIndexRef?.current ?? []);
       const registeredAssetIdByLocalAssetId = new Map<string, string>();
       for (const asset of Object.values(documentRef.current.assets)) {
-        const local = resolveLocalAssetReference(asset.id, localAssetIndex)
-          ?? (asset.locator.localSig ? resolveLocalAssetReference(asset.locator.localSig, localAssetIndex) : null);
+        const local = libraryEntry(asset.id)
+          ?? (asset.locator.localSig ? libraryEntry(asset.locator.localSig) : null);
         if (local) registeredAssetIdByLocalAssetId.set(local.assetId, asset.id);
       }
       input = normalizeStudioToolInputReferences(toolId, input, localAssetIndex, registeredAssetIdByLocalAssetId);
@@ -513,8 +516,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
        * as a fallback for projects created before project-scoped asset bindings existed. */
       const loadProjectAssetFile = async (asset: EditorMediaAsset): Promise<File | null> => {
         if (!asset.locator.localSig) return null;
-        const entry = resolveLocalAssetReference(asset.id, localAssetIndex)
-          ?? resolveLocalAssetReference(asset.locator.localSig, localAssetIndex);
+        const entry = libraryEntry(asset.id) ?? libraryEntry(asset.locator.localSig);
         return (entry ? await loadLocalAssetFile(projectId, entry) : null)
           ?? await loadLocalVideo(asset.locator.localSig);
       };
@@ -559,6 +561,37 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
       // Kept as a semantic marker at ripple-heavy call sites; the outer transaction attaches the
       // final delta for every mutation after validation (not just footage edits).
       const withDelta = (res: StudioToolResult): StudioToolResult => res;
+      /** Bytes for a document asset, by identity. Session caches first (a source already mounted for
+       * playback), then the device runtime binding the workbench keeps per asset id, then the legacy
+       * sig cache, then the cloud copy. Tools never pick "the main video" themselves: whatever the
+       * document names by asset id is what gets read. The first narrative source is mounted for the
+       * baking steps that still read the mounted main file. */
+      const assetBytes = async (asset: EditorMediaAsset): Promise<{ file: File; reason?: undefined } | { file: null; reason: string }> => {
+        const kindWord = asset.kind === 'video' ? 'video' : 'media';
+        const source = resolveAssetUrl(asset);
+        let file: File | null = (source ? clipFilesRef.current.get(source) : null) ?? null;
+        if (!file && asset.locator.localSig) {
+          const runtime = await prepareLocalAssetRuntime(asset, { asPrimary: false });
+          if (!runtime.ok) return { file: null, reason: runtime.error };
+          file = runtime.file ?? null;
+        }
+        if (!file) file = await loadProjectAssetFile(asset);
+        if (!file && source) {
+          try {
+            file = (await race(materializeRemoteMedia(source, {
+              name: `${asset.label || asset.id}.${asset.kind === 'video' ? 'mp4' : 'mp3'}`,
+              type: asset.kind === 'video' ? 'video/mp4' : 'audio/mpeg',
+              sig: asset.locator.localSig,
+              signal,
+            }))).file;
+          } catch (error) {
+            return { file: null, reason: `${kindWord} fetch failed: ${error instanceof Error ? error.message : String(error)}` };
+          }
+        }
+        if (!file) return { file: null, reason: `${kindWord} bytes unavailable: ${asset.id}` };
+        if (asset.kind === 'video' && !videoFileRef.current && asset.id === firstNarrativeAssetId(documentRef.current)) videoFileRef.current = file;
+        return { file };
+      };
       const commitNarrationRanges = (ranges: { fromSec: number; toSec: number }[]) => {
         const command = commit({ op: 'narration.removeRanges', input: { ranges } });
         if (!command.ok) return command;
@@ -603,12 +636,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 data: { transcript: transcriptForAgent() },
               };
             }
-            // Footage placed from the project library has no legacy "main video" file behind it:
-            // transcribe the primary asset itself instead of asking the user to add a video.
-            if (primaryAssetId && !primaryKnown && !videoFileRef.current) requestedAssetId = primaryAssetId;
+            // The first narrative source is transcribed by its asset id like any other source.
+            if (primaryAssetId && !primaryKnown) requestedAssetId = primaryAssetId;
           }
           if (requestedLocalReference) {
-            const resolved = resolveLocalAssetReference(requestedLocalReference, ctx.localAssetIndexRef.current);
+            const resolved = libraryEntry(requestedLocalReference);
             const entry = resolved && ((resolved.kind ?? 'video') === 'video' || resolved.kind === 'audio') ? resolved : null;
             if (!entry) return { ok: false, error: `project-library audio/video not found or ambiguous: ${requestedLocalReference}. Refresh list_assets and retry with its exact id; do not register or place the asset as a workaround` };
             const localKind = entry.kind ?? 'video';
@@ -737,22 +769,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               };
             }
             report(t('tools.extract_asr.busy'));
-            let file = await loadProjectAssetFile(asset);
-            if (!file) {
-              const source = resolveAssetUrl(asset);
-              if (!source) return { ok: false, error: `media bytes unavailable: ${targetAssetId}` };
-              const isVideo = asset.kind === 'video';
-              try {
-                file = (await race(materializeRemoteMedia(source, {
-                  name: `${asset.label || targetAssetId}.${isVideo ? 'mp4' : 'mp3'}`,
-                  type: isVideo ? 'video/mp4' : 'audio/mpeg',
-                  sig: asset.locator.localSig,
-                  signal,
-                }))).file;
-              } catch (error) {
-                return { ok: false, error: `media fetch failed: ${error instanceof Error ? error.message : String(error)}` };
-              }
-            }
+            const bytes = await assetBytes(asset);
+            if (!bytes.file) return { ok: false, error: bytes.reason };
+            const file = bytes.file;
             const probe = await probeVideoFile(file).catch(() => null);
             // Script-backed speech (TTS) keeps its exact text; ASR only lends the timing.
             const storedBefore = documentRef.current.semantics.transcripts[targetAssetId];
@@ -794,7 +813,6 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             }
             adoption.push({ op: 'transcripts.set', input: { transcripts: { [targetAssetId]: segs } } });
             if (recoveredScript) adoption.push({ op: 'assets.patch', input: { assetId: targetAssetId, metadata: { transcriptText: recoveredScript } } });
-            if (targetAssetId === firstNarrativeAssetId(current)) videoFileRef.current = file;
             const adopted = commit(adoption, { undo: 'none' });
             if (!adopted.ok) return { ok: false, error: editorErrorMessage(adopted.error) };
             if (!segs.length) {
@@ -814,7 +832,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               },
             };
           }
-          if (!videoFileRef.current) return { ok: false, error: tEnglish('common.uploadVideoFirst') };
+          // No narrative source to address: the shared pipeline step picks the transcription targets
+          // itself (narration on an audio lane) and reports when there is nothing to transcribe.
           const segs = await race(stepAsr(report));
           if (!segs.length) return { ok: true, summary: t('workbench.noSpeechDetected'), data: { speechDetected: false } };
           // Transcribe inserted clips too so the agent sees every source, including when the
@@ -916,7 +935,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 : '';
             const assetId = typeof item.assetId === 'string' ? item.assetId : '';
             const localReference = explicitLocalReference || assetId;
-            const local = localReference ? resolveLocalAssetReference(localReference, localAssetIndex) : null;
+            const local = localReference ? libraryEntry(localReference) : null;
             if (local?.label) return local.label;
             if (assetId && documentRef.current.assets[assetId]?.label) return documentRef.current.assets[assetId]!.label;
             const clipId = typeof item.clipId === 'string' ? item.clipId : '';
@@ -1120,7 +1139,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             ? input.localSig.trim()
             : '';
         if (requestedLocalReference) {
-          const resolved = resolveLocalAssetReference(requestedLocalReference, ctx.localAssetIndexRef.current);
+          const resolved = libraryEntry(requestedLocalReference);
           const entry = resolved?.kind === 'video' ? resolved : null;
           if (!entry) return { ok: false, error: `project-library video not found or ambiguous: ${requestedLocalReference}. Refresh list_assets and retry with its exact id; do not register or place the asset as a workaround` };
           const file = await loadLocalAssetFile(projectId, entry);
@@ -1205,7 +1224,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
         const clipAssetId = requestedClip && 'assetId' in requestedClip ? requestedClip.assetId : undefined;
         if (requestedClipId && !clipAssetId) {
           // Models put asset ids into clipId; a registered or library asset by that id is what they meant.
-          const asAsset = documentRef.current.assets[requestedClipId] ? requestedClipId : resolveLocalAssetReference(requestedClipId, ctx.localAssetIndexRef?.current ?? [])?.assetId;
+          const asAsset = documentRef.current.assets[requestedClipId] ? requestedClipId : libraryEntry(requestedClipId)?.assetId;
           if (!asAsset) return { ok: false, error: `clip not found or has no media asset: ${requestedClipId} — pass timeline clip ids as clipId and asset ids as ids[]/assetId` };
           requestedAssetId = requestedAssetId || asAsset;
           requestedClipId = '';
@@ -1239,82 +1258,37 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
         if (!targetAsset) return { ok: false, error: `asset not found: ${targetAssetId}` };
         if (targetAsset.kind !== 'video') return { ok: false, error: `this inspect_media mode requires a video asset: ${targetAssetId}` };
         if (questionMode) {
-          const useMounted = targetAssetId === primaryAssetId && !!videoFileRef.current;
-          const source = resolveAssetUrl(targetAsset);
-          let file: File | null = useMounted ? videoFileRef.current : (source ? clipFilesRef.current.get(source) ?? null : null);
-          if (!file) file = await loadProjectAssetFile(targetAsset);
-          if (!file && source) {
-            try {
-              file = (await race(materializeRemoteMedia(source, {
-                name: `${targetAsset.label || targetAssetId}.mp4`,
-                type: 'video/mp4',
-                sig: targetAsset.locator.localSig,
-                signal,
-              }))).file;
-            } catch (error) {
-              return { ok: false, error: `video fetch failed: ${error instanceof Error ? error.message : String(error)}` };
-            }
-          }
-          if (!file) return { ok: false, error: `video bytes unavailable: ${targetAssetId}` };
-          return await answerVisualQuestion(file, targetAssetId, targetAsset.label);
+          const bytes = await assetBytes(targetAsset);
+          if (!bytes.file) return { ok: false, error: bytes.reason };
+          return await answerVisualQuestion(bytes.file, targetAssetId, targetAsset.label);
         }
         try {
-          const useMountedPrimary = targetAssetId === primaryAssetId && !!videoFileRef.current && !!currentVideo();
-          let vis: VisualTimeline | null;
-          let sourceFile: File | null = null;
-          let sourceDurationSec = 0;
-          if (useMountedPrimary) {
-            const mounted = currentVideo()!;
-            sourceFile = videoFileRef.current!;
-            sourceDurationSec = mounted.durationSec;
-            vis = geometryOnly
-              || editorialReview
-              ? await race(analyzeVisualGeometry(videoFileRef.current!, mounted.durationSec, (done, count) => {
-                  const fraction = count > 0 ? done / count : 0;
-                  report(t('common.analyzingVisualsPctSec', {
-                    pct: Math.round(fraction * 100),
-                    sec: Math.max(1, Math.ceil((1 - fraction) * Math.min(180, Math.max(1, Math.floor(mounted.durationSec * 2))) * 0.13)),
-                  }), fraction);
-                }).catch(() => null))
-              : await race(stepVisual(report));
-          } else {
-            const source = resolveAssetUrl(targetAsset);
-            let file = source ? clipFilesRef.current.get(source) ?? null : null;
-            if (!file) file = await loadProjectAssetFile(targetAsset);
-            if (!file && source) {
-              try {
-                file = (await race(materializeRemoteMedia(source, {
-                  name: `${targetAsset.label || targetAssetId}.mp4`,
-                  type: 'video/mp4',
-                  sig: targetAsset.locator.localSig,
-                  signal,
-                }))).file;
-              } catch (error) {
-                return { ok: false, error: `video fetch failed: ${error instanceof Error ? error.message : String(error)}` };
-              }
-            }
-            if (!file) return { ok: false, error: `video bytes unavailable: ${targetAssetId}` };
-            const probe = await probeVideoFile(file).catch(() => null);
-            const durationSec = probe?.durationSec || targetAsset.metadata.durationSec;
-            if (!durationSec) return { ok: false, error: `video duration unavailable: ${targetAssetId}` };
-            sourceFile = file;
-            sourceDurationSec = durationSec;
-            const total = Math.min(180, Math.max(1, Math.floor(durationSec * 2)));
-            vis = await race(analyze(file, durationSec, (done, count) => {
-              const fraction = count > 0 ? done / count : 0;
-              report(t('common.analyzingVisualsPctSec', {
-                pct: Math.round(fraction * 85),
-                sec: Math.max(1, Math.ceil((1 - fraction) * total * 0.13 + 2)),
-              }), fraction * 0.85);
-            }).catch(() => null));
-            if (probe?.durationSec && targetAsset.metadata.durationSec !== probe.durationSec) {
-              commit({ op: 'assets.patch', input: { assetId: targetAssetId, metadata: {
-                durationSec: probe.durationSec,
-                ...(probe.width > 0 ? { width: probe.width } : {}),
-                ...(probe.height > 0 ? { height: probe.height } : {}),
-                hasAudio: probe.hasAudio,
-              } } }, { undo: 'none' });
-            }
+          const bytes = await assetBytes(targetAsset);
+          if (!bytes.file) return { ok: false, error: bytes.reason };
+          const sourceFile = bytes.file;
+          const probe = await probeVideoFile(sourceFile).catch(() => null);
+          const sourceDurationSec = probe?.durationSec || targetAsset.metadata.durationSec || 0;
+          if (!sourceDurationSec) return { ok: false, error: `video duration unavailable: ${targetAssetId}` };
+          const total = Math.min(180, Math.max(1, Math.floor(sourceDurationSec * 2)));
+          const onProgress = (done: number, count: number) => {
+            const fraction = count > 0 ? done / count : 0;
+            report(t('common.analyzingVisualsPctSec', {
+              pct: Math.round(fraction * 85),
+              sec: Math.max(1, Math.ceil((1 - fraction) * total * 0.13 + 2)),
+            }), fraction * 0.85);
+          };
+          // The first narrative source keeps the shared cached pipeline for its full semantic pass
+          // (that result also feeds the palette and the visual panel); every other read analyses
+          // the resolved bytes directly.
+          const vis: VisualTimeline | null = (!geometryOnly && !editorialReview && targetAssetId === primaryAssetId ? await race(stepVisual(report)) : null)
+            ?? await race(analyze(sourceFile, sourceDurationSec, onProgress).catch(() => null));
+          if (probe?.durationSec && targetAsset.metadata.durationSec !== probe.durationSec) {
+            commit({ op: 'assets.patch', input: { assetId: targetAssetId, metadata: {
+              durationSec: probe.durationSec,
+              ...(probe.width > 0 ? { width: probe.width } : {}),
+              ...(probe.height > 0 ? { height: probe.height } : {}),
+              hasAudio: probe.hasAudio,
+            } } }, { undo: 'none' });
           }
           const reviewed = editorialReview && vis && sourceFile && sourceDurationSec > 0
             ? await race(reviewEditorialCandidates(sourceFile, vis.qualityWindows ?? [], reviewBrief, {
@@ -1340,7 +1314,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                     ...(reviewed.reused ? { editorialReviewReused: true } : {}),
                     ...(reviewed.windowsSynthesized ? { reviewBasis: 'even-split: no motion-based windows in this source (static or screen recording); the review looked at evenly split spans' } : {}),
                     ...(opts?.collectOpeningEvidence ? {
-                      __openingEvidence: editorialOpeningEvidence(sourceFile!, targetAssetId, targetAsset.label || targetAssetId, reviewed.candidates),
+                      __openingEvidence: editorialOpeningEvidence(sourceFile, targetAssetId, targetAsset.label || targetAssetId, reviewed.candidates),
                     } : {}),
                     note: 'Editorial verdicts per candidate range; the selection rules are in the talking-head-edit / montage-edit skill (Placing from a review).',
                   } : geometryOnly ? {
@@ -1384,7 +1358,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
         // access is still checked below before any timeline mutation.
         const missingLocalAssets = referencedAssetIds
           .filter((assetId) => !documentRef.current.assets[assetId])
-          .map((assetId) => resolveLocalAssetReference(assetId, ctx.localAssetIndexRef?.current ?? []))
+          .map((assetId) => libraryEntry(assetId))
           .filter((entry): entry is LocalAssetIndexEntry => !!entry);
         if (missingLocalAssets.length) {
           const hydrated = commit({ op: 'agent.timeline', input: { tool: 'register_media', input: {
@@ -1492,7 +1466,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (typeof input.localAssetId === 'string' && input.localAssetId) return transcribeForAgent({ localAssetId: input.localAssetId });
             const requested = typeof input.assetId === 'string' ? input.assetId : typeof input.clipId === 'string' ? input.clipId : '';
             if (requested && !documentRef.current.assets[requested] && !documentRef.current.timeline.tracks.some((track) => track.clips.some((clip) => clip.id === requested))) {
-              const local = resolveLocalAssetReference(requested, ctx.localAssetIndexRef?.current ?? []);
+              const local = libraryEntry(requested);
               if (local) return transcribeForAgent({ localAssetId: requested });
             }
             const targets = transcriptTargets(documentRef.current, input);
@@ -1575,7 +1549,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           if (toolId === 'inspect_media' && outcome.ok && Array.isArray((outcome.data as { assets?: unknown } | undefined)?.assets)) {
             const rows = (outcome.data as { assets: Array<Record<string, unknown>> }).assets.map((row) => {
               if (row.missing !== true || typeof row.assetId !== 'string') return row;
-              const entry = resolveLocalAssetReference(row.assetId, ctx.localAssetIndexRef?.current ?? []);
+              const entry = libraryEntry(row.assetId);
               if (!entry) return row;
               return {
                 assetId: row.assetId,
@@ -1783,7 +1757,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   if (stopped()) throw abortErr();
                   const ref = refs[index]!;
                   report(`Inspecting image ${index + 1}/${refs.length}…`, index / refs.length);
-                  const matchedLocal = resolveLocalAssetReference(ref, ctx.localAssetIndexRef.current);
+                  const matchedLocal = libraryEntry(ref);
                   const localEntry = matchedLocal?.kind === 'image' ? matchedLocal : null;
                   let label = localEntry?.label || ref;
                   let blob: Blob | null = null;
@@ -1916,24 +1890,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               }
               const briefAsset = documentRef.current.assets[briefAssetId];
               if (!briefAsset || briefAsset.kind !== 'video') return { ok: false, error: `inspect_media brief requires a video asset: ${briefAssetId}` };
-              const briefSource = resolveAssetUrl(briefAsset);
-              let briefFile: File | null = briefAssetId === briefPrimaryId ? videoFileRef.current : null;
-              if (!briefFile && briefSource) briefFile = clipFilesRef.current.get(briefSource) ?? null;
-              if (!briefFile) briefFile = await loadProjectAssetFile(briefAsset);
-              if (!briefFile && briefSource) {
-                try {
-                  briefFile = (await race(materializeRemoteMedia(briefSource, {
-                    name: `${briefAsset.label || briefAssetId}.mp4`,
-                    type: 'video/mp4',
-                    sig: briefAsset.locator.localSig,
-                    signal,
-                  }))).file;
-                } catch (error) {
-                  return { ok: false, error: `video fetch failed: ${error instanceof Error ? error.message : String(error)}` };
-                }
-              }
-              if (!briefFile) return { ok: false, error: `video bytes unavailable: ${briefAssetId}` };
-              const briefDurationSec = briefAsset.metadata.durationSec ?? (briefAssetId === briefPrimaryId ? currentVideo()?.durationSec : undefined) ?? 0;
+              const briefBytes = await assetBytes(briefAsset);
+              if (!briefBytes.file) return { ok: false, error: briefBytes.reason };
+              const briefFile = briefBytes.file;
+              const briefDurationSec = briefAsset.metadata.durationSec ?? (await probeVideoFile(briefFile).catch(() => null))?.durationSec ?? 0;
               if (!(briefDurationSec > 0)) return { ok: false, error: `video duration unknown for ${briefAssetId}: open the project in Studio once so its metadata is probed, then retry` };
               if (visualRef.current && briefAssetId === briefPrimaryId) {
                 return {
@@ -2005,7 +1965,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               // A library asset that is not in the document is analysed by its device-local entry.
               const asSource = (id: string): Record<string, unknown> => {
                 if (documentRef.current.assets[id]) return { assetId: id };
-                const local = resolveLocalAssetReference(id, ctx.localAssetIndexRef?.current ?? []);
+                const local = libraryEntry(id);
                 return local ? { localAssetId: local.assetId } : { assetId: id };
               };
               if (ids.length <= 1) {
@@ -2240,7 +2200,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               : typeof input.sig === 'string'
                 ? input.sig
                 : '';
-            const resolved = resolveLocalAssetReference(reference, ctx.localAssetIndexRef.current);
+            const resolved = libraryEntry(reference);
             const entry = resolved?.kind === 'image' ? resolved : null;
             if (!entry) return { ok: false, error: 'local image not found or ambiguous — search the mine scope and use its exact asset id' };
             const file = await loadLocalAssetFile(projectId, entry);
@@ -2418,7 +2378,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 let file: File | null = null;
                 let sourceLabel = item.sourceAssetId || item.sourceUrl;
                 if (item.sourceAssetId) {
-                  const local = resolveLocalAssetReference(item.sourceAssetId, localAssetIndex);
+                  const local = libraryEntry(item.sourceAssetId);
                   if (local) {
                     sourceLabel = local.label;
                     file = await loadLocalAssetFile(projectId, local) ?? await loadLocalVideo(local.contentSig);
@@ -2876,10 +2836,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: tEnglish('workbench.noVideoYet') };
             const assetId = firstNarrativeAssetId(documentRef.current);
             const primaryAsset = assetId ? documentRef.current.assets[assetId] : undefined;
-            const file = (primaryAsset?.kind === 'video' ? await loadProjectAssetFile(primaryAsset) : null)
-              ?? videoFileRef.current;
-            if (!assetId || !file) return { ok: false, error: tEnglish('common.localSourceVideoMissing') };
-            videoFileRef.current = file;
+            if (!assetId || primaryAsset?.kind !== 'video') return { ok: false, error: tEnglish('common.localSourceVideoMissing') };
+            const bytes = await assetBytes(primaryAsset);
+            if (!bytes.file) return { ok: false, error: tEnglish('common.localSourceVideoMissing') };
+            const file = bytes.file;
             const settings = resolveSpeechSilenceOptions({
               minimumPauseSec: Number(input.minimumPauseSec),
               speechPaddingSec: Number(input.speechPaddingSec),
@@ -2918,17 +2878,24 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'denoise_audio': {
             if (input.off === true) {
-              if (!c.audioDenoise) return { ok: false, error: tEnglish('workbench.denoiseNotOn') };
+              if (!documentRef.current.processing?.audioDenoise) return { ok: false, error: tEnglish('workbench.denoiseNotOn') };
               setDenoise(null);
               return { ok: true, summary: t('workbench.denoiseTurnedOff') };
             }
-            const mainMounted = !!videoFileRef.current || (c.shots ?? []).some((shot) => shot.src && clipFilesRef.current.has(shot.src));
-            const pictureSoundInMix = (c.shots ?? []).some((shot) => !shot.audioMuted);
+            // Denoise bakes from bytes already mounted for playback (its own hook resolves the same way).
+            const narrativeClips = primaryNarrativeClips(documentRef.current);
+            const mainMounted = narrativeClips.some((clip) => {
+              const asset = documentRef.current.assets[clip.assetId];
+              const source = asset ? resolveAssetUrl(asset) : null;
+              return (!!source && clipFilesRef.current.has(source))
+                || (clip.assetId === firstNarrativeAssetId(documentRef.current) && !!videoFileRef.current);
+            });
+            const pictureSoundInMix = narrativeClips.some((clip) => !clip.properties.audioMuted);
             if (!mainMounted || !pictureSoundInMix) {
               // Denoise bakes the MAIN video's own recording. Say what is actually true instead of
               // "local video lost": generated/audio-lane narration is outside its scope, and a
               // montage without a mounted main source has no recording to clean.
-              const narrationOnLane = (c.audioTracks ?? []).some((clip) => clip.role === 'narration');
+              const narrationOnLane = documentRef.current.timeline.tracks.some((track) => track.role === 'narration' && track.clips.length > 0);
               return { ok: false, error: narrationOnLane ? t('workbench.denoiseNotForLaneNarration') : t('workbench.denoiseNeedsMainSource') };
             }
             const s = typeof input.strength === 'number' && Number.isFinite(input.strength) ? Math.max(0.05, Math.min(1, input.strength)) : 0.6;

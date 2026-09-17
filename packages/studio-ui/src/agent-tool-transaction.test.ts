@@ -142,6 +142,11 @@ function harness() {
       beginTransactionScope: () => committer.scope(),
       pushUndoSnapshot: () => committer.pushUndoSnapshot(),
       pickVideoFile: async () => {},
+      // Byte resolution by asset id: no session caches, no device runtime binding unless a test wires one.
+      resolveAssetUrl: (asset: { locator: { remoteUrl?: string } }) => asset.locator.remoteUrl ?? null,
+      clipFilesRef: { current: new Map<string, File>() },
+      videoFileRef: { current: null as File | null },
+      prepareLocalAssetRuntime: async () => ({ ok: true, prepared: false }),
     } as unknown as AgentToolCtx,
     /** Direct document write for test setup and for simulating a raw in-tool mutation. */
     setDocument,
@@ -1050,6 +1055,44 @@ describe('Agent composition transaction boundary', () => {
       { start: 0.2, end: 2.4, text: '这段口播必须写回项目' },
     ]);
     expect(setAsrSentences).not.toHaveBeenCalled();
+  });
+
+  it('transcribes the first narrative source by its asset id, not by the file mounted as the main video', async () => {
+    const h = harness();
+    h.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
+    const assetId = 'asset-library-primary';
+    const sig = 'library-primary.mp4:240:12';
+    const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
+      assets: [{ id: assetId, kind: 'video', localSig: sig, durationSec: 18, width: 1080, height: 1920, hasAudio: true }],
+    });
+    const placed = runAgentTimelineTool(registered.document!, 'add_clips', {
+      clips: [{ id: 'library-primary-clip', assetId, role: 'primary', startFrame: 0, durationFrames: 540 }],
+    });
+    h.setDocument(placed.document!);
+    const assetFile = new File(['library-primary-bytes'], 'library-primary.mp4', { type: 'video/mp4', lastModified: 12 });
+    const staleMain = new File(['some-other-video'], 'other.mp4', { type: 'video/mp4', lastModified: 1 });
+    mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 18, width: 1080, height: 1920, hasAudio: true });
+    providerMocks.transcribe.mockResolvedValue([{ start: 0.2, end: 2.4, text: '按资产身份取字节' }]);
+    const stepAsr = vi.fn();
+    Object.assign(h.ctx, {
+      projectId: 'test',
+      localAssetIndexRef: { current: [] },
+      videoFileRef: { current: staleMain },
+      prepareLocalAssetRuntime: vi.fn(async (asset: { id: string }) => (asset.id === assetId ? { ok: true, prepared: true, file: assetFile } : { ok: false, error: 'unexpected asset' })),
+      stepAsr,
+      ensureClipTranscripts: async () => {},
+      transcriptForAgent: () => '',
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => {},
+    });
+    const { runStudioTool } = await import('./agent-tool-runner');
+
+    const result = await runStudioTool(h.ctx, 'get_transcript', {});
+
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(providerMocks.transcribe).toHaveBeenCalledWith(assetFile, expect.anything());
+    expect(stepAsr).not.toHaveBeenCalled();
+    expect(h.documentRef.current.semantics.transcripts[assetId]).toEqual([{ start: 0.2, end: 2.4, text: '按资产身份取字节' }]);
   });
 
   it('lazily heals the exact legacy five-second primary placeholder after probing the real source', async () => {
