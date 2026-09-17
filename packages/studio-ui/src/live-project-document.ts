@@ -22,11 +22,18 @@ import {
   compositionToEditorDocument,
   projectDocumentToComposition,
 } from '@pireel/studio-engine/composition';
-import type { LocalAssetIndexEntry, TranscriptSegment } from '@pireel/studio-engine/project-dto';
+import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 
+/**
+ * Session facts folded into V2 at persistence time. Transcripts are deliberately absent: the
+ * document owns them, and the browser's runtime copies (`asrSentences` / `clipAsr`) are caches that
+ * follow the document. Carrying a render-time snapshot of those caches here re-imposed a stale
+ * transcript over one the document had just changed on its own (an agent's caption translation),
+ * and the "caches follow the document" effect then flipped it back — a publish on every pass until
+ * React gave up. Runtime transcripts reach the document only through `captions.edit`, which reads
+ * the refs at effect time after they have followed the document.
+ */
 export interface LiveProjectPersistenceMetadata {
-  mainTranscript?: readonly TranscriptSegment[] | null;
-  clipTranscripts?: Readonly<Record<string, readonly TranscriptSegment[]>>;
   plan?: unknown;
   cloudMedia?: { video?: { sig: string; key: string }; clips?: Record<string, { key: string }> };
   localAssets?: readonly LocalAssetIndexEntry[];

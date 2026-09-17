@@ -6,6 +6,7 @@ import {
   createLiveProjectDocumentSession,
   persistableLiveProjectDocument,
   resolveLiveAssetUrl,
+  type LiveProjectPersistenceMetadata,
 } from './live-project-document';
 
 describe('canonical live project document', () => {
@@ -87,6 +88,34 @@ describe('canonical live project document', () => {
     applyDocumentToLiveProject(session, snapshot);
     expect(session.state.composition.blocks).toHaveLength(1);
     expect(session.state.composition.video).toBeNull();
+  });
+
+  it('never lets persistence metadata overwrite a transcript the document owns', () => {
+    // An agent's caption translation lands in the document while the browser's runtime transcript
+    // copy still holds the untranslated rows. The persistence fold must not carry that copy: with a
+    // render-time snapshot re-imposing it and the runtime copy then following the document, the two
+    // relays flipped the transcript on every pass (React "Maximum update depth exceeded").
+    const withVideo = {
+      ...emptyComposition(),
+      video: { url: 'blob:runtime-main', durationSec: 4 },
+      shots: [{ id: 'main', srcStart: 0, srcEnd: 4, treatment: 'full' as const }],
+    };
+    const session = createLiveProjectDocumentSession('project-1', withVideo, { videoSig: 'main.mp4:42:7' });
+    const assetId = firstNarrativeAssetId(session.state.document)!;
+    const translated = [{ text: '你好', start: 0, end: 1, sub: 'Hello', subLang: 'English' }];
+    applyDocumentToLiveProject(session, {
+      ...session.state.document,
+      semantics: { ...session.state.document.semantics, transcripts: { [assetId]: translated } },
+    });
+    // The metadata type has no transcript slot, so a runtime copy cannot be folded from here.
+    const stale: LiveProjectPersistenceMetadata = {
+      videoSig: 'main.mp4:42:7',
+      // @ts-expect-error transcripts are owned by the document, never by persistence metadata
+      mainTranscript: [{ text: '你好', start: 0, end: 1 }],
+    };
+    void stale;
+    const persisted = persistableLiveProjectDocument(session, { videoSig: 'main.mp4:42:7' });
+    expect(persisted.semantics.transcripts[assetId]).toEqual(translated);
   });
 
   it('builds a persistence snapshot from V2 metadata without mutating live state', () => {

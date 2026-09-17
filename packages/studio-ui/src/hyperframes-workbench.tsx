@@ -186,7 +186,6 @@ import { monotonicPlaybackSecond, playhead } from "./playhead";
 import {
   type AsrSegment,
   desegmentCues,
-  sanitizeTranscriptSegs,
 } from "@pireel/studio-engine/build-blocks";
 import { beatsForWindow } from "@pireel/studio-engine/captions-relay";
 import {
@@ -1881,21 +1880,10 @@ export function HyperframesWorkbench({
     [prepareLocalAssetRuntime],
   );
   // Persistence metadata is folded into V2 synchronously without coupling the live-document module
-  // to workbench feature refs.
+  // to workbench feature refs. No transcripts here: this is a render-time snapshot, and the runtime
+  // transcript copies follow the document one effect later (see "Runtime transcript refs follow the
+  // document" below) — folding them from here re-imposed the stale copy over a document-side edit.
   livePersistenceMetadataRef.current = {
-    ...(asrRef.current?.length
-      ? { mainTranscript: sanitizeTranscriptSegs(asrRef.current) }
-      : {}),
-    ...(Object.keys(clipAsrRef.current).length
-      ? {
-          clipTranscripts: Object.fromEntries(
-            Object.entries(clipAsrRef.current).map(([key, value]) => [
-              key,
-              sanitizeTranscriptSegs(value),
-            ]),
-          ),
-        }
-      : {}),
     ...(cloudMediaRef.current.video || cloudMediaRef.current.clips
       ? { cloudMedia: cloudMediaRef.current }
       : {}),
@@ -8325,9 +8313,11 @@ export function HyperframesWorkbench({
     if (hasTimelineContent(comp)) everCanvasContentRef.current = true;
   }, [comp]);
 
-  // Session metadata (transcripts, cloud keys, library directory, source sig) used to be folded into
-  // the document at save time. The server never sees a saved document any more, so the fold is an
-  // operation like any other: when the runtime refs would change the document, commit that change.
+  // Session metadata (cloud keys, library directory, source sig) used to be folded into the document
+  // at save time. The server never sees a saved document any more, so the fold is an operation like
+  // any other: when the runtime refs would change the document, commit that change. Transcripts are
+  // not part of it — the caption relay above lands runtime transcripts, reading the refs after they
+  // have followed the document, so a document-side transcript edit is never overwritten from here.
   useEffect(() => {
     if (!bootDataReady || !projectId) return;
     const activation = cloudAutosaveActivationRef.current!.activation;
@@ -8338,7 +8328,7 @@ export function HyperframesWorkbench({
     if (canonicalJson(folded) === canonicalJson(current)) return;
     commit({ op: "document.foldMetadata", input: metadata }, { origin: "system", undo: "none" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bootDataReady, projectId, editorDocument, asrSentences, clipAsr, cloudMediaRev, localAssetIndexRev, videoFile]);
+  }, [bootDataReady, projectId, editorDocument, cloudMediaRev, localAssetIndexRev, videoFile]);
 
   // Project sync (debounced): coalesce one PUT 1.2s after document/context changes. Chat uses its own immediate API.
   // local useDraftAutosave still writes localStorage as a cache, the two are independent. Don't push on an empty canvas (don't blank the cloud).
