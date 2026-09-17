@@ -1,5 +1,4 @@
 import type { CaptionTranslationItem } from '@pireel/studio-engine/build-blocks';
-import { distributeSub, type MappedSeg } from '@pireel/studio-engine/captions-relay';
 import { joinWords } from '@pireel/studio-engine/caption-fx';
 
 export interface CaptionTranslationRow {
@@ -7,81 +6,68 @@ export interface CaptionTranslationRow {
   text: string;
 }
 
-/**
- * One row sent to the translator: a complete sentence of one source, with the transcript segments
- * it spans. ASR segments break at pauses, not at grammar, and a cut can split a segment into
- * fragments; neither is a translatable unit on its own ("大家好，客时间寄来的" / "张纸。" comes back as one
- * line with every later row renumbered). The stored translation is spread back over the members
- * by word share, the same way a sentence translation is spread over its display cues.
- */
-export interface TranslationUnit {
+/** One on-screen caption line as the panel and the canvas derive it: which sentence of which
+ * source it belongs to, the word range it covers, and where it plays. */
+export interface TranslationLineRow {
+  /** null = the main narration domain; otherwise the inserted clip's runtime src. */
   src: string | null;
-  start: number;
-  end: number;
+  /** Transcript owner when the row comes from the document (audio-lane narration has no src). */
+  assetId?: string;
+  /** Sentence index within its source's transcript. */
+  index: number;
+  w0: number;
+  w1: number;
   text: string;
-  members: { seg: number; wordCount: number }[];
+  editedStart: number;
 }
 
 /**
- * Sentence boundaries come from ICU (UAX #29), the same engine that segments our words: every
- * language's terminators, abbreviations and closing quotes are its business, not a hand-written
- * punctuation table. The question asked is "would a sentence break fall between these two runs of
- * words", so the two are joined the way captions join words and probed at the seam.
+ * One row sent to the translator: a complete sentence of one source, written as its on-screen
+ * lines in play order and joined by LINE_MARK. The translator sees the whole sentence, so the
+ * translation reads as one sentence, and it answers with the same number of marks, so each line's
+ * share of the translation is decided by the translator rather than by word count. The sentence
+ * (a transcript segment) is the recognizer's own unit and the id the result is written back to.
  */
-const sentenceSegmenters = new Map<string, Intl.Segmenter | null>();
-function sentenceSegmenter(lang: string | undefined): Intl.Segmenter | null {
-  const key = lang ?? '';
-  if (!sentenceSegmenters.has(key)) {
-    let segmenter: Intl.Segmenter | null = null;
-    try {
-      segmenter = typeof Intl !== 'undefined' && 'Segmenter' in Intl ? new Intl.Segmenter(lang, { granularity: 'sentence' }) : null;
-    } catch {
-      segmenter = new Intl.Segmenter(undefined, { granularity: 'sentence' });
-    }
-    sentenceSegmenters.set(key, segmenter);
-  }
-  return sentenceSegmenters.get(key) ?? null;
+export interface TranslationUnit {
+  src: string | null;
+  assetId?: string;
+  seg: number;
+  start: number;
+  text: string;
+  /** Cue word ranges, one per LINE_MARK-separated piece of `text`, in play order. */
+  lines: { w0: number; w1: number }[];
 }
-export function sentenceBreaksBetween(left: string, right: string, lang?: string): boolean {
-  const segmenter = sentenceSegmenter(lang);
-  if (!segmenter) return true;
-  const probe = joinWords([left, right]);
-  const seam = new Set([left.length, probe.length - right.length]);
-  for (const sentence of segmenter.segment(probe)) {
-    if (sentence.index === 0) continue;
-    if (seam.has(sentence.index)) return true;
-    if (sentence.index > left.length) break;
-  }
-  return false;
-}
-/** Segments closer than this are one utterance; mirrors the transcript de-segmentation rule. */
-export function sentenceTranslationUnits(fragments: readonly MappedSeg[]): TranslationUnit[] {
-  // 1. Cut fragments of one segment → the segment's surviving words in source order.
-  const segments = new Map<string, { src: string | null; seg: number; words: MappedSeg['words']; start: number; end: number; lang?: string }>();
-  for (const fragment of fragments) {
-    const key = `${fragment.ref.src ?? ''}|${fragment.ref.seg}`;
-    const current = segments.get(key);
-    if (current) {
-      current.words = [...current.words, ...fragment.words].sort((left, right) => (left.si ?? 0) - (right.si ?? 0));
-      current.start = Math.min(current.start, fragment.start);
-      current.end = Math.max(current.end, fragment.end);
-    } else {
-      segments.set(key, { src: fragment.ref.src, seg: fragment.ref.seg, words: [...fragment.words].sort((left, right) => (left.si ?? 0) - (right.si ?? 0)), start: fragment.start, end: fragment.end, ...(fragment.lang ? { lang: fragment.lang } : {}) });
-    }
-  }
-  // 2. One unit per surviving segment, in edited-timeline order. A segment is the recognizer's own
-  //    sentence and the unit the translation is written back to by id, so the mapping is exact by
-  //    construction: nothing is ever split across segments by word share, and a cut that reorders
-  //    two fragments cannot swap their halves. The translator still sees the neighbouring rows as
-  //    read-only context (the batch planner adds them), which covers a sentence the recognizer
-  //    broke at a pause.
-  const units: TranslationUnit[] = [];
-  for (const segment of segments.values()) {
-    const text = joinWords(segment.words.map((word) => word.text));
+
+/** Line-break mark inside a sentence row. Plain text a translation model carries across unchanged
+ * far more reliably than any instruction asks it to; a bar is not a word in any target language. */
+export const LINE_MARK = ' | ';
+const MARK_SPLIT = /\s*[|｜]\s*/;
+
+/** Source text must not contain the mark itself, or the answer's pieces cannot be counted. */
+const withoutMarks = (text: string): string => text.replace(/[|｜]/g, '/').trim();
+
+export function lineTranslationUnits(rows: readonly TranslationLineRow[]): TranslationUnit[] {
+  const units = new Map<string, TranslationUnit>();
+  for (const row of [...rows].sort((left, right) => left.editedStart - right.editedStart)) {
+    const text = withoutMarks(row.text);
     if (!text) continue;
-    units.push({ src: segment.src, start: segment.start, end: segment.end, text, members: [{ seg: segment.seg, wordCount: segment.words.length }] });
+    const key = `${row.assetId ?? row.src ?? ''}|${row.index}`;
+    const unit = units.get(key);
+    if (unit) {
+      unit.text += LINE_MARK + text;
+      unit.lines.push({ w0: row.w0, w1: row.w1 });
+    } else {
+      units.set(key, {
+        src: row.src,
+        ...(row.assetId ? { assetId: row.assetId } : {}),
+        seg: row.index,
+        start: row.editedStart,
+        text,
+        lines: [{ w0: row.w0, w1: row.w1 }],
+      });
+    }
   }
-  return units.sort((left, right) => left.start - right.start);
+  return [...units.values()].sort((left, right) => left.start - right.start);
 }
 
 function completeByPosition(count: number, rows: readonly CaptionTranslationRow[]): Map<number, string> | null {
@@ -95,28 +81,35 @@ function completeByPosition(count: number, rows: readonly CaptionTranslationRow[
   return byPosition.size === count ? byPosition : null;
 }
 
-/** Translations to write, grouped by source (null = the main narration), one item per transcript
- * segment. A sentence that spans several segments hands each segment the share of the translation
- * its words account for. Nothing is written until every row validated. */
+/** The translator's answer for one sentence: the pieces between its marks, and the sentence with
+ * the marks removed. Pieces are only trusted when they count the same as the lines sent. */
+export function splitTranslatedLines(text: string): { pieces: string[]; whole: string } {
+  const pieces = text.split(MARK_SPLIT).map((piece) => piece.trim()).filter(Boolean);
+  return { pieces, whole: joinWords(pieces) };
+}
+
+/** Translations to write, grouped by source, one sentence per transcript segment plus, when the
+ * answer kept every line mark, one per on-screen line. The sentence translation always lands: it
+ * is what a re-laid-out line falls back to (spread by word share). Nothing is written until every
+ * row validated. */
 export type CaptionTranslationWrites =
-  | { ok: true; writes: { src: string | null; items: CaptionTranslationItem[] }[] }
+  | { ok: true; writes: { src: string | null; assetId?: string; items: CaptionTranslationItem[] }[] }
   | { ok: false; error: string };
 
 export function captionTranslationWrites(units: readonly TranslationUnit[], rows: readonly CaptionTranslationRow[]): CaptionTranslationWrites {
   const translated = completeByPosition(units.length, rows);
   if (!translated) return { ok: false, error: 'Translation response was incomplete or contained invalid row ids.' };
-  const bySource = new Map<string | null, CaptionTranslationItem[]>();
+  const bySource = new Map<string, { src: string | null; assetId?: string; items: CaptionTranslationItem[] }>();
   units.forEach((unit, position) => {
-    const items = bySource.get(unit.src) ?? [];
-    const text = translated.get(position)!;
-    if (unit.members.length === 1) items.push({ index: unit.members[0]!.seg, text });
-    else {
-      const pieces = distributeSub(text, unit.members.map((member) => member.wordCount));
-      unit.members.forEach((member, at) => {
-        if (pieces[at]) items.push({ index: member.seg, text: pieces[at]! });
-      });
+    const key = unit.assetId ?? unit.src ?? '';
+    const write = bySource.get(key) ?? { src: unit.src, ...(unit.assetId ? { assetId: unit.assetId } : {}), items: [] };
+    const { pieces, whole } = splitTranslatedLines(translated.get(position)!);
+    if (!whole) return;
+    write.items.push({ index: unit.seg, text: whole });
+    if (pieces.length === unit.lines.length && unit.lines.length > 1) {
+      unit.lines.forEach((line, at) => write.items.push({ index: unit.seg, w0: line.w0, w1: line.w1, text: pieces[at]! }));
     }
-    bySource.set(unit.src, items);
+    bySource.set(key, write);
   });
-  return { ok: true, writes: [...bySource].map(([src, items]) => ({ src, items })) };
+  return { ok: true, writes: [...bySource.values()] };
 }
