@@ -13,7 +13,7 @@ import { wordsFromText } from './caption-fx';
 import { getCaptionPreset } from './caption-presets';
 import { type CaptionStyle, DEFAULT_CAPTION_WIDTH_PCT } from './composition-core';
 import { type Block, type VideoShot, isSentenceCaption } from './composition';
-import { spans as clipSpans, srcToEditedLoose } from './trim';
+import { spans as clipSpans } from './trim';
 import { type AsrSegment, type CueRef, type CueWord, type DisplayCue, captionBlocksFromAsr } from './build-blocks';
 import { maskCueText, maskedWordText } from './word-masks';
 import { joinWords } from './caption-fx';
@@ -30,30 +30,82 @@ const MIN_WORD_SEC = 0.06;
 /** A word whose mapped span is this short or shorter was removed by the edit. */
 const CUT_WORD_MAX_SEC = 0.03;
 
+/** Where one spoken word lands on the edited timeline, or null when the edit removed it. */
+export type WordPlacement = (word: { start: number; end: number }) => { start: number; end: number } | null;
+
+/** A word's floor-width source span: providers stamp short syllables as points. */
+function wordSourceSpan(word: { start: number; end: number }): { start: number; end: number } {
+  return { start: word.start, end: Math.max(word.end, word.start + MIN_WORD_SEC) };
+}
+
+/**
+ * One piece of media owns each word. A cut that lands inside a word leaves both sides playing a
+ * piece of it; the caption must not show the word twice, nor drop it because a remainder was
+ * short. The owner is the range playing the word's midpoint, else the one playing most of it
+ * (more than a cut sliver); nobody when the whole word was removed.
+ */
+export function chooseWordOwner<T extends { start: number; end: number }>(ranges: readonly T[], word: { start: number; end: number }): T | null {
+  const span = wordSourceSpan(word);
+  const mid = (span.start + span.end) / 2;
+  const byMid = ranges.find((range) => mid >= range.start && mid < range.end);
+  if (byMid) return byMid;
+  let best: T | null = null;
+  let bestOverlap = CUT_WORD_MAX_SEC;
+  for (const range of ranges) {
+    const overlap = Math.min(span.end, range.end) - Math.max(span.start, range.start);
+    if (overlap > bestOverlap) { best = range; bestOverlap = overlap; }
+  }
+  return best;
+}
+
+/** Placement through a monotone source→edited function (one media range, e.g. a single clip). */
+function loosePlacement(mapSourceSec: (sourceSec: number) => number): WordPlacement {
+  return (word) => {
+    const span = wordSourceSpan(word);
+    const start = mapSourceSec(span.start);
+    const end = mapSourceSec(span.end);
+    // Word width only shrinks, never grows: when a cut / insert lands mid-word,
+    // the loose mapping would swallow the whole inserted duration into the word.
+    const placed = { start, end: Math.min(end, start + (span.end - span.start) + 0.05) };
+    // A span that collapsed was cut away (the loose mapping folds a removed range onto one instant).
+    return placed.end - placed.start > CUT_WORD_MAX_SEC ? placed : null;
+  };
+}
+
+/** Placement across one source's shots on the edited timeline: the owning shot plays the word. */
+function ownerPlacement(shots: VideoShot[], inSrc: (c: VideoShot) => boolean): WordPlacement {
+  const ranges = clipSpans(shots)
+    .filter((span) => inSrc(span.clip))
+    .map((span) => ({ start: span.clip.srcStart, end: span.clip.srcEnd, editedStart: span.editedStart, editedEnd: span.editedEnd }));
+  return (word) => {
+    const owner = chooseWordOwner(ranges, word);
+    if (!owner) return null;
+    const span = wordSourceSpan(word);
+    const start = owner.editedStart + Math.max(0, span.start - owner.start);
+    const end = owner.editedStart + Math.min(span.end, owner.end) - owner.start;
+    return { start, end: Math.max(end, start + CUT_WORD_MAX_SEC + 0.001) };
+  };
+}
+
 /** Map one transcript source through an arbitrary source-time → edited-time function. */
 export function mapTranscriptSegsToEdited(
   segs: AsrSegment[],
   mapSourceSec: (sourceSec: number) => number,
   srcKey: string | null = null,
 ): MappedSeg[] {
+  return mapTranscriptSegsToEditedWith(segs, loosePlacement(mapSourceSec), srcKey);
+}
+
+function mapTranscriptSegsToEditedWith(segs: AsrSegment[], place: WordPlacement, srcKey: string | null): MappedSeg[] {
   const out: MappedSeg[] = [];
   for (const [segIdx, s] of segs.entries()) {
     const words: CueWord[] = (s.words?.length ? s.words : wordsFromText(s.text, s.start, s.end))
-      .map((w, wi) => {
-        // A spoken word is never a point in time; providers do return zero-width stamps for short
-        // syllables. Give the word a floor width in SOURCE time before mapping, so the cut filter
-        // below removes only words whose time was actually cut, never words the provider mistimed.
-        const sourceEnd = Math.max(w.end, w.start + MIN_WORD_SEC);
-        const start = mapSourceSec(w.start);
-        const end = mapSourceSec(sourceEnd);
-        // Word width only shrinks, never grows: when a cut / insert lands mid-word,
-        // the loose mapping would swallow the whole inserted duration into the word.
+      .flatMap((w, wi) => {
+        const placed = place(w);
+        if (!placed) return [];
         // A text mask swaps the caption copy only; timing stays the spoken word's.
-        return { ...w, text: maskedWordText(s, wi, w.text), si: (w as CueWord).si ?? wi, start, end: Math.min(end, start + (sourceEnd - w.start) + 0.05) };
-      })
-      // Words whose mapped span collapsed were cut away (the loose mapping folds a removed range
-      // onto one edited instant).
-      .filter((w) => w.end - w.start > CUT_WORD_MAX_SEC);
+        return [{ ...w, text: maskedWordText(s, wi, w.text), si: (w as CueWord).si ?? wi, start: placed.start, end: placed.end }];
+      });
     if (!words.length) continue;
     const groups: (typeof words)[] = [[words[0]!]];
     for (let i = 1; i < words.length; i++) {
@@ -81,7 +133,7 @@ export function mapTranscriptSegsToEdited(
  *  laying captions: caption blocks live on the edited timeline, so after cutting
  *  you can't lay them by source time directly. */
 export function mapSegsToEdited(segs: AsrSegment[], shots: VideoShot[], inSrc: (c: VideoShot) => boolean = inNarrationSource, srcKey: string | null = null): MappedSeg[] {
-  return mapTranscriptSegsToEdited(segs, (sourceSec) => srcToEditedLoose(shots, sourceSec, inSrc), srcKey);
+  return mapTranscriptSegsToEditedWith(segs, ownerPlacement(shots, inSrc), srcKey);
 }
 
 /** All-source transcript → edited-timeline caption data: narration source + each inserted source mapped by its own predicate, sorted by edited time. */

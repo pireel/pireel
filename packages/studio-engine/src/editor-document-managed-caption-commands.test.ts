@@ -398,3 +398,34 @@ describe('EditorDocument V2 managed caption command', () => {
     ]);
   });
 });
+
+describe('managed relay word ownership', () => {
+  it('captions a word split by a cut exactly once, on the clip playing its midpoint', () => {
+    const document = emptyEditorDocumentV2({ fps: 30 });
+    document.assets['main-asset'] = { id: 'main-asset', kind: 'video', locator: { localSig: 'main-sig' }, metadata: { durationSec: 4 } };
+    document.semantics.transcripts['main-asset'] = [{
+      start: 0, end: 2, text: '这是一张纸。',
+      words: [
+        { text: '这', start: 0.2, end: 0.3 }, { text: '是', start: 0.3, end: 0.5 }, { text: '一', start: 0.5, end: 0.6 },
+        { text: '张', start: 0.6, end: 1.2 }, { text: '纸。', start: 1.3, end: 1.6 },
+      ],
+    }];
+    // Split at 1.0 s, inside 张 (0.6–1.2): both clips play a piece of it.
+    document.timeline.tracks[0]!.clips = [
+      narrative({ id: 'talk-a', startFrame: 0, durationFrames: 30, sourceInSec: 0, sourceOutSec: 1 }),
+      narrative({ id: 'talk-b', startFrame: 30, durationFrames: 30, sourceInSec: 1, sourceOutSec: 2 }),
+    ];
+    document.timeline.tracks.push({
+      id: 'managed-captions', type: 'caption', role: 'managedCaptions', muted: true, hidden: true,
+      locked: false, syncLocked: true, stackOrder: 8, clips: [],
+    });
+    document.semantics.managedCaptionTrackId = 'managed-captions';
+    document.appearance.captionStyle = { on: true, preset: 'ln-clean' };
+    const relaid = applyEditorCommand(document, { type: 'captions.relay' });
+    expect(relaid.ok).toBe(true);
+    const lane = (relaid.ok ? relaid.document : document).timeline.tracks.find((track) => track.id === 'managed-captions')!;
+    const text = lane.clips.map((clip) => clip.kind === 'caption' ? (clip.block.slots as { text?: string }).text ?? JSON.stringify(clip.block.slots) : '').join('|');
+    expect((text.match(/张/g) ?? []).length).toBe(1);
+    expect(text).toContain('纸');
+  });
+});

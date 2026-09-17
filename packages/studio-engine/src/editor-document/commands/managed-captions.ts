@@ -1,5 +1,5 @@
 import { captionBlocksFromAsr, type AsrSegment, type CueRef } from '../../build-blocks';
-import { displayCuesFromMappedSegs, mapTranscriptSegsToEdited } from '../../captions-relay';
+import { chooseWordOwner, displayCuesFromMappedSegs, mapTranscriptSegsToEdited } from '../../captions-relay';
 import { positiveDurationFrames, secondsToTimelineFrames, timelineFramesToSeconds } from '../time';
 import type {
   AudioTimelineClip,
@@ -430,6 +430,18 @@ export function relayManagedCaptionTrack(
   const firstSpeechAssetId = speechClips[0]?.assetId;
   const sourceKeys = priorSourceKeys(document, track.clips);
   const assetBySourceKey = new Map<string, string>();
+  // A cut inside a word leaves two clips each playing a piece of it. Exactly one clip captions
+  // the word: the one playing its midpoint, else the one playing most of it (see chooseWordOwner).
+  const wordOwner = new Map<string, string>();
+  for (const assetId of new Set(speechClips.map((clip) => clip.assetId))) {
+    const ranges = speechClips.filter((clip) => clip.assetId === assetId).map((clip) => ({ ...sourceRange(clip, document.canvas.fps), clipId: clip.id }));
+    (document.semantics.transcripts[assetId] ?? []).forEach((segment, segmentIndex) => {
+      (segment.words ?? []).forEach((word, wordIndex) => {
+        const owner = chooseWordOwner(ranges, word);
+        if (owner) wordOwner.set(`${assetId}:${segmentIndex}:${wordIndex}`, owner.clipId);
+      });
+    });
+  }
   const mapped = speechClips.flatMap((clip) => {
     const assetId = clip.assetId;
     const segments = document.semantics.transcripts[assetId] ?? [];
@@ -438,7 +450,7 @@ export function relayManagedCaptionTrack(
     const range = sourceRange(clip, document.canvas.fps);
     return (segments as AsrSegment[]).flatMap((segment, segmentIndex) => {
       const sourceWords = (segment.words ?? []).map((word, wordIndex) => ({ ...word, si: wordIndex }));
-      const words = sourceWords.filter((word) => word.end > range.start && word.start < range.end);
+      const words = sourceWords.filter((word) => wordOwner.get(`${assetId}:${segmentIndex}:${word.si}`) === clip.id);
       if (sourceWords.length && !words.length) return [];
       if (!sourceWords.length && (segment.end <= range.start || segment.start >= range.end)) return [];
       return mapTranscriptSegsToEdited(
