@@ -82,16 +82,16 @@ function completeByPosition(count: number, rows: readonly CaptionTranslationRow[
 }
 
 /** The translator's answer for one sentence: the pieces between its marks, and the sentence with
- * the marks removed. Pieces are only trusted when they count the same as the lines sent. */
+ * the marks removed. */
 export function splitTranslatedLines(text: string): { pieces: string[]; whole: string } {
   const pieces = text.split(MARK_SPLIT).map((piece) => piece.trim()).filter(Boolean);
   return { pieces, whole: joinWords(pieces) };
 }
 
-/** Translations to write, grouped by source, one sentence per transcript segment plus, when the
- * answer kept every line mark, one per on-screen line. The sentence translation always lands: it
- * is what a re-laid-out line falls back to (spread by word share). Nothing is written until every
- * row validated. */
+/** Translations to write, grouped by source: one per on-screen line, keyed by the line's word
+ * range. An answer that lost or added a line mark is refused for the whole run, naming the
+ * sentence, so a mismatch is seen and fixed rather than papered over. Nothing is written until
+ * every row validated. */
 export type CaptionTranslationWrites =
   | { ok: true; writes: { src: string | null; assetId?: string; items: CaptionTranslationItem[] }[] }
   | { ok: false; error: string };
@@ -100,16 +100,16 @@ export function captionTranslationWrites(units: readonly TranslationUnit[], rows
   const translated = completeByPosition(units.length, rows);
   if (!translated) return { ok: false, error: 'Translation response was incomplete or contained invalid row ids.' };
   const bySource = new Map<string, { src: string | null; assetId?: string; items: CaptionTranslationItem[] }>();
-  units.forEach((unit, position) => {
+  for (const [position, unit] of units.entries()) {
+    const answer = translated.get(position)!;
+    const { pieces } = splitTranslatedLines(answer);
+    if (pieces.length !== unit.lines.length) {
+      return { ok: false, error: `Translation of "${unit.text}" came back with ${pieces.length} line(s) for ${unit.lines.length}: "${answer}"` };
+    }
     const key = unit.assetId ?? unit.src ?? '';
     const write = bySource.get(key) ?? { src: unit.src, ...(unit.assetId ? { assetId: unit.assetId } : {}), items: [] };
-    const { pieces, whole } = splitTranslatedLines(translated.get(position)!);
-    if (!whole) return;
-    write.items.push({ index: unit.seg, text: whole });
-    if (pieces.length === unit.lines.length && unit.lines.length > 1) {
-      unit.lines.forEach((line, at) => write.items.push({ index: unit.seg, w0: line.w0, w1: line.w1, text: pieces[at]! }));
-    }
+    unit.lines.forEach((line, at) => write.items.push({ index: unit.seg, w0: line.w0, w1: line.w1, text: pieces[at]! }));
     bySource.set(key, write);
-  });
+  }
   return { ok: true, writes: [...bySource.values()] };
 }

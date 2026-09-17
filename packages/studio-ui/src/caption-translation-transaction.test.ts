@@ -58,38 +58,37 @@ describe('splitTranslatedLines', () => {
 });
 
 describe('captionTranslationWrites', () => {
-  it('writes the sentence and, when the marks came back, one translation per line', () => {
+  it('writes one translation per on-screen line, keyed by the line\'s word range', () => {
     const result = captionTranslationWrites(
       [unit(null, 0, [[0, 3], [4, 7]], `我们看看里面${LINE_MARK}是什么东西。`)],
       [{ index: 0, text: "Let's take a look inside | to see what it is." }],
     );
     expect(result).toEqual({ ok: true, writes: [{ src: null, items: [
-      { index: 0, text: "Let's take a look inside to see what it is." },
       { index: 0, w0: 0, w1: 3, text: "Let's take a look inside" },
       { index: 0, w0: 4, w1: 7, text: 'to see what it is.' },
     ] }] });
   });
 
-  it('falls back to the sentence alone when the answer lost or added a mark', () => {
-    const result = captionTranslationWrites(
-      [unit(null, 0, [[0, 3], [4, 7]]), unit(null, 1, [[0, 1], [2, 2]])],
-      [{ index: 0, text: "Let's take a look at what's inside." }, { index: 1, text: 'one | two | three' }],
+  it('refuses the whole run, naming the sentence, when an answer lost or added a mark', () => {
+    const lost = captionTranslationWrites(
+      [unit(null, 0, [[0, 3], [4, 7]], `我们看看里面${LINE_MARK}是什么东西。`)],
+      [{ index: 0, text: "Let's take a look at what's inside." }],
     );
-    expect(result).toEqual({ ok: true, writes: [{ src: null, items: [
-      { index: 0, text: "Let's take a look at what's inside." },
-      { index: 1, text: 'one two three' },
-    ] }] });
+    expect(lost.ok).toBe(false);
+    expect((lost as { error: string }).error).toContain('我们看看里面');
+    expect((lost as { error: string }).error).toContain('1 line(s) for 2');
+    expect(captionTranslationWrites([unit(null, 1, [[0, 1], [2, 2]])], [{ index: 0, text: 'one | two | three' }]).ok).toBe(false);
   });
 
-  it('writes a single-line sentence once and groups items by source or transcript owner', () => {
+  it('groups items by source or transcript owner', () => {
     const result = captionTranslationWrites(
       [unit(null, 0, [[0, 2]]), unit('blob:clip', 0, [[0, 1]]), unit(null, 2, [[0, 0]], 'x', 'asset-9')],
       [{ index: 1, text: 'New clip' }, { index: 0, text: 'New main' }, { index: 2, text: 'Third' }],
     );
     expect(result).toEqual({ ok: true, writes: [
-      { src: null, items: [{ index: 0, text: 'New main' }] },
-      { src: 'blob:clip', items: [{ index: 0, text: 'New clip' }] },
-      { src: null, assetId: 'asset-9', items: [{ index: 2, text: 'Third' }] },
+      { src: null, items: [{ index: 0, w0: 0, w1: 2, text: 'New main' }] },
+      { src: 'blob:clip', items: [{ index: 0, w0: 0, w1: 1, text: 'New clip' }] },
+      { src: null, assetId: 'asset-9', items: [{ index: 2, w0: 0, w1: 0, text: 'Third' }] },
     ] });
   });
 

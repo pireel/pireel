@@ -607,8 +607,8 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       }
       const out = await tr(units.map((unit, i) => ({ index: i, text: unit.text })), target);
       // One transaction through the same tool every entry uses (chat, MCP, this panel): clear the
-      // old bilingual layer, then write each source. A missing row or a vanished source lands
-      // nothing, so a failed run never leaves a half-translated layer behind.
+      // old bilingual layer, then write each source. A missing row, a sentence whose line marks did
+      // not come back, or a vanished source lands nothing: a wrong answer is refused, not patched.
       const writes = captionTranslationWrites(units, out);
       if (!writes.ok) throw new Error(writes.error || t('workbench.translationFailedTryAgain'));
       const shots = ensureShots(compRef.current);
