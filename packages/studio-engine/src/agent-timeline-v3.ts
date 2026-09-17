@@ -32,7 +32,7 @@ import { applyOverlayDocumentEdits, removeOverlayDocumentClips } from './overlay
 import { applyVideoClipSettingsPatches, mediaVideoClipEntries } from './media-video-edit';
 import { duplicateOverlayDocumentClip, retimeOverlayDocumentClip } from './overlay-track-edit';
 import { editorDocumentRenderPlan } from './editor-document/render-plan';
-import { firstNarrativeAssetId, primaryNarrativeClips } from './editor-document/read-model';
+import { firstNarrativeAssetId, narrativeAtTimelineSecond, primaryNarrativeClips } from './editor-document/read-model';
 import { listDocumentAddressedWords, resolveDocumentWordIds } from './editor-document/transcript-address';
 import { patchNarrativeClips } from './editor-document/commands/narrative-patch';
 import { projectDocumentToComposition } from './project-document';
@@ -138,9 +138,12 @@ function duplicateGraphic(document: EditorDocumentV2, clipId: string, startFrame
   const at = startFrame !== undefined ? framesToSec(startFrame, document.canvas.fps) : block.startSec + block.durationSec;
   const newClipId = blockId('ai');
   const stackOrder = freeTrack(c.blocks, at, block.durationSec, block.trackIndex);
+  // Stack order is shared across visual, graphics and caption lanes: a B-roll lane can sit at the
+  // order the graphic wants. Only a graphics lane may take the copy; otherwise a new one is minted
+  // at that order (the same rule insert_clips applies).
   const target = found.clip.kind === 'caption'
     ? found.track
-    : document.timeline.tracks.find((track) => track.type !== 'audio' && track.role !== 'primaryNarrative' && track.stackOrder === stackOrder);
+    : document.timeline.tracks.find((track) => track.type === 'graphics' && track.stackOrder === stackOrder);
   const edit = duplicateOverlayDocumentClip({
     document,
     clipId,
@@ -690,13 +693,23 @@ export function applyLayoutV3(document: EditorDocumentV2, input: Input): AgentTi
     }
     return mutation(next, `Applied ${layout} layout to ${blockIds.length} media clip${blockIds.length === 1 ? '' : 's'}`, receipts, { blockIds, mediaClipIds: blockIds });
   }
+  // The documented default: compose with the footage under the first graphic clip.
+  let shotId = string(input.shotId);
+  if (!shotId) {
+    const firstGraphic = blockIds.map((id) => locatedClip(document, id)).find((found) => found && found.clip.kind !== 'media');
+    if (firstGraphic) {
+      const hit = narrativeAtTimelineSecond(document, framesToSec(firstGraphic.clip.startFrame, document.canvas.fps));
+      if (!hit) return fail(`no footage plays under ${firstGraphic.clip.id}: pass shotId (a narrative clip) to compose with`);
+      shotId = hit.clip.id;
+    }
+  }
   const edit = applyLayoutDocumentEdit({
     document,
     composition: c,
     layout: {
       layout: layoutKind,
       blockIds,
-      ...(string(input.shotId) ? { shotId: string(input.shotId) } : {}),
+      ...(shotId ? { shotId } : {}),
       ...(string(input.videoPosition) ? { videoPosition: input.videoPosition as 'left' | 'right' | 'top' | 'bottom' } : {}),
     },
   });

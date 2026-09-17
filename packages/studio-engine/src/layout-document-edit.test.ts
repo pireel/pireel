@@ -43,6 +43,9 @@ describe('native layout document edit', () => {
     ]);
     expect(projected.blocks[0]).not.toHaveProperty('contentBox');
     expect(projected.blocks[0]).not.toHaveProperty('fitScale');
+    // A layout arranges boxes only: the 4 s cards keep their timing under the 8 s shot instead of
+    // being stretched to the shot's span by the framing partner rule.
+    expect(projected.blocks.map((block) => [block.startSec, block.durationSec])).toEqual([[0, 4], [1, 4]]);
     expect(result.document.timeline.tracks.find((track) => track.id === 'native-empty')).toMatchObject({
       hidden: true, syncLocked: false, stackOrder: 30, clips: [],
     });
