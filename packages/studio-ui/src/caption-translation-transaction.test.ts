@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
-import { sentenceTranslationUnits, stageCaptionTranslationReplacement, type TranslationUnit } from './caption-translation-transaction';
+import { sentenceBreaksBetween, sentenceTranslationUnits, stageCaptionTranslationReplacement, type TranslationUnit } from './caption-translation-transaction';
 
 const seg = (text: string, sub?: string): AsrSegment => ({ start: 0, end: 1, text, ...(sub ? { sub, subLang: 'old' } : {}) });
 const unit = (src: string | null, segs: number[], text = 'x'): TranslationUnit => ({
@@ -112,5 +112,17 @@ describe('sentenceTranslationUnits', () => {
     expect(units.length).toBeGreaterThan(1);
     expect(units.every((u) => u.text.length <= 200)).toBe(true);
     expect(units.flatMap((u) => u.members.map((m) => m.seg))).toEqual(fragments.map((f) => f.ref.seg));
+  });
+});
+
+describe('sentenceBreaksBetween', () => {
+  it('follows ICU sentence rules instead of a punctuation table', () => {
+    expect(sentenceBreaksBetween('大家好，客时间寄来的', '张纸。')).toBe(false);
+    expect(sentenceBreaksBetween('这是一张纸。', '这是一个贺卡。')).toBe(true);
+    expect(sentenceBreaksBetween('看看这个是什么？', '这个应该是合作方法')).toBe(true);
+    expect(sentenceBreaksBetween('We shipped it.', 'Then we slept', 'en')).toBe(true);
+    expect(sentenceBreaksBetween('We shipped it', 'and then we slept', 'en')).toBe(false);
+    expect(sentenceBreaksBetween('It costs 1,999', 'yuan per year.', 'en')).toBe(false);
+    expect(sentenceBreaksBetween('今日は晴れです。', '明日は雨です。', 'ja')).toBe(true);
   });
 });

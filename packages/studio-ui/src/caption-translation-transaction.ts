@@ -38,7 +38,38 @@ export interface TranslationUnit {
   members: { seg: number; wordCount: number }[];
 }
 
-const SENTENCE_END = /[。.!?！？…][\s"'”’）)】》]*$/u;
+/**
+ * Sentence boundaries come from ICU (UAX #29), the same engine that segments our words: every
+ * language's terminators, abbreviations and closing quotes are its business, not a hand-written
+ * punctuation table. The question asked is "would a sentence break fall between these two runs of
+ * words", so the two are joined the way captions join words and probed at the seam.
+ */
+const sentenceSegmenters = new Map<string, Intl.Segmenter | null>();
+function sentenceSegmenter(lang: string | undefined): Intl.Segmenter | null {
+  const key = lang ?? '';
+  if (!sentenceSegmenters.has(key)) {
+    let segmenter: Intl.Segmenter | null = null;
+    try {
+      segmenter = typeof Intl !== 'undefined' && 'Segmenter' in Intl ? new Intl.Segmenter(lang, { granularity: 'sentence' }) : null;
+    } catch {
+      segmenter = new Intl.Segmenter(undefined, { granularity: 'sentence' });
+    }
+    sentenceSegmenters.set(key, segmenter);
+  }
+  return sentenceSegmenters.get(key) ?? null;
+}
+export function sentenceBreaksBetween(left: string, right: string, lang?: string): boolean {
+  const segmenter = sentenceSegmenter(lang);
+  if (!segmenter) return true;
+  const probe = joinWords([left, right]);
+  const seam = new Set([left.length, probe.length - right.length]);
+  for (const sentence of segmenter.segment(probe)) {
+    if (sentence.index === 0) continue;
+    if (seam.has(sentence.index)) return true;
+    if (sentence.index > left.length) break;
+  }
+  return false;
+}
 /** Segments closer than this are one utterance; mirrors the transcript de-segmentation rule. */
 const UTTERANCE_GAP_SEC = 1.0;
 /** A source with no punctuation at all must still produce bounded rows. */
@@ -46,7 +77,7 @@ const UNIT_MAX_CHARS = 200;
 
 export function sentenceTranslationUnits(fragments: readonly MappedSeg[]): TranslationUnit[] {
   // 1. Cut fragments of one segment → the segment's surviving words in source order.
-  const segments = new Map<string, { src: string | null; seg: number; words: MappedSeg['words']; start: number; end: number }>();
+  const segments = new Map<string, { src: string | null; seg: number; words: MappedSeg['words']; start: number; end: number; lang?: string }>();
   for (const fragment of fragments) {
     const key = `${fragment.ref.src ?? ''}|${fragment.ref.seg}`;
     const current = segments.get(key);
@@ -55,7 +86,7 @@ export function sentenceTranslationUnits(fragments: readonly MappedSeg[]): Trans
       current.start = Math.min(current.start, fragment.start);
       current.end = Math.max(current.end, fragment.end);
     } else {
-      segments.set(key, { src: fragment.ref.src, seg: fragment.ref.seg, words: [...fragment.words].sort((left, right) => (left.si ?? 0) - (right.si ?? 0)), start: fragment.start, end: fragment.end });
+      segments.set(key, { src: fragment.ref.src, seg: fragment.ref.seg, words: [...fragment.words].sort((left, right) => (left.si ?? 0) - (right.si ?? 0)), start: fragment.start, end: fragment.end, ...(fragment.lang ? { lang: fragment.lang } : {}) });
     }
   }
   // 2. Consecutive segments of one source → a sentence, closed at sentence-final punctuation, a
@@ -83,7 +114,7 @@ export function sentenceTranslationUnits(fragments: readonly MappedSeg[]): Trans
       if (open) {
         const previous = open.rows[open.rows.length - 1]!;
         const joined = joinWords([open.text, text]);
-        if (SENTENCE_END.test(open.text) || row.start - previous.end >= UTTERANCE_GAP_SEC || joined.length > UNIT_MAX_CHARS) close();
+        if (sentenceBreaksBetween(open.text, text, row.lang) || row.start - previous.end >= UTTERANCE_GAP_SEC || joined.length > UNIT_MAX_CHARS) close();
         else {
           open.rows.push(row);
           open.text = joined;
