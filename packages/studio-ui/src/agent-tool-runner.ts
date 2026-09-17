@@ -1925,9 +1925,48 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (mode === 'brief') {
               // BYO visual semantic analysis: the free parts (cuts/frame extraction/geometry/background) run locally, and the
               // sampled frames are returned as images for the external agent to look at itself — no in-house VLM burned. The agent submits labels via submit_visual after looking.
-              const vv = currentVideo();
-              if (!videoFileRef.current || !vv) return { ok: false, error: tEnglish('common.uploadVideoFirst') };
-              if (visualRef.current) {
+              // The source is a document asset, resolved like every other analysis mode (ids → clipId →
+              // the story spine → the only video), never the session's mounted main-video File: a
+              // restored project has none mounted, and B-roll placed by add_clips is not the spine.
+              const briefPrimaryId = firstNarrativeAssetId(documentRef.current);
+              const briefClipAssetId = typeof input.clipId === 'string' && input.clipId
+                ? (() => {
+                    const clip = documentRef.current.timeline.tracks.flatMap((track) => track.clips).find((candidate) => candidate.id === input.clipId);
+                    return clip && 'assetId' in clip ? clip.assetId : undefined;
+                  })()
+                : undefined;
+              const briefVideoAssets = Object.values(documentRef.current.assets).filter((asset): asset is EditorMediaAsset => asset.kind === 'video');
+              const briefAssetId = ids[0]
+                || briefClipAssetId
+                || (briefPrimaryId && documentRef.current.assets[briefPrimaryId]?.kind === 'video' ? briefPrimaryId : '')
+                || (briefVideoAssets.length === 1 ? briefVideoAssets[0]!.id : '');
+              if (!briefAssetId) {
+                return briefVideoAssets.length > 1
+                  ? { ok: false, error: `inspect_media brief needs ids or clipId; video assets: ${briefVideoAssets.map((asset) => asset.id).join(', ')}` }
+                  : { ok: false, error: tEnglish('common.uploadVideoFirst') };
+              }
+              const briefAsset = documentRef.current.assets[briefAssetId];
+              if (!briefAsset || briefAsset.kind !== 'video') return { ok: false, error: `inspect_media brief requires a video asset: ${briefAssetId}` };
+              const briefSource = resolveAssetUrl(briefAsset);
+              let briefFile: File | null = briefAssetId === briefPrimaryId ? videoFileRef.current : null;
+              if (!briefFile && briefSource) briefFile = clipFilesRef.current.get(briefSource) ?? null;
+              if (!briefFile) briefFile = await loadProjectAssetFile(briefAsset);
+              if (!briefFile && briefSource) {
+                try {
+                  briefFile = (await race(materializeRemoteMedia(briefSource, {
+                    name: `${briefAsset.label || briefAssetId}.mp4`,
+                    type: 'video/mp4',
+                    sig: briefAsset.locator.localSig,
+                    signal,
+                  }))).file;
+                } catch (error) {
+                  return { ok: false, error: `video fetch failed: ${error instanceof Error ? error.message : String(error)}` };
+                }
+              }
+              if (!briefFile) return { ok: false, error: `video bytes unavailable: ${briefAssetId}` };
+              const briefDurationSec = briefAsset.metadata.durationSec ?? (briefAssetId === briefPrimaryId ? currentVideo()?.durationSec : undefined) ?? 0;
+              if (!(briefDurationSec > 0)) return { ok: false, error: `video duration unknown for ${briefAssetId}: open the project in Studio once so its metadata is probed, then retry` };
+              if (visualRef.current && briefAssetId === briefPrimaryId) {
                 return {
                   ok: true,
                   summary: t('workbench.visualAnalysisAlreadyAvailable'),
@@ -1935,7 +1974,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 };
               }
               try {
-                const r = await prepareVisualAnalysis(videoFileRef.current, vv.durationSec, (done, tot) => report(t('workbench.geometryPassPct', { pct: tot ? Math.round((done / tot) * 100) : 0 }), tot ? done / tot : 0));
+                const r = await prepareVisualAnalysis(briefFile, briefDurationSec, (done, tot) => report(t('workbench.geometryPassPct', { pct: tot ? Math.round((done / tot) * 100) : 0 }), tot ? done / tot : 0));
                 if ('cached' in r) {
                   applyVisualResult(r.cached);
                   return {
