@@ -44,6 +44,7 @@ export const VOICE_LANGUAGES = ['zh', 'yue', 'en', 'pt', 'ko', 'es', 'ja', 'id',
 const FRAME = (what: string) => int(`${what}, integer timeline frame (fps from get_state).`);
 const FRAMES_RANGE = arr({ type: 'integer', minimum: 0 }, { minItems: 2, maxItems: 2, description: 'Half-open [startFrame, endFrame) in timeline frames.' });
 const SOURCE_RANGE = arr({ type: 'number', minimum: 0 }, { minItems: 2, maxItems: 2, description: 'Source seconds [inSec, outSec].' });
+const WORD_SPAN = arr(str(), { minItems: 1, maxItems: 2, description: '[firstWordId, lastWordId] from get_transcript words: the clip plays exactly the source span those words cover; assetId is inferred from the ids.' });
 const BOX = obj({
   x: num('Left edge in canvas units (0–1; may go outside for off-canvas).'),
   y: num('Top edge in canvas units.'),
@@ -248,15 +249,15 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   /* ------------------------------------------------------------------ clips */
   add_clips: {
     description:
-      'Place registered assets on the timeline without opening time (existing material is untouched). role picks the lane: primary is the full-frame story spine, broll the B-roll lane, narration/music/sfx the typed audio lanes; omit trackId to reuse or create the role lane. A full-frame B-roll video that overlaps another full-frame B-roll video is refused and nothing is placed — fix the frames or remove_clips the old clip first; only an explicit trackId overwrites that lane. Boxed (PiP) clips and images may sit over other B-roll. Timing is startFrame + durationFrames (defaults to the source remainder) with optional source [inSec,outSec]. duplicate[] copies existing graphic clips to a new start. One call, many clips, one undo step.',
+      'Place registered assets on the timeline without opening time (existing material is untouched). role picks the lane: primary is the full-frame story spine, broll the B-roll lane, narration/music/sfx the typed audio lanes; omit trackId to reuse or create the role lane. A full-frame B-roll video that overlaps another full-frame B-roll video is refused and nothing is placed — fix the frames or remove_clips the old clip first; only an explicit trackId overwrites that lane. Boxed (PiP) clips and images may sit over other B-roll. Timing is startFrame + durationFrames (defaults to the source remainder) with optional source [inSec,outSec]. To place a spoken passage, pass words [firstWordId, lastWordId] from get_transcript instead of source: the engine looks the seconds up, so never compute them. duplicate[] copies existing graphic clips to a new start. One call, many clips, one undo step.',
     inputSchema: obj({
       clips: arr(obj({
-        id: str('Optional new clip id.'), assetId: str(), trackId: str(), role: enumOf(CLIP_ROLES),
-        startFrame: FRAME('Start'), durationFrames: int('Initial duration in frames.', 1), source: SOURCE_RANGE,
+        id: str('Optional new clip id.'), assetId: str('Omit when words is given.'), trackId: str(), role: enumOf(CLIP_ROLES),
+        startFrame: FRAME('Start'), durationFrames: int('Initial duration in frames.', 1), source: SOURCE_RANGE, words: WORD_SPAN,
         fit: enumOf(['contain', 'cover']), box: BOX, anchorX: num('Cover-crop anchor 0–1.', { min: 0, max: 1 }), anchorY: num('Cover-crop anchor 0–1.', { min: 0, max: 1 }),
         opacity: num('0–1.', { min: 0, max: 1 }), enabled: bool(), linkGroupId: str(),
         volumeDb: num('Initial level; omit for the role default.', { min: -60, max: 20 }), fades: FADES, speed: num('0.25–4.', { min: 0.25, max: 4 }), mute: bool('Video placed as B-roll is silent unless false; the spine and audio clips follow their own level.'),
-      }, ['assetId'])),
+      })),
       duplicate: arr(obj({ clipId: str('Graphic clip to copy.'), startFrame: FRAME('New start') }, ['clipId'])),
       atFrame: FRAME('Default start for clips that omit startFrame'),
       includeLinked: bool('Default true: linked partners move together.'),
@@ -274,14 +275,14 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   insert_clips: {
     description:
-      'Insert registered assets and push later material on sync-locked lanes to make room (ripple). Same clip shape as add_clips. Use add_clips when nothing should shift.',
+      'Insert registered assets and push later material on sync-locked lanes to make room (ripple). Same clip shape as add_clips, including words [firstWordId, lastWordId] to insert a spoken passage by its transcript. Use add_clips when nothing should shift.',
     inputSchema: obj({
       clips: arr(obj({
-        id: str(), assetId: str(), trackId: str(), role: enumOf(CLIP_ROLES),
-        startFrame: FRAME('Start'), durationFrames: int('Initial duration in frames.', 1), source: SOURCE_RANGE,
+        id: str(), assetId: str('Omit when words is given.'), trackId: str(), role: enumOf(CLIP_ROLES),
+        startFrame: FRAME('Start'), durationFrames: int('Initial duration in frames.', 1), source: SOURCE_RANGE, words: WORD_SPAN,
         fit: enumOf(['contain', 'cover']), box: BOX, anchorX: num('', { min: 0, max: 1 }), anchorY: num('', { min: 0, max: 1 }),
         opacity: num('', { min: 0, max: 1 }), enabled: bool(), linkGroupId: str(), volumeDb: num('', { min: -60, max: 20 }), fades: FADES, speed: num('', { min: 0.25, max: 4 }), mute: bool('Video placed as B-roll is silent unless false; the spine and audio clips follow their own level.'),
-      }, ['assetId']), { minItems: 1 }),
+      }), { minItems: 1 }),
       atFrame: FRAME('Insertion point for clips that omit startFrame'),
       includeLinked: bool(),
     }, ['clips']),

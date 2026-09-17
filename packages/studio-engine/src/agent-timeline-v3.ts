@@ -95,13 +95,33 @@ const blockName = (block: Block): string => block.label?.slice(0, 10) || blockKi
 /** Convert one v3 clip row (frames, pairs) to the placement row the engine's placer reads. */
 const LEGACY_CLIP_KEYS = ['startSec', 'durationSec', 'sourceInSec', 'sourceOutSec', 'fadeInSec', 'fadeOutSec', 'muted', 'toTrackId'] as const;
 
-function clipRowToPlacement(row: Input, index: number, fps: number, path: string): Input | AgentTimelineOutcome {
+function clipRowToPlacement(document: EditorDocumentV2, row: Input, index: number, fps: number, path: string): Input | AgentTimelineOutcome {
   const legacy = LEGACY_CLIP_KEYS.filter((key) => row[key] !== undefined);
   if (legacy.length) {
-    return fail(`${path}[${index}] uses ${legacy.join(', ')}; this tool takes startFrame, durationFrames, source [inSec, outSec], fades {in, out} in frames and mute`, { path: `${path}[${index}]`, legacyKeys: legacy });
+    return fail(`${path}[${index}] uses ${legacy.join(', ')}; this tool takes startFrame, durationFrames, source [inSec, outSec] or words [firstWordId, lastWordId], fades {in, out} in frames and mute`, { path: `${path}[${index}]`, legacyKeys: legacy });
   }
-  const { startFrame, durationFrames, source, fades, mute, ...rest } = row;
+  const { startFrame, durationFrames, source, words, fades, mute, ...rest } = row;
   const item: Input = { ...rest };
+  if (words !== undefined) {
+    // A passage chosen from the transcript is placed by the ids of its first and last word: the
+    // engine looks the source seconds up, the model copies ids it has seen and never does the
+    // arithmetic (the largest correctness risk in transcript-driven cuts).
+    if (source !== undefined) return fail('invalid_value', { path: `${path}[${index}].words`, fix: 'Pass either source [inSec, outSec] or words [firstWordId, lastWordId], not both.' });
+    const ids = Array.isArray(words) ? words.filter((id): id is string => typeof id === 'string' && !!id.trim()).map((id) => id.trim()) : [];
+    if (!ids.length || ids.length > 2) return fail('invalid_value', { path: `${path}[${index}].words`, value: words, fix: 'words is [firstWordId, lastWordId] (or one id for a single word) from get_transcript {granularity:"words"}.' });
+    const resolved = resolveDocumentWordIds(document, ids);
+    if (resolved.missing.length) return fail('unknown_id', { path: `${path}[${index}].words`, unknownIds: resolved.missing, fix: 'Word ids come only from get_transcript {granularity:"words"} and shift after cuts; re-read and send current ids.' });
+    const assets = [...new Set(resolved.words.map((word) => word.assetId))];
+    if (assets.length > 1) return fail('invalid_value', { path: `${path}[${index}].words`, fix: `The two words belong to different sources (${assets.join(', ')}); a clip plays one source.` });
+    const assetId = assets[0]!;
+    if (string(item.assetId) && item.assetId !== assetId) return fail('invalid_value', { path: `${path}[${index}].assetId`, value: item.assetId, fix: `The words belong to ${assetId}; omit assetId or pass that one.` });
+    item.assetId = assetId;
+    const start = Math.min(...resolved.words.map((word) => word.start));
+    const end = Math.max(...resolved.words.map((word) => word.end));
+    if (!(end > start)) return fail('invalid_value', { path: `${path}[${index}].words`, fix: 'The last word must end after the first word starts.' });
+    item.sourceInSec = start;
+    item.sourceOutSec = end;
+  }
   if (startFrame !== undefined) {
     if (!isFrame(startFrame)) return fail(`${path}[${index}].startFrame must be an integer frame ≥ 0`);
     item.startSec = framesToSec(startFrame, fps);
@@ -123,7 +143,7 @@ function clipRowToPlacement(row: Input, index: number, fps: number, path: string
     if (isFiniteNumber(f.out)) item.fadeOutSec = framesToSec(f.out, fps);
   }
   if (typeof mute === 'boolean') item.muted = mute;
-  if (!string(item.assetId)) return fail(`${path}[${index}].assetId is required`);
+  if (!string(item.assetId)) return fail('missing_field', { path: `${path}[${index}].assetId`, fix: 'Pass assetId (from get_state or search_assets), or words [firstWordId, lastWordId] from get_transcript to place a spoken passage by its transcript.' });
   return item;
 }
 
@@ -192,7 +212,7 @@ export function addClipsV3(document: EditorDocumentV2, input: Input, mode: 'over
   if (Array.isArray(input.clips) && input.clips.length) {
     const rows: Input[] = [];
     for (const [index, raw] of (input.clips as Input[]).entries()) {
-      const row = clipRowToPlacement((raw ?? {}) as Input, index, fps, 'clips');
+      const row = clipRowToPlacement(next, (raw ?? {}) as Input, index, fps, 'clips');
       if (isOutcome(row)) return row;
       rows.push(row);
     }

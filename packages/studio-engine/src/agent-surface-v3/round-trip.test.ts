@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { runAgentTimelineTool } from '../agent-timeline';
-import { emptyEditorDocumentV2 } from '../editor-document';
+import { emptyEditorDocumentV2, listDocumentAddressedWords } from '../editor-document';
 import type { EditorDocumentV2, EditorTrack, TimelineClip } from '../editor-document/types';
 import { documentDelta, renderV3State, type V3ClipView, type V3Delta, type V3StateView } from './state';
 
@@ -86,6 +86,27 @@ describe('v3 round trips: written value → document → get_state → delta', (
     expect(view).toMatchObject({ kind: 'media', assetId: 'cam2', frames: [450, 480] });
     expect(t.state.tracks.find((track) => track.id === view.trackId)?.role).toBe('broll');
     expect(t.touched(id!)).toBeDefined();
+  });
+
+  it('add_clips words: a passage placed by its first and last word id plays exactly that source span, asset inferred', () => {
+    const document = project();
+    document.semantics.transcripts = { cam: [
+      { start: 0, end: 2.4, text: 'hello there world', words: [{ start: 0.1, end: 0.5, text: 'hello' }, { start: 0.6, end: 1.0, text: 'there' }, { start: 1.2, end: 1.7, text: 'world' }] },
+      { start: 3, end: 5, text: 'second sentence', words: [{ start: 3.1, end: 3.6, text: 'second' }, { start: 3.8, end: 4.5, text: 'sentence' }] },
+    ] };
+    const listed = listDocumentAddressedWords(document, { assetId: 'cam' });
+    if ('error' in listed) throw new Error(listed.error);
+    const ids = listed.words.map((word) => word.id);
+    const t = trip(document, 'add_clips', { clips: [{ id: 'quote', role: 'broll', startFrame: 500, words: [ids[1]!, ids[3]!] }] });
+    expect(t.clip('quote')).toMatchObject({ kind: 'media', assetId: 'cam', source: [0.6, 3.6], frames: [500, 590] });
+    expect(t.touched('quote')).toBeDefined();
+    // ids are the only contract: a stale id is unknown_id, and a mismatching assetId is refused
+    expect(runAgentTimelineTool(document, 'add_clips', { clips: [{ role: 'broll', startFrame: 0, words: ['word_asset_zz_0_0_0'] }] }))
+      .toMatchObject({ ok: false, error: 'unknown_id', data: { unknownIds: ['word_asset_zz_0_0_0'] } });
+    expect(runAgentTimelineTool(document, 'add_clips', { clips: [{ assetId: 'cam2', role: 'broll', startFrame: 0, words: [ids[0]!] }] }))
+      .toMatchObject({ ok: false, error: 'invalid_value', data: { path: 'clips[0].assetId' } });
+    expect(runAgentTimelineTool(document, 'add_clips', { clips: [{ role: 'broll', startFrame: 0 }] }))
+      .toMatchObject({ ok: false, error: 'missing_field', data: { path: 'clips[0].assetId' } });
   });
 
   it('remove_clips: the delta lists the removed ids and the source span that left the timeline', () => {
