@@ -8733,8 +8733,13 @@ export function HyperframesWorkbench({
                           // drawn above the picture under the pointer (a caption line, a component,
                           // another visual clip) takes the click as if the shell were not there.
                           const host = stageHostsRef.current[bufsRef.current.active];
-                          const hit = host?.hitTest(event.clientX, event.clientY);
-                          if (hit?.closest("[data-composition-id], [data-hf-visual-clip]")) {
+                          const hit = host?.hitTest(event.clientX, event.clientY)?.closest("[data-composition-id], [data-hf-visual-clip]");
+                          // The picture being dragged (the spine canvas or this visual clip) and the
+                          // stage roots are not "something above the picture".
+                          const other = hit
+                            && hit.id !== selectedCanvasMedia.elementId
+                            && !["root", "vid"].includes(hit.getAttribute("data-composition-id") ?? "");
+                          if (other) {
                             const rect = host!.element.getBoundingClientRect();
                             postPreview({
                               type: "hf:pickAt",
