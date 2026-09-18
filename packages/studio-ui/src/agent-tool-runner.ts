@@ -167,7 +167,7 @@ function registerGeneratedOutputs(
 
 const generationWatchers = new Map<string, number>();
 /** Follow a started job in the background (4 s cadence, 15 min cap) so its output is registered even
- * when the agent never polls; the receipt still tells the agent to call get_generation_jobs later. */
+ * when the agent never polls; the receipt still tells the agent to read inspect_media generation later. */
 function watchGenerationJobs(ids: string[], register: (entry: LocalAssetIndexEntry) => void): void {
   for (const id of ids) {
     if (generationWatchers.has(id)) continue;
@@ -2308,7 +2308,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   kind: generationKind,
                   projectId,
                   ...(unresolvedReferences.length ? { unresolvedReferences } : {}),
-                  next: 'The asynchronous task is already in Generate history. Do not poll repeatedly in this turn; call get_generation_jobs with these ids later, then register_media and add_clips after success.',
+                  next: 'The asynchronous task is already in Generate history. Do not poll repeatedly in this turn; read them later with inspect_media {mode:"generation", ids:[…]}, then register_media and add_clips after success.',
                 },
               };
             } finally {
@@ -3762,8 +3762,22 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
               .map((b) => ({ id: b.id, kind: blockKind(b), ...(b.label ? { label: b.label } : {}), ...(b.box ? { zone: zoneOf(b.box) } : {}) }));
             const span = videoShotTimelineSpans(renderTimeline.composition.shots ?? [], renderTimeline.placements)
               .find((sp) => at >= sp.editedStart - 1e-6 && at < sp.editedEnd + 1e-6);
+            // Native media on visual lanes (B-roll, images, a baked component) is what the frame shows
+            // just as much as the overlay blocks; listing only blocks left a baked element unaddressable.
+            const fpsNow = documentRef.current.canvas.fps;
+            const visMedia = documentRef.current.timeline.tracks
+              .filter((track) => track.type !== 'audio' && track.id !== documentRef.current.semantics.primaryNarrativeTrackId && !track.hidden)
+              .flatMap((track) => track.clips.flatMap((clip) => {
+                if (clip.kind !== 'media' || !clip.enabled) return [];
+                const startSec = clip.startFrame / fpsNow;
+                const endSec = (clip.startFrame + clip.durationFrames) / fpsNow;
+                if (at < startSec || at >= endSec) return [];
+                const asset = documentRef.current.assets[clip.assetId];
+                return [{ id: clip.id, kind: asset?.kind ?? 'media', trackId: track.id, ...(asset?.label ? { label: asset.label } : {}), ...(clip.box ? { zone: zoneOf(clip.box) } : { zone: 'full' }) }];
+              }));
             const visible = {
               blocks: visBlocks,
+              ...(visMedia.length ? { media: visMedia } : {}),
               ...(span ? { shot: { id: span.clip.id, treatment: span.clip.treatment } } : {}),
               captionsOn: documentCaptionsOn(documentRef.current),
             };

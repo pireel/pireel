@@ -426,6 +426,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       'Cut spoken content by the transcript, in one call for all cuts. ranges are source-second spans from get_transcript segments (whole ideas, retakes, dead passages); wordIds are stable ids from get_transcript words for exact words. keepGapSec leaves that much breathing room at each seam (default 0.35). The tool converts to the timeline, cuts the footage, re-lays overlays and captions. Word ids and positions shift afterwards — re-read get_transcript before another cut. Never place spoken content by frames; this is the editing surface for speech.',
     inputSchema: obj({
       ranges: arr(SOURCE_RANGE, { description: 'Source-second spans to remove.' }),
+      assetId: str('Transcript the ranges belong to. Default: the story spine, else the lane that speaks most (narration audio). wordIds carry their own asset.'),
       wordIds: arr(str(), { description: 'Exact words to remove.' }),
       keepGapSec: num('Breathing room kept at each seam.', { min: 0, max: 2 }),
     }),

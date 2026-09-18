@@ -292,6 +292,13 @@ function audibleSpeechClips(document: EditorDocumentV2, selection: CaptionSource
     .filter((clip) => !clipAudioMuted(clip) && !mutedTracks.has(trackOfClip.get(clip.id) ?? ''));
 }
 
+/** The transcript the caption layer currently reads: the bound source's first transcript-bearing
+ * clip (explicit track or clip selection), else the dominant speech lane's. Null with no speech. */
+export function boundCaptionSourceAssetId(document: EditorDocumentV2): string | null {
+  const selection = document.semantics.managedCaptionSource ?? { mode: 'auto' as const };
+  return selectedSpeechClips(document, selection)[0]?.assetId ?? null;
+}
+
 /** Source seconds mapped through native clip placement, including explicit gaps and retiming. */
 function sourceRange(clip: SpeechTimelineClip, fps: number): { start: number; end: number } {
   const speed = clip.kind === 'audio' && Number.isFinite(clip.properties.speed) && clip.properties.speed! > 0

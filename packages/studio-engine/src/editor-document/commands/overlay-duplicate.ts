@@ -54,6 +54,9 @@ export function duplicateOverlayClip(
 
   const duplicate: OverlayClip = {
     ...clip,
+    // A copy starts unlinked: carrying the original's linkGroupId made every later move of the
+    // copy drag the original along, and nothing in the receipt said so.
+    linkGroupId: undefined,
     id: newClipId,
     startFrame,
     // Custom blocks scope their HTML/CSS/GSAP to the clip id. Keeping the old selector makes the

@@ -1084,26 +1084,13 @@ export function HyperframesWorkbench({
       return next;
     });
   }, []);
-  // Primary auto-snap is an invariant while enabled, including after project restore and after an
-  // asset insertion. This keeps old head/middle gaps from surviving merely because no clip was dragged.
-  useEffect(() => {
-    if (!timelineSnapEnabled) return;
-    const clips = primaryNarrativeClips(editorDocument);
-    let cursor = 0;
-    const needsPacking = clips.some((clip) => {
-      const shifted = clip.startFrame !== cursor;
-      cursor += clip.durationFrames;
-      return shifted;
-    });
-    if (!needsPacking || !clips[0]) return;
-    commit({ op: "visual.move", input: {
-      clipId: clips[0].id,
-      atSec: 0,
-      target: { kind: "primary" },
-      primaryOrder: clips.map((clip) => clip.id),
-    } }, { origin: "system", undo: "none" });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editorDocument, timelineSnapEnabled]);
+  // Primary auto-snap acts on the user's own drags (the timeline packs the dragged clip) and when
+  // the magnet is switched on. It is NOT a standing invariant re-applied after every document
+  // change: a ripple insert or delete on another sync-locked lane deliberately opens or closes room
+  // on the spine too, and an effect that re-packed the spine afterwards undid exactly that half of
+  // the edit — narration, captions and B-roll moved, the picture snapped back, and the receipt
+  // (honest at commit time) no longer matched the timeline. A clip an agent places at an explicit
+  // frame is likewise left where it was put.
   const [locateSignal, setLocateSignal] = useState(0); // increment = scroll timeline to the playhead
   // near=true: only scroll when the playhead would be off-screen (jumps made from another panel), vs the
   // transport readout, which always centres because that IS the request.

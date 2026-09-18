@@ -40,6 +40,7 @@ import { listDocumentAddressedWords, resolveDocumentWordIds } from './editor-doc
 import { patchNarrativeClips } from './editor-document/commands/narrative-patch';
 import { projectDocumentToComposition } from './project-document';
 import { STUDIO_AGENT_EXECUTION_LIMITS } from './agent-execution-budget';
+import { boundCaptionSourceAssetId } from './editor-document/commands/managed-captions';
 import { type AsrSegment, applyCaptionTranslations, type CaptionTranslationItem, clearCaptionTranslations, desegmentCues } from './build-blocks';
 import { applyCaptionTextEdits } from './caption-text-edit';
 import { resolveCaptionSentenceEdits } from './caption-sentence-edit';
@@ -852,15 +853,31 @@ export function setTextsV3(document: EditorDocumentV2, input: Input): AgentTimel
 
 const CAPTION_FIX = 'Pass on, preset/yPct/scale/font, source, script, corrections, translations or relayout.';
 
-function captionCorrections(document: EditorDocumentV2, rows: unknown[], clipId: string | undefined): AgentTimelineOutcome {
+/** The transcript a caption edit writes to: an explicit asset, the speech clip named (on any
+ * lane), the source the caption layer is bound to, else the spine. */
+function captionTranscriptOwner(document: EditorDocumentV2, clipId: string | undefined, explicitAssetId: string | undefined): { assetId: string } | AgentTimelineOutcome {
+  if (explicitAssetId) {
+    if (!document.assets[explicitAssetId]) return fail('unknown_id', { path: 'assetId', value: explicitAssetId, fix: 'assetId is a registered, transcribed asset from get_state.' });
+    return { assetId: explicitAssetId };
+  }
+  if (clipId) {
+    const found = locatedClip(document, clipId);
+    if (!found) return fail('unknown_id', { path: 'clipId', value: clipId, fix: 'clipId is a clip from get_state that plays speech (spine, B-roll or narration audio).' });
+    if (found.clip.kind === 'graphic' || found.clip.kind === 'caption') return fail('wrong_kind', { path: 'clipId', value: clipId, fix: 'Name the clip that plays the speech (spine, B-roll or narration audio), not a graphic or caption cue.' });
+    return { assetId: found.clip.assetId };
+  }
+  const bound = boundCaptionSourceAssetId(document) ?? firstNarrativeAssetId(document);
+  return bound ? { assetId: bound } : fail('no speech source on the timeline', { fix: 'Place footage or narration with add_clips and turn captions on first.' });
+}
+
+function captionCorrections(document: EditorDocumentV2, rows: unknown[], clipId: string | undefined, explicitAssetId: string | undefined): AgentTimelineOutcome {
   const items = rows
     .map((row) => { const value = (row ?? {}) as Input; return { index: Number(value.index), text: typeof value.text === 'string' ? value.text.trim() : '' }; })
     .filter((item) => Number.isInteger(item.index) && item.index >= 0 && item.text.length > 0);
   if (!items.length) return fail('corrections need {index, text} rows: index is the transcript row, text the complete corrected sentence');
-  const assetId = clipId
-    ? primaryNarrativeClips(document).find((clip) => clip.id === clipId)?.assetId
-    : firstNarrativeAssetId(document);
-  if (!assetId) return fail(clipId ? `clip not found on the story spine: ${clipId}` : 'no narrative source on the timeline');
+  const owner = captionTranscriptOwner(document, clipId, explicitAssetId);
+  if (isOutcome(owner)) return owner;
+  const { assetId } = owner;
   const segments = document.semantics.transcripts[assetId] as AsrSegment[] | undefined;
   if (!segments?.length) return fail('no transcript for this source — read get_transcript first');
   const bad = items.filter((item) => item.index >= segments.length);
@@ -907,9 +924,9 @@ function captionTranslations(document: EditorDocumentV2, translations: Input, cl
   } else {
     if (!lang) return fail('translations need lang: the target language name (it also becomes the second caption line’s language)');
     const explicitAsset = string(translations.assetId);
-    const assetId = explicitAsset
-      ?? (clipId ? primaryNarrativeClips(next).find((clip) => clip.id === clipId)?.assetId : firstNarrativeAssetId(next));
-    if (!assetId) return fail(clipId ? `clip not found on the story spine: ${clipId}` : 'no narrative source on the timeline');
+    const owner = captionTranscriptOwner(next, clipId, explicitAsset);
+    if (isOutcome(owner)) return owner;
+    const { assetId } = owner;
     const segments = next.semantics.transcripts[assetId] as AsrSegment[] | undefined;
     if (!segments?.length) return fail(explicitAsset ? `no transcript for asset ${assetId}` : 'no transcript for this source — read get_transcript first');
     const bad = items.filter((row) => row.index >= segments.length);
@@ -1025,7 +1042,8 @@ export function setCaptionsV3(document: EditorDocumentV2, input: Input): AgentTi
   }
 
   if (Array.isArray(input.corrections) && input.corrections.length) {
-    const failed = take(captionCorrections(next, input.corrections as unknown[], clipId));
+    const source = (input.source ?? {}) as Input;
+    const failed = take(captionCorrections(next, input.corrections as unknown[], clipId, string(source.assetId)));
     if (failed) return failed;
   }
   if (input.translations && typeof input.translations === 'object') {

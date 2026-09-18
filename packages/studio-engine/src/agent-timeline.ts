@@ -30,6 +30,7 @@ import { canvasSizeFollowingFirstVideo } from './editing-primitives';
 import { applyNarrationDocumentEdit } from './narration-document-edit';
 import { planNarrationCuts } from './editor-document/narration-cut-planner';
 import { firstNarrativeAssetId } from './editor-document/read-model';
+import { dominantTimelineSpeechTrack } from './editor-document/commands/managed-captions';
 import { documentWordRanges, documentWordRangesToTimeline, resolveDocumentWordIds } from './editor-document/transcript-address';
 import { type CutSeamEntry, finalizeCutSeams, tightenCutRanges } from './trim';
 import { runV3DocumentTool } from './agent-timeline-v3';
@@ -1646,7 +1647,7 @@ export function updateTexts(document: EditorDocumentV2, input: Input): AgentTime
   return mutation(edited.document, `Updated ${items.length} text clip${items.length === 1 ? '' : 's'}`, edited.receipts);
 }
 
-const RANGES_NOT_ON_TIMELINE_FIX = 'None of these source-second spans is still on the timeline: they were cut already, sit outside every remaining narrative clip of the primary footage, or lie entirely inside protected speech that is not fully covered. Re-read get_transcript for what remains, or pass wordIds for exact words.';
+const RANGES_NOT_ON_TIMELINE_FIX = 'None of these source-second spans is still on the timeline: they were cut already, sit outside every remaining clip that plays this transcript (any lane), or lie entirely inside protected speech that is not fully covered. Re-read get_transcript for what remains, or pass wordIds for exact words.';
 
 /**
  * remove_words: cut spoken content by the transcript. `ranges` are [inSec, outSec] pairs on the
@@ -1661,8 +1662,12 @@ function removeWords(document: EditorDocumentV2, input: Input): AgentTimelineOut
   if (!rawRanges.length && !wordIds.length) {
     return fail('remove_words needs ranges or wordIds', { fix: 'Pass ranges as [[inSec, outSec], …] from get_transcript segments, or wordIds from get_transcript words.' });
   }
-  const assetId = firstNarrativeAssetId(document);
-  if (!assetId) return fail('no narrative footage on the timeline', { fix: 'Place the footage with add_clips (role primary) before cutting speech.' });
+  // ranges are source seconds of ONE transcript: the one named, else the spine's, else the lane
+  // that speaks most (generated narration placed as audio). wordIds carry their own asset.
+  const explicitAsset = string(input.assetId);
+  if (explicitAsset && !document.assets[explicitAsset]) return fail('unknown_id', { path: 'assetId', value: explicitAsset, fix: 'assetId is a registered asset from get_state or get_transcript.' });
+  const assetId = explicitAsset ?? firstNarrativeAssetId(document) ?? dominantTimelineSpeechTrack(document)?.clips[0]?.assetId;
+  if (rawRanges.length && !assetId) return fail('no speech on the timeline', { fix: 'Place footage or narration with add_clips before cutting speech, or pass wordIds.' });
   const seams: CutSeamEntry[] = [];
   const keepGapSec = Number(input.keepGapSec);
   const keepsGap = Number.isFinite(keepGapSec) && keepGapSec > 0;
@@ -1678,7 +1683,7 @@ function removeWords(document: EditorDocumentV2, input: Input): AgentTimelineOut
       }
       sourceRanges.push({ from, to });
     }
-    const transcriptRows = document.semantics.transcripts[assetId] ?? [];
+    const transcriptRows = document.semantics.transcripts[assetId!] ?? [];
     const words = transcriptRows.flatMap((segment) => segment.words ?? []);
     // The receipt names WHAT each cut removed; a range without words is dead air and says so by omission.
     const snippetOf = (from: number, to: number): string | undefined => {
@@ -1689,7 +1694,7 @@ function removeWords(document: EditorDocumentV2, input: Input): AgentTimelineOut
     };
     const tightened = keepsGap ? tightenCutRanges(sourceRanges, keepGapSec) : sourceRanges;
     const plan = planNarrationCuts(document, {
-      assetId,
+      assetId: assetId!,
       sourceRanges: tightened.map((range) => ({ fromSec: range.from, toSec: range.to })),
       transcriptSegments: transcriptRows,
       transcriptProtection: 'outside-candidates',
@@ -1708,7 +1713,7 @@ function removeWords(document: EditorDocumentV2, input: Input): AgentTimelineOut
       return fail(`unknown or stale word ids: ${resolved.missing.join(', ')}`, { missing: resolved.missing, fix: 'Word ids shift after every cut; re-read get_transcript {granularity:"words"} and send the current ids.' });
     }
     const mapped = documentWordRangesToTimeline(document, documentWordRanges(resolved.words));
-    if (!mapped.length) return fail('the selected words are already absent from the edited timeline');
+    if (!mapped.length) return fail('the selected words are not on the timeline', { fix: 'Their clip was cut, disabled, or trimmed past them. Re-read get_transcript {granularity:"words"}: it lists only words that still play.' });
     for (const range of mapped) seams.push({ at: range.fromSec, len: range.toSec - range.fromSec, ...(range.text ? { text: range.text } : {}) });
   }
 

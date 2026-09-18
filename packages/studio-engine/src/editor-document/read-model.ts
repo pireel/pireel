@@ -137,6 +137,28 @@ export function narrativeTrimRangeAtTimelineSecond(
 }
 
 /** Map one asset's source-clock range onto every surviving occurrence on the native timeline. */
+/** Every enabled clip that plays `assetId` on any lane, in the shape the range mapper reads. The
+ * spine is one lane among several: narration placed as an audio clip and a talking B-roll take
+ * carry speech too, and a cut addressed by their transcript must find them. */
+function speechClipsOfAsset(document: EditorDocumentV2, assetId: string): Array<{ id: string; startFrame: number; durationFrames: number; sourceInSec: number; sourceOutSec: number }> {
+  const fps = document.canvas.fps;
+  const out: Array<{ id: string; startFrame: number; durationFrames: number; sourceInSec: number; sourceOutSec: number }> = [];
+  const primaryId = document.semantics.primaryNarrativeTrackId;
+  const tracks = [...document.timeline.tracks].sort((left, right) => (left.id === primaryId ? -1 : right.id === primaryId ? 1 : 0));
+  for (const track of tracks) {
+    for (const clip of track.clips) {
+      if (!clip.enabled) continue;
+      if ((clip.kind === 'narrative' || clip.kind === 'media') && clip.assetId === assetId) {
+        out.push({ id: clip.id, startFrame: clip.startFrame, durationFrames: clip.durationFrames, sourceInSec: clip.sourceInSec, sourceOutSec: clip.sourceOutSec });
+      } else if (clip.kind === 'audio' && clip.assetId === assetId) {
+        const speed = Number.isFinite(clip.properties.speed) && clip.properties.speed! > 0 ? clip.properties.speed! : 1;
+        out.push({ id: clip.id, startFrame: clip.startFrame, durationFrames: clip.durationFrames, sourceInSec: clip.sourceInSec, sourceOutSec: clip.sourceOutSec ?? clip.sourceInSec + (clip.durationFrames / fps) * speed });
+      }
+    }
+  }
+  return out;
+}
+
 export function narrativeTimelineRangesForAssetSourceRange(
   document: EditorDocumentV2,
   assetId: string,
@@ -154,8 +176,7 @@ export function narrativeTimelineRangesForAssetSourceRange(
       range.fromSec < toSec - 0.001 && range.toSec > fromSec + 0.001
     ))
   );
-  return primaryNarrativeClips(document).flatMap((clip) => {
-    if (clip.assetId !== assetId) return [];
+  return speechClipsOfAsset(document, assetId).flatMap((clip) => {
     const sourceFrom = Math.max(sourceFromSec, clip.sourceInSec);
     const sourceTo = Math.min(sourceToSec, clip.sourceOutSec);
     if (sourceTo - sourceFrom <= 0.001) return [];

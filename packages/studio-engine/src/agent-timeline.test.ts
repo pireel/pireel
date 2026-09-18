@@ -1185,3 +1185,73 @@ describe('add_clips fades', () => {
     expect(Math.round(bed.properties.fadeOutSec! * 30)).toBe(7);
   });
 });
+
+describe('speech edits reach narration placed as audio', () => {
+  const narrated = () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', { assets: [
+      { id: 'cam', kind: 'video', url: 'https://cdn.example/cam.mp4', durationSec: 10 },
+      { id: 'voice', kind: 'audio', url: 'https://cdn.example/voice.mp3', durationSec: 4 },
+    ] }).document!;
+    document.semantics.transcripts.voice = [
+      { start: 0, end: 2, text: '第一句。', words: [{ text: '第一句', start: 0.2, end: 1.6 }, { text: '。', start: 1.6, end: 1.8 }] },
+      { start: 2, end: 4, text: '第二句。', words: [{ text: '第二句', start: 2.2, end: 3.6 }, { text: '。', start: 3.6, end: 3.8 }] },
+    ];
+    document = runAgentTimelineTool(document, 'add_clips', { clips: [
+      { id: 'cam-clip', assetId: 'cam', role: 'primary', startFrame: 0, durationFrames: 300 },
+      { id: 'vo', assetId: 'voice', role: 'narration', startFrame: 30, durationFrames: 120 },
+    ] }).document!;
+    return document;
+  };
+
+  it('remove_words cuts a narration-lane passage by its own transcript and ripples the spine', () => {
+    const document = narrated();
+    const cut = runAgentTimelineTool(document, 'remove_words', { assetId: 'voice', ranges: [[2, 4]] });
+    expect(cut.ok, cut.error).toBe(true);
+    const clips = cut.document!.timeline.tracks.flatMap((track) => track.clips);
+    const narration = clips.filter((clip) => 'assetId' in clip && clip.assetId === 'voice');
+    expect(narration.reduce((frames, clip) => frames + clip.durationFrames, 0)).toBe(60);
+    // The picture under the removed passage went with it: 300 → 240 frames of spine.
+    expect(clips.filter((clip) => 'assetId' in clip && clip.assetId === 'cam').reduce((frames, clip) => frames + clip.durationFrames, 0)).toBe(240);
+  });
+
+  it('set_captions corrections and translations address the bound narration source without a spine clip id', () => {
+    let document = narrated();
+    const narrationTrack = document.timeline.tracks.find((track) => track.role === 'narration')!;
+    const on = runAgentTimelineTool(document, 'set_captions', { on: true, preset: 'ln-clean', source: { trackId: narrationTrack.id } });
+    expect(on.ok, on.error).toBe(true);
+    document = on.document!;
+    const corrected = runAgentTimelineTool(document, 'set_captions', { corrections: [{ index: 0, text: '第壹句。' }] });
+    expect(corrected.ok, corrected.error).toBe(true);
+    expect(corrected.document!.semantics.transcripts.voice![0]!.captionText ?? corrected.document!.semantics.transcripts.voice![0]!.cueTexts).toBeTruthy();
+    const byClip = runAgentTimelineTool(document, 'set_captions', { clipId: 'vo', corrections: [{ index: 1, text: '第贰句。' }] });
+    expect(byClip.ok, byClip.error).toBe(true);
+    const translated = runAgentTimelineTool(document, 'set_captions', { translations: { lang: 'English', items: [{ index: 0, text: 'First.' }] } });
+    expect(translated.ok, translated.error).toBe(true);
+    expect(translated.document!.semantics.transcripts.voice![0]!.sub).toBe('First.');
+    const graphic = runAgentTimelineTool(document, 'set_captions', { clipId: 'no-such-clip', corrections: [{ index: 0, text: 'x' }] });
+    expect(graphic.ok).toBe(false);
+    expect(graphic.error).toBe('unknown_id');
+  });
+});
+
+describe('add_clips duplicate', () => {
+  it('starts the copy unlinked from the original link group', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    const placed = runAgentTimelineTool(document, 'set_texts', { items: [{ text: 'Title', startFrame: 0, durationFrames: 60 }] });
+    expect(placed.ok, placed.error).toBe(true);
+    document = placed.document!;
+    const titleId = document.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.kind === 'graphic')!.id;
+    const linked = runAgentTimelineTool(document, 'manage_clip_links', { action: 'link', clipIds: [titleId] });
+    document = linked.ok ? linked.document! : (() => {
+      const tracks = document.timeline.tracks.map((track) => ({ ...track, clips: track.clips.map((clip) => (clip.id === titleId ? { ...clip, linkGroupId: 'grp-1' } : clip)) }));
+      return { ...document, timeline: { ...document.timeline, tracks } };
+    })();
+    const copy = runAgentTimelineTool(document, 'add_clips', { duplicate: [{ clipId: titleId, startFrame: 90 }] });
+    expect(copy.ok, copy.error).toBe(true);
+    const newId = (copy.data as { duplicatedClipIds: string[] }).duplicatedClipIds[0]!;
+    const clone = copy.document!.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === newId)!;
+    expect(clone.linkGroupId).toBeUndefined();
+  });
+});
+
