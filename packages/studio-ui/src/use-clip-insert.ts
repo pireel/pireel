@@ -2,8 +2,7 @@
 
 /**
  * Clip insertion for the multi-source main track: read durations, insert an equal-standing clip at the
- * nearest shot bound (library asset / local file / image→still-clip), recover dead blob sources on draft
- * restore, reconnect by re-picking, plus per-source filmstrips for inserted clips. Extracted from
+ * nearest shot bound (library asset / local file / image→still-clip), reconnect by re-picking, plus per-source filmstrips for inserted clips. Extracted from
  * hyperframes-workbench.tsx — bodies verbatim.
  */
 
@@ -47,6 +46,39 @@ import { registerNarrativeSourceRuntime } from './clip-source-runtime';
 import type { DocumentOp } from '@pireel/studio-engine/document-transaction';
 import type { DocumentCommitter } from './document-commit';
 import type { TimelineInsertMode, TimelineMediaDropTarget, TimelineVisualDropTarget } from './timeline-asset-drop';
+
+/** Image → 5-second still-frame video (the user-defined default): freeze on canvas + MediaBunny avc mp4, no audio track
+ *  = silent clip. Uses a video shape rather than adding an image branch to shots — trim/split/framing/captions/export
+ *  all work automatically with zero changes. 30fps of identical frames, near-zero encode cost; dimensions clamped ≤1920 and made even (avc requirement). */
+const STILL_CLIP_SEC = 5;
+export const stillClipFromImage = async (blob: Blob, label?: string): Promise<File | null> => {
+  try {
+    const bmp = await createImageBitmap(blob);
+    const scale = Math.min(1, 1920 / Math.max(bmp.width, bmp.height));
+    const w = Math.max(2, Math.round((bmp.width * scale) / 2) * 2);
+    const h = Math.max(2, Math.round((bmp.height * scale) / 2) * 2);
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    canvas.getContext('2d')!.drawImage(bmp, 0, 0, w, h);
+    bmp.close();
+    const { BufferTarget, CanvasSource, Mp4OutputFormat, Output } = await import('mediabunny');
+    const output = new Output({ format: new Mp4OutputFormat(), target: new BufferTarget() });
+    const source = new CanvasSource(canvas, { codec: 'avc', bitrate: 2_000_000 });
+    output.addVideoTrack(source, { frameRate: 30 });
+    await output.start();
+    for (let i = 0; i < STILL_CLIP_SEC * 30; i++) await source.add(i / 30, 1 / 30);
+    await output.finalize();
+    const buf = (output.target as { buffer: ArrayBuffer | null }).buffer;
+    if (!buf) return null;
+    // Filename carries size + label: fileSig=name:size:0, and a plain 'still.mp4' collides on sig whenever size collides (cloud backup / OPFS cross-contamination)
+    const name = `still-${w}x${h}-${(label || 'image').replace(/[^\w一-龥-]/g, '').slice(0, 24) || 'image'}.mp4`;
+    return new File([buf], name, { type: 'video/mp4', lastModified: 0 });
+  } catch (e) {
+    console.warn('[studio] still clip encode failed', e);
+    return null;
+  }
+};
 
 interface InsertClipCoreOptions {
   placement?: 'nearest' | 'exact';
@@ -293,83 +325,6 @@ export function useClipInsert(deps: ClipInsertDeps) {
       }
     } catch {
       /* auto-complete failure is silent: the captions panel / agent can fill manually */
-    }
-  };
-  /** Draft restore: a local clip's src is a dead blob — fetch the File from OPFS by srcSig and rebuild the blob src.
-   *  The two split halves of the same src share one fetch; unrecoverable ones stay as-is (card shows a base color, preview a black segment, no worse than before). */
-  const recoverLocalClips = async (shots: VideoShot[]) => {
-    const remap = new Map<string, string>(); // old src → new blob src
-    const clipById = new Map(documentRef.current.timeline.tracks.flatMap((track) => track.clips.map((clip) => [clip.id, clip] as const)));
-    for (const s of shots) {
-      if (!s.src || !s.srcSig || remap.has(s.src) || clipFilesRef.current.has(s.src)) continue;
-      let f = await loadLocalVideo(s.srcSig);
-      const clip = clipById.get(s.id);
-      const cloudKey = clip && 'assetId' in clip && clip.assetId
-        ? documentRef.current.assets[clip.assetId]?.locator.cloudKey
-        : undefined;
-      if (!f && (cloudMediaRef.current.clips?.[s.srcSig] || cloudKey)) {
-        const cf = await studioProviders().vault.fetch(s.srcSig); // cloud byte rendezvous fallback
-        if (cf) f = alignFileToSig(cf, s.srcSig); // vault files carry their own name/mtime — realign or the identity drifts
-      }
-      if (!f) continue;
-      void saveLocalVideo(f, s.srcSig); // cloud-fetched files land back in the local library, instant next time
-      if (f.type.startsWith('image/') || /\.(jpe?g|png|webp|gif|avif|bmp)$/i.test(f.name)) {
-        // Image-identity source (5s still clip): the stored bytes are the IMAGE — re-derive the clip
-        const still = await stillClipFromImage(f);
-        if (!still) continue;
-        f = still;
-      }
-      const url = createClipObjectUrl(f);
-      if (!url) continue;
-      clipFilesRef.current.set(url, f);
-      remap.set(s.src, url);
-    }
-    if (remap.size) {
-      for (const shot of shots) {
-        const url = shot.src ? remap.get(shot.src) : undefined;
-        const clip = clipById.get(shot.id);
-        if (url && clip?.kind === 'narrative') rememberAssetUrl(clip.assetId, url);
-      }
-      republishDocument();
-    }
-    // Unrecovered dead links (blob src with no File): say so plainly and point to reconnection — previously a silent black
-    // segment, whereas the main video has a "re-import" prompt in the same case; equal-standing clips deserve their own repair path
-    const dead = new Set(
-      shots.map((s) => s.src).filter((src): src is string => !!src && src.startsWith('blob:') && !remap.has(src) && !clipFilesRef.current.has(src)),
-    );
-    if (dead.size) toast.error(t('workbench.insertSourcesMissing', { n: dead.size }));
-  };
-
-  /** Image → 5-second still-frame video (the user-defined default): freeze on canvas + MediaBunny avc mp4, no audio track
-   *  = silent clip. Uses a video shape rather than adding an image branch to shots — trim/split/framing/captions/export
-   *  all work automatically with zero changes. 30fps of identical frames, near-zero encode cost; dimensions clamped ≤1920 and made even (avc requirement). */
-  const STILL_CLIP_SEC = 5;
-  const stillClipFromImage = async (blob: Blob, label?: string): Promise<File | null> => {
-    try {
-      const bmp = await createImageBitmap(blob);
-      const scale = Math.min(1, 1920 / Math.max(bmp.width, bmp.height));
-      const w = Math.max(2, Math.round((bmp.width * scale) / 2) * 2);
-      const h = Math.max(2, Math.round((bmp.height * scale) / 2) * 2);
-      const canvas = document.createElement('canvas');
-      canvas.width = w;
-      canvas.height = h;
-      canvas.getContext('2d')!.drawImage(bmp, 0, 0, w, h);
-      bmp.close();
-      const { BufferTarget, CanvasSource, Mp4OutputFormat, Output } = await import('mediabunny');
-      const output = new Output({ format: new Mp4OutputFormat(), target: new BufferTarget() });
-      const source = new CanvasSource(canvas, { codec: 'avc', bitrate: 2_000_000 });
-      output.addVideoTrack(source, { frameRate: 30 });
-      await output.start();
-      for (let i = 0; i < STILL_CLIP_SEC * 30; i++) await source.add(i / 30, 1 / 30);
-      await output.finalize();
-      const buf = (output.target as { buffer: ArrayBuffer | null }).buffer;
-      if (!buf) return null;
-      // Filename carries size + label: fileSig=name:size:0, and a plain 'still.mp4' collides on sig whenever size collides (cloud backup / OPFS cross-contamination)
-      const name = `still-${w}x${h}-${(label || 'image').replace(/[^\w一-龥-]/g, '').slice(0, 24) || 'image'}.mp4`;
-      return new File([buf], name, { type: 'video/mp4', lastModified: 0 });
-    } catch (e) {
-      console.warn('[studio] still clip encode failed', e);
-      return null;
     }
   };
   /** Reconnect every shot that references one indexed local asset. Images are identities of record:
@@ -708,5 +663,5 @@ export function useClipInsert(deps: ClipInsertDeps) {
       setClipPending(null);
     }
   };
-  return { videoDurationOf, insertClipCore, recoverLocalClips, reconnectIndexedSource, insertLibraryClipAt, clipPending, clipStrips, resetRuntime };
+  return { videoDurationOf, insertClipCore, reconnectIndexedSource, insertLibraryClipAt, clipPending, clipStrips, resetRuntime };
 }

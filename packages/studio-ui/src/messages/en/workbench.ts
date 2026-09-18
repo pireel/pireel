@@ -221,7 +221,8 @@ export const WORKBENCH_EN: Record<string, string> = {
     "Local file unavailable — it may have moved or the cache was cleared; re-import it",
   "workbench.localPersistenceUnavailable":
     "This media works in the current session, but local recovery storage is unavailable. You may need to select it again after reloading.",
-  "workbench.srcMissing": "Source missing",
+  "workbench.srcMissing": "Media unavailable",
+  "workbench.srcLoading": "Loading media",
   "workbench.canvasRatio": "Canvas ratio",
   "workbench.localVideoUseTrack":
     "Drop local videos on the timeline — stage picture-in-picture does not support local video files yet",

@@ -28,7 +28,7 @@ export function useProjectOutputRuntime(deps: {
   setVideoFile: (file: File | null) => void;
   pickVideoFile: (file: File, opts?: VideoPickOptions) => Promise<void>;
   fetchCloudMedia?: (sig: string, cloudKey?: string) => Promise<File | null>;
-  recoverLocalClips: (shots: NonNullable<Composition['shots']>) => Promise<void> | void;
+  prepareAssets: (document: EditorDocumentV2) => Promise<void>;
   resetEditor: () => void;
 }) {
   const [switching, setSwitching] = useState(false);
@@ -39,8 +39,6 @@ export function useProjectOutputRuntime(deps: {
       if (switchingRef.current || id === deps.getActiveId()) return false;
       switchingRef.current = true;
       setSwitching(true);
-      const previousSig = deps.videoSigRef.current;
-      const previousFile = deps.videoFileRef.current;
       try {
         const target = deps.switchTo(id);
         if (!target) return false;
@@ -61,11 +59,10 @@ export function useProjectOutputRuntime(deps: {
         };
         deps.pendingRestoreRef.current = draft;
 
-        const shots = composition.shots ?? [];
         deps.pendingRestoreRef.current = null;
         deps.videoSigRef.current = null;
         deps.setVideoFile(null);
-        await deps.recoverLocalClips(shots);
+        await deps.prepareAssets(target.document);
         return true;
       } finally {
         switchingRef.current = false;

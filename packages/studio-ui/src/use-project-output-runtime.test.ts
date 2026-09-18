@@ -60,7 +60,7 @@ describe('project output runtime', () => {
       pendingRestoreRef: { current: null },
       setVideoFile: vi.fn(),
       pickVideoFile: vi.fn(),
-      recoverLocalClips: vi.fn(),
+      prepareAssets: vi.fn(),
       resetEditor: vi.fn(),
     } as Parameters<typeof useProjectOutputRuntime>[0];
 
@@ -85,5 +85,6 @@ describe('project output runtime', () => {
     expect(switched).toBe(true);
     expect(switchTo).toHaveBeenCalledWith('output-main');
     expect(liveActiveId).toBe('output-main');
+    expect(deps.prepareAssets).toHaveBeenCalledWith(editorDocument);
   });
 });

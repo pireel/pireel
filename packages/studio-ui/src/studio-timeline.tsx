@@ -243,6 +243,7 @@ interface StudioTimelineProps {
   mainLive?: boolean;
   /** Per-asset missing-source UI: are this clip source's bytes reachable? Default live. */
   srcLive?: (src: string) => boolean;
+  loadingSourceClipIds?: ReadonlySet<string>;
   /** Shot boundary transition hotspot: click to pick a transition effect in the shared popover (cutSec = that boundary's edited-time). */
   onOpenTransition?: (cutSec: number, anchor: DOMRect) => void;
   /** Transition handles drag on both sides (symmetric): commit the new total duration (sec, <=4). */
@@ -260,11 +261,11 @@ export const StudioTimeline = memo(StudioTimelineImpl);
  *  statement about a track, and per-item silencing is already the level slider's bottom stop. */
 /** Missing-source strip: the shot stays editable (cut/trim/delete all cloud-backed), only its frames
  *  can't render on this device — hatched fill + label instead of a blank/misleading filmstrip. */
-function MissingStrip() {
+function MissingStrip({ loading = false }: { loading?: boolean }) {
   return (
     <div className="bg-panel-2 absolute inset-0 flex items-center justify-center gap-1 bg-[repeating-linear-gradient(45deg,rgba(148,163,184,0.14)_0_5px,transparent_5px_10px)]">
-      <VideoOff size={11} className="text-ink-4 shrink-0" />
-      <span className="text-ink-4 truncate text-[9px]">{t('workbench.srcMissing')}</span>
+      {loading ? <Loader2 size={11} className="text-ink-4 shrink-0 animate-spin" /> : <VideoOff size={11} className="text-ink-4 shrink-0" />}
+      <span className="text-ink-4 truncate text-[9px]">{t(loading ? 'workbench.srcLoading' : 'workbench.srcMissing')}</span>
     </div>
   );
 }
@@ -379,6 +380,7 @@ function StudioTimelineImpl({
   onFilmstripDemandChange,
   mainLive = true,
   srcLive,
+  loadingSourceClipIds,
 }: StudioTimelineProps) {
   // Lane geometry for the chosen density. Named like the module constants they replaced so every
   // measurement below reads the same; the values change together when the user toggles density.
@@ -2111,7 +2113,7 @@ function StudioTimelineImpl({
                           {shot.src ? (
                             <div className="pointer-events-none absolute inset-0">
                               {(() => {
-                                if (srcLive && !srcLive(shot.src)) return <MissingStrip />;
+                                if (srcLive && !srcLive(shot.src)) return <MissingStrip loading={loadingSourceClipIds?.has(shot.id)} />;
                                 const strip = (shot.src ? clipStrips?.[shot.src] : null) ?? [];
                                 if (!strip.length) return <div className="absolute inset-0 bg-gradient-to-r from-sky-500/35 to-sky-500/15" />;
                                 if (end < visibleRange.startSec || start > visibleRange.endSec) return null;
@@ -2609,7 +2611,7 @@ function StudioTimelineImpl({
                     )}
                     {clip.kind === 'video' && (
                       <div className="pointer-events-none absolute inset-0">
-                        {!liveSource ? <MissingStrip /> : visualStrip.length > 0 ? visibleStripTiles(
+                        {!liveSource ? <MissingStrip loading={loadingSourceClipIds?.has(clip.clipId)} /> : visualStrip.length > 0 ? visibleStripTiles(
                           visualStrip,
                           clip.sourceInSec,
                           clip.sourceOutSec,

@@ -207,6 +207,7 @@ import {
   saveLocalVideo,
 } from "./local-media";
 import { assetUploadQueue } from "./asset-upload-queue";
+import { LocalAssetRuntime } from "./local-asset-runtime";
 import { materializeRemoteMedia } from "./remote-media";
 import {
   shouldReconnectNarrativeSource,
@@ -390,7 +391,7 @@ import { SlipTwoUpOverlay } from "./slip-two-up-overlay";
 // purpose — available as soon as any workbench chunk loads, no component lifecycle involved.
 registerStudioDevCacheTools();
 import { useCaptionsOps } from "./use-captions-ops";
-import { useClipInsert } from "./use-clip-insert";
+import { stillClipFromImage, useClipInsert } from "./use-clip-insert";
 import { useElementOps } from "./use-element-ops";
 import { isBlockContentSyncable } from "./component-content-sync";
 import { useBoxDrag } from "./use-box-drag";
@@ -1746,156 +1747,80 @@ export function HyperframesWorkbench({
     },
     [projectId],
   );
-  const localRuntimePreparingRef = useRef<Map<string, Promise<
-    | { ok: true; prepared: boolean; file?: File }
-    | { ok: false; error: string }
-  >>>(new Map());
-  const localRuntimeReadyAssetIdsRef = useRef<Set<string>>(new Set());
-  const localRuntimeFilesRef = useRef<Map<string, File>>(new Map());
-  const localRuntimeGenerationRef = useRef(0);
-  useEffect(() => {
-    localRuntimeGenerationRef.current += 1;
-    localRuntimePreparingRef.current.clear();
-    localRuntimeReadyAssetIdsRef.current.clear();
-    localRuntimeFilesRef.current.clear();
-  }, [projectId]);
-  /** One device-local runtime contract for every media kind. The durable document keeps the
-   * logical asset id plus content sig; this boundary restores/pins device bindings and attaches
-   * session-only URLs without uploading anything. */
-  const prepareLocalAssetRuntime = useCallback(
-    (asset: EditorMediaAsset, options?: { asPrimary?: boolean }): Promise<
-      | { ok: true; prepared: boolean; file?: File }
-      | { ok: false; error: string }
-    > => {
-      const sig = asset.locator.localSig;
-      if (!sig) return Promise.resolve({ ok: true, prepared: false });
-      if (localRuntimeReadyAssetIdsRef.current.has(asset.id)) {
-        return Promise.resolve({
-          ok: true,
-          prepared: false,
-          ...(localRuntimeFilesRef.current.get(asset.id)
-            ? { file: localRuntimeFilesRef.current.get(asset.id) }
-            : {}),
-        });
+  const [localRuntimeRev, setLocalRuntimeRev] = useState(0);
+  const localAssetRuntime = useMemo(() => new LocalAssetRuntime({
+    load: async (asset) => {
+      const sig = asset.locator.localSig!;
+      const byLogicalId = resolveLocalAssetReference(asset.id, localAssetIndexRef.current);
+      const sameContent = localAssetIndexRef.current.filter(
+        (item) => item.contentSig === sig && (item.kind ?? "video") === asset.kind,
+      );
+      const entry = byLogicalId && (byLogicalId.kind ?? "video") === asset.kind
+        ? byLogicalId : sameContent.length === 1 ? sameContent[0] : undefined;
+      const file = await resolveAssetBytes({
+        ...entry,
+        assetId: asset.id,
+        contentSig: sig,
+        cloudKey: asset.locator.cloudKey ?? entry?.cloudKey,
+        label: asset.label ?? entry?.label ?? sig,
+      }, { projectId });
+      if (file) void saveLocalVideo(file, sig).catch(() => {});
+      if (file && asset.kind === "video" && (file.type.startsWith("image/") || /\.(jpe?g|png|webp|gif|avif|bmp)$/i.test(file.name))) {
+        return stillClipFromImage(file, file.name);
       }
-      const current = localRuntimePreparingRef.current.get(asset.id);
-      if (current) return current;
-      const generation = localRuntimeGenerationRef.current;
-      const task = (async () => {
-        const byLogicalId = resolveLocalAssetReference(asset.id, localAssetIndexRef.current);
-        const sameContent = localAssetIndexRef.current.filter(
-          (item) => item.contentSig === sig && (item.kind ?? "video") === asset.kind,
-        );
-        const entry = byLogicalId && (byLogicalId.kind ?? "video") === asset.kind
-          ? byLogicalId
-          : sameContent.length === 1
-            ? sameContent[0]
-            : undefined;
-        const local = entry ? await resolveAssetBytes(entry, { projectId }) : await loadLocalVideo(sig);
-        const cloud = !local && asset.locator.cloudKey
-          ? await studioProviders().vault.fetch(sig, { cloudKey: asset.locator.cloudKey, label: asset.label })
-          : null;
-        const file = local ?? cloud ?? null;
-        if (generation !== localRuntimeGenerationRef.current) {
-          return { ok: false as const, error: 'media preparation was superseded by an output change' };
-        }
-        if (!file) {
-          const source = resolveAssetUrl(asset);
-          if (source && !source.startsWith("blob:")) {
-            localRuntimeReadyAssetIdsRef.current.add(asset.id);
-            return { ok: true as const, prepared: false };
-          }
-          return {
-            ok: false as const,
-            error: `local ${asset.kind} access is unavailable — restore access to “${asset.label || sig}”, then retry`,
-          };
-        }
-        // Device caching improves refresh recovery; a full cache must not block this session.
-        try {
-          await saveLocalVideo(file, sig);
-        } catch {
-          // The File remains usable for this session even when the local cache is full.
-        }
-        // The Materials panel may have already rendered a restore card before this tool-driven
-        // recovery completed. Publish a new registry identity so its byte-resolution effect retries
-        // immediately instead of waiting for a remount or project refresh.
+      return file;
+    },
+    remoteIsLive: (asset) => {
+      const source = resolveAssetUrl(asset);
+      return Boolean(source && !source.startsWith("blob:"));
+    },
+    install: (asset, file) => {
+      if (asset.kind === "image") return;
+      const url = URL.createObjectURL(file);
+      clipFilesRef.current.set(url, file);
+      rememberAssetUrl(asset.id, url);
+    },
+    changed: (_assetId, status) => {
+      if (status === 'ready') {
+        // Publish this source immediately, before waiting for any other download.
+        committer.republish();
         localAssetIndexRef.current = [...localAssetIndexRef.current];
         setLocalAssetIndexRev((value) => value + 1);
-        localRuntimeFilesRef.current.set(asset.id, file);
-        if (asset.kind === "image") {
-          localRuntimeReadyAssetIdsRef.current.add(asset.id);
-          return { ok: true as const, prepared: true, file };
-        }
-        const url = URL.createObjectURL(file);
-        clipFilesRef.current.set(url, file);
-        rememberAssetUrl(asset.id, url);
-        localRuntimeReadyAssetIdsRef.current.add(asset.id);
-        return { ok: true as const, prepared: true, file };
-      })().finally(() => {
-        localRuntimePreparingRef.current.delete(asset.id);
-      });
-      localRuntimePreparingRef.current.set(asset.id, task);
-      return task;
+      }
+      setLocalRuntimeRev((value) => value + 1);
     },
-    [projectId, rememberAssetUrl, resolveAssetUrl],
+  }), [projectId, rememberAssetUrl, resolveAssetUrl, committer]);
+  const localRuntimeReadyAssetIdsRef = useRef(localAssetRuntime.ready);
+  localRuntimeReadyAssetIdsRef.current = localAssetRuntime.ready;
+  const localRuntimeFilesRef = useRef(localAssetRuntime.files);
+  localRuntimeFilesRef.current = localAssetRuntime.files;
+  useEffect(() => () => localAssetRuntime.reset(), [localAssetRuntime]);
+  const prepareLocalAssetRuntime = useCallback(
+    (asset: EditorMediaAsset, _options?: { asPrimary?: boolean }) => localAssetRuntime.prepare(asset),
+    [localAssetRuntime],
   );
-  // Heal metadata-only clips from older agent runs as soon as this device can resolve their bytes.
-  // Images already restore through postLocalImages; audio/video need a session URL before they can
-  // enter the render projection and audio engine.
-  useEffect(() => {
-    let cancelled = false;
-    const referencedAssetIds = new Set(
-      editorDocument.timeline.tracks.flatMap((track) =>
-        track.clips.flatMap((clip) =>
-          "assetId" in clip && clip.assetId ? [clip.assetId] : [],
-        ),
-      ),
+  const referencedLocalMedia = useCallback((document: EditorDocumentV2) => {
+    const ids = new Set(document.timeline.tracks.flatMap((track) => track.clips.flatMap((clip) =>
+      "assetId" in clip && clip.assetId ? [clip.assetId] : [],
+    )));
+    return [...ids].map((id) => document.assets[id]).filter((asset): asset is EditorMediaAsset =>
+      Boolean(asset?.locator.localSig) && asset.kind !== "image",
     );
-    const missing = [...referencedAssetIds]
-      .map((assetId) => editorDocument.assets[assetId])
-      .filter(
-        (asset): asset is EditorMediaAsset =>
-          !!asset?.locator.localSig &&
-          asset.kind !== "image" &&
-          !localRuntimeReadyAssetIdsRef.current.has(asset.id),
-      );
-    if (!missing.length) return () => { cancelled = true; };
-    void (async () => {
-      let prepared = false;
-      for (const asset of missing) {
-        const result = await prepareLocalAssetRuntime(asset, { asPrimary: false });
-        prepared ||= result.ok && result.prepared;
-        if (!result.ok) {
-          console.warn(
-            `[studio] local ${asset.kind} runtime restore failed for ${asset.id}: ${result.error}`,
-          );
-        }
-      }
-      if (!cancelled && prepared) committer.republish();
-    })();
-    return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editorDocument, localAssetIndexRev, prepareLocalAssetRuntime, resolveAssetUrl]);
-  /** Export-time readiness: the same restore as the effect above, awaited. An output switch clears the
-   *  runtime and the effect restores it asynchronously; an export started in between (batch export,
-   *  an agent's export right after an output switch) must not read a plan with unresolved sources. */
+  }, []);
+  useEffect(() => {
+    void localAssetRuntime.prepareAll(referencedLocalMedia(editorDocument));
+  }, [editorDocument, localAssetIndexRev, localAssetRuntime, referencedLocalMedia]);
   const prepareExportAssets = useCallback(
-    async (document: EditorDocumentV2) => {
-      const referenced = new Set(
-        document.timeline.tracks.flatMap((track) =>
-          track.clips.flatMap((clip) => ("assetId" in clip && clip.assetId ? [clip.assetId] : [])),
-        ),
-      );
-      for (const assetId of referenced) {
-        const asset = document.assets[assetId];
-        if (!asset?.locator.localSig || asset.kind === "image") continue;
-        if (localRuntimeReadyAssetIdsRef.current.has(asset.id)) continue;
-        const result = await prepareLocalAssetRuntime(asset, { asPrimary: false });
-        if (!result.ok) console.warn(`[studio] export: local ${asset.kind} source not ready for ${asset.id}: ${result.error}`);
-      }
-    },
-    [prepareLocalAssetRuntime],
+    (document: EditorDocumentV2) => localAssetRuntime.prepareAll(referencedLocalMedia(document), true),
+    [localAssetRuntime, referencedLocalMedia],
   );
+  const loadingSourceClipIds = useMemo(() => new Set(editorDocument.timeline.tracks.flatMap((track) =>
+    track.clips.flatMap((clip) => {
+      const asset = "assetId" in clip && clip.assetId ? editorDocument.assets[clip.assetId] : undefined;
+      return asset?.locator.localSig && asset.kind !== "image" && localAssetRuntime.status(asset) === 'loading'
+        ? [clip.id] : [];
+    }),
+  )), [editorDocument, localAssetRuntime, localRuntimeRev]);
   // Persistence metadata is folded into V2 synchronously without coupling the live-document module
   // to workbench feature refs. No transcripts here: this is a render-time snapshot, and the runtime
   // transcript copies follow the document one effect later (see "Runtime transcript refs follow the
@@ -5811,7 +5736,6 @@ export function HyperframesWorkbench({
     timelineDurationSec: renderPlan.durationSec,
     documentRef: editorDocumentRef,
     commit,
-    republishDocument: (runtimeComposition) => committer.republish(runtimeComposition),
     videoFile,
     videoFileRef,
     videoSigRef,
@@ -6818,7 +6742,6 @@ export function HyperframesWorkbench({
   const {
     videoDurationOf,
     insertClipCore,
-    recoverLocalClips,
     reconnectIndexedSource,
     insertLibraryClipAt,
     clipPending,
@@ -6874,14 +6797,12 @@ export function HyperframesWorkbench({
     for (const url of localImagePreviewUrlsRef.current.values()) URL.revokeObjectURL(url);
     localImagePreviewUrlsRef.current.clear();
     setLocalImagePreviewUrls(new Map());
-    localRuntimeGenerationRef.current += 1;
-    localRuntimePreparingRef.current.clear();
-    localRuntimeReadyAssetIdsRef.current.clear();
+    localAssetRuntime.reset();
     clearRuntimeAssetUrls();
     tRef.current = 0;
     playhead.set(0);
     setT(0);
-  }, [audioOps, clearRuntimeAssetUrls, resetClipRuntime, restoreChatAfterTimelineFramePick, setSelectedId, setSelectedShotId]);
+  }, [audioOps, clearRuntimeAssetUrls, localAssetRuntime, resetClipRuntime, restoreChatAfterTimelineFramePick, setSelectedId, setSelectedShotId]);
   const outputRuntime = useProjectOutputRuntime({
     projectId,
     getActiveId: () => projectOutputs.outputsRef.current.active.id,
@@ -6910,7 +6831,7 @@ export function HyperframesWorkbench({
         || Boolean(cloudMediaRef.current.clips?.[sig]);
       return vaulted || cloudKey ? studioProviders().vault.fetch(sig, cloudKey ? { cloudKey } : undefined) : null;
     },
-    recoverLocalClips,
+    prepareAssets: prepareExportAssets,
     resetEditor: resetForOutputChange,
   });
   const outputTabs = [
@@ -8070,7 +7991,6 @@ export function HyperframesWorkbench({
           // the sig anchor stays so reconnect/autosave keep working.
         });
       }
-      void recoverLocalClips(restoredComposition.shots ?? []);
       // eslint-disable-next-line react-hooks/exhaustive-deps
     },
     [hydrateNativeSession, shell],
@@ -11132,6 +11052,7 @@ export function HyperframesWorkbench({
             onFilmstripDemandChange={setTimelineFilmstripDemand}
             mainLive
             srcLive={srcLive}
+            loadingSourceClipIds={loadingSourceClipIds}
             pps={pps}
             snapEnabled={timelineSnapEnabled}
             framePickActive={timelineFramePickActive}

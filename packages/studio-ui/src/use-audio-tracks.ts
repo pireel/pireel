@@ -5,7 +5,7 @@
  *    below the narration; silently falls back to the default when measurement fails);
  *  - keep the engine's clip channel in sync with the native render projection (per-clip
  *    envelope/source-time closures from the same pure fns export uses);
- *  - draft restore: revive dead blob srcs from OPFS/cloud by sig (recoverLocalClips analog);
+ *  - derive waveform peaks from sources recovered by the shared asset runtime;
  *  - generation: POST /api/studio/music → bytes → the same mount path as upload.
  */
 
@@ -49,8 +49,6 @@ export interface AudioTracksDeps {
   timelineDurationSec?: number;
   documentRef: MutableRefObject<EditorDocumentV2>;
   commit: DocumentCommitter['commit'];
-  /** Re-project the current document with recovered session-only audio bytes. */
-  republishDocument: (runtimeComposition?: Composition) => void;
   videoFile: File | null;
   videoFileRef: MutableRefObject<File | null>;
   videoSigRef: MutableRefObject<string | null>;
@@ -65,7 +63,7 @@ export interface AudioTracksDeps {
 
 export function useAudioTracks(deps: AudioTracksDeps) {
   const {
-    projectId, comp, compRef, renderAudioTracks, visualMediaClips, timelineDurationSec, documentRef, commit, republishDocument, videoFile, videoFileRef,
+    projectId, comp, compRef, renderAudioTracks, visualMediaClips, timelineDurationSec, documentRef, commit, videoFile, videoFileRef,
     videoSigRef, videoEngineRef, clipFilesRef, tRef, pickFile, backupMediaToCloud,
   } = deps;
   const renderAudioTracksRef = useRef(renderAudioTracks);
@@ -286,7 +284,7 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [comp.audioTracks, comp.shots, videoFile, renderAudioTracks, visualMediaClips, timelineDurationSec, audioFileRev]);
 
-  // Draft restore: dead blob src + sig → OPFS, then cloud vault; remap to a fresh blob URL.
+  // Source recovery belongs to the shared runtime; this hook derives audio waveforms once ready.
   useEffect(() => {
     for (const clip of comp.audioTracks ?? []) {
       const sig = clip.sig;
@@ -295,10 +293,11 @@ export function useAudioTracks(deps: AudioTracksDeps) {
       recoverTriedRef.current.add(sig);
       const generation = runtimeGenerationRef.current;
       void (async () => {
-        let f = await loadLocalVideo(sig);
-        if (!f) f = await studioProviders().vault.fetch(sig);
-        if (!f || generation !== runtimeGenerationRef.current) return; // stays unusable → panel offers re-pick
-        void saveLocalVideo(f, sig);
+        const f = clipFilesRef.current.get(clip.src);
+        if (!f || generation !== runtimeGenerationRef.current) {
+          recoverTriedRef.current.delete(sig);
+          return;
+        }
         audioFilesRef.current.set(sig, f);
         setAudioFileRev((v) => v + 1);
         void decodeAudioFile(f)
@@ -308,13 +307,6 @@ export function useAudioTracks(deps: AudioTracksDeps) {
             }
           })
           .catch(() => {});
-        const url = createAudioObjectUrl(f);
-        if (!url) return;
-        const runtimeComposition = {
-          ...compRef.current,
-          audioTracks: (compRef.current.audioTracks ?? []).map((x) => (x.sig === sig ? { ...x, src: url } : x)),
-        };
-        republishDocument(runtimeComposition);
       })();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
