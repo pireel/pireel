@@ -452,8 +452,14 @@ function placementFor(document: EditorDocumentV2, asset: EditorMediaAsset, item:
         },
         ...(typeof item.volumeDb === 'number' ? { volumeDb: item.volumeDb } : {}),
         ...(typeof item.muted === 'boolean' ? { audioMuted: item.muted } : {}),
+        ...(typeof item.fadeInSec === 'number' ? { audioFadeInSec: item.fadeInSec } : {}),
+        ...(typeof item.fadeOutSec === 'number' ? { audioFadeOutSec: item.fadeOutSec } : {}),
       },
     } as NarrativeTimelineClip & { offsetFrames: number };
+  }
+  const hasFades = typeof item.fadeInSec === 'number' || typeof item.fadeOutSec === 'number';
+  if (hasFades && asset.kind !== 'video') {
+    return fail(`fades are audio fades; ${asset.id} is an image and has no sound. Animate an image's entrance with set_keyframes opacity.`);
   }
   return {
     ...common,
@@ -468,9 +474,18 @@ function placementFor(document: EditorDocumentV2, asset: EditorMediaAsset, item:
     ...(opacity != null ? { opacity } : {}),
     // Overlay media keeps its audio settings under `video` (the shot-scoped controls). B-roll footage
     // is a cutaway under the narration: its own sound is off unless the caller asks for it (mute:false).
-    ...(typeof item.muted === 'boolean'
-      ? { video: { treatment: 'full', audioMuted: item.muted } }
-      : asset.kind === 'video' ? { video: { treatment: 'full', audioMuted: true } } : {}),
+    // Fades ride along here: a value the caller wrote and the receipt did not show was the worst kind
+    // of failure, a silent one.
+    ...(asset.kind === 'video' || typeof item.muted === 'boolean'
+      ? {
+          video: {
+            treatment: 'full',
+            audioMuted: typeof item.muted === 'boolean' ? item.muted : true,
+            ...(typeof item.fadeInSec === 'number' ? { audioFadeInSec: item.fadeInSec } : {}),
+            ...(typeof item.fadeOutSec === 'number' ? { audioFadeOutSec: item.fadeOutSec } : {}),
+          },
+        }
+      : {}),
   } as MediaTimelineClip & { offsetFrames: number };
 }
 

@@ -45,7 +45,7 @@ export const CLIP_PROPERTIES: readonly ClipPropertySpec[] = [
     elsewhere: { graphic: 'a graphic clip has no sound', caption: CAPTIONS } },
   { key: 'mute', kinds: ['narrative', 'media', 'audio'], needsVideo: true, summary: 'mute',
     elsewhere: { graphic: 'a graphic clip has no sound', caption: CAPTIONS } },
-  { key: 'fades', kinds: ['narrative', 'media', 'audio'], needsVideo: true, summary: 'fades {in,out} in frames',
+  { key: 'fades', kinds: ['narrative', 'media', 'audio'], needsVideo: true, summary: 'fades {in,out}: audio fades in frames (picture: set_keyframes opacity / transitions)',
     elsewhere: { graphic: 'a graphic clip has no audio fades; its entrance and exit are part of the component (apply_component)', caption: CAPTIONS } },
   { key: 'filter', kinds: ['narrative', 'media'], needsVideo: true, summary: 'filter {brightness,contrast,saturate} grades video (1 = untouched)',
     elsewhere: { audio: 'an audio clip has no picture to grade', graphic: 'a graphic clip is not graded; change its colours through apply_component', caption: CAPTIONS } },

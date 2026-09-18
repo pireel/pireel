@@ -1137,3 +1137,51 @@ describe('set_clip_properties on the story spine', () => {
     expect(ok.ok, JSON.stringify(ok)).toBe(true);
   });
 });
+
+describe('add_clips fades', () => {
+  it('stores the audio fades of spine and B-roll video clips and reads them back in frames', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', { assets: [
+      { id: 'cam', kind: 'video', url: 'https://cdn.example/cam.mp4', durationSec: 10 },
+      { id: 'city', kind: 'video', url: 'https://cdn.example/city.mp4', durationSec: 10 },
+      { id: 'still', kind: 'image', url: 'https://cdn.example/still.png' },
+    ] }).document!;
+    const placed = runAgentTimelineTool(document, 'add_clips', { clips: [
+      { id: 'cam-clip', assetId: 'cam', role: 'primary', startFrame: 0, durationFrames: 300, fades: { in: 8, out: 8 } },
+      { id: 'city-clip', assetId: 'city', role: 'broll', startFrame: 150, durationFrames: 60, mute: true, fades: { in: 8, out: 8 } },
+    ] });
+    expect(placed.ok).toBe(true);
+    const spine = placed.document!.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 'cam-clip') as { properties: Record<string, unknown> };
+    expect(spine.properties).toMatchObject({ audioFadeInSec: 8 / 30, audioFadeOutSec: 8 / 30 });
+    const broll = placed.document!.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 'city-clip') as { video?: Record<string, unknown> };
+    expect(broll.video).toMatchObject({ audioMuted: true, audioFadeInSec: 8 / 30, audioFadeOutSec: 8 / 30 });
+    const refused = runAgentTimelineTool(placed.document!, 'add_clips', { clips: [
+      { id: 'still-clip', assetId: 'still', role: 'broll', startFrame: 0, durationFrames: 60, fades: { in: 8, out: 8 } },
+    ] });
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toContain('image');
+  });
+
+  it('keeps a frame-addressed fade at its frame count across the seconds round trip', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', { assets: [
+      { id: 'cam', kind: 'video', url: 'https://cdn.example/cam.mp4', durationSec: 10 },
+      { id: 'music', kind: 'audio', url: 'https://cdn.example/music.mp3', durationSec: 30 },
+    ] }).document!;
+    document = runAgentTimelineTool(document, 'add_clips', { clips: [
+      { id: 'cam-clip', assetId: 'cam', role: 'primary', startFrame: 0, durationFrames: 300 },
+      { id: 'bed', assetId: 'music', role: 'music', startFrame: 0, durationFrames: 300 },
+    ] }).document!;
+    document = runAgentTimelineTool(document, 'set_clip_properties', { items: [
+      { clipId: 'cam-clip', fades: { in: 8, out: 8 } },
+      { clipId: 'bed', fades: { in: 8, out: 7 } },
+    ] }).document!;
+    const clips = document.timeline.tracks.flatMap((track) => track.clips);
+    const cam = clips.find((clip) => clip.id === 'cam-clip') as unknown as { properties: Record<string, number> };
+    const bed = clips.find((clip) => clip.id === 'bed') as unknown as { properties: Record<string, number> };
+    expect(Math.round(cam.properties.audioFadeInSec! * 30)).toBe(8);
+    expect(Math.round(cam.properties.audioFadeOutSec! * 30)).toBe(8);
+    expect(Math.round(bed.properties.fadeInSec! * 30)).toBe(8);
+    expect(Math.round(bed.properties.fadeOutSec! * 30)).toBe(7);
+  });
+});

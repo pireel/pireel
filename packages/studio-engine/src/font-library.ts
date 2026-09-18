@@ -11,36 +11,38 @@
  * publishes them. Font ids are persisted as `web:<id>` in caption/display-text styles.
  */
 
-import { googleFontCssUrl, googleFontRowOf, searchGoogleFonts, type FontSearchHit, type FontSearchOptions } from './google-fonts';
+import { googleFontCssUrl, googleFontRowOf, searchGoogleFonts, type FontCategory, type FontSearchHit, type FontSearchOptions } from './google-fonts';
 
 export interface WebFont {
   id: string;
   /** CSS font-family name baked into the split CSS. */
   family: string;
   label: { zh: string; en: string };
+  /** Typeface class in the Google Fonts vocabulary, so 黑体 / 宋体 / 手写 find library faces too. */
+  category: FontCategory;
   /** Source + license, for the picker's attribution and for audits. */
   license: 'OFL' | 'free-commercial';
   source: string;
 }
 
 export const WEB_FONTS: readonly WebFont[] = [
-  { id: 'smiley-sans', family: 'Smiley Sans', label: { zh: '得意黑', en: 'Smiley Sans' }, license: 'OFL', source: 'atelier-anchor/smiley-sans' },
-  { id: 'ximaiti', family: 'Ximaiti', label: { zh: '喜脉体', en: 'Ximaiti' }, license: 'free-commercial', source: '字制区喜脉体 (公益字体)' },
-  { id: 'zcool-kuaile', family: 'ZCOOL KuaiLe', label: { zh: '站酷快乐体', en: 'ZCOOL KuaiLe' }, license: 'OFL', source: 'google/fonts ofl/zcoolkuaile' },
-  { id: 'zcool-xiaowei', family: 'ZCOOL XiaoWei', label: { zh: '站酷小薇 LOGO 体', en: 'ZCOOL XiaoWei' }, license: 'OFL', source: 'google/fonts ofl/zcoolxiaowei' },
-  { id: 'zcool-qingke-huangyou', family: 'ZCOOL QingKe HuangYou', label: { zh: '站酷庆科黄油体', en: 'ZCOOL QingKe HuangYou' }, license: 'OFL', source: 'google/fonts ofl/zcoolqingkehuangyou' },
-  { id: 'lxgw-wenkai', family: 'LXGW WenKai', label: { zh: '霞鹜文楷', en: 'LXGW WenKai' }, license: 'OFL', source: 'lxgw/LxgwWenKai' },
-  { id: 'ma-shan-zheng', family: 'Ma Shan Zheng', label: { zh: '马善政毛笔楷书', en: 'Ma Shan Zheng' }, license: 'OFL', source: 'google/fonts ofl/mashanzheng' },
-  { id: 'zhi-mang-xing', family: 'Zhi Mang Xing', label: { zh: '志莽行书', en: 'Zhi Mang Xing' }, license: 'OFL', source: 'google/fonts ofl/zhimangxing' },
-  { id: 'long-cang', family: 'Long Cang', label: { zh: '龙藏体', en: 'Long Cang' }, license: 'OFL', source: 'google/fonts ofl/longcang' },
-  { id: 'liu-jian-mao-cao', family: 'Liu Jian Mao Cao', label: { zh: '刘建毛草', en: 'Liu Jian Mao Cao' }, license: 'OFL', source: 'google/fonts ofl/liujianmaocao' },
-  { id: 'douyin-sans', family: 'Douyin Sans', label: { zh: '抖音美好体', en: 'Douyin Sans' }, license: 'OFL', source: 'bytedance/fonts DouyinSans' },
-  { id: 'qingsong-handwriting-1', family: 'Qingsong Handwriting 1', label: { zh: '清松手写体1', en: 'Qingsong Handwriting 1' }, license: 'OFL', source: 'jasonhandwriting/JasonHandwriting' },
-  { id: 'xiangcui-zero-hei', family: 'Xiangcui Zero Hei', label: { zh: '香萃零度黑', en: 'Xiangcui Zero Hei' }, license: 'OFL', source: 'Miiiller/Xiangcui-ZeroHei' },
-  { id: 'xiangcui-jixue-song', family: 'Xiangcui Jixue Song', label: { zh: '香萃积雪宋', en: 'Xiangcui Jixue Song' }, license: 'OFL', source: 'Miiiller/Xiangcui-Jixuesong' },
-  { id: 'huxiaobo-nanshen', family: 'Huxiaobo Nanshen Ti', label: { zh: '胡晓波男神体', en: 'Huxiaobo Nanshen Ti' }, license: 'free-commercial', source: '胡晓波 (作者声明永久免费商用)' },
-  { id: 'honglei-zhuoshu', family: 'Honglei Zhuoshu', label: { zh: '鸿雷拙书简体', en: 'Honglei Zhuoshu' }, license: 'free-commercial', source: '鸿雷字迹 (作者声明免费商用)' },
-  { id: 'alimama-fangyuan', family: 'Alimama FangYuan Ti', label: { zh: '阿里妈妈方圆体', en: 'Alimama FangYuan Ti' }, license: 'free-commercial', source: '阿里妈妈 © Alimama (永久免费商用, 需标注版权所有人)' },
+  { id: 'smiley-sans', family: 'Smiley Sans', label: { zh: '得意黑', en: 'Smiley Sans' }, category: 'sans', license: 'OFL', source: 'atelier-anchor/smiley-sans' },
+  { id: 'ximaiti', family: 'Ximaiti', label: { zh: '喜脉体', en: 'Ximaiti' }, category: 'display', license: 'free-commercial', source: '字制区喜脉体 (公益字体)' },
+  { id: 'zcool-kuaile', family: 'ZCOOL KuaiLe', label: { zh: '站酷快乐体', en: 'ZCOOL KuaiLe' }, category: 'display', license: 'OFL', source: 'google/fonts ofl/zcoolkuaile' },
+  { id: 'zcool-xiaowei', family: 'ZCOOL XiaoWei', label: { zh: '站酷小薇 LOGO 体', en: 'ZCOOL XiaoWei' }, category: 'serif', license: 'OFL', source: 'google/fonts ofl/zcoolxiaowei' },
+  { id: 'zcool-qingke-huangyou', family: 'ZCOOL QingKe HuangYou', label: { zh: '站酷庆科黄油体', en: 'ZCOOL QingKe HuangYou' }, category: 'display', license: 'OFL', source: 'google/fonts ofl/zcoolqingkehuangyou' },
+  { id: 'lxgw-wenkai', family: 'LXGW WenKai', label: { zh: '霞鹜文楷', en: 'LXGW WenKai' }, category: 'handwriting', license: 'OFL', source: 'lxgw/LxgwWenKai' },
+  { id: 'ma-shan-zheng', family: 'Ma Shan Zheng', label: { zh: '马善政毛笔楷书', en: 'Ma Shan Zheng' }, category: 'handwriting', license: 'OFL', source: 'google/fonts ofl/mashanzheng' },
+  { id: 'zhi-mang-xing', family: 'Zhi Mang Xing', label: { zh: '志莽行书', en: 'Zhi Mang Xing' }, category: 'handwriting', license: 'OFL', source: 'google/fonts ofl/zhimangxing' },
+  { id: 'long-cang', family: 'Long Cang', label: { zh: '龙藏体', en: 'Long Cang' }, category: 'handwriting', license: 'OFL', source: 'google/fonts ofl/longcang' },
+  { id: 'liu-jian-mao-cao', family: 'Liu Jian Mao Cao', label: { zh: '刘建毛草', en: 'Liu Jian Mao Cao' }, category: 'handwriting', license: 'OFL', source: 'google/fonts ofl/liujianmaocao' },
+  { id: 'douyin-sans', family: 'Douyin Sans', label: { zh: '抖音美好体', en: 'Douyin Sans' }, category: 'sans', license: 'OFL', source: 'bytedance/fonts DouyinSans' },
+  { id: 'qingsong-handwriting-1', family: 'Qingsong Handwriting 1', label: { zh: '清松手写体1', en: 'Qingsong Handwriting 1' }, category: 'handwriting', license: 'OFL', source: 'jasonhandwriting/JasonHandwriting' },
+  { id: 'xiangcui-zero-hei', family: 'Xiangcui Zero Hei', label: { zh: '香萃零度黑', en: 'Xiangcui Zero Hei' }, category: 'sans', license: 'OFL', source: 'Miiiller/Xiangcui-ZeroHei' },
+  { id: 'xiangcui-jixue-song', family: 'Xiangcui Jixue Song', label: { zh: '香萃积雪宋', en: 'Xiangcui Jixue Song' }, category: 'serif', license: 'OFL', source: 'Miiiller/Xiangcui-Jixuesong' },
+  { id: 'huxiaobo-nanshen', family: 'Huxiaobo Nanshen Ti', label: { zh: '胡晓波男神体', en: 'Huxiaobo Nanshen Ti' }, category: 'sans', license: 'free-commercial', source: '胡晓波 (作者声明永久免费商用)' },
+  { id: 'honglei-zhuoshu', family: 'Honglei Zhuoshu', label: { zh: '鸿雷拙书简体', en: 'Honglei Zhuoshu' }, category: 'handwriting', license: 'free-commercial', source: '鸿雷字迹 (作者声明免费商用)' },
+  { id: 'alimama-fangyuan', family: 'Alimama FangYuan Ti', label: { zh: '阿里妈妈方圆体', en: 'Alimama FangYuan Ti' }, category: 'sans', license: 'free-commercial', source: '阿里妈妈 © Alimama (永久免费商用, 需标注版权所有人)' },
 ];
 
 /** The CJK face paired behind a Latin-only local font, so Han glyphs stop falling back to the system body face. */
@@ -123,19 +125,37 @@ export function fontStylesheetUrlFor(value: unknown): string | null {
 /** Combined font search: library faces first (matched on id, family, zh/en label), then the Google
  *  snapshot ranked by popularity. `script` narrows to faces that carry that writing system; every
  *  library face is CJK. */
+/** A query that names a class of typeface rather than a face: "黑体" is not in any family name, it is
+ * every sans face. Matched whole, so "得意黑" still searches by name. */
+const CATEGORY_WORDS: readonly [RegExp, FontCategory][] = [
+  [/^(黑体?|无衬线|sans(?:[- ]serif)?)$/i, 'sans'],
+  [/^(宋体?|明体|衬线|serif)$/i, 'serif'],
+  [/^(楷体?|手写体?|书法|毛笔|行书|草书|handwriting|script)$/i, 'handwriting'],
+  [/^(等宽|mono(?:space)?)$/i, 'mono'],
+  [/^(美术体?|标题体?|花字|display)$/i, 'display'],
+];
+
 export function searchFonts(query: string, options: FontSearchOptions = {}): FontSearchHit[] {
-  const needle = query.trim().toLowerCase();
+  let needle = query.trim().toLowerCase();
+  let category = options.category;
+  if (!category) {
+    const byClass = CATEGORY_WORDS.find(([pattern]) => pattern.test(needle));
+    if (byClass) {
+      category = byClass[1];
+      needle = '';
+    }
+  }
   const limit = Math.min(Math.max(options.limit ?? 12, 1), 40);
   const library: FontSearchHit[] = [];
   if (!options.script || options.script === 'zh-Hans' || options.script === 'zh-Hant' || options.script === 'latin') {
     for (const font of WEB_FONTS) {
+      if (category && font.category !== category) continue;
       const hay = [font.id, font.family, font.label.zh, font.label.en].join(' ').toLowerCase();
       if (needle && !hay.includes(needle)) continue;
-      library.push({ id: webFontFontId(font), family: font.family, label: font.label.zh, source: 'library', scripts: ['latin', 'zh-Hans'] });
+      library.push({ id: webFontFontId(font), family: font.family, label: font.label.zh, source: 'library', category: font.category, scripts: ['latin', 'zh-Hans'] });
     }
   }
-  if (options.category) library.length = 0; // categories are a Google notion; library faces are display faces
-  return [...library, ...searchGoogleFonts(query, { ...options, limit })].slice(0, limit);
+  return [...library, ...searchGoogleFonts(needle, { ...options, ...(category ? { category } : {}), limit })].slice(0, limit);
 }
 
 /** `web:<anything the user calls it>` → `web:<id>`: the id, the CSS family, or a zh/en label

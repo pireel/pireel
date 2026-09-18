@@ -520,7 +520,9 @@ export function patchShotAudio<T extends VideoShot>(s: T, patch: { volumeDb?: nu
   const { volumeDb: _v, audioMuted: _m, audioFadeInSec: _fi, audioFadeOutSec: _fo, ...rest } = s;
   const db = patch.volumeDb != null ? Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, patch.volumeDb)) : s.volumeDb;
   const muted = patch.mute != null ? patch.mute : s.audioMuted;
-  const fade = (v: number | undefined) => (v == null ? undefined : Math.round(Math.max(0, Math.min(SHOT_FADE_MAX_SEC, v)) * 10) / 10);
+  // Millisecond precision: the agent surface addresses fades in frames (8 frames at 30fps =
+  // 0.2667s) and reads them back by rounding to frames; a tenth-of-a-second grid turned 8 into 9.
+  const fade = (v: number | undefined) => (v == null ? undefined : Math.round(Math.max(0, Math.min(SHOT_FADE_MAX_SEC, v)) * 1000) / 1000);
   const fi = patch.fadeInSec != null ? fade(patch.fadeInSec) : s.audioFadeInSec;
   const fo = patch.fadeOutSec != null ? fade(patch.fadeOutSec) : s.audioFadeOutSec;
   return {

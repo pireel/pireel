@@ -282,6 +282,16 @@ function selectedSpeechClips(document: EditorDocumentV2, selection: CaptionSourc
   return clip ? transcriptBearingClips(document, [clip]) : [];
 }
 
+/** The selected speech clips the audience actually hears: a muted track or a clip-muted take is
+ * outside the mix, and a component timed to words nobody hears is timed to nothing. Caption
+ * selection itself is not filtered here: captioning a muted take is the user's explicit choice. */
+function audibleSpeechClips(document: EditorDocumentV2, selection: CaptionSourceSelection): SpeechTimelineClip[] {
+  const mutedTracks = new Set(document.timeline.tracks.filter((track) => track.muted).map((track) => track.id));
+  const trackOfClip = new Map(document.timeline.tracks.flatMap((track) => track.clips.map((clip) => [clip.id, track.id] as const)));
+  return selectedSpeechClips(document, selection)
+    .filter((clip) => !clipAudioMuted(clip) && !mutedTracks.has(trackOfClip.get(clip.id) ?? ''));
+}
+
 /** Source seconds mapped through native clip placement, including explicit gaps and retiming. */
 function sourceRange(clip: SpeechTimelineClip, fps: number): { start: number; end: number } {
   const speed = clip.kind === 'audio' && Number.isFinite(clip.properties.speed) && clip.properties.speed! > 0
@@ -321,7 +331,7 @@ export function spokenTimelineBeats(
   const windowStart = Math.max(0, startSec);
   const windowEnd = windowStart + durationSec;
   const selection = document.semantics.managedCaptionSource ?? { mode: 'auto' as const };
-  const beats = selectedSpeechClips(document, selection).flatMap((clip) => {
+  const beats = audibleSpeechClips(document, selection).flatMap((clip) => {
     const range = sourceRange(clip, document.canvas.fps);
     return (document.semantics.transcripts[clip.assetId] ?? []).flatMap((segment) => {
       const text = segment.text?.trim();
@@ -365,7 +375,7 @@ export function spokenSourceAtTimelineSecond(
   const fps = document.canvas.fps;
   const selection = document.semantics.managedCaptionSource ?? { mode: 'auto' as const };
   let best: { clip: SpeechTimelineClip; sourceSec: number; distanceSec: number } | null = null;
-  for (const clip of selectedSpeechClips(document, selection)) {
+  for (const clip of audibleSpeechClips(document, selection)) {
     if (!(document.semantics.transcripts[clip.assetId]?.length)) continue;
     const startSec = timelineFramesToSeconds(clip.startFrame, fps);
     const endSec = timelineFramesToSeconds(clip.startFrame + clip.durationFrames, fps);

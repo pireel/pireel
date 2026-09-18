@@ -429,3 +429,24 @@ describe('managed relay word ownership', () => {
     expect(text).toContain('纸');
   });
 });
+
+describe('spoken beats hear only the mix', () => {
+  it('ignores a clip-muted B-roll take and a muted track even when they carry a transcript', () => {
+    const document = emptyEditorDocumentV2({ fps: 30 });
+    document.assets.city = { id: 'city', kind: 'video', locator: { localSig: 'city-sig' }, metadata: { durationSec: 8, hasAudio: true } };
+    document.semantics.transcripts.city = [{ start: 0, end: 2, text: '线条在奔跑' }];
+    document.timeline.tracks.push({
+      id: 'broll-track', type: 'visual', role: 'broll', muted: false, hidden: false, locked: false, syncLocked: false, stackOrder: 2,
+      clips: [{
+        id: 'city-clip', kind: 'media', assetId: 'city', startFrame: 0, durationFrames: 60, offsetFrames: 0, enabled: true,
+        sourceInSec: 0, sourceOutSec: 2, fit: 'cover', video: { treatment: 'full', audioMuted: true },
+      } as never],
+    });
+    expect(spokenTimelineBeats(document, 0, 2)).toEqual([]);
+    // Unmuting the take makes its words audible, and therefore beats.
+    (document.timeline.tracks[document.timeline.tracks.length - 1]!.clips[0] as { video: { audioMuted: boolean } }).video.audioMuted = false;
+    expect(spokenTimelineBeats(document, 0, 2)).toEqual([{ text: '线条在奔跑', start: 0, end: 2 }]);
+    document.timeline.tracks[document.timeline.tracks.length - 1]!.muted = true;
+    expect(spokenTimelineBeats(document, 0, 2)).toEqual([]);
+  });
+});

@@ -47,6 +47,17 @@ describe('google fonts source', () => {
     expect(searchFonts('zzzz-no-font')).toEqual([]);
   });
 
+  it('reads a typeface class word as a category, so 黑体 finds the sans library faces', () => {
+    const hei = searchFonts('黑体', { script: 'zh-Hans' });
+    expect(hei.map((h) => h.id)).toEqual(expect.arrayContaining(['web:smiley-sans', 'web:xiangcui-zero-hei', 'web:douyin-sans']));
+    expect(hei.every((h) => h.category === 'sans')).toBe(true);
+    expect(searchFonts('手写', { script: 'zh-Hans' }).map((h) => h.id)).toContain('web:ma-shan-zheng');
+    expect(searchFonts('宋体').map((h) => h.id)).toContain('web:xiangcui-jixue-song');
+    // A face name that merely contains the class word still searches by name.
+    expect(searchFonts('得意黑')[0]).toMatchObject({ id: 'web:smiley-sans' });
+    expect(searchFonts('serif', { limit: 5 }).every((h) => h.category === 'serif')).toBe(true);
+  });
+
   it('tool body validates loosely and returns ids with a usage hint', () => {
     const out = searchFontsTool({ query: 'inter', category: 'sans', limit: 3 });
     expect(out.ok).toBe(true);

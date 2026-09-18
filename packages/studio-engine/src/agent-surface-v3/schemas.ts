@@ -56,7 +56,7 @@ const PROPERTY_VALUE: Schema = {
   anyOf: [...(PROPERTY_SCALAR.anyOf as Schema[]), { type: 'array', maxItems: COMPONENT_PROPERTY_MAX_ROWS, items: { ...obj({ text: PROPERTY_SCALAR, note: PROPERTY_SCALAR, label: PROPERTY_SCALAR, value: PROPERTY_SCALAR, trend: PROPERTY_SCALAR }), maxProperties: COMPONENT_PROPERTY_MAX_FIELDS } }],
   description: 'Scalar color, number, boolean, select or text; kit rows use an array of flat row objects matching the declared component schema.',
 };
-const FADES = obj({ in: int('Fade-in length in frames.'), out: int('Fade-out length in frames.') });
+const FADES = obj({ in: int('Audio fade-in length in frames.'), out: int('Audio fade-out length in frames.') });
 const PLACEMENT_PCT = obj({ xPct: num(), yPct: num(), widthPct: num(), heightPct: num() }, ['xPct', 'yPct', 'widthPct', 'heightPct']);
 
 export interface V3ToolSchema {
@@ -185,7 +185,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   /* ------------------------------------------------------------------ assets */
   search_assets: {
     description:
-      'Find reusable assets in one explicit scope: mine (this project\'s library — the files the user added to this project; get_state already lists them), cloud (the account\'s uploads and generations across all projects), official (curated stickers, music and sound), all (only for a cross-library request), or stock (online Pexels/Pixabay/Commons with author and licence). Omit query to list a scope. Results carry ids you can pass straight to add_clips / insert_clips (they are registered on placement); stock results carry an opaque import payload for register_media. Prefer an existing timing-compatible sound or image here before generating one. Device-local bytes are never readable from the server; use import_media for those.',
+      'Find reusable assets in one explicit scope: mine (this project\'s library — the files the user added to this project; get_state already lists them), cloud (the account\'s uploads and generations across all projects), official (curated stickers, music and sound), all (only for a cross-library request), or stock (online media with author and licence: Wikimedia Commons always, Pexels/Pixabay when the server has their keys; the receipt names the provider). Omit query to list a scope. Results carry ids you can pass straight to add_clips / insert_clips (they are registered on placement); stock results carry an opaque import payload for register_media. Prefer an existing timing-compatible sound or image here before generating one. Device-local bytes are never readable from the server; use import_media for those.',
     inputSchema: obj({
       scope: enumOf(['mine', 'cloud', 'official', 'all', 'stock']),
       query: str('Name, category, mood or use case (≤200 characters); stock needs a concrete visual query.'),
