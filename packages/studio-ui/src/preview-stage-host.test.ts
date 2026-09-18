@@ -40,6 +40,7 @@ window.addEventListener('message', function (e) {
 describe('PreviewStageHost', () => {
   let gsap: ReturnType<typeof fakeGsap>;
   beforeEach(() => {
+    vi.useFakeTimers();
     document.head.innerHTML = '';
     document.body.innerHTML = '';
     gsap = fakeGsap();
@@ -47,10 +48,11 @@ describe('PreviewStageHost', () => {
   });
   afterEach(() => {
     delete (window as unknown as { gsap?: unknown }).gsap;
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
-  const flush = () => new Promise((resolve) => setTimeout(resolve, 30));
+  const flush = () => vi.runAllTimersAsync();
 
   it('mounts the document in a shadow root, runs its scripts against the facades and answers messages', async () => {
     const host = new PreviewStageHost();
