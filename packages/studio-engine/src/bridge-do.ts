@@ -29,6 +29,8 @@
 interface BridgeSocket {
   send(data: string): void;
   close(code?: number, reason?: string): void;
+  /** WebSocket readyState (1 = OPEN) when the runtime exposes it. */
+  readyState?: number;
   /** workerd hibernation API: the attachment survives eviction of in-memory state. */
   serializeAttachment?(value: unknown): void;
   deserializeAttachment?(): unknown;
@@ -86,8 +88,9 @@ export class StudioBridge {
   private pending = new Map<string, { resolve: (r: BridgeResult) => void; timer: ReturnType<typeof setTimeout>; tool: string; at: number; late?: boolean }>();
   private late: LateReceipt[] = [];
   private seq = 0;
-  /** In-memory project tag per socket; the serialized attachment is the hibernation-safe copy. */
-  private socketProjects = new WeakMap<object, string>();
+  /** In-memory tag per socket (project + accept time); the serialized attachment is the
+   *  hibernation-safe copy. */
+  private socketMeta = new WeakMap<object, { project: string; at: number }>();
 
   constructor(private state: BridgeState) {
     // ping/pong keepalive: auto-response replies even while the DO hibernates, with no wake billing
@@ -111,22 +114,46 @@ export class StudioBridge {
       }
     }
     this.state.acceptWebSocket(server);
-    this.socketProjects.set(server as object, project);
+    const meta = { project, at: Date.now() };
+    this.socketMeta.set(server as object, meta);
     try {
-      (server as BridgeSocket).serializeAttachment?.({ project });
+      (server as BridgeSocket).serializeAttachment?.(meta);
     } catch {
       /* attachment unsupported (tests / old runtime): the in-memory tag still covers this lifetime */
     }
   }
 
-  private projectOf(ws: BridgeSocket): string {
-    const tagged = this.socketProjects.get(ws as object);
-    if (tagged !== undefined) return tagged;
+  private metaOf(ws: BridgeSocket): { project: string; at: number } {
+    const tagged = this.socketMeta.get(ws as object);
+    if (tagged) return tagged;
     try {
-      const attachment = ws.deserializeAttachment?.() as { project?: unknown } | undefined;
-      return typeof attachment?.project === 'string' ? attachment.project : '';
+      const attachment = ws.deserializeAttachment?.() as { project?: unknown; at?: unknown } | undefined;
+      return { project: typeof attachment?.project === 'string' ? attachment.project : '', at: typeof attachment?.at === 'number' ? attachment.at : 0 };
     } catch {
-      return '';
+      return { project: '', at: 0 };
+    }
+  }
+
+  private projectOf(ws: BridgeSocket): string {
+    return this.metaOf(ws).project;
+  }
+
+  /** The sockets worth trying, newest accepted first. getWebSockets() order is unspecified, and a
+   *  socket the browser dropped without a close frame (a tab frozen, a network path gone) can stay
+   *  listed until the runtime notices: every send to it throws. Picking "the last one" then landed
+   *  on that corpse for the rest of the session, even after the user opened a fresh tab, and every
+   *  call failed with bridge_send_failed. Newest first, skip what refuses, so a live tab always wins. */
+  private candidateSockets(): BridgeSocket[] {
+    return this.state.getWebSockets()
+      .filter((ws) => ws.readyState === undefined || ws.readyState === 1)
+      .sort((left, right) => this.metaOf(right).at - this.metaOf(left).at);
+  }
+
+  private dropDeadSocket(ws: BridgeSocket): void {
+    try {
+      ws.close(1011, 'unreachable');
+    } catch {
+      /* already gone */
     }
   }
 
@@ -136,8 +163,7 @@ export class StudioBridge {
     // Internal server routing only: account services must share the editing session's
     // project rather than guessing from unrelated tabs' autosave timestamps.
     if (url.pathname === '/context' && req.method === 'GET') {
-      const sockets = this.state.getWebSockets();
-      const target = sockets[sockets.length - 1];
+      const target = this.candidateSockets()[0];
       return Response.json({ connected: !!target, projectId: target ? this.projectOf(target) : null,
         anchorProject: await this.state.storage?.get('anchorProject') ?? null,
         explicitSelection: await this.state.storage?.get('anchorExplicit') === true });
@@ -177,15 +203,14 @@ export class StudioBridge {
         return Response.json({ ok: false, error: 'invalid_json' }, { status: 400 });
       }
       if (!body.tool) return Response.json({ ok: false, error: 'tool_required' }, { status: 400 });
-      const sockets = this.state.getWebSockets();
+      const sockets = this.candidateSockets();
       if (!sockets.length) {
         return Response.json(
           { ok: false, error: 'studio_not_open', hint: 'Ask the user to open their Pireel studio project in a browser tab, then retry.' },
           { status: 409 },
         );
       }
-      // getWebSockets order is unspecified, but single-active means at most one is alive
-      const target = sockets[sockets.length - 1]!;
+      const target = sockets[0]!;
       // PROJECT ANCHOR: one bridge session edits one project. The routing surface can flip
       // underneath the agent (opening another project's tab evicts the old socket, by design);
       // without this gate the agent's next tool call would silently land in the wrong project.
@@ -239,14 +264,26 @@ export class StudioBridge {
           });
         }, timeoutMs);
         this.pending.set(id, { resolve, timer, tool: called, at: Date.now() });
-        try {
-          target.send(JSON.stringify({ id, tool: body.tool, input: body.input ?? {} }));
-        } catch {
+        const payload = JSON.stringify({ id, tool: body.tool, input: body.input ?? {} });
+        // The newest socket refused: it is a corpse. Drop it and hand the call to the next tab
+        // before giving up; with none left the answer is the same as no tab at all.
+        let delivered = false;
+        for (const socket of sockets) {
+          try {
+            socket.send(payload);
+            delivered = true;
+            break;
+          } catch {
+            this.dropDeadSocket(socket);
+          }
+        }
+        if (!delivered) {
           clearTimeout(timer);
           this.pending.delete(id);
-          resolve({ ok: false, error: 'bridge_send_failed' });
+          resolve({ ok: false, error: 'studio_not_open', hint: 'The connected studio tab is no longer reachable. Ask the user to refresh or reopen their Pireel studio project, then retry.' });
         }
       });
+      if (!result.ok && result.error === 'studio_not_open') return Response.json(result, { status: 409 });
       if (called === 'get_state' && result.ok && this.late.length) {
         const lateReceipts = this.late.splice(0, this.late.length);
         return Response.json({ ...result, lateReceipts });
@@ -289,9 +326,16 @@ export class StudioBridge {
     p.resolve(result);
   }
 
+  /** The runtime reports a broken socket here instead of (or before) a close frame. Treat it as
+   *  closed: nothing sent to it can arrive, and leaving it listed would keep it a send target. */
+  webSocketError(ws: unknown): void {
+    this.dropDeadSocket(ws as BridgeSocket);
+    this.webSocketClose();
+  }
+
   webSocketClose(): void {
     // Tab closed: pending calls can no longer get a browser reply; failing fast beats waiting for timeout for the agent
-    if (!this.state.getWebSockets().length) {
+    if (!this.candidateSockets().length) {
       for (const [id, p] of this.pending) {
         // A call that already timed out for its caller keeps listening: the tab may only have
         // dropped the socket while still working (a long cut, a mask) and reports the outcome on

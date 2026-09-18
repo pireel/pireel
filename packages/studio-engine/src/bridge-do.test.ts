@@ -260,3 +260,58 @@ describe('StudioBridge DO', () => {
     expect(() => bridge.webSocketMessage(sockets[0], '{"ok":true}')).not.toThrow();
   });
 });
+
+describe('StudioBridge DO — dead sockets', () => {
+  class DeadSocket extends FakeSocket {
+    override send(): void {
+      throw new Error('WebSocket is not open');
+    }
+  }
+
+  it('skips a socket the browser dropped without a close frame and delivers to the newer tab', async () => {
+    const { state, sockets } = makeState();
+    const bridge = new StudioBridge(state);
+    const dead = new DeadSocket();
+    bridge.acceptBrowserSocket(dead, 'project-A');
+    dead.closed = null; // still listed by the runtime, but every send throws
+    const live = new FakeSocket();
+    bridge.acceptBrowserSocket(live, 'project-A');
+    // Unspecified runtime order: the corpse comes last, where the old code always looked.
+    sockets.reverse();
+    const p = bridge.fetch(callReq('undo'));
+    await until(() => live.sent.length > 0);
+    const msg = JSON.parse(live.sent[0]!) as { id: string };
+    bridge.webSocketMessage(live, JSON.stringify({ id: msg.id, ok: true }));
+    expect(await (await p).json()).toEqual({ ok: true });
+  });
+
+  it('answers 409 studio_not_open, not bridge_send_failed, when the only socket refuses to send', async () => {
+    const { state } = makeState();
+    const bridge = new StudioBridge(state);
+    const dead = new DeadSocket();
+    bridge.acceptBrowserSocket(dead, 'project-A');
+    const resp = await bridge.fetch(callReq('undo'));
+    expect(resp.status).toBe(409);
+    expect(await resp.json()).toMatchObject({ ok: false, error: 'studio_not_open' });
+    expect(dead.closed).toEqual({ code: 1011, reason: 'unreachable' });
+    // A fresh tab is served normally afterwards.
+    const live = new FakeSocket();
+    bridge.acceptBrowserSocket(live, 'project-A');
+    const p = bridge.fetch(callReq('undo'));
+    await until(() => live.sent.length > 0);
+    bridge.webSocketMessage(live, JSON.stringify({ id: (JSON.parse(live.sent[0]!) as { id: string }).id, ok: true }));
+    expect(await (await p).json()).toEqual({ ok: true });
+  });
+
+  it('a runtime error report closes the socket and fails pending calls fast', async () => {
+    const { state } = makeState();
+    const bridge = new StudioBridge(state);
+    const ws = new FakeSocket();
+    bridge.acceptBrowserSocket(ws, 'project-A');
+    const p = bridge.fetch(callReq('undo'));
+    await until(() => ws.sent.length > 0);
+    bridge.webSocketError(ws);
+    expect(ws.closed?.code).toBe(1011);
+    expect(await (await p).json()).toMatchObject({ ok: false, error: 'studio_tab_closed' });
+  });
+});
