@@ -11,13 +11,14 @@ import { outputSwitchVideoPickOptions, type VideoPickOptions } from './video-pic
 export function useProjectOutputRuntime(deps: {
   projectId: string;
   /** Read through the synchronous project-output ref. Chained agent tools can run before React
-   * commits the render that follows create_output or switch_output. */
+   * commits the render that follows manage_project output create/switch. */
   getActiveId: () => string;
   switchTo: (id: string) => StudioProjectOutputSnapshot | null;
   create: (title: string, skill?: string) => StudioProjectOutputSnapshot;
   listOutputIds: () => string[];
   remove: (id: string) => void;
-  setDocument: (document: EditorDocumentV2) => void;
+  /** Checking out another deliverable replaces the whole document; it is a restore, not a hydrate. */
+  replaceDocument: (document: EditorDocumentV2) => void;
   getComposition: () => Composition;
   onDocumentActivated?: (document: EditorDocumentV2, composition: Composition) => void;
   videoFileRef: MutableRefObject<File | null>;
@@ -27,7 +28,7 @@ export function useProjectOutputRuntime(deps: {
   setVideoFile: (file: File | null) => void;
   pickVideoFile: (file: File, opts?: VideoPickOptions) => Promise<void>;
   fetchCloudMedia?: (sig: string, cloudKey?: string) => Promise<File | null>;
-  recoverLocalClips: (shots: NonNullable<Composition['shots']>) => Promise<void> | void;
+  prepareAssets: (document: EditorDocumentV2) => Promise<void>;
   resetEditor: () => void;
 }) {
   const [switching, setSwitching] = useState(false);
@@ -38,15 +39,13 @@ export function useProjectOutputRuntime(deps: {
       if (switchingRef.current || id === deps.getActiveId()) return false;
       switchingRef.current = true;
       setSwitching(true);
-      const previousSig = deps.videoSigRef.current;
-      const previousFile = deps.videoFileRef.current;
       try {
         const target = deps.switchTo(id);
         if (!target) return false;
 
         deps.resetEditor();
         deps.coverThumbRef.current = target.coverThumb;
-        deps.setDocument(target.document);
+        deps.replaceDocument(target.document);
         const composition = deps.getComposition();
         deps.onDocumentActivated?.(target.document, composition);
         const draft: StudioDraft = {
@@ -60,11 +59,10 @@ export function useProjectOutputRuntime(deps: {
         };
         deps.pendingRestoreRef.current = draft;
 
-        const shots = composition.shots ?? [];
         deps.pendingRestoreRef.current = null;
         deps.videoSigRef.current = null;
         deps.setVideoFile(null);
-        await deps.recoverLocalClips(shots);
+        await deps.prepareAssets(target.document);
         return true;
       } finally {
         switchingRef.current = false;
@@ -82,7 +80,7 @@ export function useProjectOutputRuntime(deps: {
       deps.pendingRestoreRef.current = null;
       deps.videoSigRef.current = null;
       deps.setVideoFile(null);
-      deps.setDocument(target.document);
+      deps.replaceDocument(target.document);
       const composition = deps.getComposition();
       deps.onDocumentActivated?.(target.document, composition);
       return target;

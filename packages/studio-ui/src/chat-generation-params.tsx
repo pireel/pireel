@@ -19,7 +19,7 @@ import { imageThumb } from '@pireel/ui/image-url';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@pireel/ui/dialog';
 import { useStudioShell } from './shell-context';
 import { studioLocale, t } from './i18n';
-import { AUDIO_DURATION_LADDER, audioKindFor, generationTemplates, type GenerationIntent, type GenerationParams } from './chat-generation-intent';
+import { audioKindFor, generationTemplates, MUSIC_DURATION_OPTIONS, SFX_DURATION_OPTIONS, type AudioKind, type GenerationIntent, type GenerationParams } from './chat-generation-intent';
 
 const RATIOS: NonNullable<GenerationParams['ratio']>[] = ['9:16', '16:9', '1:1'];
 const TOOL_BUTTON = 'text-ink-3 hover:bg-line hover:text-ink inline-flex h-7 w-7 items-center justify-center rounded-md disabled:pointer-events-none disabled:opacity-30';
@@ -231,21 +231,30 @@ export function GenerationControls({
   const durationOptions = intent === 'video'
     ? (shell.modelParams?.videoDurationOptions(modelId) ?? ['5', '10'])
     : intent === 'audio'
-      ? AUDIO_DURATION_LADDER.map(String)
+      ? (audioKind === 'music' ? MUSIC_DURATION_OPTIONS : SFX_DURATION_OPTIONS).map(String)
       : [];
 
   // Switching model (or arming the mode) settles the dependent fields on that model's defaults, the
   // way the panel did: quality tier for images, a supported resolution/duration tier for video.
   useEffect(() => {
     if (intent === 'image') {
-      const next = qualityCfg?.default ?? undefined;
+      const next = qualityCfg?.options.some((option) => option.value === params.quality)
+        ? params.quality : qualityCfg?.default ?? undefined;
       if (next !== params.quality || modelId !== params.modelId) onChange({ ...params, ...(modelId ? { modelId } : {}), quality: next });
     } else if (intent === 'video') {
       const resolution = resolutionOptions.includes(params.resolution ?? '') ? params.resolution : resolutionOptions.includes('720p') ? '720p' : resolutionOptions[0];
       const duration = params.durationSec && durationOptions.includes(String(params.durationSec)) ? params.durationSec : Number(durationOptions[0] ?? 5);
       if (resolution !== params.resolution || duration !== params.durationSec || modelId !== params.modelId) onChange({ ...params, ...(modelId ? { modelId } : {}), resolution, durationSec: duration });
     } else if (intent === 'audio') {
-      if (!params.durationSec || !durationOptions.includes(String(params.durationSec))) onChange({ ...params, durationSec: 60 });
+      // Arming audio settles the explicit kind (default: sound effect, never speech) and a valid
+      // duration for that kind; speech is timed by its text so it carries no duration.
+      const kind = params.audioKind ?? 'sfx';
+      const patch: Partial<GenerationParams> = {};
+      if (params.audioKind == null) patch.audioKind = kind;
+      if (kind !== 'speech' && (!params.durationSec || !durationOptions.includes(String(params.durationSec)))) {
+        patch.durationSec = kind === 'music' ? 60 : 5;
+      }
+      if (Object.keys(patch).length) onChange({ ...params, ...patch });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intent, modelId]);
@@ -308,7 +317,27 @@ export function GenerationControls({
               onChange={(value) => onChange({ ...params, quality: value })}
             />
           ) : null}
-          {intent === 'audio' && voices.length ? (
+          {intent === 'audio' ? (
+            <Row
+              label={t('chatGen.paramAudioKind')}
+              options={[
+                { value: 'sfx', label: t('chatGen.audioKindSfx') },
+                { value: 'music', label: t('chatGen.audioKindMusic') },
+                { value: 'speech', label: t('chatGen.audioKindSpeech') },
+              ]}
+              value={audioKind ?? 'sfx'}
+              onChange={(value) => {
+                const kind = value as AudioKind;
+                const next: GenerationParams = { ...params, audioKind: kind };
+                // Kind is the source of truth: leaving speech drops the voice; entering a timed kind
+                // seeds its default duration; speech carries none (timed by its text).
+                if (kind === 'speech') { delete next.durationSec; }
+                else { delete next.voiceId; next.durationSec = kind === 'music' ? 60 : 5; }
+                onChange(next);
+              }}
+            />
+          ) : null}
+          {intent === 'audio' && audioKind === 'speech' && voices.length ? (
             <div className="flex items-center gap-1 py-0.5">
               <span className="text-ink-4 w-12 shrink-0 text-[10.5px]">{t('chatGen.paramVoice')}</span>
               <select
@@ -380,7 +409,7 @@ export function GenerationCreditsBadge({ intent, params, models }: { intent: Gen
   const quoteParams = useMemo<Record<string, unknown>>(() => {
     const ratio = params.ratio ?? '9:16';
     if (intent === 'image') return { n: Math.min(4, Math.max(1, params.count ?? 1)), size: imageSizeParam(modelId, ratio), ...(params.quality ? { quality: params.quality } : {}) };
-    if (intent === 'video') return { duration_sec: String(params.durationSec ?? 5), count: 1, resolution: params.resolution ?? '720p', aspect_ratio: ratio === '1:1' ? '9:16' : ratio, generate_audio: false };
+    if (intent === 'video') return { duration_sec: String(params.durationSec ?? 5), count: 1, resolution: params.resolution ?? '720p', aspect_ratio: ratio, generate_audio: params.generateAudio ?? false };
     if (intent === 'audio') {
       const kind = audioKindFor(params);
       if (kind === 'sfx') return { duration_tier: sfxDurationTier(params.durationSec ?? 5) };

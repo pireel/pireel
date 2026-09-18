@@ -48,6 +48,13 @@ export function t(key: string, vars?: Record<string, string | number>): string {
   return vars ? msg.replace(/\{(\w+)\}/g, (_, k: string) => String(vars[k] ?? `{${k}}`)) : msg;
 }
 
+/** English regardless of the UI locale: tool receipts and error codes read by an agent, which
+ *  translates for the user itself; mixing the tab's locale into them produced bilingual receipts. */
+export function tEnglish(key: string, vars?: Record<string, string | number>): string {
+  const msg = CATALOGS.en[key] ?? key;
+  return vars ? msg.replace(/\{(\w+)\}/g, (_, k: string) => String(vars[k] ?? `{${k}}`)) : msg;
+}
+
 import { EN_ENGINE, ZH_ENGINE } from './messages';
 registerMessages('zh', ZH_ENGINE);
 registerMessages('en', EN_ENGINE);

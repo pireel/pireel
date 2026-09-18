@@ -4,7 +4,7 @@ import type { AsrSegment, TranscriptWord } from './build-blocks';
 import { joinWords, wordsFromText } from './caption-fx';
 
 export interface CaptionTextEditItem {
-  /** Sentence row from read_script / the source transcript. */
+  /** Sentence row from get_transcript / the source transcript. */
   index: number;
   text: string;
   /** Stable source-word range of the existing display cue. Agent sentence edits are expanded to
@@ -41,6 +41,53 @@ function parsedRanges(values: Readonly<Record<string, string>> | undefined, word
 
 function overlaps(range: WordRange, start: number, end: number): boolean {
   return range.start <= end && range.end >= start;
+}
+
+/**
+ * Remove display cues. The words stay in the transcript (the audio is untouched and script cuts
+ * still see them); the cue renders nothing. Stored as an empty copy override on a locked range so a
+ * re-layout keeps the hole where the user made it. Undo restores it like any other edit.
+ */
+export function removeCaptionCues(segments: readonly AsrSegment[], items: readonly CaptionCueRange[]): AsrSegment[] {
+  if (!items.length) return segments as AsrSegment[];
+  let next = segments as AsrSegment[];
+  for (const item of items) {
+    const current = next[item.index];
+    if (!current) continue;
+    const words = wordsFor(current);
+    if (!words.length) continue;
+    const w0 = Math.max(0, Math.min(item.w0 ?? 0, words.length - 1));
+    const w1 = Math.max(w0, Math.min(item.w1 ?? words.length - 1, words.length - 1));
+    const key = `${w0}:${w1}`;
+    if (current.cueTexts?.[key] === '') continue;
+    const cueTexts = withoutOverlaps(current.cueTexts, w0, w1, words.length);
+    cueTexts[key] = '';
+    const currentLayout = current.cueLayout ?? (current.cueTexts ? Object.keys(current.cueTexts) : []);
+    const cueLayout = layoutWithoutOverlaps(currentLayout, w0, w1, words.length);
+    cueLayout.push(key);
+    cueLayout.sort((left, right) => Number(left.split(':')[0]) - Number(right.split(':')[0]));
+    const cueSubs = withoutOverlaps(current.cueSubs, w0, w1, words.length);
+    const edited: AsrSegment = { ...current, cueLayout, cueTexts };
+    edited.captionText = captionTextFromCueOverrides(edited, cueTexts);
+    if (Object.keys(cueSubs).length) edited.cueSubs = cueSubs;
+    else delete edited.cueSubs;
+    if (w0 === 0 && w1 === words.length - 1) delete edited.sub;
+    next = next === segments ? [...segments] : [...next];
+    next[item.index] = edited;
+  }
+  return next;
+}
+
+/** A display cue addressed by its source sentence and word range. */
+export interface CaptionCueRange {
+  index: number;
+  w0?: number;
+  w1?: number;
+}
+
+/** True when this cue was removed by the user (renders nothing; the words are still spoken). */
+export function isRemovedCaptionCue(segment: AsrSegment | undefined, w0: number, w1: number): boolean {
+  return segment?.cueTexts?.[`${w0}:${w1}`] === '';
 }
 
 /** Rebuild the audience-facing sentence while leaving the ASR transcript and word timing untouched. */

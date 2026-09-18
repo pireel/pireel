@@ -1,6 +1,6 @@
-import { projectDocumentToComposition, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
+import { applyCaptionDocumentEdit, projectDocumentToComposition, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
+import { applyCaptionTranslations, clearCaptionTranslations, type CaptionTranslationItem } from '@pireel/studio-engine/build-blocks';
 import { mapSegsToEdited } from '@pireel/studio-engine/captions-relay';
-import { replaceCaptionTranslationsTransaction } from './caption-translation-transaction';
 import type { CaptionTaskRecord } from './caption-task-store';
 
 type Translate = (rows: { index: number; text: string }[], language: string) => Promise<{ index: number; text: string }[]>;
@@ -33,7 +33,18 @@ export async function translateCaptionTask(task: CaptionTaskRecord, document: Ed
     rows.push(...translated);
     onProgress?.(rows.length, groups.length);
   }
-  const result = replaceCaptionTranslationsTransaction({ document, composition, groups, rows, target, mainTranscript: task.transcript!, clipTranscripts: {} });
-  if (!result.ok) throw new Error(result.error);
-  return { document: result.document, transcript: result.mainTranscript!, translation: { language: target, sourceKey } };
+  // Standalone tasks translate surviving sentence fragments. Studio's line-based translator now
+  // has a different response contract; retain this task's atomic sentence replacement here.
+  const translated = new Map(rows.map(row => [row.index, row.text]));
+  const counts = new Map<number, number>();
+  for (const group of groups) counts.set(group.ref.seg, (counts.get(group.ref.seg) ?? 0) + 1);
+  const items: CaptionTranslationItem[] = groups.map((group, index) => ({
+    index: group.ref.seg, text: translated.get(index)!,
+    ...((counts.get(group.ref.seg) ?? 0) > 1 ? { w0: group.ref.w0, w1: group.ref.w1 } : {}),
+  }));
+  const transcript = applyCaptionTranslations(clearCaptionTranslations([...task.transcript!]), items, target);
+  const result = applyCaptionDocumentEdit({ document, mainTranscript: transcript, clipTranscripts: {},
+    patch: { sub: { ...(document.appearance.captionStyle?.sub ?? {}), lang: target } } });
+  if (!result.ok) throw new Error(result.error.message);
+  return { document: result.document, transcript, translation: { language: target, sourceKey } };
 }

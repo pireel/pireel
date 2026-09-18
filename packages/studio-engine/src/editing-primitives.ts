@@ -225,7 +225,7 @@ export interface SplitShotsResult {
 export function splitShotsAtEditedPoints(shots: VideoShot[], atSecs: readonly unknown[]): SplitShotsResult | { error: string } {
   if (!atSecs.length) return { error: 'pass atSec or atSecs' };
   if (atSecs.length > STUDIO_AGENT_EXECUTION_LIMITS.splitPointsPerCall) {
-    return { error: `split_shot supports at most ${STUDIO_AGENT_EXECUTION_LIMITS.splitPointsPerCall} points per call` };
+    return { error: `split_clips supports at most ${STUDIO_AGENT_EXECUTION_LIMITS.splitPointsPerCall} points per call` };
   }
   if (atSecs.some((at) => !finite(at))) return { error: 'every split point must be a finite number' };
   const points = [...new Set(atSecs as number[])].sort((a, b) => a - b);

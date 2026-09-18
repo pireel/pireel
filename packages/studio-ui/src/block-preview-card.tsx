@@ -11,6 +11,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import { type Block, type Composition, assembleBlockHtml, blockKind, blockPreviewDoc, previewMiniComp } from '@pireel/studio-engine/composition';
 import { getTheme, themeVarsCss } from '@pireel/studio-engine/theme';
 import { injectPreviewRuntime } from './sample-composition';
+import { loadGsap as loadStageGsap } from './preview-stage-host';
 import { injectPreviewContentBoundsReporter, type PreviewContentBounds } from './preview-content-bounds';
 import { KIND_META } from './kind-meta';
 import { blockDisplayTitle } from './block-display-title';
@@ -210,7 +211,6 @@ export function BlockKindFooter({ block }: { block: Block }) {
 
 /* ============================ Inline preview (trusted blocks only) ============================ */
 
-/** Main page lazy-loads self-hosted GSAP on demand (same /vendor/gsap.min.js as the preview iframe), once per process. */
 type GsapLike = { timeline: (o?: Record<string, unknown>) => GsapTimeline };
 interface GsapTimeline {
   play(t?: number): void;
@@ -218,19 +218,8 @@ interface GsapTimeline {
   progress(v: number): GsapTimeline;
   kill(): void;
 }
-let _gsap: Promise<GsapLike | null> | null = null;
-function loadGsap(): Promise<GsapLike | null> {
-  const w = window as unknown as { gsap?: GsapLike };
-  if (w.gsap) return Promise.resolve(w.gsap);
-  _gsap ??= new Promise((resolve) => {
-    const el = document.createElement('script');
-    el.src = '/vendor/gsap.min.js';
-    el.onload = () => resolve((window as unknown as { gsap?: GsapLike }).gsap ?? null);
-    el.onerror = () => resolve(null);
-    document.head.appendChild(el);
-  });
-  return _gsap;
-}
+/** The page's self-hosted GSAP, shared with the preview stage host. */
+const loadGsap = (): Promise<GsapLike | null> => loadStageGsap() as Promise<GsapLike | null>;
 
 /**
  * Inline block preview — ONLY for trusted blocks we hand-write ourselves (frame-dialect covers/showcase):

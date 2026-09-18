@@ -43,8 +43,47 @@ function callReq(tool: string, timeoutMs?: number) {
   return new Request('https://do/call', { method: 'POST', body: JSON.stringify({ tool, input: { a: 1 }, timeoutMs }) });
 }
 
+/** How every v3 call reaches the bridge: the tool the agent asked for rides inside run_v3. */
+function v3Req(name: string) {
+  return new Request('https://do/call', { method: 'POST', body: JSON.stringify({ tool: 'run_v3', input: { name, args: {} } }) });
+}
+
 
 describe('StudioBridge DO', () => {
+  it('exposes socket identity and keeps an explicit project selection across offline calls', async () => {
+    const { state, stored, sockets } = makeState();
+    const bridge = new StudioBridge(state);
+    bridge.acceptBrowserSocket(new FakeSocket(), 'project-A');
+    expect(await (await bridge.fetch(new Request('https://do/context'))).json()).toEqual({ connected: true, projectId: 'project-A', anchorProject: null, explicitSelection: false });
+    const pin = await bridge.fetch(new Request('https://do/anchor', { method: 'POST', body: JSON.stringify({ projectId: 'project-B', explicitSelection: true }) }));
+    expect(pin.ok).toBe(true);
+    expect(stored.get('anchorProject')).toBe('project-B');
+    expect(await (await bridge.fetch(v3Req('add_clips'))).json()).toMatchObject({ ok: false, error: 'studio_not_open' });
+    expect(sockets[0]!.sent).toHaveLength(0);
+    expect(stored.get('anchorExplicit')).toBe(true);
+    sockets[0]!.closed = { code: 1000 };
+    expect(await (await bridge.fetch(new Request('https://do/context'))).json()).toEqual({ connected: false, projectId: null, anchorProject: 'project-B', explicitSelection: true });
+  });
+
+  it('keeps explicit selection on reads and routes an unrelated tab to the offline fallback', async () => {
+    const { state, sockets, stored } = makeState();
+    const bridge = new StudioBridge(state);
+    bridge.acceptBrowserSocket(new FakeSocket(), 'project-A');
+    await bridge.fetch(new Request('https://do/anchor', { method: 'POST', body: JSON.stringify({ projectId: 'project-B', explicitSelection: true }) }));
+    expect(await (await bridge.fetch(v3Req('get_state'))).json()).toMatchObject({ ok: false, error: 'studio_not_open', projectId: 'project-B' });
+    expect(sockets[0]!.sent).toHaveLength(0);
+    expect(stored.get('anchorProject')).toBe('project-B');
+    expect(stored.get('anchorExplicit')).toBe(true);
+    bridge.acceptBrowserSocket(new FakeSocket(), 'project-B');
+    const reading = bridge.fetch(v3Req('get_state'));
+    await until(() => sockets[1]!.sent.length > 0);
+    const message = JSON.parse(sockets[1]!.sent[0]!);
+    bridge.webSocketMessage(sockets[1], JSON.stringify({ id: message.id, ok: true }));
+    await reading;
+    expect(stored.get('anchorExplicit')).toBe(true);
+    expect(stored.get('anchorProject')).toBe('project-B');
+  });
+
   it('无浏览器连接:/call 回 409 studio_not_open', async () => {
     const { state } = makeState();
     const bridge = new StudioBridge(state);
@@ -67,7 +106,7 @@ describe('StudioBridge DO', () => {
     expect(body).toEqual({ ok: true, summary: '已移动' });
   });
 
-  it('超时:期限内无回执 → ok:false tool_timeout;迟到回执被忽略', async () => {
+  it('超时:期限内无回执 → ok:false tab_timeout 带 callId;迟到回执随下一次 get_state 交付', async () => {
     vi.useFakeTimers();
     try {
       const { state, sockets } = makeState();
@@ -75,11 +114,53 @@ describe('StudioBridge DO', () => {
       bridge.acceptBrowserSocket(new FakeSocket());
       const p = bridge.fetch(callReq('undo', 1_000));
       await vi.advanceTimersByTimeAsync(1_100); // fake timers 下 json 解析与定时器一起推进
-      const body = (await (await p).json()) as { ok: boolean; error: string };
+      const body = (await (await p).json()) as { ok: boolean; error: string; callId: string; hint: string };
       expect(body.ok).toBe(false);
-      expect(body.error).toContain('tool_timeout');
+      expect(body.error).toBe('tab_timeout');
+      expect(body.hint).toContain(body.callId);
       const msg = JSON.parse(sockets[0]!.sent[0]!) as { id: string };
-      expect(() => bridge.webSocketMessage(sockets[0], JSON.stringify({ id: msg.id, ok: true }))).not.toThrow();
+      expect(msg.id).toBe(body.callId);
+      // The tab finishes later: the outcome is kept, not dropped.
+      bridge.webSocketMessage(sockets[0], JSON.stringify({ id: msg.id, ok: true, summary: 'undone' }));
+      // The rest polls the socket with real timers (the late-reply window timer simply never fires).
+      vi.useRealTimers();
+      const stateCall = bridge.fetch(callReq('get_state', 1_000));
+      await until(() => sockets[0]!.sent.length > 1);
+      const stateMsg = JSON.parse(sockets[0]!.sent[1]!) as { id: string };
+      bridge.webSocketMessage(sockets[0], JSON.stringify({ id: stateMsg.id, ok: true, state: 'S' }));
+      const stateBody = (await (await stateCall).json()) as { ok: boolean; state: string; lateReceipts?: Array<{ callId: string; tool: string; ok: boolean; summary?: string }> };
+      expect(stateBody.state).toBe('S');
+      expect(stateBody.lateReceipts).toEqual([expect.objectContaining({ callId: body.callId, tool: 'undo', ok: true, summary: 'undone' })]);
+      // Delivered once.
+      const again = bridge.fetch(callReq('get_state', 1_000));
+      await until(() => sockets[0]!.sent.length > 2);
+      bridge.webSocketMessage(sockets[0], JSON.stringify({ id: (JSON.parse(sockets[0]!.sent[2]!) as { id: string }).id, ok: true, state: 'S' }));
+      expect(((await (await again).json()) as { lateReceipts?: unknown }).lateReceipts).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a call that timed out keeps its receipt across a socket drop and hands it to an offline read', async () => {
+    vi.useFakeTimers();
+    try {
+      const { state, sockets } = makeState();
+      const bridge = new StudioBridge(state);
+      bridge.acceptBrowserSocket(new FakeSocket());
+      const p = bridge.fetch(callReq('mask_words', 1_000));
+      await vi.advanceTimersByTimeAsync(1_100);
+      const body = (await (await p).json()) as { ok: boolean; error: string; callId: string };
+      expect(body.error).toBe('tab_timeout');
+      // The tab drops its socket while still working (a heavy tool), then comes back and reports.
+      sockets[0]!.closed = { code: 1006 };
+      bridge.webSocketClose();
+      const again = new FakeSocket();
+      bridge.acceptBrowserSocket(again);
+      bridge.webSocketMessage(again, JSON.stringify({ id: body.callId, ok: true, summary: 'masked 2 words' }));
+      // A get_state answered offline (no tab at that moment) still gets the receipt through /late.
+      const late = (await (await bridge.fetch(new Request('https://do/late'))).json()) as { lateReceipts: Array<{ callId: string; ok: boolean; summary?: string }> };
+      expect(late.lateReceipts).toEqual([expect.objectContaining({ callId: body.callId, ok: true, summary: 'masked 2 words' })]);
+      expect(((await (await bridge.fetch(new Request('https://do/late'))).json()) as { lateReceipts: unknown[] }).lateReceipts).toEqual([]);
     } finally {
       vi.useRealTimers();
     }
@@ -146,6 +227,29 @@ describe('StudioBridge DO', () => {
     expect(((await (await after).json()) as { ok: boolean }).ok).toBe(true);
   });
 
+  it('项目锚:v3 面的调用裹在 run_v3 里,重锚看的是里面的工具名(否则永久卡死)', async () => {
+    const { state, sockets, stored } = makeState();
+    const bridge = new StudioBridge(state);
+    bridge.acceptBrowserSocket(new FakeSocket(), 'pmtaaa1111111');
+    const first = bridge.fetch(v3Req('add_clips'));
+    await until(() => sockets[0]!.sent.length > 0);
+    bridge.webSocketMessage(sockets[0], JSON.stringify({ id: (JSON.parse(sockets[0]!.sent[0]!) as { id: string }).id, ok: true }));
+    await first;
+    expect(stored.get('anchorProject')).toBe('pmtaaa1111111');
+
+    bridge.acceptBrowserSocket(new FakeSocket(), 'pmtbbb2222222');
+    const rejected = (await (await bridge.fetch(v3Req('add_clips'))).json()) as { ok: boolean; error: string };
+    expect(rejected).toMatchObject({ ok: false, error: 'project_switched' });
+    expect(sockets[1]!.sent.length).toBe(0);
+
+    // 同样裹在 run_v3 里的 get_state 必须放行并重锚,否则没有任何调用能解开这个状态
+    const reanchor = bridge.fetch(v3Req('get_state'));
+    await until(() => sockets[1]!.sent.length > 0);
+    bridge.webSocketMessage(sockets[1], JSON.stringify({ id: (JSON.parse(sockets[1]!.sent[0]!) as { id: string }).id, ok: true, state: 's' }));
+    await reanchor;
+    expect(stored.get('anchorProject')).toBe('pmtbbb2222222');
+  });
+
   it('ping 兜底回 pong;非 JSON/无 id 的消息安全忽略', async () => {
     const { state, sockets } = makeState();
     const bridge = new StudioBridge(state);
@@ -154,5 +258,60 @@ describe('StudioBridge DO', () => {
     expect(sockets[0]!.sent).toContain('pong');
     expect(() => bridge.webSocketMessage(sockets[0], 'not json')).not.toThrow();
     expect(() => bridge.webSocketMessage(sockets[0], '{"ok":true}')).not.toThrow();
+  });
+});
+
+describe('StudioBridge DO — dead sockets', () => {
+  class DeadSocket extends FakeSocket {
+    override send(): void {
+      throw new Error('WebSocket is not open');
+    }
+  }
+
+  it('skips a socket the browser dropped without a close frame and delivers to the newer tab', async () => {
+    const { state, sockets } = makeState();
+    const bridge = new StudioBridge(state);
+    const dead = new DeadSocket();
+    bridge.acceptBrowserSocket(dead, 'project-A');
+    dead.closed = null; // still listed by the runtime, but every send throws
+    const live = new FakeSocket();
+    bridge.acceptBrowserSocket(live, 'project-A');
+    // Unspecified runtime order: the corpse comes last, where the old code always looked.
+    sockets.reverse();
+    const p = bridge.fetch(callReq('undo'));
+    await until(() => live.sent.length > 0);
+    const msg = JSON.parse(live.sent[0]!) as { id: string };
+    bridge.webSocketMessage(live, JSON.stringify({ id: msg.id, ok: true }));
+    expect(await (await p).json()).toEqual({ ok: true });
+  });
+
+  it('answers 409 studio_not_open, not bridge_send_failed, when the only socket refuses to send', async () => {
+    const { state } = makeState();
+    const bridge = new StudioBridge(state);
+    const dead = new DeadSocket();
+    bridge.acceptBrowserSocket(dead, 'project-A');
+    const resp = await bridge.fetch(callReq('undo'));
+    expect(resp.status).toBe(409);
+    expect(await resp.json()).toMatchObject({ ok: false, error: 'studio_not_open' });
+    expect(dead.closed).toEqual({ code: 1011, reason: 'unreachable' });
+    // A fresh tab is served normally afterwards.
+    const live = new FakeSocket();
+    bridge.acceptBrowserSocket(live, 'project-A');
+    const p = bridge.fetch(callReq('undo'));
+    await until(() => live.sent.length > 0);
+    bridge.webSocketMessage(live, JSON.stringify({ id: (JSON.parse(live.sent[0]!) as { id: string }).id, ok: true }));
+    expect(await (await p).json()).toEqual({ ok: true });
+  });
+
+  it('a runtime error report closes the socket and fails pending calls fast', async () => {
+    const { state } = makeState();
+    const bridge = new StudioBridge(state);
+    const ws = new FakeSocket();
+    bridge.acceptBrowserSocket(ws, 'project-A');
+    const p = bridge.fetch(callReq('undo'));
+    await until(() => ws.sent.length > 0);
+    bridge.webSocketError(ws);
+    expect(ws.closed?.code).toBe(1011);
+    expect(await (await p).json()).toMatchObject({ ok: false, error: 'studio_tab_closed' });
   });
 });

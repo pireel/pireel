@@ -5,7 +5,7 @@
  *    below the narration; silently falls back to the default when measurement fails);
  *  - keep the engine's clip channel in sync with the native render projection (per-clip
  *    envelope/source-time closures from the same pure fns export uses);
- *  - draft restore: revive dead blob srcs from OPFS/cloud by sig (recoverLocalClips analog);
+ *  - derive waveform peaks from sources recovered by the shared asset runtime;
  *  - generation: POST /api/studio/music → bytes → the same mount path as upload.
  */
 
@@ -15,15 +15,12 @@ import {
   type Composition,
   type EditorDocumentV2,
   type SupplementalVisualMediaClip,
-  addAudioDocumentClip,
-  applyAudioDocumentEdits,
   audioClipGainAt,
   audioClipId,
   audioClipSrcTimeAt,
-  removeAudioDocumentClips,
-  splitAudioDocumentClip,
   totalDuration,
 } from '@pireel/studio-engine/composition';
+import type { DocumentCommitter } from './document-commit';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { toast } from '@pireel/ui/toast';
 import type { EngineAudioClip, VideoTrackEngine } from './video-track-engine';
@@ -51,7 +48,7 @@ export interface AudioTracksDeps {
   visualMediaClips?: readonly SupplementalVisualMediaClip[];
   timelineDurationSec?: number;
   documentRef: MutableRefObject<EditorDocumentV2>;
-  setDocument: (document: EditorDocumentV2, runtimeComposition?: Composition) => void;
+  commit: DocumentCommitter['commit'];
   videoFile: File | null;
   videoFileRef: MutableRefObject<File | null>;
   videoSigRef: MutableRefObject<string | null>;
@@ -62,13 +59,12 @@ export interface AudioTracksDeps {
   tRef: MutableRefObject<number>;
   pickFile: (accept: string) => Promise<File | null>;
   backupMediaToCloud: (file: File, sig: string, kind: 'video' | 'clip') => void;
-  pushUndoSnapshot: () => void;
 }
 
 export function useAudioTracks(deps: AudioTracksDeps) {
   const {
-    projectId, comp, compRef, renderAudioTracks, visualMediaClips, timelineDurationSec, documentRef, setDocument, videoFile, videoFileRef,
-    videoSigRef, videoEngineRef, clipFilesRef, tRef, pickFile, backupMediaToCloud, pushUndoSnapshot,
+    projectId, comp, compRef, renderAudioTracks, visualMediaClips, timelineDurationSec, documentRef, commit, videoFile, videoFileRef,
+    videoSigRef, videoEngineRef, clipFilesRef, tRef, pickFile, backupMediaToCloud,
   } = deps;
   const renderAudioTracksRef = useRef(renderAudioTracks);
   renderAudioTracksRef.current = renderAudioTracks;
@@ -171,7 +167,9 @@ export function useAudioTracks(deps: AudioTracksDeps) {
       ...(volumeDb != null && volumeDb !== 0 ? { volumeDb } : {}),
       ...(startSec != null ? { startSec } : {}),
     };
-    const edit = addAudioDocumentClip({ document: documentRef.current, clip });
+    const edit = commit({ op: 'audio.add', input: { clip } }, {
+      runtimeComposition: { ...compRef.current, audioTracks: [...(compRef.current.audioTracks ?? []), clip] },
+    });
     if (!edit.ok) {
       URL.revokeObjectURL(url);
       audioObjectUrlsRef.current.delete(url);
@@ -179,8 +177,6 @@ export function useAudioTracks(deps: AudioTracksDeps) {
       toast.error(editorErrorMessage(edit.error));
       return;
     }
-    pushUndoSnapshot();
-    setDocument(edit.document, { ...compRef.current, audioTracks: [...(compRef.current.audioTracks ?? []), clip] });
     return clip.id;
   };
 
@@ -228,32 +224,27 @@ export function useAudioTracks(deps: AudioTracksDeps) {
   };
 
   const removeClips = (ids: readonly string[]): { ok: boolean; error?: string } => {
-    const edit = removeAudioDocumentClips(documentRef.current, ids);
+    const edit = commit({ op: 'audio.remove', input: { clipIds: ids } });
     if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error) };
-    pushUndoSnapshot();
-    setDocument(edit.document);
     return { ok: true };
   };
 
   const removeClip = (id: string) => removeClips([id]);
 
+  /** `undo` = a discrete user action (one ⌘Z step); live drags pass false and snapshot at gesture start. */
   const patchClip = (
     id: string,
     patch: Partial<Pick<AudioClip, 'startSec' | 'volumeDb' | 'fadeInSec' | 'fadeOutSec' | 'speed' | 'inSec' | 'outSec' | 'muted'>>,
-    beforeCommit?: () => void,
+    undo = false,
   ): { ok: boolean; error?: string } => {
-    const edit = applyAudioDocumentEdits({ document: documentRef.current, updates: [{ clipId: id, patch }] });
+    const edit = commit({ op: 'audio.patch', input: { updates: [{ clipId: id, patch }] } }, { undo: undo ? 'step' : 'none' });
     if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error) };
-    beforeCommit?.();
-    setDocument(edit.document);
     return { ok: true };
   };
 
-  const splitClip = (id: string, atSec: number, beforeCommit?: () => void): { ok: boolean; error?: string; newClipId?: string } => {
-    const edit = splitAudioDocumentClip(documentRef.current, id, atSec);
+  const splitClip = (id: string, atSec: number, undo = false): { ok: boolean; error?: string; newClipId?: string } => {
+    const edit = commit({ op: 'audio.split', input: { clipId: id, atSec } }, { undo: undo ? 'step' : 'none' });
     if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error) };
-    beforeCommit?.();
-    setDocument(edit.document);
     return { ok: true, newClipId: edit.newClipId };
   };
 
@@ -293,7 +284,7 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [comp.audioTracks, comp.shots, videoFile, renderAudioTracks, visualMediaClips, timelineDurationSec, audioFileRev]);
 
-  // Draft restore: dead blob src + sig → OPFS, then cloud vault; remap to a fresh blob URL.
+  // Source recovery belongs to the shared runtime; this hook derives audio waveforms once ready.
   useEffect(() => {
     for (const clip of comp.audioTracks ?? []) {
       const sig = clip.sig;
@@ -302,10 +293,11 @@ export function useAudioTracks(deps: AudioTracksDeps) {
       recoverTriedRef.current.add(sig);
       const generation = runtimeGenerationRef.current;
       void (async () => {
-        let f = await loadLocalVideo(sig);
-        if (!f) f = await studioProviders().vault.fetch(sig);
-        if (!f || generation !== runtimeGenerationRef.current) return; // stays unusable → panel offers re-pick
-        void saveLocalVideo(f, sig);
+        const f = clipFilesRef.current.get(clip.src);
+        if (!f || generation !== runtimeGenerationRef.current) {
+          recoverTriedRef.current.delete(sig);
+          return;
+        }
         audioFilesRef.current.set(sig, f);
         setAudioFileRev((v) => v + 1);
         void decodeAudioFile(f)
@@ -315,13 +307,6 @@ export function useAudioTracks(deps: AudioTracksDeps) {
             }
           })
           .catch(() => {});
-        const url = createAudioObjectUrl(f);
-        if (!url) return;
-        const runtimeComposition = {
-          ...compRef.current,
-          audioTracks: (compRef.current.audioTracks ?? []).map((x) => (x.sig === sig ? { ...x, src: url } : x)),
-        };
-        setDocument(documentRef.current, runtimeComposition);
       })();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

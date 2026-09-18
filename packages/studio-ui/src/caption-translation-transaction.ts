@@ -1,110 +1,115 @@
-import {
-  type AsrSegment,
-  applyCaptionTranslations,
-  clearCaptionTranslations,
-  type CaptionTranslationItem,
-} from '@pireel/studio-engine/build-blocks';
-import { applyCaptionDocumentEdit, type Composition, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
-import type { MappedSeg } from '@pireel/studio-engine/captions-relay';
-import { captionTranscriptsByAsset } from './caption-transcript-bridge';
-import { editorErrorMessage } from './editor-error';
+import type { CaptionTranslationItem } from '@pireel/studio-engine/build-blocks';
+import { joinWords } from '@pireel/studio-engine/caption-fx';
 
 export interface CaptionTranslationRow {
   index: number;
   text: string;
 }
 
-export type CaptionTranslationStageResult =
-  | { ok: true; mainTranscript: AsrSegment[] | null; clipTranscripts: Record<string, AsrSegment[]> }
-  | { ok: false; error: string };
-
-export type CaptionTranslationTransactionResult =
-  | { ok: true; document: EditorDocumentV2; mainTranscript: AsrSegment[] | null; clipTranscripts: Record<string, AsrSegment[]> }
-  | { ok: false; error: string };
-
-function completeByPosition(groups: readonly Pick<MappedSeg, 'ref'>[], rows: readonly CaptionTranslationRow[]): Map<number, string> | null {
-  if (groups.length !== rows.length) return null;
-  const byPosition = new Map<number, string>();
-  for (const row of rows) {
-    const text = row.text.trim();
-    if (!Number.isInteger(row.index) || row.index < 0 || row.index >= groups.length || !text || byPosition.has(row.index)) return null;
-    byPosition.set(row.index, text);
-  }
-  return byPosition.size === groups.length ? byPosition : null;
+/** One on-screen caption line as the panel and the canvas derive it: which sentence of which
+ * source it belongs to, the word range it covers, and where it plays. */
+export interface TranslationLineRow {
+  /** null = the main narration domain; otherwise the inserted clip's runtime src. */
+  src: string | null;
+  /** Transcript owner when the row comes from the document (audio-lane narration has no src). */
+  assetId?: string;
+  /** Sentence index within its source's transcript. */
+  index: number;
+  w0: number;
+  w1: number;
+  text: string;
+  editedStart: number;
 }
 
 /**
- * Build the complete replacement in memory. No ref/state is mutated until every translated row and
- * every transcript target has been validated, so callers can safely abandon an invalid result.
+ * One row sent to the translator: a complete sentence of one source, written as its on-screen
+ * lines in play order and joined by LINE_MARK. The translator sees the whole sentence, so the
+ * translation reads as one sentence, and it answers with the same number of marks, so each line's
+ * share of the translation is decided by the translator rather than by word count. The sentence
+ * (a transcript segment) is the recognizer's own unit and the id the result is written back to.
  */
-export function stageCaptionTranslationReplacement(input: {
-  groups: readonly Pick<MappedSeg, 'ref'>[];
-  rows: readonly CaptionTranslationRow[];
-  target: string;
-  mainTranscript: readonly AsrSegment[] | null;
-  clipTranscripts: Readonly<Record<string, readonly AsrSegment[]>>;
-}): CaptionTranslationStageResult {
-  const translated = completeByPosition(input.groups, input.rows);
-  if (!translated) return { ok: false, error: 'Translation response was incomplete or contained invalid row ids.' };
-
-  const perSegment = new Map<string, number>();
-  for (const group of input.groups) {
-    const key = `${group.ref.src ?? ''}|${group.ref.seg}`;
-    perSegment.set(key, (perSegment.get(key) ?? 0) + 1);
-  }
-
-  const bySource = new Map<string | null, CaptionTranslationItem[]>();
-  input.groups.forEach((group, position) => {
-    const ref = group.ref;
-    const items = bySource.get(ref.src) ?? [];
-    const text = translated.get(position)!;
-    items.push((perSegment.get(`${ref.src ?? ''}|${ref.seg}`) ?? 1) > 1
-      ? { index: ref.seg, w0: ref.w0, w1: ref.w1, text }
-      : { index: ref.seg, text });
-    bySource.set(ref.src, items);
-  });
-
-  let mainTranscript = input.mainTranscript ? clearCaptionTranslations([...input.mainTranscript]) : null;
-  const clipTranscripts = Object.fromEntries(Object.entries(input.clipTranscripts).map(([source, segments]) => [
-    source,
-    clearCaptionTranslations([...segments]),
-  ]));
-
-  for (const [source, items] of bySource) {
-    const segments = source ? clipTranscripts[source] : mainTranscript;
-    if (!segments?.length) return { ok: false, error: source ? `Translation source is no longer available: ${source}` : 'The main transcript is no longer available.' };
-    if (items.some((item) => item.index < 0 || item.index >= segments.length)) {
-      return { ok: false, error: 'The transcript changed while it was being translated.' };
-    }
-    const next = applyCaptionTranslations(segments, items, input.target);
-    if (source) clipTranscripts[source] = next;
-    else mainTranscript = next;
-  }
-
-  return { ok: true, mainTranscript, clipTranscripts };
+export interface TranslationUnit {
+  src: string | null;
+  assetId?: string;
+  seg: number;
+  start: number;
+  text: string;
+  /** Cue word ranges, one per LINE_MARK-separated piece of `text`, in play order. */
+  lines: { w0: number; w1: number }[];
 }
 
-/** Apply transcript replacement, caption relay, and target-language style in one document edit. */
-export function replaceCaptionTranslationsTransaction(input: {
-  document: EditorDocumentV2;
-  composition: Composition;
-  groups: readonly Pick<MappedSeg, 'ref'>[];
-  rows: readonly CaptionTranslationRow[];
-  target: string;
-  mainTranscript: readonly AsrSegment[] | null;
-  clipTranscripts: Readonly<Record<string, readonly AsrSegment[]>>;
-}): CaptionTranslationTransactionResult {
-  const staged = stageCaptionTranslationReplacement(input);
-  if (!staged.ok) return staged;
+/** Line-break mark inside a sentence row. Plain text a translation model carries across unchanged
+ * far more reliably than any instruction asks it to; a bar is not a word in any target language. */
+export const LINE_MARK = ' | ';
+const MARK_SPLIT = /\s*[|｜]\s*/;
 
-  const edit = applyCaptionDocumentEdit({
-    document: input.document,
-    patch: {
-      sub: { ...(input.document.appearance.captionStyle?.sub ?? {}), lang: input.target },
-    },
-    mainTranscript: staged.mainTranscript,
-    clipTranscripts: captionTranscriptsByAsset(input.document, input.composition, staged.clipTranscripts),
-  });
-  if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error) };
-  return { ...staged, document: edit.document };
+/** Source text must not contain the mark itself, or the answer's pieces cannot be counted. */
+const withoutMarks = (text: string): string => text.replace(/[|｜]/g, '/').trim();
+
+export function lineTranslationUnits(rows: readonly TranslationLineRow[]): TranslationUnit[] {
+  const units = new Map<string, TranslationUnit>();
+  for (const row of [...rows].sort((left, right) => left.editedStart - right.editedStart)) {
+    const text = withoutMarks(row.text);
+    if (!text) continue;
+    const key = `${row.assetId ?? row.src ?? ''}|${row.index}`;
+    const unit = units.get(key);
+    if (unit) {
+      unit.text += LINE_MARK + text;
+      unit.lines.push({ w0: row.w0, w1: row.w1 });
+    } else {
+      units.set(key, {
+        src: row.src,
+        ...(row.assetId ? { assetId: row.assetId } : {}),
+        seg: row.index,
+        start: row.editedStart,
+        text,
+        lines: [{ w0: row.w0, w1: row.w1 }],
+      });
+    }
+  }
+  return [...units.values()].sort((left, right) => left.start - right.start);
+}
+
+function completeByPosition(count: number, rows: readonly CaptionTranslationRow[]): Map<number, string> | null {
+  if (count !== rows.length) return null;
+  const byPosition = new Map<number, string>();
+  for (const row of rows) {
+    const text = row.text.trim();
+    if (!Number.isInteger(row.index) || row.index < 0 || row.index >= count || !text || byPosition.has(row.index)) return null;
+    byPosition.set(row.index, text);
+  }
+  return byPosition.size === count ? byPosition : null;
+}
+
+/** The translator's answer for one sentence: the pieces between its marks, and the sentence with
+ * the marks removed. */
+export function splitTranslatedLines(text: string): { pieces: string[]; whole: string } {
+  const pieces = text.split(MARK_SPLIT).map((piece) => piece.trim()).filter(Boolean);
+  return { pieces, whole: joinWords(pieces) };
+}
+
+/** Translations to write, grouped by source: one per on-screen line, keyed by the line's word
+ * range. An answer that lost or added a line mark is refused for the whole run, naming the
+ * sentence, so a mismatch is seen and fixed rather than papered over. Nothing is written until
+ * every row validated. */
+export type CaptionTranslationWrites =
+  | { ok: true; writes: { src: string | null; assetId?: string; items: CaptionTranslationItem[] }[] }
+  | { ok: false; error: string };
+
+export function captionTranslationWrites(units: readonly TranslationUnit[], rows: readonly CaptionTranslationRow[]): CaptionTranslationWrites {
+  const translated = completeByPosition(units.length, rows);
+  if (!translated) return { ok: false, error: 'Translation response was incomplete or contained invalid row ids.' };
+  const bySource = new Map<string, { src: string | null; assetId?: string; items: CaptionTranslationItem[] }>();
+  for (const [position, unit] of units.entries()) {
+    const answer = translated.get(position)!;
+    const { pieces } = splitTranslatedLines(answer);
+    if (pieces.length !== unit.lines.length) {
+      return { ok: false, error: `Translation of "${unit.text}" came back with ${pieces.length} line(s) for ${unit.lines.length}: "${answer}"` };
+    }
+    const key = unit.assetId ?? unit.src ?? '';
+    const write = bySource.get(key) ?? { src: unit.src, ...(unit.assetId ? { assetId: unit.assetId } : {}), items: [] };
+    unit.lines.forEach((line, at) => write.items.push({ index: unit.seg, w0: line.w0, w1: line.w1, text: pieces[at]! }));
+    bySource.set(key, write);
+  }
+  return { ok: true, writes: [...bySource.values()] };
 }

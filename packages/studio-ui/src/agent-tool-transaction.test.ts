@@ -7,15 +7,22 @@ import {
   emptyEditorDocumentV2,
   projectDocumentToComposition,
   runAgentTimelineTool,
+  setClipPatches,
 } from '@pireel/studio-engine/composition';
-import { buildChatSystem, buildHtmlSystem } from '@pireel/studio-engine/prompts';
+import { buildHtmlSystem } from '@pireel/studio-engine/prompts';
 import type { AgentToolCtx } from './agent-tool-runner';
+import { DocumentCommitter } from './document-commit';
 import { GeneratedBlockValidationError } from './compose-result';
 import { classifyAsrResponse } from './media';
 import { localAssetMentionId } from './chat-local-asset-mention';
 import { resolveInteraction } from './interaction-store';
 
 const providerMocks = vi.hoisted(() => ({ transcribe: vi.fn() }));
+const captureMocks = vi.hoisted(() => ({ captureCompositionFrame: vi.fn() }));
+vi.mock('./client-export', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./client-export')>()),
+  captureCompositionFrame: captureMocks.captureCompositionFrame,
+}));
 const mediaMocks = vi.hoisted(() => ({ probeVideoFile: vi.fn() }));
 const visualMocks = vi.hoisted(() => ({ analyzeVisual: vi.fn(), analyzeVisualGeometry: vi.fn() }));
 const editorialReviewMocks = vi.hoisted(() => ({
@@ -111,6 +118,16 @@ function harness() {
     documentRef.current = document;
     compRef.current = runtimeComposition ?? projectDocumentToComposition(document);
   };
+  // The real committer, wired to the refs: tools commit operations exactly as in the workbench.
+  const committer = new DocumentCommitter({
+    projectId: 'test',
+    getDocument: () => documentRef.current,
+    publish: setDocument,
+    undoStack: undoStackRef,
+    redoStack: redoStackRef,
+    undoCap: 20,
+    onTransaction: () => {},
+  });
   return {
     ctx: {
       compRef,
@@ -120,9 +137,19 @@ function harness() {
       asrRef,
       clipAsrRef,
       localTranscriptCacheRef: { current: new Map() },
-      setDocument,
+      commit: committer.commit.bind(committer),
+      replaceDocument: (document: EditorDocumentV2, options: Parameters<DocumentCommitter['replace']>[1]) => committer.replace(document, options),
+      beginTransactionScope: () => committer.scope(),
+      pushUndoSnapshot: () => committer.pushUndoSnapshot(),
       pickVideoFile: async () => {},
+      // Byte resolution by asset id: no session caches, no device runtime binding unless a test wires one.
+      resolveAssetUrl: (asset: { locator: { remoteUrl?: string } }) => asset.locator.remoteUrl ?? null,
+      clipFilesRef: { current: new Map<string, File>() },
+      videoFileRef: { current: null as File | null },
+      prepareLocalAssetRuntime: async () => ({ ok: true, prepared: false }),
     } as unknown as AgentToolCtx,
+    /** Direct document write for test setup and for simulating a raw in-tool mutation. */
+    setDocument,
     compRef,
     documentRef,
     undoStackRef,
@@ -131,6 +158,37 @@ function harness() {
 }
 
 describe('Agent composition transaction boundary', () => {
+  it('places an official audio ID from the host without any browser search cache', async () => {
+    const { runExternalTool } = await import('./agent-tool-runner');
+    const h = harness();
+    h.ctx.genIdsRef = { current: new Set<string>() };
+    h.ctx.pushUndoSnapshot = () => { h.undoStackRef.current.push(h.documentRef.current); };
+    const result = await runExternalTool(h.ctx, 'run_v3', { name: 'add_clips',
+      args: { clips: [{ assetId: 'bgm:host-test', role: 'music', startFrame: 0, source: [0, 5] }] },
+      placementAssets: [{ id: 'bgm:host-test', kind: 'audio', url: 'https://cdn.example/test.mp3', durationSec: 5 }],
+    });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(h.documentRef.current.assets['bgm:host-test'].locator.remoteUrl).toBe('https://cdn.example/test.mp3');
+    expect(h.documentRef.current.timeline.tracks.flatMap(t => t.clips).some(c => c.kind === 'audio' && c.assetId === 'bgm:host-test')).toBe(true);
+    expect(h.undoStackRef.current).toHaveLength(1);
+  });
+  it('patches kit row properties through the live v3 surface and preserves them on readback', async () => {
+    if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
+    const { runExternalTool } = await import('./agent-tool-runner');
+    const h = harness();
+    h.ctx.genIdsRef = { current: new Set<string>() };
+    h.ctx.pushUndoSnapshot = () => { h.ctx.undoStackRef.current.push(h.ctx.documentRef.current); };
+    const comp = composition();
+    comp.blocks.push({ id: 'kit-steps', templateId: 'kit:steps', slots: { props: { variant: 'pipeline' } }, startSec: 0, durationSec: 3, trackIndex: 1 });
+    h.setDocument(compositionToEditorDocument({ projectId: 'test', composition: comp }).document);
+    const result = await runExternalTool(h.ctx, 'run_v3', { name: 'set_clip_properties', args: { items: [{ clipId: 'kit-steps', props: [{ key: 'items', value: [{ text: 'One', note: 'First' }, { text: 'Two', note: '' }] }] }] } });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(h.compRef.current.blocks.find((block) => block.id === 'kit-steps')!.slots.props).toMatchObject({ variant: 'pipeline', items: [{ text: 'One', note: 'First' }, { text: 'Two', note: '' }] });
+    const state = await runExternalTool(h.ctx, 'run_v3', { name: 'get_state', args: {} });
+    expect(JSON.stringify(state.data)).toContain('First');
+    expect(h.undoStackRef.current).toHaveLength(1);
+  });
+
   beforeEach(() => {
     speechMocks.assessLocalSpeechAudio.mockResolvedValue({
       classification: 'speech-likely', hasAudio: true, audible: true, speechLikely: true,
@@ -172,6 +230,36 @@ describe('Agent composition transaction boundary', () => {
     vi.unstubAllGlobals();
   });
 
+  it('bakes a component into its original lane and time using the render id envelope', async () => {
+    const h = harness();
+    const comp = { ...composition(), blocks: [{ id: 'graphic', templateId: 'custom', slots: { innerHtml: '<b>Test</b>', timelineBody: '' }, startSec: 4, durationSec: 2, trackIndex: 2, box: { x: 0.1, y: 0.2, w: 0.5, h: 0.4 } }] };
+    h.setDocument(compositionToEditorDocument({ projectId: 'test', composition: comp }).document);
+    const originalTrack = h.documentRef.current.timeline.tracks.find((track) => track.clips.some((clip) => clip.id === 'graphic'))!;
+    Object.assign(h.ctx, { projectId: 'test', genIdsRef: { current: new Set() }, pushUndoSnapshot: () => h.undoStackRef.current.push(h.documentRef.current) });
+    const fetch = vi.fn().mockResolvedValue(Response.json({ id: 'job-1', status: 'done', output: { url: 'https://cdn.pireel.com/baked.webm', durationSec: 2 } }));
+    vi.stubGlobal('fetch', fetch);
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const result = await runStudioTool(h.ctx, 'bake_component', { clipId: 'graphic' });
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true });
+    const track = h.documentRef.current.timeline.tracks.find((track) => track.id === originalTrack.id)!;
+    expect(track.stackOrder).toBe(originalTrack.stackOrder);
+    expect(track.clips.find((clip) => clip.id === 'graphic')).toMatchObject({ kind: 'media', startFrame: 120, durationFrames: 60, box: { x: 0, y: 0, w: 1, h: 1 } });
+    expect(h.documentRef.current.timeline.tracks.flatMap((track) => track.clips).filter((clip) => clip.id === 'graphic')).toHaveLength(1);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains the editable component and reports structured render failures', async () => {
+    const h = harness();
+    const comp = { ...composition(), blocks: [{ id: 'graphic', templateId: 'custom', slots: { innerHtml: '<b>Test</b>', timelineBody: '' }, startSec: 4, durationSec: 2, trackIndex: 2 }] };
+    h.setDocument(compositionToEditorDocument({ projectId: 'test', composition: comp }).document);
+    const before = h.documentRef.current;
+    Object.assign(h.ctx, { projectId: 'test', genIdsRef: { current: new Set() }, pushUndoSnapshot: () => h.undoStackRef.current.push(h.documentRef.current) });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ id: 'job-1', status: 'failed', error: { code: 'render_failed', message: 'Renderer unavailable' } })));
+    const { runStudioTool } = await import('./agent-tool-runner');
+    expect(await runStudioTool(h.ctx, 'bake_component', { clipId: 'graphic' })).toMatchObject({ ok: false, error: 'Renderer unavailable' });
+    expect(h.documentRef.current).toBe(before);
+  });
+
   it('derives generated-video ratio and resolution from the active canvas', async () => {
     const { adaptiveGeneratedVideoSpec } = await import('./agent-tool-runner');
     expect(adaptiveGeneratedVideoSpec(1080, 1920)).toEqual({ aspectRatio: '9:16', resolution: '1080p' });
@@ -186,7 +274,7 @@ describe('Agent composition transaction boundary', () => {
       canvas: { ...h.documentRef.current.canvas, configured: true },
     };
 
-    const fill = runAgentTimelineTool(h.documentRef.current, 'set_clip_properties', {
+    const fill = setClipPatches(h.documentRef.current, {
       items: [{ clipId: 's1', fit: 'cover' }],
     });
     expect(fill).toMatchObject({
@@ -223,8 +311,8 @@ describe('Agent composition transaction boundary', () => {
     }).document!;
     document = runAgentTimelineTool(document, 'add_clips', {
       clips: [
-        { id: 'old-picture', role: 'primary', assetId: 'old-video', startSec: 0, sourceInSec: 0, sourceOutSec: 5 },
-        { id: 'voice', role: 'narration', assetId: 'narration', startSec: 0, sourceInSec: 0, sourceOutSec: 5 },
+        { id: 'old-picture', role: 'primary', assetId: 'old-video', startFrame: 0, source: [0, 5] },
+        { id: 'voice', role: 'narration', assetId: 'narration', startFrame: 0, source: [0, 5] },
       ],
     }).document!;
     h.documentRef.current = document;
@@ -238,8 +326,8 @@ describe('Agent composition transaction boundary', () => {
     const result = await runStudioTool(h.ctx, 'add_clips', {
       __replacePrimaryTrack: true,
       clips: [{
-        id: 'new-picture', role: 'primary', assetId: 'new-video', startSec: 1 / 30,
-        sourceInSec: 0, sourceOutSec: 149 / 30,
+        id: 'new-picture', role: 'primary', assetId: 'new-video', startFrame: 1,
+        source: [0, 149 / 30],
       }],
     });
 
@@ -391,7 +479,8 @@ describe('Agent composition transaction boundary', () => {
     vi.stubGlobal('fetch', fetchMock);
     const { runStudioTool } = await import('./agent-tool-runner');
 
-    await expect(runStudioTool(h.ctx, 'design_voice', {
+    await expect(runStudioTool(h.ctx, 'manage_voices', {
+      action: 'design',
       prompt: 'Warm, credible English narrator',
       language: 'en',
       name: 'Warm narrator',
@@ -414,24 +503,10 @@ describe('Agent composition transaction boundary', () => {
     expect(classifyAsrResponse({ asr_ok: false, detail: 'dashscope_asr poll HTTP 503: busy' })).toBe('failed');
     expect(classifyAsrResponse({ asr_ok: false, detail: 'dashscope_asr returned no text' })).toBe('empty');
 
-    const h = harness();
-    Object.assign(h.ctx, {
-      videoFileRef: { current: new File(['video'], 'talking-head.mp4', { type: 'video/mp4' }) },
-      stepAsr: async () => { throw new Error('提取口播稿失败,稍后再试'); },
-      genIdsRef: { current: new Set<string>() },
-      pushUndoSnapshot: () => h.undoStackRef.current.push(h.documentRef.current),
-    });
-    if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
-    const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'read_script', {});
-    expect(result).toMatchObject({ ok: false, error: '提取口播稿失败,稍后再试' });
-
     const skill = readFileSync(new URL('../../studio-engine/src/scenario-skills/content/talking-head-edit/SKILL.md', import.meta.url), 'utf8');
     const execute = skill.slice(skill.indexOf('## Step 10: Execute with tool discipline'));
     expect(execute).toContain('Place the narration spine first, then run `remove_silence`');
     expect(execute).toContain('do not retry it in the same user request');
-    expect(buildChatSystem(null)).toContain('run remove_silence before transcript-driven edits');
-    expect(buildChatSystem(null)).not.toContain('planning artifact');
   });
 
   it('prepares every referenced device-local media asset before clips are committed', async () => {
@@ -445,7 +520,7 @@ describe('Agent composition transaction boundary', () => {
     });
     expect(registered.ok).toBe(true);
     if (!registered.document) throw new Error('registration did not return a document');
-    h.ctx.setDocument(registered.document);
+    h.setDocument(registered.document);
     const prepareLocalAssetRuntime = vi.fn().mockResolvedValue({ ok: true, prepared: true });
     Object.assign(h.ctx, {
       prepareLocalAssetRuntime,
@@ -456,9 +531,9 @@ describe('Agent composition transaction boundary', () => {
     const { runStudioTool } = await import('./agent-tool-runner');
     const result = await runStudioTool(h.ctx, 'add_clips', {
       clips: [
-        { assetId: 'local-video', startSec: 0, durationSec: 4 },
-        { assetId: 'local-image', startSec: 4, durationSec: 4 },
-        { assetId: 'local-audio', startSec: 0, durationSec: 6, role: 'narration' },
+        { assetId: 'local-video', startFrame: 0, durationFrames: 120 },
+        { assetId: 'local-image', startFrame: 120, durationFrames: 120 },
+        { assetId: 'local-audio', startFrame: 0, durationFrames: 180, role: 'narration' },
       ],
     });
 
@@ -477,7 +552,7 @@ describe('Agent composition transaction boundary', () => {
 
   it('places a project-library asset in a fresh output without a separate register_media retry', async () => {
     const h = harness();
-    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1920, height: 1080, fps: 30 }));
+    h.setDocument(emptyEditorDocumentV2({ width: 1920, height: 1080, fps: 30 }));
     const assetId = 'shared-product-video';
     const sig = 'product.mp4:120:8';
     const video = new File(['full-source-video'], 'product.mp4', { type: 'video/mp4', lastModified: 8 });
@@ -495,7 +570,7 @@ describe('Agent composition transaction boundary', () => {
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
     const result = await runStudioTool(h.ctx, 'add_clips', {
-      clips: [{ assetId: `local:${assetId}`, startSec: 0, role: 'primary' }],
+      clips: [{ assetId: `local:${assetId}`, startFrame: 0, role: 'primary' }],
     }, { surface: 'chat' });
 
     expect(result.ok, JSON.stringify(result)).toBe(true);
@@ -520,7 +595,7 @@ describe('Agent composition transaction boundary', () => {
 
   it('mounts every montage source as a peer when several videos are placed together', async () => {
     const h = harness();
-    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1920, height: 1080, fps: 30 }));
+    h.setDocument(emptyEditorDocumentV2({ width: 1920, height: 1080, fps: 30 }));
     const first = new File(['first'], 'first.mov', { type: 'video/quicktime', lastModified: 1 });
     const second = new File(['second'], 'second.mov', { type: 'video/quicktime', lastModified: 2 });
     mediaMocks.probeVideoFile
@@ -551,8 +626,8 @@ describe('Agent composition transaction boundary', () => {
 
     const result = await runStudioTool(h.ctx, 'add_clips', {
       clips: [
-        { assetId: 'local:first-video', role: 'primary', startSec: 0 },
-        { assetId: 'local:second-video', role: 'primary', startSec: 4 },
+        { assetId: 'local:first-video', role: 'primary', startFrame: 0 },
+        { assetId: 'local:second-video', role: 'primary', startFrame: 120 },
       ],
     });
 
@@ -564,16 +639,57 @@ describe('Agent composition transaction boundary', () => {
       ['second-video', { asPrimary: false }],
     ]);
     expect(pickVideoFile).not.toHaveBeenCalled();
-    const withText = runAgentTimelineTool(h.documentRef.current, 'add_texts', {
-      items: [{ id: 'hook', text: '轻花字', startSec: 0.2, durationSec: 3.6 }],
+    const withText = runAgentTimelineTool(h.documentRef.current, 'set_texts', {
+      items: [{ id: 'hook', text: '轻花字', startFrame: 6, durationFrames: 108 }],
     });
     expect(withText.ok).toBe(true);
     expect(unplannedReviewAtSecs(withText.document!)).toEqual([2, 6]);
   });
 
+  it('accepts CSS recovery through the live v3 component submission without a failure receipt', async () => {
+    const h = harness();
+    Object.assign(h.ctx, {
+      genIdsRef: { current: new Set() }, t: (key: string) => key,
+      pushUndoSnapshot: () => h.undoStackRef.current.push(h.documentRef.current),
+      setSelectedShotId: vi.fn(), setSelectedId: vi.fn(), applyT: vi.fn(),
+    });
+    const { runExternalTool } = await import('./agent-tool-runner');
+    const result = await runExternalTool(h.ctx, 'run_v3', { name: 'apply_component', args: {
+      clipId: 'css-recovery', raw: '```html\n<div data-edit="t">Text</div><style>???{color:red}.label{color:blue}</style>\n```', atFrame: 0, durationFrames: 90,
+    } });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(h.compRef.current.blocks.find((block) => block.id === 'css-recovery')?.slots.innerHtml).toContain('Text');
+  });
+
+  it.each([
+    { name: 'manage_project', args: { scope: 'project', action: 'list' }, error: 'project_nav_not_available_in_chat', hint: 'use manage_project scope:output' },
+    { name: 'create_browser_handoff', args: {}, error: 'handoff_not_available_in_chat', hint: 'no handoff is needed' },
+  ])('passes $name recovery guidance all the way to the chat model error', async ({ name, args, error, hint }) => {
+    const h = harness();
+    h.ctx.pushUndoSnapshot = vi.fn();
+    const { runExternalTool } = await import('./agent-tool-runner');
+    const { studioToolFailureText } = await import('./chat-component-retries');
+    const result = await runExternalTool(h.ctx, 'run_v3', { name, args });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe(error);
+    // This is the same final serialization consumed by chat's addToolOutput(output-error).
+    expect(studioToolFailureText(result.error!, result.data)).toContain(hint);
+  });
+
+  it('returns concrete lint diagnostics through the live v3 failure receipt', async () => {
+    const h = harness();
+    Object.assign(h.ctx, { genIdsRef: { current: new Set() }, t: (key: string) => key });
+    const { runExternalTool } = await import('./agent-tool-runner');
+    const result = await runExternalTool(h.ctx, 'run_v3', { name: 'apply_component', args: {
+      clipId: 'bad-graphic', raw: '```html\n<div data-edit="t">Text</div><script>alert(1)</script>\n```', atFrame: 0, durationFrames: 90,
+    } });
+    expect(result.ok).toBe(false);
+    expect(result.data).toMatchObject({ blockId: 'bad-graphic', issues: expect.arrayContaining([expect.stringContaining('must not contain <script>')]) });
+  });
+
   it('run_v3 answers get_state in the v3 shape and applies a mutation as one delta-bearing step', async () => {
     const h = harness();
-    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
+    h.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
     const first = new File(['first'], 'first.mov', { type: 'video/quicktime', lastModified: 1 });
     mediaMocks.probeVideoFile.mockResolvedValueOnce({ durationSec: 4, width: 1080, height: 1920, hasAudio: true });
     Object.assign(h.ctx, {
@@ -584,10 +700,15 @@ describe('Agent composition transaction boundary', () => {
       pushUndoSnapshot: () => { h.ctx.undoStackRef.current = [...h.ctx.undoStackRef.current, h.ctx.documentRef.current]; },
     });
     const { runExternalTool } = await import('./agent-tool-runner');
-    const placed = await runExternalTool(h.ctx, 'add_clips', { clips: [{ assetId: 'local:first-video', role: 'primary', startSec: 0 }] });
+    const placed = await runExternalTool(h.ctx, 'add_clips', { clips: [{ assetId: 'local:first-video', role: 'primary', startFrame: 0 }] });
     expect(placed.ok, JSON.stringify(placed)).toBe(true);
 
+    Object.assign(h.ctx, { projectId: 'project-identity', listProjectOutputs: () => [{ id: 'output-main', position: 1, title: 'Main', active: true, durationSec: 4 }] });
     const state = await runExternalTool(h.ctx, 'run_v3', { name: 'get_state', args: {} });
+    expect(state.ok, JSON.stringify(state).slice(0, 600)).toBe(true);
+    expect((state.data as { project: unknown }).project).toEqual({ id: 'project-identity' });
+    expect((state.data as { output: unknown }).output).toEqual({ id: 'output-main', title: 'Main' });
+    expect((state.data as { outputs: Array<{ id: string; active: boolean }> }).outputs.map((output) => [output.id, output.active])).toEqual([['output-main', true]]);
     expect(state.ok).toBe(true);
     const view = state.data as { canvas: { fps: number }; tracks: Array<{ clips?: Array<{ id: string; frames: [number, number] }> }>; playhead: number };
     expect(view.canvas.fps).toBe(30);
@@ -596,18 +717,40 @@ describe('Agent composition transaction boundary', () => {
 
     const added = await runExternalTool(h.ctx, 'run_v3', { name: 'set_texts', args: { items: [{ text: 'Hook', startFrame: 6, durationFrames: 90, preset: 'headline' }] } });
     expect(added.ok, JSON.stringify(added)).toBe(true);
-    const data = added.data as { delta?: { clips?: Array<{ kind: string; frames: [number, number] }> }; steps: unknown[] };
-    expect(data.steps).toHaveLength(1);
+    const data = added.data as { delta?: { clips?: Array<{ kind: string; frames: [number, number] }> } };
+    expect(data).not.toHaveProperty('steps');
     expect(data.delta?.clips?.some((clip) => clip.frames[0] === 6), JSON.stringify(added).slice(0, 600)).toBe(true);
     expect(JSON.stringify(data.delta)).not.toContain('blocksAdded');
 
-    // Two legacy steps (set_shot_audio + set_video_speed) collapse into ONE undo step and one delta.
+    // Sound and speed on one clip are one native step, one undo step and one delta.
     const primaryId = view.tracks.flatMap((track) => track.clips ?? []).find((clip) => (clip as { kind?: string }).kind === 'narrative')!.id;
     const undoBefore = h.ctx.undoStackRef.current.length;
     const patched = await runExternalTool(h.ctx, 'run_v3', { name: 'set_clip_properties', args: { items: [{ clipId: primaryId, volumeDb: -6, speed: 0.5 }] } });
     expect(patched.ok, JSON.stringify(patched).slice(0, 600)).toBe(true);
-    expect((patched.data as { steps: unknown[] }).steps).toHaveLength(2);
+    expect((patched.data as { delta?: unknown }).delta).toBeTruthy();
     expect(h.ctx.undoStackRef.current.length).toBe(undoBefore + 1);
+  });
+
+  it('run_v3 returns all requested frame images in capture order with their metadata', async () => {
+    const h = harness();
+    Object.assign(h.ctx, {
+      t: (key: string) => key,
+      tRef: { current: 0 },
+      videoFileRef: { current: null },
+      clipFilesRef: { current: new Map() },
+    });
+    captureMocks.captureCompositionFrame.mockImplementation(async ({ atSec }: { atSec: number }) => ({
+      dataUrl: `data:image/jpeg;base64,frame-${atSec}`, width: 960, height: 540,
+    }));
+    const { runExternalTool } = await import('./agent-tool-runner');
+    const result = await runExternalTool(h.ctx, 'run_v3', { name: 'inspect_timeline', args: { frames: [30, 60] } });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    // No cloud store in this harness: frames stay inline, each with its capture size.
+    expect(result.images).toEqual([
+      { data: 'frame-1', mimeType: 'image/jpeg', width: 960, height: 540 },
+      { data: 'frame-2', mimeType: 'image/jpeg', width: 960, height: 540 },
+    ]);
+    expect((result.data as { frames: Array<{ frame: number; atSec: number }> }).frames.map((frame) => [frame.frame, frame.atSec])).toEqual([[30, 1], [60, 2]]);
   });
 
   it('lists project-local assets without exposing device storage locators', async () => {
@@ -619,14 +762,14 @@ describe('Agent composition transaction boundary', () => {
       t: (key: string) => key,
     });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'list_assets', { scope: 'mine' });
+    const result = await runStudioTool(h.ctx, 'search_assets', { scope: 'mine' });
 
     expect(result).toMatchObject({
       ok: true,
       data: {
-        assets: [{ id: `local:${assetId}`, kind: 'video', label: '商品展示' }],
+        assets: [{ id: assetId, kind: 'video', label: '商品展示' }],
         placementRequiredForInspection: false,
-        usageHint: expect.stringContaining('analyze_visual/read_script while unplaced'),
+        usageHint: expect.stringContaining('inspect_media/get_transcript while unplaced'),
       },
     });
     expect(JSON.stringify((result as { data?: { assets?: unknown } }).data?.assets))
@@ -663,7 +806,7 @@ describe('Agent composition transaction boundary', () => {
     });
     expect(registered.ok).toBe(true);
     if (!registered.document) throw new Error('registration did not return a document');
-    h.ctx.setDocument(registered.document);
+    h.setDocument(registered.document);
     const before = h.documentRef.current;
     Object.assign(h.ctx, {
       prepareLocalAssetRuntime: vi.fn().mockResolvedValue({ ok: false, error: 'restore local access' }),
@@ -673,7 +816,7 @@ describe('Agent composition transaction boundary', () => {
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
     const result = await runStudioTool(h.ctx, 'add_clips', {
-      clips: [{ assetId: 'missing-video', startSec: 0, durationSec: 4 }],
+      clips: [{ assetId: 'missing-video', startFrame: 0, durationFrames: 120 }],
     });
 
     expect(result).toMatchObject({
@@ -717,8 +860,8 @@ describe('Agent composition transaction boundary', () => {
     });
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'prepare_local_image', { assetId });
-    const legacyResult = await runStudioTool(h.ctx, 'prepare_local_image', { sig });
+    const result = await runStudioTool(h.ctx, 'prepare_local_asset', { assetId });
+    const legacyResult = await runStudioTool(h.ctx, 'prepare_local_asset', { sig });
 
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(legacyResult.ok, JSON.stringify(legacyResult)).toBe(true);
@@ -756,12 +899,12 @@ describe('Agent composition transaction boundary', () => {
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
     const mentionId = localAssetMentionId(assetId);
-    const result = await runStudioTool(h.ctx, 'inspect_images', { refs: [mentionId] });
+    const result = await runStudioTool(h.ctx, 'inspect_media', { mode: 'frames', ids: [mentionId] });
 
     expect(result).toMatchObject({
       ok: true,
       data: {
-        images: [{ ref: `local:${assetId}`, label: '转化率数据', description: expect.stringContaining('12% to 31%') }],
+        images: [{ ref: assetId, label: '转化率数据', description: expect.stringContaining('12% to 31%') }],
       },
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -787,7 +930,7 @@ describe('Agent composition transaction boundary', () => {
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
     const controller = new AbortController();
-    const pending = runStudioTool(h.ctx, 'inspect_images', { refs: [localAssetMentionId(assetId)] }, { signal: controller.signal, surface: 'chat' });
+    const pending = runStudioTool(h.ctx, 'inspect_media', { mode: 'frames', ids: [localAssetMentionId(assetId)] }, { signal: controller.signal, surface: 'chat' });
 
     controller.abort();
 
@@ -811,7 +954,7 @@ describe('Agent composition transaction boundary', () => {
     const assetIdsBefore = Object.keys(h.documentRef.current.assets);
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'read_script', { assetId: localAssetMentionId(assetId) });
+    const result = await runStudioTool(h.ctx, 'get_transcript', { assetId: localAssetMentionId(assetId) });
 
     expect(result).toMatchObject({
       ok: true,
@@ -833,7 +976,7 @@ describe('Agent composition transaction boundary', () => {
 
   it('reuses an unplaced local transcript after that asset becomes the primary source', async () => {
     const h = harness();
-    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1920, height: 1080, fps: 30 }));
+    h.setDocument(emptyEditorDocumentV2({ width: 1920, height: 1080, fps: 30 }));
     const assetId = 'asset-promoted-speaker';
     const sig = 'promoted-speaker.mp4:240:12';
     const video = new File(['video-with-speech'], 'promoted-speaker.mp4', { type: 'video/mp4', lastModified: 12 });
@@ -858,34 +1001,34 @@ describe('Agent composition transaction boundary', () => {
     });
     const { runStudioTool } = await import('./agent-tool-runner');
 
-    const read = await runStudioTool(h.ctx, 'read_script', { assetId: localAssetMentionId(assetId) });
+    const read = await runStudioTool(h.ctx, 'get_transcript', { assetId: localAssetMentionId(assetId) });
     expect(read.ok, JSON.stringify(read)).toBe(true);
     const placed = await runStudioTool(h.ctx, 'add_clips', {
-      clips: [{ assetId: localAssetMentionId(assetId), role: 'primary', startSec: 0 }],
+      clips: [{ assetId: localAssetMentionId(assetId), role: 'primary', startFrame: 0 }],
     });
     expect(placed.ok, JSON.stringify(placed)).toBe(true);
-    const words = await runStudioTool(h.ctx, 'list_words', { sentenceIndexes: [0] }, { surface: 'chat' });
+    const words = await runStudioTool(h.ctx, 'get_transcript', { granularity: 'words', segmentIndexes: [0] }, { surface: 'chat' });
 
-    expect(words).toMatchObject({ ok: true, summary: '定位精确词语' });
+    expect(words.ok, JSON.stringify(words)).toBe(true);
     expect((words.data as { words: unknown[] }).words).toHaveLength(1);
     expect(providerMocks.transcribe).toHaveBeenCalledTimes(1);
-    expect(h.ctx.asrRef.current).toEqual(transcript);
+    // The document owns the transcript; the tab's runtime copies follow it outside the tool layer.
     expect(h.documentRef.current.semantics.transcripts[assetId]).toEqual(transcript);
-    expect(setAsrSentences).toHaveBeenCalledWith(transcript);
+    expect(setAsrSentences).not.toHaveBeenCalled();
   });
 
   it('persists transcript state when a placed local video is referenced with its list_assets id', async () => {
     const h = harness();
-    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
+    h.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
     const assetId = 'asset-placed-speaker';
     const sig = 'placed-speaker.mp4:240:12';
     const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
       assets: [{ id: assetId, kind: 'video', localSig: sig, durationSec: 18, width: 1080, height: 1920, hasAudio: true }],
     });
     const placed = runAgentTimelineTool(registered.document!, 'add_clips', {
-      clips: [{ id: 'placed-speaker-clip', assetId, role: 'primary', startSec: 0, durationSec: 18 }],
+      clips: [{ id: 'placed-speaker-clip', assetId, role: 'primary', startFrame: 0, durationFrames: 540 }],
     });
-    h.ctx.setDocument(placed.document!);
+    h.setDocument(placed.document!);
     const video = new File(['video-with-speech'], 'placed-speaker.mp4', { type: 'video/mp4', lastModified: 12 });
     localMediaMocks.loadLocalAssetFile.mockResolvedValue(video);
     mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 18, width: 1080, height: 1920, hasAudio: true });
@@ -901,34 +1044,69 @@ describe('Agent composition transaction boundary', () => {
     });
     const { runStudioTool } = await import('./agent-tool-runner');
 
-    const result = await runStudioTool(h.ctx, 'read_script', { assetId: `local:${assetId}` });
+    const result = await runStudioTool(h.ctx, 'get_transcript', { assetId: `local:${assetId}` });
 
     expect(result).toMatchObject({
       ok: true,
-      data: { assetId, transcript: expect.stringContaining('这段口播必须写回项目') },
+      data: { assetIds: [assetId], transcript: expect.stringContaining('这段口播必须写回项目') },
     });
     expect(localMediaMocks.loadLocalAssetFile).toHaveBeenCalledWith('test', expect.objectContaining({ assetId }));
     expect(h.documentRef.current.semantics.transcripts[assetId]).toEqual([
       { start: 0.2, end: 2.4, text: '这段口播必须写回项目' },
     ]);
-    expect(h.ctx.asrRef.current).toEqual([
-      { start: 0.2, end: 2.4, text: '这段口播必须写回项目' },
-    ]);
-    expect(setAsrSentences).toHaveBeenCalled();
+    expect(setAsrSentences).not.toHaveBeenCalled();
+  });
+
+  it('transcribes the first narrative source by its asset id, not by the file mounted as the main video', async () => {
+    const h = harness();
+    h.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
+    const assetId = 'asset-library-primary';
+    const sig = 'library-primary.mp4:240:12';
+    const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
+      assets: [{ id: assetId, kind: 'video', localSig: sig, durationSec: 18, width: 1080, height: 1920, hasAudio: true }],
+    });
+    const placed = runAgentTimelineTool(registered.document!, 'add_clips', {
+      clips: [{ id: 'library-primary-clip', assetId, role: 'primary', startFrame: 0, durationFrames: 540 }],
+    });
+    h.setDocument(placed.document!);
+    const assetFile = new File(['library-primary-bytes'], 'library-primary.mp4', { type: 'video/mp4', lastModified: 12 });
+    const staleMain = new File(['some-other-video'], 'other.mp4', { type: 'video/mp4', lastModified: 1 });
+    mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 18, width: 1080, height: 1920, hasAudio: true });
+    providerMocks.transcribe.mockResolvedValue([{ start: 0.2, end: 2.4, text: '按资产身份取字节' }]);
+    const stepAsr = vi.fn();
+    Object.assign(h.ctx, {
+      projectId: 'test',
+      localAssetIndexRef: { current: [] },
+      videoFileRef: { current: staleMain },
+      prepareLocalAssetRuntime: vi.fn(async (asset: { id: string }) => (asset.id === assetId ? { ok: true, prepared: true, file: assetFile } : { ok: false, error: 'unexpected asset' })),
+      stepAsr,
+      ensureClipTranscripts: async () => {},
+      transcriptForAgent: () => '',
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => {},
+    });
+    const { runStudioTool } = await import('./agent-tool-runner');
+
+    const result = await runStudioTool(h.ctx, 'get_transcript', {});
+
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(providerMocks.transcribe).toHaveBeenCalledWith(assetFile, expect.anything());
+    expect(stepAsr).not.toHaveBeenCalled();
+    expect(h.documentRef.current.semantics.transcripts[assetId]).toEqual([{ start: 0.2, end: 2.4, text: '按资产身份取字节' }]);
   });
 
   it('lazily heals the exact legacy five-second primary placeholder after probing the real source', async () => {
     const h = harness();
-    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
+    h.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
     const assetId = 'asset-legacy-placeholder';
     const sig = 'legacy-placeholder.mp4:240:12';
     const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
       assets: [{ id: assetId, kind: 'video', localSig: sig }],
     });
     const placed = runAgentTimelineTool(registered.document!, 'add_clips', {
-      clips: [{ id: 'legacy-placeholder-clip', assetId, role: 'primary', startSec: 0 }],
+      clips: [{ id: 'legacy-placeholder-clip', assetId, role: 'primary', startFrame: 0 }],
     });
-    h.ctx.setDocument(placed.document!);
+    h.setDocument(placed.document!);
     expect(h.documentRef.current.timeline.tracks.flatMap((track) => track.clips)[0])
       .toMatchObject({ durationFrames: 150, sourceOutSec: 5 });
     const video = new File(['legacy-video'], 'legacy-placeholder.mp4', { type: 'video/mp4', lastModified: 12 });
@@ -945,7 +1123,7 @@ describe('Agent composition transaction boundary', () => {
     });
     const { runStudioTool } = await import('./agent-tool-runner');
 
-    const result = await runStudioTool(h.ctx, 'read_script', { assetId: `local:${assetId}` });
+    const result = await runStudioTool(h.ctx, 'get_transcript', { assetId: `local:${assetId}` });
 
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(h.documentRef.current.timeline.tracks.flatMap((track) => track.clips)[0])
@@ -955,16 +1133,16 @@ describe('Agent composition transaction boundary', () => {
 
   it('removes silence from a placed local primary asset without relying on the legacy main-file ref', async () => {
     const h = harness();
-    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
+    h.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
     const assetId = 'asset-local-primary';
     const sig = 'local-primary.mp4:240:12';
     const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
       assets: [{ id: assetId, kind: 'video', localSig: sig, durationSec: 18, width: 1080, height: 1920, hasAudio: true }],
     });
     const placed = runAgentTimelineTool(registered.document!, 'add_clips', {
-      clips: [{ id: 'local-primary-clip', assetId, role: 'primary', startSec: 0, durationSec: 18 }],
+      clips: [{ id: 'local-primary-clip', assetId, role: 'primary', startFrame: 0, durationFrames: 540 }],
     });
-    h.ctx.setDocument(placed.document!);
+    h.setDocument(placed.document!);
     const video = new File(['video-with-pauses'], 'local-primary.mp4', { type: 'video/mp4', lastModified: 12 });
     localMediaMocks.loadLocalAssetFile.mockResolvedValue(video);
     speechMocks.detectSpeechSilenceCuts.mockResolvedValue([{ fromSec: 4, toSec: 6 }]);
@@ -1002,7 +1180,7 @@ describe('Agent composition transaction boundary', () => {
     const assetIdsBefore = Object.keys(h.documentRef.current.assets);
     const { runStudioTool } = await import('./agent-tool-runner');
 
-    const result = await runStudioTool(h.ctx, 'read_script', { assetId: `local:${assetId}` });
+    const result = await runStudioTool(h.ctx, 'get_transcript', { assetId: `local:${assetId}` });
 
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('re-import that asset in Materials') });
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('Do not place the asset on the timeline') });
@@ -1011,7 +1189,7 @@ describe('Agent composition transaction boundary', () => {
 
   it('treats provider no-fragment as a speech-free observation and mutes that local source on placement', async () => {
     const h = harness();
-    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
+    h.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
     const sig = 'noise-only.mp4:240:12';
     const video = new File(['noise'], 'noise-only.mp4', { type: 'video/mp4', lastModified: 12 });
     localMediaMocks.loadLocalVideo.mockResolvedValue(video);
@@ -1026,7 +1204,7 @@ describe('Agent composition transaction boundary', () => {
     });
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const observed = await runStudioTool(h.ctx, 'read_script', { localSig: sig });
+    const observed = await runStudioTool(h.ctx, 'get_transcript', { localSig: sig });
     expect(observed).toMatchObject({ ok: true, data: { speechDetected: false, defaultSourceAudio: 'muted' } });
 
     const registered = await runStudioTool(h.ctx, 'register_media', {
@@ -1034,7 +1212,7 @@ describe('Agent composition transaction boundary', () => {
     });
     expect(registered.ok).toBe(true);
     const placed = await runStudioTool(h.ctx, 'add_clips', {
-      clips: [{ id: 'noise-clip', assetId: 'noise', role: 'primary', startSec: 0, durationSec: 6 }],
+      clips: [{ id: 'noise-clip', assetId: 'noise', role: 'primary', startFrame: 0, durationFrames: 180 }],
     });
     expect(placed.ok).toBe(true);
     expect(h.documentRef.current.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 'noise-clip'))
@@ -1060,7 +1238,7 @@ describe('Agent composition transaction boundary', () => {
     const assetIdsBefore = Object.keys(h.documentRef.current.assets);
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'analyze_visual', { localSig: sig });
+    const result = await runStudioTool(h.ctx, 'inspect_media', { mode: 'semantic', localSig: sig });
 
     expect(result).toMatchObject({
       ok: true,
@@ -1097,8 +1275,9 @@ describe('Agent composition transaction boundary', () => {
       pushUndoSnapshot: () => {},
     });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'analyze_visual', {
-      assetId: 'asset-muted-ad',
+    const result = await runStudioTool(h.ctx, 'inspect_media', {
+      mode: 'semantic',
+      ids: ['asset-muted-ad'],
       assessAudio: false,
     });
 
@@ -1127,7 +1306,7 @@ describe('Agent composition transaction boundary', () => {
       pushUndoSnapshot: () => {},
     });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'read_script', { localSig: sig });
+    const result = await runStudioTool(h.ctx, 'get_transcript', { localSig: sig });
 
     expect(result).toMatchObject({
       ok: true,
@@ -1158,7 +1337,7 @@ describe('Agent composition transaction boundary', () => {
       pushUndoSnapshot: () => {},
     });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'read_script', { localSig: sig });
+    const result = await runStudioTool(h.ctx, 'get_transcript', { localSig: sig });
 
     expect(result).toMatchObject({
       ok: true,
@@ -1193,7 +1372,7 @@ describe('Agent composition transaction boundary', () => {
       pushUndoSnapshot: () => {},
     });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'analyze_visual', { localSig: sig, mode: 'geometry' });
+    const result = await runStudioTool(h.ctx, 'inspect_media', { localSig: sig, mode: 'geometry' });
 
     expect(result).toMatchObject({
       ok: true,
@@ -1242,8 +1421,8 @@ describe('Agent composition transaction boundary', () => {
       pushUndoSnapshot: () => {},
     });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'analyze_visual', {
-      assetId: 'asset-female-lead',
+    const result = await runStudioTool(h.ctx, 'inspect_media', {
+      ids: ['asset-female-lead'],
       mode: 'editorial',
       brief: 'Confident, restrained female-lead footage; compare hook and ending suitability.',
       maxCandidates: 4,
@@ -1345,11 +1524,11 @@ describe('Agent composition transaction boundary', () => {
       pushUndoSnapshot: () => {},
     });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const pending = runStudioTool(h.ctx, 'analyze_visual', {
+    const pending = runStudioTool(h.ctx, 'inspect_media', {
       mode: 'editorial',
       brief: 'Choose complete, polished performance ranges.',
       compareOpenings: true,
-      items: [{ assetId: 'asset-first' }, { assetId: 'asset-second' }],
+      ids: ['asset-first', 'asset-second'],
     });
     await vi.waitFor(() => expect(started).toBe(2));
     release();
@@ -1383,7 +1562,7 @@ describe('Agent composition transaction boundary', () => {
     expect(fractions.every((value, index) => index === 0 || value >= fractions[index - 1]!)).toBe(true);
     expect(fractions.at(-1)).toBe(1);
     expect(progressMocks.setToolProgress).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'analyze_visual',
+      id: 'inspect_media',
       text: expect.stringContaining('第一段'),
     }));
     expect(progressMocks.setToolProgress).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -1400,7 +1579,7 @@ describe('Agent composition transaction boundary', () => {
     const h = harness();
     Object.assign(h.ctx, { projectId: 'test', genIdsRef: { current: new Set<string>() }, pushUndoSnapshot: () => {} });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'analyze_visual', { mode: 'editorial' });
+    const result = await runStudioTool(h.ctx, 'inspect_media', { mode: 'editorial' });
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('requires a concrete brief') });
     expect(visualMocks.analyzeVisualGeometry).not.toHaveBeenCalled();
     expect(editorialReviewMocks.reviewEditorialCandidates).not.toHaveBeenCalled();
@@ -1411,7 +1590,7 @@ describe('Agent composition transaction boundary', () => {
     const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
       assets: [{ id: 'tts-audio', kind: 'audio', url: 'https://cdn.example/tts.mp3', transcriptText: '原始文稿' }],
     });
-    h.ctx.setDocument(registered.document!);
+    h.setDocument(registered.document!);
     mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 12.4, width: 0, height: 0, hasAudio: true });
     providerMocks.transcribe.mockResolvedValue([{ start: 0.2, end: 1.4, text: '实际发音', words: [{ start: 0.2, end: 0.8, text: '实际' }] }]);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(new Blob(['audio'], { type: 'audio/mpeg' }), {
@@ -1430,18 +1609,16 @@ describe('Agent composition transaction boundary', () => {
     });
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const cached = await runStudioTool(h.ctx, 'read_script', { assetId: 'tts-audio' });
-    expect(cached).toMatchObject({ ok: true, data: { assetId: 'tts-audio', transcript: expect.stringContaining('原始文稿') } });
+    const cached = await runStudioTool(h.ctx, 'get_transcript', { assetId: 'tts-audio' });
+    expect(cached).toMatchObject({ ok: true, data: { assetIds: ['tts-audio'], transcript: expect.stringContaining('原始文稿') } });
     expect(providerMocks.transcribe).not.toHaveBeenCalled();
 
-    const result = await runStudioTool(h.ctx, 'read_script', { assetId: 'tts-audio', measuredTiming: true });
+    // Exact words on script-backed speech exist only once ASR has measured the timing: a words
+    // read triggers that measurement; the text stays verbatim.
+    const result = await runStudioTool(h.ctx, 'get_transcript', { assetId: 'tts-audio', granularity: 'words' });
 
-    expect(result).toMatchObject({
-      ok: true,
-      // Script-backed speech: the exact text is immutable, ASR only measures its timing.
-      data: { assetId: 'tts-audio', durationSec: 12.4, transcript: expect.stringContaining('原始文稿') },
-    });
-    expect(result.data).toMatchObject({ transcript: expect.not.stringContaining('实际发音') });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(JSON.stringify(result.data)).not.toContain('实际发音');
     expect(providerMocks.transcribe).toHaveBeenCalledWith(expect.objectContaining({ type: 'audio/mpeg' }), expect.anything());
     expect(h.documentRef.current.assets['tts-audio']?.metadata).toMatchObject({ durationSec: 12.4, hasAudio: true, transcriptText: '原始文稿' });
     const measured = h.documentRef.current.semantics.transcripts['tts-audio']!;
@@ -1451,7 +1628,7 @@ describe('Agent composition transaction boundary', () => {
     expect(measured[0]!.end).toBeCloseTo(0.8, 6);
     expect(measured[0]!.words?.map((word) => word.text).join('')).toBe('原始文稿');
     const placed = runAgentTimelineTool(h.documentRef.current, 'add_clips', {
-      clips: [{ id: 'narration-clip', assetId: 'tts-audio', role: 'narration', startSec: 0 }],
+      clips: [{ id: 'narration-clip', assetId: 'tts-audio', role: 'narration', startFrame: 0 }],
     });
     expect(placed.document!.timeline.tracks.find((track) => track.role === 'narration')?.clips[0]).toMatchObject({
       id: 'narration-clip',
@@ -1462,14 +1639,14 @@ describe('Agent composition transaction boundary', () => {
 
   it('transcribes a targeted registered video clip after get_transcript reports no stored transcript', async () => {
     const h = harness();
-    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
+    h.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
     const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
       assets: [{ id: 'speaker-video', kind: 'video', url: 'https://cdn.example/speaker.mp4', durationSec: 18, width: 1080, height: 1920, hasAudio: true }],
     });
     const placed = runAgentTimelineTool(registered.document!, 'add_clips', {
-      clips: [{ id: 'speaker-clip', assetId: 'speaker-video', role: 'primary', startSec: 0, durationSec: 18 }],
+      clips: [{ id: 'speaker-clip', assetId: 'speaker-video', role: 'primary', startFrame: 0, durationFrames: 540 }],
     });
-    h.ctx.setDocument(placed.document!);
+    h.setDocument(placed.document!);
     providerMocks.transcribe.mockResolvedValue([{ start: 0.4, end: 2.1, text: '这是视频里的口播' }]);
     mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 18, width: 1080, height: 1920, hasAudio: true });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(new Blob(['video'], { type: 'video/mp4' }), {
@@ -1488,14 +1665,11 @@ describe('Agent composition transaction boundary', () => {
     });
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const before = await runStudioTool(h.ctx, 'get_transcript', { clipId: 'speaker-clip' });
-    expect(before).toMatchObject({ ok: false, error: 'no transcript for the selected source' });
-
-    const result = await runStudioTool(h.ctx, 'read_script', { clipId: 'speaker-clip' });
+    const result = await runStudioTool(h.ctx, 'get_transcript', { clipId: 'speaker-clip' });
 
     expect(result, result.ok ? undefined : result.error).toMatchObject({
       ok: true,
-      data: { assetId: 'speaker-video', durationSec: 18, transcript: expect.stringContaining('这是视频里的口播') },
+      data: { assetIds: ['speaker-video'], transcript: expect.stringContaining('这是视频里的口播') },
     });
     expect(providerMocks.transcribe).toHaveBeenCalledWith(expect.objectContaining({ type: 'video/mp4' }), expect.anything());
     expect(h.documentRef.current.semantics.transcripts['speaker-video']).toEqual([
@@ -1504,13 +1678,13 @@ describe('Agent composition transaction boundary', () => {
     const stored = await runStudioTool(h.ctx, 'get_transcript', { clipId: 'speaker-clip' });
     expect(stored).toMatchObject({
       ok: true,
-      data: { transcripts: [{ assetId: 'speaker-video', segments: [{ text: '这是视频里的口播' }] }] },
+      data: { assetIds: ['speaker-video'], transcript: expect.stringContaining('这是视频里的口播') },
     });
   });
 
   it('analyzes the only B-roll video in an audio-led project without a mounted main video', async () => {
     const h = harness();
-    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
+    h.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
     const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
       assets: [
         { id: 'demo-video', kind: 'video', url: 'https://cdn.example/demo.mp4' },
@@ -1520,9 +1694,9 @@ describe('Agent composition transaction boundary', () => {
       ],
     });
     const placed = runAgentTimelineTool(registered.document!, 'add_clips', {
-      clips: [{ id: 'demo-clip', assetId: 'demo-video', role: 'broll', startSec: 0 }],
+      clips: [{ id: 'demo-clip', assetId: 'demo-video', role: 'broll', startFrame: 0 }],
     });
-    h.ctx.setDocument(placed.document!);
+    h.setDocument(placed.document!);
     mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 30, width: 1280, height: 720, hasAudio: true });
     visualMocks.analyzeVisual.mockResolvedValue({
       cuts: [8.5],
@@ -1548,7 +1722,7 @@ describe('Agent composition transaction boundary', () => {
     });
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'analyze_visual', {});
+    const result = await runStudioTool(h.ctx, 'inspect_media', { mode: 'semantic' });
 
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(result).toMatchObject({
@@ -1565,7 +1739,7 @@ describe('Agent composition transaction boundary', () => {
 
   it('keeps simultaneous visual evidence on separate lanes and lays media clips out directly', async () => {
     const h = harness();
-    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1920, height: 1080, fps: 30 }));
+    h.setDocument(emptyEditorDocumentV2({ width: 1920, height: 1080, fps: 30 }));
     const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
       assets: [
         { id: 'proof-xhs', kind: 'image', url: 'https://cdn.example/xhs.jpg' },
@@ -1575,13 +1749,13 @@ describe('Agent composition transaction boundary', () => {
     });
     const placed = runAgentTimelineTool(registered.document!, 'add_clips', {
       clips: [
-        { id: 'clip-xhs', assetId: 'proof-xhs', startSec: 2, durationSec: 4 },
-        { id: 'clip-x', assetId: 'proof-x', startSec: 2, durationSec: 4 },
-        { id: 'clip-video-account', assetId: 'proof-video-account', startSec: 2, durationSec: 4 },
+        { id: 'clip-xhs', assetId: 'proof-xhs', startFrame: 60, durationFrames: 120 },
+        { id: 'clip-x', assetId: 'proof-x', startFrame: 60, durationFrames: 120 },
+        { id: 'clip-video-account', assetId: 'proof-video-account', startFrame: 60, durationFrames: 120 },
       ],
     });
     expect(placed.ok, JSON.stringify(placed)).toBe(true);
-    h.ctx.setDocument(placed.document!);
+    h.setDocument(placed.document!);
     const visualTracks = h.documentRef.current.timeline.tracks.filter((track) => track.role === 'broll');
     expect(visualTracks).toHaveLength(3);
     expect(visualTracks.flatMap((track) => track.clips.map((clip) => clip.id)).sort()).toEqual([
@@ -1616,7 +1790,7 @@ describe('Agent composition transaction boundary', () => {
     const result = await runAtomicCompositionTool(h.ctx, async () => {
       h.undoStackRef.current.push(h.documentRef.current);
       h.redoStackRef.current = [];
-      h.ctx.setDocument({ ...h.documentRef.current, canvas: { ...h.documentRef.current.canvas, width: 1920 } });
+      h.setDocument({ ...h.documentRef.current, canvas: { ...h.documentRef.current.canvas, width: 1920 } });
       return { ok: false, error: 'bad input' };
     });
     expect(result.ok).toBe(false);
@@ -1629,7 +1803,7 @@ describe('Agent composition transaction boundary', () => {
     const invalid = harness();
     const rejected = await runAtomicCompositionTool(invalid.ctx, async () => {
       const primary = invalid.documentRef.current.timeline.tracks[0]!;
-      invalid.ctx.setDocument({
+      invalid.setDocument({
         ...invalid.documentRef.current,
         timeline: { tracks: [{ ...primary, clips: [...primary.clips, { ...primary.clips[0]! }] }] },
       });
@@ -1640,7 +1814,7 @@ describe('Agent composition transaction boundary', () => {
 
     const valid = harness();
     const committed = await runAtomicCompositionTool(valid.ctx, async () => {
-      valid.ctx.setDocument({ ...valid.documentRef.current, canvas: { ...valid.documentRef.current.canvas, width: 1920, height: 1080 } });
+      valid.setDocument({ ...valid.documentRef.current, canvas: { ...valid.documentRef.current.canvas, width: 1920, height: 1080 } });
       return { ok: true, summary: 'canvas' };
     });
     expect(committed.ok).toBe(true);
@@ -1651,7 +1825,7 @@ describe('Agent composition transaction boundary', () => {
     const h = harness();
     const before = h.documentRef.current;
     const result = await runAtomicCompositionTool(h.ctx, async () => {
-      h.ctx.setDocument({
+      h.setDocument({
         ...h.documentRef.current,
         timeline: {
           tracks: [
@@ -1691,7 +1865,7 @@ describe('Agent composition transaction boundary', () => {
     });
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'cut_range', { fromSec: 0, toSec: 1 });
+    const result = await runStudioTool(h.ctx, 'ripple_delete_ranges', { ranges: [[0, 30]] });
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(h.documentRef.current.timeline.tracks.find((track) => track.id === 'broll')?.clips[0]).toMatchObject({ startFrame: 30 });
   });
@@ -1699,9 +1873,15 @@ describe('Agent composition transaction boundary', () => {
   it('browser shot properties commit directly to V2 without collapsing a native gap', async () => {
     const h = harness();
     h.documentRef.current.timeline.tracks[0]!.clips[0]!.startFrame = 45;
+    // A populated sibling lane: every committed document is normalized, and an empty lane is pruned
+    // by design, so an occupied one is what proves the lane survives an unrelated edit.
+    h.documentRef.current.assets.broll = { id: 'broll', kind: 'video', locator: { remoteUrl: 'https://cdn.test/broll.mp4' }, metadata: { durationSec: 2 } };
     h.documentRef.current.timeline.tracks.push({
       id: 'broll', type: 'visual', role: 'broll', muted: false, hidden: false, locked: false,
-      syncLocked: false, stackOrder: 1, clips: [],
+      syncLocked: false, stackOrder: 1, clips: [{
+        id: 'broll-1', kind: 'media', assetId: 'broll', startFrame: 0, durationFrames: 30, enabled: true,
+        sourceInSec: 0, sourceOutSec: 1, fit: 'cover',
+      }],
     });
     Object.assign(h.ctx, {
       genIdsRef: { current: new Set<string>() },
@@ -1709,7 +1889,7 @@ describe('Agent composition transaction boundary', () => {
     });
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'set_video_filter', { shotId: 's1', contrast: 1.25 });
+    const result = await runStudioTool(h.ctx, 'set_clip_properties', { items: [{ clipId: 's1', filter: { contrast: 1.25 } }] });
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(h.documentRef.current.timeline.tracks[0]!.clips[0]).toMatchObject({
       id: 's1', startFrame: 45, properties: { filter: { contrast: 1.25 } },
@@ -1735,7 +1915,7 @@ describe('Agent composition transaction boundary', () => {
     });
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'add_block', { instruction: 'show 42', sceneId: 'output-ma' });
+    const result = await runStudioTool(h.ctx, 'apply_component', { generate: true, instruction: 'show 42', sceneId: 'output-ma' });
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(h.compRef.current.blocks).toHaveLength(1);
     expect(h.compRef.current.blocks[0]).toMatchObject({
@@ -1757,11 +1937,11 @@ describe('Agent composition transaction boundary', () => {
     });
     const { runStudioTool } = await import('./agent-tool-runner');
     const input = {
-      instruction: '做一个关系图', atSec: 8.8, durationSec: 3,
+      generate: true, instruction: '做一个关系图', atFrame: 264, durationFrames: 90,
       placement: { xPct: 12, yPct: 18, widthPct: 70, heightPct: 24 },
       backdrop: '人物在画面右侧',
     };
-    const result = await runStudioTool(h.ctx, 'add_block', input);
+    const result = await runStudioTool(h.ctx, 'apply_component', input);
     expect(result).toMatchObject({
       ok: false,
       error: expect.stringContaining('letter-spacing'),
@@ -1794,7 +1974,7 @@ describe('Agent composition transaction boundary', () => {
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
     const controller = new AbortController();
-    const pending = runStudioTool(h.ctx, 'add_block', { instruction: 'show 42' }, { signal: controller.signal, surface: 'chat' });
+    const pending = runStudioTool(h.ctx, 'apply_component', { generate: true, instruction: 'show 42' }, { signal: controller.signal, surface: 'chat' });
 
     controller.abort();
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
@@ -1818,7 +1998,7 @@ describe('Agent composition transaction boundary', () => {
       return { ok: false, error: 'provider failed' };
     });
     h.undoStackRef.current.push(h.documentRef.current); // manual edit snapshot
-    h.ctx.setDocument({ ...h.documentRef.current, canvas: { ...h.documentRef.current.canvas, width: 1440 } });
+    h.setDocument({ ...h.documentRef.current, canvas: { ...h.documentRef.current.canvas, width: 1440 } });
     release();
     const result = await pending;
     expect(result.ok).toBe(false);

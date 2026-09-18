@@ -46,6 +46,12 @@ export function applyLayoutDocumentEdit(input: LayoutDocumentEditInput): LayoutD
 
   let document = input.document;
   const receipts: EditorCommandReceipt[] = [];
+  // A layout arranges boxes; the shot framing's partner-link rule would also stretch the first
+  // graphic to the shot's whole span. Remember each overlay's timing and put it back.
+  const fps = input.document.canvas.fps;
+  const timing = new Map(input.document.timeline.tracks.flatMap((track) => track.clips
+    .filter((clip) => applied.blockIds.includes(clip.id))
+    .map((clip) => [clip.id, { startFrame: clip.startFrame, durationFrames: clip.durationFrames }] as const)));
   if (applied.shotId) {
     const shot = applied.comp.shots?.find((candidate) => candidate.id === applied.shotId);
     if (!shot || !applied.treatment) return invalid(input.document, 'layout did not produce the targeted shot framing');
@@ -66,10 +72,15 @@ export function applyLayoutDocumentEdit(input: LayoutDocumentEditInput): LayoutD
   }
 
   const byId = new Map(applied.comp.blocks.map((block) => [block.id, block] as const));
+  const placedNow = new Map(document.timeline.tracks.flatMap((track) => track.clips.map((clip) => [clip.id, clip] as const)));
   const updates: OverlayDocumentPatch[] = applied.blockIds.map((clipId) => {
     const block = byId.get(clipId)!;
+    const before = timing.get(clipId);
+    const now = placedNow.get(clipId);
+    const retimed = before && now && (now.startFrame !== before.startFrame || now.durationFrames !== before.durationFrames);
     return {
       clipId,
+      ...(retimed ? { startSec: before.startFrame / fps, durationSec: before.durationFrames / fps } : {}),
       block: {
         box: block.box,
         contentBox: undefined,

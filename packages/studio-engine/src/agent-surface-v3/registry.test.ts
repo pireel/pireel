@@ -1,48 +1,34 @@
 import { describe, expect, it } from 'vitest';
-import { STUDIO_TOOLS } from '../prompts/l0-agent-tools';
-import { MCP_BRIDGE_EXTRA_TOOL_IDS, MCP_BRIEF_TOOLS, MCP_SERVER_TOOL_IDS } from '../mcp';
-import { V3_PENDING_TRANSLATIONS, translateV3Call } from './adapter';
-import { V3_RETIRED_TOOL_IDS, V3_TOOL_IDS, V3_TOOL_LIMIT, V3_TOOLS, v3ReplacementIndex } from './registry';
-
-/** Every tool id an agent can call today on any surface: the chat tool table, the MCP server-direct
- *  set, the MCP bridge-only extras, and the BYO brief tools. */
-const legacyIds = () => new Set<string>([
-  ...(STUDIO_TOOLS as Array<{ id: string }>).map((tool) => tool.id),
-  ...MCP_SERVER_TOOL_IDS,
-  ...[...MCP_BRIDGE_EXTRA_TOOL_IDS].filter((id) => id !== 'run_v3'), // run_v3 is the v3 transport itself, not an agent tool
-  ...Object.keys(MCP_BRIEF_TOOLS),
-]);
+import { MCP_SERVER_TOOL_IDS, serverOwnsCall } from '../mcp';
+import { V3_TOOL_IDS, V3_TOOL_LIMIT, V3_TOOLS } from './registry';
+import { V3_TOOL_SCHEMAS } from './schemas';
+import { STUDIO_SKILL_CAPABILITIES } from './skill-capabilities';
 
 describe('agent surface v3 registry', () => {
-  it('stays within the fifty-tool budget with unique ids', () => {
+  it('stays within the tool budget with unique ids', () => {
     expect(V3_TOOLS.length).toBeLessThanOrEqual(V3_TOOL_LIMIT);
     expect(V3_TOOL_IDS.size).toBe(V3_TOOLS.length);
   });
 
-  it('maps every current tool id to exactly one v3 tool or retires it', () => {
-    const index = v3ReplacementIndex();
-    const retired = new Set(V3_RETIRED_TOOL_IDS);
-    const unmapped = [...legacyIds()].filter((id) => !index.has(id) && !retired.has(id));
-    expect(unmapped).toEqual([]);
-    const claimedAndRetired = [...retired].filter((id) => index.has(id));
-    expect(claimedAndRetired).toEqual([]);
+  it('gives every tool a published schema and every schema a tool', () => {
+    expect(V3_TOOLS.filter((tool) => !V3_TOOL_SCHEMAS[tool.id]).map((tool) => tool.id)).toEqual([]);
+    expect(Object.keys(V3_TOOL_SCHEMAS).filter((id) => !V3_TOOL_IDS.has(id))).toEqual([]);
   });
 
-  it('references only legacy ids that exist (no stale mapping rows)', () => {
-    const known = legacyIds();
-    const stale = V3_TOOLS.flatMap((tool) => tool.replaces.filter((legacy) => !known.has(legacy)));
-    expect(stale).toEqual([]);
-    expect(V3_RETIRED_TOOL_IDS.filter((id) => !known.has(id))).toEqual([]);
-  });
-
-  it('tracks which v3 tools still lack a translation', () => {
-    const pending = V3_PENDING_TRANSLATIONS.filter((id) => !V3_TOOL_IDS.has(id));
-    expect(pending).toEqual([]);
-    const ctx = { fps: 30, kindOf: () => undefined };
+  it('answers server-direct tools on the server and never sends chat-only tools there', () => {
     for (const tool of V3_TOOLS) {
-      const result = translateV3Call(tool.id, {}, ctx);
-      if (V3_PENDING_TRANSLATIONS.includes(tool.id)) expect(result.status).toBe('pending');
-      else expect(result.status, tool.id).not.toBe('pending');
+      if (tool.serverDirect) expect(MCP_SERVER_TOOL_IDS.has(tool.id), tool.id).toBe(true);
+      if (tool.chatOnly) expect(serverOwnsCall(tool.id, {}), tool.id).toBe(false);
+    }
+  });
+
+  it('derives the skill-safe capability catalog from stable contracts only', () => {
+    const stable = V3_TOOLS.filter((tool) => tool.skillContract?.stability === 'stable').map((tool) => tool.id);
+    expect(STUDIO_SKILL_CAPABILITIES.map((capability) => capability.id)).toEqual(stable);
+    expect(stable).toEqual(expect.arrayContaining(['get_state', 'get_transcript', 'remove_words', 'set_captions', 'apply_layout']));
+    for (const capability of STUDIO_SKILL_CAPABILITIES) {
+      expect(capability.version).toBe(1);
+      expect(capability.inputSchema).toMatchObject({ type: 'object', additionalProperties: false });
     }
   });
 });

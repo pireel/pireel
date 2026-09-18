@@ -1,34 +1,39 @@
 /**
  * Static lint of block output (pure function) — LLM-generated innerHtml/timelineBody
- * gets one pass before entering composition: unscoped CSS pollutes the whole
- * document, unstable CSS lengths break fixed-canvas sizing, script tags are an injection
+ * gets one pass before entering composition: the renderer scopes and recovers styles;
+ * CSS diagnostics are advisory. Script tags are an injection
  * surface, non-deterministic APIs break per-frame rendering, and a missing data-edit
  * handle disables double-click-to-edit.
- * Fails → the caller sends the issue list back to the model for one fix round;
- * if unfixable, keep a placeholder rather than commit bad output.
+ * Only a blocking contract failure may request one targeted model repair. Visual advice
+ * never triggers regeneration; the preview is the authority for final appearance.
  */
 
-import { BLOCK_MIN_READABLE_FONT_PX } from './block-typography';
+import { compileComponentStyles } from './component-styles';
+import { artPresetTextScale, BLOCK_MIN_READABLE_FONT_PX } from './block-typography';
+import { componentPropsRequirement, componentPropsUsage, hasComponentPropsManifest, parseComponentProps } from './component-props';
 
 export interface BlockLintIssue {
   code:
     | 'empty-content'
-    | 'unscoped-selector'
+    | 'css-recovery'
     | 'non-px-length-unit'
     | 'too-small-font-size'
     | 'script-tag'
     | 'nondeterministic'
-    | 'no-data-edit';
+    | 'no-data-edit'
+    | 'unsupported-element'
+    | 'props-invalid'
+    | 'props-unused'
+    | 'props-missing';
   message: string;
 }
 
-/** Hard errors rejected even after a fix round (bad CSS/script harms the whole document). */
+/** Admission gates protect the executable/document contract. Typography and editable-property
+ * advice is non-blocking and must never spend another model call merely to silence a warning. */
 export const HARD_LINT_CODES: ReadonlySet<string> = new Set([
   'empty-content',
-  'unscoped-selector',
-  'non-px-length-unit',
-  'too-small-font-size',
   'script-tag',
+  'unsupported-element',
   'nondeterministic',
 ]);
 
@@ -72,115 +77,16 @@ function hasFontShorthand(css: string): boolean {
   return /(?:^|[;{}\n])\s*font\s*:/i.test(css);
 }
 
-function splitSelectorList(selector: string): string[] {
-  const selectors: string[] = [];
-  let start = 0;
-  let quote = '';
-  let escaped = false;
-  let parenDepth = 0;
-  let bracketDepth = 0;
-  for (let i = 0; i < selector.length; i += 1) {
-    const ch = selector[i]!;
-    if (quote) {
-      if (escaped) escaped = false;
-      else if (ch === '\\') escaped = true;
-      else if (ch === quote) quote = '';
-      continue;
-    }
-    if (ch === '"' || ch === "'") quote = ch;
-    else if (ch === '(') parenDepth += 1;
-    else if (ch === ')') parenDepth = Math.max(0, parenDepth - 1);
-    else if (ch === '[') bracketDepth += 1;
-    else if (ch === ']') bracketDepth = Math.max(0, bracketDepth - 1);
-    else if (ch === ',' && parenDepth === 0 && bracketDepth === 0) {
-      selectors.push(selector.slice(start, i).trim());
-      start = i + 1;
-    }
-  }
-  selectors.push(selector.slice(start).trim());
-  return selectors.filter(Boolean);
-}
-
-function selectorHasScope(selector: string, blockId: string): boolean {
-  const escapedId = blockId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`#${escapedId}(?![\\w-])`).test(selector);
-}
-
-/** Native CSS nesting inherits its parent's scope; root grouping at-rules do not. */
-function unscopedSelectors(css: string, blockId: string): string[] {
-  const source = css.replace(/\/\*[\s\S]*?\*\//g, '');
-  const found = new Set<string>();
-  const stack: Array<{ scoped: boolean; ignore: boolean }> = [];
-  let buf = '';
-  let quote = '';
-  let escaped = false;
-  let parenDepth = 0;
-  let bracketDepth = 0;
-
-  for (const ch of source) {
-    if (quote) {
-      buf += ch;
-      if (escaped) escaped = false;
-      else if (ch === '\\') escaped = true;
-      else if (ch === quote) quote = '';
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      buf += ch;
-      continue;
-    }
-    if (ch === '(') parenDepth += 1;
-    else if (ch === ')') parenDepth = Math.max(0, parenDepth - 1);
-    else if (ch === '[') bracketDepth += 1;
-    else if (ch === ']') bracketDepth = Math.max(0, bracketDepth - 1);
-
-    if (parenDepth === 0 && bracketDepth === 0 && ch === '{') {
-      const prelude = buf.trim();
-      buf = '';
-      const parent = stack.at(-1);
-      const parentScoped = parent?.scoped ?? false;
-      if (parent?.ignore || /^@(?:-webkit-)?keyframes\b/i.test(prelude) || /^@(font-face|font-feature-values|property|page|counter-style)\b/i.test(prelude)) {
-        stack.push({ scoped: parentScoped, ignore: true });
-        continue;
-      }
-      if (prelude.startsWith('@')) {
-        const scoped = parentScoped || (/^@scope\b/i.test(prelude) && selectorHasScope(prelude, blockId));
-        stack.push({ scoped, ignore: false });
-        continue;
-      }
-
-      const selectors = splitSelectorList(prelude);
-      const scoped = parentScoped || (selectors.length > 0 && selectors.every((selector) => selectorHasScope(selector, blockId)));
-      if (!parentScoped) {
-        for (const selector of selectors) if (!selectorHasScope(selector, blockId)) found.add(selector);
-      }
-      stack.push({ scoped, ignore: false });
-      continue;
-    }
-    if (parenDepth === 0 && bracketDepth === 0 && ch === '}') {
-      buf = '';
-      stack.pop();
-      continue;
-    }
-    if (parenDepth === 0 && bracketDepth === 0 && ch === ';') {
-      buf = '';
-      continue;
-    }
-    buf += ch;
-  }
-  return [...found];
-}
-
-export function lintBlock(args: { blockId: string; innerHtml: string; timelineBody: string }): BlockLintIssue[] {
-  const { blockId, innerHtml, timelineBody } = args;
+export function lintBlock(args: { blockId: string; innerHtml: string; timelineBody: string; propsSchema?: string; requireProps?: boolean; boxPx?: { w: number; h: number } }): BlockLintIssue[] {
+  const { blockId, innerHtml, timelineBody, propsSchema } = args;
   const issues: BlockLintIssue[] = [];
+  const textScale = artPresetTextScale(innerHtml, args.boxPx);
 
   const contentMarkup = innerHtml
     .replace(/<!--([\s\S]*?)-->/g, '')
     .replace(/<style[\s\S]*?<\/style>/gi, '');
   const visibleText = contentMarkup.replace(/<[^>]+>/g, '').replace(/&nbsp;|\s+/gi, '');
-  const hasVisualContent = /<(?:svg|img|picture|video|canvas|path|circle|ellipse|rect|line|polyline|polygon)\b/i.test(contentMarkup);
+  const hasVisualContent = /<(?:svg|img|picture|path|circle|ellipse|rect|line|polyline|polygon)\b/i.test(contentMarkup);
   if (!visibleText && !hasVisualContent) {
     issues.push({ code: 'empty-content', message: 'generated block has no visible text or visual structure' });
   }
@@ -189,16 +95,20 @@ export function lintBlock(args: { blockId: string; innerHtml: string; timelineBo
     issues.push({ code: 'script-tag', message: 'innerHtml must not contain <script> — the runtime loads nothing beyond GSAP (no external libraries, canvas/WebGL or iframes); animation belongs in the timeline body, visuals in markup/CSS/SVG' });
   }
 
-  const cssSources: string[] = [];
-  // Selector-list branches are checked independently. Grouping at-rules keep walking,
-  // while keyframes/declaration at-rules are ignored and nested rules inherit a scoped parent.
-  for (const styleMatch of innerHtml.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)) {
-    const css = styleMatch[1]!;
-    cssSources.push(css);
-    for (const selector of unscopedSelectors(css, blockId)) {
-      issues.push({ code: 'unscoped-selector', message: `CSS selector "${selector.slice(0, 60)}" is not scoped under #${blockId}` });
-    }
+  // The runtime's own text forbids these, but until now only the prompt said so. Export rasterizes
+  // the component through an SVG foreignObject, which paints none of them: the component would look
+  // right in preview and come out empty in the finished video, which is the worst way to find out.
+  const unsupported = /<(video|canvas|iframe|object|embed)\b/i.exec(innerHtml);
+  if (unsupported) {
+    issues.push({
+      code: 'unsupported-element',
+      message: `innerHtml must not contain <${unsupported[1]!.toLowerCase()}> — the component renders through markup, CSS and SVG only, and export paints nothing else, so it would survive preview and vanish from the exported video. Footage belongs on the timeline: place a media clip at the same frames and box instead.`,
+    });
   }
+
+  const cssSources: string[] = [];
+  for (const warning of compileComponentStyles(innerHtml, blockId).warnings) issues.push({ code: 'css-recovery', message: warning });
+  for (const styleMatch of innerHtml.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)) cssSources.push(styleMatch[1]!);
   for (const styleAttr of innerHtml.matchAll(/\sstyle\s*=\s*["']([^"']*)["']/gi)) {
     cssSources.push(styleAttr[1]!);
   }
@@ -240,11 +150,11 @@ export function lintBlock(args: { blockId: string; innerHtml: string; timelineBo
       });
       break;
     }
-    if (resolved.kind === 'px' && resolved.value < BLOCK_MIN_READABLE_FONT_PX) {
+    if (resolved.kind === 'px' && resolved.value * textScale < BLOCK_MIN_READABLE_FONT_PX) {
       invalidTypeTokens.add(name);
       issues.push({
         code: 'too-small-font-size',
-        message: `typography token ${name} resolves to ${resolved.value}px; Motion Graphic text must be at least ${BLOCK_MIN_READABLE_FONT_PX}px on the authored canvas`,
+        message: `typography token ${name} resolves to ${Math.round(resolved.value * textScale * 100) / 100}px on screen; Motion Graphic text must be at least ${BLOCK_MIN_READABLE_FONT_PX}px on the authored canvas`,
       });
       break;
     }
@@ -260,10 +170,10 @@ export function lintBlock(args: { blockId: string; innerHtml: string; timelineBo
       });
       break;
     }
-    if (resolved.kind === 'px' && resolved.value < BLOCK_MIN_READABLE_FONT_PX) {
+    if (resolved.kind === 'px' && resolved.value * textScale < BLOCK_MIN_READABLE_FONT_PX) {
       issues.push({
         code: 'too-small-font-size',
-        message: `font-size "${value.slice(0, 40)}" resolves to ${resolved.value}px; Motion Graphic text must be at least ${BLOCK_MIN_READABLE_FONT_PX}px on the authored canvas`,
+        message: `font-size "${value.slice(0, 40)}" resolves to ${Math.round(resolved.value * textScale * 100) / 100}px on screen; Motion Graphic text must be at least ${BLOCK_MIN_READABLE_FONT_PX}px on the authored canvas`,
       });
       break;
     }
@@ -271,6 +181,26 @@ export function lintBlock(args: { blockId: string; innerHtml: string; timelineBo
 
   if (/\b(setTimeout|setInterval|requestAnimationFrame|Date\.now|Math\.random)\b/.test(timelineBody)) {
     issues.push({ code: 'nondeterministic', message: 'timeline body must be deterministic — no timers / Date.now / Math.random / rAF' });
+  }
+
+  // Editable properties (only judged when the component declares a properties schema — the ```json
+  // fence, stored in slots.propsSchema). A broken schema renders as "no properties" and is reported
+  // for the fix round; a value the model wrote itself (--p-* / data-p-* inside the markup) shadows the
+  // container's and defeats every override. The generation gate makes properties mandatory (a bespoke
+  // component without a schema cannot be tuned in the inspector); everything already on the timeline is
+  // judged only when it declares one.
+  if (args.requireProps) {
+    const missing = componentPropsRequirement(propsSchema);
+    if (missing) issues.push({ code: 'props-missing', message: missing });
+  }
+  if (hasComponentPropsManifest(propsSchema)) {
+    const { specs, issues: schemaIssues } = parseComponentProps(propsSchema);
+    for (const issue of schemaIssues) issues.push({ code: 'props-invalid', message: `properties schema: ${issue}` });
+    const usage = componentPropsUsage(innerHtml, specs);
+    for (const own of usage.ownDeclarations) {
+      issues.push({ code: 'props-invalid', message: `${own} must not be written inside the markup — Studio sets every declared property on #${blockId}; consume it with var(--p-<key>) / #${blockId}[data-p-<key>="v"]` });
+    }
+    for (const key of usage.unused) issues.push({ code: 'props-unused', message: `the properties schema declares "${key}" but the markup never reads var(--p-${key}) or [data-p-${key}]` });
   }
 
   // visible text with no data-edit handle → double-click in-place editing breaks

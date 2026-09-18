@@ -15,8 +15,6 @@ import {
   type NarrativeTimelineClip,
   type VideoShot,
   applyEditorCommand,
-  applyCaptionDocumentEdit,
-  applyNarrationDocumentEdit,
   insertNarrativeAssetRange,
   shotId,
   timelineSpeechRangesForAsset,
@@ -27,6 +25,8 @@ import { removeSrcRanges, restoreSrcRange, spans as clipSpans } from '@pireel/st
 import { wordsFromText } from '@pireel/studio-engine/caption-fx';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { type WordMaskPatch, applyWordMasks } from '@pireel/studio-engine/word-masks';
+import { type DocumentOp, transcriptInputsFor } from '@pireel/studio-engine/document-transaction';
+import type { DocumentCommitter } from './document-commit';
 import type { ScriptCut, ScriptMaskTarget, TimelineMaskTarget, TimelineScriptCut } from './script-panel';
 import { t } from './i18n';
 import { editorErrorMessage } from './editor-error';
@@ -45,11 +45,10 @@ export interface ScriptCutDeps {
   setClipAsr: (v: Record<string, AsrSegment[]>) => void;
   setAsrSentences: (v: AsrSegment[] | null) => void;
   documentRef: MutableRefObject<EditorDocumentV2>;
-  setDocument: (document: EditorDocumentV2) => void;
+  commit: DocumentCommitter['commit'];
   setSelectedId: (id: string | null) => void;
   setSelectedShotId: (id: string | null) => void;
   applyT: (v: number) => void;
-  pushUndoSnapshot: () => void;
   ensureShots: (c: Composition) => VideoShot[];
   stepAsr: () => Promise<AsrSegment[]>;
 }
@@ -57,8 +56,10 @@ export interface ScriptCutDeps {
 export function useScriptCut(deps: ScriptCutDeps) {
   const {
     projectId, comp, document: liveDocument, floatWin, asrSentences, compRef, tRef, asrRef, clipAsrRef, setClipAsr, setAsrSentences,
-    documentRef, setDocument, setSelectedId, setSelectedShotId, applyT, pushUndoSnapshot, ensureShots, stepAsr,
+    documentRef, commit, setSelectedId, setSelectedShotId, applyT, ensureShots, stepAsr,
   } = deps;
+  /** Runtime transcript mirrors, carried into an operation only when the document lacks them. */
+  const currentTranscripts = () => transcriptInputsFor(documentRef.current, asrRef.current, clipAsrRef.current);
 
   const cutTimelineRanges = (cuts: TimelineScriptCut[], msg: string) => {
     if (!cuts.length) return;
@@ -81,6 +82,7 @@ export function useScriptCut(deps: ScriptCutDeps) {
       byTrack.set(cut.trackId, [...(byTrack.get(cut.trackId) ?? []), ...mapped]);
     }
     let removedFrames = 0;
+    const ops: DocumentOp[] = [];
     for (const [trackId, sourceRanges] of byTrack) {
       const merged: Array<{ startFrame: number; endFrame: number }> = [];
       for (const range of [...sourceRanges].sort((left, right) => left.startFrame - right.startFrame)) {
@@ -89,33 +91,34 @@ export function useScriptCut(deps: ScriptCutDeps) {
         else merged.push({ startFrame: range.startFrame, endFrame: range.endFrame });
       }
       for (const range of merged.sort((left, right) => right.startFrame - left.startFrame)) {
-        const edit = applyEditorCommand(document, {
-          type: 'range.remove',
+        const command = {
+          type: 'range.remove' as const,
           trackId,
           startFrame: range.startFrame,
           endFrame: range.endFrame,
-          mode: 'ripple',
+          mode: 'ripple' as const,
           includeLinked: true,
-        });
+        };
+        // Preview to learn what the cut removes; the same commands then land as one transaction.
+        const edit = applyEditorCommand(document, command);
         if (!edit.ok) {
           toast.error(editorErrorMessage(edit.error));
           return;
         }
         document = edit.document;
         removedFrames += edit.receipt.removedFrames ?? 0;
+        ops.push({ op: 'command', input: { command } });
       }
     }
     if (!removedFrames) {
       toast.info(t('workbench.thoseRangesAlreadyOut'));
       return;
     }
-    const captions = applyEditorCommand(document, { type: 'captions.relay' });
+    const captions = commit([...ops, { op: 'command', input: { command: { type: 'captions.relay' } } }]);
     if (!captions.ok) {
       toast.error(editorErrorMessage(captions.error));
       return;
     }
-    pushUndoSnapshot();
-    setDocument(captions.document);
     setSelectedShotId(null);
     setSelectedId(null);
     const endFrame = captions.document.timeline.tracks.reduce(
@@ -134,24 +137,16 @@ export function useScriptCut(deps: ScriptCutDeps) {
     const groups = new Map<string | null, [number, number][]>();
     for (const it of cuts) groups.set(it.src, [...(groups.get(it.src) ?? []), it.range]);
     let shots = ensureShots(c0);
-    let document = documentRef.current;
     let cut = 0;
+    const ops: DocumentOp[] = [];
     for (const [src, ranges] of groups) {
       const r = removeSrcRanges(shots, ranges, (base, srcStart, srcEnd) => ({ ...base, id: shotId(), srcStart, srcEnd }), (c) => (c.src ?? null) === src);
       cut += r.removed.reduce((a, [x, y]) => a + (y - x), 0);
       if (r.removed.length) {
-        const edit = applyNarrationDocumentEdit({
-          projectId,
-          document,
+        ops.push({ op: 'narration.removeRanges', input: {
           ranges: r.removed.map(([fromSec, toSec]) => ({ fromSec, toSec })),
-          mainTranscript: asrRef.current,
-          clipTranscripts: clipAsrRef.current,
-        });
-        if (!edit.ok) {
-          toast.error(editorErrorMessage(edit.error));
-          return;
-        }
-        document = edit.document;
+          ...currentTranscripts(),
+        } });
       }
       shots = r.clips;
     }
@@ -159,8 +154,11 @@ export function useScriptCut(deps: ScriptCutDeps) {
       toast.info(t('workbench.thoseRangesAlreadyOut'));
       return;
     }
-    pushUndoSnapshot();
-    setDocument(document);
+    const edit = commit(ops);
+    if (!edit.ok) {
+      toast.error(editorErrorMessage(edit.error));
+      return;
+    }
     setSelectedShotId(null);
     setSelectedId(null);
     const lastSp = clipSpans(shots);
@@ -176,6 +174,7 @@ export function useScriptCut(deps: ScriptCutDeps) {
     let shots = ensureShots(c0);
     let document = documentRef.current;
     let restored = 0;
+    const ops: DocumentOp[] = [];
     for (const { src, range: [s, e] } of cuts) {
       const before = shots;
       const inSrc = (c: VideoShot) => (c.src ?? null) === src;
@@ -220,23 +219,25 @@ export function useScriptCut(deps: ScriptCutDeps) {
             .filter((clip): clip is NarrativeTimelineClip => clip.kind === 'narrative' && clip.assetId === assetId)
             .find((clip) => Math.abs(clip.sourceInSec - inserted.srcEnd) < 0.03);
         const presentation = adjacent ?? sourceClip;
-        const edit = insertNarrativeAssetRange({
-          document,
+        const input = {
           assetId,
           clipId: inserted.id,
           atSec: at,
           sourceInSec: inserted.srcStart,
           sourceOutSec: inserted.srcEnd,
-          properties: presentation?.properties ?? { treatment: 'full' },
+          properties: presentation?.properties ?? { treatment: 'full' as const },
           ...(presentation?.box ? { box: presentation.box } : {}),
           ...(presentation?.mediaFraming ? { mediaFraming: presentation.mediaFraming } : {}),
           coalesceAdjacent: true,
-        });
+        };
+        // Preview so the next range sees the restored neighbour; the same inputs land as one transaction.
+        const edit = insertNarrativeAssetRange({ document, ...input });
         if (!edit.ok) {
           toast.error(editorErrorMessage(edit.error));
           return;
         }
         document = edit.document;
+        ops.push({ op: 'narrative.insertRange', input });
       }
       restored += len;
     }
@@ -244,8 +245,11 @@ export function useScriptCut(deps: ScriptCutDeps) {
       toast.info(t('workbench.contentAlreadyInVideo'));
       return;
     }
-    pushUndoSnapshot();
-    setDocument(document);
+    const landed = commit(ops);
+    if (!landed.ok) {
+      toast.error(editorErrorMessage(landed.error));
+      return;
+    }
     setSelectedShotId(null);
     toast.success(t('workbench.msgUndoHint', { msg }));
   };
@@ -274,16 +278,11 @@ export function useScriptCut(deps: ScriptCutDeps) {
       setClipAsr(next);
       clipAsrRef.current = next;
     }
-    const edit = applyCaptionDocumentEdit({
-      document: documentRef.current,
-      mainTranscript: asrRef.current,
-      clipTranscripts: clipAsrRef.current,
-    });
+    const edit = commit({ op: 'captions.edit', input: { mainTranscript: asrRef.current, clipTranscripts: clipAsrRef.current } }, { undo: 'none' });
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return;
     }
-    setDocument(edit.document);
     toast.success(t('workbench.replacedText', { text: txt }));
   };
   /** Mask words (beep/mute their sound, swap their caption text) on the runtime transcripts, then
@@ -314,16 +313,11 @@ export function useScriptCut(deps: ScriptCutDeps) {
       }
     }
     if (!changed) return;
-    const edit = applyCaptionDocumentEdit({
-      document: documentRef.current,
-      mainTranscript: asrRef.current,
-      clipTranscripts: clipAsrRef.current,
-    });
+    const edit = commit({ op: 'captions.edit', input: { mainTranscript: asrRef.current, clipTranscripts: clipAsrRef.current } }, { undo: 'none' });
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return;
     }
-    setDocument(edit.document);
     toast.success(msg);
   };
   const replaceTimelineScriptWord = (
@@ -345,14 +339,10 @@ export function useScriptCut(deps: ScriptCutDeps) {
       .map((candidate) => (isSame(candidate) ? { ...candidate, text: txt } : candidate));
     const nextSegments = [...segments];
     nextSegments[si] = { ...segment, words, text: words.map((candidate) => candidate.text).join('') };
-    const patched: EditorDocumentV2 = {
-      ...current,
-      semantics: {
-        ...current.semantics,
-        transcripts: { ...current.semantics.transcripts, [assetId]: nextSegments },
-      },
-    };
-    const captions = applyEditorCommand(patched, { type: 'captions.relay' });
+    const captions = commit([
+      { op: 'transcripts.set', input: { transcripts: { [assetId]: nextSegments } } },
+      { op: 'command', input: { command: { type: 'captions.relay' } } },
+    ], { undo: 'none' });
     if (!captions.ok) {
       toast.error(editorErrorMessage(captions.error));
       return;
@@ -361,7 +351,6 @@ export function useScriptCut(deps: ScriptCutDeps) {
       asrRef.current = nextSegments;
       setAsrSentences(nextSegments);
     }
-    setDocument(captions.document);
     toast.success(t('workbench.replacedText', { text: txt }));
   };
   /** Native-panel mask writer: masks live on the document transcripts; the main copy mirrors the first
@@ -382,8 +371,11 @@ export function useScriptCut(deps: ScriptCutDeps) {
       changed = true;
     }
     if (!changed) return;
-    const patched: EditorDocumentV2 = { ...current, semantics: { ...current.semantics, transcripts } };
-    const captions = applyEditorCommand(patched, { type: 'captions.relay' });
+    const changedTranscripts = Object.fromEntries(Object.entries(transcripts).filter(([assetId, next]) => next !== current.semantics.transcripts[assetId]));
+    const captions = commit([
+      { op: 'transcripts.set', input: { transcripts: changedTranscripts } },
+      { op: 'command', input: { command: { type: 'captions.relay' } } },
+    ], { undo: 'none' });
     if (!captions.ok) {
       toast.error(editorErrorMessage(captions.error));
       return;
@@ -394,7 +386,6 @@ export function useScriptCut(deps: ScriptCutDeps) {
       asrRef.current = main;
       setAsrSentences(main);
     }
-    setDocument(captions.document);
     toast.success(msg);
   };
   /** The script panel's "extract narration script" (spinner prevents double-clicks; errors toast). */

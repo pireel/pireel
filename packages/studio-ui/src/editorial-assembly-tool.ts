@@ -48,7 +48,7 @@ export interface RemainingRange {
 }
 
 export interface AssemblyBuild {
-  /** Legacy add_clips input; `__replacePrimaryTrack` clears the current primary picture first. */
+  /** add_clips input (published shape); `__replacePrimaryTrack` clears the current primary picture first. */
   input: Record<string, unknown>;
   coverage: AssemblyCoverage;
   /** Accepted reviewed ranges (or the parts of them) not used by this assembly, so the agent can
@@ -221,14 +221,21 @@ export function buildAssemblyFromReview(params: {
     return { assetId: row.assetId, startSec, sourceInSec, sourceOutSec };
   });
   const tiled = tileToFrames(ordered, targetDurationSec, params.fps);
+  const fps = params.fps && params.fps > 0 ? params.fps : 30;
   const clips = tiled.map((planned) => ({
-    role: 'primary',
     assetId: planned.assetId,
     startSec: planned.startSec,
     sourceInSec: planned.sourceInSec,
     sourceOutSec: planned.sourceOutSec,
     durationSec: Math.round((planned.sourceOutSec - planned.sourceInSec) * 1_000) / 1_000,
-    muted: true,
+  }));
+  // The placement rows in add_clips' published shape: whole timeline frames and a source pair.
+  const placementRows = clips.map((clip) => ({
+    role: 'primary',
+    assetId: clip.assetId,
+    startFrame: Math.round(clip.startSec * fps),
+    source: [clip.sourceInSec, clip.sourceOutSec] as [number, number],
+    mute: true,
   }));
   const notes: string[] = [];
   const placed: AssemblyPlacedClip[] = clips.map((clip, index) => {
@@ -263,7 +270,7 @@ export function buildAssemblyFromReview(params: {
   const shortfallSec = Math.max(0, Math.round((targetDurationSec - actualDurationSec) * 10) / 10);
   const remaining = remainingAcceptedRanges(sources, clips);
   return {
-    input: { clips, __replacePrimaryTrack: true },
+    input: { clips: placementRows, __replacePrimaryTrack: true },
     remaining,
     notes,
     coverage: {

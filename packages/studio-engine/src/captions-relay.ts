@@ -4,7 +4,7 @@
  * them on both ends means passing the data as params).
  *
  * Consumers: workbench (thin wrapper feeding refs) + server-executor (offline MCP:
- * when the tab is closed, cut_narration/set_captions run server-side, data from
+ * when the tab is closed, remove_words/set_captions run server-side, data from
  * studio_projects.context). Pure-module discipline: zero react/browser deps (same
  * tier as build-blocks).
  */
@@ -13,7 +13,7 @@ import { wordsFromText } from './caption-fx';
 import { getCaptionPreset } from './caption-presets';
 import { type CaptionStyle, DEFAULT_CAPTION_WIDTH_PCT } from './composition-core';
 import { type Block, type VideoShot, isSentenceCaption } from './composition';
-import { spans as clipSpans, srcToEditedLoose } from './trim';
+import { spans as clipSpans } from './trim';
 import { type AsrSegment, type CueRef, type CueWord, type DisplayCue, captionBlocksFromAsr } from './build-blocks';
 import { maskCueText, maskedWordText } from './word-masks';
 import { joinWords } from './caption-fx';
@@ -25,24 +25,87 @@ export const inNarrationSource = (c: VideoShot): boolean => !c.src;
 /** Intermediate derived shape: an edited-timeline sentence fragment with si-stamped words + source pointer. */
 export type MappedSeg = Omit<AsrSegment, 'words'> & { words: CueWord[]; ref: CueRef };
 
+/** Floor width for a provider word stamp; below the cut threshold a mistimed word would read as cut. */
+const MIN_WORD_SEC = 0.06;
+/** A word whose mapped span is this short or shorter was removed by the edit. */
+const CUT_WORD_MAX_SEC = 0.03;
+
+/** Where one spoken word lands on the edited timeline, or null when the edit removed it. */
+export type WordPlacement = (word: { start: number; end: number }) => { start: number; end: number } | null;
+
+/** A word's floor-width source span: providers stamp short syllables as points. */
+function wordSourceSpan(word: { start: number; end: number }): { start: number; end: number } {
+  return { start: word.start, end: Math.max(word.end, word.start + MIN_WORD_SEC) };
+}
+
+/**
+ * One piece of media owns each word. A cut that lands inside a word leaves both sides playing a
+ * piece of it; the caption must not show the word twice, nor drop it because a remainder was
+ * short. The owner is the range playing the word's midpoint, else the one playing most of it
+ * (more than a cut sliver); nobody when the whole word was removed.
+ */
+export function chooseWordOwner<T extends { start: number; end: number }>(ranges: readonly T[], word: { start: number; end: number }): T | null {
+  const span = wordSourceSpan(word);
+  const mid = (span.start + span.end) / 2;
+  const byMid = ranges.find((range) => mid >= range.start && mid < range.end);
+  if (byMid) return byMid;
+  let best: T | null = null;
+  let bestOverlap = CUT_WORD_MAX_SEC;
+  for (const range of ranges) {
+    const overlap = Math.min(span.end, range.end) - Math.max(span.start, range.start);
+    if (overlap > bestOverlap) { best = range; bestOverlap = overlap; }
+  }
+  return best;
+}
+
+/** Placement through a monotone source→edited function (one media range, e.g. a single clip). */
+function loosePlacement(mapSourceSec: (sourceSec: number) => number): WordPlacement {
+  return (word) => {
+    const span = wordSourceSpan(word);
+    const start = mapSourceSec(span.start);
+    const end = mapSourceSec(span.end);
+    // Word width only shrinks, never grows: when a cut / insert lands mid-word,
+    // the loose mapping would swallow the whole inserted duration into the word.
+    const placed = { start, end: Math.min(end, start + (span.end - span.start) + 0.05) };
+    // A span that collapsed was cut away (the loose mapping folds a removed range onto one instant).
+    return placed.end - placed.start > CUT_WORD_MAX_SEC ? placed : null;
+  };
+}
+
+/** Placement across one source's shots on the edited timeline: the owning shot plays the word. */
+function ownerPlacement(shots: VideoShot[], inSrc: (c: VideoShot) => boolean): WordPlacement {
+  const ranges = clipSpans(shots)
+    .filter((span) => inSrc(span.clip))
+    .map((span) => ({ start: span.clip.srcStart, end: span.clip.srcEnd, editedStart: span.editedStart, editedEnd: span.editedEnd }));
+  return (word) => {
+    const owner = chooseWordOwner(ranges, word);
+    if (!owner) return null;
+    const span = wordSourceSpan(word);
+    const start = owner.editedStart + Math.max(0, span.start - owner.start);
+    const end = owner.editedStart + Math.min(span.end, owner.end) - owner.start;
+    return { start, end: Math.max(end, start + CUT_WORD_MAX_SEC + 0.001) };
+  };
+}
+
 /** Map one transcript source through an arbitrary source-time → edited-time function. */
 export function mapTranscriptSegsToEdited(
   segs: AsrSegment[],
   mapSourceSec: (sourceSec: number) => number,
   srcKey: string | null = null,
 ): MappedSeg[] {
+  return mapTranscriptSegsToEditedWith(segs, loosePlacement(mapSourceSec), srcKey);
+}
+
+function mapTranscriptSegsToEditedWith(segs: AsrSegment[], place: WordPlacement, srcKey: string | null): MappedSeg[] {
   const out: MappedSeg[] = [];
   for (const [segIdx, s] of segs.entries()) {
     const words: CueWord[] = (s.words?.length ? s.words : wordsFromText(s.text, s.start, s.end))
-      .map((w, wi) => {
-        const start = mapSourceSec(w.start);
-        const end = mapSourceSec(w.end);
-        // Word width only shrinks, never grows: when a cut / insert lands mid-word,
-        // the loose mapping would swallow the whole inserted duration into the word.
+      .flatMap((w, wi) => {
+        const placed = place(w);
+        if (!placed) return [];
         // A text mask swaps the caption copy only; timing stays the spoken word's.
-        return { ...w, text: maskedWordText(s, wi, w.text), si: (w as CueWord).si ?? wi, start, end: Math.min(end, start + (w.end - w.start) + 0.05) };
-      })
-      .filter((w) => w.end - w.start > 0.03);
+        return [{ ...w, text: maskedWordText(s, wi, w.text), si: (w as CueWord).si ?? wi, start: placed.start, end: placed.end }];
+      });
     if (!words.length) continue;
     const groups: (typeof words)[] = [[words[0]!]];
     for (let i = 1; i < words.length; i++) {
@@ -70,7 +133,7 @@ export function mapTranscriptSegsToEdited(
  *  laying captions: caption blocks live on the edited timeline, so after cutting
  *  you can't lay them by source time directly. */
 export function mapSegsToEdited(segs: AsrSegment[], shots: VideoShot[], inSrc: (c: VideoShot) => boolean = inNarrationSource, srcKey: string | null = null): MappedSeg[] {
-  return mapTranscriptSegsToEdited(segs, (sourceSec) => srcToEditedLoose(shots, sourceSec, inSrc), srcKey);
+  return mapTranscriptSegsToEditedWith(segs, ownerPlacement(shots, inSrc), srcKey);
 }
 
 /** All-source transcript → edited-timeline caption data: narration source + each inserted source mapped by its own predicate, sorted by edited time. */
@@ -85,7 +148,7 @@ export function mappedCaptionSegs(shots: VideoShot[], narr: AsrSegment[] | null,
  *  the source words, on the translation's own token boundaries (same tokenizer as captions). The
  *  second line follows the cue rhythm 1:1 — approximate by nature (word order diverges across
  *  languages); translation still happens at sentence level upstream for quality. */
-function distributeSub(sub: string, weights: number[]): string[] {
+export function distributeSub(sub: string, weights: number[]): string[] {
   const tokens = wordsFromText(sub, 0, 1).map((w) => w.text);
   const total = weights.reduce((a, b) => a + b, 0);
   if (!tokens.length || !total) return weights.map(() => '');
@@ -207,24 +270,46 @@ export function displayCuesFromMappedSegs(
     opts?.canvasW ?? 1080,
     { bold: style?.bold, font: style?.font },
   ));
-  const out: DisplayCue[] = [];
-  for (const g of mapped) {
+  // Pass 1: cue chunks per fragment. Pass 2: one sentence, one distribution — a sentence cut into
+  // several surviving fragments still carries a single translation, spread once across every cue
+  // of that sentence in play order; distributing per fragment repeated the whole sentence under
+  // each fragment.
+  const prepared = mapped.flatMap((g) => {
     const words = g.words;
-    if (!words.length) continue;
+    if (!words.length) return [];
     const gRef = g.ref;
     const srcSeg = gRef ? sourceSegment(gRef) : undefined;
-    const subFresh = !srcSeg?.subLang || !opts?.subLang || srcSeg.subLang === opts.subLang;
     // An explicit empty cueLayout means "temporarily unlocked" during a controlled re-layout.
     // Missing cueLayout falls back to cueTexts for drafts written by the short-lived combined
     // copy/layout format; every new write persists the two concerns separately.
     const layoutKeys = srcSeg?.cueLayout ?? (srcSeg?.cueTexts ? Object.keys(srcSeg.cueTexts) : undefined);
-    const chunks = cueChunksRespectingLocks(words, layoutKeys, split);
-    const groupSub = subFresh ? (srcSeg?.cueSubs?.[`${gRef?.w0}:${gRef?.w1}`] ?? srcSeg?.sub) : undefined;
-    const pieces = groupSub ? distributeSub(groupSub, chunks.map((c) => c.length)) : undefined;
+    return [{ g, gRef, srcSeg, chunks: cueChunksRespectingLocks(words, layoutKeys, split) }];
+  });
+  const sentencePieces = new Map<string, string[]>();
+  const sentenceKey = (gRef: CueRef | undefined) => `${gRef?.src ?? ''}|${gRef?.seg ?? -1}`;
+  const chunksBySentence = new Map<string, number[]>();
+  for (const entry of prepared) chunksBySentence.set(sentenceKey(entry.gRef), [...(chunksBySentence.get(sentenceKey(entry.gRef)) ?? []), ...entry.chunks.map((c) => c.length)]);
+  const out: DisplayCue[] = [];
+  const consumed = new Map<string, number>();
+  for (const { g, gRef, srcSeg, chunks } of prepared) {
+    const subFresh = !srcSeg?.subLang || !opts?.subLang || srcSeg.subLang === opts.subLang;
+    const key = sentenceKey(gRef);
+    // A translation stored for this exact fragment range wins for the fragment; otherwise the
+    // sentence translation is distributed once over all the sentence's cues.
+    const fragmentSub = subFresh ? srcSeg?.cueSubs?.[`${gRef?.w0}:${gRef?.w1}`] : undefined;
+    let pieces: string[] | undefined;
+    if (fragmentSub) pieces = distributeSub(fragmentSub, chunks.map((c) => c.length));
+    else if (subFresh && srcSeg?.sub) {
+      if (!sentencePieces.has(key)) sentencePieces.set(key, distributeSub(srcSeg.sub, chunksBySentence.get(key) ?? []));
+      const offset = consumed.get(key) ?? 0;
+      pieces = sentencePieces.get(key)!.slice(offset, offset + chunks.length);
+    }
+    consumed.set(key, (consumed.get(key) ?? 0) + chunks.length);
     for (const [ci, c] of chunks.entries()) {
       const w0 = c[0]!.si ?? 0;
       const w1 = c[c.length - 1]!.si ?? 0;
       const override = srcSeg?.cueTexts?.[`${w0}:${w1}`];
+      if (override === '') continue; // removed by the user: the words are spoken, nothing is shown
       const text = override !== undefined && srcSeg ? maskCueText(srcSeg, override, w0, w1) : joinWords(c.map((w) => w.text));
       const sub = subFresh ? (srcSeg?.cueSubs?.[`${w0}:${w1}`] ?? pieces?.[ci]) : undefined;
       out.push({

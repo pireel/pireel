@@ -5,18 +5,19 @@
  * monotonically for optimistic concurrency (client save carries baseVersion, server 409s if larger).
  */
 
+import { applyUploadedMediaKeys, collectUploadedMediaKeys } from './cloud-media-persistence';
 import type { WordMask } from './word-masks';
 import { applyPatch, type Operation } from 'fast-json-patch';
 import { create as createDiffer } from 'jsondiffpatch';
 import { format as formatJsonPatch } from 'jsondiffpatch/formatters/jsonpatch';
-import { parseEditorDocumentV2, validateEditorDocumentV2, type EditorDocumentV2 } from './editor-document';
+import { parseEditorDocumentV2, type EditorCommandError, type EditorDocumentV2 } from './editor-document';
+import { replayDocumentTransactions, sanitizeDocumentTransactions, type DocumentTransaction } from './document-transaction';
 import {
   isProjectContextInput,
   sanitizeProjectContext,
   type StudioProjectContext,
 } from './project-context';
 import {
-  emptyProjectDocument,
   prepareEditorDocumentForPersistence,
 } from './project-document';
 import { canonicalJson, hashSection } from './stable-json';
@@ -95,8 +96,9 @@ export interface StudioProjectMeta {
 /** Save payload from client to server (ProjectStore.save's arg; shared by cloud sync and the provider contract). */
 export interface ProjectSavePayload {
   title?: string;
-  /** May be absent for metadata/context-only saves. */
-  document?: EditorDocumentV2;
+  /** Document edits since the last acknowledgement, in order. Absent for context/meta-only saves.
+   *  The document itself never travels: the server applies these onto whatever it holds. */
+  transactions?: DocumentTransaction[];
   /** Project-level multi-output directory. */
   context?: StudioProjectContext;
   videoSig: string | null;
@@ -105,6 +107,30 @@ export interface ProjectSavePayload {
    * lands in the row); base64 here multiplied every save/list payload. Absent = untouched. */
   coverThumb?: string | null;
 }
+
+/** A save acknowledgement carries server truth back to the live editor. */
+export interface ProjectCommitAck {
+  status: 'saved';
+  /** The stored revision after this batch. */
+  version: number;
+  updatedAt: number;
+  /** The whole project, only when the writer has to adopt it: it saved onto a version it did not
+   *  know (another writer landed in between), something was rejected, or it had no version yet.
+   *  Otherwise the acknowledgement stays a few hundred bytes however large the document is. */
+  project?: StudioProjectDto;
+  /** Transaction ids the server has now applied, or already had from an earlier attempt. */
+  applied: string[];
+  /** Transactions that could not apply onto the current truth; their local effect is void. */
+  rejected: Array<{ id: string; error: EditorCommandError }>;
+  /** The version the batch was applied onto. Different from what the writer knew means another
+   *  writer landed in between and the writer has to adopt `project.document`. */
+  baseVersion: number;
+  /** Canonical hash of the stored document after this batch, for cheap divergence checks. */
+  documentHash: string;
+}
+/** 'ok' = nothing to send; 'skip' = not reachable now, keep the intent and retry. Version races are
+ * resolved by replaying intents on the server, never surfaced as a conflict state. */
+export type ProjectSaveResult = 'ok' | 'skip' | 'migration-required' | ProjectCommitAck;
 
 /** Save payload cap (document graphics can be sizable, but keep it bounded). */
 export const MAX_PROJECT_BYTES = 8 * 1024 * 1024;
@@ -172,15 +198,14 @@ export function rowToMeta(r: ProjectMetaRow): StudioProjectMeta {
  * the returned server full, so the retry diff is computed against server truth, converging per section.
  */
 
-/** Diff wire format from client to server (serverSaveProject builds it from the full payload).
- *  Each big section is one of three: full value / patch+target hash / absent (unchanged). */
+/** Wire format from client to server. The document travels as transactions (what changed, in
+ *  order); the small project sections keep the diff form: full value / patch+target hash / absent. */
 export interface ProjectSaveWire {
   /** Save protocol version. Clients with an incompatible protocol are write-blocked without reload loops. */
   documentSchemaVersion: 2;
-  baseVersion: number | null;
-  document?: EditorDocumentV2;
-  documentPatch?: Operation[];
-  documentHash?: string;
+  /** Last version this writer saw acknowledged. A hint for the response, never a precondition. */
+  knownVersion: number | null;
+  transactions?: DocumentTransaction[];
   context?: StudioProjectContext;
   contextPatch?: Operation[];
   contextHash?: string;
@@ -191,7 +216,6 @@ export interface ProjectSaveWire {
 }
 
 export interface SectionHashes {
-  document: string;
   context: string;
   coverThumb: string;
   meta: string;
@@ -200,11 +224,14 @@ export interface SectionHashes {
 /** Diff baseline from the last successful save: values (JSON-clean, the base for patch diffs) + hashes (quick changed-or-not check). */
 export interface AckedSections {
   values: {
-    document: EditorDocumentV2;
     context: StudioProjectContext;
     /** Last server-acknowledged title. ProjectSavePayload.title is optional, where omission means
      * preserve — it must not be hashed as null or hydration emits a fake metadata change. */
     title?: string;
+    /** Last acknowledged media metadata. A payload carrying null means "not hydrated here, keep"
+     * (the server merges it the same way), so it must not hash as a change either. */
+    videoSig: string | null;
+    videoDurationSec: number | null;
   };
   hashes: SectionHashes;
 }
@@ -214,24 +241,21 @@ const metaHashOf = (title: string | null | undefined, videoSig: string | null, d
 
 /** Server full DTO → diff baseline (re-seed from server truth after a 409 conflict so the retry diff aligns). */
 export function ackedFromDto(p: {
-  document: EditorDocumentV2;
   context: StudioProjectContext;
   coverThumb: string | null;
   title: string;
   videoSig: string | null;
   videoDurationSec: number | null;
 }): AckedSections {
-  const document = prepareEditorDocumentForPersistence(p.document);
-  const documentCanon = canonicalJson(document);
   const contextCanon = canonicalJson(sanitizeProjectContext(p.context));
   return {
     values: {
-      document: JSON.parse(documentCanon) as EditorDocumentV2,
       context: JSON.parse(contextCanon) as StudioProjectContext,
       title: p.title,
+      videoSig: p.videoSig,
+      videoDurationSec: p.videoDurationSec,
     },
     hashes: {
-      document: hashSection(documentCanon),
       context: hashSection(contextCanon),
       coverThumb: hashSection(p.coverThumb ?? ''),
       meta: metaHashOf(p.title, p.videoSig, p.videoDurationSec),
@@ -272,17 +296,14 @@ export function diffOps(base: unknown, target: unknown): Operation[] {
 /** Threshold below which a patch is small enough to be worth sending (too-fragmented patches aren't worth it vs the whole section, and skip a server apply). */
 const PATCH_WORTH_RATIO = 0.6;
 
-/** Full payload → diff wire format. acked = the baseline from the last SUCCESSFUL save (null = send all).
- *  Returns null = all four sections unchanged, this save can be skipped entirely; otherwise carries the new baseline to advance to after a successful save. */
+/** Full payload → wire format. acked = the section baseline from the last SUCCESSFUL save (null = send all).
+ *  Returns null = nothing to send (no transactions, every section unchanged); otherwise carries the
+ *  section baseline to advance to after a successful save. */
 export function buildSaveWire(
   p: ProjectSavePayload,
-  baseVersion: number | null,
+  knownVersion: number | null,
   acked: AckedSections | null,
 ): { wire: ProjectSaveWire; acked: AckedSections } | null {
-  // Document may be absent for context/meta-only saves. Carry the baseline forward so a later
-  // document save still diffs correctly (no acked yet means the server's empty V2 first-insert seed).
-  const document = p.document ? prepareEditorDocumentForPersistence(p.document) : null;
-  const documentCanon = document ? canonicalJson(document) : null;
   const context = p.context ? sanitizeProjectContext(p.context) : null;
   const contextCanon = context ? canonicalJson(context) : null;
   // `title` is a patch field: absent means keep the acknowledged value. Hashing an omitted title
@@ -290,8 +311,10 @@ export function buildSaveWire(
   // like a metadata edit, issuing a no-op PUT that advanced the cloud version and could race the
   // first timeline mutation.
   const effectiveTitle = p.title !== undefined ? p.title : acked?.values.title;
+  // Null media metadata means the saving tab has not hydrated it (same rule as the server merge).
+  const effectiveVideoSig = p.videoSig ?? acked?.values.videoSig ?? null;
+  const effectiveDuration = p.videoDurationSec ?? acked?.values.videoDurationSec ?? null;
   const hashes: SectionHashes = {
-    document: documentCanon != null ? hashSection(documentCanon) : (acked?.hashes.document ?? hashSection(canonicalJson(emptyProjectDocument()))),
     context: contextCanon != null
       ? hashSection(contextCanon)
       : (acked?.hashes.context ?? hashSection(canonicalJson(sanitizeProjectContext(null)))),
@@ -301,22 +324,27 @@ export function buildSaveWire(
     coverThumb: p.coverThumb !== undefined
       ? hashSection(p.coverThumb ?? '')
       : (acked?.hashes.coverThumb ?? hashSection('')),
-    meta: metaHashOf(effectiveTitle, p.videoSig, p.videoDurationSec),
+    meta: metaHashOf(effectiveTitle, effectiveVideoSig, effectiveDuration),
   };
   // JSON-clean current values (parsed from the canonical string: incidentally drops undefined, so diff is structurally comparable to the baseline)
   const values: AckedSections['values'] = {
-    document: documentCanon != null ? (JSON.parse(documentCanon) as EditorDocumentV2) : (acked?.values.document ?? emptyProjectDocument()),
     context: contextCanon != null
       ? (JSON.parse(contextCanon) as StudioProjectContext)
       : (acked?.values.context ?? sanitizeProjectContext(null)),
     ...(effectiveTitle !== undefined ? { title: effectiveTitle } : {}),
+    videoSig: effectiveVideoSig,
+    videoDurationSec: effectiveDuration,
   };
-  const wire: ProjectSaveWire = { documentSchemaVersion: 2, baseVersion };
+  const wire: ProjectSaveWire = { documentSchemaVersion: 2, knownVersion };
   const w = wire as unknown as Record<string, unknown>;
   let changed = false;
+  if (p.transactions?.length) {
+    wire.transactions = p.transactions;
+    changed = true;
+  }
 
   /** Big-section tri-state: unchanged → absent / has baseline and patch is smaller → send patch / else whole section. */
-  const emitBig = (key: 'document' | 'context', canon: string, withHash: boolean) => {
+  const emitBig = (key: 'context', canon: string, withHash: boolean) => {
     if (acked && acked.hashes[key] === hashes[key]) return;
     changed = true;
     if (acked) {
@@ -333,7 +361,6 @@ export function buildSaveWire(
     }
     w[key] = values[key];
   };
-  if (documentCanon != null) emitBig('document', documentCanon, true);
   if (contextCanon != null) emitBig('context', contextCanon, true);
 
   if (p.coverThumb !== undefined && (!acked || acked.hashes.coverThumb !== hashes.coverThumb)) {
@@ -342,8 +369,8 @@ export function buildSaveWire(
   }
   if (!acked || acked.hashes.meta !== hashes.meta) {
     if (p.title !== undefined) wire.title = p.title;
-    wire.videoSig = p.videoSig;
-    wire.videoDurationSec = p.videoDurationSec;
+    wire.videoSig = effectiveVideoSig;
+    wire.videoDurationSec = effectiveDuration;
     changed = true;
   }
   return changed ? { wire, acked: { values, hashes } } : null;
@@ -357,34 +384,40 @@ function sanitizeOps(v: unknown): Operation[] | undefined {
     : undefined;
 }
 
-/** Validate/sanitize the save request body (diff semantics: absent field = undefined = keep current value). Returns null = invalid. */
+/** Wire fields of the snapshot protocol this server no longer accepts. A client still speaking it
+ *  is write-blocked (never silently merged as a whole-document overwrite). */
+const RETIRED_SAVE_FIELDS = ['comp', 'compPatch', 'compHash', 'chat', 'chatPatch', 'chatHash', 'document', 'documentPatch', 'documentHash', 'baseVersion'];
+
+export function isRetiredSaveProtocol(body: unknown): boolean {
+  if (!body || typeof body !== 'object') return false;
+  const b = body as Record<string, unknown>;
+  return ['document', 'documentPatch', 'documentHash', 'baseVersion'].some((key) => key in b);
+}
+
+/** Validate/sanitize the save request body (section semantics: absent field = undefined = keep current value). Returns null = invalid. */
 export function sanitizeSavePayload(body: unknown): {
   title?: string;
-  document?: EditorDocumentV2;
-  documentPatch?: Operation[];
-  documentHash?: string;
+  transactions?: DocumentTransaction[];
   context?: StudioProjectContext;
   contextPatch?: Operation[];
   contextHash?: string;
   videoSig: string | null;
   videoDurationSec: number | null;
   coverThumb: string | null | undefined;
-  baseVersion: number | null;
+  knownVersion: number | null;
   documentSchemaVersion: 2 | null;
 } | null {
   if (!body || typeof body !== 'object') return null;
   const b = body as Record<string, unknown>;
-  if (['comp', 'compPatch', 'compHash', 'chat', 'chatPatch', 'chatHash'].some((key) => key in b)) return null;
+  if (RETIRED_SAVE_FIELDS.some((key) => key in b)) return null;
   const dur = b.videoDurationSec;
   const videoSig = typeof b.videoSig === 'string' ? b.videoSig.slice(0, 200) : null;
   const videoDurationSec = typeof dur === 'number' && Number.isFinite(dur) ? dur : null;
-  let document: EditorDocumentV2 | undefined;
-  if (b.document && typeof b.document === 'object') {
-    const parsed = parseEditorDocumentV2(b.document);
+  let transactions: DocumentTransaction[] | undefined;
+  if ('transactions' in b) {
+    const parsed = sanitizeDocumentTransactions(b.transactions);
     if (!parsed) return null;
-    const prepared = prepareEditorDocumentForPersistence(parsed);
-    if (validateEditorDocumentV2(prepared).some((issue) => issue.severity === 'error')) return null;
-    document = prepared;
+    if (parsed.length) transactions = parsed;
   }
   let context: StudioProjectContext | undefined;
   if ('context' in b) {
@@ -393,18 +426,16 @@ export function sanitizeSavePayload(body: unknown): {
   }
   return {
     ...(typeof b.title === 'string' && b.title.trim() ? { title: b.title.slice(0, 120) } : {}),
-    ...(document ? { document } : {}),
+    ...(transactions ? { transactions } : {}),
     ...(context ? { context } : {}),
-    ...(sanitizeOps(b.documentPatch) ? { documentPatch: sanitizeOps(b.documentPatch) } : {}),
     ...(sanitizeOps(b.contextPatch) ? { contextPatch: sanitizeOps(b.contextPatch) } : {}),
-    ...(typeof b.documentHash === 'string' ? { documentHash: b.documentHash.slice(0, 64) } : {}),
     ...(typeof b.contextHash === 'string' ? { contextHash: b.contextHash.slice(0, 64) } : {}),
     videoSig,
     videoDurationSec,
     coverThumb: b.coverThumb === null
       ? null
       : (typeof b.coverThumb === 'string' ? b.coverThumb.slice(0, 500_000) : undefined),
-    baseVersion: typeof b.baseVersion === 'number' ? b.baseVersion : null,
+    knownVersion: typeof b.knownVersion === 'number' ? b.knownVersion : null,
     documentSchemaVersion: b.documentSchemaVersion === 2 ? 2 : null,
   };
 }
@@ -446,20 +477,9 @@ export function mergeSaveIntoRow(
   videoDurationSec: string | null;
   coverThumb: string | null;
 } | null {
+  // The document arrives already transacted: the caller replays the request's transactions onto
+  // the stored row before merging the small sections here.
   let document = existing.document;
-  if (p.document) document = p.document;
-  else if (p.documentPatch) {
-    if (!p.documentHash) return null; // patch must carry a target hash; missing = client broken
-    const patched = applySectionPatch(existing.document, p.documentPatch);
-    if (patched === null) return null;
-    // Refuse a patch against a legacy-shaped row. Online migration owns that transition.
-    const parsed = parseEditorDocumentV2(patched);
-    if (!parsed) return null;
-    const prepared = prepareEditorDocumentForPersistence(parsed);
-    if (validateEditorDocumentV2(prepared).some((issue) => issue.severity === 'error')) return null;
-    if (hashSection(canonicalJson(prepared)) !== p.documentHash) return null;
-    document = prepared;
-  }
 
   let context = sanitizeProjectContext(existing.context);
   if (p.context) context = sanitizeProjectContext(p.context);
@@ -472,6 +492,9 @@ export function mergeSaveIntoRow(
     context = prepared;
   }
 
+  const enriched = applyUploadedMediaKeys(document, context, collectUploadedMediaKeys(existing.document, existing.context));
+  document = enriched.document;
+  context = enriched.context;
   const exDur = existing.videoDurationSec;
   return {
     title: p.title ?? existing.title,
@@ -482,5 +505,62 @@ export function mergeSaveIntoRow(
     videoSig: p.videoSig ?? existing.videoSig,
     videoDurationSec: p.videoDurationSec != null ? String(p.videoDurationSec) : exDur == null ? null : String(exDur),
     coverThumb: p.coverThumb === undefined ? existing.coverThumb : p.coverThumb,
+  };
+}
+
+/* ==================== server-side application of one save request ==================== */
+
+export interface ProjectSaveApplication {
+  title: string;
+  document: EditorDocumentV2;
+  context: StudioProjectContext;
+  videoSig: string | null;
+  videoDurationSec: string | null;
+  coverThumb: string | null;
+  /** Transaction ids now known to the row, most recent last, capped for storage. */
+  appliedTransactionIds: string[];
+  applied: string[];
+  duplicates: string[];
+  rejected: Array<{ id: string; error: EditorCommandError }>;
+  documentChanged: boolean;
+}
+
+/** How many applied transaction ids a row remembers. A writer resends at most its unacknowledged
+ *  tail, which is far shorter than this; the cap only bounds storage. */
+export const APPLIED_TRANSACTIONS_CAP = 200;
+
+/**
+ * Apply one save request to the stored row: replay its transactions onto the stored document (ids
+ * the row already knows are skipped, so a resend after a lost response is harmless), then merge the
+ * small sections. Returns null when a section patch does not hold (caller answers need_full).
+ */
+export function applyProjectSave(
+  existing: {
+    title: string;
+    document: EditorDocumentV2;
+    context?: unknown;
+    videoSig: string | null;
+    videoDurationSec: string | number | null;
+    coverThumb: string | null;
+    appliedTransactionIds?: readonly string[] | null;
+  },
+  p: NonNullable<ReturnType<typeof sanitizeSavePayload>>,
+  ctx: { projectId: string },
+): ProjectSaveApplication | null {
+  const known = existing.appliedTransactionIds ?? [];
+  const replay = replayDocumentTransactions(existing.document, p.transactions ?? [], ctx, new Set(known));
+  const merged = mergeSaveIntoRow({ ...existing, document: replay.document }, p);
+  if (!merged) return null;
+  const appliedTransactionIds = [...known, ...replay.applied].slice(-APPLIED_TRANSACTIONS_CAP);
+  return {
+    ...merged,
+    document: merged.document as EditorDocumentV2,
+    appliedTransactionIds,
+    applied: [...replay.applied, ...replay.duplicates],
+    duplicates: replay.duplicates,
+    rejected: replay.rejected.map(({ id, error }) => ({ id, error })),
+    // By content, not identity: a relay that rebuilt an identical document must not push a history entry.
+    documentChanged: (replay.changed || merged.document !== replay.document)
+      && canonicalJson(merged.document) !== canonicalJson(existing.document),
   };
 }

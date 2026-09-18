@@ -14,7 +14,7 @@ import type { SceneProjectStore } from './scene-project';
 
 import type { BlockEdit, ComposeContext, KitChoice } from './compose';
 import type { AsrSegment } from './build-blocks';
-import type { ProjectSavePayload, StudioProjectDto } from './project-dto';
+import type { ProjectSaveResult, ProjectSaveWire, StudioProjectDto } from './project-dto';
 import type { EditorDocumentV2 } from './editor-document';
 import type { AssetSearchDocument } from './asset-search';
 import type { CustomVisualStyle } from './visual-style';
@@ -54,6 +54,10 @@ export interface Transcriber {
  * = degrade to device-local. backup progress is reported in [0,1]; fetch prefers an explicit cloud
  * key when the caller has one (a key survives signature-format changes). */
 export interface MediaVault {
+  /** Persist a finished upload into its original project's existing media references. */
+  confirmUpload?(projectId: string, sig: string, key: string): Promise<boolean>;
+  /** Lightweight, short-lived URL for card thumbnails/preview. Does not download the media body. */
+  previewUrl?(sig: string, options: { cloudKey: string }): Promise<string | null>;
   backup(file: File, sig: string, options?: { onProgress?: (fraction: number) => void; signal?: AbortSignal }): Promise<{ key: string } | null>;
   fetch(sig: string, options?: { cloudKey?: string; label?: string }): Promise<File | null>;
 }
@@ -68,7 +72,10 @@ export interface LocalByteProvider {
 /** Project persistence beyond the current device. */
 export interface ProjectStore {
   load(id: string): Promise<StudioProjectDto | null>;
-  save(id: string, payload: ProjectSavePayload): Promise<'ok' | 'conflict' | 'migration-required' | 'skip'>;
+  /** Transport one save request (transactions + sections). Retries, baselines and the pending
+   *  list live in the sync layer; the store answers 'skip' when unreachable, 'need-full' when the
+   *  section baseline drifted, 'migration-required' when writes are blocked. */
+  save(id: string, wire: ProjectSaveWire): Promise<ProjectSaveResult | 'need-full'>;
   remove(id: string): Promise<void>;
   /** Project-card cover as image BYTES (null clears). Kept out of the JSON save payload:
    * a base64 cover multiplies every project PUT/GET/list response. Optional — a shell
@@ -142,9 +149,6 @@ export interface StudioProviders {
   curatedAssets?: CuratedAssetProvider;
   /** Endpoint for the built-in agent chat (a hosted-LLM feature; OSS shells may omit and rely on external agents via MCP). */
   chatEndpoint?: string;
-  /** Which agent tool surface the host's chat route speaks. Resolved once per session so the client can
-   *  route tool calls (`v3` names execute through the v3 adapter). Absent = legacy. */
-  agentSurface?: () => Promise<'legacy' | 'v3'>;
   /** Cloud undo fallback: pop the newest entry off the project's server-side history ring and
    *  return the restored V2 document (null = ring empty). Absent = in-memory undo only (OSS shell).
    *  The server marks the restore as consumed — repeated calls walk strictly backward. */

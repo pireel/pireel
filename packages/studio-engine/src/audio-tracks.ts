@@ -16,6 +16,7 @@
  */
 
 import { SPLICE_FADE_SEC, VOLUME_DB_MAX, VOLUME_DB_MIN, dbToGain, fadeShape } from './composition-core';
+import { mintIdSuffix } from './deterministic-ids';
 
 export interface AudioClip {
   id: string;
@@ -70,8 +71,7 @@ export function audioFadeDefaults(role: AudioClipRole | undefined): { fadeInSec:
 
 let _audioUid = 0;
 export function audioClipId(): string {
-  _audioUid += 1;
-  return `aud${_audioUid}_${Math.floor(performance.now())}`;
+  return `aud${mintIdSuffix(() => ({ ordinal: ++_audioUid, suffix: String(Math.floor(performance.now())) }))}`;
 }
 
 /** Resolved knobs (defaults applied). outSec falls back to the media duration, or Infinity when unknown.
@@ -184,7 +184,8 @@ export function patchAudioClip(cur: AudioClip, patch: Partial<Pick<AudioClip, 's
   if (next.startSec) out.startSec = Math.round(Math.max(0, next.startSec) * 100) / 100; // same precision as in/out — a coarser start would slide the audio inside the clip on a left trim
   const db = next.volumeDb != null ? Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, next.volumeDb)) : undefined;
   if (db != null && db !== AUDIO_DEFAULT_DB) out.volumeDb = Math.round(db * 10) / 10;
-  const fadeSec = (v: number) => Math.round(Math.max(0, Math.min(AUDIO_FADE_MAX_SEC, v)) * 10) / 10;
+  // Millisecond precision, so a frame-addressed fade survives the seconds round trip (see patchShotAudio).
+  const fadeSec = (v: number) => Math.round(Math.max(0, Math.min(AUDIO_FADE_MAX_SEC, v)) * 1000) / 1000;
   const roleDefaults = audioFadeDefaults(next.role);
   const explicitFadeIn = cur.fadeInSec != null || Object.prototype.hasOwnProperty.call(patch, 'fadeInSec');
   const explicitFadeOut = cur.fadeOutSec != null || Object.prototype.hasOwnProperty.call(patch, 'fadeOutSec');

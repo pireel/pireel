@@ -37,13 +37,14 @@ function OutputTile({ record, url, actions }: { record: GeneratedAssetRecord; ur
   return (
     <div className="border-line group relative overflow-hidden rounded-md border">
       {record.kind === 'video' ? (
-        <video src={url} muted loop playsInline controls preload="metadata" className="aspect-[4/5] w-full bg-black object-contain" />
+        // Natural aspect, no letterbox ground: the tile shows the clip at the ratio it was generated at.
+        <video src={url} muted loop playsInline controls preload="metadata" className="block h-auto w-full" />
       ) : record.kind === 'audio' ? (
         <div className="bg-panel-2 px-2 py-2">
           <audio src={url} controls preload="metadata" className="h-8 w-full" />
         </div>
       ) : (
-        <img src={imageThumb(record.key, 'list')} alt="" loading="lazy" className="aspect-[4/5] w-full bg-[#f3f3f0] object-contain" />
+        <img src={imageThumb(record.key, 'list')} alt="" loading="lazy" className="block h-auto w-full" />
       )}
       <div className="flex flex-wrap items-center gap-0.5 px-1 py-1">
         {record.kind === 'audio'

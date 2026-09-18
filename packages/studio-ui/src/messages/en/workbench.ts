@@ -222,7 +222,8 @@ export const WORKBENCH_EN: Record<string, string> = {
     "Local file unavailable — it may have moved or the cache was cleared; re-import it",
   "workbench.localPersistenceUnavailable":
     "This media works in the current session, but local recovery storage is unavailable. You may need to select it again after reloading.",
-  "workbench.srcMissing": "Source missing",
+  "workbench.srcMissing": "Media unavailable",
+  "workbench.srcLoading": "Loading media",
   "workbench.canvasRatio": "Canvas ratio",
   "workbench.localVideoUseTrack":
     "Drop local videos on the timeline — stage picture-in-picture does not support local video files yet",
@@ -353,12 +354,22 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.facesSafeZones": "Faces/safe zones",
   "workbench.failedFetchInsertClip": "Failed to fetch the insert clip",
   "workbench.failedStaticChecksFix":
-    'Failed static checks — fix each issue in data.issues (common: scope every CSS selector to #{blockId}), keep everything else as-is, then apply_block once more with blockId:"{blockId}"',
+    'Component source failed validation: fix the concrete data.issues, preserve everything else, and re-submit using the same target {blockId}',
   "workbench.fetchedBlockContext": "Fetched block context",
   "workbench.fetchedNewElementContext": "Fetched new-element context",
+  "workbench.composeNeedsInstruction": "compose_component needs a concrete instruction for the component.",
+  "workbench.getIconsNeedName": "get_icons needs at least one icon name",
+  "workbench.getIconsFailed": "Icon lookup failed",
+  "workbench.gotIcons": "Found {n} icons",
+  "workbench.bakeNotComponent": "Only a graphic component can be baked",
+  "workbench.bakeRendering": "Baking in the cloud…",
+  "workbench.bakeFailed": "Bake failed",
+  "workbench.bakedName": "Baked and overlaid: {name}",
   "workbench.fetchingClipBytes": "Fetching clip bytes…",
   "workbench.filledIntoElementCard": "Filled into the element card",
   "workbench.filledLabel": 'Filled "{label}"',
+  "workbench.agentBridgeLost": "Connection to the agent dropped; reconnecting. Meanwhile its edits land on the cloud copy.",
+  "workbench.agentBridgeRestored": "Reconnected to the agent",
   "workbench.reclaimedWritership":
     "Took over editing — cloud sync resumed in this window",
   "workbench.nSlotsSkippedNothingToSay":
@@ -382,7 +393,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.geometryPassPct": "Geometry pass {pct}%",
   "workbench.graphic": "Graphic",
   "workbench.indexOutOfRange":
-    "index out of range: {list} (this transcript has {n} lines — see read_script)",
+    "index out of range: {list} (this transcript has {n} lines — see get_transcript)",
   "workbench.insertClipNoTranscript": "This insert B-roll has no transcript",
   "workbench.insertedBRoll": "Inserted B-roll",
   "workbench.insertedDurSClip": "Inserted a {dur}s clip at {at}s",
@@ -395,7 +406,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.invalidRange": "Invalid fromSec/toSec",
   "workbench.invalidToSec": "Invalid toSec",
   "workbench.itemsEmptyInvalidNeed":
-    "items is empty/invalid (need {index, text}[] — index is the line number from read_script)",
+    "items is empty/invalid (need {index, text}[] — index is the line number from get_transcript)",
   "workbench.jumpedTo": "Jumped to {t}s",
   "workbench.keepLeastOneScene": "Keep at least one scene",
   "workbench.labelsEmptyAllIndexes":
@@ -413,6 +424,39 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.searchedAssetsN": "Found {n} assets",
   "workbench.searchedAssetsNoMatch": "No matching asset found",
   "workbench.searchedFontsN": "Found {n} fonts",
+  "workbench.editableProperties": "Properties",
+  "workbench.componentHeaderCustom": "Custom component",
+  "workbench.componentHeaderKit": "Preset component",
+  "workbench.resetProp": "Reset to default",
+  "workbench.propsNoManifest": "This component declares no editable properties",
+  "workbench.propsUnknownKeys": "Unknown properties: {keys}; declared: {declared}",
+  "workbench.propsUpdated": "Set {n} properties on “{name}”",
+  "workbench.propsText": "Text",
+  "workbench.propsImages": "Images",
+  "workbench.propsEmpty": "This component has nothing editable",
+  "workbench.propsSelectHint": "Select a bespoke component to see its properties here",
+  "workbench.propsReplaceImage": "Replace",
+  "workbench.propsRemoveImage": "Remove image",
+  "workbench.propsAddRow": "Add row",
+  "workbench.propsLayout": "Layout",
+  "workbench.propsTiming": "Timing",
+  "workbench.propsAppearance": "Appearance",
+  "workbench.propsName": "Name",
+  "workbench.propsNameHint": "Name shown on the timeline",
+  "workbench.propsX": "X",
+  "workbench.propsY": "Y",
+  "workbench.propsW": "W",
+  "workbench.propsH": "H",
+  "workbench.propsScale": "Scale",
+  "workbench.propsRotation": "Rotation",
+  "workbench.propsStart": "Start",
+  "workbench.propsDuration": "Duration",
+  "workbench.propsBackground": "Background",
+  "workbench.propsBorder": "Border",
+  "workbench.propsNoBorder": "No border",
+  "workbench.propsRadius": "Corner radius",
+  "workbench.propsOpacity": "Opacity",
+  "workbench.propsRemoveRow": "Remove row",
   "workbench.searchedFontsNoMatch": "No matching font found",
   "chatGen.assetScope.mine": "My assets",
   "chatGen.assetScope.cloud": "Cloud",
@@ -459,6 +503,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.bgmRemoved": "Audio track removed",
   "workbench.denoiseFailed":
     "Denoise failed — preview and export keep the original audio",
+  "workbench.denoiseNoAudio": "This video has no audio track, so there is no sound to denoise",
   "workbench.denoiseNotOn": "Denoise is not on",
   "workbench.denoiseTurnedOff": "Narration denoise turned off",
   "workbench.denoiseTurnedOn":
@@ -495,7 +540,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.noTranscriptShort": "No transcript yet — extract it first",
   "workbench.noTranscriptYetExtract":
     "No transcript yet — extract it first (Smart transcript cut / Captions panel), then sync",
-  "workbench.noTranscriptYetRun": "No transcript yet — get it with read_script first",
+  "workbench.noTranscriptYetRun": "No transcript yet — get it with get_transcript first",
   "workbench.noVideoYet": "No video yet",
   "workbench.openChat": "Open chat",
   "workbench.originalVideoReconnectedDraft":
@@ -514,8 +559,6 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.portrait": "Portrait",
   "workbench.portraitLayer": "Portrait layer",
   "workbench.preparedNSampledFrames": "Prepared {n} sampled frames",
-  "workbench.projectAlsoEditedElsewhere":
-    "This project was also edited elsewhere — saving will continue with your latest changes",
   "workbench.projectMigrationSaveBlocked":
     "This project needs a data migration. Cloud saving is paused; your current edit remains available.",
   "workbench.publishPrepareFailed":
@@ -525,7 +568,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.rangesEmptyInvalidThose":
     "ranges is empty/invalid, or those ranges no longer exist in the edit",
   "workbench.rawRequired":
-    "raw required (the text generated from the compose_block_brief brief)",
+    "raw required (the text generated from the compose_component contract)",
   "workbench.reading": "Reading…",
   "workbench.readingDuration": "Reading duration…",
   "workbench.readTranscript": "Read the transcript",
@@ -597,6 +640,7 @@ export const WORKBENCH_EN: Record<string, string> = {
     "Grouped {n} precise-framing updates · {done} done, {failed} failed",
   "workbench.framingGroupRunning":
     "Grouping {n} precise-framing updates · {done} done",
+  "workbench.brollClipN": "B-roll #{n}",
   "workbench.shotN": "Shot #{n}",
   "workbench.shotNotFound": "Shot not found",
   "workbench.smallerText": "Smaller text",
@@ -666,7 +710,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.outputSwitchPausedByAgent":
     "The assistant is editing — output switching resumes when it finishes",
   "workbench.outputChangedUnderAgent":
-    "The active output is now “{active}” but you were editing “{anchored}”. Call switch_output to go back, or get_state / list_outputs to adopt the current output",
+    "The active output is now “{active}” but you were editing “{anchored}”. Call manage_project to go back, or get_state to adopt the current output",
   "workbench.outputRenamedNamed": "Renamed output to “{title}”",
   "workbench.outputSwitched": "Switched output",
   "workbench.outputSwitcher": "Project outputs",
@@ -721,4 +765,8 @@ export const WORKBENCH_EN: Record<string, string> = {
     "Primary auto snap is on. Clips stay packed continuously from the start.",
   "workbench.timelineAutoSnapOff":
     "Primary auto snap is off. Clips can leave free gaps.",
+  "workbench.timelineCompact": "Compact timeline",
+  "workbench.timelineCompactOn":
+    "Compact timeline is on. Shorter tracks leave more room for the canvas.",
+  "workbench.timelineCompactOff": "Switch to a compact timeline with shorter tracks.",
 };

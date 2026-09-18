@@ -84,6 +84,8 @@ export interface EditorTrack {
   syncLocked: boolean;
   /** Global order across non-primary visual, graphics and caption tracks. Larger renders above smaller. */
   stackOrder: number;
+  /** A lane created on purpose (manage_tracks) survives commits while empty; derived lanes are pruned. */
+  keepEmpty?: boolean;
   clips: TimelineClip[];
 }
 
@@ -119,7 +121,7 @@ export interface NarrativeTimelineClip extends TimelineClipBase {
  * `mediaFraming` remains the canonical layer geometry; these values preserve preset intent and
  * the clip's own grade/audio settings across multi-track moves. */
 export type MediaVideoProperties = Pick<VideoShot, 'treatment'> & Partial<Pick<VideoShot,
-  'treatSize' | 'treatCrop' | 'preciseFraming' | 'filter'
+  'treatSize' | 'treatCrop' | 'preciseFraming' | 'filter' | 'zoom'
   | 'volumeDb' | 'audioMuted' | 'audioFadeInSec' | 'audioFadeOutSec'
 >>;
 

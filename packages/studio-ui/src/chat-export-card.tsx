@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * One-click export card for export_video. The program derives resolution from the source,
+ * One-click export card for export action:start. The program derives resolution from the source,
  * preserves the current canvas ratio, and defaults to 30fps MP4. Explicit user-requested specs
  * may prefill/override that adaptive choice, but ordinary exports never ask the user to configure it.
  */

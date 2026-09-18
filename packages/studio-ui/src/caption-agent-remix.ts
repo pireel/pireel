@@ -2,7 +2,8 @@ import { studioProviders } from '@pireel/studio-engine/providers';
 import { dubbingVideoDocument } from '@pireel/studio-engine/dubbing-task';
 import { buildCaptionTaskDocument } from '@pireel/studio-engine/caption-task';
 import { firstNarrativeAssetId, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
-import { STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION, type ProjectSavePayload } from '@pireel/studio-engine/project-dto';
+import { STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION, type ProjectSaveWire } from '@pireel/studio-engine/project-dto';
+import { createDocumentTransactionId } from '@pireel/studio-engine/document-transaction';
 import { loadCaptionVersion, loadCaptionMedia, type CaptionTaskRecord } from './caption-task-store';
 import { alignFileToSig, loadLocalVideo, saveLocalVideo } from './local-media';
 import { loadCurrentUser } from './current-user';
@@ -37,12 +38,16 @@ export async function createCaptionAgentRemix(task: CaptionTaskRecord, sourceFil
   try {
     const document = captionAgentRemixDocument(task, id, url);
     const assetId = firstNarrativeAssetId(document);
-    const payload: ProjectSavePayload = {
-      document, title: task.name.replace(/\.[^.]+$/, '') + (task.scene === 'dubbing' ? ` · ${task.options.dubbing?.language ?? ''}` : '') + ' · Agent Remix',
+    const transactionId = createDocumentTransactionId();
+    const payload: ProjectSaveWire = {
+      documentSchemaVersion: 2, knownVersion: null,
+      transactions: [{ id: transactionId, origin: 'user', ops: [{ op: 'document.replace', input: { document } }] }],
+      title: task.name.replace(/\.[^.]+$/, '') + (task.scene === 'dubbing' ? ` · ${task.options.dubbing?.language ?? ''}` : '') + ' · Agent Remix',
       videoSig: task.sourceSig, videoDurationSec: task.durationSec,
       context: { schemaVersion: STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION, ...(assetId ? { localAssets: [{ assetId, contentSig: task.sourceSig, sig: task.sourceSig, label: task.name, kind: 'video' as const, w: task.width, h: task.height, durationSec: task.durationSec, size: file.size, mime: file.type, createdAt: Date.now() }] } : {}) },
     };
-    if (await serverSaveProject(id, payload) !== 'ok') throw new Error('副本暂时无法保存，请重试。');
+    const saved = await serverSaveProject(id, payload);
+    if (typeof saved !== 'object' || saved.status !== 'saved' || !saved.applied.includes(transactionId)) throw new Error('副本暂时无法保存，请重试。');
     const stored = await serverLoadProject(id);
     if (!stored) throw new Error('副本已创建，暂时无法打开。请从项目列表重试。');
     cacheProjectLocally(stored);

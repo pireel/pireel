@@ -5,6 +5,7 @@ import {
   assistantHasOpenOrInterruptedInteraction,
   assistantMessageHasRenderableOutput,
   assistantMessageSuggestsContinuation,
+  assistantTurnEndedWithAnswer,
   assistantWorkDurationMs,
   assistantWorkFold,
   createStudioTurnLedger,
@@ -41,7 +42,7 @@ describe('compactStudioChatMessages', () => {
       { type: 'step-start' },
       { type: 'tool-list_assets', toolCallId: 'list-1', state: 'output-available', input: {}, output: {} },
       { type: 'text', text: '我需要再分析画面和参数。' },
-      { type: 'tool-analyze_visual', toolCallId: 'vision-1', state: 'output-available', input: {}, output: {} },
+      { type: 'tool-inspect_media', toolCallId: 'vision-1', state: 'output-available', input: {}, output: {} },
       { type: 'reasoning', text: 'private chain' },
       { type: 'text', text: '已按旅行画面完成剪辑。' },
     ] as UIMessage['parts'])]);
@@ -50,7 +51,7 @@ describe('compactStudioChatMessages', () => {
       'text',
       'tool-list_assets',
       'text',
-      'tool-analyze_visual',
+      'tool-inspect_media',
       'text',
     ]);
     expect(message!.parts
@@ -92,7 +93,7 @@ describe('assistantWorkFold', () => {
       { type: 'tool-list_assets', toolCallId: 'list-1', state: 'output-available', input: {}, output: {} },
     ] as UIMessage['parts']), true)).toBeNull();
     expect(assistantWorkFold(assistant([
-      { type: 'tool-analyze_visual', toolCallId: 'visual-1', state: 'output-available', input: {}, output: {} },
+      { type: 'tool-inspect_media', toolCallId: 'visual-1', state: 'output-available', input: {}, output: {} },
       { type: 'text', text: '画面已经选好。现在执行。' },
     ] as UIMessage['parts']), true)).toBeNull();
   });
@@ -159,11 +160,11 @@ describe('compactStudioChatMessagesForModel', () => {
 
   it('replays every timeline snapshot unchanged so the request prefix stays byte-stable', () => {
     const oldTimeline = {
-      type: 'tool-get_timeline', toolCallId: 'timeline-old', state: 'output-available', input: {},
+      type: 'tool-get_state', toolCallId: 'timeline-old', state: 'output-available', input: {},
       output: { ok: true, data: { durationSec: 0, tracks: [{ role: 'primaryNarrative', clips: [] }], dense: 'x'.repeat(20_000) } },
     };
     const currentTimeline = {
-      type: 'tool-get_timeline', toolCallId: 'timeline-current', state: 'output-available', input: {},
+      type: 'tool-get_state', toolCallId: 'timeline-current', state: 'output-available', input: {},
       output: { ok: true, data: { durationSec: 12, tracks: [{ role: 'primaryNarrative', clips: [{ id: 'shot-1' }] }] } },
     };
     const message = assistant([oldTimeline, currentTimeline] as UIMessage['parts']);
@@ -176,7 +177,7 @@ describe('compactStudioChatMessagesForModel', () => {
   it('keeps the complete visual receipt for display but replays only editorial verdict evidence', () => {
     const subjectTracks = Array.from({ length: 100 }, (_, index) => ({ startSec: index, dense: 'x'.repeat(200) }));
     const message = assistant([{
-      type: 'tool-analyze_visual',
+      type: 'tool-inspect_media',
       toolCallId: 'vision-1',
       state: 'output-available',
       input: { assetId: 'asset-1', mode: 'editorial' },
@@ -240,7 +241,7 @@ describe('compactStudioChatMessagesForModel', () => {
 
   it('compacts every source receipt in one editorial batch without dropping verdicts', () => {
     const message = assistant([{
-      type: 'tool-analyze_visual',
+      type: 'tool-inspect_media',
       toolCallId: 'vision-batch',
       state: 'output-available',
       input: { mode: 'editorial', items: [{ assetId: 'asset-a' }, { assetId: 'asset-b' }] },
@@ -275,7 +276,7 @@ describe('synchronous studio turn ledger', () => {
     expect(shouldBlockStudioTurnUndo(ledger)).toBe(true);
 
     recordStudioTurnToolResult(ledger, {
-      toolId: 'get_timeline', toolCallId: 'read-only', input: {},
+      toolId: 'get_state', toolCallId: 'read-only', input: {},
       output: { ok: true, data: { durationSec: 0 } }, canMutate: false,
     });
     expect(shouldBlockStudioTurnUndo(ledger)).toBe(true);
@@ -292,7 +293,7 @@ describe('synchronous studio turn ledger', () => {
 describe('analyze visual card context', () => {
   it('surfaces the resolved source label without showing an implementation id', () => {
     expect(analyzeVisualSourceLabel({
-      type: 'tool-analyze_visual',
+      type: 'tool-inspect_media',
       state: 'output-available',
       input: { assetId: 'asset-internal-123' },
       output: { ok: true, data: { label: '海边回眸.mov' } },
@@ -354,13 +355,13 @@ describe('assistantMessageSuggestsContinuation', () => {
     ]))).toBe(true);
     expect(assistantMessageSuggestsContinuation(assistant([
       { type: 'text', text: '正在检查时间线。' },
-      { type: 'tool-get_timeline', toolCallId: 'timeline-final', state: 'output-available', input: {}, output: { ok: true } },
+      { type: 'tool-get_state', toolCallId: 'timeline-final', state: 'output-available', input: {}, output: { ok: true } },
     ] as UIMessage['parts']))).toBe(true);
   });
 
   it('detects an output-limit truncation but still replays its text (capped, byte-stable)', () => {
     const truncated = assistant([
-      { type: 'tool-get_timeline', toolCallId: 'timeline-1', state: 'output-available', input: {}, output: {} },
+      { type: 'tool-get_state', toolCallId: 'timeline-1', state: 'output-available', input: {}, output: {} },
       { type: 'text', text: `${'继续计算镜头顺序。'.repeat(900)}clip_local_c` },
     ] as UIMessage['parts']);
     expect(assistantMessageSuggestsContinuation(truncated)).toBe(true);
@@ -372,6 +373,23 @@ describe('assistantMessageSuggestsContinuation', () => {
   it('does not annotate a completed answer or duplicate an approval interaction', () => {
     expect(assistantMessageSuggestsContinuation(assistant([
       { type: 'text', text: '已经完成剪辑并复检，字幕与视频等长。' },
+    ]))).toBe(false);
+    // An answer that hands the decision back names work it might do — that is a question, not a
+    // pending step (this exact shape re-prompted the model into unrequested edits on device).
+    expect(assistantMessageSuggestsContinuation(assistant([
+      { type: 'tool-remove_clips', toolCallId: 'rm-1', state: 'output-available', input: {}, output: { ok: true } },
+      { type: 'text', text: '第二个分镜已经删掉了。不过有两处问题：开头多了一张对比卡片，要不要我删掉？53 秒处结尾是全黑的，我可以把最后一个镜头的出点收回。你让我删第二个分镜，很可能就是因为看到了这个黑尾——如果是的话，告诉我，我按修正结尾来处理，而不是再去动分镜。' },
+    ] as UIMessage['parts']))).toBe(false);
+    expect(assistantTurnEndedWithAnswer(assistant([
+      { type: 'tool-remove_clips', toolCallId: 'rm-1', state: 'output-available', input: {}, output: { ok: true } },
+      { type: 'text', text: '第二个分镜已经删掉了，要不要我顺手把开头的卡片也删掉？' },
+    ] as UIMessage['parts']))).toBe(true);
+    expect(assistantTurnEndedWithAnswer(assistant([
+      { type: 'text', text: '先看一眼时间线。' },
+      { type: 'tool-get_state', toolCallId: 'gs-1', state: 'input-available', input: {} },
+    ] as UIMessage['parts']))).toBe(false);
+    expect(assistantTurnEndedWithAnswer(assistant([
+      { type: 'text', text: '让我用一条自然收尾的镜头补上这段，然后加字幕。' },
     ]))).toBe(false);
     expect(assistantMessageSuggestsContinuation(assistant([
       { type: 'text', text: '所有时间线操作均已执行。' },

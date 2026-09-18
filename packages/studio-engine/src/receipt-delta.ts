@@ -3,7 +3,7 @@
  *
  * Cutting/trimming footage ripples the edited timeline: overlay blocks after the
  * cut shift left, blocks spanning it get trimmed or silently dropped
- * (removeEditedInterval), and cut_narration re-lays the caption layer. The
+ * (removeEditedInterval), and remove_words re-lays the caption layer. The
  * hand-written receipt summaries state the primary effect only, so the agent had
  * to re-read state (or guess) to learn what else moved. This module computes the
  * ACTUAL change from a before/after comp diff and attaches it to the receipt as

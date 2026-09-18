@@ -27,11 +27,10 @@ import { fadeBodyPath, waveBars } from './timeline-wave';
 import { t } from './i18n';
 
 /* ---- Audio chip geometry (mirrors the reference editor's ClipRenderer) ---- */
-/** Chip height inside the music lane (row height minus the 2px breathing room top and bottom). */
-const CHIP_H = AUDIO_ROW_H - 4;
+/** Chip height inside the music lane: row height minus the 2px breathing room top and bottom. */
+const chipHeight = (rowH: number) => rowH - 4;
 /** Label strip across the top; the waveform, fade wedge and knees all live in the BODY below it. */
 const CHIP_LABEL_H = 14;
-const CHIP_BODY_H = CHIP_H - CHIP_LABEL_H;
 /** Knees sit in a fixed "fade lane" a few px below the body's top edge — not on the chip's corner. */
 const KNEE_LANE_Y = 4;
 const KNEE_SIZE = 10;
@@ -44,8 +43,8 @@ const KNEE_EDGE_INSET = 10;
  *  of it is visible, which is a crop, not a redraw. Resolution is capped generously because this is built
  *  once per clip, not per frame. */
 const WAVE_UNITS_MAX = 4000;
-function clipWavePath(peaks: Float32Array, volumeDb: number): string {
-  return waveBars(peaks, 0, peaks.length, peaks.length, CHIP_BODY_H, volumeDb, undefined, WAVE_UNITS_MAX);
+function clipWavePath(peaks: Float32Array, volumeDb: number, bodyH: number): string {
+  return waveBars(peaks, 0, peaks.length, peaks.length, bodyH, volumeDb, undefined, WAVE_UNITS_MAX);
 }
 
 /** Where a fade knob sits horizontally (body px), clamped so it stays grabbable inside the clip. */
@@ -60,6 +59,8 @@ function audioKneeX(fadeSec: number, edge: 'in' | 'out', widthPx: number, spanSe
 export interface AudioLaneProps {
   /** Native document track identity; absent only for the legacy single-lane fallback. */
   trackId?: string;
+  /** Lane height from the timeline's density; defaults to the comfortable constant. */
+  rowH?: number;
   clips: AudioClip[];
   disabledIds?: ReadonlySet<string>;
   /** Timeline duration (s) and scale (px per second). */
@@ -97,7 +98,7 @@ export type AudioLaneMoveTarget =
   | { kind: 'track'; trackId: string; newTrackIndex: number; top: number }
   | { kind: 'new-track'; newTrackIndex: number; lineTop: number; top: number };
 
-function AudioLaneImpl({ trackId, clips, disabledIds, dur, surfaceDur = dur, pps, top, peaks, selectedId, onSelect, resolveMoveTarget, onMoveTargetChange, onMove, onTrim, onFade, onToggleMute, onOpenPanel, secAt, endSecAt = secAt, onEndResizePreview, snap, drag }: AudioLaneProps) {
+function AudioLaneImpl({ trackId, rowH = AUDIO_ROW_H, clips, disabledIds, dur, surfaceDur = dur, pps, top, peaks, selectedId, onSelect, resolveMoveTarget, onMoveTargetChange, onMove, onTrim, onFade, onToggleMute, onOpenPanel, secAt, endSecAt = secAt, onEndResizePreview, snap, drag }: AudioLaneProps) {
   /** Live gesture value (this component's whole reason to exist): the clip under the pointer renders
    *  from base + patch, and the commit lands once on release. */
   const [audioDrag, setAudioDrag] = useState<{
@@ -107,16 +108,18 @@ function AudioLaneImpl({ trackId, clips, disabledIds, dur, surfaceDur = dur, pps
   } | null>(null);
   const px = useCallback((s: number) => s * pps, [pps]);
   /** One static path per clip, rebuilt only when its peaks or its level change. */
+  const CHIP_H = chipHeight(rowH);
+  const CHIP_BODY_H = CHIP_H - CHIP_LABEL_H;
   const waves = useMemo(() => {
     const out = new Map<string, string>();
     for (const c of clips) {
       const p = c.sig ? peaks?.get(c.sig) : undefined;
-      if (p && p.length > 1) out.set(c.id, clipWavePath(p, audioClipDefaults(c).volumeDb));
+      if (p && p.length > 1) out.set(c.id, clipWavePath(p, audioClipDefaults(c).volumeDb, CHIP_BODY_H));
     }
     return out;
-  }, [clips, peaks]);
+  }, [clips, peaks, CHIP_BODY_H]);
   return (
-    <div className="absolute right-0 left-0" style={{ top, height: AUDIO_ROW_H }}>
+    <div className="absolute right-0 left-0" style={{ top, height: rowH }}>
       {clips.map((base) => {
         // during a gesture this clip renders from the live patch; everything below (window,
         // wave slice, fades, knee positions) derives from it, so there is one source of truth

@@ -5,7 +5,7 @@
  * - audio: the word's sound is replaced in preview and export — 'beep' (a tone) or 'mute' (silence).
  * - text: the caption shows this string instead of the word (e.g. "**").
  *
- * The transcript text and word timing stay the spoken truth (read_script, search and cutting keep
+ * The transcript text and word timing stay the spoken truth (get_transcript, search and cutting keep
  * working on the real words); masks live beside them on the sentence, keyed by word index, and
  * survive cuts because they never reference timeline positions. Which words deserve a mask is a
  * human or agent decision — there is no built-in word list.

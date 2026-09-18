@@ -57,7 +57,7 @@ export function setCachedAsr(url: string, segs: AsrSegment[]): void {
 }
 
 /** Explicit invalidation for a source whose cached transcript failed native timeline relay. */
-export function deleteCachedAsr(url: string): void {
-  if (!url) return;
-  void kvDelete(PREFIX + url);
+export function deleteCachedAsr(url: string): Promise<void> {
+  if (!url) return Promise.resolve();
+  return kvDelete(PREFIX + url).catch(() => {});
 }

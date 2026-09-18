@@ -52,6 +52,8 @@ export interface InsertTrackInput {
   syncLocked?: boolean;
   stackOrder?: number;
   clips?: TimelineClip[];
+  /** Keep the lane through commits while it holds no clips. */
+  keepEmpty?: boolean;
 }
 
 export type TrackPatch = Partial<Pick<EditorTrack,
@@ -198,13 +200,17 @@ export type EditorCommandErrorCode =
   | 'duplicate-clip-id'
   | 'invalid-track-role'
   | 'primary-track-required'
-  | 'track-locked';
+  | 'track-locked'
+  /** A document patch made against a document this host does not hold. */
+  | 'stale-base';
 
 export interface EditorCommandError {
   code: EditorCommandErrorCode;
   message: string;
   path?: string;
   trackIds?: TrackId[];
+  /** Structured detail from the failing tool (a fix, unknown ids, conflicts) for the caller's receipt. */
+  details?: unknown;
 }
 
 export interface EditorCommandReceipt {

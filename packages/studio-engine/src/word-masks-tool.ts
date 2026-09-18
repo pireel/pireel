@@ -6,7 +6,7 @@ export { applyWordMasks } from './word-masks';
 
 export function parseMaskWordsInput(input: Record<string, unknown>): { ids: string[]; patch: WordMaskPatch } | { error: string } {
   const ids = Array.isArray(input.wordIds) ? [...new Set(input.wordIds.map(String))].filter(Boolean) : [];
-  if (!ids.length) return { error: 'wordIds must contain at least one id from list_words' };
+  if (!ids.length) return { error: 'wordIds must contain at least one id from get_transcript {granularity:"words"}' };
   const patch: WordMaskPatch = {};
   if (input.audio !== undefined) {
     if (input.audio === 'beep' || input.audio === 'mute') patch.audio = input.audio;

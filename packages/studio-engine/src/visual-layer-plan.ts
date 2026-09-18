@@ -1,4 +1,4 @@
-import type { AtomicMediaFraming, Block, ShotFilter } from './composition-core';
+import { zoomScaleAt, type AtomicMediaFraming, type Block, type ShotFilter, type ShotZoom } from './composition-core';
 
 export interface SupplementalVisualMediaClip {
   clipId: string;
@@ -6,6 +6,9 @@ export interface SupplementalVisualMediaClip {
   stackOrder: number;
   kind: 'image' | 'video';
   source: string;
+  /** Source picture size from asset metadata, when known: the preview canvas boots at this size until the first frame lands. */
+  sourceWidth?: number;
+  sourceHeight?: number;
   startSec: number;
   endSec: number;
   sourceInSec: number;
@@ -20,6 +23,8 @@ export interface SupplementalVisualMediaClip {
   filter?: ShotFilter;
   box?: { x: number; y: number; w: number; h: number };
   mediaFraming?: AtomicMediaFraming;
+  /** Animated push-in on top of mediaFraming (video clips). */
+  zoom?: ShotZoom;
   anchorX?: number;
   anchorY?: number;
   opacity?: number;
@@ -34,6 +39,8 @@ export interface SupplementalVisualState {
   opacity: number;
   anchorX: number;
   anchorY: number;
+  /** Zoom multiplier on the framing scale at this moment (1 = static framing). */
+  zoomScale: number;
 }
 
 function interpolateRows<T extends { atSec: number }>(
@@ -75,6 +82,7 @@ export function supplementalVisualStateAt(visual: SupplementalVisualMediaClip, t
     opacity,
     anchorX: visual.anchorX ?? 0.5,
     anchorY: visual.anchorY ?? 0.5,
+    zoomScale: zoomScaleAt(visual.zoom, localSec, Math.max(0, visual.endSec - visual.startSec)),
   };
 }
 

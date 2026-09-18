@@ -61,6 +61,52 @@ describe('native caption lifecycle transaction', () => {
     expect(syncCaptionTranscripts(first.document, corrected, { [main]: transcript })).toBe(first.document);
   });
 
+  it('edits and removes single cues through the transcript the document holds', () => {
+    const on = applyCaptionDocumentEdit({
+      document: captionFixture(), patch: { on: true, preset: 'ln-clean' }, mainTranscript: transcript, clipTranscripts: {},
+    });
+    expect(on.ok).toBe(true);
+    if (!on.ok) return;
+    const main = firstNarrativeAssetId(on.document)!;
+    const lane = (document: typeof on.document) => document.timeline.tracks.find((track) => track.id === document.semantics.managedCaptionTrackId)!.clips;
+    const before = lane(on.document).length;
+    expect(before).toBeGreaterThan(0);
+    // Nothing on the wire but the edit: the transcript inputs stay empty.
+    const edited = applyCaptionDocumentEdit({
+      document: on.document, mainTranscript: null, clipTranscripts: {},
+      cueEdits: [{ assetId: main, index: 0, w0: 0, w1: 3, text: 'ONE two three four' }],
+    });
+    expect(edited.ok).toBe(true);
+    if (!edited.ok) return;
+    expect(edited.document.semantics.transcripts[main]![0]!.cueTexts).toEqual({ '0:3': 'ONE two three four' });
+    const removed = applyCaptionDocumentEdit({
+      document: edited.document, mainTranscript: null, clipTranscripts: {},
+      cueEdits: [{ assetId: main, index: 0, w0: 0, w1: 3, text: null }],
+    });
+    expect(removed.ok).toBe(true);
+    if (!removed.ok) return;
+    expect(removed.document.semantics.transcripts[main]![0]!.cueTexts).toEqual({ '0:3': '' });
+    expect(lane(removed.document)).toHaveLength(before - 1);
+    // A re-layout regenerates the cue boundaries; the removed cue stays removed.
+    const relaid = applyCaptionDocumentEdit({ document: removed.document, relayout: true, mainTranscript: null, clipTranscripts: {} });
+    expect(relaid.ok).toBe(true);
+    if (!relaid.ok) return;
+    expect(Object.values(relaid.document.semantics.transcripts[main]![0]!.cueTexts ?? {})).toContain('');
+    expect(lane(relaid.document)).toHaveLength(before - 1);
+    // Re-extracting captions (a fresh transcript from ASR) is a new set: removals and copy edits are gone,
+    // the same way regenerating captions in a clip-based editor yields every caption again.
+    const reextracted = applyCaptionDocumentEdit({ document: relaid.document, mainTranscript: transcript, clipTranscripts: {} });
+    expect(reextracted.ok).toBe(true);
+    if (!reextracted.ok) return;
+    expect(reextracted.document.semantics.transcripts[main]![0]!.cueTexts).toBeUndefined();
+    expect(lane(reextracted.document)).toHaveLength(before);
+    // An unknown asset is refused rather than silently ignored.
+    const missing = applyCaptionDocumentEdit({
+      document: on.document, mainTranscript: null, clipTranscripts: {}, cueEdits: [{ assetId: 'nope', index: 0, text: null }],
+    });
+    expect(missing.ok).toBe(false);
+  });
+
   it('accepts the clip copy of the first narrative asset when no main transcript is supplied', () => {
     const document = captionFixture();
     const main = firstNarrativeAssetId(document)!;

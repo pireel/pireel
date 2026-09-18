@@ -7,7 +7,7 @@
  * as the main body (no auto-collapse — the user folds it manually).
  * Line editing: click a line = seek the video to its spot + edit IN PLACE on the same node
  * (contentEditable; background-only editing state — no border, no size change, zero jitter). Edits
- * write back to the TRANSCRIPT (single source of truth: captions re-lay, agents' read_script and the
+ * write back to the TRANSCRIPT (single source of truth: captions re-lay, agents' get_transcript and the
  * script panel all see the fix; timing untouched). The editable DOM stays local for the entire input
  * session and publishes once on blur/Enter, so IME/native undo never triggers transcript re-tokenizing
  * while the user is still typing. With
@@ -100,7 +100,7 @@ export interface CaptionStyleCtl {
 export function CaptionsPanel({
   comp,
   onPickPreset,
-  onRelayout,
+  onReextract,
   onRemove,
   styleCtl,
   translation,
@@ -119,7 +119,8 @@ export function CaptionsPanel({
   /** Click a style card: globally swap the preset for all sentence-level captions (if none exist yet, lays a layer from the voiceover script). */
   onPickPreset: (presetId: string) => void;
   /** Explicitly regenerate cue boundaries from current canvas/font metrics. */
-  onRelayout?: () => void;
+  /** Transcribe the speech again and rebuild every caption: a fresh set, edits and removals cleared. */
+  onReextract?: () => void;
   /** Remove the whole sentence-level caption layer + clear global style. */
   onRemove: () => void;
   /** Per-line (main / translation) style state + patch callbacks. */
@@ -238,12 +239,12 @@ export function CaptionsPanel({
                   onChange={(v) => (v ? onPickPreset(styleCtl.main.preset) : onRemove())}
                 />
               }
-              trailing={hasCaptions && onRelayout ? (
+              trailing={hasCaptions && onReextract ? (
                 <button
                   type="button"
-                  onClick={onRelayout}
-                  title={t('captions.relayoutHint')}
-                  aria-label={t('captions.relayout')}
+                  onClick={onReextract}
+                  title={t('captions.reextractHint')}
+                  aria-label={t('captions.reextract')}
                   className="border-line text-ink-3 hover:border-accent hover:text-ink flex h-7 w-7 shrink-0 items-center justify-center rounded-md border"
                 >
                   <RefreshCw size={12} />

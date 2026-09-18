@@ -156,7 +156,7 @@ export async function insertedClipSafeZone(file: File, srcStart: number, srcEnd:
 }
 
 /** Everything except the semantics pass (cuts/frame extraction/geometry/palette, all free) — shared by both the hosted
- *  path (VLM) and the BYO path (visual_brief: frames handed directly to an external agent to look at). Label assembly goes through finishVisualAnalysis. */
+ *  path (VLM) and the BYO path (inspect_media brief: frames handed directly to an external agent to look at). Label assembly goes through finishVisualAnalysis. */
 export interface VisualPrep {
   sig: string;
   durationSec: number;

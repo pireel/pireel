@@ -4,15 +4,18 @@
  * browser-native previews, while components resolve only through the audited local kit/template
  * catalogs. Supplied metadata is never rendered as HTML. */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FileQuestion, ImageIcon, Music2, Shapes, Video } from 'lucide-react';
 import type { StudioToolResult } from '@pireel/studio-engine/prompts';
+import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 import { getTheme, themeVarsCss } from '@pireel/studio-engine/theme';
 import { kitComponents, kitElement } from '@pireel/studio-engine/kit-templates';
 import { AudioTile, ElementTile, TileThumb, type LibraryItem, useAudioPreview } from './asset-card';
 import { ELEMENT_TEMPLATES } from './gen-templates';
 import { ElementTemplatePreview } from './gen-templates/element-card';
 import { kitSampleProps } from './kit-ui';
+import { loadLocalAssetFile } from './local-media';
+import { resolveLocalAssetReference } from './studio-tool-input-references';
 import { t } from './i18n';
 
 type AssetKind = 'image' | 'video' | 'audio' | 'element';
@@ -167,14 +170,68 @@ function AssetPreview({ item, playing, onToggleAudio }: { item: AssetSearchCardI
   return <ElementPreview item={item} />;
 }
 
-export function AssetSearchResultsBody({ output }: { output: unknown }) {
+/** Device-local (mine) search hits carry no persistent URL — their bytes live in OPFS, not the cloud.
+ *  Resolve an object URL per local image/video result so the card shows a real thumbnail instead of a
+ *  placeholder, and revoke it on unmount/refresh. Cloud/official/generated hits already carry a locator
+ *  and are skipped. */
+function useLocalAssetPreviews(
+  items: AssetSearchCardItem[],
+  localAssetIndex: readonly LocalAssetIndexEntry[] | undefined,
+  projectId: string | undefined,
+): Map<string, string> {
+  const [urls, setUrls] = useState<Map<string, string>>(() => new Map());
+  const wanted = items
+    .filter((item) => (item.kind === 'image' || item.kind === 'video') && !item.locator?.url && !item.locator?.thumbUrl)
+    .map((item) => item.assetId);
+  const key = wanted.join('|');
+  useEffect(() => {
+    if (!wanted.length || !localAssetIndex?.length) {
+      setUrls((prev) => (prev.size ? new Map() : prev));
+      return;
+    }
+    let cancelled = false;
+    const created: string[] = [];
+    void (async () => {
+      const next = new Map<string, string>();
+      for (const assetId of wanted) {
+        const entry = resolveLocalAssetReference(assetId, localAssetIndex);
+        if (!entry) continue;
+        const file = await loadLocalAssetFile(projectId, entry).catch(() => null);
+        if (!file) continue;
+        const url = URL.createObjectURL(file);
+        created.push(url);
+        next.set(assetId, url);
+      }
+      if (cancelled) {
+        created.forEach((u) => URL.revokeObjectURL(u));
+        return;
+      }
+      setUrls(next);
+    })();
+    return () => {
+      cancelled = true;
+      created.forEach((u) => URL.revokeObjectURL(u));
+    };
+    // wanted is captured by `key`; localAssetIndex/projectId identity changes re-resolve.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, localAssetIndex, projectId]);
+  return urls;
+}
+
+export function AssetSearchResultsBody({ output, localAssetIndex, projectId }: { output: unknown; localAssetIndex?: readonly LocalAssetIndexEntry[]; projectId?: string }) {
   const items = assetSearchCardItems(output);
+  const localPreviews = useLocalAssetPreviews(items, localAssetIndex, projectId);
   const { playingUrl, toggle } = useAudioPreview();
   if (!items.length) return null;
+  const resolved = items.map((item) => {
+    const localUrl = localPreviews.get(item.assetId);
+    if (!localUrl || item.locator?.url || item.locator?.thumbUrl) return item;
+    return { ...item, locator: { ...item.locator, url: localUrl, ...(item.kind === 'image' ? { thumbUrl: localUrl } : {}) } };
+  });
   return (
     <div className="border-line/70 max-h-64 overflow-y-auto border-t p-2">
       <div className="grid grid-cols-2 gap-1.5">
-        {items.map((item) => (
+        {resolved.map((item) => (
           <div key={item.assetId} className="border-line/70 bg-panel min-w-0 overflow-hidden rounded border">
             <div className="bg-panel-2 w-full overflow-hidden">
               <AssetPreview item={item} playing={item.kind === 'audio' && playingUrl === item.locator?.url} onToggleAudio={toggle} />

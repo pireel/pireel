@@ -24,6 +24,7 @@ export interface CloudBackupOptions {
 
 function putWithProgress(url: string, file: File, headers: Record<string, string>, options?: CloudBackupOptions): Promise<boolean> {
   return new Promise((resolve) => {
+    if (options?.signal?.aborted) { resolve(false); return; }
     if (typeof XMLHttpRequest === 'undefined') {
       fetch(url, { method: 'PUT', headers, body: file, signal: options?.signal })
         .then((response) => resolve(response.ok))
@@ -46,14 +47,16 @@ function putWithProgress(url: string, file: File, headers: Record<string, string
 
 const mediaContentType = (file: File): string => {
   if (file.type.startsWith('video/') || file.type.startsWith('audio/') || file.type.startsWith('image/')) return file.type;
-  if (/\.(jpe?g)$/i.test(file.name)) return 'image/jpeg';
-  if (/\.png$/i.test(file.name)) return 'image/png';
-  if (/\.webp$/i.test(file.name)) return 'image/webp';
-  if (/\.gif$/i.test(file.name)) return 'image/gif';
-  if (/\.(mp3)$/i.test(file.name)) return 'audio/mpeg';
-  if (/\.(m4a)$/i.test(file.name)) return 'audio/mp4';
-  if (/\.wav$/i.test(file.name)) return 'audio/wav';
-  if (/\.(mov)$/i.test(file.name)) return 'video/quicktime';
+  const extension = file.name.split('.').pop()?.toLowerCase();
+  const types: Record<string, string> = {
+    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp',
+    gif: 'image/gif', avif: 'image/avif', bmp: 'image/bmp',
+    mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav', aac: 'audio/aac',
+    flac: 'audio/flac', ogg: 'audio/ogg', opus: 'audio/ogg',
+    mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', m4v: 'video/mp4',
+    mkv: 'video/x-matroska', avi: 'video/x-msvideo',
+  };
+  if (extension && types[extension]) return types[extension]!;
   return 'video/mp4';
 };
 
@@ -82,6 +85,33 @@ export async function cloudBackupMedia(file: File, sig: string, options?: CloudB
       options,
     );
     return ok ? { key: j.key } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Metadata-only completion, scoped to the project that queued the bytes. */
+export async function cloudConfirmUpload(projectId: string, sig: string, key: string): Promise<boolean> {
+  try {
+    const response = await fetch('/api/studio/media', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'confirm-upload', projectId, sig, key }),
+    });
+    return response.ok && (await response.json() as { ok?: boolean }).ok === true;
+  } catch { return false; }
+}
+
+/** Read link for lazy library cards. Keep this transient: durable documents store the key. */
+export async function cloudMediaPreviewUrl(sig: string, options: { cloudKey: string }): Promise<string | null> {
+  if (!options.cloudKey.startsWith('studio-src/')) return imageThumb(options.cloudKey, 'original');
+  try {
+    const response = await fetch('/api/studio/media', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'get', sig, key: options.cloudKey }),
+    });
+    if (!response.ok) return null;
+    const result = await response.json() as { url?: string };
+    return typeof result.url === 'string' ? result.url : null;
   } catch {
     return null;
   }

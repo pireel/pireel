@@ -1,12 +1,12 @@
 /** Shared pure Agent timeline executor. Live UI, offline server, and MCP all call this contract. */
 
+import { AUDIO_DEFAULT_DB } from './audio-tracks';
 import { applyAudioDocumentEdits, ensureFreeAudioDocumentTrack } from './audio-document-edit';
 import { applyOverlayDocumentEdits } from './overlay-document-edit';
 import { insertOverlayDocumentClip } from './overlay-track-edit';
 import { titleBlock } from './block-factory';
 import {
   applyEditorCommand,
-  editorTimelineTotalFrames,
   positiveDurationFrames,
   retimeEditorClip,
   secondsToTimelineFrames,
@@ -26,36 +26,42 @@ import {
   normalizePeerNarrativeSources,
 } from './editor-document';
 import type { TranscriptSegment } from './project-dto';
-import { directorPlanFromDocument } from './director-plan-artifact';
-import { directorPlanToMarkdown } from './director-plan-markdown';
-import { sceneDesignsFromDocument, sceneDesignsToMarkdown } from './scene-design';
 import { canvasSizeFollowingFirstVideo } from './editing-primitives';
+import { applyNarrationDocumentEdit } from './narration-document-edit';
+import { planNarrationCuts } from './editor-document/narration-cut-planner';
+import { firstNarrativeAssetId } from './editor-document/read-model';
+import { dominantTimelineSpeechTrack } from './editor-document/commands/managed-captions';
+import { documentWordRanges, documentWordRangesToTimeline, resolveDocumentWordIds } from './editor-document/transcript-address';
+import { type CutSeamEntry, finalizeCutSeams, tightenCutRanges } from './trim';
+import { runV3DocumentTool } from './agent-timeline-v3';
 import { placementPercentToBox } from './overlay-placement';
 import { isDisplayTextAnimationId, isDisplayTextFontId, isDisplayTextPresetId } from './display-text-presets';
 
 export const AGENT_TIMELINE_TOOL_IDS = new Set([
-  'get_timeline',
-  'read_director_plan',
-  'read_scene_designs',
   'register_media',
-  'inspect_media',
   'organize_media',
   'add_clips',
   'insert_clips',
   'move_clips',
   'remove_clips',
   'split_clips',
-  'set_video_speed',
+  'ripple_delete_ranges',
   'set_clip_properties',
+  'swap_clip_media',
+  'set_clip_framing',
+  'add_transition',
+  'set_canvas',
+  'apply_layout',
   'set_keyframes',
   'manage_tracks',
   'manage_clip_links',
-  'sync_clips',
-  'get_transcript',
+  'set_texts',
+  'set_captions',
+  'mask_words',
+  'remove_words',
   'get_beat_grid',
-  'swap_clip_media',
-  'add_texts',
-  'update_text',
+  'get_transcript',
+  'inspect_media',
 ]);
 
 export interface AgentTimelineOutcome {
@@ -67,13 +73,13 @@ export interface AgentTimelineOutcome {
   receipts?: EditorCommandReceipt[];
 }
 
-type Input = Record<string, unknown>;
+export type Input = Record<string, unknown>;
 
-function fail(error: string, data?: unknown): AgentTimelineOutcome {
+export function fail(error: string, data?: unknown): AgentTimelineOutcome {
   return { ok: false, error, ...(data === undefined ? {} : { data }) };
 }
 
-function mutation(document: EditorDocumentV2, summary: string, receipts: EditorCommandReceipt[], data?: unknown): AgentTimelineOutcome {
+export function mutation(document: EditorDocumentV2, summary: string, receipts: EditorCommandReceipt[], data?: unknown): AgentTimelineOutcome {
   return { ok: true, summary, document, receipts, ...(data === undefined ? {} : { data }) };
 }
 
@@ -86,7 +92,7 @@ function frameDeltaSec(frames: number, fps: number): number {
   return Number.isFinite(frames) && Number.isFinite(fps) && fps > 0 ? frames / fps : 0;
 }
 
-function string(value: unknown): string | undefined {
+export function string(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
@@ -101,7 +107,7 @@ function freeGraphicsStackOrder(document: EditorDocumentV2, startSec: number, du
   }
 }
 
-function mediaBox(value: unknown): { x: number; y: number; w: number; h: number } | undefined {
+export function mediaBox(value: unknown): { x: number; y: number; w: number; h: number } | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const raw = value as Record<string, unknown>;
   const x = Number(raw.x); const y = Number(raw.y); const w = Number(raw.w); const h = Number(raw.h);
@@ -160,58 +166,7 @@ function clipForAgent(clip: TimelineClip, fps: number) {
   };
 }
 
-export function agentTimelineSnapshot(document: EditorDocumentV2) {
-  return {
-    version: document.version,
-    canvas: document.canvas,
-    durationSec: timelineFramesToSeconds(editorTimelineTotalFrames(document), document.canvas.fps),
-    tracks: document.timeline.tracks.map((track, index) => ({
-      id: track.id,
-      index,
-      type: track.type,
-      role: track.role,
-      name: track.name,
-      muted: track.muted,
-      hidden: track.hidden,
-      locked: track.locked,
-      syncLocked: track.syncLocked,
-      stackOrder: track.stackOrder,
-      clips: track.clips.map((clip) => clipForAgent(clip, document.canvas.fps)),
-    })),
-    assets: Object.values(document.assets),
-    semantics: {
-      primaryNarrativeTrackId: document.semantics.primaryNarrativeTrackId,
-      managedCaptionTrackId: document.semantics.managedCaptionTrackId,
-      managedCaptionSource: document.semantics.managedCaptionSource ?? { mode: 'auto' },
-      transcriptAssetIds: Object.entries(document.semantics.transcripts).filter(([, segments]) => segments.length).map(([assetId]) => assetId),
-      scenes: document.semantics.scenes,
-      directorPlan: (() => {
-        const plan = directorPlanFromDocument(document);
-        return plan ? {
-          available: true,
-          goal: plan.goal,
-          creativeThesis: plan.creativeThesis,
-          scenes: plan.scenes.map((scene) => ({
-            id: scene.id,
-            label: scene.label,
-            startSec: timelineFramesToSeconds(scene.startFrame, document.canvas.fps),
-            endSec: timelineFramesToSeconds(scene.startFrame + scene.durationFrames, document.canvas.fps),
-          })),
-        } : undefined;
-      })(),
-      sceneDesigns: (() => {
-        const designs = sceneDesignsFromDocument(document);
-        return designs?.scenes.length ? {
-          available: true,
-          path: 'scene-designs.md',
-          sceneIds: designs.scenes.map((scene) => scene.sceneId),
-        } : undefined;
-      })(),
-    },
-  };
-}
-
-function locatedClip(document: EditorDocumentV2, clipId: string): { track: EditorTrack; clip: TimelineClip } | undefined {
+export function locatedClip(document: EditorDocumentV2, clipId: string): { track: EditorTrack; clip: TimelineClip } | undefined {
   for (const track of document.timeline.tracks) {
     const clip = track.clips.find((candidate) => candidate.id === clipId);
     if (clip) return { track, clip };
@@ -219,7 +174,7 @@ function locatedClip(document: EditorDocumentV2, clipId: string): { track: Edito
   return undefined;
 }
 
-function importAssets(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
+export function importAssets(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const items = Array.isArray(input.assets) ? input.assets : input.asset ? [input.asset] : [];
   if (!items.length) return fail('assets is required');
   let assets = document.assets;
@@ -278,7 +233,7 @@ function importAssets(document: EditorDocumentV2, input: Input): AgentTimelineOu
   return mutation(next, `Imported ${imported.length} media asset${imported.length === 1 ? '' : 's'}`, [], { assetIds: imported });
 }
 
-function inspectAssets(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
+export function inspectAssets(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const requested = Array.isArray(input.assetIds) ? input.assetIds.map(string).filter((id): id is string => !!id) : [];
   const clipIds = Array.isArray(input.clipIds) ? input.clipIds.map(string).filter((id): id is string => !!id) : [];
   const ids = new Set(requested);
@@ -435,12 +390,9 @@ function placementFor(document: EditorDocumentV2, asset: EditorMediaAsset, item:
   };
   if (asset.kind === 'audio') {
     const role = string(item.role) ?? 'narration';
+    // An explicit level is the caller's decision; the role default applies only when none was given.
     const requestedVolumeDb = typeof item.volumeDb === 'number' ? item.volumeDb : undefined;
-    const initialVolumeDb = role === 'narration'
-      ? Math.max(4, requestedVolumeDb ?? 4)
-      : role === 'music'
-        ? Math.min(-24, requestedVolumeDb ?? -24)
-        : requestedVolumeDb;
+    const initialVolumeDb = requestedVolumeDb ?? (role === 'narration' ? 4 : role === 'music' ? -24 : undefined);
     const sourceOutSec = sec(item.sourceOutSec, sourceInSec + requestedDuration * Math.max(0.5, sec(item.speed, 1)));
     const clip: TimelineClipPlacement = {
       ...common,
@@ -501,8 +453,14 @@ function placementFor(document: EditorDocumentV2, asset: EditorMediaAsset, item:
         },
         ...(typeof item.volumeDb === 'number' ? { volumeDb: item.volumeDb } : {}),
         ...(typeof item.muted === 'boolean' ? { audioMuted: item.muted } : {}),
+        ...(typeof item.fadeInSec === 'number' ? { audioFadeInSec: item.fadeInSec } : {}),
+        ...(typeof item.fadeOutSec === 'number' ? { audioFadeOutSec: item.fadeOutSec } : {}),
       },
     } as NarrativeTimelineClip & { offsetFrames: number };
+  }
+  const hasFades = typeof item.fadeInSec === 'number' || typeof item.fadeOutSec === 'number';
+  if (hasFades && asset.kind !== 'video') {
+    return fail(`fades are audio fades; ${asset.id} is an image and has no sound. Animate an image's entrance with set_keyframes opacity.`);
   }
   return {
     ...common,
@@ -515,9 +473,20 @@ function placementFor(document: EditorDocumentV2, asset: EditorMediaAsset, item:
     ...(anchorX != null ? { anchorX } : {}),
     ...(anchorY != null ? { anchorY } : {}),
     ...(opacity != null ? { opacity } : {}),
-    // Overlay media keeps its audio settings under `video` (the shot-scoped controls); without this
-    // a `muted: true` on a broll row was silently dropped and the source sound played over narration.
-    ...(typeof item.muted === 'boolean' ? { video: { treatment: 'full', audioMuted: item.muted } } : {}),
+    // Overlay media keeps its audio settings under `video` (the shot-scoped controls). B-roll footage
+    // is a cutaway under the narration: its own sound is off unless the caller asks for it (mute:false).
+    // Fades ride along here: a value the caller wrote and the receipt did not show was the worst kind
+    // of failure, a silent one.
+    ...(asset.kind === 'video' || typeof item.muted === 'boolean'
+      ? {
+          video: {
+            treatment: 'full',
+            audioMuted: typeof item.muted === 'boolean' ? item.muted : true,
+            ...(typeof item.fadeInSec === 'number' ? { audioFadeInSec: item.fadeInSec } : {}),
+            ...(typeof item.fadeOutSec === 'number' ? { audioFadeOutSec: item.fadeOutSec } : {}),
+          },
+        }
+      : {}),
   } as MediaTimelineClip & { offsetFrames: number };
 }
 
@@ -914,7 +883,7 @@ function brollBatchOverlaps(document: EditorDocumentV2, items: Input[], input: I
   );
 }
 
-function placeClips(document: EditorDocumentV2, input: Input, mode: 'overwrite' | 'ripple'): AgentTimelineOutcome {
+export function placeClips(document: EditorDocumentV2, input: Input, mode: 'overwrite' | 'ripple'): AgentTimelineOutcome {
   document = normalizePeerNarrativeSources(document);
   const items = Array.isArray(input.clips) ? input.clips : [];
   if (!items.length) return fail('clips is required');
@@ -1021,13 +990,21 @@ function placeClips(document: EditorDocumentV2, input: Input, mode: 'overwrite' 
       );
     }
   }
+  // Music under narration sits at -24 dB unless a level was set on purpose: a clip placed in this
+  // batch with an explicit volumeDb keeps it. Whatever the sweep changes is reported, never silent.
+  const explicitLevelClipIds = new Set(items.flatMap((item) => (typeof item.volumeDb === 'number' && string(item.id) ? [string(item.id)!] : [])));
+  const autoMix: { clipId: string; fromDb: number; toDb: number }[] = [];
   const hasNarration = next.timeline.tracks.some((track) => track.role === 'narration' && track.clips.some((clip) => clip.kind === 'audio' && clip.enabled));
   if (hasNarration) {
     const musicUpdates = next.timeline.tracks
       .filter((track) => track.role === 'music')
-      .flatMap((track) => track.clips.flatMap((clip) => clip.kind === 'audio' && (clip.properties.volumeDb ?? 0) > -24
-        ? [{ clipId: clip.id, patch: { volumeDb: -24 } }]
-        : []));
+      .flatMap((track) => track.clips.flatMap((clip) => {
+        if (clip.kind !== 'audio' || explicitLevelClipIds.has(clip.id)) return [];
+        const fromDb = clip.properties.volumeDb ?? AUDIO_DEFAULT_DB;
+        if (fromDb <= -24) return [];
+        autoMix.push({ clipId: clip.id, fromDb, toDb: -24 });
+        return [{ clipId: clip.id, patch: { volumeDb: -24 } }];
+      }));
     if (musicUpdates.length) {
       const mixed = applyAudioDocumentEdits({ document: next, updates: musicUpdates });
       if (!mixed.ok) return fail(mixed.error.message, mixed.error);
@@ -1051,11 +1028,28 @@ function placeClips(document: EditorDocumentV2, input: Input, mode: 'overwrite' 
     }];
   });
   const overwrittenClipIds = [...new Set(receipts.flatMap((receipt) => receipt.removedClipIds))];
+  // Sound that runs past the last picture is sometimes wanted (a tail under the outro), so it is a
+  // note, not a refusal — but the agent must hear about it.
+  const pictureEndFrame = Math.max(0, ...next.timeline.tracks.flatMap((track) => track.type === 'audio' ? [] : track.clips
+    .filter((clip) => (clip.kind === 'narrative' || clip.kind === 'media') && clip.enabled)
+    .map((clip) => clip.startFrame + clip.durationFrames)));
+  const pastPictureEnd = created.flatMap((clipId) => {
+    const found = locatedClip(next, clipId);
+    if (!found || found.clip.kind !== 'audio' || !pictureEndFrame) return [];
+    const byFrames = found.clip.startFrame + found.clip.durationFrames - pictureEndFrame;
+    return byFrames > 0 ? [{ clipId, byFrames }] : [];
+  });
+  const notes = [
+    ...(autoMix.length ? [`music ducked to -24 dB under narration: ${autoMix.map((entry) => `${entry.clipId} (was ${entry.fromDb})`).join(', ')}; set volumeDb explicitly to override`] : []),
+    ...pastPictureEnd.map((entry) => `${entry.clipId} runs ${entry.byFrames} frames past the last picture clip`),
+  ];
   return mutation(
     next,
-    `${mode === 'ripple' ? 'Inserted' : 'Added'} ${activePlacements.length} clip${activePlacements.length === 1 ? '' : 's'}${overwrittenClipIds.length ? `; replaced ${overwrittenClipIds.length}` : ''}`,
+    `${mode === 'ripple' ? 'Inserted' : 'Added'} ${activePlacements.length} clip${activePlacements.length === 1 ? '' : 's'}${overwrittenClipIds.length ? `; replaced ${overwrittenClipIds.length}` : ''}${notes.length ? `. ${notes.join('. ')}` : ''}`,
     receipts,
     {
+      ...(autoMix.length ? { autoMix } : {}),
+      ...(pastPictureEnd.length ? { pastPictureEnd } : {}),
       clipIds: activePlacements.map((placement) => placement.clipId),
       placements: activePlacements,
       ...(overwrittenClipIds.length ? { overwrittenClipIds } : {}),
@@ -1063,92 +1057,7 @@ function placeClips(document: EditorDocumentV2, input: Input, mode: 'overwrite' 
   );
 }
 
-function moveClips(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
-  const items = Array.isArray(input.items) ? input.items : [];
-  if (!items.length) return fail('items is required');
-  let next = document;
-  const receipts: EditorCommandReceipt[] = [];
-  for (const [index, raw] of items.entries()) {
-    const item = (raw ?? {}) as Input;
-    const clipId = string(item.clipId);
-    const found = clipId ? locatedClip(next, clipId) : undefined;
-    if (!found) return fail(`items[${index}] clip not found`);
-    const moved = applyEditorCommand(next, {
-      type: 'clip.move', trackId: found.track.id, clipId: found.clip.id,
-      startFrame: secondsToTimelineFrames(Math.max(0, sec(item.startSec)), next.canvas.fps),
-      ...(string(item.toTrackId) ? { toTrackId: string(item.toTrackId) } : {}),
-      includeLinked: input.includeLinked !== false,
-    });
-    if (!moved.ok) return fail(moved.error.message, moved.error);
-    next = moved.document;
-    receipts.push(moved.receipt);
-  }
-  return mutation(next, `Moved ${items.length} clip${items.length === 1 ? '' : 's'}`, receipts);
-}
-
-function removeClips(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
-  const clipIds = Array.isArray(input.clipIds) ? input.clipIds.map(string).filter((id): id is string => !!id) : [];
-  if (!clipIds.length) return fail('clipIds is required');
-  let next = document;
-  const receipts: EditorCommandReceipt[] = [];
-  const byTrack = new Map<string, string[]>();
-  // Ids that no longer exist are skipped, not fatal: an agent correcting its own work often
-  // re-lists a clip it already removed, and failing the whole batch on that stale id left the
-  // rest in place (and the agent retrying the identical call). The receipt names the misses.
-  const missingClipIds: string[] = [];
-  for (const id of clipIds) {
-    const found = locatedClip(next, id);
-    if (!found) {
-      missingClipIds.push(id);
-      continue;
-    }
-    byTrack.set(found.track.id, [...(byTrack.get(found.track.id) ?? []), id]);
-  }
-  if (!byTrack.size) return fail(`clip not found: ${missingClipIds.join(', ')}`);
-  for (const [trackId, ids] of byTrack) {
-    // An earlier group may already remove linked partners on this track. Re-resolve against the
-    // current document so a cross-track linked batch stays idempotent within this transaction.
-    const remaining = ids.filter((id) => locatedClip(next, id)?.track.id === trackId);
-    if (!remaining.length) continue;
-    const removed = applyEditorCommand(next, { type: 'clips.remove', trackId, clipIds: remaining, includeLinked: input.includeLinked !== false });
-    if (!removed.ok) return fail(removed.error.message, removed.error);
-    next = removed.document;
-    receipts.push(removed.receipt);
-  }
-  // remove means remove — no editorial-judgment guard here. Protecting an assembled cut from
-  // agent self-demolition is the per-turn harness lock's job (it knows intent and turn state);
-  // an engine-level veto also blocked legitimate clears from the UI, MCP agents and other flows,
-  // and removals stay recoverable through undo.
-  const removedCount = clipIds.length - missingClipIds.length;
-  const summary = `Removed ${removedCount} clip${removedCount === 1 ? '' : 's'}`
-    + (missingClipIds.length ? ` (${missingClipIds.length} already gone: ${missingClipIds.join(', ')})` : '');
-  return mutation(next, summary, receipts, missingClipIds.length ? { removedClipIds: clipIds.filter((id) => !missingClipIds.includes(id)), missingClipIds } : undefined);
-}
-
-function splitClips(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
-  const items = Array.isArray(input.items) ? input.items : [];
-  if (!items.length) return fail('items is required');
-  let next = document;
-  const receipts: EditorCommandReceipt[] = [];
-  const created: string[] = [];
-  for (const [index, raw] of items.entries()) {
-    const item = (raw ?? {}) as Input;
-    const clipId = string(item.clipId);
-    const found = clipId ? locatedClip(next, clipId) : undefined;
-    if (!found) return fail(`items[${index}] clip not found`);
-    const split = applyEditorCommand(next, {
-      type: 'clip.split', trackId: found.track.id, clipId: found.clip.id,
-      atFrame: secondsToTimelineFrames(sec(item.atSec), next.canvas.fps), includeLinked: input.includeLinked !== false,
-    });
-    if (!split.ok) return fail(split.error.message, split.error);
-    next = split.document;
-    receipts.push(split.receipt);
-    created.push(...split.receipt.createdClipIds);
-  }
-  return mutation(next, `Split ${items.length} clip${items.length === 1 ? '' : 's'}`, receipts, { createdClipIds: created });
-}
-
-function setVideoSpeed(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
+export function setVideoSpeed(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const speed = Number(input.speed);
   if (!Number.isFinite(speed) || speed < 0.25 || speed > 4) return fail('speed must be within 0.25..4');
   const requestedIds = Array.isArray(input.shotIds)
@@ -1200,7 +1109,8 @@ function setVideoSpeed(document: EditorDocumentV2, input: Input): AgentTimelineO
   });
 }
 
-function setClipProperties(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
+/** Second-based clip patches shared by the v3 tools (source range, fit, box, anchors, opacity, audio knobs). */
+export function setClipPatches(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const items = Array.isArray(input.items) ? input.items : [];
   if (!items.length) return fail('items is required');
   let next = document;
@@ -1263,7 +1173,7 @@ function setClipProperties(document: EditorDocumentV2, input: Input): AgentTimel
     if (item.fit === 'contain' || item.fit === 'cover') {
       if (found.clip.kind === 'narrative') {
         if (item.fit === 'contain') {
-          return fail(`items[${index}] fit=contain is not supported for primary narrative clips; use box for canvas placement or set_shot_framing for source crop`);
+          return fail(`items[${index}] fit=contain is not supported for primary narrative clips; use box for canvas placement or set_clip_framing for source crop`);
         }
         // Primary narrative video is cover-filled by definition. Treat an explicit cover request as
         // confirmation, not as an invalid media-only patch that aborts the whole batch.
@@ -1370,7 +1280,7 @@ function setKeyframes(document: EditorDocumentV2, input: Input): AgentTimelineOu
   return mutation(result.document, `${ordered.length ? 'Set' : 'Cleared'} ${property} keyframes on clip ${clipId}`, [result.receipt], { clipId, property, keyframeCount: ordered.length });
 }
 
-function manageTracks(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
+export function manageTracks(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const action = string(input.action);
   let result;
   if (action === 'create') {
@@ -1382,6 +1292,9 @@ function manageTracks(document: EditorDocumentV2, input: Input): AgentTimelineOu
       ...(typeof input.muted === 'boolean' ? { muted: input.muted } : {}), ...(typeof input.hidden === 'boolean' ? { hidden: input.hidden } : {}),
       ...(typeof input.locked === 'boolean' ? { locked: input.locked } : {}), ...(typeof input.syncLocked === 'boolean' ? { syncLocked: input.syncLocked } : {}),
       ...(typeof input.stackOrder === 'number' ? { stackOrder: Math.trunc(input.stackOrder) } : {}),
+      // A lane the agent asked for is meant to be filled later; the commit normalizer must not
+      // prune it the moment it is created.
+      keepEmpty: true,
     } });
   } else if (action === 'update') {
     const trackId = string(input.trackId);
@@ -1401,10 +1314,11 @@ function manageTracks(document: EditorDocumentV2, input: Input): AgentTimelineOu
     result = applyEditorCommand(document, { type: 'track.remove', trackId });
   } else return fail('action must be create, update, move, or remove');
   if (!result.ok) return fail(result.error.message, result.error);
-  return mutation(result.document, `${action === 'create' ? 'Created' : action === 'remove' ? 'Removed' : 'Updated'} track`, [result.receipt]);
+  const trackId = action === 'create' ? result.receipt.affectedTrackIds[0] : string(input.trackId);
+  return mutation(result.document, `${action === 'create' ? 'Created' : action === 'remove' ? 'Removed' : 'Updated'} track`, [result.receipt], { trackId });
 }
 
-function manageLinks(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
+export function manageLinks(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const clipIds = Array.isArray(input.clipIds) ? input.clipIds.map(string).filter((id): id is string => !!id) : [];
   const action = string(input.action);
   const result = action === 'link'
@@ -1418,7 +1332,7 @@ function manageLinks(document: EditorDocumentV2, input: Input): AgentTimelineOut
   return mutation(result.document, `${action === 'link' ? 'Linked' : 'Unlinked'} ${clipIds.length} clips`, [result.receipt], { clipIds, ...(groupId ? { groupId } : {}) });
 }
 
-function syncClips(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
+export function syncClips(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const referenceClipId = string(input.referenceClipId);
   const reference = referenceClipId ? locatedClip(document, referenceClipId) : undefined;
   const targets = Array.isArray(input.targets) ? input.targets : [];
@@ -1427,11 +1341,13 @@ function syncClips(document: EditorDocumentV2, input: Input): AgentTimelineOutco
   if (referenceMarkerSec > timelineFramesToSeconds(reference.clip.durationFrames, document.canvas.fps)) return fail('referenceMarkerSec falls after the reference clip');
   const referenceMarkerFrame = reference.clip.startFrame + secondsToTimelineFrames(referenceMarkerSec, document.canvas.fps);
   const desired = new Map<string, number>();
+  const before = new Map<string, number>([[referenceClipId!, reference.clip.startFrame]]);
   for (const [index, raw] of targets.entries()) {
     const target = (raw ?? {}) as Input;
     const clipId = string(target.clipId);
     const found = clipId ? locatedClip(document, clipId) : undefined;
     if (!found || clipId === referenceClipId) return fail(`targets[${index}] must identify a different clip`);
+    before.set(clipId!, found.clip.startFrame);
     const markerSec = Number(target.markerSec);
     if (!Number.isFinite(markerSec) || markerSec < 0 || markerSec > timelineFramesToSeconds(found.clip.durationFrames, document.canvas.fps)) {
       return fail(`targets[${index}].markerSec must be inside the clip`);
@@ -1466,45 +1382,14 @@ function syncClips(document: EditorDocumentV2, input: Input): AgentTimelineOutco
     next = linked.document;
     receipts.push(linked.receipt);
   }
-  return mutation(next, `Synced ${desired.size} clip${desired.size === 1 ? '' : 's'} to ${referenceClipId}`, receipts, {
-    referenceClipId, targetClipIds: [...desired.keys()], shiftedFrames: shiftFrames,
+  // Each clip's real move: the reference only moves when the group had to be pushed off frame 0.
+  const moves = [...before].map(([clipId, fromFrame]) => {
+    const toFrame = clipId === referenceClipId ? fromFrame + shiftFrames : desired.get(clipId)! + shiftFrames;
+    return { clipId, fromFrame, toFrame, byFrames: toFrame - fromFrame };
   });
-}
-
-function getTranscript(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
-  const ids = new Set<string>();
-  const assetId = string(input.assetId);
-  const clipId = string(input.clipId);
-  const trackId = string(input.trackId);
-  if (assetId) ids.add(assetId);
-  if (clipId) {
-    const found = locatedClip(document, clipId);
-    if (!found || !('assetId' in found.clip) || !found.clip.assetId) return fail(`clip has no transcript-bearing asset: ${clipId}`);
-    ids.add(found.clip.assetId);
-  }
-  if (trackId) {
-    const track = document.timeline.tracks.find((candidate) => candidate.id === trackId);
-    if (!track) return fail(`track not found: ${trackId}`);
-    for (const clip of track.clips) if ('assetId' in clip && clip.assetId && document.semantics.transcripts[clip.assetId]?.length) ids.add(clip.assetId);
-  }
-  if (!ids.size) {
-    for (const clip of document.timeline.tracks
-      .find((track) => track.id === document.semantics.primaryNarrativeTrackId)
-      ?.clips ?? []) {
-      if (clip.kind === 'narrative' && document.semantics.transcripts[clip.assetId]?.length) ids.add(clip.assetId);
-    }
-    if (!ids.size) for (const [id, segments] of Object.entries(document.semantics.transcripts)) if (segments.length) ids.add(id);
-  }
-  const transcripts = [...ids].map((id) => ({
-    assetId: id,
-    asset: document.assets[id],
-    segments: document.semantics.transcripts[id] ?? [],
-    occurrences: document.timeline.tracks.flatMap((track) => track.clips
-      .filter((clip) => 'assetId' in clip && clip.assetId === id)
-      .map((clip) => ({ trackId: track.id, clipId: clip.id, startSec: timelineFramesToSeconds(clip.startFrame, document.canvas.fps), durationSec: timelineFramesToSeconds(clip.durationFrames, document.canvas.fps) }))),
-  }));
-  if (!transcripts.some((entry) => entry.segments.length)) return fail('no transcript for the selected source');
-  return { ok: true, summary: `Read ${transcripts.reduce((sum, entry) => sum + entry.segments.length, 0)} transcript segments`, data: { transcripts } };
+  return mutation(next, `Synced ${desired.size} clip${desired.size === 1 ? '' : 's'} to ${referenceClipId}`, receipts, {
+    referenceClipId, targetClipIds: [...desired.keys()], moves,
+  });
 }
 
 function getBeatGrid(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
@@ -1557,7 +1442,7 @@ function getBeatGrid(document: EditorDocumentV2, input: Input): AgentTimelineOut
   };
 }
 
-function swapClipMedia(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
+export function swapClipMedia(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const clipId = string(input.clipId);
   const assetId = string(input.assetId);
   const found = clipId ? locatedClip(document, clipId) : undefined;
@@ -1611,13 +1496,17 @@ function overlayTextLayoutGuard(
   return box;
 }
 
-function addTexts(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
+export function addTexts(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const items = Array.isArray(input.items) ? input.items : [];
   if (!items.length) return fail('items is required');
   let next = document;
   const receipts: EditorCommandReceipt[] = [];
   const clipIds: string[] = [];
   const skippedDuplicates: string[] = [];
+  // A requested track is honoured: an unknown id is created once and every later item naming it
+  // lands there. A requested track already occupied over the text's window is not overwritten —
+  // that text goes to a free lane and the receipt says so.
+  const relocated: string[] = [];
   const used = new Set(next.timeline.tracks.flatMap((track) => track.clips.map((clip) => clip.id)));
   for (const [index, raw] of items.entries()) {
     const item = (raw ?? {}) as Input;
@@ -1672,10 +1561,16 @@ function addTexts(document: EditorDocumentV2, input: Input): AgentTimelineOutcom
     );
     block.id = uniqueId(string(item.id) ?? block.id, used);
     used.add(block.id);
+    const requestedTrackId = string(item.trackId);
+    const requestedTrack = requestedTrackId ? next.timeline.tracks.find((track) => track.id === requestedTrackId) : undefined;
+    const startFrame = secondsToTimelineFrames(startSec, next.canvas.fps);
+    const endFrame = startFrame + positiveDurationFrames(durationSec, next.canvas.fps);
+    const occupied = !!requestedTrack && requestedTrack.clips.some((clip) => clip.startFrame < endFrame && clip.startFrame + clip.durationFrames > startFrame);
+    if (occupied) relocated.push(block.id);
     const inserted = insertOverlayDocumentClip({
       document: next,
       block,
-      ...(string(item.trackId) ? { toTrackId: string(item.trackId) } : {}),
+      ...(requestedTrackId && !occupied ? { toTrackId: requestedTrackId } : {}),
       ...(string(item.sceneId) ? { sceneId: string(item.sceneId) } : {}),
     });
     if (!inserted.ok) return fail(inserted.error.message, inserted.error);
@@ -1693,11 +1588,15 @@ function addTexts(document: EditorDocumentV2, input: Input): AgentTimelineOutcom
         skippedDuplicates,
         instruction: 'Identical on-screen text already exists in that time window. Use update_texts to restyle or move the existing clip instead of adding a copy.',
       } : {}),
+      ...(relocated.length ? {
+        relocatedClipIds: relocated,
+        note: `${relocated.map((id) => JSON.stringify(id)).join(', ')} ${relocated.length === 1 ? 'was' : 'were'} placed on a free lane instead of the requested track, which already has a clip in that time window (trackId in the delta). Nothing was overwritten.`,
+      } : {}),
     },
   );
 }
 
-function updateTexts(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
+export function updateTexts(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const items = Array.isArray(input.items) ? input.items : [];
   if (!items.length) return fail('items is required');
   const updates: Parameters<typeof applyOverlayDocumentEdits>[0]['updates'][number][] = [];
@@ -1705,7 +1604,8 @@ function updateTexts(document: EditorDocumentV2, input: Input): AgentTimelineOut
     const item = (raw ?? {}) as Input;
     const clipId = string(item.clipId);
     const found = clipId ? locatedClip(document, clipId) : undefined;
-    if (!found || found.clip.kind !== 'graphic' || found.clip.block.templateId !== 'title') return fail(`items[${index}] is not a title text clip`);
+    if (!found) return fail(`items[${index}]: no clip with id ${clipId ? JSON.stringify(clipId) : '(missing)'} in this project`);
+    if (found.clip.kind !== 'graphic' || found.clip.block.templateId !== 'title') return fail(`items[${index}]: ${JSON.stringify(found.clip.id)} is not a title text clip`);
     const text = typeof item.text === 'string' ? item.text.trim() : undefined;
     const preset = isDisplayTextPresetId(item.preset) ? item.preset : undefined;
     const animation = isDisplayTextAnimationId(item.animation) ? item.animation : undefined;
@@ -1747,50 +1647,107 @@ function updateTexts(document: EditorDocumentV2, input: Input): AgentTimelineOut
   return mutation(edited.document, `Updated ${items.length} text clip${items.length === 1 ? '' : 's'}`, edited.receipts);
 }
 
+const RANGES_NOT_ON_TIMELINE_FIX = 'None of these source-second spans is still on the timeline: they were cut already, sit outside every remaining clip that plays this transcript (any lane), or lie entirely inside protected speech that is not fully covered. Re-read get_transcript for what remains, or pass wordIds for exact words.';
+
+/**
+ * remove_words: cut spoken content by the transcript. `ranges` are [inSec, outSec] pairs on the
+ * primary footage's source clock (whole ideas, retakes, dead passages); `wordIds` are exact words
+ * from get_transcript. Both selectors land in one narration edit so overlays and captions re-lay
+ * once. Runs identically in the tab and in the offline executor: everything it needs is in the
+ * document (clips, transcripts), and the receipt speaks actual seconds removed.
+ */
+function removeWords(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
+  const rawRanges = Array.isArray(input.ranges) ? input.ranges : [];
+  const wordIds = Array.isArray(input.wordIds) ? [...new Set(input.wordIds.map(String).filter(Boolean))] : [];
+  if (!rawRanges.length && !wordIds.length) {
+    return fail('remove_words needs ranges or wordIds', { fix: 'Pass ranges as [[inSec, outSec], …] from get_transcript segments, or wordIds from get_transcript words.' });
+  }
+  // ranges are source seconds of ONE transcript: the one named, else the spine's, else the lane
+  // that speaks most (generated narration placed as audio). wordIds carry their own asset.
+  const explicitAsset = string(input.assetId);
+  if (explicitAsset && !document.assets[explicitAsset]) return fail('unknown_id', { path: 'assetId', value: explicitAsset, fix: 'assetId is a registered asset from get_state or get_transcript.' });
+  const assetId = explicitAsset ?? firstNarrativeAssetId(document) ?? dominantTimelineSpeechTrack(document)?.clips[0]?.assetId;
+  if (rawRanges.length && !assetId) return fail('no speech on the timeline', { fix: 'Place footage or narration with add_clips before cutting speech, or pass wordIds.' });
+  const seams: CutSeamEntry[] = [];
+  const keepGapSec = Number(input.keepGapSec);
+  const keepsGap = Number.isFinite(keepGapSec) && keepGapSec > 0;
+
+  if (rawRanges.length) {
+    const sourceRanges: { from: number; to: number }[] = [];
+    for (const [index, range] of rawRanges.entries()) {
+      const pair = Array.isArray(range) ? range : [];
+      const from = Number(pair[0]);
+      const to = Number(pair[1]);
+      if (!Number.isFinite(from) || !Number.isFinite(to) || from < 0 || to <= from) {
+        return fail(`ranges[${index}] must be [inSec, outSec] with outSec > inSec ≥ 0`, { fix: 'Ranges are source seconds from get_transcript segments, as two-number arrays.' });
+      }
+      sourceRanges.push({ from, to });
+    }
+    const transcriptRows = document.semantics.transcripts[assetId!] ?? [];
+    const words = transcriptRows.flatMap((segment) => segment.words ?? []);
+    // The receipt names WHAT each cut removed; a range without words is dead air and says so by omission.
+    const snippetOf = (from: number, to: number): string | undefined => {
+      const inside = words.filter((word) => word.start >= from - 0.02 && word.end <= to + 0.02).map((word) => word.text.trim());
+      if (!inside.length) return undefined;
+      const joined = inside.join('');
+      return joined.length > 16 ? `${joined.slice(0, 16)}…` : joined;
+    };
+    const tightened = keepsGap ? tightenCutRanges(sourceRanges, keepGapSec) : sourceRanges;
+    const plan = planNarrationCuts(document, {
+      assetId: assetId!,
+      sourceRanges: tightened.map((range) => ({ fromSec: range.from, toSec: range.to })),
+      transcriptSegments: transcriptRows,
+      transcriptProtection: 'outside-candidates',
+      clipEdgeSnapSec: 0.5,
+    });
+    if (!plan.timelineRanges.length) return fail('ranges_not_on_timeline', { fix: RANGES_NOT_ON_TIMELINE_FIX });
+    for (const mapped of plan.timelineRanges) {
+      const text = snippetOf(mapped.sourceFromSec, mapped.sourceToSec);
+      seams.push({ at: mapped.fromSec, len: mapped.toSec - mapped.fromSec, ...(text ? { text } : {}) });
+    }
+  }
+
+  if (wordIds.length) {
+    const resolved = resolveDocumentWordIds(document, wordIds);
+    if (resolved.missing.length) {
+      return fail(`unknown or stale word ids: ${resolved.missing.join(', ')}`, { missing: resolved.missing, fix: 'Word ids shift after every cut; re-read get_transcript {granularity:"words"} and send the current ids.' });
+    }
+    const mapped = documentWordRangesToTimeline(document, documentWordRanges(resolved.words));
+    if (!mapped.length) return fail('the selected words are not on the timeline', { fix: 'Their clip was cut, disabled, or trimmed past them. Re-read get_transcript {granularity:"words"}: it lists only words that still play.' });
+    for (const range of mapped) seams.push({ at: range.fromSec, len: range.toSec - range.fromSec, ...(range.text ? { text: range.text } : {}) });
+  }
+
+  const edit = applyNarrationDocumentEdit({
+    projectId: '',
+    document,
+    ranges: seams.map((seam) => ({ fromSec: seam.at, toSec: seam.at + seam.len })),
+    mainTranscript: null,
+    clipTranscripts: {},
+  });
+  if (!edit.ok) return fail(edit.error.message, { code: edit.error.code, trackIds: edit.error.trackIds });
+  const cuts = finalizeCutSeams(seams);
+  const removedTotalSec = Math.round(cuts.reduce((total, cut) => total + cut.removedSec, 0) * 10) / 10;
+  const parts = [
+    rawRanges.length ? `${rawRanges.length} passage${rawRanges.length === 1 ? '' : 's'}` : '',
+    wordIds.length ? `${wordIds.length} word${wordIds.length === 1 ? '' : 's'}` : '',
+  ].filter(Boolean).join(' and ');
+  return mutation(
+    edit.document,
+    `Cut ${parts} by transcript, ${removedTotalSec.toFixed(1)}s removed${keepsGap ? ` (kept ${keepGapSec}s of air per seam)` : ''}`,
+    edit.receipts,
+    { cuts, removedTotalSec, ...(wordIds.length ? { wordIds } : {}), ...(keepsGap ? { keepGapSec } : {}) },
+  );
+}
+
 export function runAgentTimelineTool(document: EditorDocumentV2, tool: string, input: Input): AgentTimelineOutcome {
+  const v3 = runV3DocumentTool(document, tool, input);
+  if (v3) return v3;
   switch (tool) {
-    case 'get_timeline': return { ok: true, summary: `${document.timeline.tracks.length} timeline tracks`, data: agentTimelineSnapshot(document) };
-    case 'read_director_plan': {
-      const plan = directorPlanFromDocument(document);
-      if (!plan) return fail('No Director Plan is saved for this output');
-      const requested = Array.isArray(input.sceneIds)
-        ? [...new Set(input.sceneIds.filter((value): value is string => typeof value === 'string' && value.trim().length > 0).map((value) => value.trim()))]
-        : [];
-      const scenes = requested.length ? plan.scenes.filter((scene) => requested.includes(scene.id)) : plan.scenes;
-      if (!scenes.length) return fail(`No requested Director Scenes exist: ${requested.join(', ')}`);
-      const content = directorPlanToMarkdown({ ...plan, scenes });
-      return { ok: true, summary: `Loaded director-plan.md (${scenes.length} Scene${scenes.length === 1 ? '' : 's'})`, data: { path: 'director-plan.md', mediaType: 'text/markdown', content, sceneIds: scenes.map((scene) => scene.id), totalScenes: plan.scenes.length } };
-    }
-    case 'read_scene_designs': {
-      const designs = sceneDesignsFromDocument(document);
-      if (!designs) return fail('No Scene designs are saved for this output');
-      const requested = Array.isArray(input.sceneIds)
-        ? [...new Set(input.sceneIds.filter((value): value is string => typeof value === 'string' && value.trim().length > 0).map((value) => value.trim()))]
-        : [];
-      const scenes = requested.length ? designs.scenes.filter((scene) => requested.includes(scene.sceneId)) : designs.scenes;
-      if (!scenes.length) return fail(`No requested Scene designs exist: ${requested.join(', ')}`);
-      const content = sceneDesignsToMarkdown({ scenes });
-      return { ok: true, summary: `Loaded scene-designs.md (${scenes.length} Scene${scenes.length === 1 ? '' : 's'})`, data: { path: 'scene-designs.md', mediaType: 'text/markdown', content, sceneIds: scenes.map((scene) => scene.sceneId), totalScenes: designs.scenes.length } };
-    }
     case 'register_media': return importAssets(document, input);
-    case 'inspect_media': return inspectAssets(document, input);
     case 'organize_media': return organizeAssets(document, input);
-    case 'add_clips': return placeClips(document, input, 'overwrite');
-    case 'insert_clips': return placeClips(document, input, 'ripple');
-    case 'move_clips': return moveClips(document, input);
-    case 'remove_clips': return removeClips(document, input);
-    case 'split_clips': return splitClips(document, input);
-    case 'set_video_speed': return setVideoSpeed(document, input);
-    case 'set_clip_properties': return setClipProperties(document, input);
     case 'set_keyframes': return setKeyframes(document, input);
-    case 'manage_tracks': return manageTracks(document, input);
-    case 'manage_clip_links': return manageLinks(document, input);
-    case 'sync_clips': return syncClips(document, input);
-    case 'get_transcript': return getTranscript(document, input);
     case 'get_beat_grid': return getBeatGrid(document, input);
-    case 'swap_clip_media': return swapClipMedia(document, input);
-    case 'add_texts': return addTexts(document, input);
-    case 'update_text': return updateTexts(document, input);
+    case 'remove_words': return removeWords(document, input);
     default: return fail(`unsupported timeline tool: ${tool}`);
   }
 }

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { dubbingVideoDocument } from '@pireel/studio-engine/dubbing-task';
 import { firstNarrativeAssetId } from '@pireel/studio-engine/composition';
 import type { CaptionTaskRecord } from './caption-task-store';
+import type { ProjectSaveWire } from '@pireel/studio-engine/project-dto';
 const mock = vi.hoisted(() => ({ user: vi.fn(), file: vi.fn(), cache: vi.fn(), save: vi.fn(), load: vi.fn(), local: vi.fn(), id: vi.fn() }));
 vi.mock('./current-user', () => ({ loadCurrentUser: mock.user }));
 vi.mock('./local-media', () => ({ loadLocalVideo: mock.file, saveLocalVideo: mock.cache }));
@@ -12,7 +13,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mock.user.mockResolvedValue({ user_id: 'owner', auth_method: 'session' });
   mock.file.mockResolvedValue(new File(['video'], 'demo.mp4', { type: 'video/mp4' })); mock.cache.mockResolvedValue(true);
-  mock.save.mockResolvedValue('ok'); mock.load.mockResolvedValue({ id: 'saved-copy' });
+  mock.save.mockImplementation(async (_id: string, wire: ProjectSaveWire) => ({ status: 'saved', applied: wire.transactions!.map(transaction => transaction.id) })); mock.load.mockResolvedValue({ id: 'saved-copy' });
   mock.id.mockReturnValueOnce('pnew001').mockReturnValueOnce('pnew002');
 });
 describe('Agent Remix', () => {
@@ -30,6 +31,7 @@ describe('Agent Remix', () => {
     expect(mock.save.mock.calls.map(([id]) => id)).toEqual(['pnew001', 'pnew002']);
     expect(original).toEqual(snapshot);
     expect(mock.save.mock.calls[0]![1].title).toBe('demo · Agent Remix');
+    expect(mock.save.mock.calls[0]![1]).toMatchObject({ documentSchemaVersion: 2, knownVersion: null, transactions: [{ origin: 'user', ops: [{ op: 'document.replace' }] }] });
   });
   it('deep-copies an existing caption document', () => {
     const original = task(); original.document = captionAgentRemixDocument(original, 'source-project', 'blob:video');

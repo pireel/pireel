@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { setStudioProviders, unavailableProviders } from '@pireel/studio-engine/providers';
 import { durableFileSig, fileSig } from './media';
-import { alignFileToSig, loadLocalVideo, resolveAssetBytes, saveLocalVideo } from './local-media';
+import { alignFileToSig, loadLocalVideo, resolveAssetBytes, resolveAssetPreview, saveLocalStream, saveLocalVideo } from './local-media';
 
 class MemoryFileHandle {
   readonly kind = 'file' as const;
@@ -156,8 +156,16 @@ describe('device byte cache', () => {
       lastModified: original.lastModified,
     })], `${legacyKey}.meta.json`));
 
-    expect(await (await loadLocalVideo(sig))?.text()).toBe('legacy-bytes');
+    const loaded = await loadLocalVideo(sig);
+    expect(await loaded?.text()).toBe('legacy-bytes');
     expect(dir.files.has(legacyKey)).toBe(false);
+    // The File handed out is backed by the migrated entry, not the legacy one just removed: a
+    // decoder built on it keeps reading after the migration (the legacy-backed File goes dead).
+    const migratedKey = [...dir.files.keys()].find((name) => name !== legacyKey && !name.endsWith('.meta.json'))!;
+    expect(migratedKey).toBeDefined();
+    expect(await dir.files.get(migratedKey)!.text()).toBe('legacy-bytes');
+    expect(loaded?.name).toBe(original.name);
+    expect(loaded?.lastModified).toBe(original.lastModified);
   });
 
   it('reports persistence failure instead of pretending the local file was saved', async () => {
@@ -229,5 +237,47 @@ describe('byte resolution chain', () => {
     const resolved = await resolveAssetBytes({ assetId: 'a', contentSig: sig, cloudKey: 'studio-src/u/k', label: 'clip.mp4' });
     expect(await resolved?.text()).toBe('disk-bytes');
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('cloud-first cache fallbacks', () => {
+  it('keeps streamed cloud bytes usable when OPFS is unavailable', async () => {
+    vi.stubGlobal('navigator', { storage: {} });
+    const bytes = new TextEncoder().encode('cloud bytes');
+    const source = new File([bytes], 'source.mp4', { type: 'video/mp4' });
+    const sig = await durableFileSig(source);
+    const restored = await saveLocalStream(source.stream(), sig, { name: 'source.mp4', type: 'video/mp4', expectedSize: bytes.length });
+    expect(await restored.text()).toBe('cloud bytes');
+    expect(fileSig(restored)).toBe(sig);
+    await expect(saveLocalStream(source.stream(), sig, { name: 'source.mp4', expectedSize: 999 })).rejects.toThrow('size mismatch');
+  });
+
+  it('ignores a truncated device cache and restores the intact cloud copy', async () => {
+    const dir = installMemoryOpfs();
+    const file = new File(['complete bytes'], 'source.mp4', { type: 'video/mp4' });
+    const sig = await durableFileSig(file);
+    await saveLocalVideo(file, sig);
+    const key = [...dir.files.keys()].find((key) => !key.endsWith('.json'))!;
+    dir.files.set(key, new File(['bad'], key));
+    const fetch = vi.fn(async () => file);
+    setStudioProviders({ ...unavailableProviders(), vault: { backup: async () => null, fetch } });
+    const restored = await resolveAssetBytes({ assetId: 'a', contentSig: sig, cloudKey: 'cloud/key', label: file.name });
+    expect(await restored?.text()).toBe('complete bytes');
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens cold library cards through read links without downloading cloud media', async () => {
+    installMemoryOpfs();
+    const fetch = vi.fn(async () => new File(['huge media'], 'clip.mp4'));
+    const previewUrl = vi.fn(async () => 'https://signed.example/clip');
+    setStudioProviders({ ...unavailableProviders(), vault: { backup: async () => null, fetch, previewUrl } });
+    const entry = { assetId: 'a', contentSig: 'clip:100:0', cloudKey: 'cloud/key', label: 'clip.mp4' };
+    expect(await resolveAssetPreview(entry)).toEqual({ file: null, url: 'https://signed.example/clip' });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(previewUrl).toHaveBeenCalledWith(entry.contentSig, { cloudKey: entry.cloudKey });
+    // The same cloud entry still downloads on demand for insert/export.
+    await resolveAssetBytes(entry);
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 });

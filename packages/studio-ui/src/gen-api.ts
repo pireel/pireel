@@ -12,7 +12,6 @@
  */
 
 import { imageThumb } from '@pireel/ui/image-url';
-import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 import { t } from './i18n';
 
 const SPACE_LS_PREFIX = 'pireel.studio.gen-space:v3:';
@@ -29,53 +28,11 @@ export interface GenAsset {
 
 export type GenStatus = 'pending' | 'succeeded' | 'failed';
 
-/** One settled generated media output, as reported to the project media directory. */
-export interface GeneratedAssetRecord {
-  jobId: string;
-  index: number;
-  kind: 'image' | 'video' | 'audio';
-  /** Bare storage key (public CDN object). */
-  key: string;
-  mime: string;
-  prompt: string;
-  createdAt: number;
-  durationSec?: number;
-}
-
-/** Settled outputs of generation jobs as directory records; kind falls back to the asset MIME when
- * the job list does not carry it (jobs polled by id). */
-export function generatedRecordsFromJobs(jobs: readonly (GenJob & { kind?: 'image' | 'video' | 'audio' })[]): GeneratedAssetRecord[] {
-  const records: GeneratedAssetRecord[] = [];
-  for (const job of jobs) {
-    if (job.status !== 'succeeded') continue;
-    job.assets.forEach((asset, index) => {
-      if (!asset.key) return;
-      const kind = job.kind ?? (asset.mime.startsWith('video/') ? 'video' : asset.mime.startsWith('audio/') ? 'audio' : 'image');
-      records.push({ jobId: job.id, index, kind, key: asset.key, mime: asset.mime, prompt: job.prompt, createdAt: job.createdAt });
-    });
-  }
-  return records;
-}
-
-/** Generated media follows the project like any import: one directory entry per output, addressed
- * by its storage key (no upload — the bytes are already in the cloud). Deterministic ids keep
- * history reloads idempotent. */
-export function generatedAssetIndexEntry(record: GeneratedAssetRecord, fallbackLabel: string): LocalAssetIndexEntry {
-  const jobId = record.jobId.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'job';
-  return {
-    assetId: `gen_${jobId}_${record.index}`,
-    contentSig: `gen:${record.key}`,
-    sig: `gen:${record.key}`,
-    cloudKey: record.key,
-    label: record.prompt.trim().slice(0, 60) || fallbackLabel,
-    kind: record.kind,
-    w: null,
-    h: null,
-    ...(record.mime ? { mime: record.mime } : {}),
-    ...(record.durationSec ? { durationSec: record.durationSec } : {}),
-    createdAt: record.createdAt,
-  };
-}
+export {
+  generatedAssetIndexEntry,
+  generatedRecordsFromJobs,
+  type GeneratedAssetRecord,
+} from '@pireel/studio-engine/generated-assets';
 
 export interface GenJob {
   id: string;
@@ -99,26 +56,48 @@ function clearSpaceCache(projectId: string) {
   }
 }
 
-/** Current project's dedicated generation space: cached locally, resolved idempotently by the server. */
-export async function getStudioSpaceId(projectId: string): Promise<string> {
-  try {
-    const v = localStorage.getItem(spaceCacheKey(projectId));
-    if (v) return v;
-  } catch {
-    /* ignore */
-  }
-  const r = await fetch(`/api/studio/projects/${encodeURIComponent(projectId)}/gen-space`, {
-    method: 'POST',
-  });
-  const j = (await r.json().catch(() => null)) as { space?: { id?: string } } | null;
-  const id = j?.space?.id;
-  if (!r.ok || !id) throw new Error('space_create_failed');
+function cacheSpaceId(projectId: string, id: string): string {
   try {
     localStorage.setItem(spaceCacheKey(projectId), id);
   } catch {
     /* ignore */
   }
   return id;
+}
+
+function cachedSpaceId(projectId: string): string | null {
+  try {
+    return localStorage.getItem(spaceCacheKey(projectId));
+  } catch {
+    return null;
+  }
+}
+
+/** Current project's dedicated generation space: cached locally, resolved idempotently by the server.
+ *  Creates the space, so it belongs to the paths that are about to write one. */
+export async function getStudioSpaceId(projectId: string): Promise<string> {
+  const cached = cachedSpaceId(projectId);
+  if (cached) return cached;
+  const r = await fetch(`/api/studio/projects/${encodeURIComponent(projectId)}/gen-space`, {
+    method: 'POST',
+  });
+  const j = (await r.json().catch(() => null)) as { space?: { id?: string } } | null;
+  const id = j?.space?.id;
+  if (!r.ok || !id) throw new Error('space_create_failed');
+  return cacheSpaceId(projectId, id);
+}
+
+/** Resolve the space for READING history. `null` when this project has none yet — a project that
+ *  was never saved to the cloud cannot own generations, and asking for its history must not create
+ *  a space (three panels ask on every open) or report a failure. */
+export async function resolveStudioSpaceId(projectId: string): Promise<string | null> {
+  const cached = cachedSpaceId(projectId);
+  if (cached) return cached;
+  const r = await fetch(`/api/studio/projects/${encodeURIComponent(projectId)}/gen-space`);
+  if (!r.ok) return null;
+  const j = (await r.json().catch(() => null)) as { space?: { id?: string } | null } | null;
+  const id = j?.space?.id;
+  return id ? cacheSpaceId(projectId, id) : null;
 }
 
 /** Start one generation. 402 insufficient credits becomes its own kind; on invalid space (account change/deletion) clear the cache and retry once. */
@@ -198,12 +177,8 @@ export async function pollCreation(id: string): Promise<GenJob | null> {
 
 /** Fetch this project's generation history (including pending — resume polling on mount). */
 export async function listStudioGens(projectId: string, type: 'image' | 'video' | 'audio', limit = 30): Promise<GenJob[]> {
-  let spaceId: string;
-  try {
-    spaceId = await getStudioSpaceId(projectId);
-  } catch {
-    return [];
-  }
+  const spaceId = await resolveStudioSpaceId(projectId).catch(() => null);
+  if (!spaceId) return [];
   const creationType = type === 'audio' ? 'bgm' : type;
   const r = await fetch(`/api/create/list?space_id=${encodeURIComponent(spaceId)}&type=${creationType}&limit=${limit}`);
   if (!r.ok) {

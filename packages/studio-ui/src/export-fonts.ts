@@ -240,7 +240,7 @@ export async function buildInlineFontCss(
   if (!res) {
     // Google Fonts unreachable even via the proxy (offline / OSS shell). Degrade to NO inlined fonts
     // instead of throwing: the frame/export still renders with system fallback fonts. A hard
-    // "Failed to fetch" here used to kill capture_frame outright.
+    // "Failed to fetch" here used to kill inspect_timeline outright.
     log('font CSS fetch failed — falling back to system fonts (no inlining)');
     return [webCss, localCss].filter(Boolean).join('\n');
   }

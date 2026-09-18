@@ -11,7 +11,6 @@
 
 import { useRef, type MutableRefObject } from 'react';
 import {
-  applyEditorCommand,
   firstNarrativeAssetId,
   timelineTranscriptionTargets,
   type EditorDocumentV2,
@@ -24,6 +23,8 @@ import { type VisualTimeline, analyzeVisual } from './visual';
 import { t } from './i18n';
 import { deleteCachedAsr } from './asr-cache';
 import { fileSig } from './media';
+import type { DocumentCommitter } from './document-commit';
+import type { DocumentOp } from '@pireel/studio-engine/document-transaction';
 
 export interface MediaAnalysisDeps {
   videoFileRef: MutableRefObject<File | null>;
@@ -32,7 +33,8 @@ export interface MediaAnalysisDeps {
   setAsrSentences: (v: AsrSegment[]) => void;
   setVisual: (v: VisualTimeline | null) => void;
   documentRef: MutableRefObject<EditorDocumentV2>;
-  setDocument: (document: EditorDocumentV2) => void;
+  /** Results land as transactions (transcripts, recovered scripts, palette) so they sync like any edit. */
+  commit: DocumentCommitter['commit'];
   /** Resolve authorized bytes for any placed timeline audio/video asset. */
   speechFileForAsset: (asset: EditorMediaAsset) => Promise<File | null>;
   /** Current video (blob preview URL + canvas size), null when there's no video. */
@@ -47,7 +49,7 @@ function transcriptWordCount(segments: readonly AsrSegment[]): number {
 
 export function useMediaAnalysis(deps: MediaAnalysisDeps) {
   const {
-    videoFileRef, asrRef, visualRef, setAsrSentences, setVisual, documentRef, setDocument,
+    videoFileRef, asrRef, visualRef, setAsrSentences, setVisual, documentRef, commit,
     speechFileForAsset, currentVideo,
   } = deps;
 
@@ -78,14 +80,11 @@ export function useMediaAnalysis(deps: MediaAnalysisDeps) {
           return asset?.kind === 'video' && asset.metadata.hasAudio === false ? [asset.id] : [];
         })))];
         if (!silentAssetIds.length) throw new Error(t('common.uploadVideoFirst'));
-        const transcripts = { ...current.semantics.transcripts };
-        for (const assetId of silentAssetIds) transcripts[assetId] = [];
-        const document = { ...current, semantics: { ...current.semantics, transcripts } };
         if (firstNarrativeAssetId(current) && silentAssetIds.includes(firstNarrativeAssetId(current)!)) {
           asrRef.current = [];
           setAsrSentences([]);
         }
-        setDocument(document);
+        commit({ op: 'transcripts.set', input: { transcripts: Object.fromEntries(silentAssetIds.map((assetId) => [assetId, []])) } }, { undo: 'none' });
         return [];
       }
       report?.(t('common.transcribing'));
@@ -93,6 +92,7 @@ export function useMediaAnalysis(deps: MediaAnalysisDeps) {
       const transcripts = { ...current.semantics.transcripts };
       const recoveredScripts = new Map<string, string>();
       let firstError: unknown;
+      let refreshed = 0;
       for (const target of targets) {
         const refreshThisAsset = force;
         if (Object.prototype.hasOwnProperty.call(transcripts, target.assetId) && !refreshThisAsset) continue;
@@ -103,10 +103,12 @@ export function useMediaAnalysis(deps: MediaAnalysisDeps) {
             ? videoFileRef.current
             : await speechFileForAsset(asset);
           if (!file) continue;
-          if (refreshThisAsset) deleteCachedAsr(fileSig(file));
+          // Awaited: the transcriber reads the same cache right after, and an unfinished delete would hand back the old result.
+          if (refreshThisAsset) await deleteCachedAsr(fileSig(file));
           // Script-backed speech (TTS) keeps its exact text; ASR only lends the timing.
           const storedBefore = current.semantics.transcripts[target.assetId];
           transcripts[target.assetId] = measuredSpeechTranscript(asset, storedBefore, await studioProviders().transcriber.transcribe(file));
+          refreshed += 1;
           if (!asset.metadata.transcriptText) {
             const recoveredScript = storedScriptText(storedBefore);
             if (recoveredScript) recoveredScripts.set(target.assetId, recoveredScript);
@@ -119,28 +121,27 @@ export function useMediaAnalysis(deps: MediaAnalysisDeps) {
         .map((target) => ({ target, segments: transcripts[target.assetId] as AsrSegment[] | undefined }))
         .filter((entry): entry is { target: typeof targets[number]; segments: AsrSegment[] } => !!entry.segments?.length);
       const resolved = targets.filter((target) => Object.prototype.hasOwnProperty.call(transcripts, target.assetId));
-      if (!resolved.length) {
+      // A forced refresh that could not re-transcribe anything (no readable source) is a failure,
+      // not a silent "done" that leaves the stored transcript as it was.
+      if (!resolved.length || (force && refreshed === 0)) {
         if (firstError instanceof Error) throw firstError;
         throw new Error(t('workbench.restoreVideoSourceBeforeCaptions'));
       }
-      // ASR can run for minutes. Merge only transcript results into the latest document so an
-      // unrelated timeline edit made while it was running is never rolled back by the completion.
+      // ASR can run for minutes. Only the transcript results become a transaction on whatever the
+      // document is by now, so an unrelated edit made meanwhile is never rolled back by the completion.
       const latest = documentRef.current;
-      const mergedTranscripts = { ...latest.semantics.transcripts };
+      const landed: Record<string, AsrSegment[]> = {};
       for (const target of targets) {
         if (!latest.assets[target.assetId] || !Object.prototype.hasOwnProperty.call(transcripts, target.assetId)) continue;
-        mergedTranscripts[target.assetId] = transcripts[target.assetId]!;
+        landed[target.assetId] = transcripts[target.assetId] as AsrSegment[];
       }
-      const mergedAssets = { ...latest.assets };
+      const ops: DocumentOp[] = Object.keys(landed).length ? [{ op: 'transcripts.set', input: { transcripts: landed } }] : [];
       for (const [assetId, script] of recoveredScripts) {
-        const entry = mergedAssets[assetId];
-        if (entry && !entry.metadata.transcriptText) mergedAssets[assetId] = { ...entry, metadata: { ...entry.metadata, transcriptText: script } };
+        const entry = latest.assets[assetId];
+        if (entry && !entry.metadata.transcriptText) ops.push({ op: 'assets.patch', input: { assetId, metadata: { transcriptText: script } } });
       }
-      const document = {
-        ...latest,
-        assets: mergedAssets,
-        semantics: { ...latest.semantics, transcripts: mergedTranscripts },
-      };
+      const committed = ops.length ? commit(ops, { undo: 'none' }) : null;
+      const mergedTranscripts = (committed?.ok ? committed.document : latest).semantics.transcripts;
       const latestFirstAssetId = firstNarrativeAssetId(latest);
       const main = latestFirstAssetId
         ? mergedTranscripts[latestFirstAssetId] as AsrSegment[] | undefined
@@ -149,7 +150,6 @@ export function useMediaAnalysis(deps: MediaAnalysisDeps) {
         asrRef.current = main;
         setAsrSentences(main);
       }
-      setDocument(document);
       return main?.length
         ? main
         : available.sort((left, right) => transcriptWordCount(right.segments) - transcriptWordCount(left.segments))[0]?.segments ?? [];
@@ -197,8 +197,7 @@ export function useMediaAnalysis(deps: MediaAnalysisDeps) {
       // Attach the palette derived from the background to the composition → assembleHtml injects #root, compose passes it to the LLM (light blend).
       // Don't override when a frame (frameId) is mounted: a frame is the user's explicitly chosen design system; the visual-derived palette is only a default source
       if (vis.palette && !documentRef.current.appearance.frameId) {
-        const command = applyEditorCommand(documentRef.current, { type: 'appearance.patch', patch: { palette: vis.palette } });
-        if (command.ok) setDocument(command.document);
+        commit({ op: 'command', input: { command: { type: 'appearance.patch', patch: { palette: vis.palette } } } }, { origin: 'system', undo: 'none' });
       }
     }
     return vis;

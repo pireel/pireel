@@ -74,6 +74,10 @@ export const COMMON_ZH: Record<string, string> = {
   'common.wave': '波浪',
   'common.wipe': '划开',
   'common.zoomIn': '放大',
+  'common.zoomPunch': '快速推近',
+  'common.zoomInstant': '瞬间推近',
+  'common.zoomSlowPush': '缓慢推近',
+  'common.zoomInOut': '推近再拉回',
   'editorError.invalidCommand': '无法应用这项编辑，请检查所选内容后重试。',
   'editorError.invalidRange': '时间范围无效，请调整选择后重试。',
   'editorError.invalidDocument': '项目数据无效，请刷新项目后重试。',
@@ -84,5 +88,6 @@ export const COMMON_ZH: Record<string, string> = {
   'editorError.invalidTrackRole': '该轨道类型不适用于这项操作。',
   'editorError.primaryTrackRequired': '不能移除主视频轨道。',
   'editorError.trackLocked': '这项编辑涉及已锁定轨道，请解锁后重试。',
+  'editorError.staleBase': '这一步基于旧版本的项目副本，已改为发送整份文档。',
   'editorError.operationFailed': '操作失败，请重试。',
 };

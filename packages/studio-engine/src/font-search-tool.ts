@@ -1,4 +1,4 @@
-/** search_fonts — one pure body shared by every surface (MCP server-direct, offline executor, browser runner). */
+/** Font search (search_assets kind:font) — one pure body shared by every surface (MCP server-direct, offline executor, browser runner). */
 import { searchFonts } from './font-library';
 import type { FontCategory, FontScript, FontSearchHit } from './google-fonts';
 
@@ -25,7 +25,7 @@ export function searchFontsTool(input: Record<string, unknown>): FontSearchToolR
     data: {
       query,
       fonts,
-      usageHint: 'Use the id verbatim as a font value (set_texts/add_texts fontFamily, set_captions font, compose_component/compose_block_brief fontFamily). Library faces cover Chinese; a Google face renders Chinese through the library partner face automatically.',
+      usageHint: 'Use the id verbatim as a font value (set_texts fontFamily, set_captions font, compose_component fontFamily). Library faces cover Chinese; a Google face renders Chinese through the library partner face automatically.',
     },
   };
 }

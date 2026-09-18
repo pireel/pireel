@@ -54,7 +54,11 @@ describe('renderV3State', () => {
     const t5 = state.tracks.find((t) => t.id === 't5')!;
     expect(t5.linkedClips).toBe(1);
     expect(t5.clips!.map((c) => c.id)).toEqual(['m1']);
-    expect(t5.clips![0]).toMatchObject({ volumeDb: -14, fadeInSec: 1.5 });
+    // A music bed fades 1.5 s out by default and the document stores no fadeOutSec for it; the
+    // reader still sees the effective value (an agent that asked for exactly the default must not
+    // read it back as "no fade").
+    expect(t5.clips![0]).toMatchObject({ volumeDb: -14, fades: { in: 45, out: 45 } });
+    expect(t5.clips![0]).not.toHaveProperty('fadeInSec');
     const t6 = state.tracks.find((t) => t.id === 't6')!;
     expect(t6.captions).toMatchObject({ on: true, cueCount: 2, preview: 'So today … we start' });
     expect(t6).not.toHaveProperty('clips');
@@ -63,6 +67,18 @@ describe('renderV3State', () => {
     // the font catalog rides on get_state so tool descriptions state the id grammar instead of a list
     expect(state.fonts.length).toBeGreaterThanOrEqual(10);
     expect(state.fonts).toContainEqual({ id: 'web:lxgw-wenkai', zh: '霞鹜文楷', en: 'LXGW WenKai' });
+  });
+
+  it('exposes a bespoke component’s editable properties with overrides applied and orphans dropped', () => {
+    const manifest = JSON.stringify({ accent: { type: 'string', format: 'color', title: 'Accent', default: '#ff5a36' }, badge: { type: 'boolean', title: 'Badge', default: true } });
+    const bespoke: TimelineClip = {
+      ...graphic('g9', 0, 60),
+      block: { templateId: 'custom', slots: { innerHtml: `<div data-props='${manifest}'></div>`, timelineBody: '', props: { badge: false, ghost: 1 } }, box: { x: 0, y: 0, w: 0.5, h: 0.2 } } as never,
+    } as TimelineClip;
+    const state = renderV3State(doc([track('t3', 'graphics', [bespoke, graphic('g1', 100, 60)], { role: 'graphics' })]));
+    const [tuned, kit] = state.tracks[0]!.clips!;
+    expect(tuned!.component?.props).toEqual([{ key: 'accent', type: 'color', value: '#ff5a36' }, { key: 'badge', type: 'boolean', value: false }]);
+    expect(kit!.component?.props).toBeUndefined();
   });
 
   it('omits identity geometry and keeps a real crop or subject framing', () => {

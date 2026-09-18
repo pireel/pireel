@@ -58,7 +58,24 @@ describe('project media segment search', () => {
       clipTranscripts: {
         'https://media.example/insert.mp4': project().clipTranscripts['blob:clip-session'],
       },
+      assetIdBySource: { 'https://media.example/insert.mp4': expect.any(String) },
     });
+  });
+
+  it('returns the document asset id when the source is mapped, so add_clips can take it as-is', () => {
+    const base = project();
+    const src = 'blob:pireel-offline/asset_video_main';
+    const shots = base.shots.map((shot) => ({ ...shot, src }));
+    const out = searchProjectMedia({
+      ...base,
+      shots,
+      mainTranscript: [],
+      clipTranscripts: { [src]: base.mainTranscript },
+      assetIdBySource: { [src]: 'asset_video_main' },
+    }, { query: '产品验证', scope: 'narrative' });
+    if ('error' in out) throw new Error(out.error);
+    expect(out.results[0]!.assetId).toBe('asset_video_main');
+    expect(out.coverage[0]!.assetId).toBe('asset_video_main');
   });
 
   it('finds Chinese transcript meaning by local n-grams and returns source + edited clocks', () => {

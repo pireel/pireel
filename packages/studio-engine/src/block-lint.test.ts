@@ -16,15 +16,15 @@ describe('lintBlock(块产物静态检查)', () => {
     expect(ok(html, "tl.from('#b7 .ul',{scaleX:0,duration:.4},0);")).toEqual([]);
   });
 
-  it('未作用域选择器 → unscoped-selector(会污染整个文档,硬错误)', () => {
+  it('local selectors are accepted because the renderer owns their scope', () => {
     const issues = ok(`<div data-edit="t">文字四个</div><style>.wrap{color:red} #b7 .x{color:blue}</style>`);
-    expect(issues.map((i) => i.code)).toContain('unscoped-selector');
-    expect(HARD_LINT_CODES.has('unscoped-selector')).toBe(true);
+    expect(issues.map((i) => i.code)).not.toContain('css-recovery');
+    expect(HARD_LINT_CODES.has('css-recovery')).toBe(false);
   });
 
-  it('逗号选择器逐项检查，不能由一个已作用域分支掩护全局分支', () => {
+  it('selector lists use the renderer scope instead of forcing model prefixes', () => {
     const mixed = ok(`<div data-edit="t">文字四个</div><style>#b7 .safe, .leak{font-size:36px}</style>`);
-    expect(mixed.map((issue) => issue.code)).toContain('unscoped-selector');
+    expect(mixed.map((issue) => issue.code)).not.toContain('css-recovery');
     expect(ok(`<div data-edit="t">文字四个</div><style>#b7 .a, #b7 .b{font-size:36px}</style>`)).toEqual([]);
   });
 
@@ -43,23 +43,31 @@ describe('lintBlock(块产物静态检查)', () => {
 
   it('@keyframes 里的百分比选择器不误报', () => {
     const issues = ok(`<div data-edit="t">文字四个字</div><style>@keyframes spin{0%{opacity:0}100%{opacity:1}} #b7 .x{color:blue}</style>`);
-    expect(issues.filter((i) => i.code === 'unscoped-selector')).toEqual([]);
+    expect(issues.filter((i) => i.code === 'css-recovery')).toEqual([]);
   });
 
-  it('@media/@container 内部的未作用域选择器同样命中(不被条件行掩护)', () => {
+  it('nested grouping rules remain valid local CSS', () => {
     const media = ok(`<div data-edit="t">文字四个字</div><style>@media (min-width:1px){ .card{position:absolute;inset:0} }</style>`);
-    expect(media.map((i) => i.code)).toContain('unscoped-selector');
+    expect(media.map((i) => i.code)).not.toContain('css-recovery');
     const container = ok(`<div data-edit="t">文字四个字</div><style>@container (aspect-ratio > 1.1){ .wrap{flex-direction:row} }</style>`);
-    expect(container.map((i) => i.code)).toContain('unscoped-selector');
+    expect(container.map((i) => i.code)).not.toContain('css-recovery');
   });
 
   it('非 px 长度、script、非确定性 API、缺 data-edit 各自命中', () => {
     for (const value of ['1cm', '12pt', '2rem', '5vw', '8cqmin']) {
       const issues = ok(`<div data-edit="t">文字四个字</div><style>#b7 .x{font-size:${value}}</style>`);
       expect(issues.map((i) => i.code), value).toContain('non-px-length-unit');
-      expect(HARD_LINT_CODES.has('non-px-length-unit')).toBe(true);
+      expect(HARD_LINT_CODES.has('non-px-length-unit')).toBe(false);
     }
     expect(ok(`<div data-edit="t">文</div><script>alert(1)</script>`).map((i) => i.code)).toContain('script-tag');
+    // 预览能播、导出画不出来的元素:过去只有提示词禁,检查器放行,结果是成片里静默消失
+    for (const tag of ['video src="x.mp4"', 'canvas', 'iframe src="x"', 'object', 'embed']) {
+      const issues = ok(`<div data-edit="t">文字四个字</div><${tag}></${tag.split(' ')[0]}>`);
+      expect(issues.map((i) => i.code), tag).toContain('unsupported-element');
+    }
+    expect(HARD_LINT_CODES.has('unsupported-element')).toBe(true);
+    // 只有 video/canvas 撑场面的块不再算"有视觉内容",空内容也要报出来
+    expect(ok(`<video src="x.mp4"></video>`).map((i) => i.code)).toContain('empty-content');
     expect(ok(`<div data-edit="t">文字四个字</div>`, 'setTimeout(()=>{},100)').map((i) => i.code)).toContain('nondeterministic');
     expect(ok(`<div>这是一段没有句柄的可见文字</div>`).map((i) => i.code)).toContain('no-data-edit');
   });
@@ -69,7 +77,7 @@ describe('lintBlock(块产物静态检查)', () => {
     expect(ok(`<div data-edit="t">最小字号</div><style>#b7 .x{font-size:24px}</style>`)).toEqual([]);
     const tooSmall = ok(`<div data-edit="t">过小字号</div><style>#b7 .x{font-size:23px}</style>`);
     expect(tooSmall.map((issue) => issue.code)).toContain('too-small-font-size');
-    expect(HARD_LINT_CODES.has('too-small-font-size')).toBe(true);
+    expect(HARD_LINT_CODES.has('too-small-font-size')).toBe(false);
   });
 
   it('语义字号 token 必须在组件内解析为 px', () => {
@@ -113,5 +121,67 @@ describe('lintBlock(块产物静态检查)', () => {
 
   it('纯结构无文本(如只有图形)不要求 data-edit', () => {
     expect(ok(`<svg viewBox="0 0 10 10"><circle r="4"/></svg><style>#b7 svg{width:100%}</style>`)).toEqual([]);
+  });
+});
+
+describe('editable properties schema', () => {
+  const manifest = JSON.stringify({
+    accent: { type: 'string', format: 'color', title: '强调色', default: '#ff5a36' },
+    badge: { type: 'boolean', title: '角标', default: true },
+  });
+  // The schema now arrives as its own slot (the ```json fence); the markup only consumes it.
+  const good = `<div class="wrap"><style>#b1 .k{color:var(--p-accent)} #b1[data-p-badge="false"] .badge{display:none}</style><span data-edit="t" class="k">十个以上的可见文字内容</span><i class="badge"></i></div>`;
+  const codes = (html: string, propsSchema: string | null = manifest) =>
+    lintBlock({ blockId: 'b1', innerHtml: html, timelineBody: '', propsSchema: propsSchema ?? undefined }).map((i) => i.code);
+
+  it('a well-formed schema that is fully consumed lints clean', () => {
+    expect(codes(good)).toEqual([]);
+  });
+
+  it('a broken schema and self-written values are reported for the fix round but never block placement', () => {
+    expect(HARD_LINT_CODES.has('props-invalid')).toBe(false);
+    expect(HARD_LINT_CODES.has('props-unused')).toBe(false);
+    expect(codes(good, '[{oops')).toContain('props-invalid');
+    expect(codes(good.replace('<span data-edit="t" class="k">', '<span data-edit="t" class="k" style="--p-accent:#000">'))).toContain('props-invalid');
+    expect(codes(good.replace('<i class="badge">', '<i class="badge" data-p-badge="false">'))).toContain('props-invalid');
+    const lazy = codes(good.replace('#b1[data-p-badge="false"] .badge{display:none}', ''));
+    expect(lazy).toContain('props-unused');
+    expect(lazy).not.toContain('props-invalid');
+  });
+
+  it('the generation gate asks for a schema with a colour (soft — the fix round, not a rejection); the timeline gate does not', () => {
+    const noManifest = `<div><style>#b1 .k{color:red}</style><span data-edit="t" class="k">十个以上的可见文字内容</span></div>`;
+    expect(HARD_LINT_CODES.has('props-missing')).toBe(false);
+    expect(lintBlock({ blockId: 'b1', innerHtml: noManifest, timelineBody: '', requireProps: true }).map((i) => i.code)).toEqual(['props-missing']);
+    expect(codes(noManifest, null)).toEqual([]);
+    const noColourSchema = '{"n":{"type":"number","title":"n","default":1}}';
+    const noColour = noManifest.replace('color:red', 'width:calc(var(--p-n)*1px)');
+    expect(lintBlock({ blockId: 'b1', innerHtml: noColour, timelineBody: '', propsSchema: noColourSchema, requireProps: true }).map((i) => i.code)).toEqual(['props-missing']);
+    expect(lintBlock({ blockId: 'b1', innerHtml: good, timelineBody: '', propsSchema: manifest, requireProps: true })).toEqual([]);
+    // text without a data-edit handle stays soft as well: the inspector just shows fewer text fields
+    expect(HARD_LINT_CODES.has('no-data-edit')).toBe(false);
+  });
+
+  it('markup without a schema is untouched by the props rules', () => {
+    expect(codes(`<div><style>#b1 .k{color:red}</style><span data-edit="t" class="k">十个以上的可见文字内容</span></div>`, null)).toEqual([]);
+  });
+});
+
+
+describe('scaled built-in SVG artboard text', () => {
+  const art = '<svg class="artboard-frame" data-pireel-art-preset="5" viewBox="0 0 120 67.5" preserveAspectRatio="none"><foreignObject x="0" y="0" width="120" height="67.5"><div data-edit="title">DATA STREAM</div></foreignObject></svg><style>#b7 .artboard-frame{width:100%;height:100%}#b7 div{font-size:5.2px}</style>';
+  it('checks the visible canvas size for the actual 580×326 component box', () => {
+    expect(lintBlock({ blockId: ID, innerHtml: art, timelineBody: '', boxPx: { w: 580.608, h: 326.592 } }).filter((issue) => HARD_LINT_CODES.has(issue.code))).toEqual([]);
+  });
+  it('still rejects text rendered too small and does not exempt unscaled or mixed markup', () => {
+    for (const innerHtml of [art, '<div data-edit="t" style="font-size:5px">Small text</div>']) {
+      expect(lintBlock({ blockId: ID, innerHtml, timelineBody: '', boxPx: { w: 120, h: 67.5 } }).some((issue) => issue.code === 'too-small-font-size')).toBe(true);
+    }
+    expect(lintBlock({ blockId: ID, innerHtml: art + '<b style="font-size:3px">Outside</b>', timelineBody: '', boxPx: { w: 600, h: 400 } }).some((issue) => issue.code === 'too-small-font-size')).toBe(true);
+    expect(lintBlock({ blockId: ID, innerHtml: art, timelineBody: '' }).some((issue) => issue.code === 'too-small-font-size')).toBe(true);
+  });
+  it('does not relax CSS scope or script checks for scaled presets', () => {
+    const issues = lintBlock({ blockId: ID, innerHtml: art + '<style>.leak{color:red}</style><script>bad()</script>', timelineBody: '', boxPx: { w: 600, h: 400 } });
+    expect(issues.map((issue) => issue.code)).toEqual(expect.arrayContaining(['script-tag']));
   });
 });

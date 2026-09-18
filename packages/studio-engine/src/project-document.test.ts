@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { emptyEditorDocumentV2 } from './editor-document';
 import { emptyComposition } from './composition-core';
 import { firstNarrativeAssetId, type EditorDocumentV2 } from './editor-document';
 import {
@@ -118,5 +119,26 @@ describe('native project document boundary', () => {
 
     expect(merged.assets[assetId]?.label).toBe('Founder explaining the pricing model');
     expect(merged.assets[assetId]?.locator.localSig).toBe('source.mp4:20:3');
+  });
+});
+
+describe('applyEditorDocumentPersistenceMetadata (library metadata)', () => {
+  it('keeps the probed duration of imported footage and audio, not only the pixel size', () => {
+    const document = emptyEditorDocumentV2({ fps: 30 });
+    const folded = applyEditorDocumentPersistenceMetadata({
+      projectId: 'p1',
+      document,
+      localAssets: [
+        { assetId: 'broll', contentSig: 'b.mp4:1:1', sig: 'b.mp4:1:1', label: 'B-roll', kind: 'video', createdAt: 2, w: 1280, h: 720, durationSec: 6 },
+        { assetId: 'tone', contentSig: 't.wav:1:1', sig: 't.wav:1:1', label: 'Tone', kind: 'audio', createdAt: 1, w: null, h: null, durationSec: 1 },
+      ],
+    });
+    expect(folded.assets.broll?.metadata).toEqual({ width: 1280, height: 720, durationSec: 6 });
+    expect(folded.assets.tone?.metadata).toEqual({ durationSec: 1 });
+    // A second fold over the existing asset keeps it too.
+    const again = applyEditorDocumentPersistenceMetadata({ projectId: 'p1', document: folded, localAssets: [
+      { assetId: 'tone', contentSig: 't.wav:1:1', sig: 't.wav:1:1', label: 'Tone', kind: 'audio', createdAt: 1, w: null, h: null, durationSec: 1 },
+    ] });
+    expect(again.assets.tone?.metadata).toEqual({ durationSec: 1 });
   });
 });

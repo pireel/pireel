@@ -6,7 +6,6 @@
  *  - Serial execution: external calls queue up, never mutate comp concurrently with each other
  *    (same execution surface as the internal chat's onToolCall; undo snapshots / gen locks all
  *    live inside runStudioTool, nothing extra needed).
- *  - get_state special-cased: the state snapshot is in the browser, return <composition_state> text directly.
  *  - Single active tab: DO side kicks the old connection when a new one arrives (close 4000); the kicked side doesn't reconnect.
  *  - Reconnect backoff 1s→30s; if never connected (not logged in / no DO), give up after 6 tries instead of spinning.
  *  - 'ping' every 25s keep-alive (answered by DO auto-response, doesn't wake a hibernating instance).
@@ -18,10 +17,9 @@ import type { StudioToolResult } from '@pireel/studio-engine/prompts';
 export interface AgentBridgeOpts {
   /** Run one tool (the exact same runStudioTool as the internal chat). */
   runTool: (tool: string, input: Record<string, unknown>) => Promise<StudioToolResult>;
-  /** Current state snapshot (the body of get_state's reply). */
-  getState: () => string;
-  /** Callback when an external call completes (for UI feedback, e.g. toast). */
-  onExternalCall?: (tool: string, result: StudioToolResult) => void;
+  /** Callback when an external call completes (for UI feedback, e.g. toast). `input` is the bridge
+   *  payload, so a run_v3 envelope can be unwrapped to the tool the agent actually called. */
+  onExternalCall?: (tool: string, result: StudioToolResult, input: Record<string, unknown>) => void;
   /** This tab's project — sent on connect; the DO hands it to whoever we evict (close reason)
    *  so displacement stays PER-PROJECT: an unrelated-project tab taking the bridge must not
    *  stop this tab's autosave. */
@@ -30,6 +28,9 @@ export interface AgentBridgeOpts {
    *  project — the single-writer demotion signal: the workbench stops cloud autosave on it.
    *  (An empty/unknown evictor project counts as same-project: demote conservatively.) */
   onDisplaced?: () => void;
+  /** The bridge dropped unexpectedly ('lost': reconnecting in the background; external calls
+   *  fall back to the cloud copy meanwhile) or came back ('restored'). Not fired for eviction. */
+  onConnection?: (state: 'lost' | 'restored') => void;
 }
 
 export interface AgentBridgeHandle {
@@ -49,6 +50,7 @@ export function useAgentBridge(opts: AgentBridgeOpts): AgentBridgeHandle {
     let retries = 0;
     let everConnected = false;
     let queue: Promise<void> = Promise.resolve();
+    let lostNotified = false;
 
     const connect = () => {
       if (!alive) return;
@@ -63,6 +65,10 @@ export function useAgentBridge(opts: AgentBridgeOpts): AgentBridgeHandle {
       }
       ws = sock;
       sock.onopen = () => {
+        if (everConnected && lostNotified) {
+          lostNotified = false;
+          optsRef.current.onConnection?.('restored');
+        }
         everConnected = true;
         retries = 0;
       };
@@ -77,9 +83,9 @@ export function useAgentBridge(opts: AgentBridgeOpts): AgentBridgeHandle {
         if (!m.id || !m.tool) return;
         const { id, tool, input } = m as { id: string; tool: string; input?: Record<string, unknown> };
         queue = queue.then(async () => {
-          let out: StudioToolResult & { state?: string };
+          let out: StudioToolResult;
           try {
-            out = tool === 'get_state' ? { ok: true, state: optsRef.current.getState() } : await optsRef.current.runTool(tool, input ?? {});
+            out = await optsRef.current.runTool(tool, input ?? {});
           } catch (e) {
             out = { ok: false, error: e instanceof Error ? e.message : String(e) };
           }
@@ -88,7 +94,7 @@ export function useAgentBridge(opts: AgentBridgeOpts): AgentBridgeHandle {
           } catch {
             /* socket already dead, DO side will time out / fail */
           }
-          optsRef.current.onExternalCall?.(tool, out);
+          optsRef.current.onExternalCall?.(tool, out, input ?? {});
         });
       };
       sock.onclose = (ev) => {
@@ -109,6 +115,10 @@ export function useAgentBridge(opts: AgentBridgeOpts): AgentBridgeHandle {
           return;
         }
         if (!everConnected && retries >= 6) return; // never connected (not logged in, etc.): don't spin
+        if (everConnected && !lostNotified) {
+          lostNotified = true;
+          optsRef.current.onConnection?.('lost');
+        }
         setTimeout(connect, Math.min(30_000, 1_000 * 2 ** retries++));
       };
     };

@@ -54,6 +54,31 @@ describe('parseBlockResponse', () => {
     expect(innerHtml).toBe('<div>only html</div>');
     expect(timelineBody).toBe(FB.timelineBody);
   });
+
+  it('多个 html 块时取有实质内容的那个(跳过空的 <div></div> 前导块)', () => {
+    const text = 'note\n```html\n<div></div>\n```\n```html\n<div class="wrap"><style>#b .wrap{color:red}</style></div>\n```\n```js\ntl.from("#b .wrap",{autoAlpha:0},0)\n```';
+    const { innerHtml, timelineBody, note } = parseBlockResponse(text, FB);
+    expect(innerHtml).toContain('.wrap{color:red}');
+    expect(innerHtml).not.toBe('<div></div>');
+    expect(timelineBody).toBe('tl.from("#b .wrap",{autoAlpha:0},0)');
+    expect(note).toBe('note');
+  });
+
+  it('抽出 ```json 作为 editable-properties schema,三块互不干扰', () => {
+    const schema = '{"accent":{"type":"string","format":"color","title":"Accent","default":"#ff5a36"}}';
+    const text = `note\n\`\`\`html\n<div class="wrap"><style>#b .wrap{color:var(--p-accent)}</style></div>\n\`\`\`\n\`\`\`js\ntl.to("#b .wrap",{},0)\n\`\`\`\n\`\`\`json\n${schema}\n\`\`\``;
+    const { innerHtml, timelineBody, propsSchema, note } = parseBlockResponse(text, FB);
+    expect(innerHtml).toContain('var(--p-accent)');
+    expect(timelineBody).toBe('tl.to("#b .wrap",{},0)');
+    expect(propsSchema).toBe(schema);
+    expect(note).toBe('note');
+  });
+
+  it('无 json 块时 propsSchema 回退到 fb,两者都缺时为空串', () => {
+    const withFb = parseBlockResponse('```html\n<div>x</div>\n```', { ...FB, propsSchema: '{"n":{"type":"number","default":1}}' });
+    expect(withFb.propsSchema).toBe('{"n":{"type":"number","default":1}}');
+    expect(parseBlockResponse('```html\n<div>x</div>\n```', FB).propsSchema).toBe('');
+  });
 });
 
 describe('buildBlockPrompt', () => {
@@ -68,12 +93,13 @@ describe('buildBlockPrompt', () => {
     expect(last.indexOf('```html')).toBeLessThan(last.indexOf('```js'));
   });
 
-  it('在具体块提示末尾重复不可违反的 CSS 作用域审计', () => {
+  it('supplies a concrete scoped example instead of a repeated self-audit loop', () => {
     const prompt = buildBlockPrompt({
       block: { id: 'block_scope', kind: 'custom', innerHtml: '<div></div>', timelineBody: '' },
       instruction: 'make a metric',
     });
-    expect(prompt).toContain('MANDATORY FINAL CSS AUDIT');
-    expect(prompt).toContain('Every one must start with #block_scope');
+    expect(prompt).toContain('.label{');
+    expect(prompt).toContain('Studio scopes the stylesheet');
+    expect(prompt).not.toContain('MANDATORY FINAL CSS AUDIT');
   });
 });

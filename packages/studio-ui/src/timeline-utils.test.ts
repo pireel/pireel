@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isTimelineDensity,
+  TIMELINE_METRICS,
   packedPrimaryPlacement,
   quantizeTimelineFrameSecond,
   timelinePointerSecond,
@@ -79,5 +81,20 @@ describe('visibleStripTiles', () => {
     expect(visible[0]).toMatchObject({ left: 0, url: 'frame-0' });
     expect(visible[0]!.width).toBeCloseTo(87.88, 1);
     expect(visible.at(-1)!.left + visible.at(-1)!.width).toBeGreaterThan(290);
+  });
+});
+
+describe('TIMELINE_METRICS', () => {
+  it('compact is no taller than comfortable anywhere and still fits a chip label', () => {
+    const { comfortable, compact } = TIMELINE_METRICS;
+    for (const key of Object.keys(comfortable) as (keyof typeof comfortable)[]) {
+      expect(compact[key], key).toBeLessThanOrEqual(comfortable[key]);
+    }
+    // The music chip keeps its 14px label strip plus a visible waveform body.
+    expect(compact.audioRowH - 4 - 14).toBeGreaterThanOrEqual(8);
+    // Video cards keep a thumbnail above the wave strip.
+    expect(compact.sceneH - compact.scenePadT - compact.scenePadB - compact.sceneWaveH).toBeGreaterThanOrEqual(24);
+    expect(isTimelineDensity('compact')).toBe(true);
+    expect(isTimelineDensity('dense')).toBe(false);
   });
 });

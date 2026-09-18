@@ -7,6 +7,8 @@ import {
   migrateLegacyDraft,
   renameProject,
   serverSaveProject,
+  serverLoadProject,
+  loadDraft,
 } from './use-draft-persist';
 
 class MemoryStorage implements Storage {
@@ -36,7 +38,6 @@ describe('local project document persistence', () => {
     expect(stored.document).toMatchObject({ version: 2 });
     expect(stored).not.toHaveProperty('comp');
   });
-
   it('ignores a retired per-project V1 draft instead of recreating compatibility state', () => {
     const legacy = {
       id: 'old-project',
@@ -72,9 +73,7 @@ describe('local project document persistence', () => {
     expect(storage.getItem('studio:draft:legacy-single')).toBeNull();
   });
 
-  it('returns the reload signal when autosave meets an online schema upgrade', async () => {
-    const id = createProject(emptyComposition(), 'Native');
-    const stored = JSON.parse(storage.getItem(`studio:draft:${id}`)!) as { document: EditorDocumentV2 };
+  it('maps a write-blocked answer to migration-required and sends transactions, never a document', async () => {
     let requestBody: Record<string, unknown> | undefined;
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
       requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -84,128 +83,31 @@ describe('local project document persistence', () => {
       });
     }));
 
-    const result = await serverSaveProject(id, {
-      document: stored.document,
-      videoSig: null,
-      videoDurationSec: null,
-      coverThumb: null,
+    const result = await serverSaveProject('p1', {
+      documentSchemaVersion: 2,
+      knownVersion: 3,
+      transactions: [{ id: 'tx_0000000000000001', origin: 'user', ops: [{ op: 'command', input: { command: { type: 'canvas.patch', patch: { width: 720, height: 1280 } } } }] }],
     });
 
     expect(result).toBe('migration-required');
-    expect(requestBody).toMatchObject({ documentSchemaVersion: 2, document: { version: 2 } });
-    expect(requestBody).not.toHaveProperty('comp');
-    expect(requestBody).not.toHaveProperty('context');
+    expect(requestBody).toMatchObject({ documentSchemaVersion: 2, knownVersion: 3 });
+    expect(requestBody).not.toHaveProperty('document');
+    expect(requestBody).not.toHaveProperty('baseVersion');
   });
 
-  it('does not write the unchanged cloud snapshot back after project hydration', async () => {
-    const id = createProject(emptyComposition(), 'Hydrated');
+  it('returns the acknowledgement fields the sync layer needs', async () => {
+    const id = createProject(emptyComposition(), 'Acked');
     const stored = JSON.parse(storage.getItem(`studio:draft:${id}`)!) as { document: EditorDocumentV2 };
-    const context = sanitizeProjectContext(null);
-    cacheProjectLocally({
-      id,
-      title: 'Hydrated',
-      document: stored.document,
-      context,
-      videoSig: null,
-      videoDurationSec: null,
-      coverThumb: null,
-      version: 7,
-      updatedAt: Date.now(),
-    });
-    const fetchSpy = vi.fn();
-    vi.stubGlobal('fetch', fetchSpy);
+    const project = { id, title: 'Acked', document: stored.document, context: sanitizeProjectContext(null), videoSig: null, videoDurationSec: null, coverThumb: null, version: 8, updatedAt: Date.now() };
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ project, applied: ['tx_0000000000000001'], rejected: [], baseVersion: 7, documentHash: 'h' })));
 
-    const result = await serverSaveProject(id, {
-      // Matches the workbench payload: title is intentionally omitted because this save is not a
-      // rename. Omission must mean "preserve", not hash as null and create a metadata-only PUT.
-      document: stored.document,
-      context,
-      videoSig: null,
-      videoDurationSec: null,
-      coverThumb: null,
-    });
+    const result = await serverSaveProject(id, { documentSchemaVersion: 2, knownVersion: 7, title: 'Acked' });
 
-    expect(result).toBe('ok');
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ status: 'saved', version: 8, applied: ['tx_0000000000000001'], baseVersion: 7, documentHash: 'h', project: { version: 8 } });
   });
 
-  it('does not turn an untouched stale timeline into a local edit after a 409 rebase', async () => {
-    const id = createProject(emptyComposition(), 'Conflict-safe');
-    const stored = JSON.parse(storage.getItem(`studio:draft:${id}`)!) as { document: EditorDocumentV2 };
-    const baselineContext = sanitizeProjectContext(null);
-    cacheProjectLocally({
-      id,
-      title: 'Conflict-safe',
-      document: stored.document,
-      context: baselineContext,
-      videoSig: null,
-      videoDurationSec: null,
-      coverThumb: null,
-      version: 3,
-      updatedAt: Date.now(),
-    });
-    const remoteDocument = structuredClone(stored.document);
-    remoteDocument.canvas = { ...remoteDocument.canvas, width: remoteDocument.canvas.width + 1 };
-    const changedContext = sanitizeProjectContext({
-      schemaVersion: 3,
-      localAssets: [{
-        assetId: 'asset-1',
-        contentSig: 'teacher.mov:1:1',
-        sig: 'teacher.mov:1:1',
-        label: 'teacher.mov',
-        createdAt: 1,
-      }],
-    });
-    const requestBodies: Record<string, unknown>[] = [];
-    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      requestBodies.push(body);
-      if (requestBodies.length === 1) {
-        return new Response(JSON.stringify({
-          error: 'version_conflict',
-          project: {
-            id,
-            title: 'Conflict-safe',
-            document: remoteDocument,
-            context: baselineContext,
-            videoSig: null,
-            videoDurationSec: null,
-            coverThumb: null,
-            version: 4,
-            updatedAt: Date.now(),
-          },
-        }), { status: 409, headers: { 'content-type': 'application/json' } });
-      }
-      return new Response(JSON.stringify({
-        project: {
-          id,
-          title: 'Conflict-safe',
-          document: remoteDocument,
-          context: changedContext,
-          videoSig: null,
-          videoDurationSec: null,
-          coverThumb: null,
-          version: 5,
-          updatedAt: Date.now(),
-        },
-      }), { status: 200, headers: { 'content-type': 'application/json' } });
-    }));
-
-    const payload = {
-      document: stored.document,
-      context: changedContext,
-      videoSig: null,
-      videoDurationSec: null,
-      coverThumb: null,
-    };
-    await expect(serverSaveProject(id, payload)).resolves.toBe('conflict');
-    await expect(serverSaveProject(id, payload)).resolves.toBe('ok');
-
-    expect(requestBodies).toHaveLength(2);
-    expect(requestBodies[0]).not.toHaveProperty('document');
-    expect(requestBodies[0]).not.toHaveProperty('documentPatch');
-    expect(requestBodies[1]).not.toHaveProperty('document');
-    expect(requestBodies[1]).not.toHaveProperty('documentPatch');
-    expect(requestBodies[1].context ?? requestBodies[1].contextPatch).toBeDefined();
+  it('answers need-full for a section patch the server could not apply', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'need_full' }), { status: 422 })));
+    expect(await serverSaveProject('p1', { documentSchemaVersion: 2, knownVersion: 1, contextPatch: [], contextHash: 'x' })).toBe('need-full');
   });
 });

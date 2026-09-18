@@ -48,20 +48,12 @@ import {
   MAX_PPS,
   MIN_DUR,
   MIN_PPS,
-  ROW_GAP,
-  AUDIO_ROW_H,
-  ROW_H,
-  RULER_H,
-  SCENE_H,
-  SCENE_PAD_B,
-  SCENE_PAD_T,
   SHOT_GAP,
   TIMELINE_ITEM_EDGE_RADIUS,
   TIMELINE_ITEM_RADIUS,
+  TIMELINE_METRICS,
+  type TimelineDensity,
   TREATMENT_NAME,
-  VISUAL_SCENE_H,
-  VISUAL_SCENE_PAD_B,
-  VISUAL_SCENE_PAD_T,
   fmtTick,
   packedPrimaryPlacement,
   quantizeTimelineFrameSecond,
@@ -88,12 +80,8 @@ import type { TimelineInsertMode, TimelineMediaDropTarget, TimelineVisualDropTar
 
 export { DEFAULT_PPS, MAX_PPS, MIN_PPS } from './timeline-utils';
 
-/** Height of the audio strip drawn along the bottom of each scene card (the video's own sound). */
-const SCENE_WAVE_H = 18;
 /** Professional NLEs keep a permanent bottom drop zone instead of inserting a temporary dashed row. */
 const VISUAL_TRACK_DROP_ZONE_H = 38;
-const VIDEO_CLIP_H = SCENE_H - SCENE_PAD_T - SCENE_PAD_B;
-const VISUAL_VIDEO_CLIP_H = VISUAL_SCENE_H - VISUAL_SCENE_PAD_T - VISUAL_SCENE_PAD_B;
 
 export interface TimelineTrackState {
   trackId: string;
@@ -134,6 +122,8 @@ export interface TimelineBlockTrackTarget {
 
 interface StudioTimelineProps {
   comp: Composition;
+  /** Row density; compact is the agent view's default (see TIMELINE_METRICS). */
+  density?: TimelineDensity;
   /** Admin/debug-only Director Plan intervals. Omit for the ordinary editing timeline. */
   directorScenes?: readonly TimelineDirectorScene[];
   /** Canonical V2 placements. Omit only for legacy contiguous compositions. */
@@ -253,6 +243,7 @@ interface StudioTimelineProps {
   mainLive?: boolean;
   /** Per-asset missing-source UI: are this clip source's bytes reachable? Default live. */
   srcLive?: (src: string) => boolean;
+  loadingSourceClipIds?: ReadonlySet<string>;
   /** Shot boundary transition hotspot: click to pick a transition effect in the shared popover (cutSec = that boundary's edited-time). */
   onOpenTransition?: (cutSec: number, anchor: DOMRect) => void;
   /** Transition handles drag on both sides (symmetric): commit the new total duration (sec, <=4). */
@@ -270,11 +261,11 @@ export const StudioTimeline = memo(StudioTimelineImpl);
  *  statement about a track, and per-item silencing is already the level slider's bottom stop. */
 /** Missing-source strip: the shot stays editable (cut/trim/delete all cloud-backed), only its frames
  *  can't render on this device — hatched fill + label instead of a blank/misleading filmstrip. */
-function MissingStrip() {
+function MissingStrip({ loading = false }: { loading?: boolean }) {
   return (
     <div className="bg-panel-2 absolute inset-0 flex items-center justify-center gap-1 bg-[repeating-linear-gradient(45deg,rgba(148,163,184,0.14)_0_5px,transparent_5px_10px)]">
-      <VideoOff size={11} className="text-ink-4 shrink-0" />
-      <span className="text-ink-4 truncate text-[9px]">{t('workbench.srcMissing')}</span>
+      {loading ? <Loader2 size={11} className="text-ink-4 shrink-0 animate-spin" /> : <VideoOff size={11} className="text-ink-4 shrink-0" />}
+      <span className="text-ink-4 truncate text-[9px]">{t(loading ? 'workbench.srcLoading' : 'workbench.srcMissing')}</span>
     </div>
   );
 }
@@ -319,6 +310,7 @@ function VisibilityToggle({ hidden, onToggle }: { hidden: boolean; onToggle: () 
 
 function StudioTimelineImpl({
   comp,
+  density = 'comfortable',
   directorScenes,
   videoPlacements,
   timelineDurationSec,
@@ -388,7 +380,24 @@ function StudioTimelineImpl({
   onFilmstripDemandChange,
   mainLive = true,
   srcLive,
+  loadingSourceClipIds,
 }: StudioTimelineProps) {
+  // Lane geometry for the chosen density. Named like the module constants they replaced so every
+  // measurement below reads the same; the values change together when the user toggles density.
+  const M = TIMELINE_METRICS[density];
+  const ROW_H = M.rowH;
+  const AUDIO_ROW_H = M.audioRowH;
+  const SCENE_H = M.sceneH;
+  const VISUAL_SCENE_H = M.visualSceneH;
+  const SCENE_PAD_T = M.scenePadT;
+  const SCENE_PAD_B = M.scenePadB;
+  const VISUAL_SCENE_PAD_T = M.visualScenePadT;
+  const VISUAL_SCENE_PAD_B = M.visualScenePadB;
+  const ROW_GAP = M.rowGap;
+  const RULER_H = M.rulerH;
+  const SCENE_WAVE_H = M.sceneWaveH;
+  const VIDEO_CLIP_H = SCENE_H - SCENE_PAD_T - SCENE_PAD_B;
+  const VISUAL_VIDEO_CLIP_H = VISUAL_SCENE_H - VISUAL_SCENE_PAD_T - VISUAL_SCENE_PAD_B;
   const dur = timelineDurationSec ?? totalDuration(comp);
   const hasDirectorScenes = !!directorScenes?.length;
   const shots = useMemo(() => videoTrackShots(comp), [comp]);
@@ -2104,7 +2113,7 @@ function StudioTimelineImpl({
                           {shot.src ? (
                             <div className="pointer-events-none absolute inset-0">
                               {(() => {
-                                if (srcLive && !srcLive(shot.src)) return <MissingStrip />;
+                                if (srcLive && !srcLive(shot.src)) return <MissingStrip loading={loadingSourceClipIds?.has(shot.id)} />;
                                 const strip = (shot.src ? clipStrips?.[shot.src] : null) ?? [];
                                 if (!strip.length) return <div className="absolute inset-0 bg-gradient-to-r from-sky-500/35 to-sky-500/15" />;
                                 if (end < visibleRange.startSec || start > visibleRange.endSec) return null;
@@ -2602,7 +2611,7 @@ function StudioTimelineImpl({
                     )}
                     {clip.kind === 'video' && (
                       <div className="pointer-events-none absolute inset-0">
-                        {!liveSource ? <MissingStrip /> : visualStrip.length > 0 ? visibleStripTiles(
+                        {!liveSource ? <MissingStrip loading={loadingSourceClipIds?.has(clip.clipId)} /> : visualStrip.length > 0 ? visibleStripTiles(
                           visualStrip,
                           clip.sourceInSec,
                           clip.sourceOutSec,
@@ -3020,6 +3029,7 @@ function StudioTimelineImpl({
                 <AudioLane
                   key={lane.trackId ?? `audio-fallback-${index}`}
                   trackId={lane.trackId}
+                  rowH={AUDIO_ROW_H}
                   clips={lane.clips}
                   disabledIds={disabledClipIds}
                   dur={dur}

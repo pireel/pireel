@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildChatSystem } from './prompts';
+import { buildChatContextBlocks } from './prompts';
 import {
   STUDIO_AUTO_SKILL_ID,
   createStudioScenarioSkillRegistry,
@@ -88,16 +88,16 @@ describe('Studio scenario skill registry', () => {
 
   it('injects only the complete Markdown Skill supplied by the host', () => {
     const selected = parseStudioScenarioSkill(raw('long-to-shorts', 'Long video to short-form cuts'));
-    const system = buildChatSystem(null, undefined, selected);
+    const system = buildChatContextBlocks(null, undefined, selected);
     expect(system).toContain('<studio_skill id="long-to-shorts"');
     expect(system).toContain('# Long video to short-form cuts');
-    expect(buildChatSystem(null, undefined, null)).not.toContain('<studio_skill');
+    expect(buildChatContextBlocks(null, undefined, null)).not.toContain('<studio_skill');
   });
 
   it('keeps a selected Skill flexible instead of turning it into structured composition', () => {
     const selected = parseStudioScenarioSkill(raw('talking-head-edit', 'Talking-head edit'));
-    const system = buildChatSystem(null, undefined, selected);
-    expect(system).toContain('A selected Studio Skill is a rich Markdown expert playbook');
+    const system = buildChatContextBlocks(null, undefined, selected);
+    expect(system).toContain('use it as an expert editorial playbook');
     expect(system).toContain('not structured configuration, a fixed workflow, or a Motion Graphic bundle');
     expect(system).not.toContain('SPEECH-LED DRAFT PIPELINE');
   });

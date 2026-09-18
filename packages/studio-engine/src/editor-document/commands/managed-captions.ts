@@ -1,5 +1,5 @@
 import { captionBlocksFromAsr, type AsrSegment, type CueRef } from '../../build-blocks';
-import { displayCuesFromMappedSegs, mapTranscriptSegsToEdited } from '../../captions-relay';
+import { chooseWordOwner, displayCuesFromMappedSegs, mapTranscriptSegsToEdited } from '../../captions-relay';
 import { positiveDurationFrames, secondsToTimelineFrames, timelineFramesToSeconds } from '../time';
 import type {
   AudioTimelineClip,
@@ -284,6 +284,23 @@ function selectedSpeechClips(document: EditorDocumentV2, selection: CaptionSourc
   return clip ? transcriptBearingClips(document, [clip]) : [];
 }
 
+/** The selected speech clips the audience actually hears: a muted track or a clip-muted take is
+ * outside the mix, and a component timed to words nobody hears is timed to nothing. Caption
+ * selection itself is not filtered here: captioning a muted take is the user's explicit choice. */
+function audibleSpeechClips(document: EditorDocumentV2, selection: CaptionSourceSelection): SpeechTimelineClip[] {
+  const mutedTracks = new Set(document.timeline.tracks.filter((track) => track.muted).map((track) => track.id));
+  const trackOfClip = new Map(document.timeline.tracks.flatMap((track) => track.clips.map((clip) => [clip.id, track.id] as const)));
+  return selectedSpeechClips(document, selection)
+    .filter((clip) => !clipAudioMuted(clip) && !mutedTracks.has(trackOfClip.get(clip.id) ?? ''));
+}
+
+/** The transcript the caption layer currently reads: the bound source's first transcript-bearing
+ * clip (explicit track or clip selection), else the dominant speech lane's. Null with no speech. */
+export function boundCaptionSourceAssetId(document: EditorDocumentV2): string | null {
+  const selection = document.semantics.managedCaptionSource ?? { mode: 'auto' as const };
+  return selectedSpeechClips(document, selection)[0]?.assetId ?? null;
+}
+
 /** Source seconds mapped through native clip placement, including explicit gaps and retiming. */
 function sourceRange(clip: SpeechTimelineClip, fps: number): { start: number; end: number } {
   const speed = clip.kind === 'audio' && Number.isFinite(clip.properties.speed) && clip.properties.speed! > 0
@@ -323,7 +340,7 @@ export function spokenTimelineBeats(
   const windowStart = Math.max(0, startSec);
   const windowEnd = windowStart + durationSec;
   const selection = document.semantics.managedCaptionSource ?? { mode: 'auto' as const };
-  const beats = selectedSpeechClips(document, selection).flatMap((clip) => {
+  const beats = audibleSpeechClips(document, selection).flatMap((clip) => {
     const range = sourceRange(clip, document.canvas.fps);
     return (document.semantics.transcripts[clip.assetId] ?? []).flatMap((segment) => {
       const text = segment.text?.trim();
@@ -351,6 +368,33 @@ export function spokenTimelineBeats(
     seen.add(key);
     return true;
   });
+}
+
+/**
+ * The speech clip playing at a timeline second under the managed caption source selection, with
+ * the source-clock second it maps to. A moment in a gap resolves to the nearest selected clip so a
+ * component placed over silence still describes the speech around it. Null when no selected clip
+ * carries a transcript.
+ */
+export function spokenSourceAtTimelineSecond(
+  document: EditorDocumentV2,
+  atSec: number,
+): { clip: SpeechTimelineClip; sourceSec: number; distanceSec: number } | null {
+  if (!Number.isFinite(atSec)) return null;
+  const fps = document.canvas.fps;
+  const selection = document.semantics.managedCaptionSource ?? { mode: 'auto' as const };
+  let best: { clip: SpeechTimelineClip; sourceSec: number; distanceSec: number } | null = null;
+  for (const clip of audibleSpeechClips(document, selection)) {
+    if (!(document.semantics.transcripts[clip.assetId]?.length)) continue;
+    const startSec = timelineFramesToSeconds(clip.startFrame, fps);
+    const endSec = timelineFramesToSeconds(clip.startFrame + clip.durationFrames, fps);
+    const distanceSec = atSec < startSec ? startSec - atSec : atSec > endSec ? atSec - endSec : 0;
+    if (best && distanceSec >= best.distanceSec) continue;
+    const range = sourceRange(clip, fps);
+    const progress = endSec > startSec ? Math.min(1, Math.max(0, (atSec - startSec) / (endSec - startSec))) : 0;
+    best = { clip, sourceSec: range.start + progress * (range.end - range.start), distanceSec };
+  }
+  return best;
 }
 
 function priorSourceKeys(document: EditorDocumentV2, clips: readonly TimelineClip[]): Map<string, string> {
@@ -432,6 +476,18 @@ export function relayManagedCaptionTrack(
   const firstSpeechAssetId = speechClips[0]?.assetId;
   const sourceKeys = priorSourceKeys(document, track.clips);
   const assetBySourceKey = new Map<string, string>();
+  // A cut inside a word leaves two clips each playing a piece of it. Exactly one clip captions
+  // the word: the one playing its midpoint, else the one playing most of it (see chooseWordOwner).
+  const wordOwner = new Map<string, string>();
+  for (const assetId of new Set(speechClips.map((clip) => clip.assetId))) {
+    const ranges = speechClips.filter((clip) => clip.assetId === assetId).map((clip) => ({ ...sourceRange(clip, document.canvas.fps), clipId: clip.id }));
+    (document.semantics.transcripts[assetId] ?? []).forEach((segment, segmentIndex) => {
+      (segment.words ?? []).forEach((word, wordIndex) => {
+        const owner = chooseWordOwner(ranges, word);
+        if (owner) wordOwner.set(`${assetId}:${segmentIndex}:${wordIndex}`, owner.clipId);
+      });
+    });
+  }
   const mapped = speechClips.flatMap((clip) => {
     const assetId = clip.assetId;
     const segments = document.semantics.transcripts[assetId] ?? [];
@@ -440,7 +496,7 @@ export function relayManagedCaptionTrack(
     const range = sourceRange(clip, document.canvas.fps);
     return (segments as AsrSegment[]).flatMap((segment, segmentIndex) => {
       const sourceWords = (segment.words ?? []).map((word, wordIndex) => ({ ...word, si: wordIndex }));
-      const words = sourceWords.filter((word) => word.end > range.start && word.start < range.end);
+      const words = sourceWords.filter((word) => wordOwner.get(`${assetId}:${segmentIndex}:${word.si}`) === clip.id);
       if (sourceWords.length && !words.length) return [];
       if (!sourceWords.length && (segment.end <= range.start || segment.start >= range.end)) return [];
       return mapTranscriptSegsToEdited(

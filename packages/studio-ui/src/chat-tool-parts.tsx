@@ -7,6 +7,7 @@ import { Check, X, Loader2 } from 'lucide-react';
 import { type StudioToolDef, type StudioToolResult } from '@pireel/studio-engine/prompts';
 import { studioToolDefFor } from './v3-tool-defs';
 import type { Composition } from '@pireel/studio-engine/composition';
+import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 import { useToolProgress } from './tool-progress';
 import { CutListCard, cutRowsOf } from './chat-cut-list';
 import { GraphicsPreviewBody } from './chat-graphics-card';
@@ -54,7 +55,7 @@ export interface ToolPartLike {
 }
 
 /** Tools whose receipt shows the component(s) they produced/changed as a live preview strip. */
-const PREVIEW_TOOLS = new Set(['add_block', 'edit_block', 'duplicate_block']);
+const PREVIEW_TOOLS = new Set(['apply_component']);
 
 function toolIdOf(part: ToolPartLike): string {
   if (part.type === 'dynamic-tool') return part.toolName ?? '';
@@ -96,7 +97,7 @@ export function toolStatus(part: ToolPartLike): { kind: 'running' | 'done' | 'er
   return { kind: 'running', text: t('chatGen.running') };
 }
 
-function ToolBadge({ def, part, children }: { def: StudioToolDef; part: ToolPartLike; children?: React.ReactNode }) {
+function ToolBadge({ def, part, children, quiet }: { def: StudioToolDef; part: ToolPartLike; children?: React.ReactNode; quiet?: boolean }) {
   const st = toolStatus(part);
   const prog = useToolProgress(def.id);
   const live = st.kind === 'running' ? prog?.text ?? null : null;
@@ -109,7 +110,8 @@ function ToolBadge({ def, part, children }: { def: StudioToolDef; part: ToolPart
       <Check size={11} strokeWidth={2.2} />
     );
   const text = live ?? st.text;
-  // Same card language as ToolCard: header row (icon chip + name + status icon), result text on its own full-width body row (wraps)
+  // Same card language as ToolCard: header row (icon chip + name + status icon), result text on its own full-width body row (wraps).
+  // quiet: the done result already renders its own body (an asset grid, an icon set) — suppress the redundant summary line, same as ToolCard. Running progress and errors always show.
   return (
     <div className="border-line bg-panel-2 w-full overflow-hidden rounded-md border">
       <div className="flex items-center gap-2 px-2.5 py-1.5">
@@ -117,7 +119,7 @@ function ToolBadge({ def, part, children }: { def: StudioToolDef; part: ToolPart
         <span className="text-ink-2 shrink-0 text-[12px] font-semibold">{t(def.label)}</span>
         <span className={`ml-auto shrink-0 ${st.kind === 'error' ? 'text-destructive' : 'text-ink-3'}`}>{icon}</span>
       </div>
-      {text && (
+      {text && !(quiet && st.kind === 'done') && (
         <div className={`border-line/70 break-words border-t px-2.5 py-1.5 text-[12px] leading-relaxed ${st.kind === 'error' ? 'text-destructive' : 'text-ink-3'}`}>
           {text}
         </div>
@@ -133,13 +135,13 @@ function ToolBadge({ def, part, children }: { def: StudioToolDef; part: ToolPart
  * running = spinner + elapsed/remaining + stage text (stream note > progress text > busyText) + progress bar
  * (with frac: determinate, ETA extrapolated by rate; without: indeterminate slider + historical EMA for ETA).
  */
-function ToolCard({ def, part, children }: { def: StudioToolDef; part: ToolPartLike; children?: React.ReactNode }) {
+function ToolCard({ def, part, children, quiet }: { def: StudioToolDef; part: ToolPartLike; children?: React.ReactNode; quiet?: boolean }) {
   const st = toolStatus(part);
   const running = st.kind === 'running';
   const prog = useToolProgress(def.id);
   const live = running ? prog : null;
   const instruction = typeof part.input?.instruction === 'string' ? (part.input.instruction as string) : '';
-  const contextLabel = def.id === 'analyze_visual' ? analyzeVisualSourceLabel(part) : instruction;
+  const contextLabel = def.id === 'inspect_media' ? analyzeVisualSourceLabel(part) : instruction;
 
   // Elapsed (clock starts once running is observed, ticks every 0.5s); on completion, record into the historical EMA
   const startRef = useRef<number | null>(null);
@@ -186,8 +188,11 @@ function ToolCard({ def, part, children }: { def: StudioToolDef; part: ToolPartL
           {running && <span className="tabular-nums">{timeText || t('chatGen.starting')}</span>}
         </span>
       </div>
-      {/* Done/failed: result text on its own full-width body row (same spec as the badge), wraps instead of hanging in the right column */}
-      {!running && st.text && (
+      {/* Done/failed: result text on its own full-width body row (same spec as the badge), wraps instead of hanging in the right column.
+          Skip it when the summary just repeats the tool label, and (quiet) when the card already shows a
+          result — a generated image, a placed asset, an audio player. The media IS the receipt; a "done"
+          summary under it is noise. Errors always show. */}
+      {!running && st.text && st.text !== t(def.label) && !(quiet && st.kind !== 'error') && (
         <div className={`border-line/70 break-words border-t px-2.5 py-1.5 text-[12px] leading-relaxed ${st.kind === 'error' ? 'text-destructive' : 'text-ink-3'}`}>
           {st.text}
         </div>
@@ -232,7 +237,32 @@ function ToolCard({ def, part, children }: { def: StudioToolDef; part: ToolPartL
   );
 }
 
-export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocate?: (sec: number) => void; getComp?: () => Composition; generation?: GenerationCardActions }): React.ReactNode {
+/** get_icons receipt: the inline SVGs it fetched (Lucide + Simple Icons resolved from the server-side
+ *  catalog, never user content) as a small grid, so the user sees which glyphs the model pulled. */
+function IconsBody({ output }: { output: unknown }) {
+  const data = (output as StudioToolResult | undefined)?.data as { icons?: Array<{ name?: unknown; svg?: unknown }> } | undefined;
+  const icons = Array.isArray(data?.icons)
+    ? data.icons.filter((i): i is { name: string; svg: string } => !!i && typeof i.name === 'string' && typeof i.svg === 'string')
+    : [];
+  if (!icons.length) return null;
+  return (
+    <div className="border-line/70 border-t p-2">
+      <div className="grid grid-cols-6 gap-1.5">
+        {icons.map((ic) => (
+          <div
+            key={ic.name}
+            title={ic.name}
+            className="border-line/70 bg-panel text-ink-2 grid aspect-square place-items-center rounded border p-2 [&_svg]:h-full [&_svg]:w-full"
+            // Catalog glyphs (Lucide / Simple Icons) resolved server-side from a fixed catalog — not user input.
+            dangerouslySetInnerHTML={{ __html: ic.svg }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocate?: (sec: number) => void; getComp?: () => Composition; generation?: GenerationCardActions; localAssetIndex?: readonly LocalAssetIndexEntry[]; projectId?: string }): React.ReactNode {
   const id = toolIdOf(part);
   const def = studioToolDefFor(id);
   if (!def) return null;
@@ -248,15 +278,13 @@ export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocat
     && (part.state === 'input-available' || part.state === 'input-streaming')) {
     return <div key={key}><ApprovalCard part={part} /></div>;
   }
-  // export_video (legacy) / export action:start (v3): parks on a one-click card with adaptive specs,
-  // then shows the started confirmation. The runner parks the SAME way under both names, so the
-  // card must render for both — without it the turn waits on a click nobody can make.
-  // export action:status is the track_export poll and stays a plain badge.
-  const isExportStart = id === 'export_video'
-    || (id === 'export' && (part.input as { action?: unknown } | undefined)?.action !== 'status');
+  // export action:start parks on a one-click card with adaptive specs, then shows the started
+  // confirmation — without the card the turn waits on a click nobody can make.
+  // export action:status is the progress poll and stays a plain badge.
+  const isExportStart = id === 'export' && (part.input as { action?: unknown } | undefined)?.action !== 'status';
   if (isExportStart && part.state !== 'output-error') return <div key={key}><ExportSettingsCard part={part} /></div>;
   // Narration cuts get their own receipt: a per-cut list with click-to-seek, not one collapsed line
-  if (id === 'cut_narration' && part.state === 'output-available') {
+  if (id === 'remove_words' && part.state === 'output-available') {
     const rows = cutRowsOf(part.output);
     const out = part.output as StudioToolResult | undefined;
     if (rows && out?.ok !== false) return <div key={key}><CutListCard summary={out?.summary ?? ''} rows={rows} onLocate={opts?.onLocate} /></div>;
@@ -265,10 +293,13 @@ export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocat
   const preview =
     PREVIEW_TOOLS.has(id) && opts?.getComp ? <GraphicsPreviewBody toolId={id} part={part} getComp={opts.getComp} /> : null;
   const assetResults = id === 'search_assets' && part.state === 'output-available'
-    ? <AssetSearchResultsBody output={part.output} />
+    ? <AssetSearchResultsBody output={part.output} localAssetIndex={opts?.localAssetIndex} projectId={opts?.projectId} />
     : null;
   const speechAsset = id === 'generate_speech' && part.state === 'output-available'
     ? <SpeechAssetBody output={part.output} />
+    : null;
+  const iconsResults = id === 'get_icons' && part.state === 'output-available'
+    ? <IconsBody output={part.output} />
     : null;
   // Generation receipts show the result itself (progress while the hosted job runs), plus the
   // host's top-up card when the generation was refused for credits.
@@ -283,18 +314,21 @@ export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocat
     : [];
   const generation = jobIds.length && opts?.generation
     ? <GenerationJobsBody ids={jobIds} kind={id === 'generate_video' ? 'video' : 'image'} prompt={promptArg} actions={opts.generation} />
-    : (id === 'generate_audio' || id === 'generate_music' || id === 'generate_sfx') && part.state === 'output-available' && opts?.generation
+    : id === 'generate_audio' && part.state === 'output-available' && opts?.generation
       ? <GeneratedAudioBody output={part.output} prompt={promptArg} actions={opts.generation} />
       : null;
-  const body = shortfall ?? preview ?? assetResults ?? speechAsset ?? generation;
+  const body = shortfall ?? preview ?? assetResults ?? speechAsset ?? iconsResults ?? generation;
+  // A card that already renders a result (media tile, placed asset, audio player, icon grid) is its own
+  // receipt — suppress the redundant "done" summary line under it. Not shortfall: that credits card wants its text.
+  const quiet = !!(preview ?? assetResults ?? speechAsset ?? iconsResults ?? generation);
   return (
     <div key={key}>
       {def.kind === 'card' ? (
-        <ToolCard def={def} part={part}>
+        <ToolCard def={def} part={part} quiet={quiet}>
           {body}
         </ToolCard>
       ) : (
-        <ToolBadge def={def} part={part}>
+        <ToolBadge def={def} part={part} quiet={quiet}>
           {body}
         </ToolBadge>
       )}
@@ -302,13 +336,13 @@ export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocat
   );
 }
 
-/** Presentation-only fallback for legacy/model-emitted scalar framing calls. New calls should use
- * set_shot_framing.updates[], but persisted conversations may already contain dozens of adjacent
- * receipts; summarize such a run as one card without rewriting the stored AI SDK message. */
+/** Presentation-only grouping for adjacent framing calls. A batch belongs in one
+ * set_clip_framing.items[] call, but a model may still emit one call per clip; summarize such a run
+ * as one card without rewriting the stored AI SDK message. */
 export function renderToolPartGroup(
   parts: ToolPartLike[],
   key: string,
-  opts?: { onLocate?: (sec: number) => void; getComp?: () => Composition },
+  opts?: { onLocate?: (sec: number) => void; getComp?: () => Composition; localAssetIndex?: readonly LocalAssetIndexEntry[]; projectId?: string },
 ): React.ReactNode {
   if (parts.length <= 1) return parts[0] ? renderToolPart(parts[0], key, opts) : null;
   const statuses = parts.map(toolStatus);

@@ -8,6 +8,8 @@
  * caption changes, and notes telling the agent exactly when to re-read. Pure; no I/O.
  */
 import { webFontCatalog } from '../font-library';
+import { componentSchemaOf, componentValuesView, type ComponentValueType } from '../component-schema';
+import { clipPropertyDefaults, effectiveAudioClipProperties } from './clip-properties';
 
 import type {
   EditorDocumentV2,
@@ -30,7 +32,7 @@ export interface V3ClipView {
   audio?: { clipId: string; volumeDb?: number; mute?: boolean };
   linkGroupId?: string;
   enabled?: false;
-  component?: { componentId?: string; box?: unknown };
+  component?: { componentId?: string; box?: unknown; props?: Array<{ key: string; type: ComponentValueType; value: unknown }> };
   [property: string]: unknown;
 }
 
@@ -98,7 +100,9 @@ function stripDefaults(value: Record<string, unknown> | undefined, defaults: Rec
   return out;
 }
 
-const NARRATIVE_DEFAULTS: Record<string, unknown> = { treatment: 'full', speed: 1, volumeDb: 0, audioMuted: false, treatSize: 50, treatCrop: 50 };
+// Read-back defaults come from the clip capability table, the one declaration of what each kind carries.
+const NARRATIVE_DEFAULTS = clipPropertyDefaults('narrative');
+const MEDIA_DEFAULTS = clipPropertyDefaults('media');
 
 const isZero = (value: unknown) => value === undefined || value === 0;
 /** Identity layer geometry (no crop, no rounding, unit transform) is the default and stays out of receipts. */
@@ -122,14 +126,48 @@ function stripIdentityGeometry(view: V3ClipView, mediaFraming: unknown): void {
   const props = view as unknown as Record<string, unknown>;
   if ('preciseFraming' in props && isIdentityPreciseFraming(props.preciseFraming)) delete props.preciseFraming;
 }
-const AUDIO_DEFAULTS: Record<string, unknown> = { speed: 1, muted: false, fadeInSec: 0, fadeOutSec: 0 };
+const AUDIO_DEFAULTS = clipPropertyDefaults('audio', 'audio');
 
 function isManagedCaptionTrack(document: EditorDocumentV2, track: EditorTrack): boolean {
   return track.id === document.semantics.managedCaptionTrackId || track.role === 'managedCaptions';
 }
 
+/** The sound fields in the vocabulary set_clip_properties writes them: `mute` and `fades {in, out}`
+ * in frames, never the storage names (`audioMuted` / `muted`, `audioFadeInSec` / `fadeInSec`), so a
+ * value an agent wrote reads back under the name it wrote. */
+function soundView(properties: Record<string, unknown>, fps: number): Record<string, unknown> {
+  const { audioMuted, muted, audioFadeInSec, fadeInSec, audioFadeOutSec, fadeOutSec, ...rest } = properties;
+  const out: Record<string, unknown> = rest;
+  if (audioMuted === true || muted === true) out.mute = true;
+  const inSec = Number(audioFadeInSec ?? fadeInSec ?? 0);
+  const outSec = Number(audioFadeOutSec ?? fadeOutSec ?? 0);
+  if (inSec > 0 || outSec > 0) out.fades = { in: Math.round(inSec * fps), out: Math.round(outSec * fps) };
+  return out;
+}
+
+/** An animated push-in as set_clip_framing wrote it: timeline frame in, frames long. */
+function zoomView(zoom: unknown, clipStartFrame: number, fps: number): Record<string, unknown> | undefined {
+  const z = zoom as { preset?: string; atSec?: number; durationSec?: number; scale?: number; anchorX?: number; anchorY?: number } | undefined;
+  if (!z || !z.preset) return undefined;
+  return {
+    preset: z.preset,
+    atFrame: clipStartFrame + Math.round((z.atSec ?? 0) * fps),
+    ...(z.durationSec != null ? { durationFrames: Math.round(z.durationSec * fps) } : {}),
+    scale: z.scale,
+    ...(z.anchorX != null ? { anchorX: z.anchorX } : {}),
+    ...(z.anchorY != null ? { anchorY: z.anchorY } : {}),
+  };
+}
+
+/** The cut transition into a story-spine clip, as add_transition wrote it. */
+function transitionView(transIn: unknown, fps: number): Record<string, unknown> | undefined {
+  const t = transIn as { effect?: string; durationSec?: number; direction?: string } | undefined;
+  if (!t || !t.effect) return undefined;
+  return { effect: t.effect, durationFrames: Math.round((t.durationSec ?? 1) * fps), ...(t.direction ? { direction: t.direction } : {}) };
+}
+
 /** Render one clip in the v3 shape. Linked audio partners are folded by the caller. */
-export function renderV3Clip(clip: TimelineClip, trackId: string): V3ClipView {
+export function renderV3Clip(clip: TimelineClip, trackId: string, trackRole?: string, fps = 30): V3ClipView {
   const view: V3ClipView = { id: clip.id, kind: clip.kind, trackId, frames: [clip.startFrame, clip.startFrame + clip.durationFrames] };
   if (!clip.enabled) view.enabled = false;
   if (clip.linkGroupId) view.linkGroupId = clip.linkGroupId;
@@ -138,8 +176,12 @@ export function renderV3Clip(clip: TimelineClip, trackId: string): V3ClipView {
       view.assetId = clip.assetId;
       view.source = [round3(clip.sourceInSec), round3(clip.sourceOutSec)];
       if (clip.box) view.box = clip.box;
-      const { transIn: _transIn, ...rest } = (clip.properties ?? {}) as Record<string, unknown>;
-      Object.assign(view, stripDefaults(rest, NARRATIVE_DEFAULTS));
+      const { transIn, zoom, ...rest } = (clip.properties ?? {}) as Record<string, unknown>;
+      Object.assign(view, soundView(stripDefaults(rest, NARRATIVE_DEFAULTS), fps));
+      const transitionIn = transitionView(transIn, fps);
+      if (transitionIn) view.transitionIn = transitionIn;
+      const zoomed = zoomView(zoom, clip.startFrame, fps);
+      if (zoomed) view.zoom = zoomed;
       stripIdentityGeometry(view, clip.mediaFraming);
       break;
     }
@@ -147,11 +189,13 @@ export function renderV3Clip(clip: TimelineClip, trackId: string): V3ClipView {
       view.assetId = clip.assetId;
       view.source = [round3(clip.sourceInSec), round3(clip.sourceOutSec)];
       if (clip.box) view.box = clip.box;
-      if (clip.fit && clip.fit !== 'cover') view.fit = clip.fit;
-      if (clip.opacity !== undefined && clip.opacity !== 1) view.opacity = clip.opacity;
-      if (clip.anchorX !== undefined && clip.anchorX !== 0.5) view.anchorX = clip.anchorX;
-      if (clip.anchorY !== undefined && clip.anchorY !== 0.5) view.anchorY = clip.anchorY;
-      if (clip.video) Object.assign(view, stripDefaults(clip.video as Record<string, unknown>, NARRATIVE_DEFAULTS));
+      Object.assign(view, stripDefaults({ fit: clip.fit, opacity: clip.opacity, anchorX: clip.anchorX, anchorY: clip.anchorY }, MEDIA_DEFAULTS));
+      if (clip.video) {
+        const { zoom, ...video } = clip.video as Record<string, unknown>;
+        Object.assign(view, soundView(stripDefaults(video, MEDIA_DEFAULTS), fps));
+        const zoomed = zoomView(zoom, clip.startFrame, fps);
+        if (zoomed) view.zoom = zoomed;
+      }
       stripIdentityGeometry(view, clip.mediaFraming);
       if (clip.keyframes && (clip.keyframes.box?.length || clip.keyframes.opacity?.length)) view.keyframes = clip.keyframes;
       break;
@@ -159,8 +203,12 @@ export function renderV3Clip(clip: TimelineClip, trackId: string): V3ClipView {
     case 'graphic': {
       if (clip.assetId) view.assetId = clip.assetId;
       view.anchor = clip.anchor;
-      const block = clip.block as unknown as { templateId?: string; box?: unknown; slots?: unknown };
+      const block = clip.block as unknown as { templateId?: string; box?: unknown; slots?: { innerHtml?: unknown; props?: unknown } };
       view.component = { ...(block.templateId ? { componentId: block.templateId } : {}), ...(block.box ? { box: block.box } : {}) };
+      // Editable properties (registered and bespoke alike): keys, types and effective values, so
+      // set_clip_properties.props needs no other lookup.
+      const editable = block.templateId ? componentSchemaOf({ templateId: block.templateId, slots: (block.slots ?? {}) as Record<string, unknown> }) : null;
+      if (editable) view.component.props = componentValuesView(editable);
       break;
     }
     case 'caption': {
@@ -173,7 +221,9 @@ export function renderV3Clip(clip: TimelineClip, trackId: string): V3ClipView {
       if (clip.sourceOutSec !== undefined) view.source = [round3(clip.sourceInSec), round3(clip.sourceOutSec)];
       else if (clip.sourceInSec) view.sourceInSec = round3(clip.sourceInSec);
       view.anchor = clip.anchor;
-      Object.assign(view, stripDefaults((clip.properties ?? {}) as Record<string, unknown>, AUDIO_DEFAULTS));
+      // Effective values (lane fade defaults applied), then only what differs from the audio defaults.
+      const effective = effectiveAudioClipProperties((clip.properties ?? {}) as Record<string, unknown>, trackRole);
+      Object.assign(view, soundView(stripDefaults(effective.properties, AUDIO_DEFAULTS), fps));
       break;
     }
   }
@@ -260,7 +310,7 @@ export function renderV3State(
         if (partners.length === 1 && visual.length === 1) { folded.add(clip.id); continue; }
       }
       if (!inWindow(clip)) continue;
-      const rendered = renderV3Clip(clip, track.id);
+      const rendered = renderV3Clip(clip, track.id, track.role, document.canvas.fps);
       if (clip.kind !== 'audio' && clip.linkGroupId) {
         const partner = (audioByGroup.get(clip.linkGroupId) ?? [])[0];
         if (partner && partner.kind === 'audio') {
@@ -321,10 +371,10 @@ export function documentDelta(before: EditorDocumentV2, after: EditorDocumentV2)
   const removedTracks = before.timeline.tracks.filter((track) => !afterTracks.has(track.id));
   if (removedTracks.length) delta.removedTrackIds = removedTracks.map((track) => track.id);
 
-  const beforeClips = new Map<string, { clip: TimelineClip; trackId: string; caption: boolean }>();
-  const afterClips = new Map<string, { clip: TimelineClip; trackId: string; caption: boolean }>();
-  for (const track of before.timeline.tracks) for (const clip of track.clips) beforeClips.set(clip.id, { clip, trackId: track.id, caption: isManagedCaptionTrack(before, track) });
-  for (const track of after.timeline.tracks) for (const clip of track.clips) afterClips.set(clip.id, { clip, trackId: track.id, caption: isManagedCaptionTrack(after, track) });
+  const beforeClips = new Map<string, { clip: TimelineClip; trackId: string; trackRole?: string; caption: boolean }>();
+  const afterClips = new Map<string, { clip: TimelineClip; trackId: string; trackRole?: string; caption: boolean }>();
+  for (const track of before.timeline.tracks) for (const clip of track.clips) beforeClips.set(clip.id, { clip, trackId: track.id, trackRole: track.role, caption: isManagedCaptionTrack(before, track) });
+  for (const track of after.timeline.tracks) for (const clip of track.clips) afterClips.set(clip.id, { clip, trackId: track.id, trackRole: track.role, caption: isManagedCaptionTrack(after, track) });
 
   // captions: one aggregate, never enumerated cues
   const caps0 = [...beforeClips.values()].filter((entry) => entry.caption).map((entry) => entry.clip);
@@ -359,7 +409,7 @@ export function documentDelta(before: EditorDocumentV2, after: EditorDocumentV2)
     const { startFrame: s1, ...rest1 } = next.clip as unknown as Record<string, unknown>;
     const contentChanged = entry.trackId !== next.trackId || JSON.stringify(rest0) !== JSON.stringify(rest1);
     if (contentChanged) {
-      touched.push(renderV3Clip(next.clip, next.trackId));
+      touched.push(renderV3Clip(next.clip, next.trackId, next.trackRole, after.canvas.fps));
       const was = sourceOf(entry.clip);
       const now = sourceOf(next.clip);
       // A trimmed clip lost part of its source: report the span that left so it can be re-inserted forward.
@@ -381,12 +431,12 @@ export function documentDelta(before: EditorDocumentV2, after: EditorDocumentV2)
   }
   for (const [id, entry] of afterClips) {
     if (entry.caption || beforeClips.has(id)) continue;
-    touched.push(renderV3Clip(entry.clip, entry.trackId));
+    touched.push(renderV3Clip(entry.clip, entry.trackId, entry.trackRole, after.canvas.fps));
   }
   const shifted: V3Delta['shifted'] = [];
   for (const group of shiftGroups.values()) {
     if (group.count >= V3_SHIFT_RULE_MIN) shifted.push({ trackId: group.trackId, fromFrame: group.fromFrame, byFrames: group.byFrames, count: group.count });
-    else for (const id of group.ids) { const entry = afterClips.get(id)!; touched.push(renderV3Clip(entry.clip, entry.trackId)); }
+    else for (const id of group.ids) { const entry = afterClips.get(id)!; touched.push(renderV3Clip(entry.clip, entry.trackId, entry.trackRole, after.canvas.fps)); }
   }
   touched.sort((left, right) => left.frames[0] - right.frames[0]);
   if (touched.length) {

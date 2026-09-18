@@ -1,3 +1,4 @@
+import { compileComponentStyles } from './component-styles';
 /**
  * Assembly layer: stitch a Composition into a complete Hyperframes document (preview iframe and export share the same source).
  * Depends on the template registry being ready — always go through the './composition' barrel externally (it imports './templates' first).
@@ -13,6 +14,8 @@ import {
   isSentenceCaption,
   IDENTITY_MEDIA_FRAMING,
   mediaFramingTransformVars,
+  zoomAnchorShiftPercent,
+  zoomMoves,
   n,
   pct,
   renderBlock,
@@ -27,6 +30,7 @@ import { compositionVisualLayerPlan, type SupplementalVisualMediaClip } from './
 import { BLOCK_TEXT_BASELINE_PX } from './block-typography';
 import { webFontStylesheetUrls } from './font-library';
 import { displayFontContext, displayTextFontCss } from './display-text-presets';
+import { blockPropsSchema, componentPropsAttrs, componentPropsFontIds, componentPropsInlineCss, parseComponentProps, resolveComponentProps } from './component-props';
 
 /* ============================ Assembly ============================ */
 
@@ -498,7 +502,9 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
       cs && isSentenceCaption(b)
         ? { ...capBase, slots: { ...capBase.slots, preset: cs.preset, yPct: cs.yPct, xPct: cs.xPct ?? 50, wPct: cs.wPct ?? 56, scale: cs.scale, ...(cs.hPct ? { hPct: cs.hPct } : {}), ...(cs.color != null ? { color: cs.color } : {}), ...(cs.bg !== undefined ? { bg: cs.bg } : {}), ...(cs.bold != null ? { bold: cs.bold } : {}), ...(cs.font != null ? { font: cs.font } : {}), ...(cs.accentColor != null ? { accentColor: cs.accentColor } : {}), ...(cs.strokeColor != null ? { strokeColor: cs.strokeColor } : {}), ...(cs.strokeWidth != null ? { strokeWidth: cs.strokeWidth } : {}), ...(cs.sub?.preset != null ? { subPreset: cs.sub.preset } : {}), ...(cs.sub?.color != null ? { subColor: cs.sub.color } : {}), ...(cs.sub?.bg !== undefined ? { subBg: cs.sub.bg } : {}), ...(cs.sub?.bold != null ? { subBold: cs.sub.bold } : {}), ...(cs.sub?.font != null ? { subFont: cs.sub.font } : {}), ...(cs.sub?.yPct != null ? { subYPct: cs.sub.yPct } : {}), ...(cs.sub?.xPct != null ? { subXPct: cs.sub.xPct } : {}), ...(cs.sub?.wPct != null ? { subWPct: cs.sub.wPct } : {}), ...(cs.sub?.scale != null ? { subScale: cs.sub.scale } : {}), ...(cs.sub?.hPct != null ? { subHPct: cs.sub.hPct } : {}) } }
         : capBase;
-    const { innerHtml, timelineBody } = renderBlock(rb);
+    const rendered = renderBlock(rb);
+    const { html: innerHtml } = compileComponentStyles(rendered.innerHtml, b.id);
+    const { timelineBody } = rendered;
     // autofit: when content overflows, scale the whole thing to just fit the box (measured empirically), preview = export
     const fit = b.fitScale && b.fitScale < 0.999 ? `transform:scale(${n(b.fitScale)});transform-origin:center center;` : '';
     // Uniform content scaling: CSS scale property (around center), doesn't affect layout (autofit's scrollWidth measure stays uncontaminated),
@@ -519,11 +525,18 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
     const authoredDuration = b.templateId === 'custom' && typeof b.slots.authoredDurationSec === 'number' && Number.isFinite(b.slots.authoredDurationSec) && b.slots.authoredDurationSec > 0
       ? `data-authored-duration="${n(b.slots.authoredDurationSec)}" `
       : '';
+    // Editable properties of a bespoke component: every declared property (override ?? default) lands
+    // on the CONTAINER as an inline custom property and a data-p-* attribute — inline beats the markup's
+    // own <style>, the live channel (hf:blockProps) writes the same names, the export serializes it.
+    const propSpecs = b.templateId === 'custom' ? parseComponentProps(blockPropsSchema(b)).specs : [];
+    const propValues = propSpecs.length ? resolveComponentProps(propSpecs, b.slots.props) : null;
+    const propsCss = propValues ? componentPropsInlineCss(propSpecs, propValues) : '';
+    const propsAttrs = propValues ? ` ${componentPropsAttrs(propSpecs, propValues)}` : '';
     const attrs =
       `id="${b.id}" data-composition-id="${b.id}" ${b.box ? 'data-hf-box="1" ' : ''}` +
       authoredDuration +
       `data-start="${n(b.startSec)}" data-duration="${n(b.durationSec)}" data-track-index="${b.trackIndex}" ` +
-      `data-width="${W}" data-height="${H}"`;
+      `data-width="${W}" data-height="${H}"${propsAttrs}`;
     // Frozen look (Block.vars): the block's insertion-time tokens, scoped to it, override #root's live
     // theme vars — a later theme mount recolors #root (and future blocks) but never this one. Emitted
     // inside the container so the in-place patch channel (hf:blockAdd/hf:blockHtml) carries it too.
@@ -542,14 +555,14 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
       const pos = `left:${pct(b.box.x)};top:${pct(b.box.y)};width:${pct(b.box.w)};height:${pct(b.box.h)};`;
       const rel = `left:${pct((cb.x - b.box.x) / b.box.w)};top:${pct((cb.y - b.box.y) / b.box.h)};width:${pct(cb.w / b.box.w)};height:${pct(cb.h / b.box.h)};`;
       html =
-        `<div class="comp" ${attrs} style="position:absolute;${pos}overflow:hidden;${frame.join('')}">\n${varsTag}` +
+        `<div class="comp" ${attrs} style="position:absolute;${propsCss}${pos}overflow:hidden;${frame.join('')}">\n${varsTag}` +
         `<div data-hf-content style="position:absolute;${rel}${bgCss}${scaleCss}${fit}">\n${innerHtml}\n</div>\n</div>`;
     } else {
       // Full-canvas block (caption layer, etc.): a single flat layer, no crop/scale semantics.
       // The sentence-caption container doesn't take clicks (pointer-events:none, .cap-line is auto): the container is inset:0 spanning
       // the whole canvas, and if it took clicks, clicking any blank area while captions are on-screen would hit it — "click blank to select a shot" would break entirely
       const pe = isSentenceCaption(b) ? 'pointer-events:none;' : '';
-      html = `<div class="comp" ${attrs} style="position:absolute;inset:0;${pe}${bgCss}${frame.join('')}${scaleCss}${fit}">\n${varsTag}${innerHtml}\n</div>`;
+      html = `<div class="comp" ${attrs} style="position:absolute;${propsCss}inset:0;${pe}${bgCss}${frame.join('')}${scaleCss}${fit}">\n${varsTag}${innerHtml}\n</div>`;
     }
     return { html, timelineBody };
 }
@@ -615,11 +628,15 @@ export function assembleHtml(
     if (visual.kind === 'image') {
       body.push(`<img class="comp hf-native-visual" ${common} src="${escapeAttr(visual.source)}" alt="" style="${mediaStyle}" />`);
     } else {
-      const rate = duration > 1e-9 ? Math.max(0, visual.sourceOutSec - visual.sourceInSec) / duration : 1;
+      // Overlay video is a picture-only canvas: the parent engine decodes the source and pushes frames
+      // (hf:layerFrame) exactly like the primary lane's #vidEl. No media element, no source URL in the
+      // document — so no File/blob has to cross the sandbox, and a document rebuild never touches a decoder.
+      // The backing store boots at the asset's size (object-fit needs an aspect) and follows the first frame.
+      const width = visual.sourceWidth && visual.sourceHeight ? visual.sourceWidth : 16;
+      const height = visual.sourceWidth && visual.sourceHeight ? visual.sourceHeight : 9;
       body.push(
-        `<video class="hf-native-visual hf-native-video" ${common} data-hf-timeline-media="1" ` +
-        `data-source-in="${n(visual.sourceInSec)}" data-source-out="${n(visual.sourceOutSec)}" data-source-rate="${n(rate)}" ` +
-        `src="${escapeAttr(visual.source)}" preload="auto" playsinline muted style="${mediaStyle}"></video>`,
+        `<canvas class="hf-native-visual hf-native-canvas" ${common} width="${n(width)}" height="${n(height)}" ` +
+        `data-source-in="${n(visual.sourceInSec)}" data-source-out="${n(visual.sourceOutSec)}" style="${mediaStyle}"></canvas>`,
       );
     }
     const motion: string[] = [`var el=document.getElementById(${JSON.stringify(id)});`];
@@ -646,6 +663,20 @@ export function assembleHtml(
         if (at <= previous.atSec + 1e-9) motion.push(`tl.set(el,{opacity:${n(row.value)}},${n(at)});`);
         else motion.push(`tl.to(el,{duration:${n(at - previous.atSec)},ease:'none',opacity:${n(row.value)}},${n(previous.atSec)});`);
         previous = { ...row, atSec: at };
+      }
+    }
+    // Animated push-in: scale tweens on the element's own timeline, on top of its static framing,
+    // the same moves the canvas export evaluates through zoomScaleAt.
+    const moves = visual.kind === 'video' ? zoomMoves(visual.zoom, duration) : [];
+    if (moves.length) {
+      const zoomVars = (multiplier: number) => {
+        const total = Math.round(framing.scale * multiplier * 10000) / 10000;
+        return `{scale:${n(total)},xPercent:${n(framing.xPercent + zoomAnchorShiftPercent(visual.zoom!.anchorX, framing.scale, total))},yPercent:${n(framing.yPercent + zoomAnchorShiftPercent(visual.zoom!.anchorY, framing.scale, total))}}`;
+      };
+      motion.push(`tl.set(el,${zoomVars(1)},0);`);
+      for (const move of moves) {
+        if (move.duration <= 0) motion.push(`tl.set(el,${zoomVars(move.scale)},${n(move.at)});`);
+        else motion.push(`tl.to(el,Object.assign({duration:${n(move.duration)},ease:'${move.ease}'},${zoomVars(move.scale)}),${n(move.at)});`);
       }
     }
     if (motion.length > 1) scripts.push(timelineScript(id, motion.join('')));
@@ -723,6 +754,7 @@ export function assembleHtml(
     comp.captionStyle?.font,
     comp.captionStyle?.sub?.font,
     ...comp.blocks.map((block) => block.slots?.fontFamily),
+    ...comp.blocks.flatMap((block) => componentPropsFontIds(block)),
   ]).map((href) => `<link href="${href}" rel="stylesheet" />\n`).join('');
   return `<!doctype html>
 <html lang="zh">
@@ -815,4 +847,23 @@ addEventListener('message',function(e){var d=e&&e.data;if(!d||d.type!=='hf-loop'
   // Static card: the head-declared boot time already opened it on the stable frame; a full seek
   // afterwards only matters for media (video currentTime), which a single-block preview has none of.
   return html;
+}
+
+/**
+ * The composition HTML for BAKING one component to a transparent video (cloud render → VP8-alpha
+ * WebM). The block alone, on the project canvas, transparent ground, with its GSAP timeline `tl`
+ * intact so the render service plays it across the full duration — no preview boot-pause, no rAF
+ * loop wrapper (those are for the browser preview; the renderer drives the timeline itself). Render
+ * it at the project canvas size and overlay the result at 0,0: the block keeps its exact box, so the
+ * bake is pixel-identical to what the timeline shows. Duration/fps come from the caller (block
+ * durationSec, comp fps).
+ */
+export function bakeCompositionHtml(comp: Composition, block: Block): string {
+  const mini = previewMiniComp(comp, block);
+  const html = assembleHtml(mini, './vendor/gsap.min.js');
+  // The cloud renderer drives the root composition timeline. Browser previews seek each block
+  // themselves; exporting only that child leaves entrance animations paused at their hidden state.
+  const rootTimeline = `<script>(function(){var child=window.__timelines[${JSON.stringify(block.id)}];var root=gsap.timeline({paused:true});if(child){child.to({},{duration:${n(block.durationSec)}},0);child.paused(false);root.add(child,0);}root.to({},{duration:${n(block.durationSec)}},0);window.__timelines.root=root;})();</script>`;
+  return html.replace('</head>', `<style>html, body, #root { ${TRANSPARENT_CSS} }</style></head>`)
+    .replace('</body>', `${rootTimeline}</body>`);
 }

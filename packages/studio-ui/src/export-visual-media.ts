@@ -1,6 +1,7 @@
 import {
   IDENTITY_MEDIA_FRAMING,
   normalizeAtomicMediaFraming,
+  zoomAnchorShiftPercent,
   parseLocalImageLocator,
   shotFilterCss,
   sourceDrawRect,
@@ -89,17 +90,22 @@ export function drawSupplementalVisualMedia(args: {
     ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
     ctx.globalAlpha *= state.opacity;
     ctx.filter = shotFilterCss(visual.filter);
-    const transformed = framing.transform.scale !== 1
-      || framing.transform.offsetX !== 0
-      || framing.transform.offsetY !== 0;
+    // The animated push-in multiplies the framing scale and keeps its anchor point still — the same
+    // moves the stage plays as tweens (zoomMoves), evaluated here per frame.
+    const totalScale = framing.transform.scale * state.zoomScale;
+    const zoomShiftX = zoomAnchorShiftPercent(visual.zoom?.anchorX, framing.transform.scale, totalScale) / 100;
+    const zoomShiftY = zoomAnchorShiftPercent(visual.zoom?.anchorY, framing.transform.scale, totalScale) / 100;
+    const transformed = totalScale !== 1
+      || framing.transform.offsetX + zoomShiftX !== 0
+      || framing.transform.offsetY + zoomShiftY !== 0;
     if (transformed) {
       const centreX = targetX + boxWidth / 2;
       const centreY = targetY + boxHeight / 2;
       ctx.translate(
-        centreX + framing.transform.offsetX * boxWidth,
-        centreY + framing.transform.offsetY * boxHeight,
+        centreX + (framing.transform.offsetX + zoomShiftX) * boxWidth,
+        centreY + (framing.transform.offsetY + zoomShiftY) * boxHeight,
       );
-      ctx.scale(framing.transform.scale, framing.transform.scale);
+      ctx.scale(totalScale, totalScale);
       ctx.translate(-centreX, -centreY);
     }
     ctx.beginPath();

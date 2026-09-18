@@ -1,7 +1,7 @@
 /**
  * Skill-declared review brief.
  *
- * Visual review (analyze_visual mode=editorial) is a platform primitive; the selection criteria
+ * Visual review (inspect_media mode=editorial) is a platform primitive; the selection criteria
  * it judges by belong to the active Skill. When the model re-authors those criteria each turn it
  * drifts — a real run invented a topical frame the Skill never asked for and then fought its own
  * assembly over it. A Skill therefore ships its criteria as DATA: a fenced ```review-brief block

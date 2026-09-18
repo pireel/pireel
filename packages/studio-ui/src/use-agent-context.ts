@@ -26,9 +26,10 @@ import { studioProviders } from '@pireel/studio-engine/providers';
 import { directorPlanFromDocument } from '@pireel/studio-engine/director-plan-artifact';
 import { sceneDesignsFromDocument } from '@pireel/studio-engine/scene-design';
 import { wrapAgentTranscript } from '@pireel/studio-engine/prompts';
+import type { DocumentCommitter } from './document-commit';
 import type { VisualTimeline } from './visual';
 import type { StudioElementRef } from './studio-chat';
-import { agentElementRosterKey, buildAgentElementRoster } from './agent-element-roster';
+import { agentElementRosterKey, agentMediaClipRefs, buildAgentElementRoster } from './agent-element-roster';
 import { blockDisplayTitle } from './block-display-title';
 import { loadCurrentUserBalance } from './current-user';
 import { t } from './i18n';
@@ -40,7 +41,6 @@ export interface AgentContextDeps {
   selectedIdRef: MutableRefObject<string | null>;
   selectedShotIdRef: MutableRefObject<string | null>;
   tRef: MutableRefObject<number>;
-  asrRef: MutableRefObject<AsrSegment[] | null>;
   visualRef: MutableRefObject<VisualTimeline | null>;
   videoSigRef: MutableRefObject<string | null>;
   videoFileRef: MutableRefObject<File | null>;
@@ -48,22 +48,27 @@ export interface AgentContextDeps {
   clipAsrBusyRef: MutableRefObject<Set<string>>;
   clipAsrFailRef: MutableRefObject<Set<string>>;
   setClipAsr: (fn: (m: Record<string, AsrSegment[]>) => Record<string, AsrSegment[]>) => void;
+  /** Transcripts land in the document; the runtime copies above follow it for the panels. */
+  commit: DocumentCommitter['commit'];
   matteFileForShot: (s: VideoShot) => Promise<{ key: string; file: File; upTo: number } | null>;
   getActiveOutput: () => { id: string; title: string; position: number; total: number };
 }
 
 export function useAgentContext(deps: AgentContextDeps) {
   const {
-    comp, compRef, documentRef, selectedIdRef, selectedShotIdRef, tRef, asrRef, visualRef, videoSigRef,
+    comp, compRef, documentRef, selectedIdRef, selectedShotIdRef, tRef, visualRef, videoSigRef,
     videoFileRef, clipAsrRef, clipAsrBusyRef, clipAsrFailRef,
-    setClipAsr, matteFileForShot, getActiveOutput,
+    setClipAsr, commit, matteFileForShot, getActiveOutput,
   } = deps;
   /* ---------- chat agent: can @ components + request context + client-executed tools ---------- */
   // Memo by **content key** (not array identity): box drag etc. changes the blocks array identity every frame but id/label/kind
   // don't change — keeping elements identity stable so the memoized StudioChat doesn't re-render every frame.
-  const chatElemsKey = agentElementRosterKey(comp.blocks, comp.shots ?? []);
+  // B-roll and image clips live only in the document (the legacy composition has no lane for them);
+  // they are @-mentionable and pinnable like blocks and spine shots.
+  const mediaClipRefs = agentMediaClipRefs(documentRef.current);
+  const chatElemsKey = agentElementRosterKey(comp.blocks, comp.shots ?? [], mediaClipRefs);
   const chatElements = useMemo<StudioElementRef[]>(
-    () => buildAgentElementRoster(compRef.current.blocks, compRef.current.shots ?? []),
+    () => buildAgentElementRoster(compRef.current.blocks, compRef.current.shots ?? [], agentMediaClipRefs(documentRef.current)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [chatElemsKey],
   );
@@ -91,7 +96,7 @@ export function useAgentContext(deps: AgentContextDeps) {
 
   /** The situation at the moment a chat message is sent (composition snapshot / selection / playhead / pipeline; attached
    *  as message metadata). The narration script isn't here — it's anchored to source time and doesn't change with editing,
-   *  so it enters the feed once via the read_script receipt, no need to resend each round (prompt-cache friendly). */
+   *  so it enters the feed once via the get_transcript receipt, no need to resend each round (prompt-cache friendly). */
   const getChatBody = useCallback((): Record<string, unknown> => {
     const c = compRef.current;
     const document = documentRef.current;
@@ -163,7 +168,7 @@ export function useAgentContext(deps: AgentContextDeps) {
       playheadSec: tRef.current,
       // Pipeline state: so the agent doesn't blindly rerun, nor claim a transcript that doesn't exist
       pipeline: {
-        asr: !!asrRef.current?.length || Object.values(document.semantics.transcripts).some((segments) => segments.length > 0),
+        asr: Object.values(document.semantics.transcripts).some((segments) => segments.length > 0),
         plan: !!directorPlan || document.semantics.plan !== undefined,
         visual: !!visualRef.current,
       },
@@ -217,7 +222,7 @@ export function useAgentContext(deps: AgentContextDeps) {
     const assetIdByClipId = new Map(primaryNarrativeClips(document).map((clip) => [clip.id, clip.assetId]));
     for (const [src, ids] of bySrc) {
       const assetId = ids.map((id) => assetIdByClipId.get(id)).find(Boolean);
-      const segs = clipAsrRef.current[src] ?? (assetId ? document.semantics.transcripts[assetId] as AsrSegment[] | undefined : undefined);
+      const segs = assetId ? document.semantics.transcripts[assetId] as AsrSegment[] | undefined : undefined;
       const sourceShots = (compRef.current.shots ?? []).filter((shot) => ids.includes(shot.id));
       const marks = narrationRowMarks(segs ?? [], sourceShots, () => true, assetId ? document.assets[assetId]?.metadata.durationSec : undefined);
       const markedRow = (segment: AsrSegment, index: number) => `  ${index}. [${rd(segment.start)}–${rd(segment.end)}s] ${marks.rows[index]!.prefix}${copy(segment)}${marks.rows[index]!.gapNote}`;
@@ -229,7 +234,7 @@ export function useAgentContext(deps: AgentContextDeps) {
     }
     // Generated/imported narration may be an audio-only lane. Its exact script is stored on the
     // canonical asset at registration time; a later targeted ASR replaces those estimated rows
-    // with measured audio timing. Expose either form through the same read_script surface.
+    // with measured audio timing. Expose either form through the same get_transcript surface.
     const audioByAsset = new Map<string, string[]>();
     for (const track of document.timeline.tracks) {
       if (track.type !== 'audio') continue;
@@ -242,14 +247,14 @@ export function useAgentContext(deps: AgentContextDeps) {
       const asset = document.assets[assetId];
       const segs = document.semantics.transcripts[assetId];
       const head = `AUDIO NARRATION ${asset?.label ? `"${asset.label}" ` : ''}for clip(s) ${clipIds.map((id) => `@${id}`).join(', ')} (asset source seconds)`;
-      if (!segs) parts.push(`${head}: (no transcript — call read_script with assetId when actual audio timing is needed)`);
+      if (!segs) parts.push(`${head}: (no transcript — call get_transcript with assetId when actual audio timing is needed)`);
       else if (!segs.length) parts.push(`${head}: (no speech detected)`);
       else parts.push(`${head}:\n${segs.map(row).join('\n')}`);
     }
     const out = parts.join('\n');
     return wrapAgentTranscript(out);
   };
-  /** Fill in insert-source transcripts (triggered on demand by read_script — policy: when captions are off, only transcribe when the LLM needs it).
+  /** Fill in insert-source transcripts (triggered on demand by get_transcript — policy: when captions are off, only transcribe when the LLM needs it).
    *  Shares the busy/fail lists with the panel transcription effect: failures don't re-burn ASR, in-flight ones are awaited. */
   const ensureClipTranscripts = async (): Promise<void> => {
     // Blacklist + tell the user (reported once per src: after blacklisting, the top continue won't reach here again) —
@@ -261,9 +266,14 @@ export function useAgentContext(deps: AgentContextDeps) {
     };
     // Muted inserted sources are outside the mix: captions, translation and spoken-word addressing
     // never derive from them, so bulk transcription skips them — a fully muted montage lane must
-    // not relaunch one ASR per source on every captions-panel action or read_script call.
+    // not relaunch one ASR per source on every captions-panel action or get_transcript call.
     const srcs = [...new Set((compRef.current.shots ?? []).filter((s) => s.src && !s.audioMuted).map((s) => s.src!))];
+    const assetIdByClipId = new Map(primaryNarrativeClips(documentRef.current).map((clip) => [clip.id, clip.assetId]));
+    const assetIdForSource = (src: string) => assetIdByClipId.get((compRef.current.shots ?? []).find((s) => s.src === src)?.id ?? '');
     for (const src of srcs) {
+      const assetId = assetIdForSource(src);
+      // The document owns the transcript; a stored one (even an empty "no speech" result) is final.
+      if (assetId && Object.prototype.hasOwnProperty.call(documentRef.current.semantics.transcripts, assetId)) continue;
       if (clipAsrRef.current[src] || clipAsrFailRef.current.has(src)) continue;
       if (clipAsrBusyRef.current.has(src)) {
         const t0 = Date.now();
@@ -279,6 +289,12 @@ export function useAgentContext(deps: AgentContextDeps) {
           continue;
         }
         const segs = await studioProviders().transcriber.transcribe(got.file);
+        // ASR can take a while: the result lands on whatever the document is by now, and only if
+        // the source is still placed there.
+        const landedAssetId = assetIdForSource(src) ?? assetId;
+        if (landedAssetId && documentRef.current.assets[landedAssetId]) {
+          commit({ op: 'transcripts.set', input: { transcripts: { [landedAssetId]: segs } } }, { undo: 'none' });
+        }
         setClipAsr((m) => ({ ...m, [src]: segs }));
         clipAsrRef.current = { ...clipAsrRef.current, [src]: segs };
       } catch (e) {

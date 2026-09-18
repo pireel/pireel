@@ -5,12 +5,7 @@ import type {
   SupplementalVisualMediaClip,
 } from '@pireel/studio-engine/composition';
 import { mediaTimelineClipAsVideoShot, segmentFadeFn, shotGain } from '@pireel/studio-engine/composition';
-import type { EngineAudioClip } from './video-track-engine';
-
-export interface SupplementalVisualFileBinding<T> {
-  id: string;
-  file: T;
-}
+import type { EngineAudioClip, EngineLayer } from './video-track-engine';
 
 export interface SupplementalVisualAudioMixSegment {
   clipId: string;
@@ -20,31 +15,6 @@ export interface SupplementalVisualAudioMixSegment {
   timelineEnd: number;
   gain: number;
   fadeAt?: (tLocal: number) => number;
-}
-
-/**
- * Resolve the local files that must cross the preview iframe boundary.
- *
- * A sandboxed srcdoc has an opaque origin, so it cannot fetch a blob URL that
- * the parent created. The iframe runtime instead receives the File and creates
- * its own URL for the exact native-video node assembled for that visual clip.
- */
-export function supplementalVisualFileBindings<T>(
-  visuals: readonly SupplementalVisualMediaClip[],
-  primarySources: readonly (string | null | undefined)[],
-  primaryFile: T | null | undefined,
-  localFilesBySource: ReadonlyMap<string, T>,
-): SupplementalVisualFileBinding<T>[] {
-  const primarySourceSet = new Set(primarySources.filter((source): source is string => Boolean(source)));
-  const result: SupplementalVisualFileBinding<T>[] = [];
-  for (const visual of visuals) {
-    if (visual.kind !== 'video') continue;
-    const file = primarySourceSet.has(visual.source)
-      ? primaryFile
-      : localFilesBySource.get(visual.source);
-    if (file) result.push({ id: `hf-visual-${visual.clipId}`, file });
-  }
-  return result;
 }
 
 /** Renderable non-primary visual media. Missing/offline assets remain in the document, not the runtime list. */
@@ -63,6 +33,9 @@ export function supplementalVisualMedia(plan: EditorRenderPlan): SupplementalVis
         stackOrder: track.stackOrder,
         kind: entry.asset.kind,
         source: entry.resolvedSource,
+        ...(entry.asset.metadata.width && entry.asset.metadata.height
+          ? { sourceWidth: entry.asset.metadata.width, sourceHeight: entry.asset.metadata.height }
+          : {}),
         startSec: entry.startSec,
         endSec: entry.endSec,
         sourceInSec: clip.sourceInSec,
@@ -74,6 +47,7 @@ export function supplementalVisualMedia(plan: EditorRenderPlan): SupplementalVis
         ...(video?.audioFadeInSec ? { audioFadeInSec: video.audioFadeInSec } : {}),
         ...(video?.audioFadeOutSec ? { audioFadeOutSec: video.audioFadeOutSec } : {}),
         ...(video?.filter ? { filter: video.filter } : {}),
+        ...(video?.zoom ? { zoom: video.zoom } : {}),
         ...(clip.box ? { box: clip.box } : {}),
         ...(clip.mediaFraming ? { mediaFraming: clip.mediaFraming } : {}),
         ...(clip.anchorX != null ? { anchorX: clip.anchorX } : {}),
@@ -142,4 +116,17 @@ export function supplementalVisualAudioSpecs(
       ...(masks?.length ? { maskAt: (srcT: number) => maskedAudioAt(masks, srcT) } : {}),
     };
   });
+}
+
+/** Overlay video layers for the preview engine: one picture-only read position per visible video clip. */
+export function supplementalVisualLayers(visuals: readonly SupplementalVisualMediaClip[]): EngineLayer[] {
+  return visuals.filter((visual) => visual.kind === 'video').map((visual) => ({
+    id: visual.clipId,
+    elKey: `hf-visual-${visual.clipId}`,
+    key: visual.source,
+    srcStart: visual.sourceInSec,
+    srcEnd: visual.sourceOutSec,
+    timelineStart: visual.startSec,
+    timelineEnd: visual.endSec,
+  }));
 }

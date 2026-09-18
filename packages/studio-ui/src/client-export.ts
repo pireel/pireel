@@ -80,6 +80,7 @@ import { materializeRemoteMedia } from './remote-media';
 import { buildInlineFontCss, warmupFontMarkup } from './export-fonts';
 import { webFontIdOf } from '@pireel/studio-engine/font-library';
 import { googleFontRowOf } from '@pireel/studio-engine/google-fonts';
+import { componentPropsFontIds } from '@pireel/studio-engine/component-props';
 import { t } from './i18n';
 import {
   browserVisualLayerPlan,
@@ -107,6 +108,7 @@ function assertExportableComposition(comp: Composition): void {
 function compositionFontIds(comp: Composition): unknown[] {
   return [
     ...comp.blocks.map((block) => block.slots.fontFamily),
+    ...comp.blocks.flatMap((block) => componentPropsFontIds(block)),
     comp.captionStyle?.font,
     comp.captionStyle?.sub?.font,
   ];
@@ -425,7 +427,7 @@ export class ExportCanceled extends Error {
   }
 }
 
-/** Single-frame capture (used by the external agent's capture_frame verification tool): one frame
+/** Single-frame capture (used by the external agent's inspect_timeline verification tool): one frame
  *  from the same render pipeline as export — theme background + source video frame (with framing
  *  transform/rounded corners/shadow) + overlay foreignObject rasterization.
  *  Returns a downsampled JPEG dataURL (small enough for LLM context); with no video, draws only background + overlay. */

@@ -55,6 +55,45 @@ describe('clip.retime', () => {
     expect(result.receipt.shiftedClipIds).toEqual(expect.arrayContaining(['second', 'voice-clip']));
   });
 
+  it('splits sync-locked material spanning the boundary when the clip shrinks, so nothing overlaps', () => {
+    const document = emptyEditorDocumentV2({ fps: 30 });
+    document.assets.video = {
+      id: 'video', kind: 'video', locator: { remoteUrl: 'https://cdn.example/video.mp4' }, metadata: { durationSec: 10 },
+    };
+    document.assets.voice = {
+      id: 'voice', kind: 'audio', locator: { remoteUrl: 'https://cdn.example/voice.wav' }, metadata: { durationSec: 6 },
+    };
+    document.timeline.tracks[0]!.clips = [
+      narrative('first', 0, 120, 0, 4),
+      narrative('second', 120, 60, 4, 6),
+    ];
+    const voice: AudioTimelineClip = {
+      id: 'voice-clip', kind: 'audio', assetId: 'voice', startFrame: 0, durationFrames: 180,
+      sourceInSec: 0, sourceOutSec: 6, properties: {}, anchor: { type: 'timeline' }, enabled: true,
+    };
+    document.timeline.tracks.push({
+      id: 'voice-track', type: 'audio', role: 'narration', muted: false, hidden: false,
+      locked: false, syncLocked: true, stackOrder: 0, clips: [voice],
+    });
+
+    const result = retimeEditorClip(document, {
+      trackId: document.semantics.primaryNarrativeTrackId, clipId: 'first', durationFrames: 60, ripple: true,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.document.timeline.tracks[0]!.clips.map((clip) => [clip.id, clip.startFrame, clip.durationFrames])).toEqual([
+      ['first', 0, 60], ['second', 60, 60],
+    ]);
+    // The narration lost the same two seconds the picture lost, at the same place: two pieces that
+    // meet at frame 60 instead of one piece running under the shot that moved up.
+    const pieces = result.document.timeline.tracks[1]!.clips as AudioTimelineClip[];
+    expect(pieces.map((clip) => [clip.startFrame, clip.startFrame + clip.durationFrames, clip.sourceInSec, clip.sourceOutSec])).toEqual([
+      [0, 60, 0, 2], [60, 120, 4, 6],
+    ]);
+    expect(result.receipt.createdClipIds).toHaveLength(1);
+  });
+
   it('can ripple from a packed clip head when restored source frames are inserted there', () => {
     const document = emptyEditorDocumentV2({ fps: 30 });
     document.assets.video = {

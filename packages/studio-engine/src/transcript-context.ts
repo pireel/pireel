@@ -22,7 +22,7 @@ function distanceToSegment(segment: AsrSegment, second: number): number {
  * beginning of a long transcript for a late block makes otherwise-correct visual generation guess
  * from the wrong topic. */
 export function transcriptContextAt(input: TranscriptContextInput): string {
-  const maxChars = Math.max(200, Math.min(4_000, Math.round(input.maxChars ?? 1_200)));
+  const maxChars = input.maxChars;
   const spans = videoShotTimelineSpans(input.shots, input.placements);
   if (!spans.length) return '';
   const atSec = Number.isFinite(input.atSec) ? input.atSec : 0;
@@ -39,6 +39,13 @@ export function transcriptContextAt(input: TranscriptContextInput): string {
   const transcript = span.clip.src
     ? input.clipTranscripts?.[span.clip.src] ?? []
     : input.mainTranscript;
+  return transcriptWindowAround(transcript, sourceSec, maxChars);
+}
+
+/** The spoken thought around one source-clock second: the nearest segment, then neighbours while
+ * they stay within reach in time and under the character budget. */
+export function transcriptWindowAround(transcript: readonly AsrSegment[], sourceSec: number, maxCharsIn?: number): string {
+  const maxChars = Math.max(200, Math.min(4_000, Math.round(maxCharsIn ?? 1_200)));
   if (!transcript.length) return '';
 
   const targetIndex = transcript.reduce((best, segment, index) => {

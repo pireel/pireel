@@ -94,12 +94,13 @@ transcript-readable with `get_transcript` when word timing matters.
    feel ("short airy whoosh, fast, passing left to right"; "soft glass notification ping, single
    hit"). Keep hits and whooshes at 0.5–2 s; use `loop:true` only for ambience beds. Never ask it
    for speech or music.
-3. **`generate_foley` — picture-synchronous Foley** (Studio chat only: it needs the in-Studio
-   approval card, so over MCP tell the user to run that step in Studio Chat). Give it up to 8 items,
+3. **`generate_foley` — picture-synchronous Foley** (runs in the open Studio tab on every
+   surface; charges credits). Give it up to 8 items,
    each an exact 1–30 s source span of a video asset plus a prompt naming only audible events
    grounded in the picture — action, material, intensity, perspective, room, timing
-   (`negativePrompt` for speech / music / ambience to exclude). It shows the event list and the
-   credit cost, waits for approval, uploads only those spans, generates with a video-to-audio model,
+   (`negativePrompt` for speech / music / ambience to exclude). Studio Chat shows the event list and
+   the credit cost on an approval card first; over MCP the call starts at once, so state the items
+   and cost to your operator before calling. It uploads only those spans, generates with a video-to-audio model,
    saves each result as a reusable AAC in the cross-project audio library with `eventType` /
    `material` / `reusePolicy`, and returns registration fields. One coherent visible action = one
    item; merge continuous actions; skip static, speech-only, decorative or misleading events. Never

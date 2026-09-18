@@ -94,7 +94,7 @@ describe('offline funnel (runServerTool)', () => {
       context: { schemaVersion: 3 as const },
       videoDurationSec: null,
     };
-    const out = runServerTool('move_block', { blockId: p.comp.blocks[0]!.id, startSec: 1 }, p);
+    const out = runServerTool('move_clips', { items: [{ clipId: p.comp.blocks[0]!.id, startFrame: p.document.canvas.fps }] }, p);
     expect(out.result.ok).toBe(true);
     expect(out.comp!.blocks[0]!.vars!.accent).toBe('#654321');
   });

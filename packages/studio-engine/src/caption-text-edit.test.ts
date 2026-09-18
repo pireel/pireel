@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AsrSegment } from './build-blocks';
-import { applyCaptionTextEdits } from './caption-text-edit';
+import { applyCaptionTextEdits, isRemovedCaptionCue, removeCaptionCues } from './caption-text-edit';
 
 const transcript = (): AsrSegment[] => [{
   start: 0,
@@ -70,5 +70,26 @@ describe('applyCaptionTextEdits', () => {
   it('无变化时保留数组引用', () => {
     const original = transcript();
     expect(applyCaptionTextEdits(original, [{ index: 0, text: original[0]!.text }])).toBe(original);
+  });
+});
+
+describe('removeCaptionCues', () => {
+  it('marks the cue removed on a locked range and leaves the spoken words alone', () => {
+    const original = transcript();
+    const next = removeCaptionCues(original, [{ index: 0, w0: 0, w1: 1 }]);
+    expect(next).not.toBe(original);
+    expect(next[0]).toMatchObject({ text: '今天天气很好', cueTexts: { '0:1': '' }, cueLayout: ['0:1'], captionText: '很好' });
+    expect(next[0]!.words).toEqual(original[0]!.words);
+    expect(next[0]!.cueSubs).toEqual({ '2:3': 'is nice' });
+    expect(isRemovedCaptionCue(next[0], 0, 1)).toBe(true);
+    expect(isRemovedCaptionCue(next[0], 2, 3)).toBe(false);
+    // Removing it again changes nothing.
+    expect(removeCaptionCues(next, [{ index: 0, w0: 0, w1: 1 }])).toBe(next);
+  });
+
+  it('drops the whole-sentence translation when the whole sentence is removed', () => {
+    const next = removeCaptionCues(transcript(), [{ index: 0, w0: 0, w1: 3 }]);
+    expect(next[0]!.sub).toBeUndefined();
+    expect(next[0]!.cueSubs).toBeUndefined();
   });
 });

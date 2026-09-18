@@ -11,7 +11,8 @@
  */
 
 import { useEffect, useRef, useState, type MutableRefObject } from 'react';
-import { applyEditorCommand, type Composition, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
+import type { Composition, EditorDocumentV2 } from '@pireel/studio-engine/composition';
+import type { DocumentCommitter } from './document-commit';
 import { toast } from '@pireel/ui/toast';
 import type { VideoTrackEngine } from './video-track-engine';
 import { DENOISE_RATE, blendPcm, decodeMono48k, denoiseWetPcm, encodeWavMono } from './denoise';
@@ -25,19 +26,20 @@ export interface DenoiseDeps {
   comp: Composition;
   compRef: MutableRefObject<Composition>;
   documentRef: MutableRefObject<EditorDocumentV2>;
-  setDocument: (document: EditorDocumentV2) => void;
+  /** The document's single mutation gateway (undo, publish and sync ride along). */
+  commit: DocumentCommitter['commit'];
   videoFile: File | null;
   videoFileRef: MutableRefObject<File | null>;
   videoSigRef: MutableRefObject<string | null>;
   videoEngineRef: MutableRefObject<VideoTrackEngine | null>;
   /** Source url → File, as mounted for playback: identifies which segment keys carry the main file. */
   clipFilesRef: MutableRefObject<Map<string, File>>;
-  pushUndoSnapshot: () => void;
 }
 
 export function useDenoise(deps: DenoiseDeps) {
-  const { comp, compRef, documentRef, setDocument, videoFile, videoFileRef, videoSigRef, videoEngineRef, clipFilesRef, pushUndoSnapshot } = deps;
-  const [status, setStatus] = useState<'baking' | 'ready' | 'failed' | null>(null);
+  const { comp, compRef, documentRef, commit, videoFile, videoFileRef, videoSigRef, videoEngineRef, clipFilesRef } = deps;
+  /** `silent`: the source decodes fine but has no audio track — nothing to denoise, not a failure. */
+  const [status, setStatus] = useState<'baking' | 'ready' | 'failed' | 'silent' | null>(null);
   const [progress, setProgress] = useState(0);
   /** Blended output of the last successful bake: what preview plays and export substitutes. */
   const blendedRef = useRef<{ sig: string; strength: number; file: File; url: string } | null>(null);
@@ -110,7 +112,16 @@ export function useDenoise(deps: DenoiseDeps) {
     try {
       const dryBuf = await decodeVideoAudio(f);
       if (runId !== runIdRef.current) return;
-      if (!dryBuf) throw new Error('source has no audio track');
+      if (!dryBuf) {
+        // A picture with no sound is a plain fact, not a processing failure: say so and leave the
+        // knob as it is, so a later sound-bearing source still gets its bake.
+        const previous = blendedRef.current;
+        if (previous) URL.revokeObjectURL(previous.url);
+        blendedRef.current = null;
+        setStatus('silent');
+        toast.info(t('workbench.denoiseNoAudio'));
+        return;
+      }
       const dry = await toMono(dryBuf, DENOISE_RATE);
       if (runId !== runIdRef.current) return;
       // wet: OPFS cache by source sig (+ engine tag) — inference runs once per source ever
@@ -178,16 +189,14 @@ export function useDenoise(deps: DenoiseDeps) {
 
   /** Panel/agent entry: strength = turn on / retune (0 < s ≤ 1), null = off. */
   const setDenoise = (s: number | null) => {
-    const command = applyEditorCommand(documentRef.current, {
+    const command = commit({ op: 'command', input: { command: {
       type: 'processing.patch',
       patch: { audioDenoise: s == null ? undefined : { strength: Math.round(Math.max(0.05, Math.min(1, s)) * 100) / 100 } },
-    });
+    } } });
     if (!command.ok) {
       toast.error(editorErrorMessage(command.error));
       return;
     }
-    pushUndoSnapshot();
-    setDocument(command.document);
   };
 
   return { status, progress, denoiseForExport, setDenoise };

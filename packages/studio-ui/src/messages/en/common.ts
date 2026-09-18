@@ -74,6 +74,10 @@ export const COMMON_EN: Record<string, string> = {
   'common.wave': 'Wave',
   'common.wipe': 'Wipe',
   'common.zoomIn': 'Zoom in',
+  'common.zoomPunch': 'Punch in',
+  'common.zoomInstant': 'Instant zoom',
+  'common.zoomSlowPush': 'Slow push',
+  'common.zoomInOut': 'Zoom in & out',
   'editorError.invalidCommand': 'This edit could not be applied. Check the selected item and try again.',
   'editorError.invalidRange': 'That time range is not valid. Adjust the selection and try again.',
   'editorError.invalidDocument': 'The project data is invalid. Refresh the project and try again.',
@@ -84,5 +88,6 @@ export const COMMON_EN: Record<string, string> = {
   'editorError.invalidTrackRole': 'That track type is not valid for this operation.',
   'editorError.primaryTrackRequired': 'The primary video track cannot be removed.',
   'editorError.trackLocked': 'This edit touches a locked track. Unlock it and try again.',
+  'editorError.staleBase': 'This step was made against an older copy of the project; the whole document is being sent instead.',
   'editorError.operationFailed': 'The operation failed. Please try again.',
 };
