@@ -690,4 +690,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.timelineAutoSnap": "主轨自动吸附",
   "workbench.timelineAutoSnapOn": "主轨自动吸附已开启，片段会从头连续排列",
   "workbench.timelineAutoSnapOff": "主轨自动吸附已关闭，可自由留白",
+  "workbench.timelineCompact": "紧凑时间轴",
+  "workbench.timelineCompactOn": "紧凑时间轴已开启，轨道更矮，给画面留出更多空间",
+  "workbench.timelineCompactOff": "切换为紧凑时间轴，缩小轨道高度",
 };

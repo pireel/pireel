@@ -762,4 +762,8 @@ export const WORKBENCH_EN: Record<string, string> = {
     "Primary auto snap is on. Clips stay packed continuously from the start.",
   "workbench.timelineAutoSnapOff":
     "Primary auto snap is off. Clips can leave free gaps.",
+  "workbench.timelineCompact": "Compact timeline",
+  "workbench.timelineCompactOn":
+    "Compact timeline is on. Shorter tracks leave more room for the canvas.",
+  "workbench.timelineCompactOff": "Switch to a compact timeline with shorter tracks.",
 };

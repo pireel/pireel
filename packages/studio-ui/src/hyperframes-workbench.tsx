@@ -55,6 +55,7 @@ import {
   Captions,
   Power,
   Magnet,
+  Rows3,
   Type,
 } from "lucide-react";
 import {
@@ -247,7 +248,12 @@ import {
   MAX_PPS,
   type TimelineTrackState,
 } from "./studio-timeline";
-import { quantizeTimelineFrameSecond } from "./timeline-utils";
+import {
+  isTimelineDensity,
+  quantizeTimelineFrameSecond,
+  TIMELINE_DENSITY_STORAGE_KEY,
+  type TimelineDensity,
+} from "./timeline-utils";
 import { timelineDirectorScenesFromDocument } from "./director-scene-strip";
 import type {
   TimelineInsertMode,
@@ -1055,6 +1061,29 @@ export function HyperframesWorkbench({
   }, [projectId]);
   const [pps, setPps] = useState(DEFAULT_PPS); // timeline zoom (px/sec), controlled by the ruler slider
   const [timelineSnapEnabled, setTimelineSnapEnabled] = useState(true);
+  // Timeline row density. A remembered choice wins; otherwise the agent's embedded view starts
+  // compact (the timeline is a readout there and the canvas needs the room) and the editor starts
+  // comfortable.
+  const [timelineDensity, setTimelineDensityState] = useState<TimelineDensity>(() => {
+    try {
+      const stored = typeof localStorage !== "undefined" ? localStorage.getItem(TIMELINE_DENSITY_STORAGE_KEY) : null;
+      if (isTimelineDensity(stored)) return stored;
+    } catch {
+      /* storage unavailable: fall through to the default */
+    }
+    return agentView ? "compact" : "comfortable";
+  });
+  const toggleTimelineDensity = useCallback(() => {
+    setTimelineDensityState((current) => {
+      const next: TimelineDensity = current === "compact" ? "comfortable" : "compact";
+      try {
+        localStorage.setItem(TIMELINE_DENSITY_STORAGE_KEY, next);
+      } catch {
+        /* storage unavailable: the choice lives for this page only */
+      }
+      return next;
+    });
+  }, []);
   // Primary auto-snap is an invariant while enabled, including after project restore and after an
   // asset insertion. This keeps old head/middle gaps from surviving merely because no clip was dragged.
   useEffect(() => {
@@ -10801,6 +10830,27 @@ export function HyperframesWorkbench({
                 <button
                   type="button"
                   role="switch"
+                  aria-checked={timelineDensity === "compact"}
+                  onClick={toggleTimelineDensity}
+                  aria-label={t("workbench.timelineCompact")}
+                  className={`mr-1 rounded p-1.5 ${timelineDensity === "compact" ? "bg-accent/12 text-accent" : "text-ink-4 hover:bg-panel-2 hover:text-ink"}`}
+                >
+                  <Rows3 size={14} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {t(
+                  timelineDensity === "compact"
+                    ? "workbench.timelineCompactOn"
+                    : "workbench.timelineCompactOff",
+                )}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  role="switch"
                   aria-checked={timelineSnapEnabled}
                   onClick={togglePrimaryAutoSnap}
                   aria-label={t("workbench.timelineAutoSnap")}
@@ -11080,6 +11130,7 @@ export function HyperframesWorkbench({
         <div data-cap-keep className="shrink-0 overflow-hidden rounded-b-sm">
           <StudioTimeline
             comp={comp}
+            density={timelineDensity}
             directorScenes={showDebug ? directorTimelineScenes : undefined}
             videoPlacements={videoPlacements}
             timelineDurationSec={duration}

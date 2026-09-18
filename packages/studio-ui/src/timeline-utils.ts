@@ -15,6 +15,41 @@ export const VISUAL_SCENE_PAD_T = 3;
 export const VISUAL_SCENE_PAD_B = 3;
 export const ROW_GAP = 2;
 export const RULER_H = 24;
+
+/** Row density. `comfortable` is the constants above; `compact` trades filmstrip height and lane
+ * padding for canvas room — the default for the agent's embedded view, where the timeline is a
+ * readout more than an editing surface. */
+export type TimelineDensity = 'comfortable' | 'compact';
+export interface TimelineMetrics {
+  rowH: number;
+  audioRowH: number;
+  sceneH: number;
+  visualSceneH: number;
+  scenePadT: number;
+  scenePadB: number;
+  visualScenePadT: number;
+  visualScenePadB: number;
+  rowGap: number;
+  rulerH: number;
+  /** Height of the audio strip drawn along the bottom of each video card. */
+  sceneWaveH: number;
+}
+export const TIMELINE_METRICS: Record<TimelineDensity, TimelineMetrics> = {
+  comfortable: {
+    rowH: ROW_H, audioRowH: AUDIO_ROW_H, sceneH: SCENE_H, visualSceneH: VISUAL_SCENE_H,
+    scenePadT: SCENE_PAD_T, scenePadB: SCENE_PAD_B, visualScenePadT: VISUAL_SCENE_PAD_T, visualScenePadB: VISUAL_SCENE_PAD_B,
+    rowGap: ROW_GAP, rulerH: RULER_H, sceneWaveH: 18,
+  },
+  compact: {
+    rowH: 22, audioRowH: 30, sceneH: 44, visualSceneH: 36,
+    scenePadT: 4, scenePadB: 3, visualScenePadT: 2, visualScenePadB: 2,
+    rowGap: 1, rulerH: 20, sceneWaveH: 10,
+  },
+};
+export const TIMELINE_DENSITY_STORAGE_KEY = 'pireel.studio.timelineDensity';
+export function isTimelineDensity(value: unknown): value is TimelineDensity {
+  return value === 'comfortable' || value === 'compact';
+}
 export const GUTTER = 68; // fixed columns: track kind + mute + visibility
 export const CAP_LANE = -1; // "caption lane" sentinel track number: read-only, no drag/reorder, not in z-reorder, not in marquee; real track numbers are always >=0
 export const EDGE_PAD = 12; // breathing room between gutter and content: keeps the first block's outset selection ring from being clipped by the sticky gutter
