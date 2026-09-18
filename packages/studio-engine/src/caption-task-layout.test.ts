@@ -3,7 +3,7 @@ import { buildCaptionTaskDocument, captionTaskCanvas, captionTaskStyle, captionT
 import { assembleHtml, projectDocumentToComposition } from './composition';
 import { captionLineSegments } from './caption-layout-metrics';
 import { wordsFromText } from './caption-fx';
-import { getCaptionPreset } from './caption-presets';
+import { BASE_CAPTION_FONT_PX, getCaptionPreset } from './caption-presets';
 const options: CaptionTaskOptions = { layoutVersion: 2, presetId: 'clean', aspect: 'original', shortenPauses: false };
 const portrait = { width: 1080, height: 1920 };
 const landscape = { width: 1920, height: 1080 };
@@ -14,8 +14,8 @@ describe('caption layout recommendations', () => {
     const canvas = captionTaskCanvas('original', source);
     const style = captionTaskStyle({ ...options, translationLanguage: 'English' }, source);
     const exportScale = 1080 / Math.min(canvas.width, canvas.height);
-    expect(Math.round(48 * style.scale!) * exportScale).toBeCloseTo(64, 0);
-    expect(Math.round(48 * style.sub!.scale!) * exportScale).toBeCloseTo(48, 0);
+    expect(Math.round(BASE_CAPTION_FONT_PX * style.scale!) * exportScale).toBeCloseTo(64, 0);
+    expect(Math.round(BASE_CAPTION_FONT_PX * style.sub!.scale!) * exportScale).toBeCloseTo(48, 0);
     const safe = captionTaskSafeArea(source);
     expect(style.xPct).toBe(50);
     expect(safe.left).toBe(100 - safe.right);
@@ -27,7 +27,7 @@ describe('caption layout recommendations', () => {
     const text = '这是一段比较长的中文译文，需要换成多行，但是不能盖住原文，也不能继续向底部的平台按钮区域伸展。';
     const style = captionTaskStyle({ ...options, translationLanguage: '中文' }, portrait);
     const fitted = fitCaptionTaskBilingualStyle(style, portrait, [text]);
-    const fs = Math.round(48 * fitted.sub!.scale!);
+    const fs = Math.round(BASE_CAPTION_FONT_PX * fitted.sub!.scale!);
     const lines = captionLineSegments(wordsFromText(text, 0, 1), getCaptionPreset('ln-clean'), fitted.wPct!, fitted.sub!.scale!, portrait.width, { font: 'sans' });
     expect(lines.length).toBeGreaterThan(1);
     const height = lines.length * fs * 1.35 + (lines.length - 1) * Math.round(fs * .15);

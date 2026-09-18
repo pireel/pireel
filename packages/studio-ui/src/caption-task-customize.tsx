@@ -3,7 +3,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { CanvasCaptionPreview } from './canvas-caption-preview';
 import { WEB_FONTS } from '@pireel/studio-engine/font-library';
 import { CAPTION_TRANSLATION_LANGUAGES, captionTaskStyle, captionTaskCanvas, type CaptionTaskDimensions, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
-import { getCaptionPreset } from '@pireel/studio-engine/caption-presets';
+import { BASE_CAPTION_FONT_PX, getCaptionPreset } from '@pireel/studio-engine/caption-presets';
 
 export function CaptionTaskCustomize({ options, locale, disabled, source, onChange, onReset }: {
   options: CaptionTaskOptions; locale: 'zh' | 'en'; disabled: boolean; source?: CaptionTaskDimensions;
@@ -14,7 +14,7 @@ export function CaptionTaskCustomize({ options, locale, disabled, source, onChan
   const canvas = captionTaskCanvas(options.aspect, source ?? { width: 1080, height: 1920 });
   const style = captionTaskStyle(options, canvas);
   const outputScale = 1080 / Math.min(canvas.width, canvas.height);
-  const outputFontPx = Math.round(48 * (style.scale ?? 1) * outputScale);
+  const outputFontPx = Math.round(BASE_CAPTION_FONT_PX * (style.scale ?? 1) * outputScale);
   const preset = getCaptionPreset(style.preset);
   const bg = style.bg === undefined ? preset.bg : style.bg;
   const color = (value: string | undefined | null, fallback: string) => value && /^#[a-f0-9]{6}$/i.test(value) ? value : fallback;
@@ -35,7 +35,7 @@ export function CaptionTaskCustomize({ options, locale, disabled, source, onChan
           </SelectContent>
         </Select>
       </div>
-      <div className="grid grid-cols-2 gap-5">{range(say('字号', 'Size'), outputFontPx, 24, 192, 1, (pixels) => onChange({ scale: pixels / outputScale / 48 }), `${outputFontPx}px`)}{range(say('每行宽度', 'Line width'), style.wPct ?? 84, 40, 94, 1, (wPct) => onChange({ wPct }), `${style.wPct ?? 84}%`)}</div>
+      <div className="grid grid-cols-2 gap-5">{range(say('字号', 'Size'), outputFontPx, 24, 192, 1, (pixels) => onChange({ scale: pixels / outputScale / BASE_CAPTION_FONT_PX }), `${outputFontPx}px`)}{range(say('每行宽度', 'Line width'), style.wPct ?? 84, 40, 94, 1, (wPct) => onChange({ wPct }), `${style.wPct ?? 84}%`)}</div>
       <div className="grid grid-cols-2 gap-5">{swatch(say('文字颜色', 'Text color'), color(style.color ?? preset.text, '#ffffff'), (value) => onChange({ color: value }))}{preset.mode === 'emphasis' && swatch(say('高亮颜色', 'Accent color'), color(style.accentColor ?? preset.emphasis, '#ffe34f'), (accentColor) => onChange({ accentColor }))}</div>
       <div className="grid grid-cols-2 gap-5">{range(say('描边粗细', 'Outline'), style.strokeWidth ?? 0, 0, 8, .5, (strokeWidth) => onChange({ strokeWidth }), String(style.strokeWidth ?? 0))}{swatch(say('描边颜色', 'Outline color'), color(style.strokeColor, '#000000'), (strokeColor) => onChange({ strokeColor }))}</div>
       <div className="grid grid-cols-2 gap-5"><label className="text-ink flex items-center gap-2 text-xs"><input type="checkbox" checked={!!style.bold} onChange={(event) => onChange({ bold: event.target.checked })} className="accent-[var(--color-accent)]" />{say('加粗', 'Bold')}</label><label className="text-ink flex items-center gap-2 text-xs"><input type="checkbox" checked={!!bg} onChange={(event) => onChange({ bg: event.target.checked ? '#000000' : null })} className="accent-[var(--color-accent)]" />{say('背景底色', 'Background')}</label></div>

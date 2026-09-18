@@ -2,7 +2,7 @@ import { dubbingCaptionSample } from './caption-preview-text';
 import { useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { CAPTION_TRANSLATION_LANGUAGES, captionTaskGroupBottom, captionTaskStyle, fitCaptionTaskBilingualStyle, type CaptionTaskDimensions, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
 import { emptyComposition, resolveSubCaptionStyle, type CaptionStyle } from '@pireel/studio-engine/composition';
-import { getCaptionPreset } from '@pireel/studio-engine/caption-presets';
+import { BASE_CAPTION_FONT_PX, getCaptionPreset } from '@pireel/studio-engine/caption-presets';
 import { captionLineSegments } from '@pireel/studio-engine/caption-layout-metrics';
 import type { FxWord } from '@pireel/studio-engine/caption-fx';
 import { CanvasCaptionPreview } from './canvas-caption-preview';
@@ -11,7 +11,7 @@ function lineHeightPct(text: string, style: Partial<CaptionStyle>, canvas: Capti
   const base = getCaptionPreset(style.preset);
   const preset = style.bg === undefined ? base : { ...base, bg: style.bg ?? undefined };
   const words: FxWord[] = text.split('|').map((text, index) => ({ text, start: index, end: index + 1 }));
-  const size = Math.max(10, Math.round(48 * (style.scale ?? 1)));
+  const size = Math.max(10, Math.round(BASE_CAPTION_FONT_PX * (style.scale ?? 1)));
   const lines = captionLineSegments(words, preset, style.wPct ?? 84, style.scale ?? 1, canvas.width, { font: style.font, bold: style.bold });
   const lineHeight = size * 1.35 + (preset.bg ? Math.round(size * .22) * 2 : 0);
   return (lines.length * lineHeight + Math.max(0, lines.length - 1) * size * .15) / canvas.height * 100;

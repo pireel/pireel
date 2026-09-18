@@ -133,7 +133,7 @@ describe('caption versions and preview UI', () => {
     await saveCaptionTask({ ...fixture(), generationId: 'old-version', stage: 'completed' }, new Blob(['old video']));
     await act(async () => root.render(createElement(CaptionTaskPage, { taskId: 'task', locale: 'zh', onBack: vi.fn(), onOpenEditor: vi.fn() })));
     await settled(() => expect(container.querySelector('video[controls]')).not.toBeNull());
-    expect(container.querySelector<HTMLInputElement>('[aria-label="字号"]')?.value).toBe('85');
+    expect(container.querySelector<HTMLInputElement>('[aria-label="字号"]')?.value).toBe('114');
     expect(container.querySelector('[aria-label="上下位置"]')).toBeNull();
     await click(button('荧光绿'));
     expect(container.querySelector<HTMLInputElement>('[aria-label="字号"]')?.value).toBe('64');
