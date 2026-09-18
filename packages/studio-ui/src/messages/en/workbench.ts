@@ -501,6 +501,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.bgmRemoved": "Audio track removed",
   "workbench.denoiseFailed":
     "Denoise failed — preview and export keep the original audio",
+  "workbench.denoiseNoAudio": "This video has no audio track, so there is no sound to denoise",
   "workbench.denoiseNotOn": "Denoise is not on",
   "workbench.denoiseTurnedOff": "Narration denoise turned off",
   "workbench.denoiseTurnedOn":

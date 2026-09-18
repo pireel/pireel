@@ -455,6 +455,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.bgmMounted": "已加一条音轨({db}dB)",
   "workbench.bgmRemoved": "已删除音轨",
   "workbench.denoiseFailed": "降噪处理失败,预览与导出继续用原声",
+  "workbench.denoiseNoAudio": "这段视频没有音轨,没有可降噪的声音",
   "workbench.denoiseNotOn": "降噪本来就没开",
   "workbench.denoiseTurnedOff": "已关闭口播降噪",
   "workbench.denoiseTurnedOn":

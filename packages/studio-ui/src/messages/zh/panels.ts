@@ -177,6 +177,7 @@ export const PANELS_ZH: Record<string, string> = {
   "panels.noMatchingAssetsTry": "没有匹配的素材，换个词试试",
   "panels.denoiseBaking": "降噪处理中 {pct}%…",
   "panels.denoiseFailedHint": "降噪处理失败,预览/导出用原声",
+  "panels.denoiseSilentHint": "主视频没有音轨,没有可降噪的声音",
   "panels.disableClip": "停用片段",
   "panels.denoiseNarration": "口播降噪",
   "panels.denoiseReadyHint": "已生效:预览与导出都是降噪后的声音",

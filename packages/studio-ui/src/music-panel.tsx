@@ -44,7 +44,7 @@ export function MusicPanel({
   shots: VideoShot[];
   onSetShotAudio: (patch: { volumeDb?: number; fadeInSec?: number; fadeOutSec?: number }) => void;
   /** Narration denoise (main source): strength null = off; status/progress mirror the bake. */
-  denoise: { strength: number | null; status: 'baking' | 'ready' | 'failed' | null; progress: number };
+  denoise: { strength: number | null; status: 'baking' | 'ready' | 'failed' | 'silent' | null; progress: number };
   onSetDenoise: (strength: number | null) => void;
 }) {
   const sel = clips.find((c) => c.id === selectedId) ?? null;
@@ -159,6 +159,7 @@ export function MusicPanel({
                 <div className="text-ink-4 text-[10.5px]">{t('panels.denoiseBaking', { pct: Math.round(denoise.progress * 100) })}</div>
               )}
               {denoise.status === 'failed' && <div className="text-ink-4 text-[10.5px]">{t('panels.denoiseFailedHint')}</div>}
+              {denoise.status === 'silent' && <div className="text-ink-4 text-[10.5px]">{t('panels.denoiseSilentHint')}</div>}
               {denoise.status === 'ready' && <div className="text-ink-4 text-[10.5px]">{t('panels.denoiseReadyHint')}</div>}
             </>
           )}

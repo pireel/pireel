@@ -185,6 +185,7 @@ export const PANELS_EN: Record<string, string> = {
   "panels.denoiseBaking": "Denoising {pct}%…",
   "panels.denoiseFailedHint":
     "Denoise failed — preview/export use the original audio",
+  "panels.denoiseSilentHint": "The main video has no audio track; nothing to denoise",
   "panels.disableClip": "Disable clip",
   "panels.denoiseNarration": "Narration denoise",
   "panels.denoiseReadyHint":

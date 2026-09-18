@@ -38,7 +38,8 @@ export interface DenoiseDeps {
 
 export function useDenoise(deps: DenoiseDeps) {
   const { comp, compRef, documentRef, commit, videoFile, videoFileRef, videoSigRef, videoEngineRef, clipFilesRef } = deps;
-  const [status, setStatus] = useState<'baking' | 'ready' | 'failed' | null>(null);
+  /** `silent`: the source decodes fine but has no audio track — nothing to denoise, not a failure. */
+  const [status, setStatus] = useState<'baking' | 'ready' | 'failed' | 'silent' | null>(null);
   const [progress, setProgress] = useState(0);
   /** Blended output of the last successful bake: what preview plays and export substitutes. */
   const blendedRef = useRef<{ sig: string; strength: number; file: File; url: string } | null>(null);
@@ -111,7 +112,16 @@ export function useDenoise(deps: DenoiseDeps) {
     try {
       const dryBuf = await decodeVideoAudio(f);
       if (runId !== runIdRef.current) return;
-      if (!dryBuf) throw new Error('source has no audio track');
+      if (!dryBuf) {
+        // A picture with no sound is a plain fact, not a processing failure: say so and leave the
+        // knob as it is, so a later sound-bearing source still gets its bake.
+        const previous = blendedRef.current;
+        if (previous) URL.revokeObjectURL(previous.url);
+        blendedRef.current = null;
+        setStatus('silent');
+        toast.info(t('workbench.denoiseNoAudio'));
+        return;
+      }
       const dry = await toMono(dryBuf, DENOISE_RATE);
       if (runId !== runIdRef.current) return;
       // wet: OPFS cache by source sig (+ engine tag) — inference runs once per source ever
