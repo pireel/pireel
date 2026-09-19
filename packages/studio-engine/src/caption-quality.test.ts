@@ -47,9 +47,19 @@ describe('caption quality invariants', () => {
     const karaoke = renderBlock({ ...block, slots: { ...block.slots, preset: 'em-yellow' } }).timelineBody;
     expect(karaoke).toContain('-w2 .t');
   });
-  it('validates complete sparse model selections and rejects fabricated indexes', () => {
+  it('validates complete model selections and rejects fabricated indexes', () => {
     const rows = [{ index: 7, words: ['不是', '免费', '而是', '按次', '收费'] }];
     expect(validateEmphasisSelection(rows, [{ index: 7, words: [0, 1] }])).not.toBeNull();
-    for (const response of [[], [{ index: 7, words: [5] }], [{ index: 7, words: [1, 1] }], [{ index: 7, words: [0, 1, 2, 3] }], [{ index: 8, words: [] }]]) expect(validateEmphasisSelection(rows, response)).toBeNull();
+    expect(validateEmphasisSelection(rows, [{ index: 7, words: [0, 1, 2, 3, 4] }])).not.toBeNull();
+    for (const response of [[], [{ index: 7, words: [5] }], [{ index: 7, words: [1, 1] }], [{ index: 8, words: [] }]]) expect(validateEmphasisSelection(rows, response)).toBeNull();
   });
+});
+
+it('accepts more than eight valid highlighted positions through the workflow contract', async () => {
+  const { emphasisSchema } = await import('./workflow-node-contracts');
+  const { assertWorkflowValue } = await import('./workflow-schema');
+  const words = Array.from({ length: 12 }, (_, index) => index);
+  const rows = [{ index: 0, words: words.map(index => 'word' + index) }];
+  expect(validateEmphasisSelection(rows, [{ index: 0, words }])).toEqual([{ index: 0, words }]);
+  expect(() => assertWorkflowValue({ sourceKey: 'source', items: [{ id: 'line', words }] }, emphasisSchema)).not.toThrow();
 });

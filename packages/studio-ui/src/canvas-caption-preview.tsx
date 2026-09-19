@@ -57,7 +57,7 @@ export function CanvasCaptionPreview({ style, locale, tile = false, aspect = 9 /
       const dpr = Math.min(devicePixelRatio || 1, 2);
       ctx.setTransform(dpr * width / designWidth, 0, 0, dpr * height / designHeight, 0, 0);
       ctx.clearRect(0, 0, designWidth, designHeight);
-      drawPresetCaption(ctx, words, viewStyle, reduced.matches ? 1.5 : (playbackTime?.() ?? clock) % (words.length * .6), designWidth, designHeight);
+      drawPresetCaption(ctx, words, viewStyle, reduced.matches ? 1.5 : (playbackTime?.() ?? clock) % (words.length * .6), designWidth, designHeight, tile ? 'center' : 'bottom');
       if (subStyle) drawPresetCaption(ctx, subWords, subStyle, 0, designWidth, designHeight);
     };
     const update = () => { unsubscribe?.(); unsubscribe = undefined; draw(1.5); if (visible && !reduced.matches && !paused) unsubscribe = subscribe(draw); };

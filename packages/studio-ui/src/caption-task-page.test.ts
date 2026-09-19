@@ -5,8 +5,10 @@ import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CaptionTaskRecord } from './caption-task-store';
 import type { runCaptionTask } from './caption-task-runner';
-const mocks = vi.hoisted(() => ({ run: vi.fn(), remix: vi.fn(), source: vi.fn(), cache: vi.fn() }));
+const mocks = vi.hoisted(() => ({ run: vi.fn(), remix: vi.fn(), source: vi.fn(), cache: vi.fn(), exportEdit: vi.fn() }));
 vi.mock('./dubbing-task-runner', () => ({ runDubbingTask: mocks.run }));
+vi.mock('./broll-export', () => ({ exportBrollEdit: mocks.exportEdit }));
+vi.mock('./broll-task-runner', () => ({ runBrollTask: mocks.run }));
 vi.mock('./caption-task-runner', () => ({ runCaptionTask: mocks.run }));
 vi.mock('./caption-agent-remix', () => ({ createCaptionAgentRemix: mocks.remix }));
 vi.mock('./current-user', () => ({ loadCurrentUser: async () => ({ user_id: 'owner', auth_method: 'session' }) }));
@@ -53,6 +55,41 @@ async function complete(index: number) {
   await settled(() => expect(container.querySelector('video[controls]')).not.toBeNull());
 }
 describe('caption versions and preview UI', () => {
+  it('opens the own-footage scene, requires assets and dispatches its runner with captions', async () => {
+    await act(async () => root.render(null));
+    const source = { ...fixture(), scene: 'broll' as const, options: { ...fixture().options, broll: { assets: [], captions: true } } };
+    await saveCaptionTask(source);
+    await act(async () => root.render(createElement(CaptionTaskPage, { taskId: 'task', scene: 'broll', locale: 'zh', onBack: vi.fn(), onOpenEditor: vi.fn() })));
+    await settled(() => expect(button('生成视频')).toBeTruthy());
+    expect(button('生成视频').disabled).toBe(true);
+    expect(container.textContent).toContain('我的素材');
+    expect(container.textContent).not.toContain('音色');
+    expect(container.textContent).not.toContain('双语字幕');
+    await act(async () => root.render(null));
+    await saveCaptionTask({ ...source, options: { ...source.options, broll: { captions: true, assets: [{ id: 'asset', sig: 'asset-sig', name: 'broll.mp4', kind: 'video', width: 1920, height: 1080, durationSec: 5 }] } } });
+    await act(async () => root.render(createElement(CaptionTaskPage, { taskId: 'task', scene: 'broll', locale: 'zh', onBack: vi.fn(), onOpenEditor: vi.fn() })));
+    await settled(() => expect(button('生成视频')?.disabled).toBe(false));
+    await click(button('生成视频')); await settled(() => expect(runs).toHaveLength(1));
+    expect(runs[0].task.scene).toBe('broll');
+    expect(container.querySelector('[aria-label="配画面生成进度"]')).not.toBeNull();
+    await complete(0);
+  });
+  it('exports a B-roll draft without opening regeneration confirmation or creating a version', async () => {
+    await act(async () => root.render(null));
+    const source = { ...fixture(), scene: 'broll' as const, stage: 'completed' as const, generationId: 'v1', draftOptions: fixture().options, options: { ...fixture().options, broll: { assets: [], captions: false } } };
+    source.draftOptions=source.options;
+    await saveCaptionTask(source,new Blob(['existing']));
+    mocks.exportEdit.mockResolvedValue(new Blob(['export']));
+    const download=vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>{});
+    await act(async () => root.render(createElement(CaptionTaskPage, { taskId: 'task', scene: 'broll', locale: 'zh', onBack: vi.fn(), onOpenEditor: vi.fn() })));
+    await settled(() => expect(button('导出')).toBeTruthy());
+    const before=await listCaptionVersions('owner','task');
+    await click(button('导出'));
+    await settled(()=>expect(download).toHaveBeenCalledOnce());
+    expect(mocks.exportEdit).toHaveBeenCalledOnce();expect(mocks.run).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(await listCaptionVersions('owner','task')).toEqual(before);
+  });
   it('defaults to the first displayed voice, preserves changes, and dispatches the dubbing runner', async () => {
     await act(async () => root.render(null));
     vi.stubGlobal('fetch', vi.fn(async (url) => new Response(JSON.stringify(String(url).includes('dubbing-lipsync') ? { lipSyncAvailable: true } : { voices: [{ id: 'en-voice', label: 'English voice', source: 'system', language: 'en', languages: ['en'], status: 'ready', sampleUrl: 'https://example.test/sample.mp3' }, { id: 'my-clone', label: '我的克隆', source: 'cloned', language: 'zh', languages: ['zh'], status: 'ready' }, { id: 'zh-system', label: '中文官方', source: 'system', language: 'zh', languages: ['zh'], status: 'ready' }] }))));

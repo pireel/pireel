@@ -2,12 +2,17 @@ import type { CaptionTaskOptions } from './caption-task';
 import type { AsrSegment } from './build-blocks';
 import type { EditorDocumentV2 } from './composition';
 
-export type CaptionTaskStage = 'ready' | 'preparing' | 'transcribing' | 'cleaning' | 'translating' | 'emphasizing' | 'voicing' | 'aligning' | 'lipsync' | 'styling' | 'rendering' | 'completed' | 'failed' | 'interrupted';
-export type CaptionProcessingStage = 'preparing' | 'transcribing' | 'cleaning' | 'translating' | 'styling' | 'emphasizing' | 'voicing' | 'aligning' | 'lipsync' | 'rendering';
+export type CaptionTaskStage = 'waiting' | 'ready' | 'preparing' | 'analyzing' | 'matching' | 'transcribing' | 'cleaning' | 'translating' | 'emphasizing' | 'voicing' | 'aligning' | 'lipsync' | 'styling' | 'rendering' | 'completed' | 'failed' | 'interrupted';
+export type CaptionProcessingStage = 'preparing' | 'analyzing' | 'matching' | 'transcribing' | 'cleaning' | 'translating' | 'styling' | 'emphasizing' | 'voicing' | 'aligning' | 'lipsync' | 'rendering';
 export interface CaptionStageProgress { status: 'pending' | 'running' | 'completed'; fraction?: number; detail?: string; done?: number; total?: number }
 export type CaptionTaskProgress = Partial<Record<CaptionProcessingStage, CaptionStageProgress>>;
 export interface CaptionTaskRecord {
-  scene?: 'captions' | 'dubbing'; dubbing?: import('@pireel/studio-engine/dubbing-task').DubbingState;
+  workflowEnvironmentRevision?: string;
+  workflow?: import('./workflow').WorkflowRun;
+  workflowDefinition?: import('./workflow').WorkflowDefinition;
+  workflowData?: import('./workflow-artifacts').SceneWorkflowData;
+  scene?: 'captions' | 'dubbing' | 'broll'; dubbing?: import('@pireel/studio-engine/dubbing-task').DubbingState;
+  broll?: { analyzedAssets?: string[]; candidates: import('./broll-task').BrollCandidate[]; analysisKey: string; planKey?: string; placements?: import('./broll-task').BrollPlacement[]; outputSig?: string };
   cloudRevision?: number; cloudPending?: boolean; cloudError?: string; coverSig?: string;
   id: string; scope: string; name: string; sourceSig: string; width: number; height: number; durationSec: number;
   options: CaptionTaskOptions; stage: CaptionTaskStage; updatedAt: number; error?: string; transcript?: AsrSegment[];

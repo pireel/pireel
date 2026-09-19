@@ -1,0 +1,21 @@
+import type { CaptionTaskOptions } from './caption-task';
+import { captionWorkflowDefinition, sceneCapability, sceneLiteral, sceneStep, stepOutput } from './workflow-caption-template';
+export const BROLL_WORKFLOW_CAPABILITIES = [
+  sceneCapability('media.analyze', ['assets', 'cached'], ['analysis'], true),
+  sceneCapability('broll.match', ['transcript', 'analysis', 'durationSec', 'projectId', 'cached'], ['plan', 'value'], true),
+  sceneCapability('broll.compose', ['document', 'plan', 'analysis', 'options', 'durationSec'], ['document', 'plan']),
+];
+export function brollWorkflowDefinition(options: CaptionTaskOptions, media: unknown, transcript: unknown, projectId: string, durationSec: number, cached: unknown) {
+  const definition = captionWorkflowDefinition({ ...options, shortenPauses: false }, media, transcript, null, projectId);
+  definition.id = 'official-broll'; definition.title = 'B-roll'; definition.templateId = 'broll';
+  const compose = definition.steps.findIndex(step => step.id === 'compose');
+  definition.steps.splice(compose, 0,
+    sceneStep('analysis', 'media.analyze', { assets: sceneLiteral(options.broll!.assets), cached: sceneLiteral(cached) }),
+    sceneStep('match', 'broll.match', { transcript: stepOutput('transcript', 'transcript'), analysis: stepOutput('analysis', 'analysis'), durationSec: sceneLiteral(durationSec), projectId: sceneLiteral(projectId), cached: sceneLiteral(cached) }),
+  );
+  const render = definition.steps.find(step => step.id === 'render')!;
+  const document = render.arguments.document;
+  definition.steps.splice(definition.steps.indexOf(render), 0, sceneStep('broll', 'broll.compose', { document, plan: stepOutput('match', 'value'), analysis: stepOutput('analysis', 'analysis'), options: sceneLiteral(options.broll), durationSec: sceneLiteral(durationSec) }));
+  render.arguments.document = stepOutput('broll', 'document'); render.dependsOn = ['broll'];
+  return definition;
+}

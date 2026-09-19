@@ -5,12 +5,12 @@ import { dubbingSpeakers, dubbingTurns, dubbingVoiceFor, splitDubbingScript } fr
 
 export interface SceneCreditInput {
   durationSec: number; asr: boolean; translation: boolean; emphasis: boolean; lipSync: boolean;
-  sourceTokens?: number; asrPasses?: number;
+  brollFrames?: number; sourceTokens?: number; asrPasses?: number;
   speech: { voiceId: string; minUnits: number; maxUnits: number; maxChunks: number; estimatedUnits?: number; estimatedChunks?: number }[];
 }
 export interface SceneCreditEstimate {
   min: number; max: number; estimate: number; durationBased: boolean;
-  items: { kind: 'asr' | 'translation' | 'emphasis' | 'speech' | 'lipSync'; min: number; max: number; estimate: number }[];
+  items: { kind: 'asr' | 'translation' | 'emphasis' | 'speech' | 'lipSync' | 'visual' | 'matching'; min: number; max: number; estimate: number }[];
 }
 const units = (text: string) => [...text].reduce((sum, char) => sum + (/\p{Script=Han}/u.test(char) ? 2 : 1), 0);
 /** Compact usage hints for a read-only estimate, never authorization or actual billing input. */
@@ -18,6 +18,11 @@ export function sceneCreditInput(task: CaptionTaskRecord, options: CaptionTaskOp
   const transcript = task.transcript ?? [];
   const source = transcript.map((segment) => segment.text).join('\n');
   const input: SceneCreditInput = { durationSec: task.durationSec, asr: !reuseCompleted || !transcript.length, translation: false, emphasis: false, lipSync: false, speech: [], ...(source ? { sourceTokens: Math.max([...source].length, Math.ceil(new TextEncoder().encode(source).byteLength / 2)) } : {}) };
+  if (task.scene === 'broll') {
+    input.brollFrames = (options.broll?.assets ?? []).reduce((sum, a) => sum + (a.kind === 'image' ? 1 : 8), 0);
+    input.emphasis = !!options.broll?.captions && options.presetId === 'keywords';
+    return input;
+  }
   if (task.scene !== 'dubbing') {
     input.translation = !!options.translationLanguage && !(reuseCompleted && task.stage === 'completed' && task.translation?.language === options.translationLanguage && task.options.shortenPauses === options.shortenPauses);
     input.emphasis = options.presetId === 'keywords';

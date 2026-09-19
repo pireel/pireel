@@ -27,7 +27,7 @@ export const CAPTION_TRANSLATION_LANGUAGES = [
   { id: '한국어', name: { zh: '韩语', en: 'Korean' }, sample: '자막 미리보기' },
 ] as const;
 export type CaptionTranslationLanguage = typeof CAPTION_TRANSLATION_LANGUAGES[number]['id'];
-export interface CaptionTaskOptions { dubbing?: import('./dubbing-task').DubbingOptions; layoutVersion?: 2; presetId: string; aspect: 'original' | 'portrait' | 'landscape' | 'square'; shortenPauses: boolean; translationLanguage?: CaptionTranslationLanguage; custom?: Pick<Partial<CaptionStyle>, 'font' | 'scale' | 'bold' | 'color' | 'accentColor' | 'bg' | 'strokeColor' | 'strokeWidth' | 'xPct' | 'yPct' | 'wPct'> }
+export interface CaptionTaskOptions { broll?: import('./broll-task').BrollOptions; dubbing?: import('./dubbing-task').DubbingOptions; layoutVersion?: 2; presetId: string; aspect: 'original' | 'portrait' | 'landscape' | 'square'; shortenPauses: boolean; translationLanguage?: CaptionTranslationLanguage; custom?: Pick<Partial<CaptionStyle>, 'font' | 'scale' | 'bold' | 'color' | 'accentColor' | 'bg' | 'strokeColor' | 'strokeWidth' | 'xPct' | 'yPct' | 'wPct'> }
 export function captionTaskPreset(id: string): CaptionTaskPreset {
   const preset = CAPTION_TASK_PRESETS.find((item) => item.id === id);
   if (!preset) throw new Error('Unknown caption preset');
@@ -92,13 +92,12 @@ export function captionTaskCanvas(aspect: CaptionTaskOptions['aspect'], source: 
   const ratio = aspect === 'portrait' ? 9 / 16 : aspect === 'landscape' ? 16 / 9 : aspect === 'square' ? 1 : source.width / source.height;
   return { width: 1080, height: Math.max(2, Math.round(1080 / ratio / 2) * 2) };
 }
-export function buildCaptionTaskDocument(input: {
+export function buildCaptionBaseDocument(input: {
   projectId: string; sourceName?: string; sourceUrl: string; sourceSig: string; width: number; height: number; durationSec: number;
   options: CaptionTaskOptions; transcript: AsrSegment[]; cuts?: { fromSec: number; toSec: number }[];
 }): EditorDocumentV2 {
   if (!Number.isFinite(input.durationSec) || input.durationSec <= 0) throw new Error('Invalid video duration');
   const canvas = captionTaskCanvas(input.options.aspect, input);
-  const style = captionTaskStyle(input.options, canvas);
   let index = 0;
   const shots = removeSrcRanges([{ id: 'caption-source', srcStart: 0, srcEnd: input.durationSec, treatment: 'full' as const }],
     (input.cuts ?? []).map((cut) => [cut.fromSec, cut.toSec]), (base, srcStart, srcEnd) => ({ ...base, id: `caption-cut-${++index}`, srcStart, srcEnd })).clips;
@@ -106,6 +105,12 @@ export function buildCaptionTaskDocument(input: {
   const comp = { ...emptyComposition(), ...canvas, video: { url: input.sourceUrl, durationSec: input.durationSec }, shots };
   const document = compositionToEditorDocument({ projectId: input.projectId, composition: comp, videoSig: input.sourceSig }).document;
   if (input.sourceName) for (const asset of Object.values(document.assets)) if (asset.kind === 'video') asset.label = input.sourceName;
+  return document;
+}
+
+export function buildCaptionTaskDocument(input: Parameters<typeof buildCaptionBaseDocument>[0]): EditorDocumentV2 {
+  const document = buildCaptionBaseDocument(input);
+  const style = captionTaskStyle(input.options, document.canvas);
   const result = applyCaptionDocumentEdit({ document, patch: { ...style, on: true }, mainTranscript: input.transcript, clipTranscripts: {} });
   if (!result.ok) throw new Error(result.error.message);
   return fitCaptionTaskDocumentLayout(result.document, input.options);

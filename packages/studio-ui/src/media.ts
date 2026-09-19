@@ -170,7 +170,7 @@ export async function probeVideoFile(file: File): Promise<ProbedFile> {
 }
 
 /** Extract audio (upload audio only) → ASR → sentence-level shots. Cached by fileSig (same clip transcribed once). */
-export async function transcribeFile(file: File, opts?: { projectId?: string; signal?: AbortSignal; onPhase?: (phase: 'checking' | 'extracting' | 'uploading' | 'recognizing' | 'aligning') => void }): Promise<AsrSegment[]> {
+export async function transcribeFile(file: File, opts?: { projectId?: string; signal?: AbortSignal; onUsage?: (usage: import('@pireel/studio-engine/workflow').WorkflowUsage) => void; onPhase?: (phase: 'checking' | 'extracting' | 'uploading' | 'recognizing' | 'aligning') => void }): Promise<AsrSegment[]> {
   const phase = (value: 'checking' | 'extracting' | 'uploading' | 'recognizing' | 'aligning') => { opts?.signal?.throwIfAborted(); opts?.onPhase?.(value); };
   phase('checking');
   const sig = fileSig(file);
@@ -201,11 +201,13 @@ export async function transcribeFile(file: File, opts?: { projectId?: string; si
   if (r.status === 402) throw new Error(t('chatGen.notEnoughCreditsTop'));
   if (!r.ok) throw new Error(t('common.transcriptionRequestFailedHttp', { status: r.status }));
   const j = (await r.json()) as {
+    usage?: import('@pireel/studio-engine/workflow').WorkflowUsage;
     asr_ok?: boolean;
     detail?: string;
     lang?: string | null;
     segments?: Array<{ start: number; end: number; text: string; lang?: string; speaker?: string; words?: Array<{ start: number; end: number; text: string }> }>;
   };
+  if (j.usage) opts?.onUsage?.(j.usage);
   const asrState = classifyAsrResponse(j);
   if (asrState === 'failed') throw new Error(t('workbench.transcriptExtractionFailedTry'));
   if (asrState === 'empty') return [];

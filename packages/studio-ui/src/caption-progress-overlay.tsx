@@ -7,9 +7,9 @@ export function CaptionProgressOverlay({ options, progress, locale, stopping, on
   const dubbed = !!options.dubbing; const cloudPending = progress.lipsync?.status === 'running';
   const zh = locale === 'zh'; const lang = zh ? 0 : 1;
   const stages = captionProcessingStages(options);
-  return <div role="region" aria-label={dubbed ? (zh ? '译制生成进度' : 'Dubbing progress') : (zh ? '字幕生成进度' : 'Caption generation progress')} className="absolute inset-0 z-20 flex items-center justify-center overflow-y-auto bg-black/80 p-4 text-white backdrop-blur-sm">
+  return <div role="region" aria-label={options.broll ? (zh ? '配画面生成进度' : 'B-roll progress') : dubbed ? (zh ? '译制生成进度' : 'Dubbing progress') : (zh ? '字幕生成进度' : 'Caption generation progress')} className="absolute inset-0 z-20 flex items-center justify-center overflow-y-auto bg-black/80 p-4 text-white backdrop-blur-sm">
     <div className="my-auto w-full max-w-sm py-3">
-      <h2 className="mb-5 flex items-center gap-2 text-base font-medium" aria-live="polite"><Loader2 size={17} className="animate-spin" />{stopping ? (zh ? '正在停止…' : 'Stopping…') : (dubbed ? (zh ? '正在生成译制视频' : 'Generating dubbed video') : (zh ? '正在生成字幕视频' : 'Generating captioned video'))}</h2>
+      <h2 className="mb-5 flex items-center gap-2 text-base font-medium" aria-live="polite"><Loader2 size={17} className="animate-spin" />{stopping ? (zh ? '正在停止…' : 'Stopping…') : (options.broll ? (zh ? '正在生成视频' : 'Generating video') : dubbed ? (zh ? '正在生成译制视频' : 'Generating dubbed video') : (zh ? '正在生成字幕视频' : 'Generating captioned video'))}</h2>
       <div className="space-y-3">{stages.map((stage) => {
         const value = progress[stage]; const running = value?.status === 'running'; const complete = value?.status === 'completed';
         const detail = value?.detail ? CAPTION_PROGRESS_DETAILS[value.detail]?.[lang] : undefined;

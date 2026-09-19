@@ -59,3 +59,22 @@ describe('Agent Remix', () => {
     expect(mock.save).not.toHaveBeenCalled();
   });
 });
+it('keeps the original picture and separate dubbed narration when remixing a migrated result', async () => {
+  const original = task(); original.scene = 'dubbing';
+  original.dubbing = { outputSig: 'flattened-export' };
+  original.document = dubbingVideoDocument(original.id, 'source', 'blob:source', 'source.mp4', 1080, 1920, 4);
+  const { applyDocumentTransaction } = await import('@pireel/studio-engine/document-transaction');
+  const edited = applyDocumentTransaction(original.document, { ops: [
+    { op: 'command', input: { command: { type: 'track.insert', track: { id: 'voice', type: 'audio', role: 'narration' } } } },
+    { op: 'audio.add', input: { toTrackId: 'voice', clip: { id: 'audio', sig: 'aligned-voice', src: 'blob:voice', durationSec: 4, startSec: 0, volumeDb: 0, fadeInSec: 0, fadeOutSec: 0 } } },
+  ] }, { projectId: original.id });
+  if (!edited.ok) throw new Error(edited.error.message);
+  original.document = edited.document;
+  original.workflow = { definition: { version: 2 } } as never;
+  original.workflowData = { artifacts: {}, receipts: {}, partials: {} };
+  await createCaptionAgentRemix(original, new File(['original'], 'source.mp4', { type: 'video/mp4' }));
+  const payload = mock.save.mock.calls[0][1] as ProjectSaveWire;
+  expect(payload.videoSig).toBe('source');
+  expect(payload.context?.localAssets?.map(asset => asset.sig)).toEqual(expect.arrayContaining(['source', 'aligned-voice']));
+  expect(JSON.stringify(payload.transactions)).not.toContain('flattened-export');
+});

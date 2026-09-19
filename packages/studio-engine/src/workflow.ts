@@ -2,6 +2,7 @@
  * Studio workflows. Pure data contracts shared by forms, agents and future schedulers.
  * No host SDK, transport, storage, media bytes or legacy business dependencies.
  */
+import { assertWorkflowValue, validateWorkflowSchema, type WorkflowSchema } from './workflow-schema';
 export type WorkflowValue = string | number | boolean | null | WorkflowValue[] | { [key: string]: WorkflowValue };
 export type WorkflowInputs = Record<string, WorkflowValue>;
 export type WorkflowEnvironment = 'browser' | 'desktop' | 'cloud';
@@ -14,9 +15,10 @@ export type WorkflowBinding =
   | { kind: 'input'; key: string }
   | { kind: 'step'; stepId: string; key: string };
 export interface WorkflowParameter {
-  type: 'string' | 'number' | 'boolean';
+  type: 'string' | 'number' | 'boolean' | 'object' | 'array';
   label: { zh: string; en: string };
-  default: string | number | boolean;
+  default: WorkflowValue;
+  schema?: WorkflowSchema;
   options?: { value: string; label: { zh: string; en: string } }[];
   min?: number;
   max?: number;
@@ -29,6 +31,8 @@ export interface WorkflowStep {
   dependsOn: string[];
   arguments: Record<string, WorkflowBinding>;
   enabledBy?: string;
+  /** Explicit pass-through outputs when an optional node is disabled. */
+  bypass?: Record<string, WorkflowBinding>;
 }
 export type WorkflowTrigger =
   | { kind: 'manual' }
@@ -64,7 +68,7 @@ export interface WorkflowSource {
   revision: string;
 }
 export interface WorkflowArtifact {
-  kind: 'project-output' | 'transcript' | 'segments' | 'edit-receipt' | 'rendered-video' | 'publication';
+  kind: 'project-output' | 'transcript' | 'segments' | 'edit-receipt' | 'rendered-video' | 'publication' | 'value' | 'approval' | 'notification';
   data: WorkflowInputs;
 }
 export interface WorkflowCapability {
@@ -76,8 +80,20 @@ export interface WorkflowCapability {
   effect: 'read' | 'edit' | 'generate' | 'publish';
   retry: 'safe' | 'reconcile-first';
   available: boolean;
+  inputs?: Record<string, { schema?: WorkflowSchema; required?: boolean; default?: WorkflowValue; label?: string; valueType?: string; hidden?: boolean }>;
+  outputs?: Record<string, { schema?: WorkflowSchema; label?: string; valueType?: string }>;
+}
+export interface WorkflowApproval {
+  id: string; title: string; value: WorkflowValue; schema: WorkflowSchema;
+  editable: boolean; status: 'pending' | 'approved' | 'rejected';
+  decidedBy?: string; decidedAt?: number;
+}
+export interface WorkflowNotice {
+  id: string; nodeId: string; title: string; message: string;
+  approvalId?: string; createdAt: number;
 }
 export type WorkflowStepStatus = 'pending' | 'running' | 'waiting' | 'completed' | 'skipped' | 'failed';
+export interface WorkflowUsage { source: 'server'; reference: string; inputTokens?: number; outputTokens?: number; cachedInputTokens?: number; credits?: number; audioSeconds?: number }
 export interface WorkflowStepRun {
   id: string;
   status: WorkflowStepStatus;
@@ -87,6 +103,11 @@ export interface WorkflowStepRun {
   artifact?: WorkflowArtifact;
   summary?: string;
   error?: string;
+  approval?: WorkflowApproval;
+  usage?: WorkflowUsage[];
+  inputs?: WorkflowInputs;
+  startedAt?: number; finishedAt?: number; cacheHit?: boolean; inputKey?: string;
+  billing?: { status: 'local' | 'cached' | 'server-managed'; requestId?: string };
 }
 export interface WorkflowRun {
   schemaVersion: 1;
@@ -99,6 +120,7 @@ export interface WorkflowRun {
   createdAt: number;
   updatedAt: number;
   error?: string;
+  notices?: WorkflowNotice[];
 }
 export const workflowInput = (key: string): WorkflowBinding => ({ kind: 'input', key });
 export const workflowLiteral = (value: WorkflowValue): WorkflowBinding => ({ kind: 'literal', value });
@@ -107,9 +129,10 @@ export function resolveWorkflowInputs(definition: WorkflowDefinition, overrides:
   for (const key of Object.keys(overrides)) if (!Object.hasOwn(definition.parameters, key)) throw new Error('Unknown parameter: ' + key);
   const result: WorkflowInputs = {};
   for (const [key, spec] of Object.entries(definition.parameters)) {
-    if (!['string', 'number', 'boolean'].includes(spec.type)) throw new Error('Unsupported parameter type: ' + key);
+    if (!['string', 'number', 'boolean', 'object', 'array'].includes(spec.type)) throw new Error('Unsupported parameter type: ' + key);
     const value = Object.hasOwn(overrides, key) ? overrides[key] : spec.default;
-    if (typeof value !== spec.type) throw new Error('Invalid parameter type: ' + key);
+    if (spec.type === 'array' ? !Array.isArray(value) : typeof value !== spec.type || (spec.type === 'object' && (!value || Array.isArray(value)))) throw new Error('Invalid parameter type: ' + key);
+    if (spec.schema) { validateWorkflowSchema(spec.schema); assertWorkflowValue(value, spec.schema, key); }
     if (typeof value === 'number' && (!Number.isFinite(value) || (spec.min !== undefined && value < spec.min) || (spec.max !== undefined && value > spec.max))) throw new Error('Parameter out of range: ' + key);
     if (typeof value === 'string' && ((spec.maxLength !== undefined && value.length > spec.maxLength) || (spec.options && !spec.options.some((option) => option.value === value)))) throw new Error('Invalid parameter value: ' + key);
     if (['__proto__', 'constructor', 'prototype'].includes(key)) throw new Error('Invalid parameter name');
@@ -141,9 +164,35 @@ export function validateWorkflow(definition: WorkflowDefinition, catalog: readon
       if (!dependency) throw new Error('Unknown dependency: ' + id);
       visit(dependency);
     }
-    for (const binding of Object.values(step.arguments)) {
+    for (const [key, port] of Object.entries(capability.inputs ?? {})) {
+      if (port.required && port.default === undefined && !Object.hasOwn(step.arguments, key)) throw new Error('Missing node input: ' + step.id + '.' + key);
+      if (port.schema) validateWorkflowSchema(port.schema);
+    }
+    if (capability.inputs && Object.keys(step.arguments).some(key => !Object.hasOwn(capability.inputs!, key))) throw new Error('Unknown node input: ' + step.id);
+    for (const port of Object.values(capability.outputs ?? {})) if (port.schema) validateWorkflowSchema(port.schema);
+    if (step.bypass && capability.outputs && Object.keys(step.bypass).some(key => !Object.hasOwn(capability.outputs!, key))) throw new Error('Unknown bypass output: ' + step.id);
+    for (const [key, binding] of Object.entries(step.arguments)) {
+      if (binding.kind === 'input' && capability.inputs?.[key]?.schema && definition.parameters[binding.key]) assertWorkflowValue(definition.parameters[binding.key].default, capability.inputs[key].schema!, step.id + '.' + key);
+      if (binding.kind === 'literal' && capability.inputs?.[key]?.schema) assertWorkflowValue(binding.value, capability.inputs[key].schema!, step.id + '.' + key);
+      if (binding.kind === 'step' && capability.inputs?.[key]?.schema) {
+        const parent = nodes.get(binding.stepId);
+        const output = parent && catalog.find(item => item.id === parent.capability && item.version === parent.version)?.outputs?.[binding.key]?.schema;
+        const explicit = parent && ['llm.transform','human.approval'].includes(parent.capability) && binding.key === 'value' && parent.arguments.schema?.kind === 'literal' ? parent.arguments.schema.value as unknown as WorkflowSchema : undefined;
+        const producer = parent && catalog.find(item => item.id === parent.capability && item.version === parent.version)?.outputs?.[binding.key];
+        const consumer = capability.inputs[key];
+        if (producer?.valueType && consumer.valueType && producer.valueType !== 'json' && consumer.valueType !== 'json' && producer.valueType !== consumer.valueType) throw new Error('Incompatible node ports: ' + step.id + '.' + key);
+        if ((output ?? explicit)?.type && (output ?? explicit)!.type !== capability.inputs[key].schema!.type) throw new Error('Incompatible node ports: ' + step.id + '.' + key);
+      }
+    }
+    for (const binding of [...Object.values(step.arguments), ...Object.values(step.bypass ?? {})]) {
       if (binding.kind === 'input' && !Object.hasOwn(definition.parameters, binding.key)) throw new Error('Unknown input binding');
       if (binding.kind === 'step' && (!step.dependsOn.includes(binding.stepId) || !nodes.has(binding.stepId))) throw new Error('Step binding requires an explicit dependency');
+      if (binding.kind === 'step') {
+        const parent = nodes.get(binding.stepId)!;
+        const outputs = catalog.find(item => item.id === parent.capability && item.version === parent.version)?.outputs;
+        if (outputs && !Object.hasOwn(outputs, binding.key)) throw new Error('Unknown output port: ' + binding.stepId + '.' + binding.key);
+        if (parent.enabledBy && (!parent.bypass || !Object.hasOwn(parent.bypass, binding.key)) && parent.enabledBy !== step.enabledBy) throw new Error('Optional producer requires bypass output: ' + parent.id);
+      }
       if (!['input', 'step', 'literal'].includes(binding.kind)) throw new Error('Unknown binding kind');
     }
     active.delete(step.id); visited.add(step.id); ordered.push(step);

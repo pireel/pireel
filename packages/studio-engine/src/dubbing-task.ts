@@ -28,6 +28,7 @@ export { DUBBING_LANGUAGES } from './scene-languages';
 export interface DubbingOptions { language: string; voiceId: string; lipSync: boolean; captions?: boolean; script?: string; speakerVoices?: Record<string, string>; turnScripts?: Record<string, string> }
 export interface DubbingSpeech { url: string; key: string; durationSec: number; signature: string }
 export interface DubbingState {
+  alignedPlanKey?: string; captionAudioSig?: string;
   captionTranscript?: AsrSegment[]; captionSignature?: string;
   language?: string; sourceText?: string; translatedText?: string; translatedTurns?: string[]; turnsKey?: string; speech?: DubbingSpeech; speechParts?: DubbingSpeech[]; speechSignature?: string;
   alignedAudioUrl?: string; alignedAudioKey?: string; alignedAudioSig?: string; sourceVideoUrl?: string; sourceVideoKey?: string; lipJobId?: string; lipResultUrl?: string;

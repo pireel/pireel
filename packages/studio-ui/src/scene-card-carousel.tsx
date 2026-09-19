@@ -2,8 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 /** Same 88px card floor and 6px gap as Studio's asset grid, in a continuous two-row strip. */
-export function SceneCardCarousel<T extends { id: string }>({ items, selectedId, header, label, previousLabel, nextLabel, renderItem, empty }: {
-  items: T[]; selectedId?: string; header: ReactNode; label: string;
+export function SceneCardCarousel<T extends { id: string }>({ items, selectedId, header, label, previousLabel, nextLabel, renderItem, empty, rows = 2 }: {
+  rows?: 1 | 2; items: T[]; selectedId?: string; header: ReactNode; label: string;
   previousLabel: string; nextLabel: string; renderItem: (item: T) => ReactNode; empty?: ReactNode;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -46,7 +46,7 @@ export function SceneCardCarousel<T extends { id: string }>({ items, selectedId,
       </div>
     </div>
     <div ref={scrollRef} onScroll={measure} role="region" aria-label={label} tabIndex={0}
-      className="relative grid grid-flow-col grid-rows-2 gap-1.5 pt-1 overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className={`relative grid grid-flow-col ${rows === 1 ? 'grid-rows-1' : 'grid-rows-2'} gap-1.5 pt-1 overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden`}
       style={{ gridAutoColumns: `calc((100% - ${(columns - 1) * 6}px) / ${columns})` }}>
       {items.map((item) => <div key={item.id} className="min-w-0">{renderItem(item)}</div>)}
     </div>

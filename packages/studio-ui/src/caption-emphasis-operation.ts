@@ -12,6 +12,20 @@ export async function emphasizeCaptionDocument(document: EditorDocumentV2, selec
   const pending = targets.map((target, index) => ({ index, words: target.words.map((word) => word.text) }))
     .filter((row) => !targets[row.index]!.cached);
   if (!pending.length) return document;
+  const selections = await selectCaptionEmphasisRows(pending, select, onProgress);
+  const transcripts = structuredClone(document.semantics.transcripts);
+  for (const selection of selections) {
+    const target = targets[selection.index]!;
+    const segment = transcripts[target.assetId]![target.seg]!;
+    segment.cueEmphasis = { ...segment.cueEmphasis, [`${target.w0}:${target.w1}`]: { text: target.text, words: selection.words } };
+  }
+  const result = applyCaptionDocumentEdit({ document: { ...document, semantics: { ...document.semantics, transcripts } }, mainTranscript: null, clipTranscripts: {} });
+  if (!result.ok) throw new Error(result.error.message);
+  return result.document;
+}
+
+/** Provider batching shared by document editing and detached workflow planning. */
+export async function selectCaptionEmphasisRows(pending: EmphasisRow[], select: (rows: EmphasisRow[]) => Promise<EmphasisSelection[]>, onProgress?: (done: number, total: number) => void): Promise<EmphasisSelection[]> {
   onProgress?.(0, pending.length);
   const selections: EmphasisSelection[] = [];
   let batch: EmphasisRow[] = [];
@@ -28,13 +42,5 @@ export async function emphasizeCaptionDocument(document: EditorDocumentV2, selec
     batch.push(row);
   }
   await flush();
-  const transcripts = structuredClone(document.semantics.transcripts);
-  for (const selection of selections) {
-    const target = targets[selection.index]!;
-    const segment = transcripts[target.assetId]![target.seg]!;
-    segment.cueEmphasis = { ...segment.cueEmphasis, [`${target.w0}:${target.w1}`]: { text: target.text, words: selection.words } };
-  }
-  const result = applyCaptionDocumentEdit({ document: { ...document, semantics: { ...document.semantics, transcripts } }, mainTranscript: null, clipTranscripts: {} });
-  if (!result.ok) throw new Error(result.error.message);
-  return result.document;
+  return selections;
 }

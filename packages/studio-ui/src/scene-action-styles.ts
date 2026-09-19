@@ -1,0 +1,2 @@
+/** Shared sizing and treatment for controls below scene previews. */
+export const sceneActionClass = 'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border-0 bg-panel px-2.5 py-0 text-xs font-medium text-ink-2 shadow-none transition-colors hover:bg-panel-2 hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ink-4 disabled:pointer-events-none disabled:opacity-40';

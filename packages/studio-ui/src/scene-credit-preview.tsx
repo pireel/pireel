@@ -25,7 +25,7 @@ export function SceneCreditPreview({ task, options, locale, busy }: { task: Capt
   const approximate = quote.durationBased || quote.min !== quote.max;
   const point = quote.estimate ?? Math.round((quote.min + quote.max) / 2);
   const displayed = quote.durationBased && point >= 20 ? Math.max(quote.min, Math.min(quote.max, Math.round(point / 5) * 5)) : point;
-  const labels = zh ? { asr: '语音识别', translation: '翻译', emphasis: '重点词', speech: '配音', lipSync: '口型同步' } : { asr: 'Transcription', translation: 'Translation', emphasis: 'Key phrases', speech: 'Voiceover', lipSync: 'Lip sync' };
+  const labels = zh ? { visual: '素材分析', matching: '画面匹配', asr: '语音识别', translation: '翻译', emphasis: '重点词', speech: '配音', lipSync: '口型同步' } : { visual: 'Media analysis', matching: 'Footage matching', asr: 'Transcription', translation: 'Translation', emphasis: 'Key phrases', speech: 'Voiceover', lipSync: 'Lip sync' };
   return <details className="text-ink-3 mt-3 text-xs">
     <summary className="cursor-pointer text-center">{zh ? (approximate ? '预计约' : '预计') : (approximate ? 'Estimated ~' : 'Estimated')} <span className="text-ink tabular-nums">{displayed}</span> {zh ? '积分' : 'credits'}</summary>
     <div className="mt-3 space-y-1.5">{quote.items.map((item) => <div key={item.kind} className="flex items-center justify-between gap-4"><span>{labels[item.kind]}</span><span className="tabular-nums">{credits(item.min, item.max)}</span></div>)}</div>

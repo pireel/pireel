@@ -19,8 +19,8 @@ describe('standalone bilingual captions', () => {
     const original = task(); const snapshot = structuredClone(original); const document = build(original);
     const result = await translateCaptionTask(original, document, translate(), () => {});
     expect(original).toEqual(snapshot);
-    expect(result.transcript[0]).toMatchObject({ ...original.transcript![0], sub: '你好世界', subLang: '中文' });
-    expect(result.document.semantics.transcripts[firstNarrativeAssetId(result.document)!]?.[0]?.sub).toBe('你好世界');
+    expect(result.transcript[0]).toMatchObject({ ...original.transcript![0], cueSubs: { '0:1': '你好世界' }, subLang: '中文' });
+    expect(result.document.semantics.transcripts[firstNarrativeAssetId(result.document)!]?.[0]?.cueSubs?.['0:1']).toBe('你好世界');
     const html = assembleHtml(projectDocumentToComposition(result.document)).replace(/<[^>]*>/g, '');
     expect(html).toContain('你好世界'); expect(html).toContain('Hello');
   });

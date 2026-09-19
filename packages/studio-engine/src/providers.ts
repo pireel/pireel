@@ -20,6 +20,7 @@ import type { AssetSearchDocument } from './asset-search';
 import type { CustomVisualStyle } from './visual-style';
 
 /** One block-generation request (the same shape the BYO brief is assembled from). */
+export interface StudioOperationOptions { signal?: AbortSignal; onUsage?: (usage: import('./workflow').WorkflowUsage) => void }
 export interface ComposeRequest {
   /** Billing attribution only — which project this generation belongs to. */
   projectId?: string;
@@ -41,7 +42,7 @@ export interface ComposeRequest {
 /** Generates block HTML/animation from a request. Hosted: server LLM. OSS: own key or unavailable (use the BYO agent flow instead). */
 export interface BlockComposer {
   /** Resolves with the raw model output (note + ```html + ```js fences); onDelta streams partials. */
-  composeStream(req: ComposeRequest, onDelta?: (raw: string) => void): Promise<string>;
+  composeStream(req: ComposeRequest, onDelta?: (raw: string) => void, options?: StudioOperationOptions): Promise<string>;
 }
 
 /** Speech → timed sentences (source-clock seconds). */
@@ -128,6 +129,7 @@ export interface CuratedAssetProvider {
 }
 
 export interface StudioProviders {
+  workflowEnvironment?: () => Promise<{ scope: string; revision: string }>;
   composer: BlockComposer;
   transcriber: Transcriber;
   vault: MediaVault;
@@ -154,8 +156,8 @@ export interface StudioProviders {
    *  The server marks the restore as consumed — repeated calls walk strictly backward. */
   historyUndo?: (projectId: string) => Promise<{ document: EditorDocumentV2; version: number } | null>;
   /** Sentence translator for bilingual captions (hosted-LLM feature; absent = the captions panel hides its translation section — BYO agents translate themselves via set_caption_translations). */
-  captionEmphasis?: (rows: import('./caption-emphasis').EmphasisRow[], projectId?: string) => Promise<import('./caption-emphasis').EmphasisSelection[]>;
-  translate?: (rows: { index: number; text: string }[], targetLanguage: string) => Promise<{ index: number; text: string }[]>;
+  captionEmphasis?: (rows: import('./caption-emphasis').EmphasisRow[], projectId?: string, options?: StudioOperationOptions) => Promise<import('./caption-emphasis').EmphasisSelection[]>;
+  translate?: (rows: { index: number; text: string }[], targetLanguage: string, options?: StudioOperationOptions) => Promise<{ index: number; text: string }[]>;
   /** Fill a component's text slots from the narration around its time window (hosted-LLM feature;
    *  absent = the toolbar hides its sync button — BYO agents edit blocks themselves). */
   syncFill?: (

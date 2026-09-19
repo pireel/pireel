@@ -11,7 +11,7 @@ export function captionWordHighlighted(words: readonly FxWord[], index: number, 
 }
 
 /** Canvas view of the same caption preset, font metrics, source word times and appearance overrides. */
-export function drawPresetCaption(ctx: CanvasRenderingContext2D, words: FxWord[], style: Partial<CaptionStyle>, time: number, width: number, height: number) {
+export function drawPresetCaption(ctx: CanvasRenderingContext2D, words: FxWord[], style: Partial<CaptionStyle>, time: number, width: number, height: number, verticalAlign: 'bottom' | 'center' = 'bottom') {
   if (!words.length) return;
   const base = getCaptionPreset(style.preset);
   const preset = { ...base, ...(style.color ? { text: style.color } : {}), ...(style.bg !== undefined ? { bg: style.bg ?? undefined } : {}), ...(style.accentColor ? { emphasis: style.accentColor, decoColor: style.accentColor } : {}) };
@@ -24,7 +24,8 @@ export function drawPresetCaption(ctx: CanvasRenderingContext2D, words: FxWord[]
   const paddingY = preset.bg ? Math.round(size * .22) : 0;
   const lineHeight = size * 1.35 + paddingY * 2;
   const gap = size * .15;
-  let y = height * (style.yPct ?? 86) / 100 - lines.length * lineHeight - Math.max(0, lines.length - 1) * gap;
+  const groupHeight = lines.length * lineHeight + Math.max(0, lines.length - 1) * gap;
+  let y = verticalAlign === 'center' ? (height - groupHeight) / 2 : height * (style.yPct ?? 86) / 100 - groupHeight;
   // Style previews keep the line visible while the active word advances.
   ctx.globalAlpha = 1;
   let index = 0;
