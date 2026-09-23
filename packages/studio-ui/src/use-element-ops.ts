@@ -71,13 +71,11 @@ export function useElementOps(deps: ElementOpsDeps) {
   /** Generate a standalone component (composeBlockChecked, not added to the video; only added via
    *  "insert" on a history card). New work always uses bespoke markup; an existing kit result keeps
    *  the props contract so editing never discards manual component choices. */
-  const generateElementStandalone = async (prompt: string, base?: GenElementResult, window?: { durationSec: number; beats?: { text: string; start: number; end: number }[] }): Promise<GenElementResult> => {
+  const generateElementStandalone = async (prompt: string, base?: GenElementResult): Promise<GenElementResult> => {
     // Draft iteration: a "reference" already-generated component enters the seed as the existing implementation, the instruction = edit on top of it
     const seed = base
       ? { id: blockId('ai'), kind: 'custom', innerHtml: base.innerHtml.replaceAll(base.seedId, 'SEED_'), timelineBody: base.timelineBody.replaceAll(base.seedId, 'SEED_'), label: base.label }
       : { id: blockId('ai'), kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: t('workbench.newElement') };
-    // A window it will land on (a transcript selection): design the motion for that length and those spoken beats.
-    const timed = window ? { durationSec: window.durationSec, ...(window.beats?.length ? { beats: window.beats } : {}) } : {};
     if (base) {
       seed.innerHtml = seed.innerHtml.replaceAll('SEED_', seed.id);
       seed.timelineBody = seed.timelineBody.replaceAll('SEED_', seed.id);
@@ -86,8 +84,8 @@ export function useElementOps(deps: ElementOpsDeps) {
       ? `Edit this element's current implementation as requested (keep everything not mentioned as-is): ${prompt}`
       : `Create a new overlay element (title / big number / list / kinetic caption — pick per the content): ${prompt}`;
     const kitOpts = base?.kit ? { kit: true, current: base.kit } : undefined;
-    let parsed = await composeBlockChecked({ ...seed, ...timed }, instruction, undefined, kitOpts);
-    if (parsed.declined) parsed = await composeBlockChecked({ ...seed, ...timed }, instruction); // explicit ask never maps to "nothing to show"
+    let parsed = await composeBlockChecked(seed, instruction, undefined, kitOpts);
+    if (parsed.declined) parsed = await composeBlockChecked(seed, instruction); // explicit ask never maps to "nothing to show"
     if (parsed.kit) {
       // Library card preview = the derived render at a standard landscape reference (same as the
       // assets-panel component cards); insertion uses the props, never this markup.

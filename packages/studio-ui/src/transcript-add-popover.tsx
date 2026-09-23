@@ -19,8 +19,6 @@ export interface TranscriptAddTarget {
   endSec: number;
   before: string;
   after: string;
-  /** Spoken words in the selection, seconds from its start (MG timing). */
-  beats?: { text: string; start: number; end: number }[];
   left: number;
   top: number;
 }

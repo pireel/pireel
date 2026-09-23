@@ -46,7 +46,7 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
   onMask: (targets: TimelineMaskTarget[], patch: WordMaskPatch, message: string) => void;
   onGenerateMG: (text: string, startSec: number, endSec: number, pauseContext?: { before: string; after: string }) => void;
   /** Insert text / sticker / media / sound over a selection's time range. */
-  onAddAtRange?: (kind: TranscriptAddKind, text: string, startSec: number, endSec: number, at: { left: number; top: number; before: string; after: string; beats?: { text: string; start: number; end: number }[] }) => void;
+  onAddAtRange?: (kind: TranscriptAddKind, text: string, startSec: number, endSec: number, at: { left: number; top: number; before: string; after: string }) => void;
   addKinds?: readonly TranscriptAddKind[];
   /** Hosted auto-highlight picker: exact phrases per row (absent = no button). */
   autoHighlight?: (rows: { index: number; text: string }[]) => Promise<{ index: number; text: string }[]>;
@@ -195,11 +195,6 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
       after: after.length > CONTEXT_CHARS ? after.slice(0, CONTEXT_CHARS) : after,
     };
   };
-  /** The selected words as beats relative to the selection start. */
-  const beatsOf = (picked: TranscriptToken[]) => {
-    const from = Math.min(...picked.map((token) => token.startSec));
-    return picked.map((token) => ({ text: token.text, start: Math.max(0, token.startSec - from), end: Math.max(0, token.endSec - from) }));
-  };
   const cutsFor = (words: TranscriptToken[]): TimelineScriptCut[] => words.map((word) => ({
     trackId: word.trackId, clipId: word.clipId, assetId: word.assetId,
     range: [Math.max(0, word.sourceStart - 0.02), Math.max(word.sourceStart + 0.05, word.sourceEnd + 0.02)],
@@ -316,7 +311,7 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
         text={joinWords(selection.tokens.map((token) => token.text))} canEdit onRequestEdit={() => setDrafts(transcriptSelectionEdits(selection.tokens))}
         onDecorate={(patch) => { onDecorate(targets, patch); close(); }} styleHighlight={styleHighlight}
         addKinds={addKinds}
-        {...(onAddAtRange ? { onAdd: (kind: TranscriptAddKind) => { onAddAtRange(kind, joinWords(selection.tokens.map((token) => token.text)), Math.min(...selection.tokens.map((token) => token.startSec)), Math.max(...selection.tokens.map((token) => token.endSec)), { left: selection.left, top: selection.top, ...contextAround(Math.min(...selection.tokens.map((token) => token.startSec)), Math.max(...selection.tokens.map((token) => token.endSec))), beats: beatsOf(selection.tokens) }); close(); } } : {})}
+        {...(onAddAtRange ? { onAdd: (kind: TranscriptAddKind) => { onAddAtRange(kind, joinWords(selection.tokens.map((token) => token.text)), Math.min(...selection.tokens.map((token) => token.startSec)), Math.max(...selection.tokens.map((token) => token.endSec)), { left: selection.left, top: selection.top, ...contextAround(Math.min(...selection.tokens.map((token) => token.startSec)), Math.max(...selection.tokens.map((token) => token.endSec))) }); close(); } } : {})}
         onGenerateMG={() => { onGenerateMG(joinWords(selection.tokens.map((token) => token.text)), Math.min(...selection.tokens.map((token) => token.startSec)), Math.max(...selection.tokens.map((token) => token.endSec))); close(); }}
         onDelete={() => { onCut(cutsFor(selection.tokens), t('panels.deletedNSelectedWords', { n: targets.length })); close(); }}
         deleteLabel={t('captions.deleteFootageSelection')}

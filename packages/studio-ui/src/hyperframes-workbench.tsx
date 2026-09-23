@@ -6961,7 +6961,6 @@ export function HyperframesWorkbench({
   // Element generation / block element ops (gen panel, floating toolbar) — see use-element-ops.ts.
   const {
     insertGeneratedElement,
-    generateElementStandalone,
     bumpBlockLayer,
     togglePersonLayer,
     saveBlockAsElement,
@@ -7043,7 +7042,7 @@ export function HyperframesWorkbench({
   /** "Add over this selection" popover (library pick or AI generation onto the selection's range). */
   const [addTarget, setAddTarget] = useState<TranscriptAddTarget | null>(null);
   const closeAddTarget = useCallback(() => setAddTarget(null), []);
-  const addAtTranscriptRange = (kind: TranscriptAddKind, text: string, startSec: number, endSec: number, at: { left: number; top: number; before: string; after: string; beats?: { text: string; start: number; end: number }[] }) => {
+  const addAtTranscriptRange = (kind: TranscriptAddKind, text: string, startSec: number, endSec: number, at: { left: number; top: number; before: string; after: string }) => {
     const durationSec = Math.max(0.5, endSec - startSec);
     if (kind === 'text') {
       insertDisplayText("clean", { text, startSec, durationSec });
@@ -7074,8 +7073,10 @@ export function HyperframesWorkbench({
     setPendingGenerations((items) => [...items, { id, startSec: at, endSec: at + dur, label, lane, inLibrary: kind !== 'mg' }]);
     try {
       if (kind === 'mg') {
-        const element = await generateElementStandalone(prompt, undefined, { durationSec: dur, ...(target.beats ? { beats: target.beats } : {}) });
-        insertGeneratedElement(element, prompt, at, dur);
+        // Same path as the chat's Motion Graphic: canvas-true geometry, director scene and the
+        // narration beats of this window come from the tool itself.
+        const result = await runStudioTool("apply_component", { generate: true, instruction: prompt, atSec: at, durationSec: dur });
+        if (!result.ok) throw new Error(result.error || t("captions.generateFailed"));
         return;
       }
       if (!request) throw new Error(t('captions.generateFailed'));
