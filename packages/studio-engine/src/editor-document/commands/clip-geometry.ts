@@ -4,6 +4,7 @@ import type {
   NarrativeTimelineClip,
   TimelineClip,
 } from '../types';
+import { seedTranscriptSection } from '../../transcript-sections';
 
 export interface ClipRangeEdit {
   clips: TimelineClip[];
@@ -106,6 +107,8 @@ export function clearRangeFromClip(
     return { clips: [clip], removedClipIds: [], createdClipIds: [], splitPairs: [] };
   }
 
+  clip = seedTranscriptSection(clip);
+
   const clipEnd = clipEndFrame(clip);
   const keepLeftFrames = Math.max(0, startFrame - clip.startFrame);
   const keepRightFrames = Math.max(0, clipEnd - endFrame);
@@ -168,6 +171,7 @@ export function splitClipAtFrame(
   if (atFrame <= clip.startFrame || atFrame >= endFrame) {
     return { clips: [clip], removedClipIds: [], createdClipIds: [], splitPairs: [] };
   }
+  clip = seedTranscriptSection(clip);
   const leftFrames = atFrame - clip.startFrame;
   const rightFrames = endFrame - atFrame;
   const rightId = derivedSplitId(clip.id, atFrame, usedIds);

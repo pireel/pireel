@@ -45,7 +45,11 @@ export function AssetsPanel({
   onUseAudio,
   onUseAsReference,
   genRefreshTick = 0,
+  pendingItems,
 }: {
+  /** Generations in flight (loading cards in My assets). */
+  pendingItems?: ReadonlyArray<{ id: string; label: string }>;
+
   /** "Use as reference": arm the chat's image generation with this asset mentioned. */
   onUseAsReference?: (entry: LocalAssetIndexEntry) => void;
   /** Element live preview needs theme/canvas (BlockPreviewFrame). */
@@ -140,6 +144,7 @@ export function AssetsPanel({
           onUseAudio={onUseAudio}
           onDragAsset={onDragAsset}
           onUseAsReference={onUseAsReference}
+          pendingItems={pendingItems}
         />
       </div>
       {officialMounted && CuratedAssetsPanel && (

@@ -76,6 +76,8 @@ export interface StudioCuratedAssetsPanelProps {
   onDragAsset?: (asset: PanelDragAsset | null) => void;
   onOpenGeneration?: (type?: StudioGenerationType, prompt?: string) => void;
   onUseAudio?: (url: string, label?: string, sig?: string | null) => void;
+  /** Jump to a section (a new nonce re-applies it), e.g. stickers when inserting over a transcript selection. */
+  focusSection?: { section: 'stickers' | 'components' | 'audio'; nonce: number };
 }
 
 export interface StudioAudioTemplateGalleryProps {

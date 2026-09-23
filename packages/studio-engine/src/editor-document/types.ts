@@ -101,6 +101,9 @@ export interface TimelineClipBase {
   durationFrames: number;
   enabled: boolean;
   linkGroupId?: string;
+  /** Stable transcript section for source-backed clips. Cleanup fragments inherit it;
+   * explicit splits create a new section. Missing means this clip is its own section. */
+  transcriptSectionId?: string;
 }
 
 export type NarrativeProperties = Omit<VideoShot, 'id' | 'src' | 'srcSig' | 'srcStart' | 'srcEnd' | 'mediaFraming'>;

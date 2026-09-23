@@ -2,6 +2,7 @@ import type { AudioTimelineClip, EditorDocumentV2, EditorMediaAsset, EditorTrack
 import { validateEditorDocumentV2 } from '../validation';
 import { audioTimelineStateError } from './audio-patch';
 import { commandFailure, emptyCommandReceipt, type EditorCommandResult } from './types';
+import { seedTranscriptSection } from '../../transcript-sections';
 
 function assetError(asset: EditorMediaAsset): string | null {
   if (!asset.id.trim()) return 'Audio asset id is required.';
@@ -52,7 +53,7 @@ export function insertAudioClip(
   }
 
   const tracks = document.timeline.tracks.map((candidate): EditorTrack => candidate.id === trackId
-    ? { ...candidate, clips: [...candidate.clips, clip].sort((left, right) => left.startFrame - right.startFrame) }
+    ? { ...candidate, clips: [...candidate.clips, seedTranscriptSection(clip)].sort((left, right) => left.startFrame - right.startFrame) }
     : candidate);
   const next: EditorDocumentV2 = {
     ...document,

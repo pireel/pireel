@@ -24,6 +24,13 @@ export interface TranscriptWord {
   end: number;
 }
 
+/** Presentation attached to a source word, addressed by its index in the sentence. */
+export interface WordDecoration {
+  highlight?: 'color' | 'underline';
+  color?: string;
+  animation?: 'pop' | 'rise';
+}
+
 /** One PERSISTED transcript sentence (source seconds; the single stored source captions derive from). */
 export interface AsrSegment {
   start: number;
@@ -56,6 +63,8 @@ export interface AsrSegment {
   /** Per-word replacements keyed by word index (see word-masks.ts): the word's sound is beeped or
    *  muted and/or its caption text is swapped. The spoken transcript above stays untouched. */
   masks?: Record<string, WordMask>;
+  /** Selected-word caption treatment. Spoken text and timing stay unchanged. */
+  wordDecorations?: Record<string, WordDecoration>;
   /** Legacy flag from the short-lived extraction-cueing scheme (desegmentCues merges those back on load). Never written anew. */
   cue?: boolean;
 }
@@ -72,6 +81,7 @@ export interface CueRef {
 /** A derived word copy (edited-timeline seconds) + its original index within the source sentence. */
 export interface CueWord extends TranscriptWord {
   si?: number;
+  decoration?: WordDecoration;
 }
 
 /** One DERIVED display cue (one on-screen caption line; output of displayCues, re-computed per change).
@@ -187,7 +197,10 @@ export function captionBlocksFromAsr(segments: (AsrSegment | DisplayCue)[], opts
       // the audience-facing copy. Re-tokenizing INSIDE this fixed window drives karaoke only; it
       // never feeds cue derivation and therefore cannot move either neighboring boundary.
       const words = s.cue && s.text.trim() !== joinWords(sourceWords.map((word) => word.text)).trim()
-        ? wordsFromText(s.text, s.start, s.end)
+        ? wordsFromText(s.text, s.start, s.end).map((word, index, all) => {
+            const source = sourceWords[Math.min(sourceWords.length - 1, Math.floor(index * sourceWords.length / all.length))] as CueWord | undefined;
+            return { ...word, ...(source?.decoration ? { decoration: source.decoration } : {}) };
+          })
         : sourceWords;
       const ref = (s as DisplayCue).ref;
       // Derived cues get a deterministic id from their source pointer: re-derivations keep the same id

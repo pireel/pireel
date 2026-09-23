@@ -194,10 +194,14 @@ export function scaleMediaCanvasBox(
   directionY: -1 | 1,
   minWidth = 0.06,
   minHeight = 0.06,
+  /** Stage width / height in pixels: the drag is measured in screen space, not canvas fractions. */
+  stageAspect = 1,
 ): MediaCanvasBox {
-  const factorX = 1 + (dx * directionX) / box.w;
-  const factorY = 1 + (dy * directionY) / box.h;
-  const requested = Math.abs(factorX - 1) >= Math.abs(factorY - 1) ? factorX : factorY;
+  // Project the pointer travel onto the box diagonal (in pixels). Picking whichever axis moved more
+  // switched between two different factors mid-drag, so the size jumped where they crossed.
+  const wPx = box.w * stageAspect;
+  const dxPx = dx * directionX * stageAspect;
+  const requested = 1 + (dxPx * wPx + dy * directionY * box.h) / (wPx * wPx + box.h * box.h);
   const minFactor = Math.max(minWidth / box.w, minHeight / box.h, 0.01);
   const factor = Math.max(requested, minFactor);
   const w = box.w * factor;

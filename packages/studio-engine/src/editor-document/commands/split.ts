@@ -2,6 +2,7 @@ import type { EditorDocumentV2, EditorTrack, SemanticScene } from '../types';
 import { validateEditorDocumentV2 } from '../validation';
 import { clipEndFrame, splitClipAtFrame } from './clip-geometry';
 import { commandFailure, emptyCommandReceipt, type EditorCommandResult } from './types';
+import { splitTranscriptSections } from '../../transcript-sections';
 
 export interface SplitEditorClipOptions {
   trackId: string;
@@ -61,16 +62,18 @@ export function splitEditorClip(
   const tracks = document.timeline.tracks.map((candidateTrack): EditorTrack => {
     const clipIds = clipsToSplit.get(candidateTrack.id);
     if (!clipIds) return candidateTrack;
+    const rightIds = new Set<string>();
     const clips = candidateTrack.clips.flatMap((candidateClip) => {
       if (!clipIds.has(candidateClip.id)) return [candidateClip];
       const split = splitClipAtFrame(candidateClip, atFrame, document.canvas.fps, usedIds);
       createdClipIds.push(...split.createdClipIds);
+      for (const id of split.createdClipIds) rightIds.add(id);
       for (const [originalId, rightId] of split.splitPairs) {
         splitPairs.set(originalId, [...(splitPairs.get(originalId) ?? []), rightId]);
       }
       return split.clips;
     });
-    return { ...candidateTrack, clips };
+    return { ...candidateTrack, clips: splitTranscriptSections(clips, rightIds, document.canvas.fps) };
   });
   const next: EditorDocumentV2 = {
     ...document,

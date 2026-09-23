@@ -7,6 +7,7 @@
 
 import { applyUploadedMediaKeys, collectUploadedMediaKeys } from './cloud-media-persistence';
 import type { WordMask } from './word-masks';
+import type { WordDecoration } from './build-blocks';
 import { applyPatch, type Operation } from 'fast-json-patch';
 import { create as createDiffer } from 'jsondiffpatch';
 import { format as formatJsonPatch } from 'jsondiffpatch/formatters/jsonpatch';
@@ -37,6 +38,8 @@ export interface TranscriptSegment {
   text: string;
   /** Per-word replacements keyed by word index (see word-masks.ts). */
   masks?: Record<string, WordMask>;
+  /** Selected-word caption highlights and animations, keyed by source word index. */
+  wordDecorations?: Record<string, WordDecoration>;
   /** Spoken language of this sentence (provider-reported or script-detected). */
   lang?: string;
   /** Speaker id (diarization; absent = single speaker / not enabled). */

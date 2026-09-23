@@ -10,6 +10,8 @@ export const SHELL_ZH: Record<string, string> = {
   'shell.planningFailed': '规划失败',
   'shell.rename': '重命名',
   'shell.syncFailed': '同步失败',
+  'shell.autoHighlightFailed': '自动高亮失败',
+  'shell.draftPromptFailed': '提示词起草失败',
   'shell.translationFailed': '翻译失败',
   'shell.startWithMedia': '放入一段或多段素材，在 Chat 选择工作流，制作一个或多个成片',
 };

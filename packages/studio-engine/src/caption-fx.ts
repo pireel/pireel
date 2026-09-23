@@ -14,6 +14,8 @@
  * All time is ABSOLUTE SECONDS ON THE EDITED TIMELINE.
  */
 
+import type { WordDecoration } from './build-blocks';
+
 export type CaptionEffect = 'highlight' | 'pill-karaoke' | 'kinetic-slam' | 'editorial-emphasis' | 'word-pop';
 
 /** Word + time window (absolute edited seconds). */
@@ -22,6 +24,7 @@ export interface FxWord {
   start: number;
   end: number;
   emphasis?: boolean;
+  decoration?: WordDecoration;
   /** Original index within the source sentence's words (stamped on mapped/derived copies; edit/translation write-back key). */
   si?: number;
 }
@@ -214,7 +217,7 @@ export function chunkWords(words: FxWord[], size: number): FxWord[][] {
 export const CAPTION_LINE_UNITS = 13;
 /** Visual width: CJK≈1, Latin/digit≈0.5. */
 const visualWidth = (t: string) => [...t].reduce((a, ch) => a + (ch.charCodeAt(0) > 0x2e7f ? 1 : 0.5), 0);
-const PUNCT_END = /[,。,.!?!?;;、::…]$/;
+export const PUNCT_END = /[,。,.!?!?;;、::…]$/;
 
 /**
  * Balanced line-breaking core (pretext-style): measure the whole sentence, then cut each line as

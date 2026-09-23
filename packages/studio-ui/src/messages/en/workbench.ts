@@ -1,4 +1,7 @@
 export const WORKBENCH_EN: Record<string, string> = {
+  "workbench.chat": "Chat",
+  "workbench.editingMode": "Editing mode",
+  "workbench.backToProjects": "Back to projects",
   "displayText.title": "Text",
   "displayText.add": "Add text",
   "displayText.addAtPlayhead": "Add text at playhead",
@@ -227,6 +230,8 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.localVideoUseTrack":
     "Drop local videos on the timeline — stage picture-in-picture does not support local video files yet",
   "workbench.ratioCustom": "Custom",
+  "workbench.collapseTimeline": "Collapse timeline",
+  "workbench.expandTimeline": "Expand timeline",
   "workbench.ratioFollowSource": "Auto",
   "workbench.followSourceUnavailable": "Add a video clip with known dimensions first",
   "workbench.couldNotGenerateCaptions":

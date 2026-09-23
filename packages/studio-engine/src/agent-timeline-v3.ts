@@ -1,3 +1,4 @@
+import { isCaptionAnimation, CAPTION_ANIMATION_IDS, captionAnimationId } from './caption-animations';
 /**
  * Agent surface v3 — document-level tools in their published shape.
  *
@@ -49,6 +50,9 @@ import { isDisplayTextFontId } from './display-text-presets';
 import { resolveWebFontReference, webFontCatalogHint } from './font-library';
 import { planScriptCaptionSegments, splitScriptLines } from './script-captions';
 import { narrationRowMarks } from './trim';
+import { applyWordDecorations, type WordDecorationPatch } from './word-decorations';
+import { phraseWordIndexes, rowWords } from './caption-highlights';
+import { joinWords } from './caption-fx';
 import { applyWordMasks, groupWordsByAsset, maskWordsSummary, parseMaskWordsInput } from './word-masks-tool';
 import { applyComponentValues, blockPropsReadback, componentSchemaOf, componentValuesView, componentPropertyInputError } from './component-schema';
 import { isComponentPropertyValue } from './component-property-input';
@@ -851,7 +855,7 @@ export function setTextsV3(document: EditorDocumentV2, input: Input): AgentTimel
 
 /* =============================== captions =============================== */
 
-const CAPTION_FIX = 'Pass on, preset/yPct/scale/font, source, script, corrections, translations or relayout.';
+const CAPTION_FIX = 'Pass on, preset/yPct/scale/font, source, script, corrections, highlights, translations or relayout.';
 
 /** The transcript a caption edit writes to: an explicit asset, the speech clip named (on any
  * lane), the source the caption layer is bound to, else the spine. */
@@ -893,6 +897,47 @@ function captionCorrections(document: EditorDocumentV2, rows: unknown[], clipId:
   });
   if (!edit.ok) return fail(edit.error.message, { code: edit.error.code, trackIds: edit.error.trackIds });
   return mutation(edit.document, `Corrected ${items.length} caption row${items.length === 1 ? '' : 's'}`, edit.receipts);
+}
+
+/** Key words by transcript row and exact phrase: the same row numbers as corrections, so a model
+ *  never copies long word ids. A phrase missing from its row fails the whole call with the row text. */
+function captionHighlights(document: EditorDocumentV2, highlights: Input, clipId: string | undefined): AgentTimelineOutcome {
+  const color = highlights.clear === true ? 'off' : highlights.color === undefined ? 'style' : highlights.color;
+  if (color !== 'style' && color !== 'off' && !(typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color))) {
+    return fail('invalid_value', { path: 'highlights.color', value: color, fix: 'Use "style" (follow the caption highlight color), #RRGGBB, or "off" to clear.' });
+  }
+  const owner = captionTranscriptOwner(document, clipId, string(highlights.assetId));
+  if (isOutcome(owner)) return owner;
+  const { assetId } = owner;
+  const segments = document.semantics.transcripts[assetId] as AsrSegment[] | undefined;
+  if (!segments?.length) return fail('no transcript for this source — read get_transcript first');
+  const patch: WordDecorationPatch = color === 'off' ? { highlight: null, color: null } : { highlight: 'color', color: color === 'style' ? null : color as string };
+  const targets: { sentenceIndex: number; wordIndex: number }[] = [];
+  if (highlights.clear === true) {
+    segments.forEach((segment, sentenceIndex) => Object.keys(segment.wordDecorations ?? {}).forEach((key) => targets.push({ sentenceIndex, wordIndex: Number(key) })));
+  } else {
+    const items = (Array.isArray(highlights.items) ? highlights.items : []).map((row) => { const value = (row ?? {}) as Input; return { index: Number(value.index), text: typeof value.text === 'string' ? value.text.trim() : '' }; });
+    if (!items.length || items.some((item) => !Number.isInteger(item.index) || item.index < 0 || !item.text)) {
+      return fail('invalid_value', { path: 'highlights.items', fix: 'items are {index, text}: index is the get_transcript row, text the exact word(s) copied from that row.' });
+    }
+    for (const item of items) {
+      const segment = segments[item.index];
+      if (!segment) return fail(`index out of range: ${item.index} (this transcript has ${segments.length} rows)`);
+      const found = phraseWordIndexes(rowWords(segment), item.text);
+      if (!found) return fail('invalid_value', { path: 'highlights.items', value: item, fix: `"${item.text}" is not in row ${item.index}: ${JSON.stringify(segment.captionText ?? segment.text)}. Copy the words exactly from that row.` });
+      for (const wordIndex of found) targets.push({ sentenceIndex: item.index, wordIndex });
+    }
+  }
+  if (!targets.length) return { ok: true, summary: 'No key words to clear' };
+  const next = applyWordDecorations(segments, targets, patch);
+  const edit = applyCaptionDocumentEdit({
+    document: { ...document, semantics: { ...document.semantics, transcripts: { ...document.semantics.transcripts, [assetId]: next } } },
+    mainTranscript: null,
+    clipTranscripts: {},
+  });
+  if (!edit.ok) return fail(edit.error.message, { code: edit.error.code, trackIds: edit.error.trackIds });
+  const n = targets.length;
+  return mutation(edit.document, color === 'off' ? `Cleared highlight on ${n} word${n === 1 ? '' : 's'}` : `Highlighted ${n} key word${n === 1 ? '' : 's'} (${color === 'style' ? 'caption highlight color' : color})`, edit.receipts);
 }
 
 function captionTranslations(document: EditorDocumentV2, translations: Input, clipId: string | undefined): AgentTimelineOutcome {
@@ -968,8 +1013,16 @@ export function setCaptionsV3(document: EditorDocumentV2, input: Input): AgentTi
 
   const preset = string(input.preset);
   if (preset && !CAPTION_PRESETS.some((entry) => entry.id === preset)) return fail('invalid_value', { path: 'preset', value: preset, allowed: CAPTION_PRESETS.map((entry) => entry.id) });
+  if (input.animation !== undefined && !isCaptionAnimation(input.animation)) return fail('invalid_value', { path: 'animation', value: input.animation, allowed: CAPTION_ANIMATION_IDS });
   const yPct = captionYPctForCanvas(next.canvas, input.yPct);
   const patch: Record<string, number | string | undefined> = {};
+  if (isCaptionAnimation(input.animation)) patch.animation = input.animation;
+  else if (preset) patch.animation = captionAnimationId(next.appearance.captionStyle ?? {});
+  if (typeof input.highlightColor === 'string') {
+    if (input.highlightColor === 'animation') patch.emphasis = undefined;
+    else if (/^#[0-9a-f]{6}$/i.test(input.highlightColor)) patch.emphasis = input.highlightColor;
+    else return fail('invalid_value', { path: 'highlightColor', value: input.highlightColor, fix: 'Pass #RRGGBB, or "animation" for the animation\'s own color.' });
+  }
   if (yPct != null) patch.yPct = yPct;
   if (isFiniteNumber(input.scale)) patch.scale = input.scale;
   if (typeof input.font === 'string') {
@@ -1057,6 +1110,10 @@ export function setCaptionsV3(document: EditorDocumentV2, input: Input): AgentTi
     next = edit.document; receipts.push(...edit.receipts);
     summaries.push('Re-laid captions for the current canvas and font size');
   }
+  if (input.highlights !== undefined) {
+    const failed = take(captionHighlights(next, (input.highlights ?? {}) as Input, clipId));
+    if (failed) return failed;
+  }
   if (!summaries.length) return fail('nothing_to_change', { fix: CAPTION_FIX });
   return mutation(next, summaries.join('; '), receipts, Object.keys(data).length ? data : undefined);
 }
@@ -1086,7 +1143,18 @@ const asAsr = (segments: TranscriptSegment[] | undefined): AsrSegment[] => deseg
 /** Narrative sources with cut marks, or a plain per-asset listing: source seconds either way. */
 function formatTranscript(document: EditorDocumentV2, assetIds: readonly string[]): string {
   const rd = (x: number) => Math.round(x * 10) / 10;
-  const copy = (segment: TranscriptSegment) => segment.captionText && segment.captionText !== segment.text ? `${segment.captionText} 〈ASR: ${segment.text}〉` : segment.text;
+  // Key words read back as highlights.items would write them: runs of marked words from the row.
+  const keys = (segment: TranscriptSegment) => {
+    const marks = (segment as AsrSegment).wordDecorations ?? {};
+    const runs: string[][] = [];
+    rowWords(segment as AsrSegment).forEach((word, index) => {
+      if (!marks[String(index)]?.highlight) return;
+      if (marks[String(index - 1)]?.highlight && runs.length) runs[runs.length - 1]!.push(word.text);
+      else runs.push([word.text]);
+    });
+    return runs.length ? ` 〈key: ${runs.map((run) => joinWords(run)).join(' · ')}〉` : '';
+  };
+  const copy = (segment: TranscriptSegment) => (segment.captionText && segment.captionText !== segment.text ? `${segment.captionText} 〈ASR: ${segment.text}〉` : segment.text) + keys(segment);
   const narrativeShots = projectNarrativeShots(document);
   const spine = primaryNarrativeClips(document);
   const parts: string[] = [];
@@ -1156,8 +1224,13 @@ export function getTranscriptV3(document: EditorDocumentV2, input: Input): Agent
       ...(Number.isInteger(input.offset) ? { offset: input.offset as number } : {}),
       ...(Number.isInteger(input.limit) ? { limit: input.limit as number } : {}),
     };
-    const listed = listDocumentAddressedWords(document, query);
-    if ('error' in listed) return fail(listed.error);
+    const found = listDocumentAddressedWords(document, query);
+    if ('error' in found) return fail(found.error);
+    // Key words read back in set_captions.highlights vocabulary: "style" or the fixed #RRGGBB.
+    const listed = { ...found, words: found.words.map((word) => {
+      const decoration = (document.semantics.transcripts[word.assetId]?.[word.sentenceIndex] as AsrSegment | undefined)?.wordDecorations?.[String(word.wordIndex)];
+      return decoration?.highlight ? { ...word, highlight: decoration.color ?? 'style' } : word;
+    }) };
     return {
       ok: true,
       summary: `Listed ${listed.words.length} transcript words`,

@@ -1,3 +1,4 @@
+import { CAPTION_ANIMATIONS, CAPTION_ANIMATION_IDS } from '../caption-animations';
 import { COMPONENT_PROPERTY_MAX_ROWS, COMPONENT_PROPERTY_MAX_FIELDS, COMPONENT_PROPERTY_MAX_TEXT } from '../component-property-input';
 /**
  * Agent surface v3 — tool descriptions and input schemas.
@@ -7,7 +8,7 @@ import { COMPONENT_PROPERTY_MAX_ROWS, COMPONENT_PROPERTY_MAX_FIELDS, COMPONENT_P
  * engine constant so the schema cannot drift from what the editor accepts (`schemas.test.ts` proves it).
  */
 
-import { CAPTION_PRESETS } from '../caption-presets';
+import { CAPTION_LOOK_HINTS, CAPTION_PRESETS } from '../caption-presets';
 import { CUT_TRANSITION_EFFECTS, MAX_TRANSITION_SEC, PLACE_ANCHORS, SHOT_TREATMENTS, ZOOM_PRESETS, ZOOM_SCALE_MAX, ZOOM_SCALE_MIN } from '../composition-core';
 import { DISPLAY_TEXT_ANIMATION_IDS, DISPLAY_TEXT_PRESETS } from '../display-text-presets';
 import { MG_BAKE_ROUTE, MG_RUNTIME_CAPABILITIES } from '../prompts/block-system';
@@ -34,6 +35,8 @@ export const TREATMENT_IDS = SHOT_TREATMENTS.map((entry) => entry.id);
 export const TRANSITION_EFFECT_IDS = [...CUT_TRANSITION_EFFECTS.map((entry) => entry.id), 'none'];
 export const ZOOM_PRESET_IDS = [...ZOOM_PRESETS.map((entry) => entry.id), 'none'];
 export const CAPTION_PRESET_IDS = CAPTION_PRESETS.map((preset) => preset.id);
+const CAPTION_LOOKS = Object.entries(CAPTION_LOOK_HINTS).map(([id, hint]) => `${id} (${hint})`).join(', ');
+const CAPTION_MOTIONS = CAPTION_ANIMATIONS.map((animation) => `${animation.id} (${animation.hint})`).join(', ');
 export const TEXT_PRESET_IDS = DISPLAY_TEXT_PRESETS.map((preset) => preset.id);
 export const TEXT_ANIMATION_IDS = [...DISPLAY_TEXT_ANIMATION_IDS];
 export const CLIP_ROLES = ['primary', 'broll', 'narration', 'music', 'sfx'] as const;
@@ -415,7 +418,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   /* ------------------------------------------------------------------ speech */
   remove_silence: {
     description:
-      'Remove dead air from the narration by analysing the actual audio — no transcript needed, so run it first when tightening pacing. minimumPauseSec (0.25–3, default 0.5) is the shortest pause treated as dead air; speechPaddingSec (0–0.5, default 0.15) stays on each edge next to speech. Overlays, captions and later material re-lay.',
+      'Remove dead air from the narration by analysing the actual audio — no transcript needed, so run it first when tightening pacing. minimumPauseSec (0.25–3, default 0.4) is the shortest pause treated as dead air; speechPaddingSec (0–0.5, default 0.15) stays on each edge next to speech. Overlays, captions and later material re-lay.',
     inputSchema: obj({
       minimumPauseSec: num('', { min: 0.25, max: 3 }),
       speechPaddingSec: num('', { min: 0, max: 0.5 }),
@@ -492,11 +495,12 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   set_captions: {
     description:
-      `Drive the managed subtitle layer as one object. on turns it on or off; preset (${CAPTION_PRESET_IDS.length} built-in styles from get_state’s caption catalog), yPct (baseline % from the top) and scale restyle it; source picks the transcript (auto, or a trackId / clipId / assetId); corrections fix caption wording by transcript row without touching the spoken audio; translations {lang, items} add a second line per row (clear removes all); relayout regenerates cue boundaries after canvas or font changes. Cues re-derive after every cut — never edit them individually.`,
+      `Drive the managed subtitle layer as one object. on turns it on or off; preset picks the look and animation the motion, independently (catalogs on each parameter); yPct (baseline % from the top) and scale restyle it; highlightColor recolors the word emphasis; get_state captions.style reads all of these back; source picks the transcript (auto, or a trackId / clipId / assetId); corrections fix caption wording by transcript row without touching the spoken audio; highlights {items:[{index, text}], color} highlights words — index is the transcript row (as in corrections), text the exact word(s) copied from that row; they stay colored while their caption shows; color "style" (default) follows highlightColor, #RRGGBB fixes it, "off" clears those words, clear:true clears every highlight; highlight generously, one or two phrases in most rows (numbers, names, the carrying verb or claim, contrasts); translations {lang, items} add a second line per row (clear removes all); relayout regenerates cue boundaries after canvas or font changes. Cues re-derive after every cut — never edit them individually.`,
     inputSchema: obj({
       on: bool(),
-      preset: enumOf(CAPTION_PRESET_IDS), yPct: num('', { min: 0, max: 100 }), scale: num('', { min: 0.5, max: 2 }),
+      preset: enumOf(CAPTION_PRESET_IDS, `Caption look: ${CAPTION_LOOKS}. em-*/ln-* are legacy looks kept for existing projects.`), animation: enumOf(CAPTION_ANIMATION_IDS, `Caption motion, independent of the look: ${CAPTION_MOTIONS}.`), highlightColor: str('#RRGGBB color for the words the animation emphasizes (karaoke, marker, underline, pulse, bounce, glow); "animation" restores the animation\'s own color.'), yPct: num('', { min: 0, max: 100 }), scale: num('', { min: 0.5, max: 2 }),
       font: str('Caption font: sans | serif | mono | web:<library id from get_state.fonts> or that font’s display name (web:lxgw-wenkai or 霞鹜文楷) | google:<Family from search_assets kind font> | local:<family>; "preset" restores the preset\'s own font.'),
+      highlights: obj({ items: arr(obj({ index: num('Transcript row.', { min: 0 }), text: str('Exact word(s) from that row.') }, ['index', 'text'])), color: str('"style" (default) | #RRGGBB | "off"'), clear: bool(), assetId: str('Transcript owner; default the caption source.') }),
       script: str('Silent montage only (no spoken transcript): the caption copy, one line per caption, timed across the placed picture by character share; the copy becomes the transcript truth of those clips.'),
       source: obj({ trackId: str(), clipId: str(), assetId: str('A placed, transcribed asset; resolved to the clip or track that plays it.') }),
       clipId: str('corrections / translations: an inserted clip’s transcript instead of the main narration.'),

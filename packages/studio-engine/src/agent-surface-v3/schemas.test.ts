@@ -1,3 +1,4 @@
+import { CAPTION_ANIMATION_IDS } from '../caption-animations';
 import { describe, expect, it } from 'vitest';
 import { CAPTION_PRESETS } from '../caption-presets';
 import { CUT_TRANSITION_EFFECTS, PLACE_ANCHORS, SHOT_TREATMENTS, ZOOM_PRESETS } from '../composition-core';
@@ -80,6 +81,7 @@ describe('agent surface v3 schemas', () => {
     expect(findEnum(V3_TOOL_SCHEMAS.set_clip_framing!.inputSchema, 'anchor')).toEqual([...PLACE_ANCHORS]);
     expect(findEnum(V3_TOOL_SCHEMAS.set_clip_framing!.inputSchema, 'preset')).toEqual([...ZOOM_PRESETS.map((entry) => entry.id), 'none']);
     expect(findEnum(V3_TOOL_SCHEMAS.add_transition!.inputSchema, 'effect')).toEqual([...CUT_TRANSITION_EFFECTS.map((entry) => entry.id), 'none']);
+    expect(findEnum(V3_TOOL_SCHEMAS.set_captions!.inputSchema, 'animation')).toEqual(CAPTION_ANIMATION_IDS);
     expect(findEnum(V3_TOOL_SCHEMAS.set_captions!.inputSchema, 'preset')).toEqual(CAPTION_PRESETS.map((preset) => preset.id));
     expect(findEnum(V3_TOOL_SCHEMAS.set_texts!.inputSchema, 'preset')).toEqual(DISPLAY_TEXT_PRESETS.map((preset) => preset.id));
     expect(findEnum(V3_TOOL_SCHEMAS.set_texts!.inputSchema, 'animation')).toEqual([...DISPLAY_TEXT_ANIMATION_IDS]);

@@ -111,6 +111,9 @@ export interface TimelineVisualClipState {
 
 type TimelineLaneKey = number | `visual:${string}` | `audio:${string}`;
 const visualLaneKey = (trackId: string): TimelineLaneKey => `visual:${trackId}`;
+
+export type TimelinePendingLane = { kind: 'block'; trackIndex: number } | { kind: 'visual'; trackId: string } | { kind: 'new' };
+export interface TimelinePendingRange { id: string; startSec: number; endSec: number; label: string; lane: TimelinePendingLane }
 const visualTrackId = (lane: TimelineLaneKey): string | null => typeof lane === 'string' && lane.startsWith('visual:') ? lane.slice('visual:'.length) : null;
 const audioLaneKey = (trackId: string): TimelineLaneKey => `audio:${trackId}`;
 const audioTrackId = (lane: TimelineLaneKey): string | null => typeof lane === 'string' && lane.startsWith('audio:') ? lane.slice('audio:'.length) : null;
@@ -250,6 +253,9 @@ interface StudioTimelineProps {
   onResizeTransition?: (shotId: string, durationSec: number) => void;
   /** External clip insert in progress (download/upload/reading duration): draw an "inserting" badge at that edited-time so the user doesn't think it failed. */
   clipPendingAt?: number | null;
+  /** Generations started from a transcript selection: striped bars on the lane they will land on
+   *  (a lane that does not exist yet shows as a temporary row under the last track). */
+  pendingRanges?: ReadonlyArray<TimelinePendingRange>;
 }
 
 /** memo: callback props have stable identity via the workbench's useStableCallbacks; timeline-irrelevant
@@ -376,6 +382,7 @@ function StudioTimelineImpl({
   onOpenTransition,
   onResizeTransition,
   clipPendingAt,
+  pendingRanges,
   clipStrips,
   onFilmstripDemandChange,
   mainLive = true,
@@ -1298,7 +1305,6 @@ function StudioTimelineImpl({
   }
   const laneForBlock = (block: Block): TimelineLaneKey => nativeLaneByClipId.get(block.id) ?? laneForStackOrder(block.trackIndex);
   const tracksH = rowCursor;
-  const tracksHeight = musicLane ? tracksH : tracksH + VISUAL_TRACK_DROP_ZONE_H;
 
   const resolveAudioMoveTarget = (clientY: number): AudioLaneMoveTarget | null => {
     const bounds = tracksRef.current?.getBoundingClientRect();
@@ -1622,6 +1628,18 @@ function StudioTimelineImpl({
     // jump upward into the previous row for a few pixels before snapping down again.
     return visualInsertionLineTop(target.slot) + VISUAL_SCENE_PAD_T;
   };
+  // The empty "new lane" strip under the last row only exists while something is being dragged
+  // (an asset in, or a clip/lane moved); at rest the timeline ends at its last track.
+  const laneDropActive = dropActive || !!trackDrag || !!shotDrag || !!blockTrackDrag || !!visualClipDrag;
+  // Pending generations sit on their target lane; one that needs a new lane gets a temporary row below.
+  const pendingPlacements = (pendingRanges ?? []).map((range) => {
+    const lane = range.lane.kind === 'block' ? laneForStackOrder(range.lane.trackIndex) : range.lane.kind === 'visual' ? visualLaneKey(range.lane.trackId) : null;
+    return lane != null && dispIdx.has(lane)
+      ? { ...range, top: rowTop(lane) + 2, height: rowH(lane) - 4 }
+      : { ...range, top: tracksH + ROW_GAP + 2, height: ROW_H - 4 };
+  });
+  const pendingRowH = pendingPlacements.some((range) => range.top >= tracksH) ? ROW_GAP + ROW_H : 0;
+  const tracksHeight = (musicLane || !laneDropActive ? tracksH : tracksH + VISUAL_TRACK_DROP_ZONE_H) + pendingRowH;
   const activeVisualGhost = (() => {
     if (shotDrag) {
       const span = sceneSpans[shotDrag.from];
@@ -3105,6 +3123,15 @@ function StudioTimelineImpl({
               })()}
 
               {/* External clip insert in progress (download/upload/reading duration): show a badge at the drop point so it doesn't look like the drag did nothing */}
+              {pendingPlacements.map((range) => (
+                <div key={range.id} data-timeline-pending-range className="pointer-events-none absolute z-40 flex items-center overflow-hidden rounded border border-dashed border-white/40 px-1.5"
+                  style={{ left: x(range.startSec), width: Math.max(28, x(range.endSec) - x(range.startSec)), top: range.top, height: range.height,
+                    backgroundImage: 'repeating-linear-gradient(135deg,rgba(0,0,0,0.55) 0 6px,rgba(0,0,0,0.35) 6px 12px)' }}>
+                  <span className="inline-flex min-w-0 items-center gap-1 truncate text-[10px] whitespace-nowrap text-white">
+                    <Loader2 size={10} className="shrink-0 animate-spin" /> {range.label}
+                  </span>
+                </div>
+              ))}
               {clipPendingAt != null && (
                 <div className="pointer-events-none absolute z-40 -translate-x-1/2" style={{ left: x(clipPendingAt), top: 8 }}>
                   <span className="inline-flex items-center gap-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] whitespace-nowrap text-white">

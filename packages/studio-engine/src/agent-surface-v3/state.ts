@@ -8,6 +8,8 @@
  * caption changes, and notes telling the agent exactly when to re-read. Pure; no I/O.
  */
 import { webFontCatalog } from '../font-library';
+import { captionAnimationId } from '../caption-animations';
+import { documentCaptionStyle } from '../editor-document/caption-state';
 import { componentSchemaOf, componentValuesView, type ComponentValueType } from '../component-schema';
 import { clipPropertyDefaults, effectiveAudioClipProperties } from './clip-properties';
 
@@ -58,6 +60,8 @@ export interface V3CaptionsView {
   cueCount: number;
   source?: unknown;
   preview?: string;
+  /** The current look in set_captions vocabulary (read back what you would write). */
+  style: { preset: string; animation: string; highlightColor?: string; yPct: number; scale: number; font?: string };
 }
 
 export interface V3StateView {
@@ -252,11 +256,20 @@ function captionsView(document: EditorDocumentV2, track: EditorTrack): V3Caption
     })
     .filter(Boolean)
     .join(' … ');
+  const style = documentCaptionStyle(document);
   return {
     on: cues.length > 0,
     cueCount: cues.length,
     ...(document.semantics.managedCaptionSource ? { source: document.semantics.managedCaptionSource } : {}),
     ...(preview ? { preview: preview.slice(0, 120) } : {}),
+    style: {
+      preset: style.preset,
+      animation: captionAnimationId(style),
+      ...(style.emphasis ? { highlightColor: style.emphasis } : {}),
+      yPct: Math.round(style.yPct * 10) / 10,
+      scale: style.scale,
+      ...(style.font ? { font: style.font } : {}),
+    },
   };
 }
 

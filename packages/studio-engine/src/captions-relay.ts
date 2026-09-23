@@ -104,7 +104,9 @@ function mapTranscriptSegsToEditedWith(segs: AsrSegment[], place: WordPlacement,
         const placed = place(w);
         if (!placed) return [];
         // A text mask swaps the caption copy only; timing stays the spoken word's.
-        return [{ ...w, text: maskedWordText(s, wi, w.text), si: (w as CueWord).si ?? wi, start: placed.start, end: placed.end }];
+        const sourceIndex = (w as CueWord).si ?? wi;
+        return [{ ...w, text: maskedWordText(s, sourceIndex, w.text), si: sourceIndex, start: placed.start, end: placed.end,
+          ...(s.wordDecorations?.[sourceIndex] ? { decoration: s.wordDecorations[sourceIndex] } : {}) }];
       });
     if (!words.length) continue;
     const groups: (typeof words)[] = [[words[0]!]];

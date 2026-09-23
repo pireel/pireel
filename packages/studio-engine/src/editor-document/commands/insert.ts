@@ -6,6 +6,7 @@ import { removeEditorRange } from './range';
 import { directorPlanAfterRippleInsertion, withAdjustedDirectorPlan } from '../../director-plan-timing';
 import { directorPlanFromDocument } from '../../director-plan-artifact';
 import { assignClipToBestDirectorScene, assignClipToSemanticScene } from '../../semantic-scenes';
+import { seedTranscriptSection } from '../../transcript-sections';
 import {
   commandFailure,
   emptyCommandReceipt,
@@ -52,11 +53,11 @@ function placedClips(placements: TimelineClipPlacement[], atFrame: number): Time
       : clip.kind === 'media'
         ? clip.mediaFraming ?? IDENTITY_MEDIA_FRAMING
         : undefined;
-    return {
+    return seedTranscriptSection({
       ...clip,
       ...(mediaFraming ? { mediaFraming } : {}),
       startFrame: atFrame + offsetFrames,
-    } as TimelineClip;
+    } as TimelineClip);
   });
 }
 

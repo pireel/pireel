@@ -73,7 +73,7 @@ describe('speech silence planner', () => {
       1,
     )).toEqual([]);
     expect(resolveSpeechSilenceOptions({ minimumPauseSec: Number.NaN, speechPaddingSec: Number.NaN })).toMatchObject({
-      minimumPauseSec: 0.5,
+      minimumPauseSec: 0.4,
       speechPaddingSec: 0.15,
     });
   });

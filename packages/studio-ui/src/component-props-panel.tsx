@@ -2,7 +2,7 @@
 
 /**
  * Inspector for a component (registered or bespoke): everything the user can change without
- * regenerating it, in one docked panel (the rail tab "Properties").
+ * regenerating it, in a contextual docked panel shown when a component is selected.
  *
  *  - Properties: the unified component contract (component-schema.ts) rendered by PropsForm;
  *    bespoke drags paint the preview live, release commits one undo step; registered components

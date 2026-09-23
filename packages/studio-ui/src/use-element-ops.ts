@@ -71,11 +71,13 @@ export function useElementOps(deps: ElementOpsDeps) {
   /** Generate a standalone component (composeBlockChecked, not added to the video; only added via
    *  "insert" on a history card). New work always uses bespoke markup; an existing kit result keeps
    *  the props contract so editing never discards manual component choices. */
-  const generateElementStandalone = async (prompt: string, base?: GenElementResult): Promise<GenElementResult> => {
+  const generateElementStandalone = async (prompt: string, base?: GenElementResult, window?: { durationSec: number; beats?: { text: string; start: number; end: number }[] }): Promise<GenElementResult> => {
     // Draft iteration: a "reference" already-generated component enters the seed as the existing implementation, the instruction = edit on top of it
     const seed = base
       ? { id: blockId('ai'), kind: 'custom', innerHtml: base.innerHtml.replaceAll(base.seedId, 'SEED_'), timelineBody: base.timelineBody.replaceAll(base.seedId, 'SEED_'), label: base.label }
       : { id: blockId('ai'), kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: t('workbench.newElement') };
+    // A window it will land on (a transcript selection): design the motion for that length and those spoken beats.
+    const timed = window ? { durationSec: window.durationSec, ...(window.beats?.length ? { beats: window.beats } : {}) } : {};
     if (base) {
       seed.innerHtml = seed.innerHtml.replaceAll('SEED_', seed.id);
       seed.timelineBody = seed.timelineBody.replaceAll('SEED_', seed.id);
@@ -84,8 +86,8 @@ export function useElementOps(deps: ElementOpsDeps) {
       ? `Edit this element's current implementation as requested (keep everything not mentioned as-is): ${prompt}`
       : `Create a new overlay element (title / big number / list / kinetic caption — pick per the content): ${prompt}`;
     const kitOpts = base?.kit ? { kit: true, current: base.kit } : undefined;
-    let parsed = await composeBlockChecked(seed, instruction, undefined, kitOpts);
-    if (parsed.declined) parsed = await composeBlockChecked(seed, instruction); // explicit ask never maps to "nothing to show"
+    let parsed = await composeBlockChecked({ ...seed, ...timed }, instruction, undefined, kitOpts);
+    if (parsed.declined) parsed = await composeBlockChecked({ ...seed, ...timed }, instruction); // explicit ask never maps to "nothing to show"
     if (parsed.kit) {
       // Library card preview = the derived render at a standard landscape reference (same as the
       // assets-panel component cards); insertion uses the props, never this markup.
@@ -96,10 +98,11 @@ export function useElementOps(deps: ElementOpsDeps) {
   };
   /** History card "insert": re-scope the id then land at the playhead (the same asset can be inserted multiple times, selectors don't collide).
    *  If there's an empty component block waiting to be filled (elementTargetRef recorded by aiFillBlock), prefer filling it — keeping its time window/box/track. */
-  const insertGeneratedElement = (el: GenElementResult, prompt: string, atSec?: number) => {
+  const insertGeneratedElement = (el: GenElementResult, prompt: string, atSec?: number, durationSec?: number) => {
     // Kit elements skip the whole HTML insertion pipeline (offscreen measurement, cq-ization,
     // token baking): the block stores props and the component computes sizes from its real box.
     if (el.kit) {
+      if (atSec != null) applyT(Math.max(0, atSec));
       insertKitBlock(`kit:${el.kit.component}`, el.kit.props);
       return;
     }
@@ -162,6 +165,7 @@ export function useElementOps(deps: ElementOpsDeps) {
     }
     const newId = blockId('cst');
     const at = Math.max(0, Math.round((atSec ?? tRef.current) * 100) / 100);
+    const dur = durationSec && durationSec > 0 ? Math.round(durationSec * 100) / 100 : 3;
     // Only with a box are there selection frame / move / resize handles (a boxless block can't show a border, so the user can't adjust it after dragging into the canvas)
     const nb: Block = {
       id: newId,
@@ -173,8 +177,8 @@ export function useElementOps(deps: ElementOpsDeps) {
         ...(el.presetVersion ? { presetVersion: el.presetVersion } : {}),
       },
       startSec: at,
-      durationSec: 3,
-      trackIndex: freeTrack(compRef.current.blocks, at, 3),
+      durationSec: dur,
+      trackIndex: freeTrack(compRef.current.blocks, at, dur),
       label: el.label || prompt.slice(0, 12),
       box: geom.box,
     };

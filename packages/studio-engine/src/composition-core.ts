@@ -557,6 +557,8 @@ export interface CaptionStyle {
   on?: boolean;
   /** Visual preset id (caption-presets registry; the per-word-emphasis / full-sentence mode is also set by the preset). */
   preset: string;
+  /** Independent global caption animation; absence preserves a legacy preset's behavior. */
+  animation?: import('./caption-animations').CaptionAnimationId;
   /** Vertical position: caption's bottom edge distance from canvas top, in % (height-based). */
   yPct: number;
   /** Horizontal position: caption line center distance from canvas left, in % (width-based). Default 50 = centered. */
@@ -572,6 +574,9 @@ export interface CaptionStyle {
   hPct?: number;
   /** Text color override (defaults to the preset's color). Optional and additive — existing projects render unchanged. */
   color?: string;
+  /** Highlight color override for speech-timed emphasis (karaoke color, marker/underline, pulse/bounce/glow);
+   *  unset = the animation's own color. Manual word highlights keep their own colors. */
+  emphasis?: string;
   /** Bold override: true = force bold (800), false = force regular (500); unset = the preset's own weight. */
   bold?: boolean;
   /** Font override: a display-text font id ('sans' | 'serif' | 'mono' | 'web:<library id>' | 'local:<family>'); unset/'preset' = the preset's own font. */
@@ -583,7 +588,7 @@ export interface CaptionStyle {
    *  xPct = line-center distance from left %, scale = font factor (same convention as the main line's scale, 1 = preset's original size).
    *  preset/color/bg = independent visual overrides for the translation line; unset = derived from the main line's (overridden) look.
    *  lang = target language chosen in the UI (panel chip selected state + auto-translate for newly inserted segments). */
-  sub?: { preset?: string; color?: string; bg?: string | null; bold?: boolean; font?: string; yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number; lang?: string };
+  sub?: { animation?: import('./caption-animations').CaptionAnimationId; preset?: string; color?: string; bg?: string | null; bold?: boolean; font?: string; yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number; lang?: string };
 }
 
 export interface Composition {
@@ -1414,6 +1419,7 @@ export function resolveSubCaptionStyle(comp: Composition): CaptionStyle {
   const derivedY = m.yPct + ((mainFs * 0.2 + subFs * 1.35 + padY) / (comp.height || 1920)) * 100;
   return {
     preset: sub.preset ?? DEFAULT_SUB_CAPTION_PRESET,
+    ...(sub.animation != null ? { animation: sub.animation } : {}),
     yPct: Math.min(99, sub.yPct ?? Math.round(derivedY * 10) / 10),
     xPct: sub.xPct ?? m.xPct ?? 50,
     wPct: sub.wPct ?? m.wPct ?? DEFAULT_CAPTION_WIDTH_PCT,
@@ -1433,6 +1439,7 @@ export interface FxWord {
   start: number;
   end: number;
   emphasis?: boolean;
+  decoration?: import('./build-blocks').WordDecoration;
 }
 
 let _uid = 0;
