@@ -16,11 +16,12 @@
 
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Check, ChevronDown, Languages, Loader2, RefreshCw } from 'lucide-react';
-import { Switch } from '@pireel/ui/switch';
+import { confirm } from '@pireel/ui/confirm';
 import { t } from './i18n';
 import { wordsFromText } from '@pireel/studio-engine/caption-fx';
 import type { WordDecorationPatch } from '@pireel/studio-engine/word-decorations';
 import { TranscriptSelectionBar } from './script-panel';
+import { CaptionsToolbarContext, TRANSCRIPT_TOOL_CLASS, TRANSCRIPT_TOOL_LABEL_CLASS, TRANSCRIPT_TOOLBAR_CLASS } from './captions-toolbar-slot';
 import {
   type CaptionPreset,
   type CaptionStyle,
@@ -88,9 +89,7 @@ export interface CaptionStyleCtl {
 
 export function CaptionsPanel({
   comp,
-  onPickPreset,
   onReextract,
-  onRemove,
   styleCtl,
   translation,
   generating,
@@ -108,13 +107,8 @@ export function CaptionsPanel({
   children,
 }: {
   comp: Composition;
-  /** Enable captions with the saved preset. */
-  onPickPreset: (presetId: string) => void;
-  /** Explicitly regenerate cue boundaries from current canvas/font metrics. */
   /** Transcribe the speech again and rebuild every caption: a fresh set, edits and removals cleared. */
   onReextract?: () => void;
-  /** Remove the whole sentence-level caption layer + clear global style. */
-  onRemove: () => void;
   /** Per-line (main / translation) style state + patch callbacks. */
   styleCtl: CaptionStyleCtl;
   /** Bilingual translation control (hidden when omitted). */
@@ -144,7 +138,6 @@ export function CaptionsPanel({
   onGenerateMG?: (text: string, startSec: number, endSec: number) => void;
   children?: ReactNode;
 }) {
-  const [showTranslation, setShowTranslation] = useState(false);
   const hasCaptions = isCaptionsOn(comp);
   const lines = rows ?? [];
   // No tabs (per user): styles sit on top as a collapsible section (~1/2 when lines exist, full height
@@ -253,6 +246,16 @@ export function CaptionsPanel({
     }
     onEditLine?.(row, next, 'commit');
   };
+  const toolbarTools = translation && <LangPick translation={translation} onOff={() => styleCtl.onSubPatch({ lang: undefined })} />;
+  const toolbarEnd = <>
+    {hasCaptions && onReextract && (
+      <button type="button" onClick={async () => {
+        if (await confirm({ title: t('captions.reextractConfirmTitle'), description: t('captions.reextractConfirmBody'), confirmLabel: t('captions.reextract'), tone: 'danger' })) onReextract();
+      }} title={t('captions.reextractHint')} aria-label={t('captions.reextract')} className="text-ink-3 hover:bg-panel-2/20 hover:text-ink flex h-7 w-7 shrink-0 items-center justify-center rounded-md">
+        <RefreshCw size={13} />
+      </button>
+    )}
+  </>;
   return (
     <div ref={panelRef} className="bg-canvas relative flex h-full min-h-0 w-full flex-col">
       {generating && (
@@ -261,23 +264,12 @@ export function CaptionsPanel({
           <span className="text-ink-2 text-[12px]">{t('captions.generatingCaptions')}</span>
         </div>
       )}
-      <div className="border-line bg-panel flex shrink-0 items-center gap-2 border-b px-3 py-2">
-        <span className="text-ink min-w-0 flex-1 truncate text-[12px] font-medium">{t('captions.transcriptEditor')}</span>
-        {children && translation?.lang && <button type="button" aria-pressed={showTranslation} onClick={() => setShowTranslation((value) => !value)} className={`rounded px-2 py-1 text-[11px] ${showTranslation ? 'bg-panel-2/35 text-ink' : 'text-ink-3 hover:text-ink'}`}>{t('captions.translationView')}</button>}
-        {translation && <LangPick translation={translation} onOff={() => styleCtl.onSubPatch({ lang: undefined })} />}
-        {hasCaptions && onReextract && (
-          <button type="button" onClick={onReextract} title={t('captions.reextractHint')} aria-label={t('captions.reextract')} className="text-ink-3 hover:text-ink flex h-7 w-7 shrink-0 items-center justify-center rounded-md">
-            <RefreshCw size={13} />
-          </button>
-        )}
-        <MiniSwitch
-          on={hasCaptions}
-          title={hasCaptions ? t('captions.removeAllCaptionsUndoable') : t('captions.enableCaptions')}
-          onChange={(enabled) => (enabled ? onPickPreset(styleCtl.main.preset) : onRemove())}
-        />
-      </div>
+      {!children && <div className={TRANSCRIPT_TOOLBAR_CLASS}>
+        {toolbarTools}
+        <div className="ml-auto flex items-center gap-1">{toolbarEnd}</div>
+      </div>}
       {/* Caption transcript: click a line to edit the whole cue, or select text for contextual edits. */}
-      {children && !showTranslation ? children : <div ref={listRef} className="min-h-0 flex-1 overflow-auto">
+      {children ? <CaptionsToolbarContext.Provider value={{ tools: toolbarTools, end: toolbarEnd }}>{children}</CaptionsToolbarContext.Provider> : <div ref={listRef} className="min-h-0 flex-1 overflow-auto">
         {lines.length === 0 && (
           <div className="flex flex-col items-center gap-2.5 px-3 py-8 text-center">
             <div className="text-ink-4 text-[11.5px]">{t('captions.noCaptionsYetExtract')}</div>
@@ -420,18 +412,6 @@ export function CaptionsPanel({
   );
 }
 
-/** Tiny on/off switch (captions layer toggle at the front of the main row — mirrors the translation row's language dropdown slot, keeping the two rows aligned). */
-function MiniSwitch({ on, title, onChange }: { on: boolean; title: string; onChange: (v: boolean) => void }) {
-  return (
-    <Switch
-      checked={on}
-      title={title}
-      onCheckedChange={onChange}
-      className="mx-px"
-    />
-  );
-}
-
 /** Language dropdown for the translation row: pick a target language to translate the transcript
  *  (same executor as before), or "off" to clear translations and hide the second line. */
 function LangPick({ translation, onOff }: { translation: CaptionTranslationControl; onOff: () => void }) {
@@ -454,20 +434,27 @@ function LangPick({ translation, onOff }: { translation: CaptionTranslationContr
         type="button"
         disabled={translation.busy || translation.total === 0}
         title={translation.total === 0 ? t('captions.transcribeFirst') : translation.done > 0 ? t('captions.linesDone', { done: translation.done, total: translation.total }) : t('captions.notAdded')}
+        aria-label={t('captions.translate')}
         onClick={() => setOpen((o) => !o)}
-        className={`hover:border-accent flex h-7 w-[30px] items-center justify-center gap-0.5 rounded-md border px-0 text-[11px] disabled:opacity-50 ${open ? 'border-accent' : 'border-line'} ${active ? 'text-ink' : 'text-ink-3'}`}
+        className={`${TRANSCRIPT_TOOL_CLASS} ${open ? 'bg-panel-2/35 text-ink' : ''}`}
       >
-        {translation.busy ? (
-          <Loader2 size={11} className="text-accent animate-spin" />
-        ) : (
-          <>
-            <span className="truncate font-mono text-[10.5px]">{active ? (LANG_ABBR[active] ?? active) : '—'}</span>
-            <ChevronDown size={10} className="text-ink-4 shrink-0" />
-          </>
-        )}
+        {translation.busy ? <Loader2 size={13} className="text-accent animate-spin" /> : <Languages size={13} />}
+        <span className={TRANSCRIPT_TOOL_LABEL_CLASS}>{t('captions.translate')}</span>
+        {active && <span className="text-ink-3 font-mono text-[10.5px]">{LANG_ABBR[active] ?? active}</span>}
+        <ChevronDown size={11} className="text-ink-4" />
       </button>
       {open && (
-        <div className="border-line bg-panel absolute left-0 top-full z-30 mt-1 w-36 rounded-lg border p-1 shadow-xl">
+        <div className="border-line bg-panel absolute left-0 top-full z-30 mt-1 w-44 rounded-lg border p-1 shadow-xl">
+          {active && <>
+            <button
+              type="button"
+              onClick={() => { setOpen(false); translation.onTranslate(active); }}
+              className="text-ink-2 hover:bg-panel-2/20 flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11.5px]"
+            >
+              {t('captions.retranslateAll')}
+            </button>
+            <div className="bg-line my-1 h-px" />
+          </>}
           <button
             type="button"
             onClick={() => { setOpen(false); if (active) onOff(); }}

@@ -8939,10 +8939,13 @@ export function HyperframesWorkbench({
       {/* Entry boot layer: heavy-resource warmup + project-data double gate, covers the whole workbench (incl. the chat bar), self-unmounts when done */}
       <StudioBootOverlay dataReady={bootDataReady} />
       <header data-studio-header data-block-selection-keep data-cap-keep className="bg-canvas flex h-11 shrink-0 items-center justify-between gap-3 rounded-sm px-3">
-        {backHref ? <a href={backHref} aria-label={t("workbench.backToProjects")} title={t("workbench.backToProjects")}
-          className="text-ink-3 hover:bg-panel-2 hover:text-ink inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px]">
-          <ArrowLeft size={14} />{t("workbench.backToProjects")}
-        </a> : <span />}
+        <div className="flex min-w-0 items-center gap-3">
+          {backHref ? <a href={backHref} aria-label={t("workbench.backToProjects")} title={t("workbench.backToProjects")}
+            className="text-ink-3 hover:bg-panel-2/20 hover:text-ink inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px]">
+            <ArrowLeft size={14} />{t("workbench.backToProjects")}
+          </a> : null}
+          <EditorModeSwitch mode={editingMode} onChange={selectEditingMode} />
+        </div>
         <div className="flex min-w-0 items-center gap-3">
           {themeToggle}
           {exportControls}
@@ -8972,7 +8975,6 @@ export function HyperframesWorkbench({
                 {dockContent[mode]}
               </div>
             ))}
-            <EditorModeSwitch mode={editingMode} onChange={selectEditingMode} />
           </WorkbenchDockPanel>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {/* Video import goes through the preview upload / chat; the top bar no longer has buttons (the pipeline is fully tool-ized, chat-driven) */}

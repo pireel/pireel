@@ -392,6 +392,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.generatedBlockFailedChecks":
     "Generated block failed checks: {message}",
   "workbench.generatedLangTranslations": "Generated {lang} translations",
+  "workbench.translationPartial": "Generated {lang} translations; {n} sentence(s) untranslated, try translating again",
   "workbench.generating": "Generating",
   "workbench.geometryPass": "Geometry pass: ",
   "workbench.geometryPassPct": "Geometry pass {pct}%",

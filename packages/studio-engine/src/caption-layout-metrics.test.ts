@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { captionLineSegments } from './caption-layout-metrics';
-import { getCaptionPreset } from './caption-presets';
+import { captionLineSegments, captionStackRows, lexicalWordGroups } from './caption-layout-metrics';
+import { CAPTION_ART_PRESETS, getCaptionPreset } from './caption-presets';
 
 describe('captionLineSegments', () => {
   it('uses actual font-engine measurements when available instead of only glyph estimates', () => {
@@ -10,6 +10,34 @@ describe('captionLineSegments', () => {
     const measured = captionLineSegments(words, preset, 100, 1, 600, { measureText: () => 200 });
     expect(estimated).toHaveLength(1);
     expect(measured.length).toBeGreaterThan(estimated.length);
+  });
+
+  // Chinese recognizers time single characters; lines must still break between dictionary words.
+  const perChar = (text: string) => [...text].map((ch, index) => ({ text: ch, start: index * 0.2, end: index * 0.2 + 0.2 }));
+  const lineTexts = (lines: { text: string }[][]) => lines.map((line) => line.map((word) => word.text).join(''));
+
+  it('groups per-character recognizer words into dictionary words', () => {
+    expect(lexicalWordGroups(perChar('我们看看里面是什么东西。')).map((group) => group.map((word) => word.text).join('')))
+      .toEqual(['我们', '看看', '里面', '是', '什么东西。']);
+    // A recognizer word spanning several dictionary words stays whole.
+    const coarse = [{ text: '我们看看', start: 0, end: 1 }, { text: '里面', start: 1, end: 2 }];
+    expect(lexicalWordGroups(coarse)).toEqual([[coarse[0]], [coarse[1]]]);
+  });
+
+  it('never breaks a line or stacked row inside a dictionary word', () => {
+    const words = perChar('极客时间寄来的礼物，我们拿来给大家抽一个奖，我们看看里面是什么东西。');
+    const groups = lexicalWordGroups(words).map((group) => group.map((word) => word.text).join(''));
+    const boundaries = new Set<number>();
+    groups.reduce((at, group) => { boundaries.add(at + group.length); return at + group.length; }, 0);
+    const preset = getCaptionPreset('ln-clean');
+    for (const lines of [
+      captionLineSegments(words, preset, 40, 1, 1080, { measureText: () => null }),
+      ...CAPTION_ART_PRESETS.map((art) => captionStackRows(words, art, 80, 1, 1080, { measureText: () => null })),
+    ]) {
+      let at = 0;
+      for (const text of lineTexts(lines)) { at += text.length; expect(boundaries.has(at)).toBe(true); }
+      expect(lineTexts(lines).join('')).toBe(words.map((word) => word.text).join(''));
+    }
   });
 });
 

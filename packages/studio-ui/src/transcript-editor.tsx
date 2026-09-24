@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, Highlighter, Loader2, Scissors, ScrollText, X } from 'lucide-react';
-import type { EditorDocumentV2 } from '@pireel/studio-engine/composition';
-import { joinWords } from '@pireel/studio-engine/caption-fx';
+import { managedCaptionLineRows, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
+import { joinWords, latinJoin } from '@pireel/studio-engine/caption-fx';
 import { isFillerWord } from '@pireel/studio-engine/speech-fillers';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { phraseWordIndexes, rowWords } from '@pireel/studio-engine/caption-highlights';
@@ -17,6 +17,7 @@ import { DEFAULT_MASK_TEXT, type WordMaskPatch } from '@pireel/studio-engine/wor
 import { TranscriptSelectionBar, type TimelineMaskTarget, type TimelineScriptCut, type TranscriptAddKind } from './script-panel';
 import { activeTranscriptTokenIndex, transcriptParagraphs, transcriptPauseContext, transcriptSelectionEdits, transcriptTokens, type TranscriptToken } from './transcript-editor-model';
 import { t } from './i18n';
+import { CaptionsToolbarContext, TRANSCRIPT_TOOL_CLASS, TRANSCRIPT_TOOL_LABEL_CLASS, TRANSCRIPT_TOOLBAR_CLASS } from './captions-toolbar-slot';
 import { playhead } from './playhead';
 const noPlaybackSubscription = () => () => {};
 /** Per side: whole scripts under ~6000 characters go to the drafting model in full. */
@@ -31,6 +32,9 @@ function selectionPosition(rect: DOMRect, desiredWidth = 480) {
   const width = Math.min(desiredWidth, window.innerWidth - 24);
   return { left: Math.max(12, Math.min(rect.left, window.innerWidth - width - 12)), top: Math.max(12, Math.min(rect.bottom + 8, window.innerHeight - 240)) };
 }
+
+/** One caption line's share of a translation; `mine` = it plays in this section. */
+interface TranslationPiece { text: string; mine: boolean }
 
 export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, playing, active = true, extracting, onExtract, onSeek, onCut, onEdit, onDecorate, onMask, onGenerateMG, onAddAtRange, addKinds, autoHighlight }: {
   document: EditorDocumentV2;
@@ -57,6 +61,57 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
   const paragraphs = useMemo(() => transcriptParagraphs(document, tokens, pauses), [document, tokens, pauses]);
   const byId = useMemo(() => new Map(tokens.map((token) => [token.id, token])), [tokens]);
   const styleHighlight = captionHighlightColor(document.appearance.captionStyle ?? {});
+  // With a translation line on, each section shows its sentences' translations under the source text.
+  const translationLang = document.appearance.captionStyle?.sub?.lang;
+  // Translations under each section. A sentence (or, when the edit split it apart, each
+  // uninterrupted stretch of it) shows its whole translation under every section it spans, with the
+  // parts the captions put on other sections' lines dimmed. The parts come from the laid-out
+  // caption lines, so the underline matches what plays on screen.
+  const sectionTranslations = useMemo(() => {
+    const out = new Map<string, (TranslationPiece[] | null)[]>();
+    if (!translationLang) return out;
+    const add = (paragraphId: string, entry: TranslationPiece[] | null) => out.set(paragraphId, [...(out.get(paragraphId) ?? []), entry]);
+    const paragraphOf = new Map<string, string>();
+    const assetOfSeg = new Map<number, string>();
+    for (const paragraph of paragraphs) {
+      for (const token of paragraph.tokens) {
+        if (!assetOfSeg.has(token.si)) assetOfSeg.set(token.si, token.assetId);
+        for (let w = token.w0; w <= token.w1; w++) paragraphOf.set(`${token.assetId}:${token.si}:${w}`, paragraph.id);
+      }
+    }
+    const rows = managedCaptionLineRows(document);
+    if (rows) {
+      const stretches: { key: string; cues: { text: string; paragraph?: string }[] }[] = [];
+      for (const row of rows) {
+        const key = `${row.assetId ?? assetOfSeg.get(row.seg) ?? ''}:${row.seg}`;
+        const cue = { text: row.sub?.trim() ?? '', paragraph: paragraphOf.get(`${key}:${row.w0}`) };
+        const last = stretches[stretches.length - 1];
+        if (last && last.key === key) last.cues.push(cue);
+        else stretches.push({ key, cues: [cue] });
+      }
+      for (const stretch of stretches) {
+        const spanned = [...new Set(stretch.cues.map((cue) => cue.paragraph).filter((id): id is string => !!id))];
+        if (!spanned.length) continue;
+        const translated = stretch.cues.filter((cue) => cue.text);
+        if (!translated.length) { add(spanned[0]!, null); continue; }
+        for (const paragraphId of spanned) add(paragraphId, translated.map((cue) => ({ text: cue.text, mine: spanned.length > 1 && cue.paragraph === paragraphId })));
+      }
+      return out;
+    }
+    // Captions not laid out: the stored translation under the section where its sentence starts.
+    const started = new Set<string>();
+    for (const paragraph of paragraphs) {
+      for (const token of paragraph.tokens) {
+        const key = `${token.assetId}:${token.si}`;
+        if (started.has(key)) continue;
+        started.add(key);
+        const segment = document.semantics.transcripts[token.assetId]?.[token.si] as AsrSegment | undefined;
+        const text = segment?.sub?.trim() || Object.values(segment?.cueSubs ?? {}).join(' ').trim();
+        add(paragraph.id, text ? [{ text, mine: false }] : null);
+      }
+    }
+    return out;
+  }, [paragraphs, document, translationLang]);
   const listRef = useRef<HTMLDivElement>(null);
   const selectingRef = useRef(false);
   const suppressClickRef = useRef(false);
@@ -64,6 +119,7 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
   const [selection, setSelection] = useState<TranscriptSelection | null>(null);
   const [drafts, setDrafts] = useState<CaptionCueEdit[] | null>(null);
   const [highlighting, setHighlighting] = useState(false);
+  const captionsToolbar = useContext(CaptionsToolbarContext);
   // One call for every sentence on screen; the result lands as ordinary word highlights
   // (one decorate commit, one undo). A phrase that is not in its row fails the whole run.
   const runAutoHighlight = async () => {
@@ -205,18 +261,20 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
     && document.semantics.transcripts[token.assetId]?.[token.si]?.words?.length);
 
   return <div className="relative flex min-h-0 flex-1 flex-col" data-transcript-editor>
-    <div className="flex shrink-0 items-center justify-between px-4 pb-2 pt-3">
+    <div className={TRANSCRIPT_TOOLBAR_CLASS}>
       <details className="group relative">
-        <summary className="text-ink-2 hover:bg-panel-2 flex cursor-pointer list-none items-center gap-1.5 rounded-md bg-panel-2/60 px-2.5 py-1.5 text-[11.5px] [&::-webkit-details-marker]:hidden"><Scissors size={13} />{t('captions.speechCleanup')}<ChevronDown size={11} /></summary>
+        <summary className={`${TRANSCRIPT_TOOL_CLASS} cursor-pointer list-none group-open:bg-panel-2/35 group-open:text-ink [&::-webkit-details-marker]:hidden`}><Scissors size={13} />{t('captions.speechCleanup')}<ChevronDown size={11} className="text-ink-4" /></summary>
         <div className="border-line bg-panel absolute left-0 top-full z-20 mt-1 w-56 rounded-md border p-1 shadow-lg">
           <button type="button" disabled={!silences.length} className="hover:bg-panel-2/20 w-full rounded px-2 py-2 text-left text-[12px] disabled:opacity-40" onClick={(event) => { onCut(silences, t('panels.deletedNSilencesSec', { n: longPauses.length, sec: longPauses.reduce((total, pause) => total + pause.endSec - pause.startSec - CLEANUP_PAUSE_KEEP_SEC, 0).toFixed(1) })); event.currentTarget.closest('details')?.removeAttribute('open'); }}>{longPauses.length ? t('panels.cutSilencesNSec', { n: longPauses.length, sec: longPauses.reduce((total, pause) => total + pause.endSec - pause.startSec - CLEANUP_PAUSE_KEEP_SEC, 0).toFixed(1) }) : <>{t('panels.cutSilences')}<span className="text-ink-4 block text-[10.5px]">{t('captions.noLongPauses', { sec: CLEANUP_PAUSE_OVER_SEC })}</span></>}</button>
           <button type="button" disabled={!fillers.length} className="hover:bg-panel-2/20 w-full rounded px-2 py-2 text-left text-[12px] disabled:opacity-40" onClick={(event) => { onCut(cutsFor(fillers), t('panels.deletedNFillerWords', { n: fillers.length })); event.currentTarget.closest('details')?.removeAttribute('open'); }}>{fillers.length ? t('panels.cutFillersN', { n: fillers.length }) : <>{t('panels.cutFillers')}<span className="text-ink-4 block text-[10.5px]">{t('panels.noFillerWordsDetected')}</span></>}</button>
         </div>
       </details>
-      <div className="flex items-center gap-2">
+      {autoHighlight && <button type="button" disabled={!tokens.length || highlighting} onClick={() => void runAutoHighlight()} title={t('captions.autoHighlightHint')} aria-label={t('captions.autoHighlight')}
+          className={TRANSCRIPT_TOOL_CLASS}>{highlighting ? <Loader2 size={13} className="animate-spin" /> : <Highlighter size={13} />}<span className={TRANSCRIPT_TOOL_LABEL_CLASS}>{t(highlighting ? 'captions.autoHighlighting' : 'captions.autoHighlight')}</span></button>}
+      {captionsToolbar?.tools}
+      <div className="ml-auto flex items-center gap-1">
         {extracting && <Loader2 size={14} className="text-ink-3 animate-spin" />}
-        {autoHighlight && <button type="button" disabled={!tokens.length || highlighting} onClick={() => void runAutoHighlight()} title={t('captions.autoHighlightHint')}
-          className="text-ink-2 hover:bg-panel-2 flex items-center gap-1.5 rounded-md bg-panel-2/60 px-2.5 py-1.5 text-[11.5px] disabled:opacity-40">{highlighting ? <Loader2 size={13} className="animate-spin" /> : <Highlighter size={13} />}{t(highlighting ? 'captions.autoHighlighting' : 'captions.autoHighlight')}</button>}
+        {captionsToolbar?.end}
       </div>
     </div>
     <div className="text-ink-4 shrink-0 px-4 pb-1 text-[10.5px]">{t('captions.selectTranscriptHint')}</div>
@@ -285,6 +343,16 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
           </span>;
         })}
         </p>
+        {sectionTranslations.has(paragraph.id) && <p data-transcript-translation lang={translationLang}
+          className="border-line/60 text-ink-4 mt-2 border-l-2 pl-3 text-[13px] leading-relaxed">
+          {sectionTranslations.get(paragraph.id)!.map((entry, entryIndex) => <span key={entryIndex}>
+            {entryIndex > 0 ? ' ' : ''}
+            {entry ? entry.map((piece, pieceIndex) => <span key={pieceIndex}>
+              {pieceIndex > 0 && latinJoin(entry[pieceIndex - 1]!.text, piece.text) ? ' ' : ''}
+              <span className={piece.mine ? 'text-ink-2' : entry.some((other) => other.mine) ? 'text-ink-4/60' : 'text-ink-3'}>{piece.text}</span>
+            </span>) : <span className="italic">{t('captions.notTranslated')}</span>}
+          </span>)}
+        </p>}
       </section>)}
     </div>
     {selection && createPortal(<div data-transcript-toolbar data-script-pop className="border-line bg-panel text-ink fixed z-[100] rounded-lg border p-1.5 shadow-xl" style={{ left: selection.left, top: selection.top, width: 'max-content', maxWidth: 'calc(100vw - 24px)' }}>

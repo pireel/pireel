@@ -42,7 +42,7 @@ export interface AsrSegment {
   lang?: string;
   /** Speaker id (diarization; absent = single speaker / not enabled). */
   speaker?: string;
-  /** Bilingual whole-sentence translation (shows only when the sentence maps to a single display cue). */
+  /** Bilingual whole-sentence translation, spread over the sentence's display cues by the caption layout. */
   sub?: string;
   /** Per-cue translations keyed by word range "w0:w1" (UI translate flow / set_caption_translations with a range). */
   cueSubs?: Record<string, string>;

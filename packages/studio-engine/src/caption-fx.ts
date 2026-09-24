@@ -162,7 +162,7 @@ export function detectLang(text: string): string | undefined {
 
 /** Letters+digits only (any script) — the alignment currency between ASR tokens and ICU words:
  *  punctuation/space counts are unreliable across tokenizers, letter counts are not. */
-const alnumCount = (s: string): number => {
+export const alnumCount = (s: string): number => {
   let n = 0;
   for (const ch of s) if (/[\p{L}\p{N}]/u.test(ch)) n++;
   return n;

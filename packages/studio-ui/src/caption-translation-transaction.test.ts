@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   captionTranslationWrites,
-  LINE_MARK,
-  lineTranslationUnits,
-  splitTranslatedLines,
+  sentenceTranslationUnits,
   type TranslationLineRow,
   type TranslationUnit,
 } from './caption-translation-transaction';
@@ -11,24 +9,23 @@ import {
 const row = (src: string | null, index: number, w0: number, w1: number, text: string, editedStart: number, assetId?: string): TranslationLineRow => ({
   src, ...(assetId ? { assetId } : {}), index, w0, w1, text, editedStart,
 });
-const unit = (src: string | null, seg: number, lines: [number, number][], text = 'x', assetId?: string): TranslationUnit => ({
-  src, ...(assetId ? { assetId } : {}), seg, start: 0, text, lines: lines.map(([w0, w1]) => ({ w0, w1 })),
+const unit = (src: string | null, seg: number, text = 'x', assetId?: string): TranslationUnit => ({
+  src, ...(assetId ? { assetId } : {}), seg, start: 0, text,
 });
 
-describe('lineTranslationUnits', () => {
-  it('writes one sentence per row as its on-screen lines joined by the line mark, in play order', () => {
-    const units = lineTranslationUnits([
+describe('sentenceTranslationUnits', () => {
+  it('sends one whole sentence per row, its on-screen lines joined in play order', () => {
+    const units = sentenceTranslationUnits([
       row(null, 0, 0, 3, '我们看看里面', 7.0),
       row(null, 0, 4, 7, '是什么东西。', 7.8),
       row(null, 1, 0, 2, '还一个包包。', 9.1),
     ]);
-    expect(units.map((u) => u.text)).toEqual([`我们看看里面${LINE_MARK}是什么东西。`, '还一个包包。']);
-    expect(units[0]!.lines).toEqual([{ w0: 0, w1: 3 }, { w0: 4, w1: 7 }]);
+    expect(units.map((u) => u.text)).toEqual(['我们看看里面是什么东西。', '还一个包包。']);
     expect(units.map((u) => u.seg)).toEqual([0, 1]);
   });
 
-  it('keeps every sentence its own row, ordered by where it plays, so a reordered cut never swaps two halves', () => {
-    const units = lineTranslationUnits([
+  it('keeps every sentence its own row, ordered by where it plays', () => {
+    const units = sentenceTranslationUnits([
       row(null, 1, 0, 0, '就', 38.4),
       row(null, 0, 0, 0, '好', 43.0),
       row('blob:b', 0, 0, 0, 'B roll line', 3),
@@ -36,65 +33,54 @@ describe('lineTranslationUnits', () => {
     expect(units.map((u) => [u.src, u.text, u.seg])).toEqual([['blob:b', 'B roll line', 0], [null, '就', 1], [null, '好', 0]]);
   });
 
-  it('groups by transcript owner when rows carry one, and strips bars from the source so the answer can be counted', () => {
-    const units = lineTranslationUnits([
-      row(null, 2, 0, 1, 'A | B', 1, 'asset-1'),
-      row(null, 2, 2, 3, 'C', 2, 'asset-1'),
+  it('groups by transcript owner when rows carry one and skips empty lines', () => {
+    const units = sentenceTranslationUnits([
+      row(null, 2, 0, 1, 'Part one', 1, 'asset-1'),
+      row(null, 2, 2, 3, 'part two', 2, 'asset-1'),
       row(null, 0, 0, 0, '', 0.5),
     ]);
     expect(units).toHaveLength(1);
-    expect(units[0]).toMatchObject({ assetId: 'asset-1', seg: 2, text: `A / B${LINE_MARK}C` });
+    expect(units[0]).toMatchObject({ assetId: 'asset-1', seg: 2, text: 'Part one part two' });
   });
-});
 
-describe('splitTranslatedLines', () => {
-  it('splits on either bar and rejoins the pieces as one sentence', () => {
-    expect(splitTranslatedLines("Let's take a look inside | to see what it is.")).toEqual({
-      pieces: ["Let's take a look inside", 'to see what it is.'],
-      whole: "Let's take a look inside to see what it is.",
-    });
-    expect(splitTranslatedLines('让我们看看｜盒子里有什么。')).toEqual({ pieces: ['让我们看看', '盒子里有什么。'], whole: '让我们看看盒子里有什么。' });
+  it('splits a sentence the edit interrupted into one row per stretch, each with its word span', () => {
+    const units = sentenceTranslationUnits([
+      row(null, 1, 0, 4, '价值三万四千八百元，', 6),
+      row(null, 2, 0, 3, '这是一张纸。', 8),
+      row(null, 1, 5, 9, '哦，里面是一个年卡，', 10),
+      row(null, 1, 10, 14, '价值一千九百九十九。', 11),
+    ]);
+    expect(units.map((u) => [u.seg, u.text, u.range])).toEqual([
+      [1, '价值三万四千八百元，', { w0: 0, w1: 4 }],
+      [2, '这是一张纸。', undefined],
+      [1, '哦，里面是一个年卡，价值一千九百九十九。', { w0: 5, w1: 14 }],
+    ]);
+    const writes = captionTranslationWrites(units, [{ index: 0, text: 'Worth 34,800 yuan,' }, { index: 1, text: 'This is a sheet of paper.' }, { index: 2, text: 'oh, an annual pass worth 1,999.' }]);
+    expect(writes.writes[0]!.items).toEqual([
+      { index: 1, w0: 0, w1: 4, text: 'Worth 34,800 yuan,' },
+      { index: 2, text: 'This is a sheet of paper.' },
+      { index: 1, w0: 5, w1: 14, text: 'oh, an annual pass worth 1,999.' },
+    ]);
   });
 });
 
 describe('captionTranslationWrites', () => {
-  it('writes one translation per on-screen line, keyed by the line\'s word range', () => {
+  it('writes one translation per sentence, grouped by source or transcript owner', () => {
     const result = captionTranslationWrites(
-      [unit(null, 0, [[0, 3], [4, 7]], `我们看看里面${LINE_MARK}是什么东西。`)],
-      [{ index: 0, text: "Let's take a look inside | to see what it is." }],
-    );
-    expect(result).toEqual({ ok: true, writes: [{ src: null, items: [
-      { index: 0, w0: 0, w1: 3, text: "Let's take a look inside" },
-      { index: 0, w0: 4, w1: 7, text: 'to see what it is.' },
-    ] }] });
-  });
-
-  it('refuses the whole run, naming the sentence, when an answer lost or added a mark', () => {
-    const lost = captionTranslationWrites(
-      [unit(null, 0, [[0, 3], [4, 7]], `我们看看里面${LINE_MARK}是什么东西。`)],
-      [{ index: 0, text: "Let's take a look at what's inside." }],
-    );
-    expect(lost.ok).toBe(false);
-    expect((lost as { error: string }).error).toContain('我们看看里面');
-    expect((lost as { error: string }).error).toContain('1 line(s) for 2');
-    expect(captionTranslationWrites([unit(null, 1, [[0, 1], [2, 2]])], [{ index: 0, text: 'one | two | three' }]).ok).toBe(false);
-  });
-
-  it('groups items by source or transcript owner', () => {
-    const result = captionTranslationWrites(
-      [unit(null, 0, [[0, 2]]), unit('blob:clip', 0, [[0, 1]]), unit(null, 2, [[0, 0]], 'x', 'asset-9')],
+      [unit(null, 0), unit('blob:clip', 0), unit(null, 2, 'x', 'asset-9')],
       [{ index: 1, text: 'New clip' }, { index: 0, text: 'New main' }, { index: 2, text: 'Third' }],
     );
-    expect(result).toEqual({ ok: true, writes: [
-      { src: null, items: [{ index: 0, w0: 0, w1: 2, text: 'New main' }] },
-      { src: 'blob:clip', items: [{ index: 0, w0: 0, w1: 1, text: 'New clip' }] },
-      { src: null, assetId: 'asset-9', items: [{ index: 2, w0: 0, w1: 0, text: 'Third' }] },
+    expect(result).toEqual({ missing: [], writes: [
+      { src: null, items: [{ index: 0, text: 'New main' }] },
+      { src: 'blob:clip', items: [{ index: 0, text: 'New clip' }] },
+      { src: null, assetId: 'asset-9', items: [{ index: 2, text: 'Third' }] },
     ] });
   });
 
-  it('refuses a missing, duplicate, or out-of-range row so nothing half-lands', () => {
-    expect(captionTranslationWrites([unit(null, 0, [[0, 0]]), unit(null, 1, [[0, 0]])], [{ index: 0, text: 'only one row' }]).ok).toBe(false);
-    expect(captionTranslationWrites([unit(null, 0, [[0, 0]])], [{ index: 0, text: 'a' }, { index: 0, text: 'b' }]).ok).toBe(false);
-    expect(captionTranslationWrites([unit(null, 0, [[0, 0]])], [{ index: 5, text: 'a' }]).ok).toBe(false);
+  it('writes what came back and reports the sentences that did not, ignoring unknown or repeated ids', () => {
+    const units = [unit(null, 0, 'first'), unit(null, 1, 'second')];
+    const result = captionTranslationWrites(units, [{ index: 0, text: 'a' }, { index: 0, text: 'again' }, { index: 5, text: 'stray' }]);
+    expect(result.writes).toEqual([{ src: null, items: [{ index: 0, text: 'a' }] }]);
+    expect(result.missing).toEqual([units[1]]);
   });
 });

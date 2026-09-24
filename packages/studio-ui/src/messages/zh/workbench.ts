@@ -357,6 +357,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.framingChangedName": "已把取景换成「{name}」",
   "workbench.generatedBlockFailedChecks": "生成的动态图形没通过检查:{message}",
   "workbench.generatedLangTranslations": "已生成{lang}译文",
+  "workbench.translationPartial": "已生成{lang}译文，{n} 句未翻译，可重新翻译",
   "workbench.generating": "生成中",
   "workbench.geometryPass": "几何遍:",
   "workbench.geometryPassPct": "几何分析 {pct}%",
