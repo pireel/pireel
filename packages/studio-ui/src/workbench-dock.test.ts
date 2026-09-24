@@ -1,12 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { fitColumnWidths, parseColumnWidths, resizeColumnWidths } from './workbench-dock';
+import { autoColumnWidths, fitColumnWidths, parseColumnWidths, resizeColumnWidths } from './workbench-dock';
 
 describe('three-column workbench sizing', () => {
-  it('starts with independent editor and tools widths and ignores obsolete lock preferences', () => {
-    expect(parseColumnWidths(null)).toEqual({ left: 320, right: 280 });
-    expect(parseColumnWidths('{"lockedTabs":["assets","chat"]}')).toEqual({ left: 320, right: 280 });
-    expect(parseColumnWidths('broken')).toEqual({ left: 320, right: 280 });
+  it('leaves undragged sides on auto and ignores obsolete lock preferences', () => {
+    expect(parseColumnWidths(null)).toEqual({ left: null, right: null });
+    expect(parseColumnWidths('{"lockedTabs":["assets","chat"]}')).toEqual({ left: null, right: null });
+    expect(parseColumnWidths('broken')).toEqual({ left: null, right: null });
+    // Earlier builds saved the fixed defaults without a drag.
+    expect(parseColumnWidths('{"left":320,"right":280}')).toEqual({ left: null, right: null });
     expect(parseColumnWidths('{"left":20,"right":1000}')).toEqual({ left: 220, right: 786 });
+  });
+
+  it('sizes the editor column from the workspace width', () => {
+    expect(autoColumnWidths(1000).left).toBe(320);
+    expect(autoColumnWidths(1420).left).toBe(398);
+    expect(autoColumnWidths(2400).left).toBe(480);
+    expect(autoColumnWidths(1420).right).toBe(280);
   });
 
   it('preserves preferred widths on wide screens and fits both panels on narrow screens', () => {

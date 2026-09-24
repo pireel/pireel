@@ -98,7 +98,7 @@ function Row({ label, options, value, onChange }: { label: string; options: read
             key={option.value}
             type="button"
             onClick={() => onChange(option.value)}
-            className={`h-6 rounded-md px-1.5 text-[10.5px] transition ${value === option.value ? 'bg-panel-2 text-ink font-medium' : 'text-ink-4 hover:text-ink-2'}`}
+            className={`h-6 rounded-md px-1.5 text-[10.5px] transition ${value === option.value ? 'bg-panel-2/35 text-ink font-medium' : 'text-ink-4 hover:text-ink-2'}`}
           >
             {option.label}
           </button>

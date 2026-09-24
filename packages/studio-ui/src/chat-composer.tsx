@@ -725,7 +725,7 @@ export function Composer({
 
   return (
     <>
-      <div className="border-line bg-panel-2 focus-within:border-ink-4 relative rounded-md border transition-colors">
+      <div className="border-line bg-panel-2/35 focus-within:border-ink-4 relative rounded-md border transition-colors">
         <div className="relative">
           {empty && !studioActionActive && (
             <div className="text-ink-4 pointer-events-none absolute left-3 top-2.5 text-[13px]">
@@ -903,7 +903,7 @@ export function Composer({
             onMouseEnter={setActive}
             onMouseDown={(e) => e.preventDefault()}
             onClick={pick}
-            className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] ${active ? "bg-panel-2" : ""}`}
+            className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] ${active ? "bg-panel-2/35" : ""}`}
           >
             <span className="shrink-0">{elementIcon(el)}</span>
             <span className="text-ink truncate">{el.label}</span>

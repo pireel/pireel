@@ -263,7 +263,7 @@ export function CaptionsPanel({
       )}
       <div className="border-line bg-panel flex shrink-0 items-center gap-2 border-b px-3 py-2">
         <span className="text-ink min-w-0 flex-1 truncate text-[12px] font-medium">{t('captions.transcriptEditor')}</span>
-        {children && translation?.lang && <button type="button" aria-pressed={showTranslation} onClick={() => setShowTranslation((value) => !value)} className={`rounded px-2 py-1 text-[11px] ${showTranslation ? 'bg-panel-2 text-ink' : 'text-ink-3 hover:text-ink'}`}>{t('captions.translationView')}</button>}
+        {children && translation?.lang && <button type="button" aria-pressed={showTranslation} onClick={() => setShowTranslation((value) => !value)} className={`rounded px-2 py-1 text-[11px] ${showTranslation ? 'bg-panel-2/35 text-ink' : 'text-ink-3 hover:text-ink'}`}>{t('captions.translationView')}</button>}
         {translation && <LangPick translation={translation} onOff={() => styleCtl.onSubPatch({ lang: undefined })} />}
         {hasCaptions && onReextract && (
           <button type="button" onClick={onReextract} title={t('captions.reextractHint')} aria-label={t('captions.reextract')} className="text-ink-3 hover:text-ink flex h-7 w-7 shrink-0 items-center justify-center rounded-md">
@@ -342,7 +342,7 @@ export function CaptionsPanel({
                     }
                   }}
                   className={`text-ink -mx-1 whitespace-pre-wrap rounded px-1 py-0.5 text-[12px] leading-snug outline-none ${
-                    editing ? 'bg-accent/12' : onEditLine ? 'hover:bg-panel-2/70 cursor-text' : ''
+                    editing ? 'bg-accent/12' : onEditLine ? 'hover:bg-panel-2/20 cursor-text' : ''
                   }`}
                 >
                   {editing ? frozenTextRef.current : row.text}
@@ -381,8 +381,8 @@ export function CaptionsPanel({
                       editingSub
                         ? 'bg-accent/12 text-ink-3'
                         : row.sub
-                          ? `text-ink-3 ${onEditSubLine ? 'hover:bg-panel-2/70 cursor-text' : ''}`
-                          : `text-ink-4 italic ${onEditSubLine ? 'hover:bg-panel-2/70 cursor-text' : ''}`
+                          ? `text-ink-3 ${onEditSubLine ? 'hover:bg-panel-2/20 cursor-text' : ''}`
+                          : `text-ink-4 italic ${onEditSubLine ? 'hover:bg-panel-2/20 cursor-text' : ''}`
                     }`}
                   >
                     {editingSub ? frozenTextRef.current : (row.sub ?? t('captions.notTranslated'))}
@@ -471,7 +471,7 @@ function LangPick({ translation, onOff }: { translation: CaptionTranslationContr
           <button
             type="button"
             onClick={() => { setOpen(false); if (active) onOff(); }}
-            className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11.5px] ${!active ? 'text-ink bg-panel-2/60' : 'text-ink-3 hover:bg-panel-2/60'}`}
+            className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11.5px] ${!active ? 'text-ink bg-panel-2/35' : 'text-ink-3 hover:bg-panel-2/20'}`}
           >
             {t('captions.off')}
             {!active && <Check size={11} className="text-accent ml-auto" />}
@@ -482,7 +482,7 @@ function LangPick({ translation, onOff }: { translation: CaptionTranslationContr
               type="button"
               title={t('captions.translateTranscriptIntoLang', { lang })}
               onClick={() => { setOpen(false); if (lang !== active) translation.onTranslate(lang); }}
-              className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11.5px] ${active === lang ? 'text-ink bg-panel-2/60' : 'text-ink-3 hover:bg-panel-2/60'}`}
+              className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11.5px] ${active === lang ? 'text-ink bg-panel-2/35' : 'text-ink-3 hover:bg-panel-2/20'}`}
             >
               <span className="text-ink-4 w-5 font-mono text-[10.5px]">{LANG_ABBR[lang]}</span> {lang}
               {active === lang && <Check size={11} className="text-accent ml-auto" />}

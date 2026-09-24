@@ -93,7 +93,7 @@ function PresetGrid({
             aria-pressed={selected}
             className={`group relative min-h-[72px] overflow-hidden rounded-md px-2.5 py-2 text-left transition-all ${
               selected
-                ? 'bg-panel-2 ring-accent/60 shadow-sm ring-1'
+                ? 'bg-panel-2/35 ring-accent/60 shadow-sm ring-1'
                 : 'bg-canvas/65 hover:bg-panel-2 hover:shadow-sm'
             }`}
           >
@@ -195,7 +195,7 @@ function GoogleFontOption({ row, selected, loading, onChoose }: { row: GoogleFon
       aria-label={row.f}
       title={row.f}
       onClick={() => onChoose(googleFontFontId(row))}
-      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] ${selected ? 'bg-panel-2 text-ink' : 'text-ink-3 hover:bg-panel-2/70 hover:text-ink'}`}
+      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] ${selected ? 'bg-panel-2/35 text-ink' : 'text-ink-3 hover:bg-panel-2/20 hover:text-ink'}`}
     >
       <span className="min-w-0 flex-1 truncate" style={{ fontFamily: `"${row.f}", sans-serif` }}>{row.f}</span>
       {loading
@@ -283,7 +283,7 @@ export function FontChoiceList({
         aria-label={label}
         title={label}
         onClick={() => onChoose(id)}
-        className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] ${selected ? 'bg-panel-2 text-ink' : 'text-ink-3 hover:bg-panel-2/70 hover:text-ink'}`}
+        className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] ${selected ? 'bg-panel-2/35 text-ink' : 'text-ink-3 hover:bg-panel-2/20 hover:text-ink'}`}
       >
         {preview ? (
           <span className="flex min-w-0 flex-1 items-center gap-2">
@@ -655,7 +655,7 @@ export function DisplayTextPanel({ block, onAdd, onPatch, onPreset }: DisplayTex
                         onClick={() => onPatch({ align: value })}
                         aria-label={t(`displayText.align.${value}`)}
                         aria-pressed={active}
-                        className={`rounded p-1.5 ${active ? 'bg-panel-2 text-ink' : 'text-ink-4 hover:text-ink'}`}
+                        className={`rounded p-1.5 ${active ? 'bg-panel-2/35 text-ink' : 'text-ink-4 hover:text-ink'}`}
                       >
                         <Icon size={13} />
                       </button>

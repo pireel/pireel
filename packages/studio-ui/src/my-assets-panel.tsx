@@ -855,7 +855,7 @@ export function MyAssetsPanel({
                 title={t('panels.filterAssets')}
                 aria-label={t('panels.filterAssets')}
                 className={`border-line hover:text-ink inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border transition ${
-                  kind === 'all' ? 'text-ink-3' : 'bg-panel-2 text-ink'
+                  kind === 'all' ? 'text-ink-3' : 'bg-panel-2/35 text-ink'
                 }`}
               >
                 <SlidersHorizontal size={12} />

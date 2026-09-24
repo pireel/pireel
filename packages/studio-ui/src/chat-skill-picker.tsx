@@ -370,7 +370,7 @@ export function ChatSkillPicker({
                 onClick={pick}
                 className={`border-line flex w-full items-start gap-2.5 px-2.5 py-2.5 text-left disabled:opacity-50 ${
                   firstAction ? 'mt-1 border-t pt-3' : ''
-                } ${active ? 'bg-panel-2' : ''}`}
+                } ${active ? 'bg-panel-2/35' : ''}`}
               >
                 <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg ${
                   item.action === 'create' ? 'bg-accent/10 text-accent' : 'text-ink-3'
@@ -389,7 +389,7 @@ export function ChatSkillPicker({
             <div
               data-active={active || undefined}
               onMouseEnter={setActive}
-              className={`group flex w-full items-center rounded-md pr-1.5 transition-colors ${active ? 'bg-panel-2' : ''}`}
+              className={`group flex w-full items-center rounded-md pr-1.5 transition-colors ${active ? 'bg-panel-2/35' : ''}`}
             >
               <button
                 type="button"

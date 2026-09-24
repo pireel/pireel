@@ -107,7 +107,7 @@ export function AskUserCard({ part }: { part: ToolPartLike }) {
   if (!question || !options.length) return null;
 
   return (
-    <div className="border-line bg-panel-2 w-full overflow-hidden rounded-md border">
+    <div className="border-line/60 w-full overflow-hidden rounded-md border">
       <div className="text-ink-2 border-line/70 border-b px-2.5 py-1.5 text-[12px] font-medium leading-relaxed">{question}</div>
       <div className="flex flex-col gap-1 p-1.5">
         {options.map((o) => {

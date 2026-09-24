@@ -11,8 +11,8 @@ export function EditorModeSwitch({ mode, onChange }: {
 }) {
   return <div data-editor-mode-switch data-block-selection-keep data-cap-keep className="shrink-0 px-2.5 pb-2.5 pt-1">
     <div role="tablist" aria-label={t('workbench.editingMode')}
-      className="border-line bg-bg relative grid grid-cols-2 rounded-lg border p-1">
-      <span aria-hidden className="border-line bg-panel-2 pointer-events-none absolute inset-y-1 left-1 w-[calc((100%-8px)/2)] rounded-md border shadow-sm transition-transform duration-200 ease-out motion-reduce:transition-none"
+      className="border-line relative grid grid-cols-2 rounded-lg border p-1">
+      <span aria-hidden className="border-line/60 bg-panel-2/35 pointer-events-none absolute inset-y-1 left-1 w-[calc((100%-8px)/2)] rounded-md border shadow-sm transition-transform duration-200 ease-out motion-reduce:transition-none"
         style={{ transform: mode === 'captions' ? 'translateX(100%)' : 'translateX(0)' }} />
       {([
         { id: 'chat', label: 'workbench.chat', icon: MessageSquareText },

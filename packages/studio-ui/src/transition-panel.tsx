@@ -175,7 +175,7 @@ export function TransitionPanel({
                   aria-label={t('panels.directionName', { name: t(name) })}
                   onClick={() => onDirection(id)}
                   className={`border-line flex h-8 w-10 items-center justify-center rounded-md border transition ${
-                    direction === id ? 'bg-accent/15 border-accent text-ink' : 'text-ink-3 hover:text-ink hover:bg-panel-2'
+                    direction === id ? 'bg-accent/15 border-accent text-ink' : 'text-ink-3 hover:text-ink hover:bg-panel-2/20'
                   }`}
                 >
                   <Icon size={14} />

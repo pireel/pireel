@@ -9,22 +9,34 @@ export type EditingMode = 'chat' | 'captions';
 export type DockTab = EditingMode | RightDockTab;
 export interface ColumnWidths { left: number; right: number }
 const DEFAULT_WIDTHS: ColumnWidths = { left: 320, right: 280 };
+/** A side left `null` has not been dragged by the user and follows the workspace size. */
+export type PreferredWidths = { [side in keyof ColumnWidths]: number | null };
 const STORAGE_KEY = 'studio-column-widths';
 const MIN_PANEL_WIDTH = 220;
 const MAX_PANEL_WIDTH = 786;
 // Right tool strip (48), three gaps (18), and a usable central preview (200).
 const RESERVED_WIDTH = 266;
+// The editor column (chat / transcript) takes about a quarter of the workspace.
+const AUTO_LEFT_SHARE = 0.28;
+const AUTO_LEFT_MAX = 480;
 
-export function parseColumnWidths(raw: string | null): ColumnWidths {
+/** Default editor column width for a workspace row of `rowWidth` pixels. */
+export function autoColumnWidths(rowWidth: number): ColumnWidths {
+  const left = Math.round(Math.max(DEFAULT_WIDTHS.left, Math.min(AUTO_LEFT_MAX, rowWidth * AUTO_LEFT_SHARE)));
+  return { left, right: DEFAULT_WIDTHS.right };
+}
+
+export function parseColumnWidths(raw: string | null): PreferredWidths {
   try {
     const value = raw ? JSON.parse(raw) : null;
     const read = (side: keyof ColumnWidths) => {
       const width = value?.[side];
-      return typeof width === 'number' && Number.isFinite(width)
-        ? Math.max(MIN_PANEL_WIDTH, Math.min(MAX_PANEL_WIDTH, width)) : DEFAULT_WIDTHS[side];
+      // Earlier builds saved the fixed defaults without any drag; treat those as "not chosen".
+      if (typeof width !== 'number' || !Number.isFinite(width) || width === DEFAULT_WIDTHS[side]) return null;
+      return Math.max(MIN_PANEL_WIDTH, Math.min(MAX_PANEL_WIDTH, width));
     };
     return { left: read('left'), right: read('right') };
-  } catch { return { ...DEFAULT_WIDTHS }; }
+  } catch { return { left: null, right: null }; }
 }
 
 /** Fit the two sidebars to the actual workspace, reserving room for the preview. */
@@ -51,11 +63,9 @@ export function resizeColumnWidths(current: ColumnWidths, side: keyof ColumnWidt
 export function useWorkbenchColumns(leftVisible: boolean, rightVisible: boolean) {
   const [row, setRow] = useState<HTMLDivElement | null>(null);
   const [rowWidth, setRowWidth] = useState(0);
-  const [preferred, setPreferred] = useState<ColumnWidths>(DEFAULT_WIDTHS);
-  const [loaded, setLoaded] = useState(false);
+  const [preferred, setPreferred] = useState<PreferredWidths>({ left: null, right: null });
   useEffect(() => {
     try { setPreferred(parseColumnWidths(window.localStorage.getItem(STORAGE_KEY))); } catch { /* optional storage */ }
-    setLoaded(true);
   }, []);
   useEffect(() => {
     if (!row) return;
@@ -63,15 +73,19 @@ export function useWorkbenchColumns(leftVisible: boolean, rightVisible: boolean)
     observer.observe(row);
     return () => observer.disconnect();
   }, [row]);
-  useEffect(() => {
-    if (!loaded) return;
-    try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(preferred)); } catch { /* optional storage */ }
-  }, [preferred, loaded]);
+  const auto = autoColumnWidths(rowWidth);
+  const left = preferred.left ?? auto.left;
+  const right = preferred.right ?? auto.right;
   const budget = Math.max(0, rowWidth - RESERVED_WIDTH);
-  const widths = fitColumnWidths({ left: leftVisible ? preferred.left : 0, right: rightVisible ? preferred.right : 0 }, budget);
+  const widths = fitColumnWidths({ left: leftVisible ? left : 0, right: rightVisible ? right : 0 }, budget);
   const resize = (side: keyof ColumnWidths, width: number) => {
     const next = resizeColumnWidths(widths, side, width, budget);
-    setPreferred((previous) => ({ left: next.left || previous.left, right: next.right || previous.right }));
+    const other = side === 'left' ? 'right' : 'left';
+    // Dragging one side may squeeze the other; only then does the other become a chosen width too.
+    const chosen: PreferredWidths = { ...preferred, [side]: next[side] || preferred[side] };
+    if (next[other] && next[other] !== widths[other]) chosen[other] = next[other];
+    setPreferred(chosen);
+    try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(chosen)); } catch { /* optional storage */ }
   };
   return { rowRef: setRow, widths, resize };
 }

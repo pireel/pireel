@@ -162,7 +162,7 @@ function StyleControls({ style, onPatch, highlight }: { style: CaptionStyle; onP
                   key={px}
                   type="button"
                   onClick={() => { setPop(null); onPatch({ scale: Math.round((px / BASE_CAPTION_FONT_PX) * 100) / 100 }); }}
-                  className={`flex w-full items-center justify-center gap-1 rounded px-2 py-1 font-mono text-[11px] tabular-nums ${px === fs ? 'text-ink bg-panel-2/60' : 'text-ink-3 hover:bg-panel-2/60'}`}
+                  className={`flex w-full items-center justify-center gap-1 rounded px-2 py-1 font-mono text-[11px] tabular-nums ${px === fs ? 'text-ink bg-panel-2/35' : 'text-ink-3 hover:bg-panel-2/20'}`}
                 >
                   {px} {px === fs && <Check size={10} className="text-accent" />}
                 </button>

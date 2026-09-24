@@ -988,7 +988,7 @@ function GapToken({ gap, onClick }: { gap: { range: SrcRange; alive: boolean; ra
       title={gap.alive ? t('panels.silenceClickDelete') : t('panels.deletedSilenceClickRestore')}
       className={
         gap.alive
-          ? 'text-ink-4 hover:text-ink hover:bg-panel-2 mx-0.5 cursor-pointer rounded px-1 font-mono text-[11px]'
+          ? 'text-ink-4 hover:text-ink hover:bg-panel-2/20 mx-0.5 cursor-pointer rounded px-1 font-mono text-[11px]'
           : 'text-ink-4 hover:bg-panel-2 mx-0.5 cursor-pointer rounded px-1 font-mono text-[11px] line-through opacity-60 hover:opacity-90'
       }
     >

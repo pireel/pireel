@@ -412,7 +412,7 @@ export const StudioChat = memo(
                       setActiveId(th.id);
                       setHistOpen(false);
                     }}
-                    className={`hover:bg-panel-2 flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] ${th.id === activeId ? "bg-panel-2" : ""}`}
+                    className={`hover:bg-panel-2/20 flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] ${th.id === activeId ? "bg-panel-2/35" : ""}`}
                   >
                     <span className="text-ink truncate">
                       {th.title || t("chatGen.newConversation")}

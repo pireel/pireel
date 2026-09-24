@@ -105,7 +105,7 @@ export function ProjectOutputSwitcher({
           const active = output.id === activeId;
           const title = output.title || `${untitledLabel} ${index + 1}`;
           return (
-            <div key={output.id} role="presentation" data-output-id={output.id} className={`group relative flex min-w-28 max-w-52 shrink-0 items-stretch border-b-2 ${active ? 'border-ink bg-canvas text-ink' : 'border-transparent text-ink-3 hover:bg-canvas/60 hover:text-ink'}`}>
+            <div key={output.id} role="presentation" data-output-id={output.id} className={`group relative flex min-w-28 max-w-52 shrink-0 items-stretch border-b-2 ${active ? 'border-ink bg-panel-2/35 text-ink' : 'border-transparent text-ink-3 hover:bg-panel-2/20 hover:text-ink'}`}>
               <button
                 type="button"
                 role="tab"

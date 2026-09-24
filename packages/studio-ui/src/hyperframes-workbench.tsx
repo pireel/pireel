@@ -9009,7 +9009,7 @@ export function HyperframesWorkbench({
                         onClick={applySourceCanvasRatio}
                         className={`whitespace-nowrap px-3 py-1.5 text-left text-[11.5px] transition ${
                           followsFirstSource
-                            ? "bg-panel-2 text-ink font-medium"
+                            ? "bg-panel-2/35 text-ink font-medium"
                             : "text-ink-3 hover:bg-panel-2 hover:text-ink"
                         }`}
                       >
@@ -9022,7 +9022,7 @@ export function HyperframesWorkbench({
                           onClick={() => applyCanvasRatio(r.w, r.h)}
                           className={`whitespace-nowrap px-3 py-1.5 text-left text-[11.5px] transition ${
                             currentRatioId === r.id
-                              ? "bg-panel-2 text-ink font-medium"
+                              ? "bg-panel-2/35 text-ink font-medium"
                               : "text-ink-3 hover:bg-panel-2 hover:text-ink"
                           }`}
                         >
@@ -9280,7 +9280,7 @@ export function HyperframesWorkbench({
                                 aria-label={t("workbench.cameraFraming")}
                                 className={`inline-flex size-7 items-center justify-center rounded ${
                                   floatWin === "shot"
-                                    ? "bg-panel-2 text-ink"
+                                    ? "bg-panel-2/35 text-ink"
                                     : "text-ink-3 hover:bg-panel-2 hover:text-ink"
                                 }`}
                               >
@@ -9296,7 +9296,7 @@ export function HyperframesWorkbench({
                                 aria-label={t("panels.videoSound")}
                                 className={`inline-flex size-7 items-center justify-center rounded ${
                                   !floatWin && libTab === "audio"
-                                    ? "bg-panel-2 text-ink"
+                                    ? "bg-panel-2/35 text-ink"
                                     : "text-ink-3 hover:bg-panel-2 hover:text-ink"
                                 }`}
                               >
@@ -9686,7 +9686,7 @@ export function HyperframesWorkbench({
                                               e.currentTarget.getBoundingClientRect(),
                                             )
                                       }
-                                      className={`inline-flex items-center gap-1 rounded p-1 text-[11px] whitespace-nowrap ${floatWin === "anim" ? "text-ink bg-panel-2" : "text-ink-3 hover:text-ink"}`}
+                                      className={`inline-flex items-center gap-1 rounded p-1 text-[11px] whitespace-nowrap ${floatWin === "anim" ? "text-ink bg-panel-2/35" : "text-ink-3 hover:text-ink"}`}
                                     >
                                       <Wand2 size={13} />{" "}
                                       {t("workbench.motion")}
@@ -9900,7 +9900,7 @@ export function HyperframesWorkbench({
                                         aria-label={t(
                                           "workbench.portraitLayer",
                                         )}
-                                        className={`rounded p-1 ${(mb.personLayer ? mb.personLayer === "behind" : !!comp.personFx?.personFront) ? "text-ink bg-panel-2" : "text-ink-3 hover:text-ink"}`}
+                                        className={`rounded p-1 ${(mb.personLayer ? mb.personLayer === "behind" : !!comp.personFx?.personFront) ? "text-ink bg-panel-2/35" : "text-ink-3 hover:text-ink"}`}
                                       >
                                         <BringToFront size={13} />
                                       </button>
@@ -9937,7 +9937,7 @@ export function HyperframesWorkbench({
                                     }
                                     disabled={!selectedShotId}
                                     aria-label={t("panels.smartCutout")}
-                                    className={`rounded p-1 disabled:opacity-40 ${(comp.shots ?? []).some((s) => s.personMatte) && comp.personFx?.personFront ? "text-ink bg-panel-2" : "text-ink-3 hover:text-ink"}`}
+                                    className={`rounded p-1 disabled:opacity-40 ${(comp.shots ?? []).some((s) => s.personMatte) && comp.personFx?.personFront ? "text-ink bg-panel-2/35" : "text-ink-3 hover:text-ink"}`}
                                   >
                                     <SendToBack size={13} />
                                   </button>
@@ -9958,7 +9958,7 @@ export function HyperframesWorkbench({
                                       setLibCollapsed(false);
                                     }}
                                     aria-label={t("workbench.editableProperties")}
-                                    className={`rounded p-1 ${floatWin === "props" ? "text-ink bg-panel-2" : "text-ink-3 hover:text-ink"}`}
+                                    className={`rounded p-1 ${floatWin === "props" ? "text-ink bg-panel-2/35" : "text-ink-3 hover:text-ink"}`}
                                   >
                                     <SlidersHorizontal size={13} />
                                   </button>
@@ -9980,7 +9980,7 @@ export function HyperframesWorkbench({
                                         aria-label={t(
                                           "workbench.elementBackground",
                                         )}
-                                        className={`rounded p-1 ${bgOpen ? "text-ink bg-panel-2" : "text-ink-3 hover:text-ink"}`}
+                                        className={`rounded p-1 ${bgOpen ? "text-ink bg-panel-2/35" : "text-ink-3 hover:text-ink"}`}
                                       >
                                         <Palette size={13} />
                                       </button>
@@ -10484,7 +10484,7 @@ export function HyperframesWorkbench({
                   title={t(n.label)}
                   className={`relative flex w-full flex-col items-center gap-1 rounded-md py-1.5 transition ${
                     active
-                      ? "bg-panel-2 text-ink"
+                      ? "bg-panel-2/35 text-ink"
                       : "text-ink-4 hover:text-ink-2"
                   }`}
                 >
@@ -10707,7 +10707,7 @@ export function HyperframesWorkbench({
                       ? t("panels.enableClip")
                       : t("panels.disableClip")
                   }
-                  className={`rounded p-1 disabled:opacity-40 ${selectedTimelineClip?.entry.clip.enabled === false ? "text-accent bg-panel-2" : "text-ink-3 hover:text-ink hover:bg-panel-2"}`}
+                  className={`rounded p-1 disabled:opacity-40 ${selectedTimelineClip?.entry.clip.enabled === false ? "text-accent bg-panel-2/35" : "text-ink-3 hover:text-ink hover:bg-panel-2/20"}`}
                 >
                   <Power size={14} />
                 </button>
@@ -10735,7 +10735,7 @@ export function HyperframesWorkbench({
                   }
                   disabled={!hasVideoTrack || !selectedShotId}
                   aria-label={t("workbench.portrait")}
-                  className={`ml-1 rounded p-1 disabled:opacity-40 ${floatWin === "person" ? "text-ink bg-panel-2" : "text-ink-3 hover:text-ink hover:bg-panel-2"}`}
+                  className={`ml-1 rounded p-1 disabled:opacity-40 ${floatWin === "person" ? "text-ink bg-panel-2/35" : "text-ink-3 hover:text-ink hover:bg-panel-2/20"}`}
                 >
                   <UserRound size={14} />
                 </button>
@@ -10752,7 +10752,7 @@ export function HyperframesWorkbench({
                   onClick={openAudioTab}
                   disabled={!hasVideoTrack}
                   aria-label={t("panels.music")}
-                  className={`rounded p-1 disabled:opacity-40 ${!floatWin && libTab === "audio" ? "text-ink bg-panel-2" : "text-ink-3 hover:text-ink hover:bg-panel-2"}`}
+                  className={`rounded p-1 disabled:opacity-40 ${!floatWin && libTab === "audio" ? "text-ink bg-panel-2/35" : "text-ink-3 hover:text-ink hover:bg-panel-2/20"}`}
                 >
                   <Music size={14} />
                 </button>
@@ -10768,7 +10768,7 @@ export function HyperframesWorkbench({
                   aria-checked={timelineDensity === "compact"}
                   onClick={toggleTimelineDensity}
                   aria-label={t("workbench.timelineCompact")}
-                  className={`mr-1 rounded p-1.5 ${timelineDensity === "compact" ? "bg-accent/12 text-accent" : "text-ink-4 hover:bg-panel-2 hover:text-ink"}`}
+                  className={`mr-1 rounded p-1.5 ${timelineDensity === "compact" ? "bg-accent/12 text-accent" : "text-ink-4 hover:bg-panel-2/20 hover:text-ink"}`}
                 >
                   <Rows3 size={14} />
                 </button>
@@ -10789,7 +10789,7 @@ export function HyperframesWorkbench({
                   aria-checked={timelineSnapEnabled}
                   onClick={togglePrimaryAutoSnap}
                   aria-label={t("workbench.timelineAutoSnap")}
-                  className={`mr-1 rounded p-1.5 ${timelineSnapEnabled ? "bg-accent/12 text-accent" : "text-ink-4 hover:bg-panel-2 hover:text-ink"}`}
+                  className={`mr-1 rounded p-1.5 ${timelineSnapEnabled ? "bg-accent/12 text-accent" : "text-ink-4 hover:bg-panel-2/20 hover:text-ink"}`}
                 >
                   <Magnet size={14} />
                 </button>
@@ -10861,7 +10861,7 @@ export function HyperframesWorkbench({
                       type="button"
                       onClick={() => setShowDebug((s) => !s)}
                       aria-label={t("workbench.debugTranscriptVisualAnalysis")}
-                      className={`rounded p-1.5 ${showDebug ? "text-ink bg-panel-2" : "text-ink-4 hover:text-ink"}`}
+                      className={`rounded p-1.5 ${showDebug ? "text-ink bg-panel-2/35" : "text-ink-4 hover:text-ink"}`}
                     >
                       <FlaskConical size={14} />
                     </button>
@@ -10939,7 +10939,7 @@ export function HyperframesWorkbench({
                   type="button"
                   onClick={() => setShowGeom((s) => !s)}
                   disabled={!visual}
-                  className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] disabled:opacity-40 ${showGeom ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-600" : "border-line text-ink-3 hover:text-ink hover:bg-panel-2"}`}
+                  className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] disabled:opacity-40 ${showGeom ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-600" : "border-line text-ink-3 hover:text-ink hover:bg-panel-2/20"}`}
                 >
                   <ScanFace size={11} /> {t("workbench.facesSafeZones")}
                 </button>
@@ -10947,7 +10947,7 @@ export function HyperframesWorkbench({
                 <button
                   type="button"
                   onClick={() => setShowCode((s) => !s)}
-                  className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] ${showCode ? "border-line bg-panel-2 text-ink" : "border-line text-ink-3 hover:text-ink hover:bg-panel-2"}`}
+                  className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] ${showCode ? "border-line bg-panel-2/35 text-ink" : "border-line text-ink-3 hover:text-ink hover:bg-panel-2/20"}`}
                 >
                   <Code2 size={11} /> {t("workbench.source")}
                 </button>

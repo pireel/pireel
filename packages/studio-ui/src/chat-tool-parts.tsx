@@ -113,7 +113,7 @@ function ToolBadge({ def, part, children, quiet }: { def: StudioToolDef; part: T
   // Same card language as ToolCard: header row (icon chip + name + status icon), result text on its own full-width body row (wraps).
   // quiet: the done result already renders its own body (an asset grid, an icon set) — suppress the redundant summary line, same as ToolCard. Running progress and errors always show.
   return (
-    <div className="border-line bg-panel-2 w-full overflow-hidden rounded-md border">
+    <div className="border-line/60 w-full overflow-hidden rounded-md border">
       <div className="flex items-center gap-2 px-2.5 py-1.5">
         <span className="text-accent grid h-5 w-5 shrink-0 place-items-center rounded bg-accent/10 text-[12px]">{def.icon}</span>
         <span className="text-ink-2 shrink-0 text-[12px] font-semibold">{t(def.label)}</span>
@@ -178,7 +178,7 @@ function ToolCard({ def, part, children, quiet }: { def: StudioToolDef; part: To
   }
 
   return (
-    <div className="border-line bg-panel-2 w-full overflow-hidden rounded-md border">
+    <div className="border-line/60 w-full overflow-hidden rounded-md border">
       <div className="flex items-center gap-2 px-2.5 py-1.5">
         <span className="text-accent grid h-5 w-5 shrink-0 place-items-center rounded bg-accent/10 text-[12px]">{def.icon}</span>
         <span className="text-ink-2 shrink-0 text-[12px] font-semibold">{t(def.label)}</span>

@@ -289,7 +289,7 @@ function MuteToggle({ muted, onToggle }: { muted: boolean; onToggle: () => void 
         e.stopPropagation();
         onToggle();
       }}
-      className={`hover:bg-panel-2 flex h-4 w-4 items-center justify-center rounded transition ${muted ? 'text-accent' : 'text-ink-4 hover:text-ink-2'}`}
+      className={`hover:bg-panel-2/20 flex h-4 w-4 items-center justify-center rounded transition ${muted ? 'text-accent' : 'text-ink-4 hover:text-ink-2'}`}
     >
       {muted ? <VolumeX size={12} /> : <Volume2 size={12} />}
     </button>
@@ -308,7 +308,7 @@ function VisibilityToggle({ hidden, onToggle }: { hidden: boolean; onToggle: () 
         event.stopPropagation();
         onToggle();
       }}
-      className={`hover:bg-panel-2 flex h-4 w-4 items-center justify-center rounded transition ${hidden ? 'text-accent' : 'text-ink-4 hover:text-ink-2'}`}
+      className={`hover:bg-panel-2/20 flex h-4 w-4 items-center justify-center rounded transition ${hidden ? 'text-accent' : 'text-ink-4 hover:text-ink-2'}`}
     >
       {hidden ? <EyeOff size={12} /> : <Eye size={12} />}
     </button>
