@@ -1,5 +1,5 @@
 /**
- * Pre-bake a transition window: cut/duration/effect are all known, so compose the
+ * Pre-bake a transition window: cut/window/effect are all known, so compose the
  * whole window offline (MediaBunny two-sided sampling + one gl-transitions mixer) and
  * just play frames back — takes "schedule two decoders live" off the critical path.
  *
@@ -17,9 +17,10 @@ import { sourceDrawRect, type CutTransitionEffect, type ShotPreciseFraming, type
 import { disposeSourceRig, type SourceRig, openSource, sampleAt } from './export-video-source';
 
 export interface BakeSpec {
-  /** Output cut point (seconds) and half-width. */
+  /** Output cut point (seconds) and how far the window reaches before / after it. */
   cut: number;
-  half: number;
+  pre: number;
+  post: number;
   effect: CutTransitionEffect;
   dir: TransitionDirection;
   /** Both source files and their source times at the cut (A ends at aEnd, B starts at bStart). */
@@ -38,7 +39,8 @@ export interface BakeSpec {
 
 export interface BakedWindow {
   cut: number;
-  half: number;
+  /** Window start (seconds); frame i sits at start + i / fps. */
+  start: number;
   fps: number;
   w: number;
   h: number;
@@ -54,8 +56,9 @@ export async function bakeTransitionWindow(spec: BakeSpec, cancelled?: () => boo
   const H = Math.max(2, Math.round(spec.compH / 2));
   const mixer: GlMixer | null = createGlMixer(W, H);
   if (!mixer) return null;
-  const fps = Math.max(24, Math.min(60, FRAME_BUDGET / (2 * spec.half)));
-  const n = Math.max(2, Math.round(2 * spec.half * fps));
+  const span = Math.max(1e-3, spec.pre + spec.post);
+  const fps = Math.max(24, Math.min(60, FRAME_BUDGET / span));
+  const n = Math.max(2, Math.round(span * fps));
   // Two sequential sample streams per side (live + handle; sampleAt is monotonic per stream, and the time domains don't connect so they must be separate)
   const rigs: SourceRig[] = [];
   const open = async (f: File, from: number, to: number) => {
@@ -70,10 +73,10 @@ export async function bakeTransitionWindow(spec: BakeSpec, cancelled?: () => boo
   const rateA = spec.rateA ?? 1;
   const rateB = spec.rateB ?? 1;
   try {
-    const liveA = await open(spec.fileA, spec.aEnd - spec.half * rateA, spec.aEnd);
-    const ghostB = await open(spec.fileB, spec.bStart - spec.half * rateB, spec.bStart);
-    const ghostA = await open(spec.fileA, spec.aEnd, spec.aEnd + spec.half * rateA);
-    const liveB = await open(spec.fileB, spec.bStart, spec.bStart + spec.half * rateB);
+    const liveA = await open(spec.fileA, spec.aEnd - spec.pre * rateA, spec.aEnd);
+    const ghostB = await open(spec.fileB, spec.bStart - spec.pre * rateB, spec.bStart);
+    const ghostA = await open(spec.fileA, spec.aEnd, spec.aEnd + spec.post * rateA);
+    const liveB = await open(spec.fileB, spec.bStart, spec.bStart + spec.post * rateB);
     const [dx, dy] = glDirection(spec.dir);
     const frames: Blob[] = [];
     // Each side draws into its own stage; if sampling runs out of bounds (handle too short), reuse the last frame rather than aborting the bake
@@ -90,7 +93,7 @@ export async function bakeTransitionWindow(spec: BakeSpec, cancelled?: () => boo
     };
     for (let i = 0; i < n; i++) {
       if (cancelled?.()) return null;
-      const t = spec.cut - spec.half + (i / (n - 1)) * 2 * spec.half;
+      const t = spec.cut - spec.pre + (i / (n - 1)) * span;
       const p = i / (n - 1);
       const pre = t < spec.cut;
       // from/to same convention as shim: before cut A live / B pre-roll, after cut A tail / B live
@@ -108,7 +111,7 @@ export async function bakeTransitionWindow(spec: BakeSpec, cancelled?: () => boo
       octx.drawImage(mixer.canvas, 0, 0);
       frames.push(await out.convertToBlob({ type: 'image/webp', quality: 0.82 }));
     }
-    return { cut: spec.cut, half: spec.half, fps: (n - 1) / (2 * spec.half), w: W, h: H, frames };
+    return { cut: spec.cut, start: spec.cut - spec.pre, fps: (n - 1) / span, w: W, h: H, frames };
   } catch {
     return null;
   } finally {

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { t } from './i18n';
 
-export const RIGHT_DOCK_TABS = ['assets', 'caption-style', 'text', 'audio', 'avatar', 'frames'] as const;
+export const RIGHT_DOCK_TABS = ['assets', 'caption-style', 'text', 'transitions', 'audio', 'avatar', 'frames'] as const;
 export type RightDockTab = typeof RIGHT_DOCK_TABS[number];
 export type EditingMode = 'chat' | 'captions';
 export type DockTab = EditingMode | RightDockTab;

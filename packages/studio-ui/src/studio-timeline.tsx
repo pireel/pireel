@@ -15,14 +15,13 @@
  * shot cut points / block, caption and audio edges / playhead.
  */
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeftRight, Clapperboard, Eye, EyeOff, Film, GalleryHorizontal, Loader2, Music, Plus, VideoOff, Volume2, VolumeX } from 'lucide-react';
 import {
   type Block,
   type BlockKind,
   type Composition,
   blockKind,
-  cutTransitions,
   MAX_TRANSITION_SEC,
   totalDuration,
   isSentenceCaption,
@@ -247,10 +246,12 @@ interface StudioTimelineProps {
   /** Per-asset missing-source UI: are this clip source's bytes reachable? Default live. */
   srcLive?: (src: string) => boolean;
   loadingSourceClipIds?: ReadonlySet<string>;
-  /** Shot boundary transition hotspot: click to pick a transition effect in the shared popover (cutSec = that boundary's edited-time). */
-  onOpenTransition?: (cutSec: number, anchor: DOMRect) => void;
-  /** Transition handles drag on both sides (symmetric): commit the new total duration (sec, <=4). */
-  onResizeTransition?: (shotId: string, durationSec: number) => void;
+  /** Transition lane (under the story spine): items placed by time, independent of cuts. */
+  transitions?: ReadonlyArray<{ id: string; startSec: number; endSec: number; label: string }>;
+  selectedTransitionId?: string | null;
+  onSelectTransition?: (id: string | null) => void;
+  /** Drag end on a transition: its new start and length (seconds). */
+  onChangeTransition?: (id: string, next: { startSec: number; durationSec: number }) => void;
   /** External clip insert in progress (download/upload/reading duration): draw an "inserting" badge at that edited-time so the user doesn't think it failed. */
   clipPendingAt?: number | null;
   /** Generations started from a transcript selection: striped bars on the lane they will land on
@@ -379,10 +380,12 @@ function StudioTimelineImpl({
   selectedAudioId,
   onSelectAudio,
   onOpenMusicPanel,
-  onOpenTransition,
-  onResizeTransition,
   clipPendingAt,
   pendingRanges,
+  transitions,
+  selectedTransitionId,
+  onSelectTransition,
+  onChangeTransition,
   clipStrips,
   onFilmstripDemandChange,
   mainLive = true,
@@ -471,7 +474,6 @@ function StudioTimelineImpl({
     mode: TimelineInsertMode;
   } | null>(null);
   const [audioDropTarget, setAudioDropTarget] = useState<AudioLaneMoveTarget | null>(null);
-  const [trDrag, setTrDrag] = useState<{ cut: number; half: number } | null>(null); // live half-width while dragging a transition handle (symmetric)
   const [shotResize, setShotResize] = useState<{
     shotId: string;
     edge: 'left' | 'right';
@@ -1273,9 +1275,18 @@ function StudioTimelineImpl({
   // taller visual lane overlap the rows below it.
   const rowTops = new Map<TimelineLaneKey, number>();
   let rowCursor = 0;
+  // The transition lane sits right under the story spine and shifts every lane below it.
+  const showTransitionLane = !!onChangeTransition && displayTracks.includes(0);
+  const TRANSITION_ROW_H = Math.max(18, Math.round(ROW_H * 0.62));
+  let transitionLaneTop = 0;
   displayTracks.forEach((track, index) => {
     rowTops.set(track, rowCursor);
-    rowCursor += rowH(track) + (index < displayTracks.length - 1 ? ROW_GAP : 0);
+    const last = index === displayTracks.length - 1;
+    rowCursor += rowH(track) + (last ? 0 : ROW_GAP);
+    if (track === 0 && showTransitionLane) {
+      transitionLaneTop = rowCursor + (last ? ROW_GAP : 0);
+      rowCursor = transitionLaneTop + TRANSITION_ROW_H + (last ? 0 : ROW_GAP);
+    }
   });
   const rowTop = (track: TimelineLaneKey) => rowTops.get(track) ?? 0;
   const nativeTrackIdForLane = (lane: TimelineLaneKey): string | null => {
@@ -1631,6 +1642,42 @@ function StudioTimelineImpl({
   // The empty "new lane" strip under the last row only exists while something is being dragged
   // (an asset in, or a clip/lane moved); at rest the timeline ends at its last track.
   const laneDropActive = dropActive || !!trackDrag || !!shotDrag || !!blockTrackDrag || !!visualClipDrag;
+  // Transition lane drag: live geometry while a block moves or resizes; committed on release.
+  const [transitionDrag, setTransitionDrag] = useState<{ id: string; startSec: number; durationSec: number } | null>(null);
+  const beginTransitionDrag = (event: React.PointerEvent, item: { id: string; startSec: number; endSec: number }, mode: 'move' | 'l' | 'r') => {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    event.preventDefault();
+    onSelectTransition?.(item.id);
+    const x0 = event.clientX;
+    const s0 = item.startSec;
+    const d0 = item.endSec - item.startSec;
+    const others = (transitions ?? []).filter((other) => other.id !== item.id);
+    const floor = Math.max(0, ...others.filter((other) => other.endSec <= s0 + 1e-6).map((other) => other.endSec));
+    const ceiling = Math.min(Number.POSITIVE_INFINITY, ...others.filter((other) => other.startSec >= s0 + d0 - 1e-6).map((other) => other.startSec));
+    const clamp = (value: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, value));
+    let next = { startSec: s0, durationSec: d0 };
+    let moved = false;
+    const onMove = (move: PointerEvent) => {
+      const dt = (move.clientX - x0) / pps;
+      if (Math.abs(move.clientX - x0) > 2) moved = true;
+      if (mode === 'move') next = { startSec: clamp(s0 + dt, floor, ceiling - d0), durationSec: d0 };
+      else if (mode === 'r') next = { startSec: s0, durationSec: clamp(d0 + dt, 0.1, Math.min(MAX_TRANSITION_SEC, ceiling - s0)) };
+      else {
+        const start = clamp(s0 + dt, Math.max(floor, s0 + d0 - MAX_TRANSITION_SEC), s0 + d0 - 0.1);
+        next = { startSec: start, durationSec: s0 + d0 - start };
+      }
+      setTransitionDrag({ id: item.id, ...next });
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      setTransitionDrag(null);
+      if (moved) onChangeTransition?.(item.id, next);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
   // Pending generations sit on their target lane; one that needs a new lane gets a temporary row below.
   const pendingPlacements = (pendingRanges ?? []).map((range) => {
     const lane = range.lane.kind === 'block' ? laneForStackOrder(range.lane.trackIndex) : range.lane.kind === 'visual' ? visualLaneKey(range.lane.trackId) : null;
@@ -1791,8 +1838,8 @@ function StudioTimelineImpl({
                 // The caption lane is pinned on top (engine caption-stack): no drag handle for it.
                 const draggable = nativeTrack != null && track !== CAP_LANE;
                 return (
+                  <Fragment key={track}>
                   <div
-                    key={track}
                     data-audio-track-id={audioId && audioId !== '__fallback__' ? audioId : undefined}
                     onPointerDown={draggable ? (e) => startTrackDrag(e, track) : undefined}
                     title={t(meta.label)}
@@ -1821,6 +1868,12 @@ function StudioTimelineImpl({
                       <span className="h-4 w-4" aria-hidden />
                     )}
                   </div>
+                  {track === 0 && showTransitionLane && (
+                    <div data-transition-lane-header title={t('workbench.transitionLane')} className="text-ink-4 flex items-center gap-1 px-2 text-[10px]" style={{ height: TRANSITION_ROW_H, marginTop: ROW_GAP }}>
+                      <ArrowLeftRight size={12} className="shrink-0" aria-hidden />
+                    </div>
+                  )}
+                  </Fragment>
                 );
               })}
             </div>
@@ -2456,101 +2509,6 @@ function StudioTimelineImpl({
                       </div>
                     );
                   })() : null}
-                  {/* Cut-point transition (content-level, mounted on the main track): unset = narrow "add" affordance; set = a
-                      symmetric region centered on the cut (theme color), with handles on both sides dragging the duration symmetrically (drag one, the other mirrors; total <=4s).
-                      z-30 is above scene cards, below the hover "+" (z-40) */}
-                  {onOpenTransition &&
-                    (() => {
-                      const trs = cutTransitions(shots, activeVideoPlacements);
-                      return sceneSpans.slice(0, -1).map(({ end }, i) => {
-                        if (!(placementEnabled.get(sceneSpans[i]!.shot.id) ?? true)
-                          || !(placementEnabled.get(sceneSpans[i + 1]!.shot.id) ?? true)) return null;
-                        const tr = trs.find((t2) => Math.abs(t2.cut - end) < 0.05);
-                        if (!tr) {
-                          return (
-                            <button
-                              key={`tr-${i}`}
-                              type="button"
-                              aria-label={t('panels.addTransition')}
-                              onMouseEnter={() => {
-                                if (draggingRef.current) return; // don't grab hover-scrub while dragging
-                                // Hovering the transition spot = clear intent: arm hover-scrub immediately, center preview jumps straight to the cut frame
-                                scrubArmedRef.current = true;
-                                setHoverT(end);
-                                onScrub(end);
-                              }}
-                              onPointerDown={(e) => e.stopPropagation()}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onOpenTransition(end, e.currentTarget.getBoundingClientRect());
-                              }}
-                              className="absolute z-30 flex h-5 w-5 -translate-x-1/2 cursor-pointer items-center justify-center rounded-full bg-black/55 text-white/75 shadow-sm transition hover:bg-black/75 hover:text-white"
-                              style={{ left: x(end), top: SCENE_PAD_T + 3 }}
-                            >
-                              <ArrowLeftRight size={10} />
-                            </button>
-                          );
-                        }
-                        // Live half-width while dragging (local state); handle clamped to [0.1, min(2, both sides' shot lengths)]
-                        const lenPrev = sceneSpans[i]!.end - sceneSpans[i]!.start;
-                        const lenSelf = sceneSpans[i + 1]!.end - sceneSpans[i + 1]!.start;
-                        const maxHalf = Math.min(MAX_TRANSITION_SEC / 2, lenPrev, lenSelf);
-                        const half = trDrag && Math.abs(trDrag.cut - end) < 0.05 ? trDrag.half : tr.half;
-                        const handle = (side: -1 | 1) => (
-                          <div
-                            role="none"
-                            onPointerDown={(e) => {
-                              e.stopPropagation();
-                              drag(
-                                e,
-                                (cx) => setTrDrag({ cut: end, half: Math.min(maxHalf, Math.max(0.1, Math.abs(secAt(cx) - end))) }),
-                                (moved) => {
-                                  setTrDrag((cur) => {
-                                    if (moved && cur) onResizeTransition?.(tr.shotId, Math.round(cur.half * 2 * 100) / 100);
-                                    return null;
-                                  });
-                                },
-                              );
-                            }}
-                            className="bg-accent pointer-events-auto absolute top-0 bottom-0 w-1.5 cursor-ew-resize rounded-full opacity-80 hover:opacity-100"
-                            style={side < 0 ? { left: -3 } : { right: -3 }}
-                          />
-                        );
-                        return (
-                          <div
-                            key={`tr-${i}`}
-                            data-transition-region
-                            className="pointer-events-none absolute top-3 bottom-2 z-30"
-                            style={{ left: x(end - half), width: Math.max(10, x(half * 2)) }}
-                            onMouseEnter={(e) => {
-                              if (draggingRef.current) return; // don't grab hover-scrub while dragging
-                              // Hovering the transition region = clear intent: arm immediately, preview jumps to the cursor's time (subsequent mousemove bubbles up to follow)
-                              scrubArmedRef.current = true;
-                              const tt = secAt(e.clientX);
-                              setHoverT(tt);
-                              onScrub(tt);
-                            }}
-                          >
-                            <button
-                              type="button"
-                              aria-label={t('panels.editTransition')}
-                              onPointerDown={(e) => e.stopPropagation()}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onOpenTransition(end, e.currentTarget.getBoundingClientRect());
-                              }}
-                              className={`bg-accent/30 ring-accent/70 pointer-events-none absolute inset-0 ring-1 ${TIMELINE_ITEM_RADIUS}`}
-                            >
-                              <span className="bg-accent pointer-events-auto absolute left-1/2 top-1/2 flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full text-white shadow transition hover:brightness-110">
-                                <ArrowLeftRight size={9} />
-                              </span>
-                            </button>
-                            {handle(-1)}
-                            {handle(1)}
-                          </div>
-                        );
-                      });
-                    })()}
               </div>
 
               {/* Native visual media lanes. They are separate from the semantic primary rail and from
@@ -3123,6 +3081,29 @@ function StudioTimelineImpl({
               })()}
 
               {/* External clip insert in progress (download/upload/reading duration): show a badge at the drop point so it doesn't look like the drag did nothing */}
+              {showTransitionLane && (
+                <div data-transition-lane className="absolute left-0 right-0" style={{ top: transitionLaneTop, height: TRANSITION_ROW_H }}>
+                  {(transitions ?? []).map((item) => {
+                    const live = transitionDrag?.id === item.id ? transitionDrag : { startSec: item.startSec, durationSec: item.endSec - item.startSec };
+                    const selected = selectedTransitionId === item.id;
+                    return (
+                      <div
+                        key={item.id}
+                        data-transition-id={item.id}
+                        title={item.label}
+                        onPointerDown={(event) => beginTransitionDrag(event, item, 'move')}
+                        onClick={(event) => event.stopPropagation()}
+                        className={`absolute top-0 flex h-full cursor-grab items-center overflow-hidden rounded text-[10px] text-white active:cursor-grabbing ${selected ? 'bg-accent ring-accent/50 ring-2' : 'bg-accent/65 hover:bg-accent/85'}`}
+                        style={{ left: x(live.startSec), width: Math.max(6, x(live.startSec + live.durationSec) - x(live.startSec)) }}
+                      >
+                        <span className="pointer-events-none min-w-0 truncate px-2">{item.label}</span>
+                        <span onPointerDown={(event) => beginTransitionDrag(event, item, 'l')} className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize" />
+                        <span onPointerDown={(event) => beginTransitionDrag(event, item, 'r')} className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize" />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               {pendingPlacements.map((range) => (
                 <div key={range.id} data-timeline-pending-range className="pointer-events-none absolute z-40 flex items-center overflow-hidden rounded border border-dashed border-white/40 px-1.5"
                   style={{ left: x(range.startSec), width: Math.max(28, x(range.endSec) - x(range.startSec)), top: range.top, height: range.height,

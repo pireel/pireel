@@ -1,4 +1,5 @@
 import { isCaptionAnimation, CAPTION_ANIMATION_IDS, captionAnimationId } from './caption-animations';
+import { DEFAULT_TRANSITION_SEC, maxTransitionFrames, transitionSlotAt } from './editor-document/transitions';
 /**
  * Agent surface v3 — document-level tools in their published shape.
  *
@@ -21,7 +22,7 @@ import {
   type TimelineClip,
 } from './editor-document';
 import { CAPTION_PRESETS, getCaptionPreset } from './caption-presets';
-import { CUT_TRANSITION_EFFECTS, DIRECTIONAL_TRANSITIONS, MAX_TRANSITION_SEC, PLACE_ANCHORS, SHOT_TREATMENTS, ZOOM_PRESETS, ZOOM_SCALE_MAX, ZOOM_SCALE_MIN, applyBlockPlacement, blockId, blockKind, isSentenceCaption, placementFramingNotes, renderBlock, shotFilterCss, splitBlockedByTransition, videoShotTimelineSpans, zoneOf, type Block, type Composition, type CutTransitionEffect, type ShotFilter, type TransitionDirection, type VideoShot } from './composition-core';
+import { CUT_TRANSITION_EFFECTS, DIRECTIONAL_TRANSITIONS, MAX_TRANSITION_SEC, PLACE_ANCHORS, SHOT_TREATMENTS, ZOOM_PRESETS, ZOOM_SCALE_MAX, ZOOM_SCALE_MIN, applyBlockPlacement, blockId, blockKind, isSentenceCaption, placementFramingNotes, renderBlock, shotFilterCss, videoShotTimelineSpans, zoneOf, type Block, type Composition, type CutTransitionEffect, type ShotFilter, type TransitionDirection, type VideoShot } from './composition-core';
 import { applyCanvasDocumentEdit } from './canvas-document-edit';
 import { applyCaptionDocumentEdit } from './caption-document-edit';
 import { applyCompositionLayout, applyShotFramingInput, canvasSizeFollowingFirstVideo, canvasSizeFromInput } from './editing-primitives';
@@ -376,10 +377,6 @@ export function splitClipsV3(document: EditorDocumentV2, input: Input): AgentTim
     if (!primaryNarrativeClips(next).length) return fail('no story-spine footage to split');
     const points = normalizeNarrationSplitPoints(spinePoints, STUDIO_AGENT_EXECUTION_LIMITS.splitPointsPerCall);
     if ('error' in points) return fail(points.error);
-    const placements = editorDocumentRenderPlan(next).narrative.map((entry) => ({ shotId: entry.clipId, startSec: entry.startSec, endSec: entry.endSec }));
-    const shots = projectNarrativeShots(next);
-    const blocked = points.find((atSec) => splitBlockedByTransition(shots, atSec, placements));
-    if (blocked != null) return fail(`cannot split at frame ${secondsToTimelineFrames(blocked, fps)}: it is inside a transition region`);
     const command = applyNarrationSplitCommands(next, points);
     if (!command.ok) return fail(command.error.message, { code: command.error.code, trackIds: command.error.trackIds });
     next = command.document;
@@ -690,35 +687,49 @@ export function addTransitionV3(document: EditorDocumentV2, input: Input): Agent
   const allowed = [...CUT_TRANSITION_EFFECTS.map(({ id }) => id), 'none'];
   if (input.effect !== undefined && !allowed.includes(input.effect as string)) return fail('invalid_value', { path: 'effect', value: input.effect, allowed });
   if (input.direction !== undefined && !['up', 'down', 'left', 'right'].includes(input.direction as string)) return fail('invalid_value', { path: 'direction', value: input.direction, allowed: ['up', 'down', 'left', 'right'] });
-  if (!isFrame(input.atFrame, 1)) return fail('atFrame must be an integer frame ≥ 1');
+  if (input.atFrame !== undefined && !isFrame(input.atFrame)) return fail('atFrame must be an integer frame ≥ 0');
   if (input.durationFrames !== undefined && !isFrame(input.durationFrames, 1)) return fail('durationFrames must be an integer frame count ≥ 1');
   const fps = document.canvas.fps;
-  const at = framesToSec(input.atFrame, fps);
-  const placements = editorDocumentRenderPlan(document).narrative.map((entry) => ({ shotId: entry.clipId, startSec: entry.startSec, endSec: entry.endSec }));
-  const spans = videoShotTimelineSpans(projectNarrativeShots(document), placements);
-  const boundaryIndex = spans.findIndex((span, idx) => idx >= 1 && Math.abs(span.editedStart - at) < 0.3);
-  if (boundaryIndex < 1) {
-    const boundaries = spans.slice(1).map((span) => secondsToTimelineFrames(span.editedStart, fps));
-    return fail('atFrame must be a cut between two story-spine clips', { fix: `Cut boundaries are at frames ${boundaries.join(', ') || '(none: one clip only)'}.`, boundaries });
+  const list = document.timeline.transitions ?? [];
+  const maxFrames = maxTransitionFrames(fps);
+  const direction = string(input.direction) as TransitionDirection | undefined;
+  const id = string(input.id);
+  if (id) {
+    const current = list.find((transition) => transition.id === id);
+    if (!current) return fail('unknown_id', { path: 'id', value: id, fix: `Transitions are ${list.map((transition) => transition.id).join(', ') || '(none)'} — read get_state transitions.` });
+    if (input.effect === 'none') {
+      const removed = applyEditorCommand(document, { type: 'transitions.remove', ids: [id] });
+      if (!removed.ok) return fail(removed.error.message, { code: removed.error.code });
+      return mutation(removed.document, `Removed transition ${id}`, [removed.receipt], { id, removed: true });
+    }
+    const patch = {
+      ...(string(input.effect) ? { effect: input.effect as CutTransitionEffect } : {}),
+      ...(direction ? { direction } : {}),
+      ...(isFrame(input.atFrame) ? { startFrame: input.atFrame } : {}),
+      ...(isFrame(input.durationFrames, 1) ? { durationFrames: Math.min(maxFrames, input.durationFrames) } : {}),
+    };
+    const patched = applyEditorCommand(document, { type: 'transitions.patch', id, patch });
+    if (!patched.ok) return fail(patched.error.message, { code: patched.error.code, fix: 'Transitions may not overlap; move it or shorten it.' });
+    const next = patched.document.timeline.transitions!.find((transition) => transition.id === id)!;
+    return mutation(patched.document, `Updated transition ${id}: ${next.effect} at frames ${next.startFrame}–${next.startFrame + next.durationFrames}`, [patched.receipt], { id, frames: [next.startFrame, next.startFrame + next.durationFrames], effect: next.effect, ...(next.direction ? { direction: next.direction } : {}) });
   }
-  const self = spans[boundaryIndex]!;
-  const previous = spans[boundaryIndex - 1]!;
-  const remove = input.effect === 'none';
-  const effect: CutTransitionEffect = string(input.effect) && input.effect !== 'none' ? (input.effect as CutTransitionEffect) : (self.clip.transIn?.effect ?? 'fade');
-  const direction = (string(input.direction) as TransitionDirection | undefined) ?? self.clip.transIn?.direction;
-  const durationSec = Math.min(MAX_TRANSITION_SEC, Math.max(0.2, isFrame(input.durationFrames, 1) ? framesToSec(input.durationFrames, fps) : (self.clip.transIn?.durationSec ?? 1)));
-  const transition = remove
-    ? undefined
-    : { prevId: previous.clip.id, effect, durationSec, ...(DIRECTIONAL_TRANSITIONS.has(effect) && direction ? { direction } : {}) };
-  const patched = patchNarrativeClips(document, [{ clipId: self.clip.id, patch: { properties: { transIn: transition } } }]);
-  if (!patched.ok) return fail(patched.error.message, { code: patched.error.code, trackIds: patched.error.trackIds });
-  const atFrame = secondsToTimelineFrames(self.editedStart, fps);
-  return mutation(
-    patched.document,
-    remove ? `Removed the transition at frame ${atFrame}` : `Set a ${effect} transition at frame ${atFrame} (${r1(durationSec)}s)`,
-    [patched.receipt],
-    { atFrame, clipId: self.clip.id, ...(remove ? { removed: true } : { effect, durationFrames: secondsToTimelineFrames(durationSec, fps), ...(transition?.direction ? { direction: transition.direction } : {}) }) },
-  );
+  if (!isFrame(input.atFrame)) return fail('missing_field', { path: 'atFrame', fix: 'Pass atFrame to add a transition there, or id to change one.' });
+  if (input.effect === 'none' || !string(input.effect)) return fail('missing_field', { path: 'effect', fix: 'Pass an effect to add; to remove one pass its id with effect "none".' });
+  const effect = input.effect as CutTransitionEffect;
+  const startFrame = transitionSlotAt(list, input.atFrame);
+  const following = list.filter((transition) => transition.startFrame >= startFrame).sort((left, right) => left.startFrame - right.startFrame)[0];
+  const wanted = isFrame(input.durationFrames, 1) ? Math.min(maxFrames, input.durationFrames) : Math.round(DEFAULT_TRANSITION_SEC * fps);
+  const durationFrames = Math.min(wanted, following ? following.startFrame - startFrame : Number.POSITIVE_INFINITY);
+  if (durationFrames < 1) return fail(`no room for a transition at frame ${input.atFrame}`, { fix: 'Transitions there fill the lane; pick another frame or shorten a neighbour.' });
+  // Deterministic from the document, so a server replay mints the same id.
+  const taken = new Set(list.map((transition) => transition.id));
+  let ordinal = list.length + 1;
+  while (taken.has(`transition_${ordinal}`)) ordinal += 1;
+  const newId = `transition_${ordinal}`;
+  const inserted = applyEditorCommand(document, { type: 'transitions.insert', transition: { id: newId, startFrame, durationFrames, effect, ...(direction && DIRECTIONAL_TRANSITIONS.has(effect) ? { direction } : {}) } });
+  if (!inserted.ok) return fail(inserted.error.message, { code: inserted.error.code });
+  const note = startFrame !== input.atFrame ? ` (queued after the transition already at frame ${input.atFrame})` : '';
+  return mutation(inserted.document, `Added a ${effect} transition at frames ${startFrame}–${startFrame + durationFrames}${note}`, [inserted.receipt], { id: newId, frames: [startFrame, startFrame + durationFrames], effect });
 }
 
 export function setCanvasV3(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {

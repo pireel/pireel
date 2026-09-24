@@ -1,4 +1,5 @@
 import { CAPTION_ANIMATIONS, CAPTION_ANIMATION_IDS } from '../caption-animations';
+import { DEFAULT_TRANSITION_SEC } from '../editor-document/transitions';
 import { COMPONENT_PROPERTY_MAX_ROWS, COMPONENT_PROPERTY_MAX_FIELDS, COMPONENT_PROPERTY_MAX_TEXT } from '../component-property-input';
 /**
  * Agent surface v3 — tool descriptions and input schemas.
@@ -398,13 +399,14 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   add_transition: {
     description:
-      `Set, restyle or remove the transition at a cut between two story-spine clips (the footage hands over; this is not an overlay). atFrame must be an existing boundary. effect is one of ${TRANSITION_EFFECT_IDS.join(' / ')}; none removes. durationFrames is the total length across both sides, at most ${MAX_TRANSITION_SEC} s, clamped by the neighbouring clips. direction applies to directional / directionalwipe.`,
+      `Place, restyle or remove a transition on the transition lane. Transitions are placed by time and need no cut: one that spans a story-spine cut hands the footage over there; elsewhere the effect plays on the running picture. atFrame adds one there (queued right after any transition already at that frame; ${DEFAULT_TRANSITION_SEC}s by default, at most ${MAX_TRANSITION_SEC}s, shortened to the room before the next one). id (from get_state transitions) changes that transition — effect, direction, atFrame to move it, durationFrames — and effect none removes it. effect is one of ${TRANSITION_EFFECT_IDS.join(' / ')}; direction applies to directional / directionalwipe. Transitions never overlap.`,
     inputSchema: obj({
-      atFrame: FRAME('Cut boundary'),
+      atFrame: FRAME('Where to add it, or where to move the one named by id'),
+      id: str('A transition from get_state transitions, to change or remove.'),
       effect: enumOf(TRANSITION_EFFECT_IDS),
       direction: enumOf(['up', 'down', 'left', 'right']),
-      durationFrames: int('Total transition length in frames.', 1),
-    }, ['atFrame']),
+      durationFrames: int('Transition length in frames.', 1),
+    }),
   },
   set_canvas: {
     description:

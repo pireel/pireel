@@ -422,9 +422,6 @@ export interface AgentToolCtx {
     opts?: ComposeMode,
   ) => Promise<ComposedBlock>;
   noteOf: (raw: string) => string;
-  // Video track edits
-  setCutTransition: (cutSec: number, effect: CutTransitionEffect | null, direction?: TransitionDirection) => void;
-  resizeCutTransition: (shotId: string, durationSec: number) => void;
   // Audio tracks (use-bgm.ts): mount auto-levels from measured loudness; patch/remove target a clip id
   audioMount: (file: File, label?: string, opts?: { startSec?: number; sig?: string | null }) => Promise<string | undefined>;
   audioPatch: (id: string, patch: Partial<Pick<AudioClip, 'startSec' | 'volumeDb' | 'fadeInSec' | 'fadeOutSec' | 'speed' | 'inSec' | 'outSec' | 'muted'>>) => { ok: boolean; error?: string };

@@ -549,7 +549,10 @@ export function applyProjectSave(
   ctx: { projectId: string },
 ): ProjectSaveApplication | null {
   const known = existing.appliedTransactionIds ?? [];
-  const replay = replayDocumentTransactions(existing.document, p.transactions ?? [], ctx, new Set(known));
+  // Replay onto the document as every client loads it (load-time repairs and migrations, e.g. spine
+  // transitions moved onto their lane): a client's ops were computed against that shape, not the raw row.
+  const base = parseEditorDocumentV2(existing.document) ?? existing.document;
+  const replay = replayDocumentTransactions(base, p.transactions ?? [], ctx, new Set(known));
   const merged = mergeSaveIntoRow({ ...existing, document: replay.document }, p);
   if (!merged) return null;
   const appliedTransactionIds = [...known, ...replay.applied].slice(-APPLIED_TRANSACTIONS_CAP);

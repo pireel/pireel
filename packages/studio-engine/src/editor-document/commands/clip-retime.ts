@@ -1,4 +1,5 @@
 import { directorPlanAfterRippleInsertion, directorPlanAfterRippleRemoval, withAdjustedDirectorPlan } from '../../director-plan-timing';
+import { transitionsAfterRetime } from '../transitions';
 import {
   directorPlanFromDocument,
   withoutDirectorPlanInSemantics,
@@ -138,7 +139,10 @@ export function retimeEditorClip(document: EditorDocumentV2, options: RetimeEdit
     }
   }
 
-  const next: EditorDocumentV2 = { ...document, timeline: { ...document.timeline, tracks }, semantics };
+  const transitions = ripple && document.timeline.transitions?.length
+    ? transitionsAfterRetime(document.timeline.transitions, rippleFromFrame, deltaFrames)
+    : document.timeline.transitions;
+  const next: EditorDocumentV2 = { ...document, timeline: { ...document.timeline, tracks, ...(transitions ? { transitions } : {}) }, semantics };
   const outputIssue = validateEditorDocumentV2(next).find((candidate) => candidate.severity === 'error');
   if (outputIssue) return commandFailure(document, 'invalid-command', outputIssue.message, { path: outputIssue.path });
   const receipt = emptyCommandReceipt('clip.retime');

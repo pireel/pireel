@@ -1,4 +1,5 @@
 import { isFinitePositive } from './time';
+import { withMigratedTransitions } from './transitions';
 import { normalizeEditorDocumentArtifacts } from '../director-plan-artifact';
 import { normalizePeerNarrativeSources } from './source-peer-normalization';
 import { pinCaptionsOnTop } from './caption-stack';
@@ -174,7 +175,8 @@ export function parseEditorDocumentV2(value: unknown): EditorDocumentV2 | null {
   if (!isEditorDocumentV2(value)) return null;
   // Load-time repair: lanes inserted before the caption pin existed could sit above the captions;
   // the captions come back on top (see caption-stack.ts).
-  return pinCaptionsOnTop(normalizePeerNarrativeSources(normalizeEditorDocumentArtifacts(value).document));
+  // Transitions used to hang on the incoming spine clip; they now live on their own lane.
+  return withMigratedTransitions(pinCaptionsOnTop(normalizePeerNarrativeSources(normalizeEditorDocumentArtifacts(value).document)));
 }
 
 export function editorTimelineTotalFrames(document: EditorDocumentV2): number {

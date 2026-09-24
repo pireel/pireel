@@ -485,4 +485,6 @@ export const PANELS_ZH: Record<string, string> = {
   "panels.width": "粗细",
   "panels.zoomOut": "缩小",
   "panels.zoomPunchMotionBlur": "变焦冲击(动态模糊)",
+  "panels.transitionSelectedHint": "点效果会在播放头新插一个转场；要换效果，先按 Delete 删掉选中的转场",
+  "panels.transitionInsertHint": "点效果插入到播放头（已有转场则往后排）",
 };

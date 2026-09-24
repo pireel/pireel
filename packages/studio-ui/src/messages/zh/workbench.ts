@@ -700,4 +700,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.timelineCompact": "紧凑时间轴",
   "workbench.timelineCompactOn": "紧凑时间轴已开启，轨道更矮，给画面留出更多空间",
   "workbench.timelineCompactOff": "切换为紧凑时间轴，缩小轨道高度",
+  "workbench.transitionsTab": "转场",
+  "workbench.transitionLane": "转场轨",
+  "workbench.noRoomForTransition": "播放头处已排满转场，没有空位了",
 };

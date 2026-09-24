@@ -1,3 +1,5 @@
+import type { TimelineTransition } from '../types';
+import type { TransitionPatch } from './transitions';
 import type {
   EditorDocumentV2,
   EditorMediaAsset,
@@ -158,6 +160,9 @@ export type EditorCommand =
   }
   | { type: 'narrative.reorder'; clipIds: TimelineClipId[] }
   | { type: 'clips.remove'; trackId: TrackId; clipIds: TimelineClipId[]; includeLinked?: boolean }
+  | { type: 'transitions.insert'; transition: TimelineTransition }
+  | { type: 'transitions.patch'; id: string; patch: TransitionPatch }
+  | { type: 'transitions.remove'; ids: string[] }
   | {
     type: 'clips.insert';
     trackId: TrackId;

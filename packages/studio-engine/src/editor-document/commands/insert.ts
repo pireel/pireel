@@ -1,4 +1,5 @@
 import type { EditorDocumentV2, EditorTrack, SemanticScene, TimelineClip } from '../types';
+import { transitionsAfterInsertion } from '../transitions';
 import { atomicMediaFramingFromTreatment, IDENTITY_MEDIA_FRAMING } from '../../composition-core';
 import { validateEditorDocumentV2 } from '../validation';
 import { clipEndFrame, splitClipAtFrame } from './clip-geometry';
@@ -234,7 +235,7 @@ export function insertEditorClips(document: EditorDocumentV2, options: InsertEdi
   }
   let next: EditorDocumentV2 = {
     ...document,
-    timeline: { ...document.timeline, tracks },
+    timeline: { ...document.timeline, tracks, ...(document.timeline.transitions ? { transitions: transitionsAfterInsertion(document.timeline.transitions, options.atFrame, spanFrames) } : {}) },
     semantics,
   };
   const assigned = assignInsertedClips(document, next, incomingClips.map((clip) => clip.id), options.sceneId);

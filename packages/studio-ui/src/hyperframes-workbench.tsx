@@ -12,6 +12,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type ComponentType } from "react";
+import type { EditorCommand } from "@pireel/studio-engine/editor-document/commands/types";
+import { DEFAULT_TRANSITION_SEC, transitionSlotAt } from "@pireel/studio-engine/editor-document/transitions";
 import { useLocale } from "use-intl";
 import {
   Play,
@@ -54,6 +56,7 @@ import {
   Magnet,
   Rows3,
   Type,
+  ArrowLeftRight,
 } from "lucide-react";
 import {
   Tooltip,
@@ -135,8 +138,8 @@ import {
   supplementalVisualStateAt,
   DIRECTIONAL_TRANSITIONS,
   MAX_TRANSITION_SEC,
-  cutTransitions,
-  splitBlockedByTransition,
+  CUT_TRANSITION_EFFECTS,
+  transitionWindows,
   totalDuration,
   hasTimelineContent,
   hasVideoTrackContent,
@@ -471,7 +474,6 @@ type FloatKind =
   | "code"
   | "props"
   | "anim"
-  | "transition"
   | "captions";
 
 /** Consecutive caption-derivation passes allowed to start from the effect's own publish before it stops relaying. */
@@ -1627,7 +1629,7 @@ export function HyperframesWorkbench({
     eng.bakeProvider = (cut) => {
       for (const e of bakesRef.current.values()) {
         if (Math.abs(e.cut - cut) < 0.05 && e.bitmaps && e.baked)
-          return { fps: e.baked.fps, half: e.half, frames: e.bitmaps };
+          return { fps: e.baked.fps, start: e.baked.start, frames: e.bitmaps };
       }
       return null;
     };
@@ -1965,11 +1967,10 @@ export function HyperframesWorkbench({
     eng.setTransitions(
       primaryNarrative.hidden
         ? []
-        : cutTransitions(shots, renderVideoPlacements).map((tr) => ({
-            cut: tr.cut,
-            half: tr.half,
-          })),
-    ); // window table for shadow decoding
+        : transitionWindows(comp.transitions, shots, renderVideoPlacements).flatMap((tr) =>
+            tr.cut == null ? [] : [{ start: tr.start, cut: tr.cut, end: tr.end }],
+          ),
+    ); // windows that hand over at a cut need the other side decoded; the rest play on the live frame
     // Overlay video layers decode in the same engine: register each layer's bytes (a File for a
     // device-local source, the URL otherwise) and hand over the layer table. The picture of a layer
     // never depends on a media element, so a layer whose bytes are missing simply stays blank.
@@ -1998,7 +1999,8 @@ export function HyperframesWorkbench({
       {
         sig: string;
         cut: number;
-        half: number;
+        start: number;
+        end: number;
         baked: BakedWindow | null;
         bitmaps: ImageBitmap[] | null;
         decoding?: boolean;
@@ -2013,9 +2015,10 @@ export function HyperframesWorkbench({
     if (primaryNarrative.hidden) return;
     const spans = videoShotTimelineSpans(shots, renderVideoPlacements);
     const specs: (BakeSpec & { sig: string })[] = [];
-    for (const tr of cutTransitions(shots, renderVideoPlacements)) {
+    for (const tr of transitionWindows(c.transitions, shots, renderVideoPlacements)) {
+      if (tr.cut == null) continue; // plays on the live frame: nothing to bake
       const iB = spans.findIndex(
-        (sp, i) => i >= 1 && Math.abs(sp.editedStart - tr.cut) < 0.05,
+        (sp, i) => i >= 1 && Math.abs(sp.editedStart - tr.cut!) < 0.05,
       );
       if (iB < 1) continue;
       const A = spans[iB - 1]!.clip;
@@ -2059,7 +2062,8 @@ export function HyperframesWorkbench({
           : undefined;
       const sig = [
         tr.cut.toFixed(2),
-        tr.half.toFixed(2),
+        tr.start.toFixed(2),
+        tr.end.toFixed(2),
         tr.effect,
         tr.dir,
         A.srcEnd.toFixed(3),
@@ -2080,7 +2084,8 @@ export function HyperframesWorkbench({
       specs.push({
         sig,
         cut: tr.cut,
-        half: tr.half,
+        pre: tr.cut - tr.start,
+        post: tr.end - tr.cut,
         effect: tr.effect,
         dir: tr.dir,
         fileA,
@@ -2111,7 +2116,8 @@ export function HyperframesWorkbench({
           const entry = {
             sig: sp.sig,
             cut: sp.cut,
-            half: sp.half,
+            start: sp.cut - sp.pre,
+            end: sp.cut + sp.post,
             baked: null as BakedWindow | null,
             bitmaps: null as ImageBitmap[] | null,
           };
@@ -2132,6 +2138,7 @@ export function HyperframesWorkbench({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     comp.shots,
+    comp.transitions,
     videoFile,
     comp.width,
     comp.height,
@@ -2144,7 +2151,7 @@ export function HyperframesWorkbench({
       const t = playhead.get();
       for (const e of bakesRef.current.values()) {
         if (!e.baked) continue;
-        const near = t >= e.cut - e.half - 1.5 && t <= e.cut + e.half + 0.5;
+        const near = t >= e.start - 1.5 && t <= e.end + 0.5;
         if (near && !e.bitmaps && !e.decoding) {
           e.decoding = true;
           void decodeBake(e.baked).then((bs) => {
@@ -2154,7 +2161,7 @@ export function HyperframesWorkbench({
           });
         } else if (
           e.bitmaps &&
-          (t < e.cut - e.half - 3 || t > e.cut + e.half + 3)
+          (t < e.start - 3 || t > e.end + 3)
         ) {
           e.bitmaps.forEach((b) => b.close());
           e.bitmaps = null;
@@ -3276,98 +3283,62 @@ export function HyperframesWorkbench({
     setFloatWin("shot");
   };
   /** The cut the transition panel is anchored to (final seconds; opened from the timeline boundary hotspot). */
-  const [transitionCut, setTransitionCut] = useState<number | null>(null);
-  const openTransitionAt = (cutSec: number, anchor: DOMRect) => {
-    setTransitionCut(cutSec);
-    setSelectedId(null); // the transition becomes the current selection: Del deletes the transition, not blocks/shots
+  /** Transition lane: items placed by time (no cut needed). Selecting one targets the Transitions
+   *  panel at it; with nothing selected a panel pick lands at the playhead. */
+  const [selectedTransitionId, setSelectedTransitionId] = useState<string | null>(null);
+  const selectedTransitionIdRef = useRef(selectedTransitionId);
+  selectedTransitionIdRef.current = selectedTransitionId;
+  const selectedTransition = selectedTransitionId
+    ? (editorDocument.timeline.transitions ?? []).find((transition) => transition.id === selectedTransitionId) ?? null
+    : null;
+  useEffect(() => {
+    if (selectedTransitionId && !selectedTransition) setSelectedTransitionId(null);
+  }, [selectedTransitionId, selectedTransition]);
+  const selectTransition = (id: string | null) => {
+    setSelectedTransitionId(id);
+    if (!id) return;
+    setSelectedId(null);
     setSelectedShotId(null);
-    openFloatAt("transition", anchor);
+    setSelectedAudioId(null);
+    const picked = (editorDocumentRef.current.timeline.transitions ?? []).find((transition) => transition.id === id);
+    if (picked && !playing) applyT(picked.startFrame / editorDocumentRef.current.canvas.fps);
   };
-  /** Set/change/remove a transition at a cut (content-level, hung on the next shot's transIn, prevId anchors the
-   *  previous shot): at most one per cut; on set, move the playhead to the transition-region start to see the effect.
-   *  Duration reuses the existing value, default 1s; direction stored only for push/slide. */
-  const setCutTransition = (
-    cutSec: number,
-    effect: CutTransitionEffect | null,
-    direction?: TransitionDirection,
-  ) => {
-    const sp = videoShotTimelineSpans(
-      ensureShots(compRef.current),
-      renderVideoPlacements,
-    );
-    const i = sp.findIndex(
-      (s, idx) => idx >= 1 && Math.abs(s.editedStart - cutSec) < 0.05,
-    );
-    if (i < 1) return;
-    const prevId = sp[i - 1]!.clip.id;
-    const selfId = sp[i]!.clip.id;
-    const shot = sp[i]!.clip;
-    const durationSec = Math.min(
-      MAX_TRANSITION_SEC,
-      shot.transIn?.durationSec ?? 1,
-    );
-    const dir = direction ?? shot.transIn?.direction;
-    commitNarrativePatches([
-      {
-        clipId: selfId,
-        patch: {
-          properties: {
-            transIn: effect
-              ? {
-                  prevId,
-                  effect,
-                  durationSec,
-                  ...(DIRECTIONAL_TRANSITIONS.has(effect) && dir
-                    ? { direction: dir }
-                    : {}),
-                }
-              : undefined,
-          },
-        },
-      },
-    ]);
-    if (effect) {
-      const prevDur = (sp[i]!.clip as VideoShot).transIn?.durationSec ?? 1;
-      applyT(
-        Math.max(0, cutSec - Math.min(prevDur, MAX_TRANSITION_SEC) / 2 - 0.2),
-      );
+  const commitTransition = (command: Extract<EditorCommand, { type: `transitions.${string}` }>) => {
+    const result = commit({ op: "command", input: { command } });
+    if (!result.ok) toast.error(editorErrorMessage(result.error));
+    return result.ok;
+  };
+  /** A panel pick always inserts at the playhead (after any transition already there); to replace
+   *  one, the user deletes it first. */
+  const pickTransition = (effect: CutTransitionEffect, direction?: TransitionDirection) => {
+    const document = editorDocumentRef.current;
+    const fps = document.canvas.fps;
+    const list = document.timeline.transitions ?? [];
+    const startFrame = transitionSlotAt(list, Math.round(tRef.current * fps));
+    const next = list.filter((transition) => transition.startFrame >= startFrame).sort((left, right) => left.startFrame - right.startFrame)[0];
+    const durationFrames = Math.min(Math.round(DEFAULT_TRANSITION_SEC * fps), next ? next.startFrame - startFrame : Number.POSITIVE_INFINITY);
+    if (durationFrames < 1) {
+      toast.error(t("workbench.noRoomForTransition"));
+      return;
+    }
+    const id = `transition_${shotId()}`;
+    if (commitTransition({ type: "transitions.insert", transition: { id, startFrame, durationFrames, effect, ...(direction ? { direction } : {}) } })) {
+      setSelectedTransitionId(id);
+      setSelectedId(null);
+      setSelectedShotId(null);
+      if (!playing) applyT(startFrame / fps);
     }
   };
-  /** Transition region-handle drag commit: symmetric total duration (the timeline already clamps to both sides' shot lengths, this clamps the upper bound). */
-  const resizeCutTransition = (shotId: string, durationSec: number) =>
-    (() => {
-      const shot = compRef.current.shots?.find(
-        (candidate) => candidate.id === shotId,
-      );
-      if (shot?.transIn)
-        commitNarrativePatches([
-          {
-            clipId: shotId,
-            patch: {
-              properties: {
-                transIn: {
-                  ...shot.transIn,
-                  durationSec: Math.min(
-                    MAX_TRANSITION_SEC,
-                    Math.max(0.2, durationSec),
-                  ),
-                },
-              },
-            },
-          },
-        ]);
-    })();
-  // If the cut disappears due to editing (no longer any shot boundary) → auto-close the transition panel
-  useEffect(() => {
-    if (floatWin !== "transition" || transitionCut == null) return;
-    const bounds = videoShotTimelineSpans(
-      comp.shots ?? [],
-      renderVideoPlacements,
-    ).map((sp) => sp.editedEnd);
-    if (!bounds.slice(0, -1).some((b) => Math.abs(b - transitionCut) < 0.05))
-      setFloatWin(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [floatWin, transitionCut, comp.shots, renderVideoPlacements]);
+  const changeTransitionTiming = (id: string, next: { startSec: number; durationSec: number }) => {
+    const fps = editorDocumentRef.current.canvas.fps;
+    commitTransition({ type: "transitions.patch", id, patch: { startFrame: Math.max(0, Math.round(next.startSec * fps)), durationFrames: Math.max(1, Math.round(next.durationSec * fps)) } });
+  };
+  const removeSelectedTransition = () => {
+    const id = selectedTransitionIdRef.current;
+    if (!id) return false;
+    if (commitTransition({ type: "transitions.remove", ids: [id] })) setSelectedTransitionId(null);
+    return true;
+  };
   // The media-anim panel depends on "a selected, filled media block": if selection is lost / switched to another block → auto-close back to chat
   useEffect(() => {
     if (floatWin !== "anim") return;
@@ -4029,7 +4000,7 @@ export function HyperframesWorkbench({
     removeAudio: (id: string) => void;
     closeCode: () => void;
     closeFloat: () => void;
-    deleteTransition: () => void;
+    deleteTransition: () => boolean;
     undo: () => void;
     redo: () => void;
     floatWin: FloatKind | null;
@@ -4042,7 +4013,7 @@ export function HyperframesWorkbench({
     removeAudio: () => {},
     closeCode: () => {},
     closeFloat: () => {},
-    deleteTransition: () => {},
+    deleteTransition: () => false,
     undo: () => {},
     redo: () => {},
     floatWin: null,
@@ -4154,10 +4125,9 @@ export function HyperframesWorkbench({
         return;
       }
       if (e.key !== "Delete" && e.key !== "Backspace") return;
-      if (keysRef.current.floatWin === "transition") {
-        // Transition selected (panel open): delete this transition, not the shot
+      if (keysRef.current.deleteTransition()) {
+        // A selected transition goes first: Del removes it, not the clip under the playhead
         e.preventDefault();
-        keysRef.current.deleteTransition();
         return;
       }
       if (selectedAudioIdRef.current) {
@@ -5855,14 +5825,6 @@ export function HyperframesWorkbench({
         .find((track) => track.id === current.semantics.primaryNarrativeTrackId)
         ?.clips.some((clip) => clip.id === clipId),
     );
-    if (primarySelected && splitBlockedByTransition(
-      ensureShots(c),
-      tRef.current,
-      primaryNarrative.placements,
-    )) {
-      toast.error(t("workbench.removeTransitionToSplit"));
-      return;
-    }
 
     let next = current;
     let splitCount = 0;
@@ -6263,10 +6225,7 @@ export function HyperframesWorkbench({
     },
     closeCode: () => setFloatWin(null),
     closeFloat: () => setFloatWin(null),
-    deleteTransition: () => {
-      if (transitionCut != null) setCutTransition(transitionCut, null);
-      setFloatWin(null);
-    },
+    deleteTransition: removeSelectedTransition,
     undo: undoLast,
     redo: redoLast,
     floatWin,
@@ -7280,8 +7239,6 @@ export function HyperframesWorkbench({
     applyVisualResult,
     composeBlockChecked,
     noteOf,
-    setCutTransition,
-    resizeCutTransition,
     splitAtPlayhead,
     trimAtPlayhead,
     deleteShot,
@@ -7317,6 +7274,10 @@ export function HyperframesWorkbench({
     await cloudSaveQueueRef.current?.flush();
     return result;
   };
+  // Selecting a clip, element or audio clip releases the transition selection.
+  useEffect(() => {
+    if (selectedId || selectedShotId || selectedAudioId) setSelectedTransitionId(null);
+  }, [selectedId, selectedShotId, selectedAudioId]);
   const runStudioTool = (
     toolId: string,
     input: Record<string, unknown>,
@@ -7871,8 +7832,6 @@ export function HyperframesWorkbench({
       } });
       if (!edit.ok) toast.error(editorErrorMessage(edit.error));
     },
-    onOpenTransition: openTransitionAt,
-    onResizeTransition: resizeCutTransition,
     onDropAsset: (t: number) => {
       // Non-main-track drop: image = insert a PiP media block at the drop moment; component = insert at the drop moment (equal standing with images, user-unified);
       // video doesn't respond in these regions (the timeline side already intercepts it)
@@ -8569,6 +8528,15 @@ export function HyperframesWorkbench({
                     }}
                     onSetDenoise={denoiseOps.setDenoise}
                   />,
+    transitions: <TransitionPanel
+      effect={selectedTransition?.effect ?? null}
+      direction={selectedTransition?.direction ?? "left"}
+      selected={!!selectedTransition}
+      onPick={pickTransition}
+      onDirection={(direction) => {
+        if (selectedTransitionIdRef.current) commitTransition({ type: "transitions.patch", id: selectedTransitionIdRef.current, patch: { direction } });
+      }}
+    />,
     text: <DisplayTextPanel
                     block={selectedDisplayTextBlock}
                     onAdd={(preset) => insertDisplayText(preset)}
@@ -8604,31 +8572,7 @@ export function HyperframesWorkbench({
                                         : "")
                                     );
                                   })()
-                                : floatWin === "transition"
-                                  ? (() => {
-                                      const i =
-                                        transitionCut == null
-                                          ? -1
-                                          : videoShotTimelineSpans(
-                                              comp.shots ?? [],
-                                              renderVideoPlacements,
-                                            ).findIndex(
-                                              (sp) =>
-                                                Math.abs(
-                                                  sp.editedEnd - transitionCut,
-                                                ) < 0.05,
-                                            );
-                                      return (
-                                        t("tools.add_transition.label") +
-                                        (i >= 0
-                                          ? t("workbench.betweenScenes", {
-                                              a: i + 1,
-                                              b: i + 2,
-                                            })
-                                          : "")
-                                      );
-                                    })()
-                                  : (() => {
+                                : (() => {
                                       const cb = codeBlockId
                                         ? comp.blocks.find(
                                             (x) => x.id === codeBlockId,
@@ -8733,29 +8677,6 @@ export function HyperframesWorkbench({
                           onSetSpeed={setShotSpeed}
                         />
                       </div>
-                    )}
-                    {floatWin === "transition" && transitionCut != null && (
-                      <TransitionPanel
-                        effect={
-                          cutTransitions(
-                            comp.shots ?? [],
-                            renderVideoPlacements,
-                          ).find(
-                            (tr) => Math.abs(tr.cut - transitionCut) < 0.05,
-                          )?.effect ?? null
-                        }
-                        direction={
-                          cutTransitions(
-                            comp.shots ?? [],
-                            renderVideoPlacements,
-                          ).find(
-                            (tr) => Math.abs(tr.cut - transitionCut) < 0.05,
-                          )?.dir ?? "left"
-                        }
-                        onPick={(ef, dir) =>
-                          setCutTransition(transitionCut, ef, dir)
-                        }
-                      />
                     )}
                     {floatWin === "person" && (
                       <PersonFxPanel
@@ -10532,6 +10453,7 @@ export function HyperframesWorkbench({
                   },
                   { v: "caption-style", icon: Captions, label: "captions.stylePanel" },
                   { v: "text", icon: Type, label: "displayText.title" },
+                  { v: "transitions", icon: ArrowLeftRight, label: "workbench.transitionsTab" },
                   { v: "audio", icon: Music, label: "panels.music" },
                   {
                     v: "avatar",
@@ -10993,6 +10915,15 @@ export function HyperframesWorkbench({
             shotSourceDurations={shotSourceDurations}
             clipPendingAt={clipPending}
             pendingRanges={pendingGenerations}
+            transitions={(editorDocument.timeline.transitions ?? []).map((transition) => ({
+              id: transition.id,
+              startSec: transition.startFrame / editorDocument.canvas.fps,
+              endSec: (transition.startFrame + transition.durationFrames) / editorDocument.canvas.fps,
+              label: t(CUT_TRANSITION_EFFECTS.find((effect) => effect.id === transition.effect)?.name ?? "tools.add_transition.label"),
+            }))}
+            selectedTransitionId={selectedTransitionId}
+            onSelectTransition={selectTransition}
+            onChangeTransition={changeTransitionTiming}
             {...timelineCbs}
           />
         </div>

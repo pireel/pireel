@@ -773,4 +773,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.timelineCompactOn":
     "Compact timeline is on. Shorter tracks leave more room for the canvas.",
   "workbench.timelineCompactOff": "Switch to a compact timeline with shorter tracks.",
+  "workbench.transitionsTab": "Transitions",
+  "workbench.transitionLane": "Transitions lane",
+  "workbench.noRoomForTransition": "No room for another transition at the playhead",
 };

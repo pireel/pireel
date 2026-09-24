@@ -270,6 +270,24 @@ describe('applying a save to the stored row', () => {
     op: 'overlay.patch', input: { updates: [{ clipId: 'title', startSec }] },
   }] });
 
+  it('replays onto the migrated document, so an old spine transition can be removed from its lane', () => {
+    const stored = document();
+    stored.assets.video = { id: 'video', kind: 'video', locator: { localSig: 'sig' }, metadata: { durationSec: 20 } };
+    const primary = stored.timeline.tracks.find((track) => track.id === stored.semantics.primaryNarrativeTrackId)!;
+    const clip = (id: string, startFrame: number, transIn?: { prevId: string; effect: 'fade'; durationSec: number }) => ({
+      id, kind: 'narrative' as const, assetId: 'video', startFrame, durationFrames: 90, enabled: true,
+      sourceInSec: startFrame / 30, sourceOutSec: startFrame / 30 + 3, properties: { treatment: 'full' as const, ...(transIn ? { transIn } : {}) },
+    });
+    primary.clips = [clip('a', 0), clip('b', 90, { prevId: 'a', effect: 'fade', durationSec: 1 })];
+    const row = { ...existing(), document: stored, appliedTransactionIds: [] };
+    const remove: DocumentTransaction = { id: 'tx_0000000000000009', origin: 'user', ops: [{ op: 'command', input: { command: { type: 'transitions.remove', ids: ['transition_b'] } } }] };
+    const applied = applyProjectSave(row, sanitizeSavePayload({ documentSchemaVersion: 2, transactions: [remove] })!, ctx)!;
+    expect(applied.applied).toEqual(['tx_0000000000000009']);
+    expect(applied.document.timeline.transitions).toEqual([]);
+    const b = applied.document.timeline.tracks.flatMap((track) => track.clips).find((candidate) => candidate.id === 'b') as { properties: Record<string, unknown> };
+    expect(b.properties.transIn).toBeUndefined(); // the old field is gone for good, so it cannot come back
+  });
+
   it('replays transactions onto the stored document and remembers their ids', () => {
     const row = { ...existing(), document: document(), appliedTransactionIds: [] };
     const applied = applyProjectSave(row, sanitizeSavePayload({ documentSchemaVersion: 2, knownVersion: 1, transactions: [move('tx_0000000000000001', 3)] })!, ctx)!;

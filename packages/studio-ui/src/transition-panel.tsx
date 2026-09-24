@@ -122,30 +122,33 @@ const DIRS: { id: TransitionDirection; icon: typeof ArrowUp; name: string }[] = 
 export function TransitionPanel({
   effect,
   direction,
+  selected,
   onPick,
+  onDirection,
 }: {
-  /** Current transition effect at this cut (null = unset). */
+  /** The selected transition's effect (null = nothing selected). */
   effect: CutTransitionEffect | null;
   /** Current direction (push/wipe only; defaults to left). */
   direction: TransitionDirection;
-  /** Clicking a card/direction applies immediately; effect null = remove. */
-  onPick: (effect: CutTransitionEffect | null, direction?: TransitionDirection) => void;
+  /** A transition is selected on the lane (its effect is highlighted; its direction can be changed here). */
+  selected: boolean;
+  /** Every pick inserts a new transition at the playhead; replacing one means deleting it first. */
+  onPick: (effect: CutTransitionEffect, direction?: TransitionDirection) => void;
+  /** Direction of the selected directional transition. */
+  onDirection: (direction: TransitionDirection) => void;
 }) {
-  const cards: { id: CutTransitionEffect | null; name: string; hint: string }[] = [
-    { id: null, name: 'common.none', hint: 'panels.hardCutDefault' },
-    ...CUT_TRANSITION_EFFECTS.map((e) => ({ id: e.id as CutTransitionEffect | null, name: e.name, hint: HINTS[e.id] })),
-  ];
+  const cards = CUT_TRANSITION_EFFECTS.map((e) => ({ id: e.id as CutTransitionEffect, name: e.name, hint: HINTS[e.id] }));
   const directional = effect != null && DIRECTIONAL_TRANSITIONS.has(effect);
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
-      <div className="border-line text-ink-4 border-b px-3 py-1.5 text-[10.5px]">{t('panels.transitionHint')}</div>
+      <div className="border-line text-ink-4 border-b px-3 py-1.5 text-[10.5px]">{t(selected ? 'panels.transitionSelectedHint' : 'panels.transitionInsertHint')}</div>
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-3">
         <div className="grid grid-cols-2 gap-2">
           {cards.map((ef) => {
             const active = effect === ef.id;
             return (
               <button
-                key={ef.id ?? 'none'}
+                key={ef.id}
                 type="button"
                 onClick={() => onPick(ef.id, direction)}
                 aria-label={t('panels.transitionName', { name: t(ef.name) })}
@@ -153,7 +156,7 @@ export function TransitionPanel({
                 className="group flex flex-col items-center gap-1"
               >
                 <div className={`w-full overflow-hidden rounded-lg border-2 transition ${active ? 'border-accent' : 'border-transparent group-hover:border-line-2'}`}>
-                  <EffectCard effect={ef.id} dir={ef.id != null && DIRECTIONAL_TRANSITIONS.has(ef.id) ? direction : 'left'} />
+                  <EffectCard effect={ef.id} dir={DIRECTIONAL_TRANSITIONS.has(ef.id) ? direction : 'left'} />
                 </div>
                 <span className={`text-[10.5px] ${active ? 'text-ink font-medium' : 'text-ink-3 group-hover:text-ink'}`}>{t(ef.name)}</span>
               </button>
@@ -170,7 +173,7 @@ export function TransitionPanel({
                   type="button"
                   title={t(name)}
                   aria-label={t('panels.directionName', { name: t(name) })}
-                  onClick={() => onPick(effect, id)}
+                  onClick={() => onDirection(id)}
                   className={`border-line flex h-8 w-10 items-center justify-center rounded-md border transition ${
                     direction === id ? 'bg-accent/15 border-accent text-ink' : 'text-ink-3 hover:text-ink hover:bg-panel-2'
                   }`}
