@@ -22,6 +22,7 @@ import { duplicateOverlayClip } from './overlay-duplicate';
 import { removeEditorClips } from './remove';
 import { splitEditorClip } from './split';
 import { removeEditorRange } from './range';
+import { insertTransition, patchTransition, removeTransitions } from './transitions';
 import { insertEditorTrack, moveEditorTrack, patchEditorTrack, removeEditorTrack } from './tracks';
 import { commandFailure, type EditorCommand, type EditorCommandResult } from './types';
 
@@ -76,6 +77,12 @@ export function applyEditorCommand(document: EditorDocumentV2, command: EditorCo
       return reorderNarrativeClips(document, command.clipIds);
     case 'clips.remove':
       return removeEditorClips(document, command);
+    case 'transitions.insert':
+      return insertTransition(document, command.transition);
+    case 'transitions.patch':
+      return patchTransition(document, command.id, command.patch);
+    case 'transitions.remove':
+      return removeTransitions(document, command.ids);
     case 'clips.insert':
       return insertEditorClips(document, command);
     case 'range.remove':

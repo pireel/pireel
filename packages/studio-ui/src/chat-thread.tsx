@@ -90,6 +90,8 @@ import type {
 } from "./studio-chat";
 import type { LocalAssetIndexEntry } from "@pireel/studio-engine/project-dto";
 
+const USER_BUBBLE_CLASS = "group-[.is-user]:bg-secondary/35";
+
 export function ChatThread({
   projectId,
   localAssetIndex,
@@ -810,7 +812,7 @@ export function ChatThread({
                               }
                               className={`group min-w-0 rounded-xl p-1 text-left transition-colors ${
                                 active
-                                  ? "bg-panel-2"
+                                  ? "bg-panel-2/35"
                                   : "hover:bg-panel-2/70"
                               }`}
                             >
@@ -997,7 +999,7 @@ export function ChatThread({
                                       : "chatGen.intentElement",
                             );
                             return (
-                              <MessageContent key={key}>
+                              <MessageContent key={key} className={USER_BUBBLE_CLASS}>
                                 <span className={CHAT_ACTION_PILL_CLASS}>
                                   <span className={`${CHAT_PILL_ICON_CLASS} text-accent`}>✦</span>
                                   <span className={CHAT_PILL_LABEL_CLASS}>{intentLine.facts ? `${kindLabel} · ${intentLine.facts}` : kindLabel}</span>
@@ -1006,7 +1008,7 @@ export function ChatThread({
                             );
                           }
                           return m.role === "user" ? (
-                            <MessageContent key={key}>
+                            <MessageContent key={key} className={USER_BUBBLE_CLASS}>
                               <div className="text-[13px] leading-relaxed">
                                 {idx === parts.findIndex((candidate) => candidate.type === "text")
                                   && (m.metadata as { studioAction?: unknown } | undefined)?.studioAction === STUDIO_CREATE_SKILL_ACTION && (

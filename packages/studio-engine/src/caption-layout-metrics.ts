@@ -1,12 +1,13 @@
 /** Shared caption line measurement for cue generation and final rendering. */
 
 import type { FxWord } from './caption-fx';
-import { chunkWordsBalanced, estWordEm, latinJoin, measureTextPx } from './caption-fx';
+import { PUNCT_END, alnumCount, chunkWordsBalanced, estWordEm, joinWords, latinJoin, measureTextPx, segmentTokens } from './caption-fx';
 import {
   BASE_CAPTION_FONT_PX,
   CAPTION_WEIGHT_BOLD,
   CAPTION_WEIGHT_REGULAR,
   type CaptionPreset,
+  type CaptionStack,
 } from './caption-presets';
 import { displayTextFontCss, displayTextLocalFontFamily } from './display-text-presets';
 import { cjkPartnerFamilyCss, webFontFamilyCss } from './font-library';
@@ -57,18 +58,106 @@ export function captionLineSegments<W extends FxWord>(
   canvasWidth = 1080,
   options: CaptionLineMetricsOptions = {},
 ): W[][] {
+  const m = groupedMetrics(lineMetrics(words, preset, widthPct, scale, canvasWidth, options));
+  const groups = lexicalWordGroups(words).map((members) => ({ text: joinWords(members.map((word) => word.text)), members }));
+  if (preset.stack) {
+    // Artistic stack: one segment = what fits in maxRows rows; the renderer re-plans its rows.
+    const rows = stackRows(groups, preset.stack, m);
+    const out: W[][] = [];
+    for (let at = 0; at < rows.length; at += preset.stack.maxRows) out.push(rows.slice(at, at + preset.stack.maxRows).flat().flatMap((group) => group.members));
+    return out;
+  }
+  return chunkWordsBalanced(groups, m.availablePx, m.widthOf).map((line) => line.flatMap((group) => group.members));
+}
+
+/** Rows of one stacked segment (preset.stack), in render order. Empty for non-stack presets. */
+export function captionStackRows<W extends FxWord>(
+  words: W[],
+  preset: CaptionPreset,
+  widthPct: number,
+  scale: number,
+  canvasWidth = 1080,
+  options: CaptionLineMetricsOptions = {},
+): W[][] {
+  if (!preset.stack) return [];
+  const groups = lexicalWordGroups(words).map((members) => ({ text: joinWords(members.map((word) => word.text)), members }));
+  return stackRows(groups, preset.stack, groupedMetrics(lineMetrics(words, preset, widthPct, scale, canvasWidth, options)))
+    .map((row) => row.flatMap((group) => group.members));
+}
+
+/**
+ * Recognizer words grouped into dictionary words, so a caption line never breaks inside one.
+ * Chinese recognizers often time single characters (「什」「么」); ICU segmentation of the joined
+ * sentence says which of them belong together. Letters and digits are the alignment currency, as in
+ * groupAsrWords; a recognizer word spanning several dictionary words simply covers all of them.
+ */
+export function lexicalWordGroups<W extends FxWord>(words: readonly W[]): W[][] {
+  if (words.length < 2) return words.map((word) => [word]);
+  const groups: W[][] = [];
+  let next = 0;
+  let excess = 0;
+  for (const token of segmentTokens(joinWords(words.map((word) => word.text)))) {
+    let want = alnumCount(token);
+    if (!want) continue;
+    if (excess >= want) { excess -= want; continue; }
+    want -= excess;
+    excess = 0;
+    const group: W[] = [];
+    let got = 0;
+    while (next < words.length && (got < want || !group.length)) {
+      got += alnumCount(words[next]!.text);
+      group.push(words[next++]!);
+    }
+    if (!group.length) break;
+    excess = Math.max(0, got - want);
+    groups.push(group);
+  }
+  // Anything the segmentation did not account for (trailing punctuation words) joins the last group.
+  while (next < words.length) {
+    if (groups.length) groups[groups.length - 1]!.push(words[next++]!);
+    else groups.push([words[next++]!]);
+  }
+  return groups;
+}
+
+interface WordGroup<W> { text: string; members: W[] }
+
+/** Width of a group = the widths its words already have side by side. */
+function groupedMetrics<W extends FxWord>(m: LineMetrics<W>): LineMetrics<WordGroup<W>> {
+  return { fontPx: m.fontPx, availablePx: m.availablePx, widthOf: (group) => group.members.reduce((total, word) => total + m.widthOf(word), 0) };
+}
+
+/** Size multiplier of stacked row `row`. */
+export function captionStackScale(stack: CaptionStack, row: number): number {
+  const scales = stack.scales?.length ? stack.scales : [1];
+  return scales[row % scales.length]!;
+}
+
+interface LineMetrics<W> { fontPx: number; availablePx: number; widthOf: (word: W) => number }
+
+function lineMetrics<W extends FxWord>(
+  words: W[],
+  preset: CaptionPreset,
+  widthPct: number,
+  scale: number,
+  canvasWidth: number,
+  options: CaptionLineMetricsOptions,
+): LineMetrics<W> {
   const fontPx = Math.max(10, Math.round(BASE_CAPTION_FONT_PX * scale));
   const spacePx = Math.round(fontPx * 0.3);
-  const paddingPx = preset.bg ? Math.round(fontPx * 0.42) * 2 : 0;
-  const weight = options.bold ? CAPTION_WEIGHT_BOLD : CAPTION_WEIGHT_REGULAR;
+  const plated = preset.bg || preset.stack?.plates?.length;
+  const paddingPx = plated ? Math.round(fontPx * 0.42) * 2 : 0;
+  const weight = options.bold === true ? CAPTION_WEIGHT_BOLD : options.bold === false ? CAPTION_WEIGHT_REGULAR : preset.weight ?? CAPTION_WEIGHT_REGULAR;
   const canvasFont = `${preset.italic ? 'italic ' : ''}${weight} ${fontPx}px ${captionCanvasFontFamilies(preset, options.font)}`;
   const measure = options.measureText ?? measureTextPx;
+  const trackingPx = (preset.trackingEm ?? 0) * fontPx;
   const indexByWord = new Map(words.map((word, index) => [word, index] as const));
   const widthOf = (word: W) => {
     const index = indexByWord.get(word) ?? 0;
-    const estimated = estWordEm(word.text) * fontPx;
-    const measured = measure(word.text, canvasFont);
-    const wordPx = measured == null ? estimated : measured;
+    const text = preset.upper ? word.text.toUpperCase() : word.text;
+    const estimated = estWordEm(text) * fontPx;
+    const measured = measure(text, canvasFont);
+    const wordPx = (measured == null ? estimated : measured) + trackingPx * [...text].length;
     const latinSpace = index < words.length - 1 && latinJoin(word.text, words[index + 1]!.text) ? spacePx : 0;
     return wordPx + latinSpace;
   };
@@ -76,5 +165,32 @@ export function captionLineSegments<W extends FxWord>(
     fontPx * 2,
     (Math.max(1, widthPct) / 100) * Math.max(1, canvasWidth) - paddingPx - fontPx * 0.15,
   );
-  return chunkWordsBalanced(words, availablePx, widthOf);
+  return { fontPx, availablePx, widthOf };
+}
+
+/** Greedy row fill: row k holds min(rowEm, box) / scale_k at base size; a row may end early at
+ *  punctuation once it is half full, so short-video phrasing breaks where the speaker pauses. */
+function stackRows<W extends { text: string }>(words: W[], stack: CaptionStack, m: LineMetrics<W>): W[][] {
+  const rows: W[][] = [];
+  let row: W[] = [];
+  let used = 0;
+  const capacity = (k: number) => Math.min(stack.rowEm * m.fontPx, m.availablePx) / captionStackScale(stack, k);
+  for (const word of words) {
+    const w = m.widthOf(word);
+    const cap = capacity(rows.length);
+    if (row.length && used + w > cap + 1e-6) {
+      rows.push(row);
+      row = [];
+      used = 0;
+    }
+    row.push(word);
+    used += w;
+    if (PUNCT_END.test(word.text) && used >= capacity(rows.length) * 0.5) {
+      rows.push(row);
+      row = [];
+      used = 0;
+    }
+  }
+  if (row.length) rows.push(row);
+  return rows;
 }

@@ -1,5 +1,5 @@
 import type { AudioClip } from '../audio-tracks';
-import type { AtomicMediaFraming, Block, CaptionStyle, PersonFx, VideoShot } from '../composition-core';
+import type { AtomicMediaFraming, Block, CaptionStyle, CutTransitionEffect, PersonFx, TransitionDirection, VideoShot } from '../composition-core';
 import type { TranscriptSegment } from '../project-dto';
 import type { ThemeId } from '../theme';
 import type { NarrativeRole, SceneFamily, ViewerTask } from '../director-plan';
@@ -89,6 +89,17 @@ export interface EditorTrack {
   clips: TimelineClip[];
 }
 
+/** A transition on the transition lane: a window of the picture, placed by time, never tied to a cut.
+ * A spine cut inside the window hands over between the two sides; without one the effect plays on
+ * the running picture. */
+export interface TimelineTransition {
+  id: string;
+  startFrame: number;
+  durationFrames: number;
+  effect: CutTransitionEffect;
+  direction?: TransitionDirection;
+}
+
 export type TimelineAnchor =
   | { type: 'timeline' }
   | { type: 'clip'; clipId: TimelineClipId; offsetFrames: number }
@@ -101,6 +112,9 @@ export interface TimelineClipBase {
   durationFrames: number;
   enabled: boolean;
   linkGroupId?: string;
+  /** Stable transcript section for source-backed clips. Cleanup fragments inherit it;
+   * explicit splits create a new section. Missing means this clip is its own section. */
+  transcriptSectionId?: string;
 }
 
 export type NarrativeProperties = Omit<VideoShot, 'id' | 'src' | 'srcSig' | 'srcStart' | 'srcEnd' | 'mediaFraming'>;
@@ -224,7 +238,8 @@ export interface EditorDocumentV2 {
   canvas: EditorCanvasSettings;
   appearance: EditorAppearance;
   assets: Record<AssetId, EditorMediaAsset>;
-  timeline: { tracks: EditorTrack[] };
+  /** transitions: effects placed anywhere on the timeline (their own lane); none is tied to a cut. */
+  timeline: { tracks: EditorTrack[]; transitions?: TimelineTransition[] };
   semantics: EditorSemanticState;
   processing?: {
     audioDenoise?: { strength: number };

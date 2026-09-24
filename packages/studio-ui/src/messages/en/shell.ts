@@ -10,6 +10,8 @@ export const SHELL_EN: Record<string, string> = {
   'shell.planningFailed': 'Planning failed',
   'shell.rename': 'Rename',
   'shell.syncFailed': 'Sync failed',
+  'shell.autoHighlightFailed': 'Auto highlight failed',
+  'shell.draftPromptFailed': 'Could not draft a prompt',
   'shell.translationFailed': 'Translation failed',
   'shell.startWithMedia': 'Add one clip or many, choose a workflow in Chat, and build one or several finished cuts',
 };

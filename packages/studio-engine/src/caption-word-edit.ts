@@ -13,7 +13,11 @@ export function editedCaptionWords(text: string, source: readonly FxWord[], star
     if (added.length) {
       const from = Math.max(start, result.at(-1)?.end ?? start, removed[0]?.start ?? start);
       const to = Math.min(end, nextStart, removed.at(-1)?.end ?? nextStart);
-      result.push(...wordsFromText(added.join(' '), from, Math.max(from, to)).map((word) => ({ ...word, timing: 'estimated' as const, emphasis: false })));
+      // Replacement words inherit the replaced words' decoration by position (a corrected word keeps its highlight).
+      result.push(...wordsFromText(added.join(' '), from, Math.max(from, to)).map((word, index, all) => {
+        const replaced = removed.length ? removed[Math.min(removed.length - 1, Math.floor(index * removed.length / all.length))] : undefined;
+        return { ...word, timing: 'estimated' as const, emphasis: false, ...(replaced?.decoration ? { decoration: replaced.decoration } : {}) };
+      }));
     }
     added = []; removed = [];
   };

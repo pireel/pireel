@@ -386,7 +386,7 @@ export function CustomFrameDialog({
                     role="radio"
                     aria-checked={draft.layout === "smart"}
                     onClick={() => setDraft({ ...draft, layout: "smart" })}
-                    className={`mb-2 flex w-full items-center gap-3 rounded-lg p-2 text-left transition-colors ${draft.layout === "smart" ? "bg-panel-2" : "hover:bg-panel-2/60"}`}
+                    className={`mb-2 flex w-full items-center gap-3 rounded-lg p-2 text-left transition-colors ${draft.layout === "smart" ? "bg-panel-2/35" : "hover:bg-panel-2/20"}`}
                   >
                     <span className="bg-canvas block h-12 w-20 shrink-0 overflow-hidden rounded-md">
                       <LayoutStrategyPreview id="smart" />
@@ -567,7 +567,7 @@ function VisualDirectionRail({
               role="radio"
               aria-checked={selected}
               onClick={() => onPick(direction.id)}
-              className={`group flex min-w-0 items-center gap-2 rounded-lg p-1.5 text-left transition-colors ${selected ? "bg-panel-2" : "hover:bg-panel-2/60"}`}
+              className={`group flex min-w-0 items-center gap-2 rounded-lg p-1.5 text-left transition-colors ${selected ? "bg-panel-2/35" : "hover:bg-panel-2/20"}`}
             >
               <span
                 className={`relative h-[46px] w-[74px] shrink-0 overflow-hidden rounded-md ${selected ? "ring-accent ring-2" : ""}`}

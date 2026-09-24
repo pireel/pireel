@@ -183,7 +183,7 @@ export function FramePreviewDialog({
             type="button"
             onClick={() => onUse(frame)}
             className={`inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md px-4 text-[12px] font-medium transition ${
-              selected ? 'bg-panel-2 text-ink' : 'bg-accent text-white hover:brightness-110'
+              selected ? 'bg-panel-2/35 text-ink' : 'bg-accent text-white hover:brightness-110'
             }`}
           >
             {selected && <Check size={13} strokeWidth={2.5} />}

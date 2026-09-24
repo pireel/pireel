@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Image as ImageIcon, Loader2, MoreHorizontal, Pause, Pencil, Play, Plus, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
+import { AudioLines, Image as ImageIcon, Loader2, MoreHorizontal, Pause, Pencil, Play, Plus, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
 import { imageThumb } from '@pireel/ui/image-url';
 import {
   DropdownMenu,
@@ -176,6 +176,12 @@ export function TileThumb({ item: it, menuOffset = false }: { item: LibraryItem;
   );
 }
 
+/** A media-fragment start makes browsers that otherwise paint nothing for preload="metadata" (Safari)
+ *  decode and show the opening frame as the cover. */
+function firstFrameUrl(url: string | undefined): string | undefined {
+  return url && !url.includes('#') ? `${url}#t=0.001` : url;
+}
+
 /** Video tile: poster frame (or metadata first frame) letterboxed in the 16:9 slot + duration badge.
  *  Even when a poster image exists, a metadata-only <video> is the duration source. */
 function VideoTile({ item: it, menuOffset = false }: { item: LibraryItem; menuOffset?: boolean }) {
@@ -186,7 +192,7 @@ function VideoTile({ item: it, menuOffset = false }: { item: LibraryItem; menuOf
         <img src={imageThumb(it.thumbSrc, 'strip')} alt={it.label} className="h-full w-full object-contain" loading="lazy" />
       ) : null}
       <video
-        src={it.insertUrl}
+        src={firstFrameUrl(it.insertUrl)}
         preload="metadata"
         muted
         playsInline
@@ -198,10 +204,29 @@ function VideoTile({ item: it, menuOffset = false }: { item: LibraryItem; menuOf
   );
 }
 
-/** Audio grid tile: audio has no picture, so it takes the same 16:9 slot with the play/pause state
- *  as the whole subject; duration is read from an off-DOM metadata-only Audio element. */
+/** A fixed waveform-like bar pattern seeded by the file, so every audio card looks like sound (not a
+ *  paused video) and different files look different. Decorative only — not the real peaks. */
+function waveformPattern(seed: string, count = 28): number[] {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) h = Math.imul(h ^ seed.charCodeAt(i), 16777619);
+  const out: number[] = [];
+  let prev = 0.5;
+  for (let i = 0; i < count; i++) {
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    const r = ((h >>> 0) % 1000) / 1000;
+    prev = prev * 0.45 + r * 0.55;
+    const envelope = 0.55 + 0.45 * Math.sin((Math.PI * (i + 0.5)) / count);
+    out.push(Math.round(Math.max(0.18, prev * envelope) * 100));
+  }
+  return out;
+}
+
+/** Audio grid tile: its own look in the shared 16:9 slot — a tinted panel with a waveform and an
+ *  audio badge, play control bottom-left — so it never reads as a video. Embedded cover art (music
+ *  files) shows behind the same chrome. Duration comes from an off-DOM metadata-only Audio element. */
 export function AudioTile({ playing, url, coverSrc, menuOffset = false }: { playing: boolean; url?: string; coverSrc?: string | null; menuOffset?: boolean }) {
   const [dur, setDur] = useState<number | null>(null);
+  const bars = useMemo(() => waveformPattern(url ?? ''), [url]);
   useEffect(() => {
     if (!url) return;
     const a = new Audio();
@@ -214,10 +239,17 @@ export function AudioTile({ playing, url, coverSrc, menuOffset = false }: { play
     };
   }, [url]);
   return (
-    <div className="bg-panel-2 relative flex aspect-video items-center justify-center overflow-hidden">
-      {coverSrc && <img src={coverSrc} alt="" className="absolute inset-0 h-full w-full object-cover" loading="lazy" />}
-      <span className={`relative flex size-8 items-center justify-center rounded-full ${playing ? 'bg-accent text-white' : coverSrc ? 'bg-black/50 text-white' : 'bg-panel text-ink-3'}`}>
-        {playing ? <Pause size={13} /> : <Play size={13} />}
+    <div className={`relative aspect-video overflow-hidden ${coverSrc ? 'bg-panel-2' : 'from-accent/15 via-panel-2 bg-gradient-to-br to-panel-2'}`}>
+      {coverSrc ? <img src={coverSrc} alt="" className="absolute inset-0 h-full w-full object-cover" loading="lazy" /> : (
+        <div aria-hidden className="absolute inset-x-3 inset-y-[28%] flex items-center gap-[2px]">
+          {bars.map((height, index) => <span key={index} className={`flex-1 rounded-full transition-colors ${playing ? 'bg-accent' : 'bg-ink-4/55'}`} style={{ height: `${height}%` }} />)}
+        </div>
+      )}
+      <span className="pointer-events-none absolute left-1 top-1 inline-flex items-center gap-0.5 rounded bg-black/45 px-1 py-0.5 text-[9px] text-white">
+        <AudioLines size={9} />{t('panels.audioBadge')}
+      </span>
+      <span className={`absolute bottom-1 left-1 flex size-6 items-center justify-center rounded-full ${playing ? 'bg-accent text-white' : 'bg-black/55 text-white'}`}>
+        {playing ? <Pause size={11} /> : <Play size={11} />}
       </span>
       <DurBadge sec={dur} menuOffset={menuOffset} />
     </div>
@@ -268,7 +300,7 @@ export function RowThumb({ item: it, playing }: { item: LibraryItem; playing?: b
   if (it.kind === 'audio') {
     return (
       <div className={`flex size-9 shrink-0 items-center justify-center overflow-hidden rounded ${playing ? 'bg-accent text-white' : 'bg-panel-2 text-ink-3'}`}>
-        {playing ? <Pause size={13} /> : <Play size={13} />}
+        {playing ? <Pause size={13} /> : <AudioLines size={14} />}
       </div>
     );
   }
@@ -286,7 +318,7 @@ export function RowThumb({ item: it, playing }: { item: LibraryItem; playing?: b
     return <img src={imageThumb(it.thumbSrc, 'thumb')} alt={it.label} className="size-9 shrink-0 rounded object-cover" loading="lazy" />;
   }
   if (it.kind === 'video') {
-    return <video src={it.insertUrl} preload="metadata" muted playsInline className="size-9 shrink-0 rounded object-cover" />;
+    return <video src={firstFrameUrl(it.insertUrl)} preload="metadata" muted playsInline className="size-9 shrink-0 rounded object-cover" />;
   }
   return (
     <div className="bg-panel-2 flex size-9 shrink-0 items-center justify-center overflow-hidden rounded">

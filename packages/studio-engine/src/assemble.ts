@@ -9,7 +9,7 @@ import { editedDuration } from './trim';
 import {
   type Block,
   type Composition,
-  cutTransitions,
+  transitionWindows,
   escapeAttr,
   isSentenceCaption,
   IDENTITY_MEDIA_FRAMING,
@@ -49,7 +49,7 @@ export const STUDIO_FONTS_HREF =
  *  (frame2) alongside the main frame, and the two live streams (from/to) are composited by the upstream shader, p spanning the whole window.
  *  Fallback chain: ghost frames cut off → after the cut, use the frozen last frame of A as from (at least the second half has an effect); GL unavailable /
  *  shader compile fails → hard cut. Before upload, cover into a W×H staging canvas first (direct texture upload gets stretched/distorted). */
-export function videoFrameShim(transitions: { cut: number; effect: string; half: number; dx: number; dy: number }[]): string {
+export function videoFrameShim(transitions: { s: number; e: number; cut: number; effect: string; dx: number; dy: number }[]): string {
   return `window.__parentClock = true; // clock/decode/audio run in the parent-layer engine; this doc doesn't self-drive
 (function(){
   var c = document.getElementById('vidEl');
@@ -100,9 +100,9 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
   var render = function (t) {
     if (!liveBmp || !(t >= 0)) return;
     var tr = null;
-    for (var i = 0; i < TRS.length; i++) { if (t >= TRS[i].cut - TRS[i].half && t <= TRS[i].cut + TRS[i].half) { tr = TRS[i]; break; } }
+    for (var i = 0; i < TRS.length; i++) { if (t >= TRS[i].s && t <= TRS[i].e) { tr = TRS[i]; break; } }
     if (t < lastT - 0.05 || t > lastT + 0.5) frozenCut = null; // rewind/big jump: discard frozen frame
-    if (tr && lastT >= 0 && lastT < tr.cut && t >= tr.cut) {
+    if (tr && tr.cut >= 0 && lastT >= 0 && lastT < tr.cut && t >= tr.cut) {
       // crossing the cut: current canvas = A's last frame; freeze it as the fallback "from" when ghost frames cut off
       frozen = frozen || mkStage();
       frozen.getContext('2d').clearRect(0, 0, W, H);
@@ -116,8 +116,15 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
     lastT = t;
     if (!tr) { bakedWinCut = -1; drawPlain(liveBmp, liveFraming, liveSourceW, liveSourceH); return; }
     // this window is now owned by baked frames: the old dual-stream compositing steps aside entirely (don't draw into inter-frame gaps either — that layers up into strobe)
-    if (bakedWinCut === tr.cut) return;
-    var p = Math.min(1, Math.max(0, (t - (tr.cut - tr.half)) / (2 * tr.half))); // 0=window start, 1=end
+    if (bakedWinCut === tr.s) return;
+    var p = Math.min(1, Math.max(0, (t - tr.s) / Math.max(1e-3, tr.e - tr.s))); // 0=window start, 1=end
+    if (tr.cut < 0) {
+      // no cut inside: the effect plays on the running picture (both sides are the live frame)
+      var LS = SL(), LK = 'L' + liveVer;
+      if (MIX && MIX.render(LS, LS, tr.effect, p, tr.dx, tr.dy, LK, LK)) { ctx.clearRect(0, 0, W, H); ctx.drawImage(MIX.canvas, 0, 0, W, H); return; }
+      drawPlain(liveBmp, liveFraming, liveSourceW, liveSourceH);
+      return;
+    }
     var pre = t < tr.cut;
     // from/to: before the cut from=main frame (A) / to=ghost (B pre-roll); after the cut from=ghost (A tail) / to=main frame (B)
     var F = pre ? SL() : (ghostBmp ? SG() : (frozenCut === tr.cut ? frozen : null));
@@ -162,7 +169,7 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
         var st = Number(d.t);
         if (st >= 0 && liveBmp) {
           for (var gi = 0; gi < TRS.length; gi++) {
-            if (st >= TRS[gi].cut - TRS[gi].half - 0.1 && st <= TRS[gi].cut + TRS[gi].half) { render(st); break; }
+            if (st >= TRS[gi].s - 0.1 && st <= TRS[gi].e) { render(st); break; }
           }
         }
       } catch (errS) {}
@@ -183,7 +190,7 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
         ctx.drawImage(d.frame, 0, 0, W, H);
         var bt = typeof d.t === 'number' ? d.t : lastT;
         lastT = bt;
-        for (var bwi = 0; bwi < TRS.length; bwi++) { if (bt >= TRS[bwi].cut - TRS[bwi].half && bt <= TRS[bwi].cut + TRS[bwi].half) { bakedWinCut = TRS[bwi].cut; break; } }
+        for (var bwi = 0; bwi < TRS.length; bwi++) { if (bt >= TRS[bwi].s && bt <= TRS[bwi].e) { bakedWinCut = TRS[bwi].s; break; } }
         window.__vidSrc = { elKey: d.elKey || 'main', srcT: typeof d.srcT === 'number' ? d.srcT : 0, w: d.sourceWidth || d.frame.width, h: d.sourceHeight || d.frame.height, framing: d.framing || null };
       } catch (errB) {}
       try { d.frame.close && d.frame.close(); } catch (errB2) {}
@@ -206,7 +213,7 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
         // discard ghost frame once out of the window (if missing inside the window, reuse the last one — a tiny stutter beats a flicker cut)
         var t0 = typeof d.t === 'number' ? d.t : lastT;
         var inWin = false;
-        for (var wi = 0; wi < TRS.length; wi++) { if (t0 >= TRS[wi].cut - TRS[wi].half && t0 <= TRS[wi].cut + TRS[wi].half) { inWin = true; break; } }
+        for (var wi = 0; wi < TRS.length; wi++) { if (t0 >= TRS[wi].s && t0 <= TRS[wi].e) { inWin = true; break; } }
         if (!inWin) { try { ghostBmp.close(); } catch (errG2) {} ghostBmp = null; ghostFraming = null; ghostSourceW = 0; ghostSourceH = 0; }
       }
       render(typeof d.t === 'number' ? d.t : lastT);
@@ -500,7 +507,7 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
       : kitBase;
     const rb =
       cs && isSentenceCaption(b)
-        ? { ...capBase, slots: { ...capBase.slots, preset: cs.preset, yPct: cs.yPct, xPct: cs.xPct ?? 50, wPct: cs.wPct ?? 56, scale: cs.scale, ...(cs.hPct ? { hPct: cs.hPct } : {}), ...(cs.color != null ? { color: cs.color } : {}), ...(cs.bg !== undefined ? { bg: cs.bg } : {}), ...(cs.bold != null ? { bold: cs.bold } : {}), ...(cs.font != null ? { font: cs.font } : {}), ...(cs.accentColor != null ? { accentColor: cs.accentColor } : {}), ...(cs.strokeColor != null ? { strokeColor: cs.strokeColor } : {}), ...(cs.strokeWidth != null ? { strokeWidth: cs.strokeWidth } : {}), ...(cs.sub?.preset != null ? { subPreset: cs.sub.preset } : {}), ...(cs.sub?.color != null ? { subColor: cs.sub.color } : {}), ...(cs.sub?.bg !== undefined ? { subBg: cs.sub.bg } : {}), ...(cs.sub?.bold != null ? { subBold: cs.sub.bold } : {}), ...(cs.sub?.font != null ? { subFont: cs.sub.font } : {}), ...(cs.sub?.yPct != null ? { subYPct: cs.sub.yPct } : {}), ...(cs.sub?.xPct != null ? { subXPct: cs.sub.xPct } : {}), ...(cs.sub?.wPct != null ? { subWPct: cs.sub.wPct } : {}), ...(cs.sub?.scale != null ? { subScale: cs.sub.scale } : {}), ...(cs.sub?.hPct != null ? { subHPct: cs.sub.hPct } : {}) } }
+        ? { ...capBase, slots: { ...capBase.slots, preset: cs.preset, ...(cs.animation != null ? { animation: cs.animation } : {}), ...(cs.sub?.animation != null ? { subAnimation: cs.sub.animation } : {}), yPct: cs.yPct, xPct: cs.xPct ?? 50, wPct: cs.wPct ?? 56, scale: cs.scale, ...(cs.hPct ? { hPct: cs.hPct } : {}), ...(cs.color != null ? { color: cs.color } : {}), ...(cs.emphasis != null ? { emphasis: cs.emphasis } : {}), ...(cs.bg !== undefined ? { bg: cs.bg } : {}), ...(cs.bold != null ? { bold: cs.bold } : {}), ...(cs.font != null ? { font: cs.font } : {}), ...(cs.accentColor != null ? { accentColor: cs.accentColor } : {}), ...(cs.strokeColor != null ? { strokeColor: cs.strokeColor } : {}), ...(cs.strokeWidth != null ? { strokeWidth: cs.strokeWidth } : {}), ...(cs.sub?.preset != null ? { subPreset: cs.sub.preset } : {}), ...(cs.sub?.color != null ? { subColor: cs.sub.color } : {}), ...(cs.sub?.bg !== undefined ? { subBg: cs.sub.bg } : {}), ...(cs.sub?.bold != null ? { subBold: cs.sub.bold } : {}), ...(cs.sub?.font != null ? { subFont: cs.sub.font } : {}), ...(cs.sub?.yPct != null ? { subYPct: cs.sub.yPct } : {}), ...(cs.sub?.xPct != null ? { subXPct: cs.sub.xPct } : {}), ...(cs.sub?.wPct != null ? { subWPct: cs.sub.wPct } : {}), ...(cs.sub?.scale != null ? { subScale: cs.sub.scale } : {}), ...(cs.sub?.hPct != null ? { subHPct: cs.sub.hPct } : {}) } }
         : capBase;
     const rendered = renderBlock(rb);
     const { html: innerHtml } = compileComponentStyles(rendered.innerHtml, b.id);
@@ -598,9 +605,9 @@ export function assembleHtml(
     // Frame-receive shim + parent-clock marker (the runtime uses it to not self-drive the clock, see PREVIEW_RUNTIME); the cut-transition table is baked into the shim
     scripts.push(
       videoFrameShim(
-        cutTransitions(placedVideoShots, videoPlacements).map((tr) => {
+        transitionWindows(comp.transitions, placedVideoShots, videoPlacements).map((tr) => {
           const [dx, dy] = glDirection(tr.dir);
-          return { cut: tr.cut, effect: tr.effect, half: tr.half, dx, dy };
+          return { s: tr.start, e: tr.end, cut: tr.cut ?? -1, effect: tr.effect, dx, dy };
         }),
       ),
     );

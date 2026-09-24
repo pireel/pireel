@@ -497,6 +497,8 @@ export const PANELS_EN: Record<string, string> = {
   "panels.turnSmartCutoutFirst": "Turn on smart cutout first",
   "panels.untitledImage": "Untitled image",
   "panels.untitledVideo": "Untitled video",
+  "panels.untitledAudio": "Untitled audio",
+  "panels.audioBadge": "Audio",
   "panels.up": "Up",
   "panels.upload": "Upload",
   "panels.uploadAsset": "Upload asset",
@@ -519,4 +521,6 @@ export const PANELS_EN: Record<string, string> = {
   "panels.width": "Width",
   "panels.zoomOut": "Zoom out",
   "panels.zoomPunchMotionBlur": "Zoom punch (motion blur)",
+  "panels.transitionSelectedHint": "Picking an effect inserts a new transition at the playhead; to replace the selected one, delete it first (Delete)",
+  "panels.transitionInsertHint": "Pick an effect to insert it at the playhead (after any transition already there)",
 };

@@ -44,7 +44,7 @@ import {
   type TransitionDirection,
   type VideoShotTimelinePlacement,
   assembleHtml,
-  cutTransitions,
+  transitionWindows,
   displayTextLocalFontFamily,
   parseClipInset,
   localImageLocator,
@@ -838,8 +838,14 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     const lctx = liveC.getContext('2d')!;
     const ghostC = new OffscreenCanvas(outW, outH);
     const gctx = ghostC.getContext('2d')!;
-    const trsX: { cut: number; half: number; effect: string; dir: string; preKey: string; postKey: string; segA: ExpSeg; segB: ExpSeg }[] = [];
-    for (const tr of opts.primaryVisualHidden ? [] : cutTransitions(shots, opts.videoPlacements)) {
+    // A window that hands over at a spine cut decodes the other side; one without a cut plays the
+    // effect on the running picture (both sides are the current frame).
+    const trsX: { start: number; end: number; cut: number | null; effect: string; dir: string; preKey?: string; postKey?: string; segA?: ExpSeg; segB?: ExpSeg }[] = [];
+    for (const tr of opts.primaryVisualHidden ? [] : transitionWindows(opts.comp.transitions, shots, opts.videoPlacements)) {
+      if (tr.cut == null) {
+        trsX.push({ start: tr.start, end: tr.end, cut: null, effect: tr.effect, dir: tr.dir });
+        continue;
+      }
       let iB = -1;
       for (let bi = 1; bi < segs.length; bi++) {
         if (Math.abs(segStarts[bi]! - tr.cut) < 0.05) {
@@ -857,9 +863,9 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       const postKey = `g_post_${trsX.length}`;
       const rateA = segmentSourceRate(segA, segA.timelineStart, segA.timelineEnd);
       const rateB = segmentSourceRate(segB, segB.timelineStart, segB.timelineEnd);
-      rigs.set(preKey, await openSource(fB, Math.max(0, segB.srcStart - tr.half * rateB), segB.srcStart + 0.2 * rateB));
-      rigs.set(postKey, await openSource(fA, segA.srcEnd, segA.srcEnd + (tr.half + 0.2) * rateA));
-      trsX.push({ cut: tr.cut, half: tr.half, effect: tr.effect, dir: tr.dir, preKey, postKey, segA, segB });
+      rigs.set(preKey, await openSource(fB, Math.max(0, segB.srcStart - (tr.cut - tr.start) * rateB), segB.srcStart + 0.2 * rateB));
+      rigs.set(postKey, await openSource(fA, segA.srcEnd, segA.srcEnd + (tr.end - tr.cut + 0.2) * rateA));
+      trsX.push({ start: tr.start, end: tr.end, cut: tr.cut, effect: tr.effect, dir: tr.dir, preKey, postKey, segA, segB });
     }
     // gl-transitions mixer (output resolution; not built if there are no transitions)
     const mixer = trsX.length ? createGlMixer(outW, outH) : null;
@@ -876,8 +882,8 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     }
     for (const visual of visualVideos) lastUse.set(visualVideoKeys.get(visual.clipId)!, visual.endSec);
     for (const x of trsX) {
-      lastUse.set(x.preKey, x.cut + x.half);
-      lastUse.set(x.postKey, x.cut + x.half);
+      if (x.preKey) lastUse.set(x.preKey, x.end);
+      if (x.postKey) lastUse.set(x.postKey, x.end);
     }
     const retireVideoStream = (rig: SourceRig) => {
       rig.cur?.close();
@@ -934,14 +940,15 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
           .then((img) => ((tm.raster += performance.now() - s0), img));
       }));
 
-      const tr = trsX.find((x) => t >= x.cut - x.half && t <= x.cut + x.half) ?? null;
+      const tr = trsX.find((x) => t >= x.start && t <= x.end) ?? null;
+      const handover = tr && tr.cut != null ? tr : null;
       // Compute shadow sampling params first; the three decodes (overlay/current frame/shadow frame) are independent → parallel
-      const pre = tr ? t < tr.cut : false;
-      const gseg = tr ? (pre ? tr.segB : tr.segA) : null;
-      const gRig = tr ? rigs.get(pre ? tr.preKey : tr.postKey) : undefined;
+      const pre = handover ? t < handover.cut! : false;
+      const gseg = handover ? (pre ? handover.segB! : handover.segA!) : null;
+      const gRig = handover ? rigs.get(pre ? handover.preKey! : handover.postKey!) : undefined;
       const gRate = gseg ? segmentSourceRate(gseg, gseg.timelineStart, gseg.timelineEnd) : 1;
-      const gSrcT = tr && gseg
-        ? (pre ? Math.max(0, gseg.srcStart - (tr.cut - t) * gRate) : gseg.srcEnd + (t - tr.cut) * gRate)
+      const gSrcT = handover && gseg
+        ? (pre ? Math.max(0, gseg.srcStart - (handover.cut! - t) * gRate) : gseg.srcEnd + (t - handover.cut!) * gRate)
         : 0;
       const visualSamplesP = Promise.all(visualVideos.map(async (visual) => {
         if (t < visual.startSec - 1e-6 || t >= visual.endSec - 1e-6) return null;
@@ -1015,7 +1022,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       if (sample && rig) paintLayer(lctx, sample, rig, seg, seg.filter);
       // Shadow layer: the "other side" frame within the window (true dual-stream; sample out-of-range/absent = hard-cut fallback)
       let ghostReady = false;
-      if (tr) {
+      if (handover) {
         gctx.setTransform(1, 0, 0, 1, 0, 0);
         gctx.clearRect(0, 0, outW, outH);
         if (gSample && gRig && gseg) {
@@ -1028,10 +1035,10 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       vctx.setTransform(1, 0, 0, 1, 0, 0);
       vctx.clearRect(0, 0, outW, outH);
       let mixed = false;
-      if (tr && ghostReady && mixer) {
-        const p = Math.min(1, Math.max(0, (t - (tr.cut - tr.half)) / (2 * tr.half))); // 0=window start, 1=end
-        const F = pre ? liveC : ghostC;
-        const T = pre ? ghostC : liveC;
+      if (tr && mixer && (ghostReady || !handover)) {
+        const p = Math.min(1, Math.max(0, (t - tr.start) / Math.max(1e-3, tr.end - tr.start))); // 0=window start, 1=end
+        const F = !handover ? liveC : pre ? liveC : ghostC;
+        const T = !handover ? liveC : pre ? ghostC : liveC;
         const [dx, dy] = glDirection(tr.dir as TransitionDirection);
         if (mixer.render(F, T, tr.effect, p, dx, dy)) {
           vctx.drawImage(mixer.canvas, 0, 0);

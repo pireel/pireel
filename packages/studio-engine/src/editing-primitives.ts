@@ -16,7 +16,6 @@ import {
   SHOT_TREATMENTS,
   patchShotFraming,
   shotId,
-  splitBlockedByTransition,
   treatmentVacancyBox,
 } from './composition-core';
 import type { EditorDocumentV2, NarrativeTimelineClip, MediaTimelineClip } from './editor-document';
@@ -231,9 +230,6 @@ export function splitShotsAtEditedPoints(shots: VideoShot[], atSecs: readonly un
   const points = [...new Set(atSecs as number[])].sort((a, b) => a - b);
   let next = shots;
   for (const at of points) {
-    if (splitBlockedByTransition(next, at)) {
-      return { error: `cannot split at ${r4(at)}s because it is inside a transition region` };
-    }
     const result = splitAtEdited(next, at, (base, srcStart, srcEnd) => ({ ...base, id: shotId(), srcStart, srcEnd }));
     if (result.clips === next) return { error: `cannot split at ${r4(at)}s (too close to an edge or already on a boundary)` };
     next = result.clips;

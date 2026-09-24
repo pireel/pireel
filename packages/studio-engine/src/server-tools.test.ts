@@ -323,6 +323,34 @@ describe('remove_words (typed)', () => {
     expect(byWord.comp!.shots!.reduce((n, s) => n + s.srcEnd - s.srcStart, 0)).toBeCloseTo(19.4, 1);
   });
 
+  it('reads the caption look back in set_captions vocabulary', () => {
+    const p = proj();
+    const styled = runServerTool('set_captions', { on: true, preset: 'art-beast', animation: 'pulse', highlightColor: '#123456', yPct: 70, scale: 1.2 }, p);
+    expect(styled.result.ok).toBe(true);
+    const state = runServerTool('get_state', {}, { ...p, document: styled.document! }).result.data as { tracks: Array<{ captions?: { style: Record<string, unknown> } }> };
+    expect(state.tracks.find((track) => track.captions)?.captions?.style).toMatchObject({ preset: 'art-beast', animation: 'pulse', highlightColor: '#123456', yPct: 70, scale: 1.2 });
+  });
+
+  it('marks, reads back and clears caption key words by row and phrase', () => {
+    const p = proj({ transcript: [{ start: 0, end: 4, text: 'one two three', words: [
+      { text: 'one', start: 0.2, end: 0.8 }, { text: 'two', start: 1, end: 1.6 }, { text: 'three', start: 2, end: 2.8 },
+    ] }] });
+    const read = (project: ServerToolProject) => (runServerTool('get_transcript', { granularity: 'words', segmentIndexes: [0] }, project).result.data as { words: Array<{ highlight?: string }> }).words.map((word) => word.highlight);
+    const marked = runServerTool('set_captions', { highlights: { items: [{ index: 0, text: 'one' }] } }, p);
+    expect(marked.result.ok).toBe(true);
+    const at = (result: typeof marked) => ({ ...p, document: result.document! });
+    const fixed = runServerTool('set_captions', { highlights: { items: [{ index: 0, text: 'three' }], color: '#123456' } }, at(marked));
+    expect(read(at(fixed))).toEqual(['style', undefined, '#123456']);
+    const rows = JSON.stringify(runServerTool('get_transcript', {}, at(fixed)).result.data);
+    expect(rows).toContain('〈key: one · three〉');
+    const cleared = runServerTool('set_captions', { highlights: { clear: true } }, at(fixed));
+    expect(read(at(cleared))).toEqual([undefined, undefined, undefined]);
+    const missing = runServerTool('set_captions', { highlights: { items: [{ index: 0, text: 'four' }] } }, p);
+    expect(missing.result.ok).toBe(false);
+    expect(JSON.stringify(missing.result.data)).toContain('one two three');
+    expect(runServerTool('set_captions', { highlights: { items: [{ index: 0, text: 'one' }], color: 'red' } }, p).result.ok).toBe(false);
+  });
+
   it('refuses pairs that no longer map onto the timeline with a fix, and stale word ids by name', () => {
     const p = proj();
     const gone = runServerTool('remove_words', { ranges: [[40, 45]] }, p);
@@ -382,5 +410,21 @@ describe('set_captions source by asset', () => {
     expect(r.document!.semantics.managedCaptionSource).toMatchObject({ mode: 'track' });
     const missing = runServerTool('set_captions', { on: true, source: { assetId: 'nope' } }, p);
     expect(missing.result).toMatchObject({ ok: false, error: 'unknown_id' });
+  });
+});
+
+describe('independent caption animation tool input', () => {
+  it('keeps animation when changing appearance and keeps appearance when changing animation', () => {
+    const project = proj();
+    const first = runServerTool('set_captions', { preset: 'style-outline', animation: 'rise' }, project);
+    expect(first.result.ok).toBe(true);
+    const second = runServerTool('set_captions', { preset: 'style-paper' }, { ...project, document: first.document! });
+    expect(second.result.ok).toBe(true);
+    expect(second.document?.appearance.captionStyle).toMatchObject({ preset: 'style-paper', animation: 'rise' });
+    const third = runServerTool('set_captions', { animation: 'none' }, { ...project, document: second.document! });
+    expect(third.result.ok).toBe(true);
+    expect(third.document?.appearance.captionStyle).toMatchObject({ preset: 'style-paper', animation: 'none' });
+    const invalid = runServerTool('set_captions', { animation: 'unknown' }, project);
+    expect(invalid.result.ok).toBe(false);
   });
 });

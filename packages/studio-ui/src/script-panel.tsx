@@ -11,7 +11,9 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Scissors, ScrollText } from 'lucide-react';
+import { CLEANUP_PAUSE_KEEP_SEC, CLEANUP_PAUSE_OVER_SEC } from '@pireel/studio-engine/transcript-pauses';
+import { isFillerWord } from '@pireel/studio-engine/speech-fillers';
+import { Loader2, Scissors, ScrollText, Plus, Pencil, Highlighter, Trash2, MoreHorizontal, Type, Sticker, Image as ImageIcon, AudioLines, Sparkles } from 'lucide-react';
 import { wordsFromText } from '@pireel/studio-engine/caption-fx';
 import {
   dominantTimelineSpeechTrack,
@@ -22,20 +24,20 @@ import {
 import { narrationGaps, srcToEditedLoose, tightenCutRanges } from '@pireel/studio-engine/trim';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { DEFAULT_MASK_TEXT, type WordMaskPatch, wordMaskAt } from '@pireel/studio-engine/word-masks';
+import type { WordDecorationPatch } from '@pireel/studio-engine/word-decorations';
 import { t } from './i18n';
 
 /** A pause counts as dead air from this length up (sec); shorter than this is breathing, leave it alone. */
-const MIN_PAUSE_SEC = 0.8;
+const MIN_PAUSE_SEC = CLEANUP_PAUSE_OVER_SEC;
 /** Air LEFT IN PLACE when a pause is compressed (sec) — pauses are shortened, never removed outright.
  *  The residue is the recording's own room tone at that exact moment, and keeping it is what holds the noise
  *  floor continuous: cut a pause to nothing and the background hiss vanishes and snaps back, which the ear
  *  reads as a glitch even though every word survived. Split evenly across the two sides of the cut. */
-const KEEP_AIR_SEC = 0.3;
+const KEEP_AIR_SEC = CLEANUP_PAUSE_KEEP_SEC;
 /** Head and tail have no seam to protect (nothing precedes/follows), so they're cleared outright — this is
  *  just the guard on the speech side, so cutting flush doesn't clip the first attack / last tail. */
 const EDGE_PAD_SEC = 0.12;
 /** Filler words (whole-word match, conservative list — words like "那个/就是" often carry real meaning, leave them). */
-const FILLER_RE = /^(嗯+|呃+|唔+|诶+|额+|um+|uh+|emm+|hmm+)[,。,.!?!?…]?$/i;
 
 export type SrcRange = [number, number];
 /** One compressible pause. after = the sentence it follows (-1 = before the first); wi set = it sits INSIDE that
@@ -55,11 +57,6 @@ type Word = { text: string; start: number; end: number };
 /** The script is multi-source: each sentence belongs to one source (talking-head src=null / inserted src = that segment's src key).
  *  Source-time operations (presence check / delete / restore / seek) intersect only with same-source shots — seconds from different files would collide numerically. */
 const inSrcOf = (src: string | null) => (c: VideoShot) => (c.src ?? null) === src;
-
-/** Whether a source's src range still has any remnant under the current edit (a fully-cut word/sentence = deleted). */
-function srcRangeAlive(shots: VideoShot[], src: string | null, s: number, e: number): boolean {
-  return shots.some((c) => (c.src ?? null) === src && Math.min(c.srcEnd, e) - Math.max(c.srcStart, s) > 0.04);
-}
 
 /** WORD presence = does its MIDPOINT survive — never the >0.04s-overlap test ranges use: ASR word
  *  timestamps can be shorter than that tolerance (particles often get near-zero spans), and such a
@@ -95,10 +92,94 @@ type Popover =
   | { kind: 'deadword'; src: string | null; word: Word; x: number; y: number }
   | { kind: 'gap'; range: SrcRange; x: number; y: number }
   | { kind: 'deadgap'; range: SrcRange; x: number; y: number }
-  | { kind: 'sel'; cut: { items: ScriptCut[]; count: number } | null; restore: { items: ScriptCut[]; count: number } | null; mask: { targets: ScriptMaskTarget[]; count: number; anyMasked: boolean } | null; x: number; y: number };
+  | { kind: 'sel'; cut: { items: ScriptCut[]; count: number } | null; restore: { items: ScriptCut[]; count: number } | null; mask: { targets: ScriptMaskTarget[]; count: number; anyMasked: boolean } | null; text: string; startSec: number; endSec: number; x: number; y: number };
 
 /** One word addressed for a mask edit: which source's sentence and which word in it. */
 export type ScriptMaskTarget = { src: string | null; si: number; wi: number };
+
+export type TranscriptAddKind = 'text' | 'sticker' | 'media' | 'sfx' | 'mg';
+
+/** Selection-first transcript actions, patterned after the compact contextual bar in the UI reference. */
+export function TranscriptSelectionBar({ text, kind = 'text', canEdit, onEdit, onRequestEdit, onDecorate, styleHighlight, onGenerateMG, onAdd, addKinds, onDelete, deleteLabel, onRestore, onMaskAudio, onMaskText, onUnmask }: {
+  text: string;
+  kind?: 'text' | 'pause';
+  canEdit: boolean;
+  onEdit?: (text: string) => void;
+  onRequestEdit?: () => void;
+  onDecorate?: (patch: WordDecorationPatch) => void;
+  /** Caption style highlight color: a key word with no chosen color follows it. */
+  styleHighlight?: string;
+  onGenerateMG: () => void;
+  /** Insert over the selection's time range; absent = only MG is offered. */
+  onAdd?: (kind: TranscriptAddKind) => void;
+  /** Which add items this host offers (default all). */
+  addKinds?: readonly TranscriptAddKind[];
+  onDelete?: () => void;
+  deleteLabel?: string;
+  onRestore?: () => void;
+  onMaskAudio?: () => void;
+  onMaskText?: () => void;
+  onUnmask?: () => void;
+}) {
+  const [menu, setMenu] = useState<'add' | 'highlight' | 'more' | null>(null);
+  const can = (item: TranscriptAddKind) => !addKinds || addKinds.includes(item);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(text);
+  const action = 'text-ink-2 hover:bg-panel-2 hover:text-ink inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-[11.5px] whitespace-nowrap';
+  const choice = 'text-ink-2 hover:bg-panel-2 hover:text-ink block w-full rounded px-2 py-1.5 text-left text-[11.5px]';
+  const finish = () => { if (draft.trim()) onEdit?.(draft.trim()); setEditing(false); };
+  return (
+    <div className="relative">
+      {editing ? (
+        <div className="flex items-center gap-1 p-0.5">
+          <input autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') finish(); if (event.key === 'Escape') setEditing(false); }} className="border-line bg-panel-2 text-ink w-44 rounded border px-2 py-1 text-[12px] outline-none" aria-label={t('captions.editSelection')} />
+          <button type="button" disabled={!draft.trim()} onClick={finish} className={action}>{t('panels.ok')}</button>
+        </div>
+      ) : (
+        <div className="flex max-w-full flex-wrap items-center gap-0.5">
+          <button type="button" className={action} onClick={() => setMenu(menu === 'add' ? null : 'add')}><Plus size={14} />{t('captions.addToSelection')}</button>
+          {kind === 'text' && <>
+            <button type="button" className={action} disabled={!canEdit} title={!canEdit ? t('captions.editOneSentence') : undefined} onClick={() => { setMenu(null); if (onRequestEdit) onRequestEdit(); else { setDraft(text); setEditing(true); } }}><Pencil size={13} />{t('captions.editSelection')}</button>
+            {onDecorate && <button type="button" className={action} onClick={() => setMenu(menu === 'highlight' ? null : 'highlight')}><Highlighter size={14} />{t('captions.highlightSelection')}</button>}
+          </>}
+          {onDelete && <button type="button" className={action} title={deleteLabel ?? t('tools.delete_block.label')} aria-label={deleteLabel ?? t('tools.delete_block.label')} onClick={onDelete}><Trash2 size={14} /></button>}
+          {(onRestore || onMaskAudio || onMaskText || onUnmask) && <button type="button" className={action} aria-label={t('captions.moreSelectionActions')} onClick={() => setMenu(menu === 'more' ? null : 'more')}><MoreHorizontal size={14} /></button>}
+        </div>
+      )}
+      {menu && !editing && <div className="border-line bg-panel absolute left-0 top-full z-[60] mt-1 w-48 rounded-lg border p-1 shadow-xl">
+        {menu === 'add' && <>
+          {onAdd && can('text') && kind === 'text' && <button type="button" className={`${choice} flex items-center gap-2`} onClick={() => { setMenu(null); onAdd('text'); }}><Type size={13} />{t('captions.addText')}</button>}
+          {onAdd && can('sticker') && <button type="button" className={`${choice} flex items-center gap-2`} onClick={() => { setMenu(null); onAdd('sticker'); }}><Sticker size={13} />{t('captions.addSticker')}</button>}
+          {onAdd && can('media') && <button type="button" className={`${choice} flex items-center gap-2`} onClick={() => { setMenu(null); onAdd('media'); }}><ImageIcon size={13} />{t('captions.addMedia')}</button>}
+          {onAdd && can('sfx') && <button type="button" className={`${choice} flex items-center gap-2`} onClick={() => { setMenu(null); onAdd('sfx'); }}><AudioLines size={13} />{t('captions.addSfx')}</button>}
+          <button type="button" className={`${choice} flex items-center gap-2`} onClick={() => { if (onAdd && can('mg')) { setMenu(null); onAdd('mg'); } else onGenerateMG(); }}><Sparkles size={13} />{t('captions.generateMG')}</button>
+        </>}
+        {menu === 'highlight' && <>
+          <div className="text-ink-3 px-2 py-1 text-[10.5px]">{t('captions.highlightColor')}</div>
+          <div className="flex items-center gap-2 px-2 pb-1.5">
+            <button type="button" title={t('captions.followStyleHighlight')} aria-label={t('captions.followStyleHighlight')} onClick={() => onDecorate?.({ highlight: 'color', color: null })}
+              className="border-accent h-5 w-5 rounded-full border-2 text-[9px] font-bold leading-4 text-[#111]" style={{ backgroundColor: styleHighlight ?? '#FFE34F' }}>A</button>
+            <span className="bg-line h-4 w-px" />
+            {['#FFE34F', '#C6FF48', '#FF82A9', '#72D7FF'].map((color) => (
+              <button key={color} type="button" aria-label={`${t('captions.highlightColor')} ${color}`} onClick={() => onDecorate?.({ highlight: 'color', color })} className="border-line h-5 w-5 rounded-full border" style={{ backgroundColor: color }} />
+            ))}
+            <label className="text-ink-3 relative h-5 w-5 cursor-pointer overflow-hidden rounded-full border border-dashed border-current text-center text-[12px] leading-[18px]" title={t('captions.customHighlightColor')}>
+              +<input type="color" aria-label={t('captions.customHighlightColor')} onChange={(event) => onDecorate?.({ highlight: 'color', color: event.target.value })} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
+            </label>
+          </div>
+          <button type="button" className={choice} onClick={() => onDecorate?.({ highlight: 'underline' })}>{t('captions.highlightUnderline')}</button>
+          <button type="button" className={choice} onClick={() => onDecorate?.({ highlight: null, color: null })}>{t('captions.clearHighlight')}</button>
+        </>}
+        {menu === 'more' && <>
+          {onRestore && <button type="button" className={choice} onClick={onRestore}>{t('captions.restoreSelection')}</button>}
+          {onMaskAudio && <button type="button" className={choice} onClick={onMaskAudio}>{t('captions.maskSelectionAudio')}</button>}
+          {onMaskText && <button type="button" className={choice} onClick={onMaskText}>{t('captions.maskSelectionText')}</button>}
+          {onUnmask && <button type="button" className={choice} onClick={onUnmask}>{t('panels.unmaskSelected')}</button>}
+        </>}
+      </div>}
+    </div>
+  );
+}
 
 export function ScriptPanel({
   sentences,
@@ -112,6 +193,9 @@ export function ScriptPanel({
   onRestore,
   onReplaceWord,
   onMaskWords,
+  onDecorateWords,
+  onEditWords,
+  onGenerateMG,
 }: {
   sentences: AsrSegment[] | null;
   /** Inserted-source transcripts (keyed by shot.src): sentence times are on that source file's own timeline. */
@@ -131,6 +215,9 @@ export function ScriptPanel({
   onReplaceWord: (src: string | null, si: number, word: Word, text: string) => void;
   /** Beep/mute the words' sound and/or mask their caption text (patch semantics: null clears); msg = success toast. */
   onMaskWords: (targets: ScriptMaskTarget[], patch: WordMaskPatch, msg: string) => void;
+  onDecorateWords: (targets: ScriptMaskTarget[], patch: WordDecorationPatch) => void;
+  onEditWords: (targets: ScriptMaskTarget[], text: string) => void;
+  onGenerateMG: (text: string, startSec: number, endSec: number) => void;
 }) {
   const sents = useMemo(() => sentences ?? [], [sentences]);
   // All-source sentence stream: talking-head sentences + each inserted source's sentences (prefer true word-level word streams,
@@ -195,7 +282,7 @@ export function ScriptPanel({
     const out: { src: string | null; range: SrcRange; text: string }[] = [];
     for (const it of items) {
       for (const w of it.seg.words ?? []) {
-        if (FILLER_RE.test(w.text.trim()) && wordAlive(shots, it.src, w)) {
+        if (isFillerWord(w.text) && wordAlive(shots, it.src, w)) {
           out.push({ src: it.src, range: wordCutRange(w), text: w.text.trim() });
         }
       }
@@ -247,7 +334,7 @@ export function ScriptPanel({
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || !rootRef.current) return;
     const nodes = [...rootRef.current.querySelectorAll<HTMLElement>('[data-w]')].filter((el) => sel.containsNode(el, true));
-    if (nodes.length < 2) return; // a single word goes through the click popover
+    if (!nodes.length) return;
     const aliveBySrc = new Map<string | null, { lo: number; hi: number; n: number }>();
     const deadBySrc = new Map<string | null, SrcRange[]>();
     const maskTargets: ScriptMaskTarget[] = [];
@@ -288,7 +375,11 @@ export function ScriptPanel({
     if (!cut && !restore) return;
     const mask = maskTargets.length ? { targets: maskTargets, count: maskTargets.length, anyMasked } : null;
     const { x, y } = localXY(e.clientX, e.clientY);
-    setPop({ kind: 'sel', cut, restore, mask, x, y: y + 14 });
+    const first = nodes[0]!;
+    const last = nodes[nodes.length - 1]!;
+    const startSec = srcToEditedLoose(shots, Number(first.dataset.ws), inSrcOf(first.dataset.src || null));
+    const endSec = srcToEditedLoose(shots, Number(last.dataset.we), inSrcOf(last.dataset.src || null));
+    setPop({ kind: 'sel', cut, restore, mask, text: sel.toString().trim(), startSec, endSec, x, y: y + 14 });
   };
 
   if (!items.length) {
@@ -349,6 +440,7 @@ export function ScriptPanel({
               const picked = pop?.kind === 'word' && pop.src === it.src && pop.si === it.si && Math.abs(pop.word.start - w.start) < 1e-3 && Math.abs(pop.word.end - w.end) < 1e-3;
               const pickedDead = pop?.kind === 'deadword' && pop.src === it.src && Math.abs(pop.word.start - w.start) < 1e-3 && Math.abs(pop.word.end - w.end) < 1e-3;
               const mask = wordMaskAt(it.seg, wi);
+              const decoration = it.seg.wordDecorations?.[wi];
               const maskTitle = mask
                 ? [mask.audio ? t(mask.audio === 'beep' ? 'panels.maskedBeep' : 'panels.maskedMute') : '', mask.text !== undefined ? t('panels.captionShowsAs', { text: mask.text }) : '']
                   .filter(Boolean)
@@ -365,6 +457,7 @@ export function ScriptPanel({
                   data-wi={wi}
                   data-masked={mask ? '1' : undefined}
                   onClick={(e) => {
+                    if (window.getSelection()?.toString().trim()) return;
                     if (alive) {
                       openWordPop(e, it, w, wi);
                     } else {
@@ -373,9 +466,10 @@ export function ScriptPanel({
                     }
                   }}
                   title={alive ? maskTitle : t('panels.deletedClickRestore')}
+                  style={decoration?.highlight === 'color' ? { color: decoration.color ?? '#ffe34f' } : decoration?.highlight === 'underline' ? { textDecorationColor: decoration.color ?? '#ffe34f' } : undefined}
                   className={
                     alive
-                      ? `text-ink cursor-pointer rounded-sm px-[1px] ${picked ? 'bg-accent/25 ring-accent/60 ring-1' : 'hover:bg-accent/15'}${mask?.audio ? ' underline decoration-amber-500/80 decoration-dotted decoration-2 underline-offset-2' : ''}${mask?.text !== undefined ? ' bg-amber-500/15' : ''}`
+                      ? `text-ink cursor-pointer rounded-sm px-[1px] ${picked ? 'bg-accent/25 ring-accent/60 ring-1' : 'hover:bg-accent/15'}${mask?.audio ? ' underline decoration-amber-500/80 decoration-dotted decoration-2 underline-offset-2' : ''}${mask?.text !== undefined ? ' bg-amber-500/15' : ''}${decoration?.highlight === 'underline' ? ' underline decoration-2 underline-offset-2' : ''}${decoration?.animation ? ' ring-1 ring-yellow-300/50' : ''}`
                       : `text-ink-4 cursor-pointer rounded-sm px-[1px] line-through opacity-60 ${pickedDead ? 'bg-accent/20 ring-accent/50 ring-1' : 'hover:opacity-90'}`
                   }
                 >
@@ -406,8 +500,10 @@ export function ScriptPanel({
       {pop && (
         <div
           data-script-pop
-          className="border-line bg-panel absolute z-50 flex items-center gap-1 rounded-lg border px-1.5 py-1 shadow-xl"
-          style={{ left: Math.max(8, Math.min(pop.x - 40, 240)), top: pop.y }}
+          className="border-line bg-panel absolute z-50 flex max-w-[calc(100%-16px)] items-center gap-1 rounded-lg border px-1.5 py-1 shadow-xl"
+          style={{ left: pop.kind === 'sel' ? 8 : Math.max(8, Math.min(pop.x - 40, (rootRef.current?.clientWidth ?? 320) - 180)),
+            ...(pop.kind === 'sel' ? { width: 'calc(100% - 16px)' } : {}),
+            top: Math.max(8, Math.min(pop.y, (rootRef.current?.clientHeight ?? 500) - 165)) }}
         >
           {pop.kind === 'word' && !replaceMode && (
             <>
@@ -529,77 +625,18 @@ export function ScriptPanel({
               {t('panels.restoreSilenceSecS', { sec: (pop.range[1] - pop.range[0]).toFixed(1) })}
             </button>
           )}
-          {pop.kind === 'sel' && (
-            <>
-              {pop.cut && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onCut(pop.cut!.items, t('panels.deletedNSelectedWords', { n: pop.cut!.count }));
-                    setPop(null);
-                    window.getSelection()?.removeAllRanges();
-                  }}
-                  className="text-ink-2 hover:text-destructive px-1.5 py-0.5 text-[11.5px]"
-                >
-                  {t('panels.deleteSelectedNWords', { n: pop.cut.count })}
-                </button>
-              )}
-              {pop.cut && pop.restore && <div className="bg-line h-3.5 w-px" />}
-              {pop.restore && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onRestore(pop.restore!.items, t('panels.restoredNSelectedWords', { n: pop.restore!.count }));
-                    setPop(null);
-                    window.getSelection()?.removeAllRanges();
-                  }}
-                  className="text-ink-2 hover:text-ink px-1.5 py-0.5 text-[11.5px]"
-                >
-                  {t('panels.restoreSelectedNWords', { n: pop.restore.count })}
-                </button>
-              )}
-              {pop.mask && (
-                <>
-                  <div className="bg-line h-3.5 w-px" />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onMaskWords(pop.mask!.targets, { audio: 'beep' }, t('panels.maskedAudioNWords', { n: pop.mask!.count }));
-                      setPop(null);
-                      window.getSelection()?.removeAllRanges();
-                    }}
-                    className="text-ink-2 hover:text-ink px-1.5 py-0.5 text-[11.5px]"
-                  >
-                    {t('panels.maskAudioSelectedN', { n: pop.mask.count })}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onMaskWords(pop.mask!.targets, { text: DEFAULT_MASK_TEXT }, t('panels.maskedTextNWords', { n: pop.mask!.count }));
-                      setPop(null);
-                      window.getSelection()?.removeAllRanges();
-                    }}
-                    className="text-ink-2 hover:text-ink px-1.5 py-0.5 text-[11.5px]"
-                  >
-                    {t('panels.maskTextSelectedN', { n: pop.mask.count })}
-                  </button>
-                  {pop.mask.anyMasked && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onMaskWords(pop.mask!.targets, { audio: null, text: null }, t('panels.unmaskedNWords', { n: pop.mask!.count }));
-                        setPop(null);
-                        window.getSelection()?.removeAllRanges();
-                      }}
-                      className="text-ink-2 hover:text-ink px-1.5 py-0.5 text-[11.5px]"
-                    >
-                      {t('panels.unmaskSelected')}
-                    </button>
-                  )}
-                </>
-              )}
-            </>
-          )}
+          {pop.kind === 'sel' && <TranscriptSelectionBar
+            text={pop.text}
+            canEdit={!!pop.mask?.targets.length && pop.mask.targets.every((target) => target.src === pop.mask!.targets[0]!.src && target.si === pop.mask!.targets[0]!.si)}
+            onEdit={(text) => { if (pop.mask) onEditWords(pop.mask.targets, text); setPop(null); window.getSelection()?.removeAllRanges(); }}
+            onDecorate={(patch) => { if (pop.mask) onDecorateWords(pop.mask.targets, patch); setPop(null); window.getSelection()?.removeAllRanges(); }}
+            onGenerateMG={() => { onGenerateMG(pop.text, pop.startSec, pop.endSec); setPop(null); window.getSelection()?.removeAllRanges(); }}
+            onDelete={pop.cut ? () => { onCut(pop.cut!.items, t('panels.deletedNSelectedWords', { n: pop.cut!.count })); setPop(null); window.getSelection()?.removeAllRanges(); } : undefined}
+            onRestore={pop.restore ? () => { onRestore(pop.restore!.items, t('panels.restoredNSelectedWords', { n: pop.restore!.count })); setPop(null); window.getSelection()?.removeAllRanges(); } : undefined}
+            onMaskAudio={pop.mask ? () => { onMaskWords(pop.mask!.targets, { audio: 'beep' }, t('panels.maskedAudioNWords', { n: pop.mask!.count })); setPop(null); window.getSelection()?.removeAllRanges(); } : undefined}
+            onMaskText={pop.mask ? () => { onMaskWords(pop.mask!.targets, { text: DEFAULT_MASK_TEXT }, t('panels.maskedTextNWords', { n: pop.mask!.count })); setPop(null); window.getSelection()?.removeAllRanges(); } : undefined}
+            onUnmask={pop.mask?.anyMasked ? () => { onMaskWords(pop.mask!.targets, { audio: null, text: null }, t('panels.unmaskedNWords', { n: pop.mask!.count })); setPop(null); window.getSelection()?.removeAllRanges(); } : undefined}
+          />}
         </div>
       )}
     </div>
@@ -625,7 +662,7 @@ export type TimelineMaskTarget = { assetId: string; si: number; wi: number };
 
 type TimelineScriptPopover =
   | { kind: 'word'; item: TimelineScriptItem; word: Word; wi: number; x: number; y: number }
-  | { kind: 'selection'; cuts: TimelineScriptCut[]; count: number; mask: { targets: TimelineMaskTarget[]; anyMasked: boolean } | null; x: number; y: number };
+  | { kind: 'selection'; cuts: TimelineScriptCut[]; count: number; mask: { targets: TimelineMaskTarget[]; anyMasked: boolean } | null; text: string; startSec: number; endSec: number; x: number; y: number };
 
 function speechClipSourceRange(clip: SpeechTimelineClip, fps: number): SrcRange {
   const speed = clip.kind === 'audio' && Number.isFinite(clip.properties.speed) && clip.properties.speed! > 0
@@ -654,6 +691,9 @@ export function TimelineScriptPanel({
   onCut,
   onReplaceWord,
   onMaskWords,
+  onDecorateWords,
+  onEditWords,
+  onGenerateMG,
 }: {
   document: EditorDocumentV2;
   extracting: boolean;
@@ -663,6 +703,9 @@ export function TimelineScriptPanel({
   onReplaceWord: (assetId: string, sentenceIndex: number, word: Word, text: string) => void;
   /** Beep/mute the words' sound and/or mask their caption text (patch semantics: null clears); msg = success toast. */
   onMaskWords: (targets: TimelineMaskTarget[], patch: WordMaskPatch, msg: string) => void;
+  onDecorateWords: (targets: TimelineMaskTarget[], patch: WordDecorationPatch) => void;
+  onEditWords: (targets: TimelineMaskTarget[], text: string) => void;
+  onGenerateMG: (text: string, startSec: number, endSec: number) => void;
 }) {
   const speechTrack = useMemo(() => dominantTimelineSpeechTrack(document), [document]);
   const items = useMemo(() => {
@@ -715,7 +758,7 @@ export function TimelineScriptPanel({
   }, [document, speechTrack]);
   const fillers = useMemo(() => items.flatMap((item) => (
     item.hasTrueWords
-      ? item.words.filter((word) => FILLER_RE.test(word.text.trim())).map((word) => ({
+      ? item.words.filter((word) => isFillerWord(word.text)).map((word) => ({
           trackId: item.trackId,
           clipId: item.clipId,
           assetId: item.assetId,
@@ -754,7 +797,7 @@ export function TimelineScriptPanel({
     if (!selection || selection.isCollapsed || !rootRef.current) return;
     const nodes = [...rootRef.current.querySelectorAll<HTMLElement>('[data-timeline-word]')]
       .filter((element) => selection.containsNode(element, true));
-    if (nodes.length < 2) return;
+    if (!nodes.length) return;
     const maskTargets: TimelineMaskTarget[] = [];
     let anyMasked = false;
     const cuts = nodes.flatMap((element): TimelineScriptCut[] => {
@@ -774,7 +817,9 @@ export function TimelineScriptPanel({
     });
     if (!cuts.length) return;
     const { x, y } = localXY(event.clientX, event.clientY);
-    setPopover({ kind: 'selection', cuts, count: cuts.length, mask: maskTargets.length ? { targets: maskTargets, anyMasked } : null, x, y: y + 14 });
+    const startSec = Math.min(...nodes.map((element) => Number(element.dataset.timelineStart)).filter(Number.isFinite));
+    const endSec = Math.max(...nodes.map((element) => Number(element.dataset.timelineEnd)).filter(Number.isFinite));
+    setPopover({ kind: 'selection', cuts, count: cuts.length, mask: maskTargets.length ? { targets: maskTargets, anyMasked } : null, text: selection.toString().trim(), startSec, endSec, x, y: y + 14 });
   };
 
   if (!items.length) {
@@ -817,6 +862,7 @@ export function TimelineScriptPanel({
             {item.words.map((word, wordIndex) => {
               const wi = item.wordIndexes[wordIndex]!;
               const mask = wordMaskAt(item.segment, wi);
+              const decoration = item.segment.wordDecorations?.[wi];
               const maskTitle = mask
                 ? [mask.audio ? t(mask.audio === 'beep' ? 'panels.maskedBeep' : 'panels.maskedMute') : '', mask.text !== undefined ? t('panels.captionShowsAs', { text: mask.text }) : '']
                   .filter(Boolean)
@@ -828,6 +874,8 @@ export function TimelineScriptPanel({
                   data-timeline-word
                   data-word-start={word.start}
                   data-word-end={word.end}
+                  data-timeline-start={speechSourceToTimelineSec(item.clip, word.start, document.canvas.fps)}
+                  data-timeline-end={speechSourceToTimelineSec(item.clip, word.end, document.canvas.fps)}
                   data-track-id={item.trackId}
                   data-clip-id={item.clipId}
                   data-asset-id={item.assetId}
@@ -835,7 +883,9 @@ export function TimelineScriptPanel({
                   data-wi={wi}
                   data-masked={mask ? '1' : undefined}
                   title={maskTitle}
+                  style={decoration?.highlight === 'color' ? { color: decoration.color ?? '#ffe34f' } : decoration?.highlight === 'underline' ? { textDecorationColor: decoration.color ?? '#ffe34f' } : undefined}
                   onClick={(event) => {
+                    if (window.getSelection()?.toString().trim()) return;
                     event.stopPropagation();
                     const { x, y } = localXY(event.clientX, event.clientY);
                     setPopover({ kind: 'word', item, word, wi, x, y: y + 14 });
@@ -843,7 +893,7 @@ export function TimelineScriptPanel({
                     setReplacement(word.text);
                     onSeek(speechSourceToTimelineSec(item.clip, word.start, document.canvas.fps));
                   }}
-                  className={`text-ink hover:bg-accent/15 cursor-pointer rounded-sm px-[1px]${mask?.audio ? ' underline decoration-amber-500/80 decoration-dotted decoration-2 underline-offset-2' : ''}${mask?.text !== undefined ? ' bg-amber-500/15' : ''}`}
+                  className={`text-ink hover:bg-accent/15 cursor-pointer rounded-sm px-[1px]${mask?.audio ? ' underline decoration-amber-500/80 decoration-dotted decoration-2 underline-offset-2' : ''}${mask?.text !== undefined ? ' bg-amber-500/15' : ''}${decoration?.highlight === 'underline' ? ' underline decoration-2 underline-offset-2' : ''}${decoration?.animation ? ' ring-1 ring-yellow-300/50' : ''}`}
                 >
                   {word.text}
                 </span>
@@ -855,7 +905,7 @@ export function TimelineScriptPanel({
         ))}
       </div>
       {popover && (
-        <div data-script-pop className="border-line bg-panel absolute z-50 flex items-center gap-1 rounded-lg border px-1.5 py-1 shadow-xl" style={{ left: Math.max(8, Math.min(popover.x - 40, 240)), top: popover.y }}>
+        <div data-script-pop className="border-line bg-panel absolute z-50 flex items-center gap-1 rounded-lg border px-1.5 py-1 shadow-xl" style={{ left: popover.kind === 'selection' ? 8 : Math.max(8, Math.min(popover.x - 40, (rootRef.current?.clientWidth ?? 320) - 180)), ...(popover.kind === 'selection' ? { width: 'calc(100% - 16px)' } : {}), top: Math.max(8, Math.min(popover.y, (rootRef.current?.clientHeight ?? 500) - 165)) }}>
           {popover.kind === 'word' && !replaceMode && (
             <>
               <button type="button" onClick={() => { onCut([cutFor(popover.item, popover.word)], t('panels.deletedWord', { word: popover.word.text })); setPopover(null); }} className="text-ink-2 hover:text-destructive px-1.5 py-0.5 text-[11.5px]">
@@ -902,29 +952,17 @@ export function TimelineScriptPanel({
               <button type="button" disabled={!replacement.trim()} onClick={() => submitReplacement(popover.item, popover.word)} className="text-accent px-1 py-0.5 text-[11.5px] font-medium disabled:opacity-40">{t('panels.ok')}</button>
             </>
           )}
-          {popover.kind === 'selection' && (
-            <>
-              <button type="button" onClick={() => { onCut(popover.cuts, t('panels.deletedNSelectedWords', { n: popover.count })); setPopover(null); window.getSelection()?.removeAllRanges(); }} className="text-ink-2 hover:text-destructive px-1.5 py-0.5 text-[11.5px]">
-                {t('panels.deleteSelectedNWords', { n: popover.count })}
-              </button>
-              {popover.mask && (
-                <>
-                  <div className="bg-line h-3.5 w-px" />
-                  <button type="button" onClick={() => { onMaskWords(popover.mask!.targets, { audio: 'beep' }, t('panels.maskedAudioNWords', { n: popover.mask!.targets.length })); setPopover(null); window.getSelection()?.removeAllRanges(); }} className="text-ink-2 hover:text-ink px-1.5 py-0.5 text-[11.5px]">
-                    {t('panels.maskAudioSelectedN', { n: popover.mask.targets.length })}
-                  </button>
-                  <button type="button" onClick={() => { onMaskWords(popover.mask!.targets, { text: DEFAULT_MASK_TEXT }, t('panels.maskedTextNWords', { n: popover.mask!.targets.length })); setPopover(null); window.getSelection()?.removeAllRanges(); }} className="text-ink-2 hover:text-ink px-1.5 py-0.5 text-[11.5px]">
-                    {t('panels.maskTextSelectedN', { n: popover.mask.targets.length })}
-                  </button>
-                  {popover.mask.anyMasked && (
-                    <button type="button" onClick={() => { onMaskWords(popover.mask!.targets, { audio: null, text: null }, t('panels.unmaskedNWords', { n: popover.mask!.targets.length })); setPopover(null); window.getSelection()?.removeAllRanges(); }} className="text-ink-2 hover:text-ink px-1.5 py-0.5 text-[11.5px]">
-                      {t('panels.unmaskSelected')}
-                    </button>
-                  )}
-                </>
-              )}
-            </>
-          )}
+          {popover.kind === 'selection' && <TranscriptSelectionBar
+            text={popover.text}
+            canEdit={!!popover.mask?.targets.length && popover.mask.targets.every((target) => target.assetId === popover.mask!.targets[0]!.assetId && target.si === popover.mask!.targets[0]!.si)}
+            onEdit={(text) => { if (popover.mask) onEditWords(popover.mask.targets, text); setPopover(null); window.getSelection()?.removeAllRanges(); }}
+            onDecorate={(patch) => { if (popover.mask) onDecorateWords(popover.mask.targets, patch); setPopover(null); window.getSelection()?.removeAllRanges(); }}
+            onGenerateMG={() => { onGenerateMG(popover.text, popover.startSec, popover.endSec); setPopover(null); window.getSelection()?.removeAllRanges(); }}
+            onDelete={() => { onCut(popover.cuts, t('panels.deletedNSelectedWords', { n: popover.count })); setPopover(null); window.getSelection()?.removeAllRanges(); }}
+            onMaskAudio={popover.mask ? () => { onMaskWords(popover.mask!.targets, { audio: 'beep' }, t('panels.maskedAudioNWords', { n: popover.mask!.targets.length })); setPopover(null); window.getSelection()?.removeAllRanges(); } : undefined}
+            onMaskText={popover.mask ? () => { onMaskWords(popover.mask!.targets, { text: DEFAULT_MASK_TEXT }, t('panels.maskedTextNWords', { n: popover.mask!.targets.length })); setPopover(null); window.getSelection()?.removeAllRanges(); } : undefined}
+            onUnmask={popover.mask?.anyMasked ? () => { onMaskWords(popover.mask!.targets, { audio: null, text: null }, t('panels.unmaskedNWords', { n: popover.mask!.targets.length })); setPopover(null); window.getSelection()?.removeAllRanges(); } : undefined}
+          />}
         </div>
       )}
     </div>
@@ -950,7 +988,7 @@ function GapToken({ gap, onClick }: { gap: { range: SrcRange; alive: boolean; ra
       title={gap.alive ? t('panels.silenceClickDelete') : t('panels.deletedSilenceClickRestore')}
       className={
         gap.alive
-          ? 'text-ink-4 hover:text-ink hover:bg-panel-2 mx-0.5 cursor-pointer rounded px-1 font-mono text-[11px]'
+          ? 'text-ink-4 hover:text-ink hover:bg-panel-2/20 mx-0.5 cursor-pointer rounded px-1 font-mono text-[11px]'
           : 'text-ink-4 hover:bg-panel-2 mx-0.5 cursor-pointer rounded px-1 font-mono text-[11px] line-through opacity-60 hover:opacity-90'
       }
     >

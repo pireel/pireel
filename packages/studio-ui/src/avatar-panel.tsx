@@ -347,7 +347,7 @@ export function AvatarPanel({ mode = 'library', initialLanguage = 'zh', onCreate
         const registerRes = await fetch('/api/studio/media', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ action: 'register-audio-asset', key: ticket.key, label: fileLabel(file, t('workbench.voiceCloned')) }),
+          body: JSON.stringify({ action: 'register-audio-asset', key: ticket.key, label: fileLabel(file, t('workbench.voiceCloned')), role: 'voice' }),
         });
         const registered = (await registerRes.json().catch(() => ({}))) as { id?: string; error?: string };
         if (!registerRes.ok || !registered.id) throw new Error(registered.error || t('workbench.voiceUploadFailed'));

@@ -1,3 +1,5 @@
+import { isCaptionAnimation, CAPTION_ANIMATION_IDS, captionAnimationId } from './caption-animations';
+import { DEFAULT_TRANSITION_SEC, maxTransitionFrames, transitionSlotAt } from './editor-document/transitions';
 /**
  * Agent surface v3 — document-level tools in their published shape.
  *
@@ -20,7 +22,7 @@ import {
   type TimelineClip,
 } from './editor-document';
 import { CAPTION_PRESETS, getCaptionPreset } from './caption-presets';
-import { CUT_TRANSITION_EFFECTS, DIRECTIONAL_TRANSITIONS, MAX_TRANSITION_SEC, PLACE_ANCHORS, SHOT_TREATMENTS, ZOOM_PRESETS, ZOOM_SCALE_MAX, ZOOM_SCALE_MIN, applyBlockPlacement, blockId, blockKind, isSentenceCaption, placementFramingNotes, renderBlock, shotFilterCss, splitBlockedByTransition, videoShotTimelineSpans, zoneOf, type Block, type Composition, type CutTransitionEffect, type ShotFilter, type TransitionDirection, type VideoShot } from './composition-core';
+import { CUT_TRANSITION_EFFECTS, DIRECTIONAL_TRANSITIONS, MAX_TRANSITION_SEC, PLACE_ANCHORS, SHOT_TREATMENTS, ZOOM_PRESETS, ZOOM_SCALE_MAX, ZOOM_SCALE_MIN, applyBlockPlacement, blockId, blockKind, isSentenceCaption, placementFramingNotes, renderBlock, shotFilterCss, videoShotTimelineSpans, zoneOf, type Block, type Composition, type CutTransitionEffect, type ShotFilter, type TransitionDirection, type VideoShot } from './composition-core';
 import { applyCanvasDocumentEdit } from './canvas-document-edit';
 import { applyCaptionDocumentEdit } from './caption-document-edit';
 import { applyCompositionLayout, applyShotFramingInput, canvasSizeFollowingFirstVideo, canvasSizeFromInput } from './editing-primitives';
@@ -49,6 +51,9 @@ import { isDisplayTextFontId } from './display-text-presets';
 import { resolveWebFontReference, webFontCatalogHint } from './font-library';
 import { planScriptCaptionSegments, splitScriptLines } from './script-captions';
 import { narrationRowMarks } from './trim';
+import { applyWordDecorations, type WordDecorationPatch } from './word-decorations';
+import { phraseWordIndexes, rowWords } from './caption-highlights';
+import { joinWords } from './caption-fx';
 import { applyWordMasks, groupWordsByAsset, maskWordsSummary, parseMaskWordsInput } from './word-masks-tool';
 import { applyComponentValues, blockPropsReadback, componentSchemaOf, componentValuesView, componentPropertyInputError } from './component-schema';
 import { isComponentPropertyValue } from './component-property-input';
@@ -372,10 +377,6 @@ export function splitClipsV3(document: EditorDocumentV2, input: Input): AgentTim
     if (!primaryNarrativeClips(next).length) return fail('no story-spine footage to split');
     const points = normalizeNarrationSplitPoints(spinePoints, STUDIO_AGENT_EXECUTION_LIMITS.splitPointsPerCall);
     if ('error' in points) return fail(points.error);
-    const placements = editorDocumentRenderPlan(next).narrative.map((entry) => ({ shotId: entry.clipId, startSec: entry.startSec, endSec: entry.endSec }));
-    const shots = projectNarrativeShots(next);
-    const blocked = points.find((atSec) => splitBlockedByTransition(shots, atSec, placements));
-    if (blocked != null) return fail(`cannot split at frame ${secondsToTimelineFrames(blocked, fps)}: it is inside a transition region`);
     const command = applyNarrationSplitCommands(next, points);
     if (!command.ok) return fail(command.error.message, { code: command.error.code, trackIds: command.error.trackIds });
     next = command.document;
@@ -686,35 +687,49 @@ export function addTransitionV3(document: EditorDocumentV2, input: Input): Agent
   const allowed = [...CUT_TRANSITION_EFFECTS.map(({ id }) => id), 'none'];
   if (input.effect !== undefined && !allowed.includes(input.effect as string)) return fail('invalid_value', { path: 'effect', value: input.effect, allowed });
   if (input.direction !== undefined && !['up', 'down', 'left', 'right'].includes(input.direction as string)) return fail('invalid_value', { path: 'direction', value: input.direction, allowed: ['up', 'down', 'left', 'right'] });
-  if (!isFrame(input.atFrame, 1)) return fail('atFrame must be an integer frame ≥ 1');
+  if (input.atFrame !== undefined && !isFrame(input.atFrame)) return fail('atFrame must be an integer frame ≥ 0');
   if (input.durationFrames !== undefined && !isFrame(input.durationFrames, 1)) return fail('durationFrames must be an integer frame count ≥ 1');
   const fps = document.canvas.fps;
-  const at = framesToSec(input.atFrame, fps);
-  const placements = editorDocumentRenderPlan(document).narrative.map((entry) => ({ shotId: entry.clipId, startSec: entry.startSec, endSec: entry.endSec }));
-  const spans = videoShotTimelineSpans(projectNarrativeShots(document), placements);
-  const boundaryIndex = spans.findIndex((span, idx) => idx >= 1 && Math.abs(span.editedStart - at) < 0.3);
-  if (boundaryIndex < 1) {
-    const boundaries = spans.slice(1).map((span) => secondsToTimelineFrames(span.editedStart, fps));
-    return fail('atFrame must be a cut between two story-spine clips', { fix: `Cut boundaries are at frames ${boundaries.join(', ') || '(none: one clip only)'}.`, boundaries });
+  const list = document.timeline.transitions ?? [];
+  const maxFrames = maxTransitionFrames(fps);
+  const direction = string(input.direction) as TransitionDirection | undefined;
+  const id = string(input.id);
+  if (id) {
+    const current = list.find((transition) => transition.id === id);
+    if (!current) return fail('unknown_id', { path: 'id', value: id, fix: `Transitions are ${list.map((transition) => transition.id).join(', ') || '(none)'} — read get_state transitions.` });
+    if (input.effect === 'none') {
+      const removed = applyEditorCommand(document, { type: 'transitions.remove', ids: [id] });
+      if (!removed.ok) return fail(removed.error.message, { code: removed.error.code });
+      return mutation(removed.document, `Removed transition ${id}`, [removed.receipt], { id, removed: true });
+    }
+    const patch = {
+      ...(string(input.effect) ? { effect: input.effect as CutTransitionEffect } : {}),
+      ...(direction ? { direction } : {}),
+      ...(isFrame(input.atFrame) ? { startFrame: input.atFrame } : {}),
+      ...(isFrame(input.durationFrames, 1) ? { durationFrames: Math.min(maxFrames, input.durationFrames) } : {}),
+    };
+    const patched = applyEditorCommand(document, { type: 'transitions.patch', id, patch });
+    if (!patched.ok) return fail(patched.error.message, { code: patched.error.code, fix: 'Transitions may not overlap; move it or shorten it.' });
+    const next = patched.document.timeline.transitions!.find((transition) => transition.id === id)!;
+    return mutation(patched.document, `Updated transition ${id}: ${next.effect} at frames ${next.startFrame}–${next.startFrame + next.durationFrames}`, [patched.receipt], { id, frames: [next.startFrame, next.startFrame + next.durationFrames], effect: next.effect, ...(next.direction ? { direction: next.direction } : {}) });
   }
-  const self = spans[boundaryIndex]!;
-  const previous = spans[boundaryIndex - 1]!;
-  const remove = input.effect === 'none';
-  const effect: CutTransitionEffect = string(input.effect) && input.effect !== 'none' ? (input.effect as CutTransitionEffect) : (self.clip.transIn?.effect ?? 'fade');
-  const direction = (string(input.direction) as TransitionDirection | undefined) ?? self.clip.transIn?.direction;
-  const durationSec = Math.min(MAX_TRANSITION_SEC, Math.max(0.2, isFrame(input.durationFrames, 1) ? framesToSec(input.durationFrames, fps) : (self.clip.transIn?.durationSec ?? 1)));
-  const transition = remove
-    ? undefined
-    : { prevId: previous.clip.id, effect, durationSec, ...(DIRECTIONAL_TRANSITIONS.has(effect) && direction ? { direction } : {}) };
-  const patched = patchNarrativeClips(document, [{ clipId: self.clip.id, patch: { properties: { transIn: transition } } }]);
-  if (!patched.ok) return fail(patched.error.message, { code: patched.error.code, trackIds: patched.error.trackIds });
-  const atFrame = secondsToTimelineFrames(self.editedStart, fps);
-  return mutation(
-    patched.document,
-    remove ? `Removed the transition at frame ${atFrame}` : `Set a ${effect} transition at frame ${atFrame} (${r1(durationSec)}s)`,
-    [patched.receipt],
-    { atFrame, clipId: self.clip.id, ...(remove ? { removed: true } : { effect, durationFrames: secondsToTimelineFrames(durationSec, fps), ...(transition?.direction ? { direction: transition.direction } : {}) }) },
-  );
+  if (!isFrame(input.atFrame)) return fail('missing_field', { path: 'atFrame', fix: 'Pass atFrame to add a transition there, or id to change one.' });
+  if (input.effect === 'none' || !string(input.effect)) return fail('missing_field', { path: 'effect', fix: 'Pass an effect to add; to remove one pass its id with effect "none".' });
+  const effect = input.effect as CutTransitionEffect;
+  const startFrame = transitionSlotAt(list, input.atFrame);
+  const following = list.filter((transition) => transition.startFrame >= startFrame).sort((left, right) => left.startFrame - right.startFrame)[0];
+  const wanted = isFrame(input.durationFrames, 1) ? Math.min(maxFrames, input.durationFrames) : Math.round(DEFAULT_TRANSITION_SEC * fps);
+  const durationFrames = Math.min(wanted, following ? following.startFrame - startFrame : Number.POSITIVE_INFINITY);
+  if (durationFrames < 1) return fail(`no room for a transition at frame ${input.atFrame}`, { fix: 'Transitions there fill the lane; pick another frame or shorten a neighbour.' });
+  // Deterministic from the document, so a server replay mints the same id.
+  const taken = new Set(list.map((transition) => transition.id));
+  let ordinal = list.length + 1;
+  while (taken.has(`transition_${ordinal}`)) ordinal += 1;
+  const newId = `transition_${ordinal}`;
+  const inserted = applyEditorCommand(document, { type: 'transitions.insert', transition: { id: newId, startFrame, durationFrames, effect, ...(direction && DIRECTIONAL_TRANSITIONS.has(effect) ? { direction } : {}) } });
+  if (!inserted.ok) return fail(inserted.error.message, { code: inserted.error.code });
+  const note = startFrame !== input.atFrame ? ` (queued after the transition already at frame ${input.atFrame})` : '';
+  return mutation(inserted.document, `Added a ${effect} transition at frames ${startFrame}–${startFrame + durationFrames}${note}`, [inserted.receipt], { id: newId, frames: [startFrame, startFrame + durationFrames], effect });
 }
 
 export function setCanvasV3(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
@@ -851,7 +866,7 @@ export function setTextsV3(document: EditorDocumentV2, input: Input): AgentTimel
 
 /* =============================== captions =============================== */
 
-const CAPTION_FIX = 'Pass on, preset/yPct/scale/font, source, script, corrections, translations or relayout.';
+const CAPTION_FIX = 'Pass on, preset/yPct/scale/font, source, script, corrections, highlights, translations or relayout.';
 
 /** The transcript a caption edit writes to: an explicit asset, the speech clip named (on any
  * lane), the source the caption layer is bound to, else the spine. */
@@ -893,6 +908,47 @@ function captionCorrections(document: EditorDocumentV2, rows: unknown[], clipId:
   });
   if (!edit.ok) return fail(edit.error.message, { code: edit.error.code, trackIds: edit.error.trackIds });
   return mutation(edit.document, `Corrected ${items.length} caption row${items.length === 1 ? '' : 's'}`, edit.receipts);
+}
+
+/** Key words by transcript row and exact phrase: the same row numbers as corrections, so a model
+ *  never copies long word ids. A phrase missing from its row fails the whole call with the row text. */
+function captionHighlights(document: EditorDocumentV2, highlights: Input, clipId: string | undefined): AgentTimelineOutcome {
+  const color = highlights.clear === true ? 'off' : highlights.color === undefined ? 'style' : highlights.color;
+  if (color !== 'style' && color !== 'off' && !(typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color))) {
+    return fail('invalid_value', { path: 'highlights.color', value: color, fix: 'Use "style" (follow the caption highlight color), #RRGGBB, or "off" to clear.' });
+  }
+  const owner = captionTranscriptOwner(document, clipId, string(highlights.assetId));
+  if (isOutcome(owner)) return owner;
+  const { assetId } = owner;
+  const segments = document.semantics.transcripts[assetId] as AsrSegment[] | undefined;
+  if (!segments?.length) return fail('no transcript for this source — read get_transcript first');
+  const patch: WordDecorationPatch = color === 'off' ? { highlight: null, color: null } : { highlight: 'color', color: color === 'style' ? null : color as string };
+  const targets: { sentenceIndex: number; wordIndex: number }[] = [];
+  if (highlights.clear === true) {
+    segments.forEach((segment, sentenceIndex) => Object.keys(segment.wordDecorations ?? {}).forEach((key) => targets.push({ sentenceIndex, wordIndex: Number(key) })));
+  } else {
+    const items = (Array.isArray(highlights.items) ? highlights.items : []).map((row) => { const value = (row ?? {}) as Input; return { index: Number(value.index), text: typeof value.text === 'string' ? value.text.trim() : '' }; });
+    if (!items.length || items.some((item) => !Number.isInteger(item.index) || item.index < 0 || !item.text)) {
+      return fail('invalid_value', { path: 'highlights.items', fix: 'items are {index, text}: index is the get_transcript row, text the exact word(s) copied from that row.' });
+    }
+    for (const item of items) {
+      const segment = segments[item.index];
+      if (!segment) return fail(`index out of range: ${item.index} (this transcript has ${segments.length} rows)`);
+      const found = phraseWordIndexes(rowWords(segment), item.text);
+      if (!found) return fail('invalid_value', { path: 'highlights.items', value: item, fix: `"${item.text}" is not in row ${item.index}: ${JSON.stringify(segment.captionText ?? segment.text)}. Copy the words exactly from that row.` });
+      for (const wordIndex of found) targets.push({ sentenceIndex: item.index, wordIndex });
+    }
+  }
+  if (!targets.length) return { ok: true, summary: 'No key words to clear' };
+  const next = applyWordDecorations(segments, targets, patch);
+  const edit = applyCaptionDocumentEdit({
+    document: { ...document, semantics: { ...document.semantics, transcripts: { ...document.semantics.transcripts, [assetId]: next } } },
+    mainTranscript: null,
+    clipTranscripts: {},
+  });
+  if (!edit.ok) return fail(edit.error.message, { code: edit.error.code, trackIds: edit.error.trackIds });
+  const n = targets.length;
+  return mutation(edit.document, color === 'off' ? `Cleared highlight on ${n} word${n === 1 ? '' : 's'}` : `Highlighted ${n} key word${n === 1 ? '' : 's'} (${color === 'style' ? 'caption highlight color' : color})`, edit.receipts);
 }
 
 function captionTranslations(document: EditorDocumentV2, translations: Input, clipId: string | undefined): AgentTimelineOutcome {
@@ -968,8 +1024,16 @@ export function setCaptionsV3(document: EditorDocumentV2, input: Input): AgentTi
 
   const preset = string(input.preset);
   if (preset && !CAPTION_PRESETS.some((entry) => entry.id === preset)) return fail('invalid_value', { path: 'preset', value: preset, allowed: CAPTION_PRESETS.map((entry) => entry.id) });
+  if (input.animation !== undefined && !isCaptionAnimation(input.animation)) return fail('invalid_value', { path: 'animation', value: input.animation, allowed: CAPTION_ANIMATION_IDS });
   const yPct = captionYPctForCanvas(next.canvas, input.yPct);
   const patch: Record<string, number | string | undefined> = {};
+  if (isCaptionAnimation(input.animation)) patch.animation = input.animation;
+  else if (preset) patch.animation = captionAnimationId(next.appearance.captionStyle ?? {});
+  if (typeof input.highlightColor === 'string') {
+    if (input.highlightColor === 'animation') patch.emphasis = undefined;
+    else if (/^#[0-9a-f]{6}$/i.test(input.highlightColor)) patch.emphasis = input.highlightColor;
+    else return fail('invalid_value', { path: 'highlightColor', value: input.highlightColor, fix: 'Pass #RRGGBB, or "animation" for the animation\'s own color.' });
+  }
   if (yPct != null) patch.yPct = yPct;
   if (isFiniteNumber(input.scale)) patch.scale = input.scale;
   if (typeof input.font === 'string') {
@@ -1057,6 +1121,10 @@ export function setCaptionsV3(document: EditorDocumentV2, input: Input): AgentTi
     next = edit.document; receipts.push(...edit.receipts);
     summaries.push('Re-laid captions for the current canvas and font size');
   }
+  if (input.highlights !== undefined) {
+    const failed = take(captionHighlights(next, (input.highlights ?? {}) as Input, clipId));
+    if (failed) return failed;
+  }
   if (!summaries.length) return fail('nothing_to_change', { fix: CAPTION_FIX });
   return mutation(next, summaries.join('; '), receipts, Object.keys(data).length ? data : undefined);
 }
@@ -1086,7 +1154,18 @@ const asAsr = (segments: TranscriptSegment[] | undefined): AsrSegment[] => deseg
 /** Narrative sources with cut marks, or a plain per-asset listing: source seconds either way. */
 function formatTranscript(document: EditorDocumentV2, assetIds: readonly string[]): string {
   const rd = (x: number) => Math.round(x * 10) / 10;
-  const copy = (segment: TranscriptSegment) => segment.captionText && segment.captionText !== segment.text ? `${segment.captionText} 〈ASR: ${segment.text}〉` : segment.text;
+  // Key words read back as highlights.items would write them: runs of marked words from the row.
+  const keys = (segment: TranscriptSegment) => {
+    const marks = (segment as AsrSegment).wordDecorations ?? {};
+    const runs: string[][] = [];
+    rowWords(segment as AsrSegment).forEach((word, index) => {
+      if (!marks[String(index)]?.highlight) return;
+      if (marks[String(index - 1)]?.highlight && runs.length) runs[runs.length - 1]!.push(word.text);
+      else runs.push([word.text]);
+    });
+    return runs.length ? ` 〈key: ${runs.map((run) => joinWords(run)).join(' · ')}〉` : '';
+  };
+  const copy = (segment: TranscriptSegment) => (segment.captionText && segment.captionText !== segment.text ? `${segment.captionText} 〈ASR: ${segment.text}〉` : segment.text) + keys(segment);
   const narrativeShots = projectNarrativeShots(document);
   const spine = primaryNarrativeClips(document);
   const parts: string[] = [];
@@ -1156,8 +1235,13 @@ export function getTranscriptV3(document: EditorDocumentV2, input: Input): Agent
       ...(Number.isInteger(input.offset) ? { offset: input.offset as number } : {}),
       ...(Number.isInteger(input.limit) ? { limit: input.limit as number } : {}),
     };
-    const listed = listDocumentAddressedWords(document, query);
-    if ('error' in listed) return fail(listed.error);
+    const found = listDocumentAddressedWords(document, query);
+    if ('error' in found) return fail(found.error);
+    // Key words read back in set_captions.highlights vocabulary: "style" or the fixed #RRGGBB.
+    const listed = { ...found, words: found.words.map((word) => {
+      const decoration = (document.semantics.transcripts[word.assetId]?.[word.sentenceIndex] as AsrSegment | undefined)?.wordDecorations?.[String(word.wordIndex)];
+      return decoration?.highlight ? { ...word, highlight: decoration.color ?? 'style' } : word;
+    }) };
     return {
       ok: true,
       summary: `Listed ${listed.words.length} transcript words`,

@@ -192,11 +192,15 @@ describe('v3 round trips: written value → document → get_state → delta', (
     expect(t.clip('broll')!.audio).toMatchObject({ clipId: 'bed' });
   });
 
-  it('add_transition: the transition reads back on the clip it leads into, in frames', () => {
+  it('add_transition: the transition reads back on the transition lane, in frames', () => {
     const t = trip(project(), 'add_transition', { atFrame: 300, effect: 'fade', durationFrames: 15 });
-    expect(t.data).toMatchObject({ atFrame: 300, clipId: 'spine-b', effect: 'fade', durationFrames: 15 });
-    expect(t.clip('spine-b')).toMatchObject({ transitionIn: { effect: 'fade', durationFrames: 15 } });
-    expect(t.touched('spine-b')).toMatchObject({ transitionIn: { effect: 'fade' } });
+    expect(t.data).toMatchObject({ id: 'transition_1', frames: [300, 315], effect: 'fade' });
+    expect(t.state.transitions).toEqual([{ id: 'transition_1', frames: [300, 315], effect: 'fade' }]);
+    const queued = trip(t.document, 'add_transition', { atFrame: 305, effect: 'glitch', durationFrames: 10 });
+    expect(queued.data).toMatchObject({ frames: [315, 325] }); // after the one already at that frame
+    expect(queued.delta?.transitions?.map((transition) => transition.frames)).toEqual([[300, 315], [315, 325]]);
+    const rippled = trip(queued.document, 'ripple_delete_ranges', { ranges: [[0, 30]] });
+    expect(rippled.delta?.transitions?.map((transition) => transition.frames)).toEqual([[270, 285], [285, 295]]);
   });
 
   it('set_canvas: the new size reads back and the delta reports from → to', () => {

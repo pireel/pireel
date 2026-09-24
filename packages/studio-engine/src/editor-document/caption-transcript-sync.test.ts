@@ -33,4 +33,13 @@ describe('caption edits survive a transcript replacement', () => {
     expect(result.document.semantics.transcripts.cam![0]).toMatchObject({ sub: 'Hello everyone' });
     expect(result.document.semantics.transcripts.cam![1]).toMatchObject({ cueSubs: { '1:1': 'about translation' } });
   });
+
+  it('transcripts.set with discardEdits lands the fresh recognition as-is', () => {
+    const document = emptyEditorDocumentV2({ fps: 30 });
+    document.semantics.transcripts = { cam: edited };
+    const result = applyDocumentTransaction(document, { id: 'tx1', origin: 'user', ops: [{ op: 'transcripts.set', input: { transcripts: { cam: spoken }, discardEdits: true } }] }, { projectId: 'p' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.document.semantics.transcripts.cam).toEqual(spoken);
+  });
 });

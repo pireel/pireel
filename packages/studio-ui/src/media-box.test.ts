@@ -88,6 +88,19 @@ describe('media canvas box', () => {
     });
   });
 
+  it('scales continuously when the pointer moves diagonally against the box', () => {
+    // Growing on x while shrinking on y used to flip between the two axis factors mid-drag.
+    const box = { x: 0.2, y: 0.3, w: 0.5, h: 0.3 };
+    let previous = scaleMediaCanvasBox(box, 0, -0.03, 1, 1, 0.06, 0.06, 9 / 16).w;
+    for (let step = 1; step <= 60; step += 1) {
+      // y stays pulled in (shrink) while x grows past it: the old axis pick flipped 0.9 → 1.1 here.
+      const next = scaleMediaCanvasBox(box, step * 0.002, -0.03, 1, 1, 0.06, 0.06, 9 / 16);
+      expect(Math.abs(next.w - previous)).toBeLessThan(0.01);
+      expect(next.w / next.h).toBeCloseTo(box.w / box.h, 2);
+      previous = next.w;
+    }
+  });
+
   it('resizes each side independently while anchoring the opposite edge', () => {
     expect(resizeMediaCanvasBox({ x: 0.2, y: 0.3, w: 0.4, h: 0.2 }, -0.1, 'l')).toEqual({
       x: 0.1, y: 0.3, w: 0.5, h: 0.2,

@@ -1,3 +1,4 @@
+import { isCaptionAnimation } from '../../caption-animations';
 import { CAPTION_PRESETS } from '../../caption-presets';
 import type { CaptionStyle } from '../../composition-core';
 import type { EditorDocumentV2 } from '../types';
@@ -11,6 +12,9 @@ const presetIds = new Set(CAPTION_PRESETS.map((preset) => preset.id));
 function patchError(patch: CaptionStylePatch): string | null {
   if (!Object.keys(patch).length) return 'Caption style patch is empty.';
   if (patch.preset != null && !presetIds.has(patch.preset)) return `Unknown caption preset: ${patch.preset}`;
+  if (patch.animation != null && !isCaptionAnimation(patch.animation)) return `Unknown caption animation: ${patch.animation}`;
+  if (patch.sub?.animation != null && !isCaptionAnimation(patch.sub.animation)) return `Unknown subtitle animation: ${patch.sub.animation}`;
+  if (patch.emphasis != null && !/^#[0-9a-f]{6}$/i.test(patch.emphasis)) return `Caption highlight color must be #RRGGBB: ${patch.emphasis}`;
   if (patch.on != null && typeof patch.on !== 'boolean') return 'Caption on must be boolean.';
   for (const key of ['yPct', 'xPct', 'wPct', 'scale', 'hPct'] as const) {
     if (patch[key] != null && !Number.isFinite(patch[key])) return `Caption ${key} must be finite.`;

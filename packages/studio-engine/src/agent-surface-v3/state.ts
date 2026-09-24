@@ -8,6 +8,8 @@
  * caption changes, and notes telling the agent exactly when to re-read. Pure; no I/O.
  */
 import { webFontCatalog } from '../font-library';
+import { captionAnimationId } from '../caption-animations';
+import { documentCaptionStyle } from '../editor-document/caption-state';
 import { componentSchemaOf, componentValuesView, type ComponentValueType } from '../component-schema';
 import { clipPropertyDefaults, effectiveAudioClipProperties } from './clip-properties';
 
@@ -58,6 +60,8 @@ export interface V3CaptionsView {
   cueCount: number;
   source?: unknown;
   preview?: string;
+  /** The current look in set_captions vocabulary (read back what you would write). */
+  style: { preset: string; animation: string; highlightColor?: string; yPct: number; scale: number; font?: string };
 }
 
 export interface V3StateView {
@@ -65,11 +69,24 @@ export interface V3StateView {
   durationFrames: number;
   frame?: { id: string };
   tracks: V3TrackView[];
+  /** The transition lane: effects placed by time, independent of cuts (add_transition vocabulary). */
+  transitions?: V3TransitionView[];
   /** `library: true` marks project-library media not yet placed on any track — the footage to start from. */
   assets: Array<{ id: string; kind: string; label?: string; durationSec?: number; hasAudio?: boolean; library?: true }>;
   semantics: { primaryTrackId: string; sceneIds: string[] };
   /** Library fonts every text surface accepts (set_texts/set_captions font ids, compose_component fontFamily); sans/serif/mono/local:<family> need no catalog. */
   fonts: Array<{ id: string; zh: string; en: string }>;
+}
+
+export interface V3TransitionView { id: string; frames: [number, number]; effect: string; direction?: string }
+
+export function transitionsView(document: EditorDocumentV2): V3TransitionView[] {
+  return (document.timeline.transitions ?? []).map((transition) => ({
+    id: transition.id,
+    frames: [transition.startFrame, transition.startFrame + transition.durationFrames],
+    effect: transition.effect,
+    ...(transition.direction ? { direction: transition.direction } : {}),
+  }));
 }
 
 export interface V3Delta {
@@ -82,6 +99,9 @@ export interface V3Delta {
   createdTracks?: Array<{ id: string; type: string; role?: string; order: number }>;
   removedTrackIds?: string[];
   captions?: { cueCount: number; change: 'relaid' | 'shifted' | 'removed' | 'restyled' };
+  /** The transition lane after the edit, when any transition was added, moved, shortened or removed
+   *  (ripple edits carry the lane along). Same shape as get_state transitions. */
+  transitions?: V3TransitionView[];
   durationFrames?: [number, number];
   canvas?: { from: [number, number]; to: [number, number] };
   notes?: string[];
@@ -159,12 +179,6 @@ function zoomView(zoom: unknown, clipStartFrame: number, fps: number): Record<st
   };
 }
 
-/** The cut transition into a story-spine clip, as add_transition wrote it. */
-function transitionView(transIn: unknown, fps: number): Record<string, unknown> | undefined {
-  const t = transIn as { effect?: string; durationSec?: number; direction?: string } | undefined;
-  if (!t || !t.effect) return undefined;
-  return { effect: t.effect, durationFrames: Math.round((t.durationSec ?? 1) * fps), ...(t.direction ? { direction: t.direction } : {}) };
-}
 
 /** Render one clip in the v3 shape. Linked audio partners are folded by the caller. */
 export function renderV3Clip(clip: TimelineClip, trackId: string, trackRole?: string, fps = 30): V3ClipView {
@@ -176,10 +190,8 @@ export function renderV3Clip(clip: TimelineClip, trackId: string, trackRole?: st
       view.assetId = clip.assetId;
       view.source = [round3(clip.sourceInSec), round3(clip.sourceOutSec)];
       if (clip.box) view.box = clip.box;
-      const { transIn, zoom, ...rest } = (clip.properties ?? {}) as Record<string, unknown>;
+      const { transIn: _legacyTransition, zoom, ...rest } = (clip.properties ?? {}) as Record<string, unknown>;
       Object.assign(view, soundView(stripDefaults(rest, NARRATIVE_DEFAULTS), fps));
-      const transitionIn = transitionView(transIn, fps);
-      if (transitionIn) view.transitionIn = transitionIn;
       const zoomed = zoomView(zoom, clip.startFrame, fps);
       if (zoomed) view.zoom = zoomed;
       stripIdentityGeometry(view, clip.mediaFraming);
@@ -252,11 +264,20 @@ function captionsView(document: EditorDocumentV2, track: EditorTrack): V3Caption
     })
     .filter(Boolean)
     .join(' … ');
+  const style = documentCaptionStyle(document);
   return {
     on: cues.length > 0,
     cueCount: cues.length,
     ...(document.semantics.managedCaptionSource ? { source: document.semantics.managedCaptionSource } : {}),
     ...(preview ? { preview: preview.slice(0, 120) } : {}),
+    style: {
+      preset: style.preset,
+      animation: captionAnimationId(style),
+      ...(style.emphasis ? { highlightColor: style.emphasis } : {}),
+      yPct: Math.round(style.yPct * 10) / 10,
+      scale: style.scale,
+      ...(style.font ? { font: style.font } : {}),
+    },
   };
 }
 
@@ -339,6 +360,7 @@ export function renderV3State(
     durationFrames: documentDurationFrames(document),
     ...(document.appearance.frameId ? { frame: { id: document.appearance.frameId } } : {}),
     tracks,
+    ...(document.timeline.transitions?.length ? { transitions: transitionsView(document) } : {}),
     assets: Object.values(document.assets).map((asset) => ({
       id: asset.id,
       kind: asset.kind,
@@ -449,5 +471,8 @@ export function documentDelta(before: EditorDocumentV2, after: EditorDocumentV2)
   if (removedTracks.length || createdTracks.length) notes.push('Track set changed — track order values may have moved; re-read get_state only before a manage_tracks order call, not for clip edits.');
   if (delta.captions && delta.captions.change !== 'restyled') notes.push('Caption cues were re-derived; never address individual cues.');
   if (notes.length) delta.notes = notes;
+  const lane0 = JSON.stringify(transitionsView(before));
+  const lane1 = transitionsView(after);
+  if (JSON.stringify(lane1) !== lane0) delta.transitions = lane1;
   return Object.keys(delta).length ? delta : null;
 }

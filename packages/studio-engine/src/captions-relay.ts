@@ -9,7 +9,7 @@
  * tier as build-blocks).
  */
 
-import { wordsFromText } from './caption-fx';
+import { PUNCT_END, alnumCount, segmentTokens, wordsFromText } from './caption-fx';
 import { getCaptionPreset } from './caption-presets';
 import { type CaptionStyle, DEFAULT_CAPTION_WIDTH_PCT } from './composition-core';
 import { type Block, type VideoShot, isSentenceCaption } from './composition';
@@ -104,7 +104,9 @@ function mapTranscriptSegsToEditedWith(segs: AsrSegment[], place: WordPlacement,
         const placed = place(w);
         if (!placed) return [];
         // A text mask swaps the caption copy only; timing stays the spoken word's.
-        return [{ ...w, text: maskedWordText(s, wi, w.text), si: (w as CueWord).si ?? wi, start: placed.start, end: placed.end }];
+        const sourceIndex = (w as CueWord).si ?? wi;
+        return [{ ...w, text: maskedWordText(s, sourceIndex, w.text), si: sourceIndex, start: placed.start, end: placed.end,
+          ...(s.wordDecorations?.[sourceIndex] ? { decoration: s.wordDecorations[sourceIndex] } : {}) }];
       });
     if (!words.length) continue;
     const groups: (typeof words)[] = [[words[0]!]];
@@ -145,23 +147,49 @@ export function mappedCaptionSegs(shots: VideoShot[], narr: AsrSegment[] | null,
 }
 
 /** Split a sentence/fragment translation into per-cue pieces, proportional to each cue's share of
- *  the source words, on the translation's own token boundaries (same tokenizer as captions). The
- *  second line follows the cue rhythm 1:1 — approximate by nature (word order diverges across
- *  languages); translation still happens at sentence level upstream for quality. */
+ *  the source text, on the translation's own word boundaries (same tokenizer as captions). A break
+ *  close to the proportional point prefers to follow punctuation, and every cue gets at least one
+ *  word when there are enough. Approximate by nature (word order diverges across languages); the
+ *  translation itself is made per sentence upstream. */
 export function distributeSub(sub: string, weights: number[]): string[] {
-  const tokens = wordsFromText(sub, 0, 1).map((w) => w.text);
-  const total = weights.reduce((a, b) => a + b, 0);
+  const tokens = segmentTokens(sub);
+  const total = weights.reduce((a, b) => a + Math.max(0, b), 0);
+  if (!weights.length) return [];
   if (!tokens.length || !total) return weights.map(() => '');
+  if (weights.length === 1) return [joinWords(tokens)];
+  const size = tokens.map((token) => Math.max(1, alnumCount(token)));
+  const sizeTotal = size.reduce((a, b) => a + b, 0);
+  const cumulative: number[] = [0];
+  for (const value of size) cumulative.push(cumulative[cumulative.length - 1]! + value);
+  const minEach = tokens.length >= weights.length ? 1 : 0;
+  const tolerance = (sizeTotal / weights.length) * 0.3;
   const out: string[] = [];
-  let used = 0;
+  let from = 0;
   let acc = 0;
-  for (let i = 0; i < weights.length; i++) {
-    acc += weights[i]!;
-    const upto = i === weights.length - 1 ? tokens.length : Math.round((acc / total) * tokens.length);
-    out.push(joinWords(tokens.slice(used, Math.max(used, upto))));
-    used = Math.max(used, upto);
+  for (let i = 0; i < weights.length - 1; i++) {
+    acc += Math.max(0, weights[i]!);
+    const target = (acc / total) * sizeTotal;
+    // Short of words, the leading cues take one each and the trailing cues stay empty.
+    const lowest = from + (minEach || (from < tokens.length ? 1 : 0));
+    const highest = Math.max(lowest, tokens.length - minEach * (weights.length - 1 - i));
+    let best = Math.max(lowest, Math.min(highest, from));
+    let bestScore = Infinity;
+    for (let cut = lowest; cut <= highest; cut++) {
+      const distance = Math.abs(cumulative[cut]! - target);
+      const afterPunct = cut > 0 && PUNCT_END.test(tokens[cut - 1]!) && distance <= tolerance;
+      const score = afterPunct ? distance - tolerance : distance;
+      if (score < bestScore) { bestScore = score; best = cut; }
+    }
+    out.push(joinWords(tokens.slice(from, best)));
+    from = best;
   }
+  out.push(joinWords(tokens.slice(from)));
   return out;
+}
+
+/** A cue's share of its sentence: letters and digits it shows (punctuation weighs nothing). */
+function cueWeight(words: readonly { text: string }[]): number {
+  return Math.max(1, words.reduce((total, word) => total + alnumCount(word.text), 0));
 }
 
 interface LockedCueRange {
@@ -288,17 +316,18 @@ export function displayCuesFromMappedSegs(
   const sentencePieces = new Map<string, string[]>();
   const sentenceKey = (gRef: CueRef | undefined) => `${gRef?.src ?? ''}|${gRef?.seg ?? -1}`;
   const chunksBySentence = new Map<string, number[]>();
-  for (const entry of prepared) chunksBySentence.set(sentenceKey(entry.gRef), [...(chunksBySentence.get(sentenceKey(entry.gRef)) ?? []), ...entry.chunks.map((c) => c.length)]);
+  for (const entry of prepared) chunksBySentence.set(sentenceKey(entry.gRef), [...(chunksBySentence.get(sentenceKey(entry.gRef)) ?? []), ...entry.chunks.map(cueWeight)]);
   const out: DisplayCue[] = [];
   const consumed = new Map<string, number>();
   for (const { g, gRef, srcSeg, chunks } of prepared) {
     const subFresh = !srcSeg?.subLang || !opts?.subLang || srcSeg.subLang === opts.subLang;
     const key = sentenceKey(gRef);
-    // A translation stored for this exact fragment range wins for the fragment; otherwise the
+    // A translation stored for this fragment's range (a sentence the edit split apart is translated
+    // per uninterrupted stretch) wins for the fragment; otherwise the
     // sentence translation is distributed once over all the sentence's cues.
     const fragmentSub = subFresh ? srcSeg?.cueSubs?.[`${gRef?.w0}:${gRef?.w1}`] : undefined;
     let pieces: string[] | undefined;
-    if (fragmentSub) pieces = distributeSub(fragmentSub, chunks.map((c) => c.length));
+    if (fragmentSub) pieces = distributeSub(fragmentSub, chunks.map(cueWeight));
     else if (subFresh && srcSeg?.sub) {
       if (!sentencePieces.has(key)) sentencePieces.set(key, distributeSub(srcSeg.sub, chunksBySentence.get(key) ?? []));
       const offset = consumed.get(key) ?? 0;

@@ -47,6 +47,7 @@ export const TIMELINE_METRICS: Record<TimelineDensity, TimelineMetrics> = {
   },
 };
 export const TIMELINE_DENSITY_STORAGE_KEY = 'pireel.studio.timelineDensity';
+export const TIMELINE_COLLAPSED_STORAGE_KEY = 'pireel.studio.timelineCollapsed';
 export function isTimelineDensity(value: unknown): value is TimelineDensity {
   return value === 'comfortable' || value === 'compact';
 }

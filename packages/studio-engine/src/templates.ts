@@ -1,3 +1,4 @@
+import { DEFAULT_HIGHLIGHT, animatedCaptionPreset } from './caption-animations';
 /**
  * Built-in template render impls + registration (importing this file registers them;
  * the side effect is triggered via the './composition' barrel). Selectors are always
@@ -25,7 +26,7 @@ import { t } from './i18n';
 import { DEFAULT_CAPTION_WIDTH_PCT } from './composition-core';
 import { BASE_CAPTION_FONT_PX, CAPTION_WEIGHT_BOLD, CAPTION_WEIGHT_REGULAR } from './caption-presets';
 import { latinJoin, wordsFromText } from './caption-fx';
-import { captionFontCss as presetFontCss, captionLineSegments } from './caption-layout-metrics';
+import { captionFontCss as presetFontCss, captionLineSegments, captionStackRows, captionStackScale } from './caption-layout-metrics';
 import {
   displayTextFontCss,
   displayTextPreset,
@@ -213,15 +214,17 @@ function renderCaption(slots: Slots, id: string): Rendered {
     ...(typeof slots.strokeWidth === 'number' && Number.isFinite(slots.strokeWidth) ? { strokeWidth: Math.min(8, Math.max(0, slots.strokeWidth)) } : {}),
     ...(typeof slots.bold === 'boolean' ? { bold: slots.bold as boolean } : {}),
     ...(typeof slots.font === 'string' ? { font: slots.font as string } : {}),
+    ...(typeof slots.emphasis === 'string' ? { emphasis: slots.emphasis as string } : {}),
   };
   const subOv = {
+    ...(typeof slots.subAnimation === 'string' ? { animation: slots.subAnimation } : {}),
     ...(typeof slots.subPreset === 'string' ? { preset: slots.subPreset as string } : {}),
     ...(typeof slots.subColor === 'string' ? { color: slots.subColor as string } : {}),
     ...(slots.subBg === null || typeof slots.subBg === 'string' ? { bg: slots.subBg as string | null } : {}),
     ...(typeof slots.subBold === 'boolean' ? { bold: slots.subBold as boolean } : {}),
     ...(typeof slots.subFont === 'string' ? { font: slots.subFont as string } : {}),
   };
-  return renderPresetCaption(words, getCaptionPreset(str(slots.preset) || undefined), yPct, xPct, wPct, scale, id, hPct, str(slots.sub) || undefined, subStyle, canvasW, ov, subOv, slots.cue === true);
+  return renderPresetCaption(words, animatedCaptionPreset(getCaptionPreset(str(slots.preset) || undefined), typeof slots.animation === 'string' ? slots.animation : undefined), yPct, xPct, wPct, scale, id, hPct, str(slots.sub) || undefined, subStyle, canvasW, ov, subOv, slots.cue === true);
 }
 
 /**
@@ -247,37 +250,67 @@ function renderCaption(slots: Slots, id: string): Rendered {
  *     env has no canvas → deterministic glyph-class estimate table fallback.
  */
 
-function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xPct: number, wPct: number, scale: number, id: string, hPct = 0, sub?: string, subStyle?: { yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number }, canvasW = 1080, ov: { color?: string; bg?: string | null; bold?: boolean; font?: string; accentColor?: string; strokeColor?: string; strokeWidth?: number } = {}, subOv: { preset?: string; color?: string; bg?: string | null; bold?: boolean; font?: string } = {}, cue = false): Rendered {
+/** Timeline-owned motion stays deterministic when seeking and during export. */
+function captionEntrance(selector: string, motion: CaptionPreset['motion'], at: number, duration: number): string | null {
+  if (!motion || motion === 'typewriter') return null;
+  const from = motion === 'rise' ? { opacity: 0, y: 20 }
+    : motion === 'pop' ? { opacity: 0, scale: 0.82 }
+    : motion === 'slide' ? { opacity: 0, x: -24 }
+    : motion === 'blur' ? { opacity: 0, filter: 'blur(8px)' }
+    : { opacity: 0 };
+  const to = { opacity: 1, ...(motion === 'rise' ? { y: 0 } : motion === 'pop' ? { scale: 1 } : motion === 'slide' ? { x: 0 } : motion === 'blur' ? { filter: 'blur(0px)' } : {}),
+    duration: Math.max(0.02, Math.min(0.24, duration * 0.4)), ease: motion === 'pop' ? 'back.out(1.5)' : 'power2.out', immediateRender: false };
+  return `tl.fromTo('${selector}', ${JSON.stringify(from)}, ${JSON.stringify(to)}, ${n(at)});`;
+}
+
+function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xPct: number, wPct: number, scale: number, id: string, hPct = 0, sub?: string, subStyle?: { yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number }, canvasW = 1080, ov: { color?: string; bg?: string | null; bold?: boolean; font?: string; emphasis?: string; accentColor?: string; strokeColor?: string; strokeWidth?: number } = {}, subOv: { animation?: string; preset?: string; color?: string; bg?: string | null; bold?: boolean; font?: string } = {}, cue = false): Rendered {
   // Effective preset = preset + user overrides (text color / plate). Reassigning p keeps every existing
   // use (segmentation budget, pill, css, karaoke revert color) consistent with the overridden look.
   if (ov.color != null || ov.bg !== undefined) p = { ...p, ...(ov.color != null ? { text: ov.color } : {}), ...(ov.bg !== undefined ? { bg: ov.bg ?? undefined } : {}) };
   if (ov.accentColor) p = { ...p, emphasis: ov.accentColor, decoColor: ov.accentColor };
+  // Highlight override recolors whatever the animation emphasizes with (word color or its marker/underline).
+  if (ov.emphasis && p.mode === 'emphasis') p = { ...p, ...(p.emphasis || !p.deco ? { emphasis: ov.emphasis } : {}), ...(p.deco ? { decoColor: ov.emphasis } : {}) };
+  // Key words without a chosen color take the style's highlight color (manual color > style > animation).
+  const styleHighlight = ov.emphasis ?? p.emphasis ?? p.decoColor ?? DEFAULT_HIGHLIGHT;
   const { start } = span2(words);
   // scale = FONT-SIZE coefficient (user-set: scaling adjusts font size, not a region transform) —
   // size/plate padding/decoration all lay out from the scaled font size, text truly reflows, not a bitmap-style scale of the whole block
   const fs = Math.max(10, Math.round(BASE_CAPTION_FONT_PX * scale));
   // Regular by default — bold ONLY via the user's toggle (presets carry no weight)
-  const mainWeight = ov.bold ? CAPTION_WEIGHT_BOLD : CAPTION_WEIGHT_REGULAR;
+  const mainWeight = ov.bold === true ? CAPTION_WEIGHT_BOLD : ov.bold === false ? CAPTION_WEIGHT_REGULAR : p.weight ?? CAPTION_WEIGHT_REGULAR;
   const deco = p.mode === 'emphasis' && p.deco ? `<span class="deco"></span>` : '';
   // Both modes split into visual lines at the CURRENT font size (same px-accurate budget). The
   // difference is presentation: derived cue blocks STACK their lines (all visible, one plate per
   // line — standard subtitle look; at scale 1 a cue fits one line so the stack is a single line);
   // legacy sentence blocks keep the old one-line-at-a-time rotation.
   const segs = captionLineSegments(words, p, wPct, scale, canvasW, { bold: ov.bold, font: ov.font });
+  const stack = p.stack;
+  // Resting color per word (karaoke reverts to it): a stacked row may carry its own color.
+  const restColor: string[] = [];
+  let rowCount = 0;
   let wIdx = 0;
-  const segHtml = segs
-    .map((g, si) => {
-      const spans = g
-        .map((w, k) => {
-          const i = wIdx++;
-          const sp = k < g.length - 1 && latinJoin(w.text, g[k + 1]!.text) ? ' sp' : '';
-          return `<span class="w${sp}" id="${id}-w${i}">${deco}<span class="t">${escapeHtml(w.text)}</span></span>`;
-        })
-        .join('');
-      return `<div class="cap-line" id="${id}-s${si}">${spans}</div>`;
+  const wordSpans = (g: FxWord[], color: string) => g
+    .map((w, k) => {
+      const i = wIdx++;
+      restColor[i] = color;
+      const sp = k < g.length - 1 && latinJoin(w.text, g[k + 1]!.text) ? ' sp' : '';
+      const decoration = w.decoration;
+      const mark = decoration?.highlight === 'underline' ? ' word-underline' : decoration?.highlight === 'color' ? ' word-color' : '';
+      const hl = decoration?.color && /^#[0-9a-fA-F]{6}$/.test(decoration.color) ? decoration.color : styleHighlight;
+      const highlightStyle = mark ? ` style="--word-highlight:${hl}"` : '';
+      return `<span class="w${sp}${mark}" id="${id}-w${i}"${highlightStyle}>${deco}<span class="t">${escapeHtml(w.text)}</span></span>`;
     })
     .join('');
-  const pill = p.bg ? `background:${p.bg}; padding:${Math.round(fs * 0.22)}px ${Math.round(fs * 0.42)}px; border-radius:${Math.round(fs * 0.28)}px;` : '';
+  const rowColor = (k: number) => (stack?.colors?.length && ov.color == null ? stack.colors[k % stack.colors.length]! : p.text);
+  const segHtml = segs
+    .map((g, si) => {
+      if (!stack) return `<div class="cap-line" id="${id}-s${si}">${wordSpans(g, p.text)}</div>`;
+      const rows = captionStackRows(g, p, wPct, scale, canvasW, { bold: ov.bold, font: ov.font });
+      rowCount = Math.max(rowCount, rows.length);
+      return `<div class="cap-line cap-stacked" id="${id}-s${si}">${rows.map((row, k) => `<div class="cap-row r${k}">${wordSpans(row, rowColor(k))}</div>`).join('')}</div>`;
+    })
+    .join('');
+  const pill = p.bg && !stack?.plates?.length ? `font-size:${fs}px; background:${p.bg}; padding:${Math.round(fs * 0.22)}px ${Math.round(fs * 0.42)}px; border-radius:${Math.round(fs * (p.plateRadiusEm ?? 0.28))}px;${p.plateBorder ? ` border:${p.plateBorder};` : ''}` : '';
   // Bilingual sub-line: full-sentence translation sits directly under the main line (main line
   // bottom anchored at yPct, sub-line top anchored at the same line), visuals follow the preset
   // (same font/plate/shadow, 0.6× size), no per-word animation — the sub-line has no word times.
@@ -287,13 +320,13 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
   // shadow/font all follow the preset. Default (subStyle.yPct unset) = follow directly under the main line.
   // Translation line's visual base: its OWN preset (independent of the main line; ln-clean by default),
   // sub color/bg overrides apply on top.
-  let subP = getCaptionPreset(subOv.preset ?? DEFAULT_SUB_CAPTION_PRESET);
+  let subP = animatedCaptionPreset(getCaptionPreset(subOv.preset ?? DEFAULT_SUB_CAPTION_PRESET), subOv.animation);
   if (subOv.color != null || subOv.bg !== undefined) subP = { ...subP, ...(subOv.color != null ? { text: subOv.color } : {}), ...(subOv.bg !== undefined ? { bg: subOv.bg ?? undefined } : {}) };
   const subScale = subStyle?.scale ?? scale * 0.7;
   const subFs = Math.max(9, Math.round(BASE_CAPTION_FONT_PX * subScale));
   const subW = subStyle?.wPct ?? wPct;
   const subSegs = sub ? captionLineSegments(wordsFromText(sub, 0, 1), subP, subW, subScale, canvasW, { font: subOv.font }) : [];
-  const subPill = subP.bg ? `background:${subP.bg}; padding:${Math.round(subFs * 0.18)}px ${Math.round(subFs * 0.5)}px; border-radius:${Math.round(subFs * 0.28)}px;` : '';
+  const subPill = subP.bg ? `font-size:${subFs}px; background:${subP.bg}; padding:${Math.round(subFs * 0.18)}px ${Math.round(subFs * 0.5)}px; border-radius:${Math.round(subFs * (subP.plateRadiusEm ?? 0.28))}px;${subP.plateBorder ? ` border:${subP.plateBorder};` : ''}` : '';
   const subHtml = sub
     ? `<div class="cap-sub" id="${id}-sub">${subSegs.map((g) => `<div class="cap-sub-line">${g.map((w, k) => `<span${k < g.length - 1 && latinJoin(w.text, g[k + 1]!.text) ? ' class="sp"' : ''}>${escapeHtml(w.text)}</span>`).join('')}</div>`).join('')}</div>`
     : '';
@@ -302,12 +335,26 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
   // anchor/box width/min-height; each line hugs its own text with its own plate.
   // ONE plate around the whole stack (multi-line = a single rounded backdrop, not one strip per line);
   // the stack hugs its widest line (width:auto), so a single-line cue looks exactly like before.
+  const tilt = p.tiltDeg ? ` rotate(${n(p.tiltDeg)}deg)` : '';
   const stackCss = cue
-    ? `\n#${id} .cap-stack { position:absolute; left:${n(xPct)}%; bottom:${n(100 - yPct)}%; transform:translateX(-50%); width:auto; max-width:${n(wPct)}%; display:flex; flex-direction:column; align-items:center; justify-content:center; row-gap:${Math.round(fs * 0.12)}px; pointer-events:auto; ${hPct > 0 ? `min-height:${n(hPct)}%; ` : ''}${pill} }`
+    ? `\n#${id} .cap-stack { position:absolute; left:${n(xPct)}%; bottom:${n(100 - yPct)}%; transform:translateX(-50%)${tilt}; width:auto; max-width:${n(wPct)}%; display:flex; flex-direction:column; align-items:${stack?.align === 'start' ? 'flex-start' : 'center'}; justify-content:center; row-gap:${Math.round(fs * 0.12)}px; pointer-events:auto; ${hPct > 0 ? `min-height:${n(hPct)}%; ` : ''}${pill} }`
     : '';
   const subCss = sub
     ? `\n#${id} .cap-sub { position:absolute; pointer-events:auto; left:${n(subStyle?.xPct ?? xPct)}%; ${subAnchor} transform:translateX(-50%); width:auto; max-width:${n(subW)}%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:${Math.round(subFs * 0.15)}px; ${subStyle?.hPct ? `min-height:${n(subStyle.hPct)}%; ` : ''}${subPill} }
-#${id} .cap-sub-line span.sp { margin-right:${Math.round(subFs * 0.3)}px; }\n#${id} .cap-sub-line span { position:relative; top:-0.04em; flex:none; white-space:nowrap; }\n#${id} .cap-sub-line { display:flex; flex-wrap:nowrap; justify-content:center; align-items:center; max-width:100%; text-align:center; color:${subP.text}; font-family:${presetFontCss(subP, subOv.font)}; font-size:${subFs}px; font-weight:${subOv.bold ? 700 : CAPTION_WEIGHT_REGULAR}; line-height:1.35; ${subP.italic ? 'font-style:italic; ' : ''}${!subP.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8); ' : ''} }`
+#${id} .cap-sub-line span.sp { margin-right:${Math.round(subFs * 0.3)}px; }\n#${id} .cap-sub-line span { position:relative; top:-0.04em; flex:none; white-space:nowrap; }\n#${id} .cap-sub-line { display:flex; flex-wrap:nowrap; justify-content:center; align-items:center; max-width:100%; text-align:center; color:${subP.text}; font-family:${presetFontCss(subP, subOv.font)}; font-size:${subFs}px; font-weight:${subOv.bold === true ? 700 : subOv.bold === false ? CAPTION_WEIGHT_REGULAR : subP.weight ?? CAPTION_WEIGHT_REGULAR}; line-height:1.35; ${subP.italic ? 'font-style:italic; ' : ''}${subP.shadow ? `text-shadow:${subP.shadow}; ` : !subP.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8); ' : ''}${subP.stroke ? `-webkit-text-stroke:${subP.stroke.widthEm}em ${subP.stroke.color}; paint-order:stroke fill; ` : ''} }`
+    : '';
+  const rowCss = stack
+    ? [
+      `#${id} .cap-line.cap-stacked { flex-direction:column; flex-wrap:nowrap; align-items:${stack.align === 'start' ? 'flex-start' : 'center'}; row-gap:${Math.round(fs * (stack.plates?.length ? 0.1 : 0.02))}px; }`,
+      `#${id} .cap-row { display:flex; flex-wrap:nowrap; align-items:center; justify-content:${stack.align === 'start' ? 'flex-start' : 'center'}; max-width:100%; }`,
+      ...Array.from({ length: Math.max(rowCount, stack.maxRows) }, (_, k) => {
+        const rowFs = Math.round(fs * captionStackScale(stack, k));
+        const plate = stack.plates?.length ? stack.plates[k % stack.plates.length]! : null;
+        const shift = stack.staggerEm ? ` transform:translateX(${n((k % 2 ? 1 : -1) * stack.staggerEm)}em);` : '';
+        const plateCss = plate ? ` background:${plate}; padding:${Math.round(rowFs * 0.16)}px ${Math.round(rowFs * 0.36)}px; border-radius:${Math.round(rowFs * (p.plateRadiusEm ?? 0.18))}px;` : '';
+        return `#${id} .cap-row.r${k} {${plateCss}${shift} font-size:${rowFs}px; }\n#${id} .cap-row.r${k} .w { font-size:${rowFs}px; color:${rowColor(k)}; }`;
+      }),
+    ].join('\n')
     : '';
   const decoCss =
     p.deco === 'highlight'
@@ -322,16 +369,25 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
   const css = `
 #${id} .cap-root { position:absolute; inset:0; }
 ${stackCss}
-#${id} .cap-line { ${cue ? 'position:relative; max-width:100%;' : `position:absolute; left:${n(xPct)}%; bottom:${n(100 - yPct)}%; transform:translateX(-50%); transform-origin:center bottom; width:${n(wPct)}%; ${hPct > 0 ? `min-height:${n(hPct)}%; ` : ''}`}display:flex; flex-wrap:nowrap; align-items:center; justify-content:center; pointer-events:auto; ${cue ? '' : pill} }
-#${id} .w { position:relative; top:-0.04em; flex:none; white-space:nowrap; color:${p.text}; font-family:${presetFontCss(p, ov.font)}; font-size:${fs}px; font-weight:${mainWeight}; ${p.italic ? 'font-style:italic;' : ''} line-height:1.2; ${!p.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8);' : ''} }
+#${id} .cap-line { ${cue ? 'position:relative; max-width:100%;' : `position:absolute; left:${n(xPct)}%; bottom:${n(100 - yPct)}%; transform:translateX(-50%)${tilt}; transform-origin:center bottom; width:${n(wPct)}%; ${hPct > 0 ? `min-height:${n(hPct)}%; ` : ''}`}display:flex; flex-wrap:nowrap; align-items:center; justify-content:center; pointer-events:auto; ${cue ? '' : pill} }
+#${id} .w { position:relative; top:-0.04em; flex:none; white-space:nowrap; color:${p.text}; font-family:${presetFontCss(p, ov.font)}; font-size:${fs}px; font-weight:${mainWeight}; ${p.italic ? 'font-style:italic;' : ''}${p.upper ? ' text-transform:uppercase;' : ''}${p.trackingEm ? ` letter-spacing:${n(p.trackingEm)}em;` : ''} line-height:1.2; ${p.shadow ? `text-shadow:${p.shadow};` : !p.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8);' : ''}${p.stroke ? `-webkit-text-stroke:${p.stroke.widthEm}em ${p.stroke.color}; paint-order:stroke fill;` : ''} }
 ${decoCss}
-#${id} .w .t { position:relative; z-index:1; ${ov.strokeWidth ? `-webkit-text-stroke:${n(ov.strokeWidth * scale)}px ${ov.strokeColor ?? '#000000'};paint-order:stroke fill;` : ''} }\n#${id} .w.sp { margin-right:${Math.round(fs * 0.3)}px; }${subCss}`.trim();
+${rowCss}
+#${id} .w .t { position:relative; display:inline-block; z-index:1; ${ov.strokeWidth ? `-webkit-text-stroke:${n(ov.strokeWidth * scale)}px ${ov.strokeColor ?? '#000000'};paint-order:stroke fill;` : ''} }\n#${id} .w.sp { margin-right:${Math.round(fs * 0.3)}px; }\n#${id} .w.word-color .t { color:var(--word-highlight); }\n#${id} .w.word-underline .t { text-decoration:underline; text-decoration-color:var(--word-highlight); text-decoration-thickness:0.09em; text-underline-offset:0.16em; }${subCss}`.trim();
 
   // Legacy segment cycling: all hidden first; each segment enters at its first word's time, and goes
   // dark when the next enters (last segment stays with the block to the end). Enter/exit are hard cuts
   // (set): the fade-in + rise version had a 0.22s semi-transparent gap between sentences that felt like flicker in playback (user-reported).
   // Cue mode has NO cycling — all stacked lines are simply visible; the block window gates on/off.
   const lines: string[] = cue ? [] : [`gsap.set('#${id} .cap-line', { autoAlpha: 0 });`];
+  words.forEach((word, index) => {
+    const at = Math.max(0, word.start - start);
+    if (!p.motion && !p.wordMotion && word.decoration?.animation === 'pop') {
+      lines.push(`tl.fromTo('#${id}-w${index}', { scale:0.72, opacity:0 }, { scale:1, opacity:1, duration:0.22, ease:'back.out(1.8)' }, ${n(at)});`);
+    } else if (!p.motion && !p.wordMotion && word.decoration?.animation === 'rise') {
+      lines.push(`tl.fromTo('#${id}-w${index}', { y:18, opacity:0 }, { y:0, opacity:1, duration:0.26, ease:'power2.out' }, ${n(at)});`);
+    }
+  });
   if (sub) lines.push(`tl.set('#${id}-sub', { autoAlpha: 1 }, 0);`);
   if (!cue) {
     segs.forEach((g, si) => {
@@ -340,6 +396,25 @@ ${decoCss}
       const nxt = segs[si + 1];
       if (nxt) lines.push(`tl.set('#${id}-s${si}', { autoAlpha: 0 }, ${n(Math.max(0, nxt[0]!.start - start))});`);
     });
+  }
+  const captionDuration = Math.max(0.04, words[words.length - 1]!.end - start);
+  if (p.motion === 'typewriter') {
+    lines.push(`gsap.set('#${id} .w', { opacity: 0 });`);
+    words.forEach((word, index) => lines.push(`tl.set('#${id}-w${index}', { opacity: 1 }, ${n(Math.max(0, word.start - start))});`));
+  } else if (cue) {
+    const entrance = captionEntrance(`#${id} .cap-line`, p.motion, 0, captionDuration);
+    if (entrance) lines.push(entrance);
+  } else {
+    segs.forEach((group, index) => {
+      const at = index === 0 ? 0 : Math.max(0, group[0]!.start - start);
+      const entrance = captionEntrance(`#${id}-s${index}`, p.motion, at, group[group.length - 1]!.end - start - at);
+      if (entrance) lines.push(entrance);
+    });
+  }
+  // Translations have no aligned word timings; only their whole-line entrance applies.
+  if (sub) {
+    const entrance = captionEntrance(`#${id} .cap-sub-line`, subP.motion === 'typewriter' ? 'fade' : subP.motion, 0, captionDuration);
+    if (entrance) lines.push(entrance);
   }
   if (p.mode === 'emphasis') {
     const selected = p.id === 'kw-yellow';
@@ -353,10 +428,21 @@ ${decoCss}
         if (p.deco) lines.push(`gsap.set('#${id}-w${i} .deco', { scaleX:1 });`);
         return;
       }
-      if (p.emphasis) {
+      if (p.emphasis && w.decoration?.highlight !== 'color') {
         // Current word color change (karaoke-style: lights up when spoken, reverts after)
         lines.push(`tl.set('#${id}-w${i} .t', { color:'${p.emphasis}' }, ${n(ws)});`);
-        lines.push(`tl.set('#${id}-w${i} .t', { color:'${p.text}' }, ${n(we)});`);
+        lines.push(`tl.set('#${id}-w${i} .t', { color:'${restColor[i] ?? p.text}' }, ${n(we)});`);
+      }
+      if (p.wordMotion) {
+        const target = `#${id}-w${i} .t`;
+        const hold = Math.max(0.02, w.end - w.start);
+        const duration = Math.min(0.12, hold / 2);
+        const peak = p.wordMotion === 'pulse' ? { scale: 1.16 }
+          : p.wordMotion === 'bounce' ? { y: -fs * 0.14 }
+          : { textShadow: `0 0 ${Math.round(fs * 0.25)}px ${p.emphasis ?? p.text}` };
+        const rest = p.wordMotion === 'pulse' ? { scale: 1 } : p.wordMotion === 'bounce' ? { y: 0 } : { textShadow: 'none' };
+        lines.push(`tl.fromTo('${target}', ${JSON.stringify(rest)}, ${JSON.stringify({ ...peak, duration, ease: 'power2.out', immediateRender: false })}, ${n(Math.max(0, ws))});`);
+        lines.push(`tl.to('${target}', ${JSON.stringify({ ...rest, duration, ease: 'power2.in' })}, ${n(Math.max(0, ws + hold - duration))});`);
       }
       if (p.deco) {
         lines.push(`tl.fromTo('#${id}-w${i} .deco', { scaleX:0 }, { scaleX:1, duration:0.12, ease:'power3.out' }, ${n(ws)});`);

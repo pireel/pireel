@@ -19,8 +19,8 @@ describe('standalone bilingual captions', () => {
     const original = task(); const snapshot = structuredClone(original); const document = build(original);
     const result = await translateCaptionTask(original, document, translate(), () => {});
     expect(original).toEqual(snapshot);
-    expect(result.transcript[0]).toMatchObject({ ...original.transcript![0], cueSubs: { '0:1': '你好世界' }, subLang: '中文' });
-    expect(result.document.semantics.transcripts[firstNarrativeAssetId(result.document)!]?.[0]?.cueSubs?.['0:1']).toBe('你好世界');
+    expect(result.transcript[0]).toMatchObject({ ...original.transcript![0], sub: '你好世界', subLang: '中文' });
+    expect(result.document.semantics.transcripts[firstNarrativeAssetId(result.document)!]?.[0]?.sub).toBe('你好世界');
     const html = assembleHtml(projectDocumentToComposition(result.document)).replace(/<[^>]*>/g, '');
     expect(html).toContain('你好世界'); expect(html).toContain('Hello');
   });
@@ -36,10 +36,12 @@ describe('standalone bilingual captions', () => {
     await translateCaptionTask(changedLanguage, build(changedLanguage), service, () => {});
     expect(service).toHaveBeenCalledTimes(2);
   });
-  it('rejects incomplete or duplicate responses atomically and honours cancellation', async () => {
+  it('writes the sentences that came back, refuses an empty run, and honours cancellation', async () => {
     const original = task(); const document = build(original); const snapshot = structuredClone(document);
-    await expect(translateCaptionTask(original, document, async () => [{ index: 0, text: '部分' }], () => {})).rejects.toThrow('不完整');
-    await expect(translateCaptionTask(original, document, async () => [{ index: 0, text: '一' }, { index: 0, text: '二' }], () => {})).rejects.toThrow('不完整');
+    const partial = await translateCaptionTask(original, document, async () => [{ index: 0, text: '部分' }, { index: 0, text: '重复' }], () => {});
+    expect(partial.transcript[0]).toMatchObject({ sub: '部分', subLang: '中文' });
+    expect(partial.transcript[1]?.sub).toBeUndefined();
+    await expect(translateCaptionTask(original, document, async () => [], () => {})).rejects.toThrow('没有返回任何结果');
     expect(document).toEqual(snapshot);
     const service = translate();
     await expect(translateCaptionTask(original, document, service, () => { throw new DOMException('Cancelled', 'AbortError'); })).rejects.toMatchObject({ name: 'AbortError' });

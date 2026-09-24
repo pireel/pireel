@@ -158,7 +158,11 @@ export interface DocumentOpInputs {
   /** One shared agent timeline tool call, run by the pure executor both surfaces already use. */
   'agent.timeline': { tool: string; input: Record<string, unknown> };
   /** Replace stored transcripts for the given assets verbatim (word masks, corrected words). */
-  'transcripts.set': { transcripts: Readonly<Record<string, readonly AsrSegment[]>> };
+  'transcripts.set': {
+    transcripts: Readonly<Record<string, readonly AsrSegment[]>>;
+    /** A fresh recognition the user asked for: drop caption edits instead of carrying them onto unchanged sentences. */
+    discardEdits?: boolean;
+  };
   /** Merge metadata onto one registered asset (probed duration, spoken text of synthesised speech…). */
   'assets.patch': { assetId: string; label?: string; metadata?: Partial<EditorMediaAsset['metadata']> };
   'director.setPlan': { plan: DirectorPlan };
@@ -345,9 +349,12 @@ const handlers: { [N in DocumentOpName]: Handler<N> } = {
   'agent.timeline': (document, input) => fromAgentOutcome(document, runAgentTimelineTool(document, input.tool, input.input)),
   'transcripts.set': (document, input) => {
     const transcripts = { ...document.semantics.transcripts };
-    // A replacement never discards the document's caption edits on unchanged sentences: the copy
-    // comes from a recognizer or a runtime ref and knows nothing about translations or cue edits.
-    for (const [assetId, segments] of Object.entries(input.transcripts)) transcripts[assetId] = carryCaptionEdits(transcripts[assetId], segments);
+    // A replacement keeps the document's caption edits on unchanged sentences (the copy comes from a
+    // recognizer or a runtime ref and knows nothing about translations or cue edits), unless the
+    // user asked to start over.
+    for (const [assetId, segments] of Object.entries(input.transcripts)) {
+      transcripts[assetId] = input.discardEdits ? [...segments] : carryCaptionEdits(transcripts[assetId], segments);
+    }
     return { ok: true, document: { ...document, semantics: { ...document.semantics, transcripts } } };
   },
   'assets.patch': (document, input) => {

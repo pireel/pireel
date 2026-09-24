@@ -1,6 +1,39 @@
 /* Studio workbench styles that live outside Tailwind utilities.
  * Import from the shell's Tailwind entry, after '@pireel/ui/theme.css'. */
 
+/* Native drag selection and the retained toolbar selection are one visual state.
+ * Scope more tightly than the hosted shell's accent-red ::selection rule. */
+.studio-scope [data-transcript-editor] {
+  --transcript-selection-bg: #b5d5fc;
+  --transcript-selection-fg: #152131;
+}
+.studio-scope [data-transcript-text],
+.studio-scope [data-transcript-text] * {
+  -webkit-user-select: text;
+  user-select: text;
+}
+.studio-scope [data-transcript-text] [data-transcript-section-heading],
+.studio-scope [data-transcript-text] [data-transcript-section-heading] *,
+.studio-scope [data-transcript-text] [data-transcript-pause],
+.studio-scope [data-transcript-text] [data-transcript-pause] * {
+  -webkit-user-select: none;
+  user-select: none;
+}
+.studio-scope [data-transcript-text]::selection,
+.studio-scope [data-transcript-text] *::selection {
+  background: var(--transcript-selection-bg);
+  color: var(--transcript-selection-fg);
+}
+.studio-scope [data-transcript-token]:hover,
+.studio-scope [data-transcript-token][data-transcript-active='true'] {
+  background: color-mix(in srgb, var(--color-ink) 10%, transparent);
+}
+.studio-scope [data-transcript-token][data-transcript-selected='true'],
+.studio-scope [data-transcript-pause][data-transcript-selected='true'] {
+  background: var(--transcript-selection-bg);
+  color: var(--transcript-selection-fg);
+}
+
 /* 时间轴缩放滑块:2px 细线轨道 + 小圆 thumb（无边框/无胶囊容器,见 studio 走带） */
 .zoom-range {
   -webkit-appearance: none;
@@ -80,4 +113,29 @@
 @keyframes dubbing-language-drift { to { transform: translateX(-50%); } }
 @media (prefers-reduced-motion: reduce) {
   .dubbing-language-row { animation: none; }
+}
+/* Caption motion thumbnails use CSS only; the actual video uses the shared GSAP renderer. */
+@keyframes caption-demo-fade { 0%, 100% { opacity: 0; } 22%, 78% { opacity: 1; } }
+@keyframes caption-demo-rise { 0%, 100% { opacity: 0; transform: translateY(10px); } 25%, 78% { opacity: 1; transform: translateY(0); } }
+@keyframes caption-demo-pop { 0%, 100% { opacity: 0; transform: scale(.8); } 24% { opacity: 1; transform: scale(1.06); } 34%, 78% { opacity: 1; transform: scale(1); } }
+@keyframes caption-demo-slide { 0%, 100% { opacity: 0; transform: translateX(-15px); } 25%, 78% { opacity: 1; transform: translateX(0); } }
+@keyframes caption-demo-blur { 0%, 100% { opacity: 0; filter: blur(5px); } 25%, 78% { opacity: 1; filter: blur(0); } }
+@keyframes caption-demo-reveal { 0%, 10% { clip-path: inset(0 100% 0 0); } 80%, 100% { clip-path: inset(0); } }
+@keyframes caption-demo-pulse { 0%, 20%, 75%, 100% { transform: scale(1); } 35%, 60% { transform: scale(1.16); } }
+@keyframes caption-demo-bounce { 0%, 20%, 75%, 100% { transform: translateY(0); } 35%, 60% { transform: translateY(-4px); } }
+@keyframes caption-demo-glow { 0%, 100% { text-shadow: none; } 40%, 65% { text-shadow: 0 0 6px #72d7ff; } }
+@keyframes caption-demo-emphasis { 0%, 20%, 85%, 100% { opacity: .45; } 35%, 70% { opacity: 1; } }
+.caption-motion-line { display: inline-block; }
+.caption-motion-preview[data-motion='fade'] .caption-motion-line { animation: caption-demo-fade 2s infinite; }
+.caption-motion-preview[data-motion='rise'] .caption-motion-line { animation: caption-demo-rise 2s infinite; }
+.caption-motion-preview[data-motion='pop'] .caption-motion-line { animation: caption-demo-pop 2s infinite; }
+.caption-motion-preview[data-motion='slide'] .caption-motion-line { animation: caption-demo-slide 2s infinite; }
+.caption-motion-preview[data-motion='blur'] .caption-motion-line { animation: caption-demo-blur 2s infinite; }
+.caption-motion-preview[data-motion='typewriter'] .caption-motion-line { animation: caption-demo-reveal 2s steps(3) infinite; }
+.caption-motion-preview[data-motion='pulse'] [data-caption-sample-word] { animation: caption-demo-pulse 2s infinite; }
+.caption-motion-preview[data-motion='bounce'] [data-caption-sample-word] { animation: caption-demo-bounce 2s infinite; }
+.caption-motion-preview[data-motion='glow'] [data-caption-sample-word] { animation: caption-demo-glow 2s infinite; }
+.caption-motion-preview:is([data-motion='karaoke'],[data-motion='underline'],[data-motion='marker']) [data-caption-sample-word] { animation: caption-demo-emphasis 2s infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .caption-motion-preview .caption-motion-line, .caption-motion-preview [data-caption-sample-word] { animation: none !important; }
 }

@@ -36,7 +36,7 @@ import type { CaptionLineRow } from './captions-panel';
 import { inspectCaptionDocument } from './caption-document-state';
 import { emphasizeCaptionDocument } from './caption-emphasis-operation';
 import { captionTranscriptsByAsset, captionTranscriptsFromDocument, captionTranslationSources } from './caption-transcript-bridge';
-import { lineTranslationUnits } from './caption-translation-transaction';
+import { sentenceTranslationUnits } from './caption-translation-transaction';
 import { deriveCaptionLineRows } from './caption-line-rows';
 import { captionTranslationKey, captionTranslationOps, translateCaptionUnits } from './caption-translation-operation';
 import { transcriptInputsFor, type DocumentOpInputs } from '@pireel/studio-engine/document-transaction';
@@ -63,7 +63,7 @@ export interface CaptionsOpsDeps {
   commit: DocumentCommitter['commit'];
   ensureShots: (c: Composition) => VideoShot[];
   stepAsr: () => Promise<AsrSegment[]>;
-  refreshAsr: () => Promise<AsrSegment[]>;
+  refreshAsr: (report?: (text: string) => void, opts?: { discardEdits?: boolean }) => Promise<AsrSegment[]>;
   ensureClipTranscripts: () => Promise<void>;
   postPreview: (msg: Record<string, unknown>) => void;
   applyT: (v: number) => void;
@@ -340,8 +340,8 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       main: resolveCaptionStyle(comp),
       sub: resolveSubCaptionStyle(comp),
       bilingualOn: !!resolveCaptionStyle(comp).sub?.lang,
-      onMainPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined; font?: string | undefined }) => setCaptionStyle(patch),
-      onSubPatch: (patch: { preset?: string | undefined; scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined; font?: string | undefined; lang?: string | undefined }) =>
+      onMainPatch: (patch: { animation?: CaptionStyle['animation']; scale?: number; emphasis?: string | undefined; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined; font?: string | undefined }) => setCaptionStyle(patch),
+      onSubPatch: (patch: { animation?: CaptionStyle['animation']; preset?: string | undefined; scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined; font?: string | undefined; lang?: string | undefined }) =>
         setCaptionStyle({ sub: { ...(compRef.current.captionStyle?.sub ?? {}), ...patch } }),
     },
     rows: captionLineRows.map((row) => ({ ...row, ...(row.words && resolveCaptionStyle(comp).preset === 'kw-yellow' ? { emphasisWords: row.words.map((word) => ({ text: word.text, selected: word.emphasis === true })) } : {}) })),
@@ -527,12 +527,15 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
         }
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
-      const segments = await refreshAsr();
+      const segments = await refreshAsr(undefined, { discardEdits: true });
       await ensureClipTranscripts();
       if (!segments.length && noticeWhenSourceHasNoAudio()) return;
       // The transcript refs changed; let the relay fold them in before regenerating the boundaries.
       await new Promise((resolve) => setTimeout(resolve, 0));
       const result = relayoutCaptions();
+      // The fresh transcript carries no translations, so the translation line turns off with them.
+      const sub = compRef.current.captionStyle?.sub;
+      if (result.ok && sub?.lang) setCaptionStyle({ sub: { ...sub, lang: undefined } });
       if (result.ok) toast.success(t('captions.reextractDone'));
     } catch {
       toast.error(t('workbench.transcriptExtractionFailedTry'));
@@ -564,11 +567,9 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     try {
       await ensureClipTranscripts(); // translate insert sources too, don't produce half-done bilingual
       const sources = sourcesFor();
-      // Translate SENTENCES as they play, each written as its on-screen lines joined by a line mark:
-      // the translator reads one whole sentence (not a line out of context, not hundreds of cue
-      // rows) and answers with the same marks, so which words land on which line is its call, not
-      // a word-count split. The sentence is the transcript row the result is written back to.
-      const units = lineTranslationUnits(deriveCaptionLineRows(documentRef.current, compRef.current, sources.main, sources.clips));
+      // Translate whole SENTENCES as they play: the translator reads one sentence at a time and the
+      // result is stored per sentence; the caption layout spreads it over that sentence's lines.
+      const units = sentenceTranslationUnits(deriveCaptionLineRows(documentRef.current, compRef.current, sources.main, sources.clips));
       if (!units.length) {
         toast.error(t('workbench.noTranscriptShort'));
         return;
@@ -576,15 +577,17 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       const sourceKey = captionTranslationKey(units);
       const writes = await translateCaptionUnits(units, target, tr);
       // One transaction through the same tool every entry uses (chat, MCP, this panel): clear the
-      // old bilingual layer, then write each source. A missing row, a sentence whose line marks did
-      // not come back, or a vanished source lands nothing: a wrong answer is refused, not patched.
+      // old bilingual layer, then write each source. Sentences that came back empty stay untranslated
+      // and are reported; a vanished source or captions edited mid-translation land nothing.
       const currentSources = sourcesFor();
-      const currentUnits = lineTranslationUnits(deriveCaptionLineRows(documentRef.current, compRef.current, currentSources.main, currentSources.clips));
+      const currentUnits = sentenceTranslationUnits(deriveCaptionLineRows(documentRef.current, compRef.current, currentSources.main, currentSources.clips));
       if (captionTranslationKey(currentUnits) !== sourceKey) throw new Error('Caption content or layout changed during translation');
-      const ops = captionTranslationOps(compRef.current, writes, target);
+      const ops = captionTranslationOps(compRef.current, writes.writes, target);
       const landed = commit(ops, { origin: 'user' });
       if (!landed.ok) throw new Error(editorErrorMessage(landed.error));
-      toast.success(t('workbench.generatedLangTranslations', { lang: target }) + (isCaptionsOn(compRef.current) ? '' : t('workbench.enableCaptionsShowThem')));
+      const note = isCaptionsOn(compRef.current) ? '' : t('workbench.enableCaptionsShowThem');
+      if (writes.missing.length) toast.warn(t('workbench.translationPartial', { lang: target, n: writes.missing.length }) + note);
+      else toast.success(t('workbench.generatedLangTranslations', { lang: target }) + note);
     } catch (e) {
       console.warn('[captions] translation failed', e);
       toast.error(t('workbench.translationFailedTryAgain'));

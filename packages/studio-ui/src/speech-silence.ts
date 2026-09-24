@@ -12,7 +12,7 @@ import { decodeVideoAudio, toMono } from './audio-decode';
 const ANALYSIS_RATE = 48_000;
 const FRAME_SAMPLES = 480; // RNNoise contract: 10 ms at 48 kHz.
 const YIELD_EVERY_FRAMES = 200;
-const DEFAULT_MINIMUM_PAUSE_SEC = 0.5;
+const DEFAULT_MINIMUM_PAUSE_SEC = 0.4;
 const DEFAULT_SPEECH_PADDING_SEC = 0.15;
 const DEFAULT_BRIDGE_GAP_SEC = 0.05;
 const VOICE_PROBABILITY_THRESHOLD = 0.35;

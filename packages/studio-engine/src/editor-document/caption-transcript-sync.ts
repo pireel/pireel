@@ -8,10 +8,9 @@ function sameTranscript(left: readonly AsrSegment[] | undefined, right: readonly
   return left === right || canonicalJson(left ?? []) === canonicalJson(right);
 }
 
-/** The translation the document owns on a transcript segment: whole-sentence, per-cue, and its
- * language. Cue text edits and removals are deliberately not here: re-extracting captions is a new
- * set (see caption-document-edit), while a translation of unchanged words is still the translation. */
-const CAPTION_EDIT_KEYS = ['sub', 'cueSubs', 'subLang'] as const;
+/** Reuse translation and selected-word styling when the spoken sentence is unchanged. Cue copy
+ * edits and removals are deliberately separate: re-extracting captions creates a new cue layout. */
+const CAPTION_EDIT_KEYS = ['sub', 'cueSubs', 'subLang', 'wordDecorations'] as const;
 
 /**
  * Carry the document's translations over to a replacement transcript. A transcript arrives again

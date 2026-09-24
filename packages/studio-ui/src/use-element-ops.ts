@@ -96,10 +96,11 @@ export function useElementOps(deps: ElementOpsDeps) {
   };
   /** History card "insert": re-scope the id then land at the playhead (the same asset can be inserted multiple times, selectors don't collide).
    *  If there's an empty component block waiting to be filled (elementTargetRef recorded by aiFillBlock), prefer filling it — keeping its time window/box/track. */
-  const insertGeneratedElement = (el: GenElementResult, prompt: string, atSec?: number) => {
+  const insertGeneratedElement = (el: GenElementResult, prompt: string, atSec?: number, durationSec?: number) => {
     // Kit elements skip the whole HTML insertion pipeline (offscreen measurement, cq-ization,
     // token baking): the block stores props and the component computes sizes from its real box.
     if (el.kit) {
+      if (atSec != null) applyT(Math.max(0, atSec));
       insertKitBlock(`kit:${el.kit.component}`, el.kit.props);
       return;
     }
@@ -162,6 +163,7 @@ export function useElementOps(deps: ElementOpsDeps) {
     }
     const newId = blockId('cst');
     const at = Math.max(0, Math.round((atSec ?? tRef.current) * 100) / 100);
+    const dur = durationSec && durationSec > 0 ? Math.round(durationSec * 100) / 100 : 3;
     // Only with a box are there selection frame / move / resize handles (a boxless block can't show a border, so the user can't adjust it after dragging into the canvas)
     const nb: Block = {
       id: newId,
@@ -173,8 +175,8 @@ export function useElementOps(deps: ElementOpsDeps) {
         ...(el.presetVersion ? { presetVersion: el.presetVersion } : {}),
       },
       startSec: at,
-      durationSec: 3,
-      trackIndex: freeTrack(compRef.current.blocks, at, 3),
+      durationSec: dur,
+      trackIndex: freeTrack(compRef.current.blocks, at, dur),
       label: el.label || prompt.slice(0, 12),
       box: geom.box,
     };

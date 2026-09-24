@@ -7,7 +7,9 @@
  * update live through direct DOM/message channels; canonical state still commits once on release.
  */
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { PREVIEW_STAGE_VERTICAL_GUTTER_PX } from './preview-stage-geometry';
 import { RotateCw } from 'lucide-react';
 import { type CaptionStyle, BASE_CAPTION_FONT_PX, getCaptionPreset } from '@pireel/studio-engine/composition';
 import { t } from './i18n';
@@ -16,6 +18,9 @@ import { startPointerDrag } from './drag-shell';
 export const BOX_SELECTION_OUTSET_PX = 6;
 
 /** Purely visual breathing room around a block; its center stays fixed so drag/rotate geometry is unchanged. */
+/** Room the rotate line + knob need below a box. */
+const ROTATE_ROOM_PX = 46;
+
 export function boxSelectionRect(
   box: { x: number; y: number; w: number; h: number },
   stageW: number,
@@ -82,9 +87,39 @@ export function BoxEditOverlay({
   // White-fill outlined dots/bars: readable on both light and dark frames
   const knob = 'pointer-events-auto absolute rounded-full border-2 border-accent bg-white shadow';
   const selectionRect = boxSelectionRect(box, stageW, stageH, outset);
+  // The toolbar lives on <body>: the preview column clips its overflow, so a toolbar inside it would be
+  // cut off under the header for a box at the stage top. It tracks the box's screen rect every frame
+  // (moves / resizes / rotation write the box DOM directly, without a React render).
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
+  const setRoot = (element: HTMLDivElement | null) => {
+    rootRef.current = element;
+    if (typeof overlayRef === 'function') overlayRef(element);
+    else if (overlayRef) (overlayRef as React.MutableRefObject<HTMLDivElement | null>).current = element;
+  };
+  const hasToolbar = !!toolbar;
+  useEffect(() => {
+    if (!hasToolbar) return;
+    let frame = 0;
+    const follow = () => {
+      const root = rootRef.current;
+      const bar = toolbarRef.current;
+      if (root && bar) {
+        const rect = root.getBoundingClientRect();
+        bar.style.left = `${Math.round(rect.left + rect.width / 2 - bar.offsetWidth / 2)}px`;
+        bar.style.top = `${Math.round(Math.max(4, rect.top - bar.offsetHeight - 8))}px`;
+        bar.style.visibility = 'visible';
+      }
+      frame = requestAnimationFrame(follow);
+    };
+    frame = requestAnimationFrame(follow);
+    return () => cancelAnimationFrame(frame);
+  }, [hasToolbar]);
+  // A box near the stage bottom keeps its rotate knob inside (the preview only has a thin gutter below).
+  const rotateInside = stageH - (selectionRect.top + selectionRect.height) < ROTATE_ROOM_PX - PREVIEW_STAGE_VERTICAL_GUTTER_PX;
   return (
     <div
-      ref={overlayRef}
+      ref={setRoot}
       className="pointer-events-none absolute z-30"
       style={{
         ...selectionRect,
@@ -95,17 +130,22 @@ export function BoxEditOverlay({
     >
       <div className={`absolute inset-0 ring-2 ring-accent/80 ${outset === 0 ? '' : 'rounded-md'}`} />
       {bodyMove && <div className="pointer-events-auto absolute inset-0 cursor-move" onPointerDown={onMovePointerDown} />}
-      {toolbar && (
+      {toolbar && createPortal(
         <div
-          className="pointer-events-auto absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2"
+          ref={toolbarRef}
+          data-cap-keep
+          data-block-selection-keep
+          className="pointer-events-auto fixed z-[200]"
+          style={{ left: 0, top: 0, visibility: 'hidden' }}
           onPointerDown={(event) => event.stopPropagation()}
         >
           {toolbar}
-        </div>
+        </div>,
+        document.body,
       )}
       {/* A blue line + rotate handle attached below center (drag to rotate around the center, live) */}
-      {onRotatePointerDown && <div className="pointer-events-none absolute left-1/2 top-full flex -translate-x-1/2 flex-col items-center">
-        <div className="bg-accent w-px" style={{ height: 22 }} />
+      {onRotatePointerDown && <div className={`pointer-events-none absolute left-1/2 flex -translate-x-1/2 flex-col items-center ${rotateInside ? 'bottom-1.5' : 'top-full'}`}>
+        {!rotateInside && <div className="bg-accent w-px" style={{ height: 22 }} />}
         <button
           type="button"
           onPointerDown={onRotatePointerDown}

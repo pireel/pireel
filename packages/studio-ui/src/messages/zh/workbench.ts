@@ -1,4 +1,7 @@
 export const WORKBENCH_ZH: Record<string, string> = {
+  "workbench.chat": "Chat",
+  "workbench.editingMode": "编辑模式",
+  "workbench.backToProjects": "返回项目列表",
   "displayText.title": "文字",
   "displayText.add": "添加文字",
   "displayText.addAtPlayhead": "在播放头添加文字",
@@ -214,6 +217,8 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.localVideoUseTrack":
     "本地视频请拖到时间轴插入;画布画中画暂不支持本地视频文件",
   "workbench.ratioCustom": "自定义",
+  "workbench.collapseTimeline": "收起时间轴",
+  "workbench.expandTimeline": "展开时间轴",
   "workbench.ratioFollowSource": "自适应",
   "workbench.followSourceUnavailable": "先添加一个有尺寸信息的视频片段",
   "workbench.couldNotGenerateCaptions": "没能生成字幕(口播稿可能是空的)",
@@ -353,6 +358,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.framingChangedName": "已把取景换成「{name}」",
   "workbench.generatedBlockFailedChecks": "生成的动态图形没通过检查:{message}",
   "workbench.generatedLangTranslations": "已生成{lang}译文",
+  "workbench.translationPartial": "已生成{lang}译文，{n} 句未翻译，可重新翻译",
   "workbench.generating": "生成中",
   "workbench.geometryPass": "几何遍:",
   "workbench.geometryPassPct": "几何分析 {pct}%",
@@ -696,4 +702,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.timelineCompact": "紧凑时间轴",
   "workbench.timelineCompactOn": "紧凑时间轴已开启，轨道更矮，给画面留出更多空间",
   "workbench.timelineCompactOff": "切换为紧凑时间轴，缩小轨道高度",
+  "workbench.transitionsTab": "转场",
+  "workbench.transitionLane": "转场轨",
+  "workbench.noRoomForTransition": "播放头处已排满转场，没有空位了",
 };

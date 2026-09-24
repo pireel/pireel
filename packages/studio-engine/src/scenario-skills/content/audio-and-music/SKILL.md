@@ -114,12 +114,14 @@ a mistake, not emphasis.
 
 ## Transitions: `add_transition`
 
-A hard cut is the default and is usually the strongest rhythm. Add a transition only where the boundary
+A hard cut is the default and is usually the strongest rhythm. Add a transition only where the moment
 communicates a real change of time, place, chapter, source or emotional mode — not to soften a jump
 cut inside one speech (fix that with framing or B-roll instead).
 
-- `add_transition {atFrame, effect, durationFrames}` at an existing boundary between two story-spine
-  clips; `effect:"none"` removes.
+- `add_transition {atFrame, effect, durationFrames?}` places one on the transition lane at any frame:
+  spanning a story-spine cut it hands the footage over there; elsewhere the effect plays on the running
+  picture as a beat. Change or remove one by its `id` from `get_state` transitions (`effect:"none"`
+  removes). Transitions never overlap; a new one queues after any already at that frame.
 - Duration **0.5–1 s** (max 4 s). Longer only for a deliberate dreamy or chapter beat.
 - One style family per video: `fade` / `fadeblack` for time and chapters; `directional` /
   `directionalwipe` (with `direction`) for place changes; `crosszoom` for an energy jump; `circleopen` /

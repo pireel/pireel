@@ -274,7 +274,7 @@ function spokenWordCount(document: EditorDocumentV2, clip: SpeechTimelineClip): 
   }, 0);
 }
 
-function selectedSpeechClips(document: EditorDocumentV2, selection: CaptionSourceSelection): SpeechTimelineClip[] {
+export function selectedSpeechClips(document: EditorDocumentV2, selection: CaptionSourceSelection = document.semantics.managedCaptionSource ?? { mode: 'auto' }): SpeechTimelineClip[] {
   if (selection.mode === 'auto') return dominantTimelineSpeechTrack(document)?.clips ?? [];
   if (selection.mode === 'track') {
     const track = document.timeline.tracks.find((candidate) => candidate.id === selection.trackId);

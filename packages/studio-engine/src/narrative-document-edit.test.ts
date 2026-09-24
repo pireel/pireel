@@ -68,8 +68,8 @@ describe('native narrative structure edits', () => {
     };
     const track = document.timeline.tracks.find((candidate) => candidate.role === 'primaryNarrative')!;
     track.clips = [
-      { id: 'talk', kind: 'narrative', assetId: 'video', startFrame: 0, durationFrames: 60, enabled: true, sourceInSec: 0, sourceOutSec: 2, properties: { treatment: 'full' } },
-      { id: 'talk~split-90', kind: 'narrative', assetId: 'video', startFrame: 60, durationFrames: 210, enabled: true, sourceInSec: 3, sourceOutSec: 10, properties: { treatment: 'full' } },
+      { id: 'talk', transcriptSectionId: 'talk', kind: 'narrative', assetId: 'video', startFrame: 0, durationFrames: 60, enabled: true, sourceInSec: 0, sourceOutSec: 2, properties: { treatment: 'full' } },
+      { id: 'talk~split-90', transcriptSectionId: 'talk', kind: 'narrative', assetId: 'video', startFrame: 60, durationFrames: 210, enabled: true, sourceInSec: 3, sourceOutSec: 10, properties: { treatment: 'full' } },
     ];
     document.semantics.scenes = [{ id: 'scene', clipIds: ['talk', 'talk~split-90'] }];
     document.timeline.tracks.push({

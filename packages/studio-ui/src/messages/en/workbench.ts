@@ -1,4 +1,7 @@
 export const WORKBENCH_EN: Record<string, string> = {
+  "workbench.chat": "Chat",
+  "workbench.editingMode": "Editing mode",
+  "workbench.backToProjects": "Back to projects",
   "displayText.title": "Text",
   "displayText.add": "Add text",
   "displayText.addAtPlayhead": "Add text at playhead",
@@ -228,6 +231,8 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.localVideoUseTrack":
     "Drop local videos on the timeline — stage picture-in-picture does not support local video files yet",
   "workbench.ratioCustom": "Custom",
+  "workbench.collapseTimeline": "Collapse timeline",
+  "workbench.expandTimeline": "Expand timeline",
   "workbench.ratioFollowSource": "Auto",
   "workbench.followSourceUnavailable": "Add a video clip with known dimensions first",
   "workbench.couldNotGenerateCaptions":
@@ -388,6 +393,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.generatedBlockFailedChecks":
     "Generated block failed checks: {message}",
   "workbench.generatedLangTranslations": "Generated {lang} translations",
+  "workbench.translationPartial": "Generated {lang} translations; {n} sentence(s) untranslated, try translating again",
   "workbench.generating": "Generating",
   "workbench.geometryPass": "Geometry pass: ",
   "workbench.geometryPassPct": "Geometry pass {pct}%",
@@ -769,4 +775,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.timelineCompactOn":
     "Compact timeline is on. Shorter tracks leave more room for the canvas.",
   "workbench.timelineCompactOff": "Switch to a compact timeline with shorter tracks.",
+  "workbench.transitionsTab": "Transitions",
+  "workbench.transitionLane": "Transitions lane",
+  "workbench.noRoomForTransition": "No room for another transition at the playhead",
 };

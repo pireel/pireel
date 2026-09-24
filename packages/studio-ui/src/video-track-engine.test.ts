@@ -245,7 +245,7 @@ describe('VideoTrackEngine WebCodecs picture', () => {
       { key: 'a', elKey: 'clip_1', srcStart: 1, srcEnd: 3, timelineStart: 0, timelineEnd: 2 },
       { key: 'a', elKey: 'clip_2', srcStart: 7, srcEnd: 9, timelineStart: 2, timelineEnd: 4 },
     ]);
-    engine.setTransitions([{ cut: 2, half: 0.25 }]);
+    engine.setTransitions([{ start: 1.75, cut: 2, end: 2.25 }]);
     await vi.waitFor(() => expect(engine.sourceState('a').decoder).toBe('ready'));
     // The element never reached HAVE_CURRENT_DATA (jsdom) — the picture still lands.
     engine.seek(0.5);

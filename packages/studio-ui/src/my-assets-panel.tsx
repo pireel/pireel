@@ -60,6 +60,7 @@ import {
   useAudioPreview,
 } from './asset-card';
 import { audioCoverUrl, fileMatchesSig, fileNameFromSig } from './media';
+import { storeVideoPoster } from './video-poster';
 import { resolveAssetBytes, resolveAssetPreview } from './local-media';
 import { assetUploadQueue, type AssetUploadState } from './asset-upload-queue';
 import {
@@ -226,6 +227,7 @@ const mediaDims = (url: string, kind: LocalKind): Promise<{ w: number; h: number
   });
 
 export function MyAssetsPanel({
+  pendingItems,
   comp,
   projectId,
   cloudRegistry,
@@ -273,6 +275,8 @@ export function MyAssetsPanel({
   /** Audio asset's primary action: mount on the music lane (workbench → use-bgm). sig = byte identity. */
   onUseAudio?: (url: string, label?: string, sig?: string | null) => void;
   onDragAsset?: (asset: PanelDragAsset | null) => void;
+  /** Generations in flight that will land in this library (shown as loading cards first). */
+  pendingItems?: ReadonlyArray<{ id: string; label: string }>;
 }) {
   const [kind, setKind] = useState<KindFilter>('all');
   const [query, setQuery] = useState('');
@@ -365,6 +369,30 @@ export function MyAssetsPanel({
       setCovers(next);
     });
   };
+  /** Posters: every video entry gets one stored first-frame still (import, generation or an older
+   *  entry alike), extracted from its live bytes one at a time in the background. A failure is
+   *  not retried this session; the card keeps the live first frame meanwhile. */
+  const posterTriedRef = useRef(new Set<string>());
+  const [posterTick, setPosterTick] = useState(0);
+  const posterBusyRef = useRef(false);
+  useEffect(() => {
+    if (posterBusyRef.current) return;
+    const entry = reg.find((e) => (e.kind ?? 'video') === 'video' && !e.posterKey && links.has(e.assetId) && !posterTriedRef.current.has(e.assetId));
+    if (!entry) return;
+    posterBusyRef.current = true;
+    posterTriedRef.current.add(entry.assetId);
+    void storeVideoPoster(links.get(entry.assetId)!, entry.label)
+      .then((posterKey) => {
+        if (posterKey && objectUrlsAliveRef.current) updateReg((r) => r.map((x) => (x.assetId === entry.assetId ? { ...x, posterKey } : x)));
+      })
+      .catch((error) => console.warn('[studio-assets] poster extraction failed', entry.assetId, error))
+      .finally(() => {
+        posterBusyRef.current = false;
+        if (objectUrlsAliveRef.current) setPosterTick((n) => n + 1);
+      });
+    // updateReg is the stable single writer; re-running on reg/links/tick picks the next entry.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reg, links, posterTick]);
   const unlink = (assetId: string) => {
     const url = linksRef.current.get(assetId);
     if (!url) return;
@@ -543,7 +571,7 @@ export function MyAssetsPanel({
           kind: e.kind ?? 'video',
           origin: 'upload',
           insertUrl: url,
-          thumbSrc: (e.kind ?? 'video') === 'image' ? url : (e.kind === 'audio' ? (covers.get(e.assetId) ?? null) : null),
+          thumbSrc: (e.kind ?? 'video') === 'image' ? url : (e.kind === 'audio' ? (covers.get(e.assetId) ?? null) : (e.posterKey ?? null)),
           label: e.label,
           createdAt: e.createdAt,
           width: e.w ?? null,
@@ -852,7 +880,7 @@ export function MyAssetsPanel({
                 title={t('panels.filterAssets')}
                 aria-label={t('panels.filterAssets')}
                 className={`border-line hover:text-ink inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border transition ${
-                  kind === 'all' ? 'text-ink-3' : 'bg-panel-2 text-ink'
+                  kind === 'all' ? 'text-ink-3' : 'bg-panel-2/35 text-ink'
                 }`}
               >
                 <SlidersHorizontal size={12} />
@@ -928,6 +956,16 @@ export function MyAssetsPanel({
         </div>
       ) : null}
       <div className="min-h-0 flex-1 overflow-auto p-2">
+        {pendingItems?.length ? (
+          <div className={`${RESPONSIVE_ASSET_CARD_GRID} mb-1.5`} data-pending-generations>
+            {pendingItems.map((item) => (
+              <div key={item.id} className="border-line bg-panel-2/60 flex aspect-square flex-col items-center justify-center gap-1.5 rounded-md border border-dashed p-1.5 text-center" role="status">
+                <Loader2 size={14} className="text-ink-3 animate-spin" />
+                <span className="text-ink-3 line-clamp-2 text-[10px] leading-tight">{item.label}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
         {!hasAny ? (
           <div className="border-line text-ink-4 flex w-full flex-col items-center justify-center gap-3 rounded-md border border-dashed px-3 py-9">
             {importing ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}

@@ -41,7 +41,7 @@ export function ExportSettingsCard({ part }: { part: ToolPartLike }) {
     const o = out?.data as { options?: { res?: number; fps?: number; format?: string } } | undefined;
     const spec = o?.options ? `${o.options.res}p · ${o.options.fps}fps · ${String(o.options.format).toUpperCase()}` : '';
     return (
-      <div className="border-line bg-panel-2 w-full overflow-hidden rounded-md border">
+      <div className="border-line/60 w-full overflow-hidden rounded-md border">
         <div className="text-ink-3 flex items-center gap-2 px-2.5 py-1.5 text-[12px]">
           <Check size={12} className="text-accent shrink-0" />
           <span>{out?.summary || t('workbench.exportStartedLocalClient')}</span>
@@ -64,7 +64,7 @@ export function ExportSettingsCard({ part }: { part: ToolPartLike }) {
 export function AdaptiveExportPicker({ selection, ready }: { selection: AdaptiveExportSelection; ready: boolean }) {
   const spec = `${selection.resolution}p · ${selection.fps}fps · ${selection.format.toUpperCase()}`;
   return (
-    <div className="border-line bg-panel-2 w-full overflow-hidden rounded-md border">
+    <div className="border-line/60 w-full overflow-hidden rounded-md border">
       <div className="text-ink-2 border-line/70 border-b px-2.5 py-1.5 text-[12px] font-medium">{t('workbench.export')}</div>
       <div className="flex items-center justify-between gap-3 p-2.5">
         <div className="min-w-0">

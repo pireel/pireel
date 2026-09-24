@@ -45,7 +45,11 @@ export function AssetsPanel({
   onUseAudio,
   onUseAsReference,
   genRefreshTick = 0,
+  pendingItems,
 }: {
+  /** Generations in flight (loading cards in My assets). */
+  pendingItems?: ReadonlyArray<{ id: string; label: string }>;
+
   /** "Use as reference": arm the chat's image generation with this asset mentioned. */
   onUseAsReference?: (entry: LocalAssetIndexEntry) => void;
   /** Element live preview needs theme/canvas (BlockPreviewFrame). */
@@ -113,7 +117,7 @@ export function AssetsPanel({
               type="button"
               onClick={() => pick(s.v)}
               className={`h-6 flex-1 rounded px-2 text-[11.5px] transition ${
-                scope === s.v ? 'bg-panel-2 text-ink font-medium' : 'text-ink-4 hover:text-ink-2'
+                scope === s.v ? 'bg-panel-2/35 text-ink font-medium' : 'text-ink-4 hover:text-ink-2'
               }`}
             >
               {s.label}
@@ -140,6 +144,7 @@ export function AssetsPanel({
           onUseAudio={onUseAudio}
           onDragAsset={onDragAsset}
           onUseAsReference={onUseAsReference}
+          pendingItems={pendingItems}
         />
       </div>
       {officialMounted && CuratedAssetsPanel && (

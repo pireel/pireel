@@ -90,6 +90,8 @@ interface InsertClipCoreOptions {
 interface InsertLibraryClipOptions {
   target?: TimelineMediaDropTarget;
   mode?: TimelineInsertMode;
+  /** Visual lanes only: play at most this long (a video is cut from its start, a still lasts exactly this long). */
+  fitSec?: number;
 }
 
 export interface ClipInsertDeps {
@@ -370,6 +372,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
     atSec: number;
     target: TimelineVisualDropTarget;
     mode: TimelineInsertMode;
+    fitSec?: number;
   }): string => {
     const before = documentRef.current;
     const durableSig = input.asset.sig ?? fileSig(input.file);
@@ -445,7 +448,8 @@ export function useClipInsert(deps: ClipInsertDeps) {
       ops.push({ op: 'command', input: { command: trackCommand } });
     }
     const clipId = uniqueDocumentId(`clip_visual_${shotId()}`, new Set(document.timeline.tracks.flatMap((track) => track.clips.map((clip) => clip.id))));
-    const durationFrames = positiveDurationFrames(input.durationSec, document.canvas.fps);
+    const clipSec = input.fitSec && input.fitSec > 0 ? (input.asset.type === 'video' ? Math.min(input.durationSec, input.fitSec) : input.fitSec) : input.durationSec;
+    const durationFrames = positiveDurationFrames(clipSec, document.canvas.fps);
     const clip: Omit<MediaTimelineClip, 'startFrame'> & { offsetFrames: number } = {
       id: clipId,
       kind: 'media',
@@ -454,7 +458,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
       durationFrames,
       enabled: true,
       sourceInSec: 0,
-      sourceOutSec: input.durationSec,
+      sourceOutSec: input.asset.type === 'video' ? clipSec : input.durationSec,
       fit: 'cover',
     };
     ops.push({ op: 'command', input: { command: {
@@ -486,6 +490,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
     at: number,
     target: TimelineVisualDropTarget,
     mode: TimelineInsertMode,
+    fitSec?: number,
   ) => {
     const locatorSig = localImageSigFromLibraryAsset(a);
     const asset = locatorSig ? { ...a, sig: locatorSig } : a;
@@ -526,11 +531,11 @@ export function useClipInsert(deps: ClipInsertDeps) {
         toast.error(t('workbench.couldNotReadDuration'));
         return;
       }
-      const inserted = insertVisualCore({ asset, url, file, durationSec: Math.round(meta.dur * 100) / 100, dimensions: meta, atSec: at, target, mode });
+      const inserted = insertVisualCore({ asset, url, file, durationSec: Math.round(meta.dur * 100) / 100, dimensions: meta, atSec: at, target, mode, fitSec });
       if (!inserted) URL.revokeObjectURL(url);
       return;
     }
-    const inserted = insertVisualCore({ asset, url, file, durationSec: STILL_CLIP_SEC, dimensions: a.dims ?? null, atSec: at, target, mode });
+    const inserted = insertVisualCore({ asset, url, file, durationSec: STILL_CLIP_SEC, dimensions: a.dims ?? null, atSec: at, target, mode, fitSec });
     if (!inserted) URL.revokeObjectURL(url);
   };
   /** Dragging a library image/video onto the main track = insert a clip (per user 2026-07-17, reversing "video-into-main-track
@@ -548,7 +553,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
     setClipPending(at);
     try {
       if (target.kind !== 'primary') {
-        await insertLibraryVisualAt(a, at, target, mode);
+        await insertLibraryVisualAt(a, at, target, mode, options.fitSec);
         return;
       }
       const coreOptions: InsertClipCoreOptions = options.target

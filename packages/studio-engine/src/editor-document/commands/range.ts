@@ -1,4 +1,5 @@
 import type { EditorDocumentV2, EditorTrack } from '../types';
+import { transitionsAfterRangeRemoval } from '../transitions';
 import { validateEditorDocumentV2 } from '../validation';
 import { pruneEmptyNonPrimaryTracks } from '../prune-empty-tracks';
 import { clearRangeFromClip, clipOverlapsRange } from './clip-geometry';
@@ -134,7 +135,11 @@ export function removeEditorRange(document: EditorDocumentV2, options: RemoveEdi
   if (semantics.managedCaptionSource?.mode === 'clip' && removedClipIds.has(semantics.managedCaptionSource.clipId)) {
     semantics = { ...semantics, managedCaptionSource: { mode: 'auto' } };
   }
-  const editedDocument = { ...document, timeline: { ...document.timeline, tracks }, semantics };
+  // The transition lane rides with the ripple; a lift leaves every position where it was.
+  const transitions = mode === 'ripple' && document.timeline.transitions?.length
+    ? transitionsAfterRangeRemoval(document.timeline.transitions, startFrame, endFrame)
+    : document.timeline.transitions;
+  const editedDocument = { ...document, timeline: { ...document.timeline, tracks, ...(transitions ? { transitions } : {}) }, semantics };
   // Overwrite insertion clears the destination interval and then immediately places replacement
   // clips back on the same lane. Keep that lane alive across the two halves of the transaction;
   // otherwise a fully-covered non-primary track is pruned here and the insertion has no target.

@@ -168,7 +168,7 @@ export class VideoTrackEngine {
   private lastPush: { key: string; srcT: number } | null = null;
   private seekGen = 0;
   /** Cut transition table (film seconds): inside a window the frame push carries the other side's picture. */
-  private trs: { cut: number; half: number }[] = [];
+  private trs: { start: number; cut: number; end: number }[] = [];
   // WebCodecs picture side. One decoder per source (opened when the source is set; `null` once open
   // failed = this source keeps its element as the picture source), read through independent cursors:
   // `${key}::main` for the active segment, `${key}::pre|post` for the two sides of a cut transition,
@@ -225,7 +225,7 @@ export class VideoTrackEngine {
   onLayerBlank?: (layer: EngineLayer) => void;
   /** Transition pre-bake provider (workbench): cut → decoded frame set; null = not baked/decoded (falls back to the two-cursor path).
    *  When baked, the window pushes finished frames and the second read position stays idle — "on-the-fly scheduling" leaves the critical path. */
-  bakeProvider?: (cut: number) => { fps: number; half: number; frames: ImageBitmap[] } | null;
+  bakeProvider?: (cut: number) => { fps: number; start: number; frames: ImageBitmap[] } | null;
 
   private ensureHost(): HTMLDivElement {
     if (!this.host) {
@@ -533,7 +533,8 @@ export class VideoTrackEngine {
   }
 
   /** Cut transition table (film seconds): inside the window, pushFrame carries the "other side" picture (frame2). */
-  setTransitions(trs: { cut: number; half: number }[]): void {
+  /** Transition windows that hand over at a spine cut (the ones needing the other side decoded). */
+  setTransitions(trs: { start: number; cut: number; end: number }[]): void {
     this.trs = trs;
   }
 
@@ -807,11 +808,11 @@ export class VideoTrackEngine {
   }
 
   /** The transition window containing t (with 0.3s warm-up lead) → both-side segment indices; null if the cut doesn't align to a segment boundary. */
-  private transitionWinAt(t: number): { cut: number; half: number; iA: number; iB: number } | null {
+  private transitionWinAt(t: number): { start: number; cut: number; end: number; iA: number; iB: number } | null {
     for (const tr of this.trs) {
-      if (t < tr.cut - tr.half - 0.3 || t > tr.cut + tr.half + 0.05) continue;
+      if (t < tr.start - 0.3 || t > tr.end + 0.05) continue;
       for (let i = 1; i < this.segs.length; i++) {
-        if (Math.abs(this.starts[i]! - tr.cut) < 0.05) return { cut: tr.cut, half: tr.half, iA: i - 1, iB: i };
+        if (Math.abs(this.starts[i]! - tr.cut) < 0.05) return { start: tr.start, cut: tr.cut, end: tr.end, iA: i - 1, iB: i };
       }
       return null;
     }
@@ -921,7 +922,7 @@ export class VideoTrackEngine {
   }
 
   /** The "other side" of a cut transition at t: which segment, its source time, and the read position to use. */
-  private transitionOtherAt(t: number, w: { cut: number; half: number; iA: number; iB: number }): { seg: EngineSeg; srcT: number; side: 'pre' | 'post' } {
+  private transitionOtherAt(t: number, w: { start: number; cut: number; end: number; iA: number; iB: number }): { seg: EngineSeg; srcT: number; side: 'pre' | 'post' } {
     const pre = t < w.cut;
     const otherIndex = pre ? w.iB : w.iA;
     const seg = this.segs[otherIndex]!;
@@ -1054,11 +1055,11 @@ export class VideoTrackEngine {
     const t = tOverride ?? segmentTimelineTimeAt(seg, srcT, this.starts[this.curIdx]!, this.ends[this.curIdx]!);
     // inside the transition window (excluding warm-up), carry the other side's picture; skip dedup (the other side is moving, push even if the main frame is same-position)
     const w = this.transitionWinAt(t);
-    const inWin = !!w && t >= w.cut - w.half;
+    const inWin = !!w && t >= w.start;
     const bake = inWin ? this.bakeProvider?.(w!.cut) : null;
     if (bake && inWin && bake.frames.length) {
       // pre-bake path: push finished frames by frame index (clone then transfer; dedup same frame), decoder doesn't touch the picture at all
-      const idx = Math.max(0, Math.min(bake.frames.length - 1, Math.round((t - (w!.cut - bake.half)) * bake.fps)));
+      const idx = Math.max(0, Math.min(bake.frames.length - 1, Math.round((t - bake.start) * bake.fps)));
       const bkey = `bake@${w!.cut}`;
       if (this.lastPush && this.lastPush.key === bkey && this.lastPush.srcT === idx) return;
       this.bitmapInflight = true;
@@ -1288,7 +1289,7 @@ export class VideoTrackEngine {
           // lagging >0.25s (forward seek/handoff) = jump forward only. Inside the bake window, free-wheel
           // (picture doesn't need the decoder), but leading >0.6s also halves the rate as a backstop.
           const wB = this.transitionWinAt(this.tSmooth);
-          const freewheel = !!wB && this.tSmooth >= wB.cut - wB.half && !!this.bakeProvider?.(wB.cut);
+          const freewheel = !!wB && this.tSmooth >= wB.start && !!this.bakeProvider?.(wB.cut);
           const lead = this.tSmooth - this.tEdited;
           let rate = 1;
           if (!freewheel && lead > 0.04) rate = Math.max(0.3, 1 - lead * 2.5);

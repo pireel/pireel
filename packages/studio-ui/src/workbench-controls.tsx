@@ -32,7 +32,7 @@ export function CardShapeControls({ block, onRadius }: { block: Block; onRadius:
             type="button"
             onClick={() => setOpen((o) => !o)}
             aria-label={t('workbench.cornerRadius')}
-            className={`rounded p-1 ${open ? 'text-ink bg-panel-2' : 'text-ink-3 hover:text-ink'}`}
+            className={`rounded p-1 ${open ? 'text-ink bg-panel-2/35' : 'text-ink-3 hover:text-ink'}`}
           >
             <Squircle size={13} />
           </button>

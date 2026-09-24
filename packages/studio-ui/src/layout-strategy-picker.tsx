@@ -30,7 +30,7 @@ export function LayoutStrategyOption({
       aria-checked={selected}
       aria-label={label}
       onClick={onPick}
-      className={`group relative w-full rounded-lg p-1.5 text-left transition-colors ${selected ? 'bg-panel-2' : 'hover:bg-panel-2/60'}`}
+      className={`group relative w-full rounded-lg p-1.5 text-left transition-colors ${selected ? 'bg-panel-2/35' : 'hover:bg-panel-2/20'}`}
     >
       <span className="bg-canvas relative block aspect-video overflow-hidden rounded-md">
         <LayoutStrategyPreview id={id} />
@@ -130,7 +130,7 @@ export function InlineLayoutPositionPicker({
               aria-checked={selected}
               aria-label={option.label}
               onClick={() => onPick(option.id)}
-              className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[10px] transition-colors ${selected ? 'bg-panel-2 text-ink font-medium' : 'text-ink-3 hover:bg-panel-2/70 hover:text-ink'}`}
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[10px] transition-colors ${selected ? 'bg-panel-2/35 text-ink font-medium' : 'text-ink-3 hover:bg-panel-2/20 hover:text-ink'}`}
             >
               <span className="border-line relative h-5 w-7 shrink-0 rounded border">
                 <span className={`bg-accent absolute h-1.5 w-1.5 rounded-full ${positionDotClass(option.id)}`} />

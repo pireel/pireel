@@ -90,7 +90,7 @@ export function ChatModePicker({ editorRef, mode, disabled, onChange }: { editor
               onMouseEnter={setActive}
               onMouseDown={(event) => event.preventDefault()}
               onClick={pick}
-              className={`flex w-full items-start gap-2.5 px-2.5 py-2 text-left ${active ? 'bg-panel-2' : ''}`}
+              className={`flex w-full items-start gap-2.5 px-2.5 py-2 text-left ${active ? 'bg-panel-2/35' : ''}`}
             >
               <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg ${selected ? 'bg-accent/10 text-accent' : 'text-ink-3'}`}>
                 <ItemIcon className="h-4 w-4" strokeWidth={2} />

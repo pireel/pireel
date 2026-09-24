@@ -57,7 +57,7 @@ describe('standalone caption task execution', () => {
   it('does not render a partial bilingual result when translation fails', async () => {
     const source = task(); source.options.translationLanguage = '中文';
     mock.translate.mockResolvedValueOnce([]);
-    await expect(runCaptionTask(source, file, { signal: new AbortController().signal, checkpoint: async () => {}, progress: vi.fn() })).rejects.toThrow('不完整');
+    await expect(runCaptionTask(source, file, { signal: new AbortController().signal, checkpoint: async () => {}, progress: vi.fn() })).rejects.toThrow('没有返回任何结果');
     expect(mock.render).not.toHaveBeenCalled(); expect(source.transcript).toBeUndefined();
   });
   it('resumes cached transcript and cleanup without repeating those operations', async () => {
@@ -76,7 +76,7 @@ describe('standalone caption task execution', () => {
   });
 });
 
-it('keeps plan/translation identity across color and position changes, but invalidates actual line or language changes', async () => {
+it('keeps translation identity across color, position and re-wrapping, but invalidates a language change', async () => {
   const source = task(); source.options.shortenPauses = false; source.options.translationLanguage = '中文';
   const text = 'This is a longer sentence with enough words to wrap differently when the caption width becomes narrow';
   source.transcript = [{ text, start: 0, end: 4 }];
@@ -88,12 +88,13 @@ it('keeps plan/translation identity across color and position changes, but inval
   expect(styled.task.workflow!.steps.find(step => step.id === 'plan')!.artifact!.data.plan).toEqual(plan);
   expect(mock.translate).toHaveBeenCalledOnce();
   expect(mock.render.mock.calls[1][0].comp.captionStyle.color).toBe('#ff0000');
+  // Translations are stored per sentence and spread over lines at render time: re-wrapping keeps them.
   styled.task.options.custom!.wPct = 15;
   const narrow = await runCaptionTask(styled.task, file, hooks);
-  expect(mock.translate).toHaveBeenCalledTimes(2);
+  expect(mock.translate).toHaveBeenCalledOnce();
   narrow.task.options.translationLanguage = '日本語';
   await runCaptionTask(narrow.task, file, hooks);
-  expect(mock.translate).toHaveBeenCalledTimes(3);
+  expect(mock.translate).toHaveBeenCalledTimes(2);
 });
 
 it('loads fonts before translation and persists matching planned and displayed word ranges without blob identities', async () => {
@@ -145,7 +146,7 @@ it('assembles downstream data from inserted LLM and approval outputs, and resume
       return Response.json({ run: cloud.get(body.creationKey) });
     }
     if (body.action === 'get') return Response.json({ run: cloud.get(body.id) });
-    const generic = genericWorkflowExecutor({ transform: async ({ value }) => { llmCalls++; const edited = structuredClone(value) as unknown as import('./caption-workflow-artifacts').CaptionTranslation; edited.items.forEach(item => { item.lines = item.lines.map(() => 'LLM 修改'); }); return edited as never; } });
+    const generic = genericWorkflowExecutor({ transform: async ({ value }) => { llmCalls++; const edited = structuredClone(value) as unknown as import('./caption-workflow-artifacts').CaptionTranslation; edited.items.forEach(item => { item.text = 'LLM 修改'; }); return edited as never; } });
     const run = await executeWorkflow(cloud.get(body.id)!, GENERIC_WORKFLOW_CAPABILITIES, generic, { save: async run => { cloud.set(run.id, run); } });
     return Response.json({ run });
   }));
@@ -154,11 +155,13 @@ it('assembles downstream data from inserted LLM and approval outputs, and resume
   expect(mock.render).not.toHaveBeenCalled();
   const approval = [...cloud.values()].find(run => run.status === 'waiting')!;
   const value = structuredClone(approval.steps[0].approval!.value) as unknown as import('./caption-workflow-artifacts').CaptionTranslation;
-  value.items.forEach(item => { item.lines = item.lines.map(() => '人工确认稿'); });
+  value.items.forEach(item => { item.text = '人工确认稿'; });
   cloud.set(approval.id, decideWorkflowApproval(approval, approval.steps[0].approval!.id, 'approve', 'owner', value as never));
   const resumed = await runCaptionTask(JSON.parse(JSON.stringify(saved)), file, hooks);
   expect(resumed.task.workflow!.id).toBe(first.task.workflow!.id);
-  expect(JSON.stringify(mock.render.mock.calls[0][0].comp)).toContain('人工确认稿');
+  // The approved sentence translation is spread over the caption lines.
+  const rendered = JSON.stringify(mock.render.mock.calls[0][0].comp);
+  expect(rendered).toContain('"sub":"人工"'); expect(rendered).toContain('"sub":"确认稿"');
   expect(llmCalls).toBe(1); expect(mock.translate).toHaveBeenCalledOnce();
 });
 
