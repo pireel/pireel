@@ -465,6 +465,8 @@ export const PANELS_ZH: Record<string, string> = {
   "panels.turnSmartCutoutFirst": "先开启智能抠像",
   "panels.untitledImage": "未命名图片",
   "panels.untitledVideo": "未命名视频",
+  "panels.untitledAudio": "未命名音频",
+  "panels.audioBadge": "音频",
   "panels.up": "向上",
   "panels.upload": "上传",
   "panels.uploadAsset": "上传素材",

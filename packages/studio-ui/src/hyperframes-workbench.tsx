@@ -8941,8 +8941,8 @@ export function HyperframesWorkbench({
       <header data-studio-header data-block-selection-keep data-cap-keep className="bg-canvas flex h-11 shrink-0 items-center justify-between gap-3 rounded-sm px-3">
         <div className="flex min-w-0 items-center gap-3">
           {backHref ? <a href={backHref} aria-label={t("workbench.backToProjects")} title={t("workbench.backToProjects")}
-            className="text-ink-3 hover:bg-panel-2/20 hover:text-ink inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px]">
-            <ArrowLeft size={14} />{t("workbench.backToProjects")}
+            className="text-ink-3 hover:bg-panel-2/20 hover:text-ink inline-flex size-8 shrink-0 items-center justify-center rounded-md">
+            <ArrowLeft size={16} />
           </a> : null}
           <EditorModeSwitch mode={editingMode} onChange={selectEditingMode} />
         </div>

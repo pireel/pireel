@@ -497,6 +497,8 @@ export const PANELS_EN: Record<string, string> = {
   "panels.turnSmartCutoutFirst": "Turn on smart cutout first",
   "panels.untitledImage": "Untitled image",
   "panels.untitledVideo": "Untitled video",
+  "panels.untitledAudio": "Untitled audio",
+  "panels.audioBadge": "Audio",
   "panels.up": "Up",
   "panels.upload": "Upload",
   "panels.uploadAsset": "Upload asset",

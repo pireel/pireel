@@ -14,6 +14,9 @@ export interface LocalAssetIndexEntry {
   /** Cloud byte-rendezvous key (content-addressed R2 object). Present once the bytes were uploaded;
    * any device can then retrieve the asset without the original file. */
   cloudKey?: string;
+  /** Video only: bare storage key of a small first-frame poster, extracted once so cards show an
+   * image instead of decoding the video. Absent = not extracted yet (filled in the background). */
+  posterKey?: string;
   /** @deprecated Compatibility mirror for schema-v3 clients deployed before assetId existed. */
   sig: string;
   label: string;
@@ -58,6 +61,7 @@ function sanitizeLocalAssets(value: unknown): LocalAssetIndexEntry[] {
     const kind = entry.kind === 'video' || entry.kind === 'image' || entry.kind === 'audio' ? entry.kind : undefined;
     const rawFolder = entry.folder;
     const cloudKey = typeof entry.cloudKey === 'string' && entry.cloudKey ? entry.cloudKey.slice(0, 300) : '';
+    const posterKey = typeof entry.posterKey === 'string' && entry.posterKey ? entry.posterKey.slice(0, 300) : '';
     const durationSec = typeof entry.durationSec === 'number' && Number.isFinite(entry.durationSec) && entry.durationSec > 0
       ? entry.durationSec
       : undefined;
@@ -75,6 +79,7 @@ function sanitizeLocalAssets(value: unknown): LocalAssetIndexEntry[] {
       contentSig,
       sig: contentSig,
       ...(cloudKey ? { cloudKey } : {}),
+      ...(posterKey ? { posterKey } : {}),
       label: typeof entry.label === 'string' && entry.label ? entry.label : contentSig,
       ...(kind ? { kind } : {}),
       ...(typeof entry.w === 'number' || entry.w === null ? { w: entry.w } : {}),

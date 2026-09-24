@@ -60,6 +60,7 @@ import {
   useAudioPreview,
 } from './asset-card';
 import { audioCoverUrl, fileMatchesSig, fileNameFromSig } from './media';
+import { storeVideoPoster } from './video-poster';
 import { resolveAssetBytes, resolveAssetPreview } from './local-media';
 import { assetUploadQueue, type AssetUploadState } from './asset-upload-queue';
 import {
@@ -368,6 +369,30 @@ export function MyAssetsPanel({
       setCovers(next);
     });
   };
+  /** Posters: every video entry gets one stored first-frame still (import, generation or an older
+   *  entry alike), extracted from its live bytes one at a time in the background. A failure is
+   *  not retried this session; the card keeps the live first frame meanwhile. */
+  const posterTriedRef = useRef(new Set<string>());
+  const [posterTick, setPosterTick] = useState(0);
+  const posterBusyRef = useRef(false);
+  useEffect(() => {
+    if (posterBusyRef.current) return;
+    const entry = reg.find((e) => (e.kind ?? 'video') === 'video' && !e.posterKey && links.has(e.assetId) && !posterTriedRef.current.has(e.assetId));
+    if (!entry) return;
+    posterBusyRef.current = true;
+    posterTriedRef.current.add(entry.assetId);
+    void storeVideoPoster(links.get(entry.assetId)!, entry.label)
+      .then((posterKey) => {
+        if (posterKey && objectUrlsAliveRef.current) updateReg((r) => r.map((x) => (x.assetId === entry.assetId ? { ...x, posterKey } : x)));
+      })
+      .catch((error) => console.warn('[studio-assets] poster extraction failed', entry.assetId, error))
+      .finally(() => {
+        posterBusyRef.current = false;
+        if (objectUrlsAliveRef.current) setPosterTick((n) => n + 1);
+      });
+    // updateReg is the stable single writer; re-running on reg/links/tick picks the next entry.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reg, links, posterTick]);
   const unlink = (assetId: string) => {
     const url = linksRef.current.get(assetId);
     if (!url) return;
@@ -546,7 +571,7 @@ export function MyAssetsPanel({
           kind: e.kind ?? 'video',
           origin: 'upload',
           insertUrl: url,
-          thumbSrc: (e.kind ?? 'video') === 'image' ? url : (e.kind === 'audio' ? (covers.get(e.assetId) ?? null) : null),
+          thumbSrc: (e.kind ?? 'video') === 'image' ? url : (e.kind === 'audio' ? (covers.get(e.assetId) ?? null) : (e.posterKey ?? null)),
           label: e.label,
           createdAt: e.createdAt,
           width: e.w ?? null,

@@ -2463,6 +2463,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   }),
                   ...(signal ? { signal } : {}),
                 }).catch(() => undefined);
+                // Foley belongs to this project: it lands in 我的素材 like every generated output.
+                registerGeneratedEntry(generatedAssetIndexEntry({ jobId: registered.id, index: 0, kind: 'audio', key: registered.key, mime: 'audio/mp4', prompt: item.name, createdAt: Date.now(), durationSec: generatedBody.asset.durationSec }, t('panels.music')));
                 registrations.push({
                   id: registered.id, kind: 'audio', url: registered.url, label: item.name,
                   durationSec: generatedBody.asset.durationSec, pictureDurationSec: item.durationSec, description,
