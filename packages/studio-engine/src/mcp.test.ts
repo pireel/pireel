@@ -113,6 +113,16 @@ describe('MCP v3 surface', () => {
     expect(callBridge).toHaveBeenCalledWith('run_v3', { name: 'move_clips', args: { items: [{ clipId: 'n1', startFrame: 90 }] } }, expect.any(Number));
   });
 
+  it('keeps the receipt next to a single returned frame image', async () => {
+    const callBridge = vi.fn(async () => ({ ok: true, summary: 'added', image: { data: 'AAAA', mimeType: 'image/jpeg' }, data: { newBlockId: 'ai1', settledFrame: { frame: 96 } } }));
+    const d = deps({ resolveV3Context: v3ctx, callBridge });
+    const response = await handleMcpRequest({ id: 31, method: 'tools/call', params: { name: 'apply_component', arguments: { raw: '{}', clipId: 'ai1', atFrame: 30, durationFrames: 90, placement: { xPct: 5, yPct: 60, widthPct: 70, heightPct: 20 } } } }, d);
+    const content = (response!.result as { content: Array<{ type: string; text?: string }> }).content;
+    expect(content[0]).toMatchObject({ type: 'image', data: 'AAAA' });
+    expect(JSON.parse(content[1]!.text!)).toMatchObject({ ok: true, data: { newBlockId: 'ai1', settledFrame: { frame: 96 } } });
+    expect(content[1]!.text).not.toContain('AAAA');
+  });
+
   it('serves project navigation and handoff on the server when the open tab declines them', async () => {
     // The tab runs the same tool table but edits one open document: it owns no account-level
     // capability. Before this, an open tab turned those calls into a hard failure for an MCP
