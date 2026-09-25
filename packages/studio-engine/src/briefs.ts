@@ -38,7 +38,7 @@ export function assembleComposeTheme(
     theme += `\n\n=== HOST VISUAL CRAFT BASELINE ===\nThis is a neutral quality floor, not a hidden Frame or visual identity. Apply its craft in a project without a Frame. When a Frame follows, keep the quality checks but let the Frame win every visible aesthetic decision.\n\n${baseline}`;
   }
   if (frame) {
-    theme += `\n\n=== FRAME DESIGN LANGUAGE — "${frame.title}" ===\nWhere this Frame conflicts with generic Motion Graphic styling, archetypes or default taste above, THE FRAME WINS. The Component engineering contract (1080px-wide reference, #ID scoping, tl local time, no external libraries, chart recipes' mechanics) always holds.\n\n${frame.body}`;
+    theme += `\n\n=== FRAME DESIGN LANGUAGE — "${frame.title}" ===\nWhere this Frame conflicts with generic Motion Graphic styling, archetypes or default taste above, THE FRAME WINS. The Component engineering contract (sizes in the real box/canvas px given in the request, local CSS selectors, tl local time, no external libraries, chart recipes' mechanics) always holds.\n\n${frame.body}`;
   }
   return theme;
 }

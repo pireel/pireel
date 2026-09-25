@@ -39,7 +39,7 @@ export function componentPreviewModel(
       block: {
         id: `preview_${source.kit}`,
         templateId: `kit:${source.kit}`,
-        slots: { props: insertProps },
+        slots: { props: insertProps, backdrop: 'page' },
         startSec: 0,
         durationSec: KIT_INSERT_DURATION,
         trackIndex: 2,

@@ -445,6 +445,8 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.propsAddRow": "Add row",
   "workbench.propsLayout": "Layout",
   "workbench.propsTiming": "Timing",
+  "workbench.propsMotionSpeed": "Animation speed",
+  "workbench.propsMotionDelay": "Animation delay",
   "workbench.propsAppearance": "Appearance",
   "workbench.propsName": "Name",
   "workbench.propsNameHint": "Name shown on the timeline",

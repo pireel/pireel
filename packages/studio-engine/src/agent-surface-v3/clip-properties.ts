@@ -14,7 +14,7 @@ import type { EditorDocumentV2, TimelineClip } from '../editor-document/types';
 export type DocumentClipKind = TimelineClip['kind'];
 export type ClipPropertyKey =
   | 'source' | 'durationFrames' | 'speed' | 'ripple' | 'volumeDb' | 'mute' | 'fades' | 'filter'
-  | 'opacity' | 'enabled' | 'box' | 'props';
+  | 'opacity' | 'enabled' | 'box' | 'props' | 'texts' | 'motion';
 
 export interface ClipPropertySpec {
   key: ClipPropertyKey;
@@ -56,6 +56,10 @@ export const CLIP_PROPERTIES: readonly ClipPropertySpec[] = [
     elsewhere: { audio: 'an audio clip has no picture', caption: 'Position the caption layer with set_captions yPct / scale' } },
   { key: 'props', kinds: ['graphic'], summary: 'props [{key,value}] sets a graphic clip’s declared editable properties (keys from component.props in get_state)',
     elsewhere: { narrative: 'props belong to graphic components; a story-spine clip has none', media: 'props belong to graphic components; a media clip has none', audio: 'props belong to graphic components; an audio clip has none', caption: CAPTIONS } },
+  { key: 'motion', kinds: ['graphic'], summary: 'motion {speed 0.25–4, delaySec} retimes a graphic clip’s own animation (1 and 0 restore it)',
+    elsewhere: { narrative: 'motion belongs to graphic components; retime footage with speed', media: 'motion belongs to graphic components; retime footage with speed', audio: 'motion belongs to graphic components; an audio clip has none', caption: CAPTIONS } },
+  { key: 'texts', kinds: ['graphic'], summary: 'texts [{key,value}] rewrites a graphic clip’s on-screen wording by key (keys and current text under component.texts in get_state)',
+    elsewhere: { narrative: 'texts belong to graphic components; a story-spine clip has none', media: 'texts belong to graphic components; a media clip has none', audio: 'texts belong to graphic components; an audio clip has none', caption: CAPTIONS } },
 ];
 
 /** Fields agents send here that belong to another tool. The schema refuses them; the fix names the tool. */

@@ -44,7 +44,8 @@ export type ComponentPropsOverrides = Record<string, ComponentPropValue>;
 
 export const COMPONENT_PROPS_MAX = 8;
 export const COMPONENT_PROP_KEY = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
-const COLOR_VALUE = /^(#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})|var\(--[a-z][\w-]*\))$/i;
+/** A literal hex colour, or a theme token with an optional literal hex fallback: var(--up, #2fbf71). */
+const COLOR_VALUE = /^(#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})|var\(--[a-z][\w-]*(\s*,\s*#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8}))?\))$/i;
 const OPTION_TOKEN = /^[a-z0-9][a-z0-9-]*$/;
 const MANIFEST_ATTR = /\sdata-props\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
 const TYPES: ReadonlySet<string> = new Set(['color', 'number', 'boolean', 'select', 'font']);
@@ -163,7 +164,7 @@ export function parseComponentProps(schemaJson: string | undefined): { specs: Co
     switch (type) {
       case 'color': {
         if (typeof f.default !== 'string' || !COLOR_VALUE.test(f.default.trim())) {
-          issues.push(`"${key}": color default must be #rgb, #rrggbb, #rrggbbaa or var(--token)`);
+          issues.push(`"${key}": color default must be #rgb, #rrggbb, #rrggbbaa, var(--token) or var(--token, #hex)`);
           ok = false;
           break;
         }
@@ -233,7 +234,10 @@ export function parseComponentProps(schemaJson: string | undefined): { specs: Co
     if (!ok) continue;
     specs.push(spec);
   }
-  return issues.length ? { specs: [], issues } : { specs, issues };
+  // One malformed property must not take the rest down with it: every var(--p-*) the markup reads
+  // would otherwise be undefined and the component could render invisible. Valid properties stay;
+  // the malformed ones are reported.
+  return { specs, issues };
 }
 
 function coerce(spec: ComponentPropSpec, value: unknown): ComponentPropValue {
@@ -402,18 +406,51 @@ export function componentPropsRequirement(schemaJson: string | undefined): strin
   return null;
 }
 
+/** Where a data-edit element's content sits: every marked opening tag paired with its own closing
+ *  tag (nested elements of the same tag are counted), in document order. */
+function dataEditRanges(innerHtml: string): Array<{ key: string; from: number; to: number }> {
+  const out: Array<{ key: string; from: number; to: number }> = [];
+  for (const m of innerHtml.matchAll(/<([a-z][a-z0-9]*)\b[^>]*\sdata-edit\s*=\s*(?:"([^"]*)"|'([^']*)')[^>]*>/gi)) {
+    const key = (m[2] ?? m[3] ?? '').trim();
+    if (!key) continue;
+    const from = m.index + m[0].length;
+    const scan = new RegExp(`<(/?)${m[1]!.toLowerCase()}\\b[^>]*>`, 'gi');
+    scan.lastIndex = from;
+    let depth = 1;
+    for (let tag = scan.exec(innerHtml); tag; tag = scan.exec(innerHtml)) {
+      if (tag[1]) depth -= 1;
+      else if (!tag[0].endsWith('/>')) depth += 1;
+      if (depth === 0) {
+        out.push({ key, from, to: tag.index });
+        break;
+      }
+    }
+  }
+  return out;
+}
+
 /** Text slots: every `data-edit` element with its current text, in document order — the "text
  *  properties" of the inspector. Editing writes back through the editor's data-edit path. */
 export function dataEditFields(innerHtml: string): Array<{ key: string; text: string }> {
   const out: Array<{ key: string; text: string }> = [];
   const seen = new Set<string>();
-  for (const m of innerHtml.matchAll(/<([a-z][a-z0-9]*)\b[^>]*\sdata-edit\s*=\s*(?:"([^"]*)"|'([^']*)')[^>]*>([\s\S]*?)<\/\1>/gi)) {
-    const key = (m[2] ?? m[3] ?? '').trim();
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push({ key, text: (m[4] ?? '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() });
+  for (const range of dataEditRanges(innerHtml)) {
+    if (seen.has(range.key)) continue;
+    seen.add(range.key);
+    out.push({ key: range.key, text: innerHtml.slice(range.from, range.to).replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').trim() });
   }
   return out;
+}
+
+const escapeText = (text: string): string => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/**
+ * Replace the text of the element marked data-edit="<key>" (its whole content becomes the plain
+ * text, as the canvas double-click edit does). Returns null when no such element exists.
+ */
+export function setDataEditText(innerHtml: string, key: string, text: string): string | null {
+  const range = dataEditRanges(innerHtml).find((candidate) => candidate.key === key);
+  return range ? innerHtml.slice(0, range.from) + escapeText(text) + innerHtml.slice(range.to) : null;
 }
 
 /** Image slots: every `<img>` (not a media-block body) with its src and alt, indexed in document order —

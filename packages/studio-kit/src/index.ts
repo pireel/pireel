@@ -24,6 +24,15 @@ import { chartSchema, renderChart } from "./components/chart";
 import { stepsSchema, renderSteps } from "./components/steps";
 import { titleSchema, renderTitle } from "./components/title";
 import { codeSchema, renderCode } from "./components/code";
+import { ctaSchema, renderCta } from "./components/cta";
+import { countdownSchema, renderCountdown } from "./components/countdown";
+import { offerSchema, renderOffer } from "./components/offer";
+import { checklistSchema, renderChecklist } from "./components/checklist";
+import { qaSchema, renderQa } from "./components/qa";
+import { locationSchema, renderLocation } from "./components/location";
+import { rankingSchema, renderRanking } from "./components/ranking";
+import { mythFactSchema, renderMythFact } from "./components/myth-fact";
+import { particleTitleSchema, renderParticleTitle } from "./components/particle-title";
 
 export type { RenderCtx, RenderResult } from "./contract";
 export { THEME_TOKENS, type ThemeToken, esc } from "./contract";
@@ -77,6 +86,15 @@ export { chartSchema, renderChart, type ChartProps } from "./components/chart";
 export { stepsSchema, renderSteps, type StepsProps } from "./components/steps";
 export { titleSchema, renderTitle, type TitleProps } from "./components/title";
 export { codeSchema, renderCode, type CodeProps } from "./components/code";
+export { ctaSchema, renderCta, type CtaProps } from "./components/cta";
+export { countdownSchema, renderCountdown, type CountdownProps } from "./components/countdown";
+export { offerSchema, renderOffer, type OfferProps } from "./components/offer";
+export { checklistSchema, renderChecklist, type ChecklistProps } from "./components/checklist";
+export { qaSchema, renderQa, type QaProps } from "./components/qa";
+export { locationSchema, renderLocation, type LocationProps } from "./components/location";
+export { rankingSchema, renderRanking, type RankingProps } from "./components/ranking";
+export { mythFactSchema, renderMythFact, type MythFactProps } from "./components/myth-fact";
+export { particleTitleSchema, renderParticleTitle, type ParticleTitleProps } from "./components/particle-title";
 
 export interface ComponentDef {
   /** JSON Schema (draft 2020-12) — the LLM/tool contract for this component's props. */
@@ -309,6 +327,208 @@ export const components = {
     ],
     render: renderCode,
     parse: codeSchema.parse as (p: unknown) => Record<string, unknown>,
+  },
+  cta: {
+    jsonSchema: ctaSchema.jsonSchema,
+    defaults: ctaSchema.defaults,
+    summary:
+      "The closing ask — a follow button that gets pressed, or an arrow-led action line.",
+    searchTerms: [
+      "cta",
+      "call to action",
+      "follow",
+      "subscribe",
+      "like",
+      "comment",
+      "link in bio",
+      "关注",
+      "点赞",
+      "订阅",
+      "评论",
+      "行动号召",
+      "下期预告",
+      "领取",
+    ],
+    render: renderCta,
+    parse: ctaSchema.parse as (p: unknown) => Record<string, unknown>,
+  },
+  countdown: {
+    jsonSchema: countdownSchema.jsonSchema,
+    defaults: countdownSchema.defaults,
+    summary:
+      "A number counting down to the moment — digits in a draining ring or slammed alone, paced across the block.",
+    searchTerms: [
+      "countdown",
+      "timer",
+      "seconds",
+      "count",
+      "hurry",
+      "倒计时",
+      "计时",
+      "秒",
+      "倒数",
+      "限时",
+    ],
+    render: renderCountdown,
+    parse: countdownSchema.parse as (p: unknown) => Record<string, unknown>,
+  },
+  offer: {
+    jsonSchema: offerSchema.jsonSchema,
+    defaults: offerSchema.defaults,
+    summary:
+      "A price drop — old price struck, new price lands big, perk stamped on; or one strip.",
+    searchTerms: [
+      "offer",
+      "price",
+      "discount",
+      "deal",
+      "sale",
+      "promo",
+      "coupon",
+      "价格",
+      "优惠",
+      "折扣",
+      "原价",
+      "现价",
+      "限时",
+      "直播间",
+      "赠品",
+    ],
+    render: renderOffer,
+    parse: offerSchema.parse as (p: unknown) => Record<string, unknown>,
+  },
+  checklist: {
+    jsonSchema: checklistSchema.jsonSchema,
+    defaults: checklistSchema.defaults,
+    summary:
+      "Items that tick off (or get crossed out) as the speaker names them.",
+    searchTerms: [
+      "checklist",
+      "checks",
+      "todo",
+      "to-do",
+      "list",
+      "tick",
+      "requirements",
+      "清单",
+      "检查",
+      "打勾",
+      "要点",
+      "待办",
+      "注意事项",
+    ],
+    render: renderChecklist,
+    parse: checklistSchema.parse as (p: unknown) => Record<string, unknown>,
+  },
+  qa: {
+    jsonSchema: qaSchema.jsonSchema,
+    defaults: qaSchema.defaults,
+    summary:
+      "A question answered on screen — Q/A tags with the answer landing big, or the answer taking the block.",
+    searchTerms: [
+      "q&a",
+      "question",
+      "answer",
+      "faq",
+      "ask",
+      "问答",
+      "问题",
+      "回答",
+      "答疑",
+      "提问",
+    ],
+    render: renderQa,
+    parse: qaSchema.parse as (p: unknown) => Record<string, unknown>,
+  },
+  location: {
+    jsonSchema: locationSchema.jsonSchema,
+    defaults: locationSchema.defaults,
+    summary:
+      "Where we are — a dropped map pin beside the place name, or a compact one-line tag.",
+    searchTerms: [
+      "location",
+      "place",
+      "city",
+      "address",
+      "venue",
+      "map",
+      "pin",
+      "地点",
+      "位置",
+      "城市",
+      "地址",
+      "定位",
+      "来到",
+    ],
+    render: renderLocation,
+    parse: locationSchema.parse as (p: unknown) => Record<string, unknown>,
+  },
+  ranking: {
+    jsonSchema: rankingSchema.jsonSchema,
+    defaults: rankingSchema.defaults,
+    summary:
+      "A top-N counted down to the winner, or shown as a podium.",
+    searchTerms: [
+      "ranking",
+      "top",
+      "best",
+      "list",
+      "winner",
+      "leaderboard",
+      "podium",
+      "排行",
+      "排名",
+      "榜单",
+      "前三",
+      "第一名",
+      "推荐",
+    ],
+    render: renderRanking,
+    parse: rankingSchema.parse as (p: unknown) => Record<string, unknown>,
+  },
+  mythFact: {
+    jsonSchema: mythFactSchema.jsonSchema,
+    defaults: mythFactSchema.defaults,
+    summary:
+      "A common belief corrected — the myth is struck out and the fact rises, or both side by side.",
+    searchTerms: [
+      "myth",
+      "fact",
+      "misconception",
+      "truth",
+      "wrong",
+      "actually",
+      "误区",
+      "真相",
+      "谣言",
+      "其实",
+      "误解",
+      "纠正",
+    ],
+    render: renderMythFact,
+    parse: mythFactSchema.parse as (p: unknown) => Record<string, unknown>,
+  },
+  particleTitle: {
+    jsonSchema: particleTitleSchema.jsonSchema,
+    defaults: particleTitleSchema.defaults,
+    summary:
+      "A short title that assembles out of particles (WebGL), then resolves into crisp type — an opener or a big reveal.",
+    searchTerms: [
+      "particle",
+      "particles",
+      "reveal",
+      "opener",
+      "intro",
+      "title",
+      "logo",
+      "粒子",
+      "开场",
+      "片头",
+      "揭晓",
+      "标题",
+    ],
+    render: renderParticleTitle,
+    parse: particleTitleSchema.parse as (p: unknown) => Record<string, unknown>,
   },
 } satisfies Record<string, ComponentDef>;
 

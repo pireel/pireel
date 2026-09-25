@@ -22,7 +22,9 @@ import { registerTemplate, type Rendered, type Slots } from './composition-core'
 const TOKEN_BRIDGE =
   '--sk-fg:var(--fg);--sk-muted:var(--muted);--sk-accent:var(--accent);--sk-accent-2:var(--accent-2);' +
   '--sk-panel:var(--panel);--sk-panel-2:var(--panel-2);--sk-line:var(--line);--sk-radius:var(--radius);' +
-  '--sk-shadow:var(--shadow);--sk-font-head:var(--font-head);--sk-font-num:var(--font-num);';
+  '--sk-shadow:var(--shadow);--sk-font-head:var(--font-head);--sk-font-num:var(--font-num);' +
+  // A Frame's typographic voice (palette head-weight / head-case). Unset leaves the kit's own values.
+  '--sk-head-weight:var(--head-weight);--sk-head-case:var(--head-case);';
 
 const px = (v: unknown, fallback: number): number => (typeof v === 'number' && v > 0 ? v : fallback);
 
@@ -34,8 +36,12 @@ function renderKitBlock(component: string, slots: Slots, blockId: string, durati
     ...(typeof durationSec === 'number' && durationSec > 0 ? { durationSec } : {}),
   };
   const out = renderKit(component, blockId, slots.props, ctx);
+  // Type without a surface: light over moving footage, the theme's ink over a flat page.
+  const ink = slots.backdrop === 'page'
+    ? '--sk-ink:var(--fg);--sk-ink-muted:var(--muted);'
+    : '--sk-ink:#ffffff;--sk-ink-muted:rgba(255,255,255,0.74);';
   return {
-    innerHtml: `<div class="sk-root" style="position:absolute;inset:0;${TOKEN_BRIDGE}">\n${out.html}\n</div>`,
+    innerHtml: `<div class="sk-root" style="position:absolute;inset:0;${TOKEN_BRIDGE}${ink}">\n${out.html}\n</div>`,
     timelineBody: out.timeline,
   };
 }
@@ -59,7 +65,8 @@ export function kitElement(
   box: { w: number; h: number },
   canvas: { w: number; h: number } = { w: 1920, h: 1080 },
 ): Rendered {
-  return renderKitBlock(component, { props, boxW: box.w, boxH: box.h, canvasW: canvas.w, canvasH: canvas.h }, id);
+  // Library previews sit on a light checker, not footage: the theme ink keeps them readable.
+  return renderKitBlock(component, { props, boxW: box.w, boxH: box.h, canvasW: canvas.w, canvasH: canvas.h, backdrop: 'page' }, id);
 }
 
 for (const [cid, def] of Object.entries(components)) {

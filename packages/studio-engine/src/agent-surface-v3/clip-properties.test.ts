@@ -25,7 +25,7 @@ function project(): { document: EditorDocumentV2; clipIds: Record<DocumentClipKi
   document = placed.document!;
   const graphic: TimelineClip = {
     id: 'title', kind: 'graphic', startFrame: 0, durationFrames: 60, enabled: true, anchor: { type: 'timeline' },
-    block: { templateId: 'custom', slots: { innerHtml: '<div>hi</div>', timelineBody: '' }, box: { x: 0.1, y: 0.1, w: 0.5, h: 0.2 } },
+    block: { templateId: 'custom', slots: { innerHtml: '<div><b data-edit="headline">hi</b></div>', timelineBody: '' }, box: { x: 0.1, y: 0.1, w: 0.5, h: 0.2 } },
   } as unknown as TimelineClip;
   const cue: TimelineClip = {
     id: 'cue', kind: 'caption', startFrame: 0, durationFrames: 30, enabled: true, managed: true, anchor: { type: 'timeline' },
@@ -41,10 +41,10 @@ function project(): { document: EditorDocumentV2; clipIds: Record<DocumentClipKi
 
 const SAMPLE: Record<ClipPropertyKey, unknown> = {
   source: [0, 1.5], durationFrames: 45, speed: 2, ripple: true, volumeDb: -6, mute: true, fades: { in: 6, out: 6 },
-  filter: { brightness: 1.1 }, opacity: 0.5, enabled: false, box: { x: 0.1, y: 0.1, w: 0.5, h: 0.5 }, props: [{ key: 'x', value: 1 }],
+  filter: { brightness: 1.1 }, opacity: 0.5, enabled: false, box: { x: 0.1, y: 0.1, w: 0.5, h: 0.5 }, props: [{ key: 'x', value: 1 }], texts: [{ key: 'headline', value: 'y' }], motion: { speed: 1.5 },
 };
 /** Fields whose success depends on more than the kind (a modifier without its verb, a component's own schema). */
-const KIND_ONLY = new Set<ClipPropertyKey>(['ripple', 'props']);
+const KIND_ONLY = new Set<ClipPropertyKey>(['ripple', 'props', 'texts']);
 
 describe('clip capability table', () => {
   it('is the source of the set_clip_properties schema and description', () => {
@@ -96,5 +96,28 @@ describe('clip capability table', () => {
     const bed = clips.find((clip) => clip.id === clipIds.audio)!;
     expect(bed).toMatchObject({ fades: { in: 15, out: 30 } });
     expect(clipPropertyDefaults('audio', 'music')).toMatchObject({ fadeInSec: expect.any(Number), fadeOutSec: expect.any(Number) });
+  });
+
+  it('reads a component\'s wording in get_state and rewrites it by key without regenerating', () => {
+    const { document, clipIds } = project();
+    const before = renderV3State(document).tracks.flatMap((track) => track.clips ?? []).find((clip) => clip.id === clipIds.graphic)!;
+    expect(before.component?.texts).toEqual([{ key: 'headline', text: 'hi' }]);
+    const written = runAgentTimelineTool(document, 'set_clip_properties', { items: [{ clipId: clipIds.graphic, texts: [{ key: 'headline', value: 'Hello <world>' }] }] });
+    expect(written.ok, JSON.stringify(written)).toBe(true);
+    const after = renderV3State(written.document!).tracks.flatMap((track) => track.clips ?? []).find((clip) => clip.id === clipIds.graphic)!;
+    expect(after.component?.texts).toEqual([{ key: 'headline', text: 'Hello <world>' }]);
+    const refused = runAgentTimelineTool(document, 'set_clip_properties', { items: [{ clipId: clipIds.graphic, texts: [{ key: 'nope', value: 'x' }] }] });
+    expect(refused.ok).toBe(false);
+    expect(JSON.stringify(refused)).toContain('declared: headline');
+  });
+
+  it('retimes a component\'s own animation and reads it back; 1 and 0 restore it', () => {
+    const { document, clipIds } = project();
+    const slowed = runAgentTimelineTool(document, 'set_clip_properties', { items: [{ clipId: clipIds.graphic, motion: { speed: 0.5, delaySec: 0.4 } }] });
+    expect(slowed.ok, JSON.stringify(slowed)).toBe(true);
+    const graphic = () => (doc: EditorDocumentV2) => renderV3State(doc).tracks.flatMap((track) => track.clips ?? []).find((clip) => clip.id === clipIds.graphic)!;
+    expect(graphic()(slowed.document!).component?.motion).toEqual({ speed: 0.5, delaySec: 0.4 });
+    const restored = runAgentTimelineTool(slowed.document!, 'set_clip_properties', { items: [{ clipId: clipIds.graphic, motion: { speed: 1, delaySec: 0 } }] });
+    expect(graphic()(restored.document!).component?.motion).toBeUndefined();
   });
 });

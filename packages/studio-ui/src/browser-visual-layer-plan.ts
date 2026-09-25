@@ -49,7 +49,35 @@ export function serializeBrowserOverlayElements(
     : [...root.children] as HTMLElement[];
   for (const element of elements) {
     if (element.style.visibility === 'hidden') continue;
-    result += serializer.serializeToString(element);
+    result += serializer.serializeToString(withCanvasSnapshots(element, document));
   }
   return `${result}</div>`;
+}
+
+/**
+ * Canvas pixels are not part of serialized markup, so a canvas-drawn layer (a WebGL component, a
+ * matte) would export empty. Each canvas in the clone becomes an <img> of what the live canvas
+ * shows at this seek, with the same attributes; an element without canvases is returned as is.
+ * A canvas that cannot be read (tainted, lost context) is left for the empty result it had before.
+ */
+export function withCanvasSnapshots(element: HTMLElement, document: Document): Node {
+  const live = element.querySelectorAll('canvas');
+  if (!live.length) return element;
+  const clone = element.cloneNode(true) as HTMLElement;
+  const copies = clone.querySelectorAll('canvas');
+  live.forEach((canvas, index) => {
+    const copy = copies[index];
+    if (!copy) return;
+    let src = '';
+    try {
+      src = canvas.toDataURL('image/png');
+    } catch {
+      return;
+    }
+    const img = document.createElement('img');
+    for (const attr of Array.from(copy.attributes)) img.setAttribute(attr.name, attr.value);
+    img.setAttribute('src', src); // class/style carry over, so the stylesheet sizes it like the canvas
+    copy.replaceWith(img);
+  });
+  return clone;
 }

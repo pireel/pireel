@@ -11,6 +11,7 @@ import { webFontCatalog } from '../font-library';
 import { captionAnimationId } from '../caption-animations';
 import { documentCaptionStyle } from '../editor-document/caption-state';
 import { componentSchemaOf, componentValuesView, type ComponentValueType } from '../component-schema';
+import { dataEditFields } from '../component-props';
 import { clipPropertyDefaults, effectiveAudioClipProperties } from './clip-properties';
 
 import type {
@@ -34,7 +35,7 @@ export interface V3ClipView {
   audio?: { clipId: string; volumeDb?: number; mute?: boolean };
   linkGroupId?: string;
   enabled?: false;
-  component?: { componentId?: string; box?: unknown; props?: Array<{ key: string; type: ComponentValueType; value: unknown }> };
+  component?: { componentId?: string; box?: unknown; props?: Array<{ key: string; type: ComponentValueType; value: unknown }>; texts?: Array<{ key: string; text: string }>; motion?: { speed?: number; delaySec?: number } };
   [property: string]: unknown;
 }
 
@@ -221,6 +222,11 @@ export function renderV3Clip(clip: TimelineClip, trackId: string, trackRole?: st
       // set_clip_properties.props needs no other lookup.
       const editable = block.templateId ? componentSchemaOf({ templateId: block.templateId, slots: (block.slots ?? {}) as Record<string, unknown> }) : null;
       if (editable) view.component.props = componentValuesView(editable);
+      // On-screen wording of a bespoke component, by key: set_clip_properties.texts rewrites it in place.
+      const texts = block.templateId === 'custom' && typeof block.slots?.innerHtml === 'string' ? dataEditFields(block.slots.innerHtml) : [];
+      const motion = (block as { motion?: { speed?: number; delaySec?: number } }).motion;
+      if (motion && (motion.speed || motion.delaySec)) view.component.motion = motion;
+      if (texts.length) view.component.texts = texts.slice(0, 24).map((field) => ({ key: field.key, text: field.text.length > 120 ? `${field.text.slice(0, 120)}…` : field.text }));
       break;
     }
     case 'caption': {

@@ -51,7 +51,6 @@ export const CAPTIONS_ZH: Record<string, string> = {
   'captions.classicStyles': '经典样式',
   'captions.speechCleanup': '口播清理',
   'captions.selectPause': '选择这段 {sec} 秒的停顿',
-  'captions.pauseLabel': '{sec} 秒的口播停顿',
   'captions.deletePause': '删除这段 {sec} 秒的停顿',
   'captions.pauseDeleted': '已删除 {sec} 秒停顿',
   'captions.transcriptParagraph': '段落 {n}',

@@ -32,6 +32,15 @@ export function kitSampleProps(cid: string): Record<string, unknown> {
     };
   if (cid === 'steps') return { items: [{ text: t('kitSample.step1') }, { text: t('kitSample.step2') }, { text: t('kitSample.step3') }] };
   if (cid === 'title') return { title: t('kitSample.titleMain'), sub: t('kitSample.titleSub') };
+  if (cid === 'cta') return { action: t('kitSample.ctaAction'), done: t('kitSample.ctaDone'), line: t('kitSample.ctaLine') };
+  if (cid === 'countdown') return { from: 3, label: t('kitSample.cdLabel') };
+  if (cid === 'offer') return { was: '¥399', now: '¥199', tag: t('kitSample.offerTag'), perk: t('kitSample.offerPerk') };
+  if (cid === 'checklist') return { items: [{ text: t('kitSample.check1') }, { text: t('kitSample.check2') }, { text: t('kitSample.check3') }] };
+  if (cid === 'qa') return { question: t('kitSample.qaQ'), answer: t('kitSample.qaA'), reason: t('kitSample.qaR') };
+  if (cid === 'location') return { place: t('kitSample.locPlace'), detail: t('kitSample.locDetail') };
+  if (cid === 'ranking') return { items: [{ name: t('kitSample.rank1') }, { name: t('kitSample.rank2') }, { name: t('kitSample.rank3') }] };
+  if (cid === 'particleTitle') return { text: t('kitSample.particleText'), sub: t('kitSample.particleSub') };
+  if (cid === 'mythFact') return { myth: t('kitSample.myth'), fact: t('kitSample.fact'), mythTag: t('kitSample.mythTag'), factTag: t('kitSample.factTag') };
   if (cid === 'code')
     return {
       variant: 'highlight',

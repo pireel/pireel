@@ -47,7 +47,7 @@ export function renderComparison(id: string, raw: unknown, ctx: RenderCtx): Rend
   const shared = `
 #${id} .wrap{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;padding:${s.pad}px;gap:${Math.round(s.gap * 0.7)}px;${panel}color:${inkOn(p)};font-family:${tk('--sk-font-head')};}
 #${id} .lbl{font-size:${s.label}px;font-weight:700;${shadow}}
-#${id} .val{font-family:${tk('--sk-font-num')};font-variant-numeric:tabular-nums;font-feature-settings:"tnum";font-weight:800;font-size:${vpx}px;line-height:1.05;white-space:nowrap;${shadow}}
+#${id} .val{font-family:${tk('--sk-font-num')};font-variant-numeric:tabular-nums;font-feature-settings:"tnum";font-weight:var(--sk-head-weight, 800);text-transform:var(--sk-head-case, none);font-size:${vpx}px;line-height:1.05;white-space:nowrap;${shadow}}
 #${id} .note{font-size:${s.kicker}px;color:${inkOn(p, true)};text-align:center;${shadow}}`;
 
   let html: string;
@@ -93,7 +93,7 @@ export function renderComparison(id: string, raw: unknown, ctx: RenderCtx): Rend
 #${id} .side.win .val{color:${tk('--sk-accent')};}
 #${id} .mid{display:flex;flex-direction:column;align-items:center;gap:${Math.round(s.gap * 0.3)}px;justify-content:center;}
 #${id} .mid .rule{display:block;width:${s.rule - 1}px;flex:1;background:${tk('--sk-line')};}
-#${id} .mid .vs{font-size:${s.kicker}px;font-weight:800;letter-spacing:0.08em;color:${inkOn(p, true)};${shadow}}
+#${id} .mid .vs{font-size:${s.kicker}px;font-weight:var(--sk-head-weight, 800);text-transform:var(--sk-head-case, none);letter-spacing:0.08em;color:${inkOn(p, true)};${shadow}}
 </style>`;
     tl.push(fadeUp(`#${id} .side.a`, 0.05, { y: 14, dur: 0.35 }));
     tl.push(fadeUp(`#${id} .mid`, 0.2, { y: 0, dur: 0.3 }));

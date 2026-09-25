@@ -51,7 +51,6 @@ export const CAPTIONS_EN: Record<string, string> = {
   'captions.classicStyles': 'Classic styles',
   'captions.speechCleanup': 'Clean up',
   'captions.selectPause': 'Select this {sec}s pause',
-  'captions.pauseLabel': '{sec}s speech pause',
   'captions.deletePause': 'Delete this {sec}s pause',
   'captions.pauseDeleted': 'Removed a {sec}s pause',
   'captions.transcriptParagraph': 'Section {n}',

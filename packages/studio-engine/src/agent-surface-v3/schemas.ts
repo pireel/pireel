@@ -84,6 +84,8 @@ const CLIP_PROPERTY_FIELD_SCHEMAS: Record<ClipPropertyKey, Schema> = {
   enabled: bool(),
   box: BOX,
   props: arr(obj({ key: str('Property key from component.props.'), value: PROPERTY_VALUE }, ['key', 'value']), { minItems: 1, maxItems: 8, description: 'Graphic clips only: editable properties to set.' }),
+  motion: obj({ speed: num('Animation speed; 1 = as generated.', { min: 0.25, max: 4 }), delaySec: num('Seconds before the animation starts.', { min: 0, max: 30 }) }),
+  texts: arr(obj({ key: str('Text key from component.texts.'), value: str('The new wording, plain text.') }, ['key', 'value']), { minItems: 1, maxItems: 24, description: 'Graphic clips only: on-screen wording to replace, no regeneration.' }),
 };
 const CLIP_PROPERTY_ITEM: Schema = obj({
   clipId: str(),
@@ -460,13 +462,13 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       clipId: str('Existing graphic clip to rewrite.'),
       atFrame: FRAME('New component start'), durationFrames: int('New component duration in frames.', 1),
       placement: PLACEMENT_PCT, backdrop: str('What sits under the box and which zones must stay clear.'),
-      format: enumOf(['html', 'kit'], 'html = bespoke markup; kit = a registered component (JSON props).'),
+      format: enumOf(['html', 'kit'], 'kit = a registered library component with JSON props — prefer it without a frame when one fits; html = bespoke markup (no fitting component, or a frame is attached).'),
       fontFamily: str('Optional display face for the component: web:<id> from get_state.fonts, google:<Family> from search_assets kind font, or local:<family>. The brief then defines var(--font-display); copy the same value to apply_component.'),
     }, ['instruction']),
   },
   apply_component: {
     description:
-      `Validate and place the component you generated from compose_component: pass raw (your full generated text) with the target clipId, atFrame, durationFrames and placement copied unchanged. Lint rejections list exact issues — fix only those and re-apply with the same clipId. generate=true instead asks Pireel's own model to author or rewrite from instruction (${CHARGE_MARKER} use only when the BYO path fails repeatedly). A rejection for <script>, an external library, canvas/WebGL, an iframe or embedded video is not fixable by retrying — the runtime is closed (see compose_component); rebuild that visual in markup, CSS and SVG. ${MG_BAKE_ROUTE} Here that means import_media, then add_clips with role broll and the component's box.`,
+      `Validate and place the component you generated from compose_component: pass raw (your full generated text) with the target clipId, atFrame, durationFrames and placement copied unchanged. Lint rejections list exact issues — fix only those and re-apply with the same clipId. A placed component comes back with one image of its settled frame (receipt settledFrame) on the real picture. generate=true instead asks Pireel's own model to author or rewrite from instruction (${CHARGE_MARKER} use only when the BYO path fails repeatedly). A rejection for <script>, an external library, canvas/WebGL, an iframe or embedded video is not fixable by retrying — the runtime is closed (see compose_component); rebuild that visual in markup, CSS and SVG. ${MG_BAKE_ROUTE} Here that means import_media, then add_clips with role broll and the component's box.`,
     inputSchema: obj({
       raw: str('Your full generated text in the contract compose_component returned.'),
       clipId: str('Target from compose_component, or the graphic clip to edit.'),

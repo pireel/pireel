@@ -41,6 +41,10 @@ export interface RenderCtx {
   canvas: { w: number; h: number };
   /** BCP-47 language of the on-screen content (affects type metrics for CJK). */
   lang?: string;
+  /** What sits behind a component that paints no surface of its own. The host expresses it as
+   *  --sk-ink / --sk-ink-muted (light on footage, the theme ink on a flat page); components read the
+   *  ink through inkOn and never branch on this field themselves. */
+  backdrop?: 'footage' | 'page';
   /** Block lifetime in seconds, when the host knows it — components with exit
    *  choreography (lower thirds) settle out before the end; absent = no exit. */
   durationSec?: number;

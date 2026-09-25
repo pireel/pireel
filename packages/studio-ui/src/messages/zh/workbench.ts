@@ -408,6 +408,8 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.propsAddRow": "添加一行",
   "workbench.propsLayout": "布局",
   "workbench.propsTiming": "时间",
+  "workbench.propsMotionSpeed": "动画速度",
+  "workbench.propsMotionDelay": "动画延迟",
   "workbench.propsAppearance": "外观",
   "workbench.propsName": "名称",
   "workbench.propsNameHint": "时间轴上显示的名字",

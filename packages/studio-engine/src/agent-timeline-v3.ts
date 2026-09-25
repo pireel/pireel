@@ -56,6 +56,7 @@ import { phraseWordIndexes, rowWords } from './caption-highlights';
 import { joinWords } from './caption-fx';
 import { applyWordMasks, groupWordsByAsset, maskWordsSummary, parseMaskWordsInput } from './word-masks-tool';
 import { applyComponentValues, blockPropsReadback, componentSchemaOf, componentValuesView, componentPropertyInputError } from './component-schema';
+import { dataEditFields, setDataEditText } from './component-props';
 import { isComponentPropertyValue } from './component-property-input';
 import type { TranscriptSegment } from './project-dto';
 import {
@@ -452,6 +453,23 @@ function setComponentProps(document: EditorDocumentV2, clipId: string, pairs: un
   return mutation(edit.document, `Set ${rows.length} propert${rows.length === 1 ? 'y' : 'ies'} on "${blockName(block)}"`, edit.receipts, { clipId, props: componentValuesView(after) });
 }
 
+function setComponentTexts(document: EditorDocumentV2, clipId: string, pairs: unknown): AgentTimelineOutcome {
+  const rows = Array.isArray(pairs) ? (pairs as unknown[]) : [];
+  const valid = rows.length > 0 && rows.every((pair) => pair && typeof pair === 'object' && string((pair as Input).key) && typeof (pair as Input).value === 'string');
+  if (!valid) return fail('texts is a non-empty array of {key, value} pairs; keys come from component.texts in get_state');
+  const block = projectOverlayBlockById(document, clipId);
+  if (!block) return fail(`graphic clip not found: ${clipId}`);
+  let innerHtml = block.templateId === 'custom' && typeof block.slots.innerHtml === 'string' ? block.slots.innerHtml : '';
+  const declared = dataEditFields(innerHtml).map((field) => field.key);
+  if (!declared.length) return fail('this component has no editable text: a registered component keeps its wording in component.props; otherwise rewrite it with apply_component');
+  const unknown = rows.map((pair) => (pair as Input).key as string).filter((key) => !declared.includes(key));
+  if (unknown.length) return fail(`unknown text keys: ${unknown.join(', ')} — declared: ${declared.join(', ')}`);
+  for (const pair of rows as Input[]) innerHtml = setDataEditText(innerHtml, pair.key as string, pair.value as string) ?? innerHtml;
+  const edit = applyOverlayDocumentEdits({ document, updates: [{ clipId: block.id, block: { slots: { ...block.slots, innerHtml } } }] });
+  if (!edit.ok) return fail(edit.error.message, { code: edit.error.code, trackIds: edit.error.trackIds });
+  return mutation(edit.document, `Set ${rows.length} text${rows.length === 1 ? '' : 's'} on "${blockName(block)}"`, edit.receipts, { clipId, texts: dataEditFields(innerHtml) });
+}
+
 export function setClipPropertiesV3(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const items = Array.isArray(input.items) ? (input.items as Input[]) : [];
   if (!items.length) return fail('items is required', { fix: 'Pass items: [{clipId, …properties}].' });
@@ -557,6 +575,25 @@ export function setClipPropertiesV3(document: EditorDocumentV2, input: Input): A
     if (item.props !== undefined) {
       failed = step(setComponentProps(next, clipId, item.props));
       if (failed) return failed;
+    }
+    if (item.texts !== undefined) {
+      failed = step(setComponentTexts(next, clipId, item.texts));
+      if (failed) return failed;
+    }
+    if (item.motion !== undefined) {
+      const motion = item.motion as Input;
+      const speed = motion && isFiniteNumber(motion.speed) ? motion.speed : undefined;
+      const delaySec = motion && isFiniteNumber(motion.delaySec) ? motion.delaySec : undefined;
+      if (speed === undefined && delaySec === undefined) return fail(`items[${index}].motion needs speed and/or delaySec`);
+      if (speed !== undefined && (speed < 0.25 || speed > 4)) return fail(`items[${index}].motion.speed must be 0.25–4`);
+      if (delaySec !== undefined && delaySec < 0) return fail(`items[${index}].motion.delaySec must be ≥ 0`);
+      const block = projectOverlayBlockById(next, clipId);
+      if (!block) return fail(`graphic clip not found: ${clipId}`);
+      const merged = { ...block.motion, ...(speed !== undefined ? { speed } : {}), ...(delaySec !== undefined ? { delaySec } : {}) };
+      const kept = { ...(merged.speed && merged.speed !== 1 ? { speed: merged.speed } : {}), ...(merged.delaySec ? { delaySec: merged.delaySec } : {}) };
+      const edit = applyOverlayDocumentEdits({ document: next, updates: [{ clipId: block.id, block: { motion: Object.keys(kept).length ? kept : undefined } }] });
+      if (!edit.ok) return fail(edit.error.message, { code: edit.error.code, trackIds: edit.error.trackIds });
+      next = edit.document; receipts.push(...edit.receipts); changes += 1;
     }
   }
   if (!changes) return fail('nothing_to_change', { fix: 'Each item needs at least one property besides clipId.' });

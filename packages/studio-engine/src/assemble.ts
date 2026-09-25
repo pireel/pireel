@@ -5,7 +5,7 @@ import { compileComponentStyles } from './component-styles';
  */
 
 import { getTheme, themeVarsCss, varsDeclCss } from './theme';
-import { editedDuration } from './trim';
+import { editedDuration, spans } from './trim';
 import {
   type Block,
   type Composition,
@@ -482,6 +482,17 @@ export function assembleBlockHtml(b: Block, comp: Composition): { html: string; 
   return assembleBlockWith(b, comp, comp.captionStyle ? resolveCaptionStyle(comp) : undefined);
 }
 
+/** What is behind a block when it starts: the shot playing then fills the frame ('full' /
+ *  'punch-in') → moving footage; a corner or split shot leaves the block on the page. With no shots
+ *  the component is an overlay on footage, its usual job. */
+export function blockBackdrop(comp: Composition, atSec: number): 'footage' | 'page' {
+  const shots = comp.shots ?? [];
+  if (!shots.length) return 'footage';
+  const playing = spans(shots).find((span) => atSec >= span.editedStart && atSec < span.editedEnd) ?? spans(shots).at(-1);
+  const treatment = playing?.clip.treatment ?? 'full';
+  return treatment === 'full' || treatment === 'punch-in' ? 'footage' : 'page';
+}
+
 function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof resolveCaptionStyle> | undefined): { html: string; timelineBody: string } {
   const { width: W, height: H } = comp;
 
@@ -499,6 +510,8 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
             boxH: Math.round((b.box?.h ?? 0.3) * H),
             canvasW: W,
             canvasH: H,
+            // A preview can pin it (library cards sit on a light checker, not footage).
+            backdrop: b.slots.backdrop === 'page' || b.slots.backdrop === 'footage' ? b.slots.backdrop : blockBackdrop(comp, b.startSec),
           },
         }
       : b;
@@ -571,7 +584,19 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
       const pe = isSentenceCaption(b) ? 'pointer-events:none;' : '';
       html = `<div class="comp" ${attrs} style="position:absolute;${propsCss}inset:0;${pe}${bgCss}${frame.join('')}${scaleCss}${fit}">\n${varsTag}${innerHtml}\n</div>`;
     }
-    return { html, timelineBody };
+    return { html, timelineBody: withMotionTiming(timelineBody, b.motion) };
+}
+
+/**
+ * Speed and start delay for ANY component animation, without reading it: the component's own
+ * timeline runs as a child of the block timeline, time-scaled and offset. Seeking the block at t
+ * shows the original animation at (t − delay) × speed, so preview, export and bake stay exact.
+ */
+export function withMotionTiming(body: string, motion: Block['motion']): string {
+  const speed = motion?.speed && Number.isFinite(motion.speed) ? Math.min(4, Math.max(0.25, motion.speed)) : 1;
+  const delay = motion?.delaySec && Number.isFinite(motion.delaySec) ? Math.max(0, motion.delaySec) : 0;
+  if (!body.trim() || (speed === 1 && delay === 0)) return body;
+  return `var __hfInner = gsap.timeline();\n(function (tl) {\n${body}\n})(__hfInner);\n__hfInner.timeScale(${speed});\ntl.add(__hfInner, ${delay});`;
 }
 
 export function assembleHtml(

@@ -45,7 +45,7 @@ export function renderCallout(id: string, raw: unknown, ctx: RenderCtx): RenderR
 
   const shared = `
 #${id} .wrap{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;padding:${s.pad}px;${panel}color:${inkOn(p)};font-family:${tk('--sk-font-head')};}
-#${id} .head{font-size:${head}px;font-weight:800;line-height:1.14;letter-spacing:${cjk ? '0.01em' : '-0.01em'};${shadow}}
+#${id} .head{font-size:${head}px;font-weight:var(--sk-head-weight, 800);text-transform:var(--sk-head-case, none);line-height:1.14;letter-spacing:${cjk ? '0.01em' : '-0.01em'};${shadow}}
 #${id} .support{font-size:${s.label}px;font-weight:500;color:${inkOn(p, true)};${shadow}}`;
 
   let html: string;
@@ -60,7 +60,7 @@ export function renderCallout(id: string, raw: unknown, ctx: RenderCtx): RenderR
 </div>
 <style>${shared}
 #${id} .wrap{gap:${Math.round(s.gap * 0.8)}px;}
-#${id} .qmark{font-size:${Math.round(head * 1.6)}px;line-height:0.6;font-weight:800;color:${tk('--sk-accent')};${shadow}}
+#${id} .qmark{font-size:${Math.round(head * 1.6)}px;line-height:0.6;font-weight:var(--sk-head-weight, 800);text-transform:var(--sk-head-case, none);color:${tk('--sk-accent')};${shadow}}
 #${id} .attr{display:flex;align-items:center;gap:${Math.round(s.gap * 0.7)}px;margin-top:${Math.round(s.gap * 0.4)}px;}
 #${id} .attr .rule{display:block;width:${Math.round(s.pad * 0.9)}px;height:${s.rule}px;background:${tk('--sk-line')};}
 </style>`;

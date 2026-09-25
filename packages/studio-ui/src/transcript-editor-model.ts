@@ -95,14 +95,6 @@ export function transcriptParagraphs(document: EditorDocumentV2, tokens: Transcr
   return paragraphs;
 }
 
-/** Speech provides meaning for a graphic placed in a pause; its placement remains the pause. */
-export function transcriptPauseContext(pause: TranscriptPause, tokens: readonly TranscriptToken[]): { before: string; after: string } {
-  return {
-    before: joinWords(tokens.filter((token) => token.endSec <= pause.startSec + 1e-7).slice(-12).map((token) => token.text)),
-    after: joinWords(tokens.filter((token) => token.startSec >= pause.endSec - 1e-7).slice(0, 12).map((token) => token.text)),
-  };
-}
-
 /** Keep each source sentence separately editable, while committing a multi-sentence selection once. */
 export function transcriptSelectionEdits(tokens: TranscriptToken[]): CaptionCueEdit[] {
   const groups: Array<{ tokens: TranscriptToken[]; last: TranscriptToken }> = [];

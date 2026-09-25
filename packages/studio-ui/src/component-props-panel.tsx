@@ -39,7 +39,7 @@ import {
 export interface InspectorBlockPatch {
   startSec?: number;
   durationSec?: number;
-  block?: Partial<Pick<EditorBlock, 'box' | 'scale' | 'rotation' | 'opacity' | 'bg' | 'border' | 'radius' | 'label'>>;
+  block?: Partial<Pick<EditorBlock, 'box' | 'scale' | 'rotation' | 'opacity' | 'bg' | 'border' | 'radius' | 'label' | 'motion'>>;
 }
 
 export interface ComponentPropsPanelProps {
@@ -117,6 +117,36 @@ function TextField({ label, text, onCommit }: { label?: string; text: string; on
   );
 }
 
+/** A compact numeric field: typing commits on blur / Enter, clamped to the range. */
+function NumberField({ label, value, min, max, step, suffix, onCommit }: { label: string; value: number; min: number; max: number; step: number; suffix: string; onCommit: (next: number) => void }) {
+  const shown = Number(value.toFixed(step < 1 ? 2 : 0));
+  const [draft, setDraft] = useState(String(shown));
+  useEffect(() => { setDraft(String(shown)); }, [shown]);
+  const commit = () => {
+    const next = Number(draft);
+    if (!Number.isFinite(next)) { setDraft(String(shown)); return; }
+    const clamped = Math.min(max, Math.max(min, next));
+    setDraft(String(clamped));
+    if (clamped !== shown) onCommit(clamped);
+  };
+  return (
+    <label className="flex min-w-0 flex-col gap-1">
+      <span className="text-ink-4 text-[10.5px]">{label}</span>
+      <span className="relative">
+        <input
+          inputMode="decimal"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+          className={`${FIELD} pr-6 tabular-nums`}
+        />
+        <span className="text-ink-4 pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10.5px]">{suffix}</span>
+      </span>
+    </label>
+  );
+}
+
 function Slider({ label, value, min, max, step, display, onCommit }: { label: string; value: number; min: number; max: number; step: number; display: string; onCommit: (next: number) => void }) {
   return (
     <Row label={label}>
@@ -144,6 +174,14 @@ function ColorRow({ label, value, swatches, noneTitle, onCommit }: { label: stri
       </div>
     </Stack>
   );
+}
+
+/** Merge one motion field, dropping defaults so an untouched component stores nothing. */
+function motionPatch(current: EditorBlock['motion'], change: { speed?: number; delaySec?: number }): EditorBlock['motion'] {
+  const next = { ...current, ...change };
+  const speed = next.speed && next.speed !== 1 ? next.speed : undefined;
+  const delaySec = next.delaySec && next.delaySec > 0 ? Math.round(next.delaySec * 10) / 10 : undefined;
+  return speed || delaySec ? { ...(speed ? { speed } : {}), ...(delaySec ? { delaySec } : {}) } : undefined;
 }
 
 function Empty({ text }: { text: string }) {
@@ -213,8 +251,31 @@ export function ComponentPropsPanel({ block, swatches, onBlockPatch, onValues, o
         </Group>
       )}
 
-      {/* Box (position/size/rotation) is dragged on the preview; start/duration on the timeline. */}
-      <Group label={t('workbench.propsAppearance')} first={!view && texts.length === 0}>
+      {/* Precise placement and timing; dragging on the preview / timeline edits the same values. */}
+      <Group label={t('workbench.propsLayout')} first={!view && texts.length === 0}>
+        <TextField label={t('workbench.propsName')} text={block.label ?? ''} onCommit={(label) => onBlockPatch({ block: { label: label.trim() || undefined } })} />
+        <div className="grid grid-cols-2 gap-2">
+          {([['x', 'workbench.propsX'], ['y', 'workbench.propsY'], ['w', 'workbench.propsW'], ['h', 'workbench.propsH']] as const).map(([axis, label]) => {
+            const box = block.box ?? { x: 0, y: 0, w: 1, h: 1 };
+            const size = axis === 'w' || axis === 'h';
+            return <NumberField key={axis} label={t(label)} value={box[axis] * 100} min={size ? 1 : -100} max={size ? 200 : 100} step={0.1} suffix="%" onCommit={(v) => onBlockPatch({ block: { box: { ...box, [axis]: v / 100 } } })} />;
+          })}
+          <NumberField label={t('workbench.propsRotation')} value={block.rotation ?? 0} min={-180} max={180} step={1} suffix="°" onCommit={(v) => onBlockPatch({ block: { rotation: v || undefined } })} />
+        </div>
+      </Group>
+
+      <Group label={t('workbench.propsTiming')}>
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label={t('workbench.propsStart')} value={block.startSec} min={0} max={36000} step={0.01} suffix="s" onCommit={(v) => onBlockPatch({ startSec: v })} />
+          <NumberField label={t('workbench.propsDuration')} value={block.durationSec} min={0.1} max={3600} step={0.01} suffix="s" onCommit={(v) => onBlockPatch({ durationSec: v })} />
+        </div>
+        <Slider label={t('workbench.propsMotionSpeed')} value={block.motion?.speed ?? 1} min={0.25} max={3} step={0.25} display={`${block.motion?.speed ?? 1}×`}
+          onCommit={(speed) => onBlockPatch({ block: { motion: motionPatch(block.motion, { speed }) } })} />
+        <Slider label={t('workbench.propsMotionDelay')} value={block.motion?.delaySec ?? 0} min={0} max={Math.max(0.1, Math.min(5, block.durationSec - 0.1))} step={0.1} display={`${(block.motion?.delaySec ?? 0).toFixed(1)}s`}
+          onCommit={(delaySec) => onBlockPatch({ block: { motion: motionPatch(block.motion, { delaySec }) } })} />
+      </Group>
+
+      <Group label={t('workbench.propsAppearance')}>
         <ColorRow label={t('workbench.propsBackground')} value={block.bg} swatches={swatches} noneTitle={t('workbench.noBackground')} onCommit={(bg) => onBlockPatch({ block: { bg } })} />
         <ColorRow label={t('workbench.propsBorder')} value={block.border} swatches={swatches} noneTitle={t('workbench.propsNoBorder')} onCommit={(border) => onBlockPatch({ block: { border } })} />
         <Slider label={t('workbench.propsRadius')} value={block.radius ?? 0} min={0} max={160} step={2} display={`${block.radius ?? 0} px`} onCommit={(v) => onBlockPatch({ block: { radius: v > 0 ? v : undefined } })} />

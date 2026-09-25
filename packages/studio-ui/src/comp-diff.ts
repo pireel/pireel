@@ -323,6 +323,7 @@ export function blockPatchableChange(a: Composition | null, b: Composition): Blo
       } else if (PATCH_TIMING.has(k)) p.timing = true;
       else if (PATCH_STYLE.has(k)) p.style = true;
       else if (k === 'templateId') p.replace = true;
+      else if (k === 'motion') p.slots = true; // animation speed/delay lives in the assembled timeline: re-assemble the node
       else if (k === 'slots') {
         // Kit blocks derive HTML from slots.props — content-only re-render (hf:blockHtml);
         // media animation changes only replace the GSAP timeline; any other slots change

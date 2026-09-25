@@ -2006,3 +2006,12 @@ describe('Agent composition transaction boundary', () => {
     expect(h.undoStackRef.current).toHaveLength(1);
   });
 });
+
+describe('componentSettledAtSec', () => {
+  it('lands after the entrance, retimed by the component motion, inside the clip', async () => {
+    const { componentSettledAtSec } = await import('./agent-tool-runner');
+    expect(componentSettledAtSec({ startSec: 10, durationSec: 4 })).toBe(12.2);
+    expect(componentSettledAtSec({ startSec: 10, durationSec: 4, motion: { speed: 2, delaySec: 0.5 } })).toBe(11.6);
+    expect(componentSettledAtSec({ startSec: 0, durationSec: 1 })).toBeLessThan(1);
+  });
+});

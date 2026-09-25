@@ -6997,7 +6997,6 @@ export function HyperframesWorkbench({
     ensureShots,
     stepAsr,
   });
-  const [pendingSelectionMG, setPendingSelectionMG] = useState<string | null>(null);
   /** "Add over this selection" popover (library pick or AI generation onto the selection's range). */
   const [addTarget, setAddTarget] = useState<TranscriptAddTarget | null>(null);
   const closeAddTarget = useCallback(() => setAddTarget(null), []);
@@ -7058,20 +7057,6 @@ export function HyperframesWorkbench({
       setPendingGenerations((items) => items.filter((item) => item.id !== id));
     }
   };
-  const generateSelectionMG = (text: string, startSec: number, endSec: number, pauseContext?: { before: string; after: string }) => {
-    if (!text.trim()) return;
-    openChat();
-    const from = Math.max(0, startSec).toFixed(2);
-    const to = Math.max(startSec + 0.1, endSec).toFixed(2);
-    setPendingSelectionMG(pauseContext
-      ? `在视频 ${from}s–${to}s 的口播停顿内添加 MG 动态图形。前文：${JSON.stringify(pauseContext.before)}；后文：${JSON.stringify(pauseContext.after)}。结合上下文设计画面，使用选中停顿的时间范围，保留原口播和剪辑节奏，不把停顿时长标签当作字幕内容。`
-      : `为视频 ${from}s–${to}s 的字幕稿选段「${text.trim()}」生成一段与语义匹配的 MG 动态图形。请放到对应时间范围，保留原口播与字幕可读性。`);
-  };
-  useEffect(() => {
-    if (!pendingSelectionMG || !initialChatThreads || chatBusy || !chatRef.current) return;
-    chatRef.current.send(pendingSelectionMG);
-    setPendingSelectionMG(null);
-  }, [pendingSelectionMG, initialChatThreads, chatBusy]);
   const transcriptControls = captionsPanelProps();
   const transcriptPanel = (
     <div data-cap-keep className="flex min-h-0 flex-1 flex-col">
@@ -7092,7 +7077,6 @@ export function HyperframesWorkbench({
           }}
           onDecorate={decorateTimelineScriptWords}
           onMask={maskTimelineScriptWords}
-          onGenerateMG={generateSelectionMG}
           onAddAtRange={addAtTranscriptRange}
           addKinds={shell.curatedAssets ? undefined : ['text', 'media', 'sfx', 'mg']}
           autoHighlight={studioProviders().autoHighlight}

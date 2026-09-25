@@ -69,7 +69,7 @@ export function renderMetric(id: string, raw: unknown, ctx: RenderCtx): RenderRe
   const shared = `
 #${id} .wrap{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;padding:${s.pad}px;${panel}color:${inkOn(p)};font-family:${tk('--sk-font-head')};}
 #${id} .kicker{font-size:${s.kicker}px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:${inkOn(p, true)};${shadow}}
-#${id} .value{font-family:${tk('--sk-font-num')};font-variant-numeric:tabular-nums;font-feature-settings:"tnum";font-weight:800;font-size:${hero}px;line-height:1.04;letter-spacing:-0.01em;display:flex;align-items:baseline;gap:${Math.round(s.gap * 0.5)}px;${shadow}}
+#${id} .value{font-family:${tk('--sk-font-num')};font-variant-numeric:tabular-nums;font-feature-settings:"tnum";font-weight:var(--sk-head-weight, 800);text-transform:var(--sk-head-case, none);font-size:${hero}px;line-height:1.04;letter-spacing:-0.01em;display:flex;align-items:baseline;gap:${Math.round(s.gap * 0.5)}px;${shadow}}
 #${id} .note{font-size:${s.label}px;color:${inkOn(p, true)};font-weight:500;${shadow}}
 #${id} .trend{display:inline-flex;align-self:center;width:${Math.round(hero * 0.3)}px;height:${Math.round(hero * 0.3)}px;}
 #${id} .trend svg{width:100%;height:100%;}
@@ -114,7 +114,7 @@ export function renderMetric(id: string, raw: unknown, ctx: RenderCtx): RenderRe
 </div>
 <style>${shared}
 #${id} .wrap{gap:${Math.round(s.gap * 0.7)}px;overflow:hidden;}
-#${id} .ghost{position:absolute;right:${-Math.round(hero * 0.18)}px;bottom:${-Math.round(hero * 0.34)}px;font-family:${tk('--sk-font-num')};font-weight:800;font-size:${Math.round(hero * 2.1)}px;line-height:1;color:${onCard ? tk('--sk-panel-2') : 'rgb(255 255 255 / 0.08)'};pointer-events:none;user-select:none;}
+#${id} .ghost{position:absolute;right:${-Math.round(hero * 0.18)}px;bottom:${-Math.round(hero * 0.34)}px;font-family:${tk('--sk-font-num')};font-weight:var(--sk-head-weight, 800);text-transform:var(--sk-head-case, none);font-size:${Math.round(hero * 2.1)}px;line-height:1;color:${onCard ? tk('--sk-panel-2') : 'rgb(255 255 255 / 0.08)'};pointer-events:none;user-select:none;}
 </style>`;
   }
 

@@ -109,7 +109,7 @@ export function renderSteps(id: string, raw: unknown, ctx: RenderCtx): RenderRes
 <style>${shared}
 #${id} .list{display:flex;flex-direction:column;gap:${Math.round(s.gap * 0.75)}px;}
 #${id} .it{display:flex;align-items:baseline;gap:${Math.round(s.gap * 0.7)}px;}
-#${id} .ix{font-family:${tk('--sk-font-num')};font-size:${s.label}px;font-weight:800;color:${tk('--sk-accent')};flex:none;}
+#${id} .ix{font-family:${tk('--sk-font-num')};font-size:${s.label}px;font-weight:var(--sk-head-weight, 800);text-transform:var(--sk-head-case, none);color:${tk('--sk-accent')};flex:none;}
 </style>`;
     items.forEach((_, i) => {
       tl.push(`tl.from('#${id} .i${i}',{autoAlpha:0,y:14,duration:0.4,ease:'power3.out'},${at(i)});`);

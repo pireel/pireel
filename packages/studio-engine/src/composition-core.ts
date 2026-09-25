@@ -71,6 +71,9 @@ export interface Block {
   radius?: number;
   /** Overall rotation (deg, -180–180): outermost container transform:rotate around center. Default/0 = no rotation. */
   rotation?: number;
+  /** Animation timing applied to the component's own timeline without rewriting it: speed
+   *  (0.25–4, default 1) and a start delay in seconds (default 0). */
+  motion?: { speed?: number; delaySec?: number };
   /** Content visual scale factor (font size scales too), written by corner-handle proportional scaling: window (box) ×k, content layer
    *  (contentBox) layout size unchanged (only center moves), and scale ×k stay in sync — zero reflow. Rendered as the content layer's
    *  CSS scale **property**, not affecting layout and not entering the transform chain — mutually non-overwriting with autofit's transform
