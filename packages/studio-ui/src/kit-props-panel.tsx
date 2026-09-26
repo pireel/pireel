@@ -20,6 +20,7 @@ import { groupOf, kitComponents, kitSurfaceSwatches, type PropertyGroup } from '
 import type { Block } from '@pireel/studio-engine/composition';
 import { Plus, X } from 'lucide-react';
 import { t } from './i18n';
+import { ACCENT_SWATCHES, ColorControl, INK_SWATCHES, OPTION_OFF, OPTION_ON, PROP_INPUT, PropRow, PropSlider } from './prop-controls';
 
 export interface FieldSchema {
   type?: string;
@@ -107,8 +108,7 @@ function OptionGlyph({ field, opt }: { field: string; opt: string }) {
   return null;
 }
 
-const INPUT =
-  'bg-transparent text-ink placeholder:text-ink-5 w-full rounded-md px-2.5 py-1.5 text-[12px] leading-5 shadow-[inset_0_0_0_1px_var(--color-line-2)] outline-none transition-shadow hover:shadow-[inset_0_0_0_1px_var(--color-ink-4)] focus:shadow-[inset_0_0_0_1.5px_var(--color-accent)]';
+const INPUT = PROP_INPUT;
 const LABEL = 'text-ink-4 text-[11px]';
 
 /** Label above, control full width — for colour, font, text and row lists. */
@@ -126,15 +126,7 @@ function Field({ label, trailing, description, children }: { label: string; trai
   );
 }
 
-/** Label left, control right — the compact editor row (sliders, segmented enums, switches). */
-function Row({ label, title, children }: { label: string; title?: string; children: ReactNode }) {
-  return (
-    <div className="flex min-h-[28px] items-center gap-3" title={title}>
-      <span className="text-ink-3 min-w-0 flex-1 truncate text-[11.5px]">{label}</span>
-      <div className="flex shrink-0 items-center gap-2">{children}</div>
-    </div>
-  );
-}
+const Row = PropRow;
 
 function Switch({ on, label, onToggle }: { on: boolean; label: string; onToggle: (next: boolean) => void }) {
   return (
@@ -222,7 +214,7 @@ export function PropsForm({
             >
               <div className="flex flex-col gap-1.5">
                 {rowsValue.map((row, index) => (
-                  <div key={index} className="bg-canvas/45 group flex items-start gap-1.5 rounded-md p-1.5">
+                  <div key={index} className="group flex items-start gap-1.5">
                     <span className="text-ink-5 w-3 shrink-0 pt-1.5 text-center text-[10px] tabular-nums">{index + 1}</span>
                     <div className="flex min-w-0 flex-1 flex-col gap-1">
                       {rowFields.map(([rk, rf]) => (
@@ -264,10 +256,8 @@ export function PropsForm({
                       type="button"
                       onClick={() => commit(key, opt)}
                       aria-pressed={v === opt}
-                      className={`min-w-0 truncate rounded-md px-2 py-1.5 text-left text-[11.5px] transition-[background-color,box-shadow,color] ${
-                        v === opt
-                          ? 'bg-accent/10 text-accent font-medium shadow-[inset_0_0_0_1.5px_var(--color-accent)]'
-                          : 'text-ink-2 hover:bg-panel-2 shadow-[inset_0_0_0_1px_var(--color-line-2)]'
+                      className={`min-w-0 truncate rounded-md px-2.5 py-1.5 text-left text-[11.5px] transition-[background-color,box-shadow,color] ${
+                        v === opt ? OPTION_ON : `bg-panel hover:bg-panel-2/70 ${OPTION_OFF}`
                       }`}
                     >
                       {kitOptionLabel(key, opt, componentId)}
@@ -279,7 +269,7 @@ export function PropsForm({
           }
           return (
             <Row key={key} label={label(key, f)} title={f.description}>
-              <div className="bg-panel-2 flex rounded-md p-0.5">
+              <div className="bg-panel flex rounded-md p-0.5">
                 {options.map((opt) => {
                   const word = kitOptionLabel(key, opt, componentId);
                   return (
@@ -290,7 +280,7 @@ export function PropsForm({
                       aria-pressed={v === opt}
                       title={word}
                       className={`flex min-w-0 items-center gap-1 truncate rounded px-2 py-1 text-[11px] transition-colors ${
-                        v === opt ? 'bg-panel text-ink font-medium shadow-sm' : 'text-ink-4 hover:text-ink'
+                        v === opt ? OPTION_ON : OPTION_OFF
                       }`}
                     >
                       <OptionGlyph field={key} opt={opt} />
@@ -316,21 +306,18 @@ export function PropsForm({
           const step = f.multipleOf ?? (max - min) / 100;
           const num = typeof v === 'number' ? v : min;
           return (
-            <Row key={key} label={label(key, f)} title={f.description}>
-              <input
-                type="range"
-                min={min}
-                max={max}
-                step={step}
-                value={num}
-                onChange={(e) => live(key, Number(e.target.value))}
-                onPointerUp={(e) => commit(key, Number((e.target as HTMLInputElement).value))}
-                onKeyUp={(e) => commit(key, Number((e.target as HTMLInputElement).value))}
-                onBlur={(e) => commit(key, Number(e.target.value))}
-                className="accent-accent h-1.5 w-24 cursor-pointer"
-              />
-              <span className="text-ink-4 w-10 text-right text-[11px] tabular-nums">{f['x-display'] === 'percent' ? `${Math.round(num * 100)}%` : Math.round(num * 100) / 100}</span>
-            </Row>
+            <PropSlider
+              key={key}
+              label={label(key, f)}
+              title={f.description}
+              value={num}
+              min={min}
+              max={max}
+              step={step}
+              display={f['x-display'] === 'percent' ? `${Math.round(num * 100)}%` : String(Math.round(num * 100) / 100)}
+              onLive={(next) => live(key, next)}
+              onCommit={(next) => commit(key, next)}
+            />
           );
         }
         if (f.format === 'font') {
@@ -360,71 +347,19 @@ export function PropsForm({
             a >= 100 ? hex6 : hex6 + Math.round((a / 100) * 255).toString(16).padStart(2, '0');
           const resetValue = resetMode === 'theme' ? '' : (f.default ?? '');
           const isReset = resetMode === 'theme' ? !val : val === resetValue;
-          const resetTitle = resetMode === 'theme' ? t('kitProp.followTheme') : t('workbench.resetProp');
-          const ring = 'ring-accent ring-2 ring-offset-1 ring-offset-panel';
-          const swatch = 'h-6 w-6 shrink-0 rounded-full shadow-[inset_0_0_0_1px_rgba(127,127,127,0.25)] transition-transform hover:scale-105';
           return (
-            <Field
+            <ColorControl
               key={key}
               label={label(key, f)}
-              description={f.description}
-              trailing={hex && (
-                <span className="text-ink-4 flex items-center gap-1.5 text-[11px] tabular-nums">
-                  <span className="h-3 w-3 rounded-full shadow-[inset_0_0_0_1px_rgba(127,127,127,0.25)]" style={{ background: val }} />
-                  {rgb.toUpperCase()}{alpha < 100 ? ` · ${alpha}%` : ''}
-                </span>
-              )}
-            >
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => commit(key, resetValue)}
-                  title={resetTitle}
-                  aria-label={resetTitle}
-                  className={`${swatch} bg-[linear-gradient(135deg,transparent_44%,#f43f5e_44%,#f43f5e_56%,transparent_56%)] ${isReset ? ring : ''}`}
-                />
-                {swatches.map((sw) => (
-                  <button
-                    key={sw.value}
-                    type="button"
-                    onClick={() => commit(key, withAlpha(sw.value, alpha))}
-                    title={sw.name}
-                    aria-label={sw.name}
-                    className={`${swatch} ${rgb.toLowerCase() === sw.value.toLowerCase() ? ring : ''}`}
-                    style={{ background: sw.value }}
-                  />
-                ))}
-                <label
-                  title={t('kitProp.customColor')}
-                  className={`${swatch} relative cursor-pointer overflow-hidden bg-[conic-gradient(#ff6b5f,#ffd24d,#37d6b0,#4d7cfe,#b89cff,#ff6b5f)]`}
-                >
-                  <input
-                    type="color"
-                    value={rgb || '#ffffff'}
-                    onInput={(e) => live(key, withAlpha((e.target as HTMLInputElement).value, alpha))}
-                    onChange={(e) => commit(key, withAlpha(e.target.value, alpha))}
-                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                    aria-label={t('kitProp.customColor')}
-                  />
-                </label>
-              </div>
-              {hex && (
-                <div className="flex items-center gap-2">
-                  <span className="text-ink-4 shrink-0 text-[10px]">{t('kitProp.opacity')}</span>
-                  <input
-                    type="range"
-                    min={10}
-                    max={100}
-                    step={5}
-                    value={alpha}
-                    onChange={(e) => live(key, withAlpha(rgb, Number(e.target.value)))}
-                    onPointerUp={(e) => commit(key, withAlpha(rgb, Number((e.target as HTMLInputElement).value)))}
-                    onBlur={(e) => commit(key, withAlpha(rgb, Number(e.target.value)))}
-                    className="accent-accent h-1.5 min-w-0 flex-1 cursor-pointer"
-                  />
-                </div>
-              )}
-            </Field>
+              title={f.description}
+              value={rgb}
+              swatches={key === 'accent' ? ACCENT_SWATCHES : key === 'ink' ? INK_SWATCHES : swatches}
+              resetLabel={resetMode === 'theme' ? t('kitProp.followTheme') : t('workbench.resetProp')}
+              isReset={isReset}
+              onReset={() => commit(key, resetValue)}
+              onPick={(next) => commit(key, withAlpha(next, alpha))}
+              alpha={{ value: alpha, label: t('kitProp.opacity'), onChange: (a) => commit(key, withAlpha(rgb, a)) }}
+            />
           );
         }
         // string

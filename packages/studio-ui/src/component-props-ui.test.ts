@@ -49,7 +49,7 @@ describe('editable properties on the UI side', () => {
     for (const label of ['强调色', '数值', '角标', '布局', '内容', '样式', '底板', '动效', '位置', '图片', '恢复默认', '不透明度']) expect(html).toContain(label);
     expect(html).toContain('type="range"');
     expect(html).toContain('role="switch"');
-    expect(html).toContain('type="color"');
+    expect(html.toLowerCase()).toContain('>#ff5a36<'); // a colour is one row showing its value; the picker opens on demand
     expect(html).toContain('>Column<'); // option ids read as words
     expect(html).toContain('data-block-selection-keep');
     const kit: Block = { id: 'k1', templateId: 'kit:steps', slots: { props: { variant: 'pipeline', items: [{ text: '第一步', note: '' }, { text: '第二步', note: '备注' }] } }, startSec: 0, durationSec: 4, trackIndex: 2 };

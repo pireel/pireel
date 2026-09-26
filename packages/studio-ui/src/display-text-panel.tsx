@@ -458,7 +458,7 @@ export function FontPicker({
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
-        className="bg-canvas/70 text-ink hover:bg-panel-2 flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-left text-[12px]"
+        className="bg-panel text-ink hover:bg-panel-2/70 flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-left text-[12px] transition-colors"
       >
         <span className="text-ink-4 text-[10px]">Aa</span>
         <span className="min-w-0 flex-1 truncate" style={selectedFamily ? { fontFamily: `"${selectedFamily}", sans-serif` } : undefined}>

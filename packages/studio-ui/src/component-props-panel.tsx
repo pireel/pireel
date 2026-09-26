@@ -27,6 +27,7 @@ import type { Block as EditorBlock } from '@pireel/studio-engine/composition';
 import { liveMessageFor } from './component-props-ui';
 import { FontPicker } from './display-text-panel';
 import { PropsForm, propertyGroupOf, type PropsSchema } from './kit-props-panel';
+import { ColorControl, PROP_INPUT, PropSlider } from './prop-controls';
 import { PROPERTY_GROUPS, type PropertyGroup } from '@pireel/studio-engine/kit-templates';
 import { t } from './i18n';
 import {
@@ -65,28 +66,17 @@ function humanizeKey(key: string): string {
   return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : key;
 }
 
-const FIELD =
-  'bg-transparent text-ink placeholder:text-ink-5 w-full rounded-md px-2.5 py-1.5 text-[12px] leading-5 shadow-[inset_0_0_0_1px_var(--color-line-2)] outline-none transition-shadow hover:shadow-[inset_0_0_0_1px_var(--color-ink-4)] focus:shadow-[inset_0_0_0_1.5px_var(--color-accent)]';
+const FIELD = PROP_INPUT;
 
 /** A hairline-topped group of rows. `first` drops the divider so the panel doesn't open on a line. */
 function Group({ label, first, children }: { label: string; first?: boolean; children: ReactNode }) {
   return (
-    <section className="px-3">
-      <div className={`text-ink-4 flex items-center gap-2 pb-2 text-[10px] font-semibold tracking-[0.1em] uppercase ${first ? 'pt-1' : 'border-line mt-1 border-t pt-3'}`}>
+    <section className="px-3.5">
+      <div className={`text-ink-2 flex items-center gap-2 pb-2.5 text-[11.5px] font-semibold ${first ? 'pt-1.5' : 'border-line mt-2 border-t pt-3.5'}`}>
         {label}
       </div>
-      <div className="flex flex-col gap-2.5 pb-1">{children}</div>
+      <div className="flex flex-col gap-2.5 pb-1.5">{children}</div>
     </section>
-  );
-}
-
-/** Label left, control right — the compact editor row (sliders, segmented enums, switches). */
-function Row({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex min-h-[28px] items-center gap-3">
-      <span className="text-ink-3 min-w-0 flex-1 truncate text-[11.5px]">{label}</span>
-      <div className="flex shrink-0 items-center gap-2">{children}</div>
-    </div>
   );
 }
 
@@ -149,31 +139,21 @@ function NumberField({ label, value, min, max, step, suffix, onCommit }: { label
 }
 
 function Slider({ label, value, min, max, step, display, onCommit }: { label: string; value: number; min: number; max: number; step: number; display: string; onCommit: (next: number) => void }) {
-  return (
-    <Row label={label}>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onCommit(Number(e.target.value))} className="accent-accent h-1.5 w-24 cursor-pointer" />
-      <span className="text-ink-4 w-10 text-right text-[11px] tabular-nums">{display}</span>
-    </Row>
-  );
+  return <PropSlider label={label} value={value} min={min} max={max} step={step} display={display} onCommit={onCommit} />;
 }
 
-/** Swatch row with a "none" pill and a custom colour picker — the same idiom as the props form. */
+/** A block-level colour (frame background / outline) in the shared one-row colour control. */
 function ColorRow({ label, value, swatches, noneTitle, onCommit }: { label: string; value: string | undefined; swatches: ReadonlyArray<{ label: string; value: string }>; noneTitle: string; onCommit: (next: string | undefined) => void }) {
-  const ring = 'ring-accent ring-2 ring-offset-1 ring-offset-panel';
-  const swatch = 'h-6 w-6 shrink-0 rounded-full shadow-[inset_0_0_0_1px_rgba(127,127,127,0.25)] transition-transform hover:scale-105';
-  const hex = /^#[0-9a-fA-F]{6}$/.test(value ?? '') ? value! : '#ffffff';
   return (
-    <Stack label={label}>
-      <div className="flex flex-wrap items-center gap-2">
-        <button type="button" onClick={() => onCommit(undefined)} title={noneTitle} aria-label={noneTitle} className={`${swatch} bg-[linear-gradient(135deg,transparent_44%,#f43f5e_44%,#f43f5e_56%,transparent_56%)] ${!value ? ring : ''}`} />
-        {swatches.map((sw) => (
-          <button key={sw.value} type="button" onClick={() => onCommit(sw.value)} title={sw.label} aria-label={sw.label} className={`${swatch} ${value?.toLowerCase() === sw.value.toLowerCase() ? ring : ''}`} style={{ background: sw.value }} />
-        ))}
-        <label className={`${swatch} relative cursor-pointer overflow-hidden bg-[conic-gradient(#ff6b5f,#ffd24d,#37d6b0,#4d7cfe,#b89cff,#ff6b5f)]`} title={t('kitProp.customColor')}>
-          <input type="color" value={hex} onChange={(e) => onCommit(e.target.value)} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" aria-label={t('kitProp.customColor')} />
-        </label>
-      </div>
-    </Stack>
+    <ColorControl
+      label={label}
+      value={/^#[0-9a-fA-F]{6}/.test(value ?? '') ? value! : ''}
+      swatches={swatches.map((sw) => ({ name: sw.label, value: sw.value }))}
+      resetLabel={noneTitle}
+      isReset={!value}
+      onReset={() => onCommit(undefined)}
+      onPick={(next) => onCommit(next)}
+    />
   );
 }
 
@@ -326,7 +306,7 @@ export function ComponentPropsPanel({ block, swatches, onBlockPatch, onValues, o
               <div className="bg-panel-2 flex h-11 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md shadow-[inset_0_0_0_1px_var(--color-line-2)]">
                 {img.src ? <img src={img.src} alt={img.alt} className="h-full w-full object-cover" /> : <ImageIcon size={14} className="text-ink-4" />}
               </div>
-              <button type="button" onClick={() => onReplaceImage(img.index)} className="bg-panel-2 text-ink-2 hover:text-ink flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-[11px] shadow-[inset_0_0_0_1px_var(--color-line-2)]">
+              <button type="button" onClick={() => onReplaceImage(img.index)} className="bg-panel hover:bg-panel-2/70 text-ink-2 hover:text-ink flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-[11px] transition-colors">
                 <RefreshCw size={11} />
                 {t('workbench.propsReplaceImage')}
               </button>
@@ -343,7 +323,7 @@ export function ComponentPropsPanel({ block, swatches, onBlockPatch, onValues, o
           <button
             type="button"
             onClick={() => onValues(resetStyle(view.schema as PropsSchema, view.values))}
-            className="text-ink-3 hover:text-ink hover:bg-panel-2 w-full rounded-md py-1.5 text-[11.5px] shadow-[inset_0_0_0_1px_var(--color-line-2)] transition-colors"
+            className="bg-panel hover:bg-panel-2/70 text-ink-3 hover:text-ink w-full rounded-md py-1.5 text-[11.5px] transition-colors"
           >
             {t('workbench.propsResetStyle')}
           </button>
