@@ -82,7 +82,15 @@ export const INK_SWATCHES: ReadonlyArray<{ name: string; value: string }> = [
 ];
 
 const SWATCH = 'h-5 w-5 shrink-0 rounded-full shadow-[inset_0_0_0_1px_rgba(127,127,127,0.28)]';
-const NONE_SWATCH = `${SWATCH} bg-[linear-gradient(135deg,transparent_44%,#f43f5e_44%,#f43f5e_56%,transparent_56%)]`;
+/** The empty choice: an open dashed ring ("none"), or — when the value follows something — that
+ *  colour inside the dashed ring, so "follow theme" shows what it follows. */
+function EmptySwatch({ follows, className = '' }: { follows?: string; className?: string }) {
+  return (
+    <span className={`relative flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-dashed border-[var(--color-ink-4)] ${className}`}>
+      {follows ? <span className="h-3 w-3 rounded-full shadow-[inset_0_0_0_1px_rgba(127,127,127,0.28)]" style={{ background: follows }} /> : null}
+    </span>
+  );
+}
 
 /**
  * One colour property in one row: the current colour and its value on the right; the swatches,
@@ -98,6 +106,7 @@ export function ColorControl({
   onReset,
   onPick,
   alpha,
+  follows,
 }: {
   label: string;
   title?: string;
@@ -111,6 +120,8 @@ export function ColorControl({
   onPick: (hex: string) => void;
   /** Opacity for a concrete colour, 10–100. */
   alpha?: { value: number; label: string; onChange: (next: number) => void };
+  /** The colour an empty value resolves to (the theme's), shown inside the empty swatch. */
+  follows?: string;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -138,7 +149,7 @@ export function ColorControl({
         >
           {/* A concrete colour always shows itself (a bespoke default is a real colour); only an
               empty value — following the theme, or none — reads as the reset choice. */}
-          {!hex ? <span className={NONE_SWATCH} /> : <span className={SWATCH} style={{ background: value }} />}
+          {!hex ? <EmptySwatch follows={follows} /> : <span className={SWATCH} style={{ background: value }} />}
           <span className={`truncate tabular-nums ${!hex ? 'text-ink-3' : 'text-ink uppercase'}`}>
             {!hex ? resetLabel : hex}
           </span>
@@ -147,7 +158,9 @@ export function ColorControl({
       {open && (
         <div className="bg-canvas absolute right-0 top-full z-30 mt-1 w-[212px] rounded-lg p-2.5 shadow-[0_0_0_1px_var(--color-line-2),0_12px_32px_rgb(0_0_0/0.14)]">
           <div className="grid grid-cols-7 gap-1.5">
-            <button type="button" onClick={onReset} title={resetLabel} aria-label={resetLabel} className={`${NONE_SWATCH} ${isReset ? ring : ''}`} />
+            <button type="button" onClick={onReset} title={resetLabel} aria-label={resetLabel} className={`rounded-full ${isReset ? ring : ''}`}>
+              <EmptySwatch follows={follows} />
+            </button>
             {swatches.map((sw) => (
               <button
                 key={sw.value}

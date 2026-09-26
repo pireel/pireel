@@ -50,6 +50,8 @@ export interface ComponentPropsPanelProps {
   canvas: { width: number; height: number };
   /** Background / border swatches (theme paper and panel first). */
   swatches: ReadonlyArray<{ label: string; value: string }>;
+  /** Resolved theme colours (accent, fg, panel, line) — what "follow theme" shows. */
+  themeVars?: Record<string, string>;
   /** Commit a geometry / timing / appearance / label change (one undo step, no regeneration). */
   onBlockPatch: (patch: InspectorBlockPatch) => void;
   /** Commit the form's next values (registered or bespoke — the engine knows where they persist). */
@@ -108,33 +110,20 @@ function TextField({ label, text, onCommit }: { label?: string; text: string; on
   );
 }
 
-/** A compact numeric field: typing commits on blur / Enter, clamped to the range. */
-function NumberField({ label, value, min, max, step, suffix, onCommit }: { label: string; value: number; min: number; max: number; step: number; suffix: string; onCommit: (next: number) => void }) {
-  const shown = Number(value.toFixed(step < 1 ? 2 : 0));
-  const [draft, setDraft] = useState(String(shown));
-  useEffect(() => { setDraft(String(shown)); }, [shown]);
-  const commit = () => {
-    const next = Number(draft);
-    if (!Number.isFinite(next)) { setDraft(String(shown)); return; }
-    const clamped = Math.min(max, Math.max(min, next));
-    setDraft(String(clamped));
-    if (clamped !== shown) onCommit(clamped);
-  };
+/** The component's name, edited in place in the header: reads as a title until hovered or focused. */
+function NameField({ name, placeholder, onCommit }: { name: string; placeholder: string; onCommit: (value: string) => void }) {
+  const [draft, setDraft] = useState(name);
+  useEffect(() => { setDraft(name); }, [name]);
   return (
-    <label className="flex min-w-0 flex-col gap-1">
-      <span className="text-ink-4 text-[10.5px]">{label}</span>
-      <span className="relative">
-        <input
-          inputMode="decimal"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-          className={`${FIELD} pr-6 tabular-nums`}
-        />
-        <span className="text-ink-4 pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10.5px]">{suffix}</span>
-      </span>
-    </label>
+    <input
+      value={draft}
+      placeholder={placeholder}
+      aria-label={t('workbench.propsName')}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => { if (draft !== name) onCommit(draft); }}
+      onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') { setDraft(name); (e.target as HTMLInputElement).blur(); } }}
+      className="text-ink placeholder:text-ink hover:bg-panel focus:bg-panel w-full truncate rounded-md bg-transparent px-1 py-0.5 text-[13px] font-semibold leading-tight outline-none transition-colors"
+    />
   );
 }
 
@@ -155,6 +144,18 @@ function ColorRow({ label, value, swatches, noneTitle, onCommit }: { label: stri
       onPick={(next) => onCommit(next)}
     />
   );
+}
+
+/** Theme tokens → the shared colour properties that follow them when left empty. */
+function themeColorsOf(vars: Record<string, string> | undefined): Record<string, string> | undefined {
+  if (!vars) return undefined;
+  const pick = (k: string) => (vars[k] && !vars[k]!.startsWith('var(') ? vars[k]! : undefined);
+  const out: Record<string, string> = {};
+  for (const [prop, token] of [['accent', 'accent'], ['ink', 'fg'], ['surfaceColor', 'panel'], ['borderColor', 'line']] as const) {
+    const v = pick(token);
+    if (v) out[prop] = v;
+  }
+  return out;
 }
 
 const GROUP_LABEL: Record<PropertyGroup, string> = {
@@ -187,7 +188,7 @@ function Empty({ text }: { text: string }) {
   return <div data-block-selection-keep className="text-ink-4 flex h-full items-center justify-center px-6 text-center text-[11px] leading-5">{text}</div>;
 }
 
-export function ComponentPropsPanel({ block, swatches, onBlockPatch, onValues, onLive, onText, onReplaceImage, onRemoveImage }: ComponentPropsPanelProps) {
+export function ComponentPropsPanel({ block, swatches, themeVars, onBlockPatch, onValues, onLive, onText, onReplaceImage, onRemoveImage }: ComponentPropsPanelProps) {
   const [localFonts, setLocalFonts] = useState<LocalFontFamilyOption[]>(cachedLocalFontFamilies);
   const [fontAccessState, setFontAccessState] = useState<'idle' | 'loading' | 'loaded' | 'denied' | 'unsupported'>('idle');
   const requestLocalFonts = async () => {
@@ -205,7 +206,7 @@ export function ComponentPropsPanel({ block, swatches, onBlockPatch, onValues, o
   const isCustom = block.templateId === 'custom';
   const headerName = block.label?.trim() || (isCustom ? t('workbench.componentHeaderCustom') : t('workbench.componentHeaderKit'));
   const schemaFields = Object.entries(((view?.schema as PropsSchema | undefined)?.properties) ?? {});
-  const groupsWithFields = new Set(schemaFields.map(([key, f]) => propertyGroupOf(key, f)));
+  const groupsWithFields = new Set(schemaFields.filter(([, f]) => !f['x-hidden']).map(([key, f]) => propertyGroupOf(key, f)));
   // Fixed order; a section shows when the component has something in it. Style, surface and motion
   // are always there: every component takes opacity, a frame and timing of its entrance.
   const sections = PROPERTY_GROUPS.filter((group) =>
@@ -216,6 +217,7 @@ export function ComponentPropsPanel({ block, swatches, onBlockPatch, onValues, o
       schema={view.schema as PropsSchema}
       values={view.values}
       group={group}
+      themeColors={themeColorsOf(themeVars)}
       className="flex flex-col gap-2.5"
       resetMode={view.source === 'kit' ? 'theme' : 'default'}
       {...(view.source === 'kit' && block.templateId.startsWith('kit:') ? { componentId: block.templateId.slice(4) } : {})}
@@ -243,9 +245,10 @@ export function ComponentPropsPanel({ block, swatches, onBlockPatch, onValues, o
         <div className="bg-accent/12 text-accent flex h-7 w-7 shrink-0 items-center justify-center rounded-lg">
           <Shapes size={15} />
         </div>
-        <div className="min-w-0">
-          <div className="text-ink truncate text-[13px] font-semibold leading-tight">{headerName}</div>
-          <div className="text-ink-4 truncate text-[10.5px]">{isCustom ? t('workbench.componentHeaderCustom') : t('workbench.componentHeaderKit')}</div>
+        <div className="min-w-0 flex-1">
+          {/* The name edits in place; placement and timing are edited on the canvas and timeline. */}
+          <NameField name={block.label ?? ''} placeholder={headerName} onCommit={(label) => onBlockPatch({ block: { label: label.trim() || undefined } })} />
+          <div className="text-ink-4 truncate px-1 text-[10.5px]">{isCustom ? t('workbench.componentHeaderCustom') : t('workbench.componentHeaderKit')}</div>
         </div>
       </div>
 
@@ -278,26 +281,6 @@ export function ComponentPropsPanel({ block, swatches, onBlockPatch, onValues, o
           )}
         </Group>
       ))}
-
-      {/* Precise placement and timing; dragging on the preview / timeline edits the same values. */}
-      <Group label={t('workbench.propsPosition')}>
-        <TextField label={t('workbench.propsName')} text={block.label ?? ''} onCommit={(label) => onBlockPatch({ block: { label: label.trim() || undefined } })} />
-        <div className="grid grid-cols-2 gap-2">
-          {([['x', 'workbench.propsX'], ['y', 'workbench.propsY'], ['w', 'workbench.propsW'], ['h', 'workbench.propsH']] as const).map(([axis, label]) => {
-            const box = block.box ?? { x: 0, y: 0, w: 1, h: 1 };
-            const size = axis === 'w' || axis === 'h';
-            return <NumberField key={axis} label={t(label)} value={box[axis] * 100} min={size ? 1 : -100} max={size ? 200 : 100} step={0.1} suffix="%" onCommit={(v) => onBlockPatch({ block: { box: { ...box, [axis]: v / 100 } } })} />;
-          })}
-          <NumberField label={t('workbench.propsRotation')} value={block.rotation ?? 0} min={-180} max={180} step={1} suffix="°" onCommit={(v) => onBlockPatch({ block: { rotation: v || undefined } })} />
-        </div>
-      </Group>
-
-      <Group label={t('workbench.propsTiming')}>
-        <div className="grid grid-cols-2 gap-2">
-          <NumberField label={t('workbench.propsStart')} value={block.startSec} min={0} max={36000} step={0.01} suffix="s" onCommit={(v) => onBlockPatch({ startSec: v })} />
-          <NumberField label={t('workbench.propsDuration')} value={block.durationSec} min={0.1} max={3600} step={0.01} suffix="s" onCommit={(v) => onBlockPatch({ durationSec: v })} />
-        </div>
-      </Group>
 
       {images.length > 0 && (
         <Group label={t('workbench.propsImages')}>

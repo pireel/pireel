@@ -605,4 +605,7 @@ export const PANELS_ZH: Record<string, string> = {
   "kitProp.font": "字体",
   "kitProp.textScale": "字号",
   "kitProp.pace": "节奏",
+  "kitOpt.mark.check": "打勾",
+  "kitOpt.mark.cross": "划掉",
+  "kitOpt.mark.none": "未完成",
 };

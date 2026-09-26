@@ -713,4 +713,5 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.propsGroupMotion": "动效",
   "workbench.propsPosition": "位置",
   "workbench.propsResetStyle": "恢复默认样式",
+  "workbench.propsDragRow": "拖动排序",
 };

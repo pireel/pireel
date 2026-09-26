@@ -639,4 +639,7 @@ export const PANELS_EN: Record<string, string> = {
   "kitProp.font": "Font",
   "kitProp.textScale": "Text size",
   "kitProp.pace": "Pace",
+  "kitOpt.mark.check": "Checked",
+  "kitOpt.mark.cross": "Crossed out",
+  "kitOpt.mark.none": "Open",
 };

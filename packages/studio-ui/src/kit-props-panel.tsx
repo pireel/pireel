@@ -15,10 +15,10 @@
  * controls from the panel, a focus ring replaces outlines, selection is a filled pill or a ring.
  */
 
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { groupOf, kitComponents, kitSurfaceSwatches, type PropertyGroup } from '@pireel/studio-engine/kit-templates';
 import type { Block } from '@pireel/studio-engine/composition';
-import { Plus, X } from 'lucide-react';
+import { GripVertical, Plus, X } from 'lucide-react';
 import { t } from './i18n';
 import { ACCENT_SWATCHES, ColorControl, INK_SWATCHES, OPTION_OFF, OPTION_ON, PROP_INPUT, PropRow, PropSlider } from './prop-controls';
 
@@ -39,6 +39,8 @@ export interface FieldSchema {
   'x-group'?: string;
   /** 'percent' shows a factor as a percentage (1 → 100%). */
   'x-display'?: string;
+  /** Kept for stored props, not offered by editors. */
+  'x-hidden'?: boolean;
   default?: unknown;
   /** Row arrays (kit `rows()`): each row is an object of primitive fields. */
   items?: { properties?: Record<string, FieldSchema>; required?: string[] };
@@ -81,7 +83,7 @@ export function kitOptionLabel(key: string, opt: string, componentId?: string): 
 }
 
 /** Shared options drawn by OptionGlyph. */
-const GLYPH_FIELDS = new Set(['surface', 'border', 'radius', 'trend']);
+const GLYPH_FIELDS = new Set(['surface', 'border', 'radius', 'trend', 'mark']);
 
 /** A tiny drawing of what a shared option does, so the choice reads before its word does. */
 function OptionGlyph({ field, opt }: { field: string; opt: string }) {
@@ -99,6 +101,11 @@ function OptionGlyph({ field, opt }: { field: string; opt: string }) {
   if (field === 'radius') {
     const r = { sharp: 0, soft: 1.8, round: 3.6, pill: 4.5 }[opt] ?? 2;
     return svg(<rect x="2.5" y="3.5" width="11" height="9" rx={r} {...stroke} />);
+  }
+  if (field === 'mark') {
+    if (opt === 'check') return svg(<><rect x="2" y="2" width="12" height="12" rx="3" {...stroke} /><path d="M5 8.2l2 2L11 6" {...stroke} strokeWidth={1.7} /></>);
+    if (opt === 'cross') return svg(<><rect x="2" y="2" width="12" height="12" rx="3" {...stroke} /><path d="M5.5 5.5l5 5M10.5 5.5l-5 5" {...stroke} strokeWidth={1.7} /></>);
+    return svg(<rect x="2" y="2" width="12" height="12" rx="3" {...stroke} />);
   }
   if (field === 'trend') {
     if (opt === 'up') return svg(<path d="M3 11l4-4 2.5 2.5L13 6M10 6h3v3" {...stroke} />);
@@ -143,6 +150,122 @@ function Switch({ on, label, onToggle }: { on: boolean; label: string; onToggle:
   );
 }
 
+/** An editable list of rows: inputs per text/number field, an icon toggle per small enum (cycles on
+ *  click), a drag handle to reorder, add within maxItems and remove on hover. */
+function RowList({
+  label,
+  description,
+  field,
+  rows,
+  labelOf,
+  componentId,
+  onChange,
+}: {
+  label: string;
+  description?: string;
+  field: FieldSchema;
+  rows: Array<Record<string, unknown>>;
+  labelOf: (key: string) => string;
+  componentId?: string;
+  onChange: (next: Array<Record<string, unknown>>) => void;
+}) {
+  const [dragFrom, setDragFrom] = useState<number | null>(null);
+  const [dropAt, setDropAt] = useState<number | null>(null);
+  const props = Object.entries(field.items?.properties ?? {});
+  const inputs = props.filter(([, rf]) => (rf.type === 'string' || rf.type === 'number') && !Array.isArray(rf.enum));
+  const toggles = props.filter(([, rf]) => Array.isArray(rf.enum) && rf.enum.length <= 4);
+  const blankRow = () => Object.fromEntries([
+    ...inputs.map(([rk, rf]) => [rk, rf.type === 'number' ? (rf.minimum ?? 0) : '']),
+    ...toggles.map(([rk, rf]) => [rk, rf.default ?? rf.enum![0]]),
+  ]);
+  const canAdd = field.maxItems === undefined || rows.length < field.maxItems;
+  const setRow = (index: number, patch: Record<string, unknown>) => onChange(rows.map((r, i) => (i === index ? { ...r, ...patch } : r)));
+  const move = (from: number, to: number) => {
+    if (from === to || from + 1 === to) return;
+    const next = [...rows];
+    const [picked] = next.splice(from, 1);
+    next.splice(to > from ? to - 1 : to, 0, picked!);
+    onChange(next);
+  };
+  return (
+    <Field
+      label={label}
+      description={description}
+      trailing={canAdd && (
+        <button type="button" onClick={() => onChange([...rows, blankRow()])} aria-label={t('workbench.propsAddRow')} title={t('workbench.propsAddRow')} className="text-ink-4 hover:text-ink rounded p-0.5">
+          <Plus size={12} />
+        </button>
+      )}
+    >
+      <div className="flex flex-col" onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropAt(null); }}>
+        {rows.map((row, index) => (
+          <div
+            key={index}
+            onDragOver={(e) => {
+              if (dragFrom === null) return;
+              e.preventDefault();
+              const r = e.currentTarget.getBoundingClientRect();
+              setDropAt(e.clientY < r.top + r.height / 2 ? index : index + 1);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (dragFrom !== null && dropAt !== null) move(dragFrom, dropAt);
+              setDragFrom(null);
+              setDropAt(null);
+            }}
+            className={`group relative flex items-center gap-1 py-[3px] ${dragFrom === index ? 'opacity-40' : ''}`}
+          >
+            {dropAt === index && <span className="bg-ink-3 absolute -top-px left-5 right-5 h-0.5 rounded-full" />}
+            {dropAt === rows.length && index === rows.length - 1 && <span className="bg-ink-3 absolute -bottom-px left-5 right-5 h-0.5 rounded-full" />}
+            <span
+              draggable
+              onDragStart={(e) => { setDragFrom(index); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(index)); }}
+              onDragEnd={() => { setDragFrom(null); setDropAt(null); }}
+              title={t('workbench.propsDragRow')}
+              className="text-ink-4 hover:text-ink flex h-8 w-4 shrink-0 cursor-grab items-center justify-center opacity-0 transition-opacity group-hover:opacity-100 active:cursor-grabbing"
+            >
+              <GripVertical size={12} />
+            </span>
+            {toggles.map(([rk, rf]) => {
+              const options = rf.enum!;
+              const current = typeof row[rk] === 'string' && options.includes(row[rk] as string) ? (row[rk] as string) : String(rf.default ?? options[0]);
+              const next = options[(options.indexOf(current) + 1) % options.length]!;
+              const word = kitOptionLabel(rk, current, componentId);
+              return (
+                <button
+                  key={rk}
+                  type="button"
+                  onClick={() => setRow(index, { [rk]: next })}
+                  title={`${word} → ${kitOptionLabel(rk, next, componentId)}`}
+                  aria-label={word}
+                  className={`hover:bg-panel-2/70 flex h-8 w-7 shrink-0 items-center justify-center rounded-md transition-colors ${current === 'none' ? 'text-ink-4' : 'text-ink'}`}
+                >
+                  {GLYPH_FIELDS.has(rk) ? <OptionGlyph field={rk} opt={current} /> : <span className="text-[10.5px]">{word}</span>}
+                </button>
+              );
+            })}
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              {inputs.map(([rk, rf]) => (
+                <input
+                  key={rk}
+                  value={row[rk] === undefined || row[rk] === null ? '' : String(row[rk])}
+                  placeholder={rf.title ?? labelOf(rk)}
+                  maxLength={rf.maxLength}
+                  onChange={(e) => setRow(index, { [rk]: rf.type === 'number' ? Number(e.target.value) : e.target.value })}
+                  className={INPUT}
+                />
+              ))}
+            </div>
+            <button type="button" onClick={() => onChange(rows.filter((_, i) => i !== index))} aria-label={t('workbench.propsRemoveRow')} className="text-ink-4 hover:text-ink shrink-0 rounded p-1 opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100">
+              <X size={11} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </Field>
+  );
+}
+
 export function PropsForm({
   schema,
   values,
@@ -155,6 +278,7 @@ export function PropsForm({
   renderFont,
   componentId,
   group,
+  themeColors,
 }: {
   schema: PropsSchema;
   /** Effective values (defaults already applied by the host). */
@@ -175,6 +299,8 @@ export function PropsForm({
   componentId?: string;
   /** Render only this group's properties (the host lays the groups out as sections). */
   group?: PropertyGroup;
+  /** What theme-following colours resolve to, keyed by property (accent, ink, surfaceColor…). */
+  themeColors?: Record<string, string>;
 }) {
   const fields = Object.entries(schema.properties ?? {}).filter(
     ([key, f]) =>
@@ -183,7 +309,9 @@ export function PropsForm({
       // Dependency declared by the schema, not by this form — a new component that declares one
       // hides correctly with no change here. The value is kept, just not shown.
       (!f.showWhen || f.showWhen.in.includes(String(values[f.showWhen.field] ?? ''))) &&
-      (!group || propertyGroupOf(key, f) === group),
+      (!group || propertyGroupOf(key, f) === group) &&
+      // Stored props keep legacy fields; editors don't offer them (their meaning moved elsewhere).
+      !f['x-hidden'],
   );
   const label = (key: string, f: FieldSchema) => f.title ?? labelOf(key);
   const commit = (key: string, v: unknown) => onChange({ ...values, [key]: v });
@@ -194,50 +322,20 @@ export function PropsForm({
       {fields.map(([key, f]) => {
         const v = values[key];
         if (f.type === 'array' && f.items?.properties) {
-          // Row list: every primitive field of every row is an input; add/remove within maxItems. Rows
-          // are content (what the component says), so this is the panel-side twin of canvas text edits.
-          const rowsValue = Array.isArray(v) ? (v as Array<Record<string, unknown>>) : [];
-          const rowFields = Object.entries(f.items.properties).filter(([, rf]) => rf.type === 'string' || rf.type === 'number');
-          const setRows = (rows: Array<Record<string, unknown>>) => commit(key, rows);
-          const blankRow = () => Object.fromEntries(rowFields.map(([rk, rf]) => [rk, rf.type === 'number' ? (rf.minimum ?? 0) : '']));
-          const canAdd = f.maxItems === undefined || rowsValue.length < f.maxItems;
+          // Row list: rows are content (what the component says), so this is the panel-side twin of
+          // canvas text edits. Text/number fields are inputs; a small enum (an item's mark) is an icon
+          // that cycles; rows reorder by dragging their handle.
           return (
-            <Field
+            <RowList
               key={key}
               label={label(key, f)}
               description={f.description}
-              trailing={canAdd && (
-                <button type="button" onClick={() => setRows([...rowsValue, blankRow()])} aria-label={t('workbench.propsAddRow')} title={t('workbench.propsAddRow')} className="text-ink-4 hover:text-ink rounded p-0.5">
-                  <Plus size={12} />
-                </button>
-              )}
-            >
-              <div className="flex flex-col gap-1.5">
-                {rowsValue.map((row, index) => (
-                  <div key={index} className="group flex items-start gap-1.5">
-                    <span className="text-ink-5 w-3 shrink-0 pt-1.5 text-center text-[10px] tabular-nums">{index + 1}</span>
-                    <div className="flex min-w-0 flex-1 flex-col gap-1">
-                      {rowFields.map(([rk, rf]) => (
-                        <input
-                          key={rk}
-                          value={row[rk] === undefined || row[rk] === null ? '' : String(row[rk])}
-                          placeholder={rf.title ?? labelOf(rk)}
-                          maxLength={rf.maxLength}
-                          onChange={(e) => {
-                            const next = rowsValue.map((r, i) => (i === index ? { ...r, [rk]: rf.type === 'number' ? Number(e.target.value) : e.target.value } : r));
-                            setRows(next);
-                          }}
-                          className={INPUT}
-                        />
-                      ))}
-                    </div>
-                    <button type="button" onClick={() => setRows(rowsValue.filter((_, i) => i !== index))} aria-label={t('workbench.propsRemoveRow')} className="text-ink-5 hover:text-ink mt-1 shrink-0 rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100">
-                      <X size={11} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </Field>
+              field={f}
+              rows={Array.isArray(v) ? (v as Array<Record<string, unknown>>) : []}
+              labelOf={labelOf}
+              componentId={componentId}
+              onChange={(next) => commit(key, next)}
+            />
           );
         }
         if (Array.isArray(f.enum)) {
@@ -359,6 +457,7 @@ export function PropsForm({
               onReset={() => commit(key, resetValue)}
               onPick={(next) => commit(key, withAlpha(next, alpha))}
               alpha={{ value: alpha, label: t('kitProp.opacity'), onChange: (a) => commit(key, withAlpha(rgb, a)) }}
+              {...(resetMode === 'theme' && themeColors?.[key] ? { follows: themeColors[key] } : {})}
             />
           );
         }

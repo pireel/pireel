@@ -786,4 +786,5 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.propsGroupMotion": "Motion",
   "workbench.propsPosition": "Position",
   "workbench.propsResetStyle": "Reset style",
+  "workbench.propsDragRow": "Drag to reorder",
 };

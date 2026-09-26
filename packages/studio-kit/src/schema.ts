@@ -109,6 +109,15 @@ export function shownWhen<T>(f: Field<T>, field: string, values: string[]): Fiel
   return { ...f, jsonSchema: { ...f.jsonSchema, showWhen: { field, in: values } } };
 }
 
+/**
+ * Keep a field that stored props still carry but editors no longer offer — its meaning moved
+ * elsewhere (e.g. a list-wide choice that became a per-item one). Parsing is unchanged so old
+ * projects render exactly as before; editors hide it.
+ */
+export function legacy<T>(f: Field<T>): Field<T> {
+  return { ...f, jsonSchema: { ...f.jsonSchema, 'x-hidden': true } };
+}
+
 /** Bounded list of row objects (rankings, steps, kpi cells…). Rows beyond maxItems
  *  are dropped from the end; each row's fields go through the same coercion. */
 export function rows<F extends Record<string, Field<unknown>>>(

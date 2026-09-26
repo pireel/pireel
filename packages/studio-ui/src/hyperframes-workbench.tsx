@@ -171,7 +171,7 @@ function clipSpeedInDocument(document: EditorDocumentV2, clipId: string): number
   }
   return 1;
 }
-import { getTheme, themeVarsCss } from "@pireel/studio-engine/theme";
+import { effectiveThemeVars, getTheme, themeVarsCss } from "@pireel/studio-engine/theme";
 import {
   spans as clipSpans,
 } from "@pireel/studio-engine/trim";
@@ -8585,6 +8585,7 @@ export function HyperframesWorkbench({
                         block={selectedCustomBlock}
                         canvas={{ width: comp.width, height: comp.height }}
                         swatches={bgSwatches.map(([name, value]) => ({ label: t("panels.backgroundName", { name: t(name) }), value }))}
+                        themeVars={effectiveThemeVars(getTheme(comp.theme), comp.palette)}
                         onBlockPatch={(patch) => selectedCustomBlock && patchInspectorBlock(selectedCustomBlock.id, patch)}
                         onValues={(next) => selectedCustomBlock && patchComponentValues(selectedCustomBlock.id, next)}
                         onLive={(message) => selectedCustomBlock && postPreview({ type: "hf:blockProps", blockId: selectedCustomBlock.id, ...message })}
