@@ -28,7 +28,7 @@ export function renderCta(id: string, raw: unknown, ctx: RenderCtx): RenderResul
   const p = ctaSchema.parse(raw);
   const s = typeScale(ctx);
   const cjk = isCjk(ctx.lang);
-  const shadow = p.surface === 'card' ? '' : 'text-shadow:0 2px 16px rgb(0 0 0 / 0.45);';
+  const shadow = p.surface === 'card' ? '' : 'text-shadow:var(--sk-ink-shadow, 0 2px 16px rgb(0 0 0 / 0.45));';
   const panel = surfaceCss(p, s);
   const innerW = ctx.box.w - s.pad * 2;
   const lineSize = fitDown(s.label, p.line.length, cjk, innerW, Math.min(s.label, 20));
@@ -56,7 +56,8 @@ export function renderCta(id: string, raw: unknown, ctx: RenderCtx): RenderResul
     return { html: html.trim(), timeline: tl.join('\n') };
   }
 
-  const btn = Math.round(Math.min(s.head * 1.6, ctx.box.h * 0.42));
+  // The pill spans about two thirds of the box: avatar + button ≈ 3.9 button heights wide.
+  const btn = Math.round(Math.max(48, Math.min(ctx.box.w * 0.165, ctx.box.h * 0.36)));
   const btnFont = fitDown(Math.round(btn * 0.42), Math.max(p.action.length, p.done.length), cjk, btn * 2.6, Math.min(s.label, 20));
   html = `
 <div class="wrap">

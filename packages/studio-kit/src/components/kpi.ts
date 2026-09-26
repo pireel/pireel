@@ -43,10 +43,10 @@ export function renderKpi(id: string, raw: unknown, ctx: RenderCtx): RenderResul
   const cols = p.variant === 'row' ? n : twoByTwo ? 2 : n;
   const cellW = (ctx.box.w - s.pad * 2) / cols;
   const longest = Math.max(...cells.map((c) => c.value.length));
-  const vpx = Math.min(Math.round(s.hero * 0.52), Math.floor((cellW * 0.82) / (longest * (cjk ? 1.02 : 0.6))));
+  const vpx = Math.min(Math.round(s.hero * 0.64), Math.floor((cellW * 0.82) / (longest * (cjk ? 1.02 : 0.6))));
 
   const onCard = p.surface === 'card';
-  const shadow = onCard ? '' : 'text-shadow:0 2px 16px rgb(0 0 0 / 0.35);';
+  const shadow = onCard ? '' : 'text-shadow:var(--sk-ink-shadow, 0 2px 16px rgb(0 0 0 / 0.35));';
   const panel = surfaceCss(p, s); // background / outline / corners are the component's own props
 
   const cellHtml = cells

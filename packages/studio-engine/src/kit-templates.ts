@@ -36,9 +36,10 @@ function renderKitBlock(component: string, slots: Slots, blockId: string, durati
     ...(typeof durationSec === 'number' && durationSec > 0 ? { durationSec } : {}),
   };
   const out = renderKit(component, blockId, slots.props, ctx);
-  // Type without a surface: light over moving footage, the theme's ink over a flat page.
+  // Type without a surface: light over moving footage (lifted by a soft shadow), the theme's ink over
+  // a flat page (no shadow — on a light page it only smudges the letters).
   const ink = slots.backdrop === 'page'
-    ? '--sk-ink:var(--fg);--sk-ink-muted:var(--muted);'
+    ? '--sk-ink:var(--fg);--sk-ink-muted:var(--muted);--sk-ink-shadow:none;'
     : '--sk-ink:#ffffff;--sk-ink-muted:rgba(255,255,255,0.74);';
   return {
     innerHtml: `<div class="sk-root" style="position:absolute;inset:0;${TOKEN_BRIDGE}${ink}">\n${out.html}\n</div>`,

@@ -31,7 +31,7 @@ export function renderRanking(id: string, raw: unknown, ctx: RenderCtx): RenderR
   const n = items.length;
   const s = typeScale(ctx);
   const cjk = isCjk(ctx.lang);
-  const shadow = p.surface === 'card' ? '' : 'text-shadow:0 3px 18px rgb(0 0 0 / 0.45);';
+  const shadow = p.surface === 'card' ? '' : 'text-shadow:var(--sk-ink-shadow, 0 3px 18px rgb(0 0 0 / 0.45));';
   const tl: string[] = [];
   const title = p.title ? `<div class="k">${esc(p.title)}</div>` : '';
   const longest = Math.max(...items.map((item) => item.name.length));

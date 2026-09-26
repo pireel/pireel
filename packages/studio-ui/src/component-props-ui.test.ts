@@ -50,11 +50,11 @@ describe('editable properties on the UI side', () => {
     expect(html).toContain('type="range"');
     expect(html).toContain('role="switch"');
     expect(html).toContain('type="color"');
-    expect(html).toContain('>column<');
+    expect(html).toContain('>Column<'); // option ids read as words
     expect(html).toContain('data-block-selection-keep');
     const kit: Block = { id: 'k1', templateId: 'kit:steps', slots: { props: { variant: 'pipeline', items: [{ text: '第一步', note: '' }, { text: '第二步', note: '备注' }] } }, startSec: 0, durationSec: 4, trackIndex: 2 };
     const kitHtml = panel(kit);
-    for (const s of ['>list<', '>pipeline<', '>timeline<', 'value="第一步"', 'value="备注"', '添加一行']) expect(kitHtml).toContain(s);
+    for (const s of ['>列表<', '>流程<', '>时间线<', 'value="第一步"', 'value="备注"', '添加一行']) expect(kitHtml).toContain(s);
     expect(componentSchemaOf(kit)?.source).toBe('kit');
     expect(componentSchemaOf(block)?.source).toBe('manifest');
   });

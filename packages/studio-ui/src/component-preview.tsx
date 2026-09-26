@@ -3,6 +3,7 @@
 import type { Block, Composition } from '@pireel/studio-engine/composition';
 import type { GenElementResult } from './element-history';
 import { BlockPreviewFrame } from './block-preview-card';
+import { defaultKitElementBox } from './editable-block-geometry';
 import { KIT_INSERT_DURATION, kitSampleProps } from './kit-ui';
 
 const COMPONENT_PREVIEW_COMP: Composition = {
@@ -13,6 +14,10 @@ const COMPONENT_PREVIEW_COMP: Composition = {
   blocks: [],
   shots: [],
 };
+
+/** Kit components are laid out for the box they land in, so they preview on a real canvas in the
+ *  box an insert gives them — a full landscape frame stretched every layout and shrank the type. */
+const KIT_PREVIEW_CANVAS = { width: 1080, height: 1920 };
 
 export interface ComponentPreviewSource {
   id: string;
@@ -25,33 +30,41 @@ export interface ComponentPreviewModel {
   comp: Composition;
   block: Block;
   insertProps?: Record<string, unknown>;
+  /** Design-canvas px of the component's own box: previews frame this, not the whole canvas. */
+  focus?: { x: number; y: number; w: number; h: number };
 }
 
 /** Normalize native kit components and authored HTML components into one preview contract. */
 export function componentPreviewModel(
   source: ComponentPreviewSource,
-  fallbackComp: Composition = COMPONENT_PREVIEW_COMP,
+  /** The project composition (lightbox): kit previews take its canvas size, authored ones its look. */
+  canvas?: Composition,
 ): ComponentPreviewModel | null {
   if (source.kit) {
     const insertProps = kitSampleProps(source.kit);
+    const templateId = `kit:${source.kit}`;
+    const size = canvas ?? KIT_PREVIEW_CANVAS;
+    const box = defaultKitElementBox(templateId);
     return {
-      comp: COMPONENT_PREVIEW_COMP,
+      comp: { ...COMPONENT_PREVIEW_COMP, width: size.width, height: size.height },
       block: {
         id: `preview_${source.kit}`,
-        templateId: `kit:${source.kit}`,
+        templateId,
         slots: { props: insertProps, backdrop: 'page' },
         startSec: 0,
         durationSec: KIT_INSERT_DURATION,
         trackIndex: 2,
-        box: { x: 0, y: 0, w: 1, h: 1 },
+        box: { ...box },
         label: source.label,
       },
       insertProps,
+      focus: { x: box.x * size.width, y: box.y * size.height, w: box.w * size.width, h: box.h * size.height },
     };
   }
 
   const element = source.element;
   if (!element) return null;
+  const fallbackComp = canvas ?? COMPONENT_PREVIEW_COMP;
   return {
     comp: {
       ...fallbackComp,
@@ -71,6 +84,11 @@ export function componentPreviewModel(
       label: element.label || source.label,
     },
   };
+}
+
+/** Width ÷ height of what a preview shows: the component's box when it has one, else its canvas. */
+export function componentPreviewAspect(model: ComponentPreviewModel): number {
+  return model.focus ? model.focus.w / model.focus.h : model.comp.width / model.comp.height;
 }
 
 /** One renderer for every component-library thumbnail and lightbox preview. */
@@ -104,6 +122,7 @@ export function LibraryComponentPreview({
       onReady={onReady}
       ground="checker"
       fit="canvas"
+      focus={model.focus}
     />
   );
 }

@@ -65,8 +65,8 @@ export function renderLowerThird(id: string, raw: unknown, ctx: RenderCtx): Rend
   ${subHtml}
 </div></div>
 <style>${base}
-#${id} .title{text-shadow:0 2px 16px rgb(0 0 0 / 0.35);}
-#${id} .sub{color:${tk('--sk-fg')};text-shadow:0 2px 14px rgb(0 0 0 / 0.4);opacity:0.85;}
+#${id} .title{text-shadow:var(--sk-ink-shadow, 0 2px 16px rgb(0 0 0 / 0.35));}
+#${id} .sub{color:${tk('--sk-fg')};text-shadow:var(--sk-ink-shadow, 0 2px 14px rgb(0 0 0 / 0.4));opacity:0.85;}
 #${id} .rule{display:block;height:${Math.max(4, Math.round(title * 0.08))}px;background:${tk('--sk-accent')};margin:${Math.round(sub * 0.35)}px 0;border-radius:3px;}
 </style>`;
       tl.push(`tl.from('#${id} .title',{y:22,autoAlpha:0,duration:0.5,ease:'power3.out'},0.05);`);
@@ -88,7 +88,7 @@ export function renderLowerThird(id: string, raw: unknown, ctx: RenderCtx): Rend
 </div></div>
 <style>${base}
 #${id} .kick{display:inline-block;background:${tk('--sk-accent')};color:#fff;font-size:${Math.max(18, Math.round(sub * 0.85))}px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;padding:${Math.round(sub * 0.25)}px ${Math.round(sub * 0.6)}px;border-radius:${Math.round(sub * 0.25)}px;margin-bottom:${Math.round(sub * 0.4)}px;}
-#${id} .title{text-shadow:0 2px 16px rgb(0 0 0 / 0.35);}
+#${id} .title{text-shadow:var(--sk-ink-shadow, 0 2px 16px rgb(0 0 0 / 0.35));}
 #${id} .rule{display:block;height:3px;background:${tk('--sk-line')};margin-top:${Math.round(sub * 0.4)}px;opacity:0.6;}
 </style>`;
       tl.push(`tl.from('#${id} .kick',{y:-30,autoAlpha:0,duration:0.4,ease:'back.out(2)'},0.05);`);
@@ -126,7 +126,7 @@ export function renderLowerThird(id: string, raw: unknown, ctx: RenderCtx): Rend
 <style>${base}
 #${id} .block{display:inline-block;background:${tk('--sk-accent')};color:#fff;padding:${Math.round(sub * 0.4)}px ${Math.round(sub * 0.9)}px;border-radius:${Math.round(sub * 0.2)}px;}
 #${id} .block .title{color:#fff;}
-#${id} .sub{margin-top:${Math.round(sub * 0.4)}px;color:${tk('--sk-fg')};text-shadow:0 2px 14px rgb(0 0 0 / 0.4);opacity:0.9;}
+#${id} .sub{margin-top:${Math.round(sub * 0.4)}px;color:${tk('--sk-fg')};text-shadow:var(--sk-ink-shadow, 0 2px 14px rgb(0 0 0 / 0.4));opacity:0.9;}
 </style>`;
       tl.push(`tl.from('#${id} .block',{x:-56,autoAlpha:0,duration:0.48,ease:'back.out(1.4)'},0.05);`);
       tl.push(`tl.from('#${id} .sub',{y:12,autoAlpha:0,duration:0.4,ease:'power3.out'},0.32);`);

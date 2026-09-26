@@ -65,7 +65,7 @@ function humanizeKey(key: string): string {
 }
 
 const FIELD =
-  'bg-panel-2 text-ink placeholder:text-ink-5 w-full rounded-md px-2.5 py-1.5 text-[12px] leading-5 shadow-[inset_0_0_0_1px_var(--color-line-2)] outline-none focus:shadow-[inset_0_0_0_1px_var(--color-accent)]';
+  'bg-transparent text-ink placeholder:text-ink-5 w-full rounded-md px-2.5 py-1.5 text-[12px] leading-5 shadow-[inset_0_0_0_1px_var(--color-line-2)] outline-none transition-shadow hover:shadow-[inset_0_0_0_1px_var(--color-ink-4)] focus:shadow-[inset_0_0_0_1.5px_var(--color-accent)]';
 
 /** A hairline-topped group of rows. `first` drops the divider so the panel doesn't open on a line. */
 function Group({ label, first, children }: { label: string; first?: boolean; children: ReactNode }) {
@@ -227,6 +227,7 @@ export function ComponentPropsPanel({ block, swatches, onBlockPatch, onValues, o
             values={view.values}
             className="flex flex-col gap-2.5"
             resetMode={view.source === 'kit' ? 'theme' : 'default'}
+            {...(view.source === 'kit' && block.templateId.startsWith('kit:') ? { componentId: block.templateId.slice(4) } : {})}
             labelOf={(key) => { const k = `kitProp.${key}`; const l = t(k); return l === k ? humanizeKey(key) : l; }}
             onLive={view.source === 'manifest' ? (next) => { const message = liveMessageFor(block, next); if (message) onLive(message); } : undefined}
             onChange={onValues}

@@ -28,7 +28,7 @@ export function renderQa(id: string, raw: unknown, ctx: RenderCtx): RenderResult
   const p = qaSchema.parse(raw);
   const s = typeScale(ctx);
   const cjk = isCjk(ctx.lang);
-  const shadow = p.surface === 'card' ? '' : 'text-shadow:0 3px 20px rgb(0 0 0 / 0.45);';
+  const shadow = p.surface === 'card' ? '' : 'text-shadow:var(--sk-ink-shadow, 0 3px 20px rgb(0 0 0 / 0.45));';
   const flip = p.variant === 'flip';
   const tag = Math.round(Math.min(s.head * 1.2, ctx.box.h * 0.16));
   const innerW = ctx.box.w - s.pad * 2 - (flip ? 0 : tag * 1.3);

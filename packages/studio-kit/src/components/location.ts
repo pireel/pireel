@@ -28,7 +28,7 @@ export function renderLocation(id: string, raw: unknown, ctx: RenderCtx): Render
   const p = locationSchema.parse(raw);
   const s = typeScale(ctx);
   const cjk = isCjk(ctx.lang);
-  const shadow = p.surface === 'card' ? '' : 'text-shadow:0 3px 20px rgb(0 0 0 / 0.45);';
+  const shadow = p.surface === 'card' ? '' : 'text-shadow:var(--sk-ink-shadow, 0 3px 20px rgb(0 0 0 / 0.45));';
   const tl: string[] = [];
   if (p.variant === 'label') {
     const size = fitDown(s.label, p.place.length + p.detail.length + 3, cjk, ctx.box.w - s.pad * 2 - s.label * 1.4, Math.min(s.label, 18));

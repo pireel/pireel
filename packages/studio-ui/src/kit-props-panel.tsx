@@ -51,8 +51,52 @@ function kitFieldLabel(key: string): string {
   return label === k ? key : label;
 }
 
+/** An option's words: a component's own layouts are named per component (the same id can mean
+ *  different things in two components); shared options (surface, border…) share one name. */
+export function kitOptionLabel(key: string, opt: string, componentId?: string): string {
+  const slug = opt.replace(/-/g, '_'); // catalog keys are slugs; option ids may be kebab-case
+  const keys = [
+    ...(key === 'variant' && componentId ? [`kitVariant.${componentId}.${slug}`] : []),
+    `kitOpt.${key}.${slug}`,
+  ];
+  for (const k of keys) {
+    const label = t(k);
+    if (label !== k) return label;
+  }
+  const spaced = opt.replace(/[-_]+/g, ' ').trim();
+  return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : opt;
+}
+
+/** Shared options drawn by OptionGlyph. */
+const GLYPH_FIELDS = new Set(['surface', 'border', 'radius', 'trend']);
+
+/** A tiny drawing of what a shared option does, so the choice reads before its word does. */
+function OptionGlyph({ field, opt }: { field: string; opt: string }) {
+  const stroke = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
+  const svg = (children: ReactNode) => <svg viewBox="0 0 16 16" className="h-3.5 w-3.5 shrink-0" aria-hidden>{children}</svg>;
+  if (field === 'surface') {
+    return opt === 'card'
+      ? svg(<rect x="2.5" y="3.5" width="11" height="9" rx="2" fill="currentColor" opacity={0.85} />)
+      : svg(<rect x="2.5" y="3.5" width="11" height="9" rx="2" {...stroke} strokeDasharray="2 1.6" />);
+  }
+  if (field === 'border') {
+    if (opt === 'none') return svg(<rect x="2.5" y="3.5" width="11" height="9" rx="2" {...stroke} strokeDasharray="2 1.6" opacity={0.6} />);
+    return svg(<rect x="2.5" y="3.5" width="11" height="9" rx="2" {...stroke} strokeWidth={opt === 'solid' ? 2.4 : 1} />);
+  }
+  if (field === 'radius') {
+    const r = { sharp: 0, soft: 1.8, round: 3.6, pill: 4.5 }[opt] ?? 2;
+    return svg(<rect x="2.5" y="3.5" width="11" height="9" rx={r} {...stroke} />);
+  }
+  if (field === 'trend') {
+    if (opt === 'up') return svg(<path d="M3 11l4-4 2.5 2.5L13 6M10 6h3v3" {...stroke} />);
+    if (opt === 'down') return svg(<path d="M3 5l4 4 2.5-2.5L13 10M10 10h3V7" {...stroke} />);
+    return svg(<path d="M3 8h10" {...stroke} />);
+  }
+  return null;
+}
+
 const INPUT =
-  'bg-panel-2 text-ink placeholder:text-ink-5 w-full rounded-md px-2.5 py-1.5 text-[12px] leading-5 shadow-[inset_0_0_0_1px_var(--color-line-2)] outline-none focus:shadow-[inset_0_0_0_1px_var(--color-accent)]';
+  'bg-transparent text-ink placeholder:text-ink-5 w-full rounded-md px-2.5 py-1.5 text-[12px] leading-5 shadow-[inset_0_0_0_1px_var(--color-line-2)] outline-none transition-shadow hover:shadow-[inset_0_0_0_1px_var(--color-ink-4)] focus:shadow-[inset_0_0_0_1.5px_var(--color-accent)]';
 const LABEL = 'text-ink-4 text-[11px]';
 
 /** Label above, control full width — for colour, font, text and row lists. */
@@ -103,6 +147,7 @@ export function PropsForm({
   resetMode = 'theme',
   className = 'flex flex-col gap-4',
   renderFont,
+  componentId,
 }: {
   schema: PropsSchema;
   /** Effective values (defaults already applied by the host). */
@@ -119,6 +164,8 @@ export function PropsForm({
   className?: string;
   /** Host-supplied control for `format:'font'` fields (the font picker lives in the host); absent → plain input. */
   renderFont?: (key: string, value: string, commit: (next: string) => void) => ReactNode;
+  /** Registered component id, for naming its own layouts. */
+  componentId?: string;
 }) {
   const fields = Object.entries(schema.properties ?? {}).filter(
     ([, f]) =>
@@ -184,21 +231,55 @@ export function PropsForm({
           );
         }
         if (Array.isArray(f.enum)) {
+          const options = f.enum;
+          // Layouts are the component's biggest choice: a wrapping set of named tiles, not a
+          // squeezed segmented row that truncates past three options.
+          const drawn = GLYPH_FIELDS.has(key);
+          if (key === 'variant' || (options.length > 3 && !drawn)) {
+            return (
+              <Field key={key} label={label(key, f)} description={f.description}>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {options.map((opt) => (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => commit(key, opt)}
+                      aria-pressed={v === opt}
+                      className={`min-w-0 truncate rounded-md px-2 py-1.5 text-left text-[11.5px] transition-[background-color,box-shadow,color] ${
+                        v === opt
+                          ? 'bg-accent/10 text-accent font-medium shadow-[inset_0_0_0_1.5px_var(--color-accent)]'
+                          : 'text-ink-2 hover:bg-panel-2 shadow-[inset_0_0_0_1px_var(--color-line-2)]'
+                      }`}
+                    >
+                      {kitOptionLabel(key, opt, componentId)}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+            );
+          }
           return (
             <Row key={key} label={label(key, f)} title={f.description}>
-              <div className="bg-panel-2 flex rounded-md p-0.5 shadow-[inset_0_0_0_1px_var(--color-line-2)]">
-                {f.enum.map((opt) => (
-                  <button
-                    key={opt}
-                    type="button"
-                    onClick={() => commit(key, opt)}
-                    className={`min-w-0 truncate rounded px-2.5 py-1 text-[11px] transition-colors ${
-                      v === opt ? 'bg-panel text-ink shadow-sm' : 'text-ink-3 hover:text-ink'
-                    }`}
-                  >
-                    {opt}
-                  </button>
-                ))}
+              <div className="bg-panel-2 flex rounded-md p-0.5">
+                {options.map((opt) => {
+                  const word = kitOptionLabel(key, opt, componentId);
+                  return (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => commit(key, opt)}
+                      aria-pressed={v === opt}
+                      title={word}
+                      className={`flex min-w-0 items-center gap-1 truncate rounded px-2 py-1 text-[11px] transition-colors ${
+                        v === opt ? 'bg-panel text-ink font-medium shadow-sm' : 'text-ink-4 hover:text-ink'
+                      }`}
+                    >
+                      <OptionGlyph field={key} opt={opt} />
+                      {/* Four drawn options fit the row as drawings; the word rides in the tooltip. */}
+                      {drawn && options.length > 3 ? <span className="sr-only">{word}</span> : word}
+                    </button>
+                  );
+                })}
               </div>
             </Row>
           );
@@ -371,6 +452,7 @@ export function KitPropsPanel({
       values={current}
       onChange={(next) => onPatch({ ...((block.slots as { props?: Record<string, unknown> }).props ?? {}), ...next })}
       labelOf={kitFieldLabel}
+      componentId={cid}
       className="flex h-full min-h-0 w-60 flex-col gap-4 overflow-y-auto p-3"
     />
   );

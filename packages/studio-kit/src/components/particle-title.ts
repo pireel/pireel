@@ -39,7 +39,7 @@ export function renderParticleTitle(id: string, raw: unknown, ctx: RenderCtx): R
   // The canvas takes the whole stage so particles have room to travel; the title sits centred in it.
   const glH = Math.max(1, Math.round(Math.max(size * 1.6, ctx.box.h - s.pad * 2 - subH)));
   const subSize = fitDown(s.label, p.sub.length, cjk, ctx.box.w - s.pad * 2, Math.min(s.label, 18));
-  const shadow = p.surface === 'card' ? '' : 'text-shadow:0 4px 26px rgb(0 0 0 / 0.45);';
+  const shadow = p.surface === 'card' ? '' : 'text-shadow:var(--sk-ink-shadow, 0 4px 26px rgb(0 0 0 / 0.45));';
   const life = ctx.durationSec && ctx.durationSec > 1.8 ? ctx.durationSec : 4;
   const settle = 1.45; // particles hand over to the crisp type here
 

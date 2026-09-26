@@ -18,11 +18,12 @@ import { blockDisplayTitle } from './block-display-title';
 
 /** Transparency checkerboard (drawn at screen-pixel scale on the container; drawing it into the scaled document blurs it — learned the hard way). */
 const CHECKER_STYLE: CSSProperties = {
+  // Quiet enough that the component, not the transparency grid, is what reads at card size.
   backgroundColor: '#ffffff',
   backgroundImage:
-    'linear-gradient(45deg,#d7dbe0 25%,transparent 25%,transparent 75%,#d7dbe0 75%),linear-gradient(45deg,#d7dbe0 25%,transparent 25%,transparent 75%,#d7dbe0 75%)',
-  backgroundSize: '16px 16px',
-  backgroundPosition: '0 0,8px 8px',
+    'linear-gradient(45deg,#eceef2 25%,transparent 25%,transparent 75%,#eceef2 75%),linear-gradient(45deg,#eceef2 25%,transparent 25%,transparent 75%,#eceef2 75%)',
+  backgroundSize: '12px 12px',
+  backgroundPosition: '0 0,6px 6px',
 };
 
 export function BlockPreviewFrame({

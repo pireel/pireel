@@ -40,7 +40,7 @@ export function renderSteps(id: string, raw: unknown, ctx: RenderCtx): RenderRes
   const cjk = isCjk(ctx.lang);
   const n = items.length;
   const onCard = p.surface === 'card';
-  const shadow = onCard ? '' : 'text-shadow:0 2px 14px rgb(0 0 0 / 0.35);';
+  const shadow = onCard ? '' : 'text-shadow:var(--sk-ink-shadow, 0 2px 14px rgb(0 0 0 / 0.35));';
   const panel = surfaceCss(p, s); // background / outline / corners are the component's own props
 
   // Presenter pacing: spread reveals across ~60% of the block life (falls back to a brisk 0.35s cadence)
@@ -48,9 +48,12 @@ export function renderSteps(id: string, raw: unknown, ctx: RenderCtx): RenderRes
   const gapT = dur > 1.5 ? Math.min(1.1, Math.max(0.3, (dur * 0.6) / n)) : 0.35;
   const at = (i: number) => Math.round((0.15 + i * gapT) * 100) / 100;
 
+  // Item text grows with the room it has: a short list in a tall box reads at heading size, a long
+  // one steps down to fit, never below the label size.
+  const txPx = Math.max(s.label, Math.round(Math.min(s.head * 0.8, (ctx.box.h - s.pad * 2) / (n * 2.2))));
   const shared = `
 #${id} .wrap{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;padding:${s.pad}px;${panel}color:${inkOn(p)};font-family:${tk('--sk-font-head')};}
-#${id} .tx{font-size:${s.label}px;font-weight:700;line-height:1.25;${shadow}}
+#${id} .tx{font-size:${txPx}px;font-weight:700;line-height:1.25;${shadow}}
 #${id} .nt{font-size:${s.kicker}px;color:${inkOn(p, true)};${shadow}}`;
 
   let html: string;
@@ -109,7 +112,7 @@ export function renderSteps(id: string, raw: unknown, ctx: RenderCtx): RenderRes
 <style>${shared}
 #${id} .list{display:flex;flex-direction:column;gap:${Math.round(s.gap * 0.75)}px;}
 #${id} .it{display:flex;align-items:baseline;gap:${Math.round(s.gap * 0.7)}px;}
-#${id} .ix{font-family:${tk('--sk-font-num')};font-size:${s.label}px;font-weight:var(--sk-head-weight, 800);text-transform:var(--sk-head-case, none);color:${tk('--sk-accent')};flex:none;}
+#${id} .ix{font-family:${tk('--sk-font-num')};font-size:${txPx}px;font-weight:var(--sk-head-weight, 800);text-transform:var(--sk-head-case, none);color:${tk('--sk-accent')};flex:none;}
 </style>`;
     items.forEach((_, i) => {
       tl.push(`tl.from('#${id} .i${i}',{autoAlpha:0,y:14,duration:0.4,ease:'power3.out'},${at(i)});`);

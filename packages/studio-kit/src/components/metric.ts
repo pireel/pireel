@@ -53,7 +53,7 @@ export function renderMetric(id: string, raw: unknown, ctx: RenderCtx): RenderRe
   );
 
   const onCard = p.surface === 'card';
-  const shadow = onCard ? '' : `text-shadow:0 2px 18px rgb(0 0 0 / 0.35);`;
+  const shadow = onCard ? '' : `text-shadow:var(--sk-ink-shadow, 0 2px 18px rgb(0 0 0 / 0.35));`;
   const panel = surfaceCss(p, s); // background / outline / corners are the component's own props
 
   const trendChip =

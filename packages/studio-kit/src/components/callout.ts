@@ -40,7 +40,7 @@ export function renderCallout(id: string, raw: unknown, ctx: RenderCtx): RenderR
   const head = fitWrap(Math.round(s.hero * 0.66), p.text.length, cjk, innerW, innerH, { min: Math.min(s.head, 34) });
 
   const onCard = p.surface === 'card';
-  const shadow = onCard ? '' : 'text-shadow:0 2px 18px rgb(0 0 0 / 0.4);';
+  const shadow = onCard ? '' : 'text-shadow:var(--sk-ink-shadow, 0 2px 18px rgb(0 0 0 / 0.4));';
   const panel = surfaceCss(p, s); // background / outline / corners are the component's own props
 
   const shared = `

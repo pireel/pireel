@@ -29,7 +29,7 @@ export function renderMythFact(id: string, raw: unknown, ctx: RenderCtx): Render
   const p = mythFactSchema.parse(raw);
   const s = typeScale(ctx);
   const cjk = isCjk(ctx.lang);
-  const shadow = p.surface === 'card' ? '' : 'text-shadow:0 3px 20px rgb(0 0 0 / 0.45);';
+  const shadow = p.surface === 'card' ? '' : 'text-shadow:var(--sk-ink-shadow, 0 3px 20px rgb(0 0 0 / 0.45));';
   const split = p.variant === 'split';
   const colW = split ? (ctx.box.w - s.pad * 2 - s.gap) / 2 : ctx.box.w - s.pad * 2;
   const mythSize = fitWrap(Math.round(s.head * (split ? 0.8 : 0.75)), p.myth.length, cjk, colW, ctx.box.h * 0.28, { min: Math.min(s.label, 20) });

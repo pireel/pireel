@@ -32,7 +32,7 @@ export function renderComparison(id: string, raw: unknown, ctx: RenderCtx): Rend
   const s = typeScale(ctx);
   const cjk = isCjk(ctx.lang);
   const onCard = p.surface === 'card';
-  const shadow = onCard ? '' : 'text-shadow:0 2px 16px rgb(0 0 0 / 0.35);';
+  const shadow = onCard ? '' : 'text-shadow:var(--sk-ink-shadow, 0 2px 16px rgb(0 0 0 / 0.35));';
   const panel = surfaceCss(p, s); // background / outline / corners are the component's own props
   const halfW = (ctx.box.w - s.pad * 2) / 2;
   const maxValLen = Math.max(p.aValue.length, p.bValue.length, 1);

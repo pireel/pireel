@@ -31,8 +31,8 @@ export function renderTitle(id: string, raw: unknown, ctx: RenderCtx): RenderRes
 
   const shared = `
 #${id} .wrap{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;padding:${s.pad}px;color:${tk('--sk-fg')};font-family:${tk('--sk-font-head')};}
-#${id} .t{font-size:${head}px;font-weight:var(--sk-head-weight, 800);text-transform:var(--sk-head-case, none);line-height:1.12;letter-spacing:${cjk ? '0.01em' : '-0.015em'};text-shadow:0 2px 20px rgb(0 0 0 / 0.35);}
-#${id} .sub{font-size:${s.label}px;font-weight:600;text-shadow:0 2px 14px rgb(0 0 0 / 0.4);}`;
+#${id} .t{font-size:${head}px;font-weight:var(--sk-head-weight, 800);text-transform:var(--sk-head-case, none);line-height:1.12;letter-spacing:${cjk ? '0.01em' : '-0.015em'};text-shadow:var(--sk-ink-shadow, 0 2px 20px rgb(0 0 0 / 0.35));}
+#${id} .sub{font-size:${s.label}px;font-weight:600;text-shadow:var(--sk-ink-shadow, 0 2px 14px rgb(0 0 0 / 0.4));}`;
 
   let html: string;
   const tl: string[] = [];
@@ -45,7 +45,7 @@ export function renderTitle(id: string, raw: unknown, ctx: RenderCtx): RenderRes
 </div>
 <style>${shared}
 #${id} .row{display:flex;align-items:baseline;gap:${s.gap}px;}
-#${id} .ix{font-family:${tk('--sk-font-num')};font-size:${Math.round(head * 0.8)}px;font-weight:var(--sk-head-weight, 800);text-transform:var(--sk-head-case, none);color:${tk('--sk-accent')};text-shadow:0 2px 16px rgb(0 0 0 / 0.35);}
+#${id} .ix{font-family:${tk('--sk-font-num')};font-size:${Math.round(head * 0.8)}px;font-weight:var(--sk-head-weight, 800);text-transform:var(--sk-head-case, none);color:${tk('--sk-accent')};text-shadow:var(--sk-ink-shadow, 0 2px 16px rgb(0 0 0 / 0.35));}
 #${id} .col{display:flex;flex-direction:column;gap:${Math.round(s.gap * 0.4)}px;}
 #${id} .sub{color:${tk('--sk-fg')};opacity:0.8;}
 #${id} .rule{display:block;height:${s.rule}px;background:${tk('--sk-line')};margin-top:${s.gap}px;opacity:0.7;}

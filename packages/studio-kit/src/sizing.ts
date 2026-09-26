@@ -45,8 +45,8 @@ export function typeScale(ctx: RenderCtx): TypeScale {
   return {
     hero: clamp(base * 0.38 * cjk, 64, 300),
     head: clamp(base * 0.16 * cjk, 34, 120),
-    label: clamp(base * 0.075, 24, 46),
-    kicker: clamp(base * 0.058, 20, 34),
+    label: clamp(base * 0.088, 26, 54),
+    kicker: clamp(base * 0.066, 22, 38),
     pad: clamp(base * 0.11, 28, 96),
     gap: clamp(base * 0.06, 14, 48),
     rule: base > 460 ? 3 : 2,

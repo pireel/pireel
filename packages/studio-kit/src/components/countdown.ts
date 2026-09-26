@@ -30,7 +30,7 @@ export function renderCountdown(id: string, raw: unknown, ctx: RenderCtx): Rende
   const s = typeScale(ctx);
   const cjk = isCjk(ctx.lang);
   const count = Math.max(1, Math.min(10, Math.round(p.from)));
-  const shadow = p.surface === 'card' ? '' : 'text-shadow:0 4px 24px rgb(0 0 0 / 0.45);';
+  const shadow = p.surface === 'card' ? '' : 'text-shadow:var(--sk-ink-shadow, 0 4px 24px rgb(0 0 0 / 0.45));';
   const labelSize = fitDown(s.label, p.label.length, cjk, ctx.box.w - s.pad * 2, Math.min(s.label, 20));
   const labelH = p.label ? labelSize * 1.6 : 0;
   const dial = Math.round(Math.max(60, Math.min(ctx.box.w - s.pad * 2, ctx.box.h - s.pad * 2 - labelH)));
@@ -52,8 +52,8 @@ export function renderCountdown(id: string, raw: unknown, ctx: RenderCtx): Rende
 #${id} .k{font-size:${labelSize}px;font-weight:var(--sk-head-weight, 800);text-transform:var(--sk-head-case, none);${shadow}}
 #${id} .dial{position:relative;width:${dial}px;height:${dial}px;display:grid;place-items:center;}
 #${id} .ring{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg);}
-#${id} .ring circle{fill:none;stroke-width:11;}
-#${id} .bg{stroke:${tk('--sk-panel-2')};opacity:0.45;}
+#${id} .ring circle{fill:none;stroke-width:12;}
+#${id} .bg{stroke:currentColor;opacity:0.16;}
 #${id} .fg{stroke:${tk('--sk-accent')};stroke-linecap:round;stroke-dasharray:${C.toFixed(1)};stroke-dashoffset:0;}
 #${id} .n{grid-area:1/1;font-family:${tk('--sk-font-num')};font-size:${digit}px;font-weight:var(--sk-head-weight, 900);text-transform:var(--sk-head-case, none);line-height:1;${shadow}}
 #${id} .n${count - 1}{color:${tk('--sk-accent')};}
@@ -67,7 +67,8 @@ export function renderCountdown(id: string, raw: unknown, ctx: RenderCtx): Rende
   if (p.label) tl.push(fadeUp(`#${id} .k`, 0, { y: 12 }));
   if (ring) {
     tl.push(`tl.from('#${id} .dial',{autoAlpha:0,scale:0.8,duration:0.35,ease:'${EASE.land}'},0.05);`);
-    tl.push(`tl.to('#${id} .fg',{strokeDashoffset:${C.toFixed(1)},duration:${(step * count).toFixed(2)},ease:'none'},${at(0)});`);
+    // The ring fills as the count runs, so the held last frame is a complete accent ring.
+    tl.push(`tl.fromTo('#${id} .fg',{strokeDashoffset:${C.toFixed(1)}},{strokeDashoffset:0,duration:${(step * (count - 1) + 0.16).toFixed(2)},ease:'none'},${at(0)});`);
   }
   digits.forEach((_, i) => {
     tl.push(`tl.fromTo('#${id} .n${i}',{autoAlpha:0,scale:${ring ? 1.5 : 1.9}},{autoAlpha:1,scale:1,duration:0.16,ease:'power4.in'},${at(i)});`);

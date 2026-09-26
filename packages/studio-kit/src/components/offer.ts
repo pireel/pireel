@@ -29,7 +29,7 @@ export function renderOffer(id: string, raw: unknown, ctx: RenderCtx): RenderRes
   const p = offerSchema.parse(raw);
   const s = typeScale(ctx);
   const cjk = isCjk(ctx.lang);
-  const shadow = p.surface === 'card' ? '' : 'text-shadow:0 4px 22px rgb(0 0 0 / 0.45);';
+  const shadow = p.surface === 'card' ? '' : 'text-shadow:var(--sk-ink-shadow, 0 4px 22px rgb(0 0 0 / 0.45));';
   const innerW = ctx.box.w - s.pad * 2;
   const tl: string[] = [];
   const strip = p.variant === 'strip';

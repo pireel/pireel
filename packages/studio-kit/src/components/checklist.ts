@@ -29,7 +29,7 @@ export function renderChecklist(id: string, raw: unknown, ctx: RenderCtx): Rende
   const s = typeScale(ctx);
   const cjk = isCjk(ctx.lang);
   const n = items.length;
-  const shadow = p.surface === 'card' ? '' : 'text-shadow:0 2px 14px rgb(0 0 0 / 0.4);';
+  const shadow = p.surface === 'card' ? '' : 'text-shadow:var(--sk-ink-shadow, 0 2px 14px rgb(0 0 0 / 0.4));';
   const innerW = ctx.box.w - s.pad * 2;
   const titleH = p.title ? s.kicker * 2 : 0;
   const rowH = Math.max(28, (ctx.box.h - s.pad * 2 - titleH) / n);
