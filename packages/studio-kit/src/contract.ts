@@ -48,6 +48,8 @@ export interface RenderCtx {
   /** Block lifetime in seconds, when the host knows it — components with exit
    *  choreography (lower thirds) settle out before the end; absent = no exit. */
   durationSec?: number;
+  /** Type-size factor from the shared style group (1 = as designed). Spacing is not scaled. */
+  textScale?: number;
 }
 
 /**

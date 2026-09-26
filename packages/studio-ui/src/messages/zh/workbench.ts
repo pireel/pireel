@@ -706,4 +706,11 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.transitionsTab": "转场",
   "workbench.transitionLane": "转场轨",
   "workbench.noRoomForTransition": "播放头处已排满转场，没有空位了",
+  "workbench.propsGroupLayout": "版式",
+  "workbench.propsGroupContent": "内容",
+  "workbench.propsGroupStyle": "样式",
+  "workbench.propsGroupSurface": "底板",
+  "workbench.propsGroupMotion": "动效",
+  "workbench.propsPosition": "位置",
+  "workbench.propsResetStyle": "恢复默认样式",
 };

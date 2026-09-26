@@ -403,6 +403,7 @@ export function FontPicker({
   onChoose,
   onLoadMore,
   sampleText,
+  defaultLabel,
 }: {
   value: DisplayTextFontId;
   localFonts: LocalFontFamilyOption[];
@@ -412,6 +413,8 @@ export function FontPicker({
   /** Text the chosen face will render (its glyph chunks are what the loading state waits for);
    *  defaults to the font's own label. */
   sampleText?: string;
+  /** Trigger wording while nothing is chosen and the face follows something else (e.g. the theme). */
+  defaultLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   // Library id whose glyphs are still downloading after being applied (spinner on the trigger).
@@ -459,7 +462,7 @@ export function FontPicker({
       >
         <span className="text-ink-4 text-[10px]">Aa</span>
         <span className="min-w-0 flex-1 truncate" style={selectedFamily ? { fontFamily: `"${selectedFamily}", sans-serif` } : undefined}>
-          {fontChoiceLabel(value)}
+          {defaultLabel && value === 'preset' ? defaultLabel : fontChoiceLabel(value)}
         </span>
         <ChevronDown size={12} className={`text-ink-4 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>

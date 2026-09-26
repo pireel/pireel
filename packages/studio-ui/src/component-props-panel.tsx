@@ -26,7 +26,8 @@ import { ImageIcon, RefreshCw, Shapes, Trash2 } from 'lucide-react';
 import type { Block as EditorBlock } from '@pireel/studio-engine/composition';
 import { liveMessageFor } from './component-props-ui';
 import { FontPicker } from './display-text-panel';
-import { PropsForm, type PropsSchema } from './kit-props-panel';
+import { PropsForm, propertyGroupOf, type PropsSchema } from './kit-props-panel';
+import { PROPERTY_GROUPS, type PropertyGroup } from '@pireel/studio-engine/kit-templates';
 import { t } from './i18n';
 import {
   cachedLocalFontFamilies,
@@ -176,6 +177,24 @@ function ColorRow({ label, value, swatches, noneTitle, onCommit }: { label: stri
   );
 }
 
+const GROUP_LABEL: Record<PropertyGroup, string> = {
+  layout: 'workbench.propsGroupLayout',
+  content: 'workbench.propsGroupContent',
+  style: 'workbench.propsGroupStyle',
+  surface: 'workbench.propsGroupSurface',
+  motion: 'workbench.propsGroupMotion',
+};
+
+/** Style, surface and motion back to the component's defaults; layout and content stay as written. */
+function resetStyle(schema: PropsSchema, values: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...values };
+  for (const [key, f] of Object.entries(schema.properties ?? {})) {
+    const group = propertyGroupOf(key, f);
+    if (group === 'style' || group === 'surface' || group === 'motion') next[key] = f.default ?? '';
+  }
+  return next;
+}
+
 /** Merge one motion field, dropping defaults so an untouched component stores nothing. */
 function motionPatch(current: EditorBlock['motion'], change: { speed?: number; delaySec?: number }): EditorBlock['motion'] {
   const next = { ...current, ...change };
@@ -205,6 +224,36 @@ export function ComponentPropsPanel({ block, swatches, onBlockPatch, onValues, o
   const images = imageSlots(innerHtml);
   const isCustom = block.templateId === 'custom';
   const headerName = block.label?.trim() || (isCustom ? t('workbench.componentHeaderCustom') : t('workbench.componentHeaderKit'));
+  const schemaFields = Object.entries(((view?.schema as PropsSchema | undefined)?.properties) ?? {});
+  const groupsWithFields = new Set(schemaFields.map(([key, f]) => propertyGroupOf(key, f)));
+  // Fixed order; a section shows when the component has something in it. Style, surface and motion
+  // are always there: every component takes opacity, a frame and timing of its entrance.
+  const sections = PROPERTY_GROUPS.filter((group) =>
+    group === 'style' || group === 'surface' || group === 'motion' || groupsWithFields.has(group) || (group === 'content' && texts.length > 0),
+  );
+  const form = (group: PropertyGroup) => view && (
+    <PropsForm
+      schema={view.schema as PropsSchema}
+      values={view.values}
+      group={group}
+      className="flex flex-col gap-2.5"
+      resetMode={view.source === 'kit' ? 'theme' : 'default'}
+      {...(view.source === 'kit' && block.templateId.startsWith('kit:') ? { componentId: block.templateId.slice(4) } : {})}
+      labelOf={(key) => { const k = `kitProp.${key}`; const l = t(k); return l === k ? humanizeKey(key) : l; }}
+      onLive={view.source === 'manifest' ? (next) => { const message = liveMessageFor(block, next); if (message) onLive(message); } : undefined}
+      onChange={onValues}
+      renderFont={(_key, value, commit) => (
+        <FontPicker
+          value={(value || 'preset') as DisplayTextFontId}
+          localFonts={localFonts}
+          accessState={fontAccessState}
+          onChoose={(font) => commit(font)}
+          onLoadMore={() => void requestLocalFonts()}
+          {...(value ? {} : { defaultLabel: t('kitProp.followTheme') })}
+        />
+      )}
+    />
+  );
 
   return (
     // Clicking inside the inspector must not clear the selection it edits (the workbench treats any
@@ -220,40 +269,38 @@ export function ComponentPropsPanel({ block, swatches, onBlockPatch, onValues, o
         </div>
       </div>
 
-      {view && (
-        <Group label={t('workbench.editableProperties')} first>
-          <PropsForm
-            schema={view.schema as PropsSchema}
-            values={view.values}
-            className="flex flex-col gap-2.5"
-            resetMode={view.source === 'kit' ? 'theme' : 'default'}
-            {...(view.source === 'kit' && block.templateId.startsWith('kit:') ? { componentId: block.templateId.slice(4) } : {})}
-            labelOf={(key) => { const k = `kitProp.${key}`; const l = t(k); return l === k ? humanizeKey(key) : l; }}
-            onLive={view.source === 'manifest' ? (next) => { const message = liveMessageFor(block, next); if (message) onLive(message); } : undefined}
-            onChange={onValues}
-            renderFont={(key, value, commit) => (
-              <FontPicker
-                value={value as DisplayTextFontId}
-                localFonts={localFonts}
-                accessState={fontAccessState}
-                onChoose={(font) => commit(font)}
-                onLoadMore={() => void requestLocalFonts()}
-              />
-            )}
-          />
-        </Group>
-      )}
-
-      {texts.length > 0 && (
-        <Group label={t('workbench.propsText')} first={!view}>
-          {texts.map((field) => (
+      {/* One panel for every component: the same sections in the same order. A component fills
+          the sections it has; the placement, timing and motion rows are every component's. */}
+      {sections.map((group, index) => (
+        <Group key={group} label={t(GROUP_LABEL[group])} first={index === 0}>
+          {group === 'content' && texts.map((field) => (
             <TextField key={field.key} label={humanizeKey(field.key)} text={field.text} onCommit={(value) => onText(field.key, value)} />
           ))}
+          {view && groupsWithFields.has(group) && form(group)}
+          {group === 'style' && (
+            <Slider label={t('workbench.propsOpacity')} value={Math.round((block.opacity ?? 1) * 100)} min={5} max={100} step={5} display={`${Math.round((block.opacity ?? 1) * 100)}%`} onCommit={(v) => onBlockPatch({ block: { opacity: v >= 100 ? undefined : v / 100 } })} />
+          )}
+          {group === 'surface' && !groupsWithFields.has('surface') && (
+            // A bespoke component has no panel properties of its own: its surface is the block frame.
+            <>
+              <ColorRow label={t('workbench.propsBackground')} value={block.bg} swatches={swatches} noneTitle={t('workbench.noBackground')} onCommit={(bg) => onBlockPatch({ block: { bg } })} />
+              <ColorRow label={t('workbench.propsBorder')} value={block.border} swatches={swatches} noneTitle={t('workbench.propsNoBorder')} onCommit={(border) => onBlockPatch({ block: { border } })} />
+              <Slider label={t('workbench.propsRadius')} value={block.radius ?? 0} min={0} max={160} step={2} display={`${block.radius ?? 0} px`} onCommit={(v) => onBlockPatch({ block: { radius: v > 0 ? v : undefined } })} />
+            </>
+          )}
+          {group === 'motion' && (
+            <>
+              <Slider label={t('workbench.propsMotionSpeed')} value={block.motion?.speed ?? 1} min={0.25} max={3} step={0.25} display={`${block.motion?.speed ?? 1}×`}
+                onCommit={(speed) => onBlockPatch({ block: { motion: motionPatch(block.motion, { speed }) } })} />
+              <Slider label={t('workbench.propsMotionDelay')} value={block.motion?.delaySec ?? 0} min={0} max={Math.max(0.1, Math.min(5, block.durationSec - 0.1))} step={0.1} display={`${(block.motion?.delaySec ?? 0).toFixed(1)}s`}
+                onCommit={(delaySec) => onBlockPatch({ block: { motion: motionPatch(block.motion, { delaySec }) } })} />
+            </>
+          )}
         </Group>
-      )}
+      ))}
 
       {/* Precise placement and timing; dragging on the preview / timeline edits the same values. */}
-      <Group label={t('workbench.propsLayout')} first={!view && texts.length === 0}>
+      <Group label={t('workbench.propsPosition')}>
         <TextField label={t('workbench.propsName')} text={block.label ?? ''} onCommit={(label) => onBlockPatch({ block: { label: label.trim() || undefined } })} />
         <div className="grid grid-cols-2 gap-2">
           {([['x', 'workbench.propsX'], ['y', 'workbench.propsY'], ['w', 'workbench.propsW'], ['h', 'workbench.propsH']] as const).map(([axis, label]) => {
@@ -270,17 +317,6 @@ export function ComponentPropsPanel({ block, swatches, onBlockPatch, onValues, o
           <NumberField label={t('workbench.propsStart')} value={block.startSec} min={0} max={36000} step={0.01} suffix="s" onCommit={(v) => onBlockPatch({ startSec: v })} />
           <NumberField label={t('workbench.propsDuration')} value={block.durationSec} min={0.1} max={3600} step={0.01} suffix="s" onCommit={(v) => onBlockPatch({ durationSec: v })} />
         </div>
-        <Slider label={t('workbench.propsMotionSpeed')} value={block.motion?.speed ?? 1} min={0.25} max={3} step={0.25} display={`${block.motion?.speed ?? 1}×`}
-          onCommit={(speed) => onBlockPatch({ block: { motion: motionPatch(block.motion, { speed }) } })} />
-        <Slider label={t('workbench.propsMotionDelay')} value={block.motion?.delaySec ?? 0} min={0} max={Math.max(0.1, Math.min(5, block.durationSec - 0.1))} step={0.1} display={`${(block.motion?.delaySec ?? 0).toFixed(1)}s`}
-          onCommit={(delaySec) => onBlockPatch({ block: { motion: motionPatch(block.motion, { delaySec }) } })} />
-      </Group>
-
-      <Group label={t('workbench.propsAppearance')}>
-        <ColorRow label={t('workbench.propsBackground')} value={block.bg} swatches={swatches} noneTitle={t('workbench.noBackground')} onCommit={(bg) => onBlockPatch({ block: { bg } })} />
-        <ColorRow label={t('workbench.propsBorder')} value={block.border} swatches={swatches} noneTitle={t('workbench.propsNoBorder')} onCommit={(border) => onBlockPatch({ block: { border } })} />
-        <Slider label={t('workbench.propsRadius')} value={block.radius ?? 0} min={0} max={160} step={2} display={`${block.radius ?? 0} px`} onCommit={(v) => onBlockPatch({ block: { radius: v > 0 ? v : undefined } })} />
-        <Slider label={t('workbench.propsOpacity')} value={Math.round((block.opacity ?? 1) * 100)} min={5} max={100} step={5} display={`${Math.round((block.opacity ?? 1) * 100)}%`} onCommit={(v) => onBlockPatch({ block: { opacity: v >= 100 ? undefined : v / 100 } })} />
       </Group>
 
       {images.length > 0 && (
@@ -300,6 +336,18 @@ export function ComponentPropsPanel({ block, swatches, onBlockPatch, onValues, o
             </div>
           ))}
         </Group>
+      )}
+
+      {view && (
+        <div className="px-3 pb-3 pt-2">
+          <button
+            type="button"
+            onClick={() => onValues(resetStyle(view.schema as PropsSchema, view.values))}
+            className="text-ink-3 hover:text-ink hover:bg-panel-2 w-full rounded-md py-1.5 text-[11.5px] shadow-[inset_0_0_0_1px_var(--color-line-2)] transition-colors"
+          >
+            {t('workbench.propsResetStyle')}
+          </button>
+        </div>
       )}
     </div>
   );

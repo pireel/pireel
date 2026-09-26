@@ -1,7 +1,7 @@
 export const PANELS_EN: Record<string, string> = {
   "kitProp.customColor": "Custom colour",
   "kitProp.opacity": "Opacity",
-  "kitProp.surface": "Surface",
+  "kitProp.surface": "Fill",
   "kitProp.surfaceColor": "Surface colour",
   "kitProp.border": "Border",
   "kitProp.borderColor": "Border colour",
@@ -82,7 +82,7 @@ export const PANELS_EN: Record<string, string> = {
   "kitSample.ltSub": "Title · Role",
   "panels.kitComponents": "Motion Graphics",
   "kitProp.variant": "Variant",
-  "kitProp.motion": "Motion",
+  "kitProp.motion": "Entrance",
   "kitProp.value": "Value",
   "kitProp.label": "Label",
   "kitProp.note": "Note",
@@ -634,4 +634,9 @@ export const PANELS_EN: Record<string, string> = {
   "kitOpt.pace.slow": "Slow",
   "kitOpt.pace.normal": "Normal",
   "kitOpt.pace.fast": "Fast",
+  "kitProp.accent": "Accent",
+  "kitProp.ink": "Text color",
+  "kitProp.font": "Font",
+  "kitProp.textScale": "Text size",
+  "kitProp.pace": "Pace",
 };

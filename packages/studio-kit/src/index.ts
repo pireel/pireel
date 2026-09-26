@@ -15,6 +15,8 @@
  */
 
 import type { RenderCtx, RenderResult } from "./contract";
+import { STYLE_FIELDS, groupOf } from "./groups";
+import type { Field } from "./schema";
 import { metricSchema, renderMetric } from "./components/metric";
 import { calloutSchema, renderCallout } from "./components/callout";
 import { lowerThirdSchema, renderLowerThird } from "./components/lower-third";
@@ -51,6 +53,7 @@ export {
   type Field,
 } from "./schema";
 export { typeScale, fitDown, isCjk, type TypeScale } from "./sizing";
+export { PROPERTY_GROUPS, STYLE_FIELDS, groupOf, type PropertyGroup } from "./groups";
 export * as motion from "./motion";
 export { catalogText, surfaceText, type CatalogDef } from "./catalog";
 export {
@@ -113,7 +116,7 @@ export interface ComponentDef {
 
 /** The component registry. Additions are minor versions; renames/removals are never —
  *  props stored years ago must keep rendering. */
-export const components = {
+const componentDefs = {
   metric: {
     jsonSchema: metricSchema.jsonSchema,
     defaults: metricSchema.defaults,
@@ -531,6 +534,35 @@ export const components = {
     parse: particleTitleSchema.parse as (p: unknown) => Record<string, unknown>,
   },
 } satisfies Record<string, ComponentDef>;
+
+/** Every component with the shared property model applied: the style group joins its contract and
+ *  each property carries its group (`x-group`) for editors. Rendering is unchanged — the host
+ *  applies style around the component. */
+function withSharedGroups<T extends Record<string, ComponentDef>>(defs: T): T {
+  const styleProps = Object.fromEntries(Object.entries(STYLE_FIELDS).map(([k, f]) => [k, f.jsonSchema]));
+  const styleDefaults = Object.fromEntries(Object.entries(STYLE_FIELDS).map(([k, f]) => [k, f.fallback]));
+  const parseStyle = (input: unknown) => {
+    const src = typeof input === "object" && input !== null ? (input as Record<string, unknown>) : {};
+    return Object.fromEntries(Object.entries(STYLE_FIELDS).map(([k, f]) => {
+      const c = (f as Field<unknown>).coerce(src[k]);
+      return [k, c !== undefined ? c : f.fallback];
+    }));
+  };
+  return Object.fromEntries(Object.entries(defs).map(([id, def]) => {
+    const own = (def.jsonSchema.properties ?? {}) as Record<string, Record<string, unknown>>;
+    const properties = Object.fromEntries(
+      Object.entries({ ...own, ...styleProps }).map(([k, f]) => [k, { ...f, "x-group": groupOf(k, f) }]),
+    );
+    return [id, {
+      ...def,
+      jsonSchema: { ...def.jsonSchema, properties },
+      defaults: { ...def.defaults, ...styleDefaults },
+      ...(def.parse ? { parse: (p: unknown) => ({ ...def.parse!(p), ...parseStyle(p) }) } : {}),
+    }];
+  })) as unknown as T;
+}
+
+export const components = withSharedGroups(componentDefs);
 
 export type ComponentId = keyof typeof components;
 

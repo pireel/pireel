@@ -1,7 +1,7 @@
 export const PANELS_ZH: Record<string, string> = {
   "kitProp.customColor": "自定义颜色",
   "kitProp.opacity": "不透明度",
-  "kitProp.surface": "底板",
+  "kitProp.surface": "填充",
   "kitProp.surfaceColor": "底板颜色",
   "kitProp.border": "描边",
   "kitProp.borderColor": "描边颜色",
@@ -82,7 +82,7 @@ export const PANELS_ZH: Record<string, string> = {
   "kitSample.ltSub": "头衔 · 身份",
   "panels.kitComponents": "动态图形库",
   "kitProp.variant": "版式",
-  "kitProp.motion": "动效",
+  "kitProp.motion": "入场方式",
   "kitProp.value": "数值",
   "kitProp.label": "标签",
   "kitProp.note": "注释",
@@ -600,4 +600,9 @@ export const PANELS_ZH: Record<string, string> = {
   "kitOpt.pace.slow": "慢",
   "kitOpt.pace.normal": "适中",
   "kitOpt.pace.fast": "快",
+  "kitProp.accent": "强调色",
+  "kitProp.ink": "文字颜色",
+  "kitProp.font": "字体",
+  "kitProp.textScale": "字号",
+  "kitProp.pace": "节奏",
 };

@@ -779,4 +779,11 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.transitionsTab": "Transitions",
   "workbench.transitionLane": "Transitions lane",
   "workbench.noRoomForTransition": "No room for another transition at the playhead",
+  "workbench.propsGroupLayout": "Layout",
+  "workbench.propsGroupContent": "Content",
+  "workbench.propsGroupStyle": "Style",
+  "workbench.propsGroupSurface": "Surface",
+  "workbench.propsGroupMotion": "Motion",
+  "workbench.propsPosition": "Position",
+  "workbench.propsResetStyle": "Reset style",
 };

@@ -25,3 +25,27 @@ describe('kit type ink follows what is behind the block', () => {
     expect(kitElement('callout', 'k3', { text: 'Hi' }, { w: 600, h: 300 }).innerHtml).toContain('--sk-ink:var(--fg)');
   });
 });
+
+describe('shared property groups', () => {
+  it('every registered component carries the same groups and the shared style fields', async () => {
+    const { kitComponents } = await import('./kit-templates');
+    for (const [id, def] of Object.entries(kitComponents as unknown as Record<string, { jsonSchema: { properties: Record<string, { 'x-group'?: string }> } }>)) {
+      const props = def.jsonSchema.properties;
+      for (const key of ['accent', 'ink', 'font', 'textScale']) expect(props[key]?.['x-group'], `${id}.${key}`).toBe('style');
+      expect(props.variant?.['x-group'], id).toBe('layout');
+      for (const [key, f] of Object.entries(props)) expect(['layout', 'content', 'style', 'surface', 'motion'], `${id}.${key}`).toContain(f['x-group']);
+    }
+  });
+
+  it('the host applies the shared style: colours, typeface and type size change the render', () => {
+    const at = (props: Record<string, unknown>) => kitElement('callout', 'k4', { text: 'Hello', ...props }, { w: 600, h: 300 }).innerHtml;
+    const plain = at({});
+    const styled = at({ accent: '#ff0055', ink: '#112233', font: 'google:Inter' });
+    expect(styled).toContain('--sk-accent:#ff0055');
+    expect(styled).toContain('--sk-fg:#112233');
+    expect(styled).toContain('--sk-font-head:');
+    expect(plain).not.toContain('--sk-accent:#');
+    const sizes = (html: string) => [...html.matchAll(/font-size:([\d.]+)px/g)].map((m) => Number(m[1]));
+    expect(Math.max(...sizes(at({ textScale: 1.4 })))).toBeGreaterThan(Math.max(...sizes(plain)));
+  });
+});

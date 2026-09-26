@@ -389,6 +389,11 @@ export function bakeComponentPropsDefaults(schemaJson: string | undefined, value
 /** Font ids a bespoke component's font-type properties resolve to (effective values), so the
  *  document, the parent page and the export load their stylesheets like any other font in use. */
 export function componentPropsFontIds(block: { templateId: string; slots: Record<string, unknown> }): string[] {
+  // Registered components take their typeface from the shared style group (`font`).
+  if (block.templateId.startsWith('kit:')) {
+    const font = (block.slots.props as { font?: unknown } | undefined)?.font;
+    return typeof font === 'string' && font ? [font] : [];
+  }
   if (block.templateId !== 'custom') return [];
   const specs = parseComponentProps(blockPropsSchema(block)).specs.filter((spec) => spec.type === 'font');
   if (!specs.length) return [];

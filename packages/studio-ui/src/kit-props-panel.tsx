@@ -16,7 +16,7 @@
  */
 
 import { useMemo, type ReactNode } from 'react';
-import { kitComponents, kitSurfaceSwatches } from '@pireel/studio-engine/kit-templates';
+import { groupOf, kitComponents, kitSurfaceSwatches, type PropertyGroup } from '@pireel/studio-engine/kit-templates';
 import type { Block } from '@pireel/studio-engine/composition';
 import { Plus, X } from 'lucide-react';
 import { t } from './i18n';
@@ -34,6 +34,10 @@ export interface FieldSchema {
   description?: string;
   /** Human label (bespoke components declare one per property); falls back to the host's labelOf. */
   title?: string;
+  /** Shared property group (registered components carry it); absent → derived from the key/kind. */
+  'x-group'?: string;
+  /** 'percent' shows a factor as a percentage (1 → 100%). */
+  'x-display'?: string;
   default?: unknown;
   /** Row arrays (kit `rows()`): each row is an object of primitive fields. */
   items?: { properties?: Record<string, FieldSchema>; required?: string[] };
@@ -42,6 +46,14 @@ export interface FieldSchema {
 
 export interface PropsSchema {
   properties?: Record<string, FieldSchema>;
+}
+
+/** The shared group a field belongs to: declared by registered components, derived otherwise. */
+export function propertyGroupOf(key: string, f: FieldSchema): PropertyGroup {
+  const declared = f['x-group'];
+  return declared === 'layout' || declared === 'content' || declared === 'style' || declared === 'surface' || declared === 'motion'
+    ? declared
+    : groupOf(key, f);
 }
 
 /** Field label: catalog key when we have one, else the raw prop name (dev-facing fallback). */
@@ -103,10 +115,12 @@ const LABEL = 'text-ink-4 text-[11px]';
 function Field({ label, trailing, description, children }: { label: string; trailing?: ReactNode; description?: string; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5" title={description}>
-      <div className="flex items-baseline justify-between gap-2">
-        <span className={LABEL}>{label}</span>
-        {trailing}
-      </div>
+      {label || trailing ? (
+        <div className="flex items-baseline justify-between gap-2">
+          <span className={LABEL}>{label}</span>
+          {trailing}
+        </div>
+      ) : null}
       {children}
     </div>
   );
@@ -148,6 +162,7 @@ export function PropsForm({
   className = 'flex flex-col gap-4',
   renderFont,
   componentId,
+  group,
 }: {
   schema: PropsSchema;
   /** Effective values (defaults already applied by the host). */
@@ -166,14 +181,17 @@ export function PropsForm({
   renderFont?: (key: string, value: string, commit: (next: string) => void) => ReactNode;
   /** Registered component id, for naming its own layouts. */
   componentId?: string;
+  /** Render only this group's properties (the host lays the groups out as sections). */
+  group?: PropertyGroup;
 }) {
   const fields = Object.entries(schema.properties ?? {}).filter(
-    ([, f]) =>
+    ([key, f]) =>
       // Row arrays without an object row shape have no control; the rows() shape below gets one.
       (f.type !== 'array' || !!f.items?.properties) &&
       // Dependency declared by the schema, not by this form — a new component that declares one
       // hides correctly with no change here. The value is kept, just not shown.
-      (!f.showWhen || f.showWhen.in.includes(String(values[f.showWhen.field] ?? ''))),
+      (!f.showWhen || f.showWhen.in.includes(String(values[f.showWhen.field] ?? ''))) &&
+      (!group || propertyGroupOf(key, f) === group),
   );
   const label = (key: string, f: FieldSchema) => f.title ?? labelOf(key);
   const commit = (key: string, v: unknown) => onChange({ ...values, [key]: v });
@@ -237,7 +255,8 @@ export function PropsForm({
           const drawn = GLYPH_FIELDS.has(key);
           if (key === 'variant' || (options.length > 3 && !drawn)) {
             return (
-              <Field key={key} label={label(key, f)} description={f.description}>
+              // The layout section's title already names this choice; the tiles stand alone there.
+              <Field key={key} label={group === 'layout' && key === 'variant' ? '' : label(key, f)} description={f.description}>
                 <div className="grid grid-cols-2 gap-1.5">
                   {options.map((opt) => (
                     <button
@@ -310,14 +329,21 @@ export function PropsForm({
                 onBlur={(e) => commit(key, Number(e.target.value))}
                 className="accent-accent h-1.5 w-24 cursor-pointer"
               />
-              <span className="text-ink-4 w-10 text-right text-[11px] tabular-nums">{Math.round(num * 100) / 100}</span>
+              <span className="text-ink-4 w-10 text-right text-[11px] tabular-nums">{f['x-display'] === 'percent' ? `${Math.round(num * 100)}%` : Math.round(num * 100) / 100}</span>
             </Row>
           );
         }
         if (f.format === 'font') {
           const val = typeof v === 'string' ? v : String(f.default ?? 'sans');
           return (
-            <Field key={key} label={label(key, f)} description={f.description}>
+            <Field
+              key={key}
+              label={label(key, f)}
+              description={f.description}
+              trailing={resetMode === 'theme' && val ? (
+                <button type="button" onClick={() => commit(key, '')} className="text-ink-4 hover:text-ink text-[10.5px]">{t('kitProp.followTheme')}</button>
+              ) : undefined}
+            >
               {renderFont ? renderFont(key, val, (next) => commit(key, next)) : <input value={val} onChange={(e) => commit(key, e.target.value)} className={INPUT} />}
             </Field>
           );
