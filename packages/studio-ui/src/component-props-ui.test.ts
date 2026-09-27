@@ -70,6 +70,15 @@ describe('editable properties on the UI side', () => {
     expect(listHtml).toContain('aria-label="划掉"');
     expect(listHtml).toContain('draggable="true"');
     expect(listHtml).not.toContain('>版式<');
+    // Code offers what a person changes on an editor window: a colour scheme and type size — no
+    // separate colours, no panel section — and only the fields its current layout uses.
+    const code = (variant: string): Block => ({ id: 'cd', templateId: 'kit:code', slots: { props: { variant, code: 'const a = 1;', codeTheme: 'night' } }, startSec: 0, durationSec: 4, trackIndex: 2 });
+    const highlight = panel(code('highlight'));
+    for (const s of ['代码主题', '暗色', '浅色', '高对比', '字号', '高亮行']) expect(highlight).toContain(s);
+    for (const s of ['>底板<', '强调色', '文字颜色', '改动前', '节奏']) expect(highlight).not.toContain(s);
+    const diff = panel(code('diff'));
+    for (const s of ['改动前', '改动后']) expect(diff).toContain(s);
+    expect(diff).not.toContain('高亮行');
     expect(componentSchemaOf(kit)?.source).toBe('kit');
     expect(componentSchemaOf(block)?.source).toBe('manifest');
   });

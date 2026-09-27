@@ -83,7 +83,9 @@ export function kitOptionLabel(key: string, opt: string, componentId?: string): 
 }
 
 /** Shared options drawn by OptionGlyph. */
-const GLYPH_FIELDS = new Set(['surface', 'border', 'radius', 'trend', 'mark']);
+const GLYPH_FIELDS = new Set(['surface', 'border', 'radius', 'trend', 'mark', 'codeTheme']);
+/** Drawn options whose drawing says it all: past three they show without words. */
+const ICON_ONLY = new Set(['radius']);
 
 /** A tiny drawing of what a shared option does, so the choice reads before its word does. */
 function OptionGlyph({ field, opt }: { field: string; opt: string }) {
@@ -101,6 +103,23 @@ function OptionGlyph({ field, opt }: { field: string; opt: string }) {
   if (field === 'radius') {
     const r = { sharp: 0, soft: 1.8, round: 3.6, pill: 4.5 }[opt] ?? 2;
     return svg(<rect x="2.5" y="3.5" width="11" height="9" rx={r} {...stroke} />);
+  }
+  if (field === 'codeTheme') {
+    // A tiny editor window in the scheme's own colours: background, then three token lines.
+    const scheme: Record<string, [string, string, string, string]> = {
+      night: ['#1e2230', '#c792ea', '#9ece6a', '#ff9e64'],
+      light: ['#ffffff', '#cf222e', '#0a3069', '#0550ae'],
+      contrast: ['#0a0a0a', '#ff5fa2', '#ffd24d', '#5ce1ff'],
+    };
+    const [bg, a, b, c] = scheme[opt] ?? ['transparent', 'currentColor', 'currentColor', 'currentColor'];
+    return (
+      <svg viewBox="0 0 22 16" className="h-4 w-[22px] shrink-0" aria-hidden>
+        <rect x="0.5" y="0.5" width="21" height="15" rx="3" fill={bg} stroke="rgba(127,127,127,0.45)" strokeDasharray={opt === 'theme' ? '2 1.5' : undefined} />
+        <rect x="4" y="4.5" width="7" height="1.8" rx="0.9" fill={a} opacity={opt === 'theme' ? 0.55 : 1} />
+        <rect x="4" y="7.3" width="11" height="1.8" rx="0.9" fill={b} opacity={opt === 'theme' ? 0.4 : 1} />
+        <rect x="4" y="10.1" width="5" height="1.8" rx="0.9" fill={c} opacity={opt === 'theme' ? 0.3 : 1} />
+      </svg>
+    );
   }
   if (field === 'mark') {
     if (opt === 'check') return svg(<><rect x="2" y="2" width="12" height="12" rx="3" {...stroke} /><path d="M5 8.2l2 2L11 6" {...stroke} strokeWidth={1.7} /></>);
@@ -343,7 +362,7 @@ export function PropsForm({
           // Layouts are the component's biggest choice: a wrapping set of named tiles, not a
           // squeezed segmented row that truncates past three options.
           const drawn = GLYPH_FIELDS.has(key);
-          if (key === 'variant' || (options.length > 3 && !drawn)) {
+          if (key === 'variant' || (options.length > 3 && !ICON_ONLY.has(key))) {
             return (
               // The layout section's title already names this choice; the tiles stand alone there.
               <Field key={key} label={group === 'layout' && key === 'variant' ? '' : label(key, f)} description={f.description}>
@@ -358,7 +377,10 @@ export function PropsForm({
                         v === opt ? OPTION_ON : `bg-panel hover:bg-panel-2/70 ${OPTION_OFF}`
                       }`}
                     >
-                      {kitOptionLabel(key, opt, componentId)}
+                      <span className="flex min-w-0 items-center gap-2">
+                        {drawn ? <OptionGlyph field={key} opt={opt} /> : null}
+                        <span className="truncate">{kitOptionLabel(key, opt, componentId)}</span>
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -383,7 +405,7 @@ export function PropsForm({
                     >
                       <OptionGlyph field={key} opt={opt} />
                       {/* Four drawn options fit the row as drawings; the word rides in the tooltip. */}
-                      {drawn && options.length > 3 ? <span className="sr-only">{word}</span> : word}
+                      {ICON_ONLY.has(key) && options.length > 3 ? <span className="sr-only">{word}</span> : word}
                     </button>
                   );
                 })}

@@ -53,7 +53,7 @@ export {
   type Field,
 } from "./schema";
 export { typeScale, fitDown, isCjk, type TypeScale } from "./sizing";
-export { PROPERTY_GROUPS, STYLE_FIELDS, groupOf, type PropertyGroup } from "./groups";
+export { PROPERTY_GROUPS, STYLE_FIELDS, groupOf, inGroup, type PropertyGroup } from "./groups";
 export * as motion from "./motion";
 export { catalogText, surfaceText, type CatalogDef } from "./catalog";
 export {
@@ -112,6 +112,9 @@ export interface ComponentDef {
   render: (id: string, props: unknown, ctx: RenderCtx) => RenderResult;
   /** Schema gate — used when a blueprint stages the component instead of a built-in variant. */
   parse?: (props: unknown) => Record<string, unknown>;
+  /** The shared style fields a person would actually change on this component (default: all).
+   *  A component whose colours only make sense together offers its own scheme instead. */
+  style?: readonly (keyof typeof STYLE_FIELDS)[];
 }
 
 /** The component registry. Additions are minor versions; renames/removals are never —
@@ -328,6 +331,7 @@ const componentDefs = {
       "差异",
       "编程",
     ],
+    style: ["textScale"],
     render: renderCode,
     parse: codeSchema.parse as (p: unknown) => Record<string, unknown>,
   },
@@ -550,14 +554,16 @@ function withSharedGroups<T extends Record<string, ComponentDef>>(defs: T): T {
   };
   return Object.fromEntries(Object.entries(defs).map(([id, def]) => {
     const own = (def.jsonSchema.properties ?? {}) as Record<string, Record<string, unknown>>;
+    const taken = new Set<string>(def.style ?? Object.keys(STYLE_FIELDS));
+    const pick = <V,>(record: Record<string, V>) => Object.fromEntries(Object.entries(record).filter(([k]) => taken.has(k)));
     const properties = Object.fromEntries(
-      Object.entries({ ...own, ...styleProps }).map(([k, f]) => [k, { ...f, "x-group": groupOf(k, f) }]),
+      Object.entries({ ...own, ...pick(styleProps) }).map(([k, f]) => [k, { ...f, "x-group": groupOf(k, f) }]),
     );
     return [id, {
       ...def,
       jsonSchema: { ...def.jsonSchema, properties },
-      defaults: { ...def.defaults, ...styleDefaults },
-      ...(def.parse ? { parse: (p: unknown) => ({ ...def.parse!(p), ...parseStyle(p) }) } : {}),
+      defaults: { ...def.defaults, ...pick(styleDefaults) },
+      ...(def.parse ? { parse: (p: unknown) => ({ ...def.parse!(p), ...pick(parseStyle(p)) }) } : {}),
     }];
   })) as unknown as T;
 }

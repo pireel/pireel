@@ -43,8 +43,16 @@ export const STYLE_FIELDS = {
 
 const MOTION_KEYS = new Set(['motion', 'pace']);
 
+/** Place a component's own property in a shared group when its kind alone would misfile it
+ *  (a code colour scheme is style, not content). */
+export function inGroup<T>(f: Field<T>, group: PropertyGroup): Field<T> {
+  return { ...f, jsonSchema: { ...f.jsonSchema, 'x-group': group } };
+}
+
 /** The group a property belongs to, by what it is. */
-export function groupOf(key: string, schema?: { format?: unknown; type?: unknown }): PropertyGroup {
+export function groupOf(key: string, schema?: { format?: unknown; type?: unknown; 'x-group'?: unknown }): PropertyGroup {
+  const declared = schema?.['x-group'];
+  if (typeof declared === 'string' && (PROPERTY_GROUPS as readonly string[]).includes(declared)) return declared as PropertyGroup;
   if (key === 'variant') return 'layout';
   if (key in STYLE_FIELDS) return 'style';
   if (key in SURFACE_FIELDS) return 'surface';

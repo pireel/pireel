@@ -31,10 +31,24 @@ describe('shared property groups', () => {
     const { kitComponents } = await import('./kit-templates');
     for (const [id, def] of Object.entries(kitComponents as unknown as Record<string, { jsonSchema: { properties: Record<string, { 'x-group'?: string }> } }>)) {
       const props = def.jsonSchema.properties;
-      for (const key of ['accent', 'ink', 'font', 'textScale']) expect(props[key]?.['x-group'], `${id}.${key}`).toBe('style');
+      // Each component offers the shared style a person would change on it; most take all four.
+      const style = id === 'code' ? ['textScale'] : ['accent', 'ink', 'font', 'textScale'];
+      for (const key of style) expect(props[key]?.['x-group'], `${id}.${key}`).toBe('style');
       expect(props.variant?.['x-group'], id).toBe('layout');
       for (const [key, f] of Object.entries(props)) expect(['layout', 'content', 'style', 'surface', 'motion'], `${id}.${key}`).toContain(f['x-group']);
     }
+  });
+
+  it('code offers editor schemes instead of separate colours', async () => {
+    const { kitComponents } = await import('./kit-templates');
+    const props = (kitComponents as unknown as Record<string, { jsonSchema: { properties: Record<string, { 'x-group'?: string; 'x-hidden'?: boolean }> } }>).code!.jsonSchema.properties;
+    expect(props.codeTheme?.['x-group']).toBe('style');
+    for (const key of ['accent', 'ink', 'font']) expect(props[key]).toBeUndefined();
+    for (const key of ['surface', 'surfaceColor', 'border', 'borderColor', 'radius']) expect(props[key]?.['x-hidden'], key).toBe(true);
+    const at = (codeTheme: string) => kitElement('code', 'c9', { code: 'const a = 1; // note', codeTheme }, { w: 800, h: 500 }).innerHtml;
+    expect(at('night')).toContain('--code-keyword:#c792ea');
+    expect(at('light')).toContain('--sk-panel:#ffffff');
+    expect(at('theme')).not.toContain('--code-keyword:');
   });
 
   it('the host applies the shared style: colours, typeface and type size change the render', () => {

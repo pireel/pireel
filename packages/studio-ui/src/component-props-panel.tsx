@@ -207,10 +207,11 @@ export function ComponentPropsPanel({ block, swatches, themeVars, onBlockPatch, 
   const headerName = block.label?.trim() || (isCustom ? t('workbench.componentHeaderCustom') : t('workbench.componentHeaderKit'));
   const schemaFields = Object.entries(((view?.schema as PropsSchema | undefined)?.properties) ?? {});
   const groupsWithFields = new Set(schemaFields.filter(([, f]) => !f['x-hidden']).map(([key, f]) => propertyGroupOf(key, f)));
-  // Fixed order; a section shows when the component has something in it. Style, surface and motion
-  // are always there: every component takes opacity, a frame and timing of its entrance.
+  // Fixed order; a section shows when the component has something in it. Every component takes
+  // opacity (style) and motion timing; the block-frame surface stands in only for bespoke markup —
+  // a registered component's surface is whatever it declares (none for a code window).
   const sections = PROPERTY_GROUPS.filter((group) =>
-    group === 'style' || group === 'surface' || group === 'motion' || groupsWithFields.has(group) || (group === 'content' && texts.length > 0),
+    group === 'style' || group === 'motion' || groupsWithFields.has(group) || (group === 'surface' && isCustom) || (group === 'content' && texts.length > 0),
   );
   const form = (group: PropertyGroup) => view && (
     <PropsForm

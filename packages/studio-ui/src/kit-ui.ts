@@ -44,6 +44,7 @@ export function kitSampleProps(cid: string): Record<string, unknown> {
   if (cid === 'code')
     return {
       variant: 'highlight',
+      codeTheme: 'night', // a fresh insert reads as an editor; stored blocks keep following the theme
       file: 'edit.ts',
       language: 'TypeScript',
       code: [
