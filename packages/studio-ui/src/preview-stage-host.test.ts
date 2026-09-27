@@ -146,3 +146,27 @@ describe('stage stylesheet rewriting', () => {
     expect(css.trim()).toBe('.x{color:red}');
   });
 });
+
+describe('loadGsap', () => {
+  it('settles when the tag is dropped from <head> and GSAP arrives another way', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.resetModules();
+      const w = window as unknown as { gsap?: unknown };
+      delete w.gsap;
+      const { loadGsap } = await import('./preview-stage-host');
+      const pending = loadGsap();
+      // An in-app navigation replaces <head>: the tag is gone before it ever loads.
+      for (const tag of Array.from(document.querySelectorAll('script[src*="gsap"]'))) tag.remove();
+      await vi.advanceTimersByTimeAsync(60);
+      expect(document.querySelector('script[src*="gsap"]')).not.toBeNull(); // put back
+      const gsap = { context: () => ({ revert() {} }), timeline: () => ({}) };
+      w.gsap = gsap; // defined by whichever loader got there first
+      await vi.advanceTimersByTimeAsync(60);
+      await expect(pending).resolves.toBe(gsap);
+    } finally {
+      vi.useRealTimers();
+      delete (window as unknown as { gsap?: unknown }).gsap;
+    }
+  });
+});

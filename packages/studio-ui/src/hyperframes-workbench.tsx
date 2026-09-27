@@ -2535,7 +2535,9 @@ export function HyperframesWorkbench({
           !fontsChanged &&
           !renderInputsChanged &&
           patchable &&
-          !pendingSwitchRef.current
+          !pendingSwitchRef.current &&
+          // A patch edits the document on screen; with none mounted it would be dropped silently.
+          stageHostsRef.current[bufsRef.current.active]?.mounted
         ) {
           const echo = iframeEditEchoRef.current;
           // Existing nodes replace in their current parent/stack position. New nodes still need a
