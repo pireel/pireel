@@ -217,7 +217,7 @@ function diffHtml(before: string, after: string): string {
     .slice(0, 24)
     .map(
       (op) =>
-        `<div class="diff-line diff-${op.type}"><span class="diff-sign">${op.type === "del" ? "−" : op.type === "add" ? "+" : " "}</span><code>${syntaxHtml(op.line)}</code></div>`,
+        `<div class="diff-line diff-${op.type}">${op.type === "del" ? '<i class="diff-mark" aria-hidden="true"></i>' : ""}<span class="diff-sign">${op.type === "del" ? "−" : op.type === "add" ? "+" : " "}</span><code>${syntaxHtml(op.line)}</code></div>`,
     )
     .join("");
 }
@@ -226,24 +226,33 @@ function typingTimeline(
   id: string,
   charCount: number,
   pace: CodeProps["pace"],
+  lifeSec?: number,
 ): string {
-  const per = pace === "slow" ? 0.04 : pace === "fast" ? 0.014 : 0.028;
+  // Typing finishes inside the block: pace is the share of the block spent typing (the rest holds
+  // the finished code). Without a known length, fall back to a per-character rate.
+  const share = pace === "slow" ? 0.85 : pace === "fast" ? 0.5 : 0.7;
+  const rate = pace === "slow" ? 0.04 : pace === "fast" ? 0.014 : 0.028;
+  const budget = lifeSec && lifeSec > 1 ? Math.max(0.4, lifeSec * share - 0.45) : charCount * rate;
+  const per = Math.min(rate, budget / Math.max(1, charCount));
   return `(function(){
 var root=document.querySelector('#${id} .code'),caret=document.querySelector('#${id} .caret');
 if(!root||!caret)return;var chars=Array.from(root.querySelectorAll('.ch'));
 tl.set(chars,{opacity:0},0);tl.set(caret,{opacity:0},0);
 if(chars.length){var first=chars[0];tl.set(caret,{x:first.offsetLeft,y:first.offsetTop,opacity:1},0.45);}
-chars.forEach(function(el,i){var at=0.45+i*${per},ws=el.getAttribute('data-space')==='1';
-tl.to(el,{opacity:1,duration:ws?0.01:0.12,ease:'power1.out'},at);
-tl.to(caret,{x:el.offsetLeft+el.offsetWidth,y:el.offsetTop,duration:${per},ease:'none'},at);});
+chars.forEach(function(el,i){var at=0.45+i*${per.toFixed(5)},ws=el.getAttribute('data-space')==='1';
+tl.to(el,{opacity:1,duration:ws?0.01:Math.min(0.12,${Math.max(0.01, per * 3).toFixed(4)}),ease:'power1.out'},at);
+tl.to(caret,{x:el.offsetLeft+el.offsetWidth,y:el.offsetTop,duration:${per.toFixed(5)},ease:'none'},at);});
 tl.to(caret,{opacity:0,duration:0.32,ease:'steps(1)',repeat:3,yoyo:true},${(0.6 + charCount * per).toFixed(3)});
 })();`;
 }
 
 function diffTimeline(id: string, lineH: number): string {
-  return `tl.from('#${id} .diff-line',{autoAlpha:0,y:8,duration:0.22,stagger:0.045,ease:'power1.out'},0.16);
-tl.to('#${id} .diff-del',{height:0,minHeight:0,opacity:0,duration:0.55,stagger:0.08,ease:'power2.inOut'},0.75);
-tl.fromTo('#${id} .diff-add',{height:0,minHeight:0,opacity:0},{height:${lineH},minHeight:${lineH},opacity:1,duration:0.6,stagger:0.12,ease:'power2.out'},1.45);`;
+  // A real diff: the old code appears, the removed lines are marked and dimmed but stay in place,
+  // then the added lines open up beneath them. The held frame shows both, red over green.
+  return `tl.from('#${id} .diff-same, #${id} .diff-del',{autoAlpha:0,y:8,duration:0.22,stagger:0.045,ease:'power1.out'},0.16);
+tl.fromTo('#${id} .diff-del .diff-mark',{scaleX:0},{scaleX:1,duration:0.4,stagger:0.08,ease:'power2.out'},0.7);
+tl.to('#${id} .diff-del code',{opacity:0.6,duration:0.3,stagger:0.08},0.8);
+tl.fromTo('#${id} .diff-add',{height:0,minHeight:0,opacity:0},{height:${lineH},minHeight:${lineH},opacity:1,duration:0.5,stagger:0.1,ease:'power2.out'},1.15);`;
 }
 
 function highlightTimeline(id: string): string {
@@ -269,7 +278,13 @@ export function renderCode(
 ): RenderResult {
   const p = codeSchema.parse(raw);
   const s = typeScale(ctx);
-  const fontPx = Math.max(14, Math.min(42, Math.round(s.label * 0.94)));
+  // Size to both the box height (via the type scale) and its width: the longest shown line must fit
+  // beside the gutter instead of being cut at the window edge.
+  const shownText = p.variant === "diff" ? `${p.before || p.code}\n${p.after || p.code}` : p.code;
+  const longest = Math.max(8, ...shownText.split("\n").slice(0, 120).map((line) => [...line.replace(/\t/g, "  ")].length));
+  const byHeight = Math.max(14, Math.min(42, Math.round(s.label * 0.94)));
+  const byWidth = Math.floor((ctx.box.w - s.pad * 1.2) / (longest * 0.6 + 3.4));
+  const fontPx = Math.max(12, Math.min(byHeight, byWidth));
   const lineH = Math.round(fontPx * 1.55);
   const chromeH = Math.max(34, Math.round(s.label * 1.8));
   const footerH = p.result ? Math.max(32, Math.round(s.label * 1.55)) : 0;
@@ -344,7 +359,10 @@ ${p.result ? `<footer><i></i><span>${esc(p.result)}</span></footer>` : ""}
 #${id} .diff-line code{display:block;min-width:0;overflow:hidden;white-space:pre;font:inherit;}
 #${id} .diff-sign{font-weight:800;text-align:center;}
 #${id} .diff-same{color:${inkOn(panel, true)};}
-#${id} .diff-del{background:rgb(248 81 73 / .12);box-shadow:inset ${Math.max(2, s.rule)}px 0 #f85149;}
+#${id} .diff-line{position:relative;}
+#${id} .diff-line > *{position:relative;z-index:1;}
+#${id} .diff-del > .diff-mark{position:absolute;z-index:0;inset:0;background:rgb(248 81 73 / .16);box-shadow:inset ${Math.max(2, s.rule)}px 0 #f85149;transform-origin:left center;}
+#${id} .diff-del code{text-decoration:line-through;text-decoration-color:rgb(248 81 73 / .7);}
 #${id} .diff-add{background:rgb(63 185 80 / .12);box-shadow:inset ${Math.max(2, s.rule)}px 0 #3fb950;}
 #${id} .diff-del .diff-sign{color:#f85149;}
 #${id} .diff-add .diff-sign{color:#3fb950;}
@@ -356,7 +374,7 @@ ${p.result ? `<footer><i></i><span>${esc(p.result)}</span></footer>` : ""}
   if (onCard) timeline.push(fadeUp(`#${id} .wrap`, 0, { y: 10, dur: 0.25 }));
   timeline.push(fadeUp(`#${id} header`, 0.04, { y: 6, dur: 0.22 }));
   if (p.variant === "typing")
-    timeline.push(typingTimeline(id, [...visible.join("")].length, p.pace));
+    timeline.push(typingTimeline(id, [...visible.join("")].length, p.pace, ctx.durationSec));
   else if (p.variant === "diff") timeline.push(diffTimeline(id, lineH));
   else if (p.variant === "scroll") timeline.push(scrollTimeline(id));
   else timeline.push(highlightTimeline(id));

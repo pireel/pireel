@@ -64,3 +64,27 @@ describe("code Motion Graphic", () => {
     expect(block.html).toContain("&lt;");
   });
 });
+
+describe('code layouts land within the block', () => {
+  const ctx = { box: { w: 600, h: 380 }, canvas: { w: 1920, h: 1080 }, durationSec: 2.5 };
+  const long = Array.from({ length: 10 }, (_, i) => `const value${i} = await pireel.compose({ source: "clip-${i}.mp4" });`).join('\n');
+
+  it('typing finishes before the block ends, whatever the length of the code', () => {
+    const out = renderCode('c1', { variant: 'typing', code: long }, ctx);
+    const per = Number(/i\*([\d.]+)/.exec(out.timeline)?.[1]);
+    const chars = (out.html.match(/class="ch/g) ?? []).length;
+    expect(0.45 + chars * per).toBeLessThan(2.5);
+  });
+
+  it('a diff keeps the removed lines on screen next to the added ones', () => {
+    const out = renderCode('c2', { variant: 'diff', before: 'a = 1;', after: 'a = 2;' }, ctx);
+    expect(out.html).toContain('diff-del');
+    expect(out.html).toContain('diff-add');
+    expect(out.timeline).not.toMatch(/diff-del',\{height:0/);
+  });
+
+  it('shrinks the type so the longest line fits the window', () => {
+    const size = (code: string) => Number(/\.line\{[^}]*font-size:(\d+)px/.exec(renderCode('c3', { variant: 'highlight', code }, ctx).html)?.[1]);
+    expect(size(long)).toBeLessThan(size('const a = 1;'));
+  });
+});
