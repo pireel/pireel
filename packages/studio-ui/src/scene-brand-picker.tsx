@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Plus } from 'lucide-react';
 import { brandCaptionStyle, brandSnapshot, type BrandKit } from '@pireel/studio-engine/brand-kit';
 import type { CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
 import { studioProviders } from '@pireel/studio-engine/providers';
@@ -15,7 +16,14 @@ export function SceneBrandPicker({ options, locale, disabled, onChange }: {
   const provider = studioProviders().brands;
   const [brands, setBrands] = useState<BrandKit[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { provider?.list().then(setBrands, reason => setError(reason instanceof Error ? reason.message : String(reason))); }, [provider]);
+  useEffect(() => {
+    if (!provider) return;
+    const load = () => provider.list().then(list => { setBrands(list); setError(null); }, reason => setError(reason instanceof Error ? reason.message : String(reason)));
+    void load();
+    // Brands are created in another tab; pick them up when the user comes back.
+    window.addEventListener('focus', load);
+    return () => window.removeEventListener('focus', load);
+  }, [provider]);
   if (!provider) return null;
   const say = (zh: string, en: string) => locale === 'zh' ? zh : en;
   const current = options.brand;
@@ -24,7 +32,9 @@ export function SceneBrandPicker({ options, locale, disabled, onChange }: {
     ...(current && !listed.some(brand => brand.id === current.id) ? [{ value: current.id, label: current.name }] : []),
     ...listed.map(brand => ({ value: brand.id, label: brand.name }))];
   return <div className="border-line mb-5 border-b pb-5">
-    <SceneSelect label={say('品牌', 'Brand')} value={current?.id ?? 'none'} disabled={disabled || brands === null} options={choices} onChange={id => {
+    <SceneSelect label={say('品牌', 'Brand')} value={current?.id ?? 'none'} disabled={disabled || brands === null} options={choices}
+      footer={provider.manage && <button type="button" onClick={() => provider.manage!()} className="text-ink-2 hover:bg-panel-2 flex w-full items-center gap-1.5 rounded-sm px-2 py-1.5 text-left text-xs"><Plus size={12} />{say('去创建品牌', 'Create a brand')}</button>}
+      onChange={id => {
       const kit = listed.find(brand => brand.id === id);
       onChange(options => {
         // The brand's captions become the scene's caption style; later edits in the panel override them.

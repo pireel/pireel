@@ -1,3 +1,4 @@
+import { DUBBING_LANGUAGES } from './scene-languages';
 import { applyCaptionDocumentEdit, compositionToEditorDocument, emptyComposition, projectDocumentToComposition, type CaptionStyle, type EditorDocumentV2 } from './composition';
 import type { AsrSegment } from './build-blocks';
 import { removeSrcRanges } from './trim';
@@ -7,13 +8,16 @@ import { wordsFromText } from './caption-fx';
 import { brandAppearance, type BrandSnapshot } from './brand-kit';
 import { DEFAULT_CAPTION_WIDTH_PCT } from './composition-core';
 
-export const CAPTION_TRANSLATION_LANGUAGES = [
-  { id: '中文', name: { zh: '中文', en: 'Chinese' }, sample: '字幕预览' },
-  { id: 'English', name: { zh: '英语', en: 'English' }, sample: 'Caption preview' },
-  { id: '日本語', name: { zh: '日语', en: 'Japanese' }, sample: '字幕プレビュー' },
-  { id: '한국어', name: { zh: '韩语', en: 'Korean' }, sample: '자막 미리보기' },
-] as const;
-export type CaptionTranslationLanguage = typeof CAPTION_TRANSLATION_LANGUAGES[number]['id'];
+/** A sample line per script, used to reserve the translation line's height before real text exists. */
+const TRANSLATION_SAMPLES: Record<string, string> = {
+  zh: '字幕预览', yue: '字幕預覽', ja: '字幕プレビュー', ko: '자막 미리보기', ar: 'معاينة الترجمة', fa: 'پیش‌نمایش زیرنویس', he: 'תצוגה מקדימה',
+  th: 'ตัวอย่างคำบรรยาย', hi: 'कैप्शन पूर्वावलोकन', ta: 'முன்னோட்டம்', ru: 'Предпросмотр', uk: 'Попередній перегляд', bg: 'Преглед', el: 'Προεπισκόπηση',
+};
+/** Every language the translation service targets (the same catalog dubbing uses); ids are stable. */
+export const CAPTION_TRANSLATION_LANGUAGES = DUBBING_LANGUAGES.map(language => ({
+  id: language.id, name: { zh: language.zh, en: language.en }, sample: TRANSLATION_SAMPLES[language.code] ?? 'Caption preview',
+}));
+export type CaptionTranslationLanguage = typeof DUBBING_LANGUAGES[number]['id'];
 export interface CaptionTaskOptions {
   /** Brand picked for this scene, copied at pick time; its captions seed `caption`. */
   brand?: BrandSnapshot;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Bold, Check, ChevronDown } from 'lucide-react';
 import { BASE_CAPTION_FONT_PX,  getCaptionPreset, isDisplayTextFontId, type CaptionStyle, type DisplayTextFontId } from '@pireel/studio-engine/composition';
 import { FontPicker } from './display-text-panel';
@@ -12,11 +12,13 @@ import { CAPTION_ANIMATIONS, captionAnimationId, animatedCaptionPreset } from '@
 
 /** Global subtitle look: main-line appearance, main-line animation, and the translation line as three
  *  first-level tabs. The translation line only gets simple looks — no stacking, no motion. */
-export function CaptionStylePanel({ styleCtl, active, generating, onPickPreset }: {
+export function CaptionStylePanel({ styleCtl, active, generating, onPickPreset, translationControls }: {
   styleCtl: CaptionStyleCtl;
   active: boolean;
   generating: boolean;
   onPickPreset: (preset: string, patch?: Partial<CaptionStyle>) => void;
+  /** Language choice shown at the top of the translation tab, for hosts that pick it here. */
+  translationControls?: ReactNode;
 }) {
   const [section, setSection] = useState<'appearance' | 'animation' | 'sub'>('appearance');
   const main = styleCtl.main;
@@ -56,10 +58,13 @@ export function CaptionStylePanel({ styleCtl, active, generating, onPickPreset }
           </button>)}
         </div>
       </div>}
-      {section === 'sub' && (styleCtl.bilingualOn ? <div data-caption-sub className="space-y-3">
-        <StyleControls key="sub" style={styleCtl.sub} onPatch={styleCtl.onSubPatch} />
-        <PresetGroup title={t('captions.subPresets')} presets={SUB_PRESETS} current={styleCtl.sub.preset} onPick={pickSub} />
-      </div> : <p className="text-ink-4 py-6 text-center text-[12px] leading-relaxed">{t('captions.subEmpty')}</p>)}
+      {section === 'sub' && <div data-caption-sub className="space-y-3">
+        {translationControls}
+        {styleCtl.bilingualOn ? <>
+          <StyleControls key="sub" style={styleCtl.sub} onPatch={styleCtl.onSubPatch} />
+          <PresetGroup title={t('captions.subPresets')} presets={SUB_PRESETS} current={styleCtl.sub.preset} onPick={pickSub} />
+        </> : !translationControls && <p className="text-ink-4 py-6 text-center text-[12px] leading-relaxed">{t('captions.subEmpty')}</p>}
+      </div>}
     </fieldset>
     {generating && <p role="status" className="text-ink-4 mt-3 text-[12px]">{t('captions.generatingCaptions')}</p>}
   </div>;

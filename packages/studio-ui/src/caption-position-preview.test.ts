@@ -3,13 +3,13 @@ import { act, createElement, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
-vi.mock('./canvas-caption-preview', () => ({ CanvasCaptionPreview: () => createElement('canvas') }));
+vi.mock('./caption-stage-sample', () => ({ CaptionStageSample: () => createElement('div') }));
 import { CaptionPositionPreview } from './caption-position-preview';
 let root: Root; let container: HTMLDivElement;
 const changed = vi.fn();
 function Harness() {
   const [options, setOptions] = useState<CaptionTaskOptions>({ caption: {}, aspect: 'original', shortenPauses: false, translationLanguage: 'English' });
-  return createElement(CaptionPositionPreview, { options, source: { width: 1080, height: 1920 }, locale: 'zh', onChange: (yPct: number) => { changed(yPct); setOptions((current) => ({ ...current, custom: { yPct } })); } });
+  return createElement(CaptionPositionPreview, { options, source: { width: 1080, height: 1920 }, locale: 'zh', onChange: (yPct: number) => { changed(yPct); setOptions((current) => ({ ...current, caption: { ...current.caption, yPct } })); } });
 }
 const slider = () => container.querySelector<HTMLElement>('[role=slider]')!;
 async function pointer(type: string, y: number, pointerId = 1) {

@@ -312,12 +312,13 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
           <SceneCheckbox label={say('字幕', 'Captions')} checked={!!options.dubbing?.captions} disabled={disabled} onChange={captions => changeOptions(current => ({ ...current, dubbing: { ...dubbingSceneOptions(current.dubbing ?? DEFAULT_DUBBING_OPTIONS), captions } }))} />
           {options.dubbing?.captions && <CaptionTaskStyle options={options} source={probe ?? undefined} locale={locale} disabled={disabled} onChange={changeOptions} />}
         </div></> : ((isSfx || isRemoval) ? false : !isBroll || options.broll?.captions) ? <>
-        <CaptionTaskStyle options={options} source={probe ?? undefined} locale={locale} disabled={disabled} onChange={changeOptions} />
-        {!isBroll && !isSfx && (!!studioProviders().translate || options.translationLanguage) && <div className="border-line mt-5 border-t pt-5">
-          <SceneSelect label={say('双语字幕', 'Bilingual captions')} ariaLabel={say('翻译语言', 'Translation language')} value={options.translationLanguage ?? 'off'} disabled={disabled} onChange={value => changeOptions(current => ({ ...current, translationLanguage: CAPTION_TRANSLATION_LANGUAGES.find(language => language.id === value)?.id }))} options={[
-            { value: 'off', label: say('关闭', 'Off') }, ...CAPTION_TRANSLATION_LANGUAGES.map(language => ({ value: language.id, label: language.name[locale], disabled: !studioProviders().translate })),
-          ]} />{options.translationLanguage && <p className="text-ink-3 mt-2 text-xs">{say('原文在上，译文在下。', 'Original above, translation below.')}</p>}
-        </div>}
+        <CaptionTaskStyle options={options} source={probe ?? undefined} locale={locale} disabled={disabled} onChange={changeOptions}
+          translation={!isBroll && !isSfx && (!!studioProviders().translate || options.translationLanguage) ? <div className="space-y-2">
+            <SceneSelect label={say('翻译成', 'Translate to')} ariaLabel={say('翻译语言', 'Translation language')} value={options.translationLanguage ?? 'off'} disabled={disabled} onChange={value => changeOptions(current => ({ ...current, translationLanguage: CAPTION_TRANSLATION_LANGUAGES.find(language => language.id === value)?.id }))} options={[
+              { value: 'off', label: say('不翻译', 'Off') }, ...CAPTION_TRANSLATION_LANGUAGES.map(language => ({ value: language.id, label: language.name[locale], disabled: !studioProviders().translate })),
+            ]} />
+            <p className="text-ink-3 text-xs">{options.translationLanguage ? say('原文在上，译文在下。', 'Original above, translation below.') : say('选择语种后生成双语字幕。', 'Pick a language to add a translated line.')}</p>
+          </div> : undefined} />
         {!isBroll && !isSfx && <div className="border-line mt-5 border-t pt-5"><SceneCheckbox label={say('AI 去停顿', 'Shorten pauses')} checked={options.shortenPauses} disabled={disabled} onChange={shortenPauses => changeOptions(current => ({ ...current, shortenPauses }))} description={say('缩短长停顿，保留自然语气。', 'Trim long pauses while keeping speech natural.')} /></div>}
         </> : null}
         {isSfx && !drafting && selectedVersion?.task.document && <p className="text-ink-3 mt-5 text-xs" role="status">{say('已添加音效', 'Effects added')}: {selectedVersion.task.document.timeline.tracks.filter(track => track.role === 'sfx').reduce((count, track) => count + track.clips.length, 0)}</p>}

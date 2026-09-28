@@ -20,7 +20,6 @@ vi.mock('./local-media', () => ({ loadLocalVideo: mocks.source, saveLocalVideo: 
 vi.mock('./media', () => ({ fileSig: () => 'source', probeVideoFile: async () => ({ width: 1920, height: 1080, durationSec: 5, hasAudio: true }) }));
 vi.mock('./web-fonts', async (original) => ({ ...await original<typeof import('./web-fonts')>(), ensureFontStylesheet: async () => {}, loadFont: async () => {} }));
 vi.mock('./caption-project-cover', () => ({ captureCaptionFirstFrame: async () => 'data:image/jpeg;base64,first-frame' }));
-vi.mock('./canvas-caption-preview', () => ({ CanvasCaptionPreview: () => createElement('canvas') }));
 vi.mock('@pireel/studio-engine/providers', () => ({ studioProviders: () => ({ translate: vi.fn(), autoHighlight: vi.fn() }) }));
 import { CaptionTaskPage } from './caption-task-page';
 import { saveCaptionTask, loadCaptionTask, listCaptionVersions, loadCaptionVersion } from './caption-task-store';
@@ -200,7 +199,7 @@ describe('caption versions and preview UI', () => {
     expect(runs[0]!.task.generationId).not.toBe(runs[1]!.task.generationId);
     expect(await listCaptionVersions('owner', 'task')).toHaveLength(2);
     await choose('视频版本', '版本 1');
-    await settled(() => expect(container.querySelector('button[title="霓虹灯"]')!.className).not.toContain('ring-1'));
+    await settled(() => expect(container.querySelector('button[title="霓虹灯"]')!.className).not.toContain('ring-2'));
     expect(container.querySelector('a[download]')?.getAttribute('download')).toBe('demo-v1.mp4');
     await click(button('Agent Remix'));
     await settled(() => expect(mocks.remix).toHaveBeenCalled());

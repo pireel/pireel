@@ -2,15 +2,17 @@ import { useId, type ReactNode } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@pireel/ui/select';
 
 /** Shared presentation only; scene and workflow owners retain their own persistence. */
-export function SceneSelect<T extends string>({ label, ariaLabel = label, value, options, onChange, disabled = false }: {
+export function SceneSelect<T extends string>({ label, ariaLabel = label, value, options, onChange, disabled = false, footer }: {
   label: string; ariaLabel?: string; value: T; options: readonly { value: T; label: string; disabled?: boolean }[];
   onChange: (value: T) => void; disabled?: boolean;
+  /** Extra content under the options inside the open list, e.g. an entry to create a new choice. */
+  footer?: ReactNode;
 }) {
   return <div className="text-ink flex min-w-0 flex-wrap items-center justify-between gap-3 text-xs">
     <span>{label}</span>
     <Select disabled={disabled} value={value} onValueChange={value => onChange(value as T)}>
       <SelectTrigger aria-label={ariaLabel} className="border-line bg-bg h-8 w-48 max-w-full text-xs shadow-none hover:bg-panel-2"><SelectValue /></SelectTrigger>
-      <SelectContent className="studio-scope max-h-72">{options.map(option => <SelectItem key={option.value} value={option.value} disabled={option.disabled}>{option.label}</SelectItem>)}</SelectContent>
+      <SelectContent className="studio-scope max-h-72">{options.map(option => <SelectItem key={option.value} value={option.value} disabled={option.disabled}>{option.label}</SelectItem>)}{footer && <div className="border-line mt-1 border-t pt-1">{footer}</div>}</SelectContent>
     </Select>
   </div>;
 }

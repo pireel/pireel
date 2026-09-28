@@ -48,8 +48,9 @@ export function BlockPreviewFrame({
   /** Fixed card height; omitted = derived from the canvas aspect. With a fixed height the canvas
    *  (or the focus piece) is contain-fit and centered — used by fixed-height cards like the chat preview. */
   height?: number;
-  /** Preview ground: 'checker' = honest ground (transparent checkerboard, library/card default); 'stage' = stage paper ground (theme wall). */
-  ground?: 'stage' | 'checker';
+  /** Preview ground: 'checker' = honest ground (transparent checkerboard, library/card default); 'stage' = stage paper ground (theme wall);
+   *  'none' = transparent with no ground of its own, for overlaying real footage. */
+  ground?: 'stage' | 'checker' | 'none';
   /** 'canvas' uses the entire preview viewport. 'inset' keeps the historical checkerboard margin. */
   fit?: 'canvas' | 'inset';
   /** Focus box (design-canvas px): given = show only this block (piece centered and enlarged, used by component list cards); omitted = whole canvas shrunk. */
@@ -95,7 +96,7 @@ export function BlockPreviewFrame({
   latest.current = block;
   const doc = useMemo(
     () => {
-      const base = injectPreviewRuntime(blockPreviewDoc(comp, latest.current, { loop: docLoop, ground }));
+      const base = injectPreviewRuntime(blockPreviewDoc(comp, latest.current, { loop: docLoop, ground: ground === 'none' ? 'checker' : ground }));
       return focusContent ? injectPreviewContentBoundsReporter(base, block.id) : base;
     },
     // `docKey` deliberately fingerprints only structural composition fields; depending on the
@@ -165,7 +166,7 @@ export function BlockPreviewFrame({
   }, [replayKey]);
   return (
     <div
-      className={`relative overflow-hidden ${ground === 'checker' ? '' : 'bg-black/40'}`}
+      className={`relative overflow-hidden ${ground === 'stage' ? 'bg-black/40' : ''}`}
       style={{ width, height: h, ...(ground === 'checker' ? CHECKER_STYLE : {}) }}
       onPointerEnter={animate === 'hover' ? () => setLoop(true) : undefined}
       onPointerLeave={animate === 'hover' ? () => setLoop(false) : undefined}

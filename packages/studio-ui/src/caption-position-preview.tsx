@@ -5,7 +5,8 @@ import { emptyComposition, resolveSubCaptionStyle, type CaptionStyle } from '@pi
 import { BASE_CAPTION_FONT_PX, getCaptionPreset } from '@pireel/studio-engine/caption-presets';
 import { captionLineSegments } from '@pireel/studio-engine/caption-layout-metrics';
 import type { FxWord } from '@pireel/studio-engine/caption-fx';
-import { CanvasCaptionPreview } from './canvas-caption-preview';
+import { CaptionStageSample } from './caption-stage-sample';
+import { t } from './i18n';
 
 function lineHeightPct(text: string, style: Partial<CaptionStyle>, canvas: CaptionTaskDimensions) {
   const base = getCaptionPreset(style.preset);
@@ -27,7 +28,8 @@ export function CaptionPositionPreview({ options, source, locale, disabled = fal
   const canvas = { width: 1080, height: 1080 * source.height / source.width };
   const value = captionTaskGroupBottom(options, source);
   const shown = position ?? value;
-  const sample = dubbingCaptionSample(options) ?? (locale === 'zh' ? '字幕|预览' : 'Caption|preview');
+  // Same sample words as the style cards, so a picked card and the preview read alike.
+  const sample = dubbingCaptionSample(options) ?? [t('captions.samplePre'), t('captions.sampleWord'), t('captions.samplePost')].join('|');
   const translation = CAPTION_TRANSLATION_LANGUAGES.find((language) => language.id === options.translationLanguage)?.sample;
   const style = useMemo(() => fitCaptionTaskBilingualStyle(captionTaskStyle(options, source), canvas, translation ? [translation] : []), [options, source.width, source.height, translation]);
   const subStyle = translation && style.sub?.lang ? resolveSubCaptionStyle({ ...emptyComposition(), ...canvas, captionStyle: style }) : null;
@@ -70,7 +72,7 @@ export function CaptionPositionPreview({ options, source, locale, disabled = fal
     event.preventDefault(); onChange(clamp(next));
   };
   return <div ref={frame} data-caption-position-preview className="absolute inset-0">
-    <div className="pointer-events-none absolute inset-0" aria-hidden style={{ transform: delta ? `translateY(${delta}%)` : undefined }}><CanvasCaptionPreview paused style={style} locale={locale} aspect={source.width / source.height} sampleText={sample} sampleSubText={translation} /></div>
+    <div className="pointer-events-none absolute inset-0" aria-hidden style={{ transform: delta ? `translateY(${delta}%)` : undefined }}><CaptionStageSample style={style} canvas={canvas} text={sample} subText={translation} /></div>
     <div role="slider" aria-label={locale === 'zh' ? '字幕位置' : 'Caption position'} aria-orientation="vertical" aria-valuemin={min} aria-valuemax={max} aria-valuenow={shown} aria-valuetext={`${shown}%`} aria-disabled={disabled} tabIndex={disabled ? -1 : 0}
       title={locale === 'zh' ? '上下拖动字幕' : 'Drag captions up or down'}
       onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={(event) => { if (drag.current?.pointerId === event.pointerId) cancel(); }} onLostPointerCapture={(event) => { if (drag.current?.pointerId === event.pointerId) cancel(); }} onKeyDown={key} data-dragging={position != null}

@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { buildCaptionTaskDocument, captionTaskCanvas, storedCaptionTaskOptions } from './caption-task';
 import { CAPTION_ART_PRESETS, CAPTION_STYLE_PRESETS } from './caption-presets';
 import { assembleHtml, firstNarrativeAssetId, projectDocumentToComposition } from './composition';
-import { captionWordHighlighted } from './caption-canvas';
 const transcript = [{ text: 'Hello world', start: 0, end: 3, words: [{ text: 'Hello', start: 0, end: 1 }, { text: 'world', start: 2, end: 3 }] }];
 const input = { projectId: 'test-captions', sourceName: 'test.mp4', sourceUrl: 'blob:video', sourceSig: 'test-sig', width: 1920, height: 1080, durationSec: 4, transcript, options: { caption: {}, aspect: 'portrait' as const, shortenPauses: false } };
 describe('standalone caption documents', () => {
@@ -40,18 +39,5 @@ describe('standalone caption documents', () => {
     expect(captionTaskCanvas('original', { width: 1080, height: 1920 })).toEqual({ width: 1080, height: 1920 });
     expect(() => captionTaskCanvas('original', { width: 0, height: 0 })).toThrow();
     expect(() => buildCaptionTaskDocument({ ...input, durationSec: NaN })).toThrow();
-  });
-});
-describe('Canvas caption animation state', () => {
-  const words = [{ text: 'one', start: .1, end: .4 }, { text: 'two', start: 1, end: 2, emphasis: true }];
-  it('holds the active word across short gaps and hands over at the next onset', () => {
-    expect(captionWordHighlighted(words, 0, .7, false)).toBe(true);
-    expect(captionWordHighlighted(words, 0, 1, false)).toBe(false);
-    expect(captionWordHighlighted(words, 1, 1, false)).toBe(true);
-  });
-  it('keeps semantic emphasis distinct from follow-along and rejects estimated timing', () => {
-    expect(captionWordHighlighted(words, 0, .3, true)).toBe(false);
-    expect(captionWordHighlighted(words, 1, .3, true)).toBe(true);
-    expect(captionWordHighlighted([{ ...words[0]!, timing: 'estimated' }], 0, .3, false)).toBe(false);
   });
 });

@@ -496,8 +496,8 @@ export function CaptionPresetCard({ preset, active, tall, onPick }: { preset: Ca
       type="button"
       title={t(preset.name)}
       onClick={() => onPick(preset.id)}
-      className={`group relative overflow-hidden rounded-lg border transition ${
-        active ? 'border-accent ring-accent/40 ring-1' : 'border-line hover:border-accent'
+      className={`group relative overflow-hidden rounded-lg transition ${
+        active ? 'ring-accent ring-2' : 'hover:ring-ink-4 hover:ring-1'
       }`}
     >
       <div className={`flex ${tall ? 'h-[84px]' : 'h-[58px]'} items-center justify-center overflow-hidden bg-[#2b2b2e] px-3`}>
