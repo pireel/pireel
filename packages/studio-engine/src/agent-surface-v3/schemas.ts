@@ -473,6 +473,51 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       fontFamily: str('Optional display face for the component: web:<id> from get_state.fonts, google:<Family> from search_assets kind font, or local:<family>. The brief then defines var(--font-display); copy the same value to apply_component.'),
     }, ['instruction']),
   },
+  set_look: {
+    description:
+      'Write this output\'s look: its own visual system and the few parametric pieces every graphic of the video is an instance of. Replaces the previous look; instances keep their props and re-render. css is a plain stylesheet that applies inside pieces only (:root means the look). Each piece source is a function expression `function (props, ctx) { return { html, animate(tl, el, ctx) { … } }; }` — html is the markup, animate builds GSAP motion on the paused timeline tl (local time 0 = instance start), el is the piece host, ctx = { width, height (px of the box), duration, words }. Every frame must depend on time only: no timers, clock or randomness; no network, storage, scripts, iframes, video or canvas; no external styles or fonts. propsSchema (JSON Schema properties) declares what can be edited without regenerating. A rejection lists exact issues; fix those and send the whole look again.',
+    inputSchema: obj({
+      look: obj({
+        css: str('The stylesheet.'),
+        pieces: arr(obj({
+          id: str('Lowercase words joined by hyphens, e.g. item-card.'),
+          label: str('Name shown to people.'),
+          source: str('The piece function expression.'),
+          propsSchema: str('JSON object string: JSON Schema properties of its props (what can be edited without regenerating).'),
+        }, ['id', 'source']), { minItems: 1, maxItems: 12 }),
+        notes: str('Your statement of the system: what colours mean, where graphics live, how things move.'),
+      }, ['css', 'pieces']),
+    }, ['look']),
+  },
+  place_graphics: {
+    description:
+      'Place instances of the look\'s pieces on the graphics tracks: each item is a piece, its props, a box in canvas units (0–1; omit for the full frame) and its time in frames. anchor ties an instance to a spoken word (from get_transcript) so it follows later cuts; words gives the piece the spoken words it should land on, in seconds from the instance start. The receipt returns the new clip ids and a still of each at its settled moment on the real picture. Change words, place or time later with set_clip_properties (props, box) and move_clips; no regeneration.',
+    inputSchema: obj({
+      items: arr(obj({
+        pieceId: str('A piece of the current look.'),
+        props: arr(obj({ key: str('Prop name from the piece\'s propsSchema.'), value: PROPERTY_VALUE }, ['key', 'value']), { description: 'The piece\'s props.' }),
+        box: obj({ x: num('Left, 0–1.'), y: num('Top, 0–1.'), w: num('Width, 0–1.'), h: num('Height, 0–1.') }),
+        startFrame: FRAME('Instance start'),
+        durationFrames: int('Length in frames.', 1),
+        anchor: obj({ assetId: str('Transcribed source.'), segmentIndex: int('Transcript row.', 0), wordIndex: int('Word in the row.', 0), offsetFrames: int('Frames after the word.') }),
+        words: arr(obj({ text: str(), start: num('Seconds from the instance start.'), end: num('Seconds from the instance start.') }), { description: 'Spoken words the piece lands on.' }),
+        label: str('Name shown on the timeline.'),
+        id: str('Optional id to mint.'),
+      }, ['pieceId', 'startFrame', 'durationFrames']), { minItems: 1 }),
+    }, ['items']),
+  },
+  set_confirm_list: {
+    description:
+      'Hand the creator what they must confirm before publishing: facts you could not verify (unclear speech, names you inferred, claims, sources — kind fact), and any music or voice you propose (kind music / voice; the creator confirms or swaps them before they are used). Never design choices. Replaces the list; items the creator already answered keep their answer. An empty list clears it.',
+    inputSchema: obj({
+      items: arr(obj({
+        kind: enumOf(['fact', 'music', 'voice']),
+        text: str('What to confirm, in the creator\'s language.'),
+        ref: str('Where it comes from: a clip id, a transcript row, a source.'),
+        id: str('Stable id, to keep an answer across rewrites.'),
+      }, ['text'])),
+    }, ['items']),
+  },
   apply_component: {
     description:
       `Validate and place the component you generated from compose_component: pass raw (your full generated text) with the target clipId, atFrame, durationFrames and placement copied unchanged. Lint rejections list exact issues — fix only those and re-apply with the same clipId. A placed component comes back with one image of its settled frame (receipt settledFrame) on the real picture. generate=true instead asks Pireel's own model to author or rewrite from instruction (${CHARGE_MARKER} use only when the BYO path fails repeatedly). A rejection for <script>, an external library, canvas/WebGL, an iframe or embedded video is not fixable by retrying — the runtime is closed (see compose_component); rebuild that visual in markup, CSS and SVG. ${MG_BAKE_ROUTE} Here that means import_media, then add_clips with role broll and the component's box.`,

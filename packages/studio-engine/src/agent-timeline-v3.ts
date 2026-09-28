@@ -57,6 +57,7 @@ import { joinWords } from './caption-fx';
 import { applyWordMasks, groupWordsByAsset, maskWordsSummary, parseMaskWordsInput } from './word-masks-tool';
 import { applyComponentValues, blockPropsReadback, componentSchemaOf, componentValuesView, componentPropertyInputError } from './component-schema';
 import { dataEditFields, setDataEditText } from './component-props';
+import { placeGraphicsV3, setConfirmListV3, setLookV3 } from './look-tools';
 import { isComponentPropertyValue } from './component-property-input';
 import type { TranscriptSegment } from './project-dto';
 import {
@@ -1374,6 +1375,9 @@ export function runV3DocumentTool(document: EditorDocumentV2, tool: string, inpu
     case 'mask_words': return maskWordsV3(document, input);
     case 'get_transcript': return getTranscriptV3(document, input);
     case 'inspect_media': return inspectMediaV3(document, input);
+    case 'set_look': return setLookV3(document, input);
+    case 'place_graphics': return placeGraphicsV3(document, input);
+    case 'set_confirm_list': return setConfirmListV3(document, input);
     default: return null;
   }
 }

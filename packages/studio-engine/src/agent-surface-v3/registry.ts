@@ -78,6 +78,9 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   { id: 'denoise_audio', group: 'speech' },
   // ---- components and text (5)
   { id: 'compose_component', group: 'components' },
+  { id: 'set_look', group: 'components' },
+  { id: 'place_graphics', group: 'components' },
+  { id: 'set_confirm_list', group: 'session' },
   { id: 'apply_component', group: 'components', charges: true },
   { id: 'set_texts', group: 'components', skillContract: { version: 1, stability: 'stable' } },
   { id: 'set_captions', group: 'components', skillContract: { version: 1, stability: 'stable' } },

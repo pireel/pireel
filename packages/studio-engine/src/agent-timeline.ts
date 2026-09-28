@@ -62,6 +62,9 @@ export const AGENT_TIMELINE_TOOL_IDS = new Set([
   'get_beat_grid',
   'get_transcript',
   'inspect_media',
+  'set_look',
+  'place_graphics',
+  'set_confirm_list',
 ]);
 
 export interface AgentTimelineOutcome {
@@ -96,7 +99,7 @@ export function string(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
-function freeGraphicsStackOrder(document: EditorDocumentV2, startSec: number, durationSec: number): number {
+export function freeGraphicsStackOrder(document: EditorDocumentV2, startSec: number, durationSec: number): number {
   const startFrame = secondsToTimelineFrames(startSec, document.canvas.fps);
   const endFrame = startFrame + positiveDurationFrames(durationSec, document.canvas.fps);
   for (let stackOrder = 2; ; stackOrder++) {
@@ -120,7 +123,7 @@ function unit(value: unknown): number | undefined {
   return Number.isFinite(number) && number >= 0 && number <= 1 ? number : undefined;
 }
 
-function uniqueId(stem: string, used: ReadonlySet<string>): string {
+export function uniqueId(stem: string, used: ReadonlySet<string>): string {
   const clean = stem.replace(/[^A-Za-z0-9_-]+/g, '_') || 'item';
   let id = clean;
   let suffix = 2;

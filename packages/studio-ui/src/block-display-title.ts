@@ -106,7 +106,10 @@ export function blockContentTitle(block: Block): string | null {
   const slots = block.slots as Record<string, unknown>;
   const pieces = block.templateId === 'custom' && typeof slots.innerHtml === 'string'
     ? htmlText(slots.innerHtml)
-    : structuredText(block.templateId.startsWith('kit:') ? kitContentProps(block.templateId.slice(4), slots.props) : slots);
+    : structuredText(block.templateId.startsWith('kit:')
+      ? kitContentProps(block.templateId.slice(4), slots.props)
+      // A look instance says what its props say; its other slots are bookkeeping (look id, words).
+      : block.templateId.startsWith('look:') ? slots.props : slots);
   return pieces.length ? shorten(pieces.slice(0, 4).join(' · ')) : null;
 }
 

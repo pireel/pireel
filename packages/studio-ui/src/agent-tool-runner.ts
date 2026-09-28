@@ -4097,6 +4097,19 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           const failure = describeStepFailure(name, args, result.error, { kindOf: (id) => kinds.get(id), hasAsset: (id) => !!before.assets[id] }, result.data);
           return { ok: false, error: failure.error, ...(failure.fix ? { fix: failure.fix } : {}), data: { ...(result.data && typeof result.data === 'object' && !Array.isArray(result.data) ? result.data : {}), ...(failure.unknownIds ? { unknownIds: failure.unknownIds } : {}), detail: failure.detail } };
         }
+        if (name === 'place_graphics') {
+          // Each placed instance comes back as a still at its settled moment on the real picture.
+          const placedIds = ((result.data && typeof result.data === 'object' ? (result.data as { clipIds?: unknown }).clipIds : []) as unknown[])
+            .filter((id): id is string => typeof id === 'string').slice(0, 4);
+          const images: NonNullable<StudioToolResult['images']> = [];
+          const settled: Array<Record<string, unknown>> = [];
+          for (const clipId of placedIds) {
+            const { image, settledFrame } = await componentFrame(ctx, clipId);
+            if (image) images.push(image);
+            settled.push({ clipId, ...settledFrame });
+          }
+          result = { ...result, ...(images.length ? { images } : {}), data: { ...(result.data as Record<string, unknown> | undefined), settledFrames: settled } };
+        }
         if (name === 'apply_component') {
           const data = (result.data && typeof result.data === 'object' ? result.data : {}) as { newBlockId?: unknown; blockId?: unknown };
           const clipId = typeof data.newBlockId === 'string' ? data.newBlockId : typeof data.blockId === 'string' ? data.blockId : typeof args.clipId === 'string' ? args.clipId : '';
