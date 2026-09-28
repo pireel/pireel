@@ -2,7 +2,6 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-vi.mock('./canvas-caption-preview', () => ({ CanvasCaptionPreview: ({ style }: { style: { preset: string } }) => createElement('div', { 'data-preview-style': style.preset }) }));
 import { CaptionEffectShowcase } from './caption-effect-showcase';
 let container: HTMLDivElement;
 let root: Root;

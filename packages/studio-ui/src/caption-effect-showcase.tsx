@@ -1,13 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pause, Play } from 'lucide-react';
 import { CAPTION_ART_PRESETS, CAPTION_STYLE_PRESETS } from '@pireel/studio-engine/caption-presets';
-import { CanvasCaptionPreview } from './canvas-caption-preview';
+import { CaptionPresetSample } from './captions-panel';
 import { t } from './i18n';
 
-/** The workbench's own style catalog, so what the landing shows is what the editor offers. */
-const SHOWCASE = [...CAPTION_ART_PRESETS, ...CAPTION_STYLE_PRESETS].map(preset => ({ id: preset.id, name: preset.name, style: { preset: preset.id } }));
-
 const demoUrl = new URL('./workflow-art/caption-demo.mp4', import.meta.url).href;
+
+/** The editor's own style catalog, drawn by the same renderer as its style panel, so what the
+ *  landing shows is what the editor offers. */
+const SHOWCASE = [...CAPTION_ART_PRESETS, ...CAPTION_STYLE_PRESETS];
+/** Entry motion replayed on every switch; stacked looks pop, flat lines rise. */
+const motionOf = (preset: (typeof SHOWCASE)[number]) => (preset.stack ? 'pop' : 'rise');
 
 export function CaptionEffectShowcase({ locale, suspended = false }: { locale: 'zh' | 'en'; suspended?: boolean }) {
   const [automatic, setAutomatic] = useState(0);
@@ -20,8 +23,8 @@ export function CaptionEffectShowcase({ locale, suspended = false }: { locale: '
   const list = useRef<HTMLDivElement>(null);
   const lastPointer = useRef('mouse');
   const active = SHOWCASE.find((item) => item.id === (hovered ?? focused ?? touchSelection)) ?? SHOWCASE[automatic]!;
-  const playbackTime = useCallback(() => video.current?.currentTime ?? 0, []);
   const cycling = !hovered && !focused && !touchSelection && !paused && !suspended && !reduced;
+  const demoText: [string, string, string] = locale === 'zh' ? ['让每句话', '都被', '看见'] : ['Make every', 'word', 'count'];
   useEffect(() => {
     const preference = matchMedia('(prefers-reduced-motion: reduce)');
     const change = () => setReduced(preference.matches);
@@ -39,17 +42,29 @@ export function CaptionEffectShowcase({ locale, suspended = false }: { locale: '
     else void video.current.play().catch(() => setPaused(true));
   }, [paused, suspended, reduced]);
   useEffect(() => {
+    // Keep the cycling card in view inside the strip without scrolling the dialog.
     if (!cycling || !list.current) return;
     const element = list.current.querySelector<HTMLElement>(`[data-preset="${active.id}"]`);
     if (!element) return;
     const viewport = list.current.getBoundingClientRect();
-    const row = element.getBoundingClientRect();
-    if (row.bottom > viewport.bottom) list.current.scrollTop += row.bottom - viewport.bottom;
-    if (row.top < viewport.top) list.current.scrollTop -= viewport.top - row.top;
+    const card = element.getBoundingClientRect();
+    if (card.right > viewport.right) list.current.scrollLeft += card.right - viewport.right + 8;
+    if (card.left < viewport.left) list.current.scrollLeft -= viewport.left - card.left + 8;
   }, [active.id, cycling]);
-  return <div className="my-2 grid grid-cols-[100px_minmax(0,1fr)] gap-3 sm:grid-cols-[120px_minmax(0,1fr)]">
-    <div className="relative min-h-0">
-    <div ref={list} role="group" aria-label={locale === 'zh' ? '字幕效果' : 'Caption styles'} className="absolute inset-0 space-y-1 overflow-y-auto overscroll-contain pr-1 [scrollbar-width:thin]" onPointerLeave={() => setHovered(null)}>
+  return <div className="my-2 w-full min-w-0 space-y-3">
+    <div data-caption-demo-frame className="relative w-full overflow-hidden rounded-xl bg-black" style={{ aspectRatio: '16 / 9' }}>
+      <video ref={video} src={demoUrl} autoPlay loop muted playsInline preload="auto" aria-label={locale === 'zh' ? '字幕视频预览' : 'Caption video preview'} className="absolute inset-0 h-full w-full object-cover" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-2/5 bg-gradient-to-t from-black/45 to-transparent" />
+      <div data-preview-style={active.id} className="pointer-events-none absolute inset-x-0 bottom-[11%] flex justify-center">
+        <div key={active.id} className="caption-motion-preview origin-bottom scale-[1.7] sm:scale-[2.1]" data-motion={reduced ? undefined : motionOf(active)}>
+          <span className="caption-motion-line"><CaptionPresetSample p={active} segments={demoText} /></span>
+        </div>
+      </div>
+      <span className="absolute left-3 top-3 rounded-full bg-black/45 px-2.5 py-1 text-[11px] font-medium text-white backdrop-blur-sm">{t(active.name)}</span>
+      {!reduced && <button type="button" onClick={() => setPaused((value) => !value)} aria-label={paused ? (locale === 'zh' ? '播放预览' : 'Play preview') : (locale === 'zh' ? '暂停预览' : 'Pause preview')} className="absolute bottom-2 right-2 flex size-7 items-center justify-center rounded-full bg-black/40 text-white">{paused ? <Play size={12} /> : <Pause size={12} />}</button>}
+    </div>
+    <div ref={list} role="group" aria-label={locale === 'zh' ? '字幕效果' : 'Caption styles'} onPointerLeave={() => setHovered(null)}
+      className="-mx-1 flex snap-x gap-2 overflow-x-auto overscroll-contain px-1 pb-1 [scrollbar-width:thin]">
       {SHOWCASE.map((item, index) => <button key={item.id} type="button" data-preset={item.id} aria-pressed={active.id === item.id} aria-label={t(item.name)}
         onPointerEnter={(event) => { if (event.pointerType !== 'touch') { setAutomatic(index); setHovered(item.id); } }}
         onPointerDown={(event) => { lastPointer.current = event.pointerType; }}
@@ -57,15 +72,12 @@ export function CaptionEffectShowcase({ locale, suspended = false }: { locale: '
         onBlur={() => setFocused(null)}
         onClick={() => { if (lastPointer.current === 'touch') setTouchSelection((current) => current === item.id ? null : item.id); }}
         onKeyDown={(event) => { if (event.key === 'Escape') { event.currentTarget.blur(); setTouchSelection(null); } }}
-        className={'block w-full overflow-hidden rounded-md border transition-colors focus-visible:outline-2 focus-visible:outline-accent ' + (active.id === item.id ? 'border-ink bg-panel-2' : 'border-transparent bg-panel hover:border-ink-4')}>
-        <span className="block aspect-[4] w-full"><CanvasCaptionPreview style={{ ...item.style, scale: 2.4, xPct: 50, yPct: 78, wPct: 94 }} locale={locale} aspect={4} sampleText={locale === 'zh' ? '让表达|更精彩' : 'YOUR|WORDS'} playbackTime={playbackTime} paused={paused || suspended || reduced} /></span>
+        className="group w-[118px] shrink-0 snap-start text-left focus-visible:outline-none">
+        <span className={'flex h-[76px] items-center justify-center overflow-hidden rounded-lg border-2 bg-[#26262a] px-2 transition-colors ' + (active.id === item.id ? 'border-accent' : 'border-transparent group-hover:border-ink-4 group-focus-visible:border-ink-4')}>
+          <CaptionPresetSample p={item} />
+        </span>
+        <span className={'mt-1.5 block truncate text-[11px] ' + (active.id === item.id ? 'text-ink font-medium' : 'text-ink-3')}>{t(item.name)}</span>
       </button>)}
-    </div>
-    </div>
-    <div data-caption-demo-frame className="relative w-full self-start overflow-hidden rounded-lg bg-panel" style={{ aspectRatio: '16 / 9' }}>
-      <video ref={video} src={demoUrl} autoPlay loop muted playsInline preload="auto" aria-label={locale === 'zh' ? '字幕视频预览' : 'Caption video preview'} className="absolute inset-0 h-full w-full object-cover" />
-      <div className="pointer-events-none absolute inset-0"><CanvasCaptionPreview style={{ ...active.style, scale: 1, yPct: 83, wPct: 90 }} locale={locale} aspect={16 / 9} playbackTime={playbackTime} paused={paused || suspended || reduced} /></div>
-      {!reduced && <button type="button" onClick={() => setPaused((value) => !value)} aria-label={paused ? (locale === 'zh' ? '播放预览' : 'Play preview') : (locale === 'zh' ? '暂停预览' : 'Pause preview')} className="absolute bottom-2 right-2 flex size-7 items-center justify-center rounded-full bg-black/40 text-white">{paused ? <Play size={12} /> : <Pause size={12} />}</button>}
     </div>
   </div>;
 }
