@@ -72,6 +72,21 @@ async function recordError(task: CaptionTaskRecord, error: unknown) {
   if (latest) await local.saveCaptionTask({ ...latest, cloudPending: true, cloudError: error instanceof Error ? error.message : '云端同步未完成。' }).catch(() => {});
   changed();
 }
+/**
+ * A cloud copy that another tab or device moved on: an edit made later than that copy lands on the
+ * current revision (otherwise every later save failed, even after reopening); an edit that is not
+ * newer still refuses to overwrite it.
+ */
+async function saveOverCloud(task: CaptionTaskRecord, revision: number) {
+  try {
+    return await cloud()!.save(task, revision);
+  } catch (error) {
+    if ((error as { status?: number }).status !== 409 || !revision) throw error;
+    const current = await cloud()!.load(task.id);
+    if (!current || current.revision === revision || current.task.sourceSig !== task.sourceSig || task.updatedAt <= current.task.updatedAt) throw error;
+    return cloud()!.save(task, current.revision);
+  }
+}
 export async function saveCaptionTask(task: CaptionTaskRecord, result?: Blob, sourceFile?: File, onProgress?: UploadProgress): Promise<void> {
   if (!cloud()) { onProgress?.({ phase: 'saving' }); return local.saveCaptionTask(task, result); }
   return serial(task.scope, task.id, async () => {
@@ -90,7 +105,7 @@ export async function saveCaptionTask(task: CaptionTaskRecord, result?: Blob, so
         await local.saveCaptionTask(pending).catch(() => {});
       }
       if (result) await saveVersionToCloud(task.scope, task.id, { id: task.generationId ?? `generated-${task.updatedAt}`, number: 0, createdAt: task.updatedAt, task }, result);
-      const stored = await cloud()!.save(pending, pending.cloudRevision ?? 0);
+      const stored = await saveOverCloud(pending, pending.cloudRevision ?? 0);
       assertScope(stored.task, task.scope); writeRevisions.set(idKey, stored.revision);
       await local.saveCaptionTask({ ...stored.task, cloudRevision: stored.revision, cloudPending: false, cloudError: undefined }).catch(() => {});
       changed();
@@ -116,7 +131,7 @@ export async function syncCaptionProject(scope: string, id: string) {
         const stored = await local.loadCaptionVersion(scope, id, version.id);
         if (stored) await saveVersionToCloud(scope, id, stored.version, stored.video);
       }
-      const stored = await cloud()!.save(task, task.cloudRevision ?? 0);
+      const stored = await saveOverCloud(task, task.cloudRevision ?? 0);
       assertScope(stored.task, scope); writeRevisions.set(key(scope, id), stored.revision);
       await local.saveCaptionTask({ ...stored.task, cloudRevision: stored.revision, cloudPending: false, cloudError: undefined }).catch(() => {});
       changed();
@@ -130,7 +145,18 @@ export async function loadCaptionTask(scope: string, id: string): Promise<Captio
     const stored = await cloud()!.load(id);
     if (stored) {
       assertScope(stored.task, scope);
-      if (cached?.cloudPending) return cached;
+      if (cached?.cloudPending) {
+        // Unsynced local edits over a cloud copy that moved on elsewhere: the later edit wins. Local
+        // edits keep their changes on the current revision; an older local draft gives way.
+        const stale = !!cached.cloudRevision && stored.revision > cached.cloudRevision;
+        if (!stale) return cached;
+        if (cached.updatedAt > stored.task.updatedAt) {
+          writeRevisions.set(key(scope, id), stored.revision);
+          const rebased = { ...cached, cloudRevision: stored.revision, cloudError: undefined };
+          await local.saveCaptionTask(rebased).catch(() => {});
+          return rebased;
+        }
+      }
       writeRevisions.set(key(scope, id), stored.revision);
       const task = { ...stored.task, cloudRevision: stored.revision, cloudPending: false };
       await local.saveCaptionTask(task).catch(() => {});

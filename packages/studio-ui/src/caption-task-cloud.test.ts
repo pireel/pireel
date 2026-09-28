@@ -58,12 +58,30 @@ it('keeps a recoverable local copy when upload fails and migrates every version 
   await syncCaptionProject('owner', 'cloud-task');
   expect(versions.has('old-version')).toBe(true); expect((await local.loadCaptionTask('owner', 'cloud-task'))?.cloudPending).toBe(false);
 });
-it('retains edits instead of overwriting a newer cloud revision', async () => {
+it('retains edits instead of overwriting a cloud revision that is not older', async () => {
   await saveCaptionTask(fixture());
   projects.get('cloud-task')!.revision++;
+  projects.get('cloud-task')!.task.updatedAt = 5;
   await expect(saveCaptionTask({ ...fixture(), name: 'Local edit', updatedAt: 3 })).rejects.toMatchObject({ status: 409 });
   expect(projects.get('cloud-task')!.task.name).toBe('source.mp4');
   expect(await local.loadCaptionTask('owner', 'cloud-task')).toMatchObject({ name: 'Local edit', cloudPending: true });
+});
+it('lands a later edit on a cloud revision another device moved on', async () => {
+  await saveCaptionTask(fixture());
+  projects.get('cloud-task')!.revision += 5;
+  await saveCaptionTask({ ...fixture(), name: 'Later local edit', updatedAt: 3 });
+  expect(projects.get('cloud-task')).toMatchObject({ revision: 7, task: { name: 'Later local edit' } });
+});
+it('reopening a stuck draft rebases later local edits and gives way to a newer cloud copy', async () => {
+  await saveCaptionTask(fixture());
+  // Another device saved twice while this browser kept an unsynced edit on the old revision.
+  projects.set('cloud-task', { revision: 3, task: { ...projects.get('cloud-task')!.task, name: 'Other device', updatedAt: 2 } });
+  await local.saveCaptionTask({ ...fixture(), name: 'Later local edit', updatedAt: 4, cloudRevision: 1, cloudPending: true });
+  expect(await loadCaptionTask('owner', 'cloud-task')).toMatchObject({ name: 'Later local edit', cloudRevision: 3, cloudPending: true });
+  await saveCaptionTask({ ...fixture(), name: 'Later local edit', updatedAt: 5 });
+  expect(projects.get('cloud-task')).toMatchObject({ revision: 4, task: { name: 'Later local edit' } });
+  await local.saveCaptionTask({ ...fixture(), name: 'Older local draft', updatedAt: 1, cloudRevision: 1, cloudPending: true });
+  expect(await loadCaptionTask('owner', 'cloud-task')).toMatchObject({ name: 'Later local edit', cloudRevision: 4, cloudPending: false });
 });
 it('does not upload another account’s device cache after a session switch', async () => {
   mocks.owner.mockResolvedValue('other');
