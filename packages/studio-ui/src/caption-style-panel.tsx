@@ -5,8 +5,9 @@ import { Bold, Check, ChevronDown } from 'lucide-react';
 import { BASE_CAPTION_FONT_PX,  getCaptionPreset, isDisplayTextFontId, type CaptionStyle, type DisplayTextFontId } from '@pireel/studio-engine/composition';
 import { FontPicker } from './display-text-panel';
 import { cachedLocalFontFamilies, loadLocalFontFamilies, supportsLocalFontAccess, type LocalFontFamilyOption } from './local-font-access';
-import { CaptionPresetCard, CaptionPresetSample, type CaptionStyleCtl } from './captions-panel';
+import { CaptionPresetCard, type CaptionStyleCtl } from './captions-panel';
 import { t } from './i18n';
+import { CaptionMotionSample } from './caption-stage-sample';
 import { CAPTION_ART_PRESETS, CAPTION_STYLE_PRESETS, SUB_CAPTION_PRESET_IDS, type CaptionPreset } from '@pireel/studio-engine/caption-presets';
 import { CAPTION_ANIMATIONS, captionAnimationId, animatedCaptionPreset } from '@pireel/studio-engine/caption-animations';
 
@@ -23,6 +24,7 @@ export function CaptionStylePanel({ styleCtl, active, generating, onPickPreset, 
   const [section, setSection] = useState<'appearance' | 'animation' | 'sub'>('appearance');
   const main = styleCtl.main;
   const animation = captionAnimationId(main);
+  const motionSampleText = [t('captions.samplePre'), t('captions.sampleWord'), t('captions.samplePost')].join('|');
   const reset = { color: undefined, bg: undefined, font: undefined, bold: undefined };
   const pickMain = (preset: string) => onPickPreset(preset, { animation, ...reset });
   const pickSub = (preset: string) => styleCtl.onSubPatch({ preset, ...reset });
@@ -50,9 +52,10 @@ export function CaptionStylePanel({ styleCtl, active, generating, onPickPreset, 
           {CAPTION_ANIMATIONS.map(effect => <button
             key={effect.id} type="button" title={t(effect.name)} aria-pressed={animation === effect.id}
             onClick={() => styleCtl.onMainPatch({ animation: effect.id })}
-            className={`relative overflow-hidden rounded-lg border text-left ${animation === effect.id ? 'border-accent ring-accent/30 ring-1' : 'border-line hover:border-ink-4'}`}>
-            <div className="caption-motion-preview flex h-[64px] items-center justify-center overflow-hidden bg-[#2b2b2e] px-2" data-motion={effect.id}>
-              <span className="caption-motion-line"><CaptionPresetSample p={animatedCaptionPreset(getCaptionPreset(main.preset), effect.id)} /></span>
+            className={`relative overflow-hidden rounded-lg text-left transition ${animation === effect.id ? 'ring-accent ring-2' : 'hover:ring-ink-4 hover:ring-1'}`}>
+            {/* Drawn and animated by the engine itself, so the card shows exactly what picking it does. */}
+            <div className="flex h-[64px] items-center overflow-hidden bg-[#2b2b2e]" data-motion={effect.id}>
+              <CaptionMotionSample id={effect.id} style={{ ...main, animation: effect.id }} text={motionSampleText} />
             </div>
             <div className="text-ink-3 flex items-center justify-between gap-1 px-2 py-1.5 text-[10.5px]">{t(effect.name)}{animation === effect.id && <Check size={11} className="text-accent" />}</div>
           </button>)}

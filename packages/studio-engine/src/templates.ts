@@ -253,9 +253,10 @@ function renderCaption(slots: Slots, id: string): Rendered {
 /** Timeline-owned motion stays deterministic when seeking and during export. */
 function captionEntrance(selector: string, motion: CaptionPreset['motion'], at: number, duration: number): string | null {
   if (!motion || motion === 'typewriter') return null;
-  const from = motion === 'rise' ? { opacity: 0, y: 20 }
+  // Travel is in canvas px (1080-wide reference); a few percent of the frame reads on a phone.
+  const from = motion === 'rise' ? { opacity: 0, y: 36 }
     : motion === 'pop' ? { opacity: 0, scale: 0.82 }
-    : motion === 'slide' ? { opacity: 0, x: -24 }
+    : motion === 'slide' ? { opacity: 0, x: -72 }
     : motion === 'blur' ? { opacity: 0, filter: 'blur(8px)' }
     : { opacity: 0 };
   const to = { opacity: 1, ...(motion === 'rise' ? { y: 0 } : motion === 'pop' ? { scale: 1 } : motion === 'slide' ? { x: 0 } : motion === 'blur' ? { filter: 'blur(0px)' } : {}),

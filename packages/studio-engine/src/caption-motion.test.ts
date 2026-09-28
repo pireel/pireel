@@ -14,7 +14,7 @@ function render(preset: string, animation?: string) {
 
 describe('caption animations', () => {
   it('provides distinct real entrances on whole lines, without requiring word decorations', () => {
-    const cases = { fade: 'opacity', rise: '"y":20', pop: '"scale":0.82', slide: '"x":-24', blur: 'blur(8px)' };
+    const cases = { fade: 'opacity', rise: '"y":36', pop: '"scale":0.82', slide: '"x":-72', blur: 'blur(8px)' };
     for (const [animation, motion] of Object.entries(cases)) {
       const output = render('style-documentary', animation);
       expect(output.timelineBody).toContain(motion);
@@ -59,7 +59,7 @@ describe('independent appearance and animation', () => {
   it('can combine every visual style with motion or explicitly turn motion off', () => {
     for (const preset of CAPTION_STYLE_PRESETS) {
       const animated = render(preset.id, 'rise');
-      expect(animated.timelineBody).toContain('"y":20');
+      expect(animated.timelineBody).toContain('"y":36');
       expect(animated.innerHtml).toContain(preset.text);
       expect(render(preset.id, 'none').timelineBody).not.toContain('fromTo');
     }
@@ -78,8 +78,8 @@ describe('independent appearance and animation', () => {
     comp.blocks = [{ ...block, slots: { ...block.slots, sub: 'Hello world' } }];
     comp.captionStyle = { preset: 'style-outline', animation: 'rise', sub: { preset: 'style-paper', animation: 'slide', lang: 'English' } };
     const html = assembleHtml(comp);
-    expect(html).toContain(String.raw`\"y\":20`);
-    expect(html).toContain(String.raw`\"x\":-24`);
+    expect(html).toContain(String.raw`\"y\":36`);
+    expect(html).toContain(String.raw`\"x\":-72`);
     expect(html).toContain('-webkit-text-stroke');
   });
   it('lets the user recolor whatever the animation emphasizes', () => {
