@@ -171,7 +171,7 @@ function clipSpeedInDocument(document: EditorDocumentV2, clipId: string): number
   }
   return 1;
 }
-import { getTheme, themeVarsCss } from "@pireel/studio-engine/theme";
+import { effectiveThemeVars, getTheme, themeVarsCss } from "@pireel/studio-engine/theme";
 import {
   spans as clipSpans,
 } from "@pireel/studio-engine/trim";
@@ -1172,7 +1172,7 @@ export function HyperframesWorkbench({
   const selectedDisplayTextBlockId = selectedDisplayTextBlock?.id ?? null;
   const selectedCustomBlock = useMemo(
     () => selectedId
-      ? comp.blocks.find((block) => block.id === selectedId && (block.templateId === "custom" || block.templateId.startsWith("kit:"))) ?? null
+      ? comp.blocks.find((block) => block.id === selectedId && (block.templateId === "custom" || block.templateId.startsWith("kit:") || block.templateId.startsWith("look:"))) ?? null
       : null,
     [comp.blocks, selectedId],
   );
@@ -2548,7 +2548,9 @@ export function HyperframesWorkbench({
           !fontsChanged &&
           !renderInputsChanged &&
           patchable &&
-          !pendingSwitchRef.current
+          !pendingSwitchRef.current &&
+          // A patch edits the document on screen; with none mounted it would be dropped silently.
+          stageHostsRef.current[bufsRef.current.active]?.mounted
         ) {
           const echo = iframeEditEchoRef.current;
           // Existing nodes replace in their current parent/stack position. New nodes still need a
@@ -5498,10 +5500,27 @@ export function HyperframesWorkbench({
   /** Commit the inspector's values on a component (registered or bespoke — the engine's unified
    *  contract decides where they persist): one undo step. Deliberately not patchOverlays (which never
    *  snapshots) — a colour or number the user tuned must undo. */
+  /** Editing skills switched on for this project (the chat's editing-skills dialog): one undo step. */
+  const setEditingSkills = (ids: string[]) => {
+    const edit = commit({ op: "command", input: { command: { type: "editingSkills.set", ids } } });
+    if (!edit.ok) toast.error(editorErrorMessage(edit.error));
+  };
+  /** The creator's answer to one confirm-list item, stored in the project for the agent to read. */
+  const answerHandoff = (id: string, status: "open" | "confirmed" | "changed", answer?: string) => {
+    const edit = commit({ op: "command", input: { command: { type: "handoff.patch", id, status, ...(answer ? { answer } : {}) } } });
+    if (!edit.ok) toast.error(editorErrorMessage(edit.error));
+  };
+  // Stable identities for the memoized chat (the latest closures are read through the ref).
+  const chatDocCbsRef = useRef({ setEditingSkills, answerHandoff });
+  chatDocCbsRef.current = { setEditingSkills, answerHandoff };
+  const chatDocCbs = useMemo(() => ({
+    setEditingSkills: (ids: string[]) => chatDocCbsRef.current.setEditingSkills(ids),
+    answerHandoff: (id: string, status: "open" | "confirmed" | "changed", answer?: string) => chatDocCbsRef.current.answerHandoff(id, status, answer),
+  }), []);
   const patchComponentValues = (id: string, next: Record<string, unknown>) => {
     const block = compRef.current.blocks.find((x) => x.id === id);
     if (!block || genIdsRef.current.has(id)) return;
-    const edit = commit({ op: "overlay.patch", input: { updates: [{ clipId: id, block: { slots: nextPropsSlots(block, next) } }] } });
+    const edit = commit({ op: "overlay.patch", input: { updates: [{ clipId: id, block: { slots: nextPropsSlots(block, next, compRef.current.look) } }] } });
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return;
@@ -7012,7 +7031,6 @@ export function HyperframesWorkbench({
     ensureShots,
     stepAsr,
   });
-  const [pendingSelectionMG, setPendingSelectionMG] = useState<string | null>(null);
   /** "Add over this selection" popover (library pick or AI generation onto the selection's range). */
   const [addTarget, setAddTarget] = useState<TranscriptAddTarget | null>(null);
   const closeAddTarget = useCallback(() => setAddTarget(null), []);
@@ -7073,20 +7091,6 @@ export function HyperframesWorkbench({
       setPendingGenerations((items) => items.filter((item) => item.id !== id));
     }
   };
-  const generateSelectionMG = (text: string, startSec: number, endSec: number, pauseContext?: { before: string; after: string }) => {
-    if (!text.trim()) return;
-    openChat();
-    const from = Math.max(0, startSec).toFixed(2);
-    const to = Math.max(startSec + 0.1, endSec).toFixed(2);
-    setPendingSelectionMG(pauseContext
-      ? `在视频 ${from}s–${to}s 的口播停顿内添加 MG 动态图形。前文：${JSON.stringify(pauseContext.before)}；后文：${JSON.stringify(pauseContext.after)}。结合上下文设计画面，使用选中停顿的时间范围，保留原口播和剪辑节奏，不把停顿时长标签当作字幕内容。`
-      : `为视频 ${from}s–${to}s 的字幕稿选段「${text.trim()}」生成一段与语义匹配的 MG 动态图形。请放到对应时间范围，保留原口播与字幕可读性。`);
-  };
-  useEffect(() => {
-    if (!pendingSelectionMG || !initialChatThreads || chatBusy || !chatRef.current) return;
-    chatRef.current.send(pendingSelectionMG);
-    setPendingSelectionMG(null);
-  }, [pendingSelectionMG, initialChatThreads, chatBusy]);
   const transcriptControls = captionsPanelProps();
   const transcriptPanel = (
     <div data-cap-keep className="flex min-h-0 flex-1 flex-col">
@@ -7107,7 +7111,6 @@ export function HyperframesWorkbench({
           }}
           onDecorate={decorateTimelineScriptWords}
           onMask={maskTimelineScriptWords}
-          onGenerateMG={generateSelectionMG}
           onAddAtRange={addAtTranscriptRange}
           addKinds={shell.curatedAssets ? undefined : ['text', 'media', 'sfx', 'mg']}
           autoHighlight={studioProviders().autoHighlight}
@@ -8435,6 +8438,10 @@ export function HyperframesWorkbench({
                     runTool={chatCbs.runTool}
                     getBody={getChatBody}
                     getComp={getChatComp}
+                    editingSkills={comp.editingSkills}
+                    onEditingSkills={chatDocCbs.setEditingSkills}
+                    handoff={comp.handoff}
+                    onAnswerHandoff={chatDocCbs.answerHandoff}
                     timelineFramePickActive={timelineFramePickActive}
                     timelineFramePickBusy={timelineFramePickBusy}
                     timelineFramePickAvailable={
@@ -8537,12 +8544,6 @@ export function HyperframesWorkbench({
                       pushUndoSnapshot();
                       for (const id of ids) setShotAudio(id, patch);
                     }}
-                    denoise={{
-                      strength: comp.audioDenoise?.strength ?? null,
-                      status: denoiseOps.status,
-                      progress: denoiseOps.progress,
-                    }}
-                    onSetDenoise={denoiseOps.setDenoise}
                   />,
     transitions: <TransitionPanel
       effect={selectedTransition?.effect ?? null}
@@ -8615,8 +8616,10 @@ export function HyperframesWorkbench({
                     {floatWin === "props" && selectedCustomBlock && (
                       <ComponentPropsPanel
                         block={selectedCustomBlock}
+                        look={comp.look}
                         canvas={{ width: comp.width, height: comp.height }}
                         swatches={bgSwatches.map(([name, value]) => ({ label: t("panels.backgroundName", { name: t(name) }), value }))}
+                        themeVars={effectiveThemeVars(getTheme(comp.theme), comp.palette)}
                         onBlockPatch={(patch) => selectedCustomBlock && patchInspectorBlock(selectedCustomBlock.id, patch)}
                         onValues={(next) => selectedCustomBlock && patchComponentValues(selectedCustomBlock.id, next)}
                         onLive={(message) => selectedCustomBlock && postPreview({ type: "hf:blockProps", blockId: selectedCustomBlock.id, ...message })}
@@ -10017,7 +10020,7 @@ export function HyperframesWorkbench({
                               </Tooltip>
                             )}
                             {/* Editable properties live in the rail inspector; the bar only opens it. */}
-                            {(mb.templateId === "custom" || mb.templateId.startsWith("kit:")) && (
+                            {(mb.templateId === "custom" || mb.templateId.startsWith("kit:") || mb.templateId.startsWith("look:")) && (
                               <Tooltip>
                                 <TooltipTrigger asChild>
                                   <button

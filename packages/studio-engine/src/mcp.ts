@@ -233,11 +233,13 @@ function toolResponse(id: JsonRpcRequest['id'], r: McpBridgeResult): JsonRpcResp
     });
   }
   if (r.ok && r.image && typeof (r.image as { data?: unknown }).data === 'string') {
+    // The receipt rides next to the image: a component placed with its settled frame still needs its new id.
     const img = r.image as { data: string; mimeType?: string };
+    const { image: _drop, ...rest } = r;
     return rpcResult(id, {
       content: [
         { type: 'image', data: img.data, mimeType: img.mimeType ?? 'image/jpeg' },
-        { type: 'text', text: r.summary ?? 'frame captured' },
+        { type: 'text', text: JSON.stringify(rest) },
       ],
       isError: false,
     });

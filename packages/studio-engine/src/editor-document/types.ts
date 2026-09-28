@@ -4,6 +4,7 @@ import type { TranscriptSegment } from '../project-dto';
 import type { ThemeId } from '../theme';
 import type { NarrativeRole, SceneFamily, ViewerTask } from '../director-plan';
 import type { CustomVisualStyle } from '../visual-style';
+import type { DocumentLook } from '../look';
 
 export const EDITOR_DOCUMENT_VERSION = 2 as const;
 
@@ -67,6 +68,8 @@ export interface EditorAppearance {
   frameId?: string;
   customVisualStyle?: CustomVisualStyle;
   personFx?: PersonFx;
+  /** The output's own video-level template (visual system + pieces); graphics instance it as `look:<pieceId>`. */
+  look?: DocumentLook;
 }
 
 export type EditorTrackType = 'visual' | 'graphics' | 'audio' | 'caption';
@@ -231,6 +234,23 @@ export interface EditorSemanticState {
   artifacts?: unknown;
   /** Legacy arbitrary storyboard context. Retained for compatibility; new work uses the Director Plan artifact. */
   plan?: unknown;
+  /** What the agent hands back for the creator to confirm: facts it could not verify, and music or
+   *  voice choices that need the creator's say before they are used. Never design choices. */
+  handoff?: HandoffItem[];
+  /** Editing skills the creator switched on for this project (editing-skills.ts ids). */
+  editingSkills?: string[];
+}
+
+export interface HandoffItem {
+  id: string;
+  kind: 'fact' | 'music' | 'voice';
+  /** What to confirm, in the creator's language. */
+  text: string;
+  /** Where it comes from (a clip id, a transcript row, a source name…). */
+  ref?: string;
+  status: 'open' | 'confirmed' | 'changed';
+  /** The creator's answer when it was changed. */
+  answer?: string;
 }
 
 export interface EditorDocumentV2 {

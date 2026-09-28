@@ -52,6 +52,8 @@ import { documentTranscriptContextAt } from '@pireel/studio-engine/spoken-contex
 import { projectNarrativeShots, projectOverlayBlockById } from '@pireel/studio-engine/editor-document/legacy-projection';
 import { freeOverlayTrackIndex } from '@pireel/studio-engine/editor-document/read-model';
 import { documentCaptionsOn } from '@pireel/studio-engine/editor-document/caption-state';
+import { captionBandRects, platformZonesPx } from '@pireel/studio-engine/facts';
+import { measureShotRegions, measureSound } from './facts-measure';
 import { exportRecommendations } from '@pireel/studio-engine/export-options';
 import { parkInteraction } from './interaction-store';
 import { assembleComposeBrief, interpretApplyRaw, type ComposeBriefInput } from '@pireel/studio-engine/briefs';
@@ -60,6 +62,7 @@ import { frameRegistry } from '@pireel/studio-frames/vite';
 import { visualCraftBaseline } from './visual-baseline';
 import { composeEditorialBrief } from '@pireel/studio-engine/review-brief';
 import { studioProviders } from '@pireel/studio-engine/providers';
+import { motionGraphicNeighbors } from '@pireel/studio-engine/compose-neighbors';
 import { compositionRevision } from '@pireel/studio-engine/analysis-jobs';
 import { compactAssetSearchElementResults, searchAssetLibrary } from '@pireel/studio-engine/asset-search';
 import { mediaSearchTranscriptsFromDocument, searchProjectMedia } from '@pireel/studio-engine/media-search';
@@ -152,7 +155,7 @@ import { blockPropsSchema, componentPropsCarry } from '@pireel/studio-engine/com
 import { blockPropsReadback } from '@pireel/studio-engine/component-schema';
 
 const PROJECT_MUTATION_TOOLS = new Set(['manage_project']);
-const NO_UNDO_TOOLS = new Set(['get_state', 'inspect_media', 'get_transcript', 'get_beat_grid', 'search_assets', 'prepare_local_asset', 'search_media', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_audio', 'generate_foley', 'manage_voices', 'generate_speech', 'lip_sync', 'preview', 'undo', 'export', 'ask_user', 'get_icons', 'create_browser_handoff', 'inspect_timeline', 'compose_component']);
+const NO_UNDO_TOOLS = new Set(['get_state', 'get_facts', 'inspect_media', 'get_transcript', 'get_beat_grid', 'search_assets', 'prepare_local_asset', 'search_media', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_audio', 'generate_foley', 'manage_voices', 'generate_speech', 'lip_sync', 'preview', 'undo', 'export', 'ask_user', 'get_icons', 'create_browser_handoff', 'inspect_timeline', 'compose_component']);
 
 /** Generated outputs join the project media directory the moment they are known — from a poll, a
  * synchronous audio tool, or the background watcher below — so the Materials panel lists them
@@ -305,6 +308,42 @@ function canonicalRenderTimeline(
       visualMediaClips,
     })}`,
   };
+}
+
+/** When a component's entrance has played out: a couple of seconds in (retimed by its own motion
+ *  speed and delay), never past its last frame. */
+export function componentSettledAtSec(block: Pick<Block, 'startSec' | 'durationSec' | 'motion'>): number {
+  const speed = block.motion?.speed && block.motion.speed > 0 ? block.motion.speed : 1;
+  const settle = (block.motion?.delaySec ?? 0) + 2.2 / speed;
+  const last = Math.max(0, block.durationSec - 0.05);
+  return Math.round((block.startSec + Math.min(settle, last * 0.9)) * 100) / 100;
+}
+
+/** The finished component as it lands on the picture — the same render as export, handed back with
+ *  the component receipt so the model sees what it made (in its own turn, no extra model call). */
+async function componentFrame(ctx: AgentToolCtx, clipId: string): Promise<Pick<StudioToolResult, 'image'> & { settledFrame: Record<string, unknown> }> {
+  const renderTimeline = canonicalRenderTimeline(ctx.compRef.current, ctx.documentRef.current, ctx.resolveAssetUrl);
+  const block = renderTimeline.composition.blocks.find((b) => b.id === clipId);
+  if (!block) return { settledFrame: { error: 'component not in the render' } };
+  const atSec = Math.min(componentSettledAtSec(block), renderTimeline.durationSec);
+  try {
+    const shot = await captureCompositionFrame({
+      comp: renderTimeline.composition,
+      videoPlacements: renderTimeline.placements,
+      primaryVisualHidden: renderTimeline.primaryHidden,
+      visualMediaClips: renderTimeline.visualMediaClips,
+      timelineDurationSec: renderTimeline.durationSec,
+      videoFile: ctx.videoFileRef.current,
+      clipFiles: ctx.clipFilesRef.current,
+      atSec,
+      burnLabel: `${Math.round(atSec * 10) / 10}s`,
+      maxDim: 720,
+    });
+    const image = await cloudToolFrame(shot.dataUrl, { width: shot.width, height: shot.height });
+    return { image, settledFrame: { frame: Math.round(atSec * ctx.documentRef.current.canvas.fps) } };
+  } catch (e) {
+    return { settledFrame: { error: e instanceof Error ? e.message : String(e) } };
+  }
 }
 
 /** Direct-execution edits intentionally have no Director Plan. Give inspect_timeline one bounded,
@@ -1735,6 +1774,89 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   truncated,
                   next: `entries[] is capped at 500 per call; ${truncated} entries were NOT imported — call load_local_assets again with the remaining entries.`,
                 } : {}),
+              },
+            };
+          }
+          case 'get_facts': {
+            // Measured facts for designing what goes on screen: local decoding only, no model calls.
+            const doc = documentRef.current;
+            const fps = doc.canvas.fps;
+            const requested = Array.isArray(input.assetIds)
+              ? [...new Set((input.assetIds as unknown[]).filter((value): value is string => typeof value === 'string' && value.trim().length > 0).map((value) => value.trim()))]
+              : [];
+            const placed = [...new Set(doc.timeline.tracks.flatMap((track) => track.clips.flatMap((clip) =>
+              'assetId' in clip && typeof clip.assetId === 'string' ? [clip.assetId] : [])))];
+            const ids = (requested.length ? requested : placed).slice(0, 12);
+            const sources: Array<Record<string, unknown>> = [];
+            for (let index = 0; index < ids.length; index += 1) {
+              if (stopped()) throw abortErr();
+              const assetId = ids[index]!;
+              const asset = doc.assets[assetId];
+              if (!asset) { sources.push({ assetId, error: 'unknown asset id' }); continue; }
+              report(t('tools.get_facts.label') + ` ${index + 1}/${ids.length}`, index / Math.max(1, ids.length));
+              const meta = asset.metadata;
+              const transcript = doc.semantics.transcripts?.[assetId];
+              const entry: Record<string, unknown> = {
+                assetId,
+                kind: asset.kind,
+                ...(asset.label ? { label: asset.label } : {}),
+                ...(meta.durationSec ? { durationSec: Math.round(meta.durationSec * 100) / 100 } : {}),
+                ...(meta.width && meta.height ? { width: meta.width, height: meta.height } : {}),
+                transcript: transcript?.length
+                  ? { segments: transcript.length, words: transcript.some((segment) => Array.isArray(segment.words) && segment.words.length > 0), read: 'get_transcript' }
+                  : { segments: 0 },
+              };
+              if (asset.kind === 'image') { sources.push(entry); continue; }
+              const bytes = await assetBytes(asset);
+              if (!bytes.file) { sources.push({ ...entry, error: bytes.reason }); continue; }
+              const file = bytes.file;
+              if (asset.kind !== 'audio') {
+                const probe = await probeVideoFile(file).catch(() => null);
+                const durationSec = probe?.durationSec || meta.durationSec || 0;
+                if (durationSec > 0) {
+                  const vis = await race(analyzeVisualGeometry(file, durationSec).catch(() => null));
+                  const cuts = vis?.cuts ?? [];
+                  const scenes = await race(measureShotRegions(file, durationSec, cuts).catch(() => []));
+                  Object.assign(entry, {
+                    scenes,
+                    ...(vis ? { geometry: visualGeometryForAgent(vis) } : {}),
+                  });
+                }
+              }
+              if (meta.hasAudio !== false) {
+                const sound = await race(measureSound(file).catch(() => null));
+                if (sound) entry.sound = sound;
+              }
+              sources.push(entry);
+            }
+            const comp = compRef.current;
+            const captionsOn = documentCaptionsOn(doc);
+            const onScreen = doc.timeline.tracks.flatMap((track) => track.clips.flatMap((clip) => {
+              if (clip.kind !== 'graphic') return [];
+              const box = (clip as { box?: { x: number; y: number; w: number; h: number } }).box ?? (clip as { block?: { box?: { x: number; y: number; w: number; h: number } } }).block?.box;
+              return [{
+                clipId: clip.id,
+                kind: clip.kind,
+                frames: [clip.startFrame, clip.startFrame + clip.durationFrames],
+                ...(box ? { box: { x: Math.round(box.x * doc.canvas.width), y: Math.round(box.y * doc.canvas.height), w: Math.round(box.w * doc.canvas.width), h: Math.round(box.h * doc.canvas.height) } } : {}),
+              }];
+            }));
+            return {
+              ok: true,
+              summary: t('tools.get_facts.label'),
+              data: {
+                canvas: { width: doc.canvas.width, height: doc.canvas.height, fps },
+                sources,
+                captions: captionsOn
+                  ? { on: true, band: captionBandRects(comp, { lines: 2, withTranslation: !!comp.captionStyle?.sub }) }
+                  : { on: false },
+                platformZones: platformZonesPx(doc.canvas.width, doc.canvas.height),
+                onScreen,
+                notes: [
+                  'Region grids are 3 columns × 5 rows per scene, top row first; busy is detail (low = empty space), bright is 0–1.',
+                  'Text burned into the footage is not located here: look at frames (inspect_timeline or inspect_media) before placing graphics near it.',
+                  'Sources without a transcript but with sound.speech.speechLikely may hold speech worth reading: get_transcript transcribes them.',
+                ],
               },
             };
           }
@@ -3202,6 +3324,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   label: b.label,
                   durationSec: b.durationSec,
                   beats: motionBeats(b.startSec, b.durationSec),
+                  neighbors: motionGraphicNeighbors(compRef.current.blocks, { blockId: b.id }),
                   ...(b.box ? { boxPx: { w: Math.round(b.box.w * canvasSize().width), h: Math.round(b.box.h * canvasSize().height) } } : {}),
                 };
                 // A kit block is edited as props; anything else keeps writing markup. Editing follows
@@ -3257,18 +3380,19 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   : {}),
                 durationSec,
                 beats: motionBeats(at, durationSec),
+                neighbors: motionGraphicNeighbors(compRef.current.blocks, { atSec: at }),
               };
               const backdrop = typeof input.backdrop === 'string' && input.backdrop.trim()
                 ? `\n\nBACKDROP AND PROTECTED ZONES: ${input.backdrop.trim()}`
                 : '';
               // Streaming: the note (the human sentence before the fence) is pushed to the card as it generates; the output passes static checks (bad CSS doesn't enter the composition)
-              // New elements always get bespoke visual reasoning. No Frame means the neutral visual
-              // craft baseline, not a fallback to the fixed component-library cards.
+              // Library first (no Frame): a registered component with filled props; the model declines
+              // when none carries the moment, and the free-form path below writes bespoke markup.
               let parsed = await race(composeBlockChecked(
                 seed,
                 `Create a new Motion Graphic layer for this composed Scene: ${String(input.instruction ?? '')}${backdrop}${sceneDirection}`,
                 (acc) => report(noteOf(acc) || t('panels.generating')),
-                newBlockComposeMode(),
+                newBlockComposeMode({ frameAttached: !!documentRef.current.appearance.frameId }),
               ));
               // An explicit user request never maps to "nothing worth showing" — a deliberate null
               // here means no component carries the ask, so take the free-form path rather than
@@ -3537,7 +3661,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
                   label: b.label,
                   durationSec: b.durationSec,
                   ...(b.box ? { boxPx: { w: Math.round(b.box.w * canvasSize().width), h: Math.round(b.box.h * canvasSize().height) } } : {}),
-                  ...(blockPropsReadback(b).props ? { props: blockPropsReadback(b).props!.values } : {}),
+                  ...(blockPropsReadback(b, compRef.current.look).props ? { props: blockPropsReadback(b, compRef.current.look).props!.values } : {}),
                 },
                 // A kit block is edited as props: hand the brief what it currently shows, so an
                 // external edit keeps unmentioned fields exactly like the in-app path does.
@@ -3973,6 +4097,27 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           // that names the next move (an invented id → read state; a wrong kind → the right tool).
           const failure = describeStepFailure(name, args, result.error, { kindOf: (id) => kinds.get(id), hasAsset: (id) => !!before.assets[id] }, result.data);
           return { ok: false, error: failure.error, ...(failure.fix ? { fix: failure.fix } : {}), data: { ...(result.data && typeof result.data === 'object' && !Array.isArray(result.data) ? result.data : {}), ...(failure.unknownIds ? { unknownIds: failure.unknownIds } : {}), detail: failure.detail } };
+        }
+        if (name === 'place_graphics') {
+          // Each placed instance comes back as a still at its settled moment on the real picture.
+          const placedIds = ((result.data && typeof result.data === 'object' ? (result.data as { clipIds?: unknown }).clipIds : []) as unknown[])
+            .filter((id): id is string => typeof id === 'string').slice(0, 4);
+          const images: NonNullable<StudioToolResult['images']> = [];
+          const settled: Array<Record<string, unknown>> = [];
+          for (const clipId of placedIds) {
+            const { image, settledFrame } = await componentFrame(ctx, clipId);
+            if (image) images.push(image);
+            settled.push({ clipId, ...settledFrame });
+          }
+          result = { ...result, ...(images.length ? { images } : {}), data: { ...(result.data as Record<string, unknown> | undefined), settledFrames: settled } };
+        }
+        if (name === 'apply_component') {
+          const data = (result.data && typeof result.data === 'object' ? result.data : {}) as { newBlockId?: unknown; blockId?: unknown };
+          const clipId = typeof data.newBlockId === 'string' ? data.newBlockId : typeof data.blockId === 'string' ? data.blockId : typeof args.clipId === 'string' ? args.clipId : '';
+          if (clipId) {
+            const { image, settledFrame } = await componentFrame(ctx, clipId);
+            result = { ...result, ...(image ? { image } : {}), data: { ...(result.data as Record<string, unknown> | undefined), settledFrame } };
+          }
         }
         if (name === 'search_assets' && result.data && typeof result.data === 'object' && 'usageHint' in (result.data as object)) {
           result = { ...result, data: { ...(result.data as Record<string, unknown>), usageHint: V3_LIBRARY_USAGE_HINT } };

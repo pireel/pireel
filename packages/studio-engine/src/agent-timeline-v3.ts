@@ -56,6 +56,8 @@ import { phraseWordIndexes, rowWords } from './caption-highlights';
 import { joinWords } from './caption-fx';
 import { applyWordMasks, groupWordsByAsset, maskWordsSummary, parseMaskWordsInput } from './word-masks-tool';
 import { applyComponentValues, blockPropsReadback, componentSchemaOf, componentValuesView, componentPropertyInputError } from './component-schema';
+import { dataEditFields, setDataEditText } from './component-props';
+import { placeGraphicsV3, setConfirmListV3, setLookV3 } from './look-tools';
 import { isComponentPropertyValue } from './component-property-input';
 import type { TranscriptSegment } from './project-dto';
 import {
@@ -437,19 +439,37 @@ function setComponentProps(document: EditorDocumentV2, clipId: string, pairs: un
   if (!valid) return fail('props is a non-empty array of {key, value} pairs; keys come from component.props in get_state');
   const block = projectOverlayBlockById(document, clipId);
   if (!block) return fail(`graphic clip not found: ${clipId}`);
-  const view = componentSchemaOf(block);
-  if (!view) return fail('this component has no editable properties (media, caption, or a bespoke component without a properties schema)');
+  const look = document.appearance.look;
+  const view = componentSchemaOf(block, look);
+  if (!view) return fail('this component has no editable properties (media, caption, or a component without a properties schema)');
   const requested = Object.fromEntries(rows.map((pair) => [(pair as Input).key as string, (pair as Input).value]));
   const declared = Object.keys(view.schema.properties ?? {});
   const unknown = Object.keys(requested).filter((key) => !declared.includes(key));
   if (unknown.length) return fail(`unknown properties: ${unknown.join(', ')} — declared: ${declared.join(', ')}`);
   const valueError = componentPropertyInputError(view, requested);
   if (valueError) return fail(valueError);
-  const slots = applyComponentValues(block, requested)!;
+  const slots = applyComponentValues(block, requested, look)!;
   const edit = applyOverlayDocumentEdits({ document, updates: [{ clipId: block.id, block: { slots } }] });
   if (!edit.ok) return fail(edit.error.message, { code: edit.error.code, trackIds: edit.error.trackIds });
-  const after = componentSchemaOf({ templateId: block.templateId, slots })!;
+  const after = componentSchemaOf({ templateId: block.templateId, slots }, look)!;
   return mutation(edit.document, `Set ${rows.length} propert${rows.length === 1 ? 'y' : 'ies'} on "${blockName(block)}"`, edit.receipts, { clipId, props: componentValuesView(after) });
+}
+
+function setComponentTexts(document: EditorDocumentV2, clipId: string, pairs: unknown): AgentTimelineOutcome {
+  const rows = Array.isArray(pairs) ? (pairs as unknown[]) : [];
+  const valid = rows.length > 0 && rows.every((pair) => pair && typeof pair === 'object' && string((pair as Input).key) && typeof (pair as Input).value === 'string');
+  if (!valid) return fail('texts is a non-empty array of {key, value} pairs; keys come from component.texts in get_state');
+  const block = projectOverlayBlockById(document, clipId);
+  if (!block) return fail(`graphic clip not found: ${clipId}`);
+  let innerHtml = block.templateId === 'custom' && typeof block.slots.innerHtml === 'string' ? block.slots.innerHtml : '';
+  const declared = dataEditFields(innerHtml).map((field) => field.key);
+  if (!declared.length) return fail('this component has no editable text: a registered component keeps its wording in component.props; otherwise rewrite it with apply_component');
+  const unknown = rows.map((pair) => (pair as Input).key as string).filter((key) => !declared.includes(key));
+  if (unknown.length) return fail(`unknown text keys: ${unknown.join(', ')} — declared: ${declared.join(', ')}`);
+  for (const pair of rows as Input[]) innerHtml = setDataEditText(innerHtml, pair.key as string, pair.value as string) ?? innerHtml;
+  const edit = applyOverlayDocumentEdits({ document, updates: [{ clipId: block.id, block: { slots: { ...block.slots, innerHtml } } }] });
+  if (!edit.ok) return fail(edit.error.message, { code: edit.error.code, trackIds: edit.error.trackIds });
+  return mutation(edit.document, `Set ${rows.length} text${rows.length === 1 ? '' : 's'} on "${blockName(block)}"`, edit.receipts, { clipId, texts: dataEditFields(innerHtml) });
 }
 
 export function setClipPropertiesV3(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
@@ -557,6 +577,25 @@ export function setClipPropertiesV3(document: EditorDocumentV2, input: Input): A
     if (item.props !== undefined) {
       failed = step(setComponentProps(next, clipId, item.props));
       if (failed) return failed;
+    }
+    if (item.texts !== undefined) {
+      failed = step(setComponentTexts(next, clipId, item.texts));
+      if (failed) return failed;
+    }
+    if (item.motion !== undefined) {
+      const motion = item.motion as Input;
+      const speed = motion && isFiniteNumber(motion.speed) ? motion.speed : undefined;
+      const delaySec = motion && isFiniteNumber(motion.delaySec) ? motion.delaySec : undefined;
+      if (speed === undefined && delaySec === undefined) return fail(`items[${index}].motion needs speed and/or delaySec`);
+      if (speed !== undefined && (speed < 0.25 || speed > 4)) return fail(`items[${index}].motion.speed must be 0.25–4`);
+      if (delaySec !== undefined && delaySec < 0) return fail(`items[${index}].motion.delaySec must be ≥ 0`);
+      const block = projectOverlayBlockById(next, clipId);
+      if (!block) return fail(`graphic clip not found: ${clipId}`);
+      const merged = { ...block.motion, ...(speed !== undefined ? { speed } : {}), ...(delaySec !== undefined ? { delaySec } : {}) };
+      const kept = { ...(merged.speed && merged.speed !== 1 ? { speed: merged.speed } : {}), ...(merged.delaySec ? { delaySec: merged.delaySec } : {}) };
+      const edit = applyOverlayDocumentEdits({ document: next, updates: [{ clipId: block.id, block: { motion: Object.keys(kept).length ? kept : undefined } }] });
+      if (!edit.ok) return fail(edit.error.message, { code: edit.error.code, trackIds: edit.error.trackIds });
+      next = edit.document; receipts.push(...edit.receipts); changes += 1;
     }
   }
   if (!changes) return fail('nothing_to_change', { fix: 'Each item needs at least one property besides clipId.' });
@@ -1301,7 +1340,7 @@ export function inspectMediaV3(document: EditorDocumentV2, input: Input): AgentT
         fitScale: block.fitScale ?? null,
         innerHtml: cap(rendered.innerHtml, 4000),
         timelineBody: cap(rendered.timelineBody, 2000),
-        ...blockPropsReadback(block),
+        ...blockPropsReadback(block, document.appearance.look),
       },
     };
   }
@@ -1337,6 +1376,9 @@ export function runV3DocumentTool(document: EditorDocumentV2, tool: string, inpu
     case 'mask_words': return maskWordsV3(document, input);
     case 'get_transcript': return getTranscriptV3(document, input);
     case 'inspect_media': return inspectMediaV3(document, input);
+    case 'set_look': return setLookV3(document, input);
+    case 'place_graphics': return placeGraphicsV3(document, input);
+    case 'set_confirm_list': return setConfirmListV3(document, input);
     default: return null;
   }
 }

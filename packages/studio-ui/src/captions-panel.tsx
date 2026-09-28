@@ -106,7 +106,6 @@ export function CaptionsPanel({
   onExtract,
   onDecorateWords,
   onEditWords,
-  onGenerateMG,
   children,
 }: {
   comp: Composition;
@@ -139,7 +138,6 @@ export function CaptionsPanel({
   /** A selected source-word range in the subtitle transcript. */
   onDecorateWords?: (row: CaptionLineRow, wordIndexes: number[], patch: WordDecorationPatch) => void;
   onEditWords?: (row: CaptionLineRow, wordIndexes: number[], text: string) => void;
-  onGenerateMG?: (text: string, startSec: number, endSec: number) => void;
   children?: ReactNode;
 }) {
   const hasCaptions = isCaptionsOn(comp);
@@ -417,7 +415,6 @@ export function CaptionsPanel({
           canEdit={!!onEditWords}
           onEdit={(text) => { onEditWords?.(selectionBar.row, selectionBar.indexes, text); setSelectionBar(null); window.getSelection()?.removeAllRanges(); }}
           onDecorate={(patch) => { onDecorateWords?.(selectionBar.row, selectionBar.indexes, patch); setSelectionBar(null); window.getSelection()?.removeAllRanges(); }}
-          onGenerateMG={() => { onGenerateMG?.(selectionBar.text, selectionBar.startSec, selectionBar.endSec); setSelectionBar(null); window.getSelection()?.removeAllRanges(); }}
         />
       </div>}
     </div>

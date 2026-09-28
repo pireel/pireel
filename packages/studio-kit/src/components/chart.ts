@@ -47,7 +47,7 @@ export function renderChart(id: string, raw: unknown, ctx: RenderCtx): RenderRes
   const max = Math.max(...series.map((r) => r.value), 1);
   const hi = p.highlight >= 0 && p.highlight < series.length ? p.highlight : series.findIndex((r) => r.value === max);
   const onCard = p.surface === 'card';
-  const shadow = onCard ? '' : 'text-shadow:0 2px 14px rgb(0 0 0 / 0.35);';
+  const shadow = onCard ? '' : 'text-shadow:var(--sk-ink-shadow, 0 2px 14px rgb(0 0 0 / 0.35));';
   const panel = surfaceCss(p, s); // background / outline / corners are the component's own props
   // Charts must stay readable when the full canvas is reduced to a small style sample. Keep a
   // deliberate three-step hierarchy instead of rendering every row as footnote-sized metadata.

@@ -10,6 +10,7 @@ import {
   type EditorTrackRole,
 } from './types';
 import { normalizeCustomVisualStyle } from '../visual-style';
+import { normalizeLook } from '../look';
 import { editorTrackAcceptsClip } from './track-compatibility';
 
 export function isEditorDocumentV2(value: unknown): value is EditorDocumentV2 {
@@ -43,6 +44,7 @@ export function isEditorDocumentV2(value: unknown): value is EditorDocumentV2 {
   if (document.semantics.scenes.some((scene) => !scene || typeof scene !== 'object' || !Array.isArray(scene.clipIds))) return false;
   if (document.appearance.customVisualStyle !== undefined
     && !normalizeCustomVisualStyle(document.appearance.customVisualStyle)) return false;
+  if (document.appearance.look !== undefined && !normalizeLook(document.appearance.look).look) return false;
   return true;
 }
 

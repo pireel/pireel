@@ -16,7 +16,6 @@
 
 import { Music } from 'lucide-react';
 import { AUDIO_DEFAULT_DB, AUDIO_FADE_MAX_SEC, AUDIO_SPEED_MAX, AUDIO_SPEED_MIN, SHOT_FADE_MAX_SEC, type AudioClip, type VideoShot, audioClipDefaults } from '@pireel/studio-engine/composition';
-import { Switch } from '@pireel/ui/switch';
 import { AudioLevel } from './audio-level';
 import { t } from './i18n';
 
@@ -29,8 +28,6 @@ export function MusicPanel({
   peakOf,
   shots,
   onSetShotAudio,
-  denoise,
-  onSetDenoise,
 }: {
   clips: AudioClip[];
   selectedId: string | null;
@@ -43,9 +40,6 @@ export function MusicPanel({
    *  Several = every one of them takes the edit; the values shown are the first one's. */
   shots: VideoShot[];
   onSetShotAudio: (patch: { volumeDb?: number; fadeInSec?: number; fadeOutSec?: number }) => void;
-  /** Narration denoise (main source): strength null = off; status/progress mirror the bake. */
-  denoise: { strength: number | null; status: 'baking' | 'ready' | 'failed' | 'silent' | null; progress: number };
-  onSetDenoise: (strength: number | null) => void;
 }) {
   const sel = clips.find((c) => c.id === selectedId) ?? null;
   const selD = sel ? audioClipDefaults(sel) : null;
@@ -124,46 +118,6 @@ export function MusicPanel({
           </section>
         )}
 
-        {/* Global settings (no selection needed): the audio tab is a first-level nav item, so this
-            section keeps it useful even with nothing selected. Narration denoise (main source):
-            bake-based — inference once per source, strength re-blends in seconds */}
-        <section className="border-line flex flex-col gap-2 border-t pt-3">
-          <div className="text-ink font-medium">{t('panels.globalAudio')}</div>
-          <div className="flex items-center justify-between">
-            <span className="text-ink-3">{t('panels.denoiseNarration')}</span>
-            <Switch
-              checked={denoise.strength != null}
-              aria-label={t('panels.denoiseNarration')}
-              onCheckedChange={(checked) => onSetDenoise(checked ? 0.6 : null)}
-            />
-          </div>
-          {denoise.strength != null && (
-            <>
-              <div className="flex items-center gap-2">
-                <span className="text-ink-3 w-7 shrink-0">{t('panels.denoiseStrength')}</span>
-                <input
-                  key={denoise.strength}
-                  type="range"
-                  min={10}
-                  max={100}
-                  step={5}
-                  defaultValue={Math.round(denoise.strength * 100)}
-                  onPointerUp={(e) => onSetDenoise(Number((e.target as HTMLInputElement).value) / 100)}
-                  onKeyUp={(e) => onSetDenoise(Number((e.target as HTMLInputElement).value) / 100)}
-                  className="zoom-range w-full"
-                  aria-label={t('panels.denoiseStrength')}
-                />
-                <span className="text-ink-4 w-8 shrink-0 text-right tabular-nums">{Math.round(denoise.strength * 100)}%</span>
-              </div>
-              {denoise.status === 'baking' && (
-                <div className="text-ink-4 text-[10.5px]">{t('panels.denoiseBaking', { pct: Math.round(denoise.progress * 100) })}</div>
-              )}
-              {denoise.status === 'failed' && <div className="text-ink-4 text-[10.5px]">{t('panels.denoiseFailedHint')}</div>}
-              {denoise.status === 'silent' && <div className="text-ink-4 text-[10.5px]">{t('panels.denoiseSilentHint')}</div>}
-              {denoise.status === 'ready' && <div className="text-ink-4 text-[10.5px]">{t('panels.denoiseReadyHint')}</div>}
-            </>
-          )}
-        </section>
       </div>
     </div>
   );

@@ -17,6 +17,8 @@
  * This file keeps the public types + the multi-session shell.
  */
 
+import type { HandoffItem } from '@pireel/studio-engine/editor-document/types';
+import type { ConfirmAnswer } from './confirm-list';
 import type { GenerationIntent } from "./chat-generation-intent";
 import {
   forwardRef,
@@ -104,6 +106,8 @@ export interface StudioChatHandle {
   clearElementPills(): void;
   /** Workbench pushes a user message directly. Silently dropped while streaming. */
   send(text: string): void;
+  /** Select a skill and send a request under it (the AI Enhance switches). Dropped while streaming. */
+  runSkill(skillId: string, text: string): void;
   /** Only fill a piece of text into the input without sending (used by the generate panel's "@reference" for assets). */
   insertText(text: string): void;
   /** Only focus the input (component floating bar's "AI edit" switches over to keep typing). */
@@ -142,6 +146,12 @@ export interface StudioChatProps {
   /** Live composition accessor (stable identity, reads a ref): tool receipt cards preview blocks
    *  without linking chat re-renders to comp state. Optional — the preview strip hides without it. */
   getComp?: () => Composition;
+  /** Editing skills switched on for this project, and how to change them (the row above the composer). */
+  editingSkills?: readonly string[];
+  onEditingSkills?: (ids: string[]) => void;
+  /** The agent's confirm list and the creator's answers to it. */
+  handoff?: HandoffItem[];
+  onAnswerHandoff?: ConfirmAnswer;
   /** Output fps for surfaces that must convert v3 frames to seconds before execution (editorial assembly). */
   /** Exact-frame picking happens on the real Studio timeline; Chat only owns its mode button and draft attachment. */
   timelineFramePickActive?: boolean;
@@ -176,6 +186,10 @@ export const StudioChat = memo(
       getBody,
       elements,
       getComp,
+      editingSkills,
+      onEditingSkills,
+      handoff,
+      onAnswerHandoff,
       timelineFramePickActive = false,
       timelineFramePickBusy = false,
       timelineFramePickAvailable = false,
@@ -337,6 +351,7 @@ export const StudioChat = memo(
         insertElementPill: (el) => innerRef.current?.insertElementPill(el),
         clearElementPills: () => innerRef.current?.clearElementPills(),
         send: (text) => innerRef.current?.send(text),
+        runSkill: (skillId, text) => innerRef.current?.runSkill(skillId, text),
         insertText: (text) => innerRef.current?.insertText(text),
         focusInput: () => innerRef.current?.focusInput(),
         attachFrame: (frame) => innerRef.current?.attachFrame(frame),
@@ -446,6 +461,10 @@ export const StudioChat = memo(
           getBody={getBody}
           elements={elements}
           getComp={getComp}
+          editingSkills={editingSkills}
+          onEditingSkills={onEditingSkills}
+          handoff={handoff}
+          onAnswerHandoff={onAnswerHandoff}
           timelineFramePickActive={timelineFramePickActive}
           timelineFramePickBusy={timelineFramePickBusy}
           timelineFramePickAvailable={timelineFramePickAvailable}

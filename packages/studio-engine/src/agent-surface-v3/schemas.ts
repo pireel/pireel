@@ -84,6 +84,8 @@ const CLIP_PROPERTY_FIELD_SCHEMAS: Record<ClipPropertyKey, Schema> = {
   enabled: bool(),
   box: BOX,
   props: arr(obj({ key: str('Property key from component.props.'), value: PROPERTY_VALUE }, ['key', 'value']), { minItems: 1, maxItems: 8, description: 'Graphic clips only: editable properties to set.' }),
+  motion: obj({ speed: num('Animation speed; 1 = as generated.', { min: 0.25, max: 4 }), delaySec: num('Seconds before the animation starts.', { min: 0, max: 30 }) }),
+  texts: arr(obj({ key: str('Text key from component.texts.'), value: str('The new wording, plain text.') }, ['key', 'value']), { minItems: 1, maxItems: 24, description: 'Graphic clips only: on-screen wording to replace, no regeneration.' }),
 };
 const CLIP_PROPERTY_ITEM: Schema = obj({
   clipId: str(),
@@ -159,6 +161,13 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       toFrame: FRAME('Sampling window end (exclusive)'),
       maxFrames: int('Frames to sample in the window, 1–12 (default 6).', 1),
       sceneIds: arr(str(), { description: 'Legacy planned scenes to review.' }),
+    }),
+  },
+  get_facts: {
+    description:
+      'Measured facts about the active output and its sources, for deciding what goes on screen and where. Free and browser-local (no model calls). Per source: technicals, whether it has likely speech (local voice activity) and its level, transcript coverage (read the words with get_transcript), scenes (between cuts) each with a 3×5 region grid (brightness, busyness = detail vs empty space, colour), and people/face/safe regions. For the output: canvas, the managed caption band rectangle(s), platform UI zones (Douyin, WeChat Channels, Xiaohongshu) in canvas px, and graphics/text already placed. Text burned into the footage is not located here; look at frames for it. Several sources take a while the first time; results are cached.',
+    inputSchema: obj({
+      assetIds: arr(str(), { maxItems: 12, description: 'Sources to measure; default: every source placed on the active output (up to 12).' }),
     }),
   },
   get_beat_grid: {
@@ -460,13 +469,58 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       clipId: str('Existing graphic clip to rewrite.'),
       atFrame: FRAME('New component start'), durationFrames: int('New component duration in frames.', 1),
       placement: PLACEMENT_PCT, backdrop: str('What sits under the box and which zones must stay clear.'),
-      format: enumOf(['html', 'kit'], 'html = bespoke markup; kit = a registered component (JSON props).'),
+      format: enumOf(['html', 'kit'], 'kit = a registered library component with JSON props — prefer it without a frame when one fits; html = bespoke markup (no fitting component, or a frame is attached).'),
       fontFamily: str('Optional display face for the component: web:<id> from get_state.fonts, google:<Family> from search_assets kind font, or local:<family>. The brief then defines var(--font-display); copy the same value to apply_component.'),
     }, ['instruction']),
   },
+  set_look: {
+    description:
+      'Write this output\'s look: its own visual system and the few parametric pieces every graphic of the video is an instance of. Replaces the previous look; instances keep their props and re-render. css is a plain stylesheet that applies inside pieces only (:root means the look). Each piece source is a function expression `function (props, ctx) { return { html, animate(tl, el, ctx) { … } }; }` — html is the markup, animate builds GSAP motion on the paused timeline tl (local time 0 = instance start), el is the piece host, ctx = { width, height (px of the box), duration, words }. Every frame must depend on time only: no timers, clock or randomness; no network, storage, scripts, iframes, video or canvas; no external styles or fonts. propsSchema (JSON Schema properties) declares what can be edited without regenerating. A rejection lists exact issues; fix those and send the whole look again.',
+    inputSchema: obj({
+      look: obj({
+        css: str('The stylesheet.'),
+        pieces: arr(obj({
+          id: str('Lowercase words joined by hyphens, e.g. item-card.'),
+          label: str('Name shown to people.'),
+          source: str('The piece function expression.'),
+          propsSchema: str('JSON object string: JSON Schema properties of its props — what the creator edits in the inspector without regenerating. Per property: type (string, number, integer, boolean), enum, format (color, font), minimum and maximum (a slider), title (the label, in the creator\'s language), default. A list is an array of objects with scalar fields.'),
+        }, ['id', 'source']), { minItems: 1, maxItems: 12 }),
+        notes: str('Your statement of the system: what colours mean, where graphics live, how things move.'),
+      }, ['css', 'pieces']),
+    }, ['look']),
+  },
+  place_graphics: {
+    description:
+      'Place instances of the look\'s pieces on the graphics tracks: each item is a piece, its props, a box in canvas units (0–1; omit for the full frame) and its time in frames. anchor ties an instance to a spoken word (from get_transcript) so it follows later cuts; words gives the piece the spoken words it should land on, in seconds from the instance start. The receipt returns the new clip ids and a still of each at its settled moment on the real picture. Change words, place or time later with set_clip_properties (props, box) and move_clips; no regeneration.',
+    inputSchema: obj({
+      items: arr(obj({
+        pieceId: str('A piece of the current look.'),
+        props: arr(obj({ key: str('Prop name from the piece\'s propsSchema.'), value: PROPERTY_VALUE }, ['key', 'value']), { description: 'The piece\'s props.' }),
+        box: obj({ x: num('Left, 0–1.'), y: num('Top, 0–1.'), w: num('Width, 0–1.'), h: num('Height, 0–1.') }),
+        startFrame: FRAME('Instance start'),
+        durationFrames: int('Length in frames.', 1),
+        anchor: obj({ assetId: str('Transcribed source.'), segmentIndex: int('Transcript row.', 0), wordIndex: int('Word in the row.', 0), offsetFrames: int('Frames after the word.') }),
+        words: arr(obj({ text: str(), start: num('Seconds from the instance start.'), end: num('Seconds from the instance start.') }), { description: 'Spoken words the piece lands on.' }),
+        label: str('Name shown on the timeline.'),
+        id: str('Optional id to mint.'),
+      }, ['pieceId', 'startFrame', 'durationFrames']), { minItems: 1 }),
+    }, ['items']),
+  },
+  set_confirm_list: {
+    description:
+      'Hand the creator what they must confirm before publishing: facts you could not verify (unclear speech, names you inferred, claims, sources — kind fact), and any music or voice you propose (kind music / voice; the creator confirms or swaps them before they are used). Never design choices. Replaces the list; items the creator already answered keep their answer. An empty list clears it.',
+    inputSchema: obj({
+      items: arr(obj({
+        kind: enumOf(['fact', 'music', 'voice']),
+        text: str('What to confirm, in the creator\'s language.'),
+        ref: str('Where it comes from: a clip id, a transcript row, a source.'),
+        id: str('Stable id, to keep an answer across rewrites.'),
+      }, ['text'])),
+    }, ['items']),
+  },
   apply_component: {
     description:
-      `Validate and place the component you generated from compose_component: pass raw (your full generated text) with the target clipId, atFrame, durationFrames and placement copied unchanged. Lint rejections list exact issues — fix only those and re-apply with the same clipId. generate=true instead asks Pireel's own model to author or rewrite from instruction (${CHARGE_MARKER} use only when the BYO path fails repeatedly). A rejection for <script>, an external library, canvas/WebGL, an iframe or embedded video is not fixable by retrying — the runtime is closed (see compose_component); rebuild that visual in markup, CSS and SVG. ${MG_BAKE_ROUTE} Here that means import_media, then add_clips with role broll and the component's box.`,
+      `Validate and place the component you generated from compose_component: pass raw (your full generated text) with the target clipId, atFrame, durationFrames and placement copied unchanged. Lint rejections list exact issues — fix only those and re-apply with the same clipId. A placed component comes back with one image of its settled frame (receipt settledFrame) on the real picture. generate=true instead asks Pireel's own model to author or rewrite from instruction (${CHARGE_MARKER} use only when the BYO path fails repeatedly). A rejection for <script>, an external library, canvas/WebGL, an iframe or embedded video is not fixable by retrying — the runtime is closed (see compose_component); rebuild that visual in markup, CSS and SVG. ${MG_BAKE_ROUTE} Here that means import_media, then add_clips with role broll and the component's box.`,
     inputSchema: obj({
       raw: str('Your full generated text in the contract compose_component returned.'),
       clipId: str('Target from compose_component, or the graphic clip to edit.'),

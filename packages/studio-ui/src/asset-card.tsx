@@ -18,7 +18,7 @@ import {
 } from '@pireel/ui/dropdown-menu';
 import type { Composition, MediaRef } from '@pireel/studio-engine/composition';
 import type { GenElementResult } from './element-history';
-import { componentPreviewModel, LibraryComponentPreview } from './component-preview';
+import { componentPreviewAspect, componentPreviewModel, LibraryComponentPreview } from './component-preview';
 import { t } from './i18n';
 
 /** Compact card grid shared by asset and generation libraries.
@@ -356,7 +356,7 @@ export function AssetCard({
   const audio = it.kind === 'audio';
   const hasOptionsMenu = Boolean(onRename || onUseAsReference);
   return (
-    <div className="bg-panel-2/55 hover:bg-panel-2 group relative w-full overflow-hidden rounded-md transition-colors">
+    <div className="bg-panel ring-line hover:ring-line-2 group relative w-full overflow-hidden rounded-lg ring-1 transition-shadow hover:shadow-[0_4px_14px_rgb(0_0_0/0.08)]">
       <button
         type="button"
         title={audio ? it.label : t('panels.previewLabelDragOnto', { label: it.label })}
@@ -372,7 +372,7 @@ export function AssetCard({
         ) : (
           <TileThumb item={it} menuOffset={hasOptionsMenu} />
         )}
-        <div className="text-ink-3 h-6 truncate px-1.5 py-1 text-[10px] leading-4">{it.label}</div>
+        <div className="text-ink-2 border-line h-6 truncate border-t px-2 py-1 text-[11px] leading-4">{it.label}</div>
       </button>
       {/* Action chrome sits inside the thumb area (label strip is h-6 below). Video/audio move the
           duration badge left when the top-right options menu is present. */}
@@ -458,6 +458,9 @@ export function AssetCardMoreMenu({
   );
 }
 
+/** A component box reads at about phone scale; a wider lightbox only blows the type up. */
+const COMPONENT_LIGHTBOX_MAX_W = 760;
+
 /** Large asset preview: click backdrop / Esc to close; bottom has an "Insert into canvas" shortcut.
  *  Full-res URLs aren't small, so show a "Loading" placeholder until ready. */
 export function AssetLightbox({
@@ -478,10 +481,10 @@ export function AssetLightbox({
     [comp, item],
   );
   const [ready, setReady] = useState(false);
-  // Size the placeholder box to the asset's true aspect ratio (element = canvas ratio; unknown dims default to 16:9)
-  const ar = componentModel ? componentModel.comp.width / componentModel.comp.height : (arOf(item) ?? 16 / 9);
+  // Size the placeholder box to what is shown: a component's own box (or its canvas), else the asset's ratio (16:9 when unknown)
+  const ar = componentModel ? componentPreviewAspect(componentModel) : (arOf(item) ?? 16 / 9);
   const componentWidth = componentModel
-    ? Math.max(240, Math.min(window.innerWidth - 96, Math.round(window.innerHeight * 0.78 * ar)))
+    ? Math.max(240, Math.min(COMPONENT_LIGHTBOX_MAX_W, window.innerWidth - 96, Math.round(window.innerHeight * 0.78 * ar)))
     : 0;
   useEffect(() => {
     setReady(false);
@@ -507,7 +510,7 @@ export function AssetLightbox({
           onClick={(e) => e.stopPropagation()}
           className="relative cursor-default overflow-hidden rounded-lg bg-black/60 shadow-2xl"
           // width = min(viewport margin, 78vh×ratio) → height stays ≤78vh, placeholder matches final size
-          style={{ aspectRatio: ar, width: `min(calc(100vw - 6rem), calc(78vh * ${ar}))` }}
+          style={{ aspectRatio: ar, width: componentModel ? componentWidth : `min(calc(100vw - 6rem), calc(78vh * ${ar}))` }}
         >
           {!ready && (
             <div className={`absolute inset-0 z-20 flex items-center justify-center ${item.thumbSrc ? 'bg-black/10' : ''}`}>
@@ -531,6 +534,7 @@ export function AssetLightbox({
                 <LibraryComponentPreview
                   model={componentModel}
                   width={componentWidth}
+                  height={Math.round(componentWidth / ar)}
                   animate="manual"
                   replayKey={replayKey}
                   playOnReady

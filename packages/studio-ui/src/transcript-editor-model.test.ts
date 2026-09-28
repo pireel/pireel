@@ -2,8 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { emptyComposition, firstNarrativeAssetId, applyEditorCommand } from '@pireel/studio-engine/composition';
 import { compositionToEditorDocument } from '@pireel/studio-engine/project-document';
 import { applyCaptionDocumentEdit } from '@pireel/studio-engine/caption-document-edit';
-import { activeTranscriptTokenIndex, transcriptTokens, transcriptSelectionEdits, transcriptParagraphs, transcriptPauseContext } from './transcript-editor-model';
-import { transcriptPauses } from '@pireel/studio-engine/transcript-pauses';
+import { activeTranscriptTokenIndex, transcriptTokens, transcriptSelectionEdits, transcriptParagraphs } from './transcript-editor-model';
 
 function fixture() {
   const document = compositionToEditorDocument({ projectId: 'transcript-ui', videoSig: 'voice', composition: {
@@ -23,13 +22,6 @@ function fixture() {
 }
 
 describe('continuous transcript editing', () => {
-  it('uses surrounding speech as pause-graphic context without changing its timing window', () => {
-    const { document } = fixture();
-    const pause = transcriptPauses(document).find((item) => item.startSec > 0.2 && item.endSec <= 2)!;
-    const before = structuredClone(pause);
-    expect(transcriptPauseContext(pause, transcriptTokens(document))).toEqual({ before: '你好', after: '世界。这是第二句。' });
-    expect(pause).toEqual(before);
-  });
   it('keeps exact word addresses and irregular timestamps instead of splitting display cues', () => {
     const { document, assetId } = fixture();
     expect(transcriptTokens(document).map(({ text, startSec, endSec, w0, assetId: owner }) => ({ text, startSec, endSec, w0, owner }))).toEqual([

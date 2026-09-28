@@ -109,8 +109,9 @@ export function TranscriptSelectionBar({ text, kind = 'text', canEdit, onEdit, o
   onDecorate?: (patch: WordDecorationPatch) => void;
   /** Caption style highlight color: a key word with no chosen color follows it. */
   styleHighlight?: string;
-  onGenerateMG: () => void;
-  /** Insert over the selection's time range; absent = only MG is offered. */
+  /** MG for hosts without onAdd (the older script panels); with onAdd, MG opens the add popover. */
+  onGenerateMG?: () => void;
+  /** Insert over the selection's time range. */
   onAdd?: (kind: TranscriptAddKind) => void;
   /** Which add items this host offers (default all). */
   addKinds?: readonly TranscriptAddKind[];
@@ -152,7 +153,7 @@ export function TranscriptSelectionBar({ text, kind = 'text', canEdit, onEdit, o
           {onAdd && can('sticker') && <button type="button" className={`${choice} flex items-center gap-2`} onClick={() => { setMenu(null); onAdd('sticker'); }}><Sticker size={13} />{t('captions.addSticker')}</button>}
           {onAdd && can('media') && <button type="button" className={`${choice} flex items-center gap-2`} onClick={() => { setMenu(null); onAdd('media'); }}><ImageIcon size={13} />{t('captions.addMedia')}</button>}
           {onAdd && can('sfx') && <button type="button" className={`${choice} flex items-center gap-2`} onClick={() => { setMenu(null); onAdd('sfx'); }}><AudioLines size={13} />{t('captions.addSfx')}</button>}
-          <button type="button" className={`${choice} flex items-center gap-2`} onClick={() => { if (onAdd && can('mg')) { setMenu(null); onAdd('mg'); } else onGenerateMG(); }}><Sparkles size={13} />{t('captions.generateMG')}</button>
+          {((onAdd && can('mg')) || onGenerateMG) && <button type="button" className={`${choice} flex items-center gap-2`} onClick={() => { setMenu(null); if (onAdd && can('mg')) onAdd('mg'); else onGenerateMG?.(); }}><Sparkles size={13} />{t('captions.generateMG')}</button>}
         </>}
         {menu === 'highlight' && <>
           <div className="text-ink-3 px-2 py-1 text-[10.5px]">{t('captions.highlightColor')}</div>

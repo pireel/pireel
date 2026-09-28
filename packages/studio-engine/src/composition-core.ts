@@ -18,6 +18,8 @@
 
 import type { ThemeId } from './theme';
 import type { CustomVisualStyle } from './visual-style';
+import type { DocumentLook } from './look';
+import type { HandoffItem } from './editor-document/types';
 import { type Clip, editedDuration, spans } from './trim';
 import { BASE_CAPTION_FONT_PX, DEFAULT_CAPTION_PRESET, DEFAULT_SUB_CAPTION_PRESET, getCaptionPreset } from './caption-presets';
 import { mintIdSuffix } from './deterministic-ids';
@@ -71,6 +73,9 @@ export interface Block {
   radius?: number;
   /** Overall rotation (deg, -180–180): outermost container transform:rotate around center. Default/0 = no rotation. */
   rotation?: number;
+  /** Animation timing applied to the component's own timeline without rewriting it: speed
+   *  (0.25–4, default 1) and a start delay in seconds (default 0). */
+  motion?: { speed?: number; delaySec?: number };
   /** Content visual scale factor (font size scales too), written by corner-handle proportional scaling: window (box) ×k, content layer
    *  (contentBox) layout size unchanged (only center moves), and scale ×k stay in sync — zero reflow. Rendered as the content layer's
    *  CSS scale **property**, not affecting layout and not entering the transform chain — mutually non-overwriting with autofit's transform
@@ -629,6 +634,12 @@ export interface Composition {
   frameId?: string;
   /** Structured user-composed Frame, persisted so every generation path receives the same choices. */
   customVisualStyle?: CustomVisualStyle;
+  /** The output's own video-level template: its visual system and pieces (look.ts). */
+  look?: DocumentLook;
+  /** What the creator must confirm (read-only projection of document semantics). */
+  handoff?: HandoffItem[];
+  /** Editing skills switched on for this project (read-only projection of document semantics). */
+  editingSkills?: string[];
   /** Global person-effect style (toolbar "Person" panel): person-on-top / feather / stroke / background swap.
    *  Only takes effect on matte-enabled (VideoShot.personMatte) shot segments; default = all defaults. */
   personFx?: PersonFx;
@@ -1191,6 +1202,8 @@ export function registerTemplate(t: Template): void {
   REGISTRY.set(t.id, t);
 }
 export function getTemplate(id: string): Template {
+  // Look instances name a piece of the output's own look (`look:<pieceId>`): one template renders them all.
+  if (id.startsWith('look:')) return REGISTRY.get('look') ?? fallbackTemplate(id);
   return REGISTRY.get(id) ?? REGISTRY.get('custom') ?? fallbackTemplate(id);
 }
 export function listTemplates(): Template[] {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  setDataEditText,
   bakeComponentPropsDefaults,
   blockPropsSchema,
   componentPropsAttrs,
@@ -144,5 +145,27 @@ describe('component props schema (JSON Schema properties)', () => {
     const html = `<div><h1 data-edit="headline">Big <b>bold</b> title</h1><p data-edit='note'>  small  note </p><span data-edit="headline">dup</span><img src="a.png" alt="A"><img class="hf-media" src="body.mp4"><img src='b.png'></div>`;
     expect(dataEditFields(html)).toEqual([{ key: 'headline', text: 'Big bold title' }, { key: 'note', text: 'small note' }]);
     expect(imageSlots(html)).toEqual([{ index: 0, src: 'a.png', alt: 'A' }, { index: 2, src: 'b.png', alt: '' }]);
+  });
+});
+
+describe('partially valid properties schema', () => {
+  it('keeps the valid properties and reports only the malformed one', () => {
+    const { specs, issues } = parseComponentProps(JSON.stringify({
+      ink: { type: 'string', format: 'color', default: '#ffffff' },
+      good: { type: 'string', format: 'color', default: 'var(--up, #2fbf71)' },
+      bad: { type: 'string', format: 'color', default: 'green' },
+    }));
+    expect(specs.map((spec) => spec.key)).toEqual(['ink', 'good']);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toContain('"bad"');
+  });
+});
+
+describe('setDataEditText', () => {
+  it('replaces the marked element\'s content, pairing nested same-tag elements', () => {
+    const html = '<div class="a"><div data-edit="title">Old <div>nested</div> tail</div><div data-edit="note">keep</div></div>';
+    expect(setDataEditText(html, 'title', 'New & <bold>')).toBe('<div class="a"><div data-edit="title">New &amp; &lt;bold&gt;</div><div data-edit="note">keep</div></div>');
+    expect(setDataEditText(html, 'missing', 'x')).toBeNull();
+    expect(dataEditFields(setDataEditText(html, 'note', '改好了')!).map((field) => field.text)).toEqual(['Old nested tail', '改好了']);
   });
 });

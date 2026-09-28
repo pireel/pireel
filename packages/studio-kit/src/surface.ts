@@ -79,7 +79,11 @@ export function inkOn(p: Pick<SurfaceProps, 'surface' | 'surfaceColor'>, muted =
   if (p.surface === 'card' && p.surfaceColor && lightness(p.surfaceColor) < 0.5) {
     return muted ? 'rgb(255 255 255 / 0.68)' : '#f7f6f4';
   }
-  return muted ? tk('--sk-muted') : tk('--sk-fg');
+  if (p.surface === 'card') return muted ? tk('--sk-muted') : tk('--sk-fg');
+  // No surface: the type sits on whatever is behind the block. The host knows (moving footage wants
+  // light ink, a flat page wants the theme's ink) and sets --sk-ink / --sk-ink-muted; unset falls
+  // back to the theme's ink.
+  return muted ? `var(--sk-ink-muted, ${tk('--sk-muted')})` : `var(--sk-ink, ${tk('--sk-fg')})`;
 }
 
 /**

@@ -98,7 +98,7 @@ function momentParts(args: { block: BlockEdit; context?: ComposeContext }): stri
     );
   if (args.context?.script)
     parts.push(
-      `Spoken script context:\n${args.context.script.slice(0, 800)}\n\nON-SCREEN TEXT LANGUAGE = the language of this spoken script (NOT the instruction's language, NOT the note's language).`,
+      `Spoken script context:\n${args.context.script.slice(0, 2400)}\n\nON-SCREEN TEXT LANGUAGE = the language of this spoken script (NOT the instruction's language, NOT the note's language).`,
     );
   if (args.context?.beats?.length)
     parts.push(

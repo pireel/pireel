@@ -43,10 +43,28 @@ export function loadGsap(): Promise<GsapLike | null> {
   const w = window as unknown as { gsap?: GsapLike };
   if (w.gsap) return Promise.resolve(w.gsap);
   gsapLoad ??= new Promise((resolve) => {
+    // Trust the global, not this tag's events: an in-app navigation can drop the tag from <head>
+    // before it loads (and another loader may define gsap first), which left the promise pending
+    // forever and the stage never mounted — a new project showed nothing until a reload.
+    let settled = false;
     const el = document.createElement('script');
     el.src = '/vendor/gsap.min.js';
-    el.onload = () => resolve((window as unknown as { gsap?: GsapLike }).gsap ?? null);
-    el.onerror = () => resolve(null);
+    const finish = (value: GsapLike | null) => {
+      if (settled) return;
+      settled = true;
+      clearInterval(poll);
+      clearTimeout(limit);
+      if (!value) gsapLoad = null; // a later mount tries again
+      resolve(value);
+    };
+    const poll = setInterval(() => {
+      if (w.gsap) finish(w.gsap);
+      else if (!el.isConnected) document.head.appendChild(el);
+    }, 50);
+    // Without GSAP the document still mounts (static, no animation) rather than staying blank.
+    const limit = setTimeout(() => finish(w.gsap ?? null), 15000);
+    el.onload = () => finish(w.gsap ?? null);
+    el.onerror = () => finish(null);
     document.head.appendChild(el);
   });
   return gsapLoad;
@@ -125,6 +143,11 @@ export class PreviewStageHost {
 
   get srcdoc(): string {
     return this.srcdocValue;
+  }
+
+  /** True once the assigned document is in the stage (mounting is asynchronous). */
+  get mounted(): boolean {
+    return this.body !== null;
   }
 
   /** Assigning a document mounts it (asynchronously, like an iframe); an empty string clears the stage. */

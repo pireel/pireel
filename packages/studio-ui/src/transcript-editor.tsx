@@ -15,7 +15,7 @@ import type { CaptionCueEdit } from '@pireel/studio-engine/caption-document-edit
 import type { WordDecorationPatch } from '@pireel/studio-engine/word-decorations';
 import { DEFAULT_MASK_TEXT, type WordMaskPatch } from '@pireel/studio-engine/word-masks';
 import { TranscriptSelectionBar, type TimelineMaskTarget, type TimelineScriptCut, type TranscriptAddKind } from './script-panel';
-import { activeTranscriptTokenIndex, transcriptParagraphs, transcriptPauseContext, transcriptSelectionEdits, transcriptTokens, type TranscriptToken } from './transcript-editor-model';
+import { activeTranscriptTokenIndex, transcriptParagraphs, transcriptSelectionEdits, transcriptTokens, type TranscriptToken } from './transcript-editor-model';
 import { t } from './i18n';
 import { CaptionsToolbarContext, TRANSCRIPT_TOOL_CLASS, TRANSCRIPT_TOOL_LABEL_CLASS, TRANSCRIPT_TOOLBAR_CLASS } from './captions-toolbar-slot';
 import { playhead } from './playhead';
@@ -36,7 +36,7 @@ function selectionPosition(rect: DOMRect, desiredWidth = 480) {
 /** One caption line's share of a translation; `mine` = it plays in this section. */
 interface TranslationPiece { text: string; mine: boolean }
 
-export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, playing, active = true, extracting, onExtract, onSeek, onCut, onEdit, onDecorate, onMask, onGenerateMG, onAddAtRange, addKinds, autoHighlight }: {
+export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, playing, active = true, extracting, onExtract, onSeek, onCut, onEdit, onDecorate, onMask, onAddAtRange, addKinds, autoHighlight }: {
   document: EditorDocumentV2;
   currentTimeSec: number;
   playing: boolean;
@@ -48,7 +48,6 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
   onEdit: (edits: CaptionCueEdit[]) => boolean;
   onDecorate: (targets: TimelineMaskTarget[], patch: WordDecorationPatch) => void;
   onMask: (targets: TimelineMaskTarget[], patch: WordMaskPatch, message: string) => void;
-  onGenerateMG: (text: string, startSec: number, endSec: number, pauseContext?: { before: string; after: string }) => void;
   /** Insert text / sticker / media / sound over a selection's time range. */
   onAddAtRange?: (kind: TranscriptAddKind, text: string, startSec: number, endSec: number, at: { left: number; top: number; before: string; after: string }) => void;
   addKinds?: readonly TranscriptAddKind[];
@@ -115,7 +114,9 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
   const listRef = useRef<HTMLDivElement>(null);
   const selectingRef = useRef(false);
   const suppressClickRef = useRef(false);
-  const readSelectionRef = useRef<() => boolean>(() => false);
+  const readSelectionRef = useRef<() => TranscriptToken[]>(() => []);
+  const seekRef = useRef(onSeek);
+  seekRef.current = onSeek;
   const [selection, setSelection] = useState<TranscriptSelection | null>(null);
   const [drafts, setDrafts] = useState<CaptionCueEdit[] | null>(null);
   const [highlighting, setHighlighting] = useState(false);
@@ -208,15 +209,15 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
       ? previous : { kind: 'words', tokens: selected, left, top });
     setDrafts(null);
   };
-  const readSelection = () => {
+  const readSelection = (): TranscriptToken[] => {
     const range = window.getSelection();
-    if (!range || range.isCollapsed || !range.rangeCount || !listRef.current) return false;
-    if (!listRef.current.contains(range.anchorNode) || !listRef.current.contains(range.focusNode)) return false;
+    if (!range || range.isCollapsed || !range.rangeCount || !listRef.current) return [];
+    if (!listRef.current.contains(range.anchorNode) || !listRef.current.contains(range.focusNode)) return [];
     const selected = [...listRef.current.querySelectorAll<HTMLElement>('[data-transcript-token]')]
       .filter((element) => range.containsNode(element, true))
       .flatMap((element) => { const token = byId.get(element.dataset.transcriptToken!); return token ? [token] : []; });
     open(selected, range.getRangeAt(0).getBoundingClientRect());
-    return selected.length > 0;
+    return selected;
   };
   readSelectionRef.current = readSelection;
   useEffect(() => {
@@ -225,8 +226,11 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
       if (!selectingRef.current) return;
       selectingRef.current = false;
       // A drag may end outside the scroll pane. Finish at document level, then ignore
-      // the browser's following click so it cannot seek or replace the selected range.
-      suppressClickRef.current = readSelectionRef.current();
+      // the browser's following click so it cannot seek or replace the selected range;
+      // the playhead moves to where the selection starts instead.
+      const selected = readSelectionRef.current();
+      suppressClickRef.current = selected.length > 0;
+      if (selected.length) seekRef.current(Math.min(...selected.map((token) => token.startSec)));
     };
     const changed = () => {
       if (selectingRef.current || window.document.activeElement?.closest('[data-transcript-toolbar]')) return;
@@ -368,11 +372,6 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
         kind="pause" text="" canEdit={false}
         addKinds={addKinds}
         {...(onAddAtRange ? { onAdd: (kind: TranscriptAddKind) => { onAddAtRange(kind, '', selection.pause.startSec, selection.pause.endSec, { left: selection.left, top: selection.top, ...contextAround(selection.pause.startSec, selection.pause.endSec) }); close(); } } : {})}
-        onGenerateMG={() => {
-          const pause = selection.pause;
-          onGenerateMG(t('captions.pauseLabel', { sec: (pause.endSec - pause.startSec).toFixed(2) }), pause.startSec, pause.endSec, transcriptPauseContext(pause, tokens));
-          close();
-        }}
         onDelete={() => { onCut(transcriptPauseCuts(selection.pause), t('captions.pauseDeleted', { sec: (selection.pause.endSec - selection.pause.startSec).toFixed(2) })); close(); }}
         deleteLabel={t('captions.deletePause', { sec: (selection.pause.endSec - selection.pause.startSec).toFixed(2) })}
       /> : <TranscriptSelectionBar
@@ -380,7 +379,6 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
         onDecorate={(patch) => { onDecorate(targets, patch); close(); }} styleHighlight={styleHighlight}
         addKinds={addKinds}
         {...(onAddAtRange ? { onAdd: (kind: TranscriptAddKind) => { onAddAtRange(kind, joinWords(selection.tokens.map((token) => token.text)), Math.min(...selection.tokens.map((token) => token.startSec)), Math.max(...selection.tokens.map((token) => token.endSec)), { left: selection.left, top: selection.top, ...contextAround(Math.min(...selection.tokens.map((token) => token.startSec)), Math.max(...selection.tokens.map((token) => token.endSec))) }); close(); } } : {})}
-        onGenerateMG={() => { onGenerateMG(joinWords(selection.tokens.map((token) => token.text)), Math.min(...selection.tokens.map((token) => token.startSec)), Math.max(...selection.tokens.map((token) => token.endSec))); close(); }}
         onDelete={() => { onCut(cutsFor(selection.tokens), t('panels.deletedNSelectedWords', { n: targets.length })); close(); }}
         deleteLabel={t('captions.deleteFootageSelection')}
         onMaskAudio={() => { onMask(targets, { audio: 'beep' }, t('panels.maskedAudioNWords', { n: targets.length })); close(); }}

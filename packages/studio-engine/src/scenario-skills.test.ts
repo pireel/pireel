@@ -18,7 +18,7 @@ describe('Studio scenario skill registry', () => {
 
   it('ships the OSS craft skills with localized picker metadata', () => {
     expect(OSS_STUDIO_DEFAULT_SKILL_ID).toBe('talking-head-edit');
-    expect(ossStudioScenarioSkillRegistry.list().map((skill) => skill.id)).toEqual(['audio-and-music', 'montage-edit', 'talking-head-edit']);
+    expect(ossStudioScenarioSkillRegistry.list().map((skill) => skill.id)).toEqual(['audio-and-music', 'montage-edit', 'talking-head-edit', 'video-graphics']);
     expect(ossStudioScenarioSkillRegistry.get('talking-head-edit')?.markdown).toContain('## Working contract');
     expect(ossStudioScenarioSkillRegistry.get('talking-head-edit')?.markdown).toContain('This is a direct execution scope, not a whole-video directing assignment');
     expect(ossStudioScenarioSkillRegistry.get('talking-head-edit')?.markdown).toContain('If several plausible spoken sources remain');

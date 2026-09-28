@@ -5,7 +5,7 @@ import { compileComponentStyles } from './component-styles';
  */
 
 import { getTheme, themeVarsCss, varsDeclCss } from './theme';
-import { editedDuration } from './trim';
+import { editedDuration, spans } from './trim';
 import {
   type Block,
   type Composition,
@@ -25,6 +25,7 @@ import {
   videoFrameTimelineBody,
 } from './composition-core';
 import { GL_MIXER_SRC, TRANSITION_GLSL, glDirection } from './transition-gl';
+import { isLookTemplate, lookHeadHtml, lookPieceOf } from './look';
 import { SOURCE_DRAW_RECT_FUNCTION } from './source-framing';
 import { compositionVisualLayerPlan, type SupplementalVisualMediaClip } from './visual-layer-plan';
 import { BLOCK_TEXT_BASELINE_PX } from './block-typography';
@@ -440,7 +441,9 @@ const PERSON_CUT_SHIM = `(function(){
 function timelineScript(id: string, body: string): string {
   return (
     `(function(){ var tl = gsap.timeline({ paused: true }); ` +
-    `try { new Function('tl', ${JSON.stringify(body)})(tl); } catch (e) { console.warn('[hf] timeline error', ${JSON.stringify(id)}, e); } ` +
+    // window/document are passed in: in the in-page stage they are its facades, so timeline code
+    // that queries or stores globals stays inside the stage (a plain Function would see the page).
+    `try { new Function('tl', 'window', 'document', ${JSON.stringify(body)})(tl, window, document); } catch (e) { console.warn('[hf] timeline error', ${JSON.stringify(id)}, e); } ` +
     `window.__timelines[${JSON.stringify(id)}] = tl; })();`
   );
 }
@@ -482,6 +485,17 @@ export function assembleBlockHtml(b: Block, comp: Composition): { html: string; 
   return assembleBlockWith(b, comp, comp.captionStyle ? resolveCaptionStyle(comp) : undefined);
 }
 
+/** What is behind a block when it starts: the shot playing then fills the frame ('full' /
+ *  'punch-in') → moving footage; a corner or split shot leaves the block on the page. With no shots
+ *  the component is an overlay on footage, its usual job. */
+export function blockBackdrop(comp: Composition, atSec: number): 'footage' | 'page' {
+  const shots = comp.shots ?? [];
+  if (!shots.length) return 'footage';
+  const playing = spans(shots).find((span) => atSec >= span.editedStart && atSec < span.editedEnd) ?? spans(shots).at(-1);
+  const treatment = playing?.clip.treatment ?? 'full';
+  return treatment === 'full' || treatment === 'punch-in' ? 'footage' : 'page';
+}
+
 function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof resolveCaptionStyle> | undefined): { html: string; timelineBody: string } {
   const { width: W, height: H } = comp;
 
@@ -490,7 +504,13 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
     // language state they stay dormant — turning translation off hides them without destroying content.
     // Kit blocks derive HTML at render time — bake the sizing context (box/canvas px)
     // into slots here, where the composition's dimensions are known.
-    const kitBase = b.templateId.startsWith('kit:')
+    const kitBase = isLookTemplate(b.templateId)
+      ? {
+          ...b,
+          // A look instance builds itself in its box: the piece reads the box size from ctx.
+          slots: { ...b.slots, piece: lookPieceOf(b.templateId), boxW: Math.round((b.box?.w ?? 1) * W), boxH: Math.round((b.box?.h ?? 1) * H) },
+        }
+      : b.templateId.startsWith('kit:')
       ? {
           ...b,
           slots: {
@@ -499,6 +519,8 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
             boxH: Math.round((b.box?.h ?? 0.3) * H),
             canvasW: W,
             canvasH: H,
+            // A preview can pin it (library cards sit on a light checker, not footage).
+            backdrop: b.slots.backdrop === 'page' || b.slots.backdrop === 'footage' ? b.slots.backdrop : blockBackdrop(comp, b.startSec),
           },
         }
       : b;
@@ -571,7 +593,19 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
       const pe = isSentenceCaption(b) ? 'pointer-events:none;' : '';
       html = `<div class="comp" ${attrs} style="position:absolute;${propsCss}inset:0;${pe}${bgCss}${frame.join('')}${scaleCss}${fit}">\n${varsTag}${innerHtml}\n</div>`;
     }
-    return { html, timelineBody };
+    return { html, timelineBody: withMotionTiming(timelineBody, b.motion) };
+}
+
+/**
+ * Speed and start delay for ANY component animation, without reading it: the component's own
+ * timeline runs as a child of the block timeline, time-scaled and offset. Seeking the block at t
+ * shows the original animation at (t − delay) × speed, so preview, export and bake stay exact.
+ */
+export function withMotionTiming(body: string, motion: Block['motion']): string {
+  const speed = motion?.speed && Number.isFinite(motion.speed) ? Math.min(4, Math.max(0.25, motion.speed)) : 1;
+  const delay = motion?.delaySec && Number.isFinite(motion.delaySec) ? Math.max(0, motion.delaySec) : 0;
+  if (!body.trim() || (speed === 1 && delay === 0)) return body;
+  return `var __hfInner = gsap.timeline();\n(function (tl) {\n${body}\n})(__hfInner);\n__hfInner.timeScale(${speed});\ntl.add(__hfInner, ${delay});`;
 }
 
 export function assembleHtml(
@@ -783,7 +817,7 @@ ${webFontLinks}<style>
   .hf-ph-plus { font-size:96px; font-weight:300; line-height:1; }
   .hf-ph-tip { font-size:34px; text-align:center; line-height:1.3; font-family:var(--font-body); }
 </style>
-</head>
+${lookHeadHtml(comp.look)}</head>
 <body>
 <div id="root" data-composition-id="root" data-start="0" data-width="${W}" data-height="${H}">
 ${body.join('\n')}
