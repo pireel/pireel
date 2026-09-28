@@ -12,10 +12,11 @@ export interface EditingSkill {
 }
 
 export const EDITING_SKILLS = [
-  { id: 'graphics', instruction: 'Graphics designed for this video, timed to the speech (read_skill video-graphics).' },
+  { id: 'graphics', instruction: 'Motion graphics designed for this video, timed to the speech (read_skill video-graphics).' },
   { id: 'captions', instruction: 'Word-synced captions (set_captions).' },
   { id: 'rough-cut', instruction: 'Cut filler words, false starts, failed retakes and dead air while keeping the meaning (read_skill speech-cleanup).' },
   { id: 'voice-cleanup', instruction: 'Cleaner narration: remove background noise (denoise_audio).' },
+  { id: 'b-roll', instruction: 'B-roll where the speech names something that can be shown: the creator\'s own media first, then stock (search_assets); footage that would have to be generated goes on the confirm list as a proposal instead (read_skill talking-head-edit).' },
   { id: 'sound', instruction: 'Sound effects where a point lands; music goes on the confirm list as a proposal instead of being applied (read_skill audio-and-music).' },
 ] as const satisfies readonly EditingSkill[];
 
