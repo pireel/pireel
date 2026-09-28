@@ -1,5 +1,7 @@
 "use client";
 
+import { editingSkillsHint } from '@pireel/studio-engine/editing-skills';
+import { EditingSkillsBar } from './editing-skills';
 import { collapsedComponentRetryIndexes, studioToolFailureText } from './chat-component-retries';
 
 /** Single-thread studio chat (useChat): stream rendering, client-side tool execution, persistence snapshots. */
@@ -108,6 +110,10 @@ export function ChatThread({
   runTool,
   getBody,
   getComp,
+  editingSkills,
+  onEditingSkills,
+  handoff,
+  onAnswerHandoff,
   timelineFramePickActive,
   timelineFramePickBusy,
   timelineFramePickAvailable,
@@ -136,6 +142,10 @@ export function ChatThread({
   runTool: StudioChatProps["runTool"];
   getBody: StudioChatProps["getBody"];
   getComp?: StudioChatProps["getComp"];
+  editingSkills?: StudioChatProps["editingSkills"];
+  onEditingSkills?: StudioChatProps["onEditingSkills"];
+  handoff?: StudioChatProps["handoff"];
+  onAnswerHandoff?: StudioChatProps["onAnswerHandoff"];
   timelineFramePickActive: boolean;
   timelineFramePickBusy: boolean;
   timelineFramePickAvailable: boolean;
@@ -167,6 +177,9 @@ export function ChatThread({
   useEffect(() => () => timelineFrameInspectionRef.current?.abort(), []);
   const getBodyRef = useRef(getBody);
   getBodyRef.current = getBody;
+  // Read at send time: the switched-on editing skills ride each message as a frozen note.
+  const editingSkillsRef = useRef(editingSkills);
+  editingSkillsRef.current = editingSkills;
   const composerRef = useRef<ComposerHandle | null>(null);
   const [frame, setFrame] = useState<AttachedFrame | null>(initialFrame);
   const frameRef = useRef(frame);
@@ -570,6 +583,7 @@ export function ChatThread({
       const mentionHint = [
         mentionedIds.length ? `Referenced elements in this message (use these ids directly): ${JSON.stringify(mentionedIds)}` : "",
         localAssetContext,
+        editingSkillsHint(editingSkillsRef.current),
       ].filter(Boolean).join("\n");
       const metadata = {
         workStartedAt: Date.now(),
@@ -1206,6 +1220,14 @@ export function ChatThread({
       </Conversation>
 
       <div className="p-2.5 pt-1">
+        {onEditingSkills && (
+          <EditingSkillsBar
+            value={editingSkills ?? []}
+            onChange={onEditingSkills}
+            handoff={handoff ?? []}
+            onAnswer={onAnswerHandoff ?? (() => {})}
+          />
+        )}
         <Composer
           placeholder={t("chatGen.sayWhatAddChange")}
           status={status}

@@ -635,6 +635,8 @@ export interface Composition {
   look?: DocumentLook;
   /** What the creator must confirm (read-only projection of document semantics). */
   handoff?: HandoffItem[];
+  /** Editing skills switched on for this project (read-only projection of document semantics). */
+  editingSkills?: string[];
   /** Global person-effect style (toolbar "Person" panel): person-on-top / feather / stroke / background swap.
    *  Only takes effect on matte-enabled (VideoShot.personMatte) shot segments; default = all defaults. */
   personFx?: PersonFx;

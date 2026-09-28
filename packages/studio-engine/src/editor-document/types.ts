@@ -237,6 +237,8 @@ export interface EditorSemanticState {
   /** What the agent hands back for the creator to confirm: facts it could not verify, and music or
    *  voice choices that need the creator's say before they are used. Never design choices. */
   handoff?: HandoffItem[];
+  /** Editing skills the creator switched on for this project (editing-skills.ts ids). */
+  editingSkills?: string[];
 }
 
 export interface HandoffItem {

@@ -12,6 +12,7 @@ import { captionAnimationId } from '../caption-animations';
 import { documentCaptionStyle } from '../editor-document/caption-state';
 import { componentSchemaOf, componentValuesView, type ComponentValueType } from '../component-schema';
 import type { DocumentLook } from '../look';
+import { editingSkillsOf } from '../editing-skills';
 import { dataEditFields } from '../component-props';
 import { clipPropertyDefaults, effectiveAudioClipProperties } from './clip-properties';
 
@@ -78,6 +79,8 @@ export interface V3StateView {
   semantics: { primaryTrackId: string; sceneIds: string[] };
   /** set_confirm_list items with the creator's answers (status confirmed / changed + answer). */
   confirmList?: Array<{ id: string; kind: string; text: string; status: string; answer?: string }>;
+  /** Editing skills the creator switched on: apply them when building or reworking the video as a whole. */
+  editingSkills?: Array<{ id: string; instruction: string }>;
   /** Library fonts every text surface accepts (set_texts/set_captions font ids, compose_component fontFamily); sans/serif/mono/local:<family> need no catalog. */
   fonts: Array<{ id: string; zh: string; en: string }>;
 }
@@ -380,6 +383,7 @@ export function renderV3State(
     })),
     semantics: { primaryTrackId: document.semantics.primaryNarrativeTrackId, sceneIds: document.semantics.scenes.map((scene) => scene.id) },
     ...(document.semantics.handoff?.length ? { confirmList: document.semantics.handoff.map(({ id, kind, text, status, answer }) => ({ id, kind, text, status, ...(answer ? { answer } : {}) })) } : {}),
+    ...(document.semantics.editingSkills?.length ? { editingSkills: editingSkillsOf(document.semantics.editingSkills) } : {}),
     fonts: webFontCatalog(),
   };
 }

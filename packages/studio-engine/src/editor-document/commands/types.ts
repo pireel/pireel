@@ -126,6 +126,7 @@ export type EditorCommand =
   | { type: 'appearance.patch'; patch: AppearancePatch }
   | { type: 'processing.patch'; patch: ProcessingPatch }
   | { type: 'handoff.patch'; id: string; status: 'open' | 'confirmed' | 'changed'; answer?: string }
+  | { type: 'editingSkills.set'; ids: string[] }
   | { type: 'track.insert'; track: InsertTrackInput; index?: number }
   | { type: 'track.remove'; trackId: TrackId }
   | { type: 'track.patch'; trackId: TrackId; patch: TrackPatch }
