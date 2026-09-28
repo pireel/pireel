@@ -44,6 +44,7 @@ export function supplementalVisualMedia(plan: EditorRenderPlan): SupplementalVis
         muted: track.muted,
         ...(video?.volumeDb != null ? { volumeDb: video.volumeDb } : {}),
         ...(video?.audioMuted ? { audioMuted: true } : {}),
+        ...(video?.personMatte ? { personMatte: true } : {}),
         ...(video?.audioFadeInSec ? { audioFadeInSec: video.audioFadeInSec } : {}),
         ...(video?.audioFadeOutSec ? { audioFadeOutSec: video.audioFadeOutSec } : {}),
         ...(video?.filter ? { filter: video.filter } : {}),
@@ -123,6 +124,7 @@ export function supplementalVisualLayers(visuals: readonly SupplementalVisualMed
   return visuals.filter((visual) => visual.kind === 'video').map((visual) => ({
     id: visual.clipId,
     elKey: `hf-visual-${visual.clipId}`,
+    ...(visual.personMatte ? { personMatte: true } : {}),
     key: visual.source,
     srcStart: visual.sourceInSec,
     srcEnd: visual.sourceOutSec,

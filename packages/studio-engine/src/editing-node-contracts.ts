@@ -1,3 +1,4 @@
+import { textTranslationSchema, textUnitsSchema } from './workflow-text-contracts';
 import type { WorkflowCapability } from './workflow';
 import { ws, artifactRefSchema, voiceConfigSchema, captionStyleSchema, type NodeContract } from './workflow-node-contracts';
 const ref = (name: string, kind: string) => ({ label: name, schema: artifactRefSchema(kind), valueType: kind + '-ref', required: true });
@@ -29,4 +30,10 @@ for (const id of ['graphics.generate', 'camera.motion', 'layout.auto', 'overlays
   EDITING_NODE_CONTRACTS[id].implementationRevision = 'editorial-consumer-1';
 }
 EDITING_NODE_CONTRACTS['edit.framing-plan'].implementationRevision = 'editorial-framing-2';
+EDITING_NODE_CONTRACTS['flow.units'] = localPlan('准备翻译文稿', { plan: ref('文稿', 'caption-plan') }, { units: { ...planPort, valueType: 'text-units', schema: textUnitsSchema } });
+EDITING_NODE_CONTRACTS['flow.translation'] = localPlan('保存译文', { document: ref('视频', 'document'), transcript: ref('原文', 'transcript'), plan: ref('文稿', 'caption-plan'), language: { ...planPort, valueType: 'text', schema: ws.string(100, 1) }, value: { ...planPort, valueType: 'text-translation', schema: textTranslationSchema } }, { document: ref('视频', 'document'), transcript: ref('双语原文', 'transcript'), spoken: ref('配音文稿', 'transcript'), value: { ...planPort, valueType: 'text-translation', schema: textTranslationSchema } });
+EDITING_NODE_CONTRACTS['flow.clock'] = localPlan('对齐当前视频时间', { document: ref('视频', 'document'), transcript: ref('原文', 'transcript'), media: ref('原片', 'media') }, { transcript: ref('当前讲话', 'transcript'), media: ref('当前时长', 'media') });
+EDITING_NODE_CONTRACTS['flow.voice'] = localPlan('替换配音音轨', { document: ref('视频', 'document'), audio: ref('配音', 'media'), transcript: ref('新字幕', 'transcript'), instanceId: { ...planPort, valueType: 'text', schema: ws.string(80, 1) } }, { document: ref('配音视频', 'document') });
+EDITING_NODE_CONTRACTS['flow.cut'] = localPlan('口播粗剪', { document: ref('视频', 'document'), transcript: ref('原文', 'transcript'), options: EDITING_NODE_CONTRACTS['edit.rough-cut'].inputs.options }, { document: ref('剪后视频', 'document'), report: planPort });
+for (const id of ['graphics.generate', 'overlays.auto', 'audio.effects', 'audio.music']) EDITING_NODE_CONTRACTS[id].inputs.instanceId = { label: '步骤', valueType: 'text', schema: ws.string(80, 1), required: false };
 export const EDITING_WORKFLOW_CAPABILITIES: WorkflowCapability[] = Object.entries(EDITING_NODE_CONTRACTS).map(([id, meta]) => ({ id, version: 1, label: meta.label, inputs: meta.inputs, outputs: meta.outputs, requirements: meta.requirements, environments: ['browser'], available: true, effect: meta.billing === 'server' ? 'generate' : 'edit', retry: meta.billing === 'server' ? 'reconcile-first' : 'safe' }));

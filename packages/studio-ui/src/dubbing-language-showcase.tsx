@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { DUBBING_LANGUAGES, type DubbingLanguageCode } from '@pireel/studio-engine/scene-languages';
-import { DUBBING_ENTRY_ICON } from './workflow-art';
+import { DUBBING_ENTRY_ICON, SCENE_ICON_STYLE } from './workflow-art';
 
 const NATIVE_NAMES: Record<DubbingLanguageCode, string> = {
   en: 'English', zh: '普通话', ja: '日本語', ko: '한국어', yue: '廣東話',
@@ -30,6 +30,6 @@ export function DubbingLanguageShowcase({ locale }: { locale: 'zh' | 'en' }) {
       </div>)}
     </div>
     </div>
-    <img src={DUBBING_ENTRY_ICON} alt="" width={104} height={104} className="relative size-[104px] object-contain" />
+    <img src={DUBBING_ENTRY_ICON} alt="" width={104} height={104} className="relative size-[104px] object-contain" style={SCENE_ICON_STYLE} />
   </div>;
 }

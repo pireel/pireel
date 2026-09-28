@@ -10,7 +10,7 @@ import { dubbingWorkflowNodes } from './dubbing-workflow-nodes';
 import { brollWorkflowNodes } from './broll-workflow-nodes';
 import { textWorkflowNodes } from './text-workflow-nodes';
 import { loadLocalVideo, saveLocalVideo } from './local-media';
-export interface WorkflowLabSession { previousDefinition?: WorkflowDefinition; recipeDefinition?: WorkflowDefinition; recipe?: import('@pireel/studio-engine/editing-capabilities').EditingRecipe; editingGroups?: Record<string, string[]>; editingTargets?: Record<string, string>; schemaVersion: 1; id: string; scope: string; name: string; definition: WorkflowDefinition; task: CaptionTaskRecord; history: WorkflowRun[] }
+export interface WorkflowLabSession { recipePresets?: { id: string; name: string; recipe: import('@pireel/studio-engine/editing-capabilities').EditingRecipe; updatedAt: number }[]; activeRecipePresetId?: string; flow?: import('@pireel/studio-engine/editing-flow').EditingFlow; flowUndo?: import('@pireel/studio-engine/editing-flow').EditingFlow[]; flowTemplates?: { id: string; name: string; flow: import('@pireel/studio-engine/editing-flow').EditingFlow }[]; flowPreviewOwner?: string; previousDefinition?: WorkflowDefinition; recipeDefinition?: WorkflowDefinition; recipe?: import('@pireel/studio-engine/editing-capabilities').EditingRecipe; editingGroups?: Record<string, string[]>; editingTargets?: Record<string, string>; schemaVersion: 1; id: string; scope: string; name: string; definition: WorkflowDefinition; task: CaptionTaskRecord; history: WorkflowRun[] }
 export function newWorkflowLabSession(scope: string): WorkflowLabSession {
   const id = crypto.randomUUID();
   const definition: WorkflowDefinition = { schemaVersion: 1, id: 'local-workflow-test', version: 1, title: '我的测试流程', templateId: 'workflow-lab', parameters: { projectId: { type: 'string', label: { zh: '测试项目', en: 'Test project' }, default: id } }, trigger: { kind: 'manual' }, steps: [{ id: 'input', capability: 'data.value', version: 1, dependsOn: [], arguments: { value: { kind: 'literal', value: { text: '这是一段用于组合测试的文案。' } } } }] };
@@ -62,7 +62,13 @@ async function runWorkflowLabUnlocked(session: WorkflowLabSession, hooks: Pick<S
     const result = await host.executeGraph(next.definition, [...captionWorkflowNodes(host), ...dubbingWorkflowNodes(host), ...brollWorkflowNodes(host), ...textWorkflowNodes(host), ...editingWorkflowNodes(host)], targetStepId);
     next = { ...next, task: { ...result.task, stage: result.run.status === 'waiting' ? 'waiting' : 'completed' } };
     next.history = [result.run, ...next.history.filter(run => run.id !== result.run.id)].slice(0, 10);
-    if (result.video) {
+    if (next.flow) for (const record of result.run.steps) {
+      if (record.status !== 'completed' || !record.artifact?.data.media || !result.run.definition.steps.some(step => step.id === record.id && step.capability === 'video.render')) continue;
+      const media = host.store.read<{ sig: string; name: string }>(record.artifact.data.media, 'media');
+      const file = host.files.get(media.sig);
+      if (file && !await saveLocalVideo(file, media.sig)) throw new Error('分支成片保存失败，请检查本机空间。');
+    }
+    if (result.video && !next.flow) {
       const render = [...result.run.steps].reverse().find(step => step.artifact?.data.media && step.id === result.run.definition.steps.find(node => node.id === step.id && node.capability === 'video.render')?.id);
       const media = render && host.store.read<{ sig: string; name: string }>(render.artifact!.data.media, 'media');
       if (media && !await saveLocalVideo(new File([result.video], media.name, { type: 'video/mp4' }), media.sig)) throw new Error('成片未缓存，请立即下载保存。');
@@ -134,4 +140,17 @@ export async function prepareEditingWorkflow(session: WorkflowLabSession): Promi
   const transcript = existing?.kind === 'literal' ? existing.value : ownedRaw ?? (next.task.transcript?.length ? await store.put('transcript', next.task.sourceSig, next.task.transcript) : null);
   const compiled = compileEditingWorkflow(next.recipe, next.task, media, transcript);
   next.definition = compiled.definition; next.recipeDefinition = structuredClone(compiled.definition); next.editingGroups = compiled.groups; next.editingTargets = compiled.targets; return next;
+}
+
+/** Consumer-facing graph; the cards' input edges are the execution source of truth. */
+export async function prepareEditingFlow(session: WorkflowLabSession): Promise<WorkflowLabSession> {
+  const { compileEditingFlow } = await import('@pireel/studio-engine/editing-flow-compiler');
+  const { recipeToFlow } = await import('@pireel/studio-engine/editing-flow');
+  const prepared = await prepareEditingWorkflow(session);
+  prepared.flow = session.flow ?? recipeToFlow(prepared.recipe!);
+  const media = prepared.definition.parameters.source.default;
+  const binding = prepared.definition.steps.find(step => step.id === 'transcript')?.arguments.transcript;
+  const compiled = compileEditingFlow(prepared.flow, prepared.task, media, binding?.kind === 'literal' ? binding.value : null);
+  prepared.definition = compiled.definition; prepared.recipeDefinition = structuredClone(compiled.definition); prepared.editingGroups = compiled.groups; prepared.editingTargets = compiled.targets;
+  return prepared;
 }

@@ -76,6 +76,7 @@ export interface EngineAudioClip {
 /** An overlay video layer (any visual lane other than the primary narrative): picture only, drawn on its
  *  own canvas in the preview document; its sound is an EngineAudioClip like music. */
 export interface EngineLayer {
+  personMatte?: boolean;
   /** Clip id. */
   id: string;
   /** Id of the canvas element that receives this layer's frames. */
@@ -184,6 +185,7 @@ export class VideoTrackEngine {
   private layerLastPush = new Map<string, number>();
   private layerVisible = new Set<string>();
   private layerWarned = new Set<string>();
+  private layerFailed = new Set<string>();
   // Audio clips (music lane): one resident <audio> element per clip, volume driven per tick from the
   // envelope closure. Deliberately loose sync (music has no lip-sync): only correct drift > 0.35s.
   // Each element is routed through a WebAudio gain node so a clip can be BOOSTED past source level
@@ -220,6 +222,7 @@ export class VideoTrackEngine {
    *  dead until the owner sets the source again from fresh bytes. */
   onSourceError?: (key: string, error: MediaError | null) => void;
   /** An overlay layer's frame (drawn into the canvas named by layer.elKey). */
+  onLayerError?: (layer: EngineLayer, error: unknown) => void;
   onLayerFrame?: (layer: EngineLayer, frame: ImageBitmap, info: LayerFrameInfo) => void;
   /** An overlay layer left its window or lost its source: its canvas should clear. */
   onLayerBlank?: (layer: EngineLayer) => void;
@@ -844,10 +847,12 @@ export class VideoTrackEngine {
         }
       }
       if (!old || old.key !== layer.key || old.srcStart !== layer.srcStart || old.srcEnd !== layer.srcEnd
-        || old.timelineStart !== layer.timelineStart || old.timelineEnd !== layer.timelineEnd || old.elKey !== layer.elKey) {
+        || old.personMatte !== layer.personMatte || old.timelineStart !== layer.timelineStart || old.timelineEnd !== layer.timelineEnd || old.elKey !== layer.elKey) {
         this.layerLastPush.delete(layer.id);
       }
     }
+    this.layerFailed.clear();
+    this.layerWarned.clear();
     this.layers = layers;
     this.layerGen += 1;
     if (!this.playing) this.pushLayers(this.tEdited);
@@ -879,6 +884,7 @@ export class VideoTrackEngine {
   }
 
   private pushLayer(layer: EngineLayer, t: number): void {
+    if (this.layerFailed.has(layer.id)) return;
     const duration = Math.max(1e-9, layer.timelineEnd - layer.timelineStart);
     const rate = Math.max(0, layer.srcEnd - layer.srcStart) / duration;
     const srcT = Math.min(layer.srcEnd, Math.max(layer.srcStart, layer.srcStart + (t - layer.timelineStart) * rate));
@@ -902,8 +908,12 @@ export class VideoTrackEngine {
     cursor.frameAt(srcT)
       .then(async (frame) => {
         if (!frame) return;
-        const bitmap = await createImageBitmap(frame.canvas);
-        if (gen !== this.layerGen || !this.layers.includes(layer) || !this.onLayerFrame) {
+        let bitmap = await createImageBitmap(frame.canvas);
+        if (layer.personMatte) {
+          const { personCutoutFrame } = await import('./person-cutout-frame');
+          bitmap = await personCutoutFrame(bitmap);
+        }
+        if (gen !== this.layerGen || !this.layers.includes(layer) || !this.onLayerFrame || this.tEdited < layer.timelineStart - 1e-6 || this.tEdited >= layer.timelineEnd - 1e-6) {
           bitmap.close();
           return;
         }
@@ -911,13 +921,20 @@ export class VideoTrackEngine {
         this.layerVisible.add(layer.id);
         this.onLayerFrame(layer, bitmap, { t, srcT, sourceWidth: frame.width, sourceHeight: frame.height });
       })
-      .catch(() => undefined)
+      .catch(error => {
+        if (gen === this.layerGen && this.layers.includes(layer)) {
+          this.layerFailed.add(layer.id);
+          this.onLayerBlank?.(layer);
+          if (!this.layerWarned.has(layer.id)) { this.layerWarned.add(layer.id); this.onLayerError?.(layer, error); }
+        }
+      })
       .then(() => {
         this.layerInflight.delete(layer.id);
         const pending = this.layerPending.get(layer.id);
-        if (pending == null || !this.layers.includes(layer)) return;
         this.layerPending.delete(layer.id);
-        this.pushLayer(layer, pending);
+        const current = this.layers.find(item => item.id === layer.id);
+        if (pending == null || !current || pending < current.timelineStart || pending >= current.timelineEnd) return;
+        this.pushLayer(current, pending);
       });
   }
 

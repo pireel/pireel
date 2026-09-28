@@ -4,6 +4,7 @@ import { removeSrcRanges } from './trim';
 import { BASE_CAPTION_FONT_PX, getCaptionPreset } from './caption-presets';
 import { captionLineSegments } from './caption-layout-metrics';
 import { wordsFromText } from './caption-fx';
+import { brandAppearance, brandCaptionStyle, type BrandSnapshot } from './brand-kit';
 
 export interface CaptionTaskPreset { id: string; name: { zh: string; en: string }; style: Partial<CaptionStyle> }
 export const CAPTION_TASK_PRESETS: readonly CaptionTaskPreset[] = [
@@ -27,7 +28,7 @@ export const CAPTION_TRANSLATION_LANGUAGES = [
   { id: '한국어', name: { zh: '韩语', en: 'Korean' }, sample: '자막 미리보기' },
 ] as const;
 export type CaptionTranslationLanguage = typeof CAPTION_TRANSLATION_LANGUAGES[number]['id'];
-export interface CaptionTaskOptions { broll?: import('./broll-task').BrollOptions; dubbing?: import('./dubbing-task').DubbingOptions; layoutVersion?: 2; presetId: string; aspect: 'original' | 'portrait' | 'landscape' | 'square'; shortenPauses: boolean; translationLanguage?: CaptionTranslationLanguage; custom?: Pick<Partial<CaptionStyle>, 'font' | 'scale' | 'bold' | 'color' | 'accentColor' | 'bg' | 'strokeColor' | 'strokeWidth' | 'xPct' | 'yPct' | 'wPct'> }
+export interface CaptionTaskOptions { /** Brand picked for this scene, copied at pick time. */ brand?: BrandSnapshot; ugcAd?: import('./ugc-ad').UgcAdOptions; subtitleRemoval?: import('./subtitle-removal').SubtitleRemovalOptions; sfx?: import('./sfx-task').SfxOptions; broll?: import('./broll-task').BrollOptions; dubbing?: import('./dubbing-task').DubbingOptions; layoutVersion?: 2; presetId: string; aspect: 'original' | 'portrait' | 'landscape' | 'square'; shortenPauses: boolean; translationLanguage?: CaptionTranslationLanguage; custom?: Pick<Partial<CaptionStyle>, 'font' | 'scale' | 'bold' | 'color' | 'accentColor' | 'bg' | 'strokeColor' | 'strokeWidth' | 'xPct' | 'yPct' | 'wPct'> }
 export function captionTaskPreset(id: string): CaptionTaskPreset {
   const preset = CAPTION_TASK_PRESETS.find((item) => item.id === id);
   if (!preset) throw new Error('Unknown caption preset');
@@ -41,18 +42,28 @@ export function captionTaskSafeArea(source: CaptionTaskDimensions) {
   return { left: 12.5, right: 87.5, top: 5, bottom: 90 };
 }
 export function captionTaskGroupBottom(options: CaptionTaskOptions, source: CaptionTaskDimensions) {
-  return options.custom?.yPct ?? (options.layoutVersion === 2 ? captionTaskSafeArea(source).bottom - 1 : 86);
+  return options.custom?.yPct ?? (options.presetId === BRAND_CAPTION_PRESET_ID ? options.brand?.captions.yPct : undefined) ?? (options.layoutVersion === 2 ? captionTaskSafeArea(source).bottom - 1 : 86);
+}
+/** presetId of the "brand captions" card: shown first when a brand is picked; any other card overrides it. */
+export const BRAND_CAPTION_PRESET_ID = 'brand';
+/** Caption base before the scene's own adjustments: the picked brand's captions, or the chosen preset. */
+export function captionTaskBaseStyle(options: CaptionTaskOptions): Partial<CaptionStyle> {
+  if (options.presetId !== BRAND_CAPTION_PRESET_ID) return captionTaskPreset(options.presetId).style;
+  if (!options.brand) throw new Error('Brand captions selected without a brand');
+  return brandCaptionStyle(options.brand);
 }
 export function captionTaskStyle(options: CaptionTaskOptions, source: CaptionTaskDimensions = { width: 1080, height: 1920 }): Partial<CaptionStyle> {
-  if (options.layoutVersion !== 2) return { ...captionTaskPreset(options.presetId).style, wPct: 84, yPct: 86, ...options.custom, sub: options.translationLanguage ? { lang: options.translationLanguage, font: 'sans' } : undefined };
+  if (options.layoutVersion !== 2) return { ...captionTaskBaseStyle(options), wPct: 84, yPct: 86, ...options.custom, sub: options.translationLanguage ? { lang: options.translationLanguage, font: 'sans' } : undefined };
   const canvas = captionTaskCanvas(options.aspect, source);
   const safe = captionTaskSafeArea(canvas);
   const { yPct: _groupBottom, ...custom } = options.custom ?? {};
-  const scale = custom.scale ?? (64 * Math.min(canvas.width, canvas.height) / 1080 / BASE_CAPTION_FONT_PX);
+  // Precedence: the scene's own adjustment > the brand's measured value > the canvas default.
+  const base = captionTaskBaseStyle(options);
+  const scale = custom.scale ?? base.scale ?? (64 * Math.min(canvas.width, canvas.height) / 1080 / BASE_CAPTION_FONT_PX);
   const bottom = captionTaskGroupBottom(options, canvas);
   const style: Partial<CaptionStyle> = {
-    ...captionTaskPreset(options.presetId).style, scale, xPct: (safe.left + safe.right) / 2,
-    wPct: canvas.height > canvas.width ? 70 : canvas.height === canvas.width ? 76 : 75,
+    ...base, scale, xPct: base.xPct ?? (safe.left + safe.right) / 2,
+    wPct: base.wPct ?? (canvas.height > canvas.width ? 70 : canvas.height === canvas.width ? 76 : 75),
     ...custom, yPct: bottom,
     sub: options.translationLanguage ? { lang: options.translationLanguage, font: 'sans', scale: scale * .75, yPct: bottom } : undefined,
   };
@@ -105,6 +116,7 @@ export function buildCaptionBaseDocument(input: {
   const comp = { ...emptyComposition(), ...canvas, video: { url: input.sourceUrl, durationSec: input.durationSec }, shots };
   const document = compositionToEditorDocument({ projectId: input.projectId, composition: comp, videoSig: input.sourceSig }).document;
   if (input.sourceName) for (const asset of Object.values(document.assets)) if (asset.kind === 'video') asset.label = input.sourceName;
+  if (input.options.brand) document.appearance = { ...document.appearance, ...brandAppearance(input.options.brand) };
   return document;
 }
 

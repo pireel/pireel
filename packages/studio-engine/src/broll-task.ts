@@ -1,5 +1,5 @@
 export interface BrollAsset { id: string; sig: string; name: string; kind: 'video' | 'image'; durationSec: number; width: number; height: number }
-export interface BrollOptions { manualClips?: { id: string; assetId: string; start: number; duration: number; sourceIn: number }[]; edits?: Record<string, { start: number; duration: number; sourceIn: number }>; assets: BrollAsset[]; captions: boolean; replacements?: Record<string, string>; disabledPlacements?: string[] }
+export interface BrollOptions { pip?: import('./pip-layout').PipOptions; manualClips?: { id: string; assetId: string; start: number; duration: number; sourceIn: number }[]; edits?: Record<string, { start: number; duration: number; sourceIn: number }>; assets: BrollAsset[]; captions: boolean; replacements?: Record<string, string>; disabledPlacements?: string[] }
 export interface BrollCandidate { id: string; assetId: string; start: number; end: number; description: string }
 export interface BrollPlacement { id: string; candidateId: string; start: number; duration: number }
 export interface BrollCue { id: number; start: number; end: number; text: string }

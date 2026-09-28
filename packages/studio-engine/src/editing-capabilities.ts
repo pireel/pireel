@@ -18,6 +18,7 @@ export const EDITING_CAPABILITIES = [
 export type EditingCapabilityId = typeof EDITING_CAPABILITIES[number]['id'];
 export interface EditingRecipe {
   version: 1;
+  brollAssetIds?: string[];
   enabled: EditingCapabilityId[];
   captions: CaptionTaskOptions;
   language: string; voiceId: string; speakerVoices: Record<string, string>; script: string;

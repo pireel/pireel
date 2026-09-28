@@ -1,3 +1,4 @@
+import { pipRenderModel } from './pip-render-model';
 import { resolveBrollEdits } from '@pireel/studio-engine/broll-task';
 import { captionTaskStyle, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
 import { loadCaptionMedia, type CaptionTaskRecord } from './caption-task-store';
@@ -28,11 +29,12 @@ export async function exportBrollEdit(task: CaptionTaskRecord, options: CaptionT
     const font = options.broll.captions && captionTaskStyle(options, task).font;
     if (font) await loadFont(font, (task.transcript ?? []).map(row => row.text).join(''));
     check();
-    const comp = brollRenderComposition(task, options, sourceUrl);
+    const pip = options.broll.pip ? pipRenderModel(task, options, sourceUrl, new Map(options.broll.assets.map(asset => [asset.sig, urls.get(asset.id)!]))) : undefined;
+    const comp = pip?.composition ?? brollRenderComposition(task, options, sourceUrl);
     for (const shot of comp.shots ?? []) if (shot.src) files.set(shot.src, source);
     const { clientExportVideo } = await import('./client-export'); check();
     const video = await clientExportVideo({ comp, videoFile: source, clipFiles: files,
-      visualMediaClips: clips.map(clip => ({ clipId: clip.id, trackId: 'broll', stackOrder: 1,
+      visualMediaClips: pip?.visuals ?? clips.map(clip => ({ clipId: clip.id, trackId: 'broll', stackOrder: 1,
         kind: clip.asset.kind, source: urls.get(clip.asset.id)!, startSec: clip.start, endSec: clip.start + clip.duration,
         sourceInSec: clip.sourceIn, sourceOutSec: clip.sourceIn + clip.duration, fit: 'cover', muted: true, audioMuted: true })),
       render: { res: 1080, fps: 30, format: 'mp4' }, shouldCancel: () => hooks.signal.aborted,

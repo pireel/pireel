@@ -43,7 +43,15 @@
     "./workbench-controls": "./src/workbench-controls.tsx",
     "./*": "./src/*.ts",
     "./caption-task-page": "./src/caption-task-page.tsx",
-    "./caption-upload-dialog": "./src/caption-upload-dialog.tsx"
+    "./caption-upload-dialog": "./src/caption-upload-dialog.tsx",
+    "./scene-form-controls": "./src/scene-form-controls.tsx",
+    "./caption-task-customize": "./src/caption-task-customize.tsx",
+    "./caption-preset-carousel": "./src/caption-preset-carousel.tsx",
+    "./dubbing-settings": "./src/dubbing-settings.tsx",
+    "./scene-media-picker": "./src/scene-media-picker.tsx",
+    "./scene-playback": "./src/scene-playback.tsx",
+    "./scene-video-preview": "./src/scene-video-preview.tsx",
+    "./scene-player-frame": "./src/scene-player-frame.tsx"
   },
   "sideEffects": [
     "./src/i18n.ts"

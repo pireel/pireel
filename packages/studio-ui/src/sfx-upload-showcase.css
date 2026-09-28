@@ -1,0 +1,20 @@
+@keyframes sfx-showcase-cue {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes sfx-showcase-ring {
+  from { opacity: .75; transform: scale(.25); }
+  to { opacity: 0; transform: scale(1.6); }
+}
+.sfx-mg-tag { animation: sfx-showcase-cue 280ms ease-out both; }
+.sfx-mg-burst span {
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(255,255,255,.55);
+  border-radius: 9999px;
+  animation: sfx-showcase-ring 650ms ease-out both;
+}
+.sfx-mg-burst span + span { animation-delay: 100ms; }
+@media (prefers-reduced-motion: reduce) {
+  .sfx-mg-tag, .sfx-mg-burst span { animation: none; }
+}

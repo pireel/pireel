@@ -1,3 +1,4 @@
+import { normalizeErasureOptions } from './subtitle-removal';
 import { sceneLanguage } from './scene-languages';
 import type { CaptionTaskRecord } from './scene-project';
 import type { CaptionTaskOptions } from './caption-task';
@@ -5,12 +6,14 @@ import { dubbingSpeakers, dubbingTurns, dubbingVoiceFor, splitDubbingScript } fr
 
 export interface SceneCreditInput {
   durationSec: number; asr: boolean; translation: boolean; emphasis: boolean; lipSync: boolean;
-  brollFrames?: number; sourceTokens?: number; asrPasses?: number;
+  subtitleRemoval?: boolean; erasureKind?: import('./subtitle-removal').ErasureKind; erasureTier?: import('./erasure-pricing').ErasureTier; erasureWidth?: number; erasureHeight?: number; sfxPlanning?: boolean; brollFrames?: number; sourceTokens?: number; asrPasses?: number;
   speech: { voiceId: string; minUnits: number; maxUnits: number; maxChunks: number; estimatedUnits?: number; estimatedChunks?: number }[];
 }
 export interface SceneCreditEstimate {
   min: number; max: number; estimate: number; durationBased: boolean;
-  items: { kind: 'asr' | 'translation' | 'emphasis' | 'speech' | 'lipSync' | 'visual' | 'matching'; min: number; max: number; estimate: number }[];
+  sfxGenerationUnitCredits?: number;
+  erasure?: { tier: import('./erasure-pricing').ErasureTier; baseCnyPerMinute: number; cnyPerCredit: number; costCny: number; prechargeCredits: number; outputFpsCap: number; outputResolution: string };
+  items: { kind: 'asr' | 'translation' | 'emphasis' | 'speech' | 'lipSync' | 'visual' | 'matching' | 'sfx' | 'subtitleRemoval'; min: number; max: number; estimate: number }[];
 }
 const units = (text: string) => [...text].reduce((sum, char) => sum + (/\p{Script=Han}/u.test(char) ? 2 : 1), 0);
 /** Compact usage hints for a read-only estimate, never authorization or actual billing input. */
@@ -18,7 +21,9 @@ export function sceneCreditInput(task: CaptionTaskRecord, options: CaptionTaskOp
   const transcript = task.transcript ?? [];
   const source = transcript.map((segment) => segment.text).join('\n');
   const input: SceneCreditInput = { durationSec: task.durationSec, asr: !reuseCompleted || !transcript.length, translation: false, emphasis: false, lipSync: false, speech: [], ...(source ? { sourceTokens: Math.max([...source].length, Math.ceil(new TextEncoder().encode(source).byteLength / 2)) } : {}) };
-  if (task.scene === 'broll') {
+  if (task.scene === 'subtitle-removal') { input.asr = false; input.subtitleRemoval = true; input.erasureKind = options.subtitleRemoval?.kind ?? 'subtitles'; input.erasureTier = normalizeErasureOptions(options.subtitleRemoval).tier; input.erasureWidth = task.width; input.erasureHeight = task.height; return input; }
+  if (task.scene === 'sfx') { input.sfxPlanning = !!options.sfx && 'density' in options.sfx; input.emphasis = !!options.sfx && 'captions' in options.sfx && options.sfx.captions && options.presetId === 'keywords'; return input; }
+  if ((task.scene === 'broll' || task.scene === 'pip' || task.scene === 'ugc-ad')) {
     input.brollFrames = (options.broll?.assets ?? []).reduce((sum, a) => sum + (a.kind === 'image' ? 1 : 8), 0);
     input.emphasis = !!options.broll?.captions && options.presetId === 'keywords';
     return input;

@@ -1,3 +1,5 @@
+import { imageThumb } from '@pireel/ui/image-url';
+import { applyBrandMedia, type BrandSnapshot } from '@pireel/studio-engine/brand-kit';
 import { validateEmphasisSelection as sourceSelectionValid } from '@pireel/studio-engine/caption-emphasis';
 import { sourceEmphasisRows, annotateSourceEmphasis } from '@pireel/studio-engine/caption-source-emphasis';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
@@ -54,6 +56,10 @@ export function captionWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
       const translation = await translateCaptionPlan(args.units as unknown as CaptionPlan['units'], String(args.language), (rows, language) => translate(rows, language, { signal: host.hooks.signal, onUsage: context.recordUsage }), host.check, count('translating'));
       return { translation: workflowJson(await store.put('translation', 'captions', translation)), value: workflowJson(translation) };
     }, project: outputs => { const value = outputs.value as unknown as CaptionTranslation; return { translation: { language: value.language, sourceKey: value.sourceKey } }; } }),
+    node('brand.apply', { stage: 'styling', async execute(args) {
+      const document = applyBrandMedia(store.read(args.document, 'document'), args.brand as unknown as BrandSnapshot);
+      return { document: workflowJson(await store.put('document', 'brand', document)) };
+    }, project: outputs => ({ document: store.read<EditorDocumentV2>(outputs.document, 'document') }) }),
     node('captions.apply', { stage: 'styling', async execute(args) {
       const document = assembleCaptionDocument(store.read(args.document, 'document'), store.read(args.plan, 'caption-plan'), args.translation as unknown as CaptionTranslation | null, args.style as unknown as CaptionTaskOptions, args.emphasis as unknown as CaptionEmphasis | null);
       return { document: workflowJson(await store.put('document', 'captions', document)) };
@@ -94,38 +100,48 @@ export function captionWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     node('video.render', { cache: false, stage: 'rendering', async execute(args) {
       const document = store.read<EditorDocumentV2>(args.document, 'document');
       const media = store.read<SceneMedia>(args.media, 'media');
-      const style = document.appearance.captionStyle;
-      const { loadFont } = await import('./web-fonts');
-      const glyphs = Object.values(document.semantics.transcripts).flat().map(segment => segment.text).join('');
-      if (style?.font) for (let offset = 0; offset < glyphs.length; offset += 1000) await loadFont(style.font, glyphs.slice(offset, offset + 1000));
-      if (typeof globalThis.document !== 'undefined') await globalThis.document.fonts?.ready;
-      const clipFiles = new Map<string, File>();
-      const assetUrls = new Map<string, string>();
-      // Resolve every persisted locator at the host boundary; no blob URLs enter artifact identity.
-      for (const asset of Object.values(document.assets)) {
-        const sig = asset.locator.localSig;
-        if (!sig) continue;
-        const file = await host.media({ sig, name: asset.label ?? sig, width: 0, height: 0, durationSec: media.durationSec, url: asset.locator.remoteUrl });
-        const url = await host.url({ sig, name: file.name, width: 0, height: 0, durationSec: media.durationSec });
-        assetUrls.set(asset.id, url); clipFiles.set(url, file);
-      }
-      const { editorDocumentRenderPlan } = await import('@pireel/studio-engine/composition');
-      const { compositionRenderView } = await import('./composition-render-view');
-      const { supplementalVisualMedia } = await import('./visual-render-plan');
-      const resolveAssetUrl = (asset: { id: string }) => assetUrls.get(asset.id);
-      const renderPlan = editorDocumentRenderPlan(document, { resolveAssetUrl });
-      const renderComp = compositionRenderView(projectDocumentToComposition(document, { resolveAssetUrl }), renderPlan);
-      const sourceUrl = await host.url(media);
-      if (renderComp.video) renderComp.video.url = sourceUrl;
-      for (const shot of renderComp.shots ?? []) if (shot.src && !clipFiles.has(shot.src)) clipFiles.set(shot.src, await host.media(media));
-      const visualMediaClips = supplementalVisualMedia(renderPlan);
-      const audio = (renderComp.audioTracks ?? []).flatMap(clip => clipFiles.has(clip.src) ? [{ clip, file: clipFiles.get(clip.src)! }] : []);
-      host.video = await (await import('./client-export')).clientExportVideo({ comp: renderComp, videoFile: await host.media(media), clipFiles, visualMediaClips, audio, render: args.settings as unknown as { res: number; fps: number; format: 'mp4' }, shouldCancel: () => host.hooks.signal.aborted, onProgress: (done, total) => { count('rendering')(done, total); host.hooks.progress(total ? done / total : 0); } });
+      const rendered = await renderSceneDocument(host, document, media, args.settings, count('rendering'));
+      host.video = rendered.video;
       host.check();
       const output = new File([host.video], media.name.replace(/\.[^.]+$/, '') + '-rendered.mp4', { type: 'video/mp4' });
       const sig = await (await import('./media')).durableFileSig(output);
       host.files.set(sig, output);
-      return { media: workflowJson(await store.put('media', 'rendered-video', { sig, name: output.name, width: document.canvas.width, height: document.canvas.height, durationSec: renderPlan.durationSec, kind: 'video' })), document: args.document };
+      return { media: workflowJson(await store.put('media', 'rendered-video', { sig, name: output.name, width: document.canvas.width, height: document.canvas.height, durationSec: rendered.durationSec, kind: 'video' })), document: args.document };
     }, project: outputs => ({ document: store.read(outputs.document, 'document') }) }),
   ];
+}
+
+/** The render step's body: resolve every asset locator (local sig, cloud key, remote url) at the host
+ * boundary, then export the document in the browser. Shared by the scene node and QA harnesses. */
+export async function renderSceneDocument(host: Pick<SceneWorkflowHost, 'media' | 'url' | 'check' | 'hooks'>, document: EditorDocumentV2, media: SceneMedia, settings: unknown, onProgress: (done: number, total: number) => void = () => {}): Promise<{ video: Blob; durationSec: number }> {
+  const style = document.appearance.captionStyle;
+  const { loadFont } = await import('./web-fonts');
+  const glyphs = Object.values(document.semantics.transcripts).flat().map(segment => segment.text).join('');
+  if (style?.font) for (let offset = 0; offset < glyphs.length; offset += 1000) await loadFont(style.font, glyphs.slice(offset, offset + 1000));
+  if (typeof globalThis.document !== 'undefined') await globalThis.document.fonts?.ready;
+  const clipFiles = new Map<string, File>();
+  const assetUrls = new Map<string, string>();
+  // Resolve every persisted locator at the host boundary; no blob URLs enter artifact identity.
+  // Cloud-only assets (e.g. brand logo / intro / outro) are read by key from the public media namespace.
+  for (const asset of Object.values(document.assets)) {
+    const { localSig, cloudKey, remoteUrl } = asset.locator;
+    const sig = localSig ?? (cloudKey ? `cloud:${cloudKey}` : undefined);
+    if (!sig) continue;
+    const file = await host.media({ sig, name: asset.label ?? sig, width: 0, height: 0, durationSec: media.durationSec, url: remoteUrl ?? (!localSig && cloudKey ? imageThumb(cloudKey, 'original') : undefined) });
+    const url = await host.url({ sig, name: file.name, width: 0, height: 0, durationSec: media.durationSec });
+    assetUrls.set(asset.id, url); clipFiles.set(url, file);
+  }
+  const { editorDocumentRenderPlan } = await import('@pireel/studio-engine/composition');
+  const { compositionRenderView } = await import('./composition-render-view');
+  const { supplementalVisualMedia } = await import('./visual-render-plan');
+  const resolveAssetUrl = (asset: { id: string }) => assetUrls.get(asset.id);
+  const renderPlan = editorDocumentRenderPlan(document, { resolveAssetUrl });
+  const renderComp = compositionRenderView(projectDocumentToComposition(document, { resolveAssetUrl }), renderPlan);
+  const sourceUrl = await host.url(media);
+  if (renderComp.video) renderComp.video.url = sourceUrl;
+  for (const shot of renderComp.shots ?? []) if (shot.src && !clipFiles.has(shot.src)) clipFiles.set(shot.src, await host.media(media));
+  const visualMediaClips = supplementalVisualMedia(renderPlan);
+  const audio = (renderComp.audioTracks ?? []).flatMap(clip => clipFiles.has(clip.src) ? [{ clip, file: clipFiles.get(clip.src)! }] : []);
+  const video = await (await import('./client-export')).clientExportVideo({ comp: renderComp, videoFile: await host.media(media), clipFiles, visualMediaClips, audio, render: settings as unknown as { res: number; fps: number; format: 'mp4' }, shouldCancel: () => host.hooks.signal.aborted, onProgress: (done, total) => { onProgress(done, total); host.hooks.progress(total ? done / total : 0); } });
+  return { video, durationSec: renderPlan.durationSec };
 }

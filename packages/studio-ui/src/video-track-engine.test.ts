@@ -4,6 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { previewAudioSource, VideoTrackEngine } from './video-track-engine';
 import { SourceFrameDecoder } from './video-frame-decoder';
 
+const cutoutFrame = vi.hoisted(() => vi.fn());
+vi.mock('./person-cutout-frame', () => ({ personCutoutFrame: cutoutFrame }));
+
 /** A decoder whose cursors answer any source time with a stage canvas tagged by that time. */
 function fakeDecoder(width = 1080, height = 1920) {
   const cursors: Array<{ reads: number[]; closed: boolean }> = [];
@@ -283,4 +286,36 @@ describe('VideoTrackEngine WebCodecs picture', () => {
     expect(cursors.some((cursor) => cursor.closed)).toBe(true);
     engine.dispose();
   });
+  it('passes alpha frames to the preview, discards late masks outside the clip, and stops retrying a failed model', async () => {
+    const { decoder } = fakeDecoder();
+    vi.spyOn(SourceFrameDecoder, 'open').mockResolvedValue(decoder);
+    const engine = new VideoTrackEngine();
+    engine.setTimelineDuration(10);
+    const pushed = vi.fn(); const failed = vi.fn();
+    engine.onLayerFrame = pushed; engine.onLayerError = failed;
+    engine.setSource('speaker', 'https://cdn.test/speaker.mp4', 'layer');
+    const layer = { id: 'a', elKey: 'a', key: 'speaker', srcStart: 2, srcEnd: 5, timelineStart: 2, timelineEnd: 5, personMatte: true };
+    engine.setLayers([layer]);
+    await vi.waitFor(() => expect(engine.sourceState('speaker').decoder).toBe('ready'));
+    const alpha = { close: vi.fn() };
+    cutoutFrame.mockReset().mockResolvedValueOnce(alpha);
+    engine.seek(2);
+    await vi.waitFor(() => expect(pushed).toHaveBeenCalledOnce());
+    expect(pushed.mock.calls[0][1]).toBe(alpha);
+    let finish!: (value: unknown) => void;
+    cutoutFrame.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    engine.seek(3);
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    engine.seek(6);
+    const late = { close: vi.fn() }; finish(late);
+    await vi.waitFor(() => expect(late.close).toHaveBeenCalledOnce());
+    expect(pushed).toHaveBeenCalledOnce();
+    cutoutFrame.mockRejectedValueOnce(new Error('model unavailable'));
+    engine.seek(4);
+    await vi.waitFor(() => expect(failed).toHaveBeenCalledOnce());
+    engine.seek(4.5);
+    expect(cutoutFrame).toHaveBeenCalledTimes(3);
+    engine.dispose();
+  });
+
 });

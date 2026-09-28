@@ -67,6 +67,7 @@ import { type MaskedAudioRange, maskedAudioAt } from '@pireel/studio-engine/word
 import { supplementalVisualAudioMixSegments } from './visual-render-plan';
 import {
   activeVisualMedia,
+  prepareVisualPersonMattes,
   disposeVisualImageBitmaps,
   drawSupplementalVisualMedia,
   loadExportVideoFile,
@@ -585,24 +586,27 @@ export async function captureCompositionFrame(opts: {
       const sample = await sampleAt(video.rig, video.srcT);
       if (sample) visualSamples.set(clipId, { sourceWidth: video.rig.sw, sourceHeight: video.rig.sh, sample });
     }
-    let htmlLayerIndex = 0;
-    for (const layer of visualLayers) {
-      if (layer.kind === 'media') {
-        drawSupplementalVisualMedia({
-          ctx,
-          visuals: layer.visuals,
-          timelineTime: t,
-          imageBitmaps: visualImages,
-          videoSamples: visualSamples,
-          targetWidth: W,
-          targetHeight: H,
-          scaleX: outW / W,
-          scaleY: outH / H,
-        });
-      } else {
-        ctx.drawImage(overlayImages[htmlLayerIndex++]!, 0, 0);
+    const releaseMattes = await prepareVisualPersonMattes(activeVisuals, visualSamples, t);
+    try {
+      let htmlLayerIndex = 0;
+      for (const layer of visualLayers) {
+        if (layer.kind === 'media') {
+          drawSupplementalVisualMedia({
+            ctx,
+            visuals: layer.visuals,
+            timelineTime: t,
+            imageBitmaps: visualImages,
+            videoSamples: visualSamples,
+            targetWidth: W,
+            targetHeight: H,
+            scaleX: outW / W,
+            scaleY: outH / H,
+          });
+        } else {
+          ctx.drawImage(overlayImages[htmlLayerIndex++]!, 0, 0);
+        }
       }
-    }
+    } finally { releaseMattes(); }
     let localSimilarityFingerprint: ReviewFrameFingerprint | undefined;
     if (opts.localSimilarityFingerprint) {
       try {
@@ -1052,27 +1056,30 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
         videoLayers.set(layer.clipId, layer);
       }
 
-      const d0 = performance.now();
-      paintExportFrameBase(ctx, outW, outH, bg, vidC);
-      let htmlLayerIndex = 0;
-      for (const layer of visualLayers) {
-        if (layer.kind === 'media') {
-          drawSupplementalVisualMedia({
-            ctx,
-            visuals: layer.visuals,
-            timelineTime: t,
-            imageBitmaps: visualImageBitmaps,
-            videoSamples: videoLayers,
-            targetWidth: W,
-            targetHeight: H,
-            scaleX: Sx,
-            scaleY: Sy,
-          });
-        } else {
-          ctx.drawImage(overlayImages[htmlLayerIndex++]!, 0, 0);
+      const releaseMattes = await prepareVisualPersonMattes(visualMediaClips, videoLayers, t);
+      try {
+        const d0 = performance.now();
+        paintExportFrameBase(ctx, outW, outH, bg, vidC);
+        let htmlLayerIndex = 0;
+        for (const layer of visualLayers) {
+          if (layer.kind === 'media') {
+            drawSupplementalVisualMedia({
+              ctx,
+              visuals: layer.visuals,
+              timelineTime: t,
+              imageBitmaps: visualImageBitmaps,
+              videoSamples: videoLayers,
+              targetWidth: W,
+              targetHeight: H,
+              scaleX: Sx,
+              scaleY: Sy,
+            });
+          } else {
+            ctx.drawImage(overlayImages[htmlLayerIndex++]!, 0, 0);
+          }
         }
-      }
-      tm.draw += performance.now() - d0;
+        tm.draw += performance.now() - d0;
+      } finally { releaseMattes(); }
       const e0 = performance.now();
       if (pendingAdd) await pendingAdd; // Previous frame's encode backpressure: only awaited here, so the next frame is already being prepared during encoding
       pendingAdd = videoSource.add(t, 1 / FPS);

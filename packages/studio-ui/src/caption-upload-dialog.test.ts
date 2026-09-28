@@ -28,7 +28,7 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
-async function render(scene: 'captions' | 'dubbing' = 'captions') { await act(async () => root.render(createElement(CaptionUploadDialog, { open: true, scene, locale: 'zh', onOpenChange: () => {}, onContinue: continued }))); }
+async function render(scene: 'captions' | 'dubbing' | 'pip' | 'sfx' | 'subtitle-removal' = 'captions') { await act(async () => root.render(createElement(CaptionUploadDialog, { open: true, scene, locale: 'zh', onOpenChange: () => {}, onContinue: continued }))); }
 async function upload() {
   const input = container.querySelector('input[type=file]')!;
   Object.defineProperty(input, 'files', { configurable: true, value: [new File(['video'], 'demo.mp4', { type: 'video/mp4' })] });
@@ -98,4 +98,30 @@ it('shows real upload percentages and keeps saving indeterminate until navigatio
   expect(container.querySelector('progress')?.hasAttribute('value')).toBe(false);
   await act(async () => finish());
   expect(continued).toHaveBeenCalledOnce();
+});
+
+it('creates an official picture-in-picture project with its own identity and a smart layout', async () => {
+  await render('pip'); await upload();
+  expect(mocks.save.mock.calls[0][0]).toMatchObject({ scene: 'pip', options: { broll: { assets: [], captions: true, pip: { template: 'smart' } } } });
+  expect(continued).toHaveBeenCalledOnce();
+});
+
+it('creates Auto SFX with medium AI density', async () => {
+  await render('sfx'); await upload();
+  expect(mocks.save.mock.calls[0][0]).toMatchObject({ scene: 'sfx', options: { sfx: { density: 'medium' } } });
+  expect(continued).toHaveBeenCalledOnce();
+});
+
+it('accepts silent video for subtitle removal without enabling caption generation', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ available: false })));
+  mocks.probe.mockResolvedValueOnce({ durationSec: 3, width: 1080, height: 1920, hasAudio: false });
+  await render('subtitle-removal'); await upload();
+  expect(mocks.save.mock.calls[0][0]).toMatchObject({ scene: 'subtitle-removal', options: { subtitleRemoval: { mode: 'auto' }, shortenPauses: false } });
+  expect(continued).toHaveBeenCalledOnce();
+});
+it('rejects over-4K removal inputs before backing up or creating a project', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ available: true })));
+  mocks.probe.mockResolvedValueOnce({ durationSec: 3, width: 7680, height: 4320, hasAudio: true });
+  await render('subtitle-removal'); await upload();
+  expect(container.textContent).toContain('最高 4K'); expect(mocks.save).not.toHaveBeenCalled(); expect(continued).not.toHaveBeenCalled();
 });

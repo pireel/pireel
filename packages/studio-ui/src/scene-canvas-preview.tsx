@@ -1,3 +1,5 @@
+import { audioClipGainAt, audioClipSrcTimeAt, audioClipDefaults } from '@pireel/studio-engine/audio-tracks';
+import { supplementalVisualLayers } from './visual-render-plan';
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { assembleHtml } from '@pireel/studio-engine/assemble';
 import { videoTrackShots, shotGain, type Composition } from '@pireel/studio-engine/composition';
@@ -17,6 +19,7 @@ interface Props {
   files: ReadonlyMap<string, File>;
   duration: number;
   volume: number;
+  sourceVolume?: number;
   onTime: (time: number) => void;
   onPlaying: (playing: boolean) => void;
 }
@@ -33,6 +36,7 @@ export const SceneCanvasPreview = forwardRef<SceneCanvasHandle, Props>(function 
   const time = useRef(0);
   const active = useRef(0);
   const priming = useRef<number | null>(null);
+  const [matteError, setMatteError] = useState('');
   const [visible, setVisible] = useState(0);
   const [width, setWidth] = useState(0);
   const [docs, setDocs] = useState<[string, string]>(['', '']);
@@ -101,6 +105,14 @@ export const SceneCanvasPreview = forwardRef<SceneCanvasHandle, Props>(function 
         }
       }
     };
+    eng.onLayerFrame = (layer, frame) => {
+      const index = priming.current ?? active.current;
+      const win = ready.current[index] && frames.current[index]?.contentWindow;
+      if (!win) { frame.close(); return; }
+      win.postMessage({ type: 'hf:layerFrame', id: layer.elKey, frame }, '*', [frame]);
+    };
+    eng.onLayerError = (_layer, error) => { pause(); setMatteError(error instanceof Error ? error.message : '人像抠图失败。'); };
+    eng.onLayerBlank = layer => post({ type: 'hf:layerClear', id: layer.elKey });
     eng.onBlank = value => post({ type: 'hf:clearFrame', t: value });
     const boot = (event: MessageEvent) => {
       if (event.data?.type !== 'pong' || event.data?.nonce !== 'boot') return;
@@ -109,11 +121,10 @@ export const SceneCanvasPreview = forwardRef<SceneCanvasHandle, Props>(function 
       const model = bindings.current[index];
       if (!model) return;
       const win = frames.current[index]!.contentWindow!;
-      // Like the workbench, clone local media into the opaque sandbox. Parent blob URLs cannot
-      // be fetched there. The existing clip-file protocol works for both video and image nodes.
+      // Images enter the opaque sandbox as Files; video layers use the resident parent decoder.
       for (const visual of model.visuals) {
         const file = model.files.get(visual.source);
-        if (file) win.postMessage({ type: 'hf:clipFile', id: `hf-visual-${visual.clipId}`, file }, '*');
+        if (file && visual.kind === 'image') win.postMessage({ type: 'hf:imageFile', sig: visual.clipId, file }, '*');
       }
       ready.current[index] = true;
       win.postMessage({ type: 'hf:seek', t: time.current }, '*');
@@ -144,18 +155,34 @@ export const SceneCanvasPreview = forwardRef<SceneCanvasHandle, Props>(function 
       const start = cursor;
       cursor += shot.srcEnd - shot.srcStart;
       return [{ key, elKey: `clip_${shot.id}`, srcStart: shot.srcStart, srcEnd: shot.srcEnd,
-        timelineStart: start, timelineEnd: cursor, gain: shotGain(shot) * props.volume,
+        timelineStart: start, timelineEnd: cursor, gain: shotGain(shot) * props.volume * (props.sourceVolume ?? 1),
         ...(shot.preciseFraming ? { framing: shot.preciseFraming } : {}) }];
     });
+    setMatteError('');
+    const layers = supplementalVisualLayers(props.visuals);
+    for (const layer of layers) {
+      keys.add(layer.key);
+      eng.setSource(layer.key, props.files.get(layer.key) ?? layer.key, 'layer');
+    }
+    eng.setLayers(layers);
     for (const key of sourceKeys.current) if (!keys.has(key)) eng.setSource(key, null);
     sourceKeys.current = keys;
     eng.setTimelineDuration(props.duration);
     if (eng.setSegments(segments)) eng.seek(time.current);
-  }, [props.composition, props.files, props.duration, props.volume]);
+  }, [props.composition, props.visuals, props.files, props.duration, props.volume, props.sourceVolume]);
+
+  useEffect(() => {
+    engine.current?.setAudioClips((props.composition.audioTracks ?? []).map(clip => ({
+      id: clip.id, url: clip.src, speed: audioClipDefaults(clip).speed,
+      gainAt: (value: number) => audioClipGainAt(clip, value, props.duration) * props.volume,
+      srcTimeAt: (value: number) => audioClipSrcTimeAt(clip, value),
+    })));
+  }, [props.composition.audioTracks, props.duration, props.volume]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      const html = injectPreviewRuntime(assembleHtml(props.composition, undefined, undefined, props.visuals));
+      const visuals = props.visuals.map(visual => visual.kind === 'image' && props.files.has(visual.source) ? { ...visual, source: 'pireel-local-image:' + encodeURIComponent(visual.clipId).replace(/[!'()*]/g, char => '%' + char.charCodeAt(0).toString(16).toUpperCase()) } : visual);
+      const html = injectPreviewRuntime(assembleHtml(props.composition, undefined, undefined, visuals));
       if (html === documents.current[active.current]) return;
       const index = documents.current[active.current] ? 1 - active.current : active.current;
       ready.current[index] = false;
@@ -174,6 +201,7 @@ export const SceneCanvasPreview = forwardRef<SceneCanvasHandle, Props>(function 
   }, []);
 
   return <div ref={host} data-scene-canvas className="absolute inset-0 overflow-hidden">
+    {matteError && <p role="alert" className="absolute inset-x-3 bottom-3 z-10 rounded bg-black/80 p-3 text-xs text-white">{matteError}</p>}
     {docs.map((doc, index) => doc && <iframe key={index} ref={element => { frames.current[index] = element; }}
       title="Canvas preview" sandbox="allow-scripts" allow="autoplay" srcDoc={doc}
       aria-hidden={index !== visible} tabIndex={-1}

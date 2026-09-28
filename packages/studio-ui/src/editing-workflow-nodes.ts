@@ -1,3 +1,4 @@
+import { editingFlowNodes } from './editing-flow-nodes';
 import { applyEditorialFraming } from '@pireel/studio-engine/editing-framing';
 import { editingPlanNodes } from './editing-plan-nodes';
 import { visualBeats, type FramingPlan } from '@pireel/studio-engine/editing-plan';
@@ -21,13 +22,13 @@ const commit = (document: EditorDocumentV2, ops: DocumentOp[]): EditorDocumentV2
   const result = applyDocumentTransaction(document, { ops }, { projectId: 'editing-workflow' });
   if (!result.ok) throw new Error(result.error.message); return result.document;
 };
-async function cacheAudio(host: SceneWorkflowHost, pcm: Float32Array, rate: number, identity: unknown, name: string): Promise<SceneMedia> {
+export async function cacheAudio(host: SceneWorkflowHost, pcm: Float32Array, rate: number, identity: unknown, name: string): Promise<SceneMedia> {
   const { encodeWavMono } = await import('./denoise');
   const sig = 'edit-audio-' + await artifactVersion(identity); const file = new File([encodeWavMono(pcm, rate)], name, { type: 'audio/wav' });
   if (!await saveLocalVideo(file, sig)) throw new Error('派生音轨未保存到本机，请检查可用空间。');
   host.files.set(sig, file); return { sig, name, kind: 'audio', width: 0, height: 0, durationSec: pcm.length / rate };
 }
-async function addAudio(host: SceneWorkflowHost, document: EditorDocumentV2, media: SceneMedia, role: 'sfx' | 'music', id: string, start: number, volumeDb: number) {
+export async function addAudio(host: SceneWorkflowHost, document: EditorDocumentV2, media: SceneMedia, role: 'sfx' | 'music', id: string, start: number, volumeDb: number) {
   const trackId = 'editing-' + role;
   const ops: DocumentOp[] = [];
   if (!document.timeline.tracks.some(track => track.id === trackId)) ops.push({ op: 'command', input: { command: { type: 'track.insert', track: { id: trackId, type: 'audio', role, name: role === 'music' ? '背景音乐' : '音效', syncLocked: true } } } });
@@ -45,7 +46,7 @@ export function editingWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
   const node = (id: string, body: Omit<SceneNode, 'capability'>): SceneNode => ({ async cacheValid(outputs) { if (!outputs.document) return true; const doc = store.read<EditorDocumentV2>(outputs.document, 'document'); return (await Promise.all(Object.values(doc.assets).filter(asset => asset.locator.localSig?.startsWith('edit-audio-')).map(asset => loadLocalVideo(asset.locator.localSig!)))).every(Boolean); }, capability: EDITING_WORKFLOW_CAPABILITIES.find(cap => cap.id === id)!, ...body });
   const output = async (id: string, document: EditorDocumentV2, report: unknown) => ({ document: workflowJson(await store.put('document', id, document)), report: workflowJson(report) });
   return [
-    ...editingPlanNodes(host),
+    ...editingPlanNodes(host), ...editingFlowNodes(host),
     node('speech.voice-check', { async execute(args) { const transcript = store.read<AsrSegment[]>(args.transcript, 'transcript'); if (!dubbingVoicesReady(transcript, args.config as unknown as DubbingOptions)) throw new Error('请先为每位说话人选择音色，再继续生成配音。'); return { transcript: args.transcript }; } }),
     node('speech.empty', { async execute(args) { const media = store.read<SceneMedia>(args.media, 'media'); return { transcript: workflowJson(await store.put('transcript', media.sig, [])) }; } }),
     node('speech.project', { async execute(args) { const document = store.read<EditorDocumentV2>(args.document, 'document'); const transcript = editingSpeechCues(document, store.read(args.transcript, 'transcript')); return { transcript: workflowJson(await store.put('transcript', 'edited-speech', transcript)), durationSec: editingDuration(document) }; } }),
@@ -133,11 +134,11 @@ export function editingWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
         const [match] = await libraryMatches(options.query || moment.text, 'image', catalog, host.hooks.signal); host.check(); if (!match?.locator?.url) continue;
         const { materializeRemoteMedia } = await import('./remote-media'); const material = await materializeRemoteMedia(match.locator.url, { name: match.label + '.png', signal: host.hooks.signal });
         if (!await saveLocalVideo(material.file, material.sig)) throw new Error('贴纸未保存，请重试。'); host.files.set(material.sig, material.file);
-        const id = 'float-asset-' + index; next.assets[id] = { id, kind: 'image', label: match.label, locator: { localSig: material.sig, remoteUrl: match.locator.url }, metadata: { width: match.dimensions?.w, height: match.dimensions?.h } };
+        const id = String(args.instanceId ?? 'float') + '-asset-' + index; next.assets[id] = { id, kind: 'image', label: match.label, locator: { localSig: material.sig, remoteUrl: match.locator.url }, metadata: { width: match.dimensions?.w, height: match.dimensions?.h } };
         const frames = Math.max(1, Math.round((moment.end - moment.start) * document.canvas.fps)); const box = { x: .72, y: .16, w: .22, h: .25 };
-        clips.push({ id: 'float-' + index, kind: 'media' as const, assetId: id, startFrame: Math.round(moment.start * document.canvas.fps), durationFrames: frames, enabled: true, sourceInSec: 0, sourceOutSec: frames / document.canvas.fps, fit: 'contain' as const, box, keyframes: { opacity: [{ frame: 0, value: 0 }, { frame: Math.min(6, frames - 1), value: 1 }, { frame: Math.max(0, frames - 6), value: 1 }, { frame: frames, value: 0 }], box: [{ frame: 0, ...box, y: box.y + .04 }, { frame: Math.min(10, frames), ...box }] } });
+        clips.push({ id: String(args.instanceId ?? 'float') + '-' + index, kind: 'media' as const, assetId: id, startFrame: Math.round(moment.start * document.canvas.fps), durationFrames: frames, enabled: true, sourceInSec: 0, sourceOutSec: frames / document.canvas.fps, fit: 'contain' as const, box, keyframes: { opacity: [{ frame: 0, value: 0 }, { frame: Math.min(6, frames - 1), value: 1 }, { frame: Math.max(0, frames - 6), value: 1 }, { frame: frames, value: 0 }], box: [{ frame: 0, ...box, y: box.y + .04 }, { frame: Math.min(10, frames), ...box }] } });
       }
-      if (clips.length) next.timeline.tracks.push({ id: 'floating-overlays', type: 'visual', name: '悬浮叠加', hidden: false, muted: true, locked: false, syncLocked: true, stackOrder: 4, clips });
+      if (clips.length) next.timeline.tracks.push({ id: String(args.instanceId ?? 'floating-overlays'), type: 'visual', name: '悬浮叠加', hidden: false, muted: true, locked: false, syncLocked: true, stackOrder: 4, clips });
       return output('floating-overlay', commit(document, [{ op: 'document.replace', input: { document: next } }]), { placed: clips.length, unmatched: moments.length - clips.length });
     } }),
     node('layout.auto', { async execute(args) {
@@ -170,7 +171,7 @@ export function editingWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
       const plan = args.plan ? store.read<FramingPlan>(args.plan, 'edit-plan') : null;
       const moments = editingMoments(plan ? plan.beats.filter(beat => beat.purpose === 'emphasis' || beat.purpose === 'transition').map(({ start, end, text }) => ({ start, end, text })) : preferred.length ? preferred : cues, options.maxCount, 5);
       const media = await cacheAudio(host, soundEffectPcm(options.style), 48000, ['sfx-v1', options.style], options.style + '.wav');
-      for (const [index, cue] of moments.entries()) if (editingDuration(document) - cue.start >= .2) document = await addAudio(host, document, media, 'sfx', 'editing-sfx-' + index, cue.start, options.volumeDb);
+      for (const [index, cue] of moments.entries()) if (editingDuration(document) - cue.start >= .2) document = await addAudio(host, document, media, 'sfx', String(args.instanceId ?? 'editing-sfx') + '-' + index, cue.start, options.volumeDb);
       return output('sound-effects', document, { placed: moments.length, style: options.style });
     } }),
     node('audio.music', { async execute(args) {
@@ -187,7 +188,7 @@ export function editingWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
       const { decodeAudioFile, toMono } = await import('./audio-decode'); const pcm = await toMono(await decodeAudioFile(file), 48000); host.check();
       const cues = editingSpeechCues(document, store.read(args.transcript, 'transcript'));
       const media = await cacheAudio(host, musicBedPcm(pcm, 48000, editingDuration(document), cues, options.volumeDb, options.duckDb), 48000, ['music-v1', sig, options.volumeDb, options.duckDb, cues.map(cue => [cue.start, cue.end]), editingDuration(document)], label + '-ducked.wav');
-      const next = await addAudio(host, document, media, 'music', 'editing-music', 0, 0);
+      const next = await addAudio(host, document, media, 'music', String(args.instanceId ?? 'editing-music'), 0, 0);
       return output('background-music', next, { source: label, originalSig: sig, volumeDb: options.volumeDb, duckDb: options.duckDb, durationSec: media.durationSec });
     } }),
   ];

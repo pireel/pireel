@@ -5,10 +5,14 @@ import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CaptionTaskRecord } from './caption-task-store';
 import type { runCaptionTask } from './caption-task-runner';
-const mocks = vi.hoisted(() => ({ run: vi.fn(), remix: vi.fn(), source: vi.fn(), cache: vi.fn(), exportEdit: vi.fn() }));
+const mocks = vi.hoisted(() => ({ run: vi.fn(), remix: vi.fn(), source: vi.fn(), cache: vi.fn(), exportEdit: vi.fn(), sfxPreview: vi.fn() }));
 vi.mock('./dubbing-task-runner', () => ({ runDubbingTask: mocks.run }));
 vi.mock('./broll-export', () => ({ exportBrollEdit: mocks.exportEdit }));
+vi.mock('./subtitle-removal-runner', () => ({ runSubtitleRemovalTask: mocks.run }));
+vi.mock('./sfx-task-runner', () => ({ runSfxTask: mocks.run, exportSfxEdit: mocks.exportEdit }));
+vi.mock('./sfx-timeline', () => ({ SfxTimeline: (props: any) => { mocks.sfxPreview(props); return createElement('div', { 'data-sfx-native-preview': true }, props.actions); } }));
 vi.mock('./broll-task-runner', () => ({ runBrollTask: mocks.run }));
+vi.mock('./ugc-ad-task-runner', () => ({ runUgcAdTask: mocks.run, exportUgcAdEdit: mocks.exportEdit }));
 vi.mock('./caption-task-runner', () => ({ runCaptionTask: mocks.run }));
 vi.mock('./caption-agent-remix', () => ({ createCaptionAgentRemix: mocks.remix }));
 vi.mock('./current-user', () => ({ loadCurrentUser: async () => ({ user_id: 'owner', auth_method: 'session' }) }));
@@ -37,6 +41,7 @@ beforeEach(async () => {
   vi.clearAllMocks(); runs = [];
   Element.prototype.scrollIntoView = vi.fn();
   Element.prototype.hasPointerCapture = vi.fn(() => false);
+  vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ measureText: (text: string) => ({ width: text.length * 24 }) } as never);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.stubGlobal('indexedDB', new IDBFactory()); vi.stubGlobal('IDBKeyRange', IDBKeyRange);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
@@ -52,7 +57,7 @@ beforeEach(async () => {
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 async function complete(index: number) {
   await act(async () => runs[index]!.resolve({ task: { ...runs[index]!.task, stage: 'completed', updatedAt: 10 + index }, video: new Blob([`video-${index}`], { type: 'video/mp4' }) }));
-  await settled(() => expect(container.querySelector('video[controls]')).not.toBeNull());
+  await settled(() => { expect(button('生成新版本')).toBeTruthy(); expect(container.querySelector(runs[index]!.task.scene === 'sfx' ? '[data-sfx-native-preview]' : 'video[data-scene-video]')).not.toBeNull(); });
 }
 describe('caption versions and preview UI', () => {
   it('opens the own-footage scene, requires assets and dispatches its runner with captions', async () => {
@@ -118,7 +123,7 @@ describe('caption versions and preview UI', () => {
     expect(runs[0]!.task.scene).toBe('dubbing'); expect(runs[0]!.task.options.dubbing?.voiceId).toBe('en-voice');
     expect(container.querySelector('[aria-label="译制生成进度"]')).not.toBeNull();
     await complete(0);
-    expect(container.querySelector('video[controls]')).not.toBeNull();
+    expect(container.querySelector('video[data-scene-video]')).not.toBeNull();
   });
   it('returns to speaker configuration without a failed version and saves per-speaker voices', async () => {
     await act(async () => root.render(null));
@@ -169,26 +174,28 @@ describe('caption versions and preview UI', () => {
     await act(async () => root.render(null));
     await saveCaptionTask({ ...fixture(), generationId: 'old-version', stage: 'completed' }, new Blob(['old video']));
     await act(async () => root.render(createElement(CaptionTaskPage, { taskId: 'task', locale: 'zh', onBack: vi.fn(), onOpenEditor: vi.fn() })));
-    await settled(() => expect(container.querySelector('video[controls]')).not.toBeNull());
+    await settled(() => expect(container.querySelector('video[data-scene-video]')).not.toBeNull());
     expect(container.querySelector<HTMLInputElement>('[aria-label="字号"]')?.value).toBe('114');
     expect(container.querySelector('[aria-label="上下位置"]')).toBeNull();
     await click(button('荧光绿'));
     expect(container.querySelector<HTMLInputElement>('[aria-label="字号"]')?.value).toBe('64');
     expect((await loadCaptionVersion('owner', 'task', 'old-version'))!.version.task.options.layoutVersion).toBeUndefined();
   });
-  it('only enables playback after generation, shows real stage progress, and preserves selectable versions', async () => {
-    expect(container.querySelector('video')).toBeNull();
-    expect(container.querySelector('img[alt="视频首帧"]')?.getAttribute('src')).toBe('data:image/jpeg;base64,first-frame');
+  it('previews the source before generation, pauses during processing, and preserves selectable versions', async () => {
+    const sourceUrl = container.querySelector('video[data-scene-video]')!.getAttribute('src');
+    expect(container.querySelector('[data-scene-playback]')).not.toBeNull();
+    expect(container.querySelector('video[data-scene-video]')?.getAttribute('poster')).toBe('data:image/jpeg;base64,first-frame');
     await click(button('生成字幕视频'));
     await settled(() => expect(runs).toHaveLength(1));
     await act(async () => runs[0]!.hooks.stageProgress?.({ transcribing: { status: 'completed', fraction: 1 }, styling: { status: 'completed', fraction: 1 }, rendering: { status: 'running', fraction: .42 } }));
     expect(container.querySelector('[aria-label="字幕生成进度"]')).not.toBeNull();
     expect(container.querySelector('progress[aria-label="生成视频"]')?.getAttribute('value')).toBe('0.42');
-    expect(container.querySelector('video')).toBeNull();
+    expect((container.querySelector('[data-scene-player-actions] button[aria-label="播放"]') as HTMLButtonElement).disabled).toBe(true);
     await complete(0);
+    expect(container.querySelector('video[data-scene-video]')!.getAttribute('src')).not.toBe(sourceUrl);
     expect(container.querySelector('[aria-label="字幕生成进度"]')).toBeNull();
     await click(button('荧光绿'));
-    expect(container.querySelector('video')).toBeNull();
+    expect(container.querySelector('video[data-scene-video]')!.getAttribute('src')).toBe(sourceUrl);
     await click(button('生成新版本'));
     expect(runs).toHaveLength(1);
     await click([...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((button) => button.textContent === '确认生成')!);
@@ -206,7 +213,7 @@ describe('caption versions and preview UI', () => {
     await act(async () => root.render(null));
     await act(async () => root.render(createElement(CaptionTaskPage, { taskId: 'task', locale: 'zh', onBack: vi.fn(), onOpenEditor: vi.fn() })));
     await settled(() => expect(container.querySelector('[role="combobox"][aria-label="视频版本"]')?.textContent).toContain('版本 2'));
-    expect(container.querySelector('video[controls]')).not.toBeNull();
+    expect(container.querySelector('video[data-scene-video]')).not.toBeNull();
   });
   it('keeps completed versions available when regeneration fails', async () => {
     await click(button('生成字幕视频')); await settled(() => expect(runs).toHaveLength(1)); await complete(0);
@@ -217,6 +224,116 @@ describe('caption versions and preview UI', () => {
     await settled(() => expect(button('继续上次处理')).toBeTruthy());
     expect(await listCaptionVersions('owner', 'task')).toHaveLength(1);
     await choose('视频版本', '版本 1');
-    await settled(() => expect(container.querySelector('video[controls]')).not.toBeNull());
+    await settled(() => expect(container.querySelector('video[data-scene-video]')).not.toBeNull());
   });
+});
+
+it('offers a fresh SFX attempt instead of resuming an unresolved paid receipt, retaining cached work', async () => {
+  await act(async () => root.render(null));
+  const task: CaptionTaskRecord = { ...fixture(), scene: 'sfx', stage: 'failed', generationId: 'failed-run', options: { ...fixture().options, sfx: { density: 'medium' } }, transcript: [{ start: 1, end: 3, text: 'Example' }], error: '上次操作结果尚未确认，已停止自动重试以避免重复计费。',
+    workflow: { steps: [{ id: 'sfx-plan', status: 'failed', inputKey: 'plan-key' }] } as CaptionTaskRecord['workflow'],
+    workflowData: { artifacts: {}, partials: {}, receipts: {
+      'transcript-key': { status: 'completed', runId: 'failed-run', idempotencyKey: 'asr', outputs: {} },
+      'plan-key': { status: 'running', runId: 'failed-run', idempotencyKey: 'sfx', usage: [{ source: 'server', reference: 'charged-request', credits: 1 }] },
+    } },
+  };
+  await saveCaptionTask(task);
+  await act(async () => root.render(createElement(CaptionTaskPage, { taskId: task.id, scene: 'sfx', locale: 'zh', onBack: vi.fn(), onOpenEditor: vi.fn() })));
+  await settled(() => expect(button('重新匹配音效')).toBeTruthy());
+  expect(button('继续上次处理')).toBeUndefined(); expect(container.textContent).toContain('可能产生匹配费用');
+  expect(mocks.run).not.toHaveBeenCalled();
+  await click(button('重新匹配音效')); await settled(() => expect(runs).toHaveLength(1));
+  expect(runs[0].task.generationId).not.toBe(task.generationId);
+  expect(runs[0].task.transcript).toEqual(task.transcript);
+  expect(runs[0].task.workflowData).toEqual(task.workflowData);
+  await complete(0);
+});
+
+it('keeps native SFX edits in a persisted draft and exports that draft without modifying the saved version', async () => {
+  await act(async () => root.render(null));
+  const { buildCaptionBaseDocument } = await import('@pireel/studio-engine/caption-task');
+  const task: CaptionTaskRecord = { ...fixture(), scene: 'sfx', stage: 'completed', generationId: 'sfx-version', options: { ...fixture().options, sfx: { density: 'high' } } };
+  task.document = buildCaptionBaseDocument({ projectId: task.id, sourceUrl: 'blob:source', sourceSig: task.sourceSig, width: task.width, height: task.height, durationSec: task.durationSec, transcript: [], options: task.options });
+  await saveCaptionTask(task, new Blob(['version']));
+  await act(async () => root.render(createElement(CaptionTaskPage, { taskId: task.id, scene: 'sfx', locale: 'zh', onBack: vi.fn(), onOpenEditor: vi.fn() })));
+  await settled(() => expect(mocks.sfxPreview).toHaveBeenCalled());
+  expect(container.querySelector('video[data-scene-video]')).toBeNull();
+  const edited = structuredClone(task.document); edited.appearance.captionStyle = { on: false, scale: 1.1 };
+  await act(async () => mocks.sfxPreview.mock.calls.at(-1)![0].onChange(edited));
+  await vi.waitFor(async () => expect((await loadCaptionTask('owner', task.id))?.draftDocument).toEqual(edited));
+  expect((await loadCaptionVersion('owner', task.id, 'sfx-version'))!.version.task.document).toEqual(task.document);
+  mocks.exportEdit.mockResolvedValue(new Blob(['edited-export'])); vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  await click(button('导出')); await settled(() => expect(mocks.exportEdit).toHaveBeenCalled());
+  expect(mocks.exportEdit.mock.calls[0][0].document).toEqual(edited); expect(mocks.run).not.toHaveBeenCalled();
+  expect(await listCaptionVersions('owner', task.id)).toHaveLength(1);
+});
+
+it('keeps Continue for generated SFX because the server can reconcile its request', async () => {
+  await act(async () => root.render(null));
+  const task: CaptionTaskRecord = { ...fixture(), scene: 'sfx', stage: 'failed', generationId: 'failed-run', options: { ...fixture().options, sfx: { density: 'medium' } }, transcript: [{ start: 1, end: 3, text: 'Example' }],
+    workflow: { definition: { steps: [{ id: 'sfx-generate', capability: 'sfx.generate' }] }, steps: [{ id: 'sfx-generate', status: 'failed', inputKey: 'generate-key' }] } as CaptionTaskRecord['workflow'],
+    workflowData: { artifacts: {}, partials: {}, receipts: { 'generate-key': { status: 'running', runId: 'failed-run', idempotencyKey: 'sfx-generate' } } },
+  };
+  await saveCaptionTask(task);
+  await act(async () => root.render(createElement(CaptionTaskPage, { taskId: task.id, scene: 'sfx', locale: 'zh', onBack: vi.fn(), onOpenEditor: vi.fn() })));
+  await settled(() => expect(button('继续上次处理')).toBeTruthy());
+  expect(button('重新匹配音效')).toBeUndefined(); expect(mocks.run).not.toHaveBeenCalled();
+});
+
+it('exposes removal settings without caption styling and disables generation until the service is configured', async () => {
+  await act(async () => root.render(null));
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ available: false })));
+  await saveCaptionTask({ ...fixture(), scene: 'subtitle-removal', options: { ...fixture().options, subtitleRemoval: { mode: 'auto' } } });
+  await act(async () => root.render(createElement(CaptionTaskPage, { taskId: 'task', scene: 'subtitle-removal', locale: 'zh', onBack: vi.fn(), onOpenEditor: vi.fn() })));
+  await settled(() => expect(container.textContent).toContain('擦除模式暂未开通'));
+  expect(button('开始擦除').disabled).toBe(true);
+  expect(container.querySelector('[aria-label="擦除范围"]')).not.toBeNull();
+  expect(container.textContent).not.toContain('AI 去停顿'); expect(container.querySelector('[aria-label="翻译语言"]')).toBeNull();
+});
+
+it('preserves the combined targets when selecting and moving a fixed removal region', async () => {
+  await act(async () => root.render(null));
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ available: true, modes: { subtitles: true, watermark: true, all: true, people: false } })));
+  await saveCaptionTask({ ...fixture(), scene: 'subtitle-removal', options: { ...fixture().options, subtitleRemoval: { mode: 'auto' } } });
+  await act(async () => root.render(createElement(CaptionTaskPage, { taskId: 'task', scene: 'subtitle-removal', locale: 'zh', onBack: vi.fn(), onOpenEditor: vi.fn() })));
+  await settled(() => expect(button('开始擦除').disabled).toBe(false));
+  await choose('擦除内容', '字幕与水印'); await choose('擦除范围', '限定区域');
+  const overlay = container.querySelector<HTMLElement>('[aria-label="擦除区域"]')!;
+  await act(async () => overlay.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true })));
+  await click(button('开始擦除')); await settled(() => expect(runs).toHaveLength(1));
+  expect(runs[0].task.options.subtitleRemoval).toMatchObject({ kind: 'all', mode: 'region', targets: ['subtitle', 'watermark'] });
+  expect(runs[0].task.options.subtitleRemoval!.region!.y).toBeCloseTo(.71);
+  await complete(0);
+});
+
+it('opens UGC ad settings and sends the verified brief to its own runner', async () => {
+  await act(async () => root.render(null));
+  const task: CaptionTaskRecord = { ...fixture(), scene: 'ugc-ad', options: { ...fixture().options, ugcAd: { productName: '', claim: '', callToAction: '', hook: '', angle: 'demo' }, broll: { assets: [], captions: true } } };
+  await saveCaptionTask(task);
+  await act(async () => root.render(createElement(CaptionTaskPage, { taskId: 'task', scene: 'ugc-ad', locale: 'zh', onBack: vi.fn(), onOpenEditor: vi.fn() })));
+  await settled(() => expect(button('生成广告')).toBeTruthy());
+  expect(button('生成广告').disabled).toBe(true);
+  expect(container.querySelector('[aria-label="UGC 广告设置"]')).not.toBeNull();
+  expect(container.textContent).toContain('商品画面（可选）');
+  await act(async () => root.render(null));
+  const ready = { ...task, options: { ...task.options, ugcAd: { ...task.options.ugcAd!, productName: '晨光杯', callToAction: '查看详情' } } };
+  await saveCaptionTask(ready);
+  await act(async () => root.render(createElement(CaptionTaskPage, { taskId: 'task', scene: 'ugc-ad', locale: 'zh', onBack: vi.fn(), onOpenEditor: vi.fn() })));
+  await settled(() => expect(button('生成广告').disabled).toBe(false));
+  await click(button('生成广告')); await settled(() => expect(runs).toHaveLength(1));
+  expect(runs[0].task.scene).toBe('ugc-ad');
+  expect(runs[0].task.options.ugcAd).toMatchObject({ productName: '晨光杯', callToAction: '查看详情' });
+  expect(runs[0].task.options.broll?.assets).toEqual([]);
+  await complete(0);
+});
+
+it('passes PiP position, size and framing choices into the official runner', async () => {
+  await act(async () => root.render(null));
+  await saveCaptionTask({ ...fixture(), scene: 'pip', options: { ...fixture().options, broll: { captions: false, pip: { template: 'presenter' }, assets: [{ id: 'asset', sig: 'footage', name: 'product.mp4', kind: 'video', durationSec: 5, width: 1920, height: 1080 }] } } });
+  await act(async () => root.render(createElement(CaptionTaskPage, { taskId: 'task', scene: 'pip', locale: 'zh', onBack: vi.fn(), onOpenEditor: vi.fn() })));
+  await settled(() => expect(button('生成视频')).toBeTruthy());
+  await choose('小窗位置', '左下'); await choose('小窗大小', '大'); await choose('素材画面', '完整显示');
+  await click(button('生成视频')); await settled(() => expect(runs).toHaveLength(1));
+  expect(runs[0].task.options.broll?.pip).toEqual({ template: 'presenter', position: 'bottom-left', size: 'large', mediaFit: 'contain' });
+  await complete(0);
 });

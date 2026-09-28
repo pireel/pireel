@@ -7,7 +7,7 @@ export const BROLL_WORKFLOW_CAPABILITIES = [
 ];
 export function brollWorkflowDefinition(options: CaptionTaskOptions, media: unknown, transcript: unknown, projectId: string, durationSec: number, cached: unknown) {
   const definition = captionWorkflowDefinition({ ...options, shortenPauses: false }, media, transcript, null, projectId);
-  definition.id = 'official-broll'; definition.title = 'B-roll'; definition.templateId = 'broll';
+  definition.id = options.broll?.pip ? 'official-pip' : 'official-broll'; definition.title = options.broll?.pip ? 'Picture in picture' : 'B-roll'; definition.templateId = options.broll?.pip ? 'pip' : 'broll';
   const compose = definition.steps.findIndex(step => step.id === 'compose');
   definition.steps.splice(compose, 0,
     sceneStep('analysis', 'media.analyze', { assets: sceneLiteral(options.broll!.assets), cached: sceneLiteral(cached) }),

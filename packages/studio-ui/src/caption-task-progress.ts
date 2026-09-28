@@ -2,6 +2,8 @@ import type { CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
 import type { CaptionProcessingStage } from './caption-task-store';
 
 export function captionProcessingStages(options: CaptionTaskOptions): CaptionProcessingStage[] {
+  if (options.subtitleRemoval) return ['preparing', 'rendering'];
+  if (options.sfx) return ['preparing', 'transcribing', ...('density' in options.sfx ? ['matching' as const] : []), 'styling', ...(('captions' in options.sfx && options.sfx.captions) && options.presetId === 'keywords' ? ['emphasizing' as const] : []), 'rendering'];
   if (options.broll) return ['preparing', 'transcribing', 'analyzing', 'matching', 'styling', ...(options.broll.captions && options.presetId === 'keywords' ? ['emphasizing' as const] : []), 'rendering'];
   if (options.dubbing) return ['preparing', 'transcribing', 'translating', 'voicing', 'aligning', ...(options.dubbing.lipSync ? ['lipsync' as const] : []), ...(options.dubbing.captions ? ['styling' as const, ...(options.presetId === 'keywords' ? ['emphasizing' as const] : [])] : []), 'rendering'];
   return ['preparing', 'transcribing', ...(options.shortenPauses ? ['cleaning' as const] : []), ...(options.translationLanguage ? ['translating' as const] : []), 'styling', ...(options.presetId === 'keywords' ? ['emphasizing' as const] : []), 'rendering'];
@@ -13,6 +15,7 @@ export const CAPTION_STAGE_NAMES: Record<CaptionProcessingStage, [string, string
   styling: ['配置字幕', 'Style captions'], emphasizing: ['选择重点词', 'Select key phrases'], rendering: ['生成视频', 'Render video'],
 };
 export const CAPTION_PROGRESS_DETAILS: Record<string, [string, string]> = {
+  'subtitle-erasing': ['修复擦除区域', 'Repairing selected areas'], 'saving-video': ['保存处理结果', 'Saving clean video'],
   checking: ['读取音轨', 'Reading audio'], extracting: ['提取音频', 'Extracting audio'], uploading: ['上传音频', 'Uploading audio'], recognizing: ['识别中', 'Recognizing speech'], aligning: ['对齐时间', 'Aligning timestamps'],
   fonts: ['加载字体', 'Loading fonts'], finishing: ['封装视频', 'Finishing video'],
 };

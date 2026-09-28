@@ -1,10 +1,10 @@
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@pireel/ui/select';
+import { SceneSelect } from './scene-form-controls';
 import { useEffect, useMemo, useState } from 'react';
 import { DUBBING_LANGUAGES, dubbingSpeakers, dubbingVoiceFor, type DubbingOptions } from '@pireel/studio-engine/dubbing-task';
 import { DubbingVoicePicker } from './dubbing-voice-picker';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import type { VoiceAsset } from './voice-card';
-export function DubbingSettings({ value, transcript = [], disabled, locale, onChange }: { value: DubbingOptions; transcript?: AsrSegment[]; disabled: boolean; locale: 'zh' | 'en'; onChange: (value: DubbingOptions) => void }) {
+export function DubbingSettings({ value, transcript = [], disabled, locale, onChange, showLanguage = true, autoSelectVoice = true }: { showLanguage?: boolean; autoSelectVoice?: boolean; value: DubbingOptions; transcript?: AsrSegment[]; disabled: boolean; locale: 'zh' | 'en'; onChange: (value: DubbingOptions) => void }) {
   const zh = locale === 'zh';
   const [speakerId, setSpeakerId] = useState('');
   const speakers = dubbingSpeakers(transcript); const multiple = speakers.length > 1;
@@ -29,18 +29,12 @@ export function DubbingSettings({ value, transcript = [], disabled, locale, onCh
   const native = useMemo(() => allVoices.filter((voice) => voice.source === 'system' && (voice.languages?.length ? voice.languages : [voice.language]).includes(language)), [allVoices, language]);
   const voices = useMemo(() => allVoices.filter((voice) => voice.source !== 'system' || voice.id === selectedVoice || !native.length || native.includes(voice)), [allVoices, native, selectedVoice]);
   useEffect(() => {
-    if (disabled || loading || selectedVoice || !voices.length) return;
+    if (!autoSelectVoice || disabled || loading || selectedVoice || !voices.length) return;
     const first = voices.find((voice) => voice.source !== 'system') ?? voices[0];
     chooseVoice(first.id);
-  }, [disabled, loading, selectedVoice, voices, chooseVoice]);
-  const selectClass = 'text-ink h-8 w-48 max-w-[70%] border-0 bg-transparent shadow-none hover:bg-panel-2';
-  return <fieldset disabled={disabled} className="space-y-5 disabled:opacity-50">
-    <div className="text-ink flex items-center justify-between gap-4 text-sm"><span>{zh ? '目标语言' : 'Target language'}</span>
-      <Select disabled={disabled} value={value.language} onValueChange={(language) => onChange({ ...value, language, script: undefined, turnScripts: undefined })}>
-        <SelectTrigger aria-label={zh ? '目标语言' : 'Target language'} className={selectClass}><SelectValue /></SelectTrigger>
-        <SelectContent className="max-h-72">{DUBBING_LANGUAGES.map((language) => <SelectItem key={language.id} value={language.id}>{language[locale]}</SelectItem>)}</SelectContent>
-      </Select>
-    </div>
+  }, [autoSelectVoice, disabled, loading, selectedVoice, voices, chooseVoice]);
+  return <fieldset disabled={disabled} className="min-w-0 space-y-5 disabled:opacity-50">
+    {showLanguage && <SceneSelect label={zh ? '目标语言' : 'Target language'} value={value.language} disabled={disabled} onChange={language => onChange({ ...value, language, script: undefined, turnScripts: undefined })} options={DUBBING_LANGUAGES.map(language => ({ value: language.id, label: language[locale] }))} />}
     {multiple && <div className="space-y-2">
       <div aria-label={zh ? '说话人' : 'Speakers'} className="flex gap-1 overflow-x-auto">
         {speakers.map((speaker, index) => <button key={speaker.id} type="button" disabled={disabled} aria-pressed={activeSpeaker?.id === speaker.id} onClick={() => setSpeakerId(speaker.id)} className={`shrink-0 rounded-md px-2.5 py-2 text-xs ${activeSpeaker?.id === speaker.id ? 'bg-panel-2 text-ink' : 'text-ink-3 hover:text-ink'}`}>

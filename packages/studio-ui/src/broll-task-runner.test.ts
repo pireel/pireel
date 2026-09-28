@@ -59,3 +59,17 @@ it('consumes an inserted transform in both native output and scene timeline stat
   expect(result.task.broll!.placements![0].start).toBe(8);
   expect(mocks.fetch).toHaveBeenCalledTimes(2);
 });
+it('runs the official PiP scene and reuses paid analysis when only its template changes', async () => {
+  const task = fixture(); task.scene = 'pip'; task.options.broll!.pip = { template: 'presenter' };
+  const source = new File(['speech'], 'source.mp4'); const hooks = { signal: new AbortController().signal, checkpoint: async () => {}, progress: vi.fn() };
+  const first = await runBrollTask(task, source, hooks);
+  expect(first.task.workflow?.definition.id).toBe('official-pip');
+  const visuals = mocks.render.mock.calls[0][0].visualMediaClips;
+  expect(visuals).toHaveLength(2);
+  expect(visuals[1]).toMatchObject({ trackId: 'broll-pip-presenter', startSec: 1, endSec: 6, sourceInSec: 1, sourceOutSec: 6, audioMuted: true });
+  first.task.options.broll!.pip = { template: 'dim' };
+  await runBrollTask(first.task, source, hooks);
+  expect(mocks.fetch).toHaveBeenCalledTimes(2); expect(mocks.asr).toHaveBeenCalledOnce();
+  expect(mocks.render.mock.calls[1][0].visualMediaClips).toHaveLength(1);
+  expect(mocks.render.mock.calls[1][0].comp.blocks.some((block: { label?: string }) => block.label === '画中画背景')).toBe(true);
+});

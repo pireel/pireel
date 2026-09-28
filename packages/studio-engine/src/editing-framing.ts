@@ -5,18 +5,20 @@ import type { FramingPlan } from './editing-plan';
 /** A visual's background and silent presenter seat are linked to it, never global speaker transforms. */
 export function applyEditorialFraming(document: EditorDocumentV2, plan: FramingPlan): EditorDocumentV2 {
   const next = structuredClone(document); const fps = next.canvas.fps;
-  next.timeline.tracks = next.timeline.tracks.filter(track => !['editorial-ground', 'editorial-presenter'].includes(track.id));
+  const trackId = (name: string) => name + (plan.scope ? '-' + plan.scope : '');
+  next.timeline.tracks = next.timeline.tracks.filter(track => ![trackId('editorial-ground'), trackId('editorial-presenter')].includes(track.id));
   const backgrounds: GraphicTimelineClip[] = []; const seats: MediaTimelineClip[] = [];
   const primary = next.timeline.tracks.find(track => track.id === next.semantics.primaryNarrativeTrackId);
   for (const beat of plan.beats.filter(beat => beat.visual !== 'speaker')) {
     const visual = beat.visual === 'graphic'
       ? next.timeline.tracks.flatMap(track => track.clips).find(clip => clip.id === 'workflow-graphic-' + beat.id)
-      : next.timeline.tracks.filter(track => track.role === 'broll').flatMap(track => track.clips).find(clip => clip.startFrame / fps >= beat.start - 1 / fps && clip.startFrame / fps < beat.end);
+      : next.timeline.tracks.filter(track => track.role === 'broll' && (!plan.scope || track.id === plan.scope + '-broll')).flatMap(track => track.clips).find(clip => clip.startFrame / fps >= beat.start - 1 / fps && clip.startFrame / fps < beat.end);
     if (!visual) continue; // No matching footage: keep the original, including the speaker's framing.
     const group = 'editorial-' + beat.id; visual.linkGroupId = group;
     const startFrame = visual.startFrame; const durationFrames = visual.durationFrames;
     backgrounds.push({ id: group + '-ground', kind: 'graphic', anchor: { type: 'timeline' }, startFrame, durationFrames, enabled: true, linkGroupId: group,
       block: { templateId: 'custom', label: '画面底色', box: { x: 0, y: 0, w: 1, h: 1 }, slots: { innerHtml: `<div style="position:absolute;inset:0;background:${getTheme(next.appearance.theme).background}"></div>`, timelineBody: '', authoredDurationSec: durationFrames / fps } } });
+    if (visual.kind === 'graphic' && beat.payload) visual.block.box = beat.payload;
     if (visual.kind === 'media') { visual.fit = 'contain'; visual.box = beat.payload ?? undefined; }
     if (beat.mode !== 'seat' || !beat.speaker) continue;
     for (const clip of primary?.clips ?? []) {
@@ -33,8 +35,8 @@ export function applyEditorialFraming(document: EditorDocumentV2, plan: FramingP
   };
   // Grounds sit above the canonical source but below B-roll, graphics and the reserved caption lane.
   for (const track of next.timeline.tracks) if (track.role === 'broll') track.stackOrder = 3;
-  add('editorial-ground', '画面底色', 'graphics', backgrounds, 2);
-  add('editorial-presenter', '人物画面', 'visual', seats, 3);
+  add(trackId('editorial-ground'), '画面底色', 'graphics', backgrounds, 2);
+  add(trackId('editorial-presenter'), '人物画面', 'visual', seats, 3);
   for (const track of next.timeline.tracks) if (track.type === 'caption') track.stackOrder = Math.max(5, track.stackOrder);
   return next;
 }

@@ -1,6 +1,7 @@
+import { composeBrollDocument } from '@pireel/studio-engine/broll-compose';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import type { BrollCandidate, BrollCue, BrollOptions, BrollPlacement } from '@pireel/studio-engine/broll-task';
-import { validateBrollPlan, resolveBrollEdits, brollAssetsMatch } from '@pireel/studio-engine/broll-task';
+import { validateBrollPlan, brollAssetsMatch } from '@pireel/studio-engine/broll-task';
 import type { EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import { applyDocumentTransaction } from '@pireel/studio-engine/document-transaction';
 import { BROLL_WORKFLOW_CAPABILITIES } from '@pireel/studio-engine/workflow-broll-template';
@@ -94,12 +95,8 @@ export function brollWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     const analysis = store.read<Analysis>(args.analysis, 'visual-analysis');
     const plan = args.plan as unknown as Plan;
     const options = args.options as unknown as BrollOptions;
-    const clips = resolveBrollEdits(plan.placements, analysis.candidates, options, Number(args.durationSec));
-    const next = structuredClone(document); const fps = next.canvas.fps;
-    for (const clip of clips) next.assets['broll-' + clip.asset.id] = { id: 'broll-' + clip.asset.id, kind: clip.asset.kind, label: clip.asset.name, locator: { localSig: clip.asset.sig }, metadata: { width: clip.asset.width, height: clip.asset.height, durationSec: clip.asset.durationSec } };
-    next.timeline.tracks.push({ id: 'broll', type: 'visual', role: 'broll', name: 'B-roll', stackOrder: 1, hidden: false, muted: true, locked: false, syncLocked: false, clips: clips.map(clip => ({ id: clip.id, kind: 'media', assetId: 'broll-' + clip.asset.id, startFrame: Math.round(clip.start * fps), durationFrames: Math.max(1, Math.round(clip.duration * fps)), sourceInSec: clip.sourceIn, sourceOutSec: clip.sourceIn + clip.duration, enabled: true, fit: 'cover', ...(clip.asset.kind === 'video' ? { video: { treatment: 'full', audioMuted: true } } : {}) })) });
-    // Captions always remain above supplemental footage.
-    for (const track of next.timeline.tracks) if (track.type === 'caption') track.stackOrder = Math.max(2, track.stackOrder);
+    const prefix = args.instanceId ? String(args.instanceId) + '-' : '';
+    const next = composeBrollDocument(document, plan.placements, analysis.candidates, options, Number(args.durationSec), prefix);
     const result = applyDocumentTransaction(document, { ops: [{ op: 'document.replace', input: { document: next } }] }, { projectId: 'broll-workflow' });
     if (!result.ok) throw new Error(result.error.message);
     return { document: workflowJson(await store.put('document', 'broll', result.document)), plan: args.plan };

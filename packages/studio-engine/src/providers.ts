@@ -129,6 +129,8 @@ export interface CuratedAssetProvider {
 }
 
 export interface StudioProviders {
+  /** The signed-in user's brand kits (hosted feature; absent = scenes hide the brand picker). */
+  brands?: { list: () => Promise<import('./brand-kit').BrandKit[]> };
   workflowEnvironment?: () => Promise<{ scope: string; revision: string }>;
   composer: BlockComposer;
   transcriber: Transcriber;

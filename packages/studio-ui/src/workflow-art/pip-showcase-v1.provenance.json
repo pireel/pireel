@@ -1,0 +1,6 @@
+{
+  "tool": "built-in image_gen",
+  "created": "2026-09-22",
+  "asset": "pip-showcase-v1.png",
+  "prompt": "Use case: photorealistic-natural. Create one clear picture-in-picture result example for a dark video editing app, wide 16:9 horizontal showcase frame. Main visual is a close-up overhead view of hands using an unbranded matte sage product bottle on a warm wood table; a clearly bounded smaller portrait video inset at lower-right shows the SAME creator speaking to camera in the same room, complete face and shoulders visible. The large product footage and small presenter coexist at the same instant and are visually separate. Natural window light, believable casual tutorial/UGC recording, subtle cinematic grading, crisp legible geometry and composition. No text, subtitles, logos, labels, fake app UI chrome, extra windows, gradients, arrows or watermark. Output one static horizontal example image."
+}

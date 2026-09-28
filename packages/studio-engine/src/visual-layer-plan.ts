@@ -18,6 +18,8 @@ export interface SupplementalVisualMediaClip {
   /** Per-clip video settings remain independent from the visual track's mute flag. */
   volumeDb?: number;
   audioMuted?: boolean;
+  /** Remove the original background with the shared local person segmenter. */
+  personMatte?: boolean;
   audioFadeInSec?: number;
   audioFadeOutSec?: number;
   filter?: ShotFilter;

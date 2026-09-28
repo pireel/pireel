@@ -4,7 +4,7 @@
  * Person matting (MODNet on WebGPU) — the high-quality mask source for the matte pipeline.
  * MediaPipe selfie segmentation is a 256 grid internally, so upscaling to the canvas gives stair-step
  * aliasing; the matting model outputs a true alpha matte (hair-level soft edges) — the source of
- * commercial-grade edges.
+ * soft edges, subject to the source and model quality.
  *
  * WebGPU only: wasm single-threaded takes hundreds of ms per frame, too slow for live preview. When
  * WebGPU is unavailable / load fails, always return null and the caller (geometry.segmentPersonMask)
@@ -14,6 +14,7 @@
 
 import type * as OrtNs from 'onnxruntime-web';
 import { modnetUrl, ortWasmUrls } from './matte-assets';
+import { matteInputSize, refinePersonAlpha } from './person-matte-refinement';
 
 interface MatteSession {
   ort: typeof OrtNs;
@@ -71,14 +72,12 @@ export function matteMask(src: ImageBitmap): Promise<ImageBitmap | null> {
     const s = await load();
     if (!s) return null;
     try {
-      // MODNet: long edge ≤512, width/height rounded to multiples of 32 (the model down-samples by /32
-      // multiple times; non-divisible sizes distort or error). Normalize (x-0.5)/0.5; output [1,1,h,w] alpha
-      const k = Math.min(1, 512 / Math.max(src.width, src.height));
-      const w = Math.max(32, Math.round((src.width * k) / 32) * 32);
-      const h = Math.max(32, Math.round((src.height * k) / 32) * 32);
+      // Preserve portrait detail: the old 512-long-edge input reduced 1080p portraits to 288px wide.
+      const { width: w, height: h } = matteInputSize(src.width, src.height);
       const oc = new OffscreenCanvas(w, h);
       const octx = oc.getContext('2d', { willReadFrequently: true });
       if (!octx) return null;
+      octx.imageSmoothingQuality = 'high';
       octx.drawImage(src, 0, 0, w, h);
       const rgba = octx.getImageData(0, 0, w, h).data;
       const n = w * h;
@@ -89,15 +88,20 @@ export function matteMask(src: ImageBitmap): Promise<ImageBitmap | null> {
         chw[2 * n + i] = (rgba[i * 4 + 2]! / 255 - 0.5) / 0.5;
       }
       const input = new s.ort.Tensor('float32', chw, [1, 3, h, w]);
-      const out = await s.session.run({ [s.session.inputNames[0]!]: input });
-      const pha = (await out[s.session.outputNames[0]!]!.getData()) as Float32Array;
-      const px = new Uint8ClampedArray(n * 4);
-      for (let i = 0; i < n; i++) px[i * 4 + 3] = Math.max(0, Math.min(255, Math.round(pha[i]! * 255)));
-      const mc = new OffscreenCanvas(w, h);
-      const mctx = mc.getContext('2d');
-      if (!mctx) return null;
-      mctx.putImageData(new ImageData(px, w, h), 0, 0);
-      return mc.transferToImageBitmap();
+      let outputs: Record<string, OrtNs.Tensor> | undefined;
+      try {
+        outputs = await s.session.run({ [s.session.inputNames[0]!]: input });
+        const pha = (await outputs[s.session.outputNames[0]!]!.getData()) as Float32Array;
+        const pixels = refinePersonAlpha(pha, rgba, w, h);
+        const mc = new OffscreenCanvas(w, h);
+        const mctx = mc.getContext('2d');
+        if (!mctx) return null;
+        mctx.putImageData(new ImageData(pixels, w, h), 0, 0);
+        return mc.transferToImageBitmap();
+      } finally {
+        input.dispose();
+        for (const tensor of Object.values(outputs ?? {})) tensor.dispose();
+      }
     } catch (e) {
       console.warn('[studio/person-matte] matting inference failed', e);
       return null;
@@ -138,7 +142,7 @@ export async function computeMatteTrack(
     if (!track) return null;
     const vw = track.displayWidth || 720;
     const vh = track.displayHeight || 1280;
-    const k = Math.min(1, 512 / Math.max(vw, vh));
+    const k = Math.min(1, 1024 / Math.max(vw, vh));
     const cw = Math.max(2, Math.round(vw * k));
     const ch = Math.max(2, Math.round(vh * k));
     const canvas = new OffscreenCanvas(cw, ch);

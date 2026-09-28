@@ -65,7 +65,7 @@ it('seeks across the timeline and drags the playhead with scroll-aware coordinat
  const pointer=(type:string,x:number)=>{const event=new MouseEvent(type,{bubbles:true,button:0,clientX:x});Object.defineProperty(event,'pointerId',{value:7});return event;};
  try {
   await render();
-  const track=el.querySelector<HTMLElement>('[data-broll-time-track]')!;
+  const track=el.querySelector<HTMLElement>('[data-scene-time-track]')!;
   const capture=vi.fn();const release=vi.fn();
   Object.defineProperties(track,{getBoundingClientRect:{value:()=>({left:-100,width:400})},setPointerCapture:{value:capture},releasePointerCapture:{value:release}});
   const head=el.querySelector<HTMLElement>('[aria-label="时间轴播放头"]')!;

@@ -6,20 +6,20 @@ import { ws } from './workflow-node-contracts';
 import { assertWorkflowValue } from './workflow-schema';
 
 export type VisualIntent = 'speaker' | 'graphic' | 'broll';
-export interface EditorialSettings { enabled: string[]; maxGraphics: number; instruction: string }
+export interface EditorialSettings { instanceId?: string; enabled: string[]; maxGraphics: number; instruction: string }
 export interface ContentSource {
   sourceKey: string; durationSec: number; settings: EditorialSettings;
   beats: { id: string; start: number; end: number; text: string }[];
   candidates: { id: string; description: string }[];
 }
 export interface ContentDecision { id: string; purpose: 'explain' | 'compare' | 'example' | 'emphasis' | 'transition' | 'summary'; visual: VisualIntent; description: string; reason: string }
-export interface ContentPlan { sourceKey: string; durationSec: number; beats: (ContentSource['beats'][number] & ContentDecision)[] }
+export interface ContentPlan { scope?: string; sourceKey: string; durationSec: number; beats: (ContentSource['beats'][number] & ContentDecision)[] }
 type ContentBeat = ContentPlan['beats'][number];
 export interface FramingBeat extends ContentBeat {
   mode: 'speaker' | 'seat' | 'full-cover';
   payload: NormBox | null; speaker: NormBox | null; captions: NormBox;
 }
-export interface FramingPlan { sourceKey: string; durationSec: number; canvas: { width: number; height: number }; beats: FramingBeat[]; measurement: 'source-fit' }
+export interface FramingPlan { scope?: string; sourceKey: string; durationSec: number; canvas: { width: number; height: number }; beats: FramingBeat[]; measurement: 'source-fit' }
 export const contentDecisionSchema = ws.object({ sourceKey: ws.string(64, 1), beats: ws.array(ws.object({
   id: ws.string(100, 1), purpose: { type: 'string', enum: ['explain', 'compare', 'example', 'emphasis', 'transition', 'summary'] },
   visual: { type: 'string', enum: ['speaker', 'graphic', 'broll'] }, description: ws.string(120), reason: ws.string(80),
@@ -34,7 +34,7 @@ export function contentSource(document: EditorDocumentV2, transcript: AsrSegment
   const chunkSize = Math.max(1, Math.ceil(cues.length / 40));
   for (let i = 0; i < cues.length; i += chunkSize) {
     const group = cues.slice(i, i + chunkSize); const start = Math.max(beats.at(-1)?.end ?? 0, group[0].start); const end = Math.min(durationSec, group.at(-1)!.end);
-    if (end > start) beats.push({ id: 'beat-' + beats.length, start, end, text: group.map(cue => cue.text).join(' ') });
+    if (end > start) beats.push({ id: (settings.instanceId ? settings.instanceId + '-' : '') + 'beat-' + beats.length, start, end, text: group.map(cue => cue.text).join(' ') });
   }
   return { durationSec, settings, beats, candidates };
 }
@@ -50,7 +50,7 @@ export function validateContentPlan(source: ContentSource, value: unknown): Cont
     if (decision.visual === 'broll' && (!source.settings.enabled.includes('broll') || !source.candidates.length)) throw new Error('内容安排引用了不可用的 B-roll。');
     return { ...beat, ...decision };
   });
-  return { sourceKey: source.sourceKey, durationSec: source.durationSec, beats };
+  return { ...(source.settings.instanceId ? { scope: source.settings.instanceId } : {}), sourceKey: source.sourceKey, durationSec: source.durationSec, beats };
 }
 /** No inferred face coordinates: fit the whole source into a reserved seat. Captions always keep their band. */
 export function frameContentPlan(plan: ContentPlan, canvas: FramingPlan['canvas'], arrange: boolean, captionBand: NormBox): FramingPlan {
@@ -71,7 +71,7 @@ export function frameContentPlan(plan: ContentPlan, canvas: FramingPlan['canvas'
     const payload = portrait ? { x: .06, y: .04, w: .88, h: bottom * .47 - .04 } : { x: .05, y: .06, w: .46, h: bottom - .09 };
     return { ...beat, end, mode: 'seat' as const, payload, speaker, captions: captionBand };
   });
-  return { sourceKey: plan.sourceKey, durationSec: plan.durationSec, canvas, beats, measurement: 'source-fit' };
+  return { ...(plan.scope ? { scope: plan.scope } : {}), sourceKey: plan.sourceKey, durationSec: plan.durationSec, canvas, beats, measurement: 'source-fit' };
 }
 export const visualBeats = (plan: FramingPlan, visual: VisualIntent) => plan.beats.filter(beat => beat.visual === visual);
 export function constrainPlannedBroll<T extends { start: number; duration: number }>(placements: T[], plan: FramingPlan): T[] {

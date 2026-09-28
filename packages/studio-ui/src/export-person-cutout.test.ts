@@ -1,0 +1,30 @@
+import { afterEach, expect, it, vi } from 'vitest';
+import { prepareVisualPersonMattes, type SampledVisualVideo } from './export-visual-media';
+import type { SupplementalVisualMediaClip } from '@pireel/studio-engine/composition';
+const cutout = vi.hoisted(() => vi.fn());
+vi.mock('./person-cutout-frame', () => ({ personCutoutFrame: cutout }));
+afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
+const clip = (clipId: string, personMatte = true): SupplementalVisualMediaClip => ({ clipId, trackId: 'presenter', kind: 'video', stackOrder: 4, startSec: 2, endSec: 5, sourceInSec: 2, sourceOutSec: 5, source: 'speaker', fit: 'contain', muted: true, personMatte });
+it('replaces only active cutout samples and releases alpha bitmaps after compositing', async () => {
+  const input = {}; const result = { close: vi.fn() };
+  const ctx = { drawImage: vi.fn() };
+  vi.stubGlobal('OffscreenCanvas', class { width = 640; height = 360; getContext() { return ctx; } transferToImageBitmap() { return input; } });
+  cutout.mockResolvedValue(result);
+  const draw = vi.fn();
+  const samples = new Map<string, SampledVisualVideo>(['a', 'b'].map(id => [id, { sourceWidth: 640, sourceHeight: 360, sample: { draw } }]));
+  const release = await prepareVisualPersonMattes([clip('a'), clip('b', false)], samples, 3);
+  expect(cutout).toHaveBeenCalledExactlyOnceWith(input);
+  samples.get('a')!.sample.draw(ctx as never, 10, 20, 100, 200);
+  expect(ctx.drawImage).toHaveBeenCalledWith(result, 10, 20, 100, 200);
+  expect(samples.get('b')!.sample.draw).toBe(draw);
+  expect(result.close).not.toHaveBeenCalled(); release(); expect(result.close).toHaveBeenCalledOnce();
+  await prepareVisualPersonMattes([clip('missing')], new Map(), 5);
+  expect(cutout).toHaveBeenCalledTimes(1);
+});
+it('releases earlier alpha frames if a later presenter sample is missing', async () => {
+  const result = { close: vi.fn() };
+  vi.stubGlobal('OffscreenCanvas', class { getContext() { return {}; } transferToImageBitmap() { return {}; } });
+  cutout.mockResolvedValue(result);
+  await expect(prepareVisualPersonMattes([clip('a'), clip('missing')], new Map([['a', { sourceWidth: 640, sourceHeight: 360, sample: { draw: vi.fn() } }]]), 3)).rejects.toThrow('无法读取');
+  expect(result.close).toHaveBeenCalledOnce();
+});
