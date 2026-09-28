@@ -76,6 +76,8 @@ export interface V3StateView {
   /** `library: true` marks project-library media not yet placed on any track — the footage to start from. */
   assets: Array<{ id: string; kind: string; label?: string; durationSec?: number; hasAudio?: boolean; library?: true }>;
   semantics: { primaryTrackId: string; sceneIds: string[] };
+  /** set_confirm_list items with the creator's answers (status confirmed / changed + answer). */
+  confirmList?: Array<{ id: string; kind: string; text: string; status: string; answer?: string }>;
   /** Library fonts every text surface accepts (set_texts/set_captions font ids, compose_component fontFamily); sans/serif/mono/local:<family> need no catalog. */
   fonts: Array<{ id: string; zh: string; en: string }>;
 }
@@ -377,6 +379,7 @@ export function renderV3State(
       ...(!placedAssetIds.has(asset.id) ? { library: true as const } : {}),
     })),
     semantics: { primaryTrackId: document.semantics.primaryNarrativeTrackId, sceneIds: document.semantics.scenes.map((scene) => scene.id) },
+    ...(document.semantics.handoff?.length ? { confirmList: document.semantics.handoff.map(({ id, kind, text, status, answer }) => ({ id, kind, text, status, ...(answer ? { answer } : {}) })) } : {}),
     fonts: webFontCatalog(),
   };
 }

@@ -139,6 +139,7 @@ export function projectV2ToLegacyComposition(document: EditorDocumentV2, options
     ...(document.appearance.frameId ? { frameId: document.appearance.frameId } : {}),
     ...(document.appearance.customVisualStyle ? { customVisualStyle: document.appearance.customVisualStyle } : {}),
     ...(document.appearance.look ? { look: document.appearance.look } : {}),
+    ...(document.semantics.handoff?.length ? { handoff: document.semantics.handoff } : {}),
     ...(document.appearance.personFx ? { personFx: document.appearance.personFx } : {}),
     ...(audioTracks.length ? { audioTracks } : {}),
     ...(document.processing?.audioDenoise ? { audioDenoise: document.processing.audioDenoise } : {}),

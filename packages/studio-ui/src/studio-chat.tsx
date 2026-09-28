@@ -104,6 +104,8 @@ export interface StudioChatHandle {
   clearElementPills(): void;
   /** Workbench pushes a user message directly. Silently dropped while streaming. */
   send(text: string): void;
+  /** Select a skill and send a request under it (the AI Enhance switches). Dropped while streaming. */
+  runSkill(skillId: string, text: string): void;
   /** Only fill a piece of text into the input without sending (used by the generate panel's "@reference" for assets). */
   insertText(text: string): void;
   /** Only focus the input (component floating bar's "AI edit" switches over to keep typing). */
@@ -337,6 +339,7 @@ export const StudioChat = memo(
         insertElementPill: (el) => innerRef.current?.insertElementPill(el),
         clearElementPills: () => innerRef.current?.clearElementPills(),
         send: (text) => innerRef.current?.send(text),
+        runSkill: (skillId, text) => innerRef.current?.runSkill(skillId, text),
         insertText: (text) => innerRef.current?.insertText(text),
         focusInput: () => innerRef.current?.focusInput(),
         attachFrame: (frame) => innerRef.current?.attachFrame(frame),

@@ -19,6 +19,7 @@
 import type { ThemeId } from './theme';
 import type { CustomVisualStyle } from './visual-style';
 import type { DocumentLook } from './look';
+import type { HandoffItem } from './editor-document/types';
 import { type Clip, editedDuration, spans } from './trim';
 import { BASE_CAPTION_FONT_PX, DEFAULT_CAPTION_PRESET, DEFAULT_SUB_CAPTION_PRESET, getCaptionPreset } from './caption-presets';
 import { mintIdSuffix } from './deterministic-ids';
@@ -632,6 +633,8 @@ export interface Composition {
   customVisualStyle?: CustomVisualStyle;
   /** The output's own video-level template: its visual system and pieces (look.ts). */
   look?: DocumentLook;
+  /** What the creator must confirm (read-only projection of document semantics). */
+  handoff?: HandoffItem[];
   /** Global person-effect style (toolbar "Person" panel): person-on-top / feather / stroke / background swap.
    *  Only takes effect on matte-enabled (VideoShot.personMatte) shot segments; default = all defaults. */
   personFx?: PersonFx;

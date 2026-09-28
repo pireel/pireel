@@ -2,6 +2,7 @@ import type { EditorDocumentV2 } from '../types';
 import { patchEditorCanvas } from './canvas';
 import { patchEditorAppearance } from './appearance';
 import { patchEditorProcessing } from './processing';
+import { patchHandoffItem } from './handoff';
 import { insertAudioClip } from './audio-insert';
 import { patchAudioClips } from './audio-patch';
 import { patchCaptionStyle } from './caption-style';
@@ -35,6 +36,8 @@ export function applyEditorCommand(document: EditorDocumentV2, command: EditorCo
       return patchEditorAppearance(document, command.patch);
     case 'processing.patch':
       return patchEditorProcessing(document, command.patch);
+    case 'handoff.patch':
+      return patchHandoffItem(document, command.id, command.status, command.answer);
     case 'track.insert':
       return insertEditorTrack(document, command.track, command.index);
     case 'track.remove':

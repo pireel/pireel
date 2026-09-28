@@ -744,6 +744,11 @@ export function ChatThread({
       send(text) {
         run(text);
       },
+      runSkill(nextSkillId, text) {
+        applySkill(nextSkillId as StudioScenarioSkillId);
+        setActiveStarterId(null);
+        run(text);
+      },
       insertText(text) {
         composerRef.current?.insertText(text);
       },
@@ -769,7 +774,7 @@ export function ChatThread({
         composerRef.current?.failTimelineFrameCapture(id);
       },
     }),
-    [applyFrame, setMessages, run],
+    [applyFrame, setMessages, run, applySkill],
   );
 
   const empty = messages.length === 0;

@@ -6,6 +6,7 @@ import type { EditorDocumentV2 } from './editor-document/types';
 import type { Block } from './composition-core';
 import { componentSchemaOf } from './component-schema';
 import { renderV3State } from './agent-surface-v3/state';
+import { applyEditorCommand } from './editor-document/commands/dispatcher';
 
 const card = "function (props, ctx) { return { html: '<b>' + props.title + '</b>', animate: function (tl, el) { tl.from(el, { opacity: 0, duration: 0.3 }, 0); } }; }";
 
@@ -77,6 +78,13 @@ describe('video-level template tools', () => {
       { id: 'confirm-2', kind: 'voice', text: '用你的克隆声音配旁白？', status: 'open' },
     ]);
     expect(runAgentTimelineTool(rewritten.document!, 'set_confirm_list', { items: [] }).document!.semantics.handoff).toBeUndefined();
+    // The creator answers in place (a document command, so it undoes and syncs), and the agent reads the answer back.
+    const answeredInPanel = applyEditorCommand(rewritten.document!, { type: 'handoff.patch', id: 'confirm-2', status: 'changed', answer: '用 AI 配音' });
+    expect(answeredInPanel.ok).toBe(true);
+    expect(renderV3State(answeredInPanel.document).confirmList).toContainEqual({ id: 'confirm-2', kind: 'voice', text: '用你的克隆声音配旁白？', status: 'changed', answer: '用 AI 配音' });
+    const reopened = applyEditorCommand(answeredInPanel.document, { type: 'handoff.patch', id: 'confirm-2', status: 'open' });
+    expect(reopened.document.semantics.handoff![1]).toEqual({ id: 'confirm-2', kind: 'voice', text: '用你的克隆声音配旁白？', status: 'open' });
+    expect(applyEditorCommand(reopened.document, { type: 'handoff.patch', id: 'nope', status: 'confirmed' }).ok).toBe(false);
   });
   it('an instance edits through the piece schema: set_clip_properties, get_state and the component contract', () => {
     const schema = JSON.stringify({ title: { type: 'string', title: '标题' }, price: { type: 'integer', title: '价格', default: 0 } });

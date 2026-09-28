@@ -331,6 +331,7 @@ import { FramePanel } from "./frame-panel";
 import { PersonFxPanel, type MatteState } from "./person-fx-panel";
 import { ShotTreatmentPanel } from "./shot-treatment-panel";
 import { MusicPanel } from "./music-panel";
+import { AiEnhancePanel } from "./ai-enhance-panel";
 import { AvatarPanel } from "./avatar-panel";
 import { useAudioTracks } from "./use-audio-tracks";
 import { useDenoise } from "./use-denoise";
@@ -1662,6 +1663,11 @@ export function HyperframesWorkbench({
   const chatRef = useRef<StudioChatHandle | null>(null); // lets workbench actions coordinate with the active chat thread
   // Agent activity gates output switching (chat turn streaming, or a bridge tool executing).
   const [chatBusy, setChatBusy] = useState(false);
+  // AI Enhance started an agent turn (graphics): shown as running until that turn ends.
+  const [enhanceRun, setEnhanceRun] = useState<"pending" | "busy" | null>(null);
+  useEffect(() => {
+    setEnhanceRun((cur) => (cur === "pending" && chatBusy ? "busy" : cur === "busy" && !chatBusy ? null : cur));
+  }, [chatBusy]);
   const [bridgeToolsInFlight, setBridgeToolsInFlight] = useState(0);
   const bridgeOutputAnchorRef = useRef<{ id: string; title: string } | null>(null);
   // Export (state + submit/poll/cancel) — see use-export.ts
@@ -8507,13 +8513,33 @@ export function HyperframesWorkbench({
                       pushUndoSnapshot();
                       for (const id of ids) setShotAudio(id, patch);
                     }}
-                    denoise={{
-                      strength: comp.audioDenoise?.strength ?? null,
-                      status: denoiseOps.status,
-                      progress: denoiseOps.progress,
-                    }}
-                    onSetDenoise={denoiseOps.setDenoise}
                   />,
+    enhance: <AiEnhancePanel
+      hasFootage={(comp.shots ?? []).length > 0}
+      graphics={{ count: comp.blocks.filter((b) => b.templateId.startsWith("look:")).length, running: enhanceRun != null }}
+      onGraphics={(mode) => {
+        openChat();
+        setEnhanceRun("pending");
+        chatRef.current?.runSkill("video-graphics", t(mode === "key" ? "panels.enhanceGraphicsKeyPrompt" : mode === "redo" ? "panels.enhanceGraphicsRedoPrompt" : "panels.enhanceGraphicsPrompt"));
+      }}
+      onRemoveGraphics={() => {
+        const ids = compRef.current.blocks.filter((b) => b.templateId.startsWith("look:")).map((b) => b.id);
+        if (!ids.length) return;
+        for (const id of ids) postPreview({ type: "hf:remove", id });
+        const edit = commit({ op: "overlay.remove", input: { clipIds: ids } });
+        if (!edit.ok) toast.error(editorErrorMessage(edit.error));
+      }}
+      captions={{ on: captionsOn, busy: !!transcriptControls.generating }}
+      onCaptions={(on) => (on ? void applyCaptionPreset(resolveCaptionStyle(compRef.current).preset) : removeCaptionLayer())}
+      denoise={{ strength: comp.audioDenoise?.strength ?? null, status: denoiseOps.status, progress: denoiseOps.progress }}
+      onSetDenoise={denoiseOps.setDenoise}
+      agentBusy={chatBusy || bridgeToolsInFlight > 0}
+      handoff={comp.handoff ?? []}
+      onAnswer={(id, status, answer) => {
+        const edit = commit({ op: "command", input: { command: { type: "handoff.patch", id, status, ...(answer ? { answer } : {}) } } });
+        if (!edit.ok) toast.error(editorErrorMessage(edit.error));
+      }}
+    />,
     transitions: <TransitionPanel
       effect={selectedTransition?.effect ?? null}
       direction={selectedTransition?.direction ?? "left"}
@@ -10436,6 +10462,7 @@ export function HyperframesWorkbench({
             <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-0.5 overflow-y-auto px-1 py-2">
               {(
                 [
+                  { v: "enhance", icon: Sparkles, label: "panels.aiEnhance" },
                   {
                     v: "assets",
                     icon: LayoutGrid,
