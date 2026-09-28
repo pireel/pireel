@@ -75,7 +75,7 @@ describe('assembleHtml', () => {
     c.blocks = [bad, titleBlock({ text: '好块', startSec: 0, durationSec: 2 })];
     const html = assembleHtml(c);
     // 坏体以字符串字面量喂 new Function(编译期抛错被 try 圈住),不直接内联成裸代码
-    expect(html).toContain(`new Function('tl', ${JSON.stringify('tl.to((')})`);
+    expect(html).toContain(`new Function('tl', 'window', 'document', ${JSON.stringify('tl.to((')})`);
     expect(html).toContain("catch (e) { console.warn('[hf] timeline error'");
     expect((html.match(/window\.__timelines\[/g) ?? []).length).toBe(2); // 两块都照常注册
   });

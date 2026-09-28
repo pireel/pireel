@@ -4,6 +4,7 @@ import type { TranscriptSegment } from '../project-dto';
 import type { ThemeId } from '../theme';
 import type { NarrativeRole, SceneFamily, ViewerTask } from '../director-plan';
 import type { CustomVisualStyle } from '../visual-style';
+import type { DocumentLook } from '../look';
 
 export const EDITOR_DOCUMENT_VERSION = 2 as const;
 
@@ -67,6 +68,8 @@ export interface EditorAppearance {
   frameId?: string;
   customVisualStyle?: CustomVisualStyle;
   personFx?: PersonFx;
+  /** The output's own video-level template (visual system + pieces); graphics instance it as `look:<pieceId>`. */
+  look?: DocumentLook;
 }
 
 export type EditorTrackType = 'visual' | 'graphics' | 'audio' | 'caption';

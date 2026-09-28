@@ -132,6 +132,37 @@ describe('PreviewStageHost', () => {
     expect(loaded).toHaveBeenCalledOnce();
     expect(host.element.shadowRoot!.getElementById('title')?.textContent).toBe('Second');
   });
+
+  it('builds a look piece inside the stage: timeline code sees the stage document and window, not the page', async () => {
+    const { assembleHtml } = await import('@pireel/studio-engine/assemble');
+    const { emptyComposition } = await import('@pireel/studio-engine/composition');
+    await import('@pireel/studio-engine/look');
+    const comp = {
+      ...emptyComposition(),
+      width: 1080,
+      height: 1920,
+      look: {
+        id: 'l1',
+        css: '.card { color: #fff; }',
+        pieces: { card: { label: 'Card', source: "function (props, ctx) { return { html: '<div class=\"card\">' + props.title + '</div>', animate: function (tl, el) { el.setAttribute('data-built', ctx.width); } }; }" } },
+      },
+      blocks: [{ id: 'g1', templateId: 'look:card', slots: { props: { title: '标题' } }, startSec: 0, durationSec: 3, trackIndex: 2, box: { x: 0, y: 0, w: 0.5, h: 0.1 } }],
+    };
+    // Timelines are real enough for construction: every GSAP call is a no-op that returns the timeline.
+    const tl: Record<string, unknown> = {};
+    for (const name of ['to', 'from', 'fromTo', 'set', 'add', 'call']) tl[name] = () => tl;
+    (window as unknown as { gsap: Record<string, unknown> }).gsap = { ...fakeGsap(), timeline: () => tl };
+    const host = new PreviewStageHost();
+    document.body.appendChild(host.element);
+    host.srcdoc = assembleHtml(comp as never);
+    await flush();
+    const card = host.element.shadowRoot!.querySelector('#g1 .card');
+    expect(card?.textContent).toBe('标题');
+    expect(host.element.shadowRoot!.querySelector('#g1 .look-piece')?.getAttribute('data-built')).toBe('540');
+    // Nothing leaked onto the page itself.
+    expect(document.querySelector('.card')).toBeNull();
+    expect((window as unknown as { __look?: unknown }).__look).toBeUndefined();
+  });
 });
 
 describe('stage stylesheet rewriting', () => {
@@ -169,4 +200,5 @@ describe('loadGsap', () => {
       delete (window as unknown as { gsap?: unknown }).gsap;
     }
   });
+
 });

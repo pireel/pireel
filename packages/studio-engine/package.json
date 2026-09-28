@@ -11,7 +11,8 @@
   },
   "sideEffects": [
     "**/templates.ts",
-    "**/templates.js"
+    "**/templates.js",
+    "**/look.ts"
   ],
   "license": "AGPL-3.0-only",
   "dependencies": {

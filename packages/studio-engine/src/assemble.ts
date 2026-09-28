@@ -25,6 +25,7 @@ import {
   videoFrameTimelineBody,
 } from './composition-core';
 import { GL_MIXER_SRC, TRANSITION_GLSL, glDirection } from './transition-gl';
+import { isLookTemplate, lookHeadHtml, lookPieceOf } from './look';
 import { SOURCE_DRAW_RECT_FUNCTION } from './source-framing';
 import { compositionVisualLayerPlan, type SupplementalVisualMediaClip } from './visual-layer-plan';
 import { BLOCK_TEXT_BASELINE_PX } from './block-typography';
@@ -440,7 +441,9 @@ const PERSON_CUT_SHIM = `(function(){
 function timelineScript(id: string, body: string): string {
   return (
     `(function(){ var tl = gsap.timeline({ paused: true }); ` +
-    `try { new Function('tl', ${JSON.stringify(body)})(tl); } catch (e) { console.warn('[hf] timeline error', ${JSON.stringify(id)}, e); } ` +
+    // window/document are passed in: in the in-page stage they are its facades, so timeline code
+    // that queries or stores globals stays inside the stage (a plain Function would see the page).
+    `try { new Function('tl', 'window', 'document', ${JSON.stringify(body)})(tl, window, document); } catch (e) { console.warn('[hf] timeline error', ${JSON.stringify(id)}, e); } ` +
     `window.__timelines[${JSON.stringify(id)}] = tl; })();`
   );
 }
@@ -501,7 +504,13 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
     // language state they stay dormant — turning translation off hides them without destroying content.
     // Kit blocks derive HTML at render time — bake the sizing context (box/canvas px)
     // into slots here, where the composition's dimensions are known.
-    const kitBase = b.templateId.startsWith('kit:')
+    const kitBase = isLookTemplate(b.templateId)
+      ? {
+          ...b,
+          // A look instance builds itself in its box: the piece reads the box size from ctx.
+          slots: { ...b.slots, piece: lookPieceOf(b.templateId), boxW: Math.round((b.box?.w ?? 1) * W), boxH: Math.round((b.box?.h ?? 1) * H) },
+        }
+      : b.templateId.startsWith('kit:')
       ? {
           ...b,
           slots: {
@@ -808,7 +817,7 @@ ${webFontLinks}<style>
   .hf-ph-plus { font-size:96px; font-weight:300; line-height:1; }
   .hf-ph-tip { font-size:34px; text-align:center; line-height:1.3; font-family:var(--font-body); }
 </style>
-</head>
+${lookHeadHtml(comp.look)}</head>
 <body>
 <div id="root" data-composition-id="root" data-start="0" data-width="${W}" data-height="${H}">
 ${body.join('\n')}

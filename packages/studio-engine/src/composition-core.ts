@@ -18,6 +18,7 @@
 
 import type { ThemeId } from './theme';
 import type { CustomVisualStyle } from './visual-style';
+import type { DocumentLook } from './look';
 import { type Clip, editedDuration, spans } from './trim';
 import { BASE_CAPTION_FONT_PX, DEFAULT_CAPTION_PRESET, DEFAULT_SUB_CAPTION_PRESET, getCaptionPreset } from './caption-presets';
 import { mintIdSuffix } from './deterministic-ids';
@@ -629,6 +630,8 @@ export interface Composition {
   frameId?: string;
   /** Structured user-composed Frame, persisted so every generation path receives the same choices. */
   customVisualStyle?: CustomVisualStyle;
+  /** The output's own video-level template: its visual system and pieces (look.ts). */
+  look?: DocumentLook;
   /** Global person-effect style (toolbar "Person" panel): person-on-top / feather / stroke / background swap.
    *  Only takes effect on matte-enabled (VideoShot.personMatte) shot segments; default = all defaults. */
   personFx?: PersonFx;
@@ -1191,6 +1194,8 @@ export function registerTemplate(t: Template): void {
   REGISTRY.set(t.id, t);
 }
 export function getTemplate(id: string): Template {
+  // Look instances name a piece of the output's own look (`look:<pieceId>`): one template renders them all.
+  if (id.startsWith('look:')) return REGISTRY.get('look') ?? fallbackTemplate(id);
   return REGISTRY.get(id) ?? REGISTRY.get('custom') ?? fallbackTemplate(id);
 }
 export function listTemplates(): Template[] {

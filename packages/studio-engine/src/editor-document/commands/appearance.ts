@@ -2,6 +2,7 @@ import type { EditorDocumentV2 } from '../types';
 import { validateEditorDocumentV2 } from '../validation';
 import { commandFailure, emptyCommandReceipt, type AppearancePatch, type EditorCommandResult } from './types';
 import { normalizeCustomVisualStyle } from '../../visual-style';
+import { normalizeLook } from '../../look';
 
 function sparseMerge<T extends object>(current: T, patch: Partial<T>): T {
   const next = { ...current, ...patch };
@@ -20,6 +21,14 @@ export function patchEditorAppearance(document: EditorDocumentV2, patch: Appeara
   }
   if (patch.customVisualStyle != null && !normalizeCustomVisualStyle(patch.customVisualStyle)) {
     return commandFailure(document, 'invalid-command', 'Custom visual style is invalid.', { path: 'patch.customVisualStyle' });
+  }
+  if (patch.look != null) {
+    const checked = normalizeLook(patch.look);
+    if (!checked.look) {
+      const first = checked.issues[0]!;
+      return commandFailure(document, 'invalid-command', `Look is invalid: ${checked.issues.map((issue) => `${issue.path}: ${issue.message}`).join('; ')}`, { path: `patch.${first.path}` });
+    }
+    patch = { ...patch, look: checked.look };
   }
   const appearance = sparseMerge(document.appearance, patch);
   if (JSON.stringify(appearance) === JSON.stringify(document.appearance)) {
