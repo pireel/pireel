@@ -72,6 +72,16 @@ export function lintLookSource(source: string, path = 'source'): LookIssue[] {
   return issues;
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
+
+/** A piece's props schema as one object schema: authors send either that or its bare `properties` map. */
+function propsSchemaOf(value: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(value)) return undefined;
+  const properties = isRecord(value.properties) ? value.properties : value;
+  const fields = Object.fromEntries(Object.entries(properties).filter(([, field]) => isRecord(field)));
+  return Object.keys(fields).length ? { type: 'object', properties: fields } : undefined;
+}
+
 /** Validate a look value (from a tool or a stored document). Returns the normalized look or issues. */
 export function normalizeLook(value: unknown): { look: DocumentLook; issues: [] } | { look: null; issues: LookIssue[] } {
   const issues: LookIssue[] = [];
@@ -95,7 +105,7 @@ export function normalizeLook(value: unknown): { look: DocumentLook; issues: [] 
       const piece = pieceRaw && typeof pieceRaw === 'object' ? (pieceRaw as Record<string, unknown>) : {};
       const source = typeof piece.source === 'string' ? piece.source : '';
       issues.push(...lintLookSource(source, `${path}.source`));
-      const schema = piece.propsSchema && typeof piece.propsSchema === 'object' && !Array.isArray(piece.propsSchema) ? (piece.propsSchema as Record<string, unknown>) : undefined;
+      const schema = propsSchemaOf(piece.propsSchema);
       pieces[pieceId] = {
         label: typeof piece.label === 'string' && piece.label.trim() ? piece.label.trim().slice(0, 40) : pieceId,
         source,

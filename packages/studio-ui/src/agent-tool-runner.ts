@@ -3660,7 +3660,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
                   label: b.label,
                   durationSec: b.durationSec,
                   ...(b.box ? { boxPx: { w: Math.round(b.box.w * canvasSize().width), h: Math.round(b.box.h * canvasSize().height) } } : {}),
-                  ...(blockPropsReadback(b).props ? { props: blockPropsReadback(b).props!.values } : {}),
+                  ...(blockPropsReadback(b, compRef.current.look).props ? { props: blockPropsReadback(b, compRef.current.look).props!.values } : {}),
                 },
                 // A kit block is edited as props: hand the brief what it currently shows, so an
                 // external edit keeps unmentioned fields exactly like the in-app path does.

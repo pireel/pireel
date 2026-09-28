@@ -412,7 +412,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
                 label: b.label,
                 durationSec: b.durationSec,
                 ...(b.box ? { boxPx: { w: Math.round(b.box.w * c.width), h: Math.round(b.box.h * c.height) } } : {}),
-                ...(blockPropsReadback(b).props ? { props: blockPropsReadback(b).props!.values } : {}),
+                ...(blockPropsReadback(b, c.look).props ? { props: blockPropsReadback(b, c.look).props!.values } : {}),
               },
               // A kit block edits as props — same as the bridge context (unmentioned fields survive).
               ...(b.templateId.startsWith('kit:') ? { kitCurrent: { component: b.templateId.slice(4), props: (b.slots as { props?: Record<string, unknown> }).props ?? {} } } : {}),

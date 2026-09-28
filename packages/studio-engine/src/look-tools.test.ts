@@ -3,6 +3,9 @@ import { runAgentTimelineTool } from './agent-timeline';
 import { emptyEditorDocumentV2 } from './editor-document';
 import { validateEditorDocumentV2 } from './editor-document/validation';
 import type { EditorDocumentV2 } from './editor-document/types';
+import type { Block } from './composition-core';
+import { componentSchemaOf } from './component-schema';
+import { renderV3State } from './agent-surface-v3/state';
 
 const card = "function (props, ctx) { return { html: '<b>' + props.title + '</b>', animate: function (tl, el) { tl.from(el, { opacity: 0, duration: 0.3 }, 0); } }; }";
 
@@ -24,7 +27,7 @@ describe('video-level template tools', () => {
     const written = setLook(withSpeech());
     expect(written.ok, JSON.stringify(written)).toBe(true);
     const look = written.document!.appearance.look!;
-    expect(look.pieces['item-card']).toMatchObject({ label: 'Item card', propsSchema: { title: { type: 'string' } } });
+    expect(look.pieces['item-card']).toMatchObject({ label: 'Item card', propsSchema: { type: 'object', properties: { title: { type: 'string' } } } });
     expect(look.id).toMatch(/^look-/);
     expect(validateEditorDocumentV2(written.document!).filter((issue) => issue.severity === 'error')).toEqual([]);
     // The same call is the same look (replay-safe id).
@@ -74,5 +77,22 @@ describe('video-level template tools', () => {
       { id: 'confirm-2', kind: 'voice', text: '用你的克隆声音配旁白？', status: 'open' },
     ]);
     expect(runAgentTimelineTool(rewritten.document!, 'set_confirm_list', { items: [] }).document!.semantics.handoff).toBeUndefined();
+  });
+  it('an instance edits through the piece schema: set_clip_properties, get_state and the component contract', () => {
+    const schema = JSON.stringify({ title: { type: 'string', title: '标题' }, price: { type: 'integer', title: '价格', default: 0 } });
+    const document = setLook(withSpeech(), [{ id: 'item-card', label: 'Item card', source: card, propsSchema: schema }]).document!;
+    const placed = runAgentTimelineTool(document, 'place_graphics', { items: [{ pieceId: 'item-card', props: [{ key: 'title', value: 'VIP 年卡' }, { key: 'extra', value: 'kept' }], startFrame: 0, durationFrames: 60 }] });
+    const clipId = (placed.data as { clipIds: string[] }).clipIds[0]!;
+    const edited = runAgentTimelineTool(placed.document!, 'set_clip_properties', { items: [{ clipId, props: [{ key: 'price', value: 34800 }] }] });
+    expect(edited.ok, JSON.stringify(edited)).toBe(true);
+    const block = edited.document!.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === clipId) as unknown as { block: Block };
+    // Undeclared props the piece was placed with survive an edit.
+    expect(block.block.slots.props).toEqual({ title: 'VIP 年卡', extra: 'kept', price: 34800 });
+    const view = componentSchemaOf(block.block, edited.document!.appearance.look);
+    expect(view).toMatchObject({ source: 'look', values: { title: 'VIP 年卡', price: 34800 } });
+    expect(componentSchemaOf(block.block)).toBeNull();
+    const state = JSON.stringify(renderV3State(edited.document!));
+    expect(state).toContain('"key":"price","type":"number","value":34800');
+    expect(runAgentTimelineTool(edited.document!, 'set_clip_properties', { items: [{ clipId, props: [{ key: 'nope', value: 1 }] }] }).ok).toBe(false);
   });
 });

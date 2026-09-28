@@ -5,6 +5,7 @@
 import type { Block } from '@pireel/studio-engine/composition';
 import { blockPropsSchema, componentPropsLiveMessage, parseComponentProps, resolveComponentProps, type ComponentPropSpec } from '@pireel/studio-engine/component-props';
 import { applyComponentValues } from '@pireel/studio-engine/component-schema';
+import type { DocumentLook } from '@pireel/studio-engine/look';
 
 /** The properties schema of a bespoke block, or [] for anything else (kit, media, captions, no schema). */
 export function blockPropSpecs(block: Pick<Block, 'templateId' | 'slots'>): ComponentPropSpec[] {
@@ -13,8 +14,8 @@ export function blockPropSpecs(block: Pick<Block, 'templateId' | 'slots'>): Comp
 }
 
 /** Slots after the user set the form to `next` — one rule for registered and bespoke components. */
-export function nextPropsSlots(block: Pick<Block, 'templateId' | 'slots'>, next: Record<string, unknown>): Record<string, unknown> {
-  return applyComponentValues(block, next) ?? block.slots;
+export function nextPropsSlots(block: Pick<Block, 'templateId' | 'slots'>, next: Record<string, unknown>, look?: DocumentLook): Record<string, unknown> {
+  return applyComponentValues(block, next, look) ?? block.slots;
 }
 
 /** The live message a bespoke component's drag paints (kit components re-render on commit instead). */

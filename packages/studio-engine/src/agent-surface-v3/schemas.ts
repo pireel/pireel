@@ -483,7 +483,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
           id: str('Lowercase words joined by hyphens, e.g. item-card.'),
           label: str('Name shown to people.'),
           source: str('The piece function expression.'),
-          propsSchema: str('JSON object string: JSON Schema properties of its props (what can be edited without regenerating).'),
+          propsSchema: str('JSON object string: JSON Schema properties of its props — what the creator edits in the inspector without regenerating. Per property: type (string, number, integer, boolean), enum, format (color, font), minimum and maximum (a slider), title (the label, in the creator\'s language), default. A list is an array of objects with scalar fields.'),
         }, ['id', 'source']), { minItems: 1, maxItems: 12 }),
         notes: str('Your statement of the system: what colours mean, where graphics live, how things move.'),
       }, ['css', 'pieces']),

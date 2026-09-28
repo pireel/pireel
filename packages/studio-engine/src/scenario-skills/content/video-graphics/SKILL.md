@@ -35,7 +35,8 @@ of the video is an instance of. Decide it from this material and this content.
 - Every frame must depend on time only. Motion goes through `tl`; there are no timers, clock or
   unseeded randomness.
 - `propsSchema` declares what a creator can change without regenerating: the words, numbers and
-  items the piece shows.
+  items the piece shows. It becomes the piece's form in the inspector, so give each property a
+  `title` in the creator's language.
 - A rejected look lists exact issues. Fix those and send the whole look again.
 
 ## 3. Place instances (`place_graphics`)

@@ -1159,7 +1159,7 @@ export function HyperframesWorkbench({
   const selectedDisplayTextBlockId = selectedDisplayTextBlock?.id ?? null;
   const selectedCustomBlock = useMemo(
     () => selectedId
-      ? comp.blocks.find((block) => block.id === selectedId && (block.templateId === "custom" || block.templateId.startsWith("kit:"))) ?? null
+      ? comp.blocks.find((block) => block.id === selectedId && (block.templateId === "custom" || block.templateId.startsWith("kit:") || block.templateId.startsWith("look:"))) ?? null
       : null,
     [comp.blocks, selectedId],
   );
@@ -5489,7 +5489,7 @@ export function HyperframesWorkbench({
   const patchComponentValues = (id: string, next: Record<string, unknown>) => {
     const block = compRef.current.blocks.find((x) => x.id === id);
     if (!block || genIdsRef.current.has(id)) return;
-    const edit = commit({ op: "overlay.patch", input: { updates: [{ clipId: id, block: { slots: nextPropsSlots(block, next) } }] } });
+    const edit = commit({ op: "overlay.patch", input: { updates: [{ clipId: id, block: { slots: nextPropsSlots(block, next, compRef.current.look) } }] } });
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return;
@@ -8585,6 +8585,7 @@ export function HyperframesWorkbench({
                     {floatWin === "props" && selectedCustomBlock && (
                       <ComponentPropsPanel
                         block={selectedCustomBlock}
+                        look={comp.look}
                         canvas={{ width: comp.width, height: comp.height }}
                         swatches={bgSwatches.map(([name, value]) => ({ label: t("panels.backgroundName", { name: t(name) }), value }))}
                         themeVars={effectiveThemeVars(getTheme(comp.theme), comp.palette)}
@@ -9937,7 +9938,7 @@ export function HyperframesWorkbench({
                               </Tooltip>
                             )}
                             {/* Editable properties live in the rail inspector; the bar only opens it. */}
-                            {(mb.templateId === "custom" || mb.templateId.startsWith("kit:")) && (
+                            {(mb.templateId === "custom" || mb.templateId.startsWith("kit:") || mb.templateId.startsWith("look:")) && (
                               <Tooltip>
                                 <TooltipTrigger asChild>
                                   <button

@@ -420,7 +420,22 @@ export function PropsForm({
             </Row>
           );
         }
-        if (f.type === 'number') {
+        if ((f.type === 'number' || f.type === 'integer') && f.maximum === undefined) {
+          // An unbounded number (a price, a count) is typed, not dragged.
+          return (
+            <Row key={key} label={label(key, f)} title={f.description}>
+              <input
+                type="number"
+                value={typeof v === 'number' ? v : ''}
+                min={f.minimum}
+                step={f.multipleOf ?? (f.type === 'integer' ? 1 : 'any')}
+                onChange={(e) => { const next = e.target.valueAsNumber; if (Number.isFinite(next)) commit(key, f.type === 'integer' ? Math.round(next) : next); }}
+                className={`${INPUT} w-28 text-right tabular-nums`}
+              />
+            </Row>
+          );
+        }
+        if (f.type === 'number' || f.type === 'integer') {
           const min = f.minimum ?? 0;
           const max = f.maximum ?? 1;
           const step = f.multipleOf ?? (max - min) / 100;

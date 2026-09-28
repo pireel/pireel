@@ -11,6 +11,7 @@ import { webFontCatalog } from '../font-library';
 import { captionAnimationId } from '../caption-animations';
 import { documentCaptionStyle } from '../editor-document/caption-state';
 import { componentSchemaOf, componentValuesView, type ComponentValueType } from '../component-schema';
+import type { DocumentLook } from '../look';
 import { dataEditFields } from '../component-props';
 import { clipPropertyDefaults, effectiveAudioClipProperties } from './clip-properties';
 
@@ -182,7 +183,7 @@ function zoomView(zoom: unknown, clipStartFrame: number, fps: number): Record<st
 
 
 /** Render one clip in the v3 shape. Linked audio partners are folded by the caller. */
-export function renderV3Clip(clip: TimelineClip, trackId: string, trackRole?: string, fps = 30): V3ClipView {
+export function renderV3Clip(clip: TimelineClip, trackId: string, trackRole?: string, fps = 30, look?: DocumentLook): V3ClipView {
   const view: V3ClipView = { id: clip.id, kind: clip.kind, trackId, frames: [clip.startFrame, clip.startFrame + clip.durationFrames] };
   if (!clip.enabled) view.enabled = false;
   if (clip.linkGroupId) view.linkGroupId = clip.linkGroupId;
@@ -220,7 +221,7 @@ export function renderV3Clip(clip: TimelineClip, trackId: string, trackRole?: st
       view.component = { ...(block.templateId ? { componentId: block.templateId } : {}), ...(block.box ? { box: block.box } : {}) };
       // Editable properties (registered and bespoke alike): keys, types and effective values, so
       // set_clip_properties.props needs no other lookup.
-      const editable = block.templateId ? componentSchemaOf({ templateId: block.templateId, slots: (block.slots ?? {}) as Record<string, unknown> }) : null;
+      const editable = block.templateId ? componentSchemaOf({ templateId: block.templateId, slots: (block.slots ?? {}) as Record<string, unknown> }, look) : null;
       if (editable) view.component.props = componentValuesView(editable);
       // On-screen wording of a bespoke component, by key: set_clip_properties.texts rewrites it in place.
       const texts = block.templateId === 'custom' && typeof block.slots?.innerHtml === 'string' ? dataEditFields(block.slots.innerHtml) : [];
@@ -337,7 +338,7 @@ export function renderV3State(
         if (partners.length === 1 && visual.length === 1) { folded.add(clip.id); continue; }
       }
       if (!inWindow(clip)) continue;
-      const rendered = renderV3Clip(clip, track.id, track.role, document.canvas.fps);
+      const rendered = renderV3Clip(clip, track.id, track.role, document.canvas.fps, document.appearance.look);
       if (clip.kind !== 'audio' && clip.linkGroupId) {
         const partner = (audioByGroup.get(clip.linkGroupId) ?? [])[0];
         if (partner && partner.kind === 'audio') {
@@ -437,7 +438,7 @@ export function documentDelta(before: EditorDocumentV2, after: EditorDocumentV2)
     const { startFrame: s1, ...rest1 } = next.clip as unknown as Record<string, unknown>;
     const contentChanged = entry.trackId !== next.trackId || JSON.stringify(rest0) !== JSON.stringify(rest1);
     if (contentChanged) {
-      touched.push(renderV3Clip(next.clip, next.trackId, next.trackRole, after.canvas.fps));
+      touched.push(renderV3Clip(next.clip, next.trackId, next.trackRole, after.canvas.fps, after.appearance.look));
       const was = sourceOf(entry.clip);
       const now = sourceOf(next.clip);
       // A trimmed clip lost part of its source: report the span that left so it can be re-inserted forward.
@@ -459,12 +460,12 @@ export function documentDelta(before: EditorDocumentV2, after: EditorDocumentV2)
   }
   for (const [id, entry] of afterClips) {
     if (entry.caption || beforeClips.has(id)) continue;
-    touched.push(renderV3Clip(entry.clip, entry.trackId, entry.trackRole, after.canvas.fps));
+    touched.push(renderV3Clip(entry.clip, entry.trackId, entry.trackRole, after.canvas.fps, after.appearance.look));
   }
   const shifted: V3Delta['shifted'] = [];
   for (const group of shiftGroups.values()) {
     if (group.count >= V3_SHIFT_RULE_MIN) shifted.push({ trackId: group.trackId, fromFrame: group.fromFrame, byFrames: group.byFrames, count: group.count });
-    else for (const id of group.ids) { const entry = afterClips.get(id)!; touched.push(renderV3Clip(entry.clip, entry.trackId, entry.trackRole, after.canvas.fps)); }
+    else for (const id of group.ids) { const entry = afterClips.get(id)!; touched.push(renderV3Clip(entry.clip, entry.trackId, entry.trackRole, after.canvas.fps, after.appearance.look)); }
   }
   touched.sort((left, right) => left.frames[0] - right.frames[0]);
   if (touched.length) {

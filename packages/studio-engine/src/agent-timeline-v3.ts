@@ -439,18 +439,19 @@ function setComponentProps(document: EditorDocumentV2, clipId: string, pairs: un
   if (!valid) return fail('props is a non-empty array of {key, value} pairs; keys come from component.props in get_state');
   const block = projectOverlayBlockById(document, clipId);
   if (!block) return fail(`graphic clip not found: ${clipId}`);
-  const view = componentSchemaOf(block);
-  if (!view) return fail('this component has no editable properties (media, caption, or a bespoke component without a properties schema)');
+  const look = document.appearance.look;
+  const view = componentSchemaOf(block, look);
+  if (!view) return fail('this component has no editable properties (media, caption, or a component without a properties schema)');
   const requested = Object.fromEntries(rows.map((pair) => [(pair as Input).key as string, (pair as Input).value]));
   const declared = Object.keys(view.schema.properties ?? {});
   const unknown = Object.keys(requested).filter((key) => !declared.includes(key));
   if (unknown.length) return fail(`unknown properties: ${unknown.join(', ')} — declared: ${declared.join(', ')}`);
   const valueError = componentPropertyInputError(view, requested);
   if (valueError) return fail(valueError);
-  const slots = applyComponentValues(block, requested)!;
+  const slots = applyComponentValues(block, requested, look)!;
   const edit = applyOverlayDocumentEdits({ document, updates: [{ clipId: block.id, block: { slots } }] });
   if (!edit.ok) return fail(edit.error.message, { code: edit.error.code, trackIds: edit.error.trackIds });
-  const after = componentSchemaOf({ templateId: block.templateId, slots })!;
+  const after = componentSchemaOf({ templateId: block.templateId, slots }, look)!;
   return mutation(edit.document, `Set ${rows.length} propert${rows.length === 1 ? 'y' : 'ies'} on "${blockName(block)}"`, edit.receipts, { clipId, props: componentValuesView(after) });
 }
 
@@ -1339,7 +1340,7 @@ export function inspectMediaV3(document: EditorDocumentV2, input: Input): AgentT
         fitScale: block.fitScale ?? null,
         innerHtml: cap(rendered.innerHtml, 4000),
         timelineBody: cap(rendered.timelineBody, 2000),
-        ...blockPropsReadback(block),
+        ...blockPropsReadback(block, document.appearance.look),
       },
     };
   }

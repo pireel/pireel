@@ -432,6 +432,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.editableProperties": "Properties",
   "workbench.componentHeaderCustom": "Custom component",
   "workbench.componentHeaderKit": "Preset component",
+  "workbench.componentHeaderLook": "Video look · {piece}",
   "workbench.resetProp": "Reset to default",
   "workbench.propsNoManifest": "This component declares no editable properties",
   "workbench.propsUnknownKeys": "Unknown properties: {keys}; declared: {declared}",

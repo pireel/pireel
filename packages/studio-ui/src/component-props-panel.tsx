@@ -22,6 +22,7 @@ import type { Block } from '@pireel/studio-engine/composition';
 import type { DisplayTextFontId } from '@pireel/studio-engine/composition';
 import { dataEditFields, imageSlots } from '@pireel/studio-engine/component-props';
 import { componentSchemaOf } from '@pireel/studio-engine/component-schema';
+import { lookPieceOf, type DocumentLook } from '@pireel/studio-engine/look';
 import { ImageIcon, RefreshCw, Shapes, Trash2 } from 'lucide-react';
 import type { Block as EditorBlock } from '@pireel/studio-engine/composition';
 import { liveMessageFor } from './component-props-ui';
@@ -46,6 +47,8 @@ export interface InspectorBlockPatch {
 
 export interface ComponentPropsPanelProps {
   block: Block | null;
+  /** The output's look: a look instance's properties are declared by its piece there. */
+  look?: DocumentLook;
   /** Canvas size, for showing the box in percent and radius in px. */
   canvas: { width: number; height: number };
   /** Background / border swatches (theme paper and panel first). */
@@ -188,7 +191,7 @@ function Empty({ text }: { text: string }) {
   return <div data-block-selection-keep className="text-ink-4 flex h-full items-center justify-center px-6 text-center text-[11px] leading-5">{text}</div>;
 }
 
-export function ComponentPropsPanel({ block, swatches, themeVars, onBlockPatch, onValues, onLive, onText, onReplaceImage, onRemoveImage }: ComponentPropsPanelProps) {
+export function ComponentPropsPanel({ block, look, swatches, themeVars, onBlockPatch, onValues, onLive, onText, onReplaceImage, onRemoveImage }: ComponentPropsPanelProps) {
   const [localFonts, setLocalFonts] = useState<LocalFontFamilyOption[]>(cachedLocalFontFamilies);
   const [fontAccessState, setFontAccessState] = useState<'idle' | 'loading' | 'loaded' | 'denied' | 'unsupported'>('idle');
   const requestLocalFonts = async () => {
@@ -197,14 +200,19 @@ export function ComponentPropsPanel({ block, swatches, themeVars, onBlockPatch, 
     try { setLocalFonts(await loadLocalFontFamilies()); setFontAccessState('loaded'); } catch { setFontAccessState('denied'); }
   };
 
-  const view = block ? componentSchemaOf(block) : null;
-  if (!block || (block.templateId !== 'custom' && !view)) return <Empty text={t('workbench.propsSelectHint')} />;
+  const view = block ? componentSchemaOf(block, look) : null;
+  const pieceId = block ? lookPieceOf(block.templateId) : null;
+  if (!block || (block.templateId !== 'custom' && !pieceId && !view)) return <Empty text={t('workbench.propsSelectHint')} />;
   // Text and image slots belong to bespoke markup; registered components carry their text in schema rows.
   const innerHtml = block.templateId === 'custom' && typeof block.slots.innerHtml === 'string' ? block.slots.innerHtml : '';
   const texts = dataEditFields(innerHtml);
   const images = imageSlots(innerHtml);
   const isCustom = block.templateId === 'custom';
-  const headerName = block.label?.trim() || (isCustom ? t('workbench.componentHeaderCustom') : t('workbench.componentHeaderKit'));
+  // What kind of component this is, under its name: a look instance names its piece.
+  const kindLabel = pieceId
+    ? t('workbench.componentHeaderLook', { piece: look?.pieces[pieceId]?.label ?? pieceId })
+    : isCustom ? t('workbench.componentHeaderCustom') : t('workbench.componentHeaderKit');
+  const headerName = block.label?.trim() || kindLabel;
   const schemaFields = Object.entries(((view?.schema as PropsSchema | undefined)?.properties) ?? {});
   const groupsWithFields = new Set(schemaFields.filter(([, f]) => !f['x-hidden']).map(([key, f]) => propertyGroupOf(key, f)));
   // Fixed order; a section shows when the component has something in it. Every component takes
@@ -249,7 +257,7 @@ export function ComponentPropsPanel({ block, swatches, themeVars, onBlockPatch, 
         <div className="min-w-0 flex-1">
           {/* The name edits in place; placement and timing are edited on the canvas and timeline. */}
           <NameField name={block.label ?? ''} placeholder={headerName} onCommit={(label) => onBlockPatch({ block: { label: label.trim() || undefined } })} />
-          <div className="text-ink-4 truncate px-1 text-[10.5px]">{isCustom ? t('workbench.componentHeaderCustom') : t('workbench.componentHeaderKit')}</div>
+          <div className="text-ink-4 truncate px-1 text-[10.5px]">{kindLabel}</div>
         </div>
       </div>
 
