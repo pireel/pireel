@@ -24,10 +24,10 @@ function pointer(element: Element, type: 'pointerover' | 'pointerout') {
 describe('single video style showcase', () => {
   it('cycles the active style without replacing the video', () => {
     const video = container.querySelector('video');
-    expect(active()).toBe('art-beast');
+    expect(active()).toBe('karaoke');
     act(() => vi.advanceTimersByTime(1400));
-    expect(active()).toBe('art-keyline');
-    expect(container.querySelector('[data-caption-demo-frame] [data-preview-style]')?.getAttribute('data-preview-style')).toBe('art-keyline');
+    expect(active()).toBe('art-beast');
+    expect(container.querySelector('[data-caption-demo-frame] [data-preview-style]')?.getAttribute('data-preview-style')).toBe('art-beast');
     expect(container.querySelector('video')).toBe(video);
   });
   it('applies hovered styles, pauses the style cycle, and resumes on exit while video keeps playing', () => {
