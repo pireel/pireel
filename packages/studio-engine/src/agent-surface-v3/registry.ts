@@ -25,7 +25,8 @@ export interface V3ToolSpec {
    *  name or payload. Stable contracts are append-only within one version; a breaking change needs a
    *  new capability id or a higher version with an explicit compatibility path. */
   skillContract?: { version: number; stability: 'stable' | 'experimental' };
-  /** Runs only inside Studio Chat (needs an in-app card the other surfaces cannot show). */
+  /** Runs only inside Studio Chat: it needs an in-app card, or it serves the in-app model only
+   *  (external agents bring their own model and do that work themselves). */
   chatOnly?: boolean;
   /** Answered directly by the server on the MCP surface (no open tab needed). */
   serverDirect?: boolean;
@@ -41,7 +42,8 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   { id: 'inspect_media', group: 'state', charges: true, skillContract: { version: 1, stability: 'stable' } },
   { id: 'inspect_timeline', group: 'state', skillContract: { version: 1, stability: 'stable' } },
   { id: 'get_beat_grid', group: 'state' },
-  { id: 'get_facts', group: 'state' },
+  // In-app agent only: external agents bring their own model and look at the material themselves.
+  { id: 'get_facts', group: 'state', chatOnly: true },
   { id: 'manage_project', group: 'state', serverDirect: true },
   // ---- assets (7)
   { id: 'search_assets', group: 'assets', serverDirect: true },
