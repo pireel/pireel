@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { captionBlocksFromAsr } from '@pireel/studio-engine/build-blocks';
 import { emptyComposition, type CaptionStyle, type Composition } from '@pireel/studio-engine/composition';
-import { BlockPreviewFrame } from './block-preview-card';
+import { InlineBlockPreview } from './block-preview-card';
 
 /**
- * A sample caption drawn by the engine's own renderer over footage: the same document code the
- * editor and export use, so a look picked on a style card shows here exactly as it will render.
+ * A sample caption drawn by the engine's own renderer over footage: the production block assembler
+ * mounted in the page (no iframe), so a look picked on a style card shows here as it will render.
  * `text` separates words with `|`; the frame holds on the caption's resting state.
  */
 export function CaptionStageSample({ style, canvas, text, subText }: {
@@ -29,6 +29,6 @@ export function CaptionStageSample({ style, canvas, text, subText }: {
     return { ...captionBlocksFromAsr([segment], { preset: style.preset })[0]!, id: 'caption_sample' };
   }, [text, subText, style.preset, comp]);
   return <div ref={host} className="absolute inset-0">
-    {width > 0 && <BlockPreviewFrame comp={comp} block={block} width={width} ground="none" fit="canvas" />}
+    {width > 0 && <InlineBlockPreview comp={comp} block={block} width={width} ground="none" />}
   </div>;
 }

@@ -48,9 +48,8 @@ export function BlockPreviewFrame({
   /** Fixed card height; omitted = derived from the canvas aspect. With a fixed height the canvas
    *  (or the focus piece) is contain-fit and centered — used by fixed-height cards like the chat preview. */
   height?: number;
-  /** Preview ground: 'checker' = honest ground (transparent checkerboard, library/card default); 'stage' = stage paper ground (theme wall);
-   *  'none' = transparent with no ground of its own, for overlaying real footage. */
-  ground?: 'stage' | 'checker' | 'none';
+  /** Preview ground: 'checker' = honest ground (transparent checkerboard, library/card default); 'stage' = stage paper ground (theme wall). */
+  ground?: 'stage' | 'checker';
   /** 'canvas' uses the entire preview viewport. 'inset' keeps the historical checkerboard margin. */
   fit?: 'canvas' | 'inset';
   /** Focus box (design-canvas px): given = show only this block (piece centered and enlarged, used by component list cards); omitted = whole canvas shrunk. */
@@ -96,7 +95,7 @@ export function BlockPreviewFrame({
   latest.current = block;
   const doc = useMemo(
     () => {
-      const base = injectPreviewRuntime(blockPreviewDoc(comp, latest.current, { loop: docLoop, ground: ground === 'none' ? 'checker' : ground }));
+      const base = injectPreviewRuntime(blockPreviewDoc(comp, latest.current, { loop: docLoop, ground }));
       return focusContent ? injectPreviewContentBoundsReporter(base, block.id) : base;
     },
     // `docKey` deliberately fingerprints only structural composition fields; depending on the
@@ -166,7 +165,7 @@ export function BlockPreviewFrame({
   }, [replayKey]);
   return (
     <div
-      className={`relative overflow-hidden ${ground === 'stage' ? 'bg-black/40' : ''}`}
+      className={`relative overflow-hidden ${ground === 'checker' ? '' : 'bg-black/40'}`}
       style={{ width, height: h, ...(ground === 'checker' ? CHECKER_STYLE : {}) }}
       onPointerEnter={animate === 'hover' ? () => setLoop(true) : undefined}
       onPointerLeave={animate === 'hover' ? () => setLoop(false) : undefined}
@@ -282,8 +281,9 @@ export function InlineBlockPreview({
   animate?: boolean | 'hover';
   /** Placeholder person; null = don't draw (non-theme scenes). */
   person?: PreviewPerson | null;
-  /** Preview ground: 'checker' = honest ground (transparent checkerboard, library/card default); 'stage' = stage paper ground (theme wall). */
-  ground?: 'stage' | 'checker';
+  /** Preview ground: 'checker' = honest ground (transparent checkerboard, library/card default); 'stage' = stage paper ground (theme wall);
+   *  'none' = transparent and full-size, for drawing over real footage. */
+  ground?: 'stage' | 'checker' | 'none';
   /** Trusted scene layer behind the block, used when a card previews the block in composition rather than in isolation. */
   backdrop?: ReactNode;
   /** Screen-space chrome over the scaled stage, such as a caption sample. */
@@ -337,7 +337,7 @@ export function InlineBlockPreview({
       <div
         ref={(el) => {
           if (el)
-            el.style.cssText = `position:absolute;left:${padX}px;top:${padY}px;width:${comp.width}px;height:${comp.height}px;transform:scale(${scale});transform-origin:top left;overflow:hidden;${ground === 'checker' ? 'background:transparent;' : `background:${stageBg};`}${vars}font-family:var(--font-body);color:var(--fg);`;
+            el.style.cssText = `position:absolute;left:${padX}px;top:${padY}px;width:${comp.width}px;height:${comp.height}px;transform:scale(${scale});transform-origin:top left;overflow:hidden;${ground !== 'stage' ? 'background:transparent;' : `background:${stageBg};`}${vars}font-family:var(--font-body);color:var(--fg);`;
         }}
       >
         {backdrop}
