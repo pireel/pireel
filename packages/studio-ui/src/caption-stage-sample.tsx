@@ -28,7 +28,9 @@ export function CaptionStageSample({ style, canvas, text, subText }: {
     const segment = { text: words.join(/[A-Za-z]/.test(text) ? ' ' : ''), start: 0, end: 3, words: words.map((word, index) => ({ text: word, start: index * step, end: (index + 1) * step })), ...(subText ? { sub: subText } : {}) };
     return { ...captionBlocksFromAsr([segment], { preset: style.preset })[0]!, id: 'caption_sample' };
   }, [text, subText, style.preset, comp]);
+  // A new look or animation plays once; moving the caption up or down does not.
+  const replayKey = useMemo(() => { const { yPct: _y, sub, ...look } = style; const { yPct: _sy, ...subLook } = sub ?? {}; return JSON.stringify([look, subLook]); }, [style]);
   return <div ref={host} className="absolute inset-0">
-    {width > 0 && <InlineBlockPreview comp={comp} block={block} width={width} ground="none" />}
+    {width > 0 && <InlineBlockPreview comp={comp} block={block} width={width} ground="none" replayKey={replayKey} />}
   </div>;
 }

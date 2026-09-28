@@ -217,6 +217,8 @@ interface GsapTimeline {
   play(t?: number): void;
   pause(t?: number): void;
   progress(v: number): GsapTimeline;
+  time(): number;
+  isActive(): boolean;
   kill(): void;
 }
 /** The page's self-hosted GSAP, shared with the preview stage host. */
@@ -272,6 +274,7 @@ export function InlineBlockPreview({
   person = null,
   ground = 'checker',
   backdrop,
+  replayKey,
   children,
 }: {
   comp: Composition;
@@ -286,6 +289,9 @@ export function InlineBlockPreview({
   ground?: 'stage' | 'checker' | 'none';
   /** Trusted scene layer behind the block, used when a card previews the block in composition rather than in isolation. */
   backdrop?: ReactNode;
+  /** Bump to play the block once from its start and settle on the resting state (the first value
+   *  only shows the resting state). */
+  replayKey?: string | number;
   /** Screen-space chrome over the scaled stage, such as a caption sample. */
   children?: ReactNode;
 }) {
@@ -293,6 +299,9 @@ export function InlineBlockPreview({
   // silently discarded block.box, so Frame/Motion Graphic samples appeared as a
   // full-canvas layer even though their production placement was safe.
   const { html, timelineBody } = useMemo(() => assembleBlockHtml(block, comp), [block, comp]);
+  // One object per markup: React rewrites innerHTML whenever this prop object changes, which would
+  // swap the nodes a running timeline animates on every parent re-render.
+  const markup = useMemo(() => ({ __html: html }), [html]);
   const theme = getTheme(comp.theme);
   const vars = useMemo(() => themeVarsCss(theme, comp.palette), [theme, comp.palette]);
   const stageBg = comp.palette?.paper ?? theme.background;
@@ -302,6 +311,10 @@ export function InlineBlockPreview({
   const padX = Math.round((width * (1 - inset)) / 2);
   const padY = Math.round((h * (1 - inset)) / 2);
   const tlRef = useRef<GsapTimeline | null>(null);
+  // A replay asked for in the same commit that rebuilds the timeline applies to the rebuilt one.
+  const replayAt = useRef(-Infinity);
+  const resumeAt = useRef<number | null>(null);
+  const firstReplayKey = useRef(replayKey);
 
   useEffect(() => {
     let dead = false;
@@ -312,20 +325,33 @@ export function InlineBlockPreview({
       // hover plays once from the start, ending naturally at the final state.
       const tl = g.timeline(animate === true ? { paused: true, repeat: -1, repeatDelay: 1.2 } : { paused: true });
       try {
-        new Function('tl', timelineBody)(tl);
-      } catch {
-        /* bad timeline -> static display */
+        // Assembled bodies call gsap directly (the stage runtime has it as a global); give them this one.
+        new Function('tl', 'gsap', timelineBody)(tl, g);
+      } catch (error) {
+        // Bad timeline -> static display, but say so: a silent catch hid a missing global once.
+        console.warn('[inline preview] timeline failed', error);
       }
       tlRef.current = tl;
-      if (animate === true) tl.play(0);
+      const resume = resumeAt.current;
+      resumeAt.current = null;
+      if (resume != null) tl.play(resume);
+      else if (animate === true || performance.now() - replayAt.current < 1000) tl.play(0);
       else tl.progress(1).pause();
     });
     return () => {
       dead = true;
+      // The markup is being replaced mid-play (e.g. a re-measured position): continue on the new nodes.
+      if (tlRef.current?.isActive()) resumeAt.current = tlRef.current.time();
       tlRef.current?.kill();
       tlRef.current = null;
     };
-  }, [timelineBody, animate]);
+  }, [timelineBody, html, animate]);
+  useEffect(() => {
+    if (replayKey === undefined || replayKey === firstReplayKey.current) return;
+    firstReplayKey.current = undefined;
+    replayAt.current = performance.now();
+    tlRef.current?.play(0);
+  }, [replayKey]);
 
   return (
     <div
@@ -344,7 +370,7 @@ export function InlineBlockPreview({
         {/* Placeholder person underneath (normal overlay: graphics in front of the person) */}
         {person && !person.front && <PersonBust person={person} canvasH={comp.height} />}
         {/* The assembled block includes the same framing box and sizing context used by editor/export. */}
-        <div style={{ position: 'absolute', inset: 0 }} dangerouslySetInnerHTML={{ __html: html }} />
+        <div style={{ position: 'absolute', inset: 0 }} dangerouslySetInnerHTML={markup} />
         {/* Person on top (personFront: text-behind-person / sticker person) -> silhouette sits in front of the graphics */}
         {person?.front && <PersonBust person={person} canvasH={comp.height} />}
       </div>
