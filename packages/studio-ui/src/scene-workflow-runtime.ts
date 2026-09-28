@@ -152,9 +152,15 @@ export class SceneWorkflowHost {
     return { task: { ...this.task, workflow: completed, workflowData: this.data, updatedAt: Date.now() }, run: completed, video: this.video };
   }
   async run(definition: WorkflowDefinition, nodes: SceneNode[]) {
+    const result = await this.compose(definition, nodes);
+    if (!result.video) throw new Error(result.task.error ?? '工作流未完成。');
+    return { task: result.task, video: result.video };
+  }
+  /** Run to the edited document; a video only exists when the definition renders one. */
+  async compose(definition: WorkflowDefinition, nodes: SceneNode[]) {
     const result = await this.executeGraph(definition, nodes);
     if (result.run.status === 'waiting') throw Object.assign(new Error('工作流等待确认，请在工作流待办中处理后继续。'), { code: 'workflow_waiting' });
-    if (result.run.status !== 'completed' || !result.video) throw new Error(result.run.error ?? '工作流未完成。');
+    if (result.run.status !== 'completed') throw new Error(result.run.error ?? '工作流未完成。');
     return { task: { ...result.task, stage: 'completed' as const }, video: result.video };
   }
 }

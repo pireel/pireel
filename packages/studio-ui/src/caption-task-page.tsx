@@ -28,6 +28,7 @@ import { SceneBrandPicker } from './scene-brand-picker';
 import { CaptionProgressOverlay } from './caption-progress-overlay';
 import { createCaptionAgentRemix } from './caption-agent-remix';
 import { CaptionTaskStyle } from './caption-task-style';
+import { CaptionDocumentPreview } from './caption-document-preview';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { fileSig, probeVideoFile, type ProbedFile } from './media';
 import { loadCurrentUser } from './current-user';
@@ -37,6 +38,10 @@ import { ensureFontStylesheet } from './web-fonts';
 import { loadCaptionTask, saveCaptionTask, loadCaptionMedia, syncCaptionProject, listCaptionVersions, loadCaptionVersion, type CaptionTaskRecord, type CaptionTaskProgress, type CaptionVersionSummary, type CaptionTaskVersion } from './caption-task-store';
 
 const defaults: CaptionTaskOptions = { caption: {}, aspect: 'original', shortenPauses: false };
+/** The latest caption generation before it is downloaded: a version entry with no video yet. */
+function generatedVersion(task: CaptionTaskRecord, history: readonly { number: number }[]): CaptionTaskVersion {
+  return { id: task.generationId!, number: Math.max(0, ...history.map(version => version.number)) + 1, createdAt: task.updatedAt, task: structuredClone(task) };
+}
 const actionClass = 'bg-ink text-bg inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40';
 
 export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, onOpenEditor }: { taskId: string; locale: 'zh' | 'en'; scene?: 'captions' | 'dubbing' | 'broll' | 'pip' | 'sfx' | 'subtitle-removal' | 'ugc-ad'; onBack: () => void; onOpenEditor: (projectId: string) => void }) {
@@ -55,6 +60,8 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
   const isBroll = scene === 'broll' || isPip || isUgc;
   const FootageSettings = isPip ? PipSettings : BrollSettings;
   const isDubbing = scene === 'dubbing';
+  // Captions generate a document; the video is rendered when it is downloaded.
+  const isCaptions = scene === 'captions';
   const say = (cn: string, en: string) => zh ? cn : en;
   const [scope, setScope] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -149,10 +156,36 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
       if(alive.current && !controller.signal.aborted)setError(reason instanceof Error ? reason.message : String(reason));
     } finally { busyRef.current = false; abortRef.current = null; if(alive.current)setExporting(false); }
   };
+  /** Render the generated caption document, keep it as a version (a later download is instant), then download it. */
+  const downloadGenerated = async () => {
+    const current = taskRef.current;
+    if (!current?.document || !file || !scope || busyRef.current || current.generationId !== selectedVersion?.id) return;
+    busyRef.current = true; setExporting(true); setExportProgress(0); setError('');
+    const controller = new AbortController(); abortRef.current = controller;
+    try {
+      const { exportCaptionEdit } = await import('./caption-task-runner');
+      const video = await exportCaptionEdit(current, file, { signal: controller.signal, progress: fraction => { if (alive.current) setExportProgress(fraction); } });
+      if (!alive.current || controller.signal.aborted) return;
+      const saved = await persist(current, video);
+      const history = saved ? await listCaptionVersions(scope, taskId) : versions;
+      const summary = history.find(version => version.id === current.generationId) ?? generatedVersion(current, history);
+      const version = { ...summary, task: structuredClone(current) };
+      if (!saved) inMemoryVersions.current.set(version.id, { version, video });
+      if (!alive.current) return;
+      setVersions(history.some(entry => entry.id === summary.id) ? history : [summary, ...history]);
+      setSelectedVersion(version); setResult(video);
+      const url = URL.createObjectURL(video);
+      const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${current.name.replace(/\.[^.]+$/, '')}-v${version.number}.mp4`;
+      document.body.appendChild(anchor); anchor.click(); anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (reason) {
+      if (alive.current && !controller.signal.aborted) setError(reason instanceof Error ? reason.message : String(reason));
+    } finally { busyRef.current = false; abortRef.current = null; if (alive.current) setExporting(false); }
+  };
   const start = async (resume = false, confirmed = false) => {
     if (!file || !probe || !scope || busyRef.current) return;
     if (isUgc) { try { readyUgcAdOptions(options.ugcAd); } catch (error) { setError(error instanceof Error ? error.message : String(error)); return; } }
-    if (!resume && !confirmed && versions.length > 0) { setConfirmGenerate(true); return; }
+    if (!resume && !confirmed && (versions.length > 0 || pendingGeneration)) { setConfirmGenerate(true); return; }
     busyRef.current = true; versionRequest.current++;
     setBusy(true); setVersionLoading(false); setError(''); setStopping(false); setProgress({ preparing: { status: 'running' } }); setDrafting(true);
     const controller = new AbortController(); abortRef.current = controller;
@@ -170,6 +203,12 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
       const completed = await runCaptionTask(next, file, { signal: controller.signal, checkpoint: async (record) => { if (!await persist(record)) throw new Error(say('执行进度未保存，已停止后续处理。', 'Could not save execution progress. Further processing stopped.')); }, progress: () => {}, stageProgress: (value) => { if (alive.current) setProgress(value); } });
       if (!alive.current || controller.signal.aborted) return;
       if (isDubbing && completed.task.dubbing?.outputCached === false) setStorageNote(say('成片未缓存到本机，请及时下载保存。', 'The result could not be cached locally. Download a copy.'));
+      if (!completed.video) {
+        await persist(completed.task);
+        if (!alive.current) return;
+        setSelectedVersion(generatedVersion(completed.task, versions)); setResult(null); setDrafting(false);
+        return;
+      }
       const saved = await persist(completed.task, completed.video);
       const history = saved ? await listCaptionVersions(scope, taskId) : versions;
       const summary = history.find((version) => version.id === next.generationId) ?? { id: next.generationId!, number: Math.max(0, ...history.map((version) => version.number)) + 1, createdAt: completed.task.updatedAt };
@@ -198,13 +237,14 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
       if ((record.scene ?? 'captions') !== scene) throw new Error(say('项目类型不匹配，请从首页打开。', 'Open this project from the home page.'));
       if (studioProviders().sceneProjects && record.cloudPending) void syncCaptionProject(scope, taskId).then(() => { if (current) setStorageNote(''); }).catch((error) => { if (current) setStorageNote(error instanceof Error ? error.message : say('云端同步未完成。', 'Cloud sync is incomplete.')); });
       const [source, history] = await Promise.all([loadCaptionMedia(scope, record.sourceSig, record.name), listCaptionVersions(scope, taskId)]);
-      const selected = history[0] ? await loadCaptionVersion(scope, taskId, history[0].id) : undefined;
+      const unexported = isCaptions && record.stage === 'completed' && !!record.document && !!record.generationId && !history.some(version => version.id === record.generationId);
+      const selected = !unexported && history[0] ? await loadCaptionVersion(scope, taskId, history[0].id) : undefined;
       if (!current) return;
       const loadedOptions = storedCaptionTaskOptions(record.draftOptions ?? record.options);
       setTask(record); setOptions(isDubbing ? { ...loadedOptions, dubbing: dubbingSceneOptions(loadedOptions.dubbing ?? DEFAULT_DUBBING_OPTIONS), translationLanguage: undefined } : loadedOptions); setFile(source); setCover(record.coverThumb ?? '');
       setProbe({ width: record.width, height: record.height, durationSec: record.durationSec, hasAudio: true });
-      setVersions(history); setSelectedVersion(selected?.version ?? null); setResult(selected?.video ?? null); setProgress(record.progress ?? {});
-      setDrafting(!!record.draftDocument || !!record.draftOptions || !selected || record.stage !== 'completed');
+      setVersions(history); setSelectedVersion(unexported ? generatedVersion(record, history) : selected?.version ?? null); setResult(selected?.video ?? null); setProgress(record.progress ?? {});
+      setDrafting(!!record.draftDocument || !!record.draftOptions || (!selected && !unexported) || record.stage !== 'completed');
       if (!source) setError(say('请重新选择原视频以继续配置；已有版本仍可下载。', 'Re-select the source to continue. Existing versions can still be downloaded.'));
       else if (record.error && !(isDubbing && record.options.dubbing?.lipSync && record.progress?.lipsync?.status === 'running')) setError(record.error);
       else setError('');
@@ -231,6 +271,7 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
   const selectVersion = async (id: string) => {
     if (!scope || busyRef.current) return;
     const request = ++versionRequest.current;
+    if (pendingGeneration && id === taskRef.current?.generationId) { setSelectedVersion(generatedVersion(taskRef.current, versions)); setResult(null); setOptions(storedCaptionTaskOptions(taskRef.current.options)); setDrafting(false); setVersionLoading(false); return; }
     if (id === 'draft') { setDrafting(true); setVersionLoading(false); const draft = taskRef.current?.draftOptions ?? taskRef.current?.options ?? defaults; setOptions(isDubbing ? { ...draft, dubbing: dubbingSceneOptions(draft.dubbing ?? DEFAULT_DUBBING_OPTIONS), translationLanguage: undefined } : draft); return; }
     setVersionLoading(true); setError('');
     try {
@@ -265,6 +306,9 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
   const sfxViewTask = !drafting && selectedVersion ? selectedVersion.task : task ? { ...task, document: task.draftDocument ?? task.document } : null;
   const brollViewTask = !drafting && selectedVersion ? selectedVersion.task : task;
   const playable = !drafting && !!resultUrl && !busy && !versionLoading;
+  // A caption generation that has not been downloaded yet: previewed live, rendered on download.
+  const pendingGeneration = isCaptions && task?.stage === 'completed' && !!task.document && !!task.generationId && !versions.some(version => version.id === task.generationId);
+  const generatedView = isCaptions && !drafting && !resultUrl && !!selectedVersion?.task.document && !busy && !versionLoading;
   const disabled = busy || preparing || versionLoading || exporting;
   const retrySfx = isSfx && drafting && !!task && ['failed', 'interrupted'].includes(task.stage) && !!task.workflow?.steps.some(step => {
     const receipt = task.workflowData?.receipts[step.inputKey ?? ''];
@@ -277,16 +321,17 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
 
   const videoActions = (addFootage?:ReactNode) => <div className="flex shrink-0 flex-wrap items-center gap-1.5 py-0.5">
 
-    {versions.length > 0 && (
+    {(versions.length > 0 || pendingGeneration) && (
           <Select disabled={disabled} value={drafting ? 'draft' : selectedVersion?.id ?? 'draft'} onValueChange={(value) => void selectVersion(value)}>
             <SelectTrigger aria-label={say('视频版本', 'Video version')} className={sceneActionClass + ' w-auto min-w-24 justify-between'}><SelectValue /></SelectTrigger>
-            <SelectContent className="max-h-72"><SelectItem value="draft">{say('当前配置', 'Current settings')}</SelectItem>{versions.map((version) => <SelectItem key={version.id} value={version.id}>{say('版本', 'Version')} {version.number}</SelectItem>)}</SelectContent>
+            <SelectContent className="max-h-72"><SelectItem value="draft">{say('当前配置', 'Current settings')}</SelectItem>{pendingGeneration && <SelectItem value={task.generationId!}>{say('最新生成（未导出）', 'Latest (not exported)')}</SelectItem>}{versions.map((version) => <SelectItem key={version.id} value={version.id}>{say('版本', 'Version')} {version.number}</SelectItem>)}</SelectContent>
           </Select>
     )}
     {addFootage}
     <div className="flex-1" />
     <button type="button" disabled={!file || disabled} onClick={() => void editInStudio()} className={sceneActionClass}><img src={AGENT_ENTRY_ICON} width={18} height={18} alt="" className="size-[18px] object-contain"/>Agent Remix</button>
-    {playable && selectedVersion ? <a href={resultUrl} download={`${task.name.replace(/\.[^.]+$/, '')}-v${selectedVersion.number}.mp4`} className={sceneActionClass}><Download size={14}/>{say('下载','Download')}</a> : <button type="button" disabled={disabled || !versions.length || (isRemoval && drafting) || (isSfx && drafting && !task.draftDocument) || (isUgc && drafting)} onClick={() => void (isBroll || isSfx ? exportCurrentEdit() : start())} className={sceneActionClass}>{exporting?<Loader2 size={14} className="animate-spin"/>:<Download size={14}/>} {exporting ? `${say('导出中','Exporting')} ${Math.round(exportProgress*100)}%` : versions.length ? say('导出','Export') : say('下载','Download')}</button>}
+    {generatedView ? <button type="button" disabled={disabled || !file} onClick={() => void downloadGenerated()} className={sceneActionClass}>{exporting ? <Loader2 size={14} className="animate-spin"/> : <Download size={14}/>} {exporting ? `${say('导出中', 'Exporting')} ${Math.round(exportProgress * 100)}%` : say('下载', 'Download')}</button>
+    : playable && selectedVersion ? <a href={resultUrl} download={`${task.name.replace(/\.[^.]+$/, '')}-v${selectedVersion.number}.mp4`} className={sceneActionClass}><Download size={14}/>{say('下载','Download')}</a> : <button type="button" disabled={disabled || !versions.length || (isRemoval && drafting) || (isSfx && drafting && !task.draftDocument) || (isUgc && drafting)} onClick={() => void (isBroll || isSfx ? exportCurrentEdit() : start())} className={sceneActionClass}>{exporting?<Loader2 size={14} className="animate-spin"/>:<Download size={14}/>} {exporting ? `${say('导出中','Exporting')} ${Math.round(exportProgress*100)}%` : versions.length ? say('导出','Export') : say('下载','Download')}</button>}
   </div>;
   return <section className="studio-scope mx-auto flex h-full min-h-0 w-full flex-1 max-w-[1440px] flex-col overflow-hidden px-5 py-5 sm:px-10">
     <Dialog open={confirmGenerate} onOpenChange={setConfirmGenerate}>
@@ -336,7 +381,7 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
         {isSfx && !busy && !versionLoading ? (sfxViewTask && file ? <SfxTimeline task={sfxViewTask} source={file} locale={locale} disabled={disabled} actions={videoActions()} onChange={editSfxDocument}/> : <div className="text-ink-3 flex h-full flex-col items-center justify-center gap-4 text-sm"><p>{say('请重新选择原视频以预览独立音效轨。', 'Re-select the original video to preview the sound tracks.')}</p>{videoActions()}</div>) : isBroll && !isUgc && brollViewTask?.broll?.planKey && brollAssetsMatch(brollViewTask.broll.analysisKey, options.broll?.assets ?? []) && file && !busy && !versionLoading ? <BrollTimeline actions={videoActions} task={brollViewTask} options={options} source={file} renderedUrl={playable ? resultUrl : undefined} locale={locale} disabled={disabled} onChange={broll => {
           if (!drafting && selectedVersion && taskRef.current) { const next = { ...taskRef.current, broll: selectedVersion.task.broll, transcript: selectedVersion.task.transcript }; taskRef.current = next; setTask(next); }
           changeOptions(current => ({ ...current, broll }));
-        }} /> : (
+        }} /> : generatedView && file && selectedVersion ? <CaptionDocumentPreview task={selectedVersion.task} source={file} locale={locale} disabled={disabled} actions={videoActions()} /> : (
         <SceneVideoPreview source={file} resultUrl={playable ? resultUrl : undefined} poster={firstFrame || cover} width={probe?.width ?? task.width} height={probe?.height ?? task.height} duration={task.durationSec} disabled={disabled} locale={locale} actions={videoActions()}>
           {!playable && <>
             {isRemoval && options.subtitleRemoval?.mode === 'region' && options.subtitleRemoval.region && !busy && !versionLoading && <SubtitleRegionOverlay region={options.subtitleRemoval.region} locale={locale} disabled={disabled} onChange={region => changeOptions(current => ({ ...current, subtitleRemoval: { ...current.subtitleRemoval, mode: 'region', region } }))}/>}

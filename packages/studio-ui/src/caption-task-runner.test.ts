@@ -6,7 +6,13 @@ vi.mock('./media', () => ({ transcribeFile: mock.transcribe, durableFileSig: asy
 vi.mock('./speech-silence', () => ({ detectSpeechSilenceCuts: mock.clean }));
 vi.mock('./client-export', () => ({ clientExportVideo: mock.render }));
 vi.mock('./web-fonts', () => ({ loadFont: mock.font }));
-import { runCaptionTask } from './caption-task-runner';
+import { runCaptionTask as generateCaptions, exportCaptionEdit } from './caption-task-runner';
+import type { SceneWorkflowHooks } from './scene-workflow-runtime';
+/** Generation, then the download-time render, as the scene page does. */
+async function runCaptionTask(source: CaptionTaskRecord, input: File, hooks: SceneWorkflowHooks) {
+  const generated = await generateCaptions(source, input, hooks);
+  return { ...generated, video: await exportCaptionEdit(generated.task, input, hooks) };
+}
 const transcript = [{ text: 'Hello world', start: 0, end: 3, words: [{ text: 'Hello', start: 0, end: 1 }, { text: 'world', start: 2, end: 3 }] }];
 const task = (): CaptionTaskRecord => ({ id: 'task', scope: 'account', name: 'video.mp4', sourceSig: 'sig', width: 1080, height: 1920, durationSec: 4, stage: 'ready', updatedAt: 0, options: { caption: {}, aspect: 'original', shortenPauses: true } });
 const file = new File(['test'], 'video.mp4', { type: 'video/mp4' });
@@ -27,12 +33,20 @@ describe('standalone caption task execution', () => {
     expect(observed.find((value) => value.transcribing?.detail === 'recognizing')?.transcribing?.fraction).toBeUndefined();
     expect(observed.some((value) => value.cleaning?.fraction === .2)).toBe(true);
     expect(observed.some((value) => value.rendering?.fraction === .42)).toBe(true);
-    expect(Object.values(observed.at(-1)!).every((value) => value?.status === 'completed')).toBe(true);
+    expect(observed.some((value) => (['transcribing', 'cleaning', 'styling'] as const).every((stage) => value[stage]?.status === 'completed'))).toBe(true);
+  });
+  it('generates a native document without rendering; the download renders it', async () => {
+    const generated = await generateCaptions(task(), file, { signal: new AbortController().signal, checkpoint: async () => {}, progress: vi.fn() });
+    expect(generated.video).toBeUndefined(); expect(mock.render).not.toHaveBeenCalled();
+    expect(generated.task.workflow?.steps.some(step => step.id === 'render')).toBe(false);
+    expect(generated.task.document?.semantics.managedCaptionTrackId).toBeTruthy();
+    expect((await exportCaptionEdit(generated.task, file, { signal: new AbortController().signal, progress: vi.fn() })).type).toBe('video/mp4');
+    expect(mock.render).toHaveBeenCalledOnce(); expect(mock.transcribe).toHaveBeenCalledOnce();
   });
   it('runs without a workbench and produces a downloadable video with a native document', async () => {
     const records: CaptionTaskRecord[] = [];
     const result = await runCaptionTask(task(), file, { signal: new AbortController().signal, checkpoint: async (record) => { records.push(structuredClone(record)); }, progress: vi.fn() });
-    expect([...new Set(records.map(record => record.stage))].filter(stage => stage !== 'ready')).toEqual(['transcribing', 'cleaning', 'styling', 'rendering']);
+    expect([...new Set(records.map(record => record.stage))].filter(stage => stage !== 'ready')).toEqual(['transcribing', 'cleaning', 'styling']);
     expect(result.task.workflow?.definition.id).toBe('official-ai-captions');
     expect(result.task.workflow?.steps.every(step => step.status === 'completed')).toBe(true);
     expect(records.some(record => record.workflow?.steps.some(step => step.id === 'transcript' && step.status === 'running') && !record.transcript)).toBe(true);
@@ -48,7 +62,7 @@ describe('standalone caption task execution', () => {
     const records: CaptionTaskRecord[] = [];
     const hooks = { signal: new AbortController().signal, checkpoint: async (record: CaptionTaskRecord) => { records.push(structuredClone(record)); }, progress: vi.fn() };
     const result = await runCaptionTask(source, file, hooks);
-    expect([...new Set(records.map(record => record.stage))].filter(stage => stage !== 'ready')).toEqual(['transcribing', 'cleaning', 'translating', 'styling', 'rendering']);
+    expect([...new Set(records.map(record => record.stage))].filter(stage => stage !== 'ready')).toEqual(['transcribing', 'cleaning', 'translating', 'styling']);
     expect(records.find((record) => record.stage === 'styling')?.translation?.language).toBe('中文');
     expect(mock.render.mock.calls[0]![0].comp.captionStyle.sub.lang).toBe('中文');
     await runCaptionTask(result.task, file, hooks);

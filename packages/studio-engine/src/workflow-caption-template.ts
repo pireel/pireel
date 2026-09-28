@@ -30,7 +30,8 @@ export function captionLayoutOptions(options: CaptionTaskOptions): CaptionTaskOp
   const { preset, font, bold, scale, wPct } = options.caption;
   return { aspect: options.aspect, shortenPauses: false, caption: { preset, font, bold, scale, wPct } };
 }
-export function captionTailSteps(options: CaptionTaskOptions, document: WorkflowBinding, transcript: WorkflowBinding, media: WorkflowBinding): WorkflowStep[] {
+/** `render: false` stops at the edited document; the video is rendered when the user exports it. */
+export function captionTailSteps(options: CaptionTaskOptions, document: WorkflowBinding, transcript: WorkflowBinding, media: WorkflowBinding, render = true): WorkflowStep[] {
   const steps: WorkflowStep[] = [];
   const captions = options.sfx ? ('captions' in options.sfx && options.sfx.captions) : !options.broll || options.broll.captions;
   if (captions) {
@@ -45,14 +46,14 @@ export function captionTailSteps(options: CaptionTaskOptions, document: Workflow
     steps.push(sceneStep('brand', 'brand.apply', { document, brand: sceneLiteral(options.brand) }));
     document = stepOutput('brand', 'document');
   }
-  steps.push(sceneStep('render', 'video.render', { document, media }));
+  if (render) steps.push(sceneStep('render', 'video.render', { document, media }));
   return steps;
 }
-export function captionWorkflowDefinition(options: CaptionTaskOptions, media: unknown, transcript: unknown = null, cuts: unknown = null, projectId = 'caption'): WorkflowDefinition {
+export function captionWorkflowDefinition(options: CaptionTaskOptions, media: unknown, transcript: unknown = null, cuts: unknown = null, projectId = 'caption', render = true): WorkflowDefinition {
   const source = sceneLiteral(media);
   const steps = [sceneStep('transcript', 'speech.transcribe', { media: source, transcript: sceneLiteral(transcript) })];
   if (options.shortenPauses) steps.push(sceneStep('pauses', 'speech.pause-plan', { media: source, cuts: sceneLiteral(cuts) }));
   steps.push(sceneStep('compose', 'edit.compose', { media: source, cuts: options.shortenPauses ? stepOutput('pauses', 'cuts') : literal([]), aspect: literal(options.aspect), projectId: literal(projectId) }));
-  steps.push(...captionTailSteps(options, stepOutput('compose', 'document'), stepOutput('transcript', 'transcript'), source));
+  steps.push(...captionTailSteps(options, stepOutput('compose', 'document'), stepOutput('transcript', 'transcript'), source, render));
   return { schemaVersion: 1, id: 'official-ai-captions', version: 2, title: 'AI Captions', templateId: 'ai-captions', parameters: {}, trigger: { kind: 'manual' }, steps };
 }

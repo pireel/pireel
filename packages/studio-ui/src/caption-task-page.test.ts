@@ -13,7 +13,8 @@ vi.mock('./sfx-task-runner', () => ({ runSfxTask: mocks.run, exportSfxEdit: mock
 vi.mock('./sfx-timeline', () => ({ SfxTimeline: (props: any) => { mocks.sfxPreview(props); return createElement('div', { 'data-sfx-native-preview': true }, props.actions); } }));
 vi.mock('./broll-task-runner', () => ({ runBrollTask: mocks.run }));
 vi.mock('./ugc-ad-task-runner', () => ({ runUgcAdTask: mocks.run, exportUgcAdEdit: mocks.exportEdit }));
-vi.mock('./caption-task-runner', () => ({ runCaptionTask: mocks.run }));
+vi.mock('./caption-task-runner', () => ({ runCaptionTask: mocks.run, exportCaptionEdit: mocks.exportEdit }));
+vi.mock('./caption-document-preview', () => ({ CaptionDocumentPreview: ({ task, actions }: { task: CaptionTaskRecord; actions: unknown }) => createElement('div', { 'data-caption-document-preview': task.generationId }, actions as never) }));
 vi.mock('./caption-agent-remix', () => ({ createCaptionAgentRemix: mocks.remix }));
 vi.mock('./current-user', () => ({ loadCurrentUser: async () => ({ user_id: 'owner', auth_method: 'session' }) }));
 vi.mock('./local-media', () => ({ loadLocalVideo: mocks.source, saveLocalVideo: mocks.cache }));
@@ -23,6 +24,7 @@ vi.mock('./caption-project-cover', () => ({ captureCaptionFirstFrame: async () =
 vi.mock('@pireel/studio-engine/providers', () => ({ studioProviders: () => ({ translate: vi.fn(), autoHighlight: vi.fn() }) }));
 import { CaptionTaskPage } from './caption-task-page';
 import { saveCaptionTask, loadCaptionTask, listCaptionVersions, loadCaptionVersion } from './caption-task-store';
+import { CAPTION_STAGE_NAMES } from './caption-task-progress';
 let root: Root; let container: HTMLDivElement;
 let runs: { task: CaptionTaskRecord; hooks: Parameters<typeof runCaptionTask>[2]; resolve: (value: Awaited<ReturnType<typeof runCaptionTask>>) => void; reject: (error: Error) => void }[];
 const fixture = (): CaptionTaskRecord => ({ id: 'task', scope: 'owner', name: 'demo.mp4', sourceSig: 'source', width: 1920, height: 1080, durationSec: 5, stage: 'ready', updatedAt: 1, coverThumb: 'data:image/jpeg;base64,poster', options: { caption: {}, aspect: 'original', shortenPauses: false } });
@@ -182,9 +184,10 @@ describe('caption versions and preview UI', () => {
     expect(container.querySelector('video[data-scene-video]')?.getAttribute('poster')).toBe('data:image/jpeg;base64,first-frame');
     await click(button('生成字幕视频'));
     await settled(() => expect(runs).toHaveLength(1));
-    await act(async () => runs[0]!.hooks.stageProgress?.({ transcribing: { status: 'completed', fraction: 1 }, styling: { status: 'completed', fraction: 1 }, rendering: { status: 'running', fraction: .42 } }));
+    await act(async () => runs[0]!.hooks.stageProgress?.({ transcribing: { status: 'completed', fraction: 1 }, styling: { status: 'running', fraction: .42 } }));
     expect(container.querySelector('[aria-label="字幕生成进度"]')).not.toBeNull();
-    expect(container.querySelector('progress[aria-label="生成视频"]')?.getAttribute('value')).toBe('0.42');
+    expect(container.querySelector(`progress[aria-label="${CAPTION_STAGE_NAMES.styling[0]}"]`)?.getAttribute('value')).toBe('0.42');
+    expect(container.querySelector('progress[aria-label="生成视频"]')).toBeNull();
     expect((container.querySelector('[data-scene-player-actions] button[aria-label="播放"]') as HTMLButtonElement).disabled).toBe(true);
     await complete(0);
     expect(container.querySelector('video[data-scene-video]')!.getAttribute('src')).not.toBe(sourceUrl);
@@ -209,6 +212,21 @@ describe('caption versions and preview UI', () => {
     await act(async () => root.render(createElement(CaptionTaskPage, { taskId: 'task', locale: 'zh', onBack: vi.fn(), onOpenEditor: vi.fn() })));
     await settled(() => expect(container.querySelector('[role="combobox"][aria-label="视频版本"]')?.textContent).toContain('版本 2'));
     expect(container.querySelector('video[data-scene-video]')).not.toBeNull();
+  });
+  it('generates captions without rendering and renders the video on download', async () => {
+    await click(button('生成字幕视频')); await settled(() => expect(runs).toHaveLength(1));
+    const document = { canvas: { width: 1080, height: 1920, fps: 30 } } as unknown as CaptionTaskRecord['document'];
+    await act(async () => runs[0]!.resolve({ task: { ...runs[0]!.task, stage: 'completed', updatedAt: 10, document } }));
+    await settled(() => expect(container.querySelector('[data-caption-document-preview]')?.getAttribute('data-caption-document-preview')).toBe(runs[0]!.task.generationId));
+    expect(await listCaptionVersions('owner', 'task')).toHaveLength(0);
+    expect(mocks.exportEdit).not.toHaveBeenCalled();
+    mocks.exportEdit.mockResolvedValueOnce(new Blob(['rendered'], { type: 'video/mp4' }));
+    await click(button('下载'));
+    await settled(() => expect(mocks.exportEdit).toHaveBeenCalledOnce());
+    expect(mocks.exportEdit.mock.calls[0]![0]).toMatchObject({ generationId: runs[0]!.task.generationId, document });
+    await settled(async () => expect(await listCaptionVersions('owner', 'task')).toHaveLength(1));
+    await settled(() => expect(container.querySelector('a[download]')?.getAttribute('download')).toBe('demo-v1.mp4'));
+    expect(mocks.run).toHaveBeenCalledOnce();
   });
   it('keeps completed versions available when regeneration fails', async () => {
     await click(button('生成字幕视频')); await settled(() => expect(runs).toHaveLength(1)); await complete(0);
