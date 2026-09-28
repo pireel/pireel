@@ -25,7 +25,9 @@ export function CaptionStageSample({ style, canvas, text, subText }: {
   const block = useMemo(() => {
     const words = text.split('|').map(word => word.trim()).filter(Boolean);
     const step = 3 / words.length;
-    const segment = { text: words.join(/[A-Za-z]/.test(text) ? ' ' : ''), start: 0, end: 3, words: words.map((word, index) => ({ text: word, start: index * step, end: (index + 1) * step })), ...(subText ? { sub: subText } : {}) };
+    // A display cue, the unit the editor and export render (the stack owns position and tilt), not a
+    // legacy sentence block whose lines carry their own centering transform.
+    const segment = { text: words.join(/[A-Za-z]/.test(text) ? ' ' : ''), start: 0, end: 3, cue: true, words: words.map((word, index) => ({ text: word, start: index * step, end: (index + 1) * step })), ...(subText ? { sub: subText } : {}) };
     return { ...captionBlocksFromAsr([segment], { preset: style.preset })[0]!, id: 'caption_sample' };
   }, [text, subText, style.preset, comp]);
   // A new look or animation plays once; moving the caption up or down does not.

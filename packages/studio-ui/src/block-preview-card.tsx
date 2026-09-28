@@ -7,7 +7,7 @@
  * - BlockKindFooter: KIND_META icon + label footer.
  */
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { type Block, type Composition, assembleBlockHtml, blockKind, blockPreviewDoc, previewMiniComp } from '@pireel/studio-engine/composition';
 import { getTheme, themeVarsCss } from '@pireel/studio-engine/theme';
 import { injectPreviewRuntime } from './sample-composition';
@@ -299,9 +299,6 @@ export function InlineBlockPreview({
   // silently discarded block.box, so Frame/Motion Graphic samples appeared as a
   // full-canvas layer even though their production placement was safe.
   const { html, timelineBody } = useMemo(() => assembleBlockHtml(block, comp), [block, comp]);
-  // One object per markup: React rewrites innerHTML whenever this prop object changes, which would
-  // swap the nodes a running timeline animates on every parent re-render.
-  const markup = useMemo(() => ({ __html: html }), [html]);
   const theme = getTheme(comp.theme);
   const vars = useMemo(() => themeVarsCss(theme, comp.palette), [theme, comp.palette]);
   const stageBg = comp.palette?.paper ?? theme.background;
@@ -313,11 +310,15 @@ export function InlineBlockPreview({
   const tlRef = useRef<GsapTimeline | null>(null);
   // A replay asked for in the same commit that rebuilds the timeline applies to the rebuilt one.
   const replayAt = useRef(-Infinity);
-  const resumeAt = useRef<number | null>(null);
+  const resumeAt = useRef<{ body: string; time: number } | null>(null);
   const firstReplayKey = useRef(replayKey);
+  const content = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  // The block's nodes are owned here, not by React: every timeline gets fresh nodes, so styles a
+  // killed timeline left mid-tween (an offset, a scale) never carry into the next one.
+  useLayoutEffect(() => {
     let dead = false;
+    if (content.current) content.current.innerHTML = html;
     void loadGsap().then((g) => {
       if (dead || !g) return;
       // animate=true (detail card): loop, settle one beat after each pass then repeat.
@@ -332,21 +333,24 @@ export function InlineBlockPreview({
         console.warn('[inline preview] timeline failed', error);
       }
       tlRef.current = tl;
-      const resume = resumeAt.current;
+      // A new look or animation starts from the top; the same animation on re-rendered markup
+      // (e.g. a re-measured position) continues where it was.
+      const resume = resumeAt.current?.body === timelineBody ? resumeAt.current.time : null;
       resumeAt.current = null;
-      if (resume != null) tl.play(resume);
-      else if (animate === true || performance.now() - replayAt.current < 1000) tl.play(0);
+      if (animate === true || performance.now() - replayAt.current < 1000) tl.play(0);
+      else if (resume != null) tl.play(resume);
       else tl.progress(1).pause();
     });
     return () => {
       dead = true;
       // The markup is being replaced mid-play (e.g. a re-measured position): continue on the new nodes.
-      if (tlRef.current?.isActive()) resumeAt.current = tlRef.current.time();
+      if (tlRef.current?.isActive()) resumeAt.current = { body: timelineBody, time: tlRef.current.time() };
       tlRef.current?.kill();
       tlRef.current = null;
     };
   }, [timelineBody, html, animate]);
-  useEffect(() => {
+  // Layout effect so the request is recorded before the rebuilt timeline (a microtask away) starts.
+  useLayoutEffect(() => {
     if (replayKey === undefined || replayKey === firstReplayKey.current) return;
     firstReplayKey.current = undefined;
     replayAt.current = performance.now();
@@ -370,7 +374,7 @@ export function InlineBlockPreview({
         {/* Placeholder person underneath (normal overlay: graphics in front of the person) */}
         {person && !person.front && <PersonBust person={person} canvasH={comp.height} />}
         {/* The assembled block includes the same framing box and sizing context used by editor/export. */}
-        <div style={{ position: 'absolute', inset: 0 }} dangerouslySetInnerHTML={markup} />
+        <div ref={content} style={{ position: 'absolute', inset: 0 }} />
         {/* Person on top (personFront: text-behind-person / sticker person) -> silhouette sits in front of the graphics */}
         {person?.front && <PersonBust person={person} canvasH={comp.height} />}
       </div>
