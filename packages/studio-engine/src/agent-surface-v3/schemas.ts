@@ -163,6 +163,13 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       sceneIds: arr(str(), { description: 'Legacy planned scenes to review.' }),
     }),
   },
+  get_facts: {
+    description:
+      'Measured facts about the active output and its sources, for deciding what goes on screen and where. Free and browser-local (no model calls). Per source: technicals, whether it has likely speech (local voice activity) and its level, transcript coverage (read the words with get_transcript), scenes (between cuts) each with a 3×5 region grid (brightness, busyness = detail vs empty space, colour), and people/face/safe regions. For the output: canvas, the managed caption band rectangle(s), platform UI zones (Douyin, WeChat Channels, Xiaohongshu) in canvas px, and graphics/text already placed. Text burned into the footage is not located here; look at frames for it. Several sources take a while the first time; results are cached.',
+    inputSchema: obj({
+      assetIds: arr(str(), { maxItems: 12, description: 'Sources to measure; default: every source placed on the active output (up to 12).' }),
+    }),
+  },
   get_beat_grid: {
     description:
       'Compute beat times from a known BPM and offset for a music asset (source seconds) or a placed clip (mapped to timeline frames). It does not detect tempo: pass bpm when the asset has none registered. Use the returned times with split_clips and move_clips to cut on beats or downbeats.',

@@ -52,6 +52,8 @@ import { documentTranscriptContextAt } from '@pireel/studio-engine/spoken-contex
 import { projectNarrativeShots, projectOverlayBlockById } from '@pireel/studio-engine/editor-document/legacy-projection';
 import { freeOverlayTrackIndex } from '@pireel/studio-engine/editor-document/read-model';
 import { documentCaptionsOn } from '@pireel/studio-engine/editor-document/caption-state';
+import { captionBandRects, platformZonesPx } from '@pireel/studio-engine/facts';
+import { measureShotRegions, measureSound } from './facts-measure';
 import { exportRecommendations } from '@pireel/studio-engine/export-options';
 import { parkInteraction } from './interaction-store';
 import { assembleComposeBrief, interpretApplyRaw, type ComposeBriefInput } from '@pireel/studio-engine/briefs';
@@ -152,7 +154,7 @@ import { blockPropsReadback } from '@pireel/studio-engine/component-schema';
 import { searchFontsTool } from '@pireel/studio-engine/font-search-tool';
 
 const PROJECT_MUTATION_TOOLS = new Set(['manage_project']);
-const NO_UNDO_TOOLS = new Set(['get_state', 'inspect_media', 'get_transcript', 'get_beat_grid', 'search_assets', 'prepare_local_asset', 'search_media', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_audio', 'generate_foley', 'manage_voices', 'generate_speech', 'lip_sync', 'preview', 'undo', 'export', 'ask_user', 'get_icons', 'create_browser_handoff', 'inspect_timeline', 'compose_component']);
+const NO_UNDO_TOOLS = new Set(['get_state', 'get_facts', 'inspect_media', 'get_transcript', 'get_beat_grid', 'search_assets', 'prepare_local_asset', 'search_media', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_audio', 'generate_foley', 'manage_voices', 'generate_speech', 'lip_sync', 'preview', 'undo', 'export', 'ask_user', 'get_icons', 'create_browser_handoff', 'inspect_timeline', 'compose_component']);
 
 /** Generated outputs join the project media directory the moment they are known — from a poll, a
  * synchronous audio tool, or the background watcher below — so the Materials panel lists them
@@ -1771,6 +1773,89 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   truncated,
                   next: `entries[] is capped at 500 per call; ${truncated} entries were NOT imported — call load_local_assets again with the remaining entries.`,
                 } : {}),
+              },
+            };
+          }
+          case 'get_facts': {
+            // Measured facts for designing what goes on screen: local decoding only, no model calls.
+            const doc = documentRef.current;
+            const fps = doc.canvas.fps;
+            const requested = Array.isArray(input.assetIds)
+              ? [...new Set((input.assetIds as unknown[]).filter((value): value is string => typeof value === 'string' && value.trim().length > 0).map((value) => value.trim()))]
+              : [];
+            const placed = [...new Set(doc.timeline.tracks.flatMap((track) => track.clips.flatMap((clip) =>
+              'assetId' in clip && typeof clip.assetId === 'string' ? [clip.assetId] : [])))];
+            const ids = (requested.length ? requested : placed).slice(0, 12);
+            const sources: Array<Record<string, unknown>> = [];
+            for (let index = 0; index < ids.length; index += 1) {
+              if (stopped()) throw abortErr();
+              const assetId = ids[index]!;
+              const asset = doc.assets[assetId];
+              if (!asset) { sources.push({ assetId, error: 'unknown asset id' }); continue; }
+              report(t('tools.get_facts.label') + ` ${index + 1}/${ids.length}`, index / Math.max(1, ids.length));
+              const meta = asset.metadata;
+              const transcript = doc.semantics.transcripts?.[assetId];
+              const entry: Record<string, unknown> = {
+                assetId,
+                kind: asset.kind,
+                ...(asset.label ? { label: asset.label } : {}),
+                ...(meta.durationSec ? { durationSec: Math.round(meta.durationSec * 100) / 100 } : {}),
+                ...(meta.width && meta.height ? { width: meta.width, height: meta.height } : {}),
+                transcript: transcript?.length
+                  ? { segments: transcript.length, words: transcript.some((segment) => Array.isArray(segment.words) && segment.words.length > 0), read: 'get_transcript' }
+                  : { segments: 0 },
+              };
+              if (asset.kind === 'image') { sources.push(entry); continue; }
+              const bytes = await assetBytes(asset);
+              if (!bytes.file) { sources.push({ ...entry, error: bytes.reason }); continue; }
+              const file = bytes.file;
+              if (asset.kind !== 'audio') {
+                const probe = await probeVideoFile(file).catch(() => null);
+                const durationSec = probe?.durationSec || meta.durationSec || 0;
+                if (durationSec > 0) {
+                  const vis = await race(analyzeVisualGeometry(file, durationSec).catch(() => null));
+                  const cuts = vis?.cuts ?? [];
+                  const scenes = await race(measureShotRegions(file, durationSec, cuts).catch(() => []));
+                  Object.assign(entry, {
+                    scenes,
+                    ...(vis ? { geometry: visualGeometryForAgent(vis) } : {}),
+                  });
+                }
+              }
+              if (meta.hasAudio !== false) {
+                const sound = await race(measureSound(file).catch(() => null));
+                if (sound) entry.sound = sound;
+              }
+              sources.push(entry);
+            }
+            const comp = compRef.current;
+            const captionsOn = documentCaptionsOn(doc);
+            const onScreen = doc.timeline.tracks.flatMap((track) => track.clips.flatMap((clip) => {
+              if (clip.kind !== 'graphic') return [];
+              const box = (clip as { box?: { x: number; y: number; w: number; h: number } }).box ?? (clip as { block?: { box?: { x: number; y: number; w: number; h: number } } }).block?.box;
+              return [{
+                clipId: clip.id,
+                kind: clip.kind,
+                frames: [clip.startFrame, clip.startFrame + clip.durationFrames],
+                ...(box ? { box: { x: Math.round(box.x * doc.canvas.width), y: Math.round(box.y * doc.canvas.height), w: Math.round(box.w * doc.canvas.width), h: Math.round(box.h * doc.canvas.height) } } : {}),
+              }];
+            }));
+            return {
+              ok: true,
+              summary: t('tools.get_facts.label'),
+              data: {
+                canvas: { width: doc.canvas.width, height: doc.canvas.height, fps },
+                sources,
+                captions: captionsOn
+                  ? { on: true, band: captionBandRects(comp, { lines: 2, withTranslation: !!comp.captionStyle?.sub }) }
+                  : { on: false },
+                platformZones: platformZonesPx(doc.canvas.width, doc.canvas.height),
+                onScreen,
+                notes: [
+                  'Region grids are 3 columns × 5 rows per scene, top row first; busy is detail (low = empty space), bright is 0–1.',
+                  'Text burned into the footage is not located here: look at frames (inspect_timeline or inspect_media) before placing graphics near it.',
+                  'Sources without a transcript but with sound.speech.speechLikely may hold speech worth reading: get_transcript transcribes them.',
+                ],
               },
             };
           }

@@ -157,7 +157,7 @@ export const MCP_BRIDGE_EXTRA_TOOL_IDS = new Set(['get_state', 'run_v3', 'adopt_
 /** Bridge timeout for slow tools (generation/analysis in the browser, minutes-scale); instant ops get 60s. */
 const CARD_TIMEOUT_MS = 600_000;
 const BADGE_TIMEOUT_MS = 60_000;
-const LONG_RUNNING_V3 = new Set(['inspect_timeline', 'inspect_media', 'get_transcript', 'remove_silence', 'denoise_audio', 'bake_component', 'apply_component', 'export', 'generate_foley', 'assemble_from_review']);
+const LONG_RUNNING_V3 = new Set(['inspect_timeline', 'inspect_media', 'get_facts', 'get_transcript', 'remove_silence', 'denoise_audio', 'bake_component', 'apply_component', 'export', 'generate_foley', 'assemble_from_review']);
 
 export function bridgeTimeoutMs(toolId: string): number {
   return LONG_RUNNING_V3.has(toolId) ? CARD_TIMEOUT_MS : BADGE_TIMEOUT_MS;

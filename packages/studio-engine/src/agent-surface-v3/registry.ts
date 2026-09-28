@@ -41,6 +41,7 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   { id: 'inspect_media', group: 'state', charges: true, skillContract: { version: 1, stability: 'stable' } },
   { id: 'inspect_timeline', group: 'state', skillContract: { version: 1, stability: 'stable' } },
   { id: 'get_beat_grid', group: 'state' },
+  { id: 'get_facts', group: 'state' },
   { id: 'manage_project', group: 'state', serverDirect: true },
   // ---- assets (7)
   { id: 'search_assets', group: 'assets', serverDirect: true },
@@ -105,7 +106,7 @@ export const V3_TOOL_IDS: ReadonlySet<string> = new Set(V3_TOOLS.map((tool) => t
 
 
 /** v3 tools that never change the output (reads, searches, inspection, skills, preview, session queries). */
-const V3_READ_ONLY = new Set(['get_state', 'get_transcript', 'search_media', 'inspect_media', 'inspect_timeline', 'get_beat_grid', 'search_assets', 'get_icons', 'create_browser_handoff', 'prepare_local_asset', 'list_models', 'list_skills', 'read_skill', 'preview', 'ask_user', 'compose_component']);
+const V3_READ_ONLY = new Set(['get_state', 'get_transcript', 'search_media', 'inspect_media', 'inspect_timeline', 'get_beat_grid', 'get_facts', 'search_assets', 'get_icons', 'create_browser_handoff', 'prepare_local_asset', 'list_models', 'list_skills', 'read_skill', 'preview', 'ask_user', 'compose_component']);
 
 export function v3ToolCanMutate(id: string): boolean {
   return V3_TOOL_IDS.has(id) && !V3_READ_ONLY.has(id);
