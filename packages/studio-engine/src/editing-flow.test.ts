@@ -18,7 +18,7 @@ it('compiles the visible order rather than the former fixed effect order', () =>
 });
 it('branches from a common result and runs only a selected branch with independent parameters', () => {
   const flow: EditingFlow = { version: 1, name: 'branches', cards: [card('voice-cleanup', 'source', 'clean'), card('captions', 'clean', 'a'), card('captions', 'clean', 'b'), card('export', 'a', 'oa'), card('export', 'b', 'ob')] };
-  flow.cards[1].settings.captions.presetId = 'keywords'; flow.cards[2].settings.captions.custom = { scale: 2 };
+  flow.cards[1].settings.captions.highlights = true; flow.cards[2].settings.captions.caption = { scale: 2 };
   const result = compile(flow); expect(() => validateWorkflow(result.definition, WORKFLOW_NODE_CATALOG)).not.toThrow();
   const one = workflowToTarget(result.definition, result.targets.oa);
   expect(one.steps.some(step => step.id.startsWith('b--') || step.id.startsWith('ob--'))).toBe(false);

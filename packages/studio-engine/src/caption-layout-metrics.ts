@@ -1,7 +1,7 @@
 /** Shared caption line measurement for cue generation and final rendering. */
 
 import type { FxWord } from './caption-fx';
-import { PUNCT_END, alnumCount, chunkWordsBalanced, estWordEm, joinWords, latinJoin, measureTextPx, segmentTokens } from './caption-fx';
+import { PUNCT_END, alnumCount, chunkWordsBalanced, estWordEm, joinWords, latinJoin, loneHan, measureTextPx, segmentTokens } from './caption-fx';
 import {
   BASE_CAPTION_FONT_PX,
   CAPTION_WEIGHT_BOLD,
@@ -67,7 +67,8 @@ export function captionLineSegments<W extends FxWord>(
     for (let at = 0; at < rows.length; at += preset.stack.maxRows) out.push(rows.slice(at, at + preset.stack.maxRows).flat().flatMap((group) => group.members));
     return out;
   }
-  return chunkWordsBalanced(groups, m.availablePx, m.widthOf).map((line) => line.flatMap((group) => group.members));
+  return chunkWordsBalanced(groups, m.availablePx, m.widthOf, (left, right) => (loneHan(left.text) && loneHan(right.text) ? m.availablePx * 0.3 : 0))
+    .map((line) => line.flatMap((group) => group.members));
 }
 
 /** Rows of one stacked segment (preset.stack), in render order. Empty for non-stack presets. */
@@ -179,9 +180,13 @@ function stackRows<W extends { text: string }>(words: W[], stack: CaptionStack, 
     const w = m.widthOf(word);
     const cap = capacity(rows.length);
     if (row.length && used + w > cap + 1e-6) {
+      // Keep a run of lone Han characters together (口播, 聊一聊): carry the row's trailing run down with this word.
+      let run = 0;
+      if (loneHan(word.text)) while (run < 3 && run < row.length - 1 && loneHan(row[row.length - 1 - run]!.text)) run++;
+      const carry = row.splice(row.length - run, run);
       rows.push(row);
-      row = [];
-      used = 0;
+      row = carry;
+      used = carry.reduce((sum, item) => sum + m.widthOf(item), 0);
     }
     row.push(word);
     used += w;

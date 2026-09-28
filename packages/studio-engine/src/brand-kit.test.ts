@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { applyBrandMedia, brandSnapshot, emptyBrandKit, validateBrandKit, type BrandKit } from './brand-kit';
+import { applyBrandMedia, brandCaptionStyle, brandSnapshot, emptyBrandKit, validateBrandKit, type BrandKit } from './brand-kit';
 import { buildCaptionBaseDocument, captionTaskStyle, type CaptionTaskOptions } from './caption-task';
 
-const options: CaptionTaskOptions = { presetId: 'clean', layoutVersion: 2, aspect: 'original', shortenPauses: false };
+const options: CaptionTaskOptions = { caption: {}, aspect: 'original', shortenPauses: false };
 const base = () => buildCaptionBaseDocument({ projectId: 'p', sourceSig: 'src', sourceUrl: 'blob:src', width: 1080, height: 1920, durationSec: 10, options, transcript: [] });
 const video = (key: string, durationSec: number) => ({ key, kind: 'video' as const, width: 1080, height: 1920, durationSec });
 function kit(patch: Partial<BrandKit> = {}): BrandKit { return { ...emptyBrandKit('brand_1', '我的品牌'), ...patch }; }
@@ -15,14 +15,12 @@ describe('brand kit', () => {
     expect(validateBrandKit(kit())).toBeTruthy();
   });
 
-  it('uses the brand captions as the scene base when its card is picked, under the scene adjustments', () => {
+  it('copies the brand captions into the scene caption style, which later scene edits override', () => {
     const brand = brandSnapshot(kit({ captions: { preset: 'em-yellow', font: 'web:smiley-sans', color: '#ffee00', yPct: 62, scale: 1.4 } }));
-    const branded = { ...options, presetId: 'brand', brand };
+    const branded = { ...options, brand, caption: brandCaptionStyle(brand) };
     const style = captionTaskStyle(branded, { width: 1080, height: 1920 });
     expect(style).toMatchObject({ preset: 'em-yellow', font: 'web:smiley-sans', color: '#ffee00', yPct: 62, scale: 1.4 });
-    expect(captionTaskStyle({ ...branded, custom: { color: '#000000', yPct: 80 } }, { width: 1080, height: 1920 })).toMatchObject({ color: '#000000', yPct: 80 });
-    // Picking another card keeps the brand for colors/logo but restyles the captions.
-    expect(captionTaskStyle({ ...branded, presetId: 'cinema' }, { width: 1080, height: 1920 })).toMatchObject({ preset: 'ln-black' });
+    expect(captionTaskStyle({ ...branded, caption: { ...branded.caption, color: '#000000', yPct: 80 } }, { width: 1080, height: 1920 })).toMatchObject({ color: '#000000', yPct: 80 });
   });
 
   it('adds intro and outro on the primary track and the logo over the main part only', () => {

@@ -13,7 +13,7 @@ import * as local from './caption-task-local';
 const projects = new Map<string, CloudSceneProject>();
 const versions = new Map<string, CloudSceneVersion>();
 const cloudFiles = new Map<string, File>();
-const fixture = (): CaptionTaskRecord => ({ id: 'cloud-task', scope: 'owner', scene: 'dubbing', name: 'source.mp4', sourceSig: 'source', width: 1920, height: 1080, durationSec: 10, stage: 'ready', updatedAt: 1, options: { presetId: 'clean', aspect: 'original', shortenPauses: false } });
+const fixture = (): CaptionTaskRecord => ({ id: 'cloud-task', scope: 'owner', scene: 'dubbing', name: 'source.mp4', sourceSig: 'source', width: 1920, height: 1080, durationSec: 10, stage: 'ready', updatedAt: 1, options: { caption: {}, aspect: 'original', shortenPauses: false } });
 beforeEach(() => {
   vi.clearAllMocks(); files.clear(); projects.clear(); versions.clear(); cloudFiles.clear();
   vi.stubGlobal('Blob', NodeBlob); vi.stubGlobal('File', NodeFile);
@@ -44,7 +44,7 @@ it('restores project, source, settings and completed versions on another device'
   expect(versions.size).toBe(1);
   files.clear(); vi.stubGlobal('indexedDB', new IDBFactory());
   const task = await loadCaptionTask('owner', 'cloud-task');
-  expect(task).toMatchObject({ scene: 'dubbing', options: { presetId: 'clean' }, cloudPending: false });
+  expect(task).toMatchObject({ scene: 'dubbing', options: { caption: {} }, cloudPending: false });
   expect(await loadCaptionMedia('owner', task!.sourceSig)).toBeInstanceOf(File);
   expect(await listCaptionVersions('owner', 'cloud-task')).toEqual([{ id: 'version-1', number: 1, createdAt: 2 }]);
   expect((await loadCaptionVersion('owner', 'cloud-task', 'version-1'))?.video.size).toBe(6);

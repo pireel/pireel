@@ -236,7 +236,13 @@ export const PUNCT_END = /[,。,.!?!?;;、::…]$/;
  * sentence stays one line when it fits; this only breaks within a sentence, never across sentences
  * (callers call per sentence). widthOf's unit is the caller's choice; limit shares it.
  */
-export function chunkWordsBalanced<W extends { text: string }>(words: W[], limit: number, widthOf: (w: W) => number): W[][] {
+/** `breakCost(left, right)` adds a penalty (in width units) for breaking between two words. */
+/** A single Han character standing alone after ICU segmentation. Runs of them are usually a word the
+ * dictionary does not know (「口播」) or a reduplicated phrase (「聊一聊」), so a line should not
+ * break between two of them when a better break is nearby. */
+export const loneHan = (text: string) => /^\p{Script=Han}$/u.test(text.replace(/[^\p{L}\p{N}]/gu, ''));
+
+export function chunkWordsBalanced<W extends { text: string }>(words: W[], limit: number, widthOf: (w: W) => number, breakCost?: (left: W, right: W) => number): W[][] {
   if (!words.length) return [];
   const widths = words.map(widthOf);
   const total = widths.reduce((a, b) => a + b, 0);
@@ -264,7 +270,7 @@ export function chunkWordsBalanced<W extends { text: string }>(words: W[], limit
       }
       const distance = Math.abs(len - target);
       const punct = PUNCT_END.test(words[at]!.text) && distance <= punctTol;
-      const score = punct ? distance - punctTol : distance;
+      const score = (punct ? distance - punctTol : distance) + (breakCost ? breakCost(words[at]!, words[at + 1]!) : 0);
       if (score < bestScore) {
         bestScore = score;
         best = at;

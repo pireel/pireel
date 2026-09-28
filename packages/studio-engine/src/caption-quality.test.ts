@@ -35,6 +35,10 @@ describe('caption quality invariants', () => {
     const words = [word('你好。', 0, 1), word('接着', 1.1, 1.5), word('讲', 2.1, 2.4)];
     expect(speechPhraseChunks(words)).toEqual(words.map((w) => [w]));
   });
+  it('lets the length cap wait briefly instead of splitting two lone Han characters', () => {
+    const words = [word('今天', 0, 3), word('聊', 3, 5.5), word('口', 5.6, 5.9), word('播', 5.9, 6.3), word('视频', 6.3, 6.8)];
+    expect(speechPhraseChunks(words).map((chunk) => chunk.map((w) => w.text).join(''))).toEqual(['今天聊口播', '视频']);
+  });
   it('persists emphasis while stripping runtime source indices', () => {
     const cleaned = sanitizeTranscriptSegs([{ text: '重点', start: 0, end: 1, words: [{ ...word('重点', 0, 1), emphasis: true, si: 8 } as never], cue: true }]);
     expect(cleaned[0]?.words?.[0]).toEqual({ ...word('重点', 0, 1), emphasis: true });

@@ -15,7 +15,7 @@ function fixture() {
   const chars=[...text].filter(char=>char.trim());
   const words=groupAsrWords(text,chars.map((text,index)=>({text,start:index*.12,end:(index+1)*.12})));
   const task:CaptionTaskRecord={id:'shared-caption',scope:'owner',name:'speech.mp4',sourceSig:'source',width:1080,height:1920,durationSec:10,stage:'ready',updatedAt:1,
-    transcript:[{text,start:0,end:chars.length*.12,words}],options:{presetId:'clean',aspect:'original',shortenPauses:false,translationLanguage:'English',custom:{wPct:35}}};
+    transcript:[{text,start:0,end:chars.length*.12,words}],options:{caption:{wPct:35},aspect:'original',shortenPauses:false,translationLanguage:'English'}};
   const document=buildCaptionTaskDocument({...task,projectId:task.id,sourceUrl:'blob:source',transcript:task.transcript!});
   return {task,document,words};
 }

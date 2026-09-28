@@ -61,15 +61,15 @@ export function compileEditingWorkflow(recipe: EditingRecipe, task: CaptionTaskR
   if (enabled.has('auto-layout')) effect('auto-layout', 'layout.auto', { ...recipe.layout, aspect: enabled.has('auto-layout') ? recipe.layout.aspect : 'original', arrange: enabled.has('auto-layout') && recipe.layout.arrange });
   if (enabled.has('captions') || enabled.has('translation') && !enabled.has('voiceover')) {
     const captionOptions = editingCaptionOptions(recipe);
-    if (recipe.captions.presetId === 'keywords') add('captions', 'caption-emphasis', 'captions.source-emphasize', 2, { transcript: speech });
-    add('captions', 'captions-plan', 'captions.plan', 2, { document, transcript: recipe.captions.presetId === 'keywords' ? out('caption-emphasis', 'transcript') : speech, layout: lit(captionLayoutOptions(captionOptions as never)) });
+    if (recipe.captions.highlights) add('captions', 'caption-highlight', 'captions.highlight', 2, { transcript: speech });
+    add('captions', 'captions-plan', 'captions.plan', 2, { document, transcript: recipe.captions.highlights ? out('caption-highlight', 'transcript') : speech, layout: lit(captionLayoutOptions(captionOptions as never)) });
     let translation: WorkflowBinding = lit(null);
     if (captionOptions.translationLanguage) {
       add('translation', 'caption-translation', 'text.translate', 2, { units: out('captions-plan', 'units'), language: lit(recipe.language) }); translation = out('caption-translation', 'value');
       if (recipe.rewrite.trim()) { add('rewrite', 'rewrite', 'llm.transform', 1, { value: translation, instruction: lit(recipe.rewrite + '\nPreserve IDs, sourceKey, language and line counts; edit lines only.'), schema: lit(captionTranslationSchema) }); translation = out('rewrite', 'value'); }
       if (recipe.reviewTranslation) { add('review', 'review', 'human.approval', 1, { value: translation, title: lit('确认字幕译文'), schema: lit(captionTranslationSchema), editable: lit(true), notify: lit(true) }); translation = out('review', 'value'); }
     }
-    if (enabled.has('captions')) { add('captions', 'captions-apply', 'captions.apply', 2, { document, plan: out('captions-plan', 'plan'), translation, emphasis: lit(null), style: lit(captionOptions) }); document = out('captions-apply', 'document'); }
+    if (enabled.has('captions')) { add('captions', 'captions-apply', 'captions.apply', 2, { document, plan: out('captions-plan', 'plan'), translation, style: lit(captionOptions) }); document = out('captions-apply', 'document'); }
   }
   if (enabled.has('sound-effects')) effect('sound-effects', 'audio.effects', recipe.effects);
   if (enabled.has('background-music')) effect('background-music', 'audio.music', recipe.music);

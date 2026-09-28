@@ -1,5 +1,4 @@
 import { wordsFromText } from '@pireel/studio-engine/caption-fx';
-import { validateEmphasisSelection } from '@pireel/studio-engine/caption-emphasis';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { applyCaptionDocumentEdit, projectDocumentToComposition, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import { applyDocumentTransaction } from '@pireel/studio-engine/document-transaction';
@@ -14,10 +13,6 @@ export interface CaptionPlan {
   transcripts: EditorDocumentV2['semantics']['transcripts'];
   units: (TranslationUnit & { id: string })[];
   lines: { id: string; assetId?: string; seg: number; w0: number; w1: number; text: string; words: string[]; start: number; duration: number }[];
-}
-export interface CaptionEmphasis { sourceKey: string; items: { id: string; words: number[] }[] }
-export function captionPlanEmphasisRows(plan: CaptionPlan) {
-  return plan.lines.map((line, index) => ({ index, words: line.words }));
 }
 export interface CaptionTranslation {
   sourceKey: string; language: string;
@@ -55,19 +50,10 @@ export async function translateCaptionPlan(units: CaptionPlan['units'], language
   });
   return { sourceKey: captionTranslationKey(units), language, items, missing: units.filter(unit => missing.has(unit)).map(unit => unit.id) };
 }
-export function assembleCaptionDocument(document: EditorDocumentV2, plan: CaptionPlan, translation: CaptionTranslation | null, options: CaptionTaskOptions, emphasis: CaptionEmphasis | null = null): EditorDocumentV2 {
+export function assembleCaptionDocument(document: EditorDocumentV2, plan: CaptionPlan, translation: CaptionTranslation | null, options: CaptionTaskOptions): EditorDocumentV2 {
   if (!Object.keys(plan.transcripts).some(id => !!document.assets[id]) || plan.sourceKey !== captionTranslationKey(plan.units)) throw new Error('字幕规划与文档不匹配。');
   // The planning artifact carries cueLayout; style changes must not trigger a second line split.
   const base = { ...document, semantics: { ...document.semantics, transcripts: structuredClone(plan.transcripts) } };
-  if (emphasis) {
-    if (emphasis.sourceKey !== plan.sourceKey || emphasis.items.length !== plan.lines.length || new Set(emphasis.items.map(item => item.id)).size !== plan.lines.length) throw new Error('重点词与字幕规划版本不匹配。');
-    const selected = plan.lines.map((line, index) => ({ index, words: emphasis.items.find(item => item.id === line.id)?.words }));
-    if (!validateEmphasisSelection(captionPlanEmphasisRows(plan), selected)) throw new Error('重点词选择无效。');
-    plan.lines.forEach((line, index) => {
-      const segment = base.semantics.transcripts[line.assetId!]![line.seg]!;
-      segment.cueEmphasis = { ...segment.cueEmphasis, [`${line.w0}:${line.w1}`]: { text: line.text, words: selected[index].words! } };
-    });
-  }
   const applied = applyCaptionDocumentEdit({ document: base, patch: { ...captionTaskStyle(options, document.canvas), on: true }, mainTranscript: null, clipTranscripts: {} });
   if (!applied.ok) throw new Error(applied.error.message);
   let result = applied.document;

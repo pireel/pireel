@@ -6,7 +6,7 @@ import type { CaptionTaskRecord } from './caption-task-store';
 import { BrollTimeline } from './broll-timeline';
 vi.mock('./caption-task-store',()=>({loadCaptionMedia:async()=>new File(['video'],'asset.mp4')}));
 vi.mock('./web-fonts',()=>({loadFont:async()=>{}}));
-const task:CaptionTaskRecord={id:'qa',scope:'owner',name:'source',scene:'broll',sourceSig:'source',width:640,height:360,durationSec:20,stage:'completed',updatedAt:1,transcript:[{start:2,end:6,text:'讲解收纳包'}],options:{presetId:'clean',aspect:'original',shortenPauses:false,broll:{captions:false,assets:[{id:'asset',sig:'asset',name:'收纳包.mp4',kind:'video',durationSec:12,width:640,height:360}]}},broll:{analysisKey:'test',planKey:'test',candidates:[{id:'candidate',assetId:'asset',start:0,end:5,description:'打开收纳包，展示内部空间'}],placements:[{id:'clip',candidateId:'candidate',start:2,duration:4}]}};
+const task:CaptionTaskRecord={id:'qa',scope:'owner',name:'source',scene:'broll',sourceSig:'source',width:640,height:360,durationSec:20,stage:'completed',updatedAt:1,transcript:[{start:2,end:6,text:'讲解收纳包'}],options:{caption:{},aspect:'original',shortenPauses:false,broll:{captions:false,assets:[{id:'asset',sig:'asset',name:'收纳包.mp4',kind:'video',durationSec:12,width:640,height:360}]}},broll:{analysisKey:'test',planKey:'test',candidates:[{id:'candidate',assetId:'asset',start:0,end:5,description:'打开收纳包，展示内部空间'}],placements:[{id:'clip',candidateId:'candidate',start:2,duration:4}]}};
 it('selects a clip to edit timing without exposing analysis notes',async()=>{
  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubGlobal('URL',{createObjectURL:()=> 'blob:qa',revokeObjectURL:vi.fn()});
  const pause=vi.spyOn(HTMLMediaElement.prototype,'pause').mockImplementation(()=>{});

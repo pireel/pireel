@@ -35,7 +35,7 @@ async function fixture() {
 }
 it('runs connected branches independently and keeps both native output documents', async () => {
   const { source, host, media, raw } = await fixture();
-  const a = flowCard('captions', 'source', defaultEditingRecipe(), 'a'); const b = flowCard('captions', 'source', defaultEditingRecipe(), 'b'); b.settings.captions.custom = { scale: 2 };
+  const a = flowCard('captions', 'source', defaultEditingRecipe(), 'a'); const b = flowCard('captions', 'source', defaultEditingRecipe(), 'b'); b.settings.captions.caption = { scale: 2 };
   const flow: EditingFlow = { version: 1, name: 'versions', cards: [a, b, flowCard('export', 'a', defaultEditingRecipe(), 'oa'), flowCard('export', 'b', defaultEditingRecipe(), 'ob')] };
   const compiled = compileEditingFlow(flow, source, media, raw);
   const result = await host.executeGraph(compiled.definition, [...captionWorkflowNodes(host), ...textWorkflowNodes(host), ...editingWorkflowNodes(host)]);

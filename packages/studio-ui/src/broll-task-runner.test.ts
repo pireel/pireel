@@ -8,7 +8,7 @@ vi.mock('./client-export', () => ({ clientExportVideo: mocks.render }));
 vi.mock('./visual', () => ({ prepareVisualAnalysis: mocks.visual }));
 vi.mock('./web-fonts', () => ({ loadFont: async () => {} }));
 import { runBrollTask } from './broll-task-runner';
-const fixture = (): CaptionTaskRecord => ({ id: 'task', scope: 'owner', scene: 'broll', name: 'source.mp4', sourceSig: 'original', durationSec: 20, width: 1920, height: 1080, stage: 'ready', updatedAt: 1, options: { presetId: 'clean', aspect: 'original', shortenPauses: false, broll: { captions: true, assets: [{ id: 'asset', sig: 'footage', name: 'asset.mp4', kind: 'video', durationSec: 10, width: 1920, height: 1080 }] } } });
+const fixture = (): CaptionTaskRecord => ({ id: 'task', scope: 'owner', scene: 'broll', name: 'source.mp4', sourceSig: 'original', durationSec: 20, width: 1920, height: 1080, stage: 'ready', updatedAt: 1, options: { caption: {}, aspect: 'original', shortenPauses: false, broll: { captions: true, assets: [{ id: 'asset', sig: 'footage', name: 'asset.mp4', kind: 'video', durationSec: 10, width: 1920, height: 1080 }] } } });
 beforeEach(() => {
   vi.clearAllMocks(); vi.stubGlobal('fetch', mocks.fetch);
   mocks.asr.mockResolvedValue([{ text: '打开收纳包', start: 1, end: 6 }]);

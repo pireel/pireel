@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CaptionTaskRecord, CaptionTaskProgress } from './caption-task-store';
 const mock = vi.hoisted(() => ({ transcribe: vi.fn(), clean: vi.fn(), render: vi.fn(), font: vi.fn(), translate: vi.fn(), emphasis: vi.fn() }));
-vi.mock('@pireel/studio-engine/providers', () => ({ studioProviders: () => ({ translate: mock.translate, captionEmphasis: mock.emphasis }) }));
+vi.mock('@pireel/studio-engine/providers', () => ({ studioProviders: () => ({ translate: mock.translate, autoHighlight: mock.emphasis }) }));
 vi.mock('./media', () => ({ transcribeFile: mock.transcribe, durableFileSig: async () => "rendered-sig" }));
 vi.mock('./speech-silence', () => ({ detectSpeechSilenceCuts: mock.clean }));
 vi.mock('./client-export', () => ({ clientExportVideo: mock.render }));
 vi.mock('./web-fonts', () => ({ loadFont: mock.font }));
 import { runCaptionTask } from './caption-task-runner';
 const transcript = [{ text: 'Hello world', start: 0, end: 3, words: [{ text: 'Hello', start: 0, end: 1 }, { text: 'world', start: 2, end: 3 }] }];
-const task = (): CaptionTaskRecord => ({ id: 'task', scope: 'account', name: 'video.mp4', sourceSig: 'sig', width: 1080, height: 1920, durationSec: 4, stage: 'ready', updatedAt: 0, options: { presetId: 'clean', aspect: 'original', shortenPauses: true } });
+const task = (): CaptionTaskRecord => ({ id: 'task', scope: 'account', name: 'video.mp4', sourceSig: 'sig', width: 1080, height: 1920, durationSec: 4, stage: 'ready', updatedAt: 0, options: { caption: {}, aspect: 'original', shortenPauses: true } });
 const file = new File(['test'], 'video.mp4', { type: 'video/mp4' });
 beforeEach(() => {
   vi.clearAllMocks(); vi.stubGlobal('document', { fonts: { ready: Promise.resolve() } });
@@ -83,13 +83,13 @@ it('keeps translation identity across color, position and re-wrapping, but inval
   const hooks = { signal: new AbortController().signal, checkpoint: async () => {}, progress: vi.fn() };
   const first = await runCaptionTask(source, file, hooks);
   const plan = first.task.workflow!.steps.find(step => step.id === 'plan')!.artifact!.data.plan;
-  first.task.options.custom = { color: '#ff0000', yPct: 55 };
+  first.task.options.caption = { color: '#ff0000', yPct: 55 };
   const styled = await runCaptionTask(first.task, file, hooks);
   expect(styled.task.workflow!.steps.find(step => step.id === 'plan')!.artifact!.data.plan).toEqual(plan);
   expect(mock.translate).toHaveBeenCalledOnce();
   expect(mock.render.mock.calls[1][0].comp.captionStyle.color).toBe('#ff0000');
   // Translations are stored per sentence and spread over lines at render time: re-wrapping keeps them.
-  styled.task.options.custom!.wPct = 15;
+  styled.task.options.caption.wPct = 15;
   const narrow = await runCaptionTask(styled.task, file, hooks);
   expect(mock.translate).toHaveBeenCalledOnce();
   narrow.task.options.translationLanguage = '日本語';
@@ -98,7 +98,7 @@ it('keeps translation identity across color, position and re-wrapping, but inval
 });
 
 it('loads fonts before translation and persists matching planned and displayed word ranges without blob identities', async () => {
-  const source = task(); source.options.translationLanguage = '中文';
+  const source = task(); source.options.translationLanguage = '中文'; source.options.caption = { font: 'web:smiley-sans' };
   const result = await runCaptionTask(source, file, { signal: new AbortController().signal, checkpoint: async () => {}, progress: vi.fn() });
   expect(mock.font.mock.invocationCallOrder[0]).toBeLessThan(mock.translate.mock.invocationCallOrder[0]);
   const { WorkflowArtifactStore } = await import('@pireel/studio-engine/workflow-artifacts');
@@ -165,28 +165,28 @@ it('assembles downstream data from inserted LLM and approval outputs, and resume
   expect(llmCalls).toBe(1); expect(mock.translate).toHaveBeenCalledOnce();
 });
 
-it('reuses detached emphasis on color/position changes without another paid selection', async () => {
-  const source = task(); source.options.presetId = 'keywords';
-  mock.emphasis.mockImplementation(async rows => rows.map((row: { index: number }) => ({ index: row.index, words: [0] })));
+it('reuses highlights on color/position changes without another paid selection', async () => {
+  const source = task(); source.options.highlights = true;
+  mock.emphasis.mockImplementation(async (rows: { index: number; text: string }[]) => rows.map(row => ({ index: row.index, text: row.text.split(/\s+/)[0]! })));
   const hooks = { signal: new AbortController().signal, checkpoint: async () => {}, progress: vi.fn() };
   const first = await runCaptionTask(source, file, hooks);
-  first.task.options.custom = { color: '#ff0000', yPct: 50 };
+  first.task.options.caption = { color: '#ff0000', yPct: 50 };
   const next = await runCaptionTask(first.task, file, hooks);
   expect(mock.emphasis).toHaveBeenCalledOnce();
-  expect(Object.values(next.task.document!.semantics.transcripts).flat()[0]?.words?.[0].emphasis).toBe(true);
+  expect(Object.values(next.task.document!.semantics.transcripts).flat()[0]?.wordDecorations?.['0']).toEqual({ highlight: 'color' });
 });
 
-it('keeps source emphasis and paid selection across font-driven line changes', async () => {
-  const source = task(); source.options = { ...source.options, presetId: 'keywords', shortenPauses: false, custom: { scale: .7, wPct: 90 } };
+it('keeps highlights and paid selection across font-driven line changes', async () => {
+  const source = task(); source.options = { ...source.options, caption: { scale: .7, wPct: 90 }, highlights: true, shortenPauses: false };
   const words = ['This', 'complete', 'important', 'phrase', 'must', 'survive', 'a', 'different', 'font', 'size'].map((text, index) => ({ text, start: index * .3, end: (index + 1) * .3 }));
   mock.transcribe.mockResolvedValueOnce([{ text: words.map(word => word.text).join(' '), start: 0, end: 3, words }]);
-  mock.emphasis.mockImplementation(async rows => rows.map((row: { index: number }) => ({ index: row.index, words: [1, 2, 3] })));
+  mock.emphasis.mockImplementation(async (rows: { index: number }[]) => rows.map(row => ({ index: row.index, text: 'complete important phrase' })));
   const hooks = { signal: new AbortController().signal, checkpoint: async () => {}, progress: vi.fn() };
   const first = await runCaptionTask(source, file, hooks);
   const before = first.task.document!.timeline.tracks.find(track => track.type === 'caption')!.clips.length;
-  first.task.options = { ...first.task.options, custom: { scale: 2, wPct: 35 } };
+  first.task.options = { ...first.task.options, caption: { scale: 2, wPct: 35 } };
   const second = await runCaptionTask(first.task, file, hooks);
   expect(mock.emphasis).toHaveBeenCalledOnce();
   expect(second.task.document!.timeline.tracks.find(track => track.type === 'caption')!.clips.length).toBeGreaterThan(before);
-  expect(Object.values(second.task.document!.semantics.transcripts).flat()[0].words?.filter(word => word.emphasis).map(word => word.text)).toEqual(['complete', 'important', 'phrase']);
+  expect(Object.keys(Object.values(second.task.document!.semantics.transcripts).flat()[0].wordDecorations ?? {})).toEqual(['1', '2', '3']);
 });

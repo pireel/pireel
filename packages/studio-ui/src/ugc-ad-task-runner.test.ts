@@ -8,7 +8,7 @@ vi.mock('./client-export', () => ({ clientExportVideo: mock.render }));
 vi.mock('./visual', () => ({ prepareVisualAnalysis: mock.visual }));
 vi.mock('./web-fonts', () => ({ loadFont: async () => {} }));
 import { exportUgcAdEdit, runUgcAdTask } from './ugc-ad-task-runner';
-const fixture = (): CaptionTaskRecord => ({ id: 'ad', scene: 'ugc-ad', scope: 'owner', name: 'creator.mp4', sourceSig: 'source', width: 1080, height: 1920, durationSec: 12, stage: 'ready', updatedAt: 1, options: { layoutVersion: 2, presetId: 'clean', aspect: 'original', shortenPauses: false, broll: { assets: [], captions: true }, ugcAd: { productName: '晨光杯', claim: '容量 350ml', callToAction: '查看详情', hook: '', angle: 'demo' } } });
+const fixture = (): CaptionTaskRecord => ({ id: 'ad', scene: 'ugc-ad', scope: 'owner', name: 'creator.mp4', sourceSig: 'source', width: 1080, height: 1920, durationSec: 12, stage: 'ready', updatedAt: 1, options: { caption: {}, aspect: 'original', shortenPauses: false, broll: { assets: [], captions: true }, ugcAd: { productName: '晨光杯', claim: '容量 350ml', callToAction: '查看详情', hook: '', angle: 'demo' } } });
 const hooks = () => ({ signal: new AbortController().signal, checkpoint: async () => {}, progress: vi.fn() });
 beforeEach(() => { vi.clearAllMocks(); mock.files.clear(); mock.asr.mockResolvedValue([{ text: '这款晨光杯很方便', start: 0, end: 3 }]); mock.visual.mockResolvedValue({ prep: { frames: [{ timestamp: 4, base64: 'frame', mime: 'image/jpeg' }], segsAll: [{ start: 0, end: 8 }] } }); mock.render.mockResolvedValue(new Blob(['mp4'], { type: 'video/mp4' })); });
 it('creates a native ad with narration captions and exact supplied claim and CTA', async () => {

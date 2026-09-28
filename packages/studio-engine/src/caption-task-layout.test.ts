@@ -1,21 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { buildCaptionTaskDocument, captionTaskCanvas, captionTaskStyle, captionTaskSafeArea, fitCaptionTaskBilingualStyle, fitCaptionTaskDocumentLayout, type CaptionTaskOptions } from './caption-task';
-import { assembleHtml, projectDocumentToComposition } from './composition';
+import { assembleHtml, projectDocumentToComposition, resolveCaptionStyle } from './composition';
 import { captionLineSegments } from './caption-layout-metrics';
 import { wordsFromText } from './caption-fx';
 import { BASE_CAPTION_FONT_PX, getCaptionPreset } from './caption-presets';
-const options: CaptionTaskOptions = { layoutVersion: 2, presetId: 'clean', aspect: 'original', shortenPauses: false };
+const options: CaptionTaskOptions = { caption: {}, aspect: 'original', shortenPauses: false };
 const portrait = { width: 1080, height: 1920 };
 const landscape = { width: 1920, height: 1080 };
 const transcript = [{ text: 'Hello world', start: 0, end: 3, words: [{ text: 'Hello', start: 0, end: 1 }, { text: 'world', start: 1, end: 3 }] }];
 const input = { projectId: 'layout', sourceUrl: 'blob:source', sourceSig: 'sig', ...portrait, durationSec: 4, transcript, options };
 describe('caption layout recommendations', () => {
-  it.each([portrait, landscape, { width: 1080, height: 1080 }])('keeps output font size consistent for %j', (source) => {
-    const canvas = captionTaskCanvas('original', source);
+  it.each([portrait, landscape, { width: 1080, height: 1080 }])('uses the workbench default size for %j', (source) => {
     const style = captionTaskStyle({ ...options, translationLanguage: 'English' }, source);
-    const exportScale = 1080 / Math.min(canvas.width, canvas.height);
-    expect(Math.round(BASE_CAPTION_FONT_PX * style.scale!) * exportScale).toBeCloseTo(64, 0);
-    expect(Math.round(BASE_CAPTION_FONT_PX * style.sub!.scale!) * exportScale).toBeCloseTo(48, 0);
+    expect(style.scale).toBe(resolveCaptionStyle({ blocks: [] }).scale);
+    expect(style.sub!.scale).toBeCloseTo(style.scale! * .75);
     const safe = captionTaskSafeArea(source);
     expect(style.xPct).toBe(50);
     expect(safe.left).toBe(100 - safe.right);
@@ -44,12 +42,8 @@ describe('caption layout recommendations', () => {
     expect(html).toContain('font-size:64px'); expect(html).toContain('font-size:48px'); expect(html).toContain('bottom:26%');
     expect(html).not.toContain('data-caption-safe-area');
   });
-  it('preserves legacy version geometry and explicit manual overrides', () => {
-    const legacy = { ...options, layoutVersion: undefined };
-    expect(captionTaskStyle(legacy)).toMatchObject({ yPct: 86, wPct: 84 });
-    const document = buildCaptionTaskDocument({ ...input, options: legacy });
-    expect(fitCaptionTaskDocumentLayout(document, legacy)).toBe(document);
-    const custom = captionTaskStyle({ ...options, custom: { scale: 1.5, yPct: 80, wPct: 60, color: '#abcdef' } });
+  it('keeps explicit style overrides', () => {
+    const custom = captionTaskStyle({ ...options, caption: { scale: 1.5, yPct: 80, wPct: 60, color: '#abcdef' } });
     expect(custom).toMatchObject({ scale: 1.5, yPct: 80, wPct: 60, color: '#abcdef' });
   });
 });

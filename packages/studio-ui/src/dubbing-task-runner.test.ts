@@ -12,7 +12,7 @@ vi.mock('./time-stretch', () => ({ signalsmithStretch: vi.fn(), tiledStretch: ()
 vi.mock('./denoise', () => ({ encodeWavMono: mocks.wav }));
 vi.mock('./client-export', () => ({ clientExportVideo: mocks.render }));
 import { runDubbingTask } from './dubbing-task-runner';
-const task = (): CaptionTaskRecord => ({ id: 'task', scope: 'owner', scene: 'dubbing', generationId: 'run', name: 'source.mp4', sourceSig: 'original', width: 1920, height: 1080, durationSec: 8, stage: 'ready', updatedAt: 0, options: { presetId: 'clean', aspect: 'original', shortenPauses: false, dubbing: { language: 'English', voiceId: 'voice', lipSync: false } } });
+const task = (): CaptionTaskRecord => ({ id: 'task', scope: 'owner', scene: 'dubbing', generationId: 'run', name: 'source.mp4', sourceSig: 'original', width: 1920, height: 1080, durationSec: 8, stage: 'ready', updatedAt: 0, options: { caption: {}, aspect: 'original', shortenPauses: false, dubbing: { language: 'English', voiceId: 'voice', lipSync: false } } });
 const file = new File(['video'], 'source.mp4', { type: 'video/mp4' });
 const response = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
 beforeEach(() => {
@@ -47,7 +47,7 @@ describe('standalone video dubbing', () => {
     expect(JSON.stringify(comp)).not.toContain('你好世界');
     expect(comp.audioTracks[0].role).toBe('narration');
     expect(first.task.dubbing?.captionTranscript?.[0].text).toBe('Hello world');
-    first.task.options.presetId = 'karaoke';
+    first.task.options.caption = { preset: 'style-outline' };
     await runDubbingTask(first.task, file, hooks);
     expect(mocks.asr).toHaveBeenCalledTimes(2);
     expect(mocks.fetch).toHaveBeenCalledOnce();

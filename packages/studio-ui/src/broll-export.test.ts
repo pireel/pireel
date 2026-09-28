@@ -7,7 +7,7 @@ vi.mock('./caption-task-store',()=>({loadCaptionMedia:mocks.media}));
 vi.mock('./web-fonts',()=>({loadFont:async()=>{}}));
 it('exports the current clip edits locally with narration intact and no AI calls',async()=>{
  const source=new File(['source'],'source.mp4');const footage=new File(['footage'],'footage.mp4');
- const task:CaptionTaskRecord={id:'p',scope:'owner',name:'source.mp4',sourceSig:'source',width:640,height:360,durationSec:10,scene:'broll',stage:'completed',updatedAt:1,options:{presetId:'clean',aspect:'original',shortenPauses:false,broll:{captions:false,assets:[{id:'a',sig:'footage',name:'footage.mp4',kind:'video',durationSec:8,width:640,height:360}],edits:{clip:{start:4,duration:2,sourceIn:3}}}},broll:{analysisKey:'a',planKey:'plan',candidates:[{id:'candidate',assetId:'a',start:0,end:5,description:'footage'}],placements:[{id:'clip',candidateId:'candidate',start:1,duration:3}]}};
+ const task:CaptionTaskRecord={id:'p',scope:'owner',name:'source.mp4',sourceSig:'source',width:640,height:360,durationSec:10,scene:'broll',stage:'completed',updatedAt:1,options:{caption:{},aspect:'original',shortenPauses:false,broll:{captions:false,assets:[{id:'a',sig:'footage',name:'footage.mp4',kind:'video',durationSec:8,width:640,height:360}],edits:{clip:{start:4,duration:2,sourceIn:3}}}},broll:{analysisKey:'a',planKey:'plan',candidates:[{id:'candidate',assetId:'a',start:0,end:5,description:'footage'}],placements:[{id:'clip',candidateId:'candidate',start:1,duration:3}]}};
  const revoke=vi.fn();let next=0;vi.stubGlobal('URL',{createObjectURL:()=>`blob:${++next}`,revokeObjectURL:revoke});
  const fetch=vi.fn();vi.stubGlobal('fetch',fetch);mocks.media.mockResolvedValue(footage);const result=new Blob(['mp4']);mocks.render.mockResolvedValue(result);
  try {
@@ -30,7 +30,7 @@ it('exports the same PiP panels and presenter crop used in the live render model
   mocks.render.mockResolvedValue(new Blob(['mp4']));
   const source = new File(['source'], 'source.mp4');
   const task: CaptionTaskRecord = { id: 'pip', scene: 'pip', scope: 'owner', name: 'source.mp4', sourceSig: 'source', width: 1080, height: 1920, durationSec: 12, stage: 'completed', updatedAt: 1,
-    options: { presetId: 'clean', aspect: 'original', shortenPauses: false, broll: { captions: false, pip: { template: 'split' }, assets: [{ id: 'a', sig: 'footage', name: 'product.mp4', kind: 'video', durationSec: 8, width: 1920, height: 1080 }] } },
+    options: { caption: {}, aspect: 'original', shortenPauses: false, broll: { captions: false, pip: { template: 'split' }, assets: [{ id: 'a', sig: 'footage', name: 'product.mp4', kind: 'video', durationSec: 8, width: 1920, height: 1080 }] } },
     broll: { analysisKey: 'a', planKey: 'plan', candidates: [{ id: 'c', assetId: 'a', start: 1, end: 5, description: 'product' }], placements: [{ id: 'clip', candidateId: 'c', start: 2, duration: 3 }] },
   };
   const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);

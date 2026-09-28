@@ -5,7 +5,7 @@ import { applyEditorialFraming } from './editing-framing';
 import { applyDocumentTransaction } from './document-transaction';
 import { moveEditorClip } from './editor-document/commands/clip-move';
 import { removeEditorClips } from './editor-document/commands/remove';
-const doc = () => buildCaptionBaseDocument({ projectId: 'p', sourceSig: 'source', sourceUrl: '', width: 1080, height: 1920, durationSec: 20, transcript: [], options: { presetId: 'clean', aspect: 'original', shortenPauses: false } });
+const doc = () => buildCaptionBaseDocument({ projectId: 'p', sourceSig: 'source', sourceUrl: '', width: 1080, height: 1920, durationSec: 20, transcript: [], options: { caption: {}, aspect: 'original', shortenPauses: false } });
 const source: ContentSource = { sourceKey: 'test', durationSec: 20, settings: { enabled: ['motion-graphics', 'broll'], maxGraphics: 2, instruction: '' }, beats: [{ id: 'a', start: 1, end: 6, text: 'Compare the two approaches' }, { id: 'b', start: 8, end: 12, text: 'Here is the actual product' }, { id: 'c', start: 14, end: 18, text: 'Remember the caveat' }], candidates: [{ id: 'asset', description: 'product' }] };
 const proposal = () => ({ sourceKey: 'test', beats: source.beats.map((beat, index) => ({ id: beat.id, purpose: index === 0 ? 'compare' : index === 1 ? 'example' : 'summary', visual: index === 0 ? 'graphic' : index === 1 ? 'broll' : 'speaker', description: 'Show the point', reason: 'Matches speech' })) });
 const plan = () => validateContentPlan(source, proposal());

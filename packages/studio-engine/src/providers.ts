@@ -161,7 +161,7 @@ export interface StudioProviders {
   captionEmphasis?: (rows: import('./caption-emphasis').EmphasisRow[], projectId?: string, options?: StudioOperationOptions) => Promise<import('./caption-emphasis').EmphasisSelection[]>;
   translate?: (rows: { index: number; text: string }[], targetLanguage: string, options?: StudioOperationOptions) => Promise<{ index: number; text: string }[]>;
   /** Caption auto-highlight picker (hosted-LLM feature; absent = the transcript hides its "Auto highlight" button — BYO agents highlight via set_captions highlights). Returns exact phrases per row. */
-  autoHighlight?: (rows: { index: number; text: string }[]) => Promise<{ index: number; text: string }[]>;
+  autoHighlight?: (rows: { index: number; text: string }[], options?: StudioOperationOptions) => Promise<{ index: number; text: string }[]>;
   /** Drafts a generation prompt for "add over this transcript selection" (hosted LLM; absent = the add popover offers library picks only). */
   draftInsertPrompt?: (req: { kind: 'mg' | 'sticker' | 'image' | 'video' | 'sfx'; text: string; before: string; after: string; durationSec: number }) => Promise<string>;
   /** Fill a component's text slots from the narration around its time window (hosted-LLM feature;

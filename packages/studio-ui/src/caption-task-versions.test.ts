@@ -1,21 +1,21 @@
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { saveCaptionTask, listCaptionVersions, loadCaptionVersion, loadCaptionTask, type CaptionTaskRecord } from './caption-task-store';
-const task = (generationId = 'v1'): CaptionTaskRecord => ({ id: 'task', scope: 'owner', generationId, name: 'demo.mp4', sourceSig: 'source', width: 1920, height: 1080, durationSec: 4, stage: 'completed', updatedAt: 10, options: { presetId: 'clean', aspect: 'original', shortenPauses: false } });
+const task = (generationId = 'v1'): CaptionTaskRecord => ({ id: 'task', scope: 'owner', generationId, name: 'demo.mp4', sourceSig: 'source', width: 1920, height: 1080, durationSec: 4, stage: 'completed', updatedAt: 10, options: { caption: {}, aspect: 'original', shortenPauses: false } });
 beforeEach(() => { vi.stubGlobal('indexedDB', new IDBFactory()); vi.stubGlobal('IDBKeyRange', IDBKeyRange); });
 afterEach(() => vi.unstubAllGlobals());
 describe('caption version persistence', () => {
   it('keeps each completed video and settings immutable across regeneration and retries', async () => {
     const first = task(); await saveCaptionTask(first, new Blob(['first']));
-    const second = { ...task('v2'), updatedAt: 20, options: { ...first.options, presetId: 'neon' } };
+    const second = { ...task('v2'), updatedAt: 20, options: { ...first.options, caption: { preset: 'art-neon' } } };
     await saveCaptionTask({ ...second, stage: 'failed' });
     expect(await listCaptionVersions('owner', 'task')).toHaveLength(1);
     await saveCaptionTask(second, new Blob(['second']));
     await saveCaptionTask({ ...second, options: first.options }, new Blob(['must not overwrite']));
     expect((await listCaptionVersions('owner', 'task')).map(({ number }) => number)).toEqual([2, 1]);
     const old = await loadCaptionVersion('owner', 'task', 'v1'); const latest = await loadCaptionVersion('owner', 'task', 'v2');
-    expect(await old!.video.text()).toBe('first'); expect(old!.version.task.options.presetId).toBe('clean');
-    expect(await latest!.video.text()).toBe('second'); expect(latest!.version.task.options.presetId).toBe('neon');
+    expect(await old!.video.text()).toBe('first'); expect(old!.version.task.options.caption.preset).toBeUndefined();
+    expect(await latest!.video.text()).toBe('second'); expect(latest!.version.task.options.caption.preset).toBe('art-neon');
     await saveCaptionTask({ ...second, draftOptions: { ...first.options, translationLanguage: 'English' } });
     expect((await loadCaptionVersion('owner', 'task', 'v2'))!.version.task.draftOptions).toBeUndefined();
     expect((await loadCaptionTask('owner', 'task'))!.draftOptions?.translationLanguage).toBe('English');

@@ -34,19 +34,17 @@ export interface EditingRecipe {
   render: { res: 720 | 1080 | 2160; fps: 24 | 25 | 30 | 60; format: 'mp4' };
 }
 export function defaultEditingRecipe(): EditingRecipe {
-  return { version: 1, enabled: ['captions'], captions: { presetId: 'clean', layoutVersion: 2, aspect: 'original', shortenPauses: false }, language: 'English', voiceId: '', speakerVoices: {}, script: '', rewrite: '', reviewTranslation: false,
+  return { version: 1, enabled: ['captions'], captions: { caption: {}, aspect: 'original', shortenPauses: false }, language: 'English', voiceId: '', speakerVoices: {}, script: '', rewrite: '', reviewTranslation: false,
     roughCut: { minimumPauseSec: .7, paddingSec: .15, fillers: true }, cleanup: { strength: .6, normalize: true }, graphics: { instruction: '用简洁、清晰的图形解释重点，不遮挡人物和底部字幕。', maxCount: 3 }, camera: { scale: 1.15, intervalSec: 8, transition: 'none' }, overlay: { query: '', maxCount: 3 }, layout: { aspect: 'original', arrange: true }, effects: { style: 'soft', maxCount: 4, volumeDb: -18 }, music: { query: 'calm narration background music', assetSig: '', name: '', volumeDb: -18, duckDb: -12 }, render: { res: 1080, fps: 30, format: 'mp4' } };
 }
 
 /** Editing workflows use the workbench canvas-size convention; explicit user sizes always win. */
 export function editingCaptionOptions(recipe: EditingRecipe): CaptionTaskOptions {
   const defaults = resolveCaptionStyle({ blocks: [] });
-  // These are the same basic presets offered in the workbench, not a separate font theme.
-  const sharedTypography = ['clean', 'keywords', 'karaoke'].includes(recipe.captions.presetId) ? { font: 'preset', bold: false } : {};
   return {
     ...recipe.captions,
     aspect: recipe.enabled.includes('auto-layout') ? recipe.layout.aspect : 'original',
-    custom: { ...sharedTypography, ...recipe.captions.custom, scale: recipe.captions.custom?.scale ?? defaults.scale },
+    caption: { ...recipe.captions.caption, scale: recipe.captions.caption?.scale ?? defaults.scale },
     translationLanguage: recipe.enabled.includes('translation') && !recipe.enabled.includes('voiceover') ? recipe.language as CaptionTaskOptions['translationLanguage'] : undefined,
   };
 }

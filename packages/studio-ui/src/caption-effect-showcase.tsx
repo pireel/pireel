@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pause, Play } from 'lucide-react';
-import { CAPTION_TASK_PRESETS } from '@pireel/studio-engine/caption-task';
+import { CAPTION_ART_PRESETS, CAPTION_STYLE_PRESETS } from '@pireel/studio-engine/caption-presets';
 import { CanvasCaptionPreview } from './canvas-caption-preview';
+import { t } from './i18n';
+
+/** The workbench's own style catalog, so what the landing shows is what the editor offers. */
+const SHOWCASE = [...CAPTION_ART_PRESETS, ...CAPTION_STYLE_PRESETS].map(preset => ({ id: preset.id, name: preset.name, style: { preset: preset.id } }));
 
 const demoUrl = new URL('./workflow-art/caption-demo.mp4', import.meta.url).href;
 
@@ -15,7 +19,7 @@ export function CaptionEffectShowcase({ locale, suspended = false }: { locale: '
   const video = useRef<HTMLVideoElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const lastPointer = useRef('mouse');
-  const active = CAPTION_TASK_PRESETS.find((item) => item.id === (hovered ?? focused ?? touchSelection)) ?? CAPTION_TASK_PRESETS[automatic]!;
+  const active = SHOWCASE.find((item) => item.id === (hovered ?? focused ?? touchSelection)) ?? SHOWCASE[automatic]!;
   const playbackTime = useCallback(() => video.current?.currentTime ?? 0, []);
   const cycling = !hovered && !focused && !touchSelection && !paused && !suspended && !reduced;
   useEffect(() => {
@@ -26,7 +30,7 @@ export function CaptionEffectShowcase({ locale, suspended = false }: { locale: '
   }, []);
   useEffect(() => {
     if (!cycling) return;
-    const interval = setInterval(() => { if (!document.hidden) setAutomatic((index) => (index + 1) % CAPTION_TASK_PRESETS.length); }, 1400);
+    const interval = setInterval(() => { if (!document.hidden) setAutomatic((index) => (index + 1) % SHOWCASE.length); }, 1400);
     return () => clearInterval(interval);
   }, [cycling]);
   useEffect(() => {
@@ -46,7 +50,7 @@ export function CaptionEffectShowcase({ locale, suspended = false }: { locale: '
   return <div className="my-2 grid grid-cols-[100px_minmax(0,1fr)] gap-3 sm:grid-cols-[120px_minmax(0,1fr)]">
     <div className="relative min-h-0">
     <div ref={list} role="group" aria-label={locale === 'zh' ? '字幕效果' : 'Caption styles'} className="absolute inset-0 space-y-1 overflow-y-auto overscroll-contain pr-1 [scrollbar-width:thin]" onPointerLeave={() => setHovered(null)}>
-      {CAPTION_TASK_PRESETS.map((item, index) => <button key={item.id} type="button" data-preset={item.id} aria-pressed={active.id === item.id} aria-label={item.name[locale]}
+      {SHOWCASE.map((item, index) => <button key={item.id} type="button" data-preset={item.id} aria-pressed={active.id === item.id} aria-label={t(item.name)}
         onPointerEnter={(event) => { if (event.pointerType !== 'touch') { setAutomatic(index); setHovered(item.id); } }}
         onPointerDown={(event) => { lastPointer.current = event.pointerType; }}
         onFocus={(event) => { if (event.currentTarget.matches(':focus-visible')) { setAutomatic(index); setFocused(item.id); } }}

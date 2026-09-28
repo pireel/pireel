@@ -12,7 +12,7 @@ vi.mock('./client-export', () => ({ clientExportVideo: mock.render }));
 vi.mock('./web-fonts', () => ({ loadFont: async () => {} }));
 vi.mock('@pireel/studio-engine/providers', () => ({ studioProviders: () => ({ sceneProjects: { owner: async () => 'owner' }, vault: { backup: mock.backup } }) }));
 import { runSfxTask, exportSfxEdit } from './sfx-task-runner';
-const fixture = (): CaptionTaskRecord => ({ id: 'sfx', scene: 'sfx', scope: 'owner', name: 'source.mp4', sourceSig: 'source', width: 640, height: 360, durationSec: 20, stage: 'ready', updatedAt: 1, options: { layoutVersion: 2, presetId: 'clean', aspect: 'original', shortenPauses: false, sfx: { ...LEGACY_SFX_OPTIONS } } });
+const fixture = (): CaptionTaskRecord => ({ id: 'sfx', scene: 'sfx', scope: 'owner', name: 'source.mp4', sourceSig: 'source', width: 640, height: 360, durationSec: 20, stage: 'ready', updatedAt: 1, options: { caption: {}, aspect: 'original', shortenPauses: false, sfx: { ...LEGACY_SFX_OPTIONS } } });
 const hooks = () => ({ signal: new AbortController().signal, checkpoint: async () => {}, progress: vi.fn() });
 beforeEach(() => {
   vi.clearAllMocks(); mock.files.clear(); mock.backup.mockResolvedValue(true);

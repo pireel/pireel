@@ -1,8 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { captionLineSegments, captionStackRows, lexicalWordGroups } from './caption-layout-metrics';
 import { CAPTION_ART_PRESETS, getCaptionPreset } from './caption-presets';
+import { groupAsrWords } from './caption-fx';
 
 describe('captionLineSegments', () => {
+  it('keeps words the dictionary splits into lone Han characters on one line (口播, 聊一聊)', () => {
+    const text = '大家好，今天我们聊一聊怎么把一条口播视频做得更好看。';
+    const words = groupAsrWords(text, [...text].map((char, index) => ({ text: char, start: index * 0.2, end: index * 0.2 + 0.2 })));
+    const lines = captionLineSegments(words, getCaptionPreset('ln-clean'), 70, 1, 1080).map(line => line.map(word => word.text).join(''));
+    expect(lines.join('')).toBe(text);
+    for (const [left, right] of lines.slice(0, -1).map((line, index) => [line, lines[index + 1]!] as const)) {
+      expect(`${left.at(-1)}${right[0]}`).not.toBe('口播');
+      expect(`${left.at(-1)}${right[0]}`).not.toBe('聊一');
+    }
+  });
   it('uses actual font-engine measurements when available instead of only glyph estimates', () => {
     const words = ['one', 'two', 'three', 'four'].map((text, index) => ({ text, start: index, end: index + 1 }));
     const preset = getCaptionPreset('ln-clean');
@@ -37,6 +48,16 @@ describe('captionLineSegments', () => {
       let at = 0;
       for (const text of lineTexts(lines)) { at += text.length; expect(boundaries.has(at)).toBe(true); }
       expect(lineTexts(lines).join('')).toBe(words.map((word) => word.text).join(''));
+    }
+  });
+  it('keeps lone Han characters together in stacked rows (口播, 聊一聊)', () => {
+    const words = perChar('大家好，今天我们聊一聊怎么把一条口播视频做得更好看。');
+    for (const art of CAPTION_ART_PRESETS) {
+      const rows = lineTexts(captionStackRows(words, art, 80, 1, 1080, { measureText: () => null }));
+      for (let at = 1; at < rows.length; at++) {
+        const seam = rows[at - 1]!.slice(-1) + rows[at]!.slice(0, 1);
+        expect(['口播', '聊一', '一聊']).not.toContain(seam);
+      }
     }
   });
 });

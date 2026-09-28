@@ -4,7 +4,7 @@ import { PIP_TEMPLATES, resolvePipGeometry } from '@pireel/studio-engine/pip-lay
 import { validateEditorDocumentV2 } from '@pireel/studio-engine/editor-document/validation';
 import type { CaptionTaskRecord } from './caption-task-store';
 const fixture = (): CaptionTaskRecord => ({ id: 'pip', scope: 'owner', scene: 'pip', name: 'speaker.mp4', sourceSig: 'source', width: 1080, height: 1920, durationSec: 10, stage: 'ready', updatedAt: 1,
-  options: { presetId: 'clean', aspect: 'original', shortenPauses: false, broll: { captions: false, pip: { template: 'presenter' }, assets: [{ id: 'a', sig: 'picture', name: 'picture.jpg', width: 1920, height: 1080, kind: 'image', durationSec: 5 }] } },
+  options: { caption: {}, aspect: 'original', shortenPauses: false, broll: { captions: false, pip: { template: 'presenter' }, assets: [{ id: 'a', sig: 'picture', name: 'picture.jpg', width: 1920, height: 1080, kind: 'image', durationSec: 5 }] } },
   broll: { analysisKey: 'key', planKey: 'plan', candidates: [{ id: 'candidate', assetId: 'a', start: 0, end: 5, description: 'picture' }], placements: [{ id: 'clip', candidateId: 'candidate', start: 2, duration: 3 }] },
 });
 for (const template of PIP_TEMPLATES) it(`${template.id}: keeps the original narration and confines supplemental visuals to the matched window`, () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { mergeCaptionProjectMetadata, type CaptionTaskRecord } from './caption-task-store';
-const task: CaptionTaskRecord = { id: 'caption', scope: 'owner', name: 'old name', updatedAt: 10, durationSec: 5, width: 1080, height: 1920, sourceSig: 'sig', options: { presetId: 'clean', aspect: 'original', shortenPauses: false }, stage: 'rendering' };
+const task: CaptionTaskRecord = { id: 'caption', scope: 'owner', name: 'old name', updatedAt: 10, durationSec: 5, width: 1080, height: 1920, sourceSig: 'sig', options: { caption: {}, aspect: 'original', shortenPauses: false }, stage: 'rendering' };
 describe('caption metadata ownership', () => {
   it('keeps a backfilled cover through later processing checkpoints without changing project order', () => {
     const stored = { ...task, coverThumb: 'data:image/jpeg;base64,cover' };

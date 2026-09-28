@@ -801,7 +801,10 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     output.addVideoTrack(videoSource, { frameRate: FPS });
     const withClips = !!opts.audio?.length;
     const clipMaskBeep = [...(opts.clipMasks?.values() ?? [])].some((ranges) => ranges.some((range) => range.audio === 'beep'));
-    const needsTimelineMix = withClips || visualVideos.length > 0 || tones.length > 0 || clipMaskBeep || segs.some((segment) =>
+    // Browser AAC encoders take 44.1/48 kHz mono or stereo only; a source outside that (phone memos,
+    // synthesized speech at 22.05 kHz) goes through the 48 kHz mixer instead of being passed through.
+    const unencodableSource = [...rigs.values()].some((rig) => rig.audio && (![44100, 48000].includes(rig.audio.sampleRate) || rig.audio.numberOfChannels > 2));
+    const needsTimelineMix = withClips || visualVideos.length > 0 || tones.length > 0 || clipMaskBeep || unencodableSource || segs.some((segment) =>
       Math.abs(segmentSourceRate(segment, segment.timelineStart, segment.timelineEnd) - 1) > 1e-6,
     );
     const anyAudio = withClips

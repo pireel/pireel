@@ -1,17 +1,19 @@
 import { imageThumb } from '@pireel/ui/image-url';
 import { applyBrandMedia, type BrandSnapshot } from '@pireel/studio-engine/brand-kit';
-import { validateEmphasisSelection as sourceSelectionValid } from '@pireel/studio-engine/caption-emphasis';
-import { sourceEmphasisRows, annotateSourceEmphasis } from '@pireel/studio-engine/caption-source-emphasis';
+import { phraseWordIndexes, rowWords } from '@pireel/studio-engine/caption-highlights';
+import { applyWordDecorations } from '@pireel/studio-engine/word-decorations';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { buildCaptionBaseDocument, captionTaskStyle, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
 import { firstNarrativeAssetId, projectDocumentToComposition, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
+import { joinWords } from '@pireel/studio-engine/caption-fx';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { CAPTION_WORKFLOW_CAPABILITIES } from '@pireel/studio-engine/workflow-caption-template';
-import { artifactVersion, workflowJson } from '@pireel/studio-engine/workflow-artifacts';
-import { selectCaptionEmphasisRows } from './caption-emphasis-operation';
-import { planCaptionDocument, translateCaptionPlan, assembleCaptionDocument, captionPlanEmphasisRows, type CaptionPlan, type CaptionTranslation, type CaptionEmphasis } from './caption-workflow-artifacts';
+import { workflowJson } from '@pireel/studio-engine/workflow-artifacts';
+import { planCaptionDocument, translateCaptionPlan, assembleCaptionDocument, type CaptionPlan, type CaptionTranslation } from './caption-workflow-artifacts';
 import { SceneWorkflowHost, type SceneNode, type SceneMedia } from './scene-workflow-runtime';
 import type { CaptionProcessingStage } from './caption-task-store';
+
+const HIGHLIGHT_BATCH = 200;
 
 export function captionWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
   const { store } = host;
@@ -33,7 +35,7 @@ export function captionWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     }, project: outputs => ({ cuts: outputs.cuts as unknown as { fromSec: number; toSec: number }[] }) }),
     node('edit.compose', { async execute(args) {
       const media = store.read<SceneMedia>(args.media, 'media');
-      const document = buildCaptionBaseDocument({ ...media, projectId: String(args.projectId), sourceName: media.name, sourceUrl: '', sourceSig: media.sig, transcript: [], cuts: args.cuts as unknown as { fromSec: number; toSec: number }[], options: { presetId: 'clean', aspect: args.aspect as CaptionTaskOptions['aspect'], shortenPauses: false } });
+      const document = buildCaptionBaseDocument({ ...media, projectId: String(args.projectId), sourceName: media.name, sourceUrl: '', sourceSig: media.sig, transcript: [], cuts: args.cuts as unknown as { fromSec: number; toSec: number }[], options: { caption: {}, aspect: args.aspect as CaptionTaskOptions['aspect'], shortenPauses: false } });
       return { document: workflowJson(await store.put('document', String(args.projectId), document)) };
     } }),
     node('captions.plan', { async execute(args) {
@@ -61,41 +63,34 @@ export function captionWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
       return { document: workflowJson(await store.put('document', 'brand', document)) };
     }, project: outputs => ({ document: store.read<EditorDocumentV2>(outputs.document, 'document') }) }),
     node('captions.apply', { stage: 'styling', async execute(args) {
-      const document = assembleCaptionDocument(store.read(args.document, 'document'), store.read(args.plan, 'caption-plan'), args.translation as unknown as CaptionTranslation | null, args.style as unknown as CaptionTaskOptions, args.emphasis as unknown as CaptionEmphasis | null);
+      const document = assembleCaptionDocument(store.read(args.document, 'document'), store.read(args.plan, 'caption-plan'), args.translation as unknown as CaptionTranslation | null, args.style as unknown as CaptionTaskOptions);
       return { document: workflowJson(await store.put('document', 'captions', document)) };
     }, project: outputs => {
       const document = store.read<EditorDocumentV2>(outputs.document, 'document');
       const owner = firstNarrativeAssetId(document);
       return { document, ...(owner && !document.timeline.tracks.some(track => track.role === 'narration') ? { transcript: document.semantics.transcripts[owner] as AsrSegment[] } : {}) };
     } }),
-    node('captions.source-emphasize', { stage: 'emphasizing', async execute(args, context) {
+    node('captions.highlight', { stage: 'emphasizing', async execute(args, context) {
+      // Same step as the workbench's auto highlight: one call over the source sentences, landing as word highlights.
+      const highlight = studioProviders().autoHighlight;
+      if (!highlight) throw new Error('自动高亮服务尚未连接，请关闭重点突出后重试。');
       const transcript = store.read<AsrSegment[]>(args.transcript, 'transcript');
-      const select = studioProviders().captionEmphasis;
-      if (!select) throw new Error('重点词服务尚未连接。');
-      const { rows, addresses } = sourceEmphasisRows(transcript);
-      const selections = await selectCaptionEmphasisRows(rows, async batch => {
+      const rows = transcript.map(segment => rowWords(segment));
+      const all = rows.flatMap((words, index) => words.length ? [{ index, text: joinWords(words.map(word => word.text)) }] : []);
+      const keys: { index: number; text: string }[] = [];
+      for (let offset = 0; offset < all.length; offset += HIGHLIGHT_BATCH) {
         host.check();
-        const key = 'source-emphasis-' + await artifactVersion([host.task.scope, host.task.workflowEnvironmentRevision ?? 'local', 'source-emphasis-1', batch]);
-        const cached = Object.values(store.entries).find(entry => entry.ref.kind === 'edit-plan' && entry.ref.id === key);
-        if (cached) {
-          const saved = store.read<{ selections: import('@pireel/studio-engine/caption-emphasis').EmphasisSelection[] }>(cached.ref, 'edit-plan');
-          if (sourceSelectionValid(batch, saved.selections)) return saved.selections;
-        }
-        const value = await select(batch, undefined, { signal: host.hooks.signal, onUsage: context.recordUsage });
-        if (!sourceSelectionValid(batch, value)) throw new Error('重点词结果不完整，原文已保留。');
-        await store.put('edit-plan', key, { selections: value });
-        await context.savePartial({ lastCompletedBatch: key }); return value;
-      }, count('emphasizing'));
-      const annotated = annotateSourceEmphasis(transcript, selections);
-      const ref = args.transcript as unknown as { id: string; version: string };
-      return { transcript: workflowJson(await store.put('transcript', ref.id, annotated)), value: workflowJson({ sourceVersion: ref.version, items: selections.map(row => ({ segment: addresses[row.index].segment, words: row.words.map(word => addresses[row.index].offset + word) })) }) };
-    } }),
-    node('captions.emphasize', { stage: 'emphasizing', cacheInputs(args) { const plan = store.read<CaptionPlan>(args.plan, 'caption-plan'); return { sourceKey: plan.sourceKey, rows: workflowJson(captionPlanEmphasisRows(plan)) }; }, async execute(args, context) {
-      const select = studioProviders().captionEmphasis;
-      if (!select) throw new Error('重点词服务尚未连接，请选择其他字幕样式。');
-      const plan = store.read<CaptionPlan>(args.plan, 'caption-plan');
-      const selections = await selectCaptionEmphasisRows(captionPlanEmphasisRows(plan), rows => { host.check(); return select(rows, undefined, { signal: host.hooks.signal, onUsage: context.recordUsage }); }, count('emphasizing'));
-      return { emphasis: workflowJson({ sourceKey: plan.sourceKey, items: selections.map(selection => ({ id: plan.lines[selection.index].id, words: selection.words })) }) };
+        keys.push(...await highlight(all.slice(offset, offset + HIGHLIGHT_BATCH), { signal: host.hooks.signal, onUsage: context.recordUsage }));
+        count('emphasizing')(Math.min(all.length, offset + HIGHLIGHT_BATCH), all.length);
+      }
+      const targets = keys.flatMap(key => {
+        const found = rows[key.index] ? phraseWordIndexes(rows[key.index]!, key.text) : null;
+        if (!found) throw new Error(`高亮结果与字幕原文对不上：「${key.text}」`);
+        return found.map(wordIndex => ({ sentenceIndex: key.index, wordIndex }));
+      });
+      const highlighted = applyWordDecorations(transcript, targets, { highlight: 'color', color: null });
+      const ref = args.transcript as unknown as { id: string };
+      return { transcript: workflowJson(await store.put('transcript', ref.id, highlighted)) };
     } }),
     node('video.render', { cache: false, stage: 'rendering', async execute(args) {
       const document = store.read<EditorDocumentV2>(args.document, 'document');

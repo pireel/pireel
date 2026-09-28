@@ -22,15 +22,15 @@ export function sceneCreditInput(task: CaptionTaskRecord, options: CaptionTaskOp
   const source = transcript.map((segment) => segment.text).join('\n');
   const input: SceneCreditInput = { durationSec: task.durationSec, asr: !reuseCompleted || !transcript.length, translation: false, emphasis: false, lipSync: false, speech: [], ...(source ? { sourceTokens: Math.max([...source].length, Math.ceil(new TextEncoder().encode(source).byteLength / 2)) } : {}) };
   if (task.scene === 'subtitle-removal') { input.asr = false; input.subtitleRemoval = true; input.erasureKind = options.subtitleRemoval?.kind ?? 'subtitles'; input.erasureTier = normalizeErasureOptions(options.subtitleRemoval).tier; input.erasureWidth = task.width; input.erasureHeight = task.height; return input; }
-  if (task.scene === 'sfx') { input.sfxPlanning = !!options.sfx && 'density' in options.sfx; input.emphasis = !!options.sfx && 'captions' in options.sfx && options.sfx.captions && options.presetId === 'keywords'; return input; }
+  if (task.scene === 'sfx') { input.sfxPlanning = !!options.sfx && 'density' in options.sfx; input.emphasis = !!options.sfx && 'captions' in options.sfx && options.sfx.captions && !!options.highlights; return input; }
   if ((task.scene === 'broll' || task.scene === 'pip' || task.scene === 'ugc-ad')) {
     input.brollFrames = (options.broll?.assets ?? []).reduce((sum, a) => sum + (a.kind === 'image' ? 1 : 8), 0);
-    input.emphasis = !!options.broll?.captions && options.presetId === 'keywords';
+    input.emphasis = !!options.broll?.captions && !!options.highlights;
     return input;
   }
   if (task.scene !== 'dubbing') {
     input.translation = !!options.translationLanguage && !(reuseCompleted && task.stage === 'completed' && task.translation?.language === options.translationLanguage && task.options.shortenPauses === options.shortenPauses);
-    input.emphasis = options.presetId === 'keywords';
+    input.emphasis = !!options.highlights;
     return input;
   }
   const config = options.dubbing;
@@ -71,7 +71,7 @@ export function sceneCreditInput(task: CaptionTaskRecord, options: CaptionTaskOp
     });
   }
   if (config.captions) {
-    input.emphasis = options.presetId === 'keywords';
+    input.emphasis = !!options.highlights;
     if (!(reuse && task.dubbing?.captionSignature === signature && task.dubbing.captionTranscript?.length)) {
       input.asrPasses = input.asr ? 2 : 1; input.asr = true;
     }

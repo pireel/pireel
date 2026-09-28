@@ -21,7 +21,7 @@ it('anchors the opening to recorded speech and uses only supplied commercial fac
   expect(planUgcAdText({ ...brief, claim: '' }, transcript, 4).map(row => row.role)).toEqual(['hook', 'cta']);
 });
 it('composes the existing native caption/B-roll graph and attaches local ad copy before rendering', () => {
-  const config = { presetId: 'clean', aspect: 'original' as const, shortenPauses: false, ugcAd: brief, broll: { assets: [], captions: true } };
+  const config = { caption: {}, aspect: 'original' as const, shortenPauses: false, ugcAd: brief, broll: { assets: [], captions: true } };
   const without = ugcAdWorkflowDefinition(config, {}, null, 'project', 14, null);
   expect(without.steps.map(step => step.id)).not.toContain('analysis');
   expect(without.steps.at(-1)!.arguments.document).toEqual({ kind: 'step', stepId: 'ugc-text', key: 'document' });

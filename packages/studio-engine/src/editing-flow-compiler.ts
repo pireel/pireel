@@ -30,9 +30,9 @@ export function compileEditingFlow(flow: EditingFlow, task: CaptionTaskRecord, m
     } else if (card.kind === 'captions') {
       const options = { ...editingCaptionOptions(recipe), aspect: 'original' as const, translationLanguage: ctx.language as typeof recipe.captions.translationLanguage };
       let annotated = ctx.transcript;
-      if (recipe.captions.presetId === 'keywords') { node('emphasis', 'captions.source-emphasize', 2, { transcript: annotated }); annotated = out(prefix('emphasis'), 'transcript'); }
+      if (recipe.captions.highlights) { node('highlight', 'captions.highlight', 2, { transcript: annotated }); annotated = out(prefix('highlight'), 'transcript'); }
       node('plan', 'captions.plan', 2, { document: ctx.document, transcript: annotated, layout: lit(captionLayoutOptions(options)) });
-      node('captions', 'captions.apply', 2, { document: ctx.document, plan: out(prefix('plan'), 'plan'), style: lit(options), translation: lit(null), emphasis: lit(null) });
+      node('captions', 'captions.apply', 2, { document: ctx.document, plan: out(prefix('plan'), 'plan'), style: lit(options), translation: lit(null) });
       result.document = out(prefix('captions'), 'document'); result.transcript = annotated;
     } else if (card.kind === 'translation') {
       node('source', 'captions.plan', 2, { document: ctx.document, transcript: ctx.transcript, layout: lit(captionLayoutOptions(editingCaptionOptions(recipe))) });

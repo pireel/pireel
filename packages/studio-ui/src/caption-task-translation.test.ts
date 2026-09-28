@@ -5,7 +5,7 @@ import { translateCaptionTask } from './caption-task-translation';
 import type { CaptionTaskRecord } from './caption-task-store';
 
 const task = (): CaptionTaskRecord => ({ id: 'task', scope: 'owner', name: 'video.mp4', sourceSig: 'source', width: 1080, height: 1920, durationSec: 6, stage: 'ready', updatedAt: 0,
-  options: { presetId: 'clean', aspect: 'original', shortenPauses: false, translationLanguage: '中文' },
+  options: { caption: {}, aspect: 'original', shortenPauses: false, translationLanguage: '中文' },
   transcript: [
     { text: 'Hello world', start: 0, end: 2, words: [{ text: 'Hello', start: 0, end: .8 }, { text: 'world', start: 1, end: 2 }] },
     { text: 'Good morning', start: 3, end: 5, words: [{ text: 'Good', start: 3, end: 3.8 }, { text: 'morning', start: 4, end: 5 }] },
@@ -29,7 +29,7 @@ describe('standalone bilingual captions', () => {
     const service = translate();
     const result = await translateCaptionTask(original, build(original), service, () => {});
     expect(service).toHaveBeenCalledWith([{ index: 0, text: 'Hello world' }], '中文');
-    const restyled = { ...original, ...result, options: { ...original.options, presetId: 'cinema' } };
+    const restyled = { ...original, ...result, options: { ...original.options, caption: {} } };
     await translateCaptionTask(restyled, build(restyled), service, () => {});
     expect(service).toHaveBeenCalledOnce();
     const changedLanguage = { ...restyled, options: { ...restyled.options, translationLanguage: '日本語' as const } };

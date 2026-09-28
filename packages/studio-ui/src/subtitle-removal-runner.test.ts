@@ -8,7 +8,7 @@ vi.mock('./remote-media', () => ({ materializeRemoteMedia: async () => ({ file: 
 vi.mock('./client-export', () => ({ clientExportVideo: mocks.render }));
 vi.mock('@pireel/studio-engine/providers', () => ({ studioProviders: () => ({ sceneProjects: { owner: async () => 'owner' }, vault: { backup: mocks.backup } }) }));
 import { runSubtitleRemovalTask } from './subtitle-removal-runner';
-const fixture = (): CaptionTaskRecord => ({ id: 'removal', scene: 'subtitle-removal', scope: 'owner', generationId: 'first', name: 'source.mp4', sourceSig: 'source', width: 640, height: 360, durationSec: 20, stage: 'ready', updatedAt: 1, options: { presetId: 'clean', aspect: 'original', shortenPauses: false, subtitleRemoval: { mode: 'auto' } } });
+const fixture = (): CaptionTaskRecord => ({ id: 'removal', scene: 'subtitle-removal', scope: 'owner', generationId: 'first', name: 'source.mp4', sourceSig: 'source', width: 640, height: 360, durationSec: 20, stage: 'ready', updatedAt: 1, options: { caption: {}, aspect: 'original', shortenPauses: false, subtitleRemoval: { mode: 'auto' } } });
 const hooks = () => ({ signal: new AbortController().signal, checkpoint: async () => {}, progress: vi.fn() });
 beforeEach(() => { vi.clearAllMocks(); mocks.files.clear(); mocks.backup.mockResolvedValue(true); mocks.probe.mockResolvedValue({ width: 640, height: 360, durationSec: 20, hasAudio: true }); });
 afterEach(() => vi.unstubAllGlobals());

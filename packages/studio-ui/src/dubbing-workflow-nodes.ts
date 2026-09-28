@@ -177,7 +177,7 @@ export function dubbingWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
   }, project: outputs => project({ captionTranscript: store.read(outputs.transcript, 'transcript'), captionSignature: String(outputs.signature), captionAudioSig: String(outputs.audioSig) }) }),
   node('dubbing.compose', { async execute(args) {
     const media = store.read<SceneMedia>(args.media, 'media'); const audio = store.read<SceneMedia>(args.audio, 'media');
-    const document = buildCaptionBaseDocument({ ...media, sourceUrl: '', sourceName: media.name, sourceSig: media.sig, projectId: String(args.projectId), transcript: [], options: { presetId: 'clean', aspect: 'original', shortenPauses: false } });
+    const document = buildCaptionBaseDocument({ ...media, sourceUrl: '', sourceName: media.name, sourceSig: media.sig, projectId: String(args.projectId), transcript: [], options: { caption: {}, aspect: 'original', shortenPauses: false } });
     const result = applyDocumentTransaction(document, { ops: [
       { op: 'narrative.patch', input: { updates: document.timeline.tracks.flatMap(track => track.clips.flatMap(clip => clip.kind === 'narrative' ? [{ clipId: clip.id, patch: { audio: { mute: true } } }] : [])) } },
       { op: 'command', input: { command: { type: 'track.insert', track: { id: 'dubbing-narration', type: 'audio', role: 'narration', name: 'Dubbing', syncLocked: true } } } },

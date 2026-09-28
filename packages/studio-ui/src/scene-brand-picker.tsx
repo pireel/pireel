@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { brandSnapshot, type BrandKit } from '@pireel/studio-engine/brand-kit';
-import { BRAND_CAPTION_PRESET_ID, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
+import { brandCaptionStyle, brandSnapshot, type BrandKit } from '@pireel/studio-engine/brand-kit';
+import type { CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { SceneSelect } from './scene-form-controls';
 
@@ -27,8 +27,10 @@ export function SceneBrandPicker({ options, locale, disabled, onChange }: {
     <SceneSelect label={say('品牌', 'Brand')} value={current?.id ?? 'none'} disabled={disabled || brands === null} options={choices} onChange={id => {
       const kit = listed.find(brand => brand.id === id);
       onChange(options => {
-        if (!kit) { const { brand: _brand, ...rest } = options; return { ...rest, presetId: rest.presetId === BRAND_CAPTION_PRESET_ID ? 'clean' : rest.presetId }; }
-        return { ...options, brand: brandSnapshot(kit), presetId: BRAND_CAPTION_PRESET_ID, custom: undefined, aspect: ASPECT[kit.framing.aspect] };
+        // The brand's captions become the scene's caption style; later edits in the panel override them.
+        if (!kit) { const { brand: _brand, ...rest } = options; return rest; }
+        const brand = brandSnapshot(kit);
+        return { ...options, brand, caption: brandCaptionStyle(brand), aspect: ASPECT[kit.framing.aspect] };
       });
     }} />
     {error ? <p role="alert" className="text-ink-3 mt-2 text-xs">{say('品牌列表加载失败：', 'Could not load brands: ')}{error}</p>

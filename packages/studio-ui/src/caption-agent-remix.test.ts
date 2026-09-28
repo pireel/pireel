@@ -8,7 +8,7 @@ vi.mock('./current-user', () => ({ loadCurrentUser: mock.user }));
 vi.mock('./local-media', () => ({ loadLocalVideo: mock.file, saveLocalVideo: mock.cache }));
 vi.mock('./use-draft-persist', () => ({ cacheProjectLocally: mock.local, newProjectId: mock.id, serverSaveProject: mock.save, serverLoadProject: mock.load }));
 import { captionAgentRemixDocument, createCaptionAgentRemix } from './caption-agent-remix';
-const task = (): CaptionTaskRecord => ({ id: 'caption-original', scope: 'owner', name: 'demo.mp4', sourceSig: 'source', width: 1080, height: 1920, durationSec: 4, updatedAt: 1, stage: 'ready', projectId: 'old-remix', options: { presetId: 'clean', aspect: 'original', shortenPauses: false } });
+const task = (): CaptionTaskRecord => ({ id: 'caption-original', scope: 'owner', name: 'demo.mp4', sourceSig: 'source', width: 1080, height: 1920, durationSec: 4, updatedAt: 1, stage: 'ready', projectId: 'old-remix', options: { caption: {}, aspect: 'original', shortenPauses: false } });
 beforeEach(() => {
   vi.clearAllMocks();
   mock.user.mockResolvedValue({ user_id: 'owner', auth_method: 'session' });
@@ -21,7 +21,8 @@ describe('Agent Remix', () => {
     const document = captionAgentRemixDocument(task(), 'pnew001', 'blob:video');
     const source = firstNarrativeAssetId(document)!;
     expect(document.assets[source]?.locator.localSig).toBe('source');
-    expect(document.appearance.captionStyle?.preset).toBe('ln-clean');
+    // No scene preset: the workbench default look applies.
+    expect(document.appearance.captionStyle?.preset).toBeUndefined();
     expect(document.timeline.tracks.some((track) => track.clips.length > 0)).toBe(true);
   });
   it('creates a new project for each explicit remix and never writes the original or an earlier remix', async () => {

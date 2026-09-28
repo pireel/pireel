@@ -16,7 +16,7 @@ const button = (text: string) => [...container.querySelectorAll('button')].find(
 beforeEach(async () => {
   vi.clearAllMocks(); mock.props = null; vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); let count = 0;
   vi.stubGlobal('URL', { createObjectURL: () => `blob:${++count}`, revokeObjectURL: vi.fn() }); mock.media.mockResolvedValue(sound);
-  task = { id: 'sfx', generationId: 'version-1', scope: 'owner', scene: 'sfx', sourceSig: 'original', name: 'source.mp4', width: 640, height: 360, durationSec: 10, stage: 'completed', updatedAt: 1, options: { presetId: 'clean', aspect: 'original', shortenPauses: false, sfx: { density: 'medium' } } };
+  task = { id: 'sfx', generationId: 'version-1', scope: 'owner', scene: 'sfx', sourceSig: 'original', name: 'source.mp4', width: 640, height: 360, durationSec: 10, stage: 'completed', updatedAt: 1, options: { caption: {}, aspect: 'original', shortenPauses: false, sfx: { density: 'medium' } } };
   const base = buildCaptionBaseDocument({ projectId: task.id, sourceUrl: 'blob:old-original', sourceSig: task.sourceSig, width: task.width, height: task.height, durationSec: task.durationSec, transcript: [], options: task.options });
   const result = applyDocumentTransaction(base, { ops: [{ op: 'command', input: { command: { type: 'track.insert', track: { id: 'sfx-track', type: 'audio', role: 'sfx', name: '音效' } } } }, { op: 'audio.add', input: { toTrackId: 'sfx-track', clip: { id: 'sound', src: 'blob:old-sound', sig: 'sound-sig', label: 'soft.wav', role: 'sfx', startSec: 2, durationSec: .25, volumeDb: -22, fadeInSec: .01, fadeOutSec: .05 } } }] }, { projectId: task.id });
   if (!result.ok) throw new Error(result.error.message); task.document = result.document;

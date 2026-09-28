@@ -28,7 +28,7 @@ it('does not require paid ASR for layout-only or voice cleanup', () => {
   expect(() => validateWorkflow(compiled.definition, WORKFLOW_NODE_CATALOG)).not.toThrow();
 });
 it('maps speech into the edited clock so later effects do not drift after cuts', () => {
-  const doc = buildCaptionBaseDocument({ projectId: 'test', sourceSig: 'source', sourceUrl: '', width: 640, height: 360, durationSec: 10, transcript: [], options: { presetId: 'clean', aspect: 'original', shortenPauses: true }, cuts: [{ fromSec: 1, toSec: 3 }] });
+  const doc = buildCaptionBaseDocument({ projectId: 'test', sourceSig: 'source', sourceUrl: '', width: 640, height: 360, durationSec: 10, transcript: [], options: { caption: {}, aspect: 'original', shortenPauses: true }, cuts: [{ fromSec: 1, toSec: 3 }] });
   const cues = editingSpeechCues(doc, [{ text: 'second', start: 4, end: 6 }]);
   expect(editingDuration(doc)).toBe(8); expect(cues[0]).toMatchObject({ start: 2, end: 4 });
 });
@@ -49,34 +49,27 @@ it('uses the workbench font scale for every workflow aspect and preserves custom
   for (const source of [{ width: 1080, height: 1920 }, { width: 1920, height: 1080 }, { width: 1080, height: 1080 }]) {
     const recipe = defaultEditingRecipe();
     expect(captionTaskStyle(editingCaptionOptions(recipe), source).scale).toBe(workbench.scale);
-    recipe.captions.custom = { scale: .75, wPct: 80 };
+    recipe.captions.caption = { scale: .75, wPct: 80 };
     expect(captionTaskStyle(editingCaptionOptions(recipe), source)).toMatchObject({ scale: .75, wPct: 80 });
     const compiled = compileEditingWorkflow(recipe, task, media, transcript);
-    expect(compiled.definition.steps.find(step => step.id === 'captions-plan')!.arguments.layout).toMatchObject({ value: { custom: { scale: .75 } } });
-    expect(compiled.definition.steps.find(step => step.id === 'captions-apply')!.arguments.style).toMatchObject({ value: { custom: { scale: .75 } } });
+    expect(compiled.definition.steps.find(step => step.id === 'captions-plan')!.arguments.layout).toMatchObject({ value: { caption: { scale: .75 } } });
+    expect(compiled.definition.steps.find(step => step.id === 'captions-apply')!.arguments.style).toMatchObject({ value: { caption: { scale: .75 } } });
   }
 });
 
-it('matches workbench typography for the basic presets without overriding deliberate font choices', async () => {
+it('uses the workbench default look and keeps deliberate style choices', async () => {
   const { editingCaptionOptions } = await import('./editing-capabilities');
   const { captionTaskStyle } = await import('./caption-task');
-  const { captionFontCss } = await import('./caption-layout-metrics');
-  const { getCaptionPreset } = await import('./caption-presets');
-  for (const presetId of ['clean', 'keywords', 'karaoke']) {
-    const recipe = defaultEditingRecipe(); recipe.captions.presetId = presetId;
-    const style = captionTaskStyle(editingCaptionOptions(recipe));
-    const preset = getCaptionPreset(style.preset);
-    expect(captionFontCss(preset, style.font)).toBe(captionFontCss(preset));
-    expect(style.bold).toBe(false);
-    recipe.captions.custom = { font: 'web:smiley-sans', bold: true, scale: 1.5 };
-    expect(captionTaskStyle(editingCaptionOptions(recipe))).toMatchObject(recipe.captions.custom);
-  }
-  const recipe = defaultEditingRecipe(); recipe.captions.presetId = 'smiley';
-  expect(captionTaskStyle(editingCaptionOptions(recipe)).font).toBe('web:smiley-sans');
+  const { resolveCaptionStyle } = await import('./composition');
+  const recipe = defaultEditingRecipe();
+  const style = captionTaskStyle(editingCaptionOptions(recipe));
+  expect(style.preset ?? resolveCaptionStyle({ blocks: [] }).preset).toBe(resolveCaptionStyle({ blocks: [] }).preset);
+  recipe.captions.caption = { preset: 'art-beast', font: 'web:smiley-sans', bold: true, scale: 1.5 };
+  expect(captionTaskStyle(editingCaptionOptions(recipe))).toMatchObject(recipe.captions.caption);
 });
 
 it('shares one validated content and framing plan across the visual effects and keeps review before generation', () => {
-  const recipe = defaultEditingRecipe(); recipe.enabled = ['motion-graphics', 'camera-movement', 'auto-layout', 'broll', 'captions']; recipe.captions.presetId = 'keywords'; recipe.reviewPlan = true;
+  const recipe = defaultEditingRecipe(); recipe.enabled = ['motion-graphics', 'camera-movement', 'auto-layout', 'broll', 'captions']; recipe.captions.highlights = true; recipe.reviewPlan = true;
   const compiled = compileEditingWorkflow(recipe, task, media, transcript);
   expect(() => validateWorkflow(compiled.definition, WORKFLOW_NODE_CATALOG)).not.toThrow();
   for (const cap of ['graphics.generate', 'camera.motion', 'layout.auto']) {
@@ -86,6 +79,6 @@ it('shares one validated content and framing plan across the visual effects and 
   }
   const preview = workflowToTarget(compiled.definition, compiled.targets.plan);
   expect(preview.steps.some(step => step.capability === 'graphics.generate' || step.capability === 'video.render' || step.capability === 'human.approval')).toBe(false);
-  expect(compiled.definition.steps.find(step => step.id === 'caption-emphasis')!.arguments.transcript).toEqual({ kind: 'step', stepId: 'transcript', key: 'transcript' });
-  expect(compiled.definition.steps.find(step => step.id === 'captions-plan')!.arguments.transcript).toEqual({ kind: 'step', stepId: 'caption-emphasis', key: 'transcript' });
+  expect(compiled.definition.steps.find(step => step.id === 'caption-highlight')!.arguments.transcript).toEqual({ kind: 'step', stepId: 'transcript', key: 'transcript' });
+  expect(compiled.definition.steps.find(step => step.id === 'captions-plan')!.arguments.transcript).toEqual({ kind: 'step', stepId: 'caption-highlight', key: 'transcript' });
 });

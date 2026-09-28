@@ -16,7 +16,7 @@ import { type Block, type VideoShot, isSentenceCaption } from './composition';
 import { spans as clipSpans } from './trim';
 import { type AsrSegment, type CueRef, type CueWord, type DisplayCue, captionBlocksFromAsr } from './build-blocks';
 import { maskCueText, maskedWordText } from './word-masks';
-import { joinWords } from './caption-fx';
+import { joinWords, loneHan } from './caption-fx';
 import { captionLineSegments } from './caption-layout-metrics';
 
 /** Source-domain predicate: the narration/transcript timeline belongs to the narration source (segments without a src field). */
@@ -257,7 +257,10 @@ export function speechPhraseChunks<W extends { text: string; start: number; end:
     offset += word.text.length;
     const sentenceEnd = sentenceEnds.has(offset);
     if (next) offset += joinWords([word.text, next.text]).length - word.text.length - next.text.length;
-    if (!next || sentenceEnd || next.start - word.end >= 0.5 || next.end - current[0]!.start > 6) {
+    // The length cap waits up to one more second rather than split two lone Han characters (口|播).
+    const span = next ? next.end - current[0]!.start : 0;
+    const overLong = span > 6 && !(span <= 7 && loneHan(word.text) && loneHan(next!.text));
+    if (!next || sentenceEnd || next.start - word.end >= 0.5 || overLong) {
       result.push(current); current = [];
     }
   });

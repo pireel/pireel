@@ -4,23 +4,9 @@ import { removeSrcRanges } from './trim';
 import { BASE_CAPTION_FONT_PX, getCaptionPreset } from './caption-presets';
 import { captionLineSegments } from './caption-layout-metrics';
 import { wordsFromText } from './caption-fx';
-import { brandAppearance, brandCaptionStyle, type BrandSnapshot } from './brand-kit';
+import { brandAppearance, type BrandSnapshot } from './brand-kit';
+import { DEFAULT_CAPTION_WIDTH_PCT } from './composition-core';
 
-export interface CaptionTaskPreset { id: string; name: { zh: string; en: string }; style: Partial<CaptionStyle> }
-export const CAPTION_TASK_PRESETS: readonly CaptionTaskPreset[] = [
-  { id: 'clean', name: { zh: '清爽白字', en: 'Clean' }, style: { preset: 'ln-clean', font: 'sans', bold: true } },
-  { id: 'keywords', name: { zh: '重点突出', en: 'Key phrases' }, style: { preset: 'kw-yellow', font: 'web:smiley-sans', bold: true } },
-  { id: 'karaoke', name: { zh: '逐词跟读', en: 'Follow along' }, style: { preset: 'em-yellow', font: 'sans', bold: true } },
-  { id: 'neon', name: { zh: '荧光绿', en: 'Neon' }, style: { preset: 'em-green', font: 'web:douyin-sans', bold: true } },
-  { id: 'cinema', name: { zh: '经典黑底', en: 'Cinema' }, style: { preset: 'ln-black', font: 'sans' } },
-  { id: 'paper', name: { zh: '纸上字幕', en: 'Paper' }, style: { preset: 'ln-white', font: 'web:zcool-xiaowei' } },
-  { id: 'handwritten', name: { zh: '手写温度', en: 'Handwritten' }, style: { preset: 'ln-clean', font: 'web:lxgw-wenkai', bold: true } },
-  { id: 'smiley', name: { zh: '得意黑', en: 'Smiley' }, style: { preset: 'ln-clean', font: 'web:smiley-sans', bold: true } },
-  { id: 'playful', name: { zh: '快乐花字', en: 'Playful' }, style: { preset: 'ln-yellow', font: 'web:zcool-kuaile' } },
-  { id: 'editorial', name: { zh: '书卷气', en: 'Editorial' }, style: { preset: 'em-gold-serif', font: 'serif', bold: true } },
-  { id: 'underline', name: { zh: '下划重点', en: 'Underline' }, style: { preset: 'em-underline', font: 'web:zcool-qingke-huangyou' } },
-  { id: 'mint', name: { zh: '薄荷白字', en: 'Mint' }, style: { preset: 'ln-mint', font: 'web:smiley-sans', bold: true } },
-];
 export const CAPTION_TRANSLATION_LANGUAGES = [
   { id: '中文', name: { zh: '中文', en: 'Chinese' }, sample: '字幕预览' },
   { id: 'English', name: { zh: '英语', en: 'English' }, sample: 'Caption preview' },
@@ -28,11 +14,16 @@ export const CAPTION_TRANSLATION_LANGUAGES = [
   { id: '한국어', name: { zh: '韩语', en: 'Korean' }, sample: '자막 미리보기' },
 ] as const;
 export type CaptionTranslationLanguage = typeof CAPTION_TRANSLATION_LANGUAGES[number]['id'];
-export interface CaptionTaskOptions { /** Brand picked for this scene, copied at pick time. */ brand?: BrandSnapshot; ugcAd?: import('./ugc-ad').UgcAdOptions; subtitleRemoval?: import('./subtitle-removal').SubtitleRemovalOptions; sfx?: import('./sfx-task').SfxOptions; broll?: import('./broll-task').BrollOptions; dubbing?: import('./dubbing-task').DubbingOptions; layoutVersion?: 2; presetId: string; aspect: 'original' | 'portrait' | 'landscape' | 'square'; shortenPauses: boolean; translationLanguage?: CaptionTranslationLanguage; custom?: Pick<Partial<CaptionStyle>, 'font' | 'scale' | 'bold' | 'color' | 'accentColor' | 'bg' | 'strokeColor' | 'strokeWidth' | 'xPct' | 'yPct' | 'wPct'> }
-export function captionTaskPreset(id: string): CaptionTaskPreset {
-  const preset = CAPTION_TASK_PRESETS.find((item) => item.id === id);
-  if (!preset) throw new Error('Unknown caption preset');
-  return preset;
+export interface CaptionTaskOptions {
+  /** Brand picked for this scene, copied at pick time; its captions seed `caption`. */
+  brand?: BrandSnapshot;
+  ugcAd?: import('./ugc-ad').UgcAdOptions; subtitleRemoval?: import('./subtitle-removal').SubtitleRemovalOptions; sfx?: import('./sfx-task').SfxOptions; broll?: import('./broll-task').BrollOptions; dubbing?: import('./dubbing-task').DubbingOptions;
+  /** The main caption line in the Studio caption model (look, animation, font, colours, position, size).
+   *  Omitted fields take the Studio defaults; the scene only adds safe-area placement. */
+  caption: Partial<CaptionStyle>;
+  /** Highlight key words with the Studio auto-highlight (word decorations on the transcript). */
+  highlights?: boolean;
+  aspect: 'original' | 'portrait' | 'landscape' | 'square'; shortenPauses: boolean; translationLanguage?: CaptionTranslationLanguage;
 }
 export interface CaptionTaskDimensions { width: number; height: number }
 /** Product reference zones, not a guarantee for every platform/ad placement. */
@@ -41,31 +32,35 @@ export function captionTaskSafeArea(source: CaptionTaskDimensions) {
   if (source.height === source.width) return { left: 10, right: 90, top: 10, bottom: 85 };
   return { left: 12.5, right: 87.5, top: 5, bottom: 90 };
 }
+/** Where the caption group's bottom sits: the user's position, else just inside the platform safe area. */
+/**
+ * Options saved before scenes used the workbench style model carried a scene preset id and a
+ * `custom` override bag. Their overrides are ordinary caption style fields; the preset id has no
+ * counterpart and falls back to the workbench default.
+ */
+export function storedCaptionTaskOptions(value: CaptionTaskOptions): CaptionTaskOptions {
+  if (value.caption && typeof value.caption === 'object') return value;
+  const { presetId, layoutVersion: _layoutVersion, custom, ...rest } = value as CaptionTaskOptions & { presetId?: string; layoutVersion?: number; custom?: Partial<CaptionStyle> };
+  return { ...rest, caption: { ...custom }, ...(presetId === 'keywords' ? { highlights: true } : {}) };
+}
+
 export function captionTaskGroupBottom(options: CaptionTaskOptions, source: CaptionTaskDimensions) {
-  return options.custom?.yPct ?? (options.presetId === BRAND_CAPTION_PRESET_ID ? options.brand?.captions.yPct : undefined) ?? (options.layoutVersion === 2 ? captionTaskSafeArea(source).bottom - 1 : 86);
+  return options.caption.yPct ?? captionTaskSafeArea(source).bottom - 1;
 }
-/** presetId of the "brand captions" card: shown first when a brand is picked; any other card overrides it. */
-export const BRAND_CAPTION_PRESET_ID = 'brand';
-/** Caption base before the scene's own adjustments: the picked brand's captions, or the chosen preset. */
-export function captionTaskBaseStyle(options: CaptionTaskOptions): Partial<CaptionStyle> {
-  if (options.presetId !== BRAND_CAPTION_PRESET_ID) return captionTaskPreset(options.presetId).style;
-  if (!options.brand) throw new Error('Brand captions selected without a brand');
-  return brandCaptionStyle(options.brand);
-}
+/** The Studio caption style for this scene: the user's choices over the Studio defaults, placed inside
+ *  the platform safe area, with the translation line reserved under the main line when bilingual. */
 export function captionTaskStyle(options: CaptionTaskOptions, source: CaptionTaskDimensions = { width: 1080, height: 1920 }): Partial<CaptionStyle> {
-  if (options.layoutVersion !== 2) return { ...captionTaskBaseStyle(options), wPct: 84, yPct: 86, ...options.custom, sub: options.translationLanguage ? { lang: options.translationLanguage, font: 'sans' } : undefined };
   const canvas = captionTaskCanvas(options.aspect, source);
   const safe = captionTaskSafeArea(canvas);
-  const { yPct: _groupBottom, ...custom } = options.custom ?? {};
-  // Precedence: the scene's own adjustment > the brand's measured value > the canvas default.
-  const base = captionTaskBaseStyle(options);
-  const scale = custom.scale ?? base.scale ?? (64 * Math.min(canvas.width, canvas.height) / 1080 / BASE_CAPTION_FONT_PX);
+  const { yPct: _groupBottom, sub, on: _on, ...caption } = options.caption;
+  // The translation line's look comes from the same panel; its language and placement stay scene-owned.
+  const { lang: _lang, yPct: _subBottom, xPct: _subX, ...subLook } = sub ?? {};
   const bottom = captionTaskGroupBottom(options, canvas);
+  const scale = caption.scale ?? 1;
   const style: Partial<CaptionStyle> = {
-    ...base, scale, xPct: base.xPct ?? (safe.left + safe.right) / 2,
-    wPct: base.wPct ?? (canvas.height > canvas.width ? 70 : canvas.height === canvas.width ? 76 : 75),
-    ...custom, yPct: bottom,
-    sub: options.translationLanguage ? { lang: options.translationLanguage, font: 'sans', scale: scale * .75, yPct: bottom } : undefined,
+    xPct: (safe.left + safe.right) / 2, wPct: DEFAULT_CAPTION_WIDTH_PCT, scale,
+    ...caption, yPct: bottom,
+    sub: options.translationLanguage ? { font: 'sans', scale: scale * .75, ...subLook, lang: options.translationLanguage, yPct: bottom } : undefined,
   };
   const sample = CAPTION_TRANSLATION_LANGUAGES.find((language) => language.id === options.translationLanguage)?.sample;
   return fitCaptionTaskBilingualStyle(style, canvas, sample ? [sample] : []);
@@ -90,7 +85,7 @@ export function fitCaptionTaskBilingualStyle(style: Partial<CaptionStyle>, canva
 
 /** Freeze the measured layout into the document shared by export and Agent Remix. */
 export function fitCaptionTaskDocumentLayout(document: EditorDocumentV2, options: CaptionTaskOptions): EditorDocumentV2 {
-  if (options.layoutVersion !== 2 || !options.translationLanguage) return document;
+  if (!options.translationLanguage) return document;
   const composition = projectDocumentToComposition(document);
   const translations = composition.blocks.filter((block) => block.templateId === 'caption').map((block) => typeof block.slots.sub === 'string' ? block.slots.sub : '');
   const style = fitCaptionTaskBilingualStyle(document.appearance.captionStyle ?? captionTaskStyle(options, document.canvas), document.canvas, translations);

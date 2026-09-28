@@ -14,7 +14,7 @@ export interface WorkflowLabSession { recipePresets?: { id: string; name: string
 export function newWorkflowLabSession(scope: string): WorkflowLabSession {
   const id = crypto.randomUUID();
   const definition: WorkflowDefinition = { schemaVersion: 1, id: 'local-workflow-test', version: 1, title: '我的测试流程', templateId: 'workflow-lab', parameters: { projectId: { type: 'string', label: { zh: '测试项目', en: 'Test project' }, default: id } }, trigger: { kind: 'manual' }, steps: [{ id: 'input', capability: 'data.value', version: 1, dependsOn: [], arguments: { value: { kind: 'literal', value: { text: '这是一段用于组合测试的文案。' } } } }] };
-  return { schemaVersion: 1, id, scope, name: definition.title, definition, history: [], task: { id, scope, name: '未选择媒体', sourceSig: 'lab-' + id, width: 1080, height: 1920, durationSec: 1, stage: 'ready', updatedAt: Date.now(), options: { presetId: 'clean', layoutVersion: 2, aspect: 'original', shortenPauses: false }, workflowData: emptySceneWorkflowData() } };
+  return { schemaVersion: 1, id, scope, name: definition.title, definition, history: [], task: { id, scope, name: '未选择媒体', sourceSig: 'lab-' + id, width: 1080, height: 1920, durationSec: 1, stage: 'ready', updatedAt: Date.now(), options: { caption: {}, aspect: 'original', shortenPauses: false }, workflowData: emptySceneWorkflowData() } };
 }
 export async function workflowLabSource(session: WorkflowLabSession, file: File): Promise<WorkflowLabSession> {
   const { durableFileSig, probeVideoFile } = await import('./media');

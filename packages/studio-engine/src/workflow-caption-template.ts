@@ -1,6 +1,6 @@
 import { contractedCapability } from './workflow-node-contracts';
 import { workflowLiteral as literal, type WorkflowBinding, type WorkflowCapability, type WorkflowDefinition, type WorkflowStep } from './workflow';
-import { BRAND_CAPTION_PRESET_ID, captionTaskBaseStyle, captionTaskStyle, type CaptionTaskOptions } from './caption-task';
+import type { CaptionTaskOptions } from './caption-task';
 import { workflowJson } from './workflow-artifacts';
 import { brandHasMedia } from './brand-kit';
 export const sceneCapability = (id: string, inputs: string[], outputs: string[], paid = false): WorkflowCapability => contractedCapability({
@@ -14,9 +14,8 @@ export const CAPTION_WORKFLOW_CAPABILITIES = [
   sceneCapability('edit.compose', ['media', 'cuts', 'aspect', 'projectId'], ['document']),
   sceneCapability('captions.plan', ['document', 'transcript', 'layout'], ['plan', 'units']),
   sceneCapability('text.translate', ['units', 'language'], ['translation', 'value'], true),
-  sceneCapability('captions.apply', ['document', 'plan', 'translation', 'emphasis', 'style'], ['document']),
-  sceneCapability('captions.emphasize', ['plan'], ['emphasis'], true),
-  sceneCapability('captions.source-emphasize', ['transcript'], ['transcript', 'value'], true),
+  sceneCapability('captions.apply', ['document', 'plan', 'translation', 'style'], ['document']),
+  sceneCapability('captions.highlight', ['transcript'], ['transcript'], true),
   sceneCapability('brand.apply', ['document', 'brand'], ['document']),
   sceneCapability('video.render', ['document', 'media'], ['media', 'document']),
 ];
@@ -25,21 +24,20 @@ export const sceneLiteral = (value: unknown) => literal(workflowJson(value));
 export function sceneStep(id: string, capability: string, args: Record<string, WorkflowBinding>): WorkflowStep {
   return { id, capability, version: 2, dependsOn: [...new Set(Object.values(args).flatMap(binding => binding.kind === 'step' ? [binding.stepId] : []))], arguments: args };
 }
-/** Only geometry affects planning. Translation keys depend on resulting lines, not style choices. */
+/** Only what changes line widths affects planning (look, font, weight, size, width); colours, position
+ *  and animation do not, so restyling reuses the plan and its translation. */
 export function captionLayoutOptions(options: CaptionTaskOptions): CaptionTaskOptions {
-  const style = captionTaskStyle(options);
-  return { presetId: options.presetId, aspect: options.aspect, shortenPauses: false, layoutVersion: options.layoutVersion, ...(options.presetId === BRAND_CAPTION_PRESET_ID ? { brand: options.brand } : {}),
-    custom: { font: style.font, scale: options.custom?.scale, bold: style.bold, wPct: options.custom?.wPct } };
+  const { preset, font, bold, scale, wPct } = options.caption;
+  return { aspect: options.aspect, shortenPauses: false, caption: { preset, font, bold, scale, wPct } };
 }
 export function captionTailSteps(options: CaptionTaskOptions, document: WorkflowBinding, transcript: WorkflowBinding, media: WorkflowBinding): WorkflowStep[] {
   const steps: WorkflowStep[] = [];
   const captions = options.sfx ? ('captions' in options.sfx && options.sfx.captions) : !options.broll || options.broll.captions;
   if (captions) {
-    const emphasize = captionTaskBaseStyle(options).preset === 'kw-yellow';
-    if (emphasize) steps.push(sceneStep('emphasis', 'captions.source-emphasize', { transcript }));
-    steps.push(sceneStep('plan', 'captions.plan', { document, transcript: emphasize ? stepOutput('emphasis', 'transcript') : transcript, layout: sceneLiteral(captionLayoutOptions(options)) }));
+    if (options.highlights) steps.push(sceneStep('highlight', 'captions.highlight', { transcript }));
+    steps.push(sceneStep('plan', 'captions.plan', { document, transcript: options.highlights ? stepOutput('highlight', 'transcript') : transcript, layout: sceneLiteral(captionLayoutOptions(options)) }));
     if (options.translationLanguage) steps.push(sceneStep('translate', 'text.translate', { units: stepOutput('plan', 'units'), language: sceneLiteral(options.translationLanguage) }));
-    steps.push(sceneStep('captions', 'captions.apply', { document, plan: stepOutput('plan', 'plan'), translation: options.translationLanguage ? stepOutput('translate', 'value') : literal(null), emphasis: literal(null), style: sceneLiteral(options) }));
+    steps.push(sceneStep('captions', 'captions.apply', { document, plan: stepOutput('plan', 'plan'), translation: options.translationLanguage ? stepOutput('translate', 'value') : literal(null), style: sceneLiteral(options) }));
     document = stepOutput('captions', 'document');
   }
   // After captions: the intro/outro ripple the captions along with the speech they follow.

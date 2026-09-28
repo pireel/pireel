@@ -18,15 +18,15 @@ vi.mock('./caption-agent-remix', () => ({ createCaptionAgentRemix: mocks.remix }
 vi.mock('./current-user', () => ({ loadCurrentUser: async () => ({ user_id: 'owner', auth_method: 'session' }) }));
 vi.mock('./local-media', () => ({ loadLocalVideo: mocks.source, saveLocalVideo: mocks.cache }));
 vi.mock('./media', () => ({ fileSig: () => 'source', probeVideoFile: async () => ({ width: 1920, height: 1080, durationSec: 5, hasAudio: true }) }));
-vi.mock('./web-fonts', () => ({ ensureFontStylesheet: async () => {} }));
+vi.mock('./web-fonts', async (original) => ({ ...await original<typeof import('./web-fonts')>(), ensureFontStylesheet: async () => {}, loadFont: async () => {} }));
 vi.mock('./caption-project-cover', () => ({ captureCaptionFirstFrame: async () => 'data:image/jpeg;base64,first-frame' }));
 vi.mock('./canvas-caption-preview', () => ({ CanvasCaptionPreview: () => createElement('canvas') }));
-vi.mock('@pireel/studio-engine/providers', () => ({ studioProviders: () => ({ translate: vi.fn(), captionEmphasis: vi.fn() }) }));
+vi.mock('@pireel/studio-engine/providers', () => ({ studioProviders: () => ({ translate: vi.fn(), autoHighlight: vi.fn() }) }));
 import { CaptionTaskPage } from './caption-task-page';
 import { saveCaptionTask, loadCaptionTask, listCaptionVersions, loadCaptionVersion } from './caption-task-store';
 let root: Root; let container: HTMLDivElement;
 let runs: { task: CaptionTaskRecord; hooks: Parameters<typeof runCaptionTask>[2]; resolve: (value: Awaited<ReturnType<typeof runCaptionTask>>) => void; reject: (error: Error) => void }[];
-const fixture = (): CaptionTaskRecord => ({ id: 'task', scope: 'owner', name: 'demo.mp4', sourceSig: 'source', width: 1920, height: 1080, durationSec: 5, stage: 'ready', updatedAt: 1, coverThumb: 'data:image/jpeg;base64,poster', options: { presetId: 'clean', aspect: 'original', shortenPauses: false } });
+const fixture = (): CaptionTaskRecord => ({ id: 'task', scope: 'owner', name: 'demo.mp4', sourceSig: 'source', width: 1920, height: 1080, durationSec: 5, stage: 'ready', updatedAt: 1, coverThumb: 'data:image/jpeg;base64,poster', options: { caption: {}, aspect: 'original', shortenPauses: false } });
 const button = (name: string) => [...container.querySelectorAll('button')].find((element) => element.textContent?.trim() === name)!;
 const click = async (element: HTMLElement) => { await act(async () => element.click()); };
 const settled = async (check: () => void) => vi.waitFor(async () => { await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); }); check(); });
@@ -108,7 +108,7 @@ describe('caption versions and preview UI', () => {
     expect(container.querySelector('button[aria-label="中文官方"]')).toBeNull();
     expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/voices')).every(([url]) => !String(url).includes('language='))).toBe(true);
     expect(container.querySelector('[aria-label="字幕位置"]')).not.toBeNull();
-    expect(container.querySelector('[aria-label="字幕样式列表"]')).not.toBeNull();
+    expect(container.querySelector('[data-caption-appearance]')).not.toBeNull();
     expect(container.textContent).not.toContain('口型同步');
     await click(container.querySelector<HTMLButtonElement>('button[aria-label="English voice"]')!);
     const voiceList = container.querySelector('[aria-label="音色列表"]');
@@ -159,27 +159,23 @@ describe('caption versions and preview UI', () => {
     await vi.waitFor(async () => {
       let saved: CaptionTaskRecord | undefined;
       await act(async () => { saved = await loadCaptionTask('owner', 'task'); });
-      expect(saved?.draftOptions?.custom?.yPct).toBe(88);
+      expect(saved?.draftOptions?.caption.yPct).toBe(88);
     });
     await click(button('生成字幕视频')); await settled(() => expect(runs).toHaveLength(1));
-    expect(runs[0]!.task.options.custom?.yPct).toBe(88);
+    expect(runs[0]!.task.options.caption.yPct).toBe(88);
     expect(container.querySelector('[aria-label="字幕位置"]')).toBeNull();
     await complete(0);
   });
-  it('uses recommended defaults for drafts while preserving legacy version settings', async () => {
-    expect(container.querySelector<HTMLInputElement>('[aria-label="字号"]')?.value).toBe('64');
+  it('places captions in the safe area by default and reads options saved in the old shape', async () => {
     expect(container.querySelector('[aria-label="字幕位置"]')?.getAttribute('aria-valuenow')).toBe('89');
-    expect(container.querySelector('[aria-label="整组位置"]')).toBeNull();
     expect(container.querySelector('[data-caption-safe-area]')).toBeNull();
     await act(async () => root.render(null));
-    await saveCaptionTask({ ...fixture(), generationId: 'old-version', stage: 'completed' }, new Blob(['old video']));
+    await saveCaptionTask({ ...fixture(), options: { presetId: 'keywords', layoutVersion: 2, custom: { yPct: 70 }, aspect: 'original', shortenPauses: false } as never });
     await act(async () => root.render(createElement(CaptionTaskPage, { taskId: 'task', locale: 'zh', onBack: vi.fn(), onOpenEditor: vi.fn() })));
     await settled(() => expect(container.querySelector('video[data-scene-video]')).not.toBeNull());
-    expect(container.querySelector<HTMLInputElement>('[aria-label="字号"]')?.value).toBe('114');
-    expect(container.querySelector('[aria-label="上下位置"]')).toBeNull();
-    await click(button('荧光绿'));
-    expect(container.querySelector<HTMLInputElement>('[aria-label="字号"]')?.value).toBe('64');
-    expect((await loadCaptionVersion('owner', 'task', 'old-version'))!.version.task.options.layoutVersion).toBeUndefined();
+    expect(container.querySelector('[aria-label="字幕位置"]')?.getAttribute('aria-valuenow')).toBe('70');
+    const highlight = [...container.querySelectorAll('label')].find(label => label.textContent?.startsWith('自动高亮重点词'))!.querySelector('input')!;
+    expect(highlight.checked).toBe(true);
   });
   it('previews the source before generation, pauses during processing, and preserves selectable versions', async () => {
     const sourceUrl = container.querySelector('video[data-scene-video]')!.getAttribute('src');
@@ -194,7 +190,7 @@ describe('caption versions and preview UI', () => {
     await complete(0);
     expect(container.querySelector('video[data-scene-video]')!.getAttribute('src')).not.toBe(sourceUrl);
     expect(container.querySelector('[aria-label="字幕生成进度"]')).toBeNull();
-    await click(button('荧光绿'));
+    await click(container.querySelector<HTMLButtonElement>('button[title="霓虹灯"]')!);
     expect(container.querySelector('video[data-scene-video]')!.getAttribute('src')).toBe(sourceUrl);
     await click(button('生成新版本'));
     expect(runs).toHaveLength(1);
@@ -204,12 +200,12 @@ describe('caption versions and preview UI', () => {
     expect(runs[0]!.task.generationId).not.toBe(runs[1]!.task.generationId);
     expect(await listCaptionVersions('owner', 'task')).toHaveLength(2);
     await choose('视频版本', '版本 1');
-    await settled(() => expect(button('清爽白字').getAttribute('aria-pressed')).toBe('true'));
+    await settled(() => expect(container.querySelector('button[title="霓虹灯"]')!.className).not.toContain('ring-1'));
     expect(container.querySelector('a[download]')?.getAttribute('download')).toBe('demo-v1.mp4');
     await click(button('Agent Remix'));
     await settled(() => expect(mocks.remix).toHaveBeenCalled());
     expect(mocks.remix.mock.calls[0]![0].generationId).toBe(runs[0]!.task.generationId);
-    expect((await loadCaptionVersion('owner', 'task', runs[1]!.task.generationId!))!.version.task.options.presetId).toBe('neon');
+    expect((await loadCaptionVersion('owner', 'task', runs[1]!.task.generationId!))!.version.task.options.caption.preset).toBe('art-neon');
     await act(async () => root.render(null));
     await act(async () => root.render(createElement(CaptionTaskPage, { taskId: 'task', locale: 'zh', onBack: vi.fn(), onOpenEditor: vi.fn() })));
     await settled(() => expect(container.querySelector('[role="combobox"][aria-label="视频版本"]')?.textContent).toContain('版本 2'));

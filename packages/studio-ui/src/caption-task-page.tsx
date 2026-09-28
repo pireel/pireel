@@ -20,15 +20,14 @@ import { SceneCreditPreview } from './scene-credit-preview';
 import { SceneSelect, SceneCheckbox } from './scene-form-controls';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowLeft, Download, Loader2, Upload, Sparkles } from 'lucide-react';
-import { CAPTION_TASK_PRESETS, CAPTION_TRANSLATION_LANGUAGES, captionTaskGroupBottom, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
+import { CAPTION_TRANSLATION_LANGUAGES, captionTaskGroupBottom, storedCaptionTaskOptions, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
 import { DEFAULT_DUBBING_OPTIONS, dubbingVoicesReady, dubbingSceneOptions } from '@pireel/studio-engine/dubbing-task';
 import { DubbingSettings } from './dubbing-settings';
 import { CaptionPositionPreview } from './caption-position-preview';
-import { CaptionPresetCarousel } from './caption-preset-carousel';
 import { SceneBrandPicker } from './scene-brand-picker';
 import { CaptionProgressOverlay } from './caption-progress-overlay';
 import { createCaptionAgentRemix } from './caption-agent-remix';
-import { CaptionTaskCustomize } from './caption-task-customize';
+import { CaptionTaskStyle } from './caption-task-style';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { fileSig, probeVideoFile, type ProbedFile } from './media';
 import { loadCurrentUser } from './current-user';
@@ -37,7 +36,7 @@ import { captureCaptionFirstFrame } from './caption-project-cover';
 import { ensureFontStylesheet } from './web-fonts';
 import { loadCaptionTask, saveCaptionTask, loadCaptionMedia, syncCaptionProject, listCaptionVersions, loadCaptionVersion, type CaptionTaskRecord, type CaptionTaskProgress, type CaptionVersionSummary, type CaptionTaskVersion } from './caption-task-store';
 
-const defaults: CaptionTaskOptions = { layoutVersion: 2, presetId: 'clean', aspect: 'original', shortenPauses: false };
+const defaults: CaptionTaskOptions = { caption: {}, aspect: 'original', shortenPauses: false };
 const actionClass = 'bg-ink text-bg inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40';
 
 export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, onOpenEditor }: { taskId: string; locale: 'zh' | 'en'; scene?: 'captions' | 'dubbing' | 'broll' | 'pip' | 'sfx' | 'subtitle-removal' | 'ugc-ad'; onBack: () => void; onOpenEditor: (projectId: string) => void }) {
@@ -104,8 +103,7 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
     return () => { alive.current = false; versionRequest.current++; abortRef.current?.abort(); window.removeEventListener('beforeunload', preventLeave); };
   }, [zh]);
   useEffect(() => { if (!result) { setResultUrl(''); return; } const url = URL.createObjectURL(result); setResultUrl(url); return () => URL.revokeObjectURL(url); }, [result]);
-  useEffect(() => { if (isDubbing) return; for (const preset of CAPTION_TASK_PRESETS) if (preset.style.font) void ensureFontStylesheet(preset.style.font); }, [isDubbing]);
-  useEffect(() => { if (options.custom?.font) void ensureFontStylesheet(options.custom.font); }, [options.custom?.font]);
+  useEffect(() => { if (options.caption.font) void ensureFontStylesheet(options.caption.font); }, [options.caption.font]);
   useEffect(() => {
     setFirstFrame('');
     if (!file) return;
@@ -202,8 +200,8 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
       const [source, history] = await Promise.all([loadCaptionMedia(scope, record.sourceSig, record.name), listCaptionVersions(scope, taskId)]);
       const selected = history[0] ? await loadCaptionVersion(scope, taskId, history[0].id) : undefined;
       if (!current) return;
-      const loadedOptions = record.draftOptions ?? record.options;
-      setTask(record); setOptions(isDubbing ? { ...loadedOptions, layoutVersion: 2, dubbing: dubbingSceneOptions(loadedOptions.dubbing ?? DEFAULT_DUBBING_OPTIONS), translationLanguage: undefined } : history.length === 0 && record.stage === 'ready' ? { ...loadedOptions, layoutVersion: 2 } : loadedOptions); setFile(source); setCover(record.coverThumb ?? '');
+      const loadedOptions = storedCaptionTaskOptions(record.draftOptions ?? record.options);
+      setTask(record); setOptions(isDubbing ? { ...loadedOptions, dubbing: dubbingSceneOptions(loadedOptions.dubbing ?? DEFAULT_DUBBING_OPTIONS), translationLanguage: undefined } : loadedOptions); setFile(source); setCover(record.coverThumb ?? '');
       setProbe({ width: record.width, height: record.height, durationSec: record.durationSec, hasAudio: true });
       setVersions(history); setSelectedVersion(selected?.version ?? null); setResult(selected?.video ?? null); setProgress(record.progress ?? {});
       setDrafting(!!record.draftDocument || !!record.draftOptions || !selected || record.stage !== 'completed');
@@ -215,10 +213,10 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
     return () => { current = false; versionRequest.current++; };
   }, [scope, taskId]);
 
-  const changeOptions = (update: (current: CaptionTaskOptions) => CaptionTaskOptions, keepLayout = false) => {
+  const changeOptions = (update: (current: CaptionTaskOptions) => CaptionTaskOptions) => {
     if (busyRef.current) return;
     if (isBroll && !drafting && selectedVersion && taskRef.current) { const next = { ...taskRef.current, broll: selectedVersion.task.broll, transcript: selectedVersion.task.transcript }; taskRef.current = next; setTask(next); }
-    versionRequest.current++; setVersionLoading(false); setDrafting(true); setOptions((current) => update(keepLayout ? current : { ...current, layoutVersion: 2 }));
+    versionRequest.current++; setVersionLoading(false); setDrafting(true); setOptions(update);
   };
   useEffect(() => {
     if (loadingProject || busy || !scope || !drafting) return;
@@ -312,15 +310,14 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
         {isDubbing ? <><DubbingSettings transcript={task.transcript} value={options.dubbing ?? DEFAULT_DUBBING_OPTIONS} locale={locale} disabled={disabled} onChange={(dubbing) => changeOptions((current) => ({ ...current, dubbing: dubbingSceneOptions(dubbing) }))} />
         <div className="mt-5 space-y-4">
           <SceneCheckbox label={say('字幕', 'Captions')} checked={!!options.dubbing?.captions} disabled={disabled} onChange={captions => changeOptions(current => ({ ...current, dubbing: { ...dubbingSceneOptions(current.dubbing ?? DEFAULT_DUBBING_OPTIONS), captions } }))} />
-          {options.dubbing?.captions && <><CaptionPresetCarousel options={options} source={probe ?? undefined} locale={locale} disabled={disabled} onSelect={(presetId) => changeOptions((current) => ({ ...current, presetId, custom: undefined }))} /><CaptionTaskCustomize options={options} source={probe ?? undefined} locale={locale} disabled={disabled} onChange={(patch) => changeOptions((current) => ({ ...current, custom: { ...current.custom, ...patch } }))} onReset={() => changeOptions((current) => ({ ...current, layoutVersion: 2, custom: undefined }))} /></>}
+          {options.dubbing?.captions && <CaptionTaskStyle options={options} source={probe ?? undefined} locale={locale} disabled={disabled} onChange={changeOptions} />}
         </div></> : ((isSfx || isRemoval) ? false : !isBroll || options.broll?.captions) ? <>
-        <CaptionPresetCarousel options={options} source={probe ?? undefined} locale={locale} disabled={disabled} onSelect={(presetId) => changeOptions((current) => ({ ...current, presetId, custom: undefined }))} />
+        <CaptionTaskStyle options={options} source={probe ?? undefined} locale={locale} disabled={disabled} onChange={changeOptions} />
         {!isBroll && !isSfx && (!!studioProviders().translate || options.translationLanguage) && <div className="border-line mt-5 border-t pt-5">
           <SceneSelect label={say('双语字幕', 'Bilingual captions')} ariaLabel={say('翻译语言', 'Translation language')} value={options.translationLanguage ?? 'off'} disabled={disabled} onChange={value => changeOptions(current => ({ ...current, translationLanguage: CAPTION_TRANSLATION_LANGUAGES.find(language => language.id === value)?.id }))} options={[
             { value: 'off', label: say('关闭', 'Off') }, ...CAPTION_TRANSLATION_LANGUAGES.map(language => ({ value: language.id, label: language.name[locale], disabled: !studioProviders().translate })),
           ]} />{options.translationLanguage && <p className="text-ink-3 mt-2 text-xs">{say('原文在上，译文在下。', 'Original above, translation below.')}</p>}
         </div>}
-        <CaptionTaskCustomize options={options} source={probe ?? undefined} locale={locale} disabled={disabled} onChange={(patch) => changeOptions((current) => ({ ...current, custom: { ...current.custom, ...patch } }))} onReset={() => changeOptions((current) => ({ ...current, layoutVersion: 2, custom: undefined }))} />
         {!isBroll && !isSfx && <div className="border-line mt-5 border-t pt-5"><SceneCheckbox label={say('AI 去停顿', 'Shorten pauses')} checked={options.shortenPauses} disabled={disabled} onChange={shortenPauses => changeOptions(current => ({ ...current, shortenPauses }))} description={say('缩短长停顿，保留自然语气。', 'Trim long pauses while keeping speech natural.')} /></div>}
         </> : null}
         {isSfx && !drafting && selectedVersion?.task.document && <p className="text-ink-3 mt-5 text-xs" role="status">{say('已添加音效', 'Effects added')}: {selectedVersion.task.document.timeline.tracks.filter(track => track.role === 'sfx').reduce((count, track) => count + track.clips.length, 0)}</p>}
@@ -344,11 +341,9 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
             {isRemoval && options.subtitleRemoval?.mode === 'region' && options.subtitleRemoval.region && !busy && !versionLoading && <SubtitleRegionOverlay region={options.subtitleRemoval.region} locale={locale} disabled={disabled} onChange={region => changeOptions(current => ({ ...current, subtitleRemoval: { ...current.subtitleRemoval, mode: 'region', region } }))}/>}
             {isPip && !busy && !versionLoading && <PipLayoutPreview options={options.broll?.pip ?? DEFAULT_PIP_OPTIONS} source={firstFrame || cover} canvas={probe ?? task} asset={options.broll?.assets[0]} scope={task.scope} locale={locale}/>}
             {(((isSfx || isRemoval) ? false : isBroll ? options.broll?.captions : !isDubbing) || options.dubbing?.captions) && !busy && !versionLoading && <CaptionPositionPreview options={options} source={probe ?? { width: 1080, height: 1920 }} locale={locale} disabled={disabled} onChange={(yPct) => changeOptions((current) => {
-              const custom = { ...current.custom };
-              if (yPct === captionTaskGroupBottom({ ...current, custom: undefined }, probe ?? { width: 1080, height: 1920 })) delete custom.yPct;
-              else custom.yPct = yPct;
-              return { ...current, custom: Object.keys(custom).length ? custom : undefined };
-            }, true)} />}
+              const { yPct: _old, ...caption } = current.caption;
+              return { ...current, caption: yPct === captionTaskGroupBottom({ ...current, caption }, probe ?? { width: 1080, height: 1920 }) ? caption : { ...caption, yPct } };
+            })} />}
           </>}
           {versionLoading && <div role="status" className="absolute inset-0 flex items-center justify-center bg-black/70 text-white"><Loader2 size={24} className="animate-spin" /><span className="sr-only">{say('读取版本', 'Loading version')}</span></div>}
           {busy && <CaptionProgressOverlay options={task.options} progress={progress} locale={locale} stopping={stopping} onStop={() => { abortRef.current?.abort(); setStopping(true); }} />}

@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({ estimate: vi.fn() }));
 vi.mock('@pireel/studio-engine/providers', () => ({ studioProviders: () => ({ estimateSceneCredits: mocks.estimate }) }));
 import { SceneCreditPreview } from './scene-credit-preview';
 let root: Root; let container: HTMLDivElement;
-const task: CaptionTaskRecord = { id: 'task', scope: 'owner', name: 'video', scene: 'dubbing', sourceSig: 'source', durationSec: 121.5, width: 1920, height: 1080, stage: 'ready', updatedAt: 1, options: { presetId: 'clean', aspect: 'original', shortenPauses: false, dubbing: { language: 'English', voiceId: 'voice', lipSync: false } } };
+const task: CaptionTaskRecord = { id: 'task', scope: 'owner', name: 'video', scene: 'dubbing', sourceSig: 'source', durationSec: 121.5, width: 1920, height: 1080, stage: 'ready', updatedAt: 1, options: { caption: {}, aspect: 'original', shortenPauses: false, dubbing: { language: 'English', voiceId: 'voice', lipSync: false } } };
 beforeEach(() => {
   vi.useFakeTimers(); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.clearAllMocks();
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
