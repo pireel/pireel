@@ -13,13 +13,15 @@ import { CAPTION_ANIMATIONS, captionAnimationId, animatedCaptionPreset } from '@
 
 /** Global subtitle look: main-line appearance, main-line animation, and the translation line as three
  *  first-level tabs. The translation line only gets simple looks — no stacking, no motion. */
-export function CaptionStylePanel({ styleCtl, active, generating, onPickPreset, translationControls }: {
+export function CaptionStylePanel({ styleCtl, active, generating, onPickPreset, translationControls, showTranslation = true }: {
   styleCtl: CaptionStyleCtl;
   active: boolean;
   generating: boolean;
   onPickPreset: (preset: string, patch?: Partial<CaptionStyle>) => void;
   /** Language choice shown at the top of the translation tab, for hosts that pick it here. */
   translationControls?: ReactNode;
+  /** Hosts whose captions never carry a second line (e.g. dubbing, which already speaks the target language) hide the tab. */
+  showTranslation?: boolean;
 }) {
   const [section, setSection] = useState<'appearance' | 'animation' | 'sub'>('appearance');
   const main = styleCtl.main;
@@ -28,11 +30,11 @@ export function CaptionStylePanel({ styleCtl, active, generating, onPickPreset, 
   const reset = { color: undefined, bg: undefined, font: undefined, bold: undefined };
   const pickMain = (preset: string) => onPickPreset(preset, { animation, ...reset });
   const pickSub = (preset: string) => styleCtl.onSubPatch({ preset, ...reset });
-  const tabs = [
+  const tabs = ([
     ['appearance', 'captions.appearanceTab'],
     ['animation', 'captions.animationTab'],
     ['sub', 'captions.subLine'],
-  ] as const;
+  ] as const).filter(([part]) => showTranslation || part !== 'sub');
   return <div data-cap-keep className="min-h-0 flex-1 overflow-auto p-3">
     <fieldset disabled={generating} className="min-w-0 space-y-3 disabled:opacity-60">
       <div className="border-line flex gap-5 border-b">

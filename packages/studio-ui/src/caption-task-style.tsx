@@ -28,7 +28,7 @@ export function CaptionTaskStyle({ options, locale, disabled, source, onChange, 
   return <div className="space-y-4">
     <h2 className="text-ink text-sm font-medium">{locale === 'zh' ? '字幕样式' : 'Caption style'}</h2>
     <div className="border-line flex max-h-[520px] min-h-0 flex-col rounded-lg border">
-      <CaptionStylePanel active generating={disabled} translationControls={translation} onPickPreset={(preset, patch) => patchMain({ ...patch, preset })} styleCtl={{
+      <CaptionStylePanel active generating={disabled} translationControls={translation} showTranslation={!options.dubbing} onPickPreset={(preset, patch) => patchMain({ ...patch, preset })} styleCtl={{
         main: resolved,
         sub: { preset: DEFAULT_SUB_CAPTION_PRESET, ...resolved.sub } as CaptionStyle,
         bilingualOn: !!options.translationLanguage,
