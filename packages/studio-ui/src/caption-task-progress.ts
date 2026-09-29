@@ -5,7 +5,7 @@ export function captionProcessingStages(options: CaptionTaskOptions): CaptionPro
   if (options.subtitleRemoval) return ['preparing', 'rendering'];
   if (options.sfx) return ['preparing', 'transcribing', ...('density' in options.sfx ? ['matching' as const] : []), 'styling', ...(('captions' in options.sfx && options.sfx.captions) && !!options.highlights ? ['emphasizing' as const] : []), 'rendering'];
   if (options.broll) return ['preparing', 'transcribing', 'analyzing', 'matching', 'styling', ...(options.broll.captions && !!options.highlights ? ['emphasizing' as const] : []), 'rendering'];
-  if (options.dubbing) return ['preparing', 'transcribing', 'translating', 'voicing', 'aligning', ...(options.dubbing.lipSync ? ['lipsync' as const] : []), ...(options.dubbing.captions ? ['styling' as const, ...(!!options.highlights ? ['emphasizing' as const] : [])] : []), 'rendering'];
+  if (options.dubbing) return ['preparing', 'transcribing', 'translating', 'voicing', 'aligning', ...(options.dubbing.lipSync ? ['lipsync' as const] : []), ...(options.dubbing.captions ? ['styling' as const, ...(!!options.highlights ? ['emphasizing' as const] : [])] : [])];
   // Captions stop at the edited document; the video is rendered on download.
   return ['preparing', 'transcribing', ...(options.shortenPauses ? ['cleaning' as const] : []), ...(options.translationLanguage ? ['translating' as const] : []), 'styling', ...(!!options.highlights ? ['emphasizing' as const] : [])];
 }

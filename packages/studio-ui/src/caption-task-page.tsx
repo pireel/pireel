@@ -60,8 +60,8 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
   const isBroll = scene === 'broll' || isPip || isUgc;
   const FootageSettings = isPip ? PipSettings : BrollSettings;
   const isDubbing = scene === 'dubbing';
-  // Captions generate a document; the video is rendered when it is downloaded.
-  const isCaptions = scene === 'captions';
+  // These scenes generate a document; the video is rendered when it is downloaded.
+  const rendersOnDownload = scene === 'captions' || scene === 'dubbing';
   const say = (cn: string, en: string) => zh ? cn : en;
   const [scope, setScope] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -237,7 +237,7 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
       if ((record.scene ?? 'captions') !== scene) throw new Error(say('项目类型不匹配，请从首页打开。', 'Open this project from the home page.'));
       if (studioProviders().sceneProjects && record.cloudPending) void syncCaptionProject(scope, taskId).then(() => { if (current) setStorageNote(''); }).catch((error) => { if (current) setStorageNote(error instanceof Error ? error.message : say('云端同步未完成。', 'Cloud sync is incomplete.')); });
       const [source, history] = await Promise.all([loadCaptionMedia(scope, record.sourceSig, record.name), listCaptionVersions(scope, taskId)]);
-      const unexported = isCaptions && record.stage === 'completed' && !!record.document && !!record.generationId && !history.some(version => version.id === record.generationId);
+      const unexported = rendersOnDownload && record.stage === 'completed' && !!record.document && !!record.generationId && !history.some(version => version.id === record.generationId);
       const selected = !unexported && history[0] ? await loadCaptionVersion(scope, taskId, history[0].id) : undefined;
       if (!current) return;
       const loadedOptions = storedCaptionTaskOptions(record.draftOptions ?? record.options);
@@ -307,8 +307,8 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
   const brollViewTask = !drafting && selectedVersion ? selectedVersion.task : task;
   const playable = !drafting && !!resultUrl && !busy && !versionLoading;
   // A caption generation that has not been downloaded yet: previewed live, rendered on download.
-  const pendingGeneration = isCaptions && task?.stage === 'completed' && !!task.document && !!task.generationId && !versions.some(version => version.id === task.generationId);
-  const generatedView = isCaptions && !drafting && !resultUrl && !!selectedVersion?.task.document && !busy && !versionLoading;
+  const pendingGeneration = rendersOnDownload && task?.stage === 'completed' && !!task.document && !!task.generationId && !versions.some(version => version.id === task.generationId);
+  const generatedView = rendersOnDownload && !drafting && !resultUrl && !!selectedVersion?.task.document && !busy && !versionLoading;
   const disabled = busy || preparing || versionLoading || exporting;
   const retrySfx = isSfx && drafting && !!task && ['failed', 'interrupted'].includes(task.stage) && !!task.workflow?.steps.some(step => {
     const receipt = task.workflowData?.receipts[step.inputKey ?? ''];

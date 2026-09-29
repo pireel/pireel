@@ -11,7 +11,14 @@ vi.mock('./audio-decode', () => ({ decodeAudioFile: async () => ({}), toMono: as
 vi.mock('./time-stretch', () => ({ signalsmithStretch: vi.fn(), tiledStretch: () => async () => [new Float32Array(6 * 24000)] }));
 vi.mock('./denoise', () => ({ encodeWavMono: mocks.wav }));
 vi.mock('./client-export', () => ({ clientExportVideo: mocks.render }));
-import { runDubbingTask } from './dubbing-task-runner';
+import { runDubbingTask as generateDubbing } from './dubbing-task-runner';
+import { exportCaptionEdit } from './caption-task-runner';
+import type { SceneWorkflowHooks } from './scene-workflow-runtime';
+/** Generation, then the download-time render, as the scene page does. */
+async function runDubbingTask(source: CaptionTaskRecord, input: File, hooks: SceneWorkflowHooks) {
+  const generated = await generateDubbing(source, input, hooks);
+  return { ...generated, video: await exportCaptionEdit(generated.task, input, hooks) };
+}
 const task = (): CaptionTaskRecord => ({ id: 'task', scope: 'owner', scene: 'dubbing', generationId: 'run', name: 'source.mp4', sourceSig: 'original', width: 1920, height: 1080, durationSec: 8, stage: 'ready', updatedAt: 0, options: { caption: {}, aspect: 'original', shortenPauses: false, dubbing: { language: 'English', voiceId: 'voice', lipSync: false } } });
 const file = new File(['video'], 'source.mp4', { type: 'video/mp4' });
 const response = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
@@ -57,7 +64,7 @@ describe('standalone video dubbing', () => {
     const result = await runDubbingTask(task(), file, hooks);
     expect(result.task.transcript).toEqual([{ text: '你好', start: 1, end: 7 }]);
     expect(records.find((record) => record.stage === 'translating')?.transcript).toEqual(result.task.transcript);
-    expect([...new Set(records.map(record => record.stage))].filter(stage => stage !== 'ready')).toEqual(['transcribing', 'translating', 'voicing', 'aligning', 'rendering']);
+    expect([...new Set(records.map(record => record.stage))].filter(stage => stage !== 'ready')).toEqual(['transcribing', 'translating', 'voicing', 'aligning']);
     expect(result.task.workflow?.definition.id).toBe('official-dubbing');
     const render = mocks.render.mock.calls[0]![0];
     expect(render.audio).toHaveLength(1);

@@ -1,3 +1,4 @@
+import type { EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import { dubbingRate, dubbingSpeakers, dubbingTurns, dubbingVoiceFor, dubbingVoicesReady, dubbingSpeechWindow, splitDubbingScript, DUBBING_LANGUAGES, type DubbingOptions, type DubbingState, type DubbingSpeech } from '@pireel/studio-engine/dubbing-task';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { buildCaptionBaseDocument } from '@pireel/studio-engine/caption-task';
@@ -185,5 +186,6 @@ export function dubbingWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     ] }, { projectId: String(args.projectId) });
     if (!result.ok) throw new Error(result.error.message);
     return { document: workflowJson(await store.put('document', 'dubbing', result.document)) };
-  } })];
+    // Without captions nothing later projects the document; with them, captions.apply supersedes this.
+  }, project: outputs => ({ document: store.read<EditorDocumentV2>(outputs.document, 'document') }) })];
 }

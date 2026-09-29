@@ -7,7 +7,9 @@ import { dubbingWorkflowNodes } from './dubbing-workflow-nodes';
 import { probeVideoFile } from './media';
 import { saveLocalVideo } from './local-media';
 
-export async function runDubbingTask(task: CaptionTaskRecord, file: File, hooks: SceneWorkflowHooks): Promise<{ task: CaptionTaskRecord; video: Blob }> {
+/** Generation stops at the dubbed document (voice track, captions, lip-synced picture); the video is
+ *  rendered on download (`exportCaptionEdit`). A saved custom definition that renders still returns it. */
+export async function runDubbingTask(task: CaptionTaskRecord, file: File, hooks: SceneWorkflowHooks): Promise<{ task: CaptionTaskRecord; video?: Blob }> {
   const config = task.options.dubbing!;
   if (!DUBBING_LANGUAGES.some(language => language.id === config.language) || !config.voiceId) throw new Error('请选择目标语言和声音。');
   if (config.script !== undefined && !config.script.trim()) throw new Error('配音文案不能为空。');
@@ -18,13 +20,14 @@ export async function runDubbingTask(task: CaptionTaskRecord, file: File, hooks:
     const media = await host.store.put('media', task.sourceSig, { sig: task.sourceSig, name: task.name, width: task.width, height: task.height, durationSec: task.durationSec });
     const raw = task.workflowData && Object.values(task.workflowData.artifacts).find(entry => entry.ref.kind === 'transcript' && entry.ref.id === task.sourceSig);
     const transcript = raw?.ref ?? (task.transcript?.length ? await host.store.put('transcript', task.sourceSig, task.transcript) : null);
-    const result = await host.run(dubbingWorkflowDefinition(task.options, media, transcript, task.id, task.name, task.dubbing, task.workflowData ? undefined : task.generationId), [...captionWorkflowNodes(host), ...dubbingWorkflowNodes(host)]);
+    const result = await host.compose(dubbingWorkflowDefinition(task.options, media, transcript, task.id, task.name, task.dubbing, task.workflowData ? undefined : task.generationId, false), [...captionWorkflowNodes(host), ...dubbingWorkflowNodes(host)]);
+    // Original ASR stays the source for speaker setup and future translation; captions use the audio artifact.
+    result.task.transcript = host.task.workflowData ? host.store.read(result.task.workflow!.steps.find(step => step.id === 'transcript')!.artifact!.data.transcript, 'transcript') : task.transcript;
+    if (!result.video) return result;
     const output = new File([result.video], `${task.name.replace(/\.[^.]+$/, '')}-${config.language}.mp4`, { type: 'video/mp4' });
     const sig = host.store.read<{ sig: string }>(result.task.workflow!.steps.find(step => step.id === 'render')!.artifact!.data.media, 'media').sig; const outputCached = await saveLocalVideo(output, sig).catch(() => false);
     const metadata = await probeVideoFile(output); host.check();
     result.task.dubbing = { ...result.task.dubbing, outputSig: sig, outputCached, outputWidth: metadata.width, outputHeight: metadata.height };
-    // Original ASR stays the source for speaker setup and future translation; captions use the audio artifact.
-    result.task.transcript = host.task.workflowData ? host.store.read(result.task.workflow!.steps.find(step => step.id === 'transcript')!.artifact!.data.transcript, 'transcript') : task.transcript;
-    return result;
+    return { task: result.task, video: result.video };
   } finally { host.dispose(); }
 }

@@ -10,7 +10,8 @@ export const DUBBING_WORKFLOW_CAPABILITIES = [
   sceneCapability('speech.dub-transcribe', ['audio', 'cached'], ['transcript', 'audioSig', 'signature'], true),
   sceneCapability('dubbing.compose', ['media', 'audio', 'projectId'], ['document']),
 ];
-export function dubbingWorkflowDefinition(options: CaptionTaskOptions, media: unknown, transcript: unknown, projectId: string, name: string, cached: DubbingState = {}, legacyRunId?: string): WorkflowDefinition {
+/** `render: false` stops at the dubbed document; the video is rendered when the user downloads it. */
+export function dubbingWorkflowDefinition(options: CaptionTaskOptions, media: unknown, transcript: unknown, projectId: string, name: string, cached: DubbingState = {}, legacyRunId?: string, render = true): WorkflowDefinition {
   const config = options.dubbing!;
   const steps = [
     step('transcript', 'speech.transcribe', { media: lit(media), transcript: lit(transcript) }),
@@ -25,6 +26,6 @@ export function dubbingWorkflowDefinition(options: CaptionTaskOptions, media: un
   if (config.captions) steps.push(step('dubTranscript', 'speech.dub-transcribe', { audio: out('align', 'audio'), cached: lit({ captionSignature: cached.captionSignature, captionTranscript: cached.captionTranscript, captionAudioSig: cached.captionAudioSig }) }));
   steps.push(step('compose', 'dubbing.compose', { media: picture, audio: out('align', 'audio'), projectId: lit(projectId) }));
   const captionOptions = { ...options, translationLanguage: undefined, shortenPauses: false, aspect: 'original' as const, broll: config.captions ? undefined : { assets: [], captions: false } };
-  steps.push(...captionTailSteps(captionOptions, out('compose', 'document'), config.captions ? out('dubTranscript', 'transcript') : lit(null), picture));
+  steps.push(...captionTailSteps(captionOptions, out('compose', 'document'), config.captions ? out('dubTranscript', 'transcript') : lit(null), picture, render));
   return { schemaVersion: 1, id: 'official-dubbing', version: 2, title: 'Video dubbing', templateId: 'dubbing', parameters: {}, trigger: { kind: 'manual' }, steps };
 }
