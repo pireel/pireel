@@ -21,7 +21,8 @@ export function textWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
       const speakers = dubbingSpeakers(transcript); const multiple = speakers.length > 1;
       const window = dubbingSpeechWindow(transcript, media.durationSec);
       const sourceText = transcript.map(segment => segment.text).join('\n');
-      const turns = multiple ? dubbingTurns(transcript, media.durationSec) : [{ id: 'turn-0', speaker: speakers[0].id, text: String(args.script || sourceText), start: window.start, end: window.end }];
+      // Lines stay at their own moments; only a hand-written whole script is one block over the speech window.
+      const turns = !args.script ? dubbingTurns(transcript, media.durationSec) : [{ id: 'turn-0', speaker: speakers[0].id, text: String(args.script), start: window.start, end: window.end }];
       if (multiple && args.script) throw new Error('多位说话人请在配音规划中逐段配置稿件。');
       return { units: workflowJson(turns.map(turn => ({ id: turn.id, text: turn.text }))), source: workflowJson({ sourceText, speakers, multiple, turns, turnsKey: JSON.stringify(turns) }), translate: !args.script, language: DUBBING_LANGUAGES.find(language => language.code === (args.script ? detectLang(String(args.script)) : transcript.find(segment => segment.lang)?.lang?.split('-')[0] ?? detectLang(sourceText)))?.id ?? 'English' };
     } }),
