@@ -53,7 +53,11 @@ export function dubbingWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
       return texts.map((_, parent) => rows.flatMap((row, index) => row.parent === parent ? [byIndex.get(index)!] : []).join('\n'));
     };
     let text: string; let parts: SpeechPlan['parts']; let translatedTurns: string[] | undefined; let turnsKey: string | undefined;
-    if (multiple) {
+    // Every speaker's lines go back to their own moments in the picture; one block stretched over the
+    // whole speech window slowed the voice down and drifted from the picture. A hand-edited whole
+    // script (single speaker) cannot be split back into lines, so it stays one block.
+    const scripted = !multiple && !!config.script?.trim();
+    if (!scripted) {
       const turns = dubbingTurns(transcript, media.durationSec); turnsKey = JSON.stringify(turns);
       translatedTurns = cached.language === config.language && cached.turnsKey === turnsKey && cached.translatedTurns?.length === turns.length ? cached.translatedTurns : await translateTexts(turns.map(turn => turn.text));
       const edited = turns.map((turn, i) => (config.turnScripts?.[turn.id] ?? translatedTurns![i]).trim());
@@ -61,10 +65,10 @@ export function dubbingWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
       text = edited.join('\n'); splitDubbingScript(text);
       parts = turns.flatMap((turn, index) => splitDubbingScript(edited[index]).map(text => ({ text, voiceId: dubbingVoiceFor(turn.speaker, speakers, config), group: index, start: turn.start, end: turn.end })));
     } else {
-      text = config.script?.trim() || (cached.language === config.language && cached.sourceText === sourceText ? cached.translatedText : '') || (await translateTexts([sourceText]))[0];
+      text = config.script!.trim();
       parts = splitDubbingScript(text).map(text => ({ text, voiceId: config.voiceId, group: 0, start: window.start, end: window.end }));
     }
-    const signature = multiple ? JSON.stringify([config.language, parts]) : JSON.stringify([text, config.voiceId, config.language]);
+    const signature = !scripted ? JSON.stringify([config.language, parts]) : JSON.stringify([text, config.voiceId, config.language]);
     const value: SpeechPlan = { text, parts, language: config.language, sourceText, translatedTurns, turnsKey, signature };
     return { plan: workflowJson(await store.put('speech-plan', 'dubbing', value)), value: workflowJson(value) };
   }, project: outputs => { const plan = outputs.value as unknown as SpeechPlan; return project({ language: plan.language, sourceText: plan.sourceText, translatedText: plan.text, translatedTurns: plan.translatedTurns, turnsKey: plan.turnsKey }); } }),
@@ -119,7 +123,16 @@ export function dubbingWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
         const group = groups.get(entry.group) ?? { total: 0, elapsed: 0, start: Math.round(entry.start * sampleRate), end: Math.min(output.length, Math.round(entry.end * sampleRate)), cursor: Math.round(entry.start * sampleRate), last: index };
         group.total += parts[index].durationSec; group.last = index; groups.set(entry.group, group);
       });
-      for (const group of groups.values()) dubbingRate(group.total * sampleRate, group.end - group.start);
+      // Natural pace when the line fits; a longer line first takes the silence before the next line,
+      // and is only then sped up. Speech is never slowed down to fill a gap.
+      const ordered = [...groups.values()].sort((a, b) => a.start - b.start);
+      ordered.forEach((group, index) => {
+        // Its own window always; the silence up to the next line extends it (overlapping speakers mix).
+        const available = Math.max(group.end, ordered[index + 1]?.start ?? output.length) - group.start;
+        const natural = Math.round(group.total * sampleRate);
+        group.end = group.start + Math.max(1, Math.min(natural, available));
+        dubbingRate(natural, group.end - group.start);
+      });
       for (let index = 0; index < parts.length; index++) {
         host.check(); const part = parts[index];
         const remote = await materializeRemoteMedia(part.url, { name: `dub-speech-${index}.mp3`, signal });

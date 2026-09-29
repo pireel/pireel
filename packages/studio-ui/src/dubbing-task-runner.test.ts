@@ -159,6 +159,20 @@ it('keeps multi-speaker lip sync out of the paid submission path', async () => {
   expect(mocks.fetch).not.toHaveBeenCalled(); expect(mocks.upload).not.toHaveBeenCalled();
 });
 
+it('keeps a single speaker at natural pace on each line instead of stretching over the pauses', async () => {
+  const source = task(); source.durationSec = 20;
+  mocks.asr.mockResolvedValue([{ text: '第一句', start: 0, end: 1.5 }, { text: '第二句', start: 10, end: 11.5 }]);
+  mocks.translate.mockResolvedValue([{ index: 0, text: 'First line' }, { index: 1, text: 'Second line' }]);
+  mocks.fetch.mockImplementation(async () => response({ status: 'succeeded', asset: { url: 'https://own/speech.mp3', key: 'uploads/owner/speech.mp3', durationSec: 2 } }));
+  const stretch = await import('./time-stretch');
+  const mono = vi.spyOn(await import('./audio-decode'), 'toMono').mockImplementation(async () => new Float32Array(2 * 24000).fill(.2));
+  try { await generateDubbing(source, file, { signal: new AbortController().signal, checkpoint: async () => {}, progress: vi.fn() }); } finally { mono.mockRestore(); }
+  const pcm = mocks.wav.mock.calls[0][0] as Float32Array;
+  // Each line starts where it was spoken, at its own length; the pause between stays silent.
+  expect(pcm[Math.round(.5 * 24000)]).toBeCloseTo(.2); expect(pcm[Math.round(5 * 24000)]).toBe(0); expect(pcm[Math.round(10.5 * 24000)]).toBeCloseTo(.2);
+  expect(stretch.signalsmithStretch).not.toHaveBeenCalled();
+});
+
 it('mixes overlapping speaker turns instead of overwriting either voice', async () => {
   const source = task(); source.durationSec = 9;
   source.options.dubbing!.speakerVoices = { 'speaker:a': 'voice-a', 'speaker:b': 'voice-b' };
