@@ -56,12 +56,20 @@ export function checkWhiteboardDoc(doc: unknown): WhiteboardDocCheck {
     }
   }
 
+  const groups = board && Array.isArray(board.groups) ? board.groups.filter(isObject) : [];
   const nodeIds = new Set(nodes.map((node) => node.id).filter((id): id is string => typeof id === 'string'));
-  const targets = new Set([...nodeIds, ...edges.map((edge) => edge.id).filter((id): id is string => typeof id === 'string')]);
+  const groupIds = new Set(groups.map((group) => group.id).filter((id): id is string => typeof id === 'string'));
+  const endpoints = new Set([...nodeIds, ...groupIds]);
+  const targets = new Set([...endpoints, ...edges.map((edge) => edge.id).filter((id): id is string => typeof id === 'string')]);
   const sentenceIds = new Set(sentences.map((sentence) => sentence.id).filter((id): id is string => typeof id === 'string'));
   if (nodeIds.size !== nodes.length) errors.push('every board node needs a unique string id');
   for (const edge of edges) {
-    if (!nodeIds.has(edge.from as string) || !nodeIds.has(edge.to as string)) errors.push(`edge ${String(edge.id)} connects unknown nodes`);
+    if (!endpoints.has(edge.from as string) || !endpoints.has(edge.to as string)) errors.push(`edge ${String(edge.id)} connects unknown nodes`);
+  }
+  for (const group of groups) {
+    for (const id of Array.isArray(group.nodeIds) ? group.nodeIds : []) {
+      if (!nodeIds.has(id as string)) errors.push(`group ${String(group.id)} lists unknown node ${String(id)}`);
+    }
   }
   for (const scene of scenes) {
     for (const id of Array.isArray(scene.nodeIds) ? scene.nodeIds : []) {

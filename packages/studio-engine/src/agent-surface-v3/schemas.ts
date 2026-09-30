@@ -61,13 +61,18 @@ export const WHITEBOARD_ASPECTS = ['16:9', '9:16', '1:1'] as const;
 export const WHITEBOARD_THEMES = ['scrapbook', 'chalkboard', 'blueprint'] as const;
 const WHITEBOARD_COLOR = enumOf(['yellow', 'green', 'pink', 'purple', 'blue', 'orange']);
 const whiteboardKind = (kind: string) => enumOf([kind]);
+const WHITEBOARD_ICON = str('Inline <svg> exactly as returned by get_icons.');
 const WHITEBOARD_CONTENT: Schema = {
   anyOf: [
     obj({ kind: whiteboardKind('headline'), eyebrow: str(), lines: arr(str(), { minItems: 1 }) }, ['kind', 'lines']),
-    obj({ kind: whiteboardKind('sticky'), color: WHITEBOARD_COLOR, label: str(), title: str(), body: str() }, ['kind', 'color', 'title']),
-    obj({ kind: whiteboardKind('card'), color: WHITEBOARD_COLOR, title: str(), body: str() }, ['kind', 'color', 'title']),
+    obj({ kind: whiteboardKind('sticky'), color: WHITEBOARD_COLOR, label: str(), title: str(), body: str(), icon: WHITEBOARD_ICON }, ['kind', 'color', 'title']),
+    obj({ kind: whiteboardKind('card'), color: WHITEBOARD_COLOR, title: str(), body: str(), icon: WHITEBOARD_ICON }, ['kind', 'color', 'title']),
     obj({ kind: whiteboardKind('photo'), caption: str(), sub: str(), image: str('https or data: URL.'), emoji: str() }, ['kind', 'caption']),
-    obj({ kind: whiteboardKind('stat'), value: str(), caption: str() }, ['kind', 'value']),
+    obj({ kind: whiteboardKind('stat'), value: str(), caption: str(), icon: WHITEBOARD_ICON }, ['kind', 'value']),
+    obj({
+      kind: whiteboardKind('list'), title: str(), items: arr(str(), { minItems: 1 }), ordered: bool(), color: WHITEBOARD_COLOR, icon: WHITEBOARD_ICON,
+    }, ['kind', 'items']),
+    obj({ kind: whiteboardKind('icon'), svg: WHITEBOARD_ICON, label: str(), color: enumOf(['ink', 'accent', 'violet']) }, ['kind', 'svg']),
     obj({
       kind: whiteboardKind('table'), label: str(),
       columns: arr(obj({ title: str(), items: arr(obj({ title: str(), meta: str(), color: WHITEBOARD_COLOR }, ['title'])) }, ['title', 'items']), { minItems: 1 }),
@@ -76,11 +81,12 @@ const WHITEBOARD_CONTENT: Schema = {
     obj({ kind: whiteboardKind('handwriting'), text: str(), color: enumOf(['accent', 'ink', 'violet']) }, ['kind', 'text']),
     obj({ kind: whiteboardKind('doodle'), shape: enumOf(['cat', 'star', 'heart', 'bulb', 'spark']) }, ['kind', 'shape']),
   ],
-  description: 'headline is typed on; sticky drops in; card is the usual flow box and edge endpoint; handwriting is written on; doodle is drawn on.',
+  description: 'headline is typed on; sticky drops in; card is the usual flow box and edge endpoint; list items and table rows can each be revealed on their own phrase; icon and doodle are drawn on; handwriting is written on.',
 };
 const WHITEBOARD_ACTION: Schema = obj({
   op: enumOf(['reveal', 'highlight', 'dim', 'cursor']),
-  target: str('Node or edge id (an edge reveal draws the arrow).'),
+  target: str('Node, edge or group id (an edge reveal draws the arrow).'),
+  item: int('reveal only: the list item or table row to reveal, from 1. Items without their own reveal appear with the node.', 1),
   effect: enumOf(['auto', 'pop', 'drop', 'type', 'write', 'draw', 'fade'], 'reveal only; auto picks the natural effect for the kind.'),
   mark: enumOf(['circle', 'underline', 'box'], 'highlight only: a hand-drawn mark around or under the target.'),
   color: enumOf(['accent', 'violet']),
@@ -575,7 +581,11 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
             rotate: num('Tilt in degrees; stickies and photos get a slight random tilt by default.'),
             size: obj({ w: num('', { min: 1 }), h: num('', { min: 1 }) }, ['w', 'h']),
           }, ['id', 'content']), { minItems: 1 }),
-          edges: arr(obj({ id: str(), from: str('Node id.'), to: str('Node id.'), kind: enumOf(['arrow', 'line']), label: str() }, ['id', 'from', 'to'])),
+          edges: arr(obj({ id: str(), from: str('Node or group id.'), to: str('Node or group id.'), kind: enumOf(['arrow', 'line']), label: str('A short verb or relation written on the line.') }, ['id', 'from', 'to'])),
+          groups: arr(obj({
+            id: str(), label: str(), nodeIds: ids('Nodes the frame surrounds; the frame follows their layout.'),
+            color: enumOf(['yellow', 'green', 'pink', 'purple', 'blue', 'orange', 'ink']),
+          }, ['id', 'nodeIds']), { description: 'Titled frames around related nodes; reveal, highlight and focus them by id.' }),
         }, ['nodes']),
         scenes: arr(obj({
           id: str(), title: str(),
@@ -590,7 +600,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
           id: str(),
           anchor: obj({ sentence: str('Sentence id.'), phrase: str('Substring of that sentence; the beat fires as it is spoken. Omit for the sentence start.'), occurrence: int('Which occurrence of the phrase, from 1.', 1) }, ['sentence']),
           actions: arr(WHITEBOARD_ACTION),
-          camera: { anyOf: [enumOf(['overview', 'hold']), obj({ focus: ids('Node or edge ids to frame.'), padding: num('', { min: 0, max: 1 }) }, ['focus'])], description: 'Frame these nodes, show everything revealed so far (overview) or stay (hold, the default).' },
+          camera: { anyOf: [enumOf(['overview', 'hold']), obj({ focus: ids('Node, edge or group ids to frame.'), padding: num('', { min: 0, max: 1 }) }, ['focus'])], description: 'Frame these nodes, show everything revealed so far (overview) or stay (hold, the default).' },
         }, ['id', 'anchor', 'actions'])),
         cursors: arr(obj({ id: str(), name: str('Label on the pointer.'), color: str('#RRGGBB') }, ['id', 'name', 'color']), { description: 'Named pointers that the cursor action moves to what is being discussed.' }),
       }, ['narration', 'board', 'scenes', 'beats']),
