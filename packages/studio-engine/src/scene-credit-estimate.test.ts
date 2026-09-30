@@ -23,10 +23,10 @@ it('does not charge ordinary style changes and identifies optional paid caption 
   expect(sceneCreditInput(source, { ...source.options, caption: {}, highlights: true, translationLanguage: 'English' })).toMatchObject({ translation: true, emphasis: true });
 });
 
-it('uses explicit language budget assumptions and excludes known silent gaps', () => {
+it('uses explicit language budget assumptions and budgets each spoken line on its own window', () => {
   const source = task(); source.options.dubbing!.language = '中文';
   expect(sceneCreditInput(source, source.options).speech[0].estimatedUnits).toBe(600);
   source.options.dubbing!.language = 'English';
   source.transcript = [{ text: 'first phrase', start: 0, end: 10 }, { text: 'second phrase', start: 50, end: 60 }];
-  expect(sceneCreditInput(source, source.options).speech[0].estimatedUnits).toBe(300);
+  expect(sceneCreditInput(source, source.options).speech.map((part) => part.estimatedUnits)).toEqual([150, 150]);
 });
