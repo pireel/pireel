@@ -25,3 +25,9 @@ it('uses surrounding speech for pauses, separates intensity, and rejects broken 
   expect(() => normalizeSound(new Float32Array([NaN]), 48000)).toThrow();
   expect(normalizeSound(sine(.1, .1), 48000).length).toBeGreaterThanOrEqual(.2 * 48000);
 });
+
+it('keeps effects under the narration of a quiet recording', () => {
+  // About -38 dBFS speech: a phone recording left unnormalized.
+  const profile = speechLevelProfile([sine(4, .018)], 48000); const speech = rms(sine(1, .018));
+  for (const intensity of ['gentle', 'normal', 'emphasis'] as const) expect(mixSoundToSpeech(sine(.3, .5, 48000, 900), 48000, profile, 1, intensity).outputRms).toBeLessThan(speech);
+});
