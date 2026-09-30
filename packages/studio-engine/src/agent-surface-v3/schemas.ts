@@ -74,6 +74,28 @@ const WHITEBOARD_CONTENT: Schema = {
     }, ['kind', 'items']),
     obj({ kind: whiteboardKind('icon'), svg: WHITEBOARD_ICON, label: str(), color: enumOf(['ink', 'accent', 'violet']) }, ['kind', 'svg']),
     obj({
+      kind: whiteboardKind('chart'), chart: enumOf(['bar', 'line', 'pie']), title: str(), unit: str(),
+      data: arr(obj({ label: str(), value: num(), color: WHITEBOARD_COLOR }, ['label', 'value']), { minItems: 1, maxItems: 12 }),
+      highlight: int('Data point to emphasise, from 1.', 1),
+    }, ['kind', 'chart', 'data']),
+    obj({
+      kind: whiteboardKind('timeline'), title: str(),
+      events: arr(obj({ date: str(), title: str(), body: str(), color: WHITEBOARD_COLOR }, ['date', 'title']), { minItems: 1, maxItems: 8 }),
+    }, ['kind', 'events']),
+    obj({
+      kind: whiteboardKind('cycle'), center: str('Short label in the middle of the loop.'),
+      items: arr(obj({ title: str(), body: str(), color: WHITEBOARD_COLOR }, ['title']), { minItems: 2, maxItems: 8 }),
+    }, ['kind', 'items']),
+    obj({
+      kind: whiteboardKind('venn'), overlap: str('Label for the shared region.'),
+      sets: arr(obj({ label: str(), color: WHITEBOARD_COLOR }, ['label']), { minItems: 2, maxItems: 3 }),
+    }, ['kind', 'sets']),
+    obj({ kind: whiteboardKind('shape'), shape: enumOf(['circle', 'rect', 'pill', 'diamond', 'triangle']), text: str(), color: WHITEBOARD_COLOR }, ['kind', 'shape']),
+    obj({
+      kind: whiteboardKind('code'), code: str('Source text, lines separated by \\n; keep it to a readable excerpt.'), lang: str(), title: str('File name or caption.'),
+      highlight: arr({ type: 'integer', minimum: 1 }, { description: 'Line numbers to highlight, from 1.' }),
+    }, ['kind', 'code']),
+    obj({
       kind: whiteboardKind('table'), label: str(),
       columns: arr(obj({ title: str(), items: arr(obj({ title: str(), meta: str(), color: WHITEBOARD_COLOR }, ['title'])) }, ['title', 'items']), { minItems: 1 }),
     }, ['kind', 'columns']),
@@ -81,12 +103,12 @@ const WHITEBOARD_CONTENT: Schema = {
     obj({ kind: whiteboardKind('handwriting'), text: str(), color: enumOf(['accent', 'ink', 'violet']) }, ['kind', 'text']),
     obj({ kind: whiteboardKind('doodle'), shape: enumOf(['cat', 'star', 'heart', 'bulb', 'spark']) }, ['kind', 'shape']),
   ],
-  description: 'headline is typed on; sticky drops in; card is the usual flow box and edge endpoint; list items and table rows can each be revealed on their own phrase; icon and doodle are drawn on; handwriting is written on.',
+  description: 'headline is typed on; sticky drops in; card is the usual flow box and edge endpoint; icon, doodle and shape are drawn on; handwriting is written on. Items can each be revealed on their own phrase: list items, table rows, chart data points, timeline events, cycle steps, venn sets (the overlap is the last item) and code lines.',
 };
 const WHITEBOARD_ACTION: Schema = obj({
   op: enumOf(['reveal', 'highlight', 'dim', 'cursor']),
   target: str('Node, edge or group id (an edge reveal draws the arrow).'),
-  item: int('reveal only: the list item or table row to reveal, from 1. Items without their own reveal appear with the node.', 1),
+  item: int('reveal only: the item to reveal, from 1 — a list item, table row, chart data point, timeline event, cycle step, venn set (overlap last) or code line. Items without their own reveal appear with the node.', 1),
   effect: enumOf(['auto', 'pop', 'drop', 'type', 'write', 'draw', 'fade'], 'reveal only; auto picks the natural effect for the kind.'),
   mark: enumOf(['circle', 'underline', 'box'], 'highlight only: a hand-drawn mark around or under the target.'),
   color: enumOf(['accent', 'violet']),
