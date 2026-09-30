@@ -73,11 +73,12 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   { id: 'remove_words', group: 'speech', skillContract: { version: 1, stability: 'stable' } },
   { id: 'mask_words', group: 'speech', skillContract: { version: 1, stability: 'stable' } },
   { id: 'denoise_audio', group: 'speech' },
-  // ---- components and text (5)
+  // ---- components and text (7)
   { id: 'compose_component', group: 'components' },
   { id: 'apply_component', group: 'components', charges: true },
   { id: 'set_texts', group: 'components', skillContract: { version: 1, stability: 'stable' } },
   { id: 'set_captions', group: 'components', skillContract: { version: 1, stability: 'stable' } },
+  { id: 'set_whiteboard', group: 'components' },
   { id: 'manage_frame', group: 'components' },
   { id: 'bake_component', group: 'components' },
   // ---- generation (8)

@@ -19,6 +19,19 @@ describe('validateV3Input', () => {
     expect(validateV3Input('remove_words', { ranges: [[95.5]] })).toMatchObject({ error: 'invalid_shape', path: 'ranges[0]' });
   });
 
+  it('checks a whiteboard document node by node: content fields are closed per kind', () => {
+    const doc = (content: Record<string, unknown>) => ({
+      narration: { durationSec: 4, sentences: [{ id: 's1', text: 'One step.' }] },
+      board: { nodes: [{ id: 'n1', content }] },
+      scenes: [{ id: 'a', nodeIds: ['n1'], layout: { type: 'free' } }],
+      beats: [{ id: 'b1', anchor: { sentence: 's1' }, actions: [{ op: 'reveal', target: 'n1' }], camera: 'overview' }],
+    });
+    expect(validateV3Input('set_whiteboard', { startFrame: 0, doc: doc({ kind: 'sticky', color: 'yellow', title: 'Step' }) })).toBeNull();
+    expect(validateV3Input('set_whiteboard', { startFrame: 0, doc: doc({ kind: 'sticky', color: 'teal', title: 'Step' }) })).toMatchObject({ error: 'invalid_value', path: 'doc.board.nodes[0].content' });
+    expect(validateV3Input('set_whiteboard', { startFrame: 0, doc: doc({ kind: 'card', color: 'blue', title: 'Step', subtitle: 'x' }) })).toMatchObject({ path: 'doc.board.nodes[0].content' });
+    expect(validateV3Input('set_whiteboard', { startFrame: 0 })).toMatchObject({ error: 'missing_field', path: 'doc' });
+  });
+
   it('reports missing required fields and wrong primitive types by path', () => {
     expect(validateV3Input('add_transition', { effect: 'fade' })).toMatchObject({ error: 'missing_field', path: 'atFrame' });
     expect(validateV3Input('add_transition', { atFrame: '30' })).toMatchObject({ error: 'invalid_value', path: 'atFrame' });

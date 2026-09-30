@@ -57,6 +57,35 @@ const PROPERTY_VALUE: Schema = {
   description: 'Scalar color, number, boolean, select or text; kit rows use an array of flat row objects matching the declared component schema.',
 };
 const FADES = obj({ in: int('Audio fade-in length in frames.'), out: int('Audio fade-out length in frames.') });
+export const WHITEBOARD_ASPECTS = ['16:9', '9:16', '1:1'] as const;
+export const WHITEBOARD_THEMES = ['scrapbook', 'chalkboard', 'blueprint'] as const;
+const WHITEBOARD_COLOR = enumOf(['yellow', 'green', 'pink', 'purple', 'blue', 'orange']);
+const whiteboardKind = (kind: string) => enumOf([kind]);
+const WHITEBOARD_CONTENT: Schema = {
+  anyOf: [
+    obj({ kind: whiteboardKind('headline'), eyebrow: str(), lines: arr(str(), { minItems: 1 }) }, ['kind', 'lines']),
+    obj({ kind: whiteboardKind('sticky'), color: WHITEBOARD_COLOR, label: str(), title: str(), body: str() }, ['kind', 'color', 'title']),
+    obj({ kind: whiteboardKind('card'), color: WHITEBOARD_COLOR, title: str(), body: str() }, ['kind', 'color', 'title']),
+    obj({ kind: whiteboardKind('photo'), caption: str(), sub: str(), image: str('https or data: URL.'), emoji: str() }, ['kind', 'caption']),
+    obj({ kind: whiteboardKind('stat'), value: str(), caption: str() }, ['kind', 'value']),
+    obj({
+      kind: whiteboardKind('table'), label: str(),
+      columns: arr(obj({ title: str(), items: arr(obj({ title: str(), meta: str(), color: WHITEBOARD_COLOR }, ['title'])) }, ['title', 'items']), { minItems: 1 }),
+    }, ['kind', 'columns']),
+    obj({ kind: whiteboardKind('comment'), text: str(), author: str() }, ['kind', 'text']),
+    obj({ kind: whiteboardKind('handwriting'), text: str(), color: enumOf(['accent', 'ink', 'violet']) }, ['kind', 'text']),
+    obj({ kind: whiteboardKind('doodle'), shape: enumOf(['cat', 'star', 'heart', 'bulb', 'spark']) }, ['kind', 'shape']),
+  ],
+  description: 'headline is typed on; sticky drops in; card is the usual flow box and edge endpoint; handwriting is written on; doodle is drawn on.',
+};
+const WHITEBOARD_ACTION: Schema = obj({
+  op: enumOf(['reveal', 'highlight', 'dim', 'cursor']),
+  target: str('Node or edge id (an edge reveal draws the arrow).'),
+  effect: enumOf(['auto', 'pop', 'drop', 'type', 'write', 'draw', 'fade'], 'reveal only; auto picks the natural effect for the kind.'),
+  mark: enumOf(['circle', 'underline', 'box'], 'highlight only: a hand-drawn mark around or under the target.'),
+  color: enumOf(['accent', 'violet']),
+  cursor: str('cursor only: which cursor moves to the target.'),
+}, ['op', 'target']);
 const PLACEMENT_PCT = obj({ xPct: num(), yPct: num(), widthPct: num(), heightPct: num() }, ['xPct', 'yPct', 'widthPct', 'heightPct']);
 
 export interface V3ToolSchema {
@@ -514,6 +543,58 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       }),
       relayout: bool(),
     }),
+  },
+  set_whiteboard: {
+    description:
+      'Create or replace a whiteboard explainer clip: an infinite-canvas board (sticky notes, flow cards, photos, tables, handwriting, doodles, arrows) that reveals itself beat by beat in sync with the narration while an automatic camera pans and zooms between scenes and ends on an overview. The document is semantic: list nodes, edges, scenes and beats; the renderer lays scenes out, times every beat from the phrase it is anchored to and plans the camera. Place the board at the startFrame of its voiceover and give narration.durationSec = the voiceover length (words are timed from the text), or timed words (seconds from the board start) from get_transcript. A new board covers the canvas on a free graphics lane; id naming a whiteboard clip replaces its document (and timing when given).',
+    inputSchema: obj({
+      id: str('Whiteboard clip to replace; an unknown id creates the board under that id.'),
+      startFrame: FRAME('Start (required for a new board)'),
+      durationFrames: int('Override the clip length; default = narration end plus a short closing hold.', 1),
+      trackId: str(),
+      doc: obj({
+        version: int('Document format version; 1.', 1),
+        aspect: enumOf(WHITEBOARD_ASPECTS, 'Match the canvas.'),
+        title: str(),
+        theme: enumOf(WHITEBOARD_THEMES, 'Visual theme; appearance only, never layout or timing.'),
+        chrome: obj({ title: str('Board name shown in the collaborative-board frame.'), avatars: arr(str()) }, ['title']),
+        narration: obj({
+          source: enumOf(['script', 'tts', 'asr']),
+          durationSec: num('Voiceover length in seconds; required when sentences carry no words.', { min: 0 }),
+          leadInSec: num('Seconds from the board start to the first spoken word.', { min: 0 }),
+          sentences: arr(obj({
+            id: str(), text: str('The sentence exactly as spoken.'),
+            words: arr(obj({ text: str(), start: num(), end: num() }, ['text', 'start', 'end']), { description: 'Optional timed words, seconds from the board start.' }),
+          }, ['id', 'text']), { minItems: 1 }),
+        }, ['sentences']),
+        board: obj({
+          nodes: arr(obj({
+            id: str(),
+            content: WHITEBOARD_CONTENT,
+            pos: obj({ x: num(), y: num() }, ['x', 'y']),
+            rotate: num('Tilt in degrees; stickies and photos get a slight random tilt by default.'),
+            size: obj({ w: num('', { min: 1 }), h: num('', { min: 1 }) }, ['w', 'h']),
+          }, ['id', 'content']), { minItems: 1 }),
+          edges: arr(obj({ id: str(), from: str('Node id.'), to: str('Node id.'), kind: enumOf(['arrow', 'line']), label: str() }, ['id', 'from', 'to'])),
+        }, ['nodes']),
+        scenes: arr(obj({
+          id: str(), title: str(),
+          nodeIds: arr(str()),
+          layout: obj({
+            type: enumOf(['free', 'flow', 'grid', 'row'], 'flow = layered along edges; grid/row = even spacing; free = node pos (world pixels; relative to the scene when at is given).'),
+            direction: enumOf(['right', 'down']), columns: int('Grid columns.', 1), gap: num(), rankGap: num(),
+          }, ['type']),
+          at: obj({ x: num(), y: num() }, ['x', 'y']),
+        }, ['id', 'nodeIds', 'layout']), { description: 'Regions of one continuous board; the camera travels between them instead of cutting.' }),
+        beats: arr(obj({
+          id: str(),
+          anchor: obj({ sentence: str('Sentence id.'), phrase: str('Substring of that sentence; the beat fires as it is spoken. Omit for the sentence start.'), occurrence: int('Which occurrence of the phrase, from 1.', 1) }, ['sentence']),
+          actions: arr(WHITEBOARD_ACTION),
+          camera: { anyOf: [enumOf(['overview', 'hold']), obj({ focus: ids('Node or edge ids to frame.'), padding: num('', { min: 0, max: 1 }) }, ['focus'])], description: 'Frame these nodes, show everything revealed so far (overview) or stay (hold, the default).' },
+        }, ['id', 'anchor', 'actions'])),
+        cursors: arr(obj({ id: str(), name: str('Label on the pointer.'), color: str('#RRGGBB') }, ['id', 'name', 'color']), { description: 'Named pointers that the cursor action moves to what is being discussed.' }),
+      }, ['narration', 'board', 'scenes', 'beats']),
+    }, ['doc']),
   },
   manage_frame: {
     description:

@@ -212,6 +212,39 @@ describe('v3 round trips: written value → document → get_state → delta', (
     expect(t.touched('hello')).toBeDefined();
   });
 
+  it('set_whiteboard: a board reads back as a full-canvas graphic spanning its narration, and id replaces its document', () => {
+    const doc = {
+      narration: { durationSec: 8, leadInSec: 0.5, sentences: [{ id: 's1', text: 'Habits run in a loop.' }] },
+      board: { nodes: [{ id: 'cue', content: { kind: 'card', color: 'blue', title: 'Cue' } }], edges: [] },
+      scenes: [{ id: 'loop', nodeIds: ['cue'], layout: { type: 'row' } }],
+      beats: [{ id: 'b1', anchor: { sentence: 's1', phrase: 'loop' }, actions: [{ op: 'reveal', target: 'cue' }], camera: { focus: ['cue'] } }],
+    };
+    const t = trip(project(), 'set_whiteboard', { id: 'board', startFrame: 30, doc });
+    // 0.5 s lead-in + 8 s voiceover + closing hold, at 30 fps
+    expect(t.clip('board')).toMatchObject({ kind: 'graphic', frames: [30, 30 + Math.round((0.5 + 8 + 1.6) * 30)] });
+    expect(t.clip('board')!.component?.componentId).toBe('whiteboard');
+    expect(t.touched('board')).toBeDefined();
+
+    const replaced = trip(t.document, 'set_whiteboard', { id: 'board', durationFrames: 90, doc: { ...doc, title: 'Loop' } });
+    expect(replaced.clip('board')).toMatchObject({ frames: [30, 120] });
+    const stored = replaced.document.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 'board');
+    expect(stored?.kind === 'graphic' && (stored.block.slots.doc as { title?: string }).title).toBe('Loop');
+  });
+
+  it('set_whiteboard: a malformed board or a non-whiteboard id is refused with the reason', () => {
+    const bad = runAgentTimelineTool(project(), 'set_whiteboard', { startFrame: 0, doc: { board: { nodes: [] }, scenes: [], beats: [], narration: { sentences: [] } } });
+    expect(bad.ok).toBe(false);
+    expect(bad.error).toBe('invalid_whiteboard_doc');
+    const wrong = runAgentTimelineTool(project(), 'set_whiteboard', {
+      id: 'title',
+      doc: {
+        narration: { durationSec: 2, sentences: [{ id: 's', text: 'Hi.' }] },
+        board: { nodes: [{ id: 'n', content: { kind: 'stat', value: '1' } }] }, scenes: [], beats: [],
+      },
+    });
+    expect(wrong).toMatchObject({ ok: false, error: 'wrong_kind' });
+  });
+
   it('apply_layout: media-only layout boxes read back on each media clip', () => {
     const t = trip(project(), 'apply_layout', { layout: 'split-top-bottom', blockIds: ['broll', 'still-clip'] });
     expect(t.clip('broll')!.box).toBeDefined();
