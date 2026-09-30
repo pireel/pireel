@@ -263,6 +263,9 @@ export interface EditorDocumentV2 {
   semantics: EditorSemanticState;
   processing?: {
     audioDenoise?: { strength: number };
+    /** Whole-mix loudness: a master gain (dB) bringing the programme to `targetLufs`, applied with a
+     *  peak limiter in preview and export. Every clip keeps its own level under it. */
+    loudness?: { targetLufs: number; gainDb: number };
   };
 }
 

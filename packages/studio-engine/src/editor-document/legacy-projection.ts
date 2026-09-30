@@ -144,6 +144,7 @@ export function projectV2ToLegacyComposition(document: EditorDocumentV2, options
     ...(document.appearance.personFx ? { personFx: document.appearance.personFx } : {}),
     ...(audioTracks.length ? { audioTracks } : {}),
     ...(document.processing?.audioDenoise ? { audioDenoise: document.processing.audioDenoise } : {}),
+    ...(document.processing?.loudness ? { audioLoudness: document.processing.loudness } : {}),
     ...(document.timeline.transitions?.length ? { transitions: document.timeline.transitions.map((transition) => ({ id: transition.id, startSec: transition.startFrame / document.canvas.fps, durationSec: transition.durationFrames / document.canvas.fps, effect: transition.effect, ...(transition.direction ? { direction: transition.direction } : {}) })) } : {}),
   };
 }

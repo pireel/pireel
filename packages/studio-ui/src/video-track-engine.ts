@@ -136,6 +136,10 @@ const EPS = 0.04;
  * releasing the node so a transient preview respec cannot leave an orphan narration playing beside
  * the replacement element. Source swaps reuse the resident decoder and let assigning the new src
  * stop the old resource; this helper is only for permanent removal. */
+function audioContextCtor(): typeof AudioContext | undefined {
+  return typeof window === 'undefined' ? undefined : window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+}
+
 function releaseMediaElement(el: HTMLMediaElement): void {
   if (!el.paused) el.pause();
   el.removeAttribute('src');
@@ -204,8 +208,15 @@ export class VideoTrackEngine {
   private maskActive: WordAudioMask | null = null;
   /** Whether any audio-lane / visual-lane clip is inside a beeped span this tick. */
   private clipBeep = false;
-  /** Beep tone: its own tiny graph, never attached to a media element (see setElGain for why that matters). */
-  private beep: { ctx: AudioContext; gain: GainNode } | null = null;
+  /** Beep tone: its own tiny graph, never attached to a media element (see setElGain for why that matters).
+   *  Under a master it joins the shared context instead (`shared`), so the tone is limited with the rest. */
+  private beep: { ctx: AudioContext; gain: GainNode; osc: OscillatorNode; shared: boolean } | null = null;
+  /** Whole-mix loudness (the document's master gain): every audible element then plays through one bus,
+   *  master gain → limiter → destination, the preview counterpart of the export's master stage. */
+  private masterGain: number | null = null;
+  private bus: { input: GainNode; limiter: DynamicsCompressorNode } | null = null;
+  /** Element chains built by gainFor, re-pointed when the master turns on or off. */
+  private routed = new Set<GainNode>();
   // Per-element gain nodes for the VIDEO/dub side, created only when a level above source is asked for
   // (see setElGain). Keyed by element so a recreated element simply gets a fresh chain.
   private elGains = new WeakMap<HTMLMediaElement, { el: HTMLMediaElement; gain?: GainNode }>();
@@ -606,17 +617,17 @@ export class VideoTrackEngine {
     }
     if (!this.beep) {
       try {
-        const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-        if (!Ctor) return;
-        const ctx = new Ctor();
+        const shared = this.masterGain !== null;
+        const Ctor = audioContextCtor(); const ctx = shared ? this.context() : Ctor ? new Ctor() : null;
+        if (!ctx) return;
         const osc = ctx.createOscillator();
         osc.type = 'sine';
         osc.frequency.value = 1000;
         const gain = ctx.createGain();
         gain.gain.value = 0;
-        osc.connect(gain).connect(ctx.destination);
+        osc.connect(gain).connect(shared ? this.output()! : ctx.destination);
         osc.start();
-        this.beep = { ctx, gain };
+        this.beep = { ctx, gain, osc, shared };
       } catch {
         return; // no context: the word is still muted, only the tone is missing in preview
       }
@@ -720,18 +731,63 @@ export class VideoTrackEngine {
     return true;
   }
 
-  /** Lazily build (and reuse) an element's WebAudio chain: element → gain → destination. Returns null when
+  /** The shared AudioContext, created on first need (null when the browser refuses one). */
+  private context(): AudioContext | null {
+    if (this.actx) return this.actx;
+    const Ctor = audioContextCtor();
+    if (!Ctor) return null;
+    try { this.actx = new Ctor(); } catch { return null; }
+    return this.actx;
+  }
+
+  /** Where element chains connect: the master bus when a loudness gain is set, else the destination. */
+  private output(): AudioNode | null {
+    const ctx = this.actx; if (!ctx) return null;
+    if (this.masterGain === null) return ctx.destination;
+    if (!this.bus) {
+      const input = ctx.createGain(); const limiter = ctx.createDynamicsCompressor();
+      limiter.threshold.value = -1.5; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = .003; limiter.release.value = .1;
+      input.connect(limiter).connect(ctx.destination);
+      this.bus = { input, limiter };
+    }
+    this.bus.input.gain.value = this.masterGain;
+    return this.bus.input;
+  }
+
+  /** Whole-mix loudness for preview: the document's master gain (linear), or null for none. Routed
+   *  chains are re-pointed; native elements join the bus on their next level update. */
+  setMasterGain(gain: number | null): void {
+    const next = gain != null && Number.isFinite(gain) && gain > 0 ? gain : null;
+    if (next === this.masterGain) return;
+    const wasShared = this.beep?.shared ?? false;
+    this.masterGain = next;
+    if (next !== null && !this.context()) return;
+    const out = this.output();
+    for (const node of this.routed) { node.disconnect(); if (out) node.connect(out); }
+    if (next === null && this.bus) { this.bus.input.disconnect(); this.bus.limiter.disconnect(); this.bus = null; }
+    // The beep lives in whichever context matches the mode: rebuild it on the next beep.
+    if (this.beep && wasShared !== (next !== null)) this.releaseBeep();
+  }
+
+  private releaseBeep(): void {
+    const beep = this.beep; if (!beep) return;
+    this.beep = null;
+    try { beep.osc.stop(); } catch { /* already stopped */ }
+    beep.gain.disconnect();
+    if (!beep.shared) void beep.ctx.close().catch(() => {});
+  }
+
+  /** Lazily build (and reuse) an element's WebAudio chain: element → gain → destination (or the master bus). Returns null when
    *  the browser refuses a context; the caller then degrades to element volume (boosts just won't be
    *  audible in preview, while export still applies them). */
   private gainFor(entry: { el: HTMLMediaElement; gain?: GainNode }): GainNode | null {
     if (entry.gain) return entry.gain;
     try {
-      const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!Ctor) return null;
-      if (!this.actx) this.actx = new Ctor();
-      const gain = this.actx.createGain();
-      this.actx.createMediaElementSource(entry.el).connect(gain).connect(this.actx.destination);
-      entry.gain = gain;
+      const ctx = this.context();
+      if (!ctx) return null;
+      const gain = ctx.createGain();
+      ctx.createMediaElementSource(entry.el).connect(gain).connect(this.output()!);
+      entry.gain = gain; this.routed.add(gain);
       return gain;
     } catch {
       return null; // already-taken-over element / autoplay policy: stay on the native path
@@ -744,7 +800,8 @@ export class VideoTrackEngine {
    *  won't start. Once routed, the node carries every level (never half native, half routed). */
   private setElGain(el: HTMLMediaElement, g: number): void {
     let entry = this.elGains.get(el);
-    if (!entry && g > 1) {
+    // Under a master every element joins the bus, so the limiter sees the whole mix.
+    if (!entry && (g > 1 || this.masterGain !== null)) {
       entry = { el };
       if (this.gainFor(entry)) this.elGains.set(el, entry);
       else entry = undefined; // no context: stay native, boost is inaudible here (export still applies it)
@@ -1403,15 +1460,13 @@ export class VideoTrackEngine {
 
   dispose(): void {
     this.pause();
-    if (this.beep) {
-      void this.beep.ctx.close().catch(() => {});
-      this.beep = null;
-    }
+    this.releaseBeep();
     for (const c of this.audioClips.values()) {
       c.gain?.disconnect();
       releaseMediaElement(c.el);
     }
     this.audioClips.clear();
+    this.routed.clear(); this.bus = null;
     void this.actx?.close().catch(() => {});
     this.actx = null;
     for (const d of this.dubs.values()) releaseMediaElement(d.el);

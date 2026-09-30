@@ -104,3 +104,58 @@ describe('导出混音:变速走保音调拉伸', () => {
     expect(seen).toEqual([{ frames: sr * 2, sampleRate: sr }]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Whole-mix loudness: master gain + lookahead limiter
+// ---------------------------------------------------------------------------
+
+import { MasterLimiter } from './export-audio-mix';
+import { exportNeedsTimelineMix } from './client-export';
+
+const CEILING = 10 ** (-1.5 / 20);
+const peakOf = (pcm: Float32Array) => { let peak = 0; for (const v of pcm) peak = Math.max(peak, Math.abs(v)); return peak; };
+const stereo = (frames: number, fill: (i: number) => number) => { const out = new Float32Array(frames * MIX_CH); for (let i = 0; i < frames; i++) out[i * MIX_CH] = out[i * MIX_CH + 1] = fill(i); return out; };
+const run = (limiter: MasterLimiter, input: Float32Array, chunk: number) => {
+  const parts: Float32Array[] = [];
+  for (let o = 0; o < input.length; o += chunk * MIX_CH) parts.push(limiter.process(input.subarray(o, o + chunk * MIX_CH)).slice());
+  parts.push(limiter.flush().slice());
+  const all = new Float32Array(parts.reduce((n, a) => n + a.length, 0)); let o = 0; for (const a of parts) { all.set(a, o); o += a.length; }
+  return all;
+};
+
+describe('whole-mix loudness master', () => {
+  it('passes quiet material through at exactly the master gain, frame-aligned and complete', () => {
+    const input = stereo(MIX_RATE, (i) => .05 * Math.sin(i / 7));
+    const out = run(new MasterLimiter(2), input, 4800);
+    expect(out.length).toBe(input.length);
+    for (let i = 0; i < input.length; i += 97) expect(out[i]).toBeCloseTo(input[i]! * 2, 6);
+  });
+
+  it('never exceeds the ceiling, chunk boundaries included, and chunking does not change the result', () => {
+    // Loud bursts straddling chunk edges, +12 dB of master gain on top.
+    const input = stereo(MIX_RATE * 2, (i) => (Math.floor(i / 3000) % 3 === 0 ? .9 : .1) * Math.sin(i / 5));
+    const whole = run(new MasterLimiter(4), input, MIX_RATE * 2);
+    const chunked = run(new MasterLimiter(4), input, 1000);
+    expect(chunked.length).toBe(input.length);
+    expect(peakOf(chunked)).toBeLessThanOrEqual(CEILING + 1e-6);
+    for (let i = 0; i < whole.length; i += 53) expect(chunked[i]).toBeCloseTo(whole[i]!, 6);
+    // The limiter gains down rather than clipping: the loud bursts stay below the ceiling by a margin most of the time.
+    let clamped = 0; for (const v of chunked) if (Math.abs(v) >= CEILING - 1e-6) clamped++;
+    expect(clamped / chunked.length).toBeLessThan(.01);
+  });
+
+  it('runs through the mixer in place of the soft clip, keeping the programme length', async () => {
+    const clip = { id: 'a', src: 'x', durationSec: 2.5, volumeDb: 0, fadeInSec: 0, fadeOutSec: 0 };
+    const buf = pcm(Math.round(MIX_RATE * 2.5), (i) => .5 * Math.sin(i / 4));
+    const mixed = await renderMix({ clips: [{ clip, buffer: buf }], totalSec: 2.5, master: { gainDb: 12 } });
+    expect(mixed.length).toBe(Math.ceil(2.5 * MIX_RATE) * MIX_CH);
+    expect(peakOf(mixed)).toBeLessThanOrEqual(CEILING + 1e-6);
+    expect(peakOf(mixed)).toBeGreaterThan(CEILING * .9);
+  });
+
+  it('sends plain 1× narration through the mixer only when the document sets a loudness', () => {
+    const plain = { loudness: false, clips: false, visualVideos: 0, tones: 0, clipMaskBeep: false, unencodableSource: false, retimed: false };
+    expect(exportNeedsTimelineMix(plain)).toBe(false);
+    expect(exportNeedsTimelineMix({ ...plain, loudness: true })).toBe(true);
+  });
+});

@@ -1,5 +1,6 @@
 import { sfxSound, legacySfxSound, SFX_LIBRARY_VERSION, type SfxIntensity } from '@pireel/studio-engine/sfx-library';
 import { speechLevelProfile, mixSoundToSpeech, SFX_MIX_VERSION } from '@pireel/studio-engine/sfx-mix';
+import { integratedLoudness, loudnessGainDb, SCENE_TARGET_LUFS } from '@pireel/studio-engine/loudness-lufs';
 import { artifactVersion } from '@pireel/studio-engine/workflow-artifacts';
 import type { EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import { applyDocumentTransaction } from '@pireel/studio-engine/document-transaction';
@@ -11,12 +12,19 @@ import { studioProviders } from '@pireel/studio-engine/providers';
 import type { CaptionTaskRecord } from './caption-task-store';
 export interface SfxMixEvent { start: number; soundId?: string; style?: string; intensity?: SfxIntensity; volumeDb?: number; muted?: boolean; generated?: SceneMedia; generate?: unknown }
 const legacyIntensity = (db: number): SfxIntensity => db <= -24 ? 'gentle' : db > -18 ? 'emphasis' : 'normal';
+/** Bake each effect against the narration's level, and bring the whole mix to the scene's target
+ *  loudness: effects are levelled against the source, the master gain lifts voice and effects together. */
 export async function renderSfxAudio(host: SceneWorkflowHost, document: EditorDocumentV2, events: readonly SfxMixEvent[], media: SceneMedia) {
-  if (!events.length) return document;
   const decoded = await decodeVideoAudio(await host.media(media)); host.check();
   if (!decoded) throw new Error('无法读取原声音轨，不能自动调整音效音量。');
-  const profile = speechLevelProfile(Array.from({ length: decoded.numberOfChannels }, (_, i) => decoded.getChannelData(i)), decoded.sampleRate);
-  const reserved = new Float32Array(profile.peaks.length); const planKey = await artifactVersion(events); let next = document;
+  const channels = Array.from({ length: decoded.numberOfChannels }, (_, i) => decoded.getChannelData(i));
+  const gainDb = loudnessGainDb(integratedLoudness(channels, decoded.sampleRate));
+  const processing: NonNullable<EditorDocumentV2['processing']> = { ...document.processing }; delete processing.loudness;
+  if (gainDb !== null) processing.loudness = { targetLufs: SCENE_TARGET_LUFS, gainDb };
+  let next: EditorDocumentV2 = { ...document, processing }; if (!Object.keys(processing).length) delete next.processing;
+  if (!events.length) return next;
+  const profile = speechLevelProfile(channels, decoded.sampleRate);
+  const reserved = new Float32Array(profile.peaks.length); const planKey = await artifactVersion(events);
   const generatedPcm = new Map<string, Float32Array>();
   for (const [index, event] of events.entries()) {
     host.check(); const sound = (event.soundId && sfxSound(event.soundId)) || legacySfxSound(event.style ?? 'soft', index);

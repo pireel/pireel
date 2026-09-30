@@ -189,6 +189,11 @@ export const SceneCanvasPreview = forwardRef<SceneCanvasHandle, Props>(function 
   }, [props.composition, props.visuals, props.files, props.duration, props.volume, props.sourceVolume]);
 
   useEffect(() => {
+    const loudness = props.composition.audioLoudness;
+    engine.current?.setMasterGain(loudness ? 10 ** (loudness.gainDb / 20) : null);
+  }, [props.composition.audioLoudness]);
+
+  useEffect(() => {
     engine.current?.setAudioClips((props.composition.audioTracks ?? []).map(clip => ({
       id: clip.id, url: clip.src, speed: audioClipDefaults(clip).speed,
       gainAt: (value: number) => audioClipGainAt(clip, value, props.duration) * props.volume,

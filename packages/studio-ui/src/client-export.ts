@@ -643,6 +643,12 @@ export async function captureCompositionFrame(opts: {
   }
 }
 
+/** Audio goes through the 48 kHz timeline mixer (instead of per-sample passthrough) when anything must
+ *  be summed or rewritten; a whole-mix loudness setting needs its master stage even for plain 1× narration. */
+export function exportNeedsTimelineMix(input: { loudness: boolean; clips: boolean; visualVideos: number; tones: number; clipMaskBeep: boolean; unencodableSource: boolean; retimed: boolean }): boolean {
+  return input.loudness || input.clips || input.visualVideos > 0 || input.tones > 0 || input.clipMaskBeep || input.unencodableSource || input.retimed;
+}
+
 export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
   const { comp, videoFile, clipFiles } = opts;
   assertExportableComposition(comp);
@@ -804,9 +810,9 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     // Browser AAC encoders take 44.1/48 kHz mono or stereo only; a source outside that (phone memos,
     // synthesized speech at 22.05 kHz) goes through the 48 kHz mixer instead of being passed through.
     const unencodableSource = [...rigs.values()].some((rig) => rig.audio && (![44100, 48000].includes(rig.audio.sampleRate) || rig.audio.numberOfChannels > 2));
-    const needsTimelineMix = withClips || visualVideos.length > 0 || tones.length > 0 || clipMaskBeep || unencodableSource || segs.some((segment) =>
+    const needsTimelineMix = exportNeedsTimelineMix({ loudness: !!comp.audioLoudness, clips: withClips, visualVideos: visualVideos.length, tones: tones.length, clipMaskBeep, unencodableSource, retimed: segs.some((segment) =>
       Math.abs(segmentSourceRate(segment, segment.timelineStart, segment.timelineEnd) - 1) > 1e-6,
-    );
+    ) });
     const anyAudio = withClips
       || tones.length > 0
       || segs.some((s) => (s.gain ?? 1) > 0 && rigs.get(s.key)?.audio)
@@ -1167,6 +1173,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
         clips,
         totalSec: durationSec,
         tones,
+        ...(comp.audioLoudness ? { master: { gainDb: comp.audioLoudness.gainDb } } : {}),
         push: (sample) => audioSource.add(sample).then(() => sample.close()),
       });
     } else if (audioSource) {

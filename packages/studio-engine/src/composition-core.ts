@@ -648,6 +648,8 @@ export interface Composition {
   /** Narration denoise (MAIN source; baked in the browser — the wet file is cached, strength is a
    *  bake-time dry/wet blend so preview and export play one identical blended file). 0 < strength ≤ 1. */
   audioDenoise?: { strength: number };
+  /** Whole-mix loudness (master gain + peak limiter), projected from the document's processing.loudness. */
+  audioLoudness?: { targetLufs: number; gainDb: number };
   /** Transition lane (seconds), projected from the document's timeline.transitions. */
   transitions?: CompositionTransition[];
 }

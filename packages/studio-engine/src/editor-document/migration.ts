@@ -387,7 +387,7 @@ export function migrateLegacyProjectToV2(input: LegacyProjectForMigration): Edit
       scenes: [],
       ...(context.plan !== undefined ? { plan: context.plan } : {}),
     },
-    ...(comp.audioDenoise ? { processing: { audioDenoise: comp.audioDenoise } } : {}),
+    ...(comp.audioDenoise || comp.audioLoudness ? { processing: { ...(comp.audioDenoise ? { audioDenoise: comp.audioDenoise } : {}), ...(comp.audioLoudness ? { loudness: comp.audioLoudness } : {}) } } : {}),
   };
 
   // Transition lane: the composition's own list, plus older spine-attached ones migrated onto it.

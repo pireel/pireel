@@ -49,6 +49,12 @@ export function isEditorDocumentV2(value: unknown): value is EditorDocumentV2 {
 }
 
 /** Structural and referential validation. Offline assets are valid; dangling asset ids are not. */
+/** A whole-mix loudness setting is a finite target and a bounded master gain. */
+export function validLoudness(value: unknown): value is { targetLufs: number; gainDb: number } {
+  const row = value as { targetLufs?: unknown; gainDb?: unknown } | null;
+  return !!row && typeof row.targetLufs === 'number' && typeof row.gainDb === 'number' && row.targetLufs >= -40 && row.targetLufs <= -5 && row.gainDb >= -24 && row.gainDb <= 30;
+}
+
 export function validateEditorDocumentV2(document: EditorDocumentV2): EditorDocumentIssue[] {
   const issues: EditorDocumentIssue[] = [];
   const push = (severity: EditorDocumentIssue['severity'], code: string, path: string, message: string) =>
@@ -58,6 +64,7 @@ export function validateEditorDocumentV2(document: EditorDocumentV2): EditorDocu
   if (!isFinitePositive(document.canvas.width)) push('error', 'invalid-canvas-width', 'canvas.width', 'Canvas width must be positive.');
   if (!isFinitePositive(document.canvas.height)) push('error', 'invalid-canvas-height', 'canvas.height', 'Canvas height must be positive.');
   if (!isFinitePositive(document.canvas.fps) || document.canvas.fps > 240) push('error', 'invalid-fps', 'canvas.fps', 'FPS must be within 1..240.');
+  if (document.processing?.loudness !== undefined && !validLoudness(document.processing.loudness)) push('error', 'invalid-loudness', 'processing.loudness', 'Loudness needs a target within [-40, -5] LUFS and a gain within [-24, 30] dB.');
 
   const trackIds = new Set<string>();
   const clipIds = new Set<string>();

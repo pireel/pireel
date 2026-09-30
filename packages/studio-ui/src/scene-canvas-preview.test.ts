@@ -14,7 +14,7 @@ vi.mock('./preview-stage-host', () => ({ PreviewStageHost: class {
   constructor(readonly element: HTMLDivElement) { stages.push(this); }
 } }));
 vi.mock('./video-track-engine', () => ({ VideoTrackEngine: class {
-  setAudioClips = vi.fn(); setLayers = vi.fn(); setSource = vi.fn(); setSegments = vi.fn(() => true); setTimelineDuration = vi.fn();
+  setAudioClips = vi.fn(); setLayers = vi.fn(); setSource = vi.fn(); setSegments = vi.fn(() => true); setTimelineDuration = vi.fn(); setMasterGain = vi.fn();
   refresh = vi.fn(); seek = vi.fn(); play = vi.fn(); pause = vi.fn(); dispose = vi.fn();
   isPlaying = false;
   constructor() { engines.push(this); }
@@ -25,7 +25,7 @@ it('uses the workbench canvas, keeps its decoder through edits, and primes repla
   const element = document.createElement('div'); document.body.append(element);
   const root = createRoot(element); const ref = createRef<SceneCanvasHandle>();
   const source = new File(['source'], 'source.mp4'); const footage = new File(['footage'], 'footage.mp4');
-  const comp = { ...emptyComposition(), width: 640, height: 360, audioTracks: [{ id: 'sfx', src: 'blob:sfx', role: 'sfx' as const, startSec: 2, durationSec: .25, volumeDb: -12 }], video: { url: 'blob:source', durationSec: 10 }, shots: [{ id: 'source', src: 'blob:source', srcStart: 0, srcEnd: 10, treatment: 'full' as const }] };
+  const comp = { ...emptyComposition(), width: 640, height: 360, audioLoudness: { targetLufs: -16, gainDb: 20 }, audioTracks: [{ id: 'sfx', src: 'blob:sfx', role: 'sfx' as const, startSec: 2, durationSec: .25, volumeDb: -12 }], video: { url: 'blob:source', durationSec: 10 }, shots: [{ id: 'source', src: 'blob:source', srcStart: 0, srcEnd: 10, treatment: 'full' as const }] };
   const picture = new File(['image'], 'picture.png', { type: 'image/png' });
   const files = new Map([['blob:source', source], ['blob:footage', footage], ['blob:picture', picture]]);
   const visual: SupplementalVisualMediaClip = { clipId: 'footage', trackId: 'broll', stackOrder: 1, kind: 'video', source: 'blob:footage', startSec: 2, endSec: 5, sourceInSec: 1, sourceOutSec: 4, fit: 'cover', muted: true, audioMuted: true };
@@ -43,6 +43,7 @@ it('uses the workbench canvas, keeps its decoder through edits, and primes repla
     await render();
     const eng = engines.at(-1); const count = engines.length;
     const sound = eng.setAudioClips.mock.calls.at(-1)[0][0];
+    expect(eng.setMasterGain).toHaveBeenLastCalledWith(10);
     expect(sound.url).toBe('blob:sfx'); expect(sound.gainAt(1)).toBe(0); expect(sound.gainAt(2.1)).toBeCloseTo(10 ** (-12 / 20)); expect(sound.srcTimeAt(2.1)).toBeCloseTo(.1);
     expect(element.querySelector('iframe')).toBeNull();
     const first = stages[0];
