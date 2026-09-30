@@ -24,7 +24,7 @@ export function captionWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
       const media = store.read<SceneMedia>(args.media, 'media');
       if (args.transcript && (args.transcript as unknown as { id: string }).id !== media.sig) throw new Error('预置转写不属于当前媒体，请重新绑定。');
       let transcript = args.transcript ? store.read<AsrSegment[]>(args.transcript, 'transcript') : null;
-      if (!transcript?.length) transcript = await (await import('./media')).transcribeFile(await host.media(media), { signal: host.hooks.signal, onUsage: context.recordUsage, onPhase: detail => host.report('transcribing', { status: 'running', detail }) });
+      if (!transcript?.length) transcript = await (await import('./media')).transcribeFile(await host.media(media), { signal: host.hooks.signal, sceneRun: host.hooks.sceneRun, onUsage: context.recordUsage, onPhase: detail => host.report('transcribing', { status: 'running', detail }) });
       if (!transcript.length) throw new Error('没有识别到讲话内容，请选择有声音的视频。');
       return { transcript: workflowJson(await store.put('transcript', media.sig, transcript)) };
     }, project: outputs => ({ transcript: store.read(outputs.transcript, 'transcript') }) }),
@@ -55,7 +55,7 @@ export function captionWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     node('text.translate', { stage: 'translating', cacheInputs(args) { return { language: args.language, units: workflowJson((args.units as unknown as CaptionPlan['units']).map(({ start: _start, ...unit }) => unit)) }; }, async execute(args, context) {
       const translate = studioProviders().translate;
       if (!translate) throw new Error('翻译服务尚未连接，请关闭双语字幕后重试。');
-      const translation = await translateCaptionPlan(args.units as unknown as CaptionPlan['units'], String(args.language), (rows, language) => translate(rows, language, { signal: host.hooks.signal, onUsage: context.recordUsage }), host.check, count('translating'));
+      const translation = await translateCaptionPlan(args.units as unknown as CaptionPlan['units'], String(args.language), (rows, language) => translate(rows, language, { signal: host.hooks.signal, sceneRun: host.hooks.sceneRun, onUsage: context.recordUsage }), host.check, count('translating'));
       return { translation: workflowJson(await store.put('translation', 'captions', translation)), value: workflowJson(translation) };
     }, project: outputs => { const value = outputs.value as unknown as CaptionTranslation; return { translation: { language: value.language, sourceKey: value.sourceKey } }; } }),
     node('brand.apply', { stage: 'styling', async execute(args) {
@@ -80,7 +80,7 @@ export function captionWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
       const keys: { index: number; text: string }[] = [];
       for (let offset = 0; offset < all.length; offset += HIGHLIGHT_BATCH) {
         host.check();
-        keys.push(...await highlight(all.slice(offset, offset + HIGHLIGHT_BATCH), { signal: host.hooks.signal, onUsage: context.recordUsage }));
+        keys.push(...await highlight(all.slice(offset, offset + HIGHLIGHT_BATCH), { signal: host.hooks.signal, sceneRun: host.hooks.sceneRun, onUsage: context.recordUsage }));
         count('emphasizing')(Math.min(all.length, offset + HIGHLIGHT_BATCH), all.length);
       }
       const targets = keys.flatMap(key => {

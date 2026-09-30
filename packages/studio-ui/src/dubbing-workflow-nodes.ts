@@ -56,7 +56,7 @@ export function dubbingWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     const translateTexts = async (texts: string[]) => {
       const translate = studioProviders().translate; if (!translate) throw new Error('翻译服务尚未连接。');
       const rows = texts.flatMap((text, parent) => (text.match(/[^\n]{1,350}/gu) ?? []).map(text => ({ text, parent })));
-      const translated = await translateTextRows(rows.map(row => row.text), config.language, translate, host.check, (done, total) => host.report('translating', { status: 'running', fraction: done / total }));
+      const translated = await translateTextRows(rows.map(row => row.text), config.language, (rows, language) => translate(rows, language, { signal: host.hooks.signal, sceneRun: host.hooks.sceneRun }), host.check, (done, total) => host.report('translating', { status: 'running', fraction: done / total }));
       const byIndex = new Map(translated.map(row => [row.index, row.text]));
       return texts.map((_, parent) => rows.flatMap((row, index) => row.parent === parent ? [byIndex.get(index)!] : []).join('\n'));
     };
@@ -93,7 +93,7 @@ export function dubbingWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     /** One voiced line; `attempt` > 0 is a fitting re-voice with its own server job. */
     const voice = async (index: number, text: string, attempt: number, speed: number): Promise<DubbingSpeech> => {
       const part = plan.parts[index];
-      let body = await jsonRequest('/api/studio/dubbing-speech', { runId: requestId, projectId: args.projectId, chunkIndex: index, attempt, speed, language: languageCode, text, voiceId: part.voiceId, name: `${args.name} · ${plan.language}` }, signal);
+      let body = await jsonRequest('/api/studio/dubbing-speech', { runId: requestId, projectId: args.projectId, sceneRun: host.hooks.sceneRun, chunkIndex: index, attempt, speed, language: languageCode, text, voiceId: part.voiceId, name: `${args.name} · ${plan.language}` }, signal);
       while (body.status === 'pending') {
         await pause(signal); const response = await fetch(`/api/studio/dubbing-speech?id=${encodeURIComponent(body.id)}`, { signal }); body = await response.json();
         if (!response.ok) throw new Error(body.error ?? '配音进度暂时无法读取。');
@@ -135,7 +135,7 @@ export function dubbingWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     const shorten = overflowing().filter(group => !fitted[group.group]);
     if (shorten.length) {
       host.report('voicing', { status: 'running', detail: 'fitting' });
-      const body = await jsonRequest('/api/studio/dubbing-fit', { language: languageCode, projectId: args.projectId, rows: shorten.map(group => ({ index: group.group, source: plan.parts[group.indexes[0]].source ?? '', text: plan.parts[group.indexes[0]].text, seconds: Math.round(group.natural * 100) / 100, targetSeconds: Math.round(Math.max(.5, group.available * .95) * 100) / 100 })) }, signal);
+      const body = await jsonRequest('/api/studio/dubbing-fit', { language: languageCode, projectId: args.projectId, sceneRun: host.hooks.sceneRun, rows: shorten.map(group => ({ index: group.group, source: plan.parts[group.indexes[0]].source ?? '', text: plan.parts[group.indexes[0]].text, seconds: Math.round(group.natural * 100) / 100, targetSeconds: Math.round(Math.max(.5, group.available * .95) * 100) / 100 })) }, signal);
       if (body.usage) context.recordUsage(body.usage);
       for (const row of body.rows as { index: number; text: string }[]) {
         host.check(); const group = shorten.find(entry => entry.group === row.index)!; const index = group.indexes[0];
@@ -221,7 +221,7 @@ export function dubbingWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     if (!state.alignedAudioKey) { const uploaded = await upload(await host.media(audio), { contentType: 'audio/wav', filename: 'dubbing-aligned.wav' }); state = { ...state, alignedAudioSig: audio.sig, alignedAudioKey: uploaded.key, alignedAudioUrl: uploaded.url }; await context.savePartial(state, project(state)); }
     if (!state.sourceVideoKey) { const file = await host.media(media); const uploaded = await upload(file, { contentType: file.type || 'video/mp4', filename: file.name }); state = { ...state, sourceVideoKey: uploaded.key, sourceVideoUrl: uploaded.url }; await context.savePartial(state, project(state)); }
     if (!state.lipJobId) {
-      const job = await jsonRequest('/api/studio/dubbing-lipsync', { runId: requestId, projectId: args.projectId, videoKey: state.sourceVideoKey, audioKey: state.alignedAudioKey }, signal);
+      const job = await jsonRequest('/api/studio/dubbing-lipsync', { runId: requestId, projectId: args.projectId, sceneRun: host.hooks.sceneRun, videoKey: state.sourceVideoKey, audioKey: state.alignedAudioKey }, signal);
       if (!job.id || job.status === 'failed') throw new Error(job.error ?? '口型任务提交失败。');
       state.lipJobId = job.id; await context.savePartial(state, project(state));
     }
@@ -239,7 +239,7 @@ export function dubbingWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
   } }),
   node('speech.dub-transcribe', { stage: 'styling', async execute(args) {
     const audio = store.read<AlignedMedia>(args.audio, 'media'); const cached = args.cached as unknown as DubbingState;
-    const transcript = cached.captionAudioSig === audio.sig && cached.captionTranscript?.length ? cached.captionTranscript : await transcribeFile(await host.media(audio), { signal, onPhase: detail => host.report('styling', { status: 'running', detail }) });
+    const transcript = cached.captionAudioSig === audio.sig && cached.captionTranscript?.length ? cached.captionTranscript : await transcribeFile(await host.media(audio), { signal, sceneRun: host.hooks.sceneRun, onPhase: detail => host.report('styling', { status: 'running', detail }) });
     if (!transcript.length) throw new Error('未识别到配音字幕，请重试。');
     return { transcript: workflowJson(await store.put('transcript', audio.sig, transcript)), audioSig: audio.sig, signature: audio.signature };
   }, project: outputs => project({ captionTranscript: store.read(outputs.transcript, 'transcript'), captionSignature: String(outputs.signature), captionAudioSig: String(outputs.audioSig) }) }),

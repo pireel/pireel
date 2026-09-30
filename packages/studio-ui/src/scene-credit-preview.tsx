@@ -32,6 +32,15 @@ export function SceneCreditPreview({ task, options, locale, busy }: { task: Capt
       <p className="text-ink-4">{zh ? '输出最高 1080p、30fps；较小输入不放大，高帧率输入会降至 30fps。' : 'Output up to 1080p and 30fps. Smaller videos are not upscaled; higher frame rates are reduced to 30fps.'}</p>
     </div>;
   }
+  if (quote.fixed) {
+    const { perMinute, lipSync } = quote.fixed; const dubbing = task.scene === 'dubbing';
+    return <div role="status" className="text-ink-3 mt-3 space-y-1.5 text-center text-xs leading-relaxed">
+      <p>{zh ? '本次生成' : 'This generation'} <strong className="text-ink tabular-nums">{quote.estimate}</strong> {zh ? '积分' : 'credits'}</p>
+      <p className="text-ink-4">{zh
+        ? `${dubbing ? '配音' : '字幕'}按视频时长 ${perMinute} 积分/分钟${lipSync ? `，口型同步 ${lipSync.perMinute} 积分/分钟（不足 ${lipSync.minSec} 秒按 ${lipSync.minSec} 秒计）` : ''}，每次生成按此扣除。生成失败会退回，已产生的服务费用除外。`
+        : `${dubbing ? 'Dubbing' : 'Captions'}: ${perMinute} credit${perMinute === 1 ? '' : 's'} per minute of video${lipSync ? `; lip sync: ${lipSync.perMinute} per minute (minimum ${lipSync.minSec} seconds)` : ''}, charged per generation. A failed generation is refunded, less any service cost already incurred.`}</p>
+    </div>;
+  }
   const approximate = quote.durationBased || quote.min !== quote.max;
   const point = quote.estimate ?? Math.round((quote.min + quote.max) / 2);
   const displayed = quote.durationBased && point >= 20 ? Math.max(quote.min, Math.min(quote.max, Math.round(point / 5) * 5)) : point;

@@ -170,7 +170,7 @@ export async function probeVideoFile(file: File): Promise<ProbedFile> {
 }
 
 /** Extract audio (upload audio only) → ASR → sentence-level shots. Cached by fileSig (same clip transcribed once). */
-export async function transcribeFile(file: File, opts?: { projectId?: string; signal?: AbortSignal; onUsage?: (usage: import('@pireel/studio-engine/workflow').WorkflowUsage) => void; onPhase?: (phase: 'checking' | 'extracting' | 'uploading' | 'recognizing' | 'aligning') => void }): Promise<AsrSegment[]> {
+export async function transcribeFile(file: File, opts?: { projectId?: string; sceneRun?: string; signal?: AbortSignal; onUsage?: (usage: import('@pireel/studio-engine/workflow').WorkflowUsage) => void; onPhase?: (phase: 'checking' | 'extracting' | 'uploading' | 'recognizing' | 'aligning') => void }): Promise<AsrSegment[]> {
   const phase = (value: 'checking' | 'extracting' | 'uploading' | 'recognizing' | 'aligning') => { opts?.signal?.throwIfAborted(); opts?.onPhase?.(value); };
   phase('checking');
   const sig = fileSig(file);
@@ -194,7 +194,7 @@ export async function transcribeFile(file: File, opts?: { projectId?: string; si
     signal: opts?.signal,
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ audio_url: url, duration_sec: durationSec, ...(opts?.projectId ? { projectId: opts.projectId } : {}) }),
+    body: JSON.stringify({ audio_url: url, duration_sec: durationSec, ...(opts?.projectId ? { projectId: opts.projectId } : {}), ...(opts?.sceneRun ? { sceneRun: opts.sceneRun } : {}) }),
   });
   // Server failures must throw a clear error, not silently become an empty array — callers need to tell "ASR failed" apart from "the video truly has no speech"
   // 402 = credits exhausted: say so instead of an opaque HTTP code

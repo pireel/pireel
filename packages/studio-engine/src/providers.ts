@@ -20,7 +20,18 @@ import type { AssetSearchDocument } from './asset-search';
 import type { CustomVisualStyle } from './visual-style';
 
 /** One block-generation request (the same shape the BYO brief is assembled from). */
-export interface StudioOperationOptions { signal?: AbortSignal; onUsage?: (usage: import('./workflow').WorkflowUsage) => void }
+export interface StudioOperationOptions {
+  signal?: AbortSignal; onUsage?: (usage: import('./workflow').WorkflowUsage) => void;
+  /** The fixed-price scene run this call belongs to: the host bills the run, not the call. */
+  sceneRun?: string;
+}
+/** Fixed-price scene generations (captions, dubbing): charged once when a generation starts; its
+ *  paid steps then pass the run id. Resuming an interrupted generation continues its run. */
+export interface SceneRunService {
+  start(input: { id: string; projectId: string }, signal?: AbortSignal): Promise<{ id: string; credits: number; resumed: boolean }>;
+  /** A failed run is refunded (less the service cost it already incurred). */
+  finish(id: string, outcome: 'completed' | 'failed'): Promise<void>;
+}
 export interface ComposeRequest {
   /** Billing attribution only — which project this generation belongs to. */
   projectId?: string;
@@ -145,6 +156,7 @@ export interface StudioProviders {
   projects: ProjectStore;
   sceneProjects?: SceneProjectStore;
   estimateSceneCredits?(input: SceneCreditInput, signal?: AbortSignal): Promise<SceneCreditEstimate>;
+  sceneRuns?: SceneRunService;
   /** Built-in chat persistence, independent from project document/version sync. */
   chats?: ChatThreadStore;
   uploads: AssetUploader;

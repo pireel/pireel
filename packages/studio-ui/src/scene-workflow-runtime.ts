@@ -17,6 +17,8 @@ export interface SceneWorkflowHooks {
   signal: AbortSignal; checkpoint: (task: CaptionTaskRecord) => Promise<void>; progress: (fraction: number) => void;
   stageProgress?: (progress: CaptionTaskProgress) => void;
   definition?: WorkflowDefinition;
+  /** The fixed-price run this generation is billed under; its paid steps pass it along. */
+  sceneRun?: string;
   /** Host extension point used by installed node adapters, not scene-specific runners. */
   nodes?: WorkflowNodeImplementation[];
 }

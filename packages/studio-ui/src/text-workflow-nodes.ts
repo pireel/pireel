@@ -33,7 +33,7 @@ export function textWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
       if (args.enabled !== false) {
         const translate = studioProviders().translate; if (!translate) throw new Error('翻译服务尚未连接。');
         const chunks = units.flatMap(unit => (unit.text.match(/[^\n]{1,350}/gu) ?? []).map(text => ({ id: unit.id, text })));
-        const rows = await translateTextRows(chunks.map(chunk => chunk.text), String(args.language), (rows, language) => translate(rows, language, { signal: host.hooks.signal, onUsage: context.recordUsage }), host.check, (done, total) => host.report('translating', { status: 'running', fraction: done / total, done, total }));
+        const rows = await translateTextRows(chunks.map(chunk => chunk.text), String(args.language), (rows, language) => translate(rows, language, { signal: host.hooks.signal, sceneRun: host.hooks.sceneRun, onUsage: context.recordUsage }), host.check, (done, total) => host.report('translating', { status: 'running', fraction: done / total, done, total }));
         const values = new Map(rows.map(row => [row.index, row.text.trim()]));
         items = units.map(unit => ({ id: unit.id, text: chunks.flatMap((chunk, index) => chunk.id === unit.id ? [values.get(index)!] : []).join('\n') }));
       }

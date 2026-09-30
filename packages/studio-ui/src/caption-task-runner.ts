@@ -1,4 +1,5 @@
 import { captionWorkflowDefinition, sceneLiteral, sceneStep } from '@pireel/studio-engine/workflow-caption-template';
+import { withSceneRun } from './scene-run';
 import { SceneWorkflowHost, type SceneWorkflowHooks } from './scene-workflow-runtime';
 import { captionWorkflowNodes } from './caption-workflow-nodes';
 import type { CaptionTaskRecord } from './caption-task-store';
@@ -6,7 +7,11 @@ import type { CaptionTaskRecord } from './caption-task-store';
 /** Scene adapter seeds immutable inputs; the definition and installed nodes own execution. */
 /** Generation stops at the edited caption document; the video is rendered when the user downloads
  *  it (`exportCaptionEdit`). A saved custom definition that renders still returns its video. */
-export async function runCaptionTask(task: CaptionTaskRecord, file: File, hooks: SceneWorkflowHooks): Promise<{ task: CaptionTaskRecord; video?: Blob }> {
+export function runCaptionTask(task: CaptionTaskRecord, file: File, hooks: SceneWorkflowHooks): Promise<{ task: CaptionTaskRecord; video?: Blob }> {
+  return withSceneRun(task, hooks, hooks => generateCaptions(task, file, hooks));
+}
+
+async function generateCaptions(task: CaptionTaskRecord, file: File, hooks: SceneWorkflowHooks): Promise<{ task: CaptionTaskRecord; video?: Blob }> {
   const host = new SceneWorkflowHost(task, file, hooks);
   try {
     const media = await host.store.put('media', task.sourceSig, { sig: task.sourceSig, name: task.name, width: task.width, height: task.height, durationSec: task.durationSec });

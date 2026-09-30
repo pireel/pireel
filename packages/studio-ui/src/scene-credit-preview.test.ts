@@ -3,7 +3,6 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import type { CaptionTaskRecord } from '@pireel/studio-engine/scene-project';
-import { dubbingTurns } from '@pireel/studio-engine/dubbing-task';
 const mocks = vi.hoisted(() => ({ estimate: vi.fn() }));
 vi.mock('@pireel/studio-engine/providers', () => ({ studioProviders: () => ({ estimateSceneCredits: mocks.estimate }) }));
 import { SceneCreditPreview } from './scene-credit-preview';
@@ -23,16 +22,15 @@ it('shows a rounded approximate budget while preserving the range in details', a
   expect(container.querySelector('details')?.textContent).toContain('34–106');
   expect(container.textContent).toContain('assumed speech rate');
 });
-it('requests the full generation price even after results are cached', async () => {
-  const transcript = [{ text: 'Hello', start: 0, end: 121.5 }];
-  const turns = dubbingTurns(transcript, 121.5);
-  const completed = { ...task, stage: 'completed' as const, transcript, dubbing: { language: 'English', turnsKey: JSON.stringify(turns), translatedTurns: ['Hello'], speechSignature: JSON.stringify(['English', [{ text: 'Hello', voiceId: 'voice', group: 0, start: turns[0].start, end: turns[0].end, source: 'Hello' }]]), speechParts: [{ url: 'audio', key: 'audio', signature: '', durationSec: 121.5 }] } };
-  mocks.estimate.mockResolvedValue({ min: 7, max: 7, estimate: 7, durationBased: false, items: [] });
-  await act(async () => root.render(createElement(SceneCreditPreview, { task: completed, options: task.options, locale: 'zh', busy: false })));
+it('shows the fixed generation price even after results are cached', async () => {
+  const completed = { ...task, stage: 'completed' as const, transcript: [{ text: 'Hello', start: 0, end: 121.5 }], options: { ...task.options, dubbing: { ...task.options.dubbing!, lipSync: true } } };
+  mocks.estimate.mockResolvedValue({ min: 90, max: 90, estimate: 90, durationBased: false, items: [], fixed: { perMinute: 8, lipSync: { perMinute: 36, minSec: 40, credits: 73 } } });
+  await act(async () => root.render(createElement(SceneCreditPreview, { task: completed, options: completed.options, locale: 'zh', busy: false })));
   await act(async () => vi.advanceTimersByTimeAsync(350));
-  expect(mocks.estimate.mock.calls[0][0]).toMatchObject({ asr: true, translation: true, speech: [{ minUnits: 5, maxUnits: 5 }] });
-  expect(container.querySelector('summary')?.textContent).toBe('预计 7 积分');
-  expect(container.textContent).not.toContain('复用');
+  expect(mocks.estimate.mock.calls[0][0]).toEqual({ scene: 'dubbing', durationSec: 121.5, asr: false, translation: false, emphasis: false, lipSync: true, speech: [] });
+  expect(container.textContent).toContain('本次生成 90 积分');
+  expect(container.textContent).toContain('8 积分/分钟');
+  expect(container.textContent).toContain('口型同步 36 积分/分钟');
 });
 
 it('shows the selected cost tier, one-order rounding and settlement terms without a markup', async () => {
