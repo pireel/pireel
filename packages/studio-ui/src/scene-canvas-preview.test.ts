@@ -7,6 +7,12 @@ import { emptyComposition } from '@pireel/studio-engine/composition';
 import type { SupplementalVisualMediaClip } from '@pireel/studio-engine/visual-layer-plan';
 
 const engines = vi.hoisted(() => [] as any[]);
+const stages = vi.hoisted(() => [] as any[]);
+vi.mock('./preview-stage-host', () => ({ PreviewStageHost: class {
+  srcdoc = ''; onMessage: ((event: unknown) => void) | null = null; dispose = vi.fn();
+  contentWindow = { postMessage: vi.fn() };
+  constructor(readonly element: HTMLDivElement) { stages.push(this); }
+} }));
 vi.mock('./video-track-engine', () => ({ VideoTrackEngine: class {
   setAudioClips = vi.fn(); setLayers = vi.fn(); setSource = vi.fn(); setSegments = vi.fn(() => true); setTimelineDuration = vi.fn();
   refresh = vi.fn(); seek = vi.fn(); play = vi.fn(); pause = vi.fn(); dispose = vi.fn();
@@ -28,9 +34,9 @@ it('uses the workbench canvas, keeps its decoder through edits, and primes repla
     await act(async () => root.render(createElement(SceneCanvasPreview, { ref, composition: comp, visuals: [{ ...visual, startSec: start, endSec: start + 3 }, { ...visual, clipId: 'picture', kind: 'image', source: 'blob:picture' }], files, duration: 10, volume, onTime, onPlaying })));
     await act(async () => vi.advanceTimersByTime(110));
   };
-  const boot = async (iframe: HTMLIFrameElement) => {
-    const post = vi.spyOn(iframe.contentWindow!, 'postMessage').mockImplementation(() => {});
-    await act(async () => window.dispatchEvent(new MessageEvent('message', { source: iframe.contentWindow!, data: { type: 'pong', nonce: 'boot' } })));
+  const boot = async (stage: any) => {
+    const post = stage.contentWindow.postMessage;
+    await act(async () => stage.onMessage({ source: stage.contentWindow, data: { type: 'pong', nonce: 'boot' } }));
     return post;
   };
   try {
@@ -38,7 +44,8 @@ it('uses the workbench canvas, keeps its decoder through edits, and primes repla
     const eng = engines.at(-1); const count = engines.length;
     const sound = eng.setAudioClips.mock.calls.at(-1)[0][0];
     expect(sound.url).toBe('blob:sfx'); expect(sound.gainAt(1)).toBe(0); expect(sound.gainAt(2.1)).toBeCloseTo(10 ** (-12 / 20)); expect(sound.srcTimeAt(2.1)).toBeCloseTo(.1);
-    const first = element.querySelector('iframe')!;
+    expect(element.querySelector('iframe')).toBeNull();
+    const first = stages[0];
     expect(first.srcdoc).toContain('<canvas id="vidEl"');
     expect(first.srcdoc).toContain('data-source-in="1"');
     expect(first.srcdoc).toContain('pireel-local-image:picture');
@@ -59,17 +66,18 @@ it('uses the workbench canvas, keeps its decoder through edits, and primes repla
     expect(eng.setAudioClips.mock.calls.at(-1)[0][0].gainAt(2.1)).toBeCloseTo(.4 * 10 ** (-12 / 20));
     expect(engines).toHaveLength(count);
     expect(eng.setSegments.mock.calls.at(-1)[0][0].gain).toBe(.4);
-    const second = element.querySelectorAll('iframe')[1];
-    expect(second.style.opacity).toBe('0');
+    const second = stages[1];
+    expect(second.element.style.opacity).toBe('0');
     expect(second.srcdoc).toContain('data-start="6"');
     const nextPost = await boot(second);
     expect(nextPost).toHaveBeenCalledWith({ type: 'hf:seek', t: 4 }, '*');
-    expect(second.style.opacity).toBe('0');
+    expect(second.element.style.opacity).toBe('0');
     await act(async () => eng.onFrame(frame, { t: 4, srcT: 4, elKey: 'clip_source' }));
-    expect(second.style.opacity).toBe('1');
-    expect(first.style.opacity).toBe('0');
+    expect(second.element.style.opacity).toBe('1');
+    expect(first.element.style.opacity).toBe('0');
     expect(post).toHaveBeenCalledWith({ type: 'hf:pause' }, '*');
     await act(async () => root.unmount());
     expect(eng.dispose).toHaveBeenCalledOnce();
+    expect(stages.every(stage => stage.dispose.mock.calls.length > 0)).toBe(true);
   } finally { element.remove(); vi.restoreAllMocks(); vi.useRealTimers(); vi.unstubAllGlobals(); }
 });

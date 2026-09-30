@@ -6,6 +6,7 @@ import { videoTrackShots, shotGain, type Composition } from '@pireel/studio-engi
 import type { SupplementalVisualMediaClip } from '@pireel/studio-engine/visual-layer-plan';
 import { injectPreviewRuntime } from './sample-composition';
 import { VideoTrackEngine } from './video-track-engine';
+import { PreviewStageHost, type PreviewMessageEvent } from './preview-stage-host';
 
 export interface SceneCanvasHandle {
   seek(time: number): void;
@@ -24,14 +25,16 @@ interface Props {
   onPlaying: (playing: boolean) => void;
 }
 
-/** The independent scenes use the workbench's resident decoder and assembled canvas runtime.
- * The iframe owns only presentation; rebuilding captions/footage never replaces the audio clock.
- * Keep the previous document visible until the replacement has received its first canvas frame. */
+/** The independent scenes use the workbench's resident decoder and assembled canvas runtime, mounted
+ * in two in-page Shadow DOM stages (double buffer) like the workbench, not iframes. The stage owns only
+ * presentation; rebuilding captions/footage never replaces the audio clock. Keep the previous document
+ * visible until the replacement has received its first canvas frame. */
 export const SceneCanvasPreview = forwardRef<SceneCanvasHandle, Props>(function SceneCanvasPreview(props, ref) {
   const current = useRef(props);
   current.current = props;
   const engine = useRef<VideoTrackEngine | null>(null);
-  const frames = useRef<(HTMLIFrameElement | null)[]>([null, null]);
+  const frames = useRef<(PreviewStageHost | null)[]>([null, null]);
+  const bootRef = useRef<((index: number, event: PreviewMessageEvent) => void) | null>(null);
   const host = useRef<HTMLDivElement>(null);
   const time = useRef(0);
   const active = useRef(0);
@@ -46,6 +49,18 @@ export const SceneCanvasPreview = forwardRef<SceneCanvasHandle, Props>(function 
   const ready = useRef([false, false]);
   const sourceKeys = useRef(new Set<string>());
 
+  /** Bind a stage to its slot once, then (re)assign the slot's document when it changes. */
+  const attachStage = (index: number, element: HTMLDivElement | null, doc: string) => {
+    if (!element) return;
+    let stage = frames.current[index];
+    if (stage?.element !== element) {
+      stage?.dispose();
+      stage = new PreviewStageHost(element);
+      stage.onMessage = event => bootRef.current?.(index, event);
+      frames.current[index] = stage;
+    }
+    if (stage.srcdoc !== doc) stage.srcdoc = doc;
+  };
   const post = (message: Record<string, unknown>) => {
     for (let index = 0; index < 2; index++) {
       if (ready.current[index]) frames.current[index]?.contentWindow?.postMessage(message, '*');
@@ -114,14 +129,14 @@ export const SceneCanvasPreview = forwardRef<SceneCanvasHandle, Props>(function 
     eng.onLayerError = (_layer, error) => { pause(); setMatteError(error instanceof Error ? error.message : '人像抠图失败。'); };
     eng.onLayerBlank = layer => post({ type: 'hf:layerClear', id: layer.elKey });
     eng.onBlank = value => post({ type: 'hf:clearFrame', t: value });
-    const boot = (event: MessageEvent) => {
-      if (event.data?.type !== 'pong' || event.data?.nonce !== 'boot') return;
-      const index = frames.current.findIndex(frame => frame?.contentWindow === event.source);
-      if (index < 0 || !documents.current[index]) return;
+    const boot = (index: number, event: PreviewMessageEvent) => {
+      const data = event.data as { type?: string; nonce?: string } | null;
+      if (data?.type !== 'pong' || data?.nonce !== 'boot') return;
+      if (!documents.current[index]) return;
       const model = bindings.current[index];
       if (!model) return;
       const win = frames.current[index]!.contentWindow!;
-      // Images enter the opaque sandbox as Files; video layers use the resident parent decoder.
+      // Images enter the stage as Files; video layers use the resident parent decoder.
       for (const visual of model.visuals) {
         const file = model.files.get(visual.source);
         if (file && visual.kind === 'image') win.postMessage({ type: 'hf:imageFile', sig: visual.clipId, file }, '*');
@@ -132,9 +147,11 @@ export const SceneCanvasPreview = forwardRef<SceneCanvasHandle, Props>(function 
       priming.current = index;
       eng.refresh();
     };
-    window.addEventListener('message', boot);
+    bootRef.current = boot;
     return () => {
-      window.removeEventListener('message', boot);
+      bootRef.current = null;
+      for (const stage of frames.current) stage?.dispose();
+      frames.current = [null, null];
       eng.dispose();
       engine.current = null;
       ready.current = [false, false];
@@ -202,10 +219,9 @@ export const SceneCanvasPreview = forwardRef<SceneCanvasHandle, Props>(function 
 
   return <div ref={host} data-scene-canvas className="absolute inset-0 overflow-hidden">
     {matteError && <p role="alert" className="absolute inset-x-3 bottom-3 z-10 rounded bg-black/80 p-3 text-xs text-white">{matteError}</p>}
-    {docs.map((doc, index) => doc && <iframe key={index} ref={element => { frames.current[index] = element; }}
-      title="Canvas preview" sandbox="allow-scripts" allow="autoplay" srcDoc={doc}
-      aria-hidden={index !== visible} tabIndex={-1}
-      className="pointer-events-none absolute left-0 top-0 origin-top-left border-0"
+    {docs.map((doc, index) => doc && <div key={index} ref={element => attachStage(index, element, doc)}
+      aria-hidden={index !== visible}
+      className="pointer-events-none absolute left-0 top-0 origin-top-left"
       style={{ width: props.composition.width, height: props.composition.height,
         transform: `scale(${width / props.composition.width})`, opacity: index === visible ? 1 : 0 }} />)}
   </div>;
