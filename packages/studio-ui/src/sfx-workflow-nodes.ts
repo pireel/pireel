@@ -16,7 +16,7 @@ export function sfxWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     while (partial.offset < cues.length) {
       host.check(); const offset = partial.offset; let batch = cues.slice(offset, offset + 120);
       while (batch.length > 1 && new TextEncoder().encode(JSON.stringify(batch)).length > 240 * 1024) batch = batch.slice(0, Math.ceil(batch.length / 2));
-      const response = await fetch('/api/studio/sfx-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: host.hooks.signal, body: JSON.stringify({ cues: batch, density, durationSec: media.durationSec, projectId: args.projectId }) });
+      const response = await fetch('/api/studio/sfx-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: host.hooks.signal, body: JSON.stringify({ cues: batch, density, durationSec: media.durationSec, projectId: args.projectId, sceneRun: host.hooks.sceneRun }) });
       const body = await response.json(); if (body.usage) context.recordUsage(body.usage);
       if (!response.ok) throw new Error(body.error ?? 'AI 音效匹配失败。');
       partial.placements.push(...validateSfxPlan(body.placements, batch, media.durationSec)); partial.offset = offset + batch.length;
@@ -35,7 +35,7 @@ export function sfxWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
       const key = await artifactVersion([event.generate.prompt.trim(), event.generate.durationSec]);
       if (!partial.sounds[key]) {
         const requestId = await artifactVersion([context.idempotencyKey, key]);
-        const response = await fetch('/api/studio/sfx', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: host.hooks.signal, body: JSON.stringify({ projectId: args.projectId, requestId, generate: event.generate }) });
+        const response = await fetch('/api/studio/sfx', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: host.hooks.signal, body: JSON.stringify({ projectId: args.projectId, requestId, generate: event.generate, sceneRun: host.hooks.sceneRun }) });
         const body = await response.json(); if (body.usage) context.recordUsage(body.usage);
         if (!response.ok) throw new Error(body.error === 'sfx_request_pending' ? '音效仍在生成或结果待确认，请稍后继续；不会重复扣费。' : ['sfx_request_failed', 'sfx_gen_failed'].includes(body.error) ? '上次音效生成失败，请生成新版本重试。' : response.status === 402 ? '积分不足，补充积分后请生成新版本重试。' : body.error === 'sfx_gen_unconfigured' ? '音效生成服务尚未配置。' : '音效生成未完成，请稍后继续。');
         const asset = body.asset;

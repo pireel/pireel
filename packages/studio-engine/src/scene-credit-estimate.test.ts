@@ -13,3 +13,9 @@ it('quotes captions as their fixed-price scene regardless of translation or high
   const source = task(); source.scene = 'captions';
   expect(sceneCreditInput(source, { ...source.options, highlights: true, translationLanguage: 'English' })).toEqual({ scene: 'captions', durationSec: 60, asr: false, translation: false, emphasis: false, lipSync: false, speech: [] });
 });
+
+it('quotes Auto SFX as its fixed-price scene by density', () => {
+  const source = task(); source.scene = 'sfx';
+  expect(sceneCreditInput(source, { ...source.options, sfx: { density: 'high' } })).toEqual({ scene: 'sfx', density: 'high', durationSec: 60, asr: false, translation: false, emphasis: false, lipSync: false, speech: [] });
+  expect(sceneCreditInput(source, { ...source.options, sfx: { style: 'pop', maxCount: 1, volumeDb: -18, captions: false } }).density).toBe('low');
+});

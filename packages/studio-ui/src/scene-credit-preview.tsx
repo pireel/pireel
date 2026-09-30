@@ -33,22 +33,23 @@ export function SceneCreditPreview({ task, options, locale, busy }: { task: Capt
     </div>;
   }
   if (quote.fixed) {
-    const { perMinute, lipSync } = quote.fixed; const dubbing = task.scene === 'dubbing';
+    const { perMinute, lipSync } = quote.fixed;
+    const name = task.scene === 'dubbing' ? { zh: '配音', en: 'Dubbing' } : task.scene === 'sfx' ? { zh: '音效', en: 'Auto SFX' } : { zh: '字幕', en: 'Captions' };
     return <div role="status" className="text-ink-3 mt-3 space-y-1.5 text-center text-xs leading-relaxed">
       <p>{zh ? '本次生成' : 'This generation'} <strong className="text-ink tabular-nums">{quote.estimate}</strong> {zh ? '积分' : 'credits'}</p>
       <p className="text-ink-4">{zh
-        ? `${dubbing ? '配音' : '字幕'}按视频时长 ${perMinute} 积分/分钟${lipSync ? `，口型同步 ${lipSync.perMinute} 积分/分钟（不足 ${lipSync.minSec} 秒按 ${lipSync.minSec} 秒计）` : ''}，每次生成按此扣除。生成失败会退回，已产生的服务费用除外。`
-        : `${dubbing ? 'Dubbing' : 'Captions'}: ${perMinute} credit${perMinute === 1 ? '' : 's'} per minute of video${lipSync ? `; lip sync: ${lipSync.perMinute} per minute (minimum ${lipSync.minSec} seconds)` : ''}, charged per generation. A failed generation is refunded, less any service cost already incurred.`}</p>
+        ? `${name.zh}按视频时长 ${perMinute} 积分/分钟${lipSync ? `，口型同步 ${lipSync.perMinute} 积分/分钟（不足 ${lipSync.minSec} 秒按 ${lipSync.minSec} 秒计）` : ''}，每次生成按此扣除。生成失败会退回，已产生的服务费用除外。`
+        : `${name.en}: ${perMinute} credit${perMinute === 1 ? '' : 's'} per minute of video${lipSync ? `; lip sync: ${lipSync.perMinute} per minute (minimum ${lipSync.minSec} seconds)` : ''}, charged per generation. A failed generation is refunded, less any service cost already incurred.`}</p>
     </div>;
   }
   const approximate = quote.durationBased || quote.min !== quote.max;
   const point = quote.estimate ?? Math.round((quote.min + quote.max) / 2);
   const displayed = quote.durationBased && point >= 20 ? Math.max(quote.min, Math.min(quote.max, Math.round(point / 5) * 5)) : point;
   const labels = zh ? { subtitleRemoval: '智能擦除', visual: '素材分析', sfx: zh ? 'AI 音效匹配' : 'AI sound matching', matching: '画面匹配', asr: '语音识别', translation: '翻译', emphasis: '重点词', speech: '配音', lipSync: '口型同步' } : { subtitleRemoval: 'AI erasing', visual: 'Media analysis', sfx: zh ? 'AI 音效匹配' : 'AI sound matching', matching: 'Footage matching', asr: 'Transcription', translation: 'Translation', emphasis: 'Key phrases', speech: 'Voiceover', lipSync: 'Lip sync' };
-  return <><details className="text-ink-3 mt-3 text-xs">
-    <summary className="cursor-pointer text-center">{quote.sfxGenerationUnitCredits !== undefined ? (zh ? '识别与匹配 · ' : 'Transcription & matching · ') : ''}{zh ? (approximate ? '预计约' : '预计') : (approximate ? 'Estimated ~' : 'Estimated')} <span className="text-ink tabular-nums">{displayed}</span> {zh ? '积分' : 'credits'}</summary>
+  return <details className="text-ink-3 mt-3 text-xs">
+    <summary className="cursor-pointer text-center">{zh ? (approximate ? '预计约' : '预计') : (approximate ? 'Estimated ~' : 'Estimated')} <span className="text-ink tabular-nums">{displayed}</span> {zh ? '积分' : 'credits'}</summary>
     <div className="mt-3 space-y-1.5">{quote.items.map((item) => <div key={item.kind} className="flex items-center justify-between gap-4"><span>{labels[item.kind]}</span><span className="tabular-nums">{credits(item.min, item.max)}</span></div>)}</div>
     {quote.min !== quote.max && <p className="text-ink-4 mt-2">{zh ? '估算范围：' : 'Estimated range: '}{credits(quote.min, quote.max)} {zh ? '积分' : 'credits'}</p>}
     <p className="text-ink-4 mt-2 leading-relaxed">{quote.durationBased ? (zh ? '按时长与语速假设估算，文案生成后更新；按实际用量结算。' : 'Budget based on duration and assumed speech rate; updated when the script is ready. Billed by actual usage.') : (zh ? '按当前配置预估，最终按实际用量结算。' : 'Estimate for these settings. Final cost follows actual usage.')}</p>
-  </details>{quote.sfxGenerationUnitCredits !== undefined && <p className="text-ink-4 mt-2 text-center text-xs leading-relaxed">{zh ? `优先使用音效库；缺少合适音源时自动生成，每种另计 ${quote.sfxGenerationUnitCredits} 积分，同一方案内重复使用不重复计费。` : `Library first. Missing sounds are generated for ${quote.sfxGenerationUnitCredits} extra credits each; repeated uses within a plan share one generation.`}</p>}</>;
+  </details>;
 }

@@ -25,7 +25,7 @@ export interface StudioOperationOptions {
   /** The fixed-price scene run this call belongs to: the host bills the run, not the call. */
   sceneRun?: string;
 }
-/** Fixed-price scene generations (captions, dubbing): charged once when a generation starts; its
+/** Fixed-price scene generations (captions, dubbing, Auto SFX): charged once when a generation starts; its
  *  paid steps then pass the run id. Resuming an interrupted generation continues its run. */
 export interface SceneRunService {
   start(input: { id: string; projectId: string }, signal?: AbortSignal): Promise<{ id: string; credits: number; resumed: boolean }>;
