@@ -14,9 +14,17 @@ import { materializeRemoteMedia } from './remote-media';
 
 interface SpeechPlan {
   text: string; language: string; sourceText: string; translatedTurns?: string[]; turnsKey?: string; signature: string;
-  parts: { text: string; voiceId: string; group: number; start: number; end: number }[];
+  /** The picture's length, the limit for the last line. */
+  durationSec?: number;
+  /** `source` is what was originally said in the line, for shortening a translation that runs long. */
+  parts: { text: string; voiceId: string; group: number; start: number; end: number; source?: string }[];
 }
-interface SpeechArtifact { parts: DubbingSpeech[]; signature: string; text: string }
+/** Largest native speech rate a fitting pass asks the voice for; beyond it the line must be shortened. */
+const MAX_FIT_SPEED = 1.3;
+/** Largest post time-stretch audio.align applies after fitting (it changes the voice less than this audibly). */
+const MAX_POST_STRETCH = 1.15;
+/** `turns`: what is actually spoken per line (a fitting pass may have shortened it). */
+interface SpeechArtifact { parts: DubbingSpeech[]; signature: string; text: string; turns?: string[] }
 interface AlignedMedia extends SceneMedia { signature: string; planKey: string }
 async function jsonRequest(url: string, input: unknown, signal: AbortSignal) {
   const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal });
@@ -63,13 +71,13 @@ export function dubbingWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
       const edited = turns.map((turn, i) => (config.turnScripts?.[turn.id] ?? translatedTurns![i]).trim());
       if (edited.some(part => !part)) throw new Error('发言文案不能为空。');
       text = edited.join('\n'); splitDubbingScript(text);
-      parts = turns.flatMap((turn, index) => splitDubbingScript(edited[index]).map(text => ({ text, voiceId: dubbingVoiceFor(turn.speaker, speakers, config), group: index, start: turn.start, end: turn.end })));
+      parts = turns.flatMap((turn, index) => splitDubbingScript(edited[index]).map(text => ({ text, voiceId: dubbingVoiceFor(turn.speaker, speakers, config), group: index, start: turn.start, end: turn.end, source: turn.text })));
     } else {
       text = config.script!.trim();
       parts = splitDubbingScript(text).map(text => ({ text, voiceId: config.voiceId, group: 0, start: window.start, end: window.end }));
     }
     const signature = !scripted ? JSON.stringify([config.language, parts]) : JSON.stringify([text, config.voiceId, config.language]);
-    const value: SpeechPlan = { text, parts, language: config.language, sourceText, translatedTurns, turnsKey, signature };
+    const value: SpeechPlan = { text, parts, language: config.language, sourceText, translatedTurns, turnsKey, signature, durationSec: media.durationSec };
     return { plan: workflowJson(await store.put('speech-plan', 'dubbing', value)), value: workflowJson(value) };
   }, project: outputs => { const plan = outputs.value as unknown as SpeechPlan; return project({ language: plan.language, sourceText: plan.sourceText, translatedText: plan.text, translatedTurns: plan.translatedTurns, turnsKey: plan.turnsKey }); } }),
   node('speech.synthesize', { stage: 'voicing', reconcile: true, cacheInputs(args) { const plan = args.plan as unknown as SpeechPlan; return { language: plan.language, parts: workflowJson(plan.parts.map(part => ({ text: part.text, voiceId: part.voiceId }))) }; }, async execute(args, context) {
@@ -79,7 +87,22 @@ export function dubbingWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     // Content-derived identity protects TTS from stale signatures in an edited LLM/approval value.
     const signature = plan.parts.some(part => part.group !== 0) ? JSON.stringify([plan.language, plan.parts]) : JSON.stringify([plan.parts.map(part => part.text).join(''), plan.parts[0].voiceId, plan.language]);
     const legacySignature = plan.parts.some(part => part.group !== 0) ? JSON.stringify(plan.parts) : JSON.stringify([plan.text, plan.parts[0].voiceId]);
-    const partial = context.partial<{ parts: DubbingSpeech[]; requestId: string }>();
+    const partial = context.partial<{ parts: DubbingSpeech[]; requestId: string; fitted?: Record<number, { text: string; speed: number }> }>();
+    const languageCode = DUBBING_LANGUAGES.find(language => language.id === plan.language)!.code;
+    const fitted: Record<number, { text: string; speed: number }> = partial?.fitted ?? {};
+    /** One voiced line; `attempt` > 0 is a fitting re-voice with its own server job. */
+    const voice = async (index: number, text: string, attempt: number, speed: number): Promise<DubbingSpeech> => {
+      const part = plan.parts[index];
+      let body = await jsonRequest('/api/studio/dubbing-speech', { runId: requestId, projectId: args.projectId, chunkIndex: index, attempt, speed, language: languageCode, text, voiceId: part.voiceId, name: `${args.name} · ${plan.language}` }, signal);
+      while (body.status === 'pending') {
+        await pause(signal); const response = await fetch(`/api/studio/dubbing-speech?id=${encodeURIComponent(body.id)}`, { signal }); body = await response.json();
+        if (!response.ok) throw new Error(body.error ?? '配音进度暂时无法读取。');
+      }
+      if (body.status === 'failed') throw new Error(body.error ?? '配音生成失败。');
+      if (!body.asset?.url || !Number.isFinite(body.asset.durationSec) || !(body.asset.durationSec > 0)) throw new Error('配音未返回有效音频。');
+      if (typeof body.asset.cost === 'number') context.recordUsage({ source: 'server', reference: body.id ?? body.asset.key, credits: body.asset.cost, audioSeconds: body.asset.durationSec });
+      return { url: body.asset.url, key: body.asset.key, durationSec: body.asset.durationSec, signature: JSON.stringify([text, part.voiceId, plan.language, speed]) };
+    };
     const requestId = partial?.requestId ?? (cached as DubbingState & { legacyRunId?: string }).legacyRunId ?? await workflowRequestId(context.idempotencyKey);
     let parts = partial?.parts;
     if (!parts) parts = (cached.speechSignature === signature || (cached.language === plan.language && cached.speechSignature === legacySignature)) ? cached.speechParts : undefined;
@@ -89,21 +112,49 @@ export function dubbingWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     for (let index = 0; index < plan.parts.length; index++) {
       host.check(); const part = plan.parts[index];
       if (!parts[index]) {
-        let body = await jsonRequest('/api/studio/dubbing-speech', { runId: requestId, projectId: args.projectId, chunkIndex: index, language: DUBBING_LANGUAGES.find(language => language.id === plan.language)!.code, text: part.text, voiceId: part.voiceId, name: `${args.name} · ${plan.language}` }, signal);
-        while (body.status === 'pending') {
-          await pause(signal); const response = await fetch(`/api/studio/dubbing-speech?id=${encodeURIComponent(body.id)}`, { signal }); body = await response.json();
-          if (!response.ok) throw new Error(body.error ?? '配音进度暂时无法读取。');
-        }
-        if (body.status === 'failed') throw new Error(body.error ?? '配音生成失败。');
-        if (!body.asset?.url || !Number.isFinite(body.asset.durationSec) || !(body.asset.durationSec > 0)) throw new Error('配音未返回有效音频。');
-        if (typeof body.asset.cost === 'number') context.recordUsage({ source: 'server', reference: body.id ?? body.asset.key, credits: body.asset.cost, audioSeconds: body.asset.durationSec });
-        parts[index] = { url: body.asset.url, key: body.asset.key, durationSec: body.asset.durationSec, signature: JSON.stringify([part.text, part.voiceId, plan.language]) };
-        await context.savePartial({ parts, requestId }, project({ speechParts: parts, speechSignature: signature }));
+        parts[index] = await voice(index, part.text, 0, 1);
+        parts[index].signature = JSON.stringify([part.text, part.voiceId, plan.language]);
+        await context.savePartial({ parts, requestId, fitted }, project({ speechParts: parts, speechSignature: signature }));
       }
       host.report('voicing', { status: 'running', fraction: (index + 1) / plan.parts.length });
     }
-    return { speech: workflowJson(await store.put('speech', 'dubbing', { parts, signature, text: plan.parts.map(part => part.text).join('') })) };
-  }, project: outputs => { const speech = store.read<SpeechArtifact>(outputs.speech, 'speech'); return project({ speechParts: speech.parts, speechSignature: speech.signature, translatedText: speech.text }); } }),
+    // Fit each line to its moment the way automatic dubbing does: a line that runs past its moment
+    // and the silence after it is first rewritten shorter, then re-voiced at a faster native rate;
+    // only a small remainder is left to the post stretch in audio.align.
+    const limit = plan.durationSec ?? Math.max(...plan.parts.map(part => part.end));
+    const groups = [...new Set(plan.parts.map(part => part.group))].map(group => {
+      const indexes = plan.parts.flatMap((part, index) => part.group === group ? [index] : []);
+      return { group, indexes, start: plan.parts[indexes[0]].start, end: plan.parts[indexes[0]].end };
+    }).sort((a, b) => a.start - b.start);
+    const overflowing = () => groups.flatMap((group, order) => {
+      const available = Math.max(group.end, groups[order + 1]?.start ?? limit) - group.start;
+      const natural = group.indexes.reduce((sum, index) => sum + parts![index].durationSec, 0);
+      // Multi-chunk lines (very long turns) are left to the post stretch and its limit.
+      return natural > available + .05 && group.indexes.length === 1 ? [{ ...group, available, natural }] : [];
+    });
+    const shorten = overflowing().filter(group => !fitted[group.group]);
+    if (shorten.length) {
+      host.report('voicing', { status: 'running', detail: 'fitting' });
+      const body = await jsonRequest('/api/studio/dubbing-fit', { language: languageCode, projectId: args.projectId, rows: shorten.map(group => ({ index: group.group, source: plan.parts[group.indexes[0]].source ?? '', text: plan.parts[group.indexes[0]].text, seconds: Math.round(group.natural * 100) / 100, targetSeconds: Math.round(Math.max(.5, group.available * .95) * 100) / 100 })) }, signal);
+      if (body.usage) context.recordUsage(body.usage);
+      for (const row of body.rows as { index: number; text: string }[]) {
+        host.check(); const group = shorten.find(entry => entry.group === row.index)!; const index = group.indexes[0];
+        parts[index] = await voice(index, row.text, 1, 1); fitted[group.group] = { text: row.text, speed: 1 };
+        await context.savePartial({ parts, requestId, fitted }, project({ speechParts: parts, speechSignature: signature }));
+      }
+    }
+    for (const group of overflowing()) {
+      const index = group.indexes[0];
+      const speed = Math.min(MAX_FIT_SPEED, Math.ceil(group.natural / group.available * 100) / 100 + .02);
+      if ((fitted[group.group]?.speed ?? 1) >= speed) continue;
+      host.check(); const text = fitted[group.group]?.text ?? plan.parts[index].text;
+      parts[index] = await voice(index, text, 2, speed); fitted[group.group] = { text, speed };
+      await context.savePartial({ parts, requestId, fitted }, project({ speechParts: parts, speechSignature: signature }));
+    }
+    const spoken = groups.map(group => fitted[group.group]?.text ?? group.indexes.map(index => plan.parts[index].text).join(''));
+    const turns = [...groups].sort((a, b) => a.group - b.group).map(group => spoken[groups.indexOf(group)]);
+    return { speech: workflowJson(await store.put('speech', 'dubbing', { parts, signature, text: plan.parts.map(part => fitted[part.group]?.text ?? part.text).join(''), ...(plan.turnsKey ? { turns } : {}) })) };
+  }, project: outputs => { const speech = store.read<SpeechArtifact>(outputs.speech, 'speech'); return project({ speechParts: speech.parts, speechSignature: speech.signature, translatedText: speech.text, ...(speech.turns ? { translatedTurns: speech.turns } : {}) }); } }),
   node('audio.align', { stage: 'aligning', async cacheValid(outputs) { const audio = store.read<SceneMedia>(outputs.audio, 'media'); return host.files.has(audio.sig) || !!await loadLocalVideo(audio.sig); }, async execute(args) {
     const speech = store.read<SpeechArtifact>(args.speech, 'speech');
     const plan = args.plan as unknown as SpeechPlan;
@@ -132,6 +183,9 @@ export function dubbingWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
         const natural = Math.round(group.total * sampleRate);
         group.end = group.start + Math.max(1, Math.min(natural, available));
         dubbingRate(natural, group.end - group.start);
+        // Shortening and native speed-up happen before this; the post stretch only closes a small gap.
+        const squeeze = natural / (group.end - group.start);
+        if (squeeze > MAX_POST_STRETCH + 1e-3) throw new Error(`第 ${index + 1} 句配音比原片长 ${Math.round((squeeze - 1) * 100)}%，请精简这句译文后重新生成。`);
       });
       for (let index = 0; index < parts.length; index++) {
         host.check(); const part = parts[index];

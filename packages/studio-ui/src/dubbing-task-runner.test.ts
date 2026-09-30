@@ -173,6 +173,32 @@ it('keeps a single speaker at natural pace on each line instead of stretching ov
   expect(stretch.signalsmithStretch).not.toHaveBeenCalled();
 });
 
+it('fits a long line by shortening it, then a faster native voice, before any post stretch', async () => {
+  const source = task(); source.durationSec = 6;
+  mocks.asr.mockResolvedValue([{ text: '这是一句比较长的话', start: 0, end: 2 }, { text: '下一句', start: 3.5, end: 5 }]);
+  mocks.translate.mockResolvedValue([{ index: 0, text: 'This is a rather long sentence indeed' }, { index: 1, text: 'Next one' }]);
+  const speechBodies: Array<Record<string, unknown>> = []; const fitBodies: Array<Record<string, any>> = [];
+  // Available for line 1: until line 2 starts at 3.5 s.
+  const durations = [4, 1.5, 3.8, 3.4];
+  mocks.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body ?? '{}'));
+    if (String(url).includes('dubbing-fit')) { fitBodies.push(body); return response({ rows: [{ index: 0, text: 'A long sentence' }], usage: { source: 'server', reference: 'fit', credits: 1 } }); }
+    speechBodies.push(body);
+    return response({ status: 'succeeded', asset: { url: `https://own/${speechBodies.length}.mp3`, key: `uploads/owner/${speechBodies.length}.mp3`, durationSec: durations[speechBodies.length - 1] } });
+  });
+  const mono = vi.spyOn(await import('./audio-decode'), 'toMono').mockImplementationOnce(async () => new Float32Array(Math.round(3.4 * 24000)).fill(.2)).mockImplementationOnce(async () => new Float32Array(Math.round(1.5 * 24000)).fill(.2));
+  const stretch = await import('./time-stretch');
+  try { await generateDubbing(source, file, { signal: new AbortController().signal, checkpoint: async () => {}, progress: vi.fn() }); } finally { mono.mockRestore(); }
+  // Shorten first: only the line that runs past its moment and the silence after it (3 s available).
+  expect(fitBodies).toHaveLength(1);
+  expect(fitBodies[0].rows).toEqual([{ index: 0, source: '这是一句比较长的话', text: 'This is a rather long sentence indeed', seconds: 4, targetSeconds: 3.33 }]);
+  expect(speechBodies.map(body => [body.chunkIndex, body.attempt, body.speed, body.text])).toEqual([
+    [0, 0, 1, 'This is a rather long sentence indeed'], [1, 0, 1, 'Next one'],
+    [0, 1, 1, 'A long sentence'], [0, 2, 1.11, 'A long sentence'],
+  ]);
+  expect(stretch.signalsmithStretch).not.toHaveBeenCalled();
+});
+
 it('mixes overlapping speaker turns instead of overwriting either voice', async () => {
   const source = task(); source.durationSec = 9;
   source.options.dubbing!.speakerVoices = { 'speaker:a': 'voice-a', 'speaker:b': 'voice-b' };
