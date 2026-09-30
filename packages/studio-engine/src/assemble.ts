@@ -882,7 +882,7 @@ export function blockPreviewDoc(comp: Composition, block: Block, opts: { loop?: 
     const auto = opts.loop === true;
     return `${html}\n<script>(function(){var playing=${auto ? 'true' : 'false'};var once=false;var t0=performance.now();
 function tick(){if(playing){var e=(performance.now()-t0)/1000;var t=once?Math.min(e,${n(at)}):e%${n(cycle)};if(t>${n(at)})t=${n(at)};try{window.__hfPreview&&window.__hfPreview.seek(t);}catch(err){}if(once&&e>=${n(at)})playing=false;}requestAnimationFrame(tick);}
-addEventListener('message',function(e){var d=e&&e.data;if(!d||d.type!=='hf-loop')return;if(d.on){t0=performance.now();once=!!d.once;playing=true;}else{playing=false;once=false;try{window.__hfPreview&&window.__hfPreview.seek(${n(at)});}catch(err){}}});
+window.addEventListener('message',function(e){var d=e&&e.data;if(!d||d.type!=='hf-loop')return;if(d.on){t0=performance.now();once=!!d.once;playing=true;}else{playing=false;once=false;try{window.__hfPreview&&window.__hfPreview.seek(${n(at)});}catch(err){}}});
 (function start(){if(!window.__hfPreview){setTimeout(start,16);return;}t0=performance.now();tick();})();})();</script>`;
   }
   // Static card: the head-declared boot time already opened it on the stable frame; a full seek

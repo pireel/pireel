@@ -135,7 +135,11 @@ export class PreviewStageHost {
     this.element = element ?? document.createElement('div');
     this.element.tabIndex = -1;
     this.element.dataset.hfStage = '1';
-    this.shadow = this.element.attachShadow({ mode: 'open' });
+    // A host may be recreated on the same element (a React ref re-run, a remount in development):
+    // an element takes one shadow root, so reuse and clear it rather than attaching again.
+    const existing = this.element.shadowRoot;
+    if (existing) existing.replaceChildren();
+    this.shadow = existing ?? this.element.attachShadow({ mode: 'open' });
     this.contentWindow = {
       postMessage: (message) => this.deliver(message),
     };

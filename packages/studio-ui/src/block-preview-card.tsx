@@ -3,7 +3,7 @@
 /**
  * Shared pieces for a single-block live preview card (used by both the component-library card and the template-panel
  * card, which previously each hand-copied a version that had started to drift):
- * - BlockPreviewFrame: blockPreviewDoc self-contained iframe (frozen stable frame) + proportional scaling; overlay via children.
+ * - BlockPreviewFrame: blockPreviewDoc in an in-page preview stage (frozen stable frame) + proportional scaling; overlay via children.
  * - BlockKindFooter: KIND_META icon + label footer.
  */
 
@@ -11,7 +11,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import { type Block, type Composition, assembleBlockHtml, blockKind, blockPreviewDoc, previewMiniComp } from '@pireel/studio-engine/composition';
 import { getTheme, themeVarsCss } from '@pireel/studio-engine/theme';
 import { injectPreviewRuntime } from './sample-composition';
-import { loadGsap as loadStageGsap } from './preview-stage-host';
+import { loadGsap as loadStageGsap, PreviewStageHost } from './preview-stage-host';
 import { injectPreviewContentBoundsReporter, type PreviewContentBounds } from './preview-content-bounds';
 import { KIND_META } from './kind-meta';
 import { blockDisplayTitle } from './block-display-title';
@@ -62,18 +62,30 @@ export function BlockPreviewFrame({
   /** Bump to replay the entrance once (used with animate='manual'): the preview plays from the
    *  start and settles back on the stable frame. Editing props re-renders WITHOUT replaying. */
   replayKey?: number;
-  /** Notify the caller when the iframe and its render dependencies are ready. */
+  /** Notify the caller when the preview document and its render dependencies are ready. */
   onReady?: () => void;
-  /** Play the entrance once after the iframe is ready; used by lightboxes that open from a poster. */
+  /** Play the entrance once after the preview is ready; used by lightboxes that open from a poster. */
   playOnReady?: boolean;
-  /** Show a lightweight loading cover until the current iframe document fires load. */
+  /** Show a lightweight loading cover until the current preview document has mounted. */
   showLoading?: boolean;
   /** Overlay layer (timestamp stamp / hover buttons / generating cover), mounted in the same relative container */
   children?: ReactNode;
 }) {
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  // The preview document runs in an in-page Shadow DOM stage, the same host the workbench stage uses.
+  const stageRef = useRef<PreviewStageHost | null>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  // Mount only once the card is near the viewport (what iframe loading="lazy" did for a wall of cards).
+  const [nearViewport, setNearViewport] = useState(false);
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box || nearViewport) return;
+    if (typeof IntersectionObserver === 'undefined') { setNearViewport(true); return; }
+    const observer = new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) setNearViewport(true); }, { rootMargin: '300px' });
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, [nearViewport]);
   // Re-render the doc only when this block (or theme/canvas size/palette) changes — deliberately not depending on the whole comp,
-  // otherwise any edit would reload the entire wall of iframes.
+  // otherwise any edit would reload the entire wall of previews.
   const docLoop = animate === 'manual' ? 'hover' : animate; // same doc shape: paused, message-driven
   // The document is rebuilt only for STRUCTURAL changes (different block, template, canvas, theme,
   // ground, loop mode, timing/box). Content edits — the props panel, in-place text — patch the one
@@ -99,18 +111,18 @@ export function BlockPreviewFrame({
       return focusContent ? injectPreviewContentBoundsReporter(base, block.id) : base;
     },
     // `docKey` deliberately fingerprints only structural composition fields; depending on the
-    // full composition would reload every iframe when an unrelated block changes.
+    // full composition would reload every preview when an unrelated block changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [block.id, docKey, focusContent],
   );
   const [loadedDocKey, setLoadedDocKey] = useState<string | null>(null);
-  const iframeReady = loadedDocKey === docKey;
+  const documentReady = loadedDocKey === docKey;
   const [measuredFocus, setMeasuredFocus] = useState<PreviewContentBounds | null>(null);
   useEffect(() => setMeasuredFocus(null), [docKey]);
+  const boundsListener = useRef<((event: { data: unknown }) => void) | null>(null);
   useEffect(() => {
     if (!focusContent) return;
-    const onMessage = (event: MessageEvent) => {
-      if (event.source !== iframeRef.current?.contentWindow) return;
+    const onMessage = (event: { data: unknown }) => {
       const data = event.data as { type?: unknown; blockId?: unknown; rect?: Partial<PreviewContentBounds> } | null;
       if (!data || data.type !== 'hf:previewContentBounds' || data.blockId !== block.id) return;
       const rect = data.rect;
@@ -124,8 +136,8 @@ export function BlockPreviewFrame({
           : next,
       );
     };
-    window.addEventListener('message', onMessage);
-    return () => window.removeEventListener('message', onMessage);
+    boundsListener.current = onMessage;
+    return () => { boundsListener.current = null; };
   }, [block.id, focusContent]);
   // Content patch: assembled against the same mini-composition the document used, so a patched node
   // is byte-identical to what a rebuild would have produced.
@@ -137,7 +149,7 @@ export function BlockPreviewFrame({
     }
     const mini = previewMiniComp(comp, block);
     const r = assembleBlockHtml({ ...block, startSec: 0 }, mini);
-    iframeRef.current?.contentWindow?.postMessage({ type: 'hf:blockAdd', blockId: block.id, html: r.html, timelineBody: r.timelineBody }, '*');
+    stageRef.current?.contentWindow.postMessage({ type: 'hf:blockAdd', blockId: block.id, html: r.html, timelineBody: r.timelineBody }, '*');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [block, docKey]);
   // Most previews preserve the historical inset that makes transparency obvious. Component-library
@@ -151,8 +163,31 @@ export function BlockPreviewFrame({
   const scale = framedFocus ? Math.min((width * inset) / framedFocus.w, (h * inset) / framedFocus.h) : Math.min(width / comp.width, h / comp.height) * inset;
   const padX = framedFocus ? Math.round(width / 2 - (framedFocus.x + framedFocus.w / 2) * scale) : Math.round((width - comp.width * scale) / 2);
   const padY = framedFocus ? Math.round(h / 2 - (framedFocus.y + framedFocus.h / 2) * scale) : Math.round((h - comp.height * scale) / 2);
-  // The sandboxed iframe (opaque origin) can't reach __hfPreview, so hover play control goes through postMessage
-  const setLoop = (on: boolean, once = false) => iframeRef.current?.contentWindow?.postMessage({ type: 'hf-loop', on, once }, '*');
+  // Hover play control goes through the document's message protocol (as it did when this was an iframe).
+  // Bind the stage once per element, then keep its document current. The load listener reads the
+  // latest doc key through a ref so a replaced document reports its own readiness.
+  const docKeyRef = useRef(docKey);
+  docKeyRef.current = docKey;
+  const readyRef = useRef({ onReady, playOnReady });
+  readyRef.current = { onReady, playOnReady };
+  const attachStage = (element: HTMLDivElement | null) => {
+    if (!element || stageRef.current?.element === element) return;
+    stageRef.current?.dispose();
+    const stage = new PreviewStageHost(element);
+    stage.onMessage = (event) => boundsListener.current?.(event);
+    stage.addEventListener('load', () => {
+      setLoadedDocKey(docKeyRef.current);
+      readyRef.current.onReady?.();
+      if (readyRef.current.playOnReady) stage.contentWindow.postMessage({ type: 'hf-loop', on: true, once: true }, '*');
+    });
+    stageRef.current = stage;
+  };
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (stage && nearViewport && stage.srcdoc !== doc) stage.srcdoc = doc;
+  }, [doc, nearViewport]);
+  useEffect(() => () => { stageRef.current?.dispose(); stageRef.current = null; }, []);
+  const setLoop = (on: boolean, once = false) => stageRef.current?.contentWindow.postMessage({ type: 'hf-loop', on, once }, '*');
   // Replay on demand. Skips the initial mount (the doc already opens on the stable frame) and
   // never fires on prop edits — those re-render the doc, which opens frozen again.
   const mounted = useRef(false);
@@ -165,31 +200,19 @@ export function BlockPreviewFrame({
   }, [replayKey]);
   return (
     <div
+      ref={boxRef}
       className={`relative overflow-hidden ${ground === 'checker' ? '' : 'bg-black/40'}`}
       style={{ width, height: h, ...(ground === 'checker' ? CHECKER_STYLE : {}) }}
       onPointerEnter={animate === 'hover' ? () => setLoop(true) : undefined}
       onPointerLeave={animate === 'hover' ? () => setLoop(false) : undefined}
     >
-      <iframe
-        // Keyed on the doc fingerprint: mutating srcDoc on a MOUNTED iframe navigates the frame
-        // and pushes a session-history entry (the many-presses-to-go-Back bug); a remount's
-        // initial load does not.
-        key={docKey}
-        ref={iframeRef}
-        title={blockDisplayTitle(block)}
-        srcDoc={doc}
-        sandbox="allow-scripts"
-        tabIndex={-1}
-        loading="lazy"
-        onLoad={() => {
-          setLoadedDocKey(docKey);
-          onReady?.();
-          if (playOnReady) setLoop(true, true);
-        }}
+      <div
+        ref={attachStage}
+        data-block-preview-stage
         className="pointer-events-none"
-        style={{ position: 'absolute', left: padX, top: padY, width: comp.width, height: comp.height, border: 0, transform: `scale(${scale})`, transformOrigin: 'top left' }}
+        style={{ position: 'absolute', left: padX, top: padY, width: comp.width, height: comp.height, transform: `scale(${scale})`, transformOrigin: 'top left' }}
       />
-      {showLoading && !iframeReady && (
+      {showLoading && !documentReady && (
         <div data-preview-loading className="bg-panel-2/85 absolute inset-0 z-10 flex items-center justify-center">
           <span className="border-ink-4 border-t-ink size-4 animate-spin rounded-full border-2" />
         </div>
