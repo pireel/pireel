@@ -3,6 +3,7 @@ import { runAgentTimelineTool } from '../agent-timeline';
 import { emptyEditorDocumentV2, listDocumentAddressedWords } from '../editor-document';
 import type { EditorDocumentV2, EditorTrack, TimelineClip } from '../editor-document/types';
 import { documentDelta, renderV3State, type V3ClipView, type V3Delta, type V3StateView } from './state';
+import { WHITEBOARD_DOC_SCHEMA } from './whiteboard-doc-schema';
 
 /**
  * Round-trip contract: a value written through a v3 tool lands in the document, reads back from
@@ -229,6 +230,16 @@ describe('v3 round trips: written value → document → get_state → delta', (
     expect(replaced.clip('board')).toMatchObject({ frames: [30, 120] });
     const stored = replaced.document.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 'board');
     expect(stored?.kind === 'graphic' && (stored.block.slots.doc as { title?: string }).title).toBe('Loop');
+  });
+
+  it('set_whiteboard describe: returns the full document format and changes nothing', () => {
+    const before = project();
+    const result = runAgentTimelineTool(before, 'set_whiteboard', { describe: true });
+    expect(result.ok).toBe(true);
+    expect(result.document).toBeUndefined();
+    expect(result.data).toEqual({ format: WHITEBOARD_DOC_SCHEMA });
+    const missing = runAgentTimelineTool(before, 'set_whiteboard', { startFrame: 0 });
+    expect(missing).toMatchObject({ ok: false, error: 'doc is required' });
   });
 
   it('set_whiteboard: a malformed board or a non-whiteboard id is refused with the reason', () => {

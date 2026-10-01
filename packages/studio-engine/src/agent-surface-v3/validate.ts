@@ -1,4 +1,4 @@
-import { V3_TOOL_SCHEMAS } from './schemas';
+import { V3_STRICT_INPUT_SCHEMAS, V3_TOOL_SCHEMAS } from './schemas';
 
 /**
  * Context-free input validation against the published tool schemas, run by the server before a
@@ -104,7 +104,7 @@ function check(schema: Schema, value: unknown, path: string): V3InputProblem | n
 export function validateV3Input(tool: string, args: Record<string, unknown>): V3InputProblem | null {
   const entry = V3_TOOL_SCHEMAS[tool];
   if (!entry) return null;
-  const found = check(entry.inputSchema as Schema, args ?? {}, '');
+  const found = check((V3_STRICT_INPUT_SCHEMAS[tool] ?? entry.inputSchema) as Schema, args ?? {}, '');
   if (found?.error === 'unknown_field' && entry.redirects) {
     const key = found.path.split('.').pop() ?? '';
     const redirect = entry.redirects[key];

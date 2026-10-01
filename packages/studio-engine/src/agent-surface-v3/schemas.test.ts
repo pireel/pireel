@@ -3,7 +3,7 @@ import { CAPTION_PRESETS } from '../caption-presets';
 import { CUT_TRANSITION_EFFECTS, PLACE_ANCHORS, SHOT_TREATMENTS, ZOOM_PRESETS } from '../composition-core';
 import { DISPLAY_TEXT_ANIMATION_IDS, DISPLAY_TEXT_PRESETS } from '../display-text-presets';
 import { V3_TOOLS } from './registry';
-import { CHARGE_MARKER, V3_TOOL_SCHEMAS } from './schemas';
+import { CHARGE_MARKER, V3_STRICT_INPUT_SCHEMAS, V3_TOOL_SCHEMAS } from './schemas';
 
 const words = (text: string) => text.split(/\s+/).filter(Boolean).length;
 
@@ -53,6 +53,12 @@ describe('agent surface v3 schemas', () => {
     }
   });
 
+  it('a thin published schema stays small while its strict form carries the full input', () => {
+    const published = JSON.stringify(V3_TOOL_SCHEMAS.set_whiteboard).length;
+    expect(published).toBeLessThan(2_000);
+    expect(JSON.stringify(V3_STRICT_INPUT_SCHEMAS.set_whiteboard).length).toBeGreaterThan(published * 4);
+  });
+
   it('timeline positions are frames: no seconds-based timeline fields and no legacy ids', () => {
     const forbidden = new Set(['atSec', 'startSec', 'toSec', 'fromSec', 'shotId', 'blockId', 'shotIds', 'blockIds', 'fadeInSec', 'fadeOutSec']);
     const allowed: Record<string, string[]> = {
@@ -68,8 +74,10 @@ describe('agent surface v3 schemas', () => {
   });
 
   it('every object rejects unknown fields', () => {
+    // Checked on the schema a call is validated against: a thin published form may leave a nested
+    // document open, but its strict counterpart must close every object.
     for (const tool of V3_TOOLS) {
-      for (const node of objectNodes(V3_TOOL_SCHEMAS[tool.id]!.inputSchema)) {
+      for (const node of objectNodes(V3_STRICT_INPUT_SCHEMAS[tool.id] ?? V3_TOOL_SCHEMAS[tool.id]!.inputSchema)) {
         expect(node.additionalProperties, `${tool.id} object without additionalProperties:false`).toBe(false);
       }
     }

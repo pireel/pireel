@@ -29,7 +29,8 @@ describe('validateV3Input', () => {
     expect(validateV3Input('set_whiteboard', { startFrame: 0, doc: doc({ kind: 'sticky', color: 'yellow', title: 'Step' }) })).toBeNull();
     expect(validateV3Input('set_whiteboard', { startFrame: 0, doc: doc({ kind: 'sticky', color: 'teal', title: 'Step' }) })).toMatchObject({ error: 'invalid_value', path: 'doc.board.nodes[0].content' });
     expect(validateV3Input('set_whiteboard', { startFrame: 0, doc: doc({ kind: 'card', color: 'blue', title: 'Step', subtitle: 'x' }) })).toMatchObject({ path: 'doc.board.nodes[0].content' });
-    expect(validateV3Input('set_whiteboard', { startFrame: 0 })).toMatchObject({ error: 'missing_field', path: 'doc' });
+    // doc is optional in the schema so describe: true can stand alone; the executor requires it for edits.
+    expect(validateV3Input('set_whiteboard', { describe: true })).toBeNull();
   });
 
   it('reports missing required fields and wrong primitive types by path', () => {

@@ -7,6 +7,7 @@ import { insertOverlayDocumentClip } from './overlay-track-edit';
 import { titleBlock } from './block-factory';
 import type { Block } from './composition-core';
 import { WHITEBOARD_FONT_ID, WHITEBOARD_TEMPLATE_ID, checkWhiteboardDoc, whiteboardDurationSec } from './whiteboard-block';
+import { WHITEBOARD_DOC_SCHEMA } from './agent-surface-v3/whiteboard-doc-schema';
 import {
   applyEditorCommand,
   positiveDurationFrames,
@@ -1650,7 +1651,12 @@ export function updateTexts(document: EditorDocumentV2, input: Input): AgentTime
   return mutation(edited.document, `Updated ${items.length} text clip${items.length === 1 ? '' : 's'}`, edited.receipts);
 }
 
-const WHITEBOARD_FIX = 'Pass doc (the board document) and, for a new board, startFrame; pass id to replace an existing whiteboard clip.';
+const WHITEBOARD_FIX = 'Pass doc (the board document; describe: true returns its format) and, for a new board, startFrame; pass id to replace an existing whiteboard clip.';
+
+/** set_whiteboard describe: the board document format, read before writing a board. Changes nothing. */
+export function whiteboardFormat(): AgentTimelineOutcome {
+  return { ok: true, summary: 'Whiteboard document format', data: { format: WHITEBOARD_DOC_SCHEMA } };
+}
 
 /**
  * set_whiteboard: create or replace one whiteboard clip. The board document is stored whole in the
@@ -1660,6 +1666,8 @@ const WHITEBOARD_FIX = 'Pass doc (the board document) and, for a new board, star
  * replaces its document (and timing when given); an unknown id creates the board under that id.
  */
 export function setWhiteboard(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
+  if (input.describe === true) return whiteboardFormat();
+  if (input.doc === undefined) return fail('doc is required', { fix: WHITEBOARD_FIX });
   const fps = document.canvas.fps;
   const check = checkWhiteboardDoc(input.doc);
   if (!check.ok) return fail('invalid_whiteboard_doc', { errors: check.errors, fix: WHITEBOARD_FIX });
