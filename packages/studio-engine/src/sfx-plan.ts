@@ -8,7 +8,7 @@ export function validSfxGeneration(value: unknown): value is SfxGenerationReques
   return !!row && typeof row.prompt === 'string' && !!row.prompt.trim() && row.prompt.length <= 500 && typeof row.reason === 'string' && !!row.reason.trim() && row.reason.length <= 300 && Number.isFinite(row.durationSec) && row.durationSec >= .5 && row.durationSec <= 5;
 }
 /** `after`: the hit sits in the pause right after its cue (start = cue end) instead of on a word.
- *  `reason`: the matcher's short note on why this moment gets this sound, shown to the user. */
+ *  `reason`: the matcher's short note on why this moment gets this sound (kept for review, not shown). */
 export interface SfxPlacement { cueId: number; start: number; style: typeof SFX_STYLES[number]['id']; volumeDb: number; soundId?: SfxSoundId; intensity?: SfxIntensity; wordId?: number; after?: boolean; reason?: string; generate?: SfxGenerationRequest }
 export const SFX_DENSITIES = [
   { id: 'low', zh: '低', en: 'Low', description: { zh: '只强调少数重点', en: 'Highlight only key moments' } },
@@ -18,9 +18,9 @@ export const SFX_DENSITIES = [
 /** Density is an editorial preference for the model, never a numeric post-processing quota. */
 export function sfxDensityGuidance(density: SfxDensity) {
   return {
-    low: 'Accent only the strongest beats: the main reveals, key numbers or prices, the big question or twist, and the sign-off. Routine mentions, item-by-item descriptions and lists stay quiet.',
-    medium: 'Balance emphasis and rhythm: support important words, transitions, and clear list structures. Use deliberate groups where they improve comprehension, with quiet passages between ideas.',
-    high: 'Follow the narration more actively: accent meaningful words, enumerations, reveals and transitions. Consecutive list items may each receive a sound. Keep speech clear and leave weak matches quiet.',
+    low: 'Sparse: add sound only where it clearly helps; most of the narration stays quiet.',
+    medium: 'Moderate: support the content and its rhythm without crowding the speech.',
+    high: 'Rich: follow the narration\'s rhythm actively while keeping the speech clear.',
   }[density];
 }
 export function sfxCues(transcript: readonly AsrSegment[], durationSec: number): SfxCue[] {

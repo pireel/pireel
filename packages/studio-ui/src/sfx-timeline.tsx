@@ -11,13 +11,6 @@ import { SceneCanvasPreview, type SceneCanvasHandle } from './scene-canvas-previ
 import { sfxPreviewModel } from './sfx-preview-model';
 import { sceneActionClass } from './scene-action-styles';
 const soundName = (clip: AudioClip, zh: boolean) => clip.label?.startsWith('generated-') ? (zh ? 'AI 音效' : 'AI sound') : sfxSoundLabel((clip.label ?? '').split('--')[0], zh ? 'zh' : 'en') ?? ({ 'soft.wav': zh ? '轻提示' : 'Soft cue', 'pop.wav': zh ? '强调音' : 'Pop', 'whoosh.wav': zh ? '转场音' : 'Whoosh' }[clip.label ?? ''] ?? clip.label ?? (zh ? '音效' : 'Sound'));
-/** Why the matcher placed each sound, keyed by the clip it became (`auto-sfx-mixed-<plan index>`). */
-function sfxReasons(task: CaptionTaskRecord): Map<string, string> {
-  const ref = task.workflow?.steps.find(step => step.id === 'sfx-generate')?.artifact?.data.plan;
-  const entry = ref ? Object.values(task.workflowData?.artifacts ?? {}).find(item => JSON.stringify(item.ref) === JSON.stringify(ref)) : undefined;
-  const placements = (entry?.value as { placements?: { reason?: unknown }[] } | undefined)?.placements ?? [];
-  return new Map(placements.flatMap((placement, index) => typeof placement.reason === 'string' && placement.reason ? [[`auto-sfx-mixed-${index}`, placement.reason] as const] : []));
-}
 export function SfxTimeline({ task, source, locale, disabled, actions, onChange }: {
   task: CaptionTaskRecord; source: File; locale: 'zh' | 'en'; disabled: boolean; actions?: ReactNode;
   onChange: (document: EditorDocumentV2) => void;
@@ -67,7 +60,6 @@ export function SfxTimeline({ task, source, locale, disabled, actions, onChange 
     if (!audition || unavailable) return;
     seek(Math.max(0, audition.start - .1)); player.current?.play();
   }, [audition, unavailable]);
-  const reasons = useMemo(() => sfxReasons(task), [task.workflow, task.workflowData]);
   const listen = (clip: AudioClip) => { pause(); setSelected(clip.id); setAudition({ id: clip.id, ...audioClipWindow(clip, task.durationSec) }); };
   const down = (event: PointerEvent<HTMLButtonElement>, clip: AudioClip) => {
     if (unavailable || event.button !== 0) return; skipClick.current = false; event.preventDefault(); pause(); setSelected(clip.id);
@@ -91,7 +83,6 @@ export function SfxTimeline({ task, source, locale, disabled, actions, onChange 
       </>}
       footer={<>
         {selectedClip && <div className="flex flex-wrap items-center gap-3 text-xs"><span>{soundName(selectedClip, zh)} · {clock(audioClipWindow(selectedClip, task.durationSec).start)}</span>
-          {reasons.get(selectedClip.id) && <span className="text-ink-3">{zh ? '依据：' : 'Why: '}{reasons.get(selectedClip.id)}</span>}
           <label className="text-ink-3 flex items-center gap-2">{zh ? '音量' : 'Volume'}<input aria-label={zh ? '选中音效音量' : 'Selected sound volume'} type="range" min={-30} max={6} step={1} value={audioClipDefaults(selectedClip).volumeDb} disabled={unavailable} onChange={event => patch(selectedClip, { volumeDb: Number(event.target.value) })}/>{audioClipDefaults(selectedClip).volumeDb} dB</label>
         </div>}
         {!clips.length && <p className="text-ink-3 text-xs">{task.document ? (zh ? '本次未添加音效，原声已保留。' : 'No sounds were added. Original audio is preserved.') : (zh ? '生成后，音效会显示在这条轨道上。' : 'Generated sounds will appear on this track.')}</p>}

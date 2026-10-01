@@ -82,14 +82,13 @@ Imported or generated audio lives as a clip on its typed lane: pass the helper's
 `source [inSec, outSec]` retrims and `move_clips` for timing. Narration placed this way is
 transcript-readable with `get_transcript` when word timing matters.
 
-**Sound effects** score the beats a viewer should feel — reveals, key numbers and prices,
-questions, twists, topic changes, calls to action, the sign-off — and leave filler and routine
-narration quiet. Give one role the same sound across the video (every list item, every price) so
-the edit has a rhythm. They have three sources — use them in this order:
+**Sound effects** make a video more engaging and give it rhythm; where sound helps is your
+judgment, and silence is always an option. Speech at the same instant masks a sound, so keep the
+voice clear. They have three sources — use them in this order:
 
 1. **An existing sound** — the user's files, or the official sound effects pack:
-   `search_assets {scope:"official", kind:"audio", query}` naming the beat ("price", "reveal",
-   "whoosh", "question", "sign-off"); each result says when it fits. Reuse a timing-compatible
+   `search_assets {scope:"official", kind:"audio", query}` describing the moment or the sound;
+   each result says what it is for. Reuse a timing-compatible
    sound before generating anything → `add_clips {role:"sfx"}` (with `register_media` first only
    for remote results).
 2. **A new off-screen / editorial sound from a text description.** If your own environment can
