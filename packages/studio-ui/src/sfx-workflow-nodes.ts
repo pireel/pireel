@@ -55,5 +55,5 @@ export function sfxWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     const media = store.read<SceneMedia>(args.media, 'media');
     document = await renderSfxAudio(host, document, plan.placements, media);
     return { document: workflowJson(await store.put('document', 'auto-sfx', document)) };
-  } }];
+  }, project: outputs => ({ document: store.read<EditorDocumentV2>(outputs.document, 'document') }) }];
 }

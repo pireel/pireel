@@ -24,7 +24,9 @@ it('creates independent audible SFX, keeps narration, backs up derived audio and
   const task = fixture(); const original = structuredClone(task); const source = new File(['source'], 'source.mp4');
   const result = await runSfxTask(task, source, hooks());
   expect(task).toEqual(original); expect(result.task.scene).toBe('sfx'); expect(result.task.workflow?.definition.id).toBe('official-auto-sfx');
-  expect(result.task.workflow?.steps.map(step => step.id)).toEqual(['transcript', 'compose', 'sfx', 'render']);
+  expect(result.task.workflow?.steps.map(step => step.id)).toEqual(['transcript', 'compose', 'sfx']);
+  expect(mock.render).not.toHaveBeenCalled(); expect(result.video).toBeUndefined();
+  await exportSfxEdit(result.task, source, hooks());
   const rendered = mock.render.mock.calls[0][0];
   expect(rendered.videoFile).toBe(source); expect(rendered.comp.shots[0]).toMatchObject({ srcStart: 0, srcEnd: 20 });
   expect(rendered.audio).toHaveLength(2);
@@ -38,12 +40,11 @@ it('reuses ASR when changing sound settings, and pure export does not plan, char
   const first = await runSfxTask(fixture(), source, hooks());
   first.task.options.sfx = { ...LEGACY_SFX_OPTIONS, style: 'whoosh', volumeDb: -25, maxCount: 1 };
   const second = await runSfxTask(first.task, source, hooks());
-  expect(mock.asr).toHaveBeenCalledOnce(); expect(mock.render.mock.calls[1][0].audio).toHaveLength(1);
-  expect(mock.render.mock.calls[1][0].audio[0].clip.volumeDb).toBe(-25);
   const before = structuredClone(second.task); mock.backup.mockClear();
   await exportSfxEdit(second.task, source, hooks());
-  expect(mock.asr).toHaveBeenCalledOnce(); expect(mock.backup).not.toHaveBeenCalled(); expect(second.task).toEqual(before);
-  expect(mock.render.mock.calls[2][0].audio).toHaveLength(1);
+  expect(mock.asr).toHaveBeenCalledOnce(); expect(mock.render.mock.calls[0][0].audio).toHaveLength(1);
+  expect(mock.render.mock.calls[0][0].audio[0].clip.volumeDb).toBe(-25);
+  expect(mock.backup).not.toHaveBeenCalled(); expect(second.task).toEqual(before);
 });
 it('supports optional captions and rejects bad configuration before recognition', async () => {
   const task = fixture(); task.options.sfx = { ...LEGACY_SFX_OPTIONS, captions: true };
@@ -56,20 +57,20 @@ it('lets AI independently match sound and volume per cue, caches the plan and in
   const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ placements: [{ cueId: 0, start: 1, style: 'soft', volumeDb: -18, soundId: 'confirmation-001', intensity: 'gentle' }, { cueId: 1, start: 11, style: 'whoosh', volumeDb: -18, soundId: 'maximize-003', intensity: 'emphasis' }], usage: { source: 'server', reference: 'sfx-llm', credits: 1 } }));
   vi.stubGlobal('fetch', fetch);
   const task = fixture(); task.options.sfx = { density: 'medium' }; const source = new File(['s'], 'source.mp4');
-  const result = await runSfxTask(task, source, hooks());
+  const result = await runSfxTask(task, source, hooks()); await exportSfxEdit(result.task, source, hooks());
   const rendered = mock.render.mock.calls[0][0];
   expect(rendered.audio.map((item: { clip: { label: string } }) => item.clip.label)).toEqual(['confirmation-001--gentle.wav', 'maximize-003--emphasis.wav']);
   expect(rendered.audio.map((item: { clip: { volumeDb: number } }) => item.clip.volumeDb)).toEqual([0, 0]);
   expect(JSON.parse(fetch.mock.calls[0][1]!.body as string).density).toBe('medium');
   await runSfxTask(result.task, source, hooks()); expect(fetch).toHaveBeenCalledOnce(); expect(mock.asr).toHaveBeenCalledOnce();
-  result.task.options.sfx = { density: 'low' }; await runSfxTask(result.task, source, hooks()); expect(fetch).toHaveBeenCalledTimes(2);
-  expect(mock.render.mock.calls[2][0].audio).toHaveLength(2);
+  result.task.options.sfx = { density: 'low' }; const low = await runSfxTask(result.task, source, hooks()); expect(fetch).toHaveBeenCalledTimes(2);
+  await exportSfxEdit(low.task, source, hooks()); expect(mock.render.mock.calls[1][0].audio).toHaveLength(2);
 });
 it('keeps the original when AI selects silence and never substitutes a rule-based plan on failure', async () => {
   const fetch = vi.fn(async () => Response.json({ placements: [] })); vi.stubGlobal('fetch', fetch);
   const task = fixture(); task.options.sfx = { density: 'high' };
   const first = await runSfxTask(task, new File(['s'], 'source.mp4'), hooks());
-  expect(mock.render.mock.calls[0][0].audio).toEqual([]);
+  await exportSfxEdit(first.task, new File(['s'], 'source.mp4'), hooks()); expect(mock.render.mock.calls[0][0].audio).toEqual([]);
   fetch.mockResolvedValueOnce(Response.json({ error: 'AI 匹配失败' }, { status: 502 })); task.options.sfx = { density: 'low' };
   await expect(runSfxTask(task, new File(['s'], 'source.mp4'), hooks())).rejects.toThrow('AI 匹配失败');
   expect(mock.render).toHaveBeenCalledOnce(); expect(first.task.document).toBeTruthy();
@@ -105,7 +106,7 @@ it('renders all three closely spaced list accents without a client-side density 
   const fetch = vi.fn(async () => Response.json({ placements: starts.map((start, wordId) => ({ cueId: 0, wordId, start, style: 'soft', volumeDb: -18, soundId: 'confirmation-001', intensity: 'normal' })) }));
   vi.stubGlobal('fetch', fetch);
   const task = fixture(); task.options.sfx = { density: 'low' };
-  await runSfxTask(task, new File(['s'], 'source.mp4'), hooks());
+  const listed = await runSfxTask(task, new File(['s'], 'source.mp4'), hooks()); await exportSfxEdit(listed.task, new File(['s'], 'source.mp4'), hooks());
   const audio = mock.render.mock.calls[0][0].audio;
   expect(audio).toHaveLength(3);
   expect(audio.map((item: { clip: { startSec: number } }) => item.clip.startSec)).toEqual(starts);
@@ -125,6 +126,7 @@ it('generates a missing sound once, reuses it at multiple moments and preserves 
   const result = await runSfxTask(task, source, hooks());
   expect(fetch.mock.calls.filter(([url]) => url === '/api/studio/sfx')).toHaveLength(1);
   expect(fetch.mock.calls.filter(([url]) => url.includes('?asset='))).toHaveLength(1);
+  await exportSfxEdit(result.task, source, hooks());
   const audio = mock.render.mock.calls[0][0].audio;
   expect(audio).toHaveLength(2);
   expect(audio.every((row: { clip: { durationSec: number } }) => row.clip.durationSec > 2.9)).toBe(true);

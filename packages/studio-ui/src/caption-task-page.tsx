@@ -61,7 +61,7 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
   const FootageSettings = isPip ? PipSettings : BrollSettings;
   const isDubbing = scene === 'dubbing';
   // These scenes generate a document; the video is rendered when it is downloaded.
-  const rendersOnDownload = scene === 'captions' || scene === 'dubbing';
+  const rendersOnDownload = scene === 'captions' || scene === 'dubbing' || scene === 'sfx';
   const say = (cn: string, en: string) => zh ? cn : en;
   const [scope, setScope] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -163,8 +163,8 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
     busyRef.current = true; setExporting(true); setExportProgress(0); setError('');
     const controller = new AbortController(); abortRef.current = controller;
     try {
-      const { exportCaptionEdit } = await import('./caption-task-runner');
-      const video = await exportCaptionEdit(current, file, { signal: controller.signal, progress: fraction => { if (alive.current) setExportProgress(fraction); } });
+      const hooks = { signal: controller.signal, progress: (fraction: number) => { if (alive.current) setExportProgress(fraction); } };
+      const video = isSfx ? await (await import('./sfx-task-runner')).exportSfxEdit(current, file, hooks) : await (await import('./caption-task-runner')).exportCaptionEdit(current, file, hooks);
       if (!alive.current || controller.signal.aborted) return;
       const saved = await persist(current, video);
       const history = saved ? await listCaptionVersions(scope, taskId) : versions;
@@ -341,12 +341,12 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
         <div className="flex justify-end gap-3"><button type="button" onClick={() => setConfirmGenerate(false)} className="text-ink-3 px-4 py-2 text-sm">{say('取消', 'Cancel')}</button><button type="button" disabled={busy} onClick={() => { setConfirmGenerate(false); void start(false, true); }} className={actionClass}>{say('确认生成', 'Generate')}</button></div>
       </DialogContent>
     </Dialog>
-    <button type="button" disabled={busy} onClick={onBack} className="text-ink-3 mb-4 inline-flex shrink-0 self-start items-center gap-2 text-sm disabled:opacity-40"><ArrowLeft size={15} />{say('返回首页', 'Back to home')}</button>
-    <header className="mb-5 flex shrink-0 flex-wrap items-start justify-between gap-4"><div><h1 className="text-ink text-2xl font-semibold tracking-tight">{isUgc ? say('UGC 广告', 'UGC Ad') : isRemoval ? say('智能擦除', 'AI Eraser') : isSfx ? 'Auto SFX' : isPip ? say('画中画', 'Picture in picture') : isBroll ? 'AI B-Roll' : isDubbing ? 'Video Dubbing' : 'AI Captions'}</h1><p className="text-ink-3 mt-2 truncate text-sm">{task.name}</p></div></header>
     <input ref={inputRef} type="file" accept="video/*" className="hidden" aria-label={say('选择视频文件', 'Choose a video file')} onChange={(event) => { const next = event.target.files?.[0]; event.target.value = ''; if (next) void pickFile(next); }} />
     <div className="grid min-h-0 flex-1 grid-cols-[minmax(160px,28%)_minmax(0,1fr)] gap-5 overflow-hidden md:grid-cols-[minmax(260px,300px)_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]">
       <section className="min-h-0 min-w-0 overflow-y-auto overscroll-contain pr-2" aria-label={isUgc ? say('UGC 广告设置', 'UGC ad settings') : isRemoval ? say('智能擦除设置', 'AI eraser settings') : isSfx ? say('自动音效设置', 'Auto SFX settings') : isPip ? say('画中画设置', 'Picture in picture settings') : isBroll ? say('配画面设置', 'B-roll settings') : isDubbing ? say('译制设置', 'Dubbing settings') : say('字幕设置', 'Caption settings')}>
         <div className="pb-5 pr-2">
+        <button type="button" disabled={busy} onClick={onBack} className="text-ink-3 mb-4 inline-flex shrink-0 self-start items-center gap-2 text-sm disabled:opacity-40"><ArrowLeft size={15} />{say('返回首页', 'Back to home')}</button>
+        <header className="mb-5 min-w-0"><div><h1 className="text-ink text-2xl font-semibold tracking-tight">{isUgc ? say('UGC 广告', 'UGC Ad') : isRemoval ? say('智能擦除', 'AI Eraser') : isSfx ? 'Auto SFX' : isPip ? say('画中画', 'Picture in picture') : isBroll ? 'AI B-Roll' : isDubbing ? 'Video Dubbing' : 'AI Captions'}</h1><p className="text-ink-3 mt-2 truncate text-sm">{task.name}</p></div></header>
         {!isRemoval && <SceneBrandPicker options={options} locale={locale} disabled={disabled} onChange={changeOptions} />}
         {isUgc && <><UgcAdSettings value={options.ugcAd ?? DEFAULT_UGC_AD_OPTIONS} locale={locale} disabled={disabled} onChange={ugcAd => changeOptions(current => ({ ...current, ugcAd }))} /><div className="border-line mt-5 border-t pt-5"><SceneSelect label={say('画面比例', 'Aspect ratio')} value={options.aspect === 'original' ? 'original' : 'portrait'} disabled={disabled} onChange={aspect => changeOptions(current => ({ ...current, aspect }))} options={[{ value: 'portrait', label: say('竖屏 9:16', 'Portrait 9:16') }, { value: 'original', label: say('保持原片', 'Original') }]} /></div><div className="border-line mt-5 border-t pt-5"><p className="text-ink mb-2 text-xs font-medium">{say('商品画面（可选）', 'Product footage (optional)')}</p></div></>}
         {isRemoval && <><SubtitleRemovalSettings value={options.subtitleRemoval ?? DEFAULT_SUBTITLE_REMOVAL} locale={locale} disabled={disabled} onChange={subtitleRemoval => changeOptions(current => ({ ...current, subtitleRemoval, shortenPauses: false, translationLanguage: undefined }))}/>{removalAvailable !== true && <p role="status" className="text-ink-3 mt-4 text-xs">{removalAvailable === null ? say('正在连接处理服务…', 'Connecting to the service…') : say('当前擦除模式暂未开通，可先预览并设置区域。', 'This removal mode is not available yet. You can preview and select a region.')}</p>}</>}

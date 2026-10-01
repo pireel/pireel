@@ -8,6 +8,8 @@ import { SceneWorkflowHost, type SceneWorkflowHooks } from './scene-workflow-run
 import { captionWorkflowNodes } from './caption-workflow-nodes';
 import { editingWorkflowNodes } from './editing-workflow-nodes';
 import type { CaptionTaskRecord } from './caption-task-store';
+import type { EditorDocumentV2 } from '@pireel/studio-engine/composition';
+import type { WorkflowInputs } from '@pireel/studio-engine/workflow';
 
 export async function runSfxTask(task: CaptionTaskRecord, source: File, hooks: SceneWorkflowHooks) {
   if (!validSfxOptions(task.options.sfx)) throw new Error('音效配置无效，请重新选择。');
@@ -20,8 +22,9 @@ async function generateSfx(task: CaptionTaskRecord, source: File, hooks: SceneWo
     const media = await host.store.put('media', task.sourceSig, { sig: task.sourceSig, name: task.name, width: task.width, height: task.height, durationSec: task.durationSec });
     const raw = task.workflowData && Object.values(task.workflowData.artifacts).find(entry => entry.ref.kind === 'transcript' && entry.ref.id === task.sourceSig);
     const transcript = raw?.ref ?? (task.transcript?.length ? await host.store.put('transcript', task.sourceSig, task.transcript) : null);
-    const effects = 'density' in task.options.sfx! ? sfxWorkflowNodes(host) : editingWorkflowNodes(host).filter(node => node.capability.id === 'audio.effects').map(node => ({ ...node, stage: 'styling' as const }));
-    const result = await host.run(sfxWorkflowDefinition(task.options, media, transcript, task.id), [...captionWorkflowNodes(host), ...effects]);
+    const effects = 'density' in task.options.sfx! ? sfxWorkflowNodes(host) : editingWorkflowNodes(host).filter(node => node.capability.id === 'audio.effects').map(node => ({ ...node, stage: 'styling' as const, project: (outputs: WorkflowInputs) => ({ document: host.store.read<EditorDocumentV2>(outputs.document, 'document') }) }));
+    // Generation stops at the document; the video is rendered on download (exportSfxEdit).
+    const result = await host.compose(sfxWorkflowDefinition(task.options, media, transcript, task.id, false), [...captionWorkflowNodes(host), ...effects]);
     // Versions carry durable audio identities, so the editable result also works on another device.
     if (studioProviders().sceneProjects) {
       if (await studioProviders().sceneProjects!.owner() !== task.scope) throw new Error('登录账号已变化。');
