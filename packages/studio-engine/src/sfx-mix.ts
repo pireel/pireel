@@ -1,5 +1,5 @@
 import type { SfxIntensity } from './sfx-library';
-export const SFX_MIX_VERSION = 'speech-relative-3';
+export const SFX_MIX_VERSION = 'speech-relative-4';
 export interface SpeechLevelProfile { rms: Float32Array; peaks: Float32Array; durationSec: number; referenceRms: number }
 const percentile = (values: number[], q: number) => values.length ? values.sort((a, b) => a - b)[Math.min(values.length - 1, Math.floor(values.length * q))] : 0;
 /** Stereo-safe energy and 1ms peak bounds, without retaining a second full audio buffer. */
@@ -46,10 +46,11 @@ export function mixSoundToSpeech(pcm: Float32Array, rate: number, profile: Speec
   const nearby = Array.from(profile.rms.slice(Math.max(0, Math.floor((startSec - 1) * 10)), Math.ceil((startSec + 1.5) * 10))).filter(value => value > .003);
   // The level follows the recording: nearby speech, but not below half its typical level, so an
   // effect in a pause stays audible. No absolute floor: it put effects over quiet recordings' speech.
-  // A hit landing on a loud syllable is masked by it, so the speech under the hit raises the basis.
+  // A placed sound must be heard: speech under the hit masks it, so that speech is the basis when it
+  // is louder. Intensity only sets the weight within the audible range, never above the voice.
   const under = Math.max(0, ...Array.from(profile.rms.slice(Math.max(0, Math.floor(startSec * 10)), Math.ceil((startSec + .3) * 10))));
-  const speechRms = Math.max(percentile(nearby, .65) || profile.referenceRms, profile.referenceRms * .5, under * .8);
-  const ratio = { gentle: .4, normal: .6, emphasis: .85 }[intensity];
+  const speechRms = Math.max(percentile(nearby, .65) || profile.referenceRms, profile.referenceRms * .5, under);
+  const ratio = { gentle: .6, normal: .8, emphasis: .95 }[intensity];
   const targetRms = Math.min(.16, speechRms * ratio);
   const gain = Math.min(4, targetRms / Math.max(.0001, activeRms(normalized)));
   const length = Math.min(normalized.length, Math.max(0, Math.floor((profile.durationSec - startSec) * rate)));

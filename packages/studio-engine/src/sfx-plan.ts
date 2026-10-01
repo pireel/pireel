@@ -18,7 +18,7 @@ export const SFX_DENSITIES = [
 /** Density is an editorial preference for the model, never a numeric post-processing quota. */
 export function sfxDensityGuidance(density: SfxDensity) {
   return {
-    low: 'Sparse: add sound only where it clearly helps; most of the narration stays quiet.',
+    low: 'Sparse: a few moments across the whole video, only where sound clearly helps; most of the narration stays quiet.',
     medium: 'Moderate: support the content and its rhythm without crowding the speech.',
     high: 'Rich: follow the narration\'s rhythm actively while keeping the speech clear.',
   }[density];
