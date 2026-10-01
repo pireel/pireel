@@ -7,7 +7,9 @@ export function validSfxGeneration(value: unknown): value is SfxGenerationReques
   const row = value as SfxGenerationRequest | null;
   return !!row && typeof row.prompt === 'string' && !!row.prompt.trim() && row.prompt.length <= 500 && typeof row.reason === 'string' && !!row.reason.trim() && row.reason.length <= 300 && Number.isFinite(row.durationSec) && row.durationSec >= .5 && row.durationSec <= 5;
 }
-export interface SfxPlacement { cueId: number; start: number; style: typeof SFX_STYLES[number]['id']; volumeDb: number; soundId?: SfxSoundId; intensity?: SfxIntensity; wordId?: number; generate?: SfxGenerationRequest }
+/** `after`: the hit sits in the pause right after its cue (start = cue end) instead of on a word.
+ *  `reason`: the matcher's short note on why this moment gets this sound, shown to the user. */
+export interface SfxPlacement { cueId: number; start: number; style: typeof SFX_STYLES[number]['id']; volumeDb: number; soundId?: SfxSoundId; intensity?: SfxIntensity; wordId?: number; after?: boolean; reason?: string; generate?: SfxGenerationRequest }
 export const SFX_DENSITIES = [
   { id: 'low', zh: '低', en: 'Low', description: { zh: '只强调少数重点', en: 'Highlight only key moments' } },
   { id: 'medium', zh: '中', en: 'Medium', description: { zh: '兼顾重点与节奏', en: 'Balance emphasis and rhythm' } },
@@ -16,7 +18,7 @@ export const SFX_DENSITIES = [
 /** Density is an editorial preference for the model, never a numeric post-processing quota. */
 export function sfxDensityGuidance(density: SfxDensity) {
   return {
-    low: 'Accent only the strongest beats: the main reveals, key numbers or prices, the big question or twist, and the sign-off. A meaningful list may still use a short group of repeated cues. Leave routine narration quiet.',
+    low: 'Accent only the strongest beats: the main reveals, key numbers or prices, the big question or twist, and the sign-off. Routine mentions, item-by-item descriptions and lists stay quiet.',
     medium: 'Balance emphasis and rhythm: support important words, transitions, and clear list structures. Use deliberate groups where they improve comprehension, with quiet passages between ideas.',
     high: 'Follow the narration more actively: accent meaningful words, enumerations, reveals and transitions. Consecutive list items may each receive a sound. Keep speech clear and leave weak matches quiet.',
   }[density];
@@ -32,12 +34,13 @@ export function validateSfxPlan(raw: unknown, cues: SfxCue[], durationSec: numbe
   const rows = raw.map(row => {
     const cue = cues.find(cue => cue.id === row?.cueId);
     if (row?.generate !== undefined && (!validSfxGeneration(row.generate) || row.soundId !== undefined || !['gentle', 'normal', 'emphasis'].includes(row.intensity))) throw new Error('生成音效参数无效。');
-    if ((row?.soundId !== undefined && (!sfxSound(row.soundId) || !['gentle', 'normal', 'emphasis'].includes(row.intensity))) || !cue || !SFX_STYLES.some(style => style.id === row.style) || !Number.isFinite(row.start) || row.start < cue.start || row.start >= cue.end || row.start + .2 > durationSec || !Number.isFinite(row.volumeDb) || row.volumeDb < -30 || row.volumeDb > -10) throw new Error('音效匹配结果无效，请重试。');
-    if (row.wordId !== undefined && !cue.anchors?.some(word => word.id === row.wordId && word.start === row.start)) throw new Error('音效匹配引用了无效词位。');
+    if ((row?.soundId !== undefined && (!sfxSound(row.soundId) || !['gentle', 'normal', 'emphasis'].includes(row.intensity))) || !cue || !SFX_STYLES.some(style => style.id === row.style) || !Number.isFinite(row.start) || row.start < cue.start || (row.after === true ? Math.abs(row.start - cue.end) > 1e-6 : row.start >= cue.end) || row.start + .2 > durationSec || !Number.isFinite(row.volumeDb) || row.volumeDb < -30 || row.volumeDb > -10) throw new Error('音效匹配结果无效，请重试。');
+    if (row.wordId !== undefined && (row.after === true || !cue.anchors?.some(word => word.id === row.wordId && word.start === row.start))) throw new Error('音效匹配引用了无效词位。');
+    if (row.reason !== undefined && (typeof row.reason !== 'string' || row.reason.length > 200)) throw new Error('音效匹配结果无效，请重试。');
     const identity = JSON.stringify([cue.id, row.start, row.generate ? [row.generate.prompt.trim(), row.generate.durationSec] : row.soundId ?? row.style, row.intensity ?? row.volumeDb]);
     if (seen.has(identity)) throw new Error('音效匹配包含完全重复的事件。');
     seen.add(identity);
-    return { cueId: cue.id, start: row.start, style: row.style, volumeDb: row.volumeDb, ...(row.soundId ? { soundId: row.soundId, intensity: row.intensity } : {}), ...(row.generate ? { generate: { prompt: row.generate.prompt.trim(), durationSec: row.generate.durationSec, reason: row.generate.reason.trim() }, intensity: row.intensity } : {}), ...(row.wordId !== undefined ? { wordId: row.wordId } : {}) } as SfxPlacement;
+    return { cueId: cue.id, start: row.start, style: row.style, volumeDb: row.volumeDb, ...(row.soundId ? { soundId: row.soundId, intensity: row.intensity } : {}), ...(row.generate ? { generate: { prompt: row.generate.prompt.trim(), durationSec: row.generate.durationSec, reason: row.generate.reason.trim() }, intensity: row.intensity } : {}), ...(row.wordId !== undefined ? { wordId: row.wordId } : {}), ...(row.after === true ? { after: true } : {}), ...(typeof row.reason === 'string' && row.reason.trim() ? { reason: row.reason.trim() } : {}) } as SfxPlacement;
   }).sort((a, b) => a.start - b.start);
   return rows;
 }
