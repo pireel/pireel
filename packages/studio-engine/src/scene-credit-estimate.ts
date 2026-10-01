@@ -17,7 +17,8 @@ export interface SceneCreditEstimate {
   sfxGenerationUnitCredits?: number;
   /** A fixed-price scene: credits per minute of source, and lip sync's with its minimum billed seconds. */
   fixed?: { perMinute: number; lipSync?: { perMinute: number; minSec: number; credits: number } };
-  erasure?: { tier: import('./erasure-pricing').ErasureTier; baseCnyPerMinute: number; cnyPerCredit: number; costCny: number; prechargeCredits: number; outputFpsCap: number; outputResolution: string };
+  /** Fixed erasure price: `perMinute` credits per minute of source for the chosen tier. */
+  erasure?: { tier: import('./erasure-pricing').ErasureTier; credits: number; perMinute: number };
   items: { kind: 'asr' | 'translation' | 'emphasis' | 'speech' | 'lipSync' | 'visual' | 'matching' | 'sfx' | 'subtitleRemoval'; min: number; max: number; estimate: number }[];
 }
 /** Compact usage hints for a read-only estimate, never authorization or actual billing input. */

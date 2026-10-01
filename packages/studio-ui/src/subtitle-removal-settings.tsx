@@ -1,9 +1,15 @@
 import { ERASURE_TIERS } from '@pireel/studio-engine/erasure-pricing';
 import { useEffect, useRef } from 'react';
-import { DEFAULT_SUBTITLE_REGION, erasureKind, type SubtitleRemovalOptions, type SubtitleRegion } from '@pireel/studio-engine/subtitle-removal';
+import { DEFAULT_SUBTITLE_REGION, erasureTargets, type ErasureTarget, type SubtitleRemovalOptions, type SubtitleRegion } from '@pireel/studio-engine/subtitle-removal';
 import { SceneSelect, SceneCheckbox } from './scene-form-controls';
+/** Checked targets map back onto the stored kind: one target is its own kind, both is 'all'. */
+function withTargets(value: SubtitleRemovalOptions, targets: ErasureTarget[]): SubtitleRemovalOptions {
+  const { targets: _previous, ...rest } = value;
+  if (targets.length === 2) return { ...rest, kind: 'all', targets: ['subtitle', 'watermark'] };
+  return { ...rest, kind: targets[0] === 'watermark' ? 'watermark' : 'subtitles' };
+}
 export function SubtitleRemovalSettings({ value, locale, disabled, onChange }: { value: SubtitleRemovalOptions; locale: 'zh' | 'en'; disabled: boolean; onChange(value: SubtitleRemovalOptions): void }) {
-  const zh = locale === 'zh'; const kind = erasureKind(value); const tier = value.tier ?? 'standard';
+  const zh = locale === 'zh'; const targets = erasureTargets(value); const tier = value.tier ?? 'standard';
   return <div className="space-y-4">
     <fieldset disabled={disabled} className="space-y-2">
       <legend className="text-ink mb-2 text-sm font-medium">{zh ? '擦除档位' : 'Quality'}</legend>
@@ -14,14 +20,13 @@ export function SubtitleRemovalSettings({ value, locale, disabled, onChange }: {
         </label>)}
       </div>
     </fieldset>
-    <SceneSelect label={zh ? '擦除内容' : 'Remove'} ariaLabel={zh ? '擦除内容' : 'Remove'} value={kind} disabled={disabled} onChange={kind => onChange({ tier, kind: kind as SubtitleRemovalOptions['kind'], mode: 'auto', ...(kind === 'all' ? { targets: ['subtitle', 'watermark'] } : {}) })} options={[
-      { value: 'subtitles', label: zh ? '去字幕' : 'Subtitles' }, { value: 'watermark', label: zh ? '去水印' : 'Watermarks' }, { value: 'all', label: zh ? '字幕与水印' : 'Subtitles and watermarks' },
-    ]}/>
-    {kind === 'all' && <div className="space-y-3">
-      {(['subtitle', 'watermark'] as const).map(target => { const targets = value.targets ?? ['subtitle', 'watermark']; return <SceneCheckbox key={target} label={target === 'subtitle' ? (zh ? '字幕' : 'Subtitles') : (zh ? (tier === 'precise' ? '水印与 Logo' : '文字水印') : (tier === 'precise' ? 'Watermarks and logos' : 'Text watermarks'))} checked={targets.includes(target)} disabled={disabled || (targets.length === 1 && targets.includes(target))} onChange={checked => onChange({ ...value, targets: checked ? [...targets, target] : targets.filter(item => item !== target) })}/>; })}
-      <p className="text-ink-4 text-xs leading-relaxed">{zh ? '一次清理选中的字幕和水印。图形 Logo 请选精准档。' : 'Remove the selected subtitles and watermarks together.'}</p>
-    </div>}
-    {kind === 'watermark' && tier !== 'precise' && <p className="text-ink-3 text-xs leading-relaxed">{zh ? '本档自动检测文字水印；图形 Logo 和非文字角标请选精准档。' : 'This tier automatically detects text watermarks. Choose Precise for graphic logos and non-text corner marks.'}</p>}
+    <fieldset disabled={disabled} className="space-y-2">
+      <legend className="text-ink mb-2 text-xs">{zh ? '擦除内容' : 'Remove'}</legend>
+      <div className="flex flex-wrap gap-x-6 gap-y-2">
+        {(['subtitle', 'watermark'] as const).map(target => <SceneCheckbox key={target} label={target === 'subtitle' ? (zh ? '字幕' : 'Subtitles') : (zh ? (tier === 'precise' ? '水印与 Logo' : '文字水印') : (tier === 'precise' ? 'Watermarks and logos' : 'Text watermarks'))} checked={targets.includes(target)} disabled={disabled || (targets.length === 1 && targets.includes(target))} onChange={checked => onChange(withTargets(value, checked ? [...targets, target] : targets.filter(item => item !== target)))}/>)}
+      </div>
+    </fieldset>
+    {targets.includes('watermark') && tier !== 'precise' && <p className="text-ink-3 text-xs leading-relaxed">{zh ? '本档自动检测文字水印；图形 Logo 和非文字角标请选精准档。' : 'This tier automatically detects text watermarks. Choose Precise for graphic logos and non-text corner marks.'}</p>}
     <SceneSelect label={zh ? '擦除范围' : 'Removal area'} ariaLabel={zh ? '擦除范围' : 'Removal area'} value={value.mode} disabled={disabled} onChange={mode => onChange(mode === 'region' ? { ...value, mode: 'region', region: DEFAULT_SUBTITLE_REGION } : { ...value, mode: 'auto', region: undefined })} options={[{ value: 'auto', label: zh ? '自动识别' : 'Detect automatically' }, { value: 'region', label: zh ? '限定区域' : 'Select a region' }]} />
     <p className="text-ink-3 text-xs leading-relaxed">{zh ? value.mode === 'auto' ? '自动检测所选类型的内容并修复背景。可限定区域以保护需要保留的画面。' : '拖动框选固定区域，整个选区都会被修复。请避开要保留的人物和物体；选区不会跟随目标移动。' : value.mode === 'auto' ? 'Detect selected content and repair the background. Select a region to protect the rest of the image.' : 'The entire fixed selection will be repaired. Avoid content you want to keep. The region does not follow moving objects.'}</p>
     {value.mode === 'region' && tier === 'precise' && <p className="text-ink-3 text-xs leading-relaxed">{zh ? '固定区域会跳过目标识别，可选择专业档降低成本。' : 'Fixed regions skip target detection. Professional can reduce the cost.'}</p>}

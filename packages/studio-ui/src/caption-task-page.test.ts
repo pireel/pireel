@@ -310,7 +310,8 @@ it('preserves the combined targets when selecting and moving a fixed removal reg
   await saveCaptionTask({ ...fixture(), scene: 'subtitle-removal', options: { ...fixture().options, subtitleRemoval: { mode: 'auto' } } });
   await act(async () => root.render(createElement(CaptionTaskPage, { taskId: 'task', scene: 'subtitle-removal', locale: 'zh', onBack: vi.fn(), onOpenEditor: vi.fn() })));
   await settled(() => expect(button('开始擦除').disabled).toBe(false));
-  await choose('擦除内容', '字幕与水印'); await choose('擦除范围', '限定区域');
+  const watermark = [...container.querySelectorAll('label')].find(item => item.textContent === '文字水印')!.querySelector('input')!;
+  await click(watermark); await choose('擦除范围', '限定区域');
   const overlay = container.querySelector<HTMLElement>('[aria-label="擦除区域"]')!;
   await act(async () => overlay.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true })));
   await click(button('开始擦除')); await settled(() => expect(runs).toHaveLength(1));

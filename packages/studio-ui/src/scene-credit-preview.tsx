@@ -26,7 +26,7 @@ export function SceneCreditPreview({ task, options, locale, busy }: { task: Capt
   if (quote.erasure) {
     const price = quote.erasure; const tier = ERASURE_TIERS.find(item => item.id === price.tier)!;
     return <div role="status" className="text-ink-3 mt-4 space-y-2 border-t border-line pt-4 text-xs leading-relaxed">
-      <p className="text-ink text-sm">{tier[locale]} · {zh ? '本次扣除' : 'This run'} <strong className="tabular-nums">{price.prechargeCredits}</strong> {zh ? '积分' : 'credits'}</p>
+      <p className="text-ink text-sm">{tier[locale]} · {zh ? '本次扣除' : 'This run'} <strong className="tabular-nums">{price.credits}</strong> {zh ? '积分' : 'credits'}</p>
     </div>;
   }
   if (quote.fixed) {
