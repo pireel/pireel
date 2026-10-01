@@ -61,7 +61,7 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
   const FootageSettings = isPip ? PipSettings : BrollSettings;
   const isDubbing = scene === 'dubbing';
   // These scenes generate a document; the video is rendered when it is downloaded.
-  const rendersOnDownload = scene === 'captions' || scene === 'dubbing' || scene === 'sfx';
+  const rendersOnDownload = scene === 'captions' || scene === 'dubbing' || scene === 'sfx' || scene === 'broll' || scene === 'pip';
   const say = (cn: string, en: string) => zh ? cn : en;
   const [scope, setScope] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -164,7 +164,9 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
     const controller = new AbortController(); abortRef.current = controller;
     try {
       const hooks = { signal: controller.signal, progress: (fraction: number) => { if (alive.current) setExportProgress(fraction); } };
-      const video = isSfx ? await (await import('./sfx-task-runner')).exportSfxEdit(current, file, hooks) : await (await import('./caption-task-runner')).exportCaptionEdit(current, file, hooks);
+      const video = isSfx ? await (await import('./sfx-task-runner')).exportSfxEdit(current, file, hooks)
+        : isBroll ? await (await import('./broll-export')).exportBrollEdit(current, current.options, file, { signal: hooks.signal, onProgress: hooks.progress })
+        : await (await import('./caption-task-runner')).exportCaptionEdit(current, file, hooks);
       if (!alive.current || controller.signal.aborted) return;
       const saved = await persist(current, video);
       const history = saved ? await listCaptionVersions(scope, taskId) : versions;

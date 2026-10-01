@@ -5,7 +5,11 @@ export const BROLL_WORKFLOW_CAPABILITIES = [
   sceneCapability('broll.match', ['transcript', 'analysis', 'durationSec', 'projectId', 'cached'], ['plan', 'value'], true),
   sceneCapability('broll.compose', ['document', 'plan', 'analysis', 'options', 'durationSec'], ['document', 'plan']),
 ];
-export function brollWorkflowDefinition(options: CaptionTaskOptions, media: unknown, transcript: unknown, projectId: string, durationSec: number, cached: unknown) {
+/** `renderVideo: false` stops at the document; the video is rendered when the user exports it. */
+export function brollWorkflowDefinition(options: CaptionTaskOptions, media: unknown, transcript: unknown, projectId: string, durationSec: number, cached: unknown, renderVideo = true) {
+  // Only the asset fields the workflow contract knows: saved assets may carry probe extras (hasAudio).
+  const assets = options.broll!.assets.map(({ id, sig, name, kind, durationSec, width, height }) => ({ id, sig, name, kind, durationSec, width, height }));
+  options = { ...options, broll: { ...options.broll!, assets } };
   const definition = captionWorkflowDefinition({ ...options, shortenPauses: false }, media, transcript, null, projectId);
   definition.id = options.broll?.pip ? 'official-pip' : 'official-broll'; definition.title = options.broll?.pip ? 'Picture in picture' : 'B-roll'; definition.templateId = options.broll?.pip ? 'pip' : 'broll';
   const compose = definition.steps.findIndex(step => step.id === 'compose');
@@ -17,5 +21,6 @@ export function brollWorkflowDefinition(options: CaptionTaskOptions, media: unkn
   const document = render.arguments.document;
   definition.steps.splice(definition.steps.indexOf(render), 0, sceneStep('broll', 'broll.compose', { document, plan: stepOutput('match', 'value'), analysis: stepOutput('analysis', 'analysis'), options: sceneLiteral(options.broll), durationSec: sceneLiteral(durationSec) }));
   render.arguments.document = stepOutput('broll', 'document'); render.dependsOn = ['broll'];
+  if (!renderVideo) definition.steps = definition.steps.filter(step => step !== render);
   return definition;
 }

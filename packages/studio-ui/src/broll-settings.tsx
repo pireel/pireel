@@ -42,7 +42,7 @@ export function BrollSettings({ task, value, disabled, locale, onChange, onBusy 
             if (!await studioProviders().vault.backup(file, sig, { onProgress: n => patchUpload(id, { progress: Math.max(0, Math.min(1, Number.isFinite(n) ? n : 0)) }) })) throw new Error('素材上传失败，请重试。');
           } else if (!cached) throw new Error('本机空间不足。');
           if (!alive.current) break;
-          assets.push({ id, sig, name: file.name, kind, ...dimensions });
+          assets.push({ id, sig, name: file.name, kind, width: dimensions.width, height: dimensions.height, durationSec: dimensions.durationSec });
           onChange({ ...value, assets: [...assets], disabledPlacements: undefined, replacements: undefined, edits: undefined });
           patchUpload(id, { status: 'done', progress: 1 });
         } catch (e) { patchUpload(id, { status: 'failed', error: e instanceof Error ? e.message : String(e) }); }

@@ -2,9 +2,24 @@ export interface BrollAsset { id: string; sig: string; name: string; kind: 'vide
 export interface BrollOptions { pip?: import('./pip-layout').PipOptions; manualClips?: { id: string; assetId: string; start: number; duration: number; sourceIn: number }[]; edits?: Record<string, { start: number; duration: number; sourceIn: number }>; assets: BrollAsset[]; captions: boolean; replacements?: Record<string, string>; disabledPlacements?: string[] }
 export interface BrollCandidate { id: string; assetId: string; start: number; end: number; description: string }
 export interface BrollPlacement { id: string; candidateId: string; start: number; duration: number }
-export interface BrollCue { id: number; start: number; end: number; text: string }
+/** One narration sentence; `anchors` are its words, so a shot can start on the word it illustrates. */
+export interface BrollCue { id: number; start: number; end: number; text: string; anchors?: { id: number; start: number; text: string }[] }
 
-/** Model chooses only known ranges; timeline bounds, overlaps and coverage are enforced here. */
+/** Narration sentences with word anchors, unmerged: a shot starts on a word, not where a sentence happens to begin. */
+export function brollCues(transcript: readonly { start: number; end: number; text: string; words?: { start: number; text: string }[] }[], durationSec: number): BrollCue[] {
+  return transcript.filter(row => row.text.trim() && Number.isFinite(row.start) && Number.isFinite(row.end) && row.end > row.start && row.start < durationSec)
+    .map((row, id) => {
+      const start = Math.max(0, row.start); const end = Math.min(durationSec, row.end);
+      const anchors = (row.words ?? []).map((word, index) => ({ id: index, start: word.start, text: word.text.slice(0, 64) })).filter(word => word.start >= start && word.start < end).slice(0, 80);
+      return { id, start, end, text: row.text.slice(0, 2000), ...(anchors.length ? { anchors } : {}) };
+    });
+}
+
+/** `broll-<cue>` or `broll-<cue>-<word>`: the id carries where the shot starts, so a stored plan re-validates. */
+export const brollPlacementAnchor = (id: string) => { const [cueId, wordId] = id.replace(/^broll-/, '').split('-').map(Number); return { cueId, ...(Number.isInteger(wordId) ? { wordId } : {}) }; };
+
+/** Model chooses only known sentences, words and shots; timeline bounds, overlaps and coverage are enforced here.
+ *  A shot starts on its word (or its sentence) and runs up to 5 seconds, past the sentence if needed. */
 export function validateBrollPlan(value: unknown, cues: BrollCue[], candidates: BrollCandidate[], durationSec: number): BrollPlacement[] {
   if (!Array.isArray(value) || value.length > 100) throw new Error('配画面方案无效，请重试。');
   const used = new Set<string>();
@@ -13,10 +28,13 @@ export function validateBrollPlan(value: unknown, cues: BrollCue[], candidates: 
     const cue = cues.find((cue) => cue.id === row?.cueId);
     const candidate = candidates.find((candidate) => candidate.id === row?.candidateId);
     if (!cue || !candidate || used.has(candidate.id)) throw new Error('配画面方案引用了无效或重复的镜头。');
-    const duration = Math.min(5, cue.end - cue.start, candidate.end - candidate.start, durationSec - cue.start);
-    if (duration < 1 || cue.start < 0) continue;
+    const anchor = row.wordId !== undefined ? cue.anchors?.find(word => word.id === row.wordId) : undefined;
+    if (row.wordId !== undefined && !anchor) throw new Error('配画面方案引用了无效的词位。');
+    const start = anchor?.start ?? cue.start;
+    const duration = Math.min(5, candidate.end - candidate.start, durationSec - start);
+    if (duration < 1 || start < 0) continue;
     used.add(candidate.id);
-    result.push({ id: `broll-${cue.id}`, candidateId: candidate.id, start: cue.start, duration });
+    result.push({ id: anchor ? `broll-${cue.id}-${anchor.id}` : `broll-${cue.id}`, candidateId: candidate.id, start, duration });
   }
   result.sort((a, b) => a.start - b.start);
   let end = -2; let coverage = 0;

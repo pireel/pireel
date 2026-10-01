@@ -1,7 +1,7 @@
 import { composeBrollDocument } from '@pireel/studio-engine/broll-compose';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
-import type { BrollCandidate, BrollCue, BrollOptions, BrollPlacement } from '@pireel/studio-engine/broll-task';
-import { validateBrollPlan, brollAssetsMatch } from '@pireel/studio-engine/broll-task';
+import type { BrollCandidate, BrollOptions, BrollPlacement } from '@pireel/studio-engine/broll-task';
+import { validateBrollPlan, brollAssetsMatch, brollCues, brollPlacementAnchor } from '@pireel/studio-engine/broll-task';
 import type { EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import { applyDocumentTransaction } from '@pireel/studio-engine/document-transaction';
 import { BROLL_WORKFLOW_CAPABILITIES } from '@pireel/studio-engine/workflow-broll-template';
@@ -61,14 +61,7 @@ export function brollWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     const transcript = store.read<AsrSegment[]>(args.transcript, 'transcript');
     const analysis = store.read<Analysis>(args.analysis, 'visual-analysis');
     const durationSec = Number(args.durationSec);
-    const cues: BrollCue[] = [];
-    for (const raw of transcript) {
-      const segment = { ...raw, start: Math.max(0, raw.start), end: Math.min(durationSec, raw.end) };
-      if (segment.end <= segment.start || !segment.text.trim()) continue;
-      const previous = cues.at(-1);
-      if (previous && previous.end - previous.start < 3 && segment.end - previous.start <= 8) { previous.text += segment.text; previous.end = segment.end; }
-      else cues.push({ id: cues.length, start: segment.start, end: segment.end, text: segment.text });
-    }
+    const cues = brollCues(transcript, durationSec);
     const planKey = JSON.stringify([analysis.analysisKey, cues]);
     const cached = args.cached as unknown as CaptionTaskRecord['broll'];
     const sameCandidates = await artifactVersion(cached?.candidates ?? null) === await artifactVersion(analysis.candidates);
@@ -82,11 +75,11 @@ export function brollWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
         const body = await response.json();
         if (body.usage) context.recordUsage(body.usage);
         if (!response.ok) throw new Error(body.error ?? '画面匹配失败。');
-        const plan = validateBrollPlan(body.placements.map((p: { id: string; candidateId: string }) => ({ cueId: Number(p.id.replace('broll-', '')), candidateId: p.candidateId })), batch, candidates, durationSec);
+        const plan = validateBrollPlan(body.placements.map((p: { id: string; candidateId: string }) => ({ ...brollPlacementAnchor(p.id), candidateId: p.candidateId })), batch, candidates, durationSec);
         for (const p of plan) { used.add(p.candidateId); placements.push(p); }
       }
     }
-    placements = validateBrollPlan(placements.map(p => ({ cueId: Number(p.id.replace('broll-', '')), candidateId: p.candidateId })), cues, analysis.candidates, durationSec);
+    placements = validateBrollPlan(placements.map(p => ({ ...brollPlacementAnchor(p.id), candidateId: p.candidateId })), cues, analysis.candidates, durationSec);
     const value: Plan = { planKey, placements };
     return { plan: workflowJson(await store.put('edit-plan', 'broll', value)), value: workflowJson(value) };
   }, project: outputs => ({ broll: { ...host.task.broll!, ...(outputs.value as unknown as Plan) } }) }),
@@ -100,5 +93,5 @@ export function brollWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     const result = applyDocumentTransaction(document, { ops: [{ op: 'document.replace', input: { document: next } }] }, { projectId: 'broll-workflow' });
     if (!result.ok) throw new Error(result.error.message);
     return { document: workflowJson(await store.put('document', 'broll', result.document)), plan: args.plan };
-  }, project: outputs => ({ broll: { ...host.task.broll!, ...(outputs.plan as unknown as Plan) } }) })];
+  }, project: outputs => ({ document: store.read<EditorDocumentV2>(outputs.document, 'document'), broll: { ...host.task.broll!, ...(outputs.plan as unknown as Plan) } }) })];
 }

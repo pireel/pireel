@@ -36,3 +36,26 @@ it('adds an uploaded asset directly to the timeline without an AI candidate',()=
  expect(resolveBrollEdits([],[],next,20)[0]).toMatchObject({id:'manual-1',start:5,duration:3,sourceIn:2});
  expect(()=>resolveBrollEdits([],[],{...next,manualClips:[{...next.manualClips[0],assetId:'foreign'}]},20)).toThrow();
 });
+
+it('passes only contract fields of saved assets into the workflow', async () => {
+  const { brollWorkflowDefinition } = await import('./workflow-broll-template');
+  const { assertWorkflowValue } = await import('./workflow-schema');
+  const { brollAssetSchema } = await import('./workflow-node-contracts');
+  const asset = { id: 'a', sig: 's', name: 'clip.mp4', kind: 'video' as const, durationSec: 12, width: 720, height: 1280, hasAudio: false };
+  const definition = brollWorkflowDefinition({ caption: {}, aspect: 'original', shortenPauses: false, broll: { assets: [asset as never], captions: true } }, null, null, 'p', 40, null);
+  const analysis = definition.steps.find(step => step.id === 'analysis')!;
+  const assets = (analysis.arguments.assets as { value: unknown[] }).value;
+  expect(assets).toEqual([{ id: 'a', sig: 's', name: 'clip.mp4', kind: 'video', durationSec: 12, width: 720, height: 1280 }]);
+  for (const item of assets) expect(() => assertWorkflowValue(item, brollAssetSchema)).not.toThrow();
+});
+
+it('starts a shot on the word it illustrates and lets it run past a short sentence', async () => {
+  const { brollCues, brollPlacementAnchor } = await import('./broll-task');
+  const cues = brollCues([{ start: 52, end: 52.9, text: '一包咖啡。', words: [{ start: 52, text: '一' }, { start: 52.1, text: '包' }, { start: 52.5, text: '咖' }, { start: 52.6, text: '啡' }] }, { start: 57.3, end: 58.8, text: '还有一个跳绳。' }], 120);
+  expect(cues).toHaveLength(2); expect(cues[0].anchors?.[2]).toMatchObject({ id: 2, start: 52.5 });
+  const candidates = [{ id: 'coffee-0', assetId: 'coffee', start: 0, end: 5, description: 'two cups' }];
+  const [shot] = validateBrollPlan([{ cueId: 0, wordId: 2, candidateId: 'coffee-0' }], cues, candidates, 120);
+  expect(shot).toEqual({ id: 'broll-0-2', candidateId: 'coffee-0', start: 52.5, duration: 5 });
+  expect(brollPlacementAnchor(shot.id)).toEqual({ cueId: 0, wordId: 2 });
+  expect(() => validateBrollPlan([{ cueId: 0, wordId: 9, candidateId: 'coffee-0' }], cues, candidates, 120)).toThrow('词位');
+});
