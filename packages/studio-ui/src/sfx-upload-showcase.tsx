@@ -12,6 +12,12 @@ const PURPOSES = {
   reveal: { zh: '揭示', en: 'Reveal' },
   confirmation: { zh: '确认', en: 'Confirm' },
   question: { zh: '提问', en: 'Question' },
+  emphasis: { zh: '强调', en: 'Emphasis' },
+  money: { zh: '金额', en: 'Money' },
+  achievement: { zh: '成就', en: 'Achievement' },
+  reaction: { zh: '反应', en: 'Reaction' },
+  comedic: { zh: '反转', en: 'Comedic' },
+  cta: { zh: '引导', en: 'Call to action' },
 };
 
 /** One local listening pack: every licensed library sound, in catalog order. */
@@ -51,7 +57,7 @@ export function SfxUploadShowcase({ locale }: { locale: 'zh' | 'en' }) {
   };
   const activeEntry = playing && position > 0 ? pack.entries[Math.max(0, pack.entries.findLastIndex(entry => entry.startSec <= position))] : null;
   const purpose = activeEntry ? sfxSound(activeEntry.id)?.purpose : null;
-  const cueName = purpose ? PURPOSES[purpose]?.[locale] : null;
+  const cueName = purpose ? PURPOSES[purpose as keyof typeof PURPOSES]?.[locale] : null;
   const progress = Math.min(1, position / pack.durationSec);
   return <div className="my-4 space-y-3" aria-label={zh ? '音效示例' : 'Sound effect example'}>
     <audio ref={audio} src={packUrl} preload="none" onTimeUpdate={event => setPosition(event.currentTarget.currentTime)} onEnded={() => { setPlaying(false); setPosition(0); if (audio.current) audio.current.currentTime = 0; }} onPause={() => setPlaying(false)} onError={() => { setPlaying(false); setError(zh ? '试听暂不可用。' : 'Preview unavailable.'); }} />

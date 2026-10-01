@@ -30,8 +30,9 @@ import select_004 from './sfx-library-assets/select_004.wav?url';
 import switch_001 from './sfx-library-assets/switch_001.wav?url';
 import switch_003 from './sfx-library-assets/switch_003.wav?url';
 import bong_001 from './sfx-library-assets/bong_001.wav?url';
-import type { SfxSoundId } from '@pireel/studio-engine/sfx-library';
-export const SFX_LIBRARY_URLS: Record<SfxSoundId, string> = {
+import { sfxPackUrl, type SfxSoundId } from '@pireel/studio-engine/sfx-library';
+/** Bundled interface cues; the short-video pack is hosted (sfxPackUrl). */
+export const SFX_LIBRARY_URLS: Partial<Record<SfxSoundId, string>> = {
   'confirmation-001': confirmation_001,
   'confirmation-002': confirmation_002,
   'confirmation-003': confirmation_003,
@@ -71,7 +72,8 @@ const cache = new Map<string, Float32Array>();
 export async function loadSfxLibrarySound(id: SfxSoundId, signal: AbortSignal) {
   signal.throwIfAborted();
   const cached = cache.get(id); if (cached) return cached;
-  const response = await fetch(SFX_LIBRARY_URLS[id], { signal });
+  const url = SFX_LIBRARY_URLS[id] ?? sfxPackUrl(id); if (!url) throw new Error('音效资源不存在。');
+  const response = await fetch(url, { signal });
   if (!response.ok) throw new Error('音效资源加载失败，请重试。');
   const pcm = await toMono(await decodeAudioFile(await response.blob()), 48000); signal.throwIfAborted();
   cache.set(id, pcm); return pcm;

@@ -38,7 +38,7 @@ export async function renderSfxAudio(host: SceneWorkflowHost, document: EditorDo
     } else pcm = await loadSfxLibrarySound(sound.id, host.hooks.signal);
     host.check();
     const start = Math.round(event.start * document.canvas.fps) / document.canvas.fps;
-    const mixed = mixSoundToSpeech(pcm, 48000, profile, start, intensity, event.muted ? new Float32Array(profile.peaks.length) : reserved, event.generated ? 5 : 1.5);
+    const mixed = mixSoundToSpeech(pcm, 48000, profile, start, intensity, event.muted ? new Float32Array(profile.peaks.length) : reserved, event.generated ? 5 : Math.max(1.5, Math.min(5, sound.durationSec + .05)));
     const audio = await cacheAudio(host, mixed.pcm, 48000, [SFX_MIX_VERSION, SFX_LIBRARY_VERSION, media.sig, start, event.generated?.sig ?? sound.sha256, intensity, planKey], `${event.generated ? event.generated.name.replace(/\.mp3$/, '') : sound.id}--${intensity}.wav`);
     const id = 'auto-sfx-mixed-' + index;
     next = await addAudio(host, next, audio, 'sfx', id, start, 0);

@@ -258,9 +258,73 @@ export const SFX_LIBRARY = [
     "sha256": "adecbca6c48c80245191a93e04229681d7026f73930d83d6b5a5eeb8c8e24232"
   }
 ] as const;
-export type SfxSoundId = typeof SFX_LIBRARY[number]['id'];
+
+/**
+ * Short-video effects pack: punchy one-shots for spoken short video (transitions, reveals, accents,
+ * money, reactions, questions, comedic beats, calls to action). Bytes are hosted, not bundled:
+ * `${base}/<id>-<sha256 first 12>.wav` (48 kHz mono, trimmed, peak -1 dBFS); scripts/upload-sfx-pack.ts
+ * ships them. `use` tells the matcher when a sound fits.
+ */
+export const SFX_PACK_VERSION = 'short-video-1';
+export const SFX_PACK = [
+  { id: "whoosh-fast", label: "快速嗖", en: "Whoosh fast", purpose: "transition", use: "A quick move between ideas, a cut or a new topic", durationSec: 0.3605, sha256: "6d09117549b42bee60ff8aace6a88aeaefa1ac8fde6d1765874fc42589c18962" },
+  { id: "whoosh-soft", label: "轻柔嗖", en: "Whoosh soft", purpose: "transition", use: "A gentle scene or topic change in calm narration", durationSec: 0.5764, sha256: "61bfa03c5ccbb464295bac5168d28b1d2aec2c2c929a135a9eadf68ef584ea6f" },
+  { id: "whoosh-deep", label: "厚重嗖", en: "Whoosh deep", purpose: "transition", use: "A dramatic turn or a big reveal coming up", durationSec: 0.5774, sha256: "1275d5fa6852cc19f29224093e6a49062ecacfe76030f6cfd4e99fdcdfa75a40" },
+  { id: "swish-short", label: "短甩", en: "Swish short", purpose: "transition", use: "Quick on-screen text or item flying in", durationSec: 0.2886, sha256: "4837447d999af83d31962f3dbfa2c30ec0b06c381ab2bfff76de9447c3d51b69" },
+  { id: "riser", label: "上升蓄势", en: "Riser", purpose: "transition", use: "Building up to a reveal or a punchline", durationSec: 1.76, sha256: "9ff2745157c21548f635caf3c4ff149a15d344c6f7e623b775b00943242969a3" },
+  { id: "pop-bubble", label: "气泡 pop", en: "Pop bubble", purpose: "reveal", use: "An item, word or card appearing; repeat it for each item in a list", durationSec: 0.1482, sha256: "2ce3c80cbc2dd9f48a53a20bac194e6065b7f6bdf90335b173dd186687a3607c" },
+  { id: "pop-soft", label: "柔和 pop", en: "Pop soft", purpose: "reveal", use: "A light appearance in calm narration; list items at low intensity", durationSec: 0.48, sha256: "9ae6fbe7b3b5b7d19b0f01d6b6287960bd0976de612ef494b8d5d0acd4e0b325" },
+  { id: "pop-cork", label: "开瓶 pop", en: "Pop cork", purpose: "reveal", use: "A fun or festive reveal", durationSec: 0.3105, sha256: "f5246c8e24541866227b1c31ea5c00675557a0c00c95801b1e40a1fa76041bae" },
+  { id: "sparkle", label: "闪光", en: "Sparkle", purpose: "reveal", use: "Something special, premium or surprising is revealed", durationSec: 1.2, sha256: "97999985fb68d1bdc5af266c12ef13ae300b7fe7ed2cc5ce3bb0e221e7d349e6" },
+  { id: "magic-chime", label: "魔法铃", en: "Magic chime", purpose: "reveal", use: "A delightful surprise or gift", durationSec: 1.2, sha256: "dbf0581c6a35247fe86cdb44d70c62ceb974b13cd4123e0591227094af584878" },
+  { id: "ta-da", label: "登登", en: "Ta-da", purpose: "reveal", use: "Presenting the result or the main item with a flourish", durationSec: 0.5914, sha256: "e6b74c70aebbfa59168ad67a1bec045a89821b1c1ee8d2f77c89709609c5e753" },
+  { id: "box-open", label: "开箱", en: "Box open", purpose: "reveal", use: "Opening a package, box or envelope", durationSec: 0.559, sha256: "d530f6fb6285adde830d2fbe826b8d33228048ed20f186dad9d96cfe05e7a07e" },
+  { id: "paper-rustle", label: "纸张", en: "Paper rustle", purpose: "reveal", use: "Unwrapping, handling paper, a letter or a card", durationSec: 0.8148, sha256: "08be8c89cf1cf83f6fbf4ccb916bceab3b14ae31aefa140810caeb38d499f852" },
+  { id: "page-flip", label: "翻页", en: "Page flip", purpose: "reveal", use: "A book, report or document is shown; moving to the next point", durationSec: 0.5877, sha256: "476c19936249c1c75282d6710980760d19a2802d91bb57d663f97ec52ddabae5" },
+  { id: "ding-bell", label: "叮", en: "Ding bell", purpose: "emphasis", use: "A key fact, name or number worth noticing", durationSec: 1.0, sha256: "20c2207882a90d45c2227e759672bb7a54a43ec3cb709233f1adbecbb1e3316c" },
+  { id: "ding-high", label: "高音叮", en: "Ding high", purpose: "emphasis", use: "A small highlight or a correct point", durationSec: 0.3124, sha256: "eb4ef167c78208ae5358f87b88979e073523a2370bab9ff375383cf6c2cc793c" },
+  { id: "tick", label: "滴答点", en: "Tick", purpose: "emphasis", use: "Ticking off steps or small points quickly", durationSec: 0.0929, sha256: "d88997aae11a2692bc93be79caed5ef42150531eb939b685065db9f594f6ca5a" },
+  { id: "snap", label: "响指", en: "Snap", purpose: "emphasis", use: "A quick idea, 'just like that', an instant change", durationSec: 0.179, sha256: "9e10b30b1c84b71e6acf49616c8be6be68fbab2c03fc34f02ad4af67bcac5828" },
+  { id: "impact-boom", label: "重击", en: "Impact boom", purpose: "emphasis", use: "A big number, a shocking claim or the main punchline", durationSec: 1.2, sha256: "4942decd59cc17ee233be7cf7dd70f030b67c83b22ccbba737fc2042214c310e" },
+  { id: "impact-thud", label: "闷击", en: "Impact thud", purpose: "emphasis", use: "A firm statement landing, a conclusion", durationSec: 0.316, sha256: "e88c78d106f2681f8b34542b36246867c6b71ca2dad18ae4bfe0dd2085a6186d" },
+  { id: "cash-register", label: "收银", en: "Cash register", purpose: "money", use: "A price, cost, value or money amount just said", durationSec: 0.4685, sha256: "1b89095eec6458f2d3fbade5038e88d5b809097e846316794dcb43ef85eb2624" },
+  { id: "coins", label: "硬币", en: "Coins", purpose: "money", use: "Saving money, small amounts, discounts", durationSec: 0.8124, sha256: "32cfe731255e1996062d875797c4a56d555ecf900b062d0e40d3962c95bb7b23" },
+  { id: "ka-ching", label: "叮铃", en: "Ka-ching", purpose: "money", use: "A deal, profit or 'worth it' moment", durationSec: 0.8, sha256: "bac8a14806a2259050e67bd000e5b065ca11ab0bc420d1684ab02f32135c8b3d" },
+  { id: "level-up", label: "升级", en: "Level up", purpose: "achievement", use: "Progress, growth, a milestone or an upgrade", durationSec: 0.9596, sha256: "0b124d32e0d718ea83f2f0b2e28f8456663b5f7d029a14c5a281c240f677f8c5" },
+  { id: "success", label: "成功", en: "Success", purpose: "achievement", use: "Something done, solved or achieved", durationSec: 0.6515, sha256: "b5aafe573ce488450b40082a2899f044d615963b082bdddf3ecd389dc8964f0f" },
+  { id: "applause", label: "掌声", en: "Applause", purpose: "achievement", use: "An impressive result, thanks or congratulations", durationSec: 1.7694, sha256: "08175b5618425054d3e34dba336be79a4d05e8e18e568ad41ec0a6face537702" },
+  { id: "crowd-wow", label: "惊叹", en: "Crowd wow", purpose: "reaction", use: "An impressive number or fact the audience should react to", durationSec: 1.2464, sha256: "f42dd987860e014cb07b14ab3c3991b7aa5172d4180072639dfcd6b1cdf858ba" },
+  { id: "crowd-laugh", label: "笑声", en: "Crowd laugh", purpose: "reaction", use: "A joke or a funny moment", durationSec: 1.6019, sha256: "268e71102af1b55c1075d21d708d3b2caf1b76588625ffbf940132b34919f9c4" },
+  { id: "cheer", label: "欢呼", en: "Cheer", purpose: "reaction", use: "Celebration, a win or an announcement of prizes", durationSec: 1.5662, sha256: "3ab8849fd12ab4c4ec5d253f4a3d5d5d915680c4dfd66bf014df9a0fe688015f" },
+  { id: "gasp", label: "惊讶吸气", en: "Gasp", purpose: "reaction", use: "A surprising twist or unexpected detail", durationSec: 0.7795, sha256: "4759cd625473f3796b85c56dddcf1aa3b6c57e36acdd9575cdc5a32dc8975bf3" },
+  { id: "question-boing", label: "疑问", en: "Question boing", purpose: "question", use: "A question to the audience or a puzzling item", durationSec: 0.6031, sha256: "9b88199585d9486dbd414625cec06ffd3b781922b36f234821ce845052593e1c" },
+  { id: "hmm", label: "思考", en: "Hmm", purpose: "question", use: "Thinking, uncertainty, 'let's see'", durationSec: 0.3825, sha256: "653793a2a95724803bbcb2b7eb67e918baf9c7c9860e8943aaabbc4a85cb8cb8" },
+  { id: "suspense", label: "悬念", en: "Suspense", purpose: "question", use: "A mystery before a reveal, 'what is it?'", durationSec: 1.1666, sha256: "8e0dfbb712731ac30844bcb5a5c6a733adb1bde983f02707e9ac7901371501da" },
+  { id: "drumroll", label: "鼓点滚奏", en: "Drumroll", purpose: "question", use: "Right before announcing a winner, price or result", durationSec: 1.0428, sha256: "4441db34a31eef5294217c59096e2916af1a3541ed0ceff419049774ccbc93f6" },
+  { id: "record-scratch", label: "唱片刮擦", en: "Record scratch", purpose: "comedic", use: "Stopping abruptly, 'wait, what?', a twist", durationSec: 0.6771, sha256: "9d52d6eb73daf488960749f802da2714dcad0ead0205a677825a862b9483aea5" },
+  { id: "sad-trombone", label: "失落长号", en: "Sad trombone", purpose: "comedic", use: "A fail, disappointment or 'unfortunately'", durationSec: 1.1349, sha256: "1038bfd321083b9edd500fd3d519e2fe92634079efdc09049a056b13f5a63921" },
+  { id: "buzzer", label: "错误蜂鸣", en: "Buzzer", purpose: "comedic", use: "Something wrong, a mistake or a myth", durationSec: 0.5179, sha256: "065a15168ef527c4cb0c12307e2c4657088440457de2e9fec283ec5a04e64ac9" },
+  { id: "crickets", label: "蟋蟀冷场", en: "Crickets", purpose: "comedic", use: "An awkward silence or a joke that falls flat", durationSec: 1.7578, sha256: "bc51f6182fc072a32bf6ecde3c912bda502373edc5b1aeefccea3214cbf82bb4" },
+  { id: "notification", label: "通知", en: "Notification", purpose: "cta", use: "Pointing to comments, follow, subscribe or a link", durationSec: 1.0, sha256: "e2c633b6157c1f4039772745ec89b6a895354d23f64655996746c9fe6319151a" },
+  { id: "swipe-up", label: "上滑", en: "Swipe up", purpose: "cta", use: "Asking viewers to check below, swipe or click", durationSec: 0.48, sha256: "9208b3dbb58614e2c631408e421d2524aeb32ce0c764698b0f4ed201bbf02f81" },
+  { id: "typing", label: "打字", en: "Typing", purpose: "cta", use: "Typing, coding, writing or searching", durationSec: 1.0805, sha256: "d6e71167aafced68592064b7bba08993cdc811ab11ecfc1fe357b521d1ab6bb0" },
+  { id: "shutter", label: "快门", en: "Shutter", purpose: "cta", use: "A photo, screenshot or 'take a look at this'", durationSec: 0.281, sha256: "dcb1ccf572964c79bfab826d0dccafc26fdc96556118cf102eee27552e579b4f" },
+  { id: "mouse-click", label: "鼠标点击", en: "Mouse click", purpose: "cta", use: "Clicking, selecting or pressing a button on screen", durationSec: 0.4599, sha256: "a020d30046bfefcf11e562418e3255e96cd493e04ffdbdc4d692af3444b58369" },
+  { id: "outro", label: "结尾", en: "Outro", purpose: "transition", use: "Saying goodbye, the last line of the video", durationSec: 0.7572, sha256: "8526d72740e7c0e08043f592298c3dee7a3e03ccf85806c5fce02c25d69e2db2" },
+] as const;
+const DEFAULT_SFX_PACK_BASE = 'https://cdn.pireel.com/sfx';
+let sfxPackBase = DEFAULT_SFX_PACK_BASE;
+/** Shell hook: serve the pack from another base (same layout). */
+export function setSfxPackBase(base: string): void { sfxPackBase = (base || DEFAULT_SFX_PACK_BASE).replace(/\/+$/, ''); }
+export const sfxPackFile = (sound: { id: string; sha256: string }) => `${sound.id}-${sound.sha256.slice(0, 12)}.wav`;
+export function sfxPackUrl(id: string): string | undefined {
+  const sound = SFX_PACK.find(entry => entry.id === id);
+  return sound ? `${sfxPackBase}/${sfxPackFile(sound)}` : undefined;
+}
+export type SfxSoundId = typeof SFX_LIBRARY[number]['id'] | typeof SFX_PACK[number]['id'];
 export type SfxIntensity = 'gentle' | 'normal' | 'emphasis';
-export const sfxSound = (id: string) => SFX_LIBRARY.find(sound => sound.id === id);
+type SfxEntry = { id: SfxSoundId; label: string; purpose: string; durationSec: number; sha256: string; en?: string; use?: string; family?: string };
+export const sfxSound = (id: string): SfxEntry | undefined => (SFX_LIBRARY as readonly SfxEntry[]).find(sound => sound.id === id) ?? (SFX_PACK as readonly SfxEntry[]).find(sound => sound.id === id);
 export function legacySfxSound(style: string, index: number) {
   const purpose = style === 'whoosh' ? 'transition' : style === 'pop' ? 'accent' : 'confirmation';
   const choices = SFX_LIBRARY.filter(sound => sound.purpose === purpose);
@@ -270,6 +334,7 @@ export function legacySfxSound(style: string, index: number) {
 export function sfxSoundLabel(id: string, locale: 'zh' | 'en') {
   const sound = sfxSound(id); if (!sound) return undefined;
   if (locale === 'zh') return sound.label;
+  if (sound.en) return sound.en;
   const [group, variant] = id.split('-');
   return group.charAt(0).toUpperCase() + group.slice(1) + ' ' + Number(variant);
 }

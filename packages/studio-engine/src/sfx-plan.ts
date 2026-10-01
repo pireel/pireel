@@ -16,7 +16,7 @@ export const SFX_DENSITIES = [
 /** Density is an editorial preference for the model, never a numeric post-processing quota. */
 export function sfxDensityGuidance(density: SfxDensity) {
   return {
-    low: 'Be restrained: emphasize only key information and important transitions. A meaningful list may still use a short group of repeated cues. Leave routine narration quiet.',
+    low: 'Accent only the strongest beats: the main reveals, key numbers or prices, the big question or twist, and the sign-off. A meaningful list may still use a short group of repeated cues. Leave routine narration quiet.',
     medium: 'Balance emphasis and rhythm: support important words, transitions, and clear list structures. Use deliberate groups where they improve comprehension, with quiet passages between ideas.',
     high: 'Follow the narration more actively: accent meaningful words, enumerations, reveals and transitions. Consecutive list items may each receive a sound. Keep speech clear and leave weak matches quiet.',
   }[density];
