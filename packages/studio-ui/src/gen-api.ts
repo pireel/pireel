@@ -148,7 +148,7 @@ export async function startGeneration(
   return { ok: false, kind: 'error', message: t('chatGen.generationRequestFailed') };
 }
 
-interface RawCreation {
+export interface RawCreation {
   id?: string;
   status?: string;
   prompt?: string;
@@ -164,7 +164,8 @@ function toAssets(data: RawCreation['output_data']): GenAsset[] {
     .map((a) => ({ key: a.url, url: imageThumb(a.url, 'original'), mime: a.mime ?? '' }));
 }
 
-function toJob(raw: RawCreation): GenJob {
+/** A creation row as the generation panels show it. */
+export function genJobFromCreation(raw: RawCreation): GenJob {
   const status: GenStatus = raw.status === 'succeeded' ? 'succeeded' : raw.status === 'failed' ? 'failed' : 'pending';
   const at = typeof raw.created_at === 'number' ? raw.created_at : Date.parse(String(raw.created_at ?? '')) || Date.now();
   return {
@@ -183,7 +184,7 @@ export async function pollCreation(id: string): Promise<GenJob | null> {
   if (!r.ok) return null;
   const j = (await r.json().catch(() => null)) as RawCreation | null;
   if (!j) return null;
-  return toJob({ ...j, id });
+  return genJobFromCreation({ ...j, id });
 }
 
 /** Fetch this project's generation history (including pending — resume polling on mount). */
@@ -193,7 +194,7 @@ export async function listSpaceGens(spaceId: string, type: 'image' | 'video' | '
   const r = await fetch(`/api/create/list?space_id=${encodeURIComponent(spaceId)}&type=${creationType}&limit=${limit}`);
   if (!r.ok) return r.status === 400 || r.status === 404 ? null : [];
   const j = (await r.json().catch(() => null)) as { items?: RawCreation[] } | null;
-  return (j?.items ?? []).map(toJob).filter((x) => x.id);
+  return (j?.items ?? []).map(genJobFromCreation).filter((x) => x.id);
 }
 
 /** Fetch this project's generation history (including pending — resume polling on mount). */
