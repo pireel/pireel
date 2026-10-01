@@ -38,8 +38,8 @@ export function SceneCreditPreview({ task, options, locale, busy }: { task: Capt
     return <div role="status" className="text-ink-3 mt-3 space-y-1.5 text-center text-xs leading-relaxed">
       <p>{zh ? '本次生成' : 'This generation'} <strong className="text-ink tabular-nums">{quote.estimate}</strong> {zh ? '积分' : 'credits'}</p>
       <p className="text-ink-4">{zh
-        ? `${name.zh}按视频时长 ${perMinute} 积分/分钟${lipSync ? `，口型同步 ${lipSync.perMinute} 积分/分钟（不足 ${lipSync.minSec} 秒按 ${lipSync.minSec} 秒计）` : ''}，每次生成按此扣除。生成失败会退回，已产生的服务费用除外。`
-        : `${name.en}: ${perMinute} credit${perMinute === 1 ? '' : 's'} per minute of video${lipSync ? `; lip sync: ${lipSync.perMinute} per minute (minimum ${lipSync.minSec} seconds)` : ''}, charged per generation. A failed generation is refunded, less any service cost already incurred.`}</p>
+        ? `${name.zh}按视频时长 ${perMinute} 积分/分钟${lipSync ? `，口型同步 ${lipSync.perMinute} 积分/分钟（不足 ${lipSync.minSec} 秒按 ${lipSync.minSec} 秒计）` : ''}`
+        : `${name.en}: ${perMinute} credit${perMinute === 1 ? '' : 's'} per minute of video${lipSync ? `; lip sync: ${lipSync.perMinute} per minute (minimum ${lipSync.minSec} seconds)` : ''}.`}</p>
     </div>;
   }
   const approximate = quote.durationBased || quote.min !== quote.max;
