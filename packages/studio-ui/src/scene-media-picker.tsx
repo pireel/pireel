@@ -28,13 +28,15 @@ export function SceneMediaCard({ name, children, onRemove, disabled, locale, sta
   </div>;
 }
 
-export function SceneMediaPicker({ children, hasItems, disabled, locale, onAdd, onFiles }: {
+export function SceneMediaPicker({ children, hasItems, disabled, locale, onAdd, onFiles, labels }: {
   children: ReactNode; hasItems: boolean; disabled: boolean; locale: 'zh' | 'en'; onAdd: () => void; onFiles?: (files: File[]) => void;
+  /** Wording for a picker that holds something other than footage (e.g. reference images). */
+  labels?: { title: string; upload: string; empty: string };
 }) {
   const zh = locale === 'zh';
   return <div onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); if (!disabled) onFiles?.(Array.from(event.dataTransfer.files)); }}>
-    <div className="mb-3 flex items-center justify-between gap-3 text-sm"><span className="text-ink">{zh ? '我的素材' : 'My footage'}</span><button type="button" disabled={disabled} onClick={onAdd} className="text-ink-3 inline-flex items-center gap-1 text-xs"><Plus size={14}/>{zh ? '上传素材' : 'Upload footage'}</button></div>
+    <div className="mb-3 flex items-center justify-between gap-3 text-sm"><span className="text-ink">{labels?.title ?? (zh ? '我的素材' : 'My footage')}</span><button type="button" disabled={disabled} onClick={onAdd} className="text-ink-3 inline-flex items-center gap-1 text-xs"><Plus size={14}/>{labels?.upload ?? (zh ? '上传素材' : 'Upload footage')}</button></div>
     <div role="region" aria-label={zh ? '素材列表' : 'Footage cards'} className="grid gap-x-1.5 gap-y-3 pt-1" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(88px, 100%), 1fr))' }}>{children}</div>
-    {!hasItems && <button type="button" disabled={disabled} onClick={onAdd} className="bg-panel-2 text-ink-3 flex min-h-28 w-full items-center justify-center gap-2 rounded-md text-sm"><Plus size={18}/>{zh ? '添加图片或视频' : 'Add images or videos'}</button>}
+    {!hasItems && <button type="button" disabled={disabled} onClick={onAdd} className="bg-panel-2 text-ink-3 flex min-h-28 w-full items-center justify-center gap-2 rounded-md text-sm"><Plus size={18}/>{labels?.empty ?? (zh ? '添加图片或视频' : 'Add images or videos')}</button>}
   </div>;
 }
