@@ -8,8 +8,9 @@ import { materializeRemoteMedia } from './remote-media';
  * short-circuits via headObject ("instant" backup) and the same bytes imported on two devices are one
  * object. Video, image and audio all use this one lane.
  *
- * Failures degrade silently (a failed backup ≠ lost functionality: the device copy keeps working and
- * asset-upload-queue retries; a failed retrieval falls back to the panel's re-import card).
+ * A failed backup returns null (the device copy keeps working and asset-upload-queue retries; a
+ * failed retrieval falls back to the panel's re-import card); the reason is logged. Large files go up
+ * in parts and every PUT is retried, so one dropped connection does not lose a long upload.
  */
 
 export interface CloudMediaEntry {
@@ -61,31 +62,67 @@ const mediaContentType = (file: File): string => {
 };
 
 /** Back up a media file to the cloud. Returns {key} whether it already exists (instant) or succeeds; null on failure (silent). */
+/** Files above this go up in parts (the server picks the part size). */
+export const MULTIPART_THRESHOLD_BYTES = 64 * 1024 * 1024;
+const PUT_ATTEMPTS = 4;
+const PART_CONCURRENCY = 4;
+
+async function postMedia(body: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  const response = await fetch('/api/studio/media', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal });
+  const result = await response.json().catch(() => ({})) as Record<string, unknown>;
+  if (!response.ok) throw new Error(`media ${String(body.action)}: ${typeof result.error === 'string' ? result.error : `HTTP ${response.status}`}`);
+  return result;
+}
+
+/** A PUT retried with backoff; `onProgress` restarts from zero on each attempt. */
+async function putWithRetry(url: string, body: Blob, headers: Record<string, string>, options: CloudBackupOptions | undefined, label: string) {
+  for (let attempt = 1; attempt <= PUT_ATTEMPTS; attempt++) {
+    options?.signal?.throwIfAborted();
+    if (await putWithProgress(url, body as File, headers, options)) return;
+    if (attempt < PUT_ATTEMPTS) await new Promise(resolve => setTimeout(resolve, 1000 * 2 ** (attempt - 1)));
+  }
+  options?.signal?.throwIfAborted();
+  throw new Error(`${label}: upload failed after ${PUT_ATTEMPTS} attempts`);
+}
+
+async function multipartBackup(file: File, sig: string, contentType: string, options?: CloudBackupOptions): Promise<{ key: string }> {
+  const start = await postMedia({ action: 'multipart-start', sig, size: file.size, content_type: contentType }, options?.signal);
+  if (start.already) { options?.onProgress?.(1); return { key: String(start.key) }; }
+  const key = String(start.key); const uploadId = String(start.uploadId); const partSize = Number(start.partSize); const urls = start.urls as string[];
+  const loaded = new Float64Array(urls.length);
+  const report = () => options?.onProgress?.(Math.min(1, loaded.reduce((sum, value) => sum + value, 0) / file.size));
+  let next = 0;
+  try {
+    await Promise.all(Array.from({ length: Math.min(PART_CONCURRENCY, urls.length) }, async () => {
+      while (next < urls.length) {
+        const index = next++; const part = file.slice(index * partSize, Math.min(file.size, (index + 1) * partSize));
+        await putWithRetry(urls[index]!, part, {}, { signal: options?.signal, onProgress: (fraction) => { loaded[index] = fraction * part.size; report(); } }, `part ${index + 1}/${urls.length}`);
+        loaded[index] = part.size; report();
+      }
+    }));
+    await postMedia({ action: 'multipart-complete', sig, size: file.size, uploadId }, options?.signal);
+  } catch (error) {
+    await postMedia({ action: 'multipart-abort', sig, uploadId }).catch(() => {});
+    throw error;
+  }
+  return { key };
+}
+
 export async function cloudBackupMedia(file: File, sig: string, options?: CloudBackupOptions): Promise<{ key: string } | null> {
   try {
     const contentType = mediaContentType(file);
-    const r = await fetch('/api/studio/media', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ action: 'put', sig, size: file.size, content_type: contentType }),
-      signal: options?.signal,
-    });
-    if (!r.ok) return null;
-    const j = (await r.json()) as { key: string; url?: string; already?: boolean; content_type?: string };
+    if (file.size > MULTIPART_THRESHOLD_BYTES && !contentType.startsWith('image/')) return await multipartBackup(file, sig, contentType, options);
+    const j = await postMedia({ action: 'put', sig, size: file.size, content_type: contentType }, options?.signal) as { key: string; url?: string; already?: boolean; content_type?: string };
     if (j.already) {
       options?.onProgress?.(1);
       return { key: j.key };
     }
     if (!j.url) return null;
     // The presign signs in Content-Type + Cache-Control; the PUT must send identical headers or the signature fails
-    const ok = await putWithProgress(
-      j.url,
-      file,
-      { 'Content-Type': j.content_type ?? contentType, 'Cache-Control': 'public, max-age=2592000, immutable' },
-      options,
-    );
-    return ok ? { key: j.key } : null;
-  } catch {
+    await putWithRetry(j.url, file, { 'Content-Type': j.content_type ?? contentType, 'Cache-Control': 'public, max-age=2592000, immutable' }, options, 'upload');
+    return { key: j.key };
+  } catch (error) {
+    if (!options?.signal?.aborted) console.warn('[cloud-media] backup failed', error instanceof Error ? error.message : error);
     return null;
   }
 }

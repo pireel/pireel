@@ -82,14 +82,21 @@ Imported or generated audio lives as a clip on its typed lane: pass the helper's
 `source [inSec, outSec]` retrims and `move_clips` for timing. Narration placed this way is
 transcript-readable with `get_transcript` when word timing matters.
 
-**Sound effects** have three sources — use them in this order:
+**Sound effects** score the beats a viewer should feel — reveals, key numbers and prices,
+questions, twists, topic changes, calls to action, the sign-off — and leave filler and routine
+narration quiet. Give one role the same sound across the video (every list item, every price) so
+the edit has a rhythm. They have three sources — use them in this order:
 
-1. **An existing sound** — the user's files, or a library asset found with `search_assets
-   {kind:"audio"}` (official library first; reuse a timing-compatible sound before generating
-   anything) → `add_clips {role:"sfx"}` (with `register_media` first only for remote results).
-2. **`generate_audio {kind:"sfx"}` — off-screen / editorial sound from a text description**
-   (server-side, so it also works over MCP; charges credits, 0.5–22 s). This is the path for
-   whooshes, UI pings, stingers, risers, impacts and ambience beds — sounds no picture drives.
+1. **An existing sound** — the user's files, or the official sound effects pack:
+   `search_assets {scope:"official", kind:"audio", query}` naming the beat ("price", "reveal",
+   "whoosh", "question", "sign-off"); each result says when it fits. Reuse a timing-compatible
+   sound before generating anything → `add_clips {role:"sfx"}` (with `register_media` first only
+   for remote results).
+2. **A new off-screen / editorial sound from a text description.** If your own environment can
+   generate audio, make it there and bring the file in with `import_media`; otherwise
+   `generate_audio {kind:"sfx"}` (server-side, so it also works over MCP; charges credits,
+   0.5–22 s). This is the path for what the pack lacks — a specific whoosh, stinger, impact or an
+   ambience bed — sounds no picture drives.
    Describe the *sound*, not the scene: source, material, motion, intensity, perspective, duration
    feel ("short airy whoosh, fast, passing left to right"; "soft glass notification ping, single
    hit"). Keep hits and whooshes at 0.5–2 s; use `loop:true` only for ambience beds. Never ask it
@@ -109,8 +116,9 @@ transcript-readable with `get_transcript` when word timing matters.
 Place every generated result with `register_media` and **one** `add_clips` call using `role: "sfx"`
 and no `trackId`, so overlapping hits land on parallel SFX lanes. Anchor each SFX at its editorial
 frame, keep it short, never stack two on the same beat, and set level and fades in the same
-`add_clips` items or one `set_clip_properties` call — a sound effect that is louder than the voice is
-a mistake, not emphasis.
+`add_clips` items or one `set_clip_properties` call — an effect should be clearly audible — accents a few dB
+under the voice, a payoff hit (a price, an impact) near it — but one louder than the voice is a
+mistake, not emphasis.
 
 ## Transitions: `add_transition`
 

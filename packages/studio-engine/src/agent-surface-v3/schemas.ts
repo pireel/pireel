@@ -198,7 +198,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   /* ------------------------------------------------------------------ assets */
   search_assets: {
     description:
-      'Find reusable assets in one explicit scope: mine (this project\'s library — the files the user added to this project; get_state already lists them), cloud (the account\'s uploads and generations across all projects), official (curated stickers, music and sound), all (only for a cross-library request), or stock (online media with author and licence: Wikimedia Commons always, Pexels/Pixabay when the server has their keys; the receipt names the provider). Omit query to list a scope. Results carry ids you can pass straight to add_clips / insert_clips (they are registered on placement); stock results carry an opaque import payload for register_media. Prefer an existing timing-compatible sound or image here before generating one. Device-local bytes are never readable from the server; use import_media for those.',
+      'Find reusable assets in one explicit scope: mine (this project\'s library — the files the user added to this project; get_state already lists them), cloud (the account\'s uploads and generations across all projects), official (curated stickers, music, and a short-video sound effects pack whose results say when each sound fits), all (only for a cross-library request), or stock (online media with author and licence: Wikimedia Commons always, Pexels/Pixabay when the server has their keys; the receipt names the provider). Omit query to list a scope. Results carry ids you can pass straight to add_clips / insert_clips (they are registered on placement); stock results carry an opaque import payload for register_media. Prefer an existing timing-compatible sound or image here before generating one. Device-local bytes are never readable from the server; use import_media for those.',
     inputSchema: obj({
       scope: enumOf(['mine', 'cloud', 'official', 'all', 'stock']),
       query: str('Name, category, mood or use case (≤200 characters); stock needs a concrete visual query.'),
@@ -607,7 +607,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   generate_audio: {
     description:
-      `${CHARGE_MARKER} Generate one audio asset from text and return it registered-ready. kind=music: an instrumental bed, 30–300 s, prompt = genre/instrumentation + energy + role under the picture + constraints. kind=sfx: one sound effect 0.5–22 s for off-screen or editorial sound (whoosh, ping, stinger, ambience) — describe the sound, not the scene; promptInfluence 0–1 (default 0.3), loop for seamless beds. Then register_media and add_clips with role music or sfx. Search official assets first. Picture-synchronous sound timed to a clip's own motion is generate_foley.`,
+      `${CHARGE_MARKER} Generate one audio asset from text and return it registered-ready. kind=music: an instrumental bed, 30–300 s, prompt = genre/instrumentation + energy + role under the picture + constraints. kind=sfx: one sound effect 0.5–22 s for off-screen or editorial sound (whoosh, ping, stinger, ambience) — describe the sound, not the scene; promptInfluence 0–1 (default 0.3), loop for seamless beds. Then register_media and add_clips with role music or sfx. Search official assets first; an agent that can generate audio itself does so and imports the file instead. Picture-synchronous sound timed to a clip's own motion is generate_foley.`,
     inputSchema: obj({
       kind: enumOf(['music', 'sfx']),
       prompt: str(),
