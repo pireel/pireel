@@ -19,6 +19,7 @@ import {
   Play,
   Pause,
   FileVideo,
+  FolderOutput,
   Code2,
   Loader2,
   Wand2,
@@ -290,7 +291,9 @@ import {
 
 import { useGenerationLock } from "./use-generation-lock";
 import { useMediaAnalysis } from "./use-media-analysis";
-import { useStudioExport } from "./use-export";
+import { downloadBlob, useStudioExport } from "./use-export";
+import { buildNlePackage, NleExportCanceled } from "./nle-export-package";
+import { NleExportDialog, type NleExportState } from "./nle-export-dialog";
 import {
   DEFAULT_RENDER_OPTS,
   EMPTY_VIDEO_GROUND,
@@ -8769,6 +8772,48 @@ export function HyperframesWorkbench({
                   </div>
                 )}</>;
 
+  /** Export for other editors: timeline XML + media + transparent graphics + subtitles, one zip. */
+  const [nleExport, setNleExport] = useState<NleExportState | null>(null);
+  const nleCancelRef = useRef(false);
+  const startNleExport = async () => {
+    if (nleExport?.phase === "running") return;
+    nleCancelRef.current = false;
+    setNleExport({ phase: "running", stage: "media", pct: 0 });
+    // Stage weights for one progress bar: media 0–30, graphics 30–90, packing 90–100.
+    const span = { media: [0, 30], graphics: [30, 90], package: [90, 100] } as const;
+    try {
+      await prepareExportAssets(editorDocumentRef.current);
+      const rows = isCaptionsOn(compRef.current) ? transcriptControls.rows : [];
+      const cue = (start: number, dur: number | undefined, text: string) => ({ startSec: start, endSec: start + (dur ?? 2), text });
+      const result = await buildNlePackage({
+        document: editorDocumentRef.current,
+        comp: compRef.current,
+        title: projectOutputs.outputs.active.title || t("workbench.untitledOutput"),
+        assetFile: async (asset) => {
+          const url = resolveAssetUrl(asset);
+          if (!url) return null;
+          const type = asset.kind === "audio" ? "audio/mpeg" : asset.kind === "image" ? "image/png" : "video/mp4";
+          return (await materializeRemoteMedia(url, { name: asset.label || asset.id, type })).file;
+        },
+        captions: rows.map((row) => cue(row.editedStart, row.dur, row.text)),
+        translatedCaptions: rows.flatMap((row) => (row.sub ? [cue(row.editedStart, row.dur, row.sub)] : [])),
+        shouldCancel: () => nleCancelRef.current,
+        onProgress: (stage, done, total) => {
+          const [from, to] = span[stage];
+          setNleExport({ phase: "running", stage, pct: Math.round(from + ((to - from) * done) / Math.max(1, total)) });
+        },
+      });
+      downloadBlob(result.blob, result.fileName);
+      setNleExport({ phase: "done", notes: result.notes, fileName: result.fileName });
+    } catch (error) {
+      if (error instanceof NleExportCanceled || nleCancelRef.current) {
+        setNleExport(null);
+        return;
+      }
+      setNleExport({ phase: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+  };
+
   const exportControls = <TooltipProvider delayDuration={200}>
             <div className="flex shrink-0 items-center gap-2">
               {/* Split button like the asset panel's import control: main half exports the active
@@ -8821,9 +8866,22 @@ export function HyperframesWorkbench({
                       <Layers size={13} />
                       {t("workbench.batchExport")}
                     </DropdownMenuItem>
+                    <DropdownMenuItem
+                      disabled={!hasContent || nleExport?.phase === "running"}
+                      onSelect={() => void startNleExport()}
+                      className="text-[12px]"
+                    >
+                      <FolderOutput size={13} />
+                      {t("workbench.exportForEditors")}
+                    </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
+              <NleExportDialog
+                state={nleExport}
+                onCancel={() => { nleCancelRef.current = true; }}
+                onClose={() => setNleExport(null)}
+              />
               <BatchExportDialog
                 open={batchExportOpen}
                 onOpenChange={setBatchExportOpen}

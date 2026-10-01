@@ -1205,3 +1205,68 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     overlay.dispose();
   }
 }
+
+/* ============================ Graphics for other editors ============================ */
+
+/** One graphic clip to render alone: its block id and timeline window. */
+export interface GraphicRenderJob {
+  blockId: string;
+  startSec: number;
+  durationSec: number;
+}
+
+/** Render graphic blocks one at a time on a transparent ground, every frame of their window, as PNG
+ *  bytes at the composition's full size — the same document, seek and rasterizer as the video export,
+ *  serializing only that block. A frame whose markup did not change reuses the previous PNG. */
+export async function renderGraphicFramesPng(opts: {
+  comp: Composition;
+  jobs: readonly GraphicRenderJob[];
+  fps: number;
+  onGraphic: (blockId: string, frames: Uint8Array[]) => Promise<void> | void;
+  onProgress?: (done: number, total: number) => void;
+  shouldCancel?: () => boolean;
+}): Promise<void> {
+  const { comp, fps } = opts;
+  assertExportableComposition(comp);
+  const W = comp.width;
+  const H = comp.height;
+  const overlay = await createOverlay(injectPreviewRuntime(assembleHtml(comp)), W, H);
+  try {
+    await inlineImages(overlay.root);
+    const text = overlay.root.textContent ?? '';
+    const fontCss = await buildInlineFontCss(text, undefined, compositionLocalFontFamilies(comp), compositionWebFontIds(comp));
+    const css = `${fontCss}\n${overlay.headCss}\n#root{background:transparent !important;}`;
+    await warmInlineFonts(css, text, W, H, W, H);
+    const canvas = document.createElement('canvas');
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext('2d')!;
+    const total = opts.jobs.reduce((sum, job) => sum + Math.max(1, Math.round(job.durationSec * fps)), 0);
+    let done = 0;
+    for (const job of opts.jobs) {
+      const count = Math.max(1, Math.round(job.durationSec * fps));
+      const frames: Uint8Array[] = [];
+      let lastMarkup = '';
+      for (let i = 0; i < count; i += 1) {
+        if (opts.shouldCancel?.()) throw new ExportCanceled();
+        overlay.win.__hfPreview!.seekTimelines(job.startSec + i / fps);
+        const markup = serializeBrowserOverlayElements(overlay.root, overlay.doc, [{ id: job.blockId }]);
+        if (markup === lastMarkup && frames.length) {
+          frames.push(frames[frames.length - 1]!);
+        } else {
+          lastMarkup = markup;
+          const image = await rasterize('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgOpen(W, H, W, H, css) + markup + SVG_CLOSE));
+          ctx.clearRect(0, 0, W, H);
+          ctx.drawImage(image, 0, 0);
+          const png = await new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('PNG encoding failed'))), 'image/png'));
+          frames.push(new Uint8Array(await png.arrayBuffer()));
+        }
+        done += 1;
+        opts.onProgress?.(done, total);
+      }
+      await opts.onGraphic(job.blockId, frames);
+    }
+  } finally {
+    overlay.dispose();
+  }
+}

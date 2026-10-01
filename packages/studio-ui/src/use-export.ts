@@ -36,7 +36,7 @@ import { clipAudioMasks, exportAudioMasks } from './export-word-masks';
 const MAX_PUBLISH_BYTES = 200 * 1024 * 1024;
 
 /** Trigger a browser download (blob stays in the cache ref; the URL is revoked once done). */
-function downloadBlob(blob: Blob, name: string) {
+export function downloadBlob(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
