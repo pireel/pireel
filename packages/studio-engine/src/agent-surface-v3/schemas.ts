@@ -96,6 +96,19 @@ const WHITEBOARD_CONTENT: Schema = {
       highlight: arr({ type: 'integer', minimum: 1 }, { description: 'Line numbers to highlight, from 1.' }),
     }, ['kind', 'code']),
     obj({
+      kind: whiteboardKind('sketch'), label: str('Short handwritten caption under the drawing.'),
+      strokes: arr(obj({
+        points: arr(arr({ type: 'number' }, { minItems: 2, maxItems: 2 }), { minItems: 2, maxItems: 400, description: '[x, y] pairs in any units, y pointing down; the drawing is scaled to fit.' }),
+        color: enumOf(['ink', 'accent', 'violet']), width: num('', { min: 1, max: 12 }),
+      }, ['points']), { minItems: 1, maxItems: 60, description: 'Pen strokes in drawing order.' }),
+    }, ['kind', 'strokes']),
+    obj({ kind: whiteboardKind('math'), tex: str('LaTeX without $ delimiters.'), caption: str() }, ['kind', 'tex']),
+    obj({
+      kind: whiteboardKind('screen'), device: enumOf(['browser', 'phone', 'tv']),
+      image: str('https or data: URL of a screenshot or a video poster frame.'), title: str('Address-bar text (browser only).'), caption: str(),
+      play: bool('Show a play button where the edit cuts to a video clip.'),
+    }, ['kind', 'device']),
+    obj({
       kind: whiteboardKind('table'), label: str(),
       columns: arr(obj({ title: str(), items: arr(obj({ title: str(), meta: str(), color: WHITEBOARD_COLOR }, ['title'])) }, ['title', 'items']), { minItems: 1 }),
     }, ['kind', 'columns']),
@@ -103,12 +116,12 @@ const WHITEBOARD_CONTENT: Schema = {
     obj({ kind: whiteboardKind('handwriting'), text: str(), color: enumOf(['accent', 'ink', 'violet']) }, ['kind', 'text']),
     obj({ kind: whiteboardKind('doodle'), shape: enumOf(['cat', 'star', 'heart', 'bulb', 'spark']) }, ['kind', 'shape']),
   ],
-  description: 'headline is typed on; sticky drops in; card is the usual flow box and edge endpoint; icon, doodle and shape are drawn on; handwriting is written on. Items can each be revealed on their own phrase: list items, table rows, chart data points, timeline events, cycle steps, venn sets (the overlap is the last item) and code lines.',
+  description: 'headline is typed on; sticky drops in; card is the usual flow box and edge endpoint; icon, doodle, shape and sketch are drawn on; handwriting and math are written on; a screen frames a screenshot or video poster. Items can each be revealed on their own phrase: list items, table rows, chart data points, timeline events, cycle steps, venn sets (the overlap is the last item), code lines and sketch strokes.',
 };
 const WHITEBOARD_ACTION: Schema = obj({
   op: enumOf(['reveal', 'highlight', 'dim', 'cursor']),
   target: str('Node, edge or group id (an edge reveal draws the arrow).'),
-  item: int('reveal only: the item to reveal, from 1 — a list item, table row, chart data point, timeline event, cycle step, venn set (overlap last) or code line. Items without their own reveal appear with the node.', 1),
+  item: int('reveal only: the item to reveal, from 1 — a list item, table row, chart data point, timeline event, cycle step, venn set (overlap last), code line or sketch stroke. Items without their own reveal appear with the node.', 1),
   effect: enumOf(['auto', 'pop', 'drop', 'type', 'write', 'draw', 'fade'], 'reveal only; auto picks the natural effect for the kind.'),
   mark: enumOf(['circle', 'underline', 'box'], 'highlight only: a hand-drawn mark around or under the target.'),
   color: enumOf(['accent', 'violet']),
