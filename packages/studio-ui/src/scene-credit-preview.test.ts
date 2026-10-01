@@ -33,12 +33,11 @@ it('shows the fixed generation price even after results are cached', async () =>
   expect(container.textContent).toContain('口型同步 36 积分/分钟');
 });
 
-it('shows the selected cost tier, one-order rounding and settlement terms without a markup', async () => {
+it('shows only the selected tier and the credits it deducts', async () => {
   const removal = { ...task, scene: 'subtitle-removal' as const, options: { ...task.options, subtitleRemoval: { mode: 'auto' as const, tier: 'lite' as const } } };
   mocks.estimate.mockResolvedValue({ min: 12, max: 15, estimate: 15, durationBased: false, items: [], erasure: { tier: 'lite', baseCnyPerMinute: .5, cnyPerCredit: .072, costCny: 1.0125, prechargeCredits: 15, outputFpsCap: 30, outputResolution: '1080p' } });
   await act(async () => root.render(createElement(SceneCreditPreview, { task: removal, options: removal.options, locale: 'zh', busy: false })));
   await act(async () => vi.advanceTimersByTimeAsync(350));
-  expect(container.textContent).toContain('极速'); expect(container.textContent).toContain('15'); expect(container.textContent).toContain('¥0.5/分钟');
-  expect(container.textContent).toContain('不加服务费'); expect(container.textContent).toContain('整单向上取整'); expect(container.textContent).toContain('差额退回');
+  expect(container.textContent).toContain('极速'); expect(container.textContent).toContain('15'); expect(container.textContent).toContain('本次扣除'); expect(container.textContent).not.toContain('¥');
   expect(mocks.estimate.mock.calls[0][0]).toMatchObject({ erasureTier: 'lite', erasureWidth: 1920, erasureHeight: 1080 });
 });

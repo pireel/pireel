@@ -26,10 +26,7 @@ export function SceneCreditPreview({ task, options, locale, busy }: { task: Capt
   if (quote.erasure) {
     const price = quote.erasure; const tier = ERASURE_TIERS.find(item => item.id === price.tier)!;
     return <div role="status" className="text-ink-3 mt-4 space-y-2 border-t border-line pt-4 text-xs leading-relaxed">
-      <p className="text-ink text-sm">{tier[locale]} · {zh ? '预计预扣' : 'Estimated precharge'} <strong className="tabular-nums">{price.prechargeCredits}</strong> {zh ? '积分' : 'credits'}</p>
-      <p>{zh ? `本档基础成本 ¥${price.baseCnyPerMinute}/分钟；当前视频按输出上限估算约 ¥${price.costCny.toFixed(3)}。` : `Base cost: CNY ${price.baseCnyPerMinute}/min. Estimated cost for this video: CNY ${price.costCny.toFixed(3)}.`}</p>
-      <p>{zh ? `按成本价收取，不加服务费。1 积分按 ¥${price.cnyPerCredit} 换算，整单向上取整。完成后按实际输出时长、帧率和分辨率结算，差额退回。` : `Charged at cost with no service markup. One credit = CNY ${price.cnyPerCredit}; the order rounds up once. Final output duration, frame rate and resolution determine settlement; excess credits are refunded.`}</p>
-      <p className="text-ink-4">{zh ? '输出最高 1080p、30fps；较小输入不放大，高帧率输入会降至 30fps。' : 'Output up to 1080p and 30fps. Smaller videos are not upscaled; higher frame rates are reduced to 30fps.'}</p>
+      <p className="text-ink text-sm">{tier[locale]} · {zh ? '本次扣除' : 'This run'} <strong className="tabular-nums">{price.prechargeCredits}</strong> {zh ? '积分' : 'credits'}</p>
     </div>;
   }
   if (quote.fixed) {
