@@ -20,6 +20,7 @@ export const PIP_SHOWCASE = new URL('./workflow-art/pip-showcase-v1.png', import
 export const PIP_ENTRY_ICON = new URL('./workflow-art/pip-v2.png', import.meta.url).href;
 export const SFX_ENTRY_ICON = new URL('./workflow-art/sfx-v1.png', import.meta.url).href;
 export const IMAGE_ENTRY_ICON = new URL('./workflow-art/image-gen-v1.png', import.meta.url).href;
+export const VIDEO_ENTRY_ICON = new URL('./workflow-art/captions-video-v3.png', import.meta.url).href;
 
 /** Shared by scene launchers and empty project covers. Keep each scene's identity consistent. */
 export const UGC_AD_ENTRY_ICON = new URL('./workflow-art/ugc-ad-v4.png', import.meta.url).href;
@@ -36,4 +37,5 @@ export const SCENE_ENTRY_ICONS = {
   pip: PIP_ENTRY_ICON,
   sfx: SFX_ENTRY_ICON,
   image: IMAGE_ENTRY_ICON,
+  video: VIDEO_ENTRY_ICON,
 } as const;
