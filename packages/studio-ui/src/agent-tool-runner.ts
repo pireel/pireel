@@ -2385,7 +2385,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   return j?.url ?? null;
                 },
               };
-              const images = await resolveGenerationReferences(input.referenceImages, referenceDeps, 9);
+              const images = await resolveGenerationReferences(input.referenceImages, referenceDeps, generationKind === 'image' ? 16 : 9);
               const unresolvedReferences = [...images.unresolved];
               const params: Record<string, unknown> = {
                 prompt,
