@@ -100,6 +100,30 @@ export async function resolveStudioSpaceId(projectId: string): Promise<string | 
   return id ? cacheSpaceId(projectId, id) : null;
 }
 
+/** One generation request in a known space: the status lets a caller decide whether a stale space is worth retrying. */
+async function postGeneration(spaceId: string, toolId: 'image-gen' | 'video-gen', params: Record<string, unknown>): Promise<{ status: number; result: StartResult }> {
+  const r = await fetch('/api/create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ space_id: spaceId, tool_id: toolId, params }),
+  });
+  const j = (await r.json().catch(() => null)) as
+    | { ok?: boolean; id?: string; ids?: string[]; error?: string; need?: number; balance?: number }
+    | null;
+  if (r.status === 402 && j?.error === 'insufficient_tokens') {
+    return { status: r.status, result: { ok: false, kind: 'credits', need: j.need ?? 0, balance: j.balance ?? 0 } };
+  }
+  if (!r.ok || !j?.ok || !j.id) {
+    return { status: r.status, result: { ok: false, kind: 'error', message: typeof j?.error === 'string' ? j.error : t('chatGen.generationRequestFailedStatus', { status: r.status }) } };
+  }
+  return { status: r.status, result: { ok: true, ids: Array.isArray(j.ids) && j.ids.length > 0 ? j.ids : [j.id] } };
+}
+
+/** Start one generation in a space the caller owns (a standalone page with its own space). */
+export async function startSpaceGeneration(spaceId: string, toolId: 'image-gen' | 'video-gen', params: Record<string, unknown>): Promise<StartResult> {
+  return (await postGeneration(spaceId, toolId, params)).result;
+}
+
 /** Start one generation. 402 insufficient credits becomes its own kind; on invalid space (account change/deletion) clear the cache and retry once. */
 export async function startGeneration(
   projectId: string,
@@ -113,26 +137,13 @@ export async function startGeneration(
     } catch {
       return { ok: false, kind: 'error', message: t('common.generationSpaceFailed') };
     }
-    const r = await fetch('/api/create', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ space_id: spaceId, tool_id: toolId, params }),
-    });
-    const j = (await r.json().catch(() => null)) as
-      | { ok?: boolean; id?: string; ids?: string[]; error?: string; need?: number; balance?: number }
-      | null;
-    if (r.status === 402 && j?.error === 'insufficient_tokens') {
-      return { ok: false, kind: 'credits', need: j.need ?? 0, balance: j.balance ?? 0 };
+    const { status, result } = await postGeneration(spaceId, toolId, params);
+    // 4xx and not yet retried → most likely an invalid space; clear the cache, get a new space, and retry
+    if (!result.ok && result.kind === 'error' && attempt === 0 && (status === 400 || status === 404)) {
+      clearSpaceCache(projectId);
+      continue;
     }
-    if (!r.ok || !j?.ok || !j.id) {
-      // 4xx and not yet retried → most likely an invalid space; clear the cache, get a new space, and retry
-      if (attempt === 0 && (r.status === 400 || r.status === 404)) {
-        clearSpaceCache(projectId);
-        continue;
-      }
-      return { ok: false, kind: 'error', message: typeof j?.error === 'string' ? j.error : t('chatGen.generationRequestFailedStatus', { status: r.status }) };
-    }
-    return { ok: true, ids: Array.isArray(j.ids) && j.ids.length > 0 ? j.ids : [j.id] };
+    return result;
   }
   return { ok: false, kind: 'error', message: t('chatGen.generationRequestFailed') };
 }
@@ -176,15 +187,20 @@ export async function pollCreation(id: string): Promise<GenJob | null> {
 }
 
 /** Fetch this project's generation history (including pending — resume polling on mount). */
+/** One space's generation history, newest first (pending included, so polling resumes on mount). */
+export async function listSpaceGens(spaceId: string, type: 'image' | 'video' | 'audio', limit = 30): Promise<GenJob[] | null> {
+  const creationType = type === 'audio' ? 'bgm' : type;
+  const r = await fetch(`/api/create/list?space_id=${encodeURIComponent(spaceId)}&type=${creationType}&limit=${limit}`);
+  if (!r.ok) return r.status === 400 || r.status === 404 ? null : [];
+  const j = (await r.json().catch(() => null)) as { items?: RawCreation[] } | null;
+  return (j?.items ?? []).map(toJob).filter((x) => x.id);
+}
+
+/** Fetch this project's generation history (including pending — resume polling on mount). */
 export async function listStudioGens(projectId: string, type: 'image' | 'video' | 'audio', limit = 30): Promise<GenJob[]> {
   const spaceId = await resolveStudioSpaceId(projectId).catch(() => null);
   if (!spaceId) return [];
-  const creationType = type === 'audio' ? 'bgm' : type;
-  const r = await fetch(`/api/create/list?space_id=${encodeURIComponent(spaceId)}&type=${creationType}&limit=${limit}`);
-  if (!r.ok) {
-    if (r.status === 400 || r.status === 404) clearSpaceCache(projectId);
-    return [];
-  }
-  const j = (await r.json().catch(() => null)) as { items?: RawCreation[] } | null;
-  return (j?.items ?? []).map(toJob).filter((x) => x.id);
+  const jobs = await listSpaceGens(spaceId, type, limit);
+  if (!jobs) clearSpaceCache(projectId);
+  return jobs ?? [];
 }
