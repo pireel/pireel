@@ -1,3 +1,4 @@
+import { brollLocalAssets, brollStillBudget } from './broll-task';
 import { normalizeErasureOptions } from './subtitle-removal';
 import { normalizeSfxOptions } from './sfx-task';
 import type { CaptionTaskRecord } from './scene-project';
@@ -9,7 +10,7 @@ export interface SceneCreditInput {
   /** Auto SFX density, which sets its per-minute price. */
   density?: import('./sfx-task').SfxDensity;
   durationSec: number; asr: boolean; translation: boolean; emphasis: boolean; lipSync: boolean;
-  subtitleRemoval?: boolean; erasureKind?: import('./subtitle-removal').ErasureKind; erasureTier?: import('./erasure-pricing').ErasureTier; erasureWidth?: number; erasureHeight?: number; sfxPlanning?: boolean; brollFrames?: number; sourceTokens?: number; asrPasses?: number;
+  subtitleRemoval?: boolean; erasureKind?: import('./subtitle-removal').ErasureKind; erasureTier?: import('./erasure-pricing').ErasureTier; erasureWidth?: number; erasureHeight?: number; sfxPlanning?: boolean; brollFrames?: number; /** AI stills a picture-in-picture run may generate (upper bound). */ brollStills?: number; sourceTokens?: number; asrPasses?: number;
   speech: { voiceId: string; minUnits: number; maxUnits: number; maxChunks: number; estimatedUnits?: number; estimatedChunks?: number }[];
 }
 export interface SceneCreditEstimate {
@@ -19,7 +20,7 @@ export interface SceneCreditEstimate {
   fixed?: { perMinute: number; lipSync?: { perMinute: number; minSec: number; credits: number } };
   /** Fixed erasure price: `perMinute` credits per minute of source for the chosen tier. */
   erasure?: { tier: import('./erasure-pricing').ErasureTier; credits: number; perMinute: number };
-  items: { kind: 'asr' | 'translation' | 'emphasis' | 'speech' | 'lipSync' | 'visual' | 'matching' | 'sfx' | 'subtitleRemoval'; min: number; max: number; estimate: number }[];
+  items: { kind: 'asr' | 'translation' | 'emphasis' | 'speech' | 'lipSync' | 'visual' | 'matching' | 'stills' | 'sfx' | 'subtitleRemoval'; min: number; max: number; estimate: number }[];
 }
 /** Compact usage hints for a read-only estimate, never authorization or actual billing input. */
 export function sceneCreditInput(task: CaptionTaskRecord, options: CaptionTaskOptions, reuseCompleted = true): SceneCreditInput {
@@ -30,7 +31,8 @@ export function sceneCreditInput(task: CaptionTaskRecord, options: CaptionTaskOp
   // Auto SFX is fixed-price per minute by density, whether sounds come from the library or are generated.
   if (task.scene === 'sfx') { input.asr = false; input.scene = 'sfx'; input.density = normalizeSfxOptions(options.sfx).density; delete input.sourceTokens; return input; }
   if ((task.scene === 'broll' || task.scene === 'pip' || task.scene === 'ugc-ad')) {
-    input.brollFrames = (options.broll?.assets ?? []).reduce((sum, a) => sum + (a.kind === 'image' ? 1 : 8), 0);
+    input.brollFrames = brollLocalAssets(options.broll).reduce((sum, a) => sum + (a.kind === 'image' ? 1 : 8), 0);
+    if (options.broll?.aiFootage) input.brollStills = brollStillBudget(task.durationSec);
     input.emphasis = !!options.broll?.captions && !!options.highlights;
     return input;
   }

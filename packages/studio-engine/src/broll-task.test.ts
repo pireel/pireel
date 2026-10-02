@@ -49,15 +49,19 @@ it('passes only contract fields of saved assets into the workflow', async () => 
   for (const item of assets) expect(() => assertWorkflowValue(item, brollAssetSchema)).not.toThrow();
 });
 
-it('adds AI stills alongside or instead of your footage, and needs at least one source', async () => {
+it('plans AI stills together with your footage in one pass, and needs at least one source', async () => {
   const { brollWorkflowDefinition } = await import('./workflow-broll-template');
   const base = { caption: {}, aspect: 'original' as const, shortenPauses: false };
   const asset = { id: 'a', sig: 's', name: 'clip.mp4', kind: 'video' as const, durationSec: 12, width: 720, height: 1280 };
   const ids = (broll: object) => brollWorkflowDefinition({ ...base, broll: broll as never }, null, null, 'p', 40, null).steps.map(step => step.id);
   expect(ids({ assets: [], captions: true, aiFootage: true })).toEqual(expect.arrayContaining(['generated', 'broll']));
   expect(ids({ assets: [], captions: true, aiFootage: true })).not.toContain('analysis');
-  expect(ids({ assets: [asset], captions: true, aiFootage: true })).toEqual(expect.arrayContaining(['analysis', 'match', 'generated', 'broll']));
-  expect(ids({ assets: [asset], captions: true, aiFootage: true, localFootage: false })).not.toContain('match');
+  expect(ids({ assets: [asset], captions: true, aiFootage: true })).toEqual(expect.arrayContaining(['analysis', 'generated', 'broll']));
+  expect(ids({ assets: [asset], captions: true, aiFootage: true })).not.toContain('match');
+  expect(ids({ assets: [asset], captions: true })).toEqual(expect.arrayContaining(['analysis', 'match', 'broll']));
+  const both = brollWorkflowDefinition({ ...base, broll: { assets: [asset], captions: true, aiFootage: true } }, null, null, 'p', 40, null).steps;
+  expect(both.find(step => step.id === 'generated')!.arguments.analysis).toEqual({ kind: 'step', stepId: 'analysis', key: 'analysis' });
+  expect(ids({ assets: [asset], captions: true, aiFootage: true, localFootage: false })).not.toContain('analysis');
   expect(() => ids({ assets: [], captions: true })).toThrow();
   const compose = brollWorkflowDefinition({ ...base, broll: { assets: [], captions: true, aiFootage: true } }, null, null, 'p', 40, null).steps.find(step => step.id === 'broll')!;
   expect(Object.keys(compose.arguments)).toEqual(expect.arrayContaining(['generated', 'document', 'options']));

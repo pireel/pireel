@@ -70,6 +70,10 @@ export function resolveBrollEdits(placements: BrollPlacement[], candidates: Brol
 }
 
 /** List order is presentation state, not a change to the analyzed media bytes. */
+/** How many AI stills a run may make: about one per ten seconds, at most eight. */
+export function brollStillBudget(durationSec: number): number {
+  return Math.min(8, Math.max(1, Math.round(durationSec / 10)));
+}
 /** The user's files that take part in matching: none when that source is switched off. */
 export function brollLocalAssets(options: BrollOptions | undefined): BrollAsset[] {
   return options && options.localFootage !== false ? options.assets : [];
