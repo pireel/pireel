@@ -33,7 +33,7 @@ export function DubbingSettings({ value, transcript = [], disabled, locale, onCh
     const first = voices.find((voice) => voice.source !== 'system') ?? voices[0];
     chooseVoice(first.id);
   }, [autoSelectVoice, disabled, loading, selectedVoice, voices, chooseVoice]);
-  return <fieldset disabled={disabled} className="min-w-0 space-y-5 disabled:opacity-50">
+  return <fieldset disabled={disabled} className="min-w-0 space-y-4 disabled:opacity-50">
     {showLanguage && <SceneSelect label={zh ? '目标语言' : 'Target language'} value={value.language} disabled={disabled} onChange={language => onChange({ ...value, language, script: undefined, turnScripts: undefined })} options={DUBBING_LANGUAGES.map(language => ({ value: language.id, label: language[locale] }))} />}
     {multiple && <div className="space-y-2">
       <div aria-label={zh ? '说话人' : 'Speakers'} className="flex gap-1 overflow-x-auto">

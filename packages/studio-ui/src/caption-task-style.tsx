@@ -25,7 +25,7 @@ export function CaptionTaskStyle({ options, locale, disabled, source, onChange, 
   const patchMain = (patch: Patch) => onChange(current => ({ ...current, caption: { ...current.caption, ...patch } }));
   const patchSub = (patch: Patch) => onChange(current => ({ ...current, caption: { ...current.caption, sub: { ...current.caption.sub, ...patch } as CaptionStyle } }));
   const canHighlight = !!studioProviders().autoHighlight;
-  return <div className="space-y-4">
+  return <div className="space-y-3">
     <h2 className="text-ink text-sm font-medium">{locale === 'zh' ? '字幕样式' : 'Caption style'}</h2>
     <div className="border-line flex max-h-[520px] min-h-0 flex-col rounded-lg border">
       <CaptionStylePanel active generating={disabled} translationControls={translation} showTranslation={!options.dubbing} onPickPreset={(preset, patch) => patchMain({ ...patch, preset })} styleCtl={{

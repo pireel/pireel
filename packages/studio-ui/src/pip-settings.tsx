@@ -29,13 +29,13 @@ export function PipSettings({ task, value, disabled, locale, onChange, onBusy }:
   const windowLayout = ['inset', 'presenter', 'cutout-small'].includes(layout.resolvedTemplate);
   return <div>
     <h2 className="text-ink mb-2 text-sm font-medium">{zh ? '画中画模板' : 'Layout template'}</h2>
-    <div className="mb-5 grid grid-cols-[repeat(auto-fit,minmax(76px,1fr))] gap-x-2 gap-y-3" role="group" aria-label={zh ? '选择画中画模板' : 'Choose a layout'}>
+    <div className="mb-4 grid grid-cols-[repeat(auto-fit,minmax(76px,1fr))] gap-x-2 gap-y-3" role="group" aria-label={zh ? '选择画中画模板' : 'Choose a layout'}>
       {PIP_TEMPLATES.map(template => <button key={template.id} type="button" disabled={disabled} aria-pressed={value.pip?.template === template.id} onClick={() => update({ template: template.id })} className="min-w-0 text-center focus-visible:outline-2 focus-visible:outline-accent">
         <span className={'mb-2 block rounded-lg border-2 p-1 ' + (value.pip?.template === template.id ? 'border-ink' : 'border-transparent hover:border-ink-4')}><PipTemplateDiagram template={template.id} options={config}/></span>
         <span className="text-ink-3 block text-xs">{template.id === 'split' ? (zh ? (task.height > task.width ? '上下分屏' : '左右分屏') : 'Split screen') : template[locale]}</span>
       </button>)}
     </div>
-    <div className="mb-5 space-y-4">
+    <div className="mb-4 space-y-3">
       {windowLayout && <>
         <SceneSelect label={zh ? '小窗位置' : 'Inset position'} value={config.position ?? 'bottom-right'} disabled={disabled} onChange={position => update({ position })} options={[
           { value: 'bottom-right', label: zh ? '右下' : 'Bottom right' }, { value: 'bottom-left', label: zh ? '左下' : 'Bottom left' },
@@ -52,7 +52,7 @@ export function PipSettings({ task, value, disabled, locale, onChange, onBusy }:
         { value: 'cover', label: zh ? '裁切铺满' : 'Crop to fill' }, { value: 'contain', label: zh ? '完整显示' : 'Show full frame' },
       ]} />}
     </div>
-    <p className="text-ink-3 mb-5 text-xs leading-relaxed">{zh ? '素材小窗默认放在下侧，并留出底部字幕空间。分屏可铺满人物区域；如果裁切不合适，可改为完整显示。' : 'Insets leave room for lower captions. Split layouts can fill the presenter area; choose full frame if the crop does not suit your footage.'}</p>
+    <p className="text-ink-3 mb-4 text-xs leading-relaxed">{zh ? '素材小窗默认放在下侧，并留出底部字幕空间。分屏可铺满人物区域；如果裁切不合适，可改为完整显示。' : 'Insets leave room for lower captions. Split layouts can fill the presenter area; choose full frame if the crop does not suit your footage.'}</p>
     <h2 className="text-ink mb-2 text-sm font-medium">{zh ? '本地素材 · AI 匹配' : 'Your footage · AI matching'}</h2>
     <p className="text-ink-3 mb-4 text-xs leading-relaxed">{zh ? '添加图片或视频，AI 根据口播挑选适合出现的片段。素材声音默认关闭，保留口播原声。' : 'Add images or videos. AI selects relevant moments from the narration. Footage is muted; narration stays intact.'}</p>
     <BrollSettings task={task} value={value} disabled={disabled} locale={locale} onChange={onChange} onBusy={onBusy}/>

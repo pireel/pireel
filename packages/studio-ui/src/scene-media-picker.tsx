@@ -23,7 +23,7 @@ export function SceneMediaCard({ name, children, onRemove, disabled, locale, sta
 }) {
   return <div className="group relative min-w-0" data-upload-status={status}>
     <div className="bg-panel relative aspect-[1.15] overflow-hidden rounded-lg">{children}</div>
-    <span className="text-ink-3 mt-2 block truncate text-xs" title={error ?? name}>{name}</span>
+    <span className="text-ink-3 mt-1 block truncate text-[11px]" title={error ?? name}>{name}</span>
     {onRemove && <button type="button" disabled={disabled} aria-label={`${locale === 'zh' ? '移除' : 'Remove'} ${name}`} onClick={onRemove} className="absolute right-1 top-1 rounded bg-black/60 p-1 text-white"><X size={12} /></button>}
   </div>;
 }
@@ -35,8 +35,8 @@ export function SceneMediaPicker({ children, hasItems, disabled, locale, onAdd, 
 }) {
   const zh = locale === 'zh';
   return <div onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); if (!disabled) onFiles?.(Array.from(event.dataTransfer.files)); }}>
-    <div className="mb-3 flex items-center justify-between gap-3 text-sm"><span className="text-ink">{labels?.title ?? (zh ? '我的素材' : 'My footage')}</span><button type="button" disabled={disabled} onClick={onAdd} className="text-ink-3 inline-flex items-center gap-1 text-xs"><Plus size={14}/>{labels?.upload ?? (zh ? '上传素材' : 'Upload footage')}</button></div>
-    <div role="region" aria-label={zh ? '素材列表' : 'Footage cards'} className="grid gap-x-1.5 gap-y-3 pt-1" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(88px, 100%), 1fr))' }}>{children}</div>
-    {!hasItems && <button type="button" disabled={disabled} onClick={onAdd} className="bg-panel-2 text-ink-3 flex min-h-28 w-full items-center justify-center gap-2 rounded-md text-sm"><Plus size={18}/>{labels?.empty ?? (zh ? '添加图片或视频' : 'Add images or videos')}</button>}
+    <div className="mb-2 flex items-center justify-between gap-3 text-xs"><span className="text-ink">{labels?.title ?? (zh ? '我的素材' : 'My footage')}</span><button type="button" disabled={disabled} onClick={onAdd} className="text-ink-3 inline-flex items-center gap-1 text-xs"><Plus size={14}/>{labels?.upload ?? (zh ? '上传素材' : 'Upload footage')}</button></div>
+    <div role="region" aria-label={zh ? '素材列表' : 'Footage cards'} className="grid gap-x-1.5 gap-y-3 pt-1" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(64px, 100%), 1fr))' }}>{children}</div>
+    {!hasItems && <button type="button" disabled={disabled} onClick={onAdd} className="bg-panel-2 text-ink-3 flex min-h-16 w-full items-center justify-center gap-2 rounded-md text-xs"><Plus size={16}/>{labels?.empty ?? (zh ? '添加图片或视频' : 'Add images or videos')}</button>}
   </div>;
 }

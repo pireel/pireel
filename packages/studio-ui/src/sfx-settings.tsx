@@ -2,7 +2,7 @@ import { SFX_DENSITIES } from '@pireel/studio-engine/sfx-plan';
 import { normalizeSfxOptions, type SfxOptions } from '@pireel/studio-engine/sfx-task';
 export function SfxSettings({ value, onChange, disabled, locale }: { value: SfxOptions; onChange: (value: SfxOptions) => void; disabled: boolean; locale: 'zh' | 'en' }) {
   const current = normalizeSfxOptions(value);
-  return <fieldset disabled={disabled} className="min-w-0 space-y-4">
+  return <fieldset disabled={disabled} className="min-w-0 space-y-3">
     <legend className="text-ink mb-3 text-sm font-medium">{locale === 'zh' ? '音效密度' : 'Sound effect density'}</legend>
     <div role="radiogroup" aria-label={locale === 'zh' ? '音效密度' : 'Sound effect density'} className="grid grid-cols-3 gap-2">
       {SFX_DENSITIES.map((density, index) => <button key={density.id} type="button" role="radio" aria-checked={current.density === density.id} tabIndex={current.density === density.id ? 0 : -1} disabled={disabled} onClick={() => onChange({ density: density.id })} onKeyDown={event => {

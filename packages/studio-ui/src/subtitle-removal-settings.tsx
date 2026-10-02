@@ -10,7 +10,7 @@ function withTargets(value: SubtitleRemovalOptions, targets: ErasureTarget[]): S
 }
 export function SubtitleRemovalSettings({ value, locale, disabled, onChange }: { value: SubtitleRemovalOptions; locale: 'zh' | 'en'; disabled: boolean; onChange(value: SubtitleRemovalOptions): void }) {
   const zh = locale === 'zh'; const targets = erasureTargets(value); const tier = value.tier ?? 'standard';
-  return <div className="space-y-4">
+  return <div className="space-y-3">
     <fieldset disabled={disabled} className="space-y-2">
       <legend className="text-ink mb-2 text-sm font-medium">{zh ? '擦除档位' : 'Quality'}</legend>
       <div role="radiogroup" aria-label={zh ? '擦除档位' : 'Erasure quality'} className="space-y-2">

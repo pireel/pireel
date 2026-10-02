@@ -31,7 +31,7 @@ export function SceneBrandPicker({ options, locale, disabled, onChange }: {
   const choices = [{ value: 'none', label: say('不使用品牌', 'No brand') },
     ...(current && !listed.some(brand => brand.id === current.id) ? [{ value: current.id, label: current.name }] : []),
     ...listed.map(brand => ({ value: brand.id, label: brand.name }))];
-  return <div className="border-line mb-5 border-b pb-5">
+  return <div className="border-line mb-4 border-b pb-4">
     <SceneSelect label={say('品牌', 'Brand')} value={current?.id ?? 'none'} disabled={disabled || brands === null} options={choices}
       footer={provider.manage && <button type="button" onClick={() => provider.manage!()} className="text-ink-2 hover:bg-panel-2 flex w-full items-center gap-1.5 rounded-sm px-2 py-1.5 text-left text-xs"><Plus size={12} />{say('去创建品牌', 'Create a brand')}</button>}
       onChange={id => {

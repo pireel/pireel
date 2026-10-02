@@ -66,7 +66,7 @@ export function BrollSettings({ task, value, disabled, locale, onChange, onBusy 
     setUploads(rows => rows.filter(row => row.id !== id));
     if (value.assets.some(a => a.id === id)) onChange({ ...value, assets: value.assets.filter(a => a.id !== id), manualClips: value.manualClips?.filter(p => p.assetId !== id), disabledPlacements: undefined, replacements: undefined, edits: undefined });
   };
-  return <div className="mb-6 space-y-3">
+  return <div className="mb-4 space-y-3">
     <input ref={input} type="file" multiple accept="video/*,image/*" className="hidden" aria-label={zh ? '添加配画面素材' : 'Add B-roll media'} onChange={e => { const files = Array.from(e.target.files ?? []); e.target.value = ''; upload(files); }} />
     <SceneMediaPicker locale={locale} disabled={disabled || busy} hasItems={cards.length > 0} onAdd={() => input.current?.click()} onFiles={upload}>
         {cards.map(card => {

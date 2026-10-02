@@ -6,7 +6,7 @@ export function UgcAdSettings({ value = DEFAULT_UGC_AD_OPTIONS, locale, disabled
 }) {
   const zh = locale === 'zh';
   const patch = (change: Partial<UgcAdOptions>) => onChange({ ...value, ...change });
-  return <div className="space-y-4" aria-label={zh ? '广告信息' : 'Ad brief'}>
+  return <div className="space-y-3" aria-label={zh ? '广告信息' : 'Ad brief'}>
     <p className="text-ink-3 text-xs leading-relaxed">{zh ? '根据真实口播与商品素材制作短广告。屏幕文案只取自视频或你填写的商品信息。' : 'Build a short ad from your footage and product media. On-screen copy uses only the narration and product facts you provide.'}</p>
     <SceneTextField label={zh ? '商品名称' : 'Product name'} value={value.productName} onChange={productName => patch({ productName })} placeholder={zh ? '商品或品牌名称' : 'Product or brand'} disabled={disabled} />
     <SceneSelect label={zh ? '开场角度' : 'Opening angle'} value={value.angle} disabled={disabled} onChange={angle => patch({ angle })} options={[
