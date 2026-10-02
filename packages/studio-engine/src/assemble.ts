@@ -1,3 +1,4 @@
+import { BASE_CAPTION_FONT_PX } from './caption-presets';
 import { compileComponentStyles } from './component-styles';
 /**
  * Assembly layer: stitch a Composition into a complete Hyperframes document (preview iframe and export share the same source).
@@ -50,6 +51,12 @@ export const STUDIO_FONTS_HREF =
  *  (frame2) alongside the main frame, and the two live streams (from/to) are composited by the upstream shader, p spanning the whole window.
  *  Fallback chain: ghost frames cut off → after the cut, use the frozen last frame of A as from (at least the second half has an effect); GL unavailable /
  *  shader compile fails → hard cut. Before upload, cover into a W×H staging canvas first (direct texture upload gets stretched/distorted). */
+/** A one-line caption centered on a split screen's seam: its bottom edge sits half a line below it. */
+function seamCaptionYPct(seam: number, scale: number | undefined, height: number) {
+  const line = BASE_CAPTION_FONT_PX * (scale ?? 1) * 1.4;
+  return seam * 100 + line / 2 / Math.max(1, height) * 100;
+}
+
 export function videoFrameShim(transitions: { s: number; e: number; cut: number; effect: string; dx: number; dy: number }[]): string {
   return `window.__parentClock = true; // clock/decode/audio run in the parent-layer engine; this doc doesn't self-drive
 (function(){
@@ -529,7 +536,7 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
       : kitBase;
     const rb =
       cs && isSentenceCaption(b)
-        ? { ...capBase, slots: { ...capBase.slots, preset: cs.preset, ...(cs.animation != null ? { animation: cs.animation } : {}), ...(cs.sub?.animation != null ? { subAnimation: cs.sub.animation } : {}), yPct: cs.yPct, xPct: cs.xPct ?? 50, wPct: cs.wPct ?? 56, scale: cs.scale, ...(cs.hPct ? { hPct: cs.hPct } : {}), ...(cs.color != null ? { color: cs.color } : {}), ...(cs.emphasis != null ? { emphasis: cs.emphasis } : {}), ...(cs.bg !== undefined ? { bg: cs.bg } : {}), ...(cs.bold != null ? { bold: cs.bold } : {}), ...(cs.font != null ? { font: cs.font } : {}), ...(cs.accentColor != null ? { accentColor: cs.accentColor } : {}), ...(cs.strokeColor != null ? { strokeColor: cs.strokeColor } : {}), ...(cs.strokeWidth != null ? { strokeWidth: cs.strokeWidth } : {}), ...(cs.sub?.preset != null ? { subPreset: cs.sub.preset } : {}), ...(cs.sub?.color != null ? { subColor: cs.sub.color } : {}), ...(cs.sub?.bg !== undefined ? { subBg: cs.sub.bg } : {}), ...(cs.sub?.bold != null ? { subBold: cs.sub.bold } : {}), ...(cs.sub?.font != null ? { subFont: cs.sub.font } : {}), ...(cs.sub?.yPct != null ? { subYPct: cs.sub.yPct } : {}), ...(cs.sub?.xPct != null ? { subXPct: cs.sub.xPct } : {}), ...(cs.sub?.wPct != null ? { subWPct: cs.sub.wPct } : {}), ...(cs.sub?.scale != null ? { subScale: cs.sub.scale } : {}), ...(cs.sub?.hPct != null ? { subHPct: cs.sub.hPct } : {}) } }
+        ? { ...capBase, slots: { ...capBase.slots, preset: cs.preset, ...(cs.animation != null ? { animation: cs.animation } : {}), ...(cs.sub?.animation != null ? { subAnimation: cs.sub.animation } : {}), yPct: typeof capBase.slots.splitSeam === 'number' ? seamCaptionYPct(capBase.slots.splitSeam, cs.scale, comp.height) : cs.yPct, xPct: cs.xPct ?? 50, wPct: cs.wPct ?? 56, scale: cs.scale, ...(cs.hPct ? { hPct: cs.hPct } : {}), ...(cs.color != null ? { color: cs.color } : {}), ...(cs.emphasis != null ? { emphasis: cs.emphasis } : {}), ...(cs.bg !== undefined ? { bg: cs.bg } : {}), ...(cs.bold != null ? { bold: cs.bold } : {}), ...(cs.font != null ? { font: cs.font } : {}), ...(cs.accentColor != null ? { accentColor: cs.accentColor } : {}), ...(cs.strokeColor != null ? { strokeColor: cs.strokeColor } : {}), ...(cs.strokeWidth != null ? { strokeWidth: cs.strokeWidth } : {}), ...(cs.sub?.preset != null ? { subPreset: cs.sub.preset } : {}), ...(cs.sub?.color != null ? { subColor: cs.sub.color } : {}), ...(cs.sub?.bg !== undefined ? { subBg: cs.sub.bg } : {}), ...(cs.sub?.bold != null ? { subBold: cs.sub.bold } : {}), ...(cs.sub?.font != null ? { subFont: cs.sub.font } : {}), ...(cs.sub?.yPct != null ? { subYPct: cs.sub.yPct } : {}), ...(cs.sub?.xPct != null ? { subXPct: cs.sub.xPct } : {}), ...(cs.sub?.wPct != null ? { subWPct: cs.sub.wPct } : {}), ...(cs.sub?.scale != null ? { subScale: cs.sub.scale } : {}), ...(cs.sub?.hPct != null ? { subHPct: cs.sub.hPct } : {}) } }
         : capBase;
     const rendered = renderBlock(rb);
     const { html: innerHtml } = compileComponentStyles(rendered.innerHtml, b.id);

@@ -285,6 +285,15 @@ describe('全局花字样式 captionStyle', () => {
     expect(cap.slots.preset).toBeUndefined(); // 全局样式不落进块
   });
 
+  it('centers a caption on a split seam instead of the global position', () => {
+    const c = emptyComposition();
+    const cap = captionBlock({ words });
+    c.blocks = [{ ...cap, slots: { ...cap.slots, splitSeam: .5 } }];
+    c.captionStyle = { preset: 'ln-clean', yPct: 88, scale: 1 };
+    // Bottom edge half a line (64px × 1.4 / 2) below the middle of a 1920-high frame.
+    expect(assembleHtml({ ...c, height: 1920 })).toContain(`bottom:${+(100 - (50 + 44.8 / 1920 * 100)).toFixed(3)}%`);
+  });
+
   it('框高 hPct:落到 .cap-line 的 min-height(底板跟框走,字号不动)', () => {
     const c = emptyComposition();
     c.blocks = [captionBlock({ words })];

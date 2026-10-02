@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { documentCaptionsOn, documentCaptionStyle } from './caption-state';
 import { emptyEditorDocumentV2 } from './create';
-import { projectNarrativeShots, projectOverlayBlockById } from './legacy-projection';
+import { projectNarrativeShots, projectOverlayBlockById, projectV2ToLegacyComposition } from './legacy-projection';
 import { freeOverlayStackOrder } from './read-model';
 import type { EditorDocumentV2, EditorTrack, GraphicTimelineClip } from './types';
 
@@ -53,4 +53,16 @@ describe('overlay reads on the document', () => {
     expect(documentCaptionsOn(off)).toBe(true);
     expect(documentCaptionStyle(off)).toMatchObject({ preset: 'ln-clean', yPct: 80, scale: 1 });
   });
+
+  it('puts captions on the seam while footage fills the top or bottom half', () => {
+    const caption = (id: string, startFrame: number) => ({ id, kind: 'caption', startFrame, durationFrames: 30, enabled: true, anchor: { kind: 'timeline' }, block: { templateId: 'caption', slots: { words: [] } } });
+    const half = (y: number, startFrame: number) => ({ id: `m${startFrame}`, kind: 'media', assetId: 'a', startFrame, durationFrames: 90, sourceInSec: 0, sourceOutSec: 3, enabled: true, box: { x: 0, y, w: 1, h: .5 } });
+    const document = project([
+      { id: 'broll', type: 'visual', name: 'broll', stackOrder: 1, locked: false, hidden: false, muted: true, clips: [half(0, 0), { ...half(.5, 300), box: { x: .5, y: .5, w: .46, h: .3 } }] } as unknown as EditorTrack,
+      { id: 'cap', type: 'caption', name: 'cap', stackOrder: 5, locked: false, hidden: false, muted: false, clips: [caption('c1', 30), caption('c2', 120), caption('c3', 300)] } as unknown as EditorTrack,
+    ]);
+    const seams = projectV2ToLegacyComposition(document).blocks.map(block => block.slots.splitSeam);
+    expect(seams).toEqual([.5, undefined, undefined]);
+  });
 });
+
