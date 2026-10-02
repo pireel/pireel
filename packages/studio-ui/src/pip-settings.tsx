@@ -35,9 +35,9 @@ export function PipSettings({ task, value, disabled, locale, onChange, onBusy }:
   const templateLabel = (id: string, label: string) => id === 'split' ? (zh ? (portrait ? '素材在上' : '素材在左') : (portrait ? 'Footage on top' : 'Footage left')) : id === 'split-bottom' ? (zh ? (portrait ? '素材在下' : '素材在右') : (portrait ? 'Footage below' : 'Footage right')) : label;
   return <div>
     <h2 className="text-ink mb-2 text-sm font-medium">{zh ? '画中画模板' : 'Layout template'}</h2>
-    <div className="mb-4 grid grid-cols-4 gap-x-2 gap-y-3" role="group" aria-label={zh ? '选择画中画模板' : 'Choose a layout'}>
+    <div className="mb-4 grid grid-cols-4 gap-x-2 gap-y-3 p-px" role="group" aria-label={zh ? '选择画中画模板' : 'Choose a layout'}>
       {PIP_PICKER_TEMPLATES.map(template => { const selected = (value.pip?.template ?? DEFAULT_PIP_OPTIONS.template) === template.id; return <button key={template.id} type="button" disabled={disabled} aria-pressed={selected} onClick={() => update({ template: template.id })} className="group min-w-0 text-center focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50">
-        <span className={'block rounded-md p-0.5 ring-1 transition-shadow ' + (selected ? 'ring-ink ring-2' : 'ring-line group-hover:ring-ink-4')}><PipTemplateDiagram template={template.id} options={config}/></span>
+        <span className={'block rounded-md p-[3px] ring-inset transition-shadow ' + (selected ? 'ring-ink ring-2' : 'ring-line ring-1 group-hover:ring-ink-4')}><PipTemplateDiagram template={template.id} options={config}/></span>
         <span className={'mt-1.5 block truncate text-[11px] ' + (selected ? 'text-ink font-medium' : 'text-ink-3')}>{templateLabel(template.id, template[locale])}</span>
       </button>; })}
     </div>
