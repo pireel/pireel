@@ -20,7 +20,8 @@ import { SceneCreditPreview } from './scene-credit-preview';
 import { SceneSelect, SceneCheckbox } from './scene-form-controls';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowLeft, Download, Loader2, Upload, Sparkles } from 'lucide-react';
-import { CAPTION_TRANSLATION_LANGUAGES, captionTaskGroupBottom, storedCaptionTaskOptions, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
+import { CAPTION_TRANSLATION_LANGUAGES, captionTaskGroupBottom, captionTaskStyle, storedCaptionTaskOptions, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
+import { captionBandFor } from '@pireel/studio-engine/pip-layout';
 import { DEFAULT_DUBBING_OPTIONS, dubbingVoicesReady, dubbingSceneOptions } from '@pireel/studio-engine/dubbing-task';
 import { DubbingSettings } from './dubbing-settings';
 import { CaptionPositionPreview } from './caption-position-preview';
@@ -387,7 +388,7 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
         <SceneVideoPreview source={file} resultUrl={playable ? resultUrl : undefined} poster={firstFrame || cover} width={probe?.width ?? task.width} height={probe?.height ?? task.height} duration={task.durationSec} disabled={disabled} locale={locale} actions={videoActions()}>
           {!playable && <>
             {isRemoval && options.subtitleRemoval?.mode === 'region' && options.subtitleRemoval.region && !busy && !versionLoading && <SubtitleRegionOverlay region={options.subtitleRemoval.region} locale={locale} disabled={disabled} onChange={region => changeOptions(current => ({ ...current, subtitleRemoval: { ...current.subtitleRemoval, mode: 'region', region } }))}/>}
-            {isPip && !busy && !versionLoading && <PipLayoutPreview options={options.broll?.pip ?? DEFAULT_PIP_OPTIONS} source={firstFrame || cover} canvas={probe ?? task} asset={options.broll?.assets[0]} scope={task.scope} locale={locale}/>}
+            {isPip && !busy && !versionLoading && <PipLayoutPreview options={options.broll?.pip ?? DEFAULT_PIP_OPTIONS} source={firstFrame || cover} canvas={probe ?? task} asset={options.broll?.assets[0]} scope={task.scope} locale={locale} captions={options.broll?.captions === false ? undefined : captionBandFor({ on: true, ...captionTaskStyle(options, probe ?? task) })}/>}
             {(((isSfx || isRemoval) ? false : isBroll ? options.broll?.captions : !isDubbing) || options.dubbing?.captions) && !busy && !versionLoading && <CaptionPositionPreview options={options} source={probe ?? { width: 1080, height: 1920 }} locale={locale} disabled={disabled} onChange={(yPct) => changeOptions((current) => {
               const { yPct: _old, ...caption } = current.caption;
               return { ...current, caption: yPct === captionTaskGroupBottom({ ...current, caption }, probe ?? { width: 1080, height: 1920 }) ? caption : { ...caption, yPct } };

@@ -1,7 +1,7 @@
 import { SceneSelect } from './scene-form-controls';
 import { PipVisual } from './pip-visual';
 import { UserRound, Image, Sparkles } from 'lucide-react';
-import { DEFAULT_PIP_OPTIONS, PIP_TEMPLATES, pipGeometry, resolvePipGeometry, type PipOptions, type PipTemplate } from '@pireel/studio-engine/pip-layout';
+import { DEFAULT_PIP_OPTIONS, PIP_TEMPLATES, pipGeometry, resolvePipGeometry, type CaptionBand, type PipOptions, type PipTemplate } from '@pireel/studio-engine/pip-layout';
 import type { BrollOptions, BrollAsset } from '@pireel/studio-engine/broll-task';
 import { BrollSettings } from './broll-settings';
 import { SceneMediaThumb } from './scene-media-picker';
@@ -59,10 +59,12 @@ export function PipSettings({ task, value, disabled, locale, onChange, onBusy }:
   </div>;
 }
 
-export function PipLayoutPreview({ options, source, canvas, asset, scope, locale }: {
+export function PipLayoutPreview({ options, source, canvas, asset, scope, locale, captions }: {
   options: PipOptions; source: string; canvas: { width: number; height: number }; asset?: BrollAsset; scope: string; locale: 'zh' | 'en';
+  /** Where captions will sit, so the preview places windows the way the render will. */
+  captions?: CaptionBand;
 }) {
-  const layout = resolvePipGeometry(options, canvas, asset ?? { width: 1920, height: 1080 }, canvas);
+  const layout = resolvePipGeometry(options, canvas, asset ?? { width: 1920, height: 1080 }, canvas, captions);
   const rect = (box: { x: number; y: number; w: number; h: number }) => ({ left: `${box.x * 100}%`, top: `${box.y * 100}%`, width: `${box.w * 100}%`, height: `${box.h * 100}%` });
   return <div className="pointer-events-none absolute inset-0" aria-label={locale === 'zh' ? '画中画布局预览' : 'Layout preview'}>
     {layout.background && <div className="absolute inset-0" style={{ background: layout.background }}/>} 

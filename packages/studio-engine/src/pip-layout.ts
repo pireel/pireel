@@ -41,8 +41,19 @@ function fittedBox(canvas: Dimensions, asset: Dimensions, region: PipBox): PipBo
   const w = Math.min(region.w, region.h / ratio); const h = w * ratio;
   return { x: region.x + (region.w - w) / 2, y: region.y + (region.h - h) / 2, w, h };
 }
-/** Functional templates. Insets keep their source ratio and leave the lower caption band free. */
-export function pipGeometry(template: PipTemplate, canvas: Dimensions, asset: Dimensions, options: Partial<PipOptions> = {}, source: Dimensions = canvas): PipGeometry {
+/** The vertical band captions occupy, as canvas fractions (top < bottom). */
+export interface CaptionBand { top: number; bottom: number }
+/**
+ * Where captions sit for a caption style: `yPct` is the caption group's bottom; the band above it
+ * holds two lines (four with a translation line), scaled with the caption size.
+ */
+export function captionBandFor(style: { on?: boolean; yPct?: number; scale?: number; sub?: unknown } | undefined): CaptionBand | undefined {
+  if (!style?.on || typeof style.yPct !== 'number') return undefined;
+  const bottom = style.yPct / 100;
+  return { top: bottom - (style.sub ? .14 : .08) * (style.scale ?? 1), bottom };
+}
+/** Functional templates. Insets keep their source ratio; bottom-corner insets stay clear of the caption band. */
+export function pipGeometry(template: PipTemplate, canvas: Dimensions, asset: Dimensions, options: Partial<PipOptions> = {}, source: Dimensions = canvas, captions?: CaptionBand): PipGeometry {
   const portrait = canvas.height > canvas.width;
   const selected = template === 'smart'
     ? portrait && aspect(asset) >= 1.2 ? 'split' : !portrait && aspect(asset) < .8 ? 'inset' : 'presenter'
@@ -53,7 +64,9 @@ export function pipGeometry(template: PipTemplate, canvas: Dimensions, asset: Di
     const maxH = (portrait ? .34 : .4) * factor;
     const fitted = fittedBox(canvas, dimensions, { x: 0, y: 0, w: maxW, h: maxH });
     const corner = options.position ?? 'bottom-right';
-    return { ...fitted, x: corner.endsWith('left') ? .04 : .96 - fitted.w, y: corner.startsWith('top') ? .06 : .79 - fitted.h };
+    // A bottom-corner window ends above the captions, so lines never run across it.
+    const floor = captions && captions.bottom > .4 ? Math.min(.79, captions.top - .02) : .79;
+    return { ...fitted, x: corner.endsWith('left') ? .04 : .96 - fitted.w, y: corner.startsWith('top') ? .06 : Math.max(.06, floor - fitted.h) };
   };
   const common = { resolvedTemplate: selected, mediaFit: options.mediaFit ?? (['presenter', 'cutout-small'].includes(selected) ? 'cover' : 'contain'), speakerFit: options.speakerFit ?? 'contain', speakerAnchorY: .5 } as const;
   if (selected === 'cutout-small') return { ...common, media: { x: 0, y: 0, w: 1, h: 1 }, speaker: inset(source, true), speakerCutout: true, speakerFit: 'contain', background: '#171717' };
@@ -75,9 +88,9 @@ export function pipGeometry(template: PipTemplate, canvas: Dimensions, asset: Di
   if (selected === 'dim') return { ...common, media: fittedBox(canvas, asset, { x: .06, y: .06, w: .88, h: .72 }), background: 'rgba(0,0,0,.62)' };
   return { ...common, media: inset(asset) };
 }
-export function resolvePipGeometry(options: PipOptions, canvas: Dimensions, asset: Dimensions, source: Dimensions = canvas): PipGeometry {
+export function resolvePipGeometry(options: PipOptions, canvas: Dimensions, asset: Dimensions, source: Dimensions = canvas, captions?: CaptionBand): PipGeometry {
   if (!validPipOptions(options)) throw new Error('画中画配置无效。');
-  return pipGeometry(options.template, canvas, asset, options, source);
+  return pipGeometry(options.template, canvas, asset, options, source, captions);
 }
 
 /** Rebuild only the layout layers tied to actual footage windows. The source audio stays intact. */
@@ -88,13 +101,15 @@ export function applyPipLayout(document: EditorDocumentV2, options: PipOptions, 
   next.timeline.tracks = next.timeline.tracks.filter(track => ![groundId, presenterId].includes(track.id));
   const grounds: GraphicTimelineClip[] = []; const presenters: MediaTimelineClip[] = [];
   const primary = next.timeline.tracks.find(track => track.id === next.semantics.primaryNarrativeTrackId);
+  const hasCaptions = next.timeline.tracks.some(track => track.type === 'caption' && track.clips.length > 0);
+  const captions = hasCaptions ? captionBandFor(next.appearance.captionStyle) : undefined;
   footage.stackOrder = 3;
   for (const clip of footage.clips) {
     if (clip.kind !== 'media') continue;
     const asset = next.assets[clip.assetId];
     const firstSource = primary?.clips.find(source => source.kind === 'narrative' && source.enabled && source.startFrame < clip.startFrame + clip.durationFrames && source.startFrame + source.durationFrames > clip.startFrame);
     const sourceAsset = firstSource && 'assetId' in firstSource && firstSource.assetId ? next.assets[firstSource.assetId] : undefined;
-    const geometry = resolvePipGeometry(options, next.canvas, { width: asset.metadata?.width ?? next.canvas.width, height: asset.metadata?.height ?? next.canvas.height }, { width: sourceAsset?.metadata?.width ?? next.canvas.width, height: sourceAsset?.metadata?.height ?? next.canvas.height });
+    const geometry = resolvePipGeometry(options, next.canvas, { width: asset.metadata?.width ?? next.canvas.width, height: asset.metadata?.height ?? next.canvas.height }, { width: sourceAsset?.metadata?.width ?? next.canvas.width, height: sourceAsset?.metadata?.height ?? next.canvas.height }, captions);
     clip.box = geometry.media; clip.fit = geometry.mediaFit; clip.linkGroupId = clip.id + '-pip';
     const { startFrame, durationFrames, linkGroupId } = clip;
     if (geometry.background) grounds.push({ id: clip.id + '-ground', kind: 'graphic', enabled: true, startFrame, durationFrames, linkGroupId, anchor: { type: 'timeline' }, block: { templateId: 'custom', label: '画中画背景', box: { x: 0, y: 0, w: 1, h: 1 }, slots: { innerHtml: `<div style="position:absolute;inset:0;background:${geometry.background}"></div>`, timelineBody: '', authoredDurationSec: durationFrames / next.canvas.fps } } });

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { pipGeometry, resolvePipGeometry, validPipOptions, type PipBox, type PipCorner, type PipSize } from './pip-layout';
+import { captionBandFor, pipGeometry, resolvePipGeometry, validPipOptions, type PipBox, type PipCorner, type PipSize } from './pip-layout';
 const portrait = { width: 1080, height: 1920 };
 const landscape = { width: 1920, height: 1080 };
 const square = { width: 1080, height: 1080 };
@@ -15,6 +15,24 @@ it('preserves both inset aspect ratios for wide, square and tall footage without
     inBounds(inset.speaker!);
     expect(inset.speaker!.w * canvas.width / (inset.speaker!.h * canvas.height)).toBeCloseTo(9 / 16, 6);
   }
+});
+it('ends bottom-corner windows above the captions, wherever the captions sit', () => {
+  const band = captionBandFor({ on: true, yPct: 74, scale: 1 })!;
+  expect(band.top).toBeCloseTo(.66, 6);
+  for (const template of ['presenter', 'inset', 'cutout-small'] as const) {
+    const geometry = pipGeometry(template, portrait, landscape, { position: 'bottom-right' }, portrait, band);
+    const window = template === 'inset' ? geometry.media : geometry.speaker!;
+    inBounds(window);
+    expect(window.y + window.h).toBeLessThanOrEqual(band.top);
+  }
+  // Top corners, captions switched off and captions near the top leave the window where it was.
+  expect(pipGeometry('presenter', portrait, landscape, { position: 'top-right' }, portrait, band).speaker!.y).toBeCloseTo(.06, 6);
+  expect(captionBandFor({ on: false, yPct: 74 })).toBeUndefined();
+  const high = captionBandFor({ on: true, yPct: 30 });
+  const plain = pipGeometry('presenter', portrait, landscape, {}, portrait).speaker!;
+  expect(pipGeometry('presenter', portrait, landscape, {}, portrait, high).speaker).toEqual(plain);
+  // A translation line doubles the band.
+  expect(captionBandFor({ on: true, yPct: 74, sub: {} })!.top).toBeCloseTo(.60, 6);
 });
 it('lets users move the inset into any corner while keeping size and aspect stable', () => {
   const corners: PipCorner[] = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
