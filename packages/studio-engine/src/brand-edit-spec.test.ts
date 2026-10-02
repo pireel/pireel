@@ -212,7 +212,8 @@ describe('visual fields of the spec', () => {
 
 describe('reading-pass facets', () => {
   it('parses leniently: an unknown value blanks only that facet', () => {
-    expect(parseStyleFacets({ layout: 'split_screen', fontClass: 'Comic Sans', brollTypes: ['stock', 'stock', 'drone'] })).toEqual({ layout: 'split_screen', fontClass: null, captionAnimation: null, accentRule: null, hookStructure: null, brollTypes: ['stock'] });
+    const facets = parseStyleFacets({ layout: 'split_screen', fontClass: 'Comic Sans', camera: 'unknown', brollTypes: ['stock', 'stock', 'drone'], callouts: 'arrows' });
+    expect(facets).toMatchObject({ layout: 'split_screen', fontClass: null, camera: null, captionAnimation: null, brollTypes: ['stock'], callouts: [], brandElements: [] });
     expect(parseStyleFacets(undefined).layout).toBeNull();
   });
 
@@ -242,5 +243,30 @@ describe('reading-pass facets', () => {
     const spec = deriveBrandEditSpec(videos, { facets });
     expect(spec.captions.fontClass).toMatchObject({ value: 'heavy_sans', provenance: { source: 'vlm_inferred' } });
     expect(spec.captions.accentRule?.value).toBe('keywords');
+  });
+});
+
+describe('reading-pass cutting, captions and graphics', () => {
+  const facet = (patch: Record<string, unknown>) => parseStyleFacets(patch);
+  it('takes cutting device and punch-in from the reading pass when it read most videos, with discounts on unstable facets', () => {
+    const videos = Array.from({ length: 4 }, (_, i) => measures(`v${i}`, { layout: 'full_frame_host', hostShare: 0.95, cuts: { jump: 0.6, punch_in: 0, punch_out: 0, camera_change: 0.1, cutaway: 0.1, broll: 0.1 } }));
+    const read = facet({ cuttingDevice: 'punchin_alternation', punchIn: 'two_sizes', captionStyle: 'chunk', captionTreatment: 'stroke', camera: 'handheld', colorGrade: 'warm', hookStructure: 'question', callouts: ['arrows', 'stickers'], brandElements: ['series_label'] });
+    const spec = deriveBrandEditSpec(videos, { facets: Object.fromEntries(videos.map(video => [video.id, read])) });
+    expect(spec.cutting.primaryDevice).toMatchObject({ value: 'punchin_alternation', provenance: { source: 'vlm_inferred' } });
+    expect(spec.cutting.punchIn?.value).toEqual({ enabled: true, pattern: 'two_sizes' });
+    expect(spec.captions.style?.value).toBe('chunk');
+    expect(spec.captions.treatment?.value).toBe('stroke');
+    expect(spec.camera?.value).toBe('handheld');
+    expect(spec.textOverlays.callouts?.value).toEqual(['arrows', 'stickers']);
+    expect(spec.brandAssets?.elements?.value).toEqual(['series_label']);
+    expect(spec.colorGrade!.provenance.confidence).toBeLessThan(0.5);
+    expect(spec.lowConfidence).toEqual(expect.arrayContaining(['colorGrade']));
+    expect(validateBrandEditSpec(spec)).toBe(spec);
+  });
+
+  it('keeps the measured cutting device when the reading pass saw too few videos', () => {
+    const videos = Array.from({ length: 4 }, (_, i) => measures(`v${i}`, { layout: 'full_frame_host', hostShare: 0.95, cuts: { jump: 0.6, punch_in: 0, punch_out: 0, camera_change: 0.1, cutaway: 0.1, broll: 0.1 } }));
+    const spec = deriveBrandEditSpec(videos, { facets: { v0: facet({ cuttingDevice: 'multicam_switch' }) } });
+    expect(spec.cutting.primaryDevice).toMatchObject({ value: 'same_size_jumpcut', provenance: { source: 'measured' } });
   });
 });

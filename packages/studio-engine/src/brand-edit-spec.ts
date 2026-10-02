@@ -1,6 +1,6 @@
 import type { VideoMeasures } from './brand-analysis';
 import { brollTier, classifyArchetype, primaryDevice, type ArchetypeId, type BrollTier, type LayoutMode, type PrimaryDevice } from './brand-visual';
-import type { VideoStyleFacets } from './brand-style-spec';
+import type { StyleFacetKey, StyleFacetListKey, VideoStyleFacets } from './brand-style-spec';
 
 /**
  * The executable half of a brand: structured edit parameters reduced from per-video measures, each
@@ -45,7 +45,7 @@ export interface BrandEditSpec {
     silence: SpecField<{ mode: SilenceMode; maxGapMs: number }>;
     /** What the cutting leans on, and whether digital punch-ins are part of the style (how often is per video). */
     primaryDevice?: SpecField<PrimaryDevice>;
-    punchIn?: SpecField<{ enabled: boolean }>;
+    punchIn?: SpecField<{ enabled: boolean; /** two_sizes / three_plus / on_emphasis, when the reading pass saw it. */ pattern?: string }>;
   };
   captions: {
     presence: SpecField<CaptionPresence>;
@@ -58,6 +58,10 @@ export interface BrandEditSpec {
     fontClass?: SpecField<string>;
     animation?: SpecField<string>;
     accentRule?: SpecField<string>;
+    /** word_pop / chunk / full_line / keyword_callouts — how much shows at once, as the reading pass saw it. */
+    style?: SpecField<string>;
+    treatment?: SpecField<string>;
+    emoji?: SpecField<string>;
   };
   audio: { targetLufs: SpecField<number> };
   /** Visual fingerprint (null fields when no visual primitives were measured). */
@@ -72,11 +76,17 @@ export interface BrandEditSpec {
     /** A header/label held over most of the video; its look is the template, its text changes per video. */
     header: SpecField<{ enabled: boolean; box: { x: number; y: number; w: number; h: number } | null; examples: string[] }>;
     hookLabel: SpecField<boolean>;
+    /** Edited-in graphics seen in at least two videos and 30% of them (arrows, stickers, charts…). */
+    callouts?: SpecField<string[]>;
   };
+  camera?: SpecField<string>;
+  /** Unstable across prompt versions and datasets in the evaluation: always low confidence, a hint only. */
+  colorGrade?: SpecField<string>;
   /** Speaker traits: pace captions with them, never enforce them as style. */
   speech: { wpm: number | null; speakers: number };
-  /** Where the recurring intro sting plays when it follows a cold open (seconds into the video). */
-  brandAssets?: { introAtSec: number };
+  /** Where the recurring intro sting plays when it follows a cold open (seconds into the video); recurring brand
+   *  elements the reading pass saw (logo bug, intro sting, end card, series label). */
+  brandAssets?: { introAtSec?: number; elements?: SpecField<string[]> };
   lowConfidence: string[];
 }
 
@@ -305,17 +315,34 @@ export function deriveBrandEditSpec(all: VideoMeasures[], options: DeriveOptions
       ...(measuredVote && measuredVote.value !== layout.value ? { layoutMeasured: measuredVote.value } : {}),
     };
   }
-  // Caption character the reading pass judged, over the captioned videos it read.
-  const facetField = (name: string, key: 'fontClass' | 'captionAnimation' | 'accentRule' | 'hookStructure', pool: VideoMeasures[]) => {
+  // Judgements of the reading pass, voted over the videos it read (captions: over the captioned ones).
+  // `discount` < 1 for facets the prompt evaluation found unstable, so they stay hints.
+  const facetField = (name: string, key: StyleFacetKey, pool: VideoMeasures[], discount = 1) => {
     const values = pool.map(video => facetOf(video)?.[key]).filter((value): value is NonNullable<typeof value> => !!value);
     if (!values.length) return undefined;
     const vote = categorical(values as string[], FIELD.case.min, values[0]!);
-    return track(name, { ...vote, provenance: { ...vote.provenance, source: 'vlm_inferred' as const } });
+    const conf = round(vote.provenance.confidence * discount);
+    return track(name, { ...vote, provenance: { ...vote.provenance, confidence: conf, source: 'vlm_inferred' as const }, low: conf < CONFIDENCE_FLOOR });
+  };
+  const listField = (key: StyleFacetListKey) => {
+    const readers = videos.filter(video => facetOf(video));
+    if (!readers.length) return undefined;
+    const counts = new Map<string, number>();
+    readers.forEach(video => new Set(facetOf(video)![key] as string[]).forEach(item => counts.set(item, (counts.get(item) ?? 0) + 1)));
+    const value = [...counts.entries()].filter(([, n]) => n >= 2 && n / readers.length >= 0.3).sort((x, y) => y[1] - x[1]).map(([item]) => item);
+    return { value, provenance: { source: 'vlm_inferred' as const, confidence: confidence(1, readers.length, FIELD.header.min), videos: readers.length } };
   };
   const fontClass = facetField('captions.fontClass', 'fontClass', captioned);
   const animation = facetField('captions.animation', 'captionAnimation', captioned);
   const accentRule = facetField('captions.accentRule', 'accentRule', captioned);
-  const hookStructure = facetField('hook.structure', 'hookStructure', videos);
+  const captionStyle = facetField('captions.style', 'captionStyle', captioned);
+  const treatment = facetField('captions.treatment', 'captionTreatment', captioned);
+  const emoji = facetField('captions.emoji', 'emoji', videos);
+  const camera = facetField('camera', 'camera', videos);
+  const hookStructure = facetField('hook.structure', 'hookStructure', videos, 0.6);
+  const colorGrade = facetField('colorGrade', 'colorGrade', videos, 0.45);
+  const callouts = listField('callouts');
+  const elements = listField('brandElements');
   const header = track('textOverlays.header', (() => {
     const share = videos.filter(video => video.headerShare >= 0.5).length / videos.length;
     const withHeader = videos.filter(video => video.headerShare >= 0.5 && video.header);
@@ -325,17 +352,31 @@ export function deriveBrandEditSpec(all: VideoMeasures[], options: DeriveOptions
   const hookVote = categorical(videos.map(video => video.hookLabel ? 'yes' as const : 'no' as const), FIELD.header.min, 'no');
   const hookLabel = track('textOverlays.hookLabel', { ...hookVote, value: hookVote.value === 'yes' });
 
+  // Cutting device and punch-in from the reading pass when it read at least half the videos: in the
+  // evaluation it agreed with reference labels 82-86% of the time, above the measured classifiers.
+  function readCutting(): Pick<BrandEditSpec['cutting'], 'primaryDevice' | 'punchIn'> {
+    const readers = videos.filter(video => facetOf(video)?.cuttingDevice);
+    if (readers.length * 2 < videos.length) return {};
+    const device = facetField('cutting.primaryDevice', 'cuttingDevice', videos)!;
+    const punch = facetField('cutting.punchIn', 'punchIn', videos);
+    return {
+      primaryDevice: device as SpecField<PrimaryDevice>,
+      ...(punch ? { punchIn: { value: { enabled: punch.value !== 'none', pattern: punch.value }, provenance: punch.provenance } } : {}),
+    };
+  }
   const wpms = present(videos.map(video => video.wpm));
   return {
     version: BRAND_EDIT_SPEC_VERSION, extractor: BRAND_EXTRACTOR_VERSION, platform, series,
     usedVideos: videos.map(video => video.id), outliers,
     framing: { faceH, faceCx, faceCy },
-    cutting: { targetCpm, p90ShotSec, silence, ...visualCutting(videos) },
-    captions: { presence, case: casing, box, wordsPerLine, wordsPerPage, ...(fontClass ? { fontClass } : {}), ...(animation ? { animation } : {}), ...(accentRule ? { accentRule } : {}) },
+    cutting: { targetCpm, p90ShotSec, silence, ...visualCutting(videos), ...readCutting() },
+    captions: { presence, case: casing, box, wordsPerLine, wordsPerPage, ...(fontClass ? { fontClass } : {}), ...(animation ? { animation } : {}), ...(accentRule ? { accentRule } : {}), ...(captionStyle ? { style: captionStyle } : {}), ...(treatment ? { treatment } : {}), ...(emoji ? { emoji } : {}) },
     ...(hookStructure ? { hook: { structure: hookStructure } } : {}),
+    ...(camera ? { camera } : {}), ...(colorGrade ? { colorGrade } : {}),
+    ...(elements ? { brandAssets: { elements } } : {}),
     audio: { targetLufs },
     ...visual,
-    textOverlays: { header, hookLabel },
+    textOverlays: { header, hookLabel, ...(callouts ? { callouts } : {}) },
     speech: { wpm: wpms.length ? Math.round(median(wpms)) : null, speakers: Math.max(0, ...videos.map(video => video.speakers)) },
     lowConfidence: low,
   };

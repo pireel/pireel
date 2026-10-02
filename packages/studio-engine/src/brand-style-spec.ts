@@ -45,24 +45,41 @@ export interface BrandStyleSpec {
   frames: (StyleEvidenceRef & { key: string })[];
 }
 
-/** Closed-vocabulary judgements per video for what measurement cannot see or sees poorly. */
+/**
+ * Closed-vocabulary judgements per video for what measurement cannot see or sees poorly. The vocabulary
+ * is the reading prompt's PART 2 (src/routes/api/studio/brand-analyze.ts), chosen by evaluating prompt
+ * versions against per-video reference labels (docs/brand-reading-prompt-eval.md). "unknown" parses to null.
+ */
 export const STYLE_FACETS = {
   layout: ['full_frame_host', 'split_screen', 'pip_host', 'pip_source', 'greenscreen_composite', 'template_frame', 'first_person', 'host_absent'],
+  camera: ['tripod', 'handheld', 'multicam', 'webcam'],
+  cuttingDevice: ['long_take', 'same_size_jumpcut', 'punchin_alternation', 'multicam_switch', 'broll_cover'],
+  punchIn: ['none', 'two_sizes', 'three_plus', 'on_emphasis'],
+  captionPresence: ['on', 'off'],
+  captionStyle: ['word_pop', 'chunk', 'full_line', 'keyword_callouts', 'none'],
   fontClass: ['heavy_sans', 'rounded_sans', 'condensed_sans', 'serif', 'handwritten', 'monospace', 'platform_native', 'none'],
-  captionAnimation: ['none', 'pop_scale', 'bounce', 'fade', 'typewriter', 'word_reveal'],
+  captionCase: ['upper', 'sentence', 'lower', 'none'],
+  captionTreatment: ['stroke', 'shadow', 'box', 'plain', 'none'],
+  captionPosition: ['upper_third', 'center', 'lower_third', 'none'],
   accentRule: ['none', 'current_word', 'keywords', 'numbers_money', 'speaker'],
+  captionAnimation: ['none', 'pop_scale', 'bounce', 'fade', 'typewriter', 'word_reveal'],
+  emoji: ['none', 'occasional', 'frequent'],
+  heldHeader: ['yes', 'no'],
+  hookLabel: ['yes', 'no'],
+  colorGrade: ['natural', 'warm', 'cool', 'high_contrast', 'muted', 'bright_high_key'],
   hookStructure: ['cold_statement', 'question', 'text_hook_card', 'broll_montage', 'result_first', 'in_media_res', 'source_clip_first'],
+} as const;
+/** Facets that are lists (any number of values, empty when none). */
+export const STYLE_FACET_LISTS = {
+  callouts: ['arrows', 'circles', 'highlight_boxes', 'zoomed_screenshots', 'articles_or_tweets', 'charts', 'memes_or_gifs', 'stickers', 'progress_bar', 'chapter_cards', 'lower_thirds', 'price_or_spec_tags'],
   brollTypes: ['user_footage', 'product_macro', 'screen_recording', 'screenshot_article', 'stock', 'archival_news', 'ai_image', 'meme_gif', 'map_3d', 'animation'],
+  brandElements: ['logo_bug', 'intro_sting', 'end_card', 'series_label'],
 } as const;
 export type StyleFacetKey = keyof typeof STYLE_FACETS;
-export interface VideoStyleFacets {
-  layout: typeof STYLE_FACETS.layout[number] | null;
-  fontClass: typeof STYLE_FACETS.fontClass[number] | null;
-  captionAnimation: typeof STYLE_FACETS.captionAnimation[number] | null;
-  accentRule: typeof STYLE_FACETS.accentRule[number] | null;
-  hookStructure: typeof STYLE_FACETS.hookStructure[number] | null;
-  brollTypes: typeof STYLE_FACETS.brollTypes[number][];
-}
+export type StyleFacetListKey = keyof typeof STYLE_FACET_LISTS;
+export type VideoStyleFacets =
+  { [K in StyleFacetKey]: typeof STYLE_FACETS[K][number] | null } &
+  { [K in StyleFacetListKey]: typeof STYLE_FACET_LISTS[K][number][] };
 
 /** One video's reading: what each system does in it, at which times. */
 export interface VideoStyleReading {
@@ -73,12 +90,16 @@ export interface VideoStyleReading {
   facets?: VideoStyleFacets;
 }
 
-/** Facets are parsed leniently: an out-of-vocabulary value only blanks that facet, it never fails the reading. */
+/** Facets are parsed leniently: an out-of-vocabulary value (or "unknown") only blanks that facet, it never fails the reading. */
 export function parseStyleFacets(value: unknown): VideoStyleFacets {
   const raw = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
-  const pick = <K extends Exclude<StyleFacetKey, 'brollTypes'>>(key: K) => (STYLE_FACETS[key] as readonly string[]).includes(raw[key] as string) ? raw[key] as VideoStyleFacets[K] : null;
-  const broll = Array.isArray(raw.brollTypes) ? [...new Set(raw.brollTypes.filter((item): item is VideoStyleFacets['brollTypes'][number] => (STYLE_FACETS.brollTypes as readonly string[]).includes(item as string)))] : [];
-  return { layout: pick('layout'), fontClass: pick('fontClass'), captionAnimation: pick('captionAnimation'), accentRule: pick('accentRule'), hookStructure: pick('hookStructure'), brollTypes: broll };
+  const out: Record<string, unknown> = {};
+  for (const [key, options] of Object.entries(STYLE_FACETS)) out[key] = (options as readonly string[]).includes(raw[key] as string) ? raw[key] : null;
+  for (const [key, options] of Object.entries(STYLE_FACET_LISTS)) {
+    const list = raw[key];
+    out[key] = Array.isArray(list) ? [...new Set(list.filter(item => (options as readonly string[]).includes(item as string)))] : [];
+  }
+  return out as VideoStyleFacets;
 }
 
 const MAX_RULES = 8;
