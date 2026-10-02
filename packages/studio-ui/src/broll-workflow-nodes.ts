@@ -1,6 +1,7 @@
 import { composeBrollDocument } from '@pireel/studio-engine/broll-compose';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import type { BrollAsset, BrollCandidate, BrollOptions, BrollPlacement } from '@pireel/studio-engine/broll-task';
+import type { PipShotLayout } from '@pireel/studio-engine/pip-layout';
 import { validateBrollPlan, brollAssetsMatch, brollCues, brollPlacementAnchor, brollStillBudget } from '@pireel/studio-engine/broll-task';
 import type { EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import { applyDocumentTransaction } from '@pireel/studio-engine/document-transaction';
@@ -13,15 +14,15 @@ type Analysis = { assets: BrollOptions['assets']; candidates: BrollCandidate[]; 
 type Plan = { placements: BrollPlacement[]; planKey: string };
 /** One plan for your shots and AI stills: the stills as candidates that carry their own asset, and where every shot lands. */
 type Generated = { candidates: BrollCandidate[]; placements: BrollPlacement[] };
-type Still = { id: string; prompt: string };
+type Still = { id: string; prompt: string; layout?: PipShotLayout };
 type GeneratedProgress = { plan?: { placements: BrollPlacement[]; stills: Still[] }; jobs: Record<number, string>; assets: Record<number, BrollAsset> };
 
-/** Picture size for a still, by where the layout shows it: full frame, a split half, or a window. */
-function stillSize(options: BrollOptions, canvas: { width: number; height: number }) {
+/** Picture size for a still, by where its layout shows it: full frame, a split half, or a window. */
+function stillSize(options: BrollOptions, canvas: { width: number; height: number }, layout?: PipShotLayout) {
   const portrait = canvas.height >= canvas.width;
-  const template = options.pip?.template ?? 'presenter';
+  const template = options.pip ? layout ?? options.pip.template : 'cover';
   if (template === 'split' || template === 'split-bottom') return '1024x1024';
-  if (options.pip && (template === 'inset' || template === 'dim')) return '1536x1024';
+  if (template === 'inset' || template === 'dim') return '1536x1024';
   return portrait ? '1024x1536' : '1536x1024';
 }
 const STILL_ASPECT = { '1024x1024': 'square', '1536x1024': 'landscape', '1024x1536': 'portrait' } as const;
@@ -33,6 +34,15 @@ function brollFrame(options: Partial<BrollOptions> | undefined) {
   if (template === 'inset' || template === 'dim') return 'window';
   return template === 'smart' ? 'smart' : 'presenter';
 }
+/** Your shots as the planner sees them: what each shows, and its shape so a layout can suit it. */
+function plannerCandidates(analysis: Analysis | undefined) {
+  return (analysis?.candidates ?? []).map(candidate => {
+    const asset = analysis!.assets.find(a => a.id === candidate.assetId);
+    const ratio = asset?.width && asset.height ? asset.width / asset.height : undefined;
+    return { ...candidate, ...(ratio ? { shape: ratio >= 1.2 ? 'landscape' : ratio <= .8 ? 'portrait' : 'square' } : {}) };
+  });
+}
+const replan = (p: { id: string; candidateId: string; layout?: PipShotLayout }) => ({ ...brollPlacementAnchor(p.id), candidateId: p.candidateId, ...(p.layout ? { layout: p.layout } : {}) });
 export function brollWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
   const { store } = host;
   const node = (id: string, body: Omit<SceneNode, 'capability'>): SceneNode => ({ capability: BROLL_WORKFLOW_CAPABILITIES.find(c => c.id === id)!, ...body });
@@ -91,17 +101,17 @@ export function brollWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     if (!placements) {
       placements = []; const used = new Set<string>();
       for (let offset = 0; offset < cues.length; offset += 100) {
-        const batch = cues.slice(offset, offset + 100); const candidates = analysis.candidates.filter(c => !used.has(c.id));
+        const batch = cues.slice(offset, offset + 100); const candidates = plannerCandidates(analysis).filter(c => !used.has(c.id));
         if (!candidates.length) break;
         const response = await fetch('/api/studio/broll-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: host.hooks.signal, body: JSON.stringify({ cues: batch, candidates, durationSec, projectId: args.projectId, frame: brollFrame(args.options as Partial<BrollOptions> | undefined) }) });
         const body = await response.json();
         if (body.usage) context.recordUsage(body.usage);
         if (!response.ok) throw new Error(body.error ?? '画面匹配失败。');
-        const plan = validateBrollPlan(body.placements.map((p: { id: string; candidateId: string }) => ({ ...brollPlacementAnchor(p.id), candidateId: p.candidateId })), batch, candidates, durationSec);
+        const plan = validateBrollPlan(body.placements.map(replan), batch, candidates, durationSec);
         for (const p of plan) { used.add(p.candidateId); placements.push(p); }
       }
     }
-    placements = validateBrollPlan(placements.map(p => ({ ...brollPlacementAnchor(p.id), candidateId: p.candidateId })), cues, analysis.candidates, durationSec);
+    placements = validateBrollPlan(placements.map(replan), cues, analysis.candidates, durationSec);
     const value: Plan = { planKey, placements };
     return { plan: workflowJson(await store.put('edit-plan', 'broll', value)), value: workflowJson(value) };
   }, project: outputs => ({ broll: { ...host.task.broll!, ...(outputs.value as unknown as Plan) } }) }),
@@ -115,18 +125,18 @@ export function brollWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     const progress: GeneratedProgress = context.partial<GeneratedProgress>() ?? { jobs: {}, assets: {} };
     if (!progress.plan) {
       // One pass arranges your shots and decides which moments get a still, before any image is paid for.
-      const response = await fetch('/api/studio/broll-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: host.hooks.signal, body: JSON.stringify({ cues, candidates: local?.candidates ?? [], durationSec, projectId: args.projectId, frame: brollFrame(options), generate: { max: brollStillBudget(durationSec), aspect: STILL_ASPECT[size] } }) });
+      const response = await fetch('/api/studio/broll-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: host.hooks.signal, body: JSON.stringify({ cues, candidates: plannerCandidates(local), durationSec, projectId: args.projectId, frame: brollFrame(options), generate: { max: brollStillBudget(durationSec), aspect: STILL_ASPECT[size] } }) });
       const body = await response.json();
       if (body.usage) context.recordUsage(body.usage);
       if (!response.ok) throw new Error(response.status === 402 ? '积分不足，无法生成素材。' : '素材编排失败，请重试。');
-      progress.plan = { placements: body.placements, stills: body.stills.map((still: Still) => ({ id: still.id, prompt: still.prompt })) }; await context.savePartial(progress);
+      progress.plan = { placements: body.placements, stills: body.stills.map((still: Still) => ({ id: still.id, prompt: still.prompt, ...(still.layout ? { layout: still.layout } : {}) })) }; await context.savePartial(progress);
     }
     const ideas = progress.plan.stills;
     const { startGeneration, pollCreation } = await import('./gen-api');
     await Promise.all(ideas.map(async (idea, index) => {
       if (progress.assets[index]) return;
       if (!progress.jobs[index]) {
-        const started = await startGeneration(String(args.projectId), 'image-gen', { prompt: idea.prompt, user_prompt: idea.prompt, n: 1, size });
+        const started = await startGeneration(String(args.projectId), 'image-gen', { prompt: idea.prompt, user_prompt: idea.prompt, n: 1, size: stillSize(options, host.task, idea.layout) });
         if (!started.ok) throw new Error(started.kind === 'credits' ? '积分不足，无法生成素材。' : started.message);
         progress.jobs[index] = started.ids[0]!; await context.savePartial(progress);
       }
@@ -150,7 +160,7 @@ export function brollWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
       await context.savePartial(progress);
     }));
     const candidates: BrollCandidate[] = ideas.map((idea, index) => ({ id: `${progress.assets[index]!.id}-0`, assetId: progress.assets[index]!.id, start: 0, end: 5, description: idea.prompt, asset: progress.assets[index]! }));
-    const shots = [...progress.plan.placements.map(p => ({ ...brollPlacementAnchor(p.id), candidateId: p.candidateId })), ...ideas.map((idea, index) => ({ ...brollPlacementAnchor(idea.id), candidateId: candidates[index]!.id }))];
+    const shots = [...progress.plan.placements.map(replan), ...ideas.map((idea, index) => replan({ ...idea, candidateId: candidates[index]!.id }))];
     const placements = validateBrollPlan(shots, cues, [...(local?.candidates ?? []), ...candidates], durationSec);
     return { value: workflowJson({ candidates, placements } satisfies Generated) };
   } }),

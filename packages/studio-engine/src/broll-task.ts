@@ -1,3 +1,4 @@
+import { isPipShotLayout, type PipShotLayout } from './pip-layout';
 export interface BrollAsset { id: string; sig: string; name: string; kind: 'video' | 'image'; durationSec: number; width: number; height: number }
 export interface BrollOptions {
   /** Picture in picture footage sources: AI-generated stills from the narration (off unless set) and
@@ -5,7 +6,7 @@ export interface BrollOptions {
   aiFootage?: boolean; localFootage?: boolean;
   pip?: import('./pip-layout').PipOptions; manualClips?: { id: string; assetId: string; start: number; duration: number; sourceIn: number }[]; edits?: Record<string, { start: number; duration: number; sourceIn: number }>; assets: BrollAsset[]; captions: boolean; replacements?: Record<string, string>; disabledPlacements?: string[] }
 export interface BrollCandidate { id: string; assetId: string; start: number; end: number; description: string; /** Footage made for this shot (AI generated) carries its own asset; user footage lives in BrollOptions.assets. */ asset?: BrollAsset }
-export interface BrollPlacement { id: string; candidateId: string; start: number; duration: number }
+export interface BrollPlacement { id: string; candidateId: string; start: number; duration: number; /** Picture in picture layout planned for this shot (smart fit). */ layout?: PipShotLayout }
 /** One narration sentence; `anchors` are its words, so a shot can start on the word it illustrates. */
 export interface BrollCue { id: number; start: number; end: number; text: string; anchors?: { id: number; start: number; text: string }[] }
 
@@ -38,7 +39,7 @@ export function validateBrollPlan(value: unknown, cues: BrollCue[], candidates: 
     const duration = Math.min(5, candidate.end - candidate.start, durationSec - start);
     if (duration < 1 || start < 0) continue;
     used.add(candidate.id);
-    result.push({ id: anchor ? `broll-${cue.id}-${anchor.id}` : `broll-${cue.id}`, candidateId: candidate.id, start, duration });
+    result.push({ id: anchor ? `broll-${cue.id}-${anchor.id}` : `broll-${cue.id}`, candidateId: candidate.id, start, duration, ...(isPipShotLayout(row.layout) ? { layout: row.layout } : {}) });
   }
   result.sort((a, b) => a.start - b.start);
   let end = -2; let coverage = 0;
@@ -51,7 +52,7 @@ export function validateBrollPlan(value: unknown, cues: BrollCue[], candidates: 
 export function resolveBrollEdits(placements: BrollPlacement[], candidates: BrollCandidate[], options: BrollOptions, durationSec: number) {
   const manual = options.manualClips ?? [];
   if (manual.length > 100) throw new Error('最多添加 100 个镜头。');
-  const all = [...placements, ...manual.map(p => ({ id: p.id, candidateId: `manual:${p.id}`, start: p.start, duration: p.duration }))];
+  const all: BrollPlacement[] = [...placements, ...manual.map(p => ({ id: p.id, candidateId: `manual:${p.id}`, start: p.start, duration: p.duration }))];
   if (new Set(all.map(p => p.id)).size !== all.length) throw new Error('镜头编号重复。');
   const clips = all.filter(p => !options.disabledPlacements?.includes(p.id)).map(p => {
     const added = manual.find(c => c.id === p.id);

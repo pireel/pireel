@@ -14,6 +14,10 @@ export const PIP_TEMPLATES = [
 export type PipTemplate = typeof PIP_TEMPLATES[number]['id'];
 /** The layouts users can pick. */
 export const PIP_PICKER_TEMPLATES = PIP_TEMPLATES.filter(template => !('retired' in template));
+/** With smart fit, the planner picks one of these for each shot, so one video mixes layouts. */
+export const PIP_SHOT_LAYOUTS = ['presenter', 'split', 'split-bottom', 'inset', 'dim'] as const;
+export type PipShotLayout = typeof PIP_SHOT_LAYOUTS[number];
+export const isPipShotLayout = (value: unknown): value is PipShotLayout => PIP_SHOT_LAYOUTS.includes(value as PipShotLayout);
 export type PipCorner = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
 export type PipSize = 'small' | 'medium' | 'large';
 export interface PipOptions {
@@ -97,8 +101,11 @@ export function resolvePipGeometry(options: PipOptions, canvas: Dimensions, asse
   return pipGeometry(options.template, canvas, asset, options, source, captions);
 }
 
-/** Rebuild only the layout layers tied to actual footage windows. The source audio stays intact. */
-export function applyPipLayout(document: EditorDocumentV2, options: PipOptions, trackId = 'broll'): EditorDocumentV2 {
+/**
+ * Rebuild only the layout layers tied to actual footage windows. The source audio stays intact.
+ * With smart fit, `layouts` holds the layout planned for each clip; a clip without one fits by shape.
+ */
+export function applyPipLayout(document: EditorDocumentV2, options: PipOptions, trackId = 'broll', layouts: Record<string, PipShotLayout> = {}): EditorDocumentV2 {
   const next = structuredClone(document); const footage = next.timeline.tracks.find(track => track.id === trackId);
   if (!footage) return next;
   const groundId = trackId + '-pip-ground'; const presenterId = trackId + '-pip-presenter';
@@ -113,7 +120,8 @@ export function applyPipLayout(document: EditorDocumentV2, options: PipOptions, 
     const asset = next.assets[clip.assetId];
     const firstSource = primary?.clips.find(source => source.kind === 'narrative' && source.enabled && source.startFrame < clip.startFrame + clip.durationFrames && source.startFrame + source.durationFrames > clip.startFrame);
     const sourceAsset = firstSource && 'assetId' in firstSource && firstSource.assetId ? next.assets[firstSource.assetId] : undefined;
-    const geometry = resolvePipGeometry(options, next.canvas, { width: asset.metadata?.width ?? next.canvas.width, height: asset.metadata?.height ?? next.canvas.height }, { width: sourceAsset?.metadata?.width ?? next.canvas.width, height: sourceAsset?.metadata?.height ?? next.canvas.height }, captions);
+    const planned = options.template === 'smart' ? layouts[clip.id] : undefined;
+    const geometry = resolvePipGeometry(planned ? { ...options, template: planned } : options, next.canvas, { width: asset.metadata?.width ?? next.canvas.width, height: asset.metadata?.height ?? next.canvas.height }, { width: sourceAsset?.metadata?.width ?? next.canvas.width, height: sourceAsset?.metadata?.height ?? next.canvas.height }, captions);
     clip.box = geometry.media; clip.fit = geometry.mediaFit; clip.linkGroupId = clip.id + '-pip';
     const { startFrame, durationFrames, linkGroupId } = clip;
     if (geometry.background) grounds.push({ id: clip.id + '-ground', kind: 'graphic', enabled: true, startFrame, durationFrames, linkGroupId, anchor: { type: 'timeline' }, block: { templateId: 'custom', label: '画中画背景', box: { x: 0, y: 0, w: 1, h: 1 }, slots: { innerHtml: `<div style="position:absolute;inset:0;background:${geometry.background}"></div>`, timelineBody: '', authoredDurationSec: durationFrames / next.canvas.fps } } });

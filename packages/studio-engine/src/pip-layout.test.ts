@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { captionBandFor, pipGeometry, resolvePipGeometry, validPipOptions, type PipBox, type PipCorner, type PipSize } from './pip-layout';
+import { applyPipLayout, captionBandFor, pipGeometry, resolvePipGeometry, validPipOptions, type PipBox, type PipCorner, type PipSize } from './pip-layout';
 const portrait = { width: 1080, height: 1920 };
 const landscape = { width: 1920, height: 1080 };
 const square = { width: 1080, height: 1080 };
@@ -86,4 +86,22 @@ it('keeps cutout presenters inside the canvas overlapping footage while fitting 
       expect(speaker.y).toBeLessThan(geometry.media.y + geometry.media.h);
     }
   }
+});
+it('lays out each clip as planned under smart fit, and by shape where no layout was planned', () => {
+  const clip = (id: string, startFrame: number) => ({ id, kind: 'media', assetId: 'wide', startFrame, durationFrames: 30, sourceInSec: 0, sourceOutSec: 1, enabled: true });
+  const document = {
+    canvas: { ...portrait, fps: 30 }, assets: { wide: { id: 'wide', kind: 'image', metadata: landscape }, talk: { id: 'talk', kind: 'video', metadata: portrait } },
+    semantics: { primaryNarrativeTrackId: 'main' }, appearance: {},
+    timeline: { tracks: [
+      { id: 'main', type: 'visual', clips: [{ id: 'm', kind: 'narrative', assetId: 'talk', startFrame: 0, durationFrames: 300, sourceInSec: 0, sourceOutSec: 10, enabled: true }] },
+      { id: 'broll', type: 'visual', clips: [clip('a', 0), clip('b', 60), clip('c', 120)] },
+    ] },
+  };
+  const next = applyPipLayout(document as never, { template: 'smart' }, 'broll', { a: 'inset', b: 'presenter' });
+  const boxes = next.timeline.tracks.find(track => track.id === 'broll')!.clips.map(clip => (clip as { box: PipBox }).box);
+  expect(boxes[0]).toEqual(pipGeometry('inset', portrait, landscape, {}, portrait).media);
+  expect(boxes[1]).toEqual({ x: 0, y: 0, w: 1, h: 1 });
+  expect(boxes[2]).toEqual(pipGeometry('split', portrait, landscape, {}, portrait).media);
+  // A fixed template ignores planned layouts.
+  expect((applyPipLayout(document as never, { template: 'dim' }, 'broll', { a: 'inset' }).timeline.tracks.find(track => track.id === 'broll')!.clips[0] as { box: PipBox }).box).toEqual(pipGeometry('dim', portrait, landscape).media);
 });
