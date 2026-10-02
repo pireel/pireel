@@ -43,7 +43,7 @@ export function BrollSettings({ task, value, disabled, locale, onChange, onBusy,
           } else if (!cached) throw new Error('本机空间不足。');
           if (!alive.current) break;
           assets.push({ id, sig, name: file.name, kind, width: dimensions.width, height: dimensions.height, durationSec: dimensions.durationSec });
-          onChange({ ...value, assets: [...assets], disabledPlacements: undefined, replacements: undefined, edits: undefined });
+          onChange({ ...value, assets: [...assets], disabledPlacements: undefined, replacements: undefined, edits: undefined, layouts: undefined });
           patchUpload(id, { status: 'done', progress: 1 });
         } catch (e) { patchUpload(id, { status: 'failed', error: e instanceof Error ? e.message : String(e) }); }
       }
@@ -64,7 +64,7 @@ export function BrollSettings({ task, value, disabled, locale, onChange, onBusy,
     const entry = uploads.find(row => row.id === id);
     if (entry) { URL.revokeObjectURL(entry.url); ownedUrls.current.delete(entry.url); }
     setUploads(rows => rows.filter(row => row.id !== id));
-    if (value.assets.some(a => a.id === id)) onChange({ ...value, assets: value.assets.filter(a => a.id !== id), manualClips: value.manualClips?.filter(p => p.assetId !== id), disabledPlacements: undefined, replacements: undefined, edits: undefined });
+    if (value.assets.some(a => a.id === id)) onChange({ ...value, assets: value.assets.filter(a => a.id !== id), manualClips: value.manualClips?.filter(p => p.assetId !== id), disabledPlacements: undefined, replacements: undefined, edits: undefined, layouts: undefined });
   };
   return <div className={compact ? 'space-y-2' : 'mb-4 space-y-3'}>
     <input ref={input} type="file" multiple accept="video/*,image/*" className="hidden" aria-label={zh ? '添加配画面素材' : 'Add B-roll media'} onChange={e => { const files = Array.from(e.target.files ?? []); e.target.value = ''; upload(files); }} />

@@ -87,7 +87,7 @@ it('keeps cutout presenters inside the canvas overlapping footage while fitting 
     }
   }
 });
-it('lays out each clip as planned under smart fit, and by shape where no layout was planned', () => {
+it('lays out each clip in its own layout, and the rest by the template', () => {
   const clip = (id: string, startFrame: number) => ({ id, kind: 'media', assetId: 'wide', startFrame, durationFrames: 30, sourceInSec: 0, sourceOutSec: 1, enabled: true });
   const document = {
     canvas: { ...portrait, fps: 30 }, assets: { wide: { id: 'wide', kind: 'image', metadata: landscape }, talk: { id: 'talk', kind: 'video', metadata: portrait } },
@@ -102,6 +102,7 @@ it('lays out each clip as planned under smart fit, and by shape where no layout 
   expect(boxes[0]).toEqual(pipGeometry('inset', portrait, landscape, {}, portrait).media);
   expect(boxes[1]).toEqual({ x: 0, y: 0, w: 1, h: 1 });
   expect(boxes[2]).toEqual(pipGeometry('split', portrait, landscape, {}, portrait).media);
-  // A fixed template ignores planned layouts.
-  expect((applyPipLayout(document as never, { template: 'dim' }, 'broll', { a: 'inset' }).timeline.tracks.find(track => track.id === 'broll')!.clips[0] as { box: PipBox }).box).toEqual(pipGeometry('dim', portrait, landscape).media);
+  // Under a fixed template, clips without their own layout follow it.
+  const fixed = applyPipLayout(document as never, { template: 'dim' }, 'broll', { a: 'inset' }).timeline.tracks.find(track => track.id === 'broll')!.clips.map(clip => (clip as { box: PipBox }).box);
+  expect(fixed[0]).toEqual(boxes[0]); expect(fixed[1]).toEqual(pipGeometry('dim', portrait, landscape).media);
 });

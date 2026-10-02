@@ -14,6 +14,9 @@ import type { SupplementalVisualMediaClip } from '@pireel/studio-engine/visual-l
 import { SceneCanvasPreview, type SceneCanvasHandle } from './scene-canvas-preview';
 import { loadFont } from './web-fonts';
 import { sceneActionClass } from './scene-action-styles';
+import { brollShotLayout } from '@pireel/studio-engine/broll-compose';
+import { PIP_SHOT_LAYOUTS, pipGeometry } from '@pireel/studio-engine/pip-layout';
+import { PipTemplateDiagram, pipTemplateLabel } from './pip-settings';
 export function BrollTimeline({ task, options, source, renderedUrl, disabled, locale, onChange, actions }: {task:CaptionTaskRecord;options:CaptionTaskOptions;source:File;actions?:ReactNode|((addFootage:ReactNode)=>ReactNode);renderedUrl?:string;disabled:boolean;locale:'zh'|'en';onChange:(value:BrollOptions)=>void}) {
  const zh=locale==='zh';const config=options.broll!;const player=useRef<SceneCanvasHandle>(null);const track=useRef<HTMLDivElement>(null);
  const [addOpen,setAddOpen]=useState(false);const [trimOpen,setTrimOpen]=useState(false);const [ghost,setGhost]=useState<{id:string;start:number;duration:number}|null>(null);
@@ -25,6 +28,8 @@ export function BrollTimeline({ task, options, source, renderedUrl, disabled, lo
  useEffect(()=>{let alive=true;const owned:string[]=[];setUrls({});setAssetFiles(new Map());void Promise.all(footage.map(async a=>{const file=await loadCaptionMedia(task.scope,a.sig,a.name);if(!file)throw new Error(`${zh?'无法读取素材':'Media unavailable'}: ${a.name}`);if(!alive)return;const url=URL.createObjectURL(file);owned.push(url);setAssetFiles(v=>new Map(v).set(url,file));setUrls(v=>({...v,[a.id]:url}));})).catch(e=>{if(alive)setError(e.message);});return()=>{alive=false;owned.forEach(URL.revokeObjectURL);};},[assetKey,task.scope]);
  const resolved=useMemo(()=>{try{return {clips:resolveBrollEdits(task.broll?.placements??[],task.broll?.candidates??[],shown,task.durationSec),error:''};}catch(e){return {clips:[],error:e instanceof Error?e.message:String(e)};}},[task.broll,shown,task.durationSec]);
  const clips=resolved.clips;const selection=clips.find(p=>p.id===selected);
+ // The selected shot's layout: its own, else the template's (smart fit goes by the footage's shape).
+ const selectionLayout=selection&&shown.pip?brollShotLayout(selection,shown)??(shown.pip.template==='smart'?pipGeometry('smart',task,selection.asset).resolvedTemplate:shown.pip.template):undefined;
  const seek=(value:number)=>{const t=Math.max(0,Math.min(task.durationSec,value));timeRef.current=t;setTime(t);player.current?.seek(t);};
  const pause=()=>{player.current?.pause();setPlaying(false);};
  const togglePlay=()=>{if(playing)pause();else player.current?.play();};
@@ -82,6 +87,11 @@ export function BrollTimeline({ task, options, source, renderedUrl, disabled, lo
   <ScenePlayerFrame width={task.width} height={task.height} disabled={disabled || !!resolved.error} onToggle={togglePlay}>
    <SceneCanvasPreview ref={player} composition={composition} visuals={visuals} files={previewFiles} duration={task.durationSec} volume={1} onTime={value=>{timeRef.current=value;setTime(value);}} onPlaying={setPlaying}/>
   </ScenePlayerFrame>
+  {selection&&shown.pip&&<div className="flex shrink-0 items-center gap-1.5" role="group" aria-label={zh?'镜头版式':'Clip layout'}>
+   <span className="text-ink-3 mr-1 text-xs">{zh?'版式':'Layout'}</span>
+   {PIP_SHOT_LAYOUTS.map(layout=>{const on=selectionLayout===layout;return <button key={layout} type="button" disabled={disabled} aria-pressed={on} title={pipTemplateLabel(layout,locale,task.height>=task.width)} aria-label={pipTemplateLabel(layout,locale,task.height>=task.width)} onClick={()=>onChange({...config,layouts:{...config.layouts,[selection.id]:layout}})} className={'w-7 rounded-sm p-0.5 ring-inset disabled:opacity-50 '+(on?'ring-ink ring-2':'ring-line ring-1 hover:ring-ink-4')}><PipTemplateDiagram template={layout} options={shown.pip}/></button>;})}
+   {selectionLayout&&<span className="text-ink-2 ml-1 truncate text-xs">{pipTemplateLabel(selectionLayout,locale,task.height>=task.width)}</span>}
+  </div>}
   {(error||resolved.error||ghost)&&<div role="status" className="shrink-0 truncate text-xs text-ink-3">{ghost?(zh?'该位置已被占用':'Position occupied'):error||resolved.error}</div>}
   <Dialog open={addOpen} onOpenChange={setAddOpen}><DialogContent aria-describedby={undefined} className="studio-scope bg-panel border-line sm:max-w-lg"><DialogTitle className="text-ink">{zh?'添加到时间轴':'Add to timeline'}</DialogTitle><div className="grid max-h-[60dvh] grid-cols-3 gap-3 overflow-y-auto">{config.assets.map(asset=><button key={asset.id} type="button" disabled={disabled} onClick={()=>insert(asset)} className="text-ink min-w-0 text-left"><div className="bg-panel-2 aspect-[1.15] overflow-hidden rounded-lg">{urls[asset.id]&&(asset.kind==='image'?<img src={urls[asset.id]} alt="" className="h-full w-full object-cover"/>:<video src={urls[asset.id]} muted playsInline preload="metadata" className="pointer-events-none h-full w-full object-cover" onLoadedMetadata={e=>{e.currentTarget.currentTime=.05;}}/>)}</div><span className="mt-1 block truncate text-xs">{asset.name}</span></button>)}</div>{error&&<p role="alert" className="text-ink text-xs">{error}</p>}</DialogContent></Dialog>
   <ScenePlayback playing={playing} onToggle={togglePlay} time={time} duration={task.durationSec} disabled={disabled || !!resolved.error} locale={locale} onPause={pause} onSeek={seek} timelineRef={track}

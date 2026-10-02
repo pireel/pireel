@@ -4,7 +4,9 @@ export interface BrollOptions {
   /** Picture in picture footage sources: AI-generated stills from the narration (off unless set) and
    *  the user's own files (on unless set to false). */
   aiFootage?: boolean; localFootage?: boolean;
-  pip?: import('./pip-layout').PipOptions; manualClips?: { id: string; assetId: string; start: number; duration: number; sourceIn: number }[]; edits?: Record<string, { start: number; duration: number; sourceIn: number }>; assets: BrollAsset[]; captions: boolean; replacements?: Record<string, string>; disabledPlacements?: string[] }
+  pip?: import('./pip-layout').PipOptions; manualClips?: { id: string; assetId: string; start: number; duration: number; sourceIn: number }[]; edits?: Record<string, { start: number; duration: number; sourceIn: number }>; assets: BrollAsset[]; captions: boolean; replacements?: Record<string, string>; disabledPlacements?: string[];
+  /** Picture in picture layout the user chose for a shot, by placement id; wins over the template and the plan. */
+  layouts?: Record<string, PipShotLayout> }
 export interface BrollCandidate { id: string; assetId: string; start: number; end: number; description: string; /** Footage made for this shot (AI generated) carries its own asset; user footage lives in BrollOptions.assets. */ asset?: BrollAsset }
 export interface BrollPlacement { id: string; candidateId: string; start: number; duration: number; /** Picture in picture layout planned for this shot (smart fit). */ layout?: PipShotLayout }
 /** One narration sentence; `anchors` are its words, so a shot can start on the word it illustrates. */

@@ -2,7 +2,7 @@ import { SceneCheckbox, SceneSelect } from './scene-form-controls';
 import { PipVisual } from './pip-visual';
 import type { ReactNode } from 'react';
 import { UserRound, Image, Sparkles, ImagePlus, Check } from 'lucide-react';
-import { DEFAULT_PIP_OPTIONS, PIP_PICKER_TEMPLATES, pipGeometry, resolvePipGeometry, type CaptionBand, type PipOptions, type PipTemplate } from '@pireel/studio-engine/pip-layout';
+import { DEFAULT_PIP_OPTIONS, PIP_PICKER_TEMPLATES, PIP_TEMPLATES, pipGeometry, resolvePipGeometry, type CaptionBand, type PipOptions, type PipTemplate } from '@pireel/studio-engine/pip-layout';
 import type { BrollOptions, BrollAsset } from '@pireel/studio-engine/broll-task';
 import { BrollSettings } from './broll-settings';
 import { SceneMediaThumb } from './scene-media-picker';
@@ -10,6 +10,11 @@ import type { CaptionTaskRecord } from './caption-task-store';
 
 /** A template's thumbnail: the real geometry drawn with one quiet palette, showing only what stays visible. */
 export function PipTemplateDiagram({ template, options }: { template: PipTemplate; options?: PipOptions }) {
+  // Smart fit mixes layouts shot by shot, so its card shows several.
+  if (template === 'smart') return <div aria-hidden="true" className="bg-line relative grid aspect-[9/16] w-full grid-cols-2 content-center gap-px overflow-hidden">
+    {(['presenter', 'split', 'inset', 'dim'] as const).map(layout => <PipTemplateDiagram key={layout} template={layout} options={options}/>)}
+    <Sparkles className="text-ink-2 absolute right-0.5 top-0.5 size-3"/>
+  </div>;
   const geometry = options ? resolvePipGeometry({ ...options, template }, { width: 1080, height: 1920 }, { width: 1920, height: 1080 }) : pipGeometry(template, { width: 1080, height: 1920 }, { width: 1920, height: 1080 });
   const rect = (box: { x: number; y: number; w: number; h: number }) => ({ left: `${box.x * 100}%`, top: `${box.y * 100}%`, width: `${box.w * 100}%`, height: `${box.h * 100}%` });
   const media = geometry.media; const speaker = geometry.speaker;
@@ -20,7 +25,6 @@ export function PipTemplateDiagram({ template, options }: { template: PipTemplat
     {template === 'dim' && <div className="bg-ink/25 absolute inset-0"/>}
     <div className="bg-accent/15 border-accent/35 absolute flex items-center justify-center border" style={rect(media)}><Image className="text-accent/70 h-[38%] max-h-5 w-[38%] max-w-5" strokeWidth={1.25}/></div>
     {speaker && <div className={'absolute flex items-end justify-center overflow-hidden ' + (geometry.speakerCutout ? '' : 'bg-panel border-ink-4/60 border')} style={rect(speaker)}><UserRound className="text-ink-3 h-[85%] w-[85%]" strokeWidth={1.25}/></div>}
-    {template === 'smart' && <Sparkles className="text-ink-3 absolute right-1 top-1 size-3"/>}
   </div>;
 }
 export function PipSettings({ task, value, disabled, locale, onChange, onBusy }: {
@@ -29,11 +33,9 @@ export function PipSettings({ task, value, disabled, locale, onChange, onBusy }:
   const zh = locale === 'zh';
   const config = value.pip ?? DEFAULT_PIP_OPTIONS;
   const update = (patch: Partial<PipOptions>) => onChange({ ...value, pip: { ...config, ...patch } });
-  const layout = resolvePipGeometry(config, task, value.assets[0] ?? { width: 1920, height: 1080 }, task);
-  const windowLayout = ['inset', 'presenter', 'cutout-small'].includes(layout.resolvedTemplate);
+  // Smart fit may use a window for any shot, so its window controls stay available.
+  const windowLayout = config.template === 'smart' || ['inset', 'presenter', 'cutout-small'].includes(config.template);
   const portrait = task.height >= task.width;
-  // Split layouts name where the footage sits; on a landscape canvas the halves are side by side.
-  const templateLabel = (id: string, label: string) => id === 'split' ? (zh ? (portrait ? '素材在上' : '素材在左') : (portrait ? 'Footage on top' : 'Footage left')) : id === 'split-bottom' ? (zh ? (portrait ? '素材在下' : '素材在右') : (portrait ? 'Footage below' : 'Footage right')) : label;
   const ai = value.aiFootage === true; const local = value.localFootage !== false;
   return <div className="space-y-5">
     <section>
@@ -50,7 +52,7 @@ export function PipSettings({ task, value, disabled, locale, onChange, onBusy }:
     <div className="grid grid-cols-4 gap-x-2 gap-y-3 p-px" role="group" aria-label={zh ? '选择画中画模板' : 'Choose a layout'}>
       {PIP_PICKER_TEMPLATES.map(template => { const selected = (value.pip?.template ?? DEFAULT_PIP_OPTIONS.template) === template.id; return <button key={template.id} type="button" disabled={disabled} aria-pressed={selected} onClick={() => update({ template: template.id })} className="group min-w-0 text-center focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50">
         <span className={'block rounded-md p-[3px] ring-inset transition-shadow ' + (selected ? 'ring-ink ring-2' : 'ring-line ring-1 group-hover:ring-ink-4')}><PipTemplateDiagram template={template.id} options={config}/></span>
-        <span className={'mt-1.5 block truncate text-[11px] ' + (selected ? 'text-ink font-medium' : 'text-ink-3')}>{templateLabel(template.id, template[locale])}</span>
+        <span className={'mt-1.5 block truncate text-[11px] ' + (selected ? 'text-ink font-medium' : 'text-ink-3')}>{pipTemplateLabel(template.id, locale, portrait)}</span>
       </button>; })}
     </div>
     {windowLayout && <div className="mt-3 space-y-3">
@@ -65,6 +67,14 @@ export function PipSettings({ task, value, disabled, locale, onChange, onBusy }:
     </section>
     <SceneCheckbox label={zh ? '字幕' : 'Captions'} checked={value.captions} disabled={disabled} onChange={captions => onChange({ ...value, captions })} />
   </div>;
+}
+
+/** A layout's name; split layouts say where the footage sits, side by side on a landscape canvas. */
+export function pipTemplateLabel(id: PipTemplate, locale: 'zh' | 'en', portrait: boolean) {
+  const zh = locale === 'zh';
+  if (id === 'split') return zh ? (portrait ? '素材在上' : '素材在左') : (portrait ? 'Footage on top' : 'Footage left');
+  if (id === 'split-bottom') return zh ? (portrait ? '素材在下' : '素材在右') : (portrait ? 'Footage below' : 'Footage right');
+  return PIP_TEMPLATES.find(template => template.id === id)![locale];
 }
 
 /** One footage source: a checkable row, with its own controls underneath when it has any. */

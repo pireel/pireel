@@ -103,7 +103,7 @@ export function resolvePipGeometry(options: PipOptions, canvas: Dimensions, asse
 
 /**
  * Rebuild only the layout layers tied to actual footage windows. The source audio stays intact.
- * With smart fit, `layouts` holds the layout planned for each clip; a clip without one fits by shape.
+ * `layouts` holds a clip's own layout (planned or chosen); other clips follow the template, and smart fit goes by shape.
  */
 export function applyPipLayout(document: EditorDocumentV2, options: PipOptions, trackId = 'broll', layouts: Record<string, PipShotLayout> = {}): EditorDocumentV2 {
   const next = structuredClone(document); const footage = next.timeline.tracks.find(track => track.id === trackId);
@@ -120,7 +120,7 @@ export function applyPipLayout(document: EditorDocumentV2, options: PipOptions, 
     const asset = next.assets[clip.assetId];
     const firstSource = primary?.clips.find(source => source.kind === 'narrative' && source.enabled && source.startFrame < clip.startFrame + clip.durationFrames && source.startFrame + source.durationFrames > clip.startFrame);
     const sourceAsset = firstSource && 'assetId' in firstSource && firstSource.assetId ? next.assets[firstSource.assetId] : undefined;
-    const planned = options.template === 'smart' ? layouts[clip.id] : undefined;
+    const planned = layouts[clip.id];
     const geometry = resolvePipGeometry(planned ? { ...options, template: planned } : options, next.canvas, { width: asset.metadata?.width ?? next.canvas.width, height: asset.metadata?.height ?? next.canvas.height }, { width: sourceAsset?.metadata?.width ?? next.canvas.width, height: sourceAsset?.metadata?.height ?? next.canvas.height }, captions);
     clip.box = geometry.media; clip.fit = geometry.mediaFit; clip.linkGroupId = clip.id + '-pip';
     const { startFrame, durationFrames, linkGroupId } = clip;
