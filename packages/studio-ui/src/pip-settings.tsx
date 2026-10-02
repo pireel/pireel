@@ -7,16 +7,19 @@ import { BrollSettings } from './broll-settings';
 import { SceneMediaThumb } from './scene-media-picker';
 import type { CaptionTaskRecord } from './caption-task-store';
 
+/** A template's thumbnail: the real geometry drawn with one quiet palette, showing only what stays visible. */
 export function PipTemplateDiagram({ template, options }: { template: PipTemplate; options?: PipOptions }) {
   const geometry = options ? resolvePipGeometry({ ...options, template }, { width: 1080, height: 1920 }, { width: 1920, height: 1080 }) : pipGeometry(template, { width: 1080, height: 1920 }, { width: 1920, height: 1080 });
   const rect = (box: { x: number; y: number; w: number; h: number }) => ({ left: `${box.x * 100}%`, top: `${box.y * 100}%`, width: `${box.w * 100}%`, height: `${box.h * 100}%` });
-  return <div aria-hidden="true" className="bg-panel-2 relative mx-auto aspect-[9/16] w-full max-w-36 overflow-hidden rounded-md">
-    <UserRound className="text-ink-4 absolute bottom-2 left-1/4 h-3/5 w-1/2" strokeWidth={1}/>
-    {geometry.background && <div className="absolute inset-0" style={{ background: geometry.background }}/>} 
-    <div className="border-ink-4 bg-panel absolute flex items-center justify-center rounded border" style={rect(geometry.media)}><Image className="text-ink-3 h-1/2 w-1/2" strokeWidth={1}/></div>
-    {geometry.speaker && <div className={'absolute flex items-center justify-center ' + (geometry.speakerCutout ? '' : 'bg-panel-2 border-ink-4 rounded border')} style={rect(geometry.speaker)}><UserRound className="text-ink-3 h-3/4 w-3/4" strokeWidth={1}/></div>}
-    {template === 'smart' && <Sparkles className="text-ink absolute right-2 top-2 size-4"/>}
-    <span className="bg-ink-4 absolute bottom-[8%] left-[24%] h-0.5 w-[52%] rounded"/>
+  const media = geometry.media; const speaker = geometry.speaker;
+  // The full-frame presenter is visible unless footage covers the whole frame.
+  const presenterBehind = !(media.w >= .99 && media.h >= .99) && !speaker;
+  return <div aria-hidden="true" className="bg-panel-2 relative aspect-[9/16] w-full overflow-hidden rounded-[5px]">
+    {presenterBehind && <UserRound className="text-ink-4 absolute bottom-0 left-[18%] h-[58%] w-[64%]" strokeWidth={1.25}/>}
+    {template === 'dim' && <div className="bg-ink/25 absolute inset-0"/>}
+    <div className="bg-accent/15 border-accent/35 absolute flex items-center justify-center rounded-[3px] border" style={rect(media)}><Image className="text-accent/70 h-[38%] max-h-5 w-[38%] max-w-5" strokeWidth={1.25}/></div>
+    {speaker && <div className={'absolute flex items-end justify-center overflow-hidden ' + (geometry.speakerCutout ? '' : 'bg-panel border-ink-4/60 rounded-[3px] border')} style={rect(speaker)}><UserRound className="text-ink-3 h-[85%] w-[85%]" strokeWidth={1.25}/></div>}
+    {template === 'smart' && <Sparkles className="text-ink-3 absolute right-1 top-1 size-3"/>}
   </div>;
 }
 export function PipSettings({ task, value, disabled, locale, onChange, onBusy }: {
@@ -29,11 +32,11 @@ export function PipSettings({ task, value, disabled, locale, onChange, onBusy }:
   const windowLayout = ['inset', 'presenter', 'cutout-small'].includes(layout.resolvedTemplate);
   return <div>
     <h2 className="text-ink mb-2 text-sm font-medium">{zh ? '画中画模板' : 'Layout template'}</h2>
-    <div className="mb-4 grid grid-cols-[repeat(auto-fit,minmax(76px,1fr))] gap-x-2 gap-y-3" role="group" aria-label={zh ? '选择画中画模板' : 'Choose a layout'}>
-      {PIP_TEMPLATES.map(template => <button key={template.id} type="button" disabled={disabled} aria-pressed={value.pip?.template === template.id} onClick={() => update({ template: template.id })} className="min-w-0 text-center focus-visible:outline-2 focus-visible:outline-accent">
-        <span className={'mb-2 block rounded-lg border-2 p-1 ' + (value.pip?.template === template.id ? 'border-ink' : 'border-transparent hover:border-ink-4')}><PipTemplateDiagram template={template.id} options={config}/></span>
-        <span className="text-ink-3 block text-xs">{template.id === 'split' ? (zh ? (task.height > task.width ? '上下分屏' : '左右分屏') : 'Split screen') : template[locale]}</span>
-      </button>)}
+    <div className="mb-4 grid grid-cols-4 gap-x-2 gap-y-3" role="group" aria-label={zh ? '选择画中画模板' : 'Choose a layout'}>
+      {PIP_TEMPLATES.map(template => { const selected = (value.pip?.template ?? DEFAULT_PIP_OPTIONS.template) === template.id; return <button key={template.id} type="button" disabled={disabled} aria-pressed={selected} onClick={() => update({ template: template.id })} className="group min-w-0 text-center focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50">
+        <span className={'block rounded-md p-0.5 ring-1 transition-shadow ' + (selected ? 'ring-ink ring-2' : 'ring-line group-hover:ring-ink-4')}><PipTemplateDiagram template={template.id} options={config}/></span>
+        <span className={'mt-1.5 block truncate text-[11px] ' + (selected ? 'text-ink font-medium' : 'text-ink-3')}>{template.id === 'split' ? (zh ? (task.height > task.width ? '上下分屏' : '左右分屏') : 'Split screen') : template[locale]}</span>
+      </button>; })}
     </div>
     <div className="mb-4 space-y-3">
       {windowLayout && <>
