@@ -1,6 +1,6 @@
 import { composeBrollDocument } from '@pireel/studio-engine/broll-compose';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
-import type { BrollCandidate, BrollOptions, BrollPlacement } from '@pireel/studio-engine/broll-task';
+import type { BrollAsset, BrollCandidate, BrollOptions, BrollPlacement } from '@pireel/studio-engine/broll-task';
 import { validateBrollPlan, brollAssetsMatch, brollCues, brollPlacementAnchor } from '@pireel/studio-engine/broll-task';
 import type { EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import { applyDocumentTransaction } from '@pireel/studio-engine/document-transaction';
@@ -11,6 +11,18 @@ import type { CaptionTaskRecord } from './caption-task-store';
 
 type Analysis = { assets: BrollOptions['assets']; candidates: BrollCandidate[]; analyzedAssets: string[]; analysisKey: string };
 type Plan = { placements: BrollPlacement[]; planKey: string };
+/** AI stills made for the narration: candidates that carry their own asset, and where each lands. */
+type Generated = { candidates: BrollCandidate[]; placements: BrollPlacement[] };
+type GeneratedProgress = { ideas?: { cueId: number; wordId?: number; prompt: string }[]; jobs: Record<number, string>; assets: Record<number, BrollAsset> };
+
+/** Picture size for a still, by where the layout shows it: full frame, a split half, or a window. */
+function stillSize(options: BrollOptions, canvas: { width: number; height: number }) {
+  const portrait = canvas.height >= canvas.width;
+  const template = options.pip?.template ?? 'presenter';
+  if (template === 'split' || template === 'split-bottom') return '1024x1024';
+  if (options.pip && (template === 'inset' || template === 'dim')) return '1536x1024';
+  return portrait ? '1024x1536' : '1536x1024';
+}
 export function brollWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
   const { store } = host;
   const node = (id: string, body: Omit<SceneNode, 'capability'>): SceneNode => ({ capability: BROLL_WORKFLOW_CAPABILITIES.find(c => c.id === id)!, ...body });
@@ -83,15 +95,67 @@ export function brollWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     const value: Plan = { planKey, placements };
     return { plan: workflowJson(await store.put('edit-plan', 'broll', value)), value: workflowJson(value) };
   }, project: outputs => ({ broll: { ...host.task.broll!, ...(outputs.value as unknown as Plan) } }) }),
+  node('broll.generate', { stage: 'matching', async execute(args, context) {
+    const transcript = store.read<AsrSegment[]>(args.transcript, 'transcript');
+    const durationSec = Number(args.durationSec); const options = args.options as unknown as BrollOptions;
+    const cues = brollCues(transcript, durationSec);
+    if (!cues.length) return { value: workflowJson({ candidates: [], placements: [] }) };
+    const progress: GeneratedProgress = context.partial<GeneratedProgress>() ?? { jobs: {}, assets: {} };
+    if (!progress.ideas) {
+      const max = Math.min(8, Math.max(1, Math.round(durationSec / 10)));
+      const response = await fetch('/api/studio/broll-ideas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: host.hooks.signal, body: JSON.stringify({ cues, durationSec, projectId: args.projectId, max }) });
+      const body = await response.json();
+      if (body.usage) context.recordUsage(body.usage);
+      if (!response.ok) throw new Error(response.status === 402 ? '积分不足，无法生成素材。' : '素材构思失败，请重试。');
+      progress.ideas = body.ideas; await context.savePartial(progress);
+    }
+    const ideas = progress.ideas!;
+    const { startGeneration, pollCreation } = await import('./gen-api');
+    const size = stillSize(options, host.task);
+    await Promise.all(ideas.map(async (idea, index) => {
+      if (progress.assets[index]) return;
+      if (!progress.jobs[index]) {
+        const started = await startGeneration(String(args.projectId), 'image-gen', { prompt: idea.prompt, user_prompt: idea.prompt, n: 1, size });
+        if (!started.ok) throw new Error(started.kind === 'credits' ? '积分不足，无法生成素材。' : started.message);
+        progress.jobs[index] = started.ids[0]!; await context.savePartial(progress);
+      }
+      let url = '';
+      for (let waited = 0; !url; waited += 3) {
+        host.check();
+        if (waited > 300) throw new Error('素材生成超时，请稍后继续。');
+        const job = await pollCreation(progress.jobs[index]!);
+        if (job?.status === 'failed') throw new Error(job.error || '素材生成失败，请重试。');
+        if (job?.status === 'succeeded' && job.assets[0]) url = job.assets[0].url;
+        else await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+      const { materializeRemoteMedia } = await import('./remote-media');
+      const { file } = await materializeRemoteMedia(url, { name: `ai-${index + 1}.png`, signal: host.hooks.signal });
+      const bitmap = await createImageBitmap(file); const width = bitmap.width; const height = bitmap.height; bitmap.close();
+      const { durableFileSig } = await import('./media'); const sig = await durableFileSig(file);
+      await (await import('./local-media')).saveLocalVideo(file, sig);
+      const { studioProviders } = await import('@pireel/studio-engine/providers');
+      if (studioProviders().sceneProjects && !await studioProviders().vault.backup(file, sig, { signal: host.hooks.signal })) throw new Error('生成的素材保存失败，请重试。');
+      progress.assets[index] = { id: `ai-${progress.jobs[index]}`, sig, name: `AI ${index + 1}`, kind: 'image', width, height, durationSec: 5 };
+      await context.savePartial(progress);
+    }));
+    const candidates: BrollCandidate[] = ideas.map((idea, index) => ({ id: `${progress.assets[index]!.id}-0`, assetId: progress.assets[index]!.id, start: 0, end: 5, description: idea.prompt, asset: progress.assets[index]! }));
+    const placements = validateBrollPlan(ideas.map((idea, index) => ({ ...brollPlacementAnchor(`broll-${idea.cueId}${idea.wordId !== undefined ? `-${idea.wordId}` : ''}`), candidateId: candidates[index]!.id })), cues, candidates, durationSec) ?? [];
+    return { value: workflowJson({ candidates, placements } satisfies Generated) };
+  } }),
   node('broll.compose', { async execute(args) {
     const document = store.read<EditorDocumentV2>(args.document, 'document');
-    const analysis = store.read<Analysis>(args.analysis, 'visual-analysis');
-    const plan = args.plan as unknown as Plan;
+    // Your footage (analyzed and matched) and AI stills: your shots keep their places, stills fill the rest.
+    const local = args.analysis ? store.read<Analysis>(args.analysis, 'visual-analysis') : undefined;
+    const generated = args.generated as unknown as Generated | undefined;
+    const analysis = { candidates: [...(local?.candidates ?? []), ...(generated?.candidates ?? [])] };
+    const localPlan = args.plan as unknown as Plan | undefined;
+    const taken = (localPlan?.placements ?? []).map(p => [p.start - 1, p.start + p.duration + 1]);
+    const plan: Plan = { planKey: localPlan?.planKey ?? 'generated', placements: [...(localPlan?.placements ?? []), ...(generated?.placements ?? []).filter(p => !taken.some(([from, to]) => p.start < to && p.start + p.duration > from))].sort((a, b) => a.start - b.start) };
     const options = args.options as unknown as BrollOptions;
     const prefix = args.instanceId ? String(args.instanceId) + '-' : '';
     const next = composeBrollDocument(document, plan.placements, analysis.candidates, options, Number(args.durationSec), prefix);
     const result = applyDocumentTransaction(document, { ops: [{ op: 'document.replace', input: { document: next } }] }, { projectId: 'broll-workflow' });
     if (!result.ok) throw new Error(result.error.message);
-    return { document: workflowJson(await store.put('document', 'broll', result.document)), plan: args.plan };
-  }, project: outputs => ({ document: store.read<EditorDocumentV2>(outputs.document, 'document'), broll: { ...host.task.broll!, ...(outputs.plan as unknown as Plan) } }) })];
+    return { document: workflowJson(await store.put('document', 'broll', result.document)), plan: workflowJson({ ...plan, candidates: analysis.candidates }) };
+  }, project: outputs => ({ document: store.read<EditorDocumentV2>(outputs.document, 'document'), broll: { analysisKey: '', ...host.task.broll, ...(outputs.plan as unknown as Plan & { candidates: BrollCandidate[] }) } }) })];
 }

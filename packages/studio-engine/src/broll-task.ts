@@ -4,7 +4,7 @@ export interface BrollOptions {
    *  the user's own files (on unless set to false). */
   aiFootage?: boolean; localFootage?: boolean;
   pip?: import('./pip-layout').PipOptions; manualClips?: { id: string; assetId: string; start: number; duration: number; sourceIn: number }[]; edits?: Record<string, { start: number; duration: number; sourceIn: number }>; assets: BrollAsset[]; captions: boolean; replacements?: Record<string, string>; disabledPlacements?: string[] }
-export interface BrollCandidate { id: string; assetId: string; start: number; end: number; description: string }
+export interface BrollCandidate { id: string; assetId: string; start: number; end: number; description: string; /** Footage made for this shot (AI generated) carries its own asset; user footage lives in BrollOptions.assets. */ asset?: BrollAsset }
 export interface BrollPlacement { id: string; candidateId: string; start: number; duration: number }
 /** One narration sentence; `anchors` are its words, so a shot can start on the word it illustrates. */
 export interface BrollCue { id: number; start: number; end: number; text: string; anchors?: { id: number; start: number; text: string }[] }
@@ -56,7 +56,7 @@ export function resolveBrollEdits(placements: BrollPlacement[], candidates: Brol
   const clips = all.filter(p => !options.disabledPlacements?.includes(p.id)).map(p => {
     const added = manual.find(c => c.id === p.id);
     const candidate = added ? { id: p.candidateId, assetId: added.assetId, start: added.sourceIn, end: added.sourceIn + added.duration, description: '' } : candidates.find(c => c.id === (options.replacements?.[p.id] ?? p.candidateId));
-    const asset = options.assets.find(a => a.id === candidate?.assetId);
+    const asset = options.assets.find(a => a.id === candidate?.assetId) ?? candidate?.asset;
     if (!candidate || !asset) throw new Error('所选素材已变化，请重新匹配。');
     const edit = options.edits?.[p.id];
     const start = edit?.start ?? p.start;

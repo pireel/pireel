@@ -8,7 +8,9 @@ import { saveLocalVideo } from './local-media';
 /** Generation stops at the document (shots on the B-roll lane, captions); the video is rendered on
  *  download (exportBrollEdit). A saved custom definition that renders still returns it. */
 export async function runBrollTask(task: CaptionTaskRecord, source: File, hooks: SceneWorkflowHooks): Promise<{ task: CaptionTaskRecord; video?: Blob }> {
-  if (!task.options.broll?.assets.length || task.options.broll.assets.length > 20) throw new Error('请添加 1–20 个素材。');
+  const broll = task.options.broll;
+  const local = broll?.localFootage !== false ? broll?.assets.length ?? 0 : 0;
+  if (!broll || local > 20 || (!local && broll.aiFootage !== true)) throw new Error('请添加 1–20 个素材，或开启 AI 生成。');
   const host = new SceneWorkflowHost(task, source, hooks);
   try {
     const media = await host.store.put('media', task.sourceSig, { sig: task.sourceSig, name: task.name, width: task.width, height: task.height, durationSec: task.durationSec });

@@ -49,6 +49,28 @@ it('passes only contract fields of saved assets into the workflow', async () => 
   for (const item of assets) expect(() => assertWorkflowValue(item, brollAssetSchema)).not.toThrow();
 });
 
+it('adds AI stills alongside or instead of your footage, and needs at least one source', async () => {
+  const { brollWorkflowDefinition } = await import('./workflow-broll-template');
+  const base = { caption: {}, aspect: 'original' as const, shortenPauses: false };
+  const asset = { id: 'a', sig: 's', name: 'clip.mp4', kind: 'video' as const, durationSec: 12, width: 720, height: 1280 };
+  const ids = (broll: object) => brollWorkflowDefinition({ ...base, broll: broll as never }, null, null, 'p', 40, null).steps.map(step => step.id);
+  expect(ids({ assets: [], captions: true, aiFootage: true })).toEqual(expect.arrayContaining(['generated', 'broll']));
+  expect(ids({ assets: [], captions: true, aiFootage: true })).not.toContain('analysis');
+  expect(ids({ assets: [asset], captions: true, aiFootage: true })).toEqual(expect.arrayContaining(['analysis', 'match', 'generated', 'broll']));
+  expect(ids({ assets: [asset], captions: true, aiFootage: true, localFootage: false })).not.toContain('match');
+  expect(() => ids({ assets: [], captions: true })).toThrow();
+  const compose = brollWorkflowDefinition({ ...base, broll: { assets: [], captions: true, aiFootage: true } }, null, null, 'p', 40, null).steps.find(step => step.id === 'broll')!;
+  expect(Object.keys(compose.arguments)).toEqual(expect.arrayContaining(['generated', 'document', 'options']));
+  expect(compose.arguments.plan).toBeUndefined();
+});
+
+it('resolves a shot whose footage travels with its candidate (AI stills)', async () => {
+  const { resolveBrollEdits } = await import('./broll-task');
+  const asset = { id: 'ai-1', sig: 'still', name: 'AI 1', kind: 'image' as const, durationSec: 5, width: 1024, height: 1536 };
+  const clips = resolveBrollEdits([{ id: 'broll-0-2', candidateId: 'ai-1-0', start: 2, duration: 4 }], [{ id: 'ai-1-0', assetId: 'ai-1', start: 0, end: 5, description: 'a gift box', asset }], { assets: [], captions: true }, 40);
+  expect(clips[0]).toMatchObject({ start: 2, duration: 4, asset });
+});
+
 it('starts a shot on the word it illustrates and lets it run past a short sentence', async () => {
   const { brollCues, brollPlacementAnchor } = await import('./broll-task');
   const cues = brollCues([{ start: 52, end: 52.9, text: '一包咖啡。', words: [{ start: 52, text: '一' }, { start: 52.1, text: '包' }, { start: 52.5, text: '咖' }, { start: 52.6, text: '啡' }] }, { start: 57.3, end: 58.8, text: '还有一个跳绳。' }], 120);
