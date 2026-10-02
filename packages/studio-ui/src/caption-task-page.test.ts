@@ -342,13 +342,14 @@ it('opens UGC ad settings and sends the verified brief to its own runner', async
   await complete(0);
 });
 
-it('passes PiP position, size and framing choices into the official runner', async () => {
+it('passes PiP position and size choices into the official runner', async () => {
   await act(async () => root.render(null));
   await saveCaptionTask({ ...fixture(), scene: 'pip', options: { ...fixture().options, broll: { captions: false, pip: { template: 'presenter' }, assets: [{ id: 'asset', sig: 'footage', name: 'product.mp4', kind: 'video', durationSec: 5, width: 1920, height: 1080 }] } } });
   await act(async () => root.render(createElement(CaptionTaskPage, { taskId: 'task', scene: 'pip', locale: 'zh', onBack: vi.fn(), onOpenEditor: vi.fn() })));
   await settled(() => expect(button('生成视频')).toBeTruthy());
-  await choose('小窗位置', '左下'); await choose('小窗大小', '大'); await choose('素材画面', '完整显示');
+  await choose('小窗位置', '左下'); await choose('小窗大小', '大');
+  expect(container.querySelector('[aria-label="素材画面"]')).toBeNull();
   await click(button('生成视频')); await settled(() => expect(runs).toHaveLength(1));
-  expect(runs[0].task.options.broll?.pip).toEqual({ template: 'presenter', position: 'bottom-left', size: 'large', mediaFit: 'contain' });
+  expect(runs[0].task.options.broll?.pip).toEqual({ template: 'presenter', position: 'bottom-left', size: 'large' });
   await complete(0);
 });

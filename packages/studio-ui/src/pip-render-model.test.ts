@@ -53,11 +53,11 @@ it('renders the main-footage layout and current inset controls without mutating 
   expect(historical.visuals).toEqual(old.visuals);
   expect(task.document).toEqual(old.document);
 });
-it('exports split presenter source anchors and the complete footage instead of stretching or shrinking both into tiny cards', () => {
+it('exports split halves: presenter anchored high, footage filling its half', () => {
   const task = fixture(); task.options.broll!.pip = { template: 'split' };
   const result = pipRenderModel(task, task.options, 'blob:source', new Map([['picture', 'blob:picture']]));
   expect(result.visuals.find(clip => clip.source === 'blob:source')).toMatchObject({ fit: 'cover', anchorX: .5, anchorY: .4 });
-  expect(result.visuals.find(clip => clip.source === 'blob:picture')).toMatchObject({ fit: 'contain', box: { x: 0, y: 0, w: 1 } });
+  expect(result.visuals.find(clip => clip.source === 'blob:picture')).toMatchObject({ fit: 'cover', box: { x: 0, y: 0, w: 1, h: .5 } });
 });
 it('rebuilds a remixable native draft without needing preview URLs', () => {
   const task = fixture(); task.options.broll!.pip = { template: 'presenter', position: 'top-left', size: 'small' };

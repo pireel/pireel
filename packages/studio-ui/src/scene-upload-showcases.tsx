@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { PipVisual } from './pip-visual';
-import { PIP_TEMPLATES, pipGeometry } from '@pireel/studio-engine/pip-layout';
+import { PIP_PICKER_TEMPLATES, pipGeometry } from '@pireel/studio-engine/pip-layout';
 import { ERASER_SHOWCASE, UGC_SHOWCASE } from './workflow-art';
 
 export function UgcAdShowcase({ locale }: { locale: 'zh' | 'en' }) {
@@ -49,7 +49,7 @@ export function PipShowcase({ locale, suspended = false }: { locale: 'zh' | 'en'
   }, []);
   useEffect(() => {
     if (suspended || reduced || !cycling) return;
-    const timer = window.setInterval(() => { if (!document.hidden) setSelected(index => (index + 1) % PIP_TEMPLATES.length); }, 2800);
+    const timer = window.setInterval(() => { if (!document.hidden) setSelected(index => (index + 1) % PIP_PICKER_TEMPLATES.length); }, 2800);
     return () => window.clearInterval(timer);
   }, [suspended, reduced, selected, cycling]);
   useEffect(() => {
@@ -58,7 +58,7 @@ export function PipShowcase({ locale, suspended = false }: { locale: 'zh' | 'en'
     else { try { void Promise.resolve(video.play()).catch(() => {}); } catch {} }
     return () => video.pause();
   }, [suspended, reduced]);
-  const template = PIP_TEMPLATES[selected];
+  const template = PIP_PICKER_TEMPLATES[selected];
   const canvas = { width: 1080, height: 1920 };
   const source = { width: 432, height: 768 };
   const footage = { width: 1672, height: 941 };
@@ -74,7 +74,7 @@ export function PipShowcase({ locale, suspended = false }: { locale: 'zh' | 'en'
         <div className="pointer-events-none absolute inset-x-1 bottom-[7%] z-10 text-center text-[9px] font-semibold text-white [text-shadow:0_1px_3px_black]">{zh ? '一边讲解，一边展示' : 'Explain and show'}</div>
       </div>
       <div role="group" aria-label={zh ? '画中画效果' : 'Picture in picture effects'} className="space-y-1.5">
-        {PIP_TEMPLATES.map((item, index) => <button key={item.id} type="button" onClick={() => { setSelected(index); setCycling(false); }} aria-pressed={selected === index} className={'border-line text-ink-3 hover:text-ink flex min-h-9 w-full items-center gap-2 rounded-md border px-2 text-left text-xs transition-colors focus-visible:outline-2 focus-visible:outline-accent ' + (selected === index ? 'bg-panel-2 text-ink' : 'bg-bg')}>
+        {PIP_PICKER_TEMPLATES.map((item, index) => <button key={item.id} type="button" onClick={() => { setSelected(index); setCycling(false); }} aria-pressed={selected === index} className={'border-line text-ink-3 hover:text-ink flex min-h-9 w-full items-center gap-2 rounded-md border px-2 text-left text-xs transition-colors focus-visible:outline-2 focus-visible:outline-accent ' + (selected === index ? 'bg-panel-2 text-ink' : 'bg-bg')}>
           <span className={'size-1.5 shrink-0 rounded-full ' + (selected === index ? 'bg-ink' : 'bg-ink-4')} />{item[locale]}
         </button>)}
         {reduced ? <p className="text-ink-4 pt-1 text-[10px]">{zh ? '点击切换效果' : 'Choose an effect'}</p> : <button type="button" className="text-ink-3 pt-1 text-[10px] underline underline-offset-2" onClick={() => setCycling(value => !value)}>{cycling ? (zh ? '暂停轮播' : 'Pause slideshow') : (zh ? '自动演示' : 'Play slideshow')}</button>}

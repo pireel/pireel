@@ -43,12 +43,19 @@ it('lets users move the inset into any corner while keeping size and aspect stab
   expect(boxes[2].y + boxes[2].h).toBeCloseTo(.79);
   expect(new Set(boxes.map(box => box.w))).toHaveLength(1);
 });
+it('splits into two equal halves with the footage on top or below', () => {
+  const top = pipGeometry('split', portrait, landscape, {}, portrait);
+  const below = pipGeometry('split-bottom', portrait, landscape, {}, portrait);
+  expect(top.media).toEqual({ x: 0, y: 0, w: 1, h: .5 }); expect(top.speaker).toEqual({ x: 0, y: .5, w: 1, h: .5 });
+  expect(below.media).toEqual({ x: 0, y: .5, w: 1, h: .5 }); expect(below.speaker).toEqual({ x: 0, y: 0, w: 1, h: .5 });
+  expect(pipGeometry('split-bottom', landscape, landscape).media).toEqual({ x: .5, y: 0, w: .5, h: 1 });
+});
 it('fills the split canvas with adjacent panels and uses an upper source crop for portrait speakers', () => {
   for (const canvas of [portrait, landscape]) {
     const split = pipGeometry('split', canvas, landscape, {}, portrait);
     inBounds(split.media); inBounds(split.speaker!);
     expect(split.media.w * split.media.h + split.speaker!.w * split.speaker!.h).toBeCloseTo(1);
-    expect(split.mediaFit).toBe('contain'); expect(split.speakerFit).toBe('cover');
+    expect(split.mediaFit).toBe('cover'); expect(split.speakerFit).toBe('cover');
     expect(split.speakerAnchorY).toBe(.4);
     if (canvas === portrait) expect(split.media.y + split.media.h).toBe(split.speaker!.y);
     else expect(split.media.x + split.media.w).toBe(split.speaker!.x);

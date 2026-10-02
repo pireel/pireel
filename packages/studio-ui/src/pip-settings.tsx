@@ -1,7 +1,7 @@
 import { SceneSelect } from './scene-form-controls';
 import { PipVisual } from './pip-visual';
 import { UserRound, Image, Sparkles } from 'lucide-react';
-import { DEFAULT_PIP_OPTIONS, PIP_TEMPLATES, pipGeometry, resolvePipGeometry, type CaptionBand, type PipOptions, type PipTemplate } from '@pireel/studio-engine/pip-layout';
+import { DEFAULT_PIP_OPTIONS, PIP_PICKER_TEMPLATES, pipGeometry, resolvePipGeometry, type CaptionBand, type PipOptions, type PipTemplate } from '@pireel/studio-engine/pip-layout';
 import type { BrollOptions, BrollAsset } from '@pireel/studio-engine/broll-task';
 import { BrollSettings } from './broll-settings';
 import { SceneMediaThumb } from './scene-media-picker';
@@ -14,11 +14,11 @@ export function PipTemplateDiagram({ template, options }: { template: PipTemplat
   const media = geometry.media; const speaker = geometry.speaker;
   // The full-frame presenter is visible unless footage covers the whole frame.
   const presenterBehind = !(media.w >= .99 && media.h >= .99) && !speaker;
-  return <div aria-hidden="true" className="bg-panel-2 relative aspect-[9/16] w-full overflow-hidden rounded-[5px]">
+  return <div aria-hidden="true" className="bg-panel-2 relative aspect-[9/16] w-full overflow-hidden">
     {presenterBehind && <UserRound className="text-ink-4 absolute bottom-0 left-[18%] h-[58%] w-[64%]" strokeWidth={1.25}/>}
     {template === 'dim' && <div className="bg-ink/25 absolute inset-0"/>}
-    <div className="bg-accent/15 border-accent/35 absolute flex items-center justify-center rounded-[3px] border" style={rect(media)}><Image className="text-accent/70 h-[38%] max-h-5 w-[38%] max-w-5" strokeWidth={1.25}/></div>
-    {speaker && <div className={'absolute flex items-end justify-center overflow-hidden ' + (geometry.speakerCutout ? '' : 'bg-panel border-ink-4/60 rounded-[3px] border')} style={rect(speaker)}><UserRound className="text-ink-3 h-[85%] w-[85%]" strokeWidth={1.25}/></div>}
+    <div className="bg-accent/15 border-accent/35 absolute flex items-center justify-center border" style={rect(media)}><Image className="text-accent/70 h-[38%] max-h-5 w-[38%] max-w-5" strokeWidth={1.25}/></div>
+    {speaker && <div className={'absolute flex items-end justify-center overflow-hidden ' + (geometry.speakerCutout ? '' : 'bg-panel border-ink-4/60 border')} style={rect(speaker)}><UserRound className="text-ink-3 h-[85%] w-[85%]" strokeWidth={1.25}/></div>}
     {template === 'smart' && <Sparkles className="text-ink-3 absolute right-1 top-1 size-3"/>}
   </div>;
 }
@@ -30,12 +30,15 @@ export function PipSettings({ task, value, disabled, locale, onChange, onBusy }:
   const update = (patch: Partial<PipOptions>) => onChange({ ...value, pip: { ...config, ...patch } });
   const layout = resolvePipGeometry(config, task, value.assets[0] ?? { width: 1920, height: 1080 }, task);
   const windowLayout = ['inset', 'presenter', 'cutout-small'].includes(layout.resolvedTemplate);
+  const portrait = task.height >= task.width;
+  // Split layouts name where the footage sits; on a landscape canvas the halves are side by side.
+  const templateLabel = (id: string, label: string) => id === 'split' ? (zh ? (portrait ? '素材在上' : '素材在左') : (portrait ? 'Footage on top' : 'Footage left')) : id === 'split-bottom' ? (zh ? (portrait ? '素材在下' : '素材在右') : (portrait ? 'Footage below' : 'Footage right')) : label;
   return <div>
     <h2 className="text-ink mb-2 text-sm font-medium">{zh ? '画中画模板' : 'Layout template'}</h2>
     <div className="mb-4 grid grid-cols-4 gap-x-2 gap-y-3" role="group" aria-label={zh ? '选择画中画模板' : 'Choose a layout'}>
-      {PIP_TEMPLATES.map(template => { const selected = (value.pip?.template ?? DEFAULT_PIP_OPTIONS.template) === template.id; return <button key={template.id} type="button" disabled={disabled} aria-pressed={selected} onClick={() => update({ template: template.id })} className="group min-w-0 text-center focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50">
+      {PIP_PICKER_TEMPLATES.map(template => { const selected = (value.pip?.template ?? DEFAULT_PIP_OPTIONS.template) === template.id; return <button key={template.id} type="button" disabled={disabled} aria-pressed={selected} onClick={() => update({ template: template.id })} className="group min-w-0 text-center focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50">
         <span className={'block rounded-md p-0.5 ring-1 transition-shadow ' + (selected ? 'ring-ink ring-2' : 'ring-line group-hover:ring-ink-4')}><PipTemplateDiagram template={template.id} options={config}/></span>
-        <span className={'mt-1.5 block truncate text-[11px] ' + (selected ? 'text-ink font-medium' : 'text-ink-3')}>{template.id === 'split' ? (zh ? (task.height > task.width ? '上下分屏' : '左右分屏') : 'Split screen') : template[locale]}</span>
+        <span className={'mt-1.5 block truncate text-[11px] ' + (selected ? 'text-ink font-medium' : 'text-ink-3')}>{templateLabel(template.id, template[locale])}</span>
       </button>; })}
     </div>
     <div className="mb-4 space-y-3">
@@ -48,14 +51,7 @@ export function PipSettings({ task, value, disabled, locale, onChange, onBusy }:
           { value: 'small', label: zh ? '小' : 'Small' }, { value: 'medium', label: zh ? '中' : 'Medium' }, { value: 'large', label: zh ? '大' : 'Large' },
         ]} />
       </>}
-      {['split', 'presenter', 'cutout', 'cutout-small'].includes(layout.resolvedTemplate) && <SceneSelect label={zh ? '素材画面' : 'Footage framing'} value={config.mediaFit ?? layout.mediaFit} disabled={disabled} onChange={mediaFit => update({ mediaFit })} options={[
-        { value: 'contain', label: zh ? '完整显示' : 'Show full frame' }, { value: 'cover', label: zh ? '裁切铺满' : 'Crop to fill' },
-      ]} />}
-      {(layout.resolvedTemplate === 'split') && <SceneSelect label={zh ? '人物画面' : 'Presenter framing'} value={config.speakerFit ?? layout.speakerFit} disabled={disabled} onChange={speakerFit => update({ speakerFit })} options={[
-        { value: 'cover', label: zh ? '裁切铺满' : 'Crop to fill' }, { value: 'contain', label: zh ? '完整显示' : 'Show full frame' },
-      ]} />}
     </div>
-    <p className="text-ink-3 mb-4 text-xs leading-relaxed">{zh ? '素材小窗默认放在下侧，并留出底部字幕空间。分屏可铺满人物区域；如果裁切不合适，可改为完整显示。' : 'Insets leave room for lower captions. Split layouts can fill the presenter area; choose full frame if the crop does not suit your footage.'}</p>
     <h2 className="text-ink mb-2 text-sm font-medium">{zh ? '本地素材 · AI 匹配' : 'Your footage · AI matching'}</h2>
     <p className="text-ink-3 mb-4 text-xs leading-relaxed">{zh ? '添加图片或视频，AI 根据口播挑选适合出现的片段。素材声音默认关闭，保留口播原声。' : 'Add images or videos. AI selects relevant moments from the narration. Footage is muted; narration stays intact.'}</p>
     <BrollSettings task={task} value={value} disabled={disabled} locale={locale} onChange={onChange} onBusy={onBusy}/>

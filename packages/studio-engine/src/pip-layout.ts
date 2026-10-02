@@ -4,12 +4,16 @@ export const PIP_TEMPLATES = [
   { id: 'smart', zh: '智能匹配', en: 'Smart fit' },
   { id: 'inset', zh: '素材小窗', en: 'Footage inset' },
   { id: 'dim', zh: '背景压暗', en: 'Dim background' },
-  { id: 'split', zh: '双画面分屏', en: 'Split screen' },
-  { id: 'cutout', zh: '人像出框', en: 'Foreground presenter' },
-  { id: 'cutout-small', zh: '抠像小窗', en: 'Cutout inset' },
+  { id: 'split', zh: '素材在上', en: 'Footage on top' },
+  { id: 'split-bottom', zh: '素材在下', en: 'Footage below' },
   { id: 'presenter', zh: '人物小窗', en: 'Presenter inset' },
+  // Person-cutout layouts are no longer offered; projects that saved them still render.
+  { id: 'cutout', zh: '人像出框', en: 'Foreground presenter', retired: true },
+  { id: 'cutout-small', zh: '抠像小窗', en: 'Cutout inset', retired: true },
 ] as const;
 export type PipTemplate = typeof PIP_TEMPLATES[number]['id'];
+/** The layouts users can pick. */
+export const PIP_PICKER_TEMPLATES = PIP_TEMPLATES.filter(template => !('retired' in template));
 export type PipCorner = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
 export type PipSize = 'small' | 'medium' | 'large';
 export interface PipOptions {
@@ -68,19 +72,19 @@ export function pipGeometry(template: PipTemplate, canvas: Dimensions, asset: Di
     const floor = captions && captions.bottom > .4 ? Math.min(.79, captions.top - .02) : .79;
     return { ...fitted, x: corner.endsWith('left') ? .04 : .96 - fitted.w, y: corner.startsWith('top') ? .06 : Math.max(.06, floor - fitted.h) };
   };
-  const common = { resolvedTemplate: selected, mediaFit: options.mediaFit ?? (['presenter', 'cutout-small'].includes(selected) ? 'cover' : 'contain'), speakerFit: options.speakerFit ?? 'contain', speakerAnchorY: .5 } as const;
+  const common = { resolvedTemplate: selected, mediaFit: options.mediaFit ?? (['presenter', 'cutout-small', 'split', 'split-bottom'].includes(selected) ? 'cover' : 'contain'), speakerFit: options.speakerFit ?? 'contain', speakerAnchorY: .5 } as const;
   if (selected === 'cutout-small') return { ...common, media: { x: 0, y: 0, w: 1, h: 1 }, speaker: inset(source, true), speakerCutout: true, speakerFit: 'contain', background: '#171717' };
   if (selected === 'cutout') {
     const speaker = portrait ? { x: 0, y: .15, w: 1, h: .85 } : { x: .62, y: .1, w: .38, h: .9 };
     return { ...common, media: portrait ? { x: .04, y: .04, w: .92, h: .66 } : { x: .04, y: .06, w: .76, h: .86 }, speaker, speakerCutout: true, speakerFit: 'cover', background: '#171717' };
   }
   if (selected === 'presenter') return { ...common, media: { x: 0, y: 0, w: 1, h: 1 }, speaker: inset(source, true), background: '#171717' };
-  if (selected === 'split') {
-    const mediaH = Math.max(.32, Math.min(.58, aspect(canvas) / aspect(asset)));
-    const mediaW = Math.max(.52, Math.min(.7, aspect(asset) / aspect(canvas)));
+  if (selected === 'split' || selected === 'split-bottom') {
+    // Two equal halves; the footage takes the top (left) or the bottom (right).
+    const after = selected === 'split-bottom';
     return { ...common,
-      media: portrait ? { x: 0, y: 0, w: 1, h: mediaH } : { x: 0, y: 0, w: mediaW, h: 1 },
-      speaker: portrait ? { x: 0, y: mediaH, w: 1, h: 1 - mediaH } : { x: mediaW, y: 0, w: 1 - mediaW, h: 1 },
+      media: portrait ? { x: 0, y: after ? .5 : 0, w: 1, h: .5 } : { x: after ? .5 : 0, y: 0, w: .5, h: 1 },
+      speaker: portrait ? { x: 0, y: after ? 0 : .5, w: 1, h: .5 } : { x: after ? 0 : .5, y: 0, w: .5, h: 1 },
       speakerFit: options.speakerFit ?? 'cover', speakerAnchorY: source.height > source.width ? .4 : .5,
       background: '#171717',
     };
