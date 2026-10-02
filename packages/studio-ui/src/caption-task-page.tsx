@@ -22,6 +22,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowLeft, Download, Loader2, Upload, Sparkles } from 'lucide-react';
 import { CAPTION_TRANSLATION_LANGUAGES, captionTaskGroupBottom, captionTaskStyle, storedCaptionTaskOptions, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
 import { captionBandFor } from '@pireel/studio-engine/pip-layout';
+import { canonicalJson } from '@pireel/studio-engine/stable-json';
 import { DEFAULT_DUBBING_OPTIONS, dubbingVoicesReady, dubbingSceneOptions } from '@pireel/studio-engine/dubbing-task';
 import { DubbingSettings } from './dubbing-settings';
 import { CaptionPositionPreview } from './caption-position-preview';
@@ -185,19 +186,29 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
       if (alive.current && !controller.signal.aborted) setError(reason instanceof Error ? reason.message : String(reason));
     } finally { busyRef.current = false; abortRef.current = null; if (alive.current) setExporting(false); }
   };
+  /** The settings a run records: scene defaults filled in, so an unchanged panel compares equal to the last run. */
+  const generationOptions = (value: CaptionTaskOptions): CaptionTaskOptions => {
+    const settings: CaptionTaskOptions = structuredClone({ ...value, ...(isSfx ? { sfx: normalizeSfxOptions(value.sfx) } : {}), ...(isRemoval ? { subtitleRemoval: normalizeErasureOptions(value.subtitleRemoval) } : {}), aspect: isUgc ? value.aspect : 'original' });
+    return isDubbing ? { ...settings, dubbing: dubbingSceneOptions(settings.dubbing ?? DEFAULT_DUBBING_OPTIONS), translationLanguage: undefined } : settings;
+  };
   const start = async (resume = false, confirmed = false) => {
     if (!file || !probe || !scope || busyRef.current) return;
     if (isUgc) { try { readyUgcAdOptions(options.ugcAd); } catch (error) { setError(error instanceof Error ? error.message : String(error)); return; } }
-    if (!resume && !confirmed && (versions.length > 0 || pendingGeneration)) { setConfirmGenerate(true); return; }
+    const settings = generationOptions(options);
+    // A new run starts from scratch; when nothing changed since the last result, ask first.
+    if (!resume && !confirmed && (versions.length > 0 || pendingGeneration) && taskRef.current && canonicalJson(settings) === canonicalJson(taskRef.current.options)) { setConfirmGenerate(true); return; }
     busyRef.current = true; versionRequest.current++;
     setBusy(true); setVersionLoading(false); setError(''); setStopping(false); setProgress({ preparing: { status: 'running' } }); setDrafting(true);
     const controller = new AbortController(); abortRef.current = controller;
     const current = taskRef.current;
+    // After a finished run, a new one reuses nothing: transcripts, analysis, matches, speech and step
+    // receipts are rebuilt. Retrying a failed or stopped run, or continuing after dubbing voice
+    // setup, still picks up the steps that already finished.
+    const earlier: Partial<CaptionTaskRecord> = current?.stage === 'completed' ? { transcript: undefined, translation: undefined, cuts: undefined, broll: undefined, dubbing: undefined, workflow: undefined, workflowDefinition: undefined, workflowData: undefined } : { dubbing: current?.dubbing ? { ...current.dubbing, lipJobId: undefined, lipResultUrl: undefined, outputSig: undefined } : undefined };
     const next: CaptionTaskRecord = resume && current ? { ...current, generationId: current.generationId ?? crypto.randomUUID(), draftOptions: undefined, stage: 'preparing', error: undefined } : {
-      ...current, scene, ...(isDubbing ? { dubbing: { ...current?.dubbing, lipJobId: undefined, lipResultUrl: undefined, outputSig: undefined } } : {}), id: taskId, scope, name: current?.name ?? file.name, sourceSig: current?.sourceSig ?? fileSig(file), ...probe,
-      generationId: crypto.randomUUID(), options: structuredClone({ ...options, ...(isSfx ? { sfx: normalizeSfxOptions(options.sfx) } : {}), ...(isRemoval ? { subtitleRemoval: normalizeErasureOptions(options.subtitleRemoval) } : {}), aspect: isUgc ? options.aspect : 'original' }), draftOptions: undefined, draftDocument: undefined, document: undefined, progress: { preparing: { status: 'running' } }, stage: 'preparing', updatedAt: Date.now(),
+      ...current, ...earlier, scene, id: taskId, scope, name: current?.name ?? file.name, sourceSig: current?.sourceSig ?? fileSig(file), ...probe,
+      generationId: crypto.randomUUID(), options: settings, draftOptions: undefined, draftDocument: undefined, document: undefined, progress: { preparing: { status: 'running' } }, stage: 'preparing', updatedAt: Date.now(),
     };
-    if (isDubbing) next.options = { ...next.options, dubbing: dubbingSceneOptions(next.options.dubbing ?? DEFAULT_DUBBING_OPTIONS), translationLanguage: undefined };
     if (resume) setOptions(next.options);
     try {
       await persist(next);
@@ -339,8 +350,8 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
   return <section className="studio-scope mx-auto flex h-full min-h-0 w-full flex-1 max-w-[1440px] flex-col overflow-hidden px-5 py-5 sm:px-10">
     <Dialog open={confirmGenerate} onOpenChange={setConfirmGenerate}>
       <DialogContent className="studio-scope bg-panel border-line sm:max-w-sm">
-        <DialogTitle className="text-ink">{say('重新生成？', 'Generate again?')}</DialogTitle>
-        <DialogDescription className="text-ink-3">{say('已有生成结果，继续将新增一个版本。', 'A result already exists. Continuing creates a new version.')}</DialogDescription>
+        <DialogTitle className="text-ink">{say('配置没有变化，重新生成？', 'Nothing changed. Generate again?')}</DialogTitle>
+        <DialogDescription className="text-ink-3">{say('将从头重新生成，并新增一个版本。', 'Everything is generated again as a new version.')}</DialogDescription>
         <div className="flex justify-end gap-3"><button type="button" onClick={() => setConfirmGenerate(false)} className="text-ink-3 px-4 py-2 text-sm">{say('取消', 'Cancel')}</button><button type="button" disabled={busy} onClick={() => { setConfirmGenerate(false); void start(false, true); }} className={actionClass}>{say('确认生成', 'Generate')}</button></div>
       </DialogContent>
     </Dialog>

@@ -194,10 +194,11 @@ describe('caption versions and preview UI', () => {
     expect(container.querySelector('[aria-label="字幕生成进度"]')).toBeNull();
     await click(container.querySelector<HTMLButtonElement>('button[title="霓虹灯"]')!);
     expect(container.querySelector('video[data-scene-video]')!.getAttribute('src')).toBe(sourceUrl);
+    // Changed settings generate straight away; nothing from the first run is carried over.
     await click(button('生成新版本'));
-    expect(runs).toHaveLength(1);
-    await click([...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((button) => button.textContent === '确认生成')!);
     await settled(() => expect(runs).toHaveLength(2));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(runs[1]!.task.transcript).toBeUndefined();
     await complete(1);
     expect(runs[0]!.task.generationId).not.toBe(runs[1]!.task.generationId);
     expect(await listCaptionVersions('owner', 'task')).toHaveLength(2);
