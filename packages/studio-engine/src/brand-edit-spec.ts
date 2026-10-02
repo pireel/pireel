@@ -1,4 +1,6 @@
 import type { VideoMeasures } from './brand-analysis';
+import { brollTier, classifyArchetype, primaryDevice, type ArchetypeId, type BrollTier, type LayoutMode, type PrimaryDevice } from './brand-visual';
+import type { VideoStyleFacets } from './brand-style-spec';
 
 /**
  * The executable half of a brand: structured edit parameters reduced from per-video measures, each
@@ -15,10 +17,11 @@ import type { VideoMeasures } from './brand-analysis';
  */
 
 export const BRAND_EDIT_SPEC_VERSION = 1;
-export const BRAND_EXTRACTOR_VERSION = 'brand-extract-p0';
+export const BRAND_EXTRACTOR_VERSION = 'brand-extract-p1';
 export const CONFIDENCE_FLOOR = 0.5;
 
-export type SpecSource = 'measured' | 'platform_default';
+/** measured = from frames/sound; vlm_inferred = the reading pass's closed-vocabulary judgement; platform_default = nothing known. */
+export type SpecSource = 'measured' | 'vlm_inferred' | 'platform_default';
 export interface SpecProvenance { source: SpecSource; confidence: number; videos: number; /** Within-series CV (continuous) or 1 − mode share (categorical). */ dispersion?: number }
 export interface SpecField<T> { value: T; provenance: SpecProvenance }
 export type SilenceMode = 'aggressive' | 'moderate' | 'natural';
@@ -40,6 +43,9 @@ export interface BrandEditSpec {
     targetCpm: SpecField<[number, number]>;
     p90ShotSec: SpecField<number>;
     silence: SpecField<{ mode: SilenceMode; maxGapMs: number }>;
+    /** What the cutting leans on, and whether digital punch-ins are part of the style (how often is per video). */
+    primaryDevice?: SpecField<PrimaryDevice>;
+    punchIn?: SpecField<{ enabled: boolean }>;
   };
   captions: {
     presence: SpecField<CaptionPresence>;
@@ -47,10 +53,30 @@ export interface BrandEditSpec {
     /** % of frame: line height, bottom edge, width, centre x. */
     box: SpecField<{ lineHeightPct: number; bottomPct: number; widthPct: number; xCenterPct: number }>;
     wordsPerLine: SpecField<number>;
+    /** Words on screen at once (all caption lines together). */
+    wordsPerPage: SpecField<number>;
+    fontClass?: SpecField<string>;
+    animation?: SpecField<string>;
+    accentRule?: SpecField<string>;
   };
   audio: { targetLufs: SpecField<number> };
+  /** Visual fingerprint (null fields when no visual primitives were measured). */
+  layout: SpecField<LayoutMode> | null;
+  /** The measured layout when the reading pass decided otherwise (measurement misses most composites). */
+  layoutMeasured?: LayoutMode | null;
+  broll: { tier: SpecField<BrollTier>; sources?: SpecField<string[]> } | null;
+  /** The usual opening; a per-video choice in the research (low ICC), kept as the default to start from. */
+  hook?: { structure: SpecField<string> };
+  archetype: SpecField<ArchetypeId> | null;
+  textOverlays: {
+    /** A header/label held over most of the video; its look is the template, its text changes per video. */
+    header: SpecField<{ enabled: boolean; box: { x: number; y: number; w: number; h: number } | null; examples: string[] }>;
+    hookLabel: SpecField<boolean>;
+  };
   /** Speaker traits: pace captions with them, never enforce them as style. */
   speech: { wpm: number | null; speakers: number };
+  /** Where the recurring intro sting plays when it follows a cold open (seconds into the video). */
+  brandAssets?: { introAtSec: number };
   lowConfidence: string[];
 }
 
@@ -67,7 +93,22 @@ const FIELD = {
   cpm: { min: 3, cv: 0.4 }, p90: { min: 3, cv: 0.45 }, silence: { min: 3, cv: 0.4 },
   presence: { min: 3 }, case: { min: 3 }, box: { min: 3, cv: 0.12 }, wordsPerLine: { min: 3, cv: 0.2 },
   lufs: { min: 2, spreadDb: 2.5 },
+  layout: { min: 3 }, broll: { min: 5 }, archetype: { min: 3 }, header: { min: 3 }, device: { min: 3 }, punch: { min: 5 },
 } as const;
+
+const EMPTY_CUTS = { jump: 0, punch_in: 0, punch_out: 0, camera_change: 0, cutaway: 0, broll: 0 };
+
+/** Primary cutting device (mode over videos) and whether punch-ins are part of the style (≥ 10% of cuts on average). */
+function visualCutting(videos: VideoMeasures[]): Pick<BrandEditSpec['cutting'], 'primaryDevice' | 'punchIn'> {
+  const cut = videos.filter(video => video.cuts);
+  if (!cut.length) return {};
+  const device = categorical(cut.map(video => primaryDevice(video.cutsPerMin, video.cuts!, video.speakers)), FIELD.device.min, 'same_size_jumpcut');
+  const punchShare = median(cut.map(video => video.cuts!.punch_in + video.cuts!.punch_out));
+  // Punch-in detection separates creators only weakly (AUC 0.64 on the research set): never above medium confidence.
+  const punchConf = round(Math.min(0.6, Math.min(1, cut.length / FIELD.punch.min) * 0.6));
+  const strip = <T>(field: SpecField<T> & { low: boolean }): SpecField<T> => { const { low: _low, ...rest } = field; return rest; };
+  return { primaryDevice: strip(device), punchIn: { value: { enabled: punchShare >= 0.1 }, provenance: { source: 'measured', confidence: punchConf, videos: cut.length } } };
+}
 
 const SILENCE_GAP_MS: Record<SilenceMode, number> = { aggressive: 200, moderate: 400, natural: 1500 };
 
@@ -177,7 +218,7 @@ export function silenceMode(cutGapMs: number): SilenceMode { return cutGapMs <= 
  * strong split (≥4 videos, separation ≥ 3): on the research set a weak split (16% false on steady
  * creators) cost more by dropping videos than it gained. Outlier dropping showed no gain and is opt-in.
  */
-export interface DeriveOptions { series?: boolean; outliers?: boolean }
+export interface DeriveOptions { series?: boolean; outliers?: boolean; /** Reading-pass facets by video id. */ facets?: Record<string, VideoStyleFacets | undefined> }
 const STRONG_SPLIT = { videos: 4, separation: 3 };
 
 export function deriveBrandEditSpec(all: VideoMeasures[], options: DeriveOptions = {}): BrandEditSpec {
@@ -232,14 +273,69 @@ export function deriveBrandEditSpec(all: VideoMeasures[], options: DeriveOptions
     ? { value: base.lufs, provenance: { source: 'platform_default', confidence: 0, videos: 0 }, low: true }
     : { value: round(median(lufsValues), 1), provenance: { source: 'measured', confidence: lufsConf, videos: lufsValues.length, dispersion: round(lufsSpread, 2) }, low: lufsConf < CONFIDENCE_FLOOR });
 
+  const wordsPerPage = track('captions.wordsPerPage', continuous(present(captioned.map(video => video.wordsPerPage)), FIELD.wordsPerLine, base.wordsPerLine, 1));
+
+  // Visual fingerprint: categorical modes over the videos that were measured or read. The reading pass
+  // decides the layout when it has a view (measurement recalls few composites); archetypes are then
+  // classified per video with that layout and the B-roll kinds it named.
+  const facets = options.facets ?? {};
+  const facetOf = (video: VideoMeasures) => facets[video.id];
+  const read = videos.filter(video => facetOf(video)?.layout);
+  const seen = videos.filter(video => video.layout !== null || facetOf(video)?.layout);
+  const strip = <T>(field: SpecField<T> & { low: boolean }): SpecField<T> & { low: boolean } => field;
+  let visual: Pick<BrandEditSpec, 'layout' | 'layoutMeasured' | 'broll' | 'archetype'> = { layout: null, broll: null, archetype: null };
+  if (seen.length) {
+    const finalLayout = (video: VideoMeasures): LayoutMode => (facetOf(video)?.layout as LayoutMode | null | undefined) ?? video.layout ?? 'full_frame_host';
+    const measuredVote = videos.filter(video => video.layout !== null).length ? categorical(videos.filter(video => video.layout !== null).map(video => video.layout!), FIELD.layout.min, 'full_frame_host') : null;
+    const layoutVote = categorical(seen.map(finalLayout), FIELD.layout.min, 'full_frame_host');
+    const layout = track('layout', strip({ ...layoutVote, provenance: { ...layoutVote.provenance, source: read.length * 2 >= seen.length ? 'vlm_inferred' : 'measured' } }));
+    const hostShare = median(seen.map(video => video.hostShare ?? 1));
+    const tier = track('broll.tier', categorical(seen.map(video => brollTier(video.hostShare ?? 1, finalLayout(video))), FIELD.broll.min, brollTier(hostShare, layout.value)));
+    const kinds = new Map<string, number>();
+    videos.forEach(video => new Set(facetOf(video)?.brollTypes ?? []).forEach(kind => kinds.set(kind, (kinds.get(kind) ?? 0) + 1)));
+    const readCount = videos.filter(video => facetOf(video)).length;
+    const sources = readCount ? [...kinds.entries()].filter(([, n]) => n >= 2 && n / readCount >= 0.3).sort((a, b) => b[1] - a[1]).map(([kind]) => kind) : null;
+    const archetype = track('archetype', categorical(seen.map(video => classifyArchetype({
+      layout: finalLayout(video), hostShare: video.hostShare ?? 1, cutsPerMin: video.cutsPerMin, cuts: video.cuts ?? EMPTY_CUTS,
+      speakers: video.speakers, captionsOn: captionsOn(video), wpm: video.wpm, headerShare: video.headerShare, hostEarlyOnly: video.hostEarlyOnly,
+      brollKinds: facetOf(video)?.brollTypes,
+    })), FIELD.archetype.min, 'A1_native_one_take'));
+    visual = {
+      layout, broll: { tier, ...(sources ? { sources: { value: sources, provenance: { source: 'vlm_inferred', confidence: confidence(1, readCount, FIELD.broll.min), videos: readCount } } } : {}) }, archetype,
+      ...(measuredVote && measuredVote.value !== layout.value ? { layoutMeasured: measuredVote.value } : {}),
+    };
+  }
+  // Caption character the reading pass judged, over the captioned videos it read.
+  const facetField = (name: string, key: 'fontClass' | 'captionAnimation' | 'accentRule' | 'hookStructure', pool: VideoMeasures[]) => {
+    const values = pool.map(video => facetOf(video)?.[key]).filter((value): value is NonNullable<typeof value> => !!value);
+    if (!values.length) return undefined;
+    const vote = categorical(values as string[], FIELD.case.min, values[0]!);
+    return track(name, { ...vote, provenance: { ...vote.provenance, source: 'vlm_inferred' as const } });
+  };
+  const fontClass = facetField('captions.fontClass', 'fontClass', captioned);
+  const animation = facetField('captions.animation', 'captionAnimation', captioned);
+  const accentRule = facetField('captions.accentRule', 'accentRule', captioned);
+  const hookStructure = facetField('hook.structure', 'hookStructure', videos);
+  const header = track('textOverlays.header', (() => {
+    const share = videos.filter(video => video.headerShare >= 0.5).length / videos.length;
+    const withHeader = videos.filter(video => video.headerShare >= 0.5 && video.header);
+    const conf = confidence(Math.max(share, 1 - share), videos.length, FIELD.header.min);
+    return { value: { enabled: share >= 0.5, box: share >= 0.5 && withHeader.length ? withHeader[0]!.header!.box : null, examples: withHeader.flatMap(video => video.header!.texts.slice(0, 1)).slice(0, 5) }, provenance: { source: 'measured' as const, confidence: conf, videos: videos.length, dispersion: round(Math.min(share, 1 - share), 3) }, low: conf < CONFIDENCE_FLOOR };
+  })());
+  const hookVote = categorical(videos.map(video => video.hookLabel ? 'yes' as const : 'no' as const), FIELD.header.min, 'no');
+  const hookLabel = track('textOverlays.hookLabel', { ...hookVote, value: hookVote.value === 'yes' });
+
   const wpms = present(videos.map(video => video.wpm));
   return {
     version: BRAND_EDIT_SPEC_VERSION, extractor: BRAND_EXTRACTOR_VERSION, platform, series,
     usedVideos: videos.map(video => video.id), outliers,
     framing: { faceH, faceCx, faceCy },
-    cutting: { targetCpm, p90ShotSec, silence },
-    captions: { presence, case: casing, box, wordsPerLine },
+    cutting: { targetCpm, p90ShotSec, silence, ...visualCutting(videos) },
+    captions: { presence, case: casing, box, wordsPerLine, wordsPerPage, ...(fontClass ? { fontClass } : {}), ...(animation ? { animation } : {}), ...(accentRule ? { accentRule } : {}) },
+    ...(hookStructure ? { hook: { structure: hookStructure } } : {}),
     audio: { targetLufs },
+    ...visual,
+    textOverlays: { header, hookLabel },
     speech: { wpm: wpms.length ? Math.round(median(wpms)) : null, speakers: Math.max(0, ...videos.map(video => video.speakers)) },
     lowConfidence: low,
   };
@@ -258,15 +354,19 @@ export function validateBrandEditSpec(value: unknown): BrandEditSpec {
     ['framing.faceH', spec.framing?.faceH], ['framing.faceCx', spec.framing?.faceCx], ['framing.faceCy', spec.framing?.faceCy],
     ['cutting.targetCpm', spec.cutting?.targetCpm], ['cutting.p90ShotSec', spec.cutting?.p90ShotSec], ['cutting.silence', spec.cutting?.silence],
     ['captions.presence', spec.captions?.presence], ['captions.case', spec.captions?.case], ['captions.box', spec.captions?.box], ['captions.wordsPerLine', spec.captions?.wordsPerLine],
-    ['audio.targetLufs', spec.audio?.targetLufs],
+    ['audio.targetLufs', spec.audio?.targetLufs], ['captions.wordsPerPage', spec.captions?.wordsPerPage],
+    ['textOverlays.header', spec.textOverlays?.header], ['textOverlays.hookLabel', spec.textOverlays?.hookLabel],
   ];
   for (const [path, field] of fields) {
     if (!field || field.value === undefined) fail(`spec.${path}`, '缺失');
     const p = field.provenance;
-    if (!p || (p.source !== 'measured' && p.source !== 'platform_default') || !(p.confidence >= 0 && p.confidence <= 1)) fail(`spec.${path}.provenance`, '来源或置信度无效');
+    if (!p || !['measured', 'vlm_inferred', 'platform_default'].includes(p.source) || !(p.confidence >= 0 && p.confidence <= 1)) fail(`spec.${path}.provenance`, '来源或置信度无效');
   }
   if (!['aggressive', 'moderate', 'natural'].includes(spec.cutting.silence.value.mode)) fail('spec.cutting.silence', '未知档位');
   if (!['always', 'sometimes', 'never'].includes(spec.captions.presence.value)) fail('spec.captions.presence', '未知取值');
   if (!(spec.audio.targetLufs.value >= -40 && spec.audio.targetLufs.value <= -5)) fail('spec.audio.targetLufs', '-40…-5');
+  for (const [path, field] of [['layout', spec.layout], ['broll.tier', spec.broll?.tier], ['archetype', spec.archetype], ['cutting.primaryDevice', spec.cutting.primaryDevice], ['cutting.punchIn', spec.cutting.punchIn]] as const) {
+    if (field && (!field.provenance || !(field.provenance.confidence >= 0 && field.provenance.confidence <= 1))) fail(`spec.${path}.provenance`, '来源或置信度无效');
+  }
   return spec;
 }

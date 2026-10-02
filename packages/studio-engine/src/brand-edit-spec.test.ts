@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { logoCandidate, measureVideo, type VideoMeasures, type VideoObservation } from './brand-analysis';
+import { logoCandidate, measureVideo, textLayers, type VideoMeasures, type VideoObservation } from './brand-analysis';
 import { brandSeries, deriveBrandEditSpec, seriesOutliers, silenceMode, validateBrandEditSpec } from './brand-edit-spec';
 import { validateBrandKit, emptyBrandKit } from './brand-kit';
+import { parseStyleFacets } from './brand-style-spec';
 
 const sentence = 'so the first thing you do is write down every expense then you cut what hurts'.split(' ');
 
@@ -29,7 +30,8 @@ function talking(id: string, patch: Partial<VideoObservation> = {}, gap = 0.1): 
 const measures = (id: string, patch: Partial<VideoMeasures> = {}): VideoMeasures => ({
   id, durationSec: 60, vertical: true, cutsPerMin: 15, p90ShotSec: 6, captionSync: 0.8, captionCoverage: 0.8,
   captionUpper: 0.05, captionLineHeight: 0.04, captionBottom: 0.7, captionWidth: 0.5, captionXCenter: 0.5, wordsPerLine: 3,
-  faceH: 0.2, faceCx: 0.5, faceCy: 0.35, faceShare: 1, wpm: 180, cutGapMs: 120, pausesPerMin: 1, speakers: 1, lufs: -15, ...patch,
+  faceH: 0.2, faceCx: 0.5, faceCy: 0.35, faceShare: 1, wpm: 180, cutGapMs: 120, pausesPerMin: 1, speakers: 1, lufs: -15,
+  layout: null, hostShare: null, cuts: null, hostEarlyOnly: false, headerShare: 0, header: null, hookLabel: false, wordsPerPage: 3, ...patch,
 });
 
 describe('per-video measures', () => {
@@ -160,5 +162,85 @@ describe('derived edit spec', () => {
     expect(() => validateBrandKit(kit)).not.toThrow();
     const broken = structuredClone(kit); broken.spec!.audio.targetLufs.value = 3;
     expect(() => validateBrandKit(broken)).toThrow(/targetLufs/);
+  });
+});
+
+describe('text layers', () => {
+  it('separates spoken captions, a held header, an opening hook label and scene text', () => {
+    const video = talking('v1');
+    video.ocr = video.ocr.map(sample => ({ t: sample.t, boxes: [
+      ...sample.boxes,
+      { text: 'BREAKING: RENT IS UP', x: 0.1, y: 0.06, w: 0.8, h: 0.05 },
+      ...(sample.t < 6 ? [{ text: 'wait for it 😳', x: 0.3, y: 0.3, w: 0.4, h: 0.03 }] : []),
+      ...(sample.t === 20 ? [{ text: 'EXIT', x: 0.8, y: 0.45, w: 0.08, h: 0.03 }] : []),
+    ] }));
+    const layers = textLayers(video);
+    const kind = (text: string) => layers.find(layer => layer.texts.some(item => item.includes(text)))?.kind;
+    expect(kind('first')).toBe('caption');
+    expect(kind('BREAKING')).toBe('header');
+    expect(kind('wait for it')).toBe('hook_label');
+    expect(kind('EXIT')).toBe('scene');
+    const m = measureVideo(video);
+    expect(m.headerShare).toBe(1);
+    expect(m.hookLabel).toBe(true);
+    expect(m.wordsPerPage).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('visual fields of the spec', () => {
+  const cuts = { jump: 0.6, punch_in: 0.05, punch_out: 0, camera_change: 0.2, cutaway: 0.1, broll: 0.05 };
+  it('reports layout, B-roll tier, archetype, cutting device and the header template', () => {
+    const spec = deriveBrandEditSpec(Array.from({ length: 5 }, (_, i) => measures(`v${i}`, { layout: 'full_frame_host', hostShare: 0.97, cuts, cutsPerMin: 9, headerShare: 0.9, header: { box: { x: 0.1, y: 0.05, w: 0.8, h: 0.05 }, texts: [`title ${i}`] } })));
+    expect(spec.layout?.value).toBe('full_frame_host');
+    expect(spec.broll?.tier.value).toBe('none');
+    expect(spec.archetype?.value).toBe('A2_jumpcut_monologue');
+    expect(spec.cutting.primaryDevice?.value).toBe('same_size_jumpcut');
+    expect(spec.cutting.punchIn?.value.enabled).toBe(false);
+    expect(spec.cutting.punchIn!.provenance.confidence).toBeLessThanOrEqual(0.6);
+    expect(spec.textOverlays.header.value).toMatchObject({ enabled: true, box: { y: 0.05 } });
+    expect(spec.textOverlays.header.value.examples).toHaveLength(5);
+    expect(validateBrandEditSpec(spec)).toBe(spec);
+  });
+
+  it('leaves visual fields empty when nothing visual was measured', () => {
+    const spec = deriveBrandEditSpec(Array.from({ length: 3 }, (_, i) => measures(`v${i}`)));
+    expect(spec.layout).toBeNull();
+    expect(spec.archetype).toBeNull();
+    expect(spec.cutting.primaryDevice).toBeUndefined();
+  });
+});
+
+describe('reading-pass facets', () => {
+  it('parses leniently: an unknown value blanks only that facet', () => {
+    expect(parseStyleFacets({ layout: 'split_screen', fontClass: 'Comic Sans', brollTypes: ['stock', 'stock', 'drone'] })).toEqual({ layout: 'split_screen', fontClass: null, captionAnimation: null, accentRule: null, hookStructure: null, brollTypes: ['stock'] });
+    expect(parseStyleFacets(undefined).layout).toBeNull();
+  });
+
+  const cuts = { jump: 0.05, punch_in: 0, punch_out: 0, camera_change: 0.1, cutaway: 0.35, broll: 0.3 };
+  const facet = (patch: Partial<ReturnType<typeof parseStyleFacets>>) => ({ ...parseStyleFacets({}), ...patch });
+
+  it('lets the reading pass decide the layout and keeps the measured one', () => {
+    const videos = Array.from({ length: 4 }, (_, i) => measures(`v${i}`, { layout: 'full_frame_host', hostShare: 0.9, cuts }));
+    const spec = deriveBrandEditSpec(videos, { facets: Object.fromEntries(videos.map(video => [video.id, facet({ layout: 'split_screen' })])) });
+    expect(spec.layout).toMatchObject({ value: 'split_screen', provenance: { source: 'vlm_inferred' } });
+    expect(spec.layoutMeasured).toBe('full_frame_host');
+    expect(spec.archetype?.value).toBe('A4_reaction_stitch');
+  });
+
+  it('routes B-roll-led videos by the B-roll kinds named', () => {
+    const videos = Array.from({ length: 4 }, (_, i) => measures(`v${i}`, { layout: 'full_frame_host', hostShare: 0.55, cuts, cutsPerMin: 20 }));
+    const as = (types: ReturnType<typeof parseStyleFacets>['brollTypes']) => deriveBrandEditSpec(videos, { facets: Object.fromEntries(videos.map(video => [video.id, facet({ brollTypes: types })])) });
+    expect(as(['product_macro', 'screen_recording']).archetype?.value).toBe('A8_demo_broll_fasttalk');
+    expect(as(['archival_news', 'map_3d']).archetype?.value).toBe('A9_doc_vo_montage');
+    expect(as(['user_footage']).archetype?.value).toBe('A10_phone_montage_vlog');
+    expect(as(['archival_news', 'map_3d']).broll?.sources?.value).toEqual(['archival_news', 'map_3d']);
+  });
+
+  it('takes caption character from captioned videos only', () => {
+    const videos = [...Array.from({ length: 3 }, (_, i) => measures(`c${i}`)), measures('plain', { captionSync: 0, captionCoverage: 0 })];
+    const facets = { c0: facet({ fontClass: 'heavy_sans', accentRule: 'keywords' }), c1: facet({ fontClass: 'heavy_sans', accentRule: 'keywords' }), c2: facet({ fontClass: 'heavy_sans', accentRule: 'keywords' }), plain: facet({ fontClass: 'serif' }) };
+    const spec = deriveBrandEditSpec(videos, { facets });
+    expect(spec.captions.fontClass).toMatchObject({ value: 'heavy_sans', provenance: { source: 'vlm_inferred' } });
+    expect(spec.captions.accentRule?.value).toBe('keywords');
   });
 });

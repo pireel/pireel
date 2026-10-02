@@ -45,11 +45,40 @@ export interface BrandStyleSpec {
   frames: (StyleEvidenceRef & { key: string })[];
 }
 
+/** Closed-vocabulary judgements per video for what measurement cannot see or sees poorly. */
+export const STYLE_FACETS = {
+  layout: ['full_frame_host', 'split_screen', 'pip_host', 'pip_source', 'greenscreen_composite', 'template_frame', 'first_person', 'host_absent'],
+  fontClass: ['heavy_sans', 'rounded_sans', 'condensed_sans', 'serif', 'handwritten', 'monospace', 'platform_native', 'none'],
+  captionAnimation: ['none', 'pop_scale', 'bounce', 'fade', 'typewriter', 'word_reveal'],
+  accentRule: ['none', 'current_word', 'keywords', 'numbers_money', 'speaker'],
+  hookStructure: ['cold_statement', 'question', 'text_hook_card', 'broll_montage', 'result_first', 'in_media_res', 'source_clip_first'],
+  brollTypes: ['user_footage', 'product_macro', 'screen_recording', 'screenshot_article', 'stock', 'archival_news', 'ai_image', 'meme_gif', 'map_3d', 'animation'],
+} as const;
+export type StyleFacetKey = keyof typeof STYLE_FACETS;
+export interface VideoStyleFacets {
+  layout: typeof STYLE_FACETS.layout[number] | null;
+  fontClass: typeof STYLE_FACETS.fontClass[number] | null;
+  captionAnimation: typeof STYLE_FACETS.captionAnimation[number] | null;
+  accentRule: typeof STYLE_FACETS.accentRule[number] | null;
+  hookStructure: typeof STYLE_FACETS.hookStructure[number] | null;
+  brollTypes: typeof STYLE_FACETS.brollTypes[number][];
+}
+
 /** One video's reading: what each system does in it, at which times. */
 export interface VideoStyleReading {
   video: string;
   summary: string;
   systems: Partial<Record<StyleSystemId, { present: boolean; observations: { text: string; times: number[] }[] }>>;
+  /** Absent on readings made before facets existed. */
+  facets?: VideoStyleFacets;
+}
+
+/** Facets are parsed leniently: an out-of-vocabulary value only blanks that facet, it never fails the reading. */
+export function parseStyleFacets(value: unknown): VideoStyleFacets {
+  const raw = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const pick = <K extends Exclude<StyleFacetKey, 'brollTypes'>>(key: K) => (STYLE_FACETS[key] as readonly string[]).includes(raw[key] as string) ? raw[key] as VideoStyleFacets[K] : null;
+  const broll = Array.isArray(raw.brollTypes) ? [...new Set(raw.brollTypes.filter((item): item is VideoStyleFacets['brollTypes'][number] => (STYLE_FACETS.brollTypes as readonly string[]).includes(item as string)))] : [];
+  return { layout: pick('layout'), fontClass: pick('fontClass'), captionAnimation: pick('captionAnimation'), accentRule: pick('accentRule'), hookStructure: pick('hookStructure'), brollTypes: broll };
 }
 
 const MAX_RULES = 8;
@@ -83,7 +112,7 @@ export function parseVideoStyleReading(raw: string, video: string, durationSec: 
     });
     out[id as StyleSystemId] = { present: item.present, observations };
   }
-  return { video, summary: str(value.summary, 'summary', 600), systems: out };
+  return { video, summary: str(value.summary, 'summary', 600), systems: out, ...(value.facets !== undefined ? { facets: parseStyleFacets(value.facets) } : {}) };
 }
 
 /**

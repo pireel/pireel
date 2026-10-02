@@ -37,9 +37,16 @@ describe('brand observations', () => {
     const intro = Array.from({ length: 6 }, (_, index) => hash(0xabc000 + index));
     const videos = [video('v1', { headHashes: intro }), video('v2', { headHashes: intro }), video('v3', { headHashes: intro }), video('v4')];
     const summary = summarizeBrandObservations(videos, 2);
-    expect(summary.intro).toMatchObject({ endSec: 3 });
+    expect(summary.intro).toMatchObject({ startSec: 0, endSec: 3 });
     expect(summary.intro!.evidence.videos).toHaveLength(3);
     expect(summary.outro).toBeNull();
+  });
+
+  it('cuts only the recurring sting when it follows a per-video cold open', () => {
+    const sting = Array.from({ length: 6 }, (_, index) => hash(0x5a5000 + index));
+    const withColdOpen = (id: string, seed: number) => video(id, { headHashes: [...Array.from({ length: 6 }, (_, index) => hash(seed * 77 + index)), ...sting] });
+    const summary = summarizeBrandObservations([withColdOpen('v1', 1), withColdOpen('v2', 2), withColdOpen('v3', 3)], 2);
+    expect(summary.intro).toMatchObject({ startSec: 3, endSec: 6 });
   });
 
   it('treats a recurring opening with per-video text as a title-card template, not a clip', () => {

@@ -1,4 +1,5 @@
 import type { BrandConfidence, BrandCorner, BrandEvidence } from './brand-kit';
+import { classifyLayout, cutProfile, VISUAL_THRESHOLDS, type CutKind, type CutPair, type LayoutMode, type VisualSample } from './brand-visual';
 
 /**
  * Brand extraction, deterministic half: per-video observations (measured in the browser and by OCR)
@@ -20,6 +21,8 @@ export interface VideoObservation {
   faces: { t: number; x: number; y: number; w: number; h: number }[];
   /** Frames the face detector looked at (faces are sampled separately from OCR); defaults to the OCR samples. */
   faceSamples?: number;
+  /** Visual primitives for layout and cut-type classification (brand-visual.ts); absent = not measured. */
+  visual?: { samples: VisualSample[]; pairs: CutPair[] };
   /** Perceptual hashes (hex) of the first and last seconds, one per sample; '' for a near-flat frame
    *  (black/solid frames hash alike across unrelated videos, so they never count as a match). */
   headHashes: string[];
@@ -52,7 +55,8 @@ export interface BrandObservationSummary {
   captions: (CaptionGeometry & { evidence: BrandEvidence }) | null;
   pacing: { avgShotSec: number; evidence: BrandEvidence } | null;
   framing: { faceScale: number; faceCenterY: number; evidence: BrandEvidence } | null;
-  intro: { video: string; endSec: number; evidence: BrandEvidence } | null;
+  /** startSec > 0: the sting plays after a per-video cold open (only the recurring span is the asset). */
+  intro: { video: string; startSec: number; endSec: number; evidence: BrandEvidence } | null;
   outro: { video: string; startSec: number; evidence: BrandEvidence } | null;
   /** A recurring opening/closing whose text changes per video: a title-card template, not a reusable clip. */
   titleCards: { position: 'intro' | 'outro'; videos: string[]; texts: string[] }[];
@@ -176,10 +180,12 @@ export function bookends(videos: VideoObservation[], rate: number, maxShare = 0.
   let outro: BrandObservationSummary['outro'] = null;
   if (head) {
     const endSec = round((head.matched.at(-1)! + 1) / rate, 2);
+    // A sting that starts after a cold open: cut only the recurring span (a second of slack for the match grid).
+    const startSec = head.matched[0]! / rate >= 1 ? round(head.matched[0]! / rate, 2) : 0;
     const ids = [head.video.id, ...head.partners];
-    const texts = ids.map(id => spanText(byId.get(id)!, 0, endSec));
+    const texts = ids.map(id => spanText(byId.get(id)!, startSec, endSec));
     if (new Set(texts).size > 1) titleCards.push({ position: 'intro', videos: ids, texts });
-    else intro = { video: head.video.id, endSec, evidence: { videos: ids, confidence: confidence(ids.length / videos.length) } };
+    else intro = { video: head.video.id, startSec, endSec, evidence: { videos: ids, confidence: confidence(ids.length / videos.length) } };
   }
   if (tail) {
     const startSec = round(tail.video.durationSec - (tail.video.tailHashes.length - tail.matched[0]!) / rate, 2);
@@ -252,6 +258,17 @@ export interface VideoMeasures {
   pausesPerMin: number | null;
   speakers: number;
   lufs: number | null;
+  /** Visual classification (null when no visual primitives were collected). */
+  layout: LayoutMode | null;
+  hostShare: number | null;
+  cuts: Record<CutKind, number> | null;
+  /** The host shows in the opening and is mostly off screen after it (narrated documentary pattern). */
+  hostEarlyOnly: boolean;
+  /** Persistent header: largest presence among header layers (0 = none) and how it looks. */
+  headerShare: number;
+  header: { box: { x: number; y: number; w: number; h: number }; texts: string[] } | null;
+  hookLabel: boolean;
+  wordsPerPage: number | null;
 }
 
 const norm = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}']+/gu, ' ').trim();
@@ -269,7 +286,75 @@ function syncedWithSpeech(text: string, t: number, words: NonNullable<VideoObser
   return parts.filter(part => pool.has(part)).length / parts.length >= 0.6;
 }
 
+export type TextLayerKind = 'caption' | 'header' | 'hook_label' | 'scene';
+export interface TextLayer {
+  kind: TextLayerKind;
+  box: { x: number; y: number; w: number; h: number };
+  /** Share of all samples / of samples in the first 8 s where this layer shows text. */
+  presence: number;
+  earlyPresence: number;
+  /** Share of its boxes matching the spoken words (null without a transcript). */
+  sync: number | null;
+  /** Share of consecutive appearances whose text changed. */
+  changeRate: number;
+  texts: string[];
+}
+
+const HOOK_SEC = 8;
+
+/**
+ * On-screen text split into layers by position, then by behaviour: captions follow the speech (or,
+ * without a transcript, change at most appearances); a header stays on most of the video with
+ * little change; a hook label shows only at the start; everything else is scene text (signs,
+ * packaging, screen content) and is not style.
+ */
+export function textLayers(video: VideoObservation): TextLayer[] {
+  const groups = new Map<string, { t: number; box: OcrBox }[]>();
+  for (const sample of video.ocr) for (const box of sample.boxes) {
+    const key = `${Math.round((box.x + box.w / 2) * 5)}:${Math.round((box.y + box.h / 2) * 20)}`;
+    const list = groups.get(key) ?? []; list.push({ t: sample.t, box }); groups.set(key, list);
+  }
+  const words = video.words ?? [];
+  const total = Math.max(1, video.ocr.length);
+  const early = Math.max(1, video.ocr.filter(sample => sample.t < HOOK_SEC).length);
+  return [...groups.values()].map(items => {
+    const times = new Set(items.map(item => item.t));
+    const presence = times.size / total;
+    const earlyPresence = [...times].filter(t => t < HOOK_SEC).length / early;
+    const sync = words.length >= 10 ? items.filter(item => syncedWithSpeech(item.box.text, item.t, words)).length / items.length : null;
+    const changeRate = items.slice(1).filter((item, index) => norm(item.box.text) !== norm(items[index]!.box.text)).length / Math.max(1, items.length - 1);
+    const box = { x: median(items.map(i => i.box.x)), y: median(items.map(i => i.box.y)), w: median(items.map(i => i.box.w)), h: median(items.map(i => i.box.h)) };
+    const kind: TextLayerKind = (sync !== null ? sync >= 0.5 : changeRate >= 0.5 && presence >= 0.15) ? 'caption'
+      : presence >= 0.5 && changeRate < 0.3 && box.w >= 0.12 ? 'header'
+        : earlyPresence >= 0.6 && presence < 0.4 && changeRate < 0.5 ? 'hook_label'
+          : 'scene';
+    return { kind, box: { x: round(box.x, 3), y: round(box.y, 3), w: round(box.w, 3), h: round(box.h, 3) }, presence: round(presence, 2), earlyPresence: round(earlyPresence, 2), sync: sync === null ? null : round(sync, 2), changeRate: round(changeRate, 2), texts: [...new Set(items.map(item => item.box.text))].slice(0, 5) };
+  }).sort((a, b) => b.presence - a.presence);
+}
+
+/** Words on screen at once in the caption layers: what a caption "page" holds. */
+function wordsPerPage(video: VideoObservation, layers: TextLayer[]): number | null {
+  const captionBoxes = (box: OcrBox) => layers.some(layer => layer.kind === 'caption' && Math.abs(layer.box.y + layer.box.h / 2 - (box.y + box.h / 2)) < 0.04 && Math.abs(layer.box.x + layer.box.w / 2 - (box.x + box.w / 2)) < 0.12);
+  const pages = video.ocr.map(sample => sample.boxes.filter(captionBoxes)).filter(boxes => boxes.length).map(boxes => boxes.reduce((n, box) => n + tokens(box.text), 0));
+  return pages.length ? median(pages) : null;
+}
+
+function visualMeasures(video: VideoObservation): Pick<VideoMeasures, 'layout' | 'hostShare' | 'cuts' | 'hostEarlyOnly'> {
+  if (!video.visual?.samples.length) return { layout: null, hostShare: null, cuts: null, hostEarlyOnly: false };
+  const vertical = video.width && video.height ? video.height > video.width : true;
+  const layout = classifyLayout(video.visual.samples, vertical);
+  const hostRate = (list: VisualSample[]) => list.length ? list.filter(sample => (sample.face?.h ?? 0) >= VISUAL_THRESHOLDS.minFaceH).length / list.length : 0;
+  const split = video.durationSec * 0.15;
+  return {
+    layout: layout.mode, hostShare: layout.hostShare,
+    cuts: video.visual.pairs.length >= 3 ? cutProfile(video.visual.pairs).share : null,
+    hostEarlyOnly: hostRate(video.visual.samples.filter(sample => sample.t < split)) >= 0.5 && hostRate(video.visual.samples.filter(sample => sample.t >= split)) < 0.25,
+  };
+}
+
 export function measureVideo(video: VideoObservation): VideoMeasures {
+  const layers = textLayers(video);
+  const header = layers.find(layer => layer.kind === 'header') ?? null;
   const duration = Math.max(0.01, video.durationSec);
   const cuts = video.cuts.filter(cut => cut > 0 && cut < duration).sort((a, b) => a - b);
   const bounds = [0, ...cuts, duration];
@@ -313,6 +398,11 @@ export function measureVideo(video: VideoObservation): VideoMeasures {
     wpm: wpm === null ? null : round(wpm, 0), cutGapMs, pausesPerMin: pausesPerMin === null ? null : round(pausesPerMin, 2),
     speakers: new Set(words.map(word => word.speaker).filter(Boolean)).size || (words.length ? 1 : 0),
     lufs: video.loudnessLufs != null && Number.isFinite(video.loudnessLufs) ? round(video.loudnessLufs, 1) : null,
+    ...visualMeasures(video),
+    headerShare: header?.presence ?? 0,
+    header: header ? { box: header.box, texts: header.texts } : null,
+    hookLabel: layers.some(layer => layer.kind === 'hook_label'),
+    wordsPerPage: wordsPerPage(video, layers),
   };
 }
 
