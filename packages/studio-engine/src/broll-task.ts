@@ -5,8 +5,6 @@ export interface BrollOptions {
    *  the user's own files (on unless set to false). */
   aiFootage?: boolean; localFootage?: boolean;
   pip?: import('./pip-layout').PipOptions; manualClips?: { id: string; assetId: string; start: number; duration: number; sourceIn: number }[]; edits?: Record<string, { start: number; duration: number; sourceIn: number }>; assets: BrollAsset[]; captions: boolean; replacements?: Record<string, string>; disabledPlacements?: string[];
-  /** Let the planner pick only the files that fit (on); off or unset, every uploaded file is used where it can be. */
-  autoSelect?: boolean;
   /** Picture in picture layout the user chose for a shot, by placement id; wins over the template and the plan. */
   layouts?: Record<string, PipShotLayout> }
 export interface BrollCandidate { id: string; assetId: string; start: number; end: number; description: string; /** Footage made for this shot (AI generated) carries its own asset; user footage lives in BrollOptions.assets. */ asset?: BrollAsset }

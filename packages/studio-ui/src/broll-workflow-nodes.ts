@@ -34,8 +34,8 @@ function brollFrame(options: Partial<BrollOptions> | undefined) {
   if (template === 'inset' || template === 'dim') return 'window';
   return template === 'smart' ? 'smart' : 'presenter';
 }
-/** Picture in picture uses every uploaded file unless the user lets the planner pick. */
-const usesEveryFile = (options: Partial<BrollOptions> | undefined) => !!options?.pip && options.autoSelect !== true;
+/** Picture in picture uses every uploaded file, each at the moment it fits best. */
+const usesEveryFile = (options: Partial<BrollOptions> | undefined) => !!options?.pip;
 /** Your shots as the planner sees them: what each shows, and its shape so a layout can suit it. */
 function plannerCandidates(analysis: Analysis | undefined) {
   return (analysis?.candidates ?? []).map(candidate => {
