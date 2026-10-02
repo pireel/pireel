@@ -10,7 +10,7 @@ import { SfxSettings } from './sfx-settings';
 import { DEFAULT_SFX_OPTIONS, normalizeSfxOptions } from '@pireel/studio-engine/sfx-task';
 import { PipSettings, PipLayoutPreview } from './pip-settings';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@pireel/ui/select';
-import { brollAssetsMatch } from '@pireel/studio-engine/broll-task';
+import { brollAssetsMatch, brollLocalAssets } from '@pireel/studio-engine/broll-task';
 import { AGENT_ENTRY_ICON } from './workflow-art';
 import { BrollTimeline } from './broll-timeline';
 import { sceneActionClass } from './scene-action-styles';
@@ -394,7 +394,7 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
         </div>
       </section>
       <section aria-label={say('视频预览', 'Video preview')} className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
-        {isSfx && !busy && !versionLoading ? (sfxViewTask && file ? <SfxTimeline task={sfxViewTask} source={file} locale={locale} disabled={disabled} actions={videoActions()} onChange={editSfxDocument}/> : <div className="text-ink-3 flex h-full flex-col items-center justify-center gap-4 text-sm"><p>{say('请重新选择原视频以预览独立音效轨。', 'Re-select the original video to preview the sound tracks.')}</p>{videoActions()}</div>) : isBroll && !isUgc && brollViewTask?.broll?.planKey && brollAssetsMatch(brollViewTask.broll.analysisKey, options.broll?.assets ?? []) && file && !busy && !versionLoading ? <BrollTimeline actions={videoActions} task={brollViewTask} options={options} source={file} renderedUrl={playable ? resultUrl : undefined} locale={locale} disabled={disabled} onChange={broll => {
+        {isSfx && !busy && !versionLoading ? (sfxViewTask && file ? <SfxTimeline task={sfxViewTask} source={file} locale={locale} disabled={disabled} actions={videoActions()} onChange={editSfxDocument}/> : <div className="text-ink-3 flex h-full flex-col items-center justify-center gap-4 text-sm"><p>{say('请重新选择原视频以预览独立音效轨。', 'Re-select the original video to preview the sound tracks.')}</p>{videoActions()}</div>) : isBroll && !isUgc && brollViewTask?.broll?.planKey && brollAssetsMatch(brollViewTask.broll.analysisKey, brollLocalAssets(options.broll)) && file && !busy && !versionLoading ? <BrollTimeline actions={videoActions} task={brollViewTask} options={options} source={file} renderedUrl={playable ? resultUrl : undefined} locale={locale} disabled={disabled} onChange={broll => {
           if (!drafting && selectedVersion && taskRef.current) { const next = { ...taskRef.current, broll: selectedVersion.task.broll, transcript: selectedVersion.task.transcript }; taskRef.current = next; setTask(next); }
           changeOptions(current => ({ ...current, broll }));
         }} /> : generatedView && file && selectedVersion ? <CaptionDocumentPreview task={selectedVersion.task} source={file} locale={locale} disabled={disabled} actions={videoActions()} /> : (

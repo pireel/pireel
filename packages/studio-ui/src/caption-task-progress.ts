@@ -1,10 +1,12 @@
 import type { CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
 import type { CaptionProcessingStage } from './caption-task-store';
+import { brollLocalAssets } from '@pireel/studio-engine/broll-task';
 
 export function captionProcessingStages(options: CaptionTaskOptions): CaptionProcessingStage[] {
   if (options.subtitleRemoval) return ['preparing', 'rendering'];
   if (options.sfx) return ['preparing', 'transcribing', ...('density' in options.sfx ? ['matching' as const] : []), 'styling', ...(('captions' in options.sfx && options.sfx.captions) && !!options.highlights ? ['emphasizing' as const] : [])];
-  if (options.broll) return ['preparing', 'transcribing', 'analyzing', 'matching', 'styling', ...(options.broll.captions && !!options.highlights ? ['emphasizing' as const] : []), ...(options.ugcAd ? ['rendering' as const] : [])];
+  // Footage analysis runs only for the user's own files; AI stills report under matching.
+  if (options.broll) return ['preparing', 'transcribing', ...(brollLocalAssets(options.broll).length ? ['analyzing' as const] : []), 'matching', 'styling', ...(options.broll.captions && !!options.highlights ? ['emphasizing' as const] : []), ...(options.ugcAd ? ['rendering' as const] : [])];
   if (options.dubbing) return ['preparing', 'transcribing', 'translating', 'voicing', 'aligning', ...(options.dubbing.lipSync ? ['lipsync' as const] : []), ...(options.dubbing.captions ? ['styling' as const, ...(!!options.highlights ? ['emphasizing' as const] : [])] : [])];
   // Captions stop at the edited document; the video is rendered on download.
   return ['preparing', 'transcribing', ...(options.shortenPauses ? ['cleaning' as const] : []), ...(options.translationLanguage ? ['translating' as const] : []), 'styling', ...(!!options.highlights ? ['emphasizing' as const] : [])];

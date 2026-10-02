@@ -4,7 +4,7 @@ import { pipRenderModel } from './pip-render-model';
 import { Dialog, DialogContent, DialogTitle } from '@pireel/ui/dialog';
 import { useEffect, useMemo, useRef, useState, type ReactNode, type PointerEvent } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
-import { resolveBrollEdits, type BrollAsset, type BrollOptions } from '@pireel/studio-engine/broll-task';
+import { brollFootageAssets, resolveBrollEdits, type BrollAsset, type BrollOptions } from '@pireel/studio-engine/broll-task';
 import type { CaptionTaskRecord } from './caption-task-store';
 import { loadCaptionMedia } from './caption-task-store';
 import { captionTaskStyle, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
@@ -21,8 +21,8 @@ export function BrollTimeline({ task, options, source, renderedUrl, disabled, lo
  const [pending,setPending]=useState<BrollOptions|null>(null);const shown=pending??config;
  const drag=useRef<{id:string;x:number;width:number;mode:'move'|'left'|'right';start:number;duration:number;sourceIn:number;config:BrollOptions;value:BrollOptions;valid:boolean}|null>(null);
  useEffect(()=>{const url=URL.createObjectURL(source);setSourceUrl(url);return()=>URL.revokeObjectURL(url);},[source]);
- const assetKey=JSON.stringify(config.assets.map(a=>[a.id,a.sig]));
- useEffect(()=>{let alive=true;const owned:string[]=[];setUrls({});setAssetFiles(new Map());void Promise.all(config.assets.map(async a=>{const file=await loadCaptionMedia(task.scope,a.sig,a.name);if(!file)throw new Error(`${zh?'无法读取素材':'Media unavailable'}: ${a.name}`);if(!alive)return;const url=URL.createObjectURL(file);owned.push(url);setAssetFiles(v=>new Map(v).set(url,file));setUrls(v=>({...v,[a.id]:url}));})).catch(e=>{if(alive)setError(e.message);});return()=>{alive=false;owned.forEach(URL.revokeObjectURL);};},[assetKey,task.scope]);
+ const footage=useMemo(()=>brollFootageAssets(config,task.broll?.candidates),[config,task.broll?.candidates]);const assetKey=JSON.stringify(footage.map(a=>[a.id,a.sig]));
+ useEffect(()=>{let alive=true;const owned:string[]=[];setUrls({});setAssetFiles(new Map());void Promise.all(footage.map(async a=>{const file=await loadCaptionMedia(task.scope,a.sig,a.name);if(!file)throw new Error(`${zh?'无法读取素材':'Media unavailable'}: ${a.name}`);if(!alive)return;const url=URL.createObjectURL(file);owned.push(url);setAssetFiles(v=>new Map(v).set(url,file));setUrls(v=>({...v,[a.id]:url}));})).catch(e=>{if(alive)setError(e.message);});return()=>{alive=false;owned.forEach(URL.revokeObjectURL);};},[assetKey,task.scope]);
  const resolved=useMemo(()=>{try{return {clips:resolveBrollEdits(task.broll?.placements??[],task.broll?.candidates??[],shown,task.durationSec),error:''};}catch(e){return {clips:[],error:e instanceof Error?e.message:String(e)};}},[task.broll,shown,task.durationSec]);
  const clips=resolved.clips;const selection=clips.find(p=>p.id===selected);
  const seek=(value:number)=>{const t=Math.max(0,Math.min(task.durationSec,value));timeRef.current=t;setTime(t);player.current?.seek(t);};
@@ -40,7 +40,7 @@ export function BrollTimeline({ task, options, source, renderedUrl, disabled, lo
   return {...emptyComposition(),width:task.width,height:task.height,video:{url,durationSec:task.durationSec},shots:[{id:'scene-source',src:url,srcStart:0,srcEnd:task.durationSec,treatment:'full' as const}]};
  },[live,renderedUrl,sourceUrl,task.id,task.name,task.sourceSig,task.width,task.height,task.durationSec,task.transcript,options,fontRevision]);
  const baseVisuals=useMemo<SupplementalVisualMediaClip[]>(()=>live?clips.filter(p=>urls[p.asset.id]).map(p=>({clipId:p.id,trackId:'broll',stackOrder:1,kind:p.asset.kind,source:urls[p.asset.id],startSec:p.start,endSec:p.start+p.duration,sourceInSec:p.sourceIn,sourceOutSec:p.sourceIn+p.duration,fit:'cover',muted:true,audioMuted:true})):[],[live,clips,urls]);
- const pip = useMemo(() => live && shown.pip ? pipRenderModel(task, { ...options, broll: shown }, sourceUrl, new Map(shown.assets.map(asset => [asset.sig, urls[asset.id]]))) : undefined, [live, task, options, shown, sourceUrl, urls]);
+ const pip = useMemo(() => live && shown.pip ? pipRenderModel(task, { ...options, broll: shown }, sourceUrl, new Map(brollFootageAssets(shown, task.broll?.candidates).map(asset => [asset.sig, urls[asset.id]]))) : undefined, [live, task, options, shown, sourceUrl, urls]);
  const composition = pip?.composition ?? baseComposition;
  const visuals = pip?.visuals ?? baseVisuals;
  const previewFiles=useMemo(()=>{const files=new Map(assetFiles);files.set(sourceUrl,source);for(const shot of composition.shots??[])if(live&&shot.src)files.set(shot.src,source);return files;},[assetFiles,sourceUrl,source,composition,live]);

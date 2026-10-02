@@ -107,7 +107,11 @@ export function brollWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
       const body = await response.json();
       if (body.usage) context.recordUsage(body.usage);
       if (!response.ok) throw new Error(response.status === 402 ? '积分不足，无法生成素材。' : '素材构思失败，请重试。');
-      progress.ideas = body.ideas; await context.savePartial(progress);
+      // Generate only stills that will be placed: the same placement rules decide before any image is paid for.
+      const ideas: NonNullable<GeneratedProgress['ideas']> = body.ideas;
+      const probe = ideas.map((_, index) => ({ id: `idea-${index}`, assetId: `idea-${index}`, start: 0, end: 5, description: '' }));
+      const kept = new Set(validateBrollPlan(ideas.map((idea, index) => ({ ...brollPlacementAnchor(`broll-${idea.cueId}${idea.wordId !== undefined ? `-${idea.wordId}` : ''}`), candidateId: probe[index]!.id })), cues, probe, durationSec).map(p => p.candidateId));
+      progress.ideas = ideas.filter((_, index) => kept.has(`idea-${index}`)); await context.savePartial(progress);
     }
     const ideas = progress.ideas!;
     const { startGeneration, pollCreation } = await import('./gen-api');
@@ -157,5 +161,5 @@ export function brollWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     const result = applyDocumentTransaction(document, { ops: [{ op: 'document.replace', input: { document: next } }] }, { projectId: 'broll-workflow' });
     if (!result.ok) throw new Error(result.error.message);
     return { document: workflowJson(await store.put('document', 'broll', result.document)), plan: workflowJson({ ...plan, candidates: analysis.candidates }) };
-  }, project: outputs => ({ document: store.read<EditorDocumentV2>(outputs.document, 'document'), broll: { analysisKey: '', ...host.task.broll, ...(outputs.plan as unknown as Plan & { candidates: BrollCandidate[] }) } }) })];
+  }, project: outputs => ({ document: store.read<EditorDocumentV2>(outputs.document, 'document'), broll: { analysisKey: '[]', ...host.task.broll, ...(outputs.plan as unknown as Plan & { candidates: BrollCandidate[] }) } }) })];
 }

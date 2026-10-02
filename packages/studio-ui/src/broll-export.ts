@@ -29,7 +29,7 @@ export async function exportBrollEdit(task: CaptionTaskRecord, options: CaptionT
     const font = options.broll.captions && captionTaskStyle(options, task).font;
     if (font) await loadFont(font, (task.transcript ?? []).map(row => row.text).join(''));
     check();
-    const pip = options.broll.pip ? pipRenderModel(task, options, sourceUrl, new Map(options.broll.assets.map(asset => [asset.sig, urls.get(asset.id)!]))) : undefined;
+    const pip = options.broll.pip ? pipRenderModel(task, options, sourceUrl, new Map(clips.map(clip => [clip.asset.sig, urls.get(clip.asset.id)!]))) : undefined;
     const comp = pip?.composition ?? brollRenderComposition(task, options, sourceUrl);
     for (const shot of comp.shots ?? []) if (shot.src) files.set(shot.src, source);
     const { clientExportVideo } = await import('./client-export'); check();

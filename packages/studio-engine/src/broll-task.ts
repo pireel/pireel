@@ -70,6 +70,16 @@ export function resolveBrollEdits(placements: BrollPlacement[], candidates: Brol
 }
 
 /** List order is presentation state, not a change to the analyzed media bytes. */
+/** The user's files that take part in matching: none when that source is switched off. */
+export function brollLocalAssets(options: BrollOptions | undefined): BrollAsset[] {
+  return options && options.localFootage !== false ? options.assets : [];
+}
+/** Every asset a project's shots can use: the user's files plus stills generated for the narration. */
+export function brollFootageAssets(options: BrollOptions, candidates: readonly BrollCandidate[] = []): BrollAsset[] {
+  const all = [...options.assets];
+  for (const candidate of candidates) if (candidate.asset && !all.some(asset => asset.id === candidate.asset!.id)) all.push(candidate.asset);
+  return all;
+}
 export function brollAssetsMatch(key: string | undefined, assets: BrollAsset[]): boolean {
   if (!key) return false;
   try {
