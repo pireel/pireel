@@ -34,6 +34,8 @@ function brollFrame(options: Partial<BrollOptions> | undefined) {
   if (template === 'inset' || template === 'dim') return 'window';
   return template === 'smart' ? 'smart' : 'presenter';
 }
+/** Picture in picture uses every uploaded file unless the user lets the planner pick. */
+const usesEveryFile = (options: Partial<BrollOptions> | undefined) => !!options?.pip && options.autoSelect !== true;
 /** Your shots as the planner sees them: what each shows, and its shape so a layout can suit it. */
 function plannerCandidates(analysis: Analysis | undefined) {
   return (analysis?.candidates ?? []).map(candidate => {
@@ -103,7 +105,7 @@ export function brollWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
       for (let offset = 0; offset < cues.length; offset += 100) {
         const batch = cues.slice(offset, offset + 100); const candidates = plannerCandidates(analysis).filter(c => !used.has(c.id));
         if (!candidates.length) break;
-        const response = await fetch('/api/studio/broll-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: host.hooks.signal, body: JSON.stringify({ cues: batch, candidates, durationSec, projectId: args.projectId, frame: brollFrame(args.options as Partial<BrollOptions> | undefined), ...(host.hooks.sceneRun ? { sceneRun: host.hooks.sceneRun } : {}) }) });
+        const response = await fetch('/api/studio/broll-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: host.hooks.signal, body: JSON.stringify({ cues: batch, candidates, durationSec, projectId: args.projectId, frame: brollFrame(args.options as Partial<BrollOptions> | undefined), useAll: usesEveryFile(args.options as Partial<BrollOptions> | undefined), ...(host.hooks.sceneRun ? { sceneRun: host.hooks.sceneRun } : {}) }) });
         const body = await response.json();
         if (body.usage) context.recordUsage(body.usage);
         if (!response.ok) throw new Error(body.error ?? '画面匹配失败。');
@@ -125,7 +127,7 @@ export function brollWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     const progress: GeneratedProgress = context.partial<GeneratedProgress>() ?? { jobs: {}, assets: {} };
     if (!progress.plan) {
       // One pass arranges your shots and decides which moments get a still, before any image is paid for.
-      const response = await fetch('/api/studio/broll-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: host.hooks.signal, body: JSON.stringify({ cues, candidates: plannerCandidates(local), durationSec, projectId: args.projectId, frame: brollFrame(options), generate: { max: brollStillBudget(durationSec), aspect: STILL_ASPECT[size] }, ...(host.hooks.sceneRun ? { sceneRun: host.hooks.sceneRun } : {}) }) });
+      const response = await fetch('/api/studio/broll-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: host.hooks.signal, body: JSON.stringify({ cues, candidates: plannerCandidates(local), durationSec, projectId: args.projectId, frame: brollFrame(options), useAll: usesEveryFile(options), generate: { max: brollStillBudget(durationSec), aspect: STILL_ASPECT[size] }, ...(host.hooks.sceneRun ? { sceneRun: host.hooks.sceneRun } : {}) }) });
       const body = await response.json();
       if (body.usage) context.recordUsage(body.usage);
       if (!response.ok) throw new Error(response.status === 402 ? '积分不足，无法生成素材。' : '素材编排失败，请重试。');

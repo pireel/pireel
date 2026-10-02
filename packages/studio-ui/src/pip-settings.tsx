@@ -44,7 +44,10 @@ export function PipSettings({ task, value, disabled, locale, onChange, onBusy }:
       <div className="space-y-2">
         <FootageSource icon={<Sparkles size={18} strokeWidth={1.5}/>} title={zh ? 'AI 生成' : 'AI generated'} note={zh ? '分析视频文案，AI 智能匹配画中画素材。' : 'Reads the narration and makes matching footage.'} checked={ai} disabled={disabled} onChange={aiFootage => onChange({ ...value, aiFootage })}/>
         <FootageSource icon={<ImagePlus size={18} strokeWidth={1.5}/>} title={zh ? '本地导入' : 'Your files'} checked={local} disabled={disabled} onChange={localFootage => onChange({ ...value, localFootage })}>
-          {local && <BrollSettings task={task} value={value} disabled={disabled} locale={locale} onChange={onChange} onBusy={onBusy} compact/>}
+          {local && <>
+            <BrollSettings task={task} value={value} disabled={disabled} locale={locale} onChange={onChange} onBusy={onBusy} compact/>
+            <div className="mt-2.5"><SceneCheckbox label={zh ? '自动筛选素材' : 'Pick footage automatically'} description={value.autoSelect ? undefined : (zh ? '不勾选时尽量用上全部素材' : 'Off: every file is used where it can be')} checked={value.autoSelect === true} disabled={disabled} onChange={autoSelect => onChange({ ...value, autoSelect: autoSelect || undefined })}/></div>
+          </>}
         </FootageSource>
       </div>
     </section>

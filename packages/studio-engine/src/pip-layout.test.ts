@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { applyPipLayout, captionBandFor, pipGeometry, resolvePipGeometry, validPipOptions, type PipBox, type PipCorner, type PipSize } from './pip-layout';
+import { applyPipLayout, captionBandFor, PIP_PICKER_TEMPLATES, PIP_SHOT_LAYOUTS, pipGeometry, resolvePipGeometry, validPipOptions, type PipBox, type PipCorner, type PipSize } from './pip-layout';
 const portrait = { width: 1080, height: 1920 };
 const landscape = { width: 1920, height: 1080 };
 const square = { width: 1080, height: 1080 };
@@ -105,4 +105,11 @@ it('lays out each clip in its own layout, and the rest by the template', () => {
   // Under a fixed template, clips without their own layout follow it.
   const fixed = applyPipLayout(document as never, { template: 'dim' }, 'broll', { a: 'inset' }).timeline.tracks.find(track => track.id === 'broll')!.clips.map(clip => (clip as { box: PipBox }).box);
   expect(fixed[0]).toEqual(boxes[0]); expect(fixed[1]).toEqual(pipGeometry('dim', portrait, landscape).media);
+});
+
+it('offers full-screen footage per shot, not as a template', () => {
+  expect(PIP_SHOT_LAYOUTS).toContain('full');
+  expect(PIP_PICKER_TEMPLATES.map(template => template.id)).not.toContain('full');
+  const full = pipGeometry('full', portrait, landscape, {}, portrait);
+  expect(full.media).toEqual({ x: 0, y: 0, w: 1, h: 1 }); expect(full.speaker).toBeUndefined(); expect(full.mediaFit).toBe('cover'); expect(full.background).toBeUndefined();
 });

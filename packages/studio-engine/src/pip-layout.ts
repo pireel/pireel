@@ -7,15 +7,17 @@ export const PIP_TEMPLATES = [
   { id: 'split', zh: '素材在上', en: 'Footage on top' },
   { id: 'split-bottom', zh: '素材在下', en: 'Footage below' },
   { id: 'presenter', zh: '人物小窗', en: 'Presenter inset' },
+  // A shot's layout only (smart fit or a timeline choice), never a whole-video template: the footage fills the frame.
+  { id: 'full', zh: '素材全屏', en: 'Full-screen footage', shotOnly: true },
   // Person-cutout layouts are no longer offered; projects that saved them still render.
   { id: 'cutout', zh: '人像出框', en: 'Foreground presenter', retired: true },
   { id: 'cutout-small', zh: '抠像小窗', en: 'Cutout inset', retired: true },
 ] as const;
 export type PipTemplate = typeof PIP_TEMPLATES[number]['id'];
 /** The layouts users can pick. */
-export const PIP_PICKER_TEMPLATES = PIP_TEMPLATES.filter(template => !('retired' in template));
+export const PIP_PICKER_TEMPLATES = PIP_TEMPLATES.filter(template => !('retired' in template) && !('shotOnly' in template));
 /** With smart fit, the planner picks one of these for each shot, so one video mixes layouts. */
-export const PIP_SHOT_LAYOUTS = ['presenter', 'split', 'split-bottom', 'inset', 'dim'] as const;
+export const PIP_SHOT_LAYOUTS = ['full', 'presenter', 'split', 'split-bottom', 'inset', 'dim'] as const;
 export type PipShotLayout = typeof PIP_SHOT_LAYOUTS[number];
 export const isPipShotLayout = (value: unknown): value is PipShotLayout => PIP_SHOT_LAYOUTS.includes(value as PipShotLayout);
 export type PipCorner = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
@@ -76,12 +78,13 @@ export function pipGeometry(template: PipTemplate, canvas: Dimensions, asset: Di
     const floor = captions && captions.bottom > .4 ? Math.min(.79, captions.top - .02) : .79;
     return { ...fitted, x: corner.endsWith('left') ? .04 : .96 - fitted.w, y: corner.startsWith('top') ? .06 : Math.max(.06, floor - fitted.h) };
   };
-  const common = { resolvedTemplate: selected, mediaFit: options.mediaFit ?? (['presenter', 'cutout-small', 'split', 'split-bottom'].includes(selected) ? 'cover' : 'contain'), speakerFit: options.speakerFit ?? 'contain', speakerAnchorY: .5 } as const;
+  const common = { resolvedTemplate: selected, mediaFit: options.mediaFit ?? (['full', 'presenter', 'cutout-small', 'split', 'split-bottom'].includes(selected) ? 'cover' : 'contain'), speakerFit: options.speakerFit ?? 'contain', speakerAnchorY: .5 } as const;
   if (selected === 'cutout-small') return { ...common, media: { x: 0, y: 0, w: 1, h: 1 }, speaker: inset(source, true), speakerCutout: true, speakerFit: 'contain', background: '#171717' };
   if (selected === 'cutout') {
     const speaker = portrait ? { x: 0, y: .15, w: 1, h: .85 } : { x: .62, y: .1, w: .38, h: .9 };
     return { ...common, media: portrait ? { x: .04, y: .04, w: .92, h: .66 } : { x: .04, y: .06, w: .76, h: .86 }, speaker, speakerCutout: true, speakerFit: 'cover', background: '#171717' };
   }
+  if (selected === 'full') return { ...common, media: { x: 0, y: 0, w: 1, h: 1 } };
   if (selected === 'presenter') return { ...common, media: { x: 0, y: 0, w: 1, h: 1 }, speaker: inset(source, true), background: '#171717' };
   if (selected === 'split' || selected === 'split-bottom') {
     // Two equal halves; the footage takes the top (left) or the bottom (right).

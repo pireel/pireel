@@ -85,3 +85,20 @@ it('starts a shot on the word it illustrates and lets it run past a short senten
   expect(brollPlacementAnchor(shot.id)).toEqual({ cueId: 0, wordId: 2 });
   expect(() => validateBrollPlan([{ cueId: 0, wordId: 9, candidateId: 'coffee-0' }], cues, candidates, 120)).toThrow('词位');
 });
+
+it('gives every file a shot when the plan left some out, taking over a still only when no spot is free', async () => {
+  const { placeEveryFile } = await import('./broll-task');
+  const cues = [
+    { id: 0, start: 0, end: 10, text: 'a', anchors: [{ id: 0, start: 0, text: 'a' }, { id: 1, start: 6, text: 'b' }] },
+    { id: 1, start: 12, end: 30, text: 'c', anchors: [{ id: 0, start: 12, text: 'c' }, { id: 1, start: 22, text: 'd' }] },
+  ];
+  const candidates = [{ id: 'a-0', assetId: 'a', start: 0, end: 5, description: '' }, { id: 'b-0', assetId: 'b', start: 0, end: 3, description: '' }, { id: 'b-1', assetId: 'b', start: 3, end: 8, description: '' }];
+  const plan = [{ id: 'broll-0-0', candidateId: 'a-0', start: 0, duration: 5 }];
+  // File b goes to the free spot farthest from the existing shot, using its longest shot.
+  expect(placeEveryFile(plan, cues, candidates, 30)).toEqual([...plan, { id: 'broll-1-1', candidateId: 'b-1', start: 22, duration: 5 }]);
+  // With no room left, a still gives up its place to the file.
+  const tight = [...plan, { id: 'broll-0-1', candidateId: 'still-0', start: 6, duration: 4 }];
+  expect(placeEveryFile(tight, cues.slice(0, 1), candidates, 12, p => p.candidateId.startsWith('still-'))).toEqual([plan[0], { id: 'broll-0-1', candidateId: 'b-1', start: 6, duration: 4 }]);
+  // Files already in the plan are left alone.
+  expect(placeEveryFile([...plan, { id: 'broll-1-0', candidateId: 'b-0', start: 12, duration: 3 }], cues, candidates, 30)).toHaveLength(2);
+});

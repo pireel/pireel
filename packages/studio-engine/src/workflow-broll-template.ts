@@ -23,7 +23,7 @@ export function brollWorkflowDefinition(options: CaptionTaskOptions, media: unkn
   definition.steps.splice(compose, 0,
     ...(local ? [sceneStep('analysis', 'media.analyze', { assets: sceneLiteral(options.broll!.assets), cached: sceneLiteral(cached) })] : []),
     ai ? sceneStep('generated', 'broll.generate', { transcript: stepOutput('transcript', 'transcript'), ...analysis, durationSec: sceneLiteral(durationSec), projectId: sceneLiteral(projectId), options: sceneLiteral(options.broll), cached: sceneLiteral(cached) })
-      : sceneStep('match', 'broll.match', { transcript: stepOutput('transcript', 'transcript'), ...analysis, durationSec: sceneLiteral(durationSec), projectId: sceneLiteral(projectId), options: sceneLiteral(options.broll!.pip ? { pip: options.broll!.pip } : {}), cached: sceneLiteral(cached) }),
+      : sceneStep('match', 'broll.match', { transcript: stepOutput('transcript', 'transcript'), ...analysis, durationSec: sceneLiteral(durationSec), projectId: sceneLiteral(projectId), options: sceneLiteral(options.broll!.pip ? { pip: options.broll!.pip, ...(options.broll!.autoSelect ? { autoSelect: true } : {}) } : {}), cached: sceneLiteral(cached) }),
   );
   const render = definition.steps.find(step => step.id === 'render')!;
   const document = render.arguments.document;
