@@ -3,6 +3,7 @@ import type { EditorDocumentV2, NarrativeProperties } from './editor-document/ty
 import { applyEditorCommand } from './editor-document/commands/dispatcher';
 import { validateEditorDocumentV2 } from './editor-document/validation';
 import { validateStoredStyleSpec, type BrandStyleSpec } from './brand-style-spec';
+import { validateBrandEditSpec, type BrandEditSpec } from './brand-edit-spec';
 
 /**
  * A creator's personal brand: the look they already use on their channels, extracted from their own
@@ -41,6 +42,8 @@ export interface BrandKit {
   cover: { layout: string; textStyle: string; references: BrandAsset[] } | null;
   /** The creator's abstracted style, by system — the source the render fields above derive from. */
   style?: BrandStyleSpec | null;
+  /** Structured, measured edit parameters with per-field confidence (the part an edit can execute). */
+  spec?: BrandEditSpec | null;
   evidence: Partial<Record<BrandEvidenceTopic, BrandEvidence>>;
 }
 export type BrandEvidenceTopic = 'captions' | 'font' | 'palette' | 'framing' | 'pacing' | 'transitions' | 'logo' | 'intro' | 'outro' | 'cover' | 'playbook';
@@ -110,6 +113,7 @@ export function validateBrandKit(value: unknown): BrandKit {
   if (kit.outro) { asset(kit.outro, 'outro'); if (kit.outro.kind !== 'video') fail('outro', '片尾需要视频'); }
   if (kit.cover) kit.cover.references.forEach((item, index) => asset(item, `cover.references.${index}`));
   if (kit.style) validateStoredStyleSpec(kit.style);
+  if (kit.spec) validateBrandEditSpec(kit.spec);
   return kit;
 }
 

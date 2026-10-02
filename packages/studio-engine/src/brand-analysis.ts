@@ -18,12 +18,21 @@ export interface VideoObservation {
   cuts: number[];
   /** Largest face per sampled frame, normalized; absent when no face. */
   faces: { t: number; x: number; y: number; w: number; h: number }[];
+  /** Frames the face detector looked at (faces are sampled separately from OCR); defaults to the OCR samples. */
+  faceSamples?: number;
   /** Perceptual hashes (hex) of the first and last seconds, one per sample; '' for a near-flat frame
    *  (black/solid frames hash alike across unrelated videos, so they never count as a match). */
   headHashes: string[];
   tailHashes: string[];
   /** Candidate persistent overlays from edge persistence (normalized boxes). */
   overlays: { x: number; y: number; w: number; h: number; text?: string }[];
+  /** ASR words over the whole video (source seconds); absent when the video was not transcribed. */
+  words?: { text: string; start: number; end: number; speaker?: string }[];
+  /** BS.1770 integrated loudness of the soundtrack; null = silent or not measured. */
+  loudnessLufs?: number | null;
+  /** Frame size, so platform (vertical short vs horizontal long) is decided per video, not from the first one. */
+  width?: number;
+  height?: number;
 }
 
 export interface CaptionGeometry {
@@ -184,12 +193,18 @@ export function bookends(videos: VideoObservation[], rate: number, maxShare = 0.
 
 const PLATFORM_MARKS = /bilibili|抖音|douyin|tiktok|快手|kuaishou|youtube|小红书|xiaohongshu|视频号/i;
 
+/** Text read inside a persistent overlay: edge persistence finds the box, OCR says what it is. */
+export function overlayText(video: VideoObservation, box: { x: number; y: number; w: number; h: number }): string {
+  const inside = (b: OcrBox) => { const cx = b.x + b.w / 2; const cy = b.y + b.h / 2; return cx >= box.x - 0.02 && cx <= box.x + box.w + 0.02 && cy >= box.y - 0.02 && cy <= box.y + box.h + 0.02; };
+  return [...new Set(video.ocr.flatMap(sample => sample.boxes.filter(inside).map(b => b.text)))].join(' ');
+}
+
 /** Only a confident logo becomes a candidate (the evaluation showed static backgrounds, caption bands
  * and platform watermarks all look persistent): near an edge, outside the caption band, not a platform
  * mark, and present in most videos at the same place. Otherwise the user uploads their logo. */
 export function logoCandidate(videos: VideoObservation[], captionBottomPct: number | null): BrandObservationSummary['logo'] {
   const candidates = videos.flatMap(video => video.overlays
-    .filter(box => !(box.text && PLATFORM_MARKS.test(box.text)))
+    .filter(box => !PLATFORM_MARKS.test(box.text ?? overlayText(video, box)))
     .filter(box => box.y < 0.2 || box.y + box.h > 0.8)
     .filter(box => captionBottomPct === null || Math.abs((box.y + box.h) * 100 - captionBottomPct) > 6)
     .map(box => ({ video: video.id, box })));
@@ -202,6 +217,103 @@ export function logoCandidate(videos: VideoObservation[], captionBottomPct: numb
   const { box } = best;
   const corner = `${box.y + box.h / 2 < 0.5 ? 'top' : 'bottom'}-${box.x + box.w / 2 < 0.5 ? 'left' : 'right'}` as BrandCorner;
   return { video: best.video, box: { x: box.x, y: box.y, w: box.w, h: box.h }, corner, evidence: { videos: [...best.partners], confidence: confidence(best.partners.size / videos.length) } };
+}
+
+/**
+ * One video reduced to the numbers a brand fingerprint is built from (research: 960 videos of 100
+ * creators, docs/creator-style-research-2026-10). Each is null when this video cannot say.
+ */
+export interface VideoMeasures {
+  id: string;
+  durationSec: number;
+  vertical: boolean;
+  /** Cuts per minute over the whole video. Evaluated on the research set, whole-video pace predicts a
+   *  creator's other videos better than body-only pace (more cuts to count beats skipping a faster hook). */
+  cutsPerMin: number;
+  p90ShotSec: number;
+  /** Share of speech-time samples showing a caption that matches the spoken words (null without ASR). */
+  captionSync: number | null;
+  /** Share of sampled frames with a changing caption band (OCR only; fallback when there is no ASR). */
+  captionCoverage: number;
+  captionUpper: number | null;
+  captionLineHeight: number | null;
+  captionBottom: number | null;
+  captionWidth: number | null;
+  captionXCenter: number | null;
+  wordsPerLine: number | null;
+  faceH: number | null;
+  faceCx: number | null;
+  faceCy: number | null;
+  /** Share of sampled frames with a detected face. */
+  faceShare: number;
+  wpm: number | null;
+  /** Median silence left at cuts that fall between words: how hard pauses are trimmed. */
+  cutGapMs: number | null;
+  pausesPerMin: number | null;
+  speakers: number;
+  lufs: number | null;
+}
+
+const norm = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}']+/gu, ' ').trim();
+const percentile = (values: number[], p: number) => { if (!values.length) return NaN; const sorted = [...values].sort((a, b) => a - b); return sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))]!; };
+const finite = (value: number) => Number.isFinite(value) ? value : null;
+
+/** Caption text counts as speech-synced when most of its tokens were spoken within ±2 s. CJK captions are
+ *  compared per character, Latin ones per word. */
+function syncedWithSpeech(text: string, t: number, words: NonNullable<VideoObservation['words']>): boolean {
+  const near = norm(words.filter(word => word.start >= t - 2 && word.start <= t + 2).map(word => word.text).join(' '));
+  if (!near) return false;
+  const parts = latin(text) ? norm(text).split(' ').filter(Boolean) : [...norm(text).replace(/\s/g, '')];
+  if (!parts.length) return false;
+  const pool = latin(text) ? new Set(near.split(' ')) : new Set([...near.replace(/\s/g, '')]);
+  return parts.filter(part => pool.has(part)).length / parts.length >= 0.6;
+}
+
+export function measureVideo(video: VideoObservation): VideoMeasures {
+  const duration = Math.max(0.01, video.durationSec);
+  const cuts = video.cuts.filter(cut => cut > 0 && cut < duration).sort((a, b) => a - b);
+  const bounds = [0, ...cuts, duration];
+  const shots = bounds.slice(1).map((end, index) => end - bounds[index]!);
+  const band = captionBand(video);
+  const words = video.words ?? [];
+  const speaking = (t: number) => words.some(word => word.start - 0.3 <= t && t <= word.end + 0.3);
+  const speechSamples = video.ocr.filter(sample => speaking(sample.t));
+  const captionSync = words.length >= 10 && speechSamples.length
+    ? speechSamples.filter(sample => sample.boxes.some(box => syncedWithSpeech(box.text, sample.t, words))).length / speechSamples.length
+    : null;
+  const boxes = band?.items.map(item => item.box) ?? [];
+  const alpha = boxes.filter(box => latin(box.text)).flatMap(box => [...box.text].filter(ch => /[A-Za-z]/.test(ch)));
+  const faces = video.faces;
+  let cutGapMs: number | null = null; let wpm: number | null = null; let pausesPerMin: number | null = null;
+  if (words.length >= 10) {
+    const span = words.at(-1)!.end - words[0]!.start;
+    wpm = finite(words.length / Math.max(1, span) * 60);
+    const gaps = words.slice(1).map((word, index) => ({ from: words[index]!.end, to: word.start }));
+    pausesPerMin = finite(gaps.filter(gap => gap.to - gap.from > 0.7).length / Math.max(1, span) * 60);
+    // A cut between two words leaves exactly the silence the editor kept there.
+    const atCuts = cuts.flatMap(cut => { const gap = gaps.find(g => g.from <= cut + 0.05 && g.to >= cut - 0.05 && g.to - g.from < 2.5); return gap ? [Math.max(0, gap.to - gap.from)] : []; });
+    cutGapMs = atCuts.length >= 3 ? Math.round(median(atCuts) * 1000) : null;
+  }
+  return {
+    id: video.id, durationSec: duration,
+    vertical: video.width && video.height ? video.height > video.width : true,
+    cutsPerMin: round(cuts.length / duration * 60, 2), p90ShotSec: round(percentile(shots, 0.9), 2),
+    captionSync: captionSync === null ? null : round(captionSync, 3),
+    captionCoverage: round(band?.coverage ?? 0, 3),
+    captionUpper: alpha.length >= 20 ? round(alpha.filter(ch => ch === ch.toUpperCase()).length / alpha.length, 2) : null,
+    captionLineHeight: boxes.length ? round(median(boxes.map(box => box.h)), 4) : null,
+    captionBottom: band ? round(band.bottom, 3) : null,
+    captionWidth: boxes.length ? round(median(boxes.map(box => box.w)), 3) : null,
+    captionXCenter: boxes.length ? round(median(boxes.map(box => box.x + box.w / 2)), 3) : null,
+    wordsPerLine: boxes.length ? median(boxes.map(box => tokens(box.text))) : null,
+    faceH: faces.length ? round(median(faces.map(face => face.h)), 3) : null,
+    faceCx: faces.length ? round(median(faces.map(face => face.x + face.w / 2)), 3) : null,
+    faceCy: faces.length ? round(median(faces.map(face => face.y + face.h / 2)), 3) : null,
+    faceShare: (video.faceSamples ?? video.ocr.length) ? round(Math.min(1, faces.length / (video.faceSamples ?? video.ocr.length)), 2) : 0,
+    wpm: wpm === null ? null : round(wpm, 0), cutGapMs, pausesPerMin: pausesPerMin === null ? null : round(pausesPerMin, 2),
+    speakers: new Set(words.map(word => word.speaker).filter(Boolean)).size || (words.length ? 1 : 0),
+    lufs: video.loudnessLufs != null && Number.isFinite(video.loudnessLufs) ? round(video.loudnessLufs, 1) : null,
+  };
 }
 
 export function summarizeBrandObservations(videos: VideoObservation[], hashRate: number): BrandObservationSummary {
