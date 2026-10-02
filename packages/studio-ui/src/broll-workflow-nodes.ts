@@ -136,8 +136,10 @@ export function brollWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     const images: Record<number, string> = {};
     const shotLabel = (id: string) => { const { cueId, wordId } = brollPlacementAnchor(id); const cue = cues.find(c => c.id === cueId); const from = cue?.anchors?.findIndex(a => a.id === wordId) ?? -1; const start = from >= 0 ? cue!.anchors![from]!.start : cue?.start ?? 0; return `${Math.floor(start / 60)}:${String(Math.floor(start % 60)).padStart(2, '0')} ${(from >= 0 ? cue!.anchors!.slice(from).map(a => a.text).join('') : cue?.text ?? '').slice(0, 14)}`; };
     const reportStills = () => host.report('generating', { status: 'running', fraction: ideas.length ? Object.keys(progress.assets).length / ideas.length : 1, items: ideas.map((idea, index) => ({ label: shotLabel(idea.id), status: progress.assets[index] ? 'completed' : progress.jobs[index] ? 'running' : 'pending', ...(images[index] ? { image: images[index] } : {}) })) });
-    host.report('matching', { status: 'completed', fraction: 1 }); reportStills();
     const { startGeneration, pollCreation } = await import('./gen-api');
+    // Stills made before a resume show their pictures too.
+    await Promise.all(ideas.map(async (_, index) => { if (progress.assets[index] && progress.jobs[index]) { const url = (await pollCreation(progress.jobs[index]!).catch(() => null))?.assets[0]?.url; if (url) images[index] = url; } }));
+    host.report('matching', { status: 'completed', fraction: 1 }); reportStills();
     await Promise.all(ideas.map(async (idea, index) => {
       if (progress.assets[index]) return;
       if (!progress.jobs[index]) {
