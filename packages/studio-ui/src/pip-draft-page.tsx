@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Loader2, Upload } from 'lucide-react';
+import { ArrowLeft, Loader2, Plus } from 'lucide-react';
 import { DEFAULT_PIP_OPTIONS } from '@pireel/studio-engine/pip-layout';
 import type { BrollOptions } from '@pireel/studio-engine/broll-task';
 import type { CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
@@ -49,23 +49,25 @@ export function PipDraftPage({ locale, onBack, onCreated }: { locale: 'zh' | 'en
       <section className="min-h-0 min-w-0 overflow-y-auto overscroll-contain pr-2" aria-label={say('画中画设置', 'Picture in picture settings')}>
         <div className="pb-5 pr-2">
           <button type="button" disabled={uploading} onClick={onBack} className="text-ink-3 mb-3 inline-flex items-center gap-2 text-sm disabled:opacity-40"><ArrowLeft size={15} />{say('返回首页', 'Back to home')}</button>
-          <header className="mb-4 min-w-0"><h1 className="text-ink text-xl font-semibold tracking-tight">{say('画中画', 'Picture in picture')}</h1><p className="text-ink-3 mt-1 text-sm">{say('选好模板和素材，再上传口播视频。', 'Pick a layout and footage, then upload your talking-head video.')}</p></header>
+          <header className="mb-4 min-w-0"><h1 className="text-ink text-xl font-semibold tracking-tight">{say('画中画', 'Picture in picture')}</h1></header>
+          <section className="mb-5">
+            <h2 className="text-ink mb-2 text-sm font-medium">{say('添加口播视频', 'Add talking-head video')}</h2>
+            <button type="button" disabled={busy || !scope} onClick={() => input.current?.click()} className="border-line text-ink-3 hover:text-ink relative flex min-h-16 w-full items-center justify-center gap-1.5 overflow-hidden rounded-md border border-dashed text-xs disabled:opacity-60">
+              {uploading ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}{uploading ? uploadLabel : say('去添加', 'Add')}
+              {uploading && <progress aria-label={say('视频上传进度', 'Video upload progress')} max={1} value={progress.phase === 'uploading' ? progress.fraction : undefined} className="absolute inset-x-0 bottom-0 h-1 w-full appearance-none accent-[var(--color-accent)]" />}
+            </button>
+            {error && <p role="alert" className="text-ink mt-2 text-xs">{error}</p>}
+          </section>
           <SceneBrandPicker options={options} locale={locale} disabled={uploading} onChange={update => setOptions(current => update(current))} />
           {scope && <PipSettings task={draft} value={broll} disabled={uploading} locale={locale} onBusy={setPreparing} onChange={value => setOptions(current => ({ ...current, broll: value }))} />}
         </div>
         <div className="bg-bg sticky bottom-0 z-20 pt-3 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-          <p className="text-ink-3 text-center text-xs">{say('上传口播视频后即可生成。', 'Upload the talking-head video to generate.')}</p>
-          <button type="button" disabled className={actionClass + ' mt-3 w-full'}>{say('生成视频', 'Generate video')}</button>
+          <button type="button" disabled title={say('先上传口播视频', 'Upload the talking-head video first')} className={actionClass + ' w-full'}>{say('生成视频', 'Generate video')}</button>
         </div>
       </section>
       <section aria-label={say('上传口播视频', 'Upload the talking-head video')} className="flex h-full min-h-0 min-w-0 flex-col items-center justify-center gap-5 overflow-y-auto rounded-lg bg-panel-2/40 p-6"
         onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); const file = event.dataTransfer.files[0]; if (file) void choose(file); }}>
         <div className="w-full max-w-md"><PipShowcase locale={locale} suspended={uploading} /></div>
-        <button type="button" disabled={busy || !scope} onClick={() => input.current?.click()} className="bg-ink text-bg relative flex min-h-12 w-full max-w-md items-center justify-center gap-2 overflow-hidden rounded-lg text-sm font-semibold disabled:cursor-wait disabled:opacity-60">
-          {uploading ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}{uploading ? uploadLabel : say('上传口播视频（30 分钟以内）', 'Upload talking-head video (up to 30 minutes)')}
-          {uploading && <progress aria-label={say('视频上传进度', 'Video upload progress')} max={1} value={progress.phase === 'uploading' ? progress.fraction : undefined} className="absolute inset-x-0 bottom-0 h-1 w-full appearance-none accent-[var(--color-accent)]" />}
-        </button>
-        {error && <p role="alert" className="text-ink max-w-md text-center text-sm">{error}</p>}
       </section>
     </div>
   </section>;

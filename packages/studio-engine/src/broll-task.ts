@@ -1,5 +1,9 @@
 export interface BrollAsset { id: string; sig: string; name: string; kind: 'video' | 'image'; durationSec: number; width: number; height: number }
-export interface BrollOptions { pip?: import('./pip-layout').PipOptions; manualClips?: { id: string; assetId: string; start: number; duration: number; sourceIn: number }[]; edits?: Record<string, { start: number; duration: number; sourceIn: number }>; assets: BrollAsset[]; captions: boolean; replacements?: Record<string, string>; disabledPlacements?: string[] }
+export interface BrollOptions {
+  /** Picture in picture footage sources: AI-generated stills from the narration (off unless set) and
+   *  the user's own files (on unless set to false). */
+  aiFootage?: boolean; localFootage?: boolean;
+  pip?: import('./pip-layout').PipOptions; manualClips?: { id: string; assetId: string; start: number; duration: number; sourceIn: number }[]; edits?: Record<string, { start: number; duration: number; sourceIn: number }>; assets: BrollAsset[]; captions: boolean; replacements?: Record<string, string>; disabledPlacements?: string[] }
 export interface BrollCandidate { id: string; assetId: string; start: number; end: number; description: string }
 export interface BrollPlacement { id: string; candidateId: string; start: number; duration: number }
 /** One narration sentence; `anchors` are its words, so a shot can start on the word it illustrates. */

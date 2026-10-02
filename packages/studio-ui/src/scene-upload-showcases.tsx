@@ -80,6 +80,5 @@ export function PipShowcase({ locale, suspended = false }: { locale: 'zh' | 'en'
         {reduced ? <p className="text-ink-4 pt-1 text-[10px]">{zh ? '点击切换效果' : 'Choose an effect'}</p> : <button type="button" className="text-ink-3 pt-1 text-[10px] underline underline-offset-2" onClick={() => setCycling(value => !value)}>{cycling ? (zh ? '暂停轮播' : 'Pause slideshow') : (zh ? '自动演示' : 'Play slideshow')}</button>}
       </div>
     </div>
-    <p className="text-ink-3 text-xs leading-relaxed">{zh ? '用同一段口播和独立商品素材展示实际布局，保留画面比例。小窗位置、大小和裁切方式均可调整。' : 'The same presenter and separate footage show the actual layouts without stretching. Adjust the inset position, size and framing after uploading.'}</p>
   </div>;
 }

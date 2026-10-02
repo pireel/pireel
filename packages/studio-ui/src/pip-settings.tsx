@@ -1,6 +1,7 @@
-import { SceneSelect } from './scene-form-controls';
+import { SceneCheckbox, SceneSelect } from './scene-form-controls';
 import { PipVisual } from './pip-visual';
-import { UserRound, Image, Sparkles } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { UserRound, Image, Sparkles, ImagePlus, Check } from 'lucide-react';
 import { DEFAULT_PIP_OPTIONS, PIP_PICKER_TEMPLATES, pipGeometry, resolvePipGeometry, type CaptionBand, type PipOptions, type PipTemplate } from '@pireel/studio-engine/pip-layout';
 import type { BrollOptions, BrollAsset } from '@pireel/studio-engine/broll-task';
 import { BrollSettings } from './broll-settings';
@@ -33,16 +34,26 @@ export function PipSettings({ task, value, disabled, locale, onChange, onBusy }:
   const portrait = task.height >= task.width;
   // Split layouts name where the footage sits; on a landscape canvas the halves are side by side.
   const templateLabel = (id: string, label: string) => id === 'split' ? (zh ? (portrait ? '素材在上' : '素材在左') : (portrait ? 'Footage on top' : 'Footage left')) : id === 'split-bottom' ? (zh ? (portrait ? '素材在下' : '素材在右') : (portrait ? 'Footage below' : 'Footage right')) : label;
-  return <div>
+  const ai = value.aiFootage === true; const local = value.localFootage !== false;
+  return <div className="space-y-5">
+    <section>
+      <h2 className="text-ink mb-2 text-sm font-medium">{zh ? '添加画中画素材' : 'Add footage'}</h2>
+      <div className="space-y-2">
+        <FootageSource icon={<Sparkles size={18} strokeWidth={1.5}/>} title={zh ? 'AI 生成' : 'AI generated'} note={zh ? '分析视频文案，AI 智能匹配画中画素材。' : 'Reads the narration and makes matching footage.'} checked={ai} disabled={disabled} onChange={aiFootage => onChange({ ...value, aiFootage })}/>
+        <FootageSource icon={<ImagePlus size={18} strokeWidth={1.5}/>} title={zh ? '本地导入' : 'Your files'} checked={local} disabled={disabled} onChange={localFootage => onChange({ ...value, localFootage })}>
+          {local && <BrollSettings task={task} value={value} disabled={disabled} locale={locale} onChange={onChange} onBusy={onBusy} compact/>}
+        </FootageSource>
+      </div>
+    </section>
+    <section>
     <h2 className="text-ink mb-2 text-sm font-medium">{zh ? '画中画模板' : 'Layout template'}</h2>
-    <div className="mb-4 grid grid-cols-4 gap-x-2 gap-y-3 p-px" role="group" aria-label={zh ? '选择画中画模板' : 'Choose a layout'}>
+    <div className="grid grid-cols-4 gap-x-2 gap-y-3 p-px" role="group" aria-label={zh ? '选择画中画模板' : 'Choose a layout'}>
       {PIP_PICKER_TEMPLATES.map(template => { const selected = (value.pip?.template ?? DEFAULT_PIP_OPTIONS.template) === template.id; return <button key={template.id} type="button" disabled={disabled} aria-pressed={selected} onClick={() => update({ template: template.id })} className="group min-w-0 text-center focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50">
         <span className={'block rounded-md p-[3px] ring-inset transition-shadow ' + (selected ? 'ring-ink ring-2' : 'ring-line ring-1 group-hover:ring-ink-4')}><PipTemplateDiagram template={template.id} options={config}/></span>
         <span className={'mt-1.5 block truncate text-[11px] ' + (selected ? 'text-ink font-medium' : 'text-ink-3')}>{templateLabel(template.id, template[locale])}</span>
       </button>; })}
     </div>
-    <div className="mb-4 space-y-3">
-      {windowLayout && <>
+    {windowLayout && <div className="mt-3 space-y-3">
         <SceneSelect label={zh ? '小窗位置' : 'Inset position'} value={config.position ?? 'bottom-right'} disabled={disabled} onChange={position => update({ position })} options={[
           { value: 'bottom-right', label: zh ? '右下' : 'Bottom right' }, { value: 'bottom-left', label: zh ? '左下' : 'Bottom left' },
           { value: 'top-right', label: zh ? '右上' : 'Top right' }, { value: 'top-left', label: zh ? '左上' : 'Top left' },
@@ -50,11 +61,21 @@ export function PipSettings({ task, value, disabled, locale, onChange, onBusy }:
         <SceneSelect label={zh ? '小窗大小' : 'Inset size'} value={config.size ?? 'medium'} disabled={disabled} onChange={size => update({ size })} options={[
           { value: 'small', label: zh ? '小' : 'Small' }, { value: 'medium', label: zh ? '中' : 'Medium' }, { value: 'large', label: zh ? '大' : 'Large' },
         ]} />
-      </>}
-    </div>
-    <h2 className="text-ink mb-2 text-sm font-medium">{zh ? '本地素材 · AI 匹配' : 'Your footage · AI matching'}</h2>
-    <p className="text-ink-3 mb-4 text-xs leading-relaxed">{zh ? '添加图片或视频，AI 根据口播挑选适合出现的片段。素材声音默认关闭，保留口播原声。' : 'Add images or videos. AI selects relevant moments from the narration. Footage is muted; narration stays intact.'}</p>
-    <BrollSettings task={task} value={value} disabled={disabled} locale={locale} onChange={onChange} onBusy={onBusy}/>
+    </div>}
+    </section>
+    <SceneCheckbox label={zh ? '字幕' : 'Captions'} checked={value.captions} disabled={disabled} onChange={captions => onChange({ ...value, captions })} />
+  </div>;
+}
+
+/** One footage source: a checkable row, with its own controls underneath when it has any. */
+function FootageSource({ icon, title, note, checked, disabled, onChange, children }: { icon: ReactNode; title: string; note?: string; checked: boolean; disabled: boolean; onChange: (checked: boolean) => void; children?: ReactNode }) {
+  return <div className={'bg-panel-2/60 rounded-lg ' + (children ? 'pb-3' : '')}>
+    <button type="button" role="checkbox" aria-checked={checked} disabled={disabled} onClick={() => onChange(!checked)} className="flex w-full items-center gap-3 px-3 py-3 text-left disabled:opacity-50">
+      <span className="text-ink-2 shrink-0">{icon}</span>
+      <span className="min-w-0 flex-1"><span className="text-ink block text-sm">{title}</span>{note && <span className="text-ink-3 mt-0.5 block text-xs">{note}</span>}</span>
+      <span aria-hidden="true" className={'flex size-5 shrink-0 items-center justify-center rounded-full ' + (checked ? 'bg-ink text-bg' : 'border-line border')}>{checked && <Check size={12} strokeWidth={2.5}/>}</span>
+    </button>
+    {children && <div className="px-3">{children}</div>}
   </div>;
 }
 

@@ -24,7 +24,7 @@ export type SceneProjectKind = 'captions' | 'dubbing' | 'broll' | 'pip' | 'sfx' 
 /** A new scene project's starting options; `overrides` carries settings chosen before the video. */
 export function sceneProjectOptions(scene: SceneProjectKind, overrides: Partial<CaptionTaskOptions> = {}): CaptionTaskOptions {
   const ugcAd = scene === 'ugc-ad'; const pip = scene === 'pip';
-  return { ...(ugcAd ? { ugcAd: DEFAULT_UGC_AD_OPTIONS, broll: { assets: [], captions: true } } : scene === 'subtitle-removal' ? { subtitleRemoval: DEFAULT_SUBTITLE_REMOVAL } : scene === 'sfx' ? { sfx: DEFAULT_SFX_OPTIONS } : scene === 'dubbing' ? { dubbing: DEFAULT_DUBBING_OPTIONS } : (scene === 'broll' || pip) ? { broll: { assets: [], captions: true, ...(pip ? { pip: DEFAULT_PIP_OPTIONS } : {}) } } : {}), caption: {}, aspect: ugcAd ? 'portrait' : 'original', shortenPauses: false, ...overrides };
+  return { ...(ugcAd ? { ugcAd: DEFAULT_UGC_AD_OPTIONS, broll: { assets: [], captions: true } } : scene === 'subtitle-removal' ? { subtitleRemoval: DEFAULT_SUBTITLE_REMOVAL } : scene === 'sfx' ? { sfx: DEFAULT_SFX_OPTIONS } : scene === 'dubbing' ? { dubbing: DEFAULT_DUBBING_OPTIONS } : (scene === 'broll' || pip) ? { broll: { assets: [], captions: true, ...(pip ? { pip: DEFAULT_PIP_OPTIONS, aiFootage: true } : {}) } } : {}), caption: {}, aspect: ugcAd ? 'portrait' : 'original', shortenPauses: false, ...overrides };
 }
 
 /**

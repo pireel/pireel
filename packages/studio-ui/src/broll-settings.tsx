@@ -8,7 +8,7 @@ import { studioProviders } from '@pireel/studio-engine/providers';
 import { durableFileSig, probeVideoFile } from './media';
 import { saveLocalVideo } from './local-media';
 interface UploadCard { id: string; file: File; url: string; status: 'queued' | 'preparing' | 'uploading' | 'done' | 'failed'; progress: number; error?: string }
-export function BrollSettings({ task, value, disabled, locale, onChange, onBusy }: { task: CaptionTaskRecord; value: BrollOptions; disabled: boolean; locale: 'zh' | 'en'; onChange: (value: BrollOptions) => void; onBusy: (busy: boolean) => void }) {
+export function BrollSettings({ task, value, disabled, locale, onChange, onBusy, compact = false }: { task: CaptionTaskRecord; value: BrollOptions; disabled: boolean; locale: 'zh' | 'en'; onChange: (value: BrollOptions) => void; onBusy: (busy: boolean) => void; /** Just the footage cards and add box, for a host that owns the surrounding section. */ compact?: boolean }) {
   const zh = locale === 'zh'; const input = useRef<HTMLInputElement>(null); const lock = useRef(false);
   const alive = useRef(true); const ownedUrls = useRef(new Set<string>());
   const [busy, setBusy] = useState(false); const [error, setError] = useState('');
@@ -66,9 +66,9 @@ export function BrollSettings({ task, value, disabled, locale, onChange, onBusy 
     setUploads(rows => rows.filter(row => row.id !== id));
     if (value.assets.some(a => a.id === id)) onChange({ ...value, assets: value.assets.filter(a => a.id !== id), manualClips: value.manualClips?.filter(p => p.assetId !== id), disabledPlacements: undefined, replacements: undefined, edits: undefined });
   };
-  return <div className="mb-4 space-y-3">
+  return <div className={compact ? 'space-y-2' : 'mb-4 space-y-3'}>
     <input ref={input} type="file" multiple accept="video/*,image/*" className="hidden" aria-label={zh ? '添加配画面素材' : 'Add B-roll media'} onChange={e => { const files = Array.from(e.target.files ?? []); e.target.value = ''; upload(files); }} />
-    <SceneMediaPicker locale={locale} disabled={disabled || busy} hasItems={cards.length > 0} onAdd={() => input.current?.click()} onFiles={upload}>
+    <SceneMediaPicker locale={locale} disabled={disabled || busy} hasItems={cards.length > 0} onAdd={() => input.current?.click()} onFiles={upload} bare={compact}>
         {cards.map(card => {
           const pending = card.upload && card.upload.status !== 'done' ? card.upload : undefined;
           return <SceneMediaCard key={card.id} name={card.name} locale={locale} disabled={disabled} status={card.upload?.status} error={card.upload?.error} onRemove={busy ? undefined : () => remove(card.id)}>
@@ -81,6 +81,6 @@ export function BrollSettings({ task, value, disabled, locale, onChange, onBusy 
         })}
     </SceneMediaPicker>
     {error && <p role="alert" className="text-ink text-xs">{error}</p>}
-    <SceneCheckbox label={zh ? '字幕' : 'Captions'} checked={value.captions} disabled={disabled || busy} onChange={captions => onChange({ ...value, captions })} />
+    {!compact && <SceneCheckbox label={zh ? '字幕' : 'Captions'} checked={value.captions} disabled={disabled || busy} onChange={captions => onChange({ ...value, captions })} />}
   </div>;
 }
