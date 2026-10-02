@@ -103,11 +103,11 @@ export async function resolveStudioSpaceId(projectId: string): Promise<string | 
 }
 
 /** One generation request in a known space: the status lets a caller decide whether a stale space is worth retrying. */
-async function postGeneration(spaceId: string, toolId: 'image-gen' | 'video-gen', params: Record<string, unknown>): Promise<{ status: number; result: StartResult }> {
+async function postGeneration(spaceId: string, toolId: 'image-gen' | 'video-gen', params: Record<string, unknown>, sceneRun?: string): Promise<{ status: number; result: StartResult }> {
   const r = await fetch('/api/create', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ space_id: spaceId, tool_id: toolId, params }),
+    body: JSON.stringify({ space_id: spaceId, tool_id: toolId, params, ...(sceneRun ? { scene_run: sceneRun } : {}) }),
   });
   const j = (await r.json().catch(() => null)) as
     | { ok?: boolean; id?: string; ids?: string[]; error?: string; need?: number; balance?: number; requires?: string }
@@ -135,6 +135,8 @@ export async function startGeneration(
   projectId: string,
   toolId: 'image-gen' | 'video-gen',
   params: Record<string, unknown>,
+  /** A scene run that takes the cost instead of the wallet (single image). */
+  sceneRun?: string,
 ): Promise<StartResult> {
   for (let attempt = 0; attempt < 2; attempt++) {
     let spaceId: string;
@@ -143,7 +145,7 @@ export async function startGeneration(
     } catch {
       return { ok: false, kind: 'error', message: t('common.generationSpaceFailed') };
     }
-    const { status, result } = await postGeneration(spaceId, toolId, params);
+    const { status, result } = await postGeneration(spaceId, toolId, params, sceneRun);
     // 4xx and not yet retried → most likely an invalid space; clear the cache, get a new space, and retry
     if (!result.ok && result.kind === 'error' && attempt === 0 && (status === 400 || status === 404)) {
       clearSpaceCache(projectId);

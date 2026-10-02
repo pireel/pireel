@@ -3,7 +3,8 @@ import type { CaptionTaskRecord } from '@pireel/studio-engine/scene-project';
 import type { SceneWorkflowHooks } from './scene-workflow-runtime';
 
 /**
- * Run a fixed-price generation (captions, dubbing, Auto SFX) under its host run: charged once when it starts,
+ * Run a generation under its host run (fixed-price captions, dubbing and Auto SFX; picture in picture holds its
+ * estimate's ceiling and settles at actual usage): charged once when it starts,
  * closed when it completes, refunded when it fails. A stopped generation, or one waiting on the user,
  * keeps its run open so continuing it is not charged again. Hosts without runs bill each step.
  */

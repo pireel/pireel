@@ -17,6 +17,13 @@ export function CaptionProgressOverlay({ options, progress, locale, stopping, on
         return <div key={stage} className={running || complete ? '' : 'opacity-45'}>
           <div className="mb-1.5 flex items-center justify-between gap-2 text-xs"><span className="flex items-center gap-2">{complete && <Check size={12} />}{label}</span><span className="text-white/70 tabular-nums">{complete ? '100%' : detail ?? (value?.fraction != null ? `${Math.floor(value.fraction * 100)}%` : running ? (zh ? '处理中' : 'Processing') : (zh ? '等待中' : 'Waiting'))}</span></div>
           <progress aria-label={label} max={1} value={complete ? 1 : running ? value?.fraction : 0} className="block h-1 w-full accent-white" />
+          {value?.items?.length ? <ul className="mt-2.5 grid grid-cols-4 gap-2" aria-label={label}>{value.items.map((item, index) => <li key={index} className="min-w-0">
+            <div className="relative aspect-[3/4] overflow-hidden rounded-md bg-white/10">
+              {item.image ? <img src={item.image} alt="" className="h-full w-full object-cover" /> : <span className="absolute inset-0 flex items-center justify-center">{item.status === 'running' ? <Loader2 size={14} className="animate-spin text-white/70" /> : <span className="size-1.5 rounded-full bg-white/40" />}</span>}
+              {item.status === 'completed' && <span className="absolute right-1 top-1 flex size-4 items-center justify-center rounded-full bg-black/70"><Check size={10} /></span>}
+            </div>
+            <p className="mt-1 truncate text-[10px] text-white/70" title={item.label}>{item.label}</p>
+          </li>)}</ul> : null}
           {running && (stage === 'translating' || stage === 'emphasizing') && value?.total != null && <p className="mt-1 text-right text-[10px] text-white/60">{value.done ?? 0} / {value.total} {zh ? '句' : 'lines'}</p>}
         </div>;
       })}</div>

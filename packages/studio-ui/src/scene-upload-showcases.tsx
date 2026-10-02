@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { PipVisual } from './pip-visual';
-import { PIP_PICKER_TEMPLATES, pipGeometry, PIP_SMART_DEMO } from '@pireel/studio-engine/pip-layout';
+import { PIP_PICKER_TEMPLATES, pipGeometry } from '@pireel/studio-engine/pip-layout';
 import { ERASER_SHOWCASE, UGC_SHOWCASE } from './workflow-art';
 
 export function UgcAdShowcase({ locale }: { locale: 'zh' | 'en' }) {
@@ -59,18 +59,10 @@ export function PipShowcase({ locale, suspended = false }: { locale: 'zh' | 'en'
     return () => video.pause();
   }, [suspended, reduced]);
   const template = PIP_PICKER_TEMPLATES[selected];
-  // Smart fit picks a layout per shot, so its demo moves through several.
-  const [shot, setShot] = useState(0);
-  useEffect(() => {
-    if (template.id !== 'smart' || suspended || reduced) return;
-    setShot(0);
-    const timer = window.setInterval(() => { if (!document.hidden) setShot(index => index + 1); }, 1100);
-    return () => window.clearInterval(timer);
-  }, [template.id, suspended, reduced]);
   const canvas = { width: 1080, height: 1920 };
   const source = { width: 432, height: 768 };
   const footage = { width: 1672, height: 941 };
-  const geometry = pipGeometry(template.id === 'smart' ? PIP_SMART_DEMO[shot % PIP_SMART_DEMO.length] : template.id, canvas, footage, {}, source);
+  const geometry = pipGeometry(template.id === 'smart' ? 'presenter' : template.id, canvas, footage, {}, source);
   const footageUrl = new URL('./workflow-art/pip-footage-v1.png', import.meta.url).href;
   const sourceUrl = new URL('./workflow-art/caption-demo.mp4', import.meta.url).href;
   return <div className="my-4 space-y-3" aria-label={zh ? '画中画动效示例' : 'Animated picture in picture example'}>

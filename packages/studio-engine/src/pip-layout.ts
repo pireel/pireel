@@ -17,8 +17,6 @@ export const PIP_PICKER_TEMPLATES = PIP_TEMPLATES.filter(template => !('retired'
 /** With smart fit, the planner picks one of these for each shot, so one video mixes layouts. */
 export const PIP_SHOT_LAYOUTS = ['presenter', 'split', 'split-bottom', 'inset', 'dim'] as const;
 export type PipShotLayout = typeof PIP_SHOT_LAYOUTS[number];
-/** Layouts a smart fit demo moves through, to show that shots differ. */
-export const PIP_SMART_DEMO: readonly PipShotLayout[] = ['presenter', 'split', 'inset', 'dim'];
 export const isPipShotLayout = (value: unknown): value is PipShotLayout => PIP_SHOT_LAYOUTS.includes(value as PipShotLayout);
 export type PipCorner = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
 export type PipSize = 'small' | 'medium' | 'large';

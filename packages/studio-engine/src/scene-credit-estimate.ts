@@ -34,6 +34,8 @@ export function sceneCreditInput(task: CaptionTaskRecord, options: CaptionTaskOp
     input.brollFrames = brollLocalAssets(options.broll).reduce((sum, a) => sum + (a.kind === 'image' ? 1 : 8), 0);
     if (options.broll?.aiFootage) input.brollStills = brollStillBudget(task.durationSec);
     input.emphasis = !!options.broll?.captions && !!options.highlights;
+    // A fresh run transcribes again, so the narration length is estimated from the duration, as the run's ceiling is.
+    if (!reuseCompleted) delete input.sourceTokens;
     return input;
   }
   // Captions and dubbing are fixed-price per minute of source (every generation, cached or not).

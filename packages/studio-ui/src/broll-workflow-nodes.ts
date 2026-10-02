@@ -77,7 +77,7 @@ export function brollWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
       }
       for (const [i, frame] of frames.entries()) {
         host.check(); if (analysis.candidates.some(c => c.id === `${asset.id}-${i}`)) continue;
-        const response = await fetch('/api/studio/vlm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: host.hooks.signal, body: JSON.stringify({ image_base64: frame.base64, mime: frame.mime }) });
+        const response = await fetch('/api/studio/vlm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: host.hooks.signal, body: JSON.stringify({ image_base64: frame.base64, mime: frame.mime, ...(host.hooks.sceneRun ? { sceneRun: host.hooks.sceneRun } : {}) }) });
         if (!response.ok) throw new Error(response.status === 402 ? '积分不足，无法分析素材。' : '素材分析失败，请重试。');
         const label = await response.json();
         if (label.usage) context.recordUsage(label.usage);
@@ -103,7 +103,7 @@ export function brollWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
       for (let offset = 0; offset < cues.length; offset += 100) {
         const batch = cues.slice(offset, offset + 100); const candidates = plannerCandidates(analysis).filter(c => !used.has(c.id));
         if (!candidates.length) break;
-        const response = await fetch('/api/studio/broll-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: host.hooks.signal, body: JSON.stringify({ cues: batch, candidates, durationSec, projectId: args.projectId, frame: brollFrame(args.options as Partial<BrollOptions> | undefined) }) });
+        const response = await fetch('/api/studio/broll-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: host.hooks.signal, body: JSON.stringify({ cues: batch, candidates, durationSec, projectId: args.projectId, frame: brollFrame(args.options as Partial<BrollOptions> | undefined), ...(host.hooks.sceneRun ? { sceneRun: host.hooks.sceneRun } : {}) }) });
         const body = await response.json();
         if (body.usage) context.recordUsage(body.usage);
         if (!response.ok) throw new Error(body.error ?? '画面匹配失败。');
@@ -125,20 +125,25 @@ export function brollWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     const progress: GeneratedProgress = context.partial<GeneratedProgress>() ?? { jobs: {}, assets: {} };
     if (!progress.plan) {
       // One pass arranges your shots and decides which moments get a still, before any image is paid for.
-      const response = await fetch('/api/studio/broll-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: host.hooks.signal, body: JSON.stringify({ cues, candidates: plannerCandidates(local), durationSec, projectId: args.projectId, frame: brollFrame(options), generate: { max: brollStillBudget(durationSec), aspect: STILL_ASPECT[size] } }) });
+      const response = await fetch('/api/studio/broll-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: host.hooks.signal, body: JSON.stringify({ cues, candidates: plannerCandidates(local), durationSec, projectId: args.projectId, frame: brollFrame(options), generate: { max: brollStillBudget(durationSec), aspect: STILL_ASPECT[size] }, ...(host.hooks.sceneRun ? { sceneRun: host.hooks.sceneRun } : {}) }) });
       const body = await response.json();
       if (body.usage) context.recordUsage(body.usage);
       if (!response.ok) throw new Error(response.status === 402 ? '积分不足，无法生成素材。' : '素材编排失败，请重试。');
       progress.plan = { placements: body.placements, stills: body.stills.map((still: Still) => ({ id: still.id, prompt: still.prompt, ...(still.layout ? { layout: still.layout } : {}) })) }; await context.savePartial(progress);
     }
     const ideas = progress.plan.stills;
+    // Each still is listed while it is made: the narration it illustrates, its state, then the picture.
+    const images: Record<number, string> = {};
+    const shotLabel = (id: string) => { const { cueId, wordId } = brollPlacementAnchor(id); const cue = cues.find(c => c.id === cueId); const from = cue?.anchors?.findIndex(a => a.id === wordId) ?? -1; const start = from >= 0 ? cue!.anchors![from]!.start : cue?.start ?? 0; return `${Math.floor(start / 60)}:${String(Math.floor(start % 60)).padStart(2, '0')} ${(from >= 0 ? cue!.anchors!.slice(from).map(a => a.text).join('') : cue?.text ?? '').slice(0, 14)}`; };
+    const reportStills = () => host.report('generating', { status: 'running', fraction: ideas.length ? Object.keys(progress.assets).length / ideas.length : 1, items: ideas.map((idea, index) => ({ label: shotLabel(idea.id), status: progress.assets[index] ? 'completed' : progress.jobs[index] ? 'running' : 'pending', ...(images[index] ? { image: images[index] } : {}) })) });
+    host.report('matching', { status: 'completed', fraction: 1 }); reportStills();
     const { startGeneration, pollCreation } = await import('./gen-api');
     await Promise.all(ideas.map(async (idea, index) => {
       if (progress.assets[index]) return;
       if (!progress.jobs[index]) {
-        const started = await startGeneration(String(args.projectId), 'image-gen', { prompt: idea.prompt, user_prompt: idea.prompt, n: 1, size: stillSize(options, host.task, idea.layout) });
+        const started = await startGeneration(String(args.projectId), 'image-gen', { prompt: idea.prompt, user_prompt: idea.prompt, n: 1, size: stillSize(options, host.task, idea.layout) }, host.hooks.sceneRun);
         if (!started.ok) throw new Error(started.kind === 'credits' ? '积分不足，无法生成素材。' : started.message);
-        progress.jobs[index] = started.ids[0]!; await context.savePartial(progress);
+        progress.jobs[index] = started.ids[0]!; await context.savePartial(progress); reportStills();
       }
       let url = '';
       for (let waited = 0; !url; waited += 3) {
@@ -157,8 +162,9 @@ export function brollWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
       const { studioProviders } = await import('@pireel/studio-engine/providers');
       if (studioProviders().sceneProjects && !await studioProviders().vault.backup(file, sig, { signal: host.hooks.signal })) throw new Error('生成的素材保存失败，请重试。');
       progress.assets[index] = { id: `ai-${progress.jobs[index]}`, sig, name: `AI ${index + 1}`, kind: 'image', width, height, durationSec: 5 };
-      await context.savePartial(progress);
+      images[index] = url; await context.savePartial(progress); reportStills();
     }));
+    host.report('generating', { status: 'completed', fraction: 1, items: ideas.map((idea, index) => ({ label: shotLabel(idea.id), status: 'completed', ...(images[index] ? { image: images[index] } : {}) })) });
     const candidates: BrollCandidate[] = ideas.map((idea, index) => ({ id: `${progress.assets[index]!.id}-0`, assetId: progress.assets[index]!.id, start: 0, end: 5, description: idea.prompt, asset: progress.assets[index]! }));
     const shots = [...progress.plan.placements.map(replan), ...ideas.map((idea, index) => replan({ ...idea, candidateId: candidates[index]!.id }))];
     const placements = validateBrollPlan(shots, cues, [...(local?.candidates ?? []), ...candidates], durationSec);

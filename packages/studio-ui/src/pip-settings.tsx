@@ -1,8 +1,8 @@
 import { SceneCheckbox, SceneSelect } from './scene-form-controls';
 import { PipVisual } from './pip-visual';
-import { useEffect, useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { UserRound, Image, Sparkles, ImagePlus, Check } from 'lucide-react';
-import { DEFAULT_PIP_OPTIONS, PIP_PICKER_TEMPLATES, PIP_SMART_DEMO, PIP_TEMPLATES, pipGeometry, resolvePipGeometry, type CaptionBand, type PipOptions, type PipTemplate } from '@pireel/studio-engine/pip-layout';
+import { DEFAULT_PIP_OPTIONS, PIP_PICKER_TEMPLATES, PIP_TEMPLATES, pipGeometry, resolvePipGeometry, type CaptionBand, type PipOptions, type PipTemplate } from '@pireel/studio-engine/pip-layout';
 import type { BrollOptions, BrollAsset } from '@pireel/studio-engine/broll-task';
 import { BrollSettings } from './broll-settings';
 import { SceneMediaThumb } from './scene-media-picker';
@@ -95,15 +95,11 @@ export function PipLayoutPreview({ options, source, canvas, asset, scope, locale
   /** Where captions will sit, so the preview places windows the way the render will. */
   captions?: CaptionBand;
 }) {
-  // Smart fit picks a layout per shot, so the sketch moves through several.
-  const smart = options.template === 'smart';
-  const [shot, setShot] = useState(0);
-  useEffect(() => {
-    if (!smart || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
-    const timer = window.setInterval(() => { if (!document.hidden) setShot(index => index + 1); }, 1500);
-    return () => window.clearInterval(timer);
-  }, [smart]);
-  const layout = resolvePipGeometry(smart ? { ...options, template: PIP_SMART_DEMO[shot % PIP_SMART_DEMO.length] } : options, canvas, asset ?? { width: 1920, height: 1080 }, canvas, captions);
+  // Smart fit decides per shot, so before generating the frame stays as it is; the real result previews after.
+  if (options.template === 'smart') return <div className="pointer-events-none absolute inset-0" aria-label={locale === 'zh' ? '画中画布局预览' : 'Layout preview'}>
+    <span className="absolute left-2 top-2 rounded bg-black/60 px-2 py-1 text-[10px] text-white">{locale === 'zh' ? '智能匹配 · 生成后预览' : 'Smart fit · preview after generating'}</span>
+  </div>;
+  const layout = resolvePipGeometry(options, canvas, asset ?? { width: 1920, height: 1080 }, canvas, captions);
   const rect = (box: { x: number; y: number; w: number; h: number }) => ({ left: `${box.x * 100}%`, top: `${box.y * 100}%`, width: `${box.w * 100}%`, height: `${box.h * 100}%` });
   return <div className="pointer-events-none absolute inset-0" aria-label={locale === 'zh' ? '画中画布局预览' : 'Layout preview'}>
     {layout.background && <div className="absolute inset-0" style={{ background: layout.background }}/>} 
@@ -111,6 +107,6 @@ export function PipLayoutPreview({ options, source, canvas, asset, scope, locale
       {asset ? <SceneMediaThumb asset={asset} scope={scope} fit={layout.mediaFit}/> : <span className="text-ink-3 text-xs">{locale === 'zh' ? '画中画素材' : 'Your footage'}</span>}
     </div>
     {layout.speaker && source && <PipVisual src={source} canvas={canvas} dimensions={canvas} box={layout.speaker} fit={layout.speakerFit} anchorY={layout.speakerAnchorY} cutout={layout.speakerCutout} layer={2}/>}
-    <span className="absolute left-2 top-2 rounded bg-black/60 px-2 py-1 text-[10px] text-white">{locale === 'zh' ? (smart ? '布局示意 · 按镜头选择' : '布局示意') : (smart ? 'Layout preview · per shot' : 'Layout preview')}</span>
+    <span className="absolute left-2 top-2 rounded bg-black/60 px-2 py-1 text-[10px] text-white">{locale === 'zh' ? '布局示意' : 'Layout preview'}</span>
   </div>;
 }

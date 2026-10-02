@@ -2,9 +2,11 @@ import type { CaptionTaskOptions } from './caption-task';
 import type { AsrSegment } from './build-blocks';
 import type { EditorDocumentV2 } from './composition';
 
-export type CaptionTaskStage = 'waiting' | 'ready' | 'preparing' | 'analyzing' | 'matching' | 'transcribing' | 'cleaning' | 'translating' | 'emphasizing' | 'voicing' | 'aligning' | 'lipsync' | 'styling' | 'rendering' | 'completed' | 'failed' | 'interrupted';
-export type CaptionProcessingStage = 'preparing' | 'analyzing' | 'matching' | 'transcribing' | 'cleaning' | 'translating' | 'styling' | 'emphasizing' | 'voicing' | 'aligning' | 'lipsync' | 'rendering';
-export interface CaptionStageProgress { status: 'pending' | 'running' | 'completed'; fraction?: number; detail?: string; done?: number; total?: number }
+export type CaptionTaskStage = 'waiting' | 'ready' | 'preparing' | 'analyzing' | 'matching' | 'generating' | 'transcribing' | 'cleaning' | 'translating' | 'emphasizing' | 'voicing' | 'aligning' | 'lipsync' | 'styling' | 'rendering' | 'completed' | 'failed' | 'interrupted';
+export type CaptionProcessingStage = 'preparing' | 'analyzing' | 'matching' | 'generating' | 'transcribing' | 'cleaning' | 'translating' | 'styling' | 'emphasizing' | 'voicing' | 'aligning' | 'lipsync' | 'rendering';
+export interface CaptionStageProgress { status: 'pending' | 'running' | 'completed'; fraction?: number; detail?: string; done?: number; total?: number;
+  /** Things the stage makes one by one (AI stills): what each is for, how far it is, and its picture once made. */
+  items?: { label: string; status: 'pending' | 'running' | 'completed'; image?: string }[] }
 export type CaptionTaskProgress = Partial<Record<CaptionProcessingStage, CaptionStageProgress>>;
 export interface CaptionTaskRecord {
   workflowEnvironmentRevision?: string;

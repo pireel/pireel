@@ -4,10 +4,16 @@ import { SceneWorkflowHost, type SceneWorkflowHooks } from './scene-workflow-run
 import { captionWorkflowNodes } from './caption-workflow-nodes';
 import { brollWorkflowNodes } from './broll-workflow-nodes';
 import { saveLocalVideo } from './local-media';
+import { withSceneRun } from './scene-run';
 
 /** Generation stops at the document (shots on the B-roll lane, captions); the video is rendered on
  *  download (exportBrollEdit). A saved custom definition that renders still returns it. */
 export async function runBrollTask(task: CaptionTaskRecord, source: File, hooks: SceneWorkflowHooks): Promise<{ task: CaptionTaskRecord; video?: Blob }> {
+  // Picture in picture runs under a capped run: billed by usage, never above the estimate's ceiling.
+  return task.scene === 'pip' ? withSceneRun(task, hooks, hooks => generateBroll(task, source, hooks)) : generateBroll(task, source, hooks);
+}
+
+async function generateBroll(task: CaptionTaskRecord, source: File, hooks: SceneWorkflowHooks): Promise<{ task: CaptionTaskRecord; video?: Blob }> {
   const broll = task.options.broll;
   const local = broll?.localFootage !== false ? broll?.assets.length ?? 0 : 0;
   if (!broll || local > 20 || (!local && broll.aiFootage !== true)) throw new Error('请添加 1–20 个素材，或开启 AI 生成。');
