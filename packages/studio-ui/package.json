@@ -44,6 +44,7 @@
     "./*": "./src/*.ts",
     "./caption-task-page": "./src/caption-task-page.tsx",
     "./caption-upload-dialog": "./src/caption-upload-dialog.tsx",
+    "./pip-draft-page": "./src/pip-draft-page.tsx",
     "./scene-form-controls": "./src/scene-form-controls.tsx",
     "./caption-task-style": "./src/caption-task-style.tsx",
     "./dubbing-settings": "./src/dubbing-settings.tsx",

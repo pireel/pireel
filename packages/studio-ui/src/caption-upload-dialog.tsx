@@ -17,6 +17,45 @@ import { saveLocalVideo } from './local-media';
 import { DEFAULT_DUBBING_OPTIONS, DUBBING_MAX_DURATION_SEC, DUBBING_MAX_VIDEO_BYTES } from '@pireel/studio-engine/dubbing-task';
 import { saveCaptionTask, type CaptionUploadProgress } from './caption-task-store';
 import { captureCaptionCover } from './caption-project-cover';
+import { studioLocale } from './i18n';
+import type { CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
+
+export type SceneProjectKind = 'captions' | 'dubbing' | 'broll' | 'pip' | 'sfx' | 'subtitle-removal' | 'ugc-ad';
+/** A new scene project's starting options; `overrides` carries settings chosen before the video. */
+export function sceneProjectOptions(scene: SceneProjectKind, overrides: Partial<CaptionTaskOptions> = {}): CaptionTaskOptions {
+  const ugcAd = scene === 'ugc-ad'; const pip = scene === 'pip';
+  return { ...(ugcAd ? { ugcAd: DEFAULT_UGC_AD_OPTIONS, broll: { assets: [], captions: true } } : scene === 'subtitle-removal' ? { subtitleRemoval: DEFAULT_SUBTITLE_REMOVAL } : scene === 'sfx' ? { sfx: DEFAULT_SFX_OPTIONS } : scene === 'dubbing' ? { dubbing: DEFAULT_DUBBING_OPTIONS } : (scene === 'broll' || pip) ? { broll: { assets: [], captions: true, ...(pip ? { pip: DEFAULT_PIP_OPTIONS } : {}) } } : {}), caption: {}, aspect: ugcAd ? 'portrait' : 'original', shortenPauses: false, ...overrides };
+}
+
+/**
+ * Check, store and register a scene's source video as a new project; returns its id, or null when
+ * `stale()` says the caller moved on. Throws a readable message when the video does not fit.
+ */
+export async function createSceneProject(file: File, scene: SceneProjectKind, { report, stale = () => false, pending, options }: {
+  report?: (value: CaptionUploadProgress) => void; stale?: () => boolean; pending?: { current: { sig: string; id: string } | null }; options?: Partial<CaptionTaskOptions>;
+} = {}): Promise<string | null> {
+  const zh = studioLocale() === 'zh'; const say = (cn: string, en: string) => zh ? cn : en;
+  const removal = scene === 'subtitle-removal'; const ugcAd = scene === 'ugc-ad';
+  const [data, user] = await Promise.all([probeVideoFile(file), loadCurrentUser()]);
+  if (stale()) return null;
+  if (!user || user.auth_method === 'anon') throw new Error(say('请先登录。', 'Please sign in.'));
+  if (![data.durationSec, data.width, data.height].every((value) => Number.isFinite(value) && value > 0)) throw new Error(say('无法读取视频，请换一个文件。', 'Could not read this video. Choose another file.'));
+  if (ugcAd && data.durationSec > 60) throw new Error(say('请上传 60 秒以内的创作者或商品视频。', 'Upload a creator or product video up to 60 seconds.'));
+  if (!removal && !data.hasAudio) throw new Error(say('请选择有声音的视频。', 'Choose a video with audio.'));
+  if (removal && (data.durationSec < 1 || Math.max(data.width, data.height) > 3840 || Math.min(data.width, data.height) > 2160)) throw new Error(say('请选择至少 1 秒、最高 4K 分辨率的视频。', 'Choose a video at least 1 second long and up to 4K.'));
+  if (scene !== 'captions' && (data.durationSec > DUBBING_MAX_DURATION_SEC || file.size > DUBBING_MAX_VIDEO_BYTES)) throw new Error(say('请选择 30 分钟以内、1GB 以下的视频。', 'Choose a video up to 30 minutes and 1GB.'));
+  const sig = studioProviders().sceneProjects ? await durableFileSig(file) : fileSig(file);
+  if (!(await saveLocalVideo(file, sig)) && !studioProviders().sceneProjects) throw new Error(say('本机空间不足，请清理后重试。', 'Free some local storage and retry.'));
+  if (stale()) return null;
+  const id = pending?.current?.sig === sig ? pending.current.id : crypto.randomUUID();
+  if (pending) pending.current = { sig, id };
+  const coverThumb = await captureCaptionCover(file, data.durationSec).catch(() => undefined);
+  if (stale()) return null;
+  await saveCaptionTask({ id, scene, scope: user.user_id, name: file.name, sourceSig: sig, ...data, coverThumb, options: sceneProjectOptions(scene, options), stage: 'ready', updatedAt: Date.now() }, undefined, file, report);
+  if (stale()) return null;
+  if (pending) pending.current = null;
+  return id;
+}
 
 export function CaptionUploadDialog({ open, locale, scene = 'captions', onOpenChange, onContinue }: {
   open: boolean; locale: 'zh' | 'en'; scene?: 'captions' | 'dubbing' | 'broll' | 'pip' | 'sfx' | 'subtitle-removal' | 'ugc-ad'; onOpenChange: (open: boolean) => void; onContinue: (id: string) => void;
@@ -59,23 +98,9 @@ export function CaptionUploadDialog({ open, locale, scene = 'captions', onOpenCh
       setProgress({ ...value, fraction });
     };
     try {
-      const [data, user] = await Promise.all([probeVideoFile(file), loadCurrentUser()]);
-      if (current !== generation.current) return;
-      if (!user || user.auth_method === 'anon') throw new Error(say('请先登录。', 'Please sign in.'));
-      if (![data.durationSec, data.width, data.height].every((value) => Number.isFinite(value) && value > 0)) throw new Error(say('无法读取视频，请换一个文件。', 'Could not read this video. Choose another file.'));
-      if (ugcAd && data.durationSec > 60) throw new Error(say('请上传 60 秒以内的创作者或商品视频。', 'Upload a creator or product video up to 60 seconds.'));
-      if (!removal && !data.hasAudio) throw new Error(say('请选择有声音的视频。', 'Choose a video with audio.'));
-      if (removal && (data.durationSec < 1 || Math.max(data.width, data.height) > 3840 || Math.min(data.width, data.height) > 2160)) throw new Error(say('请选择至少 1 秒、最高 4K 分辨率的视频。', 'Choose a video at least 1 second long and up to 4K.'));
-      if ((removal || dubbing || ugcAd || scene === 'broll' || pip || sfx) && (data.durationSec > DUBBING_MAX_DURATION_SEC || file.size > DUBBING_MAX_VIDEO_BYTES)) throw new Error(say('请选择 30 分钟以内、1GB 以下的视频。', 'Choose a video up to 30 minutes and 1GB.'));
-      const sig = studioProviders().sceneProjects ? await durableFileSig(file) : fileSig(file);
-      if (!(await saveLocalVideo(file, sig)) && !studioProviders().sceneProjects) throw new Error(say('本机空间不足，请清理后重试。', 'Free some local storage and retry.'));
-      if (current !== generation.current) return;
-      const id = pendingProject.current?.sig === sig ? pendingProject.current.id : crypto.randomUUID();
-      pendingProject.current = { sig, id };
-      const coverThumb = await captureCaptionCover(file, data.durationSec).catch(() => undefined);
-      if (current !== generation.current) return;
-      await saveCaptionTask({ id, scene, scope: user.user_id, name: file.name, sourceSig: sig, ...data, coverThumb, options: { ...(ugcAd ? { ugcAd: DEFAULT_UGC_AD_OPTIONS, broll: { assets: [], captions: true } } : removal ? { subtitleRemoval: DEFAULT_SUBTITLE_REMOVAL } : sfx ? { sfx: DEFAULT_SFX_OPTIONS } : dubbing ? { dubbing: DEFAULT_DUBBING_OPTIONS } : (scene === 'broll' || pip) ? { broll: { assets: [], captions: true, ...(pip ? { pip: DEFAULT_PIP_OPTIONS } : {}) } } : {}), caption: {}, aspect: ugcAd ? 'portrait' : 'original', shortenPauses: false }, stage: 'ready', updatedAt: Date.now() }, undefined, file, report);
-      if (current === generation.current) { pendingProject.current = null; onOpenChange(false); onContinue(id); }
+      const id = await createSceneProject(file, scene, { report, stale: () => current !== generation.current, pending: pendingProject });
+      if (!id) return;
+      onOpenChange(false); onContinue(id);
     } catch (reason) { if (current === generation.current) setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { creating.current = false; if (current === generation.current) setBusy(false); }
   };
