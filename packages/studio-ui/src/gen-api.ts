@@ -46,6 +46,8 @@ export interface GenJob {
 export type StartResult =
   | { ok: true; ids: string[] }
   | { ok: false; kind: 'credits'; need: number; balance: number }
+  /** The account's plan does not include this generation (e.g. video needs Pro). */
+  | { ok: false; kind: 'plan'; requires: 'pro' | 'max'; message: string }
   | { ok: false; kind: 'error'; message: string };
 
 function clearSpaceCache(projectId: string) {
@@ -108,10 +110,14 @@ async function postGeneration(spaceId: string, toolId: 'image-gen' | 'video-gen'
     body: JSON.stringify({ space_id: spaceId, tool_id: toolId, params }),
   });
   const j = (await r.json().catch(() => null)) as
-    | { ok?: boolean; id?: string; ids?: string[]; error?: string; need?: number; balance?: number }
+    | { ok?: boolean; id?: string; ids?: string[]; error?: string; need?: number; balance?: number; requires?: string }
     | null;
   if (r.status === 402 && j?.error === 'insufficient_tokens') {
     return { status: r.status, result: { ok: false, kind: 'credits', need: j.need ?? 0, balance: j.balance ?? 0 } };
+  }
+  if (r.status === 403 && j?.error === 'plan_locked') {
+    const requires = j.requires === 'max' ? 'max' : 'pro';
+    return { status: r.status, result: { ok: false, kind: 'plan', requires, message: t('chatGen.planLocked', { plan: requires === 'max' ? 'Max' : 'Pro' }) } };
   }
   if (!r.ok || !j?.ok || !j.id) {
     return { status: r.status, result: { ok: false, kind: 'error', message: typeof j?.error === 'string' ? j.error : t('chatGen.generationRequestFailedStatus', { status: r.status }) } };

@@ -188,6 +188,7 @@ export const CHATGEN_EN: Record<string, string> = {
   'chatGen.generationInterrupted': 'Generation was interrupted (conversation switched or page refreshed)',
   'chatGen.generationRequestFailed': 'Generation request failed',
   'chatGen.generationRequestFailedStatus': 'Generation request failed ({status})',
+  'chatGen.planLocked': 'This needs the {plan} plan. Upgrade to generate.',
   'chatGen.generationSettings': 'Generation settings',
   'chatGen.greeting': 'I\'ll help you make this video',
   'chatGen.handsCloseUp': 'Hands close-up',

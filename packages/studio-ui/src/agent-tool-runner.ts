@@ -2416,6 +2416,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const started = await startGeneration(projectId, generationKind === 'image' ? 'image-gen' : 'video-gen', params);
               if (!started.ok) {
                 if (started.kind === 'credits') return { ok: false, error: `insufficient_tokens: need ${started.need}, balance ${started.balance}` };
+                if (started.kind === 'plan') return { ok: false, error: `plan_locked: ${generationKind} generation needs the ${started.requires} plan; tell the user to upgrade` };
                 return { ok: false, error: started.message };
               }
               watchGenerationJobs(started.ids, registerGeneratedEntry);

@@ -188,6 +188,7 @@ export const CHATGEN_ZH: Record<string, string> = {
   'chatGen.generationInterrupted': '生成被打断(切换了会话或刷新了页面)',
   'chatGen.generationRequestFailed': '生成请求失败',
   'chatGen.generationRequestFailedStatus': '生成请求失败（{status}）',
+  'chatGen.planLocked': '需要 {plan} 会员才能使用，升级后即可生成。',
   'chatGen.generationSettings': '生成参数',
   'chatGen.greeting': '我来帮你做这条视频',
   'chatGen.handsCloseUp': '手部特写',
