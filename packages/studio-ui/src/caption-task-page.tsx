@@ -201,7 +201,9 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
   /** The settings a run records: scene defaults filled in, so an unchanged panel compares equal to the last run. */
   const generationOptions = (value: CaptionTaskOptions): CaptionTaskOptions => {
     const settings: CaptionTaskOptions = structuredClone({ ...value, ...(isSfx ? { sfx: normalizeSfxOptions(value.sfx) } : {}), ...(isRemoval ? { subtitleRemoval: normalizeErasureOptions(value.subtitleRemoval) } : {}), aspect: isUgc ? value.aspect : 'original' });
-    return isDubbing ? { ...settings, dubbing: dubbingSceneOptions(settings.dubbing ?? DEFAULT_DUBBING_OPTIONS), translationLanguage: undefined } : settings;
+    // Lip sync only rides along when this video can take it (10 s to 10 minutes); the toggle says so.
+    const length = probe?.durationSec ?? taskRef.current?.durationSec ?? 0; const lipSyncable = length >= 10 && length <= 600;
+    return isDubbing ? { ...settings, dubbing: { ...dubbingSceneOptions(settings.dubbing ?? DEFAULT_DUBBING_OPTIONS), ...(lipSyncable ? {} : { lipSync: false }) }, translationLanguage: undefined } : settings;
   };
   const start = async (resume = false, confirmed = false) => {
     if (!file || !probe || !scope || busyRef.current) return;
@@ -293,6 +295,16 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
     }, 250);
     return () => clearTimeout(timer);
   }, [options, loadingProject, busy, scope, drafting]);
+
+  // A generation the server runs (or finished but not yet assembled here) is followed as soon as the
+  // page has the source: closing the page never stopped it, reopening just picks it up.
+  const attachedRun = useRef('');
+  useEffect(() => {
+    const run = task?.serverRun;
+    if (loadingProject || busy || !file || !probe || !run || attachedRun.current === run.id || run.id !== task?.generationId) return;
+    if (run.status !== 'running' && !(run.status === 'completed' && !task?.document)) return;
+    attachedRun.current = run.id; void start(true);
+  }, [task, loadingProject, busy, file, probe]);
 
   const selectVersion = async (id: string) => {
     if (!scope || busyRef.current) return;

@@ -9,7 +9,9 @@ export interface CaptionStageProgress { status: 'pending' | 'running' | 'complet
   items?: { label: string; status: 'pending' | 'running' | 'completed'; image?: string }[] }
 export type CaptionTaskProgress = Partial<Record<CaptionProcessingStage, CaptionStageProgress>>;
 /** A generation the server runs to the end (docs/server-scene-runs.md); written by the server only. */
-export interface SceneServerRun { id: string; status: 'running' | 'completed' | 'failed'; startedAt: number; updatedAt: number; error?: string }
+export interface SceneServerRun { id: string; status: 'running' | 'completed' | 'failed'; startedAt: number; updatedAt: number; error?: string;
+  /** What the browser handed over: the extracted audio it uploaded for recognition and its offset to the picture. */
+  handoff?: { audioKey: string; audioOffset: number } }
 export interface CaptionTaskRecord {
   /** Set while/after the server runs this project's generation; the browser then shows its progress instead of running it. */
   serverRun?: SceneServerRun;

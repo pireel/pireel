@@ -241,6 +241,21 @@ export async function transcribeFile(file: File, opts?: { projectId?: string; sc
   return segs;
 }
 
+/**
+ * The browser's part of a server-run transcription: extract the speech, upload it, and report how far
+ * the audio track sits from the picture's zero (the server adds it to every time). null = no audio.
+ */
+export async function prepareSpeechAudio(file: File, opts?: { signal?: AbortSignal; onPhase?: (phase: 'checking' | 'extracting' | 'uploading') => void }): Promise<{ key: string; offset: number } | null> {
+  opts?.onPhase?.('checking');
+  const probe = await probeVideoFile(file).catch(() => null);
+  if (probe && !probe.hasAudio) return null;
+  opts?.signal?.throwIfAborted(); opts?.onPhase?.('extracting');
+  const audio = await extractAudio(file);
+  opts?.signal?.throwIfAborted(); opts?.onPhase?.('uploading');
+  const { key } = await studioProviders().uploads.upload(audio, { contentType: audio.type || 'audio/mp4', filename: 'studio-audio.m4a' });
+  return { key, offset: await audioPlaybackOffset(file) };
+}
+
 /** Audio track's first-packet offset relative to the playback zero (earliest sample across all tracks), in seconds. ≈0 for normal in-sync files. */
 async function audioPlaybackOffset(file: File): Promise<number> {
   const { ALL_FORMATS, BlobSource, Input } = await import('mediabunny');

@@ -157,6 +157,12 @@ export interface StudioProviders {
   sceneProjects?: SceneProjectStore;
   estimateSceneCredits?(input: SceneCreditInput, signal?: AbortSignal): Promise<SceneCreditEstimate>;
   sceneRuns?: SceneRunService;
+  /** Generations the server runs to the end (docs/server-scene-runs.md): start one with the browser's
+   *  handoff, and read the project back (with its revision) to follow it. Absent = run in the browser. */
+  serverRuns?: {
+    start(input: { projectId: string; generationId: string; audioKey: string; audioOffset: number }, signal?: AbortSignal): Promise<{ id: string; credits: number }>;
+    project(projectId: string, signal?: AbortSignal): Promise<{ revision: number; task: import('./scene-project').CaptionTaskRecord }>;
+  };
   /** Built-in chat persistence, independent from project document/version sync. */
   chats?: ChatThreadStore;
   uploads: AssetUploader;

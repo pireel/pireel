@@ -1,10 +1,11 @@
 import type { EditorDocumentV2 } from '@pireel/studio-engine/composition';
-import { dubbingPhrases, dubbingRate, dubbingSpeakers, dubbingTurns, dubbingVoiceFor, dubbingVoicesReady, dubbingSpeechWindow, splitDubbingScript, DUBBING_LANGUAGES, type DubbingOptions, type DubbingState, type DubbingSpeech } from '@pireel/studio-engine/dubbing-task';
+import { dubbingRate, stripRepeatedLead, dubbingScriptRequest, dubbingSpeakers, dubbingSpeechParts, joinSpoken, dubbingTurns, dubbingVoiceFor, dubbingVoicesReady, dubbingSpeechWindow, splitDubbingScript, DUBBING_LANGUAGES, type DubbingOptions, type DubbingState, type DubbingSpeech } from '@pireel/studio-engine/dubbing-task';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { buildCaptionBaseDocument } from '@pireel/studio-engine/caption-task';
 import { applyDocumentTransaction } from '@pireel/studio-engine/document-transaction';
 import { DUBBING_WORKFLOW_CAPABILITIES } from '@pireel/studio-engine/workflow-dubbing-template';
 import { workflowJson, workflowRequestId, artifactVersion } from '@pireel/studio-engine/workflow-artifacts';
+import { DUB_MAX_STRETCH, layoutDubbing } from '@pireel/studio-engine/dubbing-align';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { SceneWorkflowHost, type SceneNode, type SceneMedia } from './scene-workflow-runtime';
 import { transcribeFile, probeVideoFile } from './media';
@@ -21,17 +22,10 @@ interface SpeechPlan {
 }
 /** Largest native speech rate a fitting pass asks the voice for; beyond it the line must be shortened. */
 const MAX_FIT_SPEED = 1.3;
-/** Largest post time-stretch audio.align applies after fitting (it changes the voice less than this audibly). */
-const MAX_POST_STRETCH = 1.15;
-/** Beyond the gentle stretch a line is spoken faster still, up to this; past it the end is cut with a short fade. Both are reported. */
-const MAX_DEGRADED_STRETCH = 1.4;
-/** How far a line may run into the next one, pushing the lines after it later, before anything is cut. */
-const MAX_LAG_SEC = .6;
+const MAX_DEGRADED_STRETCH = DUB_MAX_STRETCH;
 /** `turns`: what is actually spoken per line (a fitting pass may have shortened it). */
 interface SpeechArtifact { parts: DubbingSpeech[]; signature: string; text: string; turns?: string[] }
 interface AlignedMedia extends SceneMedia { signature: string; planKey: string; fitNotes?: DubbingState['fitNotes'] }
-/** Lines of a dub joined into running text: a space between them except after CJK/Hangul script. */
-const joinSpoken = (lines: string[]) => lines.filter(Boolean).reduce((all, line) => all + (all && !/[\u3000-\u9fff\uac00-\ud7af]$/u.test(all) ? ' ' : '') + line, '');
 async function jsonRequest(url: string, input: unknown, signal: AbortSignal) {
   const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal });
   const body = await response.json(); if (!response.ok) throw new Error(body.detail ?? body.error ?? '请求失败，请重试。'); return body;
@@ -82,22 +76,9 @@ export function dubbingWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     // keeps its whole-turn timing; a hand-edited whole script (single speaker) stays one block.
     const scripted = !multiple && !!config.script?.trim();
     if (!scripted) {
-      const turns = dubbingTurns(transcript, media.durationSec); turnsKey = JSON.stringify(turns);
-      const phrases = dubbingPhrases(transcript, media.durationSec); phrasesKey = JSON.stringify([config.language, phrases]);
-      // Each phrase has its spoken time plus a short breath of the pause after it to fill.
-      const seconds = phrases.map((phrase, index) => Math.min(phrases[index + 1]?.start ?? media.durationSec, phrase.end + .5) - phrase.start);
-      translatedPhrases = cached.phrasesKey === phrasesKey && cached.translatedPhrases?.length === phrases.length ? cached.translatedPhrases : await writeScript(turns.map((_, turn) => phrases.flatMap((phrase, index) => phrase.turn === turn ? [{ index, text: phrase.text, seconds: seconds[index] }] : [])));
-      translatedTurns = turns.map((_, turn) => joinSpoken(phrases.flatMap((phrase, index) => phrase.turn === turn ? [translatedPhrases![index]] : [])));
-      const edited = turns.map((turn, i) => (config.turnScripts?.[turn.id] ?? translatedTurns![i]).trim());
-      if (edited.some(part => !part)) throw new Error('发言文案不能为空。');
-      text = edited.join('\n'); splitDubbingScript(text);
-      let group = 0;
-      parts = turns.flatMap((turn, index) => {
-        const voiceId = dubbingVoiceFor(turn.speaker, speakers, config);
-        if (config.turnScripts?.[turn.id]?.trim()) { const at = group++; return splitDubbingScript(edited[index]).map(text => ({ text, voiceId, group: at, start: turn.start, end: turn.end, source: turn.text, turn: index })); }
-        // A phrase the script leaves empty is a pause in the dub.
-        return phrases.flatMap((phrase, at) => phrase.turn === index && translatedPhrases![at] ? [{ text: translatedPhrases![at], voiceId, group: group++, start: phrase.start, end: phrase.end, source: phrase.text, turn: index }] : []);
-      });
+      const script = dubbingScriptRequest(transcript, media.durationSec, config.language); turnsKey = script.turnsKey; phrasesKey = script.phrasesKey;
+      translatedPhrases = cached.phrasesKey === phrasesKey && cached.translatedPhrases?.length === script.phrases.length ? cached.translatedPhrases : await writeScript(script.request);
+      ({ text, parts, translatedTurns } = dubbingSpeechParts(transcript, media.durationSec, config, translatedPhrases));
     } else {
       text = config.script!.trim();
       parts = splitDubbingScript(text).map(text => ({ text, voiceId: config.voiceId, group: 0, start: window.start, end: window.end }));
@@ -179,9 +160,11 @@ export function dubbingWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
       host.report('voicing', { status: 'running', detail: 'fitting' });
       const body = await jsonRequest('/api/studio/dubbing-fit', { language: languageCode, projectId: args.projectId, sceneRun: host.hooks.sceneRun, rows: shorten.map(group => ({ index: group.group, source: plan.parts[group.indexes[0]].source ?? '', text: spokenPart(group.indexes[0]), seconds: Math.round(group.natural * 100) / 100, targetSeconds: Math.round(Math.max(.4, group.available * (round ? .85 : .95)) * 100) / 100, ...neighbours(group.indexes[0], new Set(shorten.map(entry => entry.group))) })) }, signal);
       if (body.usage) context.recordUsage(body.usage);
-      for (const row of body.rows as { index: number; text: string }[]) {
+      for (const row of [...body.rows as { index: number; text: string }[]].sort((a, b) => a.index - b.index)) {
         host.check(); const group = shorten.find(entry => entry.group === row.index)!; const index = group.indexes[0];
-        parts[index] = await voice(index, row.text, round ? 3 : 1, 1); fitted[group.group] = { text: row.text, speed: 1, rounds: round + 1 };
+        const previous = index > 0 && plan.parts[index - 1].turn !== undefined && plan.parts[index - 1].turn === plan.parts[index].turn ? spokenPart(index - 1) : '';
+        const text = previous ? stripRepeatedLead(previous, row.text) : row.text;
+        parts[index] = await voice(index, text, round ? 3 : 1, 1); fitted[group.group] = { text, speed: 1, rounds: round + 1 };
         await context.savePartial({ parts, requestId, fitted }, project({ speechParts: parts, speechSignature: signature }));
       }
     }
@@ -219,41 +202,12 @@ export function dubbingWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     // speed-up happen before this; what still does not fit is spoken faster or cut, and reported.
     const ordered = [...groups.values()].sort((a, b) => a.start - b.start);
     const fitNotes: NonNullable<DubbingState['fitNotes']> = [];
-    // A line may run a little into the next one, which then starts that much later (the lag carries
-    // on until a pause absorbs it); only the picture's end is a hard limit. When lines back to back
-    // still do not fit, the whole run is spoken a little faster together rather than one line being cut.
-    const maxLag = Math.round(MAX_LAG_SEC * sampleRate);
+    // Placement is shared with the server (layoutDubbing): lines keep their pace where they fit, run
+    // a little into the next one, speed up together as a run, and only past that are cut.
     const said = ordered.map(group => ({ start: group.start, end: group.end, natural: Math.round(group.total * sampleRate) }));
-    const speeds = said.map(() => 1);
-    const layout = () => {
-      let lag = 0; let over = -1; const placed: { start: number; end: number; pushed: boolean }[] = [];
-      said.forEach((line, index) => {
-        const start = Math.min(total - 1, line.start + lag); const own = Math.min(total, line.end + lag);
-        const next = said[index + 1]?.start;
-        const available = Math.max(own, next === undefined ? total : Math.min(total, next + maxLag)) - start;
-        const wanted = Math.round(line.natural / speeds[index]);
-        if (wanted > available && over < 0) over = index;
-        const end = start + Math.max(1, Math.min(wanted, available));
-        // Only running past its own window into the next line pushes that line later (overlapping speakers keep their times).
-        placed.push({ start, end, pushed: lag > 0 }); lag = next === undefined ? 0 : Math.max(0, end - Math.max(own, next));
-      });
-      return { placed, over };
-    };
-    let result = layout();
-    for (let round = 0; round < 200 && result.over >= 0; round++) {
-      // Speed up the line that does not fit together with the lines that pushed it, a little at a time.
-      let first = result.over; while (first > 0 && result.placed[first].pushed) first--;
-      const run = speeds.slice(first, result.over + 1);
-      if (run.every(speed => speed >= MAX_DEGRADED_STRETCH - 1e-6)) break;
-      for (let index = first; index <= result.over; index++) speeds[index] = Math.min(MAX_DEGRADED_STRETCH, speeds[index] + .02);
-      result = layout();
-    }
-    ordered.forEach((group, index) => {
-      const { start, end } = result.placed[index]; const squeeze = said[index].natural / (end - start);
-      group.start = start; group.cursor = start; group.end = end;
-      if (squeeze > MAX_POST_STRETCH + 1e-3) fitNotes.push({ at: Math.round(said[index].start / sampleRate * 10) / 10, kind: squeeze > MAX_DEGRADED_STRETCH + 1e-3 ? 'trimmed' : 'faster' });
-      group.trim = squeeze > MAX_DEGRADED_STRETCH + 1e-3;
-    });
+    const layout = layoutDubbing(said, total, sampleRate);
+    ordered.forEach((group, index) => { const placed = layout.placed[index]!; group.start = placed.start; group.cursor = placed.start; group.end = placed.end; group.trim = placed.trim; });
+    for (const note of layout.notes) fitNotes.push({ at: Math.round(said[note.index]!.start / sampleRate * 10) / 10, kind: note.kind });
     let aligned = cached.alignedPlanKey === planKey && cached.alignedAudioSig ? await loadLocalVideo(cached.alignedAudioSig) : null;
     if (!aligned) {
       const { decodeAudioFile, toMono } = await import('./audio-decode');

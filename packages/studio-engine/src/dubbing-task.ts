@@ -36,6 +36,8 @@ export interface DubbingState {
   /** Lines the timing could only fit by speaking faster than usual or cutting the end, for the user to see. */
   fitNotes?: { at: number; kind: 'faster' | 'trimmed' }[]; speech?: DubbingSpeech; speechParts?: DubbingSpeech[]; speechSignature?: string;
   alignedAudioUrl?: string; alignedAudioKey?: string; alignedAudioSig?: string; sourceVideoUrl?: string; sourceVideoKey?: string; lipJobId?: string; lipResultUrl?: string;
+  /** The lip-synced picture a server run kept in the media vault. */
+  lipVideoSig?: string;
   outputSig?: string; outputCached?: boolean; outputWidth?: number; outputHeight?: number;
 }
 export const DEFAULT_DUBBING_OPTIONS: DubbingOptions = { language: 'English', voiceId: '', lipSync: false };
@@ -119,6 +121,47 @@ export function dubbingPhrases(transcript: readonly AsrSegment[], durationSec: n
     }
     return merged.map(piece => ({ turn: index, speaker: turn.speaker, text: piece.text, start: Math.max(0, piece.start), end: Math.min(durationSec, Math.max(piece.end, piece.start + .05)) }));
   });
+}
+
+/** Lines of a dub joined into running text: a space between them except after CJK/Hangul script. */
+export const joinSpoken = (lines: string[]) => lines.filter(Boolean).reduce((all, line) => all + (all && !/[\u3000-\u9fff\uac00-\ud7af]$/u.test(all) ? ' ' : '') + line, '');
+
+/** A rewritten phrase that repeats the word its sentence's previous phrase ends with ("there's a" | "a card")
+ *  drops the repeat, so the joined line reads once. Only an exact word match at the join is dropped. */
+export function stripRepeatedLead(previous: string, text: string): string {
+  const last = /([\p{L}\p{N}']+)[^\p{L}\p{N}']*$/u.exec(previous)?.[1]; const first = /^[^\p{L}\p{N}']*([\p{L}\p{N}']+)/u.exec(text);
+  if (!last || !first || last.toLowerCase() !== first[1]!.toLowerCase()) return text;
+  const rest = text.slice(first[0].length).replace(/^\s+/, '');
+  return rest || text;
+}
+
+/** What the script writer is asked for: each turn's phrases with the seconds each holds (its spoken
+ *  time plus a short breath of the pause after it), and keys that tell when a written script still applies. */
+export function dubbingScriptRequest(transcript: readonly AsrSegment[], durationSec: number, language: string) {
+  const turns = dubbingTurns(transcript, durationSec); const phrases = dubbingPhrases(transcript, durationSec);
+  const seconds = phrases.map((phrase, index) => Math.min(phrases[index + 1]?.start ?? durationSec, phrase.end + .5) - phrase.start);
+  const request = turns.map((_, turn) => phrases.flatMap((phrase, index) => phrase.turn === turn ? [{ index, text: phrase.text, seconds: seconds[index]! }] : []));
+  return { turns, phrases, request, turnsKey: JSON.stringify(turns), phrasesKey: JSON.stringify([language, phrases]) };
+}
+
+export interface DubbingSpeechPart { text: string; voiceId: string; group: number; start: number; end: number; source?: string; turn?: number }
+/**
+ * The voiced lines of a dub from its written script: one per phrase, placed where it was said (an
+ * empty phrase is a pause). A turn the user rewrote by hand keeps whole-turn timing.
+ */
+export function dubbingSpeechParts(transcript: readonly AsrSegment[], durationSec: number, config: DubbingOptions, translatedPhrases: readonly string[]) {
+  const turns = dubbingTurns(transcript, durationSec); const phrases = dubbingPhrases(transcript, durationSec); const speakers = dubbingSpeakers(transcript);
+  const translatedTurns = turns.map((_, turn) => joinSpoken(phrases.flatMap((phrase, index) => phrase.turn === turn ? [translatedPhrases[index] ?? ''] : [])));
+  const edited = turns.map((turn, i) => (config.turnScripts?.[turn.id] ?? translatedTurns[i]!).trim());
+  if (edited.some(part => !part)) throw new Error('发言文案不能为空。');
+  const text = edited.join('\n'); splitDubbingScript(text);
+  let group = 0;
+  const parts: DubbingSpeechPart[] = turns.flatMap((turn, index) => {
+    const voiceId = dubbingVoiceFor(turn.speaker, speakers, config);
+    if (config.turnScripts?.[turn.id]?.trim()) { const at = group++; return splitDubbingScript(edited[index]!).map(text => ({ text, voiceId, group: at, start: turn.start, end: turn.end, source: turn.text, turn: index })); }
+    return phrases.flatMap((phrase, at) => phrase.turn === index && translatedPhrases[at] ? [{ text: translatedPhrases[at]!, voiceId, group: group++, start: phrase.start, end: phrase.end, source: phrase.text, turn: index }] : []);
+  });
+  return { text, parts, translatedTurns };
 }
 
 export function dubbingRate(audioDuration: number, windowDuration: number) {

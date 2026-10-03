@@ -1,5 +1,6 @@
 import { DUBBING_MAX_DURATION_SEC, DUBBING_MAX_VIDEO_BYTES, DUBBING_LANGUAGES } from '@pireel/studio-engine/dubbing-task';
 import { withSceneRun } from './scene-run';
+import { studioProviders } from '@pireel/studio-engine/providers';
 import { dubbingWorkflowDefinition } from '@pireel/studio-engine/workflow-dubbing-template';
 import type { CaptionTaskRecord } from './caption-task-store';
 import { SceneWorkflowHost, type SceneWorkflowHooks } from './scene-workflow-runtime';
@@ -16,6 +17,8 @@ export async function runDubbingTask(task: CaptionTaskRecord, file: File, hooks:
   if (config.script !== undefined && !config.script.trim()) throw new Error('配音文案不能为空。');
   if (!Number.isFinite(task.durationSec) || task.durationSec <= 0 || task.durationSec > DUBBING_MAX_DURATION_SEC) throw new Error('支持 30 分钟以内的视频。');
   if (file.size > DUBBING_MAX_VIDEO_BYTES) throw new Error('请选择 1GB 以下的视频。');
+  // Hosted: the server runs the whole dub to the end (docs/server-scene-runs.md); the browser only hands over.
+  if (studioProviders().serverRuns) return (await import('./dubbing-server-run')).runDubbingOnServer(task, file, hooks);
   return withSceneRun(task, hooks, hooks => generateDubbing(task, file, hooks));
 }
 

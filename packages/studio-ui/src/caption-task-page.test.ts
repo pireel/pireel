@@ -110,7 +110,8 @@ describe('caption versions and preview UI', () => {
     expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/voices')).every(([url]) => !String(url).includes('language='))).toBe(true);
     expect(container.querySelector('[aria-label="字幕位置"]')).not.toBeNull();
     expect(container.querySelector('[data-caption-appearance]')).not.toBeNull();
-    expect(container.textContent).not.toContain('口型同步');
+    // Lip sync is offered but not for a 5-second video.
+    expect(container.textContent).toContain('口型同步支持 10 秒到 10 分钟的视频。');
     await click(container.querySelector<HTMLButtonElement>('button[aria-label="English voice"]')!);
     const voiceList = container.querySelector('[aria-label="音色列表"]');
     const fetchCount = vi.mocked(fetch).mock.calls.length;
@@ -144,7 +145,7 @@ describe('caption versions and preview UI', () => {
     expect((await loadCaptionTask('owner', 'task'))?.stage).toBe('ready');
     expect(await listCaptionVersions('owner', 'task')).toHaveLength(0);
     expect(button('生成译制视频').disabled).toBe(true);
-    expect(container.querySelector<HTMLInputElement>('input[type="checkbox"]')?.disabled).toBe(false);
+    expect([...container.querySelectorAll('label')].find(label => label.textContent?.trim() === '字幕')?.querySelector('input')?.disabled).toBe(false);
     await click(container.querySelectorAll<HTMLButtonElement>('[aria-label="说话人"] button')[1]);
     await settled(() => expect(container.querySelector('button[aria-label="Second voice"]')).not.toBeNull());
     await click(container.querySelector<HTMLButtonElement>('button[aria-label="Second voice"]')!);

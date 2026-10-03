@@ -55,3 +55,13 @@ describe('dubbing phrases', () => {
     expect(latin[0].text).toBe('Hi all');
   });
 });
+
+describe('phrase joins', () => {
+  it('drops a word the previous phrase already ends with, and nothing else', async () => {
+    const { stripRepeatedLead } = await import('./dubbing-task');
+    expect(stripRepeatedLead("Oh, inside there's a", 'a Geek Time VIP card,')).toBe('Geek Time VIP card,');
+    expect(stripRepeatedLead('It was the', 'The best day.')).toBe('best day.');
+    expect(stripRepeatedLead('Inside there is', 'a card.')).toBe('a card.');
+    expect(stripRepeatedLead('a', 'a')).toBe('a');
+  });
+});
