@@ -46,6 +46,16 @@ function generatedVersion(task: CaptionTaskRecord, history: readonly { number: n
 }
 const actionClass = 'bg-ink text-bg inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40';
 
+/** Where the last dub had to speak faster than usual or cut a line's end, so it is never a silent change. */
+function dubbingFitSummary(notes: { at: number; kind: 'faster' | 'trimmed' }[], locale: 'zh' | 'en') {
+  const clock = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
+  const at = (kind: 'faster' | 'trimmed') => notes.filter(note => note.kind === kind).map(note => clock(note.at)).join(locale === 'zh' ? '、' : ', ');
+  const faster = at('faster'); const trimmed = at('trimmed');
+  return locale === 'zh'
+    ? [faster && `${faster} 处配音语速偏快`, trimmed && `${trimmed} 处配音结尾被截短`].filter(Boolean).join('；') + '。'
+    : [faster && `Speech runs fast at ${faster}`, trimmed && `a line ends early at ${trimmed}`].filter(Boolean).join('; ') + '.';
+}
+
 export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, onOpenEditor }: { taskId: string; locale: 'zh' | 'en'; scene?: 'captions' | 'dubbing' | 'broll' | 'pip' | 'sfx' | 'subtitle-removal' | 'ugc-ad'; onBack: () => void; onOpenEditor: (projectId: string) => void }) {
   const zh = locale === 'zh';
   const isRemoval = scene === 'subtitle-removal';
@@ -390,6 +400,7 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
         {resumable && !busy && <button type="button" disabled={!file || disabled} onClick={() => void start(true)} className="text-ink-3 mt-3 w-full text-xs underline">{say('继续上次处理', 'Resume last run')}</button>}
         {retrySfx && <p className="text-ink-3 mb-2 text-xs">{say('重新匹配会发起新的 AI 请求，可能产生匹配费用。', 'Matching again starts a new AI request and may incur a matching charge.')}</p>}
         <SceneCreditPreview task={task} options={isSfx ? { ...options, sfx: normalizeSfxOptions(options.sfx) } : options} locale={locale} busy={busy || preparing} />
+        {isDubbing && !busy && !!task.dubbing?.fitNotes?.length && <p role="status" className="text-ink-3 mt-3 text-xs leading-relaxed">{dubbingFitSummary(task.dubbing.fitNotes, locale)}</p>}
         <button type="button" disabled={!file || !scope || disabled || (isUgc && (!options.ugcAd?.productName.trim() || !options.ugcAd?.callToAction.trim())) || (isRemoval && removalAvailable !== true) || (isBroll && !isUgc && !hasFootage(options.broll)) || (isDubbing && (!options.dubbing || !dubbingVoicesReady(task.transcript ?? [], options.dubbing)))} onClick={() => void start()} className={actionClass + ' mt-3 w-full'}>{busy || preparing ? <Loader2 size={16} className="animate-spin" /> : null}{busy ? say('正在生成…', 'Generating…') : retrySfx ? say('重新匹配音效', 'Match sounds again') : versions.length ? say('生成新版本', 'Generate new version') : isRemoval ? say('开始擦除', 'Start erasing') : isUgc ? say('生成广告', 'Generate ad') : (isBroll || isSfx) ? say('生成视频', 'Generate video') : isDubbing ? say('生成译制视频', 'Generate dubbed video') : say('生成字幕视频', 'Generate captioned video')}</button>
         </div>
       </section>

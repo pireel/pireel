@@ -35,3 +35,23 @@ it('keeps speaker turns, gaps and unknown speakers distinct', () => {
   expect(dubbingVoicesReady(transcript, { language: 'English', voiceId: 'first', lipSync: false })).toBe(false);
   expect(dubbingVoicesReady(transcript, { language: 'English', voiceId: 'first', lipSync: false, speakerVoices: { 'speaker:1': 'second', unidentified: 'third' } })).toBe(true);
 });
+
+describe('dubbing phrases', () => {
+  const word = (text: string, start: number, end: number) => ({ text, start, end });
+  it('splits a turn at clause punctuation and pauses, joining pieces too brief to time', async () => {
+    const { dubbingPhrases } = await import('./dubbing-task');
+    const transcript = [{ text: '哈喽大家好，今天收到了礼物，我们拿来给大家抽奖。', start: 0, end: 9, words: [
+      word('哈喽', 0, .3), word('大家好，', .3, .6), word('今天', 1, 1.5), word('收到了', 1.5, 2.2), word('礼物，', 2.2, 3), word('我们', 3.1, 3.5), word('拿来', 3.5, 4), word('给大家', 4.6, 5.5), word('抽奖。', 5.5, 6.4),
+    ] }];
+    expect(dubbingPhrases(transcript, 10).map(phrase => [phrase.text, phrase.start, phrase.end])).toEqual([
+      ['哈喽大家好，今天收到了礼物，', 0, 3], ['我们拿来', 3.1, 4], ['给大家抽奖。', 4.6, 6.4],
+    ]);
+  });
+  it('keeps lines without word timing whole and never joins two turns', async () => {
+    const { dubbingPhrases } = await import('./dubbing-task');
+    const phrases = dubbingPhrases([{ text: 'Hello there, friends.', start: 0, end: 2 }, { text: 'Next.', start: 5, end: 6 }], 8);
+    expect(phrases.map(phrase => [phrase.turn, phrase.text])).toEqual([[0, 'Hello there, friends.'], [1, 'Next.']]);
+    const latin = dubbingPhrases([{ text: 'Hi all', start: 0, end: 2, words: [word('Hi', 0, .5), word('all', .5, 1.2)] }], 3);
+    expect(latin[0].text).toBe('Hi all');
+  });
+});

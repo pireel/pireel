@@ -1,11 +1,18 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import type { CaptionTaskRecord } from './caption-task-store';
 import { firstNarrativeAssetId } from '@pireel/studio-engine/composition';
-const mocks = vi.hoisted(() => ({ asr: vi.fn(), translate: vi.fn(), render: vi.fn(), upload: vi.fn(), remote: vi.fn(), fetch: vi.fn(), wav: vi.fn() }));
+const mocks = vi.hoisted(() => ({ script: vi.fn(), asr: vi.fn(), translate: vi.fn(), render: vi.fn(), upload: vi.fn(), remote: vi.fn(), fetch: vi.fn(), wav: vi.fn() }));
 const cache = new Map<string, File>();
 vi.mock('./media', () => ({ durableFileSig: async () => 'rendered-sig', fileSig: (file: File) => `${file.name}:${file.size}`, transcribeFile: mocks.asr, probeVideoFile: async () => ({ width: 1920, height: 1080, durationSec: 8, hasAudio: true }) }));
 vi.mock('./local-media', () => ({ saveLocalVideo: async (file: File, sig: string) => { cache.set(sig, file); return true; }, loadLocalVideo: async (sig: string) => cache.get(sig) ?? null }));
-vi.mock('@pireel/studio-engine/providers', () => ({ studioProviders: () => ({ translate: mocks.translate, uploads: { upload: mocks.upload } }) }));
+// The dub script is written phrase by phrase; these tests have no word timing, so a turn is one phrase
+// and the script reads straight from the translation mock (a missing row leaves the turn unwritten).
+const dubbingScript = (...input: unknown[]) => mocks.script(...input);
+const scriptFromTranslation = async (turns: { text: string }[][], language: string, options: unknown) => {
+  const rows = await mocks.translate(turns.map((phrases, index) => ({ index, text: phrases.map(phrase => phrase.text).join('') })), language, options) as { index: number; text: string }[];
+  return turns.map((phrases, index) => { const row = rows.find(entry => entry.index === index); return row ? phrases.map((_, at) => at ? '' : row.text) : []; });
+};
+vi.mock('@pireel/studio-engine/providers', () => ({ studioProviders: () => ({ translate: mocks.translate, dubbingScript, uploads: { upload: mocks.upload } }) }));
 vi.mock('./remote-media', () => ({ materializeRemoteMedia: mocks.remote }));
 vi.mock('./audio-decode', () => ({ decodeAudioFile: async () => ({}), toMono: async () => new Float32Array(6 * 24000).fill(.2) }));
 vi.mock('./time-stretch', () => ({ signalsmithStretch: vi.fn(), tiledStretch: () => async () => [new Float32Array(6 * 24000)] }));
@@ -34,6 +41,7 @@ beforeEach(() => {
     return [{ text: '你好', start: 1, end: 7 }];
   });
   mocks.translate.mockResolvedValue([{ index: 0, text: 'Hello' }]);
+  mocks.script.mockImplementation(scriptFromTranslation);
   mocks.fetch.mockImplementation(async () => response({ status: 'succeeded', asset: { url: 'https://own/speech.mp3', key: 'uploads/owner/speech.mp3', durationSec: 6 } }));
   mocks.render.mockResolvedValue(new Blob(['dubbed video'], { type: 'video/mp4' }));
   mocks.remote.mockImplementation(async () => ({ file: new File(['remote'], 'media.mp3'), sig: 'remote' }));
@@ -173,13 +181,13 @@ it('keeps a single speaker at natural pace on each line instead of stretching ov
   expect(stretch.signalsmithStretch).not.toHaveBeenCalled();
 });
 
-it('fits a long line by shortening it, then a faster native voice, before any post stretch', async () => {
+it('fits a long line by shortening it (twice, tighter the second time), then a faster native voice, before any post stretch', async () => {
   const source = task(); source.durationSec = 6;
   mocks.asr.mockResolvedValue([{ text: '这是一句比较长的话', start: 0, end: 2 }, { text: '下一句', start: 3.5, end: 5 }]);
   mocks.translate.mockResolvedValue([{ index: 0, text: 'This is a rather long sentence indeed' }, { index: 1, text: 'Next one' }]);
   const speechBodies: Array<Record<string, unknown>> = []; const fitBodies: Array<Record<string, any>> = [];
   // Available for line 1: until line 2 starts at 3.5 s.
-  const durations = [4, 1.5, 3.8, 3.4];
+  const durations = [4, 1.5, 3.8, 3.6, 3.4];
   mocks.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body ?? '{}'));
     if (String(url).includes('dubbing-fit')) { fitBodies.push(body); return response({ rows: [{ index: 0, text: 'A long sentence' }], usage: { source: 'server', reference: 'fit', credits: 1 } }); }
@@ -190,11 +198,12 @@ it('fits a long line by shortening it, then a faster native voice, before any po
   const stretch = await import('./time-stretch');
   try { await generateDubbing(source, file, { signal: new AbortController().signal, checkpoint: async () => {}, progress: vi.fn() }); } finally { mono.mockRestore(); }
   // Shorten first: only the line that runs past its moment and the silence after it (3 s available).
-  expect(fitBodies).toHaveLength(1);
+  expect(fitBodies).toHaveLength(2);
   expect(fitBodies[0].rows).toEqual([{ index: 0, source: '这是一句比较长的话', text: 'This is a rather long sentence indeed', seconds: 4, targetSeconds: 3.33 }]);
+  expect(fitBodies[1].rows).toEqual([{ index: 0, source: '这是一句比较长的话', text: 'A long sentence', seconds: 3.8, targetSeconds: 2.98 }]);
   expect(speechBodies.map(body => [body.chunkIndex, body.attempt, body.speed, body.text])).toEqual([
     [0, 0, 1, 'This is a rather long sentence indeed'], [1, 0, 1, 'Next one'],
-    [0, 1, 1, 'A long sentence'], [0, 2, 1.11, 'A long sentence'],
+    [0, 1, 1, 'A long sentence'], [0, 3, 1, 'A long sentence'], [0, 2, 1.05, 'A long sentence'],
   ]);
   expect(stretch.signalsmithStretch).not.toHaveBeenCalled();
 });
@@ -235,4 +244,99 @@ it('uses inserted script edits for TTS and does not trust a stale speech signatu
   expect(JSON.parse(mocks.fetch.mock.calls[1][1].body).text).toBe('Changed after review');
   expect(result.task.dubbing?.translatedText).toBe('Changed after review');
   expect(result.task.dubbing?.alignedAudioSig).not.toBe(first.task.dubbing?.alignedAudioSig);
+});
+
+it('voices and places the dub phrase by phrase, where each phrase was said', async () => {
+  const source = task();
+  mocks.asr.mockResolvedValue([{ text: '大家好，今天收到了礼物。', start: 0, end: 6, words: [{ text: '大家好，', start: 0, end: 1.2 }, { text: '今天', start: 3, end: 3.8 }, { text: '收到了礼物。', start: 3.8, end: 6 }] }]);
+  mocks.script.mockResolvedValue([['Hi everyone,', 'today a gift arrived.']]);
+  const bodies: Array<Record<string, unknown>> = [];
+  mocks.fetch.mockImplementation(async (_url: string, init?: RequestInit) => { bodies.push(JSON.parse(String(init?.body))); return response({ status: 'succeeded', asset: { url: `https://own/${bodies.length}.mp3`, key: `k${bodies.length}`, durationSec: 1 } }); });
+  vi.spyOn(await import('./audio-decode'), 'toMono').mockImplementation(async () => new Float32Array(24000).fill(.2));
+  const result = await generateDubbing(source, file, { signal: new AbortController().signal, checkpoint: async () => {}, progress: vi.fn() });
+  expect(mocks.script.mock.calls[0][0]).toEqual([[{ text: '大家好，', seconds: 1.7 }, { text: '今天收到了礼物。', seconds: 3.5 }]]);
+  expect(bodies.map(body => [body.chunkIndex, body.text])).toEqual([[0, 'Hi everyone,'], [1, 'today a gift arrived.']]);
+  expect(result.task.dubbing?.translatedTurns).toEqual(['Hi everyone, today a gift arrived.']);
+  // The second phrase starts at 3 s, where it was said; the pause between stays silent.
+  const pcm = mocks.wav.mock.calls[0][0] as Float32Array;
+  expect(pcm[Math.round(.5 * 24000)]).toBeCloseTo(.2); expect(pcm[Math.round(2 * 24000)]).toBe(0); expect(pcm[Math.round(3.5 * 24000)]).toBeCloseTo(.2);
+  expect(result.task.dubbing?.fitNotes).toEqual([]);
+});
+
+it('speaks a line that cannot fit faster and cuts its end with a fade, reporting it instead of failing', async () => {
+  const source = task();
+  mocks.asr.mockResolvedValue([{ text: '还有一个包包', start: 7.3, end: 8 }]);
+  mocks.translate.mockResolvedValue([{ index: 0, text: 'And there is also a bag' }]);
+  mocks.fetch.mockImplementation(async (url: string) => String(url).includes('dubbing-fit')
+    ? response({ rows: [{ index: 0, text: 'And a bag' }] })
+    : response({ status: 'succeeded', asset: { url: 'https://own/s.mp3', key: 's', durationSec: 2 } }));
+  vi.spyOn(await import('./audio-decode'), 'toMono').mockImplementation(async () => new Float32Array(2 * 24000).fill(.2));
+  // Sped up as far as allowed (1.4x), the voice still outlasts the 0.7 s left before the picture ends.
+  vi.spyOn(await import('./time-stretch'), 'tiledStretch').mockReturnValue(async () => [new Float32Array(Math.round(2 / 1.4 * 24000)).fill(.2)]);
+  const result = await generateDubbing(source, file, { signal: new AbortController().signal, checkpoint: async () => {}, progress: vi.fn() });
+  expect(result.task.dubbing?.fitNotes).toEqual([{ at: 7.3, kind: 'trimmed' }]);
+  const pcm = mocks.wav.mock.calls[0][0] as Float32Array;
+  expect(pcm.length).toBe(8 * 24000);
+  // The cut fades to silence at the end of the picture.
+  expect(Math.abs(pcm[pcm.length - 1])).toBeLessThan(.01); expect(pcm[Math.round(7.5 * 24000)]).not.toBe(0);
+});
+
+it('lets a line run a little into the next one, which starts that much later, instead of cutting it', async () => {
+  const source = task();
+  mocks.asr.mockResolvedValue([{ text: '第一句', start: 0, end: 2 }, { text: '第二句', start: 2.5, end: 4 }]);
+  // One turn of two phrases (half a second apart).
+  mocks.script.mockResolvedValue([['One', 'Two']]);
+  // Line 1 needs 2.9 s but has 2.5 s before line 2: it runs 0.4 s over, so line 2 begins at 2.9 s.
+  mocks.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body));
+    return String(url).includes('dubbing-fit')
+      ? response({ rows: [{ index: 0, text: 'One' }] })
+      : response({ status: 'succeeded', asset: { url: `https://own/${body.chunkIndex}-${body.attempt}.mp3`, key: `k${body.chunkIndex}-${body.attempt}`, durationSec: body.chunkIndex ? 1 : 2.9 } });
+  });
+  let decoded = 0;
+  vi.spyOn(await import('./audio-decode'), 'toMono').mockImplementation(async () => new Float32Array(Math.round((decoded++ ? 1 : 2.9) * 24000)).fill(.2));
+  vi.spyOn(await import('./time-stretch'), 'tiledStretch').mockReturnValue(async ({ channels, rate }: { channels: Float32Array[]; rate: number }) => [channels[0]!.slice(0, Math.round(channels[0]!.length / rate))]);
+  const result = await generateDubbing(source, file, { signal: new AbortController().signal, checkpoint: async () => {}, progress: vi.fn() });
+  expect(result.task.dubbing?.fitNotes).toEqual([]);
+  const pcm = mocks.wav.mock.calls[0][0] as Float32Array;
+  // Line 1 is still speaking at 2.7 s (past line 2's own start), and nothing is cut.
+  expect(pcm[Math.round(2.7 * 24000)]).toBeCloseTo(.2);
+});
+
+it('speeds up lines back to back together when they only fit as a run, instead of cutting the later one', async () => {
+  const source = task(); source.durationSec = 5;
+  mocks.asr.mockResolvedValue([{ text: '第一句', start: 0, end: 2 }, { text: '第二句', start: 2.5, end: 4 }]);
+  mocks.script.mockResolvedValue([['One', 'Two']]);
+  // Each line keeps its length however it is re-voiced: 2.9 s and 3 s for 2.5 s each (the last line up to the picture's end).
+  mocks.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body));
+    return String(url).includes('dubbing-fit')
+      ? response({ rows: body.rows.map((row: { index: number; text: string }) => ({ index: row.index, text: row.text })) })
+      : response({ status: 'succeeded', asset: { url: `https://own/${body.chunkIndex}-${body.attempt}.mp3`, key: `k${body.chunkIndex}-${body.attempt}`, durationSec: body.chunkIndex ? 3 : 2.9 } });
+  });
+  const mono = vi.spyOn(await import('./audio-decode'), 'toMono'); let decoded = 0;
+  mono.mockImplementation(async () => new Float32Array(Math.round((decoded++ ? 3 : 2.9) * 24000)).fill(.2));
+  vi.spyOn(await import('./time-stretch'), 'tiledStretch').mockReturnValue(async ({ channels, rate }: { channels: Float32Array[]; rate: number }) => [channels[0]!.slice(0, Math.round(channels[0]!.length / rate))]);
+  const result = await generateDubbing(source, file, { signal: new AbortController().signal, checkpoint: async () => {}, progress: vi.fn() });
+  expect(result.task.dubbing?.fitNotes?.map(note => note.kind)).toEqual(['faster', 'faster']);
+});
+
+it('rewrites neighbouring phrases of a sentence together, linked, so their join stays clean', async () => {
+  const source = task();
+  mocks.asr.mockResolvedValue([{ text: '里面是一个', start: 0, end: 1.5 }, { text: '会员卡。', start: 1.5, end: 3 }, { text: '下一句。', start: 3.5, end: 4.5 }]);
+  mocks.script.mockResolvedValue([['Inside there is a', 'membership card.', 'Next.']]);
+  const fits: Array<{ rows: Array<Record<string, unknown>> }> = [];
+  mocks.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body));
+    if (String(url).includes('dubbing-fit')) { fits.push(body); return response({ rows: body.rows.map((row: { index: number; text: string }) => ({ index: row.index, text: row.text })) }); }
+    return response({ status: 'succeeded', asset: { url: `https://own/${body.chunkIndex}-${body.attempt}.mp3`, key: `k${body.chunkIndex}-${body.attempt}`, durationSec: [1.8, 2.3, .8][body.chunkIndex] } });
+  });
+  let decoded = 0;
+  vi.spyOn(await import('./audio-decode'), 'toMono').mockImplementation(async () => new Float32Array(Math.round([1.8, 2.3, .8][decoded++] * 24000)).fill(.2));
+  vi.spyOn(await import('./time-stretch'), 'tiledStretch').mockReturnValue(async ({ channels, rate }: { channels: Float32Array[]; rate: number }) => [channels[0]!.slice(0, Math.round(channels[0]!.length / rate))]);
+  await generateDubbing(source, file, { signal: new AbortController().signal, checkpoint: async () => {}, progress: vi.fn() });
+  expect(fits[0].rows.map(row => ({ index: row.index, before: row.before, after: row.after, continues: row.continues }))).toEqual([
+    { index: 0, before: undefined, after: undefined, continues: undefined },
+    { index: 1, before: undefined, after: 'Next.', continues: 0 },
+  ]);
 });

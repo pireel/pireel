@@ -30,7 +30,11 @@ export interface DubbingSpeech { url: string; key: string; durationSec: number; 
 export interface DubbingState {
   alignedPlanKey?: string; captionAudioSig?: string;
   captionTranscript?: AsrSegment[]; captionSignature?: string;
-  language?: string; sourceText?: string; translatedText?: string; translatedTurns?: string[]; turnsKey?: string; speech?: DubbingSpeech; speechParts?: DubbingSpeech[]; speechSignature?: string;
+  language?: string; sourceText?: string; translatedText?: string; translatedTurns?: string[]; turnsKey?: string;
+  /** The dub written phrase by phrase (see dubbingPhrases), reused while the phrases and language stay the same. */
+  translatedPhrases?: string[]; phrasesKey?: string;
+  /** Lines the timing could only fit by speaking faster than usual or cutting the end, for the user to see. */
+  fitNotes?: { at: number; kind: 'faster' | 'trimmed' }[]; speech?: DubbingSpeech; speechParts?: DubbingSpeech[]; speechSignature?: string;
   alignedAudioUrl?: string; alignedAudioKey?: string; alignedAudioSig?: string; sourceVideoUrl?: string; sourceVideoKey?: string; lipJobId?: string; lipResultUrl?: string;
   outputSig?: string; outputCached?: boolean; outputWidth?: number; outputHeight?: number;
 }
@@ -75,6 +79,46 @@ export function dubbingTurns(transcript: readonly AsrSegment[], durationSec: num
     } else turns.push({ id: `turn-${turns.length}`, speaker, text: segment.text.trim(), start, end });
   }
   return turns;
+}
+
+/** One short spoken phrase of a turn: the unit a dub is timed to, so it follows the speaker's rhythm. */
+export interface DubbingPhrase { turn: number; speaker: string; text: string; start: number; end: number }
+/** A clause ends at punctuation or at a pause this long between words. */
+const PHRASE_PAUSE_SEC = .35;
+/** Shorter pieces join a neighbour: a line this brief is too little to time a translation to. */
+const PHRASE_MIN_SEC = .8;
+const CLAUSE_END = /[，。！？；：、,.!?;:…]["'”’)）]*$/u;
+const latinEdge = (left: string, right: string) => /[A-Za-z0-9]$/.test(left) && /^[A-Za-z0-9]/.test(right);
+
+/**
+ * Split each turn into short phrases at clause punctuation and pauses, using word timing. Lines
+ * without word timing stay whole. Phrases keep their spoken time; a phrase never spans two turns.
+ */
+export function dubbingPhrases(transcript: readonly AsrSegment[], durationSec: number): DubbingPhrase[] {
+  const turns = dubbingTurns(transcript, durationSec);
+  const segments = [...transcript].filter(segment => segment.text.trim()).sort((a, b) => a.start - b.start);
+  return turns.flatMap((turn, index) => {
+    const pieces: Omit<DubbingPhrase, 'turn' | 'speaker'>[] = [];
+    for (const segment of segments.filter(segment => dubbingSpeakerKey(segment) === turn.speaker && segment.start >= turn.start - 1e-6 && segment.start < turn.end)) {
+      const words = (segment.words ?? []).filter(word => word.text.trim() && Number.isFinite(word.start) && Number.isFinite(word.end));
+      if (!words.length) { pieces.push({ text: segment.text.trim(), start: Math.max(turn.start, segment.start), end: Math.min(turn.end, segment.end) }); continue; }
+      let current: { text: string; start: number; end: number } | undefined;
+      words.forEach((word, at) => {
+        const text = word.text.trim();
+        current = current ? { ...current, text: current.text + (latinEdge(current.text, text) ? ' ' : '') + text, end: word.end } : { text, start: word.start, end: word.end };
+        const next = words[at + 1];
+        if (!next || CLAUSE_END.test(text) || next.start - word.end >= PHRASE_PAUSE_SEC) { pieces.push(current); current = undefined; }
+      });
+    }
+    // Too-short pieces join the previous piece (or the next one at the start of a turn).
+    const merged: typeof pieces = [];
+    for (const piece of pieces) {
+      const last = merged.at(-1);
+      if (last && (piece.end - piece.start < PHRASE_MIN_SEC || last.end - last.start < PHRASE_MIN_SEC)) merged[merged.length - 1] = { text: last.text + (latinEdge(last.text, piece.text) ? ' ' : '') + piece.text, start: last.start, end: piece.end };
+      else merged.push(piece);
+    }
+    return merged.map(piece => ({ turn: index, speaker: turn.speaker, text: piece.text, start: Math.max(0, piece.start), end: Math.min(durationSec, Math.max(piece.end, piece.start + .05)) }));
+  });
 }
 
 export function dubbingRate(audioDuration: number, windowDuration: number) {
