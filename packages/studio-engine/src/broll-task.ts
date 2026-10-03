@@ -51,34 +51,6 @@ export function validateBrollPlan(value: unknown, cues: BrollCue[], candidates: 
   });
 }
 
-/**
- * Give every file a shot when the plan left some out: each unused file takes the free spot farthest
- * from other shots (a cue or word start, kept under the same spacing, end and coverage rules), and
- * when no spot is free it takes over a replaceable shot (an AI still). Files that still do not fit
- * stay out.
- */
-export function placeEveryFile(placements: BrollPlacement[], cues: BrollCue[], candidates: BrollCandidate[], durationSec: number, replaceable: (placement: BrollPlacement) => boolean = () => false): BrollPlacement[] {
-  let result = [...placements];
-  const fileOf = (id: string) => candidates.find(c => c.id === id)?.assetId;
-  const spots = cues.flatMap(cue => [{ id: `broll-${cue.id}`, start: cue.start }, ...(cue.anchors ?? []).map(word => ({ id: `broll-${cue.id}-${word.id}`, start: word.start }))]);
-  const files = [...new Set(candidates.map(c => c.assetId))];
-  for (const file of files) {
-    if (result.some(p => fileOf(p.candidateId) === file)) continue;
-    const candidate = candidates.filter(c => c.assetId === file).sort((a, b) => (b.end - b.start) - (a.end - a.start))[0]!;
-    const covered = result.reduce((sum, p) => sum + p.duration, 0);
-    const fit = spots.flatMap(spot => {
-      const duration = Math.min(5, candidate.end - candidate.start, durationSec - spot.start);
-      if (duration < 1 || spot.start < 0 || covered + duration > durationSec * .6 || result.some(p => p.id === spot.id)) return [];
-      const clear = result.every(p => spot.start >= p.start + p.duration + 1 || spot.start + duration + 1 <= p.start);
-      return clear ? [{ ...spot, duration, room: Math.min(...result.map(p => Math.abs(p.start - spot.start)), Infinity) }] : [];
-    }).sort((a, b) => b.room - a.room)[0];
-    if (fit) { result.push({ id: fit.id, candidateId: candidate.id, start: fit.start, duration: fit.duration }); continue; }
-    const taken = result.filter(replaceable).sort((a, b) => b.duration - a.duration)[0];
-    if (taken) result = result.map(p => p === taken ? { id: p.id, candidateId: candidate.id, start: p.start, duration: Math.min(p.duration, candidate.end - candidate.start), ...(p.layout ? { layout: p.layout } : {}) } : p);
-  }
-  return result.filter(p => p.duration >= 1).sort((a, b) => a.start - b.start);
-}
-
 export function resolveBrollEdits(placements: BrollPlacement[], candidates: BrollCandidate[], options: BrollOptions, durationSec: number) {
   const manual = options.manualClips ?? [];
   if (manual.length > 100) throw new Error('最多添加 100 个镜头。');
