@@ -132,7 +132,7 @@ export function dubbingVideoDocument(id: string, sig: string, url: string, name:
   return document;
 }
 
-/** Current standalone UI keeps legacy lip jobs readable but never starts another one. */
+/** Scene defaults: captions on unless turned off; lip sync only when chosen. */
 export function dubbingSceneOptions(options: DubbingOptions): DubbingOptions {
-  return { ...options, lipSync: false, captions: options.captions ?? true };
+  return { ...options, lipSync: options.lipSync === true, captions: options.captions ?? true };
 }
