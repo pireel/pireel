@@ -47,6 +47,7 @@
     "./pip-draft-page": "./src/pip-draft-page.tsx",
     "./scene-form-controls": "./src/scene-form-controls.tsx",
     "./caption-task-style": "./src/caption-task-style.tsx",
+    "./caption-stage-sample": "./src/caption-stage-sample.tsx",
     "./dubbing-settings": "./src/dubbing-settings.tsx",
     "./scene-media-picker": "./src/scene-media-picker.tsx",
     "./scene-playback": "./src/scene-playback.tsx",

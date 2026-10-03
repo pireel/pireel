@@ -8,7 +8,8 @@ import type { CaptionTaskRecord, CaptionUploadProgress } from './caption-task-st
 import { loadCurrentUser } from './current-user';
 import { PipSettings } from './pip-settings';
 import { PipShowcase } from './scene-upload-showcases';
-import { SceneBrandPicker } from './scene-brand-picker';
+import { SceneBrandPicker, withSceneBrand } from './scene-brand-picker';
+import { studioProviders } from '@pireel/studio-engine/providers';
 
 const actionClass = 'bg-ink text-bg inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40';
 
@@ -26,7 +27,12 @@ export function PipDraftPage({ locale, onBack, onCreated }: { locale: 'zh' | 'en
   const [error, setError] = useState('');
   const input = useRef<HTMLInputElement>(null);
   const alive = useRef(true);
+  const brandPicked = useRef(false);
   useEffect(() => { alive.current = true; void loadCurrentUser().then(user => { if (alive.current && user) setScope(user.user_id); }); return () => { alive.current = false; }; }, []);
+  // Start from the user's current brand unless they already picked one here.
+  useEffect(() => {
+    void studioProviders().brands?.current?.().then(kit => { if (kit && alive.current && !brandPicked.current) setOptions(current => withSceneBrand(current, kit)); }, () => {});
+  }, []);
   // Footage cards need an owner scope only; the project itself is created with the source video.
   const draft = { id: 'draft', scope, name: '', sourceSig: '', width: 1080, height: 1920, durationSec: 0, options, stage: 'ready', updatedAt: 0 } as CaptionTaskRecord;
   const broll: BrollOptions = options.broll ?? { assets: [], captions: true, pip: DEFAULT_PIP_OPTIONS };
@@ -58,7 +64,7 @@ export function PipDraftPage({ locale, onBack, onCreated }: { locale: 'zh' | 'en
             </button>
             {error && <p role="alert" className="text-ink mt-2 text-xs">{error}</p>}
           </section>
-          <SceneBrandPicker options={options} locale={locale} disabled={uploading} onChange={update => setOptions(current => update(current))} />
+          <SceneBrandPicker options={options} locale={locale} disabled={uploading} onChange={update => { brandPicked.current = true; setOptions(current => update(current)); }} />
           {scope && <PipSettings task={draft} value={broll} disabled={uploading} locale={locale} onBusy={setPreparing} onChange={value => setOptions(current => ({ ...current, broll: value }))} />}
         </div>
         <div className="bg-bg sticky bottom-0 z-20 pt-3 pb-[max(0.5rem,env(safe-area-inset-bottom))]">

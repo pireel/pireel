@@ -140,9 +140,9 @@ export interface CuratedAssetProvider {
 }
 
 export interface StudioProviders {
-  /** The signed-in user's brand kits (hosted feature; absent = scenes hide the brand picker). */
-  /** The user's brand kits; `manage` opens the place where they are created and edited. */
-  brands?: { list: () => Promise<import('./brand-kit').BrandKit[]>; manage?: () => void };
+  /** The signed-in user's brand kits (hosted feature; absent = scenes hide the brand picker). `current`
+   *  is the brand new scene projects start from; `manage` opens where brands are created and edited. */
+  brands?: { list: () => Promise<import('./brand-kit').BrandKit[]>; current?: () => Promise<import('./brand-kit').BrandKit | null>; manage?: () => void };
   workflowEnvironment?: () => Promise<{ scope: string; revision: string }>;
   composer: BlockComposer;
   transcriber: Transcriber;
