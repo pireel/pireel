@@ -2,7 +2,6 @@ import { SCENE_ENTRY_ICONS, SCENE_ICON_STYLE } from './workflow-art';
 
 const SCENES = [
   { id: 'captions', zh: 'AI 字幕', en: 'AI Captions', label: 'AI Captions' },
-  { id: 'ugc-ad', zh: 'UGC 广告', en: 'UGC Ad' },
   { id: 'subtitle-removal', zh: '智能擦除', en: 'AI Eraser' },
   { id: 'dubbing', zh: '视频译制', en: 'Video Dubbing', label: 'Video Dubbing' },
   { id: 'pip', zh: '画中画', en: 'Picture in picture' },
@@ -16,7 +15,7 @@ const iconClass = 'size-14 object-contain transition-transform group-hover:scale
 export function WorkflowLauncher({ locale, onSelect, onCreateAgent }: { locale: 'zh' | 'en'; onSelect: (id: string) => void; onCreateAgent?: () => void }) {
   return <div className="mb-8 flex flex-wrap gap-4">
     {SCENES.map(scene => <button key={scene.id} type="button" onClick={() => onSelect(scene.id)} aria-label={scene[locale]} className={entryClass}>
-      <img src={SCENE_ENTRY_ICONS[scene.id]} width={56} height={56} alt="" className={iconClass} style={scene.id === 'captions' || scene.id === 'ugc-ad' || scene.id === 'sfx' || scene.id === 'image' || scene.id === 'video' ? undefined : SCENE_ICON_STYLE} />
+      <img src={SCENE_ENTRY_ICONS[scene.id]} width={56} height={56} alt="" className={iconClass} style={scene.id === 'captions' || scene.id === 'sfx' || scene.id === 'image' || scene.id === 'video' ? undefined : SCENE_ICON_STYLE} />
       <span>{'label' in scene ? scene.label : scene[locale]}</span>
     </button>)}
     {onCreateAgent && <button type="button" onClick={onCreateAgent} className={entryClass}>
