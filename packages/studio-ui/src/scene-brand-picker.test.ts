@@ -1,24 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { emptyBrandKit } from '@pireel/studio-engine/brand-kit';
+import { emptyPlaybook } from '@pireel/studio-engine/brand-playbook';
 import { withSceneBrand } from './scene-brand-picker';
 import { sceneProjectOptions } from './caption-upload-dialog';
 
 describe('withSceneBrand', () => {
-  it('starts a scene from a copy of the brand, its captions and its aspect', () => {
-    const kit = { ...emptyBrandKit('brand_1', 'Mine'), framing: { aspect: '16:9' as const, treatment: 'full' as const }, captions: { preset: 'ln-clean', color: '#ffcc00' } };
-    const options = withSceneBrand(sceneProjectOptions('dubbing'), kit);
+  it('starts a scene from a copy of the playbook and its captions, never its aspect', () => {
+    const playbook = { ...emptyPlaybook('brand_1', 'Mine'), fixed: { captions: { on: true, style: { preset: 'ln-clean', color: '#ffcc00' } } } };
+    const base = sceneProjectOptions('dubbing');
+    const options = withSceneBrand(base, playbook);
     expect(options.brand).toMatchObject({ id: 'brand_1', name: 'Mine' });
     expect(options.brand).not.toHaveProperty('source');
     expect(options.caption).toMatchObject({ preset: 'ln-clean', color: '#ffcc00' });
-    expect(options.aspect).toBe('landscape');
+    // The footage decides the canvas shape, not the brand.
+    expect(options.aspect).toBe(base.aspect);
     expect(options.dubbing).toBeDefined();
     // Later brand edits never reach the project's copy.
-    kit.captions.color = '#000000';
-    expect(options.brand!.captions.color).toBe('#ffcc00');
+    playbook.fixed.captions.style.color = '#000000';
+    expect(options.brand!.fixed.captions!.style!.color).toBe('#ffcc00');
   });
 
   it('removes the brand and keeps the rest', () => {
-    const branded = withSceneBrand(sceneProjectOptions('captions'), emptyBrandKit('brand_1', 'Mine'));
+    const branded = withSceneBrand(sceneProjectOptions('captions'), emptyPlaybook('brand_1', 'Mine'));
     const plain = withSceneBrand(branded, null);
     expect(plain).not.toHaveProperty('brand');
     expect(plain.caption).toEqual(branded.caption);

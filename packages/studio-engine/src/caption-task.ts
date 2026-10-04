@@ -5,7 +5,8 @@ import { removeSrcRanges } from './trim';
 import { BASE_CAPTION_FONT_PX, getCaptionPreset } from './caption-presets';
 import { captionLineSegments } from './caption-layout-metrics';
 import { wordsFromText } from './caption-fx';
-import { brandAppearance, type BrandSnapshot } from './brand-kit';
+import type { PlaybookSnapshot } from './brand-playbook';
+import { playbookAppearance } from './brand-media';
 import { DEFAULT_CAPTION_WIDTH_PCT } from './composition-core';
 
 /** A sample line per script, used to reserve the translation line's height before real text exists. */
@@ -20,7 +21,7 @@ export const CAPTION_TRANSLATION_LANGUAGES = DUBBING_LANGUAGES.map(language => (
 export type CaptionTranslationLanguage = typeof DUBBING_LANGUAGES[number]['id'];
 export interface CaptionTaskOptions {
   /** Brand picked for this scene, copied at pick time; its captions seed `caption`. */
-  brand?: BrandSnapshot;
+  brand?: PlaybookSnapshot;
   ugcAd?: import('./ugc-ad').UgcAdOptions; subtitleRemoval?: import('./subtitle-removal').SubtitleRemovalOptions; sfx?: import('./sfx-task').SfxOptions; broll?: import('./broll-task').BrollOptions; dubbing?: import('./dubbing-task').DubbingOptions;
   /** The main caption line in the Studio caption model (look, animation, font, colours, position, size).
    *  Omitted fields take the Studio defaults; the scene only adds safe-area placement. */
@@ -119,7 +120,7 @@ export function buildCaptionBaseDocument(input: {
   const comp = { ...emptyComposition(), ...canvas, video: { url: input.sourceUrl, durationSec: input.durationSec }, shots };
   const document = compositionToEditorDocument({ projectId: input.projectId, composition: comp, videoSig: input.sourceSig }).document;
   if (input.sourceName) for (const asset of Object.values(document.assets)) if (asset.kind === 'video') asset.label = input.sourceName;
-  if (input.options.brand) document.appearance = { ...document.appearance, ...brandAppearance(input.options.brand) };
+  if (input.options.brand) document.appearance = { ...document.appearance, ...playbookAppearance(input.options.brand) };
   return document;
 }
 

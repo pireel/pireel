@@ -1,21 +1,20 @@
 import { useEffect, useState } from 'react';
 import { Plus } from 'lucide-react';
-import { brandCaptionStyle, brandSnapshot, type BrandKit } from '@pireel/studio-engine/brand-kit';
-import { brandEditParams, brandHighlightsKeywords } from '@pireel/studio-engine/brand-edit-params';
+import { playbookSnapshot, type BrandPlaybook } from '@pireel/studio-engine/brand-playbook';
+import { playbookCaptionStyle } from '@pireel/studio-engine/brand-media';
+import { playbookEditParams, playbookHighlightsKeywords } from '@pireel/studio-engine/brand-edit-params';
 import type { CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { SceneSelect } from './scene-form-controls';
 
-const ASPECT = { '9:16': 'portrait', '16:9': 'landscape', '1:1': 'square' } as const;
-
-/** A scene's options with a brand applied (a copy taken now), or with the brand removed when `kit` is null.
- *  The brand's captions become the scene's caption style; later edits in the panel override them. */
-export function withSceneBrand(options: CaptionTaskOptions, kit: BrandKit | null): CaptionTaskOptions {
-  if (!kit) { const { brand: _brand, edit: _edit, ...rest } = options; return rest; }
-  const brand = brandSnapshot(kit);
-  const next = { ...options, brand, caption: brandCaptionStyle(brand), aspect: ASPECT[kit.framing.aspect] };
-  // A one-click edit also takes the brand's editing habits: pause trimming, loudness, punch-ins, key words.
-  return options.oneClick ? { ...next, edit: brandEditParams(brand), shortenPauses: brand.pacing.trimSilence, highlights: brandHighlightsKeywords(brand) } : next;
+/** A scene's options with a brand applied (a copy taken now), or with the brand removed when `playbook` is
+ *  null. The brand's caption look becomes the scene's; the picture's aspect stays the footage's — a brand
+ *  never reshapes a video. A one-click edit also takes the brand's editing habits and moves. */
+export function withSceneBrand(options: CaptionTaskOptions, playbook: BrandPlaybook | null): CaptionTaskOptions {
+  if (!playbook) { const { brand: _brand, edit: _edit, ...rest } = options; return rest; }
+  const brand = playbookSnapshot(playbook);
+  const next = { ...options, brand, caption: playbookCaptionStyle(brand) };
+  return options.oneClick ? { ...next, edit: playbookEditParams(brand), shortenPauses: brand.fixed.pauses?.mode !== 'natural', highlights: playbookHighlightsKeywords(brand) } : next;
 }
 
 /** Picks one of the user's brands for this scene. The scene keeps a copy taken now, so later edits to
@@ -25,7 +24,7 @@ export function SceneBrandPicker({ options, locale, disabled, onChange }: {
   onChange: (update: (current: CaptionTaskOptions) => CaptionTaskOptions) => void;
 }) {
   const provider = studioProviders().brands;
-  const [brands, setBrands] = useState<BrandKit[] | null>(null);
+  const [brands, setBrands] = useState<BrandPlaybook[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     if (!provider) return;
@@ -50,7 +49,7 @@ export function SceneBrandPicker({ options, locale, disabled, onChange }: {
       onChange(options => withSceneBrand(options, kit));
     }} />
     {error ? <p role="alert" className="text-ink-3 mt-2 text-xs">{say('品牌列表加载失败：', 'Could not load brands: ')}{error}</p>
-      : current ? <p className="text-ink-3 mt-2 text-xs">{say('使用选择时的品牌版本：字幕、配色', 'Uses the brand as it was when picked: captions, colors')}{current.logo ? say('、Logo', ', logo') : ''}{current.intro || current.outro ? say('、片头片尾', ', intro/outro') : ''}{say('。', '.')}</p>
+      : current ? <p className="text-ink-3 mt-2 text-xs">{say('使用选择时的品牌版本：字幕、配色', 'Uses the brand as it was when picked: captions, colors')}{current.fixed.logo ? say('、Logo', ', logo') : ''}{current.fixed.intro || current.fixed.outro ? say('、片头片尾', ', intro/outro') : ''}{say('。', '.')}</p>
       : brands?.length === 0 ? <p className="text-ink-3 mt-2 text-xs">{say('还没有品牌，可在首页「我的品牌」创建。', 'No brands yet — create one under My brand on the Studio home.')}</p> : null}
   </div>;
 }

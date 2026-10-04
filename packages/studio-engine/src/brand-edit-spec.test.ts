@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { logoCandidate, measureVideo, textLayers, type VideoMeasures, type VideoObservation } from './brand-analysis';
 import { brandSeries, deriveBrandEditSpec, seriesOutliers, silenceMode, validateBrandEditSpec } from './brand-edit-spec';
-import { validateBrandKit, emptyBrandKit } from './brand-kit';
-import { parseStyleFacets } from './brand-style-spec';
+import { parseStyleFacets } from './brand-reading';
 
 const sentence = 'so the first thing you do is write down every expense then you cut what hurts'.split(' ');
 
@@ -155,13 +154,6 @@ describe('derived edit spec', () => {
     const spec = deriveBrandEditSpec(Array.from({ length: 4 }, (_, i) => measures(`v${i}`, { vertical: false, captionSync: 0, captionCoverage: 0 })));
     expect(spec.platform).toBe('horizontal_long');
     expect(spec.captions.presence.value).toBe('never');
-  });
-
-  it('is accepted by the brand kit validator and rejected when malformed', () => {
-    const kit = { ...emptyBrandKit('b1', 'Me'), spec: deriveBrandEditSpec(Array.from({ length: 3 }, (_, i) => measures(`v${i}`))) };
-    expect(() => validateBrandKit(kit)).not.toThrow();
-    const broken = structuredClone(kit); broken.spec!.audio.targetLufs.value = 3;
-    expect(() => validateBrandKit(broken)).toThrow(/targetLufs/);
   });
 });
 

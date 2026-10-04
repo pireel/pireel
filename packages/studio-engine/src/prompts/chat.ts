@@ -37,7 +37,7 @@ export function wrapAgentTranscript(body: string): string {
   return wrapSpokenTranscript(bounded);
 }
 
-/** The creator's brand in use (the host resolves it; `brief` from brand-edit-params `brandAgentBrief`). */
+/** The creator's brand in use (the host resolves it; `brief` from brand-edit-params `playbookAgentBrief`). */
 export interface ResolvedBrand {
   name: string;
   brief: string;

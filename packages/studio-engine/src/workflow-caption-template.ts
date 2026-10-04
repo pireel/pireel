@@ -2,8 +2,8 @@ import { contractedCapability } from './workflow-node-contracts';
 import { workflowLiteral as literal, type WorkflowBinding, type WorkflowCapability, type WorkflowDefinition, type WorkflowStep } from './workflow';
 import type { CaptionTaskOptions } from './caption-task';
 import { workflowJson } from './workflow-artifacts';
-import { brandHasMedia } from './brand-kit';
-import { brandEditGuide } from './brand-edit-params';
+import { playbookHasMedia } from './brand-media';
+import { playbookEditGuide } from './brand-edit-params';
 export const sceneCapability = (id: string, inputs: string[], outputs: string[], paid = false): WorkflowCapability => contractedCapability({
   id, version: 2, label: { zh: id, en: id }, requirements: [], environments: ['browser'],
   effect: paid ? 'generate' : 'edit', retry: paid ? 'reconcile-first' : 'safe', available: true,
@@ -20,8 +20,8 @@ export const CAPTION_WORKFLOW_CAPABILITIES = [
   sceneCapability('brand.apply', ['document', 'brand'], ['document']),
   sceneCapability('brand.copy', ['transcript', 'request', 'templates', 'document'], ['copy'], true),
   sceneCapability('brand.texts', ['document', 'copy', 'templates'], ['document']),
-  sceneCapability('edit.plan', ['transcript', 'guide', 'punch', 'document'], ['targets'], true),
-  sceneCapability('framing.punch-in', ['document', 'transcript', 'punch', 'targets'], ['document']),
+  sceneCapability('edit.plan', ['transcript', 'guide', 'moves', 'document'], ['picks'], true),
+  sceneCapability('edit.moves', ['document', 'transcript', 'moves', 'picks'], ['document']),
   sceneCapability('audio.loudness', ['document', 'media', 'targetLufs'], ['document']),
   sceneCapability('video.render', ['document', 'media'], ['media', 'document']),
 ];
@@ -40,7 +40,7 @@ export function captionLayoutOptions(options: CaptionTaskOptions): CaptionTaskOp
 export function captionTailSteps(options: CaptionTaskOptions, document: WorkflowBinding, transcript: WorkflowBinding, media: WorkflowBinding, render = true): WorkflowStep[] {
   const steps: WorkflowStep[] = [];
   const captions = options.sfx ? ('captions' in options.sfx && options.sfx.captions) : !options.broll || options.broll.captions;
-  const punchIn = options.edit?.punchIn;
+  const moves = options.edit?.moves;
   if (captions && options.highlights) steps.push(sceneStep('highlight', 'captions.highlight', { transcript }));
   if (captions) {
     steps.push(sceneStep('plan', 'captions.plan', { document, transcript: options.highlights ? stepOutput('highlight', 'transcript') : transcript, layout: sceneLiteral(captionLayoutOptions(options)) }));
@@ -48,22 +48,22 @@ export function captionTailSteps(options: CaptionTaskOptions, document: Workflow
     steps.push(sceneStep('captions', 'captions.apply', { document, plan: stepOutput('plan', 'plan'), translation: options.translationLanguage ? stepOutput('translate', 'value') : literal(null), style: sceneLiteral(options) }));
     document = stepOutput('captions', 'document');
   }
-  if (punchIn) {
-    // Where to punch in is a judgement on this video's lines, made against the creator's own rules.
-    steps.push(sceneStep('editplan', 'edit.plan', { transcript, guide: literal(options.brand ? brandEditGuide(options.brand) : ''), punch: sceneLiteral(punchIn), document }));
-    steps.push(sceneStep('punch', 'framing.punch-in', { document, transcript, punch: sceneLiteral(punchIn), targets: stepOutput('editplan', 'targets') }));
-    document = stepOutput('punch', 'document');
+  if (moves && (moves.punchIn || moves.transition)) {
+    // Where each move lands is a judgement on this video's lines, made against the creator's own triggers.
+    steps.push(sceneStep('editplan', 'edit.plan', { transcript, guide: literal(options.brand ? playbookEditGuide(options.brand) : ''), moves: sceneLiteral(moves), document }));
+    steps.push(sceneStep('moves', 'edit.moves', { document, transcript, moves: sceneLiteral(moves), picks: stepOutput('editplan', 'picks') }));
+    document = stepOutput('moves', 'document');
   }
-  const texts = options.edit?.texts; const templates = options.brand?.templates;
+  const texts = options.edit?.texts; const templates = options.brand?.fixed.bands;
   if (texts && templates && ((texts.header && templates.header) || (texts.hookLabel && templates.hookLabel))) {
-    // The bands' look is the brand's; their words are written for this video.
-    const request = { header: !!(texts.header && templates.header), hookLabel: !!(texts.hookLabel && templates.hookLabel), examples: options.brand?.spec?.textOverlays.header.value.examples ?? [] };
+    // The bands' look is the brand's; their words are written for this video, in the creator's manner.
+    const request = { header: !!(texts.header && templates.header), hookLabel: !!(texts.hookLabel && templates.hookLabel), examples: options.brand?.generation.headlines?.examples ?? [] };
     steps.push(sceneStep('copy', 'brand.copy', { transcript, request: sceneLiteral(request), templates: sceneLiteral(templates), document }));
     steps.push(sceneStep('texts', 'brand.texts', { document, copy: stepOutput('copy', 'copy'), templates: sceneLiteral(templates) }));
     document = stepOutput('texts', 'document');
   }
   // After captions: the intro/outro ripple the captions along with the speech they follow.
-  if (brandHasMedia(options.brand)) {
+  if (playbookHasMedia(options.brand)) {
     steps.push(sceneStep('brand', 'brand.apply', { document, brand: sceneLiteral(options.brand) }));
     document = stepOutput('brand', 'document');
   }

@@ -1,6 +1,6 @@
 import type { VideoMeasures } from './brand-analysis';
 import { brollTier, classifyArchetype, primaryDevice, type ArchetypeId, type BrollTier, type LayoutMode, type PrimaryDevice } from './brand-visual';
-import type { StyleFacetKey, StyleFacetListKey, VideoStyleFacets } from './brand-style-spec';
+import type { StyleFacetKey, StyleFacetListKey, VideoStyleFacets } from './brand-reading';
 
 /**
  * The executable half of a brand: structured edit parameters reduced from per-video measures, each

@@ -1,7 +1,7 @@
 import { imageThumb } from '@pireel/ui/image-url';
-import { applyBrandMedia, type BrandSnapshot } from '@pireel/studio-engine/brand-kit';
-import { bandCapacity, editPlanInput, punchInUpdates, templateTextItem, type CaptionEditParams, type PunchTarget } from '@pireel/studio-engine/brand-edit-params';
-import type { BrandTemplates } from '@pireel/studio-engine/brand-kit';
+import { applyPlaybookMedia } from '@pireel/studio-engine/brand-media';
+import type { PlaybookSnapshot, FixedHabits } from '@pireel/studio-engine/brand-playbook';
+import { bandCapacity, bandTextItem, editPlanInput, punchInUpdates, transitionItems, type CaptionEditParams, type PlanPick } from '@pireel/studio-engine/brand-edit-params';
 import { applyDocumentTransaction } from '@pireel/studio-engine/document-transaction';
 import { integratedLoudness, loudnessGainDb } from '@pireel/studio-engine/loudness-lufs';
 import { phraseWordIndexes, rowWords } from '@pireel/studio-engine/caption-highlights';
@@ -63,14 +63,14 @@ export function captionWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
       return { translation: workflowJson(await store.put('translation', 'captions', translation)), value: workflowJson(translation) };
     }, project: outputs => { const value = outputs.value as unknown as CaptionTranslation; return { translation: { language: value.language, sourceKey: value.sourceKey } }; } }),
     node('brand.apply', { stage: 'styling', async execute(args) {
-      const document = applyBrandMedia(store.read(args.document, 'document'), args.brand as unknown as BrandSnapshot);
+      const document = applyPlaybookMedia(store.read(args.document, 'document'), args.brand as unknown as PlaybookSnapshot);
       return { document: workflowJson(await store.put('document', 'brand', document)) };
     }, project: outputs => ({ document: store.read<EditorDocumentV2>(outputs.document, 'document') }) }),
     node('brand.copy', { stage: 'styling', async execute(args, context) {
       const write = studioProviders().brandCopy;
       if (!write) throw new Error('标题栏文字服务尚未连接，请在品牌预设里关闭标题栏后重试。');
       const request = args.request as unknown as { header: boolean; hookLabel: boolean; examples: string[] };
-      const templates = args.templates as unknown as BrandTemplates;
+      const templates = args.templates as unknown as NonNullable<FixedHabits['bands']>;
       const canvas = store.read<EditorDocumentV2>(args.document, 'document').canvas;
       const transcript = store.read<AsrSegment[]>(args.transcript, 'transcript').map(segment => segment.text).join('\n');
       const copy = await write({
@@ -83,12 +83,12 @@ export function captionWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     node('brand.texts', { stage: 'styling', async execute(args) {
       const document = store.read<EditorDocumentV2>(args.document, 'document');
       const copy = args.copy as unknown as { header: string | null; hookLabel: string | null };
-      const templates = args.templates as unknown as BrandTemplates;
+      const templates = args.templates as unknown as NonNullable<FixedHabits['bands']>;
       const track = document.timeline.tracks.find(item => item.id === document.semantics.primaryNarrativeTrackId);
       const endSec = Math.max(0, ...(track?.clips.map(clip => (clip.startFrame + clip.durationFrames) / document.canvas.fps) ?? [0]));
       const items = [
-        ...(copy.header && templates.header ? [templateTextItem('brand-header', copy.header, templates.header, document.canvas, 0, endSec, 2)] : []),
-        ...(copy.hookLabel && templates.hookLabel ? [templateTextItem('brand-hook-label', copy.hookLabel, templates.hookLabel, document.canvas, 0, Math.min(templates.hookLabel.durationSec, endSec), 1)] : []),
+        ...(copy.header && templates.header ? [bandTextItem('brand-header', copy.header, templates.header, document.canvas, 0, endSec, 2)] : []),
+        ...(copy.hookLabel && templates.hookLabel ? [bandTextItem('brand-hook-label', copy.hookLabel, templates.hookLabel, document.canvas, 0, Math.min(templates.hookLabel.durationSec, endSec), 1)] : []),
       ];
       let next = document;
       if (items.length) {
@@ -100,30 +100,38 @@ export function captionWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     }, project: outputs => ({ document: store.read<EditorDocumentV2>(outputs.document, 'document') }) }),
     node('edit.plan', { stage: 'emphasizing', async execute(args, context) {
       const plan = studioProviders().editPlan;
-      if (!plan) throw new Error('剪辑规划服务尚未连接，请关闭「重点处推近」后重试。');
+      if (!plan) throw new Error('剪辑规划服务尚未连接，请在品牌预设里关闭推近和转场后重试。');
       const transcript = store.read<AsrSegment[]>(args.transcript, 'transcript');
-      const punch = args.punch as unknown as NonNullable<CaptionEditParams['punchIn']>;
-      const input = editPlanInput(store.read<EditorDocumentV2>(args.document, 'document'), transcript, punch);
-      if (!input.rows.length) return { targets: workflowJson([]) };
-      const { punches } = await plan({ ...input, guide: String(args.guide ?? ''), minGapSec: punch.minGapSec }, { signal: host.hooks.signal, sceneRun: host.hooks.sceneRun, onUsage: context.recordUsage });
-      const targets: PunchTarget[] = punches.map(pick => {
+      const moves = args.moves as unknown as NonNullable<CaptionEditParams['moves']>;
+      const input = editPlanInput(store.read<EditorDocumentV2>(args.document, 'document'), transcript, moves);
+      if (!input.rows.length || !input.moves.length) return { picks: workflowJson([]) };
+      const { picks } = await plan({ ...input, guide: String(args.guide ?? '') }, { signal: host.hooks.signal, sceneRun: host.hooks.sceneRun, onUsage: context.recordUsage });
+      const placed: PlanPick[] = picks.map(pick => {
         const segment = transcript[pick.index];
         const found = segment ? phraseWordIndexes(rowWords(segment), pick.text) : null;
         if (!found?.length) throw new Error(`剪辑规划的落点与原句对不上：「${pick.text}」`);
-        return { sentenceIndex: pick.index, wordIndex: found[0]! };
+        return { kind: pick.kind, sentenceIndex: pick.index, wordIndex: found[0]!, variant: pick.variant };
       });
-      return { targets: workflowJson(targets) };
+      return { picks: workflowJson(placed) };
     } }),
-    node('framing.punch-in', { stage: 'styling', async execute(args) {
+    node('edit.moves', { stage: 'styling', async execute(args) {
       const document = store.read<EditorDocumentV2>(args.document, 'document');
-      const updates = punchInUpdates(document, store.read<AsrSegment[]>(args.transcript, 'transcript'), args.punch as unknown as NonNullable<CaptionEditParams['punchIn']>, (args.targets as unknown as PunchTarget[] | null) ?? undefined);
+      const transcript = store.read<AsrSegment[]>(args.transcript, 'transcript');
+      const moves = args.moves as unknown as NonNullable<CaptionEditParams['moves']>;
+      const picks = args.picks as unknown as PlanPick[];
+      const updates = moves.punchIn ? punchInUpdates(document, transcript, moves.punchIn, picks) : [];
+      const transitions = moves.transition ? transitionItems(document, transcript, moves.transition, picks) : [];
+      const ops = [
+        ...(updates.length ? [{ op: 'narrative.patch' as const, input: { updates } }] : []),
+        ...transitions.map(item => ({ op: 'agent.timeline' as const, input: { tool: 'add_transition', input: item } })),
+      ];
       let next = document;
-      if (updates.length) {
-        const result = applyDocumentTransaction(document, { ops: [{ op: 'narrative.patch', input: { updates } }] }, { projectId: 'caption-scene' });
+      if (ops.length) {
+        const result = applyDocumentTransaction(document, { ops }, { projectId: 'caption-scene' });
         if (!result.ok) throw new Error(result.error.message);
         next = result.document;
       }
-      return { document: workflowJson(await store.put('document', 'punch-in', next)) };
+      return { document: workflowJson(await store.put('document', 'moves', next)) };
     }, project: outputs => ({ document: store.read<EditorDocumentV2>(outputs.document, 'document') }) }),
     node('audio.loudness', { stage: 'styling', async execute(args) {
       // The export applies the master gain; it is measured here once, on the source speech.

@@ -142,7 +142,7 @@ export interface CuratedAssetProvider {
 export interface StudioProviders {
   /** The signed-in user's brand kits (hosted feature; absent = scenes hide the brand picker). `current`
    *  is the brand new scene projects start from; `manage` opens where brands are created and edited. */
-  brands?: { list: () => Promise<import('./brand-kit').BrandKit[]>; current?: () => Promise<import('./brand-kit').BrandKit | null>; manage?: () => void };
+  brands?: { list: () => Promise<import('./brand-playbook').BrandPlaybook[]>; current?: () => Promise<import('./brand-playbook').BrandPlaybook | null>; manage?: () => void };
   workflowEnvironment?: () => Promise<{ scope: string; revision: string }>;
   composer: BlockComposer;
   transcriber: Transcriber;
@@ -187,9 +187,9 @@ export interface StudioProviders {
   /** Writes this video's words for the brand's text bands (held header, opening label), in the
    *  creator's manner (hosted LLM; absent = one-click edits leave the bands out). */
   brandCopy?: (input: { transcript: string; header?: { maxChars: number; examples: string[] }; hookLabel?: { maxChars: number } }, options?: StudioOperationOptions) => Promise<{ header?: string; hookLabel?: string }>;
-  /** Plans where a one-click edit punches in, following the brand's editing rules (hosted LLM; absent =
-   *  punch-ins land on highlighted words). Returns phrases of the given rows, at most `maxPunches`. */
-  editPlan?: (input: { rows: { index: number; text: string; startSec: number }[]; durationSec: number; guide: string; maxPunches: number; minGapSec: number }, options?: StudioOperationOptions) => Promise<{ punches: { index: number; text: string }[] }>;
+  /** Plans where a one-click edit places the creator's moves (punch-ins, transition accents), following
+   *  the playbook's triggers within each move's cap (hosted LLM). Picks are phrases of the given rows. */
+  editPlan?: (input: { rows: { index: number; text: string; startSec: number }[]; durationSec: number; guide: string; moves: { kind: 'punch_in' | 'transition'; variants: string[]; max: number }[] }, options?: StudioOperationOptions) => Promise<{ picks: { kind: 'punch_in' | 'transition'; index: number; text: string; variant: string }[] }>;
   /** Drafts a generation prompt for "add over this transcript selection" (hosted LLM; absent = the add popover offers library picks only). */
   draftInsertPrompt?: (req: { kind: 'mg' | 'sticker' | 'image' | 'video' | 'sfx'; text: string; before: string; after: string; durationSec: number }) => Promise<string>;
   /** Fill a component's text slots from the narration around its time window (hosted-LLM feature;

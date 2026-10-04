@@ -1,4 +1,6 @@
-import type { BrandConfidence, BrandCorner, BrandEvidence } from './brand-kit';
+import type { Confidence as BrandConfidence, Corner as BrandCorner } from './brand-playbook';
+/** Where a measured conclusion holds (videos, sample frames, confidence). */
+export interface BrandEvidence { videos: string[]; frames?: { video: string; sec: number }[]; confidence: BrandConfidence; note?: string }
 import { classifyLayout, cutProfile, portraitTemplateWindow, VISUAL_THRESHOLDS, type CutKind, type CutPair, type LayoutMode, type VisualSample } from './brand-visual';
 
 /**

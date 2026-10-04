@@ -1,5 +1,5 @@
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
-import { applyBrandMedia, brandHasMedia } from '@pireel/studio-engine/brand-kit';
+import { applyPlaybookMedia, playbookHasMedia } from '@pireel/studio-engine/brand-media';
 import { buildCaptionBaseDocument, captionTaskStyle, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
 import type { EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import { applyDocumentTransaction } from '@pireel/studio-engine/document-transaction';
@@ -68,6 +68,6 @@ export async function composeDubbingDocument(task: CaptionTaskRecord): Promise<E
     const plan = planCaptionDocument(document, dubbing.captionTranscript, captionLayoutOptions(options));
     document = assembleCaptionDocument(document, plan, null, options);
   }
-  if (brandHasMedia(task.options.brand)) document = applyBrandMedia(document, task.options.brand!);
+  if (playbookHasMedia(task.options.brand)) document = applyPlaybookMedia(document, task.options.brand!);
   return document;
 }

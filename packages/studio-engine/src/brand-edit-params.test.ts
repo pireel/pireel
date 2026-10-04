@@ -1,122 +1,133 @@
 import { describe, expect, it } from 'vitest';
-import { bandCapacity, templateTextItem, brandAgentBrief, brandEditGuide, brandEditParams, brandHighlightsKeywords, editPlanInput, punchInUpdates } from './brand-edit-params';
-import { brandSnapshot, emptyBrandKit, type BrandSnapshot } from './brand-kit';
-import type { BrandEditSpec } from './brand-edit-spec';
+import { bandCapacity, bandTextItem, editPlanInput, playbookAgentBrief, playbookEditGuide, playbookEditParams, playbookHighlightsKeywords, punchInUpdates, transitionItems, type PlanPick } from './brand-edit-params';
+import { emptyPlaybook, playbookSnapshot, type Move, type PlaybookSnapshot } from './brand-playbook';
 import { buildCaptionBaseDocument, type CaptionTaskOptions } from './caption-task';
 import { captionWorkflowDefinition } from './workflow-caption-template';
-import type { AsrSegment } from './build-blocks';
 
-const field = <T>(value: T, confidence = 0.8) => ({ value, provenance: { source: 'measured' as const, confidence, videos: 5 } });
-/** Only the fields a one-click edit reads. */
-const spec = (patch: { mode?: 'aggressive' | 'moderate' | 'natural'; lufs?: number; punch?: boolean; accent?: string } = {}) => ({
-  cutting: { silence: field({ mode: patch.mode ?? 'aggressive', maxGapMs: 200 }), ...(patch.punch !== undefined ? { punchIn: field({ enabled: patch.punch }) } : {}) },
-  audio: { targetLufs: field(patch.lufs ?? -14.8) },
-  captions: { ...(patch.accent ? { accentRule: field(patch.accent) } : {}) },
-}) as unknown as BrandEditSpec;
-const brand = (patch: Partial<BrandSnapshot> = {}): BrandSnapshot => ({ ...brandSnapshot(emptyBrandKit('brand_1', 'Mine')), ...patch });
+const playbook = (patch: Partial<PlaybookSnapshot> = {}): PlaybookSnapshot => ({ ...playbookSnapshot(emptyPlaybook('brand_1', 'Mine')), ...patch });
+const move = (patch: Partial<Move> & Pick<Move, 'kind' | 'variants'>): Move => ({ frequency: 'moderate', maxPerMin: 2, trigger: { text: '说到结论时', en: 'On a conclusion.' }, ...patch });
+const words = (start: number, texts: string[]) => texts.map((text, index) => ({ text, start: start + index * 0.5, end: start + index * 0.5 + 0.4 }));
+// 20 s of speech with a pause cut out between 9 s and 10 s.
+const document = () => buildCaptionBaseDocument({ projectId: 'p', sourceUrl: '', sourceSig: 's', width: 1080, height: 1920, durationSec: 20, transcript: [], cuts: [{ fromSec: 9, toSec: 10 }], options: { caption: {}, aspect: 'original', shortenPauses: true } });
+const pick = (kind: PlanPick['kind'], sentenceIndex: number, wordIndex: number, variant: string): PlanPick => ({ kind, sentenceIndex, wordIndex, variant });
 
-describe('brandEditParams', () => {
-  it('turns the measured habits into executable parameters', () => {
-    expect(brandEditParams(brand({ spec: spec({ mode: 'aggressive', lufs: -14.8, punch: true }) }))).toEqual({
+describe('playbookEditParams', () => {
+  it('runs fixed habits as parameters and offers the moves the engine can place', () => {
+    const params = playbookEditParams(playbook({
+      fixed: { pauses: { mode: 'tight' }, loudness: { lufs: -15 } },
+      moves: [
+        move({ kind: 'punch_in', variants: ['punch', 'slow-push'], maxPerMin: 2, settings: { scale: 1.35 } }),
+        move({ kind: 'transition', variants: ['whip', 'sfx_hit', 'flash'], frequency: 'rare', maxPerMin: 1 }),
+        move({ kind: 'broll', variants: ['product'] }),
+      ],
+    }));
+    expect(params).toEqual({
       pause: { minimumPauseSec: 0.25, speechPaddingSec: 0.08 },
       targetLufs: -15,
-      punchIn: { preset: 'punch', scale: 1.2, minGapSec: 8 },
+      moves: { punchIn: { variants: ['punch', 'slow-push'], scale: 1.35, maxPerMin: 2 }, transition: { variants: ['directional', 'fadeblack'], maxPerMin: 1 } },
     });
   });
 
-  it('reads a set zoom as a trigger with a minimum spacing, not a rate', () => {
-    const params = brandEditParams(brand({ pacing: { zoom: { preset: 'instant', everySec: 1 }, trimSilence: true } }));
-    expect(params.punchIn).toEqual({ preset: 'instant', scale: 1.25, minGapSec: 3 });
-    // No measurements: pauses and loudness stay with the scene's defaults.
-    expect(params.pause).toBeUndefined();
-    expect(params.targetLufs).toBeUndefined();
+  it('leaves out what the playbook does not have, and a transition with no picture effect', () => {
+    expect(playbookEditParams(playbook())).toEqual({});
+    expect(playbookEditParams(playbook({ moves: [move({ kind: 'transition', variants: ['sfx_hit'] })] })).moves).toBeUndefined();
   });
 
-  it('keeps loudness inside a sane range and marks key words only when the brand does', () => {
-    expect(brandEditParams(brand({ spec: spec({ lufs: -3 }) })).targetLufs).toBe(-9);
-    expect(brandHighlightsKeywords(brand({ spec: spec({ accent: 'keywords' }) }))).toBe(true);
-    expect(brandHighlightsKeywords(brand({ spec: spec({ accent: 'current_word' }) }))).toBe(false);
-  });
-});
-
-describe('punchInUpdates', () => {
-  const words = (start: number, texts: string[]) => texts.map((text, index) => ({ text, start: start + index * 0.5, end: start + index * 0.5 + 0.4 }));
-  // 20 s of speech with a pause cut out between 9 s and 10 s.
-  const document = () => buildCaptionBaseDocument({ projectId: 'p', sourceUrl: '', sourceSig: 's', width: 1080, height: 1920, durationSec: 20, transcript: [], cuts: [{ fromSec: 9, toSec: 10 }], options: { caption: {}, aspect: 'original', shortenPauses: true } });
-  const highlighted = (segment: AsrSegment, index: number): AsrSegment => ({ ...segment, wordDecorations: { [String(index)]: { highlight: 'color' } } });
-
-  it('pushes in from the key word to the sentence end inside the clip that holds it', () => {
-    const transcript = [
-      highlighted({ start: 1, end: 4, text: 'a b c d e f', words: words(1, ['a', 'b', 'c', 'd', 'e', 'f']) }, 2),
-      highlighted({ start: 11, end: 15, text: 'g h i j', words: words(11, ['g', 'h', 'i', 'j']) }, 1),
-    ];
-    const updates = punchInUpdates(document(), transcript, { preset: 'punch', scale: 1.2, minGapSec: 3 });
-    expect(updates).toHaveLength(2);
-    expect(updates[0]!.patch.properties!.zoom).toEqual({ preset: 'punch', atSec: 2, durationSec: 2, scale: 1.2 });
-    // The second clip starts at 9 s on the timeline (source 10 s); "h" is at source 11.5 s.
-    expect(updates[1]!.patch.properties!.zoom).toMatchObject({ atSec: 1.5, durationSec: 3.5 });
-  });
-
-  it('keeps the minimum spacing and skips sentences without a key word or too short a span', () => {
-    const transcript = [
-      highlighted({ start: 1, end: 4, text: 'a b', words: words(1, ['a', 'b']) }, 0),
-      highlighted({ start: 12, end: 14, text: 'c d', words: words(12, ['c', 'd']) }, 0),
-      { start: 15, end: 18, text: 'e f', words: words(15, ['e', 'f']) },
-      highlighted({ start: 18.6, end: 19, text: 'g', words: words(18.6, ['g']) }, 0),
-    ];
-    const updates = punchInUpdates(document(), transcript, { preset: 'punch', scale: 1.2, minGapSec: 20 });
-    expect(updates).toHaveLength(1);
+  it('marks key words only when the captions do', () => {
+    expect(playbookHighlightsKeywords(playbook({ fixed: { captions: { on: true, accent: 'keywords' } } }))).toBe(true);
+    expect(playbookHighlightsKeywords(playbook({ fixed: { captions: { on: true, accent: 'current_word' } } }))).toBe(false);
   });
 });
 
 describe('edit planning', () => {
-  const document = () => buildCaptionBaseDocument({ projectId: 'p', sourceUrl: '', sourceSig: 's', width: 1080, height: 1920, durationSec: 20, transcript: [], cuts: [{ fromSec: 9, toSec: 10 }], options: { caption: {}, aspect: 'original', shortenPauses: true } });
-  const words = (start: number, texts: string[]) => texts.map((text, index) => ({ text, start: start + index * 0.5, end: start + index * 0.5 + 0.4 }));
-
-  it('gives the planner timeline times after the cuts and a count the spacing allows', () => {
+  it('gives the planner timeline times after the cuts and each move its cap over this length', () => {
     const input = editPlanInput(document(), [
       { start: 1, end: 4, text: 'a b c', words: words(1, ['a', 'b', 'c']) },
       { start: 9.2, end: 9.8, text: 'cut out', words: words(9.2, ['cut', 'out']) },
       { start: 11, end: 15, text: 'd e', words: words(11, ['d', 'e']) },
-    ], { preset: 'punch', scale: 1.2, minGapSec: 8 });
+    ], { punchIn: { variants: ['punch'], scale: 1.2, maxPerMin: 6 }, transition: { variants: ['fade'], maxPerMin: 1 } });
     expect(input.durationSec).toBe(19);
-    expect(input.maxPunches).toBe(2);
     expect(input.rows).toEqual([{ index: 0, text: 'a b c', startSec: 1 }, { index: 2, text: 'd e', startSec: 10 }]);
+    // A cap never rounds a move away: a short video still allows one.
+    expect(input.moves).toEqual([{ kind: 'punch_in', variants: ['punch'], max: 1 }, { kind: 'transition', variants: ['fade'], max: 1 }]);
   });
 
-  it('punches in on the planned words instead of highlights', () => {
-    const transcript = [{ start: 1, end: 4, text: 'a b c d', words: words(1, ['a', 'b', 'c', 'd']), wordDecorations: { '0': { highlight: 'color' as const } } }];
-    const updates = punchInUpdates(document(), transcript, { preset: 'punch', scale: 1.2, minGapSec: 3 }, [{ sentenceIndex: 0, wordIndex: 2 }]);
-    expect(updates[0]!.patch.properties!.zoom).toMatchObject({ atSec: 2 });
-  });
-
-  it('hands the planner the brand rules that decide cuts', () => {
-    const style = { version: 1, summary: '', summaryEn: 'Fast unboxing talk.', frames: [], systems: Object.fromEntries(['captions', 'typography', 'graphics', 'color', 'framing', 'editing', 'motion', 'bookends', 'sound', 'cover'].map(id => [id, { present: id === 'editing', summary: '', rules: id === 'editing' ? [{ text: '笑点推近', en: 'Punch in on punchlines.', videos: [], evidence: [] }] : [], tokens: {}, variations: '', confidence: 'high' }])) } as unknown as BrandSnapshot['style'];
-    expect(brandEditGuide(brand({ style }))).toBe('Fast unboxing talk.\nediting:\n- Punch in on punchlines.');
-    expect(brandEditGuide(brand())).toBe('');
+  it('reads the triggers and structure, not the variant list', () => {
+    const guide = playbookEditGuide(playbook({ portrait: { text: '', en: 'Fast unboxing talk.' }, moves: [move({ kind: 'punch_in', variants: ['punch'] })], structure: { closing: { text: '', en: 'Ends on a question.' }, rules: [] } }));
+    expect(guide).toBe('Fast unboxing talk.\npunch_in (moderate): On a conclusion.\nclosing: Ends on a question.');
   });
 });
 
-describe('brandAgentBrief', () => {
-  it('gives the agent the measured habits and assets, and nothing invented for a blank brand', () => {
-    const full = { ...spec({ mode: 'aggressive', lufs: -15.3 }), cutting: { ...spec().cutting, targetCpm: field([15.4, 25.6]) }, captions: { presence: field('always'), wordsPerPage: field(2), case: field('sentence') }, framing: { faceH: field(0.28) }, layout: null } as unknown as BrandEditSpec;
-    const brief = brandAgentBrief(brand({ spec: full, logo: { key: 'k', kind: 'image', width: 1, height: 1, corner: 'top-right', widthPct: 10, opacity: 1 } }));
-    expect(brief).toContain('cutting 15–26 cuts/min; pauses tight — even breaths are cut; loudness about -15 LUFS; captions ~2 words on screen; face about 28% of frame height.');
-    expect(brief).toContain('Brand assets: logo.');
-    expect(brandAgentBrief(brand())).toBe('Brand assets: none.');
+describe('punchInUpdates', () => {
+  const punch = { variants: ['punch', 'slow-push'] as const, scale: 1.2, maxPerMin: 20 };
+
+  it('zooms from the picked word to the sentence end in the clip that holds it, in the picked variant', () => {
+    const transcript = [
+      { start: 1, end: 4, text: 'a b c d e f', words: words(1, ['a', 'b', 'c', 'd', 'e', 'f']) },
+      { start: 11, end: 15, text: 'g h i j', words: words(11, ['g', 'h', 'i', 'j']) },
+    ];
+    const updates = punchInUpdates(document(), transcript, { ...punch, variants: [...punch.variants] }, [pick('punch_in', 0, 2, 'punch'), pick('punch_in', 1, 1, 'slow-push')]);
+    expect(updates).toHaveLength(2);
+    expect(updates[0]!.patch.properties!.zoom).toEqual({ preset: 'punch', atSec: 2, durationSec: 2, scale: 1.2 });
+    // The second clip starts at 9 s on the timeline (source 10 s); "h" is at source 11.5 s.
+    expect(updates[1]!.patch.properties!.zoom).toMatchObject({ preset: 'slow-push', atSec: 1.5, durationSec: 3.5 });
+  });
+
+  it('keeps the spacing the cap allows, skips spans too short, and ignores other moves', () => {
+    const transcript = [
+      { start: 1, end: 4, text: 'a b', words: words(1, ['a', 'b']) },
+      { start: 12, end: 14, text: 'c d', words: words(12, ['c', 'd']) },
+      { start: 18.6, end: 19, text: 'g', words: words(18.6, ['g']) },
+    ];
+    const updates = punchInUpdates(document(), transcript, { variants: ['punch'], scale: 1.2, maxPerMin: 3 }, [pick('punch_in', 0, 0, 'punch'), pick('punch_in', 1, 0, 'punch'), pick('punch_in', 2, 0, 'punch'), pick('transition', 1, 0, 'fade')]);
+    expect(updates).toHaveLength(1);
+  });
+
+  it('falls back to the first allowed variant when the plan names another', () => {
+    const transcript = [{ start: 1, end: 4, text: 'a b c', words: words(1, ['a', 'b', 'c']) }];
+    expect(punchInUpdates(document(), transcript, { variants: ['instant'], scale: 1.2, maxPerMin: 2 }, [pick('punch_in', 0, 0, 'punch')])[0]!.patch.properties!.zoom!.preset).toBe('instant');
   });
 });
 
-describe('captions workflow with brand edit parameters', () => {
-  const options = (edit: CaptionTaskOptions['edit'], highlights = false): CaptionTaskOptions => ({ caption: {}, aspect: 'original', shortenPauses: true, highlights, edit });
+describe('transitionItems', () => {
+  it('puts each accent on the cut into its sentence, spaced by the cap, never at the very start', () => {
+    const transcript = [
+      { start: 0.2, end: 4, text: 'a b', words: words(0.2, ['a', 'b']) },
+      { start: 11, end: 13, text: 'c d', words: words(11, ['c', 'd']) },
+      { start: 14, end: 16, text: 'e f', words: words(14, ['e', 'f']) },
+    ];
+    const items = transitionItems(document(), transcript, { variants: ['fade', 'glitch'], maxPerMin: 6 }, [pick('transition', 0, 0, 'fade'), pick('transition', 1, 0, 'glitch'), pick('transition', 2, 0, 'fade')]);
+    // Sentence 1 plays at 10 s on the cut timeline; sentence 2 at 13 s is closer than 60/6 = 10 s.
+    expect(items).toEqual([{ atFrame: 300, effect: 'glitch' }]);
+  });
+});
+
+describe('playbookAgentBrief', () => {
+  it('gives the agent the style, fixed habits, moves and structure, and nothing for a blank brand', () => {
+    const brief = playbookAgentBrief(playbook({
+      portrait: { text: '', en: 'Quick tech reviews.' },
+      fixed: { captions: { on: true, perScreen: 8, accent: 'keywords' }, pauses: { mode: 'tight' }, logo: { key: 'k', kind: 'image', width: 1, height: 1, corner: 'top-right', widthPct: 10, opacity: 1 } },
+      moves: [move({ kind: 'punch_in', variants: ['punch'], frequency: 'frequent' })],
+      structure: { pace: { cutsPerMin: [15, 26] }, rules: [] },
+    }));
+    expect(brief).toContain('Style: Quick tech reviews.');
+    expect(brief).toContain('Fixed habits: captions on, ~8 per screen, keywords marked; pauses tight; logo.');
+    expect(brief).toContain('- punch_in [punch, frequent]: On a conclusion.');
+    expect(brief).toContain('Body pace: 15–26 cuts per minute.');
+    expect(playbookAgentBrief(playbook())).toBe('');
+  });
+});
+
+describe('captions workflow with playbook edit parameters', () => {
+  const options = (edit: CaptionTaskOptions['edit'], brand?: PlaybookSnapshot): CaptionTaskOptions => ({ caption: {}, aspect: 'original', shortenPauses: true, edit, ...(brand ? { brand } : {}) });
   const step = (definition: ReturnType<typeof captionWorkflowDefinition>, id: string) => definition.steps.find(item => item.id === id);
 
-  it('passes the pause threshold, punches in after captions and matches loudness before rendering', () => {
-    const definition = captionWorkflowDefinition(options({ pause: { minimumPauseSec: 0.25, speechPaddingSec: 0.08 }, targetLufs: -15, punchIn: { preset: 'punch', scale: 1.2, minGapSec: 8 } }), { sig: 'm' });
+  it('passes the pause threshold, plans and places moves after captions, and matches loudness before rendering', () => {
+    const brand = playbook({ moves: [move({ kind: 'punch_in', variants: ['punch'] })] });
+    const definition = captionWorkflowDefinition(options({ pause: { minimumPauseSec: 0.25, speechPaddingSec: 0.08 }, targetLufs: -15, moves: { punchIn: { variants: ['punch'], scale: 1.2, maxPerMin: 2 } } }, brand), { sig: 'm' });
     expect(Object.keys(step(definition, 'pauses')!.arguments)).toEqual(expect.arrayContaining(['minimumPauseSec', 'speechPaddingSec']));
-    expect(definition.steps.map(item => item.id)).toEqual(['transcript', 'pauses', 'compose', 'plan', 'captions', 'editplan', 'punch', 'loudness', 'render']);
-    // The plan decides the punch-ins; key words are only coloured when captions ask for them.
-    expect(step(definition, 'punch')!.arguments.targets).toEqual({ kind: 'step', stepId: 'editplan', key: 'targets' });
+    expect(definition.steps.map(item => item.id)).toEqual(['transcript', 'pauses', 'compose', 'plan', 'captions', 'editplan', 'moves', 'loudness', 'render']);
+    expect(step(definition, 'moves')!.arguments.picks).toEqual({ kind: 'step', stepId: 'editplan', key: 'picks' });
   });
 
   it('adds nothing when the options carry no edit parameters', () => {
@@ -128,23 +139,22 @@ describe('brand text bands', () => {
   const header = { box: { x: 0.05, y: 0.06, w: 0.9, h: 0.05 }, color: '#ffd600', plate: '#c8141e', sizePct: 0.05 };
   const label = { ...header, box: { x: 0.1, y: 0.3, w: 0.8, h: 0.04 }, plate: null, sizePct: 0.04, durationSec: 3 };
 
-  it('turns the brand templates into switches for a one-click edit', () => {
-    expect(brandEditParams(brand({ templates: { header, hookLabel: label } })).texts).toEqual({ header: true, hookLabel: true });
-    expect(brandEditParams(brand()).texts).toBeUndefined();
+  it('turns the playbook bands into switches for a one-click edit', () => {
+    expect(playbookEditParams(playbook({ fixed: { bands: { header, hookLabel: label } } })).texts).toEqual({ header: true, hookLabel: true });
+    expect(playbookEditParams(playbook()).texts).toBeUndefined();
   });
 
   it('sizes the text from the measured band and styles a plate as a label', () => {
     const canvas = { width: 1080, height: 1920, fps: 30 };
     expect(bandCapacity(header, canvas, 2)).toEqual({ fontSize: 82, maxChars: 22 });
-    expect(templateTextItem('brand-header', '月薪三千怎么存钱', header, canvas, 0, 30, 2)).toMatchObject({
+    expect(bandTextItem('brand-header', '月薪三千怎么存钱', header, canvas, 0, 30, 2)).toMatchObject({
       startFrame: 0, durationFrames: 900, preset: 'label', color: '#ffd600', accentColor: '#c8141e', fontSize: 82, placement: { xPct: 5, yPct: 6, widthPct: 90, heightPct: 10 },
     });
-    expect(templateTextItem('brand-hook-label', 'x', label, canvas, 0, 3, 1)).toMatchObject({ preset: 'clean' });
+    expect(bandTextItem('brand-hook-label', 'x', label, canvas, 0, 3, 1)).toMatchObject({ preset: 'clean' });
   });
 
-  it('writes the band words and applies them after captions, before the brand intro', () => {
-    const options: CaptionTaskOptions = { caption: {}, aspect: 'original', shortenPauses: false, edit: { texts: { header: true } }, brand: brand({ templates: { header } }) };
-    const ids = captionWorkflowDefinition(options, { sig: 'm' }).steps.map(item => item.id);
-    expect(ids).toEqual(['transcript', 'compose', 'plan', 'captions', 'copy', 'texts', 'render']);
+  it('writes the band words and applies them after captions', () => {
+    const options: CaptionTaskOptions = { caption: {}, aspect: 'original', shortenPauses: false, edit: { texts: { header: true } }, brand: playbook({ fixed: { bands: { header } } }) };
+    expect(captionWorkflowDefinition(options, { sig: 'm' }).steps.map(item => item.id)).toEqual(['transcript', 'compose', 'plan', 'captions', 'copy', 'texts', 'render']);
   });
 });
