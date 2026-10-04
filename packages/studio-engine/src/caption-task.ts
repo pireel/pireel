@@ -28,6 +28,8 @@ export interface CaptionTaskOptions {
   /** Highlight key words with the Studio auto-highlight (word decorations on the transcript). */
   highlights?: boolean;
   aspect: 'original' | 'portrait' | 'landscape' | 'square'; shortenPauses: boolean; translationLanguage?: CaptionTranslationLanguage;
+  /** Started as a one-click edit: the page leads with the brand preset instead of caption settings. */
+  oneClick?: boolean;
 }
 export interface CaptionTaskDimensions { width: number; height: number }
 /** Product reference zones, not a guarantee for every platform/ad placement. */
