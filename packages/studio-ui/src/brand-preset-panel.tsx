@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Check, ChevronDown, Minus } from 'lucide-react';
 import type { CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
-import type { BrandSnapshot } from '@pireel/studio-engine/brand-kit';
+import type { BrandSnapshot, BrandTemplates } from '@pireel/studio-engine/brand-kit';
 import { brandEditParams, PAUSE_BY_MODE, type CaptionEditParams } from '@pireel/studio-engine/brand-edit-params';
 import { SCENE_TARGET_LUFS } from '@pireel/studio-engine/loudness-lufs';
 import { imageThumb } from '@pireel/ui/image-url';
@@ -37,6 +37,11 @@ export function BrandPresetPanel({ options, locale, disabled, onChange, captionS
     for (const key of Object.keys(next) as (keyof CaptionEditParams)[]) if (next[key] === undefined) delete next[key];
     return { ...current, edit: next };
   });
+  const textsWith = (patch: NonNullable<CaptionEditParams['texts']>) => {
+    const next = { ...edit.texts, ...patch };
+    for (const key of Object.keys(next) as (keyof typeof next)[]) if (!next[key]) delete next[key];
+    return Object.keys(next).length ? next : undefined;
+  };
   const row = (label: string, on: boolean, note: string) => <li className="flex items-center gap-2.5 py-1.5 text-sm">
     <span className={'flex size-4 shrink-0 items-center justify-center rounded-full ' + (on ? 'bg-accent text-white' : 'bg-panel-2 text-ink-4')}>{on ? <Check size={10} strokeWidth={3} /> : <Minus size={10} />}</span>
     <span className={on ? 'text-ink' : 'text-ink-4'}>{label}</span><span className="text-ink-4 ml-auto truncate text-xs">{note}</span>
@@ -58,6 +63,10 @@ export function BrandPresetPanel({ options, locale, disabled, onChange, captionS
         description={say('AI 挑出每句的重点词，按字幕样式上色。', 'AI picks each sentence’s key words and colours them in the caption look.')} />
       <SceneCheckbox label={say('重点处推近', 'Punch in on key words')} checked={!!edit.punchIn} disabled={disabled} onChange={on => patchEdit({ punchIn: on ? fromBrand.punchIn ?? DEFAULT_PUNCH : undefined })}
         description={say(`在每句的重点词上推近到句末，相邻至少隔 ${(edit.punchIn ?? fromBrand.punchIn ?? DEFAULT_PUNCH).minGapSec} 秒。`, `Pushes in from a sentence’s key word to its end, at least ${(edit.punchIn ?? fromBrand.punchIn ?? DEFAULT_PUNCH).minGapSec}s apart.`)} />
+      {brand?.templates?.header && <SceneCheckbox label={say('顶部标题栏', 'Headline band')} checked={!!edit.texts?.header} disabled={disabled} onChange={on => patchEdit({ texts: textsWith({ header: on }) })}
+        description={say('按品牌标题栏的位置和样式，全程显示；文字按本条内容写。', 'In the brand’s headline band, for the whole video; the words are written for this video.')} />}
+      {brand?.templates?.hookLabel && <SceneCheckbox label={say('开头标签', 'Opening label')} checked={!!edit.texts?.hookLabel} disabled={disabled} onChange={on => patchEdit({ texts: textsWith({ hookLabel: on }) })}
+        description={say(`开头 ${brand.templates.hookLabel.durationSec} 秒，按品牌标签的样式；文字按本条内容写。`, `Over the first ${brand.templates.hookLabel.durationSec}s in the brand’s label style; the words are written for this video.`)} />}
       <SceneCheckbox label={say('统一响度', 'Match loudness')} checked={edit.targetLufs !== undefined} disabled={disabled} onChange={on => patchEdit({ targetLufs: on ? fromBrand.targetLufs ?? SCENE_TARGET_LUFS : undefined })}
         description={say(`成片调到 ${edit.targetLufs ?? fromBrand.targetLufs ?? SCENE_TARGET_LUFS} LUFS${fromBrand.targetLufs !== undefined ? '（品牌作品的响度）' : ''}。`, `Brings the video to ${edit.targetLufs ?? fromBrand.targetLufs ?? SCENE_TARGET_LUFS} LUFS${fromBrand.targetLufs !== undefined ? ' (your videos’ loudness)' : ''}.`)} />
     </div>
@@ -77,4 +86,19 @@ export function BrandLogoOverlay({ brand }: { brand: BrandSnapshot | undefined }
   const left = logo.corner.endsWith('left'); const top = logo.corner.startsWith('top');
   return <img src={imageThumb(logo.key, 'thumb')} alt="" aria-hidden className="pointer-events-none absolute h-auto object-contain"
     style={{ width: `${logo.widthPct}%`, opacity: logo.opacity, [left ? 'left' : 'right']: '4%', [top ? 'top' : 'bottom']: '4%' }} />;
+}
+
+/** The brand's text bands over a scene preview, where and how they will show; the words are placeholders
+ *  until the edit writes them for this video. */
+export function BrandTemplateOverlay({ options, locale }: { options: CaptionTaskOptions; locale: 'zh' | 'en' }) {
+  const templates = options.brand?.templates; const texts = options.edit?.texts;
+  if (!templates || !texts) return null;
+  const band = (template: NonNullable<BrandTemplates['header']>, label: string) => <div aria-hidden className="pointer-events-none absolute flex items-center justify-center overflow-hidden rounded-sm text-center font-extrabold leading-none"
+    style={{ left: `${template.box.x * 100}%`, top: `${template.box.y * 100}%`, width: `${template.box.w * 100}%`, height: `${template.box.h * 100}%`, color: template.color, background: template.plate ?? 'transparent', containerType: 'size' }}>
+    <span style={{ fontSize: 'min(70cqh, 9cqw)' }}>{label}</span>
+  </div>;
+  return <>
+    {texts.header && templates.header && band(templates.header, locale === 'zh' ? '标题栏（按本条内容生成）' : 'Headline (written for this video)')}
+    {texts.hookLabel && templates.hookLabel && band(templates.hookLabel, locale === 'zh' ? '开头标签' : 'Opening label')}
+  </>;
 }

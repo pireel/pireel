@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { brandAgentBrief, brandEditGuide, brandEditParams, brandHighlightsKeywords, editPlanInput, punchInUpdates } from './brand-edit-params';
+import { bandCapacity, templateTextItem, brandAgentBrief, brandEditGuide, brandEditParams, brandHighlightsKeywords, editPlanInput, punchInUpdates } from './brand-edit-params';
 import { brandSnapshot, emptyBrandKit, type BrandSnapshot } from './brand-kit';
 import type { BrandEditSpec } from './brand-edit-spec';
 import { buildCaptionBaseDocument, type CaptionTaskOptions } from './caption-task';
@@ -121,5 +121,30 @@ describe('captions workflow with brand edit parameters', () => {
 
   it('adds nothing when the options carry no edit parameters', () => {
     expect(captionWorkflowDefinition(options(undefined), { sig: 'm' }).steps.map(item => item.id)).toEqual(['transcript', 'pauses', 'compose', 'plan', 'captions', 'render']);
+  });
+});
+
+describe('brand text bands', () => {
+  const header = { box: { x: 0.05, y: 0.06, w: 0.9, h: 0.05 }, color: '#ffd600', plate: '#c8141e', sizePct: 0.05 };
+  const label = { ...header, box: { x: 0.1, y: 0.3, w: 0.8, h: 0.04 }, plate: null, sizePct: 0.04, durationSec: 3 };
+
+  it('turns the brand templates into switches for a one-click edit', () => {
+    expect(brandEditParams(brand({ templates: { header, hookLabel: label } })).texts).toEqual({ header: true, hookLabel: true });
+    expect(brandEditParams(brand()).texts).toBeUndefined();
+  });
+
+  it('sizes the text from the measured band and styles a plate as a label', () => {
+    const canvas = { width: 1080, height: 1920, fps: 30 };
+    expect(bandCapacity(header, canvas, 2)).toEqual({ fontSize: 82, maxChars: 22 });
+    expect(templateTextItem('brand-header', '月薪三千怎么存钱', header, canvas, 0, 30, 2)).toMatchObject({
+      startFrame: 0, durationFrames: 900, preset: 'label', color: '#ffd600', accentColor: '#c8141e', fontSize: 82, placement: { xPct: 5, yPct: 6, widthPct: 90, heightPct: 10 },
+    });
+    expect(templateTextItem('brand-hook-label', 'x', label, canvas, 0, 3, 1)).toMatchObject({ preset: 'clean' });
+  });
+
+  it('writes the band words and applies them after captions, before the brand intro', () => {
+    const options: CaptionTaskOptions = { caption: {}, aspect: 'original', shortenPauses: false, edit: { texts: { header: true } }, brand: brand({ templates: { header } }) };
+    const ids = captionWorkflowDefinition(options, { sig: 'm' }).steps.map(item => item.id);
+    expect(ids).toEqual(['transcript', 'compose', 'plan', 'captions', 'copy', 'texts', 'render']);
   });
 });

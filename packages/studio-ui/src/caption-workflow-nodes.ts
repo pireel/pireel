@@ -1,6 +1,7 @@
 import { imageThumb } from '@pireel/ui/image-url';
 import { applyBrandMedia, type BrandSnapshot } from '@pireel/studio-engine/brand-kit';
-import { editPlanInput, punchInUpdates, type CaptionEditParams, type PunchTarget } from '@pireel/studio-engine/brand-edit-params';
+import { bandCapacity, editPlanInput, punchInUpdates, templateTextItem, type CaptionEditParams, type PunchTarget } from '@pireel/studio-engine/brand-edit-params';
+import type { BrandTemplates } from '@pireel/studio-engine/brand-kit';
 import { applyDocumentTransaction } from '@pireel/studio-engine/document-transaction';
 import { integratedLoudness, loudnessGainDb } from '@pireel/studio-engine/loudness-lufs';
 import { phraseWordIndexes, rowWords } from '@pireel/studio-engine/caption-highlights';
@@ -64,6 +65,38 @@ export function captionWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     node('brand.apply', { stage: 'styling', async execute(args) {
       const document = applyBrandMedia(store.read(args.document, 'document'), args.brand as unknown as BrandSnapshot);
       return { document: workflowJson(await store.put('document', 'brand', document)) };
+    }, project: outputs => ({ document: store.read<EditorDocumentV2>(outputs.document, 'document') }) }),
+    node('brand.copy', { stage: 'styling', async execute(args, context) {
+      const write = studioProviders().brandCopy;
+      if (!write) throw new Error('标题栏文字服务尚未连接，请在品牌预设里关闭标题栏后重试。');
+      const request = args.request as unknown as { header: boolean; hookLabel: boolean; examples: string[] };
+      const templates = args.templates as unknown as BrandTemplates;
+      const canvas = store.read<EditorDocumentV2>(args.document, 'document').canvas;
+      const transcript = store.read<AsrSegment[]>(args.transcript, 'transcript').map(segment => segment.text).join('\n');
+      const copy = await write({
+        transcript,
+        ...(request.header && templates.header ? { header: { maxChars: bandCapacity(templates.header, canvas, 2).maxChars, examples: request.examples } } : {}),
+        ...(request.hookLabel && templates.hookLabel ? { hookLabel: { maxChars: bandCapacity(templates.hookLabel, canvas, 1).maxChars } } : {}),
+      }, { signal: host.hooks.signal, sceneRun: host.hooks.sceneRun, onUsage: context.recordUsage });
+      return { copy: workflowJson({ header: copy.header ?? null, hookLabel: copy.hookLabel ?? null }) };
+    } }),
+    node('brand.texts', { stage: 'styling', async execute(args) {
+      const document = store.read<EditorDocumentV2>(args.document, 'document');
+      const copy = args.copy as unknown as { header: string | null; hookLabel: string | null };
+      const templates = args.templates as unknown as BrandTemplates;
+      const track = document.timeline.tracks.find(item => item.id === document.semantics.primaryNarrativeTrackId);
+      const endSec = Math.max(0, ...(track?.clips.map(clip => (clip.startFrame + clip.durationFrames) / document.canvas.fps) ?? [0]));
+      const items = [
+        ...(copy.header && templates.header ? [templateTextItem('brand-header', copy.header, templates.header, document.canvas, 0, endSec, 2)] : []),
+        ...(copy.hookLabel && templates.hookLabel ? [templateTextItem('brand-hook-label', copy.hookLabel, templates.hookLabel, document.canvas, 0, Math.min(templates.hookLabel.durationSec, endSec), 1)] : []),
+      ];
+      let next = document;
+      if (items.length) {
+        const result = applyDocumentTransaction(document, { ops: [{ op: 'agent.timeline', input: { tool: 'set_texts', input: { items } } }] }, { projectId: 'caption-scene' });
+        if (!result.ok) throw new Error(result.error.message);
+        next = result.document;
+      }
+      return { document: workflowJson(await store.put('document', 'brand-texts', next)) };
     }, project: outputs => ({ document: store.read<EditorDocumentV2>(outputs.document, 'document') }) }),
     node('edit.plan', { stage: 'emphasizing', async execute(args, context) {
       const plan = studioProviders().editPlan;

@@ -257,3 +257,61 @@ export function primaryDevice(cutsPerMin: number, cuts: Record<CutKind, number>,
   if (cuts.camera_change >= 0.4) return 'multicam_switch';
   return cuts.broll + cuts.cutaway >= cuts.jump ? 'broll_cover' : 'same_size_jumpcut';
 }
+
+/**
+ * The content window of a vertical template frame (Chinese-platform study: a held headline band on
+ * top, landscape footage in the middle, a decorated band below; about 30% of top Douyin talking-head
+ * accounts). The window is the band of rows and columns where most pixels move across the video while
+ * the frame around it holds still. Null when the whole frame moves or the moving part is not a band.
+ */
+export function portraitTemplateWindow(samples: VisualSample[]): NRect | null {
+  if (samples.length < 6) return null;
+  const size = samples[0]!.size;
+  const moving = new Uint8Array(size * size);
+  for (let k = 0; k < size * size; k++) {
+    const values = samples.map(sample => sample.gray[k]!); const m = mean(values);
+    if (Math.sqrt(mean(values.map(v => (v - m) ** 2))) >= 6) moving[k] = 1;
+  }
+  const rowShare = Array.from({ length: size }, (_, y) => { let n = 0; for (let x = 0; x < size; x++) n += moving[y * size + x]!; return n / size; });
+  const colShare = Array.from({ length: size }, (_, x) => { let n = 0; for (let y = 0; y < size; y++) n += moving[y * size + x]!; return n / size; });
+  const rows = rowShare.flatMap((share, y) => share >= 0.5 ? [y] : []);
+  if (!rows.length) return null;
+  const top = rows[0]!, bottom = rows.at(-1)!;
+  const band = colShare.map((_, x) => { let n = 0; for (let y = top; y <= bottom; y++) n += moving[y * size + x]!; return n / (bottom - top + 1); });
+  const cols = band.flatMap((share, x) => share >= 0.5 ? [x] : []);
+  if (!cols.length) return null;
+  const window = { x: cols[0]! / size, y: top / size, w: (cols.at(-1)! - cols[0]! + 1) / size, h: (bottom - top + 1) / size };
+  // Still frame above and below the window: the rows outside it barely move.
+  const outside = rowShare.filter((_, y) => y < top || y > bottom);
+  const stillOutside = outside.length >= size * 0.25 && mean(outside) < 0.15;
+  return stillOutside && window.w >= 0.8 && window.h >= 0.2 && window.h <= 0.7 ? { x: round3(window.x), y: round3(window.y), w: round3(window.w), h: round3(window.h) } : null;
+}
+
+const hex = (rgb: number[]) => '#' + rgb.map(v => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('');
+
+/**
+ * Text and plate colours of a cropped text band (RGBA pixels): two-colour clustering, where the
+ * smaller cluster is the lettering and the larger one what is behind it. The background counts as a
+ * plate only when it is nearly flat; text over moving footage gets no plate.
+ */
+export function bandColors(rgba: Uint8ClampedArray): { color: string; plate: string | null } {
+  const pixels: number[][] = [];
+  for (let i = 0; i + 3 < rgba.length; i += 4) if (rgba[i + 3]! > 200) pixels.push([rgba[i]!, rgba[i + 1]!, rgba[i + 2]!]);
+  if (pixels.length < 8) return { color: '#ffffff', plate: null };
+  const lum = (p: number[]) => p[0]! * 0.299 + p[1]! * 0.587 + p[2]! * 0.114;
+  const sorted = [...pixels].sort((a, b) => lum(a) - lum(b));
+  let centres = [sorted[Math.floor(sorted.length * 0.1)]!, sorted[Math.floor(sorted.length * 0.9)]!];
+  let groups: number[][][] = [[], []];
+  for (let round = 0; round < 8; round++) {
+    groups = [[], []];
+    for (const p of pixels) {
+      const d = centres.map(c => (p[0]! - c[0]!) ** 2 + (p[1]! - c[1]!) ** 2 + (p[2]! - c[2]!) ** 2);
+      groups[d[0]! <= d[1]! ? 0 : 1]!.push(p);
+    }
+    centres = groups.map((group, index) => group.length ? [0, 1, 2].map(k => mean(group.map(p => p[k]!))) : centres[index]!);
+  }
+  const [textIndex, backIndex] = groups[0]!.length <= groups[1]!.length ? [0, 1] : [1, 0];
+  const back = groups[backIndex]!;
+  const spread = Math.sqrt(mean(back.map(p => (lum(p) - lum(centres[backIndex]!)) ** 2)));
+  return { color: hex(centres[textIndex]!), plate: spread < 18 ? hex(centres[backIndex]!) : null };
+}

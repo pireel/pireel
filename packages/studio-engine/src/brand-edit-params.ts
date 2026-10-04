@@ -1,4 +1,4 @@
-import type { BrandSnapshot } from './brand-kit';
+import type { BrandSnapshot, BrandTextTemplate } from './brand-kit';
 import type { AsrSegment } from './build-blocks';
 import { ZOOM_PRESETS, type ShotZoom, type ZoomPreset } from './composition-core';
 import type { NarrativeClipPatchUpdate } from './editor-document/commands/types';
@@ -19,6 +19,8 @@ export interface CaptionEditParams {
   targetLufs?: number;
   /** Push in on a sentence's highlighted word until the sentence ends, at most once per `minGapSec`. */
   punchIn?: { preset: ZoomPreset; scale: number; minGapSec: number };
+  /** Text bands from the brand's templates, their words written for this video. */
+  texts?: { header?: boolean; hookLabel?: boolean };
 }
 
 /** Pause thresholds per measured trimming habit (the research's aggressive ≈ 150–250 ms kept gaps). */
@@ -41,6 +43,8 @@ export function brandEditParams(brand: BrandSnapshot): CaptionEditParams {
   const zoom = brand.pacing.zoom;
   if (zoom) params.punchIn = { preset: zoom.preset, scale: ZOOM_PRESETS.find(item => item.id === zoom.preset)?.scale ?? 1.2, minGapSec: clamp(zoom.everySec, 3, 60) };
   else if (spec?.cutting.punchIn?.value.enabled) params.punchIn = { preset: 'punch', scale: 1.2, minGapSec: 8 };
+  const header = !!brand.templates?.header; const hookLabel = !!brand.templates?.hookLabel;
+  if (header || hookLabel) params.texts = { ...(header ? { header } : {}), ...(hookLabel ? { hookLabel } : {}) };
   return params;
 }
 
@@ -158,4 +162,24 @@ export function brandAgentBrief(brand: BrandSnapshot): string {
     `Brand assets: ${[brand.logo ? 'logo' : '', brand.intro ? 'intro' : '', brand.outro ? 'outro' : ''].filter(Boolean).join(', ') || 'none'}.`,
   ].filter(Boolean).join('\n');
   return brief.length > BRIEF_MAX ? brief.slice(0, BRIEF_MAX) + '…' : brief;
+}
+
+/** How many display characters fit a template band: a CJK character is one, a Latin letter about half. */
+export function bandCapacity(template: BrandTextTemplate, canvas: { width: number; height: number }, lines: number): { fontSize: number; maxChars: number } {
+  const fontSize = Math.round(Math.min(180, Math.max(24, template.sizePct * canvas.height * 0.85)));
+  return { fontSize, maxChars: Math.max(4, Math.floor(template.box.w * canvas.width / fontSize) * lines) };
+}
+/** Display width of text in CJK-character units. */
+export const displayChars = (text: string) => [...text].reduce((n, ch) => n + (/[\u2E80-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/.test(ch) ? 1 : 0.55), 0);
+
+/** The text-clip items that put a template band on the timeline (set_texts input), styled as measured:
+ *  a plate becomes a label plate in its colour, otherwise plain text in the measured colour. */
+export function templateTextItem(id: string, text: string, template: BrandTextTemplate, canvas: { width: number; height: number; fps: number }, startSec: number, durationSec: number, lines: number) {
+  const { fontSize } = bandCapacity(template, canvas, lines);
+  return {
+    id, text, startFrame: Math.round(startSec * canvas.fps), durationFrames: Math.max(1, Math.round(durationSec * canvas.fps)),
+    preset: template.plate ? 'label' : 'clean', animation: 'none', color: template.color, ...(template.plate ? { accentColor: template.plate } : {}),
+    fontSize, fontWeight: 800, align: 'center',
+    placement: { xPct: template.box.x * 100, yPct: template.box.y * 100, widthPct: template.box.w * 100, heightPct: Math.max(template.box.h * lines, template.box.h) * 100 },
+  };
 }

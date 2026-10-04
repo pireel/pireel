@@ -66,6 +66,8 @@ export interface BrandEditSpec {
   audio: { targetLufs: SpecField<number> };
   /** Visual fingerprint (null fields when no visual primitives were measured). */
   layout: SpecField<LayoutMode> | null;
+  /** A vertical template frame's content window, when most videos hold one (a layer over any layout). */
+  templateWindow?: SpecField<{ x: number; y: number; w: number; h: number }>;
   /** The measured layout when the reading pass decided otherwise (measurement misses most composites). */
   layoutMeasured?: LayoutMode | null;
   broll: { tier: SpecField<BrollTier>; sources?: SpecField<string[]> } | null;
@@ -76,6 +78,8 @@ export interface BrandEditSpec {
     /** A header/label held over most of the video; its look is the template, its text changes per video. */
     header: SpecField<{ enabled: boolean; box: { x: number; y: number; w: number; h: number } | null; examples: string[] }>;
     hookLabel: SpecField<boolean>;
+    /** Where the opening label sits (median over the videos that have one). */
+    hookBox?: SpecField<{ x: number; y: number; w: number; h: number }>;
     /** Edited-in graphics seen in at least two videos and 30% of them (arrows, stickers, charts…). */
     callouts?: SpecField<string[]>;
   };
@@ -347,10 +351,19 @@ export function deriveBrandEditSpec(all: VideoMeasures[], options: DeriveOptions
     const share = videos.filter(video => video.headerShare >= 0.5).length / videos.length;
     const withHeader = videos.filter(video => video.headerShare >= 0.5 && video.header);
     const conf = confidence(Math.max(share, 1 - share), videos.length, FIELD.header.min);
-    return { value: { enabled: share >= 0.5, box: share >= 0.5 && withHeader.length ? withHeader[0]!.header!.box : null, examples: withHeader.flatMap(video => video.header!.texts.slice(0, 1)).slice(0, 5) }, provenance: { source: 'measured' as const, confidence: conf, videos: videos.length, dispersion: round(Math.min(share, 1 - share), 3) }, low: conf < CONFIDENCE_FLOOR };
+    return { value: { enabled: share >= 0.5, box: share >= 0.5 && withHeader.length ? medianBox(withHeader.map(video => video.header!.box)) : null, examples: withHeader.flatMap(video => video.header!.texts.slice(0, 1)).slice(0, 5) }, provenance: { source: 'measured' as const, confidence: conf, videos: videos.length, dispersion: round(Math.min(share, 1 - share), 3) }, low: conf < CONFIDENCE_FLOOR };
   })());
   const hookVote = categorical(videos.map(video => video.hookLabel ? 'yes' as const : 'no' as const), FIELD.header.min, 'no');
   const hookLabel = track('textOverlays.hookLabel', { ...hookVote, value: hookVote.value === 'yes' });
+  // Boxes are kept only when most videos agree there is one; their place is the median.
+  const boxField = (path: string, boxes: ({ x: number; y: number; w: number; h: number } | null | undefined)[]) => {
+    const present = boxes.filter((box): box is NonNullable<typeof box> => !!box);
+    if (present.length * 2 < videos.length) return undefined;
+    const conf = confidence(present.length / videos.length, videos.length, FIELD.header.min);
+    return track(path, { value: medianBox(present), provenance: { source: 'measured' as const, confidence: conf, videos: present.length }, low: conf < CONFIDENCE_FLOOR });
+  };
+  const hookBox = hookLabel.value ? boxField('textOverlays.hookBox', videos.map(video => video.hookBox)) : undefined;
+  const templateWindow = boxField('templateWindow', videos.map(video => video.window));
 
   // Cutting device and punch-in from the reading pass when it read at least half the videos: in the
   // evaluation it agreed with reference labels 82-86% of the time, above the measured classifiers.
@@ -376,10 +389,15 @@ export function deriveBrandEditSpec(all: VideoMeasures[], options: DeriveOptions
     ...(elements ? { brandAssets: { elements } } : {}),
     audio: { targetLufs },
     ...visual,
-    textOverlays: { header, hookLabel, ...(callouts ? { callouts } : {}) },
+    ...(templateWindow ? { templateWindow } : {}),
+    textOverlays: { header, hookLabel, ...(hookBox ? { hookBox } : {}), ...(callouts ? { callouts } : {}) },
     speech: { wpm: wpms.length ? Math.round(median(wpms)) : null, speakers: Math.max(0, ...videos.map(video => video.speakers)) },
     lowConfidence: low,
   };
+}
+
+function medianBox(boxes: { x: number; y: number; w: number; h: number }[]) {
+  return { x: round(median(boxes.map(b => b.x)), 3), y: round(median(boxes.map(b => b.y)), 3), w: round(median(boxes.map(b => b.w)), 3), h: round(median(boxes.map(b => b.h)), 3) };
 }
 
 function fail(path: string, reason: string): never { throw new Error(`品牌剪辑规范字段无效：${path}（${reason}）`); }

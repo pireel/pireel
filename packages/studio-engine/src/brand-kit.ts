@@ -44,8 +44,30 @@ export interface BrandKit {
   style?: BrandStyleSpec | null;
   /** Structured, measured edit parameters with per-field confidence (the part an edit can execute). */
   spec?: BrandEditSpec | null;
+  /** Layout templates the brand repeats: the look is fixed, any text is written per video. */
+  templates?: BrandTemplates | null;
   evidence: Partial<Record<BrandEvidenceTopic, BrandEvidence>>;
 }
+/** A text band the creator repeats (held header, opening label): where it sits and how it reads. */
+export interface BrandTextTemplate {
+  box: { x: number; y: number; w: number; h: number };
+  /** Text colour and the solid plate behind it (null: text sits on the footage). */
+  color: string;
+  plate: string | null;
+  /** Line height as a share of the frame height. */
+  sizePct: number;
+  /** A crop of the band from the creator's video, for reference. */
+  reference?: BrandAsset;
+}
+export interface BrandTemplates {
+  /** Vertical template frame: the footage plays in `window`, the rest of the frame is `fill`. */
+  frame?: { window: { x: number; y: number; w: number; h: number }; fill: string } | null;
+  /** Headline band held over the whole video; its words change per video. */
+  header?: BrandTextTemplate | null;
+  /** Label over the opening seconds. */
+  hookLabel?: (BrandTextTemplate & { durationSec: number }) | null;
+}
+
 export type BrandEvidenceTopic = 'captions' | 'font' | 'palette' | 'framing' | 'pacing' | 'transitions' | 'logo' | 'intro' | 'outro' | 'cover' | 'playbook';
 
 /** What a scene keeps: a copy taken when the brand was picked, so later brand edits never restyle past projects. */
@@ -81,6 +103,24 @@ function asset(value: unknown, path: string): BrandAsset {
   return item;
 }
 
+function unitBox(value: unknown, path: string) {
+  const box = value as { x: number; y: number; w: number; h: number };
+  if (!box || ![box.x, box.y, box.w, box.h].every(n => typeof n === 'number' && n >= 0 && n <= 1) || box.w <= 0 || box.h <= 0 || box.x + box.w > 1.001 || box.y + box.h > 1.001) fail(path, '需要 0–1 的矩形');
+}
+function validateTemplates(templates: BrandTemplates) {
+  if (templates.frame) { unitBox(templates.frame.window, 'templates.frame.window'); if (!HEX.test(templates.frame.fill)) fail('templates.frame.fill', '需要 #RRGGBB'); }
+  for (const key of ['header', 'hookLabel'] as const) {
+    const item = templates[key];
+    if (!item) continue;
+    unitBox(item.box, `templates.${key}.box`);
+    if (!HEX.test(item.color)) fail(`templates.${key}.color`, '需要 #RRGGBB');
+    if (item.plate !== null && !HEX.test(item.plate)) fail(`templates.${key}.plate`, '需要 #RRGGBB 或 null');
+    if (!(item.sizePct > 0 && item.sizePct <= 0.3)) fail(`templates.${key}.sizePct`, '0–0.3');
+    if (item.reference) asset(item.reference, `templates.${key}.reference`);
+  }
+  if (templates.hookLabel && !(templates.hookLabel.durationSec > 0 && templates.hookLabel.durationSec <= 15)) fail('templates.hookLabel.durationSec', '0–15 秒');
+}
+
 /** Server and client share one validator: an invalid kit is refused with the field that failed, never patched. */
 export function validateBrandKit(value: unknown): BrandKit {
   const kit = value as BrandKit;
@@ -112,6 +152,7 @@ export function validateBrandKit(value: unknown): BrandKit {
   if (kit.intro) { asset(kit.intro, 'intro'); if (kit.intro.kind !== 'video') fail('intro', '片头需要视频'); }
   if (kit.outro) { asset(kit.outro, 'outro'); if (kit.outro.kind !== 'video') fail('outro', '片尾需要视频'); }
   if (kit.cover) kit.cover.references.forEach((item, index) => asset(item, `cover.references.${index}`));
+  if (kit.templates) validateTemplates(kit.templates);
   if (kit.style) validateStoredStyleSpec(kit.style);
   if (kit.spec) validateBrandEditSpec(kit.spec);
   return kit;

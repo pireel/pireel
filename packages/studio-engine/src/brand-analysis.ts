@@ -1,5 +1,5 @@
 import type { BrandConfidence, BrandCorner, BrandEvidence } from './brand-kit';
-import { classifyLayout, cutProfile, VISUAL_THRESHOLDS, type CutKind, type CutPair, type LayoutMode, type VisualSample } from './brand-visual';
+import { classifyLayout, cutProfile, portraitTemplateWindow, VISUAL_THRESHOLDS, type CutKind, type CutPair, type LayoutMode, type VisualSample } from './brand-visual';
 
 /**
  * Brand extraction, deterministic half: per-video observations (measured in the browser and by OCR)
@@ -268,6 +268,10 @@ export interface VideoMeasures {
   headerShare: number;
   header: { box: { x: number; y: number; w: number; h: number }; texts: string[] } | null;
   hookLabel: boolean;
+  /** Where the opening label sits, when there is one. */
+  hookBox?: { x: number; y: number; w: number; h: number } | null;
+  /** The content window of a template frame: the region that changes while the rest holds still. */
+  window?: { x: number; y: number; w: number; h: number } | null;
   wordsPerPage: number | null;
 }
 
@@ -301,6 +305,12 @@ export interface TextLayer {
 }
 
 const HOOK_SEC = 8;
+/** Headline text is set large: a line at least this share of the frame height (station bugs, corner
+ *  badges and disclaimer lines are smaller). */
+const HEADLINE_MIN_H = 0.022;
+/** A held header is a headline band across the upper part of the frame — not a corner bug, small
+ *  print, or a sign low in the set (Chinese-platform study: those were the false headers). */
+const headerShaped = (box: { x: number; y: number; w: number; h: number }) => box.w >= 0.25 && box.h >= HEADLINE_MIN_H && box.y + box.h / 2 <= 0.4;
 
 /**
  * On-screen text split into layers by position, then by behaviour: captions follow the speech (or,
@@ -325,8 +335,8 @@ export function textLayers(video: VideoObservation): TextLayer[] {
     const changeRate = items.slice(1).filter((item, index) => norm(item.box.text) !== norm(items[index]!.box.text)).length / Math.max(1, items.length - 1);
     const box = { x: median(items.map(i => i.box.x)), y: median(items.map(i => i.box.y)), w: median(items.map(i => i.box.w)), h: median(items.map(i => i.box.h)) };
     const kind: TextLayerKind = (sync !== null ? sync >= 0.5 : changeRate >= 0.5 && presence >= 0.15) ? 'caption'
-      : presence >= 0.5 && changeRate < 0.3 && box.w >= 0.12 ? 'header'
-        : earlyPresence >= 0.6 && presence < 0.4 && changeRate < 0.5 ? 'hook_label'
+      : presence >= 0.5 && changeRate < 0.3 && headerShaped(box) ? 'header'
+        : earlyPresence >= 0.6 && presence < 0.4 && changeRate < 0.5 && box.h >= HEADLINE_MIN_H ? 'hook_label'
           : 'scene';
     return { kind, box: { x: round(box.x, 3), y: round(box.y, 3), w: round(box.w, 3), h: round(box.h, 3) }, presence: round(presence, 2), earlyPresence: round(earlyPresence, 2), sync: sync === null ? null : round(sync, 2), changeRate: round(changeRate, 2), texts: [...new Set(items.map(item => item.box.text))].slice(0, 5) };
   }).sort((a, b) => b.presence - a.presence);
@@ -339,8 +349,8 @@ function wordsPerPage(video: VideoObservation, layers: TextLayer[]): number | nu
   return pages.length ? median(pages) : null;
 }
 
-function visualMeasures(video: VideoObservation): Pick<VideoMeasures, 'layout' | 'hostShare' | 'cuts' | 'hostEarlyOnly'> {
-  if (!video.visual?.samples.length) return { layout: null, hostShare: null, cuts: null, hostEarlyOnly: false };
+function visualMeasures(video: VideoObservation): Pick<VideoMeasures, 'layout' | 'hostShare' | 'cuts' | 'hostEarlyOnly' | 'window'> {
+  if (!video.visual?.samples.length) return { layout: null, hostShare: null, cuts: null, hostEarlyOnly: false, window: null };
   const vertical = video.width && video.height ? video.height > video.width : true;
   const layout = classifyLayout(video.visual.samples, vertical);
   const hostRate = (list: VisualSample[]) => list.length ? list.filter(sample => (sample.face?.h ?? 0) >= VISUAL_THRESHOLDS.minFaceH).length / list.length : 0;
@@ -349,6 +359,7 @@ function visualMeasures(video: VideoObservation): Pick<VideoMeasures, 'layout' |
     layout: layout.mode, hostShare: layout.hostShare,
     cuts: video.visual.pairs.length >= 3 ? cutProfile(video.visual.pairs).share : null,
     hostEarlyOnly: hostRate(video.visual.samples.filter(sample => sample.t < split)) >= 0.5 && hostRate(video.visual.samples.filter(sample => sample.t >= split)) < 0.25,
+    window: vertical ? portraitTemplateWindow(video.visual.samples) : null,
   };
 }
 
@@ -402,6 +413,7 @@ export function measureVideo(video: VideoObservation): VideoMeasures {
     headerShare: header?.presence ?? 0,
     header: header ? { box: header.box, texts: header.texts } : null,
     hookLabel: layers.some(layer => layer.kind === 'hook_label'),
+    hookBox: layers.find(layer => layer.kind === 'hook_label')?.box ?? null,
     wordsPerPage: wordsPerPage(video, layers),
   };
 }

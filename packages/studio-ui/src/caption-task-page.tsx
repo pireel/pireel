@@ -28,7 +28,7 @@ import { DEFAULT_DUBBING_OPTIONS, dubbingVoicesReady, dubbingSceneOptions } from
 import { DubbingSettings } from './dubbing-settings';
 import { CaptionPositionPreview } from './caption-position-preview';
 import { SceneBrandPicker } from './scene-brand-picker';
-import { BrandLogoOverlay, BrandPresetPanel } from './brand-preset-panel';
+import { BrandLogoOverlay, BrandPresetPanel, BrandTemplateOverlay } from './brand-preset-panel';
 import { CaptionProgressOverlay } from './caption-progress-overlay';
 import { createCaptionAgentRemix } from './caption-agent-remix';
 import { CaptionTaskStyle } from './caption-task-style';
@@ -429,6 +429,7 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
         <SceneVideoPreview source={file} resultUrl={playable ? resultUrl : undefined} poster={firstFrame || cover} width={probe?.width ?? task.width} height={probe?.height ?? task.height} duration={task.durationSec} disabled={disabled} locale={locale} actions={videoActions()}>
           {!playable && <>
             {!isRemoval && !busy && !versionLoading && <BrandLogoOverlay brand={options.brand} />}
+            {oneClick && !busy && !versionLoading && <BrandTemplateOverlay options={options} locale={locale} />}
             {isRemoval && options.subtitleRemoval?.mode === 'region' && options.subtitleRemoval.region && !busy && !versionLoading && <SubtitleRegionOverlay region={options.subtitleRemoval.region} locale={locale} disabled={disabled} onChange={region => changeOptions(current => ({ ...current, subtitleRemoval: { ...current.subtitleRemoval, mode: 'region', region } }))}/>}
             {isPip && !busy && !versionLoading && <PipLayoutPreview options={options.broll?.pip ?? DEFAULT_PIP_OPTIONS} source={firstFrame || cover} canvas={probe ?? task} asset={options.broll?.assets[0]} scope={task.scope} locale={locale} captions={options.broll?.captions === false ? undefined : captionBandFor({ on: true, ...captionTaskStyle(options, probe ?? task) })}/>}
             {(((isSfx || isRemoval) ? false : isBroll ? options.broll?.captions : !isDubbing) || options.dubbing?.captions) && !busy && !versionLoading && <CaptionPositionPreview options={options} source={probe ?? { width: 1080, height: 1920 }} locale={locale} disabled={disabled} onChange={(yPct) => changeOptions((current) => {

@@ -184,6 +184,9 @@ export interface StudioProviders {
   dubbingScript?: (turns: { text: string; seconds: number }[][], targetLanguage: string, options?: StudioOperationOptions) => Promise<string[][]>;
   /** Caption auto-highlight picker (hosted-LLM feature; absent = the transcript hides its "Auto highlight" button — BYO agents highlight via set_captions highlights). Returns exact phrases per row. */
   autoHighlight?: (rows: { index: number; text: string }[], options?: StudioOperationOptions) => Promise<{ index: number; text: string }[]>;
+  /** Writes this video's words for the brand's text bands (held header, opening label), in the
+   *  creator's manner (hosted LLM; absent = one-click edits leave the bands out). */
+  brandCopy?: (input: { transcript: string; header?: { maxChars: number; examples: string[] }; hookLabel?: { maxChars: number } }, options?: StudioOperationOptions) => Promise<{ header?: string; hookLabel?: string }>;
   /** Plans where a one-click edit punches in, following the brand's editing rules (hosted LLM; absent =
    *  punch-ins land on highlighted words). Returns phrases of the given rows, at most `maxPunches`. */
   editPlan?: (input: { rows: { index: number; text: string; startSec: number }[]; durationSec: number; guide: string; maxPunches: number; minGapSec: number }, options?: StudioOperationOptions) => Promise<{ punches: { index: number; text: string }[] }>;

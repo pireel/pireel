@@ -18,6 +18,8 @@ export const CAPTION_WORKFLOW_CAPABILITIES = [
   sceneCapability('captions.apply', ['document', 'plan', 'translation', 'style'], ['document']),
   sceneCapability('captions.highlight', ['transcript'], ['transcript'], true),
   sceneCapability('brand.apply', ['document', 'brand'], ['document']),
+  sceneCapability('brand.copy', ['transcript', 'request', 'templates', 'document'], ['copy'], true),
+  sceneCapability('brand.texts', ['document', 'copy', 'templates'], ['document']),
   sceneCapability('edit.plan', ['transcript', 'guide', 'punch', 'document'], ['targets'], true),
   sceneCapability('framing.punch-in', ['document', 'transcript', 'punch', 'targets'], ['document']),
   sceneCapability('audio.loudness', ['document', 'media', 'targetLufs'], ['document']),
@@ -51,6 +53,14 @@ export function captionTailSteps(options: CaptionTaskOptions, document: Workflow
     steps.push(sceneStep('editplan', 'edit.plan', { transcript, guide: literal(options.brand ? brandEditGuide(options.brand) : ''), punch: sceneLiteral(punchIn), document }));
     steps.push(sceneStep('punch', 'framing.punch-in', { document, transcript, punch: sceneLiteral(punchIn), targets: stepOutput('editplan', 'targets') }));
     document = stepOutput('punch', 'document');
+  }
+  const texts = options.edit?.texts; const templates = options.brand?.templates;
+  if (texts && templates && ((texts.header && templates.header) || (texts.hookLabel && templates.hookLabel))) {
+    // The bands' look is the brand's; their words are written for this video.
+    const request = { header: !!(texts.header && templates.header), hookLabel: !!(texts.hookLabel && templates.hookLabel), examples: options.brand?.spec?.textOverlays.header.value.examples ?? [] };
+    steps.push(sceneStep('copy', 'brand.copy', { transcript, request: sceneLiteral(request), templates: sceneLiteral(templates), document }));
+    steps.push(sceneStep('texts', 'brand.texts', { document, copy: stepOutput('copy', 'copy'), templates: sceneLiteral(templates) }));
+    document = stepOutput('texts', 'document');
   }
   // After captions: the intro/outro ripple the captions along with the speech they follow.
   if (brandHasMedia(options.brand)) {
