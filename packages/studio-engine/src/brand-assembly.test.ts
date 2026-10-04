@@ -27,7 +27,7 @@ const synthesis: Synthesis = {
     { kind: 'transition', variants: ['whip'], frequency: 'rare', trigger: { text: '换话题', en: 'New topic.' }, videos: ['v2', 'v3'], evidence: [] },
   ],
   opening: { text: '直接开讲', en: 'Straight in.', videos: ['v1', 'v2', 'v3', 'v4'] }, closing: null,
-  structure: [], palette: { accent: '#ffd600' }, cover: null, headlines: { text: '数字开头', en: 'Lead with a number.' }, elements: [],
+  structure: [], palette: { accent: '#ffd600' }, cover: null, headlines: { text: '数字开头', en: 'Lead with a number.' }, elements: [], setAside: [],
 };
 const parts = (): PlaybookParts => ({
   id: 'pending', name: 'Mine', platform: 'douyin',

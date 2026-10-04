@@ -11,7 +11,7 @@ import type { MoveKind } from './brand-playbook';
  * trust, and what is known to go wrong. Raise METHOD_VERSION whenever a row, a tool or a prompt
  * changes; every playbook records the version that made it.
  */
-export const METHOD_VERSION = 'brand-method-1';
+export const METHOD_VERSION = 'brand-method-2';
 
 export type PlaybookSection = 'fixed' | 'moves' | 'structure' | 'generation';
 export type Finding = 'measure' | 'read' | 'both';
@@ -55,7 +55,7 @@ export const DIMENSIONS: readonly Dimension[] = [
     pitfalls: 'A switch to another camera angle is multicam, not a punch-in. How many per video is decided by the content: record the trigger and a cap, never a rate.' },
   { id: 'transition', section: 'moves', move: 'transition', finding: 'read', minVideos: 3,
     look: 'Anything but a hard cut between shots: whip, zoom, flash, glitch, fade, a sound hit on the cut; and where it sits (a new section or topic, or anywhere).',
-    pitfalls: 'Hard cuts are the default for nearly every creator; a transition is an accent at a boundary, not the style of every cut.' },
+    pitfalls: 'Hard cuts are the default for nearly every creator, and a jump cut is a hard cut; a transition is an accent at a boundary, not the style of every cut.' },
   { id: 'broll', section: 'moves', move: 'broll', finding: 'both', minVideos: 5,
     look: 'Footage other than the speaker: own footage, product close-ups, screen recordings, screenshots or articles, stock, archive news, AI images, memes; how much; and what triggers it (a noun or step mentioned, a claim needing proof).',
     pitfalls: 'Same-location selfie footage is the creator\'s own footage, not stock. Jump cuts and B-roll covering rarely go together.' },

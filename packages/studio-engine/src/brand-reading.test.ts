@@ -31,10 +31,18 @@ describe('parseVideoReading', () => {
     expect(parsed.opening).toBe('Starts on a question.');
   });
 
-  it('fails on a move A does not read, a foreign variant or a time outside the video', () => {
-    expect(() => parseVideoReading(reading([{ kind: 'music', variants: ['bed'], times: [1], on: 'x' }]), 'v1', 30)).toThrow(/moves\.0\.kind/);
-    expect(() => parseVideoReading(reading([{ kind: 'punch_in', variants: ['whip'], times: [1], on: 'x' }]), 'v1', 30)).toThrow(/variants/);
-    expect(() => parseVideoReading(reading([{ kind: 'punch_in', variants: ['punch'], times: [45], on: 'x' }]), 'v1', 30)).toThrow(/times/);
+  it('sets aside names outside the vocabulary and times outside the video, keeping them visible', () => {
+    const parsed = parseVideoReading(reading([
+      { kind: 'music', variants: ['bed'], times: [1], on: 'x' },
+      { kind: 'transition', variants: ['jump', 'whip'], times: [1, 45], on: 'a new topic' },
+    ]), 'v1', 30);
+    expect(parsed.moves).toEqual([{ kind: 'transition', variants: ['whip'], times: [1], on: 'a new topic' }]);
+    expect(parsed.unread).toEqual(['music', 'transition:jump']);
+  });
+
+  it('leaves out missing parts and fails only on an answer that is not JSON', () => {
+    expect(() => parseVideoReading('no json here', 'v1', 30)).toThrow(/json/);
+    expect(parseVideoReading(JSON.stringify({ moves: [{ kind: 'punch_in', variants: ['punch'] }] }), 'v1', 30)).toMatchObject({ portrait: '', moves: [{ kind: 'punch_in', variants: ['punch'], times: [] }] });
   });
 });
 
@@ -55,10 +63,24 @@ describe('parseSynthesis', () => {
     expect(parsed.closing?.videos).toEqual(['v1', 'v3']);
   });
 
-  it('refuses what holds in one video only, unknown videos, rates and cited times outside a video', () => {
-    expect(() => parseSynthesis(synthesis({ moves: [{ kind: 'punch_in', variants: ['punch'], frequency: 'moderate', trigger: said, videos: ['v1'], evidence: [] }] }), videos)).toThrow(/moves\.0\.videos/);
-    expect(() => parseSynthesis(synthesis({ closing: { ...said, videos: ['v1', 'v9'] } }), videos)).toThrow(/closing\.videos/);
-    expect(() => parseSynthesis(synthesis({ moves: [{ kind: 'punch_in', variants: ['punch'], frequency: 'every 8s', trigger: said, videos: ['v1', 'v2'], evidence: [] }] }), videos)).toThrow(/frequency/);
-    expect(() => parseSynthesis(synthesis({ moves: [{ kind: 'punch_in', variants: ['punch'], frequency: 'rare', trigger: said, videos: ['v1', 'v2'], evidence: [{ video: 'v1', sec: 99 }] }] }), videos)).toThrow(/evidence/);
+  it('sets aside what holds in one video only, cites unknown videos, names no form or no level; drops times outside a video', () => {
+    const parsed = parseSynthesis(synthesis({
+      moves: [
+        { kind: 'punch_in', variants: ['punch'], frequency: 'moderate', trigger: said, videos: ['v1'], evidence: [] },
+        { kind: 'transition', variants: ['jump'], frequency: 'rare', trigger: said, videos: ['v1', 'v2'], evidence: [] },
+        { kind: 'broll', variants: ['product'], frequency: 'every 8s', trigger: said, videos: ['v1', 'v2'], evidence: [] },
+        { kind: 'graphic_callout', variants: ['arrow'], frequency: 'rare', trigger: said, videos: ['v1', 'v2', 'v9'], evidence: [{ video: 'v1', sec: 99 }, { video: 'v2', sec: 4 }] },
+      ],
+      closing: { ...said, videos: ['v1', 'v9'] },
+    }), videos);
+    expect(parsed.moves).toEqual([{ kind: 'graphic_callout', variants: ['arrow'], frequency: 'rare', trigger: said, videos: ['v1', 'v2'], evidence: [{ video: 'v2', sec: 4 }] }]);
+    expect(parsed.closing).toBeNull();
+    expect(parsed.setAside).toHaveLength(4);
+    expect(parsed.setAside[0]).toMatch(/punch_in.*1 video/);
+  });
+
+  it('fails only when the answer is not the contract at all', () => {
+    expect(() => parseSynthesis('nope', videos)).toThrow(/json/);
+    expect(() => parseSynthesis(synthesis({ portrait: null }), videos)).toThrow(/portrait/);
   });
 });

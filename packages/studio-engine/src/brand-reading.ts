@@ -90,7 +90,7 @@ Report:
 ${FACET_GUIDE}
 3. moves — each of these moves you can see in this video (leave out the ones you cannot):
 ${moveGuide()}
-   For each: the variants seen (names from its list), the seconds where it happens, and the kind of moment it lands on, in English (e.g. "the punchline", "naming a product", "a new topic", "a number").
+   For each: the variants seen (only names from its list), the seconds where it happens, and the kind of moment it lands on, in English (e.g. "the punchline", "naming a product", "a new topic", "a number"). Jump cuts and plain cuts are how the video is cut (the cuttingDevice facet), not a move.
 4. opening and closing — how this video opens and how it ends, in English; quote a sign-off line when it shows as text.
 5. look — captionFill and captionOutline (#RRGGBB, when captions show), palette (up to 4 #RRGGBB colours the creator's own text and graphics use, not the set or clothes), elements (look and motion of titles, cards and graphics the creator adds, in English), cover (composition and lettering, when a cover image is given).
 
@@ -115,7 +115,7 @@ ${moveGuide()}
 Structure and generated material:
 ${structure}
 
-Write "text" in ${language} for the creator to read, and "en" as an English instruction an editor can follow.
+Write "text" in ${language} for the creator to read, and "en" as an English instruction an editor can follow. The portrait is two to four sentences; every other entry is one sentence.
 Return only JSON:
 {"portrait":{"text":"…","en":"…"},
  "moves":[{"kind":"…","variants":["…"],"frequency":"rare|moderate|frequent","trigger":{"text":"…","en":"…"},"videos":["<video ids>"],"evidence":[{"video":"<id>","sec":<seconds>}]}],
@@ -126,7 +126,7 @@ Return only JSON:
  "cover":{"layout":{"text":"…","en":"…"},"lettering":{"text":"…","en":"…"}} or null,
  "headlines":{"text":"…","en":"…"} or null,
  "elements":[{"text":"…","en":"…","videos":["…"]}]}
-At most one entry per move kind; at most 8 structure rules and 6 element rules.`;
+At most one entry per move kind, each with at least one variant from its list (leave a move out when its form is unclear); at most 8 structure rules and 6 element rules.`;
 }
 
 // ── Parsing
@@ -145,31 +145,42 @@ export interface VideoReading {
   video: string;
   portrait: string;
   facets: VideoStyleFacets;
-  moves: { kind: MoveKind; variants: string[]; times: number[]; on: string }[];
+  moves: { kind: MoveKind; variants: string[]; times: number[]; on?: string }[];
   opening?: string; closing?: string;
   look: { captionFill?: string; captionOutline?: string; palette: string[]; elements?: string; cover?: string };
+  /** What the reading named outside the method's vocabulary ("kind" or "kind:variant"), kept visible, not used. */
+  unread?: string[];
 }
 
+/** A reading is evidence, not the contract: names outside the vocabulary are set aside (listed in
+ *  `unread`), missing or malformed parts are left out, and only an answer that is not JSON fails. The
+ *  synthesis applies the method's evidence bar. */
 export function parseVideoReading(raw: string, video: string, durationSec: number): VideoReading {
   const value = json(raw);
   const live = liveMoves();
-  const moves = list(value.moves, 'moves').map((entry, index) => {
+  const unread: string[] = [];
+  const moves = (Array.isArray(value.moves) ? value.moves : []).flatMap(entry => {
     const move = (entry ?? {}) as Record<string, unknown>;
     const kind = move.kind as MoveKind;
-    if (!live.includes(kind)) fail(`moves.${index}.kind`, move.kind);
-    const variants = list(move.variants, `moves.${index}.variants`).map((variant, at) => MOVE_VARIANTS[kind].includes(variant as string) ? variant as string : fail(`moves.${index}.variants.${at}`, variant));
-    const times = list(move.times, `moves.${index}.times`).map((t, at) => typeof t === 'number' && t >= 0 && t <= durationSec + 0.5 ? Math.round(t * 10) / 10 : fail(`moves.${index}.times.${at}`, t));
-    return { kind, variants, times, on: text(move.on, `moves.${index}.on`, 300) };
+    if (!live.includes(kind)) { unread.push(String(move.kind)); return []; }
+    const variants = (Array.isArray(move.variants) ? move.variants : []).flatMap(variant => {
+      if (MOVE_VARIANTS[kind].includes(variant as string)) return [variant as string];
+      unread.push(`${kind}:${String(variant)}`); return [];
+    });
+    const times = (Array.isArray(move.times) ? move.times : []).flatMap(t => typeof t === 'number' && t >= 0 && t <= durationSec + 0.5 ? [Math.round(t * 10) / 10] : []);
+    const on = optionalText(move.on, 300);
+    return [{ kind, variants: [...new Set(variants)], times, ...(on ? { on } : {}) }];
   });
   const look = (value.look ?? {}) as Record<string, unknown>;
   return {
-    video, portrait: text(value.portrait, 'portrait'), facets: parseStyleFacets(value.facets), moves,
+    video, portrait: optionalText(value.portrait) ?? '', facets: parseStyleFacets(value.facets), moves,
     ...(optionalText(value.opening) ? { opening: optionalText(value.opening) } : {}), ...(optionalText(value.closing) ? { closing: optionalText(value.closing) } : {}),
     look: {
       ...(hex(look.captionFill) ? { captionFill: hex(look.captionFill) } : {}), ...(hex(look.captionOutline) ? { captionOutline: hex(look.captionOutline) } : {}),
-      palette: list(look.palette, 'look.palette').flatMap(item => hex(item) ? [hex(item)!] : []).slice(0, 4),
+      palette: (Array.isArray(look.palette) ? look.palette : []).flatMap(item => hex(item) ? [hex(item)!] : []).slice(0, 4),
       ...(optionalText(look.elements) ? { elements: optionalText(look.elements) } : {}), ...(optionalText(look.cover) ? { cover: optionalText(look.cover) } : {}),
     },
+    ...(unread.length ? { unread } : {}),
   };
 }
 
@@ -184,47 +195,67 @@ export interface Synthesis {
   cover: { layout: Said; lettering: Said } | null;
   headlines: Said | null;
   elements: (Said & { videos: string[] })[];
+  /** Entries the method's evidence bar removed, with why — kept visible, never used. */
+  setAside: string[];
 }
 
-/** The synthesis must keep to recurring evidence: every video id and time it cites is real, and with three
- *  or more videos a move or rule holds in at least two. */
+/**
+ * The synthesis checked against the method. The evidence bar is applied here by code, not trusted to the
+ * model: an entry that cites unknown videos only, holds in fewer than two videos (with three or more),
+ * names no form from its move's list or gives no level is set aside with the reason; cited times outside
+ * a video are dropped. Only an answer that is not the contract at all (no JSON, no portrait) fails.
+ */
 export function parseSynthesis(raw: string, videos: { id: string; durationSec: number }[]): Synthesis {
   const value = json(raw);
   const ids = new Set(videos.map(video => video.id));
   const need = videos.length >= 3 ? 2 : 1;
-  const said = (entry: unknown, path: string): Said => { const item = (entry ?? {}) as Record<string, unknown>; return { text: text(item.text, `${path}.text`), en: text(item.en, `${path}.en`) }; };
-  const cited = (entry: unknown, path: string) => {
-    const seen = list((entry as Record<string, unknown>)?.videos, `${path}.videos`).map((id, at) => ids.has(id as string) ? id as string : fail(`${path}.videos.${at}`, id));
-    if (new Set(seen).size < need) fail(`${path}.videos`, seen);
-    return [...new Set(seen)];
+  const setAside: string[] = [];
+  const said = (entry: unknown, path: string, max = 600): Said => { const item = (entry ?? {}) as Record<string, unknown>; return { text: text(item.text, `${path}.text`, max), en: text(item.en, `${path}.en`, max) }; };
+  const saidOrNull = (entry: unknown, path: string): Said | null => { try { return said(entry, path); } catch { setAside.push(`${path}: no text`); return null; } };
+  /** The real videos an entry cites, or null (set aside) when fewer than the bar. */
+  const cited = (entry: unknown, path: string): string[] | null => {
+    const raw = (entry as Record<string, unknown>)?.videos;
+    const seen = [...new Set((Array.isArray(raw) ? raw : []).filter((id): id is string => ids.has(id as string)))];
+    if (seen.length < need) { setAside.push(`${path}: seen in ${seen.length} video(s)`); return null; }
+    return seen;
   };
   const live = liveMoves();
   const kinds = new Set<string>();
-  const moves = list(value.moves, 'moves').map((entry, index) => {
-    const move = (entry ?? {}) as Record<string, unknown>; const path = `moves.${index}`;
+  const moves = list(value.moves, 'moves').flatMap((entry, index) => {
+    const move = (entry ?? {}) as Record<string, unknown>; const path = `moves.${index}(${String(move.kind)})`;
     const kind = move.kind as MoveKind;
-    if (!live.includes(kind) || kinds.has(kind)) fail(`${path}.kind`, move.kind);
+    if (!live.includes(kind) || kinds.has(kind)) { setAside.push(`${path}: not a move the method reads, or repeated`); return []; }
+    const variants = [...new Set((Array.isArray(move.variants) ? move.variants : []).filter(variant => MOVE_VARIANTS[kind].includes(variant as string)) as string[])];
+    if (!variants.length) { setAside.push(`${path}: no form from its list`); return []; }
+    if (!['rare', 'moderate', 'frequent'].includes(move.frequency as string)) { setAside.push(`${path}: no frequency level`); return []; }
+    const trigger = saidOrNull(move.trigger, `${path}.trigger`);
+    const seen = cited(move, path);
+    if (!trigger || !seen) return [];
     kinds.add(kind);
-    const variants = list(move.variants, `${path}.variants`).map((variant, at) => MOVE_VARIANTS[kind].includes(variant as string) ? variant as string : fail(`${path}.variants.${at}`, variant));
-    if (!variants.length) fail(`${path}.variants`, variants);
-    if (!['rare', 'moderate', 'frequent'].includes(move.frequency as string)) fail(`${path}.frequency`, move.frequency);
-    const evidence = list(move.evidence, `${path}.evidence`).map((ref, at) => {
+    const evidence = (Array.isArray(move.evidence) ? move.evidence : []).flatMap(ref => {
       const item = (ref ?? {}) as Record<string, unknown>; const video = videos.find(v => v.id === item.video);
-      return video && typeof item.sec === 'number' && item.sec >= 0 && item.sec <= video.durationSec + 0.5 ? { video: video.id, sec: Math.round(item.sec * 10) / 10 } : fail(`${path}.evidence.${at}`, ref);
+      return video && typeof item.sec === 'number' && item.sec >= 0 && item.sec <= video.durationSec + 0.5 ? [{ video: video.id, sec: Math.round(item.sec * 10) / 10 }] : [];
     });
-    return { kind, variants: [...new Set(variants)], frequency: move.frequency as Frequency, trigger: said(move.trigger, `${path}.trigger`), videos: cited(move, path), evidence };
+    return [{ kind, variants, frequency: move.frequency as Frequency, trigger, videos: seen, evidence }];
   });
-  const rule = (entry: unknown, path: string) => entry == null ? null : { ...said(entry, path), videos: cited(entry, path) };
+  const rule = (entry: unknown, path: string) => {
+    if (entry == null) return null;
+    const words = saidOrNull(entry, path); const seen = cited(entry, path);
+    return words && seen ? { ...words, videos: seen } : null;
+  };
+  const rules = (entries: unknown, path: string, max: number) => list(entries, path).slice(0, max).flatMap((entry, index) => { const item = rule(entry, `${path}.${index}`); return item ? [item] : []; });
   const palette = (value.palette ?? {}) as Record<string, unknown>;
   const cover = value.cover as Record<string, unknown> | null | undefined;
+  const coverLayout = cover ? saidOrNull(cover.layout, 'cover.layout') : null; const coverLettering = cover ? saidOrNull(cover.lettering, 'cover.lettering') : null;
   return {
-    portrait: said(value.portrait, 'portrait'), moves,
+    portrait: said(value.portrait, 'portrait', 1500), moves,
     opening: rule(value.opening, 'opening'), closing: rule(value.closing, 'closing'),
-    structure: list(value.structure, 'structure').slice(0, 8).map((entry, index) => rule(entry, `structure.${index}`)!),
+    structure: rules(value.structure, 'structure', 8),
     palette: Object.fromEntries((['accent', 'accent2', 'text', 'ground'] as const).flatMap(key => hex(palette[key]) ? [[key, hex(palette[key])]] : [])),
-    cover: cover ? { layout: said(cover.layout, 'cover.layout'), lettering: said(cover.lettering, 'cover.lettering') } : null,
-    headlines: value.headlines ? said(value.headlines, 'headlines') : null,
-    elements: list(value.elements, 'elements').slice(0, 6).map((entry, index) => rule(entry, `elements.${index}`)!),
+    cover: coverLayout && coverLettering ? { layout: coverLayout, lettering: coverLettering } : null,
+    headlines: value.headlines ? saidOrNull(value.headlines, 'headlines') : null,
+    elements: rules(value.elements, 'elements', 6),
+    setAside,
   };
 }
 
