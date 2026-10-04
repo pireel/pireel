@@ -58,7 +58,9 @@ function dubbingFitSummary(notes: { at: number; kind: 'faster' | 'trimmed' }[], 
     : [faster && `Speech runs fast at ${faster}`, trimmed && `a line ends early at ${trimmed}`].filter(Boolean).join('; ') + '.';
 }
 
-export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, onOpenEditor }: { taskId: string; locale: 'zh' | 'en'; scene?: 'captions' | 'dubbing' | 'broll' | 'pip' | 'sfx' | 'subtitle-removal' | 'ugc-ad'; onBack: () => void; onOpenEditor: (projectId: string) => void }) {
+export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, onOpenEditor, extraActions }: { taskId: string; locale: 'zh' | 'en'; scene?: 'captions' | 'dubbing' | 'broll' | 'pip' | 'sfx' | 'subtitle-removal' | 'ugc-ad'; onBack: () => void; onOpenEditor: (projectId: string) => void;
+  /** Host actions beside Agent Remix (hosted features such as a brand cover), given the project and its source video. */
+  extraActions?: (task: CaptionTaskRecord, source: File | null) => ReactNode }) {
   const zh = locale === 'zh';
   const isRemoval = scene === 'subtitle-removal';
   const [removalModes, setRemovalModes] = useState<Partial<Record<ErasureKind, boolean>> | null>(null);
@@ -369,6 +371,7 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
     )}
     {addFootage}
     <div className="flex-1" />
+    {extraActions?.(task, file ?? null)}
     <button type="button" disabled={!file || disabled} onClick={() => void editInStudio()} className={sceneActionClass}><img src={AGENT_ENTRY_ICON} width={18} height={18} alt="" className="size-[18px] object-contain"/>Agent Remix</button>
     {generatedView ? <button type="button" disabled={disabled || !file} onClick={() => void downloadGenerated()} className={sceneActionClass}>{exporting ? <Loader2 size={14} className="animate-spin"/> : <Download size={14}/>} {exporting ? `${say('导出中', 'Exporting')} ${Math.round(exportProgress * 100)}%` : say('下载', 'Download')}</button>
     : playable && selectedVersion ? <a href={resultUrl} download={`${task.name.replace(/\.[^.]+$/, '')}-v${selectedVersion.number}.mp4`} className={sceneActionClass}><Download size={14}/>{say('下载','Download')}</a> : <button type="button" disabled={disabled || !versions.length || (isRemoval && drafting) || (isSfx && drafting && !task.draftDocument) || (isUgc && drafting)} onClick={() => void (isBroll || isSfx ? exportCurrentEdit() : start())} className={sceneActionClass}>{exporting?<Loader2 size={14} className="animate-spin"/>:<Download size={14}/>} {exporting ? `${say('导出中','Exporting')} ${Math.round(exportProgress*100)}%` : versions.length ? say('导出','Export') : say('下载','Download')}</button>}
