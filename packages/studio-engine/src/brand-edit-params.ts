@@ -4,6 +4,7 @@ import { ZOOM_PRESETS, type ShotZoom, type ZoomPreset } from './composition-core
 import type { NarrativeClipPatchUpdate } from './editor-document/commands/types';
 import type { EditorDocumentV2, NarrativeTimelineClip } from './editor-document/types';
 import type { SilenceMode } from './brand-edit-spec';
+import type { StyleSystem as BrandStyleSystem } from './brand-style-spec';
 
 /**
  * The edit parameters a one-click edit takes from a brand, each executed by the engine as is
@@ -43,27 +44,77 @@ export function brandEditParams(brand: BrandSnapshot): CaptionEditParams {
   return params;
 }
 
+/** The style-guide systems that bear on cutting decisions (layer B, given to the edit planner as context). */
+const EDIT_GUIDE_SYSTEMS = ['editing', 'framing', 'motion', 'bookends'] as const;
+
+/** The brand's own editing rules, in English, for the model planning an edit: the overall look and the
+ *  recurring rules of the systems that decide cuts and zooms. Empty when the brand was never analyzed. */
+export function brandEditGuide(brand: BrandSnapshot): string {
+  const style = brand.style;
+  if (!style) return '';
+  const lines = EDIT_GUIDE_SYSTEMS.flatMap(id => {
+    const system = style.systems[id];
+    const rules = system.present ? system.rules.map(rule => rule.en.trim()).filter(Boolean) : [];
+    return rules.length ? [`${id}:`, ...rules.map(rule => `- ${rule}`)] : [];
+  });
+  return [style.summaryEn.trim(), ...lines].filter(Boolean).join('\n');
+}
+
+function narrativeClips(document: EditorDocumentV2): NarrativeTimelineClip[] {
+  const track = document.timeline.tracks.find(item => item.id === document.semantics.primaryNarrativeTrackId);
+  return (track?.clips.filter((clip): clip is NarrativeTimelineClip => clip.kind === 'narrative') ?? []).sort((a, b) => a.startFrame - b.startFrame);
+}
+
+/** Where a source second plays on the cut timeline (null when it was cut out). */
+export function timelineSecOf(document: EditorDocumentV2, sourceSec: number): number | null {
+  const fps = document.canvas.fps;
+  const clip = narrativeClips(document).find(item => sourceSec >= item.sourceInSec && sourceSec < item.sourceOutSec);
+  if (!clip) return null;
+  const rate = (clip.sourceOutSec - clip.sourceInSec) / (clip.durationFrames / fps);
+  return clip.startFrame / fps + (sourceSec - clip.sourceInSec) / rate;
+}
+
+/** The edit planner's view of a cut video: each kept sentence with where it starts on the timeline,
+ *  the cut length, and how many punch-ins the spacing allows. */
+export function editPlanInput(document: EditorDocumentV2, transcript: readonly AsrSegment[], punch: NonNullable<CaptionEditParams['punchIn']>) {
+  const clips = narrativeClips(document);
+  const last = clips.at(-1);
+  const durationSec = last ? (last.startFrame + last.durationFrames) / document.canvas.fps : 0;
+  const rows = transcript.flatMap((segment, index) => {
+    const startSec = timelineSecOf(document, segment.words?.[0]?.start ?? segment.start);
+    return startSec !== null && segment.text.trim() ? [{ index, text: segment.text.trim(), startSec: Math.round(startSec * 10) / 10 }] : [];
+  });
+  return { rows, durationSec, maxPunches: Math.max(1, Math.floor(durationSec / punch.minGapSec)) };
+}
+
+/** A punch-in target from the edit plan: the word in a transcript sentence where the zoom starts. */
+export interface PunchTarget { sentenceIndex: number; wordIndex: number }
+
 /** Whether the brand marks key words in its captions (the research's keyword accent rule). */
 export function brandHighlightsKeywords(brand: BrandSnapshot): boolean {
   return brand.spec?.captions.accentRule?.value === 'keywords';
 }
 
 /**
- * Punch-ins for a cut document: in each sentence with a highlighted word, the clip holding that word
- * zooms from the word to the sentence's end (or the clip's end, whichever comes first). One zoom per
- * clip, none shorter than 0.6 s, none closer than `minGapSec` to the previous one; clips that already
- * carry a zoom are left alone. Times in the transcript are source seconds.
+ * Punch-ins for a cut document: at each target word, the clip holding it zooms from the word to the
+ * sentence's end (or the clip's end, whichever comes first). One zoom per clip, none shorter than
+ * 0.6 s, none closer than `minGapSec` to the previous one; clips that already carry a zoom are left
+ * alone. Transcript times are source seconds. Without targets, each sentence's first highlighted word.
  */
-export function punchInUpdates(document: EditorDocumentV2, transcript: readonly AsrSegment[], punch: NonNullable<CaptionEditParams['punchIn']>): NarrativeClipPatchUpdate[] {
+export function punchInUpdates(document: EditorDocumentV2, transcript: readonly AsrSegment[], punch: NonNullable<CaptionEditParams['punchIn']>, targets?: readonly PunchTarget[]): NarrativeClipPatchUpdate[] {
   const fps = document.canvas.fps;
-  const track = document.timeline.tracks.find(item => item.id === document.semantics.primaryNarrativeTrackId);
-  const clips = (track?.clips.filter((clip): clip is NarrativeTimelineClip => clip.kind === 'narrative') ?? []).sort((a, b) => a.startFrame - b.startFrame);
+  const clips = narrativeClips(document);
   const updates: NarrativeClipPatchUpdate[] = [];
   const used = new Set<string>();
   let last = -Infinity;
-  for (const segment of transcript) {
-    const decorated = Object.entries(segment.wordDecorations ?? {}).filter(([, decoration]) => decoration.highlight).map(([index]) => Number(index)).sort((a, b) => a - b);
-    const word = decorated.length ? segment.words?.[decorated[0]!] : undefined;
+  const picks: { segment: AsrSegment; wordIndex: number }[] = targets
+    ? [...targets].sort((a, b) => a.sentenceIndex - b.sentenceIndex || a.wordIndex - b.wordIndex).flatMap(target => transcript[target.sentenceIndex] ? [{ segment: transcript[target.sentenceIndex]!, wordIndex: target.wordIndex }] : [])
+    : transcript.flatMap(segment => {
+      const decorated = Object.entries(segment.wordDecorations ?? {}).filter(([, decoration]) => decoration.highlight).map(([index]) => Number(index)).sort((a, b) => a - b);
+      return decorated.length ? [{ segment, wordIndex: decorated[0]! }] : [];
+    });
+  for (const { segment, wordIndex } of picks) {
+    const word = segment.words?.[wordIndex];
     if (!word) continue;
     const clip = clips.find(item => word.start >= item.sourceInSec && word.start < item.sourceOutSec);
     if (!clip || used.has(clip.id) || clip.properties.zoom) continue;
@@ -78,4 +129,33 @@ export function punchInUpdates(document: EditorDocumentV2, transcript: readonly 
     used.add(clip.id); last = startOnTimeline;
   }
   return updates;
+}
+
+const SILENCE_WORDS = { aggressive: 'tight — even breaths are cut', moderate: 'moderate', natural: 'natural pauses kept' } as const;
+const BRIEF_MAX = 3500;
+
+/** The brand as the editing agent reads it (layer B): the look in a sentence, the measured habits a
+ *  scene already applies, and the creator's recurring rules by system — context for choices the user
+ *  leaves open, never a checklist. */
+export function brandAgentBrief(brand: BrandSnapshot): string {
+  const spec = brand.spec; const style = brand.style;
+  const habits = spec ? [
+    `cutting ${Math.round(spec.cutting.targetCpm.value[0])}–${Math.round(spec.cutting.targetCpm.value[1])} cuts/min`,
+    `pauses ${SILENCE_WORDS[spec.cutting.silence.value.mode]}`,
+    `loudness about ${Math.round(spec.audio.targetLufs.value)} LUFS`,
+    spec.captions.presence.value === 'never' ? 'usually no captions' : `captions ~${spec.captions.wordsPerPage.value} words on screen${spec.captions.case.value === 'upper' ? ', all caps' : ''}`,
+    `face about ${Math.round(spec.framing.faceH.value * 100)}% of frame height`,
+    ...(spec.layout ? [`layout ${spec.layout.value.replace(/_/g, ' ')}`] : []),
+  ] : [];
+  const rules = style ? (Object.entries(style.systems) as [string, BrandStyleSystem][]).flatMap(([id, system]) => {
+    const lines = system.present ? system.rules.map(rule => rule.en.trim()).filter(Boolean) : [];
+    return lines.length ? [`${id}: ${lines.join(' ')}`] : [];
+  }) : [];
+  const brief = [
+    style?.summaryEn.trim() ? `Look: ${style.summaryEn.trim()}` : '',
+    habits.length ? `Measured habits: ${habits.join('; ')}.` : '',
+    rules.length ? `Recurring rules from their videos:\n${rules.map(line => `- ${line}`).join('\n')}` : '',
+    `Brand assets: ${[brand.logo ? 'logo' : '', brand.intro ? 'intro' : '', brand.outro ? 'outro' : ''].filter(Boolean).join(', ') || 'none'}.`,
+  ].filter(Boolean).join('\n');
+  return brief.length > BRIEF_MAX ? brief.slice(0, BRIEF_MAX) + '…' : brief;
 }

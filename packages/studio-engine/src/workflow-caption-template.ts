@@ -3,6 +3,7 @@ import { workflowLiteral as literal, type WorkflowBinding, type WorkflowCapabili
 import type { CaptionTaskOptions } from './caption-task';
 import { workflowJson } from './workflow-artifacts';
 import { brandHasMedia } from './brand-kit';
+import { brandEditGuide } from './brand-edit-params';
 export const sceneCapability = (id: string, inputs: string[], outputs: string[], paid = false): WorkflowCapability => contractedCapability({
   id, version: 2, label: { zh: id, en: id }, requirements: [], environments: ['browser'],
   effect: paid ? 'generate' : 'edit', retry: paid ? 'reconcile-first' : 'safe', available: true,
@@ -17,7 +18,8 @@ export const CAPTION_WORKFLOW_CAPABILITIES = [
   sceneCapability('captions.apply', ['document', 'plan', 'translation', 'style'], ['document']),
   sceneCapability('captions.highlight', ['transcript'], ['transcript'], true),
   sceneCapability('brand.apply', ['document', 'brand'], ['document']),
-  sceneCapability('framing.punch-in', ['document', 'transcript', 'punch'], ['document']),
+  sceneCapability('edit.plan', ['transcript', 'guide', 'punch', 'document'], ['targets'], true),
+  sceneCapability('framing.punch-in', ['document', 'transcript', 'punch', 'targets'], ['document']),
   sceneCapability('audio.loudness', ['document', 'media', 'targetLufs'], ['document']),
   sceneCapability('video.render', ['document', 'media'], ['media', 'document']),
 ];
@@ -36,9 +38,8 @@ export function captionLayoutOptions(options: CaptionTaskOptions): CaptionTaskOp
 export function captionTailSteps(options: CaptionTaskOptions, document: WorkflowBinding, transcript: WorkflowBinding, media: WorkflowBinding, render = true): WorkflowStep[] {
   const steps: WorkflowStep[] = [];
   const captions = options.sfx ? ('captions' in options.sfx && options.sfx.captions) : !options.broll || options.broll.captions;
-  // Punch-ins land on highlighted words; the highlight runs for them even when captions do not colour words.
   const punchIn = options.edit?.punchIn;
-  if ((captions && options.highlights) || punchIn) steps.push(sceneStep('highlight', 'captions.highlight', { transcript }));
+  if (captions && options.highlights) steps.push(sceneStep('highlight', 'captions.highlight', { transcript }));
   if (captions) {
     steps.push(sceneStep('plan', 'captions.plan', { document, transcript: options.highlights ? stepOutput('highlight', 'transcript') : transcript, layout: sceneLiteral(captionLayoutOptions(options)) }));
     if (options.translationLanguage) steps.push(sceneStep('translate', 'text.translate', { units: stepOutput('plan', 'units'), language: sceneLiteral(options.translationLanguage) }));
@@ -46,7 +47,9 @@ export function captionTailSteps(options: CaptionTaskOptions, document: Workflow
     document = stepOutput('captions', 'document');
   }
   if (punchIn) {
-    steps.push(sceneStep('punch', 'framing.punch-in', { document, transcript: stepOutput('highlight', 'transcript'), punch: sceneLiteral(punchIn) }));
+    // Where to punch in is a judgement on this video's lines, made against the creator's own rules.
+    steps.push(sceneStep('editplan', 'edit.plan', { transcript, guide: literal(options.brand ? brandEditGuide(options.brand) : ''), punch: sceneLiteral(punchIn), document }));
+    steps.push(sceneStep('punch', 'framing.punch-in', { document, transcript, punch: sceneLiteral(punchIn), targets: stepOutput('editplan', 'targets') }));
     document = stepOutput('punch', 'document');
   }
   // After captions: the intro/outro ripple the captions along with the speech they follow.

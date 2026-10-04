@@ -37,7 +37,13 @@ export function wrapAgentTranscript(body: string): string {
   return wrapSpokenTranscript(bounded);
 }
 
-/** The situational blocks appended to the instructions on every surface: attached Frame / catalog, selected Skill / catalog. */
+/** The creator's brand in use (the host resolves it; `brief` from brand-edit-params `brandAgentBrief`). */
+export interface ResolvedBrand {
+  name: string;
+  brief: string;
+}
+
+/** The situational blocks appended to the instructions on every surface: attached Frame / catalog, selected Skill / catalog, the creator's brand. */
 export function buildChatContextBlocks(
   frame?: ResolvedFrame | null,
   frameCatalog?: string,
@@ -47,6 +53,7 @@ export function buildChatContextBlocks(
     title: string;
     summary: string;
   }[],
+  brand?: ResolvedBrand | null,
 ): string {
   const frameBlock = frame
     ? `\n\n<frame_attached id="${frame.id}" title="${frame.title}">\nThe user independently selected the visual direction "${frame.title}" — a professional art-direction playbook. Call manage_frame action:read ONCE before planning or generating, then read it as a whole. Carry its transferable visual principles directly into relevant edits where the user has left a choice open: shape language, material and image treatment, typography personality, color-role relationships, spatial tension, motion temperament and sparse sound texture. The latest explicit user instruction and current manually configured project values are authoritative. Project-level palette, captions and layout controls remain independent. The editor owns story, evidence, timing, B-roll need and beat strategy. Named situations and showcases are reference vocabulary, not templates, compatibility rules or quotas. If that read already exists in the conversation, do not call it again. Explicit user instructions, factual evidence, accessibility and brand obligations win over the direction.\n</frame_attached>`
@@ -60,5 +67,8 @@ export function buildChatContextBlocks(
     !scenarioSkill && scenarioSkillCatalog?.length
       ? `\n\n<studio_skill_catalog>\nNo Studio Skill is selected. Do not infer, auto-select, or claim that a Skill is active. The generic editing expert remains fully usable for ordinary requests. When a broad request would materially benefit from one of the available complete workflows below, recommend the single best fit once and tell the user they can select it from the Skill picker; do not block safe inspection or a requested local edit, and do not attach the Skill yourself.\n${scenarioSkillCatalog.map((skill) => `- ${skill.id} · ${skill.title} — ${skill.summary}`).join("\n")}\n</studio_skill_catalog>`
       : "";
-  return `${skillBlock}${skillCatalogBlock}${frameBlock}`;
+  const brandBlock = brand
+    ? `\n\n<creator_brand name="${brand.name.replace(/"/g, "'")}">\nThe user creates as this brand: their own style, read from videos they have published. Where the user leaves a choice open, edit the way this creator edits — when to cut and zoom, how to open and close, what text and graphics look like. Measured values describe their usual practice, not quotas for this video; decide per moment from the content. Scenes started with this brand already carry its captions, logo and intro/outro, so do not re-add them. The latest explicit user instruction wins over the brand.\n${brand.brief}\n</creator_brand>`
+    : "";
+  return `${skillBlock}${skillCatalogBlock}${frameBlock}${brandBlock}`;
 }

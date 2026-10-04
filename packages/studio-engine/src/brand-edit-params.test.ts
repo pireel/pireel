@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { brandEditParams, brandHighlightsKeywords, punchInUpdates } from './brand-edit-params';
+import { brandAgentBrief, brandEditGuide, brandEditParams, brandHighlightsKeywords, editPlanInput, punchInUpdates } from './brand-edit-params';
 import { brandSnapshot, emptyBrandKit, type BrandSnapshot } from './brand-kit';
 import type { BrandEditSpec } from './brand-edit-spec';
 import { buildCaptionBaseDocument, type CaptionTaskOptions } from './caption-task';
@@ -69,6 +69,44 @@ describe('punchInUpdates', () => {
   });
 });
 
+describe('edit planning', () => {
+  const document = () => buildCaptionBaseDocument({ projectId: 'p', sourceUrl: '', sourceSig: 's', width: 1080, height: 1920, durationSec: 20, transcript: [], cuts: [{ fromSec: 9, toSec: 10 }], options: { caption: {}, aspect: 'original', shortenPauses: true } });
+  const words = (start: number, texts: string[]) => texts.map((text, index) => ({ text, start: start + index * 0.5, end: start + index * 0.5 + 0.4 }));
+
+  it('gives the planner timeline times after the cuts and a count the spacing allows', () => {
+    const input = editPlanInput(document(), [
+      { start: 1, end: 4, text: 'a b c', words: words(1, ['a', 'b', 'c']) },
+      { start: 9.2, end: 9.8, text: 'cut out', words: words(9.2, ['cut', 'out']) },
+      { start: 11, end: 15, text: 'd e', words: words(11, ['d', 'e']) },
+    ], { preset: 'punch', scale: 1.2, minGapSec: 8 });
+    expect(input.durationSec).toBe(19);
+    expect(input.maxPunches).toBe(2);
+    expect(input.rows).toEqual([{ index: 0, text: 'a b c', startSec: 1 }, { index: 2, text: 'd e', startSec: 10 }]);
+  });
+
+  it('punches in on the planned words instead of highlights', () => {
+    const transcript = [{ start: 1, end: 4, text: 'a b c d', words: words(1, ['a', 'b', 'c', 'd']), wordDecorations: { '0': { highlight: 'color' as const } } }];
+    const updates = punchInUpdates(document(), transcript, { preset: 'punch', scale: 1.2, minGapSec: 3 }, [{ sentenceIndex: 0, wordIndex: 2 }]);
+    expect(updates[0]!.patch.properties!.zoom).toMatchObject({ atSec: 2 });
+  });
+
+  it('hands the planner the brand rules that decide cuts', () => {
+    const style = { version: 1, summary: '', summaryEn: 'Fast unboxing talk.', frames: [], systems: Object.fromEntries(['captions', 'typography', 'graphics', 'color', 'framing', 'editing', 'motion', 'bookends', 'sound', 'cover'].map(id => [id, { present: id === 'editing', summary: '', rules: id === 'editing' ? [{ text: '笑点推近', en: 'Punch in on punchlines.', videos: [], evidence: [] }] : [], tokens: {}, variations: '', confidence: 'high' }])) } as unknown as BrandSnapshot['style'];
+    expect(brandEditGuide(brand({ style }))).toBe('Fast unboxing talk.\nediting:\n- Punch in on punchlines.');
+    expect(brandEditGuide(brand())).toBe('');
+  });
+});
+
+describe('brandAgentBrief', () => {
+  it('gives the agent the measured habits and assets, and nothing invented for a blank brand', () => {
+    const full = { ...spec({ mode: 'aggressive', lufs: -15.3 }), cutting: { ...spec().cutting, targetCpm: field([15.4, 25.6]) }, captions: { presence: field('always'), wordsPerPage: field(2), case: field('sentence') }, framing: { faceH: field(0.28) }, layout: null } as unknown as BrandEditSpec;
+    const brief = brandAgentBrief(brand({ spec: full, logo: { key: 'k', kind: 'image', width: 1, height: 1, corner: 'top-right', widthPct: 10, opacity: 1 } }));
+    expect(brief).toContain('cutting 15–26 cuts/min; pauses tight — even breaths are cut; loudness about -15 LUFS; captions ~2 words on screen; face about 28% of frame height.');
+    expect(brief).toContain('Brand assets: logo.');
+    expect(brandAgentBrief(brand())).toBe('Brand assets: none.');
+  });
+});
+
 describe('captions workflow with brand edit parameters', () => {
   const options = (edit: CaptionTaskOptions['edit'], highlights = false): CaptionTaskOptions => ({ caption: {}, aspect: 'original', shortenPauses: true, highlights, edit });
   const step = (definition: ReturnType<typeof captionWorkflowDefinition>, id: string) => definition.steps.find(item => item.id === id);
@@ -76,9 +114,9 @@ describe('captions workflow with brand edit parameters', () => {
   it('passes the pause threshold, punches in after captions and matches loudness before rendering', () => {
     const definition = captionWorkflowDefinition(options({ pause: { minimumPauseSec: 0.25, speechPaddingSec: 0.08 }, targetLufs: -15, punchIn: { preset: 'punch', scale: 1.2, minGapSec: 8 } }), { sig: 'm' });
     expect(Object.keys(step(definition, 'pauses')!.arguments)).toEqual(expect.arrayContaining(['minimumPauseSec', 'speechPaddingSec']));
-    expect(definition.steps.map(item => item.id)).toEqual(['transcript', 'pauses', 'compose', 'highlight', 'plan', 'captions', 'punch', 'loudness', 'render']);
-    // Key words are found for the punch-ins, but captions only colour them when asked.
-    expect(step(definition, 'plan')!.arguments.transcript).toEqual({ kind: 'step', stepId: 'transcript', key: 'transcript' });
+    expect(definition.steps.map(item => item.id)).toEqual(['transcript', 'pauses', 'compose', 'plan', 'captions', 'editplan', 'punch', 'loudness', 'render']);
+    // The plan decides the punch-ins; key words are only coloured when captions ask for them.
+    expect(step(definition, 'punch')!.arguments.targets).toEqual({ kind: 'step', stepId: 'editplan', key: 'targets' });
   });
 
   it('adds nothing when the options carry no edit parameters', () => {

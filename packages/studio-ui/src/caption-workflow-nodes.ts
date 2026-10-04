@@ -1,6 +1,6 @@
 import { imageThumb } from '@pireel/ui/image-url';
 import { applyBrandMedia, type BrandSnapshot } from '@pireel/studio-engine/brand-kit';
-import { punchInUpdates, type CaptionEditParams } from '@pireel/studio-engine/brand-edit-params';
+import { editPlanInput, punchInUpdates, type CaptionEditParams, type PunchTarget } from '@pireel/studio-engine/brand-edit-params';
 import { applyDocumentTransaction } from '@pireel/studio-engine/document-transaction';
 import { integratedLoudness, loudnessGainDb } from '@pireel/studio-engine/loudness-lufs';
 import { phraseWordIndexes, rowWords } from '@pireel/studio-engine/caption-highlights';
@@ -65,9 +65,25 @@ export function captionWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
       const document = applyBrandMedia(store.read(args.document, 'document'), args.brand as unknown as BrandSnapshot);
       return { document: workflowJson(await store.put('document', 'brand', document)) };
     }, project: outputs => ({ document: store.read<EditorDocumentV2>(outputs.document, 'document') }) }),
+    node('edit.plan', { stage: 'emphasizing', async execute(args, context) {
+      const plan = studioProviders().editPlan;
+      if (!plan) throw new Error('剪辑规划服务尚未连接，请关闭「重点处推近」后重试。');
+      const transcript = store.read<AsrSegment[]>(args.transcript, 'transcript');
+      const punch = args.punch as unknown as NonNullable<CaptionEditParams['punchIn']>;
+      const input = editPlanInput(store.read<EditorDocumentV2>(args.document, 'document'), transcript, punch);
+      if (!input.rows.length) return { targets: workflowJson([]) };
+      const { punches } = await plan({ ...input, guide: String(args.guide ?? ''), minGapSec: punch.minGapSec }, { signal: host.hooks.signal, sceneRun: host.hooks.sceneRun, onUsage: context.recordUsage });
+      const targets: PunchTarget[] = punches.map(pick => {
+        const segment = transcript[pick.index];
+        const found = segment ? phraseWordIndexes(rowWords(segment), pick.text) : null;
+        if (!found?.length) throw new Error(`剪辑规划的落点与原句对不上：「${pick.text}」`);
+        return { sentenceIndex: pick.index, wordIndex: found[0]! };
+      });
+      return { targets: workflowJson(targets) };
+    } }),
     node('framing.punch-in', { stage: 'styling', async execute(args) {
       const document = store.read<EditorDocumentV2>(args.document, 'document');
-      const updates = punchInUpdates(document, store.read<AsrSegment[]>(args.transcript, 'transcript'), args.punch as unknown as NonNullable<CaptionEditParams['punchIn']>);
+      const updates = punchInUpdates(document, store.read<AsrSegment[]>(args.transcript, 'transcript'), args.punch as unknown as NonNullable<CaptionEditParams['punchIn']>, (args.targets as unknown as PunchTarget[] | null) ?? undefined);
       let next = document;
       if (updates.length) {
         const result = applyDocumentTransaction(document, { ops: [{ op: 'narrative.patch', input: { updates } }] }, { projectId: 'caption-scene' });
