@@ -13,12 +13,14 @@ type Patch = Partial<CaptionStyle>;
  * auto-highlight switch the workbench offers in its transcript. What a scene picks is exactly
  * what the editor shows when the result is opened there.
  */
-export function CaptionTaskStyle({ options, locale, disabled, source, onChange, highlight = true, translation }: {
+export function CaptionTaskStyle({ options, locale, disabled, source, onChange, highlight = true, translation, translationTab = true }: {
   options: CaptionTaskOptions; locale: 'zh' | 'en'; disabled: boolean; source?: CaptionTaskDimensions;
   /** Offer the auto-highlight switch (a scene run step; a brand has no run). */
   highlight?: boolean;
   /** Language choice for the translated line, shown in the panel's translation tab. */
   translation?: ReactNode;
+  /** Offer the translation tab at all (a brand's captions have no second language). */
+  translationTab?: boolean;
   onChange: (update: (current: CaptionTaskOptions) => CaptionTaskOptions) => void;
 }) {
   const resolved = { preset: DEFAULT_CAPTION_PRESET, ...captionTaskStyle(options, source) } as CaptionStyle;
@@ -28,7 +30,7 @@ export function CaptionTaskStyle({ options, locale, disabled, source, onChange, 
   return <div className="space-y-3">
     <h2 className="text-ink text-sm font-medium">{locale === 'zh' ? '字幕样式' : 'Caption style'}</h2>
     <div className="border-line flex max-h-[520px] min-h-0 flex-col rounded-lg border">
-      <CaptionStylePanel active generating={disabled} translationControls={translation} showTranslation={!options.dubbing} onPickPreset={(preset, patch) => patchMain({ ...patch, preset })} styleCtl={{
+      <CaptionStylePanel active generating={disabled} translationControls={translation} showTranslation={translationTab && !options.dubbing} onPickPreset={(preset, patch) => patchMain({ ...patch, preset })} styleCtl={{
         main: resolved,
         sub: { preset: DEFAULT_SUB_CAPTION_PRESET, ...resolved.sub } as CaptionStyle,
         bilingualOn: !!options.translationLanguage,
