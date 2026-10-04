@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { TopBarStart, topBarBackClass } from './top-bar-slot';
 import { ArrowLeft, Loader2, Plus } from 'lucide-react';
 import { DEFAULT_PIP_OPTIONS } from '@pireel/studio-engine/pip-layout';
 import type { BrollOptions } from '@pireel/studio-engine/broll-task';
@@ -54,7 +55,7 @@ export function PipDraftPage({ locale, onBack, onCreated }: { locale: 'zh' | 'en
     <div className="grid min-h-0 flex-1 grid-cols-[minmax(160px,28%)_minmax(0,1fr)] gap-5 overflow-hidden md:grid-cols-[minmax(260px,300px)_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]">
       <section className="min-h-0 min-w-0 overflow-y-auto overscroll-contain pr-2" aria-label={say('画中画设置', 'Picture in picture settings')}>
         <div className="pb-5 pr-2">
-          <button type="button" disabled={uploading} onClick={onBack} className="text-ink-3 mb-3 inline-flex items-center gap-2 text-sm disabled:opacity-40"><ArrowLeft size={15} />{say('返回首页', 'Back to home')}</button>
+          <TopBarStart>{placement => <button type="button" disabled={uploading} onClick={onBack} className={topBarBackClass(placement)}><ArrowLeft size={15} />{say('返回首页', 'Back to home')}</button>}</TopBarStart>
           <header className="mb-4 min-w-0"><h1 className="text-ink text-xl font-semibold tracking-tight">{say('画中画', 'Picture in picture')}</h1></header>
           <section className="mb-5">
             <h2 className="text-ink mb-2 text-sm font-medium">{say('添加口播视频', 'Add talking-head video')}</h2>

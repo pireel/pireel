@@ -48,6 +48,7 @@
     "./scene-form-controls": "./src/scene-form-controls.tsx",
     "./caption-task-style": "./src/caption-task-style.tsx",
     "./caption-stage-sample": "./src/caption-stage-sample.tsx",
+    "./top-bar-slot": "./src/top-bar-slot.tsx",
     "./dubbing-settings": "./src/dubbing-settings.tsx",
     "./scene-media-picker": "./src/scene-media-picker.tsx",
     "./scene-playback": "./src/scene-playback.tsx",

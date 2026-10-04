@@ -1,4 +1,5 @@
 import { DEFAULT_PIP_OPTIONS } from '@pireel/studio-engine/pip-layout';
+import { TopBarStart, topBarBackClass } from './top-bar-slot';
 import { UgcAdSettings } from './ugc-ad-settings';
 import { DEFAULT_UGC_AD_OPTIONS, readyUgcAdOptions } from '@pireel/studio-engine/ugc-ad';
 import { SubtitleRemovalSettings, SubtitleRegionOverlay } from './subtitle-removal-settings';
@@ -383,7 +384,7 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
     <div className="grid min-h-0 flex-1 grid-cols-[minmax(160px,28%)_minmax(0,1fr)] gap-5 overflow-hidden md:grid-cols-[minmax(260px,300px)_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]">
       <section className="min-h-0 min-w-0 overflow-y-auto overscroll-contain pr-2" aria-label={isUgc ? say('UGC 广告设置', 'UGC ad settings') : isRemoval ? say('智能擦除设置', 'AI eraser settings') : isSfx ? say('自动音效设置', 'Auto SFX settings') : isPip ? say('画中画设置', 'Picture in picture settings') : isBroll ? say('配画面设置', 'B-roll settings') : isDubbing ? say('译制设置', 'Dubbing settings') : say('字幕设置', 'Caption settings')}>
         <div className="pb-5 pr-2">
-        <button type="button" disabled={busy} onClick={onBack} className="text-ink-3 mb-3 inline-flex shrink-0 self-start items-center gap-2 text-sm disabled:opacity-40"><ArrowLeft size={15} />{say('返回首页', 'Back to home')}</button>
+        <TopBarStart>{placement => <button type="button" disabled={busy} onClick={onBack} className={topBarBackClass(placement)}><ArrowLeft size={15} />{say('返回首页', 'Back to home')}</button>}</TopBarStart>
         <header className="mb-4 min-w-0"><div><h1 className="text-ink text-xl font-semibold tracking-tight">{isUgc ? say('UGC 广告', 'UGC Ad') : isRemoval ? say('智能擦除', 'AI Eraser') : isSfx ? 'Auto SFX' : isPip ? say('画中画', 'Picture in picture') : isBroll ? 'AI B-Roll' : isDubbing ? 'Video Dubbing' : 'AI Captions'}</h1><p className="text-ink-3 mt-1 truncate text-sm">{task.name}</p></div></header>
         {!isRemoval && <SceneBrandPicker options={options} locale={locale} disabled={disabled} onChange={changeOptions} />}
         {isUgc && <><UgcAdSettings value={options.ugcAd ?? DEFAULT_UGC_AD_OPTIONS} locale={locale} disabled={disabled} onChange={ugcAd => changeOptions(current => ({ ...current, ugcAd }))} /><div className="border-line mt-4 border-t pt-4"><SceneSelect label={say('画面比例', 'Aspect ratio')} value={options.aspect === 'original' ? 'original' : 'portrait'} disabled={disabled} onChange={aspect => changeOptions(current => ({ ...current, aspect }))} options={[{ value: 'portrait', label: say('竖屏 9:16', 'Portrait 9:16') }, { value: 'original', label: say('保持原片', 'Original') }]} /></div><div className="border-line mt-4 border-t pt-4"><p className="text-ink mb-2 text-xs font-medium">{say('商品画面（可选）', 'Product footage (optional)')}</p></div></>}
