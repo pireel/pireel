@@ -506,6 +506,7 @@ export function HyperframesWorkbench({
   accountMenu,
   themeToggle,
   CreditsBalance,
+  AccountControls,
 }: {
   projectId: string;
   agentView?: boolean;
@@ -516,6 +517,8 @@ export function HyperframesWorkbench({
   accountMenu?: ReactNode;
   themeToggle?: ReactNode;
   CreditsBalance?: ComponentType<{ busy: boolean }>;
+  /** The host's shared top-bar controls (pricing, theme, credits…); replaces themeToggle and CreditsBalance. */
+  AccountControls?: ComponentType<{ busy: boolean }>;
 }) {
   const shell = useStudioShell();
   const [workflowOpen, setWorkflowOpen] = useState(!!initialWorkflowId);
@@ -9067,9 +9070,9 @@ export function HyperframesWorkbench({
           <EditorModeSwitch mode={editingMode} onChange={selectEditingMode} />
         </div>
         <div className="flex min-w-0 items-center gap-3">
-          {themeToggle}
+          {!AccountControls && themeToggle}
           {exportControls}
-          {CreditsBalance && <CreditsBalance busy={chatBusy || bridgeToolsInFlight > 0} />}
+          {AccountControls ? <AccountControls busy={chatBusy || bridgeToolsInFlight > 0} /> : CreditsBalance && <CreditsBalance busy={chatBusy || bridgeToolsInFlight > 0} />}
           {accountMenu && <div data-studio-account className="shrink-0">{accountMenu}</div>}
         </div>
       </header>
