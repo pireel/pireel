@@ -30,6 +30,8 @@ export interface CaptionTaskOptions {
   aspect: 'original' | 'portrait' | 'landscape' | 'square'; shortenPauses: boolean; translationLanguage?: CaptionTranslationLanguage;
   /** Started as a one-click edit: the page leads with the brand preset instead of caption settings. */
   oneClick?: boolean;
+  /** Edit parameters taken from the brand (pause threshold, target loudness, punch-ins); absent = scene defaults. */
+  edit?: import('./brand-edit-params').CaptionEditParams;
 }
 export interface CaptionTaskDimensions { width: number; height: number }
 /** Product reference zones, not a guarantee for every platform/ad placement. */

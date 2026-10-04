@@ -17,6 +17,8 @@ export const CAPTION_WORKFLOW_CAPABILITIES = [
   sceneCapability('captions.apply', ['document', 'plan', 'translation', 'style'], ['document']),
   sceneCapability('captions.highlight', ['transcript'], ['transcript'], true),
   sceneCapability('brand.apply', ['document', 'brand'], ['document']),
+  sceneCapability('framing.punch-in', ['document', 'transcript', 'punch'], ['document']),
+  sceneCapability('audio.loudness', ['document', 'media', 'targetLufs'], ['document']),
   sceneCapability('video.render', ['document', 'media'], ['media', 'document']),
 ];
 export const stepOutput = (stepId: string, key: string): WorkflowBinding => ({ kind: 'step', stepId, key });
@@ -34,17 +36,27 @@ export function captionLayoutOptions(options: CaptionTaskOptions): CaptionTaskOp
 export function captionTailSteps(options: CaptionTaskOptions, document: WorkflowBinding, transcript: WorkflowBinding, media: WorkflowBinding, render = true): WorkflowStep[] {
   const steps: WorkflowStep[] = [];
   const captions = options.sfx ? ('captions' in options.sfx && options.sfx.captions) : !options.broll || options.broll.captions;
+  // Punch-ins land on highlighted words; the highlight runs for them even when captions do not colour words.
+  const punchIn = options.edit?.punchIn;
+  if ((captions && options.highlights) || punchIn) steps.push(sceneStep('highlight', 'captions.highlight', { transcript }));
   if (captions) {
-    if (options.highlights) steps.push(sceneStep('highlight', 'captions.highlight', { transcript }));
     steps.push(sceneStep('plan', 'captions.plan', { document, transcript: options.highlights ? stepOutput('highlight', 'transcript') : transcript, layout: sceneLiteral(captionLayoutOptions(options)) }));
     if (options.translationLanguage) steps.push(sceneStep('translate', 'text.translate', { units: stepOutput('plan', 'units'), language: sceneLiteral(options.translationLanguage) }));
     steps.push(sceneStep('captions', 'captions.apply', { document, plan: stepOutput('plan', 'plan'), translation: options.translationLanguage ? stepOutput('translate', 'value') : literal(null), style: sceneLiteral(options) }));
     document = stepOutput('captions', 'document');
   }
+  if (punchIn) {
+    steps.push(sceneStep('punch', 'framing.punch-in', { document, transcript: stepOutput('highlight', 'transcript'), punch: sceneLiteral(punchIn) }));
+    document = stepOutput('punch', 'document');
+  }
   // After captions: the intro/outro ripple the captions along with the speech they follow.
   if (brandHasMedia(options.brand)) {
     steps.push(sceneStep('brand', 'brand.apply', { document, brand: sceneLiteral(options.brand) }));
     document = stepOutput('brand', 'document');
+  }
+  if (options.edit?.targetLufs !== undefined) {
+    steps.push(sceneStep('loudness', 'audio.loudness', { document, media, targetLufs: literal(options.edit.targetLufs) }));
+    document = stepOutput('loudness', 'document');
   }
   if (render) steps.push(sceneStep('render', 'video.render', { document, media }));
   return steps;
@@ -52,7 +64,8 @@ export function captionTailSteps(options: CaptionTaskOptions, document: Workflow
 export function captionWorkflowDefinition(options: CaptionTaskOptions, media: unknown, transcript: unknown = null, cuts: unknown = null, projectId = 'caption', render = true): WorkflowDefinition {
   const source = sceneLiteral(media);
   const steps = [sceneStep('transcript', 'speech.transcribe', { media: source, transcript: sceneLiteral(transcript) })];
-  if (options.shortenPauses) steps.push(sceneStep('pauses', 'speech.pause-plan', { media: source, cuts: sceneLiteral(cuts) }));
+  const pause = options.edit?.pause;
+  if (options.shortenPauses) steps.push(sceneStep('pauses', 'speech.pause-plan', { media: source, cuts: sceneLiteral(cuts), ...(pause ? { minimumPauseSec: literal(pause.minimumPauseSec), speechPaddingSec: literal(pause.speechPaddingSec) } : {}) }));
   steps.push(sceneStep('compose', 'edit.compose', { media: source, cuts: options.shortenPauses ? stepOutput('pauses', 'cuts') : literal([]), aspect: literal(options.aspect), projectId: literal(projectId) }));
   steps.push(...captionTailSteps(options, stepOutput('compose', 'document'), stepOutput('transcript', 'transcript'), source, render));
   return { schemaVersion: 1, id: 'official-ai-captions', version: 2, title: 'AI Captions', templateId: 'ai-captions', parameters: {}, trigger: { kind: 'manual' }, steps };

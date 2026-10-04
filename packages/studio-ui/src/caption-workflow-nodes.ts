@@ -1,5 +1,8 @@
 import { imageThumb } from '@pireel/ui/image-url';
 import { applyBrandMedia, type BrandSnapshot } from '@pireel/studio-engine/brand-kit';
+import { punchInUpdates, type CaptionEditParams } from '@pireel/studio-engine/brand-edit-params';
+import { applyDocumentTransaction } from '@pireel/studio-engine/document-transaction';
+import { integratedLoudness, loudnessGainDb } from '@pireel/studio-engine/loudness-lufs';
 import { phraseWordIndexes, rowWords } from '@pireel/studio-engine/caption-highlights';
 import { applyWordDecorations } from '@pireel/studio-engine/word-decorations';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
@@ -61,6 +64,28 @@ export function captionWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     node('brand.apply', { stage: 'styling', async execute(args) {
       const document = applyBrandMedia(store.read(args.document, 'document'), args.brand as unknown as BrandSnapshot);
       return { document: workflowJson(await store.put('document', 'brand', document)) };
+    }, project: outputs => ({ document: store.read<EditorDocumentV2>(outputs.document, 'document') }) }),
+    node('framing.punch-in', { stage: 'styling', async execute(args) {
+      const document = store.read<EditorDocumentV2>(args.document, 'document');
+      const updates = punchInUpdates(document, store.read<AsrSegment[]>(args.transcript, 'transcript'), args.punch as unknown as NonNullable<CaptionEditParams['punchIn']>);
+      let next = document;
+      if (updates.length) {
+        const result = applyDocumentTransaction(document, { ops: [{ op: 'narrative.patch', input: { updates } }] }, { projectId: 'caption-scene' });
+        if (!result.ok) throw new Error(result.error.message);
+        next = result.document;
+      }
+      return { document: workflowJson(await store.put('document', 'punch-in', next)) };
+    }, project: outputs => ({ document: store.read<EditorDocumentV2>(outputs.document, 'document') }) }),
+    node('audio.loudness', { stage: 'styling', async execute(args) {
+      // The export applies the master gain; it is measured here once, on the source speech.
+      const document = store.read<EditorDocumentV2>(args.document, 'document');
+      const { decodeVideoAudio } = await import('./audio-decode');
+      const decoded = await decodeVideoAudio(await host.media(store.read<SceneMedia>(args.media, 'media'))); host.check();
+      if (!decoded) throw new Error('无法读取原声音轨，不能统一响度。');
+      const targetLufs = Number(args.targetLufs);
+      const gainDb = loudnessGainDb(integratedLoudness(Array.from({ length: decoded.numberOfChannels }, (_, index) => decoded.getChannelData(index)), decoded.sampleRate), targetLufs);
+      const next: EditorDocumentV2 = gainDb === null ? document : { ...document, processing: { ...document.processing, loudness: { targetLufs, gainDb } } };
+      return { document: workflowJson(await store.put('document', 'loudness', next)) };
     }, project: outputs => ({ document: store.read<EditorDocumentV2>(outputs.document, 'document') }) }),
     node('captions.apply', { stage: 'styling', async execute(args) {
       const document = assembleCaptionDocument(store.read(args.document, 'document'), store.read(args.plan, 'caption-plan'), args.translation as unknown as CaptionTranslation | null, args.style as unknown as CaptionTaskOptions);

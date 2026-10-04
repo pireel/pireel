@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { brandCaptionStyle, brandSnapshot, type BrandKit } from '@pireel/studio-engine/brand-kit';
+import { brandEditParams, brandHighlightsKeywords } from '@pireel/studio-engine/brand-edit-params';
 import type { CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { SceneSelect } from './scene-form-controls';
@@ -10,9 +11,11 @@ const ASPECT = { '9:16': 'portrait', '16:9': 'landscape', '1:1': 'square' } as c
 /** A scene's options with a brand applied (a copy taken now), or with the brand removed when `kit` is null.
  *  The brand's captions become the scene's caption style; later edits in the panel override them. */
 export function withSceneBrand(options: CaptionTaskOptions, kit: BrandKit | null): CaptionTaskOptions {
-  if (!kit) { const { brand: _brand, ...rest } = options; return rest; }
+  if (!kit) { const { brand: _brand, edit: _edit, ...rest } = options; return rest; }
   const brand = brandSnapshot(kit);
-  return { ...options, brand, caption: brandCaptionStyle(brand), aspect: ASPECT[kit.framing.aspect] };
+  const next = { ...options, brand, caption: brandCaptionStyle(brand), aspect: ASPECT[kit.framing.aspect] };
+  // A one-click edit also takes the brand's editing habits: pause trimming, loudness, punch-ins, key words.
+  return options.oneClick ? { ...next, edit: brandEditParams(brand), shortenPauses: brand.pacing.trimSilence, highlights: brandHighlightsKeywords(brand) } : next;
 }
 
 /** Picks one of the user's brands for this scene. The scene keeps a copy taken now, so later edits to
