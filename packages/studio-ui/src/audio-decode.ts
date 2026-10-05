@@ -72,7 +72,7 @@ export async function decodeVideoAudio(file: File): Promise<AudioBuffer | null> 
  * per-100 ms sums is kept, so an hour-long video costs no more memory than a short one. Gaps in the
  * stream count as silence, as they play. Null without an audio track or audible sound.
  */
-export async function streamVideoLoudness(file: File): Promise<number | null> {
+export async function streamVideoLoudness(file: Blob): Promise<number | null> {
   const { LoudnessMeter } = await import('@pireel/studio-engine/loudness-lufs');
   const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
   try {
