@@ -37,6 +37,11 @@ const majority = <T>(values: (T | null | undefined)[]): T | undefined => {
   return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
 };
 
+/** OCR line-box height per font size of a burned-in caption. */
+const CAPTION_BOX_PER_FONT = 0.95;
+/** Space under the glyphs inside the engine's caption line box, per font size. */
+const LINE_BELOW_GLYPHS = 0.175;
+
 /** Two colours close enough to be the same caption colour, measured two ways. */
 const near = (a: string, b: string) => {
   const rgb = (value: string) => [1, 3, 5].map(at => parseInt(value.slice(at, at + 2), 16));
@@ -77,8 +82,11 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
           ...(fill ? { color: fill } : {}),
           ...(treatment === 'stroke' ? { strokeColor: outline ?? '#000000', strokeWidth: 3 } : {}),
           ...(treatment === 'box' && measured?.plate ? { bg: measured.plate } : {}),
-          scale: Math.round(geometry.lineHeightPct / 100 * 1080 * parts.heightPerWidth / 1.2 / BASE_CAPTION_FONT_PX * 100) / 100,
-          xPct: geometry.xCenterPct, yPct: geometry.bottomPct, wPct: Math.min(94, Math.max(40, Math.round(geometry.widthPct * 1.15))),
+          // An OCR line box is about as tall as the font size for CJK and Latin captions alike (checked by
+          // overlaying the rendered sample on a creator's own captioned frame).
+          scale: Math.round(geometry.lineHeightPct / 100 * 1080 * parts.heightPerWidth / CAPTION_BOX_PER_FONT / BASE_CAPTION_FONT_PX * 100) / 100,
+          // The engine anchors the line box (1.35× the font) by its bottom; the OCR box hugs the glyphs.
+          xPct: geometry.xCenterPct, yPct: Math.round((geometry.bottomPct + LINE_BELOW_GLYPHS * geometry.lineHeightPct / CAPTION_BOX_PER_FONT) * 10) / 10, wPct: Math.min(94, Math.max(40, Math.round(geometry.widthPct * 1.15))),
         },
         accent: accent === 'keywords' ? 'keywords' : accent === 'numbers_money' ? 'numbers' : accent === 'current_word' ? 'current_word' : null,
         text: say(`每屏约 ${perScreen} 个字词${upper ? '，全大写' : ''}。`, `About ${perScreen} words on screen at once${upper ? ', all caps' : ''}.`),

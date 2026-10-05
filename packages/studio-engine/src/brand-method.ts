@@ -14,7 +14,7 @@ import type { BlockId } from './brand-playbook';
  * and what goes wrong. Raise METHOD_VERSION whenever a row, a tool or a prompt changes; every brand
  * records the version that made it.
  */
-export const METHOD_VERSION = 'brand-method-8';
+export const METHOD_VERSION = 'brand-method-9';
 
 export interface BlockGuide {
   id: BlockId;
@@ -28,7 +28,7 @@ export interface BlockGuide {
 }
 
 export const BLOCK_GUIDE: readonly BlockGuide[] = [
-  { id: 'portrait', kind: 'prose', look: 'The style in two to four sentences: what kind of videos, the tone, the pace, what makes them recognisable.' },
+  { id: 'portrait', kind: 'prose', look: 'The style in two to four sentences: what kind of videos, the tone, the pace, what makes them recognisable — the positioning and feel only; the techniques that make it belong to their own blocks.' },
   { id: 'captions', kind: 'fixed', look: 'Burned-in captions: typeface character, fill, outline / shadow / plate, size, how much text shows at once, how key words are marked.',
     pitfalls: 'Captions follow the speech; a headline held still, a label over the opening, signs, packaging and screen text are not captions. A second speaker in another colour is not keyword marking.' },
   { id: 'logo', kind: 'fixed', look: 'A mark held in one corner across videos.', pitfalls: 'Platform watermarks are not the creator\'s logo.' },

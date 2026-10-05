@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { VideoObservation } from './brand-analysis';
-import { pickPreviewFrame } from './brand-preview';
+import { captionLeft, pickPreviewFrame } from './brand-preview';
 
 const face = (t: number, h = 0.3, x = 0.35) => ({ t, x, y: 0.2, w: h * 0.6, h });
 const caption = { text: 'hello there', x: 0.2, y: 0.7, w: 0.6, h: 0.05 };
@@ -23,3 +23,13 @@ describe('pickPreviewFrame', () => {
     expect(pickPreviewFrame([video('v1', [{ t: 2.5, boxes: [] }], [])])).toBeNull();
   });
 });
+
+describe('captionLeft', () => {
+  const band = { bottomPct: 90, lineHeightPct: 5 };
+  it('sees a caption left in the band, and nothing above it or specks', () => {
+    expect(captionLeft([{ text: '降到2毛', x: 0.4, y: 0.85, w: 0.2, h: 0.05 }], band)).toBe(true);
+    expect(captionLeft([{ text: '阿莫西林胶囊', x: 0.7, y: 0.35, w: 0.2, h: 0.05 }], band)).toBe(false);
+    expect(captionLeft([{ text: '·', x: 0.5, y: 0.86, w: 0.01, h: 0.01 }], band)).toBe(false);
+  });
+});
+

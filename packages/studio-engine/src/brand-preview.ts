@@ -1,4 +1,4 @@
-import type { VideoObservation } from './brand-analysis';
+import type { OcrBox, VideoObservation } from './brand-analysis';
 
 /** A frame of the creator's footage to show their brand on, and whether it is free of overlaid text. */
 export interface PreviewPick { video: string; t: number; clean: boolean; textArea: number }
@@ -34,4 +34,14 @@ export function pickPreviewFrame(videos: readonly VideoObservation[]): PreviewPi
   if (!best) return null;
   const { score: _score, ...pick } = best;
   return pick;
+}
+
+/** Where the creator's captions sit, as measured: their bottom edge and line height, % of the frame height. */
+export interface CaptionBand { bottomPct: number; lineHeightPct: number }
+
+/** Whether text is still read in the caption band of a frame meant to be clean (the text a sample caption
+ *  drawn over the preview would clash with). Specks are ignored. */
+export function captionLeft(boxes: readonly OcrBox[], band: CaptionBand): boolean {
+  const bottom = band.bottomPct / 100; const line = band.lineHeightPct / 100;
+  return boxes.some(box => box.w * box.h >= SPECK && box.y + box.h > bottom - 2.5 * line && box.y < bottom + line);
 }

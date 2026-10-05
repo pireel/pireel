@@ -71,12 +71,26 @@ export interface BrandPlaybook {
   method: string;
   source: {
     platform: BrandPlatform; account?: string;
-    videos: { id: string; title?: string; sourceUrl?: string; durationSec: number; coverKey?: string }[];
+    /** The source videos; width and height are the footage's (recorded since 2026-10). */
+    videos: { id: string; title?: string; sourceUrl?: string; durationSec: number; coverKey?: string; width?: number; height?: number }[];
     /** A clean frame of the creator's own footage (no captions or titles) for previews; `cleaned` = its
-     *  text was removed by image editing because no frame was clean. UI only, never part of the prompt. */
-    preview?: BrandAsset & { cleaned: boolean };
+     *  text was removed by image editing because no frame was clean; `textLeft`: editing could not remove
+     *  the captions, so this is the original frame with its text. UI only, never part of the prompt. */
+    preview?: BrandAsset & { cleaned: boolean; textLeft?: boolean };
   };
   blocks: BrandBlocks;
+}
+
+/**
+ * The canvas the creator's footage is cut on (width 1080, as scene canvases are): the shape of their
+ * videos, else of the preview still, else vertical. Previews draw the brand on it; it is never part of
+ * the brand, which applies to footage of any shape.
+ */
+export function brandCanvas(playbook: Pick<BrandPlaybook, 'source'>): { width: number; height: number } {
+  const ratios = playbook.source.videos.flatMap(video => video.width && video.height ? [video.height / video.width] : []).sort((a, b) => a - b);
+  const preview = playbook.source.preview;
+  const ratio = ratios.length ? ratios[Math.floor(ratios.length / 2)]! : preview ? preview.height / preview.width : 16 / 9;
+  return { width: 1080, height: Math.max(2, Math.round(1080 * ratio / 2) * 2) };
 }
 
 /** What a scene keeps: a copy taken when picked, so later edits never restyle past projects. */
