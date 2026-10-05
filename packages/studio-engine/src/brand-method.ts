@@ -14,12 +14,13 @@ import type { BlockId } from './brand-playbook';
  * and what goes wrong. Raise METHOD_VERSION whenever a row, a tool or a prompt changes; every brand
  * records the version that made it.
  */
-export const METHOD_VERSION = 'brand-method-5';
+export const METHOD_VERSION = 'brand-method-6';
 
 export interface BlockGuide {
   id: BlockId;
-  /** Fixed: values measured and applied by the engine. Prose: written for the models. */
-  kind: 'fixed' | 'prose';
+  /** Fixed: values measured and applied by the engine. Prose: written for the models from the videos.
+   *  Cover: written from the creator's covers, in its own step. */
+  kind: 'fixed' | 'prose' | 'cover';
   /** What to look for — the text the reading and synthesis prompts carry. */
   look: string;
   /** Known false readings to guard against. */
@@ -42,7 +43,8 @@ export const BLOCK_GUIDE: readonly BlockGuide[] = [
     pitfalls: 'Captions, the creator\'s logo and scene text are not motion graphics.' },
   { id: 'structure', kind: 'prose', look: 'How a video opens (straight to camera, a question, a claim, a cover frame at 0 s, a teaser, result first), how the body is organised (points, recaps, chapters), and how it ends (sign-off line, call to action, end card).',
     pitfalls: 'The opening is a per-video choice more than a fingerprint: write it as the usual way, not a rule.' },
-  { id: 'cover', kind: 'prose', look: 'The cover: composition, where the person sits, headline lettering, colours — as a prompt for generating a new cover.' },
+  { id: 'cover', kind: 'cover', look: 'How a cover is made for a new video, in two parts: which still of the video it is built on (expression, gesture, gaze, framing, who) and how that still becomes the cover (crop, placement, background, headline wording and lettering, marks, finish).',
+    pitfalls: 'Written from the creator\'s covers, never from frames of the videos. One cover\'s words or person are not the style.' },
 ];
 
 /** Never part of a brand: decided by the footage, the platform or the moment. */

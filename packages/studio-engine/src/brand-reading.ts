@@ -1,11 +1,12 @@
-import { BLOCK_GUIDE, NOT_BRAND, PROSE_BLOCKS, WINDOWS } from './brand-method';
+import { BLOCK_GUIDE, NOT_BRAND, PROSE_BLOCKS, WINDOWS, type BlockGuide } from './brand-method';
 import type { BlockId } from './brand-playbook';
 
 /**
- * The method's three judgement steps, with their contracts: a text model picks the moments of each
- * video worth a close look from its transcript; a vision model reads each video (overview, opening,
- * ending and those moments) block by block; a synthesis keeps what recurs and writes the brand's prose
- * blocks. Readings are evidence and parse leniently; the synthesis applies the evidence bar in code.
+ * The method's judgement steps, with their contracts: a text model picks the moments of each video
+ * worth a close look from its transcript; a vision model reads each video (overview, opening, ending
+ * and those moments) block by block; a synthesis keeps what recurs and writes the brand's prose blocks;
+ * the cover block is written apart, from the creator's covers. Readings are evidence and parse
+ * leniently; the synthesis and the cover apply the evidence bar in code.
  */
 
 /**
@@ -94,8 +95,8 @@ export function parseMoments(raw: string, lines: { index: number; startSec: numb
 
 // ── Step 2: reading one video
 
-const blockLines = (kinds: ('fixed' | 'prose')[]) => BLOCK_GUIDE.filter(item => kinds.includes(item.kind)).map(item => `- ${item.id}: ${item.look}${item.pitfalls ? ` Beware: ${item.pitfalls}` : ''}`).join('\n');
-const READ_NOTES: BlockId[] = ['layout', 'editing', 'motion_graphics', 'structure', 'cover'];
+const blockLines = (kinds: BlockGuide['kind'][]) => BLOCK_GUIDE.filter(item => kinds.includes(item.kind)).map(item => `- ${item.id}: ${item.look}${item.pitfalls ? ` Beware: ${item.pitfalls}` : ''}`).join('\n');
+const READ_NOTES: BlockId[] = ['layout', 'editing', 'motion_graphics', 'structure'];
 
 export function readingSystemPrompt(): string {
   return `You study ONE video by a creator, as part of extracting their style. Everything you report must be visible in the images; when you cannot see it, answer "unknown" or leave it out — never guess.
@@ -118,7 +119,7 @@ ${blockLines(['prose'])}
 Return only JSON:
 {"portrait":"…","facets":{"layout":"…","camera":"…","cuttingDevice":"…","punchIn":"…","captionPresence":"…","captionStyle":"…","fontClass":"…","captionCase":"…","captionTreatment":"…","captionPosition":"…","accentRule":"…","captionAnimation":"…","emoji":"…","heldHeader":"…","hookLabel":"…","callouts":[],"brollTypes":[],"brandElements":[],"colorGrade":"…","hookStructure":"…"},
  "moments":[{"seen":["…"],"how":"…"}],
- "notes":{"layout":"…","editing":"…","motion_graphics":"…","structure":"…","cover":"…"},
+ "notes":{"layout":"…","editing":"…","motion_graphics":"…","structure":"…"},
  "look":{"captionFill":"#…","captionOutline":"#…","palette":["#…"]}}`;
 }
 
@@ -233,4 +234,44 @@ export function parseSynthesis(raw: string, videos: { id: string }[]): Synthesis
   if (!blocks.portrait) text(undefined, 'blocks.portrait');
   const palette = (value.palette ?? {}) as Record<string, unknown>;
   return { blocks, palette: Object.fromEntries((['accent', 'accent2', 'text', 'ground'] as const).flatMap(key => hex(palette[key]) ? [[key, hex(palette[key])]] : [])), setAside, uncited };
+}
+
+// ── The cover, from the creator's covers
+
+/** The cover prompt for new videos, written from the creator's past covers (the images given). */
+export function coverSystemPrompt(language: string): string {
+  return `You study a creator's past video covers to write the prompt that will make the cover of each NEW video of theirs in the same style. The prompt has two parts, used one after the other:
+
+frame — how to choose, from the new video's footage, the still the cover is built on: the person's expression, gesture, gaze and pose, how close the shot is, who is in it when there are several people, what the moment should say. When the covers are not built on a still of the video (a designed graphic, a product shot, a cut-out on a plain ground), say what the cover is built on instead.
+
+design — how that still becomes the cover: crop, where the person sits and how large; what happens to the background (kept, darkened, blurred, replaced, a colour); the headline — how it is worded (length, voice, what it promises; never the words of one cover) and how it is lettered (type character, weight, colours as #RRGGBB, stroke, shadow or plate, size, number of lines, position); other marks (logo, arrows, circles, emoji, borders, series or episode labels); the finish (contrast, saturation, glow). When the covers are plain stills with nothing added, say so: that is the style.
+
+Keep only what recurs: with three or more covers, a habit must hold in at least two. When the covers follow two styles, describe the main one and name the other in one sentence.
+Write as instructions to a designer who has never seen these covers, concrete enough to recreate them, without naming the people in them.
+Write both parts in ${language}.
+Return only JSON: {"frame":"…","design":"…","covers":[<indices of the covers the design holds for, from 0>]}`;
+}
+
+export interface CoverReading { frame: string; design: string; covers: number[] }
+
+/** The cover prompt checked against the evidence bar: with three or more covers it must hold in two;
+ *  `null` when it does not (the brand then has no cover prompt, only its references). */
+export function parseCover(raw: string, coverCount: number): CoverReading | null {
+  const value = json(raw);
+  const frame = text(value.frame, 'frame', 2000);
+  const design = text(value.design, 'design', 3000);
+  const covers = [...new Set((Array.isArray(value.covers) ? value.covers : []).filter((at): at is number => Number.isInteger(at) && (at as number) >= 0 && (at as number) < coverCount))].sort((a, b) => a - b);
+  if (coverCount >= 3 && covers.length < 2) return null;
+  return { frame, design, covers };
+}
+
+/** Picking, among stills of a new video, the one its cover is built on, by the brand's cover prompt. */
+export function coverFrameSystemPrompt(): string {
+  return `You pick the still of a video that its cover will be built on, the way the creator picks it (their rule is given). Prefer a still where the face is sharp, the eyes are open and the mouth is not caught mid-word, unless the rule asks otherwise.
+Return only JSON: {"pick":<index of the still>}`;
+}
+
+export function parseCoverFrame(raw: string, count: number): number {
+  const pick = json(raw).pick;
+  return Number.isInteger(pick) && (pick as number) >= 0 && (pick as number) < count ? pick as number : fail('pick', pick);
 }

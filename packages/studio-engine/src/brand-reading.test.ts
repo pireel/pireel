@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NOT_BRAND, WINDOWS } from './brand-method';
-import { parseMoments, parseSynthesis, parseVideoReading, readingSystemPrompt, synthesisSystemPrompt } from './brand-reading';
+import { coverSystemPrompt, parseCover, parseCoverFrame, parseMoments, parseSynthesis, parseVideoReading, readingSystemPrompt, synthesisSystemPrompt } from './brand-reading';
 
 describe('method prompts', () => {
   it('read each video by block, from the overview, the ends and the moments', () => {
@@ -60,9 +60,9 @@ describe('parseSynthesis', () => {
   });
 
   it('sets aside blocks the answer places in one video, empty or unknown, with the reason', () => {
-    const parsed = parseSynthesis(synthesis({ layout: { text: '顶部标题栏', videos: ['v1'] }, cover: { text: '', videos: ['v1', 'v2'] }, moves: { text: 'x', videos: ['v1', 'v2'] } }), videos);
+    const parsed = parseSynthesis(synthesis({ layout: { text: '顶部标题栏', videos: ['v1'] }, structure: { text: '', videos: ['v1', 'v2'] }, cover: { text: '人物在右', videos: ['v1', 'v2'] }, moves: { text: 'x', videos: ['v1', 'v2'] } }), videos);
     expect(parsed.blocks.layout).toBeUndefined();
-    expect(parsed.setAside).toEqual(['layout: seen in 1 video(s)', 'cover: no text', 'moves: not a block']);
+    expect(parsed.setAside).toEqual(['layout: seen in 1 video(s)', 'structure: no text', 'cover: not a block', 'moves: not a block']);
   });
 
   it('takes a block written as plain text, keeping it as uncited', () => {
@@ -75,5 +75,27 @@ describe('parseSynthesis', () => {
   it('fails when the answer has no portrait or is not JSON', () => {
     expect(() => parseSynthesis('nope', videos)).toThrow(/json/);
     expect(() => parseSynthesis(JSON.stringify({ blocks: {} }), videos)).toThrow(/portrait/);
+  });
+});
+
+describe('cover', () => {
+  it('asks for the two parts, from the covers, in the brand language', () => {
+    const prompt = coverSystemPrompt('Simplified Chinese');
+    expect(prompt).toMatch(/frame —[\s\S]*design —/);
+    expect(prompt).toContain('Write both parts in Simplified Chinese.');
+    expect(synthesisSystemPrompt('English')).not.toMatch(/^- cover:/m);
+    expect(readingSystemPrompt()).not.toContain('"cover"');
+  });
+
+  it('keeps a cover prompt that holds in two of three or more covers', () => {
+    expect(parseCover(JSON.stringify({ frame: '惊讶表情', design: '人物在右', covers: [2, 0, 0, 9] }), 3)).toEqual({ frame: '惊讶表情', design: '人物在右', covers: [0, 2] });
+    expect(parseCover(JSON.stringify({ frame: '惊讶表情', design: '人物在右', covers: [1] }), 3)).toBeNull();
+    expect(parseCover(JSON.stringify({ frame: '惊讶表情', design: '人物在右', covers: [] }), 1)).toEqual({ frame: '惊讶表情', design: '人物在右', covers: [] });
+    expect(() => parseCover(JSON.stringify({ design: '人物在右' }), 2)).toThrow(/frame/);
+  });
+
+  it('reads the picked still, refusing an index out of range', () => {
+    expect(parseCoverFrame('{"pick":3}', 8)).toBe(3);
+    expect(() => parseCoverFrame('{"pick":8}', 8)).toThrow(/pick/);
   });
 });

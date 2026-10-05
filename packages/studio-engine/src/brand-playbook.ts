@@ -24,6 +24,9 @@ export interface Evidence { videos: string[]; frames?: { video: string; sec: num
 /** A block's prose, in the creator's language, as the models read it. */
 export interface Prose { text?: string; evidence?: Evidence }
 
+/** The cover prompt: `frame` picks the still from the new video, `design` turns it into the cover. */
+export interface BrandCover { frame?: string; design?: string; references?: BrandAsset[]; evidence?: Evidence }
+
 /** The blocks, in the order the prompt renders them. */
 export interface BrandBlocks {
   /** The style in a few sentences. */
@@ -48,8 +51,9 @@ export interface BrandBlocks {
   motion_graphics?: Prose & { references?: BrandAsset[] };
   /** How a video opens, unfolds and closes. */
   structure?: Prose;
-  /** The cover, as its own prompt, with the creator's past covers as references. */
-  cover?: Prose & { references?: BrandAsset[] };
+  /** The cover for a new video, as its own prompt in two parts — which still of the video to build on,
+   *  and how that still becomes the cover — with the creator's past covers as references. */
+  cover?: BrandCover;
 }
 export type BlockId = keyof BrandBlocks;
 export const BLOCK_IDS: readonly BlockId[] = ['portrait', 'captions', 'logo', 'palette', 'fonts', 'sound', 'bookends', 'layout', 'editing', 'motion_graphics', 'structure', 'cover'];
@@ -119,8 +123,15 @@ export function renderBrandPrompt(playbook: Pick<BrandPlaybook, 'name' | 'blocks
   if (want('editing')) parts.push(element('editing', {}, b.editing!.text));
   if (want('motion_graphics')) parts.push(element('motion_graphics', { references: refs(b.motion_graphics!.references) }, b.motion_graphics!.text));
   if (want('structure')) parts.push(element('structure', {}, b.structure!.text));
-  if (want('cover')) parts.push(element('cover', { references: refs(b.cover!.references) }, b.cover!.text));
+  if (want('cover')) parts.push(coverElement(b.cover!, refs(b.cover!.references)));
   return `<brand name="${escapeAttr(playbook.name)}">\n${parts.join('\n')}\n</brand>`;
+}
+
+/** <cover> holds its two parts as child elements: <frame> (which still) and <design> (how it becomes the cover). */
+function coverElement(cover: BrandCover, references: number | undefined): string {
+  const inner = [cover.frame?.trim() && element('frame', {}, cover.frame), cover.design?.trim() && element('design', {}, cover.design)].filter(Boolean).join('\n');
+  const attrs = references ? ` references="${references}"` : '';
+  return inner ? `<cover${attrs}>\n${inner}\n</cover>` : `<cover${attrs}/>`;
 }
 
 /** Whether a prose block says anything. */
@@ -165,7 +176,12 @@ export function validatePlaybook(value: unknown): BrandPlaybook {
   const b = p.blocks;
   for (const key of Object.keys(b)) if (!BLOCK_IDS.includes(key as BlockId)) fail(`blocks.${key}`, '未知的块');
   for (const id of ['portrait', 'editing', 'structure'] as const) if (b[id]) prose(b[id], `blocks.${id}`);
-  for (const id of ['layout', 'motion_graphics', 'cover'] as const) if (b[id]) { prose(b[id], `blocks.${id}`); references(b[id]!.references, `blocks.${id}.references`); }
+  for (const id of ['layout', 'motion_graphics'] as const) if (b[id]) { prose(b[id], `blocks.${id}`); references(b[id]!.references, `blocks.${id}.references`); }
+  if (b.cover) {
+    if (!isObject(b.cover)) fail('blocks.cover', '需要对象');
+    for (const key of ['frame', 'design'] as const) if (b.cover[key] !== undefined && (typeof b.cover[key] !== 'string' || b.cover[key]!.length > MAX_TEXT)) fail(`blocks.cover.${key}`, `最多 ${MAX_TEXT} 字`);
+    references(b.cover.references, 'blocks.cover.references');
+  }
   if (b.captions) {
     prose(b.captions, 'blocks.captions');
     if (typeof b.captions.on !== 'boolean') fail('blocks.captions.on', '布尔');

@@ -16,11 +16,15 @@ export interface PlaybookParts {
   summary: BrandObservationSummary;
   readings: VideoReading[];
   synthesis: Synthesis;
+  /** The cover prompt from the creator's covers: how many covers were read, how many it holds for, and
+   *  the videos those covers belong to (hand-added covers belong to none). */
+  cover?: { frame: string; design: string; held: number; total: number; videos: string[] };
   /** Canvas height per unit of width of the creator's videos (16/9 for vertical). */
   heightPerWidth: number;
   assets: {
     logo?: BrandAsset; intro?: BrandAsset; outro?: BrandAsset;
-    /** Covers, stills of titles on screen, stills of motion graphics — references for those blocks. */
+    /** Covers (those the cover prompt holds for first), stills of titles on screen, stills of motion
+     *  graphics — references for those blocks. */
     coverReferences: BrandAsset[]; layoutReferences: BrandAsset[]; motionReferences: BrandAsset[];
     /** Measured caption colours (text, plate) from the caption band. */
     captionColors?: { color: string; plate: string | null };
@@ -85,7 +89,11 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
   const editing = prose('editing'); if (editing) blocks.editing = editing;
   const motion = prose('motion_graphics'); if (motion) blocks.motion_graphics = { ...motion, ...(assets.motionReferences.length ? { references: assets.motionReferences } : {}) };
   const structure = prose('structure'); if (structure) blocks.structure = structure;
-  const cover = prose('cover'); if (cover || assets.coverReferences.length) blocks.cover = { ...cover, ...(assets.coverReferences.length ? { references: assets.coverReferences } : {}) };
+  const cover = parts.cover;
+  if (cover || assets.coverReferences.length) blocks.cover = {
+    ...(cover ? { frame: cover.frame, design: cover.design, evidence: { videos: cover.videos, confidence: cover.total < 3 ? 'low' : cover.held / cover.total >= 0.7 ? 'high' : 'medium' } } : {}),
+    ...(assets.coverReferences.length ? { references: assets.coverReferences } : {}),
+  };
 
   return {
     schema: PLAYBOOK_SCHEMA, id: parts.id, name: parts.name, version: 1, method: METHOD_VERSION,

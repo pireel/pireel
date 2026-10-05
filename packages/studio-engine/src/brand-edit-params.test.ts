@@ -47,9 +47,9 @@ describe('edit planning', () => {
   });
 
   it('reads the brand as XML blocks: style, editing, structure, sound — no cover', () => {
-    const guide = playbookEditGuide(playbook({ portrait: { text: '快节奏。' }, editing: { text: '说到价格推近。' }, cover: { text: '人物在右。' } }));
+    const guide = playbookEditGuide(playbook({ portrait: { text: '快节奏。' }, editing: { text: '说到价格推近。' }, cover: { design: '人物在右。' } }));
     expect(guide).toBe('<brand name="Mine">\n<portrait>\n快节奏。\n</portrait>\n<editing>\n说到价格推近。\n</editing>\n</brand>');
-    expect(playbookAgentBrief(playbook({ cover: { text: '人物在右。' } }))).toContain('<cover>');
+    expect(playbookAgentBrief(playbook({ cover: { frame: '惊讶表情。', design: '人物在右。' } }))).toContain('<cover>\n<frame>\n惊讶表情。\n</frame>\n<design>\n人物在右。\n</design>\n</cover>');
   });
 });
 
