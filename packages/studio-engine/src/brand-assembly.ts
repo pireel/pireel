@@ -113,7 +113,7 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
   const fonts = parts.fonts ?? {};
   const heading = fonts.titles ?? fonts.cover;
   if (heading) {
-    const from = fonts.titles ? '' : say('（取自封面大字）', ' (from the cover lettering)');
+    const from = fonts.titles ? '' : say('（作品里没有花字，取自封面大字）', ' (no overlay text in the videos; from the cover lettering)');
     blocks.fonts = { heading: heading.id, text: `${heading.look}${heading.actual ? say(`，像 ${heading.actual}`, `, like ${heading.actual}`) : ''}${from}` };
   }
 

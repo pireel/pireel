@@ -76,7 +76,7 @@ describe('assemblePlaybook', () => {
     expect(playbook.blocks.captions?.style).toMatchObject({ font: 'web:douyin-sans', bold: true });
     expect(playbook.blocks.fonts).toEqual({ heading: 'web:smiley-sans', text: '斜体窄黑体，像 得意黑' });
     const fromCover = assemblePlaybook({ ...parts(), fonts: { cover: { id: 'web:ximaiti', look: '粗斜美术体' } } });
-    expect(fromCover.blocks.fonts).toEqual({ heading: 'web:ximaiti', text: '粗斜美术体（取自封面大字）' });
+    expect(fromCover.blocks.fonts).toEqual({ heading: 'web:ximaiti', text: '粗斜美术体（作品里没有花字，取自封面大字）' });
   });
 
   it('sizes and places captions from the letters measured on pixels', () => {
