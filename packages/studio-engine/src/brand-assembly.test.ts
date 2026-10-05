@@ -39,7 +39,7 @@ describe('assemblePlaybook', () => {
     expect(playbook.method).toBe(METHOD_VERSION);
     const b = playbook.blocks;
     expect(b.sound).toMatchObject({ lufs: -15, pauses: 'tight' });
-    expect(b.captions).toMatchObject({ on: true, accent: 'keywords', style: { color: '#ffffff', strokeColor: '#000000', yPct: 22.6 } });
+    expect(b.captions).toMatchObject({ on: true, accent: 'keywords', style: { color: '#ffffff', strokeColor: '#000000', yPct: 22.7 } });
     expect(b.palette).toEqual({ accent: '#ffd600' });
     expect(b.editing).toEqual({ text: '说到价格时快推近。', evidence: { videos: ['v1', 'v2', 'v3'], confidence: 'high' } });
     expect(b.motion_graphics?.references).toEqual([mg]);
@@ -75,6 +75,13 @@ describe('assemblePlaybook', () => {
     expect(() => validatePlaybook(playbook)).not.toThrow();
     expect(playbook.blocks.captions?.style).toMatchObject({ font: 'web:douyin-sans', bold: true });
     expect(playbook.blocks.fonts).toEqual({ heading: 'web:smiley-sans', body: 'web:douyin-sans', text: '字幕：圆角黑体，粗\n标题：斜体窄黑体（像 得意黑）' });
+  });
+
+  it('sizes and places captions from the letters measured on pixels', () => {
+    // Letters 6.25% of the frame tall ending at 93.5%: on a 16:9 canvas 1080 wide (608 tall) that is
+    // a 43 px font (scale ≈ 0.67) whose line box ends a fifth of the font below the letters.
+    const playbook = assemblePlaybook({ ...parts(), heightPerWidth: 9 / 16, assets: { ...parts().assets, captionInk: { heightPct: 6.25, bottomPct: 93.5 } } });
+    expect(playbook.blocks.captions?.style).toMatchObject({ scale: 0.67, yPct: 94.9 });
   });
 });
 

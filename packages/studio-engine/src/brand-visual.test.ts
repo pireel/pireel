@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { brollTier, classifyArchetype, classifyCut, classifyLayout, cutProfile, ncc, zoomWarp, type CutPair, type VisualSample } from './brand-visual';
+import { brollTier, classifyArchetype, classifyCut, classifyLayout, cutProfile, inkExtent, ncc, zoomWarp, type CutPair, type VisualSample } from './brand-visual';
 
 const S = 64;
 /** Deterministic textured "scene" (a room) so correlations mean something. */
@@ -116,3 +116,15 @@ describe('archetype and B-roll tier', () => {
     expect(brollTier(1, 'split_screen')).toBe('medium');
   });
 });
+
+describe('inkExtent', () => {
+  // 10 wide, 20 tall: white letters on rows 6–13 (with a one-row gap at 9), a white row far off at 18.
+  const image = (rows: number[]) => { const data = new Uint8ClampedArray(10 * 20 * 4); for (let row = 0; row < 20; row++) for (let col = 0; col < 10; col++) { const i = (row * 10 + col) * 4; const on = rows.includes(row) && col % 2 === 0; data.set(on ? [255, 255, 255, 255] : [20, 20, 20, 255], i); } return data; };
+  it('finds the run of text rows around the middle, bridging a gap between strokes', () => {
+    expect(inkExtent(image([6, 7, 8, 10, 11, 12, 13, 18]), 10, 20, '#ffffff')).toEqual({ top: 0.3, bottom: 0.7 });
+  });
+  it('gives nothing when the colour is not there', () => {
+    expect(inkExtent(image([]), 10, 20, '#ffffff')).toBeNull();
+  });
+});
+

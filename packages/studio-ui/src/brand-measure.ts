@@ -1,7 +1,7 @@
 import { captionBand, type VideoObservation } from '@pireel/studio-engine/brand-analysis';
 import { captionNear, readingWindows } from '@pireel/studio-engine/brand-facts';
 import type { Moment } from '@pireel/studio-engine/brand-reading';
-import { bandColors } from '@pireel/studio-engine/brand-visual';
+import { bandColors, inkExtent } from '@pireel/studio-engine/brand-visual';
 import type { CutPair, VisualSample } from '@pireel/studio-engine/brand-visual';
 import type { FrameGeom } from '@pireel/studio-engine/geometry-math';
 import { detectScenes } from '@pireel/studio-engine/video-edit/scene-detection';
@@ -276,12 +276,31 @@ export async function tile(cells: { blob: Blob; label: string }[], columns: numb
 export const fmt = (t: number) => `${t.toFixed(1)}s`;
 
 export async function pixelsOf(blob: Blob, box: { x: number; y: number; w: number; h: number }): Promise<Uint8ClampedArray> {
+  return (await regionPixels(blob, box)).data;
+}
+
+/** The pixels of a region of an image (fractions of the image), with the region's size in pixels. */
+export async function regionPixels(blob: Blob, box: { x: number; y: number; w: number; h: number }): Promise<{ data: Uint8ClampedArray; width: number; height: number }> {
   const bitmap = await createImageBitmap(blob);
   const x = Math.floor(box.x * bitmap.width), y = Math.floor(box.y * bitmap.height);
   const w = Math.max(1, Math.round(box.w * bitmap.width)), h = Math.max(1, Math.round(box.h * bitmap.height));
   const canvas = new OffscreenCanvas(w, h); const ctx = canvas.getContext('2d')!;
   ctx.drawImage(bitmap, x, y, w, h, 0, 0, w, h); bitmap.close();
-  return ctx.getImageData(0, 0, w, h).data;
+  return { data: ctx.getImageData(0, 0, w, h).data, width: w, height: h };
+}
+
+/**
+ * A caption's colours and where its letters really are: colours inside the OCR box, then the rows the
+ * text colour covers in a region a box-height above and below it (OCR boxes are approximate and often
+ * short of the glyphs). `ink` is in fractions of the frame's height.
+ */
+export async function captionLook(blob: Blob, box: { x: number; y: number; w: number; h: number }): Promise<{ color: string; plate: string | null; ink?: { top: number; bottom: number } }> {
+  const colors = bandColors(await pixelsOf(blob, box));
+  const top = Math.max(0, box.y - box.h); const bottom = Math.min(1, box.y + box.h * 2);
+  const region = { x: box.x, y: top, w: box.w, h: bottom - top };
+  const { data, width, height } = await regionPixels(blob, region);
+  const ink = inkExtent(data, width, height, colors.color, (box.y + box.h / 2 - top) / region.h);
+  return { ...colors, ...(ink ? { ink: { top: top + ink.top * region.h, bottom: top + ink.bottom * region.h } } : {}) };
 }
 
 export const overlaps = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;

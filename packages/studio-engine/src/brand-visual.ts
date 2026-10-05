@@ -315,3 +315,37 @@ export function bandColors(rgba: Uint8ClampedArray): { color: string; plate: str
   const spread = Math.sqrt(mean(back.map(p => (lum(p) - lum(centres[backIndex]!)) ** 2)));
   return { color: hex(centres[textIndex]!), plate: spread < 18 ? hex(centres[backIndex]!) : null };
 }
+
+/**
+ * The rows the caption's letters actually cover, in a region around an OCR box: the rows where enough
+ * pixels are the caption's text colour, taking the run that holds the OCR box's middle (OCR boxes from
+ * vision models are approximate, often short of the glyphs). Fractions of the region's height.
+ */
+export function inkExtent(rgba: Uint8ClampedArray, width: number, height: number, color: string, middle = 0.5): { top: number; bottom: number } | null {
+  const target = [1, 3, 5].map(at => parseInt(color.slice(at, at + 2), 16));
+  const need = Math.max(2, Math.round(width * 0.01));
+  const inked: boolean[] = [];
+  for (let row = 0; row < height; row++) {
+    let count = 0;
+    for (let col = 0; col < width; col++) {
+      const i = (row * width + col) * 4;
+      if (Math.hypot(rgba[i]! - target[0]!, rgba[i + 1]! - target[1]!, rgba[i + 2]! - target[2]!) < 60) count++;
+    }
+    inked.push(count >= need);
+  }
+  let at = Math.min(height - 1, Math.max(0, Math.round(middle * height)));
+  if (!inked[at]) {
+    // The nearest inked row to the middle, within a fifth of the region.
+    const reach = Math.round(height / 5);
+    let found = -1;
+    for (let step = 1; step <= reach && found < 0; step++) for (const row of [at - step, at + step]) if (row >= 0 && row < height && inked[row]) { found = row; break; }
+    if (found < 0) return null;
+    at = found;
+  }
+  let top = at; let bottom = at;
+  // A gap of a row or two inside a line of text (between strokes) is bridged.
+  while (top > 0 && (inked[top - 1] || (top > 1 && inked[top - 2]))) top--;
+  while (bottom < height - 1 && (inked[bottom + 1] || (bottom < height - 2 && inked[bottom + 2]))) bottom++;
+  return { top: top / height, bottom: (bottom + 1) / height };
+}
+

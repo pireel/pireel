@@ -31,6 +31,8 @@ export interface PlaybookParts {
     coverReferences: BrandAsset[]; layoutReferences: BrandAsset[]; motionReferences: BrandAsset[];
     /** Measured caption colours (text, plate) from the caption band. */
     captionColors?: { color: string; plate: string | null };
+    /** Where the caption letters really are, measured on pixels: their height and bottom, % of the frame. */
+    captionInk?: { heightPct: number; bottomPct: number };
   };
 }
 
@@ -43,7 +45,9 @@ const majority = <T>(values: (T | null | undefined)[]): T | undefined => {
 /** OCR line-box height per font size of a burned-in caption. */
 const CAPTION_BOX_PER_FONT = 0.95;
 /** Space under the glyphs inside the engine's caption line box, per font size. */
-const LINE_BELOW_GLYPHS = 0.175;
+const LINE_BELOW_GLYPHS = 0.2;
+/** Height of CJK letters (ink) per font size in the caption faces. */
+const INK_PER_FONT = 0.88;
 
 /** Two colours close enough to be the same caption colour, measured two ways. */
 const near = (a: string, b: string) => {
@@ -76,6 +80,10 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
     const measured = assets.captionColors && (!readFill || near(assets.captionColors.color, readFill)) ? assets.captionColors : undefined;
     const fill = measured?.color ?? readFill;
     const accent = facet('accentRule');
+    // Font size and place from the letters measured on pixels; the OCR box (approximate) when there are none.
+    const ink = assets.captionInk;
+    const fontPct = ink ? ink.heightPct / INK_PER_FONT : (geometry?.lineHeightPct ?? 0) / CAPTION_BOX_PER_FONT;
+    const glyphBottomPct = ink ? ink.bottomPct : geometry?.bottomPct ?? 0;
     blocks.captions = {
       on: captionsOn,
       ...(geometry && captionsOn ? {
@@ -87,9 +95,9 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
           ...(treatment === 'box' && measured?.plate ? { bg: measured.plate } : {}),
           // An OCR line box is about as tall as the font size for CJK and Latin captions alike (checked by
           // overlaying the rendered sample on a creator's own captioned frame).
-          scale: Math.round(geometry.lineHeightPct / 100 * 1080 * parts.heightPerWidth / CAPTION_BOX_PER_FONT / BASE_CAPTION_FONT_PX * 100) / 100,
-          // The engine anchors the line box (1.35× the font) by its bottom; the OCR box hugs the glyphs.
-          xPct: geometry.xCenterPct, yPct: Math.round((geometry.bottomPct + LINE_BELOW_GLYPHS * geometry.lineHeightPct / CAPTION_BOX_PER_FONT) * 10) / 10, wPct: Math.min(94, Math.max(40, Math.round(geometry.widthPct * 1.15))),
+          scale: Math.round(fontPct / 100 * 1080 * parts.heightPerWidth / BASE_CAPTION_FONT_PX * 100) / 100,
+          // The engine anchors the line box (1.35× the font) by its bottom, below the glyphs.
+          xPct: geometry.xCenterPct, yPct: Math.round((glyphBottomPct + LINE_BELOW_GLYPHS * fontPct) * 10) / 10, wPct: Math.min(94, Math.max(40, Math.round(geometry.widthPct * 1.15))),
         },
         // Highlighting is on or off: the platform picks the words (and breaks the lines) itself.
         accent: accent && accent !== 'none' ? 'keywords' : null,
