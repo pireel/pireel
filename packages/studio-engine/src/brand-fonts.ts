@@ -37,7 +37,9 @@ export function fontsSystemPrompt(): string {
 - titles: headlines, labels and other words the creator puts on screen besides captions;
 - cover: the lettering on their video covers.
 
-For each role that has crops, report:
+A crop can catch text that belongs to the filmed scene — signs, book spines, packaging, clothing, a screen in the room — instead of words added in editing; such text is not the creator's typeface: leave that role out when all its crops are scene text.
+
+For each role that has creator-added text, report:
 - look: the typeface in a few words — class (黑体 sans, 圆体 rounded, 宋体 serif, 楷体/手写 handwriting, 毛笔 brush, 综艺/美术 display), weight, width (condensed, normal, wide), slant, and what makes it recognisable; leave out colour, stroke and shadow (they are measured elsewhere);
 - actual: the font you believe it is, by name, when you can tell ("思源黑体 Heavy", "方正兰亭特黑", "Montserrat ExtraBold"); omit when you cannot;
 - weight: light, regular, bold or black;
@@ -47,7 +49,7 @@ ${choices}
   for Latin-only text, "google:<Family>" with the Google Fonts family closest to it (for example google:Montserrat, google:Anton, google:Bebas Neue).
 Pick by shape first (class, width, slant, stroke ends), weight second.
 
-Return only JSON: {"captions":{"look":"…","actual":"…","weight":"…","id":"…"},"titles":{…},"cover":{…}} — only the roles that have crops.`;
+Return only JSON: {"captions":{"look":"…","actual":"…","weight":"…","id":"…"},"titles":{…},"cover":{…}} — only the roles that have creator-added text.`;
 }
 
 /** The readings, each id checked: a CJK choice as given, a google:<Family> that exists (else the closest
