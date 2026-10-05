@@ -8,8 +8,8 @@ import { WEB_FONTS, searchFonts, webFontFontId } from './font-library';
  * looked up in the whole Google Fonts snapshot. Choosing is the model's; checking the id is code's.
  */
 
-export type FontRole = 'captions' | 'titles' | 'cover';
-export const FONT_ROLES: readonly FontRole[] = ['captions', 'titles', 'cover'];
+export type FontRole = 'captions' | 'titles' | 'graphics' | 'cover';
+export const FONT_ROLES: readonly FontRole[] = ['captions', 'titles', 'graphics', 'cover'];
 
 /** Faces the platform renders for Chinese text, with how they look, for the model to choose among. */
 export function cjkFontChoices(): { id: string; name: string; look: string }[] {
@@ -35,6 +35,7 @@ export function fontsSystemPrompt(): string {
   return `You identify the typefaces a creator uses in their videos, from crops of their text. The crops are labelled by role:
 - captions: the burned-in subtitles of the speech;
 - titles: headlines, labels and other words the creator puts on screen besides captions;
+- graphics: stills of moments with the creator's motion graphics (cards, charts, labels) — read the words inside them;
 - cover: the lettering on their video covers.
 
 A crop can catch text that belongs to the filmed scene — signs, book spines, packaging, clothing, a screen in the room — instead of words added in editing; such text is not the creator's typeface: leave that role out when all its crops are scene text.

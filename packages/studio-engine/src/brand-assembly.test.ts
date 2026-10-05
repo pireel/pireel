@@ -77,6 +77,8 @@ describe('assemblePlaybook', () => {
     expect(playbook.blocks.overlay_text).toEqual({ font: 'web:smiley-sans', fontLike: '得意黑' });
     const fromCover = assemblePlaybook({ ...parts(), fonts: { cover: { id: 'web:ximaiti', look: '粗斜美术体' } } });
     expect(fromCover.blocks.overlay_text).toEqual({ font: 'web:ximaiti' });
+    const fromGraphics = assemblePlaybook({ ...parts(), fonts: { graphics: { id: 'sans', look: '干净黑体' }, cover: { id: 'web:ximaiti', look: '粗斜美术体' } } });
+    expect(fromGraphics.blocks.overlay_text).toEqual({ font: 'sans' });
   });
 
   it('sizes and places captions from the letters measured on pixels', () => {
