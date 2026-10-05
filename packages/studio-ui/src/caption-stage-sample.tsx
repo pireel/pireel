@@ -10,18 +10,23 @@ const WORD_SEC = 0.32;
 const TAIL_SEC = 0.5;
 
 function useWidth() {
+  const [host, width] = useSize();
+  return [host, width.width] as const;
+}
+
+function useSize() {
   const host = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(0);
+  const [size, setSize] = useState({ width: 0, height: 0 });
   useEffect(() => {
     const element = host.current;
     if (!element) return;
-    const measure = () => setWidth(Math.round(element.getBoundingClientRect().width));
+    const measure = () => { const rect = element.getBoundingClientRect(); setSize(current => current.width === Math.round(rect.width) && current.height === Math.round(rect.height) ? current : { width: Math.round(rect.width), height: Math.round(rect.height) }); };
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     measure();
     return () => observer.disconnect();
   }, []);
-  return [host, width] as const;
+  return [host, size] as const;
 }
 
 /** One display cue, the unit the editor and export render (the stack owns position and tilt), not a
@@ -56,11 +61,14 @@ export function CaptionStageSample({ style, canvas, text, subText }: {
 /** A looping sample of one caption animation in the current look, for the animation cards: the
  *  same renderer as the preview and export, so a card shows what picking it does. */
 export function CaptionMotionSample({ id, style, text }: { id: string; style: Partial<CaptionStyle>; text: string }) {
-  const [host, width] = useWidth();
+  const [host, size] = useSize();
+  const width = size.width;
   // A short strip canvas keeps the caption large inside a small card; stacked looks take two rows,
-  // so they sit lower and a little smaller to fit whole.
+  // so they sit lower and a little smaller to fit whole. The strip takes the card's own shape, so the
+  // caption stays inside however wide the card is laid out.
   const stacked = !!getCaptionPreset(style.preset).stack;
-  const comp = useMemo<Composition>(() => ({ ...emptyComposition(), width: 540, height: 240, captionStyle: { ...style, sub: undefined, xPct: 50, yPct: stacked ? 92 : 70, wPct: 94, scale: stacked ? 0.72 : Math.min(style.scale ?? 1, 1), on: true } as CaptionStyle }), [style, stacked]);
+  const stripHeight = size.width > 0 && size.height > 0 ? Math.max(120, Math.round(540 * size.height / size.width)) : 240;
+  const comp = useMemo<Composition>(() => ({ ...emptyComposition(), width: 540, height: stripHeight, captionStyle: { ...style, sub: undefined, xPct: 50, yPct: stacked ? 92 : 70, wPct: 94, scale: stacked ? 0.72 : Math.min(style.scale ?? 1, 1), on: true } as CaptionStyle }), [style, stacked, stripHeight]);
   const block = useMemo(() => sampleCue(`caption_motion_${id}`, text, style.preset), [id, text, style.preset, comp]);
   return <div ref={host} className="h-full w-full">
     {width > 0 && <InlineBlockPreview comp={comp} block={block} width={width} ground="none" animate />}

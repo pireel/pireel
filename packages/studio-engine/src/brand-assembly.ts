@@ -76,7 +76,6 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
     const measured = assets.captionColors && (!readFill || near(assets.captionColors.color, readFill)) ? assets.captionColors : undefined;
     const fill = measured?.color ?? readFill;
     const accent = facet('accentRule');
-    const perScreen = spec.captions.wordsPerPage.value; const upper = spec.captions.case.value === 'upper';
     blocks.captions = {
       on: captionsOn,
       ...(geometry && captionsOn ? {
@@ -92,8 +91,8 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
           // The engine anchors the line box (1.35× the font) by its bottom; the OCR box hugs the glyphs.
           xPct: geometry.xCenterPct, yPct: Math.round((geometry.bottomPct + LINE_BELOW_GLYPHS * geometry.lineHeightPct / CAPTION_BOX_PER_FONT) * 10) / 10, wPct: Math.min(94, Math.max(40, Math.round(geometry.widthPct * 1.15))),
         },
-        accent: accent === 'keywords' ? 'keywords' : accent === 'numbers_money' ? 'numbers' : accent === 'current_word' ? 'current_word' : null,
-        text: say(`每屏约 ${perScreen} 个字词${upper ? '，全大写' : ''}。`, `About ${perScreen} words on screen at once${upper ? ', all caps' : ''}.`),
+        // Highlighting is on or off: the platform picks the words (and breaks the lines) itself.
+        accent: accent && accent !== 'none' ? 'keywords' : null,
       } : {}),
       ...(geometry ? { evidence: { videos: geometry.evidence.videos, confidence: geometry.evidence.confidence } } : {}),
     };

@@ -25,9 +25,9 @@ describe('playbookEditParams', () => {
     expect(playbookEditParams(playbook({ editing: { text: '  ' } })).moves).toBeUndefined();
   });
 
-  it('marks key words only when the captions do', () => {
+  it('highlights key words when the captions do (on or off)', () => {
     expect(playbookHighlightsKeywords(playbook({ captions: { on: true, accent: 'keywords' } }))).toBe(true);
-    expect(playbookHighlightsKeywords(playbook({ captions: { on: true, accent: 'current_word' } }))).toBe(false);
+    expect(playbookHighlightsKeywords(playbook({ captions: { on: true, accent: null } }))).toBe(false);
   });
 });
 

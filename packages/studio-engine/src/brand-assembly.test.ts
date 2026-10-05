@@ -39,7 +39,7 @@ describe('assemblePlaybook', () => {
     expect(playbook.method).toBe(METHOD_VERSION);
     const b = playbook.blocks;
     expect(b.sound).toMatchObject({ lufs: -15, pauses: 'tight' });
-    expect(b.captions).toMatchObject({ on: true, accent: 'keywords', text: '每屏约 8 个字词。', style: { color: '#ffffff', strokeColor: '#000000', yPct: 22.6 } });
+    expect(b.captions).toMatchObject({ on: true, accent: 'keywords', style: { color: '#ffffff', strokeColor: '#000000', yPct: 22.6 } });
     expect(b.palette).toEqual({ accent: '#ffd600' });
     expect(b.editing).toEqual({ text: '说到价格时快推近。', evidence: { videos: ['v1', 'v2', 'v3'], confidence: 'high' } });
     expect(b.motion_graphics?.references).toEqual([mg]);

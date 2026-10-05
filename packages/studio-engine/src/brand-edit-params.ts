@@ -52,7 +52,8 @@ export function playbookEditParams(playbook: PlaybookSnapshot): CaptionEditParam
 }
 
 /** Whether the brand marks key words in its captions. */
-export const playbookHighlightsKeywords = (playbook: PlaybookSnapshot) => playbook.blocks.captions?.accent === 'keywords';
+/** Key-word highlighting on or off (brands made before kept which words; any of them means on). */
+export const playbookHighlightsKeywords = (playbook: PlaybookSnapshot) => !!playbook.blocks.captions?.accent;
 
 /** The brand as the edit planner reads it. */
 export const playbookEditGuide = (playbook: PlaybookSnapshot) => renderBrandPrompt(playbook, ['portrait', 'editing', 'structure', 'sound']);
