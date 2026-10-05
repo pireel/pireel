@@ -240,19 +240,21 @@ export function parseSynthesis(raw: string, videos: { id: string }[]): Synthesis
 
 /** The cover prompt for new videos, written from the creator's past covers (the images given). */
 export function coverSystemPrompt(language: string): string {
-  return `You study a creator's past video covers to write the prompt that will make the cover of each NEW video of theirs in the same style. The prompt has two parts, used one after the other:
+  return `You study a creator's past video covers to write the prompt that will make the cover of each NEW video of theirs in the same style. The prompt has three parts, used one after the other:
 
 frame — how to choose, from the new video's footage, the still the cover is built on: the person's expression, gesture, gaze and pose, how close the shot is, who is in it when there are several people, what the moment should say. When the covers are not built on a still of the video (a designed graphic, a product shot, a cut-out on a plain ground), say what the cover is built on instead.
 
-design — how that still becomes the cover: crop, where the person sits and how large; what happens to the background (kept, darkened, blurred, replaced, a colour); the headline — how it is worded (length, voice, what it promises; never the words of one cover) and how it is lettered (type character, weight, colours as #RRGGBB, stroke, shadow or plate, size, number of lines, position); other marks (logo, arrows, circles, emoji, borders, series or episode labels); the finish (contrast, saturation, glow). When the covers are plain stills with nothing added, say so: that is the style.
+headline — how the words on the cover are written, for a writer who will word the next one from what the new video says: how many lines (a main line, a second line, a small label) and how long each is; the structure (a question, a bold claim, a number or result, a series name with an episode number, a quote); the voice, punctuation and emphasis marks; how it hooks (curiosity, conflict, a promise of use). Quote two to four real headlines from the covers as examples. When the covers carry no words, leave it empty.
+
+design — how the still and the headline become the cover: crop, where the person sits and how large; what happens to the background (kept, darkened, blurred, replaced, a colour, a scene from the topic); how the headline is lettered (type character, weight, colours as #RRGGBB, stroke, shadow or plate, size, position); other marks (logo, arrows, circles, emoji, borders, series or episode labels); the finish (contrast, saturation, glow). When the covers are plain stills with nothing added, say so: that is the style.
 
 Keep only what recurs: with three or more covers, a habit must hold in at least two. When the covers follow two styles, describe the main one and name the other in one sentence.
 Write as instructions to a designer who has never seen these covers, concrete enough to recreate them, without naming the people in them.
-Write both parts in ${language}.
-Return only JSON: {"frame":"…","design":"…","covers":[<indices of the covers the design holds for, from 0>]}`;
+Write every part in ${language}.
+Return only JSON: {"frame":"…","headline":"…","design":"…","covers":[<indices of the covers the design holds for, from 0>]}`;
 }
 
-export interface CoverReading { frame: string; design: string; covers: number[] }
+export interface CoverReading { frame: string; headline?: string; design: string; covers: number[] }
 
 /** The cover prompt checked against the evidence bar: with three or more covers it must hold in two;
  *  `null` when it does not (the brand then has no cover prompt, only its references). */
@@ -260,9 +262,10 @@ export function parseCover(raw: string, coverCount: number): CoverReading | null
   const value = json(raw);
   const frame = text(value.frame, 'frame', 2000);
   const design = text(value.design, 'design', 3000);
+  const headline = optionalText(value.headline, 2000);
   const covers = [...new Set((Array.isArray(value.covers) ? value.covers : []).filter((at): at is number => Number.isInteger(at) && (at as number) >= 0 && (at as number) < coverCount))].sort((a, b) => a - b);
   if (coverCount >= 3 && covers.length < 2) return null;
-  return { frame, design, covers };
+  return { frame, ...(headline ? { headline } : {}), design, covers };
 }
 
 /** Picking, among stills of a new video, the one its cover is built on, by the brand's cover prompt. */
@@ -274,4 +277,19 @@ Return only JSON: {"pick":<index of the still>}`;
 export function parseCoverFrame(raw: string, count: number): number {
   const pick = json(raw).pick;
   return Number.isInteger(pick) && (pick as number) >= 0 && (pick as number) < count ? pick as number : fail('pick', pick);
+}
+
+/** Writing the headline of a new video's cover from what it says, the way the creator's covers word theirs. */
+export function coverHeadlineSystemPrompt(): string {
+  return `You write the headline lettered on the cover of a creator's new video, the way their covers word headlines (their rule is given, with real examples). Write it from what this video actually says, in the language it is spoken in; follow the rule's number of lines, length, structure, voice and punctuation; never promise what the video does not deliver and never copy an example's words.
+Write one headline, the best one; do not offer alternatives.
+Return only JSON: {"lines":["<first line>", "<next line, only when the rule uses more lines>"]}`;
+}
+
+/** The headline's lines, in order (one to three, each short enough to letter). */
+export function parseCoverHeadline(raw: string): string[] {
+  const value = json(raw).lines;
+  const lines = (Array.isArray(value) ? value : []).flatMap(line => typeof line === 'string' && line.trim() ? [line.trim()] : []);
+  if (!lines.length || lines.length > 3 || lines.some(line => line.length > 40)) fail('lines', value);
+  return lines;
 }

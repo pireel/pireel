@@ -57,9 +57,9 @@ describe('assemblePlaybook', () => {
 
   it('writes the cover in two parts from the covers, with the covers as references', () => {
     const cover = { key: 'uploads/u/c.jpg', kind: 'image' as const, width: 720, height: 960 };
-    const playbook = assemblePlaybook({ ...parts(), cover: { frame: '惊讶表情，正对镜头。', design: '人物在右，左侧黄色大字。', held: 3, total: 4, videos: ['v1'] }, assets: { ...parts().assets, coverReferences: [cover] } });
+    const playbook = assemblePlaybook({ ...parts(), cover: { frame: '惊讶表情，正对镜头。', headline: '一句反问，六字以内。', design: '人物在右，左侧黄色大字。', held: 3, total: 4, videos: ['v1'] }, assets: { ...parts().assets, coverReferences: [cover] } });
     expect(() => validatePlaybook(playbook)).not.toThrow();
-    expect(playbook.blocks.cover).toEqual({ frame: '惊讶表情，正对镜头。', design: '人物在右，左侧黄色大字。', evidence: { videos: ['v1'], confidence: 'high' }, references: [cover] });
+    expect(playbook.blocks.cover).toEqual({ frame: '惊讶表情，正对镜头。', headline: '一句反问，六字以内。', design: '人物在右，左侧黄色大字。', evidence: { videos: ['v1'], confidence: 'high' }, references: [cover] });
     expect(assemblePlaybook({ ...parts(), assets: { ...parts().assets, coverReferences: [cover] } }).blocks.cover).toEqual({ references: [cover] });
   });
 });

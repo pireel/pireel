@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NOT_BRAND, WINDOWS } from './brand-method';
-import { coverSystemPrompt, parseCover, parseCoverFrame, parseMoments, parseSynthesis, parseVideoReading, readingSystemPrompt, synthesisSystemPrompt } from './brand-reading';
+import { coverHeadlineSystemPrompt, coverSystemPrompt, parseCover, parseCoverFrame, parseCoverHeadline, parseMoments, parseSynthesis, parseVideoReading, readingSystemPrompt, synthesisSystemPrompt } from './brand-reading';
 
 describe('method prompts', () => {
   it('read each video by block, from the overview, the ends and the moments', () => {
@@ -81,8 +81,8 @@ describe('parseSynthesis', () => {
 describe('cover', () => {
   it('asks for the two parts, from the covers, in the brand language', () => {
     const prompt = coverSystemPrompt('Simplified Chinese');
-    expect(prompt).toMatch(/frame —[\s\S]*design —/);
-    expect(prompt).toContain('Write both parts in Simplified Chinese.');
+    expect(prompt).toMatch(/frame —[\s\S]*headline —[\s\S]*design —/);
+    expect(prompt).toContain('Write every part in Simplified Chinese.');
     expect(synthesisSystemPrompt('English')).not.toMatch(/^- cover:/m);
     expect(readingSystemPrompt()).not.toContain('"cover"');
   });
@@ -91,11 +91,24 @@ describe('cover', () => {
     expect(parseCover(JSON.stringify({ frame: '惊讶表情', design: '人物在右', covers: [2, 0, 0, 9] }), 3)).toEqual({ frame: '惊讶表情', design: '人物在右', covers: [0, 2] });
     expect(parseCover(JSON.stringify({ frame: '惊讶表情', design: '人物在右', covers: [1] }), 3)).toBeNull();
     expect(parseCover(JSON.stringify({ frame: '惊讶表情', design: '人物在右', covers: [] }), 1)).toEqual({ frame: '惊讶表情', design: '人物在右', covers: [] });
+    expect(parseCover(JSON.stringify({ frame: '惊讶表情', headline: '主标题四到六字，带问号', design: '人物在右', covers: [0, 1] }), 2)?.headline).toBe('主标题四到六字，带问号');
     expect(() => parseCover(JSON.stringify({ design: '人物在右' }), 2)).toThrow(/frame/);
   });
 
   it('reads the picked still, refusing an index out of range', () => {
     expect(parseCoverFrame('{"pick":3}', 8)).toBe(3);
     expect(() => parseCoverFrame('{"pick":8}', 8)).toThrow(/pick/);
+  });
+});
+
+describe('cover headline', () => {
+  it('asks for one headline from what the video says', () => {
+    expect(coverHeadlineSystemPrompt()).toContain('Write one headline, the best one');
+  });
+
+  it('reads one to three short lines', () => {
+    expect(parseCoverHeadline('{"lines":["评论区问题精选"," 总有你关心的 ",""]}')).toEqual(['评论区问题精选', '总有你关心的']);
+    expect(() => parseCoverHeadline('{"lines":[]}')).toThrow(/lines/);
+    expect(() => parseCoverHeadline(JSON.stringify({ lines: ['x'.repeat(41)] }))).toThrow(/lines/);
   });
 });
