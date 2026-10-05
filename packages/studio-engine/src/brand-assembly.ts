@@ -107,14 +107,14 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
   }
   if (assets.logo && summary.logo) blocks.logo = { ...assets.logo, corner: summary.logo.corner, widthPct: Math.min(40, Math.max(4, Math.round(summary.logo.box.w * 100))), opacity: 1, evidence: { videos: summary.logo.evidence.videos, confidence: summary.logo.evidence.confidence } };
   if (Object.keys(synthesis.palette).length) blocks.palette = synthesis.palette;
-  // Titles and generated elements take the creator's title face (else their cover lettering), body text
-  // their caption face; the prose keeps what each face looks like and is taken to be.
+  // The fonts block is the face of the words the creator adds — titles, labels, graphics — which generated
+  // elements take: their title face, else their cover lettering. Captions keep their face in the captions
+  // block and the cover its lettering in the cover block, each said once.
   const fonts = parts.fonts ?? {};
-  const heading = fonts.titles ?? fonts.cover; const body = fonts.captions;
-  if (heading || body) {
-    const names: Record<FontRole, string> = { captions: say('字幕', 'Captions'), titles: say('标题', 'Titles'), cover: say('封面', 'Cover') };
-    const lines = (['captions', 'titles', 'cover'] as const).flatMap(role => { const font = fonts[role]; return font ? [`${names[role]}${say('：', ': ')}${font.look}${font.actual ? say(`（像 ${font.actual}）`, ` (like ${font.actual})`) : ''}`] : []; });
-    blocks.fonts = { ...(heading ? { heading: heading.id } : {}), ...(body ? { body: body.id } : {}), text: lines.join('\n') };
+  const heading = fonts.titles ?? fonts.cover;
+  if (heading) {
+    const from = fonts.titles ? '' : say('（取自封面大字）', ' (from the cover lettering)');
+    blocks.fonts = { heading: heading.id, text: `${heading.look}${heading.actual ? say(`，像 ${heading.actual}`, `, like ${heading.actual}`) : ''}${from}` };
   }
 
   const loudness = spec.audio.targetLufs.provenance.source === 'measured' ? Math.round(spec.audio.targetLufs.value * 2) / 2 : undefined;
