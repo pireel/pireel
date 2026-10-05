@@ -62,4 +62,11 @@ describe('assemblePlaybook', () => {
     expect(playbook.blocks.cover).toEqual({ frame: '惊讶表情，正对镜头。', headline: '一句反问，六字以内。', design: '人物在右，左侧黄色大字。', evidence: { videos: ['v1'], confidence: 'high' }, references: [cover] });
     expect(assemblePlaybook({ ...parts(), assets: { ...parts().assets, coverReferences: [cover] } }).blocks.cover).toEqual({ references: [cover] });
   });
+
+  it('takes the readings\' caption colour when the measured one is the outline', () => {
+    const input = parts(); input.assets = { ...input.assets, captionColors: { color: '#0a080a', plate: null } };
+    expect(assemblePlaybook(input).blocks.captions?.style?.color).toBe('#ffffff');
+    input.assets = { ...input.assets, captionColors: { color: '#f4f4f0', plate: null } };
+    expect(assemblePlaybook(input).blocks.captions?.style?.color).toBe('#f4f4f0');
+  });
 });

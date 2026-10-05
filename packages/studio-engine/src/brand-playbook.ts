@@ -113,7 +113,7 @@ export function renderBrandPrompt(playbook: Pick<BrandPlaybook, 'name' | 'blocks
   if (want('portrait')) parts.push(element('portrait', {}, b.portrait!.text));
   if (want('captions')) {
     const c = b.captions!; const s = c.style ?? {};
-    parts.push(element('captions', c.on ? { on: true, color: s.color, stroke: s.strokeColor, plate: s.bg, bold: s.bold, accent: c.accent ?? undefined, 'accent-color': s.accentColor, bottom: s.yPct !== undefined ? `${s.yPct}%` : undefined } : { on: false }, c.text));
+    parts.push(element('captions', c.on ? { on: true, color: s.color, stroke: s.strokeColor, plate: s.bg, bold: s.bold, accent: c.accent ?? undefined, 'accent-color': s.accentColor, 'bottom-edge': s.yPct !== undefined ? `${s.yPct}% from top` : undefined } : { on: false }, c.text));
   }
   if (want('logo')) parts.push(element('logo', { corner: b.logo!.corner, width: `${b.logo!.widthPct}%`, opacity: b.logo!.opacity }));
   if (want('palette')) { const p = b.palette!; parts.push(element('palette', { accent: p.accent, 'accent-2': p.accent2, text: p.text, ground: p.ground })); }

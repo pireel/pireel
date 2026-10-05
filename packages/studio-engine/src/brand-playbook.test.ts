@@ -45,7 +45,7 @@ describe('renderBrandPrompt', () => {
   it('renders one XML block per part: fixed values as attributes, prose as escaped content', () => {
     const prompt = renderBrandPrompt(valid());
     expect(prompt.startsWith('<brand name="Mine">')).toBe(true);
-    expect(prompt).toContain('<captions on="true" color="#ffffff" stroke="#000000" accent="keywords" bottom="22%">\n每屏约 3 个词。\n</captions>');
+    expect(prompt).toContain('<captions on="true" color="#ffffff" stroke="#000000" accent="keywords" bottom-edge="22% from top">\n每屏约 3 个词。\n</captions>');
     expect(prompt).toContain('<logo corner="top-right" width="12%" opacity="1"/>');
     expect(prompt).toContain('<sound loudness="-15 LUFS" pauses="tight"/>');
     expect(prompt).toContain('<editing>\n说到价格时快推近 &amp; 换产品时甩镜 &lt;偶尔&gt;。\n</editing>');

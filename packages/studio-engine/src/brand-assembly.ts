@@ -37,6 +37,13 @@ const majority = <T>(values: (T | null | undefined)[]): T | undefined => {
   return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
 };
 
+/** Two colours close enough to be the same caption colour, measured two ways. */
+const near = (a: string, b: string) => {
+  const rgb = (value: string) => [1, 3, 5].map(at => parseInt(value.slice(at, at + 2), 16));
+  const [x, y] = [rgb(a), rgb(b)];
+  return Math.hypot(x[0]! - y[0]!, x[1]! - y[1]!, x[2]! - y[2]!) < 100;
+};
+
 export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
   const { spec, summary, readings, synthesis, assets } = parts;
   const total = parts.videos.length;
@@ -55,7 +62,11 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
     const geometry = summary.captions;
     const treatment = facet('captionTreatment');
     const outline = majority(readings.map(reading => reading.look.captionOutline));
-    const fill = assets.captionColors?.color ?? majority(readings.map(reading => reading.look.captionFill));
+    // The measured colour gives the exact value, but one frame's two-colour split can take the outline for
+    // the text (white letters over a white shirt); when it disagrees with what the readings saw, they win.
+    const readFill = majority(readings.map(reading => reading.look.captionFill));
+    const measured = assets.captionColors && (!readFill || near(assets.captionColors.color, readFill)) ? assets.captionColors : undefined;
+    const fill = measured?.color ?? readFill;
     const accent = facet('accentRule');
     const perScreen = spec.captions.wordsPerPage.value; const upper = spec.captions.case.value === 'upper';
     blocks.captions = {
@@ -65,7 +76,7 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
           preset: 'ln-clean', font: 'sans', bold: facet('fontClass') !== 'platform_native',
           ...(fill ? { color: fill } : {}),
           ...(treatment === 'stroke' ? { strokeColor: outline ?? '#000000', strokeWidth: 3 } : {}),
-          ...(treatment === 'box' && assets.captionColors?.plate ? { bg: assets.captionColors.plate } : {}),
+          ...(treatment === 'box' && measured?.plate ? { bg: measured.plate } : {}),
           scale: Math.round(geometry.lineHeightPct / 100 * 1080 * parts.heightPerWidth / 1.2 / BASE_CAPTION_FONT_PX * 100) / 100,
           xPct: geometry.xCenterPct, yPct: geometry.bottomPct, wPct: Math.min(94, Math.max(40, Math.round(geometry.widthPct * 1.15))),
         },
