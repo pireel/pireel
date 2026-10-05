@@ -18,7 +18,7 @@ export interface PlaybookParts {
   synthesis: Synthesis;
   /** The cover prompt from the creator's covers: how many covers were read, how many it holds for, and
    *  the videos those covers belong to (hand-added covers belong to none). */
-  cover?: { frame: string; headline?: string; design: string; held: number; total: number; videos: string[] };
+  cover?: { source?: 'video' | 'photo'; frame: string; headline?: string; design: string; held: number; total: number; videos: string[] };
   /** Canvas height per unit of width of the creator's videos (16/9 for vertical). */
   heightPerWidth: number;
   assets: {
@@ -110,7 +110,7 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
   const structure = prose('structure'); if (structure) blocks.structure = structure;
   const cover = parts.cover;
   if (cover || assets.coverReferences.length) blocks.cover = {
-    ...(cover ? { frame: cover.frame, ...(cover.headline ? { headline: cover.headline } : {}), design: cover.design, evidence: { videos: cover.videos, confidence: cover.total < 3 ? 'low' : cover.held / cover.total >= 0.7 ? 'high' : 'medium' } } : {}),
+    ...(cover ? { ...(cover.source ? { source: cover.source } : {}), frame: cover.frame, ...(cover.headline ? { headline: cover.headline } : {}), design: cover.design, evidence: { videos: cover.videos, confidence: cover.total < 3 ? 'low' : cover.held / cover.total >= 0.7 ? 'high' : 'medium' } } : {}),
     ...(assets.coverReferences.length ? { references: assets.coverReferences } : {}),
   };
 

@@ -95,6 +95,11 @@ describe('cover', () => {
     expect(() => parseCover(JSON.stringify({ design: '人物在右' }), 2)).toThrow(/frame/);
   });
 
+  it('reads where the person comes from, leaving out anything else', () => {
+    expect(parseCover(JSON.stringify({ source: 'photo', frame: '托腮思考', design: '人物在左', covers: [0] }), 1).source).toBe('photo');
+    expect(parseCover(JSON.stringify({ source: 'poster', frame: '托腮思考', design: '人物在左', covers: [0] }), 1).source).toBeUndefined();
+  });
+
   it('reads the picked still, refusing an index out of range', () => {
     expect(parseCoverFrame('{"pick":3}', 8)).toBe(3);
     expect(() => parseCoverFrame('{"pick":8}', 8)).toThrow(/pick/);

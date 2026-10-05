@@ -238,9 +238,13 @@ export function parseSynthesis(raw: string, videos: { id: string }[]): Synthesis
 
 /** The cover prompt for new videos, written from the creator's past covers (the images given). */
 export function coverSystemPrompt(language: string): string {
-  return `You study a creator's past video covers to write the prompt that will make the cover of each NEW video of theirs in the same style. The prompt has three parts, used one after the other:
+  return `You study a creator's past video covers to write the prompt that will make the cover of each NEW video of theirs in the same style. You also get frames from their videos, to tell where the person on the covers comes from.
 
-frame — how to choose, from the new video's footage, the still the cover is built on: the person's expression, gesture, gaze and pose, how close the shot is, who is in it when there are several people, what the moment should say. When the covers are not built on a still of the video (a designed graphic, a product shot, a cut-out on a plain ground), say what the cover is built on instead.
+source — "video" when the person on the covers is a still of the video (same outfit, light and setting as the frames), "photo" when it is a photo taken for covers (a cut-out studio portrait, another outfit, posed for the cover, lit apart). Judge from the frames given.
+
+The prompt has three parts, used one after the other:
+
+frame — what the cover is built on. For "video": how to choose the still from the new video's footage — the person's expression, gesture, gaze and pose, how close the shot is, who is in it when there are several people, what the moment should say. For "photo": the photo to pose and shoot or pick — pose, expression, gesture, gaze, framing, outfit, how it is cut out and lit. When the covers carry no person (a designed graphic, a product shot), say what they are built on.
 
 headline — how the words on the cover are written, for a writer who will word the next one from what the new video says: how many lines (a main line, a second line, a small label) and how long each is; the structure (a question, a bold claim, a number or result, a series name with an episode number, a quote); the voice, punctuation and emphasis marks; how it hooks (curiosity, conflict, a promise of use). Quote two to four real headlines from the covers as examples. When the covers carry no words, leave it empty.
 
@@ -249,10 +253,10 @@ design — how the still and the headline become the cover: crop, where the pers
 You judge what is the creator's cover style and what belongs to one cover's topic; write what depends on the topic as a role, never as the particular person or thing. When the covers follow two styles, describe the main one and name the other in one sentence.
 Write as instructions to a designer who has never seen these covers, concrete enough to recreate them, without naming the people in them.
 Write every part in ${language}.
-Return only JSON: {"frame":"…","headline":"…","design":"…","covers":[<indices of the covers the design holds for, from 0>]}`;
+Return only JSON: {"source":"video"|"photo","frame":"…","headline":"…","design":"…","covers":[<indices of the covers the design holds for, from 0>]}`;
 }
 
-export interface CoverReading { frame: string; headline?: string; design: string; covers: number[] }
+export interface CoverReading { source?: 'video' | 'photo'; frame: string; headline?: string; design: string; covers: number[] }
 
 /** The cover prompt as the model judged it; the covers it cites are evidence to show and the order
  *  references are listed in. */
@@ -262,7 +266,8 @@ export function parseCover(raw: string, coverCount: number): CoverReading {
   const design = text(value.design, 'design', 3000);
   const headline = optionalText(value.headline, 2000);
   const covers = [...new Set((Array.isArray(value.covers) ? value.covers : []).filter((at): at is number => Number.isInteger(at) && (at as number) >= 0 && (at as number) < coverCount))].sort((a, b) => a - b);
-  return { frame, ...(headline ? { headline } : {}), design, covers };
+  const source = value.source === 'video' || value.source === 'photo' ? value.source : undefined;
+  return { ...(source ? { source } : {}), frame, ...(headline ? { headline } : {}), design, covers };
 }
 
 /** Picking, among stills of a new video, the one its cover is built on, by the brand's cover prompt. */

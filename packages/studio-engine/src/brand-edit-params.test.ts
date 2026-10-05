@@ -50,6 +50,7 @@ describe('edit planning', () => {
     const guide = playbookEditGuide(playbook({ portrait: { text: '快节奏。' }, editing: { text: '说到价格推近。' }, cover: { design: '人物在右。' } }));
     expect(guide).toBe('<brand name="Mine">\n<portrait>\n快节奏。\n</portrait>\n<editing>\n说到价格推近。\n</editing>\n</brand>');
     expect(playbookAgentBrief(playbook({ cover: { frame: '惊讶表情。', headline: '一句反问。', design: '人物在右。' } }))).toContain('<cover>\n<frame>\n惊讶表情。\n</frame>\n<headline>\n一句反问。\n</headline>\n<design>\n人物在右。\n</design>\n</cover>');
+    expect(playbookAgentBrief(playbook({ cover: { source: 'photo', design: '人物在左。' } }))).toContain('<cover person="a photo taken for covers">');
   });
 });
 

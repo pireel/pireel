@@ -26,7 +26,17 @@ export interface Prose { text?: string; evidence?: Evidence }
 
 /** The cover prompt: `frame` picks the still from the new video, `headline` says how its words are
  *  written (from what the video says), `design` turns the still and the words into the cover. */
-export interface BrandCover { frame?: string; headline?: string; design?: string; references?: BrandAsset[]; evidence?: Evidence }
+export interface BrandCover {
+  /** Where the person on the cover comes from: a still of the video, or a photo taken for covers (a
+   *  cut-out studio portrait, another outfit or light) — then a new cover is built on such a photo. */
+  source?: 'video' | 'photo';
+  frame?: string; headline?: string; design?: string;
+  /** Past covers: the style, and the person when `source` is 'photo'. */
+  references?: BrandAsset[];
+  /** Photos of the creator taken for covers, added by them; used before a past cover's person. */
+  portraits?: BrandAsset[];
+  evidence?: Evidence;
+}
 
 /** The blocks, in the order the prompt renders them. */
 export interface BrandBlocks {
@@ -146,7 +156,7 @@ export function renderBrandPrompt(playbook: Pick<BrandPlaybook, 'name' | 'blocks
  *  and <design> (how still and words become the cover). */
 function coverElement(cover: BrandCover, references: number | undefined): string {
   const inner = (['frame', 'headline', 'design'] as const).flatMap(part => cover[part]?.trim() ? [element(part, {}, cover[part])] : []).join('\n');
-  const attrs = references ? ` references="${references}"` : '';
+  const attrs = `${cover.source ? ` person="${cover.source === 'photo' ? 'a photo taken for covers' : 'a still of the video'}"` : ''}${references ? ` references="${references}"` : ''}`;
   return inner ? `<cover${attrs}>\n${inner}\n</cover>` : `<cover${attrs}/>`;
 }
 
@@ -197,6 +207,8 @@ export function validatePlaybook(value: unknown): BrandPlaybook {
     if (!isObject(b.cover)) fail('blocks.cover', '需要对象');
     for (const key of ['frame', 'headline', 'design'] as const) if (b.cover[key] !== undefined && (typeof b.cover[key] !== 'string' || b.cover[key]!.length > MAX_TEXT)) fail(`blocks.cover.${key}`, `最多 ${MAX_TEXT} 字`);
     references(b.cover.references, 'blocks.cover.references');
+    references(b.cover.portraits, 'blocks.cover.portraits');
+    if (b.cover.source !== undefined && b.cover.source !== 'video' && b.cover.source !== 'photo') fail('blocks.cover.source', 'video 或 photo');
   }
   if (b.captions) {
     prose(b.captions, 'blocks.captions');
