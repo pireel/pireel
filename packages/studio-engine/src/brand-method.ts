@@ -14,7 +14,7 @@ import type { BlockId } from './brand-playbook';
  * and what goes wrong. Raise METHOD_VERSION whenever a row, a tool or a prompt changes; every brand
  * records the version that made it.
  */
-export const METHOD_VERSION = 'brand-method-4';
+export const METHOD_VERSION = 'brand-method-5';
 
 export interface BlockGuide {
   id: BlockId;

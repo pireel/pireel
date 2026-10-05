@@ -72,7 +72,7 @@ const FACET_GUIDE = `How to tell captions from other text: CAPTIONS are burned-i
 
 export function momentsSystemPrompt(): string {
   return `You read the transcript of a short talking-head video and pick the moments where an editor in this genre most likely added something on screen or in the cut: a motion graphic (a number, a list, a comparison, a chart, a named product, place or person), B-roll or a cutaway, a punch-in on a punchline or key claim, or a transition at a turn to a new point.
-Each line is "<line index> @<start seconds>s: <text>". Pick up to ${WINDOWS.moments} moments, spread over the video, never in its first ${WINDOWS.openingSec} seconds or last ${WINDOWS.closingSec} seconds (those are looked at anyway). Prefer moments the words make likely; fewer is fine.
+Each line is "<line index> @<start seconds>s: <text>". Pick the ${WINDOWS.moments} moments most likely to carry one, spread over the video, never in its first ${WINDOWS.openingSec} seconds or last ${WINDOWS.closingSec} seconds (those are looked at anyway), at least ${WINDOWS.momentSec} seconds apart. Pick fewer only when the middle of the video has no room for more.
 Return only JSON: {"moments":[{"line":<line index>,"why":"<a few words>"}]}`;
 }
 
@@ -179,6 +179,7 @@ export function synthesisSystemPrompt(language: string): string {
 
 Keep only what recurs: a habit must be seen in at least two videos, the same way. Something seen in one video, or the topic of a video, is not style.
 How often something happens in one video depends on its content: describe the moments a habit serves and how much restraint the creator shows, never a rate, an interval or a count.
+Describe habits as tendencies the readings support ("mostly", "rarely", "on numbers"). Five videos never prove a prohibition: when a technique was not seen, say it was not seen in these videos; never forbid it.
 Measured facts come from every frame and the soundtrack; never contradict them.
 Never put these in the brand: ${NOT_BRAND.join('; ')}.
 The platform can punch in, transition, cut to B-roll, add stickers, sound effects and motion graphics for every brand; a block says how THIS creator uses them, not whether they exist.

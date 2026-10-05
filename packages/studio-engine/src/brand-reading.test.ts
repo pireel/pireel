@@ -15,6 +15,7 @@ describe('method prompts', () => {
     const synthesis = synthesisSystemPrompt('Simplified Chinese');
     expect(synthesis).toContain('never a rate, an interval or a count');
     expect(synthesis).toContain('says how THIS creator uses them');
+    expect(synthesis).toContain('never forbid it');
     for (const item of NOT_BRAND) expect(synthesis).toContain(item);
     expect(synthesis).toContain('Write every block in Simplified Chinese');
   });

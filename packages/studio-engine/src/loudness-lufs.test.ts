@@ -1,5 +1,5 @@
-import { expect, it } from 'vitest';
-import { integratedLoudness, loudnessGainDb } from './loudness-lufs';
+import { describe, expect, it } from 'vitest';
+import { integratedLoudness, LoudnessMeter, loudnessGainDb } from './loudness-lufs';
 const sine = (seconds: number, peak: number, rate = 48000, hz = 997) => Float32Array.from({ length: Math.round(seconds * rate) }, (_, i) => peak * Math.sin(2 * Math.PI * hz * i / rate));
 
 it('matches the BS.1770 reference: a full-scale 997 Hz sine reads -3.01 LUFS in one channel and 0 in two', () => {
@@ -25,4 +25,17 @@ it('bounds the master gain and gives none for silence', () => {
   expect(loudnessGainDb(-60)).toBe(24);
   expect(loudnessGainDb(-2)).toBe(-12);
   expect(loudnessGainDb(-Infinity)).toBeNull();
+});
+
+describe('LoudnessMeter', () => {
+  it('gives the same loudness fed in chunks as in one piece', () => {
+    const rate = 48000; const seconds = 3;
+    const tone = (gain: number) => Float32Array.from({ length: rate * seconds }, (_, i) => gain * Math.sin(2 * Math.PI * 997 * i / rate) * (i < rate ? 0.2 : 1));
+    const left = tone(0.5); const right = tone(0.3);
+    const whole = integratedLoudness([left, right], rate);
+    const meter = new LoudnessMeter(rate, 2);
+    for (let at = 0; at < left.length; at += 4096 + 7) meter.push([left.subarray(at, at + 4096 + 7), right.subarray(at, at + 4096 + 7)]);
+    expect(meter.integrated()).toBeCloseTo(whole, 6);
+    expect(Number.isFinite(whole)).toBe(true);
+  });
 });

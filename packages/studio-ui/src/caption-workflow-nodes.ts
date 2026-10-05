@@ -3,7 +3,7 @@ import { applyPlaybookMedia } from '@pireel/studio-engine/brand-media';
 import type { PlaybookSnapshot } from '@pireel/studio-engine/brand-playbook';
 import { cutDurationSec, editPlanInput, punchInUpdates, timelineSecOf, titleTextItem, transitionItems, type CaptionEditParams, type PlannedTitle, type PlanPick } from '@pireel/studio-engine/brand-edit-params';
 import { applyDocumentTransaction } from '@pireel/studio-engine/document-transaction';
-import { integratedLoudness, loudnessGainDb } from '@pireel/studio-engine/loudness-lufs';
+import { loudnessGainDb } from '@pireel/studio-engine/loudness-lufs';
 import { phraseWordIndexes, rowWords } from '@pireel/studio-engine/caption-highlights';
 import { applyWordDecorations } from '@pireel/studio-engine/word-decorations';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
@@ -127,13 +127,13 @@ export function captionWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
       return { document: workflowJson(await store.put('document', 'moves', next)) };
     }, project: outputs => ({ document: store.read<EditorDocumentV2>(outputs.document, 'document') }) }),
     node('audio.loudness', { stage: 'styling', async execute(args) {
-      // The export applies the master gain; it is measured here once, on the source speech.
+      // The export applies the master gain; it is measured here once, on the source speech, while decoding.
       const document = store.read<EditorDocumentV2>(args.document, 'document');
-      const { decodeVideoAudio } = await import('./audio-decode');
-      const decoded = await decodeVideoAudio(await host.media(store.read<SceneMedia>(args.media, 'media'))); host.check();
-      if (!decoded) throw new Error('无法读取原声音轨，不能统一响度。');
+      const { streamVideoLoudness } = await import('./audio-decode');
+      const lufs = await streamVideoLoudness(await host.media(store.read<SceneMedia>(args.media, 'media'))); host.check();
+      if (lufs === null) throw new Error('无法读取原声音轨，不能统一响度。');
       const targetLufs = Number(args.targetLufs);
-      const gainDb = loudnessGainDb(integratedLoudness(Array.from({ length: decoded.numberOfChannels }, (_, index) => decoded.getChannelData(index)), decoded.sampleRate), targetLufs);
+      const gainDb = loudnessGainDb(lufs, targetLufs);
       const next: EditorDocumentV2 = gainDb === null ? document : { ...document, processing: { ...document.processing, loudness: { targetLufs, gainDb } } };
       return { document: workflowJson(await store.put('document', 'loudness', next)) };
     }, project: outputs => ({ document: store.read<EditorDocumentV2>(outputs.document, 'document') }) }),
