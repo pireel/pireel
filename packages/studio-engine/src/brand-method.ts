@@ -14,7 +14,7 @@ import type { BlockId } from './brand-playbook';
  * and what goes wrong. Raise METHOD_VERSION whenever a row, a tool or a prompt changes; every brand
  * records the version that made it.
  */
-export const METHOD_VERSION = 'brand-method-10';
+export const METHOD_VERSION = 'brand-method-11';
 
 export interface BlockGuide {
   id: BlockId;
@@ -33,6 +33,8 @@ export const BLOCK_GUIDE: readonly BlockGuide[] = [
     pitfalls: 'Captions follow the speech; a headline held still, a label over the opening, signs, packaging and screen text are not captions. A second speaker in another colour is not keyword marking.' },
   { id: 'logo', kind: 'fixed', look: 'A mark held in one corner across videos.', pitfalls: 'Platform watermarks are not the creator\'s logo.' },
   { id: 'palette', kind: 'fixed', look: 'Colours the creator\'s own text and graphics keep: accent, second accent, text, ground.', pitfalls: 'Set and wardrobe colours are not brand colours; skin and footage grade are not palette.' },
+  { id: 'fonts', kind: 'fixed', look: 'The typefaces of captions, titles and cover lettering: class, weight, width, slant, and the closest face the platform renders.',
+    pitfalls: 'Colour, stroke and shadow are not the typeface. A platform\'s default caption face is still the creator\'s choice when they keep it.' },
   { id: 'sound', kind: 'fixed', look: 'Loudness and how tightly pauses are cut are measured; in prose, only what frames can show about music and sound effects (credits, visual beats).', pitfalls: 'Frames carry no audio: never claim a sound you cannot see evidence of.' },
   { id: 'bookends', kind: 'fixed', look: 'The same clip at the start (often after a cold open) or the end of every video.', pitfalls: 'Title cards with the same layout but different words are layout, not a fixed clip.' },
   { id: 'layout', kind: 'prose', look: 'Text and frames the creator puts on screen besides captions: a held headline band, an opening label, chapter or series labels, a template frame around the footage — where, how large, what colours and plates, how the words read (with real examples).',

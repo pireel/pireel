@@ -69,4 +69,12 @@ describe('assemblePlaybook', () => {
     input.assets = { ...input.assets, captionColors: { color: '#f4f4f0', plate: null } };
     expect(assemblePlaybook(input).blocks.captions?.style?.color).toBe('#f4f4f0');
   });
+
+  it('takes the fonts read from the creator\'s text: captions render in theirs, titles head generated elements', () => {
+    const playbook = assemblePlaybook({ ...parts(), fonts: { captions: { id: 'web:douyin-sans', look: '圆角黑体，粗', weight: 'bold' }, titles: { id: 'web:smiley-sans', look: '斜体窄黑体', actual: '得意黑' } } });
+    expect(() => validatePlaybook(playbook)).not.toThrow();
+    expect(playbook.blocks.captions?.style).toMatchObject({ font: 'web:douyin-sans', bold: true });
+    expect(playbook.blocks.fonts).toEqual({ heading: 'web:smiley-sans', body: 'web:douyin-sans', text: '字幕：圆角黑体，粗\n标题：斜体窄黑体（像 得意黑）' });
+  });
 });
+

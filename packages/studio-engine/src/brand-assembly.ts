@@ -2,6 +2,7 @@ import type { BrandObservationSummary } from './brand-analysis';
 import type { BrandEditSpec } from './brand-edit-spec';
 import { METHOD_VERSION } from './brand-method';
 import { PLAYBOOK_SCHEMA, type BrandAsset, type BrandBlocks, type BrandPlatform, type BrandPlaybook, type Confidence, type Evidence } from './brand-playbook';
+import type { FontReading, FontRole } from './brand-fonts';
 import type { Synthesis, VideoReading } from './brand-reading';
 import { BASE_CAPTION_FONT_PX } from './caption-presets';
 
@@ -19,6 +20,8 @@ export interface PlaybookParts {
   /** The cover prompt from the creator's covers: how many covers were read, how many it holds for, and
    *  the videos those covers belong to (hand-added covers belong to none). */
   cover?: { source?: 'video' | 'photo'; frame: string; headline?: string; design: string; held: number; total: number; videos: string[] };
+  /** The typefaces read from crops of the creator's text, by role. */
+  fonts?: Partial<Record<FontRole, FontReading>>;
   /** Canvas height per unit of width of the creator's videos (16/9 for vertical). */
   heightPerWidth: number;
   assets: {
@@ -78,7 +81,8 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
       on: captionsOn,
       ...(geometry && captionsOn ? {
         style: {
-          preset: 'ln-clean', font: 'sans', bold: facet('fontClass') !== 'platform_native',
+          preset: 'ln-clean', font: parts.fonts?.captions?.id ?? 'sans',
+          bold: parts.fonts?.captions?.weight ? parts.fonts.captions.weight === 'bold' || parts.fonts.captions.weight === 'black' : facet('fontClass') !== 'platform_native',
           ...(fill ? { color: fill } : {}),
           ...(treatment === 'stroke' ? { strokeColor: outline ?? '#000000', strokeWidth: 3 } : {}),
           ...(treatment === 'box' && measured?.plate ? { bg: measured.plate } : {}),
@@ -96,6 +100,15 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
   }
   if (assets.logo && summary.logo) blocks.logo = { ...assets.logo, corner: summary.logo.corner, widthPct: Math.min(40, Math.max(4, Math.round(summary.logo.box.w * 100))), opacity: 1, evidence: { videos: summary.logo.evidence.videos, confidence: summary.logo.evidence.confidence } };
   if (Object.keys(synthesis.palette).length) blocks.palette = synthesis.palette;
+  // Titles and generated elements take the creator's title face (else their cover lettering), body text
+  // their caption face; the prose keeps what each face looks like and is taken to be.
+  const fonts = parts.fonts ?? {};
+  const heading = fonts.titles ?? fonts.cover; const body = fonts.captions;
+  if (heading || body) {
+    const names: Record<FontRole, string> = { captions: say('字幕', 'Captions'), titles: say('标题', 'Titles'), cover: say('封面', 'Cover') };
+    const lines = (['captions', 'titles', 'cover'] as const).flatMap(role => { const font = fonts[role]; return font ? [`${names[role]}${say('：', ': ')}${font.look}${font.actual ? say(`（像 ${font.actual}）`, ` (like ${font.actual})`) : ''}`] : []; });
+    blocks.fonts = { ...(heading ? { heading: heading.id } : {}), ...(body ? { body: body.id } : {}), text: lines.join('\n') };
+  }
 
   const loudness = spec.audio.targetLufs.provenance.source === 'measured' ? Math.round(spec.audio.targetLufs.value * 2) / 2 : undefined;
   const pauses = spec.cutting.silence.provenance.source === 'measured' ? ({ aggressive: 'tight', moderate: 'moderate', natural: 'natural' } as const)[spec.cutting.silence.value.mode] : undefined;

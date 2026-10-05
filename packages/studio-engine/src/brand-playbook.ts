@@ -48,8 +48,9 @@ export interface BrandBlocks {
   logo?: BrandAsset & { corner: Corner; widthPct: number; opacity: number; evidence?: Evidence };
   /** Fixed: colours of the creator's own text and graphics. */
   palette?: { accent?: string; accent2?: string; text?: string; ground?: string; evidence?: Evidence };
-  /** Fixed: fonts for titles and generated elements (font ids). */
-  fonts?: { heading?: string; body?: string };
+  /** Fixed: fonts for titles and generated elements (font ids); prose for how the faces look (and what
+   *  they are taken to be) where an id is only the closest face the platform has. */
+  fonts?: { heading?: string; body?: string; text?: string; evidence?: Evidence };
   /** Fixed: loudness and pause trimming; prose for music and sound-effect habits. */
   sound?: Prose & { lufs?: number; pauses?: 'tight' | 'moderate' | 'natural' };
   /** Fixed: the same clip before / after every video. */
@@ -141,7 +142,7 @@ export function renderBrandPrompt(playbook: Pick<BrandPlaybook, 'name' | 'blocks
   }
   if (want('logo')) parts.push(element('logo', { corner: b.logo!.corner, width: `${b.logo!.widthPct}%`, opacity: b.logo!.opacity }));
   if (want('palette')) { const p = b.palette!; parts.push(element('palette', { accent: p.accent, 'accent-2': p.accent2, text: p.text, ground: p.ground })); }
-  if (want('fonts')) parts.push(element('fonts', { heading: b.fonts!.heading, body: b.fonts!.body }));
+  if (want('fonts')) parts.push(element('fonts', { heading: b.fonts!.heading, body: b.fonts!.body }, b.fonts!.text));
   if (want('sound')) parts.push(element('sound', { loudness: b.sound!.lufs !== undefined ? `${b.sound!.lufs} LUFS` : undefined, pauses: b.sound!.pauses }, b.sound!.text));
   if (want('bookends')) parts.push(element('bookends', { intro: b.bookends!.intro ? `${b.bookends!.intro.durationSec ?? ''}s clip` : undefined, outro: b.bookends!.outro ? `${b.bookends!.outro.durationSec ?? ''}s clip` : undefined }));
   if (want('layout')) parts.push(element('layout', { references: refs(b.layout!.references) }, b.layout!.text));
@@ -222,7 +223,10 @@ export function validatePlaybook(value: unknown): BrandPlaybook {
     if (!(b.logo.opacity > 0 && b.logo.opacity <= 1)) fail('blocks.logo.opacity', '0–1');
   }
   if (b.palette) for (const key of ['accent', 'accent2', 'text', 'ground'] as const) color(b.palette[key], `blocks.palette.${key}`);
-  if (b.fonts) for (const key of ['heading', 'body'] as const) if (b.fonts[key] !== undefined && (typeof b.fonts[key] !== 'string' || b.fonts[key]!.length > 80)) fail(`blocks.fonts.${key}`, '字体 id');
+  if (b.fonts) {
+    for (const key of ['heading', 'body'] as const) if (b.fonts[key] !== undefined && (typeof b.fonts[key] !== 'string' || b.fonts[key]!.length > 80)) fail(`blocks.fonts.${key}`, '字体 id');
+    prose(b.fonts, 'blocks.fonts');
+  }
   if (b.sound) {
     prose(b.sound, 'blocks.sound');
     if (b.sound.lufs !== undefined && !(b.sound.lufs >= -40 && b.sound.lufs <= -5)) fail('blocks.sound.lufs', '-40…-5');
