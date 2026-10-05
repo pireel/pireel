@@ -14,7 +14,7 @@ import type { BlockId } from './brand-playbook';
  * and what goes wrong. Raise METHOD_VERSION whenever a row, a tool or a prompt changes; every brand
  * records the version that made it.
  */
-export const METHOD_VERSION = 'brand-method-12';
+export const METHOD_VERSION = 'brand-method-13';
 
 export interface BlockGuide {
   id: BlockId;
@@ -33,12 +33,12 @@ export const BLOCK_GUIDE: readonly BlockGuide[] = [
     pitfalls: 'Captions follow the speech; a headline held still, a label over the opening, signs, packaging and screen text are not captions. A second speaker in another colour is not keyword marking.' },
   { id: 'logo', kind: 'fixed', look: 'A mark held in one corner across videos.', pitfalls: 'Platform watermarks are not the creator\'s logo.' },
   { id: 'palette', kind: 'fixed', look: 'Colours the creator\'s own text and graphics keep: accent, second accent, text, ground.', pitfalls: 'Set and wardrobe colours are not brand colours; skin and footage grade are not palette.' },
-  { id: 'fonts', kind: 'fixed', look: 'The typefaces of captions, titles and cover lettering: class, weight, width, slant, and the closest face the platform renders.',
-    pitfalls: 'Colour, stroke and shadow are not the typeface. A platform\'s default caption face is still the creator\'s choice when they keep it.' },
   { id: 'sound', kind: 'fixed', look: 'Loudness and how tightly pauses are cut are measured; in prose, only what frames can show about music and sound effects (credits, visual beats).', pitfalls: 'Frames carry no audio: never claim a sound you cannot see evidence of.' },
   { id: 'bookends', kind: 'fixed', look: 'The same clip at the start (often after a cold open) or the end of every video.', pitfalls: 'Title cards with the same layout but different words are layout, not a fixed clip.' },
-  { id: 'layout', kind: 'prose', look: 'Text and frames the creator puts on screen besides captions: a held headline band, an opening label, chapter or series labels, a template frame around the footage — where, how large, what colours and plates, how the words read (with real examples).',
-    pitfalls: 'Station bugs, corner badges, disclaimers and set signage are not titles. Describe the convention, not one video\'s words.' },
+  { id: 'overlay_text', kind: 'prose', look: 'Overlay text (花字): the words the creator puts on screen besides captions — the words of headline bands, opening labels, chapter or point labels, emphasis words, text inside graphics: type character, colours as #RRGGBB, stroke, shadow or plate, size, how key words are emphasised, how it enters and leaves, on what moments it is used, and how the words read (real examples).',
+    pitfalls: 'Captions follow the speech and are not overlay text. Text that belongs to the filmed scene (signs, packaging, a screen in the room) is not the creator\'s. Describe the convention, not one video\'s words.' },
+  { id: 'layout', kind: 'prose', look: 'How the frame is laid out: a held headline band or a template frame around the footage, where the speaker sits, picture in picture (which corner, shape, size), split screens — positions and sizes; how the words look belongs to overlay text.',
+    pitfalls: 'Station bugs, corner badges, disclaimers and set signage are not layout.' },
   { id: 'editing', kind: 'prose', look: 'How the creator uses the platform\'s editing moves — punch-ins (quick push, instant cut-in, slow push, in-and-out; how close), transitions between shots, B-roll and cutaways (own footage, product close-ups, screen recordings, screenshots, stock, archive, memes), stickers and emoji, jump cuts — and on what moments of the speech each lands, and how often.',
     pitfalls: 'A switch to another camera angle is multi-cam, not a punch-in. Jump cuts are how the talk is cut, not a transition. How many per video depends on the content: describe the moments and the restraint, never a rate or an interval.' },
   { id: 'motion_graphics', kind: 'prose', look: 'Graphics that explain or emphasise: number cards, lists, comparisons, charts, arrows, circles, highlight boxes, zoomed screenshots, lower thirds, price tags — their shape language, type, colours, how they enter, hold and leave, and what in the speech brings them on. Written as a style prompt a designer could follow.',

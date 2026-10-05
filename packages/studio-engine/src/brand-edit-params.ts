@@ -47,7 +47,7 @@ export function playbookEditParams(playbook: PlaybookSnapshot): CaptionEditParam
   if (b.sound?.pauses) params.pause = { ...PAUSE_BY_MODE[b.sound.pauses] };
   if (b.sound?.lufs !== undefined) params.targetLufs = b.sound.lufs;
   if (hasText(b.editing)) params.moves = { punchIn: true, transition: true };
-  if (hasText(b.layout)) params.titles = true;
+  if (hasText(b.overlay_text)) params.titles = true;
   return params;
 }
 

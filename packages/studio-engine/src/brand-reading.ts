@@ -96,7 +96,7 @@ export function parseMoments(raw: string, lines: { index: number; startSec: numb
 // ── Step 2: reading one video
 
 const blockLines = (kinds: BlockGuide['kind'][]) => BLOCK_GUIDE.filter(item => kinds.includes(item.kind)).map(item => `- ${item.id}: ${item.look}${item.pitfalls ? ` Beware: ${item.pitfalls}` : ''}`).join('\n');
-const READ_NOTES: BlockId[] = ['layout', 'editing', 'motion_graphics', 'structure'];
+const READ_NOTES: BlockId[] = ['overlay_text', 'layout', 'editing', 'motion_graphics', 'structure'];
 
 export function readingSystemPrompt(): string {
   return `You study ONE video by a creator, as part of extracting their style. Everything you report must be visible in the images; when you cannot see it, answer "unknown" or leave it out — never guess.
@@ -119,7 +119,7 @@ ${blockLines(['prose'])}
 Return only JSON:
 {"portrait":"…","facets":{"layout":"…","camera":"…","cuttingDevice":"…","punchIn":"…","captionPresence":"…","captionStyle":"…","fontClass":"…","captionCase":"…","captionTreatment":"…","captionPosition":"…","accentRule":"…","captionAnimation":"…","emoji":"…","heldHeader":"…","hookLabel":"…","callouts":[],"brollTypes":[],"brandElements":[],"colorGrade":"…","hookStructure":"…"},
  "moments":[{"seen":["…"],"how":"…"}],
- "notes":{"layout":"…","editing":"…","motion_graphics":"…","structure":"…"},
+ "notes":{"overlay_text":"…","layout":"…","editing":"…","motion_graphics":"…","structure":"…"},
  "look":{"captionFill":"#…","captionOutline":"#…","palette":["#…"]}}`;
 }
 

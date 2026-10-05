@@ -2,8 +2,8 @@ import type { CaptionStyle } from './composition-core';
 
 /**
  * A creator's brand: one prompt made of XML blocks, produced from their own videos by the extraction
- * method (brand-method.ts) and edited by them. A few blocks are fixed — captions, logo, colours, fonts,
- * sound, intro and outro — and carry exact values the engine applies as they are. Every other block is
+ * method (brand-method.ts) and edited by them. A few blocks are fixed — captions, logo, colours, sound,
+ * intro and outro, and the overlay-text font — and carry exact values the engine applies as they are. Every other block is
  * prose for the models that edit and generate: how titles and layout look, how the creator uses the
  * platform's editing moves, what their motion graphics look like, how their videos are built, and their
  * cover. The platform's moves (punch-ins, transitions, B-roll, sound effects, motion graphics) are not
@@ -48,14 +48,16 @@ export interface BrandBlocks {
   logo?: BrandAsset & { corner: Corner; widthPct: number; opacity: number; evidence?: Evidence };
   /** Fixed: colours of the creator's own text and graphics. */
   palette?: { accent?: string; accent2?: string; text?: string; ground?: string; evidence?: Evidence };
-  /** Fixed: fonts for titles and generated elements (font ids); prose for how the faces look (and what
-   *  they are taken to be) where an id is only the closest face the platform has. */
-  fonts?: { heading?: string; body?: string; text?: string; evidence?: Evidence };
+  /** Overlay text (花字): the words the creator puts on screen besides captions — titles, labels, emphasis
+   *  words, text in graphics. Fixed: its font (the closest face the platform has; `fontLike` names the
+   *  original). Prose: how it looks and moves and when it is used, with reference stills. */
+  overlay_text?: Prose & { font?: string; fontLike?: string; references?: BrandAsset[] };
   /** Fixed: loudness and pause trimming; prose for music and sound-effect habits. */
   sound?: Prose & { lufs?: number; pauses?: 'tight' | 'moderate' | 'natural' };
   /** Fixed: the same clip before / after every video. */
   bookends?: { intro?: BrandAsset; outro?: BrandAsset; evidence?: Evidence };
-  /** Titles, labels, bands and frames on screen, with reference stills. */
+  /** How the frame is laid out: headline bands and template frames, where the speaker sits, picture in
+   *  picture, split screens. Where things are, not how the words look (that is overlay text). */
   layout?: Prose & { references?: BrandAsset[] };
   /** How the creator uses the platform's editing moves, and on what moments. */
   editing?: Prose;
@@ -68,9 +70,11 @@ export interface BrandBlocks {
   cover?: BrandCover;
 }
 export type BlockId = keyof BrandBlocks;
-export const BLOCK_IDS: readonly BlockId[] = ['portrait', 'captions', 'logo', 'palette', 'fonts', 'sound', 'bookends', 'layout', 'editing', 'motion_graphics', 'structure', 'cover'];
+export const BLOCK_IDS: readonly BlockId[] = ['portrait', 'captions', 'overlay_text', 'logo', 'palette', 'sound', 'bookends', 'layout', 'editing', 'motion_graphics', 'structure', 'cover'];
+/** Blocks earlier brands may still hold: read without complaint, never rendered. */
+const LEGACY_BLOCK_IDS = ['fonts'];
 /** Blocks whose values the engine applies as they are. */
-export const FIXED_BLOCKS: readonly BlockId[] = ['captions', 'logo', 'palette', 'fonts', 'sound', 'bookends'];
+export const FIXED_BLOCKS: readonly BlockId[] = ['captions', 'logo', 'palette', 'sound', 'bookends'];
 
 export interface BrandPlaybook {
   schema: typeof PLAYBOOK_SCHEMA;
@@ -140,9 +144,9 @@ export function renderBrandPrompt(playbook: Pick<BrandPlaybook, 'name' | 'blocks
     const c = b.captions!; const s = c.style ?? {};
     parts.push(element('captions', c.on ? { on: true, color: s.color, stroke: s.strokeColor, plate: s.bg, bold: s.bold, accent: c.accent ?? undefined, 'accent-color': s.accentColor, 'bottom-edge': s.yPct !== undefined ? `${s.yPct}% from top` : undefined } : { on: false }, c.text));
   }
+  if (want('overlay_text')) parts.push(element('overlay_text', { font: b.overlay_text!.font, like: b.overlay_text!.fontLike, references: refs(b.overlay_text!.references) }, b.overlay_text!.text));
   if (want('logo')) parts.push(element('logo', { corner: b.logo!.corner, width: `${b.logo!.widthPct}%`, opacity: b.logo!.opacity }));
   if (want('palette')) { const p = b.palette!; parts.push(element('palette', { accent: p.accent, 'accent-2': p.accent2, text: p.text, ground: p.ground })); }
-  if (want('fonts')) parts.push(element('fonts', { heading: b.fonts!.heading, body: b.fonts!.body }, b.fonts!.text));
   if (want('sound')) parts.push(element('sound', { loudness: b.sound!.lufs !== undefined ? `${b.sound!.lufs} LUFS` : undefined, pauses: b.sound!.pauses }, b.sound!.text));
   if (want('bookends')) parts.push(element('bookends', { intro: b.bookends!.intro ? `${b.bookends!.intro.durationSec ?? ''}s clip` : undefined, outro: b.bookends!.outro ? `${b.bookends!.outro.durationSec ?? ''}s clip` : undefined }));
   if (want('layout')) parts.push(element('layout', { references: refs(b.layout!.references) }, b.layout!.text));
@@ -201,7 +205,7 @@ export function validatePlaybook(value: unknown): BrandPlaybook {
   if (p.source.preview) { asset(p.source.preview, 'source.preview'); if (p.source.preview.kind !== 'image' || typeof p.source.preview.cleaned !== 'boolean') fail('source.preview', '需要图片与 cleaned'); }
   if (!isObject(p.blocks)) fail('blocks', '缺失');
   const b = p.blocks;
-  for (const key of Object.keys(b)) if (!BLOCK_IDS.includes(key as BlockId)) fail(`blocks.${key}`, '未知的块');
+  for (const key of Object.keys(b)) if (!BLOCK_IDS.includes(key as BlockId) && !LEGACY_BLOCK_IDS.includes(key)) fail(`blocks.${key}`, '未知的块');
   for (const id of ['portrait', 'editing', 'structure'] as const) if (b[id]) prose(b[id], `blocks.${id}`);
   for (const id of ['layout', 'motion_graphics'] as const) if (b[id]) { prose(b[id], `blocks.${id}`); references(b[id]!.references, `blocks.${id}.references`); }
   if (b.cover) {
@@ -223,9 +227,10 @@ export function validatePlaybook(value: unknown): BrandPlaybook {
     if (!(b.logo.opacity > 0 && b.logo.opacity <= 1)) fail('blocks.logo.opacity', '0–1');
   }
   if (b.palette) for (const key of ['accent', 'accent2', 'text', 'ground'] as const) color(b.palette[key], `blocks.palette.${key}`);
-  if (b.fonts) {
-    for (const key of ['heading', 'body'] as const) if (b.fonts[key] !== undefined && (typeof b.fonts[key] !== 'string' || b.fonts[key]!.length > 80)) fail(`blocks.fonts.${key}`, '字体 id');
-    prose(b.fonts, 'blocks.fonts');
+  if (b.overlay_text) {
+    prose(b.overlay_text, 'blocks.overlay_text');
+    for (const key of ['font', 'fontLike'] as const) if (b.overlay_text[key] !== undefined && (typeof b.overlay_text[key] !== 'string' || b.overlay_text[key]!.length > 80)) fail(`blocks.overlay_text.${key}`, '字体');
+    references(b.overlay_text.references, 'blocks.overlay_text.references');
   }
   if (b.sound) {
     prose(b.sound, 'blocks.sound');

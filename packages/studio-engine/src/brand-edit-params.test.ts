@@ -12,7 +12,7 @@ const pick = (kind: PlanPick['kind'], sentenceIndex: number, wordIndex: number, 
 
 describe('playbookEditParams', () => {
   it('runs the fixed blocks as parameters and offers the platform moves when the brand describes its editing', () => {
-    expect(playbookEditParams(playbook({ sound: { pauses: 'tight', lufs: -15 }, editing: { text: '说到价格时快推近。' }, layout: { text: '顶部常驻标题栏。' } }))).toEqual({
+    expect(playbookEditParams(playbook({ sound: { pauses: 'tight', lufs: -15 }, editing: { text: '说到价格时快推近。' }, overlay_text: { text: '顶部常驻黄字标题。' } }))).toEqual({
       pause: { minimumPauseSec: 0.25, speechPaddingSec: 0.08 },
       targetLufs: -15,
       moves: { punchIn: true, transition: true },
@@ -106,7 +106,7 @@ describe('captions workflow with brand edit parameters', () => {
   const step = (definition: ReturnType<typeof captionWorkflowDefinition>, id: string) => definition.steps.find(item => item.id === id);
 
   it('passes the pause threshold, plans and places moves after captions, writes titles, and matches loudness before rendering', () => {
-    const brand = playbook({ editing: { text: '说到价格推近。' }, layout: { text: '顶部常驻标题栏。' } });
+    const brand = playbook({ editing: { text: '说到价格推近。' }, overlay_text: { text: '顶部常驻黄字标题。' } });
     const definition = captionWorkflowDefinition(options({ pause: { minimumPauseSec: 0.25, speechPaddingSec: 0.08 }, targetLufs: -15, moves: { punchIn: true }, titles: true }, brand), { sig: 'm' });
     expect(Object.keys(step(definition, 'pauses')!.arguments)).toEqual(expect.arrayContaining(['minimumPauseSec', 'speechPaddingSec']));
     expect(definition.steps.map(item => item.id)).toEqual(['transcript', 'pauses', 'compose', 'plan', 'captions', 'editplan', 'moves', 'titles', 'texts', 'loudness', 'render']);

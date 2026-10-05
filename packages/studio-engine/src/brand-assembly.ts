@@ -63,7 +63,6 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
   const fromField = (confidence: number): Confidence => confidence >= 0.7 ? 'high' : confidence >= 0.4 ? 'medium' : 'low';
   const evidence = (videos: string[]): Evidence => ({ videos, confidence: confidenceOf(videos.length) });
   const facet = <K extends keyof VideoReading['facets']>(key: K) => majority(readings.map(reading => reading.facets[key] as VideoReading['facets'][K] | null));
-  const say = (zh: string, en: string) => parts.locale === 'zh' ? zh : en;
   const blocks: BrandBlocks = {};
   const prose = (id: keyof Synthesis['blocks']) => { const block = synthesis.blocks[id]; return block ? { text: block.text, ...(block.videos.length ? { evidence: evidence(block.videos) } : {}) } : undefined; };
 
@@ -107,15 +106,16 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
   }
   if (assets.logo && summary.logo) blocks.logo = { ...assets.logo, corner: summary.logo.corner, widthPct: Math.min(40, Math.max(4, Math.round(summary.logo.box.w * 100))), opacity: 1, evidence: { videos: summary.logo.evidence.videos, confidence: summary.logo.evidence.confidence } };
   if (Object.keys(synthesis.palette).length) blocks.palette = synthesis.palette;
-  // The fonts block is the face of the words the creator adds — titles, labels, graphics — which generated
-  // elements take: their title face, else their cover lettering. Captions keep their face in the captions
-  // block and the cover its lettering in the cover block, each said once.
+  // Overlay text (花字): the synthesis writes how it looks and moves; its font is the face read from the
+  // creator's overlay text, else their cover lettering; the stills of titles show it.
   const fonts = parts.fonts ?? {};
-  const heading = fonts.titles ?? fonts.cover;
-  if (heading) {
-    const from = fonts.titles ? '' : say('（作品里没有花字，取自封面大字）', ' (no overlay text in the videos; from the cover lettering)');
-    blocks.fonts = { heading: heading.id, text: `${heading.look}${heading.actual ? say(`，像 ${heading.actual}`, `, like ${heading.actual}`) : ''}${from}` };
-  }
+  const face = fonts.titles ?? fonts.cover;
+  const overlay = prose('overlay_text');
+  if (overlay || face || assets.layoutReferences.length) blocks.overlay_text = {
+    ...overlay,
+    ...(face ? { font: face.id, ...(face.actual ? { fontLike: face.actual } : {}) } : {}),
+    ...(assets.layoutReferences.length ? { references: assets.layoutReferences } : {}),
+  };
 
   const loudness = spec.audio.targetLufs.provenance.source === 'measured' ? Math.round(spec.audio.targetLufs.value * 2) / 2 : undefined;
   const pauses = spec.cutting.silence.provenance.source === 'measured' ? ({ aggressive: 'tight', moderate: 'moderate', natural: 'natural' } as const)[spec.cutting.silence.value.mode] : undefined;
@@ -124,7 +124,7 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
 
   if (assets.intro || assets.outro) blocks.bookends = { ...(assets.intro ? { intro: assets.intro } : {}), ...(assets.outro ? { outro: assets.outro } : {}), ...(summary.intro ?? summary.outro ? { evidence: { videos: (summary.intro ?? summary.outro)!.evidence.videos, confidence: (summary.intro ?? summary.outro)!.evidence.confidence } } : {}) };
 
-  const layout = prose('layout'); if (layout || assets.layoutReferences.length) blocks.layout = { ...layout, ...(assets.layoutReferences.length ? { references: assets.layoutReferences } : {}) };
+  const layout = prose('layout'); if (layout) blocks.layout = layout;
   const editing = prose('editing'); if (editing) blocks.editing = editing;
   const motion = prose('motion_graphics'); if (motion) blocks.motion_graphics = { ...motion, ...(assets.motionReferences.length ? { references: assets.motionReferences } : {}) };
   const structure = prose('structure'); if (structure) blocks.structure = structure;

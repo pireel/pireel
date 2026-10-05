@@ -22,8 +22,8 @@ export function playbookAppearance(playbook: PlaybookSnapshot): { palette: Recor
   if (p.accent2) palette['accent-2'] = p.accent2;
   if (p.text) palette.fg = p.text;
   if (p.ground) palette.paper = p.ground;
-  if (playbook.blocks.fonts?.heading) palette['font-head'] = playbook.blocks.fonts.heading;
-  if (playbook.blocks.fonts?.body) palette['font-body'] = playbook.blocks.fonts.body;
+  // Generated titles and graphics letter in the creator's overlay-text face.
+  if (playbook.blocks.overlay_text?.font) palette['font-head'] = playbook.blocks.overlay_text.font;
   return { palette };
 }
 

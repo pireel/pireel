@@ -70,13 +70,13 @@ describe('assemblePlaybook', () => {
     expect(assemblePlaybook(input).blocks.captions?.style?.color).toBe('#f4f4f0');
   });
 
-  it('takes the fonts read from the creator\'s text: captions render in theirs, the fonts block holds the title face only', () => {
+  it('takes the fonts read from the creator\'s text: captions render in theirs, overlay text in its own', () => {
     const playbook = assemblePlaybook({ ...parts(), fonts: { captions: { id: 'web:douyin-sans', look: '圆角黑体，粗', weight: 'bold' }, titles: { id: 'web:smiley-sans', look: '斜体窄黑体', actual: '得意黑' } } });
     expect(() => validatePlaybook(playbook)).not.toThrow();
     expect(playbook.blocks.captions?.style).toMatchObject({ font: 'web:douyin-sans', bold: true });
-    expect(playbook.blocks.fonts).toEqual({ heading: 'web:smiley-sans', text: '斜体窄黑体，像 得意黑' });
+    expect(playbook.blocks.overlay_text).toEqual({ font: 'web:smiley-sans', fontLike: '得意黑' });
     const fromCover = assemblePlaybook({ ...parts(), fonts: { cover: { id: 'web:ximaiti', look: '粗斜美术体' } } });
-    expect(fromCover.blocks.fonts).toEqual({ heading: 'web:ximaiti', text: '粗斜美术体（作品里没有花字，取自封面大字）' });
+    expect(fromCover.blocks.overlay_text).toEqual({ font: 'web:ximaiti' });
   });
 
   it('sizes and places captions from the letters measured on pixels', () => {
