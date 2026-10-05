@@ -64,7 +64,13 @@ export interface BrandPlaybook {
   version: number;
   /** The extraction method version that produced it; 'manual' for a hand-made brand. */
   method: string;
-  source: { platform: BrandPlatform; account?: string; videos: { id: string; title?: string; sourceUrl?: string; durationSec: number; coverKey?: string }[] };
+  source: {
+    platform: BrandPlatform; account?: string;
+    videos: { id: string; title?: string; sourceUrl?: string; durationSec: number; coverKey?: string }[];
+    /** A clean frame of the creator's own footage (no captions or titles) for previews; `cleaned` = its
+     *  text was removed by image editing because no frame was clean. UI only, never part of the prompt. */
+    preview?: BrandAsset & { cleaned: boolean };
+  };
   blocks: BrandBlocks;
 }
 
@@ -154,6 +160,7 @@ export function validatePlaybook(value: unknown): BrandPlaybook {
   if (!Number.isInteger(p.version) || p.version < 1) fail('version', '正整数');
   if (typeof p.method !== 'string' || !p.method) fail('method', '缺失');
   if (!isObject(p.source) || !Array.isArray(p.source.videos) || p.source.videos.length > 30) fail('source', '最多 30 条作品');
+  if (p.source.preview) { asset(p.source.preview, 'source.preview'); if (p.source.preview.kind !== 'image' || typeof p.source.preview.cleaned !== 'boolean') fail('source.preview', '需要图片与 cleaned'); }
   if (!isObject(p.blocks)) fail('blocks', '缺失');
   const b = p.blocks;
   for (const key of Object.keys(b)) if (!BLOCK_IDS.includes(key as BlockId)) fail(`blocks.${key}`, '未知的块');
