@@ -4,9 +4,9 @@ import type { BlockId } from './brand-playbook';
 /**
  * The method's judgement steps, with their contracts: a text model picks the moments of each video
  * worth a close look from its transcript; a vision model reads each video (overview, opening, ending
- * and those moments) block by block; a synthesis keeps what recurs and writes the brand's prose blocks;
- * the cover block is written apart, from the creator's covers. Readings are evidence and parse
- * leniently; the synthesis and the cover apply the evidence bar in code.
+ * and those moments) block by block; a synthesis judges what is style and writes the brand's prose
+ * blocks; the cover block is written apart, from the creator's covers. Every answer parses leniently:
+ * what is style is the model's judgement, never a count applied in code.
  */
 
 /**
@@ -178,7 +178,7 @@ export function parseVideoReading(raw: string, video: string, momentCount: numbe
 export function synthesisSystemPrompt(language: string): string {
   return `You write a creator's brand — the prompt an editor and a designer will follow to make new videos exactly in this creator's style — from readings of several of their videos and measurements of all of them.
 
-Keep only what recurs: a habit must be seen in at least two videos, the same way. Something seen in one video, or the topic of a video, is not style.
+Style is what this creator would do again in their next video, whatever its topic; you judge what is style. A choice made for one video's topic, or once by chance, is not style. Write what depends on the topic as a role ("a person the story is about", "the product"), never as the particular person or thing in these videos.
 How often something happens in one video depends on its content: describe the moments a habit serves and how much restraint the creator shows, never a rate, an interval or a count.
 Describe habits as tendencies the readings support ("mostly", "rarely", "on numbers"). Five videos never prove a prohibition: when a technique was not seen, say it was not seen in these videos; never forbid it.
 Measured facts come from every frame and the soundtrack; never contradict them.
@@ -200,22 +200,21 @@ export type SynthesisBlockId = (typeof PROSE_BLOCKS)[number] | 'sound';
 export interface Synthesis {
   blocks: Partial<Record<SynthesisBlockId, { text: string; videos: string[] }>>;
   palette: { accent?: string; accent2?: string; text?: string; ground?: string };
-  /** Blocks the evidence bar removed, with why — kept visible, never used. */
+  /** Blocks the answer gave that are not blocks or have no text, with why — kept visible, never used. */
   setAside: string[];
   /** Blocks kept without any video cited for them (no evidence to show). */
   uncited: string[];
 }
 
 /**
- * The synthesis checked against the method. A block may come as text or as {text, videos}. A block the
- * answer itself places in fewer than two real videos (with three or more) is set aside with the reason;
- * a block with no videos cited is kept and listed as uncited; unknown block ids are set aside. Only an
- * answer that is not JSON, or has no portrait, fails.
+ * The synthesis checked against the contract. A block may come as text or as {text, videos}; what is
+ * style is the model's judgement, so the videos it cites are evidence to show, never a bar. A block with
+ * no videos cited is kept and listed as uncited; unknown or empty blocks are set aside. Only an answer
+ * that is not JSON, or has no portrait, fails.
  */
 export function parseSynthesis(raw: string, videos: { id: string }[]): Synthesis {
   const value = json(raw);
   const ids = new Set(videos.map(video => video.id));
-  const need = videos.length >= 3 ? 2 : 1;
   const setAside: string[] = []; const uncited: string[] = [];
   const allowed = [...PROSE_BLOCKS, 'sound'] as SynthesisBlockId[];
   const rawBlocks = (value.blocks ?? {}) as Record<string, unknown>;
@@ -227,7 +226,6 @@ export function parseSynthesis(raw: string, videos: { id: string }[]): Synthesis
     if (!words) { setAside.push(`${id}: no text`); continue; }
     const cited = Array.isArray(item.videos) ? item.videos : [];
     const seen = [...new Set(cited.filter((video): video is string => ids.has(video as string)))];
-    if (id !== 'portrait' && cited.length && seen.length < need) { setAside.push(`${id}: seen in ${seen.length} video(s)`); continue; }
     if (id !== 'portrait' && !cited.length) uncited.push(id);
     blocks[id as SynthesisBlockId] = { text: words, videos: seen };
   }
@@ -248,7 +246,7 @@ headline — how the words on the cover are written, for a writer who will word 
 
 design — how the still and the headline become the cover: crop, where the person sits and how large; what happens to the background (kept, darkened, blurred, replaced, a colour, a scene from the topic); how the headline is lettered (type character, weight, colours as #RRGGBB, stroke, shadow or plate, size, position); other marks (logo, arrows, circles, emoji, borders, series or episode labels); the finish (contrast, saturation, glow). When the covers are plain stills with nothing added, say so: that is the style.
 
-Keep only what recurs: with three or more covers, a habit must hold in at least two. When the covers follow two styles, describe the main one and name the other in one sentence.
+You judge what is the creator's cover style and what belongs to one cover's topic; write what depends on the topic as a role, never as the particular person or thing. When the covers follow two styles, describe the main one and name the other in one sentence.
 Write as instructions to a designer who has never seen these covers, concrete enough to recreate them, without naming the people in them.
 Write every part in ${language}.
 Return only JSON: {"frame":"…","headline":"…","design":"…","covers":[<indices of the covers the design holds for, from 0>]}`;
@@ -256,15 +254,14 @@ Return only JSON: {"frame":"…","headline":"…","design":"…","covers":[<indi
 
 export interface CoverReading { frame: string; headline?: string; design: string; covers: number[] }
 
-/** The cover prompt checked against the evidence bar: with three or more covers it must hold in two;
- *  `null` when it does not (the brand then has no cover prompt, only its references). */
-export function parseCover(raw: string, coverCount: number): CoverReading | null {
+/** The cover prompt as the model judged it; the covers it cites are evidence to show and the order
+ *  references are listed in. */
+export function parseCover(raw: string, coverCount: number): CoverReading {
   const value = json(raw);
   const frame = text(value.frame, 'frame', 2000);
   const design = text(value.design, 'design', 3000);
   const headline = optionalText(value.headline, 2000);
   const covers = [...new Set((Array.isArray(value.covers) ? value.covers : []).filter((at): at is number => Number.isInteger(at) && (at as number) >= 0 && (at as number) < coverCount))].sort((a, b) => a - b);
-  if (coverCount >= 3 && covers.length < 2) return null;
   return { frame, ...(headline ? { headline } : {}), design, covers };
 }
 

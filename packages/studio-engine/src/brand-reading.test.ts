@@ -59,10 +59,10 @@ describe('parseSynthesis', () => {
     expect(parsed.setAside).toEqual([]);
   });
 
-  it('sets aside blocks the answer places in one video, empty or unknown, with the reason', () => {
+  it('keeps a block seen in one video (style is judged, not counted); sets aside empty or unknown blocks', () => {
     const parsed = parseSynthesis(synthesis({ layout: { text: '顶部标题栏', videos: ['v1'] }, structure: { text: '', videos: ['v1', 'v2'] }, cover: { text: '人物在右', videos: ['v1', 'v2'] }, moves: { text: 'x', videos: ['v1', 'v2'] } }), videos);
-    expect(parsed.blocks.layout).toBeUndefined();
-    expect(parsed.setAside).toEqual(['layout: seen in 1 video(s)', 'structure: no text', 'cover: not a block', 'moves: not a block']);
+    expect(parsed.blocks.layout).toEqual({ text: '顶部标题栏', videos: ['v1'] });
+    expect(parsed.setAside).toEqual(['structure: no text', 'cover: not a block', 'moves: not a block']);
   });
 
   it('takes a block written as plain text, keeping it as uncited', () => {
@@ -87,9 +87,9 @@ describe('cover', () => {
     expect(readingSystemPrompt()).not.toContain('"cover"');
   });
 
-  it('keeps a cover prompt that holds in two of three or more covers', () => {
+  it('keeps the cover prompt as judged, with the covers it cites', () => {
     expect(parseCover(JSON.stringify({ frame: '惊讶表情', design: '人物在右', covers: [2, 0, 0, 9] }), 3)).toEqual({ frame: '惊讶表情', design: '人物在右', covers: [0, 2] });
-    expect(parseCover(JSON.stringify({ frame: '惊讶表情', design: '人物在右', covers: [1] }), 3)).toBeNull();
+    expect(parseCover(JSON.stringify({ frame: '惊讶表情', design: '人物在右', covers: [1] }), 3)).toEqual({ frame: '惊讶表情', design: '人物在右', covers: [1] });
     expect(parseCover(JSON.stringify({ frame: '惊讶表情', design: '人物在右', covers: [] }), 1)).toEqual({ frame: '惊讶表情', design: '人物在右', covers: [] });
     expect(parseCover(JSON.stringify({ frame: '惊讶表情', headline: '主标题四到六字，带问号', design: '人物在右', covers: [0, 1] }), 2)?.headline).toBe('主标题四到六字，带问号');
     expect(() => parseCover(JSON.stringify({ design: '人物在右' }), 2)).toThrow(/frame/);
