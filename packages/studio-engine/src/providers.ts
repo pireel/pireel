@@ -184,12 +184,12 @@ export interface StudioProviders {
   dubbingScript?: (turns: { text: string; seconds: number }[][], targetLanguage: string, options?: StudioOperationOptions) => Promise<string[][]>;
   /** Caption auto-highlight picker (hosted-LLM feature; absent = the transcript hides its "Auto highlight" button — BYO agents highlight via set_captions highlights). Returns exact phrases per row. */
   autoHighlight?: (rows: { index: number; text: string }[], options?: StudioOperationOptions) => Promise<{ index: number; text: string }[]>;
-  /** Writes this video's words for the brand's text bands (held header, opening label), in the
-   *  creator's manner (hosted LLM; absent = one-click edits leave the bands out). */
-  brandCopy?: (input: { transcript: string; header?: { maxChars: number; examples: string[] }; hookLabel?: { maxChars: number } }, options?: StudioOperationOptions) => Promise<{ header?: string; hookLabel?: string }>;
-  /** Plans where a one-click edit places the creator's moves (punch-ins, transition accents), following
-   *  the playbook's triggers within each move's cap (hosted LLM). Picks are phrases of the given rows. */
-  editPlan?: (input: { rows: { index: number; text: string; startSec: number }[]; durationSec: number; guide: string; moves: { kind: 'punch_in' | 'transition'; variants: string[]; max: number }[] }, options?: StudioOperationOptions) => Promise<{ picks: { kind: 'punch_in' | 'transition'; index: number; text: string; variant: string }[] }>;
+  /** Writes a one-click edit's titles from the brand's layout prompt: words, timing, place and look, for
+   *  this video's lines (hosted LLM). */
+  brandTitles?: (input: { rows: { index: number; text: string; startSec: number }[]; durationSec: number; guide: string; canvas: { width: number; height: number } }, options?: StudioOperationOptions) => Promise<{ titles: import('./brand-edit-params').PlannedTitle[] }>;
+  /** Plans where a one-click edit places the platform's moves (punch-ins, transitions), following the brand's
+   *  prompt within the platform ceiling (hosted LLM). Picks are phrases of the given rows. */
+  editPlan?: (input: { rows: { index: number; text: string; startSec: number }[]; durationSec: number; guide: string; moves: { kind: 'punch_in' | 'transition'; variants: string[]; max: number }[] }, options?: StudioOperationOptions) => Promise<{ picks: { kind: 'punch_in' | 'transition'; index: number; text: string; variant: string; scale?: number }[] }>;
   /** Drafts a generation prompt for "add over this transcript selection" (hosted LLM; absent = the add popover offers library picks only). */
   draftInsertPrompt?: (req: { kind: 'mg' | 'sticker' | 'image' | 'video' | 'sfx'; text: string; before: string; after: string; durationSec: number }) => Promise<string>;
   /** Fill a component's text slots from the narration around its time window (hosted-LLM feature;

@@ -1,11 +1,11 @@
-import { LIVE_DIMENSIONS, NOT_BRAND } from './brand-method';
-import { MOVE_KINDS, MOVE_VARIANTS, type Frequency, type MoveKind } from './brand-playbook';
+import { BLOCK_GUIDE, NOT_BRAND, PROSE_BLOCKS, WINDOWS } from './brand-method';
+import type { BlockId } from './brand-playbook';
 
 /**
- * A's two judgement steps, with their contracts: a vision model reads each video (what it can see
- * that measurement cannot), then a synthesis keeps only what recurs and writes the playbook's
- * judged sections. Both prompts are built from the method's dimension table; the outputs are parsed
- * strictly — anything off-contract fails with the field, never patched.
+ * The method's three judgement steps, with their contracts: a text model picks the moments of each
+ * video worth a close look from its transcript; a vision model reads each video (overview, opening,
+ * ending and those moments) block by block; a synthesis keeps what recurs and writes the brand's prose
+ * blocks. Readings are evidence and parse leniently; the synthesis applies the evidence bar in code.
  */
 
 /**
@@ -68,65 +68,58 @@ const FACET_GUIDE = `How to tell captions from other text: CAPTIONS are burned-i
 - colorGrade: natural | warm | cool | high_contrast | muted | bright_high_key.
 - hookStructure (first 3 s): cold_statement | question | text_hook_card | broll_montage | result_first | in_media_res | source_clip_first.`;
 
-/** The moves A can find from frames, with what to look for and the variant names to use. */
-const liveMoves = () => LIVE_DIMENSIONS.filter(item => item.section === 'moves' && item.move).map(item => item.move!);
-function moveGuide(): string {
-  return LIVE_DIMENSIONS.filter(item => item.section === 'moves' && item.move).map(item =>
-    `- ${item.move}: ${item.look}${item.pitfalls ? ` Beware: ${item.pitfalls}` : ''} Variants: ${MOVE_VARIANTS[item.move!].join(' | ')}.`).join('\n');
+// ── Step 1: moments worth a close look, from the transcript
+
+export function momentsSystemPrompt(): string {
+  return `You read the transcript of a short talking-head video and pick the moments where an editor in this genre most likely added something on screen or in the cut: a motion graphic (a number, a list, a comparison, a chart, a named product, place or person), B-roll or a cutaway, a punch-in on a punchline or key claim, or a transition at a turn to a new point.
+Each line is "<line index> @<start seconds>s: <text>". Pick up to ${WINDOWS.moments} moments, spread over the video, never in its first ${WINDOWS.openingSec} seconds or last ${WINDOWS.closingSec} seconds (those are looked at anyway). Prefer moments the words make likely; fewer is fine.
+Return only JSON: {"moments":[{"line":<line index>,"why":"<a few words>"}]}`;
 }
 
+export interface Moment { startSec: number; endSec: number; why: string }
+
+/** Moments as windows around the picked lines' starts; picks outside the video's middle are dropped. */
+export function parseMoments(raw: string, lines: { index: number; startSec: number }[], durationSec: number): Moment[] {
+  const value = json(raw);
+  const middle = (t: number) => t >= WINDOWS.openingSec && t <= durationSec - WINDOWS.closingSec;
+  const picked = (Array.isArray(value.moments) ? value.moments : []).flatMap(entry => {
+    const item = (entry ?? {}) as Record<string, unknown>;
+    const line = lines.find(row => row.index === item.line);
+    if (!line || !middle(line.startSec)) return [];
+    const startSec = Math.max(0, line.startSec - 0.5);
+    return [{ startSec, endSec: Math.min(durationSec, startSec + WINDOWS.momentSec), why: optionalText(item.why, 120) ?? '' }];
+  });
+  return picked.sort((a, b) => a.startSec - b.startSec).filter((moment, at, all) => at === 0 || moment.startSec >= all[at - 1]!.endSec).slice(0, WINDOWS.moments);
+}
+
+// ── Step 2: reading one video
+
+const blockLines = (kinds: ('fixed' | 'prose')[]) => BLOCK_GUIDE.filter(item => kinds.includes(item.kind)).map(item => `- ${item.id}: ${item.look}${item.pitfalls ? ` Beware: ${item.pitfalls}` : ''}`).join('\n');
+const READ_NOTES: BlockId[] = ['layout', 'editing', 'motion_graphics', 'structure', 'cover'];
+
 export function readingSystemPrompt(): string {
-  return `You study ONE video by a creator, as part of extracting their editing style. Everything you report must be visible in the images; when you cannot see it, answer "unknown" or leave the list empty — never guess.
+  return `You study ONE video by a creator, as part of extracting their style. Everything you report must be visible in the images; when you cannot see it, answer "unknown" or leave it out — never guess.
 
 What you get:
-- grids: frames every 2 s, with the time and the caption read at that moment under each cell.
-- caption-change strips: 10 frames over 2 s around a caption change.
-- cut strips: 9 frames 0.1 s apart around one cut.
+- an overview grid: frames spread over the whole video, the time and the caption read at that moment under each cell;
+- an opening strip and an ending strip: frames close together over the first and last seconds;
+- moment strips: frames close together around moments the speech made likely to carry a graphic, a cutaway, a punch-in or a transition, each with the words spoken there;
 - measured facts, including rough automatic guesses (layoutGuess, cutDevice, hostOnScreen) that often fail on composites and multi-camera footage: confirm or correct them from the frames.
 
 Report:
 1. portrait — one English sentence on this video's look and pace.
 2. facets — one value per key from the options, or "unknown".
 ${FACET_GUIDE}
-3. moves — each of these moves you can see in this video (leave out the ones you cannot):
-${moveGuide()}
-   For each: the variants seen (only names from its list), the seconds where it happens, and the kind of moment it lands on, in English (e.g. "the punchline", "naming a product", "a new topic", "a number"). Jump cuts and plain cuts are how the video is cut (the cuttingDevice facet), not a move.
-4. opening and closing — how this video opens and how it ends, in English; quote a sign-off line when it shows as text.
-5. look — captionFill and captionOutline (#RRGGBB, when captions show), palette (up to 4 #RRGGBB colours the creator's own text and graphics use, not the set or clothes), elements (look and motion of titles, cards and graphics the creator adds, in English), cover (composition and lettering, when a cover image is given).
+3. moments — for each moment strip, in order: what happens on screen there (any of: motion_graphic, broll, punch_in, transition, sticker, nothing) and a short description of how it looks and moves.
+4. notes — what this video shows for each block, in English, concrete enough to recreate (positions, colours as #RRGGBB, type character, motion, timing, real words of titles); leave a block out when the video shows nothing for it:
+${blockLines(['prose'])}
+5. look — captionFill and captionOutline (#RRGGBB, when captions show), palette (up to 4 #RRGGBB colours of the creator's own text and graphics).
 
 Return only JSON:
 {"portrait":"…","facets":{"layout":"…","camera":"…","cuttingDevice":"…","punchIn":"…","captionPresence":"…","captionStyle":"…","fontClass":"…","captionCase":"…","captionTreatment":"…","captionPosition":"…","accentRule":"…","captionAnimation":"…","emoji":"…","heldHeader":"…","hookLabel":"…","callouts":[],"brollTypes":[],"brandElements":[],"colorGrade":"…","hookStructure":"…"},
- "moves":[{"kind":"…","variants":["…"],"times":[<seconds>],"on":"…"}],
- "opening":"…","closing":"…",
- "look":{"captionFill":"#…","captionOutline":"#…","palette":["#…"],"elements":"…","cover":"…"}}`;
-}
-
-export function synthesisSystemPrompt(language: string): string {
-  const structure = LIVE_DIMENSIONS.filter(item => item.section === 'structure' || item.section === 'generation').map(item => `- ${item.id}: ${item.look}${item.pitfalls ? ` ${item.pitfalls}` : ''}`).join('\n');
-  return `You write a creator's editing playbook from readings of several of their videos and measurements of all of them. An editor will cut new videos from this playbook the way this creator does.
-
-Keep only what recurs: a move, rule or habit must be seen in at least two videos, the same way. Something seen in one video, or the topic of a video, is not style.
-How often a move happens in one video depends on that video's content. Give each move a frequency level — rare (a few times in a whole video), moderate (about once or twice a minute), frequent (several times a minute) — and its trigger: the kind of moment it lands on. Never an interval or a count.
-Measured facts come from every frame and the soundtrack; never contradict them.
-Never put these in the playbook: ${NOT_BRAND.join('; ')}.
-
-Moves — only these kinds, with these variant names:
-${moveGuide()}
-Structure and generated material:
-${structure}
-
-Write "text" in ${language} for the creator to read, and "en" as an English instruction an editor can follow. The portrait is two to four sentences; every other entry is one sentence.
-Return only JSON:
-{"portrait":{"text":"…","en":"…"},
- "moves":[{"kind":"…","variants":["…"],"frequency":"rare|moderate|frequent","trigger":{"text":"…","en":"…"},"videos":["<video ids>"],"evidence":[{"video":"<id>","sec":<seconds>}]}],
- "opening":{"text":"…","en":"…","videos":["…"]} or null,
- "closing":{"text":"…","en":"…","videos":["…"]} or null,
- "structure":[{"text":"…","en":"…","videos":["…"]}],
- "palette":{"accent":"#…","accent2":"#…","text":"#…","ground":"#…"} (each optional),
- "cover":{"layout":{"text":"…","en":"…"},"lettering":{"text":"…","en":"…"}} or null,
- "headlines":{"text":"…","en":"…"} or null,
- "elements":[{"text":"…","en":"…","videos":["…"]}]}
-At most one entry per move kind, each with at least one variant from its list (leave a move out when its form is unclear); at most 8 structure rules and 6 element rules.`;
+ "moments":[{"seen":["…"],"how":"…"}],
+ "notes":{"layout":"…","editing":"…","motion_graphics":"…","structure":"…","cover":"…"},
+ "look":{"captionFill":"#…","captionOutline":"#…","palette":["#…"]}}`;
 }
 
 // ── Parsing
@@ -137,126 +130,106 @@ function json(raw: string): Record<string, unknown> {
 }
 const HEX = /^#[0-9a-f]{6}$/i;
 const text = (value: unknown, path: string, max = 600) => typeof value === 'string' && value.trim() && value.length <= max ? value.trim() : fail(path, value);
-const optionalText = (value: unknown, max = 600) => typeof value === 'string' && value.trim() && value.length <= max ? value.trim() : undefined;
+const optionalText = (value: unknown, max = 1200) => typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : undefined;
 const hex = (value: unknown) => typeof value === 'string' && HEX.test(value) ? value.toLowerCase() : undefined;
-const list = (value: unknown, path: string) => Array.isArray(value) ? value : value == null ? [] : fail(path, value);
+
+export const SEEN = ['motion_graphic', 'broll', 'punch_in', 'transition', 'sticker', 'nothing'] as const;
+export type Seen = typeof SEEN[number];
 
 export interface VideoReading {
   video: string;
   portrait: string;
   facets: VideoStyleFacets;
-  moves: { kind: MoveKind; variants: string[]; times: number[]; on?: string }[];
-  opening?: string; closing?: string;
-  look: { captionFill?: string; captionOutline?: string; palette: string[]; elements?: string; cover?: string };
-  /** What the reading named outside the method's vocabulary ("kind" or "kind:variant"), kept visible, not used. */
+  /** Per moment strip, in the order given. */
+  moments: { seen: Seen[]; how?: string }[];
+  notes: Partial<Record<BlockId, string>>;
+  look: { captionFill?: string; captionOutline?: string; palette: string[] };
+  /** Names the reading used outside the vocabulary, kept visible, not used. */
   unread?: string[];
 }
 
 /** A reading is evidence, not the contract: names outside the vocabulary are set aside (listed in
- *  `unread`), missing or malformed parts are left out, and only an answer that is not JSON fails. The
- *  synthesis applies the method's evidence bar. */
-export function parseVideoReading(raw: string, video: string, durationSec: number): VideoReading {
+ *  `unread`), missing or malformed parts are left out, and only an answer that is not JSON fails. */
+export function parseVideoReading(raw: string, video: string, momentCount: number): VideoReading {
   const value = json(raw);
-  const live = liveMoves();
   const unread: string[] = [];
-  const moves = (Array.isArray(value.moves) ? value.moves : []).flatMap(entry => {
-    const move = (entry ?? {}) as Record<string, unknown>;
-    const kind = move.kind as MoveKind;
-    if (!live.includes(kind)) { unread.push(String(move.kind)); return []; }
-    const variants = (Array.isArray(move.variants) ? move.variants : []).flatMap(variant => {
-      if (MOVE_VARIANTS[kind].includes(variant as string)) return [variant as string];
-      unread.push(`${kind}:${String(variant)}`); return [];
-    });
-    const times = (Array.isArray(move.times) ? move.times : []).flatMap(t => typeof t === 'number' && t >= 0 && t <= durationSec + 0.5 ? [Math.round(t * 10) / 10] : []);
-    const on = optionalText(move.on, 300);
-    return [{ kind, variants: [...new Set(variants)], times, ...(on ? { on } : {}) }];
+  const moments = (Array.isArray(value.moments) ? value.moments : []).slice(0, momentCount).map(entry => {
+    const item = (entry ?? {}) as Record<string, unknown>;
+    const seen = (Array.isArray(item.seen) ? item.seen : []).flatMap(name => { if (SEEN.includes(name as Seen)) return [name as Seen]; unread.push(String(name)); return []; });
+    const how = optionalText(item.how, 400);
+    return { seen: [...new Set(seen)], ...(how ? { how } : {}) };
   });
+  const rawNotes = (value.notes ?? {}) as Record<string, unknown>;
+  const notes = Object.fromEntries(READ_NOTES.flatMap(id => { const note = optionalText(rawNotes[id]); return note ? [[id, note]] : []; })) as VideoReading['notes'];
   const look = (value.look ?? {}) as Record<string, unknown>;
   return {
-    video, portrait: optionalText(value.portrait) ?? '', facets: parseStyleFacets(value.facets), moves,
-    ...(optionalText(value.opening) ? { opening: optionalText(value.opening) } : {}), ...(optionalText(value.closing) ? { closing: optionalText(value.closing) } : {}),
+    video, portrait: optionalText(value.portrait, 600) ?? '', facets: parseStyleFacets(value.facets), moments, notes,
     look: {
       ...(hex(look.captionFill) ? { captionFill: hex(look.captionFill) } : {}), ...(hex(look.captionOutline) ? { captionOutline: hex(look.captionOutline) } : {}),
       palette: (Array.isArray(look.palette) ? look.palette : []).flatMap(item => hex(item) ? [hex(item)!] : []).slice(0, 4),
-      ...(optionalText(look.elements) ? { elements: optionalText(look.elements) } : {}), ...(optionalText(look.cover) ? { cover: optionalText(look.cover) } : {}),
     },
     ...(unread.length ? { unread } : {}),
   };
 }
 
-interface Said { text: string; en: string }
+// ── Step 3: synthesis
+
+export function synthesisSystemPrompt(language: string): string {
+  return `You write a creator's brand — the prompt an editor and a designer will follow to make new videos exactly in this creator's style — from readings of several of their videos and measurements of all of them.
+
+Keep only what recurs: a habit must be seen in at least two videos, the same way. Something seen in one video, or the topic of a video, is not style.
+How often something happens in one video depends on its content: describe the moments a habit serves and how much restraint the creator shows, never a rate, an interval or a count.
+Measured facts come from every frame and the soundtrack; never contradict them.
+Never put these in the brand: ${NOT_BRAND.join('; ')}.
+The platform can punch in, transition, cut to B-roll, add stickers, sound effects and motion graphics for every brand; a block says how THIS creator uses them, not whether they exist.
+
+Blocks to write (each as prose a model can follow, concrete: positions, colours as #RRGGBB, type character, motion, timing, real examples):
+${blockLines(['prose'])}
+- sound: only what frames show about music or sound effects; leave out when nothing does.
+
+Write every block in ${language}. A block the videos give no recurring evidence for is left out.
+Return only JSON:
+{"blocks":{"<block id>":{"text":"…","videos":["<video ids where it holds>"]}},
+ "palette":{"accent":"#…","accent2":"#…","text":"#…","ground":"#…"} (each optional)}
+Block ids, used exactly as written: ${[...PROSE_BLOCKS, 'sound'].join(', ')}. The portrait is two to four sentences; other blocks as long as they need, without repeating each other.`;
+}
+
+export type SynthesisBlockId = (typeof PROSE_BLOCKS)[number] | 'sound';
 export interface Synthesis {
-  portrait: Said;
-  moves: { kind: MoveKind; variants: string[]; frequency: Frequency; trigger: Said; videos: string[]; evidence: { video: string; sec: number }[] }[];
-  opening: (Said & { videos: string[] }) | null;
-  closing: (Said & { videos: string[] }) | null;
-  structure: (Said & { videos: string[] })[];
+  blocks: Partial<Record<SynthesisBlockId, { text: string; videos: string[] }>>;
   palette: { accent?: string; accent2?: string; text?: string; ground?: string };
-  cover: { layout: Said; lettering: Said } | null;
-  headlines: Said | null;
-  elements: (Said & { videos: string[] })[];
-  /** Entries the method's evidence bar removed, with why — kept visible, never used. */
+  /** Blocks the evidence bar removed, with why — kept visible, never used. */
   setAside: string[];
+  /** Blocks kept without any video cited for them (no evidence to show). */
+  uncited: string[];
 }
 
 /**
- * The synthesis checked against the method. The evidence bar is applied here by code, not trusted to the
- * model: an entry that cites unknown videos only, holds in fewer than two videos (with three or more),
- * names no form from its move's list or gives no level is set aside with the reason; cited times outside
- * a video are dropped. Only an answer that is not the contract at all (no JSON, no portrait) fails.
+ * The synthesis checked against the method. A block may come as text or as {text, videos}. A block the
+ * answer itself places in fewer than two real videos (with three or more) is set aside with the reason;
+ * a block with no videos cited is kept and listed as uncited; unknown block ids are set aside. Only an
+ * answer that is not JSON, or has no portrait, fails.
  */
-export function parseSynthesis(raw: string, videos: { id: string; durationSec: number }[]): Synthesis {
+export function parseSynthesis(raw: string, videos: { id: string }[]): Synthesis {
   const value = json(raw);
   const ids = new Set(videos.map(video => video.id));
   const need = videos.length >= 3 ? 2 : 1;
-  const setAside: string[] = [];
-  const said = (entry: unknown, path: string, max = 600): Said => { const item = (entry ?? {}) as Record<string, unknown>; return { text: text(item.text, `${path}.text`, max), en: text(item.en, `${path}.en`, max) }; };
-  const saidOrNull = (entry: unknown, path: string): Said | null => { try { return said(entry, path); } catch { setAside.push(`${path}: no text`); return null; } };
-  /** The real videos an entry cites, or null (set aside) when fewer than the bar. */
-  const cited = (entry: unknown, path: string): string[] | null => {
-    const raw = (entry as Record<string, unknown>)?.videos;
-    const seen = [...new Set((Array.isArray(raw) ? raw : []).filter((id): id is string => ids.has(id as string)))];
-    if (seen.length < need) { setAside.push(`${path}: seen in ${seen.length} video(s)`); return null; }
-    return seen;
-  };
-  const live = liveMoves();
-  const kinds = new Set<string>();
-  const moves = list(value.moves, 'moves').flatMap((entry, index) => {
-    const move = (entry ?? {}) as Record<string, unknown>; const path = `moves.${index}(${String(move.kind)})`;
-    const kind = move.kind as MoveKind;
-    if (!live.includes(kind) || kinds.has(kind)) { setAside.push(`${path}: not a move the method reads, or repeated`); return []; }
-    const variants = [...new Set((Array.isArray(move.variants) ? move.variants : []).filter(variant => MOVE_VARIANTS[kind].includes(variant as string)) as string[])];
-    if (!variants.length) { setAside.push(`${path}: no form from its list`); return []; }
-    if (!['rare', 'moderate', 'frequent'].includes(move.frequency as string)) { setAside.push(`${path}: no frequency level`); return []; }
-    const trigger = saidOrNull(move.trigger, `${path}.trigger`);
-    const seen = cited(move, path);
-    if (!trigger || !seen) return [];
-    kinds.add(kind);
-    const evidence = (Array.isArray(move.evidence) ? move.evidence : []).flatMap(ref => {
-      const item = (ref ?? {}) as Record<string, unknown>; const video = videos.find(v => v.id === item.video);
-      return video && typeof item.sec === 'number' && item.sec >= 0 && item.sec <= video.durationSec + 0.5 ? [{ video: video.id, sec: Math.round(item.sec * 10) / 10 }] : [];
-    });
-    return [{ kind, variants, frequency: move.frequency as Frequency, trigger, videos: seen, evidence }];
-  });
-  const rule = (entry: unknown, path: string) => {
-    if (entry == null) return null;
-    const words = saidOrNull(entry, path); const seen = cited(entry, path);
-    return words && seen ? { ...words, videos: seen } : null;
-  };
-  const rules = (entries: unknown, path: string, max: number) => list(entries, path).slice(0, max).flatMap((entry, index) => { const item = rule(entry, `${path}.${index}`); return item ? [item] : []; });
+  const setAside: string[] = []; const uncited: string[] = [];
+  const allowed = [...PROSE_BLOCKS, 'sound'] as SynthesisBlockId[];
+  const rawBlocks = (value.blocks ?? {}) as Record<string, unknown>;
+  const blocks: Synthesis['blocks'] = {};
+  for (const [id, entry] of Object.entries(rawBlocks)) {
+    if (!allowed.includes(id as SynthesisBlockId)) { setAside.push(`${id}: not a block`); continue; }
+    const item = (typeof entry === 'string' ? { text: entry } : entry ?? {}) as Record<string, unknown>;
+    const words = optionalText(item.text, 4000);
+    if (!words) { setAside.push(`${id}: no text`); continue; }
+    const cited = Array.isArray(item.videos) ? item.videos : [];
+    const seen = [...new Set(cited.filter((video): video is string => ids.has(video as string)))];
+    if (id !== 'portrait' && cited.length && seen.length < need) { setAside.push(`${id}: seen in ${seen.length} video(s)`); continue; }
+    if (id !== 'portrait' && !cited.length) uncited.push(id);
+    blocks[id as SynthesisBlockId] = { text: words, videos: seen };
+  }
+  if (!blocks.portrait) text(undefined, 'blocks.portrait');
   const palette = (value.palette ?? {}) as Record<string, unknown>;
-  const cover = value.cover as Record<string, unknown> | null | undefined;
-  const coverLayout = cover ? saidOrNull(cover.layout, 'cover.layout') : null; const coverLettering = cover ? saidOrNull(cover.lettering, 'cover.lettering') : null;
-  return {
-    portrait: said(value.portrait, 'portrait', 1500), moves,
-    opening: rule(value.opening, 'opening'), closing: rule(value.closing, 'closing'),
-    structure: rules(value.structure, 'structure', 8),
-    palette: Object.fromEntries((['accent', 'accent2', 'text', 'ground'] as const).flatMap(key => hex(palette[key]) ? [[key, hex(palette[key])]] : [])),
-    cover: coverLayout && coverLettering ? { layout: coverLayout, lettering: coverLettering } : null,
-    headlines: value.headlines ? saidOrNull(value.headlines, 'headlines') : null,
-    elements: rules(value.elements, 'elements', 6),
-    setAside,
-  };
+  return { blocks, palette: Object.fromEntries((['accent', 'accent2', 'text', 'ground'] as const).flatMap(key => hex(palette[key]) ? [[key, hex(palette[key])]] : [])), setAside, uncited };
 }
-
-export { MOVE_KINDS };

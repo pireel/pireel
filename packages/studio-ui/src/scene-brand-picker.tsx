@@ -14,7 +14,7 @@ export function withSceneBrand(options: CaptionTaskOptions, playbook: BrandPlayb
   if (!playbook) { const { brand: _brand, edit: _edit, ...rest } = options; return rest; }
   const brand = playbookSnapshot(playbook);
   const next = { ...options, brand, caption: playbookCaptionStyle(brand) };
-  return options.oneClick ? { ...next, edit: playbookEditParams(brand), shortenPauses: brand.fixed.pauses?.mode !== 'natural', highlights: playbookHighlightsKeywords(brand) } : next;
+  return options.oneClick ? { ...next, edit: playbookEditParams(brand), shortenPauses: brand.blocks.sound?.pauses !== 'natural', highlights: playbookHighlightsKeywords(brand) } : next;
 }
 
 /** Picks one of the user's brands for this scene. The scene keeps a copy taken now, so later edits to
@@ -49,7 +49,7 @@ export function SceneBrandPicker({ options, locale, disabled, onChange }: {
       onChange(options => withSceneBrand(options, kit));
     }} />
     {error ? <p role="alert" className="text-ink-3 mt-2 text-xs">{say('品牌列表加载失败：', 'Could not load brands: ')}{error}</p>
-      : current ? <p className="text-ink-3 mt-2 text-xs">{say('使用选择时的品牌版本：字幕、配色', 'Uses the brand as it was when picked: captions, colors')}{current.fixed.logo ? say('、Logo', ', logo') : ''}{current.fixed.intro || current.fixed.outro ? say('、片头片尾', ', intro/outro') : ''}{say('。', '.')}</p>
+      : current ? <p className="text-ink-3 mt-2 text-xs">{say('使用选择时的品牌版本：字幕、配色', 'Uses the brand as it was when picked: captions, colors')}{current.blocks.logo ? say('、Logo', ', logo') : ''}{current.blocks.bookends ? say('、片头片尾', ', intro/outro') : ''}{say('。', '.')}</p>
       : brands?.length === 0 ? <p className="text-ink-3 mt-2 text-xs">{say('还没有品牌，可在首页「我的品牌」创建。', 'No brands yet — create one under My brand on the Studio home.')}</p> : null}
   </div>;
 }

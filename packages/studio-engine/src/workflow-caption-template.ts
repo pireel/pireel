@@ -4,6 +4,7 @@ import type { CaptionTaskOptions } from './caption-task';
 import { workflowJson } from './workflow-artifacts';
 import { playbookHasMedia } from './brand-media';
 import { playbookEditGuide } from './brand-edit-params';
+import { renderBrandPrompt } from './brand-playbook';
 export const sceneCapability = (id: string, inputs: string[], outputs: string[], paid = false): WorkflowCapability => contractedCapability({
   id, version: 2, label: { zh: id, en: id }, requirements: [], environments: ['browser'],
   effect: paid ? 'generate' : 'edit', retry: paid ? 'reconcile-first' : 'safe', available: true,
@@ -18,10 +19,10 @@ export const CAPTION_WORKFLOW_CAPABILITIES = [
   sceneCapability('captions.apply', ['document', 'plan', 'translation', 'style'], ['document']),
   sceneCapability('captions.highlight', ['transcript'], ['transcript'], true),
   sceneCapability('brand.apply', ['document', 'brand'], ['document']),
-  sceneCapability('brand.copy', ['transcript', 'request', 'templates', 'document'], ['copy'], true),
-  sceneCapability('brand.texts', ['document', 'copy', 'templates'], ['document']),
+  sceneCapability('brand.titles', ['transcript', 'guide', 'document'], ['titles'], true),
+  sceneCapability('brand.texts', ['document', 'titles'], ['document']),
   sceneCapability('edit.plan', ['transcript', 'guide', 'moves', 'document'], ['picks'], true),
-  sceneCapability('edit.moves', ['document', 'transcript', 'moves', 'picks'], ['document']),
+  sceneCapability('edit.moves', ['document', 'transcript', 'picks'], ['document']),
   sceneCapability('audio.loudness', ['document', 'media', 'targetLufs'], ['document']),
   sceneCapability('video.render', ['document', 'media'], ['media', 'document']),
 ];
@@ -49,17 +50,15 @@ export function captionTailSteps(options: CaptionTaskOptions, document: Workflow
     document = stepOutput('captions', 'document');
   }
   if (moves && (moves.punchIn || moves.transition)) {
-    // Where each move lands is a judgement on this video's lines, made against the creator's own triggers.
+    // Where each move lands is a judgement on this video's lines, made against the brand's own prompt.
     steps.push(sceneStep('editplan', 'edit.plan', { transcript, guide: literal(options.brand ? playbookEditGuide(options.brand) : ''), moves: sceneLiteral(moves), document }));
-    steps.push(sceneStep('moves', 'edit.moves', { document, transcript, moves: sceneLiteral(moves), picks: stepOutput('editplan', 'picks') }));
+    steps.push(sceneStep('moves', 'edit.moves', { document, transcript, picks: stepOutput('editplan', 'picks') }));
     document = stepOutput('moves', 'document');
   }
-  const texts = options.edit?.texts; const templates = options.brand?.fixed.bands;
-  if (texts && templates && ((texts.header && templates.header) || (texts.hookLabel && templates.hookLabel))) {
-    // The bands' look is the brand's; their words are written for this video, in the creator's manner.
-    const request = { header: !!(texts.header && templates.header), hookLabel: !!(texts.hookLabel && templates.hookLabel), examples: options.brand?.generation.headlines?.examples ?? [] };
-    steps.push(sceneStep('copy', 'brand.copy', { transcript, request: sceneLiteral(request), templates: sceneLiteral(templates), document }));
-    steps.push(sceneStep('texts', 'brand.texts', { document, copy: stepOutput('copy', 'copy'), templates: sceneLiteral(templates) }));
+  if (options.edit?.titles && options.brand?.blocks.layout?.text?.trim()) {
+    // Titles follow the brand's layout prompt; their words, timing, place and look are written for this video.
+    steps.push(sceneStep('titles', 'brand.titles', { transcript, guide: literal(renderBrandPrompt(options.brand, ['portrait', 'layout', 'palette', 'fonts'])), document }));
+    steps.push(sceneStep('texts', 'brand.texts', { document, titles: stepOutput('titles', 'titles') }));
     document = stepOutput('texts', 'document');
   }
   // After captions: the intro/outro ripple the captions along with the speech they follow.

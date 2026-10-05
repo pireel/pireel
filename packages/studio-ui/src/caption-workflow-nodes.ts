@@ -1,7 +1,7 @@
 import { imageThumb } from '@pireel/ui/image-url';
 import { applyPlaybookMedia } from '@pireel/studio-engine/brand-media';
-import type { PlaybookSnapshot, FixedHabits } from '@pireel/studio-engine/brand-playbook';
-import { bandCapacity, bandTextItem, editPlanInput, punchInUpdates, transitionItems, type CaptionEditParams, type PlanPick } from '@pireel/studio-engine/brand-edit-params';
+import type { PlaybookSnapshot } from '@pireel/studio-engine/brand-playbook';
+import { cutDurationSec, editPlanInput, punchInUpdates, timelineSecOf, titleTextItem, transitionItems, type CaptionEditParams, type PlannedTitle, type PlanPick } from '@pireel/studio-engine/brand-edit-params';
 import { applyDocumentTransaction } from '@pireel/studio-engine/document-transaction';
 import { integratedLoudness, loudnessGainDb } from '@pireel/studio-engine/loudness-lufs';
 import { phraseWordIndexes, rowWords } from '@pireel/studio-engine/caption-highlights';
@@ -66,30 +66,24 @@ export function captionWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
       const document = applyPlaybookMedia(store.read(args.document, 'document'), args.brand as unknown as PlaybookSnapshot);
       return { document: workflowJson(await store.put('document', 'brand', document)) };
     }, project: outputs => ({ document: store.read<EditorDocumentV2>(outputs.document, 'document') }) }),
-    node('brand.copy', { stage: 'styling', async execute(args, context) {
-      const write = studioProviders().brandCopy;
-      if (!write) throw new Error('标题栏文字服务尚未连接，请在品牌预设里关闭标题栏后重试。');
-      const request = args.request as unknown as { header: boolean; hookLabel: boolean; examples: string[] };
-      const templates = args.templates as unknown as NonNullable<FixedHabits['bands']>;
-      const canvas = store.read<EditorDocumentV2>(args.document, 'document').canvas;
-      const transcript = store.read<AsrSegment[]>(args.transcript, 'transcript').map(segment => segment.text).join('\n');
-      const copy = await write({
-        transcript,
-        ...(request.header && templates.header ? { header: { maxChars: bandCapacity(templates.header, canvas, 2).maxChars, examples: request.examples } } : {}),
-        ...(request.hookLabel && templates.hookLabel ? { hookLabel: { maxChars: bandCapacity(templates.hookLabel, canvas, 1).maxChars } } : {}),
-      }, { signal: host.hooks.signal, sceneRun: host.hooks.sceneRun, onUsage: context.recordUsage });
-      return { copy: workflowJson({ header: copy.header ?? null, hookLabel: copy.hookLabel ?? null }) };
+    node('brand.titles', { stage: 'styling', async execute(args, context) {
+      const write = studioProviders().brandTitles;
+      if (!write) throw new Error('标题服务尚未连接，请在品牌预设里关闭标题后重试。');
+      const document = store.read<EditorDocumentV2>(args.document, 'document');
+      const transcript = store.read<AsrSegment[]>(args.transcript, 'transcript');
+      // The lines as they play on the cut timeline, so titles are timed to the edited video.
+      const rows = transcript.flatMap((segment, index) => {
+        const startSec = timelineSecOf(document, segment.words?.[0]?.start ?? segment.start);
+        return startSec !== null && segment.text.trim() ? [{ index, text: segment.text.trim(), startSec: Math.round(startSec * 10) / 10 }] : [];
+      });
+      if (!rows.length) return { titles: workflowJson([]) };
+      const { titles } = await write({ rows, durationSec: cutDurationSec(document), guide: String(args.guide ?? ''), canvas: { width: document.canvas.width, height: document.canvas.height } }, { signal: host.hooks.signal, sceneRun: host.hooks.sceneRun, onUsage: context.recordUsage });
+      return { titles: workflowJson(titles) };
     } }),
     node('brand.texts', { stage: 'styling', async execute(args) {
       const document = store.read<EditorDocumentV2>(args.document, 'document');
-      const copy = args.copy as unknown as { header: string | null; hookLabel: string | null };
-      const templates = args.templates as unknown as NonNullable<FixedHabits['bands']>;
-      const track = document.timeline.tracks.find(item => item.id === document.semantics.primaryNarrativeTrackId);
-      const endSec = Math.max(0, ...(track?.clips.map(clip => (clip.startFrame + clip.durationFrames) / document.canvas.fps) ?? [0]));
-      const items = [
-        ...(copy.header && templates.header ? [bandTextItem('brand-header', copy.header, templates.header, document.canvas, 0, endSec, 2)] : []),
-        ...(copy.hookLabel && templates.hookLabel ? [bandTextItem('brand-hook-label', copy.hookLabel, templates.hookLabel, document.canvas, 0, Math.min(templates.hookLabel.durationSec, endSec), 1)] : []),
-      ];
+      const titles = args.titles as unknown as PlannedTitle[];
+      const items = titles.map((title, index) => titleTextItem(`brand-title-${index + 1}`, title, document.canvas));
       let next = document;
       if (items.length) {
         const result = applyDocumentTransaction(document, { ops: [{ op: 'agent.timeline', input: { tool: 'set_texts', input: { items } } }] }, { projectId: 'caption-scene' });
@@ -110,17 +104,16 @@ export function captionWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
         const segment = transcript[pick.index];
         const found = segment ? phraseWordIndexes(rowWords(segment), pick.text) : null;
         if (!found?.length) throw new Error(`剪辑规划的落点与原句对不上：「${pick.text}」`);
-        return { kind: pick.kind, sentenceIndex: pick.index, wordIndex: found[0]!, variant: pick.variant };
+        return { kind: pick.kind, sentenceIndex: pick.index, wordIndex: found[0]!, variant: pick.variant, ...(pick.scale !== undefined ? { scale: pick.scale } : {}) };
       });
       return { picks: workflowJson(placed) };
     } }),
     node('edit.moves', { stage: 'styling', async execute(args) {
       const document = store.read<EditorDocumentV2>(args.document, 'document');
       const transcript = store.read<AsrSegment[]>(args.transcript, 'transcript');
-      const moves = args.moves as unknown as NonNullable<CaptionEditParams['moves']>;
       const picks = args.picks as unknown as PlanPick[];
-      const updates = moves.punchIn ? punchInUpdates(document, transcript, moves.punchIn, picks) : [];
-      const transitions = moves.transition ? transitionItems(document, transcript, moves.transition, picks) : [];
+      const updates = punchInUpdates(document, transcript, picks);
+      const transitions = transitionItems(document, transcript, picks);
       const ops = [
         ...(updates.length ? [{ op: 'narrative.patch' as const, input: { updates } }] : []),
         ...transitions.map(item => ({ op: 'agent.timeline' as const, input: { tool: 'add_transition', input: item } })),
