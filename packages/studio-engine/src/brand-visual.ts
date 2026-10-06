@@ -324,14 +324,20 @@ export function bandColors(rgba: Uint8ClampedArray): { color: string; plate: str
 export function inkExtent(rgba: Uint8ClampedArray, width: number, height: number, color: string, middle = 0.5): { top: number; bottom: number } | null {
   const target = [1, 3, 5].map(at => parseInt(color.slice(at, at + 2), 16));
   const need = Math.max(2, Math.round(width * 0.01));
+  // Letters cross a row as many short runs of the colour; a shirt or a wall of the same colour as one
+  // long run. A row is text when the colour is there and keeps switching on and off along it.
+  const switches = Math.max(4, Math.round(width * 0.02));
   const inked: boolean[] = [];
   for (let row = 0; row < height; row++) {
-    let count = 0;
+    let count = 0; let changes = 0; let previous = false;
     for (let col = 0; col < width; col++) {
       const i = (row * width + col) * 4;
-      if (Math.hypot(rgba[i]! - target[0]!, rgba[i + 1]! - target[1]!, rgba[i + 2]! - target[2]!) < 60) count++;
+      const on = Math.hypot(rgba[i]! - target[0]!, rgba[i + 1]! - target[1]!, rgba[i + 2]! - target[2]!) < 60;
+      if (on) count++;
+      if (col > 0 && on !== previous) changes++;
+      previous = on;
     }
-    inked.push(count >= need);
+    inked.push(count >= need && changes >= switches);
   }
   let at = Math.min(height - 1, Math.max(0, Math.round(middle * height)));
   if (!inked[at]) {

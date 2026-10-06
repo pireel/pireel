@@ -300,7 +300,9 @@ export async function captionLook(blob: Blob, box: { x: number; y: number; w: nu
   const region = { x: box.x, y: top, w: box.w, h: bottom - top };
   const { data, width, height } = await regionPixels(blob, region);
   const ink = inkExtent(data, width, height, colors.color, (box.y + box.h / 2 - top) / region.h);
-  return { ...colors, ...(ink ? { ink: { top: top + ink.top * region.h, bottom: top + ink.bottom * region.h } } : {}) };
+  // Letters far taller or shorter than the OCR box saw are something else of the caption's colour.
+  const tall = ink ? (ink.bottom - ink.top) * region.h / box.h : 0;
+  return { ...colors, ...(ink && tall >= 0.6 && tall <= 1.8 ? { ink: { top: top + ink.top * region.h, bottom: top + ink.bottom * region.h } } : {}) };
 }
 
 export const overlaps = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;

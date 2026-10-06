@@ -123,6 +123,12 @@ describe('inkExtent', () => {
   it('finds the run of text rows around the middle, bridging a gap between strokes', () => {
     expect(inkExtent(image([6, 7, 8, 10, 11, 12, 13, 18]), 10, 20, '#ffffff')).toEqual({ top: 0.3, bottom: 0.7 });
   });
+  it('leaves out a solid block of the caption colour (a shirt, a wall) under the letters', () => {
+    // Letters on rows 6–9 (every other pixel), a solid white block on rows 10–19.
+    const data = new Uint8ClampedArray(10 * 20 * 4);
+    for (let row = 0; row < 20; row++) for (let col = 0; col < 10; col++) { const on = (row >= 6 && row <= 9 && col % 2 === 0) || row >= 10; data.set(on ? [255, 255, 255, 255] : [20, 20, 20, 255], (row * 10 + col) * 4); }
+    expect(inkExtent(data, 10, 20, '#ffffff', 0.4)).toEqual({ top: 0.3, bottom: 0.5 });
+  });
   it('gives nothing when the colour is not there', () => {
     expect(inkExtent(image([]), 10, 20, '#ffffff')).toBeNull();
   });
