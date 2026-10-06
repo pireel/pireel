@@ -109,7 +109,10 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
   // Overlay text (花字): the synthesis writes how it looks and moves; its font is the face of the words the
   // creator adds — their titles, else the words in their graphics, else their cover lettering.
   const fonts = parts.fonts ?? {};
-  const face = fonts.titles ?? fonts.graphics ?? fonts.cover;
+  // A Chinese creator's overlay text needs a face with Han glyphs: a Latin-only face (read from English
+  // or numbers in a graphic) is taken only when no role gave a Chinese one.
+  const order = [fonts.titles, fonts.graphics, fonts.cover].filter((font): font is FontReading => !!font);
+  const face = parts.locale === 'zh' ? order.find(font => !font.id.startsWith('google:')) ?? order[0] : order[0];
   const overlay = prose('overlay_text');
   if (overlay || face || assets.layoutReferences.length) blocks.overlay_text = {
     ...overlay,

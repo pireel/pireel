@@ -79,6 +79,8 @@ describe('assemblePlaybook', () => {
     expect(fromCover.blocks.overlay_text).toEqual({ font: 'web:ximaiti' });
     const fromGraphics = assemblePlaybook({ ...parts(), fonts: { graphics: { id: 'sans', look: '干净黑体' }, cover: { id: 'web:ximaiti', look: '粗斜美术体' } } });
     expect(fromGraphics.blocks.overlay_text).toEqual({ font: 'sans' });
+    const latinGraphics = assemblePlaybook({ ...parts(), fonts: { graphics: { id: 'google:Bebas Neue', look: 'condensed caps' }, cover: { id: 'web:ximaiti', look: '粗斜美术体' } } });
+    expect(latinGraphics.blocks.overlay_text).toEqual({ font: 'web:ximaiti' });
   });
 
   it('sizes and places captions from the letters measured on pixels', () => {
