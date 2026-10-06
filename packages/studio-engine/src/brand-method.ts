@@ -14,7 +14,7 @@ import type { BlockId } from './brand-playbook';
  * and what goes wrong. Raise METHOD_VERSION whenever a row, a tool or a prompt changes; every brand
  * records the version that made it.
  */
-export const METHOD_VERSION = 'brand-method-14';
+export const METHOD_VERSION = 'brand-method-15';
 
 export interface BlockGuide {
   id: BlockId;
@@ -32,7 +32,6 @@ export const BLOCK_GUIDE: readonly BlockGuide[] = [
   { id: 'captions', kind: 'fixed', look: 'Burned-in captions: typeface character, fill, outline / shadow / plate, size, how much text shows at once, how key words are marked.',
     pitfalls: 'Captions follow the speech; a headline held still, a label over the opening, signs, packaging and screen text are not captions. A second speaker in another colour is not keyword marking.' },
   { id: 'logo', kind: 'fixed', look: 'A mark held in one corner across videos.', pitfalls: 'Platform watermarks are not the creator\'s logo.' },
-  { id: 'palette', kind: 'fixed', look: 'Colours the creator\'s own text and graphics keep: accent, second accent, text, ground.', pitfalls: 'Set and wardrobe colours are not brand colours; skin and footage grade are not palette.' },
   { id: 'sound', kind: 'fixed', look: 'Loudness and how tightly pauses are cut are measured; in prose, only what frames can show about music and sound effects (credits, visual beats).', pitfalls: 'Frames carry no audio: never claim a sound you cannot see evidence of.' },
   { id: 'bookends', kind: 'fixed', look: 'The same clip at the start (often after a cold open) or the end of every video.', pitfalls: 'Title cards with the same layout but different words are layout, not a fixed clip.' },
   { id: 'overlay_text', kind: 'prose', look: 'Overlay text (花字): the words the creator puts on screen besides captions — the words of headline bands, opening labels, chapter or point labels, emphasis words, text inside graphics: type character, colours as #RRGGBB, stroke, shadow or plate, size, how key words are emphasised, how it enters and leaves, on what moments it is used, and how the words read (real examples).',
@@ -41,13 +40,19 @@ export const BLOCK_GUIDE: readonly BlockGuide[] = [
     pitfalls: 'Station bugs, corner badges, disclaimers and set signage are not layout.' },
   { id: 'editing', kind: 'prose', look: 'How the creator uses the platform\'s editing moves — punch-ins (quick push, instant cut-in, slow push, in-and-out; how close), transitions between shots, B-roll and cutaways (own footage, product close-ups, screen recordings, screenshots, stock, archive, memes), stickers and emoji, jump cuts — and on what moments of the speech each lands, and how often.',
     pitfalls: 'A switch to another camera angle is multi-cam, not a punch-in. Jump cuts are how the talk is cut, not a transition. How many per video depends on the content: describe the moments and the restraint, never a rate or an interval.' },
-  { id: 'motion_graphics', kind: 'prose', look: 'Graphics that explain or emphasise: number cards, lists, comparisons, charts, arrows, circles, highlight boxes, zoomed screenshots, lower thirds, price tags — their shape language, type, colours, how they enter, hold and leave, and what in the speech brings them on. Written as a style prompt a designer could follow.',
+  { id: 'motion_graphics', kind: 'prose', look: 'Graphics that explain or emphasise — number cards, lists, comparisons, charts, arrows, highlight boxes, zoomed screenshots, lower thirds, price tags; the platform\'s ready-made components are of this kind. Write it as the theme a designer follows: each colour with its role and its limits (for example "accent coral fills only chips, pill bars and one stat figure; headlines stay in the ink colour"), the type by role (display and labels), shape language (corners, outlines, shadows, glass), how graphics enter, hold and leave, and what in the speech brings them on.',
     pitfalls: 'Captions, the creator\'s logo and scene text are not motion graphics.' },
   { id: 'structure', kind: 'prose', look: 'How a video opens (straight to camera, a question, a claim, a cover frame at 0 s, a teaser, result first), how the body is organised (points, recaps, chapters), and how it ends (sign-off line, call to action, end card).',
     pitfalls: 'The opening is a per-video choice more than a fingerprint: write it as the usual way, not a rule.' },
   { id: 'cover', kind: 'cover', look: 'How a cover is made for a new video, in three parts: which still of the video it is built on (expression, gesture, gaze, framing, who), how its headline is worded, and how still and headline become the cover (crop, placement, background, lettering, marks, finish).',
     pitfalls: 'Written from the creator\'s covers, never from frames of the videos. One cover\'s words or person are not the style.' },
 ];
+
+/**
+ * How colour is described wherever it is not fixed (overlay text, cover, layout): a strategy a designer can
+ * follow, not a list of values that changes with every topic.
+ */
+export const COLOUR_GUIDE = 'Describe colour as a strategy, not a list: the hue relationship (one hue, analogous, complementary, clashing), the value and saturation key (vivid, muted, pastel, neon, dark), the rough share of the dominant, secondary and accent colours (for example white 80 / yellow 15 / other 5), how contrast is made (light against dark, or hue against hue), and where colours come from (kept by the creator, taken from the footage or the product, chosen by the topic). Give #RRGGBB only for signature colours that recur across videos.';
 
 /** Never part of a brand: decided by the footage, the platform or the moment. */
 export const NOT_BRAND = [

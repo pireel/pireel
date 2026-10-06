@@ -50,12 +50,12 @@ describe('parseVideoReading', () => {
 
 describe('parseSynthesis', () => {
   const videos = [{ id: 'v1' }, { id: 'v2' }, { id: 'v3' }];
-  const synthesis = (blocks: Record<string, unknown>) => JSON.stringify({ blocks: { portrait: { text: '快节奏', videos: [] }, ...blocks }, palette: { accent: '#FFD600', text: 'white' } });
+  const synthesis = (blocks: Record<string, unknown>) => JSON.stringify({ blocks: { portrait: { text: '快节奏', videos: [] }, ...blocks }, theme: { accent: '#FFD600', text: 'white' } });
 
   it('keeps blocks that hold in two videos and well-formed colours', () => {
     const parsed = parseSynthesis(synthesis({ editing: { text: '说到价格推近', videos: ['v1', 'v2', 'v9'] } }), videos);
     expect(parsed.blocks.editing).toEqual({ text: '说到价格推近', videos: ['v1', 'v2'] });
-    expect(parsed.palette).toEqual({ accent: '#ffd600' });
+    expect(parsed.theme).toEqual({ accent: '#ffd600' });
     expect(parsed.setAside).toEqual([]);
   });
 

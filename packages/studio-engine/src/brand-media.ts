@@ -16,14 +16,19 @@ export function playbookCaptionStyle(playbook: PlaybookSnapshot): Partial<Captio
 
 /** The palette generated material uses, in the document's appearance keys. */
 export function playbookAppearance(playbook: PlaybookSnapshot): { palette: Record<string, string> } {
-  const p = playbook.blocks.palette ?? {};
+  // Components and generated graphics take the creator's motion-graphics theme.
+  const t = playbook.blocks.motion_graphics?.theme ?? {};
   const palette: Record<string, string> = {};
-  if (p.accent) palette.accent = p.accent;
-  if (p.accent2) palette['accent-2'] = p.accent2;
-  if (p.text) palette.fg = p.text;
-  if (p.ground) palette.paper = p.ground;
-  // Generated titles and graphics letter in the creator's overlay-text face.
-  if (playbook.blocks.overlay_text?.font) palette['font-head'] = playbook.blocks.overlay_text.font;
+  if (t.accent) palette.accent = t.accent;
+  if (t.accent2) palette['accent-2'] = t.accent2;
+  if (t.text) palette.fg = t.text;
+  if (t.ground) palette.paper = t.ground;
+  if (t.surface) palette.panel = t.surface;
+  if (t.line) palette.line = t.line;
+  if (t.display) palette['font-head'] = t.display;
+  if (t.label) palette['font-body'] = t.label;
+  // Without a graphics face, generated headings letter in the creator's overlay-text face.
+  if (!t.display && playbook.blocks.overlay_text?.font) palette['font-head'] = playbook.blocks.overlay_text.font;
   return { palette };
 }
 

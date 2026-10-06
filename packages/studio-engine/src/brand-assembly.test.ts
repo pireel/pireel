@@ -22,7 +22,7 @@ const synthesis: Synthesis = {
     editing: { text: '说到价格时快推近。', videos: ['v1', 'v2', 'v3'] },
     motion_graphics: { text: '白底黑字数字卡弹入。', videos: ['v2', 'v3'] },
   },
-  palette: { accent: '#ffd600' }, setAside: [], uncited: [],
+  theme: { accent: '#ffd600' }, setAside: [], uncited: [],
 };
 const mg = { key: 'uploads/u/mg.jpg', kind: 'image' as const, width: 540, height: 960 };
 const parts = (): PlaybookParts => ({
@@ -40,7 +40,7 @@ describe('assemblePlaybook', () => {
     const b = playbook.blocks;
     expect(b.sound).toMatchObject({ lufs: -15, pauses: 'tight' });
     expect(b.captions).toMatchObject({ on: true, accent: 'keywords', style: { color: '#ffffff', strokeColor: '#000000', yPct: 22.7 } });
-    expect(b.palette).toEqual({ accent: '#ffd600' });
+    expect(b.motion_graphics?.theme).toEqual({ accent: '#ffd600' });
     expect(b.editing).toEqual({ text: '说到价格时快推近。', evidence: { videos: ['v1', 'v2', 'v3'], confidence: 'high' } });
     expect(b.motion_graphics?.references).toEqual([mg]);
     expect(b.layout).toBeUndefined();

@@ -38,6 +38,9 @@ export interface BrandCover {
   evidence?: Evidence;
 }
 
+/** The theme of the creator's graphics: colours (#RRGGBB) by role, fonts (font ids) by role. */
+export interface MotionTheme { text?: string; ground?: string; surface?: string; line?: string; accent?: string; accent2?: string; display?: string; label?: string }
+
 /** The blocks, in the order the prompt renders them. */
 export interface BrandBlocks {
   /** The style in a few sentences. */
@@ -46,8 +49,6 @@ export interface BrandBlocks {
   captions?: Prose & { on: boolean; style?: Partial<CaptionStyle>; accent?: 'keywords' | 'numbers' | 'current_word' | null };
   /** Fixed: a mark held in one corner. */
   logo?: BrandAsset & { corner: Corner; widthPct: number; opacity: number; evidence?: Evidence };
-  /** Fixed: colours of the creator's own text and graphics. */
-  palette?: { accent?: string; accent2?: string; text?: string; ground?: string; evidence?: Evidence };
   /** Overlay text (花字): the words the creator puts on screen besides captions — titles, labels, emphasis
    *  words, text in graphics. Fixed: its font (the closest face the platform has; `fontLike` names the
    *  original). Prose: how it looks and moves and when it is used, with reference stills. */
@@ -61,8 +62,9 @@ export interface BrandBlocks {
   layout?: Prose & { references?: BrandAsset[] };
   /** How the creator uses the platform's editing moves, and on what moments. */
   editing?: Prose;
-  /** The look and motion of their motion graphics, with reference stills. */
-  motion_graphics?: Prose & { references?: BrandAsset[] };
+  /** Motion graphics, ready-made components among them: the prose is their style; `theme` is fixed — the
+   *  colours and fonts the platform's components take (and generated graphics follow). */
+  motion_graphics?: Prose & { theme?: MotionTheme; references?: BrandAsset[] };
   /** How a video opens, unfolds and closes. */
   structure?: Prose;
   /** The cover for a new video, as its own prompt in three parts — which still of the video to build on,
@@ -70,11 +72,9 @@ export interface BrandBlocks {
   cover?: BrandCover;
 }
 export type BlockId = keyof BrandBlocks;
-export const BLOCK_IDS: readonly BlockId[] = ['portrait', 'captions', 'overlay_text', 'logo', 'palette', 'sound', 'bookends', 'layout', 'editing', 'motion_graphics', 'structure', 'cover'];
-/** Blocks earlier brands may still hold: read without complaint, never rendered. */
-const LEGACY_BLOCK_IDS = ['fonts'];
+export const BLOCK_IDS: readonly BlockId[] = ['portrait', 'captions', 'overlay_text', 'logo', 'sound', 'bookends', 'layout', 'editing', 'motion_graphics', 'structure', 'cover'];
 /** Blocks whose values the engine applies as they are. */
-export const FIXED_BLOCKS: readonly BlockId[] = ['captions', 'logo', 'palette', 'sound', 'bookends'];
+export const FIXED_BLOCKS: readonly BlockId[] = ['captions', 'logo', 'sound', 'bookends'];
 
 export interface BrandPlaybook {
   schema: typeof PLAYBOOK_SCHEMA;
@@ -146,12 +146,11 @@ export function renderBrandPrompt(playbook: Pick<BrandPlaybook, 'name' | 'blocks
   }
   if (want('overlay_text')) parts.push(element('overlay_text', { font: b.overlay_text!.font, like: b.overlay_text!.fontLike, references: refs(b.overlay_text!.references) }, b.overlay_text!.text));
   if (want('logo')) parts.push(element('logo', { corner: b.logo!.corner, width: `${b.logo!.widthPct}%`, opacity: b.logo!.opacity }));
-  if (want('palette')) { const p = b.palette!; parts.push(element('palette', { accent: p.accent, 'accent-2': p.accent2, text: p.text, ground: p.ground })); }
   if (want('sound')) parts.push(element('sound', { loudness: b.sound!.lufs !== undefined ? `${b.sound!.lufs} LUFS` : undefined, pauses: b.sound!.pauses }, b.sound!.text));
   if (want('bookends')) parts.push(element('bookends', { intro: b.bookends!.intro ? `${b.bookends!.intro.durationSec ?? ''}s clip` : undefined, outro: b.bookends!.outro ? `${b.bookends!.outro.durationSec ?? ''}s clip` : undefined }));
   if (want('layout')) parts.push(element('layout', { references: refs(b.layout!.references) }, b.layout!.text));
   if (want('editing')) parts.push(element('editing', {}, b.editing!.text));
-  if (want('motion_graphics')) parts.push(element('motion_graphics', { references: refs(b.motion_graphics!.references) }, b.motion_graphics!.text));
+  if (want('motion_graphics')) { const t = b.motion_graphics!.theme ?? {}; parts.push(element('motion_graphics', { text: t.text, ground: t.ground, surface: t.surface, line: t.line, accent: t.accent, 'accent-2': t.accent2, 'display-font': t.display, 'label-font': t.label, references: refs(b.motion_graphics!.references) }, b.motion_graphics!.text)); }
   if (want('structure')) parts.push(element('structure', {}, b.structure!.text));
   if (want('cover')) parts.push(coverElement(b.cover!, refs(b.cover!.references)));
   return `<brand name="${escapeAttr(playbook.name)}">\n${parts.join('\n')}\n</brand>`;
@@ -205,7 +204,7 @@ export function validatePlaybook(value: unknown): BrandPlaybook {
   if (p.source.preview) { asset(p.source.preview, 'source.preview'); if (p.source.preview.kind !== 'image' || typeof p.source.preview.cleaned !== 'boolean') fail('source.preview', '需要图片与 cleaned'); }
   if (!isObject(p.blocks)) fail('blocks', '缺失');
   const b = p.blocks;
-  for (const key of Object.keys(b)) if (!BLOCK_IDS.includes(key as BlockId) && !LEGACY_BLOCK_IDS.includes(key)) fail(`blocks.${key}`, '未知的块');
+  for (const key of Object.keys(b)) if (!BLOCK_IDS.includes(key as BlockId)) fail(`blocks.${key}`, '未知的块');
   for (const id of ['portrait', 'editing', 'structure'] as const) if (b[id]) prose(b[id], `blocks.${id}`);
   for (const id of ['layout', 'motion_graphics'] as const) if (b[id]) { prose(b[id], `blocks.${id}`); references(b[id]!.references, `blocks.${id}.references`); }
   if (b.cover) {
@@ -226,7 +225,11 @@ export function validatePlaybook(value: unknown): BrandPlaybook {
     if (!(b.logo.widthPct > 0 && b.logo.widthPct <= 40)) fail('blocks.logo.widthPct', '0–40');
     if (!(b.logo.opacity > 0 && b.logo.opacity <= 1)) fail('blocks.logo.opacity', '0–1');
   }
-  if (b.palette) for (const key of ['accent', 'accent2', 'text', 'ground'] as const) color(b.palette[key], `blocks.palette.${key}`);
+  if (b.motion_graphics?.theme) {
+    const t = b.motion_graphics.theme;
+    for (const key of ['text', 'ground', 'surface', 'line', 'accent', 'accent2'] as const) color(t[key], `blocks.motion_graphics.theme.${key}`);
+    for (const key of ['display', 'label'] as const) if (t[key] !== undefined && (typeof t[key] !== 'string' || t[key]!.length > 80)) fail(`blocks.motion_graphics.theme.${key}`, '字体 id');
+  }
   if (b.overlay_text) {
     prose(b.overlay_text, 'blocks.overlay_text');
     for (const key of ['font', 'fontLike'] as const) if (b.overlay_text[key] !== undefined && (typeof b.overlay_text[key] !== 'string' || b.overlay_text[key]!.length > 80)) fail(`blocks.overlay_text.${key}`, '字体');

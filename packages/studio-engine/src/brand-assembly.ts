@@ -105,7 +105,6 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
     };
   }
   if (assets.logo && summary.logo) blocks.logo = { ...assets.logo, corner: summary.logo.corner, widthPct: Math.min(40, Math.max(4, Math.round(summary.logo.box.w * 100))), opacity: 1, evidence: { videos: summary.logo.evidence.videos, confidence: summary.logo.evidence.confidence } };
-  if (Object.keys(synthesis.palette).length) blocks.palette = synthesis.palette;
   // Overlay text (花字): the synthesis writes how it looks and moves; its font is the face of the words the
   // creator adds — their titles, else the words in their graphics, else their cover lettering.
   const fonts = parts.fonts ?? {};
@@ -129,7 +128,12 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
 
   const layout = prose('layout'); if (layout) blocks.layout = layout;
   const editing = prose('editing'); if (editing) blocks.editing = editing;
-  const motion = prose('motion_graphics'); if (motion) blocks.motion_graphics = { ...motion, ...(assets.motionReferences.length ? { references: assets.motionReferences } : {}) };
+  // Motion graphics carry the theme components take: the colours the synthesis read, the face of the words
+  // in the creator's graphics (a Chinese one for a Chinese creator).
+  const motion = prose('motion_graphics');
+  const graphicsFace = fonts.graphics && (parts.locale !== 'zh' || !fonts.graphics.id.startsWith('google:')) ? fonts.graphics.id : undefined;
+  const theme = { ...synthesis.theme, ...(graphicsFace ? { display: graphicsFace } : {}) };
+  if (motion || Object.keys(theme).length) blocks.motion_graphics = { ...motion, ...(Object.keys(theme).length ? { theme } : {}), ...(assets.motionReferences.length ? { references: assets.motionReferences } : {}) };
   const structure = prose('structure'); if (structure) blocks.structure = structure;
   const cover = parts.cover;
   if (cover || assets.coverReferences.length) blocks.cover = {

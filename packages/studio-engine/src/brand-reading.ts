@@ -1,4 +1,4 @@
-import { BLOCK_GUIDE, NOT_BRAND, PROSE_BLOCKS, WINDOWS, type BlockGuide } from './brand-method';
+import { BLOCK_GUIDE, COLOUR_GUIDE, NOT_BRAND, PROSE_BLOCKS, WINDOWS, type BlockGuide } from './brand-method';
 import type { BlockId } from './brand-playbook';
 
 /**
@@ -185,21 +185,26 @@ Measured facts come from every frame and the soundtrack; never contradict them.
 Never put these in the brand: ${NOT_BRAND.join('; ')}.
 The platform can punch in, transition, cut to B-roll, add stickers, sound effects and motion graphics for every brand; a block says how THIS creator uses them, not whether they exist.
 
-Blocks to write (each as prose a model can follow, concrete: positions, colours as #RRGGBB, type character, motion, timing, real examples):
+Blocks to write (each as prose a model can follow, concrete: positions, type character, motion, timing, real examples):
 ${blockLines(['prose'])}
 - sound: only what frames show about music or sound effects; leave out when nothing does.
+
+Colour: the creator's graphics keep a theme — give it as "theme" (#RRGGBB, each only when their graphics keep it across videos: text, ground, surface for cards, line for outlines, accent, accent2) and say in motion_graphics what each is for and where it stops. Everywhere else: ${COLOUR_GUIDE}
 
 Write every block in ${language}. A block the videos give no recurring evidence for is left out.
 Return only JSON:
 {"blocks":{"<block id>":{"text":"…","videos":["<video ids where it holds>"]}},
- "palette":{"accent":"#…","accent2":"#…","text":"#…","ground":"#…"} (each optional)}
+ "theme":{"text":"#…","ground":"#…","surface":"#…","line":"#…","accent":"#…","accent2":"#…"} (each optional)}
 Block ids, used exactly as written: ${[...PROSE_BLOCKS, 'sound'].join(', ')}. The portrait is two to four sentences; other blocks as long as they need, without repeating each other.`;
 }
 
 export type SynthesisBlockId = (typeof PROSE_BLOCKS)[number] | 'sound';
+export const THEME_COLOURS = ['text', 'ground', 'surface', 'line', 'accent', 'accent2'] as const;
+export type ThemeColour = typeof THEME_COLOURS[number];
 export interface Synthesis {
   blocks: Partial<Record<SynthesisBlockId, { text: string; videos: string[] }>>;
-  palette: { accent?: string; accent2?: string; text?: string; ground?: string };
+  /** The motion-graphics theme the platform's components take. */
+  theme: Partial<Record<ThemeColour, string>>;
   /** Blocks the answer gave that are not blocks or have no text, with why — kept visible, never used. */
   setAside: string[];
   /** Blocks kept without any video cited for them (no evidence to show). */
@@ -230,8 +235,8 @@ export function parseSynthesis(raw: string, videos: { id: string }[]): Synthesis
     blocks[id as SynthesisBlockId] = { text: words, videos: seen };
   }
   if (!blocks.portrait) text(undefined, 'blocks.portrait');
-  const palette = (value.palette ?? {}) as Record<string, unknown>;
-  return { blocks, palette: Object.fromEntries((['accent', 'accent2', 'text', 'ground'] as const).flatMap(key => hex(palette[key]) ? [[key, hex(palette[key])]] : [])), setAside, uncited };
+  const theme = (value.theme ?? {}) as Record<string, unknown>;
+  return { blocks, theme: Object.fromEntries(THEME_COLOURS.flatMap(key => hex(theme[key]) ? [[key, hex(theme[key])]] : [])), setAside, uncited };
 }
 
 // ── The cover, from the creator's covers
@@ -248,7 +253,7 @@ frame — what the cover is built on. For "video": how to choose the still from 
 
 headline — how the words on the cover are written, for a writer who will word the next one from what the new video says: how many lines (a main line, a second line, a small label) and how long each is; the structure (a question, a bold claim, a number or result, a series name with an episode number, a quote); the voice, punctuation and emphasis marks; how it hooks (curiosity, conflict, a promise of use). Quote two to four real headlines from the covers as examples. When the covers carry no words, leave it empty.
 
-design — how the still and the headline become the cover: crop, where the person sits and how large; what happens to the background (kept, darkened, blurred, replaced, a colour, a scene from the topic); how the headline is lettered (type character, weight, colours as #RRGGBB, stroke, shadow or plate, size, position); other marks (logo, arrows, circles, emoji, borders, series or episode labels); the finish (contrast, saturation, glow). When the covers are plain stills with nothing added, say so: that is the style.
+design — how the still and the headline become the cover: crop, where the person sits and how large; what happens to the background (kept, darkened, blurred, replaced, a colour, a scene from the topic); how the headline is lettered (type character, weight, stroke, shadow or plate, size, position); the colour (${COLOUR_GUIDE}); other marks (logo, arrows, circles, emoji, borders, series or episode labels); the finish (contrast, saturation, glow). When the covers are plain stills with nothing added, say so: that is the style.
 
 You judge what is the creator's cover style and what belongs to one cover's topic; write what depends on the topic as a role, never as the particular person or thing. When the covers follow two styles, describe the main one and name the other in one sentence.
 Write as instructions to a designer who has never seen these covers, concrete enough to recreate them, without naming the people in them.
