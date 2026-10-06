@@ -34,7 +34,7 @@ export function fontsSystemPrompt(): string {
   const choices = cjkFontChoices().map(choice => `- ${choice.id}: ${choice.name} (${choice.look})`).join('\n');
   return `You identify the typefaces a creator uses in their videos, from crops of their text. The crops are labelled by role:
 - captions: the burned-in subtitles of the speech;
-- titles: headlines, labels and other words the creator puts on screen besides captions;
+- titles: words the creator puts straight on the picture besides captions — headlines, labels, emphasis words (not words inside charts or cards);
 - graphics: stills of moments with the creator's motion graphics (cards, charts, labels) — read the words inside them;
 - cover: the lettering on their video covers.
 

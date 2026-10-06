@@ -108,11 +108,12 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
   }
   if (assets.logo && summary.logo) blocks.logo = { ...assets.logo, corner: summary.logo.corner, widthPct: Math.min(40, Math.max(4, Math.round(summary.logo.box.w * 100))), opacity: 1, evidence: { videos: summary.logo.evidence.videos, confidence: summary.logo.evidence.confidence } };
   // Overlay text (花字): the synthesis writes how it looks and moves; its font is the face of the words the
-  // creator adds — their titles, else the words in their graphics, else their cover lettering.
+  // creator puts straight on the picture, else their cover lettering. Words in charts and cards are the
+  // graphics' (its theme fonts).
   const fonts = parts.fonts ?? {};
-  // A Chinese creator's overlay text needs a face with Han glyphs: a Latin-only face (read from English
-  // or numbers in a graphic) is taken only when no role gave a Chinese one.
-  const order = [fonts.titles, fonts.graphics, fonts.cover].filter((font): font is FontReading => !!font);
+  // A Chinese creator's overlay text needs a face with Han glyphs: a Latin-only face is taken only when no
+  // role gave a Chinese one.
+  const order = [fonts.titles, fonts.cover].filter((font): font is FontReading => !!font);
   const face = parts.locale === 'zh' ? order.find(font => !font.id.startsWith('google:')) ?? order[0] : order[0];
   const overlay = prose('overlay_text');
   if (overlay || face || assets.layoutReferences.length) blocks.overlay_text = {

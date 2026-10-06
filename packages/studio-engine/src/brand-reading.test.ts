@@ -31,6 +31,11 @@ describe('parseMoments', () => {
 });
 
 describe('parseVideoReading', () => {
+  it('keeps the times the reading picked as showing a block best', () => {
+    const parsed = parseVideoReading(JSON.stringify({ portrait: 'x', references: { graphics: [150.8, '321.6s', 400, 500], visual: [], layout: [3] } }), 'v1', 0);
+    expect(parsed.references).toEqual({ graphics: [150.8, 321.6] });
+  });
+
   it('keeps what each moment was about, its source and how it was shown', () => {
     const parsed = parseVideoReading(JSON.stringify({ portrait: 'x', moments: [{ seen: ['broll'], speech: 'number', source: 'chart', presentation: 'full_frame', how: '3D bars rise' }] }), 'v1', 1);
     expect(parsed.moments[0]).toEqual({ seen: ['broll'], speech: 'number', source: 'chart', presentation: 'full_frame', how: '3D bars rise' });

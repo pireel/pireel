@@ -117,12 +117,14 @@ ${FACET_GUIDE}
 4. notes — what this video shows for each block, in English, concrete enough to recreate (positions, colours as #RRGGBB, type character, motion, timing, real words of titles); leave a block out when the video shows nothing for it:
 ${blockLines(['prose'])}
 5. look — captionFill and captionOutline (#RRGGBB, when captions show), palette (up to 4 #RRGGBB colours of the creator's own text and graphics).
+6. references — the times (seconds, from the labels under the cells) of up to two cells that show each of these best, only when a cell really shows it: overlay_text (words put straight on the picture, not captions, not inside a chart or card), graphics (the creator's charts, cards or diagrams, fully in view), visual (the picture while the creator uses B-roll — the footage, the screenshot, the speaker in picture-in-picture).
 
 Return only JSON:
 {"portrait":"…","facets":{"layout":"…","camera":"…","cuttingDevice":"…","punchIn":"…","captionPresence":"…","captionStyle":"…","fontClass":"…","captionCase":"…","captionTreatment":"…","captionPosition":"…","accentRule":"…","captionAnimation":"…","emoji":"…","heldHeader":"…","hookLabel":"…","callouts":[],"brollTypes":[],"brandElements":[],"colorGrade":"…","hookStructure":"…"},
  "moments":[{"seen":["…"],"speech":"…","source":"…","presentation":"…","how":"…"}],
  "notes":{"overlay_text":"…","visual":"…","graphics":"…","structure":"…"},
- "look":{"captionFill":"#…","captionOutline":"#…","palette":["#…"]}}`;
+ "look":{"captionFill":"#…","captionOutline":"#…","palette":["#…"]},
+ "references":{"overlay_text":[<seconds>],"graphics":[<seconds>],"visual":[<seconds>]}}`;
 }
 
 // ── Parsing
@@ -147,9 +149,14 @@ export interface VideoReading {
   moments: { seen: Seen[]; speech?: SpeechKind; source?: BrollSource; presentation?: Presentation; how?: string }[];
   notes: Partial<Record<BlockId, string>>;
   look: { captionFill?: string; captionOutline?: string; palette: string[] };
+  /** Times of the cells that show a block best, picked by the reading: stills there become its references. */
+  references?: Partial<Record<ReferenceBlock, number[]>>;
   /** Names the reading used outside the vocabulary, kept visible, not used. */
   unread?: string[];
 }
+
+export const REFERENCE_BLOCKS = ['overlay_text', 'graphics', 'visual'] as const;
+export type ReferenceBlock = typeof REFERENCE_BLOCKS[number];
 
 /** A reading is evidence, not the contract: names outside the vocabulary are set aside (listed in
  *  `unread`), missing or malformed parts are left out, and only an answer that is not JSON fails. */
@@ -173,12 +180,16 @@ export function parseVideoReading(raw: string, video: string, momentCount: numbe
   const rawNotes = (value.notes ?? {}) as Record<string, unknown>;
   const notes = Object.fromEntries(READ_NOTES.flatMap(id => { const note = optionalText(rawNotes[id]); return note ? [[id, note]] : []; })) as VideoReading['notes'];
   const look = (value.look ?? {}) as Record<string, unknown>;
+  const rawReferences = (value.references ?? {}) as Record<string, unknown>;
+  const picked = Object.fromEntries(REFERENCE_BLOCKS.flatMap(id => { const times = (Array.isArray(rawReferences[id]) ? rawReferences[id] as unknown[] : []).flatMap(t => typeof t === 'number' && t >= 0 ? [Math.round(t * 10) / 10] : typeof t === 'string' && parseFloat(t) >= 0 ? [Math.round(parseFloat(t) * 10) / 10] : []).slice(0, 2); return times.length ? [[id, times]] : []; }));
+  const references = Object.keys(picked).length ? picked as VideoReading['references'] : undefined;
   return {
     video, portrait: optionalText(value.portrait, 600) ?? '', facets: parseStyleFacets(value.facets), moments, notes,
     look: {
       ...(hex(look.captionFill) ? { captionFill: hex(look.captionFill) } : {}), ...(hex(look.captionOutline) ? { captionOutline: hex(look.captionOutline) } : {}),
       palette: (Array.isArray(look.palette) ? look.palette : []).flatMap(item => hex(item) ? [hex(item)!] : []).slice(0, 4),
     },
+    ...(references ? { references } : {}),
     ...(unread.length ? { unread } : {}),
   };
 }
