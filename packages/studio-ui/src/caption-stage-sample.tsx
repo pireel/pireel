@@ -3,6 +3,7 @@ import { captionBlocksFromAsr } from '@pireel/studio-engine/build-blocks';
 import { emptyComposition, type CaptionStyle, type Composition } from '@pireel/studio-engine/composition';
 import { getCaptionPreset } from '@pireel/studio-engine/caption-presets';
 import { InlineBlockPreview } from './block-preview-card';
+import { loadFont } from './web-fonts';
 
 /** Seconds per sample word: about the pace of speech, so word effects read as they will in a video. */
 const WORD_SEC = 0.32;
@@ -50,7 +51,18 @@ export function CaptionStageSample({ style, canvas, text, subText }: {
   style: Partial<CaptionStyle>; canvas: { width: number; height: number }; text: string; subText?: string;
 }) {
   const [host, width] = useWidth();
-  const comp = useMemo<Composition>(() => ({ ...emptyComposition(), width: Math.round(canvas.width), height: Math.round(canvas.height), captionStyle: { ...style, on: true } as CaptionStyle }), [style, canvas.width, canvas.height]);
+  // A library or Google face is fetched for the sample's words, and the sample drawn again once it is on
+  // the device (a face named in a brand is otherwise only fetched when picked by hand).
+  const [facesLoaded, setFacesLoaded] = useState(0);
+  const faces = [style.font, style.sub?.font].filter((font): font is string => !!font).join('|');
+  useEffect(() => {
+    if (!faces) return;
+    let live = true;
+    const words = [text, subText ?? ''].join('').replace(/\|/g, '');
+    void Promise.all(faces.split('|').map(font => loadFont(font, words))).then(() => { if (live) setFacesLoaded(count => count + 1); });
+    return () => { live = false; };
+  }, [faces, text, subText]);
+  const comp = useMemo<Composition>(() => ({ ...emptyComposition(), width: Math.round(canvas.width), height: Math.round(canvas.height), captionStyle: { ...style, on: true } as CaptionStyle }), [style, canvas.width, canvas.height, facesLoaded]);
   const block = useMemo(() => sampleCue('caption_sample', text, style.preset, subText), [text, subText, style.preset, comp]);
   const replayKey = useMemo(() => { const { yPct: _y, sub, ...look } = style; const { yPct: _sy, ...subLook } = sub ?? {}; return JSON.stringify([look, subLook]); }, [style]);
   return <div ref={host} className="absolute inset-0">
