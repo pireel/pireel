@@ -65,12 +65,12 @@ export function BrandPresetPanel({ options, locale, disabled, onChange, captionS
     <div className="border-line mt-4 space-y-3 border-t pt-4">
       <div><h3 className="text-ink-3 text-xs font-medium">{say('按品牌写给这条视频', 'Written for this video from the brand')}</h3>
         <p className="text-ink-4 mt-0.5 text-[11px] leading-relaxed">{say('AI 读品牌的描述，结合这条视频的内容逐处决定。', 'AI reads the brand’s description and decides moment by moment for this video.')}</p></div>
-      {hasText(blocks?.editing)
-        ? <SceneCheckbox label={say('推近和转场', 'Punch-ins and transitions')} checked={!!(edit.moves?.punchIn || edit.moves?.transition)} disabled={disabled} onChange={on => patchEdit({ moves: on ? { punchIn: true, transition: true } : undefined })} description={gist(blocks!.editing!.text)} />
-        : <p className="text-ink-4 text-xs">{say('推近和转场：品牌里没有剪法描述', 'Punch-ins and transitions: the brand has no editing description')}</p>}
-      {hasText(blocks?.layout)
-        ? <SceneCheckbox label={say('标题与标签', 'Titles and labels')} checked={!!edit.titles} disabled={disabled} onChange={on => patchEdit({ titles: on || undefined })} description={gist(blocks!.layout!.text)} />
-        : <p className="text-ink-4 text-xs">{say('标题与标签：品牌里没有版式描述', 'Titles and labels: the brand has no layout description')}</p>}
+      {hasText(blocks?.visual)
+        ? <SceneCheckbox label={say('推近和转场', 'Punch-ins and transitions')} checked={!!(edit.moves?.punchIn || edit.moves?.transition)} disabled={disabled} onChange={on => patchEdit({ moves: on ? { punchIn: true, transition: true } : undefined })} description={gist(blocks!.visual!.text)} />
+        : <p className="text-ink-4 text-xs">{say('推近和转场：品牌里没有画面描述', 'Punch-ins and transitions: the brand has no visual-language description')}</p>}
+      {hasText(blocks?.overlay_text)
+        ? <SceneCheckbox label={say('标题与标签', 'Titles and labels')} checked={!!edit.titles} disabled={disabled} onChange={on => patchEdit({ titles: on || undefined })} description={gist(blocks!.overlay_text!.text)} />
+        : <p className="text-ink-4 text-xs">{say('标题与标签：品牌里没有花字描述', 'Titles and labels: the brand has no overlay-text description')}</p>}
       {hasText(blocks?.motion_graphics) && <p className="text-ink-4 text-[11px] leading-relaxed">{say('品牌里的 MG 风格需要生成元素，一键剪辑暂不自动做，可用 Agent Remix 继续。', 'The brand’s motion-graphics style needs generated elements; continue in Agent Remix.')}</p>}
     </div>
     <div className="border-line mt-4 border-t pt-3">

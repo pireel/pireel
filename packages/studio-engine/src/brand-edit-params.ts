@@ -46,7 +46,7 @@ export function playbookEditParams(playbook: PlaybookSnapshot): CaptionEditParam
   const params: CaptionEditParams = {};
   if (b.sound?.pauses) params.pause = { ...PAUSE_BY_MODE[b.sound.pauses] };
   if (b.sound?.lufs !== undefined) params.targetLufs = b.sound.lufs;
-  if (hasText(b.editing)) params.moves = { punchIn: true, transition: true };
+  if (hasText(b.visual)) params.moves = { punchIn: true, transition: true };
   if (hasText(b.overlay_text)) params.titles = true;
   return params;
 }
@@ -56,7 +56,7 @@ export function playbookEditParams(playbook: PlaybookSnapshot): CaptionEditParam
 export const playbookHighlightsKeywords = (playbook: PlaybookSnapshot) => !!playbook.blocks.captions?.accent;
 
 /** The brand as the edit planner reads it. */
-export const playbookEditGuide = (playbook: PlaybookSnapshot) => renderBrandPrompt(playbook, ['portrait', 'editing', 'structure', 'sound']);
+export const playbookEditGuide = (playbook: PlaybookSnapshot) => renderBrandPrompt(playbook, ['portrait', 'visual', 'structure', 'sound']);
 
 /** The brand as the editing agent reads it: the whole prompt, context for the choices the user leaves open. */
 export const playbookAgentBrief = (playbook: PlaybookSnapshot) => renderBrandPrompt(playbook);

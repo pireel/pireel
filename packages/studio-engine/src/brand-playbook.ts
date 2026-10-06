@@ -58,11 +58,9 @@ export interface BrandBlocks {
   sound?: Prose & { lufs?: number; pauses?: 'tight' | 'moderate' | 'natural' };
   /** Fixed: the same clip before / after every video. */
   bookends?: { intro?: BrandAsset; outro?: BrandAsset; evidence?: Evidence };
-  /** How the frame is laid out: headline bands and template frames, where the speaker sits, picture in
-   *  picture, split screens. Where things are, not how the words look (that is overlay text). */
-  layout?: Prose & { references?: BrandAsset[] };
-  /** How the creator uses the platform's editing moves, and on what moments. */
-  editing?: Prose;
+  /** The visual language: how the picture is organised and changes — where the speaker sits, bands and
+   *  frames, picture in picture, split screens — and how the creator uses the platform's moves on it. */
+  visual?: Prose;
   /** Motion graphics, ready-made components among them: the prose is their style; `theme` is fixed — the
    *  colours and fonts the platform's components take (and generated graphics follow). */
   motion_graphics?: Prose & { theme?: MotionTheme; references?: BrandAsset[] };
@@ -73,7 +71,7 @@ export interface BrandBlocks {
   cover?: BrandCover;
 }
 export type BlockId = keyof BrandBlocks;
-export const BLOCK_IDS: readonly BlockId[] = ['portrait', 'captions', 'overlay_text', 'logo', 'sound', 'bookends', 'layout', 'editing', 'motion_graphics', 'structure', 'cover'];
+export const BLOCK_IDS: readonly BlockId[] = ['portrait', 'captions', 'overlay_text', 'logo', 'sound', 'bookends', 'visual', 'motion_graphics', 'structure', 'cover'];
 /** Blocks whose values the engine applies as they are. */
 export const FIXED_BLOCKS: readonly BlockId[] = ['captions', 'logo', 'sound', 'bookends'];
 
@@ -150,8 +148,7 @@ export function renderBrandPrompt(playbook: Pick<BrandPlaybook, 'name' | 'blocks
   if (want('logo')) parts.push(element('logo', { corner: b.logo!.corner, width: `${b.logo!.widthPct}%`, opacity: b.logo!.opacity }));
   if (want('sound')) parts.push(element('sound', { loudness: b.sound!.lufs !== undefined ? `${b.sound!.lufs} LUFS` : undefined, pauses: b.sound!.pauses }, b.sound!.text));
   if (want('bookends')) parts.push(element('bookends', { intro: b.bookends!.intro ? `${b.bookends!.intro.durationSec ?? ''}s clip` : undefined, outro: b.bookends!.outro ? `${b.bookends!.outro.durationSec ?? ''}s clip` : undefined }));
-  if (want('layout')) parts.push(element('layout', { references: refs(b.layout!.references) }, b.layout!.text));
-  if (want('editing')) parts.push(element('editing', {}, b.editing!.text));
+  if (want('visual')) parts.push(element('visual', {}, b.visual!.text));
   if (want('motion_graphics')) { const t = b.motion_graphics!.theme ?? {}; parts.push(element('motion_graphics', { text: t.text, ground: t.ground, surface: t.surface, line: t.line, accent: t.accent, 'accent-2': t.accent2, 'display-font': t.display, 'label-font': t.label, references: refs(b.motion_graphics!.references) }, b.motion_graphics!.text)); }
   if (want('structure')) parts.push(element('structure', {}, b.structure!.text));
   if (want('cover')) parts.push(coverElement(b.cover!, refs(b.cover!.references)));
@@ -207,8 +204,8 @@ export function validatePlaybook(value: unknown): BrandPlaybook {
   if (!isObject(p.blocks)) fail('blocks', '缺失');
   const b = p.blocks;
   for (const key of Object.keys(b)) if (!BLOCK_IDS.includes(key as BlockId)) fail(`blocks.${key}`, '未知的块');
-  for (const id of ['portrait', 'editing', 'structure'] as const) if (b[id]) prose(b[id], `blocks.${id}`);
-  for (const id of ['layout', 'motion_graphics'] as const) if (b[id]) { prose(b[id], `blocks.${id}`); references(b[id]!.references, `blocks.${id}.references`); }
+  for (const id of ['portrait', 'visual', 'structure'] as const) if (b[id]) prose(b[id], `blocks.${id}`);
+  if (b.motion_graphics) { prose(b.motion_graphics, 'blocks.motion_graphics'); references(b.motion_graphics.references, 'blocks.motion_graphics.references'); }
   if (b.cover) {
     if (!isObject(b.cover)) fail('blocks.cover', '需要对象');
     for (const key of ['frame', 'headline', 'design'] as const) if (b.cover[key] !== undefined && (typeof b.cover[key] !== 'string' || b.cover[key]!.length > MAX_TEXT)) fail(`blocks.cover.${key}`, `最多 ${MAX_TEXT} 字`);

@@ -14,7 +14,7 @@ import type { BlockId } from './brand-playbook';
  * and what goes wrong. Raise METHOD_VERSION whenever a row, a tool or a prompt changes; every brand
  * records the version that made it.
  */
-export const METHOD_VERSION = 'brand-method-15';
+export const METHOD_VERSION = 'brand-method-16';
 
 export interface BlockGuide {
   id: BlockId;
@@ -36,10 +36,8 @@ export const BLOCK_GUIDE: readonly BlockGuide[] = [
   { id: 'bookends', kind: 'fixed', look: 'The same clip at the start (often after a cold open) or the end of every video.', pitfalls: 'Title cards with the same layout but different words are layout, not a fixed clip.' },
   { id: 'overlay_text', kind: 'prose', look: 'Overlay text (花字): the words the creator puts on screen besides captions — the words of headline bands, opening labels, chapter or point labels, emphasis words, text inside graphics: type character, colours as #RRGGBB, stroke, shadow or plate, size, how key words are emphasised, how it enters and leaves, on what moments it is used, and how the words read (real examples).',
     pitfalls: 'Captions follow the speech and are not overlay text. Text that belongs to the filmed scene (signs, packaging, a screen in the room) is not the creator\'s. Describe the convention, not one video\'s words.' },
-  { id: 'layout', kind: 'prose', look: 'How the frame is laid out: a held headline band or a template frame around the footage, where the speaker sits, picture in picture (which corner, shape, size), split screens — positions and sizes; how the words look belongs to overlay text.',
-    pitfalls: 'Station bugs, corner badges, disclaimers and set signage are not layout.' },
-  { id: 'editing', kind: 'prose', look: 'How the creator uses the platform\'s editing moves — punch-ins (quick push, instant cut-in, slow push, in-and-out; how close), transitions between shots, B-roll and cutaways (own footage, product close-ups, screen recordings, screenshots, stock, archive, memes), stickers and emoji, jump cuts — and on what moments of the speech each lands, and how often.',
-    pitfalls: 'A switch to another camera angle is multi-cam, not a punch-in. Jump cuts are how the talk is cut, not a transition. How many per video depends on the content: describe the moments and the restraint, never a rate or an interval.' },
+  { id: 'visual', kind: 'prose', look: 'The visual language — how the picture is organised and how it changes: where the speaker sits, a held headline band or template frame, picture in picture (which corner, shape, size), split screens; and how the creator uses the platform\'s moves on it — punch-ins (quick push, instant cut-in, slow push, in-and-out; how close), transitions, B-roll and cutaways (own footage, product close-ups, screen recordings, screenshots, stock, archive, memes), stickers, jump cuts — and on what moments of the speech each lands.',
+    pitfalls: 'A switch to another camera angle is multi-cam, not a punch-in. Jump cuts are how the talk is cut, not a transition. Station bugs, badges and set signage are not part of it; how the words look belongs to overlay text. How many per video depends on the content: describe the moments and the restraint, never a rate or an interval.' },
   { id: 'motion_graphics', kind: 'prose', look: 'Graphics that explain or emphasise — number cards, lists, comparisons, charts, arrows, highlight boxes, zoomed screenshots, lower thirds, price tags; the platform\'s ready-made components are of this kind. Write it as the theme a designer follows: each colour with its role and its limits (for example "accent coral fills only chips, pill bars and one stat figure; headlines stay in the ink colour"), the type by role (display and labels), shape language (corners, outlines, shadows, glass), how graphics enter, hold and leave, and what in the speech brings them on.',
     pitfalls: 'Captions, the creator\'s logo and scene text are not motion graphics.' },
   { id: 'structure', kind: 'prose', look: 'How a video opens (straight to camera, a question, a claim, a cover frame at 0 s, a teaser, result first), how the body is organised (points, recaps, chapters), and how it ends (sign-off line, call to action, end card).',

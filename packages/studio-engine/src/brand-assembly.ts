@@ -126,8 +126,7 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
 
   if (assets.intro || assets.outro) blocks.bookends = { ...(assets.intro ? { intro: assets.intro } : {}), ...(assets.outro ? { outro: assets.outro } : {}), ...(summary.intro ?? summary.outro ? { evidence: { videos: (summary.intro ?? summary.outro)!.evidence.videos, confidence: (summary.intro ?? summary.outro)!.evidence.confidence } } : {}) };
 
-  const layout = prose('layout'); if (layout) blocks.layout = layout;
-  const editing = prose('editing'); if (editing) blocks.editing = editing;
+  const visual = prose('visual'); if (visual) blocks.visual = visual;
   // Motion graphics carry the theme components take: the colours the synthesis read, the face of the words
   // in the creator's graphics (a Chinese one for a Chinese creator).
   const motion = prose('motion_graphics');

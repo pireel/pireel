@@ -7,7 +7,7 @@ describe('method prompts', () => {
     const reading = readingSystemPrompt();
     expect(reading).toContain('moment strips');
     expect(reading).toContain('- motion_graphics:');
-    expect(reading).toContain('- editing:');
+    expect(reading).toContain('- visual:');
     expect(reading).not.toContain('- captions:');
   });
 
@@ -53,23 +53,23 @@ describe('parseSynthesis', () => {
   const synthesis = (blocks: Record<string, unknown>) => JSON.stringify({ blocks: { portrait: { text: '快节奏', videos: [] }, ...blocks }, theme: { accent: '#FFD600', text: 'white' } });
 
   it('keeps blocks that hold in two videos and well-formed colours', () => {
-    const parsed = parseSynthesis(synthesis({ editing: { text: '说到价格推近', videos: ['v1', 'v2', 'v9'] } }), videos);
-    expect(parsed.blocks.editing).toEqual({ text: '说到价格推近', videos: ['v1', 'v2'] });
+    const parsed = parseSynthesis(synthesis({ visual: { text: '说到价格推近', videos: ['v1', 'v2', 'v9'] } }), videos);
+    expect(parsed.blocks.visual).toEqual({ text: '说到价格推近', videos: ['v1', 'v2'] });
     expect(parsed.theme).toEqual({ accent: '#ffd600' });
     expect(parsed.setAside).toEqual([]);
   });
 
   it('keeps a block seen in one video (style is judged, not counted); sets aside empty or unknown blocks', () => {
-    const parsed = parseSynthesis(synthesis({ layout: { text: '顶部标题栏', videos: ['v1'] }, structure: { text: '', videos: ['v1', 'v2'] }, cover: { text: '人物在右', videos: ['v1', 'v2'] }, moves: { text: 'x', videos: ['v1', 'v2'] } }), videos);
-    expect(parsed.blocks.layout).toEqual({ text: '顶部标题栏', videos: ['v1'] });
+    const parsed = parseSynthesis(synthesis({ visual: { text: '顶部标题栏', videos: ['v1'] }, structure: { text: '', videos: ['v1', 'v2'] }, cover: { text: '人物在右', videos: ['v1', 'v2'] }, moves: { text: 'x', videos: ['v1', 'v2'] } }), videos);
+    expect(parsed.blocks.visual).toEqual({ text: '顶部标题栏', videos: ['v1'] });
     expect(parsed.setAside).toEqual(['structure: no text', 'cover: not a block', 'moves: not a block']);
   });
 
   it('takes a block written as plain text, keeping it as uncited', () => {
-    const parsed = parseSynthesis(JSON.stringify({ blocks: { portrait: '快节奏', editing: '说到价格推近', structure: { text: '结论先行', videos: [] } } }), videos);
+    const parsed = parseSynthesis(JSON.stringify({ blocks: { portrait: '快节奏', visual: '说到价格推近', structure: { text: '结论先行', videos: [] } } }), videos);
     expect(parsed.blocks.portrait).toEqual({ text: '快节奏', videos: [] });
-    expect(parsed.blocks.editing).toEqual({ text: '说到价格推近', videos: [] });
-    expect(parsed.uncited).toEqual(['editing', 'structure']);
+    expect(parsed.blocks.visual).toEqual({ text: '说到价格推近', videos: [] });
+    expect(parsed.uncited).toEqual(['visual', 'structure']);
   });
 
   it('fails when the answer has no portrait or is not JSON', () => {
