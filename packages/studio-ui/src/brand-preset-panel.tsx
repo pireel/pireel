@@ -71,7 +71,7 @@ export function BrandPresetPanel({ options, locale, disabled, onChange, captionS
       {hasText(blocks?.overlay_text)
         ? <SceneCheckbox label={say('标题与标签', 'Titles and labels')} checked={!!edit.titles} disabled={disabled} onChange={on => patchEdit({ titles: on || undefined })} description={gist(blocks!.overlay_text!.text)} />
         : <p className="text-ink-4 text-xs">{say('标题与标签：品牌里没有花字描述', 'Titles and labels: the brand has no overlay-text description')}</p>}
-      {hasText(blocks?.motion_graphics) && <p className="text-ink-4 text-[11px] leading-relaxed">{say('品牌里的 MG 风格需要生成元素，一键剪辑暂不自动做，可用 Agent Remix 继续。', 'The brand’s motion-graphics style needs generated elements; continue in Agent Remix.')}</p>}
+      {hasText(blocks?.graphics) && <p className="text-ink-4 text-[11px] leading-relaxed">{say('品牌里的图形需要生成，一键剪辑暂不自动做，可用 Agent Remix 继续。', 'The brand’s motion-graphics style needs generated elements; continue in Agent Remix.')}</p>}
     </div>
     <div className="border-line mt-4 border-t pt-3">
       <button type="button" aria-expanded={styleOpen} onClick={() => setStyleOpen(open => !open)} className="text-ink-2 hover:text-ink flex w-full items-center justify-between py-1 text-sm">

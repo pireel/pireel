@@ -17,7 +17,7 @@ export function playbookCaptionStyle(playbook: PlaybookSnapshot): Partial<Captio
 /** The palette generated material uses, in the document's appearance keys. */
 export function playbookAppearance(playbook: PlaybookSnapshot): { palette: Record<string, string> } {
   // Components and generated graphics take the creator's motion-graphics theme.
-  const t = playbook.blocks.motion_graphics?.theme ?? {};
+  const t = playbook.blocks.graphics?.theme ?? {};
   const palette: Record<string, string> = {};
   if (t.accent) palette.accent = t.accent;
   if (t.accent2) palette['accent-2'] = t.accent2;

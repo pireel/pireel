@@ -9,7 +9,7 @@ const valid = (): BrandPlaybook => ({
     logo: { key: 'uploads/u/logo.png', kind: 'image', width: 200, height: 80, corner: 'top-right', widthPct: 12, opacity: 1 },
     sound: { lufs: -15, pauses: 'tight' },
     visual: { text: '说到价格时快推近 & 换产品时甩镜 <偶尔>。', evidence: { videos: ['v1', 'v2'], confidence: 'high' } },
-    motion_graphics: { text: '白底黑字圆角数字卡，从下方弹入。', theme: { accent: '#ffd600', display: 'web:smiley-sans' }, references: [{ key: 'uploads/u/mg.jpg', kind: 'image', width: 540, height: 960 }] },
+    graphics: { text: '白底黑字圆角数字卡，从下方弹入。', theme: { accent: '#ffd600', display: 'web:smiley-sans' }, references: [{ key: 'uploads/u/mg.jpg', kind: 'image', width: 540, height: 960 }] },
   },
 });
 
@@ -27,7 +27,7 @@ describe('validatePlaybook', () => {
       [p => { p.blocks.logo!.key = 'blob:local'; }, /blocks\.logo/],
       [p => { p.blocks.captions!.style = { color: 'red' }; }, /captions\.style\.color/],
       [p => { p.blocks.visual = { text: 'x'.repeat(4001) }; }, /visual\.text/],
-      [p => { p.blocks.motion_graphics!.references = [{ key: '', kind: 'image', width: 1, height: 1 }]; }, /motion_graphics\.references\.0/],
+      [p => { p.blocks.graphics!.references = [{ key: '', kind: 'image', width: 1, height: 1 }]; }, /graphics\.references\.0/],
     ];
     for (const [mutate, error] of cases) {
       const playbook = valid(); mutate(playbook);
@@ -48,7 +48,7 @@ describe('renderBrandPrompt', () => {
     expect(prompt).toContain('<logo corner="top-right" width="12%" opacity="1"/>');
     expect(prompt).toContain('<sound loudness="-15 LUFS" pauses="tight"/>');
     expect(prompt).toContain('<visual>\n说到价格时快推近 &amp; 换产品时甩镜 &lt;偶尔&gt;。\n</visual>');
-    expect(prompt).toContain('<motion_graphics accent="#ffd600" display-font="web:smiley-sans" references="1">');
+    expect(prompt).toContain('<graphics accent="#ffd600" display-font="web:smiley-sans" references="1">');
     expect(prompt.indexOf('<portrait>')).toBeLessThan(prompt.indexOf('<captions'));
   });
 
@@ -56,7 +56,7 @@ describe('renderBrandPrompt', () => {
     const prompt = renderBrandPrompt(valid(), ['portrait', 'visual']);
     expect(prompt).toContain('<visual>');
     expect(prompt).not.toContain('<captions');
-    expect(prompt).not.toContain('<motion_graphics');
+    expect(prompt).not.toContain('<graphics');
   });
 });
 

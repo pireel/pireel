@@ -96,7 +96,7 @@ export function parseMoments(raw: string, lines: { index: number; startSec: numb
 // ── Step 2: reading one video
 
 const blockLines = (kinds: BlockGuide['kind'][]) => BLOCK_GUIDE.filter(item => kinds.includes(item.kind)).map(item => `- ${item.id}: ${item.look}${item.pitfalls ? ` Beware: ${item.pitfalls}` : ''}`).join('\n');
-const READ_NOTES: BlockId[] = ['overlay_text', 'visual', 'motion_graphics', 'structure'];
+const READ_NOTES: BlockId[] = ['overlay_text', 'visual', 'graphics', 'structure'];
 
 export function readingSystemPrompt(): string {
   return `You study ONE video by a creator, as part of extracting their style. Everything you report must be visible in the images; when you cannot see it, answer "unknown" or leave it out — never guess.
@@ -111,15 +111,15 @@ Report:
 1. portrait — one English sentence on this video's look and pace.
 2. facets — one value per key from the options, or "unknown".
 ${FACET_GUIDE}
-3. moments — for each moment strip, in order: what happens on screen there (any of: motion_graphic, broll, punch_in, transition, sticker, nothing) and a short description of how it looks and moves.
+3. moments — for each moment strip, in order: what happens on screen there (any of: motion_graphic, broll, punch_in, transition, sticker, nothing); "speech": what the words there are about (a number or trend, a person, a company or brand, a product, a place, an event or policy, a concept or process, a comparison, an opinion, a story, a joke); "source": what the B-roll is, when there is some (own footage, news footage, screenshot, document, screen recording, photo, stock, illustration, AI-made image or video, chart or other graphic, meme, product shot); "presentation": how it is shown (full frame, window, speaker in picture-in-picture, split screen, beside the speaker); and "how": a short description of how it looks and moves.
 4. notes — what this video shows for each block, in English, concrete enough to recreate (positions, colours as #RRGGBB, type character, motion, timing, real words of titles); leave a block out when the video shows nothing for it:
 ${blockLines(['prose'])}
 5. look — captionFill and captionOutline (#RRGGBB, when captions show), palette (up to 4 #RRGGBB colours of the creator's own text and graphics).
 
 Return only JSON:
 {"portrait":"…","facets":{"layout":"…","camera":"…","cuttingDevice":"…","punchIn":"…","captionPresence":"…","captionStyle":"…","fontClass":"…","captionCase":"…","captionTreatment":"…","captionPosition":"…","accentRule":"…","captionAnimation":"…","emoji":"…","heldHeader":"…","hookLabel":"…","callouts":[],"brollTypes":[],"brandElements":[],"colorGrade":"…","hookStructure":"…"},
- "moments":[{"seen":["…"],"how":"…"}],
- "notes":{"overlay_text":"…","visual":"…","motion_graphics":"…","structure":"…"},
+ "moments":[{"seen":["…"],"speech":"…","source":"…","presentation":"…","how":"…"}],
+ "notes":{"overlay_text":"…","visual":"…","graphics":"…","structure":"…"},
  "look":{"captionFill":"#…","captionOutline":"#…","palette":["#…"]}}`;
 }
 
@@ -142,7 +142,7 @@ export interface VideoReading {
   portrait: string;
   facets: VideoStyleFacets;
   /** Per moment strip, in the order given. */
-  moments: { seen: Seen[]; how?: string }[];
+  moments: { seen: Seen[]; speech?: string; source?: string; presentation?: string; how?: string }[];
   notes: Partial<Record<BlockId, string>>;
   look: { captionFill?: string; captionOutline?: string; palette: string[] };
   /** Names the reading used outside the vocabulary, kept visible, not used. */
@@ -158,7 +158,8 @@ export function parseVideoReading(raw: string, video: string, momentCount: numbe
     const item = (entry ?? {}) as Record<string, unknown>;
     const seen = (Array.isArray(item.seen) ? item.seen : []).flatMap(name => { if (SEEN.includes(name as Seen)) return [name as Seen]; unread.push(String(name)); return []; });
     const how = optionalText(item.how, 400);
-    return { seen: [...new Set(seen)], ...(how ? { how } : {}) };
+    const said = Object.fromEntries((['speech', 'source', 'presentation'] as const).flatMap(key => { const text = optionalText(item[key], 120); return text ? [[key, text]] : []; }));
+    return { seen: [...new Set(seen)], ...said, ...(how ? { how } : {}) };
   });
   const rawNotes = (value.notes ?? {}) as Record<string, unknown>;
   const notes = Object.fromEntries(READ_NOTES.flatMap(id => { const note = optionalText(rawNotes[id]); return note ? [[id, note]] : []; })) as VideoReading['notes'];
@@ -189,7 +190,9 @@ Blocks to write (each as prose a model can follow, concrete: positions, type cha
 ${blockLines(['prose'])}
 - sound: only what frames show about music or sound effects; leave out when nothing does.
 
-Colour: the creator's graphics keep a theme — give it as "theme" (#RRGGBB, each only when their graphics keep it across videos: text, ground, surface for cards, line for outlines, accent, accent2) and say in motion_graphics what each is for and where it stops. Everywhere else: ${COLOUR_GUIDE}
+The readings' moments say what the speech was about there, what went on screen (and from what source) and how it was shown: the visual block's table generalises them into "what the speech is about → what goes on screen and how", one line per kind of content the creator treats the same way.
+
+Colour: the creator's graphics keep a theme — give it as "theme" (#RRGGBB, each only when their graphics keep it across videos: text, ground, surface for cards, line for outlines, accent, accent2) and say in graphics what each is for and where it stops. Everywhere else: ${COLOUR_GUIDE}
 
 Write every block in ${language}. A block the videos give no recurring evidence for is left out.
 Return only JSON:

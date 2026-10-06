@@ -20,7 +20,7 @@ const synthesis: Synthesis = {
   blocks: {
     portrait: { text: '快节奏数码测评。', videos: [] },
     visual: { text: '说到价格时快推近。', videos: ['v1', 'v2', 'v3'] },
-    motion_graphics: { text: '白底黑字数字卡弹入。', videos: ['v2', 'v3'] },
+    graphics: { text: '白底黑字数字卡弹入。', videos: ['v2', 'v3'] },
   },
   theme: { accent: '#ffd600' }, setAside: [], uncited: [],
 };
@@ -40,9 +40,9 @@ describe('assemblePlaybook', () => {
     const b = playbook.blocks;
     expect(b.sound).toMatchObject({ lufs: -15, pauses: 'tight' });
     expect(b.captions).toMatchObject({ on: true, accent: 'keywords', style: { color: '#ffffff', strokeColor: '#000000', yPct: 22.7 } });
-    expect(b.motion_graphics?.theme).toEqual({ accent: '#ffd600' });
+    expect(b.graphics?.theme).toEqual({ accent: '#ffd600' });
     expect(b.visual).toEqual({ text: '说到价格时快推近。', evidence: { videos: ['v1', 'v2', 'v3'], confidence: 'high' } });
-    expect(b.motion_graphics?.references).toEqual([mg]);
+    expect(b.graphics?.references).toEqual([mg]);
     expect(b.visual).toBeDefined();
   });
 

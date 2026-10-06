@@ -6,7 +6,7 @@ describe('method prompts', () => {
   it('read each video by block, from the overview, the ends and the moments', () => {
     const reading = readingSystemPrompt();
     expect(reading).toContain('moment strips');
-    expect(reading).toContain('- motion_graphics:');
+    expect(reading).toContain('- graphics:');
     expect(reading).toContain('- visual:');
     expect(reading).not.toContain('- captions:');
   });
@@ -31,13 +31,18 @@ describe('parseMoments', () => {
 });
 
 describe('parseVideoReading', () => {
+  it('keeps what each moment was about, its source and how it was shown', () => {
+    const parsed = parseVideoReading(JSON.stringify({ portrait: 'x', moments: [{ seen: ['broll'], speech: 'a number or trend', source: 'chart', presentation: 'full frame', how: '3D bars rise' }] }), 'v1', 1);
+    expect(parsed.moments[0]).toEqual({ seen: ['broll'], speech: 'a number or trend', source: 'chart', presentation: 'full frame', how: '3D bars rise' });
+  });
+
   const reading = (extra: Record<string, unknown>) => JSON.stringify({ portrait: 'Quick talk.', facets: { layout: 'full_frame_host', camera: 'nonsense' }, look: { captionFill: '#FFFFFF', palette: ['#ff0000', 'red'] }, ...extra });
 
   it('keeps what was seen, sets aside names outside the vocabulary, and blanks unknown facets', () => {
-    const parsed = parseVideoReading(reading({ moments: [{ seen: ['motion_graphic', 'zoom_blur'], how: 'a number card pops in' }, { seen: ['nothing'] }, { seen: ['broll'] }], notes: { motion_graphics: 'White rounded cards.', captions: 'ignored' } }), 'v1', 2);
+    const parsed = parseVideoReading(reading({ moments: [{ seen: ['motion_graphic', 'zoom_blur'], how: 'a number card pops in' }, { seen: ['nothing'] }, { seen: ['broll'] }], notes: { graphics: 'White rounded cards.', captions: 'ignored' } }), 'v1', 2);
     expect(parsed.moments).toEqual([{ seen: ['motion_graphic'], how: 'a number card pops in' }, { seen: ['nothing'] }]);
     expect(parsed.unread).toEqual(['zoom_blur']);
-    expect(parsed.notes).toEqual({ motion_graphics: 'White rounded cards.' });
+    expect(parsed.notes).toEqual({ graphics: 'White rounded cards.' });
     expect(parsed.facets.camera).toBeNull();
     expect(parsed.look).toEqual({ captionFill: '#ffffff', palette: ['#ff0000'] });
   });

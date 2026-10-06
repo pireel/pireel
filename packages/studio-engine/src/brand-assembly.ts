@@ -129,10 +129,10 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
   const visual = prose('visual'); if (visual) blocks.visual = visual;
   // Motion graphics carry the theme components take: the colours the synthesis read, the face of the words
   // in the creator's graphics (a Chinese one for a Chinese creator).
-  const motion = prose('motion_graphics');
+  const motion = prose('graphics');
   const graphicsFace = fonts.graphics && (parts.locale !== 'zh' || !fonts.graphics.id.startsWith('google:')) ? fonts.graphics.id : undefined;
   const theme = { ...synthesis.theme, ...(graphicsFace ? { display: graphicsFace } : {}) };
-  if (motion || Object.keys(theme).length) blocks.motion_graphics = { ...motion, ...(Object.keys(theme).length ? { theme } : {}), ...(assets.motionReferences.length ? { references: assets.motionReferences } : {}) };
+  if (motion || Object.keys(theme).length) blocks.graphics = { ...motion, ...(Object.keys(theme).length ? { theme } : {}), ...(assets.motionReferences.length ? { references: assets.motionReferences } : {}) };
   const structure = prose('structure'); if (structure) blocks.structure = structure;
   const cover = parts.cover;
   if (cover || assets.coverReferences.length) blocks.cover = {
