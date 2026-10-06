@@ -60,12 +60,11 @@ describe('parseVideoReading', () => {
 
 describe('parseSynthesis', () => {
   const videos = [{ id: 'v1' }, { id: 'v2' }, { id: 'v3' }];
-  const synthesis = (blocks: Record<string, unknown>) => JSON.stringify({ blocks: { portrait: { text: '快节奏', videos: [] }, ...blocks }, theme: { accent: '#FFD600', text: 'white' } });
+  const synthesis = (blocks: Record<string, unknown>) => JSON.stringify({ blocks: { portrait: { text: '快节奏', videos: [] }, ...blocks } });
 
-  it('keeps blocks that hold in two videos and well-formed colours', () => {
+  it('keeps blocks that hold in two videos', () => {
     const parsed = parseSynthesis(synthesis({ visual: { text: '说到价格推近', videos: ['v1', 'v2', 'v9'] } }), videos);
     expect(parsed.blocks.visual).toEqual({ text: '说到价格推近', videos: ['v1', 'v2'] });
-    expect(parsed.theme).toEqual({ accent: '#ffd600' });
     expect(parsed.setAside).toEqual([]);
   });
 
@@ -91,8 +90,9 @@ describe('parseSynthesis', () => {
 describe('cover', () => {
   it('asks for the two parts, from the covers, in the brand language', () => {
     const prompt = coverSystemPrompt('Simplified Chinese');
-    expect(prompt).toMatch(/frame —[\s\S]*headline —[\s\S]*design —/);
-    expect(prompt).toContain('Write every part in Simplified Chinese.');
+    expect(prompt).toMatch(/frame —[\s\S]*design —/);
+    expect(prompt).not.toMatch(/^headline —/m);
+    expect(prompt).toContain('Write both parts in Simplified Chinese.');
     expect(synthesisSystemPrompt('English')).not.toMatch(/^- cover:/m);
     expect(readingSystemPrompt()).not.toContain('"cover"');
   });
@@ -101,13 +101,7 @@ describe('cover', () => {
     expect(parseCover(JSON.stringify({ frame: '惊讶表情', design: '人物在右', covers: [2, 0, 0, 9] }), 3)).toEqual({ frame: '惊讶表情', design: '人物在右', covers: [0, 2] });
     expect(parseCover(JSON.stringify({ frame: '惊讶表情', design: '人物在右', covers: [1] }), 3)).toEqual({ frame: '惊讶表情', design: '人物在右', covers: [1] });
     expect(parseCover(JSON.stringify({ frame: '惊讶表情', design: '人物在右', covers: [] }), 1)).toEqual({ frame: '惊讶表情', design: '人物在右', covers: [] });
-    expect(parseCover(JSON.stringify({ frame: '惊讶表情', headline: '主标题四到六字，带问号', design: '人物在右', covers: [0, 1] }), 2)?.headline).toBe('主标题四到六字，带问号');
     expect(() => parseCover(JSON.stringify({ design: '人物在右' }), 2)).toThrow(/frame/);
-  });
-
-  it('reads where the person comes from, leaving out anything else', () => {
-    expect(parseCover(JSON.stringify({ source: 'photo', frame: '托腮思考', design: '人物在左', covers: [0] }), 1).source).toBe('photo');
-    expect(parseCover(JSON.stringify({ source: 'poster', frame: '托腮思考', design: '人物在左', covers: [0] }), 1).source).toBeUndefined();
   });
 
   it('reads the picked still, refusing an index out of range', () => {
@@ -123,7 +117,7 @@ describe('cover headline', () => {
 
   it('reads one to three short lines', () => {
     expect(parseCoverHeadline('{"lines":["评论区问题精选"," 总有你关心的 ",""]}')).toEqual(['评论区问题精选', '总有你关心的']);
-    expect(() => parseCoverHeadline('{"lines":[]}')).toThrow(/lines/);
+    expect(parseCoverHeadline('{"lines":[]}')).toEqual([]);
     expect(() => parseCoverHeadline(JSON.stringify({ lines: ['x'.repeat(41)] }))).toThrow(/lines/);
   });
 });

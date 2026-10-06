@@ -14,21 +14,11 @@ export function playbookCaptionStyle(playbook: PlaybookSnapshot): Partial<Captio
   return { ...(playbook.blocks.captions?.style ?? {}) };
 }
 
-/** The palette generated material uses, in the document's appearance keys. */
+/** The palette generated material uses, in the document's appearance keys. Graphics colours and type are
+ *  chosen per video from the brand's prose; only generated headings take the creator's overlay-text face. */
 export function playbookAppearance(playbook: PlaybookSnapshot): { palette: Record<string, string> } {
-  // Components and generated graphics take the creator's motion-graphics theme.
-  const t = playbook.blocks.graphics?.theme ?? {};
   const palette: Record<string, string> = {};
-  if (t.accent) palette.accent = t.accent;
-  if (t.accent2) palette['accent-2'] = t.accent2;
-  if (t.text) palette.fg = t.text;
-  if (t.ground) palette.paper = t.ground;
-  if (t.surface) palette.panel = t.surface;
-  if (t.line) palette.line = t.line;
-  if (t.display) palette['font-head'] = t.display;
-  if (t.label) palette['font-body'] = t.label;
-  // Without a graphics face, generated headings letter in the creator's overlay-text face.
-  if (!t.display && playbook.blocks.overlay_text?.font) palette['font-head'] = playbook.blocks.overlay_text.font;
+  if (playbook.blocks.overlay_text?.font) palette['font-head'] = playbook.blocks.overlay_text.font;
   return { palette };
 }
 

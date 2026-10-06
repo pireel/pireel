@@ -208,26 +208,20 @@ The platform can punch in, transition, cut to B-roll, add stickers, sound effect
 
 Blocks to write (each as prose a model can follow, concrete: positions, type character, motion, timing, real examples):
 ${blockLines(['prose'])}
-- sound: only what frames show about music or sound effects; leave out when nothing does.
 
-The readings' moments say what the speech was about there (speech), what went on screen (source) and how it was shown (presentation): read the creator's habits across them, then write the visual block as the principle behind them — why and when they leave the speaker, what kinds of pictures they reach for and how those look — so an editor can apply it to a new video on any topic. Never list the moments or map kinds of content to pictures as a table; never name the topics, people or things of these videos.
+The brand is used to edit the creator's next video: their own talking footage, some or all of its B-roll from them, the rest generated or found. Write the picture and the graphics as what that edit does — which moments leave the speaker and for what kind of picture, how pictures sit with the speaker, what to make where the creator's material runs out, and how graphics look — never as a description of how these videos were filmed. The readings' moments say what the speech was about there (speech), what went on screen (source) and how it was shown (presentation): read the creator's habits across them and write the principle behind them, so an editor can apply it to a new video on any topic. Never list the moments or map kinds of content to pictures as a table; never name the topics, people or things of these videos.
 
-Colour: the creator's graphics keep a theme — give it as "theme" (#RRGGBB, each only when their graphics keep it across videos: text, ground, surface for cards, line for outlines, accent, accent2) and say in graphics what each is for and where it stops. Everywhere else: ${COLOUR_GUIDE}
+Colour and type in graphics are chosen afresh for each video: write in graphics how the creator chooses them — what in the picture and the topic decides the colours, the family, key and contrast they stay in, what each colour does and where it stops, and the character of the type by role — so an editor can choose a fitting set for a new video and keep it through that video. Never fix particular colours or typefaces in graphics: name a hue or a face only as what one video used, as an example of the choice. With one video, write in graphics the conventions every graphic keeps (how titles are set, how figures are shown, how data and documents are marked) as the style, and a kind of card or chart seen once as an example of it, not a rule. Everywhere else: ${COLOUR_GUIDE}
 
 Write every block in ${language}. A block the videos give no recurring evidence for is left out.
 Return only JSON:
-{"blocks":{"<block id>":{"text":"…","videos":["<video ids where it holds>"]}},
- "theme":{"text":"#…","ground":"#…","surface":"#…","line":"#…","accent":"#…","accent2":"#…"} (each optional)}
-Block ids, used exactly as written: ${[...PROSE_BLOCKS, 'sound'].join(', ')}. The portrait is two to four sentences; other blocks as long as they need, without repeating each other.`;
+{"blocks":{"<block id>":{"text":"…","videos":["<video ids where it holds>"]}}}
+Block ids, used exactly as written: ${PROSE_BLOCKS.join(', ')}. The portrait is two to four sentences; other blocks as long as they need, without repeating each other.`;
 }
 
-export type SynthesisBlockId = (typeof PROSE_BLOCKS)[number] | 'sound';
-export const THEME_COLOURS = ['text', 'ground', 'surface', 'line', 'accent', 'accent2'] as const;
-export type ThemeColour = typeof THEME_COLOURS[number];
+export type SynthesisBlockId = (typeof PROSE_BLOCKS)[number];
 export interface Synthesis {
   blocks: Partial<Record<SynthesisBlockId, { text: string; videos: string[] }>>;
-  /** The motion-graphics theme the platform's components take. */
-  theme: Partial<Record<ThemeColour, string>>;
   /** Blocks the answer gave that are not blocks or have no text, with why — kept visible, never used. */
   setAside: string[];
   /** Blocks kept without any video cited for them (no evidence to show). */
@@ -244,7 +238,7 @@ export function parseSynthesis(raw: string, videos: { id: string }[]): Synthesis
   const value = json(raw);
   const ids = new Set(videos.map(video => video.id));
   const setAside: string[] = []; const uncited: string[] = [];
-  const allowed = [...PROSE_BLOCKS, 'sound'] as SynthesisBlockId[];
+  const allowed = [...PROSE_BLOCKS] as SynthesisBlockId[];
   const rawBlocks = (value.blocks ?? {}) as Record<string, unknown>;
   const blocks: Synthesis['blocks'] = {};
   for (const [id, entry] of Object.entries(rawBlocks)) {
@@ -258,44 +252,36 @@ export function parseSynthesis(raw: string, videos: { id: string }[]): Synthesis
     blocks[id as SynthesisBlockId] = { text: words, videos: seen };
   }
   if (!blocks.portrait) text(undefined, 'blocks.portrait');
-  const theme = (value.theme ?? {}) as Record<string, unknown>;
-  return { blocks, theme: Object.fromEntries(THEME_COLOURS.flatMap(key => hex(theme[key]) ? [[key, hex(theme[key])]] : [])), setAside, uncited };
+  return { blocks, setAside, uncited };
 }
 
 // ── The cover, from the creator's covers
 
 /** The cover prompt for new videos, written from the creator's past covers (the images given). */
 export function coverSystemPrompt(language: string): string {
-  return `You study a creator's past video covers to write the prompt that will make the cover of each NEW video of theirs in the same style. You also get frames from their videos, to tell where the person on the covers comes from.
+  return `You study a creator's past video covers to write the prompt that will make the cover of each NEW video of theirs in the same style. Whoever makes the next cover has only the new video: a still is picked from it, then an image generator turns that still into the cover. You also get frames from the creator's videos, to compare the person on the covers with how they look in the footage.
 
-source — "video" when the person on the covers is a still of the video (same outfit, light and setting as the frames), "photo" when it is a photo taken for covers (a cut-out studio portrait, another outfit, posed for the cover, lit apart). Judge from the frames given.
+The prompt has two parts, used one after the other:
 
-The prompt has three parts, used one after the other:
+frame — how to pick the still from the new video's footage: the moment to look for (expression, gesture, gaze, pose), how close the shot is, who is in it when there are several people, what the moment should say. Never describe how the person looks — face, hair, outfit, accessories: the new video decides that. When the covers carry no person (a designed graphic, a product shot), say what to pick instead.
 
-frame — what the cover is built on. For "video": how to choose the still from the new video's footage — the person's expression, gesture, gaze and pose, how close the shot is, who is in it when there are several people, what the moment should say. For "photo": the photo to pose and shoot or pick — pose, expression, gesture, gaze, framing, outfit, how it is cut out and lit. When the covers carry no person (a designed graphic, a product shot), say what they are built on.
+design — how that still becomes the cover: how the person from it is used (kept as shot, or cut out, relit and retouched to look like a portrait taken for covers when the covers differ from the footage; where they sit and how large); what else goes on the cover (other people or things from the topic, and how they are treated); the background and how it is chosen for the topic; the headline — how it is worded for a new video (how many lines and how long, the structure, the voice, punctuation and emphasis marks, how it hooks, with two to four real headlines quoted as examples) and how it is lettered (type character, weight, stroke, shadow or plate, size, position); how colours are chosen for a cover from its topic and its still (${COLOUR_GUIDE}); other marks (logo, arrows, circles, emoji, borders, series or episode labels); the finish (contrast, saturation, glow). When the covers are plain stills with nothing added, or carry no words, say so: that is the style.
 
-headline — how the words on the cover are written, for a writer who will word the next one from what the new video says: how many lines (a main line, a second line, a small label) and how long each is; the structure (a question, a bold claim, a number or result, a series name with an episode number, a quote); the voice, punctuation and emphasis marks; how it hooks (curiosity, conflict, a promise of use). Quote two to four real headlines from the covers as examples. When the covers carry no words, leave it empty.
-
-design — how the still and the headline become the cover: crop, where the person sits and how large; what happens to the background (kept, darkened, blurred, replaced, a colour, a scene from the topic); how the headline is lettered (type character, weight, stroke, shadow or plate, size, position); the colour (${COLOUR_GUIDE}); other marks (logo, arrows, circles, emoji, borders, series or episode labels); the finish (contrast, saturation, glow). When the covers are plain stills with nothing added, say so: that is the style.
-
-You judge what is the creator's cover style and what belongs to one cover's topic; write what depends on the topic as a role, never as the particular person or thing. When the covers follow two styles, describe the main one and name the other in one sentence.
-Write as instructions to a designer who has never seen these covers, concrete enough to recreate them, without naming the people in them.
-Write every part in ${language}.
-Return only JSON: {"source":"video"|"photo","frame":"…","headline":"…","design":"…","covers":[<indices of the covers the design holds for, from 0>]}`;
+You judge what is the creator's cover style and what belongs to one cover's topic; write what depends on the topic as a role, never as the particular person or thing, and name a particular colour only as one cover's example unless several covers keep it. When the covers follow two styles, describe the main one and name the other in one sentence.
+Write as instructions to a designer who has never seen these covers, concrete enough to recreate the style, without naming the people in them.
+Write both parts in ${language}.
+Return only JSON: {"frame":"…","design":"…","covers":[<indices of the covers the design holds for, from 0>]}`;
 }
 
-export interface CoverReading { source?: 'video' | 'photo'; frame: string; headline?: string; design: string; covers: number[] }
+export interface CoverReading { frame: string; design: string; covers: number[] }
 
-/** The cover prompt as the model judged it; the covers it cites are evidence to show and the order
- *  references are listed in. */
+/** The cover prompt as the model judged it; the covers it cites are evidence to show. */
 export function parseCover(raw: string, coverCount: number): CoverReading {
   const value = json(raw);
   const frame = text(value.frame, 'frame', 2000);
-  const design = text(value.design, 'design', 3000);
-  const headline = optionalText(value.headline, 2000);
+  const design = text(value.design, 'design', 4000);
   const covers = [...new Set((Array.isArray(value.covers) ? value.covers : []).filter((at): at is number => Number.isInteger(at) && (at as number) >= 0 && (at as number) < coverCount))].sort((a, b) => a - b);
-  const source = value.source === 'video' || value.source === 'photo' ? value.source : undefined;
-  return { ...(source ? { source } : {}), frame, ...(headline ? { headline } : {}), design, covers };
+  return { frame, design, covers };
 }
 
 /** Picking, among stills of a new video, the one its cover is built on, by the brand's cover prompt. */
@@ -311,15 +297,16 @@ export function parseCoverFrame(raw: string, count: number): number {
 
 /** Writing the headline of a new video's cover from what it says, the way the creator's covers word theirs. */
 export function coverHeadlineSystemPrompt(): string {
-  return `You write the headline lettered on the cover of a creator's new video, the way their covers word headlines (their rule is given, with real examples). Write it from what this video actually says, in the language it is spoken in; follow the rule's number of lines, length, structure, voice and punctuation; never promise what the video does not deliver and never copy an example's words.
-Write one headline, the best one; do not offer alternatives.
-Return only JSON: {"lines":["<first line>", "<next line, only when the rule uses more lines>"]}`;
+  return `You write the headline lettered on the cover of a creator's new video, the way their covers word headlines (their cover prompt is given; it says how headlines are worded, with real examples). Write it from what this video actually says, in the language it is spoken in; follow the prompt's number of lines, length, structure, voice and punctuation; never promise what the video does not deliver and never copy an example's words.
+Write one headline, the best one; do not offer alternatives. When the prompt says the covers carry no words, write none.
+Return only JSON: {"lines":["<first line>", "<next line, only when the prompt uses more lines>"]} — {"lines":[]} for covers without words.`;
 }
 
-/** The headline's lines, in order (one to three, each short enough to letter). */
+/** The headline's lines, in order (none for covers without words, else one to three, each short enough to letter). */
 export function parseCoverHeadline(raw: string): string[] {
   const value = json(raw).lines;
-  const lines = (Array.isArray(value) ? value : []).flatMap(line => typeof line === 'string' && line.trim() ? [line.trim()] : []);
-  if (!lines.length || lines.length > 3 || lines.some(line => line.length > 40)) fail('lines', value);
+  if (!Array.isArray(value)) fail('lines', value);
+  const lines = value.flatMap(line => typeof line === 'string' && line.trim() ? [line.trim()] : []);
+  if (lines.length > 3 || lines.some(line => line.length > 40)) fail('lines', value);
   return lines;
 }

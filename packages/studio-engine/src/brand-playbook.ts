@@ -25,22 +25,12 @@ export interface Evidence { videos: string[]; frames?: { video: string; sec: num
 /** A block's prose, in the creator's language, as the models read it. */
 export interface Prose { text?: string; evidence?: Evidence }
 
-/** The cover prompt: `frame` picks the still from the new video, `headline` says how its words are
- *  written (from what the video says), `design` turns the still and the words into the cover. */
+/** The cover prompt, in two parts: `frame` says which still of the new video to pick, `design` how that
+ *  still becomes the cover — its headline (how it is worded and lettered) among the rest. */
 export interface BrandCover {
-  /** Where the person on the cover comes from: a still of the video, or a photo taken for covers (a
-   *  cut-out studio portrait, another outfit or light) — then a new cover is built on such a photo. */
-  source?: 'video' | 'photo';
-  frame?: string; headline?: string; design?: string;
-  /** Past covers: the style, and the person when `source` is 'photo'. */
-  references?: BrandAsset[];
-  /** Photos of the creator taken for covers, added by them; used before a past cover's person. */
-  portraits?: BrandAsset[];
+  frame?: string; design?: string;
   evidence?: Evidence;
 }
-
-/** The theme of the creator's graphics: colours (#RRGGBB) by role, fonts (font ids) by role. */
-export interface MotionTheme { text?: string; ground?: string; surface?: string; line?: string; accent?: string; accent2?: string; display?: string; label?: string }
 
 /** The blocks, in the order the prompt renders them. */
 export interface BrandBlocks {
@@ -54,20 +44,20 @@ export interface BrandBlocks {
    *  words, text in graphics. Fixed: its font (the closest face the platform has; `fontLike` names the
    *  original). Prose: how it looks and moves and when it is used, with reference stills. */
   overlay_text?: Prose & { font?: string; fontLike?: string; references?: BrandAsset[] };
-  /** Fixed: loudness and pause trimming; prose for music and sound-effect habits. */
-  sound?: Prose & { lufs?: number; pauses?: 'tight' | 'moderate' | 'natural' };
+  /** Fixed: loudness, pause trimming, and whether edits add sound effects. */
+  sound?: { lufs?: number; pauses?: 'tight' | 'moderate' | 'natural'; sfx?: boolean; evidence?: Evidence };
   /** Fixed: the same clip before / after every video. */
   bookends?: { intro?: BrandAsset; outro?: BrandAsset; evidence?: Evidence };
   /** The visual language: how the picture is organised and changes — where the speaker sits, bands and
    *  frames, picture in picture, split screens — and how the creator uses the platform's moves on it. */
   visual?: Prose & { references?: BrandAsset[] };
-  /** Motion graphics, ready-made components among them: the prose is their style; `theme` is fixed — the
-   *  colours and fonts the platform's components take (and generated graphics follow). */
-  graphics?: Prose & { theme?: MotionTheme; references?: BrandAsset[] };
+  /** Motion graphics, ready-made components among them: their style in prose — how colours and type are
+   *  chosen for a video's picture and topic, never values — with reference stills. */
+  graphics?: Prose & { references?: BrandAsset[] };
   /** How a video opens, unfolds and closes. */
   structure?: Prose;
-  /** The cover for a new video, as its own prompt in three parts — which still of the video to build on,
-   *  how the headline is worded, and how still and words become the cover — with past covers as references. */
+  /** The cover for a new video, as its own prompt in two parts — which still of the video to build on, and
+   *  how that still becomes the cover. */
   cover?: BrandCover;
 }
 export type BlockId = keyof BrandBlocks;
@@ -146,21 +136,20 @@ export function renderBrandPrompt(playbook: Pick<BrandPlaybook, 'name' | 'blocks
   }
   if (want('overlay_text')) parts.push(element('overlay_text', { font: b.overlay_text!.font, like: b.overlay_text!.fontLike, references: refs(b.overlay_text!.references) }, b.overlay_text!.text));
   if (want('logo')) parts.push(element('logo', { corner: b.logo!.corner, width: `${b.logo!.widthPct}%`, opacity: b.logo!.opacity }));
-  if (want('sound')) parts.push(element('sound', { loudness: b.sound!.lufs !== undefined ? `${b.sound!.lufs} LUFS` : undefined, pauses: b.sound!.pauses }, b.sound!.text));
+  if (want('sound')) parts.push(element('sound', { loudness: b.sound!.lufs !== undefined ? `${b.sound!.lufs} LUFS` : undefined, pauses: b.sound!.pauses, 'sound-effects': b.sound!.sfx === undefined ? undefined : b.sound!.sfx ? 'on' : 'off' }));
   if (want('bookends')) parts.push(element('bookends', { intro: b.bookends!.intro ? `${b.bookends!.intro.durationSec ?? ''}s clip` : undefined, outro: b.bookends!.outro ? `${b.bookends!.outro.durationSec ?? ''}s clip` : undefined }));
   if (want('visual')) parts.push(element('visual', { references: refs(b.visual!.references) }, b.visual!.text));
-  if (want('graphics')) { const t = b.graphics!.theme ?? {}; parts.push(element('graphics', { text: t.text, ground: t.ground, surface: t.surface, line: t.line, accent: t.accent, 'accent-2': t.accent2, 'display-font': t.display, 'label-font': t.label, references: refs(b.graphics!.references) }, b.graphics!.text)); }
+  if (want('graphics')) parts.push(element('graphics', { references: refs(b.graphics!.references) }, b.graphics!.text));
   if (want('structure')) parts.push(element('structure', {}, b.structure!.text));
-  if (want('cover')) parts.push(coverElement(b.cover!, refs(b.cover!.references)));
+  if (want('cover')) parts.push(coverElement(b.cover!));
   return `<brand name="${escapeAttr(playbook.name)}">\n${parts.join('\n')}\n</brand>`;
 }
 
-/** <cover> holds its parts as child elements: <frame> (which still), <headline> (how the words are written)
- *  and <design> (how still and words become the cover). */
-function coverElement(cover: BrandCover, references: number | undefined): string {
-  const inner = (['frame', 'headline', 'design'] as const).flatMap(part => cover[part]?.trim() ? [element(part, {}, cover[part])] : []).join('\n');
-  const attrs = `${cover.source ? ` person="${cover.source === 'photo' ? 'a photo taken for covers' : 'a still of the video'}"` : ''}${references ? ` references="${references}"` : ''}`;
-  return inner ? `<cover${attrs}>\n${inner}\n</cover>` : `<cover${attrs}/>`;
+/** <cover> holds its parts as child elements: <frame> (which still of the new video) and <design> (how the
+ *  still becomes the cover, headline included). */
+function coverElement(cover: BrandCover): string {
+  const inner = (['frame', 'design'] as const).flatMap(part => cover[part]?.trim() ? [element(part, {}, cover[part])] : []).join('\n');
+  return inner ? `<cover>\n${inner}\n</cover>` : '<cover/>';
 }
 
 /** Whether a prose block says anything. */
@@ -209,10 +198,7 @@ export function validatePlaybook(value: unknown): BrandPlaybook {
   if (b.graphics) { prose(b.graphics, 'blocks.graphics'); references(b.graphics.references, 'blocks.graphics.references'); }
   if (b.cover) {
     if (!isObject(b.cover)) fail('blocks.cover', '需要对象');
-    for (const key of ['frame', 'headline', 'design'] as const) if (b.cover[key] !== undefined && (typeof b.cover[key] !== 'string' || b.cover[key]!.length > MAX_TEXT)) fail(`blocks.cover.${key}`, `最多 ${MAX_TEXT} 字`);
-    references(b.cover.references, 'blocks.cover.references');
-    references(b.cover.portraits, 'blocks.cover.portraits');
-    if (b.cover.source !== undefined && b.cover.source !== 'video' && b.cover.source !== 'photo') fail('blocks.cover.source', 'video 或 photo');
+    for (const key of ['frame', 'design'] as const) if (b.cover[key] !== undefined && (typeof b.cover[key] !== 'string' || b.cover[key]!.length > MAX_TEXT)) fail(`blocks.cover.${key}`, `最多 ${MAX_TEXT} 字`);
   }
   if (b.captions) {
     prose(b.captions, 'blocks.captions');
@@ -225,20 +211,15 @@ export function validatePlaybook(value: unknown): BrandPlaybook {
     if (!(b.logo.widthPct > 0 && b.logo.widthPct <= 40)) fail('blocks.logo.widthPct', '0–40');
     if (!(b.logo.opacity > 0 && b.logo.opacity <= 1)) fail('blocks.logo.opacity', '0–1');
   }
-  if (b.graphics?.theme) {
-    const t = b.graphics.theme;
-    for (const key of ['text', 'ground', 'surface', 'line', 'accent', 'accent2'] as const) color(t[key], `blocks.graphics.theme.${key}`);
-    for (const key of ['display', 'label'] as const) if (t[key] !== undefined && (typeof t[key] !== 'string' || t[key]!.length > 80)) fail(`blocks.graphics.theme.${key}`, '字体 id');
-  }
   if (b.overlay_text) {
     prose(b.overlay_text, 'blocks.overlay_text');
     for (const key of ['font', 'fontLike'] as const) if (b.overlay_text[key] !== undefined && (typeof b.overlay_text[key] !== 'string' || b.overlay_text[key]!.length > 80)) fail(`blocks.overlay_text.${key}`, '字体');
     references(b.overlay_text.references, 'blocks.overlay_text.references');
   }
   if (b.sound) {
-    prose(b.sound, 'blocks.sound');
     if (b.sound.lufs !== undefined && !(b.sound.lufs >= -40 && b.sound.lufs <= -5)) fail('blocks.sound.lufs', '-40…-5');
     if (b.sound.pauses !== undefined && !['tight', 'moderate', 'natural'].includes(b.sound.pauses)) fail('blocks.sound.pauses', 'tight/moderate/natural');
+    if (b.sound.sfx !== undefined && typeof b.sound.sfx !== 'boolean') fail('blocks.sound.sfx', 'true/false');
   }
   if (b.bookends) {
     if (b.bookends.intro) { asset(b.bookends.intro, 'blocks.bookends.intro'); if (b.bookends.intro.kind !== 'video') fail('blocks.bookends.intro', '片头需要视频'); }

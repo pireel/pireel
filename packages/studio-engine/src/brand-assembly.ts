@@ -19,16 +19,15 @@ export interface PlaybookParts {
   synthesis: Synthesis;
   /** The cover prompt from the creator's covers: how many covers were read, how many it holds for, and
    *  the videos those covers belong to (hand-added covers belong to none). */
-  cover?: { source?: 'video' | 'photo'; frame: string; headline?: string; design: string; held: number; total: number; videos: string[] };
+  cover?: { frame: string; design: string; held: number; total: number; videos: string[] };
   /** The typefaces read from crops of the creator's text, by role. */
   fonts?: Partial<Record<FontRole, FontReading>>;
   /** Canvas height per unit of width of the creator's videos (16/9 for vertical). */
   heightPerWidth: number;
   assets: {
     logo?: BrandAsset; intro?: BrandAsset; outro?: BrandAsset;
-    /** Covers (those the cover prompt holds for first), stills of titles on screen, stills of motion
-     *  graphics — references for those blocks. */
-    coverReferences: BrandAsset[]; layoutReferences: BrandAsset[]; motionReferences: BrandAsset[];
+    /** Stills of titles on screen and of motion graphics — references for those blocks. */
+    layoutReferences: BrandAsset[]; motionReferences: BrandAsset[];
     /** Stills of moments the creator left the speaker for B-roll. */
     brollReferences?: BrandAsset[];
     /** Measured caption colours (text, plate) from the caption band. */
@@ -109,7 +108,7 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
   if (assets.logo && summary.logo) blocks.logo = { ...assets.logo, corner: summary.logo.corner, widthPct: Math.min(40, Math.max(4, Math.round(summary.logo.box.w * 100))), opacity: 1, evidence: { videos: summary.logo.evidence.videos, confidence: summary.logo.evidence.confidence } };
   // Overlay text (花字): the synthesis writes how it looks and moves; its font is the face of the words the
   // creator puts straight on the picture, else their cover lettering. Words in charts and cards are the
-  // graphics' (its theme fonts).
+  // graphics', whose type the graphics prose describes.
   const fonts = parts.fonts ?? {};
   // A Chinese creator's overlay text needs a face with Han glyphs: a Latin-only face is taken only when no
   // role gave a Chinese one.
@@ -124,25 +123,21 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
 
   const loudness = spec.audio.targetLufs.provenance.source === 'measured' ? Math.round(spec.audio.targetLufs.value * 2) / 2 : undefined;
   const pauses = spec.cutting.silence.provenance.source === 'measured' ? ({ aggressive: 'tight', moderate: 'moderate', natural: 'natural' } as const)[spec.cutting.silence.value.mode] : undefined;
-  const soundProse = prose('sound');
-  if (loudness !== undefined || pauses || soundProse) blocks.sound = { ...(loudness !== undefined ? { lufs: loudness } : {}), ...(pauses ? { pauses } : {}), ...(soundProse ?? { evidence: { videos: spec.usedVideos, confidence: fromField(spec.audio.targetLufs.provenance.confidence) } }) };
+  // Sound effects are a switch the creator sets (the frames cannot hear them); background music is not part of a brand yet.
+  if (loudness !== undefined || pauses) blocks.sound = { ...(loudness !== undefined ? { lufs: loudness } : {}), ...(pauses ? { pauses } : {}), evidence: { videos: spec.usedVideos, confidence: fromField(spec.audio.targetLufs.provenance.confidence) } };
 
   if (assets.intro || assets.outro) blocks.bookends = { ...(assets.intro ? { intro: assets.intro } : {}), ...(assets.outro ? { outro: assets.outro } : {}), ...(summary.intro ?? summary.outro ? { evidence: { videos: (summary.intro ?? summary.outro)!.evidence.videos, confidence: (summary.intro ?? summary.outro)!.evidence.confidence } } : {}) };
 
   // The picture: its principle in prose, with stills of the creator's B-roll moments.
   const visual = prose('visual');
   if (visual) blocks.visual = { ...visual, ...(assets.brollReferences?.length ? { references: assets.brollReferences } : {}) };
-  // Motion graphics carry the theme components take: the colours the synthesis read, the face of the words
-  // in the creator's graphics (a Chinese one for a Chinese creator).
+  // Motion graphics: their style in prose (colour and type chosen per video), with stills of them.
   const motion = prose('graphics');
-  const graphicsFace = fonts.graphics && (parts.locale !== 'zh' || !fonts.graphics.id.startsWith('google:')) ? fonts.graphics.id : undefined;
-  const theme = { ...synthesis.theme, ...(graphicsFace ? { display: graphicsFace } : {}) };
-  if (motion || Object.keys(theme).length) blocks.graphics = { ...motion, ...(Object.keys(theme).length ? { theme } : {}), ...(assets.motionReferences.length ? { references: assets.motionReferences } : {}) };
+  if (motion) blocks.graphics = { ...motion, ...(assets.motionReferences.length ? { references: assets.motionReferences } : {}) };
   const structure = prose('structure'); if (structure) blocks.structure = structure;
   const cover = parts.cover;
-  if (cover || assets.coverReferences.length) blocks.cover = {
-    ...(cover ? { ...(cover.source ? { source: cover.source } : {}), frame: cover.frame, ...(cover.headline ? { headline: cover.headline } : {}), design: cover.design, evidence: { videos: cover.videos, confidence: cover.total < 3 ? 'low' : cover.held / cover.total >= 0.7 ? 'high' : 'medium' } } : {}),
-    ...(assets.coverReferences.length ? { references: assets.coverReferences } : {}),
+  if (cover) blocks.cover = {
+    frame: cover.frame, design: cover.design, evidence: { videos: cover.videos, confidence: cover.total < 3 ? 'low' : cover.held / cover.total >= 0.7 ? 'high' : 'medium' },
   };
 
   return {

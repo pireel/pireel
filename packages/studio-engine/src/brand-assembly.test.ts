@@ -22,14 +22,14 @@ const synthesis: Synthesis = {
     visual: { text: '说到价格时快推近。', videos: ['v1', 'v2', 'v3'] },
     graphics: { text: '白底黑字数字卡弹入。', videos: ['v2', 'v3'] },
   },
-  theme: { accent: '#ffd600' }, setAside: [], uncited: [],
+  setAside: [], uncited: [],
 };
 const mg = { key: 'uploads/u/mg.jpg', kind: 'image' as const, width: 540, height: 960 };
 const parts = (): PlaybookParts => ({
   id: 'pending', name: 'Mine', platform: 'douyin', locale: 'zh',
   videos: ['v1', 'v2', 'v3', 'v4'].map(id => ({ id, durationSec: 60 })),
   spec, summary, synthesis, heightPerWidth: 16 / 9, readings: ['v1', 'v2', 'v3'].map(reading),
-  assets: { coverReferences: [], layoutReferences: [], motionReferences: [mg] },
+  assets: { layoutReferences: [], motionReferences: [mg] },
 });
 
 describe('assemblePlaybook', () => {
@@ -40,7 +40,6 @@ describe('assemblePlaybook', () => {
     const b = playbook.blocks;
     expect(b.sound).toMatchObject({ lufs: -15, pauses: 'tight' });
     expect(b.captions).toMatchObject({ on: true, accent: 'keywords', style: { color: '#ffffff', strokeColor: '#000000', yPct: 22.7 } });
-    expect(b.graphics?.theme).toEqual({ accent: '#ffd600' });
     expect(b.visual).toEqual({ text: '说到价格时快推近。', evidence: { videos: ['v1', 'v2', 'v3'], confidence: 'high' } });
     expect(b.graphics?.references).toEqual([mg]);
   });
@@ -54,12 +53,11 @@ describe('assemblePlaybook', () => {
     expect(playbook.blocks.captions).toBeUndefined();
   });
 
-  it('writes the cover in two parts from the covers, with the covers as references', () => {
-    const cover = { key: 'uploads/u/c.jpg', kind: 'image' as const, width: 720, height: 960 };
-    const playbook = assemblePlaybook({ ...parts(), cover: { frame: '惊讶表情，正对镜头。', headline: '一句反问，六字以内。', design: '人物在右，左侧黄色大字。', held: 3, total: 4, videos: ['v1'] }, assets: { ...parts().assets, coverReferences: [cover] } });
+  it('writes the cover in two parts from the covers', () => {
+    const playbook = assemblePlaybook({ ...parts(), cover: { frame: '惊讶表情，正对镜头。', design: '人物在右，左侧黄色大字，标题一句反问。', held: 3, total: 4, videos: ['v1'] } });
     expect(() => validatePlaybook(playbook)).not.toThrow();
-    expect(playbook.blocks.cover).toEqual({ frame: '惊讶表情，正对镜头。', headline: '一句反问，六字以内。', design: '人物在右，左侧黄色大字。', evidence: { videos: ['v1'], confidence: 'high' }, references: [cover] });
-    expect(assemblePlaybook({ ...parts(), assets: { ...parts().assets, coverReferences: [cover] } }).blocks.cover).toEqual({ references: [cover] });
+    expect(playbook.blocks.cover).toEqual({ frame: '惊讶表情，正对镜头。', design: '人物在右，左侧黄色大字，标题一句反问。', evidence: { videos: ['v1'], confidence: 'high' } });
+    expect(assemblePlaybook(parts()).blocks.cover).toBeUndefined();
   });
 
   it('takes the readings\' caption colour when the measured one is the outline', () => {
@@ -76,12 +74,6 @@ describe('assemblePlaybook', () => {
     expect(playbook.blocks.overlay_text).toEqual({ font: 'web:smiley-sans', fontLike: '得意黑' });
     const fromCover = assemblePlaybook({ ...parts(), fonts: { cover: { id: 'web:ximaiti', look: '粗斜美术体' } } });
     expect(fromCover.blocks.overlay_text).toEqual({ font: 'web:ximaiti' });
-    const fromGraphics = assemblePlaybook({ ...parts(), fonts: { graphics: { id: 'sans', look: '干净黑体' }, cover: { id: 'web:ximaiti', look: '粗斜美术体' } } });
-    // Words in charts and cards are the graphics' face, not the overlay text's.
-    expect(fromGraphics.blocks.overlay_text).toEqual({ font: 'web:ximaiti' });
-    expect(fromGraphics.blocks.graphics?.theme?.display).toBe('sans');
-    const latinGraphics = assemblePlaybook({ ...parts(), fonts: { graphics: { id: 'google:Bebas Neue', look: 'condensed caps' }, cover: { id: 'web:ximaiti', look: '粗斜美术体' } } });
-    expect(latinGraphics.blocks.overlay_text).toEqual({ font: 'web:ximaiti' });
   });
 
   it('sizes and places captions from the letters measured on pixels', () => {
