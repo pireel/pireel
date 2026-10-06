@@ -14,7 +14,7 @@ import type { BlockId } from './brand-playbook';
  * and what goes wrong. Raise METHOD_VERSION whenever a row, a tool or a prompt changes; every brand
  * records the version that made it.
  */
-export const METHOD_VERSION = 'brand-method-17';
+export const METHOD_VERSION = 'brand-method-18';
 
 export interface BlockGuide {
   id: BlockId;
@@ -36,7 +36,7 @@ export const BLOCK_GUIDE: readonly BlockGuide[] = [
   { id: 'bookends', kind: 'fixed', look: 'The same clip at the start (often after a cold open) or the end of every video.', pitfalls: 'Title cards with the same layout but different words are layout, not a fixed clip.' },
   { id: 'overlay_text', kind: 'prose', look: 'Overlay text (花字): the words the creator puts on screen besides captions — the words of headline bands, opening labels, chapter or point labels, emphasis words, text inside graphics: type character, colours as #RRGGBB, stroke, shadow or plate, size, how key words are emphasised, how it enters and leaves, on what moments it is used, and how the words read (real examples).',
     pitfalls: 'Captions follow the speech and are not overlay text. Text that belongs to the filmed scene (signs, packaging, a screen in the room) is not the creator\'s. Describe the convention, not one video\'s words.' },
-  { id: 'visual', kind: 'prose', look: 'The picture, moment by moment — what is on screen while the creator speaks. Write it as the decisions an editor makes: how the speaker appears (framing, where they sit, punch-ins and on what); how much of the talk is covered by B-roll (a tendency: rarely, at times, most of the time) and the moments that stay on the speaker; a table "what the speech is about → what goes on screen and how" (for example "a number or a trend → a full-frame chart, the speaker in a round picture-in-picture bottom right"; "a named company → its website screenshot on a floating card"); B-roll here is anything besides the speaker — own footage, news footage, screenshots, documents, screen recordings, photos, stock, illustrations, AI-made images or video, charts and other graphics, memes; how it is presented (full frame, a window, the speaker in picture-in-picture, split screen, beside the speaker); the rhythm (how long B-roll runs, how it returns to the speaker) and transitions.',
+  { id: 'visual', kind: 'prose', look: 'The picture around the B-roll the table plans: how the speaker appears (framing, where they sit, punch-ins and on what), the moments that stay on the speaker, the rhythm (how long B-roll runs, how it returns to the speaker) and transitions. What goes on screen for each kind of content is the table, not this prose.',
     pitfalls: 'A switch to another camera angle is multi-cam, not a punch-in. Jump cuts are how the talk is cut, not a transition. Write what depends on the topic as a kind of content ("a named person"), never the particular one. How many per video depends on the content: describe the moments and the restraint, never a rate or an interval.' },
   { id: 'graphics', kind: 'prose', look: 'How the graphics the creator makes look — number cards, lists, comparisons, charts, arrows, highlight boxes, lower thirds, price tags; the platform\'s ready-made components are of this kind. When and where they appear belongs to the picture; this is their design: each colour with its role and its limits (for example "accent coral fills only chips, pill bars and one stat figure; headlines stay in the ink colour"), the type by role (display and labels), shape language (corners, outlines, shadows, glass, 3D), and how they enter, hold and leave.',
     pitfalls: 'Captions, the creator\'s logo and scene text are not graphics.' },
@@ -62,6 +62,33 @@ export const NOT_BRAND = [
 
 export const blockGuide = (id: BlockId) => BLOCK_GUIDE.find(item => item.id === id)!;
 export const PROSE_BLOCKS = BLOCK_GUIDE.filter(item => item.kind === 'prose').map(item => item.id);
+
+/**
+ * The words the picture is planned in, the same when a creator's videos are read and when a new video is
+ * cut: what the speech is about at a moment, what B-roll goes on screen, and how it is shown. A brand's
+ * table maps the first to the other two, so it applies to any topic.
+ */
+export const SPEECH_KINDS = {
+  number: { zh: '数字/趋势', en: 'a number or trend' }, person: { zh: '人物', en: 'a person' }, company: { zh: '公司/品牌', en: 'a company or brand' },
+  product: { zh: '产品', en: 'a product' }, place: { zh: '地点', en: 'a place' }, event: { zh: '事件/政策', en: 'an event or policy' },
+  concept: { zh: '概念/流程', en: 'a concept or process' }, comparison: { zh: '对比', en: 'a comparison' }, opinion: { zh: '观点', en: 'an opinion' },
+  story: { zh: '故事', en: 'a story' }, joke: { zh: '笑点', en: 'a joke' },
+} as const;
+export const BROLL_SOURCES = {
+  chart: { zh: '图表/数据卡', en: 'a chart or data card' }, photo: { zh: '照片', en: 'a photo' }, screenshot: { zh: '截图', en: 'a screenshot' },
+  document: { zh: '文件', en: 'a document' }, screen_recording: { zh: '录屏', en: 'a screen recording' }, news_footage: { zh: '新闻画面', en: 'news footage' },
+  own_footage: { zh: '自己拍的', en: 'own footage' }, stock: { zh: '图库', en: 'stock footage' }, illustration: { zh: '插画/3D 动画', en: 'an illustration or 3D animation' },
+  ai: { zh: 'AI 生成', en: 'an AI-made image or video' }, meme: { zh: '表情包', en: 'a meme' }, product_shot: { zh: '产品特写', en: 'a product shot' },
+} as const;
+export const PRESENTATIONS = {
+  speaker: { zh: '留在人物', en: 'stay on the speaker' }, full_frame: { zh: '全屏', en: 'full frame' }, speaker_pip: { zh: '全屏+人物画中画', en: 'full frame, the speaker in picture-in-picture' },
+  window: { zh: '窗口', en: 'a window over the speaker' }, split: { zh: '分屏', en: 'split screen' }, beside_speaker: { zh: '人物旁边', en: 'beside the speaker' },
+} as const;
+export type SpeechKind = keyof typeof SPEECH_KINDS;
+export type BrollSource = keyof typeof BROLL_SOURCES;
+export type Presentation = keyof typeof PRESENTATIONS;
+export const COVERAGE = { light: { zh: '少量', en: 'rarely' }, medium: { zh: '适中', en: 'at times' }, heavy: { zh: '大量', en: 'most of the time' } } as const;
+export type Coverage = keyof typeof COVERAGE;
 
 /** Windows looked at closely in each video. */
 export const WINDOWS = { openingSec: 8, closingSec: 10, moments: 4, momentSec: 4, framesPerWindow: 8 } as const;

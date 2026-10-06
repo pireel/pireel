@@ -22,7 +22,7 @@ const synthesis: Synthesis = {
     visual: { text: '说到价格时快推近。', videos: ['v1', 'v2', 'v3'] },
     graphics: { text: '白底黑字数字卡弹入。', videos: ['v2', 'v3'] },
   },
-  theme: { accent: '#ffd600' }, setAside: [], uncited: [],
+  theme: { accent: '#ffd600' }, broll: { coverage: 'heavy', rows: [{ speech: 'number', source: 'chart', presentation: 'speaker_pip', look: '深色 3D 柱状图' }] }, setAside: [], uncited: [],
 };
 const mg = { key: 'uploads/u/mg.jpg', kind: 'image' as const, width: 540, height: 960 };
 const parts = (): PlaybookParts => ({
@@ -41,9 +41,8 @@ describe('assemblePlaybook', () => {
     expect(b.sound).toMatchObject({ lufs: -15, pauses: 'tight' });
     expect(b.captions).toMatchObject({ on: true, accent: 'keywords', style: { color: '#ffffff', strokeColor: '#000000', yPct: 22.7 } });
     expect(b.graphics?.theme).toEqual({ accent: '#ffd600' });
-    expect(b.visual).toEqual({ text: '说到价格时快推近。', evidence: { videos: ['v1', 'v2', 'v3'], confidence: 'high' } });
+    expect(b.visual).toEqual({ text: '说到价格时快推近。', evidence: { videos: ['v1', 'v2', 'v3'], confidence: 'high' }, coverage: 'heavy', rows: [{ speech: 'number', source: 'chart', presentation: 'speaker_pip', look: '深色 3D 柱状图' }] });
     expect(b.graphics?.references).toEqual([mg]);
-    expect(b.visual).toBeDefined();
   });
 
   it('leaves out what measurement did not find', () => {

@@ -1,4 +1,6 @@
-import { BLOCK_GUIDE, COLOUR_GUIDE, NOT_BRAND, PROSE_BLOCKS, WINDOWS, type BlockGuide } from './brand-method';
+import { BLOCK_GUIDE, BROLL_SOURCES, COLOUR_GUIDE, COVERAGE, NOT_BRAND, PRESENTATIONS, PROSE_BLOCKS, SPEECH_KINDS, WINDOWS, type BlockGuide, type BrollSource, type Coverage, type Presentation, type SpeechKind } from './brand-method';
+
+const vocabulary = (table: Record<string, { en: string }>) => Object.entries(table).map(([id, word]) => `${id} (${word.en})`).join(', ');
 import type { BlockId } from './brand-playbook';
 
 /**
@@ -111,7 +113,7 @@ Report:
 1. portrait — one English sentence on this video's look and pace.
 2. facets — one value per key from the options, or "unknown".
 ${FACET_GUIDE}
-3. moments — for each moment strip, in order: what happens on screen there (any of: motion_graphic, broll, punch_in, transition, sticker, nothing); "speech": what the words there are about (a number or trend, a person, a company or brand, a product, a place, an event or policy, a concept or process, a comparison, an opinion, a story, a joke); "source": what the B-roll is, when there is some (own footage, news footage, screenshot, document, screen recording, photo, stock, illustration, AI-made image or video, chart or other graphic, meme, product shot); "presentation": how it is shown (full frame, window, speaker in picture-in-picture, split screen, beside the speaker); and "how": a short description of how it looks and moves.
+3. moments — for each moment strip, in order: what happens on screen there (any of: motion_graphic, broll, punch_in, transition, sticker, nothing); "speech": what the words there are about, one of: ${vocabulary(SPEECH_KINDS)}; "source": what the B-roll is, when there is some, one of: ${vocabulary(BROLL_SOURCES)}; "presentation": how the picture is, one of: ${vocabulary(PRESENTATIONS)}; and "how": a short description of how it looks and moves, without naming the particular people, things or topic.
 4. notes — what this video shows for each block, in English, concrete enough to recreate (positions, colours as #RRGGBB, type character, motion, timing, real words of titles); leave a block out when the video shows nothing for it:
 ${blockLines(['prose'])}
 5. look — captionFill and captionOutline (#RRGGBB, when captions show), palette (up to 4 #RRGGBB colours of the creator's own text and graphics).
@@ -142,7 +144,7 @@ export interface VideoReading {
   portrait: string;
   facets: VideoStyleFacets;
   /** Per moment strip, in the order given. */
-  moments: { seen: Seen[]; speech?: string; source?: string; presentation?: string; how?: string }[];
+  moments: { seen: Seen[]; speech?: SpeechKind; source?: BrollSource; presentation?: Presentation; how?: string }[];
   notes: Partial<Record<BlockId, string>>;
   look: { captionFill?: string; captionOutline?: string; palette: string[] };
   /** Names the reading used outside the vocabulary, kept visible, not used. */
@@ -158,7 +160,14 @@ export function parseVideoReading(raw: string, video: string, momentCount: numbe
     const item = (entry ?? {}) as Record<string, unknown>;
     const seen = (Array.isArray(item.seen) ? item.seen : []).flatMap(name => { if (SEEN.includes(name as Seen)) return [name as Seen]; unread.push(String(name)); return []; });
     const how = optionalText(item.how, 400);
-    const said = Object.fromEntries((['speech', 'source', 'presentation'] as const).flatMap(key => { const text = optionalText(item[key], 120); return text ? [[key, text]] : []; }));
+    // Words outside the vocabulary are set aside like any unread name.
+    const vocab = { speech: SPEECH_KINDS, source: BROLL_SOURCES, presentation: PRESENTATIONS } as const;
+    const said = Object.fromEntries((['speech', 'source', 'presentation'] as const).flatMap(key => {
+      const word = typeof item[key] === 'string' ? (item[key] as string).trim() : '';
+      if (!word || word === 'none' || word === 'unknown') return [];
+      if (word in vocab[key]) return [[key, word]];
+      unread.push(word); return [];
+    }));
     return { seen: [...new Set(seen)], ...said, ...(how ? { how } : {}) };
   });
   const rawNotes = (value.notes ?? {}) as Record<string, unknown>;
@@ -190,24 +199,29 @@ Blocks to write (each as prose a model can follow, concrete: positions, type cha
 ${blockLines(['prose'])}
 - sound: only what frames show about music or sound effects; leave out when nothing does.
 
-The readings' moments say what the speech was about there, what went on screen (and from what source) and how it was shown: the visual block's table generalises them into "what the speech is about → what goes on screen and how", one line per kind of content the creator treats the same way.
+The readings' moments say what the speech was about there (speech), what went on screen (source) and how it was shown (presentation). Generalise them into "broll": how much of the talk B-roll covers (coverage: ${Object.keys(COVERAGE).join(' | ')}), and a table with one row per kind of content the creator treats the same way — speech, source (omit when the picture stays on the speaker) and presentation from the same words, and "look": how it looks and moves in a sentence, without naming particular people, things or topics. Leave out kinds the videos never showed; one-off segments (a sponsor read, an announcement) are not rows.
 
 Colour: the creator's graphics keep a theme — give it as "theme" (#RRGGBB, each only when their graphics keep it across videos: text, ground, surface for cards, line for outlines, accent, accent2) and say in graphics what each is for and where it stops. Everywhere else: ${COLOUR_GUIDE}
 
 Write every block in ${language}. A block the videos give no recurring evidence for is left out.
 Return only JSON:
 {"blocks":{"<block id>":{"text":"…","videos":["<video ids where it holds>"]}},
+ "broll":{"coverage":"…","rows":[{"speech":"…","source":"…","presentation":"…","look":"…"}]},
  "theme":{"text":"#…","ground":"#…","surface":"#…","line":"#…","accent":"#…","accent2":"#…"} (each optional)}
 Block ids, used exactly as written: ${[...PROSE_BLOCKS, 'sound'].join(', ')}. The portrait is two to four sentences; other blocks as long as they need, without repeating each other.`;
 }
 
 export type SynthesisBlockId = (typeof PROSE_BLOCKS)[number] | 'sound';
 export const THEME_COLOURS = ['text', 'ground', 'surface', 'line', 'accent', 'accent2'] as const;
+/** One row of the picture table: for this kind of content, this B-roll shown this way. */
+export interface BrollRow { speech: SpeechKind; source?: BrollSource; presentation: Presentation; look?: string }
 export type ThemeColour = typeof THEME_COLOURS[number];
 export interface Synthesis {
   blocks: Partial<Record<SynthesisBlockId, { text: string; videos: string[] }>>;
   /** The motion-graphics theme the platform's components take. */
   theme: Partial<Record<ThemeColour, string>>;
+  /** What goes on screen for each kind of content, and how much of the talk B-roll covers. */
+  broll: { coverage?: Coverage; rows: BrollRow[] };
   /** Blocks the answer gave that are not blocks or have no text, with why — kept visible, never used. */
   setAside: string[];
   /** Blocks kept without any video cited for them (no evidence to show). */
@@ -239,7 +253,16 @@ export function parseSynthesis(raw: string, videos: { id: string }[]): Synthesis
   }
   if (!blocks.portrait) text(undefined, 'blocks.portrait');
   const theme = (value.theme ?? {}) as Record<string, unknown>;
-  return { blocks, theme: Object.fromEntries(THEME_COLOURS.flatMap(key => hex(theme[key]) ? [[key, hex(theme[key])]] : [])), setAside, uncited };
+  const broll = (value.broll ?? {}) as Record<string, unknown>;
+  const rows = (Array.isArray(broll.rows) ? broll.rows : []).flatMap((raw, at) => {
+    const row = (raw ?? {}) as Record<string, unknown>;
+    const speech = row.speech as SpeechKind; const source = row.source as BrollSource | undefined; const presentation = row.presentation as Presentation;
+    if (!(speech in SPEECH_KINDS) || !(presentation in PRESENTATIONS) || (source !== undefined && source !== null && !(source in BROLL_SOURCES))) { setAside.push(`broll row ${at}: outside the vocabulary`); return []; }
+    const look = optionalText(row.look, 300);
+    return [{ speech, ...(source ? { source } : {}), presentation, ...(look ? { look } : {}) }];
+  });
+  const coverage = typeof broll.coverage === 'string' && broll.coverage in COVERAGE ? broll.coverage as Coverage : undefined;
+  return { blocks, theme: Object.fromEntries(THEME_COLOURS.flatMap(key => hex(theme[key]) ? [[key, hex(theme[key])]] : [])), broll: { ...(coverage ? { coverage } : {}), rows }, setAside, uncited };
 }
 
 // ── The cover, from the creator's covers

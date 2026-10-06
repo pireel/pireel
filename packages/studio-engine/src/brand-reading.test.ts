@@ -32,8 +32,8 @@ describe('parseMoments', () => {
 
 describe('parseVideoReading', () => {
   it('keeps what each moment was about, its source and how it was shown', () => {
-    const parsed = parseVideoReading(JSON.stringify({ portrait: 'x', moments: [{ seen: ['broll'], speech: 'a number or trend', source: 'chart', presentation: 'full frame', how: '3D bars rise' }] }), 'v1', 1);
-    expect(parsed.moments[0]).toEqual({ seen: ['broll'], speech: 'a number or trend', source: 'chart', presentation: 'full frame', how: '3D bars rise' });
+    const parsed = parseVideoReading(JSON.stringify({ portrait: 'x', moments: [{ seen: ['broll'], speech: 'number', source: 'chart', presentation: 'full_frame', how: '3D bars rise' }] }), 'v1', 1);
+    expect(parsed.moments[0]).toEqual({ seen: ['broll'], speech: 'number', source: 'chart', presentation: 'full_frame', how: '3D bars rise' });
   });
 
   const reading = (extra: Record<string, unknown>) => JSON.stringify({ portrait: 'Quick talk.', facets: { layout: 'full_frame_host', camera: 'nonsense' }, look: { captionFill: '#FFFFFF', palette: ['#ff0000', 'red'] }, ...extra });
@@ -122,3 +122,22 @@ describe('cover headline', () => {
     expect(() => parseCoverHeadline(JSON.stringify({ lines: ['x'.repeat(41)] }))).toThrow(/lines/);
   });
 });
+
+describe('picture table', () => {
+  it('keeps rows in the platform\'s words and sets the rest aside', () => {
+    const parsed = parseSynthesis(JSON.stringify({ blocks: { portrait: '快节奏' }, broll: { coverage: 'heavy', rows: [
+      { speech: 'number', source: 'chart', presentation: 'speaker_pip', look: '深色 3D 柱状图' },
+      { speech: 'opinion', presentation: 'speaker' },
+      { speech: 'tariff', source: 'chart', presentation: 'full_frame' },
+    ] } }), [{ id: 'v1' }]);
+    expect(parsed.broll).toEqual({ coverage: 'heavy', rows: [{ speech: 'number', source: 'chart', presentation: 'speaker_pip', look: '深色 3D 柱状图' }, { speech: 'opinion', presentation: 'speaker' }] });
+    expect(parsed.setAside).toEqual(['broll row 2: outside the vocabulary']);
+  });
+
+  it('reads moments in the same words', () => {
+    const parsed = parseVideoReading(JSON.stringify({ portrait: 'x', moments: [{ seen: ['broll'], speech: 'company', source: 'news_footage', presentation: 'full_frame' }, { seen: ['nothing'], speech: 'tariffs', presentation: 'none' }] }), 'v1', 2);
+    expect(parsed.moments).toEqual([{ seen: ['broll'], speech: 'company', source: 'news_footage', presentation: 'full_frame' }, { seen: ['nothing'] }]);
+    expect(parsed.unread).toEqual(['tariffs']);
+  });
+});
+
