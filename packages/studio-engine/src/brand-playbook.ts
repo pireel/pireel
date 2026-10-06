@@ -1,4 +1,5 @@
 import type { CaptionStyle } from './composition-core';
+import { BASE_CAPTION_FONT_PX } from './caption-presets';
 
 /**
  * A creator's brand: one prompt made of XML blocks, produced from their own videos by the extraction
@@ -142,7 +143,8 @@ export function renderBrandPrompt(playbook: Pick<BrandPlaybook, 'name' | 'blocks
   if (want('portrait')) parts.push(element('portrait', {}, b.portrait!.text));
   if (want('captions')) {
     const c = b.captions!; const s = c.style ?? {};
-    parts.push(element('captions', c.on ? { on: true, color: s.color, stroke: s.strokeColor, plate: s.bg, bold: s.bold, accent: c.accent ?? undefined, 'accent-color': s.accentColor, 'bottom-edge': s.yPct !== undefined ? `${s.yPct}% from top` : undefined } : { on: false }, c.text));
+    // Size as the engine draws it: font px on a frame 1080 wide.
+    parts.push(element('captions', c.on ? { on: true, font: s.font, size: s.scale !== undefined ? `${Math.round(s.scale * BASE_CAPTION_FONT_PX)}px on a 1080-wide frame` : undefined, color: s.color, stroke: s.strokeColor, plate: s.bg, bold: s.bold, accent: c.accent ?? undefined, 'accent-color': s.accentColor, 'bottom-edge': s.yPct !== undefined ? `${s.yPct}% from top` : undefined } : { on: false }, c.text));
   }
   if (want('overlay_text')) parts.push(element('overlay_text', { font: b.overlay_text!.font, like: b.overlay_text!.fontLike, references: refs(b.overlay_text!.references) }, b.overlay_text!.text));
   if (want('logo')) parts.push(element('logo', { corner: b.logo!.corner, width: `${b.logo!.widthPct}%`, opacity: b.logo!.opacity }));
