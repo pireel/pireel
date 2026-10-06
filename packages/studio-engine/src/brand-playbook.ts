@@ -1,7 +1,5 @@
 import type { CaptionStyle } from './composition-core';
 import { BASE_CAPTION_FONT_PX } from './caption-presets';
-import { BROLL_SOURCES, COVERAGE, PRESENTATIONS, SPEECH_KINDS, type Coverage } from './brand-method';
-import type { BrollRow } from './brand-reading';
 
 /**
  * A creator's brand: one prompt made of XML blocks, produced from their own videos by the extraction
@@ -62,7 +60,7 @@ export interface BrandBlocks {
   bookends?: { intro?: BrandAsset; outro?: BrandAsset; evidence?: Evidence };
   /** The visual language: how the picture is organised and changes — where the speaker sits, bands and
    *  frames, picture in picture, split screens — and how the creator uses the platform's moves on it. */
-  visual?: Prose & { coverage?: Coverage; rows?: BrollRow[] };
+  visual?: Prose & { references?: BrandAsset[] };
   /** Motion graphics, ready-made components among them: the prose is their style; `theme` is fixed — the
    *  colours and fonts the platform's components take (and generated graphics follow). */
   graphics?: Prose & { theme?: MotionTheme; references?: BrandAsset[] };
@@ -150,14 +148,7 @@ export function renderBrandPrompt(playbook: Pick<BrandPlaybook, 'name' | 'blocks
   if (want('logo')) parts.push(element('logo', { corner: b.logo!.corner, width: `${b.logo!.widthPct}%`, opacity: b.logo!.opacity }));
   if (want('sound')) parts.push(element('sound', { loudness: b.sound!.lufs !== undefined ? `${b.sound!.lufs} LUFS` : undefined, pauses: b.sound!.pauses }, b.sound!.text));
   if (want('bookends')) parts.push(element('bookends', { intro: b.bookends!.intro ? `${b.bookends!.intro.durationSec ?? ''}s clip` : undefined, outro: b.bookends!.outro ? `${b.bookends!.outro.durationSec ?? ''}s clip` : undefined }));
-  if (want('visual')) {
-    // The table in the platform's words: what the speech is about → what goes on screen, and how.
-    const v = b.visual!;
-    const rows = (v.rows ?? []).map(row => element('when', { speech: row.speech, source: row.source, show: row.presentation }, row.look));
-    const inner = [v.text?.trim() ? escapeText(v.text.trim()) : '', ...rows].filter(Boolean).join('\n');
-    const attrs = v.coverage ? ` broll="${COVERAGE[v.coverage].en}"` : '';
-    parts.push(inner ? `<visual${attrs}>\n${inner}\n</visual>` : `<visual${attrs}/>`);
-  }
+  if (want('visual')) parts.push(element('visual', { references: refs(b.visual!.references) }, b.visual!.text));
   if (want('graphics')) { const t = b.graphics!.theme ?? {}; parts.push(element('graphics', { text: t.text, ground: t.ground, surface: t.surface, line: t.line, accent: t.accent, 'accent-2': t.accent2, 'display-font': t.display, 'label-font': t.label, references: refs(b.graphics!.references) }, b.graphics!.text)); }
   if (want('structure')) parts.push(element('structure', {}, b.structure!.text));
   if (want('cover')) parts.push(coverElement(b.cover!, refs(b.cover!.references)));
@@ -214,14 +205,7 @@ export function validatePlaybook(value: unknown): BrandPlaybook {
   const b = p.blocks;
   for (const key of Object.keys(b)) if (!BLOCK_IDS.includes(key as BlockId)) fail(`blocks.${key}`, '未知的块');
   for (const id of ['portrait', 'visual', 'structure'] as const) if (b[id]) prose(b[id], `blocks.${id}`);
-  if (b.visual) {
-    if (b.visual.coverage !== undefined && !(b.visual.coverage in COVERAGE)) fail('blocks.visual.coverage', 'light/medium/heavy');
-    if (b.visual.rows !== undefined && (!Array.isArray(b.visual.rows) || b.visual.rows.length > 20)) fail('blocks.visual.rows', '最多 20 行');
-    (b.visual.rows ?? []).forEach((row, at) => {
-      if (!(row.speech in SPEECH_KINDS) || !(row.presentation in PRESENTATIONS) || (row.source !== undefined && !(row.source in BROLL_SOURCES))) fail(`blocks.visual.rows.${at}`, '不在词表里');
-      if (row.look !== undefined && (typeof row.look !== 'string' || row.look.length > 300)) fail(`blocks.visual.rows.${at}.look`, '最多 300 字');
-    });
-  }
+  if (b.visual) references(b.visual.references, 'blocks.visual.references');
   if (b.graphics) { prose(b.graphics, 'blocks.graphics'); references(b.graphics.references, 'blocks.graphics.references'); }
   if (b.cover) {
     if (!isObject(b.cover)) fail('blocks.cover', '需要对象');

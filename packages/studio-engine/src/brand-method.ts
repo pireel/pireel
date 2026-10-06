@@ -14,7 +14,7 @@ import type { BlockId } from './brand-playbook';
  * and what goes wrong. Raise METHOD_VERSION whenever a row, a tool or a prompt changes; every brand
  * records the version that made it.
  */
-export const METHOD_VERSION = 'brand-method-18';
+export const METHOD_VERSION = 'brand-method-19';
 
 export interface BlockGuide {
   id: BlockId;
@@ -36,7 +36,7 @@ export const BLOCK_GUIDE: readonly BlockGuide[] = [
   { id: 'bookends', kind: 'fixed', look: 'The same clip at the start (often after a cold open) or the end of every video.', pitfalls: 'Title cards with the same layout but different words are layout, not a fixed clip.' },
   { id: 'overlay_text', kind: 'prose', look: 'Overlay text (花字): the words the creator puts on screen besides captions — the words of headline bands, opening labels, chapter or point labels, emphasis words, text inside graphics: type character, colours as #RRGGBB, stroke, shadow or plate, size, how key words are emphasised, how it enters and leaves, on what moments it is used, and how the words read (real examples).',
     pitfalls: 'Captions follow the speech and are not overlay text. Text that belongs to the filmed scene (signs, packaging, a screen in the room) is not the creator\'s. Describe the convention, not one video\'s words.' },
-  { id: 'visual', kind: 'prose', look: 'The picture around the B-roll the table plans: how the speaker appears (framing, where they sit, punch-ins and on what), the moments that stay on the speaker, the rhythm (how long B-roll runs, how it returns to the speaker) and transitions. What goes on screen for each kind of content is the table, not this prose.',
+  { id: 'visual', kind: 'prose', look: 'The picture, as a principle an editor can apply to a new video on any topic: why and when the creator leaves the speaker for B-roll (for example "every factual claim gets visual evidence; opinions and feelings stay on the speaker"), their visual vocabulary — the kinds of pictures they reach for and how each looks (B-roll is anything besides the speaker: own or news footage, screenshots, documents, recordings, photos, stock, illustrations, AI-made pictures, charts and other graphics, memes) — how the speaker stays present (framing, picture in picture, split screens), punch-ins, the rhythm and the transitions.',
     pitfalls: 'A switch to another camera angle is multi-cam, not a punch-in. Jump cuts are how the talk is cut, not a transition. Write what depends on the topic as a kind of content ("a named person"), never the particular one. How many per video depends on the content: describe the moments and the restraint, never a rate or an interval.' },
   { id: 'graphics', kind: 'prose', look: 'How the graphics the creator makes look — number cards, lists, comparisons, charts, arrows, highlight boxes, lower thirds, price tags; the platform\'s ready-made components are of this kind. When and where they appear belongs to the picture; this is their design: each colour with its role and its limits (for example "accent coral fills only chips, pill bars and one stat figure; headlines stay in the ink colour"), the type by role (display and labels), shape language (corners, outlines, shadows, glass, 3D), and how they enter, hold and leave.',
     pitfalls: 'Captions, the creator\'s logo and scene text are not graphics.' },
@@ -64,9 +64,9 @@ export const blockGuide = (id: BlockId) => BLOCK_GUIDE.find(item => item.id === 
 export const PROSE_BLOCKS = BLOCK_GUIDE.filter(item => item.kind === 'prose').map(item => item.id);
 
 /**
- * The words the picture is planned in, the same when a creator's videos are read and when a new video is
- * cut: what the speech is about at a moment, what B-roll goes on screen, and how it is shown. A brand's
- * table maps the first to the other two, so it applies to any topic.
+ * The words a reading notes each looked-at moment in — what the speech is about, what B-roll goes on screen
+ * and how it is shown — so the synthesis can see a creator's habits across moments and videos. They stay
+ * inside the extraction: the brand says the principle behind the habits, never a table of them.
  */
 export const SPEECH_KINDS = {
   number: { zh: '数字/趋势', en: 'a number or trend' }, person: { zh: '人物', en: 'a person' }, company: { zh: '公司/品牌', en: 'a company or brand' },
@@ -87,8 +87,6 @@ export const PRESENTATIONS = {
 export type SpeechKind = keyof typeof SPEECH_KINDS;
 export type BrollSource = keyof typeof BROLL_SOURCES;
 export type Presentation = keyof typeof PRESENTATIONS;
-export const COVERAGE = { light: { zh: '少量', en: 'rarely' }, medium: { zh: '适中', en: 'at times' }, heavy: { zh: '大量', en: 'most of the time' } } as const;
-export type Coverage = keyof typeof COVERAGE;
 
 /** Windows looked at closely in each video. */
 export const WINDOWS = { openingSec: 8, closingSec: 10, moments: 4, momentSec: 4, framesPerWindow: 8 } as const;

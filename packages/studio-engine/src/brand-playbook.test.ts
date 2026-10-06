@@ -8,7 +8,7 @@ const valid = (): BrandPlaybook => ({
     captions: { on: true, style: { color: '#ffffff', strokeColor: '#000000', yPct: 22 }, accent: 'keywords', text: '每屏约 3 个词。' },
     logo: { key: 'uploads/u/logo.png', kind: 'image', width: 200, height: 80, corner: 'top-right', widthPct: 12, opacity: 1 },
     sound: { lufs: -15, pauses: 'tight' },
-    visual: { coverage: 'heavy', rows: [{ speech: 'number', source: 'chart', presentation: 'speaker_pip', look: '深色柱状图' }], text: '说到价格时快推近 & 换产品时甩镜 <偶尔>。', evidence: { videos: ['v1', 'v2'], confidence: 'high' } },
+    visual: { text: '说到价格时快推近 & 换产品时甩镜 <偶尔>。', evidence: { videos: ['v1', 'v2'], confidence: 'high' } },
     graphics: { text: '白底黑字圆角数字卡，从下方弹入。', theme: { accent: '#ffd600', display: 'web:smiley-sans' }, references: [{ key: 'uploads/u/mg.jpg', kind: 'image', width: 540, height: 960 }] },
   },
 });
@@ -47,14 +47,14 @@ describe('renderBrandPrompt', () => {
     expect(prompt).toContain('<captions on="true" color="#ffffff" stroke="#000000" accent="keywords" bottom-edge="22% from top">\n每屏约 3 个词。\n</captions>');
     expect(prompt).toContain('<logo corner="top-right" width="12%" opacity="1"/>');
     expect(prompt).toContain('<sound loudness="-15 LUFS" pauses="tight"/>');
-    expect(prompt).toContain('<visual broll="most of the time">\n说到价格时快推近 &amp; 换产品时甩镜 &lt;偶尔&gt;。\n<when speech="number" source="chart" show="speaker_pip">\n深色柱状图\n</when>\n</visual>');
+    expect(prompt).toContain('<visual>\n说到价格时快推近 &amp; 换产品时甩镜 &lt;偶尔&gt;。\n</visual>');
     expect(prompt).toContain('<graphics accent="#ffd600" display-font="web:smiley-sans" references="1">');
     expect(prompt.indexOf('<portrait>')).toBeLessThan(prompt.indexOf('<captions'));
   });
 
   it('renders only the blocks a consumer asks for', () => {
     const prompt = renderBrandPrompt(valid(), ['portrait', 'visual']);
-    expect(prompt).toContain('<visual broll=');
+    expect(prompt).toContain('<visual>');
     expect(prompt).not.toContain('<captions');
     expect(prompt).not.toContain('<graphics');
   });
