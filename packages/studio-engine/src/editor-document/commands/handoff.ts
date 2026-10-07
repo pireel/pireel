@@ -23,9 +23,8 @@ export function setEditingSkills(document: EditorDocumentV2, ids: readonly strin
   const unknown = ids.filter((id) => !isEditingSkillId(id));
   if (unknown.length) return commandFailure(document, 'invalid-command', `Unknown editing skills: ${unknown.join(', ')}.`, { path: 'ids' });
   const on = EDITING_SKILL_IDS.filter((id) => ids.includes(id));
-  if (JSON.stringify(on) === JSON.stringify(document.semantics.editingSkills ?? [])) return { ok: true, document, receipt: emptyCommandReceipt('editingSkills.set') };
-  const semantics = { ...document.semantics };
-  if (on.length) semantics.editingSkills = [...on];
-  else delete semantics.editingSkills;
-  return { ok: true, document: { ...document, semantics }, receipt: emptyCommandReceipt('editingSkills.set') };
+  // An empty list is kept: it records that the skills were set (all off), which a brand's defaults
+  // must not override; no list at all means they were never set.
+  if (document.semantics.editingSkills && JSON.stringify(on) === JSON.stringify(document.semantics.editingSkills)) return { ok: true, document, receipt: emptyCommandReceipt('editingSkills.set') };
+  return { ok: true, document: { ...document, semantics: { ...document.semantics, editingSkills: [...on] } }, receipt: emptyCommandReceipt('editingSkills.set') };
 }

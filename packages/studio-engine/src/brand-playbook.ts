@@ -1,5 +1,6 @@
 import type { CaptionStyle } from './composition-core';
 import { BASE_CAPTION_FONT_PX } from './caption-presets';
+import { BRAND_EDITING_SKILL_IDS } from './editing-skills';
 
 /**
  * A creator's brand: one prompt made of XML blocks, produced from their own videos by the extraction
@@ -44,8 +45,8 @@ export interface BrandBlocks {
    *  words, text in graphics. Fixed: its font (the closest face the platform has; `fontLike` names the
    *  original). Prose: how it looks and moves and when it is used, with reference stills. */
   overlay_text?: Prose & { font?: string; fontLike?: string; references?: BrandAsset[] };
-  /** Fixed: loudness, pause trimming, and whether edits add sound effects. */
-  sound?: { lufs?: number; pauses?: 'tight' | 'moderate' | 'natural'; sfx?: boolean; evidence?: Evidence };
+  /** Fixed: loudness and pause trimming. */
+  sound?: { lufs?: number; pauses?: 'tight' | 'moderate' | 'natural'; evidence?: Evidence };
   /** Fixed: the same clip before / after every video. */
   bookends?: { intro?: BrandAsset; outro?: BrandAsset; evidence?: Evidence };
   /** The visual language: how the picture is organised and changes — where the speaker sits, bands and
@@ -83,6 +84,9 @@ export interface BrandPlaybook {
     preview?: BrandAsset & { cleaned: boolean; textLeft?: boolean };
   };
   blocks: BrandBlocks;
+  /** Editing skills a project edited with this brand starts with (ids from editing-skills), until the
+   *  creator sets the project's own; the analysis sets them, the creator edits them. */
+  skills?: string[];
 }
 
 /**
@@ -136,7 +140,7 @@ export function renderBrandPrompt(playbook: Pick<BrandPlaybook, 'name' | 'blocks
   }
   if (want('overlay_text')) parts.push(element('overlay_text', { font: b.overlay_text!.font, like: b.overlay_text!.fontLike, references: refs(b.overlay_text!.references) }, b.overlay_text!.text));
   if (want('logo')) parts.push(element('logo', { corner: b.logo!.corner, width: `${b.logo!.widthPct}%`, opacity: b.logo!.opacity }));
-  if (want('sound')) parts.push(element('sound', { loudness: b.sound!.lufs !== undefined ? `${b.sound!.lufs} LUFS` : undefined, pauses: b.sound!.pauses, 'sound-effects': b.sound!.sfx === undefined ? undefined : b.sound!.sfx ? 'on' : 'off' }));
+  if (want('sound')) parts.push(element('sound', { loudness: b.sound!.lufs !== undefined ? `${b.sound!.lufs} LUFS` : undefined, pauses: b.sound!.pauses }));
   if (want('bookends')) parts.push(element('bookends', { intro: b.bookends!.intro ? `${b.bookends!.intro.durationSec ?? ''}s clip` : undefined, outro: b.bookends!.outro ? `${b.bookends!.outro.durationSec ?? ''}s clip` : undefined }));
   if (want('visual')) parts.push(element('visual', { references: refs(b.visual!.references) }, b.visual!.text));
   if (want('graphics')) parts.push(element('graphics', { references: refs(b.graphics!.references) }, b.graphics!.text));
@@ -188,6 +192,7 @@ export function validatePlaybook(value: unknown): BrandPlaybook {
   if (typeof p.name !== 'string' || !p.name.trim() || p.name.length > 60) fail('name', '1–60 字');
   if (!Number.isInteger(p.version) || p.version < 1) fail('version', '正整数');
   if (typeof p.method !== 'string' || !p.method) fail('method', '缺失');
+  if (p.skills !== undefined && (!Array.isArray(p.skills) || p.skills.some(id => !(BRAND_EDITING_SKILL_IDS as readonly string[]).includes(id)))) fail('skills', BRAND_EDITING_SKILL_IDS.join(' / '));
   if (!isObject(p.source) || !Array.isArray(p.source.videos) || p.source.videos.length > 30) fail('source', '最多 30 条作品');
   if (p.source.preview) { asset(p.source.preview, 'source.preview'); if (p.source.preview.kind !== 'image' || typeof p.source.preview.cleaned !== 'boolean') fail('source.preview', '需要图片与 cleaned'); }
   if (!isObject(p.blocks)) fail('blocks', '缺失');
@@ -219,7 +224,6 @@ export function validatePlaybook(value: unknown): BrandPlaybook {
   if (b.sound) {
     if (b.sound.lufs !== undefined && !(b.sound.lufs >= -40 && b.sound.lufs <= -5)) fail('blocks.sound.lufs', '-40…-5');
     if (b.sound.pauses !== undefined && !['tight', 'moderate', 'natural'].includes(b.sound.pauses)) fail('blocks.sound.pauses', 'tight/moderate/natural');
-    if (b.sound.sfx !== undefined && typeof b.sound.sfx !== 'boolean') fail('blocks.sound.sfx', 'true/false');
   }
   if (b.bookends) {
     if (b.bookends.intro) { asset(b.bookends.intro, 'blocks.bookends.intro'); if (b.bookends.intro.kind !== 'video') fail('blocks.bookends.intro', '片头需要视频'); }

@@ -157,23 +157,18 @@ function ConfirmPopover({ handoff, pending, onAnswer }: { handoff: HandoffItem[]
   );
 }
 
-/** The row above the composer: switched-on skills as stacked tiles, and the confirm list when there is one. */
-export function EditingSkillsBar({ value, onChange, handoff, onAnswer }: {
-  value: readonly string[];
-  onChange: (ids: string[]) => void;
-  handoff: HandoffItem[];
-  onAnswer: ConfirmAnswer;
-}) {
+/** The switched-on skills as stacked tiles (a dashed plus when none), opening the dialog to pick them. */
+export function EditingSkillsChip({ value, onChange, disabled }: { value: readonly string[]; onChange: (ids: string[]) => void; disabled?: boolean }) {
   const [open, setOpen] = useState(false);
   const on = EDITING_SKILLS.filter((skill) => value.includes(skill.id));
-  const pending = handoff.filter((item) => item.status === 'open').length;
   return (
-    <div className="mb-1.5 flex items-center gap-2 px-0.5">
+    <>
       <button
         type="button"
+        disabled={disabled}
         onClick={() => setOpen(true)}
         title={on.length ? on.map((skill) => name(skill.id)).join(' · ') : t('editingSkills.title')}
-        className="hover:bg-panel-2/60 text-ink-3 hover:text-ink flex h-8 items-center gap-2 rounded-full py-1 pr-2.5 pl-1 text-[11.5px] transition-colors"
+        className="hover:bg-panel-2/60 text-ink-3 hover:text-ink flex h-8 shrink-0 items-center gap-2 rounded-full py-1 pr-2.5 pl-1 text-[11.5px] transition-colors disabled:opacity-40"
       >
         {on.length ? (
           <span className="flex items-center -space-x-1">
@@ -187,8 +182,23 @@ export function EditingSkillsBar({ value, onChange, handoff, onAnswer }: {
         )}
         <span>{on.length ? t('editingSkills.count', { n: on.length }) : t('editingSkills.title')}</span>
       </button>
-      {handoff.length > 0 && <ConfirmPopover handoff={handoff} pending={pending} onAnswer={onAnswer} />}
       <EditingSkillsDialog open={open} value={value} onClose={() => setOpen(false)} onApply={onChange} />
+    </>
+  );
+}
+
+/** The row above the composer: switched-on skills as stacked tiles, and the confirm list when there is one. */
+export function EditingSkillsBar({ value, onChange, handoff, onAnswer }: {
+  value: readonly string[];
+  onChange: (ids: string[]) => void;
+  handoff: HandoffItem[];
+  onAnswer: ConfirmAnswer;
+}) {
+  const pending = handoff.filter((item) => item.status === 'open').length;
+  return (
+    <div className="mb-1.5 flex items-center gap-2 px-0.5">
+      <EditingSkillsChip value={value} onChange={onChange} />
+      {handoff.length > 0 && <ConfirmPopover handoff={handoff} pending={pending} onAnswer={onAnswer} />}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { PLAYBOOK_SCHEMA, type BrandAsset, type BrandBlocks, type BrandPlatform,
 import type { FontReading, FontRole } from './brand-fonts';
 import type { Synthesis, VideoReading } from './brand-reading';
 import { BASE_CAPTION_FONT_PX } from './caption-presets';
+import { BRAND_EDITING_SKILL_IDS } from './editing-skills';
 
 /**
  * The method's last step: the brand from what was measured (the fixed blocks) and what the synthesis
@@ -144,5 +145,23 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
     schema: PLAYBOOK_SCHEMA, id: parts.id, name: parts.name, version: 1, method: METHOD_VERSION,
     source: { platform: parts.platform, ...(parts.account ? { account: parts.account } : {}), videos: parts.videos },
     blocks,
+    skills: brandDefaultSkills(blocks, parts.readings),
   };
+}
+
+/**
+ * The editing skills a brand turns on, from what the analysis found: captions when the videos carry
+ * them, motion graphics when the creator makes them, B-roll when at least a third of the moments read
+ * leave the speaker for it, the rough cut unless pauses are left natural. Sound effects stay off:
+ * frames cannot hear them, so the creator turns them on.
+ */
+export function brandDefaultSkills(blocks: BrandBlocks, readings: VideoReading[]): string[] {
+  const moments = readings.flatMap(reading => reading.moments);
+  const broll = moments.filter(moment => moment.seen.includes('broll')).length;
+  const on = new Set<string>();
+  if (blocks.captions && blocks.captions.on !== false) on.add('captions');
+  if (blocks.graphics?.text?.trim()) on.add('graphics');
+  if (moments.length && broll * 3 >= moments.length) on.add('b-roll');
+  if (blocks.sound?.pauses && blocks.sound.pauses !== 'natural') on.add('rough-cut');
+  return BRAND_EDITING_SKILL_IDS.filter(id => on.has(id));
 }

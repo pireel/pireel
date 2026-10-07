@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BrandObservationSummary } from './brand-analysis';
-import { assemblePlaybook, type PlaybookParts } from './brand-assembly';
+import { assemblePlaybook, brandDefaultSkills, type PlaybookParts } from './brand-assembly';
 import type { BrandEditSpec } from './brand-edit-spec';
 import { METHOD_VERSION } from './brand-method';
 import { validatePlaybook } from './brand-playbook';
@@ -84,3 +84,24 @@ describe('assemblePlaybook', () => {
   });
 });
 
+describe('brandDefaultSkills', () => {
+  const moments = (broll: number, other: number) => [...Array(broll).fill({ seen: ['broll'] }), ...Array(other).fill({ seen: ['nothing'] })];
+  const read = (m: VideoReading['moments']): VideoReading[] => [{ ...reading('v1'), moments: m }];
+
+  it('turns on what the analysis found, in catalog order, and never sound effects', () => {
+    const blocks = { captions: { on: true }, graphics: { text: '数字卡' }, sound: { pauses: 'tight' as const } };
+    expect(brandDefaultSkills(blocks, read(moments(2, 2)))).toEqual(['graphics', 'captions', 'rough-cut', 'b-roll']);
+  });
+
+  it('leaves out captions the videos do not carry, natural pauses and rare B-roll', () => {
+    expect(brandDefaultSkills({ captions: { on: false }, sound: { pauses: 'natural' } }, read(moments(1, 3)))).toEqual([]);
+    expect(brandDefaultSkills({}, read([]))).toEqual([]);
+  });
+
+  it('is part of an assembled brand, and a brand keeps only skills it may set', () => {
+    const playbook = assemblePlaybook(parts());
+    expect(playbook.skills).toEqual(brandDefaultSkills(playbook.blocks, parts().readings));
+    expect(() => validatePlaybook({ ...playbook, skills: ['sound'] })).not.toThrow();
+    expect(() => validatePlaybook({ ...playbook, skills: ['voice-cleanup'] })).toThrow(/skills/);
+  });
+});

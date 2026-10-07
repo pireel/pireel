@@ -110,6 +110,8 @@ export function ChatThread({
   runTool,
   getBody,
   getComp,
+  startPrompt,
+  onStartPromptSent,
   editingSkills,
   onEditingSkills,
   handoff,
@@ -142,6 +144,8 @@ export function ChatThread({
   runTool: StudioChatProps["runTool"];
   getBody: StudioChatProps["getBody"];
   getComp?: StudioChatProps["getComp"];
+  startPrompt?: StudioChatProps["startPrompt"];
+  onStartPromptSent?: StudioChatProps["onStartPromptSent"];
   editingSkills?: StudioChatProps["editingSkills"];
   onEditingSkills?: StudioChatProps["onEditingSkills"];
   handoff?: StudioChatProps["handoff"];
@@ -608,6 +612,15 @@ export function ChatThread({
     },
     [elements, sendMessage, status],
   );
+
+  // A project made from the Studio home opens with its first message: sent once, when the thread is idle.
+  const startSentRef = useRef(false);
+  useEffect(() => {
+    if (!startPrompt?.trim() || startSentRef.current || status !== "ready") return;
+    startSentRef.current = true;
+    onStartPromptSent?.();
+    void run(startPrompt);
+  }, [startPrompt, status, run, onStartPromptSent]);
 
   // A failed stream may already have committed tools. Re-generating the old assistant message
   // erases its receipts while keeping the client-side call counter, so the apparent retry can

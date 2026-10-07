@@ -344,6 +344,7 @@ import { useDenoise } from "./use-denoise";
 import { TransitionPanel } from "./transition-panel";
 import { MediaAnimPanel } from "./media-anim-panel";
 import { type MatteFrame, MATTE_FPS, computeMatteTrack } from "./person-matte";
+import { takeAgentStartPrompt } from "./agent-project-from-video";
 import { type FrameCatalogItem, useFrameCatalog } from "./use-frame-catalog";
 import { StudioBootOverlay } from "./studio-boot";
 import { confirm } from "@pireel/ui/confirm";
@@ -8390,6 +8391,30 @@ export function HyperframesWorkbench({
     cloudSaveQueue,
   ]);
 
+  // A project made from the Studio home brings its first message for the agent, once the project is loaded.
+  const [startPrompt, setStartPrompt] = useState<string | null>(null);
+  useEffect(() => {
+    if (!bootDataReady || !projectId || displaced) return;
+    const prompt = takeAgentStartPrompt(projectId);
+    if (prompt) setStartPrompt(prompt);
+  }, [bootDataReady, projectId, displaced]);
+  const onStartPromptSent = useCallback(() => setStartPrompt(null), []);
+
+  // A project whose editing skills were never set starts with the current brand's defaults. Once set
+  // (all off included) they are the project's own, and changing brand later never changes them. Not an
+  // undo step: ⌘Z would only clear them for this to set them again.
+  const brandSkillsSeedingRef = useRef(false);
+  useEffect(() => {
+    if (!bootDataReady || !projectId || displaced || comp.editingSkills !== undefined || brandSkillsSeedingRef.current) return;
+    const current = studioProviders().brands?.current;
+    if (!current) return;
+    brandSkillsSeedingRef.current = true;
+    void current().then((brand) => {
+      if (!brand?.skills || displacedRef.current || committer.document.semantics.editingSkills !== undefined) return;
+      commit({ op: "command", input: { command: { type: "editingSkills.set", ids: brand.skills } } }, { origin: "system", undo: "none" });
+    }, () => {}).finally(() => { brandSkillsSeedingRef.current = false; });
+  }, [bootDataReady, projectId, displaced, comp.editingSkills]);
+
   // flush-on-hide: switching away / minimizing pushes the debounce tail immediately (a closed-soon
   // tab loses it otherwise — the "fast tab close loses the last edit" hole). Writers only; the diff
   // layer already makes this zero requests when nothing changed.
@@ -8444,6 +8469,8 @@ export function HyperframesWorkbench({
                     runTool={chatCbs.runTool}
                     getBody={getChatBody}
                     getComp={getChatComp}
+                    startPrompt={startPrompt}
+                    onStartPromptSent={onStartPromptSent}
                     editingSkills={comp.editingSkills}
                     onEditingSkills={chatDocCbs.setEditingSkills}
                     handoff={comp.handoff}

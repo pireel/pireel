@@ -146,6 +146,10 @@ export interface StudioChatProps {
   /** Live composition accessor (stable identity, reads a ref): tool receipt cards preview blocks
    *  without linking chat re-renders to comp state. Optional — the preview strip hides without it. */
   getComp?: () => Composition;
+  /** A first message to send once on opening (a project made from the Studio home), and the call that
+   *  marks it sent so it is never sent again. */
+  startPrompt?: string | null;
+  onStartPromptSent?: () => void;
   /** Editing skills switched on for this project, and how to change them (the row above the composer). */
   editingSkills?: readonly string[];
   onEditingSkills?: (ids: string[]) => void;
@@ -186,6 +190,8 @@ export const StudioChat = memo(
       getBody,
       elements,
       getComp,
+      startPrompt,
+      onStartPromptSent,
       editingSkills,
       onEditingSkills,
       handoff,
@@ -461,6 +467,8 @@ export const StudioChat = memo(
           getBody={getBody}
           elements={elements}
           getComp={getComp}
+          startPrompt={startPrompt}
+          onStartPromptSent={onStartPromptSent}
           editingSkills={editingSkills}
           onEditingSkills={onEditingSkills}
           handoff={handoff}

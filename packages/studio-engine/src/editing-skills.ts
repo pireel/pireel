@@ -22,6 +22,10 @@ export const EDITING_SKILLS = [
 
 export type EditingSkillId = (typeof EDITING_SKILLS)[number]['id'];
 
+/** The skills a brand turns on by default. Voice cleanup is left out: whether narration needs it depends
+ *  on how each recording sounds, not on the creator's style (their finished videos are already clean). */
+export const BRAND_EDITING_SKILL_IDS: readonly EditingSkillId[] = ['graphics', 'captions', 'rough-cut', 'b-roll', 'sound'];
+
 export const EDITING_SKILL_IDS: readonly EditingSkillId[] = EDITING_SKILLS.map((skill) => skill.id);
 
 export const isEditingSkillId = (value: unknown): value is EditingSkillId =>

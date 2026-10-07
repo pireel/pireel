@@ -9,6 +9,7 @@
     "./studio.css": "./src/studio.css",
     "./assets-panel": "./src/assets-panel.tsx",
     "./audio-level": "./src/audio-level.tsx",
+    "./editing-skills": "./src/editing-skills.tsx",
     "./block-preview-card": "./src/block-preview-card.tsx",
     "./captions-panel": "./src/captions-panel.tsx",
     "./chat-composer": "./src/chat-composer.tsx",
