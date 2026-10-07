@@ -87,7 +87,17 @@ export interface BrandPlaybook {
   /** Editing skills a project edited with this brand starts with (ids from editing-skills), until the
    *  creator sets the project's own; the analysis sets them, the creator edits them. */
   skills?: string[];
+  /** The Studio Skill (kind of video) this brand is a style of; read through brandSkillOf. */
+  skillId?: string;
 }
+
+/** The Studio Skills a brand can belong to: only talking-head videos for now. A project on any other
+ *  Skill (or the creator's own) is edited without a brand. */
+export const BRAND_SKILL_IDS: readonly string[] = ['talking-head-edit'];
+export const DEFAULT_BRAND_SKILL_ID = 'talking-head-edit';
+/** The Skill a brand belongs to (brands made before skills were recorded are talking-head brands). */
+export const brandSkillOf = (brand: Pick<BrandPlaybook, 'skillId'>) => brand.skillId ?? DEFAULT_BRAND_SKILL_ID;
+export const skillTakesBrand = (skillId: string | undefined) => !!skillId && BRAND_SKILL_IDS.includes(skillId);
 
 /**
  * The canvas the creator's footage is cut on (width 1080, as scene canvases are): the shape of their
@@ -192,6 +202,7 @@ export function validatePlaybook(value: unknown): BrandPlaybook {
   if (typeof p.name !== 'string' || !p.name.trim() || p.name.length > 60) fail('name', '1–60 字');
   if (!Number.isInteger(p.version) || p.version < 1) fail('version', '正整数');
   if (typeof p.method !== 'string' || !p.method) fail('method', '缺失');
+  if (p.skillId !== undefined && (typeof p.skillId !== 'string' || !p.skillId || p.skillId.length > 100)) fail('skillId', 'Skill id');
   if (p.skills !== undefined && (!Array.isArray(p.skills) || p.skills.some(id => !(BRAND_EDITING_SKILL_IDS as readonly string[]).includes(id)))) fail('skills', BRAND_EDITING_SKILL_IDS.join(' / '));
   if (!isObject(p.source) || !Array.isArray(p.source.videos) || p.source.videos.length > 30) fail('source', '最多 30 条作品');
   if (p.source.preview) { asset(p.source.preview, 'source.preview'); if (p.source.preview.kind !== 'image' || typeof p.source.preview.cleaned !== 'boolean') fail('source.preview', '需要图片与 cleaned'); }

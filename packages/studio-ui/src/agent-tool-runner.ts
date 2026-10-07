@@ -135,9 +135,10 @@ import { compositionRenderView } from './composition-render-view';
 import type { StudioChatHandle } from './studio-chat';
 import { primaryNarrativeRenderPlan } from './primary-render-plan';
 
-/** The creator's brand graphics prose (component generation follows it), when a brand is in use. */
-async function currentBrandGraphics(): Promise<string | null> {
-  const brand = await studioProviders().brands?.current?.().catch(() => null);
+/** The brand graphics prose component generation follows: the project's brand, or — for a project whose
+ *  brand was never set — the creator's current one. */
+async function brandGraphicsOf(document: EditorDocumentV2): Promise<string | null> {
+  const brand = document.semantics.brand !== undefined ? document.semantics.brand : await studioProviders().brands?.current?.().catch(() => null);
   return brand?.blocks.graphics?.text?.trim() || null;
 }
 import { supplementalVisualMedia } from './visual-render-plan';
@@ -3378,7 +3379,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 seed,
                 `Create a new Motion Graphic layer for this composed Scene: ${String(input.instruction ?? '')}${backdrop}${sceneDirection}`,
                 (acc) => report(noteOf(acc) || t('panels.generating')),
-                newBlockComposeMode({ brandGraphics: !!(await currentBrandGraphics()) }),
+                newBlockComposeMode({ brandGraphics: !!(await brandGraphicsOf(documentRef.current)) }),
               ));
               // An explicit user request never maps to "nothing worth showing" — a deliberate null
               // here means no component carries the ask, so take the free-form path rather than
@@ -3623,9 +3624,11 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             };
           };
           const appearance = documentRef.current.appearance;
+          const projectBrand = documentRef.current.semantics.brand;
           const base = {
             theme: appearance.theme,
             ...(appearance.palette ? { palette: appearance.palette } : {}),
+            ...(projectBrand !== undefined ? { brandGraphics: projectBrand?.blocks.graphics?.text?.trim() || null } : {}),
           };
           const bid = typeof input.blockId === 'string' ? input.blockId : undefined;
           if (bid) {
@@ -3697,7 +3700,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         const block = d.block as ComposeBriefInput['block'] | undefined;
         if (!block) return { ok: false, error: tEnglish('workbench.elementNotFoundIds') };
         const format = input.format === 'kit' || input.format === 'html' ? (input.format as 'kit' | 'html') : undefined;
-        const brandGraphics = await currentBrandGraphics();
+        const brandGraphics = 'brandGraphics' in d ? (typeof d.brandGraphics === 'string' ? d.brandGraphics : null) : await brandGraphicsOf(documentRef.current);
         const brief = assembleComposeBrief({
           block,
           instruction: String(input.instruction).trim(),

@@ -101,6 +101,7 @@ describe('brandDefaultSkills', () => {
   it('is part of an assembled brand, and a brand keeps only skills it may set', () => {
     const playbook = assemblePlaybook(parts());
     expect(playbook.skills).toEqual(brandDefaultSkills(playbook.blocks, parts().readings));
+    expect(playbook.skillId).toBe('talking-head-edit');
     expect(() => validatePlaybook({ ...playbook, skills: ['sound'] })).not.toThrow();
     expect(() => validatePlaybook({ ...playbook, skills: ['voice-cleanup'] })).toThrow(/skills/);
   });

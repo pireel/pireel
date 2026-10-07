@@ -1,7 +1,7 @@
 import type { BrandObservationSummary } from './brand-analysis';
 import type { BrandEditSpec } from './brand-edit-spec';
 import { METHOD_VERSION } from './brand-method';
-import { PLAYBOOK_SCHEMA, type BrandAsset, type BrandBlocks, type BrandPlatform, type BrandPlaybook, type Confidence, type Evidence } from './brand-playbook';
+import { DEFAULT_BRAND_SKILL_ID, PLAYBOOK_SCHEMA, type BrandAsset, type BrandBlocks, type BrandPlatform, type BrandPlaybook, type Confidence, type Evidence } from './brand-playbook';
 import type { FontReading, FontRole } from './brand-fonts';
 import type { Synthesis, VideoReading } from './brand-reading';
 import { BASE_CAPTION_FONT_PX } from './caption-presets';
@@ -146,6 +146,8 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
     source: { platform: parts.platform, ...(parts.account ? { account: parts.account } : {}), videos: parts.videos },
     blocks,
     skills: brandDefaultSkills(blocks, parts.readings),
+    // Every brand is a talking-head brand for now; the analysis will judge the kind of video later.
+    skillId: DEFAULT_BRAND_SKILL_ID,
   };
 }
 

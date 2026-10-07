@@ -17,6 +17,7 @@
  * This file keeps the public types + the multi-session shell.
  */
 
+import type { PlaybookSnapshot } from "@pireel/studio-engine/brand-playbook";
 import type { HandoffItem } from '@pireel/studio-engine/editor-document/types';
 import type { ConfirmAnswer } from './confirm-list';
 import type { GenerationIntent } from "./chat-generation-intent";
@@ -130,6 +131,15 @@ export interface StudioChatProps {
   /** Live composition accessor (stable identity, reads a ref): tool receipt cards preview blocks
    *  without linking chat re-renders to comp state. Optional — the preview strip hides without it. */
   getComp?: () => Composition;
+  /** The brand the project is edited with (null: none picked; undefined: never set — the server then uses
+   *  the creator's current brand), sent with every request; and how the creator switches it. */
+  projectBrand?: PlaybookSnapshot | null;
+  /** The Studio Skill the project is edited as (undefined: never set — the thread's own pick applies),
+   *  and how a pick in the chat is written back to the project. */
+  projectSkillId?: string;
+  onProjectSkill?: (skillId: string) => void;
+  brands?: { list: () => Promise<PlaybookSnapshot[]>; manage?: () => void };
+  onProjectBrand?: (brand: PlaybookSnapshot | null) => void;
   /** A first message to send once on opening (a project made from the Studio home), and the call that
    *  marks it sent so it is never sent again. */
   startPrompt?: string | null;
@@ -176,6 +186,11 @@ export const StudioChat = memo(
       getComp,
       startPrompt,
       onStartPromptSent,
+      projectBrand,
+      projectSkillId,
+      onProjectSkill,
+      brands,
+      onProjectBrand,
       editingSkills,
       onEditingSkills,
       handoff,
@@ -445,6 +460,11 @@ export const StudioChat = memo(
           getComp={getComp}
           startPrompt={startPrompt}
           onStartPromptSent={onStartPromptSent}
+          projectBrand={projectBrand}
+          projectSkillId={projectSkillId}
+          onProjectSkill={onProjectSkill}
+          brands={brands}
+          onProjectBrand={onProjectBrand}
           editingSkills={editingSkills}
           onEditingSkills={onEditingSkills}
           handoff={handoff}

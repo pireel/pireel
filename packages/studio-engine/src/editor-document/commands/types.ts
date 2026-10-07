@@ -1,3 +1,4 @@
+import type { PlaybookSnapshot } from '../../brand-playbook';
 import type { TimelineTransition } from '../types';
 import type { TransitionPatch } from './transitions';
 import type {
@@ -127,6 +128,8 @@ export type EditorCommand =
   | { type: 'processing.patch'; patch: ProcessingPatch }
   | { type: 'handoff.patch'; id: string; status: 'open' | 'confirmed' | 'changed'; answer?: string }
   | { type: 'editingSkills.set'; ids: string[] }
+  | { type: 'brand.set'; brand: PlaybookSnapshot | null }
+  | { type: 'skill.set'; skillId: string }
   | { type: 'track.insert'; track: InsertTrackInput; index?: number }
   | { type: 'track.remove'; trackId: TrackId }
   | { type: 'track.patch'; trackId: TrackId; patch: TrackPatch }

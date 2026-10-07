@@ -634,6 +634,10 @@ export interface Composition {
   handoff?: HandoffItem[];
   /** Editing skills switched on for this project (read-only projection of document semantics). */
   editingSkills?: string[];
+  /** The brand the project is edited with (read-only projection of document semantics; null = none picked). */
+  brand?: import('./brand-playbook').PlaybookSnapshot | null;
+  /** The Studio Skill the project is edited as (read-only projection of document semantics). */
+  skillId?: string;
   /** Global person-effect style (toolbar "Person" panel): person-on-top / feather / stroke / background swap.
    *  Only takes effect on matte-enabled (VideoShot.personMatte) shot segments; default = all defaults. */
   personFx?: PersonFx;

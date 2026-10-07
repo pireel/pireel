@@ -4,6 +4,7 @@ import type { TranscriptSegment } from '../project-dto';
 import type { ThemeId } from '../theme';
 import type { NarrativeRole, SceneFamily, ViewerTask } from '../director-plan';
 import type { DocumentLook } from '../look';
+import type { PlaybookSnapshot } from '../brand-playbook';
 
 export const EDITOR_DOCUMENT_VERSION = 2 as const;
 
@@ -236,6 +237,12 @@ export interface EditorSemanticState {
   handoff?: HandoffItem[];
   /** Editing skills the creator switched on for this project (editing-skills.ts ids). */
   editingSkills?: string[];
+  /** The brand this project is edited with: a copy taken when it was picked, so later edits of the
+   *  brand never restyle the project. null = picked to edit without a brand; absent = never set. */
+  brand?: PlaybookSnapshot | null;
+  /** The Studio Skill (kind of video) this project is edited as; 'auto' = none; absent = never set.
+   *  A brand only goes with a Skill that takes brands (brand-playbook BRAND_SKILL_IDS). */
+  skillId?: string;
 }
 
 export interface HandoffItem {

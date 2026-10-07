@@ -15,6 +15,8 @@ import {
   useState,
 } from "react";
 import { ChevronRight, Info, X } from "lucide-react";
+import { ConfirmDialog } from "@pireel/ui/confirm-dialog";
+import { brandSkillOf, skillTakesBrand } from "@pireel/studio-engine/brand-playbook";
 import { describeGenerationIntentLine } from "./chat-generation-intent";
 import { useChat } from "@ai-sdk/react";
 import {
@@ -107,6 +109,11 @@ export function ChatThread({
   getComp,
   startPrompt,
   onStartPromptSent,
+  projectBrand,
+  projectSkillId,
+  onProjectSkill,
+  brands,
+  onProjectBrand,
   editingSkills,
   onEditingSkills,
   handoff,
@@ -137,6 +144,11 @@ export function ChatThread({
   getBody: StudioChatProps["getBody"];
   getComp?: StudioChatProps["getComp"];
   startPrompt?: StudioChatProps["startPrompt"];
+  projectBrand?: StudioChatProps["projectBrand"];
+  projectSkillId?: StudioChatProps["projectSkillId"];
+  onProjectSkill?: StudioChatProps["onProjectSkill"];
+  brands?: StudioChatProps["brands"];
+  onProjectBrand?: StudioChatProps["onProjectBrand"];
   onStartPromptSent?: StudioChatProps["onStartPromptSent"];
   editingSkills?: StudioChatProps["editingSkills"];
   onEditingSkills?: StudioChatProps["onEditingSkills"];
@@ -176,12 +188,15 @@ export function ChatThread({
   const editingSkillsRef = useRef(editingSkills);
   editingSkillsRef.current = editingSkills;
   const composerRef = useRef<ComposerHandle | null>(null);
-  const [skillId, setSkillId] = useState<StudioScenarioSkillId>(initialSkillId);
+  // The project's Skill when it has one; a project that never set one keeps this thread's own pick.
+  const [skillId, setSkillId] = useState<StudioScenarioSkillId>((projectSkillId as StudioScenarioSkillId | undefined) ?? initialSkillId);
   const [activeStarterId, setActiveStarterId] = useState<string | null>(null);
   const skillRef = useRef(skillId);
   skillRef.current = skillId;
 
-  // body carries the session-level skillId; the situation snapshot is attached to metadata.situation at send time (persists with the session,
+  const projectBrandRef = useRef(projectBrand);
+  projectBrandRef.current = projectBrand;
+  // body carries the session-level skillId and the project's brand; the situation snapshot is attached to metadata.situation at send time (persists with the session,
   // the route materializes it into a <composition_state> part) — stable history bytes are what let the prompt cache hit
   const transport = useMemo(
     () =>
@@ -193,6 +208,7 @@ export function ChatThread({
           ...(skillRef.current !== STUDIO_AUTO_SKILL_ID
             ? { skillId: skillRef.current }
             : {}),
+          ...(projectBrandRef.current !== undefined ? { brand: projectBrandRef.current } : {}),
         }),
         prepareSendMessagesRequest: ({
           body,
@@ -341,15 +357,24 @@ export function ChatThread({
     },
     [onSnapshot],
   );
+  const onProjectSkillRef = useRef(onProjectSkill);
+  onProjectSkillRef.current = onProjectSkill;
   const applySkill = useCallback(
     (nextSkillId: StudioScenarioSkillId) => {
       if (skillRef.current === nextSkillId) return;
       skillRef.current = nextSkillId;
       setSkillId(nextSkillId);
       persistSessionState(nextSkillId);
+      onProjectSkillRef.current?.(nextSkillId);
     },
     [persistSessionState],
   );
+  // The project's Skill changed elsewhere (another thread, a brand bringing its Skill): follow it.
+  useEffect(() => {
+    if (projectSkillId === undefined || projectSkillId === skillRef.current) return;
+    skillRef.current = projectSkillId as StudioScenarioSkillId;
+    setSkillId(projectSkillId as StudioScenarioSkillId);
+  }, [projectSkillId]);
   const statusSnapshotActivationRef = useRef<DeferredActivation | null>(null);
   if (!statusSnapshotActivationRef.current)
     statusSnapshotActivationRef.current = new DeferredActivation();
@@ -690,7 +715,7 @@ export function ChatThread({
     [applySkill, fillComposer],
   );
 
-  const pickSkill = useCallback((nextSkillId: StudioScenarioSkillId) => {
+  const switchSkill = useCallback((nextSkillId: StudioScenarioSkillId) => {
     applySkill(nextSkillId);
     setActiveStarterId(null);
     const defaultPrompt = nextSkillId === STUDIO_AUTO_SKILL_ID
@@ -698,6 +723,18 @@ export function ChatThread({
       : scenarioSkills.find((skill) => skill.id === nextSkillId)?.defaultPrompt ?? null;
     composerRef.current?.applySkillPrompt(defaultPrompt);
   }, [applySkill, scenarioSkills]);
+  // A Skill picked in the composer: switching away from the project's Skill, or onto one that would drop
+  // the project's brand, asks first.
+  const [pendingSkill, setPendingSkill] = useState<StudioScenarioSkillId | null>(null);
+  const pickSkill = useCallback((nextSkillId: StudioScenarioSkillId) => {
+    const leavesSkill = !!projectSkillId && projectSkillId !== STUDIO_AUTO_SKILL_ID;
+    const dropsBrand = !!projectBrand && !skillTakesBrand(nextSkillId);
+    if (onProjectSkillRef.current && nextSkillId !== skillRef.current && (leavesSkill || dropsBrand)) {
+      setPendingSkill(nextSkillId);
+      return;
+    }
+    switchSkill(nextSkillId);
+  }, [projectSkillId, projectBrand, switchSkill]);
 
   // Expose "one-tap film" progress + selected pill to the workbench.
   useImperativeHandle(
@@ -1210,6 +1247,18 @@ export function ChatThread({
             onAnswer={onAnswerHandoff ?? (() => {})}
           />
         )}
+        <ConfirmDialog
+          open={pendingSkill !== null}
+          title={t("chatGen.skill.confirmTitle")}
+          description={pendingSkill === null ? undefined : [
+            t("chatGen.skill.confirmBody", { name: pendingSkill === STUDIO_AUTO_SKILL_ID ? t("chatGen.skill.auto.title") : scenarioSkills.find((skill) => skill.id === pendingSkill)?.title ?? pendingSkill }),
+            projectBrand && !skillTakesBrand(pendingSkill) ? t("chatGen.skill.confirmDropsBrand", { brand: projectBrand.name }) : "",
+          ].filter(Boolean).join(" ")}
+          confirmLabel={t("chatGen.brand.switch")}
+          cancelLabel={t("panels.cancel")}
+          onCancel={() => setPendingSkill(null)}
+          onConfirm={() => { if (pendingSkill !== null) switchSkill(pendingSkill); setPendingSkill(null); }}
+        />
         <Composer
           placeholder={t("chatGen.sayWhatAddChange")}
           status={status}
@@ -1220,6 +1269,14 @@ export function ChatThread({
           onCreateScenarioSkill={onRefreshScenarioSkills ? createScenarioSkill : undefined}
           onDeleteScenarioSkill={onDeleteScenarioSkill}
           onPickSkill={pickSkill}
+          projectBrand={projectBrand}
+          // Brands belong to a Skill: the picker shows only while the project is on no Skill or one that
+          // takes brands, and lists that Skill's brands.
+          brands={brands && (skillId === STUDIO_AUTO_SKILL_ID || skillTakesBrand(skillId)) ? {
+            ...brands,
+            list: async () => (await brands.list()).filter((brand) => skillId === STUDIO_AUTO_SKILL_ID || brandSkillOf(brand) === skillId),
+          } : undefined}
+          onProjectBrand={onProjectBrand}
           timelineFramePickActive={timelineFramePickActive}
           timelineFramePickBusy={timelineFramePickBusy}
           timelineFramePickAvailable={timelineFramePickAvailable}

@@ -38,6 +38,8 @@ export interface ComposeRequest {
   instruction: string;
   theme?: string;
   palette?: Record<string, string>;
+  /** The project's brand graphics prose (null: edited without a brand); omitted when the project never set a brand. */
+  brandGraphics?: string | null;
   /** UI language for the human-facing note line. */
   lang?: string;
   context?: ComposeContext;

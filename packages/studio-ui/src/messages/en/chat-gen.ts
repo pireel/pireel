@@ -271,4 +271,12 @@ export const CHATGEN_EN: Record<string, string> = {
   'chatGen.workNotFinished': 'This task is not finished',
   'chatGen.workDurationSeconds': '{s}s',
   'chatGen.workDurationMinutes': '{m}m {s}s',
+  'chatGen.brand.title': "This project's brand",
+  'chatGen.brand.none': 'No brand',
+  'chatGen.brand.loading': 'Loading…',
+  'chatGen.brand.manage': 'Create or manage brands',
+  'chatGen.brand.switch': 'Switch',
+  'chatGen.skill.confirmTitle': "Switch this project's Skill?",
+  'chatGen.skill.confirmBody': 'Later edits follow “{name}”. What is already edited stays as it is.',
+  'chatGen.skill.confirmDropsBrand': "This Skill takes no brand, so the project's brand “{brand}” is dropped.",
 };

@@ -157,6 +157,7 @@ import { runtimeTranscriptsFollowingDocument } from './runtime-transcripts';
 import { transcriptInputsFor, type DocumentOp } from '@pireel/studio-engine/document-transaction';
 import { applyEditorDocumentPersistenceMetadata } from '@pireel/studio-engine/project-document';
 import { DocumentCommitter } from './document-commit';
+import { playbookSnapshot, skillTakesBrand, type PlaybookSnapshot } from "@pireel/studio-engine/brand-playbook";
 import { ProjectSync, localPendingTransactionStore, type ProjectSyncDeps, type ProjectSyncSections } from './project-sync';
 
 /** Constant speed of a placed video clip = source seconds per timeline second (1 = natural). */
@@ -4478,6 +4479,9 @@ export function HyperframesWorkbench({
           ...(compRef.current.palette
             ? { palette: compRef.current.palette }
             : {}), // background-derived colors, so the LLM uses the real accent
+          ...(compRef.current.brand !== undefined
+            ? { brandGraphics: compRef.current.brand?.blocks.graphics?.text?.trim() || null }
+            : {}), // the project's brand graphics direct the look
           lang: localeRef.current, // note (the human sentence in chat) uses the UI language
           ...(Object.keys(context).length ? { context } : {}),
           ...(opts?.kit
@@ -8223,20 +8227,45 @@ export function HyperframesWorkbench({
   }, [bootDataReady, projectId, displaced]);
   const onStartPromptSent = useCallback(() => setStartPrompt(null), []);
 
-  // A project whose editing skills were never set starts with the current brand's defaults. Once set
-  // (all off included) they are the project's own, and changing brand later never changes them. Not an
-  // undo step: ⌘Z would only clear them for this to set them again.
+  // A project that never set a brand takes a copy of the creator's current brand, and one that never set its
+  // editing skills starts with its brand's defaults. Once set (none included) they are the project's own:
+  // a later brand change on the account never touches them. Not an undo step: ⌘Z would only clear them for
+  // this to set them again.
   const brandSkillsSeedingRef = useRef(false);
   useEffect(() => {
-    if (!bootDataReady || !projectId || displaced || comp.editingSkills !== undefined || brandSkillsSeedingRef.current) return;
+    if (!bootDataReady || !projectId || displaced || brandSkillsSeedingRef.current) return;
+    if (comp.brand !== undefined && comp.editingSkills !== undefined) return;
     const current = studioProviders().brands?.current;
-    if (!current) return;
+    // A project already on a Skill that takes no brand (or explicitly on none) is not given one.
+    const brandable = comp.skillId === undefined || skillTakesBrand(comp.skillId);
+    if (comp.brand === undefined && (!current || !brandable)) return;
     brandSkillsSeedingRef.current = true;
-    void current().then((brand) => {
-      if (!brand?.skills || displacedRef.current || committer.document.semantics.editingSkills !== undefined) return;
-      commit({ op: "command", input: { command: { type: "editingSkills.set", ids: brand.skills } } }, { origin: "system", undo: "none" });
+    const brandOf = comp.brand !== undefined ? Promise.resolve(comp.brand) : brandable ? current!().then((kit) => (kit ? playbookSnapshot(kit) : undefined)) : Promise.resolve(undefined);
+    void brandOf.then((brand) => {
+      const semantics = committer.document.semantics;
+      if (displacedRef.current) return;
+      const ops: DocumentOp[] = [];
+      if (semantics.brand === undefined && brand) ops.push({ op: "command", input: { command: { type: "brand.set", brand } } });
+      const skillsFrom = semantics.brand !== undefined ? semantics.brand : brand;
+      if (semantics.editingSkills === undefined && skillsFrom?.skills) ops.push({ op: "command", input: { command: { type: "editingSkills.set", ids: skillsFrom.skills } } });
+      if (ops.length) commit(ops, { origin: "system", undo: "none" });
     }, () => {}).finally(() => { brandSkillsSeedingRef.current = false; });
-  }, [bootDataReady, projectId, displaced, comp.editingSkills]);
+  }, [bootDataReady, projectId, displaced, comp.brand, comp.editingSkills, comp.skillId]);
+  /** The Skill picked in the chat is the project's (a Skill that takes no brand leaves it without one). */
+  const setProjectSkill = useCallback((skillId: string) => {
+    const edit = commit({ op: "command", input: { command: { type: "skill.set", skillId } } });
+    if (!edit.ok) toast.error(editorErrorMessage(edit.error));
+  }, []);
+  /** The creator switches the project's brand in the chat (later edits follow it; its skills stay as set). */
+  const setProjectBrand = useCallback((brand: PlaybookSnapshot | null) => {
+    const edit = commit({ op: "command", input: { command: { type: "brand.set", brand } } });
+    if (!edit.ok) toast.error(editorErrorMessage(edit.error));
+  }, []);
+  const chatBrands = useMemo(() => {
+    const provider = studioProviders().brands;
+    return provider ? { list: async () => (await provider.list()).map(playbookSnapshot), ...(provider.manage ? { manage: provider.manage } : {}) } : undefined;
+  }, []);
+
 
   // flush-on-hide: switching away / minimizing pushes the debounce tail immediately (a closed-soon
   // tab loses it otherwise — the "fast tab close loses the last edit" hole). Writers only; the diff
@@ -8294,6 +8323,11 @@ export function HyperframesWorkbench({
                     getComp={getChatComp}
                     startPrompt={startPrompt}
                     onStartPromptSent={onStartPromptSent}
+                    projectBrand={comp.brand}
+                    projectSkillId={comp.skillId}
+                    onProjectSkill={setProjectSkill}
+                    brands={chatBrands}
+                    onProjectBrand={setProjectBrand}
                     editingSkills={comp.editingSkills}
                     onEditingSkills={chatDocCbs.setEditingSkills}
                     handoff={comp.handoff}

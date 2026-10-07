@@ -391,6 +391,8 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const base = {
         theme: c.theme,
         ...(c.palette ? { palette: c.palette } : {}),
+        // The project's brand graphics (null: edited without a brand); absent when no brand was ever set.
+        ...(c.brand !== undefined ? { brandGraphics: c.brand?.blocks.graphics?.text?.trim() || null } : {}),
       };
       const bid = typeof input.clipId === 'string' ? input.clipId : undefined;
       if (bid) {

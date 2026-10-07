@@ -21,6 +21,7 @@ import {
 } from "@pireel/ui/trigger-popover";
 import type { StudioScenarioSkillId } from "@pireel/studio-engine/scenario-skills";
 import { ChatSkillPicker } from "./chat-skill-picker";
+import { ChatBrandPicker } from "./chat-brand-picker";
 import {
   appendChatPillRemoveIcon,
   CHAT_ACTION_PILL_CLASS,
@@ -81,6 +82,9 @@ export function Composer({
   onOpenSkillMarket,
   onCreateScenarioSkill,
   onDeleteScenarioSkill,
+  projectBrand,
+  brands,
+  onProjectBrand,
   onPickSkill,
   timelineFramePickActive,
   timelineFramePickBusy,
@@ -101,6 +105,10 @@ export function Composer({
   onCreateScenarioSkill?: () => void;
   onDeleteScenarioSkill?: (id: string) => Promise<void>;
   onPickSkill: (id: StudioScenarioSkillId) => void;
+  /** The project's brand and how to switch it (hidden without a brand provider). */
+  projectBrand?: StudioChatProps["projectBrand"];
+  brands?: StudioChatProps["brands"];
+  onProjectBrand?: StudioChatProps["onProjectBrand"];
   /** Visual direction attached to the current session. */
   /** Art-direction catalog rendered in the unified visual-style dialog. */
   timelineFramePickActive: boolean;
@@ -801,6 +809,9 @@ export function Composer({
                 recomputeEmpty();
               }}
             />
+            )}
+            {intent || !brands || !onProjectBrand ? null : (
+            <ChatBrandPicker brand={projectBrand} brands={brands} disabled={isBusy} onChange={onProjectBrand} />
             )}
           </div>
           <div className="flex items-center gap-2">

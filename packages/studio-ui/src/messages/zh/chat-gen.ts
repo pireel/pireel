@@ -271,4 +271,12 @@ export const CHATGEN_ZH: Record<string, string> = {
   'chatGen.workNotFinished': '任务尚未完成',
   'chatGen.workDurationSeconds': '{s} 秒',
   'chatGen.workDurationMinutes': '{m} 分 {s} 秒',
+  'chatGen.brand.title': '这个项目用的品牌',
+  'chatGen.brand.none': '不使用品牌',
+  'chatGen.brand.loading': '加载中…',
+  'chatGen.brand.manage': '创建或管理品牌',
+  'chatGen.brand.switch': '切换',
+  'chatGen.skill.confirmTitle': '切换这个项目的 Skill？',
+  'chatGen.skill.confirmBody': '后续剪辑按「{name}」进行；已经剪好的部分不会自动改。',
+  'chatGen.skill.confirmDropsBrand': '这个 Skill 不使用品牌，项目的品牌「{brand}」会取消。',
 };

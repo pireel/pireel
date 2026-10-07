@@ -1,6 +1,7 @@
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { compositionToEditorDocument, emptyComposition } from '@pireel/studio-engine/composition';
 import { EDITING_SKILL_IDS } from '@pireel/studio-engine/editing-skills';
+import { brandSkillOf, type PlaybookSnapshot } from '@pireel/studio-engine/brand-playbook';
 import { STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION, type ProjectSaveWire } from '@pireel/studio-engine/project-dto';
 import { createDocumentTransactionId } from '@pireel/studio-engine/document-transaction';
 import { loadCurrentUser } from './current-user';
@@ -20,11 +21,12 @@ export function takeAgentStartPrompt(projectId: string): string | null {
 }
 
 /**
- * A new Agent project holding one video, with the editing skills it starts with and the first message
+ * A new Agent project holding one video, with the brand it is edited with (a copy; null = none), the
+ * editing skills it starts with and the first message
  * its agent is asked: the Studio home's way into the agent. Saved like an Agent Remix copy (the video
  * kept on this device and backed up), so the editor opens it with its media.
  */
-export async function createAgentProjectFromVideo(file: File, options: { skills: readonly string[]; prompt: string; report?: (phase: 'preparing' | 'saving') => void }): Promise<string> {
+export async function createAgentProjectFromVideo(file: File, options: { brand: PlaybookSnapshot | null; skills: readonly string[]; prompt: string; report?: (phase: 'preparing' | 'saving') => void }): Promise<string> {
   options.report?.('preparing');
   const [data, user] = await Promise.all([probeVideoFile(file), loadCurrentUser()]);
   if (!user || user.auth_method === 'anon') throw new Error('请先登录。');
@@ -38,7 +40,8 @@ export async function createAgentProjectFromVideo(file: File, options: { skills:
   try {
     const composition = { ...emptyComposition(), width: data.width, height: data.height, video: { url, durationSec: data.durationSec }, shots: [{ id: 'source-video', srcStart: 0, srcEnd: data.durationSec, treatment: 'full' as const }] };
     const document = compositionToEditorDocument({ projectId: id, videoSig: sig, composition }).document;
-    document.semantics = { ...document.semantics, editingSkills: EDITING_SKILL_IDS.filter((skill) => options.skills.includes(skill)) };
+    // A brand brings its Skill (the kind of video it is a style of).
+    document.semantics = { ...document.semantics, brand: options.brand, ...(options.brand ? { skillId: brandSkillOf(options.brand) } : {}), editingSkills: EDITING_SKILL_IDS.filter((skill) => options.skills.includes(skill)) };
     const localAssets: NonNullable<NonNullable<ProjectSaveWire['context']>['localAssets']> = [];
     for (const asset of Object.values(document.assets)) {
       if (asset.kind !== 'video') continue;
