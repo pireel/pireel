@@ -43,7 +43,6 @@ import {
   latestStudioMetaAction,
 } from "@pireel/studio-engine/skill-actions";
 import { v3ToolCanMutate, V3_TOOL_IDS } from "@pireel/studio-engine/agent-surface-v3/registry";
-import type { FrameCatalogItem } from "./use-frame-catalog";
 import {
   CHAT_ACTION_PILL_CLASS,
   CHAT_PILL_ICON_CLASS,
@@ -83,7 +82,6 @@ import { inspectTimelineFrameEvidence } from "./chat-timeline-frame-evidence";
 import { DeferredActivation } from "./deferred-activation";
 import { studioToolResultStopsAgentTurn } from "./agent-tool-runner";
 import type {
-  AttachedFrame,
   ProgressHandle,
   StudioChatDraftPart,
   StudioChatHandle,
@@ -99,14 +97,11 @@ export function ChatThread({
   localAssetIndex,
   threadId,
   initialMessages,
-  initialFrame,
   initialSkillId,
   scenarioSkills,
   onOpenSkillMarket,
   onRefreshScenarioSkills,
   onDeleteScenarioSkill,
-  frames,
-  onFrameApplied,
   runTool,
   getBody,
   getComp,
@@ -133,14 +128,11 @@ export function ChatThread({
   localAssetIndex?: readonly LocalAssetIndexEntry[];
   threadId: string;
   initialMessages: UIMessage[];
-  initialFrame: AttachedFrame | null;
   initialSkillId: StudioScenarioSkillId;
   scenarioSkills: readonly StudioScenarioSkillOption[];
   onOpenSkillMarket?: () => void;
   onRefreshScenarioSkills?: () => Promise<void>;
   onDeleteScenarioSkill?: (id: string) => Promise<void>;
-  frames: FrameCatalogItem[];
-  onFrameApplied?: (frame: AttachedFrame | null) => void;
   runTool: StudioChatProps["runTool"];
   getBody: StudioChatProps["getBody"];
   getComp?: StudioChatProps["getComp"];
@@ -157,7 +149,6 @@ export function ChatThread({
   elements: StudioElementRef[];
   onSnapshot: (
     messages: UIMessage[],
-    frame: AttachedFrame | null,
     skillId: StudioScenarioSkillId,
   ) => void;
   onBusyChange?: (busy: boolean) => void;
@@ -185,17 +176,12 @@ export function ChatThread({
   const editingSkillsRef = useRef(editingSkills);
   editingSkillsRef.current = editingSkills;
   const composerRef = useRef<ComposerHandle | null>(null);
-  const [frame, setFrame] = useState<AttachedFrame | null>(initialFrame);
-  const frameRef = useRef(frame);
-  frameRef.current = frame;
   const [skillId, setSkillId] = useState<StudioScenarioSkillId>(initialSkillId);
   const [activeStarterId, setActiveStarterId] = useState<string | null>(null);
   const skillRef = useRef(skillId);
   skillRef.current = skillId;
-  const onFrameAppliedRef = useRef(onFrameApplied);
-  onFrameAppliedRef.current = onFrameApplied;
 
-  // body carries session-level frameId + skillId; the situation snapshot is attached to metadata.situation at send time (persists with the session,
+  // body carries the session-level skillId; the situation snapshot is attached to metadata.situation at send time (persists with the session,
   // the route materializes it into a <composition_state> part) — stable history bytes are what let the prompt cache hit
   const transport = useMemo(
     () =>
@@ -204,10 +190,6 @@ export function ChatThread({
         body: () => ({
           locale: studioLocale().toLowerCase().startsWith("zh") ? "zh" : "en",
           ...(projectId ? { projectId } : {}),
-          ...(frameRef.current ? { frameId: frameRef.current.id } : {}),
-          ...(frameRef.current?.customVisualStyle
-            ? { customVisualStyle: frameRef.current.customVisualStyle }
-            : {}),
           ...(skillRef.current !== STUDIO_AUTO_SKILL_ID
             ? { skillId: skillRef.current }
             : {}),
@@ -353,28 +335,18 @@ export function ChatThread({
   // otherwise merely opening an old session refreshes its updatedAt and scrambles the history ordering.
   messagesRef.current = messages;
   const persistSessionState = useCallback(
-    (nextFrame: AttachedFrame | null, nextSkillId: StudioScenarioSkillId) => {
+    (nextSkillId: StudioScenarioSkillId) => {
       if (messagesRef.current.length > 0)
-        onSnapshot(compactStudioChatMessages(messagesRef.current), nextFrame, nextSkillId);
+        onSnapshot(compactStudioChatMessages(messagesRef.current), nextSkillId);
     },
     [onSnapshot],
-  );
-  /** Attach a frame (shared by panel/theme button): update the request state, apply the palette, and persist this explicit user action. */
-  const applyFrame = useCallback(
-    (nextFrame: AttachedFrame | null) => {
-      frameRef.current = nextFrame;
-      setFrame(nextFrame);
-      onFrameAppliedRef.current?.(nextFrame);
-      persistSessionState(nextFrame, skillRef.current);
-    },
-    [persistSessionState],
   );
   const applySkill = useCallback(
     (nextSkillId: StudioScenarioSkillId) => {
       if (skillRef.current === nextSkillId) return;
       skillRef.current = nextSkillId;
       setSkillId(nextSkillId);
-      persistSessionState(frameRef.current, nextSkillId);
+      persistSessionState(nextSkillId);
     },
     [persistSessionState],
   );
@@ -385,7 +357,7 @@ export function ChatThread({
     if (!statusSnapshotActivationRef.current!.active)
       return statusSnapshotActivationRef.current!.defer();
     if (status === "ready" || status === "error")
-      onSnapshot(compactStudioChatMessages(messagesRef.current), frameRef.current, skillRef.current);
+      onSnapshot(compactStudioChatMessages(messagesRef.current), skillRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
   const busy = status === "streaming" || status === "submitted";
@@ -413,7 +385,7 @@ export function ChatThread({
     if (timedMessages === messagesRef.current) return;
     messagesRef.current = timedMessages;
     setMessages(timedMessages);
-    onSnapshot(compactStudioChatMessages(timedMessages), frameRef.current, skillRef.current);
+    onSnapshot(compactStudioChatMessages(timedMessages), skillRef.current);
   }, [onSnapshot, setMessages, status]);
 
   const refreshedCreatedSkillRef = useRef<string | null>(null);
@@ -489,7 +461,7 @@ export function ChatThread({
   useEffect(() => {
     if (!busy) return;
     const t = setInterval(
-      () => onSnapshot(compactStudioChatMessages(messagesRef.current), frameRef.current, skillRef.current),
+      () => onSnapshot(compactStudioChatMessages(messagesRef.current), skillRef.current),
       2000,
     );
     return () => clearInterval(t);
@@ -515,7 +487,7 @@ export function ChatThread({
       } catch {
         /* already ended */
       }
-      onSnapshot(compactStudioChatMessages(messagesRef.current), frameRef.current, skillRef.current);
+      onSnapshot(compactStudioChatMessages(messagesRef.current), skillRef.current);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
@@ -788,9 +760,6 @@ export function ChatThread({
       insertMention(el) {
         composerRef.current?.insertMention(el);
       },
-      attachFrame(s) {
-        applyFrame(s);
-      },
       beginTimelineFrameCapture(s) {
         composerRef.current?.beginTimelineFrameCapture(s);
       },
@@ -801,7 +770,7 @@ export function ChatThread({
         composerRef.current?.failTimelineFrameCapture(id);
       },
     }),
-    [applyFrame, setMessages, run, applySkill],
+    [setMessages, run, applySkill],
   );
 
   const empty = messages.length === 0;
@@ -1251,13 +1220,10 @@ export function ChatThread({
           onCreateScenarioSkill={onRefreshScenarioSkills ? createScenarioSkill : undefined}
           onDeleteScenarioSkill={onDeleteScenarioSkill}
           onPickSkill={pickSkill}
-          frame={frame}
-          frames={frames}
           timelineFramePickActive={timelineFramePickActive}
           timelineFramePickBusy={timelineFramePickBusy}
           timelineFramePickAvailable={timelineFramePickAvailable}
           onTimelineFramePickActiveChange={onTimelineFramePickActiveChange}
-          onPickFrame={applyFrame}
           onSubmit={run}
           onStop={handleStop}
           methodsRef={composerRef}

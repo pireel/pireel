@@ -96,7 +96,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   /* ------------------------------------------------------------------ state */
   get_state: {
     description:
-      'Read the active output: canvas (width, height, fps), durationFrames, playhead, account (plan, canGenerate, imageGeneration, videoGeneration — credits and an enabled model per kind; check before a paid call), lateReceipts (outcomes of calls that timed out and finished since), the attached frame, every track with its role and clips, the asset inventory, and the outputs list. Clips carry frames:[start,end), source seconds, non-default properties only; linked audio is folded into its visual clip as audio:{clipId,…}; caption tracks appear as one captions object, never as cue clips. Call once per session, then patch your model from mutation deltas; re-read only when a receipt note or an error says the state is stale. window narrows to tracks and a frame range and adds totalClips per truncated track.',
+      'Read the active output: canvas (width, height, fps), durationFrames, playhead, account (plan, canGenerate, imageGeneration, videoGeneration — credits and an enabled model per kind; check before a paid call), lateReceipts (outcomes of calls that timed out and finished since), every track with its role and clips, the asset inventory, and the outputs list. Clips carry frames:[start,end), source seconds, non-default properties only; linked audio is folded into its visual clip as audio:{clipId,…}; caption tracks appear as one captions object, never as cue clips. Call once per session, then patch your model from mutation deltas; re-read only when a receipt note or an error says the state is stale. window narrows to tracks and a frame range and adds totalClips per truncated track.',
     inputSchema: obj({
       window: obj({
         tracks: arr(str(), { description: 'Track ids to include; omit for all.' }),
@@ -463,13 +463,13 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   /* ------------------------------------------------------------------ components */
   compose_component: {
     description:
-      'Get the generation contract {system, prompt, target} for one Motion Graphic component, assembled from the live output: the real box, the backdrop under it, the active frame and the spoken beats in its window. Decide atFrame, durationFrames, placement and backdrop first; pass clipId to rewrite an existing component (its timing and box are supplied). Generate the response yourself with your own model, then submit it with apply_component. No credits are charged here. ' + MG_RUNTIME_CAPABILITIES,
+      'Get the generation contract {system, prompt, target} for one Motion Graphic component, assembled from the live output: the real box, the backdrop under it, the creator\'s brand graphics (when they have a brand) and the spoken beats in its window. Decide atFrame, durationFrames, placement and backdrop first; pass clipId to rewrite an existing component (its timing and box are supplied). Generate the response yourself with your own model, then submit it with apply_component. No credits are charged here. ' + MG_RUNTIME_CAPABILITIES,
     inputSchema: obj({
       instruction: str('What the component must communicate, in one concrete sentence.'),
       clipId: str('Existing graphic clip to rewrite.'),
       atFrame: FRAME('New component start'), durationFrames: int('New component duration in frames.', 1),
       placement: PLACEMENT_PCT, backdrop: str('What sits under the box and which zones must stay clear.'),
-      format: enumOf(['html', 'kit'], 'kit = a registered library component with JSON props — prefer it without a frame when one fits; html = bespoke markup (no fitting component, or a frame is attached).'),
+      format: enumOf(['html', 'kit'], 'kit = a registered library component with JSON props — prefer it when one fits and the creator has no brand graphics; html = bespoke markup (no fitting component, or the brand\'s graphics should shape the look).'),
       fontFamily: str('Optional display face for the component: web:<id> from get_state.fonts, google:<Family> from search_assets kind font, or local:<family>. The brief then defines var(--font-display); copy the same value to apply_component.'),
     }, ['instruction']),
   },
@@ -575,10 +575,10 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       relayout: bool(),
     }),
   },
-  manage_frame: {
+  read_brand: {
     description:
-      'Visual direction. list returns the available frames (design-system content packs); attach applies one by id, filling unspecified art-direction decisions while the user’s explicit choices and manual project values stay authoritative; read returns the attached frame’s playbook to design against. A frame never authorises resetting palette, captions or layout the user set by hand.',
-    inputSchema: obj({ action: enumOf(['list', 'attach', 'read']), id: str('attach: required. read: omit to read the attached frame.') }, ['action']),
+      'The creator\'s brand in use: their style read from videos they published, as XML sections — portrait, captions, overlay_text (words put on the picture), visual (when to leave the speaker, how pictures sit with them, what to make when footage runs out), graphics (how their graphics look and how colours and type are chosen), structure, sound, logo, bookends, cover. Read it once before building or reworking a whole video; where the user leaves a choice open, edit the way this creator edits. The latest explicit user instruction wins over it. Returns no_brand when the creator has none.',
+    inputSchema: obj({}, []),
   },
 
   /* ------------------------------------------------------------------ generation */

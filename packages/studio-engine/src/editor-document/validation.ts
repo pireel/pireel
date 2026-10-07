@@ -9,7 +9,6 @@ import {
   type EditorDocumentV2,
   type EditorTrackRole,
 } from './types';
-import { normalizeCustomVisualStyle } from '../visual-style';
 import { normalizeLook } from '../look';
 import { editorTrackAcceptsClip } from './track-compatibility';
 
@@ -42,8 +41,6 @@ export function isEditorDocumentV2(value: unknown): value is EditorDocumentV2 {
   ))) return false;
   if (Object.values(document.semantics.transcripts).some((segments) => !Array.isArray(segments))) return false;
   if (document.semantics.scenes.some((scene) => !scene || typeof scene !== 'object' || !Array.isArray(scene.clipIds))) return false;
-  if (document.appearance.customVisualStyle !== undefined
-    && !normalizeCustomVisualStyle(document.appearance.customVisualStyle)) return false;
   if (document.appearance.look !== undefined && !normalizeLook(document.appearance.look).look) return false;
   return true;
 }
@@ -185,7 +182,16 @@ export function parseEditorDocumentV2(value: unknown): EditorDocumentV2 | null {
   // Load-time repair: lanes inserted before the caption pin existed could sit above the captions;
   // the captions come back on top (see caption-stack.ts).
   // Transitions used to hang on the incoming spine clip; they now live on their own lane.
-  return withMigratedTransitions(pinCaptionsOnTop(normalizePeerNarrativeSources(normalizeEditorDocumentArtifacts(value).document)));
+  return withoutRetiredAppearance(withMigratedTransitions(pinCaptionsOnTop(normalizePeerNarrativeSources(normalizeEditorDocumentArtifacts(value).document))));
+}
+
+/** Theme packs (frameId) and the custom visual style were retired (2026-10-07): projects saved with them
+ *  load without them. Graphics inserted under a theme keep its colours in their own frozen vars. */
+function withoutRetiredAppearance(document: EditorDocumentV2): EditorDocumentV2 {
+  const appearance = document.appearance as EditorDocumentV2['appearance'] & { frameId?: unknown; customVisualStyle?: unknown };
+  if (!('frameId' in appearance) && !('customVisualStyle' in appearance)) return document;
+  const { frameId: _frame, customVisualStyle: _style, ...kept } = appearance;
+  return { ...document, appearance: kept };
 }
 
 export function editorTimelineTotalFrames(document: EditorDocumentV2): number {

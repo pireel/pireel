@@ -14,10 +14,9 @@ function deps(overrides: Partial<McpDeps> = {}): McpDeps {
   return {
     skillVersion: '2099-01-01.1',
     callBridge: vi.fn(async (tool: string) => (tool === 'run_v3' ? { ok: false, error: 'studio_not_open' } : { ok: true, summary: 'done' })),
-    listFrames: vi.fn(() => [{ id: 'f1', title: 'F1', summary: 's' }]),
     listSkills: vi.fn(async () => ({ ok: true, summary: '1 skill', data: { skills: [{ id: 'usk_1', title: '大女主' }] } })),
     readSkill: vi.fn(async (id: string) => ({ ok: true, summary: id, data: { skill: { id, playbook: 'PB' } } })),
-    readFrame: vi.fn((id: string) => ({ ok: true, summary: id, data: { playbook: 'PB' } })),
+    readBrand: vi.fn(async () => ({ ok: true, summary: 'brand', data: { brand: { name: 'Me', graphics: 'G' } } })),
     assembleComposeBrief: vi.fn((_d: Record<string, unknown>, instruction: string) => ({ ok: true, data: { system: 'SYS', prompt: `P:${instruction}` } })),
     lookupIcons: vi.fn(() => ({ ok: true, data: { icons: [], misses: [] } })),
     importMedia: vi.fn(async () => ({ ok: true, summary: 'imported', data: { projectId: 'p1' } })),
@@ -152,20 +151,18 @@ describe('MCP v3 surface', () => {
     expect(JSON.parse((body!.result as { content: { text: string }[] }).content[0]!.text)).toMatchObject({ ok: false, error: 'locked track' });
   });
 
-  it('manage_frame read without an id reads the attached frame, or says none is attached', async () => {
-    const attached = deps({ attachedFrameId: vi.fn(async () => 'f9') });
-    const body = await handleMcpRequest({ id: 44, method: 'tools/call', params: { name: 'manage_frame', arguments: { action: 'read' } } }, attached);
-    expect(attached.readFrame).toHaveBeenCalledWith('f9');
-    expect(JSON.parse((body!.result as { content: { text: string }[] }).content[0]!.text)).toMatchObject({ ok: true, summary: 'f9' });
-    const bare = deps({ attachedFrameId: vi.fn(async () => null) });
-    const none = await handleMcpRequest({ id: 45, method: 'tools/call', params: { name: 'manage_frame', arguments: { action: 'read' } } }, bare);
-    expect(JSON.parse((none!.result as { content: { text: string }[] }).content[0]!.text)).toMatchObject({ ok: false, error: 'no_frame_attached' });
-    expect(bare.readFrame).not.toHaveBeenCalled();
+  it('read_brand is server-owned and answers with the account brand', async () => {
+    expect(MCP_SERVER_TOOL_IDS.has('read_brand')).toBe(true);
+    const callBridge = vi.fn(async () => ({ ok: true, summary: 'live result' }));
+    const d = deps({ callBridge });
+    const body = await handleMcpRequest({ id: 44, method: 'tools/call', params: { name: 'read_brand', arguments: {} } }, d);
+    expect(d.readBrand).toHaveBeenCalledWith();
+    expect(callBridge).not.toHaveBeenCalled();
+    expect(JSON.parse((body!.result as { content: { text: string }[] }).content[0]!.text)).toMatchObject({ ok: true, summary: 'brand', data: { brand: { name: 'Me' } } });
   });
 
   it.each([
-    ['manage_frame', { action: 'list' }, 'listFrames', undefined],
-    ['manage_frame', { action: 'read', id: 'f1' }, 'readFrame', 'f1'],
+    ['read_brand', {}, 'readBrand', undefined],
     ['read_skill', { id: 'visual-craft' }, 'readSkill', 'visual-craft'],
     ['list_models', { kind: 'all' }, 'listModels', { kind: 'all' }],
     ['list_skills', {}, 'listSkills', {}],
@@ -201,7 +198,6 @@ describe('MCP v3 surface', () => {
     ['search_assets', { scope: 'mine' }],
     ['search_assets', { scope: 'mine', query: 'local' }],
     ['manage_project', { scope: 'output', action: 'duplicate', title: 'Copy' }],
-    ['manage_frame', { action: 'attach', id: 'f1' }],
     ['register_media', { assets: [{ id: 'a1', kind: 'image', url: 'https://example.com/a.png' }] }],
   ])('keeps document-owned %s %j on the live tab', async (name, args) => {
     const callBridge = vi.fn(async () => ({ ok: true, summary: 'live result' }));

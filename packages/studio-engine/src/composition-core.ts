@@ -17,7 +17,6 @@
  */
 
 import type { ThemeId } from './theme';
-import type { CustomVisualStyle } from './visual-style';
 import type { DocumentLook } from './look';
 import type { HandoffItem } from './editor-document/types';
 import { type Clip, editedDuration, spans } from './trim';
@@ -629,11 +628,6 @@ export interface Composition {
   /** SPARSE: only fields the user explicitly set are stored — defaults live in resolveCaptionStyle
    *  (so default evolution reaches existing projects). Always read through the resolvers. */
   captionStyle?: Partial<CaptionStyle>;
-  /** Mounted frame theme-pack id (written to the document alongside palette on mount): the compose request carries it,
-   *  the server injects that frame's design language into ACTIVE THEME (overrides generic aesthetics, engineering contract untouched). */
-  frameId?: string;
-  /** Structured user-composed Frame, persisted so every generation path receives the same choices. */
-  customVisualStyle?: CustomVisualStyle;
   /** The output's own video-level template: its visual system and pieces (look.ts). */
   look?: DocumentLook;
   /** What the creator must confirm (read-only projection of document semantics). */

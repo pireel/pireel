@@ -391,8 +391,6 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const base = {
         theme: c.theme,
         ...(c.palette ? { palette: c.palette } : {}),
-        ...(c.frameId ? { frameId: c.frameId } : {}),
-        ...(c.customVisualStyle ? { customVisualStyle: c.customVisualStyle } : {}),
       };
       const bid = typeof input.clipId === 'string' ? input.clipId : undefined;
       if (bid) {

@@ -74,14 +74,6 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.aiEditFailed": "AI edit failed",
   "workbench.aiGenerate": "AI generate",
   "workbench.analysisDebug": "Analysis (debug)",
-  "workbench.appliedTheme":
-    'Applied the "{title}" visual style. Generated content now follows this design',
-  "workbench.appliedThemeAlt":
-    'Applied the "{title}" visual style. Generated content now follows this design',
-  "workbench.appliedThemePersonFx":
-    'Applied the "{title}" visual style. The subject gets a sticker outline and generated content follows this design',
-  "workbench.visualStyleDisabled":
-    "Visual styling is off. Future generations will not carry a Frame or automatic visual settings",
   "workbench.assembledHtmlBuiltFrom":
     "assembled HTML (built from blocks, read-only)",
   "workbench.assetMotion": "Asset motion",
@@ -292,8 +284,6 @@ export const WORKBENCH_EN: Record<string, string> = {
     "An element is generating — redo after it finishes",
   "workbench.elementGeneratingUndoAfter":
     "An element is generating — undo after it finishes",
-  "workbench.elementGeneratingThemeAfter":
-    "Motion Graphics are still generating. Switch the style after they finish.",
   "workbench.elementInserted": "Element inserted",
   "workbench.elementNoFillableText": "This element has no fillable text slots",
   "workbench.elementNotFound": "Element not found",
@@ -540,8 +530,6 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.noRemovableDeadAir":
     "No removable narration pauses remain on the timeline with the current detection settings",
   "workbench.noSuchCaptionPreset": "No such caption preset: {preset}",
-  "workbench.noSuchFrameId":
-    "No such frame: {id} (see <frame_catalog> for ids)",
   "workbench.nothingRedo": "Nothing to redo",
   "workbench.nothingSetGiveLeast":
     "Nothing to set: give at least one of preset / yPct / scale",
@@ -672,7 +660,6 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.syncFailedTryAgain": "Sync failed — try again later",
   "workbench.tellChatHowChange": "Tell the chat how to change this element",
   "workbench.themePanel": "Visual style panel",
-  "workbench.themes": "Visual styles",
   "workbench.thereNoCaptionsRight": "There are no captions right now",
   "workbench.thoseRangesAlreadyOut":
     "Those ranges are already out of the video",

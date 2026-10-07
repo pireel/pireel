@@ -84,7 +84,7 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   { id: 'apply_component', group: 'components', charges: true },
   { id: 'set_texts', group: 'components', skillContract: { version: 1, stability: 'stable' } },
   { id: 'set_captions', group: 'components', skillContract: { version: 1, stability: 'stable' } },
-  { id: 'manage_frame', group: 'components' },
+  { id: 'read_brand', group: 'components' },
   { id: 'bake_component', group: 'components' },
   // ---- generation (8)
   { id: 'list_models', group: 'generation', serverDirect: true },

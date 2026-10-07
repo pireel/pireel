@@ -22,7 +22,6 @@
     "./code-editor": "./src/code-editor.tsx",
     "./edit-overlays": "./src/edit-overlays.tsx",
     "./element-source-editor": "./src/element-source-editor.tsx",
-    "./frame-panel": "./src/frame-panel.tsx",
     "./gen-chat-panel": "./src/gen-chat-panel.tsx",
     "./hyperframes-workbench": "./src/hyperframes-workbench.tsx",
     "./kit-props-panel": "./src/kit-props-panel.tsx",
@@ -61,7 +60,6 @@
   ],
   "dependencies": {
     "@pireel/studio-engine": "workspace:*",
-    "@pireel/studio-frames": "workspace:*",
     "@pireel/ui": "workspace:*"
   }
 }

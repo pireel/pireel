@@ -152,8 +152,6 @@ export function projectV2ToLegacyComposition(document: EditorDocumentV2, options
     shots,
     ...(document.appearance.palette ? { palette: document.appearance.palette } : {}),
     ...(document.appearance.captionStyle ? { captionStyle: document.appearance.captionStyle } : {}),
-    ...(document.appearance.frameId ? { frameId: document.appearance.frameId } : {}),
-    ...(document.appearance.customVisualStyle ? { customVisualStyle: document.appearance.customVisualStyle } : {}),
     ...(document.appearance.look ? { look: document.appearance.look } : {}),
     ...(document.semantics.handoff?.length ? { handoff: document.semantics.handoff } : {}),
     ...(document.semantics.editingSkills ? { editingSkills: document.semantics.editingSkills } : {}),

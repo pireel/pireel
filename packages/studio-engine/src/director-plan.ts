@@ -97,7 +97,6 @@ export interface DirectorPlan {
   /** Shared design language that every Scene must inherit and vary intentionally. */
   designSystem: VideoDesignSystem;
   skillId?: string;
-  frameId?: string;
   audience?: string;
   scenes: DirectorScenePlan[];
 }
@@ -138,7 +137,6 @@ export function validateDirectorPlan(value: unknown): DirectorPlanIssue[] {
     }
   }
   if (plan.skillId !== undefined && !nonEmpty(plan.skillId)) push('invalid-skill-id', 'skillId', 'Skill id must be non-empty when supplied.');
-  if (plan.frameId !== undefined && !nonEmpty(plan.frameId)) push('invalid-frame-id', 'frameId', 'Frame id must be non-empty when supplied.');
   if (plan.audience !== undefined && !nonEmpty(plan.audience)) push('invalid-audience', 'audience', 'Audience must be non-empty when supplied.');
   if (!Array.isArray(plan.scenes) || plan.scenes.length === 0) {
     push('missing-scenes', 'scenes', 'Director plan needs at least one scene.');
@@ -203,7 +201,6 @@ function canonicalDirectorPlan(plan: DirectorPlan): DirectorPlan {
     ...(plan.deliverySafety ? { deliverySafety: plan.deliverySafety } : {}),
     designSystem: plan.designSystem,
     ...(plan.skillId ? { skillId: plan.skillId } : {}),
-    ...(plan.frameId ? { frameId: plan.frameId } : {}),
     ...(plan.audience ? { audience: plan.audience } : {}),
     scenes: plan.scenes,
   };
@@ -276,7 +273,6 @@ export function migrateDirectorPlan(value: unknown): DirectorPlan | null {
       sound: 'Preserve the existing dialogue, source sound, and per-scene sound plans.',
     },
     ...(nonEmpty(legacy.skillId) ? { skillId: legacy.skillId } : {}),
-    ...(nonEmpty(legacy.frameId) ? { frameId: legacy.frameId } : {}),
     ...(nonEmpty(legacy.audience) ? { audience: legacy.audience } : {}),
     scenes: scenes as DirectorScenePlan[],
   };
@@ -330,7 +326,6 @@ export function directorPlanFromSeconds(input: Record<string, unknown>, fps: num
     ...(input.deliverySafety !== undefined ? { deliverySafety: input.deliverySafety as string } : {}),
     designSystem: input.designSystem as VideoDesignSystem,
     ...(nonEmpty(input.skillId) ? { skillId: input.skillId } : {}),
-    ...(nonEmpty(input.frameId) ? { frameId: input.frameId } : {}),
     ...(nonEmpty(input.audience) ? { audience: input.audience } : {}),
     scenes,
   };

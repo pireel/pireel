@@ -374,8 +374,6 @@ export function migrateLegacyProjectToV2(input: LegacyProjectForMigration): Edit
       theme: comp.theme ?? 'general',
       ...(comp.palette ? { palette: comp.palette } : {}),
       ...(comp.captionStyle ? { captionStyle: comp.captionStyle } : {}),
-      ...(comp.frameId ? { frameId: comp.frameId } : {}),
-      ...(comp.customVisualStyle ? { customVisualStyle: comp.customVisualStyle } : {}),
       ...(comp.personFx ? { personFx: comp.personFx } : {}),
     },
     assets,

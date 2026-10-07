@@ -57,8 +57,6 @@ import { measureShotRegions, measureSound } from './facts-measure';
 import { exportRecommendations } from '@pireel/studio-engine/export-options';
 import { parkInteraction } from './interaction-store';
 import { assembleComposeBrief, interpretApplyRaw, type ComposeBriefInput } from '@pireel/studio-engine/briefs';
-import { composeVisualDirectionContent, normalizeCustomVisualStyle } from '@pireel/studio-engine/visual-style';
-import { frameRegistry } from '@pireel/studio-frames/vite';
 import { visualCraftBaseline } from './visual-baseline';
 import { composeEditorialBrief } from '@pireel/studio-engine/review-brief';
 import { studioProviders } from '@pireel/studio-engine/providers';
@@ -134,9 +132,14 @@ import { openingContendersFor, recordOpeningComparison, recordReviewedSource, re
 import { buildAssemblyFromReview } from './editorial-assembly-tool';
 import { type ExportRenderOpts, captureCompositionFrame } from './client-export';
 import { compositionRenderView } from './composition-render-view';
-import type { FrameCatalogItem } from './use-frame-catalog';
 import type { StudioChatHandle } from './studio-chat';
 import { primaryNarrativeRenderPlan } from './primary-render-plan';
+
+/** The creator's brand graphics prose (component generation follows it), when a brand is in use. */
+async function currentBrandGraphics(): Promise<string | null> {
+  const brand = await studioProviders().brands?.current?.().catch(() => null);
+  return brand?.blocks.graphics?.text?.trim() || null;
+}
 import { supplementalVisualMedia } from './visual-render-plan';
 import { collectAssetSearchDocuments } from './asset-search-collector';
 import { getLocalVisualModelSnapshot } from './local-visual-search-model';
@@ -485,7 +488,6 @@ export interface AgentToolCtx {
   exportPctRef: MutableRefObject<number>;
   exportVideo: (opts: ExportRenderOpts, sinkUrl?: string) => Promise<{ ok: boolean; filename?: string; error?: string; delivered?: 'local_sink' | 'browser_download'; sinkError?: string }>;
   // Frames + chat handle
-  frameCatalogRef: MutableRefObject<FrameCatalogItem[]>;
   chatRef: MutableRefObject<StudioChatHandle | null>;
 }
 
@@ -529,7 +531,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
     ensureClipTranscripts, transcriptForAgent, stepAsr, stepVisual, visualRef, visualBriefRef,
     applyVisualResult, composeBlockChecked,
     noteOf, setDenoise,
-    agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
+    agentExportRef, exportPctRef, exportVideo,
   } = ctx;
   /** Directory registration of generated outputs; hosts without a media directory (tests, thin shells) simply skip it. */
   const registerGeneratedEntry = (entry: LocalAssetIndexEntry) => {
@@ -3283,23 +3285,6 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               },
             };
           }
-          case 'manage_frame': {
-            if (input.action !== 'attach') {
-              return { ok: false, error: 'attach_only_in_tab', data: { fix: 'Listing and reading frames is answered by the server; in the studio tab manage_frame only attaches one by id.' } };
-            }
-            input = { ...input, frame_id: input.id };
-            // Editing expert selects for a complete pass, or the user names one → mount a frame through chat's attachFrame
-            // (tag + subsequent requests carry frameId),
-            // then onFrameApplied lands palette+frameId into comp. Next round <frame_attached> prompts it to manage_frame action:read (read_frame.
-            // Gate before tagging the session: onFrameApplied refuses mid-generation, and a tagged
-            // session with an unapplied comp would disagree about the active theme.
-            if (genIdsRef.current.size) return { ok: false, error: tEnglish('workbench.elementGeneratingThemeAfter') };
-            const fid = typeof input.frame_id === 'string' ? input.frame_id : '';
-            const f = frameCatalogRef.current.find((x) => x.id === fid);
-            if (!f) return { ok: false, error: tEnglish('workbench.noSuchFrameId', { id: fid }) };
-            chatRef.current?.attachFrame({ id: f.id, title: f.title, icon: f.icon, iconKey: f.iconKey ?? null });
-            return { ok: true, summary: t('workbench.appliedThemeAlt', { title: f.title }) };
-          }
           case 'apply_component': {
             if (input.generate !== true) return { ok: false, error: 'apply_component without generate runs on the BYO path', data: { fix: 'Pass raw (the generated text) through run_v3, or set generate:true with an instruction.' } };
             if (typeof input.instruction !== 'string' || !input.instruction.trim()) return { ok: false, error: 'missing_field', data: { path: 'instruction', fix: 'The hosted generator needs a concrete instruction.' } };
@@ -3387,13 +3372,13 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 ? `\n\nBACKDROP AND PROTECTED ZONES: ${input.backdrop.trim()}`
                 : '';
               // Streaming: the note (the human sentence before the fence) is pushed to the card as it generates; the output passes static checks (bad CSS doesn't enter the composition)
-              // Library first (no Frame): a registered component with filled props; the model declines
+              // Library first (no brand graphics): a registered component with filled props; the model declines
               // when none carries the moment, and the free-form path below writes bespoke markup.
               let parsed = await race(composeBlockChecked(
                 seed,
                 `Create a new Motion Graphic layer for this composed Scene: ${String(input.instruction ?? '')}${backdrop}${sceneDirection}`,
                 (acc) => report(noteOf(acc) || t('panels.generating')),
-                newBlockComposeMode({ frameAttached: !!documentRef.current.appearance.frameId }),
+                newBlockComposeMode({ brandGraphics: !!(await currentBrandGraphics()) }),
               ));
               // An explicit user request never maps to "nothing worth showing" — a deliberate null
               // here means no component carries the ask, so take the free-form path rather than
@@ -3641,8 +3626,6 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           const base = {
             theme: appearance.theme,
             ...(appearance.palette ? { palette: appearance.palette } : {}),
-            ...(appearance.frameId ? { frameId: appearance.frameId } : {}),
-            ...(appearance.customVisualStyle ? { customVisualStyle: appearance.customVisualStyle } : {}),
           };
           const bid = typeof input.blockId === 'string' ? input.blockId : undefined;
           if (bid) {
@@ -3714,8 +3697,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         const block = d.block as ComposeBriefInput['block'] | undefined;
         if (!block) return { ok: false, error: tEnglish('workbench.elementNotFoundIds') };
         const format = input.format === 'kit' || input.format === 'html' ? (input.format as 'kit' | 'html') : undefined;
-        const frame = typeof d.frameId === 'string' ? frameRegistry.get(d.frameId) : null;
-        const frameContent = composeVisualDirectionContent(frame ? { title: frame.title, body: frame.body } : null, normalizeCustomVisualStyle(d.customVisualStyle));
+        const brandGraphics = await currentBrandGraphics();
         const brief = assembleComposeBrief({
           block,
           instruction: String(input.instruction).trim(),
@@ -3728,7 +3710,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           // The shell injects the host visual-craft baseline; the server compose route folds the
           // same text in, so BYO components get the same quality floor. Empty on an OSS shell.
           ...(visualCraftBaseline() ? { visualBaseline: visualCraftBaseline() } : {}),
-          frame: frameContent,
+          brandGraphics,
         });
         const fps = documentRef.current.canvas.fps;
         return {

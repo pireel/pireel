@@ -3,7 +3,6 @@ import type { AtomicMediaFraming, Block, CaptionStyle, CutTransitionEffect, Pers
 import type { TranscriptSegment } from '../project-dto';
 import type { ThemeId } from '../theme';
 import type { NarrativeRole, SceneFamily, ViewerTask } from '../director-plan';
-import type { CustomVisualStyle } from '../visual-style';
 import type { DocumentLook } from '../look';
 
 export const EDITOR_DOCUMENT_VERSION = 2 as const;
@@ -65,8 +64,6 @@ export interface EditorAppearance {
   theme: ThemeId;
   palette?: Record<string, string>;
   captionStyle?: Partial<CaptionStyle>;
-  frameId?: string;
-  customVisualStyle?: CustomVisualStyle;
   personFx?: PersonFx;
   /** The output's own video-level template (visual system + pieces); graphics instance it as `look:<pieceId>`. */
   look?: DocumentLook;

@@ -13,7 +13,8 @@ it('replaces only active cutout samples and releases alpha bitmaps after composi
   const draw = vi.fn();
   const samples = new Map<string, SampledVisualVideo>(['a', 'b'].map(id => [id, { sourceWidth: 640, sourceHeight: 360, sample: { draw } }]));
   const release = await prepareVisualPersonMattes([clip('a'), clip('b', false)], samples, 3);
-  expect(cutout).toHaveBeenCalledExactlyOnceWith(input);
+  // Frames of one exported clip share a matting stream, so its matte stays steady from frame to frame.
+  expect(cutout).toHaveBeenCalledExactlyOnceWith(input, { id: 'export:a', t: 3 });
   samples.get('a')!.sample.draw(ctx as never, 10, 20, 100, 200);
   expect(ctx.drawImage).toHaveBeenCalledWith(result, 10, 20, 100, 200);
   expect(samples.get('b')!.sample.draw).toBe(draw);

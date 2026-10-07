@@ -195,8 +195,7 @@ export function useMediaAnalysis(deps: MediaAnalysisDeps) {
       visualRef.current = vis;
       setVisual(vis);
       // Attach the palette derived from the background to the composition → assembleHtml injects #root, compose passes it to the LLM (light blend).
-      // Don't override when a frame (frameId) is mounted: a frame is the user's explicitly chosen design system; the visual-derived palette is only a default source
-      if (vis.palette && !documentRef.current.appearance.frameId) {
+      if (vis.palette) {
         commit({ op: 'command', input: { command: { type: 'appearance.patch', patch: { palette: vis.palette } } } }, { origin: 'system', undo: 'none' });
       }
     }

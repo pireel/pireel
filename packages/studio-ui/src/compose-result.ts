@@ -32,12 +32,12 @@ export interface ComposeMode {
 /**
  * Library first: a new element is a registered component with filled props whenever one carries
  * the moment — designed, editable field by field, consistent across the video. The model may
- * decline when nothing fits, and the caller then writes bespoke markup. With a Frame attached the
- * element stays bespoke: library components only recolour to a theme, they cannot take on a
- * Frame's composition yet.
+ * decline when nothing fits, and the caller then writes bespoke markup. When the creator's brand
+ * describes their graphics the element stays bespoke: library components only recolour, they cannot
+ * take on a brand's composition.
  */
-export function newBlockComposeMode(opts: { frameAttached: boolean }): ComposeMode | undefined {
-  return opts.frameAttached ? undefined : { kit: true };
+export function newBlockComposeMode(opts: { brandGraphics: boolean }): ComposeMode | undefined {
+  return opts.brandGraphics ? undefined : { kit: true };
 }
 
 export interface ComposedBlock {

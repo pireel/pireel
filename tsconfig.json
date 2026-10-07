@@ -16,8 +16,6 @@
     "paths": {
       "@pireel/studio-ui/*": ["packages/studio-ui/src/*"],
       "@pireel/ui/*": ["packages/ui/src/*"],
-      "@pireel/studio-frames/locales": ["packages/studio-frames/src/locales/index.ts"],
-      "@pireel/studio-frames/*": ["packages/studio-frames/src/*"],
       "@pireel/studio-engine/prompts": ["packages/studio-engine/src/prompts/index.ts"],
       "@pireel/studio-engine/*": ["packages/studio-engine/src/*"],
       "@pireel/studio-kit": ["packages/studio-kit/src/index.ts"],

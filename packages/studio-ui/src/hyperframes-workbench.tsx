@@ -71,7 +71,6 @@ import { t, tEnglish } from "./i18n";
 import { editorErrorMessage } from "./editor-error";
 import {
   type Block,
-  type CaptionStyle,
   type Composition,
   type EditorDocumentV2,
   type EditorMediaAsset,
@@ -237,10 +236,6 @@ import {
 } from "./transition-bake";
 import { studioProviders } from "@pireel/studio-engine/providers";
 import { ensureTemplatesRegistered } from "@pireel/studio-engine/templates";
-import {
-  customVisualStylePalette,
-  type CustomVisualStyle,
-} from "@pireel/studio-engine/visual-style";
 import { DeferredEffectDisposer } from "./cloud-project-save";
 import { DeferredActivation } from "./deferred-activation";
 import { loadCurrentUser } from "./current-user";
@@ -264,7 +259,6 @@ import type {
   TimelineMediaDropTarget,
 } from "./timeline-asset-drop";
 import {
-  type AttachedFrame,
   StudioChat,
   type StudioChatHandle,
   type StudioElementRef,
@@ -334,7 +328,6 @@ import type { TranscriptAddKind } from "./script-panel";
 import { CaptionsPanel } from "./captions-panel";
 import { CaptionStylePanel } from "./caption-style-panel";
 import { EditorModeSwitch } from "./editor-mode-switch";
-import { FramePanel } from "./frame-panel";
 import { PersonFxPanel, type MatteState } from "./person-fx-panel";
 import { ShotTreatmentPanel } from "./shot-treatment-panel";
 import { MusicPanel } from "./music-panel";
@@ -345,7 +338,6 @@ import { TransitionPanel } from "./transition-panel";
 import { MediaAnimPanel } from "./media-anim-panel";
 import { type MatteFrame, MATTE_FPS, computeMatteTrack } from "./person-matte";
 import { takeAgentStartPrompt } from "./agent-project-from-video";
-import { type FrameCatalogItem, useFrameCatalog } from "./use-frame-catalog";
 import { StudioBootOverlay } from "./studio-boot";
 import { confirm } from "@pireel/ui/confirm";
 import type { StudioToolResult } from "@pireel/studio-engine/prompts";
@@ -361,7 +353,6 @@ import {
 import { type SafeZone, detectFrameAt, geomNote } from "./geometry";
 import {
   normalizeDims,
-  personFxFromFrame,
   shotSpan,
 } from "./workbench-utils";
 import {
@@ -449,21 +440,6 @@ ensureTemplatesRegistered();
 
 const RAIL_NAV_W = 48; // right-side tool navigation
 const UNDO_CAP = 20; // undo snapshot stack cap (each = canonical V2 document, incl. custom block payloads)
-
-/** Make the user's real caption-preset choice visible immediately. Preserve placement, size,
- * bilingual settings and on/off state; clear visual overrides so the selected preset renders intact. */
-function customCaptionStyle(
-  style: CustomVisualStyle,
-  current: CaptionStyle,
-): Partial<CaptionStyle> {
-  return {
-    ...current,
-    preset: style.captionPreset,
-    color: undefined,
-    bg: undefined,
-    bold: undefined,
-  };
-}
 
 const firstNarrativeDurationSec = (
   document: EditorDocumentV2,
@@ -1435,8 +1411,8 @@ export function HyperframesWorkbench({
   const applyVisualResult = (vis: VisualTimeline) => {
     visualRef.current = vis;
     setVisual(vis);
-    // Attach the background-derived palette to the composition; don't override when a frame is mounted (a frame is a user-chosen design system)
-    if (vis.palette && !editorDocumentRef.current.appearance.frameId) {
+    // Attach the background-derived palette to the composition.
+    if (vis.palette) {
       commit({ op: "command", input: { command: { type: "appearance.patch", patch: { palette: vis.palette } } } }, { origin: "system", undo: "none" });
     }
   };
@@ -4502,12 +4478,6 @@ export function HyperframesWorkbench({
           ...(compRef.current.palette
             ? { palette: compRef.current.palette }
             : {}), // background-derived colors, so the LLM uses the real accent
-          ...(compRef.current.frameId
-            ? { frameId: compRef.current.frameId }
-            : {}), // frame design language goes into ACTIVE THEME
-          ...(compRef.current.customVisualStyle
-            ? { customVisualStyle: compRef.current.customVisualStyle }
-            : {}),
           lang: localeRef.current, // note (the human sentence in chat) uses the UI language
           ...(Object.keys(context).length ? { context } : {}),
           ...(opts?.kit
@@ -5548,150 +5518,6 @@ export function HyperframesWorkbench({
   };
   /** Generated video → set as the main video. The CDN has no CORS headers, so fetch bytes through the /api/media/fetch same-origin proxy.
    *  Swapping the main video = a new project (pickVideoFile clears shots/blocks) — confirm first if there's content. */
-  /** Frame panel "use" → attach the frame as a tag in chat (the request carries frameId to inject the playbook), switch back to chat. */
-  const useFrameInChat = (f: FrameCatalogItem) => {
-    openChat();
-    chatRef.current?.attachFrame({
-      id: f.id,
-      title: f.title,
-      icon: f.icon,
-      iconKey: f.iconKey ?? null,
-      ...(f.customVisualStyle
-        ? { customVisualStyle: f.customVisualStyle }
-        : {}),
-    });
-  };
-  // Frame mounted (panel "use" / chat `/` trigger) → land the theme palette into comp:
-  // compose's themeForLlm consumes comp.palette to inject the token table, so generated content follows the theme's palette/fonts/radius from then on.
-  // Removing the tag doesn't roll back the palette (the project palette is explicit state; to revert to frame-derived colors, rerun visual analysis).
-  const frameCatalogRef = useRef<FrameCatalogItem[]>([]);
-  frameCatalogRef.current = useFrameCatalog();
-  // onFrameApplied is defined before setPersonFx/runMatteForShot and has empty deps → read the latest instances via refs
-  const setPersonFxRef = useRef<((fx: PersonFx | undefined) => void) | null>(
-    null,
-  );
-  const runMatteForShotRef = useRef<((s: VideoShot) => Promise<void>) | null>(
-    null,
-  );
-  const onFrameApplied = useCallback((af: AttachedFrame | null) => {
-    if (!af) {
-      if (genIdsRef.current.size) {
-        toast.error(t("workbench.elementGeneratingThemeAfter"));
-        return;
-      }
-      const appearance = commit({ op: "command", input: { command: {
-        type: "appearance.patch",
-        patch: {
-          frameId: undefined,
-          customVisualStyle: undefined,
-          palette: undefined,
-          captionStyle: undefined,
-          personFx: undefined,
-        },
-      } } }, { undo: "none" });
-      if (appearance.ok) {
-        toast.success(t("workbench.visualStyleDisabled"));
-      } else {
-        toast.error(editorErrorMessage(appearance.error));
-      }
-      return;
-    }
-    const f = frameCatalogRef.current.find((x) => x.id === af.id);
-    if (af.customVisualStyle) {
-      if (genIdsRef.current.size) {
-        toast.error(t("workbench.elementGeneratingThemeAfter"));
-        return;
-      }
-      const palette = customVisualStylePalette(
-        af.customVisualStyle,
-        f?.palette,
-      );
-      const appearance = commit({ op: "command", input: { command: {
-        type: "appearance.patch",
-        patch: {
-          frameId: af.id,
-          customVisualStyle: af.customVisualStyle,
-          palette,
-          captionStyle: customCaptionStyle(
-            af.customVisualStyle,
-            resolveCaptionStyle(compRef.current),
-          ),
-          personFx: undefined,
-        },
-      } } }, { undo: "none" });
-      if (!appearance.ok) {
-        toast.error(editorErrorMessage(appearance.error));
-        return;
-      }
-      const fx = f?.personFx ? personFxFromFrame(f.personFx) : null;
-      if (fx) {
-        setPersonFxRef.current?.(fx);
-        const tNow = playhead.get();
-        const nativeSpans = videoShotTimelineSpans(
-          compRef.current.shots ?? [],
-          videoPlacementsRef.current,
-        );
-        const sp =
-          nativeSpans.find(
-            (x) => tNow >= x.editedStart && tNow < x.editedEnd,
-          ) ?? nativeSpans[0];
-        const shot = sp?.clip;
-        if (shot && !shot.personMatte) {
-          commitNarrativePatches([
-            { clipId: shot.id, patch: { properties: { personMatte: true } } },
-          ]);
-          void runMatteForShotRef.current?.(shot);
-        }
-      }
-      toast.success(t("workbench.appliedTheme", { title: af.title }));
-      return;
-    }
-    if (!f) return;
-    // No theme switch while components are generating: each fill reads frameId when it starts, so a
-    // mid-batch switch splits one batch across two themes (and two compose paths) — a dirty batch
-    // that "insert freezes vars" then locks in. Same gate family as undo/redo-while-generating.
-    if (genIdsRef.current.size) {
-      toast.error(t("workbench.elementGeneratingThemeAfter"));
-      return;
-    }
-    // Land palette + frameId together: palette drives the token layer, frameId gives compose the design-language brief
-    const appearance = commit({ op: "command", input: { command: {
-      type: "appearance.patch",
-      patch: {
-        frameId: f.id,
-        customVisualStyle: undefined,
-        ...(f.palette ? { palette: f.palette } : {}),
-      },
-    } } }, { undo: "none" });
-    if (!appearance.ok) {
-      toast.error(editorErrorMessage(appearance.error));
-      return;
-    }
-    // The theme declared a person recommendation (sticker theme: cut out the subject and add a sticker outline) → land it into comp.personFx too,
-    // and enable matte for the shot at the playhead (finite segment, progress via the person panel; whole-video per-segment enabling belongs to the person panel)
-    const fx = f.personFx ? personFxFromFrame(f.personFx) : null;
-    if (fx) {
-      setPersonFxRef.current?.(fx);
-      const tNow = playhead.get();
-      const nativeSpans = videoShotTimelineSpans(
-        compRef.current.shots ?? [],
-        videoPlacementsRef.current,
-      );
-      const sp =
-        nativeSpans.find((x) => tNow >= x.editedStart && tNow < x.editedEnd) ??
-        nativeSpans[0];
-      const s = sp?.clip;
-      if (s && !s.personMatte) {
-        commitNarrativePatches([
-          { clipId: s.id, patch: { properties: { personMatte: true } } },
-        ]);
-        void runMatteForShotRef.current?.(s);
-      }
-      toast.success(t("workbench.appliedThemePersonFx", { title: f.title }));
-      return;
-    }
-    toast.success(t("workbench.appliedTheme", { title: f.title }));
-  }, []);
   /** Global caption style (shared by the captions panel + canvas handles): patch merged onto the current effective style, applied uniformly to all sentence-level captions. */
   /* ---------------- Unified gen panel (one chat interaction for image/video/component) ---------------- */
 
@@ -6330,7 +6156,6 @@ export function HyperframesWorkbench({
     const command = commit({ op: "command", input: { command: { type: "appearance.patch", patch: { personFx: fx } } } }, { undo: "none" });
     if (!command.ok) toast.error(editorErrorMessage(command.error));
   };
-  setPersonFxRef.current = setPersonFx;
   /** Whether this range's (a source's) mask is mostly complete (≥80% of sample points have frames) — avoids re-running when the toggle is flipped again. */
   const matteCovered = useCallback(
     (key: string, from: number, to: number): boolean => {
@@ -6438,7 +6263,6 @@ export function HyperframesWorkbench({
     },
     [matteFileForShot, matteCovered, runMatteBatch],
   );
-  runMatteForShotRef.current = runMatteForShot;
   /** Toggle the selected shot's matte (per-segment, no auto-fill — only the enabled segment is computed; any source's segment works). */
   const toggleShotMatte = useCallback(
     (on: boolean) => {
@@ -7282,7 +7106,6 @@ export function HyperframesWorkbench({
     agentExportRef,
     exportPctRef,
     exportVideo,
-    frameCatalogRef,
     chatRef,
   };
   const persistToolMutation = async (
@@ -8482,7 +8305,6 @@ export function HyperframesWorkbench({
                     }
                     onTimelineFramePickActiveChange={setTimelineFramePickMode}
                     elements={chatMentionElements}
-                    onFrameApplied={onFrameApplied}
                     initialThreads={initialChatThreads}
                     onThreadChange={persistChatThread}
                     onBusyChange={setChatBusy}
@@ -8536,14 +8358,6 @@ export function HyperframesWorkbench({
     captions: transcriptPanel,
     "caption-style": <CaptionStylePanel styleCtl={transcriptControls.styleCtl} active={captionsOn}
       generating={transcriptControls.generating} onPickPreset={transcriptControls.onPickPreset} />,
-    frames: <FramePanel
-                      comp={comp}
-                      onUse={useFrameInChat}
-                      onClear={() => {
-                        openChat();
-                        chatRef.current?.attachFrame(null);
-                      }}
-                    />,
     audio: <MusicPanel
                     clips={comp.audioTracks ?? []}
                     selectedId={selectedAudioId}

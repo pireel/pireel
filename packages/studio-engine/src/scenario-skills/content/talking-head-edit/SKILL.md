@@ -45,7 +45,7 @@ When the active output is empty, resolve the intended source before reading its 
 
 ### Complete edit
 
-Use a complete edit when the user asks to visually enhance, illustrate, package, rework, or direct the whole video, including B-roll, explanatory graphics, purposeful reframing, music, or a publishable visual treatment. Inspect the complete argument and usable media, choose a creative thesis and theme, compile the edit directly, and review the rendered result. Do not imply that conservative speech cleanup is unfinished or lower quality; these scopes deliver different kinds of work.
+Use a complete edit when the user asks to visually enhance, illustrate, package, rework, or direct the whole video, including B-roll, explanatory graphics, purposeful reframing, music, or a publishable visual treatment. Inspect the complete argument and usable media, choose a creative thesis and visual system, compile the edit directly, and review the rendered result. Do not imply that conservative speech cleanup is unfinished or lower quality; these scopes deliver different kinds of work.
 
 ### Structural rewrite
 
@@ -142,7 +142,7 @@ Only when the request leaves the whole-video direction genuinely open — severa
 
 ## Step 7: Apply the shared visual system before individual graphics
 
-Use the approved visual direction as the language for the complete pass, not as a card library. Do not silently redesign it scene by scene.
+Use the creator's brand graphics direction (`read_brand`), or the default visual craft when none is set, as the language for the complete pass, not as a card library. Do not silently redesign it scene by scene.
 
 Define:
 
@@ -283,7 +283,7 @@ Reject these results even when every individual element is technically valid:
 - **Unsupported proof:** stock or generated imagery appears to demonstrate a real claim, result, place, person, or product behavior.
 - **Uniform intensity:** every sentence receives the same visual weight, leaving no hierarchy or payoff.
 - **Speaker erasure:** graphics dominate moments where expression, authority, humor, or vulnerability is the actual content.
-- **Theme drift:** colors, typography, motion, and Motion Graphic language change scene by scene without an intentional reason.
+- **Style drift:** colors, typography, motion, and Motion Graphic language change scene by scene without an intentional reason.
 - **Patchwork repair:** continuity problems are hidden beneath arbitrary overlays instead of being solved through edit, framing, evidence, or sound.
 - **Checklist completion:** the video contains captions, music, B-roll, and graphics but still lacks a clear argument and scene progression.
 
@@ -304,11 +304,11 @@ Review the rendered result, not only the timeline data. Inspect the opening, eve
 - Is every claimed proof actually supported by supplied material?
 - Are illustration and generated imagery clearly non-evidentiary where needed?
 
-### Visual direction
+### Visual system
 
 - Does every visual have a specific job?
 - Do neighboring scenes create purposeful contrast?
-- Does the theme remain coherent without collapsing into one repeated layout?
+- Does the visual system remain coherent without collapsing into one repeated layout?
 - Are speaker, evidence, typography, captions, and platform safe areas legible?
 - Is any visual change happening only because time passed?
 

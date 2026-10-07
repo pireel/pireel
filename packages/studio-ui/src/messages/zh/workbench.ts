@@ -75,14 +75,6 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.aiEditFailed": "AI 修改失败",
   "workbench.aiGenerate": "AI 生成",
   "workbench.analysisDebug": "分析(调试)",
-  "workbench.appliedTheme":
-    "已应用「{title}」视觉风格,之后生成的内容都使用这套设计",
-  "workbench.appliedThemeAlt":
-    "已应用「{title}」视觉风格,之后生成的内容都使用这套设计",
-  "workbench.appliedThemePersonFx":
-    "已应用「{title}」视觉风格,画面主体加上贴纸描边,生成内容使用这套设计",
-  "workbench.visualStyleDisabled":
-    "已关闭视觉风格,后续生成不再附加 Frame 或自动视觉配置",
   "workbench.assembledHtmlBuiltFrom": "assembled HTML（由动态图形拼出，只读）",
   "workbench.assetMotion": "素材动效",
   "workbench.assets": "素材",
@@ -266,7 +258,6 @@ export const WORKBENCH_ZH: Record<string, string> = {
     "动态图形正在生成，改动会被生成结果覆盖——等生成完成再改",
   "workbench.elementGeneratingRedoAfter": "有动态图形正在生成,等完成再重做",
   "workbench.elementGeneratingUndoAfter": "有动态图形正在生成,等完成再撤销",
-  "workbench.elementGeneratingThemeAfter": "有动态图形正在生成,等完成再换主题",
   "workbench.elementInserted": "已插入动态图形",
   "workbench.elementNoFillableText": "这个动态图形没有可填充的文字槽",
   "workbench.elementNotFound": "找不到这个动态图形",
@@ -492,7 +483,6 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.noRemovableDeadAir":
     "按当前检测设置，时间轴里没有剩余可删除的口播空白",
   "workbench.noSuchCaptionPreset": "没有这个字幕预设:{preset}",
-  "workbench.noSuchFrameId": "没有这个主题:{id}(id 见 <frame_catalog>)",
   "workbench.nothingRedo": "没有可重做的改动",
   "workbench.nothingSetGiveLeast":
     "没说要设什么:preset / yPct / scale 至少给一个",
@@ -615,7 +605,6 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.syncFailedTryAgain": "同步失败,稍后再试",
   "workbench.tellChatHowChange": "在对话里说怎么改这个动态图形",
   "workbench.themePanel": "视觉风格面板",
-  "workbench.themes": "视觉风格",
   "workbench.thereNoCaptionsRight": "现在没有字幕",
   "workbench.thoseRangesAlreadyOut": "这些区间已经不在片子里了",
   "workbench.thoseRangesDeletedThey": "这些区间删不了(可能覆盖了整条视频)",

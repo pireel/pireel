@@ -35,12 +35,10 @@ import type { UIMessage } from "ai";
 import type { StudioToolResult } from "@pireel/studio-engine/prompts";
 import type { Composition } from "@pireel/studio-engine/composition";
 import type { LocalAssetIndexEntry } from "@pireel/studio-engine/project-dto";
-import type { CustomVisualStyle } from "@pireel/studio-engine/visual-style";
 import {
   STUDIO_AUTO_SKILL_ID,
   type StudioScenarioSkillId,
 } from "@pireel/studio-engine/scenario-skills";
-import { useFrameCatalog } from "./use-frame-catalog";
 import { mid } from "./chat-format";
 import { ChatThread } from "./chat-thread";
 import {
@@ -65,16 +63,6 @@ export interface ProgressHandle {
   step(text: string): void;
   finish(text: string): void;
   fail(text: string): void;
-}
-
-/** Visual direction attached to the session; frameId carries its art-direction playbook. */
-export interface AttachedFrame {
-  id: string;
-  title: string;
-  icon: string;
-  iconKey?: string | null;
-  /** Independent palette/caption/layout controls layered over the selected direction. */
-  customVisualStyle?: CustomVisualStyle;
 }
 
 /** A concrete composed timeline frame attached to the next user message. */
@@ -112,8 +100,6 @@ export interface StudioChatHandle {
   insertText(text: string): void;
   /** Only focus the input (component floating bar's "AI edit" switches over to keep typing). */
   focusInput(): void;
-  /** Attach a frame to the current session (shared by frame panel "use" and the input's theme button): button highlights, injected with the request. */
-  attachFrame(frame: AttachedFrame | null): void;
   /** Insert a loading frame tag at the saved composer caret before capture starts. */
   beginTimelineFrameCapture(frame: PendingTimelineFrame): void;
   /** Promote the matching loading tag in place without moving or replacing earlier frame tags. */
@@ -137,8 +123,6 @@ export interface StudioChatProps {
     input: Record<string, unknown>,
     opts?: { signal?: AbortSignal; surface?: "chat" | "bridge"; skillId?: string },
   ) => Promise<StudioToolResult>;
-  /** Callback when a frame is attached (both panel "use" and the theme button): the workbench uses it to apply the theme palette to comp. */
-  onFrameApplied?: (frame: AttachedFrame | null) => void;
   /** Request-body fields read at send time (session-level frame / skill selection). */
   getBody: () => Record<string, unknown>;
   /** Currently @-mentionable elements. */
@@ -200,7 +184,6 @@ export const StudioChat = memo(
       timelineFramePickBusy = false,
       timelineFramePickAvailable = false,
       onTimelineFramePickActiveChange,
-      onFrameApplied,
       initialThreads,
       onThreadChange,
       onClose,
@@ -244,7 +227,6 @@ export const StudioChat = memo(
     const [activeId, setActiveId] = useState<string>(() => mid("thread"));
     const [histOpen, setHistOpen] = useState(false);
     const innerRef = useRef<StudioChatHandle | null>(null);
-    const frames = useFrameCatalog(); // frame catalog for the `/` picker (in-process cache)
 
     useEffect(() => {
       let cancelled = false;
@@ -316,7 +298,6 @@ export const StudioChat = memo(
     const onSnapshot = useCallback(
       (
         messages: UIMessage[],
-        frame: AttachedFrame | null,
         skillId: StudioScenarioSkillId,
       ) => {
         if (messages.length === 0) return;
@@ -327,7 +308,6 @@ export const StudioChat = memo(
           title,
           messages,
           updatedAt: Date.now(),
-          frame,
           skillId,
         };
         const merged = [
@@ -360,7 +340,6 @@ export const StudioChat = memo(
         runSkill: (skillId, text) => innerRef.current?.runSkill(skillId, text),
         insertText: (text) => innerRef.current?.insertText(text),
         focusInput: () => innerRef.current?.focusInput(),
-        attachFrame: (frame) => innerRef.current?.attachFrame(frame),
         beginTimelineFrameCapture: (frame) =>
           innerRef.current?.beginTimelineFrameCapture(frame),
         resolveTimelineFrameCapture: (frame) =>
@@ -451,7 +430,6 @@ export const StudioChat = memo(
           localAssetIndex={localAssetIndex}
           threadId={activeId}
           initialMessages={restoredMessages}
-          initialFrame={active?.frame ?? null}
           initialSkillId={active?.skillId ?? defaultSkillId}
           scenarioSkills={scenarioSkills}
           onOpenSkillMarket={customScenarioSkillManager?.openMarket}
@@ -461,8 +439,6 @@ export const StudioChat = memo(
           onDeleteScenarioSkill={
             customScenarioSkillManager ? deleteScenarioSkill : undefined
           }
-          frames={frames}
-          onFrameApplied={onFrameApplied}
           runTool={runTool}
           getBody={getBody}
           elements={elements}

@@ -26,7 +26,7 @@ function doc(tracks: EditorTrack[]): EditorDocumentV2 {
   return {
     version: 2 as never,
     canvas: { width: 1080, height: 1920, fps: 30 } as never,
-    appearance: { frameId: 'editorial-mono' } as never,
+    appearance: {} as never,
     assets: { a1: { id: 'a1', kind: 'video', label: 'talk.mp4', locator: {} as never, metadata: { durationSec: 118.4, hasAudio: true } }, a9: { id: 'a9', kind: 'audio', locator: {} as never, metadata: {} } },
     timeline: { tracks },
     semantics: { primaryNarrativeTrackId: 't1', managedCaptionTrackId: 't6', transcripts: {}, scenes: [] },
@@ -44,7 +44,7 @@ describe('renderV3State', () => {
     const state = renderV3State(document);
     expect(state.canvas).toEqual({ width: 1080, height: 1920, fps: 30 });
     expect(state.durationFrames).toBe(2712);
-    expect(state.frame).toEqual({ id: 'editorial-mono' });
+    expect(state).not.toHaveProperty('frame');
     const t1 = state.tracks.find((t) => t.id === 't1')!;
     expect(t1.clips![0]).toMatchObject({ id: 'c1', kind: 'narrative', frames: [0, 1500], source: [0, 50], audio: { clipId: 'c1a', volumeDb: -3 } });
     expect(t1.clips![0]).not.toHaveProperty('treatment');

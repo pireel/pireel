@@ -14,7 +14,6 @@ const treatment = {
 
 function documentWithPlan(): EditorDocumentV2 {
   const document = emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 });
-  document.appearance.frameId = 'knowledge-cards';
   document.semantics = withDirectorPlanInSemantics(document.semantics, {
     goal: 'Teach one model',
     creativeThesis: 'The relation becomes visible',
@@ -28,7 +27,6 @@ function documentWithPlan(): EditorDocumentV2 {
       motion: 'Build relations in sequence, hold conclusions, clear fully.',
       sound: 'Speech first with sparse transition punctuation.',
     },
-    frameId: 'knowledge-cards',
     scenes: [
       { ...treatment, id: 'open', label: 'Question', startFrame: 0, durationFrames: 90, viewerTask: 'orient', narrativeRole: 'hook', sceneFamily: 'speaker-clean', purpose: 'Open on the real question' },
       { ...treatment, id: 'build', label: 'Build', startFrame: 90, durationFrames: 120, viewerTask: 'understand', narrativeRole: 'explain', sceneFamily: 'structure-explain', purpose: 'Build the relation' },
@@ -67,7 +65,7 @@ describe('scene-level visual QA', () => {
     const proofPayoff = moments.find((moment) => moment.sceneId === 'proof' && moment.phase === 'payoff');
     expect(proofPayoff?.expected).toContain('evidence: Recorded result');
     expect(proofPayoff?.expected).toContain('visualConcept: A relation assembled in one calm visual language.');
-    expect(proofPayoff?.expected).toContain('frameId: knowledge-cards');
+    expect(proofPayoff?.expected).not.toContain('frameId');
   });
 
   it('caps long plans while keeping critical scene phases and supports exact scene scopes', () => {
@@ -149,7 +147,7 @@ describe('scene-level visual QA', () => {
     expect(sceneVisualRepairScope([
       { sceneId: 'proof', kind: 'missing-evidence' },
       { sceneId: 'proof', kind: 'unsafe-delivery-crop' },
-      { sceneId: 'turn', kind: 'frame-drift' },
+      { sceneId: 'turn', kind: 'abrupt-handoff' },
     ])).toEqual({
       sceneIds: ['proof', 'turn'],
       instruction: 'Repair only the affected Semantic Scenes: proof, turn. Preserve unaffected scenes, then recheck each repaired moment and its immediate boundaries.',

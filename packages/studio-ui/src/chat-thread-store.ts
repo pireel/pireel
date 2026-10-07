@@ -2,7 +2,6 @@
 
 import type { UIMessage } from 'ai';
 import { t } from './i18n';
-import type { AttachedFrame } from './studio-chat';
 import { stripLeakedToolProtocolText } from '@pireel/studio-engine/tool-protocol-text';
 import {
   isStudioScenarioSkillId,
@@ -15,8 +14,6 @@ export interface StoredThread {
   title: string;
   messages: UIMessage[];
   updatedAt: number;
-  /** Frame attached to the session (theme button highlight comes back when restoring the session). */
-  frame?: AttachedFrame | null;
   /** Rich Markdown Studio Skill attached to this session; missing means no Skill. */
   skillId?: StudioScenarioSkillId;
 }

@@ -20,10 +20,11 @@ describe('BYO 简报组装(与自家 LLM 路径同一批提示词纯函数)', ()
     expect(kit.system).toContain('{"custom": true}');
     expect(kit.system).not.toContain('ACTIVE THEME'); // 组件无主题:不给 token 表
     expect(kit.prompt).toContain('把数字改成 52%');
-    const themed = assembleComposeBrief({ block, instruction: '做一张对比卡', theme: 'general', frame: { title: '双年展海报', body: 'FRAME BODY' } });
-    expect(themed.format).toBe('html');
-    expect(themed.system).toContain('FRAME BODY'); // 主题=散文描述,全量进 system
-    expect(themed.prompt).toContain('```html');
+    const branded = assembleComposeBrief({ block, instruction: '做一张对比卡', theme: 'general', brandGraphics: 'BRAND GRAPHICS PROSE' });
+    expect(branded.format).toBe('html');
+    expect(branded.system).toContain('=== CREATOR BRAND GRAPHICS ===');
+    expect(branded.system).toContain('BRAND GRAPHICS PROSE'); // 品牌图形=散文描述,全量进 system
+    expect(branded.prompt).toContain('```html');
   });
 
   it('format 覆盖:custom 之后强制 markup 契约(无主题项目也能拿到)', () => {
@@ -39,13 +40,17 @@ describe('BYO 简报组装(与自家 LLM 路径同一批提示词纯函数)', ()
     expect(b.prompt).toContain('"component": "metric"');
     expect(b.prompt).toContain('复购率');
   });
-  it('frame 嫁接:审美层 frame 赢、工程契约不动的措辞进 theme(与 compose 路由同源单点)', () => {
-    const t = assembleComposeTheme('general', undefined, { title: '双年展海报', body: 'FRAME BODY' }, 'PRIVATE QUALITY FLOOR');
-    expect(t.indexOf('PRIVATE QUALITY FLOOR')).toBeLessThan(t.indexOf('FRAME BODY'));
-    expect(t).toContain('not a hidden Frame');
-    expect(t).toContain('FRAME DESIGN LANGUAGE');
-    expect(t).toContain('THE FRAME WINS');
-    expect(t).toContain('FRAME BODY');
+  it('品牌图形嫁接:审美层品牌赢、工程契约不动的措辞进 theme(与 compose 路由同源单点)', () => {
+    const t = assembleComposeTheme('general', undefined, 'BRAND GRAPHICS PROSE', 'PRIVATE QUALITY FLOOR');
+    expect(t.indexOf('PRIVATE QUALITY FLOOR')).toBeLessThan(t.indexOf('BRAND GRAPHICS PROSE'));
+    expect(t).toContain('=== HOST VISUAL CRAFT BASELINE ===');
+    expect(t).not.toContain('hidden Frame');
+    expect(t.indexOf('=== CREATOR BRAND GRAPHICS ===')).toBeLessThan(t.indexOf('BRAND GRAPHICS PROSE'));
+    expect(t).toContain('THE BRAND WINS');
+  });
+  it('无品牌图形时不出品牌段;空白散文视同没有', () => {
+    expect(assembleComposeTheme('general', undefined, null, 'PRIVATE QUALITY FLOOR')).not.toContain('CREATOR BRAND GRAPHICS');
+    expect(assembleComposeTheme('general', undefined, '   ')).not.toContain('CREATOR BRAND GRAPHICS');
   });
 });
 

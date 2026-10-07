@@ -1,10 +1,10 @@
 "use client";
 
-/** Studio chat input: contenteditable composer with @ element pills and the theme (frame) picker. */
+/** Studio chat input: contenteditable composer with @ element pills. */
 
 import { useImperativeHandle, useRef, useState } from "react";
 import { loadGenerationParams, saveGenerationParams, useGenerationModels, withKnownModel } from './generation-settings';
-import { AtSign, ArrowUp, Square, Palette, Sparkles } from "lucide-react";
+import { AtSign, ArrowUp, Square, Sparkles } from "lucide-react";
 import { generationIntentLine, type ChatMode, type GenerationIntent, type GenerationParams } from "./chat-generation-intent";
 import { ChatModePicker } from "./chat-mode-picker";
 import { GenerationControls, GenerationCreditsBadge } from "./chat-generation-params";
@@ -21,7 +21,6 @@ import {
 } from "@pireel/ui/trigger-popover";
 import type { StudioScenarioSkillId } from "@pireel/studio-engine/scenario-skills";
 import { ChatSkillPicker } from "./chat-skill-picker";
-import type { FrameCatalogItem } from "./use-frame-catalog";
 import {
   appendChatPillRemoveIcon,
   CHAT_ACTION_PILL_CLASS,
@@ -33,7 +32,6 @@ import {
 } from "./chat-format";
 import { t } from "./i18n";
 import type {
-  AttachedFrame,
   AttachedTimelineFrame,
   PendingTimelineFrame,
   StudioChatDraftPart,
@@ -45,11 +43,6 @@ import {
   ChatTimelineFramePicker,
   formatTimelineFrameTime,
 } from "./chat-timeline-frame-picker";
-import { CustomFrameDialog } from "./custom-frame-dialog";
-import {
-  customFrameCatalogItem,
-  useCustomFrameStyle,
-} from "./custom-frame-style";
 
 const noopTimelineFramePick = () => {};
 
@@ -89,9 +82,6 @@ export function Composer({
   onCreateScenarioSkill,
   onDeleteScenarioSkill,
   onPickSkill,
-  frame,
-  frames,
-  onPickFrame,
   timelineFramePickActive,
   timelineFramePickBusy,
   timelineFramePickAvailable,
@@ -112,10 +102,7 @@ export function Composer({
   onDeleteScenarioSkill?: (id: string) => Promise<void>;
   onPickSkill: (id: StudioScenarioSkillId) => void;
   /** Visual direction attached to the current session. */
-  frame: AttachedFrame | null;
   /** Art-direction catalog rendered in the unified visual-style dialog. */
-  frames: FrameCatalogItem[];
-  onPickFrame: (frame: AttachedFrame | null) => void;
   timelineFramePickActive: boolean;
   timelineFramePickBusy: boolean;
   timelineFramePickAvailable: boolean;
@@ -138,8 +125,6 @@ export function Composer({
   const [timelineFrameCount, setTimelineFrameCount] = useState(0);
   const [studioActionActive, setStudioActionActive] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [customOpen, setCustomOpen] = useState(false);
-  const [customStyle, saveCustomStyle] = useCustomFrameStyle();
   const [mode, setMode] = useState<ChatMode>("chat");
   const intent: GenerationIntent | null = mode === "chat" ? null : mode;
   const [genParams, setGenParams] = useState<GenerationParams>(loadGenerationParams);
@@ -514,19 +499,6 @@ export function Composer({
     syncTimelineFrameCount();
   }
 
-  /** Unified visual-style dialog → attach one visual direction plus independent user controls. */
-  function pickFrame(item: FrameCatalogItem) {
-    onPickFrame({
-      id: item.id,
-      title: item.title,
-      icon: item.icon,
-      iconKey: item.iconKey ?? null,
-      ...(item.customVisualStyle
-        ? { customVisualStyle: item.customVisualStyle }
-        : {}),
-    });
-  }
-
   /** @ picker selection → insert pill. */
   function pickElement(
     el: StudioElementRef,
@@ -799,28 +771,6 @@ export function Composer({
                 }}
               />
             ) : null}
-            {/* Visual-style button opens the unified direction + controls dialog. Disabled while the
-                turn is running because a mid-generation direction switch would split one batch.
-                Only chat and graphic generation are theme-directed. */}
-            {intent && intent !== "element" ? null : (
-            <button
-              type="button"
-              disabled={isBusy}
-              className={`inline-flex h-7 w-7 items-center justify-center rounded-md disabled:pointer-events-none disabled:opacity-30 ${
-                frame
-                  ? "bg-accent/15 text-accent hover:bg-accent/25"
-                  : "text-ink-3 hover:bg-line hover:text-ink"
-              }`}
-              onClick={() => setCustomOpen(true)}
-              title={
-                frame
-                  ? t("chatGen.themeTitle", { title: frame.title })
-                  : t("chatGen.pickTheme")
-              }
-            >
-              <Palette className="h-3.5 w-3.5" strokeWidth={2.2} />
-            </button>
-            )}
             {intent ? null : (
             <ChatTimelineFramePicker
               disabled={isBusy}
@@ -914,29 +864,6 @@ export function Composer({
         )}
       />
 
-      <CustomFrameDialog
-        style={customOpen ? (frame?.customVisualStyle ?? customStyle) : null}
-        frames={frames}
-        frameId={frame?.id ?? null}
-        onClose={() => setCustomOpen(false)}
-        onUse={(style, directionId) => {
-          saveCustomStyle(style);
-          const direction = frames.find((item) => item.id === directionId);
-          pickFrame(
-            customFrameCatalogItem(
-              style,
-              t("customFrame.title"),
-              t("customFrame.summary"),
-              direction,
-            ),
-          );
-          setCustomOpen(false);
-        }}
-        onDisable={() => {
-          onPickFrame(null);
-          setCustomOpen(false);
-        }}
-      />
     </>
   );
 }

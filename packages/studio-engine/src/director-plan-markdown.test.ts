@@ -16,7 +16,6 @@ const input = {
     sound: 'Dialogue first with truthful source sound.',
   },
   skillId: 'talking-head-edit',
-  frameId: 'zen-white',
   audience: 'First-time learners',
   scenes: [{
     id: 'proof', label: 'Proof', startSec: 0, durationSec: 2,

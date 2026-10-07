@@ -18,7 +18,6 @@ const input = {
     sound: 'Continuous dialogue and room tone; product source sound only when truthful.',
   },
   skillId: 'product-demo',
-  frameId: 'zen-white',
   audience: 'Busy product leads',
   scenes: [
     {
@@ -130,7 +129,7 @@ describe('Director Plan structure', () => {
   it('drops blank optional fields and preserves an authored unknown family as custom', () => {
     const parsed = directorPlanFromSeconds({
       ...input,
-      skillId: '', frameId: '', audience: '',
+      skillId: '', audience: '',
       scenes: [{ ...input.scenes[0], sceneFamily: 'product-beauty-shot', visualMetaphor: '' }],
     }, 30);
     expect(parsed.issues).toEqual([]);

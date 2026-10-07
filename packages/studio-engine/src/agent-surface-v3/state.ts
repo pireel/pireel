@@ -70,7 +70,6 @@ export interface V3CaptionsView {
 export interface V3StateView {
   canvas: { width: number; height: number; fps: number };
   durationFrames: number;
-  frame?: { id: string };
   tracks: V3TrackView[];
   /** The transition lane: effects placed by time, independent of cuts (add_transition vocabulary). */
   transitions?: V3TransitionView[];
@@ -370,7 +369,6 @@ export function renderV3State(
   return {
     canvas: { width: document.canvas.width, height: document.canvas.height, fps: document.canvas.fps },
     durationFrames: documentDurationFrames(document),
-    ...(document.appearance.frameId ? { frame: { id: document.appearance.frameId } } : {}),
     tracks,
     ...(document.timeline.transitions?.length ? { transitions: transitionsView(document) } : {}),
     assets: Object.values(document.assets).map((asset) => ({
