@@ -12,7 +12,7 @@
 import { PUNCT_END, alnumCount, segmentTokens, wordsFromText } from './caption-fx';
 import { getCaptionPreset } from './caption-presets';
 import { type CaptionStyle, DEFAULT_CAPTION_WIDTH_PCT } from './composition-core';
-import { type Block, type VideoShot, isSentenceCaption } from './composition';
+import { type Block, type VideoShot, isSentenceCaption } from './composition-core';
 import { spans as clipSpans } from './trim';
 import { type AsrSegment, type CueRef, type CueWord, type DisplayCue, captionBlocksFromAsr } from './build-blocks';
 import { maskCueText, maskedWordText } from './word-masks';

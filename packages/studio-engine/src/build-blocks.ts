@@ -15,7 +15,8 @@
 
 import { editedCaptionWords } from './caption-word-edit';
 import { joinWords, wordsFromText } from './caption-fx';
-import { type Block, captionBlock } from './composition';
+import type { Block } from './composition-core';
+import { captionBlock } from './block-factory';
 import type { WordMask } from './word-masks';
 
 /** One persisted transcript word (source seconds). */

@@ -1,5 +1,9 @@
 import { DUBBING_LANGUAGES } from './scene-languages';
-import { applyCaptionDocumentEdit, compositionToEditorDocument, emptyComposition, projectDocumentToComposition, type CaptionStyle, type EditorDocumentV2 } from './composition';
+// Straight from the defining modules: the composition barrel can be mid-load in an import cycle.
+import { emptyComposition, type CaptionStyle } from './composition-core';
+import { applyCaptionDocumentEdit } from './caption-document-edit';
+import { compositionToEditorDocument, projectDocumentToComposition } from './project-document';
+import type { EditorDocumentV2 } from './editor-document/types';
 import type { AsrSegment } from './build-blocks';
 import { removeSrcRanges } from './trim';
 import { BASE_CAPTION_FONT_PX, getCaptionPreset } from './caption-presets';

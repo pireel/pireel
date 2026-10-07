@@ -317,7 +317,6 @@ import { useStudioShell } from "./shell-context";
 import { WorkflowPanel } from "./workflow-panel";
 import { CaptionsEntry } from "./captions-entry";
 import { workflowDocumentRevision } from "./workflow-studio-adapter";
-import { Captions as CaptionsEntryIcon } from "lucide-react";
 import { TranscriptEditor } from "./transcript-editor";
 import { brollTargetForRange } from "./timeline-asset-drop";
 import type { TimelinePendingLane, TimelinePendingRange } from "./studio-timeline";
@@ -500,7 +499,7 @@ export function HyperframesWorkbench({
 }) {
   const shell = useStudioShell();
   const [workflowOpen, setWorkflowOpen] = useState(!!initialWorkflowId);
-  const [workflowEntryId, setWorkflowEntryId] = useState(initialWorkflowId === "talking-head" ? "captions" : initialWorkflowId ?? "captions");
+  const [workflowEntryId] = useState(initialWorkflowId === "talking-head" ? "captions" : initialWorkflowId ?? "captions");
   const WorkflowEntry = workflowEntryId === "captions" ? CaptionsEntry : WorkflowPanel;
   const [workflowBusy, setWorkflowBusy] = useState(false);
   const workflowBusyRef = useRef(false);
@@ -9040,13 +9039,6 @@ export function HyperframesWorkbench({
                     {followsFirstSource ? t("workbench.ratioFollowSource") : currentRatioId ?? t("workbench.ratioCustom")}
                   </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => { setPlaying(false); setWorkflowEntryId("captions"); setWorkflowOpen(true); }}
-                  title={locale === 'zh' ? 'AI 字幕' : 'AI Captions'}
-                  aria-label={locale === 'zh' ? 'AI 字幕' : 'AI Captions'}
-                  className="bg-panel text-ink border-line absolute right-3 top-2 z-20 flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs shadow-sm hover:bg-panel-2"
-                ><CaptionsEntryIcon size={14} />{locale === 'zh' ? 'AI 字幕' : 'AI Captions'}</button>
 
                 <div
                   ref={stageBoxRef}

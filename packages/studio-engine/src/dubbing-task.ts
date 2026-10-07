@@ -1,5 +1,6 @@
 import type { AsrSegment } from './build-blocks';
-import { compositionToEditorDocument, emptyComposition } from './composition';
+import { emptyComposition } from './composition-core';
+import { compositionToEditorDocument } from './project-document';
 
 export const DUBBING_MAX_DURATION_SEC = 30 * 60;
 export const DUBBING_MAX_VIDEO_BYTES = 1024 * 1024 * 1024;

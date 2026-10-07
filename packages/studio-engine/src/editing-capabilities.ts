@@ -1,5 +1,5 @@
 import type { CaptionTaskOptions } from './caption-task';
-import { resolveCaptionStyle } from './composition';
+import { resolveCaptionStyle } from './composition-core';
 /** User-facing editing intentions. Internal steps are execution details, never the picker. */
 export const EDITING_CAPABILITIES = [
   { id: 'motion-graphics', name: '动态图形', en: 'Motion graphics', description: '把讲述的重点变成同步出现的图形动画', icon: 'Shapes' },

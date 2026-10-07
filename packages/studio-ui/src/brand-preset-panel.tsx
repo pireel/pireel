@@ -51,8 +51,6 @@ export function BrandPresetPanel({ options, locale, disabled, onChange, captionS
     <ul className="divide-line divide-y">
       {row(say('字幕样式', 'Caption look'), true, blocks?.captions?.style ? say('来自品牌', 'From the brand') : say('默认样式', 'Default look'))}
       {row('Logo', !!blocks?.logo, blocks?.logo ? say('常驻角落', 'In a corner') : missing)}
-      {row(say('片头', 'Intro'), !!blocks?.bookends?.intro, blocks?.bookends?.intro ? say('接在正片前', 'Before the video') : missing)}
-      {row(say('片尾', 'Outro'), !!blocks?.bookends?.outro, blocks?.bookends?.outro ? say('接在正片后', 'After the video') : missing)}
     </ul>
     <div className="border-line mt-3 space-y-3 border-t pt-4">
       <SceneCheckbox label={say('剪掉停顿', 'Trim pauses')} checked={options.shortenPauses} disabled={disabled} onChange={shortenPauses => onChange(current => ({ ...current, shortenPauses }))}

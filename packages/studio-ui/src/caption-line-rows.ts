@@ -1,4 +1,6 @@
-import { managedCaptionLineRows, resolveCaptionStyle, videoTrackShots, type Composition, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
+import { resolveCaptionStyle, videoTrackShots, type Composition, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
+// Straight from its own module: through the composition barrel it can still be undefined while a cycle is loading.
+import { managedCaptionLineRows } from '@pireel/studio-engine/editor-document/commands/managed-captions';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { displayCues } from '@pireel/studio-engine/captions-relay';
 import type { CaptionLineRow } from './captions-panel';

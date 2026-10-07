@@ -47,8 +47,6 @@ export interface BrandBlocks {
   overlay_text?: Prose & { font?: string; fontLike?: string; references?: BrandAsset[] };
   /** Fixed: loudness and pause trimming. */
   sound?: { lufs?: number; pauses?: 'tight' | 'moderate' | 'natural'; evidence?: Evidence };
-  /** Fixed: the same clip before / after every video. */
-  bookends?: { intro?: BrandAsset; outro?: BrandAsset; evidence?: Evidence };
   /** The visual language: how the picture is organised and changes — where the speaker sits, bands and
    *  frames, picture in picture, split screens — and how the creator uses the platform's moves on it. */
   visual?: Prose & { references?: BrandAsset[] };
@@ -62,9 +60,9 @@ export interface BrandBlocks {
   cover?: BrandCover;
 }
 export type BlockId = keyof BrandBlocks;
-export const BLOCK_IDS: readonly BlockId[] = ['portrait', 'captions', 'overlay_text', 'logo', 'sound', 'bookends', 'visual', 'graphics', 'structure', 'cover'];
+export const BLOCK_IDS: readonly BlockId[] = ['portrait', 'captions', 'overlay_text', 'logo', 'sound', 'visual', 'graphics', 'structure', 'cover'];
 /** Blocks whose values the engine applies as they are. */
-export const FIXED_BLOCKS: readonly BlockId[] = ['captions', 'logo', 'sound', 'bookends'];
+export const FIXED_BLOCKS: readonly BlockId[] = ['captions', 'logo', 'sound'];
 
 export interface BrandPlaybook {
   schema: typeof PLAYBOOK_SCHEMA;
@@ -151,7 +149,6 @@ export function renderBrandPrompt(playbook: Pick<BrandPlaybook, 'name' | 'blocks
   if (want('overlay_text')) parts.push(element('overlay_text', { font: b.overlay_text!.font, like: b.overlay_text!.fontLike, references: refs(b.overlay_text!.references) }, b.overlay_text!.text));
   if (want('logo')) parts.push(element('logo', { corner: b.logo!.corner, width: `${b.logo!.widthPct}%`, opacity: b.logo!.opacity }));
   if (want('sound')) parts.push(element('sound', { loudness: b.sound!.lufs !== undefined ? `${b.sound!.lufs} LUFS` : undefined, pauses: b.sound!.pauses }));
-  if (want('bookends')) parts.push(element('bookends', { intro: b.bookends!.intro ? `${b.bookends!.intro.durationSec ?? ''}s clip` : undefined, outro: b.bookends!.outro ? `${b.bookends!.outro.durationSec ?? ''}s clip` : undefined }));
   if (want('visual')) parts.push(element('visual', { references: refs(b.visual!.references) }, b.visual!.text));
   if (want('graphics')) parts.push(element('graphics', { references: refs(b.graphics!.references) }, b.graphics!.text));
   if (want('structure')) parts.push(element('structure', {}, b.structure!.text));
@@ -236,10 +233,7 @@ export function validatePlaybook(value: unknown): BrandPlaybook {
     if (b.sound.lufs !== undefined && !(b.sound.lufs >= -40 && b.sound.lufs <= -5)) fail('blocks.sound.lufs', '-40…-5');
     if (b.sound.pauses !== undefined && !['tight', 'moderate', 'natural'].includes(b.sound.pauses)) fail('blocks.sound.pauses', 'tight/moderate/natural');
   }
-  if (b.bookends) {
-    if (b.bookends.intro) { asset(b.bookends.intro, 'blocks.bookends.intro'); if (b.bookends.intro.kind !== 'video') fail('blocks.bookends.intro', '片头需要视频'); }
-    if (b.bookends.outro) { asset(b.bookends.outro, 'blocks.bookends.outro'); if (b.bookends.outro.kind !== 'video') fail('blocks.bookends.outro', '片尾需要视频'); }
-  }
+
   return p;
 }
 

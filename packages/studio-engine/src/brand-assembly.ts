@@ -26,7 +26,7 @@ export interface PlaybookParts {
   /** Canvas height per unit of width of the creator's videos (16/9 for vertical). */
   heightPerWidth: number;
   assets: {
-    logo?: BrandAsset; intro?: BrandAsset; outro?: BrandAsset;
+    logo?: BrandAsset;
     /** Stills of titles on screen and of motion graphics — references for those blocks. */
     layoutReferences: BrandAsset[]; motionReferences: BrandAsset[];
     /** Stills of moments the creator left the speaker for B-roll. */
@@ -127,7 +127,6 @@ export function assemblePlaybook(parts: PlaybookParts): BrandPlaybook {
   // Sound effects are a switch the creator sets (the frames cannot hear them); background music is not part of a brand yet.
   if (loudness !== undefined || pauses) blocks.sound = { ...(loudness !== undefined ? { lufs: loudness } : {}), ...(pauses ? { pauses } : {}), evidence: { videos: spec.usedVideos, confidence: fromField(spec.audio.targetLufs.provenance.confidence) } };
 
-  if (assets.intro || assets.outro) blocks.bookends = { ...(assets.intro ? { intro: assets.intro } : {}), ...(assets.outro ? { outro: assets.outro } : {}), ...(summary.intro ?? summary.outro ? { evidence: { videos: (summary.intro ?? summary.outro)!.evidence.videos, confidence: (summary.intro ?? summary.outro)!.evidence.confidence } } : {}) };
 
   // The picture: its principle in prose, with stills of the creator's B-roll moments.
   const visual = prose('visual');
