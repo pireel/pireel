@@ -145,7 +145,7 @@ export async function prepareVisualPersonMattes(visuals: readonly SupplementalVi
       const ctx = canvas.getContext('2d'); if (!ctx) throw new Error('无法创建人像抠图画布。');
       source.sample.draw(ctx, 0, 0, canvas.width, canvas.height);
       const { personCutoutFrame } = await import('./person-cutout-frame');
-      const bitmap = await personCutoutFrame(canvas.transferToImageBitmap()); owned.push(bitmap);
+      const bitmap = await personCutoutFrame(canvas.transferToImageBitmap(), { id: `export:${visual.clipId}`, t: time }); owned.push(bitmap);
       samples.set(visual.clipId, { ...source, sample: { draw: (target, x, y, width, height) => target.drawImage(bitmap, x, y, width, height) } });
     }
     return release;

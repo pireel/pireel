@@ -1,7 +1,7 @@
 /**
- * Single source of truth for the heavy person-matte asset URLs (ort wasm 27M + MODNet
- * 26M). These assets are intentionally requested only by person-matte when the feature
- * is used, so opening Studio does not eagerly download roughly 53 MB.
+ * Single source of truth for the heavy person-matte asset URLs (ort wasm 27M + an RVM
+ * model 15M per orientation). These assets are intentionally requested only by person-matte
+ * when the feature is used, so opening Studio does not eagerly download them.
  *
  * ?v= is a cache stamp: assets are served `immutable` with a one-year cache, invalidated
  * only by URL change — same stamp always hits cache, an upgrade bumps the stamp and
@@ -26,8 +26,8 @@
  */
 export const ORT_ASSET_REV = '1.27.0';
 
-/** MODNet model's own revision (independent of ort version, rarely changes; +1 when replacing the model file). */
-export const MODNET_REV = '1';
+/** The RVM models' own revision (independent of ort version; +1 when scripts/build-rvm-models.py output changes). */
+export const RVM_REV = '1';
 
 let matteBase = '';
 
@@ -38,10 +38,10 @@ export function setMatteAssetBase(base: string): void {
 
 const base = () => matteBase || (typeof location !== 'undefined' ? location.origin : '');
 
-export const modnetUrl = () => `${base()}/models/modnet_portrait.onnx?v=${MODNET_REV}`;
+export const rvmUrl = (width: number, height: number) => `${base()}/models/rvm/rvm_mb_${width}x${height}.onnx?v=${RVM_REV}`;
 
 /** DeepFilterNet3 (strong narration denoise): the official ONNX export split into its three graphs.
- *  Bump when the files change (+1 like MODNET_REV). */
+ *  Bump when the files change (+1 like RVM_REV). */
 export const DFN3_MODEL_REV = '1';
 export const dfn3ModelUrls = () => ({
   enc: `${base()}/models/dfn3/enc.onnx?v=${DFN3_MODEL_REV}`,

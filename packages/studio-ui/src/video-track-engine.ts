@@ -968,7 +968,7 @@ export class VideoTrackEngine {
         let bitmap = await createImageBitmap(frame.canvas);
         if (layer.personMatte) {
           const { personCutoutFrame } = await import('./person-cutout-frame');
-          bitmap = await personCutoutFrame(bitmap);
+          bitmap = await personCutoutFrame(bitmap, { id: `layer:${layer.id}`, t: srcT });
         }
         if (gen !== this.layerGen || !this.layers.includes(layer) || !this.onLayerFrame || this.tEdited < layer.timelineStart - 1e-6 || this.tEdited >= layer.timelineEnd - 1e-6) {
           bitmap.close();

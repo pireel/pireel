@@ -11,7 +11,7 @@ it('composites soft alpha onto source pixels and releases input and mask ownersh
   vi.stubGlobal('OffscreenCanvas', class { getContext() { return ctx; } transferToImageBitmap() { return output; } });
   segment.mockResolvedValue(mask);
   expect(await personCutoutFrame(frame)).toBe(output);
-  expect(segment).toHaveBeenCalledWith(clone);
+  expect(segment).toHaveBeenCalledWith(clone, undefined);
   expect(ctx.globalCompositeOperation).toBe('destination-in');
   expect(ctx.drawImage.mock.calls).toEqual([[frame, 0, 0], [mask, 0, 0, 640, 360]]);
   expect(frame.close).toHaveBeenCalledOnce(); expect(mask.close).toHaveBeenCalledOnce();

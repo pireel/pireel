@@ -134,7 +134,7 @@ export interface VideoShot extends Clip {
   srcEnd: number;
   /** Multi-source main track: set = externally inserted clip (srcStart/srcEnd are **this file's own** time, not the main video).
    *  Default = main-video slice. **Equal footing** (the main video is just the first-loaded source): framing/matte/audio/captions/split-trim-delete
-   *  all apply to inserted segments (framing uniformly targets the #vidEl canvas, matte feeds MODNet with the segment's own source, captions transcribe/map per source;
+   *  all apply to inserted segments (framing uniformly targets the #vidEl canvas, matte feeds the matting model with the segment's own source, captions transcribe/map per source;
    *  trim.ts's edit math only looks at length, so external segments work naturally). Don't add guards based on the early "v1 always-fullscreen-muted" constraint. */
   src?: string;
   /** Local inserted segment's fileSig (src is a session-scoped blob URL, dies on refresh): draft restore uses it to fetch the File
