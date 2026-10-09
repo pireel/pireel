@@ -58,7 +58,7 @@ export interface BlockComposer {
 /** Speech → timed sentences (source-clock seconds). */
 export interface Transcriber {
   /** opts.projectId is billing attribution only. */
-  transcribe(file: File, opts?: { projectId?: string }): Promise<AsrSegment[]>;
+  transcribe(file: File, opts?: { projectId?: string; onUsage?: (usage: import('./workflow').WorkflowUsage) => void }): Promise<AsrSegment[]>;
 }
 
 /** Cloud byte rendezvous (content-addressed by signature): video, image and audio alike. Null results
@@ -183,6 +183,10 @@ export interface StudioProviders {
   dubbingScript?: (turns: { text: string; seconds: number }[][], targetLanguage: string, options?: StudioOperationOptions) => Promise<string[][]>;
   /** Caption auto-highlight picker (hosted-LLM feature; absent = the transcript hides its "Auto highlight" button — BYO agents highlight via set_captions highlights). Returns exact phrases per row. */
   autoHighlight?: (rows: { index: number; text: string }[], options?: StudioOperationOptions) => Promise<{ index: number; text: string }[]>;
+  /** Cleans up a raw talking-head recording from its whole transcript at once (hosted LLM): the repeats
+   *  to cut (retakes, false starts, crew talk) and the sensitive words to mask, each placed on the source
+   *  clock; `unsure` lists doubtful repeats the caller leaves in. Absent = the first pass leaves them. */
+  speechCleanup?: (segments: { start: number; end: number; text: string; words?: { text: string; start: number; end: number }[] }[], options?: StudioOperationOptions) => Promise<{ cuts: { seg: number; text: string; keep: number; kind: 'retake' | 'false-start' | 'crew-talk'; range: [number, number] }[]; sensitive: { seg: number; text: string; range: [number, number] }[]; unsure: { seg: number; text: string; note: string }[] }>;
   /** Writes a one-click edit's titles from the brand's layout prompt: words, timing, place and look, for
    *  this video's lines (hosted LLM). */
   brandTitles?: (input: { rows: { index: number; text: string; startSec: number }[]; durationSec: number; guide: string; canvas: { width: number; height: number } }, options?: StudioOperationOptions) => Promise<{ titles: import('./brand-edit-params').PlannedTitle[] }>;

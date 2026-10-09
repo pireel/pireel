@@ -427,6 +427,14 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
 
   /* ------------------------------------------------------------------ speech */
+  rough_cut: {
+    description:
+      `${CHARGE_MARKER} for transcription and the repeat check. The standard first pass over a raw talking-head recording, in one call: transcribe; trim pauses at the brand's pacing; clean up the speech — cut repeated takes, false starts and filler sounds, and mask sensitive words (a beep, ** in captions); captions in the brand's caption style; voice denoise; the brand's logo and loudness. Without steps it runs what the project's editing skills and brand ask for; steps runs exactly those (["cleanup"] cleans the speech again). The receipt gives each step's result, the repeats left in because they were unclear, and the steps that failed or were stopped — call again with the steps still pending to finish. Use remove_words for cuts it does not make.`,
+    inputSchema: obj({
+      steps: arr(enumOf(['transcribe', 'pauses', 'cleanup', 'captions', 'denoise', 'logo', 'loudness']), { description: 'Run only these steps.' }),
+      pauses: enumOf(['tight', 'moderate', 'natural'], "Pause trimming: tight keeps ~0.1s of air, moderate ~0.15s, natural cuts only long pauses. Default: the brand's habit, else moderate."),
+    }),
+  },
   remove_silence: {
     description:
       'Remove dead air from the narration by analysing the actual audio — no transcript needed, so run it first when tightening pacing. minimumPauseSec (0.25–3, default 0.4) is the shortest pause treated as dead air; speechPaddingSec (0–0.5, default 0.15) stays on each edge next to speech. Overlays, captions and later material re-lay.',

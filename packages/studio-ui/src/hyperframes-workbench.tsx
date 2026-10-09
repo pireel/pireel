@@ -338,6 +338,8 @@ import { TransitionPanel } from "./transition-panel";
 import { MediaAnimPanel } from "./media-anim-panel";
 import { type MatteFrame, MATTE_FPS, computeMatteTrack } from "./person-matte";
 import { takeAgentStartPrompt } from "./agent-project-from-video";
+import { documentIsEdited, fineCutClipIds } from "./first-pass";
+import type { WorkflowUsage } from "@pireel/studio-engine/workflow";
 import { StudioBootOverlay } from "./studio-boot";
 import { confirm } from "@pireel/ui/confirm";
 import type { StudioToolResult } from "@pireel/studio-engine/prompts";
@@ -7044,7 +7046,10 @@ export function HyperframesWorkbench({
     const switched = await outputRuntime.switchOutput(id);
     return switched && projectOutputs.outputsRef.current.active.id === id;
   };
+  // Receives the usage of paid calls the tools make while a caller listens (the first pass's credits).
+  const usageSinkRef = useRef<((usage: WorkflowUsage) => void) | null>(null);
   const agentToolCtx: AgentToolCtx = {
+    usageSinkRef,
     projectId,
     documentRef: editorDocumentRef,
     resolveAssetUrl,
@@ -7136,7 +7141,7 @@ export function HyperframesWorkbench({
   ) => workflowBusyRef.current ? Promise.resolve({ ok: false, error: "A workflow is running. Wait for it to finish before editing." } satisfies StudioToolResult) : (toolId === "run_v3"
     // v3 surface from the chat: same executor as the external bridge, with the chat surface carried in the input
     // so parked interactions (ask_user / approvals) render as chat cards.
-    ? persistToolMutation(runAgentExternalTool(agentToolCtx, "run_v3", { ...input, surface: opts?.surface ?? "chat" }))
+    ? persistToolMutation(runAgentExternalTool(agentToolCtx, "run_v3", { ...input, surface: opts?.surface ?? "chat", ...(opts?.signal ? { signal: opts.signal } : {}) }))
     : persistToolMutation(runAgentStudioTool(agentToolCtx, toolId, input, opts)));
   runToolRef.current = runStudioTool; // break the hook↔dispatcher cycle (assigned every render before any handler can fire)
   // Bridge (MCP) calls span many turns with the tab live in between, so the user can switch
@@ -8225,6 +8230,9 @@ export function HyperframesWorkbench({
     if (prompt) setStartPrompt(prompt);
   }, [bootDataReady, projectId, displaced]);
   const onStartPromptSent = useCallback(() => setStartPrompt(null), []);
+  // The clips the fine-cut skills count (the rough cut's card follows a one-click edit's agent with them).
+  const fineCutClips = useCallback(() => fineCutClipIds(editorDocumentRef.current), []);
+  const projectEdited = useMemo(() => documentIsEdited(editorDocument), [editorDocument]);
 
   // A project that never set a brand takes a copy of the creator's current brand, and one that never set its
   // editing skills starts with its brand's defaults. Once set (none included) they are the project's own:
@@ -8254,15 +8262,6 @@ export function HyperframesWorkbench({
   const setProjectSkill = useCallback((skillId: string) => {
     const edit = commit({ op: "command", input: { command: { type: "skill.set", skillId } } });
     if (!edit.ok) toast.error(editorErrorMessage(edit.error));
-  }, []);
-  /** The creator switches the project's brand in the chat (later edits follow it; its skills stay as set). */
-  const setProjectBrand = useCallback((brand: PlaybookSnapshot | null) => {
-    const edit = commit({ op: "command", input: { command: { type: "brand.set", brand } } });
-    if (!edit.ok) toast.error(editorErrorMessage(edit.error));
-  }, []);
-  const chatBrands = useMemo(() => {
-    const provider = studioProviders().brands;
-    return provider ? { list: async () => (await provider.list()).map(playbookSnapshot), ...(provider.manage ? { manage: provider.manage } : {}) } : undefined;
   }, []);
 
 
@@ -8322,11 +8321,11 @@ export function HyperframesWorkbench({
                     getComp={getChatComp}
                     startPrompt={startPrompt}
                     onStartPromptSent={onStartPromptSent}
+                    fineCutClips={fineCutClips}
+                    projectEdited={projectEdited}
                     projectBrand={comp.brand}
                     projectSkillId={comp.skillId}
                     onProjectSkill={setProjectSkill}
-                    brands={chatBrands}
-                    onProjectBrand={setProjectBrand}
                     editingSkills={comp.editingSkills}
                     onEditingSkills={chatDocCbs.setEditingSkills}
                     handoff={comp.handoff}

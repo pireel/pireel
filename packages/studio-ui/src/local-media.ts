@@ -163,7 +163,11 @@ async function dirHandle(): Promise<FileSystemDirectoryHandle | null> {
 export interface SaveLocalVideoOptions {
   /** @deprecated no-op since handles were retired; every entry is a full copy. */
   pinned?: boolean;
+  /** Share of the bytes written so far (0–1); the write then goes in slices. */
+  onProgress?: (fraction: number) => void;
 }
+
+const PROGRESS_SLICE_BYTES = 16 * 1024 * 1024;
 
 /** Cache a file's bytes on this device under its sig. Returns false when the cache is unavailable
  * or full — callers must treat that as "no local cache", not as a failed import. */
@@ -177,7 +181,7 @@ export function fileOrigin(file: File): string | undefined {
   return fileOrigins.get(file);
 }
 
-export async function saveLocalVideo(file: File, sig: string, _options?: SaveLocalVideoOptions): Promise<boolean> {
+export async function saveLocalVideo(file: File, sig: string, options?: SaveLocalVideoOptions): Promise<boolean> {
   file = alignFileToSig(file, sig); // stored meta must match the sig key, or later loads mint a different identity
   const dir = await dirHandle();
   if (!dir) return false;
@@ -187,7 +191,7 @@ export async function saveLocalVideo(file: File, sig: string, _options?: SaveLoc
     const key = await sigKey(sig);
     try {
       const existing = await (await dir.getFileHandle(key)).getFile();
-      if (existing.size === file.size) return true; // Same sig fully on disk: skip byte rewrite
+      if (existing.size === file.size) { options?.onProgress?.(1); return true; } // Same sig fully on disk: skip byte rewrite
       // Size mismatch = an interrupted earlier write; fall through and rewrite so the entry heals
     } catch {
       /* Not present → write it */
@@ -195,7 +199,15 @@ export async function saveLocalVideo(file: File, sig: string, _options?: SaveLoc
     const meta: StoredMeta = { name: file.name, type: file.type, lastModified: file.lastModified };
     const fh = await dir.getFileHandle(key, { create: true });
     const w = await fh.createWritable();
-    await w.write(file);
+    const progress = options?.onProgress;
+    if (progress) {
+      for (let at = 0; at < file.size; at += PROGRESS_SLICE_BYTES) {
+        await w.write(file.slice(at, at + PROGRESS_SLICE_BYTES));
+        progress(Math.min(1, (at + PROGRESS_SLICE_BYTES) / file.size));
+      }
+    } else {
+      await w.write(file);
+    }
     await w.close();
     await writeStoredMeta(dir, key, meta);
     return true;

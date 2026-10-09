@@ -8,7 +8,7 @@ const valid = (): BrandPlaybook => ({
     captions: { on: true, style: { color: '#ffffff', strokeColor: '#000000', yPct: 22 }, accent: 'keywords', text: '每屏约 3 个词。' },
     logo: { key: 'uploads/u/logo.png', kind: 'image', width: 200, height: 80, corner: 'top-right', widthPct: 12, opacity: 1 },
     sound: { lufs: -15, pauses: 'tight' },
-    visual: { text: '说到价格时快推近 & 换产品时甩镜 <偶尔>。', evidence: { videos: ['v1', 'v2'], confidence: 'high' } },
+    camera: { text: '说到价格时快推近 & 换产品时甩镜 <偶尔>。', evidence: { videos: ['v1', 'v2'], confidence: 'high' } },
     graphics: { text: '白底黑字圆角数字卡，从下方弹入。', references: [{ key: 'uploads/u/mg.jpg', kind: 'image', width: 540, height: 960 }] },
   },
 });
@@ -26,7 +26,7 @@ describe('validatePlaybook', () => {
       [p => { p.blocks.sound = { lufs: 3 }; }, /sound\.lufs/],
       [p => { p.blocks.logo!.key = 'blob:local'; }, /blocks\.logo/],
       [p => { p.blocks.captions!.style = { color: 'red' }; }, /captions\.style\.color/],
-      [p => { p.blocks.visual = { text: 'x'.repeat(4001) }; }, /visual\.text/],
+      [p => { p.blocks.camera = { text: 'x'.repeat(4001) }; }, /camera\.text/],
       [p => { p.blocks.graphics!.references = [{ key: '', kind: 'image', width: 1, height: 1 }]; }, /graphics\.references\.0/],
     ];
     for (const [mutate, error] of cases) {
@@ -38,6 +38,15 @@ describe('validatePlaybook', () => {
   it('refuses brands of an older shape', () => {
     expect(() => validatePlaybook({ ...emptyPlaybook('b', 'Old'), schema: 1, fixed: {}, moves: [] })).toThrow(/schema/);
   });
+
+  it('reads a brand made before the toolkit split: its picture prose becomes the layout technique', () => {
+    const old = { ...valid(), schema: 2, blocks: { portrait: { text: '快节奏。' }, visual: { text: '素材出现时人物缩成圆形小窗。' } } };
+    const upgraded = validatePlaybook(old);
+    expect(upgraded.schema).toBe(3);
+    expect(upgraded.blocks.layout?.text).toBe('素材出现时人物缩成圆形小窗。');
+    expect(upgraded.blocks).not.toHaveProperty('visual');
+    expect(renderBrandPrompt(old as unknown as BrandPlaybook)).toContain('<layout>');
+  });
 });
 
 describe('renderBrandPrompt', () => {
@@ -47,14 +56,14 @@ describe('renderBrandPrompt', () => {
     expect(prompt).toContain('<captions on="true" color="#ffffff" stroke="#000000" accent="keywords" bottom-edge="22% from top">\n每屏约 3 个词。\n</captions>');
     expect(prompt).toContain('<logo corner="top-right" width="12%" opacity="1"/>');
     expect(prompt).toContain('<sound loudness="-15 LUFS" pauses="tight"/>');
-    expect(prompt).toContain('<visual>\n说到价格时快推近 &amp; 换产品时甩镜 &lt;偶尔&gt;。\n</visual>');
+    expect(prompt).toContain('<camera>\n说到价格时快推近 &amp; 换产品时甩镜 &lt;偶尔&gt;。\n</camera>');
     expect(prompt).toContain('<graphics references="1">');
     expect(prompt.indexOf('<portrait>')).toBeLessThan(prompt.indexOf('<captions'));
   });
 
   it('renders only the blocks a consumer asks for', () => {
-    const prompt = renderBrandPrompt(valid(), ['portrait', 'visual']);
-    expect(prompt).toContain('<visual>');
+    const prompt = renderBrandPrompt(valid(), ['portrait', 'camera']);
+    expect(prompt).toContain('<camera>');
     expect(prompt).not.toContain('<captions');
     expect(prompt).not.toContain('<graphics');
   });
@@ -65,8 +74,8 @@ describe('playbookSnapshot', () => {
     const playbook = valid();
     const snapshot = playbookSnapshot(playbook);
     expect(snapshot).not.toHaveProperty('source');
-    playbook.blocks.visual!.text = 'changed';
-    expect(snapshot.blocks.visual!.text).toContain('推近');
+    playbook.blocks.camera!.text = 'changed';
+    expect(snapshot.blocks.camera!.text).toContain('推近');
     expect(() => validatePlaybookSnapshot(snapshot)).not.toThrow();
   });
 });

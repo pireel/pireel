@@ -347,39 +347,47 @@ export function withStepBoundaries(parts: UIMessage['parts']): UIMessage['parts'
 }
 
 export function compactStudioChatMessagesForModel(messages: UIMessage[]): UIMessage[] {
-  return messages.map((message) => {
-    if (message.role !== 'assistant') return message;
-    const parts = (message.parts ?? []).flatMap((part) => {
-      const candidate = part as { type?: string; text?: string };
-      if (candidate.type === 'reasoning') return [];
-      if (candidate.type === 'text') {
-        const text = stripLeakedToolProtocolText(candidate.text ?? '');
-        return text.trim() ? [{ ...part, text } as typeof part] : [];
-      }
-      return [part];
-    });
-    return {
-      ...message,
-      parts: withStepBoundaries(parts).map((part) => {
-        const candidate = part as { type?: string; toolName?: string; output?: unknown; text?: string };
-        if (candidate.type === 'text') {
-          const text = candidate.text ?? '';
-          return text.length > MAX_REPLAYED_TEXT_CHARS
-            ? { ...part, text: `${text.slice(0, MAX_REPLAYED_TEXT_CHARS)}\n[…]` } as typeof part
-            : part;
-        }
-        const toolId = candidate.type === 'dynamic-tool'
-          ? candidate.toolName
-          : candidate.type?.startsWith('tool-')
-            ? candidate.type.slice('tool-'.length)
-            : '';
-        if (!isVisualAnalysisToolId(toolId ?? '') || !candidate.output || typeof candidate.output !== 'object') return part;
-        const output = candidate.output as { ok?: unknown; summary?: unknown; error?: unknown; data?: unknown };
-        if (!output.data || typeof output.data !== 'object') return part;
-        return { ...part, output: { ...output, data: compactVisualAnalysisData(output.data as Record<string, unknown>) } } as typeof part;
-      }),
-    };
+  return messages.flatMap((message) => {
+    if (message.role !== 'assistant') return [message];
+    const compacted = compactAssistantMessageForModel(message);
+    // A reply that held only UI cards so far (the first pass, before the agent answers) is not history.
+    return compacted.parts.some((part) => part.type !== 'step-start') ? [compacted] : [];
   });
+}
+
+function compactAssistantMessageForModel(message: UIMessage): UIMessage {
+  const parts = (message.parts ?? []).flatMap((part) => {
+    const candidate = part as { type?: string; text?: string };
+    if (candidate.type === 'reasoning') return [];
+    // UI-only cards (the first pass's checklist): the agent gets its own note instead.
+    if (candidate.type?.startsWith('data-')) return [];
+    if (candidate.type === 'text') {
+      const text = stripLeakedToolProtocolText(candidate.text ?? '');
+      return text.trim() ? [{ ...part, text } as typeof part] : [];
+    }
+    return [part];
+  });
+  return {
+    ...message,
+    parts: withStepBoundaries(parts).map((part) => {
+      const candidate = part as { type?: string; toolName?: string; output?: unknown; text?: string };
+      if (candidate.type === 'text') {
+        const text = candidate.text ?? '';
+        return text.length > MAX_REPLAYED_TEXT_CHARS
+          ? { ...part, text: `${text.slice(0, MAX_REPLAYED_TEXT_CHARS)}\n[…]` } as typeof part
+          : part;
+      }
+      const toolId = candidate.type === 'dynamic-tool'
+        ? candidate.toolName
+        : candidate.type?.startsWith('tool-')
+          ? candidate.type.slice('tool-'.length)
+          : '';
+      if (!isVisualAnalysisToolId(toolId ?? '') || !candidate.output || typeof candidate.output !== 'object') return part;
+      const output = candidate.output as { ok?: unknown; summary?: unknown; error?: unknown; data?: unknown };
+      if (!output.data || typeof output.data !== 'object') return part;
+      return { ...part, output: { ...output, data: compactVisualAnalysisData(output.data as Record<string, unknown>) } } as typeof part;
+    }),
+  };
 }
 
 /** Return only a material shortage after assemble_from_review has finished. Presentation metadata,

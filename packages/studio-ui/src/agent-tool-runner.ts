@@ -111,6 +111,7 @@ import { imageThumb } from '@pireel/ui/image-url';
 import { studioLocale, t, tEnglish } from './i18n';
 import { type ComposeMode, type ComposedBlock, composedBlockFields, GeneratedBlockValidationError, kitChoiceOf, newBlockComposeMode } from './compose-result';
 import { clearToolProgress, setToolProgress, type ToolProgress } from './tool-progress';
+import { FIRST_PASS_STEPS, emitLateRoughCutCredits, runFirstPass, type FirstPassHost, type FirstPassStepId } from './first-pass';
 import { probeVideoFile } from './media';
 import { cloudToolFrame } from './agent-frame-upload';
 import { measuredSpeechTranscript, storedScriptText } from '@pireel/studio-engine/script-alignment';
@@ -490,6 +491,8 @@ export interface AgentToolCtx {
   exportVideo: (opts: ExportRenderOpts, sinkUrl?: string) => Promise<{ ok: boolean; filename?: string; error?: string; delivered?: 'local_sink' | 'browser_download'; sinkError?: string }>;
   // Frames + chat handle
   chatRef: MutableRefObject<StudioChatHandle | null>;
+  /** Receives the usage of paid calls tools make (transcription) while a caller listens; null otherwise. */
+  usageSinkRef?: MutableRefObject<((usage: import('@pireel/studio-engine/workflow').WorkflowUsage) => void) | null>;
 }
 
 type StudioToolRunInternalOptions = {
@@ -499,7 +502,7 @@ type StudioToolRunInternalOptions = {
    * model-authored brief for editorial visual review. */
   skillId?: string;
   collectOpeningEvidence?: boolean;
-  reportProgress?: (text: string, frac?: number, extra?: Pick<ToolProgress, 'blockIds' | 'items'>) => void;
+  reportProgress?: (text: string, frac?: number, extra?: Pick<ToolProgress, 'blockIds' | 'items' | 'report'>) => void;
 };
 
 /** Session-scoped cache of Skill-declared review briefs (null = skill has no brief block). */
@@ -589,7 +592,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
       // Pipeline tools push friendly progress to their card. A provider may keep producing
       // harmless late deltas after our abort race has stopped waiting; never let those deltas
       // resurrect a completed/aborted progress state.
-      const report = (text: string, frac?: number, extra?: Pick<ToolProgress, 'blockIds' | 'items'>) => {
+      const report = (text: string, frac?: number, extra?: Pick<ToolProgress, 'blockIds' | 'items' | 'report'>) => {
         if (stopped()) return;
         if (opts?.reportProgress) {
           opts.reportProgress(text, frac, extra);
@@ -647,6 +650,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
       const commitOverlayInsert = (block: Block, sceneId?: string) =>
         commit({ op: 'overlay.insert', input: { block, ...(sceneId ? { sceneId } : {}) } });
       const transcribeForAgent = async (input: Record<string, unknown>): Promise<StudioToolResult> => {
+        // The listener when the call starts gets its usage, even if the bill arrives after it stopped waiting.
+        const sink = ctx.usageSinkRef?.current ?? null;
+        const usageSinkAtCall = (usage: import('@pireel/studio-engine/workflow').WorkflowUsage) => sink?.(usage);
         try {
           const requestedLocalReference = typeof input.localAssetId === 'string'
             ? input.localAssetId.trim()
@@ -742,7 +748,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 },
               };
             }
-            const segs = await race(studioProviders().transcriber.transcribe(file, { projectId })).catch((error) => {
+            const segs = await race(studioProviders().transcriber.transcribe(file, { projectId, onUsage: usageSinkAtCall })).catch((error) => {
               if (isNoSpeechAsrResult(error)) return [];
               throw error;
             });
@@ -820,7 +826,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const probe = await probeVideoFile(file).catch(() => null);
             // Script-backed speech (TTS) keeps its exact text; ASR only lends the timing.
             const storedBefore = documentRef.current.semantics.transcripts[targetAssetId];
-            const segs = measuredSpeechTranscript(asset, storedBefore, await race(studioProviders().transcriber.transcribe(file, { projectId })));
+            const segs = measuredSpeechTranscript(asset, storedBefore, await race(studioProviders().transcriber.transcribe(file, { projectId, onUsage: usageSinkAtCall })));
             // A script recovered from the stored transcript becomes the asset's own script, so a later
             // re-measure still keeps the exact text instead of storing what the recogniser heard.
             const recoveredScript = asset.metadata.transcriptText ? '' : storedScriptText(storedBefore);
@@ -2963,6 +2969,45 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               default: return { ok: false, error: 'invalid_value', data: { path: 'action', value: input.action, allowed: ['focus', 'seek', 'play', 'pause'] } };
             }
           }
+          case 'rough_cut': {
+            // The standard first pass as one tool: the same checklist the one-click edit shows, run here
+            // through this runner's own speech tools so the whole pass is one call with one receipt.
+            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: tEnglish('workbench.noVideoYet') };
+            const known = new Set<string>(FIRST_PASS_STEPS);
+            const steps = Array.isArray(input.steps) ? input.steps.filter((step): step is FirstPassStepId => typeof step === 'string' && known.has(step)) : undefined;
+            const pauses = input.pauses === 'tight' || input.pauses === 'moderate' || input.pauses === 'natural' ? input.pauses : undefined;
+            const semantics = documentRef.current.semantics;
+            const host: FirstPassHost = {
+              document: () => documentRef.current,
+              brand: semantics.brand ?? null,
+              skills: semantics.editingSkills ?? [],
+              tool: (name, args, stepSignal) => runStudioToolInner(ctx, name, args, { surface, ...(stepSignal ?? signal ? { signal: stepSignal ?? signal } : {}) }),
+              setUsageSink: (sink) => { if (ctx.usageSinkRef) ctx.usageSinkRef.current = sink; },
+              applyCaptionPreset: (preset, style) => ctx.applyCaptionPreset(preset, style),
+              captionsOn: () => !!documentRef.current.appearance.captionStyle?.on,
+              replaceDocument: (next) => commit({ op: 'document.replace', input: { document: next } }).ok,
+              patchLoudness: (loudness) => commit({ op: 'command', input: { command: { type: 'processing.patch', patch: { loudness } } } }).ok,
+              primaryFile: async () => {
+                const assetId = firstNarrativeAssetId(documentRef.current);
+                const asset = assetId ? documentRef.current.assets[assetId] : undefined;
+                return asset ? (await assetBytes(asset)).file : null;
+              },
+              measureLoudness: async (file) => (await import('./audio-decode')).streamVideoLoudness(file),
+            };
+            const outcome = await runFirstPass(host, (next) => report(next.summary ?? t('tools.rough_cut.busy'), undefined, { report: next }), {
+              ...(steps?.length ? { steps } : {}), ...(pauses ? { pauses } : {}), ...(signal ? { signal } : {}), onLateUsage: emitLateRoughCutCredits,
+            });
+            const steps_ = outcome.report.steps;
+            // Nothing applied and something failed: a failure the agent can act on. Anything applied stays.
+            if (!outcome.stopped && !steps_.some((step) => step.status === 'done') && steps_.some((step) => step.status === 'failed')) {
+              return { ok: false, error: outcome.note, data: { report: outcome.report } };
+            }
+            return {
+              ok: true,
+              summary: outcome.report.summary ?? t('tools.rough_cut.label'),
+              data: { note: outcome.note, report: outcome.report, baseline: outcome.baseline, ...(outcome.stopped ? { stopped: true } : {}) },
+            };
+          }
           case 'remove_silence': {
             if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: tEnglish('workbench.noVideoYet') };
             const assetId = firstNarrativeAssetId(documentRef.current);
@@ -4039,6 +4084,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         const name = typeof input.name === 'string' ? input.name : '';
         const args = input.args && typeof input.args === 'object' && !Array.isArray(input.args) ? (input.args as Record<string, unknown>) : {};
         const stepSurface: 'chat' | 'bridge' = input.surface === 'chat' ? 'chat' : 'bridge';
+        // In-tab callers (the first pass) may pass a stop signal; it is honored at the tool's safe boundaries.
         const before = documentRef.current;
         if (name === 'get_state') {
           const window = args.window && typeof args.window === 'object' ? (args.window as { tracks?: string[]; fromFrame?: number; toFrame?: number }) : undefined;
@@ -4074,7 +4120,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         try {
           result = external
             ? await runExternalToolInner(ctx, name, callArgs)
-            : await runStudioTool(ctx, name, callArgs, { surface: stepSurface, reportProgress: reportAsV3 });
+            : await runStudioTool(ctx, name, callArgs, { surface: stepSurface, reportProgress: reportAsV3, ...(input.signal instanceof AbortSignal ? { signal: input.signal } : {}) });
         } finally {
           clearToolProgress(name);
         }

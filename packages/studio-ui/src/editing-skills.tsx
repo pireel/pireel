@@ -24,7 +24,7 @@ const LOOK: Record<EditingSkillId, { icon: ComponentType<{ size?: number; classN
   sound: { icon: Volume2, tile: 'linear-gradient(135deg,#f9a8d4,#db2777)' },
 };
 
-function Tile({ id, size = 28, ring, z }: { id: EditingSkillId; size?: number; ring?: boolean; z?: number }) {
+export function EditingSkillTile({ id, size = 28, ring, z }: { id: EditingSkillId; size?: number; ring?: boolean; z?: number }) {
   const { icon: Icon, tile } = LOOK[id];
   return (
     <span
@@ -38,7 +38,8 @@ function Tile({ id, size = 28, ring, z }: { id: EditingSkillId; size?: number; r
 
 /** Message keys are slugs: ids like `rough-cut` read as `rough_cut`. */
 const key = (id: EditingSkillId, field: 'name' | 'short' | 'detail') => `editingSkills.${id.replace(/-/g, '_')}.${field}`;
-const name = (id: EditingSkillId) => t(key(id, 'name'));
+export const editingSkillName = (id: EditingSkillId) => t(key(id, 'name'));
+const name = editingSkillName;
 
 export function EditingSkillsDialog({ open, value, onClose, onApply }: {
   open: boolean;
@@ -76,7 +77,7 @@ export function EditingSkillsDialog({ open, value, onClose, onApply }: {
                   onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setFocus(id); } }}
                   className={`focus-visible:ring-line-2 flex w-full cursor-pointer items-center gap-3 rounded-xl px-2.5 py-2 text-left outline-none transition-colors focus-visible:ring-1 ${focus === id ? 'bg-panel-2/70' : 'hover:bg-panel-2/40'}`}
                 >
-                  <Tile id={id} size={34} />
+                  <EditingSkillTile id={id} size={34} />
                   <span className="min-w-0 flex-1">
                     <span className="text-ink block truncate text-[12.5px] font-medium">{name(id)}</span>
                     <span className="text-ink-4 block truncate text-[11px]">{t(key(id, 'short'))}</span>
@@ -125,7 +126,7 @@ export function EditingSkillsDialog({ open, value, onClose, onApply }: {
 }
 
 /** The confirm-list chip and its panel (opens upward over the thread; outside click or Escape closes). */
-function ConfirmPopover({ handoff, pending, onAnswer }: { handoff: HandoffItem[]; pending: number; onAnswer: ConfirmAnswer }) {
+export function ConfirmPopover({ handoff, pending, onAnswer }: { handoff: HandoffItem[]; pending: number; onAnswer: ConfirmAnswer }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -157,7 +158,29 @@ function ConfirmPopover({ handoff, pending, onAnswer }: { handoff: HandoffItem[]
   );
 }
 
-/** The switched-on skills as stacked tiles (a dashed plus when none), opening the dialog to pick them. */
+/** The switched-on skills as stacked tiles (a dashed plus when none), with their count. */
+function SkillStack({ value }: { value: readonly string[] }) {
+  const on = EDITING_SKILLS.filter((skill) => value.includes(skill.id));
+  return (
+    <>
+      {on.length ? (
+        <span className="flex items-center -space-x-1">
+          {/* The first skill sits on top, so each tile shows its left edge and icon. */}
+          {on.map((skill, index) => <EditingSkillTile key={skill.id} id={skill.id} size={22} ring z={on.length - index} />)}
+        </span>
+      ) : (
+        <span className="border-line-2 text-ink-4 flex h-[22px] w-[22px] items-center justify-center rounded-full border border-dashed">
+          <Plus size={12} />
+        </span>
+      )}
+      <span>{on.length ? t('editingSkills.count', { n: on.length }) : t('editingSkills.title')}</span>
+    </>
+  );
+}
+
+const CHIP_CLASS = 'hover:bg-panel-2/60 text-ink-3 hover:text-ink flex h-8 shrink-0 items-center gap-2 rounded-full py-1 pr-2.5 pl-1 text-[11.5px] transition-colors disabled:opacity-40';
+
+/** The switched-on skills as stacked tiles, opening the dialog to pick them. */
 export function EditingSkillsChip({ value, onChange, disabled }: { value: readonly string[]; onChange: (ids: string[]) => void; disabled?: boolean }) {
   const [open, setOpen] = useState(false);
   const on = EDITING_SKILLS.filter((skill) => value.includes(skill.id));
@@ -168,37 +191,11 @@ export function EditingSkillsChip({ value, onChange, disabled }: { value: readon
         disabled={disabled}
         onClick={() => setOpen(true)}
         title={on.length ? on.map((skill) => name(skill.id)).join(' · ') : t('editingSkills.title')}
-        className="hover:bg-panel-2/60 text-ink-3 hover:text-ink flex h-8 shrink-0 items-center gap-2 rounded-full py-1 pr-2.5 pl-1 text-[11.5px] transition-colors disabled:opacity-40"
+        className={CHIP_CLASS}
       >
-        {on.length ? (
-          <span className="flex items-center -space-x-1">
-            {/* The first skill sits on top, so each tile shows its left edge and icon. */}
-            {on.map((skill, index) => <Tile key={skill.id} id={skill.id} size={22} ring z={on.length - index} />)}
-          </span>
-        ) : (
-          <span className="border-line-2 text-ink-4 flex h-[22px] w-[22px] items-center justify-center rounded-full border border-dashed">
-            <Plus size={12} />
-          </span>
-        )}
-        <span>{on.length ? t('editingSkills.count', { n: on.length }) : t('editingSkills.title')}</span>
+        <SkillStack value={value} />
       </button>
       <EditingSkillsDialog open={open} value={value} onClose={() => setOpen(false)} onApply={onChange} />
     </>
-  );
-}
-
-/** The row above the composer: switched-on skills as stacked tiles, and the confirm list when there is one. */
-export function EditingSkillsBar({ value, onChange, handoff, onAnswer }: {
-  value: readonly string[];
-  onChange: (ids: string[]) => void;
-  handoff: HandoffItem[];
-  onAnswer: ConfirmAnswer;
-}) {
-  const pending = handoff.filter((item) => item.status === 'open').length;
-  return (
-    <div className="mb-1.5 flex items-center gap-2 px-0.5">
-      <EditingSkillsChip value={value} onChange={onChange} />
-      {handoff.length > 0 && <ConfirmPopover handoff={handoff} pending={pending} onAnswer={onAnswer} />}
-    </div>
   );
 }

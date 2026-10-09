@@ -1,7 +1,10 @@
 "use client";
 
-import { editingSkillsHint } from '@pireel/studio-engine/editing-skills';
-import { EditingSkillsBar } from './editing-skills';
+import { EDITING_SKILL_IDS, editingSkillsHint, type EditingSkillId } from '@pireel/studio-engine/editing-skills';
+import { ROUGH_CUT_TOOL, RoughCutCard, messageTurnCredits, toolNameOfPart, type RoughCutReplyMeta } from './first-pass-card';
+import { NextSteps, splitNextSteps } from './chat-next-steps';
+import { ConfirmPopover } from './editing-skills';
+import { FINE_CUT_SKILLS, ONE_CLICK_EDIT_HINT, onLateRoughCutCredits, type FineCutItem, type FineCutSkill } from './first-pass';
 import { collapsedComponentRetryIndexes, studioToolFailureText } from './chat-component-retries';
 
 /** Single-thread studio chat (useChat): stream rendering, client-side tool execution, persistence snapshots. */
@@ -109,11 +112,11 @@ export function ChatThread({
   getComp,
   startPrompt,
   onStartPromptSent,
+  fineCutClips,
+  projectEdited,
   projectBrand,
   projectSkillId,
   onProjectSkill,
-  brands,
-  onProjectBrand,
   editingSkills,
   onEditingSkills,
   handoff,
@@ -147,9 +150,9 @@ export function ChatThread({
   projectBrand?: StudioChatProps["projectBrand"];
   projectSkillId?: StudioChatProps["projectSkillId"];
   onProjectSkill?: StudioChatProps["onProjectSkill"];
-  brands?: StudioChatProps["brands"];
-  onProjectBrand?: StudioChatProps["onProjectBrand"];
   onStartPromptSent?: StudioChatProps["onStartPromptSent"];
+  fineCutClips?: StudioChatProps["fineCutClips"];
+  projectEdited?: StudioChatProps["projectEdited"];
   editingSkills?: StudioChatProps["editingSkills"];
   onEditingSkills?: StudioChatProps["onEditingSkills"];
   handoff?: StudioChatProps["handoff"];
@@ -187,6 +190,8 @@ export function ChatThread({
   // Read at send time: the switched-on editing skills ride each message as a frozen note.
   const editingSkillsRef = useRef(editingSkills);
   editingSkillsRef.current = editingSkills;
+  const projectEditedRef = useRef(projectEdited);
+  projectEditedRef.current = projectEdited;
   const composerRef = useRef<ComposerHandle | null>(null);
   // The project's Skill when it has one; a project that never set one keeps this thread's own pick.
   const [skillId, setSkillId] = useState<StudioScenarioSkillId>((projectSkillId as StudioScenarioSkillId | undefined) ?? initialSkillId);
@@ -531,6 +536,10 @@ export function ChatThread({
       options: {
         preserveAutoRecoveryAttempt?: boolean;
         studioAction?: typeof STUDIO_CREATE_SKILL_ACTION;
+        /** The tool this message's first step must call (a one-click edit starts with the rough cut). */
+        startTool?: string;
+        /** A note for the agent ahead of the message (one-click edit context). */
+        hint?: string;
       } = {},
     ): Promise<boolean> => {
       const draftParts: StudioChatDraftPart[] =
@@ -581,16 +590,19 @@ export function ChatThread({
       const mentionedIds = [...new Set(
         draftParts.flatMap((part) => (part.type === "text" ? [...part.text.matchAll(/@([A-Za-z0-9_:./-]+)/g)].map((m) => m[1]!) : [])),
       )];
+      // The switched-on skills shape the project's first edit; once it is edited, the creator asks in words.
       const mentionHint = [
+        options.hint ?? "",
         mentionedIds.length ? `Referenced elements in this message (use these ids directly): ${JSON.stringify(mentionedIds)}` : "",
         localAssetContext,
-        editingSkillsHint(editingSkillsRef.current),
+        projectEditedRef.current ? "" : editingSkillsHint(editingSkillsRef.current),
       ].filter(Boolean).join("\n");
       const metadata = {
         workStartedAt: Date.now(),
         ...(mentionHint ? { mentionHint } : {}),
         ...(timelineFrames.length ? { timelineFrames } : {}),
         ...(options.studioAction ? { studioAction: options.studioAction } : {}),
+        ...(options.startTool ? { startTool: options.startTool } : {}),
       };
       void sendMessage({
         metadata,
@@ -610,13 +622,87 @@ export function ChatThread({
     [elements, sendMessage, status],
   );
 
-  // A project made from the Studio home opens with its first message: sent once, when the thread is idle.
+  // A one-click edit's reply: the agent's part counted from what it adds after the rough cut, kept in the
+  // reply's metadata (never in the tool receipt, which the model reads back byte for byte).
+  const fineCutRef = useRef<{ messageId: string; baseline: Record<FineCutSkill, string[]>; seenBusy: boolean } | null>(null);
+  const patchReplyMeta = useCallback((messageId: string, patch: (meta: RoughCutReplyMeta & Record<string, unknown>) => RoughCutReplyMeta & Record<string, unknown>) => setMessages((current) => current.map((m) => (m.id === messageId ? { ...m, metadata: patch({ ...(m.metadata as Record<string, unknown> | undefined) }) } : m))), [setMessages]);
+  // Metadata settles after the turn has gone idle, past the usual idle-time save: save it again.
+  const snapshotAfterPatchRef = useRef(false);
+  useEffect(() => {
+    if (!snapshotAfterPatchRef.current || status !== "ready") return;
+    snapshotAfterPatchRef.current = false;
+    onSnapshot(compactStudioChatMessages(messagesRef.current), skillRef.current);
+  }, [messages, status, onSnapshot]);
+  useEffect(() => {
+    const working = status === "streaming" || status === "submitted";
+    const last = messages[messages.length - 1];
+    // Counting starts when a one-click edit's rough cut lands, finished, in the live reply.
+    if (!fineCutRef.current && fineCutClips && last?.role === "assistant" && !(last.metadata as RoughCutReplyMeta | undefined)?.fineCut) {
+      const roughCut = last.parts.find((part) => toolNameOfPart(part) === ROUGH_CUT_TOOL && (part as { state?: string }).state === "output-available");
+      const receipt = (roughCut as { output?: { data?: { baseline?: Record<FineCutSkill, string[]>; stopped?: boolean } } } | undefined)?.output?.data;
+      const asked = [...messages].reverse().find((m) => m.role === "user");
+      if (receipt?.baseline && !receipt.stopped && (asked?.metadata as { startTool?: unknown } | undefined)?.startTool === ROUGH_CUT_TOOL) {
+        const on = new Set(editingSkillsRef.current ?? []);
+        const items = FINE_CUT_SKILLS.filter((id) => on.has(id)).map((id): FineCutItem => ({ id, status: "running", count: 0 }));
+        if (items.length) {
+          fineCutRef.current = { messageId: last.id, baseline: receipt.baseline, seenBusy: working };
+          patchReplyMeta(last.id, (meta) => ({ ...meta, fineCut: { state: "running", items } }));
+          return;
+        }
+      }
+    }
+    const live = fineCutRef.current;
+    if (!live || !fineCutClips) return;
+    if (working) live.seenBusy = true;
+    const added = (): Record<FineCutSkill, number> => {
+      const now = fineCutClips();
+      return Object.fromEntries(FINE_CUT_SKILLS.map((id) => [id, now[id].filter((clip) => !live.baseline[id].includes(clip)).length])) as Record<FineCutSkill, number>;
+    };
+    const fineCut = (messages.find((m) => m.id === live.messageId)?.metadata as RoughCutReplyMeta | undefined)?.fineCut;
+    const counts = added();
+    if (fineCut?.items.some((item) => item.count !== counts[item.id])) {
+      patchReplyMeta(live.messageId, (meta) => ({ ...meta, fineCut: { state: "running", items: fineCut.items.map((item) => ({ ...item, count: counts[item.id] })) } }));
+    }
+    if (working || (!live.seenBusy && !userStoppedRef.current)) return;
+    // The turn has really ended (nothing streaming, no tool still running or about to continue): a skill
+    // the agent added nothing for is "not needed".
+    const timer = setTimeout(() => {
+      if (fineCutRef.current !== live || statusRef.current === "streaming" || statusRef.current === "submitted") return;
+      const tail = messagesRef.current[messagesRef.current.length - 1];
+      const pendingTool = tail?.role === "assistant" && tail.parts.some((part) => (part.type.startsWith("tool-") || part.type === "dynamic-tool") && ["input-streaming", "input-available"].includes((part as { state?: string }).state ?? ""));
+      if (!userStoppedRef.current && (pendingTool || lastAssistantMessageIsCompleteWithToolCalls({ messages: messagesRef.current }))) return;
+      fineCutRef.current = null;
+      const stopped = userStoppedRef.current || statusRef.current === "error";
+      const final = added();
+      snapshotAfterPatchRef.current = true;
+      patchReplyMeta(live.messageId, (meta) => meta.fineCut ? ({
+        ...meta,
+        fineCut: { state: "done", items: meta.fineCut.items.map((item): FineCutItem => ({ ...item, count: final[item.id], status: final[item.id] ? "done" : stopped ? "stopped" : "not-needed" })) },
+      }) : meta);
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [messages, status, patchReplyMeta, fineCutClips]);
+  // Credits billed after a rough cut ended go to that rough cut's reply.
+  useEffect(() => onLateRoughCutCredits((credits) => {
+    const reply = [...messagesRef.current].reverse().find((m) => m.role === "assistant" && m.parts.some((part) => toolNameOfPart(part) === ROUGH_CUT_TOOL));
+    if (!reply) return;
+    snapshotAfterPatchRef.current = true;
+    patchReplyMeta(reply.id, (meta) => ({ ...meta, lateCredits: Math.round(((meta.lateCredits ?? 0) + credits) * 100) / 100 }));
+  }), [patchReplyMeta]);
+
+  // A next step goes at the end of the message being written, to edit and send.
+  const fillRequest = useCallback((request: string) => {
+    composerRef.current?.insertText(request);
+  }, []);
+
+  // A project made from the Studio home opens with its first message: sent once, when the thread is idle,
+  // as a one-click edit that starts with the rough cut.
   const startSentRef = useRef(false);
   useEffect(() => {
     if (!startPrompt?.trim() || startSentRef.current || status !== "ready") return;
     startSentRef.current = true;
     onStartPromptSent?.();
-    void run(startPrompt);
+    void run(startPrompt, { startTool: ROUGH_CUT_TOOL, hint: ONE_CLICK_EDIT_HINT });
   }, [startPrompt, status, run, onStartPromptSent]);
 
   // A failed stream may already have committed tools. Re-generating the old assistant message
@@ -1059,11 +1145,13 @@ export function ChatThread({
                               </div>
                             </MessageContent>
                           ) : (
-                            <MessageContent key={key}>
-                              <MessageResponse className="text-[13px] leading-relaxed">
-                                {text}
-                              </MessageResponse>
-                            </MessageContent>
+                            splitNextSteps(text).body ? (
+                              <MessageContent key={key}>
+                                <MessageResponse className="text-[13px] leading-relaxed">
+                                  {splitNextSteps(text).body}
+                                </MessageResponse>
+                              </MessageContent>
+                            ) : null
                           );
                         }
                         if (part.type === "file") {
@@ -1110,6 +1198,18 @@ export function ChatThread({
                         // chat, it reads as leaked internals). The thinking phase still shows activity
                         // via the ThinkingDots below — live reasoning counts as "thinking", not output.
                         if (part.type === "reasoning") return null;
+                        if (toolNameOfPart(part) === ROUGH_CUT_TOOL)
+                          return (
+                            <RoughCutCard
+                              key={key}
+                              part={part as { state?: string; output?: unknown; errorText?: string }}
+                              running={busy && isLast && ["input-streaming", "input-available"].includes((part as { state?: string }).state ?? "")}
+                              fineCutLive={fineCutRef.current?.messageId === m.id}
+                              brandName={projectBrand?.name}
+                              meta={m.metadata as RoughCutReplyMeta | undefined}
+                              agentCredits={messageTurnCredits(m)}
+                            />
+                          );
                         if (
                           part.type.startsWith("tool-") ||
                           part.type === "dynamic-tool"
@@ -1177,6 +1277,12 @@ export function ChatThread({
                           </button>
                         </div>
                       )}
+                      {m.role === "assistant" && m.id === messages[messages.length - 1]?.id && !busy && (
+                        <NextSteps
+                          steps={parts.flatMap((part) => (part.type === "text" ? splitNextSteps((part as { text?: string }).text ?? "").steps : [])).slice(0, 3)}
+                          onPick={fillRequest}
+                        />
+                      )}
                       {editorialCapacityShortfall !== null && (
                         <div className="border-line bg-panel-2 text-ink-3 flex items-start gap-2 rounded-md border px-2.5 py-2 text-[12px] leading-relaxed">
                           <Info size={13} className="mt-0.5 shrink-0 text-accent" />
@@ -1239,13 +1345,11 @@ export function ChatThread({
       </Conversation>
 
       <div className="p-2.5 pt-1">
-        {onEditingSkills && (
-          <EditingSkillsBar
-            value={editingSkills ?? []}
-            onChange={onEditingSkills}
-            handoff={handoff ?? []}
-            onAnswer={onAnswerHandoff ?? (() => {})}
-          />
+        {/* An edit is set up on the Studio home; here the conversation asks in words. */}
+        {!!handoff?.length && (
+          <div className="mb-1.5 flex items-center gap-2 px-0.5">
+            <ConfirmPopover handoff={handoff} pending={handoff.filter((item) => item.status === "open").length} onAnswer={onAnswerHandoff ?? (() => {})} />
+          </div>
         )}
         <ConfirmDialog
           open={pendingSkill !== null}
@@ -1270,13 +1374,6 @@ export function ChatThread({
           onDeleteScenarioSkill={onDeleteScenarioSkill}
           onPickSkill={pickSkill}
           projectBrand={projectBrand}
-          // Brands belong to a Skill: the picker shows only while the project is on no Skill or one that
-          // takes brands, and lists that Skill's brands.
-          brands={brands && (skillId === STUDIO_AUTO_SKILL_ID || skillTakesBrand(skillId)) ? {
-            ...brands,
-            list: async () => (await brands.list()).filter((brand) => skillId === STUDIO_AUTO_SKILL_ID || brandSkillOf(brand) === skillId),
-          } : undefined}
-          onProjectBrand={onProjectBrand}
           timelineFramePickActive={timelineFramePickActive}
           timelineFramePickBusy={timelineFramePickBusy}
           timelineFramePickAvailable={timelineFramePickAvailable}

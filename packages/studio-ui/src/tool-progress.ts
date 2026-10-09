@@ -21,6 +21,8 @@ export interface ToolProgress {
   frac?: number;
   /** Blocks this run is producing: the chat card can preview them while generating. */
   blockIds?: string[];
+  /** A structured live report a tool's own card draws (the rough cut's checklist). */
+  report?: unknown;
   /** Per-source progress for a real batch call. The card keeps one batch receipt and renders these as rows. */
   items?: Array<{
     id: string;

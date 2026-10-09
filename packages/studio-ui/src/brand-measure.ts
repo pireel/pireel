@@ -1,7 +1,5 @@
-import { captionBand, type VideoObservation } from '@pireel/studio-engine/brand-analysis';
-import { captionNear, readingWindows } from '@pireel/studio-engine/brand-facts';
-import type { Moment } from '@pireel/studio-engine/brand-reading';
-import { bandColors, inkExtent } from '@pireel/studio-engine/brand-visual';
+import { type VideoObservation } from '@pireel/studio-engine/brand-analysis';
+import { inkExtent } from '@pireel/studio-engine/brand-visual';
 import type { CutPair, VisualSample } from '@pireel/studio-engine/brand-visual';
 import type { FrameGeom } from '@pireel/studio-engine/geometry-math';
 import { detectScenes } from '@pireel/studio-engine/video-edit/scene-detection';
@@ -289,42 +287,87 @@ export async function regionPixels(blob: Blob, box: { x: number; y: number; w: n
   return { data: ctx.getImageData(0, 0, w, h).data, width: w, height: h };
 }
 
+
 /**
- * A caption's colours and where its letters really are: colours inside the OCR box, then the rows the
- * text colour covers in a region a box-height above and below it (OCR boxes are approximate and often
- * short of the glyphs). `ink` is in fractions of the frame's height.
+ * Shot sheets: one row per shot, its frames side by side (a missing time is a grey cell) with the row's
+ * label above, `perSheet` rows a sheet. The frames are decoded in one pass over the video.
  */
-export async function captionLook(blob: Blob, box: { x: number; y: number; w: number; h: number }): Promise<{ color: string; plate: string | null; ink?: { top: number; bottom: number } }> {
-  const colors = bandColors(await pixelsOf(blob, box));
+export async function shotSheets(file: Blob, rows: readonly { label: string; times: readonly (number | null)[] }[], cellWidth: number, perSheet: number): Promise<Blob[]> {
+  const frames = await stills(file, rows.flatMap(row => row.times.filter((t): t is number => t !== null)), cellWidth);
+  const first = [...frames.values()][0];
+  if (!first) return [];
+  const probe = await createImageBitmap(first);
+  const cellHeight = Math.round(cellWidth * probe.height / probe.width); probe.close();
+  const bar = 18; const columns = Math.max(...rows.map(row => row.times.length));
+  const sheets: Blob[] = [];
+  for (let at = 0; at < rows.length; at += perSheet) {
+    const group = rows.slice(at, at + perSheet);
+    const canvas = new OffscreenCanvas(columns * cellWidth, group.length * (cellHeight + bar));
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#141414'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    for (const [index, row] of group.entries()) {
+      const y = index * (cellHeight + bar);
+      ctx.fillStyle = '#ffd400'; ctx.font = 'bold 12px system-ui, sans-serif';
+      ctx.fillText(row.label, 4, y + 13, canvas.width - 8);
+      for (const [column, t] of row.times.entries()) {
+        const blob = t === null ? undefined : frames.get(t);
+        if (!blob) { ctx.fillStyle = '#2a2a2a'; ctx.fillRect(column * cellWidth, y + bar, cellWidth, cellHeight); continue; }
+        const bitmap = await createImageBitmap(blob);
+        ctx.drawImage(bitmap, column * cellWidth, y + bar, cellWidth, cellHeight); bitmap.close();
+      }
+    }
+    sheets.push(await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.82 }));
+  }
+  return sheets;
+}
+
+/**
+ * Where caption letters of a known colour are: the rows that colour covers in a region a box-height above
+ * and below the given box (a model's caption box is approximate), in fractions of the frame's height.
+ * Null when the colour covers nothing like a line of letters there.
+ */
+export async function glyphRows(blob: Blob, box: { x: number; y: number; w: number; h: number }, color: string): Promise<{ top: number; bottom: number } | null> {
   const top = Math.max(0, box.y - box.h); const bottom = Math.min(1, box.y + box.h * 2);
   const region = { x: box.x, y: top, w: box.w, h: bottom - top };
   const { data, width, height } = await regionPixels(blob, region);
-  const ink = inkExtent(data, width, height, colors.color, (box.y + box.h / 2 - top) / region.h);
-  // Letters far taller or shorter than the OCR box saw are something else of the caption's colour.
-  const tall = ink ? (ink.bottom - ink.top) * region.h / box.h : 0;
-  return { ...colors, ...(ink && tall >= 0.6 && tall <= 1.8 ? { ink: { top: top + ink.top * region.h, bottom: top + ink.bottom * region.h } } : {}) };
+  const ink = inkExtent(data, width, height, color, (box.y + box.h / 2 - top) / region.h);
+  if (!ink) return null;
+  const tall = (ink.bottom - ink.top) * region.h / box.h;
+  return tall >= 0.4 && tall <= 2 ? { top: top + ink.top * region.h, bottom: top + ink.bottom * region.h } : null;
+}
+
+/**
+ * The level (RMS, dBFS) of each span of a video's soundtrack, from one pass over its first channel: the
+ * pauses between words against the speech tells whether music runs under it. Null for a span with no audio.
+ */
+export async function spanLevels(file: Blob, spans: readonly (readonly [number, number])[]): Promise<(number | null)[]> {
+  const { ALL_FORMATS, AudioSampleSink, BlobSource, Input } = await import('mediabunny');
+  const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
+  const order = spans.map((span, index) => ({ index, from: span[0], to: span[1] })).sort((a, b) => a.from - b.from);
+  const sum = new Float64Array(spans.length); const count = new Float64Array(spans.length);
+  try {
+    const track = await input.getPrimaryAudioTrack();
+    if (!track) return spans.map(() => null);
+    const t0 = Math.max(0, await input.getFirstTimestamp());
+    let first = 0;
+    for await (const sample of new AudioSampleSink(track).samples()) {
+      const rate = sample.sampleRate; const frames = sample.numberOfFrames;
+      const start = sample.timestamp - t0; const end = start + frames / rate;
+      while (first < order.length && order[first]!.to <= start) first++;
+      if (first >= order.length) { sample.close(); break; }
+      if (order[first]!.from >= end) { sample.close(); continue; }
+      const data = new Float32Array(frames);
+      sample.copyTo(data, { planeIndex: 0, format: 'f32-planar' });
+      sample.close();
+      for (let at = first; at < order.length && order[at]!.from < end; at++) {
+        const span = order[at]!;
+        const a = Math.max(0, Math.floor((span.from - start) * rate)); const b = Math.min(frames, Math.ceil((span.to - start) * rate));
+        for (let i = a; i < b; i++) sum[span.index] += data[i]! * data[i]!;
+        if (b > a) count[span.index] += b - a;
+      }
+    }
+  } finally { await input.dispose(); }
+  return spans.map((_, index) => count[index]! > 0 ? Math.round(10 * Math.log10(Math.max(1e-12, sum[index]! / count[index]!)) * 10) / 10 : null);
 }
 
 export const overlaps = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
-
-/** Caption text and plate colours, measured inside the caption band of the first video that has one. */
-export async function captionColors(measured: MeasuredVideo[]): Promise<{ color: string; plate: string | null } | undefined> {
-  for (const item of measured) {
-    const band = captionBand(item.observation);
-    const entry = band?.items.find(found => item.ocrFrames.has(found.t));
-    if (!entry) continue;
-    return bandColors(await pixelsOf(item.ocrFrames.get(entry.t)!, entry.box));
-  }
-  return undefined;
-}
-
-/** The images one video is read through: an overview grid labelled with the caption read at each time,
- *  and strips over the opening, the ending and each moment. */
-export async function readingStrips(file: Blob, video: VideoObservation, moments: readonly Moment[]): Promise<{ role: string; blob: Blob }[]> {
-  const windows = readingWindows(video.durationSec, moments);
-  const frames = await stills(file, [...windows.overview, ...windows.strips.flatMap(window => window.times)], 270);
-  const near = captionNear(video);
-  const overview = await tile(windows.overview.filter(t => frames.has(t)).map(t => ({ blob: frames.get(t)!, label: `${fmt(t)} ${near(t)}` })), 4, 270);
-  const strips = await Promise.all(windows.strips.map(async window => ({ role: window.role, blob: await tile(window.times.filter(t => frames.has(t)).map(t => ({ blob: frames.get(t)!, label: fmt(t) })), 4, 270) })));
-  return [{ role: 'overview grid', blob: overview }, ...strips];
-}

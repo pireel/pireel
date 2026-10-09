@@ -1,4 +1,4 @@
-import { hasText, renderBrandPrompt, type PlaybookSnapshot } from './brand-playbook';
+import { hasText, renderBrandPrompt, upgradeBlocks, type PlaybookSnapshot } from './brand-playbook';
 import type { AsrSegment } from './build-blocks';
 import { CUT_TRANSITION_EFFECTS, ZOOM_PRESETS, type CutTransitionEffect, type ShotZoom, type ZoomPreset } from './composition-core';
 import type { NarrativeClipPatchUpdate } from './editor-document/commands/types';
@@ -42,11 +42,11 @@ const PUNCH_SCALE: [number, number] = [1.05, 1.8];
 
 /** What of the brand a one-click edit executes. */
 export function playbookEditParams(playbook: PlaybookSnapshot): CaptionEditParams {
-  const b = playbook.blocks;
+  const b = upgradeBlocks(playbook.blocks);
   const params: CaptionEditParams = {};
   if (b.sound?.pauses) params.pause = { ...PAUSE_BY_MODE[b.sound.pauses] };
   if (b.sound?.lufs !== undefined) params.targetLufs = b.sound.lufs;
-  if (hasText(b.visual)) params.moves = { punchIn: true, transition: true };
+  if (hasText(b.camera) || hasText(b.transitions) || hasText(b.layout)) params.moves = { punchIn: true, transition: true };
   if (hasText(b.overlay_text)) params.titles = true;
   return params;
 }
@@ -56,7 +56,7 @@ export function playbookEditParams(playbook: PlaybookSnapshot): CaptionEditParam
 export const playbookHighlightsKeywords = (playbook: PlaybookSnapshot) => !!playbook.blocks.captions?.accent;
 
 /** The brand as the edit planner reads it. */
-export const playbookEditGuide = (playbook: PlaybookSnapshot) => renderBrandPrompt(playbook, ['portrait', 'visual', 'structure', 'sound']);
+export const playbookEditGuide = (playbook: PlaybookSnapshot) => renderBrandPrompt(playbook, ['portrait', 'layout', 'transitions', 'camera', 'pacing', 'structure', 'sound']);
 
 /** The brand as the editing agent reads it: the whole prompt, context for the choices the user leaves open. */
 export const playbookAgentBrief = (playbook: PlaybookSnapshot) => renderBrandPrompt(playbook);

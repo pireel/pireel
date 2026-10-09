@@ -8,6 +8,18 @@ import { loadCurrentUser } from './current-user';
 import { durableFileSig, fileSig, probeVideoFile } from './media';
 import { saveLocalVideo } from './local-media';
 import { cacheProjectLocally, newProjectId, serverSaveProject, serverLoadProject } from './use-draft-persist';
+import { importLocalSource, localAssetIndexEntry } from './local-import-session';
+import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
+
+/** An image's pixel size, for the library card and placement. */
+async function imageSize(file: File): Promise<{ width: number; height: number } | null> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const size = { width: bitmap.width, height: bitmap.height };
+    bitmap.close();
+    return size;
+  } catch { return null; }
+}
 
 /** The first message an Agent project made this way sends once it opens (read once, then removed). */
 const START_PROMPT_KEY = (projectId: string) => `studio:start-prompt:${projectId}`;
@@ -20,21 +32,39 @@ export function takeAgentStartPrompt(projectId: string): string | null {
   } catch { return null; }
 }
 
+/** Where making the project is: each step the Studio home shows, with how far it is when that can be told. */
+export type AgentProjectProgress =
+  | { phase: 'reading' | 'checking' | 'creating' }
+  | { phase: 'storing'; fraction: number }
+  | { phase: 'materials'; done: number; total: number };
+
 /**
- * A new Agent project holding one video, with the brand it is edited with (a copy; null = none), the
- * editing skills it starts with and the first message
- * its agent is asked: the Studio home's way into the agent. Saved like an Agent Remix copy (the video
- * kept on this device and backed up), so the editor opens it with its media.
+ * A new Agent project holding one video and the materials given with it, with the brand it is edited
+ * with (a copy; null = none), the editing skills it starts with and the first message its agent is
+ * asked: the Studio home's way into the agent. Everything here stays on this device (read, fingerprinted,
+ * cached); the editor uploads the media in the background once it opens, so nothing waits on the network.
+ * The materials go to the project's library, for the agent to place.
  */
-export async function createAgentProjectFromVideo(file: File, options: { brand: PlaybookSnapshot | null; skills: readonly string[]; prompt: string; report?: (phase: 'preparing' | 'saving') => void }): Promise<string> {
-  options.report?.('preparing');
+export async function createAgentProjectFromVideo(file: File, options: { brand: PlaybookSnapshot | null; skills: readonly string[]; prompt: string; materials?: readonly File[]; report?: (progress: AgentProjectProgress) => void }): Promise<string> {
+  options.report?.({ phase: 'reading' });
   const [data, user] = await Promise.all([probeVideoFile(file), loadCurrentUser()]);
   if (!user || user.auth_method === 'anon') throw new Error('请先登录。');
   if (![data.durationSec, data.width, data.height].every((value) => Number.isFinite(value) && value > 0)) throw new Error('无法读取视频，请换一个文件。');
+  options.report?.({ phase: 'checking' });
   const sig = studioProviders().sceneProjects ? await durableFileSig(file) : fileSig(file);
-  if (!(await saveLocalVideo(file, sig))) throw new Error('本机空间不足，请清理后重试。');
-  if (studioProviders().sceneProjects && !await studioProviders().vault.backup(file, sig)) throw new Error('视频尚未同步到云端，请重试。');
-  options.report?.('saving');
+  options.report?.({ phase: 'storing', fraction: 0 });
+  if (!(await saveLocalVideo(file, sig, { onProgress: (fraction) => options.report?.({ phase: 'storing', fraction }) }))) throw new Error('本机空间不足，请清理后重试。');
+  const materials: LocalAssetIndexEntry[] = [];
+  const total = options.materials?.length ?? 0;
+  for (const [index, material] of (options.materials ?? []).entries()) {
+    options.report?.({ phase: 'materials', done: index, total });
+    const imported = await importLocalSource({ type: 'browser', file: material });
+    // The editor opens from the device copy; without one the material would not reach it.
+    if (imported.cacheMiss) throw new Error('本机空间不足，请清理后重试。');
+    const size = imported.kind === 'image' ? await imageSize(material) : null;
+    materials.push(localAssetIndexEntry(imported, size ?? undefined));
+  }
+  options.report?.({ phase: 'creating' });
   const id = newProjectId();
   const url = URL.createObjectURL(file);
   try {
@@ -48,6 +78,7 @@ export async function createAgentProjectFromVideo(file: File, options: { brand: 
       asset.label = file.name;
       localAssets.push({ assetId: asset.id, contentSig: sig, sig, label: file.name, kind: asset.kind, w: data.width, h: data.height, durationSec: data.durationSec, size: file.size, mime: file.type, createdAt: Date.now() });
     }
+    localAssets.push(...materials);
     const transactionId = createDocumentTransactionId();
     const payload: ProjectSaveWire = {
       documentSchemaVersion: 2, knownVersion: null,

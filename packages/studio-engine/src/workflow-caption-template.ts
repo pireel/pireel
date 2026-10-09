@@ -57,7 +57,7 @@ export function captionTailSteps(options: CaptionTaskOptions, document: Workflow
   }
   if (options.edit?.titles && options.brand?.blocks.overlay_text?.text?.trim()) {
     // Titles follow the brand's layout prompt; their words, timing, place and look are written for this video.
-    steps.push(sceneStep('titles', 'brand.titles', { transcript, guide: literal(renderBrandPrompt(options.brand, ['portrait', 'overlay_text', 'visual'])), document }));
+    steps.push(sceneStep('titles', 'brand.titles', { transcript, guide: literal(renderBrandPrompt(options.brand, ['portrait', 'overlay_text', 'layout'])), document }));
     steps.push(sceneStep('texts', 'brand.texts', { document, titles: stepOutput('titles', 'titles') }));
     document = stepOutput('texts', 'document');
   }

@@ -4,14 +4,15 @@ import { BRAND_EDITING_SKILL_IDS } from './editing-skills';
 
 /**
  * A creator's brand: one prompt made of XML blocks, produced from their own videos by the extraction
- * method (brand-method.ts) and edited by them. A few blocks are fixed — captions, logo, colours, sound,
- * intro and outro, and the overlay-text font — and carry exact values the engine applies as they are. Every other block is
- * prose for the models that edit and generate: how titles and layout look, how the creator uses the
- * platform's editing moves, what their motion graphics look like, how their videos are built, and their
- * cover. The platform's moves (punch-ins, transitions, B-roll, sound effects, motion graphics) are not
- * listed here: they are capabilities every brand has, and a block only says how this creator uses them.
+ * method (brand-extract.ts) and edited by them, for the agent that edits their new videos. Fixed blocks
+ * carry exact values the engine applies as they are: captions, the on-screen text font, the logo,
+ * loudness and pause trimming. The rest is the creator's toolkit, one block per technique — picture
+ * layout, transitions, camera moves, graphics, illustrations and memes, footage sources, pacing,
+ * structure, sound — each saying whether it is used, how much in relation to the content, and what it
+ * looks like, with reference stills; then their reusable assets, a portrait and the cover. Where in a new
+ * video each technique goes is the editing agent's call.
  */
-export const PLAYBOOK_SCHEMA = 2;
+export const PLAYBOOK_SCHEMA = 3;
 
 export type BrandPlatform = 'douyin' | 'tiktok' | 'youtube' | 'bilibili' | 'xiaohongshu' | 'upload';
 export type Confidence = 'high' | 'medium' | 'low';
@@ -26,12 +27,16 @@ export interface Evidence { videos: string[]; frames?: { video: string; sec: num
 /** A block's prose, in the creator's language, as the models read it. */
 export interface Prose { text?: string; evidence?: Evidence }
 
-/** The cover prompt, in two parts: `frame` says which still of the new video to pick, `design` how that
- *  still becomes the cover — its headline (how it is worded and lettered) among the rest. */
+/** The cover prompt: `frame` describes a base picture or subject reference from the new video;
+ *  `design` first chooses image generation or still plus text, then describes the composition and headline. */
 export interface BrandCover {
   frame?: string; design?: string;
   evidence?: Evidence;
 }
+
+/** One technique of the creator's toolkit: whether it is used, its degree as its relation to the content,
+ *  and what it looks like, in prose, with reference stills. */
+export type Technique = Prose & { references?: BrandAsset[] };
 
 /** The blocks, in the order the prompt renders them. */
 export interface BrandBlocks {
@@ -39,28 +44,38 @@ export interface BrandBlocks {
   portrait?: Prose;
   /** Fixed: burned-in captions (look applied by the engine; prose for what the values cannot say). */
   captions?: Prose & { on: boolean; style?: Partial<CaptionStyle>; accent?: 'keywords' | 'numbers' | 'current_word' | null };
+  /** On-screen text besides captions — titles, labels, emphasis words, cards. Fixed: its font (`fontLike`
+   *  names the original face). Prose: the technique, with reference stills. */
+  overlay_text?: Technique & { font?: string; fontLike?: string };
   /** Fixed: a mark held in one corner. */
   logo?: BrandAsset & { corner: Corner; widthPct: number; opacity: number; evidence?: Evidence };
-  /** Overlay text (花字): the words the creator puts on screen besides captions — titles, labels, emphasis
-   *  words, text in graphics. Fixed: its font (the closest face the platform has; `fontLike` names the
-   *  original). Prose: how it looks and moves and when it is used, with reference stills. */
-  overlay_text?: Prose & { font?: string; fontLike?: string; references?: BrandAsset[] };
-  /** Fixed: loudness and pause trimming. */
-  sound?: { lufs?: number; pauses?: 'tight' | 'moderate' | 'natural'; evidence?: Evidence };
-  /** The visual language: how the picture is organised and changes — where the speaker sits, bands and
-   *  frames, picture in picture, split screens — and how the creator uses the platform's moves on it. */
-  visual?: Prose & { references?: BrandAsset[] };
-  /** Motion graphics, ready-made components among them: their style in prose — how colours and type are
-   *  chosen for a video's picture and topic, never values — with reference stills. */
-  graphics?: Prose & { references?: BrandAsset[] };
+  /** Fixed: loudness and pause trimming. Prose: music and sound effects. */
+  sound?: Prose & { lufs?: number; pauses?: 'tight' | 'moderate' | 'natural' };
+  /** Where the speaker sits and how other pictures share the frame: full screen, picture in picture, split screens, cards beside the speaker. */
+  layout?: Technique;
+  /** How shots meet: hard cuts, dissolves, flashes, wipes, and where they are used. */
+  transitions?: Technique;
+  /** Movement on the picture: jump cuts between framings, punch-ins, push-ins, pans, 3D camera moves. */
+  camera?: Technique;
+  /** Graphics: motion graphics, generated pictures, screenshots — which the creator uses and how they look (colours and type chosen per video, never fixed values). */
+  graphics?: Technique;
+  /** Illustrations, characters, memes and reaction pictures. */
+  illustrations?: Technique;
+  /** Where the pictures come from: own footage, news footage, screenshots and documents, stock, generated. */
+  footage?: Technique;
+  /** How fast the video moves: shot lengths, how speech and pictures keep pace. */
+  pacing?: Prose;
   /** How a video opens, unfolds and closes. */
   structure?: Prose;
-  /** The cover for a new video, as its own prompt in two parts — which still of the video to build on, and
-   *  how that still becomes the cover. */
+  /** Reusable pieces of the creator's videos (end cards, recurring characters, templates), described with stills. */
+  assets?: Technique;
+  /** The cover's production approach and design prompt, with a frame-selection rule for its base or reference. */
   cover?: BrandCover;
 }
 export type BlockId = keyof BrandBlocks;
-export const BLOCK_IDS: readonly BlockId[] = ['portrait', 'captions', 'overlay_text', 'logo', 'sound', 'visual', 'graphics', 'structure', 'cover'];
+export const BLOCK_IDS: readonly BlockId[] = ['portrait', 'captions', 'overlay_text', 'logo', 'sound', 'layout', 'transitions', 'camera', 'graphics', 'illustrations', 'footage', 'pacing', 'structure', 'assets', 'cover'];
+/** The technique blocks (prose with reference stills). */
+export const TECHNIQUE_BLOCKS = ['layout', 'transitions', 'camera', 'graphics', 'illustrations', 'footage', 'assets'] as const;
 /** Blocks whose values the engine applies as they are. */
 export const FIXED_BLOCKS: readonly BlockId[] = ['captions', 'logo', 'sound'];
 
@@ -87,6 +102,8 @@ export interface BrandPlaybook {
   skills?: string[];
   /** The Studio Skill (kind of video) this brand is a style of; read through brandSkillOf. */
   skillId?: string;
+  /** What the brand rests on and what it cannot say, for the creator (never part of the prompt). */
+  notes?: { evidence?: string; gaps?: string[] };
 }
 
 /** The Studio Skills a brand can belong to: only talking-head videos for now. A project on any other
@@ -136,7 +153,7 @@ function element(tag: string, attrs: Record<string, string | number | boolean | 
  * travel separately; a block says how many it has. Deterministic, so a prompt prefix stays cacheable.
  */
 export function renderBrandPrompt(playbook: Pick<BrandPlaybook, 'name' | 'blocks'>, only?: readonly BlockId[]): string {
-  const b = playbook.blocks;
+  const b = upgradeBlocks(playbook.blocks);
   const want = (id: BlockId) => (!only || only.includes(id)) && b[id] !== undefined;
   const refs = (list: BrandAsset[] | undefined) => list?.length ? list.length : undefined;
   const parts: string[] = [];
@@ -144,20 +161,21 @@ export function renderBrandPrompt(playbook: Pick<BrandPlaybook, 'name' | 'blocks
   if (want('captions')) {
     const c = b.captions!; const s = c.style ?? {};
     // Size as the engine draws it: font px on a frame 1080 wide.
-    parts.push(element('captions', c.on ? { on: true, font: s.font, size: s.scale !== undefined ? `${Math.round(s.scale * BASE_CAPTION_FONT_PX)}px on a 1080-wide frame` : undefined, color: s.color, stroke: s.strokeColor, plate: s.bg, bold: s.bold, accent: c.accent ?? undefined, 'accent-color': s.accentColor, 'bottom-edge': s.yPct !== undefined ? `${s.yPct}% from top` : undefined } : { on: false }, c.text));
+    parts.push(element('captions', c.on ? { on: true, preset: s.preset, font: s.font, size: s.scale !== undefined ? `${Math.round(s.scale * BASE_CAPTION_FONT_PX)}px on a 1080-wide frame` : undefined, color: s.color, stroke: s.strokeColor, plate: s.bg, bold: s.bold, animation: s.animation, accent: c.accent ?? undefined, 'accent-color': s.emphasis ?? s.accentColor, 'bottom-edge': s.yPct !== undefined ? `${s.yPct}% from top` : undefined } : { on: false }, c.text));
   }
   if (want('overlay_text')) parts.push(element('overlay_text', { font: b.overlay_text!.font, like: b.overlay_text!.fontLike, references: refs(b.overlay_text!.references) }, b.overlay_text!.text));
   if (want('logo')) parts.push(element('logo', { corner: b.logo!.corner, width: `${b.logo!.widthPct}%`, opacity: b.logo!.opacity }));
-  if (want('sound')) parts.push(element('sound', { loudness: b.sound!.lufs !== undefined ? `${b.sound!.lufs} LUFS` : undefined, pauses: b.sound!.pauses }));
-  if (want('visual')) parts.push(element('visual', { references: refs(b.visual!.references) }, b.visual!.text));
-  if (want('graphics')) parts.push(element('graphics', { references: refs(b.graphics!.references) }, b.graphics!.text));
-  if (want('structure')) parts.push(element('structure', {}, b.structure!.text));
+  if (want('sound')) parts.push(element('sound', { loudness: b.sound!.lufs !== undefined ? `${b.sound!.lufs} LUFS` : undefined, pauses: b.sound!.pauses }, b.sound!.text));
+  for (const id of ['layout', 'transitions', 'camera', 'graphics', 'illustrations', 'footage'] as const) {
+    if (want(id)) parts.push(element(id, { references: refs(b[id]!.references) }, b[id]!.text));
+  }
+  for (const id of ['pacing', 'structure'] as const) if (want(id)) parts.push(element(id, {}, b[id]!.text));
+  if (want('assets')) parts.push(element('assets', { references: refs(b.assets!.references) }, b.assets!.text));
   if (want('cover')) parts.push(coverElement(b.cover!));
   return `<brand name="${escapeAttr(playbook.name)}">\n${parts.join('\n')}\n</brand>`;
 }
 
-/** <cover> holds its parts as child elements: <frame> (which still of the new video) and <design> (how the
- *  still becomes the cover, headline included). */
+/** <cover> holds <frame> (base picture or subject reference) and <design> (production approach and prompt). */
 function coverElement(cover: BrandCover): string {
   const inner = (['frame', 'design'] as const).flatMap(part => cover[part]?.trim() ? [element(part, {}, cover[part])] : []).join('\n');
   return inner ? `<cover>\n${inner}\n</cover>` : '<cover/>';
@@ -191,8 +209,25 @@ function references(value: unknown, path: string) {
 }
 function color(value: unknown, path: string) { if (value !== undefined && value !== null && (typeof value !== 'string' || !HEX.test(value))) fail(path, '需要 #RRGGBB'); }
 
+/**
+ * Blocks of a brand made before the toolkit split (schema 2): its `visual` prose — the picture's
+ * organisation and moves — becomes the layout technique. Anything else carries over as it is.
+ */
+export function upgradeBlocks(blocks: BrandBlocks): BrandBlocks {
+  const legacy = blocks as BrandBlocks & { visual?: Technique };
+  if (!legacy.visual) return blocks;
+  const { visual, ...rest } = legacy;
+  return { ...rest, ...(rest.layout ? {} : { layout: visual }) };
+}
+
+/** A brand as the current schema reads it: one stored under schema 2 comes back upgraded (a copy). */
+export function upgradePlaybook<T extends { schema?: number; blocks?: BrandBlocks }>(value: T): T {
+  if (!isObject(value) || value.schema !== 2) return value;
+  return { ...value, schema: PLAYBOOK_SCHEMA, blocks: upgradeBlocks(value.blocks ?? {}) };
+}
+
 export function validatePlaybook(value: unknown): BrandPlaybook {
-  const p = value as BrandPlaybook;
+  const p = upgradePlaybook(value as BrandPlaybook);
   if (!isObject(value)) fail('', '不是对象');
   if (p.schema !== PLAYBOOK_SCHEMA) fail('schema', `需要 ${PLAYBOOK_SCHEMA}`);
   if (typeof p.id !== 'string' || !p.id) fail('id', '缺失');
@@ -206,9 +241,8 @@ export function validatePlaybook(value: unknown): BrandPlaybook {
   if (!isObject(p.blocks)) fail('blocks', '缺失');
   const b = p.blocks;
   for (const key of Object.keys(b)) if (!BLOCK_IDS.includes(key as BlockId)) fail(`blocks.${key}`, '未知的块');
-  for (const id of ['portrait', 'visual', 'structure'] as const) if (b[id]) prose(b[id], `blocks.${id}`);
-  if (b.visual) references(b.visual.references, 'blocks.visual.references');
-  if (b.graphics) { prose(b.graphics, 'blocks.graphics'); references(b.graphics.references, 'blocks.graphics.references'); }
+  for (const id of ['portrait', 'pacing', 'structure'] as const) if (b[id]) prose(b[id], `blocks.${id}`);
+  for (const id of TECHNIQUE_BLOCKS) if (b[id]) { prose(b[id], `blocks.${id}`); references(b[id]!.references, `blocks.${id}.references`); }
   if (b.cover) {
     if (!isObject(b.cover)) fail('blocks.cover', '需要对象');
     for (const key of ['frame', 'design'] as const) if (b.cover[key] !== undefined && (typeof b.cover[key] !== 'string' || b.cover[key]!.length > MAX_TEXT)) fail(`blocks.cover.${key}`, `最多 ${MAX_TEXT} 字`);
@@ -216,7 +250,9 @@ export function validatePlaybook(value: unknown): BrandPlaybook {
   if (b.captions) {
     prose(b.captions, 'blocks.captions');
     if (typeof b.captions.on !== 'boolean') fail('blocks.captions.on', '布尔');
-    for (const key of ['color', 'accentColor', 'strokeColor', 'bg'] as const) color(b.captions.style?.[key], `blocks.captions.style.${key}`);
+    for (const key of ['color', 'accentColor', 'strokeColor', 'emphasis'] as const) color(b.captions.style?.[key], `blocks.captions.style.${key}`);
+    const bg = b.captions.style?.bg;
+    if (bg !== undefined && bg !== null && (typeof bg !== 'string' || !/^(#[0-9a-f]{6}|rgba?\([\d.,\s]+\))$/i.test(bg))) fail('blocks.captions.style.bg', '#RRGGBB 或 rgba()');
   }
   if (b.logo) {
     asset(b.logo, 'blocks.logo');
@@ -230,15 +266,21 @@ export function validatePlaybook(value: unknown): BrandPlaybook {
     references(b.overlay_text.references, 'blocks.overlay_text.references');
   }
   if (b.sound) {
+    prose(b.sound, 'blocks.sound');
     if (b.sound.lufs !== undefined && !(b.sound.lufs >= -40 && b.sound.lufs <= -5)) fail('blocks.sound.lufs', '-40…-5');
     if (b.sound.pauses !== undefined && !['tight', 'moderate', 'natural'].includes(b.sound.pauses)) fail('blocks.sound.pauses', 'tight/moderate/natural');
   }
 
+  if (p.notes !== undefined) {
+    if (!isObject(p.notes)) fail('notes', '需要对象');
+    if (p.notes.evidence !== undefined && (typeof p.notes.evidence !== 'string' || p.notes.evidence.length > MAX_TEXT)) fail('notes.evidence', `最多 ${MAX_TEXT} 字`);
+    if (p.notes.gaps !== undefined && (!Array.isArray(p.notes.gaps) || p.notes.gaps.length > 20 || p.notes.gaps.some(gap => typeof gap !== 'string' || gap.length > 600))) fail('notes.gaps', '最多 20 条');
+  }
   return p;
 }
 
 /** A scene's copy: the same shape without the source list. */
 export function validatePlaybookSnapshot(value: unknown): PlaybookSnapshot {
-  validatePlaybook({ ...(value as object), source: { platform: 'upload', videos: [] } });
-  return value as PlaybookSnapshot;
+  const { source: _source, ...snapshot } = validatePlaybook({ ...(value as object), source: { platform: 'upload', videos: [] } });
+  return snapshot;
 }

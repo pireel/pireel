@@ -138,12 +138,16 @@ export interface StudioChatProps {
    *  and how a pick in the chat is written back to the project. */
   projectSkillId?: string;
   onProjectSkill?: (skillId: string) => void;
-  brands?: { list: () => Promise<PlaybookSnapshot[]>; manage?: () => void };
-  onProjectBrand?: (brand: PlaybookSnapshot | null) => void;
   /** A first message to send once on opening (a project made from the Studio home), and the call that
    *  marks it sent so it is never sent again. */
   startPrompt?: string | null;
   onStartPromptSent?: () => void;
+  /** The project's clips per fine-cut skill now: a one-click edit's card counts what the agent adds
+   *  after the rough cut. */
+  fineCutClips?: () => Record<import("./first-pass").FineCutSkill, string[]>;
+  /** The project has been edited (cut, captioned, anything placed): its brand is fixed and the editing
+   *  skills become tag shortcuts for a message instead of switches. */
+  projectEdited?: boolean;
   /** Editing skills switched on for this project, and how to change them (the row above the composer). */
   editingSkills?: readonly string[];
   onEditingSkills?: (ids: string[]) => void;
@@ -186,11 +190,11 @@ export const StudioChat = memo(
       getComp,
       startPrompt,
       onStartPromptSent,
+      fineCutClips,
+      projectEdited,
       projectBrand,
       projectSkillId,
       onProjectSkill,
-      brands,
-      onProjectBrand,
       editingSkills,
       onEditingSkills,
       handoff,
@@ -460,11 +464,11 @@ export const StudioChat = memo(
           getComp={getComp}
           startPrompt={startPrompt}
           onStartPromptSent={onStartPromptSent}
+          fineCutClips={fineCutClips}
+          projectEdited={projectEdited}
           projectBrand={projectBrand}
           projectSkillId={projectSkillId}
           onProjectSkill={onProjectSkill}
-          brands={brands}
-          onProjectBrand={onProjectBrand}
           editingSkills={editingSkills}
           onEditingSkills={onEditingSkills}
           handoff={handoff}

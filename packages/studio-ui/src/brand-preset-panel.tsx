@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Check, ChevronDown, Minus } from 'lucide-react';
 import type { CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
-import { hasText, type PlaybookSnapshot } from '@pireel/studio-engine/brand-playbook';
+import { hasText, type PlaybookSnapshot, upgradeBlocks } from '@pireel/studio-engine/brand-playbook';
 import { playbookEditParams, type CaptionEditParams } from '@pireel/studio-engine/brand-edit-params';
 import { SCENE_TARGET_LUFS } from '@pireel/studio-engine/loudness-lufs';
 import { imageThumb } from '@pireel/ui/image-url';
@@ -27,7 +27,8 @@ export function BrandPresetPanel({ options, locale, disabled, onChange, captionS
 }) {
   const say = (zh: string, en: string) => locale === 'zh' ? zh : en;
   const [styleOpen, setStyleOpen] = useState(false);
-  const blocks = options.brand?.blocks;
+  // A scene keeps the copy taken when it was set up; one made before the toolkit split reads upgraded.
+  const blocks = options.brand ? upgradeBlocks(options.brand.blocks) : undefined;
   const edit: CaptionEditParams = options.edit ?? {};
   // What the brand itself says; a switch turned back on returns to it.
   const fromBrand: CaptionEditParams = options.brand ? playbookEditParams(options.brand) : {};
@@ -63,9 +64,9 @@ export function BrandPresetPanel({ options, locale, disabled, onChange, captionS
     <div className="border-line mt-4 space-y-3 border-t pt-4">
       <div><h3 className="text-ink-3 text-xs font-medium">{say('按品牌写给这条视频', 'Written for this video from the brand')}</h3>
         <p className="text-ink-4 mt-0.5 text-[11px] leading-relaxed">{say('AI 读品牌的描述，结合这条视频的内容逐处决定。', 'AI reads the brand’s description and decides moment by moment for this video.')}</p></div>
-      {hasText(blocks?.visual)
-        ? <SceneCheckbox label={say('推近和转场', 'Punch-ins and transitions')} checked={!!(edit.moves?.punchIn || edit.moves?.transition)} disabled={disabled} onChange={on => patchEdit({ moves: on ? { punchIn: true, transition: true } : undefined })} description={gist(blocks!.visual!.text)} />
-        : <p className="text-ink-4 text-xs">{say('推近和转场：品牌里没有画面描述', 'Punch-ins and transitions: the brand has no visual-language description')}</p>}
+      {hasText(blocks?.camera) || hasText(blocks?.transitions)
+        ? <SceneCheckbox label={say('推近和转场', 'Punch-ins and transitions')} checked={!!(edit.moves?.punchIn || edit.moves?.transition)} disabled={disabled} onChange={on => patchEdit({ moves: on ? { punchIn: true, transition: true } : undefined })} description={gist(blocks!.camera?.text || blocks!.transitions!.text)} />
+        : <p className="text-ink-4 text-xs">{say('推近和转场：品牌里没有镜头运动和转场的描述', 'Punch-ins and transitions: the brand describes no camera moves or transitions')}</p>}
       {hasText(blocks?.overlay_text)
         ? <SceneCheckbox label={say('标题与标签', 'Titles and labels')} checked={!!edit.titles} disabled={disabled} onChange={on => patchEdit({ titles: on || undefined })} description={gist(blocks!.overlay_text!.text)} />
         : <p className="text-ink-4 text-xs">{say('标题与标签：品牌里没有花字描述', 'Titles and labels: the brand has no overlay-text description')}</p>}

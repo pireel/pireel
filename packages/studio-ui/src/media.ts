@@ -169,8 +169,26 @@ export async function probeVideoFile(file: File): Promise<ProbedFile> {
   }
 }
 
-/** Extract audio (upload audio only) → ASR → sentence-level shots. Cached by fileSig (same clip transcribed once). */
-export async function transcribeFile(file: File, opts?: { projectId?: string; sceneRun?: string; signal?: AbortSignal; onUsage?: (usage: import('@pireel/studio-engine/workflow').WorkflowUsage) => void; onPhase?: (phase: 'checking' | 'extracting' | 'uploading' | 'recognizing' | 'aligning') => void }): Promise<AsrSegment[]> {
+type TranscribeOptions = { projectId?: string; sceneRun?: string; signal?: AbortSignal; onUsage?: (usage: import('@pireel/studio-engine/workflow').WorkflowUsage) => void; onPhase?: (phase: 'checking' | 'extracting' | 'uploading' | 'recognizing' | 'aligning') => void };
+
+/** Transcriptions under way, by file: a caller that stopped waiting leaves its request running, and
+ *  asking again meanwhile joins it instead of paying for the same audio twice. */
+const transcribing = new Map<string, Promise<AsrSegment[]>>();
+
+/** Extract audio (upload audio only) → ASR → sentence-level shots. Cached by fileSig (same clip transcribed
+ *  once); a second call while the first runs joins it (its usage is reported to the first caller only).
+ *  Calls with their own abort signal or scene run stay separate: they can be cancelled or billed apart. */
+export function transcribeFile(file: File, opts?: TranscribeOptions): Promise<AsrSegment[]> {
+  if (opts?.signal || opts?.sceneRun) return transcribeFileOnce(file, opts);
+  const sig = fileSig(file);
+  const running = transcribing.get(sig);
+  if (running) return running;
+  const started = transcribeFileOnce(file, opts).finally(() => transcribing.delete(sig));
+  transcribing.set(sig, started);
+  return started;
+}
+
+async function transcribeFileOnce(file: File, opts?: TranscribeOptions): Promise<AsrSegment[]> {
   const phase = (value: 'checking' | 'extracting' | 'uploading' | 'recognizing' | 'aligning') => { opts?.signal?.throwIfAborted(); opts?.onPhase?.(value); };
   phase('checking');
   const sig = fileSig(file);

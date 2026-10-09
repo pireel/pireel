@@ -71,7 +71,8 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   { id: 'manage_clip_links', group: 'clips' },
   { id: 'add_transition', group: 'clips', skillContract: { version: 1, stability: 'stable' } },
   { id: 'set_canvas', group: 'clips', skillContract: { version: 1, stability: 'stable' } },
-  // ---- speech (4)
+  // ---- speech (5)
+  { id: 'rough_cut', group: 'speech', charges: true },
   { id: 'remove_silence', group: 'speech', skillContract: { version: 1, stability: 'stable' } },
   { id: 'remove_words', group: 'speech', skillContract: { version: 1, stability: 'stable' } },
   { id: 'mask_words', group: 'speech', skillContract: { version: 1, stability: 'stable' } },
