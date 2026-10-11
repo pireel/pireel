@@ -14,6 +14,7 @@ import { studioProviders } from '@pireel/studio-engine/providers';
 import { imageThumb } from '@pireel/ui/image-url';
 import { t } from './i18n';
 import { resolveEditingRunConfig, type EditingRunConfig } from '@pireel/studio-engine/editing-run-config';
+import { phraseWordIndexes, rowWords } from '@pireel/studio-engine/caption-highlights';
 
 /**
  * The first pass of an Agent project made from the Studio home: the fixed clean-up a talking-head edit
@@ -41,6 +42,8 @@ export interface FirstPassReport {
   /** Credits spent so far. */
   credits: number;
   sourceAssetId?: string;
+  /** Selected phrases survive retries; failed application never requires another paid selection. */
+  captionHighlights?: { assetId: string; mode: 'keywords' | 'numbers'; signature: string; items: { index: number; text: string }[]; applied: boolean }[];
   /** Checkpoints inside cleanup prevent paid analysis and applied cuts being repeated on resume. */
   cleanup?: { analysis?: Awaited<ReturnType<NonNullable<ReturnType<typeof studioProviders>['speechCleanup']>>>; applied: string[] };
   /** One sentence on what changed, once done. */
@@ -85,6 +88,7 @@ export function documentIsEdited(document: EditorDocumentV2): boolean {
 
 export interface FirstPassToolResult { ok: boolean; summary?: string; error?: string; data?: unknown }
 export interface FirstPassHost {
+  projectId?: string;
   document(): EditorDocumentV2;
   brand: PlaybookSnapshot | null;
   skills: readonly string[];
@@ -162,6 +166,7 @@ export async function runFirstPass(host: FirstPassHost, onUpdate: (report: First
   if (options.resume) {
     report.credits = options.resume.credits;
     report.cleanup = structuredClone(options.resume.cleanup);
+    report.captionHighlights = structuredClone(options.resume.captionHighlights);
     for (const previous of options.resume.steps) {
       if (previous.status === 'done' || previous.status === 'skipped') {
         Object.assign(report.steps.find(item => item.id === previous.id)!, previous);
@@ -322,10 +327,57 @@ export async function runFirstPass(host: FirstPassHost, onUpdate: (report: First
   });
 
   await attempt('captions', async () => {
-    const style = captionBlock?.on ? { ...(captionBlock.style ?? {}) } : {};
+    const accent = captionBlock?.on ? captionBlock.accent : null;
+    const style = captionBlock?.on ? { ...(captionBlock.style ?? {}), ...(accent === 'current_word' ? { animation: 'karaoke' as const } : {}) } : {};
     checkpoint();
     await host.applyCaptionPreset(style.preset ?? DEFAULT_CAPTION_PRESET, style);
     if (!host.captionsOn()) throw new Error(t('chatGen.firstPass.captionsFailed'));
+    if (accent === 'keywords' || accent === 'numbers') {
+      const highlight = studioProviders().autoHighlight;
+      if (!highlight) throw new Error(t('captions.autoHighlightUnavailable'));
+      const document = host.document();
+      const sources = new Map<string, { start: number; end: number }[]>();
+      for (const track of document.timeline.tracks) {
+        if (track.hidden || track.id !== document.semantics.primaryNarrativeTrackId && track.role !== 'narration') continue;
+        for (const clip of track.clips) {
+          if (!clip.enabled || !('assetId' in clip) || !('sourceInSec' in clip)) continue;
+          const ranges = sources.get(clip.assetId) ?? [];
+          ranges.push({ start: clip.sourceInSec ?? 0, end: clip.sourceOutSec ?? Infinity });
+          sources.set(clip.assetId, ranges);
+        }
+      }
+      let inspectedRows = 0;
+      for (const [assetId, ranges] of sources) {
+        const rows = (document.semantics.transcripts[assetId] ?? []).flatMap((segment, index) => segment.text.trim() && ranges.some(range => segment.start < range.end && segment.end > range.start) ? [{ index, text: segment.text }] : []);
+        inspectedRows += rows.length;
+        for (let offset = 0; offset < rows.length; offset += 100) {
+          const batch = rows.slice(offset, offset + 100), signature = JSON.stringify(batch);
+          let saved = report.captionHighlights?.find(item => item.assetId === assetId && item.mode === accent && item.signature === signature);
+          if (!saved) {
+            const items = await abortable(highlight(batch, { signal: options.signal, onUsage: addUsage, highlightMode: accent, projectId: host.projectId }));
+            checkpoint();
+            saved = { assetId, mode: accent, signature, items, applied: false };
+            (report.captionHighlights ??= []).push(saved);
+            publish();
+          }
+          if (!saved.applied) {
+            if (saved.items.length) await toolOk('set_captions', { highlights: { assetId, items: saved.items, color: 'style' } });
+            const segments = host.document().semantics.transcripts[assetId];
+            if (saved.items.some(item => {
+              const segment = segments?.[item.index];
+              const words = segment ? phraseWordIndexes(rowWords(segment), item.text) : null;
+              return !words?.length || words.some(word => segment!.wordDecorations?.[String(word)]?.highlight !== 'color');
+            })) throw new Error(t('captions.autoHighlightNotApplied'));
+            saved.applied = true;
+            publish();
+          }
+        }
+      }
+      if (!inspectedRows) throw new Error(t('chatGen.firstPass.waitingTranscript'));
+      const count = report.captionHighlights?.filter(item => item.applied).reduce((n, item) => n + item.items.length, 0) ?? 0;
+      done.push(`caption emphasis applied to ${count} phrases; this is selective word coloring, not headline graphics or karaoke`);
+      return t('captions.autoHighlightDone', { n: count });
+    }
     done.push(captionBlock?.on ? 'captions on in the brand caption style' : 'captions on in the default style');
     return t(captionBlock?.on ? 'chatGen.firstPass.captionsBrand' : 'chatGen.firstPass.captionsDefault');
   });

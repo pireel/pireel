@@ -21,6 +21,9 @@ import type { AssetSearchDocument } from './asset-search';
 /** One block-generation request (the same shape the BYO brief is assembled from). */
 export interface StudioOperationOptions {
   signal?: AbortSignal; onUsage?: (usage: import('./workflow').WorkflowUsage) => void;
+  /** Selective caption coloring; separate from active-word animations and headline graphics. */
+  highlightMode?: 'keywords' | 'numbers';
+  projectId?: string;
   /** The fixed-price scene run this call belongs to: the host bills the run, not the call. */
   sceneRun?: string;
 }

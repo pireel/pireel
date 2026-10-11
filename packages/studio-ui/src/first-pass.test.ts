@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { assembleBlockHtml } from '@pireel/studio-engine/assemble';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { runServerTool } from '@pireel/studio-engine/server-tools';
+import { STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION } from '@pireel/studio-engine/project-dto';
 import { compositionToEditorDocument, emptyComposition, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import { firstNarrativeAssetId } from '@pireel/studio-engine/editor-document/read-model';
 import { setStudioProviders, studioProviders, unavailableProviders } from '@pireel/studio-engine/providers';
@@ -42,6 +45,77 @@ const original = studioProviders();
 afterEach(() => setStudioProviders(original));
 
 describe('first pass', () => {
+  function captionHost(accent: 'keywords' | 'numbers' | 'current_word' | null) {
+    const h = host({ skills: ['captions'], brand: { name: 'Brand', blocks: { captions: { on: true, accent, style: { preset: 'style-documentary', emphasis: '#FFB400', animation: 'none' } } } } as PlaybookSnapshot });
+    const assetId = firstNarrativeAssetId(h.value.document())!;
+    h.value.document().semantics.transcripts[assetId] = [{ start: 0, end: 3, text: '极客时间售价1999元' }];
+    h.value.tool = async (name, args) => {
+      h.calls.push([name, args]);
+      const result = runServerTool(name, args, { id: 'p-test', title: 'Test', comp: emptyComposition(), document: h.value.document(), context: { schemaVersion: STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION }, videoDurationSec: 10 });
+      if (result.document) h.value.replaceDocument(result.document);
+      return result.result;
+    };
+    h.value.applyCaptionPreset = async (preset, style) => { const { emphasis, ...rest } = style; const result = await h.value.tool('set_captions', { on: true, preset, ...rest, ...(emphasis ? { highlightColor: emphasis } : {}) }); if (!result.ok) throw Error(result.error); };
+    return { ...h, assetId };
+  }
+  it('actually applies enabled brand word emphasis without replacing its subtitle look', async () => {
+    const highlight = vi.fn(async () => [{ index: 0, text: '极客时间' }, { index: 0, text: '1999元' }]);
+    setStudioProviders({ ...unavailableProviders(), autoHighlight: highlight });
+    const { value, assetId } = captionHost('keywords');
+    const { report } = await runFirstPass(value, () => {}, { steps: ['captions'] });
+    expect(report.steps.find(step => step.id === 'captions')?.status).toBe('done');
+    expect(highlight).toHaveBeenCalledWith([{ index: 0, text: '极客时间售价1999元' }], expect.objectContaining({ highlightMode: 'keywords' }));
+    expect(value.document().appearance.captionStyle).toMatchObject({ preset: 'style-documentary', emphasis: '#FFB400', animation: 'none' });
+    expect(Object.values(value.document().semantics.transcripts[assetId][0].wordDecorations ?? {}).filter(word => word.highlight === 'color').length).toBeGreaterThan(0);
+    expect(report.captionHighlights?.[0]).toMatchObject({ applied: true, items: [{ index: 0, text: '极客时间' }, { index: 0, text: '1999元' }] });
+    const rendered = value.document().timeline.tracks.flatMap(track => track.clips).filter(clip => clip.kind === 'caption').map(clip => assembleBlockHtml({ ...clip.block, id: clip.id, startSec: 0, durationSec: 3, trackIndex: 1 }, { ...emptyComposition(), captionStyle: value.document().appearance.captionStyle }).html).join('');
+    expect(rendered).toContain('word-color');
+    expect(rendered).toContain('--word-highlight:#FFB400');
+  });
+  it('does not claim emphasis is complete when a tool returns success without applying it', async () => {
+    setStudioProviders({ ...unavailableProviders(), autoHighlight: async () => [{ index: 0, text: '1999元' }] });
+    const { value } = captionHost('keywords');
+    const tool = value.tool;
+    value.tool = async (name, args) => args.highlights ? { ok: true } : tool(name, args);
+    const { report } = await runFirstPass(value, () => {}, { steps: ['captions'] });
+    expect(report.steps.find(step => step.id === 'captions')?.status).toBe('failed');
+    expect(report.captionHighlights?.[0].applied).toBe(false);
+  });
+  it('reuses paid selections after a failed application instead of reselecting on resume', async () => {
+    const highlight = vi.fn(async () => [{ index: 0, text: '1999元' }]);
+    setStudioProviders({ ...unavailableProviders(), autoHighlight: highlight });
+    const { value } = captionHost('keywords');
+    const tool = value.tool;
+    let fail = true;
+    value.tool = async (name, args) => fail && args.highlights ? { ok: false, error: 'locked' } : tool(name, args);
+    const first = await runFirstPass(value, () => {}, { steps: ['captions'] });
+    expect(first.report.steps.find(step => step.id === 'captions')?.status).toBe('failed');
+    expect(first.report.captionHighlights?.[0].applied).toBe(false);
+    fail = false;
+    const second = await runFirstPass(value, () => {}, { resume: first.report });
+    expect(second.report.steps.find(step => step.id === 'captions')?.status).toBe('done');
+    expect(highlight).toHaveBeenCalledTimes(1);
+  });
+  it('keeps a missing emphasis service unfinished and treats karaoke separately', async () => {
+    setStudioProviders(unavailableProviders());
+    const enabled = captionHost('keywords');
+    expect((await runFirstPass(enabled.value, () => {}, { steps: ['captions'] })).report.steps.find(step => step.id === 'captions')?.status).toBe('failed');
+    const off = captionHost(null);
+    expect((await runFirstPass(off.value, () => {}, { steps: ['captions'] })).report.steps.find(step => step.id === 'captions')?.status).toBe('done');
+    const karaoke = captionHost('current_word');
+    await runFirstPass(karaoke.value, () => {}, { steps: ['captions'] });
+    expect(karaoke.value.document().appearance.captionStyle?.animation).toBe('karaoke');
+  });
+  it('passes the numbers-only mode to selection and never applies an aborted result', async () => {
+    const controller = new AbortController();
+    const highlight = vi.fn(async () => { controller.abort(); return [{ index: 0, text: '1999元' }]; });
+    setStudioProviders({ ...unavailableProviders(), autoHighlight: highlight });
+    const { value, calls } = captionHost('numbers');
+    const { report } = await runFirstPass(value, () => {}, { steps: ['captions'], signal: controller.signal });
+    expect(highlight).toHaveBeenCalledWith(expect.any(Array), expect.objectContaining({ highlightMode: 'numbers' }));
+    expect(calls.some(([, args]) => !!args.highlights)).toBe(false);
+    expect(report.steps.find(step => step.id === 'captions')?.status).toBe('pending');
+  });
   it('runs the steps whose skills are on and skips the rest', async () => {
     setStudioProviders(unavailableProviders());
     const { value, calls } = host();

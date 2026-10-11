@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { captionBlocksFromAsr, type AsrSegment } from './build-blocks';
 import { displayCues } from './captions-relay';
 import { renderBlock, type VideoShot } from './composition';
-import { applyWordDecorations } from './word-decorations';
+import { applyWordDecorations, replaceWordHighlights } from './word-decorations';
 import { applyCaptionTextEdits } from './caption-text-edit';
 import { carryCaptionEdits } from './editor-document/caption-transcript-sync';
 
@@ -16,6 +16,22 @@ const source: AsrSegment[] = [{
 const shots: VideoShot[] = [{ id: 'shot', srcStart: 0, srcEnd: 1, treatment: 'full' }];
 
 describe('selected-word caption treatment', () => {
+  it('replaces overbroad color highlights atomically while preserving animation and out-of-scope words', () => {
+    const segments: AsrSegment[] = [{ start: 0, end: 4, text: '今天收到了教师节礼物', wordDecorations: {
+      '0': { highlight: 'color', color: '#ff0000', animation: 'pop' },
+      '1': { highlight: 'color' }, '2': { highlight: 'color' }, '3': { highlight: 'color' },
+    } }];
+    const scope = [0, 1, 2].map(wordIndex => ({ sentenceIndex: 0, wordIndex }));
+    const next = replaceWordHighlights(segments, [{ sentenceIndex: 0, wordIndex: 2 }], scope);
+    expect(next[0].wordDecorations).toEqual({ '0': { animation: 'pop' }, '2': { highlight: 'color' }, '3': { highlight: 'color' } });
+    expect(segments[0].wordDecorations?.['0']).toEqual({ highlight: 'color', color: '#ff0000', animation: 'pop' });
+    const again = replaceWordHighlights(next, [{ sentenceIndex: 0, wordIndex: 1 }], scope);
+    expect(again[0].wordDecorations).toEqual({ '0': { animation: 'pop' }, '1': { highlight: 'color' }, '3': { highlight: 'color' } });
+  });
+  it('clears old color emphasis on an empty valid selection without clearing underlines', () => {
+    const segments: AsrSegment[] = [{ ...source[0], wordDecorations: { '0': { highlight: 'color' }, '1': { highlight: 'underline', color: '#ff0000' } } }];
+    expect(replaceWordHighlights(segments, [], [{ sentenceIndex: 0, wordIndex: 0 }, { sentenceIndex: 0, wordIndex: 1 }])[0].wordDecorations).toEqual({ '1': { highlight: 'underline', color: '#ff0000' } });
+  });
   it('keeps unrelated treatment when one field changes and removes empty marks', () => {
     const highlighted = applyWordDecorations(source, [{ sentenceIndex: 0, wordIndex: 1 }], { highlight: 'color' });
     const animated = applyWordDecorations(highlighted, [{ sentenceIndex: 0, wordIndex: 1 }], { animation: 'pop' });

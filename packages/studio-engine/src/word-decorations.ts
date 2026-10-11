@@ -6,6 +6,13 @@ export type WordDecorationPatch = {
   animation?: WordDecoration['animation'] | null;
 };
 
+/** Recompute color highlights in a visible scope in one transaction. Other decoration survives. */
+export function replaceWordHighlights(segments: readonly AsrSegment[], targets: readonly { sentenceIndex: number; wordIndex: number }[], scope: readonly { sentenceIndex: number; wordIndex: number }[]): AsrSegment[] {
+  const colored = scope.filter(({ sentenceIndex, wordIndex }) => segments[sentenceIndex]?.wordDecorations?.[String(wordIndex)]?.highlight === 'color');
+  const cleared = applyWordDecorations(segments, colored, { highlight: null, color: null });
+  return applyWordDecorations(cleared, targets, { highlight: 'color', color: null });
+}
+
 /** Update selected source words without changing speech, timing, or unrelated treatments. */
 export function applyWordDecorations(
   segments: readonly AsrSegment[],

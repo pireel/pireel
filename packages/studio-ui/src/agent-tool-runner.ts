@@ -2985,6 +2985,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const pauses = input.pauses === 'tight' || input.pauses === 'moderate' || input.pauses === 'natural' ? input.pauses : undefined;
             const semantics = documentRef.current.semantics;
             const host: FirstPassHost = {
+              projectId,
               persist: opts?.roughCut?.persist,
               document: () => documentRef.current,
               brand: opts?.roughCut?.config ? opts.roughCut.config.brand : semantics.brand ?? null,

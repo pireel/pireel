@@ -46,7 +46,7 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
   onSeek: (time: number) => void;
   onCut: (cuts: TimelineScriptCut[], message: string) => void;
   onEdit: (edits: CaptionCueEdit[]) => boolean;
-  onDecorate: (targets: TimelineMaskTarget[], patch: WordDecorationPatch) => void;
+  onDecorate: (targets: TimelineMaskTarget[], patch: WordDecorationPatch, replaceHighlights?: TimelineMaskTarget[]) => void;
   onMask: (targets: TimelineMaskTarget[], patch: WordMaskPatch, message: string) => void;
   /** Insert text / sticker / media / sound over a selection's time range. */
   onAddAtRange?: (kind: TranscriptAddKind, text: string, startSec: number, endSec: number, at: { left: number; top: number; before: string; after: string }) => void;
@@ -138,8 +138,8 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
         if (!row || !found) throw new Error(t('captions.autoHighlightMismatch', { text: key.text }));
         for (const wi of found) targets.push({ assetId: row.assetId, si: row.si, wi });
       }
+      onDecorate(targets, { highlight: 'color', color: null }, tokens.flatMap(token => Array.from({ length: token.w1 - token.w0 + 1 }, (_, i) => ({ assetId: token.assetId, si: token.si, wi: token.w0 + i }))));
       if (!targets.length) { toast.info(t('captions.autoHighlightNone')); return; }
-      onDecorate(targets, { highlight: 'color', color: null });
       toast.success(t('captions.autoHighlightDone', { n: keys.length }));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));

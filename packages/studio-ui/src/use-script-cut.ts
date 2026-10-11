@@ -25,7 +25,7 @@ import { removeSrcRanges, restoreSrcRange, spans as clipSpans } from '@pireel/st
 import { wordsFromText } from '@pireel/studio-engine/caption-fx';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { type WordMaskPatch, applyWordMasks } from '@pireel/studio-engine/word-masks';
-import { applyWordDecorations, type WordDecorationPatch } from '@pireel/studio-engine/word-decorations';
+import { applyWordDecorations, replaceWordHighlights, type WordDecorationPatch } from '@pireel/studio-engine/word-decorations';
 import { applyCaptionTextEdits } from '@pireel/studio-engine/caption-text-edit';
 import { type DocumentOp, transcriptInputsFor } from '@pireel/studio-engine/document-transaction';
 import type { DocumentCommitter } from './document-commit';
@@ -419,16 +419,17 @@ export function useScriptCut(deps: ScriptCutDeps) {
     const result = commit({ op: 'captions.edit', input: { mainTranscript: asrRef.current, clipTranscripts: clipAsrRef.current } });
     if (!result.ok) toast.error(editorErrorMessage(result.error));
   };
-  const decorateTimelineScriptWords = (targets: TimelineMaskTarget[], patch: WordDecorationPatch) => {
-    if (!targets.length) return;
+  const decorateTimelineScriptWords = (targets: TimelineMaskTarget[], patch: WordDecorationPatch, replaceHighlights?: TimelineMaskTarget[]) => {
+    if (!targets.length && !replaceHighlights?.length) return;
     const current = documentRef.current;
     const byAsset = new Map<string, { sentenceIndex: number; wordIndex: number }[]>();
     for (const target of targets) byAsset.set(target.assetId, [...(byAsset.get(target.assetId) ?? []), { sentenceIndex: target.si, wordIndex: target.wi }]);
+    for (const target of replaceHighlights ?? []) if (!byAsset.has(target.assetId)) byAsset.set(target.assetId, []);
     const transcripts: Record<string, AsrSegment[]> = {};
     for (const [assetId, list] of byAsset) {
       const previous = current.semantics.transcripts[assetId] as AsrSegment[] | undefined;
       if (!previous) continue;
-      const next = applyWordDecorations(previous, list, patch);
+      const next = replaceHighlights ? replaceWordHighlights(previous, list, replaceHighlights.filter(target => target.assetId === assetId).map(target => ({ sentenceIndex: target.si, wordIndex: target.wi }))) : applyWordDecorations(previous, list, patch);
       if (next !== previous) transcripts[assetId] = next;
     }
     if (!Object.keys(transcripts).length) return;
