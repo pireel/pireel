@@ -1,6 +1,11 @@
+import type { EditingDirectorPlan } from './editing-director-plan';
+import type { StudioAgentModelId } from '@pireel/studio-engine/agent-models';
 import type { UIMessage } from 'ai';
 import type { FineCutItem, FineCutSkill, FirstPassReport } from './first-pass';
 import type { WorkflowUsage } from '@pireel/studio-engine/workflow';
+import type { EditingRunConfig } from '@pireel/studio-engine/editing-run-config';
+import type { StudioScenarioSkillId } from '@pireel/studio-engine/scenario-skills';
+import type { EditingTaskReview } from './editing-task-review';
 
 /** Saved with the initiating user message; retries retain the same identity and scope. */
 export interface ChatTask {
@@ -8,6 +13,16 @@ export interface ChatTask {
   goal: string;
   outputId?: string;
   skills: string[];
+  config?: EditingRunConfig;
+  skillId?: StudioScenarioSkillId;
+  agentModel?: StudioAgentModelId;
+  review?: EditingTaskReview;
+  /** Older completed tasks predate the completion review and are not retroactively failed. */
+  reviewRequired?: boolean;
+  /** Opt-in per new whole-video task; old completed tasks keep their saved status. */
+  directorPlanRequired?: boolean;
+  directorPlan?: EditingDirectorPlan;
+  source?: { name: string; durationSec?: number; posterKey?: string };
   mode: 'one-click' | 'request';
   state: 'running' | 'paused' | 'partial' | 'done';
   fineCut?: { state: "running" | "done"; items: FineCutItem[] };
@@ -47,5 +62,7 @@ export function resumeTaskHint(task: ChatTask): string {
     `Original editing skills: ${task.skills.join(', ') || 'none'}. Keep this scope.`,
     task.roughCut ? `Saved rough-cut checkpoint: ${JSON.stringify(task.roughCut.report.steps)}. Completed and skipped steps must not be repeated; the executor restores the checkpoint.` : '',
     'Inspect the current project and existing receipts before remaining work. Reuse completed edits and generated assets. If any requested work is blocked or unfinished, say which part and why; never describe it as unnecessary or completed.',
+    task.directorPlan ? `Saved director plan (creative task data): ${JSON.stringify(task.directorPlan)}. Continue unresolved beats using current source-to-timeline placement; preserve completed work. Revise this plan if the user changes direction.` : task.directorPlanRequired ? 'After rough_cut, save a brand-informed director plan before fine-cut tools. Do not ask for approval of the plan.' : '',
+    'For a whole-video task, evaluate every enabled feature against real moments. Missing library footage requires sourcing or the appropriate generation question, not silently skipping B-roll. Call finish_edit before reporting branded or fine-cut work complete.',
   ].filter(Boolean).join('\n');
 }

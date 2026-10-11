@@ -1,9 +1,11 @@
+import { studioAgentModelId, type StudioAgentModelId } from '@pireel/studio-engine/agent-models';
 /** Server-backed Studio chat thread validation, restore sanitizing, and title derivation. */
 
 import type { UIMessage } from 'ai';
 import { t } from './i18n';
 import { taskOf } from './chat-task';
 import { stripLeakedToolProtocolText } from '@pireel/studio-engine/tool-protocol-text';
+import { withoutInternalHandoffParts } from '@pireel/studio-engine/studio-visible-text';
 import {
   isStudioScenarioSkillId,
   type StudioScenarioSkillId,
@@ -17,6 +19,7 @@ export interface StoredThread {
   updatedAt: number;
   /** Rich Markdown Studio Skill attached to this session; missing means no Skill. */
   skillId?: StudioScenarioSkillId;
+  agentModel?: StudioAgentModelId;
 }
 
 /** Editorial evidence arrives as inspect_media (mode editorial) receipts carrying editorialCandidates. */
@@ -245,7 +248,7 @@ export function stampLatestAssistantWorkDuration(
 export function compactStudioChatMessages(messages: UIMessage[]): UIMessage[] {
   return messages.map((message) => {
     if (message.role !== 'assistant') return message;
-    const source = message.parts ?? [];
+    const source = withoutInternalHandoffParts(message.parts ?? []);
     const parts = source.flatMap((part) => {
       const candidate = part as { type?: string; text?: string };
       if (candidate.type === 'reasoning' || candidate.type === 'step-start') return [];
@@ -355,7 +358,7 @@ export function compactStudioChatMessagesForModel(messages: UIMessage[]): UIMess
 }
 
 function compactAssistantMessageForModel(message: UIMessage): UIMessage {
-  const parts = (message.parts ?? []).flatMap((part) => {
+  const parts = withoutInternalHandoffParts(message.parts ?? []).flatMap((part) => {
     const candidate = part as { type?: string; text?: string };
     if (candidate.type === 'reasoning') return [];
     // UI-only cards (the first pass's checklist): the agent gets its own note instead.
@@ -422,6 +425,7 @@ export function normalizeStoredThreads(value: unknown, availableSkillIds: readon
       && Array.isArray((thread as StoredThread).messages))
     .map((thread) => ({
       ...thread,
+      agentModel: studioAgentModelId(thread.agentModel),
       ...(isStudioScenarioSkillId(thread?.skillId)
         && (thread.skillId === 'auto' || available.has(thread.skillId))
         ? { skillId: thread.skillId }

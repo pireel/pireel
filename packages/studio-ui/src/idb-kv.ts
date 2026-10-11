@@ -40,7 +40,8 @@ function request<T>(build: (store: IDBObjectStore) => IDBRequest<T>, mode: IDBTr
   return db().then((database) => new Promise<T>((resolve, reject) => {
     const transaction = database.transaction(STORE, mode);
     const req = build(transaction.objectStore(STORE));
-    req.onsuccess = () => resolve(req.result);
+    transaction.oncomplete = () => resolve(req.result);
+    transaction.onabort = transaction.onerror = () => reject(transaction.error ?? new Error('indexeddb transaction failed'));
     req.onerror = () => reject(req.error ?? new Error('indexeddb request failed'));
   }));
 }
@@ -65,9 +66,11 @@ function makeMemoryBackend(): KvBackend {
 }
 
 let backend: KvBackend | null = null;
+let volatileBackend = false;
 function resolveBackend(): KvBackend {
   if (backend) return backend;
-  backend = typeof indexedDB === 'undefined' ? makeMemoryBackend() : makeIdbBackend();
+  volatileBackend = typeof indexedDB === 'undefined';
+  backend = volatileBackend ? makeMemoryBackend() : makeIdbBackend();
   return backend;
 }
 
@@ -80,10 +83,18 @@ export async function kvGet(key: string): Promise<unknown> {
 }
 
 export async function kvSet(key: string, value: unknown): Promise<void> {
+  try { await resolveBackend().set(key, value); } catch { /* Optional cache; callers needing durability use kvSetConfirmed. */ }
+}
+
+/** Migration callers must not delete their source until a real transaction has committed. */
+export async function kvSetConfirmed(key: string, value: unknown): Promise<boolean> {
   try {
-    await resolveBackend().set(key, value);
+    const store = resolveBackend();
+    if (volatileBackend) return false;
+    await store.set(key, value);
+    return true;
   } catch {
-    // Storage unavailable: the cache degrades to paying for the generation again.
+    return false;
   }
 }
 
@@ -111,4 +122,6 @@ export async function kvDeleteByPrefix(prefix: string): Promise<number> {
 /** Tests only: swap in a deterministic in-memory backend. */
 export function __setKvBackendForTest(next: KvBackend | null): void {
   backend = next;
+  volatileBackend = false;
+  dbPromise = null;
 }

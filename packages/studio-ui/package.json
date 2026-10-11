@@ -12,6 +12,7 @@
     "./editing-skills": "./src/editing-skills.tsx",
     "./block-preview-card": "./src/block-preview-card.tsx",
     "./captions-panel": "./src/captions-panel.tsx",
+    "./chat-model-picker": "./src/chat-model-picker.tsx",
     "./chat-composer": "./src/chat-composer.tsx",
     "./chat-asset-search-results": "./src/chat-asset-search-results.tsx",
     "./chat-cut-list": "./src/chat-cut-list.tsx",

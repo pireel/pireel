@@ -1,9 +1,15 @@
 "use client";
 
+import { directorPlanToolBlock, saveEditingDirectorPlan, withDirectorInstruction } from './editing-director-plan';
+import { DEFAULT_STUDIO_AGENT_MODEL, studioAgentModelId, type StudioAgentModelId } from '@pireel/studio-engine/agent-models';
+
 import { editingSkillsHint } from '@pireel/studio-engine/editing-skills';
-import { ROUGH_CUT_TOOL, RoughCutCard, messageTurnCredits, toolNameOfPart, type RoughCutReplyMeta } from './first-pass-card';
+import { resolveEditingRunConfig } from '@pireel/studio-engine/editing-run-config';
+import { EditingTaskCard } from './editing-task-card';
+import { displayEditingTask, hasCurrentDirectorPreview, isInteractiveEditingTool, messagesForTask, unresolvedTaskFailure } from './editing-task-progress';
+import { needsEditingReview, reviewEditingTask } from './editing-task-review';
+import { ROUGH_CUT_TOOL, messageTurnCredits, toolNameOfPart, type RoughCutReplyMeta } from './first-pass-card';
 import { NextSteps, splitNextSteps } from './chat-next-steps';
-import { ConfirmPopover } from './editing-skills';
 import { FINE_CUT_SKILLS, ONE_CLICK_EDIT_HINT, type FineCutSkill } from './first-pass';
 import { latestTask, taskOf, patchTask, resumeTaskHint, unfinishedRoughCut, withTaskUsage, type ChatTask } from "./chat-task";
 import { cachedChatThread } from "./chat-thread-cache";
@@ -50,7 +56,7 @@ import {
   STUDIO_CREATE_SKILL_ACTION,
   latestStudioMetaAction,
 } from "@pireel/studio-engine/skill-actions";
-import { v3ToolCanMutate, V3_TOOL_IDS } from "@pireel/studio-engine/agent-surface-v3/registry";
+import { CHAT_SERVER_EXECUTED_TOOLS, v3ToolCanMutate, V3_TOOL_IDS } from "@pireel/studio-engine/agent-surface-v3/registry";
 import {
   CHAT_ACTION_PILL_CLASS,
   CHAT_PILL_ICON_CLASS,
@@ -107,6 +113,7 @@ export function ChatThread({
   threadId,
   initialMessages,
   initialSkillId,
+  initialAgentModel,
   scenarioSkills,
   onOpenSkillMarket,
   onRefreshScenarioSkills,
@@ -114,6 +121,7 @@ export function ChatThread({
   runTool,
   getBody,
   getComp,
+  getDocument,
   startPrompt,
   onStartPromptSent,
   fineCutClips,
@@ -123,14 +131,12 @@ export function ChatThread({
   onProjectSkill,
   editingSkills,
   onEditingSkills,
-  handoff,
-  onAnswerHandoff,
   timelineFramePickActive,
   timelineFramePickBusy,
   timelineFramePickAvailable,
   onTimelineFramePickActiveChange,
   elements,
-  onSnapshot,
+  onSnapshot: saveSnapshot,
   onBusyChange,
   onInsertMedia,
   onUseAudio,
@@ -143,6 +149,7 @@ export function ChatThread({
   threadId: string;
   initialMessages: UIMessage[];
   initialSkillId: StudioScenarioSkillId;
+  initialAgentModel?: StudioAgentModelId;
   scenarioSkills: readonly StudioScenarioSkillOption[];
   onOpenSkillMarket?: () => void;
   onRefreshScenarioSkills?: () => Promise<void>;
@@ -150,6 +157,7 @@ export function ChatThread({
   runTool: StudioChatProps["runTool"];
   getBody: StudioChatProps["getBody"];
   getComp?: StudioChatProps["getComp"];
+  getDocument?: StudioChatProps["getDocument"];
   startPrompt?: StudioChatProps["startPrompt"];
   projectBrand?: StudioChatProps["projectBrand"];
   projectSkillId?: StudioChatProps["projectSkillId"];
@@ -169,6 +177,7 @@ export function ChatThread({
   onSnapshot: (
     messages: UIMessage[],
     skillId: StudioScenarioSkillId,
+    agentModel?: StudioAgentModelId,
   ) => void;
   onBusyChange?: (busy: boolean) => void;
   handleRef: React.MutableRefObject<StudioChatHandle | null>;
@@ -201,6 +210,13 @@ export function ChatThread({
   const composerRef = useRef<ComposerHandle | null>(null);
   // The project's Skill when it has one; a project that never set one keeps this thread's own pick.
   const [skillId, setSkillId] = useState<StudioScenarioSkillId>((projectSkillId as StudioScenarioSkillId | undefined) ?? initialSkillId);
+  const [agentModel, setAgentModel] = useState<StudioAgentModelId>(() => studioAgentModelId(initialAgentModel ?? latestTask(initialMessages)?.agentModel ?? (initialMessages.length ? 'deepseek' : DEFAULT_STUDIO_AGENT_MODEL)));
+  const agentModelRef = useRef(agentModel);
+  const modelSelectedRef = useRef(initialAgentModel !== undefined);
+  const onSnapshot = useCallback((messages: UIMessage[], skill: StudioScenarioSkillId) => {
+    if (!messages.length && !modelSelectedRef.current) return;
+    saveSnapshot(messages, skill, agentModelRef.current);
+  }, [saveSnapshot]);
   const [activeStarterId, setActiveStarterId] = useState<string | null>(null);
   const skillRef = useRef(skillId);
   skillRef.current = skillId;
@@ -230,6 +246,9 @@ export function ChatThread({
         }) => ({
           body: {
             ...body,
+            agentModel: latestTask(requestMessages)?.agentModel ?? agentModelRef.current,
+            ...(latestTask(requestMessages)?.config ? { brand: latestTask(requestMessages)!.config!.brand } : {}),
+            ...(latestTask(requestMessages)?.skillId ? { skillId: latestTask(requestMessages)!.skillId } : {}),
             id,
             messageId,
             messages: compactStudioChatMessagesForModel(requestMessages),
@@ -273,11 +292,14 @@ export function ChatThread({
       lastAssistantMessageIsCompleteWithToolCalls(args),
     async onToolCall({ toolCall }) {
       const id = toolCall.toolName;
+      if (CHAT_SERVER_EXECUTED_TOOLS.has(id)) return;
       const requestedInput = (toolCall.input ?? {}) as Record<string, unknown>;
+      const task = latestTask(messagesRef.current);
       const ledger = turnLedgerRef.current;
       const v3 = V3_TOOL_IDS.has(id);
       const canMutate = v3ToolCanMutate(id);
       const publishSuccess = (output: Record<string, unknown>) => {
+        if (canMutate && output.ok !== false && task && latestTask(messagesRef.current)?.review) updateTask(task.id, current => ({ ...current, review: undefined }));
         const recorded = recordStudioTurnToolResult(ledger, {
           toolId: id,
           toolCallId: toolCall.toolCallId,
@@ -318,6 +340,28 @@ export function ChatThread({
         });
         onSnapshot(compactStudioChatMessages(effectiveStudioTurnMessages(messagesRef.current, ledger)), skillRef.current);
       };
+      if (id === 'save_edit_plan') {
+        const document = getDocument?.();
+        if (!task || !document) { publishSuccess({ ok: false, error: 'No active editing task or timeline.' }); return; }
+        const result = saveEditingDirectorPlan(task, requestedInput, document);
+        if (!result.ok) { publishSuccess(result); return; }
+        updateTask(task.id, current => ({ ...current, directorPlan: result.plan, review: undefined }));
+        publishSuccess({ ok: true, summary: studioLocale().startsWith('zh') ? '剪辑思路已确定' : 'Editing direction saved', data: { plan: result.plan, next: 'Execute this plan now. Resolve source anchors against the current timeline after structural cuts; no approval stop.' } });
+        return;
+      }
+      const planBlock = directorPlanToolBlock(task, id, canMutate);
+      if (planBlock) { publishSuccess({ ok: false, error: planBlock }); return; }
+      if (id === 'finish_edit') {
+        if (!task || !fineCutClips) { publishError('No active editing task or timeline evidence.'); return; }
+        if (task.directorPlanRequired && !hasCurrentDirectorPreview(messagesForTask(effectiveStudioTurnMessages(messagesRef.current, ledger), task.id))) {
+          publishSuccess({ ok: false, error: 'Inspect meaningful rendered timeline frames after the final edit, then assess the result against the saved director plan before finishing.' }); return;
+        }
+        const result = reviewEditingTask(task, requestedInput, fineCutClips(), getDocument?.());
+        if (!result.ok) { publishSuccess({ ok: false, error: result.error, ...(result.missing ? { data: { missing: result.missing } } : {}) }); return; }
+        updateTask(task.id, current => ({ ...current, review: result.review }));
+        publishSuccess({ ok: true, summary: studioLocale().startsWith('zh') ? '已核对剪辑结果' : 'Editing result checked', data: { review: result.review, taskIncomplete: !result.review.completed } });
+        return;
+      }
       if (id === "undo" && shouldBlockStudioTurnUndo(ledger)) {
         publishSuccess({
           ok: true,
@@ -335,7 +379,6 @@ export function ChatThread({
       toolAbortsRef.current.add(ctrl);
       setActiveTools(toolAbortsRef.current.size);
       if (userStoppedRef.current) ctrl.abort();
-      const task = latestTask(messagesRef.current);
       // Parked tools wait on the user, not on work: keep that time out of the tool-duration ETA memory
       const interactionWaitStartedAt = id === "ask_user" || id === "export"
         ? Date.now()
@@ -346,10 +389,11 @@ export function ChatThread({
           surface: "chat" as const,
           ...(id === ROUGH_CUT_TOOL && task ? { roughCut: {
             resume: task.roughCut?.report,
-            ...(task.mode === 'one-click' ? { skills: task.skills } : {}),
+            ...(task.mode === 'one-click' ? { skills: task.skills, config: task.config } : {}),
             onProgress: (report: import('./first-pass').FirstPassReport) => updateTask(task.id, current => {
               if (current.roughCut && current.roughCut.callId !== toolCall.toolCallId && current.roughCut.callId !== task.roughCut?.callId) return current;
-              return { ...current, roughCut: { callId: toolCall.toolCallId, report } };
+              const source = localAssetIndex?.find(asset => asset.assetId === report.sourceAssetId);
+              return { ...current, roughCut: { callId: toolCall.toolCallId, report }, ...(source ? { source: { name: source.label, durationSec: source.durationSec ?? undefined, posterKey: source.posterKey } } : {}) };
             }),
             onLateUsage: (usage: import('@pireel/studio-engine/workflow').WorkflowUsage) => {
               if (!projectId) return;
@@ -357,10 +401,11 @@ export function ChatThread({
               if (saved) onSnapshot(saved.messages, saved.skillId ?? skillRef.current);
             },
           } } : {}),
-          ...(skillRef.current !== STUDIO_AUTO_SKILL_ID ? { skillId: skillRef.current } : {}),
+          ...((task?.skillId ?? skillRef.current) !== STUDIO_AUTO_SKILL_ID ? { skillId: task?.skillId ?? skillRef.current } : {}),
         };
+        const executionInput = withDirectorInstruction(task, id, requestedInput, getDocument?.());
         const out = v3
-          ? await runToolRef.current("run_v3", { name: id, args: requestedInput }, runOpts)
+          ? await runToolRef.current("run_v3", { name: id, args: executionInput }, runOpts)
           : { ok: false, error: `Unknown tool: ${id}. Use the current tool list.` };
         const stopAfterReceipt = studioToolResultStopsAgentTurn(out);
         if (id === ROUGH_CUT_TOOL && task && out.ok) {
@@ -436,14 +481,15 @@ export function ChatThread({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
   const busy = status === "streaming" || status === "submitted" || activeTools > 0;
+  const taskInProgress = busy || latestTask(messages)?.state === 'running';
   // The workbench pauses output switching while a turn runs: a mid-run switch retargets every
   // later tool call (a real run dropped one output's picture-in-picture into another).
   const onBusyChangeRef = useRef(onBusyChange);
   onBusyChangeRef.current = onBusyChange;
   useEffect(() => {
-    onBusyChangeRef.current?.(busy);
+    onBusyChangeRef.current?.(taskInProgress);
     return () => onBusyChangeRef.current?.(false);
-  }, [busy]);
+  }, [taskInProgress]);
 
   const workTimingActivationRef = useRef<DeferredActivation | null>(null);
   if (!workTimingActivationRef.current)
@@ -546,7 +592,7 @@ export function ChatThread({
   // otherwise fetch keeps running and onToolCall mutates the work in the background while the UI is already gone.
   // Non-generating unmount doesn't snapshot (glance at an old session then switch away shouldn't refresh its updatedAt).
   const busyRef = useRef(busy);
-  busyRef.current = busy;
+  busyRef.current = taskInProgress;
   const stopRef = useRef(stop);
   stopRef.current = stop;
   useEffect(
@@ -643,9 +689,13 @@ export function ChatThread({
       const outputId = (getBodyRef.current().output as { id?: string } | undefined)?.id;
       if (continuing?.outputId && continuing.outputId !== outputId) { setTaskResumeError(true); return false; }
       setTaskResumeError(false);
-      const task: ChatTask = continuing ? { ...continuing, state: 'running' } : {
+      const config = continuing?.config ?? resolveEditingRunConfig({ brand: projectBrandRef.current, skills: continuing?.mode === 'one-click' ? continuing.skills : editingSkillsRef.current });
+      const source = localAssetIndex?.find(asset => asset.kind === 'video' || !asset.kind);
+      const task: ChatTask = continuing ? { ...continuing, config, skillId: continuing.skillId ?? skillRef.current, review: undefined, agentModel: agentModelRef.current, reviewRequired: continuing.mode === 'one-click', state: 'running' } : {
         id: mid('task'), ...(outputId ? { outputId } : {}), goal: draftParts.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n'),
-        skills: options.startTool ? [...(editingSkillsRef.current ?? [])] : [],
+        skills: options.startTool ? config.skills : [],
+        config, skillId: skillRef.current, agentModel: agentModelRef.current, reviewRequired: !!options.startTool, directorPlanRequired: !!options.startTool,
+        ...(options.startTool && source ? { source: { name: source.label, ...(source.durationSec != null ? { durationSec: source.durationSec } : {}), ...(source.posterKey ? { posterKey: source.posterKey } : {}) } } : {}),
         mode: options.startTool ? 'one-click' : 'request', state: 'running',
       };
       const startTool = continuing?.mode === 'one-click' && (!continuing.roughCut || unfinishedRoughCut(continuing)) ? ROUGH_CUT_TOOL : options.startTool;
@@ -681,7 +731,7 @@ export function ChatThread({
       void sendMessage(userMessage);
       return true;
     },
-    [elements, sendMessage, status, onSnapshot],
+    [elements, localAssetIndex, sendMessage, status, onSnapshot],
   );
 
   // Fine-cut rows describe observed additions. Zero additions remain unfulfilled, never inferred unnecessary.
@@ -691,8 +741,9 @@ export function ChatThread({
     const receipt = message.parts.find(part => toolNameOfPart(part) === ROUGH_CUT_TOOL) as { output?: { data?: { baseline?: Record<FineCutSkill, string[]> } } } | undefined;
     const baseline = task.fineCutBaseline ?? receipt?.output?.data?.baseline;
     const now = fineCutClips?.();
-    if (!baseline || !now) return { state: 'done', items: FINE_CUT_SKILLS.filter(id => task.skills.includes(id)).map(id => ({ id, count: 0, status: 'stopped' })) };
-    return { state: live ? 'running' : 'done', items: FINE_CUT_SKILLS.filter(id => task.skills.includes(id)).map(id => {
+    const enabled = FINE_CUT_SKILLS.filter(id => task.skills.includes(id) || id === 'graphics' && task.config?.visual?.headlines);
+    if (!baseline || !now) return { state: 'done', items: enabled.map(id => ({ id, count: 0, status: 'stopped' })) };
+    return { state: live ? 'running' : 'done', items: enabled.map(id => {
       const count = now[id].filter(clip => !baseline[id].includes(clip)).length;
       return { id, count, status: live ? 'running' : count ? 'done' : task.state === 'paused' || unfinishedRoughCut(task) ? 'stopped' : 'not-added' };
     }) };
@@ -701,11 +752,16 @@ export function ChatThread({
     if (busy) return;
     const task = latestTask(messagesRef.current);
     const last = messagesRef.current.at(-1);
-    if (!task || task.state !== 'running' || last?.role !== 'assistant') return;
-    if (lastAssistantMessageIsCompleteWithToolCalls({ messages: messagesRef.current }) && !userStoppedRef.current && status !== 'error') return;
-    if (last.parts.some(part => ['input-streaming', 'input-available'].includes((part as { state?: string }).state ?? '')) && !userStoppedRef.current && status !== 'error') return;
+    if (!task || task.state !== 'running') return;
+    if (status === 'error' || userStoppedRef.current) {
+      updateTask(task.id, current => ({ ...current, state: 'paused' }));
+      return;
+    }
+    if (last?.role !== 'assistant') return;
+    if (lastAssistantMessageIsCompleteWithToolCalls({ messages: messagesRef.current })) return;
+    if (last.parts.some(part => ['input-streaming', 'input-available'].includes((part as { state?: string }).state ?? ''))) return;
     const fine = fineCutFor(last, task, false);
-    const state = userStoppedRef.current || status === 'error' ? 'paused' : unfinishedRoughCut(task) || fine?.items.some(item => item.status === 'stopped') ? 'partial' : 'done';
+    const state = unfinishedRoughCut(task) || task.reviewRequired && needsEditingReview(task) && !task.review?.completed || unresolvedTaskFailure(messagesForTask(messagesRef.current, task.id)) || !assistantTurnEndedWithAnswer(last) ? 'partial' : 'done';
     updateTask(task.id, current => ({ ...current, state, ...(fine ? { fineCut: fine } : {}) }));
   }, [busy, status, messages]);
 
@@ -713,6 +769,16 @@ export function ChatThread({
   const fillRequest = useCallback((request: string) => {
     composerRef.current?.insertText(request);
   }, []);
+
+  // A newly created project's model may arrive with the asynchronously loaded document.
+  // Resolve it before the startup effect sends the first request; never overwrite a user's pick.
+  useEffect(() => {
+    if (modelSelectedRef.current || initialAgentModel === undefined || messagesRef.current.length) return;
+    const selected = studioAgentModelId(initialAgentModel);
+    agentModelRef.current = selected;
+    modelSelectedRef.current = true;
+    setAgentModel(selected);
+  }, [initialAgentModel]);
 
   // A project made from the Studio home opens with its first message: sent once, when the thread is idle,
   // as a one-click edit that starts with the rough cut.
@@ -1094,9 +1160,15 @@ export function ChatThread({
                 ? assistantEditorialCapacityShortfall(m)
                 : null;
               const originTask = taskOf([...messages.slice(0, mi)].reverse().find(item => item.role === 'user'));
-              const messageTask = originTask ? [...messages].reverse().map(taskOf).find(task => task?.id === originTask.id) ?? originTask : undefined;
+              const savedTask = originTask ? [...messages].reverse().map(taskOf).find(task => task?.id === originTask.id) ?? originTask : undefined;
+              const messageTask = savedTask ? displayEditingTask(savedTask, messagesForTask(messages, savedTask.id)) : undefined;
+              const wholeVideo = messageTask?.mode === 'one-click';
+              const taskMessages = messageTask ? messagesForTask(messages, messageTask.id) : [];
+              const taskAnchor = wholeVideo && m.role === 'assistant' && taskMessages.find(item => item.role === 'assistant')?.id === m.id;
+              const taskLive = busy && latestTask(messages)?.id === messageTask?.id;
+              const finalTextIndex = parts.findLastIndex(part => part.type === 'text');
               const workFold = assistantWorkFold(m, !isLast || status === "ready");
-              const workFoldAvailable = workFold !== null;
+              const workFoldAvailable = !wholeVideo && workFold !== null;
               const workExpanded = !collapsedWorkMessages.has(m.id);
               const workHidden = workFoldAvailable && !workExpanded;
               const workDurationMs = workFoldAvailable
@@ -1113,11 +1185,18 @@ export function ChatThread({
                       m: Math.floor(workDurationSeconds / 60),
                       s: workDurationSeconds % 60,
                     });
+              if (m.role === 'assistant' && !taskAnchor && (!isLast || wholeVideo) && !parts.some((part, index) =>
+                part.type === 'text' ? !!(part as { text?: string }).text?.trim() && (!wholeVideo || index === finalTextIndex && !(busy && isLast))
+                  : part.type === 'file' || isInteractiveEditingTool(toolNameOfPart(part), !!wholeVideo))) return null;
               return (
                 <Message key={m.id} from={m.role}>
                   <div className="flex items-start gap-2">
                     {m.role === "assistant" && <PiAvatar thinking={thinking} />}
                     <div className="flex min-w-0 flex-1 flex-col gap-2">
+                      {taskAnchor && messageTask && <EditingTaskCard task={messageTask} messages={taskMessages} live={taskLive} fine={fineCutFor(m, messageTask, taskLive)}
+                        startedAt={(taskMessages.find(item => item.role === 'user')?.metadata as { workStartedAt?: number } | undefined)?.workStartedAt}
+                        credits={taskMessages.reduce((sum, item) => sum + messageTurnCredits(item), 0) + (messageTask.roughCut?.report.credits ?? 0) + Object.values(messageTask.lateUsage ?? {}).reduce((sum, value) => sum + value, 0)}
+                        onContinue={latestTask(messages)?.id === messageTask.id && !error?.message?.includes('insufficient_tokens') && (['paused', 'partial'].includes(messageTask.state) || status === 'error') ? continueFromCurrentState : undefined} />}
                       {workFoldAvailable && (
                         <button
                           type="button"
@@ -1144,6 +1223,7 @@ export function ChatThread({
                         if (part.type === "step-start") return null;
                         if (collapsed.has(idx)) return null;
                         if (part.type === "text") {
+                          if (m.role === 'assistant' && wholeVideo && (busy && isLast || idx !== finalTextIndex)) return null;
                           const text = (part as { text?: string }).text ?? "";
                           if (!text) return null;
                           const intentLine = m.role === "user" ? describeGenerationIntentLine(text) : null;
@@ -1231,19 +1311,12 @@ export function ChatThread({
                         // chat, it reads as leaked internals). The thinking phase still shows activity
                         // via the ThinkingDots below — live reasoning counts as "thinking", not output.
                         if (part.type === "reasoning") return null;
-                        if (toolNameOfPart(part) === ROUGH_CUT_TOOL)
-                          return (
-                            <RoughCutCard
-                              key={key}
-                              part={part as { state?: string; output?: unknown; errorText?: string }}
-                              running={busy && isLast && ["input-streaming", "input-available"].includes((part as { state?: string }).state ?? "")}
-                              fineCutLive={busy && isLast}
-                              brandName={projectBrand?.name}
-                              checkpoint={messageTask?.roughCut?.callId === (part as { toolCallId?: string }).toolCallId ? messageTask?.roughCut?.report : undefined}
-                              meta={{ ...(m.metadata as RoughCutReplyMeta | undefined), fineCut: fineCutFor(m, messageTask, busy && isLast), lateCredits: Object.values(messageTask?.lateUsage ?? {}).reduce((sum, credits) => sum + credits, 0) }}
-                              agentCredits={messageTurnCredits(m)}
-                            />
-                          );
+                        if (toolNameOfPart(part) === ROUGH_CUT_TOOL) return null;
+                        if (
+                          part.type.startsWith("tool-") ||
+                          part.type === "dynamic-tool"
+                        )
+                          if (!isInteractiveEditingTool(toolNameOfPart(part), !!wholeVideo)) return null;
                         if (
                           part.type.startsWith("tool-") ||
                           part.type === "dynamic-tool"
@@ -1281,8 +1354,8 @@ export function ChatThread({
                               });
                         return null;
                       })}
-                      {thinking && <ThinkingDots />}
-                      {emptyCompletedAssistant && (
+                      {!wholeVideo && (thinking || busy && isLast && !lastTextLive && !isInteractiveEditingTool(toolNameOfPart(lastPart ?? { type: '' }), false)) && <ThinkingDots />}
+                      {!wholeVideo && emptyCompletedAssistant && !['paused', 'partial'].includes(messageTask?.state ?? '') && (
                         <div className="border-line bg-panel-2 flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[12px]">
                           <X size={12} className="shrink-0 text-destructive" />
                           <span className="min-w-0 flex-1 text-destructive">
@@ -1297,7 +1370,7 @@ export function ChatThread({
                           </button>
                         </div>
                       )}
-                      {incompleteCompletedAssistant && (
+                      {!wholeVideo && incompleteCompletedAssistant && !['paused', 'partial'].includes(messageTask?.state ?? '') && (
                         <div className="border-line bg-panel-2 flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[12px]">
                           <span className="text-ink-3 min-w-0 flex-1">
                             {t("chatGen.workNotFinished")}
@@ -1311,7 +1384,7 @@ export function ChatThread({
                           </button>
                         </div>
                       )}
-                      {m.role === "assistant" && m.id === messages[messages.length - 1]?.id && !busy && (
+                      {m.role === "assistant" && m.id === messages[messages.length - 1]?.id && !busy && messageTask?.state === 'done' && (
                         <NextSteps
                           steps={parts.flatMap((part) => (part.type === "text" ? splitNextSteps((part as { text?: string }).text ?? "").steps : [])).slice(0, 3)}
                           onPick={fillRequest}
@@ -1332,20 +1405,20 @@ export function ChatThread({
             })
           )}
           {/* Sent but no first response yet (last message is the user's): standalone thinking row */}
-          {(status === "submitted" || status === "streaming") &&
+          {(status === "submitted" || status === "streaming" || status === 'error' || latestTask(messages)?.state === 'paused') &&
             messages[messages.length - 1]?.role === "user" && (
               <Message from="assistant">
                 <div className="flex items-start gap-2">
                   <PiAvatar thinking />
-                  <div className="pt-0.5">
-                    <ThinkingDots />
+                  <div className="min-w-0 flex-1 pt-0.5">
+                    {latestTask(messages)?.mode === 'one-click' ? <EditingTaskCard task={latestTask(messages)!} messages={messagesForTask(messages, latestTask(messages)!.id)} live={busy} credits={0} onContinue={!busy && !error?.message?.includes('insufficient_tokens') ? continueFromCurrentState : undefined} /> : <ThinkingDots />}
                   </div>
                 </div>
               </Message>
             )}
           {/* Request/stream failed: committed tools are durable, so recovery is a fresh continuation
               from live project state rather than regeneration of stale history. */}
-          {error && (
+          {error && (latestTask(messages)?.mode !== 'one-click' || error.message?.includes('insufficient_tokens')) && (
             <div className="border-line bg-panel-2 flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[12px]">
               <X size={12} className="shrink-0 text-destructive" />
               <span className="min-w-0 flex-1 truncate text-destructive">
@@ -1367,7 +1440,7 @@ export function ChatThread({
             </div>
           )}
           {taskResumeError && <p role="alert" className="text-ink-3 mx-3 mb-2 text-xs">{t('chatGen.resumeOriginalOutput')}</p>}
-          {!busy && status !== 'error' && ['paused', 'partial'].includes(latestTask(messages)?.state ?? '') && (
+          {!busy && status !== 'error' && latestTask(messages)?.mode !== 'one-click' && ['paused', 'partial'].includes(latestTask(messages)?.state ?? '') && (
             <div className="text-ink-3 mx-3 mb-2 flex items-center justify-between gap-2 text-xs" role="status">
               <span>{t('chatGen.workNotFinished')}</span>
               <button type="button" onClick={() => void continueFromCurrentState()} className="text-ink underline underline-offset-2">{t('chatGen.continueFromCurrentState')}</button>
@@ -1387,11 +1460,6 @@ export function ChatThread({
 
       <div className="p-2.5 pt-1">
         {/* An edit is set up on the Studio home; here the conversation asks in words. */}
-        {!!handoff?.length && (
-          <div className="mb-1.5 flex items-center gap-2 px-0.5">
-            <ConfirmPopover handoff={handoff} pending={handoff.filter((item) => item.status === "open").length} onAnswer={onAnswerHandoff ?? (() => {})} />
-          </div>
-        )}
         <ConfirmDialog
           open={pendingSkill !== null}
           title={t("chatGen.skill.confirmTitle")}
@@ -1406,7 +1474,15 @@ export function ChatThread({
         />
         <Composer
           placeholder={t("chatGen.sayWhatAddChange")}
-          status={status}
+          agentModel={agentModel}
+          onPickAgentModel={id => {
+            if (taskInProgress) return;
+            modelSelectedRef.current = true;
+            agentModelRef.current = id;
+            setAgentModel(id);
+            onSnapshot(messagesRef.current, skillRef.current);
+          }}
+          status={taskInProgress ? 'streaming' : status}
           elements={elements}
           skillId={skillId}
           scenarioSkills={scenarioSkills}

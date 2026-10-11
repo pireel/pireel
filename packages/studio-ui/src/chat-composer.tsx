@@ -1,5 +1,8 @@
 "use client";
 
+import { ChatModelPicker } from './chat-model-picker';
+import type { StudioAgentModelId } from '@pireel/studio-engine/agent-models';
+
 /** Studio chat input: contenteditable composer with @ element pills. */
 
 import { useImperativeHandle, useRef, useState } from "react";
@@ -21,6 +24,7 @@ import {
 } from "@pireel/ui/trigger-popover";
 import type { StudioScenarioSkillId } from "@pireel/studio-engine/scenario-skills";
 import { ChatSkillPicker } from "./chat-skill-picker";
+import { ProjectBrandSummary } from './project-brand-summary';
 import {
   appendChatPillRemoveIcon,
   CHAT_ACTION_PILL_CLASS,
@@ -83,6 +87,8 @@ export function Composer({
   onDeleteScenarioSkill,
   projectBrand,
   onPickSkill,
+  agentModel,
+  onPickAgentModel,
   timelineFramePickActive,
   timelineFramePickBusy,
   timelineFramePickAvailable,
@@ -91,6 +97,8 @@ export function Composer({
   onStop,
   methodsRef,
 }: {
+  agentModel?: StudioAgentModelId;
+  onPickAgentModel?: (id: StudioAgentModelId) => void;
   placeholder: string;
   status: ChatStatus;
   elements: StudioElementRef[];
@@ -700,6 +708,7 @@ export function Composer({
 
   return (
     <>
+      <div className="mb-1 flex min-w-0 items-center"><ProjectBrandSummary brand={projectBrand} /></div>
       <div className="border-line bg-panel-2/35 focus-within:border-ink-4 relative rounded-md border transition-colors">
         <div className="relative">
           {empty && !studioActionActive && (
@@ -807,6 +816,7 @@ export function Composer({
             )}
           </div>
           <div className="flex items-center gap-2">
+          {agentModel && onPickAgentModel && <ChatModelPicker value={agentModel} disabled={isBusy} onChange={onPickAgentModel} />}
           {intent ? <GenerationCreditsBadge intent={intent} params={genParams} models={genModels} /> : null}
           {isBusy ? (
             <button
@@ -1012,4 +1022,3 @@ function findElementPill(
     ) ?? null
   );
 }
-

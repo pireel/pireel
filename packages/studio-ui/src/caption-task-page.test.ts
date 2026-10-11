@@ -17,7 +17,7 @@ vi.mock('./caption-task-runner', () => ({ runCaptionTask: mocks.run, exportCapti
 vi.mock('./caption-document-preview', () => ({ CaptionDocumentPreview: ({ task, actions }: { task: CaptionTaskRecord; actions: unknown }) => createElement('div', { 'data-caption-document-preview': task.generationId }, actions as never) }));
 vi.mock('./caption-agent-remix', () => ({ createCaptionAgentRemix: mocks.remix }));
 vi.mock('./current-user', () => ({ loadCurrentUser: async () => ({ user_id: 'owner', auth_method: 'session' }) }));
-vi.mock('./local-media', () => ({ loadLocalVideo: mocks.source, saveLocalVideo: mocks.cache }));
+vi.mock('./local-media', () => ({ markLocalMediaSynced: async () => {}, startLocalMediaCacheSession: () => () => {}, loadLocalVideo: mocks.source, saveLocalVideo: mocks.cache }));
 vi.mock('./media', () => ({ fileSig: () => 'source', probeVideoFile: async () => ({ width: 1920, height: 1080, durationSec: 5, hasAudio: true }) }));
 vi.mock('./web-fonts', async (original) => ({ ...await original<typeof import('./web-fonts')>(), ensureFontStylesheet: async () => {}, loadFont: async () => {} }));
 vi.mock('./caption-project-cover', () => ({ captureCaptionFirstFrame: async () => 'data:image/jpeg;base64,first-frame' }));

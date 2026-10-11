@@ -17,6 +17,9 @@ export type V3ToolGroup =
   | 'generation'
   | 'session';
 
+/** These Chat tools have server execute handlers. The browser must wait for their receipts. */
+export const CHAT_SERVER_EXECUTED_TOOLS = new Set(['list_skills', 'read_skill', 'read_brand', 'save_user_skill']);
+
 export interface V3ToolSpec {
   id: string;
   group: V3ToolGroup;
@@ -102,19 +105,23 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   { id: 'preview', group: 'session' },
   { id: 'undo', group: 'session' },
   { id: 'ask_user', group: 'session', chatOnly: true },
+  { id: 'save_edit_plan', group: 'session', chatOnly: true },
+  { id: 'finish_edit', group: 'session', chatOnly: true },
   { id: 'export', group: 'session' },
 ];
 
 
-export const V3_TOOL_LIMIT = 60;
+// Includes the chat-only saved director brief added to the 60-tool editing surface.
+export const V3_TOOL_LIMIT = 61;
 
 export const V3_TOOL_IDS: ReadonlySet<string> = new Set(V3_TOOLS.map((tool) => tool.id));
+/** Studio Chat uses inline questions; the legacy publishing checklist remains MCP-compatible. */
+export const V3_CHAT_TOOL_IDS: ReadonlySet<string> = new Set([...V3_TOOL_IDS].filter(id => id !== 'set_confirm_list'));
 
 
 /** v3 tools that never change the output (reads, searches, inspection, skills, preview, session queries). */
-const V3_READ_ONLY = new Set(['get_state', 'get_transcript', 'search_media', 'inspect_media', 'inspect_timeline', 'get_beat_grid', 'get_facts', 'search_assets', 'get_icons', 'create_browser_handoff', 'prepare_local_asset', 'list_models', 'list_skills', 'read_skill', 'preview', 'ask_user', 'compose_component']);
+const V3_READ_ONLY = new Set(['get_state', 'get_transcript', 'search_media', 'inspect_media', 'inspect_timeline', 'get_beat_grid', 'get_facts', 'search_assets', 'get_icons', 'create_browser_handoff', 'prepare_local_asset', 'list_models', 'list_skills', 'read_skill', 'read_brand', 'preview', 'ask_user', 'compose_component', 'save_edit_plan', 'finish_edit']);
 
 export function v3ToolCanMutate(id: string): boolean {
   return V3_TOOL_IDS.has(id) && !V3_READ_ONLY.has(id);
 }
-

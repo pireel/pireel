@@ -1,4 +1,5 @@
 import type { CaptionTaskRecord, CaptionProjectSummary, CaptionTaskVersion, CaptionVersionSummary } from '@pireel/studio-engine/scene-project';
+import { MEDIA_CACHE_RECENT_MS, protectMediaCacheEntry, registerMediaCacheStore, withMediaCacheRead, type AdditionalMediaCacheEntry } from './local-media-cache';
 export type * from '@pireel/studio-engine/scene-project';
 const database = () => new Promise<IDBDatabase>((resolve, reject) => {
   const request = indexedDB.open('pireel-caption-tasks', 3);
@@ -15,6 +16,7 @@ const database = () => new Promise<IDBDatabase>((resolve, reject) => {
   request.onerror = () => reject(request.error);
 });
 const key = (scope: string, id: string) => JSON.stringify([scope, id]);
+const cacheLock = (scope: string, id: string) => `scene-project:${key(scope, id)}`;
 export async function saveCaptionTask(task: CaptionTaskRecord, result?: Blob) {
   const db = await database();
   try { await new Promise<void>((resolve, reject) => {
@@ -46,6 +48,7 @@ export async function listCaptionTasks(scope: string): Promise<CaptionTaskRecord
   }); } finally { db.close(); }
 }
 export async function loadCaptionTaskResult(scope: string, id: string): Promise<Blob | undefined> {
+  protectMediaCacheEntry(cacheLock(scope, id));
   const db = await database();
   try { return await new Promise((resolve, reject) => {
     const request = db.transaction('results').objectStore('results').get(key(scope, id));
@@ -54,6 +57,7 @@ export async function loadCaptionTaskResult(scope: string, id: string): Promise<
 }
 
 export async function loadCaptionTask(scope: string, id: string): Promise<CaptionTaskRecord | undefined> {
+  protectMediaCacheEntry(cacheLock(scope, id));
   const db = await database();
   try { return await new Promise((resolve, reject) => {
     const request = db.transaction('tasks').objectStore('tasks').get(key(scope, id));
@@ -109,7 +113,7 @@ export function mergeCaptionProjectMetadata(incoming: CaptionTaskRecord, stored?
   return { ...incoming, name: stored.name, archivedAt: stored.archivedAt, metadataUpdatedAt: stored.metadataUpdatedAt, updatedAt: Math.max(incoming.updatedAt, stored.updatedAt) };
 }
 
-interface StoredCaptionVersion extends CaptionTaskVersion { key: string; project: string }
+interface StoredCaptionVersion extends CaptionTaskVersion { key: string; project: string; cache?: { cloudConfirmed: boolean; lastAccess: number } }
 const versionKey = (scope: string, taskId: string, id: string) => JSON.stringify([scope, taskId, id]);
 
 /** Run inside a single transaction so legacy migration and repeated completion saves are idempotent. */
@@ -150,13 +154,66 @@ export async function listCaptionVersions(scope: string, taskId: string): Promis
 }
 
 export async function loadCaptionVersion(scope: string, taskId: string, id: string): Promise<{ version: CaptionTaskVersion; video: Blob } | undefined> {
+  return withMediaCacheRead(cacheLock(scope, taskId), async () => {
   const db = await database();
   try { return await new Promise((resolve, reject) => {
-    const tx = db.transaction(['tasks', 'versions', 'results']);
+    const tx = db.transaction(['tasks', 'versions', 'results'], 'readwrite');
     const task = tx.objectStore('tasks').get(key(scope, taskId));
     const version = tx.objectStore('versions').get(versionKey(scope, taskId, id));
+    version.onsuccess = () => { if (version.result?.cache) tx.objectStore('versions').put({ ...version.result, cache: { ...version.result.cache, lastAccess: Date.now() } }); };
     const video = tx.objectStore('results').get(versionKey(scope, taskId, id));
     tx.oncomplete = () => resolve(task.result?.task?.scope === scope && !task.result.task.archivedAt && version.result && video.result ? { version: version.result, video: video.result } : undefined);
     tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error);
   }); } finally { db.close(); }
+  });
 }
+
+/** A version becomes expendable only after its immutable cloud version is acknowledged. */
+export async function markCaptionVersionSynced(scope: string, taskId: string, id: string): Promise<void> {
+  const db = await database();
+  try { await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction('versions', 'readwrite');
+    const store = tx.objectStore('versions');
+    const request = store.get(versionKey(scope, taskId, id));
+    request.onsuccess = () => { if (request.result) store.put({ ...request.result, cache: { cloudConfirmed: true, lastAccess: Date.now() } }); };
+    tx.oncomplete = () => resolve(); tx.onerror = tx.onabort = () => reject(tx.error);
+  }); } finally { db.close(); }
+}
+
+async function removeVersionCache(row: StoredCaptionVersion): Promise<number> {
+  const db = await database();
+  try { return await new Promise<number>((resolve, reject) => {
+    let bytes = 0;
+    const tx = db.transaction(['tasks', 'versions', 'results'], 'readwrite');
+    const task = tx.objectStore('tasks').get(row.project);
+    const version = tx.objectStore('versions').get(row.key);
+    const result = tx.objectStore('results').get(row.key);
+    result.onsuccess = () => {
+      const current = version.result as StoredCaptionVersion | undefined;
+      if (task.result?.task?.cloudPending || !current?.cache?.cloudConfirmed || current.cache.lastAccess >= Date.now() - MEDIA_CACHE_RECENT_MS) return;
+      bytes = result.result?.size ?? 0;
+      tx.objectStore('results').delete(row.key);
+      // Legacy/current result aliases may point to this same immutable version.
+      if (task.result?.task?.generationId === row.id) tx.objectStore('results').delete(row.project);
+    };
+    tx.oncomplete = () => resolve(bytes); tx.onerror = tx.onabort = () => reject(tx.error);
+  }); } finally { db.close(); }
+}
+
+registerMediaCacheStore('scene-results', async () => {
+  const db = await database();
+  try { return await new Promise<AdditionalMediaCacheEntry[]>((resolve, reject) => {
+    const entries: AdditionalMediaCacheEntry[] = [];
+    const tx = db.transaction(['versions', 'results']);
+    const request = tx.objectStore('versions').openCursor();
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) return;
+      const row = cursor.value as StoredCaptionVersion;
+      const result = tx.objectStore('results').get(row.key);
+      result.onsuccess = () => { if (result.result?.size) entries.push({ key: `scene-project:${row.project}`, bytes: result.result.size, lastAccess: row.cache?.lastAccess ?? row.createdAt, cloudConfirmed: row.cache?.cloudConfirmed === true, remove: () => removeVersionCache(row) }); };
+      cursor.continue();
+    };
+    tx.oncomplete = () => resolve(entries); tx.onerror = tx.onabort = () => reject(tx.error);
+  }); } finally { db.close(); }
+});

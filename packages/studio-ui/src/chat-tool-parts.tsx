@@ -87,11 +87,16 @@ function SpeechAssetBody({ output }: { output: unknown }) {
 }
 
 /** Normalize tool-call status. */
+function visibleToolError(error: string | undefined): string {
+  if (!error || /(?:\b[a-z]+_[a-z_]+\b|Unknown operation|raw required|[{}]|\b(?:clipId|atFrame|durationFrames|yPct)\b)/i.test(error)) return t('chatGen.failed');
+  return error.slice(0, 80);
+}
+
 export function toolStatus(part: ToolPartLike): { kind: 'running' | 'done' | 'error'; text: string } {
   const out = part.output as StudioToolResult | undefined;
-  if (part.state === 'output-error') return { kind: 'error', text: part.errorText?.slice(0, 40) || t('chatGen.failed') };
+  if (part.state === 'output-error') return { kind: 'error', text: visibleToolError(part.errorText) };
   if (part.state === 'output-available') {
-    if (out && out.ok === false) return { kind: 'error', text: out.error?.slice(0, 40) || t('chatGen.failed') };
+    if (out && out.ok === false) return { kind: 'error', text: visibleToolError(out.error) };
     return { kind: 'done', text: out?.summary?.slice(0, 60) || t('chatGen.done') };
   }
   return { kind: 'running', text: t('chatGen.running') };

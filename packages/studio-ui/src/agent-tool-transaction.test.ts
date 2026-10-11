@@ -158,6 +158,23 @@ function harness() {
 }
 
 describe('Agent composition transaction boundary', () => {
+  it('searches online stock in Chat and registers the imported cloud asset before placement', async () => {
+    const h = harness();
+    Object.assign(h.ctx, { projectId: 'test', genIdsRef: { current: new Set() } });
+    const stock = { query: 'conference', kind: 'image', page: 1, limit: 12, assetId: 'stock-1' };
+    const fetchMock = vi.fn(async (_url: string, options?: RequestInit) => {
+      const input = JSON.parse(String(options?.body));
+      return Response.json(input.action === 'search'
+        ? { ok: true, data: { results: [{ import: stock }] } }
+        : { ok: true, data: { registration: { id: 'stock-owned', kind: 'image', url: 'https://cdn.example/stock.jpg', cloudKey: 'uploads/owner/stock.jpg', width: 1200, height: 800, label: 'Conference', description: 'Licensed conference image' } } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { runStudioTool } = await import('./agent-tool-runner');
+    expect(await runStudioTool(h.ctx, 'search_assets', { scope: 'stock', query: 'conference', kind: 'image' })).toMatchObject({ ok: true, data: { results: [{ import: stock }] } });
+    expect(await runStudioTool(h.ctx, 'register_media', { stock })).toMatchObject({ ok: true });
+    expect(h.documentRef.current.assets['stock-owned']).toMatchObject({ kind: 'image', locator: { cloudKey: 'uploads/owner/stock.jpg' } });
+    expect(fetchMock.mock.calls.map(call => JSON.parse(String(call[1]?.body)).action)).toEqual(['search', 'import']);
+  });
   it('places an official audio ID from the host without any browser search cache', async () => {
     const { runExternalTool } = await import('./agent-tool-runner');
     const h = harness();

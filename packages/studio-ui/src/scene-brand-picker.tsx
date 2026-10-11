@@ -50,7 +50,6 @@ export function SceneBrandPicker({ options, locale, disabled, onChange }: {
       onChange(options => withSceneBrand(options, kit));
     }} />
     {error ? <p role="alert" className="text-ink-3 mt-2 text-xs">{say('品牌列表加载失败：', 'Could not load brands: ')}{error}</p>
-      : current ? <p className="text-ink-3 mt-2 text-xs">{options.oneClick ? say('仅用于此项目，使用选择时的品牌版本。', 'Applies only to this project, using the version selected.') : say('仅在此项目的字幕中应用品牌样式。', 'Applies the brand’s caption style only to captions in this project.')}</p>
-      : brands?.length === 0 ? <p className="text-ink-3 mt-2 text-xs">{say('还没有品牌，可在首页「我的品牌」创建。', 'No brands yet — create one under My brand on the Studio home.')}</p> : null}
+      : !current && brands?.length === 0 ? <p className="text-ink-3 mt-2 text-xs">{say('还没有品牌，可在首页「我的品牌」创建。', 'No brands yet — create one under My brand on the Studio home.')}</p> : null}
   </div>;
 }

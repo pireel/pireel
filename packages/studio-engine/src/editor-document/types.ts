@@ -243,6 +243,8 @@ export interface EditorSemanticState {
   /** The Studio Skill (kind of video) this project is edited as; 'auto' = none; absent = never set.
    *  A brand only goes with a Skill that takes brands (brand-playbook BRAND_SKILL_IDS). */
   skillId?: string;
+  /** Initial Agent model chosen when this project was created; saved chats keep their own selection. */
+  agentModel?: import('../agent-models').StudioAgentModelId;
 }
 
 export interface HandoffItem {

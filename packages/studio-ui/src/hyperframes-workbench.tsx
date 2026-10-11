@@ -208,6 +208,7 @@ import {
   markFileOrigin,
   resolveAssetBytes,
   saveLocalVideo,
+  startLocalMediaCacheSession,
 } from "./local-media";
 import { assetUploadQueue } from "./asset-upload-queue";
 import { LocalAssetRuntime } from "./local-asset-runtime";
@@ -338,7 +339,8 @@ import { useDenoise } from "./use-denoise";
 import { TransitionPanel } from "./transition-panel";
 import { MediaAnimPanel } from "./media-anim-panel";
 import { type MatteFrame, MATTE_FPS, computeMatteTrack } from "./person-matte";
-import { acknowledgeChatThread, cachedChatThread, cacheChatThread, restoreChatThreads } from "./chat-thread-cache";
+import { restoreChatThreads } from "./chat-thread-cache";
+import { createChatThreadPersistence } from "./chat-thread-persistence";
 import type { StoredThread } from "./chat-thread-store";
 import { acknowledgeAgentStartPrompt, takeAgentStartPrompt } from "./agent-project-from-video";
 import { documentIsEdited, fineCutClipIds } from "./first-pass";
@@ -503,6 +505,7 @@ export function HyperframesWorkbench({
   AccountControls?: ComponentType<{ busy: boolean }>;
 }) {
   const shell = useStudioShell();
+  useEffect(() => startLocalMediaCacheSession(), [projectId]);
   const [workflowOpen, setWorkflowOpen] = useState(!!initialWorkflowId);
   const [workflowEntryId] = useState(initialWorkflowId === "talking-head" ? "captions" : initialWorkflowId ?? "captions");
   const WorkflowEntry = workflowEntryId === "captions" ? CaptionsEntry : WorkflowPanel;
@@ -1076,27 +1079,16 @@ export function HyperframesWorkbench({
       });
     return () => { cancelled = true; };
   }, [projectId]);
-  const chatSaveQueuesRef = useRef(new Map<string, Promise<void>>());
-  const persistChatThread = useCallback((value: unknown) => {
-    const incoming = value as StoredThread;
-    const cached = cacheChatThread(projectId, incoming);
-    if (!cached) toast.error(t('chatGen.checkpointFailed'));
-    const thread = cached ? cachedChatThread(projectId, incoming.id)! : incoming;
-    const queueKey = `${projectId}:${thread.id}`;
-    const next = (chatSaveQueuesRef.current.get(queueKey) ?? Promise.resolve()).catch(() => {}).then(async () => {
-      const store = studioProviders().chats;
-      if (!store) return;
-      await store.save(projectId, thread);
-      acknowledgeChatThread(projectId, thread);
-    });
-    chatSaveQueuesRef.current.set(queueKey, next);
-    void next.catch(error => {
+  const chatPersistence = useMemo(() => createChatThreadPersistence({
+    getStore: () => studioProviders().chats,
+    onFailure: (localSaved, error) => {
       console.error("[studio] chat save failed", error);
-      toast.error(t("workbench.syncFailedTryAgain"));
-    }).finally(() => {
-      if (chatSaveQueuesRef.current.get(queueKey) === next) chatSaveQueuesRef.current.delete(queueKey);
-    });
-  }, [projectId]);
+      toast.error(t(localSaved ? "workbench.syncFailedTryAgain" : "chatGen.checkpointFailed"));
+    },
+  }), []);
+  const persistChatThread = useCallback((value: unknown) => {
+    void chatPersistence(projectId, value as StoredThread);
+  }, [projectId, chatPersistence]);
   const [pps, setPps] = useState(DEFAULT_PPS); // timeline zoom (px/sec), controlled by the ruler slider
   const [timelineSnapEnabled, setTimelineSnapEnabled] = useState(true);
   // Timeline row density. A remembered choice wins; otherwise the agent's embedded view starts
@@ -1679,6 +1671,9 @@ export function HyperframesWorkbench({
   // Agent activity gates output switching (chat turn streaming, or a bridge tool executing).
   const [chatBusy, setChatBusy] = useState(false);
   const [bridgeToolsInFlight, setBridgeToolsInFlight] = useState(0);
+  const manualEditingLocked = chatBusy || bridgeToolsInFlight > 0 || workflowBusy;
+  const manualEditingLockedRef = useRef(manualEditingLocked);
+  manualEditingLockedRef.current = manualEditingLocked;
   const bridgeOutputAnchorRef = useRef<{ id: string; title: string } | null>(null);
   // Export (state + submit/poll/cancel) — see use-export.ts
   /** Files for locally-inserted clips (key = blob URL; the two split halves share one src so they share naturally):
@@ -4073,6 +4068,11 @@ export function HyperframesWorkbench({
         (el.tagName === "INPUT" ||
           el.tagName === "TEXTAREA" ||
           el.isContentEditable);
+      if (manualEditingLockedRef.current && el?.closest('[data-studio-chat-panel]')) return;
+      if (!typing && manualEditingLockedRef.current && ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' || ['Delete', 'Backspace', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key))) {
+        e.preventDefault();
+        return;
+      }
       if (e.key === "Escape") {
         if (timelineFramePickActiveRef.current) {
           restoreChatAfterTimelineFramePick();
@@ -6438,6 +6438,7 @@ export function HyperframesWorkbench({
   );
   // Live comp accessor for chat receipt previews: stable identity (StudioChat is memo'd), reads the ref —
   // the chat card re-renders off the tool-progress store, not off comp state.
+  const getChatDocument = useCallback(() => editorDocumentRef.current, []);
   const getChatComp = useCallback(() => compRef.current, [compRef]);
   const captureTimelineFrameAt = useCallback(
     async (atSec: number) => {
@@ -8322,12 +8323,14 @@ export function HyperframesWorkbench({
                     runTool={chatCbs.runTool}
                     getBody={getChatBody}
                     getComp={getChatComp}
+                    getDocument={getChatDocument}
                     startPrompt={startPrompt}
                     onStartPromptSent={onStartPromptSent}
                     fineCutClips={fineCutClips}
                     projectEdited={projectEdited}
                     projectBrand={comp.brand}
                     projectSkillId={comp.skillId}
+                    projectAgentModel={editorDocument.semantics.agentModel}
                     onProjectSkill={setProjectSkill}
                     editingSkills={comp.editingSkills}
                     onEditingSkills={chatDocCbs.setEditingSkills}
@@ -8993,7 +8996,7 @@ export function HyperframesWorkbench({
         <div className="mb-1.5 flex min-h-0 min-w-0 flex-1 gap-1.5">
           {/* Preview (= the editing surface: single-click selects a block, double-click edits text in place). No video → upload area.
             The panel clips its own children so nested surfaces cannot bleed through the outer rounded corners. */}
-          <div data-studio-preview className="bg-canvas flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-sm">
+          <div data-studio-preview inert={manualEditingLocked} className="bg-canvas flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-sm">
             <div className="flex min-h-0 min-w-0 flex-1 p-3">
               <div
                 ref={previewAreaRef}
@@ -10433,11 +10436,11 @@ export function HyperframesWorkbench({
           <WorkbenchDockPanel id="tools" side="right" visible={!libCollapsed} width={columnWidths.right} onResize={(width) => resizeColumn("right", width)}>
             {RIGHT_DOCK_TABS.map((tab) => {
               const visible = !contextDockVisible && libTab === tab;
-              return <div key={tab} data-studio-tool-panel={tab} className={visible ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+              return <div key={tab} data-studio-tool-panel={tab} inert={manualEditingLocked} className={visible ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
                 {visible || tab === "assets" ? dockContent[tab] : null}
               </div>;
             })}
-            {contextDockVisible && <div data-studio-tool-panel="context" className="flex min-h-0 flex-1 flex-col">{dockContextContent}</div>}
+            {contextDockVisible && <div data-studio-tool-panel="context" inert={manualEditingLocked} className="flex min-h-0 flex-1 flex-col">{dockContextContent}</div>}
           </WorkbenchDockPanel>
           {/* Tools stay on the right; the left editor has its own two-mode switch. */}
           <div
@@ -10577,7 +10580,7 @@ export function HyperframesWorkbench({
               <TooltipContent>{t("workbench.scrollPlayhead")}</TooltipContent>
             </Tooltip>
             {/* Undo/redo + editing (on the shot at the playhead, icons only): split / trim left / trim right — ][ glyph, dashed side = the side being trimmed */}
-            <div className="text-ink-3 ml-1 flex shrink-0 items-center gap-0.5">
+            <div inert={manualEditingLocked} className={`text-ink-3 ml-1 flex shrink-0 items-center gap-0.5 ${manualEditingLocked ? 'opacity-40' : ''}`}>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
@@ -10880,7 +10883,7 @@ export function HyperframesWorkbench({
 
         {/* Caption style popover: reuses CaptionsPanel wholesale; clicking a style applies globally, click outside / Esc dismisses */}
         {/* Multi-track timeline */}
-        <div data-studio-timeline data-cap-keep hidden={timelineCollapsed} className="shrink-0 overflow-hidden rounded-b-sm">
+        <div data-studio-timeline data-cap-keep inert={manualEditingLocked} hidden={timelineCollapsed} className="shrink-0 overflow-hidden rounded-b-sm">
           <StudioTimeline
             comp={comp}
             density={timelineDensity}

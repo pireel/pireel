@@ -90,7 +90,7 @@ describe('first pass', () => {
     document.timeline.tracks.push({ id: 'fx', type: 'audio', role: 'sfx', name: 'SFX', hidden: false, muted: false, locked: false, syncLocked: true, stackOrder: 0, clips: [{ id: 'hit', kind: 'audio', anchor: { type: 'timeline' }, assetId: 'a', startFrame: 0, durationFrames: 10, sourceInSec: 0, sourceOutSec: 0.3, enabled: true, properties: { volumeDb: 0, fadeInSec: 0, fadeOutSec: 0 } }] } as never);
     const { value } = host({ document: () => document, skills: [] });
     const { baseline } = await runFirstPass(value, () => {});
-    expect(baseline).toEqual({ graphics: [], 'b-roll': [], sound: ['hit'] });
+    expect(baseline).toEqual({ graphics: [], 'b-roll': [], sound: ['hit'], zoom: [], transitions: [], emptyMusicTracks: [] });
   });
 
   it('stops between steps, and runs just the steps asked for when called again', async () => {

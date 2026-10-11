@@ -1827,7 +1827,11 @@ function StudioTimelineImpl({
                   track === CAP_LANE
                     ? KIND_META.caption
                     : audioId
-                      ? { label: 'panels.musicBed', icon: Music, dot: 'text-accent' }
+                      ? nativeTrack?.role === 'sfx'
+                        ? { label: 'panels.sfxTrack', icon: Volume2, dot: 'text-accent' }
+                        : nativeTrack?.role === 'narration'
+                          ? { label: 'panels.narrationTrack', icon: Volume2, dot: 'text-accent' }
+                          : { label: nativeTrack?.role === 'music' ? 'panels.musicTrack' : 'panels.musicBed', icon: Music, dot: 'text-accent' }
                     : visualId && k === 'video'
                       ? { label: 'panels.multimediaTrack', icon: Film, dot: 'text-accent' }
                     : k === 'video'

@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { pruneUnknownToolParts } from './history';
+import { V3_CHAT_TOOL_IDS, V3_TOOL_IDS } from './registry';
 
 describe('pruneUnknownToolParts', () => {
+  it('removes retired confirmation-list receipts from Chat without changing stored or MCP history', () => {
+    const messages = [{ role: 'assistant', parts: [{ type: 'tool-set_confirm_list', toolCallId: 'confirm', state: 'output-available', input: { items: [] }, output: { ok: true } }, { type: 'text', text: '剪辑完成。' }] }];
+    expect(V3_CHAT_TOOL_IDS.has('set_confirm_list')).toBe(false);
+    expect(V3_TOOL_IDS.has('set_confirm_list')).toBe(true);
+    expect(pruneUnknownToolParts(messages, V3_CHAT_TOOL_IDS)[0].parts).toEqual([{ type: 'text', text: '剪辑完成。' }]);
+    expect(messages[0].parts).toHaveLength(2);
+    expect(pruneUnknownToolParts(messages)[0].parts).toHaveLength(2);
+  });
   it('drops tool parts that name a tool outside the surface and keeps everything else in order', () => {
     const messages = [
       { role: 'user', parts: [{ type: 'text', text: 'tighten it' }] },

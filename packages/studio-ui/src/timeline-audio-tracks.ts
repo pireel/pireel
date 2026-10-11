@@ -150,7 +150,9 @@ export function timelineAudioLanes(
 ): TimelineAudioLaneState[] {
   if (!tracks.length) return clips.length ? [{ trackId: undefined, clips: [...clips] }] : [];
   const byId = new Map(clips.map((clip) => [clip.id, clip] as const));
-  return tracks.map((track) => ({
+  // A reserved native lane is not audible content. Reveal it when its first clip is placed;
+  // keep lanes with known clip ids even while their media is still reconnecting.
+  return tracks.filter(track => track.clipIds.length > 0).map((track) => ({
     trackId: track.trackId,
     clips: track.clipIds.flatMap((id) => {
       const clip = byId.get(id);

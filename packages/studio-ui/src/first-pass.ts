@@ -13,6 +13,7 @@ import { listDocumentAddressedWords } from '@pireel/studio-engine/editor-documen
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { imageThumb } from '@pireel/ui/image-url';
 import { t } from './i18n';
+import { resolveEditingRunConfig, type EditingRunConfig } from '@pireel/studio-engine/editing-run-config';
 
 /**
  * The first pass of an Agent project made from the Studio home: the fixed clean-up a talking-head edit
@@ -30,6 +31,7 @@ export interface FirstPassStep { id: FirstPassStepId; status: FirstPassStepStatu
 /** The skills the agent applies after the first pass, each shown with what it added. */
 export const FINE_CUT_SKILLS = ['graphics', 'b-roll', 'sound'] as const;
 export type FineCutSkill = typeof FINE_CUT_SKILLS[number];
+export type EditingEvidence = Record<FineCutSkill, string[]> & { zoom?: string[]; transitions?: string[]; emptyMusicTracks?: string[] };
 export interface FineCutItem { id: FineCutSkill; status: 'running' | 'done' | 'not-needed' | 'not-added' | 'stopped'; count: number }
 /** The checklist as the rough cut's card shows it (live progress, then the tool receipt). "stopped": the
  *  creator stopped it; the steps still pending can run again. */
@@ -47,13 +49,16 @@ export interface FirstPassReport {
 
 /** The clips that count towards each fine-cut skill: graphics and on-screen text, pictures over the
  *  speaker (not the brand logo), and sound effects. */
-export function fineCutClipIds(document: EditorDocumentV2): Record<FineCutSkill, string[]> {
-  const ids: Record<FineCutSkill, string[]> = { graphics: [], 'b-roll': [], sound: [] };
+export function fineCutClipIds(document: EditorDocumentV2): EditingEvidence {
+  const ids: EditingEvidence = { graphics: [], 'b-roll': [], sound: [], zoom: [], transitions: (document.timeline.transitions ?? []).map(transition => transition.id), emptyMusicTracks: document.timeline.tracks.filter(track => track.role === 'music' && !track.clips.length).map(track => track.id) };
   for (const track of document.timeline.tracks) {
-    if (track.role === 'managedCaptions') continue;
+    if (track.role === 'managedCaptions' || track.hidden) continue;
     for (const clip of track.clips) {
+      if (!clip.enabled) continue;
+      const zoom = clip.kind === 'narrative' ? clip.properties.zoom : clip.kind === 'media' ? clip.video?.zoom : undefined;
+      if (zoom && zoom.scale > 1) ids.zoom!.push(clip.id);
       if (clip.kind === 'graphic') ids.graphics.push(clip.id);
-      else if (clip.kind === 'media' && track.type === 'visual' && track.id !== document.semantics.primaryNarrativeTrackId && clip.assetId !== 'brand-logo') ids['b-roll'].push(clip.id);
+      else if ((clip.kind === 'media' || clip.kind === 'narrative') && track.type === 'visual' && track.id !== document.semantics.primaryNarrativeTrackId && clip.assetId !== 'brand-logo') ids['b-roll'].push(clip.id);
       else if (clip.kind === 'audio' && track.role !== 'narration' && track.role !== 'music') ids.sound.push(clip.id);
     }
   }
@@ -104,13 +109,16 @@ export interface FirstPassHost {
 /** The note a one-click edit's first message carries to the agent (it starts with rough_cut). */
 export const ONE_CLICK_EDIT_HINT = [
   'This message starts a one-click edit from the Studio home: the creator handed over the whole video.',
-  'Start with rough_cut, then use the enabled editing capabilities where they help this video, in the brand\'s style. Enabling a capability does not require adding it everywhere or adding any when it would not help.',
+  'Start with the fixed rough_cut. After it completes, read the retained full transcript, inspect the footage and read the selected project brand. Then save_edit_plan before fine-cut execution. Brand style shapes the plan itself: story emphasis, pacing, visual language, imagery, motion and sound, grounded in this recording and the current request. Without a brand, derive an appropriate direction from the source. Use only enabled capabilities where they help.',
+  'Save one concise direction and source-anchored beats with actual transcript quotes and natural-language treatments. Include deliberate speaker-led holds and content-specific sourcing decisions, with no fixed quota of graphics or effects. Continue automatically into execution without asking the creator to approve the plan. Make structural changes first, then resolve source anchors to the new timeline before placing visuals and sound. Reuse the saved plan on resume, revise it when decisions change, and account for each beat plus overall editorial quality in finish_edit.',
   'Complete the selected scope using reasonable defaults. A failed or pending step is unfinished: name the blocker and preserve it for continuation. Do not turn requested work into an optional next step or claim an unconfirmed result. Ask only when the existing generation policy requires it.',
+  'Enabled visual and audio features are requested work to evaluate against specific moments, not a list to silently ignore. After the rough cut, identify the useful moments for brand typography/graphics, zoom, transitions and B-roll. An empty supporting-media library is not a reason to omit B-roll: search suitable media, or use the generation tools when authorized; otherwise ask the required generation question in chat and keep that work unfinished. Before reporting a branded or fine-cut task complete, call finish_edit with the disposition and content-based reason for every enabled feature. Applied work must exist in the current timeline.',
   'Talk to the creator in the language of their message.',
 ].join(' ');
 
 /** Per-call hooks owned by the originating task, including after its UI unmounts. */
 export interface RoughCutExecution {
+  config?: EditingRunConfig;
   skills?: readonly string[];
   resume?: FirstPassReport;
   onProgress?(report: FirstPassReport): void;
@@ -141,21 +149,14 @@ export async function runFirstPass(host: FirstPassHost, onUpdate: (report: First
   const sourceAssetId = firstNarrativeAssetId(host.document());
   if (options.resume?.sourceAssetId && options.resume.sourceAssetId !== sourceAssetId) throw new Error(t('chatGen.firstPass.sourceChanged'));
   const brand = host.brand;
-  const on = new Set(host.skills);
-  const pauseMode = options.pauses ?? brand?.blocks.sound?.pauses ?? 'moderate';
+  const config = resolveEditingRunConfig({ brand, skills: host.skills, pauses: options.pauses });
+  const pauseMode = config.pauses;
   const captionBlock = brand?.blocks.captions;
   const asked = options.resume ? new Set(options.resume.steps.filter(step => step.status !== 'done' && step.status !== 'skipped').map(step => step.id)) : options.steps?.length ? new Set(options.steps) : null;
   const byBrand = { logo: !!brand?.blocks.logo, loudness: brand?.blocks.sound?.lufs !== undefined };
   const wanted: Record<FirstPassStepId, boolean> = asked
     ? { transcribe: asked.has('transcribe') || asked.has('cleanup') || asked.has('captions'), pauses: asked.has('pauses'), cleanup: asked.has('cleanup'), captions: asked.has('captions'), denoise: asked.has('denoise'), logo: asked.has('logo') && byBrand.logo, loudness: asked.has('loudness') && byBrand.loudness }
-    : {
-      transcribe: on.has('rough-cut') || on.has('captions'),
-      pauses: on.has('rough-cut') && (brand?.preferences?.pauses ?? pauseMode !== 'natural'),
-      cleanup: on.has('rough-cut') && (brand?.preferences?.cleanup ?? true),
-      captions: on.has('captions'),
-      denoise: on.has('voice-cleanup'),
-      ...byBrand,
-    };
+    : config.steps;
   const skippedWhy = (id: FirstPassStepId) => (asked?.has(id) && (id === 'logo' || id === 'loudness') ? t('chatGen.firstPass.notInBrand') : t('chatGen.firstPass.notOn'));
   const report: FirstPassReport = { state: 'running', ...(sourceAssetId ? { sourceAssetId } : {}), steps: FIRST_PASS_STEPS.map((id) => (wanted[id] ? { id, status: 'pending' } : { id, status: 'skipped', detail: skippedWhy(id) })), credits: 0 };
   if (options.resume) {

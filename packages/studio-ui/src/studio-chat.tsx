@@ -1,5 +1,7 @@
 "use client";
 
+import type { StudioAgentModelId } from '@pireel/studio-engine/agent-models';
+
 /**
  * Studio chat panel — agent + tools version, same look as the "project doc" chat.
  *
@@ -131,11 +133,14 @@ export interface StudioChatProps {
   /** Live composition accessor (stable identity, reads a ref): tool receipt cards preview blocks
    *  without linking chat re-renders to comp state. Optional — the preview strip hides without it. */
   getComp?: () => Composition;
+  /** Read-only canonical timeline for source-anchored directing and final verification. */
+  getDocument?: () => import('@pireel/studio-engine/composition').EditorDocumentV2;
   /** This project's chosen brand snapshot. Null or undefined means no brand; no account fallback. */
   projectBrand?: PlaybookSnapshot | null;
   /** The Studio Skill the project is edited as (undefined: never set — the thread's own pick applies),
    *  and how a pick in the chat is written back to the project. */
   projectSkillId?: string;
+  projectAgentModel?: StudioAgentModelId;
   onProjectSkill?: (skillId: string) => void;
   /** A first message to send once on opening (a project made from the Studio home), and the call that
    *  marks it sent so it is never sent again. */
@@ -143,7 +148,7 @@ export interface StudioChatProps {
   onStartPromptSent?: () => void;
   /** The project's clips per fine-cut skill now: a one-click edit's card counts what the agent adds
    *  after the rough cut. */
-  fineCutClips?: () => Record<import("./first-pass").FineCutSkill, string[]>;
+  fineCutClips?: () => import("./first-pass").EditingEvidence;
   /** The project has been edited (cut, captioned, anything placed): its brand is fixed and the editing
    *  skills become tag shortcuts for a message instead of switches. */
   projectEdited?: boolean;
@@ -187,12 +192,14 @@ export const StudioChat = memo(
       getBody,
       elements,
       getComp,
+      getDocument,
       startPrompt,
       onStartPromptSent,
       fineCutClips,
       projectEdited,
       projectBrand,
       projectSkillId,
+      projectAgentModel,
       onProjectSkill,
       editingSkills,
       onEditingSkills,
@@ -317,8 +324,9 @@ export const StudioChat = memo(
       (
         messages: UIMessage[],
         skillId: StudioScenarioSkillId,
+        agentModel?: StudioAgentModelId,
       ) => {
-        if (messages.length === 0) return;
+        if (messages.length === 0 && agentModel === undefined) return;
         const title =
           firstUserText(messages).slice(0, 24) || t("chatGen.newConversation");
         const next: StoredThread = {
@@ -327,6 +335,7 @@ export const StudioChat = memo(
           messages,
           updatedAt: Math.max(Date.now(), (threadsRef.current.find(thread => thread.id === activeId)?.updatedAt ?? 0) + 1),
           skillId,
+          agentModel,
         };
         const merged = [
           next,
@@ -450,6 +459,7 @@ export const StudioChat = memo(
           threadId={activeId}
           initialMessages={restoredMessages}
           initialSkillId={active?.skillId ?? defaultSkillId}
+          initialAgentModel={active?.agentModel ?? projectAgentModel}
           scenarioSkills={scenarioSkills}
           onOpenSkillMarket={customScenarioSkillManager?.openMarket}
           onRefreshScenarioSkills={
@@ -462,6 +472,7 @@ export const StudioChat = memo(
           getBody={getBody}
           elements={elements}
           getComp={getComp}
+          getDocument={getDocument}
           startPrompt={startPrompt}
           onStartPromptSent={onStartPromptSent}
           fineCutClips={fineCutClips}

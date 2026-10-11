@@ -387,7 +387,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   manage_tracks: {
     description:
-      `Create, update, reorder or remove one typed track. type is one of ${TRACK_TYPES.join(' / ')}; role (${TRACK_ROLES.join(' / ')}) decides which lane add_clips uses and how the mix treats it; order is the stacking order (larger renders above). syncLocked=true makes ripple edits move this track. Removing a track removes its clips.`,
+      `Create, update, reorder or remove one typed track. type is one of ${TRACK_TYPES.join(' / ')}; role (${TRACK_ROLES.join(' / ')}) decides which lane add_clips uses and how the mix treats it; order is the stacking order (larger renders above). syncLocked=true makes ripple edits move this track. Removing a track removes its clips. Prefer add_clips with a role: it creates the lane together with real content. Never pre-create an empty music lane for a proposal, pending generation or an unselected track; remove abandoned empty lanes before finishing.`,
     inputSchema: obj({
       action: enumOf(['create', 'update', 'move', 'remove']),
       trackId: str(), toIndex: int('move: destination index.'),
@@ -434,6 +434,24 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       steps: arr(enumOf(['transcribe', 'pauses', 'cleanup', 'captions', 'denoise', 'logo', 'loudness']), { description: 'Run only these steps.' }),
       pauses: enumOf(['tight', 'moderate', 'natural'], "Pause trimming: tight keeps ~0.1s of air, moderate ~0.15s, natural cuts only long pauses. Default: the brand's habit, else moderate."),
     }),
+  },
+  save_edit_plan: {
+    description: 'Save the whole-video director brief AFTER fixed rough_cut and BEFORE fine-cut execution. Read retained transcript, footage and project brand first. Let brand style shape the opening, progression, pacing, typography, imagery, motion and sound from the outset; obey enabled capabilities and the current user request. Use authored prose, not a feature checklist or fixed MG quota. Every meaningful beat anchors to actual source seconds and a transcript quote, including moments deliberately kept on the speaker. Saving continues execution automatically, never asks for approval. Reuse on resume; call again to revise changed creative decisions. This records task metadata without modifying the timeline.',
+    inputSchema: obj({
+      direction: str('Concise, content-specific whole-video direction in the creator’s language: opening, progression, pace and ending.'),
+      brandTreatment: str('For a branded project, describe how its style drives this video’s editorial and visual decisions. Adapt to the footage, do not merely repeat the brand name.'),
+      beats: arr(obj({ id: str('Stable beat id; preserve when revising.'), assetId: str('Actual speech source asset from get_transcript.'), sourceInSec: num('Source start, not timeline time.', { min: 0 }), sourceOutSec: num('Source end.', { min: 0 }), quote: str('Exact excerpt from this source passage.'), direction: str('Concrete treatment in natural language: what viewers see, what to preserve or change, and any assets to source/generate. Describe timing relative to speech. Quiet speaker-led passages are valid.') }, ['id', 'assetId', 'sourceInSec', 'sourceOutSec', 'quote', 'direction']), { minItems: 1, maxItems: 80 }),
+    }, ['direction', 'beats']),
+  },
+  finish_edit: {
+    description: 'Finish a whole-video edit after checking its enabled features against the actual timeline. Required for branded/fine-cut work. Include every enabled graphics/headlines, B-roll, sound, zoom and transition feature. Applied features must exist in the timeline. For not_needed give a concrete content reason and the moment evaluated; lack of source media is not a reason to skip B-roll. Unfinished generation or unavailable assets are blocked, never completed. For a saved director plan, inspect meaningful rendered frames after the last edit and include planRevision, every beat outcome with real clipIds, and an editorialReview of opening, progression, rhythm and brand coherence. This records the outcome without modifying the video.',
+    inputSchema: obj({
+      planRevision: int('Revision returned by save_edit_plan. Required when a director plan exists.', 1),
+      editorialReview: str('Concrete assessment of the actual opening, progression, rhythm and brand coherence against the plan. Fix visible defects first.'),
+      beats: arr(obj({ beatId: str('Saved plan beat id.'), status: enumOf(['applied', 'kept', 'changed', 'blocked']), result: str('What viewers now see; explain adaptations or blockers. Use the creator’s language.'), clipIds: arr(str(), { description: 'Actual enabled clip ids overlapping this source passage’s current timeline position. Required for applied/kept/changed.' }) }, ['beatId', 'status', 'result', 'clipIds'])),
+      brandApplication: str('For a branded edit, describe concrete typography, visual treatment and pacing choices that carry its style into this video.'),
+      features: arr(obj({ feature: enumOf(['graphics', 'b-roll', 'sound', 'zoom', 'transitions']), status: enumOf(['applied', 'not_needed', 'blocked']), reason: str('Short content-based explanation in the creator’s language.'), atFrame: int('Timeline frame evaluated.', 0) }, ['feature', 'status', 'reason'])),
+    }, ['features']),
   },
   remove_silence: {
     description:

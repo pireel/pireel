@@ -5,7 +5,7 @@ import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import type { CaptionTaskRecord, CaptionTaskVersion, CloudSceneProject, CloudSceneVersion } from '@pireel/studio-engine/scene-project';
 const mocks = vi.hoisted(() => ({ backup: vi.fn(), fetch: vi.fn(), save: vi.fn(), load: vi.fn(), patch: vi.fn(), version: vi.fn(), saveVersion: vi.fn(), versions: vi.fn(), owner: vi.fn() }));
 const files = new Map<string, File>();
-vi.mock('./local-media', () => ({ loadLocalVideo: async (sig: string) => files.get(sig) ?? null, saveLocalVideo: async (file: File, sig: string) => { files.set(sig, file); return true; }, alignFileToSig: (file: File) => file }));
+vi.mock('./local-media', () => ({ markLocalMediaSynced: async () => {}, startLocalMediaCacheSession: () => () => {}, loadLocalVideo: async (sig: string) => files.get(sig) ?? null, saveLocalVideo: async (file: File, sig: string) => { files.set(sig, file); return true; }, alignFileToSig: (file: File) => file }));
 vi.mock('./media', () => ({ durableFileSig: async (file: File) => `hash:${file.name}:${file.size}` }));
 vi.mock('@pireel/studio-engine/providers', () => ({ studioProviders: () => ({ vault: { backup: mocks.backup, fetch: mocks.fetch }, sceneProjects: { owner: mocks.owner, save: mocks.save, load: mocks.load, patch: mocks.patch, versions: mocks.versions, version: mocks.version, saveVersion: mocks.saveVersion } }) }));
 import { saveCaptionTask, loadCaptionTask, loadCaptionMedia, listCaptionVersions, loadCaptionVersion, syncCaptionProject } from './caption-task-store';

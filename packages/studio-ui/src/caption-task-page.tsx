@@ -36,7 +36,7 @@ import { CaptionDocumentPreview } from './caption-document-preview';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { fileSig, probeVideoFile, type ProbedFile } from './media';
 import { loadCurrentUser } from './current-user';
-import { saveLocalVideo } from './local-media';
+import { saveLocalVideo, startLocalMediaCacheSession } from './local-media';
 import { captureCaptionFirstFrame } from './caption-project-cover';
 import { ensureFontStylesheet } from './web-fonts';
 import { loadCaptionTask, saveCaptionTask, loadCaptionMedia, syncCaptionProject, listCaptionVersions, loadCaptionVersion, type CaptionTaskRecord, type CaptionTaskProgress, type CaptionVersionSummary, type CaptionTaskVersion } from './caption-task-store';
@@ -62,6 +62,7 @@ export function CaptionTaskPage({ taskId, locale, scene = 'captions', onBack, on
   /** Host actions beside Agent Remix (hosted features such as a brand cover), given the project and its source video. */
   extraActions?: (task: CaptionTaskRecord, source: File | null) => ReactNode }) {
   const zh = locale === 'zh';
+  useEffect(() => startLocalMediaCacheSession(), [taskId]);
   const isRemoval = scene === 'subtitle-removal';
   const [removalModes, setRemovalModes] = useState<Partial<Record<ErasureKind, boolean>> | null>(null);
   useEffect(() => {

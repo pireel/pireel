@@ -1,8 +1,10 @@
-import { brandMediaAssets } from '@pireel/studio-engine/brand-media';
+import { studioAgentModelId, type StudioAgentModelId } from '@pireel/studio-engine/agent-models';
+import { brandMediaAssets, playbookAppearance } from '@pireel/studio-engine/brand-media';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { compositionToEditorDocument, emptyComposition } from '@pireel/studio-engine/composition';
 import { EDITING_SKILL_IDS } from '@pireel/studio-engine/editing-skills';
-import { brandSkillOf, type PlaybookSnapshot } from '@pireel/studio-engine/brand-playbook';
+import type { PlaybookSnapshot } from '@pireel/studio-engine/brand-playbook';
+import { HOME_VIDEO_EDITING_SKILL } from '@pireel/studio-engine/editing-run-config';
 import { STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION, type ProjectSaveWire } from '@pireel/studio-engine/project-dto';
 import { createDocumentTransactionId } from '@pireel/studio-engine/document-transaction';
 import { loadCurrentUser } from './current-user';
@@ -49,7 +51,7 @@ export type AgentProjectProgress =
  * cached); the editor uploads the media in the background once it opens, so nothing waits on the network.
  * The materials go to the project's library, for the agent to place.
  */
-export async function createAgentProjectFromVideo(file: File, options: { brand: PlaybookSnapshot | null; skills: readonly string[]; prompt: string; materials?: readonly File[]; report?: (progress: AgentProjectProgress) => void }): Promise<string> {
+export async function createAgentProjectFromVideo(file: File, options: { brand: PlaybookSnapshot | null; skills: readonly string[]; prompt: string; agentModel?: StudioAgentModelId; materials?: readonly File[]; report?: (progress: AgentProjectProgress) => void }): Promise<string> {
   options.report?.({ phase: 'reading' });
   const [data, user] = await Promise.all([probeVideoFile(file), loadCurrentUser()]);
   if (!user || user.auth_method === 'anon') throw new Error('请先登录。');
@@ -75,7 +77,9 @@ export async function createAgentProjectFromVideo(file: File, options: { brand: 
     const composition = { ...emptyComposition(), width: data.width, height: data.height, video: { url, durationSec: data.durationSec }, shots: [{ id: 'source-video', srcStart: 0, srcEnd: data.durationSec, treatment: 'full' as const }] };
     const document = compositionToEditorDocument({ projectId: id, videoSig: sig, composition }).document;
     // A brand brings its Skill (the kind of video it is a style of).
-    document.semantics = { ...document.semantics, brand: options.brand, ...(options.brand ? { skillId: brandSkillOf(options.brand) } : {}), editingSkills: EDITING_SKILL_IDS.filter((skill) => options.skills.includes(skill)) };
+    // The homepage's talking-head workflow is the same with or without a brand.
+    document.semantics = { ...document.semantics, brand: options.brand, agentModel: studioAgentModelId(options.agentModel), skillId: HOME_VIDEO_EDITING_SKILL, editingSkills: EDITING_SKILL_IDS.filter((skill) => options.skills.includes(skill)) };
+    if (options.brand) document.appearance = { ...document.appearance, palette: { ...document.appearance.palette, ...playbookAppearance(options.brand).palette } };
     const localAssets: NonNullable<NonNullable<ProjectSaveWire['context']>['localAssets']> = [];
     for (const asset of Object.values(document.assets)) {
       if (asset.kind !== 'video') continue;

@@ -1,6 +1,7 @@
 import { studioProviders } from '@pireel/studio-engine/providers';
 import type { CaptionTaskRecord, CaptionTaskVersion, CaptionProjectSummary, CaptionVersionSummary } from '@pireel/studio-engine/scene-project';
 import * as local from './caption-task-local';
+import { markLocalMediaSynced } from './local-media';
 export type * from '@pireel/studio-engine/scene-project';
 export { mergeCaptionProjectMetadata } from './caption-task-local';
 
@@ -65,7 +66,9 @@ async function saveVersionToCloud(scope: string, id: string, version: CaptionTas
   const file = video instanceof File ? video : new File([video], `${id}-${version.id}.mp4`, { type: 'video/mp4' });
   const sig = await durableFileSig(file);
   await backup(file, sig);
-  return cloud()!.saveVersion(id, version, sig);
+  const saved = await cloud()!.saveVersion(id, version, sig);
+  await local.markCaptionVersionSynced(scope, id, version.id).catch(() => {});
+  return saved;
 }
 async function recordError(task: CaptionTaskRecord, error: unknown) {
   const latest = await local.loadCaptionTask(task.scope, task.id).catch(() => undefined);
@@ -107,6 +110,7 @@ export async function saveCaptionTask(task: CaptionTaskRecord, result?: Blob, so
       if (result) await saveVersionToCloud(task.scope, task.id, { id: task.generationId ?? `generated-${task.updatedAt}`, number: 0, createdAt: task.updatedAt, task }, result);
       const stored = await saveOverCloud(pending, pending.cloudRevision ?? 0);
       assertScope(stored.task, task.scope); writeRevisions.set(idKey, stored.revision);
+      await markLocalMediaSynced(stored.task.sourceSig);
       await local.saveCaptionTask({ ...stored.task, cloudRevision: stored.revision, cloudPending: false, cloudError: undefined }).catch(() => {});
       changed();
     } catch (error) { await recordError(pending, error); throw error; }
@@ -133,6 +137,7 @@ export async function syncCaptionProject(scope: string, id: string) {
       }
       const stored = await saveOverCloud(task, task.cloudRevision ?? 0);
       assertScope(stored.task, scope); writeRevisions.set(key(scope, id), stored.revision);
+      await markLocalMediaSynced(stored.task.sourceSig);
       await local.saveCaptionTask({ ...stored.task, cloudRevision: stored.revision, cloudPending: false, cloudError: undefined }).catch(() => {});
       changed();
     } catch (error) { await recordError(task, error); throw error; }
@@ -159,6 +164,7 @@ export async function loadCaptionTask(scope: string, id: string): Promise<Captio
       }
       writeRevisions.set(key(scope, id), stored.revision);
       const task = { ...stored.task, cloudRevision: stored.revision, cloudPending: false };
+      await markLocalMediaSynced(task.sourceSig);
       await local.saveCaptionTask(task).catch(() => {});
       const active = ['preparing', 'transcribing', 'cleaning', 'translating', 'styling', 'emphasizing', 'voicing', 'aligning', 'lipsync', 'rendering'].includes(task.stage);
       return active ? { ...task, stage: 'interrupted' } : task;
@@ -225,6 +231,7 @@ export async function loadCaptionVersion(scope: string, id: string, versionId: s
   const stored = await cloud()!.version(id, versionId);
   if (!stored) return cached;
   assertScope(stored.version.task, scope);
+  await local.markCaptionVersionSynced(scope, id, versionId).catch(() => {});
   const video = cached?.video ?? await loadCaptionMedia(scope, stored.resultSig, `${task.name}-v${stored.version.number}.mp4`);
   if (!video) throw new Error('成片暂时无法下载，请稍后重试。');
   return { version: stored.version, video };

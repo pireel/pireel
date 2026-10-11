@@ -1,5 +1,6 @@
 import { imageThumb } from '@pireel/ui/image-url';
 import { materializeRemoteMedia } from './remote-media';
+import { markLocalMediaSynced } from './local-media';
 
 /**
  * Cloud rendezvous for studio media bytes (browser side) — the client half of /api/studio/media.
@@ -134,7 +135,9 @@ export async function cloudConfirmUpload(projectId: string, sig: string, key: st
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ action: 'confirm-upload', projectId, sig, key }),
     });
-    return response.ok && (await response.json() as { ok?: boolean }).ok === true;
+    const confirmed = response.ok && (await response.json() as { ok?: boolean }).ok === true;
+    if (confirmed) await markLocalMediaSynced(sig);
+    return confirmed;
   } catch { return false; }
 }
 
@@ -165,6 +168,7 @@ export async function cloudFetchMedia(sig: string, options?: { cloudKey?: string
         sig,
         name: options.label || options.cloudKey.split('/').pop() || 'media',
       });
+      await markLocalMediaSynced(sig);
       return materialized.file;
     }
     const r = await fetch('/api/studio/media', {
@@ -180,6 +184,7 @@ export async function cloudFetchMedia(sig: string, options?: { cloudKey?: string
       name: options?.label || (type.startsWith('image/') ? 'cloud-restore.png' : type.startsWith('audio/') ? 'cloud-restore.m4a' : 'cloud-restore.mp4'),
       type,
     });
+    await markLocalMediaSynced(sig);
     return materialized.file;
   } catch {
     return null;

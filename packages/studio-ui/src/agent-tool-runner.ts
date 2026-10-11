@@ -10,6 +10,7 @@ import { adaptiveGeneratedVideoSpec } from '@pireel/studio-engine/generated-vide
 
 import type { MutableRefObject } from 'react';
 import { editorErrorMessage } from './editor-error';
+import { runStockTool } from './stock-tools-client';
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 import type { DocumentOp } from '@pireel/studio-engine/document-transaction';
 import type { AgentTimelineOutcome } from '@pireel/studio-engine/agent-timeline';
@@ -1393,6 +1394,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           return { ok: false, error: tEnglish('workbench.nameGeneratingEditAfter', { name: b ? bname(b) : hit }) };
         }
       }
+      if (toolId === 'register_media' && input.stock && typeof input.stock === 'object') {
+        const imported = await runStockTool('import', input.stock as Record<string, unknown>, signal);
+        if (!imported.ok || !imported.data?.registration) return imported;
+        input = { assets: [imported.data.registration] };
+      }
       if (toolId === 'add_clips' || toolId === 'insert_clips' || toolId === 'swap_clip_media') {
         const referencedAssetIds = [
           ...new Set([
@@ -2195,7 +2201,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const found = searchFontsTool(input);
               return { ...found, summary: found.data.fonts.length ? t('workbench.searchedFontsN', { n: found.data.fonts.length }) : t('workbench.searchedFontsNoMatch') };
             }
-            if (input.scope === 'stock') return { ok: false, error: TAB_CANNOT_SERVE_ERRORS.projectNav, data: { fix: 'Stock search is answered by the server: call search_assets scope:stock through the MCP surface, or use scope mine / cloud / official here.' } };
+            if (input.scope === 'stock') return runStockTool('search', input, signal);
             if (!(typeof input.query === 'string' && input.query.trim())) {
               if (input.scope === 'all') return { ok: false, error: 'missing_field', data: { path: 'query', fix: 'Listing needs one explicit scope: mine, cloud or official.' } };
               // Least privilege: an omitted scope is local. Cloud URLs are returned only when the
@@ -2981,7 +2987,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const host: FirstPassHost = {
               persist: opts?.roughCut?.persist,
               document: () => documentRef.current,
-              brand: semantics.brand ?? null,
+              brand: opts?.roughCut?.config ? opts.roughCut.config.brand : semantics.brand ?? null,
               skills: opts?.roughCut?.skills ?? semantics.editingSkills ?? [],
               tool: (name, args, stepSignal) => runStudioTool(ctx, name, args, { surface, ...(stepSignal ?? signal ? { signal: stepSignal ?? signal } : {}) }),
               setUsageSink: (sink) => { if (ctx.usageSinkRef) ctx.usageSinkRef.current = sink; },
