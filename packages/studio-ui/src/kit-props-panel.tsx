@@ -15,11 +15,12 @@
  * controls from the panel, a focus ring replaces outlines, selection is a filled pill or a ring.
  */
 
-import { useMemo, type ReactNode } from 'react';
-import { kitComponents, kitSurfaceSwatches } from '@pireel/studio-engine/kit-templates';
+import { useMemo, useState, type ReactNode } from 'react';
+import { groupOf, kitComponents, kitSurfaceSwatches, type PropertyGroup } from '@pireel/studio-engine/kit-templates';
 import type { Block } from '@pireel/studio-engine/composition';
-import { Plus, X } from 'lucide-react';
+import { GripVertical, Plus, X } from 'lucide-react';
 import { t } from './i18n';
+import { ACCENT_SWATCHES, ColorControl, INK_SWATCHES, OPTION_OFF, OPTION_ON, PROP_INPUT, PropRow, PropSlider } from './prop-controls';
 
 export interface FieldSchema {
   type?: string;
@@ -34,6 +35,12 @@ export interface FieldSchema {
   description?: string;
   /** Human label (bespoke components declare one per property); falls back to the host's labelOf. */
   title?: string;
+  /** Shared property group (registered components carry it); absent → derived from the key/kind. */
+  'x-group'?: string;
+  /** 'percent' shows a factor as a percentage (1 → 100%). */
+  'x-display'?: string;
+  /** Kept for stored props, not offered by editors. */
+  'x-hidden'?: boolean;
   default?: unknown;
   /** Row arrays (kit `rows()`): each row is an object of primitive fields. */
   items?: { properties?: Record<string, FieldSchema>; required?: string[] };
@@ -44,6 +51,14 @@ export interface PropsSchema {
   properties?: Record<string, FieldSchema>;
 }
 
+/** The shared group a field belongs to: declared by registered components, derived otherwise. */
+export function propertyGroupOf(key: string, f: FieldSchema): PropertyGroup {
+  const declared = f['x-group'];
+  return declared === 'layout' || declared === 'content' || declared === 'style' || declared === 'surface' || declared === 'motion'
+    ? declared
+    : groupOf(key, f);
+}
+
 /** Field label: catalog key when we have one, else the raw prop name (dev-facing fallback). */
 function kitFieldLabel(key: string): string {
   const k = `kitProp.${key}`;
@@ -51,32 +66,93 @@ function kitFieldLabel(key: string): string {
   return label === k ? key : label;
 }
 
-const INPUT =
-  'bg-panel-2 text-ink placeholder:text-ink-5 w-full rounded-md px-2.5 py-1.5 text-[12px] leading-5 shadow-[inset_0_0_0_1px_var(--color-line-2)] outline-none focus:shadow-[inset_0_0_0_1px_var(--color-accent)]';
+/** An option's words: a component's own layouts are named per component (the same id can mean
+ *  different things in two components); shared options (surface, border…) share one name. */
+export function kitOptionLabel(key: string, opt: string, componentId?: string): string {
+  const slug = opt.replace(/-/g, '_'); // catalog keys are slugs; option ids may be kebab-case
+  const keys = [
+    ...(key === 'variant' && componentId ? [`kitVariant.${componentId}.${slug}`] : []),
+    `kitOpt.${key}.${slug}`,
+  ];
+  for (const k of keys) {
+    const label = t(k);
+    if (label !== k) return label;
+  }
+  const spaced = opt.replace(/[-_]+/g, ' ').trim();
+  return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : opt;
+}
+
+/** Shared options drawn by OptionGlyph. */
+const GLYPH_FIELDS = new Set(['surface', 'border', 'radius', 'trend', 'mark', 'codeTheme']);
+/** Drawn options whose drawing says it all: past three they show without words. */
+const ICON_ONLY = new Set(['radius']);
+
+/** A tiny drawing of what a shared option does, so the choice reads before its word does. */
+function OptionGlyph({ field, opt }: { field: string; opt: string }) {
+  const stroke = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
+  const svg = (children: ReactNode) => <svg viewBox="0 0 16 16" className="h-3.5 w-3.5 shrink-0" aria-hidden>{children}</svg>;
+  if (field === 'surface') {
+    return opt === 'card'
+      ? svg(<rect x="2.5" y="3.5" width="11" height="9" rx="2" fill="currentColor" opacity={0.85} />)
+      : svg(<rect x="2.5" y="3.5" width="11" height="9" rx="2" {...stroke} strokeDasharray="2 1.6" />);
+  }
+  if (field === 'border') {
+    if (opt === 'none') return svg(<rect x="2.5" y="3.5" width="11" height="9" rx="2" {...stroke} strokeDasharray="2 1.6" opacity={0.6} />);
+    return svg(<rect x="2.5" y="3.5" width="11" height="9" rx="2" {...stroke} strokeWidth={opt === 'solid' ? 2.4 : 1} />);
+  }
+  if (field === 'radius') {
+    const r = { sharp: 0, soft: 1.8, round: 3.6, pill: 4.5 }[opt] ?? 2;
+    return svg(<rect x="2.5" y="3.5" width="11" height="9" rx={r} {...stroke} />);
+  }
+  if (field === 'codeTheme') {
+    // A tiny editor window in the scheme's own colours: background, then three token lines.
+    const scheme: Record<string, [string, string, string, string]> = {
+      night: ['#1e2230', '#c792ea', '#9ece6a', '#ff9e64'],
+      light: ['#ffffff', '#cf222e', '#0a3069', '#0550ae'],
+      contrast: ['#0a0a0a', '#ff5fa2', '#ffd24d', '#5ce1ff'],
+    };
+    const [bg, a, b, c] = scheme[opt] ?? ['transparent', 'currentColor', 'currentColor', 'currentColor'];
+    return (
+      <svg viewBox="0 0 22 16" className="h-4 w-[22px] shrink-0" aria-hidden>
+        <rect x="0.5" y="0.5" width="21" height="15" rx="3" fill={bg} stroke="rgba(127,127,127,0.45)" strokeDasharray={opt === 'theme' ? '2 1.5' : undefined} />
+        <rect x="4" y="4.5" width="7" height="1.8" rx="0.9" fill={a} opacity={opt === 'theme' ? 0.55 : 1} />
+        <rect x="4" y="7.3" width="11" height="1.8" rx="0.9" fill={b} opacity={opt === 'theme' ? 0.4 : 1} />
+        <rect x="4" y="10.1" width="5" height="1.8" rx="0.9" fill={c} opacity={opt === 'theme' ? 0.3 : 1} />
+      </svg>
+    );
+  }
+  if (field === 'mark') {
+    if (opt === 'check') return svg(<><rect x="2" y="2" width="12" height="12" rx="3" {...stroke} /><path d="M5 8.2l2 2L11 6" {...stroke} strokeWidth={1.7} /></>);
+    if (opt === 'cross') return svg(<><rect x="2" y="2" width="12" height="12" rx="3" {...stroke} /><path d="M5.5 5.5l5 5M10.5 5.5l-5 5" {...stroke} strokeWidth={1.7} /></>);
+    return svg(<rect x="2" y="2" width="12" height="12" rx="3" {...stroke} />);
+  }
+  if (field === 'trend') {
+    if (opt === 'up') return svg(<path d="M3 11l4-4 2.5 2.5L13 6M10 6h3v3" {...stroke} />);
+    if (opt === 'down') return svg(<path d="M3 5l4 4 2.5-2.5L13 10M10 10h3V7" {...stroke} />);
+    return svg(<path d="M3 8h10" {...stroke} />);
+  }
+  return null;
+}
+
+const INPUT = PROP_INPUT;
 const LABEL = 'text-ink-4 text-[11px]';
 
 /** Label above, control full width — for colour, font, text and row lists. */
 function Field({ label, trailing, description, children }: { label: string; trailing?: ReactNode; description?: string; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5" title={description}>
-      <div className="flex items-baseline justify-between gap-2">
-        <span className={LABEL}>{label}</span>
-        {trailing}
-      </div>
+      {label || trailing ? (
+        <div className="flex items-baseline justify-between gap-2">
+          <span className={LABEL}>{label}</span>
+          {trailing}
+        </div>
+      ) : null}
       {children}
     </div>
   );
 }
 
-/** Label left, control right — the compact editor row (sliders, segmented enums, switches). */
-function Row({ label, title, children }: { label: string; title?: string; children: ReactNode }) {
-  return (
-    <div className="flex min-h-[28px] items-center gap-3" title={title}>
-      <span className="text-ink-3 min-w-0 flex-1 truncate text-[11.5px]">{label}</span>
-      <div className="flex shrink-0 items-center gap-2">{children}</div>
-    </div>
-  );
-}
+const Row = PropRow;
 
 function Switch({ on, label, onToggle }: { on: boolean; label: string; onToggle: (next: boolean) => void }) {
   return (
@@ -93,6 +169,122 @@ function Switch({ on, label, onToggle }: { on: boolean; label: string; onToggle:
   );
 }
 
+/** An editable list of rows: inputs per text/number field, an icon toggle per small enum (cycles on
+ *  click), a drag handle to reorder, add within maxItems and remove on hover. */
+function RowList({
+  label,
+  description,
+  field,
+  rows,
+  labelOf,
+  componentId,
+  onChange,
+}: {
+  label: string;
+  description?: string;
+  field: FieldSchema;
+  rows: Array<Record<string, unknown>>;
+  labelOf: (key: string) => string;
+  componentId?: string;
+  onChange: (next: Array<Record<string, unknown>>) => void;
+}) {
+  const [dragFrom, setDragFrom] = useState<number | null>(null);
+  const [dropAt, setDropAt] = useState<number | null>(null);
+  const props = Object.entries(field.items?.properties ?? {});
+  const inputs = props.filter(([, rf]) => (rf.type === 'string' || rf.type === 'number') && !Array.isArray(rf.enum));
+  const toggles = props.filter(([, rf]) => Array.isArray(rf.enum) && rf.enum.length <= 4);
+  const blankRow = () => Object.fromEntries([
+    ...inputs.map(([rk, rf]) => [rk, rf.type === 'number' ? (rf.minimum ?? 0) : '']),
+    ...toggles.map(([rk, rf]) => [rk, rf.default ?? rf.enum![0]]),
+  ]);
+  const canAdd = field.maxItems === undefined || rows.length < field.maxItems;
+  const setRow = (index: number, patch: Record<string, unknown>) => onChange(rows.map((r, i) => (i === index ? { ...r, ...patch } : r)));
+  const move = (from: number, to: number) => {
+    if (from === to || from + 1 === to) return;
+    const next = [...rows];
+    const [picked] = next.splice(from, 1);
+    next.splice(to > from ? to - 1 : to, 0, picked!);
+    onChange(next);
+  };
+  return (
+    <Field
+      label={label}
+      description={description}
+      trailing={canAdd && (
+        <button type="button" onClick={() => onChange([...rows, blankRow()])} aria-label={t('workbench.propsAddRow')} title={t('workbench.propsAddRow')} className="text-ink-4 hover:text-ink rounded p-0.5">
+          <Plus size={12} />
+        </button>
+      )}
+    >
+      <div className="flex flex-col" onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropAt(null); }}>
+        {rows.map((row, index) => (
+          <div
+            key={index}
+            onDragOver={(e) => {
+              if (dragFrom === null) return;
+              e.preventDefault();
+              const r = e.currentTarget.getBoundingClientRect();
+              setDropAt(e.clientY < r.top + r.height / 2 ? index : index + 1);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (dragFrom !== null && dropAt !== null) move(dragFrom, dropAt);
+              setDragFrom(null);
+              setDropAt(null);
+            }}
+            className={`group relative flex items-center gap-1 py-[3px] ${dragFrom === index ? 'opacity-40' : ''}`}
+          >
+            {dropAt === index && <span className="bg-ink-3 absolute -top-px left-5 right-5 h-0.5 rounded-full" />}
+            {dropAt === rows.length && index === rows.length - 1 && <span className="bg-ink-3 absolute -bottom-px left-5 right-5 h-0.5 rounded-full" />}
+            <span
+              draggable
+              onDragStart={(e) => { setDragFrom(index); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(index)); }}
+              onDragEnd={() => { setDragFrom(null); setDropAt(null); }}
+              title={t('workbench.propsDragRow')}
+              className="text-ink-4 hover:text-ink flex h-8 w-4 shrink-0 cursor-grab items-center justify-center opacity-0 transition-opacity group-hover:opacity-100 active:cursor-grabbing"
+            >
+              <GripVertical size={12} />
+            </span>
+            {toggles.map(([rk, rf]) => {
+              const options = rf.enum!;
+              const current = typeof row[rk] === 'string' && options.includes(row[rk] as string) ? (row[rk] as string) : String(rf.default ?? options[0]);
+              const next = options[(options.indexOf(current) + 1) % options.length]!;
+              const word = kitOptionLabel(rk, current, componentId);
+              return (
+                <button
+                  key={rk}
+                  type="button"
+                  onClick={() => setRow(index, { [rk]: next })}
+                  title={`${word} → ${kitOptionLabel(rk, next, componentId)}`}
+                  aria-label={word}
+                  className={`hover:bg-panel-2/70 flex h-8 w-7 shrink-0 items-center justify-center rounded-md transition-colors ${current === 'none' ? 'text-ink-4' : 'text-ink'}`}
+                >
+                  {GLYPH_FIELDS.has(rk) ? <OptionGlyph field={rk} opt={current} /> : <span className="text-[10.5px]">{word}</span>}
+                </button>
+              );
+            })}
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              {inputs.map(([rk, rf]) => (
+                <input
+                  key={rk}
+                  value={row[rk] === undefined || row[rk] === null ? '' : String(row[rk])}
+                  placeholder={rf.title ?? labelOf(rk)}
+                  maxLength={rf.maxLength}
+                  onChange={(e) => setRow(index, { [rk]: rf.type === 'number' ? Number(e.target.value) : e.target.value })}
+                  className={INPUT}
+                />
+              ))}
+            </div>
+            <button type="button" onClick={() => onChange(rows.filter((_, i) => i !== index))} aria-label={t('workbench.propsRemoveRow')} className="text-ink-4 hover:text-ink shrink-0 rounded p-1 opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100">
+              <X size={11} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </Field>
+  );
+}
+
 export function PropsForm({
   schema,
   values,
@@ -103,6 +295,9 @@ export function PropsForm({
   resetMode = 'theme',
   className = 'flex flex-col gap-4',
   renderFont,
+  componentId,
+  group,
+  themeColors,
 }: {
   schema: PropsSchema;
   /** Effective values (defaults already applied by the host). */
@@ -119,14 +314,23 @@ export function PropsForm({
   className?: string;
   /** Host-supplied control for `format:'font'` fields (the font picker lives in the host); absent → plain input. */
   renderFont?: (key: string, value: string, commit: (next: string) => void) => ReactNode;
+  /** Registered component id, for naming its own layouts. */
+  componentId?: string;
+  /** Render only this group's properties (the host lays the groups out as sections). */
+  group?: PropertyGroup;
+  /** What theme-following colours resolve to, keyed by property (accent, ink, surfaceColor…). */
+  themeColors?: Record<string, string>;
 }) {
   const fields = Object.entries(schema.properties ?? {}).filter(
-    ([, f]) =>
+    ([key, f]) =>
       // Row arrays without an object row shape have no control; the rows() shape below gets one.
       (f.type !== 'array' || !!f.items?.properties) &&
       // Dependency declared by the schema, not by this form — a new component that declares one
       // hides correctly with no change here. The value is kept, just not shown.
-      (!f.showWhen || f.showWhen.in.includes(String(values[f.showWhen.field] ?? ''))),
+      (!f.showWhen || f.showWhen.in.includes(String(values[f.showWhen.field] ?? ''))) &&
+      (!group || propertyGroupOf(key, f) === group) &&
+      // Stored props keep legacy fields; editors don't offer them (their meaning moved elsewhere).
+      !f['x-hidden'],
   );
   const label = (key: string, f: FieldSchema) => f.title ?? labelOf(key);
   const commit = (key: string, v: unknown) => onChange({ ...values, [key]: v });
@@ -137,68 +341,74 @@ export function PropsForm({
       {fields.map(([key, f]) => {
         const v = values[key];
         if (f.type === 'array' && f.items?.properties) {
-          // Row list: every primitive field of every row is an input; add/remove within maxItems. Rows
-          // are content (what the component says), so this is the panel-side twin of canvas text edits.
-          const rowsValue = Array.isArray(v) ? (v as Array<Record<string, unknown>>) : [];
-          const rowFields = Object.entries(f.items.properties).filter(([, rf]) => rf.type === 'string' || rf.type === 'number');
-          const setRows = (rows: Array<Record<string, unknown>>) => commit(key, rows);
-          const blankRow = () => Object.fromEntries(rowFields.map(([rk, rf]) => [rk, rf.type === 'number' ? (rf.minimum ?? 0) : '']));
-          const canAdd = f.maxItems === undefined || rowsValue.length < f.maxItems;
+          // Row list: rows are content (what the component says), so this is the panel-side twin of
+          // canvas text edits. Text/number fields are inputs; a small enum (an item's mark) is an icon
+          // that cycles; rows reorder by dragging their handle.
           return (
-            <Field
+            <RowList
               key={key}
               label={label(key, f)}
               description={f.description}
-              trailing={canAdd && (
-                <button type="button" onClick={() => setRows([...rowsValue, blankRow()])} aria-label={t('workbench.propsAddRow')} title={t('workbench.propsAddRow')} className="text-ink-4 hover:text-ink rounded p-0.5">
-                  <Plus size={12} />
-                </button>
-              )}
-            >
-              <div className="flex flex-col gap-1.5">
-                {rowsValue.map((row, index) => (
-                  <div key={index} className="bg-canvas/45 group flex items-start gap-1.5 rounded-md p-1.5">
-                    <span className="text-ink-5 w-3 shrink-0 pt-1.5 text-center text-[10px] tabular-nums">{index + 1}</span>
-                    <div className="flex min-w-0 flex-1 flex-col gap-1">
-                      {rowFields.map(([rk, rf]) => (
-                        <input
-                          key={rk}
-                          value={row[rk] === undefined || row[rk] === null ? '' : String(row[rk])}
-                          placeholder={rf.title ?? labelOf(rk)}
-                          maxLength={rf.maxLength}
-                          onChange={(e) => {
-                            const next = rowsValue.map((r, i) => (i === index ? { ...r, [rk]: rf.type === 'number' ? Number(e.target.value) : e.target.value } : r));
-                            setRows(next);
-                          }}
-                          className={INPUT}
-                        />
-                      ))}
-                    </div>
-                    <button type="button" onClick={() => setRows(rowsValue.filter((_, i) => i !== index))} aria-label={t('workbench.propsRemoveRow')} className="text-ink-5 hover:text-ink mt-1 shrink-0 rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100">
-                      <X size={11} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </Field>
+              field={f}
+              rows={Array.isArray(v) ? (v as Array<Record<string, unknown>>) : []}
+              labelOf={labelOf}
+              componentId={componentId}
+              onChange={(next) => commit(key, next)}
+            />
           );
         }
         if (Array.isArray(f.enum)) {
+          const options = f.enum;
+          // Layouts are the component's biggest choice: a wrapping set of named tiles, not a
+          // squeezed segmented row that truncates past three options.
+          const drawn = GLYPH_FIELDS.has(key);
+          if (key === 'variant' || (options.length > 3 && !ICON_ONLY.has(key))) {
+            return (
+              // The layout section's title already names this choice; the tiles stand alone there.
+              <Field key={key} label={group === 'layout' && key === 'variant' ? '' : label(key, f)} description={f.description}>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {options.map((opt) => (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => commit(key, opt)}
+                      aria-pressed={v === opt}
+                      className={`min-w-0 truncate rounded-md px-2.5 py-1.5 text-left text-[11.5px] transition-[background-color,box-shadow,color] ${
+                        v === opt ? OPTION_ON : `bg-panel hover:bg-panel-2/70 ${OPTION_OFF}`
+                      }`}
+                    >
+                      <span className="flex min-w-0 items-center gap-2">
+                        {drawn ? <OptionGlyph field={key} opt={opt} /> : null}
+                        <span className="truncate">{kitOptionLabel(key, opt, componentId)}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </Field>
+            );
+          }
           return (
             <Row key={key} label={label(key, f)} title={f.description}>
-              <div className="bg-panel-2 flex rounded-md p-0.5 shadow-[inset_0_0_0_1px_var(--color-line-2)]">
-                {f.enum.map((opt) => (
-                  <button
-                    key={opt}
-                    type="button"
-                    onClick={() => commit(key, opt)}
-                    className={`min-w-0 truncate rounded px-2.5 py-1 text-[11px] transition-colors ${
-                      v === opt ? 'bg-panel text-ink shadow-sm' : 'text-ink-3 hover:text-ink'
-                    }`}
-                  >
-                    {opt}
-                  </button>
-                ))}
+              <div className="bg-panel flex rounded-md p-0.5">
+                {options.map((opt) => {
+                  const word = kitOptionLabel(key, opt, componentId);
+                  return (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => commit(key, opt)}
+                      aria-pressed={v === opt}
+                      title={word}
+                      className={`flex min-w-0 items-center gap-1 truncate rounded px-2 py-1 text-[11px] transition-colors ${
+                        v === opt ? OPTION_ON : OPTION_OFF
+                      }`}
+                    >
+                      <OptionGlyph field={key} opt={opt} />
+                      {/* Four drawn options fit the row as drawings; the word rides in the tooltip. */}
+                      {ICON_ONLY.has(key) && options.length > 3 ? <span className="sr-only">{word}</span> : word}
+                    </button>
+                  );
+                })}
               </div>
             </Row>
           );
@@ -210,33 +420,52 @@ export function PropsForm({
             </Row>
           );
         }
-        if (f.type === 'number') {
+        if ((f.type === 'number' || f.type === 'integer') && f.maximum === undefined) {
+          // An unbounded number (a price, a count) is typed, not dragged.
+          return (
+            <Row key={key} label={label(key, f)} title={f.description}>
+              <input
+                type="number"
+                value={typeof v === 'number' ? v : ''}
+                min={f.minimum}
+                step={f.multipleOf ?? (f.type === 'integer' ? 1 : 'any')}
+                onChange={(e) => { const next = e.target.valueAsNumber; if (Number.isFinite(next)) commit(key, f.type === 'integer' ? Math.round(next) : next); }}
+                className={`${INPUT} w-28 text-right tabular-nums`}
+              />
+            </Row>
+          );
+        }
+        if (f.type === 'number' || f.type === 'integer') {
           const min = f.minimum ?? 0;
           const max = f.maximum ?? 1;
           const step = f.multipleOf ?? (max - min) / 100;
           const num = typeof v === 'number' ? v : min;
           return (
-            <Row key={key} label={label(key, f)} title={f.description}>
-              <input
-                type="range"
-                min={min}
-                max={max}
-                step={step}
-                value={num}
-                onChange={(e) => live(key, Number(e.target.value))}
-                onPointerUp={(e) => commit(key, Number((e.target as HTMLInputElement).value))}
-                onKeyUp={(e) => commit(key, Number((e.target as HTMLInputElement).value))}
-                onBlur={(e) => commit(key, Number(e.target.value))}
-                className="accent-accent h-1.5 w-24 cursor-pointer"
-              />
-              <span className="text-ink-4 w-10 text-right text-[11px] tabular-nums">{Math.round(num * 100) / 100}</span>
-            </Row>
+            <PropSlider
+              key={key}
+              label={label(key, f)}
+              title={f.description}
+              value={num}
+              min={min}
+              max={max}
+              step={step}
+              display={f['x-display'] === 'percent' ? `${Math.round(num * 100)}%` : String(Math.round(num * 100) / 100)}
+              onLive={(next) => live(key, next)}
+              onCommit={(next) => commit(key, next)}
+            />
           );
         }
         if (f.format === 'font') {
           const val = typeof v === 'string' ? v : String(f.default ?? 'sans');
           return (
-            <Field key={key} label={label(key, f)} description={f.description}>
+            <Field
+              key={key}
+              label={label(key, f)}
+              description={f.description}
+              trailing={resetMode === 'theme' && val ? (
+                <button type="button" onClick={() => commit(key, '')} className="text-ink-4 hover:text-ink text-[10.5px]">{t('kitProp.followTheme')}</button>
+              ) : undefined}
+            >
               {renderFont ? renderFont(key, val, (next) => commit(key, next)) : <input value={val} onChange={(e) => commit(key, e.target.value)} className={INPUT} />}
             </Field>
           );
@@ -253,71 +482,20 @@ export function PropsForm({
             a >= 100 ? hex6 : hex6 + Math.round((a / 100) * 255).toString(16).padStart(2, '0');
           const resetValue = resetMode === 'theme' ? '' : (f.default ?? '');
           const isReset = resetMode === 'theme' ? !val : val === resetValue;
-          const resetTitle = resetMode === 'theme' ? t('kitProp.followTheme') : t('workbench.resetProp');
-          const ring = 'ring-accent ring-2 ring-offset-1 ring-offset-panel';
-          const swatch = 'h-6 w-6 shrink-0 rounded-full shadow-[inset_0_0_0_1px_rgba(127,127,127,0.25)] transition-transform hover:scale-105';
           return (
-            <Field
+            <ColorControl
               key={key}
               label={label(key, f)}
-              description={f.description}
-              trailing={hex && (
-                <span className="text-ink-4 flex items-center gap-1.5 text-[11px] tabular-nums">
-                  <span className="h-3 w-3 rounded-full shadow-[inset_0_0_0_1px_rgba(127,127,127,0.25)]" style={{ background: val }} />
-                  {rgb.toUpperCase()}{alpha < 100 ? ` · ${alpha}%` : ''}
-                </span>
-              )}
-            >
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => commit(key, resetValue)}
-                  title={resetTitle}
-                  aria-label={resetTitle}
-                  className={`${swatch} bg-[linear-gradient(135deg,transparent_44%,#f43f5e_44%,#f43f5e_56%,transparent_56%)] ${isReset ? ring : ''}`}
-                />
-                {swatches.map((sw) => (
-                  <button
-                    key={sw.value}
-                    type="button"
-                    onClick={() => commit(key, withAlpha(sw.value, alpha))}
-                    title={sw.name}
-                    aria-label={sw.name}
-                    className={`${swatch} ${rgb.toLowerCase() === sw.value.toLowerCase() ? ring : ''}`}
-                    style={{ background: sw.value }}
-                  />
-                ))}
-                <label
-                  title={t('kitProp.customColor')}
-                  className={`${swatch} relative cursor-pointer overflow-hidden bg-[conic-gradient(#ff6b5f,#ffd24d,#37d6b0,#4d7cfe,#b89cff,#ff6b5f)]`}
-                >
-                  <input
-                    type="color"
-                    value={rgb || '#ffffff'}
-                    onInput={(e) => live(key, withAlpha((e.target as HTMLInputElement).value, alpha))}
-                    onChange={(e) => commit(key, withAlpha(e.target.value, alpha))}
-                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                    aria-label={t('kitProp.customColor')}
-                  />
-                </label>
-              </div>
-              {hex && (
-                <div className="flex items-center gap-2">
-                  <span className="text-ink-4 shrink-0 text-[10px]">{t('kitProp.opacity')}</span>
-                  <input
-                    type="range"
-                    min={10}
-                    max={100}
-                    step={5}
-                    value={alpha}
-                    onChange={(e) => live(key, withAlpha(rgb, Number(e.target.value)))}
-                    onPointerUp={(e) => commit(key, withAlpha(rgb, Number((e.target as HTMLInputElement).value)))}
-                    onBlur={(e) => commit(key, withAlpha(rgb, Number(e.target.value)))}
-                    className="accent-accent h-1.5 min-w-0 flex-1 cursor-pointer"
-                  />
-                </div>
-              )}
-            </Field>
+              title={f.description}
+              value={rgb}
+              swatches={key === 'accent' ? ACCENT_SWATCHES : key === 'ink' ? INK_SWATCHES : swatches}
+              resetLabel={resetMode === 'theme' ? t('kitProp.followTheme') : t('workbench.resetProp')}
+              isReset={isReset}
+              onReset={() => commit(key, resetValue)}
+              onPick={(next) => commit(key, withAlpha(next, alpha))}
+              alpha={{ value: alpha, label: t('kitProp.opacity'), onChange: (a) => commit(key, withAlpha(rgb, a)) }}
+              {...(resetMode === 'theme' && themeColors?.[key] ? { follows: themeColors[key] } : {})}
+            />
           );
         }
         // string
@@ -371,6 +549,7 @@ export function KitPropsPanel({
       values={current}
       onChange={(next) => onPatch({ ...((block.slots as { props?: Record<string, unknown> }).props ?? {}), ...next })}
       labelOf={kitFieldLabel}
+      componentId={cid}
       className="flex h-full min-h-0 w-60 flex-col gap-4 overflow-y-auto p-3"
     />
   );

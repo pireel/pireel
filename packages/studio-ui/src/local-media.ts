@@ -19,11 +19,11 @@
 import { studioProviders } from '@pireel/studio-engine/providers';
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 import { fileMatchesSig, fileNameFromSig, fileSig, isContentSig, rememberDurableFileSig, sigSize } from './media';
+import { additionalMediaCacheEntries, beginMediaCacheSession, evictUnusedMediaEntry, mediaCacheEvictionPlan, MEDIA_CACHE_RECENT_MS, withMediaCacheRead, type AdditionalMediaCacheEntry, type MediaCacheEntry } from './local-media-cache';
 
 const DIR = 'local-videos';
-// No count-based eviction: a project can legitimately hold a hundred local videos (a real 100-clip
-// montage lost its 13th import to the old 12-file LRU). The browser's storage quota is the only cap;
-// a failed write surfaces to the caller instead of silently evicting someone else's footage.
+// Automatic eviction is byte-budgeted and requires a confirmed cloud copy; file counts never
+// decide whether footage is expendable. Unuploaded files are protected working data.
 
 /* ---------- Legacy native handles (read-only, silent) ---------- */
 
@@ -123,6 +123,7 @@ interface StoredMeta {
   lastModified: number;
   /** Legacy flag from the handle era; ignored (every OPFS entry is a full copy now). */
   pinned?: boolean;
+  cache?: { bytes: number; lastAccess: number; cloudConfirmed: boolean };
 }
 
 /** OPFS names must not be derived by replacing unsupported characters: two different CJK names can
@@ -144,10 +145,83 @@ async function readStoredMeta(dir: FileSystemDirectoryHandle, key: string): Prom
 }
 
 async function writeStoredMeta(dir: FileSystemDirectoryHandle, key: string, meta: StoredMeta): Promise<void> {
-  const mh = await dir.getFileHandle(`${key}.meta.json`, { create: true });
-  const mw = await mh.createWritable();
-  await mw.write(JSON.stringify(meta));
-  await mw.close();
+  const write = async () => {
+    const previous = await readStoredMeta(dir, key);
+    const file = await (await dir.getFileHandle(key)).getFile();
+    const value: StoredMeta = { ...meta, cache: { bytes: file.size, lastAccess: Date.now(), cloudConfirmed: meta.cache?.cloudConfirmed === true || previous?.cache?.cloudConfirmed === true } };
+    const mh = await dir.getFileHandle(`${key}.meta.json`, { create: true });
+    const mw = await mh.createWritable();
+    await mw.write(JSON.stringify(value));
+    await mw.close();
+  };
+  if (typeof navigator !== 'undefined' && navigator.locks) await navigator.locks.request(`studio:media-cache:meta:${key}`, write);
+  else await write();
+}
+
+let lastCacheSweep = 0;
+/** Silent, budget-triggered reclamation. No metadata or cloud objects are removed from projects. */
+export async function maintainLocalMediaCache(incomingBytes = 0, force = false): Promise<number> {
+  if (typeof navigator === 'undefined' || !navigator.locks || navigator.onLine === false) return 0;
+  if (!force && incomingBytes < 16 * 1024 ** 2 && Date.now() - lastCacheSweep < 60_000) return 0;
+  try {
+    return await navigator.locks.request('studio:media-cache:sweep', { ifAvailable: true }, async lock => {
+      if (!lock) return 0;
+      const dir = await dirHandle();
+      const entries: (MediaCacheEntry | AdditionalMediaCacheEntry)[] = await additionalMediaCacheEntries();
+      const iterable = dir as (FileSystemDirectoryHandle & { keys(): AsyncIterableIterator<string> }) | null;
+      for await (const name of iterable?.keys() ?? []) {
+        if (!name.endsWith('.meta.json')) continue;
+        const key = name.slice(0, -'.meta.json'.length);
+        try {
+          const [meta, file] = await Promise.all([readStoredMeta(dir!, key), dir!.getFileHandle(key).then(handle => handle.getFile())]);
+          entries.push({ key, bytes: file.size, lastAccess: meta?.cache?.lastAccess ?? file.lastModified, cloudConfirmed: meta?.cache?.cloudConfirmed === true });
+        } catch { /* Missing/partial entries are never assumed recoverable. */ }
+      }
+      const estimate = await navigator.storage?.estimate?.().catch(() => ({})) ?? {};
+      const plan = mediaCacheEvictionPlan(entries, estimate, incomingBytes, force);
+      let reclaimed = 0;
+      for (const entry of plan.candidates) {
+        if (reclaimed >= plan.reclaimBytes) break;
+        reclaimed += await evictUnusedMediaEntry(entry.key, async () => {
+          const extra = entry as AdditionalMediaCacheEntry;
+          if (extra.remove) return extra.remove();
+          if (!dir) return 0;
+          // Recheck after taking the lock: another tab may just have accessed this file.
+          const latest = await readStoredMeta(dir, entry.key);
+          if (!latest?.cache?.cloudConfirmed || latest.cache.lastAccess >= Date.now() - MEDIA_CACHE_RECENT_MS) return 0;
+          try {
+            await dir.removeEntry(entry.key);
+            await dir.removeEntry(`${entry.key}.meta.json`).catch(() => {});
+            return entry.bytes;
+          } catch { return 0; }
+        });
+      }
+      lastCacheSweep = Date.now();
+      return reclaimed;
+    });
+  } catch { return 0; }
+}
+
+/** Called only after an authoritative upload acknowledgement or successful cloud retrieval. */
+export async function markLocalMediaSynced(sig: string): Promise<void> {
+  try {
+    const key = await sigKey(sig);
+    await withMediaCacheRead(key, async () => {
+      const dir = await dirHandle();
+      if (!dir) return;
+      const file = await (await dir.getFileHandle(key)).getFile();
+      const meta = await readStoredMeta(dir, key);
+      await writeStoredMeta(dir, key, { ...(meta ?? { name: fileNameFromSig(sig) || file.name, type: file.type, lastModified: file.lastModified }), cache: { bytes: file.size, lastAccess: Date.now(), cloudConfirmed: true } });
+    });
+  } catch { /* A missing cache remains a cloud-only file. */ }
+}
+
+/** Opening an editor protects every file it reads, and periodically reclaims inactive history. */
+export function startLocalMediaCacheSession(): () => void {
+  const release = beginMediaCacheSession();
+  const startup = setTimeout(() => { void maintainLocalMediaCache(); }, 0);
+  const timer = setInterval(() => { void maintainLocalMediaCache(); }, 60_000);
+  return () => { clearTimeout(startup); clearInterval(timer); release(); };
 }
 
 async function dirHandle(): Promise<FileSystemDirectoryHandle | null> {
@@ -163,7 +237,11 @@ async function dirHandle(): Promise<FileSystemDirectoryHandle | null> {
 export interface SaveLocalVideoOptions {
   /** @deprecated no-op since handles were retired; every entry is a full copy. */
   pinned?: boolean;
+  /** Share of the bytes written so far (0–1); the write then goes in slices. */
+  onProgress?: (fraction: number) => void;
 }
+
+const PROGRESS_SLICE_BYTES = 16 * 1024 * 1024;
 
 /** Cache a file's bytes on this device under its sig. Returns false when the cache is unavailable
  * or full — callers must treat that as "no local cache", not as a failed import. */
@@ -177,7 +255,16 @@ export function fileOrigin(file: File): string | undefined {
   return fileOrigins.get(file);
 }
 
-export async function saveLocalVideo(file: File, sig: string, _options?: SaveLocalVideoOptions): Promise<boolean> {
+export async function saveLocalVideo(file: File, sig: string, options?: SaveLocalVideoOptions): Promise<boolean> {
+  return withMediaCacheRead(await sigKey(sig), async () => {
+    await maintainLocalMediaCache(await hasLocalVideo(sig) ? 0 : file.size);
+    if (await writeLocalVideo(file, sig, options)) return true;
+    if (await maintainLocalMediaCache(file.size, true)) return writeLocalVideo(file, sig, options);
+    return false;
+  });
+}
+
+async function writeLocalVideo(file: File, sig: string, options?: SaveLocalVideoOptions): Promise<boolean> {
   file = alignFileToSig(file, sig); // stored meta must match the sig key, or later loads mint a different identity
   const dir = await dirHandle();
   if (!dir) return false;
@@ -187,7 +274,10 @@ export async function saveLocalVideo(file: File, sig: string, _options?: SaveLoc
     const key = await sigKey(sig);
     try {
       const existing = await (await dir.getFileHandle(key)).getFile();
-      if (existing.size === file.size) return true; // Same sig fully on disk: skip byte rewrite
+      if (existing.size === file.size) {
+        await writeStoredMeta(dir, key, { name: file.name, type: file.type, lastModified: file.lastModified });
+        options?.onProgress?.(1); return true;
+      } // Same sig fully on disk: skip byte rewrite
       // Size mismatch = an interrupted earlier write; fall through and rewrite so the entry heals
     } catch {
       /* Not present → write it */
@@ -195,7 +285,15 @@ export async function saveLocalVideo(file: File, sig: string, _options?: SaveLoc
     const meta: StoredMeta = { name: file.name, type: file.type, lastModified: file.lastModified };
     const fh = await dir.getFileHandle(key, { create: true });
     const w = await fh.createWritable();
-    await w.write(file);
+    const progress = options?.onProgress;
+    if (progress) {
+      for (let at = 0; at < file.size; at += PROGRESS_SLICE_BYTES) {
+        await w.write(file.slice(at, at + PROGRESS_SLICE_BYTES));
+        progress(Math.min(1, (at + PROGRESS_SLICE_BYTES) / file.size));
+      }
+    } else {
+      await w.write(file);
+    }
     await w.close();
     await writeStoredMeta(dir, key, meta);
     return true;
@@ -255,6 +353,13 @@ export async function saveLocalStream(
   sig: string,
   options: SaveLocalStreamOptions,
 ): Promise<File> {
+  return withMediaCacheRead(await sigKey(sig), async () => {
+    await maintainLocalMediaCache(await hasLocalVideo(sig) ? 0 : options.expectedSize ?? sigSize(sig) ?? 0);
+    return writeLocalStream(stream, sig, options);
+  });
+}
+
+async function writeLocalStream(stream: ReadableStream<Uint8Array<ArrayBuffer>>, sig: string, options: SaveLocalStreamOptions): Promise<File> {
   const dir = await dirHandle();
   if (!dir) {
     // Private browsing/embedded webviews may expose no OPFS. Cloud bytes must still be usable;
@@ -336,6 +441,9 @@ async function loadFromOpfs(sig: string): Promise<File | null> {
       const expectedSize = sigSize(sig);
       if (!stored.size || (expectedSize != null && stored.size !== expectedSize)) return null;
       const meta = await readStoredMeta(dir, key);
+      if (!meta?.cache || Date.now() - meta.cache.lastAccess > 60_000) {
+        await writeStoredMeta(dir, key, meta ?? { name: stored.name, type: stored.type, lastModified: stored.lastModified }).catch(() => {});
+      }
       return markFileOrigin(alignFileToSig(meta ? new File([stored], meta.name, { type: meta.type, lastModified: meta.lastModified }) : stored, sig), 'opfs');
     } catch {
       // One-time compatibility read for files written before keys became collision-safe hashes.
@@ -404,7 +512,7 @@ async function loadFromDeviceProvider(sig: string): Promise<File | null> {
 /** Device-only lanes: OPFS cache → desktop provider → legacy granted handle. Never prompts, never
  * touches the network. Use resolveAssetBytes when the cloud copy is an acceptable source. */
 export async function loadLocalVideo(sig: string): Promise<File | null> {
-  return (await loadFromOpfs(sig)) ?? (await loadFromDeviceProvider(sig)) ?? loadFromLegacyHandle(sig);
+  return withMediaCacheRead(await sigKey(sig), async () => (await loadFromOpfs(sig)) ?? (await loadFromDeviceProvider(sig)) ?? loadFromLegacyHandle(sig));
 }
 
 export interface ResolveAssetBytesOptions {
@@ -430,7 +538,8 @@ export async function resolveAssetBytes(
   const cloud = await studioProviders().vault.fetch(sig, { cloudKey: entry.cloudKey, label: entry.label });
   if (!cloud) return null;
   const aligned = alignFileToSig(cloud, sig, entry.label);
-  void saveLocalVideo(aligned, sig);
+  await saveLocalVideo(aligned, sig);
+  await markLocalMediaSynced(sig);
   return aligned;
 }
 

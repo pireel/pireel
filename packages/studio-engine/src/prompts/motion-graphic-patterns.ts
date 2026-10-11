@@ -28,7 +28,7 @@ specific form when that communicates the scene better.
 
 The same job can take many forms. A comparison may be split footage, a typographic showdown, two product
 plates, a slope chart, or a before/after reveal. A process may be a path through real footage rather than a
-diagram. Prefer the form that makes THIS evidence easiest to understand in the active visual direction.`;
+diagram. Prefer the form that makes THIS evidence easiest to understand in the active theme and brand.`;
 
 export interface MotionGraphicPattern {
   id: string;
@@ -534,11 +534,11 @@ export function motionGraphicPatternSection(
     .filter((pattern): pattern is MotionGraphicPattern => pattern != null);
   if (!selected.length) {
     return `MOMENT-SPECIFIC FORM REFERENCES
-No close reference was retrieved. Derive a content-specific structure from the evidence, active visual direction,
+No close reference was retrieved. Derive a content-specific structure from the evidence, the active theme and brand,
 and Motion Graphic capability map. Do not fall back to a generic card merely because no named pattern matched.`;
   }
   return `MOMENT-SPECIFIC FORM REFERENCES — RETRIEVED, NOT REQUIRED OUTPUT TYPES
 Use these as structural help for this moment. They are not renderer ids or an allowlist; combine, transform, or
-ignore them when another form communicates the evidence better. The active visual direction owns appearance.
+ignore them when another form communicates the evidence better. The active theme and brand own appearance.
 ${selected.map((pattern) => `- ${pattern.id}: ${pattern.guidance}`).join("\n")}`;
 }

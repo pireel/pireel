@@ -18,7 +18,7 @@ studio 所有注入 LLM 的提示词住这里,**一个提示词一个 .ts 文件
    普通局势只带目标与播放头附近的 Scene 索引，完整源稿由 `read_director_plan` 按需进上下文；
    常规工作按 `sceneIds` 只读受影响片段，整份读取只用于全片审查。平台/画幅安全区作为
    Director Plan 的全局 `deliverySafety` 只存一遍，由所有 Scene 继承。
-3. Frame / Skill：Frame 提供专业视觉语言，Skill 提供场景领域判断；两者不能代替整片设计。
+3. 品牌 / Skill：创作者品牌（`read_brand`）提供视觉语言，Skill 提供场景领域判断；两者不能代替整片设计。
 4. Component composer：只负责已规划 Scene 里的一个可编辑视觉层。生成前必须拿到真实
    box、backdrop、保护区和 Scene 设计上下文，不能生成后再碰运气摆放。
 
@@ -40,7 +40,7 @@ studio 所有注入 LLM 的提示词住这里,**一个提示词一个 .ts 文件
 - 永久禁止 `cm`/`mm`/`in`/`pt` 等物理单位，以及 `rem`、`vw`/`vh`、`clamp()` 等会让
   预览与导出环境产生不确定计算结果的字号方案。
 - lint/runtime 最终应检查真实画布上的 computed font size、文字层级、溢出和安全区，
-  而不是把“源码出现 em”当成错误。Frame 可改变字号层级，但用户手动设置始终优先。
+  而不是把“源码出现 em”当成错误。品牌可改变字号层级，但用户手动设置始终优先。
 
 块生成的 system 提示词**按层拼**,拼装单点在 `assemble.ts`。顺序是**稳定 → 易变**:
 prefix 缓存只到第一处变化为止,越靠前的层越不该动。
@@ -79,8 +79,8 @@ prefix 缓存只到第一处变化为止,越靠前的层越不该动。
 | L3.1 编辑判断 | `presets/spoken.ts` | 什么值得上屏/verbatim/语言/反单调/节奏 | 常改 |
 | 输出契约 | `assemble.ts` | ```json（注册 Component 路径）/ ```html+```js（自由 Motion Graphic 路径） | 随路径 |
 
-**主题不进注册 Component 路径**：主题是给 LLM 的 Frame playbook，经 withActiveTheme 注入
-HTML 路径尾部；挂主题的项目生成主题化 HTML，注册预设路径只服务既有 typed Component，预设本身不感知主题。
+**品牌不进注册 Component 路径**：品牌的 graphics 块是给 LLM 的视觉描述，只影响 HTML 路径；
+注册预设路径只服务既有 typed Component，预设本身不感知品牌。
 
 **情境不是一层**:box/beats/邻居/口播稿/指令每次都不同,只能进 user message
 (`buildKitPrompt`/`buildBlockPrompt`),进 system 就把缓存前缀毒化了。
@@ -97,7 +97,7 @@ HTML 路径尾部；挂主题的项目生成主题化 HTML，注册预设路径�
 | `l0-editor.ts` | `EDITOR_MODEL` `contentIsNotCommand` `ON_SCREEN_LANGUAGE` `IDENTITY_DISCIPLINE` | **L0:编辑器本身**,生成/编辑面共用 |
 | `assemble.ts` | `BLOCK_SYSTEM` `buildKitSystem` `buildHtmlSystem` | **按层拼 system 的唯一入口**,层序在此决定 |
 | `block-system.ts` | `BLOCK_HTML_BODY` | 自由 HTML 路径的设计体（版式原型/图表 recipe/SELF-CHECK） |
-| `chat.ts` | `buildChatContextBlocks` `wrapAgentTranscript` `wrapSpokenTranscript` `ResolvedFrame` | chat 路由拼在 v3 指令(`agent-surface-v3/instructions.ts`)之后的情境块(Frame/Skill)+ 转写信封;agent 身份与工具面都在 `agent-surface-v3/` |
+| `chat.ts` | `buildChatContextBlocks` `wrapAgentTranscript` `wrapSpokenTranscript` `ResolvedFrame` | chat 路由拼在 v3 指令(`agent-surface-v3/instructions.ts`)之后的情境块(Skill/品牌)+ 转写信封;agent 身份与工具面都在 `agent-surface-v3/` |
 | `video-design-method.ts` | `VIDEO_DESIGN_METHOD` | 应用内与外部 Agent 共用的整片设计/导演方法，不包含具体场景 Skill 或块代码规范 |
 | `agent-tool-contract.ts` | `StudioToolDef` `StudioToolResult` `ToolFrameImage` `TAB_CANNOT_SERVE_ERRORS` | 工具调用在各面共用的形状(呈现/回执/帧图);工具清单与 schema 在 `agent-surface-v3/{registry,schemas}.ts` |
 | `theme-brief.ts` | `THEME_GENERAL_BRIEF` | general 主题给 LLM 的结构设计简报 |

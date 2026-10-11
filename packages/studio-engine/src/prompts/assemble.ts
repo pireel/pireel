@@ -53,7 +53,7 @@ After the note line, in THIS order:
 - then one \`\`\`json block = the EDITABLE PROPERTIES schema (the JSON-Schema properties object). Omit this \`\`\`json block only when the component genuinely has no editable properties.`;
 
 /** The registered Component path's system prompt. It is currently used for an explicit Motion Graphic preset choice or
- *  editing an existing kit block; new generation uses the free-form path even without a Frame.
+ *  editing an existing kit block; new generation uses the free-form path even without brand graphics.
  *  registered Component edit. Registered presets themselves stay unthemed. */
 export function buildKitSystem(opts?: ComponentSystemOptions): string {
   const preset = getPreset(opts?.presetId);

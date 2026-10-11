@@ -44,7 +44,7 @@ import {
   type TransitionDirection,
   type VideoShotTimelinePlacement,
   assembleHtml,
-  cutTransitions,
+  transitionWindows,
   displayTextLocalFontFamily,
   parseClipInset,
   localImageLocator,
@@ -67,6 +67,7 @@ import { type MaskedAudioRange, maskedAudioAt } from '@pireel/studio-engine/word
 import { supplementalVisualAudioMixSegments } from './visual-render-plan';
 import {
   activeVisualMedia,
+  prepareVisualPersonMattes,
   disposeVisualImageBitmaps,
   drawSupplementalVisualMedia,
   loadExportVideoFile,
@@ -585,24 +586,27 @@ export async function captureCompositionFrame(opts: {
       const sample = await sampleAt(video.rig, video.srcT);
       if (sample) visualSamples.set(clipId, { sourceWidth: video.rig.sw, sourceHeight: video.rig.sh, sample });
     }
-    let htmlLayerIndex = 0;
-    for (const layer of visualLayers) {
-      if (layer.kind === 'media') {
-        drawSupplementalVisualMedia({
-          ctx,
-          visuals: layer.visuals,
-          timelineTime: t,
-          imageBitmaps: visualImages,
-          videoSamples: visualSamples,
-          targetWidth: W,
-          targetHeight: H,
-          scaleX: outW / W,
-          scaleY: outH / H,
-        });
-      } else {
-        ctx.drawImage(overlayImages[htmlLayerIndex++]!, 0, 0);
+    const releaseMattes = await prepareVisualPersonMattes(activeVisuals, visualSamples, t);
+    try {
+      let htmlLayerIndex = 0;
+      for (const layer of visualLayers) {
+        if (layer.kind === 'media') {
+          drawSupplementalVisualMedia({
+            ctx,
+            visuals: layer.visuals,
+            timelineTime: t,
+            imageBitmaps: visualImages,
+            videoSamples: visualSamples,
+            targetWidth: W,
+            targetHeight: H,
+            scaleX: outW / W,
+            scaleY: outH / H,
+          });
+        } else {
+          ctx.drawImage(overlayImages[htmlLayerIndex++]!, 0, 0);
+        }
       }
-    }
+    } finally { releaseMattes(); }
     let localSimilarityFingerprint: ReviewFrameFingerprint | undefined;
     if (opts.localSimilarityFingerprint) {
       try {
@@ -637,6 +641,12 @@ export async function captureCompositionFrame(opts: {
     disposeCaptureSources();
     overlay.dispose();
   }
+}
+
+/** Audio goes through the 48 kHz timeline mixer (instead of per-sample passthrough) when anything must
+ *  be summed or rewritten; a whole-mix loudness setting needs its master stage even for plain 1× narration. */
+export function exportNeedsTimelineMix(input: { loudness: boolean; clips: boolean; visualVideos: number; tones: number; clipMaskBeep: boolean; unencodableSource: boolean; retimed: boolean }): boolean {
+  return input.loudness || input.clips || input.visualVideos > 0 || input.tones > 0 || input.clipMaskBeep || input.unencodableSource || input.retimed;
 }
 
 export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
@@ -797,9 +807,12 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     output.addVideoTrack(videoSource, { frameRate: FPS });
     const withClips = !!opts.audio?.length;
     const clipMaskBeep = [...(opts.clipMasks?.values() ?? [])].some((ranges) => ranges.some((range) => range.audio === 'beep'));
-    const needsTimelineMix = withClips || visualVideos.length > 0 || tones.length > 0 || clipMaskBeep || segs.some((segment) =>
+    // Browser AAC encoders take 44.1/48 kHz mono or stereo only; a source outside that (phone memos,
+    // synthesized speech at 22.05 kHz) goes through the 48 kHz mixer instead of being passed through.
+    const unencodableSource = [...rigs.values()].some((rig) => rig.audio && (![44100, 48000].includes(rig.audio.sampleRate) || rig.audio.numberOfChannels > 2));
+    const needsTimelineMix = exportNeedsTimelineMix({ loudness: !!comp.audioLoudness, clips: withClips, visualVideos: visualVideos.length, tones: tones.length, clipMaskBeep, unencodableSource, retimed: segs.some((segment) =>
       Math.abs(segmentSourceRate(segment, segment.timelineStart, segment.timelineEnd) - 1) > 1e-6,
-    );
+    ) });
     const anyAudio = withClips
       || tones.length > 0
       || segs.some((s) => (s.gain ?? 1) > 0 && rigs.get(s.key)?.audio)
@@ -838,8 +851,14 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     const lctx = liveC.getContext('2d')!;
     const ghostC = new OffscreenCanvas(outW, outH);
     const gctx = ghostC.getContext('2d')!;
-    const trsX: { cut: number; half: number; effect: string; dir: string; preKey: string; postKey: string; segA: ExpSeg; segB: ExpSeg }[] = [];
-    for (const tr of opts.primaryVisualHidden ? [] : cutTransitions(shots, opts.videoPlacements)) {
+    // A window that hands over at a spine cut decodes the other side; one without a cut plays the
+    // effect on the running picture (both sides are the current frame).
+    const trsX: { start: number; end: number; cut: number | null; effect: string; dir: string; preKey?: string; postKey?: string; segA?: ExpSeg; segB?: ExpSeg }[] = [];
+    for (const tr of opts.primaryVisualHidden ? [] : transitionWindows(opts.comp.transitions, shots, opts.videoPlacements)) {
+      if (tr.cut == null) {
+        trsX.push({ start: tr.start, end: tr.end, cut: null, effect: tr.effect, dir: tr.dir });
+        continue;
+      }
       let iB = -1;
       for (let bi = 1; bi < segs.length; bi++) {
         if (Math.abs(segStarts[bi]! - tr.cut) < 0.05) {
@@ -857,9 +876,9 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       const postKey = `g_post_${trsX.length}`;
       const rateA = segmentSourceRate(segA, segA.timelineStart, segA.timelineEnd);
       const rateB = segmentSourceRate(segB, segB.timelineStart, segB.timelineEnd);
-      rigs.set(preKey, await openSource(fB, Math.max(0, segB.srcStart - tr.half * rateB), segB.srcStart + 0.2 * rateB));
-      rigs.set(postKey, await openSource(fA, segA.srcEnd, segA.srcEnd + (tr.half + 0.2) * rateA));
-      trsX.push({ cut: tr.cut, half: tr.half, effect: tr.effect, dir: tr.dir, preKey, postKey, segA, segB });
+      rigs.set(preKey, await openSource(fB, Math.max(0, segB.srcStart - (tr.cut - tr.start) * rateB), segB.srcStart + 0.2 * rateB));
+      rigs.set(postKey, await openSource(fA, segA.srcEnd, segA.srcEnd + (tr.end - tr.cut + 0.2) * rateA));
+      trsX.push({ start: tr.start, end: tr.end, cut: tr.cut, effect: tr.effect, dir: tr.dir, preKey, postKey, segA, segB });
     }
     // gl-transitions mixer (output resolution; not built if there are no transitions)
     const mixer = trsX.length ? createGlMixer(outW, outH) : null;
@@ -876,8 +895,8 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     }
     for (const visual of visualVideos) lastUse.set(visualVideoKeys.get(visual.clipId)!, visual.endSec);
     for (const x of trsX) {
-      lastUse.set(x.preKey, x.cut + x.half);
-      lastUse.set(x.postKey, x.cut + x.half);
+      if (x.preKey) lastUse.set(x.preKey, x.end);
+      if (x.postKey) lastUse.set(x.postKey, x.end);
     }
     const retireVideoStream = (rig: SourceRig) => {
       rig.cur?.close();
@@ -934,14 +953,15 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
           .then((img) => ((tm.raster += performance.now() - s0), img));
       }));
 
-      const tr = trsX.find((x) => t >= x.cut - x.half && t <= x.cut + x.half) ?? null;
+      const tr = trsX.find((x) => t >= x.start && t <= x.end) ?? null;
+      const handover = tr && tr.cut != null ? tr : null;
       // Compute shadow sampling params first; the three decodes (overlay/current frame/shadow frame) are independent → parallel
-      const pre = tr ? t < tr.cut : false;
-      const gseg = tr ? (pre ? tr.segB : tr.segA) : null;
-      const gRig = tr ? rigs.get(pre ? tr.preKey : tr.postKey) : undefined;
+      const pre = handover ? t < handover.cut! : false;
+      const gseg = handover ? (pre ? handover.segB! : handover.segA!) : null;
+      const gRig = handover ? rigs.get(pre ? handover.preKey! : handover.postKey!) : undefined;
       const gRate = gseg ? segmentSourceRate(gseg, gseg.timelineStart, gseg.timelineEnd) : 1;
-      const gSrcT = tr && gseg
-        ? (pre ? Math.max(0, gseg.srcStart - (tr.cut - t) * gRate) : gseg.srcEnd + (t - tr.cut) * gRate)
+      const gSrcT = handover && gseg
+        ? (pre ? Math.max(0, gseg.srcStart - (handover.cut! - t) * gRate) : gseg.srcEnd + (t - handover.cut!) * gRate)
         : 0;
       const visualSamplesP = Promise.all(visualVideos.map(async (visual) => {
         if (t < visual.startSec - 1e-6 || t >= visual.endSec - 1e-6) return null;
@@ -1015,7 +1035,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       if (sample && rig) paintLayer(lctx, sample, rig, seg, seg.filter);
       // Shadow layer: the "other side" frame within the window (true dual-stream; sample out-of-range/absent = hard-cut fallback)
       let ghostReady = false;
-      if (tr) {
+      if (handover) {
         gctx.setTransform(1, 0, 0, 1, 0, 0);
         gctx.clearRect(0, 0, outW, outH);
         if (gSample && gRig && gseg) {
@@ -1028,10 +1048,10 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       vctx.setTransform(1, 0, 0, 1, 0, 0);
       vctx.clearRect(0, 0, outW, outH);
       let mixed = false;
-      if (tr && ghostReady && mixer) {
-        const p = Math.min(1, Math.max(0, (t - (tr.cut - tr.half)) / (2 * tr.half))); // 0=window start, 1=end
-        const F = pre ? liveC : ghostC;
-        const T = pre ? ghostC : liveC;
+      if (tr && mixer && (ghostReady || !handover)) {
+        const p = Math.min(1, Math.max(0, (t - tr.start) / Math.max(1e-3, tr.end - tr.start))); // 0=window start, 1=end
+        const F = !handover ? liveC : pre ? liveC : ghostC;
+        const T = !handover ? liveC : pre ? ghostC : liveC;
         const [dx, dy] = glDirection(tr.dir as TransitionDirection);
         if (mixer.render(F, T, tr.effect, p, dx, dy)) {
           vctx.drawImage(mixer.canvas, 0, 0);
@@ -1045,27 +1065,30 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
         videoLayers.set(layer.clipId, layer);
       }
 
-      const d0 = performance.now();
-      paintExportFrameBase(ctx, outW, outH, bg, vidC);
-      let htmlLayerIndex = 0;
-      for (const layer of visualLayers) {
-        if (layer.kind === 'media') {
-          drawSupplementalVisualMedia({
-            ctx,
-            visuals: layer.visuals,
-            timelineTime: t,
-            imageBitmaps: visualImageBitmaps,
-            videoSamples: videoLayers,
-            targetWidth: W,
-            targetHeight: H,
-            scaleX: Sx,
-            scaleY: Sy,
-          });
-        } else {
-          ctx.drawImage(overlayImages[htmlLayerIndex++]!, 0, 0);
+      const releaseMattes = await prepareVisualPersonMattes(visualMediaClips, videoLayers, t);
+      try {
+        const d0 = performance.now();
+        paintExportFrameBase(ctx, outW, outH, bg, vidC);
+        let htmlLayerIndex = 0;
+        for (const layer of visualLayers) {
+          if (layer.kind === 'media') {
+            drawSupplementalVisualMedia({
+              ctx,
+              visuals: layer.visuals,
+              timelineTime: t,
+              imageBitmaps: visualImageBitmaps,
+              videoSamples: videoLayers,
+              targetWidth: W,
+              targetHeight: H,
+              scaleX: Sx,
+              scaleY: Sy,
+            });
+          } else {
+            ctx.drawImage(overlayImages[htmlLayerIndex++]!, 0, 0);
+          }
         }
-      }
-      tm.draw += performance.now() - d0;
+        tm.draw += performance.now() - d0;
+      } finally { releaseMattes(); }
       const e0 = performance.now();
       if (pendingAdd) await pendingAdd; // Previous frame's encode backpressure: only awaited here, so the next frame is already being prepared during encoding
       pendingAdd = videoSource.add(t, 1 / FPS);
@@ -1150,6 +1173,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
         clips,
         totalSec: durationSec,
         tones,
+        ...(comp.audioLoudness ? { master: { gainDb: comp.audioLoudness.gainDb } } : {}),
         push: (sample) => audioSource.add(sample).then(() => sample.close()),
       });
     } else if (audioSource) {
@@ -1178,6 +1202,71 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     for (const rig of rigs.values()) disposeSourceRig(rig);
     for (const input of dnInputs) void input.dispose();
     disposeVisualImageBitmaps(visualImageBitmaps);
+    overlay.dispose();
+  }
+}
+
+/* ============================ Graphics for other editors ============================ */
+
+/** One graphic clip to render alone: its block id and timeline window. */
+export interface GraphicRenderJob {
+  blockId: string;
+  startSec: number;
+  durationSec: number;
+}
+
+/** Render graphic blocks one at a time on a transparent ground, every frame of their window, as PNG
+ *  bytes at the composition's full size — the same document, seek and rasterizer as the video export,
+ *  serializing only that block. A frame whose markup did not change reuses the previous PNG. */
+export async function renderGraphicFramesPng(opts: {
+  comp: Composition;
+  jobs: readonly GraphicRenderJob[];
+  fps: number;
+  onGraphic: (blockId: string, frames: Uint8Array[]) => Promise<void> | void;
+  onProgress?: (done: number, total: number) => void;
+  shouldCancel?: () => boolean;
+}): Promise<void> {
+  const { comp, fps } = opts;
+  assertExportableComposition(comp);
+  const W = comp.width;
+  const H = comp.height;
+  const overlay = await createOverlay(injectPreviewRuntime(assembleHtml(comp)), W, H);
+  try {
+    await inlineImages(overlay.root);
+    const text = overlay.root.textContent ?? '';
+    const fontCss = await buildInlineFontCss(text, undefined, compositionLocalFontFamilies(comp), compositionWebFontIds(comp));
+    const css = `${fontCss}\n${overlay.headCss}\n#root{background:transparent !important;}`;
+    await warmInlineFonts(css, text, W, H, W, H);
+    const canvas = document.createElement('canvas');
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext('2d')!;
+    const total = opts.jobs.reduce((sum, job) => sum + Math.max(1, Math.round(job.durationSec * fps)), 0);
+    let done = 0;
+    for (const job of opts.jobs) {
+      const count = Math.max(1, Math.round(job.durationSec * fps));
+      const frames: Uint8Array[] = [];
+      let lastMarkup = '';
+      for (let i = 0; i < count; i += 1) {
+        if (opts.shouldCancel?.()) throw new ExportCanceled();
+        overlay.win.__hfPreview!.seekTimelines(job.startSec + i / fps);
+        const markup = serializeBrowserOverlayElements(overlay.root, overlay.doc, [{ id: job.blockId }]);
+        if (markup === lastMarkup && frames.length) {
+          frames.push(frames[frames.length - 1]!);
+        } else {
+          lastMarkup = markup;
+          const image = await rasterize('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgOpen(W, H, W, H, css) + markup + SVG_CLOSE));
+          ctx.clearRect(0, 0, W, H);
+          ctx.drawImage(image, 0, 0);
+          const png = await new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('PNG encoding failed'))), 'image/png'));
+          frames.push(new Uint8Array(await png.arrayBuffer()));
+        }
+        done += 1;
+        opts.onProgress?.(done, total);
+      }
+      await opts.onGraphic(job.blockId, frames);
+    }
+  } finally {
     overlay.dispose();
   }
 }

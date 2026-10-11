@@ -22,11 +22,12 @@ export interface TranslationLineRow {
 }
 
 /**
- * One row sent to the translator: a complete sentence of one source, written as its on-screen
- * lines in play order and joined by LINE_MARK. The translator sees the whole sentence, so the
- * translation reads as one sentence, and it answers with the same number of marks, so each line's
- * share of the translation is decided by the translator rather than by word count. The sentence
- * (a transcript segment) is the recognizer's own unit and the id the result is written back to.
+ * One row sent to the translator: a stretch of one sentence as it plays uninterrupted — its
+ * consecutive on-screen lines joined. A sentence the edit split apart (other speech plays in
+ * between) becomes one row per stretch, so the translator reads exactly what the viewer hears.
+ * `range` (the stretch's source word span) is set only for such split sentences; an unsplit
+ * sentence is written as the whole-sentence translation. How a translation spreads over its lines
+ * is the caption layout's job at render time, so a re-layout never invalidates it.
  */
 export interface TranslationUnit {
   src: string | null;
@@ -34,82 +35,56 @@ export interface TranslationUnit {
   seg: number;
   start: number;
   text: string;
-  /** Cue word ranges, one per LINE_MARK-separated piece of `text`, in play order. */
-  lines: { w0: number; w1: number }[];
+  range?: { w0: number; w1: number };
 }
 
-/** Line-break mark inside a sentence row. Plain text a translation model carries across unchanged
- * far more reliably than any instruction asks it to; a bar is not a word in any target language. */
-export const LINE_MARK = ' | ';
-const MARK_SPLIT = /\s*[|｜]\s*/;
-
-/** Source text must not contain the mark itself, or the answer's pieces cannot be counted. */
-const withoutMarks = (text: string): string => text.replace(/[|｜]/g, '/').trim();
-
-export function lineTranslationUnits(rows: readonly TranslationLineRow[]): TranslationUnit[] {
-  const units = new Map<string, TranslationUnit>();
+export function sentenceTranslationUnits(rows: readonly TranslationLineRow[]): TranslationUnit[] {
+  const runs: (TranslationUnit & { key: string; parts: string[]; w0: number; w1: number })[] = [];
   for (const row of [...rows].sort((left, right) => left.editedStart - right.editedStart)) {
-    const text = withoutMarks(row.text);
+    const text = row.text.trim();
     if (!text) continue;
     const key = `${row.assetId ?? row.src ?? ''}|${row.index}`;
-    const unit = units.get(key);
-    if (unit) {
-      unit.text += LINE_MARK + text;
-      unit.lines.push({ w0: row.w0, w1: row.w1 });
+    const last = runs[runs.length - 1];
+    if (last && last.key === key) {
+      last.parts.push(text);
+      last.w0 = Math.min(last.w0, row.w0);
+      last.w1 = Math.max(last.w1, row.w1);
     } else {
-      units.set(key, {
-        src: row.src,
-        ...(row.assetId ? { assetId: row.assetId } : {}),
-        seg: row.index,
-        start: row.editedStart,
-        text,
-        lines: [{ w0: row.w0, w1: row.w1 }],
-      });
+      runs.push({ key, src: row.src, ...(row.assetId ? { assetId: row.assetId } : {}), seg: row.index, start: row.editedStart, text: '', parts: [text], w0: row.w0, w1: row.w1 });
     }
   }
-  return [...units.values()].sort((left, right) => left.start - right.start);
+  const stretches = new Map<string, number>();
+  for (const run of runs) stretches.set(run.key, (stretches.get(run.key) ?? 0) + 1);
+  return runs.map(({ key, parts, w0, w1, ...unit }) => ({
+    ...unit,
+    text: joinWords(parts),
+    ...((stretches.get(key) ?? 0) > 1 ? { range: { w0, w1 } } : {}),
+  }));
 }
 
-function completeByPosition(count: number, rows: readonly CaptionTranslationRow[]): Map<number, string> | null {
-  if (count !== rows.length) return null;
-  const byPosition = new Map<number, string>();
-  for (const row of rows) {
-    const text = row.text.trim();
-    if (!Number.isInteger(row.index) || row.index < 0 || row.index >= count || !text || byPosition.has(row.index)) return null;
-    byPosition.set(row.index, text);
-  }
-  return byPosition.size === count ? byPosition : null;
+/** Sentence translations to write, grouped by source, plus the sentences that came back without one
+ * (shown as untranslated and reported, never blocking the rest). Rows with an unknown or repeated
+ * id are ignored. */
+export interface CaptionTranslationWrites {
+  writes: { src: string | null; assetId?: string; items: CaptionTranslationItem[] }[];
+  missing: TranslationUnit[];
 }
-
-/** The translator's answer for one sentence: the pieces between its marks, and the sentence with
- * the marks removed. */
-export function splitTranslatedLines(text: string): { pieces: string[]; whole: string } {
-  const pieces = text.split(MARK_SPLIT).map((piece) => piece.trim()).filter(Boolean);
-  return { pieces, whole: joinWords(pieces) };
-}
-
-/** Translations to write, grouped by source: one per on-screen line, keyed by the line's word
- * range. An answer that lost or added a line mark is refused for the whole run, naming the
- * sentence, so a mismatch is seen and fixed rather than papered over. Nothing is written until
- * every row validated. */
-export type CaptionTranslationWrites =
-  | { ok: true; writes: { src: string | null; assetId?: string; items: CaptionTranslationItem[] }[] }
-  | { ok: false; error: string };
 
 export function captionTranslationWrites(units: readonly TranslationUnit[], rows: readonly CaptionTranslationRow[]): CaptionTranslationWrites {
-  const translated = completeByPosition(units.length, rows);
-  if (!translated) return { ok: false, error: 'Translation response was incomplete or contained invalid row ids.' };
+  const translated = new Map<number, string>();
+  for (const row of rows) {
+    const text = row.text.trim();
+    if (Number.isInteger(row.index) && row.index >= 0 && row.index < units.length && text && !translated.has(row.index)) translated.set(row.index, text);
+  }
   const bySource = new Map<string, { src: string | null; assetId?: string; items: CaptionTranslationItem[] }>();
+  const missing: TranslationUnit[] = [];
   for (const [position, unit] of units.entries()) {
-    const answer = translated.get(position)!;
-    const { pieces } = splitTranslatedLines(answer);
-    if (pieces.length !== unit.lines.length) {
-      return { ok: false, error: `Translation of "${unit.text}" came back with ${pieces.length} line(s) for ${unit.lines.length}: "${answer}"` };
-    }
+    const text = translated.get(position);
+    if (!text) { missing.push(unit); continue; }
     const key = unit.assetId ?? unit.src ?? '';
     const write = bySource.get(key) ?? { src: unit.src, ...(unit.assetId ? { assetId: unit.assetId } : {}), items: [] };
-    unit.lines.forEach((line, at) => write.items.push({ index: unit.seg, w0: line.w0, w1: line.w1, text: pieces[at]! }));
+    write.items.push({ index: unit.seg, ...(unit.range ?? {}), text });
     bySource.set(key, write);
   }
-  return { ok: true, writes: [...bySource.values()] };
+  return { writes: [...bySource.values()], missing };
 }

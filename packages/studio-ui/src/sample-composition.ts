@@ -411,7 +411,7 @@ export const PREVIEW_RUNTIME = `
         var oldVt = window.__timelines && window.__timelines['vid'];
         if (oldVt && oldVt.kill) { try { oldVt.kill(); } catch (errK) {} }
         var nvt = window.gsap.timeline({ paused: true });
-        try { scoped(function () { new Function('tl', String(d.body || ''))(nvt); }); } catch (errB) { console.warn('[hf] vidTimeline error', errB); }
+        try { scoped(function () { new Function('tl', 'window', 'document', String(d.body || ''))(nvt, window, document); }); } catch (errB) { console.warn('[hf] vidTimeline error', errB); }
         window.__timelines['vid'] = nvt;
         seekTimelines(lastSeekT);
       } catch (err) {}
@@ -593,7 +593,7 @@ export const PREVIEW_RUNTIME = `
           }
           try {
             var baTl = gsap.timeline({ paused: true });
-            try { scoped(function () { new Function('tl', String(d.timelineBody || ''))(baTl); }); } catch (e2) { console.warn('[hf] blockAdd timeline', d.blockId, e2); }
+            try { scoped(function () { new Function('tl', 'window', 'document', String(d.timelineBody || ''))(baTl, window, document); }); } catch (e2) { console.warn('[hf] blockAdd timeline', d.blockId, e2); }
             window.__timelines[d.blockId] = baTl;
             seekTimelines(lastSeekT);
           } catch (e3) { console.warn('[hf] blockAdd', d.blockId, e3); }
@@ -613,7 +613,7 @@ export const PREVIEW_RUNTIME = `
           delete window.__timelines[btId];
         }
         var btTl = gsap.timeline({ paused: true });
-        try { scoped(function () { new Function('tl', String(d.timelineBody || ''))(btTl); }); } catch (e2) { console.warn('[hf] blockTimeline', btId, e2); }
+        try { scoped(function () { new Function('tl', 'window', 'document', String(d.timelineBody || ''))(btTl, window, document); }); } catch (e2) { console.warn('[hf] blockTimeline', btId, e2); }
         window.__timelines[btId] = btTl;
         seekTimelines(lastSeekT);
       } catch (err) {}
@@ -657,7 +657,7 @@ export const PREVIEW_RUNTIME = `
             delete window.__timelines[d.blockId];
           }
           var bhTl = gsap.timeline({ paused: true });
-          try { scoped(function () { new Function('tl', String(d.timelineBody || ''))(bhTl); }); } catch (e2) { console.warn('[hf] blockHtml timeline', d.blockId, e2); }
+          try { scoped(function () { new Function('tl', 'window', 'document', String(d.timelineBody || ''))(bhTl, window, document); }); } catch (e2) { console.warn('[hf] blockHtml timeline', d.blockId, e2); }
           window.__timelines[d.blockId] = bhTl;
           seekTimelines(lastSeekT); // re-align the fresh paused timeline to the current playhead
         }

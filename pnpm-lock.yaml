@@ -135,9 +135,6 @@ importers:
       '@pireel/studio-engine':
         specifier: workspace:*
         version: link:../../packages/studio-engine
-      '@pireel/studio-frames':
-        specifier: workspace:*
-        version: link:../../packages/studio-frames
       '@pireel/studio-ui':
         specifier: workspace:*
         version: link:../../packages/studio-ui
@@ -184,6 +181,9 @@ importers:
       css-tree:
         specifier: 3.2.1
         version: 3.2.1
+      diff:
+        specifier: 8.0.4
+        version: 8.0.4
       fast-json-patch:
         specifier: ^3.1.1
         version: 3.1.1
@@ -194,16 +194,6 @@ importers:
       '@types/css-tree':
         specifier: ^3.2.0
         version: 3.2.0
-
-  packages/studio-frames:
-    dependencies:
-      '@pireel/studio-engine':
-        specifier: workspace:*
-        version: link:../studio-engine
-    devDependencies:
-      vite:
-        specifier: ^8.0.16
-        version: 8.1.5
 
   packages/studio-kit:
     devDependencies:
@@ -216,9 +206,6 @@ importers:
       '@pireel/studio-engine':
         specifier: workspace:*
         version: link:../studio-engine
-      '@pireel/studio-frames':
-        specifier: workspace:*
-        version: link:../studio-frames
       '@pireel/ui':
         specifier: workspace:*
         version: link:../ui
@@ -3398,6 +3385,11 @@ packages:
     resolution: {integrity: sha512-RWmIqhcFf1lRYBvNmr7qTNuyCt/7/ns2jbpp1+PalgE/rDQcBT0fioSMUpJ93irlUhC5hrg4cYqe6U+0ImW0rA==}
     dependencies:
       dequal: 2.0.3
+    dev: false
+
+  /diff@8.0.4:
+    resolution: {integrity: sha512-DPi0FmjiSU5EvQV0++GFDOJ9ASQUVFh5kD+OzOnYdi7n3Wpm9hWWGfB/O2blfHcMVTL5WkQXSnRiK9makhrcnw==}
+    engines: {node: '>=0.3.1'}
     dev: false
 
   /dompurify@3.4.12:

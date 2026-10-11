@@ -12,7 +12,7 @@ import { decodeVideoAudio, toMono } from './audio-decode';
 const ANALYSIS_RATE = 48_000;
 const FRAME_SAMPLES = 480; // RNNoise contract: 10 ms at 48 kHz.
 const YIELD_EVERY_FRAMES = 200;
-const DEFAULT_MINIMUM_PAUSE_SEC = 0.5;
+const DEFAULT_MINIMUM_PAUSE_SEC = 0.4;
 const DEFAULT_SPEECH_PADDING_SEC = 0.15;
 const DEFAULT_BRIDGE_GAP_SEC = 0.05;
 const VOICE_PROBABILITY_THRESHOLD = 0.35;
@@ -32,6 +32,7 @@ export interface SpeechActivityFrame {
 }
 
 export interface SpeechSilenceOptions {
+  onProgress?: (done: number, total: number) => void;
   minimumPauseSec?: number;
   /** Audio kept next to speech on EACH side of an internal quiet span. */
   speechPaddingSec?: number;
@@ -192,7 +193,7 @@ export function planSpeechSilenceCuts(
   return cuts;
 }
 
-async function analyzeSpeechActivity(file: File): Promise<SpeechActivityAnalysis> {
+async function analyzeSpeechActivity(file: File, onProgress?: (done: number, total: number) => void): Promise<SpeechActivityAnalysis> {
   const decoded = await decodeVideoAudio(file);
   if (!decoded) return { durationSec: 0, frames: [] };
   const pcm = await toMono(decoded, ANALYSIS_RATE);
@@ -206,6 +207,7 @@ async function analyzeSpeechActivity(file: File): Promise<SpeechActivityAnalysis
   const frames: SpeechActivityFrame[] = [];
   try {
     const frameCount = Math.ceil(pcm.length / FRAME_SAMPLES);
+    onProgress?.(0, frameCount);
     for (let frameIndex = 0; frameIndex < frameCount; frameIndex++) {
       const offset = frameIndex * FRAME_SAMPLES;
       const sampleCount = Math.min(FRAME_SAMPLES, pcm.length - offset);
@@ -224,6 +226,7 @@ async function analyzeSpeechActivity(file: File): Promise<SpeechActivityAnalysis
         rms: sampleCount ? Math.sqrt(squareSum / sampleCount) : 0,
       });
       if (frameIndex % YIELD_EVERY_FRAMES === YIELD_EVERY_FRAMES - 1) {
+        onProgress?.(frameIndex + 1, frameCount);
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
     }
@@ -239,11 +242,12 @@ async function analyzeSpeechActivity(file: File): Promise<SpeechActivityAnalysis
 export async function detectSpeechSilenceCuts(file: File, options: SpeechSilenceOptions = {}): Promise<SpeechSilenceCut[]> {
   let pending = activityCache.get(file);
   if (!pending) {
-    pending = analyzeSpeechActivity(file);
+    pending = analyzeSpeechActivity(file, options.onProgress);
     activityCache.set(file, pending);
     void pending.catch(() => activityCache.delete(file));
   }
   const analysis = await pending;
+  options.onProgress?.(analysis.frames.length, analysis.frames.length);
   return planSpeechSilenceCuts(analysis.frames, analysis.durationSec, options);
 }
 

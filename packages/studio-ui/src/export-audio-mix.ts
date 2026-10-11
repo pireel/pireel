@@ -15,6 +15,9 @@
  * the voice's pitch; the old linear resample (pitch follows the rate) remains only as the fallback
  * when no worklet can run.
  *
+ * A document with a loudness setting replaces the soft clip with a master gain and a lookahead
+ * limiter (MasterLimiter).
+ *
  * Numeric scale note: at typical clip levels plus speech the sum rarely exceeds [-1, 1], but lane clips can
  * be boosted well past source level, so the summed buffer goes through a soft limiter (softClip) instead of
  * a hard clamp — no lookahead, it just bends the top instead of squaring it off.
@@ -47,6 +50,63 @@ export function softClip(v: number): number {
   if (a <= SOFT_KNEE) return v;
   const shaped = SOFT_KNEE + (1 - SOFT_KNEE) * (1 - Math.exp(-(a - SOFT_KNEE) / (1 - SOFT_KNEE)));
   return v < 0 ? -shaped : shaped;
+}
+
+/**
+ * Master stage for a document with a loudness setting: a fixed gain, then a stereo-linked lookahead
+ * peak limiter. The required gain per frame (ceiling / peak) goes through a sliding minimum over the
+ * lookahead window and a boxcar of the same length, so gain is already down when a peak arrives and
+ * moves smoothly; increases are slowed by the release. A final clamp holds the ceiling. State carries
+ * across chunks; output lags input by the lookahead, which `process` hides by starting with the first
+ * real frame, and `flush` returns the tail so the total frame count is unchanged.
+ */
+export class MasterLimiter {
+  private readonly lookahead: number;
+  private readonly releaseCoef: number;
+  private readonly delayed: Float32Array;
+  private readonly boxcar: Float32Array;
+  private boxSum: number;
+  /** Monotonic deque (sliding minimum) over the required gain: frame indices and values. */
+  private readonly minIndex: number[] = [];
+  private readonly minValue: number[] = [];
+  private minHead = 0;
+  private held = 1;
+  private index = 0;
+  constructor(private readonly gain: number, private readonly ceiling = 10 ** (-1.5 / 20), lookaheadSec = .005, releaseSec = .12, rate = MIX_RATE) {
+    this.lookahead = Math.max(1, Math.round(lookaheadSec * rate));
+    this.releaseCoef = 1 - Math.exp(-1 / (releaseSec * rate));
+    this.delayed = new Float32Array(this.lookahead * MIX_CH);
+    this.boxcar = new Float32Array(this.lookahead).fill(1); this.boxSum = this.lookahead;
+  }
+
+  /** Limit interleaved stereo frames; returns the frames whose lookahead is complete. */
+  process(input: Float32Array): Float32Array {
+    const frames = input.length / MIX_CH; const L = this.lookahead;
+    const out = new Float32Array(Math.max(0, Math.min(frames, this.index + frames - (L - 1))) * MIX_CH); let written = 0;
+    for (let k = 0; k < frames; k++) {
+      const i = this.index++; const l = input[k * MIX_CH]! * this.gain; const r = input[k * MIX_CH + 1]! * this.gain;
+      const peak = Math.max(Math.abs(l), Math.abs(r)); const required = peak > this.ceiling ? this.ceiling / peak : 1;
+      while (this.minValue.length > this.minHead && this.minValue[this.minValue.length - 1]! >= required) { this.minValue.pop(); this.minIndex.pop(); }
+      this.minValue.push(required); this.minIndex.push(i);
+      this.delayed[(i % L) * MIX_CH] = l; this.delayed[(i % L) * MIX_CH + 1] = r;
+      const j = i - (L - 1); if (j < 0) continue;
+      while (this.minIndex[this.minHead]! < j) this.minHead++;
+      if (this.minHead > 4096) { this.minIndex.splice(0, this.minHead); this.minValue.splice(0, this.minHead); this.minHead = 0; }
+      const windowMin = this.minValue[this.minHead]!; const b = j % L;
+      this.boxSum += windowMin - this.boxcar[b]!; this.boxcar[b] = windowMin;
+      const target = this.boxSum / L;
+      this.held = target <= this.held ? target : this.held + (target - this.held) * this.releaseCoef;
+      const slot = (j % L) * MIX_CH;
+      out[written++] = Math.max(-this.ceiling, Math.min(this.ceiling, this.delayed[slot]! * this.held));
+      out[written++] = Math.max(-this.ceiling, Math.min(this.ceiling, this.delayed[slot + 1]! * this.held));
+    }
+    return out.subarray(0, written);
+  }
+
+  /** The frames still inside the lookahead window at the end of the programme. */
+  flush(): Float32Array {
+    return this.process(new Float32Array(Math.min(this.index, this.lookahead - 1) * MIX_CH));
+  }
 }
 
 export interface MixSeg {
@@ -197,6 +257,8 @@ export async function mixAudioTrack(args: {
   stretch?: TimeStretch;
   /** Synthesized tones added on top of the mix (beeped words). */
   tones?: MixTone[];
+  /** Whole-mix loudness: master gain then the lookahead limiter, in place of the soft clip. */
+  master?: { gainDb: number };
 }): Promise<void> {
   const { segs, audioTracks, totalSec, push } = args;
   const tones = [...(args.tones ?? [])];
@@ -271,6 +333,7 @@ export async function mixAudioTrack(args: {
   const clips: MixAudioClip[] = [];
   for (const entry of args.clips) clips.push(await prestretchClip(entry, stretch));
 
+  const limiter = args.master ? new MasterLimiter(10 ** (args.master.gainDb / 20)) : null; let emitted = 0;
   const totalFrames = Math.ceil(totalSec * MIX_RATE);
   const chunkFrames = CHUNK_SEC * MIX_RATE;
   const buf = new Float32Array(chunkFrames * MIX_CH);
@@ -361,9 +424,17 @@ export async function mixAudioTrack(args: {
       }
     }
 
-    // Soft limit + emit
+    // Master (gain + lookahead limiter) or soft limit, then emit
+    if (limiter) {
+      const out = limiter.process(buf.subarray(0, frames * MIX_CH)).slice();
+      if (out.length) await push(new AudioSample({ data: out, format: 'f32', numberOfChannels: MIX_CH, sampleRate: MIX_RATE, timestamp: emitted / MIX_RATE }));
+      emitted += out.length / MIX_CH;
+      continue;
+    }
     const out = buf.subarray(0, frames * MIX_CH).slice();
     for (let i = 0; i < out.length; i++) out[i] = softClip(out[i]!);
     await push(new AudioSample({ data: out, format: 'f32', numberOfChannels: MIX_CH, sampleRate: MIX_RATE, timestamp: t0 }));
   }
+  const tail = limiter?.flush();
+  if (tail?.length) await push(new AudioSample({ data: tail.slice(), format: 'f32', numberOfChannels: MIX_CH, sampleRate: MIX_RATE, timestamp: emitted / MIX_RATE }));
 }

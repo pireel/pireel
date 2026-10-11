@@ -70,6 +70,7 @@ export function mediaVideoClipEntries(document: EditorDocumentV2): MediaVideoCli
 export function mediaVideoPropertiesFromShot(shot: VideoShot): MediaVideoProperties {
   return {
     treatment: shot.treatment,
+    ...(shot.personMatte ? { personMatte: true } : {}),
     ...(shot.treatSize != null ? { treatSize: shot.treatSize } : {}),
     ...(shot.treatCrop != null ? { treatCrop: shot.treatCrop } : {}),
     ...(shot.preciseFraming ? { preciseFraming: shot.preciseFraming } : {}),

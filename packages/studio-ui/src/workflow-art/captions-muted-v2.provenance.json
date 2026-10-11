@@ -1,0 +1,8 @@
+{
+  "tool": "built-in image_gen",
+  "mode": "edit",
+  "created": "2026-09-08",
+  "asset": "captions-muted-v2.png",
+  "reference": "captions-color-v1.png",
+  "prompt": "Use case: logo-brand. Edit the attached AI Captions app icon. Preserve the compact speech-bubble silhouette, large CC lettering and small play badge, centered square composition, transparent background. Change its highly saturated rainbow chrome styling into a restrained premium matte icon: muted slate teal body, soft ivory CC, very small dusty warm sand play badge. Low saturation, softly beveled ceramic surfaces, gentle diffuse light, minimal depth. No electric blue, neon turquoise, vivid orange, rainbow edging, glossy reflections or glow. Clearly readable at 56px on a dark interface. One icon only, no background tile, no extra lettering or scenery. Keep genuine alpha transparency."
+}

@@ -7,7 +7,7 @@
  * /api/studio/compose on the existing session billing — generation still charges, orchestration is free.
  *
  * Architecture: the v3 tool surface (agent-surface-v3) is the only surface; every call keeps its own name and
- * shape end to end. Account services (skills, frames, catalog search, generation, projects) are answered here;
+ * shape end to end. Account services (skills, brand, catalog search, generation, projects) are answered here;
  * document and runtime tools travel through the StudioBridge DO to the open studio tab as run_v3 (bridge-do.ts's
  * header explains why it is a bridge), and the routing layer runs the offline executor when no tab is open.
  *
@@ -72,18 +72,14 @@ export interface McpDeps {
   /** Bytes of a captured frame the browser stored in the user's cloud media space (routing layer =
    *  the object store, after an ownership check). Without it, keyed frames are reported as unavailable. */
   readFrameImage?: (key: string) => Promise<{ data: string; mimeType: string } | null>;
-  /** Frame catalog (routing layer = frameRegistry.list()). */
-  listFrames: () => { id: string; title: string; summary: string }[];
   /** Account-scoped Studio Skill catalog and full playbook lookup. Catalog metadata is
    *  lightweight; private instructions are returned only by an explicit read. */
   listSkills: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
   readSkill: (skillId: string) => Promise<McpBridgeResult>;
-  /** Frame playbook body (routing layer = frameRegistry.get). */
-  readFrame: (frameId: string) => McpBridgeResult;
-  /** The frame attached to the active project, for manage_frame read without an id. */
-  attachedFrameId?: () => Promise<string | null>;
-  /** BYO block brief: bridge-returned compose context + the agent's instruction → {system,prompt} (routing layer = briefs.assembleComposeBrief + frameRegistry). */
-  assembleComposeBrief: (bridgeData: Record<string, unknown>, instruction: string) => McpBridgeResult;
+  /** The creator's current brand as its prompt (routing layer = brand kits + brand-edit-params playbookAgentBrief). */
+  readBrand: () => Promise<McpBridgeResult>;
+  /** BYO block brief: bridge-returned compose context + the agent's instruction → {system,prompt} (routing layer = briefs.assembleComposeBrief with the brand's graphics). */
+  assembleComposeBrief: (bridgeData: Record<string, unknown>, instruction: string) => McpBridgeResult | Promise<McpBridgeResult>;
   /** Icon lookup (routing layer = icons.lookupIcons) — get_icons, referenced by BLOCK_SYSTEM in BYO generation, is available under the same name on the MCP surface. */
   lookupIcons: (names: string[], kind?: string) => McpBridgeResult;
   /** Local media import registration. Main video and images rendezvous with the open tab and remain
@@ -137,7 +133,7 @@ export interface McpDeps {
 /** Tools the server answers itself (catalog, account and generation services). A call is server-owned
  *  when its arguments fall in the server's half: project-scope management, non-local asset scopes,
  *  stock imports, generation jobs. Everything else runs in the studio tab or the offline executor. */
-export const MCP_SERVER_TOOL_IDS = new Set(['list_skills', 'read_skill', 'get_icons', 'import_media', 'create_browser_handoff', 'manage_project', 'search_assets', 'register_media', 'inspect_media', 'list_models', 'generate_image', 'generate_video', 'generate_audio', 'generate_speech', 'lip_sync', 'manage_voices', 'manage_frame']);
+export const MCP_SERVER_TOOL_IDS = new Set(['list_skills', 'read_skill', 'get_icons', 'import_media', 'create_browser_handoff', 'manage_project', 'search_assets', 'register_media', 'inspect_media', 'list_models', 'generate_image', 'generate_video', 'generate_audio', 'generate_speech', 'lip_sync', 'manage_voices', 'read_brand']);
 
 export function serverOwnsCall(name: string, args: Record<string, unknown>): boolean {
   switch (name) {
@@ -146,7 +142,6 @@ export function serverOwnsCall(name: string, args: Record<string, unknown>): boo
     case 'search_assets': return args.kind === 'font' || (args.scope !== undefined && args.scope !== 'mine');
     case 'register_media': return !!args.stock && typeof args.stock === 'object';
     case 'inspect_media': return args.mode === 'generation';
-    case 'manage_frame': return args.action === 'list' || args.action === 'read';
     default: return MCP_SERVER_TOOL_IDS.has(name);
   }
 }
@@ -233,11 +228,13 @@ function toolResponse(id: JsonRpcRequest['id'], r: McpBridgeResult): JsonRpcResp
     });
   }
   if (r.ok && r.image && typeof (r.image as { data?: unknown }).data === 'string') {
+    // The receipt rides next to the image: a component placed with its settled frame still needs its new id.
     const img = r.image as { data: string; mimeType?: string };
+    const { image: _drop, ...rest } = r;
     return rpcResult(id, {
       content: [
         { type: 'image', data: img.data, mimeType: img.mimeType ?? 'image/jpeg' },
-        { type: 'text', text: r.summary ?? 'frame captured' },
+        { type: 'text', text: JSON.stringify(rest) },
       ],
       isError: false,
     });
@@ -263,17 +260,7 @@ async function dispatchServerTool(name: string, args: Record<string, unknown>, d
     }
     case 'import_media': return deps.importMedia(args);
     case 'create_browser_handoff': return deps.createBrowserHandoff(args);
-    case 'manage_frame': {
-      if (args.action === 'list') { const frames = deps.listFrames(); return { ok: true, summary: `${frames.length} frames`, data: frames }; }
-      const id = typeof args.id === 'string' ? args.id : '';
-      if (id) return deps.readFrame(id);
-      if (args.action === 'read') {
-        const attached = await deps.attachedFrameId?.();
-        if (attached) return deps.readFrame(attached);
-        return { ok: false, error: 'no_frame_attached', fix: 'Attach a frame first (manage_frame action:attach with an id from action:list), or pass id to read a specific one.' };
-      }
-      return { ok: false, error: 'missing_field', path: 'id', fix: 'Pass the frame id from manage_frame action:list.' };
-    }
+    case 'read_brand': return deps.readBrand();
     case 'manage_project': {
       const action = String(args.action ?? 'list');
       if (action === 'list') return deps.listProjects(args);
@@ -414,7 +401,7 @@ export async function runV3Tool(name: string, args: Record<string, unknown>, dep
       const instruction = typeof args.instruction === 'string' ? args.instruction.trim() : '';
       if (!instruction) return { ok: false, error: 'missing_field', path: 'instruction' };
       const format = args.format === 'html' || args.format === 'kit' ? { format: args.format } : {};
-      const brief = deps.assembleComposeBrief({ ...data, ...format }, instruction);
+      const brief = await deps.assembleComposeBrief({ ...data, ...format }, instruction);
       if (!brief.ok) return brief;
       const fps = deps.resolveV3Context ? (await deps.resolveV3Context()).fps : Number.NaN;
       const block = data.block as Record<string, unknown>;

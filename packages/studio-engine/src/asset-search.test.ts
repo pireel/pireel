@@ -3,6 +3,7 @@ import {
   bgmSearchTags,
   compactAssetSearchElementResults,
   officialStickerSearchTags,
+  sfxPackSearchDocuments,
   searchAssetLibrary,
   type AssetSearchDocument,
 } from './asset-search';
@@ -81,5 +82,16 @@ describe('searchAssetLibrary', () => {
     });
     expect(compactAssetSearchElementResults(result.results)[0]?.fields?.prompt).toBeUndefined();
     expect(compactAssetSearchElementResults(result.results)[0]?.locator?.prompt).toBeUndefined();
+  });
+});
+
+describe('sound effects pack', () => {
+  it('is searchable by the beat it scores and carries when to use it', () => {
+    const documents = sfxPackSearchDocuments();
+    expect(documents.every(document => document.kind === 'audio' && document.scope === 'official' && document.locator?.url?.endsWith('.wav') && document.fields?.description)).toBe(true);
+    for (const [query, id] of [['price', 'sfx:cash-register'], ['价格', 'sfx:cash-register'], ['whoosh', 'sfx:whoosh-fast'], ['疑问', 'sfx:question-boing']] as const) {
+      const response = searchAssetLibrary(documents, { query, scope: 'official', kind: 'audio', limit: 30 });
+      expect('results' in response && response.results.map(result => result.assetId)).toContain(id);
+    }
   });
 });

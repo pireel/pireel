@@ -47,42 +47,36 @@ describe("chat 上下文块:静态、逐次字节相同", () => {
       { id: "talking-head-edit", title: "Talking-head edit", summary: "Speech-led complete edit." },
       { id: "short-video-ad-remix", title: "Short-video ad remix", summary: "Multi-output product ad remix." },
     ];
-    const blocks = buildChatContextBlocks(null, undefined, null, catalog);
+    const blocks = buildChatContextBlocks(null, catalog);
     expect(blocks).toContain("No Studio Skill is selected");
     expect(blocks).toContain("Do not infer, auto-select, or claim that a Skill is active");
     expect(blocks).toContain("talking-head-edit");
     expect(blocks).toContain("short-video-ad-remix");
     expect(blocks).not.toContain("<studio_skill id=");
-    expect(blocks).toBe(buildChatContextBlocks(null, undefined, null, catalog));
+    expect(blocks).toBe(buildChatContextBlocks(null, catalog));
   });
-  it("未选 Frame 时不隐式适配，推荐流程由 Skill 按需定义", () => {
-    const blocks = buildChatContextBlocks(null, "- zen-white · Zen White\n- editorial-bold · Editorial Bold");
-    expect(blocks).toContain("No visual direction is attached");
-    expect(blocks).toContain("A complete edit does not authorize silent Frame selection");
-    expect(blocks).toContain("host's neutral visual-craft floor");
-    expect(blocks).toContain("only after the user explicitly chooses it or delegates the choice");
-    expect(blocks).toContain("Do not use a hidden default");
-    expect(blocks).not.toContain("choose the best-fitting frame");
+  it("品牌块:创作者自己的风格,字幕外观随品牌,用户显式指令优先", () => {
+    const brand = { name: 'Jin "Z"', brief: "BRAND BRIEF" };
+    const blocks = buildChatContextBlocks(null, undefined, brand);
+    expect(blocks).toContain(`<creator_brand name="Jin 'Z'">`);
+    expect(blocks).toContain("BRAND BRIEF");
+    expect(blocks).toContain("Use its caption look whenever you add or restyle captions.");
+    expect(blocks).toContain("The latest explicit user instruction wins over the brand.");
+    expect(blocks).not.toContain("already carry its captions");
+    expect(blocks).not.toContain("<frame_attached");
+    expect(blocks).not.toContain("<frame_catalog");
+    expect(blocks).toBe(buildChatContextBlocks(null, undefined, brand));
   });
-  it("Frame 是艺术指导，配色字幕布局作为独立覆盖项;读取走 manage_frame", () => {
-    const blocks = buildChatContextBlocks({ id: "zen-white", title: "留白 Zen" });
-    expect(blocks).toContain("professional art-direction playbook");
-    expect(blocks).toContain("manage_frame action:read ONCE");
-    expect(blocks).not.toContain("read_frame");
-    expect(blocks).toContain("shape language, material and image treatment, typography personality");
-    expect(blocks).toContain("Project-level palette, captions and layout controls remain independent");
-    expect(blocks).toContain("The editor owns story, evidence, timing");
-  });
-  it("同时选择 Skill 与 Frame 时并列注入，不产生绑定关系", () => {
+  it("同时选择 Skill 与品牌时并列注入", () => {
     const blocks = buildChatContextBlocks(
-      { id: "afterimage", title: "余像 Afterimage" },
-      undefined,
       { id: "product-demo", title: "Product Demo", description: "Demonstrate a product.", markdown: "# Product Demo\n\nFollow verified product evidence." },
+      undefined,
+      { name: "Me", brief: "BRAND BRIEF" },
     );
     expect(blocks).toContain('<studio_skill id="product-demo"');
-    expect(blocks).toContain('<frame_attached id="afterimage"');
-    expect(blocks).toContain("independently selected");
-    expect(blocks).not.toContain("product-demo is compatible with afterimage");
+    expect(blocks).toContain('<creator_brand name="Me">');
+    expect(blocks.indexOf("<studio_skill")).toBeLessThan(blocks.indexOf("<creator_brand"));
+    expect(buildChatContextBlocks()).toBe("");
   });
 });
 

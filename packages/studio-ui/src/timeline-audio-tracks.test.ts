@@ -13,6 +13,10 @@ const clips: AudioClip[] = [
 ];
 
 describe('timelineAudioLanes', () => {
+  it('hides reserved empty audio lanes without hiding placed clips whose bytes are reconnecting', () => {
+    expect(timelineAudioLanes([], [{ trackId: 'empty-music', clipIds: [] }])).toEqual([]);
+    expect(timelineAudioLanes([], [{ trackId: 'loading-music', clipIds: ['music-clip'] }])).toEqual([{ trackId: 'loading-music', clips: [] }]);
+  });
   it('keeps audio tracks at the document position chosen by the user', () => {
     expect(timelineTrackDisplayOrder([
       { trackId: 'visual', timelineIndex: 2 },

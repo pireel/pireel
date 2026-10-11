@@ -1,9 +1,10 @@
 import type { AudioClip } from '../audio-tracks';
-import type { AtomicMediaFraming, Block, CaptionStyle, PersonFx, VideoShot } from '../composition-core';
+import type { AtomicMediaFraming, Block, CaptionStyle, CutTransitionEffect, PersonFx, TransitionDirection, VideoShot } from '../composition-core';
 import type { TranscriptSegment } from '../project-dto';
 import type { ThemeId } from '../theme';
 import type { NarrativeRole, SceneFamily, ViewerTask } from '../director-plan';
-import type { CustomVisualStyle } from '../visual-style';
+import type { DocumentLook } from '../look';
+import type { PlaybookSnapshot } from '../brand-playbook';
 
 export const EDITOR_DOCUMENT_VERSION = 2 as const;
 
@@ -64,9 +65,9 @@ export interface EditorAppearance {
   theme: ThemeId;
   palette?: Record<string, string>;
   captionStyle?: Partial<CaptionStyle>;
-  frameId?: string;
-  customVisualStyle?: CustomVisualStyle;
   personFx?: PersonFx;
+  /** The output's own video-level template (visual system + pieces); graphics instance it as `look:<pieceId>`. */
+  look?: DocumentLook;
 }
 
 export type EditorTrackType = 'visual' | 'graphics' | 'audio' | 'caption';
@@ -89,6 +90,17 @@ export interface EditorTrack {
   clips: TimelineClip[];
 }
 
+/** A transition on the transition lane: a window of the picture, placed by time, never tied to a cut.
+ * A spine cut inside the window hands over between the two sides; without one the effect plays on
+ * the running picture. */
+export interface TimelineTransition {
+  id: string;
+  startFrame: number;
+  durationFrames: number;
+  effect: CutTransitionEffect;
+  direction?: TransitionDirection;
+}
+
 export type TimelineAnchor =
   | { type: 'timeline' }
   | { type: 'clip'; clipId: TimelineClipId; offsetFrames: number }
@@ -101,6 +113,9 @@ export interface TimelineClipBase {
   durationFrames: number;
   enabled: boolean;
   linkGroupId?: string;
+  /** Stable transcript section for source-backed clips. Cleanup fragments inherit it;
+   * explicit splits create a new section. Missing means this clip is its own section. */
+  transcriptSectionId?: string;
 }
 
 export type NarrativeProperties = Omit<VideoShot, 'id' | 'src' | 'srcSig' | 'srcStart' | 'srcEnd' | 'mediaFraming'>;
@@ -121,7 +136,7 @@ export interface NarrativeTimelineClip extends TimelineClipBase {
  * `mediaFraming` remains the canonical layer geometry; these values preserve preset intent and
  * the clip's own grade/audio settings across multi-track moves. */
 export type MediaVideoProperties = Pick<VideoShot, 'treatment'> & Partial<Pick<VideoShot,
-  'treatSize' | 'treatCrop' | 'preciseFraming' | 'filter' | 'zoom'
+  'treatSize' | 'treatCrop' | 'preciseFraming' | 'filter' | 'zoom' | 'personMatte'
   | 'volumeDb' | 'audioMuted' | 'audioFadeInSec' | 'audioFadeOutSec'
 >>;
 
@@ -217,6 +232,31 @@ export interface EditorSemanticState {
   artifacts?: unknown;
   /** Legacy arbitrary storyboard context. Retained for compatibility; new work uses the Director Plan artifact. */
   plan?: unknown;
+  /** What the agent hands back for the creator to confirm: facts it could not verify, and music or
+   *  voice choices that need the creator's say before they are used. Never design choices. */
+  handoff?: HandoffItem[];
+  /** Editing skills the creator switched on for this project (editing-skills.ts ids). */
+  editingSkills?: string[];
+  /** The brand this project is edited with: a copy taken when it was picked, so later edits of the
+   *  brand never restyle the project. null = picked to edit without a brand; absent = never set. */
+  brand?: PlaybookSnapshot | null;
+  /** The Studio Skill (kind of video) this project is edited as; 'auto' = none; absent = never set.
+   *  A brand only goes with a Skill that takes brands (brand-playbook BRAND_SKILL_IDS). */
+  skillId?: string;
+  /** Initial Agent model chosen when this project was created; saved chats keep their own selection. */
+  agentModel?: import('../agent-models').StudioAgentModelId;
+}
+
+export interface HandoffItem {
+  id: string;
+  kind: 'fact' | 'music' | 'voice';
+  /** What to confirm, in the creator's language. */
+  text: string;
+  /** Where it comes from (a clip id, a transcript row, a source name…). */
+  ref?: string;
+  status: 'open' | 'confirmed' | 'changed';
+  /** The creator's answer when it was changed. */
+  answer?: string;
 }
 
 export interface EditorDocumentV2 {
@@ -224,10 +264,14 @@ export interface EditorDocumentV2 {
   canvas: EditorCanvasSettings;
   appearance: EditorAppearance;
   assets: Record<AssetId, EditorMediaAsset>;
-  timeline: { tracks: EditorTrack[] };
+  /** transitions: effects placed anywhere on the timeline (their own lane); none is tied to a cut. */
+  timeline: { tracks: EditorTrack[]; transitions?: TimelineTransition[] };
   semantics: EditorSemanticState;
   processing?: {
     audioDenoise?: { strength: number };
+    /** Whole-mix loudness: a master gain (dB) bringing the programme to `targetLufs`, applied with a
+     *  peak limiter in preview and export. Every clip keeps its own level under it. */
+    loudness?: { targetLufs: number; gainDb: number };
   };
 }
 

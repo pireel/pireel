@@ -284,6 +284,13 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [comp.audioTracks, comp.shots, videoFile, renderAudioTracks, visualMediaClips, timelineDurationSec, audioFileRev]);
 
+  // Whole-mix loudness (the document's master gain) plays through the engine's limited bus; re-applied
+  // with the sources since the engine may mount after the first pass (unchanged values are a no-op).
+  useEffect(() => {
+    videoEngineRef.current?.setMasterGain(comp.audioLoudness ? 10 ** (comp.audioLoudness.gainDb / 20) : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [comp.audioLoudness, comp.shots, videoFile]);
+
   // Source recovery belongs to the shared runtime; this hook derives audio waveforms once ready.
   useEffect(() => {
     for (const clip of comp.audioTracks ?? []) {

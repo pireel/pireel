@@ -12,10 +12,6 @@
  */
 
 import { setStudioProviders, unavailableProviders } from '@pireel/studio-engine/providers';
-import { frameRegistry } from '@pireel/studio-frames/vite';
-import { framePack } from '@pireel/studio-frames/locales';
-import { setFrameCatalogSource } from '@pireel/studio-ui/use-frame-catalog';
-import { shellLocale } from './locale';
 
 setStudioProviders({
   ...unavailableProviders(
@@ -37,19 +33,3 @@ setStudioProviders({
   },
 });
 
-// Frame catalog straight from the content package (client-side registry) — no API needed.
-setFrameCatalogSource(async () =>
-  frameRegistry.list().map((f) => {
-    const pack = framePack(shellLocale, f.id);
-    return {
-      id: f.id,
-      title: pack?.title ?? f.title,
-      summary: pack?.summary ?? f.summary,
-      icon: f.icon,
-      iconKey: null, // cover art lives on the hosted CDN; the emoji fallback keeps this shell self-contained
-      showcase: f.showcase,
-      palette: f.palette ?? null,
-      personFx: f.personFx ?? null,
-    };
-  }),
-);

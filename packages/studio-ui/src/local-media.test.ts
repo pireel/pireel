@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { setStudioProviders, unavailableProviders } from '@pireel/studio-engine/providers';
 import { durableFileSig, fileSig } from './media';
-import { alignFileToSig, loadLocalVideo, resolveAssetBytes, resolveAssetPreview, saveLocalStream, saveLocalVideo } from './local-media';
+import { alignFileToSig, loadLocalVideo, maintainLocalMediaCache, markLocalMediaSynced, resolveAssetBytes, resolveAssetPreview, saveLocalStream, saveLocalVideo } from './local-media';
+import { beginMediaCacheSession } from './local-media-cache';
 
 class MemoryFileHandle {
   readonly kind = 'file' as const;
@@ -36,6 +37,7 @@ class MemoryDirectoryHandle {
   readonly name = 'local-videos';
   readonly files = new Map<string, File>();
   private mtime = 0;
+  async *keys() { yield* this.files.keys(); }
 
   async getFileHandle(name: string, options?: { create?: boolean }) {
     if (!this.files.has(name) && !options?.create) throw new DOMException('Not found', 'NotFoundError');
@@ -110,11 +112,50 @@ function installLegacyHandle(key: string, file: File, permission: PermissionStat
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   setStudioProviders(unavailableProviders());
 });
 
 describe('device byte cache', () => {
+  it('evicts cold synced bytes, protects open/unsynced files, and restores an evicted asset from cloud', async () => {
+    const dir = installMemoryOpfs();
+    let now = 1_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    // Shared-reader/exclusive-eviction locks model another tab holding an open file.
+    const held = new Map<string, number>();
+    const locks = { request: async (name: string, options: LockOptions | ((lock: object) => unknown), callback?: (lock: object | null) => unknown) => {
+      const config = typeof options === 'function' ? {} : options;
+      const work = typeof options === 'function' ? options : callback!;
+      if (config.ifAvailable && held.has(name)) return work(null!);
+      held.set(name, (held.get(name) ?? 0) + 1);
+      try { return await work({ name }); } finally { const n = held.get(name)! - 1; if (n) held.set(name, n); else held.delete(name); }
+    } };
+    Object.assign(navigator, { locks });
+    const old = new File(['a'.repeat(40)], 'old.mp4', { lastModified: 1 });
+    const pending = new File(['b'.repeat(40)], 'pending.mp4', { lastModified: 2 });
+    const active = new File(['c'.repeat(40)], 'active.mp4', { lastModified: 3 });
+    for (const file of [old, pending, active]) await saveLocalVideo(file, fileSig(file));
+    await markLocalMediaSynced(fileSig(old)); await markLocalMediaSynced(fileSig(active));
+    now += 600_000;
+    const release = beginMediaCacheSession();
+    await loadLocalVideo(fileSig(active));
+    now += 600_000; // An open file remains protected even beyond the recent-read guard.
+    Object.assign(navigator.storage, { estimate: async () => ({ usage: 950, quota: 1000 }) });
+    try {
+      expect(await maintainLocalMediaCache(0, true)).toBe(40);
+      expect(await loadLocalVideo(fileSig(old))).toBeNull();
+      expect(await (await loadLocalVideo(fileSig(pending)))?.text()).toBe('b'.repeat(40));
+      expect(await (await loadLocalVideo(fileSig(active)))?.text()).toBe('c'.repeat(40));
+      const fetch = vi.fn(async () => old);
+      setStudioProviders({ ...unavailableProviders(), vault: { backup: async () => null, fetch } });
+      const entry = { assetId: 'old', contentSig: fileSig(old), cloudKey: 'cloud/old', label: old.name };
+      expect(await (await resolveAssetBytes(entry))?.text()).toBe('a'.repeat(40));
+      await resolveAssetBytes(entry);
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect([...dir.files.keys()].filter(name => name.endsWith('.meta.json'))).toHaveLength(3);
+    } finally { release(); }
+  });
   it('gives different content distinct durable identities even when file metadata is identical', async () => {
     const first = new File(['AAAA'], 'clip.mp4', { type: 'video/mp4', lastModified: 7 });
     const second = new File(['BBBB'], 'clip.mp4', { type: 'video/mp4', lastModified: 7 });

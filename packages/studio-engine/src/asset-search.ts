@@ -5,6 +5,7 @@
  * records plus cloud/official catalogs, while the MCP route gathers the same cloud-safe records
  * server-side. No model call is required and asset metadata is always returned as untrusted data.
  */
+import { SFX_PACK, sfxPackUrl } from './sfx-library';
 
 export const ASSET_SEARCH_INDEX_VERSION = 1;
 
@@ -178,6 +179,21 @@ export function officialStickerSearchTags(label: string, existingTags: readonly 
 
 /** Add small audited bilingual aliases to official music metadata. This is deterministic catalog
  * enrichment, not model-generated semantics. */
+const SFX_PURPOSE_TAGS: Record<string, string[]> = {
+  transition: ['转场', '嗖', 'transition', 'whoosh'], reveal: ['揭晓', '出现', 'reveal', 'pop'], emphasis: ['强调', '重点', 'emphasis', 'accent', 'hit'],
+  money: ['价格', '金钱', 'money', 'price'], achievement: ['成就', '增长', 'achievement', 'success'], reaction: ['观众反应', '惊叹', 'reaction', 'crowd'],
+  question: ['疑问', '悬念', 'question', 'suspense'], comedic: ['搞笑', '反转', 'comedic', 'funny'], cta: ['引导', '关注', 'call to action', 'ui'],
+};
+/** The short-video sound effects pack as official audio documents: each says when it fits, so an
+ *  agent learns the catalog by searching rather than from always-on prompt text. */
+export function sfxPackSearchDocuments(): AssetSearchDocument[] {
+  return SFX_PACK.map(sound => ({
+    assetId: `sfx:${sound.id}`, scope: 'official', kind: 'audio', origin: 'sfx', label: `${sound.label} · ${sound.en}`, durationSec: sound.durationSec,
+    fields: { category: `音效 Sound effect · ${sound.purpose}`, tags: ['音效', 'sfx', 'sound effect', ...(SFX_PURPOSE_TAGS[sound.purpose] ?? [sound.purpose])], description: sound.use },
+    availability: 'ready', locator: { url: sfxPackUrl(sound.id) },
+  }));
+}
+
 export function bgmSearchTags(narrationFit: string, moods: readonly string[], useCases: readonly string[]): string[] {
   const tags = new Set<string>();
   for (const value of [...moods, ...useCases]) {

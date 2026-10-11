@@ -8,7 +8,12 @@
  * caption changes, and notes telling the agent exactly when to re-read. Pure; no I/O.
  */
 import { webFontCatalog } from '../font-library';
+import { captionAnimationId } from '../caption-animations';
+import { documentCaptionStyle } from '../editor-document/caption-state';
 import { componentSchemaOf, componentValuesView, type ComponentValueType } from '../component-schema';
+import type { DocumentLook } from '../look';
+import { editingSkillsOf } from '../editing-skills';
+import { dataEditFields } from '../component-props';
 import { clipPropertyDefaults, effectiveAudioClipProperties } from './clip-properties';
 
 import type {
@@ -32,7 +37,7 @@ export interface V3ClipView {
   audio?: { clipId: string; volumeDb?: number; mute?: boolean };
   linkGroupId?: string;
   enabled?: false;
-  component?: { componentId?: string; box?: unknown; props?: Array<{ key: string; type: ComponentValueType; value: unknown }> };
+  component?: { componentId?: string; box?: unknown; props?: Array<{ key: string; type: ComponentValueType; value: unknown }>; texts?: Array<{ key: string; text: string }>; motion?: { speed?: number; delaySec?: number } };
   [property: string]: unknown;
 }
 
@@ -58,18 +63,36 @@ export interface V3CaptionsView {
   cueCount: number;
   source?: unknown;
   preview?: string;
+  /** The current look in set_captions vocabulary (read back what you would write). */
+  style: { preset: string; animation: string; highlightColor?: string; yPct: number; scale: number; font?: string };
 }
 
 export interface V3StateView {
   canvas: { width: number; height: number; fps: number };
   durationFrames: number;
-  frame?: { id: string };
   tracks: V3TrackView[];
+  /** The transition lane: effects placed by time, independent of cuts (add_transition vocabulary). */
+  transitions?: V3TransitionView[];
   /** `library: true` marks project-library media not yet placed on any track — the footage to start from. */
   assets: Array<{ id: string; kind: string; label?: string; durationSec?: number; hasAudio?: boolean; library?: true }>;
   semantics: { primaryTrackId: string; sceneIds: string[] };
+  /** set_confirm_list items with the creator's answers (status confirmed / changed + answer). */
+  confirmList?: Array<{ id: string; kind: string; text: string; status: string; answer?: string }>;
+  /** Editing skills the creator switched on: apply them when building or reworking the video as a whole. */
+  editingSkills?: Array<{ id: string; instruction: string }>;
   /** Library fonts every text surface accepts (set_texts/set_captions font ids, compose_component fontFamily); sans/serif/mono/local:<family> need no catalog. */
   fonts: Array<{ id: string; zh: string; en: string }>;
+}
+
+export interface V3TransitionView { id: string; frames: [number, number]; effect: string; direction?: string }
+
+export function transitionsView(document: EditorDocumentV2): V3TransitionView[] {
+  return (document.timeline.transitions ?? []).map((transition) => ({
+    id: transition.id,
+    frames: [transition.startFrame, transition.startFrame + transition.durationFrames],
+    effect: transition.effect,
+    ...(transition.direction ? { direction: transition.direction } : {}),
+  }));
 }
 
 export interface V3Delta {
@@ -82,6 +105,9 @@ export interface V3Delta {
   createdTracks?: Array<{ id: string; type: string; role?: string; order: number }>;
   removedTrackIds?: string[];
   captions?: { cueCount: number; change: 'relaid' | 'shifted' | 'removed' | 'restyled' };
+  /** The transition lane after the edit, when any transition was added, moved, shortened or removed
+   *  (ripple edits carry the lane along). Same shape as get_state transitions. */
+  transitions?: V3TransitionView[];
   durationFrames?: [number, number];
   canvas?: { from: [number, number]; to: [number, number] };
   notes?: string[];
@@ -159,15 +185,9 @@ function zoomView(zoom: unknown, clipStartFrame: number, fps: number): Record<st
   };
 }
 
-/** The cut transition into a story-spine clip, as add_transition wrote it. */
-function transitionView(transIn: unknown, fps: number): Record<string, unknown> | undefined {
-  const t = transIn as { effect?: string; durationSec?: number; direction?: string } | undefined;
-  if (!t || !t.effect) return undefined;
-  return { effect: t.effect, durationFrames: Math.round((t.durationSec ?? 1) * fps), ...(t.direction ? { direction: t.direction } : {}) };
-}
 
 /** Render one clip in the v3 shape. Linked audio partners are folded by the caller. */
-export function renderV3Clip(clip: TimelineClip, trackId: string, trackRole?: string, fps = 30): V3ClipView {
+export function renderV3Clip(clip: TimelineClip, trackId: string, trackRole?: string, fps = 30, look?: DocumentLook): V3ClipView {
   const view: V3ClipView = { id: clip.id, kind: clip.kind, trackId, frames: [clip.startFrame, clip.startFrame + clip.durationFrames] };
   if (!clip.enabled) view.enabled = false;
   if (clip.linkGroupId) view.linkGroupId = clip.linkGroupId;
@@ -176,10 +196,8 @@ export function renderV3Clip(clip: TimelineClip, trackId: string, trackRole?: st
       view.assetId = clip.assetId;
       view.source = [round3(clip.sourceInSec), round3(clip.sourceOutSec)];
       if (clip.box) view.box = clip.box;
-      const { transIn, zoom, ...rest } = (clip.properties ?? {}) as Record<string, unknown>;
+      const { transIn: _legacyTransition, zoom, ...rest } = (clip.properties ?? {}) as Record<string, unknown>;
       Object.assign(view, soundView(stripDefaults(rest, NARRATIVE_DEFAULTS), fps));
-      const transitionIn = transitionView(transIn, fps);
-      if (transitionIn) view.transitionIn = transitionIn;
       const zoomed = zoomView(zoom, clip.startFrame, fps);
       if (zoomed) view.zoom = zoomed;
       stripIdentityGeometry(view, clip.mediaFraming);
@@ -207,8 +225,13 @@ export function renderV3Clip(clip: TimelineClip, trackId: string, trackRole?: st
       view.component = { ...(block.templateId ? { componentId: block.templateId } : {}), ...(block.box ? { box: block.box } : {}) };
       // Editable properties (registered and bespoke alike): keys, types and effective values, so
       // set_clip_properties.props needs no other lookup.
-      const editable = block.templateId ? componentSchemaOf({ templateId: block.templateId, slots: (block.slots ?? {}) as Record<string, unknown> }) : null;
+      const editable = block.templateId ? componentSchemaOf({ templateId: block.templateId, slots: (block.slots ?? {}) as Record<string, unknown> }, look) : null;
       if (editable) view.component.props = componentValuesView(editable);
+      // On-screen wording of a bespoke component, by key: set_clip_properties.texts rewrites it in place.
+      const texts = block.templateId === 'custom' && typeof block.slots?.innerHtml === 'string' ? dataEditFields(block.slots.innerHtml) : [];
+      const motion = (block as { motion?: { speed?: number; delaySec?: number } }).motion;
+      if (motion && (motion.speed || motion.delaySec)) view.component.motion = motion;
+      if (texts.length) view.component.texts = texts.slice(0, 24).map((field) => ({ key: field.key, text: field.text.length > 120 ? `${field.text.slice(0, 120)}…` : field.text }));
       break;
     }
     case 'caption': {
@@ -252,11 +275,20 @@ function captionsView(document: EditorDocumentV2, track: EditorTrack): V3Caption
     })
     .filter(Boolean)
     .join(' … ');
+  const style = documentCaptionStyle(document);
   return {
     on: cues.length > 0,
     cueCount: cues.length,
     ...(document.semantics.managedCaptionSource ? { source: document.semantics.managedCaptionSource } : {}),
     ...(preview ? { preview: preview.slice(0, 120) } : {}),
+    style: {
+      preset: style.preset,
+      animation: captionAnimationId(style),
+      ...(style.emphasis ? { highlightColor: style.emphasis } : {}),
+      yPct: Math.round(style.yPct * 10) / 10,
+      scale: style.scale,
+      ...(style.font ? { font: style.font } : {}),
+    },
   };
 }
 
@@ -310,7 +342,7 @@ export function renderV3State(
         if (partners.length === 1 && visual.length === 1) { folded.add(clip.id); continue; }
       }
       if (!inWindow(clip)) continue;
-      const rendered = renderV3Clip(clip, track.id, track.role, document.canvas.fps);
+      const rendered = renderV3Clip(clip, track.id, track.role, document.canvas.fps, document.appearance.look);
       if (clip.kind !== 'audio' && clip.linkGroupId) {
         const partner = (audioByGroup.get(clip.linkGroupId) ?? [])[0];
         if (partner && partner.kind === 'audio') {
@@ -337,8 +369,8 @@ export function renderV3State(
   return {
     canvas: { width: document.canvas.width, height: document.canvas.height, fps: document.canvas.fps },
     durationFrames: documentDurationFrames(document),
-    ...(document.appearance.frameId ? { frame: { id: document.appearance.frameId } } : {}),
     tracks,
+    ...(document.timeline.transitions?.length ? { transitions: transitionsView(document) } : {}),
     assets: Object.values(document.assets).map((asset) => ({
       id: asset.id,
       kind: asset.kind,
@@ -348,6 +380,8 @@ export function renderV3State(
       ...(!placedAssetIds.has(asset.id) ? { library: true as const } : {}),
     })),
     semantics: { primaryTrackId: document.semantics.primaryNarrativeTrackId, sceneIds: document.semantics.scenes.map((scene) => scene.id) },
+    ...(document.semantics.handoff?.length ? { confirmList: document.semantics.handoff.map(({ id, kind, text, status, answer }) => ({ id, kind, text, status, ...(answer ? { answer } : {}) })) } : {}),
+    ...(document.semantics.editingSkills?.length ? { editingSkills: editingSkillsOf(document.semantics.editingSkills) } : {}),
     fonts: webFontCatalog(),
   };
 }
@@ -409,7 +443,7 @@ export function documentDelta(before: EditorDocumentV2, after: EditorDocumentV2)
     const { startFrame: s1, ...rest1 } = next.clip as unknown as Record<string, unknown>;
     const contentChanged = entry.trackId !== next.trackId || JSON.stringify(rest0) !== JSON.stringify(rest1);
     if (contentChanged) {
-      touched.push(renderV3Clip(next.clip, next.trackId, next.trackRole, after.canvas.fps));
+      touched.push(renderV3Clip(next.clip, next.trackId, next.trackRole, after.canvas.fps, after.appearance.look));
       const was = sourceOf(entry.clip);
       const now = sourceOf(next.clip);
       // A trimmed clip lost part of its source: report the span that left so it can be re-inserted forward.
@@ -431,12 +465,12 @@ export function documentDelta(before: EditorDocumentV2, after: EditorDocumentV2)
   }
   for (const [id, entry] of afterClips) {
     if (entry.caption || beforeClips.has(id)) continue;
-    touched.push(renderV3Clip(entry.clip, entry.trackId, entry.trackRole, after.canvas.fps));
+    touched.push(renderV3Clip(entry.clip, entry.trackId, entry.trackRole, after.canvas.fps, after.appearance.look));
   }
   const shifted: V3Delta['shifted'] = [];
   for (const group of shiftGroups.values()) {
     if (group.count >= V3_SHIFT_RULE_MIN) shifted.push({ trackId: group.trackId, fromFrame: group.fromFrame, byFrames: group.byFrames, count: group.count });
-    else for (const id of group.ids) { const entry = afterClips.get(id)!; touched.push(renderV3Clip(entry.clip, entry.trackId, entry.trackRole, after.canvas.fps)); }
+    else for (const id of group.ids) { const entry = afterClips.get(id)!; touched.push(renderV3Clip(entry.clip, entry.trackId, entry.trackRole, after.canvas.fps, after.appearance.look)); }
   }
   touched.sort((left, right) => left.frames[0] - right.frames[0]);
   if (touched.length) {
@@ -449,5 +483,8 @@ export function documentDelta(before: EditorDocumentV2, after: EditorDocumentV2)
   if (removedTracks.length || createdTracks.length) notes.push('Track set changed — track order values may have moved; re-read get_state only before a manage_tracks order call, not for clip edits.');
   if (delta.captions && delta.captions.change !== 'restyled') notes.push('Caption cues were re-derived; never address individual cues.');
   if (notes.length) delta.notes = notes;
+  const lane0 = JSON.stringify(transitionsView(before));
+  const lane1 = transitionsView(after);
+  if (JSON.stringify(lane1) !== lane0) delta.transitions = lane1;
   return Object.keys(delta).length ? delta : null;
 }

@@ -35,6 +35,7 @@ import type {
   StudioProjectMeta,
 } from '@pireel/studio-engine/project-dto';
 import { t } from './i18n';
+import { collectUploadedMediaKeys } from '@pireel/studio-engine/cloud-media-persistence';
 
 const PREFIX = 'studio:draft:';
 const LEGACY_KEY = 'studio:draft:v1'; // single-draft era; 'v1' is a reserved id, skipped during scans
@@ -233,6 +234,10 @@ export async function serverLoadProject(id: string): Promise<StudioProjectDto | 
     const r = await fetch(`/api/studio/projects/${id}`);
     if (!r.ok) return null;
     const { project } = (await r.json()) as { project: StudioProjectDto };
+    if (project) {
+      const { markLocalMediaSynced } = await import('./local-media');
+      for (const sig of collectUploadedMediaKeys(project.document, project.context).keys()) void markLocalMediaSynced(sig);
+    }
     return project ?? null;
   } catch {
     return null;

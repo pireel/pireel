@@ -34,7 +34,7 @@ describe('validateV3Input', () => {
   });
 
   it('reports missing required fields and wrong primitive types by path', () => {
-    expect(validateV3Input('add_transition', { effect: 'fade' })).toMatchObject({ error: 'missing_field', path: 'atFrame' });
+    expect(validateV3Input('mask_words', {})).toMatchObject({ error: 'missing_field', path: 'wordIds' });
     expect(validateV3Input('add_transition', { atFrame: '30' })).toMatchObject({ error: 'invalid_value', path: 'atFrame' });
     expect(validateV3Input('set_clip_properties', { items: [{ clipId: 'c1', mute: 'yes' }] })).toMatchObject({ error: 'invalid_value', path: 'items[0].mute' });
     expect(validateV3Input('set_clip_properties', { items: [{ clipId: 'c1', mute: true, source: [1, 2.5] }] })).toBeNull();

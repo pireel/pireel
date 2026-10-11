@@ -49,6 +49,7 @@ import {
   useAudioPreview,
 } from './asset-card';
 import { t } from './i18n';
+import { storeVideoPoster } from './video-poster';
 
 interface MaterialItem {
   id: string;
@@ -106,7 +107,7 @@ function materialToItem(it: MaterialItem): LibraryItem | null {
     // = cdn prefix, no transform) — audio once bypassed it and 404'd as a relative path.
     insertUrl: imageThumb(it.url, 'original'),
     thumbSrc: it.thumb_url ?? (it.kind === 'image' ? it.url : null),
-    label: it.label ?? (it.kind === 'video' ? t('panels.untitledVideo') : t('panels.untitledImage')),
+    label: it.label ?? t(it.kind === 'video' ? 'panels.untitledVideo' : it.kind === 'audio' ? 'panels.untitledAudio' : 'panels.untitledImage'),
     createdAt: it.created_at ?? 0,
     width: it.width,
     height: it.height,
@@ -188,6 +189,35 @@ export function CloudAssetsPanel({
     void loadUploads();
   }, [reloadTick, loadUploads]);
 
+  // Videos uploaded before posters existed get one in the background, one at a time, written back
+  // to the row so every later load shows an image. A failure is not retried this session.
+  const posterTriedRef = useRef(new Set<string>());
+  const posterBusyRef = useRef(false);
+  const [posterTick, setPosterTick] = useState(0);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+  useEffect(() => {
+    if (posterBusyRef.current) return;
+    const item = uploads.find((it) => it.kind === 'video' && !it.thumbSrc && it.uploadId && it.insertUrl && !posterTriedRef.current.has(it.uploadId));
+    if (!item) return;
+    const uploadId = item.uploadId!;
+    posterBusyRef.current = true;
+    posterTriedRef.current.add(uploadId);
+    void storeVideoPoster(item.insertUrl!, item.label)
+      .then(async (thumbKey) => {
+        if (!thumbKey) return;
+        const saved = await fetch(`/api/me/uploads/${encodeURIComponent(uploadId)}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ thumb_url: thumbKey }),
+        });
+        if (saved.ok && mountedRef.current) setUploads((current) => current.map((it) => (it.uploadId === uploadId ? { ...it, thumbSrc: thumbKey } : it)));
+      })
+      .catch((error) => console.warn('[studio-library] poster extraction failed', uploadId, error))
+      .finally(() => {
+        posterBusyRef.current = false;
+        if (mountedRef.current) setPosterTick((n) => n + 1);
+      });
+  }, [uploads, posterTick]);
+
   // Agent uploads (import_media helper → /api/studio/media) land server-side with NO signal to this
   // tab, so the library would stay stale until a full reload. Silently refetch when the tab regains
   // focus/visibility, plus a light poll while visible, so agent-added media shows up on its own.
@@ -252,10 +282,12 @@ export function CloudAssetsPanel({
       try {
         const dims = k === 'audio' ? null : await fileDims(f, k); // measured locally, persisted along with the upload
         const { url } = await studioProviders().uploads.upload(f, { contentType: f.type || 'application/octet-stream', filename: f.name });
+        // A video's card cover: one first-frame still stored with the row (a failed extraction just leaves it to the background fill).
+        const thumbKey = k === 'video' ? await storeVideoPoster(f, f.name).catch(() => null) : null;
         await fetch('/api/me/uploads', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ kind: k, url, label: f.name, role: 'general', mime: f.type, byte_size: f.size, ...(dims ? { width: dims.w, height: dims.h } : {}) }),
+          body: JSON.stringify({ kind: k, url, label: f.name, role: 'general', mime: f.type, byte_size: f.size, ...(dims ? { width: dims.w, height: dims.h } : {}), ...(thumbKey ? { thumb_url: thumbKey } : {}) }),
         });
         setReloadTick((n) => n + 1);
         setQ('');
@@ -394,7 +426,7 @@ export function CloudAssetsPanel({
                 title={t('panels.filterAssets')}
                 aria-label={t('panels.filterAssets')}
                 className={`border-line hover:text-ink inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border transition ${
-                  kind === 'all' ? 'text-ink-3' : 'bg-panel-2 text-ink'
+                  kind === 'all' ? 'text-ink-3' : 'bg-panel-2/35 text-ink'
                 }`}
               >
                 <SlidersHorizontal size={12} />

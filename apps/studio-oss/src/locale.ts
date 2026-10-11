@@ -1,4 +1,5 @@
-import type { SupportedLocale } from '@pireel/studio-frames/locales';
+/** The shell's UI languages. */
+export type SupportedLocale = 'zh' | 'en';
 
 /** UI language for the shell: browser language decides, zh ↔ en only. */
 export const shellLocale: SupportedLocale =

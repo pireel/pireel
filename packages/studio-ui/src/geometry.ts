@@ -418,16 +418,15 @@ function measureFrameQuality(
 }
 
 /**
- * Realtime person mask (for the "text behind person" preview): prefer RVM matting (WebGPU, hair-level soft edges +
- * temporal stability); if WebGPU is unavailable/fails, fall back to selfie segmentation (256 grid, low-quality fallback;
+ * Realtime person mask (for the "text behind person" preview): prefer RVM matting (WebGPU, soft alpha edges; frames of a `stream` share its memory); if WebGPU is unavailable/fails, fall back to selfie segmentation (256 grid, low-quality fallback;
  * 0.2–0.8 confidence gives a wide soft transition, preserving the model's own soft edge from being re-hardened).
  * Returns null on failure/not-ready; the caller skips that frame.
  * Closes the passed-in bitmap either way (it was transferred via postMessage and isn't returned).
  */
-export async function segmentPersonMask(src: ImageBitmap): Promise<ImageBitmap | null> {
+export async function segmentPersonMask(src: ImageBitmap, stream?: import('./person-matte').MatteStream): Promise<ImageBitmap | null> {
   try {
     const { matteMask } = await import('./person-matte');
-    const matte = await matteMask(src);
+    const matte = await matteMask(src, stream);
     if (matte) return matte;
     const mp = await loadMP();
     if (!mp) return null;

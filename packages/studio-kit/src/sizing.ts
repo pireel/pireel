@@ -42,11 +42,13 @@ export function typeScale(ctx: RenderCtx): TypeScale {
   // type than a 500×500 one, but not proportionally to its full width.
   const base = Math.min(w, h) * 0.72 + Math.max(w, h) * 0.1;
   const cjk = isCjk(ctx.lang) ? 0.88 : 1;
+  // The user's type-size choice scales the designed sizes, bounds included, and never the spacing.
+  const k = ctx.textScale && ctx.textScale > 0 ? Math.min(1.5, Math.max(0.7, ctx.textScale)) : 1;
   return {
-    hero: clamp(base * 0.38 * cjk, 64, 300),
-    head: clamp(base * 0.16 * cjk, 34, 120),
-    label: clamp(base * 0.075, 24, 46),
-    kicker: clamp(base * 0.058, 20, 34),
+    hero: clamp(base * 0.38 * cjk, 64, 300) * k,
+    head: clamp(base * 0.16 * cjk, 34, 120) * k,
+    label: clamp(base * 0.088, 26, 54) * k,
+    kicker: clamp(base * 0.066, 22, 38) * k,
     pad: clamp(base * 0.11, 28, 96),
     gap: clamp(base * 0.06, 14, 48),
     rule: base > 460 ? 3 : 2,

@@ -38,7 +38,7 @@ export function ApprovalCard({ part }: { part: ToolPartLike }) {
   };
 
   return (
-    <div className="border-line bg-panel-2 w-full overflow-hidden rounded-md border">
+    <div className="border-line/60 w-full overflow-hidden rounded-md border">
       {title ? (
         <div className="text-ink-2 border-line/70 border-b px-3 py-2 text-[12px] font-semibold leading-relaxed">
           {title}

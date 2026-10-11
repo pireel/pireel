@@ -25,6 +25,8 @@ import { removeSrcRanges, restoreSrcRange, spans as clipSpans } from '@pireel/st
 import { wordsFromText } from '@pireel/studio-engine/caption-fx';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { type WordMaskPatch, applyWordMasks } from '@pireel/studio-engine/word-masks';
+import { applyWordDecorations, replaceWordHighlights, type WordDecorationPatch } from '@pireel/studio-engine/word-decorations';
+import { applyCaptionTextEdits } from '@pireel/studio-engine/caption-text-edit';
 import { type DocumentOp, transcriptInputsFor } from '@pireel/studio-engine/document-transaction';
 import type { DocumentCommitter } from './document-commit';
 import type { ScriptCut, ScriptMaskTarget, TimelineMaskTarget, TimelineScriptCut } from './script-panel';
@@ -375,7 +377,7 @@ export function useScriptCut(deps: ScriptCutDeps) {
     const captions = commit([
       { op: 'transcripts.set', input: { transcripts: changedTranscripts } },
       { op: 'command', input: { command: { type: 'captions.relay' } } },
-    ], { undo: 'none' });
+    ]);
     if (!captions.ok) {
       toast.error(editorErrorMessage(captions.error));
       return;
@@ -387,6 +389,119 @@ export function useScriptCut(deps: ScriptCutDeps) {
       setAsrSentences(main);
     }
     toast.success(msg);
+  };
+  const decorateScriptWords = (targets: ScriptMaskTarget[], patch: WordDecorationPatch) => {
+    if (!targets.length) return;
+    const bySrc = new Map<string | null, { sentenceIndex: number; wordIndex: number }[]>();
+    for (const target of targets) bySrc.set(target.src, [...(bySrc.get(target.src) ?? []), { sentenceIndex: target.si, wordIndex: target.wi }]);
+    let changed = false;
+    for (const [src, list] of bySrc) {
+      if (src === null) {
+        const previous = asrRef.current;
+        if (!previous) continue;
+        const next = applyWordDecorations(previous, list, patch);
+        if (next === previous) continue;
+        asrRef.current = next;
+        setAsrSentences(next);
+        changed = true;
+      } else {
+        const previous = clipAsrRef.current[src];
+        if (!previous) continue;
+        const next = applyWordDecorations(previous, list, patch);
+        if (next === previous) continue;
+        const clips = { ...clipAsrRef.current, [src]: next };
+        clipAsrRef.current = clips;
+        setClipAsr(clips);
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    const result = commit({ op: 'captions.edit', input: { mainTranscript: asrRef.current, clipTranscripts: clipAsrRef.current } });
+    if (!result.ok) toast.error(editorErrorMessage(result.error));
+  };
+  const decorateTimelineScriptWords = (targets: TimelineMaskTarget[], patch: WordDecorationPatch, replaceHighlights?: TimelineMaskTarget[]) => {
+    if (!targets.length && !replaceHighlights?.length) return;
+    const current = documentRef.current;
+    const byAsset = new Map<string, { sentenceIndex: number; wordIndex: number }[]>();
+    for (const target of targets) byAsset.set(target.assetId, [...(byAsset.get(target.assetId) ?? []), { sentenceIndex: target.si, wordIndex: target.wi }]);
+    for (const target of replaceHighlights ?? []) if (!byAsset.has(target.assetId)) byAsset.set(target.assetId, []);
+    const transcripts: Record<string, AsrSegment[]> = {};
+    for (const [assetId, list] of byAsset) {
+      const previous = current.semantics.transcripts[assetId] as AsrSegment[] | undefined;
+      if (!previous) continue;
+      const next = replaceHighlights ? replaceWordHighlights(previous, list, replaceHighlights.filter(target => target.assetId === assetId).map(target => ({ sentenceIndex: target.si, wordIndex: target.wi }))) : applyWordDecorations(previous, list, patch);
+      if (next !== previous) transcripts[assetId] = next;
+    }
+    if (!Object.keys(transcripts).length) return;
+    const result = commit([
+      { op: 'transcripts.set', input: { transcripts } },
+      { op: 'command', input: { command: { type: 'captions.relay' } } },
+    ]);
+    if (!result.ok) {
+      toast.error(editorErrorMessage(result.error));
+      return;
+    }
+    const mainAssetId = firstNarrativeAssetId(current);
+    if (mainAssetId && transcripts[mainAssetId]) {
+      asrRef.current = transcripts[mainAssetId];
+      setAsrSentences(transcripts[mainAssetId]);
+    }
+  };
+  const editScriptCaptionWords = (targets: ScriptMaskTarget[], text: string) => {
+    const first = targets[0];
+    if (!first || targets.some((target) => target.src !== first.src || target.si !== first.si)) return;
+    const indexes = targets.map((target) => target.wi);
+    const item = { index: first.si, w0: Math.min(...indexes), w1: Math.max(...indexes), text, lock: true };
+    const document = documentRef.current;
+    const assetId = first.src === null
+      ? firstNarrativeAssetId(document)
+      : document.timeline.tracks.flatMap((track) => track.clips).find((clip): clip is NarrativeTimelineClip => (
+          clip.kind === 'narrative' && (
+            document.assets[clip.assetId]?.locator.remoteUrl === first.src
+            || first.src === `blob:pireel-offline/${clip.assetId}`
+            || ensureShots(compRef.current).some((shot) => shot.id === clip.id && shot.src === first.src)
+          )
+        ))?.assetId;
+    if (assetId && document.semantics.transcripts[assetId]) {
+      const result = commit({ op: 'captions.edit', input: { cueEdits: [{ assetId, index: item.index, w0: item.w0, w1: item.w1, text }] } });
+      if (!result.ok) {
+        toast.error(editorErrorMessage(result.error));
+        return;
+      }
+      const stored = result.document.semantics.transcripts[assetId] as AsrSegment[];
+      if (first.src === null) {
+        asrRef.current = stored;
+        setAsrSentences(stored);
+      } else {
+        const clips = { ...clipAsrRef.current, [first.src]: stored };
+        clipAsrRef.current = clips;
+        setClipAsr(clips);
+      }
+      return;
+    }
+    if (first.src === null) {
+      if (!asrRef.current) return;
+      const next = applyCaptionTextEdits(asrRef.current, [item]);
+      asrRef.current = next;
+      setAsrSentences(next);
+    } else {
+      const previous = clipAsrRef.current[first.src];
+      if (!previous) return;
+      const next = applyCaptionTextEdits(previous, [item]);
+      const clips = { ...clipAsrRef.current, [first.src]: next };
+      clipAsrRef.current = clips;
+      setClipAsr(clips);
+    }
+    const result = commit({ op: 'captions.edit', input: { mainTranscript: asrRef.current, clipTranscripts: clipAsrRef.current } });
+    if (!result.ok) toast.error(editorErrorMessage(result.error));
+  };
+  const editTimelineCaptionWords = (targets: TimelineMaskTarget[], text: string) => {
+    const first = targets[0];
+    if (!first || targets.some((target) => target.assetId !== first.assetId || target.si !== first.si)) return;
+    if (!documentRef.current.semantics.transcripts[first.assetId]) return;
+    const indexes = targets.map((target) => target.wi);
+    const result = commit({ op: 'captions.edit', input: { cueEdits: [{ assetId: first.assetId, index: first.si, w0: Math.min(...indexes), w1: Math.max(...indexes), text }] } });
+    if (!result.ok) toast.error(editorErrorMessage(result.error));
   };
   /** The script panel's "extract narration script" (spinner prevents double-clicks; errors toast). */
   const [asrBusy, setAsrBusy] = useState(false);
@@ -431,6 +546,10 @@ export function useScriptCut(deps: ScriptCutDeps) {
     replaceScriptWord,
     maskScriptWords,
     maskTimelineScriptWords,
+    decorateScriptWords,
+    decorateTimelineScriptWords,
+    editScriptCaptionWords,
+    editTimelineCaptionWords,
     replaceTimelineScriptWord,
     extractForScript,
     asrBusy,

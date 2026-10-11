@@ -19,26 +19,11 @@ import { imageThumb } from '@pireel/ui/image-url';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@pireel/ui/dialog';
 import { useStudioShell } from './shell-context';
 import { studioLocale, t } from './i18n';
+import { generationRequest } from './generation-settings';
 import { audioKindFor, generationTemplates, MUSIC_DURATION_OPTIONS, SFX_DURATION_OPTIONS, type AudioKind, type GenerationIntent, type GenerationParams } from './chat-generation-intent';
 
 const RATIOS: NonNullable<GenerationParams['ratio']>[] = ['9:16', '16:9', '1:1'];
 const TOOL_BUTTON = 'text-ink-3 hover:bg-line hover:text-ink inline-flex h-7 w-7 items-center justify-center rounded-md disabled:pointer-events-none disabled:opacity-30';
-
-/** Five-second ceiling tiers of the SFX billing row (same as the server's sfxDurationTier). */
-function sfxDurationTier(durationSec: number): 's5' | 's10' | 's15' | 's22' {
-  if (durationSec <= 5) return 's5';
-  if (durationSec <= 10) return 's10';
-  if (durationSec <= 15) return 's15';
-  return 's22';
-}
-
-/** gpt-image needs a concrete size for both the provider and the billing tier; other models take an aspect. */
-function imageSizeParam(modelId: string, ratio: string): string {
-  if (modelId === 'gpt-image' || modelId === 'gpt-image-2') {
-    return ratio === '16:9' ? '2560x1440' : ratio === '1:1' ? '1024x1024' : '1440x2560';
-  }
-  return ratio;
-}
 
 /** Icon button with an anchored popover. The panel is portaled to <body> and fixed above the trigger,
  * so the chat column's scroll/overflow clipping cannot cut it off (click-outside / Escape close). */
@@ -89,8 +74,9 @@ function PopButton({ icon, title, active, disabled, children }: { icon: ReactNod
         ? createPortal(
             <div
               ref={panelRef}
+              data-floating-layer
               style={{ position: 'fixed', left: anchor.left, bottom: anchor.bottom }}
-              className="border-line bg-panel z-[70] min-w-[260px] max-w-[min(420px,calc(100vw-16px))] rounded-lg border p-2 shadow-lg"
+              className="border-line bg-panel z-[130] min-w-[260px] max-w-[min(420px,calc(100vw-16px))] rounded-lg border p-2 shadow-lg"
             >
               {children}
             </div>,
@@ -112,7 +98,7 @@ function Row({ label, options, value, onChange }: { label: string; options: read
             key={option.value}
             type="button"
             onClick={() => onChange(option.value)}
-            className={`h-6 rounded-md px-1.5 text-[10.5px] transition ${value === option.value ? 'bg-panel-2 text-ink font-medium' : 'text-ink-4 hover:text-ink-2'}`}
+            className={`h-6 rounded-md px-1.5 text-[10.5px] transition ${value === option.value ? 'bg-panel-2/35 text-ink font-medium' : 'text-ink-4 hover:text-ink-2'}`}
           >
             {option.label}
           </button>
@@ -193,6 +179,7 @@ export function GenerationControls({
   params,
   models,
   disabled,
+  audioKinds,
   onChange,
   onUseTemplate,
 }: {
@@ -201,6 +188,8 @@ export function GenerationControls({
   /** Hosted model catalog for this kind (fetched by the composer; empty = default model only). */
   models: { id: string; name: string }[];
   disabled?: boolean;
+  /** Audio kinds this surface can place (default all). */
+  audioKinds?: readonly AudioKind[];
   onChange: (next: GenerationParams) => void;
   onUseTemplate: (prompt: string) => void;
 }) {
@@ -320,11 +309,11 @@ export function GenerationControls({
           {intent === 'audio' ? (
             <Row
               label={t('chatGen.paramAudioKind')}
-              options={[
+              options={([
                 { value: 'sfx', label: t('chatGen.audioKindSfx') },
                 { value: 'music', label: t('chatGen.audioKindMusic') },
                 { value: 'speech', label: t('chatGen.audioKindSpeech') },
-              ]}
+              ] as const).filter((option) => !audioKinds || audioKinds.includes(option.value))}
               value={audioKind ?? 'sfx'}
               onChange={(value) => {
                 const kind = value as AudioKind;
@@ -405,25 +394,9 @@ export function GenerationControls({
 
 /** Credit estimate for the armed generation, shown next to the send button. */
 export function GenerationCreditsBadge({ intent, params, models }: { intent: GenerationIntent; params: GenerationParams; models: { id: string; name: string }[] }) {
-  const modelId = params.modelId ?? models[0]?.id ?? '';
-  const quoteParams = useMemo<Record<string, unknown>>(() => {
-    const ratio = params.ratio ?? '9:16';
-    if (intent === 'image') return { n: Math.min(4, Math.max(1, params.count ?? 1)), size: imageSizeParam(modelId, ratio), ...(params.quality ? { quality: params.quality } : {}) };
-    if (intent === 'video') return { duration_sec: String(params.durationSec ?? 5), count: 1, resolution: params.resolution ?? '720p', aspect_ratio: ratio, generate_audio: params.generateAudio ?? false };
-    if (intent === 'audio') {
-      const kind = audioKindFor(params);
-      if (kind === 'sfx') return { duration_tier: sfxDurationTier(params.durationSec ?? 5) };
-      if (kind === 'music') return { tier: 'song' }; // 30 s floor → always the full-track tier
-      return {};
-    }
-    return {};
-  }, [intent, params, modelId]);
+  const request = useMemo(() => generationRequest(intent, params, models), [intent, params, models]);
   const audioKind = intent === 'audio' ? audioKindFor(params) : null;
-  const credits = useQuote({
-    toolId: intent === 'video' ? 'video-gen' : audioKind === 'music' ? 'music-gen' : audioKind === 'sfx' ? 'sfx-gen' : audioKind === 'speech' ? 'speech-gen-unquoted' : 'image-gen',
-    modelId: intent === 'image' || intent === 'video' ? modelId : '',
-    params: quoteParams,
-  });
+  const credits = useQuote({ toolId: request.toolId, modelId: request.modelId, params: request.params });
   if (audioKind === 'speech') return null; // priced by text length at synthesis time
   if (credits == null) return null;
   return <span className="text-ink-4 text-[10.5px] tabular-nums">{t('chatGen.estimatedCredits', { n: credits })}</span>;

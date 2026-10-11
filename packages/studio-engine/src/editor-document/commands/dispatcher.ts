@@ -2,6 +2,7 @@ import type { EditorDocumentV2 } from '../types';
 import { patchEditorCanvas } from './canvas';
 import { patchEditorAppearance } from './appearance';
 import { patchEditorProcessing } from './processing';
+import { patchHandoffItem, setEditingSkills, setProjectBrand, setProjectSkill } from './handoff';
 import { insertAudioClip } from './audio-insert';
 import { patchAudioClips } from './audio-patch';
 import { patchCaptionStyle } from './caption-style';
@@ -22,6 +23,7 @@ import { duplicateOverlayClip } from './overlay-duplicate';
 import { removeEditorClips } from './remove';
 import { splitEditorClip } from './split';
 import { removeEditorRange } from './range';
+import { insertTransition, patchTransition, removeTransitions } from './transitions';
 import { insertEditorTrack, moveEditorTrack, patchEditorTrack, removeEditorTrack } from './tracks';
 import { commandFailure, type EditorCommand, type EditorCommandResult } from './types';
 
@@ -34,6 +36,14 @@ export function applyEditorCommand(document: EditorDocumentV2, command: EditorCo
       return patchEditorAppearance(document, command.patch);
     case 'processing.patch':
       return patchEditorProcessing(document, command.patch);
+    case 'handoff.patch':
+      return patchHandoffItem(document, command.id, command.status, command.answer);
+    case 'editingSkills.set':
+      return setEditingSkills(document, command.ids);
+    case 'brand.set':
+      return setProjectBrand(document, command.brand);
+    case 'skill.set':
+      return setProjectSkill(document, command.skillId);
     case 'track.insert':
       return insertEditorTrack(document, command.track, command.index);
     case 'track.remove':
@@ -76,6 +86,12 @@ export function applyEditorCommand(document: EditorDocumentV2, command: EditorCo
       return reorderNarrativeClips(document, command.clipIds);
     case 'clips.remove':
       return removeEditorClips(document, command);
+    case 'transitions.insert':
+      return insertTransition(document, command.transition);
+    case 'transitions.patch':
+      return patchTransition(document, command.id, command.patch);
+    case 'transitions.remove':
+      return removeTransitions(document, command.ids);
     case 'clips.insert':
       return insertEditorClips(document, command);
     case 'range.remove':

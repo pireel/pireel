@@ -10,7 +10,8 @@
 
 import { esc, tk, type RenderCtx, type RenderResult } from "../contract";
 import { fadeUp } from "../motion";
-import { defineSchema, en, num, reqText, text, type PropsOf } from "../schema";
+import { defineSchema, en, legacy, num, reqText, shownWhen, text, type Field, type PropsOf } from "../schema";
+import { inGroup } from "../groups";
 import { inkOn, surfaceCss, SURFACE_FIELDS } from "../surface";
 import { typeScale } from "../sizing";
 
@@ -27,13 +28,39 @@ export const codeSchema = defineSchema({
     "const result = await run();",
     "Exact source, preserved verbatim",
   ),
-  before: text(1600, "", "diff only: exact source before the edit"),
-  after: text(1600, "", "diff only: exact source after the edit"),
-  highlightLine: num(1, 120, 1, "highlight/scroll: one-based target line"),
-  pace: en(["slow", "normal", "fast"], "normal", "Typing or camera pace"),
+  before: shownWhen(text(1600, "", "diff only: exact source before the edit"), "variant", ["diff"]),
+  after: shownWhen(text(1600, "", "diff only: exact source after the edit"), "variant", ["diff"]),
+  highlightLine: shownWhen(num(1, 120, 1, "highlight/scroll: one-based target line"), "variant", ["highlight", "scroll"]),
+  pace: shownWhen(en(["slow", "normal", "fast"], "normal", "Typing or camera pace"), "variant", ["typing", "scroll"]),
   result: text(80, "", "Optional stable result or takeaway after the motion"),
-  ...SURFACE_FIELDS,
+  // Code colours only work as a set (background, text, keywords, strings, comments, highlight), so
+  // the component offers editor schemes rather than separate accent / text / panel colours.
+  codeTheme: inGroup(
+    en(["theme", "night", "light", "contrast"], "theme", "Editor colour scheme: theme = follow the project theme; night / light = editor palettes; contrast = black with bright tokens"),
+    "style",
+  ),
+  // The editor window is its own surface; stored panel settings still render for "theme".
+  ...(Object.fromEntries(Object.entries(SURFACE_FIELDS).map(([k, f]) => [k, legacy(f as Field<string>)])) as typeof SURFACE_FIELDS),
 });
+
+/** Editor palettes: every colour the window uses, set together. */
+const CODE_THEMES: Record<string, Record<string, string>> = {
+  night: {
+    "--sk-panel": "#1e2230", "--sk-panel-2": "#181b26", "--sk-fg": "#e4e7ee", "--sk-muted": "#8a91a3",
+    "--sk-ink": "#e4e7ee", "--sk-ink-muted": "#8a91a3", "--sk-line": "rgba(255,255,255,0.08)", "--sk-accent": "#7aa2f7",
+    "--code-keyword": "#c792ea", "--code-string": "#9ece6a", "--code-number": "#ff9e64", "--code-comment": "#6b7189",
+  },
+  light: {
+    "--sk-panel": "#ffffff", "--sk-panel-2": "#f6f8fa", "--sk-fg": "#1f2328", "--sk-muted": "#6e7781",
+    "--sk-ink": "#1f2328", "--sk-ink-muted": "#6e7781", "--sk-line": "rgba(31,35,40,0.12)", "--sk-accent": "#0969da",
+    "--code-keyword": "#cf222e", "--code-string": "#0a3069", "--code-number": "#0550ae", "--code-comment": "#6e7781",
+  },
+  contrast: {
+    "--sk-panel": "#0a0a0a", "--sk-panel-2": "#000000", "--sk-fg": "#ffffff", "--sk-muted": "#9a9a9a",
+    "--sk-ink": "#ffffff", "--sk-ink-muted": "#a0a0a0", "--sk-line": "rgba(255,255,255,0.14)", "--sk-accent": "#ffd24d",
+    "--code-keyword": "#ff5fa2", "--code-string": "#ffd24d", "--code-number": "#5ce1ff", "--code-comment": "#8a8a8a",
+  },
+};
 
 export type CodeProps = PropsOf<typeof codeSchema>;
 
@@ -190,7 +217,7 @@ function diffHtml(before: string, after: string): string {
     .slice(0, 24)
     .map(
       (op) =>
-        `<div class="diff-line diff-${op.type}"><span class="diff-sign">${op.type === "del" ? "−" : op.type === "add" ? "+" : " "}</span><code>${syntaxHtml(op.line)}</code></div>`,
+        `<div class="diff-line diff-${op.type}">${op.type === "del" ? '<i class="diff-mark" aria-hidden="true"></i>' : ""}<span class="diff-sign">${op.type === "del" ? "−" : op.type === "add" ? "+" : " "}</span><code>${syntaxHtml(op.line)}</code></div>`,
     )
     .join("");
 }
@@ -199,24 +226,33 @@ function typingTimeline(
   id: string,
   charCount: number,
   pace: CodeProps["pace"],
+  lifeSec?: number,
 ): string {
-  const per = pace === "slow" ? 0.04 : pace === "fast" ? 0.014 : 0.028;
+  // Typing finishes inside the block: pace is the share of the block spent typing (the rest holds
+  // the finished code). Without a known length, fall back to a per-character rate.
+  const share = pace === "slow" ? 0.85 : pace === "fast" ? 0.5 : 0.7;
+  const rate = pace === "slow" ? 0.04 : pace === "fast" ? 0.014 : 0.028;
+  const budget = lifeSec && lifeSec > 1 ? Math.max(0.4, lifeSec * share - 0.45) : charCount * rate;
+  const per = Math.min(rate, budget / Math.max(1, charCount));
   return `(function(){
 var root=document.querySelector('#${id} .code'),caret=document.querySelector('#${id} .caret');
 if(!root||!caret)return;var chars=Array.from(root.querySelectorAll('.ch'));
 tl.set(chars,{opacity:0},0);tl.set(caret,{opacity:0},0);
 if(chars.length){var first=chars[0];tl.set(caret,{x:first.offsetLeft,y:first.offsetTop,opacity:1},0.45);}
-chars.forEach(function(el,i){var at=0.45+i*${per},ws=el.getAttribute('data-space')==='1';
-tl.to(el,{opacity:1,duration:ws?0.01:0.12,ease:'power1.out'},at);
-tl.to(caret,{x:el.offsetLeft+el.offsetWidth,y:el.offsetTop,duration:${per},ease:'none'},at);});
+chars.forEach(function(el,i){var at=0.45+i*${per.toFixed(5)},ws=el.getAttribute('data-space')==='1';
+tl.to(el,{opacity:1,duration:ws?0.01:Math.min(0.12,${Math.max(0.01, per * 3).toFixed(4)}),ease:'power1.out'},at);
+tl.to(caret,{x:el.offsetLeft+el.offsetWidth,y:el.offsetTop,duration:${per.toFixed(5)},ease:'none'},at);});
 tl.to(caret,{opacity:0,duration:0.32,ease:'steps(1)',repeat:3,yoyo:true},${(0.6 + charCount * per).toFixed(3)});
 })();`;
 }
 
 function diffTimeline(id: string, lineH: number): string {
-  return `tl.from('#${id} .diff-line',{autoAlpha:0,y:8,duration:0.22,stagger:0.045,ease:'power1.out'},0.16);
-tl.to('#${id} .diff-del',{height:0,minHeight:0,opacity:0,duration:0.55,stagger:0.08,ease:'power2.inOut'},0.75);
-tl.fromTo('#${id} .diff-add',{height:0,minHeight:0,opacity:0},{height:${lineH},minHeight:${lineH},opacity:1,duration:0.6,stagger:0.12,ease:'power2.out'},1.45);`;
+  // A real diff: the old code appears, the removed lines are marked and dimmed but stay in place,
+  // then the added lines open up beneath them. The held frame shows both, red over green.
+  return `tl.from('#${id} .diff-same, #${id} .diff-del',{autoAlpha:0,y:8,duration:0.22,stagger:0.045,ease:'power1.out'},0.16);
+tl.fromTo('#${id} .diff-del .diff-mark',{scaleX:0},{scaleX:1,duration:0.4,stagger:0.08,ease:'power2.out'},0.7);
+tl.to('#${id} .diff-del code',{opacity:0.6,duration:0.3,stagger:0.08},0.8);
+tl.fromTo('#${id} .diff-add',{height:0,minHeight:0,opacity:0},{height:${lineH},minHeight:${lineH},opacity:1,duration:0.5,stagger:0.1,ease:'power2.out'},1.15);`;
 }
 
 function highlightTimeline(id: string): string {
@@ -242,7 +278,13 @@ export function renderCode(
 ): RenderResult {
   const p = codeSchema.parse(raw);
   const s = typeScale(ctx);
-  const fontPx = Math.max(14, Math.min(42, Math.round(s.label * 0.94)));
+  // Size to both the box height (via the type scale) and its width: the longest shown line must fit
+  // beside the gutter instead of being cut at the window edge.
+  const shownText = p.variant === "diff" ? `${p.before || p.code}\n${p.after || p.code}` : p.code;
+  const longest = Math.max(8, ...shownText.split("\n").slice(0, 120).map((line) => [...line.replace(/\t/g, "  ")].length));
+  const byHeight = Math.max(14, Math.min(42, Math.round(s.label * 0.94)));
+  const byWidth = Math.floor((ctx.box.w - s.pad * 1.2) / (longest * 0.6 + 3.4));
+  const fontPx = Math.max(12, Math.min(byHeight, byWidth));
   const lineH = Math.round(fontPx * 1.55);
   const chromeH = Math.max(34, Math.round(s.label * 1.8));
   const footerH = p.result ? Math.max(32, Math.round(s.label * 1.55)) : 0;
@@ -279,32 +321,36 @@ export function renderCode(
     p.variant === "diff"
       ? `<div class="diff">${diffHtml(p.before || p.code, p.after || p.code)}</div>`
       : `<div class="gutter">${gutter}</div><div class="code">${p.variant === "scroll" ? '<i class="hl-box scroll-box"></i>' : ""}${rows}${typing ? '<i class="caret"></i>' : ""}</div>${p.variant === "highlight" ? '<i class="hl-box"></i>' : ""}`;
-  const surface = surfaceCss(p, s);
-  const onCard = p.surface === "card";
+  const scheme = CODE_THEMES[p.codeTheme];
+  // An editor scheme is a window: always on its own panel, whatever the stored surface says.
+  const panel = scheme ? { ...p, surface: "card", surfaceColor: "", border: "none", borderColor: "" } : p;
+  const surface = surfaceCss(panel, s);
+  const onCard = panel.surface === "card";
+  const schemeVars = scheme ? Object.entries(scheme).map(([k, v]) => `${k}:${v};`).join("") : "";
 
   const html = `<div class="wrap">
 <header><span class="lights"><i></i><i></i><i></i></span><b>${esc(p.file)}</b><small>${esc(p.language)}</small></header>
 <div class="viewport">${body}</div>
 ${p.result ? `<footer><i></i><span>${esc(p.result)}</span></footer>` : ""}
 </div><style>
-#${id} .wrap{position:absolute;inset:0;display:flex;flex-direction:column;overflow:hidden;${surface}color:${inkOn(p)};font-family:${tk("--sk-font-num")};}
+#${id} .wrap{${schemeVars}position:absolute;inset:0;display:flex;flex-direction:column;overflow:hidden;${surface}color:${inkOn(panel)};font-family:${tk("--sk-font-num")};}
 #${id} header{height:${chromeH}px;flex:0 0 ${chromeH}px;display:flex;align-items:center;gap:${Math.round(s.gap * 0.55)}px;padding:0 ${Math.round(s.pad * 0.55)}px;border-bottom:1px solid ${tk("--sk-line")};background:${onCard ? `color-mix(in srgb,${tk("--sk-panel-2")} 58%,transparent)` : "rgb(0 0 0 / .18)"};}
 #${id} .lights{display:flex;gap:${Math.max(4, s.rule * 2)}px;}
 #${id} .lights i{width:${Math.max(6, Math.round(fontPx * 0.38))}px;height:${Math.max(6, Math.round(fontPx * 0.38))}px;border-radius:50%;background:${tk("--sk-muted")};opacity:.5;}
 #${id} header b{font-size:${Math.max(12, Math.round(fontPx * 0.84))}px;font-weight:650;}
-#${id} header small{margin-left:auto;font-size:${Math.max(12, Math.round(fontPx * 0.68))}px;color:${inkOn(p, true)};text-transform:uppercase;letter-spacing:.08em;}
+#${id} header small{margin-left:auto;font-size:${Math.max(12, Math.round(fontPx * 0.68))}px;color:${inkOn(panel, true)};text-transform:uppercase;letter-spacing:.08em;}
 #${id} .viewport{position:relative;flex:1;min-height:0;overflow:hidden;padding:${Math.round(s.gap * 0.6)}px 0;background:${onCard ? `color-mix(in srgb,${tk("--sk-panel")} 94%,${tk("--sk-panel-2")})` : "rgb(0 0 0 / .24)"};}
 #${id} .code{position:relative;margin-left:${Math.max(38, Math.round(fontPx * 2.9))}px;padding-right:${Math.round(s.pad * 0.55)}px;will-change:transform;}
-#${id} .gutter{position:absolute;z-index:2;left:0;top:${Math.round(s.gap * 0.6)}px;width:${Math.max(34, Math.round(fontPx * 2.5))}px;color:${inkOn(p, true)};font-size:${Math.max(12, Math.round(fontPx * 0.7))}px;line-height:${lineH}px;text-align:right;opacity:.55;will-change:transform;}
+#${id} .gutter{position:absolute;z-index:2;left:0;top:${Math.round(s.gap * 0.6)}px;width:${Math.max(34, Math.round(fontPx * 2.5))}px;color:${inkOn(panel, true)};font-size:${Math.max(12, Math.round(fontPx * 0.7))}px;line-height:${lineH}px;text-align:right;opacity:.55;will-change:transform;}
 #${id} .gutter span{display:block;height:${lineH}px;}
 #${id} .line{position:relative;display:block;min-height:${lineH}px;font-size:${fontPx}px;line-height:${lineH}px;white-space:pre;}
 #${id} .line .ln{display:none;}
 #${id} .line code{position:relative;z-index:1;display:block;overflow:hidden;white-space:pre;font:inherit;}
 #${id} .tok{display:inline-block;white-space:pre;}
-#${id} .tok-keyword{color:${tk("--sk-accent")};font-weight:700;}
-#${id} .tok-string{color:${tk("--sk-accent-2")};}
-#${id} .tok-number{color:${tk("--sk-accent")};font-weight:650;}
-#${id} .tok-comment{color:${inkOn(p, true)};font-style:italic;}
+#${id} .tok-keyword{color:var(--code-keyword, ${tk("--sk-accent")});font-weight:700;}
+#${id} .tok-string{color:var(--code-string, ${tk("--sk-accent-2")});}
+#${id} .tok-number{color:var(--code-number, ${tk("--sk-accent")});font-weight:650;}
+#${id} .tok-comment{color:var(--code-comment, ${inkOn(panel, true)});font-style:italic;}
 #${id} .caret{position:absolute;left:0;top:0;width:${Math.max(2, s.rule)}px;height:${Math.max(16, lineH - 8)}px;margin-top:4px;background:${tk("--sk-accent")};border-radius:1px;z-index:3;}
 #${id} .hl-box{position:absolute;z-index:0;left:${Math.max(30, Math.round(fontPx * 2.55))}px;right:${Math.round(s.gap * 0.5)}px;top:calc(${Math.round(s.gap * 0.6)}px + ${(focus - (p.variant === "scroll" ? 0 : visibleStart)) * lineH}px);height:${lineH}px;border-left:${Math.max(2, s.rule)}px solid ${tk("--sk-accent")};background:color-mix(in srgb,${tk("--sk-accent")} 14%,transparent);border-radius:${Math.max(2, s.rule)}px;transform-origin:left center;}
 #${id} .scroll-box{left:-8px;right:0;top:${focus * lineH}px;}
@@ -312,12 +358,15 @@ ${p.result ? `<footer><i></i><span>${esc(p.result)}</span></footer>` : ""}
 #${id} .diff-line{display:grid;grid-template-columns:${Math.max(28, Math.round(fontPx * 1.7))}px 1fr;align-items:center;min-height:${lineH}px;overflow:hidden;font-size:${fontPx}px;line-height:${lineH}px;}
 #${id} .diff-line code{display:block;min-width:0;overflow:hidden;white-space:pre;font:inherit;}
 #${id} .diff-sign{font-weight:800;text-align:center;}
-#${id} .diff-same{color:${inkOn(p, true)};}
-#${id} .diff-del{background:rgb(248 81 73 / .12);box-shadow:inset ${Math.max(2, s.rule)}px 0 #f85149;}
+#${id} .diff-same{color:${inkOn(panel, true)};}
+#${id} .diff-line{position:relative;}
+#${id} .diff-line > *{position:relative;z-index:1;}
+#${id} .diff-del > .diff-mark{position:absolute;z-index:0;inset:0;background:rgb(248 81 73 / .16);box-shadow:inset ${Math.max(2, s.rule)}px 0 #f85149;transform-origin:left center;}
+#${id} .diff-del code{text-decoration:line-through;text-decoration-color:rgb(248 81 73 / .7);}
 #${id} .diff-add{background:rgb(63 185 80 / .12);box-shadow:inset ${Math.max(2, s.rule)}px 0 #3fb950;}
 #${id} .diff-del .diff-sign{color:#f85149;}
 #${id} .diff-add .diff-sign{color:#3fb950;}
-#${id} footer{height:${footerH}px;flex:0 0 ${footerH}px;display:flex;align-items:center;gap:${Math.round(s.gap * 0.45)}px;padding:0 ${Math.round(s.pad * 0.55)}px;border-top:1px solid ${tk("--sk-line")};font-size:${Math.max(12, Math.round(fontPx * 0.78))}px;color:${inkOn(p, true)};}
+#${id} footer{height:${footerH}px;flex:0 0 ${footerH}px;display:flex;align-items:center;gap:${Math.round(s.gap * 0.45)}px;padding:0 ${Math.round(s.pad * 0.55)}px;border-top:1px solid ${tk("--sk-line")};font-size:${Math.max(12, Math.round(fontPx * 0.78))}px;color:${inkOn(panel, true)};}
 #${id} footer i{width:${Math.max(6, Math.round(fontPx * 0.35))}px;height:${Math.max(6, Math.round(fontPx * 0.35))}px;border-radius:50%;background:${tk("--sk-accent")};}
 </style>`;
 
@@ -325,7 +374,7 @@ ${p.result ? `<footer><i></i><span>${esc(p.result)}</span></footer>` : ""}
   if (onCard) timeline.push(fadeUp(`#${id} .wrap`, 0, { y: 10, dur: 0.25 }));
   timeline.push(fadeUp(`#${id} header`, 0.04, { y: 6, dur: 0.22 }));
   if (p.variant === "typing")
-    timeline.push(typingTimeline(id, [...visible.join("")].length, p.pace));
+    timeline.push(typingTimeline(id, [...visible.join("")].length, p.pace, ctx.durationSec));
   else if (p.variant === "diff") timeline.push(diffTimeline(id, lineH));
   else if (p.variant === "scroll") timeline.push(scrollTimeline(id));
   else timeline.push(highlightTimeline(id));

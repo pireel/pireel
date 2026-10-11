@@ -82,14 +82,20 @@ Imported or generated audio lives as a clip on its typed lane: pass the helper's
 `source [inSec, outSec]` retrims and `move_clips` for timing. Narration placed this way is
 transcript-readable with `get_transcript` when word timing matters.
 
-**Sound effects** have three sources — use them in this order:
+**Sound effects** make a video more engaging and give it rhythm; where sound helps is your
+judgment, and silence is always an option. Speech at the same instant masks a sound, so keep the
+voice clear. They have three sources — use them in this order:
 
-1. **An existing sound** — the user's files, or a library asset found with `search_assets
-   {kind:"audio"}` (official library first; reuse a timing-compatible sound before generating
-   anything) → `add_clips {role:"sfx"}` (with `register_media` first only for remote results).
-2. **`generate_audio {kind:"sfx"}` — off-screen / editorial sound from a text description**
-   (server-side, so it also works over MCP; charges credits, 0.5–22 s). This is the path for
-   whooshes, UI pings, stingers, risers, impacts and ambience beds — sounds no picture drives.
+1. **An existing sound** — the user's files, or the official sound effects pack:
+   `search_assets {scope:"official", kind:"audio", query}` describing the moment or the sound;
+   each result says what it is for. Reuse a timing-compatible
+   sound before generating anything → `add_clips {role:"sfx"}` (with `register_media` first only
+   for remote results).
+2. **A new off-screen / editorial sound from a text description.** If your own environment can
+   generate audio, make it there and bring the file in with `import_media`; otherwise
+   `generate_audio {kind:"sfx"}` (server-side, so it also works over MCP; charges credits,
+   0.5–22 s). This is the path for what the pack lacks — a specific whoosh, stinger, impact or an
+   ambience bed — sounds no picture drives.
    Describe the *sound*, not the scene: source, material, motion, intensity, perspective, duration
    feel ("short airy whoosh, fast, passing left to right"; "soft glass notification ping, single
    hit"). Keep hits and whooshes at 0.5–2 s; use `loop:true` only for ambience beds. Never ask it
@@ -109,17 +115,20 @@ transcript-readable with `get_transcript` when word timing matters.
 Place every generated result with `register_media` and **one** `add_clips` call using `role: "sfx"`
 and no `trackId`, so overlapping hits land on parallel SFX lanes. Anchor each SFX at its editorial
 frame, keep it short, never stack two on the same beat, and set level and fades in the same
-`add_clips` items or one `set_clip_properties` call — a sound effect that is louder than the voice is
-a mistake, not emphasis.
+`add_clips` items or one `set_clip_properties` call — an effect should be clearly audible — accents a few dB
+under the voice, a payoff hit (a price, an impact) near it — but one louder than the voice is a
+mistake, not emphasis.
 
 ## Transitions: `add_transition`
 
-A hard cut is the default and is usually the strongest rhythm. Add a transition only where the boundary
+A hard cut is the default and is usually the strongest rhythm. Add a transition only where the moment
 communicates a real change of time, place, chapter, source or emotional mode — not to soften a jump
 cut inside one speech (fix that with framing or B-roll instead).
 
-- `add_transition {atFrame, effect, durationFrames}` at an existing boundary between two story-spine
-  clips; `effect:"none"` removes.
+- `add_transition {atFrame, effect, durationFrames?}` places one on the transition lane at any frame:
+  spanning a story-spine cut it hands the footage over there; elsewhere the effect plays on the running
+  picture as a beat. Change or remove one by its `id` from `get_state` transitions (`effect:"none"`
+  removes). Transitions never overlap; a new one queues after any already at that frame.
 - Duration **0.5–1 s** (max 4 s). Longer only for a deliberate dreamy or chapter beat.
 - One style family per video: `fade` / `fadeblack` for time and chapters; `directional` /
   `directionalwipe` (with `direction`) for place changes; `crosszoom` for an energy jump; `circleopen` /

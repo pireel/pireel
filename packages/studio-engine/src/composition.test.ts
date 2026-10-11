@@ -75,7 +75,7 @@ describe('assembleHtml', () => {
     c.blocks = [bad, titleBlock({ text: '好块', startSec: 0, durationSec: 2 })];
     const html = assembleHtml(c);
     // 坏体以字符串字面量喂 new Function(编译期抛错被 try 圈住),不直接内联成裸代码
-    expect(html).toContain(`new Function('tl', ${JSON.stringify('tl.to((')})`);
+    expect(html).toContain(`new Function('tl', 'window', 'document', ${JSON.stringify('tl.to((')})`);
     expect(html).toContain("catch (e) { console.warn('[hf] timeline error'");
     expect((html.match(/window\.__timelines\[/g) ?? []).length).toBe(2); // 两块都照常注册
   });
@@ -283,6 +283,15 @@ describe('全局花字样式 captionStyle', () => {
     expect(html).toContain('#cf96ff'); // 预设的强调色进了逐词变色时间轴
     expect(html).not.toContain('scaleX:1'); // 旧 highlight 的扫光动画没了 → 真走了预设通道
     expect(cap.slots.preset).toBeUndefined(); // 全局样式不落进块
+  });
+
+  it('centers a caption on a split seam instead of the global position', () => {
+    const c = emptyComposition();
+    const cap = captionBlock({ words });
+    c.blocks = [{ ...cap, slots: { ...cap.slots, splitSeam: .5 } }];
+    c.captionStyle = { preset: 'ln-clean', yPct: 88, scale: 1 };
+    // Bottom edge half a line (64px × 1.4 / 2) below the middle of a 1920-high frame.
+    expect(assembleHtml({ ...c, height: 1920 })).toContain(`bottom:${+(100 - (50 + 44.8 / 1920 * 100)).toFixed(3)}%`);
   });
 
   it('框高 hPct:落到 .cap-line 的 min-height(底板跟框走,字号不动)', () => {

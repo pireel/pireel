@@ -17,6 +17,9 @@ export type V3ToolGroup =
   | 'generation'
   | 'session';
 
+/** These Chat tools have server execute handlers. The browser must wait for their receipts. */
+export const CHAT_SERVER_EXECUTED_TOOLS = new Set(['list_skills', 'read_skill', 'read_brand', 'save_user_skill']);
+
 export interface V3ToolSpec {
   id: string;
   group: V3ToolGroup;
@@ -25,7 +28,8 @@ export interface V3ToolSpec {
    *  name or payload. Stable contracts are append-only within one version; a breaking change needs a
    *  new capability id or a higher version with an explicit compatibility path. */
   skillContract?: { version: number; stability: 'stable' | 'experimental' };
-  /** Runs only inside Studio Chat (needs an in-app card the other surfaces cannot show). */
+  /** Runs only inside Studio Chat: it needs an in-app card, or it serves the in-app model only
+   *  (external agents bring their own model and do that work themselves). */
   chatOnly?: boolean;
   /** Answered directly by the server on the MCP surface (no open tab needed). */
   serverDirect?: boolean;
@@ -41,6 +45,8 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   { id: 'inspect_media', group: 'state', charges: true, skillContract: { version: 1, stability: 'stable' } },
   { id: 'inspect_timeline', group: 'state', skillContract: { version: 1, stability: 'stable' } },
   { id: 'get_beat_grid', group: 'state' },
+  // In-app agent only: external agents bring their own model and look at the material themselves.
+  { id: 'get_facts', group: 'state', chatOnly: true },
   { id: 'manage_project', group: 'state', serverDirect: true },
   // ---- assets (7)
   { id: 'search_assets', group: 'assets', serverDirect: true },
@@ -68,18 +74,22 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   { id: 'manage_clip_links', group: 'clips' },
   { id: 'add_transition', group: 'clips', skillContract: { version: 1, stability: 'stable' } },
   { id: 'set_canvas', group: 'clips', skillContract: { version: 1, stability: 'stable' } },
-  // ---- speech (4)
+  // ---- speech (5)
+  { id: 'rough_cut', group: 'speech', charges: true },
   { id: 'remove_silence', group: 'speech', skillContract: { version: 1, stability: 'stable' } },
   { id: 'remove_words', group: 'speech', skillContract: { version: 1, stability: 'stable' } },
   { id: 'mask_words', group: 'speech', skillContract: { version: 1, stability: 'stable' } },
   { id: 'denoise_audio', group: 'speech' },
-  // ---- components and text (7)
+  // ---- components and text (9; confirmation list is a session tool)
   { id: 'compose_component', group: 'components' },
+  { id: 'set_look', group: 'components' },
+  { id: 'place_graphics', group: 'components' },
+  { id: 'set_confirm_list', group: 'session' },
   { id: 'apply_component', group: 'components', charges: true },
   { id: 'set_texts', group: 'components', skillContract: { version: 1, stability: 'stable' } },
   { id: 'set_captions', group: 'components', skillContract: { version: 1, stability: 'stable' } },
   { id: 'set_whiteboard', group: 'components' },
-  { id: 'manage_frame', group: 'components' },
+  { id: 'read_brand', group: 'components' },
   { id: 'bake_component', group: 'components' },
   // ---- generation (8)
   { id: 'list_models', group: 'generation', serverDirect: true },
@@ -96,19 +106,23 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   { id: 'preview', group: 'session' },
   { id: 'undo', group: 'session' },
   { id: 'ask_user', group: 'session', chatOnly: true },
+  { id: 'save_edit_plan', group: 'session', chatOnly: true },
+  { id: 'finish_edit', group: 'session', chatOnly: true },
   { id: 'export', group: 'session' },
 ];
 
 
-export const V3_TOOL_LIMIT = 60;
+// Includes the chat-only saved director brief and the on-demand whiteboard tool.
+export const V3_TOOL_LIMIT = 62;
 
 export const V3_TOOL_IDS: ReadonlySet<string> = new Set(V3_TOOLS.map((tool) => tool.id));
+/** Studio Chat uses inline questions; the legacy publishing checklist remains MCP-compatible. */
+export const V3_CHAT_TOOL_IDS: ReadonlySet<string> = new Set([...V3_TOOL_IDS].filter(id => id !== 'set_confirm_list'));
 
 
 /** v3 tools that never change the output (reads, searches, inspection, skills, preview, session queries). */
-const V3_READ_ONLY = new Set(['get_state', 'get_transcript', 'search_media', 'inspect_media', 'inspect_timeline', 'get_beat_grid', 'search_assets', 'get_icons', 'create_browser_handoff', 'prepare_local_asset', 'list_models', 'list_skills', 'read_skill', 'preview', 'ask_user', 'compose_component']);
+const V3_READ_ONLY = new Set(['get_state', 'get_transcript', 'search_media', 'inspect_media', 'inspect_timeline', 'get_beat_grid', 'get_facts', 'search_assets', 'get_icons', 'create_browser_handoff', 'prepare_local_asset', 'list_models', 'list_skills', 'read_skill', 'read_brand', 'preview', 'ask_user', 'compose_component', 'save_edit_plan', 'finish_edit']);
 
 export function v3ToolCanMutate(id: string): boolean {
   return V3_TOOL_IDS.has(id) && !V3_READ_ONLY.has(id);
 }
-

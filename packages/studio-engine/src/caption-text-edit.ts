@@ -162,6 +162,11 @@ export function applyCaptionTextEdits(segments: readonly AsrSegment[], items: re
       ? withoutOverlaps(current.cueSubs, w0, w1, words.length)
       : { ...(current.cueSubs ?? {}) };
     const edited: AsrSegment = { ...current };
+    if (contentChanged && current.cueEmphasis) {
+      const kept = new Set(layoutWithoutOverlaps(Object.keys(current.cueEmphasis), w0, w1, words.length));
+      edited.cueEmphasis = Object.fromEntries(Object.entries(current.cueEmphasis).filter(([range]) => kept.has(range)));
+      if (!Object.keys(edited.cueEmphasis).length) delete edited.cueEmphasis;
+    }
     if (cueLayout.length) edited.cueLayout = cueLayout;
     else delete edited.cueLayout;
     if (Object.keys(cueTexts).length) {

@@ -1,5 +1,5 @@
 import type { EditorDocumentV2 } from '../types';
-import { validateEditorDocumentV2 } from '../validation';
+import { validLoudness, validateEditorDocumentV2 } from '../validation';
 import { commandFailure, emptyCommandReceipt, type EditorCommandResult, type ProcessingPatch } from './types';
 
 /** Patch optional document processing settings; explicit undefined removes a setting. */
@@ -12,6 +12,9 @@ export function patchEditorProcessing(document: EditorDocumentV2, patch: Process
     if (!Number.isFinite(strength) || strength <= 0 || strength > 1) {
       return commandFailure(document, 'invalid-command', 'Denoise strength must be within (0, 1].', { path: 'patch.audioDenoise.strength' });
     }
+  }
+  if (patch.loudness != null && !validLoudness(patch.loudness)) {
+    return commandFailure(document, 'invalid-command', 'Loudness needs a target within [-40, -5] LUFS and a gain within [-24, 30] dB.', { path: 'patch.loudness' });
   }
   const processing = { ...(document.processing ?? {}), ...patch };
   for (const key of Object.keys(patch) as (keyof ProcessingPatch)[]) if (patch[key] === undefined) delete processing[key];

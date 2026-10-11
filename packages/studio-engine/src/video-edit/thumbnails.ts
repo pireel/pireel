@@ -16,6 +16,7 @@ async function extractFromSource(
   source: Source,
   timestamps: number[],
   opts: ThumbOpts,
+  firstFrame = false,
 ): Promise<Thumbnail[]> {
   const targetW = opts.width ?? 240;
   const quality = opts.quality ?? 0.75;
@@ -39,7 +40,8 @@ async function extractFromSource(
     const ctx = canvas.getContext('2d') as OffscreenCanvasRenderingContext2D;
 
     const out: Thumbnail[] = [];
-    for await (const sample of sink.samplesAtTimestamps(timestamps.map((t) => t + t0))) {
+    const sampleTimes = firstFrame ? [await track.getFirstTimestamp()] : timestamps.map((t) => t + t0);
+    for await (const sample of sink.samplesAtTimestamps(sampleTimes)) {
       if (!sample) continue;
       // try/finally: convertToBlob awaits between draw and close — a throw there (or in onThumb)
       // must not leak the sample ("VideoSample was garbage collected without being closed").
@@ -77,6 +79,12 @@ export async function extractThumbnails(
 ): Promise<Thumbnail[]> {
   const { BlobSource } = await import('mediabunny');
   return extractFromSource(new BlobSource(file), timestamps, opts);
+}
+
+/** Decode the first presented video frame, including files whose video starts after audio. */
+export async function extractFirstThumbnail(file: File, opts: ThumbOpts = {}): Promise<Thumbnail[]> {
+  const { BlobSource } = await import('mediabunny');
+  return extractFromSource(new BlobSource(file), [], opts, true);
 }
 
 /**

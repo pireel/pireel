@@ -1,0 +1,12 @@
+{
+  "tool": "built-in image_gen",
+  "mode": "generate with style references",
+  "created": "2026-09-22",
+  "asset": "ugc-ad-v4.png",
+  "references": [
+    "agent-editor-v2.png",
+    "subtitle-removal-v2.png",
+    "pip-v2.png"
+  ],
+  "prompt": "Use case: stylized-concept. Create ONE new standalone production icon for a UGC creator ad scene in Pireel Studio, using the attached approved icons ONLY as material-and-lighting references. The previous UGC mark looked narrow, crowded and toy-like at 56px. Redesign it as a single compact, slightly wide portrait video card (roughly 4:5, not a skinny phone), front-facing with a subtle elevated perspective. Inside: one large, unmistakable head-and-shoulders creator silhouette occupies the left two thirds; one very small simple product package sits at lower right; a tiny restrained play triangle at upper right. The creator and product should be readable as TWO forms without overlapping or covering the face. Premium tactile hand-finished ceramic: fine subtle mineral microtexture, precise shallow ivory bevel, diffused soft light, quiet contact shadows, calm weight and restrained depth like the reference icons. Matte surfaces only; absolutely no gloss, plastic, inflated toy look, dramatic shadows, extra tiles or busy details. Palette: warm bone ivory rim, desaturated muted deep aubergine/charcoal video surface, subtle dusty sage package, tiny faded terracotta play accent. Keep generous transparent margins and a genuinely transparent alpha background. No text, letters, stickers, decorative sparkles, full scene, or background plate. Final PNG icon, not a mockup board."
+}

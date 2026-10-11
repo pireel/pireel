@@ -46,15 +46,39 @@ describe('editable properties on the UI side', () => {
     setStudioLocale('zh');
     const html = panel(block);
     // Position, size and rotation live on the preview (drag the box), not the panel.
-    for (const label of ['强调色', '数值', '角标', '布局', '文字', '图片', '恢复默认', '外观', '不透明度']) expect(html).toContain(label);
+    for (const label of ['强调色', '数值', '角标', '布局', '内容', '样式', '底板', '动效', '图片', '恢复默认', '不透明度']) expect(html).toContain(label);
+    // Placement and timing are edited on the canvas and timeline, not in the panel.
+    for (const label of ['>位置<', '>时间<']) expect(html).not.toContain(label);
     expect(html).toContain('type="range"');
     expect(html).toContain('role="switch"');
-    expect(html).toContain('type="color"');
-    expect(html).toContain('>column<');
+    expect(html.toLowerCase()).toContain('>#ff5a36<'); // a colour is one row showing its value; the picker opens on demand
+    expect(html).toContain('>Column<'); // option ids read as words
     expect(html).toContain('data-block-selection-keep');
     const kit: Block = { id: 'k1', templateId: 'kit:steps', slots: { props: { variant: 'pipeline', items: [{ text: '第一步', note: '' }, { text: '第二步', note: '备注' }] } }, startSec: 0, durationSec: 4, trackIndex: 2 };
     const kitHtml = panel(kit);
-    for (const s of ['>list<', '>pipeline<', '>timeline<', 'value="第一步"', 'value="备注"', '添加一行']) expect(kitHtml).toContain(s);
+    for (const s of ['>列表<', '>流程<', '>时间线<', 'value="第一步"', 'value="备注"', '添加一行']) expect(kitHtml).toContain(s);
+    // Every registered component draws the same sections, in the same order, with the shared style.
+    const order = ['版式', '内容', '样式', '底板', '动效'].map((label) => kitHtml.indexOf(`>${label}<`));
+    expect(order.every((at) => at >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    for (const label of ['文字颜色', '字体', '字号', '动画速度', '恢复默认样式']) expect(kitHtml).toContain(label);
+    // A checklist's marks belong to its items: each row has a mark toggle and a drag handle, and the
+    // retired list-wide choice is not offered.
+    const list: Block = { id: 'c1', templateId: 'kit:checklist', slots: { props: { items: [{ text: '要做', mark: 'check' }, { text: '别做', mark: 'cross' }] } }, startSec: 0, durationSec: 4, trackIndex: 2 };
+    const listHtml = panel(list);
+    expect(listHtml).toContain('aria-label="打勾"');
+    expect(listHtml).toContain('aria-label="划掉"');
+    expect(listHtml).toContain('draggable="true"');
+    expect(listHtml).not.toContain('>版式<');
+    // Code offers what a person changes on an editor window: a colour scheme and type size — no
+    // separate colours, no panel section — and only the fields its current layout uses.
+    const code = (variant: string): Block => ({ id: 'cd', templateId: 'kit:code', slots: { props: { variant, code: 'const a = 1;', codeTheme: 'night' } }, startSec: 0, durationSec: 4, trackIndex: 2 });
+    const highlight = panel(code('highlight'));
+    for (const s of ['代码主题', '暗色', '浅色', '高对比', '字号', '高亮行']) expect(highlight).toContain(s);
+    for (const s of ['>底板<', '强调色', '文字颜色', '改动前', '节奏']) expect(highlight).not.toContain(s);
+    const diff = panel(code('diff'));
+    for (const s of ['改动前', '改动后']) expect(diff).toContain(s);
+    expect(diff).not.toContain('高亮行');
     expect(componentSchemaOf(kit)?.source).toBe('kit');
     expect(componentSchemaOf(block)?.source).toBe('manifest');
   });

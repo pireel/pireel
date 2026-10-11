@@ -1,3 +1,4 @@
+import { BASE_CAPTION_FONT_PX } from './caption-presets';
 import { compileComponentStyles } from './component-styles';
 /**
  * Assembly layer: stitch a Composition into a complete Hyperframes document (preview iframe and export share the same source).
@@ -5,11 +6,11 @@ import { compileComponentStyles } from './component-styles';
  */
 
 import { getTheme, themeVarsCss, varsDeclCss } from './theme';
-import { editedDuration } from './trim';
+import { editedDuration, spans } from './trim';
 import {
   type Block,
   type Composition,
-  cutTransitions,
+  transitionWindows,
   escapeAttr,
   isSentenceCaption,
   IDENTITY_MEDIA_FRAMING,
@@ -25,6 +26,7 @@ import {
   videoFrameTimelineBody,
 } from './composition-core';
 import { GL_MIXER_SRC, TRANSITION_GLSL, glDirection } from './transition-gl';
+import { isLookTemplate, lookHeadHtml, lookPieceOf } from './look';
 import { SOURCE_DRAW_RECT_FUNCTION } from './source-framing';
 import { compositionVisualLayerPlan, type SupplementalVisualMediaClip } from './visual-layer-plan';
 import { BLOCK_TEXT_BASELINE_PX } from './block-typography';
@@ -49,7 +51,13 @@ export const STUDIO_FONTS_HREF =
  *  (frame2) alongside the main frame, and the two live streams (from/to) are composited by the upstream shader, p spanning the whole window.
  *  Fallback chain: ghost frames cut off → after the cut, use the frozen last frame of A as from (at least the second half has an effect); GL unavailable /
  *  shader compile fails → hard cut. Before upload, cover into a W×H staging canvas first (direct texture upload gets stretched/distorted). */
-export function videoFrameShim(transitions: { cut: number; effect: string; half: number; dx: number; dy: number }[]): string {
+/** A one-line caption centered on a split screen's seam: its bottom edge sits half a line below it. */
+function seamCaptionYPct(seam: number, scale: number | undefined, height: number) {
+  const line = BASE_CAPTION_FONT_PX * (scale ?? 1) * 1.4;
+  return seam * 100 + line / 2 / Math.max(1, height) * 100;
+}
+
+export function videoFrameShim(transitions: { s: number; e: number; cut: number; effect: string; dx: number; dy: number }[]): string {
   return `window.__parentClock = true; // clock/decode/audio run in the parent-layer engine; this doc doesn't self-drive
 (function(){
   var c = document.getElementById('vidEl');
@@ -100,9 +108,9 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
   var render = function (t) {
     if (!liveBmp || !(t >= 0)) return;
     var tr = null;
-    for (var i = 0; i < TRS.length; i++) { if (t >= TRS[i].cut - TRS[i].half && t <= TRS[i].cut + TRS[i].half) { tr = TRS[i]; break; } }
+    for (var i = 0; i < TRS.length; i++) { if (t >= TRS[i].s && t <= TRS[i].e) { tr = TRS[i]; break; } }
     if (t < lastT - 0.05 || t > lastT + 0.5) frozenCut = null; // rewind/big jump: discard frozen frame
-    if (tr && lastT >= 0 && lastT < tr.cut && t >= tr.cut) {
+    if (tr && tr.cut >= 0 && lastT >= 0 && lastT < tr.cut && t >= tr.cut) {
       // crossing the cut: current canvas = A's last frame; freeze it as the fallback "from" when ghost frames cut off
       frozen = frozen || mkStage();
       frozen.getContext('2d').clearRect(0, 0, W, H);
@@ -116,8 +124,15 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
     lastT = t;
     if (!tr) { bakedWinCut = -1; drawPlain(liveBmp, liveFraming, liveSourceW, liveSourceH); return; }
     // this window is now owned by baked frames: the old dual-stream compositing steps aside entirely (don't draw into inter-frame gaps either — that layers up into strobe)
-    if (bakedWinCut === tr.cut) return;
-    var p = Math.min(1, Math.max(0, (t - (tr.cut - tr.half)) / (2 * tr.half))); // 0=window start, 1=end
+    if (bakedWinCut === tr.s) return;
+    var p = Math.min(1, Math.max(0, (t - tr.s) / Math.max(1e-3, tr.e - tr.s))); // 0=window start, 1=end
+    if (tr.cut < 0) {
+      // no cut inside: the effect plays on the running picture (both sides are the live frame)
+      var LS = SL(), LK = 'L' + liveVer;
+      if (MIX && MIX.render(LS, LS, tr.effect, p, tr.dx, tr.dy, LK, LK)) { ctx.clearRect(0, 0, W, H); ctx.drawImage(MIX.canvas, 0, 0, W, H); return; }
+      drawPlain(liveBmp, liveFraming, liveSourceW, liveSourceH);
+      return;
+    }
     var pre = t < tr.cut;
     // from/to: before the cut from=main frame (A) / to=ghost (B pre-roll); after the cut from=ghost (A tail) / to=main frame (B)
     var F = pre ? SL() : (ghostBmp ? SG() : (frozenCut === tr.cut ? frozen : null));
@@ -162,7 +177,7 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
         var st = Number(d.t);
         if (st >= 0 && liveBmp) {
           for (var gi = 0; gi < TRS.length; gi++) {
-            if (st >= TRS[gi].cut - TRS[gi].half - 0.1 && st <= TRS[gi].cut + TRS[gi].half) { render(st); break; }
+            if (st >= TRS[gi].s - 0.1 && st <= TRS[gi].e) { render(st); break; }
           }
         }
       } catch (errS) {}
@@ -183,7 +198,7 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
         ctx.drawImage(d.frame, 0, 0, W, H);
         var bt = typeof d.t === 'number' ? d.t : lastT;
         lastT = bt;
-        for (var bwi = 0; bwi < TRS.length; bwi++) { if (bt >= TRS[bwi].cut - TRS[bwi].half && bt <= TRS[bwi].cut + TRS[bwi].half) { bakedWinCut = TRS[bwi].cut; break; } }
+        for (var bwi = 0; bwi < TRS.length; bwi++) { if (bt >= TRS[bwi].s && bt <= TRS[bwi].e) { bakedWinCut = TRS[bwi].s; break; } }
         window.__vidSrc = { elKey: d.elKey || 'main', srcT: typeof d.srcT === 'number' ? d.srcT : 0, w: d.sourceWidth || d.frame.width, h: d.sourceHeight || d.frame.height, framing: d.framing || null };
       } catch (errB) {}
       try { d.frame.close && d.frame.close(); } catch (errB2) {}
@@ -206,7 +221,7 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
         // discard ghost frame once out of the window (if missing inside the window, reuse the last one — a tiny stutter beats a flicker cut)
         var t0 = typeof d.t === 'number' ? d.t : lastT;
         var inWin = false;
-        for (var wi = 0; wi < TRS.length; wi++) { if (t0 >= TRS[wi].cut - TRS[wi].half && t0 <= TRS[wi].cut + TRS[wi].half) { inWin = true; break; } }
+        for (var wi = 0; wi < TRS.length; wi++) { if (t0 >= TRS[wi].s && t0 <= TRS[wi].e) { inWin = true; break; } }
         if (!inWin) { try { ghostBmp.close(); } catch (errG2) {} ghostBmp = null; ghostFraming = null; ghostSourceW = 0; ghostSourceH = 0; }
       }
       render(typeof d.t === 'number' ? d.t : lastT);
@@ -433,7 +448,9 @@ const PERSON_CUT_SHIM = `(function(){
 function timelineScript(id: string, body: string): string {
   return (
     `(function(){ var tl = gsap.timeline({ paused: true }); ` +
-    `try { new Function('tl', ${JSON.stringify(body)})(tl); } catch (e) { console.warn('[hf] timeline error', ${JSON.stringify(id)}, e); } ` +
+    // window/document are passed in: in the in-page stage they are its facades, so timeline code
+    // that queries or stores globals stays inside the stage (a plain Function would see the page).
+    `try { new Function('tl', 'window', 'document', ${JSON.stringify(body)})(tl, window, document); } catch (e) { console.warn('[hf] timeline error', ${JSON.stringify(id)}, e); } ` +
     `window.__timelines[${JSON.stringify(id)}] = tl; })();`
   );
 }
@@ -475,6 +492,17 @@ export function assembleBlockHtml(b: Block, comp: Composition): { html: string; 
   return assembleBlockWith(b, comp, comp.captionStyle ? resolveCaptionStyle(comp) : undefined);
 }
 
+/** What is behind a block when it starts: the shot playing then fills the frame ('full' /
+ *  'punch-in') → moving footage; a corner or split shot leaves the block on the page. With no shots
+ *  the component is an overlay on footage, its usual job. */
+export function blockBackdrop(comp: Composition, atSec: number): 'footage' | 'page' {
+  const shots = comp.shots ?? [];
+  if (!shots.length) return 'footage';
+  const playing = spans(shots).find((span) => atSec >= span.editedStart && atSec < span.editedEnd) ?? spans(shots).at(-1);
+  const treatment = playing?.clip.treatment ?? 'full';
+  return treatment === 'full' || treatment === 'punch-in' ? 'footage' : 'page';
+}
+
 function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof resolveCaptionStyle> | undefined): { html: string; timelineBody: string } {
   const { width: W, height: H } = comp;
 
@@ -483,7 +511,13 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
     // language state they stay dormant — turning translation off hides them without destroying content.
     // Kit blocks derive HTML at render time — bake the sizing context (box/canvas px)
     // into slots here, where the composition's dimensions are known.
-    const kitBase = b.templateId.startsWith('kit:')
+    const kitBase = isLookTemplate(b.templateId)
+      ? {
+          ...b,
+          // A look instance builds itself in its box: the piece reads the box size from ctx.
+          slots: { ...b.slots, piece: lookPieceOf(b.templateId), boxW: Math.round((b.box?.w ?? 1) * W), boxH: Math.round((b.box?.h ?? 1) * H) },
+        }
+      : b.templateId.startsWith('kit:')
       ? {
           ...b,
           slots: {
@@ -492,6 +526,8 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
             boxH: Math.round((b.box?.h ?? 0.3) * H),
             canvasW: W,
             canvasH: H,
+            // A preview can pin it (library cards sit on a light checker, not footage).
+            backdrop: b.slots.backdrop === 'page' || b.slots.backdrop === 'footage' ? b.slots.backdrop : blockBackdrop(comp, b.startSec),
           },
         }
       : b;
@@ -500,7 +536,7 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
       : kitBase;
     const rb =
       cs && isSentenceCaption(b)
-        ? { ...capBase, slots: { ...capBase.slots, preset: cs.preset, yPct: cs.yPct, xPct: cs.xPct ?? 50, wPct: cs.wPct ?? 56, scale: cs.scale, ...(cs.hPct ? { hPct: cs.hPct } : {}), ...(cs.color != null ? { color: cs.color } : {}), ...(cs.bg !== undefined ? { bg: cs.bg } : {}), ...(cs.bold != null ? { bold: cs.bold } : {}), ...(cs.font != null ? { font: cs.font } : {}), ...(cs.sub?.preset != null ? { subPreset: cs.sub.preset } : {}), ...(cs.sub?.color != null ? { subColor: cs.sub.color } : {}), ...(cs.sub?.bg !== undefined ? { subBg: cs.sub.bg } : {}), ...(cs.sub?.bold != null ? { subBold: cs.sub.bold } : {}), ...(cs.sub?.font != null ? { subFont: cs.sub.font } : {}), ...(cs.sub?.yPct != null ? { subYPct: cs.sub.yPct } : {}), ...(cs.sub?.xPct != null ? { subXPct: cs.sub.xPct } : {}), ...(cs.sub?.wPct != null ? { subWPct: cs.sub.wPct } : {}), ...(cs.sub?.scale != null ? { subScale: cs.sub.scale } : {}), ...(cs.sub?.hPct != null ? { subHPct: cs.sub.hPct } : {}) } }
+        ? { ...capBase, slots: { ...capBase.slots, preset: cs.preset, ...(cs.animation != null ? { animation: cs.animation } : {}), ...(cs.sub?.animation != null ? { subAnimation: cs.sub.animation } : {}), yPct: typeof capBase.slots.splitSeam === 'number' ? seamCaptionYPct(capBase.slots.splitSeam, cs.scale, comp.height) : cs.yPct, xPct: cs.xPct ?? 50, wPct: cs.wPct ?? 56, scale: cs.scale, ...(cs.hPct ? { hPct: cs.hPct } : {}), ...(cs.color != null ? { color: cs.color } : {}), ...(cs.emphasis != null ? { emphasis: cs.emphasis } : {}), ...(cs.bg !== undefined ? { bg: cs.bg } : {}), ...(cs.bold != null ? { bold: cs.bold } : {}), ...(cs.font != null ? { font: cs.font } : {}), ...(cs.accentColor != null ? { accentColor: cs.accentColor } : {}), ...(cs.strokeColor != null ? { strokeColor: cs.strokeColor } : {}), ...(cs.strokeWidth != null ? { strokeWidth: cs.strokeWidth } : {}), ...(cs.sub?.preset != null ? { subPreset: cs.sub.preset } : {}), ...(cs.sub?.color != null ? { subColor: cs.sub.color } : {}), ...(cs.sub?.bg !== undefined ? { subBg: cs.sub.bg } : {}), ...(cs.sub?.bold != null ? { subBold: cs.sub.bold } : {}), ...(cs.sub?.font != null ? { subFont: cs.sub.font } : {}), ...(cs.sub?.yPct != null ? { subYPct: cs.sub.yPct } : {}), ...(cs.sub?.xPct != null ? { subXPct: cs.sub.xPct } : {}), ...(cs.sub?.wPct != null ? { subWPct: cs.sub.wPct } : {}), ...(cs.sub?.scale != null ? { subScale: cs.sub.scale } : {}), ...(cs.sub?.hPct != null ? { subHPct: cs.sub.hPct } : {}) } }
         : capBase;
     const rendered = renderBlock(rb);
     const { html: innerHtml } = compileComponentStyles(rendered.innerHtml, b.id);
@@ -564,7 +600,19 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
       const pe = isSentenceCaption(b) ? 'pointer-events:none;' : '';
       html = `<div class="comp" ${attrs} style="position:absolute;${propsCss}inset:0;${pe}${bgCss}${frame.join('')}${scaleCss}${fit}">\n${varsTag}${innerHtml}\n</div>`;
     }
-    return { html, timelineBody };
+    return { html, timelineBody: withMotionTiming(timelineBody, b.motion) };
+}
+
+/**
+ * Speed and start delay for ANY component animation, without reading it: the component's own
+ * timeline runs as a child of the block timeline, time-scaled and offset. Seeking the block at t
+ * shows the original animation at (t − delay) × speed, so preview, export and bake stay exact.
+ */
+export function withMotionTiming(body: string, motion: Block['motion']): string {
+  const speed = motion?.speed && Number.isFinite(motion.speed) ? Math.min(4, Math.max(0.25, motion.speed)) : 1;
+  const delay = motion?.delaySec && Number.isFinite(motion.delaySec) ? Math.max(0, motion.delaySec) : 0;
+  if (!body.trim() || (speed === 1 && delay === 0)) return body;
+  return `var __hfInner = gsap.timeline();\n(function (tl) {\n${body}\n})(__hfInner);\n__hfInner.timeScale(${speed});\ntl.add(__hfInner, ${delay});`;
 }
 
 export function assembleHtml(
@@ -598,9 +646,9 @@ export function assembleHtml(
     // Frame-receive shim + parent-clock marker (the runtime uses it to not self-drive the clock, see PREVIEW_RUNTIME); the cut-transition table is baked into the shim
     scripts.push(
       videoFrameShim(
-        cutTransitions(placedVideoShots, videoPlacements).map((tr) => {
+        transitionWindows(comp.transitions, placedVideoShots, videoPlacements).map((tr) => {
           const [dx, dy] = glDirection(tr.dir);
-          return { cut: tr.cut, effect: tr.effect, half: tr.half, dx, dy };
+          return { s: tr.start, e: tr.end, cut: tr.cut ?? -1, effect: tr.effect, dx, dy };
         }),
       ),
     );
@@ -776,7 +824,7 @@ ${webFontLinks}<style>
   .hf-ph-plus { font-size:96px; font-weight:300; line-height:1; }
   .hf-ph-tip { font-size:34px; text-align:center; line-height:1.3; font-family:var(--font-body); }
 </style>
-</head>
+${lookHeadHtml(comp.look)}</head>
 <body>
 <div id="root" data-composition-id="root" data-start="0" data-width="${W}" data-height="${H}">
 ${body.join('\n')}
@@ -841,7 +889,7 @@ export function blockPreviewDoc(comp: Composition, block: Block, opts: { loop?: 
     const auto = opts.loop === true;
     return `${html}\n<script>(function(){var playing=${auto ? 'true' : 'false'};var once=false;var t0=performance.now();
 function tick(){if(playing){var e=(performance.now()-t0)/1000;var t=once?Math.min(e,${n(at)}):e%${n(cycle)};if(t>${n(at)})t=${n(at)};try{window.__hfPreview&&window.__hfPreview.seek(t);}catch(err){}if(once&&e>=${n(at)})playing=false;}requestAnimationFrame(tick);}
-addEventListener('message',function(e){var d=e&&e.data;if(!d||d.type!=='hf-loop')return;if(d.on){t0=performance.now();once=!!d.once;playing=true;}else{playing=false;once=false;try{window.__hfPreview&&window.__hfPreview.seek(${n(at)});}catch(err){}}});
+window.addEventListener('message',function(e){var d=e&&e.data;if(!d||d.type!=='hf-loop')return;if(d.on){t0=performance.now();once=!!d.once;playing=true;}else{playing=false;once=false;try{window.__hfPreview&&window.__hfPreview.seek(${n(at)});}catch(err){}}});
 (function start(){if(!window.__hfPreview){setTimeout(start,16);return;}t0=performance.now();tick();})();})();</script>`;
   }
   // Static card: the head-declared boot time already opened it on the stable frame; a full seek

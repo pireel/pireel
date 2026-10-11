@@ -1,3 +1,4 @@
+import { brandGraphicsStyle } from '@pireel/studio-engine/brand-playbook';
 import { adaptiveGeneratedVideoSpec } from '@pireel/studio-engine/generated-video-spec';
 /**
  * Agent tool dispatcher: executes the studio's agent tools (chat + external MCP bridge) against the live
@@ -9,6 +10,7 @@ import { adaptiveGeneratedVideoSpec } from '@pireel/studio-engine/generated-vide
 
 import type { MutableRefObject } from 'react';
 import { editorErrorMessage } from './editor-error';
+import { runStockTool } from './stock-tools-client';
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 import type { DocumentOp } from '@pireel/studio-engine/document-transaction';
 import { whiteboardFormat, type AgentTimelineOutcome } from '@pireel/studio-engine/agent-timeline';
@@ -52,14 +54,15 @@ import { documentTranscriptContextAt } from '@pireel/studio-engine/spoken-contex
 import { projectNarrativeShots, projectOverlayBlockById } from '@pireel/studio-engine/editor-document/legacy-projection';
 import { freeOverlayTrackIndex } from '@pireel/studio-engine/editor-document/read-model';
 import { documentCaptionsOn } from '@pireel/studio-engine/editor-document/caption-state';
+import { captionBandRects, platformZonesPx } from '@pireel/studio-engine/facts';
+import { measureShotRegions, measureSound } from './facts-measure';
 import { exportRecommendations } from '@pireel/studio-engine/export-options';
 import { parkInteraction } from './interaction-store';
 import { assembleComposeBrief, interpretApplyRaw, type ComposeBriefInput } from '@pireel/studio-engine/briefs';
-import { composeVisualDirectionContent, normalizeCustomVisualStyle } from '@pireel/studio-engine/visual-style';
-import { frameRegistry } from '@pireel/studio-frames/vite';
 import { visualCraftBaseline } from './visual-baseline';
 import { composeEditorialBrief } from '@pireel/studio-engine/review-brief';
 import { studioProviders } from '@pireel/studio-engine/providers';
+import { motionGraphicNeighbors } from '@pireel/studio-engine/compose-neighbors';
 import { compositionRevision } from '@pireel/studio-engine/analysis-jobs';
 import { compactAssetSearchElementResults, searchAssetLibrary } from '@pireel/studio-engine/asset-search';
 import { mediaSearchTranscriptsFromDocument, searchProjectMedia } from '@pireel/studio-engine/media-search';
@@ -110,6 +113,7 @@ import { imageThumb } from '@pireel/ui/image-url';
 import { studioLocale, t, tEnglish } from './i18n';
 import { type ComposeMode, type ComposedBlock, composedBlockFields, GeneratedBlockValidationError, kitChoiceOf, newBlockComposeMode } from './compose-result';
 import { clearToolProgress, setToolProgress, type ToolProgress } from './tool-progress';
+import { FIRST_PASS_STEPS, runFirstPass, type FirstPassHost, type FirstPassStepId, type RoughCutExecution } from './first-pass';
 import { probeVideoFile } from './media';
 import { cloudToolFrame } from './agent-frame-upload';
 import { measuredSpeechTranscript, storedScriptText } from '@pireel/studio-engine/script-alignment';
@@ -131,9 +135,14 @@ import { openingContendersFor, recordOpeningComparison, recordReviewedSource, re
 import { buildAssemblyFromReview } from './editorial-assembly-tool';
 import { type ExportRenderOpts, captureCompositionFrame } from './client-export';
 import { compositionRenderView } from './composition-render-view';
-import type { FrameCatalogItem } from './use-frame-catalog';
 import type { StudioChatHandle } from './studio-chat';
 import { primaryNarrativeRenderPlan } from './primary-render-plan';
+
+/** Component generation follows only the brand explicitly attached to this project. */
+async function brandGraphicsOf(document: EditorDocumentV2): Promise<string | null> {
+  const brand = document.semantics.brand;
+  return brand ? brandGraphicsStyle(brand) : null;
+}
 import { supplementalVisualMedia } from './visual-render-plan';
 import { collectAssetSearchDocuments } from './asset-search-collector';
 import { getLocalVisualModelSnapshot } from './local-visual-search-model';
@@ -145,13 +154,14 @@ import {
 import { withEditableBlockGeometry } from './editable-block-geometry';
 import { placementPercentToBox } from '@pireel/studio-engine/overlay-placement';
 import { generatedAssetIndexEntry, generatedRecordsFromJobs, getStudioSpaceId, listStudioGens, pollCreation, startGeneration, type GenJob } from './gen-api';
-import { componentFontSlot, displayFontContext } from '@pireel/studio-engine/display-text-presets';
+import { componentFontSlot, displayFontContext, isDisplayTextFontId } from '@pireel/studio-engine/display-text-presets';
+import { searchFontsTool } from '@pireel/studio-engine/font-search-tool';
+import { describeAudioTargets, resolveAudioTarget } from '@pireel/studio-engine/audio-target';
 import { blockPropsSchema, componentPropsCarry } from '@pireel/studio-engine/component-props';
 import { blockPropsReadback } from '@pireel/studio-engine/component-schema';
-import { searchFontsTool } from '@pireel/studio-engine/font-search-tool';
 
 const PROJECT_MUTATION_TOOLS = new Set(['manage_project']);
-const NO_UNDO_TOOLS = new Set(['get_state', 'inspect_media', 'get_transcript', 'get_beat_grid', 'search_assets', 'prepare_local_asset', 'search_media', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_audio', 'generate_foley', 'manage_voices', 'generate_speech', 'lip_sync', 'preview', 'undo', 'export', 'ask_user', 'get_icons', 'create_browser_handoff', 'inspect_timeline', 'compose_component']);
+const NO_UNDO_TOOLS = new Set(['get_state', 'get_facts', 'inspect_media', 'get_transcript', 'get_beat_grid', 'search_assets', 'prepare_local_asset', 'search_media', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_audio', 'generate_foley', 'manage_voices', 'generate_speech', 'lip_sync', 'preview', 'undo', 'export', 'ask_user', 'get_icons', 'create_browser_handoff', 'inspect_timeline', 'compose_component']);
 
 /** Generated outputs join the project media directory the moment they are known — from a poll, a
  * synchronous audio tool, or the background watcher below — so the Materials panel lists them
@@ -306,6 +316,42 @@ function canonicalRenderTimeline(
   };
 }
 
+/** When a component's entrance has played out: a couple of seconds in (retimed by its own motion
+ *  speed and delay), never past its last frame. */
+export function componentSettledAtSec(block: Pick<Block, 'startSec' | 'durationSec' | 'motion'>): number {
+  const speed = block.motion?.speed && block.motion.speed > 0 ? block.motion.speed : 1;
+  const settle = (block.motion?.delaySec ?? 0) + 2.2 / speed;
+  const last = Math.max(0, block.durationSec - 0.05);
+  return Math.round((block.startSec + Math.min(settle, last * 0.9)) * 100) / 100;
+}
+
+/** The finished component as it lands on the picture — the same render as export, handed back with
+ *  the component receipt so the model sees what it made (in its own turn, no extra model call). */
+async function componentFrame(ctx: AgentToolCtx, clipId: string): Promise<Pick<StudioToolResult, 'image'> & { settledFrame: Record<string, unknown> }> {
+  const renderTimeline = canonicalRenderTimeline(ctx.compRef.current, ctx.documentRef.current, ctx.resolveAssetUrl);
+  const block = renderTimeline.composition.blocks.find((b) => b.id === clipId);
+  if (!block) return { settledFrame: { error: 'component not in the render' } };
+  const atSec = Math.min(componentSettledAtSec(block), renderTimeline.durationSec);
+  try {
+    const shot = await captureCompositionFrame({
+      comp: renderTimeline.composition,
+      videoPlacements: renderTimeline.placements,
+      primaryVisualHidden: renderTimeline.primaryHidden,
+      visualMediaClips: renderTimeline.visualMediaClips,
+      timelineDurationSec: renderTimeline.durationSec,
+      videoFile: ctx.videoFileRef.current,
+      clipFiles: ctx.clipFilesRef.current,
+      atSec,
+      burnLabel: `${Math.round(atSec * 10) / 10}s`,
+      maxDim: 720,
+    });
+    const image = await cloudToolFrame(shot.dataUrl, { width: shot.width, height: shot.height });
+    return { image, settledFrame: { frame: Math.round(atSec * ctx.documentRef.current.canvas.fps) } };
+  } catch (e) {
+    return { settledFrame: { error: e instanceof Error ? e.message : String(e) } };
+  }
+}
+
 /** Direct-execution edits intentionally have no Director Plan. Give inspect_timeline one bounded,
  * deterministic whole-timeline fallback instead of failing an otherwise valid empty-input review.
  * Midpoints cover every visible native clip once; dense edits are sampled evenly to the same cap
@@ -422,9 +468,6 @@ export interface AgentToolCtx {
     opts?: ComposeMode,
   ) => Promise<ComposedBlock>;
   noteOf: (raw: string) => string;
-  // Video track edits
-  setCutTransition: (cutSec: number, effect: CutTransitionEffect | null, direction?: TransitionDirection) => void;
-  resizeCutTransition: (shotId: string, durationSec: number) => void;
   // Audio tracks (use-bgm.ts): mount auto-levels from measured loudness; patch/remove target a clip id
   audioMount: (file: File, label?: string, opts?: { startSec?: number; sig?: string | null }) => Promise<string | undefined>;
   audioPatch: (id: string, patch: Partial<Pick<AudioClip, 'startSec' | 'volumeDb' | 'fadeInSec' | 'fadeOutSec' | 'speed' | 'inSec' | 'outSec' | 'muted'>>) => { ok: boolean; error?: string };
@@ -448,18 +491,20 @@ export interface AgentToolCtx {
   exportPctRef: MutableRefObject<number>;
   exportVideo: (opts: ExportRenderOpts, sinkUrl?: string) => Promise<{ ok: boolean; filename?: string; error?: string; delivered?: 'local_sink' | 'browser_download'; sinkError?: string }>;
   // Frames + chat handle
-  frameCatalogRef: MutableRefObject<FrameCatalogItem[]>;
   chatRef: MutableRefObject<StudioChatHandle | null>;
+  /** Receives the usage of paid calls tools make (transcription) while a caller listens; null otherwise. */
+  usageSinkRef?: MutableRefObject<((usage: import('@pireel/studio-engine/workflow').WorkflowUsage) => void) | null>;
 }
 
 type StudioToolRunInternalOptions = {
+  roughCut?: RoughCutExecution;
   signal?: AbortSignal;
   surface?: 'chat' | 'bridge';
   /** Active Skill for this turn: its declared review-brief (when present) overrides the
    * model-authored brief for editorial visual review. */
   skillId?: string;
   collectOpeningEvidence?: boolean;
-  reportProgress?: (text: string, frac?: number, extra?: Pick<ToolProgress, 'blockIds' | 'items'>) => void;
+  reportProgress?: (text: string, frac?: number, extra?: Pick<ToolProgress, 'blockIds' | 'items' | 'report'>) => void;
 };
 
 /** Session-scoped cache of Skill-declared review briefs (null = skill has no brief block). */
@@ -492,7 +537,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
     ensureClipTranscripts, transcriptForAgent, stepAsr, stepVisual, visualRef, visualBriefRef,
     applyVisualResult, composeBlockChecked,
     noteOf, setDenoise,
-    agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
+    agentExportRef, exportPctRef, exportVideo,
   } = ctx;
   /** Directory registration of generated outputs; hosts without a media directory (tests, thin shells) simply skip it. */
   const registerGeneratedEntry = (entry: LocalAssetIndexEntry) => {
@@ -549,7 +594,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
       // Pipeline tools push friendly progress to their card. A provider may keep producing
       // harmless late deltas after our abort race has stopped waiting; never let those deltas
       // resurrect a completed/aborted progress state.
-      const report = (text: string, frac?: number, extra?: Pick<ToolProgress, 'blockIds' | 'items'>) => {
+      const report = (text: string, frac?: number, extra?: Pick<ToolProgress, 'blockIds' | 'items' | 'report'>) => {
         if (stopped()) return;
         if (opts?.reportProgress) {
           opts.reportProgress(text, frac, extra);
@@ -607,6 +652,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
       const commitOverlayInsert = (block: Block, sceneId?: string) =>
         commit({ op: 'overlay.insert', input: { block, ...(sceneId ? { sceneId } : {}) } });
       const transcribeForAgent = async (input: Record<string, unknown>): Promise<StudioToolResult> => {
+        // The listener when the call starts gets its usage, even if the bill arrives after it stopped waiting.
+        const sink = ctx.usageSinkRef?.current ?? null;
+        const usageSinkAtCall = (usage: import('@pireel/studio-engine/workflow').WorkflowUsage) => sink?.(usage);
         try {
           const requestedLocalReference = typeof input.localAssetId === 'string'
             ? input.localAssetId.trim()
@@ -702,7 +750,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 },
               };
             }
-            const segs = await race(studioProviders().transcriber.transcribe(file, { projectId })).catch((error) => {
+            const segs = await race(studioProviders().transcriber.transcribe(file, { projectId, onUsage: usageSinkAtCall })).catch((error) => {
               if (isNoSpeechAsrResult(error)) return [];
               throw error;
             });
@@ -780,7 +828,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const probe = await probeVideoFile(file).catch(() => null);
             // Script-backed speech (TTS) keeps its exact text; ASR only lends the timing.
             const storedBefore = documentRef.current.semantics.transcripts[targetAssetId];
-            const segs = measuredSpeechTranscript(asset, storedBefore, await race(studioProviders().transcriber.transcribe(file, { projectId })));
+            const segs = measuredSpeechTranscript(asset, storedBefore, await race(studioProviders().transcriber.transcribe(file, { projectId, onUsage: usageSinkAtCall })));
             // A script recovered from the stored transcript becomes the asset's own script, so a later
             // re-measure still keeps the exact text instead of storing what the recogniser heard.
             const recoveredScript = asset.metadata.transcriptText ? '' : storedScriptText(storedBefore);
@@ -1346,6 +1394,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           return { ok: false, error: tEnglish('workbench.nameGeneratingEditAfter', { name: b ? bname(b) : hit }) };
         }
       }
+      if (toolId === 'register_media' && input.stock && typeof input.stock === 'object') {
+        const imported = await runStockTool('import', input.stock as Record<string, unknown>, signal);
+        if (!imported.ok || !imported.data?.registration) return imported;
+        input = { assets: [imported.data.registration] };
+      }
       if (toolId === 'add_clips' || toolId === 'insert_clips' || toolId === 'swap_clip_media') {
         const referencedAssetIds = [
           ...new Set([
@@ -1742,6 +1795,89 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               },
             };
           }
+          case 'get_facts': {
+            // Measured facts for designing what goes on screen: local decoding only, no model calls.
+            const doc = documentRef.current;
+            const fps = doc.canvas.fps;
+            const requested = Array.isArray(input.assetIds)
+              ? [...new Set((input.assetIds as unknown[]).filter((value): value is string => typeof value === 'string' && value.trim().length > 0).map((value) => value.trim()))]
+              : [];
+            const placed = [...new Set(doc.timeline.tracks.flatMap((track) => track.clips.flatMap((clip) =>
+              'assetId' in clip && typeof clip.assetId === 'string' ? [clip.assetId] : [])))];
+            const ids = (requested.length ? requested : placed).slice(0, 12);
+            const sources: Array<Record<string, unknown>> = [];
+            for (let index = 0; index < ids.length; index += 1) {
+              if (stopped()) throw abortErr();
+              const assetId = ids[index]!;
+              const asset = doc.assets[assetId];
+              if (!asset) { sources.push({ assetId, error: 'unknown asset id' }); continue; }
+              report(t('tools.get_facts.label') + ` ${index + 1}/${ids.length}`, index / Math.max(1, ids.length));
+              const meta = asset.metadata;
+              const transcript = doc.semantics.transcripts?.[assetId];
+              const entry: Record<string, unknown> = {
+                assetId,
+                kind: asset.kind,
+                ...(asset.label ? { label: asset.label } : {}),
+                ...(meta.durationSec ? { durationSec: Math.round(meta.durationSec * 100) / 100 } : {}),
+                ...(meta.width && meta.height ? { width: meta.width, height: meta.height } : {}),
+                transcript: transcript?.length
+                  ? { segments: transcript.length, words: transcript.some((segment) => Array.isArray(segment.words) && segment.words.length > 0), read: 'get_transcript' }
+                  : { segments: 0 },
+              };
+              if (asset.kind === 'image') { sources.push(entry); continue; }
+              const bytes = await assetBytes(asset);
+              if (!bytes.file) { sources.push({ ...entry, error: bytes.reason }); continue; }
+              const file = bytes.file;
+              if (asset.kind !== 'audio') {
+                const probe = await probeVideoFile(file).catch(() => null);
+                const durationSec = probe?.durationSec || meta.durationSec || 0;
+                if (durationSec > 0) {
+                  const vis = await race(analyzeVisualGeometry(file, durationSec).catch(() => null));
+                  const cuts = vis?.cuts ?? [];
+                  const scenes = await race(measureShotRegions(file, durationSec, cuts).catch(() => []));
+                  Object.assign(entry, {
+                    scenes,
+                    ...(vis ? { geometry: visualGeometryForAgent(vis) } : {}),
+                  });
+                }
+              }
+              if (meta.hasAudio !== false) {
+                const sound = await race(measureSound(file).catch(() => null));
+                if (sound) entry.sound = sound;
+              }
+              sources.push(entry);
+            }
+            const comp = compRef.current;
+            const captionsOn = documentCaptionsOn(doc);
+            const onScreen = doc.timeline.tracks.flatMap((track) => track.clips.flatMap((clip) => {
+              if (clip.kind !== 'graphic') return [];
+              const box = (clip as { box?: { x: number; y: number; w: number; h: number } }).box ?? (clip as { block?: { box?: { x: number; y: number; w: number; h: number } } }).block?.box;
+              return [{
+                clipId: clip.id,
+                kind: clip.kind,
+                frames: [clip.startFrame, clip.startFrame + clip.durationFrames],
+                ...(box ? { box: { x: Math.round(box.x * doc.canvas.width), y: Math.round(box.y * doc.canvas.height), w: Math.round(box.w * doc.canvas.width), h: Math.round(box.h * doc.canvas.height) } } : {}),
+              }];
+            }));
+            return {
+              ok: true,
+              summary: t('tools.get_facts.label'),
+              data: {
+                canvas: { width: doc.canvas.width, height: doc.canvas.height, fps },
+                sources,
+                captions: captionsOn
+                  ? { on: true, band: captionBandRects(comp, { lines: 2, withTranslation: !!comp.captionStyle?.sub }) }
+                  : { on: false },
+                platformZones: platformZonesPx(doc.canvas.width, doc.canvas.height),
+                onScreen,
+                notes: [
+                  'Region grids are 3 columns × 5 rows per scene, top row first; busy is detail (low = empty space), bright is 0–1.',
+                  'Text burned into the footage is not located here: look at frames (inspect_timeline or inspect_media) before placing graphics near it.',
+                  'Sources without a transcript but with sound.speech.speechLikely may hold speech worth reading: get_transcript transcribes them.',
+                ],
+              },
+            };
+          }
           case 'inspect_media': {
             const mode = String(input.mode ?? 'metadata');
             const ids = Array.isArray(input.ids) ? (input.ids as unknown[]).filter((value): value is string => typeof value === 'string' && value.trim().length > 0).map((value) => value.trim()) : [];
@@ -2067,7 +2203,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const found = searchFontsTool(input);
               return { ...found, summary: found.data.fonts.length ? t('workbench.searchedFontsN', { n: found.data.fonts.length }) : t('workbench.searchedFontsNoMatch') };
             }
-            if (input.scope === 'stock') return { ok: false, error: TAB_CANNOT_SERVE_ERRORS.projectNav, data: { fix: 'Stock search is answered by the server: call search_assets scope:stock through the MCP surface, or use scope mine / cloud / official here.' } };
+            if (input.scope === 'stock') return runStockTool('search', input, signal);
             if (!(typeof input.query === 'string' && input.query.trim())) {
               if (input.scope === 'all') return { ok: false, error: 'missing_field', data: { path: 'query', fix: 'Listing needs one explicit scope: mine, cloud or official.' } };
               // Least privilege: an omitted scope is local. Cloud URLs are returned only when the
@@ -2267,7 +2403,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   return j?.url ?? null;
                 },
               };
-              const images = await resolveGenerationReferences(input.referenceImages, referenceDeps, 9);
+              const images = await resolveGenerationReferences(input.referenceImages, referenceDeps, generationKind === 'image' ? 16 : 9);
               const unresolvedReferences = [...images.unresolved];
               const params: Record<string, unknown> = {
                 prompt,
@@ -2298,6 +2434,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const started = await startGeneration(projectId, generationKind === 'image' ? 'image-gen' : 'video-gen', params);
               if (!started.ok) {
                 if (started.kind === 'credits') return { ok: false, error: `insufficient_tokens: need ${started.need}, balance ${started.balance}` };
+                if (started.kind === 'plan') return { ok: false, error: `plan_locked: ${generationKind} generation needs the ${started.requires} plan; tell the user to upgrade` };
                 return { ok: false, error: started.message };
               }
               watchGenerationJobs(started.ids, registerGeneratedEntry);
@@ -2468,6 +2605,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   }),
                   ...(signal ? { signal } : {}),
                 }).catch(() => undefined);
+                // Foley belongs to this project: it lands in 我的素材 like every generated output.
+                registerGeneratedEntry(generatedAssetIndexEntry({ jobId: registered.id, index: 0, kind: 'audio', key: registered.key, mime: 'audio/mp4', prompt: item.name, createdAt: Date.now(), durationSec: generatedBody.asset.durationSec }, t('panels.music')));
                 registrations.push({
                   id: registered.id, kind: 'audio', url: registered.url, label: item.name,
                   durationSec: generatedBody.asset.durationSec, pictureDurationSec: item.durationSec, description,
@@ -2839,6 +2978,42 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               default: return { ok: false, error: 'invalid_value', data: { path: 'action', value: input.action, allowed: ['focus', 'seek', 'play', 'pause'] } };
             }
           }
+          case 'rough_cut': {
+            // The standard first pass as one tool: the same checklist the one-click edit shows, run here
+            // through this runner's own speech tools so the whole pass is one call with one receipt.
+            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: tEnglish('workbench.noVideoYet') };
+            const known = new Set<string>(FIRST_PASS_STEPS);
+            const steps = Array.isArray(input.steps) ? input.steps.filter((step): step is FirstPassStepId => typeof step === 'string' && known.has(step)) : undefined;
+            const pauses = input.pauses === 'tight' || input.pauses === 'moderate' || input.pauses === 'natural' ? input.pauses : undefined;
+            const semantics = documentRef.current.semantics;
+            const host: FirstPassHost = {
+              projectId,
+              persist: opts?.roughCut?.persist,
+              document: () => documentRef.current,
+              brand: opts?.roughCut?.config ? opts.roughCut.config.brand : semantics.brand ?? null,
+              skills: opts?.roughCut?.skills ?? semantics.editingSkills ?? [],
+              tool: (name, args, stepSignal) => runStudioTool(ctx, name, args, { surface, ...(stepSignal ?? signal ? { signal: stepSignal ?? signal } : {}) }),
+              setUsageSink: (sink) => { if (ctx.usageSinkRef) ctx.usageSinkRef.current = sink; },
+              applyCaptionPreset: (preset, style) => ctx.applyCaptionPreset(preset, style),
+              captionsOn: () => !!documentRef.current.appearance.captionStyle?.on,
+              replaceDocument: (next) => commit({ op: 'document.replace', input: { document: next } }).ok,
+              patchLoudness: (loudness) => commit({ op: 'command', input: { command: { type: 'processing.patch', patch: { loudness } } } }).ok,
+              primaryFile: async () => {
+                const assetId = firstNarrativeAssetId(documentRef.current);
+                const asset = assetId ? documentRef.current.assets[assetId] : undefined;
+                return asset ? (await assetBytes(asset)).file : null;
+              },
+              measureLoudness: async (file) => (await import('./audio-decode')).streamVideoLoudness(file),
+            };
+            const outcome = await runFirstPass(host, (next) => { report(next.summary ?? t('tools.rough_cut.busy'), undefined, { report: next }); opts?.roughCut?.onProgress?.(next); }, {
+              ...(steps?.length ? { steps } : {}), ...(pauses ? { pauses } : {}), ...(signal ? { signal } : {}), onLateUsage: opts?.roughCut?.onLateUsage, resume: opts?.roughCut?.resume,
+            });
+            return {
+              ok: true,
+              summary: outcome.report.summary ?? t('tools.rough_cut.label'),
+              data: { note: outcome.note, report: outcome.report, baseline: outcome.baseline, ...(outcome.report.state !== 'done' ? { taskIncomplete: true } : {}), ...(outcome.stopped ? { stopped: true } : {}) },
+            };
+          }
           case 'remove_silence': {
             if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: tEnglish('workbench.noVideoYet') };
             const assetId = firstNarrativeAssetId(documentRef.current);
@@ -3162,23 +3337,6 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               },
             };
           }
-          case 'manage_frame': {
-            if (input.action !== 'attach') {
-              return { ok: false, error: 'attach_only_in_tab', data: { fix: 'Listing and reading frames is answered by the server; in the studio tab manage_frame only attaches one by id.' } };
-            }
-            input = { ...input, frame_id: input.id };
-            // Editing expert selects for a complete pass, or the user names one → mount a frame through chat's attachFrame
-            // (tag + subsequent requests carry frameId),
-            // then onFrameApplied lands palette+frameId into comp. Next round <frame_attached> prompts it to manage_frame action:read (read_frame.
-            // Gate before tagging the session: onFrameApplied refuses mid-generation, and a tagged
-            // session with an unapplied comp would disagree about the active theme.
-            if (genIdsRef.current.size) return { ok: false, error: tEnglish('workbench.elementGeneratingThemeAfter') };
-            const fid = typeof input.frame_id === 'string' ? input.frame_id : '';
-            const f = frameCatalogRef.current.find((x) => x.id === fid);
-            if (!f) return { ok: false, error: tEnglish('workbench.noSuchFrameId', { id: fid }) };
-            chatRef.current?.attachFrame({ id: f.id, title: f.title, icon: f.icon, iconKey: f.iconKey ?? null });
-            return { ok: true, summary: t('workbench.appliedThemeAlt', { title: f.title }) };
-          }
           case 'apply_component': {
             if (input.generate !== true) return { ok: false, error: 'apply_component without generate runs on the BYO path', data: { fix: 'Pass raw (the generated text) through run_v3, or set generate:true with an instruction.' } };
             if (typeof input.instruction !== 'string' || !input.instruction.trim()) return { ok: false, error: 'missing_field', data: { path: 'instruction', fix: 'The hosted generator needs a concrete instruction.' } };
@@ -3204,6 +3362,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   label: b.label,
                   durationSec: b.durationSec,
                   beats: motionBeats(b.startSec, b.durationSec),
+                  neighbors: motionGraphicNeighbors(compRef.current.blocks, { blockId: b.id }),
                   ...(b.box ? { boxPx: { w: Math.round(b.box.w * canvasSize().width), h: Math.round(b.box.h * canvasSize().height) } } : {}),
                 };
                 // A kit block is edited as props; anything else keeps writing markup. Editing follows
@@ -3259,18 +3418,19 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   : {}),
                 durationSec,
                 beats: motionBeats(at, durationSec),
+                neighbors: motionGraphicNeighbors(compRef.current.blocks, { atSec: at }),
               };
               const backdrop = typeof input.backdrop === 'string' && input.backdrop.trim()
                 ? `\n\nBACKDROP AND PROTECTED ZONES: ${input.backdrop.trim()}`
                 : '';
               // Streaming: the note (the human sentence before the fence) is pushed to the card as it generates; the output passes static checks (bad CSS doesn't enter the composition)
-              // New elements always get bespoke visual reasoning. No Frame means the neutral visual
-              // craft baseline, not a fallback to the fixed component-library cards.
+              // Library first (no brand graphics): a registered component with filled props; the model declines
+              // when none carries the moment, and the free-form path below writes bespoke markup.
               let parsed = await race(composeBlockChecked(
                 seed,
                 `Create a new Motion Graphic layer for this composed Scene: ${String(input.instruction ?? '')}${backdrop}${sceneDirection}`,
                 (acc) => report(noteOf(acc) || t('panels.generating')),
-                newBlockComposeMode(),
+                newBlockComposeMode({ brandGraphics: !!(await brandGraphicsOf(documentRef.current)) }),
               ));
               // An explicit user request never maps to "nothing worth showing" — a deliberate null
               // here means no component carries the ask, so take the free-form path rather than
@@ -3445,13 +3605,13 @@ export async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () =>
 /** A rejected parked approval is a turn boundary, not an ordinary successful tool receipt. */
 export function studioToolResultStopsAgentTurn(result: StudioToolResult): boolean {
   const data = result.ok && result.data && typeof result.data === 'object'
-    ? result.data as { decision?: unknown }
+    ? result.data as { decision?: unknown; taskIncomplete?: unknown }
     : null;
-  return data?.decision === 'rejected';
+  return data?.decision === 'rejected' || data?.taskIncomplete === true;
 }
 
-export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal; surface?: 'chat' | 'bridge'; skillId?: string; reportProgress?: StudioToolRunInternalOptions['reportProgress'] }): Promise<StudioToolResult> {
-  const result = QUERY_TOOLS.has(toolId) || PROJECT_MUTATION_TOOLS.has(toolId)
+export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: StudioToolRunInternalOptions): Promise<StudioToolResult> {
+  const result = toolId === 'rough_cut' || QUERY_TOOLS.has(toolId) || PROJECT_MUTATION_TOOLS.has(toolId)
     ? await runStudioToolInner(ctx, toolId, input, opts)
     : await runAtomicCompositionTool(ctx, () => runStudioToolInner(ctx, toolId, input, opts));
   if (
@@ -3471,7 +3631,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
   /** External-agent-only bridge operations (MCP-only, invisible to the internal chat) — the browser half of the BYO-brain contract:
    *  compose_component fetches live context; apply_component receives the model output and runs it through
    *  the same parseBlockResponse+lintBlock validation as the in-house path. Other tools fall back to runStudioTool. */
-async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Record<string, unknown>): Promise<StudioToolResult> {
+async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Record<string, unknown>, execution?: RoughCutExecution): Promise<StudioToolResult> {
   const {
     compRef, documentRef, commit, setSelectedId, setSelectedShotId, applyT, tRef,
     pushUndoSnapshot, genIdsRef, videoFileRef, clipFilesRef,
@@ -3515,11 +3675,11 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             };
           };
           const appearance = documentRef.current.appearance;
+          const projectBrand = documentRef.current.semantics.brand;
           const base = {
             theme: appearance.theme,
             ...(appearance.palette ? { palette: appearance.palette } : {}),
-            ...(appearance.frameId ? { frameId: appearance.frameId } : {}),
-            ...(appearance.customVisualStyle ? { customVisualStyle: appearance.customVisualStyle } : {}),
+            ...(projectBrand !== undefined ? { brandGraphics: projectBrand ? brandGraphicsStyle(projectBrand) : null } : {}),
           };
           const bid = typeof input.blockId === 'string' ? input.blockId : undefined;
           if (bid) {
@@ -3539,7 +3699,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
                   label: b.label,
                   durationSec: b.durationSec,
                   ...(b.box ? { boxPx: { w: Math.round(b.box.w * canvasSize().width), h: Math.round(b.box.h * canvasSize().height) } } : {}),
-                  ...(blockPropsReadback(b).props ? { props: blockPropsReadback(b).props!.values } : {}),
+                  ...(blockPropsReadback(b, compRef.current.look).props ? { props: blockPropsReadback(b, compRef.current.look).props!.values } : {}),
                 },
                 // A kit block is edited as props: hand the brief what it currently shows, so an
                 // external edit keeps unmentioned fields exactly like the in-app path does.
@@ -3591,8 +3751,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         const block = d.block as ComposeBriefInput['block'] | undefined;
         if (!block) return { ok: false, error: tEnglish('workbench.elementNotFoundIds') };
         const format = input.format === 'kit' || input.format === 'html' ? (input.format as 'kit' | 'html') : undefined;
-        const frame = typeof d.frameId === 'string' ? frameRegistry.get(d.frameId) : null;
-        const frameContent = composeVisualDirectionContent(frame ? { title: frame.title, body: frame.body } : null, normalizeCustomVisualStyle(d.customVisualStyle));
+        const brandGraphics = 'brandGraphics' in d ? (typeof d.brandGraphics === 'string' ? d.brandGraphics : null) : await brandGraphicsOf(documentRef.current);
         const brief = assembleComposeBrief({
           block,
           instruction: String(input.instruction).trim(),
@@ -3605,7 +3764,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           // The shell injects the host visual-craft baseline; the server compose route folds the
           // same text in, so BYO components get the same quality floor. Empty on an OSS shell.
           ...(visualCraftBaseline() ? { visualBaseline: visualCraftBaseline() } : {}),
-          frame: frameContent,
+          brandGraphics,
         });
         const fps = documentRef.current.canvas.fps;
         return {
@@ -3931,6 +4090,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         const name = typeof input.name === 'string' ? input.name : '';
         const args = input.args && typeof input.args === 'object' && !Array.isArray(input.args) ? (input.args as Record<string, unknown>) : {};
         const stepSurface: 'chat' | 'bridge' = input.surface === 'chat' ? 'chat' : 'bridge';
+        // In-tab callers (the first pass) may pass a stop signal; it is honored at the tool's safe boundaries.
         const before = documentRef.current;
         if (name === 'get_state') {
           const window = args.window && typeof args.window === 'object' ? (args.window as { tracks?: string[]; fromFrame?: number; toFrame?: number }) : undefined;
@@ -3966,7 +4126,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         try {
           result = external
             ? await runExternalToolInner(ctx, name, callArgs)
-            : await runStudioTool(ctx, name, callArgs, { surface: stepSurface, reportProgress: reportAsV3 });
+            : await runStudioTool(ctx, name, callArgs, { surface: stepSurface, reportProgress: reportAsV3, roughCut: execution, ...(input.signal instanceof AbortSignal ? { signal: input.signal } : {}) });
         } finally {
           clearToolProgress(name);
         }
@@ -3976,10 +4136,31 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           const failure = describeStepFailure(name, args, result.error, { kindOf: (id) => kinds.get(id), hasAsset: (id) => !!before.assets[id] }, result.data);
           return { ok: false, error: failure.error, ...(failure.fix ? { fix: failure.fix } : {}), data: { ...(result.data && typeof result.data === 'object' && !Array.isArray(result.data) ? result.data : {}), ...(failure.unknownIds ? { unknownIds: failure.unknownIds } : {}), detail: failure.detail } };
         }
+        if (name === 'place_graphics') {
+          // Each placed instance comes back as a still at its settled moment on the real picture.
+          const placedIds = ((result.data && typeof result.data === 'object' ? (result.data as { clipIds?: unknown }).clipIds : []) as unknown[])
+            .filter((id): id is string => typeof id === 'string').slice(0, 4);
+          const images: NonNullable<StudioToolResult['images']> = [];
+          const settled: Array<Record<string, unknown>> = [];
+          for (const clipId of placedIds) {
+            const { image, settledFrame } = await componentFrame(ctx, clipId);
+            if (image) images.push(image);
+            settled.push({ clipId, ...settledFrame });
+          }
+          result = { ...result, ...(images.length ? { images } : {}), data: { ...(result.data as Record<string, unknown> | undefined), settledFrames: settled } };
+        }
+        if (name === 'apply_component') {
+          const data = (result.data && typeof result.data === 'object' ? result.data : {}) as { newBlockId?: unknown; blockId?: unknown };
+          const clipId = typeof data.newBlockId === 'string' ? data.newBlockId : typeof data.blockId === 'string' ? data.blockId : typeof args.clipId === 'string' ? args.clipId : '';
+          if (clipId) {
+            const { image, settledFrame } = await componentFrame(ctx, clipId);
+            result = { ...result, ...(image ? { image } : {}), data: { ...(result.data as Record<string, unknown> | undefined), settledFrame } };
+          }
+        }
         if (name === 'search_assets' && result.data && typeof result.data === 'object' && 'usageHint' in (result.data as object)) {
           result = { ...result, data: { ...(result.data as Record<string, unknown>), usageHint: V3_LIBRARY_USAGE_HINT } };
         }
-        // One v3 call = one undo step: keep only the snapshot taken before the call.
+        // Completed steps have already committed; group their undo history once this call settles.
         if (ctx.undoStackRef.current.length > undoDepth + 1) ctx.undoStackRef.current = ctx.undoStackRef.current.slice(0, undoDepth + 1);
         const delta = documentDelta(before, documentRef.current);
         if (!delta) return result;
@@ -3990,11 +4171,11 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         return { ...result, data: { ...base, delta } };
       }
       default:
-        return runStudioTool(ctx, tool, input);
+        return runStudioTool(ctx, tool, input, { roughCut: execution });
     }
 }
 
-export function runExternalTool(ctx: AgentToolCtx, tool: string, input: Record<string, unknown>): Promise<StudioToolResult> {
-  if (QUERY_TOOLS.has(tool) || PROJECT_MUTATION_TOOLS.has(tool)) return runExternalToolInner(ctx, tool, input);
-  return runAtomicCompositionTool(ctx, () => runExternalToolInner(ctx, tool, input));
+export function runExternalTool(ctx: AgentToolCtx, tool: string, input: Record<string, unknown>, execution?: RoughCutExecution): Promise<StudioToolResult> {
+  if (tool === 'rough_cut' || (tool === 'run_v3' && input.name === 'rough_cut') || QUERY_TOOLS.has(tool) || PROJECT_MUTATION_TOOLS.has(tool)) return runExternalToolInner(ctx, tool, input, execution);
+  return runAtomicCompositionTool(ctx, () => runExternalToolInner(ctx, tool, input, execution));
 }

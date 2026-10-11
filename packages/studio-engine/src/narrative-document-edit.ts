@@ -18,6 +18,7 @@ import {
 import { clearRangeFromClip } from './editor-document/commands/clip-geometry';
 import { detachDanglingClipAnchors, updateScenesForClipChanges } from './editor-document/commands/clip-references';
 import { validateEditorDocumentV2 } from './editor-document/validation';
+import { transcriptSectionId } from './transcript-sections';
 
 export type NarrativeStructureEditResult =
   | { ok: true; document: EditorDocumentV2; receipts: EditorCommandReceipt[]; clipId?: string; assetId?: string }
@@ -42,6 +43,7 @@ export interface InsertNarrativeAssetRangeInput {
   document: EditorDocumentV2;
   assetId: string;
   clipId: string;
+  transcriptSectionId?: string;
   atSec: number;
   sourceInSec: number;
   sourceOutSec: number;
@@ -127,6 +129,7 @@ function coalesceRestoredNarrativeClip(
   const canMerge = (left: NarrativeTimelineClip, right: NarrativeTimelineClip): boolean => (
     left.startFrame + left.durationFrames === right.startFrame
     && left.assetId === right.assetId
+    && transcriptSectionId(left) === transcriptSectionId(right)
     && Math.abs(left.sourceOutSec - right.sourceInSec) < 0.03
     && presentationKey(left) === presentationKey(right)
   );
@@ -304,11 +307,20 @@ export function insertNarrativeAssetRange(input: InsertNarrativeAssetRangeInput)
   if (!Number.isFinite(input.atSec) || input.atSec < 0) return failure(input.document, 'invalid-range', 'Narrative insert time must be non-negative.', 'atSec');
   const durationSec = input.sourceOutSec - input.sourceInSec;
   if (!Number.isFinite(durationSec) || durationSec <= 0) return failure(input.document, 'invalid-range', 'Narrative source range must be positive.', 'sourceRange');
+  const atFrame = secondsToTimelineFrames(input.atSec, input.document.canvas.fps);
+  const neighbours = input.coalesceAdjacent
+    ? input.document.timeline.tracks.find((track) => track.id === input.document.semantics.primaryNarrativeTrackId)?.clips
+      .filter((clip): clip is NarrativeTimelineClip => clip.kind === 'narrative' && clip.assetId === input.assetId) ?? []
+    : [];
+  const owner = neighbours.find((clip) => clip.startFrame + clip.durationFrames === atFrame && Math.abs(clip.sourceOutSec - input.sourceInSec) < 0.03)
+    ?? neighbours.find((clip) => clip.startFrame === atFrame && Math.abs(clip.sourceInSec - input.sourceOutSec) < 0.03);
+  const sectionId = input.transcriptSectionId ?? (owner ? transcriptSectionId(owner) : input.clipId);
   const inserted = applyEditorCommand(input.document, {
     type: 'narrative.insert',
-    atFrame: secondsToTimelineFrames(input.atSec, input.document.canvas.fps),
+    atFrame,
     clip: {
       id: input.clipId,
+      transcriptSectionId: sectionId,
       kind: 'narrative',
       assetId: input.assetId,
       durationFrames: positiveDurationFrames(durationSec, input.document.canvas.fps),
@@ -479,6 +491,7 @@ export function moveNarrativeDocumentClipToVisualTrack(
     startFrame: narrative.startFrame,
     durationFrames: narrative.durationFrames,
     enabled: narrative.enabled,
+    ...(narrative.transcriptSectionId ? { transcriptSectionId: narrative.transcriptSectionId } : {}),
     ...(narrative.linkGroupId ? { linkGroupId: narrative.linkGroupId } : {}),
     sourceInSec: narrative.sourceInSec,
     sourceOutSec: narrative.sourceOutSec,

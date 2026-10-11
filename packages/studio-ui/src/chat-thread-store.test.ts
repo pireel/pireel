@@ -18,7 +18,7 @@ import {
   sanitizeRestored,
   stampLatestAssistantWorkDuration,
 } from './chat-thread-store';
-import { analyzeVisualSourceLabel } from './chat-tool-parts';
+import { analyzeVisualSourceLabel, toolStatus } from './chat-tool-parts';
 
 const assistant = (parts: UIMessage['parts']): UIMessage => ({
   id: 'assistant-1',
@@ -27,6 +27,18 @@ const assistant = (parts: UIMessage['parts']): UIMessage => ({
 });
 
 describe('sanitizeRestored', () => {
+  it('hides internal handoff prose in old chats and subsequent model history without dropping receipts', () => {
+    const receipt = { type: 'tool-get_state' as const, toolCallId: 'state', state: 'output-available' as const, input: {}, output: { ok: true } };
+    const messages = [assistant([receipt, { type: 'text', text: '让我按时间顺序梳理这段对话。\n初始用户消息：读品牌、调用工具。' }])];
+    expect(sanitizeRestored(messages)[0].parts).toEqual([receipt]);
+    expect(compactStudioChatMessagesForModel(messages)[0].parts).toEqual([receipt]);
+  });
+  it('keeps raw tool diagnostics in the receipt but shows a readable error state', () => {
+    const part = { type: 'tool-read_brand', state: 'output-error', errorText: 'Unknown operation read_brand {"detail":"unknown_id"}' };
+    expect(toolStatus(part).text).not.toContain('read_brand');
+    expect(toolStatus(part).text).not.toContain('unknown_id');
+    expect(part.errorText).toContain('unknown_id');
+  });
   it('removes leaked provider tool markup from persisted assistant text', () => {
     const [message] = sanitizeRestored([assistant([
       { type: 'text', text: '先处理。<｜｜DSML｜｜tool_calls><｜｜DSML｜｜invoke name="resize_block">x</｜｜DSML｜｜tool_calls>完成。' },

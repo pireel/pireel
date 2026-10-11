@@ -76,6 +76,7 @@ export interface EngineAudioClip {
 /** An overlay video layer (any visual lane other than the primary narrative): picture only, drawn on its
  *  own canvas in the preview document; its sound is an EngineAudioClip like music. */
 export interface EngineLayer {
+  personMatte?: boolean;
   /** Clip id. */
   id: string;
   /** Id of the canvas element that receives this layer's frames. */
@@ -135,6 +136,10 @@ const EPS = 0.04;
  * releasing the node so a transient preview respec cannot leave an orphan narration playing beside
  * the replacement element. Source swaps reuse the resident decoder and let assigning the new src
  * stop the old resource; this helper is only for permanent removal. */
+function audioContextCtor(): typeof AudioContext | undefined {
+  return typeof window === 'undefined' ? undefined : window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+}
+
 function releaseMediaElement(el: HTMLMediaElement): void {
   if (!el.paused) el.pause();
   el.removeAttribute('src');
@@ -168,7 +173,7 @@ export class VideoTrackEngine {
   private lastPush: { key: string; srcT: number } | null = null;
   private seekGen = 0;
   /** Cut transition table (film seconds): inside a window the frame push carries the other side's picture. */
-  private trs: { cut: number; half: number }[] = [];
+  private trs: { start: number; cut: number; end: number }[] = [];
   // WebCodecs picture side. One decoder per source (opened when the source is set; `null` once open
   // failed = this source keeps its element as the picture source), read through independent cursors:
   // `${key}::main` for the active segment, `${key}::pre|post` for the two sides of a cut transition,
@@ -184,6 +189,7 @@ export class VideoTrackEngine {
   private layerLastPush = new Map<string, number>();
   private layerVisible = new Set<string>();
   private layerWarned = new Set<string>();
+  private layerFailed = new Set<string>();
   // Audio clips (music lane): one resident <audio> element per clip, volume driven per tick from the
   // envelope closure. Deliberately loose sync (music has no lip-sync): only correct drift > 0.35s.
   // Each element is routed through a WebAudio gain node so a clip can be BOOSTED past source level
@@ -202,8 +208,15 @@ export class VideoTrackEngine {
   private maskActive: WordAudioMask | null = null;
   /** Whether any audio-lane / visual-lane clip is inside a beeped span this tick. */
   private clipBeep = false;
-  /** Beep tone: its own tiny graph, never attached to a media element (see setElGain for why that matters). */
-  private beep: { ctx: AudioContext; gain: GainNode } | null = null;
+  /** Beep tone: its own tiny graph, never attached to a media element (see setElGain for why that matters).
+   *  Under a master it joins the shared context instead (`shared`), so the tone is limited with the rest. */
+  private beep: { ctx: AudioContext; gain: GainNode; osc: OscillatorNode; shared: boolean } | null = null;
+  /** Whole-mix loudness (the document's master gain): every audible element then plays through one bus,
+   *  master gain → limiter → destination, the preview counterpart of the export's master stage. */
+  private masterGain: number | null = null;
+  private bus: { input: GainNode; limiter: DynamicsCompressorNode } | null = null;
+  /** Element chains built by gainFor, re-pointed when the master turns on or off. */
+  private routed = new Set<GainNode>();
   // Per-element gain nodes for the VIDEO/dub side, created only when a level above source is asked for
   // (see setElGain). Keyed by element so a recreated element simply gets a fresh chain.
   private elGains = new WeakMap<HTMLMediaElement, { el: HTMLMediaElement; gain?: GainNode }>();
@@ -220,12 +233,13 @@ export class VideoTrackEngine {
    *  dead until the owner sets the source again from fresh bytes. */
   onSourceError?: (key: string, error: MediaError | null) => void;
   /** An overlay layer's frame (drawn into the canvas named by layer.elKey). */
+  onLayerError?: (layer: EngineLayer, error: unknown) => void;
   onLayerFrame?: (layer: EngineLayer, frame: ImageBitmap, info: LayerFrameInfo) => void;
   /** An overlay layer left its window or lost its source: its canvas should clear. */
   onLayerBlank?: (layer: EngineLayer) => void;
   /** Transition pre-bake provider (workbench): cut → decoded frame set; null = not baked/decoded (falls back to the two-cursor path).
    *  When baked, the window pushes finished frames and the second read position stays idle — "on-the-fly scheduling" leaves the critical path. */
-  bakeProvider?: (cut: number) => { fps: number; half: number; frames: ImageBitmap[] } | null;
+  bakeProvider?: (cut: number) => { fps: number; start: number; frames: ImageBitmap[] } | null;
 
   private ensureHost(): HTMLDivElement {
     if (!this.host) {
@@ -533,7 +547,8 @@ export class VideoTrackEngine {
   }
 
   /** Cut transition table (film seconds): inside the window, pushFrame carries the "other side" picture (frame2). */
-  setTransitions(trs: { cut: number; half: number }[]): void {
+  /** Transition windows that hand over at a spine cut (the ones needing the other side decoded). */
+  setTransitions(trs: { start: number; cut: number; end: number }[]): void {
     this.trs = trs;
   }
 
@@ -602,17 +617,17 @@ export class VideoTrackEngine {
     }
     if (!this.beep) {
       try {
-        const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-        if (!Ctor) return;
-        const ctx = new Ctor();
+        const shared = this.masterGain !== null;
+        const Ctor = audioContextCtor(); const ctx = shared ? this.context() : Ctor ? new Ctor() : null;
+        if (!ctx) return;
         const osc = ctx.createOscillator();
         osc.type = 'sine';
         osc.frequency.value = 1000;
         const gain = ctx.createGain();
         gain.gain.value = 0;
-        osc.connect(gain).connect(ctx.destination);
+        osc.connect(gain).connect(shared ? this.output()! : ctx.destination);
         osc.start();
-        this.beep = { ctx, gain };
+        this.beep = { ctx, gain, osc, shared };
       } catch {
         return; // no context: the word is still muted, only the tone is missing in preview
       }
@@ -716,18 +731,63 @@ export class VideoTrackEngine {
     return true;
   }
 
-  /** Lazily build (and reuse) an element's WebAudio chain: element → gain → destination. Returns null when
+  /** The shared AudioContext, created on first need (null when the browser refuses one). */
+  private context(): AudioContext | null {
+    if (this.actx) return this.actx;
+    const Ctor = audioContextCtor();
+    if (!Ctor) return null;
+    try { this.actx = new Ctor(); } catch { return null; }
+    return this.actx;
+  }
+
+  /** Where element chains connect: the master bus when a loudness gain is set, else the destination. */
+  private output(): AudioNode | null {
+    const ctx = this.actx; if (!ctx) return null;
+    if (this.masterGain === null) return ctx.destination;
+    if (!this.bus) {
+      const input = ctx.createGain(); const limiter = ctx.createDynamicsCompressor();
+      limiter.threshold.value = -1.5; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = .003; limiter.release.value = .1;
+      input.connect(limiter).connect(ctx.destination);
+      this.bus = { input, limiter };
+    }
+    this.bus.input.gain.value = this.masterGain;
+    return this.bus.input;
+  }
+
+  /** Whole-mix loudness for preview: the document's master gain (linear), or null for none. Routed
+   *  chains are re-pointed; native elements join the bus on their next level update. */
+  setMasterGain(gain: number | null): void {
+    const next = gain != null && Number.isFinite(gain) && gain > 0 ? gain : null;
+    if (next === this.masterGain) return;
+    const wasShared = this.beep?.shared ?? false;
+    this.masterGain = next;
+    if (next !== null && !this.context()) return;
+    const out = this.output();
+    for (const node of this.routed) { node.disconnect(); if (out) node.connect(out); }
+    if (next === null && this.bus) { this.bus.input.disconnect(); this.bus.limiter.disconnect(); this.bus = null; }
+    // The beep lives in whichever context matches the mode: rebuild it on the next beep.
+    if (this.beep && wasShared !== (next !== null)) this.releaseBeep();
+  }
+
+  private releaseBeep(): void {
+    const beep = this.beep; if (!beep) return;
+    this.beep = null;
+    try { beep.osc.stop(); } catch { /* already stopped */ }
+    beep.gain.disconnect();
+    if (!beep.shared) void beep.ctx.close().catch(() => {});
+  }
+
+  /** Lazily build (and reuse) an element's WebAudio chain: element → gain → destination (or the master bus). Returns null when
    *  the browser refuses a context; the caller then degrades to element volume (boosts just won't be
    *  audible in preview, while export still applies them). */
   private gainFor(entry: { el: HTMLMediaElement; gain?: GainNode }): GainNode | null {
     if (entry.gain) return entry.gain;
     try {
-      const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!Ctor) return null;
-      if (!this.actx) this.actx = new Ctor();
-      const gain = this.actx.createGain();
-      this.actx.createMediaElementSource(entry.el).connect(gain).connect(this.actx.destination);
-      entry.gain = gain;
+      const ctx = this.context();
+      if (!ctx) return null;
+      const gain = ctx.createGain();
+      ctx.createMediaElementSource(entry.el).connect(gain).connect(this.output()!);
+      entry.gain = gain; this.routed.add(gain);
       return gain;
     } catch {
       return null; // already-taken-over element / autoplay policy: stay on the native path
@@ -740,7 +800,8 @@ export class VideoTrackEngine {
    *  won't start. Once routed, the node carries every level (never half native, half routed). */
   private setElGain(el: HTMLMediaElement, g: number): void {
     let entry = this.elGains.get(el);
-    if (!entry && g > 1) {
+    // Under a master every element joins the bus, so the limiter sees the whole mix.
+    if (!entry && (g > 1 || this.masterGain !== null)) {
       entry = { el };
       if (this.gainFor(entry)) this.elGains.set(el, entry);
       else entry = undefined; // no context: stay native, boost is inaudible here (export still applies it)
@@ -807,11 +868,11 @@ export class VideoTrackEngine {
   }
 
   /** The transition window containing t (with 0.3s warm-up lead) → both-side segment indices; null if the cut doesn't align to a segment boundary. */
-  private transitionWinAt(t: number): { cut: number; half: number; iA: number; iB: number } | null {
+  private transitionWinAt(t: number): { start: number; cut: number; end: number; iA: number; iB: number } | null {
     for (const tr of this.trs) {
-      if (t < tr.cut - tr.half - 0.3 || t > tr.cut + tr.half + 0.05) continue;
+      if (t < tr.start - 0.3 || t > tr.end + 0.05) continue;
       for (let i = 1; i < this.segs.length; i++) {
-        if (Math.abs(this.starts[i]! - tr.cut) < 0.05) return { cut: tr.cut, half: tr.half, iA: i - 1, iB: i };
+        if (Math.abs(this.starts[i]! - tr.cut) < 0.05) return { start: tr.start, cut: tr.cut, end: tr.end, iA: i - 1, iB: i };
       }
       return null;
     }
@@ -843,10 +904,12 @@ export class VideoTrackEngine {
         }
       }
       if (!old || old.key !== layer.key || old.srcStart !== layer.srcStart || old.srcEnd !== layer.srcEnd
-        || old.timelineStart !== layer.timelineStart || old.timelineEnd !== layer.timelineEnd || old.elKey !== layer.elKey) {
+        || old.personMatte !== layer.personMatte || old.timelineStart !== layer.timelineStart || old.timelineEnd !== layer.timelineEnd || old.elKey !== layer.elKey) {
         this.layerLastPush.delete(layer.id);
       }
     }
+    this.layerFailed.clear();
+    this.layerWarned.clear();
     this.layers = layers;
     this.layerGen += 1;
     if (!this.playing) this.pushLayers(this.tEdited);
@@ -878,6 +941,7 @@ export class VideoTrackEngine {
   }
 
   private pushLayer(layer: EngineLayer, t: number): void {
+    if (this.layerFailed.has(layer.id)) return;
     const duration = Math.max(1e-9, layer.timelineEnd - layer.timelineStart);
     const rate = Math.max(0, layer.srcEnd - layer.srcStart) / duration;
     const srcT = Math.min(layer.srcEnd, Math.max(layer.srcStart, layer.srcStart + (t - layer.timelineStart) * rate));
@@ -901,8 +965,12 @@ export class VideoTrackEngine {
     cursor.frameAt(srcT)
       .then(async (frame) => {
         if (!frame) return;
-        const bitmap = await createImageBitmap(frame.canvas);
-        if (gen !== this.layerGen || !this.layers.includes(layer) || !this.onLayerFrame) {
+        let bitmap = await createImageBitmap(frame.canvas);
+        if (layer.personMatte) {
+          const { personCutoutFrame } = await import('./person-cutout-frame');
+          bitmap = await personCutoutFrame(bitmap, { id: `layer:${layer.id}`, t: srcT });
+        }
+        if (gen !== this.layerGen || !this.layers.includes(layer) || !this.onLayerFrame || this.tEdited < layer.timelineStart - 1e-6 || this.tEdited >= layer.timelineEnd - 1e-6) {
           bitmap.close();
           return;
         }
@@ -910,18 +978,25 @@ export class VideoTrackEngine {
         this.layerVisible.add(layer.id);
         this.onLayerFrame(layer, bitmap, { t, srcT, sourceWidth: frame.width, sourceHeight: frame.height });
       })
-      .catch(() => undefined)
+      .catch(error => {
+        if (gen === this.layerGen && this.layers.includes(layer)) {
+          this.layerFailed.add(layer.id);
+          this.onLayerBlank?.(layer);
+          if (!this.layerWarned.has(layer.id)) { this.layerWarned.add(layer.id); this.onLayerError?.(layer, error); }
+        }
+      })
       .then(() => {
         this.layerInflight.delete(layer.id);
         const pending = this.layerPending.get(layer.id);
-        if (pending == null || !this.layers.includes(layer)) return;
         this.layerPending.delete(layer.id);
-        this.pushLayer(layer, pending);
+        const current = this.layers.find(item => item.id === layer.id);
+        if (pending == null || !current || pending < current.timelineStart || pending >= current.timelineEnd) return;
+        this.pushLayer(current, pending);
       });
   }
 
   /** The "other side" of a cut transition at t: which segment, its source time, and the read position to use. */
-  private transitionOtherAt(t: number, w: { cut: number; half: number; iA: number; iB: number }): { seg: EngineSeg; srcT: number; side: 'pre' | 'post' } {
+  private transitionOtherAt(t: number, w: { start: number; cut: number; end: number; iA: number; iB: number }): { seg: EngineSeg; srcT: number; side: 'pre' | 'post' } {
     const pre = t < w.cut;
     const otherIndex = pre ? w.iB : w.iA;
     const seg = this.segs[otherIndex]!;
@@ -1054,11 +1129,11 @@ export class VideoTrackEngine {
     const t = tOverride ?? segmentTimelineTimeAt(seg, srcT, this.starts[this.curIdx]!, this.ends[this.curIdx]!);
     // inside the transition window (excluding warm-up), carry the other side's picture; skip dedup (the other side is moving, push even if the main frame is same-position)
     const w = this.transitionWinAt(t);
-    const inWin = !!w && t >= w.cut - w.half;
+    const inWin = !!w && t >= w.start;
     const bake = inWin ? this.bakeProvider?.(w!.cut) : null;
     if (bake && inWin && bake.frames.length) {
       // pre-bake path: push finished frames by frame index (clone then transfer; dedup same frame), decoder doesn't touch the picture at all
-      const idx = Math.max(0, Math.min(bake.frames.length - 1, Math.round((t - (w!.cut - bake.half)) * bake.fps)));
+      const idx = Math.max(0, Math.min(bake.frames.length - 1, Math.round((t - bake.start) * bake.fps)));
       const bkey = `bake@${w!.cut}`;
       if (this.lastPush && this.lastPush.key === bkey && this.lastPush.srcT === idx) return;
       this.bitmapInflight = true;
@@ -1288,7 +1363,7 @@ export class VideoTrackEngine {
           // lagging >0.25s (forward seek/handoff) = jump forward only. Inside the bake window, free-wheel
           // (picture doesn't need the decoder), but leading >0.6s also halves the rate as a backstop.
           const wB = this.transitionWinAt(this.tSmooth);
-          const freewheel = !!wB && this.tSmooth >= wB.cut - wB.half && !!this.bakeProvider?.(wB.cut);
+          const freewheel = !!wB && this.tSmooth >= wB.start && !!this.bakeProvider?.(wB.cut);
           const lead = this.tSmooth - this.tEdited;
           let rate = 1;
           if (!freewheel && lead > 0.04) rate = Math.max(0.3, 1 - lead * 2.5);
@@ -1385,15 +1460,13 @@ export class VideoTrackEngine {
 
   dispose(): void {
     this.pause();
-    if (this.beep) {
-      void this.beep.ctx.close().catch(() => {});
-      this.beep = null;
-    }
+    this.releaseBeep();
     for (const c of this.audioClips.values()) {
       c.gain?.disconnect();
       releaseMediaElement(c.el);
     }
     this.audioClips.clear();
+    this.routed.clear(); this.bus = null;
     void this.actx?.close().catch(() => {});
     this.actx = null;
     for (const d of this.dubs.values()) releaseMediaElement(d.el);

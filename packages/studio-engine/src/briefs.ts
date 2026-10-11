@@ -19,26 +19,23 @@ import { buildHtmlSystem, buildKitSystem, retrieveComponentCandidates, retrieveM
 import { type ThemeId, getTheme, themeForLlm } from './theme';
 import { isComponentId } from '@pireel/studio-kit';
 
-export interface FrameContent {
-  title: string;
-  body: string;
-}
-
-/** compose's ACTIVE THEME text (single source shared by the compose route and BYO brief):
- *  theme tokens (+ palette override) + optional frame design-language graft (frame wins on aesthetics, engineering contract unchanged). */
+/** compose's ACTIVE THEME text (single source shared by the compose route and BYO brief): theme tokens
+ *  (+ palette override) + the creator's brand graphics when they have a brand (the brand wins on aesthetics,
+ *  the engineering contract is unchanged). */
 export function assembleComposeTheme(
   themeId?: string,
   palette?: Record<string, string>,
-  frame?: FrameContent | null,
+  brandGraphics?: string | null,
   visualBaseline?: string,
 ): string {
   let theme = themeForLlm(getTheme(themeId as ThemeId | undefined), palette);
   const baseline = visualBaseline?.trim();
+  const graphics = brandGraphics?.trim();
   if (baseline) {
-    theme += `\n\n=== HOST VISUAL CRAFT BASELINE ===\nThis is a neutral quality floor, not a hidden Frame or visual identity. Apply its craft in a project without a Frame. When a Frame follows, keep the quality checks but let the Frame win every visible aesthetic decision.\n\n${baseline}`;
+    theme += `\n\n=== HOST VISUAL CRAFT BASELINE ===\nThis is a neutral quality floor, not a visual identity. Apply its craft when the creator has no brand graphics. When brand graphics follow, keep the quality checks but let the brand win every visible aesthetic decision.\n\n${baseline}`;
   }
-  if (frame) {
-    theme += `\n\n=== FRAME DESIGN LANGUAGE — "${frame.title}" ===\nWhere this Frame conflicts with generic Motion Graphic styling, archetypes or default taste above, THE FRAME WINS. The Component engineering contract (1080px-wide reference, #ID scoping, tl local time, no external libraries, chart recipes' mechanics) always holds.\n\n${frame.body}`;
+  if (graphics) {
+    theme += `\n\n=== CREATOR BRAND GRAPHICS ===\nHow this creator's own graphics look, read from videos they published. Where it conflicts with generic Motion Graphic styling, archetypes or default taste above, THE BRAND WINS; choose colours and type for this video's topic and picture the way it describes. The Component engineering contract (sizes in the real box/canvas px given in the request, local CSS selectors, tl local time, no external libraries, chart recipes' mechanics) always holds.\n\n${graphics}`;
   }
   return theme;
 }
@@ -50,15 +47,16 @@ export interface ComposeBriefInput {
   context?: ComposeContext;
   theme?: string;
   palette?: Record<string, string>;
-  frame?: FrameContent | null;
-  /** Optional private host context that raises the quality floor without becoming a Frame. */
+  /** The creator's brand graphics prose, when they have a brand. */
+  brandGraphics?: string | null;
+  /** Optional private host context that raises the quality floor without becoming a visual identity. */
   visualBaseline?: string;
   lang?: string;
   /** Domain preset constrains the searchable Component vocabulary before query-time retrieval. */
   presetId?: string;
   /** Override the routing (an agent answered {"custom": true} and needs the markup contract for a
    *  project; or wants to fill props on an existing kit block). Default: existing kit → kit,
-   *  otherwise html. New generation stays bespoke even without a Frame. */
+   *  otherwise html. New generation stays bespoke even without brand graphics. */
   format?: 'kit' | 'html';
   /** The registered Component a targeted kit block currently shows, so a BYO edit keeps unmentioned props. */
   kitCurrent?: KitChoice | null;
@@ -66,8 +64,8 @@ export interface ComposeBriefInput {
 
 /** Block-generation brief: the caller takes system+prompt, generates with its OWN model, and passes
  *  the raw output back to apply_component. Routing mirrors the in-app client: a themed project
- *  generates HTML (the optional Frame is a prose description the model builds from). Existing kit
- *  blocks keep their typed-props contract; new generation stays bespoke even without a Frame. The
+ *  generates HTML (the optional brand graphics are a prose description the model builds from). Existing kit
+ *  blocks keep their typed-props contract; new generation stays bespoke even without brand graphics. The
  *  returned `format` names which contract the text will follow. */
 export function assembleComposeBrief(input: ComposeBriefInput): {
   system: string;
@@ -114,7 +112,7 @@ export function assembleComposeBrief(input: ComposeBriefInput): {
         patternIds: candidatePatterns,
         ...(input.presetId ? { presetId: input.presetId } : {}),
       }),
-      assembleComposeTheme(input.theme, input.palette, input.frame, input.visualBaseline),
+      assembleComposeTheme(input.theme, input.palette, input.brandGraphics, input.visualBaseline),
     ),
     prompt: buildBlockPrompt({
       block: input.block,

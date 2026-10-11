@@ -1,3 +1,5 @@
+import type { SceneCreditInput, SceneCreditEstimate } from './scene-credit-estimate';
+import type { SceneProjectStore } from './scene-project';
 /**
  * Provider contracts — the capability seams between the pure engine/editor and
  * whatever supplies LLM, ASR, storage, and persistence.
@@ -15,9 +17,23 @@ import type { AsrSegment } from './build-blocks';
 import type { ProjectSaveResult, ProjectSaveWire, StudioProjectDto } from './project-dto';
 import type { EditorDocumentV2 } from './editor-document';
 import type { AssetSearchDocument } from './asset-search';
-import type { CustomVisualStyle } from './visual-style';
 
 /** One block-generation request (the same shape the BYO brief is assembled from). */
+export interface StudioOperationOptions {
+  signal?: AbortSignal; onUsage?: (usage: import('./workflow').WorkflowUsage) => void;
+  /** Selective caption coloring; separate from active-word animations and headline graphics. */
+  highlightMode?: 'keywords' | 'numbers';
+  projectId?: string;
+  /** The fixed-price scene run this call belongs to: the host bills the run, not the call. */
+  sceneRun?: string;
+}
+/** Fixed-price scene generations (captions, dubbing, Auto SFX): charged once when a generation starts; its
+ *  paid steps then pass the run id. Resuming an interrupted generation continues its run. */
+export interface SceneRunService {
+  start(input: { id: string; projectId: string }, signal?: AbortSignal): Promise<{ id: string; credits: number; resumed: boolean }>;
+  /** A failed run is refunded (less the service cost it already incurred). */
+  finish(id: string, outcome: 'completed' | 'failed'): Promise<void>;
+}
 export interface ComposeRequest {
   /** Billing attribution only — which project this generation belongs to. */
   projectId?: string;
@@ -25,8 +41,8 @@ export interface ComposeRequest {
   instruction: string;
   theme?: string;
   palette?: Record<string, string>;
-  frameId?: string;
-  customVisualStyle?: CustomVisualStyle;
+  /** The project's brand graphics prose (null: edited without a brand); omitted when the project never set a brand. */
+  brandGraphics?: string | null;
   /** UI language for the human-facing note line. */
   lang?: string;
   context?: ComposeContext;
@@ -39,13 +55,13 @@ export interface ComposeRequest {
 /** Generates block HTML/animation from a request. Hosted: server LLM. OSS: own key or unavailable (use the BYO agent flow instead). */
 export interface BlockComposer {
   /** Resolves with the raw model output (note + ```html + ```js fences); onDelta streams partials. */
-  composeStream(req: ComposeRequest, onDelta?: (raw: string) => void): Promise<string>;
+  composeStream(req: ComposeRequest, onDelta?: (raw: string) => void, options?: StudioOperationOptions): Promise<string>;
 }
 
 /** Speech → timed sentences (source-clock seconds). */
 export interface Transcriber {
   /** opts.projectId is billing attribution only. */
-  transcribe(file: File, opts?: { projectId?: string }): Promise<AsrSegment[]>;
+  transcribe(file: File, opts?: { projectId?: string; onUsage?: (usage: import('./workflow').WorkflowUsage) => void }): Promise<AsrSegment[]>;
 }
 
 /** Cloud byte rendezvous (content-addressed by signature): video, image and audio alike. Null results
@@ -126,6 +142,9 @@ export interface CuratedAssetProvider {
 }
 
 export interface StudioProviders {
+  /** Reusable brand presets. Each project explicitly selects its own snapshot; manage opens the library. */
+  brands?: { list: () => Promise<import('./brand-playbook').BrandPlaybook[]>; manage?: () => void };
+  workflowEnvironment?: () => Promise<{ scope: string; revision: string }>;
   composer: BlockComposer;
   transcriber: Transcriber;
   vault: MediaVault;
@@ -136,6 +155,15 @@ export interface StudioProviders {
    * needs them. */
   uploadPolicy?: 'always' | 'lazy';
   projects: ProjectStore;
+  sceneProjects?: SceneProjectStore;
+  estimateSceneCredits?(input: SceneCreditInput, signal?: AbortSignal): Promise<SceneCreditEstimate>;
+  sceneRuns?: SceneRunService;
+  /** Generations the server runs to the end (docs/server-scene-runs.md): start one with the browser's
+   *  handoff, and read the project back (with its revision) to follow it. Absent = run in the browser. */
+  serverRuns?: {
+    start(input: { projectId: string; generationId: string; audioKey: string; audioOffset: number }, signal?: AbortSignal): Promise<{ id: string; credits: number }>;
+    project(projectId: string, signal?: AbortSignal): Promise<{ revision: number; task: import('./scene-project').CaptionTaskRecord }>;
+  };
   /** Built-in chat persistence, independent from project document/version sync. */
   chats?: ChatThreadStore;
   uploads: AssetUploader;
@@ -150,7 +178,25 @@ export interface StudioProviders {
    *  The server marks the restore as consumed — repeated calls walk strictly backward. */
   historyUndo?: (projectId: string) => Promise<{ document: EditorDocumentV2; version: number } | null>;
   /** Sentence translator for bilingual captions (hosted-LLM feature; absent = the captions panel hides its translation section — BYO agents translate themselves via set_caption_translations). */
-  translate?: (rows: { index: number; text: string }[], targetLanguage: string) => Promise<{ index: number; text: string }[]>;
+  captionEmphasis?: (rows: import('./caption-emphasis').EmphasisRow[], projectId?: string, options?: StudioOperationOptions) => Promise<import('./caption-emphasis').EmphasisSelection[]>;
+  translate?: (rows: { index: number; text: string }[], targetLanguage: string, options?: StudioOperationOptions) => Promise<{ index: number; text: string }[]>;
+  /** Dubbing script writer (hosted LLM): each turn's phrases with the seconds they hold, back as one
+   *  target-language phrase per source phrase sized to its time. Absent = video dubbing is unavailable. */
+  dubbingScript?: (turns: { text: string; seconds: number }[][], targetLanguage: string, options?: StudioOperationOptions) => Promise<string[][]>;
+  /** Caption auto-highlight picker (hosted-LLM feature; absent = the transcript hides its "Auto highlight" button — BYO agents highlight via set_captions highlights). Returns exact phrases per row. */
+  autoHighlight?: (rows: { index: number; text: string }[], options?: StudioOperationOptions) => Promise<{ index: number; text: string }[]>;
+  /** Cleans up a raw talking-head recording from its whole transcript at once (hosted LLM): the repeats
+   *  to cut (retakes, false starts, crew talk) and the sensitive words to mask, each placed on the source
+   *  clock; `unsure` lists doubtful repeats the caller leaves in. Absent = the first pass leaves them. */
+  speechCleanup?: (segments: { start: number; end: number; text: string; words?: { text: string; start: number; end: number }[] }[], options?: StudioOperationOptions) => Promise<{ cuts: { seg: number; text: string; keep: number; kind: 'retake' | 'false-start' | 'crew-talk'; range: [number, number] }[]; sensitive: { seg: number; text: string; range: [number, number] }[]; unsure: { seg: number; text: string; note: string }[] }>;
+  /** Writes a one-click edit's titles from the brand's layout prompt: words, timing, place and look, for
+   *  this video's lines (hosted LLM). */
+  brandTitles?: (input: { rows: { index: number; text: string; startSec: number }[]; durationSec: number; guide: string; canvas: { width: number; height: number } }, options?: StudioOperationOptions) => Promise<{ titles: import('./brand-edit-params').PlannedTitle[] }>;
+  /** Plans where a one-click edit places the platform's moves (punch-ins, transitions), following the brand's
+   *  prompt within the platform ceiling (hosted LLM). Picks are phrases of the given rows. */
+  editPlan?: (input: { rows: { index: number; text: string; startSec: number }[]; durationSec: number; guide: string; moves: { kind: 'punch_in' | 'transition'; variants: string[]; max: number }[] }, options?: StudioOperationOptions) => Promise<{ picks: { kind: 'punch_in' | 'transition'; index: number; text: string; variant: string; scale?: number }[] }>;
+  /** Drafts a generation prompt for "add over this transcript selection" (hosted LLM; absent = the add popover offers library picks only). */
+  draftInsertPrompt?: (req: { kind: 'mg' | 'sticker' | 'image' | 'video' | 'sfx'; text: string; before: string; after: string; durationSec: number }) => Promise<string>;
   /** Fill a component's text slots from the narration around its time window (hosted-LLM feature;
    *  absent = the toolbar hides its sync button — BYO agents edit blocks themselves). */
   syncFill?: (

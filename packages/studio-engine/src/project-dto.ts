@@ -7,6 +7,7 @@
 
 import { applyUploadedMediaKeys, collectUploadedMediaKeys } from './cloud-media-persistence';
 import type { WordMask } from './word-masks';
+import type { WordDecoration } from './build-blocks';
 import { applyPatch, type Operation } from 'fast-json-patch';
 import { create as createDiffer } from 'jsondiffpatch';
 import { format as formatJsonPatch } from 'jsondiffpatch/formatters/jsonpatch';
@@ -37,11 +38,13 @@ export interface TranscriptSegment {
   text: string;
   /** Per-word replacements keyed by word index (see word-masks.ts). */
   masks?: Record<string, WordMask>;
+  /** Selected-word caption highlights and animations, keyed by source word index. */
+  wordDecorations?: Record<string, WordDecoration>;
   /** Spoken language of this sentence (provider-reported or script-detected). */
   lang?: string;
   /** Speaker id (diarization; absent = single speaker / not enabled). */
   speaker?: string;
-  words?: { text: string; start: number; end: number }[];
+  words?: { text: string; start: number; end: number; emphasis?: boolean; timing?: 'estimated' }[];
   /** Bilingual whole-sentence translation (shows only when the sentence maps to a single display cue). */
   sub?: string;
   /** Per-cue translations keyed by word range "w0:w1" (UI translate flow / set_caption_translations with a range). */
@@ -50,6 +53,8 @@ export interface TranscriptSegment {
   captionText?: string;
   /** User-locked cue copy keyed by the source word range "w0:w1". */
   cueTexts?: Record<string, string>;
+  /** Selected display-word positions per source cue range; independent of immutable ASR tokens. */
+  cueEmphasis?: Record<string, { text: string; words: number[] }>;
   /** Stable display-cue boundaries encoded as source word ranges "w0:w1". */
   cueLayout?: string[];
   /** Provisional timing derived from an exact script (TTS text) — no ASR has measured it yet. Once
@@ -546,7 +551,10 @@ export function applyProjectSave(
   ctx: { projectId: string },
 ): ProjectSaveApplication | null {
   const known = existing.appliedTransactionIds ?? [];
-  const replay = replayDocumentTransactions(existing.document, p.transactions ?? [], ctx, new Set(known));
+  // Replay onto the document as every client loads it (load-time repairs and migrations, e.g. spine
+  // transitions moved onto their lane): a client's ops were computed against that shape, not the raw row.
+  const base = parseEditorDocumentV2(existing.document) ?? existing.document;
+  const replay = replayDocumentTransactions(base, p.transactions ?? [], ctx, new Set(known));
   const merged = mergeSaveIntoRow({ ...existing, document: replay.document }, p);
   if (!merged) return null;
   const appliedTransactionIds = [...known, ...replay.applied].slice(-APPLIED_TRANSACTIONS_CAP);

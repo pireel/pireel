@@ -87,11 +87,16 @@ function SpeechAssetBody({ output }: { output: unknown }) {
 }
 
 /** Normalize tool-call status. */
+function visibleToolError(error: string | undefined): string {
+  if (!error || /(?:\b[a-z]+_[a-z_]+\b|Unknown operation|raw required|[{}]|\b(?:clipId|atFrame|durationFrames|yPct)\b)/i.test(error)) return t('chatGen.failed');
+  return error.slice(0, 80);
+}
+
 export function toolStatus(part: ToolPartLike): { kind: 'running' | 'done' | 'error'; text: string } {
   const out = part.output as StudioToolResult | undefined;
-  if (part.state === 'output-error') return { kind: 'error', text: part.errorText?.slice(0, 40) || t('chatGen.failed') };
+  if (part.state === 'output-error') return { kind: 'error', text: visibleToolError(part.errorText) };
   if (part.state === 'output-available') {
-    if (out && out.ok === false) return { kind: 'error', text: out.error?.slice(0, 40) || t('chatGen.failed') };
+    if (out && out.ok === false) return { kind: 'error', text: visibleToolError(out.error) };
     return { kind: 'done', text: out?.summary?.slice(0, 60) || t('chatGen.done') };
   }
   return { kind: 'running', text: t('chatGen.running') };
@@ -113,7 +118,7 @@ function ToolBadge({ def, part, children, quiet }: { def: StudioToolDef; part: T
   // Same card language as ToolCard: header row (icon chip + name + status icon), result text on its own full-width body row (wraps).
   // quiet: the done result already renders its own body (an asset grid, an icon set) — suppress the redundant summary line, same as ToolCard. Running progress and errors always show.
   return (
-    <div className="border-line bg-panel-2 w-full overflow-hidden rounded-md border">
+    <div className="border-line/60 w-full overflow-hidden rounded-md border">
       <div className="flex items-center gap-2 px-2.5 py-1.5">
         <span className="text-accent grid h-5 w-5 shrink-0 place-items-center rounded bg-accent/10 text-[12px]">{def.icon}</span>
         <span className="text-ink-2 shrink-0 text-[12px] font-semibold">{t(def.label)}</span>
@@ -178,7 +183,7 @@ function ToolCard({ def, part, children, quiet }: { def: StudioToolDef; part: To
   }
 
   return (
-    <div className="border-line bg-panel-2 w-full overflow-hidden rounded-md border">
+    <div className="border-line/60 w-full overflow-hidden rounded-md border">
       <div className="flex items-center gap-2 px-2.5 py-1.5">
         <span className="text-accent grid h-5 w-5 shrink-0 place-items-center rounded bg-accent/10 text-[12px]">{def.icon}</span>
         <span className="text-ink-2 shrink-0 text-[12px] font-semibold">{t(def.label)}</span>

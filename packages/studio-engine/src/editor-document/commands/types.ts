@@ -1,3 +1,6 @@
+import type { PlaybookSnapshot } from '../../brand-playbook';
+import type { TimelineTransition } from '../types';
+import type { TransitionPatch } from './transitions';
 import type {
   EditorDocumentV2,
   EditorMediaAsset,
@@ -123,6 +126,10 @@ export type EditorCommand =
   | { type: 'canvas.patch'; patch: CanvasPatch }
   | { type: 'appearance.patch'; patch: AppearancePatch }
   | { type: 'processing.patch'; patch: ProcessingPatch }
+  | { type: 'handoff.patch'; id: string; status: 'open' | 'confirmed' | 'changed'; answer?: string }
+  | { type: 'editingSkills.set'; ids: string[] }
+  | { type: 'brand.set'; brand: PlaybookSnapshot | null }
+  | { type: 'skill.set'; skillId: string }
   | { type: 'track.insert'; track: InsertTrackInput; index?: number }
   | { type: 'track.remove'; trackId: TrackId }
   | { type: 'track.patch'; trackId: TrackId; patch: TrackPatch }
@@ -158,6 +165,9 @@ export type EditorCommand =
   }
   | { type: 'narrative.reorder'; clipIds: TimelineClipId[] }
   | { type: 'clips.remove'; trackId: TrackId; clipIds: TimelineClipId[]; includeLinked?: boolean }
+  | { type: 'transitions.insert'; transition: TimelineTransition }
+  | { type: 'transitions.patch'; id: string; patch: TransitionPatch }
+  | { type: 'transitions.remove'; ids: string[] }
   | {
     type: 'clips.insert';
     trackId: TrackId;

@@ -43,10 +43,28 @@ export function loadGsap(): Promise<GsapLike | null> {
   const w = window as unknown as { gsap?: GsapLike };
   if (w.gsap) return Promise.resolve(w.gsap);
   gsapLoad ??= new Promise((resolve) => {
+    // Trust the global, not this tag's events: an in-app navigation can drop the tag from <head>
+    // before it loads (and another loader may define gsap first), which left the promise pending
+    // forever and the stage never mounted — a new project showed nothing until a reload.
+    let settled = false;
     const el = document.createElement('script');
     el.src = '/vendor/gsap.min.js';
-    el.onload = () => resolve((window as unknown as { gsap?: GsapLike }).gsap ?? null);
-    el.onerror = () => resolve(null);
+    const finish = (value: GsapLike | null) => {
+      if (settled) return;
+      settled = true;
+      clearInterval(poll);
+      clearTimeout(limit);
+      if (!value) gsapLoad = null; // a later mount tries again
+      resolve(value);
+    };
+    const poll = setInterval(() => {
+      if (w.gsap) finish(w.gsap);
+      else if (!el.isConnected) document.head.appendChild(el);
+    }, 50);
+    // Without GSAP the document still mounts (static, no animation) rather than staying blank.
+    const limit = setTimeout(() => finish(w.gsap ?? null), 15000);
+    el.onload = () => finish(w.gsap ?? null);
+    el.onerror = () => finish(null);
     document.head.appendChild(el);
   });
   return gsapLoad;
@@ -117,7 +135,11 @@ export class PreviewStageHost {
     this.element = element ?? document.createElement('div');
     this.element.tabIndex = -1;
     this.element.dataset.hfStage = '1';
-    this.shadow = this.element.attachShadow({ mode: 'open' });
+    // A host may be recreated on the same element (a React ref re-run, a remount in development):
+    // an element takes one shadow root, so reuse and clear it rather than attaching again.
+    const existing = this.element.shadowRoot;
+    if (existing) existing.replaceChildren();
+    this.shadow = existing ?? this.element.attachShadow({ mode: 'open' });
     this.contentWindow = {
       postMessage: (message) => this.deliver(message),
     };
@@ -125,6 +147,11 @@ export class PreviewStageHost {
 
   get srcdoc(): string {
     return this.srcdocValue;
+  }
+
+  /** True once the assigned document is in the stage (mounting is asynchronous). */
+  get mounted(): boolean {
+    return this.body !== null;
   }
 
   /** Assigning a document mounts it (asynchronously, like an iframe); an empty string clears the stage. */

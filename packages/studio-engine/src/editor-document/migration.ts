@@ -1,4 +1,5 @@
 import { audioClipDefaults } from '../audio-tracks';
+import { withMigratedTransitions } from './transitions';
 import type { Block, Composition, VideoShot } from '../composition-core';
 import type { LocalAssetIndexEntry, ProjectCloudMediaIndex, TranscriptSegment } from '../project-dto';
 import { createMigrationAssetRegistry } from './asset-registry';
@@ -373,8 +374,6 @@ export function migrateLegacyProjectToV2(input: LegacyProjectForMigration): Edit
       theme: comp.theme ?? 'general',
       ...(comp.palette ? { palette: comp.palette } : {}),
       ...(comp.captionStyle ? { captionStyle: comp.captionStyle } : {}),
-      ...(comp.frameId ? { frameId: comp.frameId } : {}),
-      ...(comp.customVisualStyle ? { customVisualStyle: comp.customVisualStyle } : {}),
       ...(comp.personFx ? { personFx: comp.personFx } : {}),
     },
     assets,
@@ -386,10 +385,15 @@ export function migrateLegacyProjectToV2(input: LegacyProjectForMigration): Edit
       scenes: [],
       ...(context.plan !== undefined ? { plan: context.plan } : {}),
     },
-    ...(comp.audioDenoise ? { processing: { audioDenoise: comp.audioDenoise } } : {}),
+    ...(comp.audioDenoise || comp.audioLoudness ? { processing: { ...(comp.audioDenoise ? { audioDenoise: comp.audioDenoise } : {}), ...(comp.audioLoudness ? { loudness: comp.audioLoudness } : {}) } } : {}),
   };
 
-  return { document, issues: [...issues, ...validateEditorDocumentV2(document)] };
+  // Transition lane: the composition's own list, plus older spine-attached ones migrated onto it.
+  const laned = comp.transitions?.length
+    ? { ...document, timeline: { ...document.timeline, transitions: comp.transitions.map((transition) => ({ id: transition.id, startFrame: Math.round(transition.startSec * fps), durationFrames: Math.max(1, Math.round(transition.durationSec * fps)), effect: transition.effect, ...(transition.direction ? { direction: transition.direction } : {}) })) } }
+    : document;
+  const migrated = withMigratedTransitions(laned);
+  return { document: migrated, issues: [...issues, ...validateEditorDocumentV2(migrated)] };
 }
 
 function addLibraryAssets(context: LegacyStudioProjectContext, registry: ReturnType<typeof createMigrationAssetRegistry>): void {

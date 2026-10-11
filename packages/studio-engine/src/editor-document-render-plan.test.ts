@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assembleHtml, cutTransitions, emptyComposition, videoFrameTimelineBody, videoShotTimelineSpans, type VideoShot } from './composition';
+import { assembleHtml, transitionWindows, emptyComposition, videoFrameTimelineBody, videoShotTimelineSpans, type VideoShot } from './composition';
 import { editorDocumentRenderPlan, emptyEditorDocumentV2 } from './editor-document';
 
 describe('EditorDocumentV2 render plan', () => {
@@ -74,7 +74,7 @@ describe('EditorDocumentV2 render plan', () => {
     expect(plan.durationSec).toBe(3);
   });
 
-  it('places framing at native starts and forbids transitions across a real gap', () => {
+  it('places framing at native starts and hands transitions over only at a real cut', () => {
     const shots: VideoShot[] = [
       { id: 'a', srcStart: 0, srcEnd: 2, treatment: 'full' },
       { id: 'b', srcStart: 2, srcEnd: 4, treatment: 'punch-in', transIn: { prevId: 'a', effect: 'fade', durationSec: 0.5 } },
@@ -84,8 +84,9 @@ describe('EditorDocumentV2 render plan', () => {
       { shotId: 'b', startSec: 4, endSec: 6 },
     ];
     expect(videoFrameTimelineBody(shots, placements)).toMatch(/\), 4\);/);
-    expect(cutTransitions(shots, placements)).toEqual([]);
-    expect(cutTransitions(shots, [placements[0]!, { ...placements[1]!, startSec: 3, endSec: 5 }])).toMatchObject([{ cut: 3, shotId: 'b' }]);
+    const lane = [{ id: 'tr', startSec: 2.75, durationSec: 0.5, effect: 'fade' as const }];
+    expect(transitionWindows(lane, shots, placements)).toMatchObject([{ start: 2.75, end: 3.25, cut: null }]);
+    expect(transitionWindows(lane, shots, [placements[0]!, { ...placements[1]!, startSec: 3, endSec: 5 }])).toMatchObject([{ cut: 3 }]);
   });
 
   it('places the primary video box independently from source framing', () => {

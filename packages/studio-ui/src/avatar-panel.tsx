@@ -1,6 +1,9 @@
 'use client';
 
-import { ArrowUp, Check, Loader2, Mic2, Pause, Play, Search, X } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@pireel/ui/select';
+import { VoiceCard, type VoiceAsset } from './voice-card';
+
+import { ArrowUp, Loader2, Mic2, Search, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { confirm } from '@pireel/ui/confirm';
 import {
@@ -15,22 +18,6 @@ import { AssetCardMoreMenu, RESPONSIVE_ASSET_CARD_GRID } from './asset-card';
 import { t } from './i18n';
 import { MembershipFeatureIcon } from './membership-feature-icon';
 
-type VoiceAsset = {
-  id: string;
-  label: string;
-  source: 'system' | 'cloned' | 'designed';
-  language: string;
-  languages?: string[];
-  status: 'ready' | 'deploying' | 'failed';
-  selected: boolean;
-  description?: string;
-  sampleUrl?: string;
-  avatarUrl?: string;
-  gender?: 'female' | 'male';
-  age?: number;
-  scene?: string;
-  catalog?: 'system' | 'base';
-};
 
 type UploadTicket = { key: string; url: string; content_type: string; cache_control: string };
 
@@ -91,40 +78,9 @@ function audioDuration(file: File): Promise<number> {
   });
 }
 
-function VoiceGlyph({ voice }: { voice: VoiceAsset }) {
-  if (voice.avatarUrl) {
-    return <img src={voice.avatarUrl} alt="" className="size-9 shrink-0 rounded object-cover" loading="lazy" />;
-  }
-  return (
-    <span
-      className={`relative flex size-9 shrink-0 items-end justify-center gap-[2px] overflow-hidden rounded pb-2 ${
-        voice.selected ? 'bg-ink text-panel' : voice.source !== 'system' ? 'bg-amber-100 text-amber-700' : voice.gender === 'male' ? 'bg-sky-100 text-sky-700' : voice.gender === 'female' ? 'bg-rose-100 text-rose-700' : 'bg-violet-100 text-violet-700'
-      }`}
-    >
-      {[8, 15, 11, 18, 9].map((height, i) => (
-        <i key={i} className="w-[2px] rounded-full bg-current opacity-80" style={{ height }} />
-      ))}
-    </span>
-  );
-}
-
-function SampleButton({ loading, playing, onToggle }: { loading: boolean; playing: boolean; onToggle: () => void }) {
-  const label = loading ? t('workbench.voiceLoadingSample') : t('workbench.voicePlaySample');
-  return (
-    <button
-      type="button"
-      onClick={(event) => { event.stopPropagation(); onToggle(); }}
-      className={`absolute bottom-7 right-1 z-10 flex h-5 w-5 items-center justify-center rounded text-white transition-colors ${playing ? 'bg-accent' : 'bg-black/55 hover:bg-black/70'}`}
-      title={label}
-      aria-label={label}
-      aria-busy={loading}
-    >
-      {loading ? <Loader2 size={11} className="animate-spin" /> : playing ? <Pause size={10} /> : <Play size={10} fill="currentColor" />}
-    </button>
-  );
-}
-
-export function AvatarPanel() {
+export function AvatarPanel({ mode = 'library', initialLanguage = 'zh', onCreated, onBusyChange }: {
+  mode?: 'library' | 'clone'; initialLanguage?: string; onCreated?: (voice: VoiceAsset) => void; onBusyChange?: (busy: boolean) => void;
+} = {}) {
   const [voices, setVoices] = useState<VoiceAsset[]>(() => voicesSnapshot?.voices ?? []);
   const [loading, setLoading] = useState(!voicesSnapshot);
   const [error, setError] = useState('');
@@ -138,7 +94,7 @@ export function AvatarPanel() {
     },
   );
   const [composerText, setComposerText] = useState('');
-  const [language, setLanguage] = useState('zh');
+  const [language, setLanguage] = useState((CUSTOM_VOICE_LANGUAGE_CODES as readonly string[]).includes(initialLanguage) ? initialLanguage : 'en');
   const [consent, setConsent] = useState(false);
   const [preprocess, setPreprocess] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -149,6 +105,7 @@ export function AvatarPanel() {
   const [loadingVoiceId, setLoadingVoiceId] = useState<string | null>(null);
   const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => { onBusyChange?.(busy); }, [busy, onBusyChange]);
 
   const load = useCallback(async (refresh = true) => {
     try {
@@ -363,7 +320,7 @@ export function AvatarPanel() {
 
   const createVoice = async () => {
     const text = composerText.trim();
-    if (busy) return;
+    if (busy || (mode === 'clone' && !file)) return;
     if (!customVoiceAccess.allowed) return;
     if (file && (!consent || duration == null || duration < 10 || duration > 300 || file.size > 20 * 1024 * 1024)) return;
     if (!file && !text) return;
@@ -390,7 +347,7 @@ export function AvatarPanel() {
         const registerRes = await fetch('/api/studio/media', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ action: 'register-audio-asset', key: ticket.key, label: fileLabel(file, t('workbench.voiceCloned')) }),
+          body: JSON.stringify({ action: 'register-audio-asset', key: ticket.key, label: fileLabel(file, t('workbench.voiceCloned')), role: 'voice' }),
         });
         const registered = (await registerRes.json().catch(() => ({}))) as { id?: string; error?: string };
         if (!registerRes.ok || !registered.id) throw new Error(registered.error || t('workbench.voiceUploadFailed'));
@@ -409,6 +366,7 @@ export function AvatarPanel() {
       setConsent(false);
       setPreprocess(false);
       await load(true);
+      onCreated?.(created.voice);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t('workbench.voiceCreateFailed'));
     } finally {
@@ -422,53 +380,24 @@ export function AvatarPanel() {
     customVoiceAccess.allowed && !busy && (
       file
         ? consent && duration != null && duration >= 10 && duration <= 300 && file.size <= 20 * 1024 * 1024
-        : composerText.trim()
+        : mode !== 'clone' && composerText.trim()
     ),
   );
 
   const voiceCards = (items: VoiceAsset[]) => items.map((voice) => (
-    <div
-      key={voice.id}
-      className={`bg-panel-2/55 hover:bg-panel-2 group relative w-full overflow-hidden rounded-md transition-colors ${voice.selected ? 'ring-accent ring-1' : ''}`}
-    >
-      <button
-        type="button"
-        disabled={voice.status !== 'ready' || busy}
-        onClick={() => void selectVoice(voice)}
-        title={`${voice.label} · ${voice.description || t('workbench.voiceReadyShort')}`}
-        className="block w-full text-left disabled:cursor-default disabled:opacity-60"
-      >
-        <div className="bg-panel-2 relative flex aspect-video w-full flex-col items-center justify-center gap-1 overflow-hidden">
-          {voice.avatarUrl ? <img src={voice.avatarUrl} alt="" className="absolute inset-0 h-full w-full object-cover" loading="lazy" /> : <VoiceGlyph voice={voice} />}
-          {!voice.avatarUrl && (
-            <span className="text-ink-4 max-w-[104px] truncate text-[8.5px]">
-              {voice.status === 'deploying' ? t('workbench.voiceDeployingShort') : voice.status === 'failed' ? t('workbench.voiceFailed') : voice.source === 'designed' ? t('workbench.voiceDesignedShort') : voice.source === 'cloned' ? t('workbench.voiceClonedShort') : voice.description || t('workbench.voiceReadyShort')}
-            </span>
-          )}
-          <span className={`absolute top-1 rounded bg-black/55 px-1 py-0.5 text-[8px] text-white ${voice.source === 'system' ? 'right-1' : 'right-7'}`}>
-            {(voice.languages ?? [voice.language]).map((item) => item === 'zh' ? '中' : item === 'yue' ? '粤' : item.toUpperCase()).join('/')}
-          </span>
-          {voice.selected && <span className="bg-accent text-accent-foreground absolute bottom-1 left-1 flex size-4 items-center justify-center rounded"><Check size={9} strokeWidth={3} /></span>}
-        </div>
-        <div className={`text-ink-3 h-6 truncate px-1.5 py-1 text-[10px] leading-4 ${voice.selected ? 'font-medium text-ink' : ''}`}>{voice.label}</div>
-      </button>
-      {voice.sampleUrl && <SampleButton loading={loadingVoiceId === voice.id} playing={playingVoiceId === voice.id} onToggle={() => togglePreview(voice)} />}
-      {voice.source !== 'system' && (
-        <AssetCardMoreMenu
-          onRename={() => beginRename(voice)}
-          onDelete={() => void removeVoice(voice)}
-          optionsLabel={t('workbench.voiceOptions')}
-          renameLabel={t('workbench.voiceRename')}
-          deleteLabel={t('workbench.voiceDelete')}
-        />
-      )}
-      {voice.status === 'deploying' && <span className="absolute inset-x-2 bottom-0 h-px overflow-hidden rounded-full bg-black/5"><i className="block h-full w-1/2 animate-pulse bg-amber-500" /></span>}
-    </div>
+    <VoiceCard key={voice.id} voice={voice} disabled={busy}
+      loading={loadingVoiceId === voice.id} playing={playingVoiceId === voice.id}
+      onSelect={() => void selectVoice(voice)} onPreview={() => togglePreview(voice)}
+      actions={voice.source !== 'system' ? <AssetCardMoreMenu
+        onRename={() => beginRename(voice)} onDelete={() => void removeVoice(voice)}
+        optionsLabel={t('workbench.voiceOptions')} renameLabel={t('workbench.voiceRename')} deleteLabel={t('workbench.voiceDelete')}
+      /> : undefined}
+    />
   ));
 
   return (
     <div className="bg-canvas flex h-full min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex h-9 shrink-0 items-center gap-1.5 px-2.5">
+      {mode === 'library' && <><div className="flex h-9 shrink-0 items-center gap-1.5 px-2.5">
         <select
           value={languageFilter}
           onChange={(event) => setLanguageFilter(event.target.value)}
@@ -516,8 +445,18 @@ export function AvatarPanel() {
         )}
       </div>
 
-      <div className="shrink-0 px-3 pb-3 pt-1">
-        <div className="border-line bg-panel-2 focus-within:border-ink-4 rounded-md border transition-colors">
+      </>}
+      {mode === 'clone' && error && <p role="alert" className="text-ink mb-3 text-xs">{error}</p>}
+      <fieldset disabled={busy} className={mode === 'clone' ? 'min-w-0' : 'min-w-0 shrink-0 px-3 pb-3 pt-1'}>
+        {mode === 'clone' && !file && <label className="border-line hover:bg-panel-2 text-ink flex cursor-pointer flex-col items-center gap-3 rounded-md border border-dashed px-5 py-8 text-sm">
+          <Mic2 size={24} className="text-ink-3" />
+          {t('workbench.voiceAttachSample')}
+          <span className="text-ink-3 text-xs">MP3 / M4A / WAV · 10s–5min · 20 MB</span>
+          <input type="file" aria-label={t('workbench.voiceAttachSample')} disabled={busy || loading} accept="audio/mpeg,audio/mp4,audio/wav,.mp3,.m4a,.wav" className="sr-only" onChange={(event) => { void chooseFile(event.target.files?.[0] ?? null); event.target.value = ''; }} />
+        </label>}
+        {mode === 'clone' && !loading && !customVoiceAccess.allowed && <div className="text-ink-3 mt-3 flex items-center gap-2 text-xs">{t('workbench.membershipFeature')}<MembershipFeatureIcon /></div>}
+
+        <div className={`bg-panel-2 rounded-md transition-colors ${mode === 'clone' ? 'mt-3' : 'border-line focus-within:border-ink-4 border'}`}>
           {file && (
             <div className="px-3 pt-2.5">
               <div className="border-line bg-panel flex items-center gap-1.5 rounded-md border px-2 py-1.5">
@@ -536,7 +475,7 @@ export function AvatarPanel() {
               </label>
             </div>
           )}
-          {!file && (
+          {!file && mode === 'library' && (
             <textarea
               value={composerText}
               onChange={(event) => setComposerText(event.target.value)}
@@ -558,27 +497,28 @@ export function AvatarPanel() {
               <Mic2 size={14} />
               <input type="file" accept="audio/mpeg,audio/mp4,audio/wav,.mp3,.m4a,.wav" className="hidden" onChange={(event) => { void chooseFile(event.target.files?.[0] ?? null); event.target.value = ''; }} />
             </label>
-            <select value={language} onChange={(event) => setLanguage(event.target.value)} className="border-line bg-panel-2 text-ink-2 focus:border-ink-4 shrink-0 rounded-md border py-1 pl-2 pr-1 text-[11px] outline-none">
-              {CUSTOM_VOICE_LANGUAGE_CODES.map((code) => <option key={code} value={code}>{languageLabel(code)}</option>)}
-            </select>
+            <Select value={language} onValueChange={setLanguage} disabled={busy}>
+              <SelectTrigger aria-label={t('workbench.voiceSampleLanguage')} className={`bg-panel-2 text-ink-2 h-7 w-28 text-[11px] shadow-none ${mode === 'clone' ? 'border-0' : 'border-line'}`}><SelectValue /></SelectTrigger>
+              <SelectContent>{CUSTOM_VOICE_LANGUAGE_CODES.map((code) => <SelectItem key={code} value={code}>{languageLabel(code)}</SelectItem>)}</SelectContent>
+            </Select>
             <MembershipFeatureIcon className="ml-1" />
             <div className="flex-1" />
             {customVoiceAccess.allowed && (
-              <span className="text-ink-4 truncate text-[10px]" title={file
+              <span className="text-ink-4 truncate text-[10px]" title={file || mode === 'clone'
                 ? t('workbench.voiceCloneCost', { credits: customVoiceAccess.cloneCredits ?? '—' })
                 : t('workbench.voiceDesignCost', { credits: customVoiceAccess.designCredits ?? '—' })}
               >
-                {file
+                {file || mode === 'clone'
                   ? t('workbench.voiceCloneCost', { credits: customVoiceAccess.cloneCredits ?? '—' })
                   : t('workbench.voiceDesignCost', { credits: customVoiceAccess.designCredits ?? '—' })}
               </span>
             )}
-            <button type="button" onClick={() => void createVoice()} disabled={!canCreate} className="bg-ink text-bg flex size-7 shrink-0 items-center justify-center rounded-md transition-opacity hover:opacity-85 disabled:pointer-events-none disabled:opacity-25" title={file ? t('workbench.voiceStartClone') : t('workbench.voiceStartDesign')}>
-              {busy ? <Loader2 size={13} className="animate-spin" /> : <ArrowUp size={15} strokeWidth={2.5} />}
+            <button type="button" onClick={() => void createVoice()} disabled={!canCreate} className={`bg-ink text-bg flex h-7 shrink-0 items-center justify-center rounded-md transition-opacity hover:opacity-85 disabled:pointer-events-none disabled:opacity-25 ${mode === 'clone' ? 'px-3 text-xs' : 'w-7'}`} title={file || mode === 'clone' ? t('workbench.voiceStartClone') : t('workbench.voiceStartDesign')}>
+              {busy ? <Loader2 size={13} className="animate-spin" /> : mode === 'clone' ? t('workbench.voiceStartClone') : <ArrowUp size={15} strokeWidth={2.5} />}
             </button>
           </div>
         </div>
-      </div>
+      </fieldset>
       <Dialog
         open={Boolean(renaming)}
         onOpenChange={(open) => {

@@ -89,6 +89,18 @@ export function overlayBlocks(document: EditorDocumentV2, options?: LegacyProjec
   )));
 }
 
+/** Times when footage fills exactly the top or bottom half of the frame (a top/bottom split screen). */
+function splitSeamWindows(document: EditorDocumentV2): [number, number][] {
+  const fps = document.canvas.fps; const near = (a: number, b: number) => Math.abs(a - b) < .01;
+  return document.timeline.tracks.flatMap(track => track.hidden ? [] : track.clips.flatMap(clip => {
+    if (clip.kind !== 'media' || !clip.enabled || !clip.box) return [];
+    const { x, y, w, h } = clip.box;
+    if (!near(x, 0) || !near(w, 1) || !near(h, .5) || !(near(y, 0) || near(y, .5))) return [];
+    const start = timelineFramesToSeconds(clip.startFrame, fps);
+    return [[start, start + timelineFramesToSeconds(clip.durationFrames, fps)] as [number, number]];
+  }));
+}
+
 /** Temporary V2 -> V1 read adapter. It intentionally cannot represent visual gaps or overlapping narrative clips. */
 export function projectV2ToLegacyComposition(document: EditorDocumentV2, options?: LegacyProjectionOptions): Composition {
   document = normalizePeerNarrativeSources(document);
@@ -96,10 +108,14 @@ export function projectV2ToLegacyComposition(document: EditorDocumentV2, options
   const shots = narrativeShotsOf(document, options);
   const blocks: Block[] = [];
   const audioTracks: AudioClip[] = [];
+  const seams = splitSeamWindows(document);
   for (const track of document.timeline.tracks) {
     for (const clip of track.clips) {
       if (clip.kind === 'graphic' || clip.kind === 'caption') {
-        blocks.push(projectOverlayBlock(document, track, clip, options));
+        const block = projectOverlayBlock(document, track, clip, options);
+        // Over a top/bottom split, captions sit on the seam between the halves, off both pictures.
+        const middle = block.startSec + block.durationSec / 2;
+        blocks.push(clip.kind === 'caption' && seams.some(([from, to]) => middle >= from && middle < to) ? { ...block, slots: { ...block.slots, splitSeam: .5 } } : block);
       } else if (clip.kind === 'audio') {
         const asset = document.assets[clip.assetId];
         const src = asset && projectedAssetUrl(asset, options);
@@ -136,10 +152,15 @@ export function projectV2ToLegacyComposition(document: EditorDocumentV2, options
     shots,
     ...(document.appearance.palette ? { palette: document.appearance.palette } : {}),
     ...(document.appearance.captionStyle ? { captionStyle: document.appearance.captionStyle } : {}),
-    ...(document.appearance.frameId ? { frameId: document.appearance.frameId } : {}),
-    ...(document.appearance.customVisualStyle ? { customVisualStyle: document.appearance.customVisualStyle } : {}),
+    ...(document.appearance.look ? { look: document.appearance.look } : {}),
+    ...(document.semantics.handoff?.length ? { handoff: document.semantics.handoff } : {}),
+    ...(document.semantics.editingSkills ? { editingSkills: document.semantics.editingSkills } : {}),
+    ...(document.semantics.brand !== undefined ? { brand: document.semantics.brand } : {}),
+    ...(document.semantics.skillId !== undefined ? { skillId: document.semantics.skillId } : {}),
     ...(document.appearance.personFx ? { personFx: document.appearance.personFx } : {}),
     ...(audioTracks.length ? { audioTracks } : {}),
     ...(document.processing?.audioDenoise ? { audioDenoise: document.processing.audioDenoise } : {}),
+    ...(document.processing?.loudness ? { audioLoudness: document.processing.loudness } : {}),
+    ...(document.timeline.transitions?.length ? { transitions: document.timeline.transitions.map((transition) => ({ id: transition.id, startSec: transition.startFrame / document.canvas.fps, durationSec: transition.durationFrames / document.canvas.fps, effect: transition.effect, ...(transition.direction ? { direction: transition.direction } : {}) })) } : {}),
   };
 }

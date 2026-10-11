@@ -1,4 +1,7 @@
 export const WORKBENCH_EN: Record<string, string> = {
+  "workbench.chat": "Chat",
+  "workbench.editingMode": "Editing mode",
+  "workbench.backToProjects": "Back to projects",
   "displayText.title": "Text",
   "displayText.add": "Add text",
   "displayText.addAtPlayhead": "Add text at playhead",
@@ -71,14 +74,6 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.aiEditFailed": "AI edit failed",
   "workbench.aiGenerate": "AI generate",
   "workbench.analysisDebug": "Analysis (debug)",
-  "workbench.appliedTheme":
-    'Applied the "{title}" visual style. Generated content now follows this design',
-  "workbench.appliedThemeAlt":
-    'Applied the "{title}" visual style. Generated content now follows this design',
-  "workbench.appliedThemePersonFx":
-    'Applied the "{title}" visual style. The subject gets a sticker outline and generated content follows this design',
-  "workbench.visualStyleDisabled":
-    "Visual styling is off. Future generations will not carry a Frame or automatic visual settings",
   "workbench.assembledHtmlBuiltFrom":
     "assembled HTML (built from blocks, read-only)",
   "workbench.assetMotion": "Asset motion",
@@ -152,6 +147,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.voiceSampleTypeError": "Use an MP3, M4A, or WAV file",
   "workbench.voiceUploadFailed": "Voice sample upload failed",
   "workbench.voiceSearchPlaceholder": "Search names, traits, or scenes",
+  "workbench.voiceSampleLanguage": "Sample language",
   "workbench.voiceLanguageAll": "All",
   "workbench.voiceOfficialPreview": "Official previews",
   "workbench.voiceOfficial": "Official",
@@ -227,6 +223,8 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.localVideoUseTrack":
     "Drop local videos on the timeline — stage picture-in-picture does not support local video files yet",
   "workbench.ratioCustom": "Custom",
+  "workbench.collapseTimeline": "Collapse timeline",
+  "workbench.expandTimeline": "Expand timeline",
   "workbench.ratioFollowSource": "Auto",
   "workbench.followSourceUnavailable": "Add a video clip with known dimensions first",
   "workbench.couldNotGenerateCaptions":
@@ -286,8 +284,6 @@ export const WORKBENCH_EN: Record<string, string> = {
     "An element is generating — redo after it finishes",
   "workbench.elementGeneratingUndoAfter":
     "An element is generating — undo after it finishes",
-  "workbench.elementGeneratingThemeAfter":
-    "Motion Graphics are still generating. Switch the style after they finish.",
   "workbench.elementInserted": "Element inserted",
   "workbench.elementNoFillableText": "This element has no fillable text slots",
   "workbench.elementNotFound": "Element not found",
@@ -387,6 +383,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.generatedBlockFailedChecks":
     "Generated block failed checks: {message}",
   "workbench.generatedLangTranslations": "Generated {lang} translations",
+  "workbench.translationPartial": "Generated {lang} translations; {n} sentence(s) untranslated, try translating again",
   "workbench.generating": "Generating",
   "workbench.geometryPass": "Geometry pass: ",
   "workbench.geometryPassPct": "Geometry pass {pct}%",
@@ -426,6 +423,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.editableProperties": "Properties",
   "workbench.componentHeaderCustom": "Custom component",
   "workbench.componentHeaderKit": "Preset component",
+  "workbench.componentHeaderLook": "Video look · {piece}",
   "workbench.resetProp": "Reset to default",
   "workbench.propsNoManifest": "This component declares no editable properties",
   "workbench.propsUnknownKeys": "Unknown properties: {keys}; declared: {declared}",
@@ -439,6 +437,8 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.propsAddRow": "Add row",
   "workbench.propsLayout": "Layout",
   "workbench.propsTiming": "Timing",
+  "workbench.propsMotionSpeed": "Animation speed",
+  "workbench.propsMotionDelay": "Animation delay",
   "workbench.propsAppearance": "Appearance",
   "workbench.propsName": "Name",
   "workbench.propsNameHint": "Name shown on the timeline",
@@ -530,8 +530,6 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.noRemovableDeadAir":
     "No removable narration pauses remain on the timeline with the current detection settings",
   "workbench.noSuchCaptionPreset": "No such caption preset: {preset}",
-  "workbench.noSuchFrameId":
-    "No such frame: {id} (see <frame_catalog> for ids)",
   "workbench.nothingRedo": "Nothing to redo",
   "workbench.nothingSetGiveLeast":
     "Nothing to set: give at least one of preset / yPct / scale",
@@ -662,7 +660,6 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.syncFailedTryAgain": "Sync failed — try again later",
   "workbench.tellChatHowChange": "Tell the chat how to change this element",
   "workbench.themePanel": "Visual style panel",
-  "workbench.themes": "Visual styles",
   "workbench.thereNoCaptionsRight": "There are no captions right now",
   "workbench.thoseRangesAlreadyOut":
     "Those ranges are already out of the video",
@@ -768,4 +765,15 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.timelineCompactOn":
     "Compact timeline is on. Shorter tracks leave more room for the canvas.",
   "workbench.timelineCompactOff": "Switch to a compact timeline with shorter tracks.",
+  "workbench.transitionsTab": "Transitions",
+  "workbench.transitionLane": "Transitions lane",
+  "workbench.noRoomForTransition": "No room for another transition at the playhead",
+  "workbench.propsGroupLayout": "Layout",
+  "workbench.propsGroupContent": "Content",
+  "workbench.propsGroupStyle": "Style",
+  "workbench.propsGroupSurface": "Surface",
+  "workbench.propsGroupMotion": "Motion",
+  "workbench.propsPosition": "Position",
+  "workbench.propsResetStyle": "Reset style",
+  "workbench.propsDragRow": "Drag to reorder",
 };

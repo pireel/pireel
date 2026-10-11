@@ -118,18 +118,16 @@ export function supplementalMediaFramingOnlyChange(
   return changed;
 }
 
-/** Only the theme-mount surface (frameId/custom style/palette) changed: skip the rebuild and hot-patch #root's vars.
+/** Only the palette (or person effects) changed: skip the rebuild and hot-patch #root's vars.
  *  Already-inserted components carry their frozen insertion-time tokens (Block.vars, #id-scoped above
- *  #root), so a theme swap genuinely never restyles them — on this fast path AND on every later rebuild.
+ *  #root), so a palette change never restyles them — on this fast path AND on every later rebuild.
  *  Only the stage background and future generations pick up the new palette. */
 export function themeMountOnlyChange(a: Composition | null, b: Composition): boolean {
   if (!a) return false;
-  if (previewDataEqual(a.palette, b.palette)
-    && previewDataEqual(a.frameId, b.frameId)
-    && previewDataEqual(a.customVisualStyle, b.customVisualStyle)) return false;
+  if (previewDataEqual(a.palette, b.palette)) return false;
   const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof Composition>;
   for (const k of keys) {
-    if (k === 'palette' || k === 'frameId' || k === 'customVisualStyle' || k === 'personFx') continue;
+    if (k === 'palette' || k === 'personFx') continue;
     if (!previewDataEqual(a[k], b[k])) return false;
   }
   return true;
@@ -323,6 +321,7 @@ export function blockPatchableChange(a: Composition | null, b: Composition): Blo
       } else if (PATCH_TIMING.has(k)) p.timing = true;
       else if (PATCH_STYLE.has(k)) p.style = true;
       else if (k === 'templateId') p.replace = true;
+      else if (k === 'motion') p.slots = true; // animation speed/delay lives in the assembled timeline: re-assemble the node
       else if (k === 'slots') {
         // Kit blocks derive HTML from slots.props — content-only re-render (hf:blockHtml);
         // media animation changes only replace the GSAP timeline; any other slots change

@@ -93,7 +93,7 @@ function PresetGrid({
             aria-pressed={selected}
             className={`group relative min-h-[72px] overflow-hidden rounded-md px-2.5 py-2 text-left transition-all ${
               selected
-                ? 'bg-panel-2 ring-accent/60 shadow-sm ring-1'
+                ? 'bg-panel-2/35 ring-accent/60 shadow-sm ring-1'
                 : 'bg-canvas/65 hover:bg-panel-2 hover:shadow-sm'
             }`}
           >
@@ -195,7 +195,7 @@ function GoogleFontOption({ row, selected, loading, onChoose }: { row: GoogleFon
       aria-label={row.f}
       title={row.f}
       onClick={() => onChoose(googleFontFontId(row))}
-      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] ${selected ? 'bg-panel-2 text-ink' : 'text-ink-3 hover:bg-panel-2/70 hover:text-ink'}`}
+      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] ${selected ? 'bg-panel-2/35 text-ink' : 'text-ink-3 hover:bg-panel-2/20 hover:text-ink'}`}
     >
       <span className="min-w-0 flex-1 truncate" style={{ fontFamily: `"${row.f}", sans-serif` }}>{row.f}</span>
       {loading
@@ -283,7 +283,7 @@ export function FontChoiceList({
         aria-label={label}
         title={label}
         onClick={() => onChoose(id)}
-        className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] ${selected ? 'bg-panel-2 text-ink' : 'text-ink-3 hover:bg-panel-2/70 hover:text-ink'}`}
+        className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] ${selected ? 'bg-panel-2/35 text-ink' : 'text-ink-3 hover:bg-panel-2/20 hover:text-ink'}`}
       >
         {preview ? (
           <span className="flex min-w-0 flex-1 items-center gap-2">
@@ -403,6 +403,7 @@ export function FontPicker({
   onChoose,
   onLoadMore,
   sampleText,
+  defaultLabel,
 }: {
   value: DisplayTextFontId;
   localFonts: LocalFontFamilyOption[];
@@ -412,6 +413,8 @@ export function FontPicker({
   /** Text the chosen face will render (its glyph chunks are what the loading state waits for);
    *  defaults to the font's own label. */
   sampleText?: string;
+  /** Trigger wording while nothing is chosen and the face follows something else (e.g. the theme). */
+  defaultLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   // Library id whose glyphs are still downloading after being applied (spinner on the trigger).
@@ -455,11 +458,11 @@ export function FontPicker({
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
-        className="bg-canvas/70 text-ink hover:bg-panel-2 flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-left text-[12px]"
+        className="bg-panel text-ink hover:bg-panel-2/70 flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-left text-[12px] transition-colors"
       >
         <span className="text-ink-4 text-[10px]">Aa</span>
         <span className="min-w-0 flex-1 truncate" style={selectedFamily ? { fontFamily: `"${selectedFamily}", sans-serif` } : undefined}>
-          {fontChoiceLabel(value)}
+          {defaultLabel && value === 'preset' ? defaultLabel : fontChoiceLabel(value)}
         </span>
         <ChevronDown size={12} className={`text-ink-4 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
@@ -655,7 +658,7 @@ export function DisplayTextPanel({ block, onAdd, onPatch, onPreset }: DisplayTex
                         onClick={() => onPatch({ align: value })}
                         aria-label={t(`displayText.align.${value}`)}
                         aria-pressed={active}
-                        className={`rounded p-1.5 ${active ? 'bg-panel-2 text-ink' : 'text-ink-4 hover:text-ink'}`}
+                        className={`rounded p-1.5 ${active ? 'bg-panel-2/35 text-ink' : 'text-ink-4 hover:text-ink'}`}
                       >
                         <Icon size={13} />
                       </button>

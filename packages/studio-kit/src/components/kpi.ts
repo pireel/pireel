@@ -43,10 +43,10 @@ export function renderKpi(id: string, raw: unknown, ctx: RenderCtx): RenderResul
   const cols = p.variant === 'row' ? n : twoByTwo ? 2 : n;
   const cellW = (ctx.box.w - s.pad * 2) / cols;
   const longest = Math.max(...cells.map((c) => c.value.length));
-  const vpx = Math.min(Math.round(s.hero * 0.52), Math.floor((cellW * 0.82) / (longest * (cjk ? 1.02 : 0.6))));
+  const vpx = Math.min(Math.round(s.hero * 0.64), Math.floor((cellW * 0.82) / (longest * (cjk ? 1.02 : 0.6))));
 
   const onCard = p.surface === 'card';
-  const shadow = onCard ? '' : 'text-shadow:0 2px 16px rgb(0 0 0 / 0.35);';
+  const shadow = onCard ? '' : 'text-shadow:var(--sk-ink-shadow, 0 2px 16px rgb(0 0 0 / 0.35));';
   const panel = surfaceCss(p, s); // background / outline / corners are the component's own props
 
   const cellHtml = cells
@@ -67,7 +67,7 @@ export function renderKpi(id: string, raw: unknown, ctx: RenderCtx): RenderResul
 #${id} .cell{display:flex;flex-direction:column;gap:${Math.round(s.gap * 0.35)}px;min-width:0;padding:0 ${Math.round(s.gap * 0.6)}px;border-left:${s.rule - 1}px solid ${onCard ? tk('--sk-line') : 'rgb(255 255 255 / 0.25)'};}
 #${id} .cell:first-child${twoByTwo ? `, #${id} .c2` : ''}{border-left:none;}
 #${id} .lbl{font-size:${s.kicker}px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:${inkOn(p, true)};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;${shadow}}
-#${id} .val{display:flex;align-items:baseline;gap:${Math.round(s.gap * 0.3)}px;font-family:${tk('--sk-font-num')};font-variant-numeric:tabular-nums;font-feature-settings:"tnum";font-weight:800;font-size:${vpx}px;line-height:1.05;white-space:nowrap;${shadow}}
+#${id} .val{display:flex;align-items:baseline;gap:${Math.round(s.gap * 0.3)}px;font-family:${tk('--sk-font-num')};font-variant-numeric:tabular-nums;font-feature-settings:"tnum";font-weight:var(--sk-head-weight, 800);text-transform:var(--sk-head-case, none);font-size:${vpx}px;line-height:1.05;white-space:nowrap;${shadow}}
 #${id} .tr{width:${Math.round(vpx * 0.32)}px;height:${Math.round(vpx * 0.32)}px;align-self:center;clip-path:polygon(50% 12%, 92% 82%, 8% 82%);}
 #${id} .tr.up{background:${tk('--sk-accent')};}
 #${id} .tr.down{background:${tk('--sk-accent-2')};transform:rotate(180deg);}

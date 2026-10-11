@@ -47,7 +47,6 @@ const planInput = {
     sound: 'Continuous voice, source response at proof, sparse punctuation.',
   },
   skillId: 'product-demo',
-  frameId: 'zen-white',
   scenes: [
     {
       id: 'problem', label: 'The problem', startSec: 0, durationSec: 4,

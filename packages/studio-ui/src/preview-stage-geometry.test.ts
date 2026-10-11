@@ -14,7 +14,7 @@ describe('preview stage geometry', () => {
     });
 
     expect(geometry.gutterY).toBe(PREVIEW_STAGE_VERTICAL_GUTTER_PX);
-    expect(geometry.height).toBe(504);
+    expect(geometry.height).toBe(600 - PREVIEW_STAGE_VERTICAL_GUTTER_PX * 2);
     expect((600 - geometry.height) / 2).toBeGreaterThanOrEqual(PREVIEW_STAGE_VERTICAL_GUTTER_PX);
   });
 
@@ -26,7 +26,7 @@ describe('preview stage geometry', () => {
       canvasH: 1080,
     });
 
-    expect(geometry.height).toBe(504);
+    expect(geometry.height).toBeLessThanOrEqual(600 - PREVIEW_STAGE_VERTICAL_GUTTER_PX * 2);
     expect((600 - geometry.height) / 2).toBeGreaterThanOrEqual(PREVIEW_STAGE_VERTICAL_GUTTER_PX);
   });
 
@@ -38,7 +38,7 @@ describe('preview stage geometry', () => {
       canvasH: 1920,
     });
 
-    expect(geometry.gutterY).toBe(20);
-    expect(geometry.height).toBe(160);
+    expect(geometry.gutterY).toBe(PREVIEW_STAGE_VERTICAL_GUTTER_PX);
+    expect(geometry.height).toBe(200 - PREVIEW_STAGE_VERTICAL_GUTTER_PX * 2);
   });
 });

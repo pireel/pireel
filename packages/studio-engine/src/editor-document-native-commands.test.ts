@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { applyEditorCommand, emptyEditorDocumentV2 } from "./editor-document";
-import { DEFAULT_CUSTOM_VISUAL_STYLE } from "./visual-style";
+import {
+  applyEditorCommand,
+  emptyEditorDocumentV2,
+  isEditorDocumentV2,
+  parseEditorDocumentV2,
+} from "./editor-document";
 
 describe("native V2 command surface", () => {
   it("patches and clears appearance/processing without touching tracks", () => {
     const initial = emptyEditorDocumentV2();
     const appearance = applyEditorCommand(initial, {
       type: "appearance.patch",
-      patch: { palette: { accent: "#f00" }, frameId: "editorial" },
+      patch: { palette: { accent: "#f00" } },
     });
     expect(appearance.ok).toBe(true);
     if (!appearance.ok) return;
@@ -26,54 +30,42 @@ describe("native V2 command surface", () => {
     expect(cleared.document.processing).toBeUndefined();
     expect(cleared.document.appearance).toMatchObject({
       palette: { accent: "#f00" },
-      frameId: "editorial",
     });
     expect(cleared.document.timeline.tracks).toBe(initial.timeline.tracks);
   });
 
-  it("persists a user-composed visual style in document appearance", () => {
-    const document = emptyEditorDocumentV2();
-    const result = applyEditorCommand(document, {
-      type: "appearance.patch",
-      patch: {
-        frameId: "custom-visual-style",
-        customVisualStyle: DEFAULT_CUSTOM_VISUAL_STYLE,
-      },
-    });
-    expect(result.ok).toBe(true);
-    if (result.ok)
-      expect(result.document.appearance.customVisualStyle).toEqual(
-        DEFAULT_CUSTOM_VISUAL_STYLE,
-      );
-  });
-
-  it("clears project-level visual direction without deleting timeline content", () => {
+  it("clears project-level palette without deleting timeline content", () => {
     const document = emptyEditorDocumentV2();
     const applied = applyEditorCommand(document, {
       type: "appearance.patch",
-      patch: {
-        frameId: "custom-visual-style",
-        customVisualStyle: DEFAULT_CUSTOM_VISUAL_STYLE,
-        palette: { accent: "#f00" },
-      },
+      patch: { palette: { accent: "#f00" } },
     });
     expect(applied.ok).toBe(true);
     if (!applied.ok) return;
 
     const cleared = applyEditorCommand(applied.document, {
       type: "appearance.patch",
-      patch: {
-        frameId: undefined,
-        customVisualStyle: undefined,
-        palette: undefined,
-      },
+      patch: { palette: undefined },
     });
     expect(cleared.ok).toBe(true);
     if (!cleared.ok) return;
-    expect(cleared.document.appearance).not.toHaveProperty("frameId");
-    expect(cleared.document.appearance).not.toHaveProperty("customVisualStyle");
     expect(cleared.document.appearance).not.toHaveProperty("palette");
     expect(cleared.document.timeline).toBe(document.timeline);
+  });
+
+  it("loads documents saved with a retired theme or visual style without them", () => {
+    const stored = JSON.parse(JSON.stringify(emptyEditorDocumentV2()));
+    stored.appearance = {
+      palette: { accent: "#f00" },
+      frameId: "custom-visual-style",
+      customVisualStyle: { mood: "bold" },
+    };
+    expect(isEditorDocumentV2(stored)).toBe(true);
+    const parsed = parseEditorDocumentV2(stored);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.appearance).toEqual({ palette: { accent: "#f00" } });
+    expect(parsed!.appearance).not.toHaveProperty("frameId");
+    expect(parsed!.appearance).not.toHaveProperty("customVisualStyle");
   });
 
   it("inserts durable narrative and graphic identities through the dispatcher", () => {

@@ -7,6 +7,7 @@
  * component does not require another title switch statement.
  */
 
+import { kitComponents } from '@pireel/studio-engine/kit-templates';
 import { type Block, blockKind, getTemplate } from '@pireel/studio-engine/composition';
 import { t } from './i18n';
 
@@ -92,12 +93,23 @@ function htmlText(html: string): string[] {
   return plain.split(/\s*·\s*/).map(compact).filter((text) => !!usefulText(text));
 }
 
+/** A registered component's words: only its content-group properties (style, surface, layout and
+ *  motion values are settings, not what it says). */
+function kitContentProps(componentId: string, props: unknown): unknown {
+  const schema = (kitComponents as Record<string, { jsonSchema?: { properties?: Record<string, { 'x-group'?: string }> } }>)[componentId]?.jsonSchema?.properties;
+  if (!schema || !props || typeof props !== 'object') return props;
+  return Object.fromEntries(Object.entries(props as Record<string, unknown>).filter(([key]) => schema[key]?.['x-group'] === 'content'));
+}
+
 export function blockContentTitle(block: Block): string | null {
   if (blockKind(block) === 'media') return usefulText(block.label);
   const slots = block.slots as Record<string, unknown>;
   const pieces = block.templateId === 'custom' && typeof slots.innerHtml === 'string'
     ? htmlText(slots.innerHtml)
-    : structuredText(block.templateId.startsWith('kit:') ? slots.props : slots);
+    : structuredText(block.templateId.startsWith('kit:')
+      ? kitContentProps(block.templateId.slice(4), slots.props)
+      // A look instance says what its props say; its other slots are bookkeeping (look id, words).
+      : block.templateId.startsWith('look:') ? slots.props : slots);
   return pieces.length ? shorten(pieces.slice(0, 4).join(' · ')) : null;
 }
 

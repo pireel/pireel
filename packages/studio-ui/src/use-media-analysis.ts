@@ -66,7 +66,7 @@ export function useMediaAnalysis(deps: MediaAnalysisDeps) {
 
   /** Extract transcript: ASR only (lib-cached) + store sentences. Does not lay captions,
    * add graphics, or cut shots. Returns sentences. */
-  function runAsr(report: ((text: string) => void) | undefined, force: boolean): Promise<AsrSegment[]> {
+  function runAsr(report: ((text: string) => void) | undefined, force: boolean, discardEdits = false): Promise<AsrSegment[]> {
     return dedup('asr', async () => {
       const current = documentRef.current;
       // Honor the pinned caption/narration source: with the source pinned to the narration track,
@@ -135,7 +135,7 @@ export function useMediaAnalysis(deps: MediaAnalysisDeps) {
         if (!latest.assets[target.assetId] || !Object.prototype.hasOwnProperty.call(transcripts, target.assetId)) continue;
         landed[target.assetId] = transcripts[target.assetId] as AsrSegment[];
       }
-      const ops: DocumentOp[] = Object.keys(landed).length ? [{ op: 'transcripts.set', input: { transcripts: landed } }] : [];
+      const ops: DocumentOp[] = Object.keys(landed).length ? [{ op: 'transcripts.set', input: { transcripts: landed, ...(discardEdits ? { discardEdits } : {}) } }] : [];
       for (const [assetId, script] of recoveredScripts) {
         const entry = latest.assets[assetId];
         if (entry && !entry.metadata.transcriptText) ops.push({ op: 'assets.patch', input: { assetId, metadata: { transcriptText: script } } });
@@ -160,8 +160,8 @@ export function useMediaAnalysis(deps: MediaAnalysisDeps) {
   }
   /** Re-transcribe the mounted main source even when a cached transcript exists. Used only after
    *  native caption relay proves the stored transcript cannot produce a cue for the current track. */
-  function refreshAsr(report?: (text: string) => void): Promise<AsrSegment[]> {
-    return runAsr(report, true);
+  function refreshAsr(report?: (text: string) => void, opts?: { discardEdits?: boolean }): Promise<AsrSegment[]> {
+    return runAsr(report, true, opts?.discardEdits);
   }
 
   /** Analyze visuals: local frame-by-frame (MediaPipe safe area + VLM). Extrapolate ETA from measured rate for progress. Returns null on failure. */
@@ -195,8 +195,7 @@ export function useMediaAnalysis(deps: MediaAnalysisDeps) {
       visualRef.current = vis;
       setVisual(vis);
       // Attach the palette derived from the background to the composition → assembleHtml injects #root, compose passes it to the LLM (light blend).
-      // Don't override when a frame (frameId) is mounted: a frame is the user's explicitly chosen design system; the visual-derived palette is only a default source
-      if (vis.palette && !documentRef.current.appearance.frameId) {
+      if (vis.palette) {
         commit({ op: 'command', input: { command: { type: 'appearance.patch', patch: { palette: vis.palette } } } }, { origin: 'system', undo: 'none' });
       }
     }

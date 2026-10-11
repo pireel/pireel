@@ -16,26 +16,51 @@
  */
 
 import { components, render as renderKit } from '@pireel/studio-kit';
+export { PROPERTY_GROUPS, groupOf, type PropertyGroup } from '@pireel/studio-kit';
 import { registerTemplate, type Rendered, type Slots } from './composition-core';
+import { displayTextFontCss } from './display-text-presets';
 
 /** Map studio palette tokens onto the kit's theme surface (kit fallbacks used when a token is unset). */
 const TOKEN_BRIDGE =
   '--sk-fg:var(--fg);--sk-muted:var(--muted);--sk-accent:var(--accent);--sk-accent-2:var(--accent-2);' +
   '--sk-panel:var(--panel);--sk-panel-2:var(--panel-2);--sk-line:var(--line);--sk-radius:var(--radius);' +
-  '--sk-shadow:var(--shadow);--sk-font-head:var(--font-head);--sk-font-num:var(--font-num);';
+  '--sk-shadow:var(--shadow);--sk-font-head:var(--font-head);--sk-font-num:var(--font-num);' +
+  // A Frame's typographic voice (palette head-weight / head-case). Unset leaves the kit's own values.
+  '--sk-head-weight:var(--head-weight);--sk-head-case:var(--head-case);';
 
 const px = (v: unknown, fallback: number): number => (typeof v === 'number' && v > 0 ? v : fallback);
 
+/** The shared style group, as the host applies it: token overrides on the component root. */
+function styleOverrides(style: Record<string, unknown>): string {
+  const hex = (v: unknown) => (typeof v === 'string' && /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(v) ? v : '');
+  const accent = hex(style.accent);
+  const ink = hex(style.ink);
+  const face = typeof style.font === 'string' && style.font ? displayTextFontCss(style.font) : null;
+  return (
+    (accent ? `--sk-accent:${accent};` : '') +
+    // One text colour for the whole component: over footage, on a page and on its own panel.
+    (ink ? `--sk-ink:${ink};--sk-fg:${ink};` : '') +
+    (face ? `--sk-font-head:${face.replaceAll('"', "'")};` : '')
+  );
+}
+
 function renderKitBlock(component: string, slots: Slots, blockId: string, durationSec?: number): Rendered {
+  const style = (slots.props && typeof slots.props === 'object' ? slots.props : {}) as Record<string, unknown>;
   const ctx = {
     box: { w: px(slots.boxW, 920), h: px(slots.boxH, 560) },
     canvas: { w: px(slots.canvasW, 1080), h: px(slots.canvasH, 1920) },
     ...(typeof slots.lang === 'string' && slots.lang ? { lang: slots.lang } : {}),
     ...(typeof durationSec === 'number' && durationSec > 0 ? { durationSec } : {}),
+    ...(typeof style.textScale === 'number' && style.textScale !== 1 ? { textScale: style.textScale } : {}),
   };
   const out = renderKit(component, blockId, slots.props, ctx);
+  // Type without a surface: light over moving footage (lifted by a soft shadow), the theme's ink over
+  // a flat page (no shadow — on a light page it only smudges the letters).
+  const ink = slots.backdrop === 'page'
+    ? '--sk-ink:var(--fg);--sk-ink-muted:var(--muted);--sk-ink-shadow:none;'
+    : '--sk-ink:#ffffff;--sk-ink-muted:rgba(255,255,255,0.74);';
   return {
-    innerHtml: `<div class="sk-root" style="position:absolute;inset:0;${TOKEN_BRIDGE}">\n${out.html}\n</div>`,
+    innerHtml: `<div class="sk-root" style="position:absolute;inset:0;${TOKEN_BRIDGE}${ink}${styleOverrides(style)}">\n${out.html}\n</div>`,
     timelineBody: out.timeline,
   };
 }
@@ -59,7 +84,8 @@ export function kitElement(
   box: { w: number; h: number },
   canvas: { w: number; h: number } = { w: 1920, h: 1080 },
 ): Rendered {
-  return renderKitBlock(component, { props, boxW: box.w, boxH: box.h, canvasW: canvas.w, canvasH: canvas.h }, id);
+  // Library previews sit on a light checker, not footage: the theme ink keeps them readable.
+  return renderKitBlock(component, { props, boxW: box.w, boxH: box.h, canvasW: canvas.w, canvasH: canvas.h, backdrop: 'page' }, id);
 }
 
 for (const [cid, def] of Object.entries(components)) {

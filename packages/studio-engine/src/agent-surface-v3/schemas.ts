@@ -1,3 +1,5 @@
+import { CAPTION_ANIMATIONS, CAPTION_ANIMATION_IDS } from '../caption-animations';
+import { DEFAULT_TRANSITION_SEC } from '../editor-document/transitions';
 import { COMPONENT_PROPERTY_MAX_ROWS, COMPONENT_PROPERTY_MAX_FIELDS, COMPONENT_PROPERTY_MAX_TEXT } from '../component-property-input';
 /**
  * Agent surface v3 — tool descriptions and input schemas.
@@ -7,7 +9,7 @@ import { COMPONENT_PROPERTY_MAX_ROWS, COMPONENT_PROPERTY_MAX_FIELDS, COMPONENT_P
  * engine constant so the schema cannot drift from what the editor accepts (`schemas.test.ts` proves it).
  */
 
-import { CAPTION_PRESETS } from '../caption-presets';
+import { CAPTION_LOOK_HINTS, CAPTION_PRESETS } from '../caption-presets';
 import { CUT_TRANSITION_EFFECTS, MAX_TRANSITION_SEC, PLACE_ANCHORS, SHOT_TREATMENTS, ZOOM_PRESETS, ZOOM_SCALE_MAX, ZOOM_SCALE_MIN } from '../composition-core';
 import { DISPLAY_TEXT_ANIMATION_IDS, DISPLAY_TEXT_PRESETS } from '../display-text-presets';
 import { MG_BAKE_ROUTE, MG_RUNTIME_CAPABILITIES } from '../prompts/block-system';
@@ -35,6 +37,8 @@ export const TREATMENT_IDS = SHOT_TREATMENTS.map((entry) => entry.id);
 export const TRANSITION_EFFECT_IDS = [...CUT_TRANSITION_EFFECTS.map((entry) => entry.id), 'none'];
 export const ZOOM_PRESET_IDS = [...ZOOM_PRESETS.map((entry) => entry.id), 'none'];
 export const CAPTION_PRESET_IDS = CAPTION_PRESETS.map((preset) => preset.id);
+const CAPTION_LOOKS = Object.entries(CAPTION_LOOK_HINTS).map(([id, hint]) => `${id} (${hint})`).join(', ');
+const CAPTION_MOTIONS = CAPTION_ANIMATIONS.map((animation) => `${animation.id} (${animation.hint})`).join(', ');
 export const TEXT_PRESET_IDS = DISPLAY_TEXT_PRESETS.map((preset) => preset.id);
 export const TEXT_ANIMATION_IDS = [...DISPLAY_TEXT_ANIMATION_IDS];
 export const CLIP_ROLES = ['primary', 'broll', 'narration', 'music', 'sfx'] as const;
@@ -81,6 +85,8 @@ const CLIP_PROPERTY_FIELD_SCHEMAS: Record<ClipPropertyKey, Schema> = {
   enabled: bool(),
   box: BOX,
   props: arr(obj({ key: str('Property key from component.props.'), value: PROPERTY_VALUE }, ['key', 'value']), { minItems: 1, maxItems: 8, description: 'Graphic clips only: editable properties to set.' }),
+  motion: obj({ speed: num('Animation speed; 1 = as generated.', { min: 0.25, max: 4 }), delaySec: num('Seconds before the animation starts.', { min: 0, max: 30 }) }),
+  texts: arr(obj({ key: str('Text key from component.texts.'), value: str('The new wording, plain text.') }, ['key', 'value']), { minItems: 1, maxItems: 24, description: 'Graphic clips only: on-screen wording to replace, no regeneration.' }),
 };
 const CLIP_PROPERTY_ITEM: Schema = obj({
   clipId: str(),
@@ -91,7 +97,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   /* ------------------------------------------------------------------ state */
   get_state: {
     description:
-      'Read the active output: canvas (width, height, fps), durationFrames, playhead, account (plan, canGenerate, imageGeneration, videoGeneration — credits and an enabled model per kind; check before a paid call), lateReceipts (outcomes of calls that timed out and finished since), the attached frame, every track with its role and clips, the asset inventory, and the outputs list. Clips carry frames:[start,end), source seconds, non-default properties only; linked audio is folded into its visual clip as audio:{clipId,…}; caption tracks appear as one captions object, never as cue clips. Call once per session, then patch your model from mutation deltas; re-read only when a receipt note or an error says the state is stale. window narrows to tracks and a frame range and adds totalClips per truncated track.',
+      'Read the active output: canvas (width, height, fps), durationFrames, playhead, account (plan, canGenerate, imageGeneration, videoGeneration — credits and an enabled model per kind; check before a paid call), lateReceipts (outcomes of calls that timed out and finished since), every track with its role and clips, the asset inventory, and the outputs list. Clips carry frames:[start,end), source seconds, non-default properties only; linked audio is folded into its visual clip as audio:{clipId,…}; caption tracks appear as one captions object, never as cue clips. Call once per session, then patch your model from mutation deltas; re-read only when a receipt note or an error says the state is stale. window narrows to tracks and a frame range and adds totalClips per truncated track.',
     inputSchema: obj({
       window: obj({
         tracks: arr(str(), { description: 'Track ids to include; omit for all.' }),
@@ -158,6 +164,13 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       sceneIds: arr(str(), { description: 'Legacy planned scenes to review.' }),
     }),
   },
+  get_facts: {
+    description:
+      'Measured facts about the active output and its sources, for deciding what goes on screen and where. Free and browser-local (no model calls). Per source: technicals, whether it has likely speech (local voice activity) and its level, transcript coverage (read the words with get_transcript), scenes (between cuts) each with a 3×5 region grid (brightness, busyness = detail vs empty space, colour), and people/face/safe regions. For the output: canvas, the managed caption band rectangle(s), platform UI zones (Douyin, WeChat Channels, Xiaohongshu) in canvas px, and graphics/text already placed. Text burned into the footage is not located here; look at frames for it. Several sources take a while the first time; results are cached.',
+    inputSchema: obj({
+      assetIds: arr(str(), { maxItems: 12, description: 'Sources to measure; default: every source placed on the active output (up to 12).' }),
+    }),
+  },
   get_beat_grid: {
     description:
       'Compute beat times from a known BPM and offset for a music asset (source seconds) or a placed clip (mapped to timeline frames). It does not detect tempo: pass bpm when the asset has none registered. Use the returned times with split_clips and move_clips to cut on beats or downbeats.',
@@ -186,7 +199,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   /* ------------------------------------------------------------------ assets */
   search_assets: {
     description:
-      'Find reusable assets in one explicit scope: mine (this project\'s library — the files the user added to this project; get_state already lists them), cloud (the account\'s uploads and generations across all projects), official (curated stickers, music and sound), all (only for a cross-library request), or stock (online media with author and licence: Wikimedia Commons always, Pexels/Pixabay when the server has their keys; the receipt names the provider). Omit query to list a scope. Results carry ids you can pass straight to add_clips / insert_clips (they are registered on placement); stock results carry an opaque import payload for register_media. Prefer an existing timing-compatible sound or image here before generating one. Device-local bytes are never readable from the server; use import_media for those.',
+      'Find reusable assets in one explicit scope: mine (this project\'s library — the files the user added to this project; get_state already lists them), cloud (the account\'s uploads and generations across all projects), official (curated stickers, music, and a short-video sound effects pack whose results say when each sound fits), all (only for a cross-library request), or stock (online media with author and licence: Wikimedia Commons always, Pexels/Pixabay when the server has their keys; the receipt names the provider). Omit query to list a scope. Results carry ids you can pass straight to add_clips / insert_clips (they are registered on placement); stock results carry an opaque import payload for register_media. Prefer an existing timing-compatible sound or image here before generating one. Device-local bytes are never readable from the server; use import_media for those.',
     inputSchema: obj({
       scope: enumOf(['mine', 'cloud', 'official', 'all', 'stock']),
       query: str('Name, category, mood or use case (≤200 characters); stock needs a concrete visual query.'),
@@ -375,7 +388,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   manage_tracks: {
     description:
-      `Create, update, reorder or remove one typed track. type is one of ${TRACK_TYPES.join(' / ')}; role (${TRACK_ROLES.join(' / ')}) decides which lane add_clips uses and how the mix treats it; order is the stacking order (larger renders above). syncLocked=true makes ripple edits move this track. Removing a track removes its clips.`,
+      `Create, update, reorder or remove one typed track. type is one of ${TRACK_TYPES.join(' / ')}; role (${TRACK_ROLES.join(' / ')}) decides which lane add_clips uses and how the mix treats it; order is the stacking order (larger renders above). syncLocked=true makes ripple edits move this track. Removing a track removes its clips. Prefer add_clips with a role: it creates the lane together with real content. Never pre-create an empty music lane for a proposal, pending generation or an unselected track; remove abandoned empty lanes before finishing.`,
     inputSchema: obj({
       action: enumOf(['create', 'update', 'move', 'remove']),
       trackId: str(), toIndex: int('move: destination index.'),
@@ -396,13 +409,14 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   add_transition: {
     description:
-      `Set, restyle or remove the transition at a cut between two story-spine clips (the footage hands over; this is not an overlay). atFrame must be an existing boundary. effect is one of ${TRANSITION_EFFECT_IDS.join(' / ')}; none removes. durationFrames is the total length across both sides, at most ${MAX_TRANSITION_SEC} s, clamped by the neighbouring clips. direction applies to directional / directionalwipe.`,
+      `Place, restyle or remove a transition on the transition lane. Transitions are placed by time and need no cut: one that spans a story-spine cut hands the footage over there; elsewhere the effect plays on the running picture. atFrame adds one there (queued right after any transition already at that frame; ${DEFAULT_TRANSITION_SEC}s by default, at most ${MAX_TRANSITION_SEC}s, shortened to the room before the next one). id (from get_state transitions) changes that transition — effect, direction, atFrame to move it, durationFrames — and effect none removes it. effect is one of ${TRANSITION_EFFECT_IDS.join(' / ')}; direction applies to directional / directionalwipe. Transitions never overlap.`,
     inputSchema: obj({
-      atFrame: FRAME('Cut boundary'),
+      atFrame: FRAME('Where to add it, or where to move the one named by id'),
+      id: str('A transition from get_state transitions, to change or remove.'),
       effect: enumOf(TRANSITION_EFFECT_IDS),
       direction: enumOf(['up', 'down', 'left', 'right']),
-      durationFrames: int('Total transition length in frames.', 1),
-    }, ['atFrame']),
+      durationFrames: int('Transition length in frames.', 1),
+    }),
   },
   set_canvas: {
     description:
@@ -414,9 +428,35 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
 
   /* ------------------------------------------------------------------ speech */
+  rough_cut: {
+    description:
+      `${CHARGE_MARKER} for transcription and the repeat check. The standard first pass over a raw talking-head recording, in one call: transcribe; trim pauses at the brand's pacing; clean up the speech — cut repeated takes, false starts and filler sounds, and mask sensitive words (a beep, ** in captions); captions in the brand's caption style; voice denoise; the brand's logo and loudness. Without steps it runs what the project's editing skills and brand ask for; steps runs exactly those (["cleanup"] cleans the speech again). The receipt gives each step's result, the repeats left in because they were unclear, and the steps that failed or were stopped — call again with the steps still pending to finish. Use remove_words for cuts it does not make.`,
+    inputSchema: obj({
+      steps: arr(enumOf(['transcribe', 'pauses', 'cleanup', 'captions', 'denoise', 'logo', 'loudness']), { description: 'Run only these steps.' }),
+      pauses: enumOf(['tight', 'moderate', 'natural'], "Pause trimming: tight keeps ~0.1s of air, moderate ~0.15s, natural cuts only long pauses. Default: the brand's habit, else moderate."),
+    }),
+  },
+  save_edit_plan: {
+    description: 'Save the whole-video director brief AFTER fixed rough_cut and BEFORE fine-cut execution. Read retained transcript, footage and project brand first. Let brand style shape the opening, progression, pacing, typography, imagery, motion and sound from the outset; obey enabled capabilities and the current user request. Use authored prose, not a feature checklist or fixed MG quota. Every meaningful beat anchors to actual source seconds and a transcript quote, including moments deliberately kept on the speaker. Saving continues execution automatically, never asks for approval. Reuse on resume; call again to revise changed creative decisions. This records task metadata without modifying the timeline.',
+    inputSchema: obj({
+      direction: str('Concise, content-specific whole-video direction in the creator’s language: opening, progression, pace and ending.'),
+      brandTreatment: str('For a branded project, describe how its style drives this video’s editorial and visual decisions. Adapt to the footage, do not merely repeat the brand name.'),
+      beats: arr(obj({ id: str('Stable beat id; preserve when revising.'), assetId: str('Actual speech source asset from get_transcript.'), sourceInSec: num('Source start, not timeline time.', { min: 0 }), sourceOutSec: num('Source end.', { min: 0 }), quote: str('Exact excerpt from this source passage.'), direction: str('Concrete treatment in natural language: what viewers see, what to preserve or change, and any assets to source/generate. Describe timing relative to speech. Quiet speaker-led passages are valid.') }, ['id', 'assetId', 'sourceInSec', 'sourceOutSec', 'quote', 'direction']), { minItems: 1, maxItems: 80 }),
+    }, ['direction', 'beats']),
+  },
+  finish_edit: {
+    description: 'Finish a whole-video edit after checking its enabled features against the actual timeline. Required for branded/fine-cut work. Include every enabled graphics/headlines, B-roll, sound, zoom and transition feature. Applied features must exist in the timeline. For not_needed give a concrete content reason and the moment evaluated; lack of source media is not a reason to skip B-roll. Unfinished generation or unavailable assets are blocked, never completed. For a saved director plan, inspect meaningful rendered frames after the last edit and include planRevision, every beat outcome with real clipIds, and an editorialReview of opening, progression, rhythm and brand coherence. This records the outcome without modifying the video.',
+    inputSchema: obj({
+      planRevision: int('Revision returned by save_edit_plan. Required when a director plan exists.', 1),
+      editorialReview: str('Concrete assessment of the actual opening, progression, rhythm and brand coherence against the plan. Fix visible defects first.'),
+      beats: arr(obj({ beatId: str('Saved plan beat id.'), status: enumOf(['applied', 'kept', 'changed', 'blocked']), result: str('What viewers now see; explain adaptations or blockers. Use the creator’s language.'), clipIds: arr(str(), { description: 'Actual enabled clip ids overlapping this source passage’s current timeline position. Required for applied/kept/changed.' }) }, ['beatId', 'status', 'result', 'clipIds'])),
+      brandApplication: str('For a branded edit, describe concrete typography, visual treatment and pacing choices that carry its style into this video.'),
+      features: arr(obj({ feature: enumOf(['graphics', 'b-roll', 'sound', 'zoom', 'transitions']), status: enumOf(['applied', 'not_needed', 'blocked']), reason: str('Short content-based explanation in the creator’s language.'), atFrame: int('Timeline frame evaluated.', 0) }, ['feature', 'status', 'reason'])),
+    }, ['features']),
+  },
   remove_silence: {
     description:
-      'Remove dead air from the narration by analysing the actual audio — no transcript needed, so run it first when tightening pacing. minimumPauseSec (0.25–3, default 0.5) is the shortest pause treated as dead air; speechPaddingSec (0–0.5, default 0.15) stays on each edge next to speech. Overlays, captions and later material re-lay.',
+      'Remove dead air from the narration by analysing the actual audio — no transcript needed, so run it first when tightening pacing. minimumPauseSec (0.25–3, default 0.4) is the shortest pause treated as dead air; speechPaddingSec (0–0.5, default 0.15) stays on each edge next to speech. Overlays, captions and later material re-lay.',
     inputSchema: obj({
       minimumPauseSec: num('', { min: 0.25, max: 3 }),
       speechPaddingSec: num('', { min: 0, max: 0.5 }),
@@ -450,19 +490,64 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   /* ------------------------------------------------------------------ components */
   compose_component: {
     description:
-      'Get the generation contract {system, prompt, target} for one Motion Graphic component, assembled from the live output: the real box, the backdrop under it, the active frame and the spoken beats in its window. Decide atFrame, durationFrames, placement and backdrop first; pass clipId to rewrite an existing component (its timing and box are supplied). Generate the response yourself with your own model, then submit it with apply_component. No credits are charged here. ' + MG_RUNTIME_CAPABILITIES,
+      'Get the generation contract {system, prompt, target} for one Motion Graphic component, assembled from the live output: the real box, the backdrop under it, the creator\'s brand graphics (when they have a brand) and the spoken beats in its window. Decide atFrame, durationFrames, placement and backdrop first; pass clipId to rewrite an existing component (its timing and box are supplied). Generate the response yourself with your own model, then submit it with apply_component. No credits are charged here. ' + MG_RUNTIME_CAPABILITIES,
     inputSchema: obj({
       instruction: str('What the component must communicate, in one concrete sentence.'),
       clipId: str('Existing graphic clip to rewrite.'),
       atFrame: FRAME('New component start'), durationFrames: int('New component duration in frames.', 1),
       placement: PLACEMENT_PCT, backdrop: str('What sits under the box and which zones must stay clear.'),
-      format: enumOf(['html', 'kit'], 'html = bespoke markup; kit = a registered component (JSON props).'),
+      format: enumOf(['html', 'kit'], 'kit = a registered library component with JSON props — prefer it when one fits and the creator has no brand graphics; html = bespoke markup (no fitting component, or the brand\'s graphics should shape the look).'),
       fontFamily: str('Optional display face for the component: web:<id> from get_state.fonts, google:<Family> from search_assets kind font, or local:<family>. The brief then defines var(--font-display); copy the same value to apply_component.'),
     }, ['instruction']),
   },
+  set_look: {
+    description:
+      'Write this output\'s look: its own visual system and the few parametric pieces every graphic of the video is an instance of. Replaces the previous look; instances keep their props and re-render. css is a plain stylesheet that applies inside pieces only (:root means the look). Each piece source is a function expression `function (props, ctx) { return { html, animate(tl, el, ctx) { … } }; }` — html is the markup, animate builds GSAP motion on the paused timeline tl (local time 0 = instance start), el is the piece host, ctx = { width, height (px of the box), duration, words }. Every frame must depend on time only: no timers, clock or randomness; no network, storage, scripts, iframes, video or canvas; no external styles or fonts. propsSchema (JSON Schema properties) declares what can be edited without regenerating. A rejection lists exact issues; fix those and send the whole look again.',
+    inputSchema: obj({
+      look: obj({
+        css: str('The stylesheet.'),
+        pieces: arr(obj({
+          id: str('Lowercase words joined by hyphens, e.g. item-card.'),
+          label: str('Name shown to people.'),
+          source: str('The piece function expression.'),
+          propsSchema: str('JSON object string: JSON Schema properties of its props — what the creator edits in the inspector without regenerating. Per property: type (string, number, integer, boolean), enum, format (color, font), minimum and maximum (a slider), title (the label, in the creator\'s language), default. A list is an array of objects with scalar fields.'),
+        }, ['id', 'source']), { minItems: 1, maxItems: 12 }),
+        notes: str('Your statement of the system: what colours mean, where graphics live, how things move.'),
+      }, ['css', 'pieces']),
+    }, ['look']),
+  },
+  place_graphics: {
+    description:
+      'Place instances of the look\'s pieces on the graphics tracks: each item is a piece, its props, a box in canvas units (0–1; omit for the full frame) and its time in frames. anchor ties an instance to a spoken word (from get_transcript) so it follows later cuts; words gives the piece the spoken words it should land on, in seconds from the instance start. The receipt returns the new clip ids and a still of each at its settled moment on the real picture. Change words, place or time later with set_clip_properties (props, box) and move_clips; no regeneration.',
+    inputSchema: obj({
+      items: arr(obj({
+        pieceId: str('A piece of the current look.'),
+        props: arr(obj({ key: str('Prop name from the piece\'s propsSchema.'), value: PROPERTY_VALUE }, ['key', 'value']), { description: 'The piece\'s props.' }),
+        box: obj({ x: num('Left, 0–1.'), y: num('Top, 0–1.'), w: num('Width, 0–1.'), h: num('Height, 0–1.') }),
+        startFrame: FRAME('Instance start'),
+        durationFrames: int('Length in frames.', 1),
+        anchor: obj({ assetId: str('Transcribed source.'), segmentIndex: int('Transcript row.', 0), wordIndex: int('Word in the row.', 0), offsetFrames: int('Frames after the word.') }),
+        words: arr(obj({ text: str(), start: num('Seconds from the instance start.'), end: num('Seconds from the instance start.') }), { description: 'Spoken words the piece lands on.' }),
+        label: str('Name shown on the timeline.'),
+        id: str('Optional id to mint.'),
+      }, ['pieceId', 'startFrame', 'durationFrames']), { minItems: 1 }),
+    }, ['items']),
+  },
+  set_confirm_list: {
+    description:
+      'Hand the creator what they must confirm before publishing: facts you could not verify (unclear speech, names you inferred, claims, sources — kind fact), and any music or voice you propose (kind music / voice; the creator confirms or swaps them before they are used). Never design choices. Replaces the list; items the creator already answered keep their answer. An empty list clears it.',
+    inputSchema: obj({
+      items: arr(obj({
+        kind: enumOf(['fact', 'music', 'voice']),
+        text: str('What to confirm, in the creator\'s language.'),
+        ref: str('Where it comes from: a clip id, a transcript row, a source.'),
+        id: str('Stable id, to keep an answer across rewrites.'),
+      }, ['text'])),
+    }, ['items']),
+  },
   apply_component: {
     description:
-      `Validate and place the component you generated from compose_component: pass raw (your full generated text) with the target clipId, atFrame, durationFrames and placement copied unchanged. Lint rejections list exact issues — fix only those and re-apply with the same clipId. generate=true instead asks Pireel's own model to author or rewrite from instruction (${CHARGE_MARKER} use only when the BYO path fails repeatedly). A rejection for <script>, an external library, canvas/WebGL, an iframe or embedded video is not fixable by retrying — the runtime is closed (see compose_component); rebuild that visual in markup, CSS and SVG. ${MG_BAKE_ROUTE} Here that means import_media, then add_clips with role broll and the component's box.`,
+      `Validate and place the component you generated from compose_component: pass raw (your full generated text) with the target clipId, atFrame, durationFrames and placement copied unchanged. Lint rejections list exact issues — fix only those and re-apply with the same clipId. A placed component comes back with one image of its settled frame (receipt settledFrame) on the real picture. generate=true instead asks Pireel's own model to author or rewrite from instruction (${CHARGE_MARKER} use only when the BYO path fails repeatedly). A rejection for <script>, an external library, canvas/WebGL, an iframe or embedded video is not fixable by retrying — the runtime is closed (see compose_component); rebuild that visual in markup, CSS and SVG. ${MG_BAKE_ROUTE} Here that means import_media, then add_clips with role broll and the component's box.`,
     inputSchema: obj({
       raw: str('Your full generated text in the contract compose_component returned.'),
       clipId: str('Target from compose_component, or the graphic clip to edit.'),
@@ -493,11 +578,12 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   set_captions: {
     description:
-      `Drive the managed subtitle layer as one object. on turns it on or off; preset (${CAPTION_PRESET_IDS.length} built-in styles from get_state’s caption catalog), yPct (baseline % from the top) and scale restyle it; source picks the transcript (auto, or a trackId / clipId / assetId); corrections fix caption wording by transcript row without touching the spoken audio; translations {lang, items} add a second line per row (clear removes all); relayout regenerates cue boundaries after canvas or font changes. Cues re-derive after every cut — never edit them individually.`,
+      `Drive the managed subtitle layer as one object. on turns it on or off; preset picks the look and animation the motion, independently (catalogs on each parameter); yPct (baseline % from the top) and scale restyle it; highlightColor recolors the word emphasis; get_state captions.style reads all of these back; source picks the transcript (auto, or a trackId / clipId / assetId); corrections fix caption wording by transcript row without touching the spoken audio; highlights {items:[{index, text}], color} highlights words — index is the transcript row (as in corrections), text the exact word(s) copied from that row; they stay colored while their caption shows; color "style" (default) follows highlightColor, #RRGGBB fixes it, "off" clears those words, clear:true clears every highlight; highlight generously, one or two phrases in most rows (numbers, names, the carrying verb or claim, contrasts); translations {lang, items} add a second line per row (clear removes all); relayout regenerates cue boundaries after canvas or font changes. Cues re-derive after every cut — never edit them individually.`,
     inputSchema: obj({
       on: bool(),
-      preset: enumOf(CAPTION_PRESET_IDS), yPct: num('', { min: 0, max: 100 }), scale: num('', { min: 0.5, max: 2 }),
+      preset: enumOf(CAPTION_PRESET_IDS, `Caption look: ${CAPTION_LOOKS}. em-*/ln-* are legacy looks kept for existing projects.`), animation: enumOf(CAPTION_ANIMATION_IDS, `Caption motion, independent of the look: ${CAPTION_MOTIONS}.`), highlightColor: str('#RRGGBB color for the words the animation emphasizes (karaoke, marker, underline, pulse, bounce, glow); "animation" restores the animation\'s own color.'), yPct: num('', { min: 0, max: 100 }), scale: num('', { min: 0.5, max: 2 }),
       font: str('Caption font: sans | serif | mono | web:<library id from get_state.fonts> or that font’s display name (web:lxgw-wenkai or 霞鹜文楷) | google:<Family from search_assets kind font> | local:<family>; "preset" restores the preset\'s own font.'),
+      highlights: obj({ items: arr(obj({ index: num('Transcript row.', { min: 0 }), text: str('Exact word(s) from that row.') }, ['index', 'text'])), color: str('"style" (default) | #RRGGBB | "off"'), clear: bool(), assetId: str('Transcript owner; default the caption source.') }),
       script: str('Silent montage only (no spoken transcript): the caption copy, one line per caption, timed across the placed picture by character share; the copy becomes the transcript truth of those clips.'),
       source: obj({ trackId: str(), clipId: str(), assetId: str('A placed, transcribed asset; resolved to the clip or track that plays it.') }),
       clipId: str('corrections / translations: an inserted clip’s transcript instead of the main narration.'),
@@ -528,10 +614,10 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       doc: { type: 'object', description: 'The board document, in the format returned by describe: true.' },
     }),
   },
-  manage_frame: {
+  read_brand: {
     description:
-      'Visual direction. list returns the available frames (design-system content packs); attach applies one by id, filling unspecified art-direction decisions while the user’s explicit choices and manual project values stay authoritative; read returns the attached frame’s playbook to design against. A frame never authorises resetting palette, captions or layout the user set by hand.',
-    inputSchema: obj({ action: enumOf(['list', 'attach', 'read']), id: str('attach: required. read: omit to read the attached frame.') }, ['action']),
+      'The brand snapshot explicitly selected for this project, with its reusable style guidance, editing preferences, fixed caption and logo settings, and cover guidance. Read it once before building or reworking a whole video; apply it where the current request leaves a choice open. Enabled capabilities are optional when useful, not quotas. The latest explicit user instruction wins. Returns no_brand when this project has no brand; it never adopts an account default',
+    inputSchema: obj({}, []),
   },
 
   /* ------------------------------------------------------------------ generation */
@@ -546,7 +632,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
     inputSchema: obj({
       prompt: str(), modelId: str('From list_models; omit for the default.'),
       size: str('e.g. 1440x2560, 2560x1440, 2048x2048.'), quality: str('Model-specific tier.'),
-      referenceImages: arr(str('An asset id from get_state (or a URL). Pass it straight through — generation resolves it; no inspect_media first.'), { maxItems: 9 }),
+      referenceImages: arr(str('An asset id from get_state (or a URL). Pass it straight through — generation resolves it; no inspect_media first.'), { maxItems: 16 }),
     }, ['prompt']),
   },
   generate_video: {
@@ -560,7 +646,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   generate_audio: {
     description:
-      `${CHARGE_MARKER} Generate one audio asset from text and return it registered-ready. kind=music: an instrumental bed, 30–300 s, prompt = genre/instrumentation + energy + role under the picture + constraints. kind=sfx: one sound effect 0.5–22 s for off-screen or editorial sound (whoosh, ping, stinger, ambience) — describe the sound, not the scene; promptInfluence 0–1 (default 0.3), loop for seamless beds. Then register_media and add_clips with role music or sfx. Search official assets first. Picture-synchronous sound timed to a clip's own motion is generate_foley.`,
+      `${CHARGE_MARKER} Generate one audio asset from text and return it registered-ready. kind=music: an instrumental bed, 30–300 s, prompt = genre/instrumentation + energy + role under the picture + constraints. kind=sfx: one sound effect 0.5–22 s for off-screen or editorial sound (whoosh, ping, stinger, ambience) — describe the sound, not the scene; promptInfluence 0–1 (default 0.3), loop for seamless beds. Then register_media and add_clips with role music or sfx. Search official assets first; an agent that can generate audio itself does so and imports the file instead. Picture-synchronous sound timed to a clip's own motion is generate_foley.`,
     inputSchema: obj({
       kind: enumOf(['music', 'sfx']),
       prompt: str(),

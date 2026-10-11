@@ -1,3 +1,4 @@
+import { isCaptionAnimation } from '../../caption-animations';
 import { CAPTION_PRESETS } from '../../caption-presets';
 import type { CaptionStyle } from '../../composition-core';
 import type { EditorDocumentV2 } from '../types';
@@ -11,10 +12,15 @@ const presetIds = new Set(CAPTION_PRESETS.map((preset) => preset.id));
 function patchError(patch: CaptionStylePatch): string | null {
   if (!Object.keys(patch).length) return 'Caption style patch is empty.';
   if (patch.preset != null && !presetIds.has(patch.preset)) return `Unknown caption preset: ${patch.preset}`;
+  if (patch.animation != null && !isCaptionAnimation(patch.animation)) return `Unknown caption animation: ${patch.animation}`;
+  if (patch.sub?.animation != null && !isCaptionAnimation(patch.sub.animation)) return `Unknown subtitle animation: ${patch.sub.animation}`;
+  if (patch.emphasis != null && !/^#[0-9a-f]{6}$/i.test(patch.emphasis)) return `Caption highlight color must be #RRGGBB: ${patch.emphasis}`;
   if (patch.on != null && typeof patch.on !== 'boolean') return 'Caption on must be boolean.';
   for (const key of ['yPct', 'xPct', 'wPct', 'scale', 'hPct'] as const) {
     if (patch[key] != null && !Number.isFinite(patch[key])) return `Caption ${key} must be finite.`;
   }
+  if (patch.strokeWidth != null && (!Number.isFinite(patch.strokeWidth) || patch.strokeWidth < 0 || patch.strokeWidth > 8)) return 'Caption outline width must be from 0 to 8.';
+  for (const key of ['accentColor', 'strokeColor'] as const) if (patch[key] != null && !/^#[a-f0-9]{6}$/i.test(patch[key]!)) return 'Caption color must be a six-digit hex color.';
   if (patch.sub != null && (typeof patch.sub !== 'object' || Array.isArray(patch.sub))) return 'Caption sub style must be an object.';
   // A font id the renderer cannot resolve falls back to the preset font in silence; refuse it here.
   if (patch.font != null && (typeof patch.font !== 'string' || (!isDisplayTextFontId(patch.font) && !resolveWebFontReference(patch.font)))) {

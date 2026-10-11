@@ -17,7 +17,8 @@
  */
 
 import type { ThemeId } from './theme';
-import type { CustomVisualStyle } from './visual-style';
+import type { DocumentLook } from './look';
+import type { HandoffItem } from './editor-document/types';
 import { type Clip, editedDuration, spans } from './trim';
 import { BASE_CAPTION_FONT_PX, DEFAULT_CAPTION_PRESET, DEFAULT_SUB_CAPTION_PRESET, getCaptionPreset } from './caption-presets';
 import { mintIdSuffix } from './deterministic-ids';
@@ -71,6 +72,9 @@ export interface Block {
   radius?: number;
   /** Overall rotation (deg, -180–180): outermost container transform:rotate around center. Default/0 = no rotation. */
   rotation?: number;
+  /** Animation timing applied to the component's own timeline without rewriting it: speed
+   *  (0.25–4, default 1) and a start delay in seconds (default 0). */
+  motion?: { speed?: number; delaySec?: number };
   /** Content visual scale factor (font size scales too), written by corner-handle proportional scaling: window (box) ×k, content layer
    *  (contentBox) layout size unchanged (only center moves), and scale ×k stay in sync — zero reflow. Rendered as the content layer's
    *  CSS scale **property**, not affecting layout and not entering the transform chain — mutually non-overwriting with autofit's transform
@@ -129,7 +133,7 @@ export interface VideoShot extends Clip {
   srcEnd: number;
   /** Multi-source main track: set = externally inserted clip (srcStart/srcEnd are **this file's own** time, not the main video).
    *  Default = main-video slice. **Equal footing** (the main video is just the first-loaded source): framing/matte/audio/captions/split-trim-delete
-   *  all apply to inserted segments (framing uniformly targets the #vidEl canvas, matte feeds MODNet with the segment's own source, captions transcribe/map per source;
+   *  all apply to inserted segments (framing uniformly targets the #vidEl canvas, matte feeds the matting model with the segment's own source, captions transcribe/map per source;
    *  trim.ts's edit math only looks at length, so external segments work naturally). Don't add guards based on the early "v1 always-fullscreen-muted" constraint. */
   src?: string;
   /** Local inserted segment's fileSig (src is a session-scoped blob URL, dies on refresh): draft restore uses it to fetch the File
@@ -348,6 +352,14 @@ export interface CutTransition {
   /** Only meaningful for push/slide; default 'left'. */
   direction?: TransitionDirection;
 }
+/** A transition on its own lane, placed by time (see TimelineTransition in the document). */
+export interface CompositionTransition {
+  id: string;
+  startSec: number;
+  durationSec: number;
+  effect: CutTransitionEffect;
+  direction?: TransitionDirection;
+}
 export const MAX_TRANSITION_SEC = 4;
 export const CUT_TRANSITION_EFFECTS: { id: CutTransitionEffect; name: string }[] = [
   { id: 'fade', name: 'common.dissolve' },
@@ -388,35 +400,39 @@ export function videoShotTimelineSpans(shots: VideoShot[], placements?: readonly
   return placedShotSpans(shots, placements);
 }
 
-/** Table of valid cut transitions (edited time): prevId must still be the immediately-preceding shot (deleting/trimming either side invalidates it),
- *  half is clamped by both neighboring shot lengths (transitions don't cross shots). Same convention for preview shim / export / timeline. */
-export function cutTransitions(
-  shots: VideoShot[],
-  placements?: readonly VideoShotTimelinePlacement[],
-): { cut: number; shotId: string; effect: CutTransitionEffect; half: number; dir: TransitionDirection }[] {
-  const sp = placedShotSpans(shots, placements);
-  const out: { cut: number; shotId: string; effect: CutTransitionEffect; half: number; dir: TransitionDirection }[] = [];
-  for (let i = 1; i < sp.length; i++) {
-    const s = sp[i]!.clip as VideoShot;
-    const prev = sp[i - 1]!.clip as VideoShot;
-    const tr = s.transIn;
-    if (!tr || tr.prevId !== prev.id) continue;
-    if (Math.abs(sp[i]!.editedStart - sp[i - 1]!.editedEnd) > 1e-3) continue;
-    const lenPrev = sp[i - 1]!.editedEnd - sp[i - 1]!.editedStart;
-    const lenSelf = sp[i]!.editedEnd - sp[i]!.editedStart;
-    const half = Math.min(Math.max(0.1, Math.min(MAX_TRANSITION_SEC, tr.durationSec) / 2), lenPrev, lenSelf);
-    out.push({ cut: sp[i]!.editedStart, shotId: s.id, effect: tr.effect, half: Math.round(half * 100) / 100, dir: tr.direction ?? 'left' });
-  }
-  return out;
+/** A transition as the renderers play it: a window of the timeline, with the spine cut it hands
+ * over at (the one nearest its middle) or null when it plays on continuous picture. */
+export interface TransitionWindow {
+  id: string;
+  start: number;
+  end: number;
+  cut: number | null;
+  effect: CutTransitionEffect;
+  dir: TransitionDirection;
 }
 
-/** Whether a split point falls inside some transition's coverage region (splitting inside is forbidden — remove the transition first). */
-export function splitBlockedByTransition(
+export function transitionWindows(
+  transitions: readonly CompositionTransition[] | undefined,
   shots: VideoShot[],
-  atSec: number,
   placements?: readonly VideoShotTimelinePlacement[],
-): boolean {
-  return cutTransitions(shots, placements).some((tr) => Math.abs(atSec - tr.cut) < tr.half - 1e-3);
+): TransitionWindow[] {
+  if (!transitions?.length) return [];
+  const spans = placedShotSpans(shots, placements);
+  const cuts: number[] = [];
+  for (let i = 1; i < spans.length; i++) {
+    if (Math.abs(spans[i]!.editedStart - spans[i - 1]!.editedEnd) <= 1e-3) cuts.push(spans[i]!.editedStart);
+  }
+  return transitions
+    .filter((transition) => transition.durationSec > 0)
+    .map((transition) => {
+      const start = Math.max(0, transition.startSec);
+      const end = start + Math.min(MAX_TRANSITION_SEC, transition.durationSec);
+      const middle = (start + end) / 2;
+      const inside = cuts.filter((at) => at > start + 1e-3 && at < end - 1e-3);
+      const cut = inside.length ? inside.reduce((best, at) => (Math.abs(at - middle) < Math.abs(best - middle) ? at : best)) : null;
+      return { id: transition.id, start, end, cut, effect: transition.effect, dir: transition.direction ?? 'left' };
+    })
+    .sort((left, right) => left.start - right.start);
 }
 
 /** Three color-grade params (numeric factors, 1 = no change; undefined treated as 1). */
@@ -557,6 +573,8 @@ export interface CaptionStyle {
   on?: boolean;
   /** Visual preset id (caption-presets registry; the per-word-emphasis / full-sentence mode is also set by the preset). */
   preset: string;
+  /** Independent global caption animation; absence preserves a legacy preset's behavior. */
+  animation?: import('./caption-animations').CaptionAnimationId;
   /** Vertical position: caption's bottom edge distance from canvas top, in % (height-based). */
   yPct: number;
   /** Horizontal position: caption line center distance from canvas left, in % (width-based). Default 50 = centered. */
@@ -572,6 +590,12 @@ export interface CaptionStyle {
   hPct?: number;
   /** Text color override (defaults to the preset's color). Optional and additive — existing projects render unchanged. */
   color?: string;
+  accentColor?: string;
+  strokeColor?: string;
+  strokeWidth?: number;
+  /** Highlight color override for speech-timed emphasis (karaoke color, marker/underline, pulse/bounce/glow);
+   *  unset = the animation's own color. Manual word highlights keep their own colors. */
+  emphasis?: string;
   /** Bold override: true = force bold (800), false = force regular (500); unset = the preset's own weight. */
   bold?: boolean;
   /** Font override: a display-text font id ('sans' | 'serif' | 'mono' | 'web:<library id>' | 'local:<family>'); unset/'preset' = the preset's own font. */
@@ -583,7 +607,7 @@ export interface CaptionStyle {
    *  xPct = line-center distance from left %, scale = font factor (same convention as the main line's scale, 1 = preset's original size).
    *  preset/color/bg = independent visual overrides for the translation line; unset = derived from the main line's (overridden) look.
    *  lang = target language chosen in the UI (panel chip selected state + auto-translate for newly inserted segments). */
-  sub?: { preset?: string; color?: string; bg?: string | null; bold?: boolean; font?: string; yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number; lang?: string };
+  sub?: { animation?: import('./caption-animations').CaptionAnimationId; preset?: string; color?: string; bg?: string | null; bold?: boolean; font?: string; yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number; lang?: string };
 }
 
 export interface Composition {
@@ -604,11 +628,16 @@ export interface Composition {
   /** SPARSE: only fields the user explicitly set are stored — defaults live in resolveCaptionStyle
    *  (so default evolution reaches existing projects). Always read through the resolvers. */
   captionStyle?: Partial<CaptionStyle>;
-  /** Mounted frame theme-pack id (written to the document alongside palette on mount): the compose request carries it,
-   *  the server injects that frame's design language into ACTIVE THEME (overrides generic aesthetics, engineering contract untouched). */
-  frameId?: string;
-  /** Structured user-composed Frame, persisted so every generation path receives the same choices. */
-  customVisualStyle?: CustomVisualStyle;
+  /** The output's own video-level template: its visual system and pieces (look.ts). */
+  look?: DocumentLook;
+  /** What the creator must confirm (read-only projection of document semantics). */
+  handoff?: HandoffItem[];
+  /** Editing skills switched on for this project (read-only projection of document semantics). */
+  editingSkills?: string[];
+  /** The brand the project is edited with (read-only projection of document semantics; null = none picked). */
+  brand?: import('./brand-playbook').PlaybookSnapshot | null;
+  /** The Studio Skill the project is edited as (read-only projection of document semantics). */
+  skillId?: string;
   /** Global person-effect style (toolbar "Person" panel): person-on-top / feather / stroke / background swap.
    *  Only takes effect on matte-enabled (VideoShot.personMatte) shot segments; default = all defaults. */
   personFx?: PersonFx;
@@ -617,6 +646,10 @@ export interface Composition {
   /** Narration denoise (MAIN source; baked in the browser — the wet file is cached, strength is a
    *  bake-time dry/wet blend so preview and export play one identical blended file). 0 < strength ≤ 1. */
   audioDenoise?: { strength: number };
+  /** Whole-mix loudness (master gain + peak limiter), projected from the document's processing.loudness. */
+  audioLoudness?: { targetLufs: number; gainDb: number };
+  /** Transition lane (seconds), projected from the document's timeline.transitions. */
+  transitions?: CompositionTransition[];
 }
 
 /** Person-effect config (global style; matte on/off is per-segment, see VideoShot.personMatte).
@@ -1169,6 +1202,8 @@ export function registerTemplate(t: Template): void {
   REGISTRY.set(t.id, t);
 }
 export function getTemplate(id: string): Template {
+  // Look instances name a piece of the output's own look (`look:<pieceId>`): one template renders them all.
+  if (id.startsWith('look:')) return REGISTRY.get('look') ?? fallbackTemplate(id);
   return REGISTRY.get(id) ?? REGISTRY.get('custom') ?? fallbackTemplate(id);
 }
 export function listTemplates(): Template[] {
@@ -1414,6 +1449,7 @@ export function resolveSubCaptionStyle(comp: Composition): CaptionStyle {
   const derivedY = m.yPct + ((mainFs * 0.2 + subFs * 1.35 + padY) / (comp.height || 1920)) * 100;
   return {
     preset: sub.preset ?? DEFAULT_SUB_CAPTION_PRESET,
+    ...(sub.animation != null ? { animation: sub.animation } : {}),
     yPct: Math.min(99, sub.yPct ?? Math.round(derivedY * 10) / 10),
     xPct: sub.xPct ?? m.xPct ?? 50,
     wPct: sub.wPct ?? m.wPct ?? DEFAULT_CAPTION_WIDTH_PCT,
@@ -1433,6 +1469,8 @@ export interface FxWord {
   start: number;
   end: number;
   emphasis?: boolean;
+  timing?: 'estimated';
+  decoration?: import('./build-blocks').WordDecoration;
 }
 
 let _uid = 0;

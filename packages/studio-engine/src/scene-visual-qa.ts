@@ -12,7 +12,6 @@ export type SceneVisualQaIssueKind =
   | 'missing-planned-visual'
   | 'missing-audible-audio'
   | 'caption-subject-collision'
-  | 'frame-drift'
   | 'unsafe-delivery-crop'
   | 'missing-development'
   | 'abrupt-handoff'
@@ -61,7 +60,6 @@ function sceneContext(
   scene: DirectorScenePlan,
   phase: SceneVisualReviewPhase,
   plan: DirectorPlan,
-  frameId?: string,
 ): string {
   const evidence = evidenceOf(scene);
   const design = sceneDesignForDocument(document, scene.id);
@@ -97,7 +95,6 @@ function sceneContext(
     `authoredChoreography: ${design?.choreography ?? '(missing)'}`,
     `authoredContinuity: ${design?.continuity ?? '(missing)'}`,
     `renderedSuccessCriteria: ${design?.successCriteria ?? '(missing)'}`,
-    `frameId: ${frameId ?? '(themeless)'}`,
   ].join('; ');
 }
 
@@ -165,7 +162,7 @@ export function planSceneVisualReview(
       sceneId: scene.id,
       sceneLabel: scene.label,
       phase,
-      expected: sceneContext(document, scene, phase, plan, plan.frameId ?? document.appearance.frameId),
+      expected: sceneContext(document, scene, phase, plan),
     }));
   }).filter((moment) => !selectedIds || selectedIds.has(moment.sceneId));
   return capMoments(moments, Math.min(18, Math.max(1, options.maxMoments ?? 18)));

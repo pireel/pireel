@@ -67,6 +67,50 @@ export async function decodeVideoAudio(file: File): Promise<AudioBuffer | null> 
   }
 }
 
+/**
+ * Integrated loudness (LUFS) of a file's soundtrack, measured while decoding: nothing but the meter's
+ * per-100 ms sums is kept, so an hour-long video costs no more memory than a short one. Gaps in the
+ * stream count as silence, as they play. Null without an audio track or audible sound.
+ */
+export async function streamVideoLoudness(file: Blob): Promise<number | null> {
+  const { LoudnessMeter } = await import('@pireel/studio-engine/loudness-lufs');
+  const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
+  try {
+    const track = await input.getPrimaryAudioTrack();
+    if (!track) return null;
+    const rate = track.sampleRate;
+    const chCount = Math.min(ANALYSIS_CH, track.numberOfChannels);
+    const meter = new LoudnessMeter(rate, chCount);
+    let next = 0;
+    let since = performance.now();
+    for await (const sample of new AudioSampleSink(track).samples()) {
+      const frames = sample.numberOfFrames;
+      const srcCh = sample.numberOfChannels;
+      const data = new Float32Array(frames * srcCh);
+      sample.copyTo(data, { planeIndex: 0, format: 'f32' });
+      const at = Math.round(sample.timestamp * rate);
+      sample.close();
+      if (at > next) { const gap = Array.from({ length: chCount }, () => new Float32Array(at - next)); meter.push(gap); next = at; }
+      const skip = Math.max(0, next - at); // overlap with what was already measured
+      if (skip >= frames) continue;
+      const chunk = Array.from({ length: chCount }, (_, c) => {
+        const sc = srcCh === 1 ? 0 : Math.min(c, srcCh - 1);
+        return Float32Array.from({ length: frames - skip }, (_, i) => data[(i + skip) * srcCh + sc]!);
+      });
+      meter.push(chunk);
+      next = at + frames;
+      if (performance.now() - since > 8) {
+        await new Promise((r) => setTimeout(r, 0)); // a macrotask, so a frame can actually paint
+        since = performance.now();
+      }
+    }
+    const lufs = meter.integrated();
+    return Number.isFinite(lufs) ? lufs : null;
+  } finally {
+    await input.dispose();
+  }
+}
+
 /** Mono mixdown of a decoded buffer, resampled to `rate` (OfflineAudioContext does the resampling in
  *  native code — far cheaper than doing it in JS, and it's the same path decodeAudioData would take). */
 export async function toMono(buf: AudioBuffer, rate: number): Promise<Float32Array> {

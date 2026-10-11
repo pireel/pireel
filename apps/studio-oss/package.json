@@ -14,7 +14,6 @@
     "@fontsource-variable/geist": "^5.2.9",
     "@fontsource-variable/jetbrains-mono": "^5.2.8",
     "@pireel/studio-engine": "workspace:*",
-    "@pireel/studio-frames": "workspace:*",
     "@pireel/studio-ui": "workspace:*",
     "@pireel/ui": "workspace:*",
     "react": "^19.0.0",

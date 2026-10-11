@@ -28,13 +28,13 @@ function toolIdOf(part: PartLike): string | null {
 }
 
 /** Drop assistant tool parts that name a tool outside the current surface. Returns the same array when nothing changed. */
-export function pruneUnknownToolParts<M extends MessageLike>(messages: readonly M[]): M[] {
+export function pruneUnknownToolParts<M extends MessageLike>(messages: readonly M[], allowed: ReadonlySet<string> = V3_TOOL_IDS): M[] {
   let changed = false;
   const out = messages.map((message) => {
     if (message.role !== 'assistant') return message;
     const parts = message.parts.filter((part) => {
       const id = toolIdOf(part);
-      return !id || V3_TOOL_IDS.has(id);
+      return !id || allowed.has(id);
     });
     if (parts.length === message.parts.length) return message;
     changed = true;

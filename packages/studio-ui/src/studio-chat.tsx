@@ -1,5 +1,7 @@
 "use client";
 
+import type { StudioAgentModelId } from '@pireel/studio-engine/agent-models';
+
 /**
  * Studio chat panel — agent + tools version, same look as the "project doc" chat.
  *
@@ -17,6 +19,9 @@
  * This file keeps the public types + the multi-session shell.
  */
 
+import type { PlaybookSnapshot } from "@pireel/studio-engine/brand-playbook";
+import type { HandoffItem } from '@pireel/studio-engine/editor-document/types';
+import type { ConfirmAnswer } from './confirm-list';
 import type { GenerationIntent } from "./chat-generation-intent";
 import {
   forwardRef,
@@ -33,12 +38,10 @@ import type { UIMessage } from "ai";
 import type { StudioToolResult } from "@pireel/studio-engine/prompts";
 import type { Composition } from "@pireel/studio-engine/composition";
 import type { LocalAssetIndexEntry } from "@pireel/studio-engine/project-dto";
-import type { CustomVisualStyle } from "@pireel/studio-engine/visual-style";
 import {
   STUDIO_AUTO_SKILL_ID,
   type StudioScenarioSkillId,
 } from "@pireel/studio-engine/scenario-skills";
-import { useFrameCatalog } from "./use-frame-catalog";
 import { mid } from "./chat-format";
 import { ChatThread } from "./chat-thread";
 import {
@@ -63,16 +66,6 @@ export interface ProgressHandle {
   step(text: string): void;
   finish(text: string): void;
   fail(text: string): void;
-}
-
-/** Visual direction attached to the session; frameId carries its art-direction playbook. */
-export interface AttachedFrame {
-  id: string;
-  title: string;
-  icon: string;
-  iconKey?: string | null;
-  /** Independent palette/caption/layout controls layered over the selected direction. */
-  customVisualStyle?: CustomVisualStyle;
 }
 
 /** A concrete composed timeline frame attached to the next user message. */
@@ -104,12 +97,12 @@ export interface StudioChatHandle {
   clearElementPills(): void;
   /** Workbench pushes a user message directly. Silently dropped while streaming. */
   send(text: string): void;
+  /** Select a skill and send a request under it (the AI Enhance switches). Dropped while streaming. */
+  runSkill(skillId: string, text: string): void;
   /** Only fill a piece of text into the input without sending (used by the generate panel's "@reference" for assets). */
   insertText(text: string): void;
   /** Only focus the input (component floating bar's "AI edit" switches over to keep typing). */
   focusInput(): void;
-  /** Attach a frame to the current session (shared by frame panel "use" and the input's theme button): button highlights, injected with the request. */
-  attachFrame(frame: AttachedFrame | null): void;
   /** Insert a loading frame tag at the saved composer caret before capture starts. */
   beginTimelineFrameCapture(frame: PendingTimelineFrame): void;
   /** Promote the matching loading tag in place without moving or replacing earlier frame tags. */
@@ -131,10 +124,8 @@ export interface StudioChatProps {
   runTool: (
     toolId: string,
     input: Record<string, unknown>,
-    opts?: { signal?: AbortSignal; surface?: "chat" | "bridge"; skillId?: string },
+    opts?: { signal?: AbortSignal; surface?: "chat" | "bridge"; skillId?: string; roughCut?: import("./first-pass").RoughCutExecution },
   ) => Promise<StudioToolResult>;
-  /** Callback when a frame is attached (both panel "use" and the theme button): the workbench uses it to apply the theme palette to comp. */
-  onFrameApplied?: (frame: AttachedFrame | null) => void;
   /** Request-body fields read at send time (session-level frame / skill selection). */
   getBody: () => Record<string, unknown>;
   /** Currently @-mentionable elements. */
@@ -142,6 +133,31 @@ export interface StudioChatProps {
   /** Live composition accessor (stable identity, reads a ref): tool receipt cards preview blocks
    *  without linking chat re-renders to comp state. Optional — the preview strip hides without it. */
   getComp?: () => Composition;
+  /** Read-only canonical timeline for source-anchored directing and final verification. */
+  getDocument?: () => import('@pireel/studio-engine/composition').EditorDocumentV2;
+  /** This project's chosen brand snapshot. Null or undefined means no brand; no account fallback. */
+  projectBrand?: PlaybookSnapshot | null;
+  /** The Studio Skill the project is edited as (undefined: never set — the thread's own pick applies),
+   *  and how a pick in the chat is written back to the project. */
+  projectSkillId?: string;
+  projectAgentModel?: StudioAgentModelId;
+  onProjectSkill?: (skillId: string) => void;
+  /** A first message to send once on opening (a project made from the Studio home), and the call that
+   *  marks it sent so it is never sent again. */
+  startPrompt?: string | null;
+  onStartPromptSent?: () => void;
+  /** The project's clips per fine-cut skill now: a one-click edit's card counts what the agent adds
+   *  after the rough cut. */
+  fineCutClips?: () => import("./first-pass").EditingEvidence;
+  /** The project has been edited (cut, captioned, anything placed): its brand is fixed and the editing
+   *  skills become tag shortcuts for a message instead of switches. */
+  projectEdited?: boolean;
+  /** Editing skills switched on for this project, and how to change them (the row above the composer). */
+  editingSkills?: readonly string[];
+  onEditingSkills?: (ids: string[]) => void;
+  /** The agent's confirm list and the creator's answers to it. */
+  handoff?: HandoffItem[];
+  onAnswerHandoff?: ConfirmAnswer;
   /** Output fps for surfaces that must convert v3 frames to seconds before execution (editorial assembly). */
   /** Exact-frame picking happens on the real Studio timeline; Chat only owns its mode button and draft attachment. */
   timelineFramePickActive?: boolean;
@@ -176,11 +192,23 @@ export const StudioChat = memo(
       getBody,
       elements,
       getComp,
+      getDocument,
+      startPrompt,
+      onStartPromptSent,
+      fineCutClips,
+      projectEdited,
+      projectBrand,
+      projectSkillId,
+      projectAgentModel,
+      onProjectSkill,
+      editingSkills,
+      onEditingSkills,
+      handoff,
+      onAnswerHandoff,
       timelineFramePickActive = false,
       timelineFramePickBusy = false,
       timelineFramePickAvailable = false,
       onTimelineFramePickActiveChange,
-      onFrameApplied,
       initialThreads,
       onThreadChange,
       onClose,
@@ -224,7 +252,6 @@ export const StudioChat = memo(
     const [activeId, setActiveId] = useState<string>(() => mid("thread"));
     const [histOpen, setHistOpen] = useState(false);
     const innerRef = useRef<StudioChatHandle | null>(null);
-    const frames = useFrameCatalog(); // frame catalog for the `/` picker (in-process cache)
 
     useEffect(() => {
       let cancelled = false;
@@ -296,24 +323,25 @@ export const StudioChat = memo(
     const onSnapshot = useCallback(
       (
         messages: UIMessage[],
-        frame: AttachedFrame | null,
         skillId: StudioScenarioSkillId,
+        agentModel?: StudioAgentModelId,
       ) => {
-        if (messages.length === 0) return;
+        if (messages.length === 0 && agentModel === undefined) return;
         const title =
           firstUserText(messages).slice(0, 24) || t("chatGen.newConversation");
         const next: StoredThread = {
           id: activeId,
           title,
           messages,
-          updatedAt: Date.now(),
-          frame,
+          updatedAt: Math.max(Date.now(), (threadsRef.current.find(thread => thread.id === activeId)?.updatedAt ?? 0) + 1),
           skillId,
+          agentModel,
         };
         const merged = [
           next,
           ...threadsRef.current.filter((t) => t.id !== activeId),
         ];
+        threadsRef.current = merged;
         setThreads(merged);
         onThreadChangeRef.current?.(next);
       },
@@ -337,9 +365,9 @@ export const StudioChat = memo(
         insertElementPill: (el) => innerRef.current?.insertElementPill(el),
         clearElementPills: () => innerRef.current?.clearElementPills(),
         send: (text) => innerRef.current?.send(text),
+        runSkill: (skillId, text) => innerRef.current?.runSkill(skillId, text),
         insertText: (text) => innerRef.current?.insertText(text),
         focusInput: () => innerRef.current?.focusInput(),
-        attachFrame: (frame) => innerRef.current?.attachFrame(frame),
         beginTimelineFrameCapture: (frame) =>
           innerRef.current?.beginTimelineFrameCapture(frame),
         resolveTimelineFrameCapture: (frame) =>
@@ -412,7 +440,7 @@ export const StudioChat = memo(
                       setActiveId(th.id);
                       setHistOpen(false);
                     }}
-                    className={`hover:bg-panel-2 flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] ${th.id === activeId ? "bg-panel-2" : ""}`}
+                    className={`hover:bg-panel-2/20 flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] ${th.id === activeId ? "bg-panel-2/35" : ""}`}
                   >
                     <span className="text-ink truncate">
                       {th.title || t("chatGen.newConversation")}
@@ -430,8 +458,8 @@ export const StudioChat = memo(
           localAssetIndex={localAssetIndex}
           threadId={activeId}
           initialMessages={restoredMessages}
-          initialFrame={active?.frame ?? null}
           initialSkillId={active?.skillId ?? defaultSkillId}
+          initialAgentModel={active?.agentModel ?? projectAgentModel}
           scenarioSkills={scenarioSkills}
           onOpenSkillMarket={customScenarioSkillManager?.openMarket}
           onRefreshScenarioSkills={
@@ -440,12 +468,22 @@ export const StudioChat = memo(
           onDeleteScenarioSkill={
             customScenarioSkillManager ? deleteScenarioSkill : undefined
           }
-          frames={frames}
-          onFrameApplied={onFrameApplied}
           runTool={runTool}
           getBody={getBody}
           elements={elements}
           getComp={getComp}
+          getDocument={getDocument}
+          startPrompt={startPrompt}
+          onStartPromptSent={onStartPromptSent}
+          fineCutClips={fineCutClips}
+          projectEdited={projectEdited}
+          projectBrand={projectBrand}
+          projectSkillId={projectSkillId}
+          onProjectSkill={onProjectSkill}
+          editingSkills={editingSkills}
+          onEditingSkills={onEditingSkills}
+          handoff={handoff}
+          onAnswerHandoff={onAnswerHandoff}
           timelineFramePickActive={timelineFramePickActive}
           timelineFramePickBusy={timelineFramePickBusy}
           timelineFramePickAvailable={timelineFramePickAvailable}

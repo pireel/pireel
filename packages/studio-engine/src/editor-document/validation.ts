@@ -1,4 +1,5 @@
 import { isFinitePositive } from './time';
+import { withMigratedTransitions } from './transitions';
 import { normalizeEditorDocumentArtifacts } from '../director-plan-artifact';
 import { normalizePeerNarrativeSources } from './source-peer-normalization';
 import { pinCaptionsOnTop } from './caption-stack';
@@ -8,7 +9,7 @@ import {
   type EditorDocumentV2,
   type EditorTrackRole,
 } from './types';
-import { normalizeCustomVisualStyle } from '../visual-style';
+import { normalizeLook } from '../look';
 import { editorTrackAcceptsClip } from './track-compatibility';
 
 export function isEditorDocumentV2(value: unknown): value is EditorDocumentV2 {
@@ -40,12 +41,17 @@ export function isEditorDocumentV2(value: unknown): value is EditorDocumentV2 {
   ))) return false;
   if (Object.values(document.semantics.transcripts).some((segments) => !Array.isArray(segments))) return false;
   if (document.semantics.scenes.some((scene) => !scene || typeof scene !== 'object' || !Array.isArray(scene.clipIds))) return false;
-  if (document.appearance.customVisualStyle !== undefined
-    && !normalizeCustomVisualStyle(document.appearance.customVisualStyle)) return false;
+  if (document.appearance.look !== undefined && !normalizeLook(document.appearance.look).look) return false;
   return true;
 }
 
 /** Structural and referential validation. Offline assets are valid; dangling asset ids are not. */
+/** A whole-mix loudness setting is a finite target and a bounded master gain. */
+export function validLoudness(value: unknown): value is { targetLufs: number; gainDb: number } {
+  const row = value as { targetLufs?: unknown; gainDb?: unknown } | null;
+  return !!row && typeof row.targetLufs === 'number' && typeof row.gainDb === 'number' && row.targetLufs >= -40 && row.targetLufs <= -5 && row.gainDb >= -24 && row.gainDb <= 30;
+}
+
 export function validateEditorDocumentV2(document: EditorDocumentV2): EditorDocumentIssue[] {
   const issues: EditorDocumentIssue[] = [];
   const push = (severity: EditorDocumentIssue['severity'], code: string, path: string, message: string) =>
@@ -55,6 +61,7 @@ export function validateEditorDocumentV2(document: EditorDocumentV2): EditorDocu
   if (!isFinitePositive(document.canvas.width)) push('error', 'invalid-canvas-width', 'canvas.width', 'Canvas width must be positive.');
   if (!isFinitePositive(document.canvas.height)) push('error', 'invalid-canvas-height', 'canvas.height', 'Canvas height must be positive.');
   if (!isFinitePositive(document.canvas.fps) || document.canvas.fps > 240) push('error', 'invalid-fps', 'canvas.fps', 'FPS must be within 1..240.');
+  if (document.processing?.loudness !== undefined && !validLoudness(document.processing.loudness)) push('error', 'invalid-loudness', 'processing.loudness', 'Loudness needs a target within [-40, -5] LUFS and a gain within [-24, 30] dB.');
 
   const trackIds = new Set<string>();
   const clipIds = new Set<string>();
@@ -174,7 +181,17 @@ export function parseEditorDocumentV2(value: unknown): EditorDocumentV2 | null {
   if (!isEditorDocumentV2(value)) return null;
   // Load-time repair: lanes inserted before the caption pin existed could sit above the captions;
   // the captions come back on top (see caption-stack.ts).
-  return pinCaptionsOnTop(normalizePeerNarrativeSources(normalizeEditorDocumentArtifacts(value).document));
+  // Transitions used to hang on the incoming spine clip; they now live on their own lane.
+  return withoutRetiredAppearance(withMigratedTransitions(pinCaptionsOnTop(normalizePeerNarrativeSources(normalizeEditorDocumentArtifacts(value).document))));
+}
+
+/** Theme packs (frameId) and the custom visual style were retired (2026-10-07): projects saved with them
+ *  load without them. Graphics inserted under a theme keep its colours in their own frozen vars. */
+function withoutRetiredAppearance(document: EditorDocumentV2): EditorDocumentV2 {
+  const appearance = document.appearance as EditorDocumentV2['appearance'] & { frameId?: unknown; customVisualStyle?: unknown };
+  if (!('frameId' in appearance) && !('customVisualStyle' in appearance)) return document;
+  const { frameId: _frame, customVisualStyle: _style, ...kept } = appearance;
+  return { ...document, appearance: kept };
 }
 
 export function editorTimelineTotalFrames(document: EditorDocumentV2): number {

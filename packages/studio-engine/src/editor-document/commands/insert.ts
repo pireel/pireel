@@ -1,4 +1,5 @@
 import type { EditorDocumentV2, EditorTrack, SemanticScene, TimelineClip } from '../types';
+import { transitionsAfterInsertion } from '../transitions';
 import { atomicMediaFramingFromTreatment, IDENTITY_MEDIA_FRAMING } from '../../composition-core';
 import { validateEditorDocumentV2 } from '../validation';
 import { clipEndFrame, splitClipAtFrame } from './clip-geometry';
@@ -6,6 +7,7 @@ import { removeEditorRange } from './range';
 import { directorPlanAfterRippleInsertion, withAdjustedDirectorPlan } from '../../director-plan-timing';
 import { directorPlanFromDocument } from '../../director-plan-artifact';
 import { assignClipToBestDirectorScene, assignClipToSemanticScene } from '../../semantic-scenes';
+import { seedTranscriptSection } from '../../transcript-sections';
 import {
   commandFailure,
   emptyCommandReceipt,
@@ -52,11 +54,11 @@ function placedClips(placements: TimelineClipPlacement[], atFrame: number): Time
       : clip.kind === 'media'
         ? clip.mediaFraming ?? IDENTITY_MEDIA_FRAMING
         : undefined;
-    return {
+    return seedTranscriptSection({
       ...clip,
       ...(mediaFraming ? { mediaFraming } : {}),
       startFrame: atFrame + offsetFrames,
-    } as TimelineClip;
+    } as TimelineClip);
   });
 }
 
@@ -233,7 +235,7 @@ export function insertEditorClips(document: EditorDocumentV2, options: InsertEdi
   }
   let next: EditorDocumentV2 = {
     ...document,
-    timeline: { ...document.timeline, tracks },
+    timeline: { ...document.timeline, tracks, ...(document.timeline.transitions ? { transitions: transitionsAfterInsertion(document.timeline.transitions, options.atFrame, spanFrames) } : {}) },
     semantics,
   };
   const assigned = assignInsertedClips(document, next, incomingClips.map((clip) => clip.id), options.sceneId);

@@ -29,7 +29,7 @@ describe('open Motion Graphic capability retrieval', () => {
     const retrieved = motionGraphicPatternSection(['browser-source', 'annotation']);
     expect(retrieved).toContain('RETRIEVED, NOT REQUIRED OUTPUT TYPES');
     expect(retrieved).toContain('combine, transform, or');
-    expect(retrieved).toContain('active visual direction owns appearance');
+    expect(retrieved).toContain('active theme and brand own appearance');
 
     const unmatched = motionGraphicPatternSection([]);
     expect(unmatched).toContain('content-specific structure');

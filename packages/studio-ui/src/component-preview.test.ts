@@ -2,16 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { componentPreviewModel } from './component-preview';
 
 describe('componentPreviewModel', () => {
-  it('normalizes a native kit component into a full-canvas preview block', () => {
+  it('previews a native kit component in the box an insert gives it, framed on that box', () => {
     const model = componentPreviewModel({ id: 'kit:metric', label: 'Metric', kit: 'metric' });
 
-    expect(model?.comp).toMatchObject({ width: 1920, height: 1080, theme: 'general' });
+    expect(model?.comp).toMatchObject({ width: 1080, height: 1920, theme: 'general' });
     expect(model?.block).toMatchObject({
       templateId: 'kit:metric',
       slots: { props: { value: '47%', trend: 'up' } },
-      box: { x: 0, y: 0, w: 1, h: 1 },
+      box: { x: 0.07, y: 0.34, w: 0.86, h: 0.3 },
     });
+    expect(model?.focus?.w).toBeCloseTo(0.86 * 1080);
+    expect(model?.focus?.h).toBeCloseTo(0.3 * 1920);
     expect(model?.insertProps).toEqual({ value: '47%', trend: 'up' });
+    const landscape = componentPreviewModel({ id: 'kit:metric', label: 'Metric', kit: 'metric' }, { width: 1920, height: 1080, theme: 'general', video: null, blocks: [], shots: [] });
+    expect(landscape?.comp).toMatchObject({ width: 1920, height: 1080 });
   });
 
   it('normalizes an authored component with its design canvas and animation', () => {

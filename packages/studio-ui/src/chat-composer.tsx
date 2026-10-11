@@ -1,9 +1,13 @@
 "use client";
 
-/** Studio chat input: contenteditable composer with @ element pills and the theme (frame) picker. */
+import { ChatModelPicker } from './chat-model-picker';
+import type { StudioAgentModelId } from '@pireel/studio-engine/agent-models';
+
+/** Studio chat input: contenteditable composer with @ element pills. */
 
 import { useImperativeHandle, useRef, useState } from "react";
-import { AtSign, ArrowUp, Square, Palette, Sparkles } from "lucide-react";
+import { loadGenerationParams, saveGenerationParams, useGenerationModels, withKnownModel } from './generation-settings';
+import { AtSign, ArrowUp, Square, Sparkles } from "lucide-react";
 import { generationIntentLine, type ChatMode, type GenerationIntent, type GenerationParams } from "./chat-generation-intent";
 import { ChatModePicker } from "./chat-mode-picker";
 import { GenerationControls, GenerationCreditsBadge } from "./chat-generation-params";
@@ -20,7 +24,7 @@ import {
 } from "@pireel/ui/trigger-popover";
 import type { StudioScenarioSkillId } from "@pireel/studio-engine/scenario-skills";
 import { ChatSkillPicker } from "./chat-skill-picker";
-import type { FrameCatalogItem } from "./use-frame-catalog";
+import { ProjectBrandSummary } from './project-brand-summary';
 import {
   appendChatPillRemoveIcon,
   CHAT_ACTION_PILL_CLASS,
@@ -32,7 +36,6 @@ import {
 } from "./chat-format";
 import { t } from "./i18n";
 import type {
-  AttachedFrame,
   AttachedTimelineFrame,
   PendingTimelineFrame,
   StudioChatDraftPart,
@@ -44,11 +47,6 @@ import {
   ChatTimelineFramePicker,
   formatTimelineFrameTime,
 } from "./chat-timeline-frame-picker";
-import { CustomFrameDialog } from "./custom-frame-dialog";
-import {
-  customFrameCatalogItem,
-  useCustomFrameStyle,
-} from "./custom-frame-style";
 
 const noopTimelineFramePick = () => {};
 
@@ -78,19 +76,6 @@ export interface ComposerHandle {
   insertMention(el: StudioElementRef): void;
 }
 
-/** Generation config (model, ratio, count, quality, resolution, duration, voice) is a user preference,
- *  not per-project state — remember the last choices so the picker opens on them next time. */
-const GEN_PARAMS_KEY = 'pireel:studio:gen-params';
-function loadGenParams(): GenerationParams {
-  try {
-    const raw = localStorage.getItem(GEN_PARAMS_KEY);
-    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as GenerationParams) : {};
-  } catch {
-    return {};
-  }
-}
-
 export function Composer({
   placeholder,
   status,
@@ -100,10 +85,10 @@ export function Composer({
   onOpenSkillMarket,
   onCreateScenarioSkill,
   onDeleteScenarioSkill,
+  projectBrand,
   onPickSkill,
-  frame,
-  frames,
-  onPickFrame,
+  agentModel,
+  onPickAgentModel,
   timelineFramePickActive,
   timelineFramePickBusy,
   timelineFramePickAvailable,
@@ -112,6 +97,8 @@ export function Composer({
   onStop,
   methodsRef,
 }: {
+  agentModel?: StudioAgentModelId;
+  onPickAgentModel?: (id: StudioAgentModelId) => void;
   placeholder: string;
   status: ChatStatus;
   elements: StudioElementRef[];
@@ -123,11 +110,10 @@ export function Composer({
   onCreateScenarioSkill?: () => void;
   onDeleteScenarioSkill?: (id: string) => Promise<void>;
   onPickSkill: (id: StudioScenarioSkillId) => void;
+  /** The project's brand and how to switch it (hidden without a brand provider). */
+  projectBrand?: StudioChatProps["projectBrand"];
   /** Visual direction attached to the current session. */
-  frame: AttachedFrame | null;
   /** Art-direction catalog rendered in the unified visual-style dialog. */
-  frames: FrameCatalogItem[];
-  onPickFrame: (frame: AttachedFrame | null) => void;
   timelineFramePickActive: boolean;
   timelineFramePickBusy: boolean;
   timelineFramePickAvailable: boolean;
@@ -150,39 +136,15 @@ export function Composer({
   const [timelineFrameCount, setTimelineFrameCount] = useState(0);
   const [studioActionActive, setStudioActionActive] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [customOpen, setCustomOpen] = useState(false);
-  const [customStyle, saveCustomStyle] = useCustomFrameStyle();
   const [mode, setMode] = useState<ChatMode>("chat");
   const intent: GenerationIntent | null = mode === "chat" ? null : mode;
-  const [genParams, setGenParams] = useState<GenerationParams>(loadGenParams);
+  const [genParams, setGenParams] = useState<GenerationParams>(loadGenerationParams);
   // Persist the generation config across sessions (per-viewer localStorage, best-effort).
   useEffect(() => {
-    try { localStorage.setItem(GEN_PARAMS_KEY, JSON.stringify(genParams)); } catch { /* private mode / blocked */ }
+    saveGenerationParams(genParams);
   }, [genParams]);
-  // Hosted model catalog for the armed kind (image/video only), same source the retired panel used.
-  const [genModels, setGenModels] = useState<{ id: string; name: string }[]>([]);
-  useEffect(() => {
-    if (intent !== "image" && intent !== "video") {
-      setGenModels([]);
-      return;
-    }
-    let cancelled = false;
-    void fetch(`/api/models?kind=${intent}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j: { models?: Array<{ id?: string; name?: string }> } | null) => {
-        if (cancelled || !Array.isArray(j?.models)) return;
-        const models = j.models.filter((m): m is { id: string; name?: string } => typeof m?.id === "string").map((m) => ({ id: m.id, name: m.name ?? m.id }));
-        setGenModels(models);
-        // A remembered model is intent-specific: drop it if it is not one of this kind's models, so
-        // an image model never leaks into a video generation. Everything else (ratio, quality, …) stays.
-        const ids = new Set(models.map((m) => m.id));
-        setGenParams((p) => (p.modelId && !ids.has(p.modelId) ? { ...p, modelId: undefined } : p));
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [intent]);
+  // Hosted model catalog for the armed kind (image/video only); a remembered model of another kind is dropped.
+  const genModels = useGenerationModels(intent === "image" || intent === "video" ? intent : null, (models) => setGenParams((p) => withKnownModel(p, models)));
   const isBusy = submitting || status === "streaming" || status === "submitted";
 
   function recomputeEmpty() {
@@ -548,19 +510,6 @@ export function Composer({
     syncTimelineFrameCount();
   }
 
-  /** Unified visual-style dialog → attach one visual direction plus independent user controls. */
-  function pickFrame(item: FrameCatalogItem) {
-    onPickFrame({
-      id: item.id,
-      title: item.title,
-      icon: item.icon,
-      iconKey: item.iconKey ?? null,
-      ...(item.customVisualStyle
-        ? { customVisualStyle: item.customVisualStyle }
-        : {}),
-    });
-  }
-
   /** @ picker selection → insert pill. */
   function pickElement(
     el: StudioElementRef,
@@ -759,7 +708,8 @@ export function Composer({
 
   return (
     <>
-      <div className="border-line bg-panel-2 focus-within:border-ink-4 relative rounded-md border transition-colors">
+      <div className="mb-1 flex min-w-0 items-center"><ProjectBrandSummary brand={projectBrand} /></div>
+      <div className="border-line bg-panel-2/35 focus-within:border-ink-4 relative rounded-md border transition-colors">
         <div className="relative">
           {empty && !studioActionActive && (
             <div className="text-ink-4 pointer-events-none absolute left-3 top-2.5 text-[13px]">
@@ -833,28 +783,6 @@ export function Composer({
                 }}
               />
             ) : null}
-            {/* Visual-style button opens the unified direction + controls dialog. Disabled while the
-                turn is running because a mid-generation direction switch would split one batch.
-                Only chat and graphic generation are theme-directed. */}
-            {intent && intent !== "element" ? null : (
-            <button
-              type="button"
-              disabled={isBusy}
-              className={`inline-flex h-7 w-7 items-center justify-center rounded-md disabled:pointer-events-none disabled:opacity-30 ${
-                frame
-                  ? "bg-accent/15 text-accent hover:bg-accent/25"
-                  : "text-ink-3 hover:bg-line hover:text-ink"
-              }`}
-              onClick={() => setCustomOpen(true)}
-              title={
-                frame
-                  ? t("chatGen.themeTitle", { title: frame.title })
-                  : t("chatGen.pickTheme")
-              }
-            >
-              <Palette className="h-3.5 w-3.5" strokeWidth={2.2} />
-            </button>
-            )}
             {intent ? null : (
             <ChatTimelineFramePicker
               disabled={isBusy}
@@ -888,6 +816,7 @@ export function Composer({
             )}
           </div>
           <div className="flex items-center gap-2">
+          {agentModel && onPickAgentModel && <ChatModelPicker value={agentModel} disabled={isBusy} onChange={onPickAgentModel} />}
           {intent ? <GenerationCreditsBadge intent={intent} params={genParams} models={genModels} /> : null}
           {isBusy ? (
             <button
@@ -937,7 +866,7 @@ export function Composer({
             onMouseEnter={setActive}
             onMouseDown={(e) => e.preventDefault()}
             onClick={pick}
-            className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] ${active ? "bg-panel-2" : ""}`}
+            className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] ${active ? "bg-panel-2/35" : ""}`}
           >
             <span className="shrink-0">{elementIcon(el)}</span>
             <span className="text-ink truncate">{el.label}</span>
@@ -948,29 +877,6 @@ export function Composer({
         )}
       />
 
-      <CustomFrameDialog
-        style={customOpen ? (frame?.customVisualStyle ?? customStyle) : null}
-        frames={frames}
-        frameId={frame?.id ?? null}
-        onClose={() => setCustomOpen(false)}
-        onUse={(style, directionId) => {
-          saveCustomStyle(style);
-          const direction = frames.find((item) => item.id === directionId);
-          pickFrame(
-            customFrameCatalogItem(
-              style,
-              t("customFrame.title"),
-              t("customFrame.summary"),
-              direction,
-            ),
-          );
-          setCustomOpen(false);
-        }}
-        onDisable={() => {
-          onPickFrame(null);
-          setCustomOpen(false);
-        }}
-      />
     </>
   );
 }
@@ -1116,4 +1022,3 @@ function findElementPill(
     ) ?? null
   );
 }
-

@@ -70,8 +70,9 @@ export function injectPreviewContentBoundsReporter(html: string, blockId: string
     }
     parent.postMessage({type:'hf:previewContentBounds',blockId:blockId,rect:rect},'*');
   }
-  addEventListener('load',schedule);
-  addEventListener('message',function(e){var d=e.data||{};if(d.type==='hf:blockAdd'||d.type==='hf:blockHtml')setTimeout(schedule,0);});
+  // window.* so it also binds inside an in-page preview stage (whose scripts get a window facade).
+  window.addEventListener('load',schedule);
+  window.addEventListener('message',function(e){var d=e.data||{};if(d.type==='hf:blockAdd'||d.type==='hf:blockHtml')setTimeout(schedule,0);});
   if(document.fonts&&document.fonts.ready)document.fonts.ready.then(schedule);
   setTimeout(schedule,0);setTimeout(schedule,160);setTimeout(schedule,600);
 })();

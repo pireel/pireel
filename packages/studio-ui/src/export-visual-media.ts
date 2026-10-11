@@ -9,7 +9,6 @@ import {
   type ShotPreciseFraming,
   type SupplementalVisualMediaClip,
 } from '@pireel/studio-engine/composition';
-import type { VideoSample } from 'mediabunny';
 import { t } from './i18n';
 import { materializeRemoteMedia } from './remote-media';
 import { loadLocalVideo } from './local-media';
@@ -17,7 +16,7 @@ import { loadLocalVideo } from './local-media';
 export interface SampledVisualVideo {
   sourceWidth: number;
   sourceHeight: number;
-  sample: VideoSample;
+  sample: { draw: (ctx: VisualCanvasContext, x: number, y: number, width: number, height: number) => void };
 }
 
 type VisualCanvasContext = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
@@ -131,4 +130,24 @@ export function drawSupplementalVisualMedia(args: {
 
 export function disposeVisualImageBitmaps(images: ReadonlyMap<string, ImageBitmap>): void {
   for (const image of images.values()) image.close();
+}
+
+/** Materialize alpha before entering the synchronous canvas layer compositor. */
+export async function prepareVisualPersonMattes(visuals: readonly SupplementalVisualMediaClip[], samples: Map<string, SampledVisualVideo>, time: number): Promise<() => void> {
+  const owned: ImageBitmap[] = [];
+  const release = () => owned.forEach(bitmap => bitmap.close());
+  try {
+    for (const visual of activeVisualMedia(visuals, time)) {
+      if (!visual.personMatte) continue;
+      const source = samples.get(visual.clipId);
+      if (!source) throw new Error('无法读取需要抠图的人像视频。');
+      const canvas = new OffscreenCanvas(source.sourceWidth, source.sourceHeight);
+      const ctx = canvas.getContext('2d'); if (!ctx) throw new Error('无法创建人像抠图画布。');
+      source.sample.draw(ctx, 0, 0, canvas.width, canvas.height);
+      const { personCutoutFrame } = await import('./person-cutout-frame');
+      const bitmap = await personCutoutFrame(canvas.transferToImageBitmap(), { id: `export:${visual.clipId}`, t: time }); owned.push(bitmap);
+      samples.set(visual.clipId, { ...source, sample: { draw: (target, x, y, width, height) => target.drawImage(bitmap, x, y, width, height) } });
+    }
+    return release;
+  } catch (error) { release(); throw error; }
 }

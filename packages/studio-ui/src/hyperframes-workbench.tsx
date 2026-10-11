@@ -1,3 +1,4 @@
+import { brandEditingSkills } from '@pireel/studio-engine/brand-preferences';
 "use client";
 
 /**
@@ -11,12 +12,15 @@
  *  · Export via server-side headless Chrome (same assembled HTML, WYSIWYG, TODO wire up).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type ComponentType } from "react";
+import type { EditorCommand } from "@pireel/studio-engine/editor-document/commands/types";
+import { DEFAULT_TRANSITION_SEC, transitionSlotAt } from "@pireel/studio-engine/editor-document/transitions";
 import { useLocale } from "use-intl";
 import {
   Play,
   Pause,
   FileVideo,
+  FolderOutput,
   Code2,
   Loader2,
   Wand2,
@@ -24,10 +28,8 @@ import {
   Upload,
   FlaskConical,
   ScanFace,
-  MessageSquare,
   Image as ImageIcon,
-  ChevronsLeft,
-  ChevronsRight,
+  ArrowLeft,
   Minus,
   Plus,
   Download,
@@ -51,12 +53,12 @@ import {
   Undo2,
   Redo2,
   LayoutGrid,
-  Scissors,
   Captions,
   Power,
   Magnet,
   Rows3,
   Type,
+  ArrowLeftRight,
 } from "lucide-react";
 import {
   Tooltip,
@@ -70,7 +72,6 @@ import { t, tEnglish } from "./i18n";
 import { editorErrorMessage } from "./editor-error";
 import {
   type Block,
-  type CaptionStyle,
   type Composition,
   type EditorDocumentV2,
   type EditorMediaAsset,
@@ -91,6 +92,8 @@ import {
   assembleHtml,
   blockBgCss,
   captionLineSegments,
+  captionStackRows,
+  captionStackScale,
   customHasSurface,
   blockId,
   blockKind,
@@ -98,7 +101,6 @@ import {
   BASE_CAPTION_FONT_PX,
   emptyComposition,
   emptyEditorDocumentV2,
-  dominantTimelineSpeechTrack,
   editorDocumentRenderPlan,
   freeTrack,
   getCaptionPreset,
@@ -137,8 +139,8 @@ import {
   supplementalVisualStateAt,
   DIRECTIONAL_TRANSITIONS,
   MAX_TRANSITION_SEC,
-  cutTransitions,
-  splitBlockedByTransition,
+  CUT_TRANSITION_EFFECTS,
+  transitionWindows,
   totalDuration,
   hasTimelineContent,
   hasVideoTrackContent,
@@ -156,6 +158,7 @@ import { runtimeTranscriptsFollowingDocument } from './runtime-transcripts';
 import { transcriptInputsFor, type DocumentOp } from '@pireel/studio-engine/document-transaction';
 import { applyEditorDocumentPersistenceMetadata } from '@pireel/studio-engine/project-document';
 import { DocumentCommitter } from './document-commit';
+import type { PlaybookSnapshot } from "@pireel/studio-engine/brand-playbook";
 import { ProjectSync, localPendingTransactionStore, type ProjectSyncDeps, type ProjectSyncSections } from './project-sync';
 
 /** Constant speed of a placed video clip = source seconds per timeline second (1 = natural). */
@@ -170,7 +173,7 @@ function clipSpeedInDocument(document: EditorDocumentV2, clipId: string): number
   }
   return 1;
 }
-import { getTheme, themeVarsCss } from "@pireel/studio-engine/theme";
+import { effectiveThemeVars, getTheme, themeVarsCss } from "@pireel/studio-engine/theme";
 import {
   spans as clipSpans,
 } from "@pireel/studio-engine/trim";
@@ -205,6 +208,7 @@ import {
   markFileOrigin,
   resolveAssetBytes,
   saveLocalVideo,
+  startLocalMediaCacheSession,
 } from "./local-media";
 import { assetUploadQueue } from "./asset-upload-queue";
 import { LocalAssetRuntime } from "./local-asset-runtime";
@@ -235,10 +239,6 @@ import {
 } from "./transition-bake";
 import { studioProviders } from "@pireel/studio-engine/providers";
 import { ensureTemplatesRegistered } from "@pireel/studio-engine/templates";
-import {
-  customVisualStylePalette,
-  type CustomVisualStyle,
-} from "@pireel/studio-engine/visual-style";
 import { DeferredEffectDisposer } from "./cloud-project-save";
 import { DeferredActivation } from "./deferred-activation";
 import { loadCurrentUser } from "./current-user";
@@ -253,6 +253,7 @@ import {
   isTimelineDensity,
   quantizeTimelineFrameSecond,
   TIMELINE_DENSITY_STORAGE_KEY,
+  TIMELINE_COLLAPSED_STORAGE_KEY,
   type TimelineDensity,
 } from "./timeline-utils";
 import { timelineDirectorScenesFromDocument } from "./director-scene-strip";
@@ -261,7 +262,6 @@ import type {
   TimelineMediaDropTarget,
 } from "./timeline-asset-drop";
 import {
-  type AttachedFrame,
   StudioChat,
   type StudioChatHandle,
   type StudioElementRef,
@@ -271,6 +271,7 @@ import { resolveLocalAssetReference } from "./studio-tool-input-references";
 import { shouldCollapseChatForTimelineFramePick } from "./chat-timeline-frame-picker";
 import { ElementSourceEditor, type SourceDraft } from "./element-source-editor";
 import { useStableCallbacks } from "./use-stable-callbacks";
+import { RIGHT_DOCK_TABS, WorkbenchDockPanel, useWorkbenchColumns, type DockTab, type RightDockTab, type EditingMode } from "./workbench-dock";
 import {
   type StudioDraft,
   cacheProjectLocally,
@@ -287,7 +288,9 @@ import {
 
 import { useGenerationLock } from "./use-generation-lock";
 import { useMediaAnalysis } from "./use-media-analysis";
-import { useStudioExport } from "./use-export";
+import { downloadBlob, useStudioExport } from "./use-export";
+import { buildNlePackage, NleExportCanceled } from "./nle-export-package";
+import { NleExportDialog, type NleExportState } from "./nle-export-dialog";
 import {
   DEFAULT_RENDER_OPTS,
   EMPTY_VIDEO_GROUND,
@@ -301,6 +304,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@pireel/ui/dialog";
+import { generatedAssetIndexEntry, generatedRecordsFromJobs, listStudioGens, type GeneratedAssetRecord } from "./gen-api";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -308,14 +312,24 @@ import {
   DropdownMenuTrigger,
 } from "@pireel/ui/dropdown-menu";
 import { BatchExportDialog, type OutputBatchState } from "./batch-export-dialog";
-import { generatedAssetIndexEntry, generatedRecordsFromJobs, listStudioGens, type GeneratedAssetRecord } from "./gen-api";
 import { KIT_INSERT_DURATION, kitSampleProps } from "./kit-ui";
 import { wordsFromText } from "@pireel/studio-engine/caption-fx";
 import { AssetsPanel, type GenType, type PanelDragAsset } from "./assets-panel";
 import { useStudioShell } from "./shell-context";
-import { ScriptPanel, TimelineScriptPanel } from "./script-panel";
+import { WorkflowPanel } from "./workflow-panel";
+import { CaptionsEntry } from "./captions-entry";
+import { workflowDocumentRevision } from "./workflow-studio-adapter";
+import { TranscriptEditor } from "./transcript-editor";
+import { brollTargetForRange } from "./timeline-asset-drop";
+import type { TimelinePendingLane, TimelinePendingRange } from "./studio-timeline";
+import { TranscriptAddPopover, type TranscriptAddGenKind, type TranscriptAddTarget } from "./transcript-add-popover";
+import { generateAudioForRange, generateVisualForRange } from "./range-generation";
+import type { GenerationRequest } from "./generation-settings";
+import { MyAssetsPanel } from "./my-assets-panel";
+import type { TranscriptAddKind } from "./script-panel";
 import { CaptionsPanel } from "./captions-panel";
-import { FramePanel } from "./frame-panel";
+import { CaptionStylePanel } from "./caption-style-panel";
+import { EditorModeSwitch } from "./editor-mode-switch";
 import { PersonFxPanel, type MatteState } from "./person-fx-panel";
 import { ShotTreatmentPanel } from "./shot-treatment-panel";
 import { MusicPanel } from "./music-panel";
@@ -325,7 +339,12 @@ import { useDenoise } from "./use-denoise";
 import { TransitionPanel } from "./transition-panel";
 import { MediaAnimPanel } from "./media-anim-panel";
 import { type MatteFrame, MATTE_FPS, computeMatteTrack } from "./person-matte";
-import { type FrameCatalogItem, useFrameCatalog } from "./use-frame-catalog";
+import { restoreChatThreads } from "./chat-thread-cache";
+import { createChatThreadPersistence } from "./chat-thread-persistence";
+import type { StoredThread } from "./chat-thread-store";
+import { acknowledgeAgentStartPrompt, takeAgentStartPrompt } from "./agent-project-from-video";
+import { documentIsEdited, fineCutClipIds } from "./first-pass";
+import type { WorkflowUsage } from "@pireel/studio-engine/workflow";
 import { StudioBootOverlay } from "./studio-boot";
 import { confirm } from "@pireel/ui/confirm";
 import type { StudioToolResult } from "@pireel/studio-engine/prompts";
@@ -341,7 +360,6 @@ import {
 import { type SafeZone, detectFrameAt, geomNote } from "./geometry";
 import {
   normalizeDims,
-  personFxFromFrame,
   shotSpan,
 } from "./workbench-utils";
 import {
@@ -427,23 +445,8 @@ import { ensureWebFontStylesheets } from './web-fonts';
 // production tree-shaking can flatten a re-export barrel before evaluating it.
 ensureTemplatesRegistered();
 
-const RAIL_NAV_W = 48; // vertical primary-nav strip on the rail's outer edge; railW measures the CONTENT column only
+const RAIL_NAV_W = 48; // right-side tool navigation
 const UNDO_CAP = 20; // undo snapshot stack cap (each = canonical V2 document, incl. custom block payloads)
-
-/** Make the user's real caption-preset choice visible immediately. Preserve placement, size,
- * bilingual settings and on/off state; clear visual overrides so the selected preset renders intact. */
-function customCaptionStyle(
-  style: CustomVisualStyle,
-  current: CaptionStyle,
-): Partial<CaptionStyle> {
-  return {
-    ...current,
-    preset: style.captionPreset,
-    color: undefined,
-    bg: undefined,
-    bold: undefined,
-  };
-}
 
 const firstNarrativeDurationSec = (
   document: EditorDocumentV2,
@@ -460,8 +463,8 @@ type FloatKind =
   | "person"
   | "shot"
   | "code"
+  | "props"
   | "anim"
-  | "transition"
   | "captions";
 
 /** Consecutive caption-derivation passes allowed to start from the effect's own publish before it stops relaying. */
@@ -482,11 +485,34 @@ function readCoverPushedSig(key: string): string | null {
 export function HyperframesWorkbench({
   projectId,
   agentView = false,
+  initialWorkflowId,
+  backHref,
+  accountMenu,
+  themeToggle,
+  CreditsBalance,
+  AccountControls,
 }: {
   projectId: string;
   agentView?: boolean;
+  initialWorkflowId?: string;
+  /** Host-provided return route when the editor replaces the global navigation. */
+  backHref?: string;
+  /** Hosted account controls; omitted by standalone editors. */
+  accountMenu?: ReactNode;
+  themeToggle?: ReactNode;
+  CreditsBalance?: ComponentType<{ busy: boolean }>;
+  /** The host's shared top-bar controls (pricing, theme, credits…); replaces themeToggle and CreditsBalance. */
+  AccountControls?: ComponentType<{ busy: boolean }>;
 }) {
   const shell = useStudioShell();
+  useEffect(() => startLocalMediaCacheSession(), [projectId]);
+  const [workflowOpen, setWorkflowOpen] = useState(!!initialWorkflowId);
+  const [workflowEntryId] = useState(initialWorkflowId === "talking-head" ? "captions" : initialWorkflowId ?? "captions");
+  const WorkflowEntry = workflowEntryId === "captions" ? CaptionsEntry : WorkflowPanel;
+  const [workflowBusy, setWorkflowBusy] = useState(false);
+  const workflowBusyRef = useRef(false);
+  const workflowOpenRef = useRef(workflowOpen);
+  workflowOpenRef.current = workflowOpen;
   const locale = useLocale(); // note/reply language follows UI locale (on-screen text follows the narration script language)
   const localeRef = useRef(locale);
   localeRef.current = locale;
@@ -972,7 +998,6 @@ export function HyperframesWorkbench({
   // Right-panel categories (selected via the vertical toolbar): chat / image / video / blocks / upload / captions / frame (code = source drill-down of the selected block)
   const [codeBlockId, setCodeBlockId] = useState<string | null>(null); // which block the source editor is viewing
   const [codeLoop, setCodeLoop] = useState(false); // source editor "loop preview" toggle
-  const [panelW, setPanelW] = useState(342); // right panel width (shared by all panels, drag left edge, 320–760)
   const loopRangeRef = useRef<{ start: number; end: number } | null>(null); // loop window (final time); clock reports out-of-range → jump back
   const codeOrigRef = useRef<{
     id: string;
@@ -1046,20 +1071,24 @@ export function HyperframesWorkbench({
     void (store?.list(projectId) ?? Promise.resolve([]))
       .then((threads) => {
         if (cancelled) return;
-        setInitialChatThreads(Array.isArray(threads) ? threads : []);
+        setInitialChatThreads(restoreChatThreads(projectId, (Array.isArray(threads) ? threads : []) as StoredThread[]));
         setChatEpoch((value) => value + 1);
       })
       .catch(() => {
-        if (!cancelled) setInitialChatThreads([]);
+        if (!cancelled) setInitialChatThreads(restoreChatThreads(projectId, []));
       });
     return () => { cancelled = true; };
   }, [projectId]);
-  const persistChatThread = useCallback((thread: unknown) => {
-    void studioProviders().chats?.save(projectId, thread).catch((error) => {
+  const chatPersistence = useMemo(() => createChatThreadPersistence({
+    getStore: () => studioProviders().chats,
+    onFailure: (localSaved, error) => {
       console.error("[studio] chat save failed", error);
-      toast.error(t("workbench.syncFailedTryAgain"));
-    });
-  }, [projectId]);
+      toast.error(t(localSaved ? "workbench.syncFailedTryAgain" : "chatGen.checkpointFailed"));
+    },
+  }), []);
+  const persistChatThread = useCallback((value: unknown) => {
+    void chatPersistence(projectId, value as StoredThread);
+  }, [projectId, chatPersistence]);
   const [pps, setPps] = useState(DEFAULT_PPS); // timeline zoom (px/sec), controlled by the ruler slider
   const [timelineSnapEnabled, setTimelineSnapEnabled] = useState(true);
   // Timeline row density. A remembered choice wins; otherwise the agent's embedded view starts
@@ -1074,6 +1103,24 @@ export function HyperframesWorkbench({
     }
     return agentView ? "compact" : "comfortable";
   });
+  // Collapsed timeline: only the transport bar stays; the tracks fold away so the preview gets the room.
+  const [timelineCollapsed, setTimelineCollapsed] = useState(() => {
+    try {
+      return typeof localStorage !== "undefined" && localStorage.getItem(TIMELINE_COLLAPSED_STORAGE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleTimelineCollapsed = useCallback(() => {
+    setTimelineCollapsed((current) => {
+      try {
+        localStorage.setItem(TIMELINE_COLLAPSED_STORAGE_KEY, current ? "0" : "1");
+      } catch {
+        /* storage unavailable: the choice lasts for this session */
+      }
+      return !current;
+    });
+  }, []);
   const toggleTimelineDensity = useCallback(() => {
     setTimelineDensityState((current) => {
       const next: TimelineDensity = current === "compact" ? "comfortable" : "compact";
@@ -1100,10 +1147,17 @@ export function HyperframesWorkbench({
     setLocateNear(near);
     setLocateSignal((n) => n + 1);
   };
-  const [libTab, setLibTab] = useState<
-    "assets" | "frames" | "script" | "captions" | "audio" | "text" | "props" | "avatar"
-  >("assets"); // rail primary-nav tab (themes hidden)
-  const [libCollapsed, setLibCollapsed] = useState(false); // asset rail collapsed (narrow strip + expand button; content hidden but state kept)
+  const [editingMode, setEditingMode] = useState<EditingMode>(agentView ? "captions" : "chat");
+  const selectEditingMode = (mode: EditingMode) => {
+    timelineFramePickAutoClosedChatRef.current = false;
+    setTimelineFramePickActive(false);
+    setEditingMode(mode);
+  };
+  const [libTab, setLibTab] = useState<RightDockTab>("assets");
+  const [libCollapsed, setLibCollapsed] = useState(false);
+  const leftPanelVisible = !(timelineFramePickActive && timelineFramePickAutoClosedChatRef.current);
+  const { rowRef: workspaceRowRef, widths: columnWidths, resize: resizeColumn } = useWorkbenchColumns(leftPanelVisible, !libCollapsed);
+  const setLibCollapsedManual = setLibCollapsed;
   const selectedDisplayTextBlock = useMemo(
     () => selectedId
       ? comp.blocks.find((block) => block.id === selectedId && block.templateId === "title") ?? null
@@ -1113,78 +1167,16 @@ export function HyperframesWorkbench({
   const selectedDisplayTextBlockId = selectedDisplayTextBlock?.id ?? null;
   const selectedCustomBlock = useMemo(
     () => selectedId
-      ? comp.blocks.find((block) => block.id === selectedId && (block.templateId === "custom" || block.templateId.startsWith("kit:"))) ?? null
+      ? comp.blocks.find((block) => block.id === selectedId && (block.templateId === "custom" || block.templateId.startsWith("kit:") || block.templateId.startsWith("look:"))) ?? null
       : null,
     [comp.blocks, selectedId],
   );
   const selectedCustomBlockId = selectedCustomBlock?.id ?? null;
-  // Asset rail geometry: the expanded content width is drag-resizable and persists. Collapsing
-  // keeps the primary-nav strip docked so navigation and the expand control stay in one place.
-  const [railW, setRailW] = useState(() => {
-    if (typeof window === "undefined") return 320;
-    const v = Number(window.localStorage.getItem("studio-rail-w"));
-    if (Number.isFinite(v) && v >= 260 && v <= 786) return v;
-    // No stored width → derive from the screen: fit a whole number of fixed 120px asset-card
-    // columns (~22vw budget, 2–6 cols) so the grid lands flush with no leftover strip.
-    // 130 = card 120 + gap 10; 16 = the grid's p-2 content padding.
-    const cols = Math.max(
-      2,
-      Math.min(6, Math.floor((window.innerWidth * 0.22 - 6) / 130)),
-    );
-    return 16 + cols * 120 + (cols - 1) * 10;
-  });
-  useEffect(() => {
-    try {
-      window.localStorage.setItem("studio-rail-w", String(railW));
-    } catch {
-      /* private mode: geometry just resets next session */
-    }
-  }, [railW]);
-  const railAutoCollapsedRef = useRef(false); // our small-screen auto-collapse (vs the user's manual one — only ours auto-reopens)
-  /** Manual collapse/expand: overrides any pending small-screen auto state. */
-  const setLibCollapsedManual = (v: boolean) => {
-    railAutoCollapsedRef.current = false;
-    setLibCollapsed(v);
-  };
-  // Small screens: auto-collapse the rail to give the stage room; growing back reopens it only
-  // if the collapse was ours (a user's deliberate collapse stays collapsed).
-  // Threshold 1152 (not 1280): 14" Windows laptops at the OS-recommended 150% scaling are exactly
-  // 1280 CSS px wide (and 2560×1600 @200% too) — the rail must stay expanded there. ≤1152 is
-  // effectively tablets and half-screen windows only.
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 1152px)");
-    const apply = (matches: boolean) => {
-      if (matches) {
-        setLibCollapsed((c) => {
-          if (!c) railAutoCollapsedRef.current = true;
-          return true;
-        });
-      } else if (railAutoCollapsedRef.current) {
-        railAutoCollapsedRef.current = false;
-        setLibCollapsed(false);
-      }
-    };
-    apply(mq.matches);
-    const on = (e: MediaQueryListEvent) => apply(e.matches);
-    mq.addEventListener("change", on);
-    return () => mq.removeEventListener("change", on);
-  }, []);
-  // Chat area (left) open/close: chat can be closed to free up the frame; the top-right "chat" button on the preview
-  // only appears when chat is hidden. Agent view collapses by default: the main conversation lives in the external
-  // agent (Codex), the built-in chat on the right just takes up space
-  const [panelOpen, setPanelOpen] = useState(!agentView);
-  const restoreChatAfterTimelineFramePick = useCallback(() => {
-    setTimelineFramePickActive(false);
-    if (!timelineFramePickAutoClosedChatRef.current) return;
-    timelineFramePickAutoClosedChatRef.current = false;
-    setPanelOpen(true);
-  }, []);
-  // Contextual tool panels (smart-cut/person/framing/code/anim/transition): **dock into the asset rail column, full area**
-  // (per user: not a new tab, takes the whole column; if the rail is collapsed, expand it first, and collapse back
-  // when a panel-triggered expansion closes). **Single instance** — opening another replaces the current one
-  // (setFloatWin handles the exit settlement uniformly).
+  // Contextual inspectors occupy the right tools column; the editing mode stays on the left.
   const [floatWin, setFloatWinRaw] = useState<FloatKind | null>(null);
   const floatWinRef = useRef<FloatKind | null>(null);
+  const contextDockVisible = !libCollapsed && !!floatWin;
+
   const [genRefreshTick, setGenRefreshTick] = useState(0);
   /** The rail was "auto-expanded just to dock a panel" — collapse it back after the panel closes (leave user-expanded ones alone). */
   const libAutoExpandedRef = useRef(false);
@@ -1431,8 +1423,8 @@ export function HyperframesWorkbench({
   const applyVisualResult = (vis: VisualTimeline) => {
     visualRef.current = vis;
     setVisual(vis);
-    // Attach the background-derived palette to the composition; don't override when a frame is mounted (a frame is a user-chosen design system)
-    if (vis.palette && !editorDocumentRef.current.appearance.frameId) {
+    // Attach the background-derived palette to the composition.
+    if (vis.palette) {
       commit({ op: "command", input: { command: { type: "appearance.patch", patch: { palette: vis.palette } } } }, { origin: "system", undo: "none" });
     }
   };
@@ -1645,7 +1637,7 @@ export function HyperframesWorkbench({
     eng.bakeProvider = (cut) => {
       for (const e of bakesRef.current.values()) {
         if (Math.abs(e.cut - cut) < 0.05 && e.bitmaps && e.baked)
-          return { fps: e.baked.fps, half: e.half, frames: e.bitmaps };
+          return { fps: e.baked.fps, start: e.baked.start, frames: e.bitmaps };
       }
       return null;
     };
@@ -1679,6 +1671,9 @@ export function HyperframesWorkbench({
   // Agent activity gates output switching (chat turn streaming, or a bridge tool executing).
   const [chatBusy, setChatBusy] = useState(false);
   const [bridgeToolsInFlight, setBridgeToolsInFlight] = useState(0);
+  const manualEditingLocked = chatBusy || bridgeToolsInFlight > 0 || workflowBusy;
+  const manualEditingLockedRef = useRef(manualEditingLocked);
+  manualEditingLockedRef.current = manualEditingLocked;
   const bridgeOutputAnchorRef = useRef<{ id: string; title: string } | null>(null);
   // Export (state + submit/poll/cancel) — see use-export.ts
   /** Files for locally-inserted clips (key = blob URL; the two split halves share one src so they share naturally):
@@ -1983,11 +1978,10 @@ export function HyperframesWorkbench({
     eng.setTransitions(
       primaryNarrative.hidden
         ? []
-        : cutTransitions(shots, renderVideoPlacements).map((tr) => ({
-            cut: tr.cut,
-            half: tr.half,
-          })),
-    ); // window table for shadow decoding
+        : transitionWindows(comp.transitions, shots, renderVideoPlacements).flatMap((tr) =>
+            tr.cut == null ? [] : [{ start: tr.start, cut: tr.cut, end: tr.end }],
+          ),
+    ); // windows that hand over at a cut need the other side decoded; the rest play on the live frame
     // Overlay video layers decode in the same engine: register each layer's bytes (a File for a
     // device-local source, the URL otherwise) and hand over the layer table. The picture of a layer
     // never depends on a media element, so a layer whose bytes are missing simply stays blank.
@@ -2016,7 +2010,8 @@ export function HyperframesWorkbench({
       {
         sig: string;
         cut: number;
-        half: number;
+        start: number;
+        end: number;
         baked: BakedWindow | null;
         bitmaps: ImageBitmap[] | null;
         decoding?: boolean;
@@ -2031,9 +2026,10 @@ export function HyperframesWorkbench({
     if (primaryNarrative.hidden) return;
     const spans = videoShotTimelineSpans(shots, renderVideoPlacements);
     const specs: (BakeSpec & { sig: string })[] = [];
-    for (const tr of cutTransitions(shots, renderVideoPlacements)) {
+    for (const tr of transitionWindows(c.transitions, shots, renderVideoPlacements)) {
+      if (tr.cut == null) continue; // plays on the live frame: nothing to bake
       const iB = spans.findIndex(
-        (sp, i) => i >= 1 && Math.abs(sp.editedStart - tr.cut) < 0.05,
+        (sp, i) => i >= 1 && Math.abs(sp.editedStart - tr.cut!) < 0.05,
       );
       if (iB < 1) continue;
       const A = spans[iB - 1]!.clip;
@@ -2077,7 +2073,8 @@ export function HyperframesWorkbench({
           : undefined;
       const sig = [
         tr.cut.toFixed(2),
-        tr.half.toFixed(2),
+        tr.start.toFixed(2),
+        tr.end.toFixed(2),
         tr.effect,
         tr.dir,
         A.srcEnd.toFixed(3),
@@ -2098,7 +2095,8 @@ export function HyperframesWorkbench({
       specs.push({
         sig,
         cut: tr.cut,
-        half: tr.half,
+        pre: tr.cut - tr.start,
+        post: tr.end - tr.cut,
         effect: tr.effect,
         dir: tr.dir,
         fileA,
@@ -2129,7 +2127,8 @@ export function HyperframesWorkbench({
           const entry = {
             sig: sp.sig,
             cut: sp.cut,
-            half: sp.half,
+            start: sp.cut - sp.pre,
+            end: sp.cut + sp.post,
             baked: null as BakedWindow | null,
             bitmaps: null as ImageBitmap[] | null,
           };
@@ -2150,6 +2149,7 @@ export function HyperframesWorkbench({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     comp.shots,
+    comp.transitions,
     videoFile,
     comp.width,
     comp.height,
@@ -2162,7 +2162,7 @@ export function HyperframesWorkbench({
       const t = playhead.get();
       for (const e of bakesRef.current.values()) {
         if (!e.baked) continue;
-        const near = t >= e.cut - e.half - 1.5 && t <= e.cut + e.half + 0.5;
+        const near = t >= e.start - 1.5 && t <= e.end + 0.5;
         if (near && !e.bitmaps && !e.decoding) {
           e.decoding = true;
           void decodeBake(e.baked).then((bs) => {
@@ -2172,7 +2172,7 @@ export function HyperframesWorkbench({
           });
         } else if (
           e.bitmaps &&
-          (t < e.cut - e.half - 3 || t > e.cut + e.half + 3)
+          (t < e.start - 3 || t > e.end + 3)
         ) {
           e.bitmaps.forEach((b) => b.close());
           e.bitmaps = null;
@@ -2546,7 +2546,9 @@ export function HyperframesWorkbench({
           !fontsChanged &&
           !renderInputsChanged &&
           patchable &&
-          !pendingSwitchRef.current
+          !pendingSwitchRef.current &&
+          // A patch edits the document on screen; with none mounted it would be dropped silently.
+          stageHostsRef.current[bufsRef.current.active]?.mounted
         ) {
           const echo = iframeEditEchoRef.current;
           // Existing nodes replace in their current parent/stack position. New nodes still need a
@@ -3200,7 +3202,12 @@ export function HyperframesWorkbench({
   /** The single entry for contextual tool panels: open/switch/close all go through here — leaving code settles the draft first.
    *  Docking semantics: a panel takes the whole rail column — expand
    *  if collapsed; auto-collapse on close if it was expanded only for the panel. */
-  const setFloatWin = (next: FloatKind | null) => {
+  const setFloatWin = (requested: FloatKind | null) => {
+    if (requested === "script" || requested === "captions") {
+      setEditingMode("captions");
+      return;
+    }
+    const next = requested;
     const prev = floatWinRef.current;
     if (prev === next) return;
     if (prev === "code") {
@@ -3219,10 +3226,12 @@ export function HyperframesWorkbench({
   };
   // Selecting a bespoke component opens its inspector, the way a native text block opens the text panel.
   useEffect(() => {
-    if (!selectedCustomBlockId) return;
-    setFloatWin(null);
-    setLibTab("props");
-    setLibCollapsed(false);
+    if (selectedCustomBlockId) {
+      setFloatWin("props");
+      setLibCollapsed(false);
+    } else if (floatWinRef.current === "props") {
+      setFloatWin(null);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCustomBlockId]);
   useEffect(() => {
@@ -3237,13 +3246,19 @@ export function HyperframesWorkbench({
   // The source-editor entry is removed (per user 2026-07-17; edit components via "AI edit"/chat). The panel machinery
   // (FloatKind 'code'/ElementSourceEditor/draft settlement) is kept; to restore the entry later: set the baseline
   // codeOrigRef + setCodeBlockId(id) + setFloatWin('code'), and pin the playhead to a stable frame.
-  /** Open the right-side chat area (right side is chat only; other panels dock in the asset rail). */
-  const openChat = useCallback(() => setPanelOpen(true), []);
-  const closeChat = useCallback(() => {
-    timelineFramePickAutoClosedChatRef.current = false;
-    setTimelineFramePickActive(false);
-    setPanelOpen(false);
-  }, []);
+  const { openChat, restoreChatAfterTimelineFramePick } = useStableCallbacks({
+    openChat: () => {
+      timelineFramePickAutoClosedChatRef.current = false;
+      setTimelineFramePickActive(false);
+      setEditingMode("chat");
+    },
+    restoreChatAfterTimelineFramePick: () => {
+      setTimelineFramePickActive(false);
+      if (!timelineFramePickAutoClosedChatRef.current) return;
+      timelineFramePickAutoClosedChatRef.current = false;
+      openChat();
+    },
+  });
   /** Open a tool panel (docked in the full asset rail column). The anchor param is kept for signature compatibility
    *  across entries but no longer used for positioning after docking; clicking outside doesn't close it (a docked
    *  panel is a persistent region, not a popover) — toggling is on the trigger button itself. */
@@ -3253,7 +3268,7 @@ export function HyperframesWorkbench({
   /** Generation has ONE entry: the chat. Arm the intent (kind + parameters) in the composer; the
    * agent runs the generation tool and the output lands in the project media directory. */
   const openGeneration = (type: GenType = "image", prompt?: string) => {
-    setFloatWin(null);
+    openChat();
     chatRef.current?.beginGeneration(type, prompt);
   };
   // The person panel depends on a selected shot (its entry is disabled without one): if the selection is lost while open → just close it
@@ -3281,98 +3296,62 @@ export function HyperframesWorkbench({
     setFloatWin("shot");
   };
   /** The cut the transition panel is anchored to (final seconds; opened from the timeline boundary hotspot). */
-  const [transitionCut, setTransitionCut] = useState<number | null>(null);
-  const openTransitionAt = (cutSec: number, anchor: DOMRect) => {
-    setTransitionCut(cutSec);
-    setSelectedId(null); // the transition becomes the current selection: Del deletes the transition, not blocks/shots
+  /** Transition lane: items placed by time (no cut needed). Selecting one targets the Transitions
+   *  panel at it; with nothing selected a panel pick lands at the playhead. */
+  const [selectedTransitionId, setSelectedTransitionId] = useState<string | null>(null);
+  const selectedTransitionIdRef = useRef(selectedTransitionId);
+  selectedTransitionIdRef.current = selectedTransitionId;
+  const selectedTransition = selectedTransitionId
+    ? (editorDocument.timeline.transitions ?? []).find((transition) => transition.id === selectedTransitionId) ?? null
+    : null;
+  useEffect(() => {
+    if (selectedTransitionId && !selectedTransition) setSelectedTransitionId(null);
+  }, [selectedTransitionId, selectedTransition]);
+  const selectTransition = (id: string | null) => {
+    setSelectedTransitionId(id);
+    if (!id) return;
+    setSelectedId(null);
     setSelectedShotId(null);
-    openFloatAt("transition", anchor);
+    setSelectedAudioId(null);
+    const picked = (editorDocumentRef.current.timeline.transitions ?? []).find((transition) => transition.id === id);
+    if (picked && !playing) applyT(picked.startFrame / editorDocumentRef.current.canvas.fps);
   };
-  /** Set/change/remove a transition at a cut (content-level, hung on the next shot's transIn, prevId anchors the
-   *  previous shot): at most one per cut; on set, move the playhead to the transition-region start to see the effect.
-   *  Duration reuses the existing value, default 1s; direction stored only for push/slide. */
-  const setCutTransition = (
-    cutSec: number,
-    effect: CutTransitionEffect | null,
-    direction?: TransitionDirection,
-  ) => {
-    const sp = videoShotTimelineSpans(
-      ensureShots(compRef.current),
-      renderVideoPlacements,
-    );
-    const i = sp.findIndex(
-      (s, idx) => idx >= 1 && Math.abs(s.editedStart - cutSec) < 0.05,
-    );
-    if (i < 1) return;
-    const prevId = sp[i - 1]!.clip.id;
-    const selfId = sp[i]!.clip.id;
-    const shot = sp[i]!.clip;
-    const durationSec = Math.min(
-      MAX_TRANSITION_SEC,
-      shot.transIn?.durationSec ?? 1,
-    );
-    const dir = direction ?? shot.transIn?.direction;
-    commitNarrativePatches([
-      {
-        clipId: selfId,
-        patch: {
-          properties: {
-            transIn: effect
-              ? {
-                  prevId,
-                  effect,
-                  durationSec,
-                  ...(DIRECTIONAL_TRANSITIONS.has(effect) && dir
-                    ? { direction: dir }
-                    : {}),
-                }
-              : undefined,
-          },
-        },
-      },
-    ]);
-    if (effect) {
-      const prevDur = (sp[i]!.clip as VideoShot).transIn?.durationSec ?? 1;
-      applyT(
-        Math.max(0, cutSec - Math.min(prevDur, MAX_TRANSITION_SEC) / 2 - 0.2),
-      );
+  const commitTransition = (command: Extract<EditorCommand, { type: `transitions.${string}` }>) => {
+    const result = commit({ op: "command", input: { command } });
+    if (!result.ok) toast.error(editorErrorMessage(result.error));
+    return result.ok;
+  };
+  /** A panel pick always inserts at the playhead (after any transition already there); to replace
+   *  one, the user deletes it first. */
+  const pickTransition = (effect: CutTransitionEffect, direction?: TransitionDirection) => {
+    const document = editorDocumentRef.current;
+    const fps = document.canvas.fps;
+    const list = document.timeline.transitions ?? [];
+    const startFrame = transitionSlotAt(list, Math.round(tRef.current * fps));
+    const next = list.filter((transition) => transition.startFrame >= startFrame).sort((left, right) => left.startFrame - right.startFrame)[0];
+    const durationFrames = Math.min(Math.round(DEFAULT_TRANSITION_SEC * fps), next ? next.startFrame - startFrame : Number.POSITIVE_INFINITY);
+    if (durationFrames < 1) {
+      toast.error(t("workbench.noRoomForTransition"));
+      return;
+    }
+    const id = `transition_${shotId()}`;
+    if (commitTransition({ type: "transitions.insert", transition: { id, startFrame, durationFrames, effect, ...(direction ? { direction } : {}) } })) {
+      setSelectedTransitionId(id);
+      setSelectedId(null);
+      setSelectedShotId(null);
+      if (!playing) applyT(startFrame / fps);
     }
   };
-  /** Transition region-handle drag commit: symmetric total duration (the timeline already clamps to both sides' shot lengths, this clamps the upper bound). */
-  const resizeCutTransition = (shotId: string, durationSec: number) =>
-    (() => {
-      const shot = compRef.current.shots?.find(
-        (candidate) => candidate.id === shotId,
-      );
-      if (shot?.transIn)
-        commitNarrativePatches([
-          {
-            clipId: shotId,
-            patch: {
-              properties: {
-                transIn: {
-                  ...shot.transIn,
-                  durationSec: Math.min(
-                    MAX_TRANSITION_SEC,
-                    Math.max(0.2, durationSec),
-                  ),
-                },
-              },
-            },
-          },
-        ]);
-    })();
-  // If the cut disappears due to editing (no longer any shot boundary) → auto-close the transition panel
-  useEffect(() => {
-    if (floatWin !== "transition" || transitionCut == null) return;
-    const bounds = videoShotTimelineSpans(
-      comp.shots ?? [],
-      renderVideoPlacements,
-    ).map((sp) => sp.editedEnd);
-    if (!bounds.slice(0, -1).some((b) => Math.abs(b - transitionCut) < 0.05))
-      setFloatWin(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [floatWin, transitionCut, comp.shots, renderVideoPlacements]);
+  const changeTransitionTiming = (id: string, next: { startSec: number; durationSec: number }) => {
+    const fps = editorDocumentRef.current.canvas.fps;
+    commitTransition({ type: "transitions.patch", id, patch: { startFrame: Math.max(0, Math.round(next.startSec * fps)), durationFrames: Math.max(1, Math.round(next.durationSec * fps)) } });
+  };
+  const removeSelectedTransition = () => {
+    const id = selectedTransitionIdRef.current;
+    if (!id) return false;
+    if (commitTransition({ type: "transitions.remove", ids: [id] })) setSelectedTransitionId(null);
+    return true;
+  };
   // The media-anim panel depends on "a selected, filled media block": if selection is lost / switched to another block → auto-close back to chat
   useEffect(() => {
     if (floatWin !== "anim") return;
@@ -4034,7 +4013,7 @@ export function HyperframesWorkbench({
     removeAudio: (id: string) => void;
     closeCode: () => void;
     closeFloat: () => void;
-    deleteTransition: () => void;
+    deleteTransition: () => boolean;
     undo: () => void;
     redo: () => void;
     floatWin: FloatKind | null;
@@ -4047,7 +4026,7 @@ export function HyperframesWorkbench({
     removeAudio: () => {},
     closeCode: () => {},
     closeFloat: () => {},
-    deleteTransition: () => {},
+    deleteTransition: () => false,
     undo: () => {},
     redo: () => {},
     floatWin: null,
@@ -4080,6 +4059,7 @@ export function HyperframesWorkbench({
   }, [beginPlayback, postPreview]);
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (workflowOpenRef.current) return;
       // The preview stage is a shadow tree: an in-place text edit inside it shows up here as the host.
       let el = document.activeElement as HTMLElement | null;
       while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement as HTMLElement;
@@ -4088,6 +4068,11 @@ export function HyperframesWorkbench({
         (el.tagName === "INPUT" ||
           el.tagName === "TEXTAREA" ||
           el.isContentEditable);
+      if (manualEditingLockedRef.current && el?.closest('[data-studio-chat-panel]')) return;
+      if (!typing && manualEditingLockedRef.current && ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' || ['Delete', 'Backspace', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key))) {
+        e.preventDefault();
+        return;
+      }
       if (e.key === "Escape") {
         if (timelineFramePickActiveRef.current) {
           restoreChatAfterTimelineFramePick();
@@ -4159,10 +4144,9 @@ export function HyperframesWorkbench({
         return;
       }
       if (e.key !== "Delete" && e.key !== "Backspace") return;
-      if (keysRef.current.floatWin === "transition") {
-        // Transition selected (panel open): delete this transition, not the shot
+      if (keysRef.current.deleteTransition()) {
+        // A selected transition goes first: Del removes it, not the clip under the playhead
         e.preventDefault();
-        keysRef.current.deleteTransition();
         return;
       }
       if (selectedAudioIdRef.current) {
@@ -4514,12 +4498,9 @@ export function HyperframesWorkbench({
           ...(compRef.current.palette
             ? { palette: compRef.current.palette }
             : {}), // background-derived colors, so the LLM uses the real accent
-          ...(compRef.current.frameId
-            ? { frameId: compRef.current.frameId }
-            : {}), // frame design language goes into ACTIVE THEME
-          ...(compRef.current.customVisualStyle
-            ? { customVisualStyle: compRef.current.customVisualStyle }
-            : {}),
+          ...(compRef.current.brand !== undefined
+            ? { brandGraphics: compRef.current.brand?.blocks.graphics?.text?.trim() || null }
+            : {}), // the project's brand graphics direct the look
           lang: localeRef.current, // note (the human sentence in chat) uses the UI language
           ...(Object.keys(context).length ? { context } : {}),
           ...(opts?.kit
@@ -5204,11 +5185,12 @@ export function HyperframesWorkbench({
     label?: string,
     atSec?: number,
     knownDims?: { w: number; h: number },
+    durationSec?: number,
   ) => {
     const media = await stageMediaOf(mediaIn);
     if (!media) return;
     const startSec = Math.max(0, Math.round((atSec ?? tRef.current) * 10) / 10);
-    const dur = media.type === "video" ? 5 : 3;
+    const dur = durationSec && durationSec > 0 ? Math.round(durationSec * 100) / 100 : media.type === "video" ? 5 : 3;
     const dims = knownDims ?? (await mediaDims(media)); // use ready dimensions if available, else measure (1.5s fallback null → default box)
     const base = mediaBlock({
       startSec,
@@ -5468,12 +5450,12 @@ export function HyperframesWorkbench({
 
   /** Persistent UI text entry: insert a deterministic native text clip at the playhead, select it,
    * and hand off to the same Text panel used by Agent-created titles. */
-  const insertDisplayText = (preset: DisplayTextPresetId = "clean") => {
-    const startSec = Math.max(0, Math.round(tRef.current * 10) / 10);
-    const durationSec = 3;
+  const insertDisplayText = (preset: DisplayTextPresetId = "clean", at?: { text: string; startSec: number; durationSec: number }) => {
+    const startSec = Math.max(0, Math.round((at?.startSec ?? tRef.current) * 10) / 10);
+    const durationSec = at ? Math.max(0.5, Math.round(at.durationSec * 100) / 100) : 3;
     const presetDefinition = displayTextPreset(preset);
     const block = titleBlock({
-      text: t("displayText.defaultText"),
+      text: at?.text.trim() || t("displayText.defaultText"),
       startSec,
       durationSec,
       preset,
@@ -5518,10 +5500,27 @@ export function HyperframesWorkbench({
   /** Commit the inspector's values on a component (registered or bespoke — the engine's unified
    *  contract decides where they persist): one undo step. Deliberately not patchOverlays (which never
    *  snapshots) — a colour or number the user tuned must undo. */
+  /** Editing skills switched on for this project (the chat's editing-skills dialog): one undo step. */
+  const setEditingSkills = (ids: string[]) => {
+    const edit = commit({ op: "command", input: { command: { type: "editingSkills.set", ids } } });
+    if (!edit.ok) toast.error(editorErrorMessage(edit.error));
+  };
+  /** The creator's answer to one confirm-list item, stored in the project for the agent to read. */
+  const answerHandoff = (id: string, status: "open" | "confirmed" | "changed", answer?: string) => {
+    const edit = commit({ op: "command", input: { command: { type: "handoff.patch", id, status, ...(answer ? { answer } : {}) } } });
+    if (!edit.ok) toast.error(editorErrorMessage(edit.error));
+  };
+  // Stable identities for the memoized chat (the latest closures are read through the ref).
+  const chatDocCbsRef = useRef({ setEditingSkills, answerHandoff });
+  chatDocCbsRef.current = { setEditingSkills, answerHandoff };
+  const chatDocCbs = useMemo(() => ({
+    setEditingSkills: (ids: string[]) => chatDocCbsRef.current.setEditingSkills(ids),
+    answerHandoff: (id: string, status: "open" | "confirmed" | "changed", answer?: string) => chatDocCbsRef.current.answerHandoff(id, status, answer),
+  }), []);
   const patchComponentValues = (id: string, next: Record<string, unknown>) => {
     const block = compRef.current.blocks.find((x) => x.id === id);
     if (!block || genIdsRef.current.has(id)) return;
-    const edit = commit({ op: "overlay.patch", input: { updates: [{ clipId: id, block: { slots: nextPropsSlots(block, next) } }] } });
+    const edit = commit({ op: "overlay.patch", input: { updates: [{ clipId: id, block: { slots: nextPropsSlots(block, next, compRef.current.look) } }] } });
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return;
@@ -5542,150 +5541,6 @@ export function HyperframesWorkbench({
   };
   /** Generated video → set as the main video. The CDN has no CORS headers, so fetch bytes through the /api/media/fetch same-origin proxy.
    *  Swapping the main video = a new project (pickVideoFile clears shots/blocks) — confirm first if there's content. */
-  /** Frame panel "use" → attach the frame as a tag in chat (the request carries frameId to inject the playbook), switch back to chat. */
-  const useFrameInChat = (f: FrameCatalogItem) => {
-    openChat();
-    chatRef.current?.attachFrame({
-      id: f.id,
-      title: f.title,
-      icon: f.icon,
-      iconKey: f.iconKey ?? null,
-      ...(f.customVisualStyle
-        ? { customVisualStyle: f.customVisualStyle }
-        : {}),
-    });
-  };
-  // Frame mounted (panel "use" / chat `/` trigger) → land the theme palette into comp:
-  // compose's themeForLlm consumes comp.palette to inject the token table, so generated content follows the theme's palette/fonts/radius from then on.
-  // Removing the tag doesn't roll back the palette (the project palette is explicit state; to revert to frame-derived colors, rerun visual analysis).
-  const frameCatalogRef = useRef<FrameCatalogItem[]>([]);
-  frameCatalogRef.current = useFrameCatalog();
-  // onFrameApplied is defined before setPersonFx/runMatteForShot and has empty deps → read the latest instances via refs
-  const setPersonFxRef = useRef<((fx: PersonFx | undefined) => void) | null>(
-    null,
-  );
-  const runMatteForShotRef = useRef<((s: VideoShot) => Promise<void>) | null>(
-    null,
-  );
-  const onFrameApplied = useCallback((af: AttachedFrame | null) => {
-    if (!af) {
-      if (genIdsRef.current.size) {
-        toast.error(t("workbench.elementGeneratingThemeAfter"));
-        return;
-      }
-      const appearance = commit({ op: "command", input: { command: {
-        type: "appearance.patch",
-        patch: {
-          frameId: undefined,
-          customVisualStyle: undefined,
-          palette: undefined,
-          captionStyle: undefined,
-          personFx: undefined,
-        },
-      } } }, { undo: "none" });
-      if (appearance.ok) {
-        toast.success(t("workbench.visualStyleDisabled"));
-      } else {
-        toast.error(editorErrorMessage(appearance.error));
-      }
-      return;
-    }
-    const f = frameCatalogRef.current.find((x) => x.id === af.id);
-    if (af.customVisualStyle) {
-      if (genIdsRef.current.size) {
-        toast.error(t("workbench.elementGeneratingThemeAfter"));
-        return;
-      }
-      const palette = customVisualStylePalette(
-        af.customVisualStyle,
-        f?.palette,
-      );
-      const appearance = commit({ op: "command", input: { command: {
-        type: "appearance.patch",
-        patch: {
-          frameId: af.id,
-          customVisualStyle: af.customVisualStyle,
-          palette,
-          captionStyle: customCaptionStyle(
-            af.customVisualStyle,
-            resolveCaptionStyle(compRef.current),
-          ),
-          personFx: undefined,
-        },
-      } } }, { undo: "none" });
-      if (!appearance.ok) {
-        toast.error(editorErrorMessage(appearance.error));
-        return;
-      }
-      const fx = f?.personFx ? personFxFromFrame(f.personFx) : null;
-      if (fx) {
-        setPersonFxRef.current?.(fx);
-        const tNow = playhead.get();
-        const nativeSpans = videoShotTimelineSpans(
-          compRef.current.shots ?? [],
-          videoPlacementsRef.current,
-        );
-        const sp =
-          nativeSpans.find(
-            (x) => tNow >= x.editedStart && tNow < x.editedEnd,
-          ) ?? nativeSpans[0];
-        const shot = sp?.clip;
-        if (shot && !shot.personMatte) {
-          commitNarrativePatches([
-            { clipId: shot.id, patch: { properties: { personMatte: true } } },
-          ]);
-          void runMatteForShotRef.current?.(shot);
-        }
-      }
-      toast.success(t("workbench.appliedTheme", { title: af.title }));
-      return;
-    }
-    if (!f) return;
-    // No theme switch while components are generating: each fill reads frameId when it starts, so a
-    // mid-batch switch splits one batch across two themes (and two compose paths) — a dirty batch
-    // that "insert freezes vars" then locks in. Same gate family as undo/redo-while-generating.
-    if (genIdsRef.current.size) {
-      toast.error(t("workbench.elementGeneratingThemeAfter"));
-      return;
-    }
-    // Land palette + frameId together: palette drives the token layer, frameId gives compose the design-language brief
-    const appearance = commit({ op: "command", input: { command: {
-      type: "appearance.patch",
-      patch: {
-        frameId: f.id,
-        customVisualStyle: undefined,
-        ...(f.palette ? { palette: f.palette } : {}),
-      },
-    } } }, { undo: "none" });
-    if (!appearance.ok) {
-      toast.error(editorErrorMessage(appearance.error));
-      return;
-    }
-    // The theme declared a person recommendation (sticker theme: cut out the subject and add a sticker outline) → land it into comp.personFx too,
-    // and enable matte for the shot at the playhead (finite segment, progress via the person panel; whole-video per-segment enabling belongs to the person panel)
-    const fx = f.personFx ? personFxFromFrame(f.personFx) : null;
-    if (fx) {
-      setPersonFxRef.current?.(fx);
-      const tNow = playhead.get();
-      const nativeSpans = videoShotTimelineSpans(
-        compRef.current.shots ?? [],
-        videoPlacementsRef.current,
-      );
-      const sp =
-        nativeSpans.find((x) => tNow >= x.editedStart && tNow < x.editedEnd) ??
-        nativeSpans[0];
-      const s = sp?.clip;
-      if (s && !s.personMatte) {
-        commitNarrativePatches([
-          { clipId: s.id, patch: { properties: { personMatte: true } } },
-        ]);
-        void runMatteForShotRef.current?.(s);
-      }
-      toast.success(t("workbench.appliedThemePersonFx", { title: f.title }));
-      return;
-    }
-    toast.success(t("workbench.appliedTheme", { title: f.title }));
-  }, []);
   /** Global caption style (shared by the captions panel + canvas handles): patch merged onto the current effective style, applied uniformly to all sentence-level captions. */
   /* ---------------- Unified gen panel (one chat interaction for image/video/component) ---------------- */
 
@@ -5859,14 +5714,6 @@ export function HyperframesWorkbench({
         .find((track) => track.id === current.semantics.primaryNarrativeTrackId)
         ?.clips.some((clip) => clip.id === clipId),
     );
-    if (primarySelected && splitBlockedByTransition(
-      ensureShots(c),
-      tRef.current,
-      primaryNarrative.placements,
-    )) {
-      toast.error(t("workbench.removeTransitionToSplit"));
-      return;
-    }
 
     let next = current;
     let splitCount = 0;
@@ -6267,10 +6114,7 @@ export function HyperframesWorkbench({
     },
     closeCode: () => setFloatWin(null),
     closeFloat: () => setFloatWin(null),
-    deleteTransition: () => {
-      if (transitionCut != null) setCutTransition(transitionCut, null);
-      setFloatWin(null);
-    },
+    deleteTransition: removeSelectedTransition,
     undo: undoLast,
     redo: redoLast,
     floatWin,
@@ -6335,7 +6179,6 @@ export function HyperframesWorkbench({
     const command = commit({ op: "command", input: { command: { type: "appearance.patch", patch: { personFx: fx } } } }, { undo: "none" });
     if (!command.ok) toast.error(editorErrorMessage(command.error));
   };
-  setPersonFxRef.current = setPersonFx;
   /** Whether this range's (a source's) mask is mostly complete (≥80% of sample points have frames) — avoids re-running when the toggle is flipped again. */
   const matteCovered = useCallback(
     (key: string, from: number, to: number): boolean => {
@@ -6443,7 +6286,6 @@ export function HyperframesWorkbench({
     },
     [matteFileForShot, matteCovered, runMatteBatch],
   );
-  runMatteForShotRef.current = runMatteForShot;
   /** Toggle the selected shot's matte (per-segment, no auto-fill — only the enabled segment is computed; any source's segment works). */
   const toggleShotMatte = useCallback(
     (on: boolean) => {
@@ -6468,7 +6310,7 @@ export function HyperframesWorkbench({
   const clipAsrFailRef = useRef<Set<string>>(new Set());
   const captionsOn = isCaptionsOn(comp);
   useEffect(() => {
-    if (floatWin !== "script" && !captionsOn) return;
+    if (editingMode !== "captions" && !captionsOn) return;
     const assetIdByClipId = new Map(primaryNarrativeClips(editorDocumentRef.current).map((clip) => [clip.id, clip.assetId]));
     for (const shot of (comp.shots ?? []).filter((s) => s.src)) {
       const src = shot.src!;
@@ -6510,7 +6352,7 @@ export function HyperframesWorkbench({
       })();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [floatWin, captionsOn, comp.shots]);
+  }, [editingMode, captionsOn, comp.shots]);
   // Swap main video: the narration source's old track is void, in-progress budgeting cancelled (other sources' tracks persist under their own src keys)
   useEffect(() => {
     return () => {
@@ -6596,6 +6438,7 @@ export function HyperframesWorkbench({
   );
   // Live comp accessor for chat receipt previews: stable identity (StudioChat is memo'd), reads the ref —
   // the chat card re-renders off the tool-progress store, not off comp state.
+  const getChatDocument = useCallback(() => editorDocumentRef.current, []);
   const getChatComp = useCallback(() => compRef.current, [compRef]);
   const captureTimelineFrameAt = useCallback(
     async (atSec: number) => {
@@ -6624,14 +6467,13 @@ export function HyperframesWorkbench({
       }
       if (active && playingRef.current) setPlaying(false);
       const shouldCollapse = shouldCollapseChatForTimelineFramePick(
-        window.innerWidth,
-        panelW,
+        window.innerWidth - RAIL_NAV_W - columnWidths.right,
+        columnWidths.left,
       );
       timelineFramePickAutoClosedChatRef.current = shouldCollapse;
-      if (shouldCollapse) setPanelOpen(false);
       setTimelineFramePickActive(true);
     },
-    [panelW, restoreChatAfterTimelineFramePick],
+    [columnWidths.left, columnWidths.right, restoreChatAfterTimelineFramePick],
   );
   const pickTimelineFrame = useCallback(
     async (atSec: number) => {
@@ -6691,6 +6533,7 @@ export function HyperframesWorkbench({
     setCaptionStyle,
     mappedCaptionSegs,
     captionsPanelProps,
+    emphasizeCaptions,
     applyCaptionPreset,
     relayoutCaptions,
     removeCaptionLayer,
@@ -7019,20 +6862,15 @@ export function HyperframesWorkbench({
   });
   // Script-panel scissors (cut/restore/replace-word/extract) — see use-script-cut.ts.
   const {
-    cutSrcRanges,
     cutTimelineRanges,
-    restoreSrcRanges,
-    replaceScriptWord,
-    maskScriptWords,
     maskTimelineScriptWords,
-    replaceTimelineScriptWord,
-    extractForScript,
+    decorateTimelineScriptWords,
     asrBusy,
   } = useScriptCut({
     projectId,
     comp,
     document: editorDocument,
-    floatWin,
+    floatWin: editingMode === "captions" && leftPanelVisible ? "script" : null,
     asrSentences,
     compRef,
     tRef,
@@ -7048,9 +6886,121 @@ export function HyperframesWorkbench({
     ensureShots,
     stepAsr,
   });
-  const dominantScriptTrack = dominantTimelineSpeechTrack(editorDocument);
-  const useNativeScriptPanel = !primaryNarrativeClips(editorDocument).length
-    || (!!dominantScriptTrack && dominantScriptTrack.trackId !== editorDocument.semantics.primaryNarrativeTrackId);
+  /** "Add over this selection" popover (library pick or AI generation onto the selection's range). */
+  const [addTarget, setAddTarget] = useState<TranscriptAddTarget | null>(null);
+  const closeAddTarget = useCallback(() => setAddTarget(null), []);
+  const addAtTranscriptRange = (kind: TranscriptAddKind, text: string, startSec: number, endSec: number, at: { left: number; top: number; before: string; after: string }) => {
+    const durationSec = Math.max(0.5, endSec - startSec);
+    if (kind === 'text') {
+      insertDisplayText("clean", { text, startSec, durationSec });
+      return;
+    }
+    setAddTarget({ kind, text, startSec, endSec: startSec + durationSec, ...at });
+  };
+  /** Library picks from the popover land over the selection, then the popover closes. */
+  const rangeFor = (target: TranscriptAddTarget) => ({ at: target.startSec, dur: target.endSec - target.startSec });
+  const insertLibraryOverRange = (target: TranscriptAddTarget, asset: Parameters<typeof insertLibraryClipAt>[0]) => {
+    const { at, dur } = rangeFor(target);
+    setAddTarget(null);
+    void insertLibraryClipAt(asset, at, { target: brollTargetForRange(editorDocumentRef.current, at, at + dur), mode: "overwrite", fitSec: dur });
+  };
+  /** Generations started from the popover: loading bars on the timeline and cards in My assets until they land. */
+  const [pendingGenerations, setPendingGenerations] = useState<Array<TimelinePendingRange & { inLibrary: boolean }>>([]);
+  /** Confirmed AI prompt: generate in the background and place the result over the selection. */
+  const generateOverRange = async (target: TranscriptAddTarget, kind: TranscriptAddGenKind, prompt: string, request?: GenerationRequest) => {
+    const { at, dur } = rangeFor(target);
+    const span = { from: at.toFixed(1), to: (at + dur).toFixed(1) };
+    const id = `gen-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    const label = t(kind === 'mg' ? 'captions.pendingMg' : kind === 'sfx' ? 'captions.pendingSfx' : kind === 'video' ? 'captions.pendingVideo' : kind === 'sticker' ? 'captions.pendingSticker' : 'captions.pendingImage');
+    // The lane the result will land on, chosen the same way the insert below chooses it.
+    const broll = kind === 'image' || kind === 'video' ? brollTargetForRange(editorDocumentRef.current, at, at + dur) : null;
+    const lane: TimelinePendingLane = kind === 'mg' || kind === 'sticker'
+      ? { kind: 'block', trackIndex: freeTrack(compRef.current.blocks, at, dur) }
+      : broll?.kind === 'visual' ? { kind: 'visual', trackId: broll.trackId } : { kind: 'new' };
+    setPendingGenerations((items) => [...items, { id, startSec: at, endSec: at + dur, label, lane, inLibrary: kind !== 'mg' }]);
+    try {
+      if (kind === 'mg') {
+        // Same path as the chat's Motion Graphic: canvas-true geometry, director scene and the
+        // narration beats of this window come from the tool itself.
+        const result = await runStudioTool("apply_component", { generate: true, instruction: prompt, atSec: at, durationSec: dur });
+        if (!result.ok) throw new Error(result.error || t("captions.generateFailed"));
+        return;
+      }
+      if (!request) throw new Error(t('captions.generateFailed'));
+      if (kind === 'sfx') {
+        const result = await generateAudioForRange(projectId, prompt, request);
+        registerGeneratedAssets([{ jobId: result.jobId, index: 0, kind: 'audio', key: result.key, mime: result.mime, prompt, createdAt: Date.now(), ...(result.durationSec ? { durationSec: result.durationSec } : {}) }]);
+        const clipId = await audioOps.mountAudioFromUrl(result.url, prompt.slice(0, 24), { startSec: at });
+        if (clipId) setSelectedAudioId(clipId);
+        toast.success(t('captions.generatedInserted', span));
+        return;
+      }
+      const result = await generateVisualForRange(projectId, prompt, request);
+      const mediaKind = kind === 'video' ? 'video' : 'image';
+      registerGeneratedAssets([{ jobId: result.jobId, index: 0, kind: mediaKind, key: result.key, mime: result.mime, prompt, createdAt: Date.now() }]);
+      if (kind === 'sticker') await insertPanelMedia({ type: 'image', url: result.url }, prompt.slice(0, 24), at, undefined, dur);
+      else await insertLibraryClipAt({ type: mediaKind, url: result.url, label: prompt.slice(0, 24) }, at, { target: brollTargetForRange(editorDocumentRef.current, at, at + dur), mode: "overwrite", fitSec: dur });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPendingGenerations((items) => items.filter((item) => item.id !== id));
+    }
+  };
+  const transcriptControls = captionsPanelProps();
+  const transcriptPanel = (
+    <div data-cap-keep className="flex min-h-0 flex-1 flex-col">
+      <CaptionsPanel {...transcriptControls}>
+        <TranscriptEditor
+          active={editingMode === "captions" && leftPanelVisible}
+          document={editorDocument}
+          currentTimeSec={tSec}
+          playing={playing}
+          extracting={asrBusy || transcriptControls.generating}
+          onExtract={transcriptControls.onExtract}
+          onSeek={(sec) => { setPlaying(false); applyT(Math.max(0, sec)); locateTimeline(true); }}
+          onCut={cutTimelineRanges}
+          onEdit={(cueEdits) => {
+            const result = commit({ op: 'captions.edit', input: { cueEdits } });
+            if (!result.ok) toast.error(editorErrorMessage(result.error));
+            return result.ok;
+          }}
+          onDecorate={decorateTimelineScriptWords}
+          onMask={maskTimelineScriptWords}
+          onAddAtRange={addAtTranscriptRange}
+          addKinds={shell.curatedAssets ? undefined : ['text', 'media', 'sfx', 'mg']}
+          autoHighlight={studioProviders().autoHighlight}
+        />
+      </CaptionsPanel>
+      {addTarget && <TranscriptAddPopover
+        target={addTarget}
+        draftPrompt={studioProviders().draftInsertPrompt}
+        onGenerate={(kind, prompt, request) => void generateOverRange(addTarget, kind, prompt, request)}
+        onClose={closeAddTarget}
+        library={addTarget.kind !== 'media' && shell.curatedAssets ? <shell.curatedAssets.Panel
+          comp={comp}
+          focusSection={{ section: addTarget.kind === 'mg' ? 'components' : addTarget.kind === 'sfx' ? 'audio' : 'stickers', nonce: 0 }}
+          onInsertKit={(cid, props) => { const { at } = rangeFor(addTarget); setAddTarget(null); if (!playing) applyT(at); insertTemplateBlock(`kit:${cid}`, props); }}
+          onInsert={(m, l, d) => { const { at, dur } = rangeFor(addTarget); setAddTarget(null); void insertPanelMedia(m, l, at, d, dur); }}
+          onInsertClip={(a) => insertLibraryOverRange(addTarget, a)}
+          onInsertElement={(element, prompt) => { const { at, dur } = rangeFor(addTarget); setAddTarget(null); insertGeneratedElement(element, prompt, at, dur); }}
+          onUseAudio={(url, label, sig) => { const { at } = rangeFor(addTarget); setAddTarget(null); void audioOps.mountAudioFromUrl(url, label, { sig, startSec: at }).then((id) => id && setSelectedAudioId(id)); }}
+        /> : addTarget.kind === 'media' ? <MyAssetsPanel
+          comp={comp}
+          projectId={projectId}
+          cloudRegistry={localAssetIndexKnownRef.current ? localAssetIndexRef.current : undefined}
+          registrySyncReady={false}
+          videoSig={null}
+          mainSourceUrl={null}
+          hasMainSource={false}
+          onDeleteAsset={deleteAssetSource}
+          isSrcLive={srcLive}
+          onReconnectSource={(src, sig) => void reconnectSource(src, sig)}
+          onInsert={(m, l, d) => { const { at, dur } = rangeFor(addTarget); setAddTarget(null); void insertPanelMedia(m, l, at, d, dur); }}
+          onInsertClip={(a) => insertLibraryOverRange(addTarget, a)}
+        /> : undefined}
+      />}
+    </div>
+  );
   /** Generated outputs follow the project like imports: one directory entry per output, keyed by its
    * storage key (already in the cloud, nothing to upload). Idempotent by asset id, one publish per batch. */
   const registerGeneratedAssets = useCallback((records: GeneratedAssetRecord[]) => {
@@ -7115,7 +7065,10 @@ export function HyperframesWorkbench({
     const switched = await outputRuntime.switchOutput(id);
     return switched && projectOutputs.outputsRef.current.active.id === id;
   };
+  // Receives the usage of paid calls the tools make while a caller listens (the first pass's credits).
+  const usageSinkRef = useRef<((usage: WorkflowUsage) => void) | null>(null);
   const agentToolCtx: AgentToolCtx = {
+    usageSinkRef,
     projectId,
     documentRef: editorDocumentRef,
     resolveAssetUrl,
@@ -7162,8 +7115,6 @@ export function HyperframesWorkbench({
     applyVisualResult,
     composeBlockChecked,
     noteOf,
-    setCutTransition,
-    resizeCutTransition,
     splitAtPlayhead,
     trimAtPlayhead,
     deleteShot,
@@ -7182,7 +7133,6 @@ export function HyperframesWorkbench({
     agentExportRef,
     exportPctRef,
     exportVideo,
-    frameCatalogRef,
     chatRef,
   };
   const persistToolMutation = async (
@@ -7199,14 +7149,18 @@ export function HyperframesWorkbench({
     await cloudSaveQueueRef.current?.flush();
     return result;
   };
+  // Selecting a clip, element or audio clip releases the transition selection.
+  useEffect(() => {
+    if (selectedId || selectedShotId || selectedAudioId) setSelectedTransitionId(null);
+  }, [selectedId, selectedShotId, selectedAudioId]);
   const runStudioTool = (
     toolId: string,
     input: Record<string, unknown>,
-    opts?: { signal?: AbortSignal; surface?: "chat" | "bridge"; skillId?: string },
-  ) => (toolId === "run_v3"
+    opts?: { signal?: AbortSignal; surface?: "chat" | "bridge"; skillId?: string; roughCut?: import("./first-pass").RoughCutExecution },
+  ) => workflowBusyRef.current ? Promise.resolve({ ok: false, error: "A workflow is running. Wait for it to finish before editing." } satisfies StudioToolResult) : (toolId === "run_v3"
     // v3 surface from the chat: same executor as the external bridge, with the chat surface carried in the input
     // so parked interactions (ask_user / approvals) render as chat cards.
-    ? persistToolMutation(runAgentExternalTool(agentToolCtx, "run_v3", { ...input, surface: opts?.surface ?? "chat" }))
+    ? persistToolMutation(runAgentExternalTool(agentToolCtx, "run_v3", { ...input, surface: opts?.surface ?? "chat", ...(opts?.signal ? { signal: opts.signal } : {}) }, opts?.roughCut ? { ...opts.roughCut, persist: async () => { await cloudSaveQueueRef.current?.flush(); } } : undefined))
     : persistToolMutation(runAgentStudioTool(agentToolCtx, toolId, input, opts)));
   runToolRef.current = runStudioTool; // break the hook↔dispatcher cycle (assigned every render before any handler can fire)
   // Bridge (MCP) calls span many turns with the tab live in between, so the user can switch
@@ -7214,6 +7168,7 @@ export function HyperframesWorkbench({
   // report the active output re-anchor; anything else is refused when the tab has moved on, and
   // the error names both outputs so the agent can switch back or adopt the current one.
   const runExternalTool = async (tool: string, input: Record<string, unknown>) => {
+    if (workflowBusyRef.current) return { ok: false, error: "A workflow is running. Wait for it to finish before editing." } satisfies StudioToolResult;
     const activeBefore = projectOutputs.outputsRef.current.active;
     const anchored = bridgeOutputAnchorRef.current;
     if (!OUTPUT_ANCHOR_TOOLS.has(tool) && anchored && anchored.id !== activeBefore.id) {
@@ -7753,8 +7708,6 @@ export function HyperframesWorkbench({
       } });
       if (!edit.ok) toast.error(editorErrorMessage(edit.error));
     },
-    onOpenTransition: openTransitionAt,
-    onResizeTransition: resizeCutTransition,
     onDropAsset: (t: number) => {
       // Non-main-track drop: image = insert a PiP media block at the drop moment; component = insert at the drop moment (equal standing with images, user-unified);
       // video doesn't respond in these regions (the timeline side already intercepts it)
@@ -8288,6 +8241,34 @@ export function HyperframesWorkbench({
     cloudSaveQueue,
   ]);
 
+  // A project made from the Studio home brings its first message for the agent, once the project is loaded.
+  const [startPrompt, setStartPrompt] = useState<string | null>(null);
+  useEffect(() => {
+    if (!bootDataReady || !projectId || displaced) return;
+    const prompt = takeAgentStartPrompt(projectId);
+    if (prompt) setStartPrompt(prompt);
+  }, [bootDataReady, projectId, displaced]);
+  const onStartPromptSent = useCallback(() => { acknowledgeAgentStartPrompt(projectId); setStartPrompt(null); }, [projectId]);
+  // The clips the fine-cut skills count (the rough cut's card follows a one-click edit's agent with them).
+  const fineCutClips = useCallback(() => fineCutClipIds(editorDocumentRef.current), []);
+  const projectEdited = useMemo(() => documentIsEdited(editorDocument), [editorDocument]);
+
+  // An unbranded project stays unbranded. Defaults come only from its own explicit brand snapshot.
+  useEffect(() => {
+    if (!bootDataReady || !projectId || displaced) return;
+    const semantics = committer.document.semantics;
+    const ops: DocumentOp[] = [];
+    if (semantics.brand === undefined) ops.push({ op: 'command', input: { command: { type: 'brand.set', brand: null } } });
+    if (semantics.editingSkills === undefined && semantics.brand) ops.push({ op: 'command', input: { command: { type: 'editingSkills.set', ids: brandEditingSkills(semantics.brand) } } });
+    if (ops.length) commit(ops, { origin: 'system', undo: 'none' });
+  }, [bootDataReady, projectId, displaced, comp.brand, comp.editingSkills]);
+  /** The Skill picked in the chat is the project's (a Skill that takes no brand leaves it without one). */
+  const setProjectSkill = useCallback((skillId: string) => {
+    const edit = commit({ op: "command", input: { command: { type: "skill.set", skillId } } });
+    if (!edit.ok) toast.error(editorErrorMessage(edit.error));
+  }, []);
+
+
   // flush-on-hide: switching away / minimizing pushes the debounce tail immediately (a closed-soon
   // tab loses it otherwise — the "fast tab close loses the last edit" hole). Writers only; the diff
   // layer already makes this zero requests when nothing changed.
@@ -8328,10 +8309,653 @@ export function HyperframesWorkbench({
     };
   }, [cloudSaveQueue]);
 
+  const dockContent: Record<DockTab, ReactNode> = {
+    chat: <div data-studio-chat-panel className="flex min-h-0 flex-1 flex-col">{initialChatThreads ? (<StudioChat
+                    key={chatEpoch}
+                    ref={chatRef}
+                    projectId={projectId}
+                    // updateLocalAssetIndex swaps in a NEW array and bumps localAssetIndexRev (re-rendering
+                    // the workbench), so reading the ref here hands the memo'd chat the fresh identity and
+                    // search receipts resolve OPFS thumbnails for mine-scope hits.
+                    localAssetIndex={localAssetIndexRef.current}
+                    onInsertMedia={(m) => void insertPanelMedia({ type: m.type, url: m.url }, m.label)}
+                    onUseAudio={(url, label) => void audioOps.mountAudioFromUrl(url, label)}
+                    runTool={chatCbs.runTool}
+                    getBody={getChatBody}
+                    getComp={getChatComp}
+                    getDocument={getChatDocument}
+                    startPrompt={startPrompt}
+                    onStartPromptSent={onStartPromptSent}
+                    fineCutClips={fineCutClips}
+                    projectEdited={projectEdited}
+                    projectBrand={comp.brand}
+                    projectSkillId={comp.skillId}
+                    projectAgentModel={editorDocument.semantics.agentModel}
+                    onProjectSkill={setProjectSkill}
+                    editingSkills={comp.editingSkills}
+                    onEditingSkills={chatDocCbs.setEditingSkills}
+                    handoff={comp.handoff}
+                    onAnswerHandoff={chatDocCbs.answerHandoff}
+                    timelineFramePickActive={timelineFramePickActive}
+                    timelineFramePickBusy={timelineFramePickBusy}
+                    timelineFramePickAvailable={
+                      duration > 0 && hasTimelineContent(comp)
+                    }
+                    onTimelineFramePickActiveChange={setTimelineFramePickMode}
+                    elements={chatMentionElements}
+                    initialThreads={initialChatThreads}
+                    onThreadChange={persistChatThread}
+                    onBusyChange={setChatBusy}
+                  />) : <div className="text-ink-4 flex h-full items-center justify-center"><Loader2 size={16} className="animate-spin" /></div>}</div>,
+    assets: <div className="flex min-h-0 flex-1 flex-col"><AssetsPanel
+                    comp={comp}
+                    projectId={projectId}
+                    localAssetIndex={
+                      localAssetIndexKnownRef.current
+                        ? localAssetIndexRef.current
+                        : undefined
+                    }
+                    localAssetIndexSyncReady={localAssetIndexSyncReady}
+                    onLocalAssetIndexChange={changeLocalAssetIndex}
+                    onLocalAssetAvailable={acceptLocalAssetFile}
+                    pendingItems={pendingGenerations.filter((item) => item.inLibrary)}
+                    onUseAsReference={(entry) => {
+                      openChat();
+                      chatRef.current?.beginGeneration("image");
+                      chatRef.current?.insertMention(localAssetMentionRef(entry));
+                    }}
+                    videoSig={null}
+                    mainSourceUrl={null}
+                    hasMainSource={false}
+                    onDeleteAsset={deleteAssetSource}
+                    isSrcLive={srcLive}
+                    onReconnectSource={(src, sig) =>
+                      void reconnectSource(src, sig)
+                    }
+                    onInsert={(m, l, d) =>
+                      void insertPanelMedia(m, l, undefined, d)
+                    }
+                    onInsertClip={(a) =>
+                      void insertLibraryClipAt(a, tRef.current)
+                    }
+                    onInsertElement={insertGeneratedElement}
+                    onInsertKit={(cid, props) =>
+                      insertTemplateBlock(`kit:${cid}`, props)
+                    }
+                    onDragAsset={setDragAsset}
+                    onOpenGeneration={(type, prompt) =>
+                      openGeneration(type, prompt)
+                    }
+                    onUseAudio={(url, label, sig) =>
+                      void audioOps
+                        .mountAudioFromUrl(url, label, { sig })
+                        .then((id) => id && setSelectedAudioId(id))
+                    }
+                    genRefreshTick={genRefreshTick}
+                  /></div>,
+    captions: transcriptPanel,
+    "caption-style": <CaptionStylePanel styleCtl={transcriptControls.styleCtl} active={captionsOn}
+      generating={transcriptControls.generating} onPickPreset={transcriptControls.onPickPreset} />,
+    audio: <MusicPanel
+                    clips={comp.audioTracks ?? []}
+                    selectedId={selectedAudioId}
+                    usable={audioOps.clipUsable}
+                    onPatch={audioOps.patchClip}
+                    peakOf={(c) =>
+                      c.sig ? (audioOps.clipPeaks.get(c.sig) ?? null) : null
+                    }
+                    shots={
+                      selectedVisualClipId
+                        ? selectedShot
+                          ? [selectedShot]
+                          : []
+                        : (comp.shots ?? []).filter((sh) =>
+                            selectedShotIds.has(sh.id),
+                          )
+                    }
+                    onSetShotAudio={(patch: {
+                      volumeDb?: number;
+                      fadeInSec?: number;
+                      fadeOutSec?: number;
+                    }) => {
+                      // Multi-select takes the edit as one action: every selected shot, one undo step
+                      const ids =
+                        selectedVisualClipId && selectedShot
+                          ? [selectedShot.id]
+                          : (comp.shots ?? [])
+                              .filter((sh) => selectedShotIds.has(sh.id))
+                              .map((sh) => sh.id);
+                      if (!ids.length) return;
+                      pushUndoSnapshot();
+                      for (const id of ids) setShotAudio(id, patch);
+                    }}
+                  />,
+    transitions: <TransitionPanel
+      effect={selectedTransition?.effect ?? null}
+      direction={selectedTransition?.direction ?? "left"}
+      selected={!!selectedTransition}
+      onPick={pickTransition}
+      onDirection={(direction) => {
+        if (selectedTransitionIdRef.current) commitTransition({ type: "transitions.patch", id: selectedTransitionIdRef.current, patch: { direction } });
+      }}
+    />,
+    text: <DisplayTextPanel
+                    block={selectedDisplayTextBlock}
+                    onAdd={(preset) => insertDisplayText(preset)}
+                    onPatch={patchDisplayText}
+                    onPreset={(preset: DisplayTextPresetId, animation: DisplayTextAnimationId) =>
+                      patchDisplayText({ preset, animation })
+                    }
+                  />,
+    avatar: <AvatarPanel />,
+  };
+  const dockContextContent = <>{floatWin ? (
+                  <div className="bg-panel flex h-8 shrink-0 items-center gap-1 px-2.5">
+                    <span className="text-ink truncate px-1 text-[12px] font-medium">
+                      {floatWin === "props"
+                        ? t("workbench.editableProperties")
+                        : floatWin === "script"
+                        ? t("workbench.smartScriptCut")
+                        : floatWin === "person"
+                          ? t("workbench.portrait")
+                          : floatWin === "anim"
+                            ? t("workbench.assetMotion")
+                            : floatWin === "captions"
+                              ? t("panels.captions")
+                              : floatWin === "shot"
+                                ? (() => {
+                                    const i = (comp.shots ?? []).findIndex(
+                                      (s) => s.id === selectedShotId,
+                                    );
+                                    return (
+                                      t("workbench.cameraFraming") +
+                                      (i >= 0
+                                        ? t("workbench.sceneN", { n: i + 1 })
+                                        : "")
+                                    );
+                                  })()
+                                : (() => {
+                                      const cb = codeBlockId
+                                        ? comp.blocks.find(
+                                            (x) => x.id === codeBlockId,
+                                          )
+                                        : null;
+                                      return t("workbench.sourceLabel", {
+                                        label: cb?.label || codeBlockId || "",
+                                      });
+                                    })()}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setFloatWin(null)}
+                      title={t("workbench.close")}
+                      aria-label={t("workbench.closePanel")}
+                      className="text-ink-4 hover:text-ink ml-auto rounded p-1"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ) : null}{floatWin && (
+                  <div className="flex min-h-0 flex-1">
+
+                    {floatWin === "props" && selectedCustomBlock && (
+                      <ComponentPropsPanel
+                        block={selectedCustomBlock}
+                        look={comp.look}
+                        canvas={{ width: comp.width, height: comp.height }}
+                        swatches={bgSwatches.map(([name, value]) => ({ label: t("panels.backgroundName", { name: t(name) }), value }))}
+                        themeVars={effectiveThemeVars(getTheme(comp.theme), comp.palette)}
+                        onBlockPatch={(patch) => selectedCustomBlock && patchInspectorBlock(selectedCustomBlock.id, patch)}
+                        onValues={(next) => selectedCustomBlock && patchComponentValues(selectedCustomBlock.id, next)}
+                        onLive={(message) => selectedCustomBlock && postPreview({ type: "hf:blockProps", blockId: selectedCustomBlock.id, ...message })}
+                        onText={(key, value) => selectedCustomBlock && setSlot(selectedCustomBlock.id, key, value)}
+                        onReplaceImage={(index) => selectedCustomBlock && void replaceCustomImg(selectedCustomBlock.id, index)}
+                        onRemoveImage={(index) => selectedCustomBlock && patchCustomImg(selectedCustomBlock.id, index, () => "remove")}
+                      />
+                    )}
+                    {floatWin === "code" &&
+                      (() => {
+                        const cb = codeBlockId
+                          ? comp.blocks.find((x) => x.id === codeBlockId)
+                          : null;
+                        return cb ? (
+                          <ElementSourceEditor
+                            key={cb.id}
+                            block={cb}
+                            boxPx={{ w: (cb.box?.w ?? 1) * comp.width, h: (cb.box?.h ?? 1) * comp.height }}
+                            locked={genIds.has(cb.id)}
+                            loop={codeLoop}
+                            onLoop={toggleCodeLoop}
+                            onDraft={(draft) => handleCodeDraft(cb.id, draft)}
+                            onApply={(draft) => handleCodeApply(cb.id, draft)}
+                            runAi={(instruction, draft, onNote) =>
+                              runCodeAi(cb, instruction, draft, onNote)
+                            }
+                          />
+                        ) : (
+                          <div className="text-ink-4 flex flex-1 items-center justify-center gap-2 text-[12px]">
+                            {t("workbench.elementDeleted")}
+                            <button
+                              type="button"
+                              onClick={() => setFloatWin(null)}
+                              className="text-ink underline"
+                            >
+                              {t("workbench.close")}
+                            </button>
+                          </div>
+                        );
+                      })()}
+                    {floatWin === "shot" && selectedShot && (
+                      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                        {selectedShot.src?.startsWith("blob:") &&
+                          !clipFilesRef.current.has(selectedShot.src) && (
+                            <div className="border-line flex items-center gap-2 border-b px-3 py-2">
+                              <span className="text-ink-2 min-w-0 flex-1 text-[11px]">
+                                {t("workbench.insertSourceMissing")}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void reconnectSource(
+                                    selectedShot.src!,
+                                    selectedShot.srcSig,
+                                  )
+                                }
+                                className="bg-accent shrink-0 rounded px-2.5 py-1 text-[11px] font-medium text-white transition hover:brightness-110"
+                              >
+                                {t("workbench.rePickFile")}
+                              </button>
+                            </div>
+                          )}
+                        <ShotTreatmentPanel
+                          shot={selectedShot}
+                          onSetTreatment={setShotTreatment}
+                          onSetTreatSize={setShotTreatSize}
+                          onPreviewTreatSize={previewShotTreatSize}
+                          onSetTreatCrop={setShotTreatCrop}
+                          onPreviewTreatCrop={previewShotTreatCrop}
+                          onSetFilter={setShotFilter}
+                          onPreviewFilter={previewShotFilter}
+                          onSetAudio={setShotAudio}
+                          speed={clipSpeedInDocument(editorDocument, selectedShot.id)}
+                          onSetSpeed={setShotSpeed}
+                        />
+                      </div>
+                    )}
+                    {floatWin === "person" && (
+                      <PersonFxPanel
+                        comp={comp}
+                        onChange={setPersonFx}
+                        onPrepareLocalImage={preparePickedLocalImage}
+                        matte={matteState}
+                        selectedShotMatte={(() => {
+                          const s = (comp.shots ?? []).find(
+                            (x) => x.id === selectedShotId,
+                          );
+                          return s ? !!s.personMatte : null; // equal standing: any source's segment can enable matte
+                        })()}
+                        onToggleShotMatte={toggleShotMatte}
+                        onRetry={() => {
+                          const s = (compRef.current.shots ?? []).find(
+                            (x) => x.id === selectedShotIdRef.current,
+                          );
+                          if (s) void runMatteForShot(s);
+                        }}
+                      />
+                    )}
+                    {floatWin === "anim" &&
+                      (() => {
+                        const b = selectedId
+                          ? comp.blocks.find((x) => x.id === selectedId)
+                          : null;
+                        if (!b) return null; // the auto-close-panel effect takes over immediately
+                        return (
+                          <MediaAnimPanel
+                            anim={
+                              (b.slots.anim ?? {}) as {
+                                enter?: string;
+                                exit?: string;
+                                dur?: number;
+                              }
+                            }
+                            onChange={(patch) => {
+                              const merged = setBlockAnim(b.id, patch);
+                              if (!merged) return;
+                              // Click a card to play it once (hf:animPreview runs the tween directly in the active doc, no debounced rebuild);
+                              // changing duration replays the current entry so you feel the speed change instantly
+                              if (patch.enter !== undefined)
+                                postPreview({
+                                  type: "hf:animPreview",
+                                  id: b.id,
+                                  phase: "in",
+                                  effect: patch.enter,
+                                  dur: merged.dur ?? 0.5,
+                                });
+                              else if (patch.exit !== undefined)
+                                postPreview({
+                                  type: "hf:animPreview",
+                                  id: b.id,
+                                  phase: "out",
+                                  effect: patch.exit,
+                                  dur: merged.dur ?? 0.5,
+                                });
+                              else if (patch.dur !== undefined)
+                                postPreview({
+                                  type: "hf:animPreview",
+                                  id: b.id,
+                                  phase: "in",
+                                  effect: merged.enter ?? "fade",
+                                  dur: patch.dur,
+                                });
+                            }}
+                          />
+                        );
+                      })()}
+                  </div>
+                )}</>;
+
+  /** Export for other editors: timeline XML + media + transparent graphics + subtitles, one zip. */
+  const [nleExport, setNleExport] = useState<NleExportState | null>(null);
+  const nleCancelRef = useRef(false);
+  const startNleExport = async () => {
+    if (nleExport?.phase === "running") return;
+    nleCancelRef.current = false;
+    setNleExport({ phase: "running", stage: "media", pct: 0 });
+    // Stage weights for one progress bar: media 0–30, graphics 30–90, packing 90–100.
+    const span = { media: [0, 30], graphics: [30, 90], package: [90, 100] } as const;
+    try {
+      await prepareExportAssets(editorDocumentRef.current);
+      const rows = isCaptionsOn(compRef.current) ? transcriptControls.rows : [];
+      const cue = (start: number, dur: number | undefined, text: string) => ({ startSec: start, endSec: start + (dur ?? 2), text });
+      const result = await buildNlePackage({
+        document: editorDocumentRef.current,
+        comp: compRef.current,
+        title: projectOutputs.outputs.active.title || t("workbench.untitledOutput"),
+        assetFile: async (asset) => {
+          const url = resolveAssetUrl(asset);
+          if (!url) return null;
+          const type = asset.kind === "audio" ? "audio/mpeg" : asset.kind === "image" ? "image/png" : "video/mp4";
+          return (await materializeRemoteMedia(url, { name: asset.label || asset.id, type })).file;
+        },
+        captions: rows.map((row) => cue(row.editedStart, row.dur, row.text)),
+        translatedCaptions: rows.flatMap((row) => (row.sub ? [cue(row.editedStart, row.dur, row.sub)] : [])),
+        shouldCancel: () => nleCancelRef.current,
+        onProgress: (stage, done, total) => {
+          const [from, to] = span[stage];
+          setNleExport({ phase: "running", stage, pct: Math.round(from + ((to - from) * done) / Math.max(1, total)) });
+        },
+      });
+      downloadBlob(result.blob, result.fileName);
+      setNleExport({ phase: "done", notes: result.notes, fileName: result.fileName });
+    } catch (error) {
+      if (error instanceof NleExportCanceled || nleCancelRef.current) {
+        setNleExport(null);
+        return;
+      }
+      setNleExport({ phase: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+  };
+
+  const exportControls = <TooltipProvider delayDuration={200}>
+            <div className="flex shrink-0 items-center gap-2">
+              {/* Split button like the asset panel's import control: main half exports the active
+                output, the attached "more" half opens batch export over the project's outputs. */}
+              <div className="flex shrink-0 items-center">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => setExportOpen(true)}
+                      disabled={exporting || publishing || !hasContent}
+                      className="border-accent bg-accent text-accent-foreground hover:bg-accent/90 inline-flex shrink-0 items-center gap-1.5 rounded-l-md border px-2.5 py-1.5 text-[12px] font-medium transition-colors disabled:opacity-50"
+                    >
+                      {exporting || publishing ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <FileVideo size={14} />
+                      )}{" "}
+                      {exporting
+                        ? t("workbench.exportingPctShort", { pct: exportPct })
+                        : publishing
+                          ? t("workbench.renderingPct", { pct: exportPct })
+                          : t("workbench.export")}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("tools.export_video.label")}</TooltipContent>
+                </Tooltip>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      disabled={exporting || publishing}
+                      title={t("workbench.moreExportOptions")}
+                      aria-label={t("workbench.moreExportOptions")}
+                      className="border-accent bg-accent text-accent-foreground hover:bg-accent/90 -ml-px inline-flex shrink-0 items-center justify-center self-stretch rounded-r-md border border-l-accent-foreground/20 px-1.5 transition-colors disabled:opacity-50 data-[state=open]:bg-accent/90"
+                    >
+                      <MoreHorizontal size={13} />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    sideOffset={5}
+                    className="min-w-[140px] text-[12px]"
+                  >
+                    <DropdownMenuItem
+                      disabled={!batchExportableOutputs.length}
+                      onSelect={openBatchExport}
+                      className="text-[12px]"
+                    >
+                      <Layers size={13} />
+                      {t("workbench.batchExport")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      disabled={!hasContent || nleExport?.phase === "running"}
+                      onSelect={() => void startNleExport()}
+                      className="text-[12px]"
+                    >
+                      <FolderOutput size={13} />
+                      {t("workbench.exportForEditors")}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+              <NleExportDialog
+                state={nleExport}
+                onCancel={() => { nleCancelRef.current = true; }}
+                onClose={() => setNleExport(null)}
+              />
+              <BatchExportDialog
+                open={batchExportOpen}
+                onOpenChange={setBatchExportOpen}
+                outputs={batchExportableOutputs}
+                selected={batchSelected}
+                onToggleSelect={toggleBatchSelect}
+                onToggleAll={toggleBatchSelectAll}
+                opts={exportOpts}
+                onOptsChange={setExportOpts}
+                batch={outputBatch}
+                exportPct={exportPct}
+                onStart={startBatchExport}
+                onCancel={cancelBatchExport}
+              />
+              <Dialog
+                open={exportOpen}
+                onOpenChange={(v) => {
+                  if (!v && exporting) return;
+                  setExportOpen(v);
+                }}
+              >
+                <DialogContent
+                  className="max-w-[320px]"
+                  showCloseButton={!exporting}
+                >
+                  <DialogHeader>
+                    <DialogTitle>{t("tools.export_video.label")}</DialogTitle>
+                  </DialogHeader>
+                  {exporting ? (
+                    // Export dialog stays open: progress lives here, only "cancel export" can close it (overlay/Esc are blocked)
+                    <div className="flex flex-col gap-3">
+                      <div className="bg-line h-1.5 overflow-hidden rounded-full">
+                        <div
+                          className="bg-accent h-full rounded-full transition-[width] duration-300 ease-out"
+                          style={{ width: `${exportPct}%` }}
+                        />
+                      </div>
+                      <p className="text-ink-3 text-[12px]">
+                        {t("workbench.renderingPctDownloads", {
+                          pct: exportPct,
+                        })}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          cancelExport();
+                          setExportOpen(false);
+                        }}
+                        className="border-line text-ink-2 hover:text-ink inline-flex items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-[13px]"
+                      >
+                        <X size={14} /> {t("workbench.cancelExport")}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      <ExportOptRow
+                        label={t("chatGen.resolution")}
+                        value={exportOpts.res}
+                        options={[
+                          [2160, "4K"],
+                          [1440, "2K"],
+                          [1080, "1080p"],
+                          [720, "720p"],
+                          [540, "540p"],
+                        ]}
+                        onPick={(res) => setExportOpts((o) => ({ ...o, res }))}
+                      />
+                      <ExportOptRow
+                        label={t("workbench.frameRate")}
+                        value={exportOpts.fps}
+                        options={[
+                          [24, "24"],
+                          [30, "30"],
+                          [60, "60"],
+                        ]}
+                        onPick={(fps) => setExportOpts((o) => ({ ...o, fps }))}
+                      />
+                      <ExportOptRow
+                        label={t("workbench.format")}
+                        value={exportOpts.format}
+                        options={[
+                          ["mp4", "MP4"],
+                          ["mov", "MOV"],
+                          ["webm", "WebM"],
+                        ]}
+                        onPick={(format) =>
+                          setExportOpts((o) => ({ ...o, format }))
+                        }
+                      />
+                      <p className="text-ink-4 text-[11px] leading-relaxed">
+                        {t("workbench.downloadsAutomaticallyWhenExport")}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // Keep the dialog to show progress, close only when compositing ends (done/failed/cancelled)
+                          void exportVideo(exportOpts).finally(() =>
+                            setExportOpen(false),
+                          );
+                        }}
+                        className="bg-ink text-bg inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-[13px] font-medium hover:opacity-90"
+                      >
+                        <Download size={14} /> {t("workbench.startExport")}
+                      </button>
+                    </div>
+                  )}
+                </DialogContent>
+              </Dialog>
+              {((exporting && !exportOpen) || publishing) && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        cancelExport();
+                      }}
+                      className="text-ink-3 hover:text-ink shrink-0 rounded p-1"
+                    >
+                      <X size={14} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {t("workbench.stopRendering")}
+                  </TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+  </TooltipProvider>;
+
   return (
-    <div className="studio-scope bg-bg relative flex h-full min-h-0 w-full gap-1.5 overflow-hidden p-1.5">
+    <div ref={workspaceRowRef} data-studio-workspace className="studio-scope bg-bg relative flex h-full min-h-0 w-full flex-col gap-1.5 overflow-hidden p-1.5">
+      {workflowOpen && <WorkflowEntry
+        projectId={projectId}
+        initialTemplateId={workflowEntryId}
+        open={workflowOpen}
+        onOpenChange={setWorkflowOpen}
+        blocked={!bootDataReady || busyImport || chatBusy || bridgeToolsInFlight > 0 || displaced}
+        onBusyChange={(value) => { workflowBusyRef.current = value; setWorkflowBusy(value); }}
+        onImport={() => fileInputRef.current?.click()}
+        host={{
+          ...(studioProviders().captionEmphasis ? { emphasizeCaptions } : {}),
+          context: () => {
+            const document = editorDocumentRef.current;
+            const sourceId = firstNarrativeAssetId(document);
+            return {
+              source: { projectId, outputId: projectOutputs.outputsRef.current.active.id, revision: workflowDocumentRevision(document) },
+              title: projectOutputs.outputsRef.current.active.title,
+              sourceLabel: sourceId ? document.assets[sourceId]?.label : undefined,
+              hasContent: hasTimelineContent(compRef.current),
+              hasNarration: !!sourceId,
+              hasTranscript: !!sourceId && !!document.semantics.transcripts[sourceId]?.length,
+            };
+          },
+          assertWritable: () => {
+            if (displacedRef.current || chatBusy || bridgeToolsInFlight > 0) throw new Error(locale === 'zh' ? '当前作品正在被其他任务编辑。' : 'Another task is editing this output.');
+          },
+          prepareMedia: async () => {
+            const document = editorDocumentRef.current;
+            const sourceId = firstNarrativeAssetId(document);
+            const asset = sourceId ? document.assets[sourceId] : undefined;
+            const file = asset ? await speechFileForAsset(asset) : null;
+            if (!file) throw new Error(locale === 'zh' ? '无法读取原素材，请在素材面板恢复文件。' : 'Source media is unavailable. Restore the file in Materials.');
+          },
+          call: async (name, args) => {
+            const result = await persistToolMutation(runAgentExternalTool(agentToolCtx, 'run_v3', { name, args, surface: 'bridge' }));
+            // Output duplication changes project metadata even when the document delta is empty.
+            if (result.ok && cloudSaveQueueRef.current) {
+              cloudSaveQueueRef.current.markDirty();
+              await cloudSaveQueueRef.current.flush();
+            }
+            return result;
+          },
+        }}
+      />}
       {/* Entry boot layer: heavy-resource warmup + project-data double gate, covers the whole workbench (incl. the chat bar), self-unmounts when done */}
       <StudioBootOverlay dataReady={bootDataReady} />
+      <header data-studio-header data-block-selection-keep data-cap-keep className="bg-canvas flex h-11 shrink-0 items-center justify-between gap-3 rounded-sm px-3">
+        <div className="flex min-w-0 items-center gap-3">
+          {backHref ? <a href={backHref} aria-label={t("workbench.backToProjects")} title={t("workbench.backToProjects")}
+            className="text-ink-3 hover:bg-panel-2/20 hover:text-ink inline-flex size-8 shrink-0 items-center justify-center rounded-md">
+            <ArrowLeft size={16} />
+          </a> : null}
+          <EditorModeSwitch mode={editingMode} onChange={selectEditingMode} />
+        </div>
+        <div className="flex min-w-0 items-center gap-3">
+          {!AccountControls && themeToggle}
+          {exportControls}
+          {AccountControls ? <AccountControls busy={chatBusy || bridgeToolsInFlight > 0} /> : CreditsBalance && <CreditsBalance busy={chatBusy || bridgeToolsInFlight > 0} />}
+          {accountMenu && <div data-studio-account className="shrink-0">{accountMenu}</div>}
+        </div>
+      </header>
+      <div data-studio-body className="flex min-h-0 min-w-0 flex-1 gap-1.5">
       {/* Agent file injection: the stable input and empty-canvas trigger below let an external agent
           use the browser file-chooser bridge. The browser reads the local file directly — no cloud
           upload — and the normal pickVideoFile path persists it in the OPFS local library. */}
@@ -8346,91 +8970,14 @@ export function HyperframesWorkbench({
           if (f) void pickVideoFile(f);
         }}
       />
-      {/* Left: chat area. It shares one workbench frame with the editor, while staying mounted when hidden to preserve the chat session. */}
-      <div className={panelOpen ? "flex min-h-0 shrink-0" : "hidden"}>
-        {/* Panel width adjustable (drag the right edge, 320–760); the stage shrinks accordingly (area observer auto-recomputes fit) */}
-        <div
-          className="bg-canvas relative flex min-h-0 flex-col overflow-hidden rounded-sm"
-          style={{ width: panelW }}
-        >
-          <div
-            onPointerDown={(e) => {
-              e.preventDefault();
-              try {
-                (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-              } catch {
-                /* fall back on buttons */
-              }
-              const sx = e.clientX;
-              const w0 = panelW;
-              let raf = 0;
-              let last: PointerEvent | null = null;
-              const flush = () => {
-                raf = 0;
-                if (last)
-                  setPanelW(
-                    Math.max(320, Math.min(760, w0 + (last.clientX - sx))),
-                  );
-              };
-              const mv = (ev: PointerEvent) => {
-                if (ev.buttons === 0) {
-                  up();
-                  return;
-                }
-                last = ev;
-                if (!raf) raf = requestAnimationFrame(flush);
-              };
-              const up = () => {
-                if (raf) cancelAnimationFrame(raf);
-                flush();
-                window.removeEventListener("pointermove", mv);
-                window.removeEventListener("pointerup", up);
-                window.removeEventListener("pointercancel", up);
-              };
-              window.addEventListener("pointermove", mv);
-              window.addEventListener("pointerup", up);
-              window.addEventListener("pointercancel", up);
-            }}
-            title={t("workbench.dragResizePanel")}
-            className="hover:bg-accent/40 absolute inset-y-0 right-0 z-10 w-1.5 cursor-col-resize transition-colors"
-          />
-          {/* Chat is the only content of this area (hidden entirely when collapsed, session/streaming preserved) */}
-          <div className="flex min-h-0 flex-1">
-            {initialChatThreads ? (
-              <StudioChat
-                key={chatEpoch}
-                ref={chatRef}
-                projectId={projectId}
-                // updateLocalAssetIndex swaps in a NEW array and bumps localAssetIndexRev (re-rendering
-                // the workbench), so reading the ref here hands the memo'd chat the fresh identity and
-                // search receipts resolve OPFS thumbnails for mine-scope hits.
-                localAssetIndex={localAssetIndexRef.current}
-                onInsertMedia={(m) => void insertPanelMedia({ type: m.type, url: m.url }, m.label)}
-                onUseAudio={(url, label) => void audioOps.mountAudioFromUrl(url, label)}
-                runTool={chatCbs.runTool}
-                getBody={getChatBody}
-                getComp={getChatComp}
-                timelineFramePickActive={timelineFramePickActive}
-                timelineFramePickBusy={timelineFramePickBusy}
-                timelineFramePickAvailable={
-                  duration > 0 && hasTimelineContent(comp)
-                }
-                onTimelineFramePickActiveChange={setTimelineFramePickMode}
-                elements={chatMentionElements}
-                onFrameApplied={onFrameApplied}
-                initialThreads={initialChatThreads}
-                onThreadChange={persistChatThread}
-                onClose={closeChat}
-                onBusyChange={setChatBusy}
-              />
-            ) : (
-              <div className="text-ink-4 flex h-full w-full items-center justify-center">
-                <Loader2 size={16} className="animate-spin" />
+          <WorkbenchDockPanel id="editor" side="left" visible={leftPanelVisible} width={columnWidths.left} onResize={(width) => resizeColumn("left", width)}>
+            {(["chat", "captions"] as const).map((mode) => (
+              <div key={mode} role="tabpanel" id={`editor-panel-${mode}`} aria-labelledby={`editor-tab-${mode}`}
+                className={editingMode === mode ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+                {dockContent[mode]}
               </div>
-            )}
-          </div>
-        </div>
-      </div>
+            ))}
+          </WorkbenchDockPanel>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {/* Video import goes through the preview upload / chat; the top bar no longer has buttons (the pipeline is fully tool-ized, chat-driven) */}
         <input
@@ -8445,28 +8992,11 @@ export function HyperframesWorkbench({
           }}
         />
 
-        {/* Top half: preview | asset library (above the timeline). The asset library has a fixed column width, the stage adapts to remaining space (area observer recomputes fit).
-            The preview must be min-w-0: flex's min-width:auto would lock it to the stage content width, and it gets squeezed and clipped when the rail collapses then expands */}
+        {/* Left editing mode | preview | right tools. Sidebars share a width budget that leaves the stage visible. */}
         <div className="mb-1.5 flex min-h-0 min-w-0 flex-1 gap-1.5">
           {/* Preview (= the editing surface: single-click selects a block, double-click edits text in place). No video → upload area.
             The panel clips its own children so nested surfaces cannot bleed through the outer rounded corners. */}
-          <div className="bg-canvas flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-sm">
-            {/* The deliverables rail is a sibling of the measured canvas area: it consumes real width,
-              so the fit observer sizes the stage against the remaining space instead of overlaying it. */}
-            <ProjectOutputSwitcher
-              outputs={outputTabs}
-              activeId={projectOutputs.outputs.active.id}
-              label={t("workbench.outputSwitcher")}
-              newLabel={t("workbench.newOutput")}
-              deleteLabel={t("workbench.deleteOutput")}
-              untitledLabel={t("workbench.untitledOutput")}
-              switching={outputRuntime.switching}
-              locked={chatBusy || bridgeToolsInFlight > 0}
-              lockedHint={t("workbench.outputSwitchPausedByAgent")}
-              onSwitch={switchOutput}
-              onCreate={createOutput}
-              onDelete={requestDeleteOutput}
-            />
+          <div data-studio-preview inert={manualEditingLocked} className="bg-canvas flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-sm">
             <div className="flex min-h-0 min-w-0 flex-1 p-3">
               <div
                 ref={previewAreaRef}
@@ -8483,7 +9013,7 @@ export function HyperframesWorkbench({
                         onClick={applySourceCanvasRatio}
                         className={`whitespace-nowrap px-3 py-1.5 text-left text-[11.5px] transition ${
                           followsFirstSource
-                            ? "bg-panel-2 text-ink font-medium"
+                            ? "bg-panel-2/35 text-ink font-medium"
                             : "text-ink-3 hover:bg-panel-2 hover:text-ink"
                         }`}
                       >
@@ -8496,7 +9026,7 @@ export function HyperframesWorkbench({
                           onClick={() => applyCanvasRatio(r.w, r.h)}
                           className={`whitespace-nowrap px-3 py-1.5 text-left text-[11.5px] transition ${
                             currentRatioId === r.id
-                              ? "bg-panel-2 text-ink font-medium"
+                              ? "bg-panel-2/35 text-ink font-medium"
                               : "text-ink-3 hover:bg-panel-2 hover:text-ink"
                           }`}
                         >
@@ -8514,20 +9044,7 @@ export function HyperframesWorkbench({
                     {followsFirstSource ? t("workbench.ratioFollowSource") : currentRatioId ?? t("workbench.ratioCustom")}
                   </button>
                 </div>
-                {/* Floating entries on the preview (outside the toolbar's TooltipProvider scope, use native title — Tooltip would crash):
-              top-left = reopen chat (the chat area is on the left, returns to the same side; theme black primary button).
-              Icon-only (per user): no text floating over the frame — the label lives in title/aria. */}
-                {!panelOpen && (
-                  <button
-                    type="button"
-                    onClick={openChat}
-                    title={t("workbench.openChat")}
-                    aria-label={t("workbench.openChat")}
-                    className="bg-ink text-bg absolute left-3 top-2 z-20 flex h-7 w-7 items-center justify-center rounded-md shadow-sm hover:opacity-90"
-                  >
-                    <MessageSquare size={14} />
-                  </button>
-                )}
+
                 <div
                   ref={stageBoxRef}
                   data-cap-keep
@@ -8768,7 +9285,7 @@ export function HyperframesWorkbench({
                                 aria-label={t("workbench.cameraFraming")}
                                 className={`inline-flex size-7 items-center justify-center rounded ${
                                   floatWin === "shot"
-                                    ? "bg-panel-2 text-ink"
+                                    ? "bg-panel-2/35 text-ink"
                                     : "text-ink-3 hover:bg-panel-2 hover:text-ink"
                                 }`}
                               >
@@ -8784,7 +9301,7 @@ export function HyperframesWorkbench({
                                 aria-label={t("panels.videoSound")}
                                 className={`inline-flex size-7 items-center justify-center rounded ${
                                   !floatWin && libTab === "audio"
-                                    ? "bg-panel-2 text-ink"
+                                    ? "bg-panel-2/35 text-ink"
                                     : "text-ink-3 hover:bg-panel-2 hover:text-ink"
                                 }`}
                               >
@@ -8826,7 +9343,19 @@ export function HyperframesWorkbench({
                             ? mainPresetSel0
                             : { ...mainPresetSel0, bg: csSel.bg ?? undefined };
                         const mainLines =
-                          sb.slots.cue === true && selWords.length
+                          sb.slots.cue === true && selWords.length && mainPresetSel.stack
+                            ? Math.max(
+                                1,
+                                captionStackRows(
+                                  selWords,
+                                  mainPresetSel,
+                                  csSel.wPct ?? 56,
+                                  csSel.scale,
+                                  comp.width,
+                                  { bold: csSel.bold, font: csSel.font },
+                                ).reduce((sum, _row, k) => sum + captionStackScale(mainPresetSel.stack!, k), 0),
+                              )
+                          : sb.slots.cue === true && selWords.length
                             ? Math.max(
                                 1,
                                 captionLineSegments(
@@ -9162,7 +9691,7 @@ export function HyperframesWorkbench({
                                               e.currentTarget.getBoundingClientRect(),
                                             )
                                       }
-                                      className={`inline-flex items-center gap-1 rounded p-1 text-[11px] whitespace-nowrap ${floatWin === "anim" ? "text-ink bg-panel-2" : "text-ink-3 hover:text-ink"}`}
+                                      className={`inline-flex items-center gap-1 rounded p-1 text-[11px] whitespace-nowrap ${floatWin === "anim" ? "text-ink bg-panel-2/35" : "text-ink-3 hover:text-ink"}`}
                                     >
                                       <Wand2 size={13} />{" "}
                                       {t("workbench.motion")}
@@ -9376,7 +9905,7 @@ export function HyperframesWorkbench({
                                         aria-label={t(
                                           "workbench.portraitLayer",
                                         )}
-                                        className={`rounded p-1 ${(mb.personLayer ? mb.personLayer === "behind" : !!comp.personFx?.personFront) ? "text-ink bg-panel-2" : "text-ink-3 hover:text-ink"}`}
+                                        className={`rounded p-1 ${(mb.personLayer ? mb.personLayer === "behind" : !!comp.personFx?.personFront) ? "text-ink bg-panel-2/35" : "text-ink-3 hover:text-ink"}`}
                                       >
                                         <BringToFront size={13} />
                                       </button>
@@ -9413,7 +9942,7 @@ export function HyperframesWorkbench({
                                     }
                                     disabled={!selectedShotId}
                                     aria-label={t("panels.smartCutout")}
-                                    className={`rounded p-1 disabled:opacity-40 ${(comp.shots ?? []).some((s) => s.personMatte) && comp.personFx?.personFront ? "text-ink bg-panel-2" : "text-ink-3 hover:text-ink"}`}
+                                    className={`rounded p-1 disabled:opacity-40 ${(comp.shots ?? []).some((s) => s.personMatte) && comp.personFx?.personFront ? "text-ink bg-panel-2/35" : "text-ink-3 hover:text-ink"}`}
                                   >
                                     <SendToBack size={13} />
                                   </button>
@@ -9424,18 +9953,17 @@ export function HyperframesWorkbench({
                               </Tooltip>
                             )}
                             {/* Editable properties live in the rail inspector; the bar only opens it. */}
-                            {(mb.templateId === "custom" || mb.templateId.startsWith("kit:")) && (
+                            {(mb.templateId === "custom" || mb.templateId.startsWith("kit:") || mb.templateId.startsWith("look:")) && (
                               <Tooltip>
                                 <TooltipTrigger asChild>
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      setFloatWin(null);
-                                      setLibTab("props");
+                                      setFloatWin("props");
                                       setLibCollapsed(false);
                                     }}
                                     aria-label={t("workbench.editableProperties")}
-                                    className={`rounded p-1 ${libTab === "props" ? "text-ink bg-panel-2" : "text-ink-3 hover:text-ink"}`}
+                                    className={`rounded p-1 ${floatWin === "props" ? "text-ink bg-panel-2/35" : "text-ink-3 hover:text-ink"}`}
                                   >
                                     <SlidersHorizontal size={13} />
                                   </button>
@@ -9457,7 +9985,7 @@ export function HyperframesWorkbench({
                                         aria-label={t(
                                           "workbench.elementBackground",
                                         )}
-                                        className={`rounded p-1 ${bgOpen ? "text-ink bg-panel-2" : "text-ink-3 hover:text-ink"}`}
+                                        className={`rounded p-1 ${bgOpen ? "text-ink bg-panel-2/35" : "text-ink-3 hover:text-ink"}`}
                                       >
                                         <Palette size={13} />
                                       </button>
@@ -9905,611 +10433,116 @@ export function HyperframesWorkbench({
             </div>
           </div>
 
-          {/* Library rail: content column + a vertical primary-nav strip on the outer edge
-            (assets / script-cut / captions / audio / avatar). railW = CONTENT width; the nav strip
-            adds RAIL_NAV_W on top so the asset grid's whole-column math stays intact.
-            Collapsible to free up the frame: the content column stays mounted as hidden (preserving filters/scroll/generation polling), while the primary nav remains visible.
-            When a tool panel (floatWin) is open it **docks and takes the whole content column** (per user: not a new tab):
-            a panel title header appears, the asset list is hidden but keeps state; the nav strip stays visible and
-            clicking any nav item closes the panel and returns to that tab. */}
+          <WorkbenchDockPanel id="tools" side="right" visible={!libCollapsed} width={columnWidths.right} onResize={(width) => resizeColumn("right", width)}>
+            {RIGHT_DOCK_TABS.map((tab) => {
+              const visible = !contextDockVisible && libTab === tab;
+              return <div key={tab} data-studio-tool-panel={tab} inert={manualEditingLocked} className={visible ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+                {visible || tab === "assets" ? dockContent[tab] : null}
+              </div>;
+            })}
+            {contextDockVisible && <div data-studio-tool-panel="context" inert={manualEditingLocked} className="flex min-h-0 flex-1 flex-col">{dockContextContent}</div>}
+          </WorkbenchDockPanel>
+          {/* Tools stay on the right; the left editor has its own two-mode switch. */}
           <div
-            className="relative flex shrink-0 flex-col"
-            style={{
-              width: libCollapsed ? RAIL_NAV_W : railW + RAIL_NAV_W + 6,
-            }}
+            data-studio-tools
+            className="bg-canvas flex shrink-0 flex-col overflow-hidden rounded-sm"
+            style={{ width: RAIL_NAV_W }}
           >
-            {/* Drag the left edge to resize (260–786 = up to six 120px card columns flush, persisted) */}
-            {!libCollapsed && (
-              <div
-                onPointerDown={(e) => {
-                  e.preventDefault();
-                  const sx = e.clientX;
-                  const w0 = railW;
-                  let raf = 0;
-                  let last: PointerEvent | null = null;
-                  const flush = () => {
-                    raf = 0;
-                    if (last)
-                      setRailW(
-                        Math.max(260, Math.min(786, w0 + (sx - last.clientX))),
-                      );
-                  };
-                  const mv = (ev: PointerEvent) => {
-                    if (ev.buttons === 0) {
-                      up();
-                      return;
-                    }
-                    last = ev;
-                    if (!raf) raf = requestAnimationFrame(flush);
-                  };
-                  const up = () => {
-                    if (raf) cancelAnimationFrame(raf);
-                    flush();
-                    window.removeEventListener("pointermove", mv);
-                    window.removeEventListener("pointerup", up);
-                    window.removeEventListener("pointercancel", up);
-                  };
-                  window.addEventListener("pointermove", mv);
-                  window.addEventListener("pointerup", up);
-                  window.addEventListener("pointercancel", up);
-                }}
-                title={t("workbench.dragResizePanel")}
-                className="hover:bg-accent/40 absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize transition-colors"
-              />
-            )}
-            <div className="flex min-h-0 flex-1 gap-1.5">
-              <div
-                className={`${libCollapsed ? "hidden" : "flex"} bg-canvas min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-sm`}
-              >
-                {floatWin ? (
-                  <div className="bg-panel flex h-8 shrink-0 items-center gap-1 px-2.5">
-                    <span className="text-ink truncate px-1 text-[12px] font-medium">
-                      {floatWin === "script"
-                        ? t("workbench.smartScriptCut")
-                        : floatWin === "person"
-                          ? t("workbench.portrait")
-                          : floatWin === "anim"
-                            ? t("workbench.assetMotion")
-                            : floatWin === "captions"
-                              ? t("panels.captions")
-                              : floatWin === "shot"
-                                ? (() => {
-                                    const i = (comp.shots ?? []).findIndex(
-                                      (s) => s.id === selectedShotId,
-                                    );
-                                    return (
-                                      t("workbench.cameraFraming") +
-                                      (i >= 0
-                                        ? t("workbench.sceneN", { n: i + 1 })
-                                        : "")
-                                    );
-                                  })()
-                                : floatWin === "transition"
-                                  ? (() => {
-                                      const i =
-                                        transitionCut == null
-                                          ? -1
-                                          : videoShotTimelineSpans(
-                                              comp.shots ?? [],
-                                              renderVideoPlacements,
-                                            ).findIndex(
-                                              (sp) =>
-                                                Math.abs(
-                                                  sp.editedEnd - transitionCut,
-                                                ) < 0.05,
-                                            );
-                                      return (
-                                        t("tools.add_transition.label") +
-                                        (i >= 0
-                                          ? t("workbench.betweenScenes", {
-                                              a: i + 1,
-                                              b: i + 2,
-                                            })
-                                          : "")
-                                      );
-                                    })()
-                                  : (() => {
-                                      const cb = codeBlockId
-                                        ? comp.blocks.find(
-                                            (x) => x.id === codeBlockId,
-                                          )
-                                        : null;
-                                      return t("workbench.sourceLabel", {
-                                        label: cb?.label || codeBlockId || "",
-                                      });
-                                    })()}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setFloatWin(null)}
-                      title={t("workbench.close")}
-                      aria-label={t("workbench.closePanel")}
-                      className="text-ink-4 hover:text-ink ml-auto rounded p-1"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                ) : null}
-                {/* Assets stay mounted (hidden when switched away / covered by a panel, preserving polling/scroll position); themes mount on demand (don't run the cover wall in the background) */}
-                <div
-                  className={
-                    !floatWin && libTab === "assets"
-                      ? "flex min-h-0 flex-1 flex-col"
-                      : "hidden"
-                  }
-                >
-                  <AssetsPanel
-                    comp={comp}
-                    projectId={projectId}
-                    localAssetIndex={
-                      localAssetIndexKnownRef.current
-                        ? localAssetIndexRef.current
-                        : undefined
-                    }
-                    localAssetIndexSyncReady={localAssetIndexSyncReady}
-                    onLocalAssetIndexChange={changeLocalAssetIndex}
-                    onLocalAssetAvailable={acceptLocalAssetFile}
-                    onUseAsReference={(entry) => {
-                      openChat();
-                      chatRef.current?.beginGeneration("image");
-                      chatRef.current?.insertMention(localAssetMentionRef(entry));
-                    }}
-                    videoSig={null}
-                    mainSourceUrl={null}
-                    hasMainSource={false}
-                    onDeleteAsset={deleteAssetSource}
-                    isSrcLive={srcLive}
-                    onReconnectSource={(src, sig) =>
-                      void reconnectSource(src, sig)
-                    }
-                    onInsert={(m, l, d) =>
-                      void insertPanelMedia(m, l, undefined, d)
-                    }
-                    onInsertClip={(a) =>
-                      void insertLibraryClipAt(a, tRef.current)
-                    }
-                    onInsertElement={insertGeneratedElement}
-                    onInsertKit={(cid, props) =>
-                      insertTemplateBlock(`kit:${cid}`, props)
-                    }
-                    onDragAsset={setDragAsset}
-                    onOpenGeneration={(type, prompt) =>
-                      openGeneration(type, prompt)
-                    }
-                    onUseAudio={(url, label, sig) =>
-                      void audioOps
-                        .mountAudioFromUrl(url, label, { sig })
-                        .then((id) => id && setSelectedAudioId(id))
-                    }
-                    genRefreshTick={genRefreshTick}
-                  />
-                </div>
-                {!floatWin && libTab === "frames" && (
-                  <div className="flex min-h-0 flex-1">
-                    <FramePanel
-                      comp={comp}
-                      onUse={useFrameInChat}
-                      onClear={() => {
-                        openChat();
-                        chatRef.current?.attachFrame(null);
-                      }}
-                    />
-                  </div>
-                )}
-                {/* 剪口播 / 字幕 docked as library tabs (siblings of 素材). The same panels also open
-              floating from the caption-selected shortcuts / style popover — one component, two mounts;
-              floatWin covers the rail, so only one is ever visible. */}
-                {!floatWin && libTab === "script" && (
-                  <div className="flex min-h-0 flex-1 flex-col">
-                    {!useNativeScriptPanel ? (
-                      <ScriptPanel
-                        sentences={asrSentences}
-                        clipSentences={clipAsr}
-                        shots={ensureShots(comp)}
-                        videoDurationSec={firstAssetDurationSec ?? 0}
-                        extracting={asrBusy}
-                        onExtract={() => void extractForScript()}
-                        onSeek={(sec) => {
-                          applyT(Math.max(0, sec));
-                          locateTimeline(true); // clicking a word in the script also brings that moment into view on the timeline
-                        }}
-                        onCut={cutSrcRanges}
-                        onRestore={restoreSrcRanges}
-                        onReplaceWord={replaceScriptWord}
-                        onMaskWords={maskScriptWords}
-                      />
-                    ) : (
-                      <TimelineScriptPanel
-                        document={editorDocument}
-                        extracting={asrBusy}
-                        onExtract={() => void extractForScript()}
-                        onSeek={(sec) => {
-                          applyT(Math.max(0, sec));
-                          locateTimeline(true);
-                        }}
-                        onCut={cutTimelineRanges}
-                        onReplaceWord={replaceTimelineScriptWord}
-                        onMaskWords={maskTimelineScriptWords}
-                      />
-                    )}
-                  </div>
-                )}
-                {!floatWin && libTab === "audio" && (
-                  <MusicPanel
-                    clips={comp.audioTracks ?? []}
-                    selectedId={selectedAudioId}
-                    usable={audioOps.clipUsable}
-                    onPatch={audioOps.patchClip}
-                    peakOf={(c) =>
-                      c.sig ? (audioOps.clipPeaks.get(c.sig) ?? null) : null
-                    }
-                    shots={
-                      selectedVisualClipId
-                        ? selectedShot
-                          ? [selectedShot]
-                          : []
-                        : (comp.shots ?? []).filter((sh) =>
-                            selectedShotIds.has(sh.id),
-                          )
-                    }
-                    onSetShotAudio={(patch: {
-                      volumeDb?: number;
-                      fadeInSec?: number;
-                      fadeOutSec?: number;
-                    }) => {
-                      // Multi-select takes the edit as one action: every selected shot, one undo step
-                      const ids =
-                        selectedVisualClipId && selectedShot
-                          ? [selectedShot.id]
-                          : (comp.shots ?? [])
-                              .filter((sh) => selectedShotIds.has(sh.id))
-                              .map((sh) => sh.id);
-                      if (!ids.length) return;
-                      pushUndoSnapshot();
-                      for (const id of ids) setShotAudio(id, patch);
-                    }}
-                    denoise={{
-                      strength: comp.audioDenoise?.strength ?? null,
-                      status: denoiseOps.status,
-                      progress: denoiseOps.progress,
-                    }}
-                    onSetDenoise={denoiseOps.setDenoise}
-                  />
-                )}
-                {!floatWin && libTab === "captions" && (
-                  <div className="flex min-h-0 flex-1 flex-col">
-                    <div data-cap-keep className="contents">
-                      <CaptionsPanel {...captionsPanelProps()} />
-                    </div>
-                  </div>
-                )}
-                {!floatWin && libTab === "text" && (
-                  <DisplayTextPanel
-                    block={selectedDisplayTextBlock}
-                    onAdd={insertDisplayText}
-                    onPatch={patchDisplayText}
-                    onPreset={(preset: DisplayTextPresetId, animation: DisplayTextAnimationId) =>
-                      patchDisplayText({ preset, animation })
-                    }
-                  />
-                )}
-                {!floatWin && libTab === "props" && (
-                  <ComponentPropsPanel
-                    block={selectedCustomBlock}
-                    canvas={{ width: comp.width, height: comp.height }}
-                    swatches={bgSwatches.map(([name, value]) => ({ label: t("panels.backgroundName", { name: t(name) }), value }))}
-                    onBlockPatch={(patch) => selectedCustomBlock && patchInspectorBlock(selectedCustomBlock.id, patch)}
-                    onValues={(next) => selectedCustomBlock && patchComponentValues(selectedCustomBlock.id, next)}
-                    onLive={(message) => selectedCustomBlock && postPreview({ type: "hf:blockProps", blockId: selectedCustomBlock.id, ...message })}
-                    onText={(key, value) => selectedCustomBlock && setSlot(selectedCustomBlock.id, key, value)}
-                    onReplaceImage={(index) => selectedCustomBlock && void replaceCustomImg(selectedCustomBlock.id, index)}
-                    onRemoveImage={(index) => selectedCustomBlock && patchCustomImg(selectedCustomBlock.id, index, () => "remove")}
-                  />
-                )}
-                {!floatWin && libTab === "avatar" && <AvatarPanel />}
-                {floatWin && (
-                  <div className="flex min-h-0 flex-1">
-                    {floatWin === "script" && (
-                      !useNativeScriptPanel ? (
-                        <ScriptPanel
-                          sentences={asrSentences}
-                          clipSentences={clipAsr}
-                          shots={ensureShots(comp)}
-                          videoDurationSec={firstAssetDurationSec ?? 0}
-                          extracting={asrBusy}
-                          onExtract={() => void extractForScript()}
-                          onSeek={(sec) => {
-                            applyT(Math.max(0, sec));
-                            locateTimeline(true); // clicking a word in the script also brings that moment into view on the timeline
-                          }}
-                          onCut={cutSrcRanges}
-                          onRestore={restoreSrcRanges}
-                          onReplaceWord={replaceScriptWord}
-                        onMaskWords={maskScriptWords}
-                        />
-                      ) : (
-                        <TimelineScriptPanel
-                          document={editorDocument}
-                          extracting={asrBusy}
-                          onExtract={() => void extractForScript()}
-                          onSeek={(sec) => {
-                            applyT(Math.max(0, sec));
-                            locateTimeline(true);
-                          }}
-                          onCut={cutTimelineRanges}
-                          onReplaceWord={replaceTimelineScriptWord}
-                        onMaskWords={maskTimelineScriptWords}
-                        />
-                      )
-                    )}
-                    {floatWin === "code" &&
-                      (() => {
-                        const cb = codeBlockId
-                          ? comp.blocks.find((x) => x.id === codeBlockId)
-                          : null;
-                        return cb ? (
-                          <ElementSourceEditor
-                            key={cb.id}
-                            block={cb}
-                            boxPx={{ w: (cb.box?.w ?? 1) * comp.width, h: (cb.box?.h ?? 1) * comp.height }}
-                            locked={genIds.has(cb.id)}
-                            loop={codeLoop}
-                            onLoop={toggleCodeLoop}
-                            onDraft={(draft) => handleCodeDraft(cb.id, draft)}
-                            onApply={(draft) => handleCodeApply(cb.id, draft)}
-                            runAi={(instruction, draft, onNote) =>
-                              runCodeAi(cb, instruction, draft, onNote)
-                            }
-                          />
-                        ) : (
-                          <div className="text-ink-4 flex flex-1 items-center justify-center gap-2 text-[12px]">
-                            {t("workbench.elementDeleted")}
-                            <button
-                              type="button"
-                              onClick={() => setFloatWin(null)}
-                              className="text-ink underline"
-                            >
-                              {t("workbench.close")}
-                            </button>
-                          </div>
-                        );
-                      })()}
-                    {floatWin === "shot" && selectedShot && (
-                      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                        {selectedShot.src?.startsWith("blob:") &&
-                          !clipFilesRef.current.has(selectedShot.src) && (
-                            <div className="border-line flex items-center gap-2 border-b px-3 py-2">
-                              <span className="text-ink-2 min-w-0 flex-1 text-[11px]">
-                                {t("workbench.insertSourceMissing")}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  void reconnectSource(
-                                    selectedShot.src!,
-                                    selectedShot.srcSig,
-                                  )
-                                }
-                                className="bg-accent shrink-0 rounded px-2.5 py-1 text-[11px] font-medium text-white transition hover:brightness-110"
-                              >
-                                {t("workbench.rePickFile")}
-                              </button>
-                            </div>
-                          )}
-                        <ShotTreatmentPanel
-                          shot={selectedShot}
-                          onSetTreatment={setShotTreatment}
-                          onSetTreatSize={setShotTreatSize}
-                          onPreviewTreatSize={previewShotTreatSize}
-                          onSetTreatCrop={setShotTreatCrop}
-                          onPreviewTreatCrop={previewShotTreatCrop}
-                          onSetFilter={setShotFilter}
-                          onPreviewFilter={previewShotFilter}
-                          onSetAudio={setShotAudio}
-                          speed={clipSpeedInDocument(editorDocument, selectedShot.id)}
-                          onSetSpeed={setShotSpeed}
-                        />
-                      </div>
-                    )}
-                    {floatWin === "transition" && transitionCut != null && (
-                      <TransitionPanel
-                        effect={
-                          cutTransitions(
-                            comp.shots ?? [],
-                            renderVideoPlacements,
-                          ).find(
-                            (tr) => Math.abs(tr.cut - transitionCut) < 0.05,
-                          )?.effect ?? null
-                        }
-                        direction={
-                          cutTransitions(
-                            comp.shots ?? [],
-                            renderVideoPlacements,
-                          ).find(
-                            (tr) => Math.abs(tr.cut - transitionCut) < 0.05,
-                          )?.dir ?? "left"
-                        }
-                        onPick={(ef, dir) =>
-                          setCutTransition(transitionCut, ef, dir)
-                        }
-                      />
-                    )}
-                    {floatWin === "captions" && (
-                      <div data-cap-keep className="contents">
-                        <CaptionsPanel {...captionsPanelProps()} />
-                      </div>
-                    )}
-                    {floatWin === "person" && (
-                      <PersonFxPanel
-                        comp={comp}
-                        onChange={setPersonFx}
-                        onPrepareLocalImage={preparePickedLocalImage}
-                        matte={matteState}
-                        selectedShotMatte={(() => {
-                          const s = (comp.shots ?? []).find(
-                            (x) => x.id === selectedShotId,
-                          );
-                          return s ? !!s.personMatte : null; // equal standing: any source's segment can enable matte
-                        })()}
-                        onToggleShotMatte={toggleShotMatte}
-                        onRetry={() => {
-                          const s = (compRef.current.shots ?? []).find(
-                            (x) => x.id === selectedShotIdRef.current,
-                          );
-                          if (s) void runMatteForShot(s);
-                        }}
-                      />
-                    )}
-                    {floatWin === "anim" &&
-                      (() => {
-                        const b = selectedId
-                          ? comp.blocks.find((x) => x.id === selectedId)
-                          : null;
-                        if (!b) return null; // the auto-close-panel effect takes over immediately
-                        return (
-                          <MediaAnimPanel
-                            anim={
-                              (b.slots.anim ?? {}) as {
-                                enter?: string;
-                                exit?: string;
-                                dur?: number;
-                              }
-                            }
-                            onChange={(patch) => {
-                              const merged = setBlockAnim(b.id, patch);
-                              if (!merged) return;
-                              // Click a card to play it once (hf:animPreview runs the tween directly in the active doc, no debounced rebuild);
-                              // changing duration replays the current entry so you feel the speed change instantly
-                              if (patch.enter !== undefined)
-                                postPreview({
-                                  type: "hf:animPreview",
-                                  id: b.id,
-                                  phase: "in",
-                                  effect: patch.enter,
-                                  dur: merged.dur ?? 0.5,
-                                });
-                              else if (patch.exit !== undefined)
-                                postPreview({
-                                  type: "hf:animPreview",
-                                  id: b.id,
-                                  phase: "out",
-                                  effect: patch.exit,
-                                  dur: merged.dur ?? 0.5,
-                                });
-                              else if (patch.dur !== undefined)
-                                postPreview({
-                                  type: "hf:animPreview",
-                                  id: b.id,
-                                  phase: "in",
-                                  effect: merged.enter ?? "fade",
-                                  dur: patch.dur,
-                                });
-                            }}
-                          />
-                        );
-                      })()}
-                  </div>
-                )}
-              </div>
-              {/* Primary nav strip: always visible, including while the content column is collapsed.
-              Clicking a tab closes any docked tool panel; collapse/expand aligns with the content header. */}
-              <div
-                className="bg-canvas flex shrink-0 flex-col overflow-hidden rounded-sm"
-                style={{ width: RAIL_NAV_W }}
-              >
-                <button
+            <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-0.5 overflow-y-auto px-1 py-2">
+              {(
+                [
+                  {
+                    v: "assets",
+                    icon: LayoutGrid,
+                    label: "workbench.assets",
+                  },
+                  { v: "caption-style", icon: Captions, label: "captions.stylePanel" },
+                  { v: "text", icon: Type, label: "displayText.title" },
+                  { v: "transitions", icon: ArrowLeftRight, label: "workbench.transitionsTab" },
+                  { v: "audio", icon: Music, label: "panels.music" },
+                  {
+                    v: "avatar",
+                    icon: AudioLines,
+                    label: "workbench.avatar",
+                  },
+                  // Themes tab hidden (per user 2026-07-19): the component library is already grouped by theme with its own tokens, mount themes via the chat selector
+                ] as {
+                  v: RightDockTab;
+                  icon: typeof LayoutGrid;
+                  label: string;
+                }[]
+              ).map((n) => {
+                const active = !libCollapsed && !floatWin && libTab === n.v;
+                return <button
+                  key={n.v}
                   type="button"
-                  onClick={() => setLibCollapsedManual(!libCollapsed)}
-                  title={t(
-                    libCollapsed
-                      ? "workbench.expandAssetsBar"
-                      : "workbench.collapseAssetsBar",
-                  )}
-                  aria-label={t(
-                    libCollapsed
-                      ? "workbench.expandAssetsBar"
-                      : "workbench.collapseAssetsBar",
-                  )}
-                  className="bg-panel text-ink-4 hover:text-ink flex h-8 w-full shrink-0 items-center justify-center transition-colors"
+                  onClick={() => {
+                    timelineFramePickAutoClosedChatRef.current = false;
+                    setTimelineFramePickActive(false);
+                    if (active) { setLibCollapsedManual(true); return; }
+                    setFloatWin(null);
+                    setLibTab(n.v);
+                    setLibCollapsedManual(false);
+                  }}
+                  aria-label={t(n.label)}
+                  aria-pressed={active}
+                  title={t(n.label)}
+                  className={`relative flex w-full flex-col items-center gap-1 rounded-md py-1.5 transition ${
+                    active
+                      ? "bg-panel-2/35 text-ink"
+                      : "text-ink-4 hover:text-ink-2"
+                  }`}
                 >
-                  {libCollapsed ? (
-                    <ChevronsLeft size={14} />
-                  ) : (
-                    <ChevronsRight size={14} />
-                  )}
-                </button>
-                <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-0.5 overflow-y-auto px-1 py-2">
-                  {(
-                    [
-                      {
-                        v: "assets",
-                        icon: LayoutGrid,
-                        label: "workbench.assets",
-                      },
-                      {
-                        v: "script",
-                        icon: Scissors,
-                        label: "workbench.scriptCut",
-                      },
-                      {
-                        v: "captions",
-                        icon: Captions,
-                        label: "panels.captions",
-                      },
-                      { v: "text", icon: Type, label: "displayText.title" },
-                      { v: "props", icon: SlidersHorizontal, label: "workbench.editableProperties" },
-                      { v: "audio", icon: Music, label: "panels.music" },
-                      {
-                        v: "avatar",
-                        icon: AudioLines,
-                        label: "workbench.avatar",
-                      },
-                      // Themes tab hidden (per user 2026-07-19): the component library is already grouped by theme with its own tokens, mount themes via the chat selector
-                    ] as {
-                      v:
-                        | "assets"
-                        | "script"
-                        | "captions"
-                        | "text"
-                        | "props"
-                        | "audio"
-                        | "avatar";
-                      icon: typeof LayoutGrid;
-                      label: string;
-                    }[]
-                  ).map((n) => (
-                    <button
-                      key={n.v}
-                      type="button"
-                      // The properties tab edits the current selection: switching to it must keep it.
-                      {...(n.v === "props" ? { "data-block-selection-keep": true } : {})}
-                      onClick={() => {
-                        setFloatWin(null);
-                        setLibTab(n.v);
-                        if (libCollapsed) setLibCollapsedManual(false);
-                      }}
-                      aria-label={t(n.label)}
-                      className={`flex w-full flex-col items-center gap-1 rounded-md py-1.5 transition ${
-                        !floatWin && libTab === n.v
-                          ? "bg-panel-2 text-ink"
-                          : "text-ink-4 hover:text-ink-2"
-                      }`}
-                    >
-                      <n.icon size={15} />
-                      <span className="max-w-full truncate px-0.5 text-[9px] leading-none">
-                        {t(n.label)}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
+                  <n.icon size={15} />
+                  <span className="max-w-full truncate px-0.5 text-[9px] leading-none">
+                    {t(n.label)}
+                  </span>
+                </button>;
+              })}
             </div>
           </div>
         </div>
 
+        {/* Each project output opens an independent timeline. */}
+        <ProjectOutputSwitcher
+          outputs={outputTabs}
+          activeId={projectOutputs.outputs.active.id}
+          label={t("workbench.outputSwitcher")}
+          newLabel={t("workbench.newOutput")}
+          deleteLabel={t("workbench.deleteOutput")}
+          untitledLabel={t("workbench.untitledOutput")}
+          switching={outputRuntime.switching}
+          locked={chatBusy || bridgeToolsInFlight > 0 || workflowBusy}
+          lockedHint={t("workbench.outputSwitchPausedByAgent")}
+          onSwitch={switchOutput}
+          onCreate={createOutput}
+          onDelete={requestDeleteOutput}
+          leading={
+            <TooltipProvider delayDuration={200}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    data-timeline-collapse
+                    onClick={toggleTimelineCollapsed}
+                    aria-expanded={!timelineCollapsed}
+                    aria-label={t(timelineCollapsed ? "workbench.expandTimeline" : "workbench.collapseTimeline")}
+                    className="text-ink-3 hover:bg-panel-2 hover:text-ink shrink-0 rounded p-1.5"
+                  >
+                    {timelineCollapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {t(timelineCollapsed ? "workbench.expandTimeline" : "workbench.collapseTimeline")}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          }
+        />
+
         {/* Transport bar. On narrow windows (≤1280) button text must not wrap: when space is short the whole bar scrolls horizontally, don't let "safe zone" stack into three lines */}
         <TooltipProvider delayDuration={200}>
-          <div className="bg-panel flex items-center gap-3 overflow-x-auto rounded-t-sm py-2 pl-4 whitespace-nowrap [&>button]:shrink-0">
+          <div className="bg-panel flex items-center gap-3 overflow-x-auto py-1 pl-4 whitespace-nowrap [&>button]:shrink-0">
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -10547,7 +10580,7 @@ export function HyperframesWorkbench({
               <TooltipContent>{t("workbench.scrollPlayhead")}</TooltipContent>
             </Tooltip>
             {/* Undo/redo + editing (on the shot at the playhead, icons only): split / trim left / trim right — ][ glyph, dashed side = the side being trimmed */}
-            <div className="text-ink-3 ml-1 flex shrink-0 items-center gap-0.5">
+            <div inert={manualEditingLocked} className={`text-ink-3 ml-1 flex shrink-0 items-center gap-0.5 ${manualEditingLocked ? 'opacity-40' : ''}`}>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
@@ -10679,7 +10712,7 @@ export function HyperframesWorkbench({
                       ? t("panels.enableClip")
                       : t("panels.disableClip")
                   }
-                  className={`rounded p-1 disabled:opacity-40 ${selectedTimelineClip?.entry.clip.enabled === false ? "text-accent bg-panel-2" : "text-ink-3 hover:text-ink hover:bg-panel-2"}`}
+                  className={`rounded p-1 disabled:opacity-40 ${selectedTimelineClip?.entry.clip.enabled === false ? "text-accent bg-panel-2/35" : "text-ink-3 hover:text-ink hover:bg-panel-2/20"}`}
                 >
                   <Power size={14} />
                 </button>
@@ -10707,7 +10740,7 @@ export function HyperframesWorkbench({
                   }
                   disabled={!hasVideoTrack || !selectedShotId}
                   aria-label={t("workbench.portrait")}
-                  className={`ml-1 rounded p-1 disabled:opacity-40 ${floatWin === "person" ? "text-ink bg-panel-2" : "text-ink-3 hover:text-ink hover:bg-panel-2"}`}
+                  className={`ml-1 rounded p-1 disabled:opacity-40 ${floatWin === "person" ? "text-ink bg-panel-2/35" : "text-ink-3 hover:text-ink hover:bg-panel-2/20"}`}
                 >
                   <UserRound size={14} />
                 </button>
@@ -10724,7 +10757,7 @@ export function HyperframesWorkbench({
                   onClick={openAudioTab}
                   disabled={!hasVideoTrack}
                   aria-label={t("panels.music")}
-                  className={`rounded p-1 disabled:opacity-40 ${!floatWin && libTab === "audio" ? "text-ink bg-panel-2" : "text-ink-3 hover:text-ink hover:bg-panel-2"}`}
+                  className={`rounded p-1 disabled:opacity-40 ${!floatWin && libTab === "audio" ? "text-ink bg-panel-2/35" : "text-ink-3 hover:text-ink hover:bg-panel-2/20"}`}
                 >
                   <Music size={14} />
                 </button>
@@ -10740,7 +10773,7 @@ export function HyperframesWorkbench({
                   aria-checked={timelineDensity === "compact"}
                   onClick={toggleTimelineDensity}
                   aria-label={t("workbench.timelineCompact")}
-                  className={`mr-1 rounded p-1.5 ${timelineDensity === "compact" ? "bg-accent/12 text-accent" : "text-ink-4 hover:bg-panel-2 hover:text-ink"}`}
+                  className={`mr-1 rounded p-1.5 ${timelineDensity === "compact" ? "bg-accent/12 text-accent" : "text-ink-4 hover:bg-panel-2/20 hover:text-ink"}`}
                 >
                   <Rows3 size={14} />
                 </button>
@@ -10761,7 +10794,7 @@ export function HyperframesWorkbench({
                   aria-checked={timelineSnapEnabled}
                   onClick={togglePrimaryAutoSnap}
                   aria-label={t("workbench.timelineAutoSnap")}
-                  className={`mr-1 rounded p-1.5 ${timelineSnapEnabled ? "bg-accent/12 text-accent" : "text-ink-4 hover:bg-panel-2 hover:text-ink"}`}
+                  className={`mr-1 rounded p-1.5 ${timelineSnapEnabled ? "bg-accent/12 text-accent" : "text-ink-4 hover:bg-panel-2/20 hover:text-ink"}`}
                 >
                   <Magnet size={14} />
                 </button>
@@ -10833,7 +10866,7 @@ export function HyperframesWorkbench({
                       type="button"
                       onClick={() => setShowDebug((s) => !s)}
                       aria-label={t("workbench.debugTranscriptVisualAnalysis")}
-                      className={`rounded p-1.5 ${showDebug ? "text-ink bg-panel-2" : "text-ink-4 hover:text-ink"}`}
+                      className={`rounded p-1.5 ${showDebug ? "text-ink bg-panel-2/35" : "text-ink-4 hover:text-ink"}`}
                     >
                       <FlaskConical size={14} />
                     </button>
@@ -10844,197 +10877,13 @@ export function HyperframesWorkbench({
                 </Tooltip>
               </div>
             )}
-            {/* Export pinned right via sticky (stays put while the bar scrolls on narrow windows).
-              The bar keeps no right padding of its own — this layer's pr-4 provides it, so the sticky
-              edge IS the visible edge and nothing can show through beside the button; bg-panel matches
-              the column surface, masking buttons that pass underneath without a visible block. */}
-            <div className="sticky right-0 z-10 ml-auto flex shrink-0 items-center gap-3 bg-panel pl-2 pr-4">
-              {/* Split button like the asset panel's import control: main half exports the active
-                output, the attached "more" half opens batch export over the project's outputs. */}
-              <div className="flex shrink-0 items-center">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={() => setExportOpen(true)}
-                      disabled={exporting || publishing || !hasContent}
-                      className="border-line text-ink-2 hover:text-ink inline-flex shrink-0 items-center gap-1.5 rounded-l-md border px-2.5 py-1.5 text-[12px] disabled:opacity-50"
-                    >
-                      {exporting || publishing ? (
-                        <Loader2 size={14} className="animate-spin" />
-                      ) : (
-                        <FileVideo size={14} />
-                      )}{" "}
-                      {exporting
-                        ? t("workbench.exportingPctShort", { pct: exportPct })
-                        : publishing
-                          ? t("workbench.renderingPct", { pct: exportPct })
-                          : t("workbench.export")}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>{t("tools.export_video.label")}</TooltipContent>
-                </Tooltip>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      disabled={exporting || publishing}
-                      title={t("workbench.moreExportOptions")}
-                      aria-label={t("workbench.moreExportOptions")}
-                      className="border-line text-ink-3 hover:text-ink -ml-px inline-flex shrink-0 items-center justify-center self-stretch rounded-r-md border px-1.5 disabled:opacity-50 data-[state=open]:text-ink"
-                    >
-                      <MoreHorizontal size={13} />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent
-                    align="end"
-                    sideOffset={5}
-                    className="min-w-[140px] text-[12px]"
-                  >
-                    <DropdownMenuItem
-                      disabled={!batchExportableOutputs.length}
-                      onSelect={openBatchExport}
-                      className="text-[12px]"
-                    >
-                      <Layers size={13} />
-                      {t("workbench.batchExport")}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-              <BatchExportDialog
-                open={batchExportOpen}
-                onOpenChange={setBatchExportOpen}
-                outputs={batchExportableOutputs}
-                selected={batchSelected}
-                onToggleSelect={toggleBatchSelect}
-                onToggleAll={toggleBatchSelectAll}
-                opts={exportOpts}
-                onOptsChange={setExportOpts}
-                batch={outputBatch}
-                exportPct={exportPct}
-                onStart={startBatchExport}
-                onCancel={cancelBatchExport}
-              />
-              <Dialog
-                open={exportOpen}
-                onOpenChange={(v) => {
-                  if (!v && exporting) return;
-                  setExportOpen(v);
-                }}
-              >
-                <DialogContent
-                  className="max-w-[320px]"
-                  showCloseButton={!exporting}
-                >
-                  <DialogHeader>
-                    <DialogTitle>{t("tools.export_video.label")}</DialogTitle>
-                  </DialogHeader>
-                  {exporting ? (
-                    // Export dialog stays open: progress lives here, only "cancel export" can close it (overlay/Esc are blocked)
-                    <div className="flex flex-col gap-3">
-                      <div className="bg-line h-1.5 overflow-hidden rounded-full">
-                        <div
-                          className="bg-accent h-full rounded-full transition-[width] duration-300 ease-out"
-                          style={{ width: `${exportPct}%` }}
-                        />
-                      </div>
-                      <p className="text-ink-3 text-[12px]">
-                        {t("workbench.renderingPctDownloads", {
-                          pct: exportPct,
-                        })}
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          cancelExport();
-                          setExportOpen(false);
-                        }}
-                        className="border-line text-ink-2 hover:text-ink inline-flex items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-[13px]"
-                      >
-                        <X size={14} /> {t("workbench.cancelExport")}
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col gap-3">
-                      <ExportOptRow
-                        label={t("chatGen.resolution")}
-                        value={exportOpts.res}
-                        options={[
-                          [2160, "4K"],
-                          [1440, "2K"],
-                          [1080, "1080p"],
-                          [720, "720p"],
-                          [540, "540p"],
-                        ]}
-                        onPick={(res) => setExportOpts((o) => ({ ...o, res }))}
-                      />
-                      <ExportOptRow
-                        label={t("workbench.frameRate")}
-                        value={exportOpts.fps}
-                        options={[
-                          [24, "24"],
-                          [30, "30"],
-                          [60, "60"],
-                        ]}
-                        onPick={(fps) => setExportOpts((o) => ({ ...o, fps }))}
-                      />
-                      <ExportOptRow
-                        label={t("workbench.format")}
-                        value={exportOpts.format}
-                        options={[
-                          ["mp4", "MP4"],
-                          ["mov", "MOV"],
-                          ["webm", "WebM"],
-                        ]}
-                        onPick={(format) =>
-                          setExportOpts((o) => ({ ...o, format }))
-                        }
-                      />
-                      <p className="text-ink-4 text-[11px] leading-relaxed">
-                        {t("workbench.downloadsAutomaticallyWhenExport")}
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          // Keep the dialog to show progress, close only when compositing ends (done/failed/cancelled)
-                          void exportVideo(exportOpts).finally(() =>
-                            setExportOpen(false),
-                          );
-                        }}
-                        className="bg-ink text-bg inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-[13px] font-medium hover:opacity-90"
-                      >
-                        <Download size={14} /> {t("workbench.startExport")}
-                      </button>
-                    </div>
-                  )}
-                </DialogContent>
-              </Dialog>
-              {((exporting && !exportOpen) || publishing) && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        cancelExport();
-                      }}
-                      className="text-ink-3 hover:text-ink shrink-0 rounded p-1"
-                    >
-                      <X size={14} />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {t("workbench.stopRendering")}
-                  </TooltipContent>
-                </Tooltip>
-              )}
-            </div>
+
           </div>
         </TooltipProvider>
 
         {/* Caption style popover: reuses CaptionsPanel wholesale; clicking a style applies globally, click outside / Esc dismisses */}
         {/* Multi-track timeline */}
-        <div data-cap-keep className="shrink-0 overflow-hidden rounded-b-sm">
+        <div data-studio-timeline data-cap-keep inert={manualEditingLocked} hidden={timelineCollapsed} className="shrink-0 overflow-hidden rounded-b-sm">
           <StudioTimeline
             comp={comp}
             density={timelineDensity}
@@ -11070,6 +10919,16 @@ export function HyperframesWorkbench({
             sourcePeaks={audioOps.sourcePeaks}
             shotSourceDurations={shotSourceDurations}
             clipPendingAt={clipPending}
+            pendingRanges={pendingGenerations}
+            transitions={(editorDocument.timeline.transitions ?? []).map((transition) => ({
+              id: transition.id,
+              startSec: transition.startFrame / editorDocument.canvas.fps,
+              endSec: (transition.startFrame + transition.durationFrames) / editorDocument.canvas.fps,
+              label: t(CUT_TRANSITION_EFFECTS.find((effect) => effect.id === transition.effect)?.name ?? "tools.add_transition.label"),
+            }))}
+            selectedTransitionId={selectedTransitionId}
+            onSelectTransition={selectTransition}
+            onChangeTransition={changeTransitionTiming}
             {...timelineCbs}
           />
         </div>
@@ -11085,7 +10944,7 @@ export function HyperframesWorkbench({
                   type="button"
                   onClick={() => setShowGeom((s) => !s)}
                   disabled={!visual}
-                  className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] disabled:opacity-40 ${showGeom ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-600" : "border-line text-ink-3 hover:text-ink hover:bg-panel-2"}`}
+                  className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] disabled:opacity-40 ${showGeom ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-600" : "border-line text-ink-3 hover:text-ink hover:bg-panel-2/20"}`}
                 >
                   <ScanFace size={11} /> {t("workbench.facesSafeZones")}
                 </button>
@@ -11093,7 +10952,7 @@ export function HyperframesWorkbench({
                 <button
                   type="button"
                   onClick={() => setShowCode((s) => !s)}
-                  className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] ${showCode ? "border-line bg-panel-2 text-ink" : "border-line text-ink-3 hover:text-ink hover:bg-panel-2"}`}
+                  className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] ${showCode ? "border-line bg-panel-2/35 text-ink" : "border-line text-ink-3 hover:text-ink hover:bg-panel-2/20"}`}
                 >
                   <Code2 size={11} /> {t("workbench.source")}
                 </button>
@@ -11130,6 +10989,7 @@ export function HyperframesWorkbench({
             />
           </div>
         )}
+      </div>
       </div>
     </div>
   );

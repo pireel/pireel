@@ -1,9 +1,11 @@
+import { studioAgentModelId, type StudioAgentModelId } from '@pireel/studio-engine/agent-models';
 /** Server-backed Studio chat thread validation, restore sanitizing, and title derivation. */
 
 import type { UIMessage } from 'ai';
 import { t } from './i18n';
-import type { AttachedFrame } from './studio-chat';
+import { taskOf } from './chat-task';
 import { stripLeakedToolProtocolText } from '@pireel/studio-engine/tool-protocol-text';
+import { withoutInternalHandoffParts } from '@pireel/studio-engine/studio-visible-text';
 import {
   isStudioScenarioSkillId,
   type StudioScenarioSkillId,
@@ -15,10 +17,9 @@ export interface StoredThread {
   title: string;
   messages: UIMessage[];
   updatedAt: number;
-  /** Frame attached to the session (theme button highlight comes back when restoring the session). */
-  frame?: AttachedFrame | null;
   /** Rich Markdown Studio Skill attached to this session; missing means no Skill. */
   skillId?: StudioScenarioSkillId;
+  agentModel?: StudioAgentModelId;
 }
 
 /** Editorial evidence arrives as inspect_media (mode editorial) receipts carrying editorialCandidates. */
@@ -138,19 +139,17 @@ export function effectiveStudioTurnMessages(
   ledger: StudioTurnLedger,
 ): UIMessage[] {
   if (!ledger.receipts.length) return messages as UIMessage[];
-  const committed = new Set<string>();
-  for (const message of messages) {
-    for (const part of message.parts ?? []) {
-      const toolCallId = (part as { toolCallId?: unknown }).toolCallId;
-      if (typeof toolCallId === 'string') committed.add(toolCallId);
-    }
-  }
-  const pending = ledger.receipts.filter((part) => {
-    const toolCallId = (part as { toolCallId?: unknown }).toolCallId;
-    return typeof toolCallId !== 'string' || !committed.has(toolCallId);
-  });
-  if (!pending.length) return messages as UIMessage[];
-  return [...messages, { id: '__studio-turn-ledger__', role: 'assistant', parts: pending }];
+  const receipts = new Map(ledger.receipts.map(part => [(part as { toolCallId?: string }).toolCallId, part]));
+  const merged = messages.map(message => ({ ...message, parts: message.parts.map(part => {
+    const id = (part as { toolCallId?: string }).toolCallId;
+    const receipt = receipts.get(id);
+    if (!receipt) return part;
+    receipts.delete(id);
+    // SDK state can lag a synchronous tool receipt. Preserve the actual result before a refresh.
+    return receipt;
+  }) }));
+  const pending = [...receipts.values()];
+  return pending.length ? [...merged, { id: '__studio-turn-ledger__', role: 'assistant', parts: pending }] : merged;
 }
 
 export interface AssistantWorkFold {
@@ -249,7 +248,7 @@ export function stampLatestAssistantWorkDuration(
 export function compactStudioChatMessages(messages: UIMessage[]): UIMessage[] {
   return messages.map((message) => {
     if (message.role !== 'assistant') return message;
-    const source = message.parts ?? [];
+    const source = withoutInternalHandoffParts(message.parts ?? []);
     const parts = source.flatMap((part) => {
       const candidate = part as { type?: string; text?: string };
       if (candidate.type === 'reasoning' || candidate.type === 'step-start') return [];
@@ -350,39 +349,47 @@ export function withStepBoundaries(parts: UIMessage['parts']): UIMessage['parts'
 }
 
 export function compactStudioChatMessagesForModel(messages: UIMessage[]): UIMessage[] {
-  return messages.map((message) => {
-    if (message.role !== 'assistant') return message;
-    const parts = (message.parts ?? []).flatMap((part) => {
-      const candidate = part as { type?: string; text?: string };
-      if (candidate.type === 'reasoning') return [];
-      if (candidate.type === 'text') {
-        const text = stripLeakedToolProtocolText(candidate.text ?? '');
-        return text.trim() ? [{ ...part, text } as typeof part] : [];
-      }
-      return [part];
-    });
-    return {
-      ...message,
-      parts: withStepBoundaries(parts).map((part) => {
-        const candidate = part as { type?: string; toolName?: string; output?: unknown; text?: string };
-        if (candidate.type === 'text') {
-          const text = candidate.text ?? '';
-          return text.length > MAX_REPLAYED_TEXT_CHARS
-            ? { ...part, text: `${text.slice(0, MAX_REPLAYED_TEXT_CHARS)}\n[…]` } as typeof part
-            : part;
-        }
-        const toolId = candidate.type === 'dynamic-tool'
-          ? candidate.toolName
-          : candidate.type?.startsWith('tool-')
-            ? candidate.type.slice('tool-'.length)
-            : '';
-        if (!isVisualAnalysisToolId(toolId ?? '') || !candidate.output || typeof candidate.output !== 'object') return part;
-        const output = candidate.output as { ok?: unknown; summary?: unknown; error?: unknown; data?: unknown };
-        if (!output.data || typeof output.data !== 'object') return part;
-        return { ...part, output: { ...output, data: compactVisualAnalysisData(output.data as Record<string, unknown>) } } as typeof part;
-      }),
-    };
+  return messages.flatMap((message) => {
+    if (message.role !== 'assistant') return [message];
+    const compacted = compactAssistantMessageForModel(message);
+    // A reply that held only UI cards so far (the first pass, before the agent answers) is not history.
+    return compacted.parts.some((part) => part.type !== 'step-start') ? [compacted] : [];
   });
+}
+
+function compactAssistantMessageForModel(message: UIMessage): UIMessage {
+  const parts = withoutInternalHandoffParts(message.parts ?? []).flatMap((part) => {
+    const candidate = part as { type?: string; text?: string };
+    if (candidate.type === 'reasoning') return [];
+    // UI-only cards (the first pass's checklist): the agent gets its own note instead.
+    if (candidate.type?.startsWith('data-')) return [];
+    if (candidate.type === 'text') {
+      const text = stripLeakedToolProtocolText(candidate.text ?? '');
+      return text.trim() ? [{ ...part, text } as typeof part] : [];
+    }
+    return [part];
+  });
+  return {
+    ...message,
+    parts: withStepBoundaries(parts).map((part) => {
+      const candidate = part as { type?: string; toolName?: string; output?: unknown; text?: string };
+      if (candidate.type === 'text') {
+        const text = candidate.text ?? '';
+        return text.length > MAX_REPLAYED_TEXT_CHARS
+          ? { ...part, text: `${text.slice(0, MAX_REPLAYED_TEXT_CHARS)}\n[…]` } as typeof part
+          : part;
+      }
+      const toolId = candidate.type === 'dynamic-tool'
+        ? candidate.toolName
+        : candidate.type?.startsWith('tool-')
+          ? candidate.type.slice('tool-'.length)
+          : '';
+      if (!isVisualAnalysisToolId(toolId ?? '') || !candidate.output || typeof candidate.output !== 'object') return part;
+      const output = candidate.output as { ok?: unknown; summary?: unknown; error?: unknown; data?: unknown };
+      if (!output.data || typeof output.data !== 'object') return part;
+      return { ...part, output: { ...output, data: compactVisualAnalysisData(output.data as Record<string, unknown>) } } as typeof part;
+    }),
+  };
 }
 
 /** Return only a material shortage after assemble_from_review has finished. Presentation metadata,
@@ -418,6 +425,7 @@ export function normalizeStoredThreads(value: unknown, availableSkillIds: readon
       && Array.isArray((thread as StoredThread).messages))
     .map((thread) => ({
       ...thread,
+      agentModel: studioAgentModelId(thread.agentModel),
       ...(isStudioScenarioSkillId(thread?.skillId)
         && (thread.skillId === 'auto' || available.has(thread.skillId))
         ? { skillId: thread.skillId }
@@ -429,6 +437,8 @@ export function normalizeStoredThreads(value: unknown, availableSkillIds: readon
  *  protocol accidentally persisted as assistant text must never become visible history. */
 export function sanitizeRestored(messages: UIMessage[]): UIMessage[] {
   return compactStudioChatMessages(messages.map((m) => {
+    const task = taskOf(m);
+    if (task?.state === 'running') return { ...m, metadata: { ...(m.metadata as object), task: { ...task, state: 'paused' } } };
     if (m.role !== 'assistant') return m;
     const parts = (m.parts ?? []).map((p) => {
       const tp = p as { type: string; state?: string; text?: string };
@@ -436,7 +446,7 @@ export function sanitizeRestored(messages: UIMessage[]): UIMessage[] {
         const text = stripLeakedToolProtocolText(tp.text);
         if (text !== tp.text) return { ...p, text } as typeof p;
       }
-      if (tp.type.startsWith('tool-') && (tp.state === 'input-streaming' || tp.state === 'input-available')) {
+      if ((tp.type.startsWith('tool-') || tp.type === 'dynamic-tool') && (tp.state === 'input-streaming' || tp.state === 'input-available')) {
         return { ...p, state: 'output-error', errorText: t('chatGen.generationInterrupted') } as typeof p;
       }
       return p;

@@ -6,7 +6,7 @@
  *   a wall of sandboxed iframes in the chat column would be the timeline-thumbnail lesson all over again).
  * - Previews appear as results land (re-render driven by the tool-progress store during the run,
  *   by the receipt part after it).
- * - LLM-generated markup previews ONLY through the BlockPreviewFrame sandbox (trust boundary).
+ * - LLM-generated markup previews through BlockPreviewFrame, in the same in-page stage (same-origin trust model) as the workbench.
  */
 
 import { useCallback, useRef, useState } from 'react';

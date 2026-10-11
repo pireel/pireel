@@ -10,6 +10,17 @@ import { ELEMENT_TEMPLATES } from './gen-templates';
 import { ElementTemplateCard } from './gen-templates/element-card';
 import { StudioShellProvider, type StudioShell } from './shell-context';
 
+const stages = vi.hoisted(() => [] as Array<{ srcdoc: string; loads: Array<() => void>; contentWindow: { postMessage: ReturnType<typeof vi.fn> } }>);
+vi.mock('./preview-stage-host', async (original) => ({
+  ...await original<typeof import('./preview-stage-host')>(),
+  PreviewStageHost: class {
+    srcdoc = ''; loads: Array<() => void> = []; onMessage = null; contentWindow = { postMessage: vi.fn() };
+    constructor(readonly element: HTMLDivElement) { stages.push(this); }
+    addEventListener(_type: string, listener: () => void) { this.loads.push(listener); }
+    dispose() {}
+  },
+}));
+
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const mounted: Array<{ root: ReturnType<typeof createRoot>; host: HTMLDivElement }> = [];
@@ -70,7 +81,7 @@ describe('component thumbnail previews', () => {
     expect(host.querySelector('iframe')).toBeNull();
   });
 
-  it('marks the live preview ready and starts its entrance once after iframe load', () => {
+  it('marks the live preview ready and starts its entrance once after its document mounts', () => {
     const comp: Composition = { width: 1920, height: 1080, theme: 'general', video: null, blocks: [], shots: [] };
     const block: Block = {
       id: 'preview',
@@ -82,12 +93,14 @@ describe('component thumbnail previews', () => {
     };
     const onReady = vi.fn();
     const host = mount(createElement(BlockPreviewFrame, { comp, block, width: 320, animate: 'manual', playOnReady: true, showLoading: true, onReady }));
-    const iframe = host.querySelector('iframe')!;
-    const postMessage = vi.spyOn(iframe.contentWindow!, 'postMessage');
+    expect(host.querySelector('iframe')).toBeNull();
+    const stage = stages.at(-1)!;
+    expect(stage.srcdoc).toContain('Preview');
+    const postMessage = stage.contentWindow.postMessage;
     postMessage.mockClear();
     expect(host.querySelector('[data-preview-loading]')).not.toBeNull();
 
-    act(() => iframe.dispatchEvent(new Event('load')));
+    act(() => { for (const load of stage.loads) load(); });
 
     expect(onReady).toHaveBeenCalledOnce();
     expect(postMessage).toHaveBeenCalledWith({ type: 'hf-loop', on: true, once: true }, '*');

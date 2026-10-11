@@ -1,30 +1,7 @@
-/** Pure workbench helpers: canvas dimension normalization, shot spans, frame → PersonFx mapping. */
+/** Pure workbench helpers: canvas dimension normalization, shot spans. */
 
-import { type Composition, type PersonFx, normalizeSourceCanvasSize } from '@pireel/studio-engine/composition';
+import { type Composition, normalizeSourceCanvasSize } from '@pireel/studio-engine/composition';
 import { spans as clipSpans } from '@pireel/studio-engine/trim';
-
-/** personFx recommendation from a frame content pack (kebab string map) → runtime PersonFx. */
-export function personFxFromFrame(m: Record<string, string>): PersonFx {
-  const num = (v: string | undefined): number | null => {
-    const n = Number(v);
-    return v != null && Number.isFinite(n) ? n : null;
-  };
-  const width = num(m['stroke-width']);
-  return {
-    ...(m['person-front'] === 'true' ? { personFront: true } : {}),
-    ...(num(m['feather']) != null ? { feather: num(m['feather'])! } : {}),
-    ...(width != null && width > 0
-      ? {
-          stroke: {
-            style: m['stroke-style'] === 'dashed' ? ('dashed' as const) : ('solid' as const),
-            width,
-            color: m['stroke-color'] ?? '#FFFFFF',
-            opacity: num(m['stroke-opacity']) ?? 1,
-          },
-        }
-      : {}),
-  };
-}
 
 /**
  * Canvas dimension normalization: **width always anchored to 1080 (fixed reference)**, height derived from video aspect ratio.

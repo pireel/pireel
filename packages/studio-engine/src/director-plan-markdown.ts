@@ -80,7 +80,6 @@ export function directorPlanToMarkdown(plan: DirectorPlan): string {
     `## Rhythm arc\n\n${escapeBody(plan.rhythmArc)}`,
     plan.deliverySafety ? `## Delivery safety\n\n${escapeBody(plan.deliverySafety)}` : '',
     plan.skillId ? `## Skill ID\n\n${escapeBody(plan.skillId)}` : '',
-    plan.frameId ? `## Frame ID\n\n${escapeBody(plan.frameId)}` : '',
     plan.audience ? `## Audience\n\n${escapeBody(plan.audience)}` : '',
     `## Video design system\n\n${DESIGN_HEADINGS
       .map(([key, heading]) => `### ${heading}\n\n${escapeBody(plan.designSystem[key])}`)
@@ -157,7 +156,6 @@ export function directorPlanFromMarkdown(markdown: string): DirectorPlan | null 
     ...(section(top, 'Delivery safety') ? { deliverySafety: unescapeBody(section(top, 'Delivery safety')!) } : {}),
     designSystem,
     ...(section(top, 'Skill ID') ? { skillId: unescapeBody(section(top, 'Skill ID')!) } : {}),
-    ...(section(top, 'Frame ID') ? { frameId: unescapeBody(section(top, 'Frame ID')!) } : {}),
     ...(section(top, 'Audience') ? { audience: unescapeBody(section(top, 'Audience')!) } : {}),
     scenes,
   };

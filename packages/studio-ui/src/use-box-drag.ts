@@ -272,6 +272,7 @@ export function useBoxDrag(deps: BoxDragDeps) {
           sgnY,
           Math.min(1, 48 / sr.width),
           Math.min(1, 48 / sr.height),
+          sr.width / sr.height,
         );
         previewSelectionRect(next, 0);
         target.onLive(next);

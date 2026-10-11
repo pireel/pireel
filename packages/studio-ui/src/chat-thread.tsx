@@ -1,5 +1,19 @@
 "use client";
 
+import { directorPlanToolBlock, saveEditingDirectorPlan, withDirectorInstruction } from './editing-director-plan';
+import { DEFAULT_STUDIO_AGENT_MODEL, studioAgentModelId, type StudioAgentModelId } from '@pireel/studio-engine/agent-models';
+
+import { editingSkillsHint } from '@pireel/studio-engine/editing-skills';
+import { resolveEditingRunConfig } from '@pireel/studio-engine/editing-run-config';
+import { EditingTaskCard } from './editing-task-card';
+import { displayEditingTask, hasCurrentDirectorPreview, isInteractiveEditingTool, messagesForTask, unresolvedTaskFailure } from './editing-task-progress';
+import { needsEditingReview, reviewEditingTask } from './editing-task-review';
+import { ROUGH_CUT_TOOL, messageTurnCredits, toolNameOfPart, type RoughCutReplyMeta } from './first-pass-card';
+import { NextSteps, splitNextSteps } from './chat-next-steps';
+import { FINE_CUT_SKILLS, ONE_CLICK_EDIT_HINT, type FineCutSkill } from './first-pass';
+import { latestTask, taskOf, patchTask, resumeTaskHint, unfinishedRoughCut, withTaskUsage, type ChatTask } from "./chat-task";
+import { cachedChatThread } from "./chat-thread-cache";
+import { recordTaskUsage, subscribeTaskUsage } from "./chat-task-usage";
 import { collapsedComponentRetryIndexes, studioToolFailureText } from './chat-component-retries';
 
 /** Single-thread studio chat (useChat): stream rendering, client-side tool execution, persistence snapshots. */
@@ -13,6 +27,8 @@ import {
   useState,
 } from "react";
 import { ChevronRight, Info, X } from "lucide-react";
+import { ConfirmDialog } from "@pireel/ui/confirm-dialog";
+import { brandSkillOf, skillTakesBrand } from "@pireel/studio-engine/brand-playbook";
 import { describeGenerationIntentLine } from "./chat-generation-intent";
 import { useChat } from "@ai-sdk/react";
 import {
@@ -40,8 +56,7 @@ import {
   STUDIO_CREATE_SKILL_ACTION,
   latestStudioMetaAction,
 } from "@pireel/studio-engine/skill-actions";
-import { v3ToolCanMutate, V3_TOOL_IDS } from "@pireel/studio-engine/agent-surface-v3/registry";
-import type { FrameCatalogItem } from "./use-frame-catalog";
+import { CHAT_SERVER_EXECUTED_TOOLS, v3ToolCanMutate, V3_TOOL_IDS } from "@pireel/studio-engine/agent-surface-v3/registry";
 import {
   CHAT_ACTION_PILL_CLASS,
   CHAT_PILL_ICON_CLASS,
@@ -69,6 +84,7 @@ import {
   compactStudioChatMessages,
   compactStudioChatMessagesForModel,
   createStudioTurnLedger,
+  effectiveStudioTurnMessages,
   isRecoverableStudioChatError,
   recordStudioTurnToolResult,
   shouldBlockStudioTurnUndo,
@@ -81,7 +97,6 @@ import { inspectTimelineFrameEvidence } from "./chat-timeline-frame-evidence";
 import { DeferredActivation } from "./deferred-activation";
 import { studioToolResultStopsAgentTurn } from "./agent-tool-runner";
 import type {
-  AttachedFrame,
   ProgressHandle,
   StudioChatDraftPart,
   StudioChatHandle,
@@ -90,28 +105,38 @@ import type {
 } from "./studio-chat";
 import type { LocalAssetIndexEntry } from "@pireel/studio-engine/project-dto";
 
+const USER_BUBBLE_CLASS = "group-[.is-user]:bg-secondary/35";
+
 export function ChatThread({
   projectId,
   localAssetIndex,
   threadId,
   initialMessages,
-  initialFrame,
   initialSkillId,
+  initialAgentModel,
   scenarioSkills,
   onOpenSkillMarket,
   onRefreshScenarioSkills,
   onDeleteScenarioSkill,
-  frames,
-  onFrameApplied,
   runTool,
   getBody,
   getComp,
+  getDocument,
+  startPrompt,
+  onStartPromptSent,
+  fineCutClips,
+  projectEdited,
+  projectBrand,
+  projectSkillId,
+  onProjectSkill,
+  editingSkills,
+  onEditingSkills,
   timelineFramePickActive,
   timelineFramePickBusy,
   timelineFramePickAvailable,
   onTimelineFramePickActiveChange,
   elements,
-  onSnapshot,
+  onSnapshot: saveSnapshot,
   onBusyChange,
   onInsertMedia,
   onUseAudio,
@@ -123,17 +148,27 @@ export function ChatThread({
   localAssetIndex?: readonly LocalAssetIndexEntry[];
   threadId: string;
   initialMessages: UIMessage[];
-  initialFrame: AttachedFrame | null;
   initialSkillId: StudioScenarioSkillId;
+  initialAgentModel?: StudioAgentModelId;
   scenarioSkills: readonly StudioScenarioSkillOption[];
   onOpenSkillMarket?: () => void;
   onRefreshScenarioSkills?: () => Promise<void>;
   onDeleteScenarioSkill?: (id: string) => Promise<void>;
-  frames: FrameCatalogItem[];
-  onFrameApplied?: (frame: AttachedFrame | null) => void;
   runTool: StudioChatProps["runTool"];
   getBody: StudioChatProps["getBody"];
   getComp?: StudioChatProps["getComp"];
+  getDocument?: StudioChatProps["getDocument"];
+  startPrompt?: StudioChatProps["startPrompt"];
+  projectBrand?: StudioChatProps["projectBrand"];
+  projectSkillId?: StudioChatProps["projectSkillId"];
+  onProjectSkill?: StudioChatProps["onProjectSkill"];
+  onStartPromptSent?: StudioChatProps["onStartPromptSent"];
+  fineCutClips?: StudioChatProps["fineCutClips"];
+  projectEdited?: StudioChatProps["projectEdited"];
+  editingSkills?: StudioChatProps["editingSkills"];
+  onEditingSkills?: StudioChatProps["onEditingSkills"];
+  handoff?: StudioChatProps["handoff"];
+  onAnswerHandoff?: StudioChatProps["onAnswerHandoff"];
   timelineFramePickActive: boolean;
   timelineFramePickBusy: boolean;
   timelineFramePickAvailable: boolean;
@@ -141,8 +176,8 @@ export function ChatThread({
   elements: StudioElementRef[];
   onSnapshot: (
     messages: UIMessage[],
-    frame: AttachedFrame | null,
     skillId: StudioScenarioSkillId,
+    agentModel?: StudioAgentModelId,
   ) => void;
   onBusyChange?: (busy: boolean) => void;
   handleRef: React.MutableRefObject<StudioChatHandle | null>;
@@ -152,8 +187,10 @@ export function ChatThread({
   // Stop plumbing: aborting the stream alone isn't enough — the stream loop awaits onToolCall, so a
   // running tool must be told to stand down too. The user-stopped flag keeps the continuation
   // safety net from resurrecting a turn the user just killed.
-  const toolAbortRef = useRef<AbortController | null>(null);
-  const userStoppedRef = useRef(false);
+  const toolAbortsRef = useRef(new Set<AbortController>());
+  const userStoppedRef = useRef(latestTask(initialMessages)?.state === 'paused');
+  const [activeTools, setActiveTools] = useState(0);
+  const [taskResumeError, setTaskResumeError] = useState(false);
   const interactionWaitDurationRef = useRef(0);
   const autoRecoveryAttemptedRef = useRef(false);
   const turnLedgerRef = useRef(createStudioTurnLedger());
@@ -165,18 +202,28 @@ export function ChatThread({
   useEffect(() => () => timelineFrameInspectionRef.current?.abort(), []);
   const getBodyRef = useRef(getBody);
   getBodyRef.current = getBody;
+  // Read at send time: the switched-on editing skills ride each message as a frozen note.
+  const editingSkillsRef = useRef(editingSkills);
+  editingSkillsRef.current = editingSkills;
+  const projectEditedRef = useRef(projectEdited);
+  projectEditedRef.current = projectEdited;
   const composerRef = useRef<ComposerHandle | null>(null);
-  const [frame, setFrame] = useState<AttachedFrame | null>(initialFrame);
-  const frameRef = useRef(frame);
-  frameRef.current = frame;
-  const [skillId, setSkillId] = useState<StudioScenarioSkillId>(initialSkillId);
+  // The project's Skill when it has one; a project that never set one keeps this thread's own pick.
+  const [skillId, setSkillId] = useState<StudioScenarioSkillId>((projectSkillId as StudioScenarioSkillId | undefined) ?? initialSkillId);
+  const [agentModel, setAgentModel] = useState<StudioAgentModelId>(() => studioAgentModelId(initialAgentModel ?? latestTask(initialMessages)?.agentModel ?? (initialMessages.length ? 'deepseek' : DEFAULT_STUDIO_AGENT_MODEL)));
+  const agentModelRef = useRef(agentModel);
+  const modelSelectedRef = useRef(initialAgentModel !== undefined);
+  const onSnapshot = useCallback((messages: UIMessage[], skill: StudioScenarioSkillId) => {
+    if (!messages.length && !modelSelectedRef.current) return;
+    saveSnapshot(messages, skill, agentModelRef.current);
+  }, [saveSnapshot]);
   const [activeStarterId, setActiveStarterId] = useState<string | null>(null);
   const skillRef = useRef(skillId);
   skillRef.current = skillId;
-  const onFrameAppliedRef = useRef(onFrameApplied);
-  onFrameAppliedRef.current = onFrameApplied;
 
-  // body carries session-level frameId + skillId; the situation snapshot is attached to metadata.situation at send time (persists with the session,
+  const projectBrandRef = useRef(projectBrand);
+  projectBrandRef.current = projectBrand;
+  // body carries the session-level skillId and the project's brand; the situation snapshot is attached to metadata.situation at send time (persists with the session,
   // the route materializes it into a <composition_state> part) — stable history bytes are what let the prompt cache hit
   const transport = useMemo(
     () =>
@@ -185,13 +232,10 @@ export function ChatThread({
         body: () => ({
           locale: studioLocale().toLowerCase().startsWith("zh") ? "zh" : "en",
           ...(projectId ? { projectId } : {}),
-          ...(frameRef.current ? { frameId: frameRef.current.id } : {}),
-          ...(frameRef.current?.customVisualStyle
-            ? { customVisualStyle: frameRef.current.customVisualStyle }
-            : {}),
           ...(skillRef.current !== STUDIO_AUTO_SKILL_ID
             ? { skillId: skillRef.current }
             : {}),
+          ...(projectBrandRef.current !== undefined ? { brand: projectBrandRef.current } : {}),
         }),
         prepareSendMessagesRequest: ({
           body,
@@ -202,6 +246,9 @@ export function ChatThread({
         }) => ({
           body: {
             ...body,
+            agentModel: latestTask(requestMessages)?.agentModel ?? agentModelRef.current,
+            ...(latestTask(requestMessages)?.config ? { brand: latestTask(requestMessages)!.config!.brand } : {}),
+            ...(latestTask(requestMessages)?.skillId ? { skillId: latestTask(requestMessages)!.skillId } : {}),
             id,
             messageId,
             messages: compactStudioChatMessagesForModel(requestMessages),
@@ -213,6 +260,16 @@ export function ChatThread({
   );
 
   const messagesRef = useRef<UIMessage[]>(initialMessages);
+  const mountedRef = useRef(true);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
+  // Bound to this thread: a delayed bill must still save its original task after navigation.
+  const updateTask = (id: string, patch: (task: ChatTask) => ChatTask) => {
+    const source = !mountedRef.current && projectId ? cachedChatThread(projectId, threadId)?.messages ?? messagesRef.current : messagesRef.current;
+    const next = patchTask(source, id, patch);
+    messagesRef.current = next;
+    if (mountedRef.current) setMessages(next);
+    onSnapshot(compactStudioChatMessages(mountedRef.current ? effectiveStudioTurnMessages(next, turnLedgerRef.current) : next), skillRef.current);
+  };
 
   const {
     messages,
@@ -235,11 +292,14 @@ export function ChatThread({
       lastAssistantMessageIsCompleteWithToolCalls(args),
     async onToolCall({ toolCall }) {
       const id = toolCall.toolName;
+      if (CHAT_SERVER_EXECUTED_TOOLS.has(id)) return;
       const requestedInput = (toolCall.input ?? {}) as Record<string, unknown>;
+      const task = latestTask(messagesRef.current);
       const ledger = turnLedgerRef.current;
       const v3 = V3_TOOL_IDS.has(id);
       const canMutate = v3ToolCanMutate(id);
       const publishSuccess = (output: Record<string, unknown>) => {
+        if (canMutate && output.ok !== false && task && latestTask(messagesRef.current)?.review) updateTask(task.id, current => ({ ...current, review: undefined }));
         const recorded = recordStudioTurnToolResult(ledger, {
           toolId: id,
           toolCallId: toolCall.toolCallId,
@@ -248,6 +308,8 @@ export function ChatThread({
           canMutate,
         });
         addToolOutput({ tool: id, toolCallId: toolCall.toolCallId, output });
+        const saved = effectiveStudioTurnMessages(messagesRef.current, ledger);
+        onSnapshot(compactStudioChatMessages(saved), skillRef.current);
         return recorded;
       };
       const publishError = (errorText: string) => {
@@ -276,7 +338,30 @@ export function ChatThread({
           state: "output-error",
           errorText,
         });
+        onSnapshot(compactStudioChatMessages(effectiveStudioTurnMessages(messagesRef.current, ledger)), skillRef.current);
       };
+      if (id === 'save_edit_plan') {
+        const document = getDocument?.();
+        if (!task || !document) { publishSuccess({ ok: false, error: 'No active editing task or timeline.' }); return; }
+        const result = saveEditingDirectorPlan(task, requestedInput, document);
+        if (!result.ok) { publishSuccess(result); return; }
+        updateTask(task.id, current => ({ ...current, directorPlan: result.plan, review: undefined }));
+        publishSuccess({ ok: true, summary: studioLocale().startsWith('zh') ? '剪辑思路已确定' : 'Editing direction saved', data: { plan: result.plan, next: 'Execute this plan now. Resolve source anchors against the current timeline after structural cuts; no approval stop.' } });
+        return;
+      }
+      const planBlock = directorPlanToolBlock(task, id, canMutate);
+      if (planBlock) { publishSuccess({ ok: false, error: planBlock }); return; }
+      if (id === 'finish_edit') {
+        if (!task || !fineCutClips) { publishError('No active editing task or timeline evidence.'); return; }
+        if (task.directorPlanRequired && !hasCurrentDirectorPreview(messagesForTask(effectiveStudioTurnMessages(messagesRef.current, ledger), task.id))) {
+          publishSuccess({ ok: false, error: 'Inspect meaningful rendered timeline frames after the final edit, then assess the result against the saved director plan before finishing.' }); return;
+        }
+        const result = reviewEditingTask(task, requestedInput, fineCutClips(), getDocument?.());
+        if (!result.ok) { publishSuccess({ ok: false, error: result.error, ...(result.missing ? { data: { missing: result.missing } } : {}) }); return; }
+        updateTask(task.id, current => ({ ...current, review: result.review }));
+        publishSuccess({ ok: true, summary: studioLocale().startsWith('zh') ? '已核对剪辑结果' : 'Editing result checked', data: { review: result.review, taskIncomplete: !result.review.completed } });
+        return;
+      }
       if (id === "undo" && shouldBlockStudioTurnUndo(ledger)) {
         publishSuccess({
           ok: true,
@@ -291,7 +376,9 @@ export function ChatThread({
       // Fresh controller per tool run: the stop button aborts it so long tools can stand down at
       // their safe boundaries instead of holding the turn hostage until they finish
       const ctrl = new AbortController();
-      toolAbortRef.current = ctrl;
+      toolAbortsRef.current.add(ctrl);
+      setActiveTools(toolAbortsRef.current.size);
+      if (userStoppedRef.current) ctrl.abort();
       // Parked tools wait on the user, not on work: keep that time out of the tool-duration ETA memory
       const interactionWaitStartedAt = id === "ask_user" || id === "export"
         ? Date.now()
@@ -300,13 +387,32 @@ export function ChatThread({
         const runOpts = {
           signal: ctrl.signal,
           surface: "chat" as const,
-          ...(skillRef.current !== STUDIO_AUTO_SKILL_ID ? { skillId: skillRef.current } : {}),
+          ...(id === ROUGH_CUT_TOOL && task ? { roughCut: {
+            resume: task.roughCut?.report,
+            ...(task.mode === 'one-click' ? { skills: task.skills, config: task.config } : {}),
+            onProgress: (report: import('./first-pass').FirstPassReport) => updateTask(task.id, current => {
+              if (current.roughCut && current.roughCut.callId !== toolCall.toolCallId && current.roughCut.callId !== task.roughCut?.callId) return current;
+              const source = localAssetIndex?.find(asset => asset.assetId === report.sourceAssetId);
+              return { ...current, roughCut: { callId: toolCall.toolCallId, report }, ...(source ? { source: { name: source.label, durationSec: source.durationSec ?? undefined, posterKey: source.posterKey } } : {}) };
+            }),
+            onLateUsage: (usage: import('@pireel/studio-engine/workflow').WorkflowUsage) => {
+              if (!projectId) return;
+              const saved = recordTaskUsage({ projectId, threadId, taskId: task.id, callId: toolCall.toolCallId, usage });
+              if (saved) onSnapshot(saved.messages, saved.skillId ?? skillRef.current);
+            },
+          } } : {}),
+          ...((task?.skillId ?? skillRef.current) !== STUDIO_AUTO_SKILL_ID ? { skillId: task?.skillId ?? skillRef.current } : {}),
         };
+        const executionInput = withDirectorInstruction(task, id, requestedInput, getDocument?.());
         const out = v3
-          ? await runToolRef.current("run_v3", { name: id, args: requestedInput }, runOpts)
+          ? await runToolRef.current("run_v3", { name: id, args: executionInput }, runOpts)
           : { ok: false, error: `Unknown tool: ${id}. Use the current tool list.` };
         const stopAfterReceipt = studioToolResultStopsAgentTurn(out);
-        if (stopAfterReceipt) userStoppedRef.current = true;
+        if (id === ROUGH_CUT_TOOL && task && out.ok) {
+          const baseline = (out.data as { baseline?: Record<FineCutSkill, string[]> } | undefined)?.baseline;
+          if (baseline) updateTask(task.id, current => ({ ...current, fineCutBaseline: current.fineCutBaseline ?? baseline }));
+        }
+        if (stopAfterReceipt) { userStoppedRef.current = true; toolAbortsRef.current.forEach(controller => { if (controller !== ctrl) controller.abort(); }); }
         if (out.ok) publishSuccess(out as unknown as Record<string, unknown>);
         else publishError(studioToolFailureText(out.error ?? t("chatGen.executionFailed"), out.data));
         if (stopAfterReceipt) void stop();
@@ -323,10 +429,16 @@ export function ChatThread({
         if (interactionWaitStartedAt !== null) {
           interactionWaitDurationRef.current += Math.max(0, Date.now() - interactionWaitStartedAt);
         }
-        if (toolAbortRef.current === ctrl) toolAbortRef.current = null;
+        toolAbortsRef.current.delete(ctrl);
+        setActiveTools(toolAbortsRef.current.size);
       }
     },
   });
+
+  useEffect(() => subscribeTaskUsage(event => {
+    if (event.projectId !== projectId || event.threadId !== threadId) return;
+    updateTask(event.taskId, current => withTaskUsage(current, event.callId, event.usage));
+  }), [projectId, threadId, onSnapshot]);
 
   // Persist: on stream end (ready / error) write localStorage; throttle a snapshot every 2s while streaming —
   // so switching sessions / refreshing mid-generation doesn't evaporate the streamed-out parts and completed tool outputs.
@@ -334,31 +446,30 @@ export function ChatThread({
   // otherwise merely opening an old session refreshes its updatedAt and scrambles the history ordering.
   messagesRef.current = messages;
   const persistSessionState = useCallback(
-    (nextFrame: AttachedFrame | null, nextSkillId: StudioScenarioSkillId) => {
+    (nextSkillId: StudioScenarioSkillId) => {
       if (messagesRef.current.length > 0)
-        onSnapshot(compactStudioChatMessages(messagesRef.current), nextFrame, nextSkillId);
+        onSnapshot(compactStudioChatMessages(effectiveStudioTurnMessages(messagesRef.current, turnLedgerRef.current)), nextSkillId);
     },
     [onSnapshot],
   );
-  /** Attach a frame (shared by panel/theme button): update the request state, apply the palette, and persist this explicit user action. */
-  const applyFrame = useCallback(
-    (nextFrame: AttachedFrame | null) => {
-      frameRef.current = nextFrame;
-      setFrame(nextFrame);
-      onFrameAppliedRef.current?.(nextFrame);
-      persistSessionState(nextFrame, skillRef.current);
-    },
-    [persistSessionState],
-  );
+  const onProjectSkillRef = useRef(onProjectSkill);
+  onProjectSkillRef.current = onProjectSkill;
   const applySkill = useCallback(
     (nextSkillId: StudioScenarioSkillId) => {
       if (skillRef.current === nextSkillId) return;
       skillRef.current = nextSkillId;
       setSkillId(nextSkillId);
-      persistSessionState(frameRef.current, nextSkillId);
+      persistSessionState(nextSkillId);
+      onProjectSkillRef.current?.(nextSkillId);
     },
     [persistSessionState],
   );
+  // The project's Skill changed elsewhere (another thread, a brand bringing its Skill): follow it.
+  useEffect(() => {
+    if (projectSkillId === undefined || projectSkillId === skillRef.current) return;
+    skillRef.current = projectSkillId as StudioScenarioSkillId;
+    setSkillId(projectSkillId as StudioScenarioSkillId);
+  }, [projectSkillId]);
   const statusSnapshotActivationRef = useRef<DeferredActivation | null>(null);
   if (!statusSnapshotActivationRef.current)
     statusSnapshotActivationRef.current = new DeferredActivation();
@@ -366,18 +477,19 @@ export function ChatThread({
     if (!statusSnapshotActivationRef.current!.active)
       return statusSnapshotActivationRef.current!.defer();
     if (status === "ready" || status === "error")
-      onSnapshot(compactStudioChatMessages(messagesRef.current), frameRef.current, skillRef.current);
+      onSnapshot(compactStudioChatMessages(effectiveStudioTurnMessages(messagesRef.current, turnLedgerRef.current)), skillRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
-  const busy = status === "streaming" || status === "submitted";
+  const busy = status === "streaming" || status === "submitted" || activeTools > 0;
+  const taskInProgress = busy || latestTask(messages)?.state === 'running';
   // The workbench pauses output switching while a turn runs: a mid-run switch retargets every
   // later tool call (a real run dropped one output's picture-in-picture into another).
   const onBusyChangeRef = useRef(onBusyChange);
   onBusyChangeRef.current = onBusyChange;
   useEffect(() => {
-    onBusyChangeRef.current?.(busy);
+    onBusyChangeRef.current?.(taskInProgress);
     return () => onBusyChangeRef.current?.(false);
-  }, [busy]);
+  }, [taskInProgress]);
 
   const workTimingActivationRef = useRef<DeferredActivation | null>(null);
   if (!workTimingActivationRef.current)
@@ -394,7 +506,7 @@ export function ChatThread({
     if (timedMessages === messagesRef.current) return;
     messagesRef.current = timedMessages;
     setMessages(timedMessages);
-    onSnapshot(compactStudioChatMessages(timedMessages), frameRef.current, skillRef.current);
+    onSnapshot(compactStudioChatMessages(timedMessages), skillRef.current);
   }, [onSnapshot, setMessages, status]);
 
   const refreshedCreatedSkillRef = useRef<string | null>(null);
@@ -454,7 +566,7 @@ export function ChatThread({
     if (status !== "ready") return;
     const timer = setTimeout(() => {
       if (statusRef.current !== "ready") return; // the SDK sent its own follow-up meanwhile
-      if (userStoppedRef.current) return; // the user killed this turn — don't resurrect it
+      if (userStoppedRef.current || latestTask(messagesRef.current)?.state === 'paused') return; // the user killed this turn — don't resurrect it
       const msgs = messagesRef.current;
       const last = msgs[msgs.length - 1];
       if (!last || last.role !== "assistant") return;
@@ -470,7 +582,7 @@ export function ChatThread({
   useEffect(() => {
     if (!busy) return;
     const t = setInterval(
-      () => onSnapshot(compactStudioChatMessages(messagesRef.current), frameRef.current, skillRef.current),
+      () => onSnapshot(compactStudioChatMessages(effectiveStudioTurnMessages(messagesRef.current, turnLedgerRef.current)), skillRef.current),
       2000,
     );
     return () => clearInterval(t);
@@ -480,7 +592,7 @@ export function ChatThread({
   // otherwise fetch keeps running and onToolCall mutates the work in the background while the UI is already gone.
   // Non-generating unmount doesn't snapshot (glance at an old session then switch away shouldn't refresh its updatedAt).
   const busyRef = useRef(busy);
-  busyRef.current = busy;
+  busyRef.current = taskInProgress;
   const stopRef = useRef(stop);
   stopRef.current = stop;
   useEffect(
@@ -490,13 +602,15 @@ export function ChatThread({
       // leaves the client-side tool alive, so a slow generator can mutate the timeline
       // after the user has moved to a new chat or cleared the cut.
       userStoppedRef.current = true;
-      toolAbortRef.current?.abort();
+      toolAbortsRef.current.forEach(controller => controller.abort());
       try {
         void stopRef.current();
       } catch {
         /* already ended */
       }
-      onSnapshot(compactStudioChatMessages(messagesRef.current), frameRef.current, skillRef.current);
+      const task = latestTask(messagesRef.current);
+      const saved = effectiveStudioTurnMessages(messagesRef.current, turnLedgerRef.current);
+      onSnapshot(compactStudioChatMessages(task ? patchTask(saved, task.id, current => ({ ...current, state: 'paused' })) : saved), skillRef.current);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
@@ -515,6 +629,11 @@ export function ChatThread({
       options: {
         preserveAutoRecoveryAttempt?: boolean;
         studioAction?: typeof STUDIO_CREATE_SKILL_ACTION;
+        /** The tool this message's first step must call (a one-click edit starts with the rough cut). */
+        startTool?: string;
+        /** A note for the agent ahead of the message (one-click edit context). */
+        hint?: string;
+        resume?: ChatTask;
       } = {},
     ): Promise<boolean> => {
       const draftParts: StudioChatDraftPart[] =
@@ -524,7 +643,7 @@ export function ChatThread({
       const hasContent = draftParts.some(
         (part) => part.type === "timeline-frame" || part.text.trim().length > 0,
       );
-      if (!hasContent || status === "streaming" || status === "submitted")
+      if (!hasContent || status === "streaming" || status === "submitted" || toolAbortsRef.current.size > 0)
         return false;
       if (!options.preserveAutoRecoveryAttempt)
         autoRecoveryAttemptedRef.current = false;
@@ -565,18 +684,37 @@ export function ChatThread({
       const mentionedIds = [...new Set(
         draftParts.flatMap((part) => (part.type === "text" ? [...part.text.matchAll(/@([A-Za-z0-9_:./-]+)/g)].map((m) => m[1]!) : [])),
       )];
+      // The switched-on skills shape the project's first edit; once it is edited, the creator asks in words.
+      const continuing = options.resume ?? (/^(继续|继续剪辑|继续粗剪|continue|resume)[。.!！]?$/i.test(typeof draft === 'string' ? draft.trim() : '') && latestTask(messagesRef.current)?.state !== 'done' ? latestTask(messagesRef.current) : undefined);
+      const outputId = (getBodyRef.current().output as { id?: string } | undefined)?.id;
+      if (continuing?.outputId && continuing.outputId !== outputId) { setTaskResumeError(true); return false; }
+      setTaskResumeError(false);
+      const config = continuing?.config ?? resolveEditingRunConfig({ brand: projectBrandRef.current, skills: continuing?.mode === 'one-click' ? continuing.skills : editingSkillsRef.current });
+      const source = localAssetIndex?.find(asset => asset.kind === 'video' || !asset.kind);
+      const task: ChatTask = continuing ? { ...continuing, config, skillId: continuing.skillId ?? skillRef.current, review: undefined, agentModel: agentModelRef.current, reviewRequired: continuing.mode === 'one-click', state: 'running' } : {
+        id: mid('task'), ...(outputId ? { outputId } : {}), goal: draftParts.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n'),
+        skills: options.startTool ? config.skills : [],
+        config, skillId: skillRef.current, agentModel: agentModelRef.current, reviewRequired: !!options.startTool, directorPlanRequired: !!options.startTool,
+        ...(options.startTool && source ? { source: { name: source.label, ...(source.durationSec != null ? { durationSec: source.durationSec } : {}), ...(source.posterKey ? { posterKey: source.posterKey } : {}) } } : {}),
+        mode: options.startTool ? 'one-click' : 'request', state: 'running',
+      };
+      const startTool = continuing?.mode === 'one-click' && (!continuing.roughCut || unfinishedRoughCut(continuing)) ? ROUGH_CUT_TOOL : options.startTool;
       const mentionHint = [
+        continuing ? resumeTaskHint(task) : options.hint ?? "",
         mentionedIds.length ? `Referenced elements in this message (use these ids directly): ${JSON.stringify(mentionedIds)}` : "",
         localAssetContext,
+        continuing ? editingSkillsHint(task.skills) : projectEditedRef.current ? "" : editingSkillsHint(editingSkillsRef.current),
       ].filter(Boolean).join("\n");
       const metadata = {
+        task,
         workStartedAt: Date.now(),
         ...(mentionHint ? { mentionHint } : {}),
         ...(timelineFrames.length ? { timelineFrames } : {}),
         ...(options.studioAction ? { studioAction: options.studioAction } : {}),
+        ...(startTool ? { startTool } : {}),
       };
-      void sendMessage({
-        metadata,
+      const userMessage: UIMessage = {
+        id: mid("user"), role: "user", metadata,
         parts: draftParts.map((part) =>
           part.type === "text"
             ? { type: "text" as const, text: part.text }
@@ -587,11 +725,73 @@ export function ChatThread({
                 url: part.frame.dataUrl,
               },
         ),
-      });
+      };
+      messagesRef.current = [...messagesRef.current, userMessage];
+      onSnapshot(compactStudioChatMessages(messagesRef.current), skillRef.current);
+      void sendMessage(userMessage);
       return true;
     },
-    [elements, sendMessage, status],
+    [elements, localAssetIndex, sendMessage, status, onSnapshot],
   );
+
+  // Fine-cut rows describe observed additions. Zero additions remain unfulfilled, never inferred unnecessary.
+  const fineCutFor = (message: UIMessage, task: ChatTask | undefined, live: boolean): RoughCutReplyMeta['fineCut'] => {
+    if (task?.mode !== 'one-click') return undefined;
+    if (!live && task.state !== 'running' && task.fineCut) return task.fineCut;
+    const receipt = message.parts.find(part => toolNameOfPart(part) === ROUGH_CUT_TOOL) as { output?: { data?: { baseline?: Record<FineCutSkill, string[]> } } } | undefined;
+    const baseline = task.fineCutBaseline ?? receipt?.output?.data?.baseline;
+    const now = fineCutClips?.();
+    const enabled = FINE_CUT_SKILLS.filter(id => task.skills.includes(id) || id === 'graphics' && task.config?.visual?.headlines);
+    if (!baseline || !now) return { state: 'done', items: enabled.map(id => ({ id, count: 0, status: 'stopped' })) };
+    return { state: live ? 'running' : 'done', items: enabled.map(id => {
+      const count = now[id].filter(clip => !baseline[id].includes(clip)).length;
+      return { id, count, status: live ? 'running' : count ? 'done' : task.state === 'paused' || unfinishedRoughCut(task) ? 'stopped' : 'not-added' };
+    }) };
+  };
+  useEffect(() => {
+    if (busy) return;
+    const task = latestTask(messagesRef.current);
+    const last = messagesRef.current.at(-1);
+    if (!task || task.state !== 'running') return;
+    if (status === 'error' || userStoppedRef.current) {
+      updateTask(task.id, current => ({ ...current, state: 'paused' }));
+      return;
+    }
+    if (last?.role !== 'assistant') return;
+    if (lastAssistantMessageIsCompleteWithToolCalls({ messages: messagesRef.current })) return;
+    if (last.parts.some(part => ['input-streaming', 'input-available'].includes((part as { state?: string }).state ?? ''))) return;
+    const fine = fineCutFor(last, task, false);
+    const state = unfinishedRoughCut(task) || task.reviewRequired && needsEditingReview(task) && !task.review?.completed || unresolvedTaskFailure(messagesForTask(messagesRef.current, task.id)) || !assistantTurnEndedWithAnswer(last) ? 'partial' : 'done';
+    updateTask(task.id, current => ({ ...current, state, ...(fine ? { fineCut: fine } : {}) }));
+  }, [busy, status, messages]);
+
+  // A next step goes at the end of the message being written, to edit and send.
+  const fillRequest = useCallback((request: string) => {
+    composerRef.current?.insertText(request);
+  }, []);
+
+  // A newly created project's model may arrive with the asynchronously loaded document.
+  // Resolve it before the startup effect sends the first request; never overwrite a user's pick.
+  useEffect(() => {
+    if (modelSelectedRef.current || initialAgentModel === undefined || messagesRef.current.length) return;
+    const selected = studioAgentModelId(initialAgentModel);
+    agentModelRef.current = selected;
+    modelSelectedRef.current = true;
+    setAgentModel(selected);
+  }, [initialAgentModel]);
+
+  // A project made from the Studio home opens with its first message: sent once, when the thread is idle,
+  // as a one-click edit that starts with the rough cut.
+  const startSentRef = useRef(false);
+  useEffect(() => {
+    if (!startPrompt?.trim() || startSentRef.current || status !== "ready") return;
+    startSentRef.current = true;
+    // A reload after saving the first message must not start it a second time.
+    if (messagesRef.current.some(message => taskOf(message)?.mode === 'one-click')) { onStartPromptSent?.(); return; }
+    void run(startPrompt, { startTool: ROUGH_CUT_TOOL, hint: ONE_CLICK_EDIT_HINT }).then(sent => {
+      if (sent) onStartPromptSent?.(); else startSentRef.current = false;
+    });
+  }, [startPrompt, status, run, onStartPromptSent]);
 
   // A failed stream may already have committed tools. Re-generating the old assistant message
   // erases its receipts while keeping the client-side call counter, so the apparent retry can
@@ -601,6 +801,7 @@ export function ChatThread({
     () => {
       const studioAction = latestStudioMetaAction(messagesRef.current);
       return run(t("chatGen.continueAfterInterruptionPrompt"), {
+        resume: latestTask(messagesRef.current),
         ...(studioAction ? { studioAction } : {}),
       });
     },
@@ -649,6 +850,7 @@ export function ChatThread({
       const studioAction = latestStudioMetaAction(messagesRef.current);
       run(t("chatGen.continueAfterInterruptionPrompt"), {
         preserveAutoRecoveryAttempt: true,
+        resume: latestTask(messagesRef.current),
         ...(studioAction ? { studioAction } : {}),
       });
     }, 650);
@@ -660,9 +862,16 @@ export function ChatThread({
   const handleStop = useCallback(() => {
     userStoppedRef.current = true;
     timelineFrameInspectionRef.current?.abort();
-    toolAbortRef.current?.abort();
+    toolAbortsRef.current.forEach(controller => controller.abort());
     void stop();
-  }, [stop]);
+    const task = latestTask(messagesRef.current);
+    if (task) updateTask(task.id, current => ({ ...current, state: 'paused' }));
+  }, [stop, onSnapshot]);
+  useEffect(() => {
+    const leave = () => { if (busyRef.current) handleStop(); };
+    window.addEventListener('pagehide', leave);
+    return () => window.removeEventListener('pagehide', leave);
+  }, [handleStop]);
 
   // Quick prompts: fill into the composer instead of sending directly (user can reword / add @ references before sending)
   const fillComposer = useCallback((text: string) => {
@@ -689,7 +898,7 @@ export function ChatThread({
     [applySkill, fillComposer],
   );
 
-  const pickSkill = useCallback((nextSkillId: StudioScenarioSkillId) => {
+  const switchSkill = useCallback((nextSkillId: StudioScenarioSkillId) => {
     applySkill(nextSkillId);
     setActiveStarterId(null);
     const defaultPrompt = nextSkillId === STUDIO_AUTO_SKILL_ID
@@ -697,6 +906,18 @@ export function ChatThread({
       : scenarioSkills.find((skill) => skill.id === nextSkillId)?.defaultPrompt ?? null;
     composerRef.current?.applySkillPrompt(defaultPrompt);
   }, [applySkill, scenarioSkills]);
+  // A Skill picked in the composer: switching away from the project's Skill, or onto one that would drop
+  // the project's brand, asks first.
+  const [pendingSkill, setPendingSkill] = useState<StudioScenarioSkillId | null>(null);
+  const pickSkill = useCallback((nextSkillId: StudioScenarioSkillId) => {
+    const leavesSkill = !!projectSkillId && projectSkillId !== STUDIO_AUTO_SKILL_ID;
+    const dropsBrand = !!projectBrand && !skillTakesBrand(nextSkillId);
+    if (onProjectSkillRef.current && nextSkillId !== skillRef.current && (leavesSkill || dropsBrand)) {
+      setPendingSkill(nextSkillId);
+      return;
+    }
+    switchSkill(nextSkillId);
+  }, [projectSkillId, projectBrand, switchSkill]);
 
   // Expose "one-tap film" progress + selected pill to the workbench.
   useImperativeHandle(
@@ -742,6 +963,11 @@ export function ChatThread({
       send(text) {
         run(text);
       },
+      runSkill(nextSkillId, text) {
+        applySkill(nextSkillId as StudioScenarioSkillId);
+        setActiveStarterId(null);
+        run(text);
+      },
       insertText(text) {
         composerRef.current?.insertText(text);
       },
@@ -754,9 +980,6 @@ export function ChatThread({
       insertMention(el) {
         composerRef.current?.insertMention(el);
       },
-      attachFrame(s) {
-        applyFrame(s);
-      },
       beginTimelineFrameCapture(s) {
         composerRef.current?.beginTimelineFrameCapture(s);
       },
@@ -767,7 +990,7 @@ export function ChatThread({
         composerRef.current?.failTimelineFrameCapture(id);
       },
     }),
-    [applyFrame, setMessages, run],
+    [setMessages, run, applySkill],
   );
 
   const empty = messages.length === 0;
@@ -810,7 +1033,7 @@ export function ChatThread({
                               }
                               className={`group min-w-0 rounded-xl p-1 text-left transition-colors ${
                                 active
-                                  ? "bg-panel-2"
+                                  ? "bg-panel-2/35"
                                   : "hover:bg-panel-2/70"
                               }`}
                             >
@@ -936,8 +1159,16 @@ export function ChatThread({
               const editorialCapacityShortfall = m.role === "assistant" && (!isLast || status === "ready")
                 ? assistantEditorialCapacityShortfall(m)
                 : null;
+              const originTask = taskOf([...messages.slice(0, mi)].reverse().find(item => item.role === 'user'));
+              const savedTask = originTask ? [...messages].reverse().map(taskOf).find(task => task?.id === originTask.id) ?? originTask : undefined;
+              const messageTask = savedTask ? displayEditingTask(savedTask, messagesForTask(messages, savedTask.id)) : undefined;
+              const wholeVideo = messageTask?.mode === 'one-click';
+              const taskMessages = messageTask ? messagesForTask(messages, messageTask.id) : [];
+              const taskAnchor = wholeVideo && m.role === 'assistant' && taskMessages.find(item => item.role === 'assistant')?.id === m.id;
+              const taskLive = busy && latestTask(messages)?.id === messageTask?.id;
+              const finalTextIndex = parts.findLastIndex(part => part.type === 'text');
               const workFold = assistantWorkFold(m, !isLast || status === "ready");
-              const workFoldAvailable = workFold !== null;
+              const workFoldAvailable = !wholeVideo && workFold !== null;
               const workExpanded = !collapsedWorkMessages.has(m.id);
               const workHidden = workFoldAvailable && !workExpanded;
               const workDurationMs = workFoldAvailable
@@ -954,11 +1185,18 @@ export function ChatThread({
                       m: Math.floor(workDurationSeconds / 60),
                       s: workDurationSeconds % 60,
                     });
+              if (m.role === 'assistant' && !taskAnchor && (!isLast || wholeVideo) && !parts.some((part, index) =>
+                part.type === 'text' ? !!(part as { text?: string }).text?.trim() && (!wholeVideo || index === finalTextIndex && !(busy && isLast))
+                  : part.type === 'file' || isInteractiveEditingTool(toolNameOfPart(part), !!wholeVideo))) return null;
               return (
                 <Message key={m.id} from={m.role}>
                   <div className="flex items-start gap-2">
                     {m.role === "assistant" && <PiAvatar thinking={thinking} />}
                     <div className="flex min-w-0 flex-1 flex-col gap-2">
+                      {taskAnchor && messageTask && <EditingTaskCard task={messageTask} messages={taskMessages} live={taskLive} fine={fineCutFor(m, messageTask, taskLive)}
+                        startedAt={(taskMessages.find(item => item.role === 'user')?.metadata as { workStartedAt?: number } | undefined)?.workStartedAt}
+                        credits={taskMessages.reduce((sum, item) => sum + messageTurnCredits(item), 0) + (messageTask.roughCut?.report.credits ?? 0) + Object.values(messageTask.lateUsage ?? {}).reduce((sum, value) => sum + value, 0)}
+                        onContinue={latestTask(messages)?.id === messageTask.id && !error?.message?.includes('insufficient_tokens') && (['paused', 'partial'].includes(messageTask.state) || status === 'error') ? continueFromCurrentState : undefined} />}
                       {workFoldAvailable && (
                         <button
                           type="button"
@@ -985,6 +1223,7 @@ export function ChatThread({
                         if (part.type === "step-start") return null;
                         if (collapsed.has(idx)) return null;
                         if (part.type === "text") {
+                          if (m.role === 'assistant' && wholeVideo && (busy && isLast || idx !== finalTextIndex)) return null;
                           const text = (part as { text?: string }).text ?? "";
                           if (!text) return null;
                           const intentLine = m.role === "user" ? describeGenerationIntentLine(text) : null;
@@ -997,7 +1236,7 @@ export function ChatThread({
                                       : "chatGen.intentElement",
                             );
                             return (
-                              <MessageContent key={key}>
+                              <MessageContent key={key} className={USER_BUBBLE_CLASS}>
                                 <span className={CHAT_ACTION_PILL_CLASS}>
                                   <span className={`${CHAT_PILL_ICON_CLASS} text-accent`}>✦</span>
                                   <span className={CHAT_PILL_LABEL_CLASS}>{intentLine.facts ? `${kindLabel} · ${intentLine.facts}` : kindLabel}</span>
@@ -1006,7 +1245,7 @@ export function ChatThread({
                             );
                           }
                           return m.role === "user" ? (
-                            <MessageContent key={key}>
+                            <MessageContent key={key} className={USER_BUBBLE_CLASS}>
                               <div className="text-[13px] leading-relaxed">
                                 {idx === parts.findIndex((candidate) => candidate.type === "text")
                                   && (m.metadata as { studioAction?: unknown } | undefined)?.studioAction === STUDIO_CREATE_SKILL_ACTION && (
@@ -1019,11 +1258,13 @@ export function ChatThread({
                               </div>
                             </MessageContent>
                           ) : (
-                            <MessageContent key={key}>
-                              <MessageResponse className="text-[13px] leading-relaxed">
-                                {text}
-                              </MessageResponse>
-                            </MessageContent>
+                            splitNextSteps(text).body ? (
+                              <MessageContent key={key}>
+                                <MessageResponse className="text-[13px] leading-relaxed">
+                                  {splitNextSteps(text).body}
+                                </MessageResponse>
+                              </MessageContent>
+                            ) : null
                           );
                         }
                         if (part.type === "file") {
@@ -1070,6 +1311,12 @@ export function ChatThread({
                         // chat, it reads as leaked internals). The thinking phase still shows activity
                         // via the ThinkingDots below — live reasoning counts as "thinking", not output.
                         if (part.type === "reasoning") return null;
+                        if (toolNameOfPart(part) === ROUGH_CUT_TOOL) return null;
+                        if (
+                          part.type.startsWith("tool-") ||
+                          part.type === "dynamic-tool"
+                        )
+                          if (!isInteractiveEditingTool(toolNameOfPart(part), !!wholeVideo)) return null;
                         if (
                           part.type.startsWith("tool-") ||
                           part.type === "dynamic-tool"
@@ -1107,8 +1354,8 @@ export function ChatThread({
                               });
                         return null;
                       })}
-                      {thinking && <ThinkingDots />}
-                      {emptyCompletedAssistant && (
+                      {!wholeVideo && (thinking || busy && isLast && !lastTextLive && !isInteractiveEditingTool(toolNameOfPart(lastPart ?? { type: '' }), false)) && <ThinkingDots />}
+                      {!wholeVideo && emptyCompletedAssistant && !['paused', 'partial'].includes(messageTask?.state ?? '') && (
                         <div className="border-line bg-panel-2 flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[12px]">
                           <X size={12} className="shrink-0 text-destructive" />
                           <span className="min-w-0 flex-1 text-destructive">
@@ -1123,7 +1370,7 @@ export function ChatThread({
                           </button>
                         </div>
                       )}
-                      {incompleteCompletedAssistant && (
+                      {!wholeVideo && incompleteCompletedAssistant && !['paused', 'partial'].includes(messageTask?.state ?? '') && (
                         <div className="border-line bg-panel-2 flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[12px]">
                           <span className="text-ink-3 min-w-0 flex-1">
                             {t("chatGen.workNotFinished")}
@@ -1136,6 +1383,12 @@ export function ChatThread({
                             {t("chatGen.continueFromCurrentState")}
                           </button>
                         </div>
+                      )}
+                      {m.role === "assistant" && m.id === messages[messages.length - 1]?.id && !busy && messageTask?.state === 'done' && (
+                        <NextSteps
+                          steps={parts.flatMap((part) => (part.type === "text" ? splitNextSteps((part as { text?: string }).text ?? "").steps : [])).slice(0, 3)}
+                          onPick={fillRequest}
+                        />
                       )}
                       {editorialCapacityShortfall !== null && (
                         <div className="border-line bg-panel-2 text-ink-3 flex items-start gap-2 rounded-md border px-2.5 py-2 text-[12px] leading-relaxed">
@@ -1152,20 +1405,20 @@ export function ChatThread({
             })
           )}
           {/* Sent but no first response yet (last message is the user's): standalone thinking row */}
-          {(status === "submitted" || status === "streaming") &&
+          {(status === "submitted" || status === "streaming" || status === 'error' || latestTask(messages)?.state === 'paused') &&
             messages[messages.length - 1]?.role === "user" && (
               <Message from="assistant">
                 <div className="flex items-start gap-2">
                   <PiAvatar thinking />
-                  <div className="pt-0.5">
-                    <ThinkingDots />
+                  <div className="min-w-0 flex-1 pt-0.5">
+                    {latestTask(messages)?.mode === 'one-click' ? <EditingTaskCard task={latestTask(messages)!} messages={messagesForTask(messages, latestTask(messages)!.id)} live={busy} credits={0} onContinue={!busy && !error?.message?.includes('insufficient_tokens') ? continueFromCurrentState : undefined} /> : <ThinkingDots />}
                   </div>
                 </div>
               </Message>
             )}
           {/* Request/stream failed: committed tools are durable, so recovery is a fresh continuation
               from live project state rather than regeneration of stale history. */}
-          {error && (
+          {error && (latestTask(messages)?.mode !== 'one-click' || error.message?.includes('insufficient_tokens')) && (
             <div className="border-line bg-panel-2 flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[12px]">
               <X size={12} className="shrink-0 text-destructive" />
               <span className="min-w-0 flex-1 truncate text-destructive">
@@ -1186,6 +1439,13 @@ export function ChatThread({
               )}
             </div>
           )}
+          {taskResumeError && <p role="alert" className="text-ink-3 mx-3 mb-2 text-xs">{t('chatGen.resumeOriginalOutput')}</p>}
+          {!busy && status !== 'error' && latestTask(messages)?.mode !== 'one-click' && ['paused', 'partial'].includes(latestTask(messages)?.state ?? '') && (
+            <div className="text-ink-3 mx-3 mb-2 flex items-center justify-between gap-2 text-xs" role="status">
+              <span>{t('chatGen.workNotFinished')}</span>
+              <button type="button" onClick={() => void continueFromCurrentState()} className="text-ink underline underline-offset-2">{t('chatGen.continueFromCurrentState')}</button>
+            </div>
+          )}
           {timelineFrameInspectionError && status !== "error" && (
             <div className="border-destructive/30 bg-destructive/5 text-ink-2 mx-3 mb-2 flex items-center gap-2 rounded-md border px-2.5 py-2 text-[11px]">
               <X size={12} className="shrink-0 text-destructive" />
@@ -1199,9 +1459,30 @@ export function ChatThread({
       </Conversation>
 
       <div className="p-2.5 pt-1">
+        {/* An edit is set up on the Studio home; here the conversation asks in words. */}
+        <ConfirmDialog
+          open={pendingSkill !== null}
+          title={t("chatGen.skill.confirmTitle")}
+          description={pendingSkill === null ? undefined : [
+            t("chatGen.skill.confirmBody", { name: pendingSkill === STUDIO_AUTO_SKILL_ID ? t("chatGen.skill.auto.title") : scenarioSkills.find((skill) => skill.id === pendingSkill)?.title ?? pendingSkill }),
+            projectBrand && !skillTakesBrand(pendingSkill) ? t("chatGen.skill.confirmDropsBrand", { brand: projectBrand.name }) : "",
+          ].filter(Boolean).join(" ")}
+          confirmLabel={t("chatGen.brand.switch")}
+          cancelLabel={t("panels.cancel")}
+          onCancel={() => setPendingSkill(null)}
+          onConfirm={() => { if (pendingSkill !== null) switchSkill(pendingSkill); setPendingSkill(null); }}
+        />
         <Composer
           placeholder={t("chatGen.sayWhatAddChange")}
-          status={status}
+          agentModel={agentModel}
+          onPickAgentModel={id => {
+            if (taskInProgress) return;
+            modelSelectedRef.current = true;
+            agentModelRef.current = id;
+            setAgentModel(id);
+            onSnapshot(messagesRef.current, skillRef.current);
+          }}
+          status={taskInProgress ? 'streaming' : status}
           elements={elements}
           skillId={skillId}
           scenarioSkills={scenarioSkills}
@@ -1209,13 +1490,11 @@ export function ChatThread({
           onCreateScenarioSkill={onRefreshScenarioSkills ? createScenarioSkill : undefined}
           onDeleteScenarioSkill={onDeleteScenarioSkill}
           onPickSkill={pickSkill}
-          frame={frame}
-          frames={frames}
+          projectBrand={projectBrand}
           timelineFramePickActive={timelineFramePickActive}
           timelineFramePickBusy={timelineFramePickBusy}
           timelineFramePickAvailable={timelineFramePickAvailable}
           onTimelineFramePickActiveChange={onTimelineFramePickActiveChange}
-          onPickFrame={applyFrame}
           onSubmit={run}
           onStop={handleStop}
           methodsRef={composerRef}

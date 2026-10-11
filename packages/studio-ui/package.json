@@ -9,8 +9,10 @@
     "./studio.css": "./src/studio.css",
     "./assets-panel": "./src/assets-panel.tsx",
     "./audio-level": "./src/audio-level.tsx",
+    "./editing-skills": "./src/editing-skills.tsx",
     "./block-preview-card": "./src/block-preview-card.tsx",
     "./captions-panel": "./src/captions-panel.tsx",
+    "./chat-model-picker": "./src/chat-model-picker.tsx",
     "./chat-composer": "./src/chat-composer.tsx",
     "./chat-asset-search-results": "./src/chat-asset-search-results.tsx",
     "./chat-cut-list": "./src/chat-cut-list.tsx",
@@ -21,7 +23,6 @@
     "./code-editor": "./src/code-editor.tsx",
     "./edit-overlays": "./src/edit-overlays.tsx",
     "./element-source-editor": "./src/element-source-editor.tsx",
-    "./frame-panel": "./src/frame-panel.tsx",
     "./gen-chat-panel": "./src/gen-chat-panel.tsx",
     "./hyperframes-workbench": "./src/hyperframes-workbench.tsx",
     "./kit-props-panel": "./src/kit-props-panel.tsx",
@@ -37,15 +38,29 @@
     "./timeline-audio-lane": "./src/timeline-audio-lane.tsx",
     "./timeline-overlays": "./src/timeline-overlays.tsx",
     "./transition-panel": "./src/transition-panel.tsx",
+    "./workflow-launcher": "./src/workflow-launcher.tsx",
+    "./captions-entry": "./src/captions-entry.tsx",
+    "./workflow-panel": "./src/workflow-panel.tsx",
     "./workbench-controls": "./src/workbench-controls.tsx",
-    "./*": "./src/*.ts"
+    "./*": "./src/*.ts",
+    "./caption-task-page": "./src/caption-task-page.tsx",
+    "./caption-upload-dialog": "./src/caption-upload-dialog.tsx",
+    "./pip-draft-page": "./src/pip-draft-page.tsx",
+    "./scene-form-controls": "./src/scene-form-controls.tsx",
+    "./caption-task-style": "./src/caption-task-style.tsx",
+    "./caption-stage-sample": "./src/caption-stage-sample.tsx",
+    "./top-bar-slot": "./src/top-bar-slot.tsx",
+    "./dubbing-settings": "./src/dubbing-settings.tsx",
+    "./scene-media-picker": "./src/scene-media-picker.tsx",
+    "./scene-playback": "./src/scene-playback.tsx",
+    "./scene-video-preview": "./src/scene-video-preview.tsx",
+    "./scene-player-frame": "./src/scene-player-frame.tsx"
   },
   "sideEffects": [
     "./src/i18n.ts"
   ],
   "dependencies": {
     "@pireel/studio-engine": "workspace:*",
-    "@pireel/studio-frames": "workspace:*",
     "@pireel/ui": "workspace:*"
   }
 }

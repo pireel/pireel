@@ -7,7 +7,7 @@
  */
 
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
-import { kvDelete, kvGet, kvSet } from './idb-kv';
+import { kvDelete, kvGet, kvSet, kvSetConfirmed } from './idb-kv';
 
 const PREFIX = 'asr:';
 const LEGACY_LOCALSTORAGE_PREFIX = 'pinshot:studio:asr:';
@@ -22,19 +22,16 @@ function sweepLegacyLocalStorage(): Promise<void> {
     if (typeof localStorage === 'undefined') return;
     try {
       const doomed: string[] = [];
-      const migrations: Promise<void>[] = [];
       for (let index = 0; index < localStorage.length; index += 1) {
         const key = localStorage.key(index);
         if (!key?.startsWith(LEGACY_LOCALSTORAGE_PREFIX)) continue;
-        doomed.push(key);
         try {
           const value = JSON.parse(localStorage.getItem(key) ?? 'null');
-          if (Array.isArray(value)) migrations.push(kvSet(PREFIX + key.slice(LEGACY_LOCALSTORAGE_PREFIX.length), value));
+          if (Array.isArray(value) && await kvSetConfirmed(PREFIX + key.slice(LEGACY_LOCALSTORAGE_PREFIX.length), value)) doomed.push(key);
         } catch {
-          /* corrupt entry: drop it */
+          /* Keep the source if migration could not be verified. */
         }
       }
-      await Promise.all(migrations);
       doomed.forEach((key) => localStorage.removeItem(key));
     } catch {
       /* storage unavailable */
@@ -47,7 +44,11 @@ export async function getCachedAsr(url: string): Promise<AsrSegment[] | null> {
   if (!url) return null;
   await sweepLegacyLocalStorage();
   const value = await kvGet(PREFIX + url);
-  return Array.isArray(value) ? (value as AsrSegment[]) : null;
+  if (Array.isArray(value)) return value as AsrSegment[];
+  try {
+    const legacy = JSON.parse(localStorage.getItem(LEGACY_LOCALSTORAGE_PREFIX + url) ?? 'null');
+    return Array.isArray(legacy) ? legacy as AsrSegment[] : null;
+  } catch { return null; }
 }
 
 export function setCachedAsr(url: string, segs: AsrSegment[]): void {

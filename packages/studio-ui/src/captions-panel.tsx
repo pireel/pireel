@@ -2,9 +2,8 @@
 
 /**
  * Captions panel (a tool panel docked in the material bar, entered via the "Captions" button).
- * Layout (per user, no tabs): a collapsible STYLES section on top (~1/2 height; the original preset
- * wall + bilingual setup, full height when no transcript), and the editable caption LINE LIST below
- * as the main body (no auto-collapse — the user folds it manually).
+ * The panel is a subtitle transcript: a compact on/off and translation header above editable cues.
+ * Selecting text opens the same contextual edit/highlight/animation/MG bar as the speech transcript.
  * Line editing: click a line = seek the video to its spot + edit IN PLACE on the same node
  * (contentEditable; background-only editing state — no border, no size change, zero jitter). Edits
  * write back to the TRANSCRIPT (single source of truth: captions re-lay, agents' get_transcript and the
@@ -15,23 +14,21 @@
  * only change when the user asks (the retranslate button / a full re-translate) — never automatically.
  */
 
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Bold, Check, ChevronDown, Languages, Loader2, RefreshCw } from 'lucide-react';
-import { FontPicker } from './display-text-panel';
-import { cachedLocalFontFamilies, loadLocalFontFamilies, supportsLocalFontAccess, type LocalFontFamilyOption } from './local-font-access';
-import { Switch } from '@pireel/ui/switch';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { Check, ChevronDown, Languages, Loader2, RefreshCw } from 'lucide-react';
+import { confirm } from '@pireel/ui/confirm';
 import { t } from './i18n';
+import { wordsFromText } from '@pireel/studio-engine/caption-fx';
+import type { WordDecorationPatch } from '@pireel/studio-engine/word-decorations';
+import { TranscriptSelectionBar } from './script-panel';
+import { CaptionsToolbarContext, TRANSCRIPT_TOOL_CLASS, TRANSCRIPT_TOOL_LABEL_CLASS, TRANSCRIPT_TOOLBAR_CLASS } from './captions-toolbar-slot';
 import {
   type CaptionPreset,
   type CaptionStyle,
   type Composition,
   BASE_CAPTION_FONT_PX,
-  CAPTION_PRESETS,
-  getCaptionPreset,
+  captionStackScale,
   isCaptionsOn,
-  isDisplayTextFontId,
-  resolveCaptionStyle,
-  type DisplayTextFontId,
 } from '@pireel/studio-engine/composition';
 
 /** One editable caption line = one DISPLAY CUE (derived by displayCues in edited-timeline order across
@@ -50,6 +47,8 @@ export interface CaptionLineRow {
   w0: number;
   w1: number;
   text: string;
+  words?: import('@pireel/studio-engine/caption-fx').FxWord[];
+  emphasisWords?: { text: string; selected: boolean }[];
   /** Bilingual second line (this cue's translation), when present. */
   sub?: string;
   /** Edited-timeline seconds (for the timecode + seek). */
@@ -57,11 +56,6 @@ export interface CaptionLineRow {
   /** Cue duration (seek nudges inside by min(0.3, dur/2)). */
   dur?: number;
 }
-
-const SECTIONS: { mode: CaptionPreset['mode']; title: string; desc: string }[] = [
-  { mode: 'line', title: 'captions.lineByLine', desc: 'captions.linesAppearOneTime' },
-  { mode: 'emphasis', title: 'captions.wordEmphasis', desc: 'captions.fullLineStaysEach' },
-];
 
 /** Injection surface for the bilingual translation area (only the hosted shell has translation; the OSS shell passes nothing = whole area hidden, BYO agent translates itself). */
 export interface CaptionTranslationControl {
@@ -91,35 +85,32 @@ export interface CaptionStyleCtl {
   sub: CaptionStyle;
   /** A translation target language is active — only then does the translation-line row show (per user). */
   bilingualOn: boolean;
-  onMainPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined; font?: string | undefined }) => void;
-  onSubPatch: (patch: { preset?: string | undefined; scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined; font?: string | undefined; lang?: string | undefined }) => void;
+  onMainPatch: (patch: { animation?: CaptionStyle['animation']; scale?: number; emphasis?: string | undefined; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined; font?: string | undefined }) => void;
+  onSubPatch: (patch: { animation?: CaptionStyle['animation']; preset?: string | undefined; scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined; font?: string | undefined; lang?: string | undefined }) => void;
 }
 
 export function CaptionsPanel({
   comp,
-  onPickPreset,
   onReextract,
-  onRemove,
   styleCtl,
   translation,
   generating,
   rows,
   activeKey,
   onEditLine,
+  onToggleEmphasis,
   onEditSubLine,
   onSeekTo,
   onRetranslateLine,
   lineBusyKey,
   onExtract,
+  onDecorateWords,
+  onEditWords,
+  children,
 }: {
   comp: Composition;
-  /** Click a style card: globally swap the preset for all sentence-level captions (if none exist yet, lays a layer from the voiceover script). */
-  onPickPreset: (presetId: string) => void;
-  /** Explicitly regenerate cue boundaries from current canvas/font metrics. */
   /** Transcribe the speech again and rebuild every caption: a fresh set, edits and removals cleared. */
   onReextract?: () => void;
-  /** Remove the whole sentence-level caption layer + clear global style. */
-  onRemove: () => void;
   /** Per-line (main / translation) style state + patch callbacks. */
   styleCtl: CaptionStyleCtl;
   /** Bilingual translation control (hidden when omitted). */
@@ -132,6 +123,7 @@ export function CaptionsPanel({
   activeKey?: string | null;
   /** Write an edited line back to the transcript (timing untouched). The panel publishes only
    *  `commit`; `revert` is retained for callers that want to observe Esc. */
+  onToggleEmphasis?: (row: CaptionLineRow, offset: number) => void;
   onEditLine?: (row: CaptionLineRow, text: string, phase?: 'live' | 'commit' | 'revert') => void;
   /** Manually edit a cue's translation (bilingual second row); null clears it. Same phases as onEditLine. */
   onEditSubLine?: (row: CaptionLineRow, text: string | null, phase?: 'live' | 'commit' | 'revert') => void;
@@ -143,6 +135,10 @@ export function CaptionsPanel({
   lineBusyKey?: string | null;
   /** No transcript yet: the empty state offers a direct "extract captions" button (runs ASR in place). */
   onExtract?: () => void;
+  /** A selected source-word range in the subtitle transcript. */
+  onDecorateWords?: (row: CaptionLineRow, wordIndexes: number[], patch: WordDecorationPatch) => void;
+  onEditWords?: (row: CaptionLineRow, wordIndexes: number[], text: string) => void;
+  children?: ReactNode;
 }) {
   const hasCaptions = isCaptionsOn(comp);
   const lines = rows ?? [];
@@ -156,6 +152,50 @@ export function CaptionsPanel({
    *  rewrites the contentEditable DOM mid-typing, caret survives live re-renders), and the Esc target. */
   const frozenTextRef = useRef('');
   const listRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [selectionBar, setSelectionBar] = useState<{ row: CaptionLineRow; indexes: number[]; text: string; startSec: number; endSec: number; y: number } | null>(null);
+  useEffect(() => {
+    if (!selectionBar) return;
+    const close = (event: MouseEvent) => {
+      if ((event.target as HTMLElement).closest('[data-caption-selection-bar]')) return;
+      setSelectionBar(null);
+    };
+    window.addEventListener('mousedown', close);
+    return () => window.removeEventListener('mousedown', close);
+  }, [selectionBar]);
+  const selectCaptionText = (row: CaptionLineRow, element: HTMLElement, event: React.MouseEvent) => {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.anchorNode || !selection.focusNode) return;
+    if (!element.contains(selection.anchorNode) || !element.contains(selection.focusNode)) return;
+    const text = selection.toString().trim();
+    if (!text) return;
+    const startRange = document.createRange();
+    startRange.selectNodeContents(element);
+    startRange.setEnd(selection.anchorNode, selection.anchorOffset);
+    const endRange = document.createRange();
+    endRange.selectNodeContents(element);
+    endRange.setEnd(selection.focusNode, selection.focusOffset);
+    const start = Math.min(startRange.toString().length, endRange.toString().length);
+    const end = Math.max(startRange.toString().length, endRange.toString().length);
+    const tokens = wordsFromText(row.text, 0, 1);
+    let cursor = 0;
+    const indexes = tokens.flatMap((word, index) => {
+      const at = row.text.indexOf(word.text, cursor);
+      if (at < 0) return [];
+      cursor = at + word.text.length;
+      if (cursor <= start || at >= end) return [];
+      const sourceCount = row.w1 - row.w0 + 1;
+      return [row.w0 + Math.min(sourceCount - 1, Math.floor(index * sourceCount / Math.max(1, tokens.length)))];
+    });
+    if (!indexes.length) return;
+    const uniqueIndexes = [...new Set(indexes)];
+    const panel = panelRef.current?.getBoundingClientRect();
+    const duration = row.dur ?? 0.6;
+    setSelectionBar({ row, indexes: uniqueIndexes, text,
+      startSec: row.editedStart + duration * (uniqueIndexes[0]! - row.w0) / Math.max(1, row.w1 - row.w0 + 1),
+      endSec: row.editedStart + duration * (uniqueIndexes[uniqueIndexes.length - 1]! - row.w0 + 1) / Math.max(1, row.w1 - row.w0 + 1),
+      y: event.clientY - (panel?.top ?? 0) + 12 });
+  };
   // Follow the playhead: keep the active row in view (unless the user is editing)
   useEffect(() => {
     if (!activeKey || editingKey) return;
@@ -185,7 +225,6 @@ export function CaptionsPanel({
         sel.addRange(r);
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingKey, editingPart]);
   const commit = (row: CaptionLineRow, el: HTMLElement, part: 'text' | 'sub') => {
     setEditingKey(null);
@@ -209,67 +248,30 @@ export function CaptionsPanel({
     }
     onEditLine?.(row, next, 'commit');
   };
+  const toolbarTools = translation && <LangPick translation={translation} onOff={() => styleCtl.onSubPatch({ lang: undefined })} />;
+  const toolbarEnd = <>
+    {hasCaptions && onReextract && (
+      <button type="button" onClick={async () => {
+        if (await confirm({ title: t('captions.reextractConfirmTitle'), description: t('captions.reextractConfirmBody'), confirmLabel: t('captions.reextract'), tone: 'danger' })) onReextract();
+      }} title={t('captions.reextractHint')} aria-label={t('captions.reextract')} className="text-ink-3 hover:bg-panel-2/20 hover:text-ink flex h-7 w-7 shrink-0 items-center justify-center rounded-md">
+        <RefreshCw size={13} />
+      </button>
+    )}
+  </>;
   return (
-    <div className="bg-canvas relative flex h-full min-h-0 w-full flex-col">
+    <div ref={panelRef} className="bg-canvas relative flex h-full min-h-0 w-full flex-col">
       {generating && (
         <div className="bg-bg/70 absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 backdrop-blur-[2px]">
           <Loader2 size={18} className="text-accent animate-spin" />
           <span className="text-ink-2 text-[12px]">{t('captions.generatingCaptions')}</span>
         </div>
       )}
-      {/* Style rows laid flat at the top (no section header) — the line list below is the panel body */}
-      <div className="bg-panel flex shrink-0 flex-col">
-        <div className="px-2.5 pb-2 pt-2.5">
-            {/* Compact per-line style rows (preset picker + size + text color + backdrop as on-demand popovers)
-                — the 18 preset cards no longer live inline, the line list below gets the panel back. */}
-            <StyleRow
-              label={t('captions.mainLine')}
-              style={styleCtl.main}
-              active={hasCaptions}
-              onPreset={(id) => id && onPickPreset(id)}
-              onPatch={styleCtl.onMainPatch}
-              leading={
-                <MiniSwitch
-                  on={hasCaptions}
-                  title={hasCaptions ? t('captions.removeAllCaptionsUndoable') : t('captions.enableCaptions')}
-                  onChange={(v) => (v ? onPickPreset(styleCtl.main.preset) : onRemove())}
-                />
-              }
-              trailing={hasCaptions && onReextract ? (
-                <button
-                  type="button"
-                  onClick={onReextract}
-                  title={t('captions.reextractHint')}
-                  aria-label={t('captions.reextract')}
-                  className="border-line text-ink-3 hover:border-accent hover:text-ink flex h-7 w-7 shrink-0 items-center justify-center rounded-md border"
-                >
-                  <RefreshCw size={12} />
-                </button>
-              ) : undefined}
-            />
-            {/* Translation row (right under the main line): language dropdown first, then the same
-                style controls once a language is active. Replaces the old bottom "bilingual" strip. */}
-            {(translation || styleCtl.bilingualOn) && (
-              <StyleRow
-                label={t('captions.translateRow')}
-                style={styleCtl.sub}
-                active={hasCaptions}
-                isSub
-                styleHidden={!styleCtl.bilingualOn}
-                leading={
-                  translation ? (
-                    <LangPick translation={translation} onOff={() => styleCtl.onSubPatch({ lang: undefined })} />
-                  ) : undefined
-                }
-                onPreset={(id) => id && styleCtl.onSubPatch({ preset: id, color: undefined, bg: undefined })}
-                onPatch={styleCtl.onSubPatch}
-              />
-            )}
-        </div>
-      </div>
-      {/* Caption lines: the main body. Click a line = seek the video there + edit in place (background-only
-          editing state on the SAME node — no border, no size change, zero jitter) + collapse the styles section. */}
-      <div ref={listRef} className="min-h-0 flex-1 overflow-auto">
+      {!children && <div className={TRANSCRIPT_TOOLBAR_CLASS}>
+        {toolbarTools}
+        <div className="ml-auto flex items-center gap-1">{toolbarEnd}</div>
+      </div>}
+      {/* Caption transcript: click a line to edit the whole cue, or select text for contextual edits. */}
+      {children ? <CaptionsToolbarContext.Provider value={{ tools: toolbarTools, end: toolbarEnd }}>{children}</CaptionsToolbarContext.Provider> : <div ref={listRef} className="min-h-0 flex-1 overflow-auto">
         {lines.length === 0 && (
           <div className="flex flex-col items-center gap-2.5 px-3 py-8 text-center">
             <div className="text-ink-4 text-[11.5px]">{t('captions.noCaptionsYetExtract')}</div>
@@ -312,7 +314,7 @@ export function CaptionsPanel({
                     if (!editing) caretPointRef.current = { x: e.clientX, y: e.clientY };
                   }}
                   onClick={() => {
-                    if (editing || !onEditLine) return;
+                    if (editing || !onEditLine || window.getSelection()?.toString().trim()) return;
                     // Seek INTO the sentence (not its exact boundary): at startSec the enter animation is at
                     // frame 0 (opacity 0), so a paused preview looked caption-less after editing (user hit this)
                     onSeekTo?.(row.editedStart + Math.min(0.3, (row.dur ?? 0.6) / 2));
@@ -321,6 +323,7 @@ export function CaptionsPanel({
                     setEditingKey(row.key);
                   }}
                   onBlur={(e) => editing && commit(row, e.currentTarget, 'text')}
+                  onMouseUp={(event) => !children && !editing && selectCaptionText(row, event.currentTarget, event)}
                   onKeyDown={(e) => {
                     if (!editing) return;
                     if (e.key === 'Enter') {
@@ -333,11 +336,19 @@ export function CaptionsPanel({
                     }
                   }}
                   className={`text-ink -mx-1 whitespace-pre-wrap rounded px-1 py-0.5 text-[12px] leading-snug outline-none ${
-                    editing ? 'bg-accent/12' : onEditLine ? 'hover:bg-panel-2/70 cursor-text' : ''
+                    editing ? 'bg-accent/12' : onEditLine ? 'hover:bg-panel-2/20 cursor-text' : ''
                   }`}
                 >
                   {editing ? frozenTextRef.current : row.text}
                 </div>
+                {row.emphasisWords && onToggleEmphasis && (
+                  <details className="text-ink-3 mt-1 text-[11px]">
+                    <summary className="cursor-pointer">{t('engine.keyPhrases')}</summary>
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {row.emphasisWords.map((word, offset) => <button type="button" key={offset} aria-pressed={word.selected} onClick={() => onToggleEmphasis(row, offset)} className={'rounded border px-2 py-1 ' + (word.selected ? 'border-accent text-ink bg-accent/15' : 'border-line text-ink-3')}>{word.text}</button>)}
+                    </div>
+                  </details>
+                )}
                 {translation?.lang && (
                   <div
                     data-edit-sub
@@ -372,8 +383,8 @@ export function CaptionsPanel({
                       editingSub
                         ? 'bg-accent/12 text-ink-3'
                         : row.sub
-                          ? `text-ink-3 ${onEditSubLine ? 'hover:bg-panel-2/70 cursor-text' : ''}`
-                          : `text-ink-4 italic ${onEditSubLine ? 'hover:bg-panel-2/70 cursor-text' : ''}`
+                          ? `text-ink-3 ${onEditSubLine ? 'hover:bg-panel-2/20 cursor-text' : ''}`
+                          : `text-ink-4 italic ${onEditSubLine ? 'hover:bg-panel-2/20 cursor-text' : ''}`
                     }`}
                   >
                     {editingSub ? frozenTextRef.current : (row.sub ?? t('captions.notTranslated'))}
@@ -397,218 +408,16 @@ export function CaptionsPanel({
             </div>
           );
         })}
-      </div>
+      </div>}
+      {!children && selectionBar && <div data-caption-selection-bar className="border-line bg-panel absolute z-50 rounded-lg border p-1 shadow-xl" style={{ left: 8, width: 'calc(100% - 16px)', top: Math.max(8, Math.min(selectionBar.y, (panelRef.current?.clientHeight ?? 500) - 165)) }}>
+        <TranscriptSelectionBar
+          text={selectionBar.text}
+          canEdit={!!onEditWords}
+          onEdit={(text) => { onEditWords?.(selectionBar.row, selectionBar.indexes, text); setSelectionBar(null); window.getSelection()?.removeAllRanges(); }}
+          onDecorate={(patch) => { onDecorateWords?.(selectionBar.row, selectionBar.indexes, patch); setSelectionBar(null); window.getSelection()?.removeAllRanges(); }}
+        />
+      </div>}
     </div>
-  );
-}
-
-const TEXT_SWATCHES = ['#FFFFFF', '#101114', '#FFD24D', '#FF4D4D', '#3F6DF6', '#7CF29C'];
-const BG_SWATCHES = ['#101114', '#FFFFFF', '#FF2E4D', '#FFD24D', '#3F6DF6'];
-
-/** One compact style row (main line / translation line): preset picker + font size + text color + backdrop.
- *  All pickers are on-demand popovers — nothing takes permanent panel space. */
-function StyleRow({ label, style, active, isSub, leading, trailing, styleHidden, onPreset, onPatch }: {
-  label: string;
-  /** Resolved current style for this line. */
-  style: CaptionStyle;
-  /** Captions laid on the canvas (main row shows "pick a style" until then). */
-  active: boolean;
-  /** Translation-line row (its preset name always shows; the picker has no follow-main entry). */
-  isSub?: boolean;
-  /** Rendered between the label and the style controls (the translation row's language dropdown). */
-  leading?: React.ReactNode;
-  /** Optional row action after the style controls. */
-  trailing?: React.ReactNode;
-  /** Hide the style controls (translation row before a language is active — only label + leading show). */
-  styleHidden?: boolean;
-  /** Preset picked (null = follow main; only offered on the translation row). */
-  onPreset: (id: string | null) => void;
-  onPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined; font?: string | undefined }) => void;
-}) {
-  const [pop, setPop] = useState<null | 'preset' | 'size' | 'color' | 'bg'>(null);
-  const [expanded, setExpanded] = useState(false);
-  // Font picker shares the display-text picker (built-ins + common + system fonts via Local Font Access).
-  const [localFonts, setLocalFonts] = useState<LocalFontFamilyOption[]>(cachedLocalFontFamilies);
-  const [fontAccess, setFontAccess] = useState<'idle' | 'loading' | 'loaded' | 'denied' | 'unsupported'>('idle');
-  const requestLocalFonts = async () => {
-    if (!supportsLocalFontAccess()) {
-      setFontAccess('unsupported');
-      return;
-    }
-    setFontAccess('loading');
-    try {
-      setLocalFonts(await loadLocalFontFamilies());
-      setFontAccess('loaded');
-    } catch {
-      setFontAccess('denied');
-    }
-  };
-  const fontId: DisplayTextFontId = isDisplayTextFontId(style.font) ? style.font : 'preset';
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!pop) return;
-    const onDoc = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setPop(null);
-    };
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, [pop]);
-  const preset = getCaptionPreset(style.preset);
-  const fs = Math.max(9, Math.round(BASE_CAPTION_FONT_PX * style.scale));
-  const effColor = style.color ?? preset.text;
-  const effBg = style.bg === null ? null : (style.bg ?? preset.bg ?? null);
-  // Bold is purely the user's toggle — everything is regular by default (presets carry no weight)
-  const effBold = style.bold === true;
-  // Size options in real px (dropdown replaces the A± stepper): mapped back to the preset-relative scale on pick.
-  const sizeOpts = [16, 20, 24, 28, 32, 36, 40, 44, 48, 56, 64, 72, 80, 96].filter((px) => {
-    const k = px / BASE_CAPTION_FONT_PX;
-    return k >= 0.4 && k <= 4;
-  });
-  // Anything beyond preset + size lives behind the expand chevron: the inline row stays one
-  // line wide, and the extras (weight, colors, font) open as a block under it — the font picker
-  // sits there directly, one dropdown level, never a list inside a popover.
-  const extrasActive = effBold || style.color != null || style.bg !== undefined || fontId !== 'preset';
-  return (
-    <div ref={rootRef} className="relative mb-1.5">
-      <div className="flex items-center gap-1.5">
-      <span className="text-ink-3 w-14 shrink-0 truncate text-[11px]">{label}</span>
-      {leading}
-      {!styleHidden && (
-      <>
-      <button
-        type="button"
-        onClick={() => setPop(pop === 'preset' ? null : 'preset')}
-        title={t('captions.pickStyle')}
-        className={`hover:border-accent flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md border px-2 text-left ${pop === 'preset' ? 'border-accent' : 'border-line'}`}
-      >
-        <span className="inline-block h-3.5 w-3.5 shrink-0 rounded-sm border border-white/20 text-center" style={{ background: effBg ?? '#2b2b2e' }}>
-          <span className="block text-[9px] font-bold leading-[13px]" style={{ color: effColor }}>A</span>
-        </span>
-        <span className="text-ink-2 min-w-0 flex-1 truncate text-[11px]">
-          {active || isSub ? t(preset.name) : t('captions.pickStyle')}
-        </span>
-        <ChevronDown size={11} className="text-ink-4 shrink-0" />
-      </button>
-      {/* 字号按钮在行中段:菜单锚它自己(嵌套 relative),不能挂行容器的 right-0——那会贴到行尾颜色按钮底下 */}
-      <div className="relative shrink-0">
-        <button
-          type="button"
-          title={t('captions.fontSize')}
-          onClick={() => setPop(pop === 'size' ? null : 'size')}
-          className={`hover:border-accent flex h-7 shrink-0 items-center gap-0.5 rounded-md border px-1.5 ${pop === 'size' ? 'border-accent' : 'border-line'}`}
-        >
-          <span className="text-ink-3 font-mono text-[10.5px] tabular-nums">{fs}</span>
-          <ChevronDown size={11} className="text-ink-4" />
-        </button>
-        {pop === 'size' && (
-          <div className="border-line bg-panel absolute left-1/2 top-full z-30 mt-1 max-h-56 w-20 -translate-x-1/2 overflow-auto rounded-lg border p-1 shadow-xl">
-            {sizeOpts.map((px) => (
-              <button
-                key={px}
-                type="button"
-                onClick={() => { setPop(null); onPatch({ scale: Math.round((px / BASE_CAPTION_FONT_PX) * 100) / 100 }); }}
-                className={`flex w-full items-center justify-center gap-1 rounded px-2 py-1 font-mono text-[11px] tabular-nums ${px === fs ? 'text-ink bg-panel-2/60' : 'text-ink-3 hover:bg-panel-2/60'}`}
-              >
-                {px} {px === fs && <Check size={10} className="text-accent" />}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-      <button
-        type="button"
-        title={t('captions.moreStyle')}
-        aria-expanded={expanded}
-        onClick={() => { setPop(null); setExpanded((current) => !current); }}
-        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border ${expanded || extrasActive ? 'border-accent text-ink' : 'border-line text-ink-3 hover:border-accent hover:text-ink'}`}
-      >
-        <ChevronDown size={12} className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />
-      </button>
-      {pop === 'preset' && (
-        <PresetPop current={style.preset} onPick={(id) => { setPop(null); onPreset(id); }} />
-      )}
-      </>
-      )}
-      {trailing}
-      </div>
-      {!styleHidden && expanded && (
-        <div className="bg-panel-2/40 mt-1.5 rounded-lg p-2">
-          <div className="relative flex items-center gap-1.5">
-            <span className="text-ink-3 w-14 shrink-0 truncate text-[11px]">{t('captions.bold')}</span>
-            <button
-              type="button"
-              title={t('captions.bold')}
-              aria-pressed={effBold}
-              onClick={() => onPatch({ bold: !effBold })}
-              className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border ${effBold ? 'border-accent text-ink bg-panel-2/60' : 'border-line text-ink-3 hover:border-accent'}`}
-            >
-              <Bold size={12} strokeWidth={2.6} />
-            </button>
-            <span className="text-ink-3 ml-2 shrink-0 text-[11px]">{t('captions.textColor')}</span>
-            <button
-              type="button"
-              title={t('captions.textColor')}
-              onClick={() => setPop(pop === 'color' ? null : 'color')}
-              className={`hover:border-accent h-7 w-7 shrink-0 rounded-md border p-1 ${pop === 'color' ? 'border-accent' : 'border-line'}`}
-            >
-              <span className="block h-full w-full rounded-sm border border-white/15" style={{ background: effColor }} />
-            </button>
-            <span className="text-ink-3 ml-2 shrink-0 text-[11px]">{t('captions.plate')}</span>
-            <button
-              type="button"
-              title={t('captions.plate')}
-              onClick={() => setPop(pop === 'bg' ? null : 'bg')}
-              className={`hover:border-accent h-7 w-7 shrink-0 rounded-md border p-1 ${pop === 'bg' ? 'border-accent' : 'border-line'}`}
-            >
-              <span className="block h-full w-full rounded-sm border border-white/15" style={effBg ? { background: effBg } : NO_COLOR_CHECKER} />
-            </button>
-            {pop === 'color' && (
-              <SwatchPop
-                title={t('captions.textColor')}
-                swatches={TEXT_SWATCHES}
-                value={style.color}
-                onPick={(c) => { setPop(null); onPatch({ color: c }); }}
-              />
-            )}
-            {pop === 'bg' && (
-              <SwatchPop
-                title={t('captions.plate')}
-                swatches={BG_SWATCHES}
-                value={style.bg === null ? undefined : style.bg}
-                allowNone
-                noneActive={style.bg === null}
-                onNone={() => { setPop(null); onPatch({ bg: null }); }}
-                onPick={(c) => { setPop(null); onPatch({ bg: c }); }}
-              />
-            )}
-          </div>
-          <div className="mt-1.5 flex items-center gap-1.5">
-            <span className="text-ink-3 w-14 shrink-0 truncate text-[11px]">{t('captions.fontFamily')}</span>
-            <div className="min-w-0 flex-1">
-              <FontPicker
-                value={fontId}
-                localFonts={localFonts}
-                accessState={fontAccess}
-                onLoadMore={() => void requestLocalFonts()}
-                onChoose={(font) => onPatch({ font: font === 'preset' ? undefined : font })}
-              />
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** Tiny on/off switch (captions layer toggle at the front of the main row — mirrors the translation row's language dropdown slot, keeping the two rows aligned). */
-function MiniSwitch({ on, title, onChange }: { on: boolean; title: string; onChange: (v: boolean) => void }) {
-  return (
-    <Switch
-      checked={on}
-      title={title}
-      onCheckedChange={onChange}
-      className="mx-px"
-    />
   );
 }
 
@@ -634,24 +443,31 @@ function LangPick({ translation, onOff }: { translation: CaptionTranslationContr
         type="button"
         disabled={translation.busy || translation.total === 0}
         title={translation.total === 0 ? t('captions.transcribeFirst') : translation.done > 0 ? t('captions.linesDone', { done: translation.done, total: translation.total }) : t('captions.notAdded')}
+        aria-label={t('captions.translate')}
         onClick={() => setOpen((o) => !o)}
-        className={`hover:border-accent flex h-7 w-[30px] items-center justify-center gap-0.5 rounded-md border px-0 text-[11px] disabled:opacity-50 ${open ? 'border-accent' : 'border-line'} ${active ? 'text-ink' : 'text-ink-3'}`}
+        className={`${TRANSCRIPT_TOOL_CLASS} ${open ? 'bg-panel-2/35 text-ink' : ''}`}
       >
-        {translation.busy ? (
-          <Loader2 size={11} className="text-accent animate-spin" />
-        ) : (
-          <>
-            <span className="truncate font-mono text-[10.5px]">{active ? (LANG_ABBR[active] ?? active) : '—'}</span>
-            <ChevronDown size={10} className="text-ink-4 shrink-0" />
-          </>
-        )}
+        {translation.busy ? <Loader2 size={13} className="text-accent animate-spin" /> : <Languages size={13} />}
+        <span className={TRANSCRIPT_TOOL_LABEL_CLASS}>{t('captions.translate')}</span>
+        {active && <span className="text-ink-3 font-mono text-[10.5px]">{LANG_ABBR[active] ?? active}</span>}
+        <ChevronDown size={11} className="text-ink-4" />
       </button>
       {open && (
-        <div className="border-line bg-panel absolute left-0 top-full z-30 mt-1 w-36 rounded-lg border p-1 shadow-xl">
+        <div className="border-line bg-panel absolute left-0 top-full z-30 mt-1 w-44 rounded-lg border p-1 shadow-xl">
+          {active && <>
+            <button
+              type="button"
+              onClick={() => { setOpen(false); translation.onTranslate(active); }}
+              className="text-ink-2 hover:bg-panel-2/20 flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11.5px]"
+            >
+              {t('captions.retranslateAll')}
+            </button>
+            <div className="bg-line my-1 h-px" />
+          </>}
           <button
             type="button"
             onClick={() => { setOpen(false); if (active) onOff(); }}
-            className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11.5px] ${!active ? 'text-ink bg-panel-2/60' : 'text-ink-3 hover:bg-panel-2/60'}`}
+            className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11.5px] ${!active ? 'text-ink bg-panel-2/35' : 'text-ink-3 hover:bg-panel-2/20'}`}
           >
             {t('captions.off')}
             {!active && <Check size={11} className="text-accent ml-auto" />}
@@ -662,7 +478,7 @@ function LangPick({ translation, onOff }: { translation: CaptionTranslationContr
               type="button"
               title={t('captions.translateTranscriptIntoLang', { lang })}
               onClick={() => { setOpen(false); if (lang !== active) translation.onTranslate(lang); }}
-              className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11.5px] ${active === lang ? 'text-ink bg-panel-2/60' : 'text-ink-3 hover:bg-panel-2/60'}`}
+              className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11.5px] ${active === lang ? 'text-ink bg-panel-2/35' : 'text-ink-3 hover:bg-panel-2/20'}`}
             >
               <span className="text-ink-4 w-5 font-mono text-[10.5px]">{LANG_ABBR[lang]}</span> {lang}
               {active === lang && <Check size={11} className="text-accent ml-auto" />}
@@ -674,95 +490,20 @@ function LangPick({ translation, onOff }: { translation: CaptionTranslationContr
   );
 }
 
-/** Preset picker popover: the 18 cards live here on demand (2-column grid), line presets first. */
-function PresetPop({ current, onPick }: { current: string; onPick: (id: string | null) => void }) {
-  return (
-    <div className="border-line bg-panel absolute left-0 right-0 top-full z-30 mt-1 max-h-80 overflow-auto rounded-lg border p-2 shadow-xl">
-      {SECTIONS.map((sec) => (
-        <div key={sec.mode} className="mb-2">
-          <div className="text-ink-4 mb-1 text-[10px]">{t(sec.title)}</div>
-          <div className="grid grid-cols-2 gap-1.5">
-            {CAPTION_PRESETS.filter((p) => p.mode === sec.mode).map((p) => (
-              <CaptionPresetCard key={p.id} preset={p} active={p.id === current} onPick={(id) => onPick(id)} />
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/** "No color" swatch face: transparency checkerboard (same visual language as block previews'
- *  honest ground, scaled to swatch size — screen pixels, block-preview-card convention). */
-const NO_COLOR_CHECKER: CSSProperties = {
-  backgroundColor: '#ffffff',
-  backgroundImage:
-    'linear-gradient(45deg,#d7dbe0 25%,transparent 25%,transparent 75%,#d7dbe0 75%),linear-gradient(45deg,#d7dbe0 25%,transparent 25%,transparent 75%,#d7dbe0 75%)',
-  backgroundSize: '8px 8px',
-  backgroundPosition: '0 0,4px 4px',
-};
-
-/** Color picker popover: preset-default chip, optional "no plate", fixed swatches, free custom color. */
-function SwatchPop({ title, swatches, value, allowNone, noneActive, onNone, onPick }: {
-  title: string;
-  swatches: string[];
-  /** Current override value (undefined = following the preset). */
-  value?: string | undefined;
-  allowNone?: boolean;
-  noneActive?: boolean;
-  onNone?: () => void;
-  onPick: (color: string) => void;
-}) {
-  return (
-    <div className="border-line bg-panel absolute right-0 top-full z-30 mt-1 w-60 rounded-lg border p-2 shadow-xl">
-      <div className="text-ink-4 mb-1.5 text-[10px]">{title}</div>
-      <div className="flex flex-wrap items-center gap-1.5">
-        {allowNone && (
-          <button
-            type="button"
-            onClick={onNone}
-            className={`flex items-center gap-1 rounded-md border px-1.5 py-1 text-[10px] ${noneActive ? 'border-accent text-ink bg-accent/10' : 'border-line text-ink-3 hover:border-accent'}`}
-          >
-            <span className="border-line h-3.5 w-3.5 rounded-sm border" style={NO_COLOR_CHECKER} /> {t('captions.noPlate')}
-          </button>
-        )}
-        {swatches.map((c) => (
-          <button
-            key={c}
-            type="button"
-            title={c}
-            onClick={() => onPick(c)}
-            className={`h-6 w-6 rounded-md border ${value?.toLowerCase() === c.toLowerCase() ? 'border-accent ring-accent/40 ring-1' : 'border-line hover:border-accent'}`}
-            style={{ background: c }}
-          />
-        ))}
-        <label title={t('captions.customColor')} className="border-line hover:border-accent relative h-6 w-6 cursor-pointer overflow-hidden rounded-md border">
-          <span className="absolute inset-0" style={{ background: 'conic-gradient(#f66,#fd4,#6f6,#4df,#66f,#f6f,#f66)' }} />
-          <input
-            type="color"
-            value={value ?? '#ffffff'}
-            onChange={(e) => onPick(e.target.value)}
-            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-          />
-        </label>
-      </div>
-    </div>
-  );
-}
-
-export function CaptionPresetCard({ preset, active, onPick }: { preset: CaptionPreset; active: boolean; onPick: (id: string) => void }) {
+export function CaptionPresetCard({ preset, active, tall, onPick }: { preset: CaptionPreset; active: boolean; tall?: boolean; onPick: (id: string) => void }) {
   return (
     <button
       type="button"
       title={t(preset.name)}
       onClick={() => onPick(preset.id)}
-      className={`group relative overflow-hidden rounded-lg border transition ${
-        active ? 'border-accent ring-accent/40 ring-1' : 'border-line hover:border-accent'
+      className={`group relative overflow-hidden rounded-lg transition ${
+        active ? 'ring-accent ring-2' : 'hover:ring-ink-4 hover:ring-1'
       }`}
     >
-      <div className="flex h-[58px] items-center justify-center bg-[#2b2b2e] px-3">
+      <div className={`flex ${tall ? 'h-[84px]' : 'h-[58px]'} items-center justify-center overflow-hidden bg-[#2b2b2e] px-3`}>
         <CaptionPresetSample p={preset} />
       </div>
+      <div className="text-ink-3 truncate px-2 py-1.5 text-left text-[10.5px]">{t(preset.name)}</div>
       {active ? (
         <span className="bg-accent text-accent-foreground absolute right-1.5 top-1.5 inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium">
           <Check size={10} /> {t('captions.inUse')}
@@ -783,16 +524,18 @@ export function CaptionPresetSample({ p, segments }: { p: CaptionPreset; segment
   const fontFamily = p.font === 'serif' ? "'Noto Serif SC','Songti SC',serif" : p.font === 'mono' ? "'IBM Plex Mono',ui-monospace,monospace" : undefined;
   const base: CSSProperties = {
     color: p.text,
-    fontWeight: 600, // card preview: slight bump for legibility at tiny size
+    fontWeight: p.weight ?? 600,
     fontFamily,
     fontStyle: p.italic ? 'italic' : undefined,
     fontSize: Math.round(BASE_CAPTION_FONT_PX * 0.24),
     lineHeight: 1.2,
-    textShadow: !p.bg ? '0 1px 6px rgba(0,0,0,0.85)' : undefined,
+    textShadow: p.shadow ?? (!p.bg ? '0 1px 6px rgba(0,0,0,0.85)' : undefined),
+    WebkitTextStroke: p.stroke ? `${p.stroke.widthEm}em ${p.stroke.color}` : undefined,
+    paintOrder: 'stroke fill',
     whiteSpace: 'nowrap',
   };
   const pill: CSSProperties | undefined = p.bg
-    ? { background: p.bg, padding: '4px 10px', borderRadius: 8, display: 'inline-flex', alignItems: 'baseline' }
+    ? { background: p.bg, fontSize: Math.round(BASE_CAPTION_FONT_PX * 0.24), padding: '4px 10px', borderRadius: p.plateRadiusEm == null ? 8 : `${p.plateRadiusEm}em`, border: p.plateBorder, display: 'inline-flex', alignItems: 'baseline' }
     : { display: 'inline-flex', alignItems: 'baseline' };
   // Frozen form of the emphasized word (the middle caption)
   const emph: CSSProperties = { position: 'relative', margin: '0 0.18em' };
@@ -800,11 +543,36 @@ export function CaptionPresetSample({ p, segments }: { p: CaptionPreset; segment
   if (p.deco === 'underline') emph.boxShadow = `inset 0 -3px 0 ${p.decoColor}`;
   const decoBox: CSSProperties | undefined =
     p.deco === 'highlight' ? { position: 'absolute', inset: '-2px -4px', background: p.decoColor, borderRadius: 4 } : undefined;
+  if (p.upper) base.textTransform = 'uppercase';
+  if (p.trackingEm) base.letterSpacing = `${p.trackingEm}em`;
+  const stack = p.stack;
+  if (stack) {
+    // Stacked art preset: same row plan shape as the renderer (per-row size / color / plate / stagger, whole tilt).
+    const rows = stack.maxRows === 1 ? [sample.join('')] : [sample[0], `${sample[1]}${sample[2]}`];
+    const fontSize = Math.round(BASE_CAPTION_FONT_PX * 0.22);
+    return (
+      <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: stack.align === 'start' ? 'flex-start' : 'center', rowGap: stack.plates?.length ? 3 : 0, transform: p.tiltDeg ? `rotate(${p.tiltDeg}deg)` : undefined }}>
+        {rows.map((text, k) => {
+          const size = Math.round(fontSize * captionStackScale(stack, k));
+          const plate = stack.plates?.length ? stack.plates[k % stack.plates.length] : undefined;
+          return (
+            <span key={k} style={{
+              ...base,
+              fontSize: size,
+              color: stack.colors?.length ? stack.colors[k % stack.colors.length] : p.text,
+              ...(plate ? { background: plate, padding: '1px 6px', borderRadius: `${p.plateRadiusEm ?? 0.18}em` } : {}),
+              ...(stack.staggerEm ? { transform: `translateX(${(k % 2 ? 1 : -1) * stack.staggerEm}em)` } : {}),
+            }}>{text}</span>
+          );
+        })}
+      </span>
+    );
+  }
   return (
     <span style={pill}>
       <span style={base}>
         {sample[0]}
-        <span style={{ ...base, ...emph }}>
+        <span data-caption-sample-word style={{ ...base, ...emph, display: 'inline-block' }}>
           {decoBox && <span style={decoBox} />}
           <span style={{ position: 'relative' }}>{sample[1]}</span>
         </span>
