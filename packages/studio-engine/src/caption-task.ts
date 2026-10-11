@@ -39,6 +39,15 @@ export interface CaptionTaskOptions {
   edit?: import('./brand-edit-params').CaptionEditParams;
 }
 export interface CaptionTaskDimensions { width: number; height: number }
+/** Focused scenes borrow caption styling only. Full editing projects retain their complete brand.
+ * Normalize saved options too, so an older scene cannot silently add a logo or editing moves. */
+export function scopeSceneBrandOptions(options: CaptionTaskOptions): CaptionTaskOptions {
+  if (options.oneClick || !options.brand) return options;
+  const { brand, edit: _edit, ...rest } = options;
+  if (options.sfx || options.subtitleRemoval) return rest;
+  const { style: _style, preferences: _preferences, media: _media, skills: _skills, ...identity } = brand;
+  return { ...rest, brand: { ...identity, skills: [], blocks: brand.blocks.captions ? { captions: brand.blocks.captions } : {} } };
+}
 /** Product reference zones, not a guarantee for every platform/ad placement. */
 export function captionTaskSafeArea(source: CaptionTaskDimensions) {
   if (source.height > source.width) return { left: 13, right: 87, top: 12, bottom: 75 };
@@ -52,9 +61,9 @@ export function captionTaskSafeArea(source: CaptionTaskDimensions) {
  * counterpart and falls back to the workbench default.
  */
 export function storedCaptionTaskOptions(value: CaptionTaskOptions): CaptionTaskOptions {
-  if (value.caption && typeof value.caption === 'object') return value;
+  if (value.caption && typeof value.caption === 'object') return scopeSceneBrandOptions(value);
   const { presetId, layoutVersion: _layoutVersion, custom, ...rest } = value as CaptionTaskOptions & { presetId?: string; layoutVersion?: number; custom?: Partial<CaptionStyle> };
-  return { ...rest, caption: { ...custom }, ...(presetId === 'keywords' ? { highlights: true } : {}) };
+  return scopeSceneBrandOptions({ ...rest, caption: { ...custom }, ...(presetId === 'keywords' ? { highlights: true } : {}) });
 }
 
 export function captionTaskGroupBottom(options: CaptionTaskOptions, source: CaptionTaskDimensions) {
@@ -124,7 +133,8 @@ export function buildCaptionBaseDocument(input: {
   const comp = { ...emptyComposition(), ...canvas, video: { url: input.sourceUrl, durationSec: input.durationSec }, shots };
   const document = compositionToEditorDocument({ projectId: input.projectId, composition: comp, videoSig: input.sourceSig }).document;
   if (input.sourceName) for (const asset of Object.values(document.assets)) if (asset.kind === 'video') asset.label = input.sourceName;
-  if (input.options.brand) document.appearance = { ...document.appearance, ...playbookAppearance(input.options.brand) };
+  const brand = scopeSceneBrandOptions(input.options).brand;
+  if (brand) document.appearance = { ...document.appearance, ...playbookAppearance(brand) };
   return document;
 }
 

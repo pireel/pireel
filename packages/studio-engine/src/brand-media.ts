@@ -1,7 +1,7 @@
 import type { CaptionStyle } from './composition-core';
 import type { EditorDocumentV2 } from './editor-document/types';
 import { validateEditorDocumentV2 } from './editor-document/validation';
-import type { PlaybookSnapshot } from './brand-playbook';
+import { brandMediaEntries, type PlaybookSnapshot } from './brand-playbook';
 
 /**
  * What a brand's fixed blocks do to a scene's document and options: the caption look a scene starts
@@ -60,3 +60,12 @@ export function applyPlaybookMedia(document: EditorDocumentV2, playbook: Playboo
   return next;
 }
 
+
+/** Supplied reusable media is registered in the project library, ready for the agent to place. */
+export function brandMediaAssets(playbook: PlaybookSnapshot): EditorDocumentV2['assets'] {
+  return Object.fromEntries(brandMediaEntries(playbook).map(({ role, id, asset }) => [id, {
+    id, kind: asset.kind, label: role === 'intro' ? 'Brand intro' : role === 'outro' ? 'Brand outro' : ('name' in asset && asset.name) || 'Brand music',
+    locator: { cloudKey: asset.key },
+    metadata: { durationSec: asset.durationSec, ...('width' in asset ? { width: asset.width, height: asset.height } : {}) },
+  }]));
+}

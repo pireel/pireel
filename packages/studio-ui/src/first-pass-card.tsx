@@ -21,7 +21,7 @@ export interface RoughCutReplyMeta {
   lateCredits?: number;
 }
 
-const FINE_ICON: Record<FineCutItem["status"], FirstPassStepStatus> = { running: "running", done: "done", "not-needed": "skipped", stopped: "skipped" };
+const FINE_ICON: Record<FineCutItem["status"], FirstPassStepStatus> = { running: "running", done: "done", "not-needed": "skipped", "not-added": "skipped", stopped: "skipped" };
 const ICON: Record<FirstPassStepStatus, React.ReactNode> = {
   pending: <span className="border-line-2 size-3 rounded-full border" />,
   running: <Loader2 className="text-ink-2 size-3.5 animate-spin" />,
@@ -40,7 +40,7 @@ export function messageTurnCredits(message: UIMessage): number {
  * A rough_cut call as its checklist: live from the tool's progress while it runs in this tab, from its
  * receipt once done. A call a closed page left unanswered shows as stopped.
  */
-export function RoughCutCard({ part, running, fineCutLive, brandName, meta, agentCredits }: {
+export function RoughCutCard({ part, running, fineCutLive, brandName, meta, agentCredits, checkpoint }: {
   part: { state?: string; output?: unknown; errorText?: string };
   /** The call is executing in this tab right now. */
   running: boolean;
@@ -49,10 +49,11 @@ export function RoughCutCard({ part, running, fineCutLive, brandName, meta, agen
   brandName?: string;
   meta?: RoughCutReplyMeta;
   agentCredits: number;
+  checkpoint?: FirstPassReport;
 }) {
   const progress = useToolProgress(ROUGH_CUT_TOOL);
   const output = part.output as { data?: { report?: FirstPassReport } } | undefined;
-  const report = output?.data?.report ?? (running ? (progress?.report as FirstPassReport | undefined) : undefined);
+  const report = output?.data?.report ?? checkpoint ?? (running ? (progress?.report as FirstPassReport | undefined) : undefined);
   if (!report) {
     return (
       <div className="border-line bg-panel text-ink-3 w-full rounded-lg border px-3 py-2.5 text-[12px]">
@@ -92,6 +93,7 @@ export function FirstPassCard({ report, live, fineCut, fineCutLive, lateCredits,
         </span>
         <span className="text-ink-3 shrink-0 tabular-nums">
           {state === "running" && <>{t("chatGen.firstPass.running")} · </>}
+          {(state === 'partial' || state === 'failed') && <>{t('chatGen.firstPass.incomplete')} · </>}
           {state === "stopped" && <>{t(stopping ? "chatGen.firstPass.stopping" : "chatGen.firstPass.stoppedState")} · </>}
           {t("chatGen.firstPass.credits", { n: Math.round((report.credits + lateCredits + agentCredits) * 100) / 100 })}
         </span>
@@ -121,8 +123,8 @@ export function FirstPassCard({ report, live, fineCut, fineCutLive, lateCredits,
                 <span className="flex size-4 shrink-0 items-center justify-center">{ICON[FINE_ICON[fineStatus(item.status)]]}</span>
                 <span className={item.status === "done" || item.status === "running" ? "text-ink-2" : "text-ink-4"}>{editingSkillName(item.id)}</span>
                 <span className="text-ink-3 ml-auto pl-2">
-                  {item.status === "not-needed"
-                    ? t("chatGen.firstPass.notNeeded")
+                  {(item.status === "not-needed" || item.status === "not-added")
+                    ? t("chatGen.firstPass.notAdded")
                     : fineStatus(item.status) === "stopped"
                       ? t("chatGen.firstPass.stopped")
                       : item.count ? t("chatGen.firstPass.added", { n: item.count }) : ""}

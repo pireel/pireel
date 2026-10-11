@@ -3,17 +3,18 @@ import { Plus } from 'lucide-react';
 import { playbookSnapshot, type BrandPlaybook } from '@pireel/studio-engine/brand-playbook';
 import { playbookCaptionStyle } from '@pireel/studio-engine/brand-media';
 import { playbookEditParams, playbookHighlightsKeywords } from '@pireel/studio-engine/brand-edit-params';
-import type { CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
+import { scopeSceneBrandOptions, type CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { SceneSelect } from './scene-form-controls';
 
-/** A scene's options with a brand applied (a copy taken now), or with the brand removed when `playbook` is
- *  null. The brand's caption look becomes the scene's; the picture's aspect stays the footage's — a brand
- *  never reshapes a video. A one-click edit also takes the brand's editing habits and moves. */
+/** Copy only the brand settings this scene uses. Caption scenes borrow the caption look;
+ * one-click editing projects explicitly opt into the full brand. Keep the scene's aspect and controls. */
 export function withSceneBrand(options: CaptionTaskOptions, playbook: BrandPlaybook | null): CaptionTaskOptions {
   if (!playbook) { const { brand: _brand, edit: _edit, ...rest } = options; return rest; }
   const brand = playbookSnapshot(playbook);
-  const next = { ...options, brand, caption: playbookCaptionStyle(brand) };
+  const scoped = scopeSceneBrandOptions({ ...options, brand });
+  if (!scoped.brand) return scoped;
+  const next = { ...scoped, caption: playbookCaptionStyle(scoped.brand), highlights: playbookHighlightsKeywords(scoped.brand) };
   return options.oneClick ? { ...next, edit: playbookEditParams(brand), shortenPauses: brand.blocks.sound?.pauses !== 'natural', highlights: playbookHighlightsKeywords(brand) } : next;
 }
 
@@ -34,7 +35,7 @@ export function SceneBrandPicker({ options, locale, disabled, onChange }: {
     window.addEventListener('focus', load);
     return () => window.removeEventListener('focus', load);
   }, [provider]);
-  if (!provider) return null;
+  if (!provider || options.sfx || options.subtitleRemoval) return null;
   const say = (zh: string, en: string) => locale === 'zh' ? zh : en;
   const current = options.brand;
   const listed = brands ?? [];
@@ -49,7 +50,7 @@ export function SceneBrandPicker({ options, locale, disabled, onChange }: {
       onChange(options => withSceneBrand(options, kit));
     }} />
     {error ? <p role="alert" className="text-ink-3 mt-2 text-xs">{say('品牌列表加载失败：', 'Could not load brands: ')}{error}</p>
-      : current ? <p className="text-ink-3 mt-2 text-xs">{say('使用选择时的品牌版本：字幕、配色', 'Uses the brand as it was when picked: captions, colors')}{current.blocks.logo ? say('、Logo', ', logo') : ''}{say('。', '.')}</p>
+      : current ? <p className="text-ink-3 mt-2 text-xs">{options.oneClick ? say('仅用于此项目，使用选择时的品牌版本。', 'Applies only to this project, using the version selected.') : say('仅在此项目的字幕中应用品牌样式。', 'Applies the brand’s caption style only to captions in this project.')}</p>
       : brands?.length === 0 ? <p className="text-ink-3 mt-2 text-xs">{say('还没有品牌，可在首页「我的品牌」创建。', 'No brands yet — create one under My brand on the Studio home.')}</p> : null}
   </div>;
 }

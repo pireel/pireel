@@ -30,14 +30,17 @@ export interface FirstPassStep { id: FirstPassStepId; status: FirstPassStepStatu
 /** The skills the agent applies after the first pass, each shown with what it added. */
 export const FINE_CUT_SKILLS = ['graphics', 'b-roll', 'sound'] as const;
 export type FineCutSkill = typeof FINE_CUT_SKILLS[number];
-export interface FineCutItem { id: FineCutSkill; status: 'running' | 'done' | 'not-needed' | 'stopped'; count: number }
+export interface FineCutItem { id: FineCutSkill; status: 'running' | 'done' | 'not-needed' | 'not-added' | 'stopped'; count: number }
 /** The checklist as the rough cut's card shows it (live progress, then the tool receipt). "stopped": the
  *  creator stopped it; the steps still pending can run again. */
 export interface FirstPassReport {
-  state: 'running' | 'stopped' | 'done';
+  state: 'running' | 'stopped' | 'done' | 'partial' | 'failed';
   steps: FirstPassStep[];
   /** Credits spent so far. */
   credits: number;
+  sourceAssetId?: string;
+  /** Checkpoints inside cleanup prevent paid analysis and applied cuts being repeated on resume. */
+  cleanup?: { analysis?: Awaited<ReturnType<NonNullable<ReturnType<typeof studioProviders>['speechCleanup']>>>; applied: string[] };
   /** One sentence on what changed, once done. */
   summary?: string;
 }
@@ -94,25 +97,25 @@ export interface FirstPassHost {
   /** The main video's bytes, for measuring its loudness. */
   primaryFile(): Promise<Blob | null>;
   measureLoudness(file: Blob): Promise<number | null>;
+  /** Flush document changes before publishing a completed checkpoint. */
+  persist?(): Promise<void>;
 }
 
 /** The note a one-click edit's first message carries to the agent (it starts with rough_cut). */
 export const ONE_CLICK_EDIT_HINT = [
   'This message starts a one-click edit from the Studio home: the creator handed over the whole video.',
-  'Start with rough_cut, then apply the editing skills that are on, in the brand\'s style.',
-  'Finish the edit in this turn without asking questions: make the reasonable choice and offer the alternatives as next steps.',
+  'Start with rough_cut, then use the enabled editing capabilities where they help this video, in the brand\'s style. Enabling a capability does not require adding it everywhere or adding any when it would not help.',
+  'Complete the selected scope using reasonable defaults. A failed or pending step is unfinished: name the blocker and preserve it for continuation. Do not turn requested work into an optional next step or claim an unconfirmed result. Ask only when the existing generation policy requires it.',
   'Talk to the creator in the language of their message.',
 ].join(' ');
 
-/** Credits billed after a rough cut ended (a transcription it stopped waiting for finished on its own):
- *  the chat adds them to that rough cut's card. */
-const lateCreditListeners = new Set<(credits: number) => void>();
-export function onLateRoughCutCredits(listener: (credits: number) => void): () => void {
-  lateCreditListeners.add(listener);
-  return () => { lateCreditListeners.delete(listener); };
-}
-export function emitLateRoughCutCredits(credits: number): void {
-  for (const listener of lateCreditListeners) listener(credits);
+/** Per-call hooks owned by the originating task, including after its UI unmounts. */
+export interface RoughCutExecution {
+  skills?: readonly string[];
+  resume?: FirstPassReport;
+  onProgress?(report: FirstPassReport): void;
+  onLateUsage?(usage: WorkflowUsage): void;
+  persist?(): Promise<void>;
 }
 
 /** Air kept before the take that stays when a failed attempt and the pause after it are cut. */
@@ -134,29 +137,41 @@ export interface FirstPassOutcome { report: FirstPassReport; note: string; stopp
  * exactly those (a brand-only step still needs the brand to set it). A stop (the signal) ends a step's
  * analysis at once and takes effect before its edit, so no step is left half applied.
  */
-export async function runFirstPass(host: FirstPassHost, onUpdate: (report: FirstPassReport) => void, options: { steps?: readonly FirstPassStepId[]; pauses?: 'tight' | 'moderate' | 'natural'; signal?: AbortSignal; onLateUsage?: (credits: number) => void } = {}): Promise<FirstPassOutcome> {
+export async function runFirstPass(host: FirstPassHost, onUpdate: (report: FirstPassReport) => void, options: { steps?: readonly FirstPassStepId[]; pauses?: 'tight' | 'moderate' | 'natural'; signal?: AbortSignal; onLateUsage?: (usage: WorkflowUsage) => void; resume?: FirstPassReport } = {}): Promise<FirstPassOutcome> {
+  const sourceAssetId = firstNarrativeAssetId(host.document());
+  if (options.resume?.sourceAssetId && options.resume.sourceAssetId !== sourceAssetId) throw new Error(t('chatGen.firstPass.sourceChanged'));
   const brand = host.brand;
   const on = new Set(host.skills);
   const pauseMode = options.pauses ?? brand?.blocks.sound?.pauses ?? 'moderate';
   const captionBlock = brand?.blocks.captions;
-  const asked = options.steps?.length ? new Set(options.steps) : null;
+  const asked = options.resume ? new Set(options.resume.steps.filter(step => step.status !== 'done' && step.status !== 'skipped').map(step => step.id)) : options.steps?.length ? new Set(options.steps) : null;
   const byBrand = { logo: !!brand?.blocks.logo, loudness: brand?.blocks.sound?.lufs !== undefined };
   const wanted: Record<FirstPassStepId, boolean> = asked
     ? { transcribe: asked.has('transcribe') || asked.has('cleanup') || asked.has('captions'), pauses: asked.has('pauses'), cleanup: asked.has('cleanup'), captions: asked.has('captions'), denoise: asked.has('denoise'), logo: asked.has('logo') && byBrand.logo, loudness: asked.has('loudness') && byBrand.loudness }
     : {
       transcribe: on.has('rough-cut') || on.has('captions'),
-      pauses: on.has('rough-cut') && pauseMode !== 'natural',
-      cleanup: on.has('rough-cut'),
+      pauses: on.has('rough-cut') && (brand?.preferences?.pauses ?? pauseMode !== 'natural'),
+      cleanup: on.has('rough-cut') && (brand?.preferences?.cleanup ?? true),
       captions: on.has('captions'),
       denoise: on.has('voice-cleanup'),
       ...byBrand,
     };
   const skippedWhy = (id: FirstPassStepId) => (asked?.has(id) && (id === 'logo' || id === 'loudness') ? t('chatGen.firstPass.notInBrand') : t('chatGen.firstPass.notOn'));
-  const report: FirstPassReport = { state: 'running', steps: FIRST_PASS_STEPS.map((id) => (wanted[id] ? { id, status: 'pending' } : { id, status: 'skipped', detail: skippedWhy(id) })), credits: 0 };
+  const report: FirstPassReport = { state: 'running', ...(sourceAssetId ? { sourceAssetId } : {}), steps: FIRST_PASS_STEPS.map((id) => (wanted[id] ? { id, status: 'pending' } : { id, status: 'skipped', detail: skippedWhy(id) })), credits: 0 };
+  if (options.resume) {
+    report.credits = options.resume.credits;
+    report.cleanup = structuredClone(options.resume.cleanup);
+    for (const previous of options.resume.steps) {
+      if (previous.status === 'done' || previous.status === 'skipped') {
+        Object.assign(report.steps.find(item => item.id === previous.id)!, previous);
+        wanted[previous.id] = false;
+      }
+    }
+  }
   const startSec = cutDurationSec(host.document());
   const counts = { pauses: 0, fillers: 0, repeats: 0, sensitive: 0 };
   /** What was done, for the receipt. */
-  const done: string[] = [];
+  const done: string[] = options.resume?.steps.filter(step => step.status === 'done').map(step => `${step.id}: ${step.detail ?? 'completed previously'}`) ?? [];
   /** Doubtful repeats left in, for the receipt. */
   const unsure: string[] = [];
   const publish = () => onUpdate(structuredClone(report));
@@ -169,7 +184,7 @@ export async function runFirstPass(host: FirstPassHost, onUpdate: (report: First
   const addUsage = (usage: WorkflowUsage) => {
     if (typeof usage.credits !== 'number' || !Number.isFinite(usage.credits)) return;
     // Billed after the pass ended: the chat adds it to the card it belongs to.
-    if (ended) { options.onLateUsage?.(usage.credits); return; }
+    if (ended) { options.onLateUsage?.(usage); return; }
     report.credits = Math.round((report.credits + usage.credits) * 100) / 100;
     publish();
   };
@@ -181,9 +196,14 @@ export async function runFirstPass(host: FirstPassHost, onUpdate: (report: First
 
   const attempt = async (id: FirstPassStepId, body: () => Promise<string | null>) => {
     if (!wanted[id] || stopped()) return;
+    if ((id === 'cleanup' || id === 'captions') && step('transcribe').status === 'failed') {
+      set(id, 'pending', t('chatGen.firstPass.waitingTranscript'));
+      return;
+    }
     set(id, 'running');
     try {
       const detail = await body();
+      await host.persist?.();
       set(id, detail === null ? 'skipped' : 'done', detail ?? t('chatGen.firstPass.nothingToDo'));
     } catch (error) {
       // Stopped mid-step: nothing of it was applied after the stop, so it waits to run again.
@@ -219,6 +239,7 @@ export async function runFirstPass(host: FirstPassHost, onUpdate: (report: First
     const main = mainTranscript();
     if (!main) {
       if (wanted.cleanup) { wanted.cleanup = false; set('cleanup', 'skipped', t('chatGen.firstPass.noSpeech')); }
+      if (wanted.captions) { wanted.captions = false; set('captions', 'skipped', t('chatGen.firstPass.noSpeech')); }
       return t('chatGen.firstPass.noSpeech');
     }
     done.push('transcribed the narration');
@@ -240,13 +261,16 @@ export async function runFirstPass(host: FirstPassHost, onUpdate: (report: First
     const main = mainTranscript();
     if (!main) return null;
     const clean = studioProviders().speechCleanup;
-    let found: Awaited<ReturnType<NonNullable<typeof clean>>> | null = null;
-    let modelError = '';
-    if (clean) {
+    const cleanup = report.cleanup ??= { applied: [] };
+    let found = cleanup.analysis ?? null;
+    let modelError = clean ? '' : t('chatGen.firstPass.cleanupUnavailable');
+    if (clean && !found) {
       try { found = await clean(main.segments, { onUsage: addUsage, ...(options.signal ? { signal: options.signal } : {}) }); } catch (error) { checkpoint(); modelError = error instanceof Error ? error.message : String(error); }
     }
+    if (found) { cleanup.analysis = found; publish(); }
+    const applied = async (name: string) => { await host.persist?.(); cleanup.applied.push(name); publish(); };
     unsure.push(...(found?.unsure ?? []).map((item) => `segment ${item.seg} "${item.text}": ${item.note}`));
-    if (found?.cuts.length) {
+    if (found?.cuts.length && !cleanup.applied.includes('repeats')) {
       // Each failed attempt goes with the pause after it, up to a breath before what follows.
       const starts = main.segments.flatMap((segment) => (segment.words?.length ? segment.words : [segment]).map((word) => word.start)).sort((a, b) => a - b);
       const ranges = found.cuts.map((cut) => {
@@ -254,6 +278,7 @@ export async function runFirstPass(host: FirstPassHost, onUpdate: (report: First
         return [cut.range[0], next !== undefined ? Math.max(cut.range[1], next - REPEAT_LEAD_SEC) : cut.range[1]];
       });
       await toolOk('remove_words', { assetId: main.assetId, ranges });
+      await applied('repeats');
       counts.repeats = found.cuts.length;
       done.push(`removed ${found.cuts.length} repeats (${found.cuts.map((cut) => `"${cut.text === '*' ? main.segments[cut.seg]?.text.slice(0, 20) : cut.text.slice(0, 20)}"`).join(', ')})`);
     }
@@ -269,16 +294,18 @@ export async function runFirstPass(host: FirstPassHost, onUpdate: (report: First
       return words;
     };
     const fillers = playing().filter((word) => isFillerWord(word.text)).map((word) => word.id);
-    if (fillers.length) {
+    if (fillers.length && !cleanup.applied.includes('fillers')) {
       await toolOk('remove_words', { wordIds: fillers });
+      await applied('fillers');
       counts.fillers = fillers.length;
       done.push(`cut ${fillers.length} filler sounds`);
     }
-    if (found?.sensitive.length) {
+    if (found?.sensitive.length && !cleanup.applied.includes('sensitive')) {
       const words = playing();
       const ids = found.sensitive.flatMap((item) => words.filter((word) => word.start >= item.range[0] - 0.01 && word.end <= item.range[1] + 0.01).map((word) => word.id));
       if (ids.length) {
         await toolOk('mask_words', { wordIds: [...new Set(ids)] });
+        await applied('sensitive');
         counts.sensitive = found.sensitive.length;
         done.push(`masked ${found.sensitive.length} sensitive words with a beep and ** in the captions (${found.sensitive.map((item) => `"${item.text}"`).join(', ')})`);
       }
@@ -339,7 +366,7 @@ export async function runFirstPass(host: FirstPassHost, onUpdate: (report: First
   const failed = report.steps.filter((item) => item.status === 'failed').map((item) => `${item.id} (${item.detail ?? 'failed'})`);
   const pending = report.steps.filter((item) => item.status === 'pending').map((item) => item.id);
   const facts = [
-    failed.length ? `Failed and not applied: ${failed.join('; ')}.` : '',
+    failed.length ? `Not fully completed (some substeps may already be applied): ${failed.join('; ')}.` : '',
     unsure.length ? `Possible repeats left in because they were unclear (judge them only if the edit needs it): ${unsure.join(' | ')}` : '',
     wanted.cleanup && !studioProviders().speechCleanup ? 'Repeat and sensitive-word detection is not available here; only filler sounds were cut — find repeats in the transcript and cut them with remove_words.' : '',
   ];
@@ -365,12 +392,15 @@ export async function runFirstPass(host: FirstPassHost, onUpdate: (report: First
   report.summary = changes.length
     ? t('chatGen.firstPass.summaryCut', { changes: sentenceCase(changes.join(t('chatGen.firstPass.listJoin'))), from: clock(startSec), to: clock(endSec) })
     : t('chatGen.firstPass.summaryNoCut', { length: clock(endSec) });
-  report.state = 'done';
+  report.state = failed.length || pending.length ? (report.steps.some(item => item.status === 'done') ? 'partial' : 'failed') : 'done';
+  if (report.state !== 'done') report.summary = t('chatGen.firstPass.incomplete');
   publish();
 
   const note = [
-    `Rough cut done (${clock(startSec)} → ${clock(endSec)}): ${done.length ? done.join('; ') : 'nothing needed changing'}.`,
+    `Rough cut ${report.state} (${clock(startSec)} → ${clock(endSec)}): ${done.length ? done.join('; ') : 'nothing needed changing'}.`,
     ...facts,
+    pending.length ? `Pending: ${pending.join(', ')}.` : '',
+    report.state !== 'done' ? 'Do not claim completion. Resume only the incomplete steps after the blocker is resolved.' : '',
   ].filter(Boolean).join('\n');
   ended = true;
   return { report: structuredClone(report), note, stopped: false, baseline };

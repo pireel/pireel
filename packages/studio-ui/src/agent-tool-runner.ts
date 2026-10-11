@@ -1,3 +1,4 @@
+import { brandGraphicsStyle } from '@pireel/studio-engine/brand-playbook';
 import { adaptiveGeneratedVideoSpec } from '@pireel/studio-engine/generated-video-spec';
 /**
  * Agent tool dispatcher: executes the studio's agent tools (chat + external MCP bridge) against the live
@@ -111,7 +112,7 @@ import { imageThumb } from '@pireel/ui/image-url';
 import { studioLocale, t, tEnglish } from './i18n';
 import { type ComposeMode, type ComposedBlock, composedBlockFields, GeneratedBlockValidationError, kitChoiceOf, newBlockComposeMode } from './compose-result';
 import { clearToolProgress, setToolProgress, type ToolProgress } from './tool-progress';
-import { FIRST_PASS_STEPS, emitLateRoughCutCredits, runFirstPass, type FirstPassHost, type FirstPassStepId } from './first-pass';
+import { FIRST_PASS_STEPS, runFirstPass, type FirstPassHost, type FirstPassStepId, type RoughCutExecution } from './first-pass';
 import { probeVideoFile } from './media';
 import { cloudToolFrame } from './agent-frame-upload';
 import { measuredSpeechTranscript, storedScriptText } from '@pireel/studio-engine/script-alignment';
@@ -136,11 +137,10 @@ import { compositionRenderView } from './composition-render-view';
 import type { StudioChatHandle } from './studio-chat';
 import { primaryNarrativeRenderPlan } from './primary-render-plan';
 
-/** The brand graphics prose component generation follows: the project's brand, or — for a project whose
- *  brand was never set — the creator's current one. */
+/** Component generation follows only the brand explicitly attached to this project. */
 async function brandGraphicsOf(document: EditorDocumentV2): Promise<string | null> {
-  const brand = document.semantics.brand !== undefined ? document.semantics.brand : await studioProviders().brands?.current?.().catch(() => null);
-  return brand?.blocks.graphics?.text?.trim() || null;
+  const brand = document.semantics.brand;
+  return brand ? brandGraphicsStyle(brand) : null;
 }
 import { supplementalVisualMedia } from './visual-render-plan';
 import { collectAssetSearchDocuments } from './asset-search-collector';
@@ -496,6 +496,7 @@ export interface AgentToolCtx {
 }
 
 type StudioToolRunInternalOptions = {
+  roughCut?: RoughCutExecution;
   signal?: AbortSignal;
   surface?: 'chat' | 'bridge';
   /** Active Skill for this turn: its declared review-brief (when present) overrides the
@@ -2978,10 +2979,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const pauses = input.pauses === 'tight' || input.pauses === 'moderate' || input.pauses === 'natural' ? input.pauses : undefined;
             const semantics = documentRef.current.semantics;
             const host: FirstPassHost = {
+              persist: opts?.roughCut?.persist,
               document: () => documentRef.current,
               brand: semantics.brand ?? null,
-              skills: semantics.editingSkills ?? [],
-              tool: (name, args, stepSignal) => runStudioToolInner(ctx, name, args, { surface, ...(stepSignal ?? signal ? { signal: stepSignal ?? signal } : {}) }),
+              skills: opts?.roughCut?.skills ?? semantics.editingSkills ?? [],
+              tool: (name, args, stepSignal) => runStudioTool(ctx, name, args, { surface, ...(stepSignal ?? signal ? { signal: stepSignal ?? signal } : {}) }),
               setUsageSink: (sink) => { if (ctx.usageSinkRef) ctx.usageSinkRef.current = sink; },
               applyCaptionPreset: (preset, style) => ctx.applyCaptionPreset(preset, style),
               captionsOn: () => !!documentRef.current.appearance.captionStyle?.on,
@@ -2994,18 +2996,13 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               },
               measureLoudness: async (file) => (await import('./audio-decode')).streamVideoLoudness(file),
             };
-            const outcome = await runFirstPass(host, (next) => report(next.summary ?? t('tools.rough_cut.busy'), undefined, { report: next }), {
-              ...(steps?.length ? { steps } : {}), ...(pauses ? { pauses } : {}), ...(signal ? { signal } : {}), onLateUsage: emitLateRoughCutCredits,
+            const outcome = await runFirstPass(host, (next) => { report(next.summary ?? t('tools.rough_cut.busy'), undefined, { report: next }); opts?.roughCut?.onProgress?.(next); }, {
+              ...(steps?.length ? { steps } : {}), ...(pauses ? { pauses } : {}), ...(signal ? { signal } : {}), onLateUsage: opts?.roughCut?.onLateUsage, resume: opts?.roughCut?.resume,
             });
-            const steps_ = outcome.report.steps;
-            // Nothing applied and something failed: a failure the agent can act on. Anything applied stays.
-            if (!outcome.stopped && !steps_.some((step) => step.status === 'done') && steps_.some((step) => step.status === 'failed')) {
-              return { ok: false, error: outcome.note, data: { report: outcome.report } };
-            }
             return {
               ok: true,
               summary: outcome.report.summary ?? t('tools.rough_cut.label'),
-              data: { note: outcome.note, report: outcome.report, baseline: outcome.baseline, ...(outcome.stopped ? { stopped: true } : {}) },
+              data: { note: outcome.note, report: outcome.report, baseline: outcome.baseline, ...(outcome.report.state !== 'done' ? { taskIncomplete: true } : {}), ...(outcome.stopped ? { stopped: true } : {}) },
             };
           }
           case 'remove_silence': {
@@ -3599,13 +3596,13 @@ export async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () =>
 /** A rejected parked approval is a turn boundary, not an ordinary successful tool receipt. */
 export function studioToolResultStopsAgentTurn(result: StudioToolResult): boolean {
   const data = result.ok && result.data && typeof result.data === 'object'
-    ? result.data as { decision?: unknown }
+    ? result.data as { decision?: unknown; taskIncomplete?: unknown }
     : null;
-  return data?.decision === 'rejected';
+  return data?.decision === 'rejected' || data?.taskIncomplete === true;
 }
 
-export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal; surface?: 'chat' | 'bridge'; skillId?: string; reportProgress?: StudioToolRunInternalOptions['reportProgress'] }): Promise<StudioToolResult> {
-  const result = QUERY_TOOLS.has(toolId) || PROJECT_MUTATION_TOOLS.has(toolId)
+export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: StudioToolRunInternalOptions): Promise<StudioToolResult> {
+  const result = toolId === 'rough_cut' || QUERY_TOOLS.has(toolId) || PROJECT_MUTATION_TOOLS.has(toolId)
     ? await runStudioToolInner(ctx, toolId, input, opts)
     : await runAtomicCompositionTool(ctx, () => runStudioToolInner(ctx, toolId, input, opts));
   if (
@@ -3625,7 +3622,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
   /** External-agent-only bridge operations (MCP-only, invisible to the internal chat) — the browser half of the BYO-brain contract:
    *  compose_component fetches live context; apply_component receives the model output and runs it through
    *  the same parseBlockResponse+lintBlock validation as the in-house path. Other tools fall back to runStudioTool. */
-async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Record<string, unknown>): Promise<StudioToolResult> {
+async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Record<string, unknown>, execution?: RoughCutExecution): Promise<StudioToolResult> {
   const {
     compRef, documentRef, commit, setSelectedId, setSelectedShotId, applyT, tRef,
     pushUndoSnapshot, genIdsRef, videoFileRef, clipFilesRef,
@@ -3673,7 +3670,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           const base = {
             theme: appearance.theme,
             ...(appearance.palette ? { palette: appearance.palette } : {}),
-            ...(projectBrand !== undefined ? { brandGraphics: projectBrand?.blocks.graphics?.text?.trim() || null } : {}),
+            ...(projectBrand !== undefined ? { brandGraphics: projectBrand ? brandGraphicsStyle(projectBrand) : null } : {}),
           };
           const bid = typeof input.blockId === 'string' ? input.blockId : undefined;
           if (bid) {
@@ -4120,7 +4117,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         try {
           result = external
             ? await runExternalToolInner(ctx, name, callArgs)
-            : await runStudioTool(ctx, name, callArgs, { surface: stepSurface, reportProgress: reportAsV3, ...(input.signal instanceof AbortSignal ? { signal: input.signal } : {}) });
+            : await runStudioTool(ctx, name, callArgs, { surface: stepSurface, reportProgress: reportAsV3, roughCut: execution, ...(input.signal instanceof AbortSignal ? { signal: input.signal } : {}) });
         } finally {
           clearToolProgress(name);
         }
@@ -4154,7 +4151,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         if (name === 'search_assets' && result.data && typeof result.data === 'object' && 'usageHint' in (result.data as object)) {
           result = { ...result, data: { ...(result.data as Record<string, unknown>), usageHint: V3_LIBRARY_USAGE_HINT } };
         }
-        // One v3 call = one undo step: keep only the snapshot taken before the call.
+        // Completed steps have already committed; group their undo history once this call settles.
         if (ctx.undoStackRef.current.length > undoDepth + 1) ctx.undoStackRef.current = ctx.undoStackRef.current.slice(0, undoDepth + 1);
         const delta = documentDelta(before, documentRef.current);
         if (!delta) return result;
@@ -4165,11 +4162,11 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         return { ...result, data: { ...base, delta } };
       }
       default:
-        return runStudioTool(ctx, tool, input);
+        return runStudioTool(ctx, tool, input, { roughCut: execution });
     }
 }
 
-export function runExternalTool(ctx: AgentToolCtx, tool: string, input: Record<string, unknown>): Promise<StudioToolResult> {
-  if (QUERY_TOOLS.has(tool) || PROJECT_MUTATION_TOOLS.has(tool)) return runExternalToolInner(ctx, tool, input);
-  return runAtomicCompositionTool(ctx, () => runExternalToolInner(ctx, tool, input));
+export function runExternalTool(ctx: AgentToolCtx, tool: string, input: Record<string, unknown>, execution?: RoughCutExecution): Promise<StudioToolResult> {
+  if (tool === 'rough_cut' || (tool === 'run_v3' && input.name === 'rough_cut') || QUERY_TOOLS.has(tool) || PROJECT_MUTATION_TOOLS.has(tool)) return runExternalToolInner(ctx, tool, input, execution);
+  return runAtomicCompositionTool(ctx, () => runExternalToolInner(ctx, tool, input, execution));
 }

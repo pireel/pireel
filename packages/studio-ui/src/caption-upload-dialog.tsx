@@ -19,8 +19,6 @@ import { saveCaptionTask, type CaptionUploadProgress } from './caption-task-stor
 import { captureCaptionCover } from './caption-project-cover';
 import { studioLocale } from './i18n';
 import type { CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
-import type { BrandPlaybook } from '@pireel/studio-engine/brand-playbook';
-import { withSceneBrand } from './scene-brand-picker';
 
 export type SceneProjectKind = 'captions' | 'dubbing' | 'broll' | 'pip' | 'sfx' | 'subtitle-removal' | 'ugc-ad';
 /** A new scene project's starting options; `overrides` carries settings chosen before the video. */
@@ -59,16 +57,10 @@ export async function createSceneProject(file: File, scene: SceneProjectKind, { 
   return id;
 }
 
-/** Scenes that restyle the video and so start from the user's current brand (erasing only removes text). */
-export const sceneUsesBrand = (scene: SceneProjectKind) => scene !== 'subtitle-removal';
-
-export function CaptionUploadDialog({ open, locale, scene = 'captions', brand = null, onOpenChange, onContinue }: {
+export function CaptionUploadDialog({ open, locale, scene = 'captions', onOpenChange, onContinue }: {
   open: boolean; locale: 'zh' | 'en'; scene?: SceneProjectKind;
-  /** The brand a new project starts from; it can be changed in the project's settings. */
-  brand?: BrandPlaybook | null;
   onOpenChange: (open: boolean) => void; onContinue: (id: string) => void;
 }) {
-  const startBrand = sceneUsesBrand(scene) ? brand : null;
   const zh = locale === 'zh';
   const removal = scene === 'subtitle-removal';
   const ugcAd = scene === 'ugc-ad';
@@ -107,8 +99,7 @@ export function CaptionUploadDialog({ open, locale, scene = 'captions', brand = 
       setProgress({ ...value, fraction });
     };
     try {
-      const options = startBrand ? withSceneBrand(sceneProjectOptions(scene), startBrand) : undefined;
-      const id = await createSceneProject(file, scene, { report, stale: () => current !== generation.current, pending: pendingProject, ...(options ? { options } : {}) });
+      const id = await createSceneProject(file, scene, { report, stale: () => current !== generation.current, pending: pendingProject });
       if (!id) return;
       onOpenChange(false); onContinue(id);
     } catch (reason) { if (current === generation.current) setError(reason instanceof Error ? reason.message : String(reason)); }
@@ -119,7 +110,6 @@ export function CaptionUploadDialog({ open, locale, scene = 'captions', brand = 
     <DialogContent onOpenAutoFocus={(event) => { event.preventDefault(); uploadButton.current?.focus(); }} aria-describedby={undefined} className={'studio-scope bg-bg border-line max-h-[90dvh] overflow-y-auto p-6 ' + (sfx ? 'sm:max-w-[620px]' : scene === 'captions' ? 'sm:max-w-[720px]' : 'sm:max-w-[520px]')} showCloseButton={!busy}>
       <DialogHeader className="text-left"><DialogTitle className="text-ink text-2xl font-semibold">{ugcAd ? say('UGC 广告', 'UGC Ad') : removal ? say('智能擦除', 'AI Eraser') : sfx ? 'Auto SFX' : pip ? say('画中画', 'Picture in picture') : scene === 'broll' ? 'AI B-Roll' : dubbing ? 'Video Dubbing' : 'AI Captions'}</DialogTitle></DialogHeader>
       {open && (ugcAd ? <UgcAdShowcase locale={locale}/> : removal ? <EraserShowcase locale={locale}/> : sfx ? <SfxUploadShowcase locale={locale}/> : pip ? <PipShowcase locale={locale} suspended={busy}/> : scene === 'broll' ? <div className="my-3 overflow-hidden rounded-lg"><img src={BROLL_SHOWCASE} alt={say('口播搭配咖啡豆、冲煮和成品镜头', 'A talking-head video paired with coffee beans, brewing and serving footage')} width={1536} height={1024} className="w-full object-contain" /></div> : dubbing ? <div className="my-7 flex flex-col items-center gap-4"><DubbingLanguageShowcase locale={locale} /></div> : <CaptionEffectShowcase locale={locale} suspended={busy} />)}
-      {startBrand && <p className="text-ink-3 mb-3 flex items-center justify-center gap-1.5 text-xs"><span aria-hidden className="border-line inline-block size-2.5 rounded-full border" style={{ background: startBrand.blocks.captions?.style?.color ?? 'transparent' }} />{say(`使用品牌「${startBrand.name}」，可在设置里更换`, `Uses your brand “${startBrand.name}”; change it in settings`)}</p>}
       {removal && removalAvailable === false && <p role="status" className="text-ink-3 mb-3 text-xs">{say('智能擦除服务暂未开通，当前可上传预览并设置区域。', 'AI erasing is not available yet. Upload to preview and select a region.')}</p>}
       <input ref={input} type="file" accept="video/*" className="hidden" aria-label={say('选择视频文件', 'Choose a video file')} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void choose(file); }} />
       <div onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (event.dataTransfer.files[0]) void choose(event.dataTransfer.files[0]); }}>

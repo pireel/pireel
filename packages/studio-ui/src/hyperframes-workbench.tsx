@@ -1,3 +1,4 @@
+import { brandEditingSkills } from '@pireel/studio-engine/brand-preferences';
 "use client";
 
 /**
@@ -157,7 +158,7 @@ import { runtimeTranscriptsFollowingDocument } from './runtime-transcripts';
 import { transcriptInputsFor, type DocumentOp } from '@pireel/studio-engine/document-transaction';
 import { applyEditorDocumentPersistenceMetadata } from '@pireel/studio-engine/project-document';
 import { DocumentCommitter } from './document-commit';
-import { playbookSnapshot, skillTakesBrand, type PlaybookSnapshot } from "@pireel/studio-engine/brand-playbook";
+import type { PlaybookSnapshot } from "@pireel/studio-engine/brand-playbook";
 import { ProjectSync, localPendingTransactionStore, type ProjectSyncDeps, type ProjectSyncSections } from './project-sync';
 
 /** Constant speed of a placed video clip = source seconds per timeline second (1 = natural). */
@@ -337,7 +338,9 @@ import { useDenoise } from "./use-denoise";
 import { TransitionPanel } from "./transition-panel";
 import { MediaAnimPanel } from "./media-anim-panel";
 import { type MatteFrame, MATTE_FPS, computeMatteTrack } from "./person-matte";
-import { takeAgentStartPrompt } from "./agent-project-from-video";
+import { acknowledgeChatThread, cachedChatThread, cacheChatThread, restoreChatThreads } from "./chat-thread-cache";
+import type { StoredThread } from "./chat-thread-store";
+import { acknowledgeAgentStartPrompt, takeAgentStartPrompt } from "./agent-project-from-video";
 import { documentIsEdited, fineCutClipIds } from "./first-pass";
 import type { WorkflowUsage } from "@pireel/studio-engine/workflow";
 import { StudioBootOverlay } from "./studio-boot";
@@ -1065,18 +1068,33 @@ export function HyperframesWorkbench({
     void (store?.list(projectId) ?? Promise.resolve([]))
       .then((threads) => {
         if (cancelled) return;
-        setInitialChatThreads(Array.isArray(threads) ? threads : []);
+        setInitialChatThreads(restoreChatThreads(projectId, (Array.isArray(threads) ? threads : []) as StoredThread[]));
         setChatEpoch((value) => value + 1);
       })
       .catch(() => {
-        if (!cancelled) setInitialChatThreads([]);
+        if (!cancelled) setInitialChatThreads(restoreChatThreads(projectId, []));
       });
     return () => { cancelled = true; };
   }, [projectId]);
-  const persistChatThread = useCallback((thread: unknown) => {
-    void studioProviders().chats?.save(projectId, thread).catch((error) => {
+  const chatSaveQueuesRef = useRef(new Map<string, Promise<void>>());
+  const persistChatThread = useCallback((value: unknown) => {
+    const incoming = value as StoredThread;
+    const cached = cacheChatThread(projectId, incoming);
+    if (!cached) toast.error(t('chatGen.checkpointFailed'));
+    const thread = cached ? cachedChatThread(projectId, incoming.id)! : incoming;
+    const queueKey = `${projectId}:${thread.id}`;
+    const next = (chatSaveQueuesRef.current.get(queueKey) ?? Promise.resolve()).catch(() => {}).then(async () => {
+      const store = studioProviders().chats;
+      if (!store) return;
+      await store.save(projectId, thread);
+      acknowledgeChatThread(projectId, thread);
+    });
+    chatSaveQueuesRef.current.set(queueKey, next);
+    void next.catch(error => {
       console.error("[studio] chat save failed", error);
       toast.error(t("workbench.syncFailedTryAgain"));
+    }).finally(() => {
+      if (chatSaveQueuesRef.current.get(queueKey) === next) chatSaveQueuesRef.current.delete(queueKey);
     });
   }, [projectId]);
   const [pps, setPps] = useState(DEFAULT_PPS); // timeline zoom (px/sec), controlled by the ruler slider
@@ -7137,11 +7155,11 @@ export function HyperframesWorkbench({
   const runStudioTool = (
     toolId: string,
     input: Record<string, unknown>,
-    opts?: { signal?: AbortSignal; surface?: "chat" | "bridge"; skillId?: string },
+    opts?: { signal?: AbortSignal; surface?: "chat" | "bridge"; skillId?: string; roughCut?: import("./first-pass").RoughCutExecution },
   ) => workflowBusyRef.current ? Promise.resolve({ ok: false, error: "A workflow is running. Wait for it to finish before editing." } satisfies StudioToolResult) : (toolId === "run_v3"
     // v3 surface from the chat: same executor as the external bridge, with the chat surface carried in the input
     // so parked interactions (ask_user / approvals) render as chat cards.
-    ? persistToolMutation(runAgentExternalTool(agentToolCtx, "run_v3", { ...input, surface: opts?.surface ?? "chat", ...(opts?.signal ? { signal: opts.signal } : {}) }))
+    ? persistToolMutation(runAgentExternalTool(agentToolCtx, "run_v3", { ...input, surface: opts?.surface ?? "chat", ...(opts?.signal ? { signal: opts.signal } : {}) }, opts?.roughCut ? { ...opts.roughCut, persist: async () => { await cloudSaveQueueRef.current?.flush(); } } : undefined))
     : persistToolMutation(runAgentStudioTool(agentToolCtx, toolId, input, opts)));
   runToolRef.current = runStudioTool; // break the hook↔dispatcher cycle (assigned every render before any handler can fire)
   // Bridge (MCP) calls span many turns with the tab live in between, so the user can switch
@@ -8229,35 +8247,20 @@ export function HyperframesWorkbench({
     const prompt = takeAgentStartPrompt(projectId);
     if (prompt) setStartPrompt(prompt);
   }, [bootDataReady, projectId, displaced]);
-  const onStartPromptSent = useCallback(() => setStartPrompt(null), []);
+  const onStartPromptSent = useCallback(() => { acknowledgeAgentStartPrompt(projectId); setStartPrompt(null); }, [projectId]);
   // The clips the fine-cut skills count (the rough cut's card follows a one-click edit's agent with them).
   const fineCutClips = useCallback(() => fineCutClipIds(editorDocumentRef.current), []);
   const projectEdited = useMemo(() => documentIsEdited(editorDocument), [editorDocument]);
 
-  // A project that never set a brand takes a copy of the creator's current brand, and one that never set its
-  // editing skills starts with its brand's defaults. Once set (none included) they are the project's own:
-  // a later brand change on the account never touches them. Not an undo step: ⌘Z would only clear them for
-  // this to set them again.
-  const brandSkillsSeedingRef = useRef(false);
+  // An unbranded project stays unbranded. Defaults come only from its own explicit brand snapshot.
   useEffect(() => {
-    if (!bootDataReady || !projectId || displaced || brandSkillsSeedingRef.current) return;
-    if (comp.brand !== undefined && comp.editingSkills !== undefined) return;
-    const current = studioProviders().brands?.current;
-    // A project already on a Skill that takes no brand (or explicitly on none) is not given one.
-    const brandable = comp.skillId === undefined || skillTakesBrand(comp.skillId);
-    if (comp.brand === undefined && (!current || !brandable)) return;
-    brandSkillsSeedingRef.current = true;
-    const brandOf = comp.brand !== undefined ? Promise.resolve(comp.brand) : brandable ? current!().then((kit) => (kit ? playbookSnapshot(kit) : undefined)) : Promise.resolve(undefined);
-    void brandOf.then((brand) => {
-      const semantics = committer.document.semantics;
-      if (displacedRef.current) return;
-      const ops: DocumentOp[] = [];
-      if (semantics.brand === undefined && brand) ops.push({ op: "command", input: { command: { type: "brand.set", brand } } });
-      const skillsFrom = semantics.brand !== undefined ? semantics.brand : brand;
-      if (semantics.editingSkills === undefined && skillsFrom?.skills) ops.push({ op: "command", input: { command: { type: "editingSkills.set", ids: skillsFrom.skills } } });
-      if (ops.length) commit(ops, { origin: "system", undo: "none" });
-    }, () => {}).finally(() => { brandSkillsSeedingRef.current = false; });
-  }, [bootDataReady, projectId, displaced, comp.brand, comp.editingSkills, comp.skillId]);
+    if (!bootDataReady || !projectId || displaced) return;
+    const semantics = committer.document.semantics;
+    const ops: DocumentOp[] = [];
+    if (semantics.brand === undefined) ops.push({ op: 'command', input: { command: { type: 'brand.set', brand: null } } });
+    if (semantics.editingSkills === undefined && semantics.brand) ops.push({ op: 'command', input: { command: { type: 'editingSkills.set', ids: brandEditingSkills(semantics.brand) } } });
+    if (ops.length) commit(ops, { origin: 'system', undo: 'none' });
+  }, [bootDataReady, projectId, displaced, comp.brand, comp.editingSkills]);
   /** The Skill picked in the chat is the project's (a Skill that takes no brand leaves it without one). */
   const setProjectSkill = useCallback((skillId: string) => {
     const edit = commit({ op: "command", input: { command: { type: "skill.set", skillId } } });

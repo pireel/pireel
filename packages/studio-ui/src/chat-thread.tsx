@@ -1,10 +1,13 @@
 "use client";
 
-import { EDITING_SKILL_IDS, editingSkillsHint, type EditingSkillId } from '@pireel/studio-engine/editing-skills';
+import { editingSkillsHint } from '@pireel/studio-engine/editing-skills';
 import { ROUGH_CUT_TOOL, RoughCutCard, messageTurnCredits, toolNameOfPart, type RoughCutReplyMeta } from './first-pass-card';
 import { NextSteps, splitNextSteps } from './chat-next-steps';
 import { ConfirmPopover } from './editing-skills';
-import { FINE_CUT_SKILLS, ONE_CLICK_EDIT_HINT, onLateRoughCutCredits, type FineCutItem, type FineCutSkill } from './first-pass';
+import { FINE_CUT_SKILLS, ONE_CLICK_EDIT_HINT, type FineCutSkill } from './first-pass';
+import { latestTask, taskOf, patchTask, resumeTaskHint, unfinishedRoughCut, withTaskUsage, type ChatTask } from "./chat-task";
+import { cachedChatThread } from "./chat-thread-cache";
+import { recordTaskUsage, subscribeTaskUsage } from "./chat-task-usage";
 import { collapsedComponentRetryIndexes, studioToolFailureText } from './chat-component-retries';
 
 /** Single-thread studio chat (useChat): stream rendering, client-side tool execution, persistence snapshots. */
@@ -75,6 +78,7 @@ import {
   compactStudioChatMessages,
   compactStudioChatMessagesForModel,
   createStudioTurnLedger,
+  effectiveStudioTurnMessages,
   isRecoverableStudioChatError,
   recordStudioTurnToolResult,
   shouldBlockStudioTurnUndo,
@@ -174,8 +178,10 @@ export function ChatThread({
   // Stop plumbing: aborting the stream alone isn't enough — the stream loop awaits onToolCall, so a
   // running tool must be told to stand down too. The user-stopped flag keeps the continuation
   // safety net from resurrecting a turn the user just killed.
-  const toolAbortRef = useRef<AbortController | null>(null);
-  const userStoppedRef = useRef(false);
+  const toolAbortsRef = useRef(new Set<AbortController>());
+  const userStoppedRef = useRef(latestTask(initialMessages)?.state === 'paused');
+  const [activeTools, setActiveTools] = useState(0);
+  const [taskResumeError, setTaskResumeError] = useState(false);
   const interactionWaitDurationRef = useRef(0);
   const autoRecoveryAttemptedRef = useRef(false);
   const turnLedgerRef = useRef(createStudioTurnLedger());
@@ -235,6 +241,16 @@ export function ChatThread({
   );
 
   const messagesRef = useRef<UIMessage[]>(initialMessages);
+  const mountedRef = useRef(true);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
+  // Bound to this thread: a delayed bill must still save its original task after navigation.
+  const updateTask = (id: string, patch: (task: ChatTask) => ChatTask) => {
+    const source = !mountedRef.current && projectId ? cachedChatThread(projectId, threadId)?.messages ?? messagesRef.current : messagesRef.current;
+    const next = patchTask(source, id, patch);
+    messagesRef.current = next;
+    if (mountedRef.current) setMessages(next);
+    onSnapshot(compactStudioChatMessages(mountedRef.current ? effectiveStudioTurnMessages(next, turnLedgerRef.current) : next), skillRef.current);
+  };
 
   const {
     messages,
@@ -270,6 +286,8 @@ export function ChatThread({
           canMutate,
         });
         addToolOutput({ tool: id, toolCallId: toolCall.toolCallId, output });
+        const saved = effectiveStudioTurnMessages(messagesRef.current, ledger);
+        onSnapshot(compactStudioChatMessages(saved), skillRef.current);
         return recorded;
       };
       const publishError = (errorText: string) => {
@@ -298,6 +316,7 @@ export function ChatThread({
           state: "output-error",
           errorText,
         });
+        onSnapshot(compactStudioChatMessages(effectiveStudioTurnMessages(messagesRef.current, ledger)), skillRef.current);
       };
       if (id === "undo" && shouldBlockStudioTurnUndo(ledger)) {
         publishSuccess({
@@ -313,7 +332,10 @@ export function ChatThread({
       // Fresh controller per tool run: the stop button aborts it so long tools can stand down at
       // their safe boundaries instead of holding the turn hostage until they finish
       const ctrl = new AbortController();
-      toolAbortRef.current = ctrl;
+      toolAbortsRef.current.add(ctrl);
+      setActiveTools(toolAbortsRef.current.size);
+      if (userStoppedRef.current) ctrl.abort();
+      const task = latestTask(messagesRef.current);
       // Parked tools wait on the user, not on work: keep that time out of the tool-duration ETA memory
       const interactionWaitStartedAt = id === "ask_user" || id === "export"
         ? Date.now()
@@ -322,13 +344,30 @@ export function ChatThread({
         const runOpts = {
           signal: ctrl.signal,
           surface: "chat" as const,
+          ...(id === ROUGH_CUT_TOOL && task ? { roughCut: {
+            resume: task.roughCut?.report,
+            ...(task.mode === 'one-click' ? { skills: task.skills } : {}),
+            onProgress: (report: import('./first-pass').FirstPassReport) => updateTask(task.id, current => {
+              if (current.roughCut && current.roughCut.callId !== toolCall.toolCallId && current.roughCut.callId !== task.roughCut?.callId) return current;
+              return { ...current, roughCut: { callId: toolCall.toolCallId, report } };
+            }),
+            onLateUsage: (usage: import('@pireel/studio-engine/workflow').WorkflowUsage) => {
+              if (!projectId) return;
+              const saved = recordTaskUsage({ projectId, threadId, taskId: task.id, callId: toolCall.toolCallId, usage });
+              if (saved) onSnapshot(saved.messages, saved.skillId ?? skillRef.current);
+            },
+          } } : {}),
           ...(skillRef.current !== STUDIO_AUTO_SKILL_ID ? { skillId: skillRef.current } : {}),
         };
         const out = v3
           ? await runToolRef.current("run_v3", { name: id, args: requestedInput }, runOpts)
           : { ok: false, error: `Unknown tool: ${id}. Use the current tool list.` };
         const stopAfterReceipt = studioToolResultStopsAgentTurn(out);
-        if (stopAfterReceipt) userStoppedRef.current = true;
+        if (id === ROUGH_CUT_TOOL && task && out.ok) {
+          const baseline = (out.data as { baseline?: Record<FineCutSkill, string[]> } | undefined)?.baseline;
+          if (baseline) updateTask(task.id, current => ({ ...current, fineCutBaseline: current.fineCutBaseline ?? baseline }));
+        }
+        if (stopAfterReceipt) { userStoppedRef.current = true; toolAbortsRef.current.forEach(controller => { if (controller !== ctrl) controller.abort(); }); }
         if (out.ok) publishSuccess(out as unknown as Record<string, unknown>);
         else publishError(studioToolFailureText(out.error ?? t("chatGen.executionFailed"), out.data));
         if (stopAfterReceipt) void stop();
@@ -345,10 +384,16 @@ export function ChatThread({
         if (interactionWaitStartedAt !== null) {
           interactionWaitDurationRef.current += Math.max(0, Date.now() - interactionWaitStartedAt);
         }
-        if (toolAbortRef.current === ctrl) toolAbortRef.current = null;
+        toolAbortsRef.current.delete(ctrl);
+        setActiveTools(toolAbortsRef.current.size);
       }
     },
   });
+
+  useEffect(() => subscribeTaskUsage(event => {
+    if (event.projectId !== projectId || event.threadId !== threadId) return;
+    updateTask(event.taskId, current => withTaskUsage(current, event.callId, event.usage));
+  }), [projectId, threadId, onSnapshot]);
 
   // Persist: on stream end (ready / error) write localStorage; throttle a snapshot every 2s while streaming —
   // so switching sessions / refreshing mid-generation doesn't evaporate the streamed-out parts and completed tool outputs.
@@ -358,7 +403,7 @@ export function ChatThread({
   const persistSessionState = useCallback(
     (nextSkillId: StudioScenarioSkillId) => {
       if (messagesRef.current.length > 0)
-        onSnapshot(compactStudioChatMessages(messagesRef.current), nextSkillId);
+        onSnapshot(compactStudioChatMessages(effectiveStudioTurnMessages(messagesRef.current, turnLedgerRef.current)), nextSkillId);
     },
     [onSnapshot],
   );
@@ -387,10 +432,10 @@ export function ChatThread({
     if (!statusSnapshotActivationRef.current!.active)
       return statusSnapshotActivationRef.current!.defer();
     if (status === "ready" || status === "error")
-      onSnapshot(compactStudioChatMessages(messagesRef.current), skillRef.current);
+      onSnapshot(compactStudioChatMessages(effectiveStudioTurnMessages(messagesRef.current, turnLedgerRef.current)), skillRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
-  const busy = status === "streaming" || status === "submitted";
+  const busy = status === "streaming" || status === "submitted" || activeTools > 0;
   // The workbench pauses output switching while a turn runs: a mid-run switch retargets every
   // later tool call (a real run dropped one output's picture-in-picture into another).
   const onBusyChangeRef = useRef(onBusyChange);
@@ -475,7 +520,7 @@ export function ChatThread({
     if (status !== "ready") return;
     const timer = setTimeout(() => {
       if (statusRef.current !== "ready") return; // the SDK sent its own follow-up meanwhile
-      if (userStoppedRef.current) return; // the user killed this turn — don't resurrect it
+      if (userStoppedRef.current || latestTask(messagesRef.current)?.state === 'paused') return; // the user killed this turn — don't resurrect it
       const msgs = messagesRef.current;
       const last = msgs[msgs.length - 1];
       if (!last || last.role !== "assistant") return;
@@ -491,7 +536,7 @@ export function ChatThread({
   useEffect(() => {
     if (!busy) return;
     const t = setInterval(
-      () => onSnapshot(compactStudioChatMessages(messagesRef.current), skillRef.current),
+      () => onSnapshot(compactStudioChatMessages(effectiveStudioTurnMessages(messagesRef.current, turnLedgerRef.current)), skillRef.current),
       2000,
     );
     return () => clearInterval(t);
@@ -511,13 +556,15 @@ export function ChatThread({
       // leaves the client-side tool alive, so a slow generator can mutate the timeline
       // after the user has moved to a new chat or cleared the cut.
       userStoppedRef.current = true;
-      toolAbortRef.current?.abort();
+      toolAbortsRef.current.forEach(controller => controller.abort());
       try {
         void stopRef.current();
       } catch {
         /* already ended */
       }
-      onSnapshot(compactStudioChatMessages(messagesRef.current), skillRef.current);
+      const task = latestTask(messagesRef.current);
+      const saved = effectiveStudioTurnMessages(messagesRef.current, turnLedgerRef.current);
+      onSnapshot(compactStudioChatMessages(task ? patchTask(saved, task.id, current => ({ ...current, state: 'paused' })) : saved), skillRef.current);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
@@ -540,6 +587,7 @@ export function ChatThread({
         startTool?: string;
         /** A note for the agent ahead of the message (one-click edit context). */
         hint?: string;
+        resume?: ChatTask;
       } = {},
     ): Promise<boolean> => {
       const draftParts: StudioChatDraftPart[] =
@@ -549,7 +597,7 @@ export function ChatThread({
       const hasContent = draftParts.some(
         (part) => part.type === "timeline-frame" || part.text.trim().length > 0,
       );
-      if (!hasContent || status === "streaming" || status === "submitted")
+      if (!hasContent || status === "streaming" || status === "submitted" || toolAbortsRef.current.size > 0)
         return false;
       if (!options.preserveAutoRecoveryAttempt)
         autoRecoveryAttemptedRef.current = false;
@@ -591,21 +639,32 @@ export function ChatThread({
         draftParts.flatMap((part) => (part.type === "text" ? [...part.text.matchAll(/@([A-Za-z0-9_:./-]+)/g)].map((m) => m[1]!) : [])),
       )];
       // The switched-on skills shape the project's first edit; once it is edited, the creator asks in words.
+      const continuing = options.resume ?? (/^(继续|继续剪辑|继续粗剪|continue|resume)[。.!！]?$/i.test(typeof draft === 'string' ? draft.trim() : '') && latestTask(messagesRef.current)?.state !== 'done' ? latestTask(messagesRef.current) : undefined);
+      const outputId = (getBodyRef.current().output as { id?: string } | undefined)?.id;
+      if (continuing?.outputId && continuing.outputId !== outputId) { setTaskResumeError(true); return false; }
+      setTaskResumeError(false);
+      const task: ChatTask = continuing ? { ...continuing, state: 'running' } : {
+        id: mid('task'), ...(outputId ? { outputId } : {}), goal: draftParts.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n'),
+        skills: options.startTool ? [...(editingSkillsRef.current ?? [])] : [],
+        mode: options.startTool ? 'one-click' : 'request', state: 'running',
+      };
+      const startTool = continuing?.mode === 'one-click' && (!continuing.roughCut || unfinishedRoughCut(continuing)) ? ROUGH_CUT_TOOL : options.startTool;
       const mentionHint = [
-        options.hint ?? "",
+        continuing ? resumeTaskHint(task) : options.hint ?? "",
         mentionedIds.length ? `Referenced elements in this message (use these ids directly): ${JSON.stringify(mentionedIds)}` : "",
         localAssetContext,
-        projectEditedRef.current ? "" : editingSkillsHint(editingSkillsRef.current),
+        continuing ? editingSkillsHint(task.skills) : projectEditedRef.current ? "" : editingSkillsHint(editingSkillsRef.current),
       ].filter(Boolean).join("\n");
       const metadata = {
+        task,
         workStartedAt: Date.now(),
         ...(mentionHint ? { mentionHint } : {}),
         ...(timelineFrames.length ? { timelineFrames } : {}),
         ...(options.studioAction ? { studioAction: options.studioAction } : {}),
-        ...(options.startTool ? { startTool: options.startTool } : {}),
+        ...(startTool ? { startTool } : {}),
       };
-      void sendMessage({
-        metadata,
+      const userMessage: UIMessage = {
+        id: mid("user"), role: "user", metadata,
         parts: draftParts.map((part) =>
           part.type === "text"
             ? { type: "text" as const, text: part.text }
@@ -616,79 +675,39 @@ export function ChatThread({
                 url: part.frame.dataUrl,
               },
         ),
-      });
+      };
+      messagesRef.current = [...messagesRef.current, userMessage];
+      onSnapshot(compactStudioChatMessages(messagesRef.current), skillRef.current);
+      void sendMessage(userMessage);
       return true;
     },
-    [elements, sendMessage, status],
+    [elements, sendMessage, status, onSnapshot],
   );
 
-  // A one-click edit's reply: the agent's part counted from what it adds after the rough cut, kept in the
-  // reply's metadata (never in the tool receipt, which the model reads back byte for byte).
-  const fineCutRef = useRef<{ messageId: string; baseline: Record<FineCutSkill, string[]>; seenBusy: boolean } | null>(null);
-  const patchReplyMeta = useCallback((messageId: string, patch: (meta: RoughCutReplyMeta & Record<string, unknown>) => RoughCutReplyMeta & Record<string, unknown>) => setMessages((current) => current.map((m) => (m.id === messageId ? { ...m, metadata: patch({ ...(m.metadata as Record<string, unknown> | undefined) }) } : m))), [setMessages]);
-  // Metadata settles after the turn has gone idle, past the usual idle-time save: save it again.
-  const snapshotAfterPatchRef = useRef(false);
+  // Fine-cut rows describe observed additions. Zero additions remain unfulfilled, never inferred unnecessary.
+  const fineCutFor = (message: UIMessage, task: ChatTask | undefined, live: boolean): RoughCutReplyMeta['fineCut'] => {
+    if (task?.mode !== 'one-click') return undefined;
+    if (!live && task.state !== 'running' && task.fineCut) return task.fineCut;
+    const receipt = message.parts.find(part => toolNameOfPart(part) === ROUGH_CUT_TOOL) as { output?: { data?: { baseline?: Record<FineCutSkill, string[]> } } } | undefined;
+    const baseline = task.fineCutBaseline ?? receipt?.output?.data?.baseline;
+    const now = fineCutClips?.();
+    if (!baseline || !now) return { state: 'done', items: FINE_CUT_SKILLS.filter(id => task.skills.includes(id)).map(id => ({ id, count: 0, status: 'stopped' })) };
+    return { state: live ? 'running' : 'done', items: FINE_CUT_SKILLS.filter(id => task.skills.includes(id)).map(id => {
+      const count = now[id].filter(clip => !baseline[id].includes(clip)).length;
+      return { id, count, status: live ? 'running' : count ? 'done' : task.state === 'paused' || unfinishedRoughCut(task) ? 'stopped' : 'not-added' };
+    }) };
+  };
   useEffect(() => {
-    if (!snapshotAfterPatchRef.current || status !== "ready") return;
-    snapshotAfterPatchRef.current = false;
-    onSnapshot(compactStudioChatMessages(messagesRef.current), skillRef.current);
-  }, [messages, status, onSnapshot]);
-  useEffect(() => {
-    const working = status === "streaming" || status === "submitted";
-    const last = messages[messages.length - 1];
-    // Counting starts when a one-click edit's rough cut lands, finished, in the live reply.
-    if (!fineCutRef.current && fineCutClips && last?.role === "assistant" && !(last.metadata as RoughCutReplyMeta | undefined)?.fineCut) {
-      const roughCut = last.parts.find((part) => toolNameOfPart(part) === ROUGH_CUT_TOOL && (part as { state?: string }).state === "output-available");
-      const receipt = (roughCut as { output?: { data?: { baseline?: Record<FineCutSkill, string[]>; stopped?: boolean } } } | undefined)?.output?.data;
-      const asked = [...messages].reverse().find((m) => m.role === "user");
-      if (receipt?.baseline && !receipt.stopped && (asked?.metadata as { startTool?: unknown } | undefined)?.startTool === ROUGH_CUT_TOOL) {
-        const on = new Set(editingSkillsRef.current ?? []);
-        const items = FINE_CUT_SKILLS.filter((id) => on.has(id)).map((id): FineCutItem => ({ id, status: "running", count: 0 }));
-        if (items.length) {
-          fineCutRef.current = { messageId: last.id, baseline: receipt.baseline, seenBusy: working };
-          patchReplyMeta(last.id, (meta) => ({ ...meta, fineCut: { state: "running", items } }));
-          return;
-        }
-      }
-    }
-    const live = fineCutRef.current;
-    if (!live || !fineCutClips) return;
-    if (working) live.seenBusy = true;
-    const added = (): Record<FineCutSkill, number> => {
-      const now = fineCutClips();
-      return Object.fromEntries(FINE_CUT_SKILLS.map((id) => [id, now[id].filter((clip) => !live.baseline[id].includes(clip)).length])) as Record<FineCutSkill, number>;
-    };
-    const fineCut = (messages.find((m) => m.id === live.messageId)?.metadata as RoughCutReplyMeta | undefined)?.fineCut;
-    const counts = added();
-    if (fineCut?.items.some((item) => item.count !== counts[item.id])) {
-      patchReplyMeta(live.messageId, (meta) => ({ ...meta, fineCut: { state: "running", items: fineCut.items.map((item) => ({ ...item, count: counts[item.id] })) } }));
-    }
-    if (working || (!live.seenBusy && !userStoppedRef.current)) return;
-    // The turn has really ended (nothing streaming, no tool still running or about to continue): a skill
-    // the agent added nothing for is "not needed".
-    const timer = setTimeout(() => {
-      if (fineCutRef.current !== live || statusRef.current === "streaming" || statusRef.current === "submitted") return;
-      const tail = messagesRef.current[messagesRef.current.length - 1];
-      const pendingTool = tail?.role === "assistant" && tail.parts.some((part) => (part.type.startsWith("tool-") || part.type === "dynamic-tool") && ["input-streaming", "input-available"].includes((part as { state?: string }).state ?? ""));
-      if (!userStoppedRef.current && (pendingTool || lastAssistantMessageIsCompleteWithToolCalls({ messages: messagesRef.current }))) return;
-      fineCutRef.current = null;
-      const stopped = userStoppedRef.current || statusRef.current === "error";
-      const final = added();
-      snapshotAfterPatchRef.current = true;
-      patchReplyMeta(live.messageId, (meta) => meta.fineCut ? ({
-        ...meta,
-        fineCut: { state: "done", items: meta.fineCut.items.map((item): FineCutItem => ({ ...item, count: final[item.id], status: final[item.id] ? "done" : stopped ? "stopped" : "not-needed" })) },
-      }) : meta);
-    }, 1500);
-    return () => clearTimeout(timer);
-  }, [messages, status, patchReplyMeta, fineCutClips]);
-  // Credits billed after a rough cut ended go to that rough cut's reply.
-  useEffect(() => onLateRoughCutCredits((credits) => {
-    const reply = [...messagesRef.current].reverse().find((m) => m.role === "assistant" && m.parts.some((part) => toolNameOfPart(part) === ROUGH_CUT_TOOL));
-    if (!reply) return;
-    snapshotAfterPatchRef.current = true;
-    patchReplyMeta(reply.id, (meta) => ({ ...meta, lateCredits: Math.round(((meta.lateCredits ?? 0) + credits) * 100) / 100 }));
-  }), [patchReplyMeta]);
+    if (busy) return;
+    const task = latestTask(messagesRef.current);
+    const last = messagesRef.current.at(-1);
+    if (!task || task.state !== 'running' || last?.role !== 'assistant') return;
+    if (lastAssistantMessageIsCompleteWithToolCalls({ messages: messagesRef.current }) && !userStoppedRef.current && status !== 'error') return;
+    if (last.parts.some(part => ['input-streaming', 'input-available'].includes((part as { state?: string }).state ?? '')) && !userStoppedRef.current && status !== 'error') return;
+    const fine = fineCutFor(last, task, false);
+    const state = userStoppedRef.current || status === 'error' ? 'paused' : unfinishedRoughCut(task) || fine?.items.some(item => item.status === 'stopped') ? 'partial' : 'done';
+    updateTask(task.id, current => ({ ...current, state, ...(fine ? { fineCut: fine } : {}) }));
+  }, [busy, status, messages]);
 
   // A next step goes at the end of the message being written, to edit and send.
   const fillRequest = useCallback((request: string) => {
@@ -701,8 +720,11 @@ export function ChatThread({
   useEffect(() => {
     if (!startPrompt?.trim() || startSentRef.current || status !== "ready") return;
     startSentRef.current = true;
-    onStartPromptSent?.();
-    void run(startPrompt, { startTool: ROUGH_CUT_TOOL, hint: ONE_CLICK_EDIT_HINT });
+    // A reload after saving the first message must not start it a second time.
+    if (messagesRef.current.some(message => taskOf(message)?.mode === 'one-click')) { onStartPromptSent?.(); return; }
+    void run(startPrompt, { startTool: ROUGH_CUT_TOOL, hint: ONE_CLICK_EDIT_HINT }).then(sent => {
+      if (sent) onStartPromptSent?.(); else startSentRef.current = false;
+    });
   }, [startPrompt, status, run, onStartPromptSent]);
 
   // A failed stream may already have committed tools. Re-generating the old assistant message
@@ -713,6 +735,7 @@ export function ChatThread({
     () => {
       const studioAction = latestStudioMetaAction(messagesRef.current);
       return run(t("chatGen.continueAfterInterruptionPrompt"), {
+        resume: latestTask(messagesRef.current),
         ...(studioAction ? { studioAction } : {}),
       });
     },
@@ -761,6 +784,7 @@ export function ChatThread({
       const studioAction = latestStudioMetaAction(messagesRef.current);
       run(t("chatGen.continueAfterInterruptionPrompt"), {
         preserveAutoRecoveryAttempt: true,
+        resume: latestTask(messagesRef.current),
         ...(studioAction ? { studioAction } : {}),
       });
     }, 650);
@@ -772,9 +796,16 @@ export function ChatThread({
   const handleStop = useCallback(() => {
     userStoppedRef.current = true;
     timelineFrameInspectionRef.current?.abort();
-    toolAbortRef.current?.abort();
+    toolAbortsRef.current.forEach(controller => controller.abort());
     void stop();
-  }, [stop]);
+    const task = latestTask(messagesRef.current);
+    if (task) updateTask(task.id, current => ({ ...current, state: 'paused' }));
+  }, [stop, onSnapshot]);
+  useEffect(() => {
+    const leave = () => { if (busyRef.current) handleStop(); };
+    window.addEventListener('pagehide', leave);
+    return () => window.removeEventListener('pagehide', leave);
+  }, [handleStop]);
 
   // Quick prompts: fill into the composer instead of sending directly (user can reword / add @ references before sending)
   const fillComposer = useCallback((text: string) => {
@@ -1062,6 +1093,8 @@ export function ChatThread({
               const editorialCapacityShortfall = m.role === "assistant" && (!isLast || status === "ready")
                 ? assistantEditorialCapacityShortfall(m)
                 : null;
+              const originTask = taskOf([...messages.slice(0, mi)].reverse().find(item => item.role === 'user'));
+              const messageTask = originTask ? [...messages].reverse().map(taskOf).find(task => task?.id === originTask.id) ?? originTask : undefined;
               const workFold = assistantWorkFold(m, !isLast || status === "ready");
               const workFoldAvailable = workFold !== null;
               const workExpanded = !collapsedWorkMessages.has(m.id);
@@ -1204,9 +1237,10 @@ export function ChatThread({
                               key={key}
                               part={part as { state?: string; output?: unknown; errorText?: string }}
                               running={busy && isLast && ["input-streaming", "input-available"].includes((part as { state?: string }).state ?? "")}
-                              fineCutLive={fineCutRef.current?.messageId === m.id}
+                              fineCutLive={busy && isLast}
                               brandName={projectBrand?.name}
-                              meta={m.metadata as RoughCutReplyMeta | undefined}
+                              checkpoint={messageTask?.roughCut?.callId === (part as { toolCallId?: string }).toolCallId ? messageTask?.roughCut?.report : undefined}
+                              meta={{ ...(m.metadata as RoughCutReplyMeta | undefined), fineCut: fineCutFor(m, messageTask, busy && isLast), lateCredits: Object.values(messageTask?.lateUsage ?? {}).reduce((sum, credits) => sum + credits, 0) }}
                               agentCredits={messageTurnCredits(m)}
                             />
                           );
@@ -1330,6 +1364,13 @@ export function ChatThread({
                   {t("chatGen.continueFromCurrentState")}
                 </button>
               )}
+            </div>
+          )}
+          {taskResumeError && <p role="alert" className="text-ink-3 mx-3 mb-2 text-xs">{t('chatGen.resumeOriginalOutput')}</p>}
+          {!busy && status !== 'error' && ['paused', 'partial'].includes(latestTask(messages)?.state ?? '') && (
+            <div className="text-ink-3 mx-3 mb-2 flex items-center justify-between gap-2 text-xs" role="status">
+              <span>{t('chatGen.workNotFinished')}</span>
+              <button type="button" onClick={() => void continueFromCurrentState()} className="text-ink underline underline-offset-2">{t('chatGen.continueFromCurrentState')}</button>
             </div>
           )}
           {timelineFrameInspectionError && status !== "error" && (

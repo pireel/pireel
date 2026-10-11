@@ -51,11 +51,11 @@ describe('first pass', () => {
     expect(calls[2]![1].wordIds).toHaveLength(1);
     const status = Object.fromEntries(report.steps.map((step) => [step.id, step.status]));
     // No speech clean-up service in this host (fillers still go); no voice cleanup skill; no brand logo or loudness.
-    expect(status).toEqual({ transcribe: 'done', pauses: 'done', cleanup: 'done', captions: 'done', denoise: 'skipped', logo: 'skipped', loudness: 'skipped' });
-    expect(report.state).toBe('done');
+    expect(status).toEqual({ transcribe: 'done', pauses: 'done', cleanup: 'failed', captions: 'done', denoise: 'skipped', logo: 'skipped', loudness: 'skipped' });
+    expect(report.state).toBe('partial');
     expect(report.summary).toBeTruthy();
     expect(updates.at(-1)).toEqual(report);
-    expect(note).toMatch(/Rough cut done/);
+    expect(note).toMatch(/Rough cut partial/);
   });
 
   it('keeps natural pauses, cuts repeats with the pause after them and masks sensitive words', async () => {
@@ -119,6 +119,16 @@ describe('first pass', () => {
     expect(second.report.steps.find((step) => step.id === 'pauses')!.status).toBe('skipped');
   });
 
+  it('honors independent cleanup and pause switches without changing the original brand', async () => {
+    setStudioProviders(unavailableProviders());
+    const brand = { blocks: { sound: { pauses: 'moderate' } }, preferences: { cleanup: false, pauses: true } } as unknown as PlaybookSnapshot;
+    const { value, calls } = host({ brand, skills: ['rough-cut'] });
+    const { report } = await runFirstPass(value, () => {});
+    expect(calls.map(([name]) => name)).toEqual(['get_transcript', 'remove_silence']);
+    expect(report.steps.find(step => step.id === 'cleanup')?.status).toBe('skipped');
+    expect(brand.preferences).toEqual({ cleanup: false, pauses: true });
+  });
+
   it('skips a step the brand does not set even when it is asked for', async () => {
     setStudioProviders(unavailableProviders());
     const { value } = host({ skills: [] });
@@ -158,7 +168,7 @@ describe('first pass', () => {
       }),
     });
     const late: number[] = [];
-    const { report } = await runFirstPass(value, () => {}, { signal: controller.signal, onLateUsage: (credits) => late.push(credits) });
+    const { report } = await runFirstPass(value, () => {}, { signal: controller.signal, onLateUsage: (usage) => late.push(usage.credits!) });
     bill!({ source: 'server', reference: 'asr', credits: 3 });
     expect(report.credits).toBe(0);
     expect(late).toEqual([3]);
@@ -170,7 +180,55 @@ describe('first pass', () => {
     const { report, note } = await runFirstPass(value, () => {});
     expect(report.steps.find((step) => step.id === 'pauses')).toMatchObject({ status: 'failed', detail: 'no bytes' });
     expect(report.steps.find((step) => step.id === 'captions')!.status).toBe('done');
-    expect(note).toMatch(/Failed and not applied: pauses/);
+    expect(report.state).toBe('partial');
+    expect(note).toMatch(/Not fully completed.*pauses/);
+  });
+
+  it('blocks dependent work after transcription fails and never reports completion', async () => {
+    setStudioProviders(unavailableProviders());
+    const { value, calls } = host({ tool: async () => ({ ok: false, error: 'Failed to fetch' }) });
+    const { report, note } = await runFirstPass(value, () => {});
+    expect(report.state).toBe('failed');
+    expect(report.steps.find(step => step.id === 'captions')?.status).toBe('pending');
+    expect(calls.some(([name]) => name === 'captions')).toBe(false);
+    expect(note).not.toContain('Rough cut done');
+  });
+
+  it('resumes checkpoints without repeating completed analysis or applied cleanup substeps', async () => {
+    let analyses = 0;
+    setStudioProviders({ ...unavailableProviders(), speechCleanup: async () => {
+      analyses++;
+      return { cuts: [{ seg: 0, text: '嗯，', keep: 0, kind: 'false-start', range: [0, 0.4] }], sensitive: [], unsure: [] };
+    } });
+    const controller = new AbortController();
+    const { value, calls } = host({ skills: ['rough-cut'], tool: async (name, args) => {
+      calls.push([name, args]);
+      if (name === 'remove_words' && args.ranges) controller.abort();
+      return { ok: true };
+    } });
+    const first = await runFirstPass(value, () => {}, { signal: controller.signal });
+    expect(first.report.cleanup?.applied).toContain('repeats');
+    calls.length = 0;
+    const second = await runFirstPass(value, () => {}, { resume: first.report, steps: ['captions'] });
+    expect(analyses).toBe(1);
+    expect(calls.some(([name]) => name === 'get_transcript')).toBe(false);
+    expect(calls.some(([name, args]) => name === 'remove_words' && args.ranges)).toBe(false);
+    expect(second.report.state).toBe('done');
+  });
+
+  it('refuses to apply a checkpoint to a different source video', async () => {
+    const { value, calls } = host();
+    await expect(runFirstPass(value, () => {}, { resume: { sourceAssetId: 'different-source', state: 'stopped', credits: 0, steps: [] } })).rejects.toThrow();
+    expect(calls).toEqual([]);
+  });
+
+  it('persists document changes before marking a step complete', async () => {
+    setStudioProviders(unavailableProviders());
+    let persisted = false;
+    const { value } = host({ skills: [], persist: async () => { persisted = true; } });
+    await runFirstPass(value, report => {
+      if (report.steps.find(step => step.id === 'transcribe')?.status === 'done') expect(persisted).toBe(true);
+    }, { steps: ['transcribe'] });
   });
 
   it('tells an imported source from an edited project', () => {

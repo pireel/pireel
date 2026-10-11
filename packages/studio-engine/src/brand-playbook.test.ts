@@ -35,6 +35,21 @@ describe('validatePlaybook', () => {
     }
   });
 
+  it('reads legacy labelled descriptions as prose without changing stored observations', () => {
+    const original = valid();
+    original.blocks.graphics!.text = '用不用：用\n程度：讲数据时配图形，观点回到人物。\n样子：白底黑字数字卡。';
+    const upgraded = validatePlaybook(original);
+    expect(upgraded.blocks.graphics?.text).toBe('讲数据时配图形，观点回到人物。 白底黑字数字卡。');
+    expect(upgraded.blocks.graphics?.references).toEqual(original.blocks.graphics?.references);
+    expect(original.blocks.graphics?.text).toContain('用不用：');
+    expect(validatePlaybook(upgraded)).toBe(upgraded);
+    expect(renderBrandPrompt(original)).not.toContain('用不用：');
+    const english = valid();
+    english.blocks.camera = { text: 'Use: No\nDegree: No deliberate camera moves were seen.\nLooks: Static framing.' };
+    expect(validatePlaybook(english).blocks.camera?.text).toBe('No. No deliberate camera moves were seen. Static framing.');
+    expect(validatePlaybook(valid()).blocks.camera?.text).toBe(valid().blocks.camera?.text);
+  });
+
   it('refuses brands of an older shape', () => {
     expect(() => validatePlaybook({ ...emptyPlaybook('b', 'Old'), schema: 1, fixed: {}, moves: [] })).toThrow(/schema/);
   });

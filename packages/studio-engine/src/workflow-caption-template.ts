@@ -1,6 +1,6 @@
 import { contractedCapability } from './workflow-node-contracts';
 import { workflowLiteral as literal, type WorkflowBinding, type WorkflowCapability, type WorkflowDefinition, type WorkflowStep } from './workflow';
-import type { CaptionTaskOptions } from './caption-task';
+import { scopeSceneBrandOptions, type CaptionTaskOptions } from './caption-task';
 import { workflowJson } from './workflow-artifacts';
 import { playbookHasMedia } from './brand-media';
 import { playbookEditGuide } from './brand-edit-params';
@@ -39,6 +39,7 @@ export function captionLayoutOptions(options: CaptionTaskOptions): CaptionTaskOp
 }
 /** `render: false` stops at the edited document; the video is rendered when the user exports it. */
 export function captionTailSteps(options: CaptionTaskOptions, document: WorkflowBinding, transcript: WorkflowBinding, media: WorkflowBinding, render = true): WorkflowStep[] {
+  options = scopeSceneBrandOptions(options);
   const steps: WorkflowStep[] = [];
   const captions = options.sfx ? ('captions' in options.sfx && options.sfx.captions) : !options.broll || options.broll.captions;
   const moves = options.edit?.moves;
@@ -74,6 +75,7 @@ export function captionTailSteps(options: CaptionTaskOptions, document: Workflow
   return steps;
 }
 export function captionWorkflowDefinition(options: CaptionTaskOptions, media: unknown, transcript: unknown = null, cuts: unknown = null, projectId = 'caption', render = true): WorkflowDefinition {
+  options = scopeSceneBrandOptions(options);
   const source = sceneLiteral(media);
   const steps = [sceneStep('transcript', 'speech.transcribe', { media: source, transcript: sceneLiteral(transcript) })];
   const pause = options.edit?.pause;

@@ -1,3 +1,4 @@
+import { brandGraphicsStyle } from './brand-playbook';
 /**
  * Offline executor — when no studio tab is open, document tools operate directly on the
  * project's native V2 document server-side, so the bridge's studio_not_open is not a dead end.
@@ -392,7 +393,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         theme: c.theme,
         ...(c.palette ? { palette: c.palette } : {}),
         // The project's brand graphics (null: edited without a brand); absent when no brand was ever set.
-        ...(c.brand !== undefined ? { brandGraphics: c.brand?.blocks.graphics?.text?.trim() || null } : {}),
+        ...(c.brand !== undefined ? { brandGraphics: c.brand ? brandGraphicsStyle(c.brand) : null } : {}),
       };
       const bid = typeof input.clipId === 'string' ? input.clipId : undefined;
       if (bid) {

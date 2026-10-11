@@ -122,7 +122,7 @@ export interface StudioChatProps {
   runTool: (
     toolId: string,
     input: Record<string, unknown>,
-    opts?: { signal?: AbortSignal; surface?: "chat" | "bridge"; skillId?: string },
+    opts?: { signal?: AbortSignal; surface?: "chat" | "bridge"; skillId?: string; roughCut?: import("./first-pass").RoughCutExecution },
   ) => Promise<StudioToolResult>;
   /** Request-body fields read at send time (session-level frame / skill selection). */
   getBody: () => Record<string, unknown>;
@@ -131,8 +131,7 @@ export interface StudioChatProps {
   /** Live composition accessor (stable identity, reads a ref): tool receipt cards preview blocks
    *  without linking chat re-renders to comp state. Optional — the preview strip hides without it. */
   getComp?: () => Composition;
-  /** The brand the project is edited with (null: none picked; undefined: never set — the server then uses
-   *  the creator's current brand), sent with every request; and how the creator switches it. */
+  /** This project's chosen brand snapshot. Null or undefined means no brand; no account fallback. */
   projectBrand?: PlaybookSnapshot | null;
   /** The Studio Skill the project is edited as (undefined: never set — the thread's own pick applies),
    *  and how a pick in the chat is written back to the project. */
@@ -326,13 +325,14 @@ export const StudioChat = memo(
           id: activeId,
           title,
           messages,
-          updatedAt: Date.now(),
+          updatedAt: Math.max(Date.now(), (threadsRef.current.find(thread => thread.id === activeId)?.updatedAt ?? 0) + 1),
           skillId,
         };
         const merged = [
           next,
           ...threadsRef.current.filter((t) => t.id !== activeId),
         ];
+        threadsRef.current = merged;
         setThreads(merged);
         onThreadChangeRef.current?.(next);
       },

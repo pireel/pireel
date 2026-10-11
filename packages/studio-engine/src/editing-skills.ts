@@ -42,7 +42,7 @@ export function editingSkillsHint(ids: readonly string[] | undefined): string {
   const on = editingSkillsOf(ids);
   if (!on.length) return '';
   return [
-    'Editing skills the creator switched on for this project. Apply them when this turn builds or reworks the video as a whole; for a narrow request, do only what was asked.',
+    'Editing capabilities enabled for this project. Use them when useful for a whole-video edit, not as quotas or a requirement to add something from every category. For a narrow request, do only what was asked. The current explicit request takes precedence over brand defaults.',
     ...on.map((skill) => `- ${skill.id}: ${skill.instruction}`),
   ].join('\n');
 }

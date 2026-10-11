@@ -16,6 +16,8 @@ vi.mock('@pireel/ui/dialog', () => ({
   DialogTitle: ({ children }: { children: ReactNode }) => createElement('h1', null, children),
 }));
 import { CaptionUploadDialog } from './caption-upload-dialog';
+import { setStudioProviders, studioProviders } from '@pireel/studio-engine/providers';
+import { emptyPlaybook } from '@pireel/studio-engine/brand-playbook';
 let root: Root;
 let container: HTMLDivElement;
 const continued = vi.fn();
@@ -43,6 +45,19 @@ describe('automatic caption upload transition', () => {
     await act(async () => finishSave());
     expect(continued).toHaveBeenCalledOnce();
     expect(mocks.save.mock.calls[0]![0]).toMatchObject({ scope: 'account', sourceSig: 'source-sig', stage: 'ready', coverThumb: 'data:image/jpeg;base64,cover' });
+  });
+  it('does not inherit or advertise an account brand while uploading a scene', async () => {
+    const before = studioProviders();
+    const current = vi.fn().mockResolvedValue(emptyPlaybook('account-brand', 'ACCOUNT BRAND'));
+    const legacyBrands = { list: async () => [], current };
+    setStudioProviders({ ...before, brands: legacyBrands });
+    try {
+      await render(); await upload();
+      expect(current).not.toHaveBeenCalled();
+      expect(mocks.save.mock.calls[0][0].options.brand).toBeUndefined();
+      expect(container.textContent).not.toContain('ACCOUNT BRAND');
+      expect(container.textContent).not.toContain('使用品牌');
+    } finally { setStudioProviders(before); }
   });
   it('still imports the video when thumbnail decoding fails', async () => {
     mocks.cover.mockRejectedValueOnce(new Error('Decoder unavailable'));

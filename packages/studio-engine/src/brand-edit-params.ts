@@ -1,3 +1,4 @@
+import { brandPreferences } from './brand-preferences';
 import { hasText, renderBrandPrompt, upgradeBlocks, type PlaybookSnapshot } from './brand-playbook';
 import type { AsrSegment } from './build-blocks';
 import { CUT_TRANSITION_EFFECTS, ZOOM_PRESETS, type CutTransitionEffect, type ShotZoom, type ZoomPreset } from './composition-core';
@@ -44,10 +45,11 @@ const PUNCH_SCALE: [number, number] = [1.05, 1.8];
 export function playbookEditParams(playbook: PlaybookSnapshot): CaptionEditParams {
   const b = upgradeBlocks(playbook.blocks);
   const params: CaptionEditParams = {};
-  if (b.sound?.pauses) params.pause = { ...PAUSE_BY_MODE[b.sound.pauses] };
+  const preferences = brandPreferences(playbook);
+  if (b.sound?.pauses && playbook.preferences?.pauses !== false) params.pause = { ...PAUSE_BY_MODE[b.sound.pauses] };
   if (b.sound?.lufs !== undefined) params.targetLufs = b.sound.lufs;
-  if (hasText(b.camera) || hasText(b.transitions) || hasText(b.layout)) params.moves = { punchIn: true, transition: true };
-  if (hasText(b.overlay_text)) params.titles = true;
+  if (preferences.zoom || preferences.transitions) params.moves = { punchIn: preferences.zoom, transition: preferences.transitions };
+  if (preferences.headlines) params.titles = true;
   return params;
 }
 

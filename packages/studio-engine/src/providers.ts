@@ -139,9 +139,8 @@ export interface CuratedAssetProvider {
 }
 
 export interface StudioProviders {
-  /** The signed-in user's brand kits (hosted feature; absent = scenes hide the brand picker). `current`
-   *  is the brand new scene projects start from; `manage` opens where brands are created and edited. */
-  brands?: { list: () => Promise<import('./brand-playbook').BrandPlaybook[]>; current?: () => Promise<import('./brand-playbook').BrandPlaybook | null>; manage?: () => void };
+  /** Reusable brand presets. Each project explicitly selects its own snapshot; manage opens the library. */
+  brands?: { list: () => Promise<import('./brand-playbook').BrandPlaybook[]>; manage?: () => void };
   workflowEnvironment?: () => Promise<{ scope: string; revision: string }>;
   composer: BlockComposer;
   transcriber: Transcriber;

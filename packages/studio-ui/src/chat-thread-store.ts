@@ -2,6 +2,7 @@
 
 import type { UIMessage } from 'ai';
 import { t } from './i18n';
+import { taskOf } from './chat-task';
 import { stripLeakedToolProtocolText } from '@pireel/studio-engine/tool-protocol-text';
 import {
   isStudioScenarioSkillId,
@@ -135,19 +136,17 @@ export function effectiveStudioTurnMessages(
   ledger: StudioTurnLedger,
 ): UIMessage[] {
   if (!ledger.receipts.length) return messages as UIMessage[];
-  const committed = new Set<string>();
-  for (const message of messages) {
-    for (const part of message.parts ?? []) {
-      const toolCallId = (part as { toolCallId?: unknown }).toolCallId;
-      if (typeof toolCallId === 'string') committed.add(toolCallId);
-    }
-  }
-  const pending = ledger.receipts.filter((part) => {
-    const toolCallId = (part as { toolCallId?: unknown }).toolCallId;
-    return typeof toolCallId !== 'string' || !committed.has(toolCallId);
-  });
-  if (!pending.length) return messages as UIMessage[];
-  return [...messages, { id: '__studio-turn-ledger__', role: 'assistant', parts: pending }];
+  const receipts = new Map(ledger.receipts.map(part => [(part as { toolCallId?: string }).toolCallId, part]));
+  const merged = messages.map(message => ({ ...message, parts: message.parts.map(part => {
+    const id = (part as { toolCallId?: string }).toolCallId;
+    const receipt = receipts.get(id);
+    if (!receipt) return part;
+    receipts.delete(id);
+    // SDK state can lag a synchronous tool receipt. Preserve the actual result before a refresh.
+    return receipt;
+  }) }));
+  const pending = [...receipts.values()];
+  return pending.length ? [...merged, { id: '__studio-turn-ledger__', role: 'assistant', parts: pending }] : merged;
 }
 
 export interface AssistantWorkFold {
@@ -434,6 +433,8 @@ export function normalizeStoredThreads(value: unknown, availableSkillIds: readon
  *  protocol accidentally persisted as assistant text must never become visible history. */
 export function sanitizeRestored(messages: UIMessage[]): UIMessage[] {
   return compactStudioChatMessages(messages.map((m) => {
+    const task = taskOf(m);
+    if (task?.state === 'running') return { ...m, metadata: { ...(m.metadata as object), task: { ...task, state: 'paused' } } };
     if (m.role !== 'assistant') return m;
     const parts = (m.parts ?? []).map((p) => {
       const tp = p as { type: string; state?: string; text?: string };
@@ -441,7 +442,7 @@ export function sanitizeRestored(messages: UIMessage[]): UIMessage[] {
         const text = stripLeakedToolProtocolText(tp.text);
         if (text !== tp.text) return { ...p, text } as typeof p;
       }
-      if (tp.type.startsWith('tool-') && (tp.state === 'input-streaming' || tp.state === 'input-available')) {
+      if ((tp.type.startsWith('tool-') || tp.type === 'dynamic-tool') && (tp.state === 'input-streaming' || tp.state === 'input-available')) {
         return { ...p, state: 'output-error', errorText: t('chatGen.generationInterrupted') } as typeof p;
       }
       return p;

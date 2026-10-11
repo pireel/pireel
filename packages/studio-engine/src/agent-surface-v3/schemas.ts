@@ -585,7 +585,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   read_brand: {
     description:
-      'The creator\'s brand in use: their style read from videos they published, as XML sections — portrait, captions, overlay_text (words put on the picture), visual (when to leave the speaker, how pictures sit with them, what to make when footage runs out), graphics (how their graphics look and how colours and type are chosen), structure, sound, logo, cover. Read it once before building or reworking a whole video; where the user leaves a choice open, edit the way this creator edits. The latest explicit user instruction wins over it. Returns no_brand when the creator has none.',
+      'The brand snapshot explicitly selected for this project, with its reusable style guidance, editing preferences, fixed caption and logo settings, and cover guidance. Read it once before building or reworking a whole video; apply it where the current request leaves a choice open. Enabled capabilities are optional when useful, not quotas. The latest explicit user instruction wins. Returns no_brand when this project has no brand; it never adopts an account default',
     inputSchema: obj({}, []),
   },
 

@@ -1,3 +1,4 @@
+import { brandMediaAssets } from '@pireel/studio-engine/brand-media';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { compositionToEditorDocument, emptyComposition } from '@pireel/studio-engine/composition';
 import { EDITING_SKILL_IDS } from '@pireel/studio-engine/editing-skills';
@@ -21,15 +22,18 @@ async function imageSize(file: File): Promise<{ width: number; height: number } 
   } catch { return null; }
 }
 
-/** The first message an Agent project made this way sends once it opens (read once, then removed). */
+/** Keep the launch request until its first user message has been checkpointed. */
 const START_PROMPT_KEY = (projectId: string) => `studio:start-prompt:${projectId}`;
 
 export function takeAgentStartPrompt(projectId: string): string | null {
   try {
-    const prompt = sessionStorage.getItem(START_PROMPT_KEY(projectId));
-    if (prompt !== null) sessionStorage.removeItem(START_PROMPT_KEY(projectId));
+    const prompt = localStorage.getItem(START_PROMPT_KEY(projectId)) ?? sessionStorage.getItem(START_PROMPT_KEY(projectId));
     return prompt;
   } catch { return null; }
+}
+
+export function acknowledgeAgentStartPrompt(projectId: string): void {
+  try { localStorage.removeItem(START_PROMPT_KEY(projectId)); sessionStorage.removeItem(START_PROMPT_KEY(projectId)); } catch { /* The saved task also deduplicates startup. */ }
 }
 
 /** Where making the project is: each step the Studio home shows, with how far it is when that can be told. */
@@ -79,6 +83,7 @@ export async function createAgentProjectFromVideo(file: File, options: { brand: 
       localAssets.push({ assetId: asset.id, contentSig: sig, sig, label: file.name, kind: asset.kind, w: data.width, h: data.height, durationSec: data.durationSec, size: file.size, mime: file.type, createdAt: Date.now() });
     }
     localAssets.push(...materials);
+    if (options.brand) document.assets = { ...document.assets, ...brandMediaAssets(options.brand) };
     const transactionId = createDocumentTransactionId();
     const payload: ProjectSaveWire = {
       documentSchemaVersion: 2, knownVersion: null,
@@ -91,7 +96,7 @@ export async function createAgentProjectFromVideo(file: File, options: { brand: 
     const stored = await serverLoadProject(id);
     if (!stored) throw new Error('项目已创建，暂时无法打开。请从项目列表重试。');
     cacheProjectLocally(stored);
-    try { sessionStorage.setItem(START_PROMPT_KEY(id), options.prompt); } catch { /* the editor opens without a first message */ }
+    try { localStorage.setItem(START_PROMPT_KEY(id), options.prompt); } catch { sessionStorage.setItem(START_PROMPT_KEY(id), options.prompt); }
     return id;
   } finally { URL.revokeObjectURL(url); }
 }

@@ -427,10 +427,26 @@ describe('Agent composition transaction boundary', () => {
     expect(String(speechCalls[0]?.[1]?.body)).toContain('"pauseStyle":"spacious"');
   });
 
+  it('checkpoints a partial rough cut without wrapping completed steps in an outer transaction', async () => {
+    const { runExternalTool } = await import('./agent-tool-runner');
+    const h = harness();
+    h.ctx.documentRef.current.semantics.editingSkills = ['captions'];
+    h.ctx.applyCaptionPreset = vi.fn();
+    const scopes = vi.spyOn(h.ctx, 'beginTransactionScope');
+    const progress: import('./first-pass').FirstPassReport[] = [];
+    const result = await runExternalTool(h.ctx, 'run_v3', { name: 'rough_cut', args: {}, surface: 'chat' }, { onProgress: report => progress.push(report) });
+    expect(result).toMatchObject({ ok: true, data: { taskIncomplete: true, report: { state: 'failed' } } });
+    expect(progress.at(-1)?.steps.find(step => step.id === 'captions')?.status).toBe('pending');
+    expect(h.ctx.applyCaptionPreset).not.toHaveBeenCalled();
+    // get_transcript is a read; no outer rough-cut transaction may hold the checkpoints hostage.
+    expect(scopes).not.toHaveBeenCalled();
+  });
+
   it('marks rejected approval receipts as a hard agent-turn boundary', async () => {
     const { studioToolResultStopsAgentTurn } = await import('./agent-tool-runner');
     expect(studioToolResultStopsAgentTurn({ ok: true, data: { decision: 'rejected' } })).toBe(true);
     expect(studioToolResultStopsAgentTurn({ ok: true, data: { decision: 'approved' } })).toBe(false);
+    expect(studioToolResultStopsAgentTurn({ ok: true, data: { taskIncomplete: true } })).toBe(true);
     expect(studioToolResultStopsAgentTurn({ ok: false, data: { decision: 'rejected' } })).toBe(false);
   });
 
