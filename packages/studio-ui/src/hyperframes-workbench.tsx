@@ -1,5 +1,6 @@
-import { brandEditingSkills } from '@pireel/studio-engine/brand-preferences';
 "use client";
+
+import { brandEditingSkills } from '@pireel/studio-engine/brand-preferences';
 
 /**
  * Hyperframes workbench — block-based editing (pure browser, zero server).
@@ -12,7 +13,7 @@ import { brandEditingSkills } from '@pireel/studio-engine/brand-preferences';
  *  · Export via server-side headless Chrome (same assembled HTML, WYSIWYG, TODO wire up).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type ComponentType } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type ComponentType } from "react";
 import type { EditorCommand } from "@pireel/studio-engine/editor-document/commands/types";
 import { DEFAULT_TRANSITION_SEC, transitionSlotAt } from "@pireel/studio-engine/editor-document/transitions";
 import { useLocale } from "use-intl";
@@ -505,6 +506,10 @@ export function HyperframesWorkbench({
   AccountControls?: ComponentType<{ busy: boolean }>;
 }) {
   const shell = useStudioShell();
+  const [whiteboardOpen, setWhiteboardOpen] = useState(false);
+  const whiteboardOpenRef = useRef(false);
+  whiteboardOpenRef.current = whiteboardOpen;
+  const [whiteboardId, setWhiteboardId] = useState<string | null>(null);
   useEffect(() => startLocalMediaCacheSession(), [projectId]);
   const [workflowOpen, setWorkflowOpen] = useState(!!initialWorkflowId);
   const [workflowEntryId] = useState(initialWorkflowId === "talking-head" ? "captions" : initialWorkflowId ?? "captions");
@@ -4060,6 +4065,7 @@ export function HyperframesWorkbench({
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (workflowOpenRef.current) return;
+      if (whiteboardOpenRef.current && [' ', 'Delete', 'Backspace', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
       // The preview stage is a shadow tree: an in-place text edit inside it shows up here as the host.
       let el = document.activeElement as HTMLElement | null;
       while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement as HTMLElement;
@@ -8893,6 +8899,31 @@ export function HyperframesWorkbench({
             </div>
   </TooltipProvider>;
 
+  const whiteboardBlocks = comp.blocks.filter(block => block.templateId === 'whiteboard');
+  const whiteboardBlock = whiteboardBlocks.find(block => block.id === whiteboardId) ?? null;
+  const closeWhiteboard = () => {
+    setWhiteboardOpen(false);
+    const block = compRef.current.blocks.find(item => item.id === whiteboardId);
+    if (block) { setSelectedId(block.id); applyT(block.startSec); }
+  };
+  const saveWhiteboard = (doc: Record<string, unknown>, durationSec?: number): boolean => {
+    if (manualEditingLockedRef.current || !bootDataReady || displaced) return false;
+    const existing = compRef.current.blocks.find(item => item.id === whiteboardId && item.templateId === 'whiteboard');
+    const id = existing?.id ?? blockId();
+    const result = existing ? commit({ op: 'overlay.patch', input: { updates: [{ clipId: id,
+      ...(durationSec !== undefined ? { durationSec } : {}),
+      block: { label: typeof doc.title === 'string' && doc.title ? doc.title : (locale === 'zh' ? '白板' : 'Whiteboard'), slots: { ...existing.slots, doc } },
+    }] } }) : commit({ op: 'overlay.insert', input: { block: {
+      id, templateId: 'whiteboard', startSec: Math.max(0, tRef.current), durationSec: durationSec ?? 10,
+      trackIndex: freeTrack(compRef.current.blocks, Math.max(0, tRef.current), durationSec ?? 10, 2),
+      slots: { doc, fontFamily: 'web:long-cang' }, box: { x: 0, y: 0, w: 1, h: 1 },
+      label: typeof doc.title === 'string' && doc.title ? doc.title : (locale === 'zh' ? '白板' : 'Whiteboard'),
+    } } });
+    if (!result.ok) { toast.error(editorErrorMessage(result.error)); return false; }
+    setWhiteboardId(id); setSelectedShotId(null); setSelectedId(id);
+    return true;
+  };
+
   return (
     <div ref={workspaceRowRef} data-studio-workspace className="studio-scope bg-bg relative flex h-full min-h-0 w-full flex-col gap-1.5 overflow-hidden p-1.5">
       {workflowOpen && <WorkflowEntry
@@ -8947,6 +8978,17 @@ export function HyperframesWorkbench({
             <ArrowLeft size={16} />
           </a> : null}
           <EditorModeSwitch mode={editingMode} onChange={selectEditingMode} />
+          {shell.WhiteboardEditor && <button type="button" data-whiteboard-toggle aria-pressed={whiteboardOpen}
+            disabled={manualEditingLocked || !bootDataReady || displaced}
+            onClick={() => {
+              if (whiteboardOpen) { closeWhiteboard(); return; }
+              setPlaying(false);
+              setWhiteboardId(whiteboardBlocks.find(block => block.id === selectedId)?.id ?? whiteboardBlocks[0]?.id ?? null);
+              setWhiteboardOpen(true);
+            }}
+            className={`inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-xs transition disabled:opacity-40 ${whiteboardOpen ? 'bg-panel-2 text-ink' : 'text-ink-3 hover:bg-panel hover:text-ink'}`}>
+            <LayoutGrid size={14} />{locale === 'zh' ? '白板' : 'Whiteboard'}
+          </button>}
         </div>
         <div className="flex min-w-0 items-center gap-3">
           {!AccountControls && themeToggle}
@@ -8996,7 +9038,19 @@ export function HyperframesWorkbench({
         <div className="mb-1.5 flex min-h-0 min-w-0 flex-1 gap-1.5">
           {/* Preview (= the editing surface: single-click selects a block, double-click edits text in place). No video → upload area.
             The panel clips its own children so nested surfaces cannot bleed through the outer rounded corners. */}
-          <div data-studio-preview inert={manualEditingLocked} className="bg-canvas flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-sm">
+          {whiteboardOpen && shell.WhiteboardEditor && <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-sm" inert={manualEditingLocked || !bootDataReady || displaced}>
+            <Suspense fallback={<div role="status" className="flex flex-1 items-center justify-center bg-canvas text-sm text-ink-3">{locale === 'zh' ? '正在打开白板…' : 'Opening whiteboard…'}</div>}>
+              <shell.WhiteboardEditor key={`${projectOutputs.outputs.active.id}:${whiteboardBlock?.id ?? 'new'}`}
+                block={whiteboardBlock} blocks={whiteboardBlocks} locale={locale}
+                canvas={{ w: editorDocument.canvas.width, h: editorDocument.canvas.height }}
+                hasAudio={editorDocument.timeline.tracks.some(track => !track.muted && track.clips.some(clip =>
+                  clip.startFrame / editorDocument.canvas.fps < (whiteboardBlock ? whiteboardBlock.startSec + whiteboardBlock.durationSec : tRef.current + 10) &&
+                  (clip.startFrame + clip.durationFrames) / editorDocument.canvas.fps > (whiteboardBlock?.startSec ?? tRef.current) &&
+                  (clip.kind === 'audio' && track.role === 'narration' || clip.kind === 'narrative' || clip.kind === 'media' && editorDocument.assets[clip.assetId]?.metadata.hasAudio === true)))}
+                onSelect={id => { setWhiteboardId(id); if (id) setSelectedId(id); }} onSave={saveWhiteboard} onPreview={closeWhiteboard} />
+            </Suspense>
+          </div>}
+          <div data-studio-preview style={whiteboardOpen ? { display: 'none' } : undefined} inert={manualEditingLocked} className="bg-canvas flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-sm">
             <div className="flex min-h-0 min-w-0 flex-1 p-3">
               <div
                 ref={previewAreaRef}
@@ -10433,7 +10487,7 @@ export function HyperframesWorkbench({
             </div>
           </div>
 
-          <WorkbenchDockPanel id="tools" side="right" visible={!libCollapsed} width={columnWidths.right} onResize={(width) => resizeColumn("right", width)}>
+          <WorkbenchDockPanel id="tools" side="right" visible={!libCollapsed && !whiteboardOpen} width={columnWidths.right} onResize={(width) => resizeColumn("right", width)}>
             {RIGHT_DOCK_TABS.map((tab) => {
               const visible = !contextDockVisible && libTab === tab;
               return <div key={tab} data-studio-tool-panel={tab} inert={manualEditingLocked} className={visible ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
@@ -10446,7 +10500,7 @@ export function HyperframesWorkbench({
           <div
             data-studio-tools
             className="bg-canvas flex shrink-0 flex-col overflow-hidden rounded-sm"
-            style={{ width: RAIL_NAV_W }}
+            style={{ width: RAIL_NAV_W, ...(whiteboardOpen ? { display: 'none' } : {}) }}
           >
             <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-0.5 overflow-y-auto px-1 py-2">
               {(
@@ -10542,7 +10596,7 @@ export function HyperframesWorkbench({
 
         {/* Transport bar. On narrow windows (≤1280) button text must not wrap: when space is short the whole bar scrolls horizontally, don't let "safe zone" stack into three lines */}
         <TooltipProvider delayDuration={200}>
-          <div className="bg-panel flex items-center gap-3 overflow-x-auto py-1 pl-4 whitespace-nowrap [&>button]:shrink-0">
+          <div style={whiteboardOpen ? { display: "none" } : undefined} className="bg-panel flex items-center gap-3 overflow-x-auto py-1 pl-4 whitespace-nowrap [&>button]:shrink-0">
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -10883,7 +10937,7 @@ export function HyperframesWorkbench({
 
         {/* Caption style popover: reuses CaptionsPanel wholesale; clicking a style applies globally, click outside / Esc dismisses */}
         {/* Multi-track timeline */}
-        <div data-studio-timeline data-cap-keep inert={manualEditingLocked} hidden={timelineCollapsed} className="shrink-0 overflow-hidden rounded-b-sm">
+        <div data-studio-timeline data-cap-keep inert={manualEditingLocked} hidden={timelineCollapsed || whiteboardOpen} className="shrink-0 overflow-hidden rounded-b-sm">
           <StudioTimeline
             comp={comp}
             density={timelineDensity}

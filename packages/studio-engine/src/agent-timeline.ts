@@ -6,7 +6,7 @@ import { applyOverlayDocumentEdits } from './overlay-document-edit';
 import { insertOverlayDocumentClip } from './overlay-track-edit';
 import { titleBlock } from './block-factory';
 import type { Block } from './composition-core';
-import { WHITEBOARD_FONT_ID, WHITEBOARD_TEMPLATE_ID, checkWhiteboardDoc, whiteboardDurationSec } from './whiteboard-block';
+import { WHITEBOARD_FONT_ID, WHITEBOARD_TEMPLATE_ID, checkWhiteboardDoc, whiteboardDurationSec, preserveWhiteboardLayout } from './whiteboard-block';
 import { WHITEBOARD_DOC_SCHEMA } from './agent-surface-v3/whiteboard-doc-schema';
 import {
   applyEditorCommand,
@@ -1695,7 +1695,7 @@ export function setWhiteboard(document: EditorDocumentV2, input: Input): AgentTi
         clipId: existing.clip.id,
         ...(startFrame !== undefined ? { startSec: timelineFramesToSeconds(startFrame as number, fps) } : {}),
         durationSec,
-        block: { slots: { ...existing.clip.block.slots, ...slots } },
+        block: { slots: { ...existing.clip.block.slots, ...slots, doc: preserveWhiteboardLayout(existing.clip.block.slots.doc, doc) } },
       }],
     });
     if (!edited.ok) return fail(edited.error.message, edited.error);
