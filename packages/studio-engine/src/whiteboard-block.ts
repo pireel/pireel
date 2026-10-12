@@ -99,17 +99,3 @@ export function whiteboardDurationSec(doc: unknown): number {
   }
   return Math.max(MIN_SEC, end + TAIL_SEC);
 }
-
-/** Keep user-placed nodes where they are when an agent replaces the board content. Explicit false
- * releases the lock. Newly added/deleted nodes still follow the incoming document. */
-export function preserveWhiteboardLayout(previous: unknown, incoming: Json): Json {
-  if (!isObject(previous) || !isObject(previous.board) || !Array.isArray(previous.board.nodes)
-    || !isObject(incoming.board) || !Array.isArray(incoming.board.nodes)) return incoming;
-  const old = new Map(previous.board.nodes.filter(isObject).map(node => [node.id, node]));
-  return { ...incoming, board: { ...incoming.board, nodes: incoming.board.nodes.map(node => {
-    if (!isObject(node)) return node;
-    const saved = old.get(node.id);
-    if (saved?.layoutLocked !== true || node.layoutLocked === false || !isObject(saved.pos)) return node;
-    return { ...node, pos: saved.pos, layoutLocked: true, ...(saved.size ? { size: saved.size } : {}) };
-  }) } };
-}

@@ -7,7 +7,7 @@
  */
 
 import { createContext, useContext, type ComponentType } from 'react';
-import type { Block, Composition, EditorDocumentV2, MediaRef } from '@pireel/studio-engine/composition';
+import type { Composition, EditorDocumentV2, MediaRef } from '@pireel/studio-engine/composition';
 import type { PanelDragAsset, PanelMediaAsset } from './asset-card';
 import type { GenElementResult } from './element-history';
 
@@ -84,21 +84,7 @@ export interface StudioAudioTemplateGalleryProps {
   onUseTemplate: (prompt: string, durationSec?: number) => void;
 }
 
-/** Host-owned structured canvas editor; mutations still use the workbench transaction/undo path. */
-export interface StudioWhiteboardEditorProps {
-  block: Block | null;
-  blocks: readonly Block[];
-  locale: string;
-  canvas: { w: number; h: number };
-  hasAudio: boolean;
-  onSelect: (id: string | null) => void;
-  /** A false result leaves the editor open with the existing document intact. */
-  onSave: (doc: Record<string, unknown>, durationSec?: number) => boolean;
-  onPreview: () => void;
-}
-
 export interface StudioShell {
-  WhiteboardEditor?: ComponentType<StudioWhiteboardEditorProps>;
   /** Insufficient-credits card (SaaS billing piece; omitted = not rendered). */
   CreditsCard?: ComponentType<{ need: number; balance: number }>;
   /** Generation model params table (quality/duration/resolution; omitted = panel hides the matching selectors). */

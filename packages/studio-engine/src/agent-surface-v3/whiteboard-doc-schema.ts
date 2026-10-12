@@ -113,7 +113,6 @@ export const WHITEBOARD_DOC_SCHEMA: Schema = obj({
       id: str(),
       content: WHITEBOARD_CONTENT,
       pos: obj({ x: num(), y: num() }, ['x', 'y']),
-      layoutLocked: bool('Manual position in world coordinates. Preserve it on content edits; false explicitly releases the lock.'),
       rotate: num('Tilt in degrees; stickies and photos get a slight random tilt by default.'),
       size: obj({ w: num('', { min: 1 }), h: num('', { min: 1 }) }, ['w', 'h']),
     }, ['id', 'content']), { minItems: 1 }),

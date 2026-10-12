@@ -51,7 +51,7 @@ export type AgentProjectProgress =
  * cached); the editor uploads the media in the background once it opens, so nothing waits on the network.
  * The materials go to the project's library, for the agent to place.
  */
-export async function createAgentProjectFromVideo(file: File, options: { brand: PlaybookSnapshot | null; skills: readonly string[]; prompt: string; agentModel?: StudioAgentModelId; materials?: readonly File[]; report?: (progress: AgentProjectProgress) => void }): Promise<string> {
+export async function createAgentProjectFromVideo(file: File, options: { brand: PlaybookSnapshot | null; skills: readonly string[]; prompt: string; agentModel?: StudioAgentModelId; skillId?: string; canvas?: { width: number; height: number }; materials?: readonly File[]; report?: (progress: AgentProjectProgress) => void }): Promise<string> {
   options.report?.({ phase: 'reading' });
   const [data, user] = await Promise.all([probeVideoFile(file), loadCurrentUser()]);
   if (!user || user.auth_method === 'anon') throw new Error('请先登录。');
@@ -78,7 +78,11 @@ export async function createAgentProjectFromVideo(file: File, options: { brand: 
     const document = compositionToEditorDocument({ projectId: id, videoSig: sig, composition }).document;
     // A brand brings its Skill (the kind of video it is a style of).
     // The homepage's talking-head workflow is the same with or without a brand.
-    document.semantics = { ...document.semantics, brand: options.brand, agentModel: studioAgentModelId(options.agentModel), skillId: HOME_VIDEO_EDITING_SKILL, editingSkills: EDITING_SKILL_IDS.filter((skill) => options.skills.includes(skill)) };
+    document.semantics = { ...document.semantics, brand: options.brand, agentModel: studioAgentModelId(options.agentModel), skillId: options.skillId ?? HOME_VIDEO_EDITING_SKILL, editingSkills: EDITING_SKILL_IDS.filter((skill) => options.skills.includes(skill)) };
+    if (options.canvas) {
+      if (![options.canvas.width, options.canvas.height].every(value => Number.isInteger(value) && value >= 64 && value <= 7680)) throw new Error('Invalid output dimensions');
+      document.canvas = { ...document.canvas, ...options.canvas, configured: true };
+    }
     if (options.brand) document.appearance = { ...document.appearance, palette: { ...document.appearance.palette, ...playbookAppearance(options.brand).palette } };
     const localAssets: NonNullable<NonNullable<ProjectSaveWire['context']>['localAssets']> = [];
     for (const asset of Object.values(document.assets)) {
