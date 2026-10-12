@@ -97,6 +97,7 @@ export interface StudioChatHandle {
   clearElementPills(): void;
   /** Workbench pushes a user message directly. Silently dropped while streaming. */
   send(text: string): void;
+  coverContext?(outputId?: string): { request?: string; direction?: string; brandTreatment?: string };
   /** Select a skill and send a request under it (the AI Enhance switches). Dropped while streaming. */
   runSkill(skillId: string, text: string): void;
   /** Only fill a piece of text into the input without sending (used by the generate panel's "@reference" for assets). */
@@ -116,6 +117,11 @@ export interface StudioChatHandle {
 }
 
 export interface StudioChatProps {
+  coverScene?: import('./cover-scene').CoverScene | null;
+  onOpenCover?: () => void;
+  projectCover?: import('./project-cover').ProjectCover | null;
+  onApplyCover?: (cover: import('./project-cover').ProjectCover) => Promise<void>;
+  coverApplying?: boolean;
   /** Billing attribution: which project this chat edits (rides every charged request). */
   projectId?: string;
   /** Device-local asset index: lets search receipts resolve OPFS thumbnails for mine-scope hits. */
@@ -124,7 +130,7 @@ export interface StudioChatProps {
   runTool: (
     toolId: string,
     input: Record<string, unknown>,
-    opts?: { signal?: AbortSignal; surface?: "chat" | "bridge"; skillId?: string; roughCut?: import("./first-pass").RoughCutExecution },
+    opts?: { signal?: AbortSignal; surface?: "chat" | "bridge"; coverRequested?: boolean; skillId?: string; roughCut?: import("./first-pass").RoughCutExecution },
   ) => Promise<StudioToolResult>;
   /** Request-body fields read at send time (session-level frame / skill selection). */
   getBody: () => Record<string, unknown>;
@@ -187,6 +193,11 @@ export const StudioChat = memo(
   forwardRef<StudioChatHandle, StudioChatProps>(function StudioChat(
     {
       projectId,
+      projectCover,
+      coverScene,
+      onOpenCover,
+      onApplyCover,
+      coverApplying,
       localAssetIndex,
       runTool,
       getBody,
@@ -365,6 +376,7 @@ export const StudioChat = memo(
         insertElementPill: (el) => innerRef.current?.insertElementPill(el),
         clearElementPills: () => innerRef.current?.clearElementPills(),
         send: (text) => innerRef.current?.send(text),
+        coverContext: outputId => innerRef.current?.coverContext?.(outputId) ?? {},
         runSkill: (skillId, text) => innerRef.current?.runSkill(skillId, text),
         insertText: (text) => innerRef.current?.insertText(text),
         focusInput: () => innerRef.current?.focusInput(),
@@ -455,6 +467,11 @@ export const StudioChat = memo(
         <ChatThread
           key={activeId}
           projectId={projectId}
+          projectCover={projectCover}
+          coverScene={coverScene}
+          onOpenCover={onOpenCover}
+          onApplyCover={onApplyCover}
+          coverApplying={coverApplying}
           localAssetIndex={localAssetIndex}
           threadId={activeId}
           initialMessages={restoredMessages}

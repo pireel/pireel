@@ -1,3 +1,5 @@
+import { CoverToolCard } from './cover-scene-dialog';
+import type { CoverScene } from './cover-scene';
 import { useEffect, useState } from 'react';
 import type { UIMessage } from 'ai';
 import { Check, Film, Loader2, Minus, X } from 'lucide-react';
@@ -8,7 +10,8 @@ import { editingTaskRows, type EditingProgressRow } from './editing-task-progres
 import { useToolProgress } from './tool-progress';
 import { studioLocale, t } from './i18n';
 
-export function EditingTaskCard({ task, messages, live, fine, credits, startedAt, onContinue }: {
+export function EditingTaskCard({ task, messages, live, fine, credits, startedAt, onContinue, coverScene, onOpenCover }: {
+  coverScene?: CoverScene | null; onOpenCover?: () => void;
   task: ChatTask; messages: UIMessage[]; live: boolean; fine?: { items: FineCutItem[] }; credits: number; startedAt?: number; onContinue?: () => void;
 }) {
   const zh = studioLocale().startsWith('zh');
@@ -24,9 +27,9 @@ export function EditingTaskCard({ task, messages, live, fine, credits, startedAt
     planning: say('构思剪辑', 'Directing the edit'),
     pauses: say('缩短停顿', 'Trimming pauses'), captions: say('制作字幕', 'Adding captions'),
     denoise: say('清理人声', 'Cleaning up narration'), logo: say('添加 Logo', 'Adding logo'), loudness: say('调整音量', 'Balancing audio'),
-    graphics: say('设计画面与花字', 'Designing visuals'), 'b-roll': say('搭配素材', 'Gathering B-roll'), sound: say('处理音效', 'Adding sound effects'), zoom: say('自动缩放', 'Auto zoom'), transitions: say('转场', 'Transitions'), review: say('检查预览', 'Checking the preview'),
+    graphics: say('设计画面与花字', 'Designing visuals'), 'b-roll': say('搭配素材', 'Gathering B-roll'), sound: say('处理音效', 'Adding sound effects'), zoom: say('自动缩放', 'Auto zoom'), transitions: say('转场', 'Transitions'), review: say('检查预览', 'Checking the preview'), cover: say('制作品牌封面', 'Creating brand cover'),
   };
-  const card = (title: string, entries: EditingProgressRow[]) => entries.length > 0 && <section aria-label={title} className="bg-panel-2/60 border-line rounded-2xl border px-4 py-3.5">
+  const card = (title: string, entries: EditingProgressRow[]) => entries.length > 0 && <section aria-label={title} className="bg-panel-2/60 border-line rounded-xl border px-4 py-3.5">
     <h3 className="text-ink-3 mb-3 text-xs font-medium">{title}</h3>
     <ul className="space-y-3">{entries.map(row => <li key={row.id} className="flex items-start gap-2.5 text-[13px]">
       <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center">{row.status === 'done' ? <Check size={15} className="text-ink-3" /> : row.status === 'running' ? <Loader2 size={15} className="animate-spin text-ink" /> : row.status === 'failed' ? <X size={15} className="text-destructive" /> : row.status === 'skipped' ? <Minus size={14} className="text-ink-4" /> : <span className="border-ink-4 size-3 rounded-full border border-dashed" />}</span>
@@ -50,7 +53,7 @@ export function EditingTaskCard({ task, messages, live, fine, credits, startedAt
     </div>}
     {card(rows.rough.some(row => row.id === 'cleanup') ? say('粗剪', 'Rough cut') : say('准备视频', 'Preparing your video'), rows.rough)}
     {report?.summary && <p className="text-ink-2 text-[13px] leading-relaxed">{report.summary}</p>}
-    {rows.planning && (rows.planning.status !== 'pending' || rows.rough.every(row => row.status === 'done')) && <section aria-label={names.planning} className="bg-panel-2/60 border-line rounded-2xl border px-4 py-3.5">
+    {rows.planning && (rows.planning.status !== 'pending' || rows.rough.every(row => row.status === 'done')) && <section aria-label={names.planning} className="bg-panel-2/60 border-line rounded-xl border px-4 py-3.5">
       <div className="text-ink-3 flex items-center gap-2.5 text-[13px]">{rows.planning.status === 'done' ? <Check size={15} /> : rows.planning.status === 'running' ? <Loader2 size={15} className="animate-spin" /> : <span className="border-ink-4 size-3 rounded-full border border-dashed" />}<h3>{names.planning}</h3></div>
       {task.directorPlan && <div className="text-ink-2 mt-3 space-y-2 text-xs leading-relaxed">
         <p>{task.directorPlan.direction}</p>
@@ -64,6 +67,7 @@ export function EditingTaskCard({ task, messages, live, fine, credits, startedAt
       </div>}
     </section>}
     {showFinishing && card(say('精剪', 'Fine cut'), rows.finishing)}
+    {task.review?.cover && task.review.cover.status !== 'skipped' && onOpenCover && <CoverToolCard scene={coverScene} onOpen={onOpenCover} />}
     {task.review?.director?.summary && <p className="text-ink-2 text-[13px] leading-relaxed">{task.review.director.summary}</p>}
     {task.review?.brandApplication && <details className="text-ink-3 text-xs"><summary className="cursor-pointer">{say('品牌应用', 'Brand treatment')}</summary><p className="mt-2 leading-6">{task.review.brandApplication}</p></details>}
     <div className="text-ink-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]" role="status">

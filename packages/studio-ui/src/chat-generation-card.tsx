@@ -11,12 +11,18 @@ import { useEffect, useMemo, useState } from 'react';
 import { Loader2, Plus, RefreshCw, Sparkles } from 'lucide-react';
 import { imageThumb } from '@pireel/ui/image-url';
 import { useStudioShell } from './shell-context';
-import { t } from './i18n';
+import { t, studioLocale } from './i18n';
+import { CoverApplyButton } from './chat-cover-controls';
+import type { ProjectCover } from './project-cover';
 import { generatedAssetIndexEntry, generatedRecordsFromJobs, pollCreation, type GeneratedAssetRecord, type GenJob } from './gen-api';
 import { localAssetMentionRef, type StudioElementRef } from './chat-local-asset-mention';
 import type { GenerationIntent } from './chat-generation-intent';
 
 export interface GenerationCardActions {
+  onApplyCover?: (cover: ProjectCover) => Promise<void>;
+  appliedCoverKey?: string;
+  onGenerateCover?: () => void;
+  coverDisabled?: boolean;
   onInsertMedia?: (asset: { type: 'image' | 'video'; url: string; label?: string }) => void;
   onUseAudio?: (url: string, label?: string) => void;
   /** Arms the image mode with this asset mentioned as a reference. */
@@ -32,7 +38,7 @@ function recordRef(record: GeneratedAssetRecord): StudioElementRef {
   return localAssetMentionRef(entry);
 }
 
-function OutputTile({ record, url, actions }: { record: GeneratedAssetRecord; url: string; actions: GenerationCardActions }) {
+function OutputTile({ record, url, actions, isCover = false }: { record: GeneratedAssetRecord; url: string; actions: GenerationCardActions; isCover?: boolean }) {
   const label = record.prompt.trim().slice(0, 60);
   return (
     <div className="border-line group relative overflow-hidden rounded-md border">
@@ -44,7 +50,7 @@ function OutputTile({ record, url, actions }: { record: GeneratedAssetRecord; ur
           <audio src={url} controls preload="metadata" className="h-8 w-full" />
         </div>
       ) : (
-        <img src={imageThumb(record.key, 'list')} alt="" loading="lazy" className="block h-auto w-full" />
+        <img src={imageThumb(record.key, 'list')} alt={isCover ? studioLocale().startsWith('zh') ? '生成的封面' : 'Generated cover' : ''} loading="lazy" className="block h-auto w-full" />
       )}
       <div className="flex flex-wrap items-center gap-0.5 px-1 py-1">
         {record.kind === 'audio'
@@ -53,17 +59,18 @@ function OutputTile({ record, url, actions }: { record: GeneratedAssetRecord; ur
               <Plus className="h-3 w-3" /> {t('chatGen.insertToTimeline')}
             </button>
           )
-          : actions.onInsertMedia && (
+          : !isCover && actions.onInsertMedia && (
             <button type="button" className={ACTION} onClick={() => actions.onInsertMedia?.({ type: record.kind === 'video' ? 'video' : 'image', url, label })}>
               <Plus className="h-3 w-3" /> {t('chatGen.insertToTimeline')}
             </button>
           )}
+        {record.kind === 'image' && actions.onApplyCover && <CoverApplyButton cover={{ key: record.key, url, label }} appliedKey={actions.appliedCoverKey} onApply={actions.onApplyCover} disabled={actions.coverDisabled} />}
         {record.kind !== 'audio' && actions.onUseAsReference ? (
           <button type="button" className={ACTION} onClick={() => actions.onUseAsReference?.(recordRef(record))}>
             <Sparkles className="h-3 w-3" /> {t('chatGen.useAsReference')}
           </button>
         ) : null}
-        {actions.onRegenerate && record.prompt ? (
+        {isCover && actions.onGenerateCover ? <button type="button" disabled={actions.coverDisabled} className={ACTION} onClick={actions.onGenerateCover}><RefreshCw size={12} />{studioLocale().startsWith('zh') ? '重新生成封面' : 'Generate another cover'}</button> : actions.onRegenerate && record.prompt ? (
           <button type="button" className={ACTION} onClick={() => actions.onRegenerate?.(record.kind, record.prompt)}>
             <RefreshCw className="h-3 w-3" /> {t('chatGen.regenerate')}
           </button>
@@ -74,7 +81,7 @@ function OutputTile({ record, url, actions }: { record: GeneratedAssetRecord; ur
 }
 
 /** Hosted image/video jobs: poll while pending (4 s), then show every output. */
-export function GenerationJobsBody({ ids, kind, prompt, actions }: { ids: string[]; kind: 'image' | 'video'; prompt: string; actions: GenerationCardActions }) {
+export function GenerationJobsBody({ ids, kind, prompt, actions, isCover = false }: { ids: string[]; kind: 'image' | 'video'; prompt: string; actions: GenerationCardActions; isCover?: boolean }) {
   const [jobs, setJobs] = useState<GenJob[]>([]);
   useEffect(() => {
     let cancelled = false;
@@ -101,7 +108,7 @@ export function GenerationJobsBody({ ids, kind, prompt, actions }: { ids: string
           {records.map((record) => {
             const job = jobs.find((candidate) => candidate.id === record.jobId);
             const url = job?.assets[record.index]?.url ?? imageThumb(record.key, 'original');
-            return <OutputTile key={`${record.jobId}:${record.index}`} record={record} url={url} actions={actions} />;
+            return <OutputTile key={`${record.jobId}:${record.index}`} record={record} url={url} actions={actions} isCover={isCover} />;
           })}
         </div>
       ) : null}

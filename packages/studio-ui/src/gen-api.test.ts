@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getStudioSpaceId, listStudioGens, resolveStudioSpaceId } from './gen-api';
+import { getStudioSpaceId, listStudioGens, resolveStudioSpaceId, genJobFromCreation } from './gen-api';
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>();
@@ -39,4 +39,8 @@ describe('generation space resolution', () => {
     expect(await resolveStudioSpaceId('p1')).toBe('studio_u1_p1');
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+});
+
+it('keeps a cover scene request identity when restoring generation history', () => {
+  expect(genJobFromCreation({ id: 'job', status: 'pending', params: { _cover_run_id: 'cover-run-123', user_prompt: 'Cover headline' } })).toMatchObject({ id: 'job', coverRunId: 'cover-run-123', prompt: 'Cover headline' });
 });

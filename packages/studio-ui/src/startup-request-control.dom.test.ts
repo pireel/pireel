@@ -320,3 +320,18 @@ describe("startup request control", () => {
     expect(onSnapshot).toHaveBeenCalledTimes(1);
   });
 });
+
+it('opens the independent cover scene without adding a main-chat message or running a chat tool', async () => {
+  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host); mounted.push({ root, host });
+  const onOpenCover = vi.fn(); const runTool = vi.fn();
+  await act(async () => root.render(createElement(ChatThread, {
+    threadId: 'independent-cover', initialMessages: [], initialSkillId: STUDIO_AUTO_SKILL_ID, scenarioSkills: [],
+    runTool, getBody: () => ({}), timelineFramePickActive: false, timelineFramePickBusy: false, timelineFramePickAvailable: false,
+    elements: [], onSnapshot: vi.fn(), handleRef: { current: null }, onOpenCover,
+  })));
+  const button = [...host.querySelectorAll('button')].find(button => button.textContent === '生成封面')!;
+  await act(async () => button.click());
+  expect(onOpenCover).toHaveBeenCalledTimes(1);
+  expect(mocks.sendMessage).not.toHaveBeenCalled();
+  expect(runTool).not.toHaveBeenCalled();
+});

@@ -11,7 +11,7 @@ import type { StudioToolDef } from '@pireel/studio-engine/prompts';
 /** Slow or generative tools show as cards (progress, busy text); everything else is an instant badge. */
 const CARD_TOOLS = new Set([
   'get_transcript', 'get_facts', 'inspect_media', 'inspect_timeline', 'import_media', 'rough_cut', 'remove_silence', 'denoise_audio',
-  'compose_component', 'apply_component', 'place_graphics', 'bake_component', 'generate_image', 'generate_video', 'generate_audio', 'generate_speech',
+  'compose_component', 'apply_component', 'place_graphics', 'bake_component', 'generate_cover', 'generate_image', 'generate_video', 'generate_audio', 'generate_speech',
   'generate_foley', 'lip_sync', 'export', 'preview', 'assemble_from_review', 'manage_voices',
 ]);
 
@@ -24,7 +24,7 @@ const ICONS: Record<string, string> = {
   manage_tracks: '🛤️', manage_clip_links: '🔗', add_transition: '🌫️', set_canvas: '🖥️',
   rough_cut: '✂️', remove_silence: '🤫', remove_words: '✂️', mask_words: '🔇', denoise_audio: '🎧',
   compose_component: '📐', apply_component: '🧩', set_look: '🎨', place_graphics: '🧷', set_confirm_list: '📋', set_texts: '🔤', set_captions: '💬', read_brand: '🏷️', bake_component: '🎬',
-  list_models: '🧠', generate_image: '🖼️', generate_video: '🎥', generate_audio: '🎵', generate_speech: '🗣️', generate_foley: '🔊',
+  list_models: '🧠', generate_cover: '🖼️', generate_image: '🖼️', generate_video: '🎥', generate_audio: '🎵', generate_speech: '🗣️', generate_foley: '🔊',
   lip_sync: '👄', manage_voices: '🎙️',
   list_skills: '📚', read_skill: '📖', preview: '▶️', undo: '↩️', ask_user: '❓', export: '📤',
 };

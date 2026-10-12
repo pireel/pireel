@@ -7,6 +7,9 @@ import { BRAND_EDITING_SKILL_IDS } from './editing-skills';
 import { DEFAULT_BRAND_SKILL_ID, PLAYBOOK_SCHEMA, type BrandAsset, type BrandBlocks, type BrandPlatform, type BrandPlaybook, type Corner } from './brand-playbook';
 import type { CaptionStyle } from './composition-core';
 
+// Automatic cover is an execution choice; legacy visual analyses need not emit it.
+const ANALYSIS_PREFERENCE_IDS = BRAND_PREFERENCE_IDS.filter(id => id !== 'cover');
+
 /**
  * The brand extraction method: how a creator's videos become their brand (brand-playbook.ts).
  *
@@ -260,7 +263,7 @@ For the cover, first decide how to MAKE a new one in this style: generate a comp
 Return only JSON:
 {"evidence":"<what this brand rests on>",
  "style":{"text":"<cohesive, reusable editing guidance for new footage; no source report, fixed headings or old topic-specific prescriptions>","refs":[{"video":"<id>","shot":<n>}]},
- "preferences":{${BRAND_PREFERENCE_IDS.map(id => `"${id}":true|false`).join(',')}},
+ "preferences":{${ANALYSIS_PREFERENCE_IDS.map(id => `"${id}":true|false`).join(',')}},
  "captions":{"on":true|false,"preset":"<preset id>","font":"<font id>","bold":true|false,"color":"#hex","stroke":{"color":"#hex","width":<px 0–8 at a 64 px font>}|null,"bg":"#hex|rgba(…)|null","animation":"<animation id>","highlight":{"how":"<…>","color":"#hex"}|null,"text":"<what the values cannot say: line breaks, chars per line, how lines appear>"},
  "onScreenText":{"font":"<font id for titles and labels>","fontLike":"<the original face, as you'd name it>"},
  "logo":null|{"candidate":<logo candidate index>,"corner":"top-left|top-right|bottom-left|bottom-right","widthPct":<share of frame width>},
@@ -324,8 +327,8 @@ export function parseBrandSynthesis(raw: string, context: { shots: Record<string
   if (value.preferences !== undefined) {
     if (!value.preferences || typeof value.preferences !== 'object' || Array.isArray(value.preferences)) throw new Error('preferences must be an object');
     const raw = value.preferences as Record<string, unknown>;
-    if (BRAND_PREFERENCE_IDS.some(id => typeof raw[id] !== 'boolean')) throw new Error('every editing preference must be true or false');
-    preferences = Object.fromEntries(BRAND_PREFERENCE_IDS.map(id => [id, raw[id]]));
+    if (ANALYSIS_PREFERENCE_IDS.some(id => typeof raw[id] !== 'boolean') || raw.cover !== undefined && typeof raw.cover !== 'boolean') throw new Error('every editing preference must be true or false');
+    preferences = { ...Object.fromEntries(ANALYSIS_PREFERENCE_IDS.map(id => [id, raw[id]])), ...(typeof raw.cover === 'boolean' ? { cover: raw.cover } : {}) };
   }
   if (style && !preferences) throw new Error('preferences are required with the unified style');
   return {

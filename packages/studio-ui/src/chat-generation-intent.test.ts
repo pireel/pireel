@@ -40,3 +40,7 @@ describe('chat generation intent', () => {
     expect(generationTemplatePrompts('audio', 'en')).toHaveLength(6);
   });
 });
+
+it('includes the selected image resolution in the instruction sent to the agent', () => {
+  expect(generationIntentLine('image', { modelId: 'gpt-image', imageSize: '3840x2160', quality: 'medium' })).toContain('size 3840x2160, quality medium');
+});

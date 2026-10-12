@@ -39,3 +39,36 @@ describe('generation references', () => {
     expect(presign).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('source-frame identity reference', () => {
+  it('uses source seconds and a clean decoded image, without a model call', async () => {
+    const { resolveGenerationSourceFrame } = await import('./generation-reference');
+    const file = new File(['video'], 'speaker.mp4');
+    const blob = new Blob(['clean frame'], { type: 'image/jpeg' });
+    const load = vi.fn(async () => ({ file }));
+    const capture = vi.fn(async () => blob);
+    const upload = vi.fn(async () => 'https://private.example/frame?signature');
+    const assets = { speaker: { id: 'speaker', kind: 'video' as const, label: 'Speaker', locator: { localSig: 'sig' }, metadata: { durationSec: 20, width: 1080 } } };
+    await expect(resolveGenerationSourceFrame({ assetId: 'speaker', sourceSec: 3.5 }, { assets, load, capture, upload })).resolves.toEqual({ assetId: 'speaker', sourceSec: 3.5, url: 'https://private.example/frame?signature' });
+    expect(capture).toHaveBeenCalledWith(file, 3.5, 1080);
+    expect(upload).toHaveBeenCalledWith(blob);
+    for (const frame of [{ assetId: 'missing', sourceSec: 1 }, { assetId: 'speaker', sourceSec: 20 }, { assetId: 'speaker', sourceSec: -1 }, { assetId: 'speaker', sourceSec: '3' }]) await expect(resolveGenerationSourceFrame(frame, { assets, load, capture, upload })).rejects.toThrow();
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+  it('blocks before generation when source bytes, frame upload or cancellation fails', async () => {
+    const { resolveGenerationSourceFrame } = await import('./generation-reference');
+    const assets = { speaker: { id: 'speaker', kind: 'video' as const, label: 'Speaker', locator: {}, metadata: { durationSec: 10 } } };
+    const capture = vi.fn(async () => new Blob(['frame']));
+    const upload = vi.fn(async () => null);
+    const load = vi.fn(async () => ({ file: null, reason: 'Restore the source' }));
+    const frame = { assetId: 'speaker', sourceSec: 1 };
+    await expect(resolveGenerationSourceFrame(frame, { assets, load, capture, upload })).rejects.toThrow('Restore the source');
+    expect(capture).not.toHaveBeenCalled();
+    expect(upload).not.toHaveBeenCalled();
+    const source = async () => ({ file: new File(['video'], 'source.mp4') });
+    await expect(resolveGenerationSourceFrame(frame, { assets, load: source, capture, upload })).rejects.toThrow('fetchable source frame');
+    const controller = new AbortController(); controller.abort();
+    await expect(resolveGenerationSourceFrame(frame, { assets, load, capture, upload, signal: controller.signal })).rejects.toThrow();
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+});

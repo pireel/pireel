@@ -1,5 +1,6 @@
 "use client";
 
+import { ChatCoverEntry } from './chat-cover-controls';
 import { directorPlanToolBlock, saveEditingDirectorPlan, withDirectorInstruction } from './editing-director-plan';
 import { DEFAULT_STUDIO_AGENT_MODEL, studioAgentModelId, type StudioAgentModelId } from '@pireel/studio-engine/agent-models';
 
@@ -109,6 +110,11 @@ const USER_BUBBLE_CLASS = "group-[.is-user]:bg-secondary/35";
 
 export function ChatThread({
   projectId,
+  projectCover,
+  coverScene,
+  onOpenCover,
+  onApplyCover,
+  coverApplying,
   localAssetIndex,
   threadId,
   initialMessages,
@@ -145,6 +151,11 @@ export function ChatThread({
   onInsertMedia?: StudioChatProps["onInsertMedia"];
   onUseAudio?: StudioChatProps["onUseAudio"];
   projectId?: string;
+  projectCover?: StudioChatProps["projectCover"];
+  coverScene?: StudioChatProps["coverScene"];
+  onOpenCover?: StudioChatProps["onOpenCover"];
+  onApplyCover?: StudioChatProps["onApplyCover"];
+  coverApplying?: boolean;
   localAssetIndex?: readonly LocalAssetIndexEntry[];
   threadId: string;
   initialMessages: UIMessage[];
@@ -356,7 +367,7 @@ export function ChatThread({
         if (task.directorPlanRequired && !hasCurrentDirectorPreview(messagesForTask(effectiveStudioTurnMessages(messagesRef.current, ledger), task.id))) {
           publishSuccess({ ok: false, error: 'Inspect meaningful rendered timeline frames after the final edit, then assess the result against the saved director plan before finishing.' }); return;
         }
-        const result = reviewEditingTask(task, requestedInput, fineCutClips(), getDocument?.());
+        const result = reviewEditingTask(task, requestedInput, fineCutClips(), getDocument?.(), messagesForTask(effectiveStudioTurnMessages(messagesRef.current, ledger), task.id));
         if (!result.ok) { publishSuccess({ ok: false, error: result.error, ...(result.missing ? { data: { missing: result.missing } } : {}) }); return; }
         updateTask(task.id, current => ({ ...current, review: result.review }));
         publishSuccess({ ok: true, summary: studioLocale().startsWith('zh') ? '已核对剪辑结果' : 'Editing result checked', data: { review: result.review, taskIncomplete: !result.review.completed } });
@@ -387,6 +398,7 @@ export function ChatThread({
         const runOpts = {
           signal: ctrl.signal,
           surface: "chat" as const,
+          ...(id === 'generate_cover' ? { coverRequested: task?.mode === 'request' } : {}),
           ...(id === ROUGH_CUT_TOOL && task ? { roughCut: {
             resume: task.roughCut?.report,
             ...(task.mode === 'one-click' ? { skills: task.skills, config: task.config } : {}),
@@ -923,6 +935,11 @@ export function ChatThread({
   useImperativeHandle(
     handleRef,
     () => ({
+      coverContext(outputId?: string) {
+        const tasks = messagesRef.current.map(taskOf).filter(task => task && (!outputId || !task.outputId || task.outputId === outputId));
+        const latest = tasks.at(-1); const plan = tasks.findLast(task => task?.directorPlan)?.directorPlan;
+        return { request: latest?.goal, direction: plan?.direction, brandTreatment: plan?.brandTreatment };
+      },
       startProgress(): ProgressHandle {
         const id = mid("prog");
         const paint = (text: string) =>
@@ -1193,7 +1210,7 @@ export function ChatThread({
                   <div className="flex items-start gap-2">
                     {m.role === "assistant" && <PiAvatar thinking={thinking} />}
                     <div className="flex min-w-0 flex-1 flex-col gap-2">
-                      {taskAnchor && messageTask && <EditingTaskCard task={messageTask} messages={taskMessages} live={taskLive} fine={fineCutFor(m, messageTask, taskLive)}
+                      {taskAnchor && messageTask && <EditingTaskCard coverScene={coverScene} onOpenCover={onOpenCover} task={messageTask} messages={taskMessages} live={taskLive} fine={fineCutFor(m, messageTask, taskLive)}
                         startedAt={(taskMessages.find(item => item.role === 'user')?.metadata as { workStartedAt?: number } | undefined)?.workStartedAt}
                         credits={taskMessages.reduce((sum, item) => sum + messageTurnCredits(item), 0) + (messageTask.roughCut?.report.credits ?? 0) + Object.values(messageTask.lateUsage ?? {}).reduce((sum, value) => sum + value, 0)}
                         onContinue={latestTask(messages)?.id === messageTask.id && !error?.message?.includes('insufficient_tokens') && (['paused', 'partial'].includes(messageTask.state) || status === 'error') ? continueFromCurrentState : undefined} />}
@@ -1335,9 +1352,15 @@ export function ChatThread({
                                 },
                               )
                             : renderToolPart(part, key, {
+                                coverScene,
+                                onOpenCover,
                                 generation: {
                                   onInsertMedia,
                                   onUseAudio,
+                                  onApplyCover,
+                                  appliedCoverKey: projectCover?.key,
+                                  coverDisabled: taskInProgress || coverApplying,
+                                  onGenerateCover: onOpenCover,
                                   onUseAsReference: (ref) => {
                                     composerRef.current?.beginGeneration("image");
                                     composerRef.current?.insertMention(ref);
@@ -1411,7 +1434,7 @@ export function ChatThread({
                 <div className="flex items-start gap-2">
                   <PiAvatar thinking />
                   <div className="min-w-0 flex-1 pt-0.5">
-                    {latestTask(messages)?.mode === 'one-click' ? <EditingTaskCard task={latestTask(messages)!} messages={messagesForTask(messages, latestTask(messages)!.id)} live={busy} credits={0} onContinue={!busy && !error?.message?.includes('insufficient_tokens') ? continueFromCurrentState : undefined} /> : <ThinkingDots />}
+                    {latestTask(messages)?.mode === 'one-click' ? <EditingTaskCard coverScene={coverScene} onOpenCover={onOpenCover} task={latestTask(messages)!} messages={messagesForTask(messages, latestTask(messages)!.id)} live={busy} credits={0} onContinue={!busy && !error?.message?.includes('insufficient_tokens') ? continueFromCurrentState : undefined} /> : <ThinkingDots />}
                   </div>
                 </div>
               </Message>
@@ -1472,6 +1495,7 @@ export function ChatThread({
           onCancel={() => setPendingSkill(null)}
           onConfirm={() => { if (pendingSkill !== null) switchSkill(pendingSkill); setPendingSkill(null); }}
         />
+        {onOpenCover && <ChatCoverEntry cover={projectCover} disabled={coverApplying} onGenerate={onOpenCover} />}
         <Composer
           placeholder={t("chatGen.sayWhatAddChange")}
           agentModel={agentModel}

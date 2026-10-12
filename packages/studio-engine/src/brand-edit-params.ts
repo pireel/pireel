@@ -1,5 +1,5 @@
 import { brandPreferences } from './brand-preferences';
-import { hasText, renderBrandPrompt, upgradeBlocks, type PlaybookSnapshot } from './brand-playbook';
+import { BLOCK_IDS, hasText, renderBrandPrompt, upgradeBlocks, type PlaybookSnapshot } from './brand-playbook';
 import type { AsrSegment } from './build-blocks';
 import { CUT_TRANSITION_EFFECTS, ZOOM_PRESETS, type CutTransitionEffect, type ShotZoom, type ZoomPreset } from './composition-core';
 import type { NarrativeClipPatchUpdate } from './editor-document/commands/types';
@@ -60,8 +60,8 @@ export const playbookHighlightsKeywords = (playbook: PlaybookSnapshot) => !!play
 /** The brand as the edit planner reads it. */
 export const playbookEditGuide = (playbook: PlaybookSnapshot) => renderBrandPrompt(playbook, ['portrait', 'layout', 'transitions', 'camera', 'pacing', 'structure', 'sound']);
 
-/** The brand as the editing agent reads it: the whole prompt, context for the choices the user leaves open. */
-export const playbookAgentBrief = (playbook: PlaybookSnapshot) => renderBrandPrompt(playbook);
+/** The brand as the editing agent reads it: the editing prompt; cover production reads its own snapshot in the independent scene. */
+export const playbookAgentBrief = (playbook: PlaybookSnapshot) => renderBrandPrompt(playbook, BLOCK_IDS.filter(id => id !== 'cover'));
 
 function narrativeClips(document: EditorDocumentV2): NarrativeTimelineClip[] {
   const track = document.timeline.tracks.find(item => item.id === document.semantics.primaryNarrativeTrackId);

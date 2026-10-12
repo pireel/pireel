@@ -1,5 +1,8 @@
 'use client';
 
+import { pickImageModel, normalizeImageSettings, imageSizeChoices } from '@pireel/studio-engine/image-generation-settings';
+import { ImageGenerationFields } from './image-generation-fields';
+
 /**
  * Toolbar controls of the composer's generation modes — the configuration the retired generation
  * panel held, collapsed into icons on the input's bottom row (like the theme button in Agent mode):
@@ -39,12 +42,16 @@ function PopButton({ icon, title, active, disabled, children }: { icon: ReactNod
       if (rect) setAnchor({ left: Math.max(8, Math.min(rect.left, window.innerWidth - 280)), bottom: window.innerHeight - rect.top + 6 });
     };
     place();
+    const ownsMenu = (element: Element | null) => {
+      const owner = element?.closest('[data-scene-select-owner]')?.getAttribute('data-scene-select-owner');
+      return !!owner && Array.from(panelRef.current?.querySelectorAll('[data-image-generation-fields]') ?? []).some(field => field.getAttribute('data-image-generation-fields') === owner);
+    };
     const onDoc = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
-      if (!triggerRef.current?.contains(target) && !panelRef.current?.contains(target)) setOpen(false);
+      if (!ownsMenu(target) && !triggerRef.current?.contains(target) && !panelRef.current?.contains(target)) setOpen(false);
     };
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key === 'Escape' && !Array.from(document.querySelectorAll('[data-scene-select-owner]')).some(ownsMenu)) setOpen(false);
     };
     document.addEventListener('mousedown', onDoc);
     document.addEventListener('keydown', onKey);
@@ -214,8 +221,8 @@ export function GenerationControls({
     };
   }, [intent]);
   const audioKind = intent === 'audio' ? audioKindFor(params) : null;
-  const modelId = params.modelId ?? models[0]?.id ?? '';
-  const qualityCfg = intent === 'image' ? (shell.modelParams?.qualityConfigFor(modelId) ?? null) : null;
+  const modelId = intent === 'image' ? pickImageModel(models, params.modelId) : params.modelId ?? models[0]?.id ?? '';
+  const imageSettings = normalizeImageSettings({ modelId, size: params.imageSize || params.ratio, quality: params.quality });
   const resolutionOptions = intent === 'video' ? (shell.modelParams?.videoResolutionOptions(modelId) ?? []) : [];
   const durationOptions = intent === 'video'
     ? (shell.modelParams?.videoDurationOptions(modelId) ?? ['5', '10'])
@@ -227,9 +234,8 @@ export function GenerationControls({
   // way the panel did: quality tier for images, a supported resolution/duration tier for video.
   useEffect(() => {
     if (intent === 'image') {
-      const next = qualityCfg?.options.some((option) => option.value === params.quality)
-        ? params.quality : qualityCfg?.default ?? undefined;
-      if (next !== params.quality || modelId !== params.modelId) onChange({ ...params, ...(modelId ? { modelId } : {}), quality: next });
+      const ratio = imageSizeChoices(modelId).find(choice => choice.value === imageSettings.size)!.aspect as GenerationParams['ratio'];
+      if (ratio !== params.ratio || imageSettings.quality !== (params.quality ?? '') || imageSettings.size !== params.imageSize || modelId !== params.modelId) onChange({ ...params, modelId, ratio, quality: imageSettings.quality, imageSize: imageSettings.size });
     } else if (intent === 'video') {
       const resolution = resolutionOptions.includes(params.resolution ?? '') ? params.resolution : resolutionOptions.includes('720p') ? '720p' : resolutionOptions[0];
       const duration = params.durationSec && durationOptions.includes(String(params.durationSec)) ? params.durationSec : Number(durationOptions[0] ?? 5);
@@ -267,7 +273,8 @@ export function GenerationControls({
       ) : null}
       {hasSettings ? (
         <PopButton icon={<SlidersHorizontal className="h-3.5 w-3.5" strokeWidth={2.2} />} title={t('chatGen.generationSettings')} disabled={disabled}>
-          {models.length > 1 && (intent === 'image' || intent === 'video') ? (
+          {intent === 'image' && <ImageGenerationFields value={imageSettings} models={models} locale={studioLocale().startsWith('zh') ? 'zh' : 'en'} disabled={disabled} onChange={next => onChange({ ...params, modelId: next.modelId, imageSize: next.size, quality: next.quality, ratio: imageSizeChoices(next.modelId).find(choice => choice.value === next.size)?.aspect as GenerationParams['ratio'] })} />}
+          {models.length > 1 && intent === 'video' ? (
             <div className="flex items-center gap-1 py-0.5">
               <span className="text-ink-4 w-12 shrink-0 text-[10.5px]">{t('chatGen.model')}</span>
               <select
@@ -282,7 +289,7 @@ export function GenerationControls({
               </select>
             </div>
           ) : null}
-          {intent === 'image' || intent === 'video' ? (
+          {intent === 'video' ? (
             <Row
               label={t('chatGen.paramRatio')}
               options={RATIOS.map((ratio) => ({ value: ratio, label: ratio }))}
@@ -296,14 +303,6 @@ export function GenerationControls({
               options={[1, 2, 4].map((n) => ({ value: String(n), label: String(n) }))}
               value={String(params.count ?? 1)}
               onChange={(value) => onChange({ ...params, count: Number(value) })}
-            />
-          ) : null}
-          {intent === 'image' && qualityCfg && qualityCfg.options.length > 1 ? (
-            <Row
-              label={t('chatGen.paramQuality')}
-              options={qualityCfg.options.map((option) => ({ value: option.value, label: option.label }))}
-              value={params.quality ?? qualityCfg.default}
-              onChange={(value) => onChange({ ...params, quality: value })}
             />
           ) : null}
           {intent === 'audio' ? (

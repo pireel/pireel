@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, createElement } from 'react';
+import { act, createElement, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { setStudioLocale } from './i18n';
+import type { GenerationParams } from './chat-generation-intent';
 import { GenerationControls, GenerationCreditsBadge } from './chat-generation-params';
 
 const mocks = vi.hoisted(() => ({ quote: vi.fn(() => null) }));
@@ -20,6 +22,10 @@ describe('generation composer settings', () => {
   beforeEach(() => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     mocks.quote.mockClear();
+    setStudioLocale('zh');
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    HTMLElement.prototype.hasPointerCapture = vi.fn(() => false);
+    HTMLElement.prototype.releasePointerCapture = vi.fn();
     host = document.createElement('div');
     document.body.append(host);
     root = createRoot(host);
@@ -32,8 +38,8 @@ describe('generation composer settings', () => {
   it('preserves a supported saved quality when image settings reopen', async () => {
     const onChange = vi.fn();
     await act(async () => root.render(createElement(GenerationControls, {
-      intent: 'image', params: { modelId: 'image-model', quality: 'high' },
-      models: [{ id: 'image-model', name: 'Image' }], onChange, onUseTemplate: vi.fn(),
+      intent: 'image', params: { modelId: 'gpt-image', quality: 'high', ratio: '9:16', imageSize: '1440x2560' },
+      models: [{ id: 'gpt-image', name: 'Image' }], onChange, onUseTemplate: vi.fn(),
     })));
     expect(onChange).not.toHaveBeenCalled();
   });
@@ -41,10 +47,28 @@ describe('generation composer settings', () => {
   it('replaces an unsupported quality with the selected model default', async () => {
     const onChange = vi.fn();
     await act(async () => root.render(createElement(GenerationControls, {
-      intent: 'image', params: { modelId: 'image-model', quality: 'old-quality' },
-      models: [{ id: 'image-model', name: 'Image' }], onChange, onUseTemplate: vi.fn(),
+      intent: 'image', params: { modelId: 'gpt-image', quality: 'old-quality' },
+      models: [{ id: 'gpt-image', name: 'Image' }], onChange, onUseTemplate: vi.fn(),
     })));
-    expect(onChange).toHaveBeenCalledWith({ modelId: 'image-model', quality: 'medium' });
+    expect(onChange).toHaveBeenCalledWith({ modelId: 'gpt-image', quality: 'medium', ratio: '9:16', imageSize: '1440x2560' });
+  });
+
+  it('keeps the image settings popover open while choosing a resolution from its portaled menu', async () => {
+    let selected: GenerationParams = {};
+    function Harness() {
+      const [params, setParams] = useState<GenerationParams>({ modelId: 'gpt-image', ratio: '9:16', imageSize: '1440x2560', quality: 'medium' });
+      selected = params;
+      return createElement(GenerationControls, { intent: 'image', params, models: [{ id: 'gpt-image', name: 'GPT Image' }], onChange: setParams, onUseTemplate() {} });
+    }
+    await act(async () => root.render(createElement(Harness)));
+    await act(async () => (host.querySelector('button[aria-label="生成参数"]') as HTMLButtonElement).click());
+    const trigger = document.querySelector('[role=combobox][aria-label="分辨率"]')!;
+    await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
+    const option = [...document.querySelectorAll('[role=option]')].find(element => element.textContent?.includes('4K')) as HTMLElement;
+    expect(option).toBeTruthy();
+    await act(async () => { option.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); option.click(); });
+    expect(selected.imageSize).toBe('2160x3840');
+    expect(document.querySelector('[data-image-generation-fields]')).not.toBeNull();
   });
 
   it('quotes the same sound and square aspect choices sent to the video agent', async () => {

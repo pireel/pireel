@@ -1,5 +1,14 @@
-import { brandEditingSkills } from '@pireel/studio-engine/brand-preferences';
+import { loadCoverBrandReferences } from './cover-brand-references';
+import { pickImageModel } from '@pireel/studio-engine/image-generation-settings';
 "use client";
+
+import { coverFrameRanges, coverFrameAtTime, retainedCoverFrame, type CoverSourceFrame, type CoverFrameStripData } from './cover-frame-selection';
+import { CoverSceneController, coverSceneFromDocument, withCoverScene, type CoverGenerateOptions, type CoverDraftPatch } from './cover-scene';
+import { CoverSceneDialog, TimelineCoverPlaceholder, coverSceneStatus } from './cover-scene-dialog';
+import { cloudBackupMedia } from './cloud-media';
+import { extractThumbnails } from '@pireel/studio-engine/video-edit/thumbnails';
+import { applyProjectCover, persistProjectCover, projectCoverFromDocument, projectCoverThumbnail, ProjectCoverWriteQueue, type ProjectCover } from './project-cover';
+import { brandEditingSkills } from '@pireel/studio-engine/brand-preferences';
 
 /**
  * Hyperframes workbench — block-based editing (pure browser, zero server).
@@ -304,7 +313,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@pireel/ui/dialog";
-import { generatedAssetIndexEntry, generatedRecordsFromJobs, listStudioGens, type GeneratedAssetRecord } from "./gen-api";
+import { generatedAssetIndexEntry, generatedRecordsFromJobs, listStudioGens, startGeneration, pollCreation, type GeneratedAssetRecord } from "./gen-api";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1670,8 +1679,13 @@ export function HyperframesWorkbench({
   const chatRef = useRef<StudioChatHandle | null>(null); // lets workbench actions coordinate with the active chat thread
   // Agent activity gates output switching (chat turn streaming, or a bridge tool executing).
   const [chatBusy, setChatBusy] = useState(false);
+  const [coverApplying, setCoverApplying] = useState(false);
+  const [coverSceneOpen, setCoverSceneOpen] = useState(false);
+  const [coverSceneBusy, setCoverSceneBusy] = useState(false);
+  const coverApplyingRef = useRef(false);
+  const applyingCoverUrlRef = useRef<string | null>(null);
   const [bridgeToolsInFlight, setBridgeToolsInFlight] = useState(0);
-  const manualEditingLocked = chatBusy || bridgeToolsInFlight > 0 || workflowBusy;
+  const manualEditingLocked = coverSceneBusy || coverApplying || chatBusy || bridgeToolsInFlight > 0 || workflowBusy;
   const manualEditingLockedRef = useRef(manualEditingLocked);
   manualEditingLockedRef.current = manualEditingLocked;
   const bridgeOutputAnchorRef = useRef<{ id: string; title: string } | null>(null);
@@ -2960,24 +2974,29 @@ export function HyperframesWorkbench({
   // (~140KB) each time the project is opened.
   const coverPushedStorageKey = `studio:cover-pushed:${projectId}`;
   const coverCloudPushedSigRef = useRef<string | null>(readCoverPushedSig(coverPushedStorageKey));
-  const scheduleCoverCloudPush = (cover: Blob | null, sig: string | null) => {
-    const saveCover = studioProviders().projects.saveCover;
-    if (!saveCover || sig === coverCloudPushedSigRef.current) return;
+  const projectCover = projectCoverFromDocument(editorDocument);
+  const coverWriteQueue = useMemo(() => new ProjectCoverWriteQueue(async (cover, sig) => {
+    if (displacedRef.current) throw new Error('cover_apply_failed');
+    const selected = projectCoverFromDocument(editorDocumentRef.current);
+    if (selected && sig !== selected.url && sig !== applyingCoverUrlRef.current) return;
+    if (coverApplyingRef.current && sig !== applyingCoverUrlRef.current) return;
+    await studioProviders().projects.saveCover?.(projectId, cover);
+    coverCloudPushedSigRef.current = sig;
+    try {
+      if (sig) localStorage.setItem(coverPushedStorageKey, sig);
+      else localStorage.removeItem(coverPushedStorageKey);
+    } catch { /* Optional upload deduplication. */ }
+  }), [projectId, coverPushedStorageKey, editorDocumentRef]);
+  const scheduleCoverCloudPush = useCallback((cover: Blob | null, sig: string | null) => {
+    if (!studioProviders().projects.saveCover || sig === coverCloudPushedSigRef.current || coverApplyingRef.current) return;
     if (coverCloudTimerRef.current) window.clearTimeout(coverCloudTimerRef.current);
+    const selectedKey = projectCoverFromDocument(editorDocumentRef.current)?.key;
     coverCloudTimerRef.current = window.setTimeout(() => {
       coverCloudTimerRef.current = null;
-      if (displacedRef.current) return;
-      void saveCover(projectId, cover)
-        .then(() => {
-          coverCloudPushedSigRef.current = sig;
-          try {
-            if (sig) localStorage.setItem(coverPushedStorageKey, sig);
-            else localStorage.removeItem(coverPushedStorageKey);
-          } catch { /* storage is a convenience */ }
-        })
-        .catch(() => {}); // a cover is a bonus; the next redraw retries
+      if (coverApplyingRef.current || selectedKey !== projectCoverFromDocument(editorDocumentRef.current)?.key) return;
+      void coverWriteQueue.write(cover, sig).catch(() => {});
     }, 2_500);
-  };
+  }, [coverWriteQueue, editorDocumentRef]);
   // Cover clearing must wait for hydration: the first render is intentionally empty even when a
   // saved project has video. Once ready, an empty primary track is authoritative user state.
   const [bootDataReady, setBootDataReady] = useState(false);
@@ -3002,19 +3021,19 @@ export function HyperframesWorkbench({
     }))
     .sort((left, right) => left.startSec - right.startSec || Number(right.primary) - Number(left.primary) || left.clipId.localeCompare(right.clipId))[0] ?? null,
   [localImagePreviewUrls, renderPlan]);
-  const hasCoverVisual = editorDocument.timeline.tracks.some((track) => !track.hidden && track.clips.some((clip) => {
+  const hasCoverVisual = !!projectCover || editorDocument.timeline.tracks.some((track) => !track.hidden && track.clips.some((clip) => {
     if (!clip.enabled || !("assetId" in clip) || typeof clip.assetId !== "string") return false;
     const kind = editorDocument.assets[clip.assetId]?.kind;
     return kind === "video" || kind === "image";
   }));
-  const currentCoverThumb = () =>
-    editorDocumentRef.current.timeline.tracks.some((track) => !track.hidden && track.clips.some((clip) => {
+  const currentCoverThumb = useCallback(() =>
+    projectCoverFromDocument(editorDocumentRef.current)?.url ?? (editorDocumentRef.current.timeline.tracks.some((track) => !track.hidden && track.clips.some((clip) => {
       if (!clip.enabled || !("assetId" in clip) || typeof clip.assetId !== "string") return false;
       const kind = editorDocumentRef.current.assets[clip.assetId]?.kind;
       return kind === "video" || kind === "image";
     }))
       ? coverThumbRef.current
-      : null;
+      : null), [editorDocumentRef]);
   const activateOutputDocumentRef = useRef<
     (document: EditorDocumentV2, composition: Composition) => void
   >(() => {});
@@ -3027,10 +3046,173 @@ export function HyperframesWorkbench({
       videoDurationSec: firstNarrativeDurationSec(editorDocumentRef.current),
       coverThumb: currentCoverThumb(),
     }),
-    [persistableDocument],
+    [persistableDocument, currentCoverThumb, editorDocumentRef],
   );
   const projectOutputs = useProjectOutputs(getActiveOutputState);
+  const coverScene = coverSceneFromDocument(editorDocument);
+  const coverOutputId = projectOutputs.outputs.active.id;
+  const loadCoverSource = useCallback(async (assetId: string) => {
+    const asset = editorDocumentRef.current.assets[assetId];
+    if (!asset || asset.kind !== 'video') throw new Error('cover_source_unavailable');
+    if (asset.locator.localSig) { const file = await loadLocalVideo(asset.locator.localSig); if (file) return file; }
+    if (assetId === firstNarrativeAssetId(editorDocumentRef.current) && videoFileRef.current) return videoFileRef.current;
+    const url = resolveAssetUrl(asset);
+    if (!url) throw new Error('cover_source_unavailable');
+    return (await materializeRemoteMedia(url, { name: asset.label || 'video.mp4', type: 'video/mp4' })).file;
+  }, [editorDocumentRef, resolveAssetUrl]);
+  const coverController = useMemo(() => new CoverSceneController({
+    document: () => {
+      if (projectOutputs.outputsRef.current.active.id !== coverOutputId) throw new Error('cover_output_changed');
+      return editorDocumentRef.current;
+    },
+    context: () => ({ ...chatRef.current?.coverContext?.(coverOutputId), locale: localeRef.current }),
+    save: async (scene) => {
+      if (projectOutputs.outputsRef.current.active.id !== coverOutputId || displacedRef.current) throw new Error('cover_output_changed');
+      const result = committer.commit({ op: 'document.replace', input: { document: withCoverScene(editorDocumentRef.current, scene) } }, { origin: 'system', undo: 'none' });
+      if (!result.ok) throw new Error('cover_save_failed');
+      await projectSyncRef.current?.flush();
+    },
+    candidates: async (assetId, times, signal) => {
+      const file = await loadCoverSource(assetId);
+      const wanted = [...times].sort((a, b) => a - b);
+      const frames = await extractThumbnails(file, wanted, { width: 360, quality: 0.8 });
+      try {
+        const candidates = []; const remaining = [...wanted];
+        for (const frame of frames) {
+          signal?.throwIfAborted();
+          const bytes = new Uint8Array(await frame.blob.arrayBuffer());
+          let binary = ''; for (const byte of bytes) binary += String.fromCharCode(byte);
+          const at = remaining.reduce((best, sec, i) => Math.abs(sec - frame.timestamp) < Math.abs(remaining[best]! - frame.timestamp) ? i : best, 0);
+          const sourceSec = remaining.splice(at, 1)[0];
+          if (sourceSec !== undefined) candidates.push({ sourceSec, base64: btoa(binary) });
+        }
+        return candidates;
+      } finally { frames.forEach(frame => URL.revokeObjectURL(frame.url)); }
+    },
+    analyze: async (body, signal) => {
+      const response = await fetch('/api/studio/brand-analyze', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal });
+      const data = await response.json().catch(() => ({})) as { text?: string };
+      if (!response.ok || !data.text) throw new Error(response.status === 402 ? 'cover_insufficient_credits' : 'cover_generation_failed');
+      return data.text;
+    },
+    reference: async (assetId, sec, signal) => {
+      const file = await loadCoverSource(assetId);
+      const frames = await extractThumbnails(file, [sec], { width: 1440, quality: 0.92 });
+      try {
+        if (!frames[0]) throw new Error('cover_source_unavailable');
+        signal?.throwIfAborted();
+        const frame = new File([frames[0].blob], 'cover-source.jpg', { type: 'image/jpeg' });
+        const stored = await cloudBackupMedia(frame, await durableFileSig(frame), { signal });
+        if (!stored) throw new Error('cover_source_unavailable');
+        const response = await fetch('/api/studio/media', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'get', key: stored.key }), signal });
+        const data = await response.json().catch(() => ({})) as { url?: string };
+        if (!response.ok || !data.url) throw new Error('cover_source_unavailable');
+        return data.url;
+      } finally { frames.forEach(frame => URL.revokeObjectURL(frame.url)); }
+    },
+    brandReferences: loadCoverBrandReferences,
+    start: params => startGeneration(projectId, 'image-gen', params),
+    poll: pollCreation,
+    recover: async runId => (await listStudioGens(projectId, 'image', 30)).find(job => job.coverRunId === runId) ?? null,
+    defaultModel: async () => {
+      const response = await fetch('/api/models?kind=image');
+      const data = await response.json() as { models?: { id: string }[] };
+      return pickImageModel(data.models ?? []);
+    },
+  }), [committer, coverOutputId, editorDocumentRef, loadCoverSource, projectId, projectOutputs.outputsRef]);
+  const generateCoverScene = useCallback(async (options: CoverGenerateOptions = {}, signal?: AbortSignal) => {
+    setCoverSceneBusy(true);
+    try { return await coverController.generate(options, signal); }
+    finally { setCoverSceneBusy(false); }
+  }, [coverController]);
   useEffect(() => {
+    if (coverScene?.phase !== 'generating' && coverScene?.phase !== 'starting') return;
+    let alive = true; let timer: number;
+    const poll = async () => {
+      try { await coverController.refresh(); } catch { /* A switched output resumes its own scene later. */ }
+      if (alive && ['generating', 'starting'].includes(coverSceneFromDocument(editorDocumentRef.current)?.phase ?? '')) timer = window.setTimeout(() => void poll(), 4000);
+    };
+    timer = window.setTimeout(() => void poll(), 4000);
+    return () => { alive = false; window.clearTimeout(timer); };
+  }, [coverController, coverScene?.phase, coverScene?.jobId, editorDocumentRef]);
+  const prepareCoverScene = useCallback(async (rewrite = false) => {
+    setCoverSceneBusy(true);
+    try { return await coverController.prepare({ rewrite }); }
+    finally { setCoverSceneBusy(false); }
+  }, [coverController]);
+  const saveCoverDraft = useCallback((patch: CoverDraftPatch) => coverController.updateDraft(patch), [coverController]);
+  const previewCoverFrame = useCallback(async (frame: CoverSourceFrame): Promise<Blob> => {
+    if (!retainedCoverFrame(editorDocumentRef.current, frame)) throw new Error('cover_frame_not_retained');
+    const file = await loadCoverSource(frame.assetId);
+    const frames = await extractThumbnails(file, [frame.sourceSec], { width: 1440, quality: 0.92 });
+    try { if (!frames[0]) throw new Error('cover_source_unavailable'); return frames[0].blob; }
+    finally { frames.forEach(frame => URL.revokeObjectURL(frame.url)); }
+  }, [editorDocumentRef, loadCoverSource]);
+  const loadCoverFrames = useCallback(async (): Promise<CoverFrameStripData> => {
+    const document = editorDocumentRef.current; const ranges = coverFrameRanges(document); const fps = document.canvas.fps;
+    const durationSec = Math.max(0, ...ranges.map(range => range.endSec));
+    const count = Math.min(24, Math.max(8, Math.ceil(durationSec / 5)));
+    const anchors = Array.from({ length: count }, (_, i) => coverFrameAtTime(ranges, Math.max(0, durationSec - 1 / fps) * i / Math.max(1, count - 1), fps)).filter((frame): frame is CoverSourceFrame => !!frame);
+    const grouped = new Map<string, CoverSourceFrame[]>();
+    for (const frame of anchors) grouped.set(frame.assetId, [...(grouped.get(frame.assetId) ?? []), frame]);
+    const frames: CoverFrameStripData['frames'] = [];
+    for (const [assetId, group] of grouped) {
+      const file = await loadCoverSource(assetId);
+      group.sort((a, b) => a.sourceSec - b.sourceSec);
+      const thumbnails = await extractThumbnails(file, group.map(frame => frame.sourceSec), { width: 240, quality: 0.72 });
+      try {
+        const unmatched = [...group];
+        for (const thumbnail of thumbnails) {
+          const bytes = new Uint8Array(await thumbnail.blob.arrayBuffer()); let binary = ''; for (const byte of bytes) binary += String.fromCharCode(byte);
+          const closest = unmatched.reduce((best, frame, index) => Math.abs(frame.sourceSec - thumbnail.timestamp) < Math.abs(unmatched[best]!.sourceSec - thumbnail.timestamp) ? index : best, 0);
+          const anchor = unmatched.splice(closest, 1)[0]; if (anchor) frames.push({ ...anchor, timelineSec: anchor.timelineSec ?? 0, url: `data:image/jpeg;base64,${btoa(binary)}` });
+        }
+      } finally { thumbnails.forEach(thumbnail => URL.revokeObjectURL(thumbnail.url)); }
+    }
+    return { frames: frames.sort((a, b) => a.timelineSec - b.timelineSec), ranges, durationSec, fps };
+  }, [editorDocumentRef, loadCoverSource]);
+  const openCoverScene = useCallback(() => setCoverSceneOpen(true), []);
+  const onApplyCover = useCallback(async (cover: ProjectCover) => {
+    if (coverApplyingRef.current) throw new Error('cover_apply_failed');
+    const outputId = projectOutputs.outputsRef.current.active.id;
+    let coverTransactionId: string | undefined;
+    coverApplyingRef.current = true;
+    applyingCoverUrlRef.current = cover.url;
+    setCoverApplying(true);
+    if (coverCloudTimerRef.current) { window.clearTimeout(coverCloudTimerRef.current); coverCloudTimerRef.current = null; }
+    try {
+      await applyProjectCover(cover, {
+        load: async (url) => projectCoverThumbnail((await materializeRemoteMedia(url, { name: 'cover.png', type: 'image/png' })).file),
+        save: (blob, sig) => coverWriteQueue.write(blob, sig),
+        current: () => !displacedRef.current && projectOutputs.outputsRef.current.active.id === outputId,
+        document: () => editorDocumentRef.current,
+        commit: (document) => {
+          const result = committer.commit({ op: 'document.replace', input: { document } }, { origin: 'user' });
+          if (result.ok) { coverTransactionId = projectSyncRef.current?.pendingTransactions.at(-1)?.id; coverThumbRef.current = cover.url; saveCoverThumb(projectId, cover.url); }
+          return result.ok;
+        },
+        persist: () => persistProjectCover(projectSyncRef.current, coverTransactionId, cover, () => editorDocumentRef.current),
+      });
+    } finally {
+      applyingCoverUrlRef.current = null;
+      coverApplyingRef.current = false;
+      setCoverApplying(false);
+    }
+  }, [committer, coverWriteQueue, projectId, projectOutputs.outputsRef, editorDocumentRef]);
+  useEffect(() => {
+    const chosen = projectCover;
+    if (chosen) {
+      coverThumbRef.current = chosen.url;
+      saveCoverThumb(projectId, chosen.url);
+      let alive = true;
+      if (chosen.url !== coverCloudPushedSigRef.current && !coverApplyingRef.current) {
+        void materializeRemoteMedia(chosen.url, { name: 'cover.png', type: 'image/png' }).then(async ({ file }) => {
+          const thumbnail = await projectCoverThumbnail(file);
+          if (alive) scheduleCoverCloudPush(thumbnail, chosen.url);
+        }).catch(() => {});
+      }
+      return () => { alive = false; };
+    }
     // A cover describes the current deliverable, not the reusable source kept in the media
     // library. Removing the final timeline video must therefore clear the cover even though
     // videoFile intentionally remains available for inserting again later.
@@ -3049,7 +3231,7 @@ export function HyperframesWorkbench({
     const objectUrl = boundFile ? URL.createObjectURL(boundFile) : null;
     const url = objectUrl ?? coverVisual.source;
     const drawCover = (media: CanvasImageSource, mediaWidth: number, mediaHeight: number) => {
-      if (!alive || !mediaWidth || !mediaHeight) return;
+      if (!alive || coverApplyingRef.current || projectCoverFromDocument(editorDocumentRef.current) || !mediaWidth || !mediaHeight) return;
       const w = 960;
       const h = Math.max(2, Math.round((editorDocument.canvas.height / editorDocument.canvas.width) * w));
       const cv = document.createElement("canvas");
@@ -3106,7 +3288,7 @@ export function HyperframesWorkbench({
     return () => {
       alive = false;
     };
-  }, [bootDataReady, coverVisual, editorDocument.canvas.height, editorDocument.canvas.width, hasCoverVisual, projectId, videoFile]);
+  }, [bootDataReady, coverVisual, editorDocument.canvas.height, editorDocument.canvas.width, hasCoverVisual, projectId, videoFile, projectCover, scheduleCoverCloudPush, editorDocumentRef]);
   // Autosave runs regardless (pure side effect: debounced draft write); the toolbar no longer shows a "project/saved" time
   // videoSigRef first: in the missing-media state (no File on this device) the draft's sig anchor
   // must survive autosave — writing null would wipe the cloud row's reconnect anchor.
@@ -7156,8 +7338,21 @@ export function HyperframesWorkbench({
   const runStudioTool = (
     toolId: string,
     input: Record<string, unknown>,
-    opts?: { signal?: AbortSignal; surface?: "chat" | "bridge"; skillId?: string; roughCut?: import("./first-pass").RoughCutExecution },
-  ) => workflowBusyRef.current ? Promise.resolve({ ok: false, error: "A workflow is running. Wait for it to finish before editing." } satisfies StudioToolResult) : (toolId === "run_v3"
+    opts?: { signal?: AbortSignal; surface?: "chat" | "bridge"; coverRequested?: boolean; skillId?: string; roughCut?: import("./first-pass").RoughCutExecution },
+  ) => (toolId === 'generate_cover' || toolId === 'run_v3' && input.name === 'generate_cover') ? (async () => {
+    const args = (toolId === 'run_v3' ? input.args ?? input.input ?? {} : input) as Record<string, unknown>;
+    try {
+      if (args.action !== 'status' && !editorDocumentRef.current.semantics.editingSkills?.includes('cover') && !opts?.coverRequested) return { ok: true, summary: localeRef.current === 'zh' ? '自动封面已关闭' : 'Automatic cover is off', data: { status: 'disabled', available: false } };
+      let data;
+      if (args.action === 'status') data = await coverController.refresh();
+      else {
+        setCoverSceneBusy(true);
+        try { data = await coverController.complete({ regenerate: args.regenerate === true }, opts?.signal); }
+        finally { setCoverSceneBusy(false); }
+      }
+      return { ok: data.status !== 'failed', summary: coverSceneStatus(coverSceneFromDocument(editorDocumentRef.current)), data };
+    } catch { return { ok: false, error: localeRef.current === 'zh' ? '封面制作未完成，请在封面场景中重试。' : 'Cover incomplete. Retry in the cover scene.' }; }
+  })() : workflowBusyRef.current ? Promise.resolve({ ok: false, error: "A workflow is running. Wait for it to finish before editing." } satisfies StudioToolResult) : (toolId === "run_v3"
     // v3 surface from the chat: same executor as the external bridge, with the chat surface carried in the input
     // so parked interactions (ask_user / approvals) render as chat cards.
     ? persistToolMutation(runAgentExternalTool(agentToolCtx, "run_v3", { ...input, surface: opts?.surface ?? "chat", ...(opts?.signal ? { signal: opts.signal } : {}) }, opts?.roughCut ? { ...opts.roughCut, persist: async () => { await cloudSaveQueueRef.current?.flush(); } } : undefined))
@@ -8314,6 +8509,11 @@ export function HyperframesWorkbench({
                     key={chatEpoch}
                     ref={chatRef}
                     projectId={projectId}
+                    projectCover={projectCover}
+                    onApplyCover={onApplyCover}
+                    coverApplying={coverApplying}
+                    coverScene={coverScene}
+                    onOpenCover={openCoverScene}
                     // updateLocalAssetIndex swaps in a NEW array and bumps localAssetIndexRev (re-rendering
                     // the workbench), so reading the ref here hands the memo'd chat the fresh identity and
                     // search receipts resolve OPFS thumbnails for mine-scope hits.
@@ -8900,7 +9100,7 @@ export function HyperframesWorkbench({
         initialTemplateId={workflowEntryId}
         open={workflowOpen}
         onOpenChange={setWorkflowOpen}
-        blocked={!bootDataReady || busyImport || chatBusy || bridgeToolsInFlight > 0 || displaced}
+        blocked={!bootDataReady || busyImport || coverSceneBusy || coverApplying || chatBusy || bridgeToolsInFlight > 0 || displaced}
         onBusyChange={(value) => { workflowBusyRef.current = value; setWorkflowBusy(value); }}
         onImport={() => fileInputRef.current?.click()}
         host={{
@@ -8918,7 +9118,7 @@ export function HyperframesWorkbench({
             };
           },
           assertWritable: () => {
-            if (displacedRef.current || chatBusy || bridgeToolsInFlight > 0) throw new Error(locale === 'zh' ? '当前作品正在被其他任务编辑。' : 'Another task is editing this output.');
+            if (displacedRef.current || coverApplyingRef.current || chatBusy || bridgeToolsInFlight > 0) throw new Error(locale === 'zh' ? '当前作品正在被其他任务编辑。' : 'Another task is editing this output.');
           },
           prepareMedia: async () => {
             const document = editorDocumentRef.current;
@@ -8938,6 +9138,7 @@ export function HyperframesWorkbench({
           },
         }}
       />}
+      <CoverSceneDialog open={coverSceneOpen} scene={coverScene} applied={projectCover} busy={coverSceneBusy || coverApplying} onClose={() => setCoverSceneOpen(false)} onPrepare={prepareCoverScene} onSaveDraft={saveCoverDraft} onLoadFrames={loadCoverFrames} onPreviewFrame={previewCoverFrame} onGenerate={generateCoverScene} onApply={onApplyCover} />
       {/* Entry boot layer: heavy-resource warmup + project-data double gate, covers the whole workbench (incl. the chat bar), self-unmounts when done */}
       <StudioBootOverlay dataReady={bootDataReady} />
       <header data-studio-header data-block-selection-keep data-cap-keep className="bg-canvas flex h-11 shrink-0 items-center justify-between gap-3 rounded-sm px-3">
@@ -8996,7 +9197,7 @@ export function HyperframesWorkbench({
         <div className="mb-1.5 flex min-h-0 min-w-0 flex-1 gap-1.5">
           {/* Preview (= the editing surface: single-click selects a block, double-click edits text in place). No video → upload area.
             The panel clips its own children so nested surfaces cannot bleed through the outer rounded corners. */}
-          <div data-studio-preview inert={manualEditingLocked} className="bg-canvas flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-sm">
+          <div data-studio-preview inert={manualEditingLocked || coverSceneOpen} className="isolate bg-canvas flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-sm">
             <div className="flex min-h-0 min-w-0 flex-1 p-3">
               <div
                 ref={previewAreaRef}
@@ -10884,6 +11085,9 @@ export function HyperframesWorkbench({
         {/* Caption style popover: reuses CaptionsPanel wholesale; clicking a style applies globally, click outside / Esc dismisses */}
         {/* Multi-track timeline */}
         <div data-studio-timeline data-cap-keep inert={manualEditingLocked} hidden={timelineCollapsed} className="shrink-0 overflow-hidden rounded-b-sm">
+          <div className="flex min-w-0">
+            {projectCover && <TimelineCoverPlaceholder cover={projectCover} onOpen={openCoverScene} />}
+            <div className="min-w-0 flex-1">
           <StudioTimeline
             comp={comp}
             density={timelineDensity}
@@ -10931,6 +11135,8 @@ export function HyperframesWorkbench({
             onChangeTransition={changeTransitionTiming}
             {...timelineCbs}
           />
+            </div>
+          </div>
         </div>
 
         {/* Test hook: narration script + visual analysis (read-only) */}

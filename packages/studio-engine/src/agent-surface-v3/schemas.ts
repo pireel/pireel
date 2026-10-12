@@ -444,8 +444,9 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
     }, ['direction', 'beats']),
   },
   finish_edit: {
-    description: 'Finish a whole-video edit after checking its enabled features against the actual timeline. Required for branded/fine-cut work. Include every enabled graphics/headlines, B-roll, sound, zoom and transition feature. Applied features must exist in the timeline. For not_needed give a concrete content reason and the moment evaluated; lack of source media is not a reason to skip B-roll. Unfinished generation or unavailable assets are blocked, never completed. For a saved director plan, inspect meaningful rendered frames after the last edit and include planRevision, every beat outcome with real clipIds, and an editorialReview of opening, progression, rhythm and brand coherence. This records the outcome without modifying the video.',
+    description: 'Finish a whole-video edit after checking its enabled features against the actual timeline. Required for branded/fine-cut work. When cover is enabled, call generate_cover; completion reads the independent scene’s actual outcome. Main chat must not carry cover prompts, frames or image results. A pending or failed scene keeps cover work unfinished. Include every enabled graphics/headlines, B-roll, sound, zoom and transition feature. Applied features must exist in the timeline. For not_needed give a concrete content reason and the moment evaluated; lack of source media is not a reason to skip B-roll. Unfinished generation or unavailable assets are blocked, never completed. For a saved director plan, inspect meaningful rendered frames after the last edit and include planRevision, every beat outcome with real clipIds, and an editorialReview of opening, progression, rhythm and brand coherence. This records the outcome without modifying the video.',
     inputSchema: obj({
+      cover: obj({ status: enumOf(['generated', 'blocked', 'skipped']), reason: str('Actual cover outcome in the creator’s language. skipped only when the user explicitly excludes covers.'), jobId: str('Succeeded generate_image purpose=cover job from this task.'), assetId: str('Registered cover image, inspected with inspect_media mode frames; keep separate from the video timeline.') }, ['status', 'reason']),
       planRevision: int('Revision returned by save_edit_plan. Required when a director plan exists.', 1),
       editorialReview: str('Concrete assessment of the actual opening, progression, rhythm and brand coherence against the plan. Fix visible defects first.'),
       beats: arr(obj({ beatId: str('Saved plan beat id.'), status: enumOf(['applied', 'kept', 'changed', 'blocked']), result: str('What viewers now see; explain adaptations or blockers. Use the creator’s language.'), clipIds: arr(str(), { description: 'Actual enabled clip ids overlapping this source passage’s current timeline position. Required for applied/kept/changed.' }) }, ['beatId', 'status', 'result', 'clipIds'])),
@@ -603,7 +604,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   read_brand: {
     description:
-      'The brand snapshot explicitly selected for this project, with its reusable style guidance, editing preferences, fixed caption and logo settings, and cover guidance. Read it once before building or reworking a whole video; apply it where the current request leaves a choice open. Enabled capabilities are optional when useful, not quotas. The latest explicit user instruction wins. Returns no_brand when this project has no brand; it never adopts an account default',
+      'The brand snapshot explicitly selected for this project, with its reusable style guidance, editing preferences, fixed caption and logo settings. Read it once before building or reworking a whole video; apply it where the current request leaves a choice open. Enabled capabilities are optional when useful, not quotas. The latest explicit user instruction wins. Returns no_brand when this project has no brand; it never adopts an account default',
     inputSchema: obj({}, []),
   },
 
@@ -613,10 +614,16 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       'List the enabled hosted generation models for a kind, with stable ids and capability notes such as supported sizes and durations. Call it before passing a non-default modelId to generate_image, generate_video or lip_sync; omit modelId to use the catalog default.',
     inputSchema: obj({ kind: enumOf(['image', 'video', 'all']) }),
   },
+  generate_cover: {
+    description: `${CHARGE_MARKER} Make the current video’s cover in its independent cover scene: retained transcript, brand cover direction, frame selection, complete prompt authoring and image generation run there, outside main-chat context. Enabling cover or explicitly requesting it authorizes this bounded workflow without another approval. Omit inputs for automatic defaults. Waits for the image and returns only status; action=status just reads progress. It opens no chat questions and never inserts a timed clip. Reuse a pending or ready scene on continuation. The creator reviews/applies results in the cover dialog; applying adds an untimed placeholder before the timeline.`,
+    inputSchema: obj({ action: enumOf(['generate', 'status']), regenerate: bool('Only for an explicit request for another cover; default reuses an existing job/result.') }),
+  },
   generate_image: {
     description:
-      `${CHARGE_MARKER} Start one hosted image generation and return a job id; poll inspect_media mode:generation, then register_media and add_clips. prompt is a production-ready visual brief (subject, action, environment, camera, light, composition, exclusions); referenceImages carry identity or product constraints. Works without an open tab.`,
+      `${CHARGE_MARKER} Start one hosted image generation and return a job id; poll inspect_media mode:generation, then register_media and add_clips. prompt is a production-ready visual brief (subject, action, environment, camera, light, composition, exclusions); referenceImages carry identity or product constraints. sourceFrame captures a clean image from a project video for identity/reference; requires the open tab. Cover outputs stay in generation history and the project library, separate from the video timeline.`,
     inputSchema: obj({
+      purpose: enumOf(['cover', 'illustration'], 'cover creates a separate brand-cover delivery; do not place it as B-roll.'),
+      sourceFrame: obj({ assetId: str('Actual project video source; preserves this video’s speaker, never the reference creator.'), sourceSec: num('Source seconds of the chosen expressive frame. Decoded and uploaded without a model call.', { min: 0 }) }, ['assetId', 'sourceSec']),
       prompt: str(), modelId: str('From list_models; omit for the default.'),
       size: str('e.g. 1440x2560, 2560x1440, 2048x2048.'), quality: str('Model-specific tier.'),
       referenceImages: arr(str('An asset id from get_state (or a URL). Pass it straight through — generation resolves it; no inspect_media first.'), { maxItems: 16 }),

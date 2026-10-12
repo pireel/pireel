@@ -16,6 +16,8 @@ import { AskUserCard } from './chat-ask-card';
 import { ApprovalCard } from './chat-approval-card';
 import { ExportSettingsCard } from './chat-export-card';
 import { t } from './i18n';
+import { CoverToolCard } from './cover-scene-dialog';
+import type { CoverScene } from './cover-scene';
 import { CreditsShortfallBody, GeneratedAudioBody, GenerationJobsBody, type GenerationCardActions } from './chat-generation-card';
 
 /* ============================ Tool-duration memory (for ETA) ============================ */
@@ -267,8 +269,9 @@ function IconsBody({ output }: { output: unknown }) {
   );
 }
 
-export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocate?: (sec: number) => void; getComp?: () => Composition; generation?: GenerationCardActions; localAssetIndex?: readonly LocalAssetIndexEntry[]; projectId?: string }): React.ReactNode {
+export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocate?: (sec: number) => void; getComp?: () => Composition; generation?: GenerationCardActions; coverScene?: CoverScene | null; onOpenCover?: () => void; localAssetIndex?: readonly LocalAssetIndexEntry[]; projectId?: string }): React.ReactNode {
   const id = toolIdOf(part);
+  if (id === "generate_cover") return <CoverToolCard key={key} scene={opts?.coverScene} onOpen={opts?.onOpenCover} />;
   const def = studioToolDefFor(id);
   if (!def) return null;
   // ask_user: a structured question with clickable option chips (its own card, not the generic one).
@@ -318,7 +321,7 @@ export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocat
     ? ((out?.data as { ids?: unknown } | undefined)?.ids as unknown[] | undefined)?.filter((value): value is string => typeof value === 'string') ?? []
     : [];
   const generation = jobIds.length && opts?.generation
-    ? <GenerationJobsBody ids={jobIds} kind={id === 'generate_video' ? 'video' : 'image'} prompt={promptArg} actions={opts.generation} />
+    ? <GenerationJobsBody ids={jobIds} kind={id === 'generate_video' ? 'video' : 'image'} prompt={promptArg} actions={opts.generation} isCover={args.purpose === 'cover'} />
     : id === 'generate_audio' && part.state === 'output-available' && opts?.generation
       ? <GeneratedAudioBody output={part.output} prompt={promptArg} actions={opts.generation} />
       : null;

@@ -114,7 +114,9 @@ import { studioLocale, t, tEnglish } from './i18n';
 import { type ComposeMode, type ComposedBlock, composedBlockFields, GeneratedBlockValidationError, kitChoiceOf, newBlockComposeMode } from './compose-result';
 import { clearToolProgress, setToolProgress, type ToolProgress } from './tool-progress';
 import { FIRST_PASS_STEPS, runFirstPass, type FirstPassHost, type FirstPassStepId, type RoughCutExecution } from './first-pass';
-import { probeVideoFile } from './media';
+import { probeVideoFile, durableFileSig } from './media';
+import { cloudBackupMedia } from './cloud-media';
+import { extractThumbnails } from '@pireel/studio-engine/video-edit/thumbnails';
 import { cloudToolFrame } from './agent-frame-upload';
 import { measuredSpeechTranscript, storedScriptText } from '@pireel/studio-engine/script-alignment';
 import { deleteCachedTts, getCachedTts, setCachedTts, ttsCacheKey, type CachedTtsAsset } from './tts-cache';
@@ -122,7 +124,7 @@ import { loadLocalAssetFile, loadLocalVideo, saveLocalVideo } from './local-medi
 import { materializeRemoteMedia } from './remote-media';
 import { localAssetIndexEntry, runLocalImportSession } from './local-import-session';
 import { normalizeStudioToolInputReferences, resolveLocalAssetReference } from './studio-tool-input-references';
-import { resolveGenerationReferences } from './generation-reference';
+import { resolveGenerationReferences, resolveGenerationSourceFrame } from './generation-reference';
 import { analyzeVisual, analyzeVisualGeometry, type VisualLabel, type VisualPrep, type VisualTimeline, finishVisualAnalysis, prepareVisualAnalysis } from './visual';
 import {
   compareEditorialOpenings,
@@ -2402,10 +2404,35 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 },
               };
               const images = await resolveGenerationReferences(input.referenceImages, referenceDeps, generationKind === 'image' ? 16 : 9);
+              const sourceFrame = generationKind === 'image' && input.sourceFrame !== undefined ? await race(resolveGenerationSourceFrame(input.sourceFrame, {
+                assets: documentRef.current.assets,
+                load: assetBytes,
+                capture: async (file, sec, width) => {
+                  const frames = await extractThumbnails(file, [sec], { width, quality: 0.92 });
+                  try { return frames[0]?.blob ?? null; }
+                  finally { frames.forEach(frame => URL.revokeObjectURL(frame.url)); }
+                },
+                upload: async (blob) => {
+                  const file = new File([blob], 'cover-source.jpg', { type: blob.type || 'image/jpeg' });
+                  const stored = await cloudBackupMedia(file, await durableFileSig(file), { signal });
+                  return stored ? referenceDeps.presign(stored.key) : null;
+                },
+                signal,
+              })) : undefined;
+              if (sourceFrame) {
+                if (images.urls.length >= 16) return { ok: false, error: 'sourceFrame plus referenceImages must not exceed 16 image references.' };
+                images.urls.unshift(sourceFrame.url);
+              }
+              // Identity/product references must never be silently dropped before a paid call.
+              if (generationKind === 'image' && input.purpose === 'cover' && images.unresolved.length) return { ok: false, error: 'Resolve all cover references before generating.', data: { unresolvedReferences: images.unresolved } };
               const unresolvedReferences = [...images.unresolved];
               const params: Record<string, unknown> = {
-                prompt,
-                user_prompt: prompt,
+                prompt: generationKind === 'image' && input.purpose === 'cover' ? [
+                  'Create a new cover for THIS video. Preserve the current video subject from sourceFrame; the selected brand supplies style, never the identity or old headline. Do not copy captions, timestamp labels or watermarks from reference frames.',
+                  documentRef.current.semantics.brand?.blocks.cover?.design,
+                  prompt,
+                ].filter(Boolean).join('\n\n') : prompt,
+                user_prompt: generationKind === 'image' && input.purpose === 'cover' ? `Brand cover: ${prompt}` : prompt,
                 ...(typeof input.modelId === 'string' && input.modelId ? { model_id: input.modelId } : {}),
                 ...(images.urls.length ? { reference_images: images.urls } : {}),
               };
@@ -2444,8 +2471,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   status: 'pending',
                   kind: generationKind,
                   projectId,
+                  ...(input.purpose === 'cover' ? { purpose: 'cover', ...(sourceFrame ? { sourceFrame: { assetId: sourceFrame.assetId, sourceSec: sourceFrame.sourceSec } } : {}) } : {}),
                   ...(unresolvedReferences.length ? { unresolvedReferences } : {}),
-                  next: 'The asynchronous task is already in Generate history. Do not poll repeatedly in this turn; read them later with inspect_media {mode:"generation", ids:[…]}, then register_media and add_clips after success.',
+                  next: input.purpose === 'cover' ? 'The cover is generating in this project’s history. Keep it separate from the timeline. After success, inspect_media mode:generation, register_media its image and inspect_media mode:frames; include the jobId and assetId in finish_edit. Pending generation is unfinished. Reuse this job on continuation.' : 'The asynchronous task is already in Generate history. Do not poll repeatedly in this turn; read them later with inspect_media {mode:"generation", ids:[…]}, then register_media and add_clips after success.',
                 },
               };
             } finally {

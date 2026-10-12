@@ -1,3 +1,4 @@
+import { pickImageModel, imageGenerationParams } from '@pireel/studio-engine/image-generation-settings';
 import { useEffect, useState } from 'react';
 import { audioKindFor, type GenerationIntent, type GenerationParams } from './chat-generation-intent';
 
@@ -66,14 +67,6 @@ function sfxDurationTier(durationSec: number): 's5' | 's10' | 's15' | 's22' {
   return 's22';
 }
 
-/** gpt-image needs a concrete size for both the provider and the billing tier; other models take an aspect. */
-function imageSize(modelId: string, ratio: string): string {
-  if (modelId === 'gpt-image' || modelId === 'gpt-image-2') {
-    return ratio === '16:9' ? '2560x1440' : ratio === '1:1' ? '1024x1024' : '1440x2560';
-  }
-  return ratio;
-}
-
 export type GenerationToolId = 'image-gen' | 'video-gen' | 'sfx-gen' | 'music-gen' | 'speech-gen-unquoted';
 
 export interface GenerationRequest {
@@ -86,10 +79,10 @@ export interface GenerationRequest {
 
 /** Settings → the generation request. The credit quote and the real call both read this. */
 export function generationRequest(intent: GenerationIntent, params: GenerationParams, models: GenerationModel[]): GenerationRequest {
-  const modelId = intent === 'image' || intent === 'video' ? (params.modelId ?? models[0]?.id ?? '') : '';
+  const modelId = intent === 'image' ? pickImageModel(models, params.modelId) : intent === 'video' ? (params.modelId ?? models[0]?.id ?? '') : '';
   const ratio = params.ratio ?? '9:16';
   if (intent === 'image') {
-    return { toolId: 'image-gen', modelId, params: { n: Math.min(4, Math.max(1, params.count ?? 1)), size: imageSize(modelId, ratio), ...(params.quality ? { quality: params.quality } : {}) } };
+    return { toolId: 'image-gen', modelId, params: { n: Math.min(4, Math.max(1, params.count ?? 1)), ...imageGenerationParams({ modelId, size: params.imageSize || ratio, quality: params.quality }) } };
   }
   if (intent === 'video') {
     return { toolId: 'video-gen', modelId, params: { duration_sec: String(params.durationSec ?? 5), count: 1, resolution: params.resolution ?? '720p', aspect_ratio: ratio, generate_audio: params.generateAudio ?? false } };

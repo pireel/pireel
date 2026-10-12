@@ -12,6 +12,7 @@ export interface EditingSkill {
 }
 
 export const EDITING_SKILLS = [
+  { id: 'cover', instruction: 'Automatically create one cover in the independent cover scene (generate_cover). Enabling this capability authorizes cover analysis and generation without another confirmation. Keep cover prompts, frames and results out of the main chat.' },
   { id: 'graphics', instruction: 'Motion graphics designed for this video, timed to the speech (read_skill video-graphics).' },
   { id: 'captions', instruction: 'Word-synced captions (set_captions).' },
   { id: 'rough-cut', instruction: 'Cut filler words, false starts, failed retakes and dead air while keeping the meaning (read_skill speech-cleanup).' },
@@ -24,7 +25,7 @@ export type EditingSkillId = (typeof EDITING_SKILLS)[number]['id'];
 
 /** The skills a brand turns on by default. Voice cleanup is left out: whether narration needs it depends
  *  on how each recording sounds, not on the creator's style (their finished videos are already clean). */
-export const BRAND_EDITING_SKILL_IDS: readonly EditingSkillId[] = ['graphics', 'captions', 'rough-cut', 'b-roll', 'sound'];
+export const BRAND_EDITING_SKILL_IDS: readonly EditingSkillId[] = ['cover', 'graphics', 'captions', 'rough-cut', 'b-roll', 'sound'];
 
 export const EDITING_SKILL_IDS: readonly EditingSkillId[] = EDITING_SKILLS.map((skill) => skill.id);
 

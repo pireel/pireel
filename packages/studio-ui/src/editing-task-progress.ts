@@ -2,7 +2,7 @@ import type { UIMessage } from 'ai';
 import { taskOf, unfinishedRoughCut, type ChatTask } from './chat-task';
 import { v3ToolCanMutate } from '@pireel/studio-engine/agent-surface-v3/registry';
 import type { FirstPassReport, FirstPassStepStatus, FineCutItem } from './first-pass';
-import { needsEditingReview } from './editing-task-review';
+import { needsBrandCover, needsEditingReview } from './editing-task-review';
 
 export const toolIdOf = (part: { type: string; toolName?: unknown }) => part.type === 'dynamic-tool' ? String(part.toolName ?? '') : part.type.startsWith('tool-') ? part.type.slice(5) : '';
 export function messagesForTask(messages: readonly UIMessage[], taskId: string): UIMessage[] {
@@ -11,7 +11,7 @@ export function messagesForTask(messages: readonly UIMessage[], taskId: string):
 }
 /** Keep actual decisions/results interactive, but never render an execution log as conversation. */
 export function isInteractiveEditingTool(id: string, wholeVideo: boolean): boolean {
-  return ['ask_user', 'request_approval', 'export', 'generate_image', 'generate_video', 'generate_audio', 'generate_speech', 'generate_foley', 'save_user_skill'].includes(id)
+  return ['ask_user', 'request_approval', 'export', 'generate_cover', 'generate_image', 'generate_video', 'generate_audio', 'generate_speech', 'generate_foley', 'save_user_skill'].includes(id)
     || (!wholeVideo && ['search_assets', 'get_icons', 'manage_voices'].includes(id));
 }
 export function unresolvedTaskFailure(messages: readonly UIMessage[]): boolean {
@@ -19,8 +19,10 @@ export function unresolvedTaskFailure(messages: readonly UIMessage[]): boolean {
   for (const message of messages) if (message.role === 'assistant') for (const part of message.parts) {
     const id = toolIdOf(part);
     if (!id) continue;
-    const value = part as { state?: string; output?: { ok?: boolean; error?: string; data?: { taskIncomplete?: boolean } } };
+    const value = part as { state?: string; output?: { ok?: boolean; error?: string; data?: { taskIncomplete?: boolean; review?: { completed?: boolean } } } };
     if (id === 'read_brand' && value.output?.error === 'no_brand') continue;
+    // A cover can be repaired in its independent scene, without another chat generation call.
+    if (id === 'finish_edit' && value.output?.ok !== false && value.output?.data?.review?.completed) latest.set('generate_cover', false);
     if (value.state === 'output-error' || value.state === 'output-available') latest.set(id, value.state === 'output-error' || value.output?.ok === false || value.output?.data?.taskIncomplete === true);
   }
   return [...latest.values()].some(Boolean);
@@ -32,7 +34,7 @@ export function hasCurrentDirectorPreview(messages: readonly UIMessage[]): boole
     const id = toolIdOf(part);
     const value = part as { state?: string; output?: { ok?: boolean } };
     if (value.state !== 'output-available' || value.output?.ok === false) continue;
-    if (v3ToolCanMutate(id)) checked = false;
+    if (v3ToolCanMutate(id) && id !== 'generate_cover') checked = false;
     else if (id === 'inspect_timeline') checked = true;
   }
   return checked;
@@ -82,6 +84,12 @@ export function editingTaskRows(task: ChatTask, report: FirstPassReport | undefi
     const camera = tools.filter(part => (feature === 'zoom' ? 'set_clip_framing' : 'add_transition') === toolIdOf(part));
     const last = camera.at(-1) as { state?: string; output?: { ok?: boolean } } | undefined;
     finishing.push({ id: feature, status: working ? last ? 'running' : 'pending' : last?.state === 'output-error' || last?.output?.ok === false ? 'failed' : last?.state === 'output-available' ? 'done' : 'pending' });
+  }
+  if (needsBrandCover(task)) {
+    const cover = task.review?.cover;
+    const coverCalls = tools.filter(part => toolIdOf(part) === 'generate_cover' || toolIdOf(part) === 'generate_image' && (part as { input?: { purpose?: string } }).input?.purpose === 'cover');
+    const failed = unresolvedTaskFailure([{ id: 'cover', role: 'assistant', parts: coverCalls }]);
+    finishing.push({ id: 'cover', status: cover?.status === 'generated' ? 'done' : cover?.status === 'skipped' ? 'skipped' : cover?.status === 'blocked' ? 'failed' : failed ? 'failed' : working && coverCalls.length ? 'running' : 'pending', reason: cover?.reason });
   }
   const lastMutation = tools.findLastIndex(part => v3ToolCanMutate(toolIdOf(part)) && (part as { state?: string; output?: { ok?: boolean } }).state === 'output-available' && (part as { output?: { ok?: boolean } }).output?.ok !== false);
   const inspectionStarted = tools.some(part => ['inspect_timeline', 'preview'].includes(toolIdOf(part)));

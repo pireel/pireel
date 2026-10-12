@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useRef, useState, type ComponentType } from 'react';
-import { AudioLines, Captions, Film, Plus, Scissors, Shapes, Volume2 } from 'lucide-react';
+import { AudioLines, Captions, Film, ImageIcon, Plus, Scissors, Shapes, Volume2 } from 'lucide-react';
 import { EDITING_SKILLS, type EditingSkillId } from '@pireel/studio-engine/editing-skills';
 import type { HandoffItem } from '@pireel/studio-engine/editor-document/types';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@pireel/ui/dialog';
@@ -16,6 +16,7 @@ import { ConfirmList, type ConfirmAnswer } from './confirm-list';
 import { studioLocale, t } from './i18n';
 
 const LOOK: Record<EditingSkillId, { icon: ComponentType<{ size?: number; className?: string }>; tile: string }> = {
+  cover: { icon: ImageIcon, tile: '#3f5054' },
   graphics: { icon: Shapes, tile: 'linear-gradient(135deg,#7dd3fc,#6366f1)' },
   captions: { icon: Captions, tile: 'linear-gradient(135deg,#60a5fa,#0ea5e9)' },
   'rough-cut': { icon: Scissors, tile: 'linear-gradient(135deg,#fdba74,#f97316)' },

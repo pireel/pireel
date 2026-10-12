@@ -1,6 +1,6 @@
 import type { BrandPlaybook } from './brand-playbook';
 
-export const BRAND_PREFERENCE_IDS = ['pauses', 'cleanup', 'denoise', 'broll', 'graphics', 'sound', 'transitions', 'zoom', 'headlines'] as const;
+export const BRAND_PREFERENCE_IDS = ['cover', 'pauses', 'cleanup', 'denoise', 'broll', 'graphics', 'sound', 'transitions', 'zoom', 'headlines'] as const;
 export type BrandPreferenceId = typeof BRAND_PREFERENCE_IDS[number];
 // Read the briefly exposed layout flag for compatibility only. Multi-speaker layout will use
 // explicit fixed presets (top/bottom, side-by-side, three or four panes), not agent discretion.
@@ -14,6 +14,7 @@ export function brandPreferences(brand: BrandSettings): Record<BrandPreferenceId
   const { layout: _reservedLayout, ...preferences } = brand.preferences ?? {};
   const describedMoves = [b.camera, b.transitions, b.layout].some(block => !!block?.text?.trim());
   return {
+    cover: !!(b.cover?.design?.trim() || b.cover?.frame?.trim()),
     pauses: skills.has('rough-cut') && b.sound?.pauses !== 'natural',
     cleanup: skills.has('rough-cut'), denoise: skills.has('voice-cleanup'),
     broll: skills.has('b-roll'), graphics: skills.has('graphics'), sound: skills.has('sound'),
@@ -26,6 +27,7 @@ export function brandPreferences(brand: BrandSettings): Record<BrandPreferenceId
 export function brandEditingSkills(brand: BrandSettings): string[] {
   const p = brandPreferences(brand);
   return [
+    ...(p.cover ? ['cover'] : []),
     ...(p.graphics ? ['graphics'] : []),
     ...(brand.blocks.captions?.on ? ['captions'] : []),
     ...(p.pauses || p.cleanup ? ['rough-cut'] : []),

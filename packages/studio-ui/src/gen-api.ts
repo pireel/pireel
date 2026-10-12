@@ -35,6 +35,7 @@ export {
 } from '@pireel/studio-engine/generated-assets';
 
 export interface GenJob {
+  coverRunId?: string;
   id: string;
   status: GenStatus;
   prompt: string;
@@ -160,7 +161,7 @@ export interface RawCreation {
   id?: string;
   status?: string;
   prompt?: string;
-  params?: { user_prompt?: string };
+  params?: { user_prompt?: string; _cover_run_id?: string };
   error?: string;
   created_at?: number | string;
   output_data?: { assets?: Array<{ url?: string; mime?: string }> };
@@ -178,6 +179,7 @@ export function genJobFromCreation(raw: RawCreation): GenJob {
   const at = typeof raw.created_at === 'number' ? raw.created_at : Date.parse(String(raw.created_at ?? '')) || Date.now();
   return {
     id: raw.id ?? '',
+    ...(typeof raw.params?._cover_run_id === 'string' ? { coverRunId: raw.params._cover_run_id } : {}),
     status,
     prompt: raw.params?.user_prompt || raw.prompt || '',
     assets: toAssets(raw.output_data),

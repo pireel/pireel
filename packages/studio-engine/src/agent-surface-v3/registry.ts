@@ -92,6 +92,7 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   { id: 'bake_component', group: 'components' },
   // ---- generation (8)
   { id: 'list_models', group: 'generation', serverDirect: true },
+  { id: 'generate_cover', group: 'generation', chatOnly: true, charges: true },
   { id: 'generate_image', group: 'generation', serverDirect: true, charges: true },
   { id: 'generate_video', group: 'generation', serverDirect: true, charges: true },
   { id: 'generate_audio', group: 'generation', serverDirect: true, charges: true, skillContract: { version: 1, stability: 'stable' } },
@@ -112,7 +113,7 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
 
 
 // Includes the chat-only saved director brief added to the 60-tool editing surface.
-export const V3_TOOL_LIMIT = 61;
+export const V3_TOOL_LIMIT = 62;
 
 export const V3_TOOL_IDS: ReadonlySet<string> = new Set(V3_TOOLS.map((tool) => tool.id));
 /** Studio Chat uses inline questions; the legacy publishing checklist remains MCP-compatible. */

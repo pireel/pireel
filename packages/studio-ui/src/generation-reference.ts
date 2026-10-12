@@ -64,3 +64,32 @@ export async function resolveGenerationReferences(
   }
   return { urls, unresolved };
 }
+
+/** Decode a clean source frame locally; no caption/time label and no paid frame-picking model. */
+export async function resolveGenerationSourceFrame(
+  value: unknown,
+  deps: {
+    assets: Readonly<Record<string, EditorMediaAsset>>;
+    load: (asset: EditorMediaAsset) => Promise<{ file: File | null; reason?: string }>;
+    capture: (file: File, sourceSec: number, width: number) => Promise<Blob | null>;
+    upload: (blob: Blob) => Promise<string | null>;
+    signal?: AbortSignal;
+  },
+): Promise<{ url: string; assetId: string; sourceSec: number }> {
+  const frame = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const assetId = typeof frame.assetId === 'string' ? frame.assetId : '';
+  const asset = deps.assets[assetId];
+  const sourceSec = frame.sourceSec;
+  if (!asset || asset.kind !== 'video') throw new Error('sourceFrame needs an actual project video assetId.');
+  if (typeof sourceSec !== 'number' || !Number.isFinite(sourceSec) || sourceSec < 0 || asset.metadata.durationSec !== undefined && sourceSec >= asset.metadata.durationSec) throw new Error('sourceFrame.sourceSec must be within the video source, not timeline frames.');
+  deps.signal?.throwIfAborted();
+  const source = await deps.load(asset);
+  if (!source.file) throw new Error(source.reason || 'Source video bytes are unavailable; restore this file before generating its cover.');
+  const blob = await deps.capture(source.file, sourceSec, Math.min(1920, asset.metadata.width || 1280));
+  deps.signal?.throwIfAborted();
+  if (!blob) throw new Error('Could not decode the selected source frame. No generation was started.');
+  const url = await deps.upload(blob);
+  deps.signal?.throwIfAborted();
+  if (!url || !/^https?:\/\//i.test(url)) throw new Error('Could not prepare a fetchable source frame. No generation was started.');
+  return { url, assetId, sourceSec };
+}

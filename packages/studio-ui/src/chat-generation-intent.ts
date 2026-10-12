@@ -17,7 +17,9 @@ export interface GenerationParams {
   /** image / video: hosted model id from the catalog (omit = default) */
   modelId?: string;
   /** image / video */
-  ratio?: '9:16' | '16:9' | '1:1';
+  ratio?: '9:16' | '16:9' | '1:1' | '3:4' | '4:3' | '2:3' | '3:2';
+  /** Image-only concrete dimensions or aspect; includes the selected resolution tier. */
+  imageSize?: string;
   /** image only, 1–4 */
   count?: number;
   /** image only: model quality tier */
@@ -63,6 +65,7 @@ export function generationIntentLine(intent: GenerationIntent, params: Generatio
   if (params.modelId && (intent === 'image' || intent === 'video')) facts.push(`model ${params.modelId}`);
   if (params.ratio && (intent === 'image' || intent === 'video')) facts.push(`aspect ${params.ratio}`);
   if (params.count && intent === 'image') facts.push(`count ${params.count}`);
+  if (params.imageSize && intent === 'image') facts.push(`size ${params.imageSize}`);
   if (params.quality && intent === 'image') facts.push(`quality ${params.quality}`);
   if (params.resolution && intent === 'video') facts.push(`resolution ${params.resolution}`);
   const audioKind = intent === 'audio' ? audioKindFor(params) : null;

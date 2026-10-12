@@ -5,8 +5,11 @@ const models = [{ id: 'seedream', name: 'Seedream' }, { id: 'gpt-image', name: '
 
 describe('generationRequest', () => {
   it('maps image settings to the create call the quote also prices', () => {
-    expect(generationRequest('image', { ratio: '1:1', count: 2, quality: 'high' }, models)).toEqual({ toolId: 'image-gen', modelId: 'seedream', params: { n: 2, size: '1:1', quality: 'high' } });
+    expect(generationRequest('image', { ratio: '1:1', count: 2, quality: 'high' }, models)).toEqual({ toolId: 'image-gen', modelId: 'gpt-image', params: { n: 2, size: '1024x1024', quality: 'high' } });
     expect(generationRequest('image', { modelId: 'gpt-image', ratio: '16:9' }, models).params.size).toBe('2560x1440');
+  });
+  it('preserves the selected 4K size in the quoted generation request', () => {
+    expect(generationRequest('image', { imageSize: '3840x2160', quality: 'high' }, models).params).toEqual({ n: 1, size: '3840x2160', quality: 'high' });
   });
   it('maps video and audio settings', () => {
     expect(generationRequest('video', { durationSec: 10, resolution: '1080p', ratio: '16:9' }, [{ id: 'kling', name: 'Kling' }])).toEqual({ toolId: 'video-gen', modelId: 'kling', params: { duration_sec: '10', count: 1, resolution: '1080p', aspect_ratio: '16:9', generate_audio: false } });
