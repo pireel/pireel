@@ -13,7 +13,7 @@ import { editorErrorMessage } from './editor-error';
 import { runStockTool } from './stock-tools-client';
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 import type { DocumentOp } from '@pireel/studio-engine/document-transaction';
-import type { AgentTimelineOutcome } from '@pireel/studio-engine/agent-timeline';
+import { whiteboardFormat, type AgentTimelineOutcome } from '@pireel/studio-engine/agent-timeline';
 import type { DocumentCommitter, ReplaceOptions, TransactionScope } from './document-commit';
 import { directorPlanFromDocument } from '@pireel/studio-engine/director-plan-artifact';
 import {
@@ -1514,6 +1514,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
         }
       }
+      // Reading the whiteboard format changes nothing: answer it before an undo step is taken.
+      if (toolId === 'set_whiteboard' && input.describe === true) return whiteboardFormat();
       if (!NO_UNDO_TOOLS.has(toolId)) pushUndoSnapshot(); // same entry: agent changes also void the redo line
       try {
         const documentInspect = toolId !== 'inspect_media' || input.mode === undefined || input.mode === 'metadata' || input.mode === 'component';

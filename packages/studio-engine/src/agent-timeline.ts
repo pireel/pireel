@@ -5,6 +5,9 @@ import { applyAudioDocumentEdits, ensureFreeAudioDocumentTrack } from './audio-d
 import { applyOverlayDocumentEdits } from './overlay-document-edit';
 import { insertOverlayDocumentClip } from './overlay-track-edit';
 import { titleBlock } from './block-factory';
+import type { Block } from './composition-core';
+import { WHITEBOARD_FONT_ID, WHITEBOARD_TEMPLATE_ID, checkWhiteboardDoc, whiteboardDurationSec } from './whiteboard-block';
+import { WHITEBOARD_DOC_SCHEMA } from './agent-surface-v3/whiteboard-doc-schema';
 import {
   applyEditorCommand,
   positiveDurationFrames,
@@ -57,6 +60,7 @@ export const AGENT_TIMELINE_TOOL_IDS = new Set([
   'manage_clip_links',
   'set_texts',
   'set_captions',
+  'set_whiteboard',
   'mask_words',
   'remove_words',
   'get_beat_grid',
@@ -1650,6 +1654,73 @@ export function updateTexts(document: EditorDocumentV2, input: Input): AgentTime
   return mutation(edited.document, `Updated ${items.length} text clip${items.length === 1 ? '' : 's'}`, edited.receipts);
 }
 
+const WHITEBOARD_FIX = 'Pass doc (the board document; describe: true returns its format) and, for a new board, startFrame; pass id to replace an existing whiteboard clip.';
+
+/** set_whiteboard describe: the board document format, read before writing a board. Changes nothing. */
+export function whiteboardFormat(): AgentTimelineOutcome {
+  return { ok: true, summary: 'Whiteboard document format', data: { format: WHITEBOARD_DOC_SCHEMA } };
+}
+
+/**
+ * set_whiteboard: create or replace one whiteboard clip. The board document is stored whole in the
+ * block's `doc` slot and rendered by the host's `whiteboard` template; the clip spans the narration
+ * (declared durationSec or last timed word) plus a closing hold unless durationFrames says otherwise.
+ * New boards cover the full canvas on a free graphics lane. An id naming an existing whiteboard clip
+ * replaces its document (and timing when given); an unknown id creates the board under that id.
+ */
+export function setWhiteboard(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
+  if (input.describe === true) return whiteboardFormat();
+  if (input.doc === undefined) return fail('doc is required', { fix: WHITEBOARD_FIX });
+  const fps = document.canvas.fps;
+  const check = checkWhiteboardDoc(input.doc);
+  if (!check.ok) return fail('invalid_whiteboard_doc', { errors: check.errors, fix: WHITEBOARD_FIX });
+  const doc = input.doc as Record<string, unknown>;
+  const startFrame = input.startFrame;
+  const durationFrames = input.durationFrames;
+  if (startFrame !== undefined && !(Number.isInteger(startFrame) && (startFrame as number) >= 0)) return fail('startFrame must be an integer frame ≥ 0', { fix: WHITEBOARD_FIX });
+  if (durationFrames !== undefined && !(Number.isInteger(durationFrames) && (durationFrames as number) >= 1)) return fail('durationFrames must be an integer frame count ≥ 1', { fix: WHITEBOARD_FIX });
+  const durationSec = durationFrames !== undefined ? timelineFramesToSeconds(durationFrames as number, fps) : whiteboardDurationSec(doc);
+  const slots = { doc, fontFamily: WHITEBOARD_FONT_ID };
+  const summaryOf = (verb: string, clipId: string) => `${verb} whiteboard ${JSON.stringify(clipId)}: ${check.nodes} node${check.nodes === 1 ? '' : 's'}, ${check.beats} beat${check.beats === 1 ? '' : 's'}`;
+
+  const id = string(input.id);
+  const existing = id ? locatedClip(document, id) : undefined;
+  if (existing) {
+    if (existing.clip.kind !== 'graphic' || existing.clip.block.templateId !== WHITEBOARD_TEMPLATE_ID) {
+      return fail('wrong_kind', { path: 'id', value: id, fix: 'id must name a whiteboard clip; omit it to create a new board.' });
+    }
+    const edited = applyOverlayDocumentEdits({
+      document,
+      updates: [{
+        clipId: existing.clip.id,
+        ...(startFrame !== undefined ? { startSec: timelineFramesToSeconds(startFrame as number, fps) } : {}),
+        durationSec,
+        block: { slots: { ...existing.clip.block.slots, ...slots } },
+      }],
+    });
+    if (!edited.ok) return fail(edited.error.message, edited.error);
+    return mutation(edited.document, summaryOf('Replaced', existing.clip.id), edited.receipts, { clipId: existing.clip.id, durationFrames: positiveDurationFrames(durationSec, fps) });
+  }
+
+  if (startFrame === undefined) return fail('a new whiteboard needs startFrame', { fix: WHITEBOARD_FIX });
+  const startSec = timelineFramesToSeconds(startFrame as number, fps);
+  const used = new Set(document.timeline.tracks.flatMap((track) => track.clips.map((clip) => clip.id)));
+  const block: Block = {
+    id: uniqueId(id ?? 'whiteboard', used),
+    templateId: WHITEBOARD_TEMPLATE_ID,
+    slots,
+    startSec,
+    durationSec,
+    trackIndex: freeGraphicsStackOrder(document, startSec, durationSec),
+    box: { x: 0, y: 0, w: 1, h: 1 },
+    label: typeof doc.title === 'string' && doc.title.trim() ? doc.title.trim() : 'Whiteboard',
+  };
+  const requestedTrackId = string(input.trackId);
+  const inserted = insertOverlayDocumentClip({ document, block, ...(requestedTrackId ? { toTrackId: requestedTrackId } : {}) });
+  if (!inserted.ok) return fail(inserted.error.message, inserted.error);
+  return mutation(inserted.document, summaryOf('Added', block.id), inserted.receipts, { clipId: block.id, durationFrames: positiveDurationFrames(durationSec, fps) });
+}
+
 const RANGES_NOT_ON_TIMELINE_FIX = 'None of these source-second spans is still on the timeline: they were cut already, sit outside every remaining clip that plays this transcript (any lane), or lie entirely inside protected speech that is not fully covered. Re-read get_transcript for what remains, or pass wordIds for exact words.';
 
 /**
@@ -1751,6 +1822,7 @@ export function runAgentTimelineTool(document: EditorDocumentV2, tool: string, i
     case 'set_keyframes': return setKeyframes(document, input);
     case 'get_beat_grid': return getBeatGrid(document, input);
     case 'remove_words': return removeWords(document, input);
+    case 'set_whiteboard': return setWhiteboard(document, input);
     default: return fail(`unsupported timeline tool: ${tool}`);
   }
 }

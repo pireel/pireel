@@ -23,7 +23,7 @@ const ICONS: Record<string, string> = {
   ripple_delete_ranges: '✂️', set_clip_properties: '🎚️', swap_clip_media: '🔁', set_clip_framing: '🖼️', apply_layout: '📐', set_keyframes: '⏱️',
   manage_tracks: '🛤️', manage_clip_links: '🔗', add_transition: '🌫️', set_canvas: '🖥️',
   rough_cut: '✂️', remove_silence: '🤫', remove_words: '✂️', mask_words: '🔇', denoise_audio: '🎧',
-  compose_component: '📐', apply_component: '🧩', set_look: '🎨', place_graphics: '🧷', set_confirm_list: '📋', set_texts: '🔤', set_captions: '💬', read_brand: '🏷️', bake_component: '🎬',
+  compose_component: '📐', apply_component: '🧩', set_look: '🎨', place_graphics: '🧷', set_confirm_list: '📋', set_texts: '🔤', set_captions: '💬', set_whiteboard: '🧑‍🏫', read_brand: '🏷️', bake_component: '🎬',
   list_models: '🧠', generate_cover: '🖼️', generate_image: '🖼️', generate_video: '🎥', generate_audio: '🎵', generate_speech: '🗣️', generate_foley: '🔊',
   lip_sync: '👄', manage_voices: '🎙️',
   list_skills: '📚', read_skill: '📖', preview: '▶️', undo: '↩️', ask_user: '❓', export: '📤',

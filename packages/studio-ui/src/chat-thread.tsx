@@ -1,4 +1,5 @@
 "use client";
+import { alreadyStarted, startWithRoughCut, sceneAgentState } from './agent-startup';
 
 import { ChatCoverEntry } from './chat-cover-controls';
 import { directorPlanToolBlock, saveEditingDirectorPlan, withDirectorInstruction } from './editing-director-plan';
@@ -144,6 +145,7 @@ export function ChatThread({
   elements,
   onSnapshot: saveSnapshot,
   onBusyChange,
+  onSceneStateChange,
   onInsertMedia,
   onUseAudio,
   handleRef,
@@ -191,6 +193,7 @@ export function ChatThread({
     agentModel?: StudioAgentModelId,
   ) => void;
   onBusyChange?: (busy: boolean) => void;
+  onSceneStateChange?: StudioChatProps["onSceneStateChange"];
   handleRef: React.MutableRefObject<StudioChatHandle | null>;
 }) {
   const runToolRef = useRef(runTool);
@@ -503,6 +506,11 @@ export function ChatThread({
     return () => onBusyChangeRef.current?.(false);
   }, [taskInProgress]);
 
+  const sceneState = sceneAgentState(messages, taskInProgress, status === 'error');
+  const onSceneStateChangeRef = useRef(onSceneStateChange);
+  onSceneStateChangeRef.current = onSceneStateChange;
+  useEffect(() => { onSceneStateChangeRef.current?.(sceneState); }, [sceneState]);
+
   const workTimingActivationRef = useRef<DeferredActivation | null>(null);
   if (!workTimingActivationRef.current)
     workTimingActivationRef.current = new DeferredActivation();
@@ -799,8 +807,9 @@ export function ChatThread({
     if (!startPrompt?.trim() || startSentRef.current || status !== "ready") return;
     startSentRef.current = true;
     // A reload after saving the first message must not start it a second time.
-    if (messagesRef.current.some(message => taskOf(message)?.mode === 'one-click')) { onStartPromptSent?.(); return; }
-    void run(startPrompt, { startTool: ROUGH_CUT_TOOL, hint: ONE_CLICK_EDIT_HINT }).then(sent => {
+    const roughCut = startWithRoughCut(skillRef.current);
+    if (alreadyStarted(messagesRef.current, startPrompt, roughCut)) { onStartPromptSent?.(); return; }
+    void run(startPrompt, roughCut ? { startTool: ROUGH_CUT_TOOL, hint: ONE_CLICK_EDIT_HINT } : {}).then(sent => {
       if (sent) onStartPromptSent?.(); else startSentRef.current = false;
     });
   }, [startPrompt, status, run, onStartPromptSent]);

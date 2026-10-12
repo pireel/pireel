@@ -14,6 +14,7 @@ import { CUT_TRANSITION_EFFECTS, MAX_TRANSITION_SEC, PLACE_ANCHORS, SHOT_TREATME
 import { DISPLAY_TEXT_ANIMATION_IDS, DISPLAY_TEXT_PRESETS } from '../display-text-presets';
 import { MG_BAKE_ROUTE, MG_RUNTIME_CAPABILITIES } from '../prompts/block-system';
 import { CLIP_PROPERTIES, CLIP_PROPERTY_REDIRECTS, clipPropertySummary, type ClipPropertyKey } from './clip-properties';
+import { WHITEBOARD_DOC_SCHEMA } from './whiteboard-doc-schema';
 
 export const CHARGE_MARKER = "[CHARGES the user's Pireel account.]";
 
@@ -602,6 +603,18 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       relayout: bool(),
     }),
   },
+  set_whiteboard: {
+    description:
+      'Create or replace a whiteboard explainer clip: one continuous board of notes, cards, charts, diagrams and handwriting that reveals itself beat by beat in sync with the narration while an automatic camera travels between scenes. The board document format is not listed here — call once with describe: true to read it before writing a board; the call is validated against it. Place the board at the startFrame of its voiceover. A new board covers the canvas on a free graphics lane; id naming a whiteboard clip replaces its document (and timing when given).',
+    inputSchema: obj({
+      describe: bool('Return the board document format instead of editing.'),
+      id: str('Whiteboard clip to replace; an unknown id creates the board under that id.'),
+      startFrame: FRAME('Start (required for a new board)'),
+      durationFrames: int('Override the clip length; default = narration end plus a short closing hold.', 1),
+      trackId: str(),
+      doc: { type: 'object', description: 'The board document, in the format returned by describe: true.' },
+    }),
+  },
   read_brand: {
     description:
       'The brand snapshot explicitly selected for this project, with its reusable style guidance, editing preferences, fixed caption and logo settings. Read it once before building or reworking a whole video; apply it where the current request leaves a choice open. Enabled capabilities are optional when useful, not quotas. The latest explicit user instruction wins. Returns no_brand when this project has no brand; it never adopts an account default',
@@ -734,5 +747,16 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       resolution: { type: 'number', enum: [2160, 1440, 1080, 720, 540] }, fps: { type: 'number', enum: [24, 30, 60] }, format: enumOf(['mp4', 'webm', 'mov']),
       sink_url: str('Loopback receiver from the export-sink helper.'),
     }),
+  },
+};
+
+/**
+ * The schema a call is actually validated against, where it is richer than the published one. Only
+ * tools whose full input would weigh down every session publish a thin form (see set_whiteboard).
+ */
+export const V3_STRICT_INPUT_SCHEMAS: Readonly<Record<string, Schema>> = {
+  set_whiteboard: {
+    ...(V3_TOOL_SCHEMAS.set_whiteboard!.inputSchema as Schema),
+    properties: { ...((V3_TOOL_SCHEMAS.set_whiteboard!.inputSchema as Schema).properties as Record<string, unknown>), doc: WHITEBOARD_DOC_SCHEMA },
   },
 };

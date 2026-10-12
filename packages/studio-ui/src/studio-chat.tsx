@@ -178,6 +178,7 @@ export interface StudioChatProps {
   onClose?: () => void;
   /** Streaming/tool-running state of the active thread (workbench pauses output switching while true). */
   onBusyChange?: (busy: boolean) => void;
+  onSceneStateChange?: (state: import('./agent-startup').SceneAgentState) => void;
   /** Generation receipts: insert an output into the timeline at the playhead / mount audio. */
   onInsertMedia?: (asset: { type: 'image' | 'video'; url: string; label?: string }) => void;
   onUseAudio?: (url: string, label?: string) => void;
@@ -224,6 +225,7 @@ export const StudioChat = memo(
       onThreadChange,
       onClose,
       onBusyChange,
+      onSceneStateChange,
 
       onInsertMedia,
 
@@ -507,6 +509,7 @@ export const StudioChat = memo(
           onTimelineFramePickActiveChange={onTimelineFramePickActiveChange}
           onSnapshot={onSnapshot}
           onBusyChange={onBusyChange}
+          onSceneStateChange={onSceneStateChange}
           onInsertMedia={onInsertMedia}
           onUseAudio={onUseAudio}
           handleRef={innerRef}

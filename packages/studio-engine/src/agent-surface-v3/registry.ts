@@ -80,7 +80,7 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   { id: 'remove_words', group: 'speech', skillContract: { version: 1, stability: 'stable' } },
   { id: 'mask_words', group: 'speech', skillContract: { version: 1, stability: 'stable' } },
   { id: 'denoise_audio', group: 'speech' },
-  // ---- components and text (5)
+  // ---- components and text (9; confirmation list is a session tool)
   { id: 'compose_component', group: 'components' },
   { id: 'set_look', group: 'components' },
   { id: 'place_graphics', group: 'components' },
@@ -88,6 +88,7 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   { id: 'apply_component', group: 'components', charges: true },
   { id: 'set_texts', group: 'components', skillContract: { version: 1, stability: 'stable' } },
   { id: 'set_captions', group: 'components', skillContract: { version: 1, stability: 'stable' } },
+  { id: 'set_whiteboard', group: 'components' },
   { id: 'read_brand', group: 'components' },
   { id: 'bake_component', group: 'components' },
   // ---- generation (8)
@@ -112,8 +113,8 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
 ];
 
 
-// Includes the chat-only saved director brief added to the 60-tool editing surface.
-export const V3_TOOL_LIMIT = 62;
+// Includes cover generation and the on-demand whiteboard tool.
+export const V3_TOOL_LIMIT = 63;
 
 export const V3_TOOL_IDS: ReadonlySet<string> = new Set(V3_TOOLS.map((tool) => tool.id));
 /** Studio Chat uses inline questions; the legacy publishing checklist remains MCP-compatible. */
