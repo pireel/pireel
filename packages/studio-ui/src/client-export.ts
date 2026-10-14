@@ -18,6 +18,7 @@
  *    outside preview). Ported from experiments/client-export-spike (gotchas and notes all from real testing).
  */
 
+import { whiteboardProgramFontText } from '@pireel/studio-engine/whiteboard-program';
 import {
   ALL_FORMATS,
   AudioSample,
@@ -182,6 +183,7 @@ export function scaleAudioSample(sample: AudioSample, gainAt: (offsetSec: number
 
 interface HfWin extends Window {
   __hfPreview?: { seekTimelines(t: number): void };
+  __pireelWhiteboardFlush?: () => Promise<void>;
 }
 
 interface Overlay {
@@ -191,6 +193,12 @@ interface Overlay {
   root: HTMLElement;
   headCss: string;
   dispose(): void;
+}
+
+function overlayFontText(overlay: Overlay, comp: Composition): string {
+  return (overlay.root.textContent ?? '') + comp.blocks
+    .filter(block => block.templateId === 'whiteboard')
+    .map(block => whiteboardProgramFontText(block.slots.doc)).join('');
 }
 
 function createOverlay(html: string, w: number, h: number): Promise<Overlay> {
@@ -207,12 +215,14 @@ function createOverlay(html: string, w: number, h: number): Promise<Overlay> {
           const hide = doc.createElement('style');
           hide.textContent = '#vidEl, .hf-native-visual { opacity: 0 !important; }';
           doc.head.appendChild(hide);
+          await win.__pireelWhiteboardFlush?.();
           await doc.fonts.ready;
           const root = doc.getElementById('root');
           if (!root || !win.__hfPreview) throw new Error(t('common.overlayDocumentMissingRoot'));
           const headCss = [...doc.head.querySelectorAll('style')].map((s) => s.textContent ?? '').join('\n');
           resolve({ iframe, win, doc, root, headCss, dispose: () => iframe.remove() });
         } catch (e) {
+          iframe.remove();
           reject(e instanceof Error ? e : new Error(String(e)));
         }
       })();
@@ -532,14 +542,15 @@ export async function captureCompositionFrame(opts: {
   try {
     await inlineImages(overlay.root);
     const fontCss = await buildInlineFontCss(
-      overlay.root.textContent ?? '',
+      overlayFontText(overlay, comp),
       undefined,
       compositionLocalFontFamilies(comp),
       compositionWebFontIds(comp),
     );
     const css = `${fontCss}\n${overlay.headCss}\n#root{background:transparent !important;}`;
-    await warmInlineFonts(css, overlay.root.textContent ?? '', W, H, outW, outH);
+    await warmInlineFonts(css, overlayFontText(overlay, comp), W, H, outW, outH);
     overlay.win.__hfPreview!.seekTimelines(t);
+    await overlay.win.__pireelWhiteboardFlush?.();
     const el = overlay.doc.getElementById('vidEl');
     const vs = readTransform(overlay.win, el, W, H);
     const bg = await rasterize(
@@ -779,13 +790,13 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
   try {
     await inlineImages(overlay.root);
     const fontCss = await buildInlineFontCss(
-      overlay.root.textContent ?? '',
+      overlayFontText(overlay, comp),
       undefined,
       compositionLocalFontFamilies(comp),
       compositionWebFontIds(comp),
     );
     const css = `${fontCss}\n${overlay.headCss}\n#root{background:transparent !important;}`;
-    await warmInlineFonts(css, overlay.root.textContent ?? '', W, H, outW, outH);
+    await warmInlineFonts(css, overlayFontText(overlay, comp), W, H, outW, outH);
     // Layout coordinate system is always comp's W×H (font-size calibration unchanged); device size =
     // output outW×outH → vectors rasterize crisply at 4K
     const preEnc = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgOpen(W, H, outW, outH, css));
@@ -934,6 +945,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       const t = i / FPS;
       const tPrep = performance.now();
       overlay.win.__hfPreview!.seekTimelines(t);
+      await overlay.win.__pireelWhiteboardFlush?.();
       const { seg, srcT } = segAt(t);
       const rig = rigs.get(seg.key);
       // Read the framing transform uniformly from #vidEl: in canvas mode every segment's (including
@@ -1233,7 +1245,7 @@ export async function renderGraphicFramesPng(opts: {
   const overlay = await createOverlay(injectPreviewRuntime(assembleHtml(comp)), W, H);
   try {
     await inlineImages(overlay.root);
-    const text = overlay.root.textContent ?? '';
+    const text = overlayFontText(overlay, comp);
     const fontCss = await buildInlineFontCss(text, undefined, compositionLocalFontFamilies(comp), compositionWebFontIds(comp));
     const css = `${fontCss}\n${overlay.headCss}\n#root{background:transparent !important;}`;
     await warmInlineFonts(css, text, W, H, W, H);
@@ -1250,6 +1262,7 @@ export async function renderGraphicFramesPng(opts: {
       for (let i = 0; i < count; i += 1) {
         if (opts.shouldCancel?.()) throw new ExportCanceled();
         overlay.win.__hfPreview!.seekTimelines(job.startSec + i / fps);
+        await overlay.win.__pireelWhiteboardFlush?.();
         const markup = serializeBrowserOverlayElements(overlay.root, overlay.doc, [{ id: job.blockId }]);
         if (markup === lastMarkup && frames.length) {
           frames.push(frames[frames.length - 1]!);

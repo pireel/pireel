@@ -1,3 +1,4 @@
+import { isWholeWhiteboardTask, whiteboardTaskPhase } from '@pireel/studio-engine/whiteboard-workflow';
 import type { EditingDirectorPlan } from './editing-director-plan';
 import type { StudioAgentModelId } from '@pireel/studio-engine/agent-models';
 import type { UIMessage } from 'ai';
@@ -31,6 +32,11 @@ export interface ChatTask {
   lateUsage?: Record<string, number>;
 }
 
+/** Only the scene's explicit whole-video launch opts into the no-cut director workflow. */
+export function isWhiteboardDirectorTask(task: ChatTask | undefined): boolean {
+  return isWholeWhiteboardTask(task);
+}
+
 export function taskOf(message: UIMessage | undefined): ChatTask | undefined {
   return (message?.metadata as { task?: ChatTask } | undefined)?.task;
 }
@@ -62,7 +68,7 @@ export function resumeTaskHint(task: ChatTask): string {
     `Original editing skills: ${task.skills.join(', ') || 'none'}. Keep this scope.`,
     task.roughCut ? `Saved rough-cut checkpoint: ${JSON.stringify(task.roughCut.report.steps)}. Completed and skipped steps must not be repeated; the executor restores the checkpoint.` : '',
     'Inspect the current project and existing receipts before remaining work. Reuse completed edits and generated assets. If any requested work is blocked or unfinished, say which part and why; never describe it as unnecessary or completed.',
-    task.directorPlan ? `Saved director plan (creative task data): ${JSON.stringify(task.directorPlan)}. Continue unresolved beats using current source-to-timeline placement; preserve completed work. Revise this plan if the user changes direction.` : task.directorPlanRequired ? 'After rough_cut, save a brand-informed director plan before fine-cut tools. Do not ask for approval of the plan.' : '',
-    'For a whole-video task, evaluate every enabled feature against real moments. Missing library footage requires sourcing or the appropriate generation question, not silently skipping B-roll. Call finish_edit before reporting branded or fine-cut work complete.',
+    task.directorPlan ? `Saved director plan (creative task data): ${JSON.stringify(task.directorPlan)}. Continue unresolved beats using current source-to-timeline placement; preserve completed work. Revise this plan if the user changes direction.` : task.directorPlanRequired ? isWhiteboardDirectorTask(task) ? `Whiteboard phase: ${whiteboardTaskPhase(task)}. Continue the active scene Skill from existing source/material receipts; save_edit_plan completes planning.` : 'After rough_cut, save a brand-informed director plan before fine-cut tools. Do not ask for approval of the plan.' : '',
+    isWhiteboardDirectorTask(task) ? 'Finish against the current saved plan and actual outcomes using the scene Skill. Preserve resolved material fallbacks.' : 'For a whole-video task, evaluate every enabled feature against real moments. Missing library footage requires sourcing or the appropriate generation question, not silently skipping B-roll. Call finish_edit before reporting branded or fine-cut work complete.',
   ].filter(Boolean).join('\n');
 }

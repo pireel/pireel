@@ -144,7 +144,7 @@ async function pexelsSearch(key: string, q: string, type: 'image' | 'video', pag
       : q
         ? `https://api.pexels.com/v1/videos/search?query=${encodeURIComponent(q)}&page=${page}&per_page=${per}${locale}`
         : `https://api.pexels.com/v1/videos/popular?page=${page}&per_page=${per}`;
-  const r = await fetch(url, { headers: { Authorization: key } });
+  const r = await fetch(url, { headers: { Authorization: key }, signal: AbortSignal.timeout(8000) });
   if (!r.ok) throw new Error(`pexels ${r.status}`);
   const j = (await r.json()) as { photos?: PexelsPhoto[]; videos?: PexelsVideo[]; next_page?: string };
   const items =
@@ -228,7 +228,7 @@ async function pixabaySearch(key: string, q: string, type: StockKind, page: numb
   const base = type === 'video' ? 'https://pixabay.com/api/videos/' : 'https://pixabay.com/api/';
   // sticker = vector image (webformat renders to a transparent-background PNG, no white box in the frame)
   const extra = type === 'sticker' ? '&image_type=vector' : '';
-  const r = await fetch(`${base}?key=${encodeURIComponent(key)}&q=${encodeURIComponent(q)}&page=${page}&per_page=${per}&safesearch=true${lang}${extra}`);
+  const r = await fetch(`${base}?key=${encodeURIComponent(key)}&q=${encodeURIComponent(q)}&page=${page}&per_page=${per}&safesearch=true${lang}${extra}`, { signal: AbortSignal.timeout(8000) });
   if (!r.ok) throw new Error(`pixabay ${r.status}`);
   const j = (await r.json()) as { totalHits?: number; hits?: unknown[] };
   const hits = j.hits ?? [];
@@ -292,8 +292,9 @@ export function normalizeWikimediaPage(page: WikimediaPage, requestedKind: Stock
     id: `wm_${page.pageid}`,
     type,
     thumb: info.thumburl ?? info.url,
-    // Images use the requested 1600px derivative to cap import memory; videos need the original stream.
-    url: isVideo ? info.url : info.thumburl ?? info.url,
+    // Thumbnails are for search previews only. Import the original so its pixel dimensions
+    // match this receipt and close camera views do not silently magnify a small derivative.
+    url: info.url,
     width: info.width,
     height: info.height,
     ...(info.duration ? { durationSec: info.duration } : {}),
@@ -330,7 +331,7 @@ async function wikimediaSearch(q: string, type: StockKind, page: number, per: nu
   })) url.searchParams.set(key, value);
   // Wikimedia refuses requests without a real User-Agent (403); Api-User-Agent alone is not enough
   // from a runtime that sends no default UA.
-  const response = await fetch(url, { headers: { 'User-Agent': STOCK_FETCH_USER_AGENT, 'Api-User-Agent': STOCK_FETCH_USER_AGENT } });
+  const response = await fetch(url, { headers: { 'User-Agent': STOCK_FETCH_USER_AGENT, 'Api-User-Agent': STOCK_FETCH_USER_AGENT }, signal: AbortSignal.timeout(8000) });
   if (!response.ok) throw new Error(`wikimedia ${response.status}`);
   const body = (await response.json()) as { continue?: { gsroffset?: number }; query?: { pages?: WikimediaPage[] } };
   const items = (body.query?.pages ?? [])
@@ -353,7 +354,9 @@ export function stockConfigured(): boolean {
  * stickers are Pixabay-only (Pexels has no vector category) — with no Pixabay key, returns an empty page (panel hides that section).
  * With no commercial-provider key, Wikimedia Commons is the license-audited fallback.
  */
-export async function searchStock(q: string, type: StockKind, page = 1, per = 24): Promise<StockPage> {
+export async function searchStock(q: string, type: StockKind, page = 1, per = 24, intent?: 'entity'): Promise<StockPage> {
+  // Named subjects require documentary candidates, not generic lifestyle stock.
+  if (intent === 'entity') return wikimediaSearch(q, type, page, per);
   const pexels = process.env.PEXELS_API_KEY;
   const pixabay = process.env.PIXABAY_API_KEY;
   if (type === 'sticker') {

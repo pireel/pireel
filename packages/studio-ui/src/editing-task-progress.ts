@@ -63,7 +63,7 @@ export function editingTaskRows(task: ChatTask, report: FirstPassReport | undefi
   const finishing: EditingProgressRow[] = steps.filter(step => ['captions', 'denoise', 'logo', 'loudness'].includes(step.id) && step.status !== 'skipped').map(step => ({ id: step.id, status: normalize(step.status) }));
   const tools = messages.flatMap(message => message.role === 'assistant' ? message.parts.filter(part => toolIdOf(part)) : []);
   const planning: EditingProgressRow | undefined = task.directorPlanRequired || task.directorPlan ? {
-    id: 'planning', status: task.directorPlan ? 'done' : working && !!report && !report.steps.some(step => ['pending', 'running', 'failed'].includes(step.status)) ? 'running' : 'pending',
+    id: 'planning', status: task.directorPlan ? 'done' : working && (task.skillId === 'whiteboard-explainer' || !!report && !report.steps.some(step => ['pending', 'running', 'failed'].includes(step.status))) ? 'running' : 'pending',
   } : undefined;
   for (const id of ['graphics', 'b-roll', 'sound']) {
     if (!task.skills.includes(id) && !(id === 'graphics' && task.config?.visual?.headlines)) continue;

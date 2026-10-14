@@ -104,3 +104,20 @@ describe('video-level template tools', () => {
     expect(runAgentTimelineTool(edited.document!, 'set_clip_properties', { items: [{ clipId, props: [{ key: 'nope', value: 1 }] }] }).ok).toBe(false);
   });
 });
+
+describe('authored function syntax feedback', () => {
+  it('rejects incomplete code at submission and preserves the prior look', () => {
+    const current=setLook(withSpeech()).document!;
+    const failed=setLook(current,[{id:'broken',source:'function(props){return {html:"x",animate(tl){tl.to({},{});}}'}]);
+    expect(failed.ok).toBe(false);expect(JSON.stringify(failed)).toContain('JavaScript syntax error');
+    expect(current.appearance.look!.pieces['item-card'].source).toBe(card);
+  });
+  it('allows repairing a legacy malformed look without executing its source', () => {
+    const current=setLook(withSpeech()).document!;
+    current.appearance.look!.pieces['item-card'].source='function(){';
+    const fixed=setLook(current);expect(fixed.ok,JSON.stringify(fixed)).toBe(true);
+    expect(fixed.document!.appearance.look!.pieces['item-card'].source).toBe(card);
+    const invoked=setLook(current,[{id:'side-effect',source:'(function(){throw Error("must never run")})()'}]);
+    expect(invoked.ok).toBe(false);expect(JSON.stringify(invoked)).toContain('one function expression');
+  });
+});

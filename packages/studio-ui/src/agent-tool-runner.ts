@@ -631,8 +631,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
         if (!file && source) {
           try {
             file = (await race(materializeRemoteMedia(source, {
-              name: `${asset.label || asset.id}.${asset.kind === 'video' ? 'mp4' : 'mp3'}`,
-              type: asset.kind === 'video' ? 'video/mp4' : 'audio/mpeg',
+              name: `${asset.label || asset.id}.${asset.kind === 'video' ? 'mp4' : asset.kind === 'image' ? 'png' : 'mp3'}`,
+              type: asset.kind === 'video' ? 'video/mp4' : asset.kind === 'image' ? 'image/png' : 'audio/mpeg',
               sig: asset.locator.localSig,
               signal,
             }))).file;
@@ -1515,7 +1515,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
         }
       }
       // Reading the whiteboard format changes nothing: answer it before an undo step is taken.
-      if (toolId === 'set_whiteboard' && input.describe === true) return whiteboardFormat();
+      if (toolId === 'set_whiteboard' && input.describe === true) return whiteboardFormat(input.reference);
       if (!NO_UNDO_TOOLS.has(toolId)) pushUndoSnapshot(); // same entry: agent changes also void the redo line
       try {
         const documentInspect = toolId !== 'inspect_media' || input.mode === undefined || input.mode === 'metadata' || input.mode === 'component';
@@ -2347,26 +2347,32 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 : '';
             const resolved = libraryEntry(reference);
             const entry = resolved?.kind === 'image' ? resolved : null;
-            if (!entry) return { ok: false, error: 'local image not found or ambiguous — search the mine scope and use its exact asset id' };
-            const file = await loadLocalAssetFile(projectId, entry);
-            if (!file) {
-              return { ok: false, error: 'image bytes are unavailable on this device and in the cloud — ask the user to re-import that exact asset, then retry; do not use another image' };
-            }
-            // Keep the prepared image in the device cache so a refresh cannot leave a valid
-            // timeline clip pointing at bytes the preview/export pipeline can no longer reach.
-            await saveLocalVideo(file, entry.contentSig);
-            return {
-              ok: true,
-              summary: t('workbench.preparedLocalImage', { name: entry.label }),
-              data: {
-                scope: 'mine',
-                assetId: entry.assetId,
-                label: entry.label,
-                url: localImageLocator(entry.contentSig),
-                urlKind: 'device-local',
-                privacy: 'The image bytes and storage locator stay in this browser/device.',
-              },
-            };
+            const asset = documentRef.current.assets[reference];
+            if (!entry && asset?.kind !== 'image') return { ok: false, error: 'Exact image not found; register selected remote media or use a local image assetId.' };
+            if (input.treatment !== undefined && input.treatment !== 'person-cutout') return { ok: false, error: 'Unsupported image treatment.' };
+            const loaded = entry ? { file: await loadLocalAssetFile(projectId, entry) } : await assetBytes(asset);
+            const file = loaded.file;
+            if (!file) return { ok: false, error: 'Image bytes unavailable; restore access to this exact asset.' };
+            const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer())), b => b.toString(16).padStart(2, '0')).join('');
+            const originalSig = entry?.contentSig ?? `prepared-image-${hash}`;
+            if (!await saveLocalVideo(file, originalSig)) return { ok: false, error: 'Could not persist image on this device.' };
+            const base = { scope: 'mine', assetId: entry?.assetId ?? asset.id, label: entry?.label ?? asset.label, originalUrl: localImageLocator(originalSig), urlKind: 'device-local', privacy: 'Prepared image bytes stay on this device.' };
+            if (input.treatment !== 'person-cutout') return { ok: true, data: { ...base, url: base.originalUrl, treatment: 'photo' } };
+            const sig = `person-cutout-v2-${hash}`;
+            const cached = await loadLocalVideo(sig);
+            if (cached) return { ok: true, data: { ...base, url: localImageLocator(sig), treatment: 'cutout', cached: true } };
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            try {
+              const { preparePersonImage } = await import('./prepare-person-image');
+              const prepared = await Promise.race([
+                preparePersonImage(file),
+                new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Error('Person preparation timed out')), 20000); }),
+              ]);
+              if (!await saveLocalVideo(prepared.file, sig)) throw Error('Could not persist prepared image');
+              return { ok: true, data: { ...base, url: localImageLocator(sig), treatment: 'cutout', width: prepared.width, height: prepared.height, bounds: prepared.bounds } };
+            } catch (error) {
+              return { ok: true, data: { ...base, url: base.originalUrl, treatment: 'photo', fallback: true, reason: error instanceof Error ? error.message : String(error), hint: 'Use the original photo in a frame. Do not label it as a successful cutout; record the changed treatment.' } };
+            } finally { if (timer) clearTimeout(timer); }
           }
           case 'get_icons': {
             // Server-direct like the font search, but the icon catalog is server-side, so fetch it (the

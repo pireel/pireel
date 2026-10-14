@@ -17,6 +17,8 @@ import { classifyAsrResponse } from './media';
 import { localAssetMentionId } from './chat-local-asset-mention';
 import { resolveInteraction } from './interaction-store';
 
+const portraitMocks = vi.hoisted(() => ({ prepare: vi.fn() }));
+vi.mock('./prepare-person-image', () => ({ preparePersonImage: portraitMocks.prepare }));
 const providerMocks = vi.hoisted(() => ({ transcribe: vi.fn() }));
 const captureMocks = vi.hoisted(() => ({ captureCompositionFrame: vi.fn() }));
 vi.mock('./client-export', async (importOriginal) => ({
@@ -878,7 +880,18 @@ describe('Agent composition transaction boundary', () => {
     expect(componentSystem).toContain('not a dashboard widget');
   });
 
+  it('serves optional whiteboard authoring references through the Chat runner without edits', async () => {
+    const h = harness();
+    const before = structuredClone(h.documentRef.current);
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const result = await runStudioTool(h.ctx, 'set_whiteboard', { describe: true, reference: 'program' });
+    expect(result).toMatchObject({ ok: true, data: { references: ['drawing', 'program'], authoring: expect.stringContaining('createScene') } });
+    expect(h.documentRef.current).toEqual(before);
+    expect(h.undoStackRef.current).toHaveLength(0);
+  });
+
   it('caches every explicitly prepared local image on the device', async () => {
+    localMediaMocks.saveLocalVideo.mockResolvedValue(true);
     const h = harness();
     const sig = 'platform-data.jpg:12:7';
     const assetId = 'asset-platform-data';
@@ -901,6 +914,28 @@ describe('Agent composition transaction boundary', () => {
     expect(JSON.stringify(result)).not.toContain('contentSig');
     expect(localMediaMocks.loadLocalFolderFile).not.toHaveBeenCalled();
     expect(localMediaMocks.saveLocalVideo).toHaveBeenCalledWith(image, sig);
+  });
+
+  it('prepares and caches person images, and reports original-photo fallback honestly', async () => {
+    const h = harness();
+    const source = new File(['source'], 'person.jpg', { type: 'image/jpeg' });
+    const cutout = new File(['alpha'], 'person.png', { type: 'image/png' });
+    const assetId = 'portrait';
+    const cache = new Map<string, File>();
+    localMediaMocks.loadLocalAssetFile.mockResolvedValue(source);
+    localMediaMocks.loadLocalVideo.mockImplementation(async (sig: string) => cache.get(sig) ?? null);
+    localMediaMocks.saveLocalVideo.mockImplementation(async (file: File, sig: string) => { cache.set(sig, file); return true; });
+    Object.assign(h.ctx, { projectId: 'test', localAssetIndexRef: { current: [localEntry(assetId, 'original', '人物', 'image')] }, genIdsRef: { current: new Set<string>() }, pushUndoSnapshot: () => {}, t: (key: string) => key });
+    portraitMocks.prepare.mockReset().mockResolvedValue({ file: cutout, width: 200, height: 300, bounds: { x: 20, y: 10, width: 200, height: 300 } });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const input = { assetId, treatment: 'person-cutout' };
+    expect(await runStudioTool(h.ctx, 'prepare_local_asset', input)).toMatchObject({ ok: true, data: { treatment: 'cutout', width: 200 } });
+    expect(await runStudioTool(h.ctx, 'prepare_local_asset', input)).toMatchObject({ ok: true, data: { treatment: 'cutout', cached: true } });
+    expect(portraitMocks.prepare).toHaveBeenCalledTimes(1);
+    cache.clear(); portraitMocks.prepare.mockRejectedValue(Error('model unavailable'));
+    expect(await runStudioTool(h.ctx, 'prepare_local_asset', input)).toMatchObject({ ok: true, data: { treatment: 'photo', fallback: true, reason: 'model unavailable' } });
+    expect(cache.get('original')).toBe(source);
+    localMediaMocks.loadLocalAssetFile.mockImplementation(() => localMediaMocks.loadLocalVideo());
   });
 
   it('inspects local image pixels before timeline placement without uploading them to the media library', async () => {

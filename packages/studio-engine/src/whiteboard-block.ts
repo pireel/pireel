@@ -7,6 +7,9 @@
  * template. The checks here are structural so a malformed document never reaches the timeline.
  */
 
+import { programErrors } from './whiteboard-program';
+import { drawingReferenceErrors, whiteboardCameraErrors } from './whiteboard-drawing';
+
 export const WHITEBOARD_TEMPLATE_ID = 'whiteboard';
 
 /** Handwriting face from the web font library; the block's fontFamily slot makes the document link it. */
@@ -63,6 +66,9 @@ export function checkWhiteboardDoc(doc: unknown): WhiteboardDocCheck {
   const targets = new Set([...endpoints, ...edges.map((edge) => edge.id).filter((id): id is string => typeof id === 'string')]);
   const sentenceIds = new Set(sentences.map((sentence) => sentence.id).filter((id): id is string => typeof id === 'string'));
   if (nodeIds.size !== nodes.length) errors.push('every board node needs a unique string id');
+  const beatIds = new Set(beats.map((beat) => beat.id).filter((id): id is string => typeof id === 'string'));
+  errors.push(...programErrors(nodes));
+  for (const node of nodes) errors.push(...drawingReferenceErrors(node.content, beatIds));
   for (const edge of edges) {
     if (!endpoints.has(edge.from as string) || !endpoints.has(edge.to as string)) errors.push(`edge ${String(edge.id)} connects unknown nodes`);
   }
@@ -77,6 +83,7 @@ export function checkWhiteboardDoc(doc: unknown): WhiteboardDocCheck {
     }
   }
   for (const beat of beats) {
+    errors.push(...whiteboardCameraErrors(beat.camera, nodes, targets));
     const anchor = isObject(beat.anchor) ? beat.anchor : null;
     if (!anchor || !sentenceIds.has(anchor.sentence as string)) errors.push(`beat ${String(beat.id)} is anchored to an unknown sentence`);
     for (const action of Array.isArray(beat.actions) ? beat.actions.filter(isObject) : []) {

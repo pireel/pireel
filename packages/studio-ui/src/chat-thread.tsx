@@ -363,7 +363,7 @@ export function ChatThread({
         publishSuccess({ ok: true, summary: studioLocale().startsWith('zh') ? '剪辑思路已确定' : 'Editing direction saved', data: { plan: result.plan, next: 'Execute this plan now. Resolve source anchors against the current timeline after structural cuts; no approval stop.' } });
         return;
       }
-      const planBlock = directorPlanToolBlock(task, id, canMutate);
+      const planBlock = directorPlanToolBlock(task, id, canMutate, requestedInput);
       if (planBlock) { publishSuccess({ ok: false, error: planBlock }); return; }
       if (id === 'finish_edit') {
         if (!task || !fineCutClips) { publishError('No active editing task or timeline evidence.'); return; }
@@ -651,6 +651,8 @@ export function ChatThread({
         studioAction?: typeof STUDIO_CREATE_SKILL_ACTION;
         /** The tool this message's first step must call (a one-click edit starts with the rough cut). */
         startTool?: string;
+        /** Explicit initial whiteboard generation; local follow-up edits do not opt in. */
+        wholeWhiteboard?: boolean;
         /** A note for the agent ahead of the message (one-click edit context). */
         hint?: string;
         resume?: ChatTask;
@@ -711,11 +713,11 @@ export function ChatThread({
       setTaskResumeError(false);
       const config = continuing?.config ?? resolveEditingRunConfig({ brand: projectBrandRef.current, skills: continuing?.mode === 'one-click' ? continuing.skills : editingSkillsRef.current });
       const source = localAssetIndex?.find(asset => asset.kind === 'video' || !asset.kind);
-      const task: ChatTask = continuing ? { ...continuing, config, skillId: continuing.skillId ?? skillRef.current, review: undefined, agentModel: agentModelRef.current, reviewRequired: continuing.mode === 'one-click', state: 'running' } : {
+      const task: ChatTask = continuing ? { ...continuing, config, skillId: continuing.skillId ?? skillRef.current, review: undefined, agentModel: agentModelRef.current, reviewRequired: continuing.reviewRequired || continuing.mode === 'one-click', state: 'running' } : {
         id: mid('task'), ...(outputId ? { outputId } : {}), goal: draftParts.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n'),
         skills: options.startTool ? config.skills : [],
-        config, skillId: skillRef.current, agentModel: agentModelRef.current, reviewRequired: !!options.startTool, directorPlanRequired: !!options.startTool,
-        ...(options.startTool && source ? { source: { name: source.label, ...(source.durationSec != null ? { durationSec: source.durationSec } : {}), ...(source.posterKey ? { posterKey: source.posterKey } : {}) } } : {}),
+        config, skillId: skillRef.current, agentModel: agentModelRef.current, reviewRequired: !!options.startTool || !!options.wholeWhiteboard, directorPlanRequired: !!options.startTool || !!options.wholeWhiteboard,
+        ...((options.startTool || options.wholeWhiteboard) && source ? { source: { name: source.label, ...(source.durationSec != null ? { durationSec: source.durationSec } : {}), ...(source.posterKey ? { posterKey: source.posterKey } : {}) } } : {}),
         mode: options.startTool ? 'one-click' : 'request', state: 'running',
       };
       const startTool = continuing?.mode === 'one-click' && (!continuing.roughCut || unfinishedRoughCut(continuing)) ? ROUGH_CUT_TOOL : options.startTool;
@@ -809,7 +811,7 @@ export function ChatThread({
     // A reload after saving the first message must not start it a second time.
     const roughCut = startWithRoughCut(skillRef.current);
     if (alreadyStarted(messagesRef.current, startPrompt, roughCut)) { onStartPromptSent?.(); return; }
-    void run(startPrompt, roughCut ? { startTool: ROUGH_CUT_TOOL, hint: ONE_CLICK_EDIT_HINT } : {}).then(sent => {
+    void run(startPrompt, roughCut ? { startTool: ROUGH_CUT_TOOL, hint: ONE_CLICK_EDIT_HINT } : { wholeWhiteboard: skillRef.current === 'whiteboard-explainer' }).then(sent => {
       if (sent) onStartPromptSent?.(); else startSentRef.current = false;
     });
   }, [startPrompt, status, run, onStartPromptSent]);

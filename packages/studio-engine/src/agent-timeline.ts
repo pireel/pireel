@@ -1,3 +1,4 @@
+import { WHITEBOARD_AUTHORING_REFERENCES, type WhiteboardAuthoringReference } from './whiteboard-authoring';
 /** Shared pure Agent timeline executor. Live UI, offline server, and MCP all call this contract. */
 
 import { AUDIO_DEFAULT_DB } from './audio-tracks';
@@ -1657,8 +1658,8 @@ export function updateTexts(document: EditorDocumentV2, input: Input): AgentTime
 const WHITEBOARD_FIX = 'Pass doc (the board document; describe: true returns its format) and, for a new board, startFrame; pass id to replace an existing whiteboard clip.';
 
 /** set_whiteboard describe: the board document format, read before writing a board. Changes nothing. */
-export function whiteboardFormat(): AgentTimelineOutcome {
-  return { ok: true, summary: 'Whiteboard document format', data: { format: WHITEBOARD_DOC_SCHEMA } };
+export function whiteboardFormat(reference?: unknown): AgentTimelineOutcome {
+  return { ok: true, summary: 'Whiteboard document format', data: { format: WHITEBOARD_DOC_SCHEMA, references: Object.keys(WHITEBOARD_AUTHORING_REFERENCES), ...(typeof reference === 'string' && Object.hasOwn(WHITEBOARD_AUTHORING_REFERENCES, reference) ? { authoring: WHITEBOARD_AUTHORING_REFERENCES[reference as WhiteboardAuthoringReference] } : {}) } };
 }
 
 /**
@@ -1669,7 +1670,8 @@ export function whiteboardFormat(): AgentTimelineOutcome {
  * replaces its document (and timing when given); an unknown id creates the board under that id.
  */
 export function setWhiteboard(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
-  if (input.describe === true) return whiteboardFormat();
+  if (input.describe === true) return whiteboardFormat(input.reference);
+  if (input.reference !== undefined) return fail('reference requires describe:true');
   if (input.doc === undefined) return fail('doc is required', { fix: WHITEBOARD_FIX });
   const fps = document.canvas.fps;
   const check = checkWhiteboardDoc(input.doc);

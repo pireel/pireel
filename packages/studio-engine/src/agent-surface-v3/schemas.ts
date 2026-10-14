@@ -1,3 +1,4 @@
+import { WHITEBOARD_MEDIA_LIMITS } from '../whiteboard-workflow';
 import { CAPTION_ANIMATIONS, CAPTION_ANIMATION_IDS } from '../caption-animations';
 import { DEFAULT_TRANSITION_SEC } from '../editor-document/transitions';
 import { COMPONENT_PROPERTY_MAX_ROWS, COMPONENT_PROPERTY_MAX_FIELDS, COMPONENT_PROPERTY_MAX_TEXT } from '../component-property-input';
@@ -206,6 +207,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       kind: enumOf(['all', 'image', 'video', 'audio', 'element', 'sticker', 'font'], 'font searches the font catalog instead (scope ignored): library faces plus the Google Fonts snapshot, matched on family name or Chinese label, optionally narrowed by script/category; returns web:<id> / google:<Family> ids for set_texts, set_captions and compose_component.'),
       script: enumOf(['latin', 'zh-Hans', 'zh-Hant', 'ja', 'ko'], 'kind font only: faces that carry this writing system.'),
       category: enumOf(['sans', 'serif', 'display', 'handwriting', 'mono'], 'kind font only: Google category.'),
+      intent: enumOf(['entity'], 'stock only: search Wikimedia Commons for the exact named person/company/product/event, bypassing generic lifestyle stock.'),
       page: int('stock only: result page.', 1),
       limit: int('Max results.', 1),
     }, ['scope']),
@@ -222,7 +224,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
         transcriptText: str('Exact known script (e.g. generate_speech input).'),
         transcript: arr(obj({ start: num(), end: num(), text: str() }, ['start', 'end', 'text'])),
       }, ['id']), { description: 'Identities to register.' }),
-      stock: obj({ query: str(), kind: enumOf(['image', 'video', 'sticker']), page: int('', 1), limit: int('', 1), assetId: str() }, ['query', 'kind', 'page', 'limit', 'assetId']),
+      stock: obj({ intent: enumOf(['entity']), query: str(), kind: enumOf(['image', 'video', 'sticker']), page: int('', 1), limit: int('', 1), assetId: str() }, ['query', 'kind', 'page', 'limit', 'assetId']),
     }),
   },
   import_media: {
@@ -246,8 +248,8 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   prepare_local_asset: {
     description:
-      'Make one exact device-local image usable inside bespoke component markup (needs the open Studio tab that holds the bytes). Call only when the user asked for that image; listing metadata does not grant access to its bytes, which stay on the device. If access needs a user gesture the call fails with a restore instruction — never substitute another image.',
-    inputSchema: obj({ assetId: str('Exact local image asset id from search_assets.') }, ['assetId']),
+      'Prepare one exact selected local or registered remote image for whiteboard/component markup in the open Studio tab. treatment:person-cutout removes the background using the existing local segmenter, trims transparent margins and caches a PNG; use returned url and treatment in a whiteboard photo node. Failure returns the original photo with fallback:true and a reason. Identity pixels are preserved; the board supplies theme-aware outline. Preparation stays device-local and may occur before save_edit_plan. Restore inaccessible local bytes rather than substituting another image.',
+    inputSchema: obj({ assetId: str('Exact local or registered remote image asset id.'), treatment: enumOf(['person-cutout'], 'Optional: prepare a transparent real-person image; no image generation.') }, ['assetId']),
   },
   get_icons: {
     description:
@@ -437,9 +439,19 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
     }),
   },
   save_edit_plan: {
-    description: 'Save the whole-video director brief AFTER fixed rough_cut and BEFORE fine-cut execution. Read retained transcript, footage and project brand first. Let brand style shape the opening, progression, pacing, typography, imagery, motion and sound from the outset; obey enabled capabilities and the current user request. Use authored prose, not a feature checklist or fixed MG quota. Every meaningful beat anchors to actual source seconds and a transcript quote, including moments deliberately kept on the speaker. Saving continues execution automatically, never asks for approval. Reuse on resume; call again to revise changed creative decisions. This records task metadata without modifying the timeline.',
+    description: 'Persist the whole-video direction, source-anchored beats and scene-specific material inventory without editing the timeline. Follow the active scene Skill for preparation and creative decisions. Ordinary one-click tasks require completed rough_cut; source-preserving whole-whiteboard tasks require entities instead. A successful save hands off to execution automatically. Reuse on resume; revising the plan invalidates its previous completion review.',
     inputSchema: obj({
       direction: str('Concise, content-specific whole-video direction in the creator’s language: opening, progression, pace and ending.'),
+      entities: arr(obj({
+        id: str(), name: str('Exact person/company/object/product/event identity.'),
+        kind: enumOf(['person', 'company', 'object', 'product', 'event']),
+        beatIds: arr(str(), { minItems: 1 }),
+        queries: arr(str(), { maxItems: WHITEBOARD_MEDIA_LIMITS.queriesPerEntity, description: `Actual searches; empty only when reusing verified media. Budget: ${WHITEBOARD_MEDIA_LIMITS.queriesPerEntity} per entity.` }),
+        status: enumOf(['selected', 'fallback']), assetId: str('Registered asset id for selected; omit for fallback.'),
+        sourceUrl: str('Original source page, when available.'), credit: str('Source attribution and licence, when available.'),
+        treatment: enumOf(['photo', 'person-cutout', 'logo', 'footage']),
+        reason: str('Observed identity/relevance and selection reason, or search failure plus concrete text/diagram fallback.'),
+      }, ['id', 'name', 'kind', 'beatIds', 'queries', 'status', 'reason']), { maxItems: WHITEBOARD_MEDIA_LIMITS.entities, description: 'Required for whole whiteboards; [] for purely abstract content. Material selection precedes layout.' }),
       brandTreatment: str('For a branded project, describe how its style drives this video’s editorial and visual decisions. Adapt to the footage, do not merely repeat the brand name.'),
       beats: arr(obj({ id: str('Stable beat id; preserve when revising.'), assetId: str('Actual speech source asset from get_transcript.'), sourceInSec: num('Source start, not timeline time.', { min: 0 }), sourceOutSec: num('Source end.', { min: 0 }), quote: str('Exact excerpt from this source passage.'), direction: str('Concrete treatment in natural language: what viewers see, what to preserve or change, and any assets to source/generate. Describe timing relative to speech. Quiet speaker-led passages are valid.') }, ['id', 'assetId', 'sourceInSec', 'sourceOutSec', 'quote', 'direction']), { minItems: 1, maxItems: 80 }),
     }, ['direction', 'beats']),
@@ -605,9 +617,10 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   set_whiteboard: {
     description:
-      'Create or replace a whiteboard explainer clip: one continuous board of notes, cards, charts, diagrams and handwriting that reveals itself beat by beat in sync with the narration while an automatic camera travels between scenes. The board document format is not listed here — call once with describe: true to read it before writing a board; the call is validated against it. Place the board at the startFrame of its voiceover. A new board covers the canvas on a free graphics lane; id naming a whiteboard clip replaces its document (and timing when given).',
+      'Create or replace a persistent whiteboard clip from a semantic document. Call describe:true for its schema; add reference:drawing or reference:program for animation and JS/Three.js authoring APIs when needed. The whiteboard-explainer Skill defines the editorial workflow. Place at the narration start; id updates the existing board. Rendering and export use the same board clock.',
     inputSchema: obj({
       describe: bool('Return the board document format instead of editing.'),
+      reference: enumOf(['drawing', 'program'], 'With describe:true, include only this authoring reference.'),
       id: str('Whiteboard clip to replace; an unknown id creates the board under that id.'),
       startFrame: FRAME('Start (required for a new board)'),
       durationFrames: int('Override the clip length; default = narration end plus a short closing hold.', 1),

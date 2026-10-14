@@ -7,6 +7,9 @@
  * Kept free of engine imports so the executor and the validator can both read it.
  */
 
+import { PROGRAM_SCHEMA } from '../whiteboard-program';
+import { DRAWING_SCHEMA } from './drawing-schema';
+
 type Schema = Record<string, unknown>;
 
 const obj = (properties: Record<string, unknown>, required: string[] = []): Schema => ({
@@ -29,10 +32,12 @@ const whiteboardKind = (kind: string) => enumOf([kind]);
 const WHITEBOARD_ICON = str('Inline <svg> exactly as returned by get_icons.');
 const WHITEBOARD_CONTENT: Schema = {
   anyOf: [
+    DRAWING_SCHEMA,
+    PROGRAM_SCHEMA,
     obj({ kind: whiteboardKind('headline'), eyebrow: str(), lines: arr(str(), { minItems: 1 }) }, ['kind', 'lines']),
     obj({ kind: whiteboardKind('sticky'), color: WHITEBOARD_COLOR, label: str(), title: str(), body: str(), icon: WHITEBOARD_ICON }, ['kind', 'color', 'title']),
     obj({ kind: whiteboardKind('card'), color: WHITEBOARD_COLOR, title: str(), body: str(), icon: WHITEBOARD_ICON }, ['kind', 'color', 'title']),
-    obj({ kind: whiteboardKind('photo'), caption: str(), sub: str(), image: str('https or data: URL.'), emoji: str() }, ['kind', 'caption']),
+    obj({ kind: whiteboardKind('photo'), caption: str(), sub: str(), image: str('Returned prepared image locator, https or data: URL.'), treatment: enumOf(['photo', 'cutout', 'logo']), emoji: str() }, ['kind', 'caption']),
     obj({ kind: whiteboardKind('stat'), value: str(), caption: str(), icon: WHITEBOARD_ICON }, ['kind', 'value']),
     obj({
       kind: whiteboardKind('list'), title: str(), items: arr(str(), { minItems: 1 }), ordered: bool(), color: WHITEBOARD_COLOR, icon: WHITEBOARD_ICON,
@@ -98,7 +103,7 @@ export const WHITEBOARD_DOC_SCHEMA: Schema = obj({
   aspect: enumOf(WHITEBOARD_ASPECTS, 'Match the canvas.'),
   title: str(),
   theme: enumOf(WHITEBOARD_THEMES, 'Visual theme; appearance only, never layout or timing.'),
-  chrome: obj({ title: str('Board name shown in the collaborative-board frame.'), avatars: arr(str()) }, ['title']),
+  chrome: { anyOf: [{ type: 'boolean', enum: [false] }, obj({ title: str('Board name shown in the collaborative-board frame.'), avatars: arr(str()) }, ['title'])], description: 'Decorative shell is ON by default: title bar, toolbar (hidden in portrait), avatars and zoom indicator. Omit to use doc.title and default decorative avatars. Pass an object to customize; avatars: [] hides avatars. Pass false only when a clean board without the shell is explicitly wanted.' },
   narration: obj({
     source: enumOf(['script', 'tts', 'asr']),
     durationSec: num('Voiceover length in seconds; required when sentences carry no words.', { min: 0 }),
@@ -135,7 +140,12 @@ export const WHITEBOARD_DOC_SCHEMA: Schema = obj({
     id: str(),
     anchor: obj({ sentence: str('Sentence id.'), phrase: str('Substring of that sentence; the beat fires as it is spoken. Omit for the sentence start.'), occurrence: int('Which occurrence of the phrase, from 1.', 1) }, ['sentence']),
     actions: arr(WHITEBOARD_ACTION),
-    camera: { anyOf: [enumOf(['overview', 'hold']), obj({ focus: ids('Node, edge or group ids to frame.'), padding: num('', { min: 0, max: 1 }) }, ['focus'])], description: 'Frame these nodes, show everything revealed so far (overview) or stay (hold, the default).' },
+    camera: { anyOf: [enumOf(['overview', 'hold']), obj({
+      focus: arr({ anyOf: [str('Node, edge or group id.'), obj({ nodeId: str('A drawing node id.'), elements: ids('Ids of elements inside this drawing to frame together, including related labels. Motion bounds until the next camera beat are included.') }, ['nodeId', 'elements'])] }, { minItems: 1, description: 'Frame whole nodes or a selection inside a drawing. These can be mixed.' }),
+      padding: num('Space around the focus.', { min: 0, max: 1 }),
+      maxZoom: num('Maximum magnification, not a forced crop. Default 1.7 for whole nodes, 3 for drawing details. Zoom 1 = one design pixel per output pixel at 1080p.', { min: .2, max: 4 }),
+      durationSec: num('Optional smooth camera move duration; default adapts to travel distance. Leave time to hold and read.', { min: .3, max: 4 }),
+    }, ['focus'])], description: 'Smoothly frame targets at this narration beat, show everything revealed so far (overview), or hold the camera. Zoom back to the drawing node or overview after a detail shot.' },
   }, ['id', 'anchor', 'actions'])),
   cursors: arr(obj({ id: str(), name: str('Label on the pointer.'), color: str('#RRGGBB') }, ['id', 'name', 'color']), { description: 'Named pointers that the cursor action moves to what is being discussed.' }),
 }, ['narration', 'board', 'scenes', 'beats']);

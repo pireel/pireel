@@ -1,11 +1,14 @@
+import { whiteboardToolBlock } from '@pireel/studio-engine/whiteboard-workflow';
+import { readWhiteboardEntities, type WhiteboardEntity } from './whiteboard-entities';
 import type { EditorDocumentV2 } from '@pireel/studio-engine/composition';
-import { unfinishedRoughCut, type ChatTask } from './chat-task';
+import { isWhiteboardDirectorTask, unfinishedRoughCut, type ChatTask } from './chat-task';
 
 /** Source-time anchors survive ripple cuts and reordering. Directions stay authored prose. */
 export interface EditingDirectorPlan {
   revision: number;
   direction: string;
   brandTreatment?: string;
+  entities?: WhiteboardEntity[];
   beats: { id: string; assetId: string; sourceInSec: number; sourceOutSec: number; quote: string; direction: string }[];
 }
 export interface DirectorBeatResult {
@@ -30,7 +33,7 @@ export function directorBeatWindows(beat: EditingDirectorPlan['beats'][number], 
 }
 
 export function saveEditingDirectorPlan(task: ChatTask, input: Record<string, unknown>, document: EditorDocumentV2): { ok: true; plan: EditingDirectorPlan } | { ok: false; error: string } {
-  if (task.mode !== 'one-click' || !task.roughCut || unfinishedRoughCut(task)) return { ok: false, error: 'Complete the fixed rough_cut before saving the director plan.' };
+  if (!isWhiteboardDirectorTask(task) && (task.mode !== 'one-click' || !task.roughCut || unfinishedRoughCut(task))) return { ok: false, error: 'Complete the fixed rough_cut before saving the director plan.' };
   if (!prose(input.direction)) return { ok: false, error: 'Give a concrete whole-video direction: opening, progression, rhythm and ending, in the creator’s language.' };
   if (task.config?.brand && !prose(input.brandTreatment, 12)) return { ok: false, error: 'Explain how this project’s brand changes the story rhythm, visual language and sound choices before planning beats.' };
   if (!Array.isArray(input.beats) || !input.beats.length || input.beats.length > 80) return { ok: false, error: 'Plan the meaningful passages with 1–80 source-anchored beats; there is no fixed visual quota.' };
@@ -40,21 +43,24 @@ export function saveEditingDirectorPlan(task: ChatTask, input: Record<string, un
     const b = value as EditingDirectorPlan['beats'][number] | null;
     if (!b || !prose(b.id, 1, 80) || ids.has(b.id) || !prose(b.assetId, 1, 160) || !prose(b.quote, 2, 500) || !prose(b.direction)
       || !Number.isFinite(b.sourceInSec) || !Number.isFinite(b.sourceOutSec) || b.sourceInSec < 0 || b.sourceOutSec <= b.sourceInSec) return { ok: false, error: 'Every beat needs a unique id, a real source passage and a specific direction.' };
-    if (!directorBeatWindows(b, document).length) return { ok: false, error: `Beat ${b.id} is absent from the retained footage. Use the post-rough-cut transcript and timeline.` };
+    if (!directorBeatWindows(b, document).length) return { ok: false, error: `Beat ${b.id} is absent from the retained footage. Use the current source transcript and timeline.` };
     const transcript = document.semantics.transcripts[b.assetId] ?? [];
     const passage = transcript.filter(segment => segment.end > b.sourceInSec && segment.start < b.sourceOutSec).map(segment => segment.text).join('');
     if (!compactText(passage).includes(compactText(b.quote)) || !compactText(b.quote)) return { ok: false, error: `Beat ${b.id} must quote actual transcript text at its source range; read get_transcript first.` };
     ids.add(b.id);
     beats.push({ id: b.id, assetId: b.assetId, sourceInSec: b.sourceInSec, sourceOutSec: b.sourceOutSec, quote: b.quote.trim(), direction: b.direction.trim() });
   }
-  return { ok: true, plan: { revision: (task.directorPlan?.revision ?? 0) + 1, direction: input.direction.trim(),
+  const media = isWhiteboardDirectorTask(task) || input.entities !== undefined
+    ? readWhiteboardEntities(input.entities, ids, new Set(Object.keys(document.assets))) : undefined;
+  if (media?.error) return { ok: false, error: media.error };
+  return { ok: true, plan: { ...(media ? { entities: media.entities } : {}), revision: (task.directorPlan?.revision ?? 0) + 1, direction: input.direction.trim(),
     ...(task.config?.brand ? { brandTreatment: (input.brandTreatment as string).trim() } : {}), beats } };
 }
 
 /** Completed claims reference real clips at that passage, not just a global MG count. */
 export function reviewDirectorPlan(task: ChatTask, input: Record<string, unknown>, document?: EditorDocumentV2): { ok: true; beats: DirectorBeatResult[]; summary: string; completed: boolean } | { ok: false; error: string } {
   const plan = task.directorPlan;
-  if (!plan || !document) return { ok: false, error: 'Save the director plan after rough_cut and review the current timeline before finishing.' };
+  if (!plan || !document) return { ok: false, error: 'Save the current task’s director plan and review the timeline before finishing.' };
   if (input.planRevision !== plan.revision) return { ok: false, error: 'Review the current director plan revision.' };
   if (!prose(input.editorialReview, 12)) return { ok: false, error: 'Review the actual opening, progression, pacing and brand coherence, and fix defects before finishing.' };
   if (!Array.isArray(input.beats) || input.beats.length !== plan.beats.length) return { ok: false, error: 'Report the result of every planned beat.' };
@@ -71,7 +77,9 @@ export function reviewDirectorPlan(task: ChatTask, input: Record<string, unknown
   return { ok: true, beats, summary: input.editorialReview.trim(), completed: beats.every(beat => beat.status !== 'blocked') };
 }
 
-export function directorPlanToolBlock(task: ChatTask | undefined, id: string, mutates: boolean): string | undefined {
+export function directorPlanToolBlock(task: ChatTask | undefined, id: string, mutates: boolean, input?: Record<string, unknown>): string | undefined {
+  if (isWhiteboardDirectorTask(task)) return whiteboardToolBlock(task, id, mutates, input);
+  if (id === 'set_whiteboard' && input?.describe === true) return;
   if (!task?.directorPlanRequired || task.directorPlan || id === 'rough_cut' || id === 'save_edit_plan' || (!mutates && id !== 'compose_component')) return;
   return 'Before fine-cut execution, finish rough_cut, read the retained transcript, inspect the footage and project brand, then call save_edit_plan. Continue automatically after saving; no plan approval is needed.';
 }

@@ -14,6 +14,7 @@ import { blockId, type Block } from './composition-core';
 import type { EditorDocumentV2, HandoffItem, TimelineAnchor } from './editor-document/types';
 import { patchEditorAppearance } from './editor-document/commands/appearance';
 import { insertOverlayDocumentClip } from './overlay-track-edit';
+import { lookSourceSyntaxIssues } from './look-source-syntax';
 import { LOOK_TEMPLATE_PREFIX, normalizeLook } from './look';
 
 type Input = Record<string, unknown>;
@@ -58,6 +59,8 @@ export function setLookV3(document: EditorDocumentV2, input: Input): AgentTimeli
     });
   }
   const look = checked.look;
+  const syntaxIssues = Object.entries(look.pieces).flatMap(([id, piece]) => lookSourceSyntaxIssues(piece.source, `look.pieces.${id}.source`));
+  if (syntaxIssues.length) return fail('invalid_look', { issues: syntaxIssues, fix: 'Correct the JavaScript syntax and submit the complete look again. The previous look has been preserved.' });
   const patched = patchEditorAppearance(document, { look });
   if (!patched.ok) return fail(patched.error?.message ?? 'look was not applied');
   // Instances of pieces the new look no longer has would render empty: name them.

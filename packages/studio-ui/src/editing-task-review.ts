@@ -2,7 +2,9 @@ import { coverSceneFromDocument, coverSceneInput } from './cover-scene';
 import type { UIMessage } from 'ai';
 import { reviewDirectorPlan, type DirectorBeatResult } from './editing-director-plan';
 import type { EditorDocumentV2 } from '@pireel/studio-engine/composition';
-import type { ChatTask } from './chat-task';
+import { isWhiteboardDirectorTask, type ChatTask } from './chat-task';
+import { projectDocumentToComposition } from '@pireel/studio-engine/project-document';
+import { whiteboardSceneReady } from './whiteboard-scene-result';
 import type { EditingEvidence } from './first-pass';
 
 export const EDIT_REVIEW_FEATURES = ['graphics', 'b-roll', 'sound', 'zoom', 'transitions'] as const;
@@ -18,14 +20,34 @@ export function requestedEditFeatures(task: ChatTask): EditReviewFeature[] {
   return EDIT_REVIEW_FEATURES.filter(id => id === 'zoom' || id === 'transitions' ? task.config?.visual?.[id] : task.skills.includes(id) || id === 'graphics' && task.config?.visual?.headlines);
 }
 export function needsEditingReview(task: ChatTask): boolean {
-  return task.mode === 'one-click' && (!!task.directorPlanRequired || !!task.config?.brand || requestedEditFeatures(task).length > 0 || needsBrandCover(task));
+  return (task.mode === 'one-click' || isWhiteboardDirectorTask(task)) && (!!task.directorPlanRequired || !!task.config?.brand || requestedEditFeatures(task).length > 0 || needsBrandCover(task));
 }
 
 /** Validate completion against actual timeline evidence, not the model's claim that it added a feature. */
 export function reviewEditingTask(task: ChatTask, input: Record<string, unknown>, evidence: EditingEvidence, document?: EditorDocumentV2, messages: readonly UIMessage[] = []): { ok: true; review: EditingTaskReview } | { ok: false; error: string; missing?: string[] } {
-  if (task.mode !== 'one-click') return { ok: false, error: 'finish_edit is for a whole-video editing task.' };
+  if (task.mode !== 'one-click' && !isWhiteboardDirectorTask(task)) return { ok: false, error: 'finish_edit is for a whole-video editing task.' };
   if (evidence.emptyMusicTracks?.length) return { ok: false, error: `Remove unused empty music tracks before finishing: ${evidence.emptyMusicTracks.join(', ')}. Create music lanes with actual placed audio, not pending suggestions.` };
-  if (!task.roughCut || task.roughCut.report.steps.some(step => ['pending', 'running', 'failed'].includes(step.status))) return { ok: false, error: 'Complete the unfinished rough-cut steps first; preserve completed checkpoints.' };
+  if (!isWhiteboardDirectorTask(task) && (!task.roughCut || task.roughCut.report.steps.some(step => ['pending', 'running', 'failed'].includes(step.status)))) return { ok: false, error: 'Complete the unfinished rough-cut steps first; preserve completed checkpoints.' };
+  if (isWhiteboardDirectorTask(task) && document) {
+    const composition = projectDocumentToComposition(document);
+    const primary = document.timeline.tracks.find(track => track.id === document.semantics.primaryNarrativeTrackId);
+    const voice = (primary?.clips.filter(c => c.enabled) ?? []).sort((a,b) => a.startFrame-b.startFrame);
+    const first = voice[0];
+    const assetId = first && 'assetId' in first ? first.assetId : undefined;
+    const sourceDuration = task.source?.durationSec ?? (assetId ? document.assets[assetId]?.metadata.durationSec : undefined);
+    let sourceCursor = 0, frameCursor = 0;
+    let intact = !!voice.length && !primary?.muted && typeof sourceDuration === 'number';
+    for (const clip of voice) {
+      if (!('assetId' in clip) || !('sourceInSec' in clip) || !('sourceOutSec' in clip) || typeof clip.sourceInSec !== 'number' || typeof clip.sourceOutSec !== 'number' || clip.assetId !== assetId
+        || Math.abs(clip.sourceInSec-sourceCursor) > 1/document.canvas.fps || clip.startFrame !== frameCursor
+        || Math.abs((clip.sourceOutSec-clip.sourceInSec)*document.canvas.fps-clip.durationFrames) > 1) { intact=false; break; }
+      if (clip.kind === 'narrative' && clip.properties?.audioMuted || clip.kind === 'media' && clip.video?.audioMuted) intact=false;
+      sourceCursor=clip.sourceOutSec;frameCursor=clip.startFrame+clip.durationFrames;
+    }
+    if (!intact || Math.abs(sourceCursor-(sourceDuration ?? 0)) > 1/document.canvas.fps) return { ok:false,error:'Preserve the complete original narration, order, speed and audible primary track for this whiteboard task.' };
+    const end = frameCursor/document.canvas.fps;
+    if (!whiteboardSceneReady(composition.blocks, document.canvas.width, document.canvas.height, end)) return { ok: false, error: 'The whiteboard must cover the entire original narration at the selected aspect before finishing.' };
+  }
   const director = task.directorPlanRequired || task.directorPlan ? reviewDirectorPlan(task, input, document) : undefined;
   if (director && !director.ok) return director;
   const coverResult = reviewBrandCover(task, input.cover, document, messages);

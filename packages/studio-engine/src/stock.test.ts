@@ -147,7 +147,9 @@ describe('stock 在线搜索', () => {
     expect(page).toMatchObject({ provider: 'wikimedia', hasMore: true });
     expect(page.items[0]).toMatchObject({
       id: 'wm_99',
-      url: 'https://upload.wikimedia.org/1600.jpg',
+      url: 'https://upload.wikimedia.org/original.jpg',
+      thumb: 'https://upload.wikimedia.org/1600.jpg',
+      width: 2400, height: 1600,
       sourceUrl: 'https://commons.wikimedia.org/wiki/File:Phone.jpg',
       author: 'Lin',
       license: { name: 'CC BY-SA 4.0', url: 'https://creativecommons.org/licenses/by-sa/4.0' },
@@ -166,4 +168,16 @@ describe('stock 在线搜索', () => {
       }],
     }, 'image')).toBeNull();
   });
+});
+
+ it('routes exact named entities to Commons even with commercial stock keys configured', async () => {
+  vi.stubEnv('PEXELS_API_KEY', 'test');
+  const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ query: { pages: [] } }) });
+  vi.stubGlobal('fetch', fetchMock);
+  try {
+    expect(await searchStock('David Ellison', 'image', 1, 6, 'entity')).toMatchObject({ provider: 'wikimedia', items: [] });
+    expect(String(fetchMock.mock.calls[0][0])).toContain('commons.wikimedia.org');
+    expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  } finally { vi.unstubAllGlobals(); vi.unstubAllEnvs(); }
 });

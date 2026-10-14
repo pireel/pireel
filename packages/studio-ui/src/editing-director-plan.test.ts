@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { runAgentTimelineTool } from '@pireel/studio-engine/agent-timeline';
 import { compositionToEditorDocument, emptyComposition } from '@pireel/studio-engine/composition';
 import { emptyPlaybook, playbookSnapshot } from '@pireel/studio-engine/brand-playbook';
 import { resolveEditingRunConfig } from '@pireel/studio-engine/editing-run-config';
@@ -105,5 +106,33 @@ describe('brand-informed director plan', () => {
     expect(html).not.toContain('annual-card');
     expect(html).not.toContain('待确认');
     expect(html).not.toContain('sourceInSec');
+  });
+});
+
+describe('whole-whiteboard directing without destructive cleanup', () => {
+  it('plans from original transcript, keeps local requests unchanged, and refuses completion without a full board', () => {
+    const {task,document,input,review}=fixture();
+    const whiteboard:ChatTask={...task,mode:'request',skillId:'whiteboard-explainer',roughCut:undefined,config:undefined,skills:[]};
+    const planned=saveEditingDirectorPlan(whiteboard,{...input,entities:[]},document);expect(planned.ok).toBe(true);
+    if(!planned.ok)throw Error(planned.error);
+    expect(directorPlanToolBlock(whiteboard,'set_whiteboard',true)).toBeTruthy();
+    expect(directorPlanToolBlock(whiteboard,'set_whiteboard',true,{describe:true})).toBeUndefined();
+    expect(directorPlanToolBlock(whiteboard,'register_media',true)).toBeUndefined();
+    expect(directorPlanToolBlock(whiteboard,'prepare_local_asset',false)).toBeUndefined();
+    expect(saveEditingDirectorPlan(whiteboard,input,document).ok).toBe(false);
+    expect(directorPlanToolBlock(whiteboard,'rough_cut',true)).toBeTruthy();
+    expect(resumeTaskHint(whiteboard)).toContain('planning');
+    expect(resumeTaskHint(whiteboard)).not.toContain('generation question');
+    expect(saveEditingDirectorPlan({...whiteboard,directorPlanRequired:false},input,document).ok).toBe(false);
+    const saved={...whiteboard,directorPlan:planned.plan};
+    const evidence={graphics:[],'b-roll':[],sound:[]};
+    expect(reviewEditingTask(saved,{...review,features:[]},evidence,document).ok).toBe(false);
+    const board={version:1,aspect:'16:9',narration:{source:'script',durationSec:10,sentences:[{id:'s',text:'这张年卡包含两场大会门票。'}]},board:{nodes:[{id:'a',content:{kind:'headline',lines:['两场大会']} }],edges:[]},scenes:[{id:'s',nodeIds:['a'],layout:{type:'free'}}],beats:[{id:'b',anchor:{sentence:'s'},actions:[{op:'reveal',target:'a'}]}]};
+    const applied=runAgentTimelineTool(document,'set_whiteboard',{id:'board',startFrame:0,durationFrames:300,doc:board});
+    expect(applied.ok).toBe(true);
+    expect(reviewEditingTask(saved,{...review,features:[]},evidence,applied.document)).toMatchObject({ok:true,review:{completed:true}});
+    const shortened=structuredClone(applied.document!);const primary=shortened.timeline.tracks.find(t=>t.id===shortened.semantics.primaryNarrativeTrackId)!;primary.clips[0].durationFrames=270;if('sourceOutSec' in primary.clips[0])primary.clips[0].sourceOutSec=9;
+    expect(reviewEditingTask(saved,{...review,features:[]},evidence,shortened).ok).toBe(false);
+    expect(saveEditingDirectorPlan(whiteboard,{...input,beats:[{...input.beats[0],quote:'不存在的口播文字'}]},document).ok).toBe(false);
   });
 });

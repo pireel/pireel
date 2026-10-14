@@ -93,7 +93,7 @@ function check(schema: Schema, value: unknown, path: string): V3InputProblem | n
     case 'number':
       return typeof value === 'number' && Number.isFinite(value) ? null : problem('invalid_value', path, schema, value);
     case 'boolean':
-      return typeof value === 'boolean' ? null : problem('invalid_value', path, schema, value);
+      return typeof value === 'boolean' && (!Array.isArray(schema.enum) || schema.enum.includes(value)) ? null : problem('invalid_value', path, schema, value);
     default:
       return null;
   }
