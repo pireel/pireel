@@ -1,6 +1,6 @@
-import { brandEditingSkills, brandPreferences } from './brand-preferences';
-import { fixedBrandConfiguration, type PlaybookSnapshot } from './brand-playbook';
-import { EDITING_SKILL_IDS } from './editing-skills';
+import { brandEditingSkills, brandPreferences } from '@pireel/studio-engine/brand-preferences';
+import { fixedBrandConfiguration, type PlaybookSnapshot } from '@pireel/studio-engine/brand-playbook';
+import { EDITING_SKILL_IDS } from '@pireel/studio-engine/editing-skills';
 export const HOME_VIDEO_EDITING_SKILL = 'talking-head-edit';
 
 /** Immutable input to one editing task. Brand presence never selects a different executor. */

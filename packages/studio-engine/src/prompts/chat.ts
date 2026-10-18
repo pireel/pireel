@@ -8,7 +8,7 @@
  * append-only and byte-stable, so the system breakpoint and rolling message breakpoints hit.
  */
 
-import type { StudioScenarioSkill } from "../scenario-skills";
+import type { StudioScenarioSkill } from "@pireel/studio-engine/scenario-skills";
 
 /** Delimit the spoken transcript as DATA (industry "spotlighting": wrap untrusted content in
  *  markers the system prompt declares inert). The transcript is the classic indirect-injection

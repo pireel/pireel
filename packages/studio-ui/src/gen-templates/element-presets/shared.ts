@@ -1,4 +1,4 @@
-import type { GenElementResult } from '../../element-history';
+import type { GenElementResult } from '@pireel/studio-ui/element-history';
 
 export type ArtDirectedElementSpec = Omit<GenElementResult, 'label' | 'presetId'> & { presetId: string };
 export const ART_DIRECTED_PRESET_VERSION = 5;

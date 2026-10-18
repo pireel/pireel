@@ -12,7 +12,7 @@
  */
 
 import { components } from '@pireel/studio-kit';
-import { ON_SCREEN_LANGUAGE } from '../l0-editor';
+import { ON_SCREEN_LANGUAGE } from '@pireel/studio-engine/prompts/l0-editor';
 
 /** L3.1 — how to decide what goes on screen in a talking-head piece. */
 export const SPOKEN_EDITORIAL = `WHAT EARNS A GRAPHIC

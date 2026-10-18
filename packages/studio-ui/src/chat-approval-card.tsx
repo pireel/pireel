@@ -10,9 +10,9 @@
 
 import { Check, X } from 'lucide-react';
 import type { StudioToolResult } from '@pireel/studio-engine/prompts';
-import { resolveInteraction, usePendingInteraction } from './interaction-store';
-import type { ToolPartLike } from './chat-tool-parts';
-import { t } from './i18n';
+import { resolveInteraction, usePendingInteraction } from '@pireel/studio-ui/interaction-store';
+import type { ToolPartLike } from '@pireel/studio-ui/chat-tool-parts';
+import { t } from '@pireel/studio-ui/i18n';
 
 type ApprovalDecision = 'approved' | 'rejected';
 

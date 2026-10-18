@@ -2,8 +2,8 @@ import { studioAgentModelId, type StudioAgentModelId } from '@pireel/studio-engi
 /** Server-backed Studio chat thread validation, restore sanitizing, and title derivation. */
 
 import type { UIMessage } from 'ai';
-import { t } from './i18n';
-import { taskOf } from './chat-task';
+import { t } from '@pireel/studio-ui/i18n';
+import { taskOf } from '@pireel/studio-ui/chat-task';
 import { stripLeakedToolProtocolText } from '@pireel/studio-engine/tool-protocol-text';
 import { withoutInternalHandoffParts } from '@pireel/studio-engine/studio-visible-text';
 import {

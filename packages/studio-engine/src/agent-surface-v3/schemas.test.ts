@@ -1,10 +1,10 @@
-import { CAPTION_ANIMATION_IDS } from '../caption-animations';
+import { CAPTION_ANIMATION_IDS } from '@pireel/studio-engine/caption-animations';
 import { describe, expect, it } from 'vitest';
-import { CAPTION_PRESETS } from '../caption-presets';
-import { CUT_TRANSITION_EFFECTS, PLACE_ANCHORS, SHOT_TREATMENTS, ZOOM_PRESETS } from '../composition-core';
-import { DISPLAY_TEXT_ANIMATION_IDS, DISPLAY_TEXT_PRESETS } from '../display-text-presets';
-import { V3_TOOLS } from './registry';
-import { CHARGE_MARKER, V3_STRICT_INPUT_SCHEMAS, V3_TOOL_SCHEMAS } from './schemas';
+import { CAPTION_PRESETS } from '@pireel/studio-engine/caption-presets';
+import { CUT_TRANSITION_EFFECTS, PLACE_ANCHORS, SHOT_TREATMENTS, ZOOM_PRESETS } from '@pireel/studio-engine/composition-core';
+import { DISPLAY_TEXT_ANIMATION_IDS, DISPLAY_TEXT_PRESETS } from '@pireel/studio-engine/display-text-presets';
+import { V3_TOOLS } from '@pireel/studio-engine/agent-surface-v3/registry';
+import { CHARGE_MARKER, V3_STRICT_INPUT_SCHEMAS, V3_TOOL_SCHEMAS } from '@pireel/studio-engine/agent-surface-v3/schemas';
 
 const words = (text: string) => text.split(/\s+/).filter(Boolean).length;
 

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { localAssetMentionId } from './chat-local-asset-mention';
+import { localAssetMentionId } from '@pireel/studio-ui/chat-local-asset-mention';
 import {
   normalizeStudioToolInputReferences,
   resolveLocalAssetReference,
-} from './studio-tool-input-references';
+} from '@pireel/studio-ui/studio-tool-input-references';
 
 describe('Studio tool input reference normalization', () => {
   const sig = '爆款视频.mp4:240:12';

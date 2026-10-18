@@ -1,7 +1,8 @@
 'use client';
+import { editorRequest } from '@pireel/studio-ui/host-request';
 
 import { pickImageModel, normalizeImageSettings, imageSizeChoices } from '@pireel/studio-engine/image-generation-settings';
-import { ImageGenerationFields } from './image-generation-fields';
+import { ImageGenerationFields } from '@pireel/studio-ui/image-generation-fields';
 
 /**
  * Toolbar controls of the composer's generation modes — the configuration the retired generation
@@ -17,13 +18,13 @@ import { ImageGenerationFields } from './image-generation-fields';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Lightbulb, Play, Search, SlidersHorizontal } from 'lucide-react';
-import { useQuote } from '@pireel/ui/use-quote';
+import { useQuote } from '@pireel/studio-ui/use-quote';
 import { imageThumb } from '@pireel/ui/image-url';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@pireel/ui/dialog';
-import { useStudioShell } from './shell-context';
-import { studioLocale, t } from './i18n';
-import { generationRequest } from './generation-settings';
-import { audioKindFor, generationTemplates, MUSIC_DURATION_OPTIONS, SFX_DURATION_OPTIONS, type AudioKind, type GenerationIntent, type GenerationParams } from './chat-generation-intent';
+import { useStudioShell } from '@pireel/studio-ui/shell-context';
+import { studioLocale, t } from '@pireel/studio-ui/i18n';
+import { generationRequest } from '@pireel/studio-ui/generation-settings';
+import { audioKindFor, generationTemplates, MUSIC_DURATION_OPTIONS, SFX_DURATION_OPTIONS, type AudioKind, type GenerationIntent, type GenerationParams } from '@pireel/studio-ui/chat-generation-intent';
 
 const RATIOS: NonNullable<GenerationParams['ratio']>[] = ['9:16', '16:9', '1:1'];
 const TOOL_BUTTON = 'text-ink-3 hover:bg-line hover:text-ink inline-flex h-7 w-7 items-center justify-center rounded-md disabled:pointer-events-none disabled:opacity-30';
@@ -207,7 +208,7 @@ export function GenerationControls({
   useEffect(() => {
     if (intent !== 'audio') return;
     let cancelled = false;
-    void fetch('/api/studio/voices?limit=50')
+    void editorRequest('/api/studio/voices?limit=50')
       .then((r) => (r.ok ? r.json() : null))
       .then((j: { voices?: Array<Record<string, unknown>> } | null) => {
         if (cancelled || !Array.isArray(j?.voices)) return;

@@ -4,9 +4,9 @@ import { primaryNarrativeClips } from '@pireel/studio-engine/composition';
 import { parseCoverPlan } from '@pireel/studio-engine/brand-cover';
 import { canonicalJson, hashSection } from '@pireel/studio-engine/stable-json';
 import { activeBrandCover, brandCoverReferenceKeys } from '@pireel/studio-engine/brand-playbook';
-import { retainedCoverFrame, coverFrameIdentity, type CoverSourceFrame } from './cover-frame-selection';
-import { projectCoverFromDocument, type ProjectCover } from './project-cover';
-import type { GenJob, StartResult } from './gen-api';
+import { retainedCoverFrame, coverFrameIdentity, type CoverSourceFrame } from '@pireel/studio-ui/cover-frame-selection';
+import { projectCoverFromDocument, type ProjectCover } from '@pireel/studio-ui/project-cover';
+import type { GenJob, StartResult } from '@pireel/studio-ui/gen-api';
 
 export interface CoverScene {
   version: 1; runId: string; inputFingerprint?: string; contextFingerprint?: string; startedAt?: number; phase: 'planning' | 'prepared' | 'starting' | 'generating' | 'ready' | 'failed';

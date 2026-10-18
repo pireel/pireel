@@ -1,10 +1,10 @@
-import type { BrandFeatureTheme } from './brand-feature-settings';
-import { brandPreferences } from './brand-preferences';
-import { BLOCK_IDS, renderBrandPrompt, upgradeBlocks, type PlaybookSnapshot } from './brand-playbook';
-import type { AsrSegment } from './build-blocks';
-import { CUT_TRANSITION_EFFECTS, ZOOM_PRESETS, type CutTransitionEffect, type ShotZoom, type ZoomPreset } from './composition-core';
-import type { NarrativeClipPatchUpdate } from './editor-document/commands/types';
-import type { EditorDocumentV2, NarrativeTimelineClip } from './editor-document/types';
+import type { BrandFeatureTheme } from '@pireel/studio-engine/brand-feature-settings';
+import { brandPreferences } from '@pireel/studio-engine/brand-preferences';
+import { BLOCK_IDS, renderBrandPrompt, upgradeBlocks, type PlaybookSnapshot } from '@pireel/studio-engine/brand-playbook';
+import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
+import { CUT_TRANSITION_EFFECTS, ZOOM_PRESETS, type CutTransitionEffect, type ShotZoom, type ZoomPreset } from '@pireel/studio-engine/composition-core';
+import type { NarrativeClipPatchUpdate } from '@pireel/studio-engine/editor-document/commands/types';
+import type { EditorDocumentV2, NarrativeTimelineClip } from '@pireel/studio-engine/editor-document/types';
 
 /**
  * How a scene edits from a creator's brand. Fixed blocks become parameters the engine runs as they are

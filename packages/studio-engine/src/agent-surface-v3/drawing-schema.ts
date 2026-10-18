@@ -1,4 +1,4 @@
-import { DRAWING_COLORS, DRAWING_EASINGS, DRAWING_PROPERTIES } from '../whiteboard-drawing';
+import { DRAWING_COLORS, DRAWING_EASINGS, DRAWING_PROPERTIES } from '@pireel/studio-engine/whiteboard-drawing';
 
 type Schema = Record<string, unknown>;
 const number = (minimum = -100_000, maximum = 100_000): Schema => ({ type: 'number', minimum, maximum });

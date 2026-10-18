@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { splitNextSteps } from './chat-next-steps';
+import { splitNextSteps } from '@pireel/studio-ui/chat-next-steps';
 
 describe('next steps in a reply', () => {
   it('takes the offered steps out of the text', () => {

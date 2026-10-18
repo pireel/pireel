@@ -19,11 +19,11 @@ import {
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { measuredSpeechTranscript, storedScriptText } from '@pireel/studio-engine/script-alignment';
-import { type VisualTimeline, analyzeVisual } from './visual';
-import { t } from './i18n';
-import { deleteCachedAsr } from './asr-cache';
-import { fileSig } from './media';
-import type { DocumentCommitter } from './document-commit';
+import { type VisualTimeline, analyzeVisual } from '@pireel/studio-ui/visual';
+import { t } from '@pireel/studio-ui/i18n';
+import { deleteCachedAsr } from '@pireel/studio-ui/asr-cache';
+import { fileSig } from '@pireel/studio-ui/media-ai';
+import type { DocumentCommitter } from '@pireel/studio-ui/document-commit';
 import type { DocumentOp } from '@pireel/studio-engine/document-transaction';
 
 export interface MediaAnalysisDeps {

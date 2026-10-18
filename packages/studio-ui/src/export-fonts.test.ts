@@ -1,3 +1,6 @@
+import { beforeEach } from 'vitest';
+import { setStudioProviders, unavailableProviders } from '@pireel/studio-engine/providers';
+beforeEach(() => setStudioProviders({ ...unavailableProviders(), mediaProxyUrl: url => `/api/media/fetch?url=${encodeURIComponent(url)}` }));
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildInlineFontCss, warmupFontMarkup } from './export-fonts';
 import { loadLocalFontFamilies } from './local-font-access';

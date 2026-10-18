@@ -1,18 +1,19 @@
 "use client";
+import { editorRequest } from '@pireel/studio-ui/host-request';
 import { brandGraphicsStyle } from '@pireel/studio-engine/brand-playbook';
 import { brandEditingSkills } from '@pireel/studio-engine/brand-preferences';
-import { loadCoverBrandReferences } from './cover-brand-references';
+import { loadCoverBrandReferences } from '@pireel/studio-ui/cover-brand-references';
 import { pickImageModel } from '@pireel/studio-engine/image-generation-settings';
-import { ScenePreviewTransport } from "./scene-preview-transport";
-import { whiteboardSceneReady } from './whiteboard-scene-result';
-import type { SceneAgentState } from './agent-startup';
+import { ScenePreviewTransport } from "@pireel/studio-ui/scene-preview-transport";
+import { whiteboardSceneReady } from '@pireel/studio-ui/whiteboard-scene-result';
+import type { SceneAgentState } from '@pireel/studio-ui/agent-startup';
 
-import { coverFrameRanges, coverFrameAtTime, retainedCoverFrame, type CoverSourceFrame, type CoverFrameStripData } from './cover-frame-selection';
-import { CoverSceneController, coverSceneFromDocument, withCoverScene, type CoverGenerateOptions, type CoverDraftPatch } from './cover-scene';
-import { CoverSceneDialog, TimelineCoverPlaceholder, coverSceneStatus } from './cover-scene-dialog';
-import { cloudBackupMedia } from './cloud-media';
+import { coverFrameRanges, coverFrameAtTime, retainedCoverFrame, type CoverSourceFrame, type CoverFrameStripData } from '@pireel/studio-ui/cover-frame-selection';
+import { CoverSceneController, coverSceneFromDocument, withCoverScene, type CoverGenerateOptions, type CoverDraftPatch } from '@pireel/studio-ui/cover-scene';
+import { CoverSceneDialog, TimelineCoverPlaceholder, coverSceneStatus } from '@pireel/studio-ui/cover-scene-dialog';
+import { cloudBackupMedia } from '@pireel/studio-ui/cloud-media';
 import { extractThumbnails } from '@pireel/studio-engine/video-edit/thumbnails';
-import { applyProjectCover, persistProjectCover, projectCoverFromDocument, projectCoverThumbnail, ProjectCoverWriteQueue, type ProjectCover } from './project-cover';
+import { applyProjectCover, persistProjectCover, projectCoverFromDocument, projectCoverThumbnail, ProjectCoverWriteQueue, type ProjectCover } from '@pireel/studio-ui/project-cover';
 
 /**
  * Hyperframes workbench — block-based editing (pure browser, zero server).
@@ -81,8 +82,8 @@ import {
 } from "@pireel/ui/tooltip";
 
 import { toast } from "@pireel/ui/toast";
-import { t, tEnglish } from "./i18n";
-import { editorErrorMessage } from "./editor-error";
+import { t, tEnglish } from "@pireel/studio-ui/i18n";
+import { editorErrorMessage } from "@pireel/studio-ui/editor-error";
 import {
   type Block,
   type Composition,
@@ -167,12 +168,12 @@ import {
   titleBlock,
 } from "@pireel/studio-engine/composition";
 import { canonicalJson } from '@pireel/studio-engine/stable-json';
-import { runtimeTranscriptsFollowingDocument } from './runtime-transcripts';
+import { runtimeTranscriptsFollowingDocument } from '@pireel/studio-ui/runtime-transcripts';
 import { transcriptInputsFor, type DocumentOp } from '@pireel/studio-engine/document-transaction';
 import { applyEditorDocumentPersistenceMetadata } from '@pireel/studio-engine/project-document';
-import { DocumentCommitter } from './document-commit';
+import { DocumentCommitter } from '@pireel/studio-ui/document-commit';
 import type { PlaybookSnapshot } from "@pireel/studio-engine/brand-playbook";
-import { ProjectSync, localPendingTransactionStore, type ProjectSyncDeps, type ProjectSyncSections } from './project-sync';
+import { ProjectSync, localPendingTransactionStore, type ProjectSyncDeps, type ProjectSyncSections } from '@pireel/studio-ui/project-sync';
 
 /** Constant speed of a placed video clip = source seconds per timeline second (1 = natural). */
 function clipSpeedInDocument(document: EditorDocumentV2, clipId: string): number {
@@ -196,11 +197,11 @@ import {
 import {
   type ComposeMode,
   type ComposedBlock,
-} from "./compose-result";
+} from "@pireel/studio-ui/compose-result";
 import { imageThumb } from "@pireel/ui/image-url";
-import { acceptGeneratedComponent } from "./compose-validation";
-import { injectPreviewRuntime } from "./sample-composition";
-import { monotonicPlaybackSecond, playhead } from "./playhead";
+import { acceptGeneratedComponent } from "@pireel/studio-ui/compose-validation";
+import { injectPreviewRuntime } from "@pireel/studio-ui/sample-composition";
+import { monotonicPlaybackSecond, playhead } from "@pireel/studio-ui/playhead";
 import {
   type AsrSegment,
   desegmentCues,
@@ -213,7 +214,7 @@ import {
   fileSig,
   probeVideoFile,
   uploadVideoFile,
-} from "./media";
+} from "@pireel/studio-ui/media-ai";
 import {
   alignFileToSig,
   loadLocalVideo,
@@ -222,69 +223,69 @@ import {
   resolveAssetBytes,
   saveLocalVideo,
   startLocalMediaCacheSession,
-} from "./local-media";
-import { assetUploadQueue } from "./asset-upload-queue";
-import { LocalAssetRuntime } from "./local-asset-runtime";
-import { materializeRemoteMedia } from "./remote-media";
+} from "@pireel/studio-ui/local-media";
+import { assetUploadQueue } from "@pireel/studio-ui/asset-upload-queue";
+import { LocalAssetRuntime } from "@pireel/studio-ui/local-asset-runtime";
+import { materializeRemoteMedia } from "@pireel/studio-ui/remote-media";
 import {
   shouldReconnectNarrativeSource,
   sourceRuntimeIsLive,
-} from "./local-source-runtime";
+} from "@pireel/studio-ui/local-source-runtime";
 import {
   importLocalSource,
   localAssetIndexEntry,
-} from "./local-import-session";
-import { VideoTrackEngine } from "./video-track-engine";
-import { PreviewStageHost, type PreviewContentWindow, type PreviewMessageEvent } from "./preview-stage-host";
-import { clipAudioMasks, previewAudioMasks } from "./export-word-masks";
-import { segmentSourceRate } from "./video-segment-time";
-import { compositionRenderView } from "./composition-render-view";
-import { primaryNarrativeRenderPlan } from "./primary-render-plan";
+} from "@pireel/studio-ui/local-import-session";
+import { VideoTrackEngine } from "@pireel/studio-ui/video-track-engine";
+import { PreviewStageHost, type PreviewContentWindow, type PreviewMessageEvent } from "@pireel/studio-ui/preview-stage-host";
+import { clipAudioMasks, previewAudioMasks } from "@pireel/studio-ui/export-word-masks";
+import { segmentSourceRate } from "@pireel/studio-ui/video-segment-time";
+import { compositionRenderView } from "@pireel/studio-ui/composition-render-view";
+import { primaryNarrativeRenderPlan } from "@pireel/studio-ui/primary-render-plan";
 import {
   supplementalVisualLayers,
   supplementalVisualMedia,
-} from "./visual-render-plan";
+} from "@pireel/studio-ui/visual-render-plan";
 import {
   type BakeSpec,
   type BakedWindow,
   bakeTransitionWindow,
   decodeBake,
-} from "./transition-bake";
+} from "@pireel/studio-ui/transition-bake";
 import { studioProviders } from "@pireel/studio-engine/providers";
 import { ensureTemplatesRegistered } from "@pireel/studio-engine/templates";
-import { DeferredEffectDisposer } from "./cloud-project-save";
-import { DeferredActivation } from "./deferred-activation";
-import { loadCurrentUser } from "./current-user";
+import { DeferredEffectDisposer } from "@pireel/studio-ui/cloud-project-save";
+import { DeferredActivation } from "@pireel/studio-ui/deferred-activation";
+import { loadCurrentUser } from "@pireel/studio-ui/current-user";
 import {
   StudioTimeline,
   DEFAULT_PPS,
   MIN_PPS,
   MAX_PPS,
   type TimelineTrackState,
-} from "./studio-timeline";
+} from "@pireel/studio-ui/studio-timeline";
 import {
   isTimelineDensity,
   quantizeTimelineFrameSecond,
   TIMELINE_DENSITY_STORAGE_KEY,
   TIMELINE_COLLAPSED_STORAGE_KEY,
   type TimelineDensity,
-} from "./timeline-utils";
-import { timelineDirectorScenesFromDocument } from "./director-scene-strip";
+} from "@pireel/studio-ui/timeline-utils";
+import { timelineDirectorScenesFromDocument } from "@pireel/studio-ui/director-scene-strip";
 import type {
   TimelineInsertMode,
   TimelineMediaDropTarget,
-} from "./timeline-asset-drop";
+} from "@pireel/studio-ui/timeline-asset-drop";
 import {
   StudioChat,
   type StudioChatHandle,
   type StudioElementRef,
-} from "./studio-chat";
-import { buildChatMentionElements, localAssetMentionRef } from "./chat-local-asset-mention";
-import { resolveLocalAssetReference } from "./studio-tool-input-references";
-import { shouldCollapseChatForTimelineFramePick } from "./chat-timeline-frame-picker";
-import { ElementSourceEditor, type SourceDraft } from "./element-source-editor";
-import { useStableCallbacks } from "./use-stable-callbacks";
-import { RIGHT_DOCK_TABS, WorkbenchDockPanel, useWorkbenchColumns, type DockTab, type RightDockTab, type EditingMode } from "./workbench-dock";
+} from "@pireel/studio-ui/studio-chat";
+import { buildChatMentionElements, localAssetMentionRef } from "@pireel/studio-ui/chat-local-asset-mention";
+import { resolveLocalAssetReference } from "@pireel/studio-ui/studio-tool-input-references";
+import { shouldCollapseChatForTimelineFramePick } from "@pireel/studio-ui/chat-timeline-frame-picker";
+import { ElementSourceEditor, type SourceDraft } from "@pireel/studio-ui/element-source-editor";
+import { useStableCallbacks } from "@pireel/studio-ui/use-stable-callbacks";
+import { RIGHT_DOCK_TABS, WorkbenchDockPanel, useWorkbenchColumns, type DockTab, type RightDockTab, type EditingMode } from "@pireel/studio-ui/workbench-dock";
 import {
   type StudioDraft,
   cacheProjectLocally,
@@ -292,89 +293,87 @@ import {
   migrateLegacyDraft,
   saveCoverThumb,
   useDraftAutosave,
-} from "./use-draft-persist";
+} from "@pireel/studio-ui/use-draft-persist";
 import {
   STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION,
   type LocalAssetIndexEntry,
   type StudioProjectDto,
 } from "@pireel/studio-engine/project-dto";
 
-import { useGenerationLock } from "./use-generation-lock";
-import { useMediaAnalysis } from "./use-media-analysis";
-import { downloadBlob, useStudioExport } from "./use-export";
-import { buildNlePackage, NleExportCanceled } from "./nle-export-package";
-import { NleExportDialog, type NleExportState } from "./nle-export-dialog";
+import { useGenerationLock } from "@pireel/studio-ui/use-generation-lock";
+import { useMediaAnalysis } from "@pireel/studio-ui/use-media-analysis";
+import { downloadBlob, useStudioExport } from "@pireel/studio-ui/use-export";
+import { buildNlePackage, NleExportCanceled } from "@pireel/studio-ui/nle-export-package";
+import { NleExportDialog, type NleExportState } from "@pireel/studio-ui/nle-export-dialog";
 import {
   DEFAULT_RENDER_OPTS,
   EMPTY_VIDEO_GROUND,
   type ExportRenderOpts,
   captureCompositionFrame,
-} from "./client-export";
-import { DisplayTextPanel, type DisplayTextPatch } from "./display-text-panel";
+} from "@pireel/studio-ui/client-export";
+import { DisplayTextPanel, type DisplayTextPatch } from "@pireel/studio-ui/display-text-panel";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from "@pireel/ui/dialog";
-import { generatedAssetIndexEntry, generatedRecordsFromJobs, listStudioGens, startGeneration, pollCreation, type GeneratedAssetRecord } from "./gen-api";
+import { generatedAssetIndexEntry, generatedRecordsFromJobs, listStudioGens, startGeneration, pollCreation, type GeneratedAssetRecord } from "@pireel/studio-ui/gen-api";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@pireel/ui/dropdown-menu";
-import { BatchExportDialog, type OutputBatchState } from "./batch-export-dialog";
-import { KIT_INSERT_DURATION, kitSampleProps } from "./kit-ui";
+import { BatchExportDialog, type OutputBatchState } from "@pireel/studio-ui/batch-export-dialog";
+import { KIT_INSERT_DURATION, kitSampleProps } from "@pireel/studio-ui/kit-ui";
 import { wordsFromText } from "@pireel/studio-engine/caption-fx";
-import { AssetsPanel, type GenType, type PanelDragAsset } from "./assets-panel";
-import { useStudioShell } from "./shell-context";
-import { WorkflowPanel } from "./workflow-panel";
-import { CaptionsEntry } from "./captions-entry";
-import { workflowDocumentRevision } from "./workflow-studio-adapter";
-import { TranscriptEditor } from "./transcript-editor";
-import { brollTargetForRange } from "./timeline-asset-drop";
-import type { TimelinePendingLane, TimelinePendingRange } from "./studio-timeline";
-import { TranscriptAddPopover, type TranscriptAddGenKind, type TranscriptAddTarget } from "./transcript-add-popover";
-import { generateAudioForRange, generateVisualForRange } from "./range-generation";
-import type { GenerationRequest } from "./generation-settings";
-import { MyAssetsPanel } from "./my-assets-panel";
-import type { TranscriptAddKind } from "./script-panel";
-import { CaptionsPanel } from "./captions-panel";
-import { CaptionStylePanel } from "./caption-style-panel";
-import { EditorModeSwitch } from "./editor-mode-switch";
-import { PersonFxPanel, type MatteState } from "./person-fx-panel";
-import { ShotTreatmentPanel } from "./shot-treatment-panel";
-import { MusicPanel } from "./music-panel";
-import { AvatarPanel } from "./avatar-panel";
-import { useAudioTracks } from "./use-audio-tracks";
-import { useDenoise } from "./use-denoise";
-import { TransitionPanel } from "./transition-panel";
-import { MediaAnimPanel } from "./media-anim-panel";
-import { type MatteFrame, MATTE_FPS, computeMatteTrack } from "./person-matte";
-import { restoreChatThreads } from "./chat-thread-cache";
-import { createChatThreadPersistence } from "./chat-thread-persistence";
-import type { StoredThread } from "./chat-thread-store";
-import { acknowledgeAgentStartPrompt, takeAgentStartPrompt } from "./agent-project-from-video";
-import { documentIsEdited, fineCutClipIds } from "./first-pass";
-import type { WorkflowUsage } from "@pireel/studio-engine/workflow";
-import { StudioBootOverlay } from "./studio-boot";
+import { AssetsPanel, type GenType, type PanelDragAsset } from "@pireel/studio-ui/assets-panel";
+import { useStudioShell } from "@pireel/studio-ui/shell-context";
+import { workflowDocumentRevision } from "@pireel/studio-ui/editor-workflow-host";
+import { TranscriptEditor } from "@pireel/studio-ui/transcript-editor";
+import { brollTargetForRange } from "@pireel/studio-ui/timeline-asset-drop";
+import type { TimelinePendingLane, TimelinePendingRange } from "@pireel/studio-ui/studio-timeline";
+import { TranscriptAddPopover, type TranscriptAddGenKind, type TranscriptAddTarget } from "@pireel/studio-ui/transcript-add-popover";
+import { generateAudioForRange, generateVisualForRange } from "@pireel/studio-ui/range-generation";
+import type { GenerationRequest } from "@pireel/studio-ui/generation-settings";
+import { MyAssetsPanel } from "@pireel/studio-ui/my-assets-panel";
+import type { TranscriptAddKind } from "@pireel/studio-ui/script-panel";
+import { CaptionsPanel } from "@pireel/studio-ui/captions-panel";
+import { CaptionStylePanel } from "@pireel/studio-ui/caption-style-panel";
+import { EditorModeSwitch } from "@pireel/studio-ui/editor-mode-switch";
+import { PersonFxPanel, type MatteState } from "@pireel/studio-ui/person-fx-panel";
+import { ShotTreatmentPanel } from "@pireel/studio-ui/shot-treatment-panel";
+import { MusicPanel } from "@pireel/studio-ui/music-panel";
+import { AvatarPanel } from "@pireel/studio-ui/avatar-panel";
+import { useAudioTracks } from "@pireel/studio-ui/use-audio-tracks";
+import { useDenoise } from "@pireel/studio-ui/use-denoise";
+import { TransitionPanel } from "@pireel/studio-ui/transition-panel";
+import { MediaAnimPanel } from "@pireel/studio-ui/media-anim-panel";
+import { type MatteFrame, MATTE_FPS, computeMatteTrack } from "@pireel/studio-ui/person-matte";
+import { restoreChatThreads } from "@pireel/studio-ui/chat-thread-cache";
+import { createChatThreadPersistence } from "@pireel/studio-ui/chat-thread-persistence";
+import type { StoredThread } from "@pireel/studio-ui/chat-thread-store";
+import { acknowledgeAgentStartPrompt, takeAgentStartPrompt } from "@pireel/studio-ui/editor-start-prompt";
+import { documentIsEdited, fineCutClipIds } from "@pireel/studio-ui/first-pass";
+import type { WorkflowUsage } from '@pireel/studio-engine/usage';
+import { StudioBootOverlay } from "@pireel/studio-ui/studio-boot";
 import { confirm } from "@pireel/ui/confirm";
 import type { StudioToolResult } from "@pireel/studio-engine/prompts";
-import { studioToolDefFor } from "./v3-tool-defs";
-import { agentMediaClipRefs } from "./agent-element-roster";
-import { useAgentBridge } from "./use-agent-bridge";
+import { studioToolDefFor } from "@pireel/studio-ui/v3-tool-defs";
+import { agentMediaClipRefs } from "@pireel/studio-ui/agent-element-roster";
+import { useAgentBridge } from "@pireel/studio-ui/use-agent-bridge";
 import {
   type VisualPrep,
   type VisualTimeline,
   analyzeVisual,
   clearVisualCache,
-} from "./visual";
-import { type SafeZone, detectFrameAt, geomNote } from "./geometry";
+} from "@pireel/studio-ui/visual";
+import { type SafeZone, detectFrameAt, geomNote } from "@pireel/studio-ui/geometry";
 import {
   normalizeDims,
   shotSpan,
-} from "./workbench-utils";
+} from "@pireel/studio-ui/workbench-utils";
 import {
   shotCountChange,
   canvasSizeOnlyChange,
@@ -388,12 +387,12 @@ import {
   shotFramingOnlyChange,
   supplementalMediaFramingOnlyChange,
   themeMountOnlyChange,
-} from "./comp-diff";
+} from "@pireel/studio-ui/comp-diff";
 import {
   BoxEditOverlay,
   CaptionEditOverlay,
   boxSelectionRect,
-} from "./edit-overlays";
+} from "@pireel/studio-ui/edit-overlays";
 import {
   FULL_MEDIA_CANVAS_BOX,
   fittedMediaContentBox,
@@ -401,57 +400,57 @@ import {
   framedMediaPlacementBox,
   resolveBufferedMediaSelection,
   type MediaCanvasBox,
-} from "./media-box";
-import { blockDisplayTitle } from "./block-display-title";
+} from "@pireel/studio-ui/media-box";
+import { blockDisplayTitle } from "@pireel/studio-ui/block-display-title";
 import {
   BracketCutIcon,
   CardShapeControls,
   ExportOptRow,
   TimeReadout,
-} from "./workbench-controls";
+} from "@pireel/studio-ui/workbench-controls";
 import {
   type AgentExportJob,
   type AgentToolCtx,
   runStudioTool as runAgentStudioTool,
   runExternalTool as runAgentExternalTool,
-} from "./agent-tool-runner";
-import { registerStudioDevCacheTools } from "./dev-cache-tools";
-import { SlipTwoUpOverlay } from "./slip-two-up-overlay";
+} from "@pireel/studio-ui/agent-tool-runner";
+import { registerStudioDevCacheTools } from "@pireel/studio-ui/dev-cache-tools";
+import { SlipTwoUpOverlay } from "@pireel/studio-ui/slip-two-up-overlay";
 
 // Console entry in all builds (pireelStudioDev.clearReviewCache / clearTtsCache): module scope on
 // purpose — available as soon as any workbench chunk loads, no component lifecycle involved.
 registerStudioDevCacheTools();
-import { useCaptionsOps } from "./use-captions-ops";
-import { stillClipFromImage, useClipInsert } from "./use-clip-insert";
-import { useElementOps } from "./use-element-ops";
-import { isBlockContentSyncable } from "./component-content-sync";
-import { useBoxDrag } from "./use-box-drag";
-import { useAgentContext } from "./use-agent-context";
-import { useScriptCut } from "./use-script-cut";
-import { useLiveProjectDocument } from "./use-live-project-document";
-import type { LiveProjectPersistenceMetadata } from "./live-project-document";
+import { useCaptionsOps } from "@pireel/studio-ui/use-captions-ops";
+import { stillClipFromImage, useClipInsert } from "@pireel/studio-ui/use-clip-insert";
+import { useElementOps } from "@pireel/studio-ui/use-element-ops";
+import { isBlockContentSyncable } from "@pireel/studio-ui/component-content-sync";
+import { useBoxDrag } from "@pireel/studio-ui/use-box-drag";
+import { useAgentContext } from "@pireel/studio-ui/use-agent-context";
+import { useScriptCut } from "@pireel/studio-ui/use-script-cut";
+import { useLiveProjectDocument } from "@pireel/studio-ui/use-live-project-document";
+import type { LiveProjectPersistenceMetadata } from "@pireel/studio-ui/live-project-document";
 import {
   nativeProjectSessionMetadata,
   nativeProjectSharedLocalAssets,
-} from "./native-project-session";
-import { ProjectOutputSwitcher } from "./project-output-switcher";
-import { previewStageGeometry } from "./preview-stage-geometry";
-import { useProjectOutputs } from "./use-project-outputs";
-import { useProjectOutputRuntime } from "./use-project-output-runtime";
+} from "@pireel/studio-ui/native-project-session";
+import { ProjectOutputSwitcher } from "@pireel/studio-ui/project-output-switcher";
+import { previewStageGeometry } from "@pireel/studio-ui/preview-stage-geometry";
+import { useProjectOutputs } from "@pireel/studio-ui/use-project-outputs";
+import { useProjectOutputRuntime } from "@pireel/studio-ui/use-project-output-runtime";
 import {
   videoPickSuccessNotices,
   type VideoPickOptions,
-} from "./video-pick-feedback";
+} from "@pireel/studio-ui/video-pick-feedback";
 import {
   defaultKitElementBox,
   fitEditableBoxIntoSafeArea,
   withEditableBlockGeometry,
-} from "./editable-block-geometry";
+} from "@pireel/studio-ui/editable-block-geometry";
 import { webFontStylesheetUrls } from '@pireel/studio-engine/font-library';
 import { blockPropsSchema, componentPropsCarry, componentPropsFontIds, componentPropsLiveMessage, parseComponentProps, resolveComponentProps } from '@pireel/studio-engine/component-props';
-import { nextPropsSlots } from './component-props-ui';
-import { ComponentPropsPanel } from './component-props-panel';
-import { ensureWebFontStylesheets } from './web-fonts';
+import { nextPropsSlots } from '@pireel/studio-ui/component-props-ui';
+import { ComponentPropsPanel } from '@pireel/studio-ui/component-props-panel';
+import { ensureWebFontStylesheets } from '@pireel/studio-ui/web-fonts';
 
 // The workbench calls semantic template helpers during its first render. Keep the
 // registration call in this concrete client entry as well as the engine barrel:
@@ -526,7 +525,7 @@ export function HyperframesWorkbench({
   useEffect(() => startLocalMediaCacheSession(), [projectId]);
   const [workflowOpen, setWorkflowOpen] = useState(!!initialWorkflowId);
   const [workflowEntryId] = useState(initialWorkflowId === "talking-head" ? "captions" : initialWorkflowId ?? "captions");
-  const WorkflowEntry = workflowEntryId === "captions" ? CaptionsEntry : WorkflowPanel;
+  const WorkflowEntry = shell.WorkflowEntry;
   const [workflowBusy, setWorkflowBusy] = useState(false);
   const workflowBusyRef = useRef(false);
   const workflowOpenRef = useRef(workflowOpen);
@@ -3102,7 +3101,7 @@ export function HyperframesWorkbench({
       } finally { frames.forEach(frame => URL.revokeObjectURL(frame.url)); }
     },
     analyze: async (body, signal) => {
-      const response = await fetch('/api/studio/brand-analyze', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal });
+      const response = await editorRequest('/api/studio/brand-analyze', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal });
       const data = await response.json().catch(() => ({})) as { text?: string };
       if (!response.ok || !data.text) throw new Error(response.status === 402 ? 'cover_insufficient_credits' : 'cover_generation_failed');
       return data.text;
@@ -3116,7 +3115,7 @@ export function HyperframesWorkbench({
         const frame = new File([frames[0].blob], 'cover-source.jpg', { type: 'image/jpeg' });
         const stored = await cloudBackupMedia(frame, await durableFileSig(frame), { signal });
         if (!stored) throw new Error('cover_source_unavailable');
-        const response = await fetch('/api/studio/media', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'get', key: stored.key }), signal });
+        const response = await editorRequest('/api/studio/media', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'get', key: stored.key }), signal });
         const data = await response.json().catch(() => ({})) as { url?: string };
         if (!response.ok || !data.url) throw new Error('cover_source_unavailable');
         return data.url;
@@ -3127,7 +3126,7 @@ export function HyperframesWorkbench({
     poll: pollCreation,
     recover: async runId => (await listStudioGens(projectId, 'image', 30)).find(job => job.coverRunId === runId) ?? null,
     defaultModel: async () => {
-      const response = await fetch('/api/models?kind=image');
+      const response = await editorRequest('/api/models?kind=image');
       const data = await response.json() as { models?: { id: string }[] };
       return pickImageModel(data.models ?? []);
     },
@@ -7351,7 +7350,7 @@ export function HyperframesWorkbench({
   const runStudioTool = (
     toolId: string,
     input: Record<string, unknown>,
-    opts?: { signal?: AbortSignal; surface?: "chat" | "bridge"; coverRequested?: boolean; skillId?: string; roughCut?: import("./first-pass").RoughCutExecution },
+    opts?: { signal?: AbortSignal; surface?: "chat" | "bridge"; coverRequested?: boolean; skillId?: string; roughCut?: import("@pireel/studio-ui/first-pass").RoughCutExecution },
   ) => (toolId === 'generate_cover' || toolId === 'run_v3' && input.name === 'generate_cover') ? (async () => {
     const args = (toolId === 'run_v3' ? input.args ?? input.input ?? {} : input) as Record<string, unknown>;
     try {
@@ -9111,7 +9110,7 @@ export function HyperframesWorkbench({
 
   return (
     <div ref={workspaceRowRef} data-studio-workspace className="studio-scope bg-bg relative flex h-full min-h-0 w-full flex-col gap-1.5 overflow-hidden p-1.5">
-      {workflowOpen && <WorkflowEntry
+      {workflowOpen && WorkflowEntry && <WorkflowEntry
         projectId={projectId}
         initialTemplateId={workflowEntryId}
         open={workflowOpen}

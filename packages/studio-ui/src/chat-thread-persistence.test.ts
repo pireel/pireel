@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createChatThreadPersistence } from './chat-thread-persistence';
-import { cachedChatThread } from './chat-thread-cache';
-import type { StoredThread } from './chat-thread-store';
+import { createChatThreadPersistence } from '@pireel/studio-ui/chat-thread-persistence';
+import { cachedChatThread } from '@pireel/studio-ui/chat-thread-cache';
+import type { StoredThread } from '@pireel/studio-ui/chat-thread-store';
 
 const thread = (updatedAt: number): StoredThread => ({ id: 't', title: 'Edit', updatedAt, messages: [] });
 beforeEach(() => {

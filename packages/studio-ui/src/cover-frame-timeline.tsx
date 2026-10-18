@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Minus, Plus } from 'lucide-react';
-import { fmtTick, rulerStep, RULER_H } from './timeline-utils';
-import { coverFrameAtTime, type CoverFrameStripData, type CoverSourceFrame } from './cover-frame-selection';
+import { fmtTick, rulerStep, RULER_H } from '@pireel/studio-ui/timeline-utils';
+import { coverFrameAtTime, type CoverFrameStripData, type CoverSourceFrame } from '@pireel/studio-ui/cover-frame-selection';
 
 /** Read-only Studio filmstrip: an independent playhead never seeks or edits the project. */
 export function CoverFrameTimeline({ strip, at, disabled, zh, onPreview, onCommit, onCancel }: {

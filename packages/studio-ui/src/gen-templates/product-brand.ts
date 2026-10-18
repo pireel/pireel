@@ -1,4 +1,4 @@
-import type { GenTemplate } from './types';
+import type { GenTemplate } from '@pireel/studio-ui/gen-templates/types';
 
 /** "Product & Brand" image templates (curated from the open-source leaderboard, preview images re-hosted on R2). */
 export const PRODUCT_BRAND_TEMPLATES: GenTemplate[] = [

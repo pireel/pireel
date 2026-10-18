@@ -1,6 +1,6 @@
 import { imageThumb } from '@pireel/ui/image-url';
-import { materializeRemoteMedia } from './remote-media';
-import type { LoadedCoverBrandReference } from './cover-scene';
+import { materializeRemoteMedia } from '@pireel/studio-ui/remote-media';
+import type { LoadedCoverBrandReference } from '@pireel/studio-ui/cover-scene';
 
 /** Pixels for visual planning; original image URLs for the one image-generation call. No model calls. */
 export async function loadCoverBrandReferences(keys: string[], signal?: AbortSignal): Promise<LoadedCoverBrandReference[]> {

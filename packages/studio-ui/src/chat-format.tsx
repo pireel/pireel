@@ -3,8 +3,8 @@
 /** Shared presentation helpers for the studio chat: ids, element pills, avatar, thinking dots. */
 
 import { BrandMark } from '@pireel/ui/brand-mark';
-import { t } from './i18n';
-import type { StudioElementRef } from './studio-chat';
+import { t } from '@pireel/studio-ui/i18n';
+import type { StudioElementRef } from '@pireel/studio-ui/studio-chat';
 
 let _mid = 0;
 export const mid = (p = 'm') => `${p}${++_mid}_${Math.random().toString(36).slice(2, 7)}`;

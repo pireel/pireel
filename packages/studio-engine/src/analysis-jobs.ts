@@ -6,12 +6,12 @@
  * proposal; only an explicit apply evaluates its operations against a cloned Composition.
  */
 
-import type { Composition } from './composition-core';
-import type { EditorDocumentV2 } from './editor-document';
-import { validateStudioProposalBudget } from './agent-execution-budget';
-import { validateComposition } from './editing-primitives';
-import { compReceiptDelta, type ReceiptDelta } from './receipt-delta';
-import { canonicalJson, hashSection } from './stable-json';
+import type { Composition } from '@pireel/studio-engine/composition-core';
+import type { EditorDocumentV2 } from '@pireel/studio-engine/editor-document';
+import { validateStudioProposalBudget } from '@pireel/studio-engine/agent-execution-budget';
+import { validateComposition } from '@pireel/studio-engine/editing-primitives';
+import { compReceiptDelta, type ReceiptDelta } from '@pireel/studio-engine/receipt-delta';
+import { canonicalJson, hashSection } from '@pireel/studio-engine/stable-json';
 
 export type AnalysisJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 export type EditProposalStatus = 'ready' | 'applied' | 'discarded';

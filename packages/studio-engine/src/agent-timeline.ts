@@ -1,14 +1,14 @@
-import { WHITEBOARD_AUTHORING_REFERENCES, type WhiteboardAuthoringReference } from './whiteboard-authoring';
+import { WHITEBOARD_AUTHORING_REFERENCES, type WhiteboardAuthoringReference } from '@pireel/studio-engine/whiteboard-authoring';
 /** Shared pure Agent timeline executor. Live UI, offline server, and MCP all call this contract. */
 
-import { AUDIO_DEFAULT_DB } from './audio-tracks';
-import { applyAudioDocumentEdits, ensureFreeAudioDocumentTrack } from './audio-document-edit';
-import { applyOverlayDocumentEdits } from './overlay-document-edit';
-import { insertOverlayDocumentClip } from './overlay-track-edit';
-import { titleBlock } from './block-factory';
-import type { Block } from './composition-core';
-import { WHITEBOARD_FONT_ID, WHITEBOARD_TEMPLATE_ID, checkWhiteboardDoc, whiteboardDurationSec } from './whiteboard-block';
-import { WHITEBOARD_DOC_SCHEMA } from './agent-surface-v3/whiteboard-doc-schema';
+import { AUDIO_DEFAULT_DB } from '@pireel/studio-engine/audio-tracks';
+import { applyAudioDocumentEdits, ensureFreeAudioDocumentTrack } from '@pireel/studio-engine/audio-document-edit';
+import { applyOverlayDocumentEdits } from '@pireel/studio-engine/overlay-document-edit';
+import { insertOverlayDocumentClip } from '@pireel/studio-engine/overlay-track-edit';
+import { titleBlock } from '@pireel/studio-engine/block-factory';
+import type { Block } from '@pireel/studio-engine/composition-core';
+import { WHITEBOARD_FONT_ID, WHITEBOARD_TEMPLATE_ID, checkWhiteboardDoc, whiteboardDurationSec } from '@pireel/studio-engine/whiteboard-block';
+import { WHITEBOARD_DOC_SCHEMA } from '@pireel/studio-engine/agent-surface-v3/whiteboard-doc-schema';
 import {
   applyEditorCommand,
   positiveDurationFrames,
@@ -28,18 +28,18 @@ import {
   type TimelineClip,
   type TimelineClipPlacement,
   normalizePeerNarrativeSources,
-} from './editor-document';
-import type { TranscriptSegment } from './project-dto';
-import { canvasSizeFollowingFirstVideo } from './editing-primitives';
-import { applyNarrationDocumentEdit } from './narration-document-edit';
-import { planNarrationCuts } from './editor-document/narration-cut-planner';
-import { firstNarrativeAssetId } from './editor-document/read-model';
-import { dominantTimelineSpeechTrack } from './editor-document/commands/managed-captions';
-import { documentWordRanges, documentWordRangesToTimeline, resolveDocumentWordIds } from './editor-document/transcript-address';
-import { type CutSeamEntry, finalizeCutSeams, tightenCutRanges } from './trim';
-import { runV3DocumentTool } from './agent-timeline-v3';
-import { placementPercentToBox } from './overlay-placement';
-import { isDisplayTextAnimationId, isDisplayTextFontId, isDisplayTextPresetId } from './display-text-presets';
+} from '@pireel/studio-engine/editor-document';
+import type { TranscriptSegment } from '@pireel/studio-engine/project-dto';
+import { canvasSizeFollowingFirstVideo } from '@pireel/studio-engine/editing-primitives';
+import { applyNarrationDocumentEdit } from '@pireel/studio-engine/narration-document-edit';
+import { planNarrationCuts } from '@pireel/studio-engine/editor-document/narration-cut-planner';
+import { firstNarrativeAssetId } from '@pireel/studio-engine/editor-document/read-model';
+import { dominantTimelineSpeechTrack } from '@pireel/studio-engine/editor-document/commands/managed-captions';
+import { documentWordRanges, documentWordRangesToTimeline, resolveDocumentWordIds } from '@pireel/studio-engine/editor-document/transcript-address';
+import { type CutSeamEntry, finalizeCutSeams, tightenCutRanges } from '@pireel/studio-engine/trim';
+import { runV3DocumentTool } from '@pireel/studio-engine/agent-timeline-v3';
+import { placementPercentToBox } from '@pireel/studio-engine/overlay-placement';
+import { isDisplayTextAnimationId, isDisplayTextFontId, isDisplayTextPresetId } from '@pireel/studio-engine/display-text-presets';
 
 export const AGENT_TIMELINE_TOOL_IDS = new Set([
   'register_media',

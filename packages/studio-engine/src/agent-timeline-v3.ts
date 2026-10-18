@@ -1,5 +1,5 @@
-import { isCaptionAnimation, CAPTION_ANIMATION_IDS, captionAnimationId } from './caption-animations';
-import { DEFAULT_TRANSITION_SEC, maxTransitionFrames, transitionSlotAt } from './editor-document/transitions';
+import { isCaptionAnimation, CAPTION_ANIMATION_IDS, captionAnimationId } from '@pireel/studio-engine/caption-animations';
+import { DEFAULT_TRANSITION_SEC, maxTransitionFrames, transitionSlotAt } from '@pireel/studio-engine/editor-document/transitions';
 /**
  * Agent surface v3 — document-level tools in their published shape.
  *
@@ -20,46 +20,46 @@ import {
   type EditorCommandReceipt,
   type EditorDocumentV2,
   type TimelineClip,
-} from './editor-document';
-import { CAPTION_PRESETS, getCaptionPreset } from './caption-presets';
-import { CUT_TRANSITION_EFFECTS, DIRECTIONAL_TRANSITIONS, MAX_TRANSITION_SEC, PLACE_ANCHORS, SHOT_TREATMENTS, ZOOM_PRESETS, ZOOM_SCALE_MAX, ZOOM_SCALE_MIN, applyBlockPlacement, blockId, blockKind, isSentenceCaption, placementFramingNotes, renderBlock, shotFilterCss, videoShotTimelineSpans, zoneOf, type Block, type Composition, type CutTransitionEffect, type ShotFilter, type TransitionDirection, type VideoShot } from './composition-core';
-import { applyCanvasDocumentEdit } from './canvas-document-edit';
-import { applyCaptionDocumentEdit } from './caption-document-edit';
-import { applyCompositionLayout, applyShotFramingInput, canvasSizeFollowingFirstVideo, canvasSizeFromInput } from './editing-primitives';
-import { applyLayoutDocumentEdit } from './layout-document-edit';
-import { applyMediaCropInput, applyMediaTransformInput } from './media-framing-edit';
-import { applyNarrationDocumentEdit } from './narration-document-edit';
-import { applyNarrationSplitCommands, normalizeNarrationSplitPoints } from './editor-document/commands/narration-split';
-import { applyOverlayDocumentEdits, removeOverlayDocumentClips } from './overlay-document-edit';
-import { applyVideoClipSettingsPatches, mediaVideoClipEntries } from './media-video-edit';
-import { duplicateOverlayDocumentClip, retimeOverlayDocumentClip } from './overlay-track-edit';
-import { editorDocumentRenderPlan } from './editor-document/render-plan';
-import { firstNarrativeAssetId, freeOverlayStackOrder, narrativeAtTimelineSecond, primaryNarrativeClips } from './editor-document/read-model';
-import { projectNarrativeShots, projectOverlayBlockById } from './editor-document/legacy-projection';
-import { documentCaptionsOn, documentCaptionStyle } from './editor-document/caption-state';
-import { clipCapabilityContext, clipFieldRefusal } from './agent-surface-v3/clip-properties';
-import { listDocumentAddressedWords, resolveDocumentWordIds } from './editor-document/transcript-address';
-import { patchNarrativeClips } from './editor-document/commands/narrative-patch';
-import { projectDocumentToComposition } from './project-document';
-import { STUDIO_AGENT_EXECUTION_LIMITS } from './agent-execution-budget';
-import { boundCaptionSourceAssetId } from './editor-document/commands/managed-captions';
-import { type AsrSegment, applyCaptionTranslations, type CaptionTranslationItem, clearCaptionTranslations, desegmentCues } from './build-blocks';
-import { applyCaptionTextEdits } from './caption-text-edit';
-import { resolveCaptionSentenceEdits } from './caption-sentence-edit';
-import { captionYPctForCanvas } from './delivery-safety';
-import { isDisplayTextFontId } from './display-text-presets';
-import { resolveWebFontReference, webFontCatalogHint } from './font-library';
-import { planScriptCaptionSegments, splitScriptLines } from './script-captions';
-import { narrationRowMarks } from './trim';
-import { applyWordDecorations, type WordDecorationPatch } from './word-decorations';
-import { phraseWordIndexes, rowWords } from './caption-highlights';
-import { joinWords } from './caption-fx';
-import { applyWordMasks, groupWordsByAsset, maskWordsSummary, parseMaskWordsInput } from './word-masks-tool';
-import { applyComponentValues, blockPropsReadback, componentSchemaOf, componentValuesView, componentPropertyInputError } from './component-schema';
-import { dataEditFields, setDataEditText } from './component-props';
-import { placeGraphicsV3, setConfirmListV3, setLookV3 } from './look-tools';
-import { isComponentPropertyValue } from './component-property-input';
-import type { TranscriptSegment } from './project-dto';
+} from '@pireel/studio-engine/editor-document';
+import { CAPTION_PRESETS, getCaptionPreset } from '@pireel/studio-engine/caption-presets';
+import { CUT_TRANSITION_EFFECTS, DIRECTIONAL_TRANSITIONS, MAX_TRANSITION_SEC, PLACE_ANCHORS, SHOT_TREATMENTS, ZOOM_PRESETS, ZOOM_SCALE_MAX, ZOOM_SCALE_MIN, applyBlockPlacement, blockId, blockKind, isSentenceCaption, placementFramingNotes, renderBlock, shotFilterCss, videoShotTimelineSpans, zoneOf, type Block, type Composition, type CutTransitionEffect, type ShotFilter, type TransitionDirection, type VideoShot } from '@pireel/studio-engine/composition-core';
+import { applyCanvasDocumentEdit } from '@pireel/studio-engine/canvas-document-edit';
+import { applyCaptionDocumentEdit } from '@pireel/studio-engine/caption-document-edit';
+import { applyCompositionLayout, applyShotFramingInput, canvasSizeFollowingFirstVideo, canvasSizeFromInput } from '@pireel/studio-engine/editing-primitives';
+import { applyLayoutDocumentEdit } from '@pireel/studio-engine/layout-document-edit';
+import { applyMediaCropInput, applyMediaTransformInput } from '@pireel/studio-engine/media-framing-edit';
+import { applyNarrationDocumentEdit } from '@pireel/studio-engine/narration-document-edit';
+import { applyNarrationSplitCommands, normalizeNarrationSplitPoints } from '@pireel/studio-engine/editor-document/commands/narration-split';
+import { applyOverlayDocumentEdits, removeOverlayDocumentClips } from '@pireel/studio-engine/overlay-document-edit';
+import { applyVideoClipSettingsPatches, mediaVideoClipEntries } from '@pireel/studio-engine/media-video-edit';
+import { duplicateOverlayDocumentClip, retimeOverlayDocumentClip } from '@pireel/studio-engine/overlay-track-edit';
+import { editorDocumentRenderPlan } from '@pireel/studio-engine/editor-document/render-plan';
+import { firstNarrativeAssetId, freeOverlayStackOrder, narrativeAtTimelineSecond, primaryNarrativeClips } from '@pireel/studio-engine/editor-document/read-model';
+import { projectNarrativeShots, projectOverlayBlockById } from '@pireel/studio-engine/editor-document/legacy-projection';
+import { documentCaptionsOn, documentCaptionStyle } from '@pireel/studio-engine/editor-document/caption-state';
+import { clipCapabilityContext, clipFieldRefusal } from '@pireel/studio-engine/agent-surface-v3/clip-properties';
+import { listDocumentAddressedWords, resolveDocumentWordIds } from '@pireel/studio-engine/editor-document/transcript-address';
+import { patchNarrativeClips } from '@pireel/studio-engine/editor-document/commands/narrative-patch';
+import { projectDocumentToComposition } from '@pireel/studio-engine/project-document';
+import { STUDIO_AGENT_EXECUTION_LIMITS } from '@pireel/studio-engine/agent-execution-budget';
+import { boundCaptionSourceAssetId } from '@pireel/studio-engine/editor-document/commands/managed-captions';
+import { type AsrSegment, applyCaptionTranslations, type CaptionTranslationItem, clearCaptionTranslations, desegmentCues } from '@pireel/studio-engine/build-blocks';
+import { applyCaptionTextEdits } from '@pireel/studio-engine/caption-text-edit';
+import { resolveCaptionSentenceEdits } from '@pireel/studio-engine/caption-sentence-edit';
+import { captionYPctForCanvas } from '@pireel/studio-engine/delivery-safety';
+import { isDisplayTextFontId } from '@pireel/studio-engine/display-text-presets';
+import { resolveWebFontReference, webFontCatalogHint } from '@pireel/studio-engine/font-library';
+import { planScriptCaptionSegments, splitScriptLines } from '@pireel/studio-engine/script-captions';
+import { narrationRowMarks } from '@pireel/studio-engine/trim';
+import { applyWordDecorations, type WordDecorationPatch } from '@pireel/studio-engine/word-decorations';
+import { phraseWordIndexes, rowWords } from '@pireel/studio-engine/caption-highlights';
+import { joinWords } from '@pireel/studio-engine/caption-fx';
+import { applyWordMasks, groupWordsByAsset, maskWordsSummary, parseMaskWordsInput } from '@pireel/studio-engine/word-masks-tool';
+import { applyComponentValues, blockPropsReadback, componentSchemaOf, componentValuesView, componentPropertyInputError } from '@pireel/studio-engine/component-schema';
+import { dataEditFields, setDataEditText } from '@pireel/studio-engine/component-props';
+import { placeGraphicsV3, setConfirmListV3, setLookV3 } from '@pireel/studio-engine/look-tools';
+import { isComponentPropertyValue } from '@pireel/studio-engine/component-property-input';
+import type { TranscriptSegment } from '@pireel/studio-engine/project-dto';
 import {
   type AgentTimelineOutcome,
   type Input,
@@ -79,7 +79,7 @@ import {
   swapClipMedia,
   syncClips,
   updateTexts,
-} from './agent-timeline';
+} from '@pireel/studio-engine/agent-timeline';
 
 /* ================================ shared ================================ */
 

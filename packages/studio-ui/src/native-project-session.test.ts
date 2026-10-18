@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { emptyProjectDocument } from '@pireel/studio-engine/project-document';
 import type { StudioProjectContext } from '@pireel/studio-engine/project-dto';
-import { nativeProjectSharedLocalAssets } from './native-project-session';
+import { nativeProjectSharedLocalAssets } from '@pireel/studio-ui/native-project-session';
 
 const sharedAsset = {
   id: 'shared-video',

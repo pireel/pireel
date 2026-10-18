@@ -12,8 +12,8 @@
  *   pireelStudioDev.clearTtsCache()     — TTS receipts, next run re-synthesizes
  */
 
-import { kvDeleteByPrefix } from './idb-kv';
-import { remoteDerivedClear, type DerivedCacheKind } from './derived-cache-remote';
+import { kvDeleteByPrefix } from '@pireel/studio-ui/idb-kv';
+import { remoteDerivedClear, type DerivedCacheKind } from '@pireel/studio-ui/derived-cache-remote';
 
 const LOCAL_PREFIX: Record<DerivedCacheKind, string> = {
   'visual-review': 'review:',

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { emptyEditorDocumentV2 } from './editor-document';
-import type { AudioTimelineClip, EditorDocumentV2, GraphicTimelineClip, MediaTimelineClip } from './editor-document/types';
-import { auditSceneVisualStructure, planSceneVisualReview, sceneAtSecond, sceneVisualRepairScope } from './scene-visual-qa';
-import { directorPlanFromDocument, withDirectorPlanInSemantics } from './director-plan-artifact';
+import { emptyEditorDocumentV2 } from '@pireel/studio-engine/editor-document';
+import type { AudioTimelineClip, EditorDocumentV2, GraphicTimelineClip, MediaTimelineClip } from '@pireel/studio-engine/editor-document/types';
+import { auditSceneVisualStructure, planSceneVisualReview, sceneAtSecond, sceneVisualRepairScope } from '@pireel/studio-engine/scene-visual-qa';
+import { directorPlanFromDocument, withDirectorPlanInSemantics } from '@pireel/studio-engine/director-plan-artifact';
 
 const treatment = {
   treatmentId: 'authored-scene', visualAnchor: 'The scene subject.',

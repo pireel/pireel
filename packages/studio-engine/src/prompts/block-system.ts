@@ -1,4 +1,4 @@
-import { COMPONENT_COORDINATE_CONTRACT } from '../component-authoring-contract';
+import { COMPONENT_COORDINATE_CONTRACT } from '@pireel/studio-engine/component-authoring-contract';
 /**
  * The free-form path's body: design constraints, layout archetypes, chart recipes, SELF-CHECK.
  *

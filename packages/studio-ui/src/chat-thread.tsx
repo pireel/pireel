@@ -1,22 +1,23 @@
+import { editorRequest } from '@pireel/studio-ui/host-request';
 "use client";
-import { alreadyStarted, startWithRoughCut, sceneAgentState } from './agent-startup';
+import { alreadyStarted, startWithRoughCut, sceneAgentState } from '@pireel/studio-ui/agent-startup';
 
-import { ChatCoverEntry } from './chat-cover-controls';
-import { directorPlanToolBlock, saveEditingDirectorPlan, withDirectorInstruction } from './editing-director-plan';
+import { ChatCoverEntry } from '@pireel/studio-ui/chat-cover-controls';
+import { directorPlanToolBlock, saveEditingDirectorPlan, withDirectorInstruction } from '@pireel/studio-ui/editing-director-plan';
 import { DEFAULT_STUDIO_AGENT_MODEL, studioAgentModelId, type StudioAgentModelId } from '@pireel/studio-engine/agent-models';
 
 import { editingSkillsHint } from '@pireel/studio-engine/editing-skills';
 import { resolveEditingRunConfig } from '@pireel/studio-engine/editing-run-config';
-import { EditingTaskCard } from './editing-task-card';
-import { displayEditingTask, hasCurrentDirectorPreview, isInteractiveEditingTool, messagesForTask, unresolvedTaskFailure } from './editing-task-progress';
-import { needsEditingReview, reviewEditingTask } from './editing-task-review';
-import { ROUGH_CUT_TOOL, messageTurnCredits, toolNameOfPart, type RoughCutReplyMeta } from './first-pass-card';
-import { NextSteps, splitNextSteps } from './chat-next-steps';
-import { FINE_CUT_SKILLS, ONE_CLICK_EDIT_HINT, type FineCutSkill } from './first-pass';
-import { latestTask, taskOf, patchTask, resumeTaskHint, resumeEditingTask, unfinishedRoughCut, withTaskUsage, type ChatTask } from "./chat-task";
-import { cachedChatThread } from "./chat-thread-cache";
-import { recordTaskUsage, subscribeTaskUsage } from "./chat-task-usage";
-import { collapsedComponentRetryIndexes, studioToolFailureText } from './chat-component-retries';
+import { EditingTaskCard } from '@pireel/studio-ui/editing-task-card';
+import { displayEditingTask, hasCurrentDirectorPreview, isInteractiveEditingTool, messagesForTask, unresolvedTaskFailure } from '@pireel/studio-ui/editing-task-progress';
+import { needsEditingReview, reviewEditingTask } from '@pireel/studio-ui/editing-task-review';
+import { ROUGH_CUT_TOOL, messageTurnCredits, toolNameOfPart, type RoughCutReplyMeta } from '@pireel/studio-ui/first-pass-card';
+import { NextSteps, splitNextSteps } from '@pireel/studio-ui/chat-next-steps';
+import { FINE_CUT_SKILLS, firstPassStartupHint, type FineCutSkill } from '@pireel/studio-ui/first-pass';
+import { latestTask, taskOf, patchTask, resumeTaskHint, resumeEditingTask, unfinishedRoughCut, withTaskUsage, type ChatTask } from "@pireel/studio-ui/chat-task";
+import { cachedChatThread } from "@pireel/studio-ui/chat-thread-cache";
+import { recordTaskUsage, subscribeTaskUsage } from "@pireel/studio-ui/chat-task-usage";
+import { collapsedComponentRetryIndexes, studioToolFailureText } from '@pireel/studio-ui/chat-component-retries';
 
 /** Single-thread studio chat (useChat): stream rendering, client-side tool execution, persistence snapshots. */
 
@@ -31,7 +32,7 @@ import {
 import { ChevronRight, Info, X } from "lucide-react";
 import { ConfirmDialog } from "@pireel/ui/confirm-dialog";
 import { brandSkillOf, skillTakesBrand } from "@pireel/studio-engine/brand-playbook";
-import { describeGenerationIntentLine } from "./chat-generation-intent";
+import { describeGenerationIntentLine } from "@pireel/studio-ui/chat-generation-intent";
 import { useChat } from "@ai-sdk/react";
 import {
   DefaultChatTransport,
@@ -67,14 +68,14 @@ import {
   PiAvatar,
   ThinkingDots,
   renderTextWithElementPills,
-} from "./chat-format";
+} from "@pireel/studio-ui/chat-format";
 import {
   renderToolPart,
   renderToolPartGroup,
   toolStatus,
   type ToolPartLike,
-} from "./chat-tool-parts";
-import { Composer, type ComposerHandle } from "./chat-composer";
+} from "@pireel/studio-ui/chat-tool-parts";
+import { Composer, type ComposerHandle } from "@pireel/studio-ui/chat-composer";
 import {
   assistantEditorialCapacityShortfall,
   assistantHasOpenOrInterruptedInteraction,
@@ -91,20 +92,20 @@ import {
   recordStudioTurnToolResult,
   shouldBlockStudioTurnUndo,
   stampLatestAssistantWorkDuration,
-} from "./chat-thread-store";
-import { studioLocale, t } from "./i18n";
-import type { StudioScenarioSkillOption } from "./shell-context";
-import { localAssetMentionContext } from "./chat-local-asset-mention";
-import { inspectTimelineFrameEvidence } from "./chat-timeline-frame-evidence";
-import { DeferredActivation } from "./deferred-activation";
-import { studioToolResultStopsAgentTurn } from "./agent-tool-runner";
+} from "@pireel/studio-ui/chat-thread-store";
+import { studioLocale, t } from "@pireel/studio-ui/i18n";
+import type { StudioScenarioSkillOption } from "@pireel/studio-ui/shell-context";
+import { localAssetMentionContext } from "@pireel/studio-ui/chat-local-asset-mention";
+import { inspectTimelineFrameEvidence } from "@pireel/studio-ui/chat-timeline-frame-evidence";
+import { DeferredActivation } from "@pireel/studio-ui/deferred-activation";
+import { studioToolResultStopsAgentTurn } from "@pireel/studio-ui/agent-tool-runner";
 import type {
   ProgressHandle,
   StudioChatDraftPart,
   StudioChatHandle,
   StudioChatProps,
   StudioElementRef,
-} from "./studio-chat";
+} from "@pireel/studio-ui/studio-chat";
 import type { LocalAssetIndexEntry } from "@pireel/studio-engine/project-dto";
 
 const USER_BUBBLE_CLASS = "group-[.is-user]:bg-secondary/35";
@@ -242,6 +243,7 @@ export function ChatThread({
   const transport = useMemo(
     () =>
       new DefaultChatTransport({
+        fetch: editorRequest,
         api: studioProviders().chatEndpoint ?? "/api/studio/chat",
         body: () => ({
           locale: studioLocale().toLowerCase().startsWith("zh") ? "zh" : "en",
@@ -405,12 +407,12 @@ export function ChatThread({
           ...(id === ROUGH_CUT_TOOL && task ? { roughCut: {
             resume: task.roughCut?.report,
             ...(task.mode === 'one-click' ? { skills: task.skills, config: task.config } : {}),
-            onProgress: (report: import('./first-pass').FirstPassReport) => updateTask(task.id, current => {
+            onProgress: (report: import('@pireel/studio-ui/first-pass').FirstPassReport) => updateTask(task.id, current => {
               if (current.roughCut && current.roughCut.callId !== toolCall.toolCallId && current.roughCut.callId !== task.roughCut?.callId) return current;
               const source = localAssetIndex?.find(asset => asset.assetId === report.sourceAssetId);
               return { ...current, roughCut: { callId: toolCall.toolCallId, report }, ...(source ? { source: { name: source.label, durationSec: source.durationSec ?? undefined, posterKey: source.posterKey } } : {}) };
             }),
-            onLateUsage: (usage: import('@pireel/studio-engine/workflow').WorkflowUsage) => {
+            onLateUsage: (usage: import('@pireel/studio-engine/usage').WorkflowUsage) => {
               if (!projectId) return;
               const saved = recordTaskUsage({ projectId, threadId, taskId: task.id, callId: toolCall.toolCallId, usage });
               if (saved) onSnapshot(saved.messages, saved.skillId ?? skillRef.current);
@@ -811,7 +813,7 @@ export function ChatThread({
     // A reload after saving the first message must not start it a second time.
     const roughCut = startWithRoughCut(skillRef.current);
     if (alreadyStarted(messagesRef.current, startPrompt, roughCut)) { onStartPromptSent?.(); return; }
-    void run(startPrompt, roughCut ? { startTool: ROUGH_CUT_TOOL, hint: ONE_CLICK_EDIT_HINT } : { wholeWhiteboard: skillRef.current === 'whiteboard-explainer' }).then(sent => {
+    void run(startPrompt, roughCut ? { startTool: ROUGH_CUT_TOOL, hint: firstPassStartupHint() } : { wholeWhiteboard: skillRef.current === 'whiteboard-explainer' }).then(sent => {
       if (sent) onStartPromptSent?.(); else startSentRef.current = false;
     });
   }, [startPrompt, status, run, onStartPromptSent]);

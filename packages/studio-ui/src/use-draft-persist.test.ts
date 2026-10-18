@@ -1,3 +1,11 @@
+import { beforeEach as configureHttpHost, afterEach as restoreHttpHost } from 'vitest';
+import { studioProviders, setStudioProviders } from '@pireel/studio-engine/providers';
+let previousHttpHost: ReturnType<typeof studioProviders>;
+configureHttpHost(() => {
+  previousHttpHost = studioProviders();
+  setStudioProviders({ ...previousHttpHost, request: (input, init) => init === undefined ? fetch(input) : fetch(input, init) });
+});
+restoreHttpHost(() => setStudioProviders(previousHttpHost));
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyComposition, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import { sanitizeProjectContext } from '@pireel/studio-engine/project-dto';
@@ -9,7 +17,7 @@ import {
   serverSaveProject,
   serverLoadProject,
   loadDraft,
-} from './use-draft-persist';
+} from '@pireel/studio-ui/use-draft-persist';
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>();

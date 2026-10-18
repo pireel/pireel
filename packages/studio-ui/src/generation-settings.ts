@@ -1,6 +1,7 @@
+import { editorRequest } from '@pireel/studio-ui/host-request';
 import { pickImageModel, imageGenerationParams } from '@pireel/studio-engine/image-generation-settings';
 import { useEffect, useState } from 'react';
-import { audioKindFor, type GenerationIntent, type GenerationParams } from './chat-generation-intent';
+import { audioKindFor, type GenerationIntent, type GenerationParams } from '@pireel/studio-ui/chat-generation-intent';
 
 /**
  * Generation settings shared by every surface that starts a generation (chat composer, the
@@ -37,7 +38,7 @@ export function useGenerationModels(intent: GenerationIntent | null, onLoaded?: 
       return;
     }
     let cancelled = false;
-    void fetch(`/api/models?kind=${intent}`)
+    void editorRequest(`/api/models?kind=${intent}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((j: { models?: Array<{ id?: string; name?: string }> } | null) => {
         if (cancelled || !Array.isArray(j?.models)) return;

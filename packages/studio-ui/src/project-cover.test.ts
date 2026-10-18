@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { compositionToEditorDocument, emptyComposition, parseEditorDocumentV2 } from '@pireel/studio-engine/composition';
-import { ProjectSync } from './project-sync';
+import { ProjectSync } from '@pireel/studio-ui/project-sync';
 import { canonicalJson, hashSection } from '@pireel/studio-engine/stable-json';
-import { applyProjectCover, persistProjectCover, projectCoverFromDocument, withProjectCover, ProjectCoverWriteQueue } from './project-cover';
+import { applyProjectCover, persistProjectCover, projectCoverFromDocument, withProjectCover, ProjectCoverWriteQueue } from '@pireel/studio-ui/project-cover';
 const document = () => compositionToEditorDocument({ projectId: 'p', videoSig: 'sig', composition: emptyComposition() }).document;
 const cover = { url: 'https://cdn.example/cover.png', key: 'uploads/cover.png', label: 'Current video cover' };
 

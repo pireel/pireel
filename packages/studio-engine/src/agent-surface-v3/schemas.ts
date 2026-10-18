@@ -1,7 +1,7 @@
-import { WHITEBOARD_MEDIA_LIMITS } from '../whiteboard-workflow';
-import { CAPTION_ANIMATIONS, CAPTION_ANIMATION_IDS } from '../caption-animations';
-import { DEFAULT_TRANSITION_SEC } from '../editor-document/transitions';
-import { COMPONENT_PROPERTY_MAX_ROWS, COMPONENT_PROPERTY_MAX_FIELDS, COMPONENT_PROPERTY_MAX_TEXT } from '../component-property-input';
+import { WHITEBOARD_MEDIA_LIMITS } from '@pireel/studio-engine/whiteboard-workflow';
+import { CAPTION_ANIMATIONS, CAPTION_ANIMATION_IDS } from '@pireel/studio-engine/caption-animations';
+import { DEFAULT_TRANSITION_SEC } from '@pireel/studio-engine/editor-document/transitions';
+import { COMPONENT_PROPERTY_MAX_ROWS, COMPONENT_PROPERTY_MAX_FIELDS, COMPONENT_PROPERTY_MAX_TEXT } from '@pireel/studio-engine/component-property-input';
 /**
  * Agent surface v3 — tool descriptions and input schemas.
  *
@@ -10,12 +10,12 @@ import { COMPONENT_PROPERTY_MAX_ROWS, COMPONENT_PROPERTY_MAX_FIELDS, COMPONENT_P
  * engine constant so the schema cannot drift from what the editor accepts (`schemas.test.ts` proves it).
  */
 
-import { CAPTION_LOOK_HINTS, CAPTION_PRESETS } from '../caption-presets';
-import { CUT_TRANSITION_EFFECTS, MAX_TRANSITION_SEC, PLACE_ANCHORS, SHOT_TREATMENTS, ZOOM_PRESETS, ZOOM_SCALE_MAX, ZOOM_SCALE_MIN } from '../composition-core';
-import { DISPLAY_TEXT_ANIMATION_IDS, DISPLAY_TEXT_PRESETS } from '../display-text-presets';
-import { MG_BAKE_ROUTE, MG_RUNTIME_CAPABILITIES } from '../prompts/block-system';
-import { CLIP_PROPERTIES, CLIP_PROPERTY_REDIRECTS, clipPropertySummary, type ClipPropertyKey } from './clip-properties';
-import { WHITEBOARD_DOC_SCHEMA } from './whiteboard-doc-schema';
+import { CAPTION_LOOK_HINTS, CAPTION_PRESETS } from '@pireel/studio-engine/caption-presets';
+import { CUT_TRANSITION_EFFECTS, MAX_TRANSITION_SEC, PLACE_ANCHORS, SHOT_TREATMENTS, ZOOM_PRESETS, ZOOM_SCALE_MAX, ZOOM_SCALE_MIN } from '@pireel/studio-engine/composition-core';
+import { DISPLAY_TEXT_ANIMATION_IDS, DISPLAY_TEXT_PRESETS } from '@pireel/studio-engine/display-text-presets';
+import { MG_BAKE_ROUTE, MG_RUNTIME_CAPABILITIES } from '@pireel/studio-engine/prompts/block-system';
+import { CLIP_PROPERTIES, CLIP_PROPERTY_REDIRECTS, clipPropertySummary, type ClipPropertyKey } from '@pireel/studio-engine/agent-surface-v3/clip-properties';
+import { WHITEBOARD_DOC_SCHEMA } from '@pireel/studio-engine/agent-surface-v3/whiteboard-doc-schema';
 
 export const CHARGE_MARKER = "[CHARGES the user's Pireel account.]";
 

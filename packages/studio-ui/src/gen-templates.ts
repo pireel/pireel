@@ -17,21 +17,21 @@
  * output → show two tabs ("Mine / Templates") at the top.
  */
 
-import type { GenTemplate } from './gen-templates/types';
-import { POSTER_TEMPLATES } from './gen-templates/poster';
-import { UI_GRAPHIC_TEMPLATES } from './gen-templates/ui-graphic';
-import { ILLUSTRATION_3D_TEMPLATES } from './gen-templates/illustration-3d';
-import { PRODUCT_BRAND_TEMPLATES } from './gen-templates/product-brand';
-import { PHOTOGRAPHY_TEMPLATES } from './gen-templates/photography';
-import { FOOD_DRINK_TEMPLATES } from './gen-templates/food-drink';
-import { VIDEO_TEMPLATES } from './gen-templates/video';
-import { ELEMENT_TEMPLATES } from './gen-templates/element';
+import type { GenTemplate } from '@pireel/studio-ui/gen-templates/types';
+import { POSTER_TEMPLATES } from '@pireel/studio-ui/gen-templates/poster';
+import { UI_GRAPHIC_TEMPLATES } from '@pireel/studio-ui/gen-templates/ui-graphic';
+import { ILLUSTRATION_3D_TEMPLATES } from '@pireel/studio-ui/gen-templates/illustration-3d';
+import { PRODUCT_BRAND_TEMPLATES } from '@pireel/studio-ui/gen-templates/product-brand';
+import { PHOTOGRAPHY_TEMPLATES } from '@pireel/studio-ui/gen-templates/photography';
+import { FOOD_DRINK_TEMPLATES } from '@pireel/studio-ui/gen-templates/food-drink';
+import { VIDEO_TEMPLATES } from '@pireel/studio-ui/gen-templates/video';
+import { ELEMENT_TEMPLATES } from '@pireel/studio-ui/gen-templates/element';
 
-export type { GenTemplate } from './gen-templates/types';
-export { localizedTemplatePrompt } from './gen-templates/types';
+export type { GenTemplate } from '@pireel/studio-ui/gen-templates/types';
+export { localizedTemplatePrompt } from '@pireel/studio-ui/gen-templates/types';
 export { ELEMENT_TEMPLATES, VIDEO_TEMPLATES };
-export { artDirectedTemplateElement, artDirectedTemplateIds } from './gen-templates/element-presets';
-export { ART_DIRECTED_PRESET_VERSION } from './gen-templates/element-presets/shared';
+export { artDirectedTemplateElement, artDirectedTemplateIds } from '@pireel/studio-ui/gen-templates/element-presets';
+export { ART_DIRECTED_PRESET_VERSION } from '@pireel/studio-ui/gen-templates/element-presets/shared';
 
 export const TEMPLATE_CATEGORY_ZH: Record<string, string> = {
   'Poster Design': 'chatGen.poster',

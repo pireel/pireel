@@ -1,3 +1,5 @@
+@import './editor-theme.css';
+
 /* Studio workbench styles that live outside Tailwind utilities.
  * Import from the shell's Tailwind entry, after '@pireel/ui/theme.css'. */
 

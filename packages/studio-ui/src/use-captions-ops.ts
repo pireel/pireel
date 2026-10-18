@@ -30,17 +30,17 @@ import { firstNarrativeAssetId } from '@pireel/studio-engine/editor-document';
 import { joinWords, wordsFromText } from '@pireel/studio-engine/caption-fx';
 import { mappedCaptionSegs as relayMappedCaptionSegs, relayCaptionLayer as relayCaptionLayerPure } from '@pireel/studio-engine/captions-relay';
 import { studioProviders } from '@pireel/studio-engine/providers';
-import { t, tEnglish } from './i18n';
-import { editorErrorMessage } from './editor-error';
-import type { CaptionLineRow } from './captions-panel';
-import { inspectCaptionDocument } from './caption-document-state';
-import { emphasizeCaptionDocument } from './caption-emphasis-operation';
-import { captionTranscriptsByAsset, captionTranscriptsFromDocument, captionTranslationSources } from './caption-transcript-bridge';
-import { sentenceTranslationUnits } from './caption-translation-transaction';
-import { deriveCaptionLineRows } from './caption-line-rows';
-import { captionTranslationKey, captionTranslationOps, translateCaptionUnits } from './caption-translation-operation';
+import { t, tEnglish } from '@pireel/studio-ui/i18n';
+import { editorErrorMessage } from '@pireel/studio-ui/editor-error';
+import type { CaptionLineRow } from '@pireel/studio-ui/captions-panel';
+import { inspectCaptionDocument } from '@pireel/studio-ui/caption-document-state';
+import { emphasizeCaptionDocument } from '@pireel/studio-ui/caption-emphasis-operation';
+import { captionTranscriptsByAsset, captionTranscriptsFromDocument, captionTranslationSources } from '@pireel/studio-ui/caption-transcript-bridge';
+import { sentenceTranslationUnits } from '@pireel/studio-ui/caption-translation-transaction';
+import { deriveCaptionLineRows } from '@pireel/studio-ui/caption-line-rows';
+import { captionTranslationKey, captionTranslationOps, translateCaptionUnits } from '@pireel/studio-ui/caption-translation-operation';
 import { transcriptInputsFor, type DocumentOpInputs } from '@pireel/studio-engine/document-transaction';
-import { restoreOp, type DocumentCommitter } from './document-commit';
+import { restoreOp, type DocumentCommitter } from '@pireel/studio-ui/document-commit';
 
 /** Everything the caption ops borrow from the workbench (values are per-render, refs/handlers are stable-by-ref). */
 export interface CaptionsOpsDeps {

@@ -4,7 +4,7 @@ import {
   localAssetMentionContext,
   localAssetMentionId,
   localAssetMentionRef,
-} from './chat-local-asset-mention';
+} from '@pireel/studio-ui/chat-local-asset-mention';
 
 describe('Studio local-asset @ mentions', () => {
   it('ignores a sig-only legacy draft entry instead of inventing an id for it', () => {

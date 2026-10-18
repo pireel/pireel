@@ -1,10 +1,11 @@
-import { brandFeaturePrompt, upgradeBrandFeatureSettings, BRAND_PROMPT_FEATURES, validateBrandFeatureSettings, type BrandFeatureSettings } from './brand-feature-settings';
-import { hashSection } from './stable-json';
-import { BRAND_PREFERENCE_IDS, brandPreferences, upgradeBrandPreferences, type BrandPreferences } from './brand-preferences';
-import { naturalTechniqueText } from './brand-prose';
-import type { CaptionStyle } from './composition-core';
-import { BASE_CAPTION_FONT_PX } from './caption-presets';
-import { BRAND_EDITING_SKILL_IDS } from './editing-skills';
+import './editor-product-commands';
+import { brandFeaturePrompt, upgradeBrandFeatureSettings, BRAND_PROMPT_FEATURES, validateBrandFeatureSettings, type BrandFeatureSettings } from '@pireel/studio-engine/brand-feature-settings';
+import { hashSection } from '@pireel/studio-engine/stable-json';
+import { BRAND_PREFERENCE_IDS, brandPreferences, upgradeBrandPreferences, type BrandPreferences } from '@pireel/studio-engine/brand-preferences';
+import { naturalTechniqueText } from '@pireel/studio-engine/brand-prose';
+import type { CaptionStyle } from '@pireel/studio-engine/composition-core';
+import { BASE_CAPTION_FONT_PX } from '@pireel/studio-engine/caption-presets';
+import { BRAND_EDITING_SKILL_IDS } from '@pireel/studio-engine/editing-skills';
 
 /** Fixed brand configuration and editing switches.
  * Legacy prose fields are accepted for storage compatibility, but ignored by new editing consumers.

@@ -1,4 +1,4 @@
-import type { ToolPartLike } from './chat-tool-parts';
+import type { ToolPartLike } from '@pireel/studio-ui/chat-tool-parts';
 
 /** Retain the diagnostics in model/history receipts; do not drop data.issues at the chat boundary. */
 export function studioToolFailureText(error: string, data?: unknown): string {

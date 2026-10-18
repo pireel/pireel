@@ -21,8 +21,8 @@ import type { StudioAgentModelId } from '@pireel/studio-engine/agent-models';
 
 import type { PlaybookSnapshot } from "@pireel/studio-engine/brand-playbook";
 import type { HandoffItem } from '@pireel/studio-engine/editor-document/types';
-import type { ConfirmAnswer } from './confirm-list';
-import type { GenerationIntent } from "./chat-generation-intent";
+import type { ConfirmAnswer } from '@pireel/studio-ui/confirm-list';
+import type { GenerationIntent } from "@pireel/studio-ui/chat-generation-intent";
 import {
   forwardRef,
   memo,
@@ -42,22 +42,22 @@ import {
   STUDIO_AUTO_SKILL_ID,
   type StudioScenarioSkillId,
 } from "@pireel/studio-engine/scenario-skills";
-import { mid } from "./chat-format";
-import { ChatThread } from "./chat-thread";
+import { mid } from "@pireel/studio-ui/chat-format";
+import { ChatThread } from "@pireel/studio-ui/chat-thread";
 import {
   type StoredThread,
   firstUserText,
   normalizeStoredThreads,
   sanitizeRestored,
-} from "./chat-thread-store";
-import { t } from "./i18n";
+} from "@pireel/studio-ui/chat-thread-store";
+import { t } from "@pireel/studio-ui/i18n";
 import {
   useStudioShell,
   type StudioScenarioSkillOption,
-} from "./shell-context";
-import type { StudioElementRef } from "./chat-local-asset-mention";
+} from "@pireel/studio-ui/shell-context";
+import type { StudioElementRef } from "@pireel/studio-ui/chat-local-asset-mention";
 
-export type { StudioElementRef } from "./chat-local-asset-mention";
+export type { StudioElementRef } from "@pireel/studio-ui/chat-local-asset-mention";
 
 /* ============================ Public types ============================ */
 
@@ -117,10 +117,10 @@ export interface StudioChatHandle {
 }
 
 export interface StudioChatProps {
-  coverScene?: import('./cover-scene').CoverScene | null;
+  coverScene?: import('@pireel/studio-ui/cover-scene').CoverScene | null;
   onOpenCover?: () => void;
-  projectCover?: import('./project-cover').ProjectCover | null;
-  onApplyCover?: (cover: import('./project-cover').ProjectCover) => Promise<void>;
+  projectCover?: import('@pireel/studio-ui/project-cover').ProjectCover | null;
+  onApplyCover?: (cover: import('@pireel/studio-ui/project-cover').ProjectCover) => Promise<void>;
   coverApplying?: boolean;
   /** Billing attribution: which project this chat edits (rides every charged request). */
   projectId?: string;
@@ -130,7 +130,7 @@ export interface StudioChatProps {
   runTool: (
     toolId: string,
     input: Record<string, unknown>,
-    opts?: { signal?: AbortSignal; surface?: "chat" | "bridge"; coverRequested?: boolean; skillId?: string; roughCut?: import("./first-pass").RoughCutExecution },
+    opts?: { signal?: AbortSignal; surface?: "chat" | "bridge"; coverRequested?: boolean; skillId?: string; roughCut?: import("@pireel/studio-ui/first-pass").RoughCutExecution },
   ) => Promise<StudioToolResult>;
   /** Request-body fields read at send time (session-level frame / skill selection). */
   getBody: () => Record<string, unknown>;
@@ -154,7 +154,7 @@ export interface StudioChatProps {
   onStartPromptSent?: () => void;
   /** The project's clips per fine-cut skill now: a one-click edit's card counts what the agent adds
    *  after the rough cut. */
-  fineCutClips?: () => import("./first-pass").EditingEvidence;
+  fineCutClips?: () => import("@pireel/studio-ui/first-pass").EditingEvidence;
   /** The project has been edited (cut, captioned, anything placed): its brand is fixed and the editing
    *  skills become tag shortcuts for a message instead of switches. */
   projectEdited?: boolean;
@@ -178,7 +178,7 @@ export interface StudioChatProps {
   onClose?: () => void;
   /** Streaming/tool-running state of the active thread (workbench pauses output switching while true). */
   onBusyChange?: (busy: boolean) => void;
-  onSceneStateChange?: (state: import('./agent-startup').SceneAgentState) => void;
+  onSceneStateChange?: (state: import('@pireel/studio-ui/agent-startup').SceneAgentState) => void;
   /** Generation receipts: insert an output into the timeline at the playhead / mount audio. */
   onInsertMedia?: (asset: { type: 'image' | 'video'; url: string; label?: string }) => void;
   onUseAudio?: (url: string, label?: string) => void;

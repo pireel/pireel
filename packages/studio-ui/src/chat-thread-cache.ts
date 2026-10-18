@@ -1,5 +1,5 @@
-import { taskOf } from './chat-task';
-import type { StoredThread } from './chat-thread-store';
+import { taskOf } from '@pireel/studio-ui/chat-task';
+import type { StoredThread } from '@pireel/studio-ui/chat-thread-store';
 
 const PREFIX = 'studio:chat-checkpoints:';
 const key = (projectId: string) => `${PREFIX}${projectId}`;

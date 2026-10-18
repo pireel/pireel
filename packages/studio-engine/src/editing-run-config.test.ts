@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { emptyPlaybook, playbookSnapshot } from './brand-playbook';
-import { resolveEditingRunConfig } from './editing-run-config';
+import { emptyPlaybook, playbookSnapshot } from '@pireel/studio-engine/brand-playbook';
+import { resolveEditingRunConfig } from '@pireel/studio-engine/editing-run-config';
 
 describe('editing task configuration', () => {
   it('uses the same execution steps with or without a brand for equivalent choices', () => {

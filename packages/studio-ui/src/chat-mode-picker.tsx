@@ -10,8 +10,8 @@
 import { useRef, type RefObject } from 'react';
 import { Check, Image as ImageIcon, Music, Shapes, Sparkles, Video } from 'lucide-react';
 import { TriggerPopover, type TriggerPopoverHandle } from '@pireel/ui/trigger-popover';
-import { t } from './i18n';
-import type { ChatMode } from './chat-generation-intent';
+import { t } from '@pireel/studio-ui/i18n';
+import type { ChatMode } from '@pireel/studio-ui/chat-generation-intent';
 
 interface ModeOption {
   id: ChatMode;

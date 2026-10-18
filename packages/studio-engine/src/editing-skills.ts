@@ -1,3 +1,4 @@
+import './editor-product-commands';
 /**
  * Editing skills: what the creator switched on for this project, applied by whichever agent edits it.
  * The choice is stored in the document (semantics.editingSkills), so the in-app chat, an external

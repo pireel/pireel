@@ -14,9 +14,9 @@
  * converges here (assembleComposeTheme) to prevent drift between two places.
  */
 
-import { type BlockEdit, type ComposeContext, type KitChoice, buildBlockPrompt, buildKitPrompt, parseKitResponse, withTheme } from './compose';
-import { buildHtmlSystem, buildKitSystem, retrieveComponentCandidates, retrieveMotionGraphicPatterns } from './prompts';
-import { type ThemeId, getTheme, themeForLlm } from './theme';
+import { type BlockEdit, type ComposeContext, type KitChoice, buildBlockPrompt, buildKitPrompt, parseKitResponse, withTheme } from '@pireel/studio-engine/compose';
+import { buildHtmlSystem, buildKitSystem, retrieveComponentCandidates, retrieveMotionGraphicPatterns } from '@pireel/studio-engine/prompts';
+import { type ThemeId, getTheme, themeForLlm } from '@pireel/studio-engine/theme';
 import { isComponentId } from '@pireel/studio-kit';
 
 /** compose's ACTIVE THEME text (single source shared by the compose route and BYO brief): theme tokens

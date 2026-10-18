@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { generationRequest, withKnownModel } from './generation-settings';
+import { generationRequest, withKnownModel } from '@pireel/studio-ui/generation-settings';
 
 const models = [{ id: 'seedream', name: 'Seedream' }, { id: 'gpt-image', name: 'GPT Image' }];
 

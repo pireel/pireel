@@ -4,7 +4,7 @@ import {
   reviewMomentKey,
   selectReviewMoments,
   validateStudioProposalBudget,
-} from './agent-execution-budget';
+} from '@pireel/studio-engine/agent-execution-budget';
 
 describe('Studio Agent operation safeguards', () => {
   it('requires persisted split/framing operations to use their vectorized forms', () => {

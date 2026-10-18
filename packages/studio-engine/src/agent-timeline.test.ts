@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeCommittedDocument } from './document-transaction';
-import { compositionToEditorDocument, projectDocumentToComposition } from './project-document';
-import { emptyComposition } from './composition-core';
-import { applyCaptionDocumentEdit } from './caption-document-edit';
-import { audioClipDefaults } from './audio-tracks';
-import { emptyEditorDocumentV2, parseEditorDocumentV2, projectV2ToLegacyComposition } from './editor-document';
-import { resizeNarrativeTimelineClip, resizeVisualTimelineClip, runAgentTimelineTool, slipNarrativeTimelineClip } from './agent-timeline';
-import { directorPlanFromDocument, withDirectorPlanInSemantics } from './director-plan-artifact';
-import { sceneDesignsFromDocument, withSceneDesignsInSemantics } from './scene-design';
+import { normalizeCommittedDocument } from '@pireel/studio-engine/document-transaction';
+import { compositionToEditorDocument, projectDocumentToComposition } from '@pireel/studio-engine/project-document';
+import { emptyComposition } from '@pireel/studio-engine/composition-core';
+import { applyCaptionDocumentEdit } from '@pireel/studio-engine/caption-document-edit';
+import { audioClipDefaults } from '@pireel/studio-engine/audio-tracks';
+import { emptyEditorDocumentV2, parseEditorDocumentV2, projectV2ToLegacyComposition } from '@pireel/studio-engine/editor-document';
+import { resizeNarrativeTimelineClip, resizeVisualTimelineClip, runAgentTimelineTool, slipNarrativeTimelineClip } from '@pireel/studio-engine/agent-timeline';
+import { directorPlanFromDocument, withDirectorPlanInSemantics } from '@pireel/studio-engine/director-plan-artifact';
+import { sceneDesignsFromDocument, withSceneDesignsInSemantics } from '@pireel/studio-engine/scene-design';
 
 describe('shared agent timeline atoms', () => {
   it('binds planned native visuals and reassigns them when they move across Director scenes', () => {

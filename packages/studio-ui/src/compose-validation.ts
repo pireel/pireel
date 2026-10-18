@@ -1,6 +1,6 @@
 import { parseBlockResponse } from '@pireel/studio-engine/compose';
 import { HARD_LINT_CODES, lintBlock, type BlockLintIssue } from '@pireel/studio-engine/block-lint';
-import { GeneratedBlockValidationError, type ComposedBlock } from './compose-result';
+import { GeneratedBlockValidationError, type ComposedBlock } from '@pireel/studio-ui/compose-result';
 
 export interface ComponentValidationSeed {
   id: string;

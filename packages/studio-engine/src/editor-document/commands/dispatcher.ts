@@ -2,7 +2,7 @@ import type { EditorDocumentV2 } from '../types';
 import { patchEditorCanvas } from './canvas';
 import { patchEditorAppearance } from './appearance';
 import { patchEditorProcessing } from './processing';
-import { patchHandoffItem, setEditingSkills, setProjectBrand, setProjectSkill } from './handoff';
+import { applyEditorCommandExtension } from './extensions';
 import { insertAudioClip } from './audio-insert';
 import { patchAudioClips } from './audio-patch';
 import { patchCaptionStyle } from './caption-style';
@@ -37,13 +37,13 @@ export function applyEditorCommand(document: EditorDocumentV2, command: EditorCo
     case 'processing.patch':
       return patchEditorProcessing(document, command.patch);
     case 'handoff.patch':
-      return patchHandoffItem(document, command.id, command.status, command.answer);
+      return applyEditorCommandExtension(document, command);
     case 'editingSkills.set':
-      return setEditingSkills(document, command.ids);
+      return applyEditorCommandExtension(document, command);
     case 'brand.set':
-      return setProjectBrand(document, command.brand);
+      return applyEditorCommandExtension(document, command);
     case 'skill.set':
-      return setProjectSkill(document, command.skillId);
+      return applyEditorCommandExtension(document, command);
     case 'track.insert':
       return insertEditorTrack(document, command.track, command.index);
     case 'track.remove':

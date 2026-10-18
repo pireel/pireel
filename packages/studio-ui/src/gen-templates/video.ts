@@ -1,4 +1,4 @@
-import type { GenTemplate } from './types';
+import type { GenTemplate } from '@pireel/studio-ui/gen-templates/types';
 
 /**
  * The first 24 official Seedance 2.5 showcase cases curated by EvoLink.

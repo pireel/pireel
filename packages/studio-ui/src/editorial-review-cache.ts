@@ -17,8 +17,8 @@
 
 import type { EditorialCandidateReview } from '@pireel/studio-engine/editorial-candidates';
 import { SCENE_DETECTION_VERSION } from '@pireel/studio-engine/video-edit/scene-detection';
-import { kvDelete, kvGet, kvSet } from './idb-kv';
-import { remoteDerivedGet, remoteDerivedPut } from './derived-cache-remote';
+import { kvDelete, kvGet, kvSet } from '@pireel/studio-ui/idb-kv';
+import { remoteDerivedGet, remoteDerivedPut } from '@pireel/studio-ui/derived-cache-remote';
 import type { VisualQuestionAnswer } from '@pireel/studio-engine/visual-question';
 
 const PREFIX = 'review:';

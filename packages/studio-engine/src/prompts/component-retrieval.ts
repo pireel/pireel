@@ -13,8 +13,8 @@ import {
   type ComponentDef,
   type ComponentId,
 } from "@pireel/studio-kit";
-import type { BlockEdit, ComposeContext, KitChoice } from "../compose";
-import { getPreset } from "./presets";
+import type { BlockEdit, ComposeContext, KitChoice } from "@pireel/studio-engine/compose";
+import { getPreset } from "@pireel/studio-engine/prompts/presets";
 
 export const MAX_COMPONENT_CANDIDATES = 3;
 

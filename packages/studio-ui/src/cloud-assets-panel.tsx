@@ -1,4 +1,5 @@
 'use client';
+import { editorRequest } from '@pireel/studio-ui/host-request';
 
 /**
  * Library — personal uploads across projects (/api/me/materials) + project components
@@ -36,7 +37,7 @@ import {
   loadElementEntries,
   removeElementEntry,
   syncElementEntries,
-} from './element-history';
+} from '@pireel/studio-ui/element-history';
 import {
   AssetCard,
   AssetLightbox,
@@ -47,9 +48,9 @@ import {
   dimsOf,
   dragPropsFor,
   useAudioPreview,
-} from './asset-card';
-import { t } from './i18n';
-import { storeVideoPoster } from './video-poster';
+} from '@pireel/studio-ui/asset-card';
+import { t } from '@pireel/studio-ui/i18n';
+import { storeVideoPoster } from '@pireel/studio-ui/video-poster';
 
 interface MaterialItem {
   id: string;
@@ -174,7 +175,7 @@ export function CloudAssetsPanel({
     const seq = ++reqSeq.current;
     if (!silent) setLoading(true);
     const get = (k: 'image' | 'video' | 'audio') =>
-      fetch(`/api/me/materials?tab=global&kind=${k}&limit=200`)
+      editorRequest(`/api/me/materials?tab=global&kind=${k}&limit=200`)
         .then((r) => (r.ok ? r.json() : null))
         .then((j: { items?: MaterialItem[] } | null) => j?.items ?? [])
         .catch(() => [] as MaterialItem[]);
@@ -206,7 +207,7 @@ export function CloudAssetsPanel({
     void storeVideoPoster(item.insertUrl!, item.label)
       .then(async (thumbKey) => {
         if (!thumbKey) return;
-        const saved = await fetch(`/api/me/uploads/${encodeURIComponent(uploadId)}`, {
+        const saved = await editorRequest(`/api/me/uploads/${encodeURIComponent(uploadId)}`, {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ thumb_url: thumbKey }),
         });
         if (saved.ok && mountedRef.current) setUploads((current) => current.map((it) => (it.uploadId === uploadId ? { ...it, thumbSrc: thumbKey } : it)));
@@ -284,7 +285,7 @@ export function CloudAssetsPanel({
         const { url } = await studioProviders().uploads.upload(f, { contentType: f.type || 'application/octet-stream', filename: f.name });
         // A video's card cover: one first-frame still stored with the row (a failed extraction just leaves it to the background fill).
         const thumbKey = k === 'video' ? await storeVideoPoster(f, f.name).catch(() => null) : null;
-        await fetch('/api/me/uploads', {
+        await editorRequest('/api/me/uploads', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ kind: k, url, label: f.name, role: 'general', mime: f.type, byte_size: f.size, ...(dims ? { width: dims.w, height: dims.h } : {}), ...(thumbKey ? { thumb_url: thumbKey } : {}) }),
@@ -328,7 +329,7 @@ export function CloudAssetsPanel({
     setUploads((cur) => cur.filter((x) => x.id !== it.id));
     if (preview?.id === it.id) setPreview(null);
     try {
-      const r = await fetch(`/api/me/uploads/${encodeURIComponent(it.uploadId)}`, { method: 'DELETE' });
+      const r = await editorRequest(`/api/me/uploads/${encodeURIComponent(it.uploadId)}`, { method: 'DELETE' });
       if (!r.ok) throw new Error(String(r.status));
       toast.success(t('panels.deleted'));
     } catch {
@@ -370,7 +371,7 @@ export function CloudAssetsPanel({
     setRenaming(null);
     setRenameDraft('');
     try {
-      const response = await fetch(`/api/me/uploads/${encodeURIComponent(uploadId)}`, {
+      const response = await editorRequest(`/api/me/uploads/${encodeURIComponent(uploadId)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ label }),

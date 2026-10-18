@@ -8,8 +8,8 @@
  * all derived from this table, so a kind gaining or losing a property is one edit, and a refusal
  * always names the tool that does the job (the same idea as component-schema.ts for components).
  */
-import { audioFadeDefaults, type AudioClipRole } from '../audio-tracks';
-import type { EditorDocumentV2, TimelineClip } from '../editor-document/types';
+import { audioFadeDefaults, type AudioClipRole } from '@pireel/studio-engine/audio-tracks';
+import type { EditorDocumentV2, TimelineClip } from '@pireel/studio-engine/editor-document/types';
 
 export type DocumentClipKind = TimelineClip['kind'];
 export type ClipPropertyKey =

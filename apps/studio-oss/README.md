@@ -1,26 +1,5 @@
-# Pireel Studio — open-source app
+# Editor component example
 
-This app runs the open-source edition of Pireel Studio locally.
+This application mounts the original `PireelEditor` with local storage adapters. Canvas, timeline, transcript, assets, properties and AI controls share the same workbench as the hosted product. Supply `StudioProviders` to connect AI services; use host extensions for product workflow pages.
 
-## Start
-
-From the repository root:
-
-```bash
-pnpm install
-pnpm dev
-```
-
-Open the URL shown in the terminal and import your media.
-
-## Included
-
-- Canvas and timeline editing
-- Multiple video, image, and audio sources
-- Captions, graphics, overlays, and audio
-- Multiple editable outputs in one project
-- Local preview and export
-- Public editing Skills and visual Frames
-
-For the product overview and agent setup, see the
-[main README](../../README.md).
+Run `pnpm install` and `pnpm dev` from the open-source repository root. See the [repository README](../../README.md) for embedding and the product boundary.

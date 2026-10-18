@@ -6,8 +6,8 @@
  * like any other instruction and the prompt prefix stays byte-stable.
  */
 
-import { localizedTemplatePrompt, TEMPLATES_BY_TYPE } from './gen-templates';
-import { t } from './i18n';
+import { localizedTemplatePrompt, TEMPLATES_BY_TYPE } from '@pireel/studio-ui/gen-templates';
+import { t } from '@pireel/studio-ui/i18n';
 
 export type GenerationIntent = 'image' | 'video' | 'audio' | 'element';
 /** Composer mode: plain chat, or one generation intent that reshapes the composer. */

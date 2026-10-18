@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { Check, ImageIcon, Loader2 } from 'lucide-react';
-import { studioLocale } from './i18n';
-import type { ProjectCover } from './project-cover';
+import { studioLocale } from '@pireel/studio-ui/i18n';
+import type { ProjectCover } from '@pireel/studio-ui/project-cover';
 
 export function CoverApplyButton({ cover, appliedKey, onApply, disabled }: { cover: ProjectCover; appliedKey?: string; onApply: (cover: ProjectCover) => Promise<void>; disabled?: boolean }) {
   const zh = studioLocale().startsWith('zh');

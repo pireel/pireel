@@ -32,20 +32,20 @@ import {
   extractFilmstripFromUrlAtTimestamps,
   fileSig,
   filmstripTimestampsForRanges,
-} from './media';
-import { alignFileToSig, loadLocalVideo, resolveAssetBytes, saveLocalVideo } from './local-media';
-import { materializeRemoteMedia } from './remote-media';
+} from '@pireel/studio-ui/media-ai';
+import { alignFileToSig, loadLocalVideo, resolveAssetBytes, saveLocalVideo } from '@pireel/studio-ui/local-media';
+import { materializeRemoteMedia } from '@pireel/studio-ui/remote-media';
 import {
   isDeviceLocalLibraryAsset,
   localImageSigFromLibraryAsset,
-} from './library-asset-source';
-import { normalizeDims } from './workbench-utils';
-import { t } from './i18n';
-import { editorErrorMessage } from './editor-error';
-import { registerNarrativeSourceRuntime } from './clip-source-runtime';
+} from '@pireel/studio-ui/library-asset-source';
+import { normalizeDims } from '@pireel/studio-ui/workbench-utils';
+import { t } from '@pireel/studio-ui/i18n';
+import { editorErrorMessage } from '@pireel/studio-ui/editor-error';
+import { registerNarrativeSourceRuntime } from '@pireel/studio-ui/clip-source-runtime';
 import type { DocumentOp } from '@pireel/studio-engine/document-transaction';
-import type { DocumentCommitter } from './document-commit';
-import type { TimelineInsertMode, TimelineMediaDropTarget, TimelineVisualDropTarget } from './timeline-asset-drop';
+import type { DocumentCommitter } from '@pireel/studio-ui/document-commit';
+import type { TimelineInsertMode, TimelineMediaDropTarget, TimelineVisualDropTarget } from '@pireel/studio-ui/timeline-asset-drop';
 
 /** Image → 5-second still-frame video (the user-defined default): freeze on canvas + MediaBunny avc mp4, no audio track
  *  = silent clip. Uses a video shape rather than adding an image branch to shots — trim/split/framing/captions/export

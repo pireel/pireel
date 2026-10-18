@@ -10,13 +10,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Loader2, Plus, RefreshCw, Sparkles } from 'lucide-react';
 import { imageThumb } from '@pireel/ui/image-url';
-import { useStudioShell } from './shell-context';
-import { t, studioLocale } from './i18n';
-import { CoverApplyButton } from './chat-cover-controls';
-import type { ProjectCover } from './project-cover';
-import { generatedAssetIndexEntry, generatedRecordsFromJobs, pollCreation, type GeneratedAssetRecord, type GenJob } from './gen-api';
-import { localAssetMentionRef, type StudioElementRef } from './chat-local-asset-mention';
-import type { GenerationIntent } from './chat-generation-intent';
+import { useStudioShell } from '@pireel/studio-ui/shell-context';
+import { t, studioLocale } from '@pireel/studio-ui/i18n';
+import { CoverApplyButton } from '@pireel/studio-ui/chat-cover-controls';
+import type { ProjectCover } from '@pireel/studio-ui/project-cover';
+import { generatedAssetIndexEntry, generatedRecordsFromJobs, pollCreation, type GeneratedAssetRecord, type GenJob } from '@pireel/studio-ui/gen-api';
+import { localAssetMentionRef, type StudioElementRef } from '@pireel/studio-ui/chat-local-asset-mention';
+import type { GenerationIntent } from '@pireel/studio-ui/chat-generation-intent';
 
 export interface GenerationCardActions {
   onApplyCover?: (cover: ProjectCover) => Promise<void>;

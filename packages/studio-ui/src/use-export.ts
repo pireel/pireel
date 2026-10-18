@@ -23,14 +23,14 @@ import {
   videoTrackShots,
 } from '@pireel/studio-engine/composition';
 import { studioProviders } from '@pireel/studio-engine/providers';
-import { fileSig } from './media';
-import { ExportCanceled, type ExportRenderOpts, clientExportVideo } from './client-export';
-import { t, tEnglish } from './i18n';
-import { compositionRenderView } from './composition-render-view';
-import { primaryNarrativeRenderPlan } from './primary-render-plan';
-import { supplementalVisualMedia } from './visual-render-plan';
-import type { AudioExportEntry } from './audio-export-payload';
-import { clipAudioMasks, exportAudioMasks } from './export-word-masks';
+import { fileSig } from '@pireel/studio-ui/media-ai';
+import { ExportCanceled, type ExportRenderOpts, clientExportVideo } from '@pireel/studio-ui/client-export';
+import { t, tEnglish } from '@pireel/studio-ui/i18n';
+import { compositionRenderView } from '@pireel/studio-ui/composition-render-view';
+import { primaryNarrativeRenderPlan } from '@pireel/studio-ui/primary-render-plan';
+import { supplementalVisualMedia } from '@pireel/studio-ui/visual-render-plan';
+import type { AudioExportEntry } from '@pireel/studio-ui/audio-export-payload';
+import { clipAudioMasks, exportAudioMasks } from '@pireel/studio-ui/export-word-masks';
 
 /** presign's hard cap (413 past it); intercept early to give a human message. */
 const MAX_PUBLISH_BYTES = 200 * 1024 * 1024;

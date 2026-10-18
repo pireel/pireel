@@ -7,12 +7,12 @@
  * every assembly goes through — so adding "vlog" later is a new file and a map entry.
  */
 
-import { GENERAL_PRESET } from './general';
-import { type Preset, SPOKEN_PRESET } from './spoken';
+import { GENERAL_PRESET } from '@pireel/studio-engine/prompts/presets/general';
+import { type Preset, SPOKEN_PRESET } from '@pireel/studio-engine/prompts/presets/spoken';
 
 export type { Preset };
-export { GENERAL_EDITORIAL, GENERAL_PRESET } from './general';
-export { SPOKEN_EDITORIAL, SPOKEN_PRESET } from './spoken';
+export { GENERAL_EDITORIAL, GENERAL_PRESET } from '@pireel/studio-engine/prompts/presets/general';
+export { SPOKEN_EDITORIAL, SPOKEN_PRESET } from '@pireel/studio-engine/prompts/presets/spoken';
 
 const PRESETS: Record<string, Preset> = {
   [GENERAL_PRESET.id]: GENERAL_PRESET,

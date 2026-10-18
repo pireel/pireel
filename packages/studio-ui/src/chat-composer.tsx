@@ -1,16 +1,16 @@
 "use client";
 
-import { ChatModelPicker } from './chat-model-picker';
+import { ChatModelPicker } from '@pireel/studio-ui/chat-model-picker';
 import type { StudioAgentModelId } from '@pireel/studio-engine/agent-models';
 
 /** Studio chat input: contenteditable composer with @ element pills. */
 
 import { useImperativeHandle, useRef, useState } from "react";
-import { loadGenerationParams, saveGenerationParams, useGenerationModels, withKnownModel } from './generation-settings';
+import { loadGenerationParams, saveGenerationParams, useGenerationModels, withKnownModel } from '@pireel/studio-ui/generation-settings';
 import { AtSign, ArrowUp, Square, Sparkles } from "lucide-react";
-import { generationIntentLine, type ChatMode, type GenerationIntent, type GenerationParams } from "./chat-generation-intent";
-import { ChatModePicker } from "./chat-mode-picker";
-import { GenerationControls, GenerationCreditsBadge } from "./chat-generation-params";
+import { generationIntentLine, type ChatMode, type GenerationIntent, type GenerationParams } from "@pireel/studio-ui/chat-generation-intent";
+import { ChatModePicker } from "@pireel/studio-ui/chat-mode-picker";
+import { GenerationControls, GenerationCreditsBadge } from "@pireel/studio-ui/chat-generation-params";
 import { useEffect } from "react";
 import type { ChatStatus } from "ai";
 import {
@@ -23,8 +23,8 @@ import {
   type TriggerPopoverPickContext,
 } from "@pireel/ui/trigger-popover";
 import type { StudioScenarioSkillId } from "@pireel/studio-engine/scenario-skills";
-import { ChatSkillPicker } from "./chat-skill-picker";
-import { ProjectBrandSummary } from './project-brand-summary';
+import { ChatSkillPicker } from "@pireel/studio-ui/chat-skill-picker";
+import { ProjectBrandSummary } from '@pireel/studio-ui/project-brand-summary';
 import {
   appendChatPillRemoveIcon,
   CHAT_ACTION_PILL_CLASS,
@@ -33,20 +33,20 @@ import {
   CHAT_PILL_LABEL_CLASS,
   elementIcon,
   makeElementPill,
-} from "./chat-format";
-import { t } from "./i18n";
+} from "@pireel/studio-ui/chat-format";
+import { t } from "@pireel/studio-ui/i18n";
 import type {
   AttachedTimelineFrame,
   PendingTimelineFrame,
   StudioChatDraftPart,
   StudioChatProps,
   StudioElementRef,
-} from "./studio-chat";
-import type { StudioScenarioSkillOption } from "./shell-context";
+} from "@pireel/studio-ui/studio-chat";
+import type { StudioScenarioSkillOption } from "@pireel/studio-ui/shell-context";
 import {
   ChatTimelineFramePicker,
   formatTimelineFrameTime,
-} from "./chat-timeline-frame-picker";
+} from "@pireel/studio-ui/chat-timeline-frame-picker";
 
 const noopTimelineFramePick = () => {};
 

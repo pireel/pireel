@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Popover, RadioGroup } from 'radix-ui';
 import { Check, ChevronDown } from 'lucide-react';
 import { STUDIO_AGENT_MODELS, type StudioAgentModelId } from '@pireel/studio-engine/agent-models';
-import { studioLocale } from './i18n';
+import { studioLocale } from '@pireel/studio-ui/i18n';
 
 export function ChatModelPicker({ value, disabled, onChange, locale }: {
   locale?: string;

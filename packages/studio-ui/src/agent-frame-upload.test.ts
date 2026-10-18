@@ -3,10 +3,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const backup = vi.fn();
-vi.mock('./cloud-media', () => ({ cloudBackupMedia: (...args: unknown[]) => backup(...args) }));
-vi.mock('./media', () => ({ durableFileSig: async () => 'pireel2:abc:3' }));
+vi.mock('@pireel/studio-ui/cloud-media', () => ({ cloudBackupMedia: (...args: unknown[]) => backup(...args) }));
+vi.mock('@pireel/studio-ui/media-ai', () => ({ durableFileSig: async () => 'pireel2:abc:3' }));
 
-import { cloudToolFrame } from './agent-frame-upload';
+import { cloudToolFrame } from '@pireel/studio-ui/agent-frame-upload';
 
 const DATA_URL = 'data:image/jpeg;base64,QUJD';
 

@@ -1,4 +1,4 @@
-import { V3_STRICT_INPUT_SCHEMAS, V3_TOOL_SCHEMAS } from './schemas';
+import { V3_STRICT_INPUT_SCHEMAS, V3_TOOL_SCHEMAS } from '@pireel/studio-engine/agent-surface-v3/schemas';
 
 /**
  * Context-free input validation against the published tool schemas, run by the server before a

@@ -5,31 +5,31 @@
  * monotonically for optimistic concurrency (client save carries baseVersion, server 409s if larger).
  */
 
-import { applyUploadedMediaKeys, collectUploadedMediaKeys } from './cloud-media-persistence';
-import type { WordMask } from './word-masks';
-import type { WordDecoration } from './build-blocks';
+import { applyUploadedMediaKeys, collectUploadedMediaKeys } from '@pireel/studio-engine/cloud-media-persistence';
+import type { WordMask } from '@pireel/studio-engine/word-masks';
+import type { WordDecoration } from '@pireel/studio-engine/build-blocks';
 import { applyPatch, type Operation } from 'fast-json-patch';
 import { create as createDiffer } from 'jsondiffpatch';
 import { format as formatJsonPatch } from 'jsondiffpatch/formatters/jsonpatch';
-import { parseEditorDocumentV2, type EditorCommandError, type EditorDocumentV2 } from './editor-document';
-import { replayDocumentTransactions, sanitizeDocumentTransactions, type DocumentTransaction } from './document-transaction';
+import { parseEditorDocumentV2, type EditorCommandError, type EditorDocumentV2 } from '@pireel/studio-engine/editor-document';
+import { replayDocumentTransactions, sanitizeDocumentTransactions, type DocumentTransaction } from '@pireel/studio-engine/document-transaction';
 import {
   isProjectContextInput,
   sanitizeProjectContext,
   type StudioProjectContext,
-} from './project-context';
+} from '@pireel/studio-engine/project-context';
 import {
   prepareEditorDocumentForPersistence,
-} from './project-document';
-import { canonicalJson, hashSection } from './stable-json';
+} from '@pireel/studio-engine/project-document';
+import { canonicalJson, hashSection } from '@pireel/studio-engine/stable-json';
 export {
   sanitizeProjectContext,
   STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION,
   type LocalAssetIndexEntry,
   type StudioProjectContext,
-} from './project-context';
+} from '@pireel/studio-engine/project-context';
 
-export { canonicalJson, hashSection } from './stable-json';
+export { canonicalJson, hashSection } from '@pireel/studio-engine/stable-json';
 
 /** Transcript sentence (source seconds; same shape as the client AsrSegment, declared independently here to avoid a lib→features reverse dependency). */
 export interface TranscriptSegment {

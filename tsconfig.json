@@ -3,7 +3,11 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "jsx": "react-jsx",
     "strict": true,
     "skipLibCheck": true,
@@ -14,12 +18,21 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
-      "@pireel/studio-ui/*": ["packages/studio-ui/src/*"],
-      "@pireel/ui/*": ["packages/ui/src/*"],
-      "@pireel/studio-engine/prompts": ["packages/studio-engine/src/prompts/index.ts"],
-      "@pireel/studio-engine/*": ["packages/studio-engine/src/*"],
-      "@pireel/studio-kit": ["packages/studio-kit/src/index.ts"],
-      "@pireel/studio-kit/*": ["packages/studio-kit/src/*"]
+      "@pireel/studio-ui/*": [
+        "packages/studio-ui/src/*"
+      ],
+      "@pireel/ui/*": [
+        "packages/ui/src/*"
+      ],
+      "@pireel/studio-engine/*": [
+        "packages/studio-engine/src/*"
+      ],
+      "@pireel/studio-kit": [
+        "packages/studio-kit/src/index.ts"
+      ],
+      "@pireel/studio-kit/*": [
+        "packages/studio-kit/src/*"
+      ]
     }
   }
 }

@@ -1,5 +1,5 @@
-import { brandPreferences } from './brand-preferences';
-import type { BrandPlaybook } from './brand-playbook';
+import { brandPreferences } from '@pireel/studio-engine/brand-preferences';
+import type { BrandPlaybook } from '@pireel/studio-engine/brand-playbook';
 
 /** Per-capability settings, never a shared style paragraph or an effect-template catalog. */
 export const BRAND_PROMPT_FEATURES = ['cover', 'headlines', 'broll', 'graphics', 'sound', 'zoom'] as const;

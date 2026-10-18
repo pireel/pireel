@@ -1,5 +1,3 @@
-import type { SceneCreditInput, SceneCreditEstimate } from './scene-credit-estimate';
-import type { SceneProjectStore } from './scene-project';
 /**
  * Provider contracts — the capability seams between the pure engine/editor and
  * whatever supplies LLM, ASR, storage, and persistence.
@@ -12,15 +10,15 @@ import type { SceneProjectStore } from './scene-project';
  *    or `unavailableProviders()` to run the editor pure-local (BYO agent only).
  */
 
-import type { BlockEdit, ComposeContext, KitChoice } from './compose';
-import type { AsrSegment } from './build-blocks';
-import type { ProjectSaveResult, ProjectSaveWire, StudioProjectDto } from './project-dto';
-import type { EditorDocumentV2 } from './editor-document';
-import type { AssetSearchDocument } from './asset-search';
+import type { BlockEdit, ComposeContext, KitChoice } from '@pireel/studio-engine/compose';
+import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
+import type { ProjectSaveResult, ProjectSaveWire, StudioProjectDto } from '@pireel/studio-engine/project-dto';
+import type { EditorDocumentV2 } from '@pireel/studio-engine/editor-document';
+import type { AssetSearchDocument } from '@pireel/studio-engine/asset-search';
 
 /** One block-generation request (the same shape the BYO brief is assembled from). */
 export interface StudioOperationOptions {
-  signal?: AbortSignal; onUsage?: (usage: import('./workflow').WorkflowUsage) => void;
+  signal?: AbortSignal; onUsage?: (usage: import('@pireel/studio-engine/usage').WorkflowUsage) => void;
   /** Selective caption coloring; separate from active-word animations and headline graphics. */
   highlightMode?: 'keywords' | 'numbers';
   projectId?: string;
@@ -61,7 +59,7 @@ export interface BlockComposer {
 /** Speech → timed sentences (source-clock seconds). */
 export interface Transcriber {
   /** opts.projectId is billing attribution only. */
-  transcribe(file: File, opts?: { projectId?: string; onUsage?: (usage: import('./workflow').WorkflowUsage) => void }): Promise<AsrSegment[]>;
+  transcribe(file: File, opts?: { projectId?: string; onUsage?: (usage: import('@pireel/studio-engine/usage').WorkflowUsage) => void }): Promise<AsrSegment[]>;
 }
 
 /** Cloud byte rendezvous (content-addressed by signature): video, image and audio alike. Null results
@@ -142,8 +140,13 @@ export interface CuratedAssetProvider {
 }
 
 export interface StudioProviders {
+  /** HTTP transport supplied by the host; the editor never assumes a Pireel account. */
+  request?: typeof fetch;
+  /** Optional external-Agent websocket URL. Omitted means no bridge connection. */
+  bridgeUrl?: string;
+  mediaProxyUrl?: (url: string) => string;
   /** Reusable brand presets. Each project explicitly selects its own snapshot; manage opens the library. */
-  brands?: { list: () => Promise<import('./brand-playbook').BrandPlaybook[]>; manage?: () => void };
+  brands?: { list: () => Promise<import('@pireel/studio-engine/brand-playbook').BrandPlaybook[]>; manage?: () => void };
   workflowEnvironment?: () => Promise<{ scope: string; revision: string }>;
   composer: BlockComposer;
   transcriber: Transcriber;
@@ -155,15 +158,6 @@ export interface StudioProviders {
    * needs them. */
   uploadPolicy?: 'always' | 'lazy';
   projects: ProjectStore;
-  sceneProjects?: SceneProjectStore;
-  estimateSceneCredits?(input: SceneCreditInput, signal?: AbortSignal): Promise<SceneCreditEstimate>;
-  sceneRuns?: SceneRunService;
-  /** Generations the server runs to the end (docs/server-scene-runs.md): start one with the browser's
-   *  handoff, and read the project back (with its revision) to follow it. Absent = run in the browser. */
-  serverRuns?: {
-    start(input: { projectId: string; generationId: string; audioKey: string; audioOffset: number }, signal?: AbortSignal): Promise<{ id: string; credits: number }>;
-    project(projectId: string, signal?: AbortSignal): Promise<{ revision: number; task: import('./scene-project').CaptionTaskRecord }>;
-  };
   /** Built-in chat persistence, independent from project document/version sync. */
   chats?: ChatThreadStore;
   uploads: AssetUploader;
@@ -178,7 +172,7 @@ export interface StudioProviders {
    *  The server marks the restore as consumed — repeated calls walk strictly backward. */
   historyUndo?: (projectId: string) => Promise<{ document: EditorDocumentV2; version: number } | null>;
   /** Sentence translator for bilingual captions (hosted-LLM feature; absent = the captions panel hides its translation section — BYO agents translate themselves via set_caption_translations). */
-  captionEmphasis?: (rows: import('./caption-emphasis').EmphasisRow[], projectId?: string, options?: StudioOperationOptions) => Promise<import('./caption-emphasis').EmphasisSelection[]>;
+  captionEmphasis?: (rows: import('@pireel/studio-engine/caption-emphasis').EmphasisRow[], projectId?: string, options?: StudioOperationOptions) => Promise<import('@pireel/studio-engine/caption-emphasis').EmphasisSelection[]>;
   translate?: (rows: { index: number; text: string }[], targetLanguage: string, options?: StudioOperationOptions) => Promise<{ index: number; text: string }[]>;
   /** Dubbing script writer (hosted LLM): each turn's phrases with the seconds they hold, back as one
    *  target-language phrase per source phrase sized to its time. Absent = video dubbing is unavailable. */
@@ -191,7 +185,7 @@ export interface StudioProviders {
   speechCleanup?: (segments: { start: number; end: number; text: string; words?: { text: string; start: number; end: number }[] }[], options?: StudioOperationOptions) => Promise<{ cuts: { seg: number; text: string; keep: number; kind: 'retake' | 'false-start' | 'crew-talk'; range: [number, number] }[]; sensitive: { seg: number; text: string; range: [number, number] }[]; unsure: { seg: number; text: string; note: string }[] }>;
   /** Writes a one-click edit's titles from the brand's layout prompt: words, timing, place and look, for
    *  this video's lines (hosted LLM). */
-  brandTitles?: (input: { rows: { index: number; text: string; startSec: number }[]; durationSec: number; guide: string; canvas: { width: number; height: number } }, options?: StudioOperationOptions) => Promise<{ titles: import('./brand-edit-params').PlannedTitle[] }>;
+  brandTitles?: (input: { rows: { index: number; text: string; startSec: number }[]; durationSec: number; guide: string; canvas: { width: number; height: number } }, options?: StudioOperationOptions) => Promise<{ titles: import('@pireel/studio-engine/brand-edit-params').PlannedTitle[] }>;
   /** Plans where a one-click edit places the platform's moves (punch-ins, transitions), following the brand's
    *  prompt within the platform ceiling (hosted LLM). Picks are phrases of the given rows. */
   editPlan?: (input: { rows: { index: number; text: string; startSec: number }[]; durationSec: number; guide: string; moves: { kind: 'punch_in' | 'transition'; variants: string[]; max: number }[] }, options?: StudioOperationOptions) => Promise<{ picks: { kind: 'punch_in' | 'transition'; index: number; text: string; variant: string; scale?: number }[] }>;
@@ -229,4 +223,5 @@ export const studioProviders = (): StudioProviders => current;
 /** The shell injects impls (hosted shell = API backend; OSS shell = local/BYO; tests = stub). */
 export function setStudioProviders(p: StudioProviders): void {
   current = p;
+
 }

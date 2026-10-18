@@ -11,10 +11,10 @@ vi.mock('@pireel/studio-engine/providers', () => ({
   studioProviders: () => ({ transcriber: { transcribe: mocks.transcribe } }),
 }));
 
-vi.mock('./visual', () => ({ analyzeVisual: vi.fn() }));
+vi.mock('@pireel/studio-ui/visual', () => ({ analyzeVisual: vi.fn() }));
 
-import { useMediaAnalysis } from './use-media-analysis';
-import { DocumentCommitter } from './document-commit';
+import { useMediaAnalysis } from '@pireel/studio-ui/use-media-analysis';
+import { DocumentCommitter } from '@pireel/studio-ui/document-commit';
 
 function committerFor(documentRef: { current: EditorDocumentV2 }) {
   return new DocumentCommitter({

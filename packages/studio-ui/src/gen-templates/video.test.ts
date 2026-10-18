@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { CHATGEN_EN } from '../messages/en/chat-gen';
-import { CHATGEN_ZH } from '../messages/zh/chat-gen';
-import { VIDEO_TEMPLATES } from './video';
-import { localizedTemplatePrompt } from './types';
+import { CHATGEN_EN } from '@pireel/studio-ui/messages/en/chat-gen';
+import { CHATGEN_ZH } from '@pireel/studio-ui/messages/zh/chat-gen';
+import { VIDEO_TEMPLATES } from '@pireel/studio-ui/gen-templates/video';
+import { localizedTemplatePrompt } from '@pireel/studio-ui/gen-templates/types';
 
 describe('video templates', () => {
   it('ships the curated preview clips from our own R2 namespace', () => {

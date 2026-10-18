@@ -26,13 +26,13 @@ import { studioProviders } from '@pireel/studio-engine/providers';
 import { directorPlanFromDocument } from '@pireel/studio-engine/director-plan-artifact';
 import { sceneDesignsFromDocument } from '@pireel/studio-engine/scene-design';
 import { wrapAgentTranscript } from '@pireel/studio-engine/prompts';
-import type { DocumentCommitter } from './document-commit';
-import type { VisualTimeline } from './visual';
-import type { StudioElementRef } from './studio-chat';
-import { agentElementRosterKey, agentMediaClipRefs, buildAgentElementRoster } from './agent-element-roster';
-import { blockDisplayTitle } from './block-display-title';
-import { loadCurrentUserBalance } from './current-user';
-import { t } from './i18n';
+import type { DocumentCommitter } from '@pireel/studio-ui/document-commit';
+import type { VisualTimeline } from '@pireel/studio-ui/visual';
+import type { StudioElementRef } from '@pireel/studio-ui/studio-chat';
+import { agentElementRosterKey, agentMediaClipRefs, buildAgentElementRoster } from '@pireel/studio-ui/agent-element-roster';
+import { blockDisplayTitle } from '@pireel/studio-ui/block-display-title';
+import { loadCurrentUserBalance } from '@pireel/studio-ui/current-user';
+import { t } from '@pireel/studio-ui/i18n';
 
 export interface AgentContextDeps {
   comp: Composition;

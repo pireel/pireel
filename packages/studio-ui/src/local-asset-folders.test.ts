@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
+import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-types';
 import {
   folderImportTriggerProps,
   pendingLocalAssetEntries,

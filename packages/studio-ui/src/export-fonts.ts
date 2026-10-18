@@ -1,3 +1,4 @@
+import { studioProviders } from '@pireel/studio-engine/providers';
 /**
  * Google Fonts → inline @font-face (base64 data:).
  *
@@ -126,13 +127,13 @@ async function buildInlineLocalFontCss(
 /**
  * Fetch a Google Fonts resource, same-origin proxy FIRST: Google's `/l/font` (text= subset)
  * endpoint doesn't reliably send Access-Control-Allow-Origin, so a direct browser fetch CORS-fails
- * even in normal Chrome — the `/api/media/fetch` proxy fetches it server-side (no CORS, works in
+ * even in normal Chrome — the host media proxy fetches it server-side (no CORS, works in
  * restricted in-app browsers too, and read-through-caches font binaries into R2). Direct fetch is
  * the fallback for shells with no backend (OSS). Returns null if both fail (degrade to system fonts).
  */
 async function fetchFontOnce(url: string): Promise<Response | null> {
   try {
-    const r = await fetch(`/api/media/fetch?url=${encodeURIComponent(url)}`);
+    const r = await fetch(studioProviders().mediaProxyUrl?.(url) ?? url);
     if (r.ok) return r;
   } catch {
     /* proxy unreachable (e.g. OSS shell, no backend) → try direct */

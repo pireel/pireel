@@ -1,8 +1,8 @@
 import type { UIMessage } from 'ai';
-import { taskOf, unfinishedRoughCut, type ChatTask } from './chat-task';
+import { taskOf, unfinishedRoughCut, type ChatTask } from '@pireel/studio-ui/chat-task';
 import { v3ToolCanMutate } from '@pireel/studio-engine/agent-surface-v3/registry';
-import type { FirstPassReport, FirstPassStepStatus, FineCutItem } from './first-pass';
-import { needsBrandCover, needsEditingReview } from './editing-task-review';
+import type { FirstPassReport, FirstPassStepStatus, FineCutItem } from '@pireel/studio-ui/first-pass';
+import { needsBrandCover, needsEditingReview } from '@pireel/studio-ui/editing-task-review';
 
 export const toolIdOf = (part: { type: string; toolName?: unknown }) => part.type === 'dynamic-tool' ? String(part.toolName ?? '') : part.type.startsWith('tool-') ? part.type.slice(5) : '';
 export function messagesForTask(messages: readonly UIMessage[], taskId: string): UIMessage[] {

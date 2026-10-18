@@ -1,4 +1,4 @@
-import type { ProjectSync } from './project-sync';
+import type { ProjectSync } from '@pireel/studio-ui/project-sync';
 import type { EditorDocumentV2 } from '@pireel/studio-engine/editor-document/types';
 
 export interface ProjectCover { url: string; key: string; label: string }

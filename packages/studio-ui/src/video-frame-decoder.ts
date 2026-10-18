@@ -1,3 +1,4 @@
+import { studioProviders } from '@pireel/studio-engine/providers';
 /**
  * WebCodecs frame access for the preview engine.
  *
@@ -37,7 +38,7 @@ export function decodableMediaUrl(url: string): string {
   try {
     const target = new URL(url, window.location.href);
     if ((target.protocol === 'http:' || target.protocol === 'https:') && target.origin !== window.location.origin) {
-      return `/api/media/fetch?url=${encodeURIComponent(target.toString())}`;
+      return studioProviders().mediaProxyUrl?.(target.toString()) ?? url;
     }
   } catch {
     // Keep opaque values unchanged; opening the input surfaces the real failure.

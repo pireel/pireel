@@ -5,20 +5,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, X, Loader2 } from 'lucide-react';
 import { type StudioToolDef, type StudioToolResult } from '@pireel/studio-engine/prompts';
-import { studioToolDefFor } from './v3-tool-defs';
+import { studioToolDefFor } from '@pireel/studio-ui/v3-tool-defs';
 import type { Composition } from '@pireel/studio-engine/composition';
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
-import { useToolProgress } from './tool-progress';
-import { CutListCard, cutRowsOf } from './chat-cut-list';
-import { GraphicsPreviewBody } from './chat-graphics-card';
-import { AssetSearchResultsBody } from './chat-asset-search-results';
-import { AskUserCard } from './chat-ask-card';
-import { ApprovalCard } from './chat-approval-card';
-import { ExportSettingsCard } from './chat-export-card';
-import { t } from './i18n';
-import { CoverToolCard } from './cover-scene-dialog';
-import type { CoverScene } from './cover-scene';
-import { CreditsShortfallBody, GeneratedAudioBody, GenerationJobsBody, type GenerationCardActions } from './chat-generation-card';
+import { useToolProgress } from '@pireel/studio-ui/tool-progress';
+import { CutListCard, cutRowsOf } from '@pireel/studio-ui/chat-cut-list';
+import { GraphicsPreviewBody } from '@pireel/studio-ui/chat-graphics-card';
+import { AssetSearchResultsBody } from '@pireel/studio-ui/chat-asset-search-results';
+import { AskUserCard } from '@pireel/studio-ui/chat-ask-card';
+import { ApprovalCard } from '@pireel/studio-ui/chat-approval-card';
+import { ExportSettingsCard } from '@pireel/studio-ui/chat-export-card';
+import { t } from '@pireel/studio-ui/i18n';
+import { CoverToolCard } from '@pireel/studio-ui/cover-scene-dialog';
+import type { CoverScene } from '@pireel/studio-ui/cover-scene';
+import { CreditsShortfallBody, GeneratedAudioBody, GenerationJobsBody, type GenerationCardActions } from '@pireel/studio-ui/chat-generation-card';
 
 /* ============================ Tool-duration memory (for ETA) ============================ */
 

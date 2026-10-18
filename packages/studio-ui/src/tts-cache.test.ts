@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getCachedTts, setCachedTts, ttsCacheKey, type CachedTtsAsset } from './tts-cache';
-import { __setKvBackendForTest } from './idb-kv';
+import { getCachedTts, setCachedTts, ttsCacheKey, type CachedTtsAsset } from '@pireel/studio-ui/tts-cache';
+import { __setKvBackendForTest } from '@pireel/studio-ui/idb-kv';
 
 describe('tts cache key', () => {
   const values = new Map<string, unknown>();

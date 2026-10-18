@@ -2,7 +2,7 @@
  * Studio workflows. Pure data contracts shared by forms, agents and future schedulers.
  * No host SDK, transport, storage, media bytes or legacy business dependencies.
  */
-import { assertWorkflowValue, validateWorkflowSchema, type WorkflowSchema } from './workflow-schema';
+import { assertWorkflowValue, validateWorkflowSchema, type WorkflowSchema } from '@pireel/studio-engine/workflow-schema';
 export type WorkflowValue = string | number | boolean | null | WorkflowValue[] | { [key: string]: WorkflowValue };
 export type WorkflowInputs = Record<string, WorkflowValue>;
 export type WorkflowEnvironment = 'browser' | 'desktop' | 'cloud';

@@ -1,4 +1,4 @@
-import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
+import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-types';
 
 export type FolderSource = NonNullable<LocalAssetIndexEntry['folder']>;
 

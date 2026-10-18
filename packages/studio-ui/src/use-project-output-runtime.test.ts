@@ -4,7 +4,7 @@ import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { emptyEditorDocumentV2, type Composition } from '@pireel/studio-engine/composition';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { useProjectOutputRuntime } from './use-project-output-runtime';
+import { useProjectOutputRuntime } from '@pireel/studio-ui/use-project-output-runtime';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

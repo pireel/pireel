@@ -1,12 +1,12 @@
 import { isWholeWhiteboardTask, whiteboardTaskPhase } from '@pireel/studio-engine/whiteboard-workflow';
-import type { EditingDirectorPlan } from './editing-director-plan';
+import type { EditingDirectorPlan } from '@pireel/studio-ui/editing-director-plan';
 import type { StudioAgentModelId } from '@pireel/studio-engine/agent-models';
 import type { UIMessage } from 'ai';
-import type { FineCutItem, FineCutSkill, FirstPassReport } from './first-pass';
-import type { WorkflowUsage } from '@pireel/studio-engine/workflow';
+import type { FineCutItem, FineCutSkill, FirstPassReport } from '@pireel/studio-ui/first-pass';
+import type { WorkflowUsage } from '@pireel/studio-engine/usage';
 import type { EditingRunConfig } from '@pireel/studio-engine/editing-run-config';
 import type { StudioScenarioSkillId } from '@pireel/studio-engine/scenario-skills';
-import type { EditingTaskReview } from './editing-task-review';
+import type { EditingTaskReview } from '@pireel/studio-ui/editing-task-review';
 
 /** Saved with the initiating user message; retries retain the same identity and scope. */
 export interface ChatTask {

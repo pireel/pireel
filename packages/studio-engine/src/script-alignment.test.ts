@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { alignTranscriptToScript, alignmentUnits, carryWordMasks, measuredSpeechTranscript, storedScriptText } from './script-alignment';
-import { transcriptFromExactText } from './agent-timeline';
-import type { TranscriptSegment } from './project-dto';
+import { alignTranscriptToScript, alignmentUnits, carryWordMasks, measuredSpeechTranscript, storedScriptText } from '@pireel/studio-engine/script-alignment';
+import { transcriptFromExactText } from '@pireel/studio-engine/agent-timeline';
+import type { TranscriptSegment } from '@pireel/studio-engine/project-dto';
 
 /** ASR "hearing" with one word per CJK character / Latin word, 0.2s each from `start`. */
 function heard(text: string, start = 0): TranscriptSegment {

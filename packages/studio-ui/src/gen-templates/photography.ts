@@ -1,4 +1,4 @@
-import type { GenTemplate } from './types';
+import type { GenTemplate } from '@pireel/studio-ui/gen-templates/types';
 
 /** "Photography" image templates (curated from the open-source leaderboard, preview images re-hosted on R2). */
 export const PHOTOGRAPHY_TEMPLATES: GenTemplate[] = [

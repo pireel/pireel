@@ -1,5 +1,5 @@
-import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
-import { durableFileSig, probeVideoFile } from './media';
+import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-types';
+import { durableFileSig, probeVideoFile } from '@pireel/studio-ui/media';
 import { saveLocalStream, saveLocalVideo } from './local-media';
 
 export type LocalAssetKind = 'video' | 'image' | 'audio';

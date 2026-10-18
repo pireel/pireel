@@ -1,10 +1,10 @@
 import type { AudioClip } from '../audio-tracks';
 import type { AtomicMediaFraming, Block, CaptionStyle, CutTransitionEffect, PersonFx, TransitionDirection, VideoShot } from '../composition-core';
-import type { TranscriptSegment } from '../project-dto';
+import type { TranscriptSegment } from '@pireel/studio-engine/project-types';
 import type { ThemeId } from '../theme';
 import type { NarrativeRole, SceneFamily, ViewerTask } from '../director-plan';
 import type { DocumentLook } from '../look';
-import type { PlaybookSnapshot } from '../brand-playbook';
+import type { PlaybookSnapshot } from '@pireel/studio-engine/project-brand-metadata';
 
 export const EDITOR_DOCUMENT_VERSION = 2 as const;
 
@@ -244,7 +244,7 @@ export interface EditorSemanticState {
    *  A brand only goes with a Skill that takes brands (brand-playbook BRAND_SKILL_IDS). */
   skillId?: string;
   /** Initial Agent model chosen when this project was created; saved chats keep their own selection. */
-  agentModel?: import('../agent-models').StudioAgentModelId;
+  agentModel?: 'auto' | 'deepseek' | 'opus' | 'sonnet' | 'gpt-sol';
 }
 
 export interface HandoffItem {

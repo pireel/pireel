@@ -1,3 +1,5 @@
+import { setStudioProviders, unavailableProviders } from '@pireel/studio-engine/providers';
+beforeEach(() => setStudioProviders({ ...unavailableProviders(), mediaProxyUrl: url => `/api/media/fetch?url=${encodeURIComponent(url)}` }));
 /** @vitest-environment jsdom */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

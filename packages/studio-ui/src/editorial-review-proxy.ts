@@ -1,7 +1,8 @@
 'use client';
+import { editorRequest } from '@pireel/studio-ui/host-request';
 
 import type { EditorialCandidateSpec } from '@pireel/studio-engine/editorial-candidates';
-import { probeVideoFile } from './media';
+import { probeVideoFile } from '@pireel/studio-ui/media';
 
 export interface EditorialReviewProxySegment {
   candidateId: string;
@@ -89,7 +90,7 @@ export async function uploadEditorialReviewProxy(
   blob: Blob,
   signal?: AbortSignal,
 ): Promise<{ key: string }> {
-  const presign = await fetch('/api/studio/media', {
+  const presign = await editorRequest('/api/studio/media', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ action: 'put-review-proxy', size: blob.size, content_type: 'video/mp4' }),
@@ -105,7 +106,7 @@ export async function uploadEditorialReviewProxy(
   if (!presign.ok || !body.key || !body.url) {
     throw new Error(body.error || `review proxy presign failed: HTTP ${presign.status}`);
   }
-  const uploaded = await fetch(body.url, {
+  const uploaded = await editorRequest(body.url, {
     method: 'PUT',
     headers: {
       'Content-Type': body.content_type || 'video/mp4',
@@ -119,7 +120,7 @@ export async function uploadEditorialReviewProxy(
 }
 
 export async function deleteEditorialReviewProxy(key: string): Promise<void> {
-  const response = await fetch('/api/studio/media', {
+  const response = await editorRequest('/api/studio/media', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ action: 'delete-review-proxy', key }),

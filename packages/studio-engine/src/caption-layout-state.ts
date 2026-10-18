@@ -3,7 +3,7 @@
 import type { AsrSegment, TranscriptWord } from './build-blocks';
 import { joinWords, segmentTokens, wordsFromText } from './caption-fx';
 import type { EditorDocumentV2 } from './editor-document';
-import type { TranscriptSegment } from './project-dto';
+import type { TranscriptSegment } from '@pireel/studio-engine/project-types';
 import { captionTextFromCueOverrides } from './caption-text-edit';
 
 interface SourceRange {

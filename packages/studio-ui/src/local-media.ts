@@ -17,8 +17,8 @@
  */
 
 import { studioProviders } from '@pireel/studio-engine/providers';
-import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
-import { fileMatchesSig, fileNameFromSig, fileSig, isContentSig, rememberDurableFileSig, sigSize } from './media';
+import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-types';
+import { fileMatchesSig, fileNameFromSig, fileSig, isContentSig, rememberDurableFileSig, sigSize } from '@pireel/studio-ui/media';
 import { additionalMediaCacheEntries, beginMediaCacheSession, evictUnusedMediaEntry, mediaCacheEvictionPlan, MEDIA_CACHE_RECENT_MS, withMediaCacheRead, type AdditionalMediaCacheEntry, type MediaCacheEntry } from './local-media-cache';
 
 const DIR = 'local-videos';

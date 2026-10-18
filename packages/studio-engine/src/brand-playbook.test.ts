@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { emptyPlaybook, playbookSnapshot, renderBrandPrompt, validatePlaybook, validatePlaybookSnapshot, type BrandPlaybook } from './brand-playbook';
+import { emptyPlaybook, playbookSnapshot, renderBrandPrompt, validatePlaybook, validatePlaybookSnapshot, type BrandPlaybook } from '@pireel/studio-engine/brand-playbook';
 
 const valid = (): BrandPlaybook => ({
   ...emptyPlaybook('brand_1', 'Mine', 'douyin'),

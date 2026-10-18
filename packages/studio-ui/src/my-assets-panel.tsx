@@ -1,4 +1,5 @@
 'use client';
+import { editorRequest } from '@pireel/studio-ui/host-request';
 
 /**
  * My assets — the CURRENT PROJECT's media (video / image / audio). Cloud is the source of truth
@@ -58,11 +59,11 @@ import {
   dimsOf,
   dragPropsFor,
   useAudioPreview,
-} from './asset-card';
-import { audioCoverUrl, fileMatchesSig, fileNameFromSig } from './media';
-import { storeVideoPoster } from './video-poster';
-import { resolveAssetBytes, resolveAssetPreview } from './local-media';
-import { assetUploadQueue, type AssetUploadState } from './asset-upload-queue';
+} from '@pireel/studio-ui/asset-card';
+import { audioCoverUrl, fileMatchesSig, fileNameFromSig } from '@pireel/studio-ui/media';
+import { storeVideoPoster } from '@pireel/studio-ui/video-poster';
+import { resolveAssetBytes, resolveAssetPreview } from '@pireel/studio-ui/local-media';
+import { assetUploadQueue, type AssetUploadState } from '@pireel/studio-ui/asset-upload-queue';
 import {
   localAssetIndexEntry,
   localAssetKindOf,
@@ -70,7 +71,7 @@ import {
   runLocalImportSession,
   type BrowserLocalImportSource,
   type LocalAssetKind,
-} from './local-import-session';
+} from '@pireel/studio-ui/local-import-session';
 import {
   folderImportTriggerProps,
   LOCAL_ASSET_LABEL_MAX_LENGTH,
@@ -78,9 +79,9 @@ import {
   reconcileLocalAssetRegistry,
   renameLocalAssetEntry,
   triggerFolderInput,
-} from './local-asset-folders';
-import { useLocalVisualModel } from './local-visual-search-model';
-import { t } from './i18n';
+} from '@pireel/studio-ui/local-asset-folders';
+import { useLocalVisualModel } from '@pireel/studio-ui/local-visual-search-model';
+import { t } from '@pireel/studio-ui/i18n';
 
 type KindFilter = 'all' | 'image' | 'video' | 'audio';
 const KIND_FILTERS: { value: KindFilter; label: string }[] = [
@@ -664,11 +665,11 @@ export function MyAssetsPanel({
     }
     setImporting(true);
     try {
-      const manifestResponse = await fetch(manifestUrl, { cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' });
+      const manifestResponse = await editorRequest(manifestUrl, { cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' });
       if (!manifestResponse.ok) throw new Error(`manifest HTTP ${manifestResponse.status}`);
       const manifest = (await manifestResponse.json()) as { entries?: unknown[] };
       if (!Array.isArray(manifest.entries) || !manifest.entries.length) throw new Error('manifest has no entries');
-      const response = await fetch('/api/studio/media', {
+      const response = await editorRequest('/api/studio/media', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ action: 'register-local-assets', entries: manifest.entries }),
@@ -861,7 +862,7 @@ export function MyAssetsPanel({
   /** Retry a failed upload, or start one by hand on a lazy host: bytes come back from the live URL. */
   const retryUpload = (it: LibraryItem) => {
     if (!it.sig || !it.insertUrl) return;
-    void fetch(it.insertUrl)
+    void editorRequest(it.insertUrl)
       .then((r) => r.blob())
       .then((blob) => assetUploadQueue().enqueue({ projectId, sig: it.sig!, file: new File([blob], it.label, { type: blob.type }), label: it.label }, { force: true }))
       .catch(() => {});

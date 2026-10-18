@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { directorPlanFromDocument } from './director-plan-artifact';
-import { emptyProjectDocument } from './project-document';
+import { directorPlanFromDocument } from '@pireel/studio-engine/director-plan-artifact';
+import { emptyProjectDocument } from '@pireel/studio-engine/project-document';
 import {
   ackedFromDto,
   applyProjectSave,
@@ -14,8 +14,8 @@ import {
   sanitizeProjectContext,
   sanitizeSavePayload,
   type ProjectSavePayload,
-} from './project-dto';
-import { normalizeCommittedDocument, type DocumentTransaction } from './document-transaction';
+} from '@pireel/studio-engine/project-dto';
+import { normalizeCommittedDocument, type DocumentTransaction } from '@pireel/studio-engine/document-transaction';
 
 const document = () => {
   const value = emptyProjectDocument();

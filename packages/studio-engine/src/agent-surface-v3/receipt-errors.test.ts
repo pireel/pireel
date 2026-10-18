@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeStepFailure } from './receipt-errors';
+import { describeStepFailure } from '@pireel/studio-engine/agent-surface-v3/receipt-errors';
 
 const ctx = {
   kindOf: (id: string) => (({ ai1: 'graphic', clip_a: 'narrative', t1: 'text' }) as Record<string, 'graphic' | 'narrative' | 'text'>)[id],

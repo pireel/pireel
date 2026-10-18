@@ -12,8 +12,8 @@ import { EDITING_SKILLS, type EditingSkillId } from '@pireel/studio-engine/editi
 import type { HandoffItem } from '@pireel/studio-engine/editor-document/types';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@pireel/ui/dialog';
 import { Switch } from '@pireel/ui/switch';
-import { ConfirmList, type ConfirmAnswer } from './confirm-list';
-import { studioLocale, t } from './i18n';
+import { ConfirmList, type ConfirmAnswer } from '@pireel/studio-ui/confirm-list';
+import { studioLocale, t } from '@pireel/studio-ui/i18n';
 
 const LOOK: Record<EditingSkillId, { icon: ComponentType<{ size?: number; className?: string }>; tile: string }> = {
   cover: { icon: ImageIcon, tile: '#3f5054' },

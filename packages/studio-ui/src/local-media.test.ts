@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { setStudioProviders, unavailableProviders } from '@pireel/studio-engine/providers';
-import { durableFileSig, fileSig } from './media';
+import { durableFileSig, fileSig } from '@pireel/studio-ui/media';
 import { alignFileToSig, loadLocalVideo, maintainLocalMediaCache, markLocalMediaSynced, resolveAssetBytes, resolveAssetPreview, saveLocalStream, saveLocalVideo } from './local-media';
 import { beginMediaCacheSession } from './local-media-cache';
 

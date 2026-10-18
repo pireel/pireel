@@ -1,6 +1,0 @@
-{
-  "tool": "built-in image_gen",
-  "created": "2026-09-22",
-  "asset": "eraser-showcase-v1.png",
-  "prompt": "Use case: photorealistic-natural. Create one clean still frame to demonstrate subtitle and watermark removal in a video editor. Horizontal 16:9 mid-shot of a person giving a calm educational explanation in a simple softly lit interior. Dark neutral clothing and uncluttered background, warm daylight, sharp face and shoulders. The lower third must have clean visual negative space suitable for a code-rendered subtitle overlay added later; do NOT put any text or graphics in the image itself. Straightforward real video frame, subtle editorial color grade, no blur on face, no logos, watermarks, subtitle text, UI, border, collage, or before-after split. Output one static horizontal image."
-}

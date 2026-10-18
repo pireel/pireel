@@ -4,7 +4,7 @@ import {
   MOTION_GRAPHIC_CAPABILITY_MAP,
   motionGraphicPatternSection,
   retrieveMotionGraphicPatterns,
-} from './motion-graphic-patterns';
+} from '@pireel/studio-engine/prompts/motion-graphic-patterns';
 
 describe('open Motion Graphic capability retrieval', () => {
   it('describes breadth without presenting a closed component enum', () => {

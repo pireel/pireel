@@ -9,9 +9,9 @@
 import { Check } from 'lucide-react';
 import type { StudioToolResult } from '@pireel/studio-engine/prompts';
 import type { ExportRecommendations } from '@pireel/studio-engine/export-options';
-import { resolveInteraction, usePendingInteraction } from './interaction-store';
-import type { ToolPartLike } from './chat-tool-parts';
-import { t } from './i18n';
+import { resolveInteraction, usePendingInteraction } from '@pireel/studio-ui/interaction-store';
+import type { ToolPartLike } from '@pireel/studio-ui/chat-tool-parts';
+import { t } from '@pireel/studio-ui/i18n';
 
 export interface AdaptiveExportSelection {
   resolution: number;

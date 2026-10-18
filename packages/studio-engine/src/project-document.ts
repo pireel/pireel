@@ -14,7 +14,7 @@ import {
   type LegacyProjectionOptions,
 } from './editor-document';
 import { migrateLegacyProjectToV2 } from './editor-document/migration';
-import type { LocalAssetIndexEntry, ProjectCloudMediaIndex, TranscriptSegment } from './project-dto';
+import type { LocalAssetIndexEntry, ProjectCloudMediaIndex, TranscriptSegment } from '@pireel/studio-engine/project-types';
 import { normalizeEditorDocumentArtifacts } from './director-plan-artifact';
 
 export interface CompositionDocumentInput {

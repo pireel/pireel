@@ -6,13 +6,13 @@ const deps = vi.hoisted(() => ({
   loadElementEntries: vi.fn(),
 }));
 
-vi.mock('./gen-api', () => ({ listStudioGens: deps.listStudioGens }));
-vi.mock('./element-history', () => ({ loadElementEntries: deps.loadElementEntries }));
-vi.mock('./gen-templates', () => ({ ELEMENT_TEMPLATES: [], localizedTemplatePrompt: vi.fn() }));
-vi.mock('./i18n', () => ({ studioLocale: () => 'zh', t: (key: string) => key }));
-vi.mock('@pireel/studio-engine/providers', () => ({ studioProviders: () => ({ elements: { list: deps.listElements } }) }));
+vi.mock('@pireel/studio-ui/gen-api', () => ({ listStudioGens: deps.listStudioGens }));
+vi.mock('@pireel/studio-ui/element-history', () => ({ loadElementEntries: deps.loadElementEntries }));
+vi.mock('@pireel/studio-ui/gen-templates', () => ({ ELEMENT_TEMPLATES: [], localizedTemplatePrompt: vi.fn() }));
+vi.mock('@pireel/studio-ui/i18n', () => ({ studioLocale: () => 'zh', t: (key: string) => key }));
+vi.mock('@pireel/studio-engine/providers', () => ({ studioProviders: () => ({ elements: { list: deps.listElements }, request: (input: RequestInfo | URL, init?: RequestInit) => init === undefined ? fetch(input) : fetch(input, init) }) }));
 
-import { collectAssetSearchDocuments } from './asset-search-collector';
+import { collectAssetSearchDocuments } from '@pireel/studio-ui/asset-search-collector';
 
 describe('collectAssetSearchDocuments scope boundary', () => {
   beforeEach(() => {

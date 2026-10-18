@@ -1,7 +1,7 @@
 /** Pure layout constants and helpers for the studio timeline (no React state). */
 
 import { type BlockKind, SHOT_TREATMENTS } from '@pireel/studio-engine/composition';
-import type { FilmstripFrame } from './media';
+import type { FilmstripFrame } from '@pireel/studio-ui/media';
 
 export const PREVIEW_W = 108; // hover element preview width
 

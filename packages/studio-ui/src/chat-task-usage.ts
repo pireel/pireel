@@ -1,7 +1,7 @@
-import type { WorkflowUsage } from '@pireel/studio-engine/workflow';
-import { cachedChatThread, cacheChatThread } from './chat-thread-cache';
-import { patchTask, withTaskUsage } from './chat-task';
-import type { StoredThread } from './chat-thread-store';
+import type { WorkflowUsage } from '@pireel/studio-engine/usage';
+import { cachedChatThread, cacheChatThread } from '@pireel/studio-ui/chat-thread-cache';
+import { patchTask, withTaskUsage } from '@pireel/studio-ui/chat-task';
+import type { StoredThread } from '@pireel/studio-ui/chat-thread-store';
 
 export interface TaskUsageEvent { projectId: string; threadId: string; taskId: string; callId: string; usage: WorkflowUsage }
 const listeners = new Set<(event: TaskUsageEvent) => void>();

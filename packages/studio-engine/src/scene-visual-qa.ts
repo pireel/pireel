@@ -1,7 +1,7 @@
-import type { DirectorPlan, DirectorScenePlan } from './director-plan';
-import type { EditorDocumentV2, TimelineClip } from './editor-document/types';
-import { directorPlanFromDocument } from './director-plan-artifact';
-import { sceneDesignForDocument } from './scene-design';
+import type { DirectorPlan, DirectorScenePlan } from '@pireel/studio-engine/director-plan';
+import type { EditorDocumentV2, TimelineClip } from '@pireel/studio-engine/editor-document/types';
+import { directorPlanFromDocument } from '@pireel/studio-engine/director-plan-artifact';
+import { sceneDesignForDocument } from '@pireel/studio-engine/scene-design';
 
 export type SceneVisualReviewPhase = 'entrance' | 'develop' | 'payoff' | 'exit' | 'scene';
 

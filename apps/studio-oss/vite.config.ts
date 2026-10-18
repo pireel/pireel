@@ -4,6 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { localAssets } from './local-assets-plugin';
 
 export default defineConfig({
+  cacheDir: "node_modules/.vite-oss",
   // Workspace packages export TS source. Native Vite tsconfig resolution follows
   // each importer to the app or workspace tsconfig, so aliases work in both scopes.
   resolve: { tsconfigPaths: true },

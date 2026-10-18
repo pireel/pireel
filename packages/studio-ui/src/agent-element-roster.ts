@@ -3,9 +3,9 @@
 
 import type { EditorDocumentV2 } from '@pireel/studio-engine/editor-document';
 import { type Block, type VideoShot, blockKind, isSentenceCaption } from '@pireel/studio-engine/composition';
-import type { StudioElementRef } from './studio-chat';
-import { blockDisplayTitle } from './block-display-title';
-import { t } from './i18n';
+import type { StudioElementRef } from '@pireel/studio-ui/studio-chat';
+import { blockDisplayTitle } from '@pireel/studio-ui/block-display-title';
+import { t } from '@pireel/studio-ui/i18n';
 
 /** A media clip on a visual lane other than the story spine (B-roll footage or a still). */
 export interface AgentMediaClipRef {

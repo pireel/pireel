@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeGenerationIntentLine, generationIntentLine, generationTemplatePrompts, GENERATION_INTENTS } from './chat-generation-intent';
+import { describeGenerationIntentLine, generationIntentLine, generationTemplatePrompts, GENERATION_INTENTS } from '@pireel/studio-ui/chat-generation-intent';
 
 describe('chat generation intent', () => {
   it('appends one compact instruction line carrying kind and only the parameters that apply', () => {

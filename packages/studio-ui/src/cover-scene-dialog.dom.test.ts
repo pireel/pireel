@@ -1,12 +1,20 @@
 /** @vitest-environment jsdom */
+import { beforeEach as configureHttpHost, afterEach as restoreHttpHost } from 'vitest';
+import { studioProviders, setStudioProviders } from '@pireel/studio-engine/providers';
+let previousHttpHost: ReturnType<typeof studioProviders>;
+configureHttpHost(() => {
+  previousHttpHost = studioProviders();
+  setStudioProviders({ ...previousHttpHost, request: (input, init) => init === undefined ? fetch(input) : fetch(input, init) });
+});
+restoreHttpHost(() => setStudioProviders(previousHttpHost));
 import { act, createElement, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CoverSceneDialog, CoverToolCard, TimelineCoverPlaceholder } from './cover-scene-dialog';
-import { ChatCoverEntry } from './chat-cover-controls';
+import { CoverSceneDialog, CoverToolCard, TimelineCoverPlaceholder } from '@pireel/studio-ui/cover-scene-dialog';
+import { ChatCoverEntry } from '@pireel/studio-ui/chat-cover-controls';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { setStudioLocale } from './i18n';
-import type { CoverScene } from './cover-scene';
+import { setStudioLocale } from '@pireel/studio-ui/i18n';
+import type { CoverScene } from '@pireel/studio-ui/cover-scene';
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const roots: ReturnType<typeof createRoot>[] = [];
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }); vi.stubGlobal('URL', class extends URL { static createObjectURL() { return 'blob:reference-preview'; } static revokeObjectURL() {} }); setStudioLocale('zh'); vi.stubGlobal('fetch', vi.fn(async () => Response.json({ models: [{ id: 'nano-banana', name: 'Nano Banana' }], credits: 10 }))); });

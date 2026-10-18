@@ -2,12 +2,12 @@
   "name": "@pireel/studio-engine",
   "version": "0.1.0",
   "private": true,
-  "description": "Pure composition engine for Pireel Studio: timeline math, caption relay, general agent-tool contracts, BYO-brain briefs, MCP protocol core, and the offline executor. Zero React, zero DB, zero provider bindings.",
+  "description": "Video document model, native edit commands, media geometry, captions and rendering. No product workflow or generation service.",
   "type": "module",
   "exports": {
-    "./prompts": "./src/prompts/index.ts",
     "./video-edit": "./src/video-edit/index.ts",
-    "./*": "./src/*.ts"
+    "./*": "./src/*.ts",
+    "./prompts": "./src/prompts/index.ts"
   },
   "sideEffects": [
     "**/templates.ts",

@@ -3,10 +3,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Loader2, RefreshCw, Sparkles, X } from 'lucide-react';
-import { t } from './i18n';
-import type { GenerationIntent, GenerationParams } from './chat-generation-intent';
-import { GenerationControls, GenerationCreditsBadge } from './chat-generation-params';
-import { generationRequest, loadGenerationParams, saveGenerationParams, useGenerationModels, withKnownModel, type GenerationRequest } from './generation-settings';
+import { t } from '@pireel/studio-ui/i18n';
+import type { GenerationIntent, GenerationParams } from '@pireel/studio-ui/chat-generation-intent';
+import { GenerationControls, GenerationCreditsBadge } from '@pireel/studio-ui/chat-generation-params';
+import { generationRequest, loadGenerationParams, saveGenerationParams, useGenerationModels, withKnownModel, type GenerationRequest } from '@pireel/studio-ui/generation-settings';
 
 export type TranscriptAddPopoverKind = 'sticker' | 'media' | 'sfx' | 'mg';
 /** What an AI tab generates. */

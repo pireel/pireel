@@ -45,7 +45,7 @@ import {
   filmstripSourceRangeForTimelineWindow,
   filmstripTimestampsForRanges,
   transcribeFile,
-} from './media';
+} from '@pireel/studio-ui/media-ai';
 
 describe('filmstrip source demand', () => {
   it('publishes the first decoded frame before the extraction batch finishes', async () => {

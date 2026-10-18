@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildEditorialReviewProxyPlan,
   editorialReviewProxyMeetsProviderMinimum,
-} from './editorial-review-proxy';
+} from '@pireel/studio-ui/editorial-review-proxy';
 
 describe('editorial review proxy plan', () => {
   it('uses each maximal interval exactly by default so its model clock starts at zero', () => {

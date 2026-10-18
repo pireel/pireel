@@ -1,4 +1,5 @@
 "use client";
+import { editorRequest } from '@pireel/studio-ui/host-request';
 
 export interface CurrentUser {
   user_id: string;
@@ -35,7 +36,7 @@ export function loadCurrentUser(): Promise<CurrentUser | null> {
   if (pending) return pending;
 
   const requestGeneration = generation;
-  const request = fetch("/api/me")
+  const request = editorRequest("/api/me")
     .then(async (response) => {
       if (!response.ok && response.status !== 401)
         throw new Error(`Current user request failed: ${response.status}`);
@@ -59,7 +60,7 @@ export function loadCurrentUser(): Promise<CurrentUser | null> {
 export function loadCurrentUserBalance(): Promise<CurrentUserBalance | null> {
   if (balancePending) return balancePending;
 
-  const request = fetch("/api/me/balance")
+  const request = editorRequest("/api/me/balance")
     .then(async (response) =>
       response.ok
         ? ((await response.json()) as CurrentUserBalance)

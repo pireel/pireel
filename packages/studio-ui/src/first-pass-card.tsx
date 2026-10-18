@@ -1,9 +1,9 @@
 import { Check, Loader2, Minus, X } from "lucide-react";
 import type { UIMessage } from "ai";
-import type { FineCutItem, FirstPassReport, FirstPassStepStatus } from "./first-pass";
-import { editingSkillName } from "./editing-skills";
-import { useToolProgress } from "./tool-progress";
-import { t } from "./i18n";
+import type { FineCutItem, FirstPassReport, FirstPassStepStatus } from "@pireel/studio-ui/first-pass";
+import { editingSkillName } from "@pireel/studio-ui/editing-skills";
+import { useToolProgress } from "@pireel/studio-ui/tool-progress";
+import { t } from "@pireel/studio-ui/i18n";
 
 /** The tool whose call shows as the rough cut's checklist. */
 export const ROUGH_CUT_TOOL = "rough_cut";

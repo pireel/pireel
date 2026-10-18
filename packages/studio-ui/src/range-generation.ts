@@ -1,6 +1,7 @@
-import type { GenerationRequest } from './generation-settings';
-import { getStudioSpaceId, pollCreation, startGeneration } from './gen-api';
-import { t } from './i18n';
+import { editorRequest } from '@pireel/studio-ui/host-request';
+import type { GenerationRequest } from '@pireel/studio-ui/generation-settings';
+import { getStudioSpaceId, pollCreation, startGeneration } from '@pireel/studio-ui/gen-api';
+import { t } from '@pireel/studio-ui/i18n';
 
 /** A finished generation, ready to insert and to register in the project library. */
 export interface RangeGenerationResult {
@@ -60,7 +61,7 @@ export async function generateVisualForRange(projectId: string, prompt: string, 
 export async function generateAudioForRange(projectId: string, prompt: string, request: GenerationRequest): Promise<RangeGenerationResult> {
   if (request.toolId !== 'sfx-gen' && request.toolId !== 'music-gen') throw new RangeGenerationError(t('captions.generateFailed'));
   const spaceId = await getStudioSpaceId(projectId);
-  const res = await fetch(request.toolId === 'sfx-gen' ? '/api/studio/sfx' : '/api/studio/music', {
+  const res = await editorRequest(request.toolId === 'sfx-gen' ? '/api/studio/sfx' : '/api/studio/music', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ prompt, duration_sec: request.params.duration_sec, space_id: spaceId }),

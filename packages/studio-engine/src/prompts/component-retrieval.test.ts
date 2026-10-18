@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { components } from '@pireel/studio-kit';
-import { assembleComposeBrief } from '../briefs';
-import { MAX_COMPONENT_CANDIDATES, retrieveComponentCandidates } from './component-retrieval';
-import { getPreset } from './presets';
+import { assembleComposeBrief } from '@pireel/studio-engine/briefs';
+import { MAX_COMPONENT_CANDIDATES, retrieveComponentCandidates } from '@pireel/studio-engine/prompts/component-retrieval';
+import { getPreset } from '@pireel/studio-engine/prompts/presets';
 
 describe('component query-time retrieval', () => {
   it('indexes every registered component without a second hand-maintained list', () => {

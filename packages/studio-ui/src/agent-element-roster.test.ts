@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { emptyEditorDocumentV2 } from '@pireel/studio-engine/editor-document';
 import { runAgentTimelineTool } from '@pireel/studio-engine/agent-timeline';
-import { agentMediaClipRefs, buildAgentElementRoster } from './agent-element-roster';
+import { agentMediaClipRefs, buildAgentElementRoster } from '@pireel/studio-ui/agent-element-roster';
 
 describe('agent element roster', () => {
   it('lists B-roll and image clips next to blocks and spine shots so they can be pinned and @mentioned', () => {

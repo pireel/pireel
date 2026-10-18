@@ -4,7 +4,7 @@ import {
   editorialBriefFaceRequirements,
   editorialContentRoleUsesFaceGates,
   openingComparisonVisualIndex,
-} from './editorial-review';
+} from '@pireel/studio-ui/editorial-review';
 
 describe('openingComparisonVisualIndex', () => {
   it('keeps comparison images in numbered candidate order instead of source-time order', () => {

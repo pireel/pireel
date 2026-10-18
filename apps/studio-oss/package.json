@@ -2,7 +2,7 @@
   "name": "@pireel/studio-oss-shell",
   "version": "0.1.0",
   "private": true,
-  "description": "Minimal open-source shell for Pireel Studio: a plain Vite app that mounts the editor with no SaaS backend. Editing, preview, timeline, and client export run fully in the browser; generation capabilities stay unavailable until you inject your own StudioProviders (or drive the editor with an external agent).",
+  "description": "Embeddable video editor with the original Pireel workbench and AI editing interfaces; host applications supply services and scenario workflows.",
   "type": "module",
   "license": "AGPL-3.0-only",
   "scripts": {

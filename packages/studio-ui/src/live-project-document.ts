@@ -22,7 +22,7 @@ import {
   compositionToEditorDocument,
   projectDocumentToComposition,
 } from '@pireel/studio-engine/composition';
-import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
+import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-types';
 
 /**
  * Session facts folded into V2 at persistence time. Transcripts are deliberately absent: the

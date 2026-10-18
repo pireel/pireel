@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { V3_TOOLS } from '@pireel/studio-engine/agent-surface-v3/registry';
-import { t } from './i18n';
-import { studioToolDefFor } from './v3-tool-defs';
+import { t } from '@pireel/studio-ui/i18n';
+import { studioToolDefFor } from '@pireel/studio-ui/v3-tool-defs';
 
 describe('tool presentation', () => {
   it('renders every registered tool with a translated label', () => {

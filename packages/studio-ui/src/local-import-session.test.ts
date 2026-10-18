@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fileSig } from './media';
+import { fileSig } from '@pireel/studio-ui/media';
 import {
   localAssetIndexEntry,
   localAssetKindOf,

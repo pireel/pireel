@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { customBlock, mediaBlock, titleBlock } from '@pireel/studio-engine/composition';
-import { scalesProportionallyOnCanvas, snapCanvasRotation, visualCornerScaleFactor } from './use-box-drag';
+import { scalesProportionallyOnCanvas, snapCanvasRotation, visualCornerScaleFactor } from '@pireel/studio-ui/use-box-drag';
 
 describe('canvas block transform interaction', () => {
   it('keeps visual media and Motion components proportional while ordinary titles can reflow', () => {

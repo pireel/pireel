@@ -11,14 +11,14 @@
 import { useState } from 'react';
 import type { Composition, MediaRef } from '@pireel/studio-engine/composition';
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
-import type { GenElementResult } from './element-history';
-import type { PanelDragAsset, PanelMediaAsset } from './asset-card';
-import { MyAssetsPanel } from './my-assets-panel';
-import { CloudAssetsPanel } from './cloud-assets-panel';
-import { t } from './i18n';
-import { useStudioShell } from './shell-context';
+import type { GenElementResult } from '@pireel/studio-ui/element-history';
+import type { PanelDragAsset, PanelMediaAsset } from '@pireel/studio-ui/asset-card';
+import { MyAssetsPanel } from '@pireel/studio-ui/my-assets-panel';
+import { CloudAssetsPanel } from '@pireel/studio-ui/cloud-assets-panel';
+import { t } from '@pireel/studio-ui/i18n';
+import { useStudioShell } from '@pireel/studio-ui/shell-context';
 
-export type { PanelDragAsset } from './asset-card';
+export type { PanelDragAsset } from '@pireel/studio-ui/asset-card';
 export type GenType = 'image' | 'video' | 'element' | 'audio';
 
 type Scope = 'mine' | 'official' | 'cloud';

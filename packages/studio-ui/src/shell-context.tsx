@@ -85,6 +85,8 @@ export interface StudioAudioTemplateGalleryProps {
 }
 
 export interface StudioShell {
+  /** Product-owned scenario UI; omitted by the standalone editor component. */
+  WorkflowEntry?: ComponentType<import('./editor-workflow-host').EditorWorkflowEntryProps>;
   /** Insufficient-credits card (SaaS billing piece; omitted = not rendered). */
   CreditsCard?: ComponentType<{ need: number; balance: number }>;
   /** Generation model params table (quality/duration/resolution; omitted = panel hides the matching selectors). */

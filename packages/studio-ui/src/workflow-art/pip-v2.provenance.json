@@ -1,8 +1,0 @@
-{
-  "tool": "built-in image_gen",
-  "mode": "edit",
-  "created": "2026-09-22",
-  "asset": "pip-v2.png",
-  "source": "pip-v1.png",
-  "prompt": "Use case: precise-object-edit. Edit the supplied Pireel Studio icon ONLY to change its material colors. Preserve its object shapes, perspective, silhouette, lighting, bevels, soft shadows, spacing, icon size and genuinely transparent background. No added or removed objects, no text, no new border or background plate. Keep a premium matte ceramic / clay 3D material family that is cohesive with the reference. Make the color difference obvious when icons are viewed together at 56px on a dark charcoal UI. Lilac and muted lavender ceramic main screen border, deep indigo inner panel, pale butter-yellow landscape, warm ivory presenter inset, small coral play triangle. Lavender is the dominant visible area. Preserve exact nested screen geometry and portrait inset. Produce one standalone transparent PNG final icon."
-}

@@ -1,4 +1,5 @@
 'use client';
+import { editorRequest } from '@pireel/studio-ui/host-request';
 
 /**
  * Project draft persistence — multi-project: one localStorage key per project
@@ -34,7 +35,7 @@ import type {
   StudioProjectDto,
   StudioProjectMeta,
 } from '@pireel/studio-engine/project-dto';
-import { t } from './i18n';
+import { t } from '@pireel/studio-ui/i18n';
 import { collectUploadedMediaKeys } from '@pireel/studio-engine/cloud-media-persistence';
 
 const PREFIX = 'studio:draft:';
@@ -204,7 +205,7 @@ export function migrateLegacyDraft() {
 /** Server project list (visible across devices). Returns null on failure; caller falls back to local cache. */
 export async function serverListProjects(): Promise<StudioProjectMeta[] | null> {
   try {
-    const r = await fetch('/api/studio/projects');
+    const r = await editorRequest('/api/studio/projects');
     if (!r.ok) return null;
     const { projects } = (await r.json()) as { projects: StudioProjectMeta[] };
     return Array.isArray(projects) ? projects : [];
@@ -217,7 +218,7 @@ export async function serverListProjects(): Promise<StudioProjectMeta[] | null> 
  *  when the row doesn't exist yet — the first autosave carries the local title up anyway. */
 export async function serverRenameProject(id: string, title: string): Promise<boolean> {
   try {
-    const r = await fetch(`/api/studio/projects/${encodeURIComponent(id)}`, {
+    const r = await editorRequest(`/api/studio/projects/${encodeURIComponent(id)}`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ documentSchemaVersion: 2, knownVersion: null, title }),
@@ -231,11 +232,11 @@ export async function serverRenameProject(id: string, title: string): Promise<bo
 /** Fetch a single project in full (open project / cross-device restore). Returns null on 404/failure. */
 export async function serverLoadProject(id: string): Promise<StudioProjectDto | null> {
   try {
-    const r = await fetch(`/api/studio/projects/${id}`);
+    const r = await editorRequest(`/api/studio/projects/${id}`);
     if (!r.ok) return null;
     const { project } = (await r.json()) as { project: StudioProjectDto };
     if (project) {
-      const { markLocalMediaSynced } = await import('./local-media');
+      const { markLocalMediaSynced } = await import('@pireel/studio-ui/local-media');
       for (const sig of collectUploadedMediaKeys(project.document, project.context).keys()) void markLocalMediaSynced(sig);
     }
     return project ?? null;
@@ -253,7 +254,7 @@ async function putWire(id: string, wire: ProjectSaveWire): Promise<Response> {
   if (json.length > 8192 && typeof CompressionStream !== 'undefined') {
     try {
       const body = await new Response(new Blob([json]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
-      return await fetch(`/api/studio/projects/${id}`, {
+      return await editorRequest(`/api/studio/projects/${id}`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json', 'x-content-gzip': '1' },
         body,
@@ -262,7 +263,7 @@ async function putWire(id: string, wire: ProjectSaveWire): Promise<Response> {
       /* compression failed; use plaintext */
     }
   }
-  return fetch(`/api/studio/projects/${id}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: json });
+  return editorRequest(`/api/studio/projects/${id}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: json });
 }
 
 /** Transport for one save request. The sync layer owns retries, baselines and the pending list. */
@@ -296,7 +297,7 @@ export async function serverSaveProject(id: string, wire: ProjectSaveWire): Prom
 
 export async function serverDeleteProject(id: string): Promise<void> {
   try {
-    await fetch(`/api/studio/projects/${id}`, { method: 'DELETE' });
+    await editorRequest(`/api/studio/projects/${id}`, { method: 'DELETE' });
   } catch {
     /* local delete already applied; a later cloud retry is fine */
   }

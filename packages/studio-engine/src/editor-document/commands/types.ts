@@ -1,4 +1,4 @@
-import type { PlaybookSnapshot } from '../../brand-playbook';
+import type { PlaybookSnapshot } from '@pireel/studio-engine/project-brand-metadata';
 import type { TimelineTransition } from '../types';
 import type { TransitionPatch } from './transitions';
 import type {

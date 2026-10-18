@@ -1,4 +1,5 @@
 'use client';
+import { editorRequest } from '@pireel/studio-ui/host-request';
 
 /**
  * Studio visual analysis: observe footage without prescribing an edit. It produces:
@@ -10,9 +11,9 @@
 
 import { detectScenes } from '@pireel/studio-engine/video-edit/scene-detection';
 import { extractThumbnails } from '@pireel/studio-engine/video-edit/thumbnails';
-import { type NRect, type SafeZone, analyzeGeometryAndQuality, analyzeGeometryRange, analyzeQualityAtTimes, geomNote, safeZoneForRange } from './geometry';
-import { type DerivedPalette, extractPalette } from './palette';
-import { fileSig } from './media';
+import { type NRect, type SafeZone, analyzeGeometryAndQuality, analyzeGeometryRange, analyzeQualityAtTimes, geomNote, safeZoneForRange } from '@pireel/studio-ui/geometry';
+import { type DerivedPalette, extractPalette } from '@pireel/studio-ui/palette';
+import { fileSig } from '@pireel/studio-ui/media';
 import { buildVisualQualityWindows, fineQualitySampleTimes, type VisualQualityWindow } from '@pireel/studio-engine/visual-quality';
 
 // Data contracts live in the engine package (analysis impl stays here): layoutFromPlan etc. consume these shapes
@@ -318,7 +319,7 @@ export async function analyzeVisual(
     VLM_CONCURRENCY,
     async (f): Promise<VisualLabel | null> => {
       try {
-        const resp = await fetch('/api/studio/vlm', {
+        const resp = await editorRequest('/api/studio/vlm', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ image_base64: f.base64, mime: f.mime }),

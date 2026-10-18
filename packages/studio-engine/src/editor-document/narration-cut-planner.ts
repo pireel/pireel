@@ -1,4 +1,4 @@
-import type { TranscriptSegment } from '../project-dto';
+import type { TranscriptSegment } from '@pireel/studio-engine/project-types';
 import { narrativeTimelineRangesForAssetSourceRange, type NarrativeTimelineRange } from './read-model';
 import type { EditorDocumentV2 } from './types';
 

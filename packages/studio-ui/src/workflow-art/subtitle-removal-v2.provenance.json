@@ -1,8 +1,0 @@
-{
-  "tool": "built-in image_gen",
-  "mode": "edit",
-  "created": "2026-09-22",
-  "asset": "subtitle-removal-v2.png",
-  "source": "subtitle-removal-v1.png",
-  "prompt": "Use case: precise-object-edit. Edit the supplied Pireel Studio icon ONLY to change its material colors. Preserve its object shapes, perspective, silhouette, lighting, bevels, soft shadows, spacing, icon size and genuinely transparent background. No added or removed objects, no text, no new border or background plate. Keep a premium matte ceramic / clay 3D material family cohesive with the other scene icons. Make the color difference obvious at 56px on a dark charcoal UI. Clear sea-glass jade and mint-green ceramic outer video frame, deep pine-green inner screen, ivory caption lines, one pale apricot and soft ivory eraser. Green is the dominant visible area. Preserve the eraser angle, bitten text line and all shapes. Produce one standalone transparent PNG final icon."
-}

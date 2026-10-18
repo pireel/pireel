@@ -1,4 +1,4 @@
-import type { AttachedTimelineFrame } from './studio-chat';
+import type { AttachedTimelineFrame } from '@pireel/studio-ui/studio-chat';
 
 export interface TimelineFrameEvidence {
   id: string;

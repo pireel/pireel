@@ -9,13 +9,13 @@
  * executor and server replay run them the same way.
  */
 
-import { fail, freeGraphicsStackOrder, mutation, string, uniqueId, type AgentTimelineOutcome } from './agent-timeline';
-import { blockId, type Block } from './composition-core';
-import type { EditorDocumentV2, HandoffItem, TimelineAnchor } from './editor-document/types';
-import { patchEditorAppearance } from './editor-document/commands/appearance';
-import { insertOverlayDocumentClip } from './overlay-track-edit';
-import { lookSourceSyntaxIssues } from './look-source-syntax';
-import { LOOK_TEMPLATE_PREFIX, normalizeLook } from './look';
+import { fail, freeGraphicsStackOrder, mutation, string, uniqueId, type AgentTimelineOutcome } from '@pireel/studio-engine/agent-timeline';
+import { blockId, type Block } from '@pireel/studio-engine/composition-core';
+import type { EditorDocumentV2, HandoffItem, TimelineAnchor } from '@pireel/studio-engine/editor-document/types';
+import { patchEditorAppearance } from '@pireel/studio-engine/editor-document/commands/appearance';
+import { insertOverlayDocumentClip } from '@pireel/studio-engine/overlay-track-edit';
+import { lookSourceSyntaxIssues } from '@pireel/studio-engine/look-source-syntax';
+import { LOOK_TEMPLATE_PREFIX, normalizeLook } from '@pireel/studio-engine/look';
 
 type Input = Record<string, unknown>;
 

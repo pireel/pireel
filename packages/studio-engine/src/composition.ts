@@ -1,3 +1,4 @@
+import './editor-product-commands';
 /**
  * Studio composition — the single public entry (barrel).
  *
@@ -36,7 +37,6 @@ export * from './overlay-document-edit';
 export * from './overlay-track-edit';
 export * from './layout-document-edit';
 export * from './audio-document-edit';
-export * from './agent-timeline';
 export * from './caption-document-edit';
 export * from './narrative-document-edit';
 export * from './visual-document-edit';
@@ -49,3 +49,5 @@ export * from './local-asset-locator';
 export * from './templates';
 export * from './assemble';
 export * from './block-factory';
+
+export * from './agent-timeline';

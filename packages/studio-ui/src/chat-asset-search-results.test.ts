@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assetSearchCardItems } from './chat-asset-search-results';
+import { assetSearchCardItems } from '@pireel/studio-ui/chat-asset-search-results';
 
 describe('assetSearchCardItems', () => {
   it('keeps only the display-safe subset of search results', () => {

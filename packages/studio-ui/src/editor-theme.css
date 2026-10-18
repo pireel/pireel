@@ -1,0 +1,134 @@
+/* Shared editor appearance. Hosted Studio and the embeddable editor use the same tokens. */
+/* Editorial surfaces share one neutral four-step hierarchy:
+ * page → content block → content header → inner card. */
+.pireel-editor-theme,
+.studio-editorial,
+.editorial-theme,
+body:has(.pireel-editor-theme),
+body:has(.studio-editorial),
+body:has(.editorial-theme),
+body:has(.landing-editorial) {
+  color-scheme: dark;
+  color: var(--color-ink);
+  --color-bg: #141414;
+  --color-canvas: #262626;
+  --color-panel: #303030;
+  --color-panel-2: #3b3b3b;
+  --color-ink: #f3efe4;
+  --color-ink-2: #d8d2c6;
+  --color-ink-3: #aaa397;
+  --color-ink-4: #999287;
+  --color-line: rgba(243, 239, 228, 0.13);
+  --color-line-2: rgba(243, 239, 228, 0.27);
+  --color-accent: var(--color-brand);
+  --color-accent-ink: var(--color-brand);
+  --color-accent-2: #b66a57;
+  --color-switch-on: var(--color-ink-2);
+  --color-switch-off: #34352f;
+  --color-switch-thumb-on: var(--color-panel);
+  --color-switch-thumb-off: #aaa397;
+  --color-switch-border: rgba(243, 239, 228, 0.2);
+  --color-switch-focus: var(--color-brand);
+  --color-lime: #b6b98f;
+  --color-lime-soft: #303126;
+  --color-lime-ink: #d7d9b5;
+  --color-teal: #7e9f95;
+  --color-rose: #c27c72;
+  --color-violet: #958da2;
+  --color-amber: #bd9468;
+  --color-foreground: #f3efe4;
+  --color-background: #141414;
+  --color-card: #303030;
+  --color-card-foreground: #f3efe4;
+  --color-popover: #303030;
+  --color-popover-foreground: #f3efe4;
+  --color-primary: var(--color-brand);
+  --color-primary-foreground: var(--color-brand-foreground);
+  --color-secondary: #3b3b3b;
+  --color-secondary-foreground: #f3efe4;
+  --color-muted: #3b3b3b;
+  --color-muted-foreground: #aaa397;
+  --color-accent-foreground: var(--color-brand-foreground);
+  --color-destructive: #c27c72;
+  --color-destructive-foreground: #fffaf0;
+  --color-border: rgba(243, 239, 228, 0.13);
+  --color-input: rgba(243, 239, 228, 0.18);
+  --color-ring: var(--color-brand);
+  --studio-rail-surface: #262626;
+  --radius-sm: 0.1875rem;
+  --radius-md: 0.25rem;
+  --radius-lg: 0.375rem;
+  --radius-xl: 0.5rem;
+  --radius: 0.25rem;
+  --shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.32);
+  --shadow-md: 0 10px 28px -16px rgba(0, 0, 0, 0.8);
+  --shadow-lg: 0 28px 72px -28px rgba(0, 0, 0, 0.9);
+  background-color: var(--color-bg);
+  background-image:
+    radial-gradient(ellipse at 82% 5%, rgba(243, 239, 228, 0.025), transparent 31%),
+    radial-gradient(circle at 12% 22%, rgba(243, 239, 228, 0.035) 0 0.55px, transparent 0.7px),
+    radial-gradient(circle at 76% 68%, rgba(0, 0, 0, 0.12) 0 0.55px, transparent 0.7px);
+  background-size: auto, 9px 9px, 13px 13px;
+}
+
+/* Studio follows the saved site theme, including menus rendered through portals. */
+html:not(.dark) .pireel-editor-theme,
+html:not(.dark) body:has(.pireel-editor-theme),
+html:not(.dark) body:has(.pireel-editor-theme) .editorial-theme,
+html:not(.dark) .studio-editorial,
+html:not(.dark) body:has(.studio-editorial),
+html:not(.dark) body:has(.studio-editorial) .editorial-theme {
+  color-scheme: light;
+  --color-accent-ink: var(--color-brand-text);
+  --color-bg: #e8e8e4;
+  --color-canvas: #fafaf8;
+  --color-panel: #f1f1ed;
+  --color-panel-2: #e5e5df;
+  --color-ink: #24251f;
+  --color-ink-2: #45463e;
+  --color-ink-3: #686a60;
+  --color-ink-4: #797c71;
+  --color-line: rgba(36, 37, 31, 0.12);
+  --color-line-2: rgba(36, 37, 31, 0.24);
+  --color-switch-on: var(--color-ink-2);
+  --color-switch-off: #d7d8d0;
+  --color-switch-thumb-on: var(--color-panel);
+  --color-switch-thumb-off: #ffffff;
+  --color-switch-border: rgba(36, 37, 31, 0.18);
+  --color-switch-focus: var(--color-brand-text);
+  --color-lime-soft: #e7ead9;
+  --color-lime-ink: #55633a;
+  --color-foreground: #24251f;
+  --color-background: #e8e8e4;
+  --color-card: #f1f1ed;
+  --color-card-foreground: #24251f;
+  --color-popover: #fafaf8;
+  --color-popover-foreground: #24251f;
+  --color-primary: var(--color-brand);
+  --color-primary-foreground: var(--color-brand-foreground);
+  --color-secondary: #e5e5df;
+  --color-secondary-foreground: #24251f;
+  --color-muted: #e5e5df;
+  --color-muted-foreground: #686a60;
+  --color-destructive: #ac493d;
+  --color-border: rgba(36, 37, 31, 0.12);
+  --color-input: rgba(36, 37, 31, 0.18);
+  --color-ring: var(--color-brand-text);
+  --studio-rail-surface: #fafaf8;
+  --shadow-sm: 0 1px 3px rgba(36, 37, 31, 0.08);
+  --shadow-md: 0 10px 28px -16px rgba(36, 37, 31, 0.25);
+  --shadow-lg: 0 28px 72px -28px rgba(36, 37, 31, 0.3);
+  background-image: none;
+}
+
+.pireel-editor-theme ::selection,
+.studio-editorial ::selection,
+.editorial-theme ::selection {
+  color: var(--color-accent-foreground);
+  background: var(--color-accent);
+}
+
+
+.pireel-editor-theme * {
+  scrollbar-color: var(--color-line-2) transparent;
+}

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { coverFrameAtTime, coverFrameTime, coverFrameIdentity } from './cover-frame-selection';
+import { coverFrameAtTime, coverFrameTime, coverFrameIdentity } from '@pireel/studio-ui/cover-frame-selection';
 
 it('maps edited time to exact source frames across cuts, speed changes and multiple sources', () => {
   const ranges = [{ assetId: 'a', startSec: 0, endSec: 2, sourceInSec: 10, sourceOutSec: 14 }, { assetId: 'b', startSec: 3, endSec: 5, sourceInSec: 20, sourceOutSec: 22 }];

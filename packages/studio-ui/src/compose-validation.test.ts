@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { acceptGeneratedComponent } from './compose-validation';
-import { GeneratedBlockValidationError } from './compose-result';
+import { acceptGeneratedComponent } from '@pireel/studio-ui/compose-validation';
+import { GeneratedBlockValidationError } from '@pireel/studio-ui/compose-result';
 import { componentContractExample } from '@pireel/studio-engine/component-authoring-contract';
 
 const seed = { id: 'g1', innerHtml: '', timelineBody: '', boxPx: { w: 580, h: 326 } };

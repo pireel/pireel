@@ -1,4 +1,5 @@
 'use client';
+import { editorRequest } from '@pireel/studio-ui/host-request';
 
 import {
   buildEditorialCandidateSpecs,
@@ -16,7 +17,7 @@ import {
   refineEditorialRangeLocally,
 } from '@pireel/studio-engine/mouth-state';
 import { extractThumbnails } from '@pireel/studio-engine/video-edit/thumbnails';
-import { analyzeMouthAtTimes } from './geometry';
+import { analyzeMouthAtTimes } from '@pireel/studio-ui/geometry';
 import {
   editorialBriefHash,
   editorialReviewCacheKey,
@@ -26,14 +27,14 @@ import {
   getCachedVisualQuestion,
   setCachedVisualQuestion,
   visualQuestionCacheKey,
-} from './editorial-review-cache';
-import { fileSig } from './media';
+} from '@pireel/studio-ui/editorial-review-cache';
+import { fileSig } from '@pireel/studio-ui/media';
 import {
   deleteEditorialReviewProxy,
   editorialReviewProxyMeetsProviderMinimum,
   renderEditorialReviewProxy,
   uploadEditorialReviewProxy,
-} from './editorial-review-proxy';
+} from '@pireel/studio-ui/editorial-review-proxy';
 import { MAX_VISUAL_QUESTION_CHARS, normalizeVisualQuestionAnswers, visualQuestionSpecs, type VisualQuestionAnswer, type VisualQuestionRange } from '@pireel/studio-engine/visual-question';
 
 async function blobToBase64(blob: Blob): Promise<{ base64: string; mime: string }> {
@@ -213,7 +214,7 @@ export async function compareEditorialOpenings(
       thumbnails.forEach((thumbnail) => URL.revokeObjectURL(thumbnail.url));
     }
   }
-  const response = await fetch('/api/studio/review', {
+  const response = await editorRequest('/api/studio/review', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -351,7 +352,7 @@ export async function reviewEditorialCandidates(
       comparisonSummary: string;
       candidates: EditorialCandidateReview[];
     }> => {
-      const response = await fetch('/api/studio/review', {
+      const response = await editorRequest('/api/studio/review', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ mode: 'source-candidates', brief: normalizedBrief, candidates: specs, ...(options.projectId ? { projectId: options.projectId } : {}), ...payload }),
@@ -544,7 +545,7 @@ export async function askEditorialQuestion(
     frames.push({ candidateId: requested.candidateId, phase: requested.phase, atSec: Math.round(thumbnail.timestamp * 1_000) / 1_000, image_base64: encoded.base64, mime: encoded.mime });
   }
   if (!frames.length) throw new Error('question frames extraction returned no readable frames');
-  const response = await fetch('/api/studio/review', {
+  const response = await editorRequest('/api/studio/review', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({

@@ -5,7 +5,7 @@ import type { ExportRecommendations } from '@pireel/studio-engine/export-options
 import {
   AdaptiveExportPicker,
   adaptiveExportSelection,
-} from './chat-export-card';
+} from '@pireel/studio-ui/chat-export-card';
 
 const recommendations: ExportRecommendations = {
   canvas: { width: 1080, height: 1920, orientation: 'portrait' },

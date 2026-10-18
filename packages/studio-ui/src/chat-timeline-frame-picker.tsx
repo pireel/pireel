@@ -4,7 +4,7 @@
 
 import { useEffect, useRef } from 'react';
 import { LoaderCircle, ScanLine } from 'lucide-react';
-import { t } from './i18n';
+import { t } from '@pireel/studio-ui/i18n';
 
 /** Keep enough editor width visible to make the real timeline tappable while frame-pick mode is armed. */
 export function shouldCollapseChatForTimelineFramePick(viewportWidth: number, panelWidth: number): boolean {

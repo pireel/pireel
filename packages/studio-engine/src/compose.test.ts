@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BLOCK_SYSTEM, buildBlockPrompt, parseBlockResponse } from './compose';
+import { BLOCK_SYSTEM, buildBlockPrompt, parseBlockResponse } from '@pireel/studio-engine/compose';
 
 describe('BLOCK_SYSTEM 质量契约(反单调 + 分阶段动效)', () => {
   it('含版式原型库与动效编排(防回归:别改丢)', () => {

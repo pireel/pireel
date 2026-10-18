@@ -1,6 +1,7 @@
+import { editorRequest } from '@pireel/studio-ui/host-request';
 import { imageThumb } from '@pireel/ui/image-url';
-import { materializeRemoteMedia } from './remote-media';
-import { markLocalMediaSynced } from './local-media';
+import { materializeRemoteMedia } from '@pireel/studio-ui/remote-media';
+import { markLocalMediaSynced } from '@pireel/studio-ui/local-media';
 
 /**
  * Cloud rendezvous for studio media bytes (browser side) — the client half of /api/studio/media.
@@ -28,7 +29,7 @@ function putWithProgress(url: string, file: File, headers: Record<string, string
   return new Promise((resolve) => {
     if (options?.signal?.aborted) { resolve(false); return; }
     if (typeof XMLHttpRequest === 'undefined') {
-      fetch(url, { method: 'PUT', headers, body: file, signal: options?.signal })
+      editorRequest(url, { method: 'PUT', headers, body: file, signal: options?.signal })
         .then((response) => resolve(response.ok))
         .catch(() => resolve(false));
       return;
@@ -69,7 +70,7 @@ const PUT_ATTEMPTS = 4;
 const PART_CONCURRENCY = 4;
 
 async function postMedia(body: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown>> {
-  const response = await fetch('/api/studio/media', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal });
+  const response = await editorRequest('/api/studio/media', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal });
   const result = await response.json().catch(() => ({})) as Record<string, unknown>;
   if (!response.ok) throw new Error(`media ${String(body.action)}: ${typeof result.error === 'string' ? result.error : `HTTP ${response.status}`}`);
   return result;
@@ -131,7 +132,7 @@ export async function cloudBackupMedia(file: File, sig: string, options?: CloudB
 /** Metadata-only completion, scoped to the project that queued the bytes. */
 export async function cloudConfirmUpload(projectId: string, sig: string, key: string): Promise<boolean> {
   try {
-    const response = await fetch('/api/studio/media', {
+    const response = await editorRequest('/api/studio/media', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ action: 'confirm-upload', projectId, sig, key }),
     });
@@ -145,7 +146,7 @@ export async function cloudConfirmUpload(projectId: string, sig: string, key: st
 export async function cloudMediaPreviewUrl(sig: string, options: { cloudKey: string }): Promise<string | null> {
   if (!options.cloudKey.startsWith('studio-src/')) return imageThumb(options.cloudKey, 'original');
   try {
-    const response = await fetch('/api/studio/media', {
+    const response = await editorRequest('/api/studio/media', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ action: 'get', sig, key: options.cloudKey }),
     });
@@ -171,7 +172,7 @@ export async function cloudFetchMedia(sig: string, options?: { cloudKey?: string
       await markLocalMediaSynced(sig);
       return materialized.file;
     }
-    const r = await fetch('/api/studio/media', {
+    const r = await editorRequest('/api/studio/media', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ action: 'get', sig, ...(options?.cloudKey ? { key: options.cloudKey } : {}) }),

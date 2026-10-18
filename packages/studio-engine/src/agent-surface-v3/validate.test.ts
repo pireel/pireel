@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { TRANSITION_EFFECT_IDS } from './schemas';
-import { validateV3Input } from './validate';
+import { TRANSITION_EFFECT_IDS } from '@pireel/studio-engine/agent-surface-v3/schemas';
+import { validateV3Input } from '@pireel/studio-engine/agent-surface-v3/validate';
 
 describe('validateV3Input', () => {
   it('refuses an effect outside the enum and lists what is allowed', () => {

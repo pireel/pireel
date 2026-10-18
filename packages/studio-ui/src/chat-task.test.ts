@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { UIMessage } from 'ai';
-import { latestTask, patchTask, resumeTaskHint, resumeEditingTask, taskOf, unfinishedRoughCut, withTaskUsage, type ChatTask } from './chat-task';
-import { createStudioTurnLedger, effectiveStudioTurnMessages, recordStudioTurnToolResult, sanitizeRestored } from './chat-thread-store';
+import { latestTask, patchTask, resumeTaskHint, resumeEditingTask, taskOf, unfinishedRoughCut, withTaskUsage, type ChatTask } from '@pireel/studio-ui/chat-task';
+import { createStudioTurnLedger, effectiveStudioTurnMessages, recordStudioTurnToolResult, sanitizeRestored } from '@pireel/studio-ui/chat-thread-store';
 
 const task = (id: string): ChatTask => ({ id, goal: 'Edit the full video', skills: ['captions', 'graphics'], mode: 'one-click', state: 'running' });
 const user = (id: string, value: ChatTask): UIMessage => ({ id, role: 'user', parts: [{ type: 'text', text: id }], metadata: { task: value } });

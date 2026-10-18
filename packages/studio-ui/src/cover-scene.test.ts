@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { compositionToEditorDocument, emptyComposition } from '@pireel/studio-engine/composition';
 import { emptyPlaybook, playbookSnapshot } from '@pireel/studio-engine/brand-playbook';
 import { playbookAgentBrief } from '@pireel/studio-engine/brand-edit-params';
-import { CoverSceneController, videoCoverAspect, coverSceneFromDocument, coverSceneInput, withCoverScene, type CoverSceneHost } from './cover-scene';
+import { CoverSceneController, videoCoverAspect, coverSceneFromDocument, coverSceneInput, withCoverScene, type CoverSceneHost } from '@pireel/studio-ui/cover-scene';
 
 function fixture() {
   let document = compositionToEditorDocument({ projectId: 'cover', videoSig: 'sig', composition: { ...emptyComposition(), video: { url: 'blob:source', durationSec: 12 }, shots: [{ id: 'speaker', srcStart: 2, srcEnd: 6, treatment: 'full' }] } }).document;

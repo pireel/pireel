@@ -1,3 +1,5 @@
+import { setStudioProviders, unavailableProviders } from '@pireel/studio-engine/providers';
+beforeEach(() => setStudioProviders({ ...unavailableProviders(), mediaProxyUrl: url => `/api/media/fetch?url=${encodeURIComponent(url)}` }));
 /** @vitest-environment jsdom */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -99,4 +101,10 @@ describe('decodableMediaUrl', () => {
     expect(decodableMediaUrl('/media/a.mp4')).toBe('/media/a.mp4');
     expect(decodableMediaUrl('https://cdn.example/a.mp4')).toBe('/api/media/fetch?url=https%3A%2F%2Fcdn.example%2Fa.mp4');
   });
+});
+
+it('leaves remote URLs direct when running without a hosted media adapter', () => {
+  setStudioProviders(unavailableProviders());
+  vi.stubGlobal('window', { location: { href: 'http://localhost:5173/', origin: 'http://localhost:5173' } });
+  expect(decodableMediaUrl('https://cdn.example/a.mp4')).toBe('https://cdn.example/a.mp4');
 });

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { readWhiteboardEntities } from './whiteboard-entities';
+import { readWhiteboardEntities } from '@pireel/studio-ui/whiteboard-entities';
 const base = { id: 'person', name: '真实人物', kind: 'person', beatIds: ['intro'], queries: [], status: 'selected', assetId: 'portrait', treatment: 'person-cutout', reason: '已检查原片中的人物照片并确认身份。' };
 const parse = (rows: unknown) => readWhiteboardEntities(rows, new Set(['intro']), new Set(['portrait']));
 it('preserves registered real material provenance without requiring a redundant search', () => {

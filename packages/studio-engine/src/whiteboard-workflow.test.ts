@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { whiteboardTaskPhase, whiteboardToolBlock } from './whiteboard-workflow';
-import { v3ToolCanMutate } from './agent-surface-v3/registry';
-import { validateV3Input } from './agent-surface-v3/validate';
-import { runAgentTimelineTool } from './agent-timeline';
-import { emptyEditorDocumentV2 } from './editor-document';
+import { whiteboardTaskPhase, whiteboardToolBlock } from '@pireel/studio-engine/whiteboard-workflow';
+import { v3ToolCanMutate } from '@pireel/studio-engine/agent-surface-v3/registry';
+import { validateV3Input } from '@pireel/studio-engine/agent-surface-v3/validate';
+import { runAgentTimelineTool } from '@pireel/studio-engine/agent-timeline';
+import { emptyEditorDocumentV2 } from '@pireel/studio-engine/editor-document';
 
 const task = { skillId: 'whiteboard-explainer', directorPlanRequired: true };
 const saved = { ...task, directorPlan: { revision: 1, beats: [{ id: 'intro' }] } };

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { emptyComposition } from './composition-core';
-import { compositionToEditorDocument } from './project-document';
-import { diffOps } from './project-dto';
-import { canonicalJson, hashSection } from './stable-json';
+import { emptyComposition } from '@pireel/studio-engine/composition-core';
+import { compositionToEditorDocument } from '@pireel/studio-engine/project-document';
+import { diffOps } from '@pireel/studio-engine/project-dto';
+import { canonicalJson, hashSection } from '@pireel/studio-engine/stable-json';
 import {
   applyDocumentOp,
   applyDocumentTransaction,
@@ -13,7 +13,7 @@ import {
   transcriptInputsFor,
   type DocumentOp,
   type DocumentTransaction,
-} from './document-transaction';
+} from '@pireel/studio-engine/document-transaction';
 
 const ctx = { projectId: 'tx-test' };
 

@@ -2,8 +2,8 @@
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ChatCoverEntry, CoverApplyButton } from './chat-cover-controls';
-import { setStudioLocale } from './i18n';
+import { ChatCoverEntry, CoverApplyButton } from '@pireel/studio-ui/chat-cover-controls';
+import { setStudioLocale } from '@pireel/studio-ui/i18n';
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const roots: ReturnType<typeof createRoot>[] = [];
 function mount(component: ReturnType<typeof createElement>) { const host = document.createElement('div'); document.body.append(host); const root = createRoot(host); roots.push(root); act(() => root.render(component)); return { host, root }; }

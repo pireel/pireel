@@ -1,5 +1,5 @@
 import { type LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
-import { localAssetMentionId } from './chat-local-asset-mention';
+import { localAssetMentionId } from '@pireel/studio-ui/chat-local-asset-mention';
 
 const idShapedKey = (key: string) =>
   key === 'id'

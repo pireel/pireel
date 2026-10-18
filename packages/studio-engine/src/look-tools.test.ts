@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { runAgentTimelineTool } from './agent-timeline';
-import { emptyEditorDocumentV2 } from './editor-document';
-import { validateEditorDocumentV2 } from './editor-document/validation';
-import type { EditorDocumentV2 } from './editor-document/types';
-import type { Block } from './composition-core';
-import { componentSchemaOf } from './component-schema';
-import { renderV3State } from './agent-surface-v3/state';
-import { applyEditorCommand } from './editor-document/commands/dispatcher';
+import { runAgentTimelineTool } from '@pireel/studio-engine/agent-timeline';
+import { emptyEditorDocumentV2 } from '@pireel/studio-engine/editor-document';
+import { validateEditorDocumentV2 } from '@pireel/studio-engine/editor-document/validation';
+import type { EditorDocumentV2 } from '@pireel/studio-engine/editor-document/types';
+import type { Block } from '@pireel/studio-engine/composition-core';
+import { componentSchemaOf } from '@pireel/studio-engine/component-schema';
+import { renderV3State } from '@pireel/studio-engine/agent-surface-v3/state';
+import { applyEditorCommand } from '@pireel/studio-engine/editor-document/commands/dispatcher';
 
 const card = "function (props, ctx) { return { html: '<b>' + props.title + '</b>', animate: function (tl, el) { tl.from(el, { opacity: 0, duration: 0.3 }, 0); } }; }";
 

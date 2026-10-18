@@ -1,4 +1,5 @@
 'use client';
+import { editorRequest } from '@pireel/studio-ui/host-request';
 
 /**
  * Client API layer for the Studio right-rail image/video generation panels.
@@ -12,7 +13,7 @@
  */
 
 import { imageThumb } from '@pireel/ui/image-url';
-import { t } from './i18n';
+import { t } from '@pireel/studio-ui/i18n';
 
 const SPACE_LS_PREFIX = 'pireel.studio.gen-space:v3:';
 
@@ -81,7 +82,7 @@ function cachedSpaceId(projectId: string): string | null {
 export async function getStudioSpaceId(projectId: string): Promise<string> {
   const cached = cachedSpaceId(projectId);
   if (cached) return cached;
-  const r = await fetch(`/api/studio/projects/${encodeURIComponent(projectId)}/gen-space`, {
+  const r = await editorRequest(`/api/studio/projects/${encodeURIComponent(projectId)}/gen-space`, {
     method: 'POST',
   });
   const j = (await r.json().catch(() => null)) as { space?: { id?: string } } | null;
@@ -96,7 +97,7 @@ export async function getStudioSpaceId(projectId: string): Promise<string> {
 export async function resolveStudioSpaceId(projectId: string): Promise<string | null> {
   const cached = cachedSpaceId(projectId);
   if (cached) return cached;
-  const r = await fetch(`/api/studio/projects/${encodeURIComponent(projectId)}/gen-space`);
+  const r = await editorRequest(`/api/studio/projects/${encodeURIComponent(projectId)}/gen-space`);
   if (!r.ok) return null;
   const j = (await r.json().catch(() => null)) as { space?: { id?: string } | null } | null;
   const id = j?.space?.id;
@@ -105,7 +106,7 @@ export async function resolveStudioSpaceId(projectId: string): Promise<string | 
 
 /** One generation request in a known space: the status lets a caller decide whether a stale space is worth retrying. */
 async function postGeneration(spaceId: string, toolId: 'image-gen' | 'video-gen', params: Record<string, unknown>, sceneRun?: string): Promise<{ status: number; result: StartResult }> {
-  const r = await fetch('/api/create', {
+  const r = await editorRequest('/api/create', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ space_id: spaceId, tool_id: toolId, params, ...(sceneRun ? { scene_run: sceneRun } : {}) }),
@@ -190,7 +191,7 @@ export function genJobFromCreation(raw: RawCreation): GenJob {
 
 /** Poll one creation. Network hiccups are treated as pending, checked again next round. */
 export async function pollCreation(id: string): Promise<GenJob | null> {
-  const r = await fetch(`/api/create/${encodeURIComponent(id)}`);
+  const r = await editorRequest(`/api/create/${encodeURIComponent(id)}`);
   if (!r.ok) return null;
   const j = (await r.json().catch(() => null)) as RawCreation | null;
   if (!j) return null;
@@ -201,7 +202,7 @@ export async function pollCreation(id: string): Promise<GenJob | null> {
 /** One space's generation history, newest first (pending included, so polling resumes on mount). */
 export async function listSpaceGens(spaceId: string, type: 'image' | 'video' | 'audio', limit = 30): Promise<GenJob[] | null> {
   const creationType = type === 'audio' ? 'bgm' : type;
-  const r = await fetch(`/api/create/list?space_id=${encodeURIComponent(spaceId)}&type=${creationType}&limit=${limit}`);
+  const r = await editorRequest(`/api/create/list?space_id=${encodeURIComponent(spaceId)}&type=${creationType}&limit=${limit}`);
   if (!r.ok) return r.status === 400 || r.status === 404 ? null : [];
   const j = (await r.json().catch(() => null)) as { items?: RawCreation[] } | null;
   return (j?.items ?? []).map(genJobFromCreation).filter((x) => x.id);

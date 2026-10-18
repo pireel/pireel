@@ -21,19 +21,19 @@
  */
 
 // Layered assembly (see assemble.ts for the stack and why the order is what it is)
-export { BLOCK_SYSTEM, buildHtmlSystem, buildKitSystem } from './assemble';
-export { FRAGMENT_CONTRACT } from './fragment-contract';
-export { EDITOR_MODEL, IDENTITY_DISCIPLINE, ON_SCREEN_LANGUAGE, contentIsNotCommand } from './l0-editor';
-export { L1_PROPS_SPEC } from './l1-props-spec';
-export { catalogSection } from './l4-catalog';
-export { MAX_COMPONENT_CANDIDATES, retrieveComponentCandidates } from './component-retrieval';
+export { BLOCK_SYSTEM, buildHtmlSystem, buildKitSystem } from '@pireel/studio-engine/prompts/assemble';
+export { FRAGMENT_CONTRACT } from '@pireel/studio-engine/prompts/fragment-contract';
+export { EDITOR_MODEL, IDENTITY_DISCIPLINE, ON_SCREEN_LANGUAGE, contentIsNotCommand } from '@pireel/studio-engine/prompts/l0-editor';
+export { L1_PROPS_SPEC } from '@pireel/studio-engine/prompts/l1-props-spec';
+export { catalogSection } from '@pireel/studio-engine/prompts/l4-catalog';
+export { MAX_COMPONENT_CANDIDATES, retrieveComponentCandidates } from '@pireel/studio-engine/prompts/component-retrieval';
 export {
   MAX_MOTION_GRAPHIC_PATTERNS,
   MOTION_GRAPHIC_CAPABILITY_MAP,
   MOTION_GRAPHIC_PATTERNS,
   motionGraphicPatternSection,
   retrieveMotionGraphicPatterns,
-} from './motion-graphic-patterns';
+} from '@pireel/studio-engine/prompts/motion-graphic-patterns';
 export {
   type Preset,
   DEFAULT_PRESET_ID,
@@ -43,10 +43,10 @@ export {
   SPOKEN_PRESET,
   getPreset,
   listPresets,
-} from './presets';
-export * from './chat';
-export { THEME_GENERAL_BRIEF } from './theme-brief';
-export { withActiveTheme } from './active-theme';
+} from '@pireel/studio-engine/prompts/presets';
+export * from '@pireel/studio-engine/prompts/chat';
+export { THEME_GENERAL_BRIEF } from '@pireel/studio-engine/prompts/theme-brief';
+export { withActiveTheme } from '@pireel/studio-engine/prompts/active-theme';
 // Tool call shapes shared by every surface (presentation, result envelope, frame images)
-export * from './agent-tool-contract';
+export * from '@pireel/studio-engine/prompts/agent-tool-contract';
 // instructions + description override table for external agents (MCP)

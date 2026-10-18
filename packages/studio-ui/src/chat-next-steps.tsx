@@ -1,4 +1,4 @@
-import { t } from "./i18n";
+import { t } from "@pireel/studio-ui/i18n";
 
 /**
  * Next steps at the end of the latest reply, as the agent offers them: <next>…</next> lines closing its

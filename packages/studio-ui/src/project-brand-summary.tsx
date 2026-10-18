@@ -2,7 +2,7 @@ import { Popover } from 'radix-ui';
 import { ChevronDown, Palette } from 'lucide-react';
 import { type PlaybookSnapshot } from '@pireel/studio-engine/brand-playbook';
 import { brandPreferences } from '@pireel/studio-engine/brand-preferences';
-import { studioLocale } from './i18n';
+import { studioLocale } from '@pireel/studio-ui/i18n';
 
 export function ProjectBrandSummary({ brand }: { brand: PlaybookSnapshot | null | undefined }) {
   const zh = studioLocale().startsWith('zh');

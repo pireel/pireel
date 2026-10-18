@@ -1,3 +1,4 @@
+import {studioProviders} from '@pireel/studio-engine/providers';
 /**
  * External agent bridge (browser side) — connects to /api/studio/bridge (StudioBridge DO),
  * letting Codex/Claude Code drive this tab's runStudioTool via /api/studio/mcp.
@@ -45,6 +46,8 @@ export function useAgentBridge(opts: AgentBridgeOpts): AgentBridgeHandle {
   const handleRef = useRef<AgentBridgeHandle>({ reclaim: () => {} });
 
   useEffect(() => {
+    const bridgeUrl = studioProviders().bridgeUrl;
+    if (!bridgeUrl) return;
     let ws: WebSocket | null = null;
     let alive = true;
     let retries = 0;
@@ -54,8 +57,9 @@ export function useAgentBridge(opts: AgentBridgeOpts): AgentBridgeHandle {
 
     const connect = () => {
       if (!alive) return;
-      const url = new URL('/api/studio/bridge', location.href);
-      url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+      const url = new URL(bridgeUrl, location.href);
+      if (url.protocol === 'https:') url.protocol = 'wss:';
+      else if (url.protocol === 'http:') url.protocol = 'ws:';
       if (optsRef.current.projectId) url.searchParams.set('project', optsRef.current.projectId);
       let sock: WebSocket;
       try {

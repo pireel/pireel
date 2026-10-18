@@ -1,7 +1,8 @@
 'use client';
+import { editorRequest } from '@pireel/studio-ui/host-request';
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@pireel/ui/select';
-import { VoiceCard, type VoiceAsset } from './voice-card';
+import { VoiceCard, type VoiceAsset } from '@pireel/studio-ui/voice-card';
 
 import { ArrowUp, Loader2, Mic2, Search, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -14,9 +15,9 @@ import {
   DialogTitle,
 } from '@pireel/ui/dialog';
 import { toast } from '@pireel/ui/toast';
-import { AssetCardMoreMenu, RESPONSIVE_ASSET_CARD_GRID } from './asset-card';
-import { t } from './i18n';
-import { MembershipFeatureIcon } from './membership-feature-icon';
+import { AssetCardMoreMenu, RESPONSIVE_ASSET_CARD_GRID } from '@pireel/studio-ui/asset-card';
+import { t } from '@pireel/studio-ui/i18n';
+import { MembershipFeatureIcon } from '@pireel/studio-ui/membership-feature-icon';
 
 
 type UploadTicket = { key: string; url: string; content_type: string; cache_control: string };
@@ -109,7 +110,7 @@ export function AvatarPanel({ mode = 'library', initialLanguage = 'zh', onCreate
 
   const load = useCallback(async (refresh = true) => {
     try {
-      const res = await fetch(`/api/studio/voices?refresh=${refresh}&limit=500`);
+      const res = await editorRequest(`/api/studio/voices?refresh=${refresh}&limit=500`);
       const body = (await res.json().catch(() => ({}))) as { voices?: VoiceAsset[]; customVoiceAccess?: CustomVoiceAccessState; error?: string; detail?: string };
       if (!res.ok || !body.voices) throw new Error(body.detail || body.error || t('workbench.voiceListFailed'));
       setVoices(body.voices);
@@ -246,7 +247,7 @@ export function AvatarPanel({ mode = 'library', initialLanguage = 'zh', onCreate
     if (voice.status !== 'ready' || voice.selected || busy) return;
     setBusy(true);
     try {
-      const res = await fetch('/api/studio/voices', {
+      const res = await editorRequest('/api/studio/voices', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ action: 'select', voiceId: voice.id }),
@@ -276,7 +277,7 @@ export function AvatarPanel({ mode = 'library', initialLanguage = 'zh', onCreate
     setRenameDraft('');
     setBusy(true);
     try {
-      const res = await fetch('/api/studio/voices', {
+      const res = await editorRequest('/api/studio/voices', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ action: 'rename', voiceId: previous.id, name: label }),
@@ -303,7 +304,7 @@ export function AvatarPanel({ mode = 'library', initialLanguage = 'zh', onCreate
     if (!approved) return;
     setBusy(true);
     try {
-      const res = await fetch('/api/studio/voices', {
+      const res = await editorRequest('/api/studio/voices', {
         method: 'DELETE',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ voiceId: voice.id }),
@@ -331,20 +332,20 @@ export function AvatarPanel({ mode = 'library', initialLanguage = 'zh', onCreate
       if (file) {
         const contentType = normalizeAudioType(file);
         if (!['audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/x-wav'].includes(contentType)) throw new Error(t('workbench.voiceSampleTypeError'));
-        const ticketRes = await fetch('/api/studio/media', {
+        const ticketRes = await editorRequest('/api/studio/media', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ action: 'put-audio-asset', size: file.size, content_type: contentType }),
         });
         const ticket = (await ticketRes.json().catch(() => ({}))) as UploadTicket & { error?: string };
         if (!ticketRes.ok || !ticket.url) throw new Error(ticket.error || t('workbench.voiceUploadFailed'));
-        const putRes = await fetch(ticket.url, {
+        const putRes = await editorRequest(ticket.url, {
           method: 'PUT',
           headers: { 'Content-Type': ticket.content_type, 'Cache-Control': ticket.cache_control },
           body: file,
         });
         if (!putRes.ok) throw new Error(t('workbench.voiceUploadFailed'));
-        const registerRes = await fetch('/api/studio/media', {
+        const registerRes = await editorRequest('/api/studio/media', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ action: 'register-audio-asset', key: ticket.key, label: fileLabel(file, t('workbench.voiceCloned')), role: 'voice' }),
@@ -353,7 +354,7 @@ export function AvatarPanel({ mode = 'library', initialLanguage = 'zh', onCreate
         if (!registerRes.ok || !registered.id) throw new Error(registered.error || t('workbench.voiceUploadFailed'));
         payload = { action: 'clone', audioAssetId: registered.id, name: fileLabel(file, t('workbench.voiceCloned')), language, consentConfirmed: true, preprocess };
       }
-      const createRes = await fetch('/api/studio/voices', {
+      const createRes = await editorRequest('/api/studio/voices', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload),

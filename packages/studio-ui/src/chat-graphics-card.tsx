@@ -13,11 +13,11 @@ import { useCallback, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { Composition } from '@pireel/studio-engine/composition';
 import type { StudioToolResult } from '@pireel/studio-engine/prompts';
-import { BlockPreviewFrame } from './block-preview-card';
-import { blockDisplayTitle } from './block-display-title';
-import { useToolProgress } from './tool-progress';
-import type { ToolPartLike } from './chat-tool-parts';
-import { t } from './i18n';
+import { BlockPreviewFrame } from '@pireel/studio-ui/block-preview-card';
+import { blockDisplayTitle } from '@pireel/studio-ui/block-display-title';
+import { useToolProgress } from '@pireel/studio-ui/tool-progress';
+import type { ToolPartLike } from '@pireel/studio-ui/chat-tool-parts';
+import { t } from '@pireel/studio-ui/i18n';
 
 export function GraphicsPreviewBody({ toolId, part, getComp }: { toolId: string; part: ToolPartLike; getComp: () => Composition }) {
   // Progress subscription doubles as the live re-render source: each landed fill reports progress,

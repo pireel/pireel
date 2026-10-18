@@ -6,8 +6,8 @@
  * receipt (CDN url + measured duration), so a hit is byte-identical to a fresh generation.
  */
 
-import { kvDelete, kvGet, kvSet } from './idb-kv';
-import { remoteDerivedGet, remoteDerivedPut } from './derived-cache-remote';
+import { kvDelete, kvGet, kvSet } from '@pireel/studio-ui/idb-kv';
+import { remoteDerivedGet, remoteDerivedPut } from '@pireel/studio-ui/derived-cache-remote';
 
 const PREFIX = 'tts:';
 const LEGACY_LOCALSTORAGE_PREFIX = 'pinshot:studio:tts:';

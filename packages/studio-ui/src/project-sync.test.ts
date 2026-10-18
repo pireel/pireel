@@ -3,7 +3,7 @@ import { emptyComposition, type EditorDocumentV2 } from '@pireel/studio-engine/c
 import { compositionToEditorDocument } from '@pireel/studio-engine/project-document';
 import { canonicalJson, hashSection, sanitizeProjectContext, type ProjectCommitAck, type ProjectSaveWire, type StudioProjectDto } from '@pireel/studio-engine/project-dto';
 import type { DocumentTransaction } from '@pireel/studio-engine/document-transaction';
-import { ProjectSync, type PendingTransactionStore, type ProjectSyncSendResult } from './project-sync';
+import { ProjectSync, type PendingTransactionStore, type ProjectSyncSendResult } from '@pireel/studio-ui/project-sync';
 
 const tx = (id: string): DocumentTransaction => ({ id, origin: 'user', ops: [{ op: 'command', input: { command: { type: 'canvas.patch', patch: { width: 720, height: 1280 } } } }] });
 

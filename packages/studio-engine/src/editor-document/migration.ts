@@ -1,7 +1,7 @@
 import { audioClipDefaults } from '../audio-tracks';
 import { withMigratedTransitions } from './transitions';
 import type { Block, Composition, VideoShot } from '../composition-core';
-import type { LocalAssetIndexEntry, ProjectCloudMediaIndex, TranscriptSegment } from '../project-dto';
+import type { LocalAssetIndexEntry, ProjectCloudMediaIndex, TranscriptSegment } from '@pireel/studio-engine/project-types';
 import { createMigrationAssetRegistry } from './asset-registry';
 import { DEFAULT_TIMELINE_FPS, isFinitePositive, positiveDurationFrames, secondsToTimelineFrames } from './time';
 import {

@@ -9,9 +9,9 @@ import {
   STUDIO_AUTO_SKILL_ID,
   type StudioScenarioSkillId,
 } from '@pireel/studio-engine/scenario-skills';
-import type { StudioScenarioSkillOption, StudioSkillMarketMetadata } from './shell-context';
-import { ScenarioSkillIcon } from './scenario-skill-icon';
-import { t } from './i18n';
+import type { StudioScenarioSkillOption, StudioSkillMarketMetadata } from '@pireel/studio-ui/shell-context';
+import { ScenarioSkillIcon } from '@pireel/studio-ui/scenario-skill-icon';
+import { t } from '@pireel/studio-ui/i18n';
 
 interface SkillOption {
   id: string;

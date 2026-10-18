@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { durableFileSig, fileMatchesSig, fileNameFromSig, fileSig, isContentSig, rememberDurableFileSig, sigSize } from './media';
+import { durableFileSig, fileMatchesSig, fileNameFromSig, fileSig, isContentSig, rememberDurableFileSig, sigSize } from '@pireel/studio-ui/media';
 
 describe('content signature', () => {
   it('identifies bytes, not filename, mtime or picker MIME', async () => {

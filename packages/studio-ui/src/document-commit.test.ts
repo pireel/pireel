@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { emptyComposition, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import { compositionToEditorDocument } from '@pireel/studio-engine/project-document';
 import type { DocumentTransaction } from '@pireel/studio-engine/document-transaction';
-import { DocumentCommitter } from './document-commit';
+import { DocumentCommitter } from '@pireel/studio-ui/document-commit';
 
 function harness() {
   let document = compositionToEditorDocument({ projectId: 'p', composition: emptyComposition() }).document;

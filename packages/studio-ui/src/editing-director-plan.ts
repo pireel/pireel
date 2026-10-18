@@ -1,7 +1,7 @@
 import { whiteboardToolBlock } from '@pireel/studio-engine/whiteboard-workflow';
-import { readWhiteboardEntities, type WhiteboardEntity } from './whiteboard-entities';
+import { readWhiteboardEntities, type WhiteboardEntity } from '@pireel/studio-ui/whiteboard-entities';
 import type { EditorDocumentV2 } from '@pireel/studio-engine/composition';
-import { isWhiteboardDirectorTask, unfinishedRoughCut, type ChatTask } from './chat-task';
+import { isWhiteboardDirectorTask, unfinishedRoughCut, type ChatTask } from '@pireel/studio-ui/chat-task';
 
 /** Source-time anchors survive ripple cuts and reordering. Directions stay authored prose. */
 export interface EditingDirectorPlan {

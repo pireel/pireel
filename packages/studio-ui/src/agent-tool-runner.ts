@@ -1,3 +1,4 @@
+import { editorRequest } from '@pireel/studio-ui/host-request';
 import { brandGraphicsStyle } from '@pireel/studio-engine/brand-playbook';
 import { adaptiveGeneratedVideoSpec } from '@pireel/studio-engine/generated-video-spec';
 /**
@@ -9,12 +10,12 @@ import { adaptiveGeneratedVideoSpec } from '@pireel/studio-engine/generated-vide
  */
 
 import type { MutableRefObject } from 'react';
-import { editorErrorMessage } from './editor-error';
-import { runStockTool } from './stock-tools-client';
+import { editorErrorMessage } from '@pireel/studio-ui/editor-error';
+import { runStockTool } from '@pireel/studio-ui/stock-tools-client';
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 import type { DocumentOp } from '@pireel/studio-engine/document-transaction';
 import { whiteboardFormat, type AgentTimelineOutcome } from '@pireel/studio-engine/agent-timeline';
-import type { DocumentCommitter, ReplaceOptions, TransactionScope } from './document-commit';
+import type { DocumentCommitter, ReplaceOptions, TransactionScope } from '@pireel/studio-ui/document-commit';
 import { directorPlanFromDocument } from '@pireel/studio-engine/director-plan-artifact';
 import {
   type AudioClip,
@@ -55,11 +56,11 @@ import { projectNarrativeShots, projectOverlayBlockById } from '@pireel/studio-e
 import { freeOverlayTrackIndex } from '@pireel/studio-engine/editor-document/read-model';
 import { documentCaptionsOn } from '@pireel/studio-engine/editor-document/caption-state';
 import { captionBandRects, platformZonesPx } from '@pireel/studio-engine/facts';
-import { measureShotRegions, measureSound } from './facts-measure';
+import { measureShotRegions, measureSound } from '@pireel/studio-ui/facts-measure';
 import { exportRecommendations } from '@pireel/studio-engine/export-options';
-import { parkInteraction } from './interaction-store';
+import { parkInteraction } from '@pireel/studio-ui/interaction-store';
 import { assembleComposeBrief, interpretApplyRaw, type ComposeBriefInput } from '@pireel/studio-engine/briefs';
-import { visualCraftBaseline } from './visual-baseline';
+import { visualCraftBaseline } from '@pireel/studio-ui/visual-baseline';
 import { composeEditorialBrief } from '@pireel/studio-engine/review-brief';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { motionGraphicNeighbors } from '@pireel/studio-engine/compose-neighbors';
@@ -110,52 +111,52 @@ function rememberSearchedAssets(results: ReadonlyArray<Record<string, unknown>>)
 
 const V3_LIBRARY_USAGE_HINT = 'Each id is a complete reference: pass it as assetId to add_clips / insert_clips, or to inspect_media directly — placing is not required to inspect or transcribe. Byte access is resolved on demand; when it is unavailable, ask the user to restore the file in Materials. Never substitute cloud or official media for project-library media unless the user asks.';
 import { imageThumb } from '@pireel/ui/image-url';
-import { studioLocale, t, tEnglish } from './i18n';
-import { type ComposeMode, type ComposedBlock, composedBlockFields, GeneratedBlockValidationError, kitChoiceOf, newBlockComposeMode } from './compose-result';
-import { clearToolProgress, setToolProgress, type ToolProgress } from './tool-progress';
-import { FIRST_PASS_STEPS, runFirstPass, type FirstPassHost, type FirstPassStepId, type RoughCutExecution } from './first-pass';
-import { probeVideoFile, durableFileSig } from './media';
-import { cloudBackupMedia } from './cloud-media';
+import { studioLocale, t, tEnglish } from '@pireel/studio-ui/i18n';
+import { type ComposeMode, type ComposedBlock, composedBlockFields, GeneratedBlockValidationError, kitChoiceOf, newBlockComposeMode } from '@pireel/studio-ui/compose-result';
+import { clearToolProgress, setToolProgress, type ToolProgress } from '@pireel/studio-ui/tool-progress';
+import { FIRST_PASS_STEPS, runFirstPass, type FirstPassHost, type FirstPassStepId, type RoughCutExecution } from '@pireel/studio-ui/first-pass';
+import { probeVideoFile, durableFileSig } from '@pireel/studio-ui/media-ai';
+import { cloudBackupMedia } from '@pireel/studio-ui/cloud-media';
 import { extractThumbnails } from '@pireel/studio-engine/video-edit/thumbnails';
-import { cloudToolFrame } from './agent-frame-upload';
+import { cloudToolFrame } from '@pireel/studio-ui/agent-frame-upload';
 import { measuredSpeechTranscript, storedScriptText } from '@pireel/studio-engine/script-alignment';
-import { deleteCachedTts, getCachedTts, setCachedTts, ttsCacheKey, type CachedTtsAsset } from './tts-cache';
-import { loadLocalAssetFile, loadLocalVideo, saveLocalVideo } from './local-media';
-import { materializeRemoteMedia } from './remote-media';
-import { localAssetIndexEntry, runLocalImportSession } from './local-import-session';
-import { normalizeStudioToolInputReferences, resolveLocalAssetReference } from './studio-tool-input-references';
-import { resolveGenerationReferences, resolveGenerationSourceFrame } from './generation-reference';
-import { analyzeVisual, analyzeVisualGeometry, type VisualLabel, type VisualPrep, type VisualTimeline, finishVisualAnalysis, prepareVisualAnalysis } from './visual';
+import { deleteCachedTts, getCachedTts, setCachedTts, ttsCacheKey, type CachedTtsAsset } from '@pireel/studio-ui/tts-cache';
+import { loadLocalAssetFile, loadLocalVideo, saveLocalVideo } from '@pireel/studio-ui/local-media';
+import { materializeRemoteMedia } from '@pireel/studio-ui/remote-media';
+import { localAssetIndexEntry, runLocalImportSession } from '@pireel/studio-ui/local-import-session';
+import { normalizeStudioToolInputReferences, resolveLocalAssetReference } from '@pireel/studio-ui/studio-tool-input-references';
+import { resolveGenerationReferences, resolveGenerationSourceFrame } from '@pireel/studio-ui/generation-reference';
+import { analyzeVisual, analyzeVisualGeometry, type VisualLabel, type VisualPrep, type VisualTimeline, finishVisualAnalysis, prepareVisualAnalysis } from '@pireel/studio-ui/visual';
 import {
   compareEditorialOpenings,
   editorialOpeningEvidence,
   reviewEditorialCandidates,
   type EditorialOpeningEvidence,
   askEditorialQuestion,
-} from './editorial-review';
-import { openingContendersFor, recordOpeningComparison, recordReviewedSource, reviewedSourcesFor } from './editorial-review-store';
-import { buildAssemblyFromReview } from './editorial-assembly-tool';
-import { type ExportRenderOpts, captureCompositionFrame } from './client-export';
-import { compositionRenderView } from './composition-render-view';
-import type { StudioChatHandle } from './studio-chat';
-import { primaryNarrativeRenderPlan } from './primary-render-plan';
+} from '@pireel/studio-ui/editorial-review';
+import { openingContendersFor, recordOpeningComparison, recordReviewedSource, reviewedSourcesFor } from '@pireel/studio-ui/editorial-review-store';
+import { buildAssemblyFromReview } from '@pireel/studio-ui/editorial-assembly-tool';
+import { type ExportRenderOpts, captureCompositionFrame } from '@pireel/studio-ui/client-export';
+import { compositionRenderView } from '@pireel/studio-ui/composition-render-view';
+import type { StudioChatHandle } from '@pireel/studio-ui/studio-chat';
+import { primaryNarrativeRenderPlan } from '@pireel/studio-ui/primary-render-plan';
 
 /** Component generation follows only the brand explicitly attached to this project. */
 async function brandGraphicsOf(document: EditorDocumentV2): Promise<string | null> {
   const brand = document.semantics.brand;
   return brand ? brandGraphicsStyle(brand) : null;
 }
-import { supplementalVisualMedia } from './visual-render-plan';
-import { collectAssetSearchDocuments } from './asset-search-collector';
-import { getLocalVisualModelSnapshot } from './local-visual-search-model';
+import { supplementalVisualMedia } from '@pireel/studio-ui/visual-render-plan';
+import { collectAssetSearchDocuments } from '@pireel/studio-ui/asset-search-collector';
+import { getLocalVisualModelSnapshot } from '@pireel/studio-ui/local-visual-search-model';
 import {
   assessLocalSpeechAudio,
   detectSpeechSilenceCuts,
   resolveSpeechSilenceOptions,
-} from './speech-silence';
-import { withEditableBlockGeometry } from './editable-block-geometry';
+} from '@pireel/studio-ui/speech-silence';
+import { withEditableBlockGeometry } from '@pireel/studio-ui/editable-block-geometry';
 import { placementPercentToBox } from '@pireel/studio-engine/overlay-placement';
-import { generatedAssetIndexEntry, generatedRecordsFromJobs, getStudioSpaceId, listStudioGens, pollCreation, startGeneration, type GenJob } from './gen-api';
+import { generatedAssetIndexEntry, generatedRecordsFromJobs, getStudioSpaceId, listStudioGens, pollCreation, startGeneration, type GenJob } from '@pireel/studio-ui/gen-api';
 import { componentFontSlot, displayFontContext, isDisplayTextFontId } from '@pireel/studio-engine/display-text-presets';
 import { searchFontsTool } from '@pireel/studio-engine/font-search-tool';
 import { describeAudioTargets, resolveAudioTarget } from '@pireel/studio-engine/audio-target';
@@ -495,7 +496,7 @@ export interface AgentToolCtx {
   // Frames + chat handle
   chatRef: MutableRefObject<StudioChatHandle | null>;
   /** Receives the usage of paid calls tools make (transcription) while a caller listens; null otherwise. */
-  usageSinkRef?: MutableRefObject<((usage: import('@pireel/studio-engine/workflow').WorkflowUsage) => void) | null>;
+  usageSinkRef?: MutableRefObject<((usage: import('@pireel/studio-engine/usage').WorkflowUsage) => void) | null>;
 }
 
 type StudioToolRunInternalOptions = {
@@ -514,7 +515,7 @@ const skillReviewBriefCache = new Map<string, Promise<string | null>>();
 function fetchSkillReviewBrief(skillId: string): Promise<string | null> {
   const cached = skillReviewBriefCache.get(skillId);
   if (cached) return cached;
-  const pending = fetch(`/api/studio/skill-brief?skillId=${encodeURIComponent(skillId)}`)
+  const pending = editorRequest(`/api/studio/skill-brief?skillId=${encodeURIComponent(skillId)}`)
     .then(async (response) => {
       if (!response.ok) throw new Error(`skill-brief ${response.status}`);
       const body = (await response.json()) as { brief?: unknown };
@@ -656,7 +657,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
       const transcribeForAgent = async (input: Record<string, unknown>): Promise<StudioToolResult> => {
         // The listener when the call starts gets its usage, even if the bill arrives after it stopped waiting.
         const sink = ctx.usageSinkRef?.current ?? null;
-        const usageSinkAtCall = (usage: import('@pireel/studio-engine/workflow').WorkflowUsage) => sink?.(usage);
+        const usageSinkAtCall = (usage: import('@pireel/studio-engine/usage').WorkflowUsage) => sink?.(usage);
         try {
           const requestedLocalReference = typeof input.localAssetId === 'string'
             ? input.localAssetId.trim()
@@ -1959,7 +1960,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 }
                 if (!frames.length) return { ok: false, error: failed[0]?.error || 'no readable images to inspect', data: { failed } };
                 report(`Reviewing ${frames.length} image${frames.length === 1 ? '' : 's'}…`, 0.85);
-                const response = await race(fetch('/api/studio/review', {
+                const response = await race(editorRequest('/api/studio/review', {
                   method: 'POST',
                   headers: { 'content-type': 'application/json' },
                   body: JSON.stringify({ mode: 'assets', frames, projectId }),
@@ -2147,7 +2148,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             report?.(t('workbench.bakeRendering'));
             let job: { id?: string; status?: string; output?: { url?: string | null; durationSec?: number }; error?: { message?: string } };
             try {
-              const res = await fetch('/api/render/bake', {
+              const res = await editorRequest('/api/render/bake', {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({ html, width: canvas.width, height: canvas.height, durationSec: b.durationSec, fps }),
@@ -2170,7 +2171,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               if (opts?.signal?.aborted) throw new DOMException('aborted', 'AbortError');
               report?.(t('workbench.bakeRendering'));
               try {
-                const s = await fetch(`/api/render/${encodeURIComponent(jobId)}`, { ...(opts?.signal ? { signal: opts.signal } : {}) });
+                const s = await editorRequest(`/api/render/${encodeURIComponent(jobId)}`, { ...(opts?.signal ? { signal: opts.signal } : {}) });
                 if (!s.ok) return { ok: false, error: `${t('workbench.bakeFailed')} (HTTP ${s.status})` };
                 job = await s.json();
               } catch (e) {
@@ -2225,7 +2226,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   ...(entry.w && entry.h ? { w: entry.w, h: entry.h } : {}),
                 }));
               const fetchKind = (k: 'image' | 'video' | 'audio') =>
-                fetch(`/api/me/materials?tab=global&kind=${k}&limit=${limit}`)
+                editorRequest(`/api/me/materials?tab=global&kind=${k}&limit=${limit}`)
                   .then((r) => (r.ok ? r.json() : null))
                   .then((j: { items?: { id: string; url: string; label: string | null; kind: string; width: number | null; height: number | null; created_at: number }[] } | null) => j?.items ?? [])
                   .catch(() => []);
@@ -2363,7 +2364,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (cached) return { ok: true, data: { ...base, url: localImageLocator(sig), treatment: 'cutout', cached: true } };
             let timer: ReturnType<typeof setTimeout> | undefined;
             try {
-              const { preparePersonImage } = await import('./prepare-person-image');
+              const { preparePersonImage } = await import('@pireel/studio-ui/prepare-person-image');
               const prepared = await Promise.race([
                 preparePersonImage(file),
                 new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Error('Person preparation timed out')), 20000); }),
@@ -2379,14 +2380,14 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             // MCP surface answers the same lookup through its own dispatch).
             const names = Array.isArray(input.names) ? (input.names as unknown[]).filter((n): n is string => typeof n === 'string' && n.trim().length > 0).slice(0, 8) : [];
             if (!names.length) return { ok: false, error: tEnglish('workbench.getIconsNeedName') };
-            const res = await fetch('/api/studio/icons', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ names, ...(input.kind === 'brand' ? { kind: 'brand' } : {}) }), ...(signal ? { signal } : {}) });
+            const res = await editorRequest('/api/studio/icons', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ names, ...(input.kind === 'brand' ? { kind: 'brand' } : {}) }), ...(signal ? { signal } : {}) });
             const data = (await res.json().catch(() => ({}))) as { icons?: Array<{ name: string; svg: string }>; misses?: Array<{ name: string }>; error?: string };
             if (!res.ok || !Array.isArray(data.icons)) return { ok: false, error: data.error || t('workbench.getIconsFailed') };
             return { ok: true, summary: t('workbench.gotIcons', { n: data.icons.length }), data };
           }
           case 'list_models': {
             const kind = input.kind === 'image' || input.kind === 'video' ? `?kind=${input.kind}` : '';
-            const res = await fetch(`/api/models${kind}`, { ...(signal ? { signal } : {}) });
+            const res = await editorRequest(`/api/models${kind}`, { ...(signal ? { signal } : {}) });
             const body = (await res.json().catch(() => ({}))) as { models?: Array<{ id: string; name: string; kind: 'image' | 'video' }>; error?: string };
             if (!res.ok || !Array.isArray(body.models)) return { ok: false, error: body.error || 'generation model list unavailable' };
             const models = body.models.filter((model) => model.kind === 'image' || model.kind === 'video');
@@ -2405,7 +2406,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 localAssets: ctx.localAssetIndexRef?.current ?? [],
                 documentAssets: documentRef.current.assets,
                 presign: async (key: string) => {
-                  const r = await fetch('/api/studio/media', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'get', key }) });
+                  const r = await editorRequest('/api/studio/media', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'get', key }) });
                   if (!r.ok) return null;
                   const j = (await r.json().catch(() => null)) as { url?: string } | null;
                   return j?.url ?? null;
@@ -2517,7 +2518,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             }
 
             report('Preparing the Foley batch…');
-            const quoteRes = await fetch('/api/studio/foley', {
+            const quoteRes = await editorRequest('/api/studio/foley', {
               method: 'POST', headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ action: 'quote', durations: items.map((item) => item.durationSec) }),
               ...(signal ? { signal } : {}),
@@ -2590,7 +2591,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 });
 
                 report(`Generating Foley ${index + 1}/${items.length}…`, (index + 0.35) / items.length);
-                const generatedRes = await fetch('/api/studio/foley', {
+                const generatedRes = await editorRequest('/api/studio/foley', {
                   method: 'POST', headers: { 'content-type': 'application/json' },
                   body: JSON.stringify({
                     video_url: sourceUpload.url,
@@ -2621,7 +2622,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   `reuse=${item.reusePolicy}`, `duration=${item.durationSec.toFixed(2)}s`, `source=${sourceLabel}`,
                   `prompt=${item.prompt}`,
                 ].filter(Boolean).join(' · ');
-                const registerRes = await fetch('/api/studio/media', {
+                const registerRes = await editorRequest('/api/studio/media', {
                   method: 'POST', headers: { 'content-type': 'application/json' },
                   body: JSON.stringify({
                     action: 'register-audio-asset', key: audioUpload.key, label: item.name,
@@ -2631,7 +2632,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 });
                 const registered = (await registerRes.json().catch(() => ({}))) as { ok?: boolean; id?: string; key?: string; url?: string | null; error?: string };
                 if (!registerRes.ok || !registered.ok || !registered.id || !registered.key || !registered.url) throw new Error(registered.error || 'Foley library registration failed');
-                await fetch('/api/studio/foley', {
+                await editorRequest('/api/studio/foley', {
                   method: 'POST', headers: { 'content-type': 'application/json' },
                   body: JSON.stringify({
                     action: 'finalize', creationId: generatedBody.asset.id, audioKey: registered.key, assetId: registered.id,
@@ -2676,7 +2677,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               report('Generating background music…');
               try {
                 const spaceId = await getStudioSpaceId(projectId);
-                const res = await fetch('/api/studio/music', {
+                const res = await editorRequest('/api/studio/music', {
                   method: 'POST', headers: { 'content-type': 'application/json' },
                   body: JSON.stringify({ prompt, duration_sec: Math.max(10, Math.min(300, Math.round(Number(input.durationSec) || 60))), space_id: spaceId }),
                   ...(signal ? { signal } : {}),
@@ -2703,7 +2704,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             report('Generating sound effect…');
             try {
               const spaceId = await getStudioSpaceId(projectId);
-              const res = await fetch('/api/studio/sfx', {
+              const res = await editorRequest('/api/studio/sfx', {
                 method: 'POST', headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({
                   prompt,
@@ -2737,7 +2738,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 const params = new URLSearchParams({ refresh: 'true', limit: String(Math.min(100, Math.max(1, Number(input.limit) || 20))) });
                 if (typeof input.language === 'string' && /^[a-z]{2,3}$/.test(input.language)) params.set('language', input.language);
                 if (typeof input.query === 'string' && input.query.trim()) params.set('query', input.query.trim().slice(0, 100));
-                const res = await fetch(`/api/studio/voices?${params}`, { ...(signal ? { signal } : {}) });
+                const res = await editorRequest(`/api/studio/voices?${params}`, { ...(signal ? { signal } : {}) });
                 const body = (await res.json().catch(() => ({}))) as { voices?: unknown[]; customVoiceAccess?: unknown; error?: string; detail?: string };
                 if (!res.ok || !body.voices) return { ok: false, error: body.detail || body.error || t('workbench.voiceListFailed') };
                 const voices = body.voices.map((voice) => {
@@ -2750,7 +2751,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               case 'clone': {
                 report(t('workbench.cloningVoice'));
                 try {
-                  const res = await fetch('/api/studio/voices', {
+                  const res = await editorRequest('/api/studio/voices', {
                     method: 'POST',
                     headers: { 'content-type': 'application/json' },
                     body: JSON.stringify({ action: 'clone', ...input }),
@@ -2774,7 +2775,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               case 'design': {
                 report(t('workbench.designingVoice'));
                 try {
-                  const res = await fetch('/api/studio/voices', {
+                  const res = await editorRequest('/api/studio/voices', {
                     method: 'POST',
                     headers: { 'content-type': 'application/json' },
                     body: JSON.stringify({ action: 'design', ...input }),
@@ -2796,7 +2797,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 }
               }
               case 'delete': {
-                const res = await fetch('/api/studio/voices', {
+                const res = await editorRequest('/api/studio/voices', {
                   method: 'DELETE',
                   headers: { 'content-type': 'application/json' },
                   body: JSON.stringify({ voiceId: input.voiceId }),
@@ -2840,14 +2841,14 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const cacheKey = ttsCacheKey(speechInput);
               const cached = await getCachedTts(cacheKey);
               if (cached) {
-                const alive = await fetch(cached.url, { method: 'HEAD', ...(signal ? { signal } : {}) })
+                const alive = await editorRequest(cached.url, { method: 'HEAD', ...(signal ? { signal } : {}) })
                   .then((probe) => probe.ok)
                   .catch(() => false);
                 if (alive) return speechResult(cached, true);
                 deleteCachedTts(cacheKey);
               }
               report(t('workbench.generatingSpeech'));
-              const res = await fetch('/api/studio/speech', {
+              const res = await editorRequest('/api/studio/speech', {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({ ...speechInput, projectId }),
@@ -2869,7 +2870,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             report(t('workbench.startingLipSync'));
             try {
               const adaptive = adaptiveGeneratedVideoSpec(canvasSize().width, canvasSize().height);
-              const res = await fetch('/api/studio/lip-sync', {
+              const res = await editorRequest('/api/studio/lip-sync', {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({
@@ -3037,7 +3038,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 const asset = assetId ? documentRef.current.assets[assetId] : undefined;
                 return asset ? (await assetBytes(asset)).file : null;
               },
-              measureLoudness: async (file) => (await import('./audio-decode')).streamVideoLoudness(file),
+              measureLoudness: async (file) => (await import('@pireel/studio-ui/audio-decode')).streamVideoLoudness(file),
             };
             const outcome = await runFirstPass(host, (next) => { report(next.summary ?? t('tools.rough_cut.busy'), undefined, { report: next }); opts?.roughCut?.onProgress?.(next); }, {
               ...(steps?.length ? { steps } : {}), ...(pauses ? { pauses } : {}), ...(signal ? { signal } : {}), onLateUsage: opts?.roughCut?.onLateUsage, resume: opts?.roughCut?.resume,

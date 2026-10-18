@@ -1,17 +1,18 @@
+import { editorRequest } from '@pireel/studio-ui/host-request';
 import { pickImageModel, normalizeImageSettings, imageGenerationParams } from '@pireel/studio-engine/image-generation-settings';
-import { ImageGenerationFields } from './image-generation-fields';
+import { ImageGenerationFields } from '@pireel/studio-ui/image-generation-fields';
 import { useEffect, useRef, useState } from 'react';
 import { ImageIcon, Loader2 } from 'lucide-react';
-import { useQuote } from '@pireel/ui/use-quote';
+import { useQuote } from '@pireel/studio-ui/use-quote';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@pireel/ui/dialog';
-import { studioLocale } from './i18n';
-import { CoverFrameTimeline } from './cover-frame-timeline';
-import { SceneMediaCard } from './scene-media-picker';
-import { CoverApplyButton } from './chat-cover-controls';
-import { coverFrameTime, coverFrameIdentity, type CoverSourceFrame, type CoverFrameStripData } from './cover-frame-selection';
-import type { CoverDraftPatch, CoverGenerateOptions } from './cover-scene';
-import { videoCoverAspect, type CoverScene } from './cover-scene';
-import type { ProjectCover } from './project-cover';
+import { studioLocale } from '@pireel/studio-ui/i18n';
+import { CoverFrameTimeline } from '@pireel/studio-ui/cover-frame-timeline';
+import { SceneMediaCard } from '@pireel/studio-ui/media-picker';
+import { CoverApplyButton } from '@pireel/studio-ui/chat-cover-controls';
+import { coverFrameTime, coverFrameIdentity, type CoverSourceFrame, type CoverFrameStripData } from '@pireel/studio-ui/cover-frame-selection';
+import type { CoverDraftPatch, CoverGenerateOptions } from '@pireel/studio-ui/cover-scene';
+import { videoCoverAspect, type CoverScene } from '@pireel/studio-ui/cover-scene';
+import type { ProjectCover } from '@pireel/studio-ui/project-cover';
 
 export function coverSceneStatus(scene?: CoverScene | null): string {
   const zh = studioLocale().startsWith('zh');
@@ -57,7 +58,7 @@ export function CoverSceneDialog({ open, scene, applied, busy, canvas, onClose, 
   }, [open, zh]);
   useEffect(() => {
     if (!open) return; let alive = true;
-    void fetch('/api/models?kind=image').then(r => r.json()).then(data => { if (alive) { const list = data.models ?? []; setModels(list); setModelId(current => pickImageModel(list, current || scene?.modelId)); } }).catch(() => {});
+    void editorRequest('/api/models?kind=image').then(r => r.json()).then(data => { if (alive) { const list = data.models ?? []; setModels(list); setModelId(current => pickImageModel(list, current || scene?.modelId)); } }).catch(() => {});
     return () => { alive = false; };
   }, [open, scene?.modelId]);
   const scenePrompt = scene?.prompt ?? ''; const sceneSize = scene?.size || videoCoverAspect(canvas); const sceneQuality = scene?.quality ?? ''; const newestImageKey = scene?.images[0]?.key ?? '';

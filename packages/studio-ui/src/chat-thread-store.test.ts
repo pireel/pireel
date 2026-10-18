@@ -17,8 +17,8 @@ import {
   isRecoverableStudioChatError,
   sanitizeRestored,
   stampLatestAssistantWorkDuration,
-} from './chat-thread-store';
-import { analyzeVisualSourceLabel, toolStatus } from './chat-tool-parts';
+} from '@pireel/studio-ui/chat-thread-store';
+import { analyzeVisualSourceLabel, toolStatus } from '@pireel/studio-ui/chat-tool-parts';
 
 const assistant = (parts: UIMessage['parts']): UIMessage => ({
   id: 'assistant-1',

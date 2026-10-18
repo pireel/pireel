@@ -1,5 +1,5 @@
-import { acknowledgeChatThread, cachedChatThread, cacheChatThread } from './chat-thread-cache';
-import type { StoredThread } from './chat-thread-store';
+import { acknowledgeChatThread, cachedChatThread, cacheChatThread } from '@pireel/studio-ui/chat-thread-cache';
+import type { StoredThread } from '@pireel/studio-ui/chat-thread-store';
 
 /** One in-flight save per thread; streaming updates replace the waiting snapshot, not queue it.
  * Local failure is silent when the cloud succeeds. A continuous sync outage warns only once. */

@@ -12,15 +12,15 @@
 
 import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import type { Composition, EditorDocumentV2 } from '@pireel/studio-engine/composition';
-import type { DocumentCommitter } from './document-commit';
+import type { DocumentCommitter } from '@pireel/studio-ui/document-commit';
 import { toast } from '@pireel/ui/toast';
-import type { VideoTrackEngine } from './video-track-engine';
-import { DENOISE_RATE, blendPcm, decodeMono48k, denoiseWetPcm, encodeWavMono } from './denoise';
-import { decodeVideoAudio, toMono } from './audio-decode';
-import { fileSig } from './media';
-import { loadLocalVideo, saveLocalVideo } from './local-media';
-import { t } from './i18n';
-import { editorErrorMessage } from './editor-error';
+import type { VideoTrackEngine } from '@pireel/studio-ui/video-track-engine';
+import { DENOISE_RATE, blendPcm, decodeMono48k, denoiseWetPcm, encodeWavMono } from '@pireel/studio-ui/denoise';
+import { decodeVideoAudio, toMono } from '@pireel/studio-ui/audio-decode';
+import { fileSig } from '@pireel/studio-ui/media';
+import { loadLocalVideo, saveLocalVideo } from '@pireel/studio-ui/local-media';
+import { t } from '@pireel/studio-ui/i18n';
+import { editorErrorMessage } from '@pireel/studio-ui/editor-error';
 
 export interface DenoiseDeps {
   comp: Composition;

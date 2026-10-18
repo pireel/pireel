@@ -4,15 +4,15 @@ import { compositionToEditorDocument, emptyComposition } from '@pireel/studio-en
 import { emptyPlaybook, playbookSnapshot } from '@pireel/studio-engine/brand-playbook';
 import { resolveEditingRunConfig } from '@pireel/studio-engine/editing-run-config';
 import { firstNarrativeAssetId } from '@pireel/studio-engine/editor-document/read-model';
-import { directorBeatWindows, directorPlanToolBlock, saveEditingDirectorPlan, reviewDirectorPlan, withDirectorInstruction } from './editing-director-plan';
+import { directorBeatWindows, directorPlanToolBlock, saveEditingDirectorPlan, reviewDirectorPlan, withDirectorInstruction } from '@pireel/studio-ui/editing-director-plan';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { EditingTaskCard } from './editing-task-card';
-import { setStudioLocale } from './i18n';
-import { reviewEditingTask } from './editing-task-review';
-import { latestTask, resumeTaskHint, type ChatTask } from './chat-task';
-import { sanitizeRestored } from './chat-thread-store';
-import { editingTaskRows } from './editing-task-progress';
+import { EditingTaskCard } from '@pireel/studio-ui/editing-task-card';
+import { setStudioLocale } from '@pireel/studio-ui/i18n';
+import { reviewEditingTask } from '@pireel/studio-ui/editing-task-review';
+import { latestTask, resumeTaskHint, type ChatTask } from '@pireel/studio-ui/chat-task';
+import { sanitizeRestored } from '@pireel/studio-ui/chat-thread-store';
+import { editingTaskRows } from '@pireel/studio-ui/editing-task-progress';
 
 function fixture() {
   const document = compositionToEditorDocument({ projectId: 'p-test', videoSig: 'sig', composition: { ...emptyComposition(), video: { url: 'blob:test', durationSec: 10 }, shots: [{ id: 'speaker', srcStart: 0, srcEnd: 10, treatment: 'full' }] } }).document;

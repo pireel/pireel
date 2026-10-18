@@ -3,8 +3,8 @@
 import { useCallback, useRef, useState, type MutableRefObject } from 'react';
 import type { Composition, EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import type { StudioProjectOutputSnapshot } from '@pireel/studio-engine/project-outputs';
-import type { StudioDraft } from './use-draft-persist';
-import { outputSwitchVideoPickOptions, type VideoPickOptions } from './video-pick-feedback';
+import type { StudioDraft } from '@pireel/studio-ui/use-draft-persist';
+import { outputSwitchVideoPickOptions, type VideoPickOptions } from '@pireel/studio-ui/video-pick-feedback';
 
 /** Reconnects browser-only media when the checked-out deliverable changes. The project-output
  * controller owns persisted snapshots; this hook owns the intentionally separate runtime layer. */

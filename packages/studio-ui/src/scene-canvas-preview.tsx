@@ -2,7 +2,7 @@ import { audioClipGainAt, audioClipSrcTimeAt, audioClipDefaults } from '@pireel/
 import { supplementalVisualLayers } from './visual-render-plan';
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { assembleHtml } from '@pireel/studio-engine/assemble';
-import { videoTrackShots, shotGain, type Composition } from '@pireel/studio-engine/composition';
+import { videoTrackShots, videoShotTimelineSpans, transitionWindows, shotGain, type VideoShotTimelinePlacement, type Composition } from '@pireel/studio-engine/composition';
 import type { SupplementalVisualMediaClip } from '@pireel/studio-engine/visual-layer-plan';
 import { injectPreviewRuntime } from './sample-composition';
 import { VideoTrackEngine } from './video-track-engine';
@@ -16,6 +16,7 @@ export interface SceneCanvasHandle {
 
 interface Props {
   composition: Composition;
+  placements?: readonly VideoShotTimelinePlacement[];
   visuals: SupplementalVisualMediaClip[];
   files: ReadonlyMap<string, File>;
   duration: number;
@@ -145,6 +146,11 @@ export const SceneCanvasPreview = forwardRef<SceneCanvasHandle, Props>(function 
       win.postMessage({ type: 'hf:seek', t: time.current }, '*');
       if (eng.isPlaying) win.postMessage({ type: 'hf:play', t: time.current }, '*');
       priming.current = index;
+      if (!videoTrackShots(model.composition).length) {
+        active.current = index;
+        setVisible(index);
+        priming.current = null;
+      }
       eng.refresh();
     };
     bootRef.current = boot;
@@ -163,16 +169,13 @@ export const SceneCanvasPreview = forwardRef<SceneCanvasHandle, Props>(function 
     const eng = engine.current;
     if (!eng) return;
     const keys = new Set<string>();
-    let cursor = 0;
-    const segments = videoTrackShots(props.composition).flatMap(shot => {
+    const segments = videoShotTimelineSpans(videoTrackShots(props.composition), props.placements).flatMap(({ clip: shot, editedStart: start, editedEnd: end }) => {
       const key = shot.src || props.composition.video?.url;
       if (!key) return [];
       keys.add(key);
       eng.setSource(key, props.files.get(key) ?? key);
-      const start = cursor;
-      cursor += shot.srcEnd - shot.srcStart;
       return [{ key, elKey: `clip_${shot.id}`, srcStart: shot.srcStart, srcEnd: shot.srcEnd,
-        timelineStart: start, timelineEnd: cursor, gain: shotGain(shot) * props.volume * (props.sourceVolume ?? 1),
+        timelineStart: start, timelineEnd: end, gain: shotGain(shot) * props.volume * (props.sourceVolume ?? 1),
         ...(shot.preciseFraming ? { framing: shot.preciseFraming } : {}) }];
     });
     setMatteError('');
@@ -185,8 +188,9 @@ export const SceneCanvasPreview = forwardRef<SceneCanvasHandle, Props>(function 
     for (const key of sourceKeys.current) if (!keys.has(key)) eng.setSource(key, null);
     sourceKeys.current = keys;
     eng.setTimelineDuration(props.duration);
+    eng.setTransitions(transitionWindows(props.composition.transitions, videoTrackShots(props.composition), props.placements).flatMap(tr => tr.cut === null ? [] : [{ start: tr.start, cut: tr.cut, end: tr.end }]));
     if (eng.setSegments(segments)) eng.seek(time.current);
-  }, [props.composition, props.visuals, props.files, props.duration, props.volume, props.sourceVolume]);
+  }, [props.composition, props.placements, props.visuals, props.files, props.duration, props.volume, props.sourceVolume]);
 
   useEffect(() => {
     const loudness = props.composition.audioLoudness;
@@ -204,7 +208,7 @@ export const SceneCanvasPreview = forwardRef<SceneCanvasHandle, Props>(function 
   useEffect(() => {
     const timer = setTimeout(() => {
       const visuals = props.visuals.map(visual => visual.kind === 'image' && props.files.has(visual.source) ? { ...visual, source: 'pireel-local-image:' + encodeURIComponent(visual.clipId).replace(/[!'()*]/g, char => '%' + char.charCodeAt(0).toString(16).toUpperCase()) } : visual);
-      const html = injectPreviewRuntime(assembleHtml(props.composition, undefined, undefined, visuals));
+      const html = injectPreviewRuntime(assembleHtml(props.composition, undefined, props.placements, visuals));
       if (html === documents.current[active.current]) return;
       const index = documents.current[active.current] ? 1 - active.current : active.current;
       ready.current[index] = false;
@@ -213,7 +217,7 @@ export const SceneCanvasPreview = forwardRef<SceneCanvasHandle, Props>(function 
       setDocs(previous => { const next: [string, string] = [...previous]; next[index] = html; return next; });
     }, 100);
     return () => clearTimeout(timer);
-  }, [props.composition, props.visuals, props.files]);
+  }, [props.composition, props.placements, props.visuals, props.files]);
 
   useEffect(() => {
     if (!host.current || typeof ResizeObserver === 'undefined') return;

@@ -7,8 +7,8 @@
  */
 
 import type { ToolFrameImage } from '@pireel/studio-engine/prompts';
-import { cloudBackupMedia } from './cloud-media';
-import { durableFileSig } from './media';
+import { cloudBackupMedia } from '@pireel/studio-ui/cloud-media';
+import { durableFileSig } from '@pireel/studio-ui/media-ai';
 
 function decodeDataUrl(dataUrl: string): { bytes: Uint8Array; mimeType: string; base64: string } | null {
   const comma = dataUrl.indexOf(',');

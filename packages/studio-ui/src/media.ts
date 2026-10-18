@@ -1,24 +1,7 @@
 'use client';
+/** Local probing, fingerprints and thumbnails. No generation or network service. */
+import {extractThumbnails, extractThumbnailsFromUrl} from '@pireel/studio-engine/video-edit/thumbnails';
 
-import { groupAsrWords } from '@pireel/studio-engine/caption-fx';
-
-/**
- * Studio media pipeline — the browser reads the local file directly for preview/probing; the bytes are
- * backed up to the cloud rendezvous in the background (asset-upload-queue) so any device can reopen the project.
- *
- * Open → pick a local file (URL.createObjectURL for local preview playback) → MediaBunny probes metadata →
- * **audio only** (tens of MB) is uploaded for ASR → shots.
- * Reuses existing shared pieces: extractAudio (MediaBunny audio-track extraction) / studioProviders().uploads.upload
- * (clean intermediate-artifact path, doesn't pollute the material library).
- */
-
-import { extractAudio } from '@pireel/studio-engine/video-edit/extract-audio';
-import { extractThumbnails, extractThumbnailsFromUrl } from '@pireel/studio-engine/video-edit/thumbnails';
-import { studioProviders } from '@pireel/studio-engine/providers';
-import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
-import { detectLang } from '@pireel/studio-engine/caption-fx';
-import { getCachedAsr, setCachedAsr } from './asr-cache';
-import { t } from './i18n';
 
 export interface ProbedFile {
   durationSec: number;
@@ -27,20 +10,15 @@ export interface ProbedFile {
   hasAudio: boolean;
 }
 
-/** The ASR routes deliberately return HTTP 200 for both genuine no-speech and provider
- * failures so a batch import can continue. The browser must still distinguish them: only
- * an explicit provider "no text/speech" result is an empty transcript; every other
- * asr_ok:false response is a failed service call. */
-export function classifyAsrResponse(value: { asr_ok?: boolean; detail?: string }): 'ok' | 'empty' | 'failed' {
-  if (value.asr_ok !== false) return 'ok';
-  return /returned no (?:text|transcript)|no speech|no_valid_fragment/i.test(value.detail ?? '') ? 'empty' : 'failed';
-}
 
 const durableFileSigs = new WeakMap<File, string>();
+
 const CONTENT_SIG_MARKER = '#pireel=';
+
 /** Name-free content identity: `pireel2:<hash>:<size>`. Same bytes → same asset on every device,
  * regardless of filename, mtime or the MIME a particular picker reports. */
 const CONTENT_SIG_PREFIX = 'pireel2:';
+
 
 /** Legacy synchronous identity. Newly imported browser files are upgraded through durableFileSig;
  * callers that receive an aligned/restored File transparently get its remembered durable sig. */
@@ -48,7 +26,9 @@ export function fileSig(file: File): string {
   return durableFileSigs.get(file) ?? `${file.name}:${file.size}:${file.lastModified}`;
 }
 
+
 export const isContentSig = (sig: string): boolean => sig.startsWith(CONTENT_SIG_PREFIX);
+
 
 /** Byte size encoded in any locator format (content sig: last field; legacy: second to last). */
 export function sigSize(sig: string): number | null {
@@ -56,6 +36,7 @@ export function sigSize(sig: string): number | null {
   const raw = Number(isContentSig(sig) ? parts[parts.length - 1] : parts[parts.length - 2]);
   return Number.isSafeInteger(raw) && raw >= 0 ? raw : null;
 }
+
 
 async function sampledContentHash(file: File): Promise<string> {
   const chunkSize = 64 * 1024;
@@ -81,6 +62,7 @@ async function sampledContentHash(file: File): Promise<string> {
   return [...new Uint8Array(digest)].slice(0, 16).map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+
 /** Stable lightweight content identity for imported files. Hashing five bounded slices keeps
  * multi-GB videos cheap while preventing unrelated same-size files from sharing OPFS, ASR or cloud
  * entries. Filename, mtime and MIME are deliberately NOT part of the identity: the same file imported
@@ -92,6 +74,7 @@ export async function durableFileSig(file: File): Promise<string> {
   durableFileSigs.set(file, sig);
   return sig;
 }
+
 
 /** Legacy fingerprint (`name#pireel=<hash>:size:mtime`) recomputed only to validate an old locator. */
 async function legacyDurableFileSig(file: File): Promise<string> {
@@ -117,10 +100,12 @@ async function legacyDurableFileSig(file: File): Promise<string> {
   return `${file.name}${CONTENT_SIG_MARKER}${hash}:${file.size}:${file.lastModified}`;
 }
 
+
 export function rememberDurableFileSig(file: File, sig: string): File {
   durableFileSigs.set(file, sig);
   return file;
 }
+
 
 /** Display filename recoverable from LEGACY locators only. Content sigs carry no name: callers fall
  * back to the asset's label. */
@@ -132,6 +117,7 @@ export function fileNameFromSig(sig: string): string {
     ? raw.slice(0, marker)
     : raw;
 }
+
 
 export async function fileMatchesSig(file: File, sig: string): Promise<boolean> {
   if (isContentSig(sig)) {
@@ -147,6 +133,7 @@ export async function fileMatchesSig(file: File, sig: string): Promise<boolean> 
   }
   return `${file.name}:${file.size}:${file.lastModified}` === sig;
 }
+
 
 /** Probe video metadata locally (MediaBunny dynamically loaded, no upload). */
 export async function probeVideoFile(file: File): Promise<ProbedFile> {
@@ -169,113 +156,9 @@ export async function probeVideoFile(file: File): Promise<ProbedFile> {
   }
 }
 
-type TranscribeOptions = { projectId?: string; sceneRun?: string; signal?: AbortSignal; onUsage?: (usage: import('@pireel/studio-engine/workflow').WorkflowUsage) => void; onPhase?: (phase: 'checking' | 'extracting' | 'uploading' | 'recognizing' | 'aligning') => void };
-
-/** Transcriptions under way, by file: a caller that stopped waiting leaves its request running, and
- *  asking again meanwhile joins it instead of paying for the same audio twice. */
-const transcribing = new Map<string, Promise<AsrSegment[]>>();
-
-/** Extract audio (upload audio only) → ASR → sentence-level shots. Cached by fileSig (same clip transcribed
- *  once); a second call while the first runs joins it (its usage is reported to the first caller only).
- *  Calls with their own abort signal or scene run stay separate: they can be cancelled or billed apart. */
-export function transcribeFile(file: File, opts?: TranscribeOptions): Promise<AsrSegment[]> {
-  if (opts?.signal || opts?.sceneRun) return transcribeFileOnce(file, opts);
-  const sig = fileSig(file);
-  const running = transcribing.get(sig);
-  if (running) return running;
-  const started = transcribeFileOnce(file, opts).finally(() => transcribing.delete(sig));
-  transcribing.set(sig, started);
-  return started;
-}
-
-async function transcribeFileOnce(file: File, opts?: TranscribeOptions): Promise<AsrSegment[]> {
-  const phase = (value: 'checking' | 'extracting' | 'uploading' | 'recognizing' | 'aligning') => { opts?.signal?.throwIfAborted(); opts?.onPhase?.(value); };
-  phase('checking');
-  const sig = fileSig(file);
-  const cached = await getCachedAsr(sig);
-  if (cached) return cached;
-
-  const probe = await probeVideoFile(file).catch(() => null);
-  // A missing audio track is a valid media property, not an ASR failure. Resolve it locally before
-  // extracting/uploading bytes so silent visual assets cost nothing and never surface an error.
-  if (probe && !probe.hasAudio) {
-    setCachedAsr(sig, []);
-    return [];
-  }
-  const durationSec = probe?.durationSec;
-  phase('extracting');
-  const audio = await extractAudio(file);
-  phase('uploading');
-  const { url } = await studioProviders().uploads.upload(audio, { contentType: audio.type || 'audio/mp4', filename: 'studio-audio.m4a' });
-  phase('recognizing');
-  const r = await fetch('/api/auto-edit/asr', {
-    signal: opts?.signal,
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ audio_url: url, duration_sec: durationSec, ...(opts?.projectId ? { projectId: opts.projectId } : {}), ...(opts?.sceneRun ? { sceneRun: opts.sceneRun } : {}) }),
-  });
-  // Server failures must throw a clear error, not silently become an empty array — callers need to tell "ASR failed" apart from "the video truly has no speech"
-  // 402 = credits exhausted: say so instead of an opaque HTTP code
-  if (r.status === 402) throw new Error(t('chatGen.notEnoughCreditsTop'));
-  if (!r.ok) throw new Error(t('common.transcriptionRequestFailedHttp', { status: r.status }));
-  const j = (await r.json()) as {
-    usage?: import('@pireel/studio-engine/workflow').WorkflowUsage;
-    asr_ok?: boolean;
-    detail?: string;
-    lang?: string | null;
-    segments?: Array<{ start: number; end: number; text: string; lang?: string; speaker?: string; words?: Array<{ start: number; end: number; text: string }> }>;
-  };
-  if (j.usage) opts?.onUsage?.(j.usage);
-  const asrState = classifyAsrResponse(j);
-  if (asrState === 'failed') throw new Error(t('workbench.transcriptExtractionFailedTry'));
-  if (asrState === 'empty') return [];
-  // ASR times are in the "audio track's own zero" frame (audio extraction subtracts the audio track's first
-  // packet), while playback is in "earliest sample across all tracks". Files whose two tracks' first packets
-  // are out of sync need this delta added back, or captions/cut points shift wholesale.
-  phase('aligning');
-  const off = await audioPlaybackOffset(file);
-  // Language: provider-reported when available, script-detection fallback otherwise (feeds translate
-  // defaults / segmentation hints; per-segment so mixed-language sources stay honest).
-  const fallbackLang = j.lang ?? detectLang((Array.isArray(j.segments) ? j.segments : []).map((s) => s.text ?? '').join(' '));
-  const segs: AsrSegment[] = (Array.isArray(j.segments) ? j.segments : [])
-    .filter((s) => s.text?.trim())
-    .map((s) => {
-      const words = (Array.isArray(s.words) ? s.words : [])
-        .filter((w) => w.text?.trim() && typeof w.start === 'number' && typeof w.end === 'number')
-        .map((w) => ({ text: w.text.trim(), start: Math.max(0, w.start + off), end: Math.max(0, w.end + off) }));
-      const lang = s.lang ?? fallbackLang;
-      return {
-        start: Math.max(0, s.start + off),
-        end: Math.max(s.start + off + 0.1, s.end + off),
-        text: s.text.trim(),
-        ...(lang ? { lang } : {}),
-        ...(s.speaker ? { speaker: s.speaker } : {}),
-        ...(words.length ? { words: groupAsrWords(s.text, words) } : {}),
-      };
-    });
-  // Empty is a durable verdict too — without caching it, every later pass re-uploads,
-  // re-charges and re-asks the provider about the same speech-less source.
-  setCachedAsr(sig, segs);
-  return segs;
-}
-
-/**
- * The browser's part of a server-run transcription: extract the speech, upload it, and report how far
- * the audio track sits from the picture's zero (the server adds it to every time). null = no audio.
- */
-export async function prepareSpeechAudio(file: File, opts?: { signal?: AbortSignal; onPhase?: (phase: 'checking' | 'extracting' | 'uploading') => void }): Promise<{ key: string; offset: number } | null> {
-  opts?.onPhase?.('checking');
-  const probe = await probeVideoFile(file).catch(() => null);
-  if (probe && !probe.hasAudio) return null;
-  opts?.signal?.throwIfAborted(); opts?.onPhase?.('extracting');
-  const audio = await extractAudio(file);
-  opts?.signal?.throwIfAborted(); opts?.onPhase?.('uploading');
-  const { key } = await studioProviders().uploads.upload(audio, { contentType: audio.type || 'audio/mp4', filename: 'studio-audio.m4a' });
-  return { key, offset: await audioPlaybackOffset(file) };
-}
 
 /** Audio track's first-packet offset relative to the playback zero (earliest sample across all tracks), in seconds. ≈0 for normal in-sync files. */
-async function audioPlaybackOffset(file: File): Promise<number> {
+export async function audioPlaybackOffset(file: File): Promise<number> {
   const { ALL_FORMATS, BlobSource, Input } = await import('mediabunny');
   const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
   try {
@@ -290,11 +173,13 @@ async function audioPlaybackOffset(file: File): Promise<number> {
   }
 }
 
+
 /** One filmstrip frame: global timestamp + blob URL (backing the timeline video track). */
 export interface FilmstripFrame {
   t: number;
   url: string;
 }
+
 
 const filmstripTimestamps = (durationSec: number, count: number): number[] => {
   const n = Math.max(2, Math.min(count, 600));
@@ -302,10 +187,12 @@ const filmstripTimestamps = (durationSec: number, count: number): number[] => {
   return Array.from({ length: n }, (_, i) => Math.min(durationSec - 0.05, ((i + 0.5) / n) * durationSec));
 };
 
+
 export interface FilmstripSourceRange {
   startSec: number;
   endSec: number;
 }
+
 
 export function filmstripSourceRangeForTimelineWindow(
   timelineStartSec: number,
@@ -327,6 +214,7 @@ export function filmstripSourceRangeForTimelineWindow(
     endSec: sourceInSec + (overlapEndSec - timelineStartSec) * sourceRate,
   };
 }
+
 
 /** Stable, source-clock thumbnail demand for the ranges that survive the edit. The grid is anchored
  * to source time so trimming a clip inside one bucket does not schedule a whole new filmstrip. */
@@ -365,6 +253,7 @@ export function filmstripTimestampsForRanges(
   return Array.from({ length: maxCount }, (_, index) => unique[Math.floor(index * unique.length / maxCount)]!);
 }
 
+
 export async function extractFilmstripAtTimestamps(
   file: File,
   timestamps: readonly number[],
@@ -382,6 +271,7 @@ export async function extractFilmstripAtTimestamps(
   });
   return frames.sort((left, right) => left.t - right.t);
 }
+
 
 export async function extractFilmstripFromUrlAtTimestamps(
   url: string,
@@ -401,6 +291,7 @@ export async function extractFilmstripFromUrlAtTimestamps(
   return frames.sort((left, right) => left.t - right.t);
 }
 
+
 /**
  * Sample evenly-spaced filmstrip frames to back the timeline video track (local decode, no upload).
  * count controls density; onFrame is an incremental callback so the filmstrip appears as it decodes.
@@ -416,6 +307,7 @@ export async function extractFilmstrip(
   return extractFilmstripAtTimestamps(file, filmstripTimestamps(dur, count), onFrame);
 }
 
+
 /** Remote counterpart: MediaBunny's UrlSource requests only the container index and sample
  * ranges needed for the visible strip instead of materializing the entire video as a Blob. */
 export async function extractFilmstripFromUrl(
@@ -429,11 +321,6 @@ export async function extractFilmstripFromUrl(
   return extractFilmstripFromUrlAtTimestamps(url, filmstripTimestamps(dur, count), onFrame);
 }
 
-/** Upload the full source clip only at export time, returning an https URL the render service can fetch. */
-export async function uploadVideoFile(file: File): Promise<string> {
-  const { url } = await studioProviders().uploads.upload(file, { contentType: file.type || 'video/mp4', filename: file.name || 'studio-video.mp4' });
-  return url;
-}
 
 /** Extract embedded cover art from an audio file (ID3 APIC / MP4 covr / FLAC PICTURE — MediaBunny
  *  reads them all) as an object URL, or null. Best-effort: any failure = no cover, never an error. */

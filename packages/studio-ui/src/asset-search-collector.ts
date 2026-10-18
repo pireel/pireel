@@ -1,11 +1,12 @@
 'use client';
+import { editorRequest } from '@pireel/studio-ui/host-request';
 
 import { type AssetSearchDocument, type AssetSearchScope } from '@pireel/studio-engine/asset-search';
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { imageThumb } from '@pireel/ui/image-url';
-import { loadElementEntries } from './element-history';
-import { listStudioGens } from './gen-api';
+import { loadElementEntries } from '@pireel/studio-ui/element-history';
+import { listStudioGens } from '@pireel/studio-ui/gen-api';
 
 interface MaterialItem {
   id: string;
@@ -35,7 +36,7 @@ export async function collectAssetSearchDocuments(
   const includeCloud = scope === 'all' || scope === 'cloud';
   const includeOfficial = scope === 'all' || scope === 'official';
   const getUploads = (kind: 'image' | 'video' | 'audio') =>
-    fetch(`/api/me/materials?tab=global&kind=${kind}&limit=200`)
+    editorRequest(`/api/me/materials?tab=global&kind=${kind}&limit=200`)
       .then((response) => (response.ok ? response.json() : null))
       .then((body: { items?: MaterialItem[] } | null) => body?.items ?? [])
       .catch(() => [] as MaterialItem[]);

@@ -1,4 +1,4 @@
-import type { WorkflowValue } from './workflow';
+import type { WorkflowValue } from '@pireel/studio-engine/workflow';
 
 /** Bounded JSON Schema subset supported by workflow parameters and LLM outputs. */
 export interface WorkflowSchema {

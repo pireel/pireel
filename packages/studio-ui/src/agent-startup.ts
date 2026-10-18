@@ -1,5 +1,5 @@
 import type { UIMessage } from 'ai';
-import { latestTask, taskOf } from './chat-task';
+import { latestTask, taskOf } from '@pireel/studio-ui/chat-task';
 
 /** A whiteboard keeps the recorded lesson intact; the ordinary home edit keeps its rough-cut flow. */
 export function startWithRoughCut(skillId: string): boolean {

@@ -6,7 +6,7 @@
  * structural help without every prompt anchoring on the same small catalogue.
  */
 
-import type { BlockEdit, ComposeContext } from "../compose";
+import type { BlockEdit, ComposeContext } from "@pireel/studio-engine/compose";
 
 export const MOTION_GRAPHIC_CAPABILITY_MAP = `MOTION GRAPHIC CAPABILITY MAP — OPEN, NOT EXHAUSTIVE
 Choose a visual form from the communicative job and available evidence. The families below are landmarks,

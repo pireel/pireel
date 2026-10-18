@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { EditorDocumentV2, EditorTrack, TimelineClip } from '../editor-document/types';
-import { documentDelta, renderV3State } from './state';
+import type { EditorDocumentV2, EditorTrack, TimelineClip } from '@pireel/studio-engine/editor-document/types';
+import { documentDelta, renderV3State } from '@pireel/studio-engine/agent-surface-v3/state';
 
 const track = (id: string, type: EditorTrack['type'], clips: TimelineClip[], extra: Partial<EditorTrack> = {}): EditorTrack => ({
   id, type, muted: false, hidden: false, locked: false, syncLocked: true, stackOrder: 0, clips, ...extra,

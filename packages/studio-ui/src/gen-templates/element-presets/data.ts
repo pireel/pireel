@@ -1,4 +1,4 @@
-import { artElement, type ArtDirectedElementSpec } from './shared';
+import { artElement, type ArtDirectedElementSpec } from '@pireel/studio-ui/gen-templates/element-presets/shared';
 
 export const DATA_ELEMENT_PRESETS: Record<string, ArtDirectedElementSpec> = {
   'el-big-number': artElement(

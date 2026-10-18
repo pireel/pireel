@@ -1,4 +1,4 @@
-import type { GenTemplate } from './types';
+import type { GenTemplate } from '@pireel/studio-ui/gen-templates/types';
 
 /** Reusable starting briefs for generated overlay components. The copy stays generic so users can
  * replace the sample subject after it lands in the composer; the generator supplies the visual

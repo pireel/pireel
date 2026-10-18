@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { renderV3State } from './agent-surface-v3/state';
-import { editingSkillsHint } from './editing-skills';
-import { emptyEditorDocumentV2 } from './editor-document';
-import { applyEditorCommand } from './editor-document/commands/dispatcher';
-import { projectV2ToLegacyComposition } from './editor-document/legacy-projection';
+import { renderV3State } from '@pireel/studio-engine/agent-surface-v3/state';
+import { editingSkillsHint } from '@pireel/studio-engine/editing-skills';
+import { emptyEditorDocumentV2 } from '@pireel/studio-engine/editor-document';
+import { applyEditorCommand } from '@pireel/studio-engine/editor-document/commands/dispatcher';
+import { projectV2ToLegacyComposition } from '@pireel/studio-engine/editor-document/legacy-projection';
 
 describe('editing skills', () => {
   it('are stored in the document in catalog order, read back by agents and projected for the UI', () => {

@@ -1,7 +1,8 @@
+import { studioProviders } from '@pireel/studio-engine/providers';
 'use client';
 
 import { alignFileToSig, deleteLocalVideo, loadLocalVideo, saveLocalStream, saveLocalVideo } from './local-media';
-import { fileNameFromSig, sigSize } from './media';
+import { fileNameFromSig, sigSize } from '@pireel/studio-ui/media';
 
 export interface MaterializedRemoteMedia {
   file: File;
@@ -45,7 +46,7 @@ async function fetchRemote(raw: string, signal?: AbortSignal): Promise<Response>
   } catch {
     // CORS/network: use the guarded same-origin proxy below.
   }
-  return fetch(`/api/media/fetch?url=${encodeURIComponent(raw)}`, { signal });
+  return fetch(studioProviders().mediaProxyUrl?.(raw) ?? raw, { signal });
 }
 
 /** Materialize a remote media object directly into OPFS. Large videos never pass through

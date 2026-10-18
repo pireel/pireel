@@ -19,20 +19,20 @@ import {
   freeTrack,
   isSentenceCaption,
 } from '@pireel/studio-engine/composition';
-import type { DocumentCommitter } from './document-commit';
+import type { DocumentCommitter } from '@pireel/studio-ui/document-commit';
 import { getTheme, themeVarsCss } from '@pireel/studio-engine/theme';
 import { kitElement } from '@pireel/studio-engine/kit-templates';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { HARD_LINT_CODES, lintBlock } from '@pireel/studio-engine/block-lint';
-import { addElementEntry } from './element-history';
-import type { GenElementResult } from './element-history';
-import { fitElementDesignBox } from './element-insert-geometry';
-import type { StudioChatHandle } from './studio-chat';
-import { t } from './i18n';
-import { componentContentSyncTarget } from './component-content-sync';
-import { fitEditableBoxIntoSafeArea, normalizeElementForInsert } from './editable-block-geometry';
-import { editorErrorMessage } from './editor-error';
+import { addElementEntry } from '@pireel/studio-ui/element-history';
+import type { GenElementResult } from '@pireel/studio-ui/element-history';
+import { fitElementDesignBox } from '@pireel/studio-ui/element-insert-geometry';
+import type { StudioChatHandle } from '@pireel/studio-ui/studio-chat';
+import { t } from '@pireel/studio-ui/i18n';
+import { componentContentSyncTarget } from '@pireel/studio-ui/component-content-sync';
+import { fitEditableBoxIntoSafeArea, normalizeElementForInsert } from '@pireel/studio-ui/editable-block-geometry';
+import { editorErrorMessage } from '@pireel/studio-ui/editor-error';
 
 export interface ElementOpsDeps {
   projectId: string;

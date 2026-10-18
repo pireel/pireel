@@ -15,12 +15,12 @@
  * appears here: it goes in the user message, or it poisons the cached prefix on every call.
  */
 
-import { BLOCK_HTML_BODY } from './block-system';
-import { FRAGMENT_CONTRACT } from './fragment-contract';
-import { L1_PROPS_SPEC } from './l1-props-spec';
-import { catalogSection, componentNormsSection } from './l4-catalog';
-import { MOTION_GRAPHIC_CAPABILITY_MAP, motionGraphicPatternSection } from './motion-graphic-patterns';
-import { getPreset } from './presets';
+import { BLOCK_HTML_BODY } from '@pireel/studio-engine/prompts/block-system';
+import { FRAGMENT_CONTRACT } from '@pireel/studio-engine/prompts/fragment-contract';
+import { L1_PROPS_SPEC } from '@pireel/studio-engine/prompts/l1-props-spec';
+import { catalogSection, componentNormsSection } from '@pireel/studio-engine/prompts/l4-catalog';
+import { MOTION_GRAPHIC_CAPABILITY_MAP, motionGraphicPatternSection } from '@pireel/studio-engine/prompts/motion-graphic-patterns';
+import { getPreset } from '@pireel/studio-engine/prompts/presets';
 
 interface ComponentSystemOptions {
   presetId?: string;

@@ -10,7 +10,7 @@
  */
 
 import { Check, Scissors } from 'lucide-react';
-import { t } from './i18n';
+import { t } from '@pireel/studio-ui/i18n';
 
 export interface CutRow {
   atSec: number;

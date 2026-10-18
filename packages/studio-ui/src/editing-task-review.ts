@@ -1,11 +1,11 @@
-import { coverSceneFromDocument, coverSceneInput } from './cover-scene';
+import { coverSceneFromDocument, coverSceneInput } from '@pireel/studio-ui/cover-scene';
 import type { UIMessage } from 'ai';
-import { reviewDirectorPlan, type DirectorBeatResult } from './editing-director-plan';
+import { reviewDirectorPlan, type DirectorBeatResult } from '@pireel/studio-ui/editing-director-plan';
 import type { EditorDocumentV2 } from '@pireel/studio-engine/composition';
-import { isWhiteboardDirectorTask, type ChatTask } from './chat-task';
+import { isWhiteboardDirectorTask, type ChatTask } from '@pireel/studio-ui/chat-task';
 import { projectDocumentToComposition } from '@pireel/studio-engine/project-document';
-import { whiteboardSceneReady } from './whiteboard-scene-result';
-import type { EditingEvidence } from './first-pass';
+import { whiteboardSceneReady } from '@pireel/studio-ui/whiteboard-scene-result';
+import type { EditingEvidence } from '@pireel/studio-ui/first-pass';
 
 export const EDIT_REVIEW_FEATURES = ['graphics', 'b-roll', 'sound', 'zoom', 'transitions'] as const;
 export type EditReviewFeature = typeof EDIT_REVIEW_FEATURES[number];

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { newBlockComposeMode } from './compose-result';
+import { newBlockComposeMode } from '@pireel/studio-ui/compose-result';
 
 describe('new block compose routing', () => {
   it('tries the component library first without brand graphics, and writes bespoke markup with them', () => {

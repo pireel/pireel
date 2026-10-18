@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { acknowledgeChatThread, cachedChatThread, cacheChatThread, restoreChatThreads } from './chat-thread-cache';
-import { recordTaskUsage, subscribeTaskUsage } from './chat-task-usage';
-import { taskOf } from './chat-task';
-import type { StoredThread } from './chat-thread-store';
+import { acknowledgeChatThread, cachedChatThread, cacheChatThread, restoreChatThreads } from '@pireel/studio-ui/chat-thread-cache';
+import { recordTaskUsage, subscribeTaskUsage } from '@pireel/studio-ui/chat-task-usage';
+import { taskOf } from '@pireel/studio-ui/chat-task';
+import type { StoredThread } from '@pireel/studio-ui/chat-thread-store';
 
 beforeEach(() => {
   const values = new Map<string, string>();

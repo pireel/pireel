@@ -8,9 +8,9 @@
  * measured time, substituted or unheard units share the time span the recogniser spent on the
  * corresponding stretch, and sentences follow the script's own punctuation.
  */
-import type { TranscriptSegment } from './project-dto';
-import { splitSpeechSentences } from './agent-timeline';
-import { segmentTokens, wordsFromText } from './caption-fx';
+import type { TranscriptSegment } from '@pireel/studio-engine/project-dto';
+import { splitSpeechSentences } from '@pireel/studio-engine/agent-timeline';
+import { segmentTokens, wordsFromText } from '@pireel/studio-engine/caption-fx';
 
 interface Unit {
   text: string;

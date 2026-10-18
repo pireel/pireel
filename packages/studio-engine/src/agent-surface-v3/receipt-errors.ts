@@ -1,4 +1,4 @@
-import type { V3ClipKind } from './context';
+import type { V3ClipKind } from '@pireel/studio-engine/agent-surface-v3/context';
 
 /**
  * Failure receipts are the agent's correction channel, so every refused call must say what to do

@@ -1,6 +1,6 @@
 import { videoTrackShots, type Composition } from '@pireel/studio-engine/composition';
 import type { DocumentOp } from '@pireel/studio-engine/document-transaction';
-import { captionTranslationWrites, type CaptionTranslationRow, type CaptionTranslationWrites, type TranslationUnit } from './caption-translation-transaction';
+import { captionTranslationWrites, type CaptionTranslationRow, type CaptionTranslationWrites, type TranslationUnit } from '@pireel/studio-ui/caption-translation-transaction';
 
 export type CaptionTranslator = (rows: CaptionTranslationRow[], language: string) => Promise<CaptionTranslationRow[]>;
 

@@ -1,9 +1,17 @@
+import { beforeEach as configureHttpHost, afterEach as restoreHttpHost } from 'vitest';
+import { studioProviders, setStudioProviders } from '@pireel/studio-engine/providers';
+let previousHttpHost: ReturnType<typeof studioProviders>;
+configureHttpHost(() => {
+  previousHttpHost = studioProviders();
+  setStudioProviders({ ...previousHttpHost, request: (input, init) => init === undefined ? fetch(input) : fetch(input, init) });
+});
+restoreHttpHost(() => setStudioProviders(previousHttpHost));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   invalidateCurrentUser,
   loadCurrentUser,
   loadCurrentUserBalance,
-} from "./current-user";
+} from "@pireel/studio-ui/current-user";
 
 describe("loadCurrentUser", () => {
   beforeEach(() => invalidateCurrentUser());

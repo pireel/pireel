@@ -7,7 +7,7 @@ import {
   ChatTimelineFramePicker,
   formatTimelineFrameTime,
   shouldCollapseChatForTimelineFramePick,
-} from './chat-timeline-frame-picker';
+} from '@pireel/studio-ui/chat-timeline-frame-picker';
 
 const mounted: Array<{ root: ReturnType<typeof createRoot>; host: HTMLDivElement }> = [];
 

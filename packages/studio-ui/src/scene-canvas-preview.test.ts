@@ -14,7 +14,7 @@ vi.mock('./preview-stage-host', () => ({ PreviewStageHost: class {
   constructor(readonly element: HTMLDivElement) { stages.push(this); }
 } }));
 vi.mock('./video-track-engine', () => ({ VideoTrackEngine: class {
-  setAudioClips = vi.fn(); setLayers = vi.fn(); setSource = vi.fn(); setSegments = vi.fn(() => true); setTimelineDuration = vi.fn(); setMasterGain = vi.fn();
+  setTransitions = vi.fn(); setAudioClips = vi.fn(); setLayers = vi.fn(); setSource = vi.fn(); setSegments = vi.fn(() => true); setTimelineDuration = vi.fn(); setMasterGain = vi.fn();
   refresh = vi.fn(); seek = vi.fn(); play = vi.fn(); pause = vi.fn(); dispose = vi.fn();
   isPlaying = false;
   constructor() { engines.push(this); }

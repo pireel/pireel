@@ -4,13 +4,13 @@
  * component has been baked to a video outside the closed component runtime.
  */
 
-import { runAgentTimelineTool } from './agent-timeline';
+import { runAgentTimelineTool } from '@pireel/studio-engine/agent-timeline';
 import {
   validateEditorDocumentV2,
   type EditorCommandError,
   type EditorDocumentV2,
   type MediaTimelineClip,
-} from './editor-document';
+} from '@pireel/studio-engine/editor-document';
 
 export interface BakeOverlayClipToMediaInput {
   document: EditorDocumentV2;

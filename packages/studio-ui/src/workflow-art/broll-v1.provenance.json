@@ -1,9 +1,0 @@
-{
-  "tool": "built-in image_gen",
-  "references": [
-    "captions-cc-v4.png",
-    "agent-editor-v2.png",
-    "dubbing-v1.png"
-  ],
-  "prompt": "Generate ONE standalone transparent-background square PNG app feature icon for AI B-Roll, stylistically matching these three reference icons. Same refined tactile 3D clay / matte ceramic materials, ivory rounded bevels, subtle contact shadows, low saturation blue-gray sage and a small muted terracotta accent. Semantics must unmistakably mean inserting supplemental footage: two overlapping wide video-frame tiles, rear tile offset upper-left has a simple embossed head-and-shoulders presenter silhouette; front tile offset lower-right has a stylized embossed mountain landscape and a tiny terracotta play triangle. Only two clearly readable chunky tiles, legible at 56px. Centered large object with 8% transparent margins. Same nearly frontal slightly elevated camera as references. No clapperboard, no microphone, no globe, no speech bubble, no CC, no letters, no words, no extra sparkles, no background plate, no neon, no saturated rainbow. Transparent alpha outside the objects. This is the final production raster icon, not a mockup sheet."
-}

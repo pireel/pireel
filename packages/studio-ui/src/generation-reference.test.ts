@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { EditorMediaAsset } from '@pireel/studio-engine/editor-document';
-import { resolveGenerationReferences } from './generation-reference';
+import { resolveGenerationReferences } from '@pireel/studio-ui/generation-reference';
 
 const entry = (assetId: string, cloudKey?: string) => ({
   assetId,
@@ -42,7 +42,7 @@ describe('generation references', () => {
 
 describe('source-frame identity reference', () => {
   it('uses source seconds and a clean decoded image, without a model call', async () => {
-    const { resolveGenerationSourceFrame } = await import('./generation-reference');
+    const { resolveGenerationSourceFrame } = await import('@pireel/studio-ui/generation-reference');
     const file = new File(['video'], 'speaker.mp4');
     const blob = new Blob(['clean frame'], { type: 'image/jpeg' });
     const load = vi.fn(async () => ({ file }));
@@ -56,7 +56,7 @@ describe('source-frame identity reference', () => {
     expect(load).toHaveBeenCalledTimes(1);
   });
   it('blocks before generation when source bytes, frame upload or cancellation fails', async () => {
-    const { resolveGenerationSourceFrame } = await import('./generation-reference');
+    const { resolveGenerationSourceFrame } = await import('@pireel/studio-ui/generation-reference');
     const assets = { speaker: { id: 'speaker', kind: 'video' as const, label: 'Speaker', locator: {}, metadata: { durationSec: 10 } } };
     const capture = vi.fn(async () => new Blob(['frame']));
     const upload = vi.fn(async () => null);

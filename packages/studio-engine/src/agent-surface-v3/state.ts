@@ -7,20 +7,20 @@
  * touched/created clips (capped), uniform shifts compressed to rules, removed ids, created tracks,
  * caption changes, and notes telling the agent exactly when to re-read. Pure; no I/O.
  */
-import { webFontCatalog } from '../font-library';
-import { captionAnimationId } from '../caption-animations';
-import { documentCaptionStyle } from '../editor-document/caption-state';
-import { componentSchemaOf, componentValuesView, type ComponentValueType } from '../component-schema';
-import type { DocumentLook } from '../look';
-import { editingSkillsOf } from '../editing-skills';
-import { dataEditFields } from '../component-props';
-import { clipPropertyDefaults, effectiveAudioClipProperties } from './clip-properties';
+import { webFontCatalog } from '@pireel/studio-engine/font-library';
+import { captionAnimationId } from '@pireel/studio-engine/caption-animations';
+import { documentCaptionStyle } from '@pireel/studio-engine/editor-document/caption-state';
+import { componentSchemaOf, componentValuesView, type ComponentValueType } from '@pireel/studio-engine/component-schema';
+import type { DocumentLook } from '@pireel/studio-engine/look';
+import { editingSkillsOf } from '@pireel/studio-engine/editing-skills';
+import { dataEditFields } from '@pireel/studio-engine/component-props';
+import { clipPropertyDefaults, effectiveAudioClipProperties } from '@pireel/studio-engine/agent-surface-v3/clip-properties';
 
 import type {
   EditorDocumentV2,
   EditorTrack,
   TimelineClip,
-} from '../editor-document/types';
+} from '@pireel/studio-engine/editor-document/types';
 
 export const V3_DELTA_CLIP_LIMIT = 30;
 export const V3_SHIFT_RULE_MIN = 3;

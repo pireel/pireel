@@ -1,3 +1,4 @@
+import { studioProviders } from '@pireel/studio-engine/providers';
 /**
  * Parent-layer video track engine (decode/clock/audio side of the canvas render mode):
  *
@@ -105,7 +106,7 @@ export function previewAudioSource(url: string): string {
   try {
     const target = new URL(url, window.location.href);
     if ((target.protocol === 'http:' || target.protocol === 'https:') && target.origin !== window.location.origin) {
-      return `/api/media/fetch?url=${encodeURIComponent(target.toString())}`;
+      return studioProviders().mediaProxyUrl?.(target.toString()) ?? url;
     }
   } catch {
     // Keep malformed/opaque values unchanged; the media element will surface the real load failure.

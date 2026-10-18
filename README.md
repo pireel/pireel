@@ -1,46 +1,10 @@
-<div align="center">
+# Pireel editor component
 
-# Pireel Studio
+An embeddable video editor preserving the original Pireel workbench: canvas, timeline, transcript, properties, assets, AI chat and editing tools. There is no separate simplified UI.
 
-**An open-source AI video editor built for humans and AI agents.**
+English · [简体中文](README.zh-CN.md)
 
-[English](README.md) · [简体中文](README.zh-CN.md)
-
-Start with one clip, a collection of media, or a blank video. Edit directly on
-the canvas and timeline, or describe the result you want.
-
-<img src="https://cdn.pireel.com/static/landing/editorial-scenes/chat-editing-hero-dark-v8.jpg" alt="Pireel Studio video editing workspace" width="880" />
-
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
-[![Agent plugin](https://img.shields.io/badge/Agent-plugin-8b5cf6.svg)](https://github.com/pireel/pireel-agent)
-
-[Try Pireel](https://pireel.com) · [Connect an agent](https://pireel.com/connect-agent.md)
-
-</div>
-
----
-
-Pireel brings AI into a real editing workspace. AI can help make the first cut,
-but you stay in control of the canvas, timeline, captions, graphics, audio, and
-final export.
-
-## What you can create
-
-- Talking-head videos with cleaner pacing and readable captions
-- Short clips made from longer recordings
-- Product demos, tutorials, explainers, and marketing videos
-- Multi-source edits combining video, images, audio, and graphics
-- Multiple versions for different platforms, formats, and audiences
-- Videos shaped with reusable editing Skills and visual Frames
-
-## Edit your way
-
-- **Directly in Studio** for hands-on canvas and timeline editing
-- **With Chat** by describing cuts, pacing, captions, layouts, and visual ideas
-- **With an AI agent** such as Codex or Claude Code
-- **Any combination of the three** as the project develops
-
-## Run the open-source editor
+## Run the example
 
 ```bash
 git clone https://github.com/pireel/pireel.git
@@ -50,23 +14,34 @@ pnpm install
 pnpm dev
 ```
 
-Open the URL shown in the terminal and import your media.
+Local import, editing, preview and export run independently. AI remains part of the component; the embedding host supplies model, transcription, generation and persistence services.
 
-The open-source edition focuses on local editing. For the complete hosted
-experience, including built-in Chat and connected services, visit
-[pireel.com](https://pireel.com).
+## Embed
 
-## Connect an AI agent
+```tsx
+import { PireelEditor } from '@pireel/studio-ui/editor';
+import { unavailableProviders } from '@pireel/studio-engine/providers';
 
-Install the public Pireel agent plugin:
-
-```bash
-npx skills add pireel/pireel-agent
+const providers = {
+  ...unavailableProviders(),
+  chatEndpoint: '/api/editor/chat',
+  request: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
+};
+export function EditorPage() {
+  return <PireelEditor projectId="local" locale="en" providers={providers} className="h-screen w-full" />;
+}
 ```
 
-Then ask your agent to set up Pireel. See the
-[connection guide](https://pireel.com/connect-agent.md) for supported agents.
+Implement the chat service and other capabilities using `StudioProviders`. Runtime service configuration is shared per page; use one provider configuration on a page. The editor includes no platform credentials.
+
+The optional `extensions` prop supplies host UI and catalogs. `StudioShell.WorkflowEntry` mounts a product-owned workflow surface. Complete scene pages and recipes (dubbing, B-roll, erasure and other production flows), official playbooks, billing and platform services remain in the hosted product.
+
+Load Tailwind v4, `@pireel/ui/theme.css` and `@pireel/studio-ui/studio.css` in the host; the example app contains the complete stylesheet entry. External Agent connections use the optional `bridgeUrl` port.
+
+## Hosted product
+
+[Pireel](https://pireel.com) offers the complete connected production workflows. The [public Agent connector](https://github.com/pireel/pireel-agent) connects to that service.
 
 ## License
 
-[AGPL-3.0-only](LICENSE). The separate agent plugin is licensed under Apache-2.0.
+[AGPL-3.0-only](LICENSE). The separate Agent connector is Apache-2.0.

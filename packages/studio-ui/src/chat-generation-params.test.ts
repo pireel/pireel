@@ -2,13 +2,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { setStudioLocale } from './i18n';
-import type { GenerationParams } from './chat-generation-intent';
-import { GenerationControls, GenerationCreditsBadge } from './chat-generation-params';
+import { setStudioLocale } from '@pireel/studio-ui/i18n';
+import type { GenerationParams } from '@pireel/studio-ui/chat-generation-intent';
+import { GenerationControls, GenerationCreditsBadge } from '@pireel/studio-ui/chat-generation-params';
 
 const mocks = vi.hoisted(() => ({ quote: vi.fn(() => null) }));
-vi.mock('@pireel/ui/use-quote', () => ({ useQuote: mocks.quote }));
-vi.mock('./shell-context', () => ({
+vi.mock('@pireel/studio-ui/use-quote', () => ({ useQuote: mocks.quote }));
+vi.mock('@pireel/studio-ui/shell-context', () => ({
   useStudioShell: () => ({ modelParams: {
     qualityConfigFor: () => ({ default: 'medium', options: [{ value: 'medium', label: 'Medium' }, { value: 'high', label: 'High' }] }),
     videoResolutionOptions: () => ['720p', '1080p'],

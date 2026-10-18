@@ -1,9 +1,9 @@
-import type { GenElementResult } from '../../element-history';
-import type { GenTemplate } from '../types';
-import { ACCENT_ELEMENT_PRESETS } from './accent';
-import { DATA_ELEMENT_PRESETS } from './data';
-import { STORY_ELEMENT_PRESETS } from './story';
-import type { ArtDirectedElementSpec } from './shared';
+import type { GenElementResult } from '@pireel/studio-ui/element-history';
+import type { GenTemplate } from '@pireel/studio-ui/gen-templates/types';
+import { ACCENT_ELEMENT_PRESETS } from '@pireel/studio-ui/gen-templates/element-presets/accent';
+import { DATA_ELEMENT_PRESETS } from '@pireel/studio-ui/gen-templates/element-presets/data';
+import { STORY_ELEMENT_PRESETS } from '@pireel/studio-ui/gen-templates/element-presets/story';
+import type { ArtDirectedElementSpec } from '@pireel/studio-ui/gen-templates/element-presets/shared';
 
 const ELEMENT_PRESETS: Record<string, ArtDirectedElementSpec> = {
   ...DATA_ELEMENT_PRESETS,

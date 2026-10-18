@@ -2,7 +2,7 @@ import {
   type StudioScenarioSkill,
   type StudioScenarioSkillRegistry,
   type StudioScenarioSkillRegistryLayer,
-} from './types';
+} from '@pireel/studio-engine/scenario-skills/types';
 
 // default_prompt: optional suggested first message a host may prefill into chat when the
 // Skill is selected. The engine ignores it beyond parsing; hosts read it from attributes.

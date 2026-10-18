@@ -7,8 +7,8 @@
  */
 
 import { components } from '@pireel/studio-kit';
-import { ON_SCREEN_LANGUAGE } from '../l0-editor';
-import type { Preset } from './spoken';
+import { ON_SCREEN_LANGUAGE } from '@pireel/studio-engine/prompts/l0-editor';
+import type { Preset } from '@pireel/studio-engine/prompts/presets/spoken';
 
 export const GENERAL_EDITORIAL = `WHAT EARNS A MOTION GRAPHIC
 Start from the authored Scene, its source evidence and viewer task. A Motion Graphic exists only

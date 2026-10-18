@@ -15,11 +15,11 @@
  */
 
 import { applyPatch, type Operation as JsonPatchOperation } from 'fast-json-patch';
-import type { AsrSegment } from './build-blocks';
-import { canonicalJson, hashSection } from './stable-json';
-import type { Block, Composition, VideoShot } from './composition-core';
-import type { ProjectCloudMediaIndex } from './project-dto';
-import type { LocalAssetIndexEntry } from './project-context';
+import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
+import { canonicalJson, hashSection } from '@pireel/studio-engine/stable-json';
+import type { Block, Composition, VideoShot } from '@pireel/studio-engine/composition-core';
+import type { ProjectCloudMediaIndex } from '@pireel/studio-engine/project-dto';
+import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-context';
 import {
   applyEditorCommand,
   freezeEditorDocumentBlockVars,
@@ -34,13 +34,13 @@ import {
   type EditorMediaAsset,
   type NarrationSecondRange,
   type NarrativeClipPatchUpdate,
-} from './editor-document';
+} from '@pireel/studio-engine/editor-document';
 import {
   applyEditorDocumentPersistenceMetadata,
   prepareEditorDocumentForPersistence,
   projectDocumentToComposition,
-} from './project-document';
-import { applyOverlayDocumentEdits, removeOverlayDocumentClips, type OverlayDocumentPatch } from './overlay-document-edit';
+} from '@pireel/studio-engine/project-document';
+import { applyOverlayDocumentEdits, removeOverlayDocumentClips, type OverlayDocumentPatch } from '@pireel/studio-engine/overlay-document-edit';
 import {
   duplicateOverlayDocumentClip,
   insertOverlayDocumentClip,
@@ -51,7 +51,7 @@ import {
   type InsertOverlayDocumentClipInput,
   type MoveOverlayDocumentClipInput,
   type RetimeOverlayDocumentClipInput,
-} from './overlay-track-edit';
+} from '@pireel/studio-engine/overlay-track-edit';
 import {
   addNarrativeDocumentClip,
   insertNarrativeAssetRange,
@@ -62,10 +62,10 @@ import {
   type InsertNarrativeAssetRangeInput,
   type MoveNarrativeDocumentClipInput,
   type MoveNarrativeDocumentClipToVisualTrackInput,
-} from './narrative-document-edit';
-import { applyNarrationDocumentEdit, removeNarrationClipsWithoutRipple } from './narration-document-edit';
-import { moveVisualDocumentClip, type MoveVisualDocumentClipInput } from './visual-document-edit';
-import { applyMediaVideoSettingsPatch, type MediaVideoSettingsPatch } from './media-video-edit';
+} from '@pireel/studio-engine/narrative-document-edit';
+import { applyNarrationDocumentEdit, removeNarrationClipsWithoutRipple } from '@pireel/studio-engine/narration-document-edit';
+import { moveVisualDocumentClip, type MoveVisualDocumentClipInput } from '@pireel/studio-engine/visual-document-edit';
+import { applyMediaVideoSettingsPatch, type MediaVideoSettingsPatch } from '@pireel/studio-engine/media-video-edit';
 import {
   addAudioDocumentClip,
   applyAudioDocumentEdits,
@@ -75,27 +75,27 @@ import {
   type AddAudioDocumentClipInput,
   type AudioDocumentPatchInput,
   type MoveAudioDocumentClipInput,
-} from './audio-document-edit';
-import { applyCaptionDocumentEdit, resizeManagedCaptionTiming, type CaptionDocumentEditInput } from './caption-document-edit';
-import { applyCanvasDocumentEdit } from './canvas-document-edit';
-import { applyLayoutDocumentEdit, type LayoutDocumentEditInput, type LayoutDocumentEditResult } from './layout-document-edit';
-import { applyGeneratedDraftDocument } from './generated-draft-document-edit';
-import { patchNarrativeClips } from './editor-document/commands/narrative-patch';
-import { applyNarrationSplitCommands } from './editor-document/commands/narration-split';
-import { applyVideoClipSettingsPatches, type VideoClipSettingsPatchUpdate } from './media-video-edit';
-import { applyMediaCropInput, applyMediaTransformInput, type AppliedMediaFramingUpdate } from './media-framing-edit';
-import { applyDirectorPlanToDocument } from './director-plan-document';
-import type { DirectorPlan } from './director-plan';
-import { withSceneDesignsInSemantics, type SceneDesignCollection } from './scene-design';
-import { bakeOverlayClipToMedia, type BakeOverlayClipToMediaInput } from './overlay-bake';
-import { withDeterministicIds } from './deterministic-ids';
+} from '@pireel/studio-engine/audio-document-edit';
+import { applyCaptionDocumentEdit, resizeManagedCaptionTiming, type CaptionDocumentEditInput } from '@pireel/studio-engine/caption-document-edit';
+import { applyCanvasDocumentEdit } from '@pireel/studio-engine/canvas-document-edit';
+import { applyLayoutDocumentEdit, type LayoutDocumentEditInput, type LayoutDocumentEditResult } from '@pireel/studio-engine/layout-document-edit';
+import { applyGeneratedDraftDocument } from '@pireel/studio-engine/generated-draft-document-edit';
+import { patchNarrativeClips } from '@pireel/studio-engine/editor-document/commands/narrative-patch';
+import { applyNarrationSplitCommands } from '@pireel/studio-engine/editor-document/commands/narration-split';
+import { applyVideoClipSettingsPatches, type VideoClipSettingsPatchUpdate } from '@pireel/studio-engine/media-video-edit';
+import { applyMediaCropInput, applyMediaTransformInput, type AppliedMediaFramingUpdate } from '@pireel/studio-engine/media-framing-edit';
+import { applyDirectorPlanToDocument } from '@pireel/studio-engine/director-plan-document';
+import type { DirectorPlan } from '@pireel/studio-engine/director-plan';
+import { withSceneDesignsInSemantics, type SceneDesignCollection } from '@pireel/studio-engine/scene-design';
+import { bakeOverlayClipToMedia, type BakeOverlayClipToMediaInput } from '@pireel/studio-engine/overlay-bake';
+import { withDeterministicIds } from '@pireel/studio-engine/deterministic-ids';
 import {
   resizeNarrativeTimelineClip,
   resizeVisualTimelineClip,
   runAgentTimelineTool,
   slipNarrativeTimelineClip,
   type VisualTimelineResizeEdge,
-} from './agent-timeline';
+} from '@pireel/studio-engine/agent-timeline';
 
 /* ================================ operations ================================ */
 

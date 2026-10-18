@@ -1,12 +1,12 @@
 'use client';
 
 import { Blocks } from 'lucide-react';
-import { ElementTile, type LibraryItem } from '../asset-card';
-import { studioLocale, t } from '../i18n';
-import { useStudioShell } from '../shell-context';
-import { ELEMENT_TEMPLATES } from './element';
-import { artDirectedTemplateElement } from './element-presets';
-import { localizedTemplatePrompt, type GenTemplate } from './types';
+import { ElementTile, type LibraryItem } from '@pireel/studio-ui/asset-card';
+import { studioLocale, t } from '@pireel/studio-ui/i18n';
+import { useStudioShell } from '@pireel/studio-ui/shell-context';
+import { ELEMENT_TEMPLATES } from '@pireel/studio-ui/gen-templates/element';
+import { artDirectedTemplateElement } from '@pireel/studio-ui/gen-templates/element-presets';
+import { localizedTemplatePrompt, type GenTemplate } from '@pireel/studio-ui/gen-templates/types';
 
 function templateItem(template: GenTemplate, thumbSrc?: string | null): LibraryItem | null {
   const prompt = localizedTemplatePrompt(template, studioLocale());

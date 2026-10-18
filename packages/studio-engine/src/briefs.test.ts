@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assembleComposeBrief, assembleComposeTheme, interpretApplyRaw } from './briefs';
+import { assembleComposeBrief, assembleComposeTheme, interpretApplyRaw } from '@pireel/studio-engine/briefs';
 
 describe('BYO 简报组装(与自家 LLM 路径同一批提示词纯函数)', () => {
   it('新元素无 Frame 也走自由设计；已有 kit 块才保留组件 props 契约', () => {

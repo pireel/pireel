@@ -10,12 +10,12 @@
 import type { MutableRefObject } from 'react';
 import { type Block, type Composition, type EditorDocumentV2, blockKind } from '@pireel/studio-engine/composition';
 import { toast } from '@pireel/ui/toast';
-import { startPointerDrag } from './drag-shell';
-import { shiftBox } from './comp-diff';
-import { boxSelectionRect } from './edit-overlays';
-import { moveMediaCanvasBox, resizeMediaCanvasBox, scaleMediaCanvasBox, type MediaCanvasBox } from './media-box';
-import { editorErrorMessage } from './editor-error';
-import type { DocumentCommitter } from './document-commit';
+import { startPointerDrag } from '@pireel/studio-ui/drag-shell';
+import { shiftBox } from '@pireel/studio-ui/comp-diff';
+import { boxSelectionRect } from '@pireel/studio-ui/edit-overlays';
+import { moveMediaCanvasBox, resizeMediaCanvasBox, scaleMediaCanvasBox, type MediaCanvasBox } from '@pireel/studio-ui/media-box';
+import { editorErrorMessage } from '@pireel/studio-ui/editor-error';
+import type { DocumentCommitter } from '@pireel/studio-ui/document-commit';
 
 export interface CanvasBoxDragTarget {
   box: MediaCanvasBox;

@@ -1,8 +1,0 @@
-{
-  "tool": "built-in image_gen",
-  "mode": "edit",
-  "created": "2026-09-08",
-  "asset": "captions-cc-v4.png",
-  "reference": "captions-video-v3.png",
-  "prompt": "Use case: logo-brand. Edit this AI Captions icon. Keep its simple horizontal rounded rectangular video-frame silhouette, ivory border, muted slate blue-grey face, matte softly beveled ceramic material and transparent background. Replace ALL the inner symbols (the play triangle and both subtitle bars) with two large bold ivory capital letters exactly \"CC\", centered side by side and highly legible at 56 pixels. Only CC inside the frame, no other symbols. No speech bubble tail, no dialogue shape, no extra badge, no words, no saturated colors, no glow. Same centered square canvas and similar footprint. Preserve genuine alpha transparency. Final app icon asset."
-}

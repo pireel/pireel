@@ -1,7 +1,7 @@
-import type { EditorDocumentV2, HandoffItem } from '../types';
-import { EDITING_SKILL_IDS, isEditingSkillId } from '../../editing-skills';
-import { brandSkillOf, skillTakesBrand, validatePlaybookSnapshot, type PlaybookSnapshot } from '../../brand-playbook';
-import { commandFailure, emptyCommandReceipt, type EditorCommandResult } from './types';
+import type { EditorDocumentV2, HandoffItem } from '@pireel/studio-engine/editor-document/types';
+import { EDITING_SKILL_IDS, isEditingSkillId } from '@pireel/studio-engine/editing-skills';
+import { brandSkillOf, skillTakesBrand, validatePlaybookSnapshot, type PlaybookSnapshot } from '@pireel/studio-engine/brand-playbook';
+import { commandFailure, emptyCommandReceipt, type EditorCommandResult } from '@pireel/studio-engine/editor-document/commands/types';
 
 /** The creator's answer to one confirm-list item: confirmed as is, or changed with their words. */
 export function patchHandoffItem(document: EditorDocumentV2, id: string, status: HandoffItem['status'], answer?: string): EditorCommandResult {

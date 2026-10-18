@@ -28,10 +28,10 @@ import { type WordMaskPatch, applyWordMasks } from '@pireel/studio-engine/word-m
 import { applyWordDecorations, replaceWordHighlights, type WordDecorationPatch } from '@pireel/studio-engine/word-decorations';
 import { applyCaptionTextEdits } from '@pireel/studio-engine/caption-text-edit';
 import { type DocumentOp, transcriptInputsFor } from '@pireel/studio-engine/document-transaction';
-import type { DocumentCommitter } from './document-commit';
-import type { ScriptCut, ScriptMaskTarget, TimelineMaskTarget, TimelineScriptCut } from './script-panel';
-import { t } from './i18n';
-import { editorErrorMessage } from './editor-error';
+import type { DocumentCommitter } from '@pireel/studio-ui/document-commit';
+import type { ScriptCut, ScriptMaskTarget, TimelineMaskTarget, TimelineScriptCut } from '@pireel/studio-ui/script-panel';
+import { t } from '@pireel/studio-ui/i18n';
+import { editorErrorMessage } from '@pireel/studio-ui/editor-error';
 
 export interface ScriptCutDeps {
   projectId: string;

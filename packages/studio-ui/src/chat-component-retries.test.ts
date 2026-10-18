@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { collapsedComponentRetryIndexes, studioToolFailureText } from './chat-component-retries';
-import type { ToolPartLike } from './chat-tool-parts';
+import { collapsedComponentRetryIndexes, studioToolFailureText } from '@pireel/studio-ui/chat-component-retries';
+import type { ToolPartLike } from '@pireel/studio-ui/chat-tool-parts';
 
 const attempt = (id: string, state = 'output-error', ok = false): ToolPartLike => ({
   type: 'tool-apply_component', state, input: { clipId: id }, output: { ok }, errorText: ok ? undefined : 'invalid CSS',

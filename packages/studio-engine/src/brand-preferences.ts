@@ -1,4 +1,4 @@
-import type { BrandPlaybook } from './brand-playbook';
+import type { BrandPlaybook } from '@pireel/studio-engine/brand-playbook';
 
 export const BRAND_PREFERENCE_IDS = ['cover', 'pauses', 'cleanup', 'denoise', 'broll', 'graphics', 'sound', 'zoom', 'headlines', 'logo', 'intro', 'outro', 'music', 'loudness'] as const;
 export type BrandPreferenceId = typeof BRAND_PREFERENCE_IDS[number];

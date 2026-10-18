@@ -15,8 +15,8 @@
  * the instruction's language).
  */
 
-import { componentContractExample, componentCoordinateContext } from './component-authoring-contract';
-import { BLOCK_SYSTEM, buildHtmlSystem, retrieveComponentCandidates, retrieveMotionGraphicPatterns, withActiveTheme } from './prompts';
+import { componentContractExample, componentCoordinateContext } from '@pireel/studio-engine/component-authoring-contract';
+import { BLOCK_SYSTEM, buildHtmlSystem, retrieveComponentCandidates, retrieveMotionGraphicPatterns, withActiveTheme } from '@pireel/studio-engine/prompts';
 
 /** Minimal chat shape (matches @/lib/models ModelRouter.chat). */
 interface ChatHint {

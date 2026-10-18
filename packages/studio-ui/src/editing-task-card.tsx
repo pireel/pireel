@@ -1,14 +1,14 @@
-import { CoverToolCard } from './cover-scene-dialog';
-import type { CoverScene } from './cover-scene';
+import { CoverToolCard } from '@pireel/studio-ui/cover-scene-dialog';
+import type { CoverScene } from '@pireel/studio-ui/cover-scene';
 import { useEffect, useState } from 'react';
 import type { UIMessage } from 'ai';
 import { Check, Film, Loader2, Minus, X } from 'lucide-react';
 import { imageThumb } from '@pireel/ui/image-url';
-import type { ChatTask } from './chat-task';
-import type { FineCutItem, FirstPassReport } from './first-pass';
-import { editingTaskRows, type EditingProgressRow } from './editing-task-progress';
-import { useToolProgress } from './tool-progress';
-import { studioLocale, t } from './i18n';
+import type { ChatTask } from '@pireel/studio-ui/chat-task';
+import type { FineCutItem, FirstPassReport } from '@pireel/studio-ui/first-pass';
+import { editingTaskRows, type EditingProgressRow } from '@pireel/studio-ui/editing-task-progress';
+import { useToolProgress } from '@pireel/studio-ui/tool-progress';
+import { studioLocale, t } from '@pireel/studio-ui/i18n';
 
 export function EditingTaskCard({ task, messages, live, fine, credits, startedAt, onContinue, coverScene, onOpenCover }: {
   coverScene?: CoverScene | null; onOpenCover?: () => void;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { UIMessage } from 'ai';
-import { alreadyStarted, sceneAgentState, startWithRoughCut } from './agent-startup';
+import { alreadyStarted, sceneAgentState, startWithRoughCut } from '@pireel/studio-ui/agent-startup';
 const request = (state: string): UIMessage => ({ id: 'u', role: 'user', parts: [{ type: 'text', text: 'make a board' }], metadata: { task: { id: 'task', goal: 'make a board', mode: 'request', state } } });
 describe('scene startup and progress', () => {
   it('keeps the whiteboard narration intact without changing the usual one-click edit', () => {

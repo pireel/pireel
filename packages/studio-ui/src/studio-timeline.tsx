@@ -38,7 +38,7 @@ import {
   type FilmstripFrame,
   type FilmstripSourceRange,
   filmstripSourceRangeForTimelineWindow,
-} from './media';
+} from '@pireel/studio-ui/media';
 import {
   CAP_LANE,
   EDGE_PAD,

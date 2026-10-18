@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { inspectTimelineFrameEvidence } from './chat-timeline-frame-evidence';
+import { inspectTimelineFrameEvidence } from '@pireel/studio-ui/chat-timeline-frame-evidence';
 
 const frame = {
   id: 'shot-1',

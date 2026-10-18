@@ -635,7 +635,7 @@ export interface Composition {
   /** Editing skills switched on for this project (read-only projection of document semantics). */
   editingSkills?: string[];
   /** The brand the project is edited with (read-only projection of document semantics; null = none picked). */
-  brand?: import('./brand-playbook').PlaybookSnapshot | null;
+  brand?: import('@pireel/studio-engine/project-brand-metadata').PlaybookSnapshot | null;
   /** The Studio Skill the project is edited as (read-only projection of document semantics). */
   skillId?: string;
   /** Global person-effect style (toolbar "Person" panel): person-on-top / feather / stroke / background swap.

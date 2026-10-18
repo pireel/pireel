@@ -1,6 +1,7 @@
+import { editorRequest } from '@pireel/studio-ui/host-request';
 /** Same authenticated stock search/import used by the hosted MCP surface. */
 export async function runStockTool(action: 'search' | 'import', args: Record<string, unknown>, signal?: AbortSignal): Promise<{ ok: boolean; summary?: string; error?: string; data?: Record<string, unknown> }> {
-  const response = await fetch('/api/studio/stock', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...args, action }), signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(action === 'search' ? 30000 : 60000)]) : AbortSignal.timeout(action === 'search' ? 30000 : 60000) });
+  const response = await editorRequest('/api/studio/stock', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...args, action }), signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(action === 'search' ? 30000 : 60000)]) : AbortSignal.timeout(action === 'search' ? 30000 : 60000) });
   const body = await response.json();
   return response.ok ? body : { ok: false, error: body.error ?? `stock_request_failed_${response.status}` };
 }

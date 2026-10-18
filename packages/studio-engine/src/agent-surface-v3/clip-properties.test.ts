@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { runAgentTimelineTool } from '../agent-timeline';
-import { emptyEditorDocumentV2 } from '../editor-document';
-import type { EditorDocumentV2, EditorTrack, TimelineClip } from '../editor-document/types';
-import { CLIP_PROPERTIES, CLIP_PROPERTY_KEYS, clipPropertiesFor, clipPropertyDefaults, type ClipPropertyKey, type DocumentClipKind } from './clip-properties';
-import { V3_TOOL_SCHEMAS } from './schemas';
-import { validateV3Input } from './validate';
-import { renderV3State } from './state';
+import { runAgentTimelineTool } from '@pireel/studio-engine/agent-timeline';
+import { emptyEditorDocumentV2 } from '@pireel/studio-engine/editor-document';
+import type { EditorDocumentV2, EditorTrack, TimelineClip } from '@pireel/studio-engine/editor-document/types';
+import { CLIP_PROPERTIES, CLIP_PROPERTY_KEYS, clipPropertiesFor, clipPropertyDefaults, type ClipPropertyKey, type DocumentClipKind } from '@pireel/studio-engine/agent-surface-v3/clip-properties';
+import { V3_TOOL_SCHEMAS } from '@pireel/studio-engine/agent-surface-v3/schemas';
+import { validateV3Input } from '@pireel/studio-engine/agent-surface-v3/validate';
+import { renderV3State } from '@pireel/studio-engine/agent-surface-v3/state';
 
 /** One clip of every kind (a media clip both as video and as a still), built through the real tools. */
 function project(): { document: EditorDocumentV2; clipIds: Record<DocumentClipKind | 'image', string> } {

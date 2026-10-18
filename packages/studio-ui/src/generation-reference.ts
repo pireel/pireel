@@ -9,7 +9,7 @@
 import { imageThumb } from '@pireel/ui/image-url';
 import type { EditorMediaAsset } from '@pireel/studio-engine/editor-document';
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
-import { resolveLocalAssetReference } from './studio-tool-input-references';
+import { resolveLocalAssetReference } from '@pireel/studio-ui/studio-tool-input-references';
 
 export interface GenerationReferenceDeps {
   localAssets: readonly LocalAssetIndexEntry[];

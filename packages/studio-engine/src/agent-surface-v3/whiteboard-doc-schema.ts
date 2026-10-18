@@ -7,8 +7,8 @@
  * Kept free of engine imports so the executor and the validator can both read it.
  */
 
-import { PROGRAM_SCHEMA } from '../whiteboard-program';
-import { DRAWING_SCHEMA } from './drawing-schema';
+import { PROGRAM_SCHEMA } from '@pireel/studio-engine/whiteboard-program';
+import { DRAWING_SCHEMA } from '@pireel/studio-engine/agent-surface-v3/drawing-schema';
 
 type Schema = Record<string, unknown>;
 
