@@ -21,8 +21,9 @@ export function unresolvedTaskFailure(messages: readonly UIMessage[]): boolean {
     if (!id) continue;
     const value = part as { state?: string; output?: { ok?: boolean; error?: string; data?: { taskIncomplete?: boolean; review?: { completed?: boolean } } } };
     if (id === 'read_brand' && value.output?.error === 'no_brand') continue;
-    // A cover can be repaired in its independent scene, without another chat generation call.
-    if (id === 'finish_edit' && value.output?.ok !== false && value.output?.data?.review?.completed) latest.set('generate_cover', false);
+    // A successful final review checks the current timeline, so failures before that
+    // checkpoint are resolved. Later failures still count and require a new review.
+    if (id === 'finish_edit' && value.state === 'output-available' && value.output?.ok === true && value.output?.data?.review?.completed) latest.clear();
     if (value.state === 'output-error' || value.state === 'output-available') latest.set(id, value.state === 'output-error' || value.output?.ok === false || value.output?.data?.taskIncomplete === true);
   }
   return [...latest.values()].some(Boolean);
@@ -80,7 +81,7 @@ export function editingTaskRows(task: ChatTask, report: FirstPassReport | undefi
       : savedItem?.status === 'not-needed' ? 'skipped'
       : task.state === 'done' && !task.reviewRequired ? item?.count ? 'done' : 'skipped' : 'pending' });
   }
-  for (const feature of ['zoom', 'transitions'] as const) if (task.config?.visual?.[feature]) {
+  for (const feature of ['zoom', 'transitions'] as const) if (feature === 'zoom' ? task.config?.visual?.zoom : tools.some(part => toolIdOf(part) === 'add_transition')) {
     const camera = tools.filter(part => (feature === 'zoom' ? 'set_clip_framing' : 'add_transition') === toolIdOf(part));
     const last = camera.at(-1) as { state?: string; output?: { ok?: boolean } } | undefined;
     finishing.push({ id: feature, status: working ? last ? 'running' : 'pending' : last?.state === 'output-error' || last?.output?.ok === false ? 'failed' : last?.state === 'output-available' ? 'done' : 'pending' });

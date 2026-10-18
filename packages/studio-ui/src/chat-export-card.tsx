@@ -43,7 +43,7 @@ export function ExportSettingsCard({ part }: { part: ToolPartLike }) {
     return (
       <div className="border-line/60 w-full overflow-hidden rounded-md border">
         <div className="text-ink-3 flex items-center gap-2 px-2.5 py-1.5 text-[12px]">
-          <Check size={12} className="text-accent shrink-0" />
+          <Check size={12} className="text-accent-ink shrink-0" />
           <span>{out?.summary || t('workbench.exportStartedLocalClient')}</span>
           {spec && <span className="text-ink-4 ml-auto tabular-nums">{spec}</span>}
         </div>
@@ -75,7 +75,7 @@ export function AdaptiveExportPicker({ selection, ready }: { selection: Adaptive
           type="button"
           disabled={!ready}
           onClick={() => resolveInteraction(selection)}
-          className="bg-ink text-bg shrink-0 rounded-md px-3 py-1 text-[12px] hover:opacity-90 disabled:opacity-30"
+          className="bg-primary text-primary-foreground shrink-0 rounded-md px-3 py-1 text-[12px] hover:opacity-90 disabled:opacity-30"
         >
           {t('workbench.exportStart')}
         </button>

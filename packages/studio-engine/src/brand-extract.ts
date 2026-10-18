@@ -4,11 +4,11 @@ import { BASE_CAPTION_FONT_PX, CAPTION_PRESETS } from './caption-presets';
 import { CAPTION_ANIMATIONS, type CaptionAnimationId } from './caption-animations';
 import { WEB_FONTS } from './font-library';
 import { BRAND_EDITING_SKILL_IDS } from './editing-skills';
-import { DEFAULT_BRAND_SKILL_ID, PLAYBOOK_SCHEMA, type BrandAsset, type BrandBlocks, type BrandPlatform, type BrandPlaybook, type Corner } from './brand-playbook';
+import { fixedBrandConfiguration, DEFAULT_BRAND_SKILL_ID, PLAYBOOK_SCHEMA, type BrandAsset, type BrandBlocks, type BrandPlatform, type BrandPlaybook, type Corner } from './brand-playbook';
 import type { CaptionStyle } from './composition-core';
 
 // Automatic cover is an execution choice; legacy visual analyses need not emit it.
-const ANALYSIS_PREFERENCE_IDS = BRAND_PREFERENCE_IDS.filter(id => id !== 'cover');
+const ANALYSIS_PREFERENCE_IDS = BRAND_PREFERENCE_IDS.filter(id => !['cover', 'logo', 'intro', 'outro', 'music', 'loudness'].includes(id));
 
 /**
  * The brand extraction method: how a creator's videos become their brand (brand-playbook.ts).
@@ -20,7 +20,7 @@ const ANALYSIS_PREFERENCE_IDS = BRAND_PREFERENCE_IDS.filter(id => id !== 'cover'
  * are, and the creator's toolkit for the agent that edits their new videos. A long video is not watched
  * whole: its opening and ending are, and the middle stretches its transcript says are worth a look.
  */
-export const METHOD_VERSION = 'brand-method-32';
+export const METHOD_VERSION = 'brand-method-33';
 
 // ── What is watched
 
@@ -249,27 +249,17 @@ export function synthesisCatalogs() {
 }
 
 export function brandSynthesisSystemPrompt(language: string): string {
-  return `You write a video creator's brand from the shot logs of their videos. The brand goes to an AI editing agent that edits the creator's NEW raw talking videos so viewers recognise the creator. It has:
-1. fixed values a program applies exactly — captions, the on-screen text font, the logo, loudness and pause trimming;
-2. one unified style description that an editor can apply to DIFFERENT subjects and raw footage;
-3. explicit editing preferences: enabled means permitted where useful, never a quota. Disable effects the creator avoids. zoom means automatic punch-ins and zoom changes. Do not infer raw-recording denoise needs from polished reference videos; default denoise to false.
-The style is written in a few cohesive paragraphs, not a report or a list of fixed dimensions. Describe transferable visual language, emphasis, rhythm, and the balance between the speaker and supporting material. Separate filming conditions (clothes, room, camera equipment), one-off story subjects (named people, laws, products), and incidental decorations from editing style: do not prescribe them for the next video. Keep useful specificity in typography, visual hierarchy, shapes, contrast, motion and material treatment. Let the next video's meaning determine subjects, graphical forms and placements. Reference images illustrate the visual language; they are not templates whose subjects must be copied. Only describe an intro/outro as reusable when an actual reusable asset is available; a screenshot is a reference, not that asset. Include the cover's own prompts separately.
-Write every free text in ${language}, plainly, for an editor. Base every statement on the evidence, without presenting something seen once as a habit. Keep source counts and supporting observations in evidence and refs; the style descriptions should read as usable editing guidance, with uncertainty expressed naturally where it affects the advice. Use only the ids the catalogs give (caption presets, fonts, animations). Use the measured caption size and place as given; they are not yours to change.
-
-You get: the shot logs; measured facts (loudness, pause gap at cuts, pacing, music bed, caption size and place, logo candidates); the catalogs; style frames from the videos; the creator's covers when there are any.
-
-For the cover, first decide how to MAKE a new one in this style: generate a composed image with an image model, or preserve a video still and add styled headline text. This is a production recommendation, not a claim about how the original was made. Prefer image-model generation for most designed covers; choose still plus text only when the examples clearly keep the video's scene and composition. Begin cover.design by naming the chosen approach and briefly explaining the visual evidence, then write an actionable, reusable prompt for that approach. For image generation, describe the complete composition, subjects, background, lighting, colours and headline wording/lettering; a video still can supply the creator's identity or pose without locking the new cover to its background or layout. If the style has no creator portrait, say so and do not force one in. For still plus text, say what to preserve in the frame and how to place and style the headline. In cover.frame, explain whether the selected frame is the base picture or only a subject reference, then describe the moment and pose to select. If no real covers are supplied, record that gap and label the image-generation approach as a proposal rather than an observed habit. Describe how subjects and headline content change with each new video's topic; never carry an old cover's topic into a new one.
-
-Return only JSON:
-{"evidence":"<what this brand rests on>",
- "style":{"text":"<cohesive, reusable editing guidance for new footage; no source report, fixed headings or old topic-specific prescriptions>","refs":[{"video":"<id>","shot":<n>}]},
- "preferences":{${ANALYSIS_PREFERENCE_IDS.map(id => `"${id}":true|false`).join(',')}},
- "captions":{"on":true|false,"preset":"<preset id>","font":"<font id>","bold":true|false,"color":"#hex","stroke":{"color":"#hex","width":<px 0–8 at a 64 px font>}|null,"bg":"#hex|rgba(…)|null","animation":"<animation id>","highlight":{"how":"<…>","color":"#hex"}|null,"text":"<what the values cannot say: line breaks, chars per line, how lines appear>"},
- "onScreenText":{"font":"<font id for titles and labels>","fontLike":"<the original face, as you'd name it>"},
- "logo":null|{"candidate":<logo candidate index>,"corner":"top-left|top-right|bottom-left|bottom-right","widthPct":<share of frame width>},
- "cover":{"frame":"<the still's role: base picture or subject reference; how to pick it from the NEW video; say when no portrait is needed>","design":"<chosen production approach and its basis, followed by the full image-generation or still-plus-text prompt: composition, subjects, headline wording and lettering, background, light, colour>"},
- "gaps":["<what the evidence cannot say>"]}
-Do not invent a preference unsupported by the footage. Explain only meaningful style choices, without padding the description to cover every capability.`;
+  return `Extract only fixed, reusable brand configuration from the supplied measurements, shot logs and images.
+Do not write a style description, editing techniques, portrait, B-roll, transition or motion-graphics guidance. B-roll and motion graphics are boolean editing preferences: enable only when supported by the supplied evidence, without writing style prose.
+Use only supplied caption preset, font and animation ids. Preserve measured caption geometry. Do not infer raw-recording denoise from finished videos.
+Write evidence and gaps in ${language}. Return only JSON:
+{"evidence":"what was measured",
+"preferences":{"cover":false,"cleanup":false,"pauses":false,"denoise":false,"broll":true|false,"graphics":true|false,"sound":false,"zoom":false,"headlines":true|false},
+"captions":{"on":true|false,"preset":"catalog id","font":"catalog id","bold":true|false,"color":"#RRGGBB","stroke":{"color":"#RRGGBB","width":0}|null,"bg":"#RRGGBB or rgba(...) or null","animation":"catalog id","highlight":{"how":"keywords","color":"#RRGGBB"}|null},
+"onScreenText":{"font":"catalog id","fontLike":"observed face"},
+"logo":null|{"candidate":0,"corner":"top-left|top-right|bottom-left|bottom-right","widthPct":12},
+"gaps":["missing measurements"]}
+Set cleanup and pauses only when measurements support them. Covers are retained as reference images by the application, never described as abstract style. Unknown settings use conservative defaults; do not invent observations.`;
 }
 
 export interface Ref { video: string; shot: number }
@@ -318,11 +308,9 @@ export function parseBrandSynthesis(raw: string, context: { shots: Record<string
   const o = (value.onScreenText ?? {}) as Record<string, unknown>;
   const logo = value.logo && typeof value.logo === 'object' ? value.logo as Record<string, unknown> : null;
   const techniques = Object.fromEntries(SYNTHESIS_TECHNIQUES.map(id => [id, technique((value.techniques as Record<string, unknown> | undefined)?.[id])])) as Record<SynthesisTechnique, TechniqueText>;
-  const missing = SYNTHESIS_TECHNIQUES.filter(id => !techniques[id].text);
-  if (!value.style && missing.length) throw new Error(`write every technique (say when it is not used): missing ${missing.join(', ')}`);
+
   const cover = (value.cover ?? {}) as Record<string, unknown>;
-  const style = value.style ? technique(value.style) : undefined;
-  if (style && !style.text) throw new Error('style.text must describe the editing style');
+
   let preferences: BrandPreferences | undefined;
   if (value.preferences !== undefined) {
     if (!value.preferences || typeof value.preferences !== 'object' || Array.isArray(value.preferences)) throw new Error('preferences must be an object');
@@ -330,9 +318,9 @@ export function parseBrandSynthesis(raw: string, context: { shots: Record<string
     if (ANALYSIS_PREFERENCE_IDS.some(id => typeof raw[id] !== 'boolean') || raw.cover !== undefined && typeof raw.cover !== 'boolean') throw new Error('every editing preference must be true or false');
     preferences = { ...Object.fromEntries(ANALYSIS_PREFERENCE_IDS.map(id => [id, raw[id]])), ...(typeof raw.cover === 'boolean' ? { cover: raw.cover } : {}) };
   }
-  if (style && !preferences) throw new Error('preferences are required with the unified style');
+
   return {
-    ...(style ? { style } : {}), ...(preferences ? { preferences } : {}),
+    ...(preferences ? { preferences } : {}),
     evidence: text(value.evidence, 800), portrait: text(value.portrait, 1200),
     captions: {
       on: c.on, preset: preset ?? 'ln-clean', font: font ?? 'sans', bold: c.bold === true, color: HEX.test(String(c.color)) ? String(c.color) : '#ffffff',
@@ -385,10 +373,8 @@ export interface BrandParts {
 
 export function assembleBrand(parts: BrandParts): BrandPlaybook {
   const s = parts.synthesis;
-  const refs = (id: keyof BrandParts['references']) => parts.references[id]?.length ? { references: parts.references[id]! } : {};
   const c = s.captions;
   const blocks: BrandBlocks = {
-    ...(s.portrait ? { portrait: { text: s.portrait } } : {}),
     captions: c.on ? {
       on: true,
       style: {
@@ -399,27 +385,21 @@ export function assembleBrand(parts: BrandParts): BrandPlaybook {
         ...(parts.measured.captions ?? {}),
       },
       accent: c.highlight ? 'keywords' : null,
-      ...(c.text || c.highlight ? { text: [c.text, c.highlight?.how].filter(Boolean).join('\n') } : {}),
     } : { on: false },
-    overlay_text: { text: techniqueProse(s.onScreenText), font: s.onScreenText.font, ...(s.onScreenText.fontLike ? { fontLike: s.onScreenText.fontLike } : {}), ...refs('overlay_text') },
+    overlay_text: { font: s.onScreenText.font, ...(s.onScreenText.fontLike ? { fontLike: s.onScreenText.fontLike } : {}) },
     ...(s.logo && parts.logo ? { logo: { ...parts.logo, corner: s.logo.corner, widthPct: s.logo.widthPct, opacity: 1 } } : {}),
-    sound: { text: techniqueProse(s.techniques.sound), ...(parts.measured.lufs !== null ? { lufs: Math.round(parts.measured.lufs * 2) / 2 } : {}), ...(parts.measured.pauses ? { pauses: parts.measured.pauses } : {}) },
-    ...Object.fromEntries((['layout', 'transitions', 'camera', 'graphics', 'illustrations', 'footage'] as const).map(id => [id, { text: techniqueProse(s.techniques[id]), ...refs(id) }])),
-    pacing: { text: techniqueProse(s.techniques.pacing) },
-    structure: { text: techniqueProse(s.techniques.structure) },
-    ...(s.assets.length ? { assets: { text: s.assets.map(asset => `- ${asset.what}`).join('\n'), ...refs('assets') } } : {}),
-    ...(s.cover.frame || s.cover.design || parts.coverReferences?.length ? { cover: { frame: s.cover.frame, design: s.cover.design, ...(parts.coverReferences ? { referenceKeys: [...new Set(parts.coverReferences)].slice(0, 8) } : {}) } } : {}),
+    sound: { ...(parts.measured.lufs !== null ? { lufs: Math.round(parts.measured.lufs * 2) / 2 } : {}), ...(parts.measured.pauses ? { pauses: parts.measured.pauses } : {}) },
+    ...(parts.coverReferences?.length ? { cover: { referenceKeys: [...new Set(parts.coverReferences)].slice(0, 8) } } : {}),
   };
-  return {
+  return fixedBrandConfiguration({
     schema: PLAYBOOK_SCHEMA, id: parts.id, name: parts.name, version: 1, method: METHOD_VERSION,
     source: { platform: parts.platform, ...(parts.account ? { account: parts.account } : {}), videos: parts.videos },
     blocks,
-    ...(s.style ? { style: { text: s.style.text, references: parts.references.style ?? [] } } : {}),
     ...(s.preferences ? { preferences: s.preferences } : {}),
     skills: s.preferences ? brandEditingSkills({ blocks, preferences: s.preferences, skills: s.skills }).filter(id => (BRAND_EDITING_SKILL_IDS as readonly string[]).includes(id)) : BRAND_EDITING_SKILL_IDS.filter(id => s.skills.includes(id)),
     skillId: DEFAULT_BRAND_SKILL_ID,
     notes: { ...(s.evidence ? { evidence: s.evidence } : {}), ...(s.gaps.length ? { gaps: s.gaps } : {}) },
-  };
+  });
 }
 
 function json(raw: string, what: string): Record<string, unknown> {

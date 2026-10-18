@@ -23,3 +23,13 @@ describe('editing task configuration', () => {
     expect(config.visual.zoom).toBe(true);
   });
 });
+
+it('leaves transition decisions to the main prompt regardless of legacy brand switches', () => {
+  for (const transitions of [true, false]) {
+    const brand = playbookSnapshot(emptyPlaybook('b', 'Brand'));
+    brand.preferences = { transitions };
+    const config = resolveEditingRunConfig({ brand });
+    expect(config.visual).not.toHaveProperty('transitions');
+    expect(config.brand?.preferences).not.toHaveProperty('transitions');
+  }
+});

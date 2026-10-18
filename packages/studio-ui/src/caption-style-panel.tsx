@@ -59,7 +59,7 @@ export function CaptionStylePanel({ styleCtl, active, generating, onPickPreset, 
             <div className="flex h-[64px] items-center overflow-hidden bg-[#2b2b2e]" data-motion={effect.id}>
               <CaptionMotionSample id={effect.id} style={{ ...main, animation: effect.id }} text={motionSampleText} />
             </div>
-            <div className="text-ink-3 flex items-center justify-between gap-1 px-2 py-1.5 text-[10.5px]">{t(effect.name)}{animation === effect.id && <Check size={11} className="text-accent" />}</div>
+            <div className="text-ink-3 flex items-center justify-between gap-1 px-2 py-1.5 text-[10.5px]">{t(effect.name)}{animation === effect.id && <Check size={11} className="text-accent-ink" />}</div>
           </button>)}
         </div>
       </div>}
@@ -174,7 +174,7 @@ function StyleControls({ style, onPatch, highlight }: { style: CaptionStyle; onP
                   onClick={() => { setPop(null); onPatch({ scale: Math.round((px / BASE_CAPTION_FONT_PX) * 100) / 100 }); }}
                   className={`flex w-full items-center justify-center gap-1 rounded px-2 py-1 font-mono text-[11px] tabular-nums ${px === fs ? 'text-ink bg-panel-2/35' : 'text-ink-3 hover:bg-panel-2/20'}`}
                 >
-                  {px} {px === fs && <Check size={10} className="text-accent" />}
+                  {px} {px === fs && <Check size={10} className="text-accent-ink" />}
                 </button>
               ))}
             </div>

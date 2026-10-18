@@ -1,7 +1,8 @@
+import { brandPreferences } from '@pireel/studio-engine/brand-preferences';
 import { useState, type ReactNode } from 'react';
 import { Check, ChevronDown, Minus } from 'lucide-react';
 import type { CaptionTaskOptions } from '@pireel/studio-engine/caption-task';
-import { hasText, type PlaybookSnapshot, upgradeBlocks } from '@pireel/studio-engine/brand-playbook';
+import { type PlaybookSnapshot, upgradeBlocks } from '@pireel/studio-engine/brand-playbook';
 import { playbookEditParams, type CaptionEditParams } from '@pireel/studio-engine/brand-edit-params';
 import { SCENE_TARGET_LUFS } from '@pireel/studio-engine/loudness-lufs';
 import { imageThumb } from '@pireel/ui/image-url';
@@ -11,9 +12,6 @@ import { SceneCheckbox } from './scene-form-controls';
 /** The scene's pause threshold when the brand gives none (the pause step's own default). */
 const DEFAULT_PAUSE = { minimumPauseSec: 0.7, speechPaddingSec: 0.15 };
 const PAUSE_NAMES = { tight: { zh: '紧凑', en: 'tight' }, moderate: { zh: '适中', en: 'moderate' }, natural: { zh: '保留自然停顿', en: 'natural' } } as const;
-/** The first sentence of a prose block, as a hint of what it says. */
-const gist = (text: string | undefined) => (text ?? '').trim().split(/(?<=[。.!！?？])\s*/)[0]?.slice(0, 80) ?? '';
-
 /**
  * A one-click edit's settings, led by the brand: which brand; its fixed blocks, applied as they are; and
  * the parts the edit writes for this video from the brand's prompt — where moves land, and titles. Parts
@@ -40,7 +38,7 @@ export function BrandPresetPanel({ options, locale, disabled, onChange, captionS
     return { ...current, edit: next };
   });
   const row = (label: string, on: boolean, note: string) => <li className="flex items-center gap-2.5 py-1.5 text-sm">
-    <span className={'flex size-4 shrink-0 items-center justify-center rounded-full ' + (on ? 'bg-accent text-white' : 'bg-panel-2 text-ink-4')}>{on ? <Check size={10} strokeWidth={3} /> : <Minus size={10} />}</span>
+    <span className={'flex size-4 shrink-0 items-center justify-center rounded-full ' + (on ? 'bg-accent text-accent-foreground' : 'bg-panel-2 text-ink-4')}>{on ? <Check size={10} strokeWidth={3} /> : <Minus size={10} />}</span>
     <span className={on ? 'text-ink' : 'text-ink-4'}>{label}</span><span className="text-ink-4 ml-auto truncate text-xs">{note}</span>
   </li>;
   const missing = say('品牌里没有', 'Not in the brand');
@@ -62,15 +60,10 @@ export function BrandPresetPanel({ options, locale, disabled, onChange, captionS
         description={say(`成片调到 ${edit.targetLufs ?? fromBrand.targetLufs ?? SCENE_TARGET_LUFS} LUFS${fromBrand.targetLufs !== undefined ? '（品牌作品的响度）' : ''}。`, `Brings the video to ${edit.targetLufs ?? fromBrand.targetLufs ?? SCENE_TARGET_LUFS} LUFS${fromBrand.targetLufs !== undefined ? ' (your videos’ loudness)' : ''}.`)} />
     </div>
     <div className="border-line mt-4 space-y-3 border-t pt-4">
-      <div><h3 className="text-ink-3 text-xs font-medium">{say('按品牌写给这条视频', 'Written for this video from the brand')}</h3>
-        <p className="text-ink-4 mt-0.5 text-[11px] leading-relaxed">{say('AI 读品牌的描述，结合这条视频的内容逐处决定。', 'AI reads the brand’s description and decides moment by moment for this video.')}</p></div>
-      {hasText(blocks?.camera) || hasText(blocks?.transitions)
-        ? <SceneCheckbox label={say('推近和转场', 'Punch-ins and transitions')} checked={!!(edit.moves?.punchIn || edit.moves?.transition)} disabled={disabled} onChange={on => patchEdit({ moves: on ? { punchIn: true, transition: true } : undefined })} description={gist(blocks!.camera?.text || blocks!.transitions!.text)} />
-        : <p className="text-ink-4 text-xs">{say('推近和转场：品牌里没有镜头运动和转场的描述', 'Punch-ins and transitions: the brand describes no camera moves or transitions')}</p>}
-      {hasText(blocks?.overlay_text)
-        ? <SceneCheckbox label={say('标题与标签', 'Titles and labels')} checked={!!edit.titles} disabled={disabled} onChange={on => patchEdit({ titles: on || undefined })} description={gist(blocks!.overlay_text!.text)} />
-        : <p className="text-ink-4 text-xs">{say('标题与标签：品牌里没有花字描述', 'Titles and labels: the brand has no overlay-text description')}</p>}
-      {hasText(blocks?.graphics) && <p className="text-ink-4 text-[11px] leading-relaxed">{say('品牌里的图形需要生成，一键剪辑暂不自动做，可用 Agent Remix 继续。', 'The brand’s motion-graphics style needs generated elements; continue in Agent Remix.')}</p>}
+      <div><h3 className="text-ink-3 text-xs font-medium">{say('本次剪辑', 'This edit')}</h3>
+        <p className="text-ink-4 mt-0.5 text-[11px] leading-relaxed">{say('按内容选择位置，使用品牌中选定的配置。', 'Choose moments from the content and use the selected settings.')}</p></div>
+      {fromBrand.moves?.punchIn && <SceneCheckbox label={say('自动缩放', 'Auto zoom')} checked={!!edit.moves?.punchIn} disabled={disabled} onChange={on => patchEdit({ moves: on ? fromBrand.moves : undefined })} />}
+      {blocks?.overlay_text?.font && <SceneCheckbox label={say('标题与标签', 'Titles and labels')} checked={!!edit.titles} disabled={disabled} onChange={on => patchEdit({ titles: on || undefined })} />}
     </div>
     <div className="border-line mt-4 border-t pt-3">
       <button type="button" aria-expanded={styleOpen} onClick={() => setStyleOpen(open => !open)} className="text-ink-2 hover:text-ink flex w-full items-center justify-between py-1 text-sm">
@@ -83,7 +76,7 @@ export function BrandPresetPanel({ options, locale, disabled, onChange, captionS
 
 /** The brand's logo over a scene preview, where the export puts it (4% from the corner, width as a share of the frame). */
 export function BrandLogoOverlay({ brand }: { brand: PlaybookSnapshot | undefined }) {
-  const logo = brand?.blocks.logo;
+  const logo = brand && brandPreferences(brand).logo ? brand.blocks.logo : undefined;
   if (!logo) return null;
   const left = logo.corner.endsWith('left'); const top = logo.corner.startsWith('top');
   return <img src={imageThumb(logo.key, 'thumb')} alt="" aria-hidden className="pointer-events-none absolute h-auto object-contain"

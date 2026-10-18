@@ -81,7 +81,7 @@ export function ExportOptRow<T extends string | number>({
             key={String(v)}
             type="button"
             onClick={() => onPick(v)}
-            className={`rounded-md border px-2.5 py-1 text-[12px] ${v === value ? 'border-accent bg-accent/10 text-accent' : 'border-line text-ink-3 hover:text-ink'}`}
+            className={`rounded-md border px-2.5 py-1 text-[12px] ${v === value ? 'border-accent bg-accent/10 text-accent-ink' : 'border-line text-ink-3 hover:text-ink'}`}
           >
             {text}
           </button>

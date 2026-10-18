@@ -25,7 +25,7 @@ const EXITS = [
   ['scale', 'panels.zoomOut'],
 ] as const;
 
-const ACCENT = 'var(--color-accent, #3f4be8)';
+const ACCENT = 'var(--color-accent, #f1ce55)';
 
 /** A single motion card: 96×96 frame, media = light rounded rect, motion trail = afterimages + accent arrow. */
 function AnimPreview({ effect, phase }: { effect: string; phase: 'in' | 'out' }) {

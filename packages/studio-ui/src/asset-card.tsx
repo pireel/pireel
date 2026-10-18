@@ -248,7 +248,7 @@ export function AudioTile({ playing, url, coverSrc, menuOffset = false }: { play
       <span className="pointer-events-none absolute left-1 top-1 inline-flex items-center gap-0.5 rounded bg-black/45 px-1 py-0.5 text-[9px] text-white">
         <AudioLines size={9} />{t('panels.audioBadge')}
       </span>
-      <span className={`absolute bottom-1 left-1 flex size-6 items-center justify-center rounded-full ${playing ? 'bg-accent text-white' : 'bg-black/55 text-white'}`}>
+      <span className={`absolute bottom-1 left-1 flex size-6 items-center justify-center rounded-full ${playing ? 'bg-black/75 text-white' : 'bg-black/55 text-white'}`}>
         {playing ? <Pause size={11} /> : <Play size={11} />}
       </span>
       <DurBadge sec={dur} menuOffset={menuOffset} />
@@ -299,7 +299,7 @@ export function ElementTile({ item, width, height }: { item: LibraryItem; width?
 export function RowThumb({ item: it, playing }: { item: LibraryItem; playing?: boolean }) {
   if (it.kind === 'audio') {
     return (
-      <div className={`flex size-9 shrink-0 items-center justify-center overflow-hidden rounded ${playing ? 'bg-accent text-white' : 'bg-panel-2 text-ink-3'}`}>
+      <div className={`flex size-9 shrink-0 items-center justify-center overflow-hidden rounded ${playing ? 'bg-black/75 text-white' : 'bg-panel-2 text-ink-3'}`}>
         {playing ? <Pause size={13} /> : <AudioLines size={14} />}
       </div>
     );
@@ -394,7 +394,7 @@ export function AssetCard({
         title={insertLabel}
         aria-label={insertLabel}
         onClick={onInsert}
-        className="bg-accent absolute bottom-7 right-1 hidden h-5 w-5 items-center justify-center rounded text-white group-hover:inline-flex"
+        className="bg-accent absolute bottom-7 right-1 hidden h-5 w-5 items-center justify-center rounded text-ink group-hover:inline-flex"
       >
         <Plus size={12} />
       </button>
@@ -581,7 +581,7 @@ export function AssetLightbox({
             e.stopPropagation();
             onInsert(componentModel?.insertProps);
           }}
-          className="bg-accent inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-medium text-white"
+          className="bg-accent inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-medium text-accent-foreground"
         >
           <Plus size={13} /> {t('panels.insertOntoCanvas')}
         </button>

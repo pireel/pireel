@@ -1,3 +1,5 @@
+import { activeBrandSetting } from './brand-feature-settings';
+import { brandPreferences } from './brand-preferences';
 import { contractedCapability } from './workflow-node-contracts';
 import { workflowLiteral as literal, type WorkflowBinding, type WorkflowCapability, type WorkflowDefinition, type WorkflowStep } from './workflow';
 import { scopeSceneBrandOptions, type CaptionTaskOptions } from './caption-task';
@@ -56,10 +58,10 @@ export function captionTailSteps(options: CaptionTaskOptions, document: Workflow
     steps.push(sceneStep('moves', 'edit.moves', { document, transcript, picks: stepOutput('editplan', 'picks') }));
     document = stepOutput('moves', 'document');
   }
-  if (options.edit?.titles && options.brand?.blocks.overlay_text?.text?.trim()) {
+  if (options.edit?.titles && options.brand && brandPreferences(options.brand).headlines) {
     // Titles follow the brand's layout prompt; their words, timing, place and look are written for this video.
     steps.push(sceneStep('titles', 'brand.titles', { transcript, guide: literal(renderBrandPrompt(options.brand, ['portrait', 'overlay_text', 'layout'])), document }));
-    steps.push(sceneStep('texts', 'brand.texts', { document, titles: stepOutput('titles', 'titles') }));
+    steps.push(sceneStep('texts', 'brand.texts', { document, titles: stepOutput('titles', 'titles'), theme: sceneLiteral({ ...(options.brand.blocks.overlay_text?.font ? { font: options.brand.blocks.overlay_text.font } : {}), ...activeBrandSetting(options.brand, 'headlines')?.theme }) }));
     document = stepOutput('texts', 'document');
   }
   // After captions: the intro/outro ripple the captions along with the speech they follow.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { UIMessage } from 'ai';
-import { latestTask, patchTask, resumeTaskHint, taskOf, unfinishedRoughCut, withTaskUsage, type ChatTask } from './chat-task';
+import { latestTask, patchTask, resumeTaskHint, resumeEditingTask, taskOf, unfinishedRoughCut, withTaskUsage, type ChatTask } from './chat-task';
 import { createStudioTurnLedger, effectiveStudioTurnMessages, recordStudioTurnToolResult, sanitizeRestored } from './chat-thread-store';
 
 const task = (id: string): ChatTask => ({ id, goal: 'Edit the full video', skills: ['captions', 'graphics'], mode: 'one-click', state: 'running' });
@@ -38,6 +38,26 @@ describe('durable editing task', () => {
     expect(saved).toHaveLength(1);
     expect(saved[0]!.parts[0]).toMatchObject({ state: 'output-available', output: { ok: true } });
   });
+  it('resets only unfinished rough-cut states when continuing without losing completed checkpoints', () => {
+    const paused: ChatTask = { ...task('same'), state: 'paused', roughCut: { callId: 'failed-call', report: {
+      state: 'partial', credits: 1, summary: '部分工作尚未完成', sourceAssetId: 'source',
+      steps: [{ id: 'transcribe', status: 'done', detail: '16 句' }, { id: 'pauses', status: 'failed', detail: 'Outdated module' }, { id: 'cleanup', status: 'done', detail: '3 fillers' }, { id: 'captions', status: 'pending' }, { id: 'loudness', status: 'skipped' }],
+      cleanup: { applied: ['fillers'], analysis: { cuts: [], unsure: [], sensitive: [] } },
+    } } };
+    const resumed = resumeEditingTask(paused);
+    expect(resumed.state).toBe('running');
+    expect(resumed.roughCut?.report.state).toBe('running');
+    expect(resumed.roughCut?.report.summary).toBeUndefined();
+    expect(resumed.roughCut?.report.steps).toEqual([
+      { id: 'transcribe', status: 'done', detail: '16 句' }, { id: 'pauses', status: 'pending' }, { id: 'cleanup', status: 'done', detail: '3 fillers' }, { id: 'captions', status: 'pending' }, { id: 'loudness', status: 'skipped' },
+    ]);
+    expect(resumed.roughCut?.report.credits).toBe(1);
+    expect(resumed.roughCut?.report.cleanup).toEqual(paused.roughCut?.report.cleanup);
+    expect(paused.roughCut?.report.steps[1]).toMatchObject({ status: 'failed', detail: 'Outdated module' });
+    const finished = { ...paused, roughCut: { callId: 'success', report: { ...paused.roughCut!.report, state: 'done' as const, steps: [{ id: 'pauses' as const, status: 'done' as const }] } } };
+    expect(resumeEditingTask(finished).roughCut).toBe(finished.roughCut);
+  });
+
   it('retains the original goal and exact unfinished steps for a continuation', () => {
     const current: ChatTask = { ...task('a'), roughCut: { callId: 'c1', report: { state: 'partial', credits: 4, steps: [{ id: 'transcribe', status: 'done' }, { id: 'captions', status: 'failed', detail: 'not applied' }] } } };
     expect(unfinishedRoughCut(current)).toBe(true);

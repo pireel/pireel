@@ -106,7 +106,7 @@ export function ImageUpload({
         type="button"
         onClick={() => !uploading && fileRef.current?.click()}
         disabled={uploading}
-        className="border-line-2 hover:border-accent hover:bg-accent/[0.04] text-ink-3 hover:text-accent flex h-[88px] items-center justify-center gap-2 rounded-md border-[1.5px] border-dashed bg-transparent px-4 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+        className="border-line-2 hover:border-accent hover:bg-accent/[0.04] text-ink-3 hover:text-accent-ink flex h-[88px] items-center justify-center gap-2 rounded-md border-[1.5px] border-dashed bg-transparent px-4 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
       >
         {uploading ? (
           <span className="font-mono text-[12px]">{ui.uploadingProgress(progress)}</span>
@@ -216,7 +216,7 @@ export function ImageUploadList({
           <button
             type="button"
             onClick={() => fileRef.current?.click()}
-            className="border-line-2 hover:border-accent hover:bg-accent/[0.04] text-ink-3 hover:text-accent flex h-[88px] w-[88px] shrink-0 flex-col items-center justify-center gap-1 rounded-md border-[1.5px] border-dashed bg-transparent transition-colors"
+            className="border-line-2 hover:border-accent hover:bg-accent/[0.04] text-ink-3 hover:text-accent-ink flex h-[88px] w-[88px] shrink-0 flex-col items-center justify-center gap-1 rounded-md border-[1.5px] border-dashed bg-transparent transition-colors"
             title={resolvedLabel}
           >
             <IconPlus size={16} />

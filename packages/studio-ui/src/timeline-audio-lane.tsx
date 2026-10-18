@@ -222,7 +222,7 @@ function AudioLaneImpl({ trackId, rowH = AUDIO_ROW_H, clips, disabledIds, dur, s
               className={`pointer-events-none absolute inset-x-0 top-0 flex items-center gap-1 px-1.5 pr-6 ${selected ? 'bg-accent/18' : 'bg-accent/10'}`}
               style={{ height: CHIP_LABEL_H }}
             >
-              {clip.muted ? <VolumeX size={9} className="text-ink-4 shrink-0" /> : <Music size={9} className="text-accent shrink-0" />}
+              {clip.muted ? <VolumeX size={9} className="text-ink-4 shrink-0" /> : <Music size={9} className="text-accent-ink shrink-0" />}
               <span className={`truncate text-[9.5px] leading-none ${clip.muted ? 'text-ink-4 line-through' : 'text-ink-2'}`}>{clip.label || t('panels.musicBed')}</span>
               {d.speed !== 1 && (
                 <span className="text-ink-3 bg-panel/70 shrink-0 rounded px-1 text-[9px] leading-[12px] tabular-nums">{d.speed.toFixed(2).replace(/0$/, '')}×</span>
@@ -243,7 +243,7 @@ function AudioLaneImpl({ trackId, rowH = AUDIO_ROW_H, clips, disabledIds, dur, s
                   e.stopPropagation();
                   onToggleMute(base.id, !clip.muted);
                 }}
-                className={`bg-panel/85 text-ink-3 hover:bg-panel hover:text-ink focus-visible:ring-accent absolute top-0.5 right-1 z-30 flex h-3 w-3 items-center justify-center rounded-sm shadow-sm backdrop-blur-sm transition-opacity focus-visible:ring-1 focus-visible:outline-none ${
+                className={`bg-panel/85 text-ink-3 hover:bg-panel hover:text-ink focus-visible:ring-ring absolute top-0.5 right-1 z-30 flex h-3 w-3 items-center justify-center rounded-sm shadow-sm backdrop-blur-sm transition-opacity focus-visible:ring-1 focus-visible:outline-none ${
                   clip.muted
                     ? 'opacity-100'
                     : 'opacity-0 group-hover/aud:opacity-100 focus-visible:opacity-100'
@@ -269,9 +269,9 @@ function AudioLaneImpl({ trackId, rowH = AUDIO_ROW_H, clips, disabledIds, dur, s
               </defs>
               <g clipPath={`url(#${maskId})`}>
                 {/* body background (the silhouette itself), then the wave on top of it */}
-                <path d={silhouette} transform={`translate(${(offsetPx * uPerPx).toFixed(2)},0)`} className={selected ? 'text-accent/18' : 'text-accent/10'} fill="currentColor" />
+                <path d={silhouette} transform={`translate(${(offsetPx * uPerPx).toFixed(2)},0)`} className={selected ? 'text-accent-ink/18' : 'text-accent-ink/10'} fill="currentColor" />
                 {/* Muted keeps its shape but loses its colour — the clip is still there to reason about, it just makes no sound */}
-                {wave && <path d={wave} className={clip.muted ? 'text-ink-4/40' : 'text-accent/60'} fill="currentColor" />}
+                {wave && <path d={wave} className={clip.muted ? 'text-ink-4/40' : 'text-accent-ink/60'} fill="currentColor" />}
               </g>
             </svg>
             {/* Trim handles: the edge follows the pointer 1:1, painted through the DOM. On a left
@@ -350,7 +350,7 @@ function AudioLaneImpl({ trackId, rowH = AUDIO_ROW_H, clips, disabledIds, dur, s
         );
       })}
       {clips.length === 0 && (
-        <div className={`border-accent/50 text-accent absolute inset-x-0 top-0.5 bottom-0.5 flex items-center justify-center gap-1.5 border border-dashed text-[10px] ${TIMELINE_ITEM_RADIUS}`}>
+        <div className={`border-accent/50 text-accent-ink absolute inset-x-0 top-0.5 bottom-0.5 flex items-center justify-center gap-1.5 border border-dashed text-[10px] ${TIMELINE_ITEM_RADIUS}`}>
           <Music size={11} /> {t('panels.dropAudioHere')}
         </div>
       )}

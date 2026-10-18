@@ -1,5 +1,6 @@
+import type { BrandFeatureTheme } from './brand-feature-settings';
 import { brandPreferences } from './brand-preferences';
-import { BLOCK_IDS, hasText, renderBrandPrompt, upgradeBlocks, type PlaybookSnapshot } from './brand-playbook';
+import { BLOCK_IDS, renderBrandPrompt, upgradeBlocks, type PlaybookSnapshot } from './brand-playbook';
 import type { AsrSegment } from './build-blocks';
 import { CUT_TRANSITION_EFFECTS, ZOOM_PRESETS, type CutTransitionEffect, type ShotZoom, type ZoomPreset } from './composition-core';
 import type { NarrativeClipPatchUpdate } from './editor-document/commands/types';
@@ -46,9 +47,9 @@ export function playbookEditParams(playbook: PlaybookSnapshot): CaptionEditParam
   const b = upgradeBlocks(playbook.blocks);
   const params: CaptionEditParams = {};
   const preferences = brandPreferences(playbook);
-  if (b.sound?.pauses && playbook.preferences?.pauses !== false) params.pause = { ...PAUSE_BY_MODE[b.sound.pauses] };
-  if (b.sound?.lufs !== undefined) params.targetLufs = b.sound.lufs;
-  if (preferences.zoom || preferences.transitions) params.moves = { punchIn: preferences.zoom, transition: preferences.transitions };
+  if (preferences.pauses && b.sound?.pauses) params.pause = { ...PAUSE_BY_MODE[b.sound.pauses] };
+  if (preferences.loudness && b.sound?.lufs !== undefined) params.targetLufs = b.sound.lufs;
+  if (preferences.zoom) params.moves = { punchIn: true };
   if (preferences.headlines) params.titles = true;
   return params;
 }
@@ -168,10 +169,10 @@ export interface PlannedTitle {
 }
 
 /** The set_texts item for a planned title: a plate becomes a label in its colour, otherwise plain text. */
-export function titleTextItem(id: string, title: PlannedTitle, canvas: { width: number; height: number; fps: number }) {
+export function titleTextItem(id: string, title: PlannedTitle, canvas: { width: number; height: number; fps: number }, theme?: BrandFeatureTheme) {
   return {
     id, text: title.text, startFrame: Math.round(title.startSec * canvas.fps), durationFrames: Math.max(1, Math.round(title.durationSec * canvas.fps)),
-    preset: title.plate ? 'label' : 'clean', animation: 'none', color: title.color, ...(title.plate ? { accentColor: title.plate } : {}),
+    preset: title.plate ? 'label' : 'clean', animation: 'none', color: theme?.foreground ?? title.color, ...(title.plate ? { accentColor: theme?.background ?? title.plate } : {}), ...(theme?.font ? { fontFamily: theme.font } : {}),
     fontSize: Math.round(Math.min(180, Math.max(24, title.sizePct / 100 * canvas.height))), fontWeight: 800, align: 'center',
     placement: title.box,
   };

@@ -67,7 +67,7 @@ export function ApprovalCard({ part }: { part: ToolPartLike }) {
           onClick={() => decide('approved')}
           className={`inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[12px] font-semibold transition-colors ${
             decision === 'approved'
-              ? 'bg-ink text-bg'
+              ? 'bg-primary text-primary-foreground'
               : 'bg-accent text-accent-foreground hover:opacity-90 disabled:opacity-45'
           }`}
         >

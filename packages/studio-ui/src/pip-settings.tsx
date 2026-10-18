@@ -23,7 +23,7 @@ export function PipTemplateDiagram({ template, options }: { template: PipTemplat
   return <div aria-hidden="true" className="bg-panel-2 relative aspect-[9/16] w-full overflow-hidden">
     {presenterBehind && <UserRound className="text-ink-4 absolute bottom-0 left-[18%] h-[58%] w-[64%]" strokeWidth={1.25}/>}
     {template === 'dim' && <div className="bg-ink/25 absolute inset-0"/>}
-    <div className="bg-accent/15 border-accent/35 absolute flex items-center justify-center border" style={rect(media)}><Image className="text-accent/70 h-[38%] max-h-5 w-[38%] max-w-5" strokeWidth={1.25}/></div>
+    <div className="bg-accent/15 border-accent/35 absolute flex items-center justify-center border" style={rect(media)}><Image className="text-accent-ink/70 h-[38%] max-h-5 w-[38%] max-w-5" strokeWidth={1.25}/></div>
     {speaker && <div className={'absolute flex items-end justify-center overflow-hidden ' + (geometry.speakerCutout ? '' : 'bg-panel border-ink-4/60 border')} style={rect(speaker)}><UserRound className="text-ink-3 h-[85%] w-[85%]" strokeWidth={1.25}/></div>}
   </div>;
 }
@@ -84,7 +84,7 @@ function FootageSource({ icon, title, note, checked, disabled, onChange, childre
     <button type="button" role="checkbox" aria-checked={checked} disabled={disabled} onClick={() => onChange(!checked)} className="flex w-full items-center gap-3 px-3 py-3 text-left disabled:opacity-50">
       <span className="text-ink-2 shrink-0">{icon}</span>
       <span className="min-w-0 flex-1"><span className="text-ink block text-sm">{title}</span>{note && <span className="text-ink-3 mt-0.5 block text-xs">{note}</span>}</span>
-      <span aria-hidden="true" className={'flex size-5 shrink-0 items-center justify-center rounded-full ' + (checked ? 'bg-ink text-bg' : 'border-line border')}>{checked && <Check size={12} strokeWidth={2.5}/>}</span>
+      <span aria-hidden="true" className={'flex size-5 shrink-0 items-center justify-center rounded-full ' + (checked ? 'bg-panel-2 text-ink' : 'border-line border')}>{checked && <Check size={12} strokeWidth={2.5}/>}</span>
     </button>
     {children && <div className="px-3">{children}</div>}
   </div>;

@@ -11,7 +11,7 @@ const badgeVariants = cva(
         // brand
         default: 'bg-panel-2 border-line text-ink-2',
         solid: 'bg-ink border-ink text-bg',
-        accent: 'bg-accent/8 border-accent/18 text-accent',
+        accent: 'bg-accent/8 border-accent/18 text-accent-ink',
         orange: 'bg-accent-2/8 border-accent-2/20 text-accent-2',
         teal: 'bg-teal/10 border-teal/22 text-teal',
         rose: 'bg-rose/8 border-rose/20 text-rose',

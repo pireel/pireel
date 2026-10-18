@@ -136,7 +136,7 @@ function AiTab({ kind, target, draftPrompt, onGenerate }: {
       {draftPrompt && <button type="button" disabled={drafting} onClick={() => void draft()} title={t('captions.redraftPrompt')} className="text-ink-3 hover:text-ink flex items-center gap-1 text-[11px] disabled:opacity-40"><RefreshCw size={11} />{t('captions.redraftPrompt')}</button>}
       <span className="ml-auto">{intent ? <GenerationCreditsBadge intent={intent} params={params} models={models} /> : <span className="text-ink-4 text-[10.5px]">{t('captions.generateCostsCredits')}</span>}</span>
       <button type="button" disabled={drafting || !prompt.trim()} onClick={() => onGenerate(prompt.trim(), intent ? generationRequest(intent, params, models) : undefined)}
-        className="bg-ink text-bg flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] disabled:opacity-40"><Sparkles size={12} />{t('captions.generateInsert')}</button>
+        className="bg-primary text-primary-foreground flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] disabled:opacity-40"><Sparkles size={12} />{t('captions.generateInsert')}</button>
     </div>
   </div>;
 }

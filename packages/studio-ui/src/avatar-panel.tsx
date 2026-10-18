@@ -513,7 +513,7 @@ export function AvatarPanel({ mode = 'library', initialLanguage = 'zh', onCreate
                   : t('workbench.voiceDesignCost', { credits: customVoiceAccess.designCredits ?? '—' })}
               </span>
             )}
-            <button type="button" onClick={() => void createVoice()} disabled={!canCreate} className={`bg-ink text-bg flex h-7 shrink-0 items-center justify-center rounded-md transition-opacity hover:opacity-85 disabled:pointer-events-none disabled:opacity-25 ${mode === 'clone' ? 'px-3 text-xs' : 'w-7'}`} title={file || mode === 'clone' ? t('workbench.voiceStartClone') : t('workbench.voiceStartDesign')}>
+            <button type="button" onClick={() => void createVoice()} disabled={!canCreate} className={`bg-primary text-primary-foreground flex h-7 shrink-0 items-center justify-center rounded-md transition-opacity hover:opacity-85 disabled:pointer-events-none disabled:opacity-25 ${mode === 'clone' ? 'px-3 text-xs' : 'w-7'}`} title={file || mode === 'clone' ? t('workbench.voiceStartClone') : t('workbench.voiceStartDesign')}>
               {busy ? <Loader2 size={13} className="animate-spin" /> : mode === 'clone' ? t('workbench.voiceStartClone') : <ArrowUp size={15} strokeWidth={2.5} />}
             </button>
           </div>
@@ -564,7 +564,7 @@ export function AvatarPanel({ mode = 'library', initialLanguage = 'zh', onCreate
               <button
                 type="submit"
                 disabled={!renameDraft.trim() || renameDraft.trim() === renaming?.label || busy}
-                className="bg-ink text-bg h-7 rounded-md px-3 text-[11px] font-medium disabled:pointer-events-none disabled:opacity-35"
+                className="bg-primary text-primary-foreground h-7 rounded-md px-3 text-[11px] font-medium disabled:pointer-events-none disabled:opacity-35"
               >
                 {t('panels.saveName')}
               </button>

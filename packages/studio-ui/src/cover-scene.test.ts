@@ -2,13 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { compositionToEditorDocument, emptyComposition } from '@pireel/studio-engine/composition';
 import { emptyPlaybook, playbookSnapshot } from '@pireel/studio-engine/brand-playbook';
 import { playbookAgentBrief } from '@pireel/studio-engine/brand-edit-params';
-import { CoverSceneController, coverSceneFromDocument, coverSceneInput, withCoverScene, type CoverSceneHost } from './cover-scene';
+import { CoverSceneController, videoCoverAspect, coverSceneFromDocument, coverSceneInput, withCoverScene, type CoverSceneHost } from './cover-scene';
 
 function fixture() {
   let document = compositionToEditorDocument({ projectId: 'cover', videoSig: 'sig', composition: { ...emptyComposition(), video: { url: 'blob:source', durationSec: 12 }, shots: [{ id: 'speaker', srcStart: 2, srcEnd: 6, treatment: 'full' }] } }).document;
   const assetId = Object.keys(document.assets)[0];
   document.semantics.transcripts[assetId] = [{ start: 0, end: 1, text: 'Deleted wrong take' }, { start: 2, end: 6, text: 'Keep this useful explanation' }];
-  const brand = playbookSnapshot(emptyPlaybook('b', 'Brand')); brand.blocks.cover = { design: 'SPECIAL COVER DESIGN: black type on white.', frame: 'Choose the current speaker’s clear face.' }; document.semantics.brand = brand;
+  const brand = playbookSnapshot(emptyPlaybook('b', 'Brand')); brand.blocks.cover = { referenceKeys: [] }; brand.preferences = { cover: true }; brand.settings = { cover: { prompt: 'SPECIAL COVER DESIGN: black type on white. Choose the current speaker’s clear face.' } }; document.semantics.brand = brand;
   const analyze = vi.fn(async (_body: Record<string, unknown>) => JSON.stringify({ prompt: 'SPECIAL COVER DESIGN: black type on white. Use this video’s own speaker as the reference, with generous negative space and the words Useful explanation. Preserve identity and add no unsupported claims.', pick: 0 }));
   const start = vi.fn(async (_params: Record<string, unknown>) => ({ ok: true as const, ids: ['new-cover-job'] }));
   const poll = vi.fn(async () => ({ id: 'new-cover-job', status: 'succeeded' as const, prompt: 'Prompt stays outside chat', createdAt: 1, assets: [{ key: 'uploads/cover.jpg', url: 'https://cdn.example/cover.jpg', mime: 'image/jpeg' }] }));
@@ -205,4 +205,34 @@ it('loads missing brand references into a saved manual draft without rewriting i
   expect(f.analyze).toHaveBeenCalledTimes(1);
   expect(coverSceneFromDocument(f.document())?.prompt).toBe('My complete prompt and intended composition');
   expect(coverSceneFromDocument(f.document())?.brandReferences).toEqual([{ key: 'brand.jpg', url: 'https://cdn.example/brand.jpg' }]);
+});
+
+it('omits disabled cover settings and invalidates the cached plan when its own prompt changes', async () => {
+  const f = fixture(); const b = f.document().semantics.brand!;
+  const fingerprint = coverSceneInput(f.document()).fingerprint;
+  b.settings!.cover!.prompt = 'A different cover instruction';
+  expect(coverSceneInput(f.document()).fingerprint).not.toBe(fingerprint);
+  b.preferences!.cover = false;
+  await f.controller.prepare();
+  expect(f.analyze.mock.calls[0][0]).toMatchObject({ brand: { cover: undefined } });
+  expect(b.settings!.cover!.prompt).toBe('A different cover instruction');
+});
+
+
+it.each([[1080, 1920, '9:16'], [1920, 1080, '16:9'], [1080, 1080, '1:1'], [1440, 1080, '4:3'], [1080, 1440, '3:4'], [1080, 1620, '2:3']])('defaults a %s×%s video cover to %s', async (width, height, expected) => {
+  const f = fixture(); f.document().canvas.width = Number(width); f.document().canvas.height = Number(height);
+  expect(videoCoverAspect(f.document().canvas)).toBe(expected);
+  expect(coverSceneInput(f.document()).size).toBe(expected);
+  await f.controller.prepare();
+  expect(coverSceneFromDocument(f.document())?.size).toBe(expected);
+  expect(f.analyze.mock.calls[0][0].size).toBe(expected);
+});
+it('keeps a saved cover ratio when reopening even if it differs from the video', async () => {
+  const f = fixture(); f.document().canvas.width = 1080; f.document().canvas.height = 1920;
+  await f.controller.prepare();
+  await f.controller.updateDraft({ size: '1:1' });
+  await new CoverSceneController(f.host).prepare();
+  expect(coverSceneFromDocument(f.document())?.size).toBe('1:1');
+  await f.controller.generate();
+  expect(f.start.mock.calls[0][0].size).toBe('1:1');
 });

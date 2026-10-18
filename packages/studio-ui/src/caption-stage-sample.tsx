@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { captionBlocksFromAsr } from '@pireel/studio-engine/build-blocks';
 import { emptyComposition, type CaptionStyle, type Composition } from '@pireel/studio-engine/composition';
 import { getCaptionPreset } from '@pireel/studio-engine/caption-presets';
@@ -50,6 +50,7 @@ function sampleCue(id: string, text: string, preset: string | undefined, subText
 export function CaptionStageSample({ style, canvas, text, subText }: {
   style: Partial<CaptionStyle>; canvas: { width: number; height: number }; text: string; subText?: string;
 }) {
+  const sampleId = `caption_sample_${useId().replace(/[^a-zA-Z0-9_-]/g, '_')}`;
   const [host, width] = useWidth();
   // A library or Google face is fetched for the sample's words, and the sample drawn again once it is on
   // the device (a face named in a brand is otherwise only fetched when picked by hand).
@@ -63,7 +64,7 @@ export function CaptionStageSample({ style, canvas, text, subText }: {
     return () => { live = false; };
   }, [faces, text, subText]);
   const comp = useMemo<Composition>(() => ({ ...emptyComposition(), width: Math.round(canvas.width), height: Math.round(canvas.height), captionStyle: { ...style, on: true } as CaptionStyle }), [style, canvas.width, canvas.height, facesLoaded]);
-  const block = useMemo(() => sampleCue('caption_sample', text, style.preset, subText), [text, subText, style.preset, comp]);
+  const block = useMemo(() => sampleCue(sampleId, text, style.preset, subText), [sampleId, text, subText, style.preset, comp]);
   const replayKey = useMemo(() => { const { yPct: _y, sub, ...look } = style; const { yPct: _sy, ...subLook } = sub ?? {}; return JSON.stringify([look, subLook]); }, [style]);
   return <div ref={host} className="absolute inset-0">
     {width > 0 && <InlineBlockPreview comp={comp} block={block} width={width} ground="none" replayKey={replayKey} />}

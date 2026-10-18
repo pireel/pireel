@@ -1,19 +1,13 @@
+import { brandFeaturePrompt, upgradeBrandFeatureSettings, BRAND_PROMPT_FEATURES, validateBrandFeatureSettings, type BrandFeatureSettings } from './brand-feature-settings';
 import { hashSection } from './stable-json';
-import { BRAND_PREFERENCE_IDS, brandPreferences, type BrandPreferences } from './brand-preferences';
+import { BRAND_PREFERENCE_IDS, brandPreferences, upgradeBrandPreferences, type BrandPreferences } from './brand-preferences';
 import { naturalTechniqueText } from './brand-prose';
 import type { CaptionStyle } from './composition-core';
 import { BASE_CAPTION_FONT_PX } from './caption-presets';
 import { BRAND_EDITING_SKILL_IDS } from './editing-skills';
 
-/**
- * A creator's brand: one prompt made of XML blocks, produced from their own videos by the extraction
- * method (brand-extract.ts) and edited by them, for the agent that edits their new videos. Fixed blocks
- * carry exact values the engine applies as they are: captions, the on-screen text font, the logo,
- * loudness and pause trimming. The rest is the creator's toolkit, one block per technique — picture
- * layout, transitions, camera moves, graphics, illustrations and memes, footage sources, pacing,
- * structure, sound — described in natural prose with reference stills; then their reusable assets,
- * a portrait and the cover. Where in a new
- * video each technique goes is the editing agent's call.
+/** Fixed brand configuration and editing switches.
+ * Legacy prose fields are accepted for storage compatibility, but ignored by new editing consumers.
  */
 export const PLAYBOOK_SCHEMA = 3;
 
@@ -42,10 +36,11 @@ export function brandMusicTracks(brand: { media?: { music?: unknown } }): BrandA
 }
 
 /** Shared by the prompt and library; removing or reordering tracks never retargets ids. */
-export function brandMediaEntries(brand: Pick<BrandPlaybook, 'media'>): { role: 'intro' | 'outro' | 'music'; id: string; asset: BrandAsset | BrandAudio }[] {
+export function brandMediaEntries(brand: Pick<BrandPlaybook, 'media'> & Partial<Pick<BrandPlaybook, 'blocks' | 'preferences' | 'skills'>>): { role: 'intro' | 'outro' | 'music'; id: string; asset: BrandAsset | BrandAudio }[] {
+  const enabled = brandPreferences({ ...brand, blocks: brand.blocks ?? {} });
   return [
-    ...(['intro', 'outro'] as const).flatMap(role => brand.media?.[role] ? [{ role, id: `brand-${role}`, asset: brand.media[role]! }] : []),
-    ...brandMusicTracks(brand).map(asset => ({ role: 'music' as const, id: asset.id ?? `brand-music-${hashSection(asset.key)}`, asset })),
+    ...(['intro', 'outro'] as const).flatMap(role => enabled[role] && brand.media?.[role] ? [{ role, id: `brand-${role}`, asset: brand.media[role]! }] : []),
+    ...(enabled.music ? brandMusicTracks(brand) : []).map(asset => ({ role: 'music' as const, id: asset.id ?? `brand-music-${hashSection(asset.key)}`, asset })),
   ];
 }
 
@@ -120,9 +115,11 @@ export interface BrandPlaybook {
     preview?: BrandAsset & { cleaned: boolean; textLeft?: boolean };
   };
   blocks: BrandBlocks;
-  /** The editable, unified guidance for new footage. Its presence supersedes legacy technique prose. */
+  /** Legacy prose, accepted for reading old records only; never passed to editing. */
   style?: { text: string; references?: BrandAsset[] };
   preferences?: BrandPreferences;
+  /** Settings scoped to the matching capability switch; retained while disabled. */
+  settings?: BrandFeatureSettings;
   media?: BrandReusableMedia;
   /** Editing skills a project edited with this brand starts with (ids from editing-skills), until the
    *  creator sets the project's own; the analysis sets them, the creator edits them. */
@@ -156,9 +153,8 @@ export function brandCanvas(playbook: Pick<BrandPlaybook, 'source'>): { width: n
 /** What a scene keeps: a copy taken when picked, so later edits never restyle past projects. */
 export type PlaybookSnapshot = Omit<BrandPlaybook, 'source'>;
 export function playbookSnapshot(playbook: BrandPlaybook): PlaybookSnapshot {
-  const { source: _source, ...snapshot } = structuredClone(playbook);
+  const { source: _source, ...snapshot } = fixedBrandConfiguration(structuredClone(playbook));
   const covers = brandCoverReferenceKeys(playbook);
-  if (snapshot.style) snapshot.style.references = brandStyleReferences(playbook);
   if (snapshot.blocks.cover?.referenceKeys === undefined && covers.length) snapshot.blocks.cover = { ...snapshot.blocks.cover, referenceKeys: covers };
   return snapshot;
 }
@@ -167,12 +163,21 @@ export function emptyPlaybook(id: string, name: string, platform: BrandPlatform 
   return { schema: PLAYBOOK_SCHEMA, id, name, version: 1, method: 'manual', source: { platform, videos: [] }, blocks: {} };
 }
 
-/** Existing brands open with their original descriptions merged, without a paid re-analysis. */
-export function brandStyleText(brand: Pick<BrandPlaybook, 'blocks' | 'style'>): string {
-  if (brand.style !== undefined) return brand.style.text;
-  const b = upgradeBlocks(brand.blocks);
-  return [...new Set((['portrait', 'layout', 'camera', 'transitions', 'graphics', 'illustrations', 'footage', 'overlay_text', 'sound', 'pacing', 'structure'] as const)
-    .map(id => b[id]?.text?.trim()).filter((text): text is string => !!text))].join('\n\n');
+/** Legacy descriptions remain readable in stored backups, but no longer guide new edits. */
+export function brandStyleText(_brand: Pick<BrandPlaybook, 'blocks' | 'style'>): string { return ''; }
+
+/** Keep only reusable configuration. Called when a brand is edited, saved or snapshotted. */
+export function fixedBrandConfiguration<T extends Pick<BrandPlaybook, 'blocks'> & Partial<BrandPlaybook>>(brand: T): T {
+  const b = brand.blocks;
+  const blocks: BrandBlocks = {
+    ...(b.captions ? { captions: { on: b.captions.on, style: b.captions.style, accent: b.captions.accent } } : {}),
+    ...(b.overlay_text ? { overlay_text: { font: b.overlay_text.font, fontLike: b.overlay_text.fontLike } } : {}),
+    ...(b.logo ? { logo: b.logo } : {}),
+    ...(b.sound ? { sound: { lufs: b.sound.lufs, pauses: b.sound.pauses } } : {}),
+    ...(b.cover || brand.source?.videos.some(v => v.coverKey) ? { cover: { referenceKeys: brandCoverReferenceKeys(brand) } } : {}),
+  };
+  const { style: _style, presets: _withdrawnPresets, ...rest } = brand as T & { presets?: unknown };
+  return { ...rest, blocks, ...(brand.preferences !== undefined ? { preferences: upgradeBrandPreferences(brand.preferences) } : {}), ...(brand.settings !== undefined ? { settings: upgradeBrandFeatureSettings(brand.settings) } : {}) } as T;
 }
 
 /** An explicit empty list means the creator removed the examples; do not restore them from sources. */
@@ -181,14 +186,16 @@ export function brandCoverReferenceKeys(brand: Pick<BrandPlaybook, 'blocks'> & P
   return [...new Set((brand.source?.videos ?? []).flatMap(video => video.coverKey ? [video.coverKey] : []))].slice(0, 8);
 }
 
-export function brandStyleReferences(brand: Pick<BrandPlaybook, 'blocks' | 'style'> & Partial<Pick<BrandPlaybook, 'source'>>): BrandAsset[] {
-  const covers = new Set([...brandCoverReferenceKeys(brand), ...(brand.source?.videos ?? []).flatMap(video => video.coverKey ? [video.coverKey] : [])]);
-  const references = brand.style !== undefined ? brand.style.references ?? [] : [brand.blocks.overlay_text, ...TECHNIQUE_BLOCKS.map(id => brand.blocks[id])].flatMap(block => block?.references ?? []);
-  return [...new Map(references.filter(asset => !covers.has(asset.key)).map(asset => [asset.key, asset])).values()];
+export function brandStyleReferences(_brand: Pick<BrandPlaybook, 'blocks' | 'style'> & Partial<Pick<BrandPlaybook, 'source'>>): BrandAsset[] {
+  return [];
 }
 
-export function brandGraphicsStyle(brand: Pick<BrandPlaybook, 'blocks' | 'style'>): string | null {
-  return (brand.style !== undefined ? brand.style.text : brand.blocks.graphics?.text)?.trim() || null;
+export function brandGraphicsStyle(brand: Pick<BrandPlaybook, 'blocks' | 'style' | 'settings' | 'preferences' | 'skills' | 'media'>): string | null { return brandFeaturePrompt(brand, 'graphics'); }
+
+/** Cover generation consumes only its own enabled configuration. */
+export function activeBrandCover(brand: Pick<BrandPlaybook, 'blocks' | 'settings' | 'preferences' | 'skills' | 'media'>): BrandCover | undefined {
+  if (!brandPreferences(brand).cover) return undefined;
+  return { referenceKeys: brand.blocks.cover?.referenceKeys, ...(brandFeaturePrompt(brand, 'cover') ? { design: brandFeaturePrompt(brand, 'cover')! } : {}) };
 }
 
 // ── The prompt
@@ -206,36 +213,35 @@ function element(tag: string, attrs: Record<string, string | number | boolean | 
  * content. `only` picks the blocks a consumer needs (an edit planner needs no cover). Reference images
  * travel separately; a block says how many it has. Deterministic, so a prompt prefix stays cacheable.
  */
-export function renderBrandPrompt(playbook: Pick<BrandPlaybook, 'name' | 'blocks' | 'style' | 'preferences' | 'media' | 'skills'>, only?: readonly BlockId[]): string {
-  const b = upgradeBlocks(playbook.blocks);
+export function renderBrandPrompt(playbook: Pick<BrandPlaybook, 'name' | 'blocks' | 'style' | 'preferences' | 'media' | 'skills' | 'settings'>, only?: readonly BlockId[]): string {
+  const b = fixedBrandConfiguration(playbook).blocks;
+  const enabled = brandPreferences(playbook);
   const want = (id: BlockId) => (!only || only.includes(id)) && b[id] !== undefined;
-  const refs = (list: BrandAsset[] | undefined) => list?.length ? list.length : undefined;
   const parts: string[] = [];
-  const unified = playbook.style !== undefined;
   const editing = !only || only.some(id => id !== 'cover');
-  if (editing && unified) parts.push(element('style', { references: refs(playbook.style!.references) }, playbook.style!.text));
-  if (editing && (unified || playbook.preferences)) parts.push(element('editing_preferences', brandPreferences(playbook),
-    'Enabled editing capabilities are allowed when the new content benefits, never quotas. cover enables automatic production in the independent cover scene without another confirmation. Disabled capabilities must not be added unless the user explicitly requests them for this edit. zoom permits automatic punch-ins and zoom changes. Choose subjects, assets and placements from the current footage; reference images illustrate visual treatment, not content to copy.'));
+  if (editing) {
+    parts.push(element('editing_preferences', enabled, 'Use enabled capabilities where the new content benefits. Disabled capabilities must not be added. Choose B-roll and motion graphics from the new content when enabled; these capabilities do not require a template selection.'));
+  }
   if (editing && playbook.media) {
     const media = brandMediaEntries(playbook).map(({ role, id, asset }) => element(role, { id, cloudKey: asset.key, kind: asset.kind, durationSec: asset.durationSec, ...('width' in asset ? { width: asset.width, height: asset.height } : { name: asset.name }) }));
     if (media.length) parts.push(`<brand_media>\nThese are supplied reusable assets. Register their exact ids and cloudKeys with register_media if they are not in the project, then place them when the requested edit calls for them. The music entries are alternatives: choose a suitable track for the new video’s content, pace and mood, rather than layering every track or inserting them all. Use the provided names and durations to guide selection; do not claim to have listened when you have not. Preserve narration intelligibility under music.\n${media.join('\n')}\n</brand_media>`);
   }
-  if (!unified && want('portrait')) parts.push(element('portrait', {}, b.portrait!.text));
   if (want('captions')) {
     const c = b.captions!; const s = c.style ?? {};
     // Size as the engine draws it: font px on a frame 1080 wide.
-    parts.push(element('captions', c.on ? { on: true, preset: s.preset, font: s.font, size: s.scale !== undefined ? `${Math.round(s.scale * BASE_CAPTION_FONT_PX)}px on a 1080-wide frame` : undefined, color: s.color, stroke: s.strokeColor, plate: s.bg, bold: s.bold, animation: s.animation, accent: c.accent ?? undefined, 'accent-color': s.emphasis ?? s.accentColor, 'bottom-edge': s.yPct !== undefined ? `${s.yPct}% from top` : undefined } : { on: false }, c.text));
+    parts.push(element('captions', c.on ? { on: true, preset: s.preset, font: s.font, size: s.scale !== undefined ? `${Math.round(s.scale * BASE_CAPTION_FONT_PX)}px on a 1080-wide frame` : undefined, color: s.color, stroke: s.strokeColor, plate: s.bg, bold: s.bold, animation: s.animation, accent: c.accent ?? undefined, 'accent-color': s.emphasis ?? s.accentColor, 'bottom-edge': s.yPct !== undefined ? `${s.yPct}% from top` : undefined } : { on: false }));
   }
   if (want('captions') && b.captions?.on && b.captions.accent === 'keywords') parts.push(element('caption-emphasis', {}, 'Selective word coloring is enabled. Highlight reading anchors such as names, products, numbers, actions and expressive phrases; they need not be major conclusions. This is independent of karaoke tracking and large headline graphics. A style described as avoiding word-by-word animation or using large emphasis rarely does not disable this selection. Preserve the brand typography and highlight color.'));
-  if (want('overlay_text')) parts.push(element('overlay_text', { font: b.overlay_text!.font, like: b.overlay_text!.fontLike, references: refs(b.overlay_text!.references) }, unified ? undefined : b.overlay_text!.text));
-  if (want('logo')) parts.push(element('logo', { corner: b.logo!.corner, width: `${b.logo!.widthPct}%`, opacity: b.logo!.opacity }));
-  if (want('sound')) parts.push(element('sound', { loudness: b.sound!.lufs !== undefined ? `${b.sound!.lufs} LUFS` : undefined, pauses: b.sound!.pauses }, unified ? undefined : b.sound!.text));
-  for (const id of ['layout', 'transitions', 'camera', 'graphics', 'illustrations', 'footage'] as const) {
-    if (!unified && want(id)) parts.push(element(id, { references: refs(b[id]!.references) }, b[id]!.text));
+  if (want('overlay_text') && enabled.headlines) parts.push(element('overlay_text', { font: b.overlay_text!.font, like: b.overlay_text!.fontLike }));
+  if (want('logo') && enabled.logo) parts.push(element('logo', { corner: b.logo!.corner, width: `${b.logo!.widthPct}%`, opacity: b.logo!.opacity }));
+  if (want('sound')) parts.push(element('sound', { loudness: enabled.loudness && b.sound!.lufs !== undefined ? `${b.sound!.lufs} LUFS` : undefined, pauses: enabled.pauses ? b.sound!.pauses : undefined }));
+  const scope: Record<typeof BRAND_PROMPT_FEATURES[number], BlockId> = { cover: 'cover', headlines: 'overlay_text', broll: 'footage', graphics: 'graphics', sound: 'sound', zoom: 'camera' };
+  for (const id of BRAND_PROMPT_FEATURES) {
+    if (id === 'cover' || only && !only.includes(scope[id])) continue;
+    const prompt = brandFeaturePrompt(playbook, id);
+    if (prompt) parts.push(element('feature_settings', { feature: id }, prompt));
   }
-  for (const id of ['pacing', 'structure'] as const) if (!unified && want(id)) parts.push(element(id, {}, b[id]!.text));
-  if (!unified && want('assets')) parts.push(element('assets', { references: refs(b.assets!.references) }, b.assets!.text));
-  if (want('cover')) parts.push(coverElement(b.cover!));
+  if ((!only || only.includes('cover')) && enabled.cover) parts.push(coverElement(activeBrandCover(playbook)!));
   return `<brand name="${escapeAttr(playbook.name)}">\n${parts.join('\n')}\n</brand>`;
 }
 
@@ -299,9 +305,13 @@ export function upgradePlaybook<T extends { schema?: number; blocks?: BrandBlock
   if (!isObject(value) || (value.schema !== 2 && value.schema !== PLAYBOOK_SCHEMA)) return value;
   const blocks = upgradeBlocks(value.blocks ?? {});
   const media = (value as T & { media?: { music?: unknown } }).media;
+  const storedPreferences = (value as T & { preferences?: unknown }).preferences;
+  const preferences = upgradeBrandPreferences(storedPreferences);
+  const storedSettings = (value as T & { settings?: unknown }).settings;
+  const settings = upgradeBrandFeatureSettings(storedSettings);
   const legacyMusic = isObject(media) && isObject(media?.music);
-  if (value.schema === PLAYBOOK_SCHEMA && blocks === value.blocks && !legacyMusic) return value;
-  return { ...value, schema: PLAYBOOK_SCHEMA, blocks, ...(legacyMusic ? { media: { ...media, music: brandMusicTracks({ media }) } } : {}) };
+  if (value.schema === PLAYBOOK_SCHEMA && blocks === value.blocks && !legacyMusic && settings === storedSettings && preferences === storedPreferences) return value;
+  return { ...value, schema: PLAYBOOK_SCHEMA, blocks, ...(preferences !== storedPreferences ? { preferences } : {}), ...(settings !== storedSettings ? { settings } : {}), ...(legacyMusic ? { media: { ...media, music: brandMusicTracks({ media }) } } : {}) };
 }
 
 export function validatePlaybook(value: unknown): BrandPlaybook {
@@ -357,6 +367,7 @@ export function validatePlaybook(value: unknown): BrandPlaybook {
       p.style.references.forEach((item, index) => asset(item, `style.references.${index}`));
     }
   }
+  if (p.settings !== undefined) validateBrandFeatureSettings(p.settings);
   if (p.preferences !== undefined) {
     if (!isObject(p.preferences)) fail('preferences', '需要对象');
     for (const [key, value] of Object.entries(p.preferences)) if ((key !== 'layout' && !(BRAND_PREFERENCE_IDS as readonly string[]).includes(key)) || typeof value !== 'boolean') fail(`preferences.${key}`, '需要有效的剪辑偏好');

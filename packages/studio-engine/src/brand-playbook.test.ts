@@ -60,25 +60,26 @@ describe('validatePlaybook', () => {
     expect(upgraded.schema).toBe(3);
     expect(upgraded.blocks.layout?.text).toBe('素材出现时人物缩成圆形小窗。');
     expect(upgraded.blocks).not.toHaveProperty('visual');
-    expect(renderBrandPrompt(old as unknown as BrandPlaybook)).toContain('<layout>');
+    expect(renderBrandPrompt(old as unknown as BrandPlaybook)).not.toContain('<layout>');
   });
 });
 
 describe('renderBrandPrompt', () => {
-  it('renders one XML block per part: fixed values as attributes, prose as escaped content', () => {
+  it('renders fixed values only, excluding legacy prose', () => {
     const prompt = renderBrandPrompt(valid());
     expect(prompt.startsWith('<brand name="Mine">')).toBe(true);
-    expect(prompt).toContain('<captions on="true" color="#ffffff" stroke="#000000" accent="keywords" bottom-edge="22% from top">\n每屏约 3 个词。\n</captions>');
+    expect(prompt).toContain('<captions on="true" color="#ffffff" stroke="#000000" accent="keywords" bottom-edge="22% from top"/>');
     expect(prompt).toContain('<logo corner="top-right" width="12%" opacity="1"/>');
-    expect(prompt).toContain('<sound loudness="-15 LUFS" pauses="tight"/>');
-    expect(prompt).toContain('<camera>\n说到价格时快推近 &amp; 换产品时甩镜 &lt;偶尔&gt;。\n</camera>');
-    expect(prompt).toContain('<graphics references="1">');
-    expect(prompt.indexOf('<portrait>')).toBeLessThan(prompt.indexOf('<captions'));
+    expect(prompt).toContain('<sound loudness="-15 LUFS"/>');
+    expect(prompt).not.toContain('pauses="tight"');
+    expect(prompt).not.toContain('<camera>');
+    expect(prompt).not.toContain('<graphics');
+    expect(prompt).not.toContain('<portrait>');
   });
 
   it('renders only the blocks a consumer asks for', () => {
     const prompt = renderBrandPrompt(valid(), ['portrait', 'camera']);
-    expect(prompt).toContain('<camera>');
+    expect(prompt).not.toContain('<camera>');
     expect(prompt).not.toContain('<captions');
     expect(prompt).not.toContain('<graphics');
   });
@@ -90,7 +91,9 @@ describe('playbookSnapshot', () => {
     const snapshot = playbookSnapshot(playbook);
     expect(snapshot).not.toHaveProperty('source');
     playbook.blocks.camera!.text = 'changed';
-    expect(snapshot.blocks.camera!.text).toContain('推近');
+    expect(snapshot.blocks.camera).toBeUndefined();
+    playbook.blocks.captions!.style!.color = '#000000';
+    expect(snapshot.blocks.captions!.style!.color).toBe('#ffffff');
     expect(() => validatePlaybookSnapshot(snapshot)).not.toThrow();
   });
 });

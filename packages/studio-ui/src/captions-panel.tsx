@@ -262,7 +262,7 @@ export function CaptionsPanel({
     <div ref={panelRef} className="bg-canvas relative flex h-full min-h-0 w-full flex-col">
       {generating && (
         <div className="bg-bg/70 absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 backdrop-blur-[2px]">
-          <Loader2 size={18} className="text-accent animate-spin" />
+          <Loader2 size={18} className="text-accent-ink animate-spin" />
           <span className="text-ink-2 text-[12px]">{t('captions.generatingCaptions')}</span>
         </div>
       )}
@@ -279,7 +279,7 @@ export function CaptionsPanel({
               <button
                 type="button"
                 onClick={onExtract}
-                className="bg-ink text-bg rounded-md px-3 py-1.5 text-[12px] font-medium transition hover:opacity-90"
+                className="bg-primary text-primary-foreground rounded-md px-3 py-1.5 text-[12px] font-medium transition hover:opacity-90"
               >
                 {t('captions.extractCaptions')}
               </button>
@@ -300,7 +300,7 @@ export function CaptionsPanel({
                 type="button"
                 onClick={() => onSeekTo?.(row.editedStart + Math.min(0.3, (row.dur ?? 0.6) / 2))}
                 title={t('captions.jumpLine')}
-                className={`mt-[5px] shrink-0 font-mono text-[10px] tabular-nums ${active ? 'text-accent font-semibold' : 'text-ink-4 hover:text-ink'}`}
+                className={`mt-[5px] shrink-0 font-mono text-[10px] tabular-nums ${active ? 'text-accent-ink font-semibold' : 'text-ink-4 hover:text-ink'}`}
               >
                 {fmtTime(row.editedStart)}
               </button>
@@ -400,9 +400,9 @@ export function CaptionsPanel({
                     onRetranslateLine(row);
                   }}
                   title={t('captions.retranslateLine')}
-                  className="text-ink-4 hover:text-accent mt-[4px] shrink-0 opacity-0 transition group-hover:opacity-100 disabled:opacity-100"
+                  className="text-ink-4 hover:text-accent-ink mt-[4px] shrink-0 opacity-0 transition group-hover:opacity-100 disabled:opacity-100"
                 >
-                  {lineBusyKey === row.key ? <Loader2 size={12} className="text-accent animate-spin" /> : <Languages size={12} />}
+                  {lineBusyKey === row.key ? <Loader2 size={12} className="text-accent-ink animate-spin" /> : <Languages size={12} />}
                 </button>
               )}
             </div>
@@ -447,7 +447,7 @@ function LangPick({ translation, onOff }: { translation: CaptionTranslationContr
         onClick={() => setOpen((o) => !o)}
         className={`${TRANSCRIPT_TOOL_CLASS} ${open ? 'bg-panel-2/35 text-ink' : ''}`}
       >
-        {translation.busy ? <Loader2 size={13} className="text-accent animate-spin" /> : <Languages size={13} />}
+        {translation.busy ? <Loader2 size={13} className="text-accent-ink animate-spin" /> : <Languages size={13} />}
         <span className={TRANSCRIPT_TOOL_LABEL_CLASS}>{t('captions.translate')}</span>
         {active && <span className="text-ink-3 font-mono text-[10.5px]">{LANG_ABBR[active] ?? active}</span>}
         <ChevronDown size={11} className="text-ink-4" />
@@ -470,7 +470,7 @@ function LangPick({ translation, onOff }: { translation: CaptionTranslationContr
             className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11.5px] ${!active ? 'text-ink bg-panel-2/35' : 'text-ink-3 hover:bg-panel-2/20'}`}
           >
             {t('captions.off')}
-            {!active && <Check size={11} className="text-accent ml-auto" />}
+            {!active && <Check size={11} className="text-accent-ink ml-auto" />}
           </button>
           {TRANSLATION_LANGS.map((lang) => (
             <button
@@ -481,7 +481,7 @@ function LangPick({ translation, onOff }: { translation: CaptionTranslationContr
               className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11.5px] ${active === lang ? 'text-ink bg-panel-2/35' : 'text-ink-3 hover:bg-panel-2/20'}`}
             >
               <span className="text-ink-4 w-5 font-mono text-[10.5px]">{LANG_ABBR[lang]}</span> {lang}
-              {active === lang && <Check size={11} className="text-accent ml-auto" />}
+              {active === lang && <Check size={11} className="text-accent-ink ml-auto" />}
             </button>
           ))}
         </div>

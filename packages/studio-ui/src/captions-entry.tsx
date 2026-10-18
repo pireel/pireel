@@ -124,9 +124,9 @@ export function CaptionsEntry(props: WorkflowPanelProps) {
         {busy && <p role="status" aria-live="polite" className="text-ink mt-4 flex items-center gap-2 text-sm"><Loader2 size={15} className="animate-spin" />{progress}</p>}
         {completed && <p role="status" className="text-ink mt-4 flex items-center gap-2 text-sm"><CheckCircle2 size={16} />{say('字幕已加好', 'Your captions are ready')}</p>}
         <div className="mt-5">
-          {completed ? <button type="button" onClick={() => props.onOpenChange(false)} className="bg-ink text-bg h-11 w-full rounded-md text-sm font-semibold">{say('查看视频', 'View video')}</button>
+          {completed ? <button type="button" onClick={() => props.onOpenChange(false)} className="bg-primary text-primary-foreground h-11 w-full rounded-md text-sm font-semibold">{say('查看视频', 'View video')}</button>
             : busy ? <button type="button" disabled={stopping} onClick={() => { abortRef.current?.abort(); setStopping(true); }} className="border-line text-ink h-11 w-full rounded-md border text-sm disabled:opacity-50">{say('停止处理', 'Stop processing')}</button>
-            : <button type="button" disabled={!current.hasNarration || !storageKey || props.blocked} onClick={() => void start()} className="bg-ink text-bg h-11 w-full rounded-md text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-35">{say('开始加字幕', 'Add captions')}</button>}
+            : <button type="button" disabled={!current.hasNarration || !storageKey || props.blocked} onClick={() => void start()} className="bg-primary text-primary-foreground h-11 w-full rounded-md text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-35">{say('开始加字幕', 'Add captions')}</button>}
         </div>
         <p className="text-ink-4 mt-3 text-center text-[11px] leading-relaxed">{props.blocked ? say('视频准备中，请稍候…', 'Preparing your video…') : say('处理时请保持页面打开。语音识别与重点词选择可能消耗积分。', 'Keep this page open. Transcription and key phrase selection may use credits.')}</p>
       </DialogContent>

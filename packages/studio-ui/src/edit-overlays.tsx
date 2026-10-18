@@ -151,14 +151,14 @@ export function BoxEditOverlay({
           onPointerDown={onRotatePointerDown}
           title={t('workbench.dragRotateHoldShift')}
           aria-label={t('common.rotate')}
-          className="border-accent text-accent pointer-events-auto -mt-px flex h-5 w-5 cursor-grab items-center justify-center rounded-full border-2 bg-white shadow active:cursor-grabbing"
+          className="border-accent text-accent-ink pointer-events-auto -mt-px flex h-5 w-5 cursor-grab items-center justify-center rounded-full border-2 bg-white shadow active:cursor-grabbing"
         >
           <RotateCw size={11} />
         </button>
         {/* Current angle (live during drag; shown when committed non-zero). Counter-rotation keeps the number upright */}
         <span
           ref={labelRef}
-          className="bg-accent mt-1 rounded px-1 py-0.5 font-mono text-[9px] leading-none text-white whitespace-nowrap"
+          className="bg-accent mt-1 rounded px-1 py-0.5 font-mono text-[9px] leading-none text-accent-foreground whitespace-nowrap"
           style={{ display: rotation ? 'block' : 'none', transform: rotation ? `rotate(${-rotation}deg)` : undefined }}
         >
           {rotation ? `${Math.round(rotation)}°` : ''}
@@ -321,7 +321,7 @@ export function CaptionEditOverlay({
     <div className="pointer-events-none absolute z-30" style={{ left: rootR.left, top: rootR.top, width: rootR.w, height: rootR.h }}>
       {/* Center-axis guide: lights up when the drag snaps to the canvas horizontal center (spans the whole stage) */}
       {snappedCenter && (
-        <div className="bg-accent/90 absolute w-px" style={{ left: stageW / 2 - rootR.left, top: -rootR.top, height: stageH, boxShadow: '0 0 6px rgba(63,75,232,0.55)' }} />
+        <div className="bg-accent/90 absolute w-px" style={{ left: stageW / 2 - rootR.left, top: -rootR.top, height: stageH, boxShadow: '0 0 6px color-mix(in srgb, var(--color-accent) 55%, transparent)' }} />
       )}
       <div className="ring-accent/80 absolute inset-0 rounded-md ring-2" />
       {/* Widen ghost: the baseline solid line stays, the dashed line follows (solid line lands in one step on release) */}

@@ -289,7 +289,7 @@ function MuteToggle({ muted, onToggle }: { muted: boolean; onToggle: () => void 
         e.stopPropagation();
         onToggle();
       }}
-      className={`hover:bg-panel-2/20 flex h-4 w-4 items-center justify-center rounded transition ${muted ? 'text-accent' : 'text-ink-4 hover:text-ink-2'}`}
+      className={`hover:bg-panel-2/20 flex h-4 w-4 items-center justify-center rounded transition ${muted ? 'text-accent-ink' : 'text-ink-4 hover:text-ink-2'}`}
     >
       {muted ? <VolumeX size={12} /> : <Volume2 size={12} />}
     </button>
@@ -308,7 +308,7 @@ function VisibilityToggle({ hidden, onToggle }: { hidden: boolean; onToggle: () 
         event.stopPropagation();
         onToggle();
       }}
-      className={`hover:bg-panel-2/20 flex h-4 w-4 items-center justify-center rounded transition ${hidden ? 'text-accent' : 'text-ink-4 hover:text-ink-2'}`}
+      className={`hover:bg-panel-2/20 flex h-4 w-4 items-center justify-center rounded transition ${hidden ? 'text-accent-ink' : 'text-ink-4 hover:text-ink-2'}`}
     >
       {hidden ? <EyeOff size={12} /> : <Eye size={12} />}
     </button>
@@ -1803,7 +1803,7 @@ function StudioTimelineImpl({
             <div className="border-line bg-panel sticky top-0 z-10 border-b" style={{ height: RULER_H }} />
             {hasDirectorScenes && (
               <div className="border-line text-ink-4 flex items-center gap-1 border-b px-2 text-[9px]" style={{ height: DIRECTOR_SCENE_STRIP_H }} title={t('panels.directorPlan')}>
-                <Clapperboard size={12} className="text-accent shrink-0" />
+                <Clapperboard size={12} className="text-accent-ink shrink-0" />
                 <span className="truncate">{t('panels.directorPlan')}</span>
               </div>
             )}
@@ -1828,14 +1828,14 @@ function StudioTimelineImpl({
                     ? KIND_META.caption
                     : audioId
                       ? nativeTrack?.role === 'sfx'
-                        ? { label: 'panels.sfxTrack', icon: Volume2, dot: 'text-accent' }
+                        ? { label: 'panels.sfxTrack', icon: Volume2, dot: 'text-accent-ink' }
                         : nativeTrack?.role === 'narration'
-                          ? { label: 'panels.narrationTrack', icon: Volume2, dot: 'text-accent' }
-                          : { label: nativeTrack?.role === 'music' ? 'panels.musicTrack' : 'panels.musicBed', icon: Music, dot: 'text-accent' }
+                          ? { label: 'panels.narrationTrack', icon: Volume2, dot: 'text-accent-ink' }
+                          : { label: nativeTrack?.role === 'music' ? 'panels.musicTrack' : 'panels.musicBed', icon: Music, dot: 'text-accent-ink' }
                     : visualId && k === 'video'
-                      ? { label: 'panels.multimediaTrack', icon: Film, dot: 'text-accent' }
+                      ? { label: 'panels.multimediaTrack', icon: Film, dot: 'text-accent-ink' }
                     : k === 'video'
-                      ? { label: sceneRail ? t('panels.scene') : t('panels.video'), icon: Film, dot: 'text-accent' }
+                      ? { label: sceneRail ? t('panels.scene') : t('panels.video'), icon: Film, dot: 'text-accent-ink' }
                       : KIND_META[k];
                 const Icon = meta.icon;
                 const dragging = trackDrag?.track === track;
@@ -1989,7 +1989,7 @@ function StudioTimelineImpl({
               {framePickActive && (
                 <div
                   data-frame-pick-hint
-                  className="bg-ink text-bg pointer-events-none sticky top-1 left-2 z-[49] inline-flex w-fit items-center gap-2 rounded-sm px-2 py-1 text-[10px] shadow-md"
+                  className="bg-panel-2 text-ink pointer-events-none sticky top-1 left-2 z-[49] inline-flex w-fit items-center gap-2 rounded-sm px-2 py-1 text-[10px] shadow-md"
                 >
                   <span>{t('chatGen.pickFrameOnTimeline')}</span>
                   <kbd className="border-bg/25 border-l pl-2 font-mono text-[9px] opacity-70">Esc</kbd>
@@ -2060,7 +2060,7 @@ function StudioTimelineImpl({
                   {sceneSpans.length === 0 && (
                     <div
                       data-empty-main-track-placeholder
-                      className={`pointer-events-none absolute top-3 bottom-2 left-2 flex items-center overflow-hidden border border-dashed px-3 transition-colors ${TIMELINE_ITEM_RADIUS} ${assetDragging && assetDragKind === 'video' ? 'border-accent/70 bg-accent/10 text-accent' : 'border-line/80 bg-panel/45 text-ink-4'}`}
+                      className={`pointer-events-none absolute top-3 bottom-2 left-2 flex items-center overflow-hidden border border-dashed px-3 transition-colors ${TIMELINE_ITEM_RADIUS} ${assetDragging && assetDragKind === 'video' ? 'border-accent/70 bg-accent/10 text-accent-ink' : 'border-line/80 bg-panel/45 text-ink-4'}`}
                       style={{ width: Math.max(220, Math.min(420, W - 16)) }}
                     >
                       <span className="relative mr-2 flex h-7 w-7 shrink-0 items-center justify-center rounded-sm bg-ink/6">
@@ -2216,7 +2216,7 @@ function StudioTimelineImpl({
                             if (!band) return null;
                             return (
                               <svg
-                                className={`pointer-events-none absolute inset-x-0 bottom-0 ${shot.audioMuted ? 'text-accent/25' : 'text-accent/60'}`}
+                                className={`pointer-events-none absolute inset-x-0 bottom-0 ${shot.audioMuted ? 'text-accent-ink/25' : 'text-accent-ink/60'}`}
                                 style={{ height: SCENE_WAVE_H }}
                                 viewBox={`0 0 ${Math.round(w)} ${SCENE_WAVE_H}`}
                                 preserveAspectRatio="none"
@@ -2617,7 +2617,7 @@ function StudioTimelineImpl({
                     )}
                     {waveBand && (
                       <svg
-                        className="text-accent/60 pointer-events-none absolute inset-x-0 bottom-0"
+                        className="text-accent-ink/60 pointer-events-none absolute inset-x-0 bottom-0"
                         style={{ height: SCENE_WAVE_H }}
                         viewBox={`0 0 ${Math.round(width)} ${SCENE_WAVE_H}`}
                         preserveAspectRatio="none"
@@ -2736,7 +2736,7 @@ function StudioTimelineImpl({
                     )}
                     {ghostBand && (
                       <svg
-                        className="text-accent/60 absolute inset-x-0 bottom-0"
+                        className="text-accent-ink/60 absolute inset-x-0 bottom-0"
                         style={{ height: SCENE_WAVE_H }}
                         viewBox={`0 0 ${Math.round(ghostWidth)} ${SCENE_WAVE_H}`}
                         preserveAspectRatio="none"
@@ -3037,7 +3037,7 @@ function StudioTimelineImpl({
               {/* Snap alignment guide (when a drag hits a cut point / whole second / adjacent block edge / playhead) */}
               {guide != null && (
                 <div className="pointer-events-none absolute top-0 bottom-0 z-40" style={{ left: x(guide) }}>
-                  <div className="absolute top-0 bottom-0 w-px bg-accent/90" style={{ boxShadow: '0 0 6px rgba(63,75,232,0.55)' }} />
+                  <div className="absolute top-0 bottom-0 w-px bg-accent/90" style={{ boxShadow: '0 0 6px color-mix(in srgb, var(--color-accent) 55%, transparent)' }} />
                 </div>
               )}
 
@@ -3073,8 +3073,8 @@ function StudioTimelineImpl({
                       />
                     )}
                     <div className="pointer-events-none absolute top-0 bottom-0 z-40" style={{ left: x(dropHint.t) }}>
-                      <div className="bg-accent absolute top-0 bottom-0 w-0.5 -translate-x-1/2" style={{ boxShadow: '0 0 8px rgba(63,75,232,0.7)' }} />
-                      <div className="bg-accent absolute -top-0.5 left-1.5 rounded px-1 text-[9px] leading-[13px] whitespace-nowrap text-white">
+                      <div className="bg-accent absolute top-0 bottom-0 w-0.5 -translate-x-1/2" style={{ boxShadow: '0 0 8px color-mix(in srgb, var(--color-accent) 70%, transparent)' }} />
+                      <div className="bg-accent absolute -top-0.5 left-1.5 rounded px-1 text-[9px] leading-[13px] whitespace-nowrap text-accent-foreground">
                         {mediaTarget
                           ? `${t(dropHint.mode === 'ripple' ? 'panels.rippleInsert' : 'panels.overwritePlace')} · ${dropHint.t.toFixed(1)}s${newLane ? ` · ${t('panels.newVisualTrack')}` : ''}`
                           : t('panels.insertSecS', { sec: dropHint.t.toFixed(1) })}
@@ -3097,7 +3097,7 @@ function StudioTimelineImpl({
                         title={item.label}
                         onPointerDown={(event) => beginTransitionDrag(event, item, 'move')}
                         onClick={(event) => event.stopPropagation()}
-                        className={`absolute top-0 flex h-full cursor-grab items-center overflow-hidden rounded text-[10px] text-white active:cursor-grabbing ${selected ? 'bg-accent ring-accent/50 ring-2' : 'bg-accent/65 hover:bg-accent/85'}`}
+                        className={`absolute top-0 flex h-full cursor-grab items-center overflow-hidden rounded text-[10px] text-accent-foreground active:cursor-grabbing ${selected ? 'bg-accent ring-accent/50 ring-2' : 'bg-accent/65 hover:bg-accent/85'}`}
                         style={{ left: x(live.startSec), width: Math.max(6, x(live.startSec + live.durationSec) - x(live.startSec)) }}
                       >
                         <span className="pointer-events-none min-w-0 truncate px-2">{item.label}</span>

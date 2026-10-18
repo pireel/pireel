@@ -200,7 +200,7 @@ function GoogleFontOption({ row, selected, loading, onChoose }: { row: GoogleFon
       <span className="min-w-0 flex-1 truncate" style={{ fontFamily: `"${row.f}", sans-serif` }}>{row.f}</span>
       {loading
         ? <Loader2 size={12} className="text-ink-4 shrink-0 animate-spin" aria-label={t('displayText.fontLoading')} />
-        : selected && <Check size={12} className="text-accent shrink-0" />}
+        : selected && <Check size={12} className="text-accent-ink shrink-0" />}
     </button>
   );
 }
@@ -304,7 +304,7 @@ export function FontChoiceList({
         )}
         {loading
           ? <Loader2 size={12} className="text-ink-4 shrink-0 animate-spin" aria-label={t('displayText.fontLoading')} />
-          : selected && <Check size={12} className="text-accent shrink-0" />}
+          : selected && <Check size={12} className="text-accent-ink shrink-0" />}
       </button>
     );
   };

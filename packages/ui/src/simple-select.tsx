@@ -31,7 +31,7 @@ export function SimpleSelect({
   return (
     <BaseSelect.Root value={value} items={options} onValueChange={(v) => onValueChange?.(v ?? '')}>
       <BaseSelect.Trigger
-        className={`border-line-2 bg-panel hover:bg-panel-2 focus:border-accent focus:ring-accent/15 flex w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-[13px] outline-none transition-[border-color,box-shadow] focus:ring-4 ${className}`}
+        className={`border-line-2 bg-panel hover:bg-panel-2 focus:border-accent focus:ring-ring/15 flex w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-[13px] outline-none transition-[border-color,box-shadow] focus:ring-4 ${className}`}
       >
         <BaseSelect.Value placeholder={placeholder} />
         <BaseSelect.Icon>

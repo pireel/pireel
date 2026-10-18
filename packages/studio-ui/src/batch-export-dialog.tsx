@@ -204,7 +204,7 @@ export function BatchExportDialog({
               type="button"
               disabled={!selectedCount}
               onClick={onStart}
-              className="bg-ink text-bg inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-[13px] font-medium hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+              className="bg-primary text-primary-foreground inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-[13px] font-medium hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Download size={14} /> {t('workbench.startExport')}
             </button>

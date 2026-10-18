@@ -115,7 +115,7 @@ export function ProjectOutputSwitcher({
                 title={locked && lockedHint ? lockedHint : title}
                 disabled={disabled}
                 onClick={() => onSwitch(output.id)}
-                className="min-w-0 flex-1 truncate px-3 text-left text-[11.5px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 disabled:cursor-wait disabled:opacity-50"
+                className="min-w-0 flex-1 truncate px-3 text-left text-[11.5px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-wait disabled:opacity-50"
               >
                 {title}
               </button>
@@ -127,7 +127,7 @@ export function ProjectOutputSwitcher({
                   title={deleteLabel}
                   disabled={disabled}
                   onClick={() => onDelete(output.id)}
-                  className="text-ink-4 hover:text-destructive mr-1 my-auto flex h-6 w-6 shrink-0 items-center justify-center rounded opacity-0 hover:bg-panel-2 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 group-hover:opacity-100 group-focus-within:opacity-100 disabled:cursor-wait disabled:opacity-40"
+                  className="text-ink-4 hover:text-destructive mr-1 my-auto flex h-6 w-6 shrink-0 items-center justify-center rounded opacity-0 hover:bg-panel-2 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100 group-focus-within:opacity-100 disabled:cursor-wait disabled:opacity-40"
                 >
                   <Trash2 size={12} />
                 </button>
@@ -143,7 +143,7 @@ export function ProjectOutputSwitcher({
         title={locked && lockedHint ? lockedHint : newLabel}
         disabled={disabled}
         onClick={onCreate}
-        className="text-ink-3 hover:bg-panel-2 hover:text-ink my-auto ml-1 flex h-6 w-6 shrink-0 items-center justify-center rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-wait disabled:opacity-50"
+        className="text-ink-3 hover:bg-panel-2 hover:text-ink my-auto ml-1 flex h-6 w-6 shrink-0 items-center justify-center rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-50"
       >
         <Plus size={14} />
       </button>

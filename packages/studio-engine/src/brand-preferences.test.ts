@@ -6,7 +6,32 @@ import { brandMediaAssets } from './brand-media';
 
 const reference = { key: 'uploads/u/style.jpg', kind: 'image' as const, width: 1280, height: 720 };
 
-describe('unified brand settings', () => {
+describe('fixed brand settings', () => {
+  it('runs B-roll and MG from switches while ignoring retired transition preferences', () => {
+    const brand = emptyPlaybook('b', 'Brand');
+    brand.preferences = { broll: true, graphics: true, transitions: true };
+    const saved = validatePlaybookSnapshot(JSON.parse(JSON.stringify(playbookSnapshot(validatePlaybook(brand)))));
+    expect(brandPreferences(saved)).toMatchObject({ broll: true, graphics: true });
+    expect(brandPreferences(saved)).not.toHaveProperty('transitions');
+    expect(brandEditingSkills(saved)).toEqual(expect.arrayContaining(['b-roll', 'graphics']));
+    expect(playbookEditParams(saved).moves).toBeUndefined();
+    expect(renderBrandPrompt(saved)).toContain('broll="true"');
+    expect(renderBrandPrompt(saved)).toContain('graphics="true"');
+    expect(renderBrandPrompt(saved)).not.toContain('transitions=');
+    saved.preferences = { broll: false, graphics: false, transitions: false };
+    saved.skills = ['b-roll', 'graphics'];
+    expect(brandEditingSkills(saved)).toEqual([]);
+    expect(playbookEditParams(saved).moves).toBeUndefined();
+  });
+
+  it('drops withdrawn preset selections while retaining the saved switches', () => {
+    const brand = { ...emptyPlaybook('b', 'Brand'), preferences: { broll: true, graphics: true, transitions: true }, presets: { broll: 'broll-inset-v1', graphics: 'mg-metric-v1', transitions: 'transition-push-v1' } };
+    const snapshot = playbookSnapshot(brand);
+    expect(snapshot).not.toHaveProperty('presets');
+    expect(snapshot.preferences).toEqual({ broll: true, graphics: true });
+    expect(renderBrandPrompt(snapshot)).not.toContain('apply_editing_preset');
+  });
+
   it('keeps saved layout flags readable but inactive while preserving auto zoom', () => {
     const brand = emptyPlaybook('b', 'Brand');
     brand.blocks.layout = { text: 'Arrange supporting media beside the speaker.' };
@@ -27,8 +52,8 @@ describe('unified brand settings', () => {
   it('opens legacy prose and references without losing their source data', () => {
     const brand = emptyPlaybook('b', 'Brand');
     brand.blocks = { portrait: { text: '清楚直接。' }, graphics: { text: '深色底，暖色强调。', references: [reference] }, layout: { text: '让辅助画面服务内容。', references: [reference] } };
-    expect(brandStyleText(brand)).toBe('清楚直接。\n\n让辅助画面服务内容。\n\n深色底，暖色强调。');
-    expect(brandStyleReferences(brand)).toEqual([reference]);
+    expect(brandStyleText(brand)).toBe('');
+    expect(brandStyleReferences(brand)).toEqual([]);
     expect(brand.blocks.graphics?.text).toBe('深色底，暖色强调。');
   });
 
@@ -37,33 +62,33 @@ describe('unified brand settings', () => {
     brand.source.videos = [{ id: 'v', durationSec: 30, coverKey: 'uploads/u/cover.jpg' }];
     brand.style = { text: 'Style', references: [reference, { ...reference, key: 'uploads/u/cover.jpg' }] };
     expect(brandCoverReferenceKeys(brand)).toEqual(['uploads/u/cover.jpg']);
-    expect(brandStyleReferences(brand)).toEqual([reference]);
+    expect(brandStyleReferences(brand)).toEqual([]);
     const snapshot = playbookSnapshot(brand);
     expect(snapshot.blocks.cover?.referenceKeys).toEqual(['uploads/u/cover.jpg']);
-    expect(snapshot.style?.references).toEqual([reference]);
+    expect(snapshot.style).toBeUndefined();
     expect(validatePlaybookSnapshot(snapshot).blocks.cover?.referenceKeys).toEqual(['uploads/u/cover.jpg']);
     brand.blocks.cover = { referenceKeys: [] };
     expect(brandCoverReferenceKeys(brand)).toEqual([]);
-    expect(brandStyleReferences(brand)).toEqual([reference]);
+    expect(brandStyleReferences(brand)).toEqual([]);
     expect(playbookSnapshot(brand).blocks.cover?.referenceKeys).toEqual([]);
     expect(() => validatePlaybook({ ...brand, blocks: { cover: { referenceKeys: ['blob:temporary'] } } })).toThrow(/referenceKeys/);
   });
 
-  it('uses the edited description in every editing consumer, without replaying conflicting legacy prose', () => {
+  it('omits all style descriptions from every editing consumer', () => {
     const brand = emptyPlaybook('b', 'Brand');
     brand.blocks = { graphics: { text: 'OLD GRAPHICS' }, camera: { text: 'OLD CAMERA' }, sound: { text: 'OLD SOUND', lufs: -14 }, overlay_text: { text: 'OLD TITLES', font: 'sans' } };
     brand.style = { text: 'NEW STYLE', references: [reference] };
     brand.preferences = { zoom: false, transitions: false, headlines: false };
     for (const only of [undefined, ['camera', 'sound'] as const, ['overlay_text'] as const]) {
       const prompt = renderBrandPrompt(brand, only);
-      expect(prompt).toContain('NEW STYLE');
+      expect(prompt).not.toContain('NEW STYLE');
       expect(prompt).not.toContain('OLD');
       expect(prompt).toContain('zoom="false"');
     }
     expect(playbookEditParams(playbookSnapshot(brand)).moves).toBeUndefined();
     expect(playbookEditParams(playbookSnapshot(brand)).titles).toBeUndefined();
     expect(renderBrandPrompt(brand)).toContain('loudness="-14 LUFS"');
-    expect(renderBrandPrompt(brand)).toContain('font="sans"');
+    expect(renderBrandPrompt(brand)).not.toContain('font="sans"');
     brand.style.text = '';
     expect(brandStyleText(brand)).toBe('');
     expect(renderBrandPrompt(brand)).not.toContain('OLD GRAPHICS');

@@ -132,7 +132,7 @@ function LocalVisualSearchLoading() {
   return (
     <div className="border-line bg-panel/95 shrink-0 border-t px-2.5 py-1.5" data-testid="local-visual-search-loading">
       <div className="text-ink-3 flex items-center gap-1.5 text-[10px]">
-        <Loader2 size={11} className="text-accent animate-spin" />
+        <Loader2 size={11} className="text-accent-ink animate-spin" />
         <span className="min-w-0 flex-1 truncate">{t('panels.localVisualSearchPreparing')}</span>
         {downloading ? <span className="text-ink-4 tabular-nums">{pct}%</span> : null}
       </div>
@@ -1161,7 +1161,7 @@ export function MyAssetsPanel({
               <button
                 type="submit"
                 disabled={!renameDraft.trim() || renameDraft.trim() === renaming?.label}
-                className="bg-ink text-bg h-7 rounded-md px-3 text-[11px] font-medium disabled:pointer-events-none disabled:opacity-35"
+                className="bg-primary text-primary-foreground h-7 rounded-md px-3 text-[11px] font-medium disabled:pointer-events-none disabled:opacity-35"
               >
                 {t('panels.saveName')}
               </button>

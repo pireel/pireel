@@ -130,7 +130,7 @@ export function AskUserCard({ part }: { part: ToolPartLike }) {
                 onClick={() => onChip(o.label)}
                 className="flex min-w-0 flex-1 items-start gap-2 px-2.5 py-1.5 text-left"
               >
-                <span className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border ${isChosen ? 'border-accent bg-accent text-white' : 'border-line'}`}>
+                <span className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border ${isChosen ? 'border-accent bg-accent text-accent-foreground' : 'border-line'}`}>
                   {isChosen && <Check size={10} strokeWidth={3} />}
                 </span>
                 <span className="min-w-0 flex-1">
@@ -158,7 +158,7 @@ export function AskUserCard({ part }: { part: ToolPartLike }) {
             type="button"
             disabled={!picked.size}
             onClick={() => submit([...picked])}
-            className="bg-ink text-bg rounded-md px-3 py-1 text-[12px] hover:opacity-90 disabled:opacity-30"
+            className="bg-primary text-primary-foreground rounded-md px-3 py-1 text-[12px] hover:opacity-90 disabled:opacity-30"
           >
             {t('workbench.askConfirm')}
           </button>

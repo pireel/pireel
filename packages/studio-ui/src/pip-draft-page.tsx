@@ -11,7 +11,7 @@ import { PipSettings } from './pip-settings';
 import { PipShowcase } from './scene-upload-showcases';
 import { SceneBrandPicker } from './scene-brand-picker';
 
-const actionClass = 'bg-ink text-bg inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40';
+const actionClass = 'bg-primary text-primary-foreground inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40';
 
 /**
  * Picture in picture before its source video exists: the layout and footage are chosen right away,

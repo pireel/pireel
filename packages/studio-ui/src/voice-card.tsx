@@ -42,7 +42,7 @@ function SampleButton({ loading, playing, disabled, name, onToggle }: { loading:
     <button
       type="button"
       onClick={(event) => { event.stopPropagation(); onToggle(); }}
-      className={`absolute bottom-7 right-1 z-10 flex h-5 w-5 items-center justify-center rounded text-white transition-colors ${playing ? 'bg-accent' : 'bg-black/55 hover:bg-black/70'}`}
+      className={`absolute bottom-7 right-1 z-10 flex h-5 w-5 items-center justify-center rounded transition-colors ${playing ? 'bg-black/75 text-white' : 'bg-black/55 text-white hover:bg-black/70'}`}
       title={label}
       aria-label={label}
       aria-busy={loading}
@@ -78,7 +78,7 @@ export function VoiceCard({ voice, disabled = false, loading = false, playing = 
               {voice.status === 'deploying' ? t('workbench.voiceDeployingShort') : t('workbench.voiceFailed')}
             </span>
           )}
-          {personalLabel && <span className="bg-panel text-accent absolute left-1 top-1 rounded px-1 py-0.5 text-[8px] font-medium">{personalLabel}</span>}
+          {personalLabel && <span className="bg-panel text-accent-ink absolute left-1 top-1 rounded px-1 py-0.5 text-[8px] font-medium">{personalLabel}</span>}
           <span className={`absolute top-1 rounded bg-black/55 px-1 py-0.5 text-[8px] text-white ${actions ? 'right-7' : 'right-1'}`}>
             {(voice.languages ?? [voice.language]).filter(Boolean).map((item) => item === 'zh' ? '中' : item === 'yue' ? '粤' : item.toUpperCase()).join('/')}
           </span>

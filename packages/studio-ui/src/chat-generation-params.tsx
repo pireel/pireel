@@ -73,7 +73,7 @@ function PopButton({ icon, title, active, disabled, children }: { icon: ReactNod
         aria-label={title}
         disabled={disabled}
         onClick={() => setOpen((value) => !value)}
-        className={`${TOOL_BUTTON} ${active || open ? 'bg-accent/15 text-accent hover:bg-accent/25' : ''}`}
+        className={`${TOOL_BUTTON} ${active || open ? 'bg-accent/15 text-accent-ink hover:bg-accent/25' : ''}`}
       >
         {icon}
       </button>

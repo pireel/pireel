@@ -305,7 +305,7 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
       }}>
       {!paragraphs.length && <div className="text-ink-3 flex flex-col items-center gap-3 py-10 text-center text-[12px]">
         <ScrollText size={24} />{t('panels.noTranscriptYetTranscribe')}
-        <button type="button" disabled={extracting} onClick={onExtract} className="bg-ink text-bg rounded-md px-3 py-1.5 disabled:opacity-40">{t('captions.extractCaptions')}</button>
+        <button type="button" disabled={extracting} onClick={onExtract} className="bg-primary text-primary-foreground rounded-md px-3 py-1.5 disabled:opacity-40">{t('captions.extractCaptions')}</button>
       </div>}
       {paragraphs.map((paragraph, paragraphIndex) => <section key={paragraph.id} data-transcript-section={paragraph.id} className="border-line/60 mb-5 border-b pb-5 last:mb-0 last:border-b-0">
         <button type="button" data-transcript-section-heading
@@ -325,7 +325,7 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
             return <button key={pause.id} type="button" data-transcript-pause={pause.id} data-transcript-selected={picked || undefined}
               aria-label={t('captions.selectPause', { sec })} title={t('captions.selectPause', { sec })} aria-pressed={picked}
               onClick={(event) => { close(); onSeek(pause.startSec); setSelection({ kind: 'pause', pause, ...selectionPosition(event.currentTarget.getBoundingClientRect(), 220) }); }}
-              className={`mx-1 inline-flex items-center rounded px-1.5 align-baseline font-mono text-[10.5px] leading-6 tabular-nums hover:bg-ink/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent ${active ? 'bg-ink/15 text-ink' : 'bg-panel-2/35 text-ink-3'}`}>{sec}s</button>;
+              className={`mx-1 inline-flex items-center rounded px-1.5 align-baseline font-mono text-[10.5px] leading-6 tabular-nums hover:bg-ink/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${active ? 'bg-ink/15 text-ink' : 'bg-panel-2/35 text-ink-3'}`}>{sec}s</button>;
           }
           const token = item.token;
           const picked = selectedIds.has(token.id);
@@ -366,7 +366,7 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
           {drafts.map((draft, i) => <textarea key={`${draft.assetId}:${draft.index}:${draft.w0}`} autoFocus={i === 0} aria-label={`${t('captions.editSelection')} ${i + 1}`} rows={2} value={draft.text ?? ''} onChange={(event) => setDrafts((items) => items!.map((item, index) => index === i ? { ...item, text: event.target.value } : item))} className="border-line bg-canvas w-full resize-y rounded border px-2 py-1.5 text-[14px] leading-relaxed outline-none focus:border-ink-3" />)}
         </div>
         <div className="text-ink-4 text-[10.5px]">{t('captions.captionCopyHint')}</div>
-        <button type="button" disabled={drafts.some((draft) => !draft.text?.trim())} onClick={() => { if (onEdit(drafts)) close(); }} className="bg-ink text-bg self-end rounded px-3 py-1.5 text-[12px] disabled:opacity-40">{t('panels.ok')}</button>
+        <button type="button" disabled={drafts.some((draft) => !draft.text?.trim())} onClick={() => { if (onEdit(drafts)) close(); }} className="bg-primary text-primary-foreground self-end rounded px-3 py-1.5 text-[12px] disabled:opacity-40">{t('panels.ok')}</button>
       </div> : selection.kind === 'pause' ? <TranscriptSelectionBar
         key={selection.pause.id}
         kind="pause" text="" canEdit={false}

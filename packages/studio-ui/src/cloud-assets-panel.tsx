@@ -551,7 +551,7 @@ export function CloudAssetsPanel({
               <button
                 type="submit"
                 disabled={!renameDraft.trim() || renameDraft.trim() === renaming?.label}
-                className="bg-ink text-bg h-7 rounded-md px-3 text-[11px] font-medium disabled:pointer-events-none disabled:opacity-35"
+                className="bg-primary text-primary-foreground h-7 rounded-md px-3 text-[11px] font-medium disabled:pointer-events-none disabled:opacity-35"
               >
                 {t('panels.saveName')}
               </button>

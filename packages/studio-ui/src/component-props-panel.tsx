@@ -251,7 +251,7 @@ export function ComponentPropsPanel({ block, look, swatches, themeVars, onBlockP
     // host-UI region without this marker as "blank page → deselect").
     <div data-block-selection-keep className="flex h-full min-h-0 flex-col overflow-y-auto py-1">
       <div className="flex items-center gap-2.5 px-3 pt-2 pb-1">
-        <div className="bg-accent/12 text-accent flex h-7 w-7 shrink-0 items-center justify-center rounded-lg">
+        <div className="bg-accent/12 text-accent-ink flex h-7 w-7 shrink-0 items-center justify-center rounded-lg">
           <Shapes size={15} />
         </div>
         <div className="min-w-0 flex-1">

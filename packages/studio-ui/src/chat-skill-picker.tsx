@@ -373,7 +373,7 @@ export function ChatSkillPicker({
                 } ${active ? 'bg-panel-2/35' : ''}`}
               >
                 <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg ${
-                  item.action === 'create' ? 'bg-accent/10 text-accent' : 'text-ink-3'
+                  item.action === 'create' ? 'bg-panel-2 text-ink-2' : 'text-ink-3'
                 }`}>
                   <SkillMark option={item} />
                 </span>
@@ -403,7 +403,7 @@ export function ChatSkillPicker({
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-1.5">
                     <span className="text-ink truncate text-[12.5px] font-medium">{item.label}</span>
-                    {selectedItem && <Check size={12} className="text-accent shrink-0" strokeWidth={2.5} />}
+                    {selectedItem && <Check size={12} className="text-accent-ink shrink-0" strokeWidth={2.5} />}
                   </span>
                   <span className="text-ink-4 mt-0.5 line-clamp-2 text-[11px] leading-snug">{item.summary}</span>
                 </span>

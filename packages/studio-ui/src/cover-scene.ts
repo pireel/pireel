@@ -3,7 +3,7 @@ import type { EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import { primaryNarrativeClips } from '@pireel/studio-engine/composition';
 import { parseCoverPlan } from '@pireel/studio-engine/brand-cover';
 import { canonicalJson, hashSection } from '@pireel/studio-engine/stable-json';
-import { brandStyleText, brandCoverReferenceKeys } from '@pireel/studio-engine/brand-playbook';
+import { activeBrandCover, brandCoverReferenceKeys } from '@pireel/studio-engine/brand-playbook';
 import { retainedCoverFrame, coverFrameIdentity, type CoverSourceFrame } from './cover-frame-selection';
 import { projectCoverFromDocument, type ProjectCover } from './project-cover';
 import type { GenJob, StartResult } from './gen-api';
@@ -36,7 +36,7 @@ export interface CoverBrandReference { key: string; url: string }
 export interface LoadedCoverBrandReference extends CoverBrandReference { base64: string; mime: string }
 /** Keep enough room for eight source candidates in the twelve-image planning request. */
 export function coverBrandKeys(document: EditorDocumentV2): string[] {
-  return document.semantics.brand ? [...new Set(brandCoverReferenceKeys(document.semantics.brand))].slice(0, 3) : [];
+  return document.semantics.brand && activeBrandCover(document.semantics.brand) ? [...new Set(brandCoverReferenceKeys(document.semantics.brand))].slice(0, 3) : [];
 }
 
 export interface CoverDraftPatch { prompt?: string; sourceFrame?: CoverSourceFrame; referenceImage?: ProjectCover | null; modelId?: string; size?: string; quality?: string }
@@ -57,6 +57,15 @@ export function coverSceneSummary(scene: CoverScene | null) {
 }
 
 /** Only retained words may inform the production brief; cut-out takes must never return as cover copy. */
+/** Default to the actual output canvas, preserving both shape and aspect (not just orientation). */
+export function videoCoverAspect(canvas?: { width: number; height: number }): string {
+  if (!canvas || !Number.isFinite(canvas.width) || !Number.isFinite(canvas.height) || canvas.width < 1 || canvas.height < 1) return '9:16';
+  const width = Math.round(canvas.width); const height = Math.round(canvas.height);
+  let a = width; let b = height;
+  while (b) { const rest = a % b; a = b; b = rest; }
+  return `${width / a}:${height / a}`;
+}
+
 export function coverSceneInput(document: EditorDocumentV2) {
   const clips = primaryNarrativeClips(document).filter(clip => clip.enabled && document.assets[clip.assetId]?.kind === 'video').sort((a, b) => a.startFrame - b.startFrame);
   const lines = clips.flatMap(clip => (document.semantics.transcripts[clip.assetId] ?? []).flatMap(segment => {
@@ -75,7 +84,7 @@ export function coverSceneInput(document: EditorDocumentV2) {
     for (const range of ranges) { if (offset < range.end - range.start) return range.start + offset; offset -= range.end - range.start; }
     return Math.max(0, (ranges.at(-1)?.end ?? 0) - 0.05);
   });
-  return { fingerprint: hashSection(canonicalJson({ lines, ranges, assetId, cover: document.semantics.brand?.blocks.cover, style: document.semantics.brand ? brandStyleText(document.semantics.brand) : '', canvas: { width: document.canvas.width, height: document.canvas.height } })), assetId, lines, times, size: document.canvas.height > document.canvas.width ? '3:4' : document.canvas.height === document.canvas.width ? '1:1' : '16:9' };
+  return { fingerprint: hashSection(canonicalJson({ lines, ranges, assetId, cover: document.semantics.brand ? activeBrandCover(document.semantics.brand) : undefined, canvas: { width: document.canvas.width, height: document.canvas.height } })), assetId, lines, times, size: videoCoverAspect(document.canvas) };
 }
 
 export interface CoverSceneHost {
@@ -153,7 +162,7 @@ export class CoverSceneController {
       scene = { ...scene, brandReferences: references.map(({ key, url }) => ({ key, url })) };
       if (!candidates.length) throw new Error('cover_source_unavailable');
       const brand = document.semantics.brand;
-      const plan = parseCoverPlan(await this.host.analyze({ action: 'cover-plan', locale: context.locale ?? 'zh', context, brand: brand ? { name: brand.name, style: brandStyleText(brand), cover: brand.blocks.cover } : null, lines: input.lines, size: scene.size, manualReference: !!manual, candidateCount: candidates.length, images: [...candidates.map((item, index) => ({ role: `${manual ? 'manual source' : 'source candidate'} ${index} at ${item.sourceSec.toFixed(3)}s`, base64: item.base64, mime: 'image/jpeg' })), ...references.map((item, index) => ({ role: `brand cover ${index + 1}: style only`, base64: item.base64, mime: item.mime }))] }, signal), candidates.length);
+      const plan = parseCoverPlan(await this.host.analyze({ action: 'cover-plan', locale: context.locale ?? 'zh', context, brand: brand ? { name: brand.name, cover: activeBrandCover(brand) } : null, lines: input.lines, size: scene.size, manualReference: !!manual, candidateCount: candidates.length, images: [...candidates.map((item, index) => ({ role: `${manual ? 'manual source' : 'source candidate'} ${index} at ${item.sourceSec.toFixed(3)}s`, base64: item.base64, mime: 'image/jpeg' })), ...references.map((item, index) => ({ role: `brand cover ${index + 1}: style only`, base64: item.base64, mime: item.mime }))] }, signal), candidates.length);
       signal?.throwIfAborted();
       scene = { ...scene, phase: 'prepared', prompt: `${coverIdentityGuidance(context.locale)}\n\n${plan.prompt}`, promptVersion: 2, identityGuidanceVersion: 3, sourceFrame: manual ?? { assetId, sourceSec: candidates[plan.pick]!.sourceSec }, sourceSelection: manual ? 'manual' : 'auto', modelId: scene.modelId || await this.host.defaultModel() };
       await this.host.save(scene);

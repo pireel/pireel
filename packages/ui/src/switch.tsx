@@ -8,7 +8,7 @@ export interface SwitchProps
   size?: 'sm' | 'md';
 }
 
-/** Theme-aware switch using the product's original blue active state. */
+/** Neutral on/off control; reserve the brand fill for primary actions. */
 const Switch = React.forwardRef<HTMLButtonElement, SwitchProps>(function Switch(
   {
     checked,
@@ -38,7 +38,7 @@ const Switch = React.forwardRef<HTMLButtonElement, SwitchProps>(function Switch(
       }}
       className={cn(
         'relative inline-flex shrink-0 items-center rounded-full border transition-[background-color,border-color,box-shadow,transform] duration-150',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-switch-focus/35 focus-visible:ring-offset-2 focus-visible:ring-offset-panel',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-switch-focus focus-visible:ring-offset-2 focus-visible:ring-offset-panel',
         'active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40',
         compact ? 'h-[18px] w-8' : 'h-6 w-11',
         checked

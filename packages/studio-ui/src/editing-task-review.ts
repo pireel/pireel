@@ -17,7 +17,7 @@ export interface EditingTaskReview {
   items: { feature: EditReviewFeature; status: 'applied' | 'not_needed' | 'blocked'; reason: string; atFrame?: number; count: number }[];
 }
 export function requestedEditFeatures(task: ChatTask): EditReviewFeature[] {
-  return EDIT_REVIEW_FEATURES.filter(id => id === 'zoom' || id === 'transitions' ? task.config?.visual?.[id] : task.skills.includes(id) || id === 'graphics' && task.config?.visual?.headlines);
+  return EDIT_REVIEW_FEATURES.filter(id => id === 'transitions' ? false : id === 'zoom' ? task.config?.visual?.zoom : task.skills.includes(id) || id === 'graphics' && task.config?.visual?.headlines);
 }
 export function needsEditingReview(task: ChatTask): boolean {
   return (task.mode === 'one-click' || isWhiteboardDirectorTask(task)) && (!!task.directorPlanRequired || !!task.config?.brand || requestedEditFeatures(task).length > 0 || needsBrandCover(task));
@@ -57,7 +57,8 @@ export function reviewEditingTask(task: ChatTask, input: Record<string, unknown>
   const missing = wanted.filter(feature => !raw.some(item => item?.feature === feature));
   if (missing.length) return { ok: false, error: 'Account for every enabled feature before finishing.', missing };
   const items: EditingTaskReview['items'] = [];
-  for (const feature of wanted) {
+  const reviewed = raw.some(item => item?.feature === 'transitions') ? [...wanted, 'transitions' as const] : wanted;
+  for (const feature of reviewed) {
     const row = raw.find(item => item?.feature === feature)!;
     const reason = typeof row.reason === 'string' ? row.reason.trim() : '';
     if (!['applied', 'not_needed', 'blocked'].includes(String(row.status)) || reason.length < 8) return { ok: false, error: `Give a concrete content-based reason for ${feature}.` };

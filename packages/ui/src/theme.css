@@ -20,15 +20,28 @@
    * 卡片背景靠 bg-panel + bg 对比 + shadow 拉层级,不再依赖 border-line 划格。 */
   --color-line: rgba(20, 22, 30, 0.06);
   --color-line-2: rgba(20, 22, 30, 0.1);
-  --color-accent: #3f4be8;
+  /* Color hierarchy (hosted app and OSS):
+   * 1. Primary: yellow + dark label, reserved for the next principal action per panel.
+   * 2. Selection: thin accent border or 8–15% tint; never turn tabs into primary actions.
+   * 3. Utilities/navigation/links/switches: neutral ink and panel tokens.
+   * 4. Cards and page surfaces remain neutral; do not use primary as a surface token.
+   * 5. Success/warning/error and media/category palettes keep their semantic colors.
+   * Brand marks and generated video content have independent palettes.
+   * Keyboard focus uses ring in both modes; light accent text uses accessible gold. */
+  --color-brand: #f1ce55;
+  --color-brand-hover: #e4bd3b;
+  --color-brand-foreground: #191b1c;
+  --color-brand-text: #785c00;
+  --color-accent: var(--color-brand);
+  --color-accent-ink: var(--color-brand-text);
   --color-accent-2: #e85a2a;
   /* Dedicated switch pairs keep checked and unchecked states legible in both themes. */
-  --color-switch-on: #3f4be8;
+  --color-switch-on: var(--color-ink-2);
   --color-switch-off: #e2e2dd;
-  --color-switch-thumb-on: #ffffff;
+  --color-switch-thumb-on: var(--color-panel);
   --color-switch-thumb-off: #ffffff;
   --color-switch-border: #d2d2cd;
-  --color-switch-focus: #3f4be8;
+  --color-switch-focus: var(--color-brand-text);
   --color-lime: #c4f24c;
   --color-lime-soft: #f0fbc7;
   --color-lime-ink: #58760f;
@@ -68,7 +81,7 @@
   --radius-3xl: 1rem;        /* alias → xl */
 
   /* shadcn / ai-elements 兼容 token —— 映射到品牌色，避免组件失样式。
-   * --color-accent 不在这里：品牌已占用同名 token（#3f4be8）。shadcn 默认 --accent 是
+   * --color-accent 不在这里：品牌已占用同名 token（产品黄）。shadcn 默认 --accent 是
    * 中性灰 hover，含义不同；项目里的弹出列表 hover 走 bg-panel-2，不用 accent。 */
   --color-foreground: #17181b;
   --color-background: #f3f3ef;
@@ -76,18 +89,18 @@
   --color-card-foreground: #17181b;
   --color-popover: #ffffff;
   --color-popover-foreground: #17181b;
-  --color-primary: #17181b;
-  --color-primary-foreground: #ffffff;
+  --color-primary: var(--color-brand);
+  --color-primary-foreground: var(--color-brand-foreground);
   --color-secondary: #fafaf8;
   --color-secondary-foreground: #17181b;
   --color-muted: #fafaf8;
   --color-muted-foreground: #6a6d76;
-  --color-accent-foreground: #ffffff;
+  --color-accent-foreground: var(--color-brand-foreground);
   --color-destructive: #ff4f7b;
   --color-destructive-foreground: #ffffff;
   --color-border: #ececE8;
   --color-input: #ececE8;
-  --color-ring: #9a9da6;
+  --color-ring: var(--color-brand-text);
   --radius: 0.5rem;
 }
 
@@ -99,6 +112,7 @@
  * 此块必须在未分层样式里(Tailwind 的 @theme 落在 @layer theme,未分层规则天然胜出)。 */
 .dark {
   color-scheme: dark;
+  --color-accent-ink: var(--color-brand);
   --color-bg: #141414;
   --color-canvas: #262626;
   --color-panel: #303030;
@@ -109,12 +123,12 @@
   --color-ink-4: #888c96;
   --color-line: rgba(235, 238, 245, 0.08);
   --color-line-2: rgba(235, 238, 245, 0.14);
-  --color-switch-on: #3f4be8;
+  --color-switch-on: var(--color-ink-2);
   --color-switch-off: #2b2e35;
-  --color-switch-thumb-on: #ffffff;
+  --color-switch-thumb-on: var(--color-panel);
   --color-switch-thumb-off: #8f939d;
   --color-switch-border: #3b3e45;
-  --color-switch-focus: #737bf2;
+  --color-switch-focus: var(--color-brand);
   --color-lime-soft: #2b3610;
   --color-lime-ink: #c4f24c;
   --shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.35);
@@ -127,15 +141,15 @@
   --color-card-foreground: #f0f1f4;
   --color-popover: #303030;
   --color-popover-foreground: #f0f1f4;
-  --color-primary: #f0f1f4;
-  --color-primary-foreground: #17181b;
+  --color-primary: var(--color-brand);
+  --color-primary-foreground: var(--color-brand-foreground);
   --color-secondary: #3b3b3b;
   --color-secondary-foreground: #f0f1f4;
   --color-muted: #3b3b3b;
   --color-muted-foreground: #8f939d;
   --color-border: #2b2e35;
   --color-input: #2b2e35;
-  --color-ring: #888c96;
+  --color-ring: var(--color-brand);
 }
 
 /* shiki 双主题:亮色走默认 color,暗色读 codeToHtml 写进内联样式的 --shiki-dark */
@@ -205,7 +219,7 @@
   from { transform: translateY(-8px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
 }
-.toast-info { border-left: 3px solid #3f4be8; }
+.toast-info { border-left: 3px solid var(--color-accent); }
 .toast-success { border-left: 3px solid #1fb6a1; }
 .toast-warn { border-left: 3px solid #f5a524; }
 .toast-error { border-left: 3px solid #ff4f7b; }
@@ -237,7 +251,7 @@
 }
 .toast-close:hover { color: var(--color-ink); background: var(--color-panel-2); }
 .toast-close:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--color-ring) 55%, transparent);
+  outline: 2px solid var(--color-ring);
   outline-offset: 1px;
 }
 

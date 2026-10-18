@@ -157,7 +157,7 @@ export async function runFirstPass(host: FirstPassHost, onUpdate: (report: First
   const pauseMode = config.pauses;
   const captionBlock = brand?.blocks.captions;
   const asked = options.resume ? new Set(options.resume.steps.filter(step => step.status !== 'done' && step.status !== 'skipped').map(step => step.id)) : options.steps?.length ? new Set(options.steps) : null;
-  const byBrand = { logo: !!brand?.blocks.logo, loudness: brand?.blocks.sound?.lufs !== undefined };
+  const byBrand = { logo: config.steps.logo, loudness: config.steps.loudness };
   const wanted: Record<FirstPassStepId, boolean> = asked
     ? { transcribe: asked.has('transcribe') || asked.has('cleanup') || asked.has('captions'), pauses: asked.has('pauses'), cleanup: asked.has('cleanup'), captions: asked.has('captions'), denoise: asked.has('denoise'), logo: asked.has('logo') && byBrand.logo, loudness: asked.has('loudness') && byBrand.loudness }
     : config.steps;

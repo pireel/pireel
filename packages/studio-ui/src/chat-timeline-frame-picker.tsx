@@ -63,7 +63,7 @@ export function ChatTimelineFramePicker({
       type="button"
       disabled={disabled || busy || !available}
       className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:pointer-events-none disabled:opacity-30 ${
-        active ? 'bg-accent/15 text-accent hover:bg-accent/25' : 'text-ink-3 hover:bg-line hover:text-ink'
+        active ? 'bg-accent/15 text-accent-ink hover:bg-accent/25' : 'text-ink-3 hover:bg-line hover:text-ink'
       }`}
       onMouseDown={(event) => event.preventDefault()}
       onClick={(event) => {

@@ -147,7 +147,7 @@ export function ConfirmPopover({ handoff, pending, onAnswer }: { handoff: Handof
         className={`hover:bg-panel-2/60 hover:text-ink flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[11.5px] transition-colors ${open ? 'bg-panel-2/60 text-ink' : 'text-ink-3'}`}
       >
         {t('panels.confirmTitle')}
-        {pending > 0 && <span className="bg-accent/12 text-accent rounded-full px-1.5 text-[10.5px] tabular-nums">{pending}</span>}
+        {pending > 0 && <span className="bg-accent/12 text-accent-ink rounded-full px-1.5 text-[10.5px] tabular-nums">{pending}</span>}
       </button>
       {open && (
         <div className="bg-panel border-line absolute right-0 bottom-full z-30 mb-1.5 max-h-[60vh] w-[320px] overflow-y-auto rounded-xl border p-3 shadow-xl">

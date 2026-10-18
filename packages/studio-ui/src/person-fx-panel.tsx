@@ -41,7 +41,7 @@ function BustPreview({ style }: { style: StrokeStyle }) {
           <path
             d={outline}
             fill="none"
-            stroke="var(--color-accent, #3f4be8)"
+            stroke="var(--color-accent, #f1ce55)"
             strokeWidth="3.5"
             strokeLinejoin="round"
             strokeLinecap="round"
@@ -364,7 +364,7 @@ export function PersonFxPanel({
                         type="button"
                         onClick={() => fileRef.current?.click()}
                         disabled={uploading}
-                        className={`inline-flex h-5 items-center gap-1 rounded-full border px-1.5 text-[10px] ${fx.bg?.type === 'image' ? 'border-accent text-accent' : 'border-line text-ink-3 hover:text-ink'}`}
+                        className={`inline-flex h-5 items-center gap-1 rounded-full border px-1.5 text-[10px] ${fx.bg?.type === 'image' ? 'border-accent text-accent-ink' : 'border-line text-ink-3 hover:text-ink'}`}
                       >
                         {uploading ? <Loader2 size={10} className="animate-spin" /> : <ImagePlus size={10} />} {t('panels.image')}
                       </button>

@@ -1,3 +1,6 @@
+import { brandPreferences } from './brand-preferences';
+import { activeBrandSetting } from './brand-feature-settings';
+import { displayTextFontCss } from './display-text-presets';
 import type { CaptionStyle } from './composition-core';
 import type { EditorDocumentV2 } from './editor-document/types';
 import { validateEditorDocumentV2 } from './editor-document/validation';
@@ -17,13 +20,18 @@ export function playbookCaptionStyle(playbook: PlaybookSnapshot): Partial<Captio
  *  chosen per video from the brand's prose; only generated headings take the creator's overlay-text face. */
 export function playbookAppearance(playbook: PlaybookSnapshot): { palette: Record<string, string> } {
   const palette: Record<string, string> = {};
-  if (playbook.blocks.overlay_text?.font) palette['font-head'] = playbook.blocks.overlay_text.font;
+  const theme = activeBrandSetting(playbook, 'graphics')?.theme;
+  if (theme?.background) { palette.panel = theme.background; palette.paper = theme.background; }
+  if (theme?.foreground) palette.fg = theme.foreground;
+  if (theme?.accent) palette.accent = theme.accent;
+  const font = theme?.font ?? (brandPreferences(playbook).headlines ? playbook.blocks.overlay_text?.font : undefined);
+  if (font) palette['font-head'] = displayTextFontCss(font) ?? font;
   return { palette };
 }
 
 /** True when the playbook adds media to the timeline. */
 export function playbookHasMedia(playbook: PlaybookSnapshot | undefined): boolean {
-  return !!playbook && !!playbook.blocks.logo;
+  return !!playbook && brandPreferences(playbook).logo && !!playbook.blocks.logo;
 }
 
 const LOGO_MARGIN = 0.04;
@@ -33,7 +41,7 @@ const LOGO_MARGIN = 0.04;
  * layer added before.
  */
 export function applyPlaybookMedia(document: EditorDocumentV2, playbook: PlaybookSnapshot): EditorDocumentV2 {
-  const brand = { logo: playbook.blocks.logo };
+  const brand = { logo: brandPreferences(playbook).logo ? playbook.blocks.logo : undefined };
   let next = document;
   const fps = next.canvas.fps;
   const primaryEnd = () => Math.max(0, ...(next.timeline.tracks.find(track => track.id === next.semantics.primaryNarrativeTrackId)?.clips ?? []).map(clip => clip.startFrame + clip.durationFrames));

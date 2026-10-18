@@ -35,7 +35,7 @@ export function CutListCard({ summary, rows, onLocate }: { summary: string; rows
   return (
     <div className="border-line/60 w-full overflow-hidden rounded-md border">
       <div className="flex items-center gap-2 px-2.5 py-1.5">
-        <span className="text-accent grid h-5 w-5 shrink-0 place-items-center rounded bg-accent/10">
+        <span className="text-accent-ink grid h-5 w-5 shrink-0 place-items-center rounded bg-accent/10">
           <Scissors size={11} />
         </span>
         <span className="text-ink-2 shrink-0 text-[12px] font-semibold">{t('tools.cut_narration.label')}</span>
@@ -53,7 +53,7 @@ export function CutListCard({ summary, rows, onLocate }: { summary: string; rows
             onClick={() => onLocate?.(r.atSec)}
             className="hover:bg-panel group flex w-full items-center gap-2 px-2.5 py-1 text-left transition-colors"
           >
-            <span className="text-ink-4 group-hover:text-accent shrink-0 font-mono text-[11px] tabular-nums">{mmss(r.atSec)}</span>
+            <span className="text-ink-4 group-hover:text-accent-ink shrink-0 font-mono text-[11px] tabular-nums">{mmss(r.atSec)}</span>
             <span className={`min-w-0 flex-1 truncate text-[12px] ${r.text ? 'text-ink-3 line-through opacity-80' : 'text-ink-4'}`}>
               {r.text ?? t('chatGen.cutRowSilence')}
             </span>

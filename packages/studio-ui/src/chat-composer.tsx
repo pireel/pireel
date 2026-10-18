@@ -479,7 +479,7 @@ export function Composer({
     pill.title = label;
 
     const icon = document.createElement("span");
-    icon.className = `${CHAT_PILL_ICON_CLASS} text-accent`;
+    icon.className = `${CHAT_PILL_ICON_CLASS} text-accent-ink`;
     icon.textContent = "✦";
     pill.appendChild(icon);
 
@@ -830,7 +830,7 @@ export function Composer({
           ) : (
             <button
               type="button"
-              className="bg-ink text-bg inline-flex h-7 w-7 items-center justify-center rounded-md transition-opacity hover:opacity-85 disabled:pointer-events-none disabled:opacity-25"
+              className="bg-primary text-primary-foreground inline-flex h-7 w-7 items-center justify-center rounded-md transition-opacity hover:opacity-85 disabled:pointer-events-none disabled:opacity-25"
               disabled={empty || timelineFramePickBusy}
               onClick={() => void fireSubmit()}
               title={intent ? t("chatGen.generateSend") : t("chatGen.sendEnter")}

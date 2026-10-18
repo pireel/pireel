@@ -13,7 +13,7 @@ import { needsEditingReview, reviewEditingTask } from './editing-task-review';
 import { ROUGH_CUT_TOOL, messageTurnCredits, toolNameOfPart, type RoughCutReplyMeta } from './first-pass-card';
 import { NextSteps, splitNextSteps } from './chat-next-steps';
 import { FINE_CUT_SKILLS, ONE_CLICK_EDIT_HINT, type FineCutSkill } from './first-pass';
-import { latestTask, taskOf, patchTask, resumeTaskHint, unfinishedRoughCut, withTaskUsage, type ChatTask } from "./chat-task";
+import { latestTask, taskOf, patchTask, resumeTaskHint, resumeEditingTask, unfinishedRoughCut, withTaskUsage, type ChatTask } from "./chat-task";
 import { cachedChatThread } from "./chat-thread-cache";
 import { recordTaskUsage, subscribeTaskUsage } from "./chat-task-usage";
 import { collapsedComponentRetryIndexes, studioToolFailureText } from './chat-component-retries';
@@ -713,7 +713,7 @@ export function ChatThread({
       setTaskResumeError(false);
       const config = continuing?.config ?? resolveEditingRunConfig({ brand: projectBrandRef.current, skills: continuing?.mode === 'one-click' ? continuing.skills : editingSkillsRef.current });
       const source = localAssetIndex?.find(asset => asset.kind === 'video' || !asset.kind);
-      const task: ChatTask = continuing ? { ...continuing, config, skillId: continuing.skillId ?? skillRef.current, review: undefined, agentModel: agentModelRef.current, reviewRequired: continuing.reviewRequired || continuing.mode === 'one-click', state: 'running' } : {
+      const task: ChatTask = continuing ? { ...resumeEditingTask(continuing), config, skillId: continuing.skillId ?? skillRef.current, review: undefined, agentModel: agentModelRef.current, reviewRequired: continuing.reviewRequired || continuing.mode === 'one-click', state: 'running' } : {
         id: mid('task'), ...(outputId ? { outputId } : {}), goal: draftParts.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n'),
         skills: options.startTool ? config.skills : [],
         config, skillId: skillRef.current, agentModel: agentModelRef.current, reviewRequired: !!options.startTool || !!options.wholeWhiteboard, directorPlanRequired: !!options.startTool || !!options.wholeWhiteboard,
@@ -1266,7 +1266,7 @@ export function ChatThread({
                             return (
                               <MessageContent key={key} className={USER_BUBBLE_CLASS}>
                                 <span className={CHAT_ACTION_PILL_CLASS}>
-                                  <span className={`${CHAT_PILL_ICON_CLASS} text-accent`}>✦</span>
+                                  <span className={`${CHAT_PILL_ICON_CLASS} text-accent-ink`}>✦</span>
                                   <span className={CHAT_PILL_LABEL_CLASS}>{intentLine.facts ? `${kindLabel} · ${intentLine.facts}` : kindLabel}</span>
                                 </span>
                               </MessageContent>
@@ -1278,7 +1278,7 @@ export function ChatThread({
                                 {idx === parts.findIndex((candidate) => candidate.type === "text")
                                   && (m.metadata as { studioAction?: unknown } | undefined)?.studioAction === STUDIO_CREATE_SKILL_ACTION && (
                                   <span className={`${CHAT_ACTION_PILL_CLASS} mr-1.5`}>
-                                    <span className={`${CHAT_PILL_ICON_CLASS} text-accent`}>✦</span>
+                                    <span className={`${CHAT_PILL_ICON_CLASS} text-accent-ink`}>✦</span>
                                     <span className={CHAT_PILL_LABEL_CLASS}>{t("chatGen.skill.create.title")}</span>
                                   </span>
                                 )}
@@ -1426,7 +1426,7 @@ export function ChatThread({
                       )}
                       {editorialCapacityShortfall !== null && (
                         <div className="border-line bg-panel-2 text-ink-3 flex items-start gap-2 rounded-md border px-2.5 py-2 text-[12px] leading-relaxed">
-                          <Info size={13} className="mt-0.5 shrink-0 text-accent" />
+                          <Info size={13} className="mt-0.5 shrink-0 text-accent-ink" />
                           <span>
                             {t("chatGen.editorialCapacityShortfall", { s: editorialCapacityShortfall })}
                           </span>

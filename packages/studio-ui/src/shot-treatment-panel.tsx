@@ -289,7 +289,7 @@ export function ShotTreatmentPanel({
                   type="button"
                   onClick={() => commitSpeed(v)}
                   className={`rounded-md border px-2 py-0.5 text-[11px] tabular-nums transition-colors ${
-                    Math.abs(speedValue - v) < 0.005 ? 'border-ink bg-ink text-bg' : 'border-line-2 hover:bg-panel-2/20'
+                    Math.abs(speedValue - v) < 0.005 ? 'border-line-2 bg-panel-2 text-ink' : 'border-line-2 hover:bg-panel-2/20'
                   }`}
                 >
                   {v}×

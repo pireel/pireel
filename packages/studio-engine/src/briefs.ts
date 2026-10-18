@@ -35,7 +35,7 @@ export function assembleComposeTheme(
     theme += `\n\n=== HOST VISUAL CRAFT BASELINE ===\nThis is a neutral quality floor, not a visual identity. Apply its craft when the creator has no brand graphics. When brand graphics follow, keep the quality checks but let the brand win every visible aesthetic decision.\n\n${baseline}`;
   }
   if (graphics) {
-    theme += `\n\n=== CREATOR BRAND GRAPHICS ===\nHow this creator's own graphics look, read from videos they published. Where it conflicts with generic Motion Graphic styling, archetypes or default taste above, THE BRAND WINS; choose colours and type for this video's topic and picture the way it describes. The Component engineering contract (sizes in the real box/canvas px given in the request, local CSS selectors, tl local time, no external libraries, chart recipes' mechanics) always holds.\n\n${graphics}`;
+    theme += `\n\n=== CREATOR BRAND GRAPHICS ===\nThe user's enabled MG configuration: its theme and feature-specific instructions. Where it conflicts with generic Motion Graphic styling, archetypes or default taste above, THE BRAND WINS; honor its configured colours and type, and adapt content to the current video. The Component engineering contract (sizes in the real box/canvas px given in the request, local CSS selectors, tl local time, no external libraries, chart recipes' mechanics) always holds.\n\n${graphics}`;
   }
   return theme;
 }

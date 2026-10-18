@@ -10,7 +10,7 @@ import { SceneMediaCard } from './scene-media-picker';
 import { CoverApplyButton } from './chat-cover-controls';
 import { coverFrameTime, coverFrameIdentity, type CoverSourceFrame, type CoverFrameStripData } from './cover-frame-selection';
 import type { CoverDraftPatch, CoverGenerateOptions } from './cover-scene';
-import type { CoverScene } from './cover-scene';
+import { videoCoverAspect, type CoverScene } from './cover-scene';
 import type { ProjectCover } from './project-cover';
 
 export function coverSceneStatus(scene?: CoverScene | null): string {
@@ -27,8 +27,8 @@ export function TimelineCoverPlaceholder({ cover, onOpen }: { cover: ProjectCove
 }
 const timeLabel = (seconds: number) => `${Math.floor(seconds / 60)}:${(seconds % 60).toFixed(2).padStart(5, '0')}`;
 
-export function CoverSceneDialog({ open, scene, applied, busy, onClose, onPrepare, onSaveDraft, onLoadFrames, onPreviewFrame, onGenerate, onApply }: {
-  open: boolean; scene: CoverScene | null; applied: ProjectCover | null; busy: boolean;
+export function CoverSceneDialog({ open, scene, applied, busy, canvas, onClose, onPrepare, onSaveDraft, onLoadFrames, onPreviewFrame, onGenerate, onApply }: {
+  open: boolean; scene: CoverScene | null; applied: ProjectCover | null; busy: boolean; canvas?: { width: number; height: number };
   onClose(): void;
   onPrepare(rewrite?: boolean): Promise<unknown>;
   onSaveDraft(patch: CoverDraftPatch): Promise<unknown>;
@@ -60,7 +60,7 @@ export function CoverSceneDialog({ open, scene, applied, busy, onClose, onPrepar
     void fetch('/api/models?kind=image').then(r => r.json()).then(data => { if (alive) { const list = data.models ?? []; setModels(list); setModelId(current => pickImageModel(list, current || scene?.modelId)); } }).catch(() => {});
     return () => { alive = false; };
   }, [open, scene?.modelId]);
-  const scenePrompt = scene?.prompt ?? ''; const sceneSize = scene?.size ?? ''; const sceneQuality = scene?.quality ?? ''; const newestImageKey = scene?.images[0]?.key ?? '';
+  const scenePrompt = scene?.prompt ?? ''; const sceneSize = scene?.size || videoCoverAspect(canvas); const sceneQuality = scene?.quality ?? ''; const newestImageKey = scene?.images[0]?.key ?? '';
   useEffect(() => { if (open) setPrompt(scenePrompt); }, [open, scenePrompt]);
   useEffect(() => { if (open) { setSize(sceneSize); setQuality(sceneQuality); } }, [open, sceneSize, sceneQuality]);
   useEffect(() => { setDraftFrame(null); }, [scene?.sourceFrame?.assetId, scene?.sourceFrame?.sourceSec]);
@@ -75,7 +75,7 @@ export function CoverSceneDialog({ open, scene, applied, busy, onClose, onPrepar
     }, 100);
     return () => { alive = false; clearTimeout(timer); if (url) URL.revokeObjectURL(url); };
   }, [open, selectedAsset, selectedSourceSec, onPreviewFrame, zh]);
-  const settings = normalizeImageSettings({ modelId, size: size || scene?.size, quality });
+  const settings = normalizeImageSettings({ modelId, size: size || scene?.size || videoCoverAspect(canvas), quality });
   const credits = useQuote({ toolId: 'image-gen', modelId: open ? modelId : '', params: { n: 1, ...imageGenerationParams(settings), reference_count: 1 + (scene?.brandReferences?.length ?? 0) + (scene?.referenceImage ? 1 : 0) } });
   const choices = [...(scene?.images ?? []), ...(scene?.history ?? []), ...(applied ? [applied] : [])];
   const images = [...new Map(choices.map(image => [image.key, image])).values()];
@@ -110,7 +110,7 @@ export function CoverSceneDialog({ open, scene, applied, busy, onClose, onPrepar
         <ImageGenerationFields value={settings} models={models} locale={zh ? 'zh' : 'en'} disabled={pending} onChange={next => { setModelId(next.modelId); setSize(next.size); setQuality(next.quality); void onSaveDraft(next).catch(() => setError(say('设置未保存，请重试。', 'Settings were not saved. Please retry.'))); }} />
         <div className="bg-bg sticky bottom-0 z-10 shrink-0 space-y-2 py-2">
         {credits !== null && <p className="text-ink-3 text-xs">{say('生图预计', 'Image estimate')} {credits} {say('积分', 'credits')}</p>}
-        <button type="button" disabled={pending || !modelId || !prompt.trim() || !selectedFrame || !referenceUrl || readingFrame} onClick={async () => { if (!selectedFrame) return; setError(''); try { await onGenerate({ regenerate: true, prompt, sourceFrame: coverFrameIdentity(selectedFrame), ...settings }); } catch { setError(failure); } }} className="bg-ink text-bg inline-flex w-full h-10 shrink-0 items-center justify-center gap-2 rounded-md text-sm disabled:opacity-40">{pending && <Loader2 size={14} className="animate-spin" />}{scene?.phase === 'planning' ? say('正在准备提示词与参考图…', 'Preparing prompt and reference…') : pending ? say('制作中…', 'Creating…') : say('生成封面', 'Generate cover')}</button>
+        <button type="button" disabled={pending || !modelId || !prompt.trim() || !selectedFrame || !referenceUrl || readingFrame} onClick={async () => { if (!selectedFrame) return; setError(''); try { await onGenerate({ regenerate: true, prompt, sourceFrame: coverFrameIdentity(selectedFrame), ...settings }); } catch { setError(failure); } }} className="bg-primary text-primary-foreground inline-flex w-full h-10 shrink-0 items-center justify-center gap-2 rounded-md text-sm disabled:opacity-40">{pending && <Loader2 size={14} className="animate-spin" />}{scene?.phase === 'planning' ? say('正在准备提示词与参考图…', 'Preparing prompt and reference…') : pending ? say('制作中…', 'Creating…') : say('生成封面', 'Generate cover')}</button>
         {(error || scene?.phase === 'failed') && <p role="alert" className="text-destructive text-xs leading-5">{error || failure}</p>}
         </div>
       </div>

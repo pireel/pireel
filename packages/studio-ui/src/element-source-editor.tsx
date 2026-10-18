@@ -140,7 +140,7 @@ export function ElementSourceEditor({ block, boxPx, locked, onDraft, onApply, lo
           onClick={() => onLoop(!loop)}
           title={t('panels.loopElementSTime')}
           className={`ml-auto inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] transition ${
-            loop ? 'border-accent bg-accent/10 text-accent' : 'border-line text-ink-4 hover:text-ink'
+            loop ? 'border-accent bg-accent/10 text-accent-ink' : 'border-line text-ink-4 hover:text-ink'
           }`}
         >
           <Repeat size={11} /> {t('chatGen.loopPreview')}
@@ -213,7 +213,7 @@ export function ElementSourceEditor({ block, boxPx, locked, onDraft, onApply, lo
             type="button"
             onClick={() => void submitAi()}
             disabled={disabled || !aiInput.trim()}
-            className="inline-flex shrink-0 items-center gap-1 rounded-md bg-accent px-2 py-1 text-[12px] font-medium text-white hover:bg-accent/85 disabled:opacity-40"
+            className="inline-flex shrink-0 items-center gap-1 rounded-md bg-accent px-2 py-1 text-[12px] font-medium text-accent-foreground hover:bg-accent/85 disabled:opacity-40"
           >
             {aiBusy ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />} {t('chatGen.aiEdit')}
           </button>
@@ -230,7 +230,7 @@ export function ElementSourceEditor({ block, boxPx, locked, onDraft, onApply, lo
             setDirty(false);
           }}
           disabled={!dirty || hardCount > 0 || disabled}
-          className="ml-auto inline-flex items-center gap-1 rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-white hover:bg-accent/85 disabled:opacity-40"
+          className="ml-auto inline-flex items-center gap-1 rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-accent-foreground hover:bg-accent/85 disabled:opacity-40"
         >
           <Check size={12} /> {t('chatGen.apply')}
         </button>

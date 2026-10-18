@@ -394,7 +394,7 @@ export function ScriptPanel({
             type="button"
             onClick={onExtract}
             disabled={extracting}
-            className="bg-ink text-bg inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12px] font-medium disabled:opacity-50"
+            className="bg-primary text-primary-foreground inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12px] font-medium disabled:opacity-50"
           >
             {extracting ? <Loader2 size={12} className="animate-spin" /> : <ScrollText size={12} />}
             {extracting ? t('panels.transcribing') : t('tools.extract_asr.label')}
@@ -584,7 +584,7 @@ export function ScriptPanel({
                   setPop(null);
                   setReplaceMode(false);
                 }}
-                className="text-accent px-1 py-0.5 text-[11.5px] font-medium disabled:opacity-40"
+                className="text-accent-ink px-1 py-0.5 text-[11.5px] font-medium disabled:opacity-40"
               >
                 {t('panels.ok')}
               </button>
@@ -830,7 +830,7 @@ export function TimelineScriptPanel({
         <div className="text-ink-4 flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center text-[11.5px]">
           <ScrollText size={22} />
           {t('panels.noTranscriptYetTranscribe')}
-          <button type="button" onClick={onExtract} disabled={extracting} className="bg-ink text-bg inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12px] font-medium disabled:opacity-50">
+          <button type="button" onClick={onExtract} disabled={extracting} className="bg-primary text-primary-foreground inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12px] font-medium disabled:opacity-50">
             {extracting ? <Loader2 size={12} className="animate-spin" /> : <ScrollText size={12} />}
             {extracting ? t('panels.transcribing') : t('tools.extract_asr.label')}
           </button>
@@ -950,7 +950,7 @@ export function TimelineScriptPanel({
           {popover.kind === 'word' && replaceMode && (
             <>
               <input autoFocus value={replacement} onChange={(event) => setReplacement(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submitReplacement(popover.item, popover.word); if (event.key === 'Escape') { setPopover(null); setReplaceMode(false); } }} className="border-line bg-panel-2 text-ink w-24 rounded border px-1.5 py-0.5 text-[11.5px] outline-none" aria-label={t('panels.replacementWord')} />
-              <button type="button" disabled={!replacement.trim()} onClick={() => submitReplacement(popover.item, popover.word)} className="text-accent px-1 py-0.5 text-[11.5px] font-medium disabled:opacity-40">{t('panels.ok')}</button>
+              <button type="button" disabled={!replacement.trim()} onClick={() => submitReplacement(popover.item, popover.word)} className="text-accent-ink px-1 py-0.5 text-[11.5px] font-medium disabled:opacity-40">{t('panels.ok')}</button>
             </>
           )}
           {popover.kind === 'selection' && <TranscriptSelectionBar

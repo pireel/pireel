@@ -9,7 +9,7 @@ import type { ChatTask } from './chat-task';
 import type { FirstPassReport } from './first-pass';
 import { setStudioLocale } from './i18n';
 import { sanitizeRestored } from './chat-thread-store';
-import { taskOf } from './chat-task';
+import { taskOf, resumeEditingTask } from './chat-task';
 
 const config = resolveEditingRunConfig({ skills: ['rough-cut', 'captions', 'graphics', 'b-roll'] });
 const task: ChatTask = { id: 'edit', goal: 'Edit the video', skills: config.skills, config, mode: 'one-click', state: 'running', source: { name: 'demo.mp4', durationSec: 122 } };
@@ -86,6 +86,16 @@ describe('editing progress presentation', () => {
     expect(html).not.toContain('未完成');
     expect(html).not.toContain('从当前进度继续');
   });
+  it('removes stale rough-cut failure badges as soon as the same task resumes', () => {
+    setStudioLocale('zh');
+    const paused: ChatTask = { ...task, state: 'paused', roughCut: { callId: 'rough-old', report: { ...report, state: 'partial', summary: '部分工作尚未完成', steps: report.steps.map(step => step.id === 'pauses' ? { ...step, status: 'failed', detail: 'Module fetch failed' } : step) } } };
+    const resumed = resumeEditingTask(paused);
+    const html = renderToStaticMarkup(createElement(EditingTaskCard, { task: resumed, messages: [], live: true, credits: 1 }));
+    expect(html).toContain('清理口播');
+    expect(html).not.toContain('未完成');
+    expect(html).not.toContain('Module fetch failed');
+    expect(editingTaskRows(resumed, resumed.roughCut?.report, [], true).rough.find(row => row.id === 'cleanup')?.status).toBe('pending');
+  });
   it('shows actual active work, not every enabled capability as running', () => {
     const rows = editingTaskRows(task, report, [receipt('compose_component', 'input-available')], true);
     expect(rows.rough).toEqual([{ id: 'transcribe', status: 'done' }, { id: 'cleanup', status: 'done', detail: undefined }]);
@@ -100,6 +110,14 @@ describe('editing progress presentation', () => {
     expect(editingTaskRows({ ...task, state: 'partial' }, report, [receipt('apply_component', 'output-error')], false).finishing.find(row => row.id === 'graphics')?.status).toBe('failed');
     expect(unresolvedTaskFailure([{ id: 'brand', role: 'assistant', parts: [{ type: 'dynamic-tool', toolName: 'read_brand', toolCallId: 'brand', state: 'output-available', input: {}, output: { ok: false, error: 'no_brand' } }] }])).toBe(false);
     expect(displayEditingTask({ ...task, state: 'done' }, [receipt('apply_component', 'output-error')]).state).toBe('partial');
+  });
+  it('clears historical failures after a successful final review, but preserves later failures', () => {
+    const failed = receipt('remove_silence', 'output-error');
+    const reviewed: UIMessage = { id: 'reviewed', role: 'assistant', parts: [{ type: 'dynamic-tool', toolName: 'finish_edit', toolCallId: 'reviewed', state: 'output-available', input: {}, output: { ok: true, data: { review: { completed: true } } } }] };
+    expect(unresolvedTaskFailure([failed])).toBe(true);
+    expect(unresolvedTaskFailure([failed, reviewed])).toBe(false);
+    expect(unresolvedTaskFailure([failed, reviewed, receipt('set_texts', 'output-error')])).toBe(true);
+    expect(displayEditingTask({ ...task, state: 'done', roughCut: { callId: 'recovered', report } }, [failed, reviewed]).state).toBe('done');
   });
   it('does not label an inspection made before the last edit as a final preview check', () => {
     const before = [receipt('inspect_timeline', 'output-available'), receipt('apply_component', 'output-available')];

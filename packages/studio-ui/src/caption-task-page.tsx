@@ -46,7 +46,7 @@ const defaults: CaptionTaskOptions = { caption: {}, aspect: 'original', shortenP
 function generatedVersion(task: CaptionTaskRecord, history: readonly { number: number }[]): CaptionTaskVersion {
   return { id: task.generationId!, number: Math.max(0, ...history.map(version => version.number)) + 1, createdAt: task.updatedAt, task: structuredClone(task) };
 }
-const actionClass = 'bg-ink text-bg inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40';
+const actionClass = 'bg-primary text-primary-foreground inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40';
 
 /** Where the last dub had to speak faster than usual or cut a line's end, so it is never a silent change. */
 function dubbingFitSummary(notes: { at: number; kind: 'faster' | 'trimmed' }[], locale: 'zh' | 'en') {

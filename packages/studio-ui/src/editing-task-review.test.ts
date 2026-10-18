@@ -20,11 +20,12 @@ describe('editing completion review', () => {
   });
   it('rejects silently missing enabled features', () => {
     expect(needsEditingReview(task)).toBe(true);
-    expect(reviewEditingTask(task, { features: [] }, evidence)).toMatchObject({ ok: false, missing: ['graphics', 'b-roll', 'zoom', 'transitions'] });
+    expect(reviewEditingTask(task, { features: [] }, evidence)).toMatchObject({ ok: false, missing: ['graphics', 'b-roll', 'zoom'] });
   });
   it('rejects claims of effects that do not exist on the timeline', () => {
     expect(reviewEditingTask(task, input(), { ...evidence, zoom: [] })).toMatchObject({ ok: false });
     expect(reviewEditingTask(task, input(), { ...evidence, 'b-roll': [] })).toMatchObject({ ok: false });
+    expect(reviewEditingTask(task, input(), { ...evidence, transitions: [] })).toMatchObject({ ok: false });
     expect(reviewEditingTask(task, input(), evidence)).toMatchObject({ ok: true, review: { completed: true } });
   });
   it('requires real brand treatment and refuses an empty library as a reason to skip B-roll', () => {

@@ -72,3 +72,18 @@ export function resumeTaskHint(task: ChatTask): string {
     isWhiteboardDirectorTask(task) ? 'Finish against the current saved plan and actual outcomes using the scene Skill. Preserve resolved material fallbacks.' : 'For a whole-video task, evaluate every enabled feature against real moments. Missing library footage requires sourcing or the appropriate generation question, not silently skipping B-roll. Call finish_edit before reporting branded or fine-cut work complete.',
   ].filter(Boolean).join('\n');
 }
+
+/** Begin a continuation without carrying terminal failure badges into the new attempt.
+ * The original message/receipt stays intact; completed steps and paid analysis remain reusable. */
+export function resumeEditingTask(task: ChatTask): ChatTask {
+  const next: ChatTask = { ...task, state: 'running', review: undefined };
+  if (!task.roughCut || !unfinishedRoughCut(task)) return next;
+  const { summary: _previousSummary, ...report } = task.roughCut.report;
+  return { ...next, roughCut: { ...task.roughCut, report: {
+    ...report, state: 'running', steps: report.steps.map(step => {
+      if (step.status === 'done' || step.status === 'skipped') return step;
+      const { detail: _previousError, ...pending } = step;
+      return { ...pending, status: 'pending' };
+    }),
+  } } };
+}

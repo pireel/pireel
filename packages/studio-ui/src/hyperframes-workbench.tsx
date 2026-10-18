@@ -1,4 +1,5 @@
 "use client";
+import { brandGraphicsStyle } from '@pireel/studio-engine/brand-playbook';
 import { brandEditingSkills } from '@pireel/studio-engine/brand-preferences';
 import { loadCoverBrandReferences } from './cover-brand-references';
 import { pickImageModel } from '@pireel/studio-engine/image-generation-settings';
@@ -4693,7 +4694,7 @@ export function HyperframesWorkbench({
             ? { palette: compRef.current.palette }
             : {}), // background-derived colors, so the LLM uses the real accent
           ...(compRef.current.brand !== undefined
-            ? { brandGraphics: compRef.current.brand?.blocks.graphics?.text?.trim() || null }
+            ? { brandGraphics: compRef.current.brand ? brandGraphicsStyle(compRef.current.brand) : null }
             : {}), // the project's brand graphics direct the look
           lang: localeRef.current, // note (the human sentence in chat) uses the UI language
           ...(Object.keys(context).length ? { context } : {}),
@@ -8774,7 +8775,7 @@ export function HyperframesWorkbench({
                                     selectedShot.srcSig,
                                   )
                                 }
-                                className="bg-accent shrink-0 rounded px-2.5 py-1 text-[11px] font-medium text-white transition hover:brightness-110"
+                                className="bg-accent shrink-0 rounded px-2.5 py-1 text-[11px] font-medium text-accent-foreground transition hover:brightness-110"
                               >
                                 {t("workbench.rePickFile")}
                               </button>
@@ -9079,7 +9080,7 @@ export function HyperframesWorkbench({
                             setExportOpen(false),
                           );
                         }}
-                        className="bg-ink text-bg inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-[13px] font-medium hover:opacity-90"
+                        className="bg-primary text-primary-foreground inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-[13px] font-medium hover:opacity-90"
                       >
                         <Download size={14} /> {t("workbench.startExport")}
                       </button>
@@ -9153,7 +9154,7 @@ export function HyperframesWorkbench({
           },
         }}
       />}
-      <CoverSceneDialog open={coverSceneOpen} scene={coverScene} applied={projectCover} busy={coverSceneBusy || coverApplying} onClose={() => setCoverSceneOpen(false)} onPrepare={prepareCoverScene} onSaveDraft={saveCoverDraft} onLoadFrames={loadCoverFrames} onPreviewFrame={previewCoverFrame} onGenerate={generateCoverScene} onApply={onApplyCover} />
+      <CoverSceneDialog canvas={editorDocument.canvas} open={coverSceneOpen} scene={coverScene} applied={projectCover} busy={coverSceneBusy || coverApplying} onClose={() => setCoverSceneOpen(false)} onPrepare={prepareCoverScene} onSaveDraft={saveCoverDraft} onLoadFrames={loadCoverFrames} onPreviewFrame={previewCoverFrame} onGenerate={generateCoverScene} onApply={onApplyCover} />
       {/* Entry boot layer: heavy-resource warmup + project-data double gate, covers the whole workbench (incl. the chat bar), self-unmounts when done */}
       <StudioBootOverlay dataReady={bootDataReady} />
       <header data-studio-header data-block-selection-keep data-cap-keep className="bg-canvas flex h-11 shrink-0 items-center justify-between gap-3 rounded-sm px-3">
@@ -9789,7 +9790,7 @@ export function HyperframesWorkbench({
                           <button
                             type="button"
                             onClick={() => aiFillBlock(eb.id)}
-                            className="bg-ink text-bg pointer-events-auto rounded-full px-3 py-1 text-[12px] font-medium shadow-lg"
+                            className="bg-primary text-primary-foreground pointer-events-auto rounded-full px-3 py-1 text-[12px] font-medium shadow-lg"
                           >
                             {t("workbench.aiGenerate")}
                           </button>
@@ -10558,7 +10559,7 @@ export function HyperframesWorkbench({
                       className="bg-accent/80 absolute bottom-0 left-1/2 top-0 w-px -translate-x-1/2"
                       style={{
                         display: "none",
-                        boxShadow: "0 0 4px rgba(63,75,232,0.5)",
+                        boxShadow: "0 0 4px color-mix(in srgb, var(--color-accent) 50%, transparent)",
                       }}
                     />
                     <div
@@ -10566,7 +10567,7 @@ export function HyperframesWorkbench({
                       className="bg-accent/80 absolute left-0 right-0 top-1/2 h-px -translate-y-1/2"
                       style={{
                         display: "none",
-                        boxShadow: "0 0 4px rgba(63,75,232,0.5)",
+                        boxShadow: "0 0 4px color-mix(in srgb, var(--color-accent) 50%, transparent)",
                       }}
                     />
                   </div>
@@ -10772,7 +10773,7 @@ export function HyperframesWorkbench({
                   type="button"
                   onClick={togglePlaybackFromUserGesture}
                   disabled={!hasContent}
-                  className="bg-ink text-bg inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full disabled:opacity-40"
+                  className="bg-primary text-primary-foreground inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full disabled:opacity-40"
                   aria-label={
                     playing ? t("tools.pause.label") : t("tools.play.label")
                   }
@@ -10935,7 +10936,7 @@ export function HyperframesWorkbench({
                       ? t("panels.enableClip")
                       : t("panels.disableClip")
                   }
-                  className={`rounded p-1 disabled:opacity-40 ${selectedTimelineClip?.entry.clip.enabled === false ? "text-accent bg-panel-2/35" : "text-ink-3 hover:text-ink hover:bg-panel-2/20"}`}
+                  className={`rounded p-1 disabled:opacity-40 ${selectedTimelineClip?.entry.clip.enabled === false ? "text-accent-ink bg-panel-2/35" : "text-ink-3 hover:text-ink hover:bg-panel-2/20"}`}
                 >
                   <Power size={14} />
                 </button>
@@ -10996,7 +10997,7 @@ export function HyperframesWorkbench({
                   aria-checked={timelineDensity === "compact"}
                   onClick={toggleTimelineDensity}
                   aria-label={t("workbench.timelineCompact")}
-                  className={`mr-1 rounded p-1.5 ${timelineDensity === "compact" ? "bg-accent/12 text-accent" : "text-ink-4 hover:bg-panel-2/20 hover:text-ink"}`}
+                  className={`mr-1 rounded p-1.5 ${timelineDensity === "compact" ? "bg-accent/12 text-accent-ink" : "text-ink-4 hover:bg-panel-2/20 hover:text-ink"}`}
                 >
                   <Rows3 size={14} />
                 </button>
@@ -11017,7 +11018,7 @@ export function HyperframesWorkbench({
                   aria-checked={timelineSnapEnabled}
                   onClick={togglePrimaryAutoSnap}
                   aria-label={t("workbench.timelineAutoSnap")}
-                  className={`mr-1 rounded p-1.5 ${timelineSnapEnabled ? "bg-accent/12 text-accent" : "text-ink-4 hover:bg-panel-2/20 hover:text-ink"}`}
+                  className={`mr-1 rounded p-1.5 ${timelineSnapEnabled ? "bg-accent/12 text-accent-ink" : "text-ink-4 hover:bg-panel-2/20 hover:text-ink"}`}
                 >
                   <Magnet size={14} />
                 </button>

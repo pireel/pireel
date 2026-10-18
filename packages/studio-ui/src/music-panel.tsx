@@ -102,13 +102,13 @@ export function MusicPanel({
         {sel && (
           <section className="flex flex-col gap-2.5">
             <div className="text-ink flex items-center gap-1.5 font-medium">
-              <Music className="text-accent size-3.5 shrink-0" />
+              <Music className="text-accent-ink size-3.5 shrink-0" />
               <span className="min-w-0 flex-1 truncate">{sel.label || t('panels.musicBed')}</span>
-              {!usable(sel) && <span className="text-accent shrink-0 text-[10px]">{t('panels.musicFileMissingShort')}</span>}
+              {!usable(sel) && <span className="text-accent-ink shrink-0 text-[10px]">{t('panels.musicFileMissingShort')}</span>}
             </div>
             <AudioLevel db={dbValue} disabled={!!sel.muted} onChange={(db) => onPatch(sel.id, { volumeDb: db })} />
             {sel.muted && <div className="text-ink-4 text-[10.5px]">{t('panels.trackMutedHint')}</div>}
-            {clipping && !sel.muted && <div className="text-accent text-[10.5px]">{t('panels.audioClippingHint', { db: String(clipsAt) })}</div>}
+            {clipping && !sel.muted && <div className="text-accent-ink text-[10.5px]">{t('panels.audioClippingHint', { db: String(clipsAt) })}</div>}
             {/* Effective values (fades are clamped so the two never overlap) — showing the raw stored number
                 would promise a fade the clip is too short to hold. */}
             {slider(t('panels.fadeIn'), selD!.fadeInSec, 0, AUDIO_FADE_MAX_SEC, 0.1, (v) => `${v.toFixed(1)}s`, (v) => onPatch(sel.id, { fadeInSec: v }))}

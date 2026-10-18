@@ -42,10 +42,11 @@ export interface CaptionTaskDimensions { width: number; height: number }
 /** Focused scenes borrow caption styling only. Full editing projects retain their complete brand.
  * Normalize saved options too, so an older scene cannot silently add a logo or editing moves. */
 export function scopeSceneBrandOptions(options: CaptionTaskOptions): CaptionTaskOptions {
+  if (options.brand && options.edit?.moves) options = { ...options, edit: { ...options.edit, moves: options.edit.moves.punchIn ? { punchIn: true } : undefined } };
   if (options.oneClick || !options.brand) return options;
   const { brand, edit: _edit, ...rest } = options;
   if (options.sfx || options.subtitleRemoval) return rest;
-  const { style: _style, preferences: _preferences, media: _media, skills: _skills, ...identity } = brand;
+  const { style: _style, settings: _settings, preferences: _preferences, media: _media, skills: _skills, ...identity } = brand;
   return { ...rest, brand: { ...identity, skills: [], blocks: brand.blocks.captions ? { captions: brand.blocks.captions } : {} } };
 }
 /** Product reference zones, not a guarantee for every platform/ad placement. */

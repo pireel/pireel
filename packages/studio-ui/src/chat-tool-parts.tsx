@@ -122,7 +122,7 @@ function ToolBadge({ def, part, children, quiet }: { def: StudioToolDef; part: T
   return (
     <div className="border-line/60 w-full overflow-hidden rounded-md border">
       <div className="flex items-center gap-2 px-2.5 py-1.5">
-        <span className="text-accent grid h-5 w-5 shrink-0 place-items-center rounded bg-accent/10 text-[12px]">{def.icon}</span>
+        <span className="text-ink-2 grid h-5 w-5 shrink-0 place-items-center rounded bg-panel-2 text-[12px]">{def.icon}</span>
         <span className="text-ink-2 shrink-0 text-[12px] font-semibold">{t(def.label)}</span>
         <span className={`ml-auto shrink-0 ${st.kind === 'error' ? 'text-destructive' : 'text-ink-3'}`}>{icon}</span>
       </div>
@@ -187,7 +187,7 @@ function ToolCard({ def, part, children, quiet }: { def: StudioToolDef; part: To
   return (
     <div className="border-line/60 w-full overflow-hidden rounded-md border">
       <div className="flex items-center gap-2 px-2.5 py-1.5">
-        <span className="text-accent grid h-5 w-5 shrink-0 place-items-center rounded bg-accent/10 text-[12px]">{def.icon}</span>
+        <span className="text-ink-2 grid h-5 w-5 shrink-0 place-items-center rounded bg-panel-2 text-[12px]">{def.icon}</span>
         <span className="text-ink-2 shrink-0 text-[12px] font-semibold">{t(def.label)}</span>
         {contextLabel && <span className="text-ink-4 truncate text-[12px]">{contextLabel}</span>}
         <span className={`ml-auto inline-flex min-w-0 shrink-0 items-center gap-1.5 text-[11px] ${st.kind === 'error' ? 'text-destructive' : 'text-ink-3'}`}>

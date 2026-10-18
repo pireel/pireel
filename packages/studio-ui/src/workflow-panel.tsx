@@ -20,7 +20,7 @@ export interface WorkflowPanelProps {
   onBusyChange(busy: boolean): void;
   onImport(): void;
 }
-const inputClass = 'border-line bg-bg text-ink h-10 w-full rounded-md border px-3 text-sm outline-none focus:border-ink-3 focus:ring-2 focus:ring-accent/20 disabled:opacity-50';
+const inputClass = 'border-line bg-bg text-ink h-10 w-full rounded-md border px-3 text-sm outline-none focus:border-ink-3 focus:ring-2 focus:ring-ring/20 disabled:opacity-50';
 const buttonClass = 'border-line text-ink hover:bg-panel-2 inline-flex min-h-10 items-center justify-center gap-2 rounded-md border px-4 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40';
 const emptyState = (): WorkflowBrowserState => ({ schemaVersion: 1, definitions: [], runs: [] });
 
@@ -198,7 +198,7 @@ export function WorkflowPanel(props: WorkflowPanelProps) {
         </div>
         <footer className="border-line bg-bg flex flex-wrap items-center justify-between gap-3 border-t px-6 py-4">
           <button type="button" disabled={busy || !storageKey} onClick={saveDefinition} className={buttonClass}>{saved ? <Check size={15} /> : <Save size={15} />}{saved ? say('已保存', 'Saved') : say('保存为我的工作流', 'Save workflow')}</button>
-          {busy ? <button type="button" disabled={stopping} onClick={() => { abortRef.current?.abort(); setStopping(true); }} className={buttonClass}>{stopping ? say('等待当前步骤结束…', 'Finishing the current step…') : say('停止后续步骤', 'Stop after this step')}</button> : <button type="button" disabled={props.blocked || !context.hasContent || !storageKey} onClick={() => void start()} className="bg-ink text-bg inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-5 text-sm font-semibold hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"><Play size={14} />{say('运行工作流', 'Run workflow')}</button>}
+          {busy ? <button type="button" disabled={stopping} onClick={() => { abortRef.current?.abort(); setStopping(true); }} className={buttonClass}>{stopping ? say('等待当前步骤结束…', 'Finishing the current step…') : say('停止后续步骤', 'Stop after this step')}</button> : <button type="button" disabled={props.blocked || !context.hasContent || !storageKey} onClick={() => void start()} className="bg-primary text-primary-foreground inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-5 text-sm font-semibold hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"><Play size={14} />{say('运行工作流', 'Run workflow')}</button>}
         </footer>
       </DialogContent>
     </Dialog>

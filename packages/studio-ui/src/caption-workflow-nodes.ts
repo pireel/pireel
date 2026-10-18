@@ -1,3 +1,4 @@
+import type { BrandFeatureTheme } from '@pireel/studio-engine/brand-feature-settings';
 import { imageThumb } from '@pireel/ui/image-url';
 import { applyPlaybookMedia } from '@pireel/studio-engine/brand-media';
 import type { PlaybookSnapshot } from '@pireel/studio-engine/brand-playbook';
@@ -83,7 +84,7 @@ export function captionWorkflowNodes(host: SceneWorkflowHost): SceneNode[] {
     node('brand.texts', { stage: 'styling', async execute(args) {
       const document = store.read<EditorDocumentV2>(args.document, 'document');
       const titles = args.titles as unknown as PlannedTitle[];
-      const items = titles.map((title, index) => titleTextItem(`brand-title-${index + 1}`, title, document.canvas));
+      const items = titles.map((title, index) => titleTextItem(`brand-title-${index + 1}`, title, document.canvas, args.theme as BrandFeatureTheme | undefined));
       let next = document;
       if (items.length) {
         const result = applyDocumentTransaction(document, { ops: [{ op: 'agent.timeline', input: { tool: 'set_texts', input: { items } } }] }, { projectId: 'caption-scene' });

@@ -87,7 +87,7 @@ describe('model answers are checked', () => {
     expect(() => parseBrandSynthesis(answer({ captions: { on: true, preset: 'made-up', font: 'sans', animation: 'none', color: '#ffffff' } }), context)).toThrow(/catalogs/);
     const missing = JSON.parse(answer()) as { techniques: Record<string, unknown> };
     delete missing.techniques.transitions;
-    expect(() => parseBrandSynthesis(JSON.stringify(missing), context)).toThrow(/missing transitions/);
+    expect(() => parseBrandSynthesis(JSON.stringify(missing), context)).not.toThrow();
   });
 
   it('accepts free prose and still reads saved synthesis answers from the old method', () => {
@@ -99,16 +99,16 @@ describe('model answers are checked', () => {
     expect(parseBrandSynthesis(JSON.stringify(fresh), context).techniques.graphics.text).toBe('只在解释数字时出现。 白底黑字。');
   });
 
-  it('accepts the unified style and explicit preferences without requiring the old technique checklist', () => {
+  it('accepts fixed-only answers and preserves editing switches without old style prose', () => {
     const value = JSON.parse(answer());
     delete value.techniques;
     value.style = { text: '图形跟随新内容，保持深色底和清楚的层级。', refs: [{ video: 'v1', shot: 2 }] };
     value.preferences = { pauses: true, cleanup: true, denoise: false, broll: true, graphics: true, sound: false, transitions: false, zoom: false, headlines: true };
     const synthesis = parseBrandSynthesis(JSON.stringify(value), context);
-    expect(synthesis.style?.text).toBe(value.style.text);
+    expect(synthesis.style).toBeUndefined();
     expect(synthesis.preferences?.zoom).toBe(false);
     const brand = assembleBrand({ id: 'b', name: 'Brand', platform: 'upload', locale: 'zh', videos: [], synthesis, measured: { lufs: null, pauses: null }, references: {} });
-    expect(validatePlaybook(brand).style?.text).toBe(value.style.text);
+    expect(validatePlaybook(brand).style).toBeUndefined();
     expect(brand.preferences?.broll).toBe(true);
     // The withdrawn layout flag in saved synthesis does not reactivate the unreleased feature.
     expect(synthesis.preferences?.layout).toBeUndefined();
@@ -129,7 +129,7 @@ describe('the brand', () => {
     expect(captionGeometry({ x: 0.3, w: 0.4 }, { top: 0.86, bottom: 0.9 }, 9 / 16)).toEqual({ scale: 0.43, xPct: 50, yPct: 90.9, wPct: 46 });
   });
 
-  it('assembles a valid schema-3 brand: fixed values, one block per technique, notes', () => {
+  it('assembles fixed values and evidence, discarding old techniques', () => {
     const synthesis: BrandSynthesis = parseBrandSynthesis(answer(), context);
     const asset = { key: 'uploads/u/ref.jpg', kind: 'image' as const, width: 852, height: 480 };
     const brand = assembleBrand({
@@ -140,9 +140,9 @@ describe('the brand', () => {
     expect(() => validatePlaybook(brand)).not.toThrow();
     expect(brand.blocks.captions?.style).toMatchObject({ preset: 'style-documentary', color: '#ffffff', strokeColor: '#1a1a1a', strokeWidth: 2, scale: 0.64, yPct: 92.7 });
     expect(brand.blocks.sound).toMatchObject({ lufs: -12.5, pauses: 'tight' });
-    expect(brand.blocks.transitions?.text).toBe('transitions 随内容变化，保持清晰直接。');
-    expect(brand.blocks.graphics?.references).toEqual([asset]);
-    expect(brand.blocks.assets?.text).toBe('- 片尾结束板');
+    expect(brand.blocks.transitions).toBeUndefined();
+    expect(brand.blocks.graphics).toBeUndefined();
+    expect(brand.blocks.assets).toBeUndefined();
     expect(brand.blocks.cover?.referenceKeys).toEqual(['uploads/u/cover.jpg']);
     expect(brand.notes).toEqual({ evidence: '1 条视频', gaps: ['只有一条视频'] });
   });

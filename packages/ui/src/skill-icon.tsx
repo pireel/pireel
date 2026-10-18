@@ -35,7 +35,7 @@ export function SkillIcon({
   }
   return (
     <span
-      className={`bg-accent/10 text-accent inline-flex shrink-0 items-center justify-center ${rounded} ${className}`}
+      className={`bg-panel-2 text-ink-2 inline-flex shrink-0 items-center justify-center ${rounded} ${className}`}
       style={{ width: size, height: size, fontSize: Math.round(size * 0.5) }}
     >
       {emoji ?? '✨'}

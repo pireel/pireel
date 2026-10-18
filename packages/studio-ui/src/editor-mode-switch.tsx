@@ -48,7 +48,7 @@ export function EditorModeSwitch({ mode, onChange }: {
           onChange(next);
           event.currentTarget.parentElement?.querySelector<HTMLButtonElement>(`[data-mode="${next}"]`)?.focus();
         }}
-        className={`focus-visible:ring-accent group flex h-8 items-center gap-2 rounded-full py-1 pl-1 pr-3 text-[12px] transition-colors focus-visible:outline-none focus-visible:ring-1 ${active ? 'bg-panel-2/35 text-ink font-medium' : 'text-ink-3 hover:text-ink'}`}>
+        className={`focus-visible:ring-ring group flex h-8 items-center gap-2 rounded-full py-1 pl-1 pr-3 text-[12px] transition-colors focus-visible:outline-none focus-visible:ring-1 ${active ? 'bg-panel-2/35 text-ink font-medium' : 'text-ink-3 hover:text-ink'}`}>
         <span className={`grid size-6 place-items-center rounded-full transition-all duration-200 motion-reduce:transition-none ${active
           ? `bg-gradient-to-br ${chip} text-white shadow-[0_2px_8px_-2px_rgba(0,0,0,0.35)]`
           : 'text-ink-4 group-hover:text-ink-2 group-hover:bg-panel-2/35'}`}>
