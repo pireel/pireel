@@ -1,5 +1,6 @@
 import { useId, type ReactNode } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@pireel/ui/select';
+import { Switch } from '@pireel/ui/switch';
 
 /** Shared presentation only; scene and workflow owners retain their own persistence. */
 export function SceneSelect<T extends string>({ label, ariaLabel = label, value, options, onChange, disabled = false, footer, portalOwner }: {
@@ -28,14 +29,18 @@ export function SceneRange({ label, value, min, max, step = 1, unit = '', onChan
   </label>;
 }
 
-export function SceneCheckbox({ label, checked, onChange, description, disabled = false }: {
+/** An on/off setting: the label leads, the switch sits at the end of the row. */
+export function SceneSwitch({ label, checked, onChange, description, disabled = false }: {
   label: string; checked: boolean; onChange: (checked: boolean) => void; description?: ReactNode; disabled?: boolean;
 }) {
   const id = useId();
-  return <label className="text-ink flex cursor-pointer items-start gap-3 text-xs leading-relaxed">
-    <input type="checkbox" checked={checked} disabled={disabled} aria-describedby={description ? id : undefined} onChange={event => onChange(event.target.checked)} className="mt-0.5 shrink-0 accent-[var(--color-accent)] disabled:opacity-50" />
-    <span>{label}{description && <span id={id} className="text-ink-3 mt-1 block text-xs">{description}</span>}</span>
-  </label>;
+  return <div className="text-ink text-xs leading-relaxed">
+    <div className="flex min-w-0 items-center justify-between gap-3">
+      <label htmlFor={id} className={'min-w-0 ' + (disabled ? 'opacity-50' : 'cursor-pointer')}>{label}</label>
+      <Switch id={id} checked={checked} disabled={disabled} aria-describedby={description ? `${id}-note` : undefined} onCheckedChange={onChange} />
+    </div>
+    {description && <p id={`${id}-note`} className="text-ink-3 mt-1 text-xs">{description}</p>}
+  </div>;
 }
 
 const textClass = 'border-line bg-bg text-ink w-full min-w-0 rounded-md border px-3 py-2 text-xs leading-relaxed placeholder:text-ink-4 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ink-4 disabled:opacity-50';
