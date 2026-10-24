@@ -103,7 +103,7 @@ export const WHITEBOARD_DOC_SCHEMA: Schema = obj({
   aspect: enumOf(WHITEBOARD_ASPECTS, 'Match the canvas.'),
   title: str(),
   theme: enumOf(WHITEBOARD_THEMES, 'Visual theme; appearance only, never layout or timing.'),
-  chrome: { anyOf: [{ type: 'boolean', enum: [false] }, obj({ title: str('Board name shown in the collaborative-board frame.'), avatars: arr(str()) }, ['title'])], description: 'Decorative shell is ON by default: title bar, toolbar (hidden in portrait), avatars and zoom indicator. Omit to use doc.title and default decorative avatars. Pass an object to customize; avatars: [] hides avatars. Pass false only when a clean board without the shell is explicitly wanted.' },
+  chrome: { anyOf: [{ type: 'boolean', enum: [false] }, obj({ title: str('Board name shown in the collaborative-board frame.'), avatars: arr(str()) }, ['title'])], description: 'Decorative collaboration shell (title bar, toolbar hidden in portrait, avatars, zoom indicator). OFF by default: a narrated video reads cleaner without it. Pass an object only when the user asks for the collaborative-board look; avatars: [] hides avatars.' },
   narration: obj({
     source: enumOf(['script', 'tts', 'asr']),
     durationSec: num('Voiceover length in seconds; required when sentences carry no words.', { min: 0 }),
