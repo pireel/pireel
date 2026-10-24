@@ -526,6 +526,7 @@ export function HyperframesWorkbench({
   const [workflowOpen, setWorkflowOpen] = useState(!!initialWorkflowId);
   const [workflowEntryId] = useState(initialWorkflowId === "talking-head" ? "captions" : initialWorkflowId ?? "captions");
   const WorkflowEntry = shell.WorkflowEntry;
+  const MaterialEntry = shell.MaterialEntry;
   const [workflowBusy, setWorkflowBusy] = useState(false);
   const workflowBusyRef = useRef(false);
   const workflowOpenRef = useRef(workflowOpen);
@@ -9166,6 +9167,23 @@ export function HyperframesWorkbench({
         </div>
         <div className="flex min-w-0 items-center gap-3">
           {!AccountControls && themeToggle}
+          {whiteboardScene && MaterialEntry && <MaterialEntry
+            projectId={projectId}
+            document={editorDocument}
+            onReadTranscript={async () => {
+              const document = editorDocumentRef.current; const id = firstNarrativeAssetId(document);
+              if (!id) throw new Error('请先导入原声视频。');
+              const existing = document.semantics.transcripts[id];
+              if (existing?.length) return existing.map(cue => cue.text).join('\n');
+              const file = await speechFileForAsset(document.assets[id]);
+              if (!file) throw new Error('无法读取原声文件，请恢复素材。');
+              const { transcribeFile } = await import('@pireel/studio-ui/media-ai');
+              const cues = await transcribeFile(file, { projectId });
+              if (editorDocumentRef.current.assets[id]) commit({ op: 'transcripts.set', input: { transcripts: { [id]: cues } } });
+              return cues.map(cue => cue.text).join('\n');
+            }}
+            blocked={!bootDataReady || busyImport || chatBusy || !!startPrompt || bridgeToolsInFlight > 0 || displaced || exporting || workflowBusy}
+          />}
           {exportControls}
           {AccountControls ? <AccountControls busy={chatBusy || bridgeToolsInFlight > 0} /> : CreditsBalance && <CreditsBalance busy={chatBusy || bridgeToolsInFlight > 0} />}
           {accountMenu && <div data-studio-account className="shrink-0">{accountMenu}</div>}
