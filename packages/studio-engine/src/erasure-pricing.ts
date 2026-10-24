@@ -1,9 +1,11 @@
 export type ErasureTier = 'lite' | 'standard' | 'precise';
 export const ERASURE_TIERS = [
-  { id: 'lite', zh: '极速', en: 'Fast', description: { zh: '处理更快、成本更低，适合普通字幕和角落文字水印。', en: 'Faster and lower cost, for ordinary subtitles and corner text watermarks.' } },
-  { id: 'standard', zh: '专业', en: 'Professional', description: { zh: '更注重背景修复，适合对画质要求较高的字幕和文字水印。', en: 'Higher-quality background repair for subtitles and text watermarks.' } },
-  { id: 'precise', zh: '精准', en: 'Precise', description: { zh: '加强目标识别，适合图形 Logo、角标和复杂目标区分，成本更高。', en: 'More precise detection for graphic logos, corner marks and complex target selection, at higher cost.' } },
+  { id: 'lite' },
+  { id: 'standard' },
+  { id: 'precise' },
 ] as const;
+/** A tier's name and what it suits, in the engine catalog. */
+export const erasureTierKeys = (tier: ErasureTier) => ({ name: `engine.erasureTier.${tier}`, detail: `engine.erasureTier.${tier}Detail` });
 export const ERASURE_OUTPUT = { fps: 30, resolution: '1080p' } as const;
 export interface ErasureMeter { durationSec: number; fps: number; width: number; height: number }
 /** Published LAS coefficients. Use actual output pixels, independent of portrait/landscape orientation. */

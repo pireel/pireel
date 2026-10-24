@@ -1,18 +1,20 @@
 import type { EditorDocumentV2, GraphicTimelineClip, MediaTimelineClip } from './editor-document';
 
 export const PIP_TEMPLATES = [
-  { id: 'smart', zh: '智能匹配', en: 'Smart fit' },
-  { id: 'inset', zh: '素材小窗', en: 'Footage inset' },
-  { id: 'dim', zh: '背景压暗', en: 'Dim background' },
-  { id: 'split', zh: '素材在上', en: 'Footage on top' },
-  { id: 'split-bottom', zh: '素材在下', en: 'Footage below' },
-  { id: 'presenter', zh: '人物小窗', en: 'Presenter inset' },
+  { id: 'smart' },
+  { id: 'inset' },
+  { id: 'dim' },
+  { id: 'split' },
+  { id: 'split-bottom' },
+  { id: 'presenter' },
   // A shot's layout only (smart fit or a timeline choice), never a whole-video template: the footage fills the frame.
-  { id: 'full', zh: '素材全屏', en: 'Full-screen footage', shotOnly: true },
+  { id: 'full', shotOnly: true },
   // Person-cutout layouts are no longer offered; projects that saved them still render.
-  { id: 'cutout', zh: '人像出框', en: 'Foreground presenter', retired: true },
-  { id: 'cutout-small', zh: '抠像小窗', en: 'Cutout inset', retired: true },
+  { id: 'cutout', retired: true },
+  { id: 'cutout-small', retired: true },
 ] as const;
+/** A layout's catalog key (`engine.pipTemplate.<id>`); split layouts add `<key>Side` for a landscape canvas. */
+export const pipTemplateKey = (id: string) => `engine.pipTemplate.${id.replace(/-(\w)/g, (_, c: string) => c.toUpperCase())}`;
 export type PipTemplate = typeof PIP_TEMPLATES[number]['id'];
 /** The layouts users can pick. */
 export const PIP_PICKER_TEMPLATES = PIP_TEMPLATES.filter(template => !('retired' in template) && !('shotOnly' in template));

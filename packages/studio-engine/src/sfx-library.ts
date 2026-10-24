@@ -331,7 +331,8 @@ export function legacySfxSound(style: string, index: number) {
   return choices[index % choices.length];
 }
 
-export function sfxSoundLabel(id: string, locale: 'zh' | 'en') {
+/** A sound's name in `locale`; the bank ships Chinese and English names, other locales read English. */
+export function sfxSoundLabel(id: string, locale: string) {
   const sound = sfxSound(id); if (!sound) return undefined;
   if (locale === 'zh') return sound.label;
   if (sound.en) return sound.en;
