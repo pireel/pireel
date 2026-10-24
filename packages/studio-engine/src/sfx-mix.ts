@@ -17,19 +17,19 @@ export function speechLevelProfile(channels: readonly Float32Array[], sampleRate
   for (let i = 0; i < rms.length; i++) rms[i] = Math.sqrt(rms[i] / Math.max(1, counts[i]));
   return { rms, peaks, durationSec: length / sampleRate, referenceRms: percentile(Array.from(rms).filter(value => value > .003), .65) || .04 };
 }
-export function normalizeSound(pcm: Float32Array, rate: number, maxDurationSec = 1.5): Float32Array {
+export function normalizeSound(pcm: Float32Array, rate: number, maxDurationSec = 1.5, preserveTiming = false): Float32Array {
   if (!pcm.length) throw new Error('音效文件为空。');
   let mean = 0; for (const value of pcm) { if (!Number.isFinite(value)) throw new Error('音效采样无效。'); mean += value; } mean /= pcm.length;
   let peak = 0; for (const value of pcm) peak = Math.max(peak, Math.abs(value - mean));
   if (peak < .0001) throw new Error('音效文件没有可用声音。');
   const threshold = peak * .006; let first = 0; let last = pcm.length - 1;
-  while (first < last && Math.abs(pcm[first] - mean) < threshold) first++;
-  while (last > first && Math.abs(pcm[last] - mean) < threshold) last--;
+  while (!preserveTiming && first < last && Math.abs(pcm[first] - mean) < threshold) first++;
+  while (!preserveTiming && last > first && Math.abs(pcm[last] - mean) < threshold) last--;
   first = Math.max(0, first - Math.round(rate * .003)); last = Math.min(pcm.length - 1, last + Math.round(rate * .02));
   const count = Math.min(last - first + 1, Math.round(rate * maxDurationSec));
   const result = new Float32Array(Math.max(Math.ceil(rate * .22), count));
   for (let i = 0; i < count; i++) {
-    const edge = Math.min(1, i / Math.max(1, rate * .003), (count - 1 - i) / Math.max(1, rate * .012));
+    const edge = preserveTiming ? 1 : Math.min(1, i / Math.max(1, rate * .003), (count - 1 - i) / Math.max(1, rate * .012));
     result[i] = (pcm[first + i] - mean) * .75 / peak * Math.max(0, edge);
   }
   return result;
@@ -41,8 +41,8 @@ function activeRms(pcm: Float32Array) {
   return Math.sqrt(sum / Math.max(1, count));
 }
 /** Bake the level and headroom envelope into the SFX file. Preview/export read the same samples. */
-export function mixSoundToSpeech(pcm: Float32Array, rate: number, profile: SpeechLevelProfile, startSec: number, intensity: SfxIntensity, reserved = new Float32Array(profile.peaks.length), maxDurationSec = 1.5) {
-  const normalized = normalizeSound(pcm, rate, maxDurationSec);
+export function mixSoundToSpeech(pcm: Float32Array, rate: number, profile: SpeechLevelProfile, startSec: number, intensity: SfxIntensity, reserved = new Float32Array(profile.peaks.length), maxDurationSec = 1.5, preserveTiming = false) {
+  const normalized = normalizeSound(pcm, rate, maxDurationSec, preserveTiming);
   const nearby = Array.from(profile.rms.slice(Math.max(0, Math.floor((startSec - 1) * 10)), Math.ceil((startSec + 1.5) * 10))).filter(value => value > .003);
   // The level follows the recording: nearby speech, but not below half its typical level, so an
   // effect in a pause stays audible. No absolute floor: it put effects over quiet recordings' speech.
@@ -70,5 +70,10 @@ export function mixSoundToSpeech(pcm: Float32Array, rate: number, profile: Speec
   }
   const base = Math.floor(startSec * 1000);
   for (let i = 0; i < contributions.length && base + i < reserved.length; i++) reserved[base + i] += contributions[i];
+  if (preserveTiming) {
+    // The source may have been trimmed at timeline zero or cut by the video's end. Protect only
+    // those output edges; do not remove silence or change the measured internal sync points.
+    for (let i = 0; i < mixed.length; i++) mixed[i] *= Math.max(0, Math.min(1, i / Math.max(1, rate * .001), (mixed.length - 1 - i) / Math.max(1, rate * .003)));
+  }
   return { pcm: mixed, gainDb: 20 * Math.log10(Math.max(.00001, gain)), speechRms, targetRms, outputRms: activeRms(mixed), limitedBlocks };
 }

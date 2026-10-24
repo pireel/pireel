@@ -31,3 +31,16 @@ it('keeps effects under the narration of a quiet recording', () => {
   const profile = speechLevelProfile([sine(4, .018)], 48000); const speech = rms(sine(1, .018));
   for (const intensity of ['gentle', 'normal', 'emphasis'] as const) expect(mixSoundToSpeech(sine(.3, .5, 48000, 900), 48000, profile, 1, intensity).outputRms).toBeLessThan(speech);
 });
+
+it('preserves measured recipe pre-roll while legacy files still trim leading silence', () => {
+  const rate = 48000;
+  const pcm = new Float32Array(rate);
+  for (let i = rate / 4; i < rate / 2; i++) pcm[i] = .5 * Math.sin((i - rate / 4) * 2 * Math.PI * 440 / rate);
+  const profile = speechLevelProfile([Float32Array.from({ length: rate * 3 }, (_, i) => .2 * Math.sin(i * .1))], rate);
+  const preserved = mixSoundToSpeech(pcm, rate, profile, 1, 'normal', undefined, 5, true).pcm;
+  const legacy = mixSoundToSpeech(pcm, rate, profile, 1, 'normal').pcm;
+  expect(preserved.length).toBe(rate);
+  expect(legacy.length).toBeLessThan(rate / 2);
+  expect(preserved.slice(0, rate / 5).every(v => Math.abs(v) < .00001)).toBe(true);
+  expect(Math.max(...preserved.slice(rate / 4, rate / 4 + 1000))).toBeGreaterThan(.01);
+});
