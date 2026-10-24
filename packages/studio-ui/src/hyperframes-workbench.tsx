@@ -7355,7 +7355,7 @@ export function HyperframesWorkbench({
   ) => (toolId === 'generate_cover' || toolId === 'run_v3' && input.name === 'generate_cover') ? (async () => {
     const args = (toolId === 'run_v3' ? input.args ?? input.input ?? {} : input) as Record<string, unknown>;
     try {
-      if (args.action !== 'status' && !editorDocumentRef.current.semantics.editingSkills?.includes('cover') && !opts?.coverRequested) return { ok: true, summary: localeRef.current === 'zh' ? '自动封面已关闭' : 'Automatic cover is off', data: { status: 'disabled', available: false } };
+      if (args.action !== 'status' && !editorDocumentRef.current.semantics.editingSkills?.includes('cover') && !opts?.coverRequested) return { ok: true, summary: localeRef.current === 'zh' ? t('ui.workbenchCover.autoOff') : 'Automatic cover is off', data: { status: 'disabled', available: false } };
       let data;
       if (args.action === 'status') data = await coverController.refresh();
       else {
@@ -7364,7 +7364,7 @@ export function HyperframesWorkbench({
         finally { setCoverSceneBusy(false); }
       }
       return { ok: data.status !== 'failed', summary: coverSceneStatus(coverSceneFromDocument(editorDocumentRef.current)), data };
-    } catch { return { ok: false, error: localeRef.current === 'zh' ? '封面制作未完成，请在封面场景中重试。' : 'Cover incomplete. Retry in the cover scene.' }; }
+    } catch { return { ok: false, error: localeRef.current === 'zh' ? t('ui.workbenchCover.incomplete') : 'Cover incomplete. Retry in the cover scene.' }; }
   })() : workflowBusyRef.current ? Promise.resolve({ ok: false, error: "A workflow is running. Wait for it to finish before editing." } satisfies StudioToolResult) : (toolId === "run_v3"
     // v3 surface from the chat: same executor as the external bridge, with the chat surface carried in the input
     // so parked interactions (ask_user / approvals) render as chat cards.
@@ -9134,14 +9134,14 @@ export function HyperframesWorkbench({
             };
           },
           assertWritable: () => {
-            if (displacedRef.current || coverApplyingRef.current || chatBusy || bridgeToolsInFlight > 0) throw new Error(locale === 'zh' ? '当前作品正在被其他任务编辑。' : 'Another task is editing this output.');
+            if (displacedRef.current || coverApplyingRef.current || chatBusy || bridgeToolsInFlight > 0) throw new Error(t('ui.hyperframesWorkbench.anotherTaskEditingOutput'));
           },
           prepareMedia: async () => {
             const document = editorDocumentRef.current;
             const sourceId = firstNarrativeAssetId(document);
             const asset = sourceId ? document.assets[sourceId] : undefined;
             const file = asset ? await speechFileForAsset(asset) : null;
-            if (!file) throw new Error(locale === 'zh' ? '无法读取原素材，请在素材面板恢复文件。' : 'Source media is unavailable. Restore the file in Materials.');
+            if (!file) throw new Error(t('ui.hyperframesWorkbench.sourceMediaUnavailableRestore'));
           },
           call: async (name, args) => {
             const result = await persistToolMutation(runAgentExternalTool(agentToolCtx, 'run_v3', { name, args, surface: 'bridge' }));
@@ -9163,7 +9163,7 @@ export function HyperframesWorkbench({
             className="text-ink-3 hover:bg-panel-2/20 hover:text-ink inline-flex size-8 shrink-0 items-center justify-center rounded-md">
             <ArrowLeft size={16} />
           </a> : null}
-          {whiteboardScene ? <span className="text-sm font-medium">{locale === 'zh' ? '白板视频' : 'Whiteboard video'}</span> : <EditorModeSwitch mode={editingMode} onChange={selectEditingMode} />}
+          {whiteboardScene ? <span className="text-sm font-medium">{t('ui.hyperframesWorkbench.whiteboardVideo')}</span> : <EditorModeSwitch mode={editingMode} onChange={selectEditingMode} />}
         </div>
         <div className="flex min-w-0 items-center gap-3">
           {!AccountControls && themeToggle}
@@ -9172,11 +9172,11 @@ export function HyperframesWorkbench({
             document={editorDocument}
             onReadTranscript={async () => {
               const document = editorDocumentRef.current; const id = firstNarrativeAssetId(document);
-              if (!id) throw new Error('请先导入原声视频。');
+              if (!id) throw new Error(t('ui.workbenchMedia.importVoice'));
               const existing = document.semantics.transcripts[id];
               if (existing?.length) return existing.map(cue => cue.text).join('\n');
               const file = await speechFileForAsset(document.assets[id]);
-              if (!file) throw new Error('无法读取原声文件，请恢复素材。');
+              if (!file) throw new Error(t('ui.workbenchMedia.voiceUnreadable'));
               const { transcribeFile } = await import('@pireel/studio-ui/media-ai');
               const cues = await transcribeFile(file, { projectId });
               if (editorDocumentRef.current.assets[id]) commit({ op: 'transcripts.set', input: { transcripts: { [id]: cues } } });
@@ -9190,10 +9190,10 @@ export function HyperframesWorkbench({
         </div>
       </header>
       {whiteboardScene && <div className="bg-canvas flex shrink-0 flex-wrap items-center gap-3 rounded-sm px-4 py-3" role="status">
-        {(chatBusy || startPrompt || !bootDataReady) && sceneState !== 'attention' ? <><Loader2 size={15} className="animate-spin" /><span className="text-sm">{locale === 'zh' ? '正在理解讲解并编排白板画面…' : 'Understanding the narration and composing your whiteboard…'}</span></>
-          : <span className="text-sm">{sceneCanExport ? (locale === 'zh' ? '白板视频已生成，可以预览和导出。' : 'Your whiteboard video is ready to preview and export.') : (locale === 'zh' ? '生成尚未完成，请查看进度继续处理。' : 'Generation is not complete. Check progress to continue.')}</span>}
-        <button type="button" className="text-ink-3 hover:text-ink ml-auto rounded-md px-2 py-1 text-xs" onClick={() => { setSceneDetails(value => !value); setEditingMode('chat'); }}>{sceneDetails ? (locale === 'zh' ? '收起详情' : 'Hide details') : (locale === 'zh' ? '查看进度' : 'View progress')}</button>
-        {!chatBusy && !startPrompt && bootDataReady && !sceneCanExport && <button type="button" className="bg-panel text-ink rounded-md px-3 py-1.5 text-xs" onClick={() => { setSceneDetails(true); setEditingMode('chat'); chatRef.current?.send(locale === 'zh' ? '继续完成白板视频。先检查已有成果和错误，不要重复已完成的识别或重新扣费生成。保持原声、所选主题和比例，补全覆盖整段视频的白板画面，检查预览后再完成。' : 'Continue the whiteboard video from the current state. Check existing work and errors first; do not repeat completed transcription or paid generation. Keep the original audio, chosen theme and aspect. Complete full-duration board coverage and verify the preview.'); }}>{locale === 'zh' ? '继续生成' : 'Continue generation'}</button>}
+        {(chatBusy || startPrompt || !bootDataReady) && sceneState !== 'attention' ? <><Loader2 size={15} className="animate-spin" /><span className="text-sm">{t('ui.hyperframesWorkbench.understandingNarrationComposingWhiteboard')}</span></>
+          : <span className="text-sm">{sceneCanExport ? (t('ui.hyperframesWorkbench.whiteboardVideoReadyPreview')) : (t('ui.hyperframesWorkbench.generationNotCompleteCheck'))}</span>}
+        <button type="button" className="text-ink-3 hover:text-ink ml-auto rounded-md px-2 py-1 text-xs" onClick={() => { setSceneDetails(value => !value); setEditingMode('chat'); }}>{sceneDetails ? (t('ui.hyperframesWorkbench.hideDetails')) : (t('ui.hyperframesWorkbench.viewProgress'))}</button>
+        {!chatBusy && !startPrompt && bootDataReady && !sceneCanExport && <button type="button" className="bg-panel text-ink rounded-md px-3 py-1.5 text-xs" onClick={() => { setSceneDetails(true); setEditingMode('chat'); chatRef.current?.send(t('ui.hyperframesWorkbench.continueWhiteboardVideoFrom')); }}>{t('ui.hyperframesWorkbench.continueGeneration')}</button>}
       </div>}
       <div data-studio-body className="flex min-h-0 min-w-0 flex-1 gap-1.5">
       {/* Agent file injection: the stable input and empty-canvas trigger below let an external agent

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Minus, Plus } from 'lucide-react';
 import { fmtTick, rulerStep, RULER_H } from '@pireel/studio-ui/timeline-utils';
 import { coverFrameAtTime, type CoverFrameStripData, type CoverSourceFrame } from '@pireel/studio-ui/cover-frame-selection';
+import { t } from './i18n';
 
 /** Read-only Studio filmstrip: an independent playhead never seeks or edits the project. */
 export function CoverFrameTimeline({ strip, at, disabled, zh, onPreview, onCommit, onCancel }: {
@@ -33,10 +34,10 @@ export function CoverFrameTimeline({ strip, at, disabled, zh, onPreview, onCommi
     const x = at * pps;
     if (x < element.scrollLeft || x > element.scrollLeft + element.clientWidth - 12) element.scrollLeft = Math.max(0, x - element.clientWidth / 2);
   }, [at, pps]);
-  return <section aria-label={zh ? '视频缩略图时间轴' : 'Video frame strip'} className="border-line bg-panel shrink-0 overflow-hidden rounded-md border">
-    <div className="text-ink-3 flex items-center gap-2 px-3 py-2 text-xs"><span>{zh ? '选帧' : 'Choose a frame'}</span><span className="font-mono text-[11px] tabular-nums">{at.toFixed(3)}s / {duration.toFixed(2)}s</span><span className="ml-auto text-[10px]">{zh ? '拖动选帧 · 滚动浏览' : 'Drag to scrub · Scroll to browse'}</span><button type="button" aria-label={zh ? '缩小时间轴' : 'Zoom out timeline'} disabled={zoom <= 1} onClick={() => setZoom(value => Math.max(1, value / 2))} className="p-1 disabled:opacity-30"><Minus size={13} /></button><button type="button" aria-label={zh ? '放大时间轴' : 'Zoom in timeline'} disabled={zoom >= 8} onClick={() => setZoom(value => Math.min(8, value * 2))} className="p-1 disabled:opacity-30"><Plus size={13} /></button></div>
+  return <section aria-label={t('ui.coverFrameTimeline.videoFrameStrip')} className="border-line bg-panel shrink-0 overflow-hidden rounded-md border">
+    <div className="text-ink-3 flex items-center gap-2 px-3 py-2 text-xs"><span>{t('ui.coverFrameTimeline.chooseFrame')}</span><span className="font-mono text-[11px] tabular-nums">{at.toFixed(3)}s / {duration.toFixed(2)}s</span><span className="ml-auto text-[10px]">{t('ui.coverFrameTimeline.dragScrubScrollBrowse')}</span><button type="button" aria-label={t('ui.coverFrameTimeline.zoomOutTimeline')} disabled={zoom <= 1} onClick={() => setZoom(value => Math.max(1, value / 2))} className="p-1 disabled:opacity-30"><Minus size={13} /></button><button type="button" aria-label={t('ui.coverFrameTimeline.zoomTimeline')} disabled={zoom >= 8} onClick={() => setZoom(value => Math.min(8, value * 2))} className="p-1 disabled:opacity-30"><Plus size={13} /></button></div>
     <div ref={viewport} data-cover-frame-scroll className="overflow-x-auto overscroll-contain pb-2">
-      <div ref={content} role="slider" aria-label={zh ? '精确选帧' : 'Precise frame selection'} aria-valuemin={0} aria-valuemax={max} aria-valuenow={at} aria-valuetext={`${at.toFixed(3)}s`} aria-disabled={disabled} tabIndex={disabled ? -1 : 0} className="relative cursor-ew-resize touch-pan-x select-none focus-visible:outline-2 focus-visible:outline-accent" style={{ width: duration * pps + 16 }}
+      <div ref={content} role="slider" aria-label={t('ui.coverFrameTimeline.preciseFrameSelection')} aria-valuemin={0} aria-valuemax={max} aria-valuenow={at} aria-valuetext={`${at.toFixed(3)}s`} aria-disabled={disabled} tabIndex={disabled ? -1 : 0} className="relative cursor-ew-resize touch-pan-x select-none focus-visible:outline-2 focus-visible:outline-accent" style={{ width: duration * pps + 16 }}
         onPointerDown={event => { if (disabled || event.button !== 0) return; event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); seek(event.clientX); }}
         onPointerMove={event => { if (drag.current) seek(event.clientX); }}
         onPointerUp={event => { if (!drag.current) return; seek(event.clientX); const frame = drag.current; drag.current = null; event.currentTarget.releasePointerCapture(event.pointerId); if (frame) onCommit(frame); }}

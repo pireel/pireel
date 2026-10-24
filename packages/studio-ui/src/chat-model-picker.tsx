@@ -3,6 +3,7 @@ import { Popover, RadioGroup } from 'radix-ui';
 import { Check, ChevronDown } from 'lucide-react';
 import { STUDIO_AGENT_MODELS, type StudioAgentModelId } from '@pireel/studio-engine/agent-models';
 import { studioLocale } from '@pireel/studio-ui/i18n';
+import { t } from './i18n';
 
 export function ChatModelPicker({ value, disabled, onChange, locale }: {
   locale?: string;
@@ -11,8 +12,8 @@ export function ChatModelPicker({ value, disabled, onChange, locale }: {
   const [open, setOpen] = useState(false);
   const current = STUDIO_AGENT_MODELS.find(model => model.id === value)!;
   const zh = (locale ?? studioLocale()).startsWith('zh');
-  const label = zh ? 'Agent 模型' : 'Agent model';
-  const version = (model: typeof STUDIO_AGENT_MODELS[number]) => model.id === 'auto' ? zh ? '高性价比' : 'Cost-efficient' : model.version;
+  const label = t('ui.chatModelPicker.agentModel');
+  const version = (model: typeof STUDIO_AGENT_MODELS[number]) => model.id === 'auto' ? t('ui.chatModelPicker.costEfficient') : model.version;
   return <Popover.Root open={open && !disabled} onOpenChange={setOpen}>
     <Popover.Trigger asChild><button type="button" disabled={disabled} aria-label={`${label}: ${current.label} ${version(current)}`} className="text-ink-3 hover:text-ink hover:bg-panel-2 inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-[11px] disabled:opacity-50">
       {current.label}<ChevronDown size={12} />

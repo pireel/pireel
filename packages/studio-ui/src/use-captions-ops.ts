@@ -597,11 +597,11 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
   };
   const emphasizeCaptions = async () => {
     const select = studioProviders().captionEmphasis;
-    if (!select) throw new Error('当前环境尚未连接重点词服务。');
+    if (!select) throw new Error(t('ui.captionsOps.highlightMissing'));
     const before = documentRef.current;
     const fingerprint = JSON.stringify(before);
     const after = await emphasizeCaptionDocument(before, (rows) => select(rows));
-    if (JSON.stringify(documentRef.current) !== fingerprint) throw new Error('字幕已发生变化，请重新选择重点词。');
+    if (JSON.stringify(documentRef.current) !== fingerprint) throw new Error(t('ui.captionsOps.captionsChanged'));
     if (after === before) return;
     const landed = commit(restoreOp(before, after), { origin: 'user' });
     if (!landed.ok) throw new Error(editorErrorMessage(landed.error));

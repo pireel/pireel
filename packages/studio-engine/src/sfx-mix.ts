@@ -1,10 +1,11 @@
 import type { SfxIntensity } from './sfx-library';
+import { t } from './i18n';
 export const SFX_MIX_VERSION = 'speech-relative-4';
 export interface SpeechLevelProfile { rms: Float32Array; peaks: Float32Array; durationSec: number; referenceRms: number }
 const percentile = (values: number[], q: number) => values.length ? values.sort((a, b) => a - b)[Math.min(values.length - 1, Math.floor(values.length * q))] : 0;
 /** Stereo-safe energy and 1ms peak bounds, without retaining a second full audio buffer. */
 export function speechLevelProfile(channels: readonly Float32Array[], sampleRate: number): SpeechLevelProfile {
-  if (!channels.length || !(sampleRate > 0) || !channels[0].length) throw new Error('无法分析原声音量。');
+  if (!channels.length || !(sampleRate > 0) || !channels[0].length) throw new Error(t('engine.sfxMix.voiceUnreadable'));
   const length = channels[0].length; const rms = new Float32Array(Math.ceil(length / sampleRate * 10)); const counts = new Uint32Array(rms.length);
   const peaks = new Float32Array(Math.ceil(length / sampleRate * 1000));
   for (let i = 0; i < length; i++) {
@@ -18,10 +19,10 @@ export function speechLevelProfile(channels: readonly Float32Array[], sampleRate
   return { rms, peaks, durationSec: length / sampleRate, referenceRms: percentile(Array.from(rms).filter(value => value > .003), .65) || .04 };
 }
 export function normalizeSound(pcm: Float32Array, rate: number, maxDurationSec = 1.5, preserveTiming = false): Float32Array {
-  if (!pcm.length) throw new Error('音效文件为空。');
-  let mean = 0; for (const value of pcm) { if (!Number.isFinite(value)) throw new Error('音效采样无效。'); mean += value; } mean /= pcm.length;
+  if (!pcm.length) throw new Error(t('engine.sfxMix.empty'));
+  let mean = 0; for (const value of pcm) { if (!Number.isFinite(value)) throw new Error(t('engine.sfxMix.badSamples')); mean += value; } mean /= pcm.length;
   let peak = 0; for (const value of pcm) peak = Math.max(peak, Math.abs(value - mean));
-  if (peak < .0001) throw new Error('音效文件没有可用声音。');
+  if (peak < .0001) throw new Error(t('engine.sfxMix.silent'));
   const threshold = peak * .006; let first = 0; let last = pcm.length - 1;
   while (!preserveTiming && first < last && Math.abs(pcm[first] - mean) < threshold) first++;
   while (!preserveTiming && last > first && Math.abs(pcm[last] - mean) < threshold) last--;
@@ -54,7 +55,7 @@ export function mixSoundToSpeech(pcm: Float32Array, rate: number, profile: Speec
   const targetRms = Math.min(.16, speechRms * ratio);
   const gain = Math.min(4, targetRms / Math.max(.0001, activeRms(normalized)));
   const length = Math.min(normalized.length, Math.max(0, Math.floor((profile.durationSec - startSec) * rate)));
-  if (length < rate * .2) throw new Error('音效位置过于接近视频结尾。');
+  if (length < rate * .2) throw new Error(t('engine.sfxMix.tooLate'));
   const mixed = new Float32Array(length); const blocks = Math.ceil(length / rate * 1000); const contributions = new Float32Array(blocks + 2); let envelope = 1; let limitedBlocks = 0;
   for (let b = 0; b < blocks; b++) {
     const from = Math.floor(b * rate / 1000); const end = Math.min(length, Math.floor((b + 1) * rate / 1000));

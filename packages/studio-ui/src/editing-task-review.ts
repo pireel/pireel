@@ -6,6 +6,7 @@ import { isWhiteboardDirectorTask, type ChatTask } from '@pireel/studio-ui/chat-
 import { projectDocumentToComposition } from '@pireel/studio-engine/project-document';
 import { whiteboardSceneReady } from '@pireel/studio-ui/whiteboard-scene-result';
 import type { EditingEvidence } from '@pireel/studio-ui/first-pass';
+import { t } from './i18n';
 
 export const EDIT_REVIEW_FEATURES = ['graphics', 'b-roll', 'sound', 'zoom', 'transitions'] as const;
 export type EditReviewFeature = typeof EDIT_REVIEW_FEATURES[number];
@@ -81,11 +82,11 @@ export function needsBrandCover(task: ChatTask): boolean {
 /** A separate delivery: match a cover job from this task to its settled, registered image. */
 function reviewBrandCover(task: ChatTask, value: unknown, document: EditorDocumentV2 | undefined, messages: readonly UIMessage[]): { ok: true; cover?: EditingTaskReview['cover'] } | { ok: false; error: string; missing?: string[] } {
   if (!needsBrandCover(task)) return { ok: true };
-  if (document?.semantics.editingSkills && !document.semantics.editingSkills.includes('cover')) return { ok: true, cover: { status: 'skipped', reason: '已关闭自动封面，本次剪辑不制作封面。' } };
+  if (document?.semantics.editingSkills && !document.semantics.editingSkills.includes('cover')) return { ok: true, cover: { status: 'skipped', reason: t('ui.editingReview.coverOff') } };
   const scene = document ? coverSceneFromDocument(document) : null;
   if (scene) {
-    if (scene.phase === 'ready' && scene.images.length && scene.inputFingerprint === coverSceneInput(document!).fingerprint) return { ok: true, cover: { status: 'generated', reason: '封面已在独立封面场景中完成，可打开查看和应用。', jobId: scene.jobId } };
-    return { ok: true, cover: { status: 'blocked', reason: scene.phase === 'failed' ? '封面制作未完成，请在独立封面场景中重试。' : scene.phase === 'ready' ? '口播内容已改变，请通过封面工具更新封面。' : '封面正在独立制作，完成后可打开查看和应用。' } };
+    if (scene.phase === 'ready' && scene.images.length && scene.inputFingerprint === coverSceneInput(document!).fingerprint) return { ok: true, cover: { status: 'generated', reason: t('ui.editingReview.coverDone'), jobId: scene.jobId } };
+    return { ok: true, cover: { status: 'blocked', reason: scene.phase === 'failed' ? t('ui.editingReview.coverIncomplete') : scene.phase === 'ready' ? t('ui.editingReview.coverStale') : t('ui.editingReview.coverRunning') } };
   }
   if (!value || typeof value !== 'object') return { ok: false, error: 'Call generate_cover for the enabled cover before finishing; no confirmation is needed.', missing: ['cover'] };
   const row = value as Record<string, unknown>;

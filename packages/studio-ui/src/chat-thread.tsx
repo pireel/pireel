@@ -362,7 +362,7 @@ export function ChatThread({
         const result = saveEditingDirectorPlan(task, requestedInput, document);
         if (!result.ok) { publishSuccess(result); return; }
         updateTask(task.id, current => ({ ...current, directorPlan: result.plan, review: undefined }));
-        publishSuccess({ ok: true, summary: studioLocale().startsWith('zh') ? '剪辑思路已确定' : 'Editing direction saved', data: { plan: result.plan, next: 'Execute this plan now. Resolve source anchors against the current timeline after structural cuts; no approval stop.' } });
+        publishSuccess({ ok: true, summary: studioLocale().startsWith('zh') ? t('ui.chatThread.planSaved') : 'Editing direction saved', data: { plan: result.plan, next: 'Execute this plan now. Resolve source anchors against the current timeline after structural cuts; no approval stop.' } });
         return;
       }
       const planBlock = directorPlanToolBlock(task, id, canMutate, requestedInput);
@@ -375,7 +375,7 @@ export function ChatThread({
         const result = reviewEditingTask(task, requestedInput, fineCutClips(), getDocument?.(), messagesForTask(effectiveStudioTurnMessages(messagesRef.current, ledger), task.id));
         if (!result.ok) { publishSuccess({ ok: false, error: result.error, ...(result.missing ? { data: { missing: result.missing } } : {}) }); return; }
         updateTask(task.id, current => ({ ...current, review: result.review }));
-        publishSuccess({ ok: true, summary: studioLocale().startsWith('zh') ? '已核对剪辑结果' : 'Editing result checked', data: { review: result.review, taskIncomplete: !result.review.completed } });
+        publishSuccess({ ok: true, summary: studioLocale().startsWith('zh') ? t('ui.chatThread.editChecked') : 'Editing result checked', data: { review: result.review, taskIncomplete: !result.review.completed } });
         return;
       }
       if (id === "undo" && shouldBlockStudioTurnUndo(ledger)) {
@@ -383,7 +383,7 @@ export function ChatThread({
           ok: true,
           skipped: true,
           summary: studioLocale().toLowerCase().startsWith("zh")
-            ? "上一项失败且未改动时间线，已跳过撤销"
+            ? t('ui.chatThread.undoSkipped')
             : "The previous operation failed without changing the timeline, so undo was skipped.",
           data: { skipped: true, reason: "previous-mutation-failed", didMutate: false },
         });

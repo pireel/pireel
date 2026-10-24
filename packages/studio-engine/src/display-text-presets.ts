@@ -1,3 +1,4 @@
+import { t } from './i18n';
 import { cjkPartnerFamilyCss, webFontById, webFontFamilyCss, webFontFontId, webFontIdOf } from './font-library';
 import { googleFontFamilyCss, googleFontRowOf } from './google-fonts';
 /** Deterministic native display-text vocabulary shared by tools, renderer and future preset UI. */
@@ -50,14 +51,19 @@ export interface DisplayTextPreset {
   defaultAnimation: DisplayTextAnimationId;
 }
 
-/** Product-facing catalog. The ids are persisted; labels can be localized when a picker is added. */
+/** A preset whose name and description read from the engine catalog (`engine.textPreset.<id>`) when used. */
+const preset = (id: DisplayTextPresetId, defaultAnimation: DisplayTextAnimationId): DisplayTextPreset => ({
+  id, defaultAnimation, get label() { return t(`engine.textPreset.${id}`); }, get description() { return t(`engine.textPreset.${id}Detail`); },
+});
+
+/** Product-facing catalog. The ids are persisted. */
 export const DISPLAY_TEXT_PRESETS: readonly DisplayTextPreset[] = [
-  { id: 'clean', label: '清爽白字', description: '简洁高对比，适合补充说明与短句。', defaultAnimation: 'slideUp' },
-  { id: 'editorial', label: '杂志衬线', description: '克制的编辑感，适合观点与情绪句。', defaultAnimation: 'wordReveal' },
-  { id: 'headline', label: '强力标题', description: '粗重紧凑，适合钩子、结论与 CTA。', defaultAnimation: 'popIn' },
-  { id: 'outline', label: '描边大字', description: '保留画面穿透感，适合强调关键词。', defaultAnimation: 'wordSlide' },
-  { id: 'marker', label: '荧光标记', description: '重点词带强调底色，适合证据与卖点。', defaultAnimation: 'highlightPop' },
-  { id: 'label', label: '编辑标签', description: '紧凑色块标签，适合章节、地点与属性。', defaultAnimation: 'highlightBlock' },
+  preset('clean', 'slideUp'),
+  preset('editorial', 'wordReveal'),
+  preset('headline', 'popIn'),
+  preset('outline', 'wordSlide'),
+  preset('marker', 'highlightPop'),
+  preset('label', 'highlightBlock'),
 ] as const;
 
 export const DEFAULT_DISPLAY_TEXT_PRESET: DisplayTextPresetId = 'clean';

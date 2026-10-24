@@ -274,7 +274,7 @@ export function GenerationControls({
       ) : null}
       {hasSettings ? (
         <PopButton icon={<SlidersHorizontal className="h-3.5 w-3.5" strokeWidth={2.2} />} title={t('chatGen.generationSettings')} disabled={disabled}>
-          {intent === 'image' && <ImageGenerationFields value={imageSettings} models={models} locale={studioLocale().startsWith('zh') ? 'zh' : 'en'} disabled={disabled} onChange={next => onChange({ ...params, modelId: next.modelId, imageSize: next.size, quality: next.quality, ratio: imageSizeChoices(next.modelId).find(choice => choice.value === next.size)?.aspect as GenerationParams['ratio'] })} />}
+          {intent === 'image' && <ImageGenerationFields value={imageSettings} models={models} disabled={disabled} onChange={next => onChange({ ...params, modelId: next.modelId, imageSize: next.size, quality: next.quality, ratio: imageSizeChoices(next.modelId).find(choice => choice.value === next.size)?.aspect as GenerationParams['ratio'] })} />}
           {models.length > 1 && intent === 'video' ? (
             <div className="flex items-center gap-1 py-0.5">
               <span className="text-ink-4 w-12 shrink-0 text-[10.5px]">{t('chatGen.model')}</span>

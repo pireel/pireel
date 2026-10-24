@@ -1,9 +1,10 @@
 import { applyCaptionDocumentEdit, managedCaptionLineRows, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import { validateEmphasisSelection, type EmphasisRow, type EmphasisSelection } from '@pireel/studio-engine/caption-emphasis';
+import { t } from './i18n';
 
 export async function emphasizeCaptionDocument(document: EditorDocumentV2, select: (rows: EmphasisRow[]) => Promise<EmphasisSelection[]>, onProgress?: (done: number, total: number) => void): Promise<EditorDocumentV2> {
   const lane = document.timeline.tracks.find((track) => track.id === document.semantics.managedCaptionTrackId);
-  if (lane?.locked) throw new Error('字幕轨道已锁定，请先解锁。');
+  if (lane?.locked) throw new Error(t('ui.captionEmphasis.locked'));
   const targets = (managedCaptionLineRows(document) ?? []).flatMap((row) => {
     const segment = row.assetId ? document.semantics.transcripts[row.assetId]?.[row.seg] : undefined;
     if (!segment || !row.words?.length || !row.assetId) return [];
@@ -32,12 +33,12 @@ export async function selectCaptionEmphasisRows(pending: EmphasisRow[], select: 
   const flush = async () => {
     if (!batch.length) return;
     const selected = validateEmphasisSelection(batch, await select(batch));
-    if (!selected) throw new Error('重点词结果不完整，字幕已保留。请重试。');
+    if (!selected) throw new Error(t('ui.captionEmphasis.incomplete'));
     selections.push(...selected); batch = [];
     onProgress?.(selections.length, pending.length);
   };
   for (const row of pending) {
-    if (row.words.length > 120 || JSON.stringify(row).length > 15000) throw new Error('这条字幕过长，请先重新断句。');
+    if (row.words.length > 120 || JSON.stringify(row).length > 15000) throw new Error(t('ui.captionEmphasis.tooLong'));
     if (batch.length >= 32 || JSON.stringify([...batch, row]).length > 15000) await flush();
     batch.push(row);
   }

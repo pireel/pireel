@@ -1,4 +1,5 @@
 import type { EditorDocumentV2, GraphicTimelineClip, MediaTimelineClip } from './editor-document';
+import { t } from './i18n';
 
 export const PIP_TEMPLATES = [
   { id: 'smart' },
@@ -102,7 +103,7 @@ export function pipGeometry(template: PipTemplate, canvas: Dimensions, asset: Di
   return { ...common, media: inset(asset) };
 }
 export function resolvePipGeometry(options: PipOptions, canvas: Dimensions, asset: Dimensions, source: Dimensions = canvas, captions?: CaptionBand): PipGeometry {
-  if (!validPipOptions(options)) throw new Error('画中画配置无效。');
+  if (!validPipOptions(options)) throw new Error(t('engine.pip.invalid'));
   return pipGeometry(options.template, canvas, asset, options, source, captions);
 }
 
@@ -129,7 +130,7 @@ export function applyPipLayout(document: EditorDocumentV2, options: PipOptions, 
     const geometry = resolvePipGeometry(planned ? { ...options, template: planned } : options, next.canvas, { width: asset.metadata?.width ?? next.canvas.width, height: asset.metadata?.height ?? next.canvas.height }, { width: sourceAsset?.metadata?.width ?? next.canvas.width, height: sourceAsset?.metadata?.height ?? next.canvas.height }, captions);
     clip.box = geometry.media; clip.fit = geometry.mediaFit; clip.linkGroupId = clip.id + '-pip';
     const { startFrame, durationFrames, linkGroupId } = clip;
-    if (geometry.background) grounds.push({ id: clip.id + '-ground', kind: 'graphic', enabled: true, startFrame, durationFrames, linkGroupId, anchor: { type: 'timeline' }, block: { templateId: 'custom', label: '画中画背景', box: { x: 0, y: 0, w: 1, h: 1 }, slots: { innerHtml: `<div style="position:absolute;inset:0;background:${geometry.background}"></div>`, timelineBody: '', authoredDurationSec: durationFrames / next.canvas.fps } } });
+    if (geometry.background) grounds.push({ id: clip.id + '-ground', kind: 'graphic', enabled: true, startFrame, durationFrames, linkGroupId, anchor: { type: 'timeline' }, block: { templateId: 'custom', label: t('engine.pip.background'), box: { x: 0, y: 0, w: 1, h: 1 }, slots: { innerHtml: `<div style="position:absolute;inset:0;background:${geometry.background}"></div>`, timelineBody: '', authoredDurationSec: durationFrames / next.canvas.fps } } });
     if (geometry.speaker) for (const source of primary?.clips ?? []) {
       if (source.kind !== 'narrative' || !source.enabled) continue;
       const start = Math.max(startFrame, source.startFrame); const end = Math.min(startFrame + durationFrames, source.startFrame + source.durationFrames);
@@ -138,8 +139,8 @@ export function applyPipLayout(document: EditorDocumentV2, options: PipOptions, 
       presenters.push({ id: clip.id + '-presenter-' + source.id, kind: 'media', assetId: source.assetId, enabled: true, startFrame: start, durationFrames: end - start, sourceInSec: source.sourceInSec + (start - source.startFrame) * rate, sourceOutSec: source.sourceInSec + (end - source.startFrame) * rate, fit: geometry.speakerFit, anchorX: .5, anchorY: geometry.speakerAnchorY, box: geometry.speaker, linkGroupId, video: { treatment: 'full', audioMuted: true, ...(geometry.speakerCutout ? { personMatte: true } : {}) } });
     }
   }
-  if (grounds.length) next.timeline.tracks.push({ id: groundId, type: 'graphics', name: '画中画背景', stackOrder: 2, hidden: false, muted: true, locked: false, syncLocked: true, clips: grounds });
-  if (presenters.length) next.timeline.tracks.push({ id: presenterId, type: 'visual', name: '人物小窗', stackOrder: 4, hidden: false, muted: true, locked: false, syncLocked: true, clips: presenters });
+  if (grounds.length) next.timeline.tracks.push({ id: groundId, type: 'graphics', name: t('engine.pip.background'), stackOrder: 2, hidden: false, muted: true, locked: false, syncLocked: true, clips: grounds });
+  if (presenters.length) next.timeline.tracks.push({ id: presenterId, type: 'visual', name: t('engine.pip.presenter'), stackOrder: 4, hidden: false, muted: true, locked: false, syncLocked: true, clips: presenters });
   for (const track of next.timeline.tracks) if (track.type === 'caption') track.stackOrder = Math.max(5, track.stackOrder);
   return next;
 }

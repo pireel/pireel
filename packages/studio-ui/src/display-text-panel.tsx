@@ -15,7 +15,7 @@ import {
 import { AlignCenter, AlignLeft, AlignRight, Check, ChevronDown, Loader2, Plus, Search, Type } from 'lucide-react';
 import { WEB_FONTS, webFontFontId, webFontIdOf } from '@pireel/studio-engine/font-library';
 import { googleFontFontId, googleFontRowOf, googleFontsForScripts, type GoogleFontRow } from '@pireel/studio-engine/google-fonts';
-import { studioLocale, t } from './i18n';
+import { localized, studioLocale, t } from './i18n';
 import { ensureGoogleFontPreview, loadFont } from './web-fonts';
 import type { FontPreview } from './font-previews';
 import {
@@ -175,7 +175,7 @@ export function fontChoiceLabel(value: DisplayTextFontId): string {
   const webId = webFontIdOf(value);
   if (webId) {
     const font = WEB_FONTS.find((candidate) => candidate.id === webId)!;
-    return studioLocale().toLowerCase().startsWith('zh') ? font.label.zh : font.label.en;
+    return localized(font.label);
   }
   const google = googleFontRowOf(value);
   if (google) return google.f;
@@ -245,6 +245,7 @@ export function FontChoiceList({
     }).catch(() => {});
     return () => { alive = false; };
   }, [previews]);
+  // Which scripts to offer first follows the UI language: a feature choice, not copy.
   const zh = studioLocale().toLowerCase().startsWith('zh');
   const selectedFamily = displayTextLocalFontFamily(value);
   const commonSet = new Set(COMMON_FONT_FAMILIES.map((family) => family.toLocaleLowerCase()));
@@ -257,7 +258,7 @@ export function FontChoiceList({
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const matches = (label: string) => !normalizedQuery || label.toLocaleLowerCase().includes(normalizedQuery);
   const builtins = DISPLAY_TEXT_FONT_IDS.filter((id) => matches(t(`displayText.font.${id}`)));
-  const webFonts = WEB_FONTS.filter((font) => matches(zh ? font.label.zh : font.label.en) || matches(font.family));
+  const webFonts = WEB_FONTS.filter((font) => matches(localized(font.label)) || matches(font.family));
   const common = COMMON_FONT_FAMILIES.filter(matches);
   const system = selectedMissing.filter((font) => matches(font.family));
   // Google: a query searches every script ("inter" from a Chinese UI is a legitimate ask); the idle
@@ -329,7 +330,7 @@ export function FontChoiceList({
           if (group === 'web' && webFonts.length > 0) return (
             <div key={group}>
               <div className="text-ink-4 px-2 pb-1 pt-2 text-[9px] tracking-[0.1em] uppercase">{t('displayText.webFonts')}</div>
-              {webFonts.map((font) => fontRow(webFontFontId(font), zh ? font.label.zh : font.label.en, undefined, previews?.[font.id]))}
+              {webFonts.map((font) => fontRow(webFontFontId(font), localized(font.label), undefined, previews?.[font.id]))}
             </div>
           );
           if (group === 'google' && google.length > 0) return (
