@@ -12,9 +12,9 @@
  *   own, default en) — set ONCE before render; no runtime reactivity (switching
  *   language = route change + full-page reload, matching app-router behavior).
  * - Interpolation: `t('captions.linesDone', { done, total })`, {name} placeholders.
- * - Client-side UI strings ONLY: the server (Worker) has cross-request shared module
- *   scope where this global locale is unsafe — server-tools/MCP receipts don't go
- *   through here.
+ * - The server (Worker) shares module scope across requests, so a global locale is unsafe
+ *   there: the server host calls setStudioLocaleSource with the current request's locale.
+ *   Server-tools/MCP receipts use tEnglish.
  * - Never call t() at module scope (the shell hasn't injected locale yet): store the
  *   SLUG in constants and wrap with t() at the render/use site.
  */
@@ -27,11 +27,17 @@ const CATALOGS: Record<string, Record<string, string>> = { zh: {}, en: {} };
 /** Keys that missed the active locale's catalog (fell back to zh or the key itself); read by probe/self-check. */
 export const missingKeys = new Set<string>();
 
+let source: (() => StudioLocale) | undefined;
+
 export function setStudioLocale(l: StudioLocale): void {
   locale = l;
 }
+/** Where the locale comes from when it is per request (the server), instead of the global set once. */
+export function setStudioLocaleSource(read: (() => StudioLocale) | undefined): void {
+  source = read;
+}
 export function studioLocale(): StudioLocale {
-  return locale;
+  return source ? source() : locale;
 }
 
 /** Each package merges in its own catalogs (called in the package's i18n entry module body; consuming t triggers registration). Any locale tag is accepted — adding a language needs no core change. */
@@ -40,7 +46,7 @@ export function registerMessages(l: StudioLocale, dict: Record<string, string>):
 }
 
 export function t(key: string, vars?: Record<string, string | number>): string {
-  let msg = CATALOGS[locale]?.[key];
+  let msg = CATALOGS[studioLocale()]?.[key];
   if (msg === undefined) {
     missingKeys.add(key);
     msg = CATALOGS.en[key] ?? key; // en is the guaranteed-complete fallback locale
@@ -51,7 +57,7 @@ export function t(key: string, vars?: Record<string, string | number>): string {
 /** A name from data that ships its own per-language names (font lists, sound banks, workflow templates),
  *  falling back to English like the catalogs do. UI copy belongs in the catalogs, not in such data. */
 export function localized(names: { en: string } & Partial<Record<string, string>>): string {
-  return names[locale] ?? names.en;
+  return names[studioLocale()] ?? names.en;
 }
 
 /** English regardless of the UI locale: tool receipts and error codes read by an agent, which

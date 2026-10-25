@@ -31,13 +31,13 @@ export function brandFeaturePrompt(brand: ConfiguredBrand, id: BrandPromptFeatur
 
 export function validateBrandFeatureSettings(value: unknown): void {
   const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
-  const fail = (path: string): never => { throw new Error(`品牌字段无效：settings.${path}`); };
-  if (!record(value)) fail('需要对象');
+  const fail = (path: string): never => { throw new Error(`Invalid brand field settings${path ? `.${path}` : ''}`); };
+  if (!record(value)) fail('');
   for (const [id, raw] of Object.entries(value as Record<string, unknown>)) {
     if (!(BRAND_PROMPT_FEATURES as readonly string[]).includes(id) || !record(raw)) fail(id);
     const config = raw as Record<string, unknown>;
     if (Object.keys(config).some(key => !['prompt', 'theme'].includes(key))) fail(id);
-    if (config.prompt !== undefined && (typeof config.prompt !== 'string' || config.prompt.length > 4000)) fail(`${id}.prompt（最多 4000 字）`);
+    if (config.prompt !== undefined && (typeof config.prompt !== 'string' || config.prompt.length > 4000)) fail(`${id}.prompt (at most 4000 characters)`);
     if (config.theme !== undefined) {
       if (!BRAND_THEME_FEATURES.includes(id as BrandPromptFeature) || !record(config.theme)) fail(`${id}.theme`);
       for (const [key, token] of Object.entries(config.theme as Record<string, unknown>)) {

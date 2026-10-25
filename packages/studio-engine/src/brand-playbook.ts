@@ -259,26 +259,26 @@ export const hasText = (block: Prose | undefined) => !!block?.text?.trim();
 
 const HEX = /^#[0-9a-f]{6}$/i;
 const MAX_TEXT = 4000;
-function fail(path: string, reason: string): never { throw new Error(`品牌字段无效：${path}（${reason}）`); }
+function fail(path: string, reason: string): never { throw new Error(`Invalid brand field ${path}: ${reason}`); }
 const isObject = (value: unknown): boolean => !!value && typeof value === 'object' && !Array.isArray(value);
 function asset(value: unknown, path: string) {
   const a = value as BrandAsset;
-  if (!isObject(value) || typeof a.key !== 'string' || !a.key || /^(blob|data):/.test(a.key)) fail(path, '需要持久化的素材 key');
-  if (a.kind !== 'image' && a.kind !== 'video') fail(path, 'kind 只能是 image 或 video');
-  if (!(a.width > 0) || !(a.height > 0)) fail(path, '缺少尺寸');
-  if (a.kind === 'video' && !(a.durationSec! > 0)) fail(path, '视频缺少时长');
+  if (!isObject(value) || typeof a.key !== 'string' || !a.key || /^(blob|data):/.test(a.key)) fail(path, 'needs a stored media key');
+  if (a.kind !== 'image' && a.kind !== 'video') fail(path, 'kind must be image or video');
+  if (!(a.width > 0) || !(a.height > 0)) fail(path, 'missing size');
+  if (a.kind === 'video' && !(a.durationSec! > 0)) fail(path, 'video missing duration');
 }
 function prose(value: unknown, path: string) {
-  if (!isObject(value)) fail(path, '需要对象');
+  if (!isObject(value)) fail(path, 'needs an object');
   const text = (value as Prose).text;
-  if (text !== undefined && (typeof text !== 'string' || text.length > MAX_TEXT)) fail(`${path}.text`, `最多 ${MAX_TEXT} 字`);
+  if (text !== undefined && (typeof text !== 'string' || text.length > MAX_TEXT)) fail(`${path}.text`, `at most ${MAX_TEXT} characters`);
 }
 function references(value: unknown, path: string) {
   if (value === undefined) return;
-  if (!Array.isArray(value) || value.length > 8) fail(path, '最多 8 张参考图');
+  if (!Array.isArray(value) || value.length > 8) fail(path, 'at most 8 reference images');
   value.forEach((item, index) => asset(item, `${path}.${index}`));
 }
-function color(value: unknown, path: string) { if (value !== undefined && value !== null && (typeof value !== 'string' || !HEX.test(value))) fail(path, '需要 #RRGGBB'); }
+function color(value: unknown, path: string) { if (value !== undefined && value !== null && (typeof value !== 'string' || !HEX.test(value))) fail(path, 'needs #RRGGBB'); }
 
 /**
  * Blocks of a brand made before the toolkit split (schema 2): its `visual` prose — the picture's
@@ -317,42 +317,42 @@ export function upgradePlaybook<T extends { schema?: number; blocks?: BrandBlock
 
 export function validatePlaybook(value: unknown): BrandPlaybook {
   const p = upgradePlaybook(value as BrandPlaybook);
-  if (!isObject(value)) fail('', '不是对象');
-  if (p.schema !== PLAYBOOK_SCHEMA) fail('schema', `需要 ${PLAYBOOK_SCHEMA}`);
-  if (typeof p.id !== 'string' || !p.id) fail('id', '缺失');
-  if (typeof p.name !== 'string' || !p.name.trim() || p.name.length > 60) fail('name', '1–60 字');
-  if (!Number.isInteger(p.version) || p.version < 1) fail('version', '正整数');
-  if (typeof p.method !== 'string' || !p.method) fail('method', '缺失');
+  if (!isObject(value)) fail('', 'not an object');
+  if (p.schema !== PLAYBOOK_SCHEMA) fail('schema', `needs ${PLAYBOOK_SCHEMA}`);
+  if (typeof p.id !== 'string' || !p.id) fail('id', 'missing');
+  if (typeof p.name !== 'string' || !p.name.trim() || p.name.length > 60) fail('name', '1–60 characters');
+  if (!Number.isInteger(p.version) || p.version < 1) fail('version', 'positive integer');
+  if (typeof p.method !== 'string' || !p.method) fail('method', 'missing');
   if (p.skillId !== undefined && (typeof p.skillId !== 'string' || !p.skillId || p.skillId.length > 100)) fail('skillId', 'Skill id');
   if (p.skills !== undefined && (!Array.isArray(p.skills) || p.skills.some(id => !(BRAND_EDITING_SKILL_IDS as readonly string[]).includes(id)))) fail('skills', BRAND_EDITING_SKILL_IDS.join(' / '));
-  if (!isObject(p.source) || !Array.isArray(p.source.videos) || p.source.videos.length > 30) fail('source', '最多 30 条作品');
-  if (p.source.preview) { asset(p.source.preview, 'source.preview'); if (p.source.preview.kind !== 'image' || typeof p.source.preview.cleaned !== 'boolean') fail('source.preview', '需要图片与 cleaned'); }
-  if (!isObject(p.blocks)) fail('blocks', '缺失');
+  if (!isObject(p.source) || !Array.isArray(p.source.videos) || p.source.videos.length > 30) fail('source', 'at most 30 videos');
+  if (p.source.preview) { asset(p.source.preview, 'source.preview'); if (p.source.preview.kind !== 'image' || typeof p.source.preview.cleaned !== 'boolean') fail('source.preview', 'needs an image and cleaned'); }
+  if (!isObject(p.blocks)) fail('blocks', 'missing');
   const b = p.blocks;
-  for (const key of Object.keys(b)) if (!BLOCK_IDS.includes(key as BlockId)) fail(`blocks.${key}`, '未知的块');
+  for (const key of Object.keys(b)) if (!BLOCK_IDS.includes(key as BlockId)) fail(`blocks.${key}`, 'unknown block');
   for (const id of ['portrait', 'pacing', 'structure'] as const) if (b[id]) prose(b[id], `blocks.${id}`);
   for (const id of TECHNIQUE_BLOCKS) if (b[id]) { prose(b[id], `blocks.${id}`); references(b[id]!.references, `blocks.${id}.references`); }
   if (b.cover) {
-    if (!isObject(b.cover)) fail('blocks.cover', '需要对象');
-    if (b.cover.referenceKeys !== undefined && (!Array.isArray(b.cover.referenceKeys) || b.cover.referenceKeys.length > 8 || b.cover.referenceKeys.some(key => typeof key !== 'string' || !key || /^(blob|data):/.test(key)))) fail('blocks.cover.referenceKeys', '最多 8 张持久化的封面参考图');
-    for (const key of ['frame', 'design'] as const) if (b.cover[key] !== undefined && (typeof b.cover[key] !== 'string' || b.cover[key]!.length > MAX_TEXT)) fail(`blocks.cover.${key}`, `最多 ${MAX_TEXT} 字`);
+    if (!isObject(b.cover)) fail('blocks.cover', 'needs an object');
+    if (b.cover.referenceKeys !== undefined && (!Array.isArray(b.cover.referenceKeys) || b.cover.referenceKeys.length > 8 || b.cover.referenceKeys.some(key => typeof key !== 'string' || !key || /^(blob|data):/.test(key)))) fail('blocks.cover.referenceKeys', 'at most 8 stored cover references');
+    for (const key of ['frame', 'design'] as const) if (b.cover[key] !== undefined && (typeof b.cover[key] !== 'string' || b.cover[key]!.length > MAX_TEXT)) fail(`blocks.cover.${key}`, `at most ${MAX_TEXT} characters`);
   }
   if (b.captions) {
     prose(b.captions, 'blocks.captions');
-    if (typeof b.captions.on !== 'boolean') fail('blocks.captions.on', '布尔');
+    if (typeof b.captions.on !== 'boolean') fail('blocks.captions.on', 'boolean');
     for (const key of ['color', 'accentColor', 'strokeColor', 'emphasis'] as const) color(b.captions.style?.[key], `blocks.captions.style.${key}`);
     const bg = b.captions.style?.bg;
-    if (bg !== undefined && bg !== null && (typeof bg !== 'string' || !/^(#[0-9a-f]{6}|rgba?\([\d.,\s]+\))$/i.test(bg))) fail('blocks.captions.style.bg', '#RRGGBB 或 rgba()');
+    if (bg !== undefined && bg !== null && (typeof bg !== 'string' || !/^(#[0-9a-f]{6}|rgba?\([\d.,\s]+\))$/i.test(bg))) fail('blocks.captions.style.bg', '#RRGGBB or rgba()');
   }
   if (b.logo) {
     asset(b.logo, 'blocks.logo');
-    if (!['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(b.logo.corner)) fail('blocks.logo.corner', '四角之一');
+    if (!['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(b.logo.corner)) fail('blocks.logo.corner', 'one of the four corners');
     if (!(b.logo.widthPct > 0 && b.logo.widthPct <= 40)) fail('blocks.logo.widthPct', '0–40');
     if (!(b.logo.opacity > 0 && b.logo.opacity <= 1)) fail('blocks.logo.opacity', '0–1');
   }
   if (b.overlay_text) {
     prose(b.overlay_text, 'blocks.overlay_text');
-    for (const key of ['font', 'fontLike'] as const) if (b.overlay_text[key] !== undefined && (typeof b.overlay_text[key] !== 'string' || b.overlay_text[key]!.length > 80)) fail(`blocks.overlay_text.${key}`, '字体');
+    for (const key of ['font', 'fontLike'] as const) if (b.overlay_text[key] !== undefined && (typeof b.overlay_text[key] !== 'string' || b.overlay_text[key]!.length > 80)) fail(`blocks.overlay_text.${key}`, 'font');
     references(b.overlay_text.references, 'blocks.overlay_text.references');
   }
   if (b.sound) {
@@ -362,43 +362,43 @@ export function validatePlaybook(value: unknown): BrandPlaybook {
   }
 
   if (p.style !== undefined) {
-    if (!isObject(p.style) || typeof p.style.text !== 'string' || p.style.text.length > 48000) fail('style.text', '最多 48000 字');
+    if (!isObject(p.style) || typeof p.style.text !== 'string' || p.style.text.length > 48000) fail('style.text', 'at most 48000 characters');
     if (p.style.references !== undefined) {
-      if (!Array.isArray(p.style.references) || p.style.references.length > 64) fail('style.references', '最多 64 张参考图');
+      if (!Array.isArray(p.style.references) || p.style.references.length > 64) fail('style.references', 'at most 64 reference images');
       p.style.references.forEach((item, index) => asset(item, `style.references.${index}`));
     }
   }
   if (p.settings !== undefined) validateBrandFeatureSettings(p.settings);
   if (p.preferences !== undefined) {
-    if (!isObject(p.preferences)) fail('preferences', '需要对象');
-    for (const [key, value] of Object.entries(p.preferences)) if ((key !== 'layout' && !(BRAND_PREFERENCE_IDS as readonly string[]).includes(key)) || typeof value !== 'boolean') fail(`preferences.${key}`, '需要有效的剪辑偏好');
+    if (!isObject(p.preferences)) fail('preferences', 'needs an object');
+    for (const [key, value] of Object.entries(p.preferences)) if ((key !== 'layout' && !(BRAND_PREFERENCE_IDS as readonly string[]).includes(key)) || typeof value !== 'boolean') fail(`preferences.${key}`, 'needs a valid editing preference');
   }
   if (p.media !== undefined) {
-    if (!isObject(p.media) || Object.keys(p.media).some(key => !['intro', 'outro', 'music'].includes(key))) fail('media', '需要片头、片尾或音乐');
+    if (!isObject(p.media) || Object.keys(p.media).some(key => !['intro', 'outro', 'music'].includes(key))) fail('media', 'needs an intro, outro or music');
     for (const role of ['intro', 'outro'] as const) if (p.media[role]) {
       asset(p.media[role], `media.${role}`);
-      if (p.media[role]!.kind !== 'video') fail(`media.${role}`, '需要视频');
+      if (p.media[role]!.kind !== 'video') fail(`media.${role}`, 'needs a video');
     }
     const music = p.media.music;
     if (music !== undefined) {
-      if (!Array.isArray(music) || music.length > MAX_BRAND_MUSIC) fail('media.music', `最多 ${MAX_BRAND_MUSIC} 首音乐`);
+      if (!Array.isArray(music) || music.length > MAX_BRAND_MUSIC) fail('media.music', `at most ${MAX_BRAND_MUSIC} tracks`);
       const keys = new Set<string>(); const ids = new Set<string>();
       for (const [index, track] of music.entries()) {
         const path = `media.music.${index}`;
-        if (!isObject(track) || track.kind !== 'audio' || typeof track.key !== 'string' || !track.key || /^(blob|data):/.test(track.key) || !Number.isFinite(track.durationSec) || track.durationSec <= 0) fail(path, '需要持久化的音频与时长');
-        if (track.name !== undefined && (typeof track.name !== 'string' || track.name.length > 240)) fail(`${path}.name`, '最多 240 字');
-        if (track.id !== undefined && (typeof track.id !== 'string' || !/^brand-music(?:-[a-z0-9.]+)?$/.test(track.id))) fail(`${path}.id`, '需要有效的音乐标识');
+        if (!isObject(track) || track.kind !== 'audio' || typeof track.key !== 'string' || !track.key || /^(blob|data):/.test(track.key) || !Number.isFinite(track.durationSec) || track.durationSec <= 0) fail(path, 'needs stored audio with a duration');
+        if (track.name !== undefined && (typeof track.name !== 'string' || track.name.length > 240)) fail(`${path}.name`, 'at most 240 characters');
+        if (track.id !== undefined && (typeof track.id !== 'string' || !/^brand-music(?:-[a-z0-9.]+)?$/.test(track.id))) fail(`${path}.id`, 'needs a valid music id');
         const id = track.id ?? `brand-music-${hashSection(track.key)}`;
-        if (keys.has(track.key) || ids.has(id)) fail(path, '音乐不能重复');
+        if (keys.has(track.key) || ids.has(id)) fail(path, 'duplicate music');
         keys.add(track.key); ids.add(id);
       }
     }
   }
 
   if (p.notes !== undefined) {
-    if (!isObject(p.notes)) fail('notes', '需要对象');
-    if (p.notes.evidence !== undefined && (typeof p.notes.evidence !== 'string' || p.notes.evidence.length > MAX_TEXT)) fail('notes.evidence', `最多 ${MAX_TEXT} 字`);
-    if (p.notes.gaps !== undefined && (!Array.isArray(p.notes.gaps) || p.notes.gaps.length > 20 || p.notes.gaps.some(gap => typeof gap !== 'string' || gap.length > 600))) fail('notes.gaps', '最多 20 条');
+    if (!isObject(p.notes)) fail('notes', 'needs an object');
+    if (p.notes.evidence !== undefined && (typeof p.notes.evidence !== 'string' || p.notes.evidence.length > MAX_TEXT)) fail('notes.evidence', `at most ${MAX_TEXT} characters`);
+    if (p.notes.gaps !== undefined && (!Array.isArray(p.notes.gaps) || p.notes.gaps.length > 20 || p.notes.gaps.some(gap => typeof gap !== 'string' || gap.length > 600))) fail('notes.gaps', 'at most 20 items');
   }
   return p;
 }
