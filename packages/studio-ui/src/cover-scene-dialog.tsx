@@ -4,6 +4,7 @@ import { ImageGenerationFields } from '@pireel/studio-ui/image-generation-fields
 import { useEffect, useRef, useState } from 'react';
 import { ImageIcon, Loader2 } from 'lucide-react';
 import { useQuote } from '@pireel/studio-ui/use-quote';
+import { ButtonCreditCost } from './credit-cost';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@pireel/ui/dialog';
 import { CoverFrameTimeline } from '@pireel/studio-ui/cover-frame-timeline';
 import { SceneMediaCard } from '@pireel/studio-ui/media-picker';
@@ -106,8 +107,7 @@ export function CoverSceneDialog({ open, scene, applied, busy, canvas, onClose, 
         </section>
         <ImageGenerationFields value={settings} models={models} disabled={pending} onChange={next => { setModelId(next.modelId); setSize(next.size); setQuality(next.quality); void onSaveDraft(next).catch(() => setError(t('ui.coverSceneDialog.settingsWereNotSaved'))); }} />
         <div className="bg-bg sticky bottom-0 z-10 shrink-0 space-y-2 py-2">
-        {credits !== null && <p className="text-ink-3 text-xs">{t('ui.coverSceneDialog.imageEstimate')} {credits} {t('ui.coverSceneDialog.credits')}</p>}
-        <button type="button" disabled={pending || !modelId || !prompt.trim() || !selectedFrame || !referenceUrl || readingFrame} onClick={async () => { if (!selectedFrame) return; setError(''); try { await onGenerate({ regenerate: true, prompt, sourceFrame: coverFrameIdentity(selectedFrame), ...settings }); } catch { setError(failure); } }} className="bg-primary text-primary-foreground inline-flex w-full h-10 shrink-0 items-center justify-center gap-2 rounded-md text-sm disabled:opacity-40">{pending && <Loader2 size={14} className="animate-spin" />}{scene?.phase === 'planning' ? t('ui.coverSceneDialog.preparingPromptReference') : pending ? t('ui.coverSceneDialog.creating') : t('ui.coverSceneDialog.generateCover')}</button>
+        <button type="button" disabled={pending || !modelId || !prompt.trim() || !selectedFrame || !referenceUrl || readingFrame} onClick={async () => { if (!selectedFrame) return; setError(''); try { await onGenerate({ regenerate: true, prompt, sourceFrame: coverFrameIdentity(selectedFrame), ...settings }); } catch { setError(failure); } }} className="bg-primary text-primary-foreground inline-flex w-full h-10 shrink-0 items-center justify-center gap-2 rounded-md text-sm disabled:opacity-40">{pending && <Loader2 size={14} className="animate-spin" />}{scene?.phase === 'planning' ? t('ui.coverSceneDialog.preparingPromptReference') : pending ? t('ui.coverSceneDialog.creating') : <>{t('ui.coverSceneDialog.generateCover')}<ButtonCreditCost cost={credits === null ? null : { credits }} /></>}</button>
         {(error || scene?.phase === 'failed') && <p role="alert" className="text-destructive text-xs leading-5">{error || failure}</p>}
         </div>
       </div>

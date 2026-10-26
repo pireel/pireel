@@ -35,6 +35,7 @@
     "./scene-player-frame": "./src/scene-player-frame.tsx",
     "./editing-task-card": "./src/editing-task-card.tsx",
     "./cover-scene-dialog": "./src/cover-scene-dialog.tsx",
+    "./credit-cost": "./src/credit-cost.tsx",
     "./chat-export-card": "./src/chat-export-card.tsx",
     "./membership-feature-icon": "./src/membership-feature-icon.tsx",
     "./confirm-list": "./src/confirm-list.tsx",
