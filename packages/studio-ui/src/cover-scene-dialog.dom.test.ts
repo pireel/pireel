@@ -61,12 +61,12 @@ describe('independent cover scene interaction', () => {
   });
   it.each([[1080, 1920, '9:16'], [1920, 1080, '16:9'], [1080, 1080, '1:1'], [1440, 1080, '4:3']])('selects the %s×%s video aspect before a cover draft exists', async (width, height, ratio) => {
     await mount(createElement(CoverSceneDialog, { ...inputs, open: true, scene: null, canvas: { width: Number(width), height: Number(height) }, applied: null, busy: false, onClose() {}, onGenerate: async () => {}, onApply: async () => {} }));
-    expect(document.querySelector('[aria-label="比例"]')?.textContent).toContain(ratio);
+    expect(document.querySelector('[aria-label="画面比例"]')?.textContent).toContain(ratio);
     expect(inputs.onSaveDraft).not.toHaveBeenCalled();
   });
   it('uses a saved explicit aspect instead of replacing it with the video aspect', async () => {
     await mount(createElement(CoverSceneDialog, { ...inputs, open: true, scene, canvas: { width: 1080, height: 1920 }, applied: null, busy: false, onClose() {}, onGenerate: async () => {}, onApply: async () => {} }));
-    expect(document.querySelector('[aria-label="比例"]')?.textContent).toContain('3:4');
+    expect(document.querySelector('[aria-label="画面比例"]')?.textContent).toContain('3:4');
   });
   it('compares historical covers and applies the selected version inside the scene', async () => {
     const apply = vi.fn(async () => {});

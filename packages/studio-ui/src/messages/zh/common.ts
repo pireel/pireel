@@ -11,7 +11,6 @@ export const COMMON_ZH: Record<string, string> = {
   'common.bulletList': '要点列表',
   'common.canceled': '已取消',
   'common.circle': '圆形',
-  'common.closePreview': '关闭预览',
   'common.cornerBottomRight': '缩右下',
   'common.cornerBottomLeft': '缩左下',
   'common.cornerTopLeft': '缩左上',

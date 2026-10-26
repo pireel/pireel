@@ -46,7 +46,9 @@ describe('DisplayTextPanel', () => {
     expect(html).toContain('现代黑体');
     expect(html).toContain('PingFang SC');
     expect(html).toContain('加载更多字体');
-    expect(html).toContain('<option value="typewriter" selected="">打字机</option>');
+    // The select shows its value once mounted in the browser; server markup carries only the control.
+    expect(html).toContain('role="combobox"');
+    expect(html).toContain('aria-label="入场动画"');
     expect(html).not.toContain('aria-label="强调色 #FFFFFF"');
     expect(html).toContain('aria-label="右对齐" aria-pressed="true"');
     expect(html.match(/border-line/g)).toHaveLength(1);

@@ -127,7 +127,7 @@ export const COMPONENTS_ZH: Record<string, string> = {
   'ui.hyperframesWorkbench.viewProgress': '查看进度',
   'ui.hyperframesWorkbench.whiteboardVideo': '白板视频',
   'ui.hyperframesWorkbench.whiteboardVideoReadyPreview': '白板视频已生成，可以预览和导出。',
-  'ui.imageGenerationFields.aspectRatio': '比例',
+  'ui.imageGenerationFields.aspectRatio': '画面比例',
   'ui.imageGenerationFields.imageModel': '生图模型',
   'ui.imageGenerationFields.quality': '清晰度',
   'ui.imageGenerationFields.resolution': '分辨率',

@@ -15,6 +15,7 @@ import {
 import { AlignCenter, AlignLeft, AlignRight, Check, ChevronDown, Loader2, Plus, Search, Type } from 'lucide-react';
 import { WEB_FONTS, webFontFontId, webFontIdOf } from '@pireel/studio-engine/font-library';
 import { googleFontFontId, googleFontRowOf, googleFontsForScripts, type GoogleFontRow } from '@pireel/studio-engine/google-fonts';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@pireel/ui/select';
 import { localized, studioLocale, t } from './i18n';
 import { ensureGoogleFontPreview, loadFont } from './web-fonts';
 import type { FontPreview } from './font-previews';
@@ -171,6 +172,7 @@ function ColorSwatches({
 
 let fontPreviewsCache: Readonly<Record<string, FontPreview>> | null = null;
 
+const PANEL_SELECT = 'bg-canvas/70 text-ink h-8 border-0 px-2 text-[12px] shadow-none';
 export function fontChoiceLabel(value: DisplayTextFontId): string {
   const webId = webFontIdOf(value);
   if (webId) {
@@ -570,15 +572,14 @@ export function DisplayTextPanel({ block, onAdd, onPatch, onPreset }: DisplayTex
 
             <section>
               <SectionLabel>{t('displayText.animation')}</SectionLabel>
-              <select
-                value={animation}
-                onChange={(event) => onPatch({ animation: event.target.value as DisplayTextAnimationId })}
-                className="bg-canvas/70 text-ink focus:ring-ink-4/40 h-8 w-full rounded-md px-2 text-[12px] outline-none focus:ring-1"
-              >
-                {DISPLAY_TEXT_ANIMATION_IDS.map((id) => (
-                  <option key={id} value={id}>{t(`displayText.animation.${id}`)}</option>
-                ))}
-              </select>
+              <Select value={animation} onValueChange={(value) => onPatch({ animation: value as DisplayTextAnimationId })}>
+                <SelectTrigger aria-label={t('displayText.animation')} className={PANEL_SELECT}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {DISPLAY_TEXT_ANIMATION_IDS.map((id) => (
+                    <SelectItem key={id} value={id} className="text-[12px]">{t(`displayText.animation.${id}`)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </section>
 
             <section>
@@ -634,17 +635,15 @@ export function DisplayTextPanel({ block, onAdd, onPatch, onPreset }: DisplayTex
               </div>
 
               <div className="mt-2 grid grid-cols-[1fr_auto] gap-2">
-                <select
-                  value={typeof slots.fontWeight === 'number' ? slots.fontWeight : 800}
-                  onChange={(event) => onPatch({ fontWeight: Number(event.target.value) })}
-                  className="bg-canvas/70 text-ink focus:ring-ink-4/40 h-8 rounded-md px-2 text-[12px] outline-none focus:ring-1"
-                  aria-label={t('displayText.fontWeight')}
-                >
-                  <option value={400}>{t('displayText.weightRegular')}</option>
-                  <option value={600}>{t('displayText.weightSemibold')}</option>
-                  <option value={800}>{t('displayText.weightBold')}</option>
-                  <option value={900}>{t('displayText.weightBlack')}</option>
-                </select>
+                <Select value={String(typeof slots.fontWeight === 'number' ? slots.fontWeight : 800)} onValueChange={(value) => onPatch({ fontWeight: Number(value) })}>
+                  <SelectTrigger aria-label={t('displayText.fontWeight')} className={PANEL_SELECT}><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="400" className="text-[12px]">{t('displayText.weightRegular')}</SelectItem>
+                    <SelectItem value="600" className="text-[12px]">{t('displayText.weightSemibold')}</SelectItem>
+                    <SelectItem value="800" className="text-[12px]">{t('displayText.weightBold')}</SelectItem>
+                    <SelectItem value="900" className="text-[12px]">{t('displayText.weightBlack')}</SelectItem>
+                  </SelectContent>
+                </Select>
                 <div className="bg-canvas/70 flex rounded-md p-0.5">
                   {([
                     ['left', AlignLeft],

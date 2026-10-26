@@ -11,13 +11,18 @@ export function SceneSelect<T extends string>({ label, ariaLabel = label, value,
   /** Associates a portaled menu with its enclosing generation popover. */
   portalOwner?: string;
 }) {
-  return <div className="text-ink flex min-w-0 flex-wrap items-center justify-between gap-3 text-xs">
+  return <div data-scene-select-scope={portalOwner} className="text-ink flex min-w-0 flex-wrap items-center justify-between gap-3 text-xs">
     <span>{label}</span>
     <Select disabled={disabled} value={value} onValueChange={value => onChange(value as T)}>
       <SelectTrigger aria-label={ariaLabel} className="border-line bg-bg h-8 w-48 max-w-full text-xs shadow-none hover:bg-panel-2"><SelectValue /></SelectTrigger>
       <SelectContent data-scene-select-owner={portalOwner} className={`studio-scope max-h-72 ${portalOwner ? 'z-[140]' : ''}`}>{options.map(option => <SelectItem key={option.value} value={option.value} disabled={option.disabled}>{option.label}</SelectItem>)}{footer && <div className="border-line mt-1 border-t pt-1">{footer}</div>}</SelectContent>
     </Select>
   </div>;
+}
+
+/** One card in a group of exclusive choices (a radiogroup of cards): the selected card is outlined in ink. */
+export function sceneChoiceClass(selected: boolean) {
+  return 'min-w-0 rounded-lg border transition focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50 ' + (selected ? 'border-ink bg-panel text-ink' : 'border-line text-ink-3 hover:bg-panel');
 }
 
 export function SceneRange({ label, value, min, max, step = 1, unit = '', onChange, disabled = false }: {

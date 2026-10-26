@@ -3,6 +3,7 @@ import { editorRequest } from '@pireel/studio-ui/host-request';
 
 import { pickImageModel, normalizeImageSettings, imageSizeChoices } from '@pireel/studio-engine/image-generation-settings';
 import { ImageGenerationFields } from '@pireel/studio-ui/image-generation-fields';
+import { SceneSelect } from '@pireel/studio-ui/scene-form-controls';
 
 /**
  * Toolbar controls of the composer's generation modes — the configuration the retired generation
@@ -15,7 +16,7 @@ import { ImageGenerationFields } from '@pireel/studio-ui/image-generation-fields
  * message's intent line.
  */
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Lightbulb, Play, Search, SlidersHorizontal } from 'lucide-react';
 import { useQuote } from '@pireel/studio-ui/use-quote';
@@ -43,9 +44,10 @@ function PopButton({ icon, title, active, disabled, children }: { icon: ReactNod
       if (rect) setAnchor({ left: Math.max(8, Math.min(rect.left, window.innerWidth - 280)), bottom: window.innerHeight - rect.top + 6 });
     };
     place();
+    // A select inside the panel portals its option list to <body>; clicks there still belong to the panel.
     const ownsMenu = (element: Element | null) => {
       const owner = element?.closest('[data-scene-select-owner]')?.getAttribute('data-scene-select-owner');
-      return !!owner && Array.from(panelRef.current?.querySelectorAll('[data-image-generation-fields]') ?? []).some(field => field.getAttribute('data-image-generation-fields') === owner);
+      return !!owner && !!panelRef.current?.querySelector(`[data-scene-select-scope="${CSS.escape(owner)}"]`);
     };
     const onDoc = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
@@ -94,6 +96,9 @@ function PopButton({ icon, title, active, disabled, children }: { icon: ReactNod
     </>
   );
 }
+
+/** The voice select's "none" choice; a select item cannot carry an empty value. */
+const NO_VOICE = 'none';
 
 /** One labelled row of exclusive chips. */
 function Row({ label, options, value, onChange }: { label: string; options: readonly { value: string; label: string }[]; value: string | undefined; onChange: (value: string) => void }) {
@@ -203,6 +208,7 @@ export function GenerationControls({
 }) {
   const shell = useStudioShell();
   const [ideasOpen, setIdeasOpen] = useState(false);
+  const selectOwner = useId();
   // Voices for the audio mode: choosing one turns the message into a narration script.
   const [voices, setVoices] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => {
@@ -276,19 +282,14 @@ export function GenerationControls({
         <PopButton icon={<SlidersHorizontal className="h-3.5 w-3.5" strokeWidth={2.2} />} title={t('chatGen.generationSettings')} disabled={disabled}>
           {intent === 'image' && <ImageGenerationFields value={imageSettings} models={models} disabled={disabled} onChange={next => onChange({ ...params, modelId: next.modelId, imageSize: next.size, quality: next.quality, ratio: imageSizeChoices(next.modelId).find(choice => choice.value === next.size)?.aspect as GenerationParams['ratio'] })} />}
           {models.length > 1 && intent === 'video' ? (
-            <div className="flex items-center gap-1 py-0.5">
-              <span className="text-ink-4 w-12 shrink-0 text-[10.5px]">{t('chatGen.model')}</span>
-              <select
-                value={modelId}
-                onChange={(event) => onChange({ ...params, modelId: event.target.value })}
-                aria-label={t('chatGen.chooseModel')}
-                className="border-line bg-panel text-ink h-6 min-w-0 flex-1 rounded-md border px-1 text-[10.5px] outline-none"
-              >
-                {models.map((model) => (
-                  <option key={model.id} value={model.id}>{model.name}</option>
-                ))}
-              </select>
-            </div>
+            <SceneSelect
+              portalOwner={selectOwner}
+              label={t('chatGen.model')}
+              ariaLabel={t('chatGen.chooseModel')}
+              value={modelId}
+              options={models.map((model) => ({ value: model.id, label: model.name }))}
+              onChange={(value) => onChange({ ...params, modelId: value })}
+            />
           ) : null}
           {intent === 'video' ? (
             <Row
@@ -327,19 +328,16 @@ export function GenerationControls({
             />
           ) : null}
           {intent === 'audio' && audioKind === 'speech' && voices.length ? (
-            <div className="flex items-center gap-1 py-0.5">
-              <span className="text-ink-4 w-12 shrink-0 text-[10.5px]">{t('chatGen.paramVoice')}</span>
-              <select
-                value={params.voiceId ?? ''}
-                onChange={(event) => onChange({ ...params, voiceId: event.target.value || undefined })}
-                aria-label={t('chatGen.paramVoice')}
-                className="border-line bg-panel text-ink h-6 min-w-0 flex-1 rounded-md border px-1 text-[10.5px] outline-none"
-              >
-                <option value="">{t('chatGen.voiceNone')}</option>
-                {voices.map((voice) => (
-                  <option key={voice.id} value={voice.id}>{voice.name}</option>
-                ))}
-              </select>
+            <div className="flex items-center gap-1">
+              <div className="min-w-0 flex-1">
+                <SceneSelect
+                  portalOwner={selectOwner}
+                  label={t('chatGen.paramVoice')}
+                  value={params.voiceId ?? NO_VOICE}
+                  options={[{ value: NO_VOICE, label: t('chatGen.voiceNone') }, ...voices.map((voice) => ({ value: voice.id, label: voice.name }))]}
+                  onChange={(value) => onChange({ ...params, voiceId: value === NO_VOICE ? undefined : value })}
+                />
+              </div>
               {params.voiceId ? (
                 <button
                   type="button"

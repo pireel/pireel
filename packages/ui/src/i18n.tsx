@@ -23,11 +23,12 @@ export interface UiI18nMessages {
   viewImage: string;
   video: string;
   failed: string;
-  closeEsc: string;
   inputOrUploadPlaceholder: string;
   urlOrTextPlaceholder: string;
   uploadFile: string;
   loading: string;
+  previous: string;
+  next: string;
 }
 
 export const UI_MESSAGES_EN: UiI18nMessages = {
@@ -51,11 +52,12 @@ export const UI_MESSAGES_EN: UiI18nMessages = {
   viewImage: 'View image',
   video: 'Video',
   failed: 'Failed',
-  closeEsc: 'Close (Esc)',
   inputOrUploadPlaceholder: 'Enter text, paste a link, or upload a file',
   urlOrTextPlaceholder: 'Paste a link or enter text',
   uploadFile: 'Upload file',
   loading: 'Loading…',
+  previous: 'Previous',
+  next: 'Next',
 };
 
 export const UI_MESSAGES_ZH: UiI18nMessages = {
@@ -79,11 +81,12 @@ export const UI_MESSAGES_ZH: UiI18nMessages = {
   viewImage: '查看大图',
   video: '视频',
   failed: '失败',
-  closeEsc: '关闭（Esc）',
   inputOrUploadPlaceholder: '输入文本、粘贴链接或上传文件',
   urlOrTextPlaceholder: '粘贴链接或输入文本',
   uploadFile: '上传文件',
   loading: '加载中…',
+  previous: '上一个',
+  next: '下一个',
 };
 
 export function uiMessagesForLocale(locale: string): UiI18nMessages {

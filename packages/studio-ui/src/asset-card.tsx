@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AudioLines, Image as ImageIcon, Loader2, MoreHorizontal, Pause, Pencil, Play, Plus, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
 import { imageThumb } from '@pireel/ui/image-url';
+import { MediaViewer } from '@pireel/ui/media-viewer';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -489,103 +490,85 @@ export function AssetLightbox({
   useEffect(() => {
     setReady(false);
   }, [item.id]);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
   return (
-    <div
-      role="button"
-      tabIndex={-1}
-      aria-label={t('common.closePreview')}
-      onClick={onClose}
-      className="fixed inset-0 z-[100] flex cursor-zoom-out flex-col items-center justify-center gap-3 bg-black/70 p-6"
-    >
-      <div className="flex max-w-full items-stretch gap-3">
-        <div
-          role="presentation"
-          onClick={(e) => e.stopPropagation()}
-          className="relative cursor-default overflow-hidden rounded-lg bg-black/60 shadow-2xl"
-          // width = min(viewport margin, 78vh×ratio) → height stays ≤78vh, placeholder matches final size
-          style={{ aspectRatio: ar, width: componentModel ? componentWidth : `min(calc(100vw - 6rem), calc(78vh * ${ar}))` }}
-        >
-          {!ready && (
-            <div className={`absolute inset-0 z-20 flex items-center justify-center ${item.thumbSrc ? 'bg-black/10' : ''}`}>
-              <div className="flex items-center gap-2 rounded-md bg-black/60 px-3 py-2 text-white/90 shadow-lg backdrop-blur-sm">
-                <Loader2 size={16} className="animate-spin" />
-                <span className="text-[11px]">{t('panels.loading')}</span>
-              </div>
-            </div>
+    <MediaViewer
+      label={item.label}
+      onClose={onClose}
+      footer={
+        <>
+          {componentModel && (
+            <button
+              type="button"
+              onClick={() => setReplayKey((k) => k + 1)}
+              className="inline-flex items-center gap-1 rounded-md bg-white/15 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-white/25"
+            >
+              <RotateCcw size={13} /> {t('panels.replayAnimation')}
+            </button>
           )}
-          {componentModel ? (
-            <>
-              {item.thumbSrc && (
-                <img
-                  src={imageThumb(item.thumbSrc, 'preview')}
-                  alt={item.label}
-                  fetchPriority="high"
-                  className={`absolute inset-0 h-full w-full object-contain transition-opacity duration-150 ${ready ? 'pointer-events-none opacity-0' : 'opacity-100'}`}
-                />
-              )}
-              <div className={`transition-opacity duration-150 ${ready ? 'opacity-100' : 'opacity-0'}`}>
-                <LibraryComponentPreview
-                  model={componentModel}
-                  width={componentWidth}
-                  height={Math.round(componentWidth / ar)}
-                  animate="manual"
-                  replayKey={replayKey}
-                  playOnReady
-                  onReady={() => setReady(true)}
-                />
-              </div>
-            </>
-          ) : item.kind === 'video' ? (
-            <video
-              src={item.insertUrl}
-              controls
-              autoPlay
-              playsInline
-              onLoadedData={() => setReady(true)}
-              className={`h-full w-full object-contain ${ready ? '' : 'invisible'}`}
-            />
-          ) : (
-            <img
-              src={item.thumbSrc ? imageThumb(item.thumbSrc, 'preview') : item.insertUrl}
-              alt={item.label}
-              onLoad={() => setReady(true)}
-              onError={() => setReady(true)}
-              className={`h-full w-full object-contain ${ready ? '' : 'invisible'}`}
-            />
-          )}
-        </div>
-      </div>
-      <div className="flex items-center gap-2">
-        {componentModel && (
           <button
             type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setReplayKey((k) => k + 1);
-            }}
-            className="inline-flex items-center gap-1 rounded-md bg-white/15 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-white/25"
+            onClick={() => onInsert(componentModel?.insertProps)}
+            className="bg-accent inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-medium text-accent-foreground"
           >
-            <RotateCcw size={13} /> {t('panels.replayAnimation')}
+            <Plus size={13} /> {t('panels.insertOntoCanvas')}
           </button>
+        </>
+      }
+    >
+      <div
+        className="relative overflow-hidden rounded-lg bg-black/60 shadow-2xl"
+        // width = min(viewport margin, 78vh×ratio) → height stays ≤78vh, placeholder matches final size
+        style={{ aspectRatio: ar, width: componentModel ? componentWidth : `min(calc(100vw - 6rem), calc(78vh * ${ar}))` }}
+      >
+        {!ready && (
+          <div className={`absolute inset-0 z-20 flex items-center justify-center ${item.thumbSrc ? 'bg-black/10' : ''}`}>
+            <div className="flex items-center gap-2 rounded-md bg-black/60 px-3 py-2 text-white/90 shadow-lg backdrop-blur-sm">
+              <Loader2 size={16} className="animate-spin" />
+              <span className="text-[11px]">{t('panels.loading')}</span>
+            </div>
+          </div>
         )}
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onInsert(componentModel?.insertProps);
-          }}
-          className="bg-accent inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-medium text-accent-foreground"
-        >
-          <Plus size={13} /> {t('panels.insertOntoCanvas')}
-        </button>
+        {componentModel ? (
+          <>
+            {item.thumbSrc && (
+              <img
+                src={imageThumb(item.thumbSrc, 'preview')}
+                alt={item.label}
+                fetchPriority="high"
+                className={`absolute inset-0 h-full w-full object-contain transition-opacity duration-150 ${ready ? 'pointer-events-none opacity-0' : 'opacity-100'}`}
+              />
+            )}
+            <div className={`transition-opacity duration-150 ${ready ? 'opacity-100' : 'opacity-0'}`}>
+              <LibraryComponentPreview
+                model={componentModel}
+                width={componentWidth}
+                height={Math.round(componentWidth / ar)}
+                animate="manual"
+                replayKey={replayKey}
+                playOnReady
+                onReady={() => setReady(true)}
+              />
+            </div>
+          </>
+        ) : item.kind === 'video' ? (
+          <video
+            src={item.insertUrl}
+            controls
+            autoPlay
+            playsInline
+            onLoadedData={() => setReady(true)}
+            className={`h-full w-full object-contain ${ready ? '' : 'invisible'}`}
+          />
+        ) : (
+          <img
+            src={item.thumbSrc ? imageThumb(item.thumbSrc, 'preview') : item.insertUrl}
+            alt={item.label}
+            onLoad={() => setReady(true)}
+            onError={() => setReady(true)}
+            className={`h-full w-full object-contain ${ready ? '' : 'invisible'}`}
+          />
+        )}
       </div>
-    </div>
+    </MediaViewer>
   );
 }

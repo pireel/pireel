@@ -399,15 +399,13 @@ export function AvatarPanel({ mode = 'library', initialLanguage = 'zh', onCreate
   return (
     <div className="bg-canvas flex h-full min-h-0 min-w-0 flex-1 flex-col">
       {mode === 'library' && <><div className="flex h-9 shrink-0 items-center gap-1.5 px-2.5">
-        <select
-          value={languageFilter}
-          onChange={(event) => setLanguageFilter(event.target.value)}
-          aria-label={t('workbench.voiceLanguageAll')}
-          className="border-line bg-panel-2 text-ink h-[24px] w-[104px] shrink-0 rounded-md border px-1.5 text-[10.5px] outline-none focus:border-accent"
-        >
-          <option value="all">{t('workbench.voiceLanguageAll')} · {voices.length}</option>
-          {languageOptions.map(([code, count]) => <option key={code} value={code}>{languageLabel(code)} · {count}</option>)}
-        </select>
+        <Select value={languageFilter} onValueChange={setLanguageFilter}>
+          <SelectTrigger aria-label={t('workbench.voiceLanguageAll')} className="border-line bg-panel-2 text-ink h-[24px] w-[104px] shrink-0 px-1.5 text-[10.5px] shadow-none"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all" className="text-[11px]">{t('workbench.voiceLanguageAll')} · {voices.length}</SelectItem>
+            {languageOptions.map(([code, count]) => <SelectItem key={code} value={code} className="text-[11px]">{languageLabel(code)} · {count}</SelectItem>)}
+          </SelectContent>
+        </Select>
         <label className="border-line focus-within:border-accent relative min-w-0 flex-1 rounded-md border transition">
           <Search size={11} className="text-ink-4 pointer-events-none absolute left-1.5 top-1/2 -translate-y-1/2" />
           <input
@@ -467,11 +465,11 @@ export function AvatarPanel({ mode = 'library', initialLanguage = 'zh', onCreate
                 <button type="button" onClick={() => void chooseFile(null)} className="text-ink-4 hover:text-ink"><X size={12} /></button>
               </div>
               <label className="text-ink mt-2 flex cursor-pointer items-start gap-1.5 text-[9.5px] leading-relaxed">
-                <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} className="mt-0.5 accent-black" />
+                <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} className="accent-ink mt-0.5" />
                 {t('workbench.voiceConsent')}
               </label>
               <label className="text-ink-3 mt-1 flex cursor-pointer items-start gap-1.5 text-[9.5px] leading-relaxed">
-                <input type="checkbox" checked={preprocess} onChange={(event) => setPreprocess(event.target.checked)} className="mt-0.5 accent-black" />
+                <input type="checkbox" checked={preprocess} onChange={(event) => setPreprocess(event.target.checked)} className="accent-ink mt-0.5" />
                 {t('workbench.voicePreprocess')}
               </label>
             </div>

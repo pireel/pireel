@@ -5,6 +5,7 @@ import { CalendarDays, Check, CircleUserRound, Info, Loader2, ShieldCheck, Trash
 import { TriggerPopover, type TriggerPopoverHandle } from '@pireel/ui/trigger-popover';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@pireel/ui/dialog';
 import { toast } from '@pireel/ui/toast';
+import { confirm } from '@pireel/ui/confirm';
 import {
   STUDIO_AUTO_SKILL_ID,
   type StudioScenarioSkillId,
@@ -431,9 +432,9 @@ export function ChatSkillPicker({
                     aria-label={t('chatGen.skill.delete')}
                     title={t('chatGen.skill.delete')}
                     onMouseDown={(event) => event.preventDefault()}
-                    onClick={(event) => {
+                    onClick={async (event) => {
                       event.stopPropagation();
-                      if (deletingId || !window.confirm(t('chatGen.skill.deleteConfirm', { title: item.label }))) return;
+                      if (deletingId || !(await confirm({ title: t('chatGen.skill.deleteConfirm', { title: item.label }), tone: 'danger' }))) return;
                       setDeletingId(item.id);
                       void onDeleteCustom(item.id)
                         .then(() => {

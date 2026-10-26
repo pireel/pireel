@@ -1,58 +1,50 @@
 'use client';
 
-import { Select as BaseSelect } from '@base-ui/react/select';
-import { IconChevDown } from './icons';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './select';
+import { cn } from './cn';
 
 interface Option {
   value: string;
   label: string;
+  disabled?: boolean;
 }
 
+/** A select item cannot carry an empty value, so an empty option travels under this stand-in. */
+const EMPTY = '\u0000empty';
+const encode = (value: string) => (value === '' ? EMPTY : value);
+const decode = (value: string) => (value === EMPTY ? '' : value);
+
+/** `Select` from a list of options, for forms and filters that need nothing more. */
 export function SimpleSelect({
   value,
   onValueChange,
   options,
   placeholder,
-  className = '',
+  disabled,
+  ariaLabel,
+  className,
 }: {
-  /**
-   * Controlled value. null means unselected (shows placeholder).
-   * Never pass undefined — base-ui treats undefined as uncontrolled,
-   * and setting a value later throws "changing from uncontrolled to controlled".
-   */
+  /** Controlled value. null means unselected (shows placeholder). */
   value: string | null;
   onValueChange?: (v: string) => void;
-  options: Option[];
+  options: readonly Option[];
   placeholder?: string;
+  disabled?: boolean;
+  ariaLabel?: string;
   className?: string;
 }) {
-  // `items` lets Select.Value render the selected option's label; without it
-  // the trigger shows the raw value string after a pick.
   return (
-    <BaseSelect.Root value={value} items={options} onValueChange={(v) => onValueChange?.(v ?? '')}>
-      <BaseSelect.Trigger
-        className={`border-line-2 bg-panel hover:bg-panel-2 focus:border-accent focus:ring-ring/15 flex w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-[13px] outline-none transition-[border-color,box-shadow] focus:ring-4 ${className}`}
-      >
-        <BaseSelect.Value placeholder={placeholder} />
-        <BaseSelect.Icon>
-          <IconChevDown size={14} className="text-ink-3" />
-        </BaseSelect.Icon>
-      </BaseSelect.Trigger>
-      <BaseSelect.Portal>
-        <BaseSelect.Positioner>
-          <BaseSelect.Popup className="bg-panel border-line min-w-[var(--anchor-width)] rounded-md border p-1 shadow-[var(--shadow-md)]">
-            {options.map((opt) => (
-              <BaseSelect.Item
-                key={opt.value}
-                value={opt.value}
-                className="hover:bg-panel-2 data-[highlighted]:bg-panel-2 cursor-pointer rounded-md px-2.5 py-1.5 text-[13px] outline-none"
-              >
-                <BaseSelect.ItemText>{opt.label}</BaseSelect.ItemText>
-              </BaseSelect.Item>
-            ))}
-          </BaseSelect.Popup>
-        </BaseSelect.Positioner>
-      </BaseSelect.Portal>
-    </BaseSelect.Root>
+    <Select value={value === null ? '' : encode(value)} disabled={disabled} onValueChange={(v) => onValueChange?.(decode(v))}>
+      <SelectTrigger aria-label={ariaLabel} className={cn('border-line-2 bg-panel hover:bg-panel-2 h-auto px-3 py-2 text-[13px] shadow-none', className)}>
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((opt) => (
+          <SelectItem key={opt.value} value={encode(opt.value)} disabled={opt.disabled} className="text-[13px]">
+            {opt.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }

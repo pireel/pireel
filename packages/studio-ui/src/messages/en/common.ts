@@ -11,7 +11,6 @@ export const COMMON_EN: Record<string, string> = {
   'common.bulletList': 'Bullet list',
   'common.canceled': 'Canceled',
   'common.circle': 'Circle',
-  'common.closePreview': 'Close preview',
   'common.cornerBottomRight': 'Bottom right',
   'common.cornerBottomLeft': 'Bottom left',
   'common.cornerTopLeft': 'Top left',
