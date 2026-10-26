@@ -5,7 +5,6 @@ import { useEffect, useRef, useState } from 'react';
 import { ImageIcon, Loader2 } from 'lucide-react';
 import { useQuote } from '@pireel/studio-ui/use-quote';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@pireel/ui/dialog';
-import { studioLocale } from '@pireel/studio-ui/i18n';
 import { CoverFrameTimeline } from '@pireel/studio-ui/cover-frame-timeline';
 import { SceneMediaCard } from '@pireel/studio-ui/media-picker';
 import { CoverApplyButton } from '@pireel/studio-ui/chat-cover-controls';
@@ -16,15 +15,12 @@ import type { ProjectCover } from '@pireel/studio-ui/project-cover';
 import { t } from './i18n';
 
 export function coverSceneStatus(scene?: CoverScene | null): string {
-  const zh = studioLocale().startsWith('zh');
   return scene?.phase === 'prepared' ? t('ui.coverSceneDialog.coverBriefReady') : scene?.phase === 'ready' ? t('ui.coverSceneDialog.coverReady') : scene?.phase === 'failed' ? t('ui.coverSceneDialog.coverIncomplete') : scene ? t('ui.coverSceneDialog.creatingCover') : t('ui.coverSceneDialog.noCoverYet');
 }
 export function CoverToolCard({ scene, onOpen }: { scene?: CoverScene | null; onOpen?: () => void }) {
-  const zh = studioLocale().startsWith('zh');
   return <div className="border-line rounded-md border px-3 py-2"><div className="text-ink-2 flex items-center gap-2 text-xs"><ImageIcon size={14} /><span>{coverSceneStatus(scene)}</span>{onOpen && <button type="button" onClick={onOpen} className="text-ink ml-auto underline underline-offset-4">{t('ui.coverSceneDialog.openCover')}</button>}</div></div>;
 }
 export function TimelineCoverPlaceholder({ cover, onOpen }: { cover: ProjectCover; onOpen: () => void }) {
-  const zh = studioLocale().startsWith('zh');
   return <button type="button" data-timeline-cover-placeholder onClick={onOpen} aria-label={t('ui.coverSceneDialog.coverPlaceholderOpenCover')} className="border-line bg-panel text-ink-3 flex w-[88px] shrink-0 flex-col items-center gap-2 border-r px-2 py-3 text-xs"><span>{t('ui.coverSceneDialog.cover')}</span><img src={cover.url} alt={t('ui.coverSceneDialog.currentCover')} className="bg-canvas h-20 w-full rounded-sm object-contain" /><span className="text-ink-4 text-[10px]">{t('ui.coverSceneDialog.coverSlot')}</span></button>;
 }
 const timeLabel = (seconds: number) => `${Math.floor(seconds / 60)}:${(seconds % 60).toFixed(2).padStart(5, '0')}`;
@@ -39,7 +35,6 @@ export function CoverSceneDialog({ open, scene, applied, busy, canvas, onClose, 
   onGenerate(options: CoverGenerateOptions): Promise<unknown>;
   onApply(cover: ProjectCover): Promise<void>;
 }) {
-  const zh = studioLocale().startsWith('zh'); const say = (cn: string, en: string) => zh ? cn : en;
   const [models, setModels] = useState<{ id: string; name: string }[]>([]);
   const [modelId, setModelId] = useState(''); const [size, setSize] = useState(''); const [quality, setQuality] = useState('');
   const [prompt, setPrompt] = useState(''); const [selectedKey, setSelectedKey] = useState(''); const [error, setError] = useState('');
@@ -56,7 +51,7 @@ export function CoverSceneDialog({ open, scene, applied, busy, canvas, onClose, 
     void callbacks.current.onPrepare().catch(() => { if (alive) setError(t('ui.coverSceneDialog.couldNotPreparePrompt')); });
     void callbacks.current.onLoadFrames().then(data => { if (alive) setStrip(data); }).catch(() => { if (alive) setError(t('ui.coverSceneDialog.restoreSourceVideoLoad')); });
     return () => { alive = false; };
-  }, [open, zh]);
+  }, [open]);
   useEffect(() => {
     if (!open) return; let alive = true;
     void editorRequest('/api/models?kind=image').then(r => r.json()).then(data => { if (alive) { const list = data.models ?? []; setModels(list); setModelId(current => pickImageModel(list, current || scene?.modelId)); } }).catch(() => {});
@@ -76,7 +71,7 @@ export function CoverSceneDialog({ open, scene, applied, busy, canvas, onClose, 
       void onPreviewFrame({ assetId: selectedAsset, sourceSec: selectedSourceSec }).then(blob => { if (alive) { url = URL.createObjectURL(blob); setReferenceUrl(url); } }).catch(() => { if (alive) setError(t('ui.coverSceneDialog.couldNotReadThat')); }).finally(() => { if (alive) setReadingFrame(false); });
     }, 100);
     return () => { alive = false; clearTimeout(timer); if (url) URL.revokeObjectURL(url); };
-  }, [open, selectedAsset, selectedSourceSec, onPreviewFrame, zh]);
+  }, [open, selectedAsset, selectedSourceSec, onPreviewFrame]);
   const settings = normalizeImageSettings({ modelId, size: size || scene?.size || videoCoverAspect(canvas), quality });
   const credits = useQuote({ toolId: 'image-gen', modelId: open ? modelId : '', params: { n: 1, ...imageGenerationParams(settings), reference_count: 1 + (scene?.brandReferences?.length ?? 0) + (scene?.referenceImage ? 1 : 0) } });
   const choices = [...(scene?.images ?? []), ...(scene?.history ?? []), ...(applied ? [applied] : [])];
@@ -117,7 +112,7 @@ export function CoverSceneDialog({ open, scene, applied, busy, canvas, onClose, 
         </div>
       </div>
       <div className="bg-canvas flex min-h-0 min-w-0 flex-col gap-3 p-5">
-        {strip ? <CoverFrameTimeline strip={strip} at={at} disabled={pending} zh={zh} onPreview={setDraftFrame} onCancel={() => setDraftFrame(null)} onCommit={frame => void saveFrame(frame)} /> : <p className="text-ink-4 py-4 text-xs">{t('ui.coverSceneDialog.loadingVideoFrames')}</p>}
+        {strip ? <CoverFrameTimeline strip={strip} at={at} disabled={pending} onPreview={setDraftFrame} onCancel={() => setDraftFrame(null)} onCommit={frame => void saveFrame(frame)} /> : <p className="text-ink-4 py-4 text-xs">{t('ui.coverSceneDialog.loadingVideoFrames')}</p>}
         <div className="text-ink-3 text-xs">{t('ui.coverSceneDialog.coverPreview')}</div>
         <div className="flex min-h-0 flex-1 items-center justify-center">{main ? <img src={main.url} alt={t('ui.coverSceneDialog.coverPreview')} className="h-full max-h-full w-full object-contain" /> : <div className="text-ink-4 text-center text-sm"><ImageIcon size={28} className="mx-auto mb-3" />{t('ui.coverSceneDialog.generatedCoverAppearsHere')}</div>}</div>
         {main && <div className="flex items-center gap-3"><a href={main.url} target="_blank" rel="noreferrer" className="text-ink-3 mr-auto text-xs underline underline-offset-4">{t('ui.coverSceneDialog.openOriginal')}</a><button type="button" disabled={pending || scene?.referenceImage?.key === main.key} onClick={async () => { setSavingReference(true); setError(''); try { await onSaveDraft({ referenceImage: main }); setDraftFrame(null); } catch { setError(t('ui.coverSceneDialog.referenceWasNotSaved')); } finally { setSavingReference(false); } }} className="border-line text-ink rounded-md border px-3 py-2 text-xs disabled:opacity-40">{scene?.referenceImage?.key === main.key ? t('ui.coverSceneDialog.usingAsReference') : t('ui.coverSceneDialog.useAsReference')}</button><CoverApplyButton cover={main} appliedKey={applied?.key} onApply={onApply} disabled={pending} /></div>}

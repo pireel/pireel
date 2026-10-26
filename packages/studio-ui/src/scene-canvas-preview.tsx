@@ -7,6 +7,7 @@ import type { SupplementalVisualMediaClip } from '@pireel/studio-engine/visual-l
 import { injectPreviewRuntime } from './sample-composition';
 import { VideoTrackEngine } from './video-track-engine';
 import { PreviewStageHost, type PreviewMessageEvent } from './preview-stage-host';
+import { t } from './i18n';
 
 export interface SceneCanvasHandle {
   seek(time: number): void;
@@ -127,7 +128,7 @@ export const SceneCanvasPreview = forwardRef<SceneCanvasHandle, Props>(function 
       if (!win) { frame.close(); return; }
       win.postMessage({ type: 'hf:layerFrame', id: layer.elKey, frame }, '*', [frame]);
     };
-    eng.onLayerError = (_layer, error) => { pause(); setMatteError(error instanceof Error ? error.message : '人像抠图失败。'); };
+    eng.onLayerError = (_layer, error) => { pause(); setMatteError(error instanceof Error ? error.message : t('ui.personCutout.failed')); };
     eng.onLayerBlank = layer => post({ type: 'hf:layerClear', id: layer.elKey });
     eng.onBlank = value => post({ type: 'hf:clearFrame', t: value });
     const boot = (index: number, event: PreviewMessageEvent) => {

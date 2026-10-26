@@ -11,7 +11,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Loader2, Plus, RefreshCw, Sparkles } from 'lucide-react';
 import { imageThumb } from '@pireel/ui/image-url';
 import { useStudioShell } from '@pireel/studio-ui/shell-context';
-import { t, studioLocale } from '@pireel/studio-ui/i18n';
+import { t } from '@pireel/studio-ui/i18n';
 import { CoverApplyButton } from '@pireel/studio-ui/chat-cover-controls';
 import type { ProjectCover } from '@pireel/studio-ui/project-cover';
 import { generatedAssetIndexEntry, generatedRecordsFromJobs, pollCreation, type GeneratedAssetRecord, type GenJob } from '@pireel/studio-ui/gen-api';
@@ -50,7 +50,7 @@ function OutputTile({ record, url, actions, isCover = false }: { record: Generat
           <audio src={url} controls preload="metadata" className="h-8 w-full" />
         </div>
       ) : (
-        <img src={imageThumb(record.key, 'list')} alt={isCover ? studioLocale().startsWith('zh') ? '生成的封面' : 'Generated cover' : ''} loading="lazy" className="block h-auto w-full" />
+        <img src={imageThumb(record.key, 'list')} alt={isCover ? t('ui.chatGenerationCard.generatedCover') : ''} loading="lazy" className="block h-auto w-full" />
       )}
       <div className="flex flex-wrap items-center gap-0.5 px-1 py-1">
         {record.kind === 'audio'
@@ -70,7 +70,7 @@ function OutputTile({ record, url, actions, isCover = false }: { record: Generat
             <Sparkles className="h-3 w-3" /> {t('chatGen.useAsReference')}
           </button>
         ) : null}
-        {isCover && actions.onGenerateCover ? <button type="button" disabled={actions.coverDisabled} className={ACTION} onClick={actions.onGenerateCover}><RefreshCw size={12} />{studioLocale().startsWith('zh') ? '重新生成封面' : 'Generate another cover'}</button> : actions.onRegenerate && record.prompt ? (
+        {isCover && actions.onGenerateCover ? <button type="button" disabled={actions.coverDisabled} className={ACTION} onClick={actions.onGenerateCover}><RefreshCw size={12} />{t('ui.chatGenerationCard.generateAnotherCover')}</button> : actions.onRegenerate && record.prompt ? (
           <button type="button" className={ACTION} onClick={() => actions.onRegenerate?.(record.kind, record.prompt)}>
             <RefreshCw className="h-3 w-3" /> {t('chatGen.regenerate')}
           </button>

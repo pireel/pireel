@@ -80,7 +80,7 @@ export function VoiceCard({ voice, disabled = false, loading = false, playing = 
           )}
           {personalLabel && <span className="bg-panel text-accent-ink absolute left-1 top-1 rounded px-1 py-0.5 text-[8px] font-medium">{personalLabel}</span>}
           <span className={`absolute top-1 rounded bg-black/55 px-1 py-0.5 text-[8px] text-white ${actions ? 'right-7' : 'right-1'}`}>
-            {(voice.languages ?? [voice.language]).filter(Boolean).map((item) => item === 'zh' ? '中' : item === 'yue' ? '粤' : item.toUpperCase()).join('/')}
+            {(voice.languages ?? [voice.language]).filter(Boolean).map((item) => item === 'zh' || item === 'yue' ? t(`ui.voiceCard.language.${item}`) : item.toUpperCase()).join('/')}
           </span>
           {voice.selected && <span className="bg-accent text-accent-foreground absolute bottom-1 left-1 flex size-4 items-center justify-center rounded"><Check size={9} strokeWidth={3} /></span>}
         </div>

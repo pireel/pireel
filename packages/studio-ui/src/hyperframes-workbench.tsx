@@ -10780,7 +10780,7 @@ export function HyperframesWorkbench({
           }
         />}
 
-        {whiteboardScene && <ScenePreviewTransport duration={hasContent ? duration : 0} playing={playing} locale={locale} onToggle={togglePlaybackFromUserGesture} onSeek={time => { setPlaying(false); applyT(time); }} />}
+        {whiteboardScene && <ScenePreviewTransport duration={hasContent ? duration : 0} playing={playing} onToggle={togglePlaybackFromUserGesture} onSeek={time => { setPlaying(false); applyT(time); }} />}
         {/* Transport bar. On narrow windows (≤1280) button text must not wrap: when space is short the whole bar scrolls horizontally, don't let "safe zone" stack into three lines */}
         <TooltipProvider delayDuration={200}>
           <div style={whiteboardScene ? { display: "none" } : undefined} className="bg-panel flex items-center gap-3 overflow-x-auto py-1 pl-4 whitespace-nowrap [&>button]:shrink-0">

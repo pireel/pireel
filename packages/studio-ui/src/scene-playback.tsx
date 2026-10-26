@@ -5,13 +5,13 @@ import { t } from './i18n';
 export const sceneClock = (value: number) => `${Math.floor(Math.max(0, value) / 60)}:${(Math.max(0, value) % 60).toFixed(1).padStart(4, '0')}`;
 
 /** Shared time axis and scrub/playhead implementation; transport controls share the scene action row. */
-export function ScenePlayback({ time, duration, playing, onToggle, disabled = false, locale, onPause, onSeek, actions, primary, children, header, footer, timelineRef, fps = 30 }: {
-  time: number; duration: number; playing: boolean; onToggle: () => void; disabled?: boolean; locale: 'zh' | 'en'; fps?: number;
+export function ScenePlayback({ time, duration, playing, onToggle, disabled = false, onPause, onSeek, actions, primary, children, header, footer, timelineRef, fps = 30 }: {
+  time: number; duration: number; playing: boolean; onToggle: () => void; disabled?: boolean; fps?: number;
   onPause: () => void; onSeek: (time: number) => void;
   actions?: ReactNode; primary?: ReactNode; children?: ReactNode; header?: ReactNode; footer?: ReactNode;
   timelineRef?: { current: HTMLDivElement | null };
 }) {
-  const track = useRef<HTMLDivElement | null>(null); const pointer = useRef<number | null>(null); const zh = locale === 'zh';
+  const track = useRef<HTMLDivElement | null>(null); const pointer = useRef<number | null>(null);
   const total = Number.isFinite(duration) && duration > 0 ? duration : 0;
   const current = Math.max(0, Math.min(total, Number.isFinite(time) ? time : 0)); const locked = disabled || !total;
   const seek = (value: number) => onSeek(Math.max(0, Math.min(total, value)));

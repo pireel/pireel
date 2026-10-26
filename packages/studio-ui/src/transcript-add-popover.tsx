@@ -123,7 +123,7 @@ function AiTab({ kind, target, draftPrompt, onGenerate }: {
   };
   useEffect(() => { void draft(); }, []); // eslint-disable-line react-hooks/exhaustive-deps -- draft once per tab
   return <div className="flex flex-col gap-2 p-3">
-    {target.text && <div className="text-ink-3 line-clamp-2 text-[11px] leading-relaxed">「{target.text}」</div>}
+    {target.text && <div className="text-ink-3 line-clamp-2 text-[11px] leading-relaxed">{t('ui.transcriptAddPopover.quote', { text: target.text })}</div>}
     <div className="relative">
       <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={5} disabled={drafting}
         placeholder={t(drafting ? 'captions.draftingPrompt' : 'captions.promptPlaceholder')} aria-label={t('captions.generatePrompt')}

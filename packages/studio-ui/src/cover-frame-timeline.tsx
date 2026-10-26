@@ -5,8 +5,8 @@ import { coverFrameAtTime, type CoverFrameStripData, type CoverSourceFrame } fro
 import { t } from './i18n';
 
 /** Read-only Studio filmstrip: an independent playhead never seeks or edits the project. */
-export function CoverFrameTimeline({ strip, at, disabled, zh, onPreview, onCommit, onCancel }: {
-  strip: CoverFrameStripData; at: number; disabled: boolean; zh: boolean;
+export function CoverFrameTimeline({ strip, at, disabled, onPreview, onCommit, onCancel }: {
+  strip: CoverFrameStripData; at: number; disabled: boolean;
   onPreview(frame: CoverSourceFrame): void; onCommit(frame: CoverSourceFrame): void; onCancel(): void;
 }) {
   const viewport = useRef<HTMLDivElement>(null); const content = useRef<HTMLDivElement>(null);

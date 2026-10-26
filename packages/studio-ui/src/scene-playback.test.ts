@@ -8,7 +8,7 @@ import { SceneVideoPreview } from './scene-video-preview';
 it('shares scroll-aware dragging, frame keyboard steps, bounds and disabled behavior across track contents', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   const rootEl = document.createElement('div'); document.body.append(rootEl); const root = createRoot(rootEl); const pause = vi.fn(); const seeks = vi.fn();
-  function Harness({ disabled = false }) { const [time, setTime] = useState(0); return createElement(ScenePlayback, { time, duration: 20, playing: false, onToggle: vi.fn(), disabled, locale: 'zh', onPause: pause, onSeek: value => { seeks(value); setTime(value); } }, createElement('button', { 'data-scene-clip': true }, 'Clip')); }
+  function Harness({ disabled = false }) { const [time, setTime] = useState(0); return createElement(ScenePlayback, { time, duration: 20, playing: false, onToggle: vi.fn(), disabled, onPause: pause, onSeek: value => { seeks(value); setTime(value); } }, createElement('button', { 'data-scene-clip': true }, 'Clip')); }
   const pointer = (type: string, x: number) => { const event = new MouseEvent(type, { bubbles: true, button: 0, clientX: x }); Object.defineProperty(event, 'pointerId', { value: 7 }); return event; };
   try {
     await act(async () => root.render(createElement(Harness)));
@@ -30,7 +30,7 @@ it('drives a regular scene video through the same axis, resets on version change
   const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
   const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function (this: HTMLMediaElement) { this.dispatchEvent(new Event('play')); return Promise.resolve(); });
   const rootEl = document.createElement('div'); document.body.append(rootEl); const root = createRoot(rootEl); const source = new File(['source'], 'test.mp4');
-  const props = { source, width: 640, height: 360, duration: 20, disabled: false, locale: 'zh' as const };
+  const props = { source, width: 640, height: 360, duration: 20, disabled: false };
   try {
     await act(async () => root.render(createElement(SceneVideoPreview, props)));
     const video = rootEl.querySelector('video')!; expect(video.controls).toBe(false); expect(video.getAttribute('src')).toBe('blob:source');
@@ -48,7 +48,7 @@ it('places the transport first in the action row with no time counter or video o
   const el = document.createElement('div'); document.body.append(el); const root = createRoot(el); const toggle = vi.fn();
   const render = async (playing = false, disabled = false) => act(async () => root.render(createElement('div', null,
     createElement(ScenePlayerFrame, { width: 1080, height: 1920, disabled, onToggle: toggle, children: createElement('div', { role: 'slider', 'aria-label': '字幕位置' }) }),
-    createElement(ScenePlayback, { time: 3, duration: 10, playing, disabled, locale: 'zh', onToggle: toggle, onPause: vi.fn(), onSeek: vi.fn(), actions: createElement('button', null, 'Agent Remix') })
+    createElement(ScenePlayback, { time: 3, duration: 10, playing, disabled, onToggle: toggle, onPause: vi.fn(), onSeek: vi.fn(), actions: createElement('button', null, 'Agent Remix') })
   )));
   try {
     await render(); const frame = el.querySelector<HTMLElement>('[data-scene-player-frame]')!; const row = el.querySelector('[data-scene-player-actions]')!;

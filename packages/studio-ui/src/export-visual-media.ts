@@ -140,9 +140,9 @@ export async function prepareVisualPersonMattes(visuals: readonly SupplementalVi
     for (const visual of activeVisualMedia(visuals, time)) {
       if (!visual.personMatte) continue;
       const source = samples.get(visual.clipId);
-      if (!source) throw new Error('无法读取需要抠图的人像视频。');
+      if (!source) throw new Error(t('ui.personCutout.sourceUnreadable'));
       const canvas = new OffscreenCanvas(source.sourceWidth, source.sourceHeight);
-      const ctx = canvas.getContext('2d'); if (!ctx) throw new Error('无法创建人像抠图画布。');
+      const ctx = canvas.getContext('2d'); if (!ctx) throw new Error(t('ui.personCutout.canvasUnavailable'));
       source.sample.draw(ctx, 0, 0, canvas.width, canvas.height);
       const { personCutoutFrame } = await import('./person-cutout-frame');
       const bitmap = await personCutoutFrame(canvas.transferToImageBitmap(), { id: `export:${visual.clipId}`, t: time }); owned.push(bitmap);

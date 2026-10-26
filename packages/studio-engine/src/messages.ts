@@ -212,6 +212,9 @@ export const ZH_ENGINE: Record<string, string> = {
   'engine.textPreset.markerDetail': '重点词带强调底色，适合证据与卖点。',
   'engine.textPreset.label': '编辑标签',
   'engine.textPreset.labelDetail': '紧凑色块标签，适合章节、地点与属性。',
+  'engine.roughCutRemovesAll': '粗剪会删除全部讲话，请降低清理强度。',
+  'engine.musicInvalid': '配乐音频无效。',
+  'engine.erasureInvalidMeter': '无效的擦除计量规格。',
 };
 
 export const EN_ENGINE: Record<string, string> = {
@@ -420,4 +423,7 @@ export const EN_ENGINE: Record<string, string> = {
   'engine.textPreset.markerDetail': 'Key words on an accent band, for evidence and selling points.',
   'engine.textPreset.label': 'Editorial tag',
   'engine.textPreset.labelDetail': 'Compact color tags, for chapters, places and attributes.',
+  'engine.roughCutRemovesAll': 'The rough cut would remove all of the speech. Lower the cleanup strength.',
+  'engine.musicInvalid': 'The music audio is invalid.',
+  'engine.erasureInvalidMeter': 'The video measurements for erasing are invalid.',
 };

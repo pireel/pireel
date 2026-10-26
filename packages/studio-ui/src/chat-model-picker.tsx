@@ -2,16 +2,13 @@ import { useState } from 'react';
 import { Popover, RadioGroup } from 'radix-ui';
 import { Check, ChevronDown } from 'lucide-react';
 import { STUDIO_AGENT_MODELS, type StudioAgentModelId } from '@pireel/studio-engine/agent-models';
-import { studioLocale } from '@pireel/studio-ui/i18n';
 import { t } from './i18n';
 
-export function ChatModelPicker({ value, disabled, onChange, locale }: {
-  locale?: string;
+export function ChatModelPicker({ value, disabled, onChange }: {
   value: StudioAgentModelId; disabled: boolean; onChange: (id: StudioAgentModelId) => void;
 }) {
   const [open, setOpen] = useState(false);
   const current = STUDIO_AGENT_MODELS.find(model => model.id === value)!;
-  const zh = (locale ?? studioLocale()).startsWith('zh');
   const label = t('ui.chatModelPicker.agentModel');
   const version = (model: typeof STUDIO_AGENT_MODELS[number]) => model.id === 'auto' ? t('ui.chatModelPicker.costEfficient') : model.version;
   return <Popover.Root open={open && !disabled} onOpenChange={setOpen}>

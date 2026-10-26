@@ -8,14 +8,12 @@ import type { ChatTask } from '@pireel/studio-ui/chat-task';
 import type { FineCutItem, FirstPassReport } from '@pireel/studio-ui/first-pass';
 import { editingTaskRows, type EditingProgressRow } from '@pireel/studio-ui/editing-task-progress';
 import { useToolProgress } from '@pireel/studio-ui/tool-progress';
-import { studioLocale, t } from '@pireel/studio-ui/i18n';
+import { t } from '@pireel/studio-ui/i18n';
 
 export function EditingTaskCard({ task, messages, live, fine, credits, startedAt, onContinue, coverScene, onOpenCover }: {
   coverScene?: CoverScene | null; onOpenCover?: () => void;
   task: ChatTask; messages: UIMessage[]; live: boolean; fine?: { items: FineCutItem[] }; credits: number; startedAt?: number; onContinue?: () => void;
 }) {
-  const zh = studioLocale().startsWith('zh');
-  const say = (cn: string, en: string) => zh ? cn : en;
   const working = live || task.state === 'running';
   const progress = useToolProgress('rough_cut');
   const report = (live ? progress?.report as FirstPassReport | undefined : undefined) ?? task.roughCut?.report;

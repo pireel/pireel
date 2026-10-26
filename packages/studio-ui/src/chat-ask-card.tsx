@@ -142,7 +142,7 @@ export function AskUserCard({ part }: { part: ToolPartLike }) {
                 <button
                   type="button"
                   onClick={() => togglePreview(o)}
-                  aria-label={playingLabel === o.label ? '暂停试听' : `试听 ${o.label}`}
+                  aria-label={playingLabel === o.label ? t('ui.chatAskCard.pausePreview') : t('ui.chatAskCard.preview', { label: o.label })}
                   className="text-ink-3 hover:text-ink border-line/70 grid w-9 shrink-0 place-items-center border-l"
                 >
                   {playingLabel === o.label ? <Pause size={14} /> : <Play size={14} />}

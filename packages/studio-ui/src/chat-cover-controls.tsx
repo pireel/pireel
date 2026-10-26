@@ -1,11 +1,9 @@
 import { useRef, useState } from 'react';
 import { Check, ImageIcon, Loader2 } from 'lucide-react';
-import { studioLocale } from '@pireel/studio-ui/i18n';
 import type { ProjectCover } from '@pireel/studio-ui/project-cover';
 import { t } from './i18n';
 
 export function CoverApplyButton({ cover, appliedKey, onApply, disabled }: { cover: ProjectCover; appliedKey?: string; onApply: (cover: ProjectCover) => Promise<void>; disabled?: boolean }) {
-  const zh = studioLocale().startsWith('zh');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const pending = useRef(false);
@@ -30,7 +28,6 @@ export function CoverApplyButton({ cover, appliedKey, onApply, disabled }: { cov
 }
 
 export function ChatCoverEntry({ cover, disabled, onGenerate }: { cover?: ProjectCover | null; disabled?: boolean; onGenerate: () => void }) {
-  const zh = studioLocale().startsWith('zh');
   return <div className="mb-2 flex min-w-0 items-center gap-2">
     {cover && <button type="button" onClick={onGenerate} className="text-ink-3 flex min-w-0 items-center gap-1.5 text-xs"><img src={cover.url} alt={t('ui.chatCoverControls.currentCover')} className="h-7 w-7 rounded-sm object-contain" />{t('ui.chatCoverControls.currentCover')}</button>}
     <button type="button" disabled={disabled} onClick={onGenerate} className="text-ink-2 hover:bg-line ml-auto inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs disabled:opacity-40"><ImageIcon size={13} />{t('ui.chatCoverControls.generateCover')}</button>

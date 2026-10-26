@@ -1,4 +1,5 @@
 import type { AsrSegment } from './build-blocks';
+import { t } from './i18n';
 import type { EditorDocumentV2 } from './composition';
 /** Project source-clock speech through native clip geometry once, shared by all added effects. */
 export function editingSpeechCues(document: EditorDocumentV2, transcript: AsrSegment[]): AsrSegment[] {
@@ -38,12 +39,12 @@ export function mergeEditingCuts(cuts: { fromSec: number; toSec: number }[], dur
   for (const cut of cuts.map(c => ({ fromSec: Math.max(0, c.fromSec), toSec: Math.min(duration, c.toSec) })).filter(c => c.toSec > c.fromSec).sort((a, b) => a.fromSec - b.fromSec)) {
     const last = result.at(-1); if (last && cut.fromSec <= last.toSec) last.toSec = Math.max(last.toSec, cut.toSec); else result.push(cut);
   }
-  if (result.reduce((sum, cut) => sum + cut.toSec - cut.fromSec, 0) > duration - .2) throw new Error('粗剪会删除全部讲话，请降低清理强度。');
+  if (result.reduce((sum, cut) => sum + cut.toSec - cut.fromSec, 0) > duration - .2) throw new Error(t('engine.roughCutRemovesAll'));
   return result;
 }
 /** Sample-accurate ducking, looping and fades baked into a derivative, equal in preview/export. */
 export function musicBedPcm(source: Float32Array, sampleRate: number, duration: number, cues: Pick<AsrSegment, 'start' | 'end'>[], volumeDb: number, duckDb: number): Float32Array {
-  if (!source.length || !(sampleRate > 0 && duration > 0)) throw new Error('配乐音频无效。');
+  if (!source.length || !(sampleRate > 0 && duration > 0)) throw new Error(t('engine.musicInvalid'));
   const output = new Float32Array(Math.ceil(duration * sampleRate)); const level = 10 ** (volumeDb / 20); const duck = 10 ** (duckDb / 20);
   const spans = [...cues].sort((a, b) => a.start - b.start); let at = 0; let envelope = 1;
   const loopFade = Math.min(Math.floor(sampleRate * .03), Math.floor(source.length / 4));

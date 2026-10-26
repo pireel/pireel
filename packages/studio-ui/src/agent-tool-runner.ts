@@ -3653,7 +3653,8 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
     opts?.surface === 'chat'
     && result.ok
     && result.summary
-    && t('chatGen.done') === '完成'
+    // Chat cards outside English show the tool's own label instead of an English receipt.
+    && !studioLocale().startsWith('en')
     && /[A-Za-z]{2,}/.test(result.summary)
   ) {
     const key = `tools.${toolId}.label`;

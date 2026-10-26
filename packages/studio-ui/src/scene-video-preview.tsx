@@ -4,9 +4,9 @@ import { ScenePlayback } from './scene-playback';
 import { t } from './i18n';
 
 /** Adapter for regular source/result videos. Canvas scenes use the same ScenePlayerFrame and ScenePlayback. */
-export function SceneVideoPreview({ source, resultUrl, poster, width, height, duration, disabled, locale, actions, children }: {
+export function SceneVideoPreview({ source, resultUrl, poster, width, height, duration, disabled, actions, children }: {
   source: File | null; resultUrl?: string; poster?: string; width: number; height: number; duration: number;
-  disabled: boolean; locale: 'zh' | 'en'; actions?: ReactNode; children?: ReactNode;
+  disabled: boolean; actions?: ReactNode; children?: ReactNode;
 }) {
   const video = useRef<HTMLVideoElement>(null); const [sourceUrl, setSourceUrl] = useState('');
   const [time, setTime] = useState(0); const [playing, setPlaying] = useState(false); const [error, setError] = useState('');
@@ -29,6 +29,6 @@ export function SceneVideoPreview({ source, resultUrl, poster, width, height, du
         {children}
     </ScenePlayerFrame>
     {error && <p role="alert" className="text-ink-3 text-xs">{error}</p>}
-    <ScenePlayback playing={playing} onToggle={() => void toggle()} time={time} duration={duration} disabled={disabled || !src} locale={locale} onPause={pause} onSeek={value => { if (video.current) video.current.currentTime = value; setTime(value); }} actions={actions}/>
+    <ScenePlayback playing={playing} onToggle={() => void toggle()} time={time} duration={duration} disabled={disabled || !src} onPause={pause} onSeek={value => { if (video.current) video.current.currentTime = value; setTime(value); }} actions={actions}/>
   </div>;
 }

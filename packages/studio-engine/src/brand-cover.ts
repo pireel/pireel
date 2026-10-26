@@ -3,7 +3,7 @@
  * writing that cover's headline, the way the creator's covers do (the brand's cover block).
  */
 
-function fail(path: string, value: unknown): never { throw new Error(`封面输出不符合约定：${path} = ${JSON.stringify(value)?.slice(0, 160)}`); }
+function fail(path: string, value: unknown): never { throw new Error(`cover output breaks the contract: ${path} = ${JSON.stringify(value)?.slice(0, 160)}`); }
 function json(raw: string): Record<string, unknown> {
   try { return JSON.parse(/\{[\s\S]*\}/.exec(raw)?.[0] ?? raw) as Record<string, unknown>; } catch { return fail('json', raw.slice(0, 200)); }
 }
