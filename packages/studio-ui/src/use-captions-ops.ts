@@ -25,7 +25,7 @@ import {
 } from '@pireel/studio-engine/composition';
 import { type AsrSegment, applyCaptionTranslations } from '@pireel/studio-engine/build-blocks';
 import { applyCaptionTextEdits } from '@pireel/studio-engine/caption-text-edit';
-import type { CaptionCueEdit } from '@pireel/studio-engine/caption-document-edit';
+import { captionPatchBreaksLines, type CaptionCueEdit } from '@pireel/studio-engine/caption-document-edit';
 import { firstNarrativeAssetId } from '@pireel/studio-engine/editor-document';
 import { joinWords, wordsFromText } from '@pireel/studio-engine/caption-fx';
 import { mappedCaptionSegs as relayMappedCaptionSegs, relayCaptionLayer as relayCaptionLayerPure } from '@pireel/studio-engine/captions-relay';
@@ -71,6 +71,11 @@ export interface CaptionsOpsDeps {
   runTool: (toolId: string, input: Record<string, unknown>) => Promise<unknown>;
 }
 
+/** Whether a style patch on shown captions changes how much fits on a line, so cues must break again. */
+export function breaksCaptionLines(comp: Composition, patch: Partial<CaptionStyle>) {
+  return isCaptionsOn(comp) && captionPatchBreaksLines(comp.captionStyle, patch);
+}
+
 export function useCaptionsOps(deps: CaptionsOpsDeps) {
   const {
     comp, tSec, asrSentences, clipAsr, setClipAsr, setAsrSentences, setSelectedIdRaw, setSelectedBlockIds,
@@ -93,14 +98,26 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
   });
   const captionCommit = (input: Omit<DocumentOpInputs['captions.edit'], 'mainTranscript' | 'clipTranscripts'>, undo: 'step' | 'none' = 'step') =>
     commit({ op: 'captions.edit', input: { ...input, ...currentTranscripts() } }, { undo });
+  /** Mirror the transcripts a re-layout rewrote (new cue boundaries) into the runtime copies. */
+  const adoptCaptionTranscripts = (document: EditorDocumentV2) => {
+    const transcripts = captionTranscriptsFromDocument(document, compRef.current, clipAsrRef.current);
+    asrRef.current = transcripts.main;
+    clipAsrRef.current = transcripts.clips;
+    setAsrSentences(transcripts.main);
+    setClipAsr(transcripts.clips);
+  };
   const setCaptionStyle = useCallback((patch: Partial<CaptionStyle>) => {
     // SPARSE persistence: merge into the raw stored style, never the resolved one — defaults stay in
     // the resolver so future default changes reach projects that never explicitly set those fields.
-    const edit = captionCommit({ patch }, 'none');
+    // A change to how much fits on a line breaks the captions into lines again (an undo step, as it
+    // moves cue boundaries); corrected copy, translations and emphasis follow their words.
+    const relayout = breaksCaptionLines(compRef.current, patch);
+    const edit = captionCommit({ patch, ...(relayout ? { relayout: true } : {}) }, relayout ? 'step' : 'none');
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return;
     }
+    if (relayout) adoptCaptionTranscripts(edit.document);
   }, []);
   /** Caption re-lay/mapping: the pure functions live in captions-relay (reused by the offline MCP executor); this is a thin wrapper feeding refs. */
   const mappedCaptionSegs = (shots: VideoShot[], narr: AsrSegment[] | null): AsrSegment[] => relayMappedCaptionSegs(shots, narr, clipAsrRef.current);
@@ -439,11 +456,15 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
         toast.error(t('workbench.transcriptEmptyGenerateCaptions'));
         return;
       }
-      const landed = captionCommit({ patch: { on: true, preset, color: undefined, bg: undefined, ...stylePatch } });
+      const patch = { on: true, preset, color: undefined, bg: undefined, ...stylePatch };
+      // Captions already on screen in another look break into lines again for this one.
+      const relayout = has && breaksCaptionLines(compRef.current, patch);
+      const landed = captionCommit({ patch, ...(relayout ? { relayout: true } : {}) });
       if (!landed.ok) {
         toast.error(editorErrorMessage(landed.error));
         return;
       }
+      if (relayout) adoptCaptionTranscripts(landed.document);
       // Let the user see the result immediately (same value as "select means visible"): if the playhead isn't in any
       // caption window, move it to the first caption — otherwise nothing on screen moves after laying and it feels like "clicked but no effect" (user reported)
       if (!playingRef.current && output.firstCaptionStartSec != null) {
@@ -493,11 +514,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       toast.error(editorErrorMessage(edit.error));
       return { ok: false, error: editorErrorMessage(edit.error) };
     }
-    const transcripts = captionTranscriptsFromDocument(edit.document, compRef.current, clipAsrRef.current);
-    asrRef.current = transcripts.main;
-    clipAsrRef.current = transcripts.clips;
-    setAsrSentences(transcripts.main);
-    setClipAsr(transcripts.clips);
+    adoptCaptionTranscripts(edit.document);
     return { ok: true };
   };
   /** Panel "re-extract": transcribe the speech again and rebuild every caption from the fresh

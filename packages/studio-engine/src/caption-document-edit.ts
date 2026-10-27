@@ -5,7 +5,9 @@ import { applyCaptionTextEdits, removeCaptionCues } from './caption-text-edit';
 import {
   clearManagedCaptionLayout,
   lockManagedCaptionLayout,
+  managedCaptionEmphasis,
   remapCaptionCopyToManagedLayout,
+  remapCaptionEmphasis,
 } from './caption-layout-state';
 import {
   applyEditorCommand,
@@ -16,6 +18,14 @@ import {
   type EditorCommandReceipt,
   type EditorDocumentV2,
 } from './editor-document';
+
+/** Style fields that change how much fits on a caption line. */
+const LINE_FIELDS = ['preset', 'scale', 'font', 'bold', 'wPct', 'bg'] as const;
+/** Whether a style patch changes how much fits on a line (against the stored sparse style), so cues on
+ *  screen must break into lines again (`relayout`). */
+export function captionPatchBreaksLines(stored: Partial<CaptionStylePatch> | undefined, patch: Partial<CaptionStylePatch>) {
+  return LINE_FIELDS.some((field) => field in patch && patch[field] !== stored?.[field]);
+}
 
 export type ManagedCaptionResizeResult =
   | { ok: true; document: EditorDocumentV2 }
@@ -198,13 +208,15 @@ export function applyCaptionDocumentEdit(input: CaptionDocumentEditInput): Capti
     return { ok: true, document: settleUnchanged(input.document, document), receipts };
   }
 
+  // Emphasis is keyed to the cues a re-layout replaces: read it off first, by transcript word.
+  const emphasis = input.relayout ? managedCaptionEmphasis(document) : undefined;
   if (input.relayout) document = clearManagedCaptionLayout(document);
   const relaid = applyEditorCommand(document, { type: 'captions.relay', ...(input.source ? { source: input.source } : {}) });
   if (!relaid.ok) return { ok: false, document: input.document, error: relaid.error };
   document = relaid.document;
   receipts.push(relaid.receipt);
   if (input.relayout) {
-    document = remapCaptionCopyToManagedLayout(document);
+    document = remapCaptionEmphasis(remapCaptionCopyToManagedLayout(document), emphasis!);
     const copyRelaid = applyEditorCommand(document, { type: 'captions.relay', ...(input.source ? { source: input.source } : {}) });
     if (!copyRelaid.ok) return { ok: false, document: input.document, error: copyRelaid.error };
     document = copyRelaid.document;

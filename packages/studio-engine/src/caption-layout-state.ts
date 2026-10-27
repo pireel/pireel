@@ -168,3 +168,56 @@ export function remapCaptionCopyToManagedLayout(document: EditorDocumentV2): Edi
     return JSON.stringify(edited) === JSON.stringify(segment) ? segment : edited;
   });
 }
+
+type LaneWord = { text: string; si?: number; emphasis?: boolean };
+function laneCues(document: EditorDocumentV2) {
+  const track = document.semantics.managedCaptionTrackId
+    ? document.timeline.tracks.find((candidate) => candidate.id === document.semantics.managedCaptionTrackId)
+    : undefined;
+  return (track?.clips ?? []).flatMap((clip) => {
+    if (clip.kind !== 'caption' || !clip.managed || !clip.sourceRef) return [];
+    const words = Array.isArray(clip.block.slots?.words) ? clip.block.slots.words as LaneWord[] : [];
+    return [{ ref: clip.sourceRef, words }];
+  });
+}
+
+/**
+ * The transcript words the managed lane shows emphasized (picked by hand or by auto highlight), per
+ * sentence. Emphasis is stored per cue by word offset, so it is read off before a re-layout moves the
+ * cue boundaries and written back onto the new cues with remapCaptionEmphasis.
+ */
+export function managedCaptionEmphasis(document: EditorDocumentV2): Map<string, Set<number>> {
+  const out = new Map<string, Set<number>>();
+  for (const { ref, words } of laneCues(document)) {
+    for (const word of words) {
+      if (!word.emphasis || !Number.isInteger(word.si)) continue;
+      const key = `${ref.assetId}\u0000${ref.segmentIndex}`;
+      out.set(key, (out.get(key) ?? new Set()).add(word.si!));
+    }
+  }
+  return out;
+}
+
+/** Key the emphasized words (managedCaptionEmphasis) to the lane's current cues. A cue whose copy was
+ *  rewritten shows other words than the transcript's, so it takes none. */
+export function remapCaptionEmphasis(document: EditorDocumentV2, emphasis: ReadonlyMap<string, ReadonlySet<number>>): EditorDocumentV2 {
+  if (!emphasis.size) return document;
+  const cues = new Map<string, { key: string; text: string; words: number[] }[]>();
+  for (const { ref, words } of laneCues(document)) {
+    const picked = emphasis.get(`${ref.assetId}\u0000${ref.segmentIndex}`);
+    if (!picked || !words.length || words.some((word) => !Number.isInteger(word.si))) continue;
+    const offsets = words.flatMap((word, index) => (picked.has(word.si!) ? [index] : []));
+    if (!offsets.length) continue;
+    const key = `${ref.assetId}\u0000${ref.segmentIndex}`;
+    cues.set(key, [...(cues.get(key) ?? []), { key: `${ref.wordStart}:${ref.wordEnd}`, text: joinWords(words.map((word) => word.text)), words: offsets }]);
+  }
+  return mapTranscripts(document, (segment, assetId, segmentIndex) => {
+    const key = `${assetId}\u0000${segmentIndex}`;
+    if (!emphasis.has(key)) return segment;
+    const entries = (cues.get(key) ?? []).filter((cue) => segment.cueTexts?.[cue.key] === undefined);
+    const edited: TranscriptSegment = { ...segment };
+    if (entries.length) edited.cueEmphasis = Object.fromEntries(entries.map((cue) => [cue.key, { text: cue.text, words: cue.words }]));
+    else delete edited.cueEmphasis;
+    return JSON.stringify(edited) === JSON.stringify(segment) ? segment : edited;
+  });
+}

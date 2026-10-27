@@ -166,6 +166,29 @@ describe('native caption lifecycle transaction', () => {
     expect(Object.keys(segment.cueTexts ?? {})).toEqual([segment.cueLayout![0]]);
   });
 
+  it('keeps emphasized words on the same words when a re-layout moves the cue boundaries', () => {
+    const initial = applyCaptionDocumentEdit({
+      document: captionFixture(), patch: { on: true, preset: 'em-yellow' }, mainTranscript: transcript, clipTranscripts: {},
+    });
+    expect(initial.ok).toBe(true);
+    if (!initial.ok) return;
+    const assetId = firstNarrativeAssetId(initial.document)!;
+    const transcripts = structuredClone(initial.document.semantics.transcripts);
+    transcripts[assetId]![0]!.cueEmphasis = { '0:3': { text: 'one two three four', words: [1, 3] } };
+    const marked = applyCaptionDocumentEdit({ document: { ...initial.document, semantics: { ...initial.document.semantics, transcripts } }, mainTranscript: null, clipTranscripts: {} });
+    expect(marked.ok).toBe(true);
+    if (!marked.ok) return;
+    const emphasized = (document: typeof marked.document) => projectDocumentToComposition(document).blocks
+      .filter((block) => block.templateId === 'caption')
+      .flatMap((block) => (block.slots.words as { text: string; emphasis?: boolean }[]).filter((word) => word.emphasis).map((word) => word.text));
+    expect(emphasized(marked.document)).toEqual(['two', 'four']);
+    const narrow = applyCaptionDocumentEdit({ document: marked.document, patch: { wPct: 10 }, relayout: true, mainTranscript: null, clipTranscripts: {} });
+    expect(narrow.ok).toBe(true);
+    if (!narrow.ok) return;
+    expect(narrow.document.semantics.transcripts[assetId]![0]!.cueLayout!.length).toBeGreaterThan(1);
+    expect(emphasized(narrow.document)).toEqual(['two', 'four']);
+  });
+
   it('adopts pre-cueLayout managed clips before a style change instead of silently reflowing them', () => {
     const enabled = applyCaptionDocumentEdit({
       document: captionFixture(), patch: { on: true, preset: 'ln-clean' }, mainTranscript: transcript, clipTranscripts: {},

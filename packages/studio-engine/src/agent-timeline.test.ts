@@ -1235,6 +1235,22 @@ describe('speech edits reach narration placed as audio', () => {
   });
 });
 
+describe('set_captions size changes', () => {
+  it('breaks shown captions into lines again when the size changes', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', { assets: [{ id: 'cam', kind: 'video', url: 'https://cdn.example/cam.mp4', durationSec: 10 }] }).document!;
+    const text = '今天我们来聊一聊怎么把一条视频的字幕做得更加好看而且更容易读';
+    document.semantics.transcripts.cam = [{ start: 0, end: 7, text, words: [...text].map((char, index) => ({ text: char, start: index * .2, end: index * .2 + .2 })) }];
+    document = runAgentTimelineTool(document, 'add_clips', { clips: [{ id: 'cam-clip', assetId: 'cam', role: 'primary', startFrame: 0, durationFrames: 300 }] }).document!;
+    const on = runAgentTimelineTool(document, 'set_captions', { on: true, preset: 'ln-clean' });
+    expect(on.ok, on.error).toBe(true);
+    const cues = (doc: typeof document) => doc.semantics.transcripts.cam![0]!.cueLayout!.length;
+    const small = runAgentTimelineTool(on.document!, 'set_captions', { scale: .5 });
+    expect(small.ok, small.error).toBe(true);
+    expect(cues(small.document!)).toBeLessThan(cues(on.document!));
+  });
+});
+
 describe('add_clips duplicate', () => {
   it('starts the copy unlinked from the original link group', () => {
     let document = emptyEditorDocumentV2({ fps: 30 });

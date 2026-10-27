@@ -24,7 +24,7 @@ import {
 import { CAPTION_PRESETS, getCaptionPreset } from '@pireel/studio-engine/caption-presets';
 import { CUT_TRANSITION_EFFECTS, DIRECTIONAL_TRANSITIONS, MAX_TRANSITION_SEC, PLACE_ANCHORS, SHOT_TREATMENTS, ZOOM_PRESETS, ZOOM_SCALE_MAX, ZOOM_SCALE_MIN, applyBlockPlacement, blockId, blockKind, isSentenceCaption, placementFramingNotes, renderBlock, shotFilterCss, videoShotTimelineSpans, zoneOf, type Block, type Composition, type CutTransitionEffect, type ShotFilter, type TransitionDirection, type VideoShot } from '@pireel/studio-engine/composition-core';
 import { applyCanvasDocumentEdit } from '@pireel/studio-engine/canvas-document-edit';
-import { applyCaptionDocumentEdit } from '@pireel/studio-engine/caption-document-edit';
+import { applyCaptionDocumentEdit, captionPatchBreaksLines } from '@pireel/studio-engine/caption-document-edit';
 import { applyCompositionLayout, applyShotFramingInput, canvasSizeFollowingFirstVideo, canvasSizeFromInput } from '@pireel/studio-engine/editing-primitives';
 import { applyLayoutDocumentEdit } from '@pireel/studio-engine/layout-document-edit';
 import { applyMediaCropInput, applyMediaTransformInput } from '@pireel/studio-engine/media-framing-edit';
@@ -1133,7 +1133,9 @@ export function setCaptionsV3(document: EditorDocumentV2, input: Input): AgentTi
     const stylePatch = { ...(turningOn ? { on: true } : {}), ...(preset ? { preset, color: undefined, bg: undefined } : {}), ...patch };
     // "Turn captions on" with no style is complete: the layer needs a preset to start, so use the default.
     if (input.on === true && !preset && !documentCaptionsOn(next)) stylePatch.preset = documentCaptionStyle(next).preset;
-    const edit = applyCaptionDocumentEdit({ document: next, patch: stylePatch, ...(captionSource ? { source: captionSource } : {}), mainTranscript: null, clipTranscripts: {} });
+    // Captions already shown break into lines again when the change alters how much fits on one.
+    const relayout = documentCaptionsOn(next) && captionPatchBreaksLines(next.appearance.captionStyle, stylePatch);
+    const edit = applyCaptionDocumentEdit({ document: next, patch: stylePatch, ...(captionSource ? { source: captionSource } : {}), ...(relayout ? { relayout: true } : {}), mainTranscript: null, clipTranscripts: {} });
     if (!edit.ok) return fail(edit.error.message, { code: edit.error.code, trackIds: edit.error.trackIds });
     if (turningOn) {
       const captionTrack = edit.document.semantics.managedCaptionTrackId ? edit.document.timeline.tracks.find((track) => track.id === edit.document.semantics.managedCaptionTrackId) : undefined;
