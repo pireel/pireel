@@ -1,5 +1,5 @@
 import type { AudioClip } from '../audio-tracks';
-import type { AtomicMediaFraming, Block, CaptionStyle, CutTransitionEffect, PersonFx, TransitionDirection, VideoShot } from '../composition-core';
+import type { AtomicMediaFraming, Block, CaptionStyle, CutTransitionEffect, PersonFx, SourceBackdrop, TransitionDirection, VideoShot } from '../composition-core';
 import type { TranscriptSegment } from '@pireel/studio-engine/project-types';
 import type { ThemeId } from '../theme';
 import type { NarrativeRole, SceneFamily, ViewerTask } from '../director-plan';
@@ -68,6 +68,8 @@ export interface EditorAppearance {
   personFx?: PersonFx;
   /** The output's own video-level template (visual system + pieces); graphics instance it as `look:<pieceId>`. */
   look?: DocumentLook;
+  /** Fill behind a main source that does not cover the canvas (see Composition.backdrop). */
+  backdrop?: SourceBackdrop;
 }
 
 export type EditorTrackType = 'visual' | 'graphics' | 'audio' | 'caption';

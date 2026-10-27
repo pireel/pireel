@@ -27,7 +27,7 @@ import {
 } from './composition-core';
 import { GL_MIXER_SRC, TRANSITION_GLSL, glDirection } from './transition-gl';
 import { isLookTemplate, lookHeadHtml, lookPieceOf } from './look';
-import { SOURCE_DRAW_RECT_FUNCTION } from './source-framing';
+import { SOURCE_BACKDROP_FUNCTION, SOURCE_DRAW_RECT_FUNCTION } from './source-framing';
 import { compositionVisualLayerPlan, type SupplementalVisualMediaClip } from './visual-layer-plan';
 import { BLOCK_TEXT_BASELINE_PX } from './block-typography';
 import { webFontStylesheetUrls } from './font-library';
@@ -57,7 +57,8 @@ function seamCaptionYPct(seam: number, scale: number | undefined, height: number
   return seam * 100 + line / 2 / Math.max(1, height) * 100;
 }
 
-export function videoFrameShim(transitions: { s: number; e: number; cut: number; effect: string; dx: number; dy: number }[]): string {
+/** `backdrop`: fill the frame around a source that does not cover it with its own blurred picture (Composition.backdrop). */
+export function videoFrameShim(transitions: { s: number; e: number; cut: number; effect: string; dx: number; dy: number }[], backdrop = false): string {
   return `window.__parentClock = true; // clock/decode/audio run in the parent-layer engine; this doc doesn't self-drive
 (function(){
   var c = document.getElementById('vidEl');
@@ -76,6 +77,8 @@ export function videoFrameShim(transitions: { s: number; e: number; cut: number;
   var mkStage = function () { var s = document.createElement('canvas'); s.width = W; s.height = H; return s; };
   var stageLive = mkStage(), stageGhost = mkStage();
   var sourceRect = (${SOURCE_DRAW_RECT_FUNCTION});
+  var paintBackdrop = ${backdrop ? `(${SOURCE_BACKDROP_FUNCTION})` : 'null'};
+  var backdropSample = paintBackdrop ? document.createElement('canvas') : null;
   // #vidEl keeps a composition-sized backing store so the sandbox protocol stays stable, but its
   // CSS box is the independent media layer. Pre-compensate for that box's X/Y scaling before draw;
   // otherwise changing the canvas ratio non-uniformly stretches the already-rendered pixels.
@@ -90,6 +93,7 @@ export function videoFrameShim(transitions: { s: number; e: number; cut: number;
     var g = stage.getContext('2d');
     var r = layerRect(sourceW || bmp.width, sourceH || bmp.height, framing);
     g.clearRect(0, 0, W, H);
+    if (paintBackdrop) paintBackdrop(g, backdropSample, bmp, sourceW || bmp.width, sourceH || bmp.height, 0, 0, W, H);
     g.drawImage(bmp, r.x, r.y, r.width, r.height);
     return stage;
   };
@@ -103,6 +107,7 @@ export function videoFrameShim(transitions: { s: number; e: number; cut: number;
     // surface to place a 9:16 picture both letterboxes it and deforms the subject.
     var r = layerRect(sourceW || bmp.width, sourceH || bmp.height, framing);
     ctx.clearRect(0, 0, W, H);
+    if (paintBackdrop) paintBackdrop(ctx, backdropSample, bmp, sourceW || bmp.width, sourceH || bmp.height, 0, 0, W, H);
     ctx.drawImage(bmp, r.x, r.y, r.width, r.height);
   };
   var render = function (t) {
@@ -650,6 +655,7 @@ export function assembleHtml(
           const [dx, dy] = glDirection(tr.dir);
           return { s: tr.start, e: tr.end, cut: tr.cut ?? -1, effect: tr.effect, dx, dy };
         }),
+        comp.backdrop === 'blur',
       ),
     );
     // Framing timeline (in final-cut time) registered to vid → transforms applied to the canvas element, one canvas absorbing every segment's framing

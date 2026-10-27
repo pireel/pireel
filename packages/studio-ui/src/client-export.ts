@@ -61,6 +61,7 @@ import {
   videoTrackShots,
   videoShotTimelineSpans,
 } from '@pireel/studio-engine/composition';
+import { BACKDROP_DIM, backdropBlurPx, backdropSampleSize } from '@pireel/studio-engine/source-framing';
 import { decodeAudioFile } from './audio-decode';
 import {
   type MixTone, mixAudioTrack } from './export-audio-mix';
@@ -361,6 +362,36 @@ interface ExportMediaGeometry {
   layout: { x: number; y: number; width: number; height: number };
 }
 
+type BackdropSource = { draw(context: OffscreenCanvasRenderingContext2D, x: number, y: number, width: number, height: number): void };
+const backdropSamples = new Map<string, OffscreenCanvas>();
+/** The blurred fill behind a source that does not cover its layer (Composition.backdrop 'blur'), drawn
+ *  in layer coordinates with the preview shim's sample size, blur and dim (source-framing). `scale` is
+ *  output pixels per layer unit: canvas filters blur in output pixels. */
+function paintBlurredBackdrop(
+  g: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  source: BackdropSource, sourceWidth: number, sourceHeight: number,
+  box: { x: number; y: number; width: number; height: number }, scale: number,
+): void {
+  const size = backdropSampleSize(box.width, box.height);
+  const key = `${size.width}x${size.height}`;
+  let sample = backdropSamples.get(key);
+  if (!sample) { sample = new OffscreenCanvas(size.width, size.height); backdropSamples.set(key, sample); }
+  const s = sample.getContext('2d')!;
+  const k = Math.max(size.width / Math.max(1, sourceWidth), size.height / Math.max(1, sourceHeight));
+  s.clearRect(0, 0, size.width, size.height);
+  source.draw(s, (size.width - sourceWidth * k) / 2, (size.height - sourceHeight * k) / 2, sourceWidth * k, sourceHeight * k);
+  const blur = backdropBlurPx(box.width);
+  g.save();
+  g.imageSmoothingEnabled = true;
+  g.imageSmoothingQuality = 'high';
+  g.filter = `blur(${Math.round(blur * scale)}px)`;
+  g.drawImage(sample, box.x - 2 * blur, box.y - 2 * blur, box.width + 4 * blur, box.height + 4 * blur);
+  g.filter = 'none';
+  g.fillStyle = `rgba(0,0,0,${BACKDROP_DIM})`;
+  g.fillRect(box.x, box.y, box.width, box.height);
+  g.restore();
+}
+
 function readTransform(win: Window, el: Element | null, fallbackWidth: number, fallbackHeight: number): ExportMediaGeometry {
   if (!el) return {
     m: new DOMMatrix(), radius: 0, inset: { t: 0, r: 0, b: 0, l: 0 },
@@ -587,6 +618,7 @@ export async function captureCompositionFrame(opts: {
       ctx.transform(vs.m.a, vs.m.b, vs.m.c, vs.m.d, vs.m.e, vs.m.f);
       ctx.translate(-centerX, -centerY);
       ctx.clip(framedClipPath(vs));
+      if (comp.backdrop === 'blur') paintBlurredBackdrop(ctx, sample, rig.sw, rig.sh, vs.layout, Sx);
       const rect = sourceDrawRect(rig.sw, rig.sh, vs.layout.width, vs.layout.height, sourceFraming);
       sample.draw(ctx, vs.layout.x + rect.x, vs.layout.y + rect.y, rect.width, rect.height);
       ctx.restore();
@@ -1035,6 +1067,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
           tc.shadowOffsetY = 0;
         }
         tc.clip(path);
+        if (comp.backdrop === 'blur') paintBlurredBackdrop(tc, smp, rg.sw, rg.sh, vs.layout, Sx);
         // Per-shot grade: same source as the preview's #vidEl CSS filter (canvas filter, same syntax); restore resets it
         if (filterCss) tc.filter = filterCss;
         const rect = sourceDrawRect(rg.sw, rg.sh, vs.layout.width, vs.layout.height, layerSeg.framing);

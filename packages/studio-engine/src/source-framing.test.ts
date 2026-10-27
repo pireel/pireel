@@ -11,6 +11,39 @@ const iframeRect = new Function(`return (${SOURCE_DRAW_RECT_FUNCTION});`)() as (
 ) => SourceDrawRect;
 
 describe('sourceDrawRect', () => {
+  it('fills the bands around a contained frame with its blurred copy only when the backdrop is on', () => {
+    const run = (backdrop: boolean) => {
+      const calls: string[] = []; const draws: unknown[][] = [];
+      let onMessage: ((event: { data: Record<string, unknown> }) => void) | undefined;
+      const context = (name: string) => ({
+        filter: 'none', fillStyle: '', imageSmoothingEnabled: false, imageSmoothingQuality: 'low',
+        clearRect: () => {}, save: () => calls.push(`${name}:save`), restore: () => {}, beginPath: () => {}, rect: () => {}, clip: () => {},
+        fillRect: (...args: unknown[]) => calls.push(`${name}:fill:${args.join(',')}`),
+        drawImage: (...args: unknown[]) => { draws.push([name, ...args]); },
+      });
+      const main = context('main'); const sample = context('sample');
+      const mainCanvas = { width: 1080, height: 1920, getContext: () => main };
+      const documentLike = { getElementById: (id: string) => (id === 'vidEl' ? mainCanvas : null), createElement: () => ({ width: 0, height: 0, getContext: () => sample }) };
+      const windowLike: Record<string, unknown> = {
+        getComputedStyle: () => ({ width: '1080px', height: '1920px' }),
+        addEventListener: (type: string, listener: (event: { data: Record<string, unknown> }) => void) => { if (type === 'message') onMessage = listener; },
+      };
+      new Function('window', 'document', videoFrameShim([], backdrop))(windowLike, documentLike);
+      const frame = { width: 1920, height: 1080, close: () => {} };
+      onMessage?.({ data: { type: 'hf:frame', frame, sourceWidth: 1920, sourceHeight: 1080, t: 0 } });
+      return { calls, draws, frame };
+    };
+    const off = run(false);
+    expect(off.draws).toEqual([['main', off.frame, 0, 656.25, 1080, 607.5]]);
+    const on = run(true);
+    // The frame goes small into the sample first, the sample back up past the edges, then the frame itself on top.
+    expect(on.draws[0]![0]).toBe('sample');
+    expect(on.draws[1]!.slice(0, 1)).toEqual(['main']);
+    expect(on.draws[1]![3]).toBeLessThan(0); expect(on.draws[1]![4]).toBeGreaterThan(1080);
+    expect(on.calls).toContain('main:fill:0,0,1080,1920');
+    expect(on.draws.at(-1)).toEqual(['main', on.frame, 0, 656.25, 1080, 607.5]);
+  });
+
   it('注入预览 iframe 的完整 frame shim 保持可解析', () => {
     expect(() => new Function(videoFrameShim([]))).not.toThrow();
   });

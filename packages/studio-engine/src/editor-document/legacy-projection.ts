@@ -158,6 +158,7 @@ export function projectV2ToLegacyComposition(document: EditorDocumentV2, options
     ...(document.semantics.brand !== undefined ? { brand: document.semantics.brand } : {}),
     ...(document.semantics.skillId !== undefined ? { skillId: document.semantics.skillId } : {}),
     ...(document.appearance.personFx ? { personFx: document.appearance.personFx } : {}),
+    ...(document.appearance.backdrop ? { backdrop: document.appearance.backdrop } : {}),
     ...(audioTracks.length ? { audioTracks } : {}),
     ...(document.processing?.audioDenoise ? { audioDenoise: document.processing.audioDenoise } : {}),
     ...(document.processing?.loudness ? { audioLoudness: document.processing.loudness } : {}),

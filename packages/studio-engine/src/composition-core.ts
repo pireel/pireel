@@ -650,7 +650,12 @@ export interface Composition {
   audioLoudness?: { targetLufs: number; gainDb: number };
   /** Transition lane (seconds), projected from the document's timeline.transitions. */
   transitions?: CompositionTransition[];
+  /** Fill behind a main source that does not cover the canvas (a landscape video on a vertical
+   *  canvas): 'blur' = the same frame, cover-fitted, blurred and dimmed. Absent = transparent. */
+  backdrop?: SourceBackdrop;
 }
+
+export type SourceBackdrop = 'blur';
 
 /** Person-effect config (global style; matte on/off is per-segment, see VideoShot.personMatte).
  *  Composited live on the preview side; the export path is not yet supported (the background-swap layer is hidden on export, falling back to the original frame).

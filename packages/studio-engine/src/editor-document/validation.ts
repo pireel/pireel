@@ -42,6 +42,7 @@ export function isEditorDocumentV2(value: unknown): value is EditorDocumentV2 {
   if (Object.values(document.semantics.transcripts).some((segments) => !Array.isArray(segments))) return false;
   if (document.semantics.scenes.some((scene) => !scene || typeof scene !== 'object' || !Array.isArray(scene.clipIds))) return false;
   if (document.appearance.look !== undefined && !normalizeLook(document.appearance.look).look) return false;
+  if (document.appearance.backdrop !== undefined && document.appearance.backdrop !== 'blur') return false;
   return true;
 }
 

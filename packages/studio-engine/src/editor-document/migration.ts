@@ -375,6 +375,7 @@ export function migrateLegacyProjectToV2(input: LegacyProjectForMigration): Edit
       ...(comp.palette ? { palette: comp.palette } : {}),
       ...(comp.captionStyle ? { captionStyle: comp.captionStyle } : {}),
       ...(comp.personFx ? { personFx: comp.personFx } : {}),
+      ...(comp.backdrop ? { backdrop: comp.backdrop } : {}),
     },
     assets,
     timeline: { tracks },
