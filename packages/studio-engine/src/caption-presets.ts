@@ -73,8 +73,15 @@ export interface CaptionStack {
 /** Simple looks for the translation line: no stacking, no motion. */
 export const SUB_CAPTION_PRESET_IDS = ['ln-clean', 'ln-black', 'style-glass', 'ln-yellow', 'ln-mint', 'ln-navy'] as const;
 
-/** Artistic main-caption looks: short stacked rows, size contrast, tilt, per-row color and plates. */
+/** Artistic main-caption looks: single-line looks that run across the caption width (a smaller size fits
+ *  more on a line), then short stacked rows (size contrast, tilt, per-row color and plates). */
 export const CAPTION_ART_PRESETS: CaptionPreset[] = [
+  { id: 'art-beast-line', name: 'engine.artBeastLine', mode: 'emphasis', text: '#ffffff', emphasis: '#ffe600', weight: 900, upper: true, tiltDeg: -2, stroke: { color: '#000000', widthEm: 0.18 }, shadow: '0 0.09em 0 #000000' },
+  { id: 'art-comic-line', name: 'engine.artComicLine', mode: 'line', text: '#ffe600', weight: 900, tiltDeg: 2, stroke: { color: '#000000', widthEm: 0.2 }, shadow: '0.06em 0.09em 0 #000000' },
+  { id: 'art-neon-line', name: 'engine.artNeonLine', mode: 'line', text: '#ffffff', weight: 700, trackingEm: 0.04, shadow: '0 0 0.1em #ff2bd6,0 0 0.35em #ff2bd6,0 0 0.8em #b100ff' },
+  { id: 'art-glitch-line', name: 'engine.artGlitchLine', mode: 'line', text: '#ffffff', weight: 900, upper: true, shadow: '0.05em 0 0 #ff0050,-0.05em 0 0 #00f0ff' },
+  { id: 'art-ticket-line', name: 'engine.artTicketLine', mode: 'line', text: '#111111', weight: 900, upper: true, tiltDeg: -3, bg: '#ffe600', plateRadiusEm: 0, shadow: 'none' },
+  { id: 'art-bubble-line', name: 'engine.artBubbleLine', mode: 'line', text: '#111111', weight: 800, tiltDeg: 1, bg: '#ffffff', plateRadiusEm: 0.5, shadow: 'none' },
   { id: 'art-beast', name: 'engine.artBeast', mode: 'line', text: '#ffffff', weight: 900, upper: true, tiltDeg: -3, stroke: { color: '#000000', widthEm: 0.2 }, shadow: '0 0.09em 0 #000000',
     stack: { rowEm: 6, maxRows: 2, scales: [1.3], colors: ['#ffffff', '#ffe600'] } },
   { id: 'art-keyline', name: 'engine.artKeyline', mode: 'line', text: '#ffffff', weight: 900, stroke: { color: '#111111', widthEm: 0.12 },
@@ -126,6 +133,12 @@ export const CAPTION_LOOK_HINTS: Record<string, string> = {
   'art-magazine': 'left-aligned serif, big row over small row',
   'art-tower': 'narrow stacked caps, last row red',
   'art-bubble': 'white/mint rounded speech bubbles, staggered',
+  'art-beast-line': 'one line of bold caps, thick black outline, slight tilt, key words yellow',
+  'art-comic-line': 'one line of yellow comic lettering, heavy outline',
+  'art-neon-line': 'one line of white text with pink neon glow',
+  'art-glitch-line': 'one line of caps with red/cyan split shadow',
+  'art-ticket-line': 'one line of black caps on a tilted yellow tag',
+  'art-bubble-line': 'one line of dark text on a white rounded bubble',
   'style-documentary': 'clean white text with soft shadow',
   'style-outline': 'heavy white text, thick black outline',
   'style-editorial': 'italic serif, warm white',

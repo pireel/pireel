@@ -13,6 +13,18 @@ export interface SceneCanvasHandle {
   seek(time: number): void;
   play(): void;
   pause(): void;
+  /** Where the captions on screen are painted (main and translation lines together), as fractions of
+   *  the canvas; null when none shows. */
+  captionBounds(): { x: number; y: number; w: number; h: number } | null;
+}
+
+/** Painted: not hidden, not faded out, by itself or any ancestor inside the stage. */
+function painted(element: Element) {
+  for (let node: Element | null = element; node; node = node.parentElement) {
+    const style = getComputedStyle(node);
+    if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) < .05) return false;
+  }
+  return true;
 }
 
 interface Props {
@@ -87,6 +99,20 @@ export const SceneCanvasPreview = forwardRef<SceneCanvasHandle, Props>(function 
       current.current.onPlaying(true);
     },
     pause,
+    captionBounds() {
+      const stage = frames.current[active.current]?.element;
+      const lines = stage?.shadowRoot?.querySelectorAll('.cap-line, .cap-sub');
+      if (!stage || !lines?.length) return null;
+      const box = stage.getBoundingClientRect();
+      if (box.width < 1 || box.height < 1) return null;
+      let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+      for (const line of lines) {
+        const rect = line.getBoundingClientRect();
+        if (rect.width < 1 || rect.height < 1 || !painted(line)) continue;
+        left = Math.min(left, rect.left); top = Math.min(top, rect.top); right = Math.max(right, rect.right); bottom = Math.max(bottom, rect.bottom);
+      }
+      return Number.isFinite(left) ? { x: (left - box.left) / box.width, y: (top - box.top) / box.height, w: (right - left) / box.width, h: (bottom - top) / box.height } : null;
+    },
   }), []);
 
   useEffect(() => {

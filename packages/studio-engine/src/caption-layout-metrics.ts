@@ -199,7 +199,8 @@ function stackRows<W extends { text: string }>(words: W[], stack: CaptionStack, 
   const rows: W[][] = [];
   let row: W[] = [];
   let used = 0;
-  const capacity = (k: number) => Math.min(stack.rowEm * m.fontPx, m.availablePx) / captionStackScale(stack, k);
+  // rowEm is a width at the base size, so a smaller caption fits more on a row and a larger one less.
+  const capacity = (k: number) => Math.min(stack.rowEm * BASE_CAPTION_FONT_PX, m.availablePx) / captionStackScale(stack, k);
   for (const word of words) {
     const w = m.widthOf(word);
     const cap = capacity(rows.length);

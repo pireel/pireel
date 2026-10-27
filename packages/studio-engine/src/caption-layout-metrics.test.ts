@@ -43,7 +43,7 @@ describe('captionLineSegments', () => {
     const preset = getCaptionPreset('ln-clean');
     for (const lines of [
       captionLineSegments(words, preset, 40, 1, 1080, { measureText: () => null }),
-      ...CAPTION_ART_PRESETS.map((art) => captionStackRows(words, art, 80, 1, 1080, { measureText: () => null })),
+      ...CAPTION_ART_PRESETS.filter((art) => art.stack).map((art) => captionStackRows(words, art, 80, 1, 1080, { measureText: () => null })),
     ]) {
       let at = 0;
       for (const text of lineTexts(lines)) { at += text.length; expect(boundaries.has(at)).toBe(true); }
@@ -59,6 +59,13 @@ describe('captionLineSegments', () => {
         expect(['口播', '聊一', '一聊']).not.toContain(seam);
       }
     }
+  });
+
+  it('fits more on a stacked row at a smaller size and less at a larger one', () => {
+    const words = perChar('今天我们来聊一聊怎么把一条视频的字幕做得更加好看');
+    const longest = (scale: number) => Math.max(...lineTexts(captionStackRows(words, getCaptionPreset('art-beast'), 80, scale, 1080, { measureText: () => null })).map(row => row.length));
+    expect(longest(.5)).toBeGreaterThan(longest(1));
+    expect(longest(1.5)).toBeLessThan(longest(1));
   });
 
   it('keeps numbers, particles and words the dictionary does not know off line edges', () => {
