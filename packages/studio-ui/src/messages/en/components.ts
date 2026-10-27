@@ -1,7 +1,5 @@
 export const COMPONENTS_EN: Record<string, string> = {
-  'ui.captionEmphasis.incomplete': 'The key-word result is incomplete; your captions are kept. Try again.',
   'ui.captionEmphasis.locked': 'The caption track is locked. Unlock it first.',
-  'ui.captionEmphasis.tooLong': 'This caption is too long. Split it again first.',
   'ui.captionTranslation.badText': 'A translated line is empty or too long.',
   'ui.captionTranslation.empty': 'The translation returned nothing. Try again.',
   'ui.captionTranslation.incomplete': 'The translation is incomplete. Try again.',

@@ -15,7 +15,6 @@ export const CAPTIONS_EN: Record<string, string> = {
   'captions.autoHighlightUnavailable': 'Caption emphasis is unavailable. Your captions are preserved.',
   'captions.autoHighlightNotApplied': 'Caption emphasis was not applied. Please retry.',
   'captions.autoHighlightNone': 'Nothing to highlight',
-  'captions.autoHighlightMismatch': 'The result does not match the caption text: “{text}”',
   'captions.noLongPauses': 'No pauses longer than {sec}s',
   'captions.addText': 'Text title',
   'captions.addSticker': 'Sticker',

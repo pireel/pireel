@@ -172,12 +172,11 @@ export interface StudioProviders {
    *  The server marks the restore as consumed — repeated calls walk strictly backward. */
   historyUndo?: (projectId: string) => Promise<{ document: EditorDocumentV2; version: number } | null>;
   /** Sentence translator for bilingual captions (hosted-LLM feature; absent = the captions panel hides its translation section — BYO agents translate themselves via set_caption_translations). */
-  captionEmphasis?: (rows: import('@pireel/studio-engine/caption-emphasis').EmphasisRow[], projectId?: string, options?: StudioOperationOptions) => Promise<import('@pireel/studio-engine/caption-emphasis').EmphasisSelection[]>;
   translate?: (rows: { index: number; text: string }[], targetLanguage: string, options?: StudioOperationOptions) => Promise<{ index: number; text: string }[]>;
   /** Dubbing script writer (hosted LLM): each turn's phrases with the seconds they hold, back as one
    *  target-language phrase per source phrase sized to its time. Absent = video dubbing is unavailable. */
   dubbingScript?: (turns: { text: string; seconds: number }[][], targetLanguage: string, options?: StudioOperationOptions) => Promise<string[][]>;
-  /** Caption auto-highlight picker (hosted-LLM feature; absent = the transcript hides its "Auto highlight" button — BYO agents highlight via set_captions highlights). Returns exact phrases per row. */
+  /** Caption auto-highlight picker (hosted-LLM feature; absent = the transcript hides its "Auto highlight" button and the keyword caption style is unavailable — BYO agents highlight via set_captions highlights). Returns exact phrases per row. */
   autoHighlight?: (rows: { index: number; text: string }[], options?: StudioOperationOptions) => Promise<{ index: number; text: string }[]>;
   /** Cleans up a raw talking-head recording from its whole transcript at once (hosted LLM): the repeats
    *  to cut (retakes, false starts, crew talk) and the sensitive words to mask, each placed on the source

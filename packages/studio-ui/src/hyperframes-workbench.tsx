@@ -9120,7 +9120,7 @@ export function HyperframesWorkbench({
         onBusyChange={(value) => { workflowBusyRef.current = value; setWorkflowBusy(value); }}
         onImport={() => fileInputRef.current?.click()}
         host={{
-          ...(studioProviders().captionEmphasis ? { emphasizeCaptions } : {}),
+          ...(studioProviders().autoHighlight ? { emphasizeCaptions } : {}),
           context: () => {
             const document = editorDocumentRef.current;
             const sourceId = firstNarrativeAssetId(document);

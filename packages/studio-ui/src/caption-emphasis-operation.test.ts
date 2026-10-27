@@ -15,7 +15,7 @@ describe('keyword emphasis document operation', () => {
   it('updates source annotations and rendered blocks together, then reuses the result without another model call', async () => {
     const document = fixture();
     const original = JSON.stringify(document);
-    const select = vi.fn(async (rows) => rows.map((row: { index: number }) => ({ index: row.index, words: [0, 1] })));
+    const select = vi.fn(async (rows: { index: number; text: string }[]) => rows.map((row) => ({ index: row.index, text: row.text.slice(0, 4) })));
     const after = await emphasizeCaptionDocument(document, select);
     const words = after.semantics.transcripts[firstNarrativeAssetId(after)!]![0]!.words!;
     expect(words.every((w) => w.emphasis === undefined)).toBe(true);
@@ -28,7 +28,7 @@ describe('keyword emphasis document operation', () => {
     expect(select).toHaveBeenCalledOnce();
   });
   it('invalidates edited copy emphasis and selects against the new display words without rewriting ASR', async () => {
-    const select = vi.fn(async (rows) => rows.map((row: { index: number }) => ({ index: row.index, words: [0, 1] })));
+    const select = vi.fn(async (rows: { index: number; text: string }[]) => rows.map((row) => ({ index: row.index, text: row.text.slice(0, 4) })));
     const before = await emphasizeCaptionDocument(fixture(), select);
     const asset = firstNarrativeAssetId(before)!;
     const text = '完全免费而不是按次收费';
@@ -41,15 +41,18 @@ describe('keyword emphasis document operation', () => {
     expect(after.semantics.transcripts[asset]![0]!.text).toBe('不是免费而是按次收费');
     expect(after.semantics.transcripts[asset]![0]!.cueEmphasis!['0:4']!.text).toBe(text);
   });
-  it('does not modify the document on a malformed or failed model response', async () => {
+  it('does not modify the document when the model call fails', async () => {
     const document = fixture(); const original = JSON.stringify(document);
-    await expect(emphasizeCaptionDocument(document, async () => [])).rejects.toThrow();
     await expect(emphasizeCaptionDocument(document, async () => { throw new Error('offline'); })).rejects.toThrow('offline');
     expect(JSON.stringify(document)).toBe(original);
+  });
+  it('skips a phrase that is not in its line and keeps the rest', async () => {
+    const after = await emphasizeCaptionDocument(fixture(), async () => [{ index: 0, text: '不存在' }, { index: 0, text: '按次收费' }, { index: 9, text: '免费' }]);
+    expect(after.semantics.transcripts[firstNarrativeAssetId(after)!]![0]!.cueEmphasis!['0:4']!.words).toEqual([3, 4]);
   });
   it('refuses a locked caption lane', async () => {
     const document = fixture();
     document.timeline.tracks.find((track) => track.id === document.semantics.managedCaptionTrackId)!.locked = true;
-    await expect(emphasizeCaptionDocument(document, async (rows) => rows.map((row) => ({ index: row.index, words: [] })))).rejects.toThrow();
+    await expect(emphasizeCaptionDocument(document, async () => [])).rejects.toThrow();
   });
 });

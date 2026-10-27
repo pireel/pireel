@@ -67,8 +67,32 @@ export function captionLineSegments<W extends FxWord>(
     for (let at = 0; at < rows.length; at += preset.stack.maxRows) out.push(rows.slice(at, at + preset.stack.maxRows).flat().flatMap((group) => group.members));
     return out;
   }
-  return chunkWordsBalanced(groups, m.availablePx, m.widthOf, (left, right) => (loneHan(left.text) && loneHan(right.text) ? m.availablePx * 0.3 : 0))
+  return chunkWordsBalanced(groups, m.availablePx, m.widthOf, (left, right) => lineBreakCost(left.text, right.text) * m.availablePx)
     .map((line) => line.flatMap((group) => group.members));
+}
+
+const NUMERAL_END = /[\p{N}零〇一二三四五六七八九十百千万亿两]$/u;
+const NUMERAL_START = /^[\p{N}零〇一二三四五六七八九十百千万亿]/u;
+/** Particles that only ever follow what they attach to; a line never opens with one. */
+const CJK_TRAILING = /^[的了吗呢啊吧呀哦嘛么着过得地们]/u;
+/**
+ * How bad a line break between two dictionary words reads, as a share of the line width. Numbers
+ * stay whole and with the unit or measure after them; a line does not open with a particle; a lone
+ * Han character (a function word, or a suffix the dictionary split off: 评论|区) stays with its
+ * neighbour. Punctuation already ends the left word, so a break after it costs nothing.
+ */
+export function lineBreakCost(left: string, right: string): number {
+  if (PUNCT_END.test(left)) return 0;
+  const before = left.replace(/[^\p{L}\p{N}]+$/u, '');
+  const after = right.replace(/^[^\p{L}\p{N}]+/u, '');
+  let cost = 0;
+  if (NUMERAL_END.test(before) && NUMERAL_START.test(after)) cost += 0.6;
+  else if (NUMERAL_END.test(before) && /^\p{Script=Han}/u.test(after)) cost += 0.35;
+  if (CJK_TRAILING.test(after)) cost += 0.3;
+  // Two lone characters side by side are usually one word the dictionary does not know (极|客).
+  if (loneHan(left) && loneHan(right)) cost += 1;
+  else if (loneHan(left) || loneHan(right)) cost += 0.2;
+  return cost;
 }
 
 /** Rows of one stacked segment (preset.stack), in render order. Empty for non-stack presets. */

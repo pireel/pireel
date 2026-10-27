@@ -1,7 +1,5 @@
 export const COMPONENTS_ZH: Record<string, string> = {
-  'ui.captionEmphasis.incomplete': '重点词结果不完整，字幕已保留。请重试。',
   'ui.captionEmphasis.locked': '字幕轨道已锁定，请先解锁。',
-  'ui.captionEmphasis.tooLong': '这条字幕过长，请先重新断句。',
   'ui.captionTranslation.badText': '翻译文本为空或过长。',
   'ui.captionTranslation.empty': '翻译没有返回任何结果，请重试。',
   'ui.captionTranslation.incomplete': '翻译结果不完整，请重试。',

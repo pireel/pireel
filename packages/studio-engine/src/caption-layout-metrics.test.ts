@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { captionLineSegments, captionStackRows, lexicalWordGroups } from './caption-layout-metrics';
+import { captionLineSegments, captionStackRows, lexicalWordGroups, lineBreakCost } from './caption-layout-metrics';
 import { CAPTION_ART_PRESETS, getCaptionPreset } from './caption-presets';
 import { groupAsrWords } from './caption-fx';
 
@@ -59,6 +59,18 @@ describe('captionLineSegments', () => {
         expect(['口播', '聊一', '一聊']).not.toContain(seam);
       }
     }
+  });
+
+  it('keeps numbers, particles and words the dictionary does not know off line edges', () => {
+    expect(lineBreakCost('一千', '九百')).toBeGreaterThan(0.5);
+    expect(lineBreakCost('五十', '毫克')).toBeGreaterThan(0);
+    expect(lineBreakCost('抽奖方式', '的话')).toBeGreaterThan(0);
+    expect(lineBreakCost('极', '客')).toBeGreaterThanOrEqual(1);
+    expect(lineBreakCost('礼物，', '我们')).toBe(0);
+    const words = groupAsrWords('这个应该是如何和极客时间合作的一些方法', [...'这个应该是如何和极客时间合作的一些方法'].map((ch, i) => ({ text: ch, start: i * 0.2, end: i * 0.2 + 0.2 })));
+    const lines = captionLineSegments(words, getCaptionPreset('ln-clean'), 56, 1, 1080).map(line => line.map(word => word.text).join(''));
+    expect(lines.length).toBeGreaterThan(1);
+    expect(lines.some(line => line.endsWith('极') || line.startsWith('客'))).toBe(false);
   });
 });
 

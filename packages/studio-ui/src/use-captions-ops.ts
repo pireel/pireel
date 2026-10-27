@@ -596,7 +596,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     }
   };
   const emphasizeCaptions = async () => {
-    const select = studioProviders().captionEmphasis;
+    const select = studioProviders().autoHighlight;
     if (!select) throw new Error(t('ui.captionsOps.highlightMissing'));
     const before = documentRef.current;
     const fingerprint = JSON.stringify(before);

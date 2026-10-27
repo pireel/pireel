@@ -185,12 +185,59 @@ export const alnumCount = (s: string): number => {
   return n;
 };
 
-/** Merge complete ASR tokens only. Never invent sub-token time or match by length alone. */
+/**
+ * Sentence text whose ASR tokens miss or change a few characters (recognizers drop some word stamps
+ * while the sentence text stays complete). Characters are matched in order; a token takes the time
+ * of its matched characters, and a token with none shares the gap between its matched neighbours
+ * (marked estimated). Null unless the two clearly say the same thing, so unrelated tokens stay raw.
+ */
+function alignByCharacters(toks: string[], flat: { text: string; start: number; end: number }[]): FxWord[] | null {
+  const a = toks.flatMap((tok, token) => [...alignmentText(tok)].map((char) => ({ char, token })));
+  const b = flat.flatMap((word) => {
+    const chars = [...alignmentText(word.text)];
+    const step = (word.end - word.start) / Math.max(1, chars.length);
+    return chars.map((char, at) => ({ char, start: word.start + step * at, end: word.start + step * (at + 1) }));
+  });
+  const n = a.length, m = b.length;
+  if (!n || !m || n * m > 4_000_000) return null;
+  // Longest common subsequence of the spoken characters.
+  const table = new Uint16Array((n + 1) * (m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) {
+    table[i * (m + 1) + j] = a[i]!.char === b[j]!.char ? table[(i + 1) * (m + 1) + j + 1]! + 1 : Math.max(table[(i + 1) * (m + 1) + j]!, table[i * (m + 1) + j + 1]!);
+  }
+  const matched = table[0]!;
+  if (matched < m * 0.9 || matched < n * 0.7) return null;
+  const time: ({ start: number; end: number } | null)[] = Array.from({ length: n }, () => null);
+  for (let i = 0, j = 0; i < n && j < m;) {
+    if (a[i]!.char === b[j]!.char) { time[i++] = b[j++]!; continue; }
+    if (table[(i + 1) * (m + 1) + j]! >= table[i * (m + 1) + j + 1]!) i++; else j++;
+  }
+  const out: FxWord[] = [];
+  toks.forEach((tok, token) => {
+    const own = a.flatMap((entry, at) => (entry.token === token ? [at] : []));
+    if (!own.length) { if (out.length) out[out.length - 1]!.text += tok; return; }
+    const stamped = own.flatMap((at) => (time[at] ? [time[at]!] : []));
+    if (stamped.length) { out.push({ text: tok, start: stamped[0]!.start, end: stamped[stamped.length - 1]!.end }); return; }
+    // No character of this token was stamped: it takes the gap between its stamped neighbours.
+    let before = own[0]! - 1; while (before >= 0 && !time[before]) before--;
+    let after = own[own.length - 1]! + 1; while (after < n && !time[after]) after++;
+    const from = before >= 0 ? time[before]!.end : time[after]?.start ?? 0;
+    const to = after < n ? Math.max(from, time[after]!.start) : from;
+    const run = after - before - 1;
+    const share = (to - from) / Math.max(1, run);
+    out.push({ text: tok, start: from + share * (own[0]! - before - 1), end: from + share * (own[own.length - 1]! - before), timing: 'estimated' });
+  });
+  return out.length ? out : null;
+}
+
+/** Merge complete ASR tokens only. Never invent sub-token time or match by length alone; text the
+ *  tokens do not spell out exactly is aligned character by character (alignByCharacters). */
 export function groupAsrWords(text: string, asr: { text: string; start: number; end: number }[]): FxWord[] {
   const flat = asr.filter((w) => w.text.trim() && Number.isFinite(w.start) && Number.isFinite(w.end) && w.end > w.start)
     .map((w) => ({ ...w, text: w.text.trim() }));
   const toks = segmentTokens(text);
-  if (!flat.length || !toks.length || alignmentText(text) !== flat.map((w) => alignmentText(w.text)).join('')) return flat;
+  if (!flat.length || !toks.length) return flat;
+  if (alignmentText(text) !== flat.map((w) => alignmentText(w.text)).join('')) return alignByCharacters(toks, flat) ?? flat;
   const out: FxWord[] = [];
   let i = 0;
   for (const tk of toks) {
@@ -228,15 +275,15 @@ const visualWidth = (t: string) => [...t].reduce((a, ch) => a + (ch.charCodeAt(0
 export const PUNCT_END = /[,。,.!?!?;;、::…]$/;
 
 /**
- * Balanced line-breaking core (pretext-style): measure the whole sentence, then cut each line as
- * close as possible to an equal share of what is still left, never past the limit. The share is
- * re-planned after every cut from the actual remaining width, so a line that had to end early (a
- * wide word would not fit) hands its slack to the lines after it instead of leaving the last word
- * alone on the last line. Punctuation near the share wins over a nearer plain break. The whole
- * sentence stays one line when it fits; this only breaks within a sentence, never across sentences
- * (callers call per sentence). widthOf's unit is the caller's choice; limit shares it.
+ * Balanced line-breaking core: the sentence takes the fewest lines that fit, and the breaks are
+ * chosen together so every line comes as close as possible to an equal share of the width, never
+ * past the limit (a single word wider than the line stands alone). A break after punctuation earns
+ * a bonus; `breakCost(left, right)` adds a penalty, in width units, for breaking between two words.
+ * With a breakCost, one more line is allowed when it avoids a bad break (it costs 0.3 of a line).
+ * Choosing all breaks at once means a costly break avoided early never forces a worse one later.
+ * The whole sentence stays one line when it fits; this only breaks within a sentence, never across
+ * sentences (callers call per sentence). widthOf's unit is the caller's choice; limit shares it.
  */
-/** `breakCost(left, right)` adds a penalty (in width units) for breaking between two words. */
 /** A single Han character standing alone after ICU segmentation. Runs of them are usually a word the
  * dictionary does not know (「口播」) or a reduplicated phrase (「聊一聊」), so a line should not
  * break between two of them when a better break is nearby. */
@@ -244,44 +291,39 @@ export const loneHan = (text: string) => /^\p{Script=Han}$/u.test(text.replace(/
 
 export function chunkWordsBalanced<W extends { text: string }>(words: W[], limit: number, widthOf: (w: W) => number, breakCost?: (left: W, right: W) => number): W[][] {
   if (!words.length) return [];
-  const widths = words.map(widthOf);
-  const total = widths.reduce((a, b) => a + b, 0);
+  const n = words.length;
+  const prefix = [0];
+  for (const word of words) prefix.push(prefix[prefix.length - 1]! + widthOf(word));
+  const total = prefix[n]!;
   if (total <= limit) return [words];
+  const span = (from: number, to: number) => prefix[to]! - prefix[from]!;
+  const fits = (from: number, to: number) => to - from === 1 || span(from, to) <= limit + 1e-6;
+  let lines = 0;
+  for (let at = 0; at < n; lines++) { let end = at + 1; while (end < n && fits(at, end + 1)) end++; at = end; }
   const punctTol = limit * 0.15; // punctuation-priority band (scales with the unit)
-  const out: W[][] = [];
-  let from = 0;
-  let remaining = total;
-  while (from < words.length) {
-    const linesLeft = Math.max(1, Math.ceil(remaining / limit - 1e-9));
-    if (linesLeft === 1) {
-      out.push(words.slice(from));
-      break;
-    }
-    const target = remaining / linesLeft;
-    let len = 0;
-    let best = -1;
-    let bestScore = Infinity;
-    // Every line but the last leaves at least one word for the lines after it.
-    for (let at = from; at < words.length - 1; at++) {
-      len += widths[at]!;
-      if (len > limit + 1e-6) {
-        if (best < 0) best = at; // a single word wider than the line stands alone
-        break;
-      }
-      const distance = Math.abs(len - target);
-      const punct = PUNCT_END.test(words[at]!.text) && distance <= punctTol;
-      const score = (punct ? distance - punctTol : distance) + (breakCost ? breakCost(words[at]!, words[at + 1]!) : 0);
-      if (score < bestScore) {
-        bestScore = score;
-        best = at;
+  // Moving a break changes two lines' deviation, so the bonus counts twice.
+  const breakAfter = (at: number) => (PUNCT_END.test(words[at - 1]!.text) ? -2 * punctTol : 0) + (breakCost ? breakCost(words[at - 1]!, words[at]!) : 0);
+  const layout = (count: number) => {
+    const target = total / count;
+    // cost[k][j]: best layout of the first j words on k lines; back[k][j]: where its last line starts.
+    const cost = Array.from({ length: count + 1 }, () => new Array<number>(n + 1).fill(Infinity));
+    const back = Array.from({ length: count + 1 }, () => new Array<number>(n + 1).fill(-1));
+    cost[0]![0] = 0;
+    for (let k = 1; k <= count; k++) for (let to = k; to <= n; to++) {
+      for (let from = to - 1; from >= k - 1 && fits(from, to); from--) {
+        if (cost[k - 1]![from] === Infinity) continue;
+        const value = cost[k - 1]![from]! + Math.abs(span(from, to) - target) + (to < n ? breakAfter(to) : 0);
+        if (value < cost[k]![to]!) { cost[k]![to] = value; back[k]![to] = from; }
       }
     }
-    if (best < 0) best = from;
-    out.push(words.slice(from, best + 1));
-    for (let at = from; at <= best; at++) remaining -= widths[at]!;
-    from = best + 1;
-  }
-  return out;
+    const out: W[][] = [];
+    for (let k = count, to = n; k > 0 && to > 0; k--) { const from = back[k]![to]!; out.unshift(words.slice(from, to)); to = from; }
+    return { out, cost: cost[count]![n]! };
+  };
+  const fewest = layout(lines);
+  if (!breakCost || lines + 1 > n) return fewest.out;
+  const more = layout(lines + 1);
+  return more.cost + limit * 0.3 < fewest.cost ? more.out : fewest.out;
 }
 
 /** Coarse visual-unit measure (CJK=1/Latin=0.5): the fallback when there's no font-size context. */

@@ -36,6 +36,9 @@ function selectionPosition(rect: DOMRect, desiredWidth = 480) {
 /** One caption line's share of a translation; `mine` = it plays in this section. */
 interface TranslationPiece { text: string; mine: boolean }
 
+/** Rows per auto highlight request (the service takes at most 400). */
+const AUTO_HIGHLIGHT_BATCH = 200;
+
 export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, playing, active = true, extracting, onExtract, onSeek, onCut, onEdit, onDecorate, onMask, onAddAtRange, addKinds, autoHighlight }: {
   document: EditorDocumentV2;
   currentTimeSec: number;
@@ -122,7 +125,7 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
   const [highlighting, setHighlighting] = useState(false);
   const captionsToolbar = useContext(CaptionsToolbarContext);
   // One call for every sentence on screen; the result lands as ordinary word highlights
-  // (one decorate commit, one undo). A phrase that is not in its row fails the whole run.
+  // (one decorate commit, one undo). A phrase that is not in its row is skipped.
   const runAutoHighlight = async () => {
     if (!autoHighlight || highlighting) return;
     const sentences = [...new Map(tokens.map((token) => [`${token.assetId}:${token.si}`, { assetId: token.assetId, si: token.si }])).values()]
@@ -130,17 +133,21 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
     if (!sentences.length) return;
     setHighlighting(true);
     try {
-      const keys = await autoHighlight(sentences.map((row, index) => ({ index, text: joinWords(row.words.map((word) => word.text)) })));
+      const rows = sentences.map((row, index) => ({ index, text: joinWords(row.words.map((word) => word.text)) }));
+      const keys: { index: number; text: string }[] = [];
+      for (let offset = 0; offset < rows.length; offset += AUTO_HIGHLIGHT_BATCH) keys.push(...await autoHighlight(rows.slice(offset, offset + AUTO_HIGHLIGHT_BATCH)));
       const targets: TimelineMaskTarget[] = [];
+      let placed = 0;
       for (const key of keys) {
         const row = sentences[key.index];
         const found = row ? phraseWordIndexes(row.words, key.text) : null;
-        if (!row || !found) throw new Error(t('captions.autoHighlightMismatch', { text: key.text }));
+        if (!row || !found) continue;
+        placed++;
         for (const wi of found) targets.push({ assetId: row.assetId, si: row.si, wi });
       }
       onDecorate(targets, { highlight: 'color', color: null }, tokens.flatMap(token => Array.from({ length: token.w1 - token.w0 + 1 }, (_, i) => ({ assetId: token.assetId, si: token.si, wi: token.w0 + i }))));
       if (!targets.length) { toast.info(t('captions.autoHighlightNone')); return; }
-      toast.success(t('captions.autoHighlightDone', { n: keys.length }));
+      toast.success(t('captions.autoHighlightDone', { n: placed }));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {

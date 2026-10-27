@@ -15,7 +15,6 @@ export const CAPTIONS_ZH: Record<string, string> = {
   'captions.autoHighlighting': '高亮中…',
   'captions.autoHighlightDone': '已高亮 {n} 处',
   'captions.autoHighlightNone': '没有挑出需要高亮的词',
-  'captions.autoHighlightMismatch': '高亮结果与字幕原文对不上：「{text}」',
   'captions.noLongPauses': '没有超过 {sec}s 的空白',
   'captions.addText': '文字标题',
   'captions.addSticker': '贴纸',

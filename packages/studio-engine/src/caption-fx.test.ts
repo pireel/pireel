@@ -72,6 +72,15 @@ describe('groupAsrWords(ASR 词元按 ICU 词界归组,时间戳合并)', () => 
     const out = groupAsrWords('这个方案不科学好长好长', asr);
     expect(out).toEqual([{ text: '完全不同的内容', start: 0, end: 1 }]);
   });
+  it('ASR 漏掉个别字的时间戳时仍按整句显示,漏字取前后词之间的时间', () => {
+    const asr = [...'我边给到家上架的产品'].map((ch, i) => ({ text: ch, start: i * 0.2, end: i * 0.2 + 0.2 }));
+    const out = groupAsrWords('我这边给到大家上架的产品', asr);
+    expect(out.map((w) => w.text).join('')).toBe('我这边给到大家上架的产品');
+    const shelf = out.find((w) => w.text === '上架')!;
+    expect(shelf.start).toBeCloseTo(1, 3);
+    expect(shelf.end).toBeCloseTo(1.4, 3);
+    expect(out.every((w, i) => w.end >= w.start && (i === 0 || w.start >= out[i - 1]!.start))).toBe(true);
+  });
 });
 
 describe('chunkWords', () => {
