@@ -184,3 +184,26 @@ it('tiles a group in the place a picture takes, under one seat and backdrop for 
   expect(track('broll-pip-ground').map(ground => ground.id)).toEqual(['a-ground']);
   expect(second!.keyframes!.box![0]).toMatchObject({ frame: 0, y: -.5 });
 });
+
+it('grows a one-by-one tiling as pictures arrive, so no cell sits empty', async () => {
+  const { pipGroupCells } = await import('./pip-layout');
+  const clip = (id: string, startFrame: number, durationFrames: number) => ({ id, kind: 'media', assetId: 'wide', startFrame, durationFrames, sourceInSec: 0, sourceOutSec: 3, enabled: true });
+  const document = {
+    canvas: { ...portrait, fps: 30 }, assets: { wide: { id: 'wide', kind: 'image', metadata: landscape }, talk: { id: 'talk', kind: 'video', metadata: portrait } },
+    semantics: { primaryNarrativeTrackId: 'main' }, appearance: {},
+    timeline: { tracks: [
+      { id: 'main', type: 'visual', clips: [{ id: 'm', kind: 'narrative', assetId: 'talk', startFrame: 0, durationFrames: 600, sourceInSec: 0, sourceOutSec: 20, enabled: true }] },
+      { id: 'broll', type: 'visual', clips: [clip('a', 30, 150), clip('b', 90, 90)] },
+    ] },
+  };
+  const next = applyPipLayout(document as never, { template: 'split' }, 'broll', {}, { a: { id: 'g', index: 0 }, b: { id: 'g', index: 1 } });
+  const [first, second] = next.timeline.tracks.find(row => row.id === 'broll')!.clips as { box: PipBox; keyframes: { box: (PipBox & { frame: number })[] } }[];
+  const half = pipGeometry('split', portrait, landscape, {}, portrait).media; const [left, right] = pipGroupCells(half, 2, portrait);
+  // Alone, the first picture fills the half; when the second arrives (60 frames in) it moves over to its cell.
+  expect(first!.keyframes.box.find(row => row.frame === 11)).toMatchObject(half);
+  expect(first!.keyframes.box.find(row => row.frame === 60)).toMatchObject(half);
+  expect(first!.keyframes.box.find(row => row.frame === 71)).toMatchObject(left!);
+  expect(first!.box).toEqual(left);
+  // The second arrives straight into its own cell.
+  expect(second!.keyframes.box.find(row => row.frame === 11)).toMatchObject(right!);
+});

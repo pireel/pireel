@@ -186,7 +186,13 @@ export function applyPipLayout(document: EditorDocumentV2, options: PipOptions, 
     // A group tiles a window (at its largest) or the dim frame as a square; elsewhere it tiles the place a single picture takes.
     const shape = grouped && (chosen === 'inset' || chosen === 'dim') ? { width: 1, height: 1 } : dims(lead.assetId);
     const geometry = resolvePipGeometry({ ...options, template: chosen, ...(grouped && chosen === 'inset' ? { size: 'large' as const } : {}) }, next.canvas, shape, source, captions);
-    const box = grouped ? pipGroupCells(geometry.media, members.length, next.canvas)[members.indexOf(clip)]! : geometry.media;
+    // A group's tiling grows as its pictures arrive, so the frame is never left with empty cells: a
+    // picture takes its cell among those already there, and moves over as each later one comes in.
+    const place = members.indexOf(clip);
+    const cellAt = (count: number) => grouped ? pipGroupCells(geometry.media, count, next.canvas)[place]! : geometry.media;
+    const arrivals = members.map((member, index) => ({ index, frame: member.startFrame })).filter(({ index, frame }) => index > place && frame > clip.startFrame);
+    const box = cellAt(members.length);
+    const firstBox = cellAt(members.filter(member => member.startFrame <= clip.startFrame).length);
     const background = geometry.background ?? (grouped ? '#171717' : undefined);
     clip.box = box; clip.fit = grouped ? 'cover' : geometry.mediaFit; clip.linkGroupId = lead.id + '-pip';
     const { linkGroupId } = clip;
@@ -196,8 +202,9 @@ export function applyPipLayout(document: EditorDocumentV2, options: PipOptions, 
     const enters = span >= 2 && !abutsBefore(clip.startFrame, members);
     const leaves = span >= 2 && !abutsAfter(ends(clip), members);
     const end = clip.durationFrames - span;
-    const entrance = pictureEntrance(geometry.resolvedTemplate, box, portrait);
-    const boxRows = [...(enters && entrance.box ? boxMove(entrance.box, box, 0, span) : []), ...(leaves && entrance.box ? boxMove(box, entrance.box, end, span) : [])];
+    const entrance = pictureEntrance(geometry.resolvedTemplate, firstBox, portrait); const exit = pictureEntrance(geometry.resolvedTemplate, box, portrait);
+    const regrows = arrivals.flatMap(({ index, frame }) => { const at = frame - clip.startFrame; return at + span <= end ? boxMove(cellAt(index), cellAt(index + 1), at, span) : []; });
+    const boxRows = [...(enters && entrance.box ? boxMove(entrance.box, firstBox, 0, span) : regrows.length ? [{ ...firstBox, frame: 0 }] : []), ...regrows, ...(leaves && exit.box ? boxMove(box, exit.box, end, span) : [])];
     const opacityRows = [...(enters && entrance.fade ? fade(0, 1, 0, span) : []), ...(leaves && entrance.fade ? fade(1, 0, end, span) : [])];
     delete clip.keyframes;
     if (boxRows.length || opacityRows.length) clip.keyframes = { ...(boxRows.length ? { box: boxRows } : {}), ...(opacityRows.length ? { opacity: opacityRows } : {}) };
