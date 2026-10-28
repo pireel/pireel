@@ -117,6 +117,30 @@ export function analysisSegmentsFromCuts(cuts: number[], durationSec: number): {
   return segs.length ? segs : [{ start: 0, end: durationSec }];
 }
 
+/** Seconds a cut-away holds (the B-roll planner's longest shot). */
+const FOOTAGE_SHOT_SEC = 5;
+/** Footage shot: its window on the source and three frames across it (start, middle, end). */
+export interface FootageShot { start: number; end: number; frames: { base64: string; mime: string }[] }
+/**
+ * Footage for cut-aways, cheaply (no geometry or quality pass): its shots — scene cuts, long takes
+ * split — at most `maxShots`, each as the five-second window a cut-away would use from its middle,
+ * with frames at its start, middle and end so a description can say what happens in it.
+ */
+export async function prepareFootageShots(file: File, durationSec: number, maxShots = MAX_VLM): Promise<FootageShot[]> {
+  const cuts = (await detectScenes(file).catch(() => [])).map((cut) => cut.timestamp).filter((t) => t > 0.3 && t < durationSec - 0.1);
+  const windows = capSegments(analysisSegmentsFromCuts(cuts, durationSec), maxShots).map((segment) => {
+    const length = Math.min(FOOTAGE_SHOT_SEC, segment.end - segment.start);
+    const start = segment.start + (segment.end - segment.start - length) / 2;
+    return { start, end: start + length };
+  });
+  const stamps = windows.flatMap((window) => [0.15, 0.5, 0.85].map((at) => window.start + (window.end - window.start) * at));
+  const thumbs = await extractThumbnails(file, stamps, { width: 448 });
+  try {
+    const frames = await Promise.all(thumbs.map(async (thumb) => ({ timestamp: thumb.timestamp, ...(await blobToBase64(thumb.blob)) })));
+    return windows.map((window) => ({ ...window, frames: frames.filter((frame) => frame.timestamp >= window.start - 0.05 && frame.timestamp <= window.end + 0.05).map(({ base64, mime }) => ({ base64, mime })) })).filter((shot) => shot.frames.length);
+  } finally { thumbs.forEach((thumb) => URL.revokeObjectURL(thumb.url)); }
+}
+
 /** Too many segments -> evenly pick max of them (preserving boundary distribution). Only used to pick "VLM sampling points", not to drop segments themselves. */
 function capSegments<T>(segs: T[], max: number): T[] {
   if (segs.length <= max) return segs;
