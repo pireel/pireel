@@ -158,3 +158,29 @@ it('eases each layout in and out, and cuts where shots butt against each other',
   expect(pair[0]!.keyframes!.opacity!.map(row => row.frame)).toEqual([0, 4, 11]);
   expect(pair[1]!.keyframes!.opacity!.map(row => row.frame)).toEqual([79, 83, 90]);
 });
+
+it('tiles a group in the place a picture takes, under one seat and backdrop for the group', async () => {
+  const { pipGroupCells } = await import('./pip-layout');
+  // Two in the top half of a portrait split sit side by side; four make a two-by-two grid.
+  const half = { x: 0, y: 0, w: 1, h: .5 };
+  const pair = pipGroupCells(half, 2, portrait);
+  expect(pair[0]!.y).toBe(0); expect(pair[1]!.y).toBe(0); expect(pair[0]!.x + pair[0]!.w).toBeLessThan(pair[1]!.x);
+  expect(new Set(pipGroupCells({ x: 0, y: 0, w: 1, h: 1 }, 4, square).map(cell => cell.y)).size).toBe(2);
+  const clip = (id: string, startFrame: number, durationFrames: number) => ({ id, kind: 'media', assetId: 'wide', startFrame, durationFrames, sourceInSec: 0, sourceOutSec: 3, enabled: true });
+  const document = {
+    canvas: { ...portrait, fps: 30 }, assets: { wide: { id: 'wide', kind: 'image', metadata: landscape }, talk: { id: 'talk', kind: 'video', metadata: portrait } },
+    semantics: { primaryNarrativeTrackId: 'main' }, appearance: {},
+    timeline: { tracks: [
+      { id: 'main', type: 'visual', clips: [{ id: 'm', kind: 'narrative', assetId: 'talk', startFrame: 0, durationFrames: 600, sourceInSec: 0, sourceOutSec: 20, enabled: true }] },
+      { id: 'broll', type: 'visual', clips: [clip('a', 30, 150), clip('b', 60, 120)] },
+    ] },
+  };
+  const next = applyPipLayout(document as never, { template: 'split' }, 'broll', {}, { a: { id: 'g', index: 0 }, b: { id: 'g', index: 1 } });
+  const track = (id: string) => next.timeline.tracks.find(row => row.id === id)!.clips as { id: string; startFrame: number; durationFrames: number; box?: PipBox; keyframes?: { box?: (PipBox & { frame: number })[] } }[];
+  const [first, second] = track('broll');
+  expect([first!.box, second!.box]).toEqual(pipGroupCells(pipGeometry('split', portrait, landscape, {}, portrait).media, 2, portrait));
+  // One speaker seat for the group's span, easing in at its start; the later picture slides in on its own start.
+  expect(track('broll-pip-presenter').map(seat => [seat.startFrame, seat.durationFrames])).toEqual([[30, 150]]);
+  expect(track('broll-pip-ground').map(ground => ground.id)).toEqual(['a-ground']);
+  expect(second!.keyframes!.box![0]).toMatchObject({ frame: 0, y: -.5 });
+});

@@ -135,10 +135,31 @@ function pictureEntrance(layout: PipGeometry['resolvedTemplate'], media: PipBox,
 }
 
 /**
+ * Cells for a group's pictures in one frame: rows of cells chosen so the cells come out closest to
+ * square, a thin gap between them.
+ */
+export function pipGroupCells(region: PipBox, count: number, canvas: Dimensions): PipBox[] {
+  if (count <= 1) return [region];
+  const width = region.w * canvas.width; const height = region.h * canvas.height; const gap = Math.min(canvas.width, canvas.height) * .012;
+  const arrangements: number[][] = count === 2 ? [[2], [1, 1]] : count === 3 ? [[3], [1, 1, 1], [2, 1], [1, 2]] : [[2, 2], [4], [1, 1, 1, 1]];
+  const cellsOf = (rows: number[]) => {
+    const rowHeight = (height - gap * (rows.length - 1)) / rows.length;
+    return rows.flatMap((columns, row) => Array.from({ length: columns }, (_, column) => {
+      const cellWidth = (width - gap * (columns - 1)) / columns;
+      return { x: region.x + column * (cellWidth + gap) / canvas.width, y: region.y + row * (rowHeight + gap) / canvas.height, w: cellWidth / canvas.width, h: rowHeight / canvas.height };
+    }));
+  };
+  const squareness = (cells: PipBox[]) => cells.reduce((sum, cell) => sum + Math.abs(Math.log(cell.w * canvas.width / (cell.h * canvas.height))), 0);
+  return arrangements.map(cellsOf).reduce((best, cells) => squareness(cells) < squareness(best) ? cells : best);
+}
+
+/**
  * Rebuild only the layout layers tied to actual footage windows. The source audio stays intact.
  * `layouts` holds a clip's own layout (planned or chosen); other clips follow the template, and smart fit goes by shape.
+ * `groups` names the group of clips that share one frame, and each clip's place in its tiling order: they tile the picture's place in the layout
+ * (a window or the dim frame tiled as a square), under one speaker seat and backdrop for the group's span.
  */
-export function applyPipLayout(document: EditorDocumentV2, options: PipOptions, trackId = 'broll', layouts: Record<string, PipShotLayout> = {}): EditorDocumentV2 {
+export function applyPipLayout(document: EditorDocumentV2, options: PipOptions, trackId = 'broll', layouts: Record<string, PipShotLayout> = {}, groups: Record<string, { id: string; index: number }> = {}): EditorDocumentV2 {
   const next = structuredClone(document); const footage = next.timeline.tracks.find(track => track.id === trackId);
   if (!footage) return next;
   const groundId = trackId + '-pip-ground'; const presenterId = trackId + '-pip-presenter';
@@ -150,37 +171,51 @@ export function applyPipLayout(document: EditorDocumentV2, options: PipOptions, 
   footage.stackOrder = 3;
   const fps = next.canvas.fps; const portrait = next.canvas.height > next.canvas.width;
   const shots = footage.clips.filter((clip): clip is MediaTimelineClip => clip.kind === 'media');
-  for (const clip of footage.clips) {
-    if (clip.kind !== 'media') continue;
-    const asset = next.assets[clip.assetId];
-    const firstSource = primary?.clips.find(source => source.kind === 'narrative' && source.enabled && source.startFrame < clip.startFrame + clip.durationFrames && source.startFrame + source.durationFrames > clip.startFrame);
-    const sourceAsset = firstSource && 'assetId' in firstSource && firstSource.assetId ? next.assets[firstSource.assetId] : undefined;
-    const planned = layouts[clip.id];
-    const geometry = resolvePipGeometry(planned ? { ...options, template: planned } : options, next.canvas, { width: asset.metadata?.width ?? next.canvas.width, height: asset.metadata?.height ?? next.canvas.height }, { width: sourceAsset?.metadata?.width ?? next.canvas.width, height: sourceAsset?.metadata?.height ?? next.canvas.height }, captions);
-    clip.box = geometry.media; clip.fit = geometry.mediaFit; clip.linkGroupId = clip.id + '-pip';
-    const { startFrame, durationFrames, linkGroupId } = clip;
-    // A layout eases in and out, except where another shot butts against it: there it cuts.
-    const span = Math.min(Math.round(PIP_TRANSITION_SEC * fps), Math.floor(durationFrames / 3));
-    const enters = span >= 2 && !shots.some(other => other !== clip && Math.abs(other.startFrame + other.durationFrames - startFrame) <= 1);
-    const leaves = span >= 2 && !shots.some(other => other !== clip && Math.abs(other.startFrame - (startFrame + durationFrames)) <= 1);
-    const end = durationFrames - span;
-    const entrance = pictureEntrance(geometry.resolvedTemplate, geometry.media, portrait);
-    const boxRows = [...(enters && entrance.box ? boxMove(entrance.box, geometry.media, 0, span) : []), ...(leaves && entrance.box ? boxMove(geometry.media, entrance.box, end, span) : [])];
+  const membersOf = (clip: MediaTimelineClip) => groups[clip.id] ? shots.filter(other => groups[other.id]?.id === groups[clip.id]!.id).sort((a, b) => groups[a.id]!.index - groups[b.id]!.index) : [clip];
+  const ends = (clip: MediaTimelineClip) => clip.startFrame + clip.durationFrames;
+  // Another moment butting against a frame makes it cut there rather than ease.
+  const abutsBefore = (frame: number, members: MediaTimelineClip[]) => shots.some(other => !members.includes(other) && Math.abs(ends(other) - frame) <= 1);
+  const abutsAfter = (frame: number, members: MediaTimelineClip[]) => shots.some(other => !members.includes(other) && Math.abs(other.startFrame - frame) <= 1);
+  const dims = (assetId: string) => { const asset = next.assets[assetId]; return { width: asset?.metadata?.width ?? next.canvas.width, height: asset?.metadata?.height ?? next.canvas.height }; };
+  for (const clip of shots) {
+    const members = membersOf(clip); const lead = members[0]!; const grouped = members.length > 1;
+    const firstSource = primary?.clips.find(source => source.kind === 'narrative' && source.enabled && source.startFrame < ends(clip) && source.startFrame + source.durationFrames > clip.startFrame);
+    const source = firstSource && 'assetId' in firstSource && firstSource.assetId ? dims(firstSource.assetId) : next.canvas;
+    const planned = layouts[lead.id];
+    const chosen = planned ?? (options.template === 'smart' ? pipGeometry('smart', next.canvas, dims(lead.assetId), options, source).resolvedTemplate : options.template);
+    // A group tiles a window (at its largest) or the dim frame as a square; elsewhere it tiles the place a single picture takes.
+    const shape = grouped && (chosen === 'inset' || chosen === 'dim') ? { width: 1, height: 1 } : dims(lead.assetId);
+    const geometry = resolvePipGeometry({ ...options, template: chosen, ...(grouped && chosen === 'inset' ? { size: 'large' as const } : {}) }, next.canvas, shape, source, captions);
+    const box = grouped ? pipGroupCells(geometry.media, members.length, next.canvas)[members.indexOf(clip)]! : geometry.media;
+    const background = geometry.background ?? (grouped ? '#171717' : undefined);
+    clip.box = box; clip.fit = grouped ? 'cover' : geometry.mediaFit; clip.linkGroupId = lead.id + '-pip';
+    const { linkGroupId } = clip;
+    const groupStart = lead.startFrame; const groupEnd = Math.max(...members.map(ends));
+    // A layout eases in and out, except where another moment butts against it: there it cuts.
+    const span = Math.min(Math.round(PIP_TRANSITION_SEC * fps), Math.floor(clip.durationFrames / 3), Math.floor((groupEnd - groupStart) / 3));
+    const enters = span >= 2 && !abutsBefore(clip.startFrame, members);
+    const leaves = span >= 2 && !abutsAfter(ends(clip), members);
+    const end = clip.durationFrames - span;
+    const entrance = pictureEntrance(geometry.resolvedTemplate, box, portrait);
+    const boxRows = [...(enters && entrance.box ? boxMove(entrance.box, box, 0, span) : []), ...(leaves && entrance.box ? boxMove(box, entrance.box, end, span) : [])];
     const opacityRows = [...(enters && entrance.fade ? fade(0, 1, 0, span) : []), ...(leaves && entrance.fade ? fade(1, 0, end, span) : [])];
     delete clip.keyframes;
     if (boxRows.length || opacityRows.length) clip.keyframes = { ...(boxRows.length ? { box: boxRows } : {}), ...(opacityRows.length ? { opacity: opacityRows } : {}) };
+    // The seat and backdrop belong to the moment: the lead clip lays them out over the group's span.
+    if (clip !== lead) continue;
+    const seatEnters = span >= 2 && !abutsBefore(groupStart, members); const seatLeaves = span >= 2 && !abutsAfter(groupEnd, members);
+    const seatEnd = groupEnd - groupStart - span;
     // A translucent backdrop (dim) fades with the picture; an opaque one sits behind a speaker that covers the frame as it comes and goes.
-    const groundFade = geometry.resolvedTemplate === 'dim' ? [enters ? `tl.fromTo('#${clip.id}-ground > div',{opacity:0},{opacity:1,duration:${(span / fps).toFixed(3)},ease:'power2.out'},0);` : '', leaves ? `tl.to('#${clip.id}-ground > div',{opacity:0,duration:${(span / fps).toFixed(3)},ease:'power2.in'},${(end / fps).toFixed(3)});` : ''].join('') : '';
-    if (geometry.background) grounds.push({ id: clip.id + '-ground', kind: 'graphic', enabled: true, startFrame, durationFrames, linkGroupId, anchor: { type: 'timeline' }, block: { templateId: 'custom', label: t('engine.pip.background'), box: { x: 0, y: 0, w: 1, h: 1 }, slots: { innerHtml: `<div style="position:absolute;inset:0;background:${geometry.background}"></div>`, timelineBody: groundFade, authoredDurationSec: durationFrames / next.canvas.fps } } });
-    if (geometry.speaker) for (const source of primary?.clips ?? []) {
-      if (source.kind !== 'narrative' || !source.enabled) continue;
-      const from = Math.max(startFrame, source.startFrame); const to = Math.min(startFrame + durationFrames, source.startFrame + source.durationFrames);
+    const groundFade = geometry.resolvedTemplate === 'dim' ? [seatEnters ? `tl.fromTo('#${lead.id}-ground > div',{opacity:0},{opacity:1,duration:${(span / fps).toFixed(3)},ease:'power2.out'},0);` : '', seatLeaves ? `tl.to('#${lead.id}-ground > div',{opacity:0,duration:${(span / fps).toFixed(3)},ease:'power2.in'},${(seatEnd / fps).toFixed(3)});` : ''].join('') : '';
+    if (background) grounds.push({ id: lead.id + '-ground', kind: 'graphic', enabled: true, startFrame: groupStart, durationFrames: groupEnd - groupStart, linkGroupId, anchor: { type: 'timeline' }, block: { templateId: 'custom', label: t('engine.pip.background'), box: { x: 0, y: 0, w: 1, h: 1 }, slots: { innerHtml: `<div style="position:absolute;inset:0;background:${background}"></div>`, timelineBody: groundFade, authoredDurationSec: (groupEnd - groupStart) / fps } } });
+    if (geometry.speaker) for (const narration of primary?.clips ?? []) {
+      if (narration.kind !== 'narrative' || !narration.enabled) continue;
+      const from = Math.max(groupStart, narration.startFrame); const to = Math.min(groupEnd, narration.startFrame + narration.durationFrames);
       if (to <= from) continue;
-      const rate = (source.sourceOutSec - source.sourceInSec) / source.durationFrames;
-      const seat: MediaTimelineClip = { id: clip.id + '-presenter-' + source.id, kind: 'media', assetId: source.assetId, enabled: true, startFrame: from, durationFrames: to - from, sourceInSec: source.sourceInSec + (from - source.startFrame) * rate, sourceOutSec: source.sourceInSec + (to - source.startFrame) * rate, fit: geometry.speakerFit, anchorX: geometry.speakerAnchorX, anchorY: geometry.speakerAnchorY, box: geometry.speaker, linkGroupId, video: { treatment: 'full', audioMuted: true, ...(geometry.speakerCutout ? { personMatte: true } : {}) } };
-      // The speaker starts full frame, exactly over the narration underneath, and settles into its seat (and back as the shot ends).
-      const local = (frame: number) => frame - from;
-      const rows = geometry.speakerCutout ? [] : [...(enters && from === startFrame && to - from > span ? boxMove(FULL, geometry.speaker, 0, span) : []), ...(leaves && to === startFrame + durationFrames && to - from > span ? boxMove(geometry.speaker, FULL, local(startFrame + end), span) : [])];
+      const rate = (narration.sourceOutSec - narration.sourceInSec) / narration.durationFrames;
+      const seat: MediaTimelineClip = { id: lead.id + '-presenter-' + narration.id, kind: 'media', assetId: narration.assetId, enabled: true, startFrame: from, durationFrames: to - from, sourceInSec: narration.sourceInSec + (from - narration.startFrame) * rate, sourceOutSec: narration.sourceInSec + (to - narration.startFrame) * rate, fit: geometry.speakerFit, anchorX: geometry.speakerAnchorX, anchorY: geometry.speakerAnchorY, box: geometry.speaker, linkGroupId, video: { treatment: 'full', audioMuted: true, ...(geometry.speakerCutout ? { personMatte: true } : {}) } };
+      // The speaker starts full frame, exactly over the narration underneath, and settles into its seat (and back as the moment ends).
+      const rows = geometry.speakerCutout ? [] : [...(seatEnters && from === groupStart && to - from > span ? boxMove(FULL, geometry.speaker, 0, span) : []), ...(seatLeaves && to === groupEnd && to - from > span ? boxMove(geometry.speaker, FULL, groupStart + seatEnd - from, span) : [])];
       if (rows.length) seat.keyframes = { box: rows };
       presenters.push(seat);
     }
