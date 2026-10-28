@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { assembleHtml, emptyComposition, type Block } from './composition';
-import { compositionVisualLayerPlan, type SupplementalVisualMediaClip } from './visual-layer-plan';
+import { compositionVisualLayerPlan, supplementalVisualStateAt, type SupplementalVisualMediaClip } from './visual-layer-plan';
 
 const block = (id: string, trackIndex: number): Block => ({
   id, templateId: 'custom', slots: {}, startSec: 0, durationSec: 1, trackIndex,
@@ -42,4 +42,13 @@ describe('composition visual layer plan', () => {
     expect(html.indexOf('id="below"')).toBeLessThan(html.indexOf('id="hf-visual-middle"'));
     expect(html.indexOf('id="hf-visual-middle"')).toBeLessThan(html.indexOf('id="above"'));
   });
+});
+
+it('starts a clip from its first keyframe rather than its resting box', () => {
+  const visual = { clipId: 'a', trackId: 't', stackOrder: 1, kind: 'image' as const, source: 's', startSec: 2, endSec: 5, sourceInSec: 0, sourceOutSec: 3, fit: 'cover' as const, muted: true,
+    box: { x: 0, y: .5, w: 1, h: .5 }, keyframes: { box: [{ atSec: 0, x: 0, y: 0, w: 1, h: 1 }, { atSec: .4, x: 0, y: .5, w: 1, h: .5 }] } };
+  expect(supplementalVisualStateAt(visual, 2).box).toEqual({ x: 0, y: 0, w: 1, h: 1 });
+  const middle = supplementalVisualStateAt(visual, 2.2).box;
+  expect(middle.y).toBeCloseTo(.25); expect(middle.h).toBeCloseTo(.75);
+  expect(supplementalVisualStateAt(visual, 4).box).toEqual({ x: 0, y: .5, w: 1, h: .5 });
 });

@@ -2,11 +2,16 @@ import { type ReactNode } from 'react';
 import { Plus, X } from 'lucide-react';
 import { t } from './i18n';
 
-export function SceneMediaCard({ name, children, onRemove, disabled, status = 'done', error }: {
+export function SceneMediaCard({ name, children, onRemove, onOpen, disabled, status = 'done', error }: {
   name: string; children: ReactNode; onRemove?: () => void; disabled: boolean; status?: string; error?: string;
+  /** Opens the file in a viewer; the whole thumbnail is its button (under any status overlay). */
+  onOpen?: () => void;
 }) {
   return <div className="group relative min-w-0" data-upload-status={status}>
-    <div className="bg-panel relative aspect-[1.15] overflow-hidden rounded-lg">{children}</div>
+    <div className="bg-panel relative aspect-[1.15] overflow-hidden rounded-lg">
+      {onOpen && <button type="button" aria-label={`${t('ui.mediaPicker.preview')} ${name}`} onClick={onOpen} className="absolute inset-0 z-0 cursor-zoom-in focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent" />}
+      {children}
+    </div>
     <span className="text-ink-3 mt-1 block truncate text-[11px]" title={error ?? name}>{name}</span>
     {onRemove && <button type="button" disabled={disabled} aria-label={`${t('ui.mediaPicker.remove')} ${name}`} onClick={onRemove} className="absolute right-1 top-1 rounded bg-black/60 p-1 text-white"><X size={12} /></button>}
   </div>;

@@ -133,6 +133,7 @@ export const COMPONENTS_ZH: Record<string, string> = {
   'ui.mediaPicker.footageCards': '素材列表',
   'ui.mediaPicker.myFootage': '我的素材',
   'ui.mediaPicker.remove': '移除',
+  'ui.mediaPicker.preview': '预览',
   'ui.mediaPicker.uploadFootage': '上传素材',
   'ui.personCutout.canvasUnavailable': '无法创建人像抠图画布。',
   'ui.personCutout.failed': '人像抠图失败。',

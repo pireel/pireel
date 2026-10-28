@@ -70,7 +70,8 @@ it('uses content proportions for smart layouts and applies the same geometry to 
 it('validates framing controls before persistence', () => {
   expect(validPipOptions({ template: 'smart' })).toBe(true);
   expect(validPipOptions({ template: 'inset', position: 'bottom-left', size: 'large', mediaFit: 'cover' })).toBe(true);
-  for (const patch of [{ position: 'middle' }, { size: 10 }, { mediaFit: 'stretch' }, { speakerFit: 'stretch' }]) expect(validPipOptions({ template: 'inset', ...patch })).toBe(false);
+  expect(validPipOptions({ template: 'split', speakerFocus: { x: .5, y: .2 } })).toBe(true);
+  for (const patch of [{ position: 'middle' }, { size: 10 }, { mediaFit: 'stretch' }, { speakerFit: 'stretch' }, { speakerFocus: { x: .5, y: 1.2 } }, { speakerFocus: { y: .5 } }]) expect(validPipOptions({ template: 'inset', ...patch })).toBe(false);
 });
 
 it('keeps cutout presenters inside the canvas overlapping footage while fitting small insets without distortion', () => {
@@ -112,4 +113,48 @@ it('offers full-screen footage per shot, not as a template', () => {
   expect(PIP_PICKER_TEMPLATES.map(template => template.id)).not.toContain('full');
   const full = pipGeometry('full', portrait, landscape, {}, portrait);
   expect(full.media).toEqual({ x: 0, y: 0, w: 1, h: 1 }); expect(full.speaker).toBeUndefined(); expect(full.mediaFit).toBe('cover'); expect(full.background).toBeUndefined();
+});
+
+it('frames a cropped speaker where the creator placed it', () => {
+  const split = pipGeometry('split', portrait, landscape, { speakerFocus: { x: .3, y: .2 } }, portrait);
+  expect([split.speakerAnchorX, split.speakerAnchorY]).toEqual([.3, .2]);
+  const document = {
+    canvas: { ...portrait, fps: 30 }, assets: { wide: { id: 'wide', kind: 'image', metadata: landscape }, talk: { id: 'talk', kind: 'video', metadata: portrait } },
+    semantics: { primaryNarrativeTrackId: 'main' }, appearance: {},
+    timeline: { tracks: [
+      { id: 'main', type: 'visual', clips: [{ id: 'm', kind: 'narrative', assetId: 'talk', startFrame: 0, durationFrames: 300, sourceInSec: 0, sourceOutSec: 10, enabled: true }] },
+      { id: 'broll', type: 'visual', clips: [{ id: 'a', kind: 'media', assetId: 'wide', startFrame: 0, durationFrames: 30, sourceInSec: 0, sourceOutSec: 1, enabled: true }] },
+    ] },
+  };
+  const presenter = applyPipLayout(document as never, { template: 'split', speakerFocus: { x: .3, y: .2 } }).timeline.tracks.find(track => track.id === 'broll-pip-presenter')!.clips[0];
+  expect(presenter).toMatchObject({ anchorX: .3, anchorY: .2 });
+});
+
+it('eases each layout in and out, and cuts where shots butt against each other', () => {
+  const clip = (id: string, startFrame: number, durationFrames = 90) => ({ id, kind: 'media', assetId: 'wide', startFrame, durationFrames, sourceInSec: 0, sourceOutSec: 3, enabled: true });
+  const document = (clips: unknown[]) => ({
+    canvas: { ...portrait, fps: 30 }, assets: { wide: { id: 'wide', kind: 'image', metadata: landscape }, talk: { id: 'talk', kind: 'video', metadata: portrait } },
+    semantics: { primaryNarrativeTrackId: 'main' }, appearance: {},
+    timeline: { tracks: [
+      { id: 'main', type: 'visual', clips: [{ id: 'm', kind: 'narrative', assetId: 'talk', startFrame: 0, durationFrames: 600, sourceInSec: 0, sourceOutSec: 20, enabled: true }] },
+      { id: 'broll', type: 'visual', clips },
+    ] },
+  });
+  const track = (next: ReturnType<typeof applyPipLayout>, id: string) => next.timeline.tracks.find(row => row.id === id)!.clips as { id: string; box?: PipBox; keyframes?: { box?: (PipBox & { frame: number })[]; opacity?: { frame: number; value: number }[] }; block?: { slots: { timelineBody: string } } }[];
+  const split = applyPipLayout(document([clip('a', 30)]) as never, { template: 'split' });
+  const [picture] = track(split, 'broll'); const [speaker] = track(split, 'broll-pip-presenter');
+  // The picture slides down into the top half and back out; the speaker shrinks from full frame into the bottom half.
+  expect(picture!.keyframes!.box![0]).toMatchObject({ frame: 0, y: -.5 });
+  expect(picture!.keyframes!.box!.at(-1)).toMatchObject({ frame: 90, y: -.5 });
+  expect(speaker!.keyframes!.box![0]).toMatchObject({ frame: 0, x: 0, y: 0, w: 1, h: 1 });
+  expect(speaker!.keyframes!.box!.find(row => row.frame === 11)).toMatchObject(speaker!.box!);
+  expect(speaker!.keyframes!.box!.at(-1)).toMatchObject({ frame: 90, w: 1, h: 1 });
+  // A dimmed backdrop fades with the picture, which grows into its window.
+  const dim = applyPipLayout(document([clip('a', 30)]) as never, { template: 'dim' });
+  expect(track(dim, 'broll')[0]!.keyframes!.opacity!.map(row => row.value)).toEqual([0, .75, 1, 1, .25, 0]);
+  expect(track(dim, 'broll-pip-ground')[0]!.block!.slots.timelineBody).toMatch(/fromTo\('#a-ground > div'[\s\S]*tl\.to\('#a-ground > div'/);
+  // Back-to-back shots cut between each other; only the outer edges ease.
+  const pair = track(applyPipLayout(document([clip('a', 30), clip('b', 120)]) as never, { template: 'dim' }), 'broll');
+  expect(pair[0]!.keyframes!.opacity!.map(row => row.frame)).toEqual([0, 4, 11]);
+  expect(pair[1]!.keyframes!.opacity!.map(row => row.frame)).toEqual([79, 83, 90]);
 });

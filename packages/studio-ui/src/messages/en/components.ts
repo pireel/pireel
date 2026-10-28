@@ -133,6 +133,7 @@ export const COMPONENTS_EN: Record<string, string> = {
   'ui.mediaPicker.footageCards': 'Footage cards',
   'ui.mediaPicker.myFootage': 'My footage',
   'ui.mediaPicker.remove': 'Remove',
+  'ui.mediaPicker.preview': 'Preview',
   'ui.mediaPicker.uploadFootage': 'Upload footage',
   'ui.personCutout.canvasUnavailable': 'The portrait cutout canvas can\'t be created.',
   'ui.personCutout.failed': 'Portrait cutout failed.',

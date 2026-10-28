@@ -51,7 +51,8 @@ function interpolateRows<T extends { atSec: number }>(
   base: T,
   mix: (left: T, right: T, progress: number) => T,
 ): T {
-  const ordered = [base, ...rows].sort((left, right) => left.atSec - right.atSec);
+  // The static value only stands in for a missing first keyframe: a clip may start from a keyframed pose.
+  const ordered = (rows.some(row => row.atSec <= base.atSec) ? [...rows] : [base, ...rows]).sort((left, right) => left.atSec - right.atSec);
   if (localSec <= ordered[0]!.atSec) return ordered[0]!;
   for (let index = 1; index < ordered.length; index++) {
     const right = ordered[index]!;

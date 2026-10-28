@@ -36,9 +36,12 @@ function BlurredBackdrop({ video, poster }: { video: HTMLVideoElement | null; po
 
 /** Adapter for regular source/result videos. Canvas scenes use the same ScenePlayerFrame and ScenePlayback.
  *  `backdrop`: the frame has another shape than the picture; fill the bands with its blurred copy. */
-export function SceneVideoPreview({ source, resultUrl, poster, width, height, duration, disabled, actions, backdrop, children }: {
+export function SceneVideoPreview({ source, resultUrl, poster, width, height, duration, disabled, actions, backdrop, playable = true, children }: {
   source: File | null; resultUrl?: string; poster?: string; width: number; height: number; duration: number;
-  disabled: boolean; actions?: ReactNode; backdrop?: boolean; children?: ReactNode;
+  disabled: boolean; actions?: ReactNode; backdrop?: boolean;
+  /** False for a still layout preview drawn over the first frame: playing would move nothing under it. */
+  playable?: boolean;
+  children?: ReactNode;
 }) {
   const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
   const video = useRef<HTMLVideoElement>(null); const [sourceUrl, setSourceUrl] = useState('');
@@ -50,19 +53,19 @@ export function SceneVideoPreview({ source, resultUrl, poster, width, height, du
   useEffect(() => { if (disabled) video.current?.pause(); }, [disabled]);
   const pause = () => { video.current?.pause(); setPlaying(false); };
   const toggle = async () => {
-    if (!video.current || disabled) return;
+    if (!video.current || disabled || !playable) return;
     if (!video.current.paused) { pause(); return; }
     if (video.current.ended || video.current.currentTime >= duration) video.current.currentTime = 0;
     const element = video.current; const current = src;
     try { await element.play(); if (element.getAttribute('src') === current) setError(''); } catch { if (element.getAttribute('src') === current) setError(t('ui.sceneVideoPreview.couldNotPlayTry')); }
   };
   return <div className="flex h-full min-h-0 flex-col gap-3">
-    <ScenePlayerFrame width={width} height={height} disabled={disabled || !src} onToggle={() => void toggle()}>
+    <ScenePlayerFrame width={width} height={height} disabled={disabled || !src || !playable} onToggle={() => void toggle()}>
         {backdrop && !resultUrl && <BlurredBackdrop video={src ? videoElement : null} poster={poster} />}
         {src ? <video data-scene-video ref={attachVideo} src={src} poster={poster} playsInline className="relative h-full w-full object-contain" onTimeUpdate={event => setTime(event.currentTarget.currentTime)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => { setPlaying(false); setTime(duration); }}/> : poster ? <img src={poster} alt={t('ui.sceneVideoPreview.firstVideoFrame')} className="relative h-full w-full object-contain"/> : <div className="bg-panel h-full w-full"/>}
         {children}
     </ScenePlayerFrame>
     {error && <p role="alert" className="text-ink-3 text-xs">{error}</p>}
-    <ScenePlayback playing={playing} onToggle={() => void toggle()} time={time} duration={duration} disabled={disabled || !src} onPause={pause} onSeek={value => { if (video.current) video.current.currentTime = value; setTime(value); }} actions={actions}/>
+    <ScenePlayback playing={playing} onToggle={() => void toggle()} time={time} duration={duration} disabled={disabled || !src || !playable} onPause={pause} onSeek={value => { if (video.current) video.current.currentTime = value; setTime(value); }} actions={actions}/>
   </div>;
 }
