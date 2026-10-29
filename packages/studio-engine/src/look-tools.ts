@@ -16,6 +16,7 @@ import { patchEditorAppearance } from '@pireel/studio-engine/editor-document/com
 import { insertOverlayDocumentClip } from '@pireel/studio-engine/overlay-track-edit';
 import { lookSourceSyntaxIssues } from '@pireel/studio-engine/look-source-syntax';
 import { LOOK_TEMPLATE_PREFIX, normalizeLook } from '@pireel/studio-engine/look';
+import { COMPONENT_ROW_FIELDS } from '@pireel/studio-engine/component-property-input';
 
 type Input = Record<string, unknown>;
 
@@ -27,6 +28,20 @@ function lookIdFor(value: Input): string {
   let hash = 2166136261;
   for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619);
   return `look-${(hash >>> 0).toString(36)}`;
+}
+
+/** The first list-row field of a props schema that a tool call cannot carry. */
+function listFieldOutsideRows(schema: unknown): { prop: string; field: string } | undefined {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return undefined;
+  const record = schema as Input;
+  const properties = record.properties && typeof record.properties === 'object' && !Array.isArray(record.properties) ? record.properties as Input : record;
+  for (const [prop, field] of Object.entries(properties)) {
+    const items = (field as Input | null)?.items as Input | undefined;
+    const fields = items?.properties && typeof items.properties === 'object' ? Object.keys(items.properties as Input) : [];
+    const outside = fields.find(name => !(COMPONENT_ROW_FIELDS as readonly string[]).includes(name));
+    if (outside) return { prop, field: outside };
+  }
+  return undefined;
 }
 
 export function setLookV3(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
@@ -46,6 +61,9 @@ export function setLookV3(document: EditorDocumentV2, input: Input): AgentTimeli
           return fail('invalid_value', { path: `look.pieces[${index}].propsSchema`, fix: 'propsSchema is a JSON object string, e.g. {"title":{"type":"string"}}.' });
         }
       }
+      // A list field no tool call can fill would leave the piece unplaceable: refuse it while the look is written.
+      const stray = listFieldOutsideRows(propsSchema);
+      if (stray) return fail('invalid_value', { path: `look.pieces[${index}].propsSchema.${stray.prop}.items.properties.${stray.field}`, fix: `List rows carry only ${COMPONENT_ROW_FIELDS.join(', ')}; carry ${stray.field} in one of them.` });
       keyed[id] = { label: piece.label, source: piece.source, ...(propsSchema && typeof propsSchema === 'object' ? { propsSchema } : {}) };
     }
     pieces = keyed;

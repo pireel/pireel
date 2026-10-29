@@ -1,9 +1,10 @@
 import type { ToolPartLike } from '@pireel/studio-ui/chat-tool-parts';
 
 /** Retain the diagnostics in model/history receipts; do not drop data.issues at the chat boundary. */
-export function studioToolFailureText(error: string, data?: unknown): string {
-  if (!data || typeof data !== 'object' || Array.isArray(data)) return error;
-  const source = data as Record<string, unknown>;
+export function studioToolFailureText(error: string, data?: unknown, result?: object): string {
+  // A refused input reports where and how to fix it beside the error, not under data; both reach the model.
+  const top = result ? Object.fromEntries(Object.entries(result).filter(([key]) => key === 'path' || key === 'fix')) : {};
+  const source = { ...top, ...(data && typeof data === 'object' && !Array.isArray(data) ? data as Record<string, unknown> : {}) };
   const diagnostics = Object.fromEntries(['blockId', 'clipId', 'issues', 'code', 'detail', 'path', 'fix', 'allowed']
     .filter((key) => source[key] !== undefined).map((key) => [key, source[key]]));
   return Object.keys(diagnostics).length ? `${error}\n${JSON.stringify(diagnostics).slice(0, 12000)}` : error;

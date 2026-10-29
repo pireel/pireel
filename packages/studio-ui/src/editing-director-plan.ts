@@ -71,7 +71,10 @@ export function reviewDirectorPlan(task: ChatTask, input: Record<string, unknown
     const row = matches[0] as DirectorBeatResult | undefined;
     if (matches.length !== 1 || !row || !['applied', 'kept', 'changed', 'blocked'].includes(row.status) || !prose(row.result) || !Array.isArray(row.clipIds)) return { ok: false, error: `Account for beat ${beat.id} with a concrete outcome and any changed decision.` };
     const windows = directorBeatWindows(beat, document);
-    if (row.status !== 'blocked' && (!row.clipIds.length || row.clipIds.some(id => !clips.some(clip => clip.id === id && windows.some(w => clip.startFrame < w.endFrame && clip.startFrame + clip.durationFrames > w.startFrame))))) return { ok: false, error: `Beat ${beat.id} needs real enabled clips at its current source-anchored placement. If removed or unresolved, revise the plan or report blocked.` };
+    const atPassage = clips.filter(clip => windows.some(w => clip.startFrame < w.endFrame && clip.startFrame + clip.durationFrames > w.startFrame)).map(clip => clip.id);
+    const elsewhere = row.clipIds.filter(id => !atPassage.includes(id));
+    // Name the ids that miss and the clips that are there: a bare refusal leaves the model guessing which of its ids is wrong.
+    if (row.status !== 'blocked' && (!row.clipIds.length || elsewhere.length)) return { ok: false, error: `Beat ${beat.id} needs real enabled clips at its current source-anchored placement.${elsewhere.length ? ` Not at that passage: ${elsewhere.join(', ')}.` : ''} Clips there now: ${atPassage.join(', ') || 'none'}. If removed or unresolved, revise the plan or report blocked.` };
     beats.push({ beatId: beat.id, status: row.status, result: row.result.trim(), clipIds: row.clipIds.filter(id => typeof id === 'string') });
   }
   return { ok: true, beats, summary: input.editorialReview.trim(), completed: beats.every(beat => beat.status !== 'blocked') };

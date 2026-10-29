@@ -3,6 +3,15 @@ import { TRANSITION_EFFECT_IDS } from '@pireel/studio-engine/agent-surface-v3/sc
 import { validateV3Input } from '@pireel/studio-engine/agent-surface-v3/validate';
 
 describe('validateV3Input', () => {
+  it('names the stray field inside a list prop instead of saying the value fits nothing', () => {
+    const rows = [{ label: 'VIP', value: '1999', unit: 'CNY' }];
+    expect(validateV3Input('place_graphics', { items: [{ pieceId: 'price', startFrame: 0, durationFrames: 30, props: [{ key: 'rows', value: rows }] }] })).toMatchObject({
+      error: 'unknown_field', path: 'items[0].props[0].value[0].unit', allowed: ['text', 'note', 'label', 'value', 'trend'],
+    });
+    expect(validateV3Input('place_graphics', { items: [{ pieceId: 'price', startFrame: 0, durationFrames: 30, props: [{ key: 'title', value: { text: 'x' } }] }] })).toMatchObject({
+      error: 'invalid_value', fix: expect.stringContaining(' or an array of objects'),
+    });
+  });
   it('refuses an effect outside the enum and lists what is allowed', () => {
     expect(validateV3Input('add_transition', { atFrame: 30, effect: 'dip-to-black' })).toMatchObject({
       error: 'invalid_value', path: 'effect', value: 'dip-to-black', allowed: TRANSITION_EFFECT_IDS,

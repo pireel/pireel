@@ -22,6 +22,7 @@ export interface V3InputProblem {
 type Schema = Record<string, unknown>;
 
 const describe = (schema: Schema): string => {
+  if (Array.isArray(schema.anyOf)) return [...new Set((schema.anyOf as Schema[]).map(describe))].join(' or ');
   if (Array.isArray(schema.enum)) return `one of ${(schema.enum as string[]).join(' / ')}`;
   if (schema.type === 'array') {
     const items = (schema.items ?? {}) as Schema;
@@ -46,9 +47,14 @@ const problem = (error: V3InputProblem['error'], path: string, schema: Schema, v
 function check(schema: Schema, value: unknown, path: string): V3InputProblem | null {
   if (value === undefined) return null;
   if (Array.isArray(schema.anyOf)) {
-    return (schema.anyOf as Schema[]).some((branch) => check(branch, value, path) === null)
-      ? null
-      : problem('invalid_value', path, schema, value);
+    const branches = schema.anyOf as Schema[];
+    const found = branches.map((branch) => check(branch, value, path));
+    if (found.some((entry) => entry === null)) return null;
+    // The one branch of the value's own kind names the real problem (a row's stray field), not just
+    // that the value fits none of them.
+    const kind = Array.isArray(value) ? 'array' : value === null ? 'null' : typeof value;
+    const same = branches.flatMap((branch, index) => branch.type === kind || kind === 'number' && branch.type === 'integer' ? [index] : []);
+    return same.length === 1 ? found[same[0]!]! : problem('invalid_value', path, schema, value);
   }
   switch (schema.type) {
     case 'object': {

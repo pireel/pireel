@@ -1,7 +1,7 @@
 import { WHITEBOARD_MEDIA_LIMITS } from '@pireel/studio-engine/whiteboard-workflow';
 import { CAPTION_ANIMATIONS, CAPTION_ANIMATION_IDS } from '@pireel/studio-engine/caption-animations';
 import { DEFAULT_TRANSITION_SEC } from '@pireel/studio-engine/editor-document/transitions';
-import { COMPONENT_PROPERTY_MAX_ROWS, COMPONENT_PROPERTY_MAX_FIELDS, COMPONENT_PROPERTY_MAX_TEXT } from '@pireel/studio-engine/component-property-input';
+import { COMPONENT_PROPERTY_MAX_ROWS, COMPONENT_PROPERTY_MAX_FIELDS, COMPONENT_PROPERTY_MAX_TEXT, COMPONENT_ROW_FIELDS } from '@pireel/studio-engine/component-property-input';
 /**
  * Agent surface v3 — tool descriptions and input schemas.
  *
@@ -59,7 +59,7 @@ const BOX = obj({
 }, ['x', 'y', 'w', 'h']);
 const PROPERTY_SCALAR: Schema = { anyOf: [{ type: 'string', maxLength: COMPONENT_PROPERTY_MAX_TEXT }, { type: 'number' }, { type: 'boolean' }] };
 const PROPERTY_VALUE: Schema = {
-  anyOf: [...(PROPERTY_SCALAR.anyOf as Schema[]), { type: 'array', maxItems: COMPONENT_PROPERTY_MAX_ROWS, items: { ...obj({ text: PROPERTY_SCALAR, note: PROPERTY_SCALAR, label: PROPERTY_SCALAR, value: PROPERTY_SCALAR, trend: PROPERTY_SCALAR }), maxProperties: COMPONENT_PROPERTY_MAX_FIELDS } }],
+  anyOf: [...(PROPERTY_SCALAR.anyOf as Schema[]), { type: 'array', maxItems: COMPONENT_PROPERTY_MAX_ROWS, items: { ...obj(Object.fromEntries(COMPONENT_ROW_FIELDS.map(field => [field, PROPERTY_SCALAR]))), maxProperties: COMPONENT_PROPERTY_MAX_FIELDS } }],
   description: 'Scalar color, number, boolean, select or text; kit rows use an array of flat row objects matching the declared component schema.',
 };
 const FADES = obj({ in: int('Audio fade-in length in frames.'), out: int('Audio fade-out length in frames.') });
@@ -464,7 +464,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       editorialReview: str('Concrete assessment of the actual opening, progression, rhythm and brand coherence against the plan. Fix visible defects first.'),
       beats: arr(obj({ beatId: str('Saved plan beat id.'), status: enumOf(['applied', 'kept', 'changed', 'blocked']), result: str('What viewers now see; explain adaptations or blockers. Use the creator’s language.'), clipIds: arr(str(), { description: 'Actual enabled clip ids overlapping this source passage’s current timeline position. Required for applied/kept/changed.' }) }, ['beatId', 'status', 'result', 'clipIds'])),
       brandApplication: str('For a branded edit, describe concrete typography, visual treatment and pacing choices that carry its style into this video.'),
-      features: arr(obj({ feature: enumOf(['graphics', 'b-roll', 'sound', 'zoom', 'transitions']), status: enumOf(['applied', 'not_needed', 'blocked']), reason: str('Short content-based explanation in the creator’s language.'), atFrame: int('Timeline frame evaluated.', 0) }, ['feature', 'status', 'reason'])),
+      features: arr(obj({ feature: enumOf(['graphics', 'b-roll', 'sound', 'zoom', 'transitions']), status: enumOf(['applied', 'not_needed', 'blocked']), reason: str('Short content-based explanation in the creator’s language.'), atFrame: int('Timeline frame evaluated; required unless status is blocked.', 0) }, ['feature', 'status', 'reason'])),
     }, ['features']),
   },
   remove_silence: {
@@ -523,7 +523,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
           id: str('Lowercase words joined by hyphens, e.g. item-card.'),
           label: str('Name shown to people.'),
           source: str('The piece function expression.'),
-          propsSchema: str('JSON object string: JSON Schema properties of its props — what the creator edits in the inspector without regenerating. Per property: type (string, number, integer, boolean), enum, format (color, font), minimum and maximum (a slider), title (the label, in the creator\'s language), default. A list is an array of objects with scalar fields.'),
+          propsSchema: str('JSON object string: JSON Schema properties of its props — what the creator edits in the inspector without regenerating. Per property: type (string, number, integer, boolean), enum, format (color, font), minimum and maximum (a slider), title (the label, in the creator\'s language), default. A list is an array of objects whose scalar fields are among ' + COMPONENT_ROW_FIELDS.join(', ') + '.'),
         }, ['id', 'source']), { minItems: 1, maxItems: 12 }),
         notes: str('Your statement of the system: what colours mean, where graphics live, how things move.'),
       }, ['css', 'pieces']),

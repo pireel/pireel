@@ -66,7 +66,10 @@ describe('brand-informed director plan', () => {
     clip.startFrame += 300;
     expect(directorBeatWindows(planned.directorPlan.beats[0], document)[0].startFrame).toBeGreaterThanOrEqual(300);
     expect(reviewDirectorPlan(planned, review, document)).toMatchObject({ ok: true, completed: true });
-    expect(reviewDirectorPlan(planned, { ...review, beats: [{ ...review.beats[0], clipIds: ['invented'] }] }, document).ok).toBe(false);
+    const refused = reviewDirectorPlan(planned, { ...review, beats: [{ ...review.beats[0], clipIds: [...review.beats[0].clipIds, 'invented'] }] }, document);
+    // The refusal names the id that misses and the clips actually at the passage, so the next call can be right.
+    expect(refused).toMatchObject({ ok: false, error: expect.stringContaining('Not at that passage: invented.') });
+    expect(refused).toMatchObject({ error: expect.stringContaining('speaker') });
     clip.enabled = false;
     expect(reviewDirectorPlan(planned, review, document).ok).toBe(false);
   });

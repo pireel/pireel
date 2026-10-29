@@ -64,7 +64,10 @@ export function reviewEditingTask(task: ChatTask, input: Record<string, unknown>
     const reason = typeof row.reason === 'string' ? row.reason.trim() : '';
     if (!['applied', 'not_needed', 'blocked'].includes(String(row.status)) || reason.length < 8) return { ok: false, error: `Give a concrete content-based reason for ${feature}.` };
     const count = evidence[feature]?.length ?? 0;
-    if (row.status === 'applied' && !count) return { ok: false, error: `${feature} is absent from the current timeline. Apply it or report why it is blocked/not needed.` };
+    // A music bed is not a sound effect: without saying so, a model that laid music keeps re-adding it.
+    if (row.status === 'applied' && !count) return { ok: false, error: feature === 'sound'
+      ? 'sound counts sound effects on an effects lane; a music bed on the music lane is not one. Add effects where points land, or report sound as not_needed or blocked with the content-based reason.'
+      : `${feature} is absent from the current timeline. Apply it or report why it is blocked/not needed.` };
     if (row.status === 'not_needed' && feature === 'b-roll' && /没有.{0,8}素材|无.{0,4}素材|no (?:available |supporting |usable )?(?:media|assets|footage)/i.test(reason)) return { ok: false, error: 'An empty library is a sourcing gap, not a content-based reason to skip B-roll. Search or generate when authorized, or report blocked.' };
     if (row.status !== 'blocked' && (typeof row.atFrame !== 'number' || !Number.isInteger(row.atFrame) || row.atFrame < 0)) return { ok: false, error: `Name the timeline moment evaluated for ${feature} with atFrame.` };
     items.push({ feature, status: row.status as EditingTaskReview['items'][number]['status'], reason, count, ...(typeof row.atFrame === 'number' ? { atFrame: row.atFrame } : {}) });

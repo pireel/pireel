@@ -562,7 +562,7 @@ export const PANELS_EN: Record<string, string> = {
   "editingSkills.voice_cleanup.name": "Voice cleanup",
   "editingSkills.voice_cleanup.short": "Cleaner speech",
   "editingSkills.voice_cleanup.detail": "Removes background noise from the recording so the voice comes through clearly, in preview and export.",
-  "editingSkills.sound.name": "Sound & music",
+  "editingSkills.sound.name": "Sound effects",
   "editingSkills.sound.short": "A sound where you land a point",
   "editingSkills.sound.detail": "Adds a fitting sound effect where you land a point.",
   "editingSkills.b_roll.name": "Auto B-roll",

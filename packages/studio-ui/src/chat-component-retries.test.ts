@@ -32,3 +32,9 @@ describe('component retry presentation', () => {
     expect(studioToolFailureText('Stopped')).toBe('Stopped');
   });
 });
+
+it('keeps where and how to fix a refused input, which the runner reports beside the error', () => {
+  const text = studioToolFailureText('invalid_value', undefined, { ok: false, error: 'invalid_value', path: 'items[0].props[0].value', fix: 'Use a string.' });
+  expect(text).toContain('items[0].props[0].value');
+  expect(text).toContain('Use a string.');
+});

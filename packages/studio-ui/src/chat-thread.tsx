@@ -431,7 +431,7 @@ export function ChatThread({
         }
         if (stopAfterReceipt) { userStoppedRef.current = true; toolAbortsRef.current.forEach(controller => { if (controller !== ctrl) controller.abort(); }); }
         if (out.ok) publishSuccess(out as unknown as Record<string, unknown>);
-        else publishError(studioToolFailureText(out.error ?? t("chatGen.executionFailed"), out.data));
+        else publishError(studioToolFailureText(out.error ?? t("chatGen.executionFailed"), out.data, out));
         if (stopAfterReceipt) void stop();
       } catch (e) {
         const isStop = e instanceof DOMException && e.name === "AbortError";

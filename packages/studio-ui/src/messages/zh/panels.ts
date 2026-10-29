@@ -536,7 +536,7 @@ export const PANELS_ZH: Record<string, string> = {
   "editingSkills.voice_cleanup.name": "口播降噪",
   "editingSkills.voice_cleanup.short": "更干净的人声",
   "editingSkills.voice_cleanup.detail": "去掉录音里的环境噪声，让口播更清楚，预览和导出都生效。",
-  "editingSkills.sound.name": "音效与音乐",
+  "editingSkills.sound.name": "音效",
   "editingSkills.sound.short": "在讲到关键点时加音效",
   "editingSkills.sound.detail": "讲到关键点时加上合适的音效。",
   "editingSkills.b_roll.name": "自动 B-roll",
