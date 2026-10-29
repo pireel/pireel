@@ -1,6 +1,8 @@
 import { editorRequest } from '@pireel/studio-ui/host-request';
 "use client";
-import { alreadyStarted, startWithRoughCut, sceneAgentState } from '@pireel/studio-ui/agent-startup';
+import { alreadyStarted, firstEditMessage, firstMessageEditsFootage, footageToEdit, startWithRoughCut, sceneAgentState } from '@pireel/studio-ui/agent-startup';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@pireel/ui/tooltip';
+import { EditingSkillSwitches } from '@pireel/studio-ui/editing-skills';
 
 import { ChatCoverEntry } from '@pireel/studio-ui/chat-cover-controls';
 import { directorPlanToolBlock, saveEditingDirectorPlan, withDirectorInstruction } from '@pireel/studio-ui/editing-director-plan';
@@ -232,7 +234,6 @@ export function ChatThread({
     if (!messages.length && !modelSelectedRef.current) return;
     saveSnapshot(messages, skill, agentModelRef.current);
   }, [saveSnapshot]);
-  const [activeStarterId, setActiveStarterId] = useState<string | null>(null);
   const skillRef = useRef(skillId);
   skillRef.current = skillId;
 
@@ -898,34 +899,8 @@ export function ChatThread({
     return () => window.removeEventListener('pagehide', leave);
   }, [handleStop]);
 
-  // Quick prompts: fill into the composer instead of sending directly (user can reword / add @ references before sending)
-  const fillComposer = useCallback((text: string) => {
-    composerRef.current?.setText(text);
-  }, []);
-
-  const starterGroups = useMemo(
-    () =>
-      scenarioSkills
-        .map((skill) => ({
-          skill,
-          starters: skill.starters ?? [],
-        }))
-        .filter((group) => group.starters.length > 0),
-    [scenarioSkills],
-  );
-
-  const pickStarter = useCallback(
-    (nextSkillId: StudioScenarioSkillId, starterId: string, prompt: string) => {
-      applySkill(nextSkillId);
-      setActiveStarterId(`${nextSkillId}:${starterId}`);
-      fillComposer(prompt);
-    },
-    [applySkill, fillComposer],
-  );
-
   const switchSkill = useCallback((nextSkillId: StudioScenarioSkillId) => {
     applySkill(nextSkillId);
-    setActiveStarterId(null);
     const defaultPrompt = nextSkillId === STUDIO_AUTO_SKILL_ID
       ? null
       : scenarioSkills.find((skill) => skill.id === nextSkillId)?.defaultPrompt ?? null;
@@ -995,8 +970,7 @@ export function ChatThread({
       },
       runSkill(nextSkillId, text) {
         applySkill(nextSkillId as StudioScenarioSkillId);
-        setActiveStarterId(null);
-        run(text);
+            run(text);
       },
       insertText(text) {
         composerRef.current?.insertText(text);
@@ -1024,6 +998,17 @@ export function ChatThread({
   );
 
   const empty = messages.length === 0;
+  const shownEditingSkills = useMemo(() => resolveEditingRunConfig({ brand: projectBrand, skills: editingSkills }).skills, [projectBrand, editingSkills]);
+  // The project's first message on footage not yet edited is the one-click edit those switches describe,
+  // worded as when the Studio home hands a video over: the edit, then what the creator asked for.
+  // Why one-click edit cannot start yet, shown on hover; the rerender that brings footage clears it.
+  const startBlocked = !footageToEdit(getDocument?.()) ? t('chatGen.importVideoFirst') : !shownEditingSkills.length ? t('chatGen.turnOnASkill') : '';
+  const submit = useCallback((draft: string | StudioChatDraftPart[]) => {
+    if (!firstMessageEditsFootage(getDocument?.(), messagesRef.current, skillRef.current, shownEditingSkills)) return run(draft);
+    return run(firstEditMessage(typeof draft === 'string' ? [{ type: 'text', text: draft }] : draft), { startTool: ROUGH_CUT_TOOL, hint: firstPassStartupHint() });
+  }, [run, getDocument, shownEditingSkills]);
+  // One-click edit takes the path a video handed over from the Studio home takes, whatever the box holds.
+  const startEdit = useCallback(() => run(firstEditMessage([]), { startTool: ROUGH_CUT_TOOL, hint: firstPassStartupHint() }), [run]);
 
   return (
     <>
@@ -1042,70 +1027,25 @@ export function ChatThread({
                 title={t("chatGen.greeting")}
                 description={t("chatGen.emptyStateIntro")}
               />
-              {starterGroups.length > 0 ? (
-                <div className="flex w-full max-w-[430px] flex-col gap-3 px-2">
-                  {starterGroups.map(({ skill, starters }) => (
-                    <section key={skill.id} className="min-w-0">
-                      <h3 className="text-ink-3 mb-1.5 px-1 text-[11px] font-medium">
-                        {skill.title}
-                      </h3>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        {starters.map((starter) => {
-                          const active =
-                            activeStarterId === `${skill.id}:${starter.id}`;
-                          return (
-                            <button
-                              key={starter.id}
-                              type="button"
-                              aria-pressed={active}
-                              onClick={() =>
-                                pickStarter(skill.id, starter.id, starter.prompt)
-                              }
-                              className={`group min-w-0 rounded-xl p-1 text-left transition-colors ${
-                                active
-                                  ? "bg-panel-2/35"
-                                  : "hover:bg-panel-2/70"
-                              }`}
-                            >
-                              <span
-                                className={`relative block aspect-[3/2] overflow-hidden rounded-lg bg-panel-2 ${
-                                  active ? "ring-1 ring-inset ring-white/45" : ""
-                                }`}
-                              >
-                                <img
-                                  src={starter.imageUrl}
-                                  alt=""
-                                  draggable={false}
-                                  className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.025]"
-                                />
-                              </span>
-                              <span className="text-ink block truncate px-1 pb-0.5 pt-1.5 text-[12px] font-medium">
-                                {starter.title}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </section>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex max-w-full flex-wrap items-center justify-center gap-2 px-3">
-                  <button
-                    type="button"
-                    onClick={() => fillComposer(t("chatGen.cutShotsFirst"))}
-                    className="border-line bg-panel hover:bg-panel-2 rounded-full border px-3 py-1.5 text-[12px]"
-                  >
-                    {t("chatGen.cutShotsFirst")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => fillComposer(t("chatGen.transcribeToEdit"))}
-                    className="border-line bg-panel hover:bg-panel-2 rounded-full border px-3 py-1.5 text-[12px]"
-                  >
-                    {t("chatGen.transcribeToEdit")}
-                  </button>
-                </div>
+              {/* What the first edit of this footage does, until it is edited; afterwards the creator asks in words. */}
+              {!projectEdited && onEditingSkills && (
+                <EditingSkillSwitches value={shownEditingSkills} onChange={onEditingSkills} disabled={busy} />
+              )}
+              {!projectEdited && onEditingSkills && startWithRoughCut(skillId) && (
+                <TooltipProvider delayDuration={200}>
+                  <Tooltip open={startBlocked ? undefined : false}>
+                    {/* A disabled button takes no pointer events: the wrapper carries the hover. */}
+                    <TooltipTrigger asChild>
+                      <span tabIndex={startBlocked ? 0 : -1} className="block w-full max-w-[344px]">
+                        <button type="button" disabled={busy || !!startBlocked} onClick={() => void startEdit()}
+                          className="bg-ink text-canvas w-full rounded-lg px-4 py-2 text-[12.5px] font-medium disabled:pointer-events-none disabled:opacity-40">
+                          {t('chatGen.startEdit')}
+                        </button>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>{startBlocked}</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               )}
             </div>
           ) : (
@@ -1532,7 +1472,7 @@ export function ChatThread({
           timelineFramePickBusy={timelineFramePickBusy}
           timelineFramePickAvailable={timelineFramePickAvailable}
           onTimelineFramePickActiveChange={onTimelineFramePickActiveChange}
-          onSubmit={run}
+          onSubmit={submit}
           onStop={handleStop}
           methodsRef={composerRef}
         />

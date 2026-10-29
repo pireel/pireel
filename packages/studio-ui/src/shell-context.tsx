@@ -44,19 +44,10 @@ export interface StudioScenarioSkillOption {
   defaultPrompt?: string | null;
   /** Compact picker mark; presentation only, never included in the model prompt. */
   icon?: string;
-  /** Optional editable opening prompts shown in an empty chat. Picking one activates this Skill. */
-  starters?: readonly StudioScenarioSkillStarter[];
   /** User-owned account Skill. Enables management controls; never changes prompt authority. */
   custom?: boolean;
   /** Market listing metadata used by the picker detail view. Markdown is intentionally absent. */
   market?: StudioSkillMarketMetadata;
-}
-
-export interface StudioScenarioSkillStarter {
-  id: string;
-  title: string;
-  prompt: string;
-  imageUrl: string;
 }
 
 export interface StudioCustomScenarioSkillManager {
