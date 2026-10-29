@@ -1,6 +1,6 @@
 import { editorRequest } from '@pireel/studio-ui/host-request';
 import type { GenerationRequest } from '@pireel/studio-ui/generation-settings';
-import { getStudioSpaceId, pollCreation, startGeneration } from '@pireel/studio-ui/gen-api';
+import { generationFailureMessage, getStudioSpaceId, pollCreation, startGeneration } from '@pireel/studio-ui/gen-api';
 import { t } from '@pireel/studio-ui/i18n';
 
 /** A finished generation, ready to insert and to register in the project library. */
@@ -52,7 +52,7 @@ export async function generateVisualForRange(projectId: string, prompt: string, 
       if (!asset) throw new RangeGenerationError(t('captions.generateEmpty'));
       return { jobId: id, key: asset.key, url: asset.url, mime: asset.mime };
     }
-    if (job?.status === 'failed') throw new RangeGenerationError(job.error || t('captions.generateFailed'));
+    if (job?.status === 'failed') throw new RangeGenerationError(job.error ? generationFailureMessage(job.error) : t('captions.generateFailed'));
     if (Date.now() - startedAt > POLL_CAP_MS) throw new RangeGenerationError(t('captions.generateTimedOut'));
   }
 }

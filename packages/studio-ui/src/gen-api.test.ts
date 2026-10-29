@@ -52,3 +52,20 @@ describe('generation space resolution', () => {
 it('keeps a cover scene request identity when restoring generation history', () => {
   expect(genJobFromCreation({ id: 'job', status: 'pending', params: { _cover_run_id: 'cover-run-123', user_prompt: 'Cover headline' } })).toMatchObject({ id: 'job', coverRunId: 'cover-run-123', prompt: 'Cover headline' });
 });
+
+it('tells a failed generation in words the user can act on, keeping the raw failure on the job', async () => {
+  const { generationFailureMessage, startSpaceGeneration } = await import('@pireel/studio-ui/gen-api');
+  const { t } = await import('@pireel/studio-ui/i18n');
+  expect(generationFailureMessage('atlascloud_poll HTTP 400: code=400 msg=The request failed because the output audio may contain sensitive information.')).toBe(t('common.generationRejected'));
+  expect(generationFailureMessage('doubao_video_gen HTTP 400: {"error":{"code":"InputImageSensitiveContentDetected.PrivacyInformation"}}')).toBe(t('common.generationRejected'));
+  expect(generationFailureMessage('task_timeout_30min')).toBe(t('common.generationTimedOut'));
+  expect(generationFailureMessage('fetch failed')).toBe(t('common.generationFailedRetry'));
+  expect(generationFailureMessage(undefined)).toBe(t('common.generationFailedRetry'));
+  expect(genJobFromCreation({ id: 'c', status: 'failed', error: 'task_timeout_30min', prompt: 'p' } as never).error).toBe('task_timeout_30min');
+  // A start refused with an error code reads as a failed request, not as the code.
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'creation_failed', id: 'x' }), { status: 500 })));
+  const started = await startSpaceGeneration('space', 'image-gen', { prompt: 'p' });
+  expect(started).toMatchObject({ ok: false, kind: 'error' });
+  expect((started as { message: string }).message).not.toContain('creation_failed');
+  vi.unstubAllGlobals();
+});

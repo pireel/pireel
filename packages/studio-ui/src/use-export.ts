@@ -47,6 +47,24 @@ export function downloadBlob(blob: Blob, name: string) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
+/**
+ * Save a file from another origin (a CDN): `<a download>` is ignored across origins and only opens
+ * the file, so it is fetched and saved from memory; when it cannot be read, it opens in a new tab.
+ */
+export async function downloadUrl(url: string, name: string) {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    downloadBlob(await response.blob(), name);
+  } catch { window.open(url, '_blank', 'noopener'); }
+}
+/** A download name from a file's URL, falling back to `fallback` with the URL's extension. */
+export function downloadName(url: string, fallback: string) {
+  const last = decodeURIComponent(new URL(url, 'https://x').pathname.split('/').pop() ?? '');
+  const extension = /\.[a-z0-9]{2,5}$/i.exec(last)?.[0] ?? '';
+  return `${fallback}${extension}`;
+}
+
 export interface ExportDelivery {
   delivered: 'local_sink' | 'browser_download';
   /** Set when a sink was requested but the PUT failed (delivery fell back to the browser download). */

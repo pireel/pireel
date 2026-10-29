@@ -41,8 +41,20 @@ export interface GenJob {
   status: GenStatus;
   prompt: string;
   assets: GenAsset[];
+  /** The failure as the service reported it (for diagnostics and agents); show `generationFailureMessage` to people. */
   error?: string;
   createdAt: number;
+}
+
+/**
+ * A failed generation in words the user can act on. Providers report failures in their own terms
+ * (codes, HTTP status, JSON); only what the user can change is told apart: content a review turned
+ * down, and a run that timed out.
+ */
+export function generationFailureMessage(error?: string): string {
+  if (error && /sensitive|moderat|policy|copyright|rejected|privacy|safety|nsfw|violat|inappropriate/i.test(error)) return t('common.generationRejected');
+  if (error && /time ?out|timed out/i.test(error)) return t('common.generationTimedOut');
+  return t('common.generationFailedRetry');
 }
 
 export type StartResult =
@@ -122,7 +134,8 @@ async function postGeneration(spaceId: string, toolId: 'image-gen' | 'video-gen'
     return { status: r.status, result: { ok: false, kind: 'plan', requires, message: t('chatGen.planLocked', { plan: requires === 'max' ? 'Max' : 'Pro' }) } };
   }
   if (!r.ok || !j?.ok || !j.id) {
-    return { status: r.status, result: { ok: false, kind: 'error', message: typeof j?.error === 'string' ? j.error : t('chatGen.generationRequestFailedStatus', { status: r.status }) } };
+    // The service answers with an error code (creation_failed, unknown_skill…), not a message to show.
+    return { status: r.status, result: { ok: false, kind: 'error', message: typeof j?.error === 'string' && /\s/.test(j.error) ? j.error : t('chatGen.generationRequestFailedStatus', { status: r.status }) } };
   }
   return { status: r.status, result: { ok: true, ids: Array.isArray(j.ids) && j.ids.length > 0 ? j.ids : [j.id] } };
 }

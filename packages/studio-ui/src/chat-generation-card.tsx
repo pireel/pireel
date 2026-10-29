@@ -14,7 +14,7 @@ import { useStudioShell } from '@pireel/studio-ui/shell-context';
 import { t } from '@pireel/studio-ui/i18n';
 import { CoverApplyButton } from '@pireel/studio-ui/chat-cover-controls';
 import type { ProjectCover } from '@pireel/studio-ui/project-cover';
-import { generatedAssetIndexEntry, generatedRecordsFromJobs, pollCreation, type GeneratedAssetRecord, type GenJob } from '@pireel/studio-ui/gen-api';
+import { generatedAssetIndexEntry, generatedRecordsFromJobs, generationFailureMessage, pollCreation, type GeneratedAssetRecord, type GenJob } from '@pireel/studio-ui/gen-api';
 import { localAssetMentionRef, type StudioElementRef } from '@pireel/studio-ui/chat-local-asset-mention';
 import type { GenerationIntent } from '@pireel/studio-ui/chat-generation-intent';
 
@@ -118,7 +118,7 @@ export function GenerationJobsBody({ ids, kind, prompt, actions, isCover = false
         </div>
       ) : null}
       {failed.map((job) => (
-        <div key={job.id} className="text-destructive mt-1 text-[11px]">{job.error || t('common.generationFailed')}</div>
+        <div key={job.id} className="text-destructive mt-1 text-[11px]">{generationFailureMessage(job.error)}</div>
       ))}
     </div>
   );
