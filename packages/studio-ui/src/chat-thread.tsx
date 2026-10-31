@@ -812,7 +812,8 @@ export function ChatThread({
     if (!startPrompt?.trim() || startSentRef.current || status !== "ready") return;
     startSentRef.current = true;
     // A reload after saving the first message must not start it a second time.
-    const roughCut = startWithRoughCut(skillRef.current);
+    // With nothing switched on (no brand) the message is the creator's own request, not a one-click edit.
+    const roughCut = startWithRoughCut(skillRef.current) && resolveEditingRunConfig({ brand: projectBrandRef.current, skills: editingSkillsRef.current }).skills.length > 0;
     if (alreadyStarted(messagesRef.current, startPrompt, roughCut)) { onStartPromptSent?.(); return; }
     void run(startPrompt, roughCut ? { startTool: ROUGH_CUT_TOOL, hint: firstPassStartupHint() } : { wholeWhiteboard: skillRef.current === 'whiteboard-explainer' }).then(sent => {
       if (sent) onStartPromptSent?.(); else startSentRef.current = false;

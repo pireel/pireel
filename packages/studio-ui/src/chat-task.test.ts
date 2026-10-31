@@ -42,7 +42,7 @@ describe('durable editing task', () => {
     const paused: ChatTask = { ...task('same'), state: 'paused', roughCut: { callId: 'failed-call', report: {
       state: 'partial', credits: 1, summary: '部分工作尚未完成', sourceAssetId: 'source',
       steps: [{ id: 'transcribe', status: 'done', detail: '16 句' }, { id: 'pauses', status: 'failed', detail: 'Outdated module' }, { id: 'cleanup', status: 'done', detail: '3 fillers' }, { id: 'captions', status: 'pending' }, { id: 'loudness', status: 'skipped' }],
-      cleanup: { applied: ['fillers'], analysis: { cuts: [], unsure: [], sensitive: [] } },
+      cleanup: { source: { applied: ['fillers'], analysis: { cuts: [], unsure: [], sensitive: [] } } },
     } } };
     const resumed = resumeEditingTask(paused);
     expect(resumed.state).toBe('running');

@@ -473,6 +473,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
     inputSchema: obj({
       minimumPauseSec: num('', { min: 0.25, max: 3 }),
       speechPaddingSec: num('', { min: 0, max: 0.5 }),
+      assetId: str('Which narration video on the story track; default: the first.'),
     }),
   },
   remove_words: {

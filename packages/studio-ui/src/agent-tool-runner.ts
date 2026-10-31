@@ -3051,7 +3051,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'remove_silence': {
             if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: tEnglish('workbench.noVideoYet') };
-            const assetId = firstNarrativeAssetId(documentRef.current);
+            // A story of several videos is cleaned one source at a time.
+            const story = documentRef.current.timeline.tracks.find((track) => track.id === documentRef.current.semantics.primaryNarrativeTrackId);
+            const requested = typeof input.assetId === 'string' && input.assetId ? input.assetId : '';
+            if (requested && !story?.clips.some((clip) => 'assetId' in clip && clip.assetId === requested)) return { ok: false, error: 'unknown_id', data: { path: 'assetId', value: requested, fix: 'Pass the assetId of a narration video on the story track (get_state), or omit it for the first.' } };
+            const assetId = requested || firstNarrativeAssetId(documentRef.current);
             const primaryAsset = assetId ? documentRef.current.assets[assetId] : undefined;
             if (!assetId || primaryAsset?.kind !== 'video') return { ok: false, error: tEnglish('common.localSourceVideoMissing') };
             const bytes = await assetBytes(primaryAsset);

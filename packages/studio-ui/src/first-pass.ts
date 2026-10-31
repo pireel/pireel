@@ -41,8 +41,8 @@ export interface FirstPassReport {
   sourceAssetId?: string;
   /** Selected phrases survive retries; failed application never requires another paid selection. */
   captionHighlights?: { assetId: string; mode: 'keywords' | 'numbers'; signature: string; items: { index: number; text: string }[]; applied: boolean }[];
-  /** Checkpoints inside cleanup prevent paid analysis and applied cuts being repeated on resume. */
-  cleanup?: { analysis?: Awaited<ReturnType<NonNullable<ReturnType<typeof studioProviders>['speechCleanup']>>>; applied: string[] };
+  /** Checkpoints inside cleanup, per narration source, prevent paid analysis and applied cuts being repeated on resume. */
+  cleanup?: Record<string, { analysis?: Awaited<ReturnType<NonNullable<ReturnType<typeof studioProviders>['speechCleanup']>>>; applied: string[] }>;
   /** One sentence on what changed, once done. */
   summary?: string;
 }
@@ -74,11 +74,17 @@ export function fineCutClipIds(document: EditorDocumentV2): EditingEvidence {
  */
 export function documentIsEdited(document: EditorDocumentV2): boolean {
   const primary = document.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId);
-  const story = primary?.clips ?? [];
-  const only = story[0];
-  const sourceSec = only?.kind === 'narrative' ? document.assets[only.assetId]?.metadata.durationSec : undefined;
-  const trimmed = only?.kind === 'narrative' && (only.sourceInSec > 0.05 || (sourceSec !== undefined && only.sourceOutSec < sourceSec - 0.05));
-  return story.length > 1 || trimmed
+  const story = [...(primary?.clips ?? [])].sort((a, b) => a.startFrame - b.startFrame);
+  // Imported as given: each story clip a whole source, one after another, no source twice.
+  const whole = (clip: (typeof story)[number], index: number) => {
+    if (clip.kind !== 'narrative') return false;
+    const sourceSec = document.assets[clip.assetId]?.metadata.durationSec;
+    const previous = story[index - 1];
+    return clip.sourceInSec <= 0.05 && (sourceSec === undefined || clip.sourceOutSec >= sourceSec - 0.05)
+      && (!previous || previous.startFrame + previous.durationFrames === clip.startFrame)
+      && story.findIndex((other) => other.kind === 'narrative' && other.assetId === clip.assetId) === index;
+  };
+  return !story.every(whole)
     || document.timeline.tracks.some((track) => track !== primary && track.role !== 'managedCaptions' && track.clips.length > 0)
     || !!document.appearance.captionStyle?.on
     || !!document.timeline.transitions?.length
