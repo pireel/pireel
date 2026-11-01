@@ -40,7 +40,7 @@ import { sentenceTranslationUnits } from '@pireel/studio-ui/caption-translation-
 import { deriveCaptionLineRows } from '@pireel/studio-ui/caption-line-rows';
 import { captionTranslationKey, captionTranslationOps, translateCaptionUnits } from '@pireel/studio-ui/caption-translation-operation';
 import { transcriptInputsFor, type DocumentOpInputs } from '@pireel/studio-engine/document-transaction';
-import { restoreOp, type DocumentCommitter } from '@pireel/studio-ui/document-commit';
+import { fieldCoalesce, restoreOp, type CommitUndo, type DocumentCommitter } from '@pireel/studio-ui/document-commit';
 
 /** Everything the caption ops borrow from the workbench (values are per-render, refs/handlers are stable-by-ref). */
 export interface CaptionsOpsDeps {
@@ -96,7 +96,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     mainTranscript: asrRef.current,
     clipTranscripts: captionTranscriptsByAsset(documentRef.current, compRef.current, clipAsrRef.current),
   });
-  const captionCommit = (input: Omit<DocumentOpInputs['captions.edit'], 'mainTranscript' | 'clipTranscripts'>, undo: 'step' | 'none' = 'step') =>
+  const captionCommit = (input: Omit<DocumentOpInputs['captions.edit'], 'mainTranscript' | 'clipTranscripts'>, undo: CommitUndo = 'step') =>
     commit({ op: 'captions.edit', input: { ...input, ...currentTranscripts() } }, { undo });
   /** Mirror the transcripts a re-layout rewrote (new cue boundaries) into the runtime copies. */
   const adoptCaptionTranscripts = (document: EditorDocumentV2) => {
@@ -110,9 +110,11 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     // SPARSE persistence: merge into the raw stored style, never the resolved one — defaults stay in
     // the resolver so future default changes reach projects that never explicitly set those fields.
     // A change to how much fits on a line breaks the captions into lines again (an undo step, as it
-    // moves cue boundaries); corrected copy, translations and emphasis follow their words.
+    // moves cue boundaries); corrected copy, translations and emphasis follow their words. Other
+    // style edits are undoable too; a colour picker writes per tick, so one field's run is one step.
     const relayout = breaksCaptionLines(compRef.current, patch);
-    const edit = captionCommit({ patch, ...(relayout ? { relayout: true } : {}) }, relayout ? 'step' : 'none');
+    const style = compRef.current.captionStyle ?? {};
+    const edit = captionCommit({ patch, ...(relayout ? { relayout: true } : {}) }, relayout ? 'step' : fieldCoalesce('caption-style', style, { ...style, ...patch }));
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return;

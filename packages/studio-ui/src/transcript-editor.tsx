@@ -9,6 +9,7 @@ import { isFillerWord } from '@pireel/studio-engine/speech-fillers';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { phraseWordIndexes, rowWords } from '@pireel/studio-engine/caption-highlights';
 import { toast } from '@pireel/ui/toast';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@pireel/ui/dropdown-menu';
 import { captionHighlightColor } from '@pireel/studio-engine/caption-animations';
 import { CLEANUP_PAUSE_KEEP_SEC, CLEANUP_PAUSE_OVER_SEC, transcriptPauses, transcriptPauseCuts, type TranscriptPause } from '@pireel/studio-engine/transcript-pauses';
 import type { CaptionCueEdit } from '@pireel/studio-engine/caption-document-edit';
@@ -268,18 +269,21 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
   }));
   const longPauses = useMemo(() => pauses.filter((pause) => pause.endSec - pause.startSec > CLEANUP_PAUSE_OVER_SEC + 1e-7), [pauses]);
   const silences = useMemo(() => longPauses.flatMap((pause) => transcriptPauseCuts(pause, CLEANUP_PAUSE_KEEP_SEC)), [longPauses]);
+  const silenceSec = longPauses.reduce((total, pause) => total + pause.endSec - pause.startSec - CLEANUP_PAUSE_KEEP_SEC, 0);
   const fillers = tokens.filter((token) => isFillerWord(token.text)
     && document.semantics.transcripts[token.assetId]?.[token.si]?.words?.length);
 
   return <div className="relative flex min-h-0 flex-1 flex-col" data-transcript-editor>
     <div className={TRANSCRIPT_TOOLBAR_CLASS}>
-      <details className="group relative">
-        <summary className={`${TRANSCRIPT_TOOL_CLASS} cursor-pointer list-none group-open:bg-panel-2/35 group-open:text-ink [&::-webkit-details-marker]:hidden`}><Scissors size={13} />{t('captions.speechCleanup')}<ChevronDown size={11} className="text-ink-4" /></summary>
-        <div className="border-line bg-panel absolute left-0 top-full z-20 mt-1 w-56 rounded-md border p-1 shadow-lg">
-          <button type="button" disabled={!silences.length} className="hover:bg-panel-2/20 w-full rounded px-2 py-2 text-left text-[12px] disabled:opacity-40" onClick={(event) => { onCut(silences, t('panels.deletedNSilencesSec', { n: longPauses.length, sec: longPauses.reduce((total, pause) => total + pause.endSec - pause.startSec - CLEANUP_PAUSE_KEEP_SEC, 0).toFixed(1) })); event.currentTarget.closest('details')?.removeAttribute('open'); }}>{longPauses.length ? t('panels.cutSilencesNSec', { n: longPauses.length, sec: longPauses.reduce((total, pause) => total + pause.endSec - pause.startSec - CLEANUP_PAUSE_KEEP_SEC, 0).toFixed(1) }) : <>{t('panels.cutSilences')}<span className="text-ink-4 block text-[10.5px]">{t('captions.noLongPauses', { sec: CLEANUP_PAUSE_OVER_SEC })}</span></>}</button>
-          <button type="button" disabled={!fillers.length} className="hover:bg-panel-2/20 w-full rounded px-2 py-2 text-left text-[12px] disabled:opacity-40" onClick={(event) => { onCut(cutsFor(fillers), t('panels.deletedNFillerWords', { n: fillers.length })); event.currentTarget.closest('details')?.removeAttribute('open'); }}>{fillers.length ? t('panels.cutFillersN', { n: fillers.length }) : <>{t('panels.cutFillers')}<span className="text-ink-4 block text-[10.5px]">{t('panels.noFillerWordsDetected')}</span></>}</button>
-        </div>
-      </details>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button type="button" className={`${TRANSCRIPT_TOOL_CLASS} data-[state=open]:bg-panel-2/35 data-[state=open]:text-ink`}><Scissors size={13} />{t('captions.speechCleanup')}<ChevronDown size={11} className="text-ink-4" /></button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" sideOffset={4} className="w-56">
+          <DropdownMenuItem disabled={!silences.length} className="flex-col items-start gap-0 text-[12px]" onSelect={() => onCut(silences, t('panels.deletedNSilencesSec', { n: longPauses.length, sec: silenceSec.toFixed(1) }))}>{longPauses.length ? t('panels.cutSilencesNSec', { n: longPauses.length, sec: silenceSec.toFixed(1) }) : <>{t('panels.cutSilences')}<span className="text-ink-4 text-[10.5px]">{t('captions.noLongPauses', { sec: CLEANUP_PAUSE_OVER_SEC })}</span></>}</DropdownMenuItem>
+          <DropdownMenuItem disabled={!fillers.length} className="flex-col items-start gap-0 text-[12px]" onSelect={() => onCut(cutsFor(fillers), t('panels.deletedNFillerWords', { n: fillers.length }))}>{fillers.length ? t('panels.cutFillersN', { n: fillers.length }) : <>{t('panels.cutFillers')}<span className="text-ink-4 text-[10.5px]">{t('panels.noFillerWordsDetected')}</span></>}</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
       {autoHighlight && <button type="button" disabled={!tokens.length || highlighting} onClick={() => void runAutoHighlight()} title={t('captions.autoHighlightHint')} aria-label={t('captions.autoHighlight')}
           className={TRANSCRIPT_TOOL_CLASS}>{highlighting ? <Loader2 size={13} className="animate-spin" /> : <Highlighter size={13} />}<span className={TRANSCRIPT_TOOL_LABEL_CLASS}>{t(highlighting ? 'captions.autoHighlighting' : 'captions.autoHighlight')}</span></button>}
       {captionsToolbar?.tools}

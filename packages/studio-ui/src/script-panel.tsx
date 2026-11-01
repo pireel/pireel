@@ -99,6 +99,23 @@ export type ScriptMaskTarget = { src: string | null; si: number; wi: number };
 
 export type TranscriptAddKind = 'text' | 'sticker' | 'media' | 'sfx' | 'mg';
 
+/** A colour input that reports once, when the picker closes. React's onChange fires on every
+ *  tick of dragging inside the picker, and a highlight applied on the first tick closes the
+ *  selection bar under the open picker. */
+function ColorOnClose({ onCommit, ...props }: Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'onChange'> & { onCommit: (color: string) => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const commitRef = useRef(onCommit);
+  commitRef.current = onCommit;
+  useEffect(() => {
+    const input = ref.current;
+    if (!input) return;
+    const changed = () => commitRef.current(input.value);
+    input.addEventListener('change', changed);
+    return () => input.removeEventListener('change', changed);
+  }, []);
+  return <input ref={ref} type="color" {...props} />;
+}
+
 /** Selection-first transcript actions, patterned after the compact contextual bar in the UI reference. */
 export function TranscriptSelectionBar({ text, kind = 'text', canEdit, onEdit, onRequestEdit, onDecorate, styleHighlight, onGenerateMG, onAdd, addKinds, onDelete, deleteLabel, onRestore, onMaskAudio, onMaskText, onUnmask }: {
   text: string;
@@ -165,7 +182,7 @@ export function TranscriptSelectionBar({ text, kind = 'text', canEdit, onEdit, o
               <button key={color} type="button" aria-label={`${t('captions.highlightColor')} ${color}`} onClick={() => onDecorate?.({ highlight: 'color', color })} className="border-line h-5 w-5 rounded-full border" style={{ backgroundColor: color }} />
             ))}
             <label className="text-ink-3 relative h-5 w-5 cursor-pointer overflow-hidden rounded-full border border-dashed border-current text-center text-[12px] leading-[18px]" title={t('captions.customHighlightColor')}>
-              +<input type="color" aria-label={t('captions.customHighlightColor')} onChange={(event) => onDecorate?.({ highlight: 'color', color: event.target.value })} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
+              +<ColorOnClose aria-label={t('captions.customHighlightColor')} onCommit={(color) => onDecorate?.({ highlight: 'color', color })} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
             </label>
           </div>
           <button type="button" className={choice} onClick={() => onDecorate?.({ highlight: 'underline' })}>{t('captions.highlightUnderline')}</button>

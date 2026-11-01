@@ -280,7 +280,7 @@ export function useScriptCut(deps: ScriptCutDeps) {
       setClipAsr(next);
       clipAsrRef.current = next;
     }
-    const edit = commit({ op: 'captions.edit', input: { mainTranscript: asrRef.current, clipTranscripts: clipAsrRef.current } }, { undo: 'none' });
+    const edit = commit({ op: 'captions.edit', input: { mainTranscript: asrRef.current, clipTranscripts: clipAsrRef.current } });
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return;
@@ -315,7 +315,7 @@ export function useScriptCut(deps: ScriptCutDeps) {
       }
     }
     if (!changed) return;
-    const edit = commit({ op: 'captions.edit', input: { mainTranscript: asrRef.current, clipTranscripts: clipAsrRef.current } }, { undo: 'none' });
+    const edit = commit({ op: 'captions.edit', input: { mainTranscript: asrRef.current, clipTranscripts: clipAsrRef.current } });
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return;
@@ -344,7 +344,7 @@ export function useScriptCut(deps: ScriptCutDeps) {
     const captions = commit([
       { op: 'transcripts.set', input: { transcripts: { [assetId]: nextSegments } } },
       { op: 'command', input: { command: { type: 'captions.relay' } } },
-    ], { undo: 'none' });
+    ]);
     if (!captions.ok) {
       toast.error(editorErrorMessage(captions.error));
       return;
