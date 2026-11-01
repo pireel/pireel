@@ -21,7 +21,7 @@ import {
   audioClipSrcTimeAt,
   totalDuration,
 } from '@pireel/studio-engine/composition';
-import type { DocumentCommitter } from '@pireel/studio-ui/document-commit';
+import type { CommitUndo, DocumentCommitter } from '@pireel/studio-ui/document-commit';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { toast } from '@pireel/ui/toast';
 import type { EngineAudioClip, VideoTrackEngine } from '@pireel/studio-ui/video-track-engine';
@@ -281,9 +281,10 @@ export function useAudioTracks(deps: AudioTracksDeps) {
   const patchClip = (
     id: string,
     patch: Partial<Pick<AudioClip, 'startSec' | 'volumeDb' | 'fadeInSec' | 'fadeOutSec' | 'speed' | 'inSec' | 'outSec' | 'muted'>>,
-    undo = false,
+    /** true: one undo step; a coalesce key for a control that writes on every tick. */
+    undo: boolean | Extract<CommitUndo, object> = false,
   ): { ok: boolean; error?: string } => {
-    const edit = commit({ op: 'audio.patch', input: { updates: [{ clipId: id, patch }] } }, { undo: undo ? 'step' : 'none' });
+    const edit = commit({ op: 'audio.patch', input: { updates: [{ clipId: id, patch }] } }, { undo: typeof undo === 'object' ? undo : undo ? 'step' : 'none' });
     if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error) };
     return { ok: true };
   };

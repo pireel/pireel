@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { emptyComposition, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import { compositionToEditorDocument } from '@pireel/studio-engine/project-document';
 import type { DocumentTransaction } from '@pireel/studio-engine/document-transaction';
-import { DocumentCommitter } from '@pireel/studio-ui/document-commit';
+import { DocumentCommitter, fieldCoalesce } from '@pireel/studio-ui/document-commit';
 
 function harness() {
   let document = compositionToEditorDocument({ projectId: 'p', composition: emptyComposition() }).document;
@@ -41,6 +41,33 @@ describe('DocumentCommitter', () => {
     expect(h.transactions[0]!.ops).toHaveLength(2);
     expect(h.transactions[0]!.origin).toBe('user');
     expect(h.document.timeline.tracks.flatMap((t) => t.clips.map((c) => c.id))).toEqual(['a', 'b']);
+  });
+
+  it('folds a slider\'s tick-by-tick writes into one undo step until something else lands', () => {
+    const h = harness();
+    h.committer.commit(card('a'));
+    const move = (startSec: number) => ({ op: 'overlay.patch' as const, input: { updates: [{ clipId: 'a', startSec }] } });
+    for (const startSec of [2, 3, 4]) h.committer.commit(move(startSec), { undo: { coalesce: 'level:a' } });
+    expect(h.undoStack.current).toHaveLength(2);
+    // A derived relay between ticks does not end the gesture.
+    h.committer.commit({ op: 'document.foldMetadata', input: {} }, { origin: 'system', undo: 'none' });
+    h.committer.commit(move(5), { undo: { coalesce: 'level:a' } });
+    expect(h.undoStack.current).toHaveLength(2);
+    // Another edit, or another control, opens a new step.
+    h.committer.commit(card('b', 8));
+    h.committer.commit(move(6), { undo: { coalesce: 'level:a' } });
+    h.committer.commit(move(7), { undo: { coalesce: 'fade:a' } });
+    expect(h.undoStack.current).toHaveLength(5);
+    // Undo restores through replace, after which the same control starts fresh.
+    h.committer.replace(h.undoStack.current.pop()!, { origin: 'restore' });
+    h.committer.commit(move(9), { undo: { coalesce: 'fade:a' } });
+    expect(h.undoStack.current).toHaveLength(5);
+  });
+
+  it('keys a whole-form write by the fields it changed', () => {
+    expect(fieldCoalesce('fx', { feather: 1, stroke: { width: 2 } }, { feather: 4, stroke: { width: 2 } })).toEqual({ coalesce: 'fx:feather' });
+    expect(fieldCoalesce('props:a', { props: { title: 'A', n: 1 } }, { props: { title: 'AB', n: 1 } })).toEqual({ coalesce: 'props:a:props.title' });
+    expect(fieldCoalesce('fx', undefined, { feather: 2 })).toEqual({ coalesce: 'fx:feather' });
   });
 
   it('leaves everything untouched when an operation fails', () => {

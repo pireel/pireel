@@ -30,7 +30,31 @@ import { canonicalJson, hashSection } from '@pireel/studio-engine/stable-json';
 import { diffOps } from '@pireel/studio-engine/project-dto';
 import { withDeterministicIds } from '@pireel/studio-engine/deterministic-ids';
 
-export type CommitUndo = 'step' | 'none';
+/** `coalesce`: a control that writes through on every tick (a level slider). Its first write takes
+ *  the undo snapshot; later writes with the same key fold into that step until something else is
+ *  committed, undone or snapshotted. */
+export type CommitUndo = 'step' | 'none' | { coalesce: string };
+
+/**
+ * The coalesce step for a form that hands back its whole value on every tick: keyed by the fields
+ * that changed, so dragging one slider is one step and moving to the next field starts another.
+ * A single changed object field is followed one level down (a component's `props`).
+ */
+export function fieldCoalesce(scope: string, before: unknown, after: unknown): { coalesce: string } {
+  const record = (value: unknown): Record<string, unknown> =>
+    value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const changed = (a: Record<string, unknown>, b: Record<string, unknown>) =>
+    [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((key) => canonicalJson(a[key] ?? null) !== canonicalJson(b[key] ?? null)).sort();
+  const a = record(before);
+  const b = record(after);
+  let keys = changed(a, b);
+  if (keys.length === 1) {
+    const [key] = keys;
+    const inner = changed(record(a[key!]), record(b[key!]));
+    if (inner.length) keys = inner.map((field) => `${key}.${field}`);
+  }
+  return { coalesce: `${scope}:${keys.join(',')}` };
+}
 
 export interface CommitOptions {
   origin?: DocumentTransactionOrigin;
@@ -73,6 +97,8 @@ export interface TransactionScope {
 export class DocumentCommitter {
   private readonly deps: DocumentCommitterDeps;
   private staging: DocumentTransaction[] | null = null;
+  /** The coalesce key of the last user or agent commit, while its undo step is still open. */
+  private openCoalesce: string | null = null;
 
   constructor(deps: DocumentCommitterDeps) {
     this.deps = deps;
@@ -92,6 +118,7 @@ export class DocumentCommitter {
     undoStack.current.push(this.deps.getDocument());
     if (undoStack.current.length > undoCap) undoStack.current.shift();
     redoStack.current = [];
+    this.openCoalesce = null;
   }
 
   /**
@@ -136,7 +163,11 @@ export class DocumentCommitter {
     const next = unchanged ? before : normalized;
     if (unchanged && !options.runtimeComposition) return { ...last, document: before };
     if (origin === 'user' || origin === 'agent') this.deps.onBeforeMutation?.();
-    if (!unchanged && (options.undo ?? 'step') === 'step' && !this.staging) this.pushUndoSnapshot();
+    const undo = options.undo ?? 'step';
+    const coalesce = typeof undo === 'object' ? undo.coalesce : null;
+    if (!unchanged && !this.staging && (undo === 'step' || (coalesce !== null && coalesce !== this.openCoalesce))) this.pushUndoSnapshot();
+    // Derived relays run between a slider's ticks; only the user's or agent's own edits close the step.
+    if (!unchanged && origin !== 'system') this.openCoalesce = coalesce;
     this.deps.publish(next, options.runtimeComposition);
     const published = this.deps.getDocument();
     if (!unchanged) this.record({ id: transactionId, origin, ops });
@@ -146,6 +177,7 @@ export class DocumentCommitter {
   /** Replace the whole document. See ReplaceOptions for which callers record a transaction. */
   replace(document: EditorDocumentV2, options: ReplaceOptions): void {
     const before = this.deps.getDocument();
+    this.openCoalesce = null;
     if (options.origin === 'restore' && (options.undo ?? 'none') === 'step') this.pushUndoSnapshot();
     this.deps.publish(document, options.runtimeComposition);
     if (options.origin !== 'restore') return;

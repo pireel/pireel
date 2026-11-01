@@ -173,7 +173,7 @@ import { canonicalJson } from '@pireel/studio-engine/stable-json';
 import { runtimeTranscriptsFollowingDocument } from '@pireel/studio-ui/runtime-transcripts';
 import { transcriptInputsFor, type DocumentOp } from '@pireel/studio-engine/document-transaction';
 import { applyEditorDocumentPersistenceMetadata } from '@pireel/studio-engine/project-document';
-import { DocumentCommitter } from '@pireel/studio-ui/document-commit';
+import { DocumentCommitter, fieldCoalesce, type CommitUndo } from '@pireel/studio-ui/document-commit';
 import type { PlaybookSnapshot } from "@pireel/studio-engine/brand-playbook";
 import { ProjectSync, localPendingTransactionStore, type ProjectSyncDeps, type ProjectSyncSections } from '@pireel/studio-ui/project-sync';
 
@@ -593,10 +593,12 @@ export function HyperframesWorkbench({
     ReadonlyMap<string, string>
   >(new Map());
   const localImagePreviewUrlsRef = useRef<Map<string, string>>(new Map());
+  /** Overlay edits. `none` (default) is for live drafts and derived fixes; the user's own edits
+   *  pass a step, or a coalesce key when the control writes on every tick. */
   const patchOverlays = useCallback(
-    (updates: readonly OverlayDocumentPatch[]): boolean => {
+    (updates: readonly OverlayDocumentPatch[], undo: CommitUndo = "none"): boolean => {
       if (!updates.length) return false;
-      const edit = commit({ op: "overlay.patch", input: { updates } }, { undo: "none" });
+      const edit = commit({ op: "overlay.patch", input: { updates } }, { undo });
       if (!edit.ok) {
         toast.error(editorErrorMessage(edit.error));
         return false;
@@ -2981,7 +2983,8 @@ export function HyperframesWorkbench({
         if (block.slots[key] === value) return;
         slots = { ...block.slots, [key]: value };
       }
-      patchOverlays([{ clipId: blockId, block: { slots } }]);
+      // Typing writes per keystroke: one field's run of edits is one undo step.
+      patchOverlays([{ clipId: blockId, block: { slots } }], { coalesce: `slot:${blockId}:${key}` });
     },
     [patchOverlays, genIdsRef],
   );
@@ -3597,7 +3600,7 @@ export function HyperframesWorkbench({
             slots: nextBlock.slots,
           },
         },
-      ])
+      ], { coalesce: `anim:${bid}:${Object.keys(patch).join(",")}` })
     )
       return null;
     // Install the persisted timeline before the one-shot preview. This keeps the media node
@@ -4075,7 +4078,7 @@ export function HyperframesWorkbench({
                   box: shiftBox({ ...block, box: st.box }, dxf, dyf).box,
                 },
               },
-            ]);
+            ], "step");
         }
         boxDragRef.current = null;
         setGuideVis(false, false);
@@ -4326,7 +4329,7 @@ export function HyperframesWorkbench({
           if (!dx && !dy) return;
           patchOverlays([
             { clipId: b.id, block: { box: shiftBox(b, dx, dy).box } },
-          ]);
+          ], { coalesce: `nudge:${b.id}` }); // a held arrow key repeats: one run is one step
           return;
         }
         if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
@@ -4781,10 +4784,12 @@ export function HyperframesWorkbench({
   };
 
   /* ---------- Video track: shot slicing + shot framing ---------- */
+  /** Inspector edits to primary shots; each is its own undo step unless the caller coalesces. */
   const commitNarrativePatches = (
     updates: NarrativeClipPatchUpdate[],
+    undo: CommitUndo = "step",
   ): boolean => {
-    const result = commit({ op: "narrative.patch", input: { updates } }, { undo: "none" });
+    const result = commit({ op: "narrative.patch", input: { updates } }, { undo });
     if (!result.ok) {
       toast.error(editorErrorMessage(result.error));
       return false;
@@ -4833,10 +4838,11 @@ export function HyperframesWorkbench({
   const patchMediaVideoSettings = (
     clipId: string,
     patch: Parameters<typeof applyMediaVideoSettingsPatch>[1]["patch"],
+    undo: CommitUndo = "step",
   ): VideoShot | null => {
     const media = mediaVideoLocation(clipId);
     if (!media) return null;
-    const result = commit({ op: "media.videoSettings", input: { trackId: media.trackId, clipId, patch } }, { undo: "none" });
+    const result = commit({ op: "media.videoSettings", input: { trackId: media.trackId, clipId, patch } }, { undo });
     if (!result.ok) {
       toast.error(result.error.message);
       return null;
@@ -4948,11 +4954,13 @@ export function HyperframesWorkbench({
       fadeInSec?: number;
       fadeOutSec?: number;
     },
+    // The level slider writes on every tick: one drag is one undo step.
+    undo: CommitUndo = { coalesce: `shot-audio:${sid}` },
   ) => {
     if (compRef.current.shots?.some((candidate) => candidate.id === sid)) {
-      commitNarrativePatches([{ clipId: sid, patch: { audio: patch } }]);
+      commitNarrativePatches([{ clipId: sid, patch: { audio: patch } }], undo);
     } else {
-      patchMediaVideoSettings(sid, { audio: patch });
+      patchMediaVideoSettings(sid, { audio: patch }, undo);
     }
   };
   const setTimelineClipEnabled = (
@@ -5143,7 +5151,7 @@ export function HyperframesWorkbench({
     if (block)
       patchOverlays([
         { clipId: bid, block: { slots: { ...block.slots, media } } },
-      ]);
+      ], "step");
   };
   /** Pop the native file picker, get one file. */
   const pickFile = (accept: string): Promise<File | null> =>
@@ -5207,7 +5215,7 @@ export function HyperframesWorkbench({
             clipId: blockId,
             block: { slots: { ...block.slots, innerHtml: host.innerHTML } },
           },
-        ]);
+        ], "step");
       } catch {
         return;
       }
@@ -5495,7 +5503,6 @@ export function HyperframesWorkbench({
     }
     if (hit) {
       if (genLockToast(hit.id)) return;
-      pushUndoSnapshot();
       const fillMedia = await stageMediaOf({ type: a.type, url: a.url, sig: a.sig });
       if (!fillMedia) return;
       setBlockMedia(hit.id, fillMedia);
@@ -5687,7 +5694,9 @@ export function HyperframesWorkbench({
   const patchComponentValues = (id: string, next: Record<string, unknown>) => {
     const block = compRef.current.blocks.find((x) => x.id === id);
     if (!block || genIdsRef.current.has(id)) return;
-    const edit = commit({ op: "overlay.patch", input: { updates: [{ clipId: id, block: { slots: nextPropsSlots(block, next, compRef.current.look) } }] } });
+    const slots = nextPropsSlots(block, next, compRef.current.look);
+    // Text and number fields hand back the form on every keystroke: one field's edits are one step.
+    const edit = commit({ op: "overlay.patch", input: { updates: [{ clipId: id, block: { slots } }] } }, { undo: fieldCoalesce(`props:${id}`, block.slots, slots) });
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return;
@@ -6321,22 +6330,23 @@ export function HyperframesWorkbench({
   const canRedo = redoStackRef.current.length > 0;
 
   /** Component surface background. undefined = transparent (clears the surface). */
+  // Colour pickers and sliders write on every tick: each control's run of edits is one undo step.
   const setBlockBg = (id: string, bg: string | undefined) =>
-    patchOverlays([{ clipId: id, block: { bg } }]);
+    patchOverlays([{ clipId: id, block: { bg } }], { coalesce: `bg:${id}` });
   /** Component border color. undefined = no border. */
   const setBlockBorder = (id: string, border: string | undefined) =>
-    patchOverlays([{ clipId: id, block: { border } }]);
+    patchOverlays([{ clipId: id, block: { border } }], { coalesce: `border:${id}` });
   /** Component opacity (0–1). ≈1 clears it (back to default). */
   const setBlockOpacity = (id: string, v: number) =>
     patchOverlays([
       { clipId: id, block: { opacity: v >= 0.995 ? undefined : v } },
-    ]);
+    ], { coalesce: `opacity:${id}` });
   /** Component corner radius (comp px). 0 clears it (back to square/default). */
   const setBlockRadius = (id: string, v: number) =>
-    patchOverlays([{ clipId: id, block: { radius: v > 0 ? v : undefined } }]);
+    patchOverlays([{ clipId: id, block: { radius: v > 0 ? v : undefined } }], { coalesce: `radius:${id}` });
   /** Component whole rotation (degrees). 0 clears it (back to upright). */
-  const setBlockRotation = (id: string, v: number) =>
-    patchOverlays([{ clipId: id, block: { rotation: v ? v : undefined } }]);
+  const setBlockRotation = (id: string, v: number, undo: CommitUndo = { coalesce: `rotation:${id}` }) =>
+    patchOverlays([{ clipId: id, block: { rotation: v ? v : undefined } }], undo);
   /** Person-matte global config (person panel): undefined = all defaults. */
   const setPersonFx = (fx: PersonFx | undefined) => {
     // Instant: feather/stroke/background sent straight via hf:personFx to the matte shim (conversion matches assemble);
@@ -6367,7 +6377,7 @@ export function HyperframesWorkbench({
       strokeAlpha: fx?.stroke?.opacity ?? 1,
       bg,
     });
-    const command = commit({ op: "command", input: { command: { type: "appearance.patch", patch: { personFx: fx } } } }, { undo: "none" });
+    const command = commit({ op: "command", input: { command: { type: "appearance.patch", patch: { personFx: fx } } } }, { undo: fieldCoalesce("personFx", compRef.current.personFx, fx) });
     if (!command.ok) toast.error(editorErrorMessage(command.error));
   };
   /** Whether this range's (a source's) mask is mostly complete (≥80% of sample points have frames) — avoids re-running when the toggle is flipped again. */
@@ -7049,7 +7059,8 @@ export function HyperframesWorkbench({
     documentRef: editorDocumentRef,
     commit,
     postPreview,
-    setBlockRotation,
+    // The rotate handle commits once, on release.
+    setBlockRotation: (id: string, deg: number) => setBlockRotation(id, deg, "step"),
   });
   // Script-panel scissors (cut/restore/replace-word/extract) — see use-script-cut.ts.
   const {
@@ -7960,14 +7971,15 @@ export function HyperframesWorkbench({
     onTrimAudio: (
       id: string,
       patch: { startSec?: number; inSec?: number; outSec?: number },
-    ) => audioOps.patchClip(id, patch),
+    ) => audioOps.patchClip(id, patch, true),
     onFadeAudio: (id: string, edge: "in" | "out", sec: number) =>
       audioOps.patchClip(
         id,
         edge === "in" ? { fadeInSec: sec } : { fadeOutSec: sec },
+        true,
       ),
     onToggleAudioClipMute: (id: string, muted: boolean) =>
-      audioOps.patchClip(id, { muted }),
+      audioOps.patchClip(id, { muted }, true),
     onSelectAudio: (id: string | null) => {
       setSelectedAudioId(id);
       if (id) {
@@ -8617,7 +8629,7 @@ export function HyperframesWorkbench({
                     clips={comp.audioTracks ?? []}
                     selectedId={selectedAudioId}
                     usable={audioOps.clipUsable}
-                    onPatch={audioOps.patchClip}
+                    onPatch={(id, patch) => audioOps.patchClip(id, patch, { coalesce: `audio:${id}:${Object.keys(patch).join(",")}` })}
                     peakOf={(c) =>
                       c.sig ? (audioOps.clipPeaks.get(c.sig) ?? null) : null
                     }
@@ -8643,8 +8655,8 @@ export function HyperframesWorkbench({
                               .filter((sh) => selectedShotIds.has(sh.id))
                               .map((sh) => sh.id);
                       if (!ids.length) return;
-                      pushUndoSnapshot();
-                      for (const id of ids) setShotAudio(id, patch);
+                      const undo = { coalesce: `shot-audio:${ids.join(",")}` };
+                      for (const id of ids) setShotAudio(id, patch, undo);
                     }}
                     onReplaceSound={SoundPicker ? setReplacingSound : undefined}
                   /></>,
