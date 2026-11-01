@@ -240,24 +240,23 @@ function nativeAudioClip(document: EditorDocumentV2, clipId: string): { trackId:
 }
 
 /** Add a durable audio asset and place its clip on an existing or newly-created music lane. */
-export function addAudioDocumentClip(input: AddAudioDocumentClipInput): AddAudioDocumentClipResult {
-  if (!input.clip.id.trim()) return failure(input.document, 'invalid-command', 'Audio clip id is required.', { path: 'clip.id' });
-  if (!input.clip.src.trim()) return failure(input.document, 'invalid-command', 'Audio source is required.', { path: 'clip.src' });
-  const locator = durableLocator(input.clip);
+/** A legacy audio clip as the timeline clip and (new) asset it becomes in this document. */
+function audioTimelineClip(document: EditorDocumentV2, input: AudioClip):
+  | { ok: true; clip: AudioTimelineClip; asset?: EditorMediaAsset; assetId: string; speed: number }
+  | { ok: false; document: EditorDocumentV2; error: EditorCommandError } {
+  if (!input.id.trim()) return failure(document, 'invalid-command', 'Audio clip id is required.', { path: 'clip.id' });
+  if (!input.src.trim()) return failure(document, 'invalid-command', 'Audio source is required.', { path: 'clip.src' });
+  const locator = durableLocator(input);
   if (!locator.localSig && !locator.remoteUrl && !locator.cloudKey) {
-    return failure(input.document, 'invalid-command', 'Audio source needs a durable local signature or remote URL.', { path: 'clip.src' });
+    return failure(document, 'invalid-command', 'Audio source needs a durable local signature or remote URL.', { path: 'clip.src' });
   }
-  const normalized = normalizedAudioClip(input.clip);
+  const normalized = normalizedAudioClip(input);
   const defaults = audioClipDefaults(normalized);
   const knownOut = Number.isFinite(defaults.outSec) ? defaults.outSec : undefined;
   const durationSec = knownOut == null ? undefined : (knownOut - defaults.inSec) / defaults.speed;
   if (durationSec != null && durationSec < AUDIO_MIN_LEN_SEC) {
-    return failure(input.document, 'invalid-range', 'Audio clip is shorter than the minimum timeline duration.', { path: 'clip.durationSec' });
+    return failure(document, 'invalid-range', 'Audio clip is shorter than the minimum timeline duration.', { path: 'clip.durationSec' });
   }
-
-  let document = input.document;
-  const receipts: EditorCommandReceipt[] = [];
-
   const reused = existingAsset(document, normalized);
   const assetId = reused?.id ?? assetIdFor(document, normalized.id);
   const asset: EditorMediaAsset | undefined = reused ? undefined : {
@@ -279,6 +278,15 @@ export function addAudioDocumentClip(input: AddAudioDocumentClipInput): AddAudio
     properties: propertiesOf(normalized),
     anchor: { type: 'timeline' },
   };
+  return { ok: true, clip, ...(asset ? { asset } : {}), assetId, speed: defaults.speed };
+}
+
+export function addAudioDocumentClip(input: AddAudioDocumentClipInput): AddAudioDocumentClipResult {
+  const built = audioTimelineClip(input.document, input.clip);
+  if (!built.ok) return built;
+  const { clip, asset, assetId } = built;
+  let document = input.document;
+  const receipts: EditorCommandReceipt[] = [];
   const preferred = input.toTrackId
     ?? document.timeline.tracks.find((candidate) => candidate.type === 'audio' && candidate.role === 'music')?.id
     ?? document.timeline.tracks.find((candidate) => candidate.type === 'audio')?.id;
@@ -302,6 +310,47 @@ export function addAudioDocumentClip(input: AddAudioDocumentClipInput): AddAudio
     trackId: allocated.track.id,
     assetId,
   };
+}
+
+export interface ReplaceAudioDocumentClipInput {
+  document: EditorDocumentV2;
+  /** The placed clip whose sound changes. */
+  clipId: string;
+  /** The new sound; its own start is ignored for the replaced clip's. */
+  clip: AudioClip;
+}
+
+/**
+ * Another sound in a placed clip's place: the same lane and start, its own length up to the next clip
+ * on that lane. Inserted aside first, so the lane is never empty and never pruned, then moved in.
+ */
+export function replaceAudioDocumentClip(input: ReplaceAudioDocumentClipInput): AddAudioDocumentClipResult {
+  const found = nativeAudioClip(input.document, input.clipId);
+  if (!found) return failure(input.document, 'clip-not-found', `Audio clip does not exist: ${input.clipId}`, { path: 'clipId' });
+  const built = audioTimelineClip(input.document, input.clip);
+  if (!built.ok) return built;
+  const track = input.document.timeline.tracks.find((candidate) => candidate.id === found.trackId)!;
+  const startFrame = found.clip.startFrame;
+  const nextStart = Math.min(Infinity, ...track.clips.filter((clip) => clip.id !== found.clip.id && clip.startFrame >= startFrame).map((clip) => clip.startFrame));
+  let clip = built.clip;
+  if (startFrame + clip.durationFrames > nextStart) {
+    const durationFrames = nextStart - startFrame;
+    clip = { ...clip, durationFrames, sourceOutSec: clip.sourceInSec + timelineFramesToSeconds(durationFrames, input.document.canvas.fps) * built.speed };
+  }
+  const aside = Math.max(0, ...track.clips.map((existing) => existing.startFrame + existing.durationFrames));
+  let document = input.document;
+  const receipts: EditorCommandReceipt[] = [];
+  for (const command of [
+    { type: 'audio.insert' as const, trackId: track.id, clip: { ...clip, startFrame: aside }, ...(built.asset ? { asset: built.asset } : {}) },
+    { type: 'clips.remove' as const, trackId: track.id, clipIds: [found.clip.id], includeLinked: false },
+    { type: 'clip.move' as const, trackId: track.id, clipId: clip.id, startFrame },
+  ]) {
+    const result = applyEditorCommand(document, command);
+    if (!result.ok) return { ok: false, document: input.document, error: result.error };
+    document = result.document;
+    receipts.push(result.receipt);
+  }
+  return { ok: true, document, receipts, clipId: clip.id, trackId: track.id, assetId: built.assetId };
 }
 
 /** Move an audio clip through collision-aware lane allocation, creating a parallel lane when needed. */

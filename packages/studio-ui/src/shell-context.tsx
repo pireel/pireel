@@ -75,6 +75,17 @@ export interface StudioAudioTemplateGalleryProps {
   onUseTemplate: (prompt: string, durationSec?: number) => void;
 }
 
+/** A host's sound catalog for replacing a placed sound effect: the editor puts the chosen sound in its place. */
+export interface StudioSoundPickerProps {
+  open: boolean;
+  projectId: string;
+  /** The placed clip: its name (a host reads its own catalog id from it) and length (for a generated one). */
+  current: { label?: string; durationSec?: number };
+  onClose: () => void;
+  /** Rejects when the sound could not be put in place, so the picker stays open with the reason. */
+  onChoose: (sound: { url: string; label: string }) => Promise<void>;
+}
+
 export interface StudioShell {
   MaterialEntry?: ComponentType<import('./editor-material-host').EditorMaterialEntryProps>;
   /** Product-owned scenario UI; omitted by the standalone editor component. */
@@ -98,6 +109,8 @@ export interface StudioShell {
     label?: string;
     Panel: ComponentType<StudioCuratedAssetsPanelProps>;
     AudioTemplateGallery?: ComponentType<StudioAudioTemplateGalleryProps>;
+    /** Replace a placed sound effect from the host's catalog (omitted = sound effects are not replaceable). */
+    SoundPicker?: ComponentType<StudioSoundPickerProps>;
     /** Host-owned poster lookup shared by Official Assets and generation-template cards. */
     componentThumbnail?: (kind: 'kit' | 'template', id: string) => string | null;
   };

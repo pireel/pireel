@@ -426,3 +426,16 @@ describe('isRecoverableStudioChatError', () => {
     }
   });
 });
+
+it('counts a tool refused again after reading state in between, until that tool itself succeeds', () => {
+  const ledger = createStudioTurnLedger();
+  const refuse = (callId: string) => recordStudioTurnToolResult(ledger, { toolId: 'finish_edit', toolCallId: callId, input: { features: [callId] }, output: { ok: false, error: 'sound is absent' }, canMutate: false });
+  const read = (callId: string) => recordStudioTurnToolResult(ledger, { toolId: 'get_state', toolCallId: callId, input: {}, output: { ok: true }, canMutate: false });
+  expect(refuse('a').toolFailureCount).toBe(1);
+  read('r1');
+  expect(refuse('b').toolFailureCount).toBe(2);
+  read('r2');
+  expect(refuse('c').toolFailureCount).toBe(3);
+  recordStudioTurnToolResult(ledger, { toolId: 'finish_edit', toolCallId: 'ok', input: {}, output: { ok: true }, canMutate: false });
+  expect(refuse('d').toolFailureCount).toBe(1);
+});

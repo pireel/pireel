@@ -228,6 +228,8 @@ export const PANELS_ZH: Record<string, string> = {
   "panels.generate": "生成",
   "panels.generateMusic": "生成配乐",
   "panels.generatingMusic": "生成中…",
+  "panels.replaceSoundFailed": "换音效没有成功，请重试。",
+  "panels.replaceSound": "更换",
   "panels.musicFileMissingShort": "文件缺失",
   "panels.music": "音频",
   "panels.myAssets": "我的素材",

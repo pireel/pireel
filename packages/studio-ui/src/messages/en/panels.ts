@@ -237,6 +237,8 @@ export const PANELS_EN: Record<string, string> = {
   "panels.generate": "Generate",
   "panels.generateMusic": "Generate music",
   "panels.generatingMusic": "Generating…",
+  "panels.replaceSoundFailed": "Could not replace the sound. Try again.",
+  "panels.replaceSound": "Replace",
   "panels.musicFileMissingShort": "file missing",
   "panels.music": "Audio",
   "panels.myAssets": "Assets",

@@ -111,6 +111,8 @@ import type {
 import type { LocalAssetIndexEntry } from "@pireel/studio-engine/project-dto";
 
 const USER_BUBBLE_CLASS = "group-[.is-user]:bg-secondary/35";
+/** Refusals of one tool in a turn after which it is not run again in that turn. */
+const STUDIO_TOOL_FAILURES_PER_TURN = 5;
 
 export function ChatThread({
   projectId,
@@ -315,6 +317,18 @@ export function ChatThread({
       const ledger = turnLedgerRef.current;
       const v3 = V3_TOOL_IDS.has(id);
       const canMutate = v3ToolCanMutate(id);
+      // What a refusal adds once the same call or the same tool keeps failing in this turn: refused
+      // results (ok:false) count as much as errors, and reading state in between does not reset it.
+      const loopNote = (recorded: { repeatedFailureCount: number; toolFailureCount: number }) => {
+        const zh = studioLocale().toLowerCase().startsWith("zh");
+        if (recorded.repeatedFailureCount >= 2) return zh
+          ? `（完全相同的调用已连续失败 ${recorded.repeatedFailureCount} 次，重试不会成功：改用回执里的真实 id 与参数，或放弃该操作直接收尾。）`
+          : ` (This identical call has now failed ${recorded.repeatedFailureCount} times in a row; retrying cannot succeed. Use the real ids and parameters from receipts, or drop this operation and finish.)`;
+        if (recorded.toolFailureCount >= 2) return zh
+          ? `（${id} 本轮已失败 ${recorded.toolFailureCount} 次，换措辞重试无效：按错误提示改参数或先改时间线；改不了就别再调用它，直接用文字告诉用户卡在哪里。）`
+          : ` (${id} has failed ${recorded.toolFailureCount} times this turn; rewording it does not help. Change what the error names, in the input or on the timeline, or stop calling this tool and tell the user in plain text what blocks it.)`;
+        return '';
+      };
       const publishSuccess = (output: Record<string, unknown>) => {
         if (canMutate && output.ok !== false && task && latestTask(messagesRef.current)?.review) updateTask(task.id, current => ({ ...current, review: undefined }));
         const recorded = recordStudioTurnToolResult(ledger, {
@@ -324,6 +338,7 @@ export function ChatThread({
           output,
           canMutate,
         });
+        if (output.ok === false && typeof output.error === 'string') output = { ...output, error: output.error + loopNote(recorded) };
         addToolOutput({ tool: id, toolCallId: toolCall.toolCallId, output });
         const saved = effectiveStudioTurnMessages(messagesRef.current, ledger);
         onSnapshot(compactStudioChatMessages(saved), skillRef.current);
@@ -337,18 +352,8 @@ export function ChatThread({
           errorText,
           canMutate,
         });
-        // A verbatim retry of a failed call fails identically forever; say so on the receipt the
-        // moment the repetition starts instead of letting the streak burn the turn budget.
-        if (recorded.repeatedFailureCount >= 2) {
-          errorText += studioLocale().toLowerCase().startsWith("zh")
-            ? `（完全相同的调用已连续失败 ${recorded.repeatedFailureCount} 次，重试不会成功：改用回执里的真实 id 与参数，或放弃该操作直接收尾。）`
-            : ` (This identical call has now failed ${recorded.repeatedFailureCount} times in a row; retrying cannot succeed. Use the real ids and parameters from receipts, or drop this operation and finish.)`;
-        } else if (recorded.sameToolFailureCount >= 2) {
-          // Reworded retries of one tool are the same loop with different text on it.
-          errorText += studioLocale().toLowerCase().startsWith("zh")
-            ? `（${id} 已连续失败 ${recorded.sameToolFailureCount} 次，换措辞重试无效：按错误提示改参数形状；改不了就别再调用它，直接用文字回复用户。）`
-            : ` (${id} has now failed ${recorded.sameToolFailureCount} times in a row; rewording it does not help. Fix the input shape the error describes, or stop calling this tool and answer the user in plain text.)`;
-        }
+        // Say so on the receipt the moment a loop starts instead of letting it burn the turn budget.
+        errorText += loopNote(recorded);
         addToolOutput({
           tool: id,
           toolCallId: toolCall.toolCallId,
@@ -364,6 +369,11 @@ export function ChatThread({
         if (!result.ok) { publishSuccess(result); return; }
         updateTask(task.id, current => ({ ...current, directorPlan: result.plan, review: undefined }));
         publishSuccess({ ok: true, summary: studioLocale().startsWith('zh') ? t('ui.chatThread.planSaved') : 'Editing direction saved', data: { plan: result.plan, next: 'Execute this plan now. Resolve source anchors against the current timeline after structural cuts; no approval stop.' } });
+        return;
+      }
+      // A tool refused this often in one turn is not run again: the model reports the blocker instead.
+      if ((ledger.toolFailures[id] ?? 0) >= STUDIO_TOOL_FAILURES_PER_TURN) {
+        publishSuccess({ ok: false, error: `${id} was refused ${ledger.toolFailures[id]} times this turn and is not run again in it. Stop calling it and tell the user in plain text what blocks it.` });
         return;
       }
       const planBlock = directorPlanToolBlock(task, id, canMutate, requestedInput);

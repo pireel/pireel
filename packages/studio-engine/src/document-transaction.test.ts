@@ -45,6 +45,33 @@ describe('document operations', () => {
     expect(clip).toMatchObject({ kind: 'graphic', startFrame: 30 });
   });
 
+  it('replaces a placed sound in one step on its own lane, where the old one stood', () => {
+    const placed = applyDocumentTransaction(emptyDocument(), { ops: [
+      { op: 'command', input: { command: { type: 'track.insert', track: { id: 'track_sfx', type: 'audio', role: 'sfx', name: 'SFX', syncLocked: true, stackOrder: 0 } } } },
+      { op: 'audio.add', input: { clip: { id: 'pop', src: 'https://cdn.test/pop.wav', durationSec: 1, startSec: 2 }, toTrackId: 'track_sfx' } },
+    ] }, ctx);
+    expect(placed.ok, JSON.stringify(!placed.ok && placed.error)).toBe(true);
+    if (!placed.ok) return;
+    const tracks = placed.document.timeline.tracks.length;
+    const replaced = applyDocumentTransaction(placed.document, { ops: [
+      { op: 'audio.replace', input: { clipId: 'pop', clip: { id: 'ding', src: 'https://cdn.test/ding.wav', durationSec: 0.8, volumeDb: -6 } } },
+    ] }, ctx);
+    expect(replaced.ok, JSON.stringify(!replaced.ok && replaced.error)).toBe(true);
+    if (!replaced.ok) return;
+    const lane = replaced.document.timeline.tracks.find((track) => track.id === 'track_sfx')!;
+    expect(lane.clips.map((clip) => [clip.id, clip.startFrame, clip.durationFrames])).toEqual([['ding', 60, 24]]);
+    expect(replaced.document.timeline.tracks).toHaveLength(tracks);
+    // A longer sound stops where the next clip on the lane begins.
+    const crowded = applyDocumentTransaction(placed.document, { ops: [
+      { op: 'audio.add', input: { clip: { id: 'next', src: 'https://cdn.test/next.wav', durationSec: 1, startSec: 3.5 }, toTrackId: 'track_sfx' } },
+      { op: 'audio.replace', input: { clipId: 'pop', clip: { id: 'long', src: 'https://cdn.test/long.wav', durationSec: 3 } } },
+    ] }, ctx);
+    expect(crowded.ok).toBe(true);
+    if (!crowded.ok) return;
+    const long = crowded.document.timeline.tracks.find((track) => track.id === 'track_sfx')!.clips.find((clip) => clip.id === 'long')!;
+    expect([long.startFrame, long.durationFrames]).toEqual([60, 45]);
+  });
+
   it('leaves the input document untouched when the operation fails', () => {
     const document = emptyDocument();
     const missing = applyDocumentOp(document, { op: 'overlay.remove', input: { clipIds: ['nope'] } }, ctx);

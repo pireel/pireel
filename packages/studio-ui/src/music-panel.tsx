@@ -28,6 +28,7 @@ export function MusicPanel({
   peakOf,
   shots,
   onSetShotAudio,
+  onReplaceSound,
 }: {
   clips: AudioClip[];
   selectedId: string | null;
@@ -40,6 +41,8 @@ export function MusicPanel({
    *  Several = every one of them takes the edit; the values shown are the first one's. */
   shots: VideoShot[];
   onSetShotAudio: (patch: { volumeDb?: number; fadeInSec?: number; fadeOutSec?: number }) => void;
+  /** Swap a sound effect for another from the host's catalog (omitted = not offered). */
+  onReplaceSound?: (clip: AudioClip) => void;
 }) {
   const sel = clips.find((c) => c.id === selectedId) ?? null;
   const selD = sel ? audioClipDefaults(sel) : null;
@@ -105,6 +108,7 @@ export function MusicPanel({
               <Music className="text-accent-ink size-3.5 shrink-0" />
               <span className="min-w-0 flex-1 truncate">{sel.label || t('panels.musicBed')}</span>
               {!usable(sel) && <span className="text-accent-ink shrink-0 text-[10px]">{t('panels.musicFileMissingShort')}</span>}
+              {sel.role === 'sfx' && onReplaceSound && <button type="button" onClick={() => onReplaceSound(sel)} className="text-ink-3 hover:text-ink hover:bg-panel-2 shrink-0 rounded px-1.5 py-0.5 text-[10.5px] font-normal">{t('panels.replaceSound')}</button>}
             </div>
             <AudioLevel db={dbValue} disabled={!!sel.muted} onChange={(db) => onPatch(sel.id, { volumeDb: db })} />
             {sel.muted && <div className="text-ink-4 text-[10.5px]">{t('panels.trackMutedHint')}</div>}

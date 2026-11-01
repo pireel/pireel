@@ -68,11 +68,13 @@ import { moveVisualDocumentClip, type MoveVisualDocumentClipInput } from '@piree
 import { applyMediaVideoSettingsPatch, type MediaVideoSettingsPatch } from '@pireel/studio-engine/media-video-edit';
 import {
   addAudioDocumentClip,
+  replaceAudioDocumentClip,
   applyAudioDocumentEdits,
   moveAudioDocumentClip,
   removeAudioDocumentClips,
   splitAudioDocumentClip,
   type AddAudioDocumentClipInput,
+  type ReplaceAudioDocumentClipInput,
   type AudioDocumentPatchInput,
   type MoveAudioDocumentClipInput,
 } from '@pireel/studio-engine/audio-document-edit';
@@ -145,6 +147,7 @@ export interface DocumentOpInputs {
   'visual.resize': { clipId: string; edge: VisualTimelineResizeEdge; atSec: number };
   'media.videoSettings': { trackId: string; clipId: string; patch: MediaVideoSettingsPatch };
   'audio.add': WithoutDocument<AddAudioDocumentClipInput>;
+  'audio.replace': WithoutDocument<ReplaceAudioDocumentClipInput>;
   'audio.patch': WithoutDocument<AudioDocumentPatchInput>;
   'audio.move': WithoutDocument<MoveAudioDocumentClipInput>;
   'audio.remove': { clipIds: readonly string[] };
@@ -210,6 +213,7 @@ export interface DocumentOpResults {
   'visual.resize': { summary?: string; data?: unknown };
   'media.videoSettings': { shot: VideoShot };
   'audio.add': { clipId?: string; trackId?: string; assetId?: string };
+  'audio.replace': { clipId?: string; trackId?: string; assetId?: string };
   'audio.patch': Record<never, never>;
   'audio.move': { trackId?: string };
   'audio.remove': Record<never, never>;
@@ -324,6 +328,7 @@ const handlers: { [N in DocumentOpName]: Handler<N> } = {
     return { ok: false, document, error: { code: missing ? 'clip-not-found' : 'invalid-command', message: result.error } };
   },
   'audio.add': (document, input) => strip(addAudioDocumentClip({ document, ...input })),
+  'audio.replace': (document, input) => strip(replaceAudioDocumentClip({ document, ...input })),
   'audio.patch': (document, input) => strip(applyAudioDocumentEdits({ document, updates: input.updates })),
   'audio.move': (document, input) => strip(moveAudioDocumentClip({ document, ...input })),
   'audio.remove': (document, input) => strip(removeAudioDocumentClips(document, input.clipIds)),

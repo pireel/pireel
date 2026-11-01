@@ -129,6 +129,51 @@ export function useAudioTracks(deps: AudioTracksDeps) {
   /** Absolute-peak envelope over the whole file (~100 points/s, capped) for the lane waveform — dense
    *  enough that a zoomed-in chip still gets a distinct bar per column instead of repeating buckets. */
 
+  /** Put another sound under a placed clip: same place, lane, level, fades and speed, one undo step. */
+  const replaceClipSource = async (id: string, url: string, label: string): Promise<string | undefined> => {
+    const old = (compRef.current.audioTracks ?? []).find((clip) => clip.id === id);
+    if (!old) return;
+    let file: File;
+    try {
+      file = (await materializeRemoteMedia(url, { name: label, type: 'audio/mpeg' })).file;
+    } catch {
+      toast.error(t('workbench.musicGenFailed'));
+      return;
+    }
+    let durationSec: number | undefined;
+    let peaks: Float32Array | undefined;
+    try {
+      const buf = await decodeAudioFile(file);
+      durationSec = Math.round(buf.duration * 10) / 10;
+      peaks = peaksOf(buf);
+    } catch {
+      toast.error(t('workbench.musicDecodeFailed'));
+      return;
+    }
+    const sig = fileSig(file);
+    const src = createAudioObjectUrl(file);
+    if (!src) return;
+    audioFilesRef.current.set(sig, file);
+    setAudioFileRev((v) => v + 1);
+    if (peaks) setAudioPeaks((m) => new Map(m).set(sig, peaks!));
+    void saveLocalVideo(file, sig);
+    backupMediaToCloud(file, sig, 'clip');
+    const { volumeDb, fadeInSec, fadeOutSec, speed, muted, role } = old;
+    const clip: AudioClip = {
+      id: audioClipId(), src, sig, label, durationSec, ...(volumeDb != null ? { volumeDb } : {}),
+      ...(fadeInSec != null ? { fadeInSec } : {}), ...(fadeOutSec != null ? { fadeOutSec } : {}),
+      ...(speed != null ? { speed } : {}), ...(muted ? { muted } : {}), ...(role ? { role } : {}),
+    };
+    const edit = commit({ op: 'audio.replace', input: { clipId: id, clip } }, {
+      runtimeComposition: { ...compRef.current, audioTracks: (compRef.current.audioTracks ?? []).map((existing) => existing.id === id ? { ...clip, startSec: existing.startSec } : existing) },
+    });
+    if (!edit.ok) {
+      toast.error(editorErrorMessage(edit.error));
+      return;
+    }
+    return clip.id;
+  };
+
   /** Mount music bytes as a NEW clip on the lane: measure → initial level → OPFS → comp.audioTracks.
    *  A supplied sig means this is a project-local asset: metadata syncs, bytes stay on-device. */
   const mountAudioFile = async (file: File, label?: string, opts?: { startSec?: number; sig?: string | null }) => {
@@ -416,6 +461,7 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     resyncEngineClips,
     mountAudioFile,
     mountAudioFromUrl,
+    replaceClipSource,
     generateAudioAsset,
     resetRuntime,
   };

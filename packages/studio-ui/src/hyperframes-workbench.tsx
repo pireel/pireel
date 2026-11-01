@@ -519,6 +519,7 @@ export function HyperframesWorkbench({
   AccountControls?: ComponentType<{ busy: boolean }>;
 }) {
   const shell = useStudioShell();
+  const SoundPicker = shell.curatedAssets?.SoundPicker;
   const [sceneDetails, setSceneDetails] = useState(false);
   const [sceneState, setSceneState] = useState<SceneAgentState>('idle');
   const sceneModeRef = useRef(false);
@@ -815,6 +816,8 @@ export function HyperframesWorkbench({
   // Declared alongside the other selection state so every selection path can clear it — the three are mutually
   // exclusive: whatever the user picks last owns the toolbar.
   const [selectedAudioId, setSelectedAudioId] = useState<string | null>(null);
+  /** The sound effect whose replacement the host's sound picker is choosing. */
+  const [replacingSound, setReplacingSound] = useState<AudioClip | null>(null);
   const selectedAudioIdRef = useRef<string | null>(null);
   selectedAudioIdRef.current = selectedAudioId;
   // Picking a component or a shot drops the audio selection (the reverse lives in onSelectAudio, which clears
@@ -8610,7 +8613,14 @@ export function HyperframesWorkbench({
     captions: transcriptPanel,
     "caption-style": <CaptionStylePanel styleCtl={transcriptControls.styleCtl} active={captionsOn}
       generating={transcriptControls.generating} onPickPreset={transcriptControls.onPickPreset} />,
-    audio: <MusicPanel
+    audio: <>{SoundPicker && replacingSound && <SoundPicker open projectId={projectId} current={{ label: replacingSound.label, durationSec: replacingSound.durationSec }}
+                    onClose={() => setReplacingSound(null)}
+                    onChoose={async ({ url, label }) => {
+                      const id = await audioOps.replaceClipSource(replacingSound.id, url, label);
+                      if (!id) throw new Error(t('panels.replaceSoundFailed'));
+                      setSelectedAudioId(id); setReplacingSound(null);
+                    }} />}
+                  <MusicPanel
                     clips={comp.audioTracks ?? []}
                     selectedId={selectedAudioId}
                     usable={audioOps.clipUsable}
@@ -8643,7 +8653,8 @@ export function HyperframesWorkbench({
                       pushUndoSnapshot();
                       for (const id of ids) setShotAudio(id, patch);
                     }}
-                  />,
+                    onReplaceSound={SoundPicker ? setReplacingSound : undefined}
+                  /></>,
     transitions: <TransitionPanel
       effect={selectedTransition?.effect ?? null}
       direction={selectedTransition?.direction ?? "left"}

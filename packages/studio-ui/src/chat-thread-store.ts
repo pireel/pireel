@@ -35,10 +35,9 @@ export interface StudioTurnLedger {
   lastFailureSig: string | null;
   /** How many consecutive times that same failing call has been fired. */
   repeatedFailureCount: number;
-  /** Tool id of the most recent failed call, for detecting reworded retries of one tool. */
-  lastFailureToolId: string | null;
-  /** How many consecutive failures the same tool has produced, regardless of input. */
-  sameToolFailureCount: number;
+  /** Failures of each tool in this turn since its last success, whatever ran in between: a model that
+   *  reads state between attempts is still retrying the same refused call. */
+  toolFailures: Record<string, number>;
 }
 
 export interface StudioTurnToolResultRecord {
@@ -57,8 +56,7 @@ export function createStudioTurnLedger(): StudioTurnLedger {
     unsafeUndoBlocked: false,
     lastFailureSig: null,
     repeatedFailureCount: 0,
-    lastFailureToolId: null,
-    sameToolFailureCount: 0,
+    toolFailures: {},
   };
 }
 
@@ -80,21 +78,19 @@ function studioTimelineFingerprint(data: unknown): string | null {
 export function recordStudioTurnToolResult(
   ledger: StudioTurnLedger,
   record: StudioTurnToolResultRecord,
-): { repeatedFailureCount: number; sameToolFailureCount: number } {
+): { repeatedFailureCount: number; toolFailureCount: number } {
   const failed = !!record.errorText || record.output?.ok === false;
   if (failed) {
     const failureSig = `${record.toolId}:${studioTimelineFingerprint(record.input) ?? ''}`;
     ledger.repeatedFailureCount = failureSig === ledger.lastFailureSig ? ledger.repeatedFailureCount + 1 : 1;
     ledger.lastFailureSig = failureSig;
-    ledger.sameToolFailureCount = record.toolId === ledger.lastFailureToolId ? ledger.sameToolFailureCount + 1 : 1;
-    ledger.lastFailureToolId = record.toolId;
+    ledger.toolFailures[record.toolId] = (ledger.toolFailures[record.toolId] ?? 0) + 1;
   } else if (record.output?.skipped !== true) {
     // Only a genuinely executed success clears the streak — refused/skipped no-ops interleaved
     // between verbatim retries must not disarm the breaker.
     ledger.lastFailureSig = null;
     ledger.repeatedFailureCount = 0;
-    ledger.lastFailureToolId = null;
-    ledger.sameToolFailureCount = 0;
+    delete ledger.toolFailures[record.toolId];
   }
   const data = record.output?.data && typeof record.output.data === 'object'
     ? record.output.data as Record<string, unknown>
@@ -121,7 +117,7 @@ export function recordStudioTurnToolResult(
         input: record.input,
         output: record.output ?? { ok: true },
       }) as UIMessage['parts'][number]);
-  return { repeatedFailureCount: ledger.repeatedFailureCount, sameToolFailureCount: ledger.sameToolFailureCount };
+  return { repeatedFailureCount: ledger.repeatedFailureCount, toolFailureCount: failed ? ledger.toolFailures[record.toolId] ?? 0 : 0 };
 }
 
 export function shouldBlockStudioTurnUndo(ledger: StudioTurnLedger): boolean {
