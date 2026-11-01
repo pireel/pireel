@@ -174,14 +174,20 @@ export function CloudAssetsPanel({
   const loadUploads = useCallback((silent = false) => {
     const seq = ++reqSeq.current;
     if (!silent) setLoading(true);
-    const get = (k: 'image' | 'video' | 'audio') =>
+    const kinds = ['image', 'video', 'audio'] as const;
+    // null = that request failed: keep what is already listed for the kind instead of emptying it
+    // (a background refresh on a flaky network must not make the library look wiped).
+    const get = (k: (typeof kinds)[number]) =>
       editorRequest(`/api/me/materials?tab=global&kind=${k}&limit=200`)
         .then((r) => (r.ok ? r.json() : null))
-        .then((j: { items?: MaterialItem[] } | null) => j?.items ?? [])
-        .catch(() => [] as MaterialItem[]);
-    return Promise.all([get('image'), get('video'), get('audio')]).then(([imgs, vids, auds]) => {
+        .then((j: { items?: MaterialItem[] } | null) => j?.items ?? null)
+        .catch(() => null);
+    return Promise.all(kinds.map(get)).then((results) => {
       if (seq !== reqSeq.current) return; // superseded by a newer load
-      setUploads([...imgs, ...vids, ...auds].map(materialToItem).filter((x): x is LibraryItem => !!x));
+      setUploads((current) => kinds.flatMap((k, index) => {
+        const items = results[index];
+        return items ? items.map(materialToItem).filter((x): x is LibraryItem => !!x) : current.filter((it) => it.kind === k);
+      }));
       if (!silent) setLoading(false);
     });
   }, []);

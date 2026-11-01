@@ -865,7 +865,7 @@ export function MyAssetsPanel({
     void editorRequest(it.insertUrl)
       .then((r) => r.blob())
       .then((blob) => assetUploadQueue().enqueue({ projectId, sig: it.sig!, file: new File([blob], it.label, { type: blob.type }), label: it.label }, { force: true }))
-      .catch(() => {});
+      .catch(() => toast.error(t('panels.uploadFailed')));
   };
   const lazyHost = assetUploadQueue().policy() === 'lazy';
   const cloudKeyBySig = useMemo(() => new Map(reg.map((entry) => [entry.contentSig, entry.cloudKey] as const)), [reg]);
