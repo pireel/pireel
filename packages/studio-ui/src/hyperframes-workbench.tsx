@@ -4210,30 +4210,19 @@ export function HyperframesWorkbench({
   // no selected block, ←→ steps the playhead) · Delete/Backspace deletes the selected block or scene · Escape closes
   // the source panel / deselects. All yield when the cursor is in an input/editable area; don't intercept Enter: focus
   // often sits on a toolbar button, and Enter would do "button trigger + block delete" together, making blocks vanish.
-  // removeBlock/deleteShot etc. read the latest per-render closures via keysRef.
+  // deleteSelection etc. read the latest per-render closures via keysRef.
   const keysRef = useRef<{
-    removeBlock: (id: string) => void;
-    deleteBlocks: (ids: Set<string>) => void;
-    deleteShot: (sid: string) => void;
-    deleteShots: (ids: Set<string>) => void;
-    deleteVisualClip: (id: string) => void;
-    removeAudio: (id: string) => void;
+    /** Delete whatever is selected; false when nothing deletable is. */
+    deleteSelection: () => boolean;
     closeCode: () => void;
     closeFloat: () => void;
-    deleteTransition: () => boolean;
     undo: () => void;
     redo: () => void;
     floatWin: FloatKind | null;
   }>({
-    removeBlock: () => {},
-    deleteBlocks: () => {},
-    deleteShot: () => {},
-    deleteShots: () => {},
-    deleteVisualClip: () => {},
-    removeAudio: () => {},
+    deleteSelection: () => false,
     closeCode: () => {},
     closeFloat: () => {},
-    deleteTransition: () => false,
     undo: () => {},
     redo: () => {},
     floatWin: null,
@@ -4352,39 +4341,7 @@ export function HyperframesWorkbench({
         return;
       }
       if (e.key !== "Delete" && e.key !== "Backspace") return;
-      if (keysRef.current.deleteTransition()) {
-        // A selected transition goes first: Del removes it, not the clip under the playhead
-        e.preventDefault();
-        return;
-      }
-      if (selectedAudioIdRef.current) {
-        // Music-lane clip selected: Del removes it (audio selection is exclusive with block/shot per click)
-        e.preventDefault();
-        keysRef.current.removeAudio(selectedAudioIdRef.current);
-        return;
-      }
-      if (selectedVisualClipIdRef.current) {
-        e.preventDefault();
-        keysRef.current.deleteVisualClip(selectedVisualClipIdRef.current);
-        return;
-      }
-      const bids = selectedBlockIdsRef.current;
-      if (bids.size > 1) {
-        e.preventDefault();
-        keysRef.current.deleteBlocks(bids); // bulk-delete multi-selected blocks
-        return;
-      }
-      const id = selectedIdRef.current;
-      if (id) {
-        e.preventDefault();
-        keysRef.current.removeBlock(id); // unified guard: don't delete a generating block
-        return;
-      }
-      const ids = selectedShotIdsRef.current;
-      if (ids.size) {
-        e.preventDefault();
-        keysRef.current.deleteShots(ids); // bulk multi-select; single degrades automatically (unified guard: always keep at least one scene)
-      }
+      if (keysRef.current.deleteSelection()) e.preventDefault();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -5755,7 +5712,7 @@ export function HyperframesWorkbench({
   /* ---------------- Unified gen panel (one chat interaction for image/video/component) ---------------- */
 
   // Timeline block drag: move (clamped to [0, dur]) / trim both ends. Don't move a generating block (its time window was already fed to the worker)
-  // The timeline reports a move once on release, a trim on every pointer move: one gesture = one undo step.
+  // The timeline reports a move or a trim once, on release: one gesture = one undo step.
   const moveBlock = (id: string, startSec: number) => {
     if (genLockToast(id)) return;
     const edit = commit({ op: "overlay.patch", input: {
@@ -5765,13 +5722,8 @@ export function HyperframesWorkbench({
     } });
     if (!edit.ok) toast.error(editorErrorMessage(edit.error));
   };
-  const blockTrimGestureRef = useRef<{ id: string; at: number } | null>(null);
   const resizeBlock = (id: string, startSec: number, durationSec: number) => {
     if (genLockToast(id)) return;
-    const now = Date.now();
-    const gesture = blockTrimGestureRef.current;
-    const sameGesture = gesture?.id === id && now - gesture.at < 500;
-    blockTrimGestureRef.current = { id, at: now };
     const edit = commit({ op: "overlay.patch", input: {
       updates: [
         {
@@ -5780,7 +5732,7 @@ export function HyperframesWorkbench({
           durationSec: Math.max(0.3, Math.round(durationSec * 100) / 100),
         },
       ],
-    } }, { undo: sameGesture ? "none" : "step" });
+    } });
     if (!edit.ok) toast.error(editorErrorMessage(edit.error));
   };
   const resizeCaption = (id: string, edge: "left" | "right", atSec: number) => {
@@ -6317,19 +6269,43 @@ export function HyperframesWorkbench({
           : ""),
     );
   };
-  keysRef.current = {
-    removeBlock,
-    deleteBlocks,
-    deleteShot,
-    deleteShots,
-    deleteVisualClip,
-    removeAudio: (id: string) => {
-      audioOps.removeClip(id);
+  /** The Delete key and the toolbar's delete button: one selection, one order. A selected transition
+   *  goes first, then whichever of audio, media, blocks or shots the user picked last (they are
+   *  mutually exclusive). Generating blocks and the last scene are guarded by the delete paths. */
+  const deleteSelection = (): boolean => {
+    if (removeSelectedTransition()) return true;
+    const audioId = selectedAudioIdRef.current;
+    if (audioId) {
+      audioOps.removeClip(audioId);
       setSelectedAudioId(null);
-    },
+      return true;
+    }
+    const visualClipId = selectedVisualClipIdRef.current;
+    if (visualClipId) {
+      deleteVisualClip(visualClipId);
+      return true;
+    }
+    const blockIds = selectedBlockIdsRef.current;
+    const blockId = selectedIdRef.current;
+    if (blockIds.size > 1 || (!blockId && blockIds.size)) {
+      deleteBlocks(blockIds);
+      return true;
+    }
+    if (blockId) {
+      removeBlock(blockId);
+      return true;
+    }
+    const shotIds = selectedShotIdsRef.current;
+    if (shotIds.size) {
+      deleteShots(shotIds);
+      return true;
+    }
+    return false;
+  };
+  keysRef.current = {
+    deleteSelection,
     closeCode: () => setFloatWin(null),
     closeFloat: () => setFloatWin(null),
-    deleteTransition: removeSelectedTransition,
     undo: undoLast,
     redo: redoLast,
     floatWin,
@@ -10980,15 +10956,13 @@ export function HyperframesWorkbench({
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  onClick={() => {
-                    if (selectedVisualClipId)
-                      deleteVisualClip(selectedVisualClipId);
-                    else if (selectedId) removeBlock(selectedId);
-                    else if (selectedShotIds.size) deleteShots(selectedShotIds); // bulk multi-select; single degrades automatically
-                  }}
+                  onClick={deleteSelection}
                   disabled={
+                    !selectedTransitionId &&
+                    !selectedAudioId &&
                     !selectedVisualClipId &&
                     !selectedId &&
+                    selectedBlockIds.size === 0 &&
                     selectedShotIds.size === 0
                   }
                   aria-label={t("workbench.deleteSelection")}

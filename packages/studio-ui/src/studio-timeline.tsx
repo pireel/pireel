@@ -63,7 +63,7 @@ import {
   timelineSourceResizeEnd,
   visibleStripTiles,
 } from './timeline-utils';
-import { FramePickCursor, HoverCursor, PlayheadCursor } from './timeline-overlays';
+import { createTimelineHover, PlayheadCursor, TimelineHoverLine } from './timeline-overlays';
 import { AudioLane, type AudioLaneMoveTarget } from './timeline-audio-lane';
 import {
   timelineAudioLanes,
@@ -186,6 +186,7 @@ interface StudioTimelineProps {
   /** Click empty space: clear all selection (blocks + shots). */
   onDeselectAll: () => void;
   onMoveBlock: (id: string, newStartSec: number) => void;
+  /** Block trim, reported once per gesture on release. */
   onResizeBlock: (id: string, newStartSec: number, newDurationSec: number) => void;
   /** Managed caption edge trim. The caption remains source-anchored; only its display window changes. */
   onResizeCaption?: (id: string, edge: 'left' | 'right', atSec: number) => void;
@@ -631,6 +632,8 @@ function StudioTimelineImpl({
     startSec: number;
     durationSec: number;
   } | null>(null);
+  /** Live block trim; the document changes once, on release. */
+  const [blockResize, setBlockResize] = useState<{ id: string; startSec: number; durationSec: number } | null>(null);
   const [visualClipResize, setVisualClipResize] = useState<{
     clipId: string;
     edge: 'left' | 'right';
@@ -645,7 +648,7 @@ function StudioTimelineImpl({
   const tracksRef = useRef<HTMLDivElement | null>(null); // track background area DOM (coordinate base for block marquee)
   const blockMarqueeDraggedRef = useRef(false); // whether the block marquee became a drag (suppress the subsequent block click)
   const marqueeRafRef = useRef(0); // rAF during marquee (edge auto-scroll + recompute rectangle each frame)
-  const [hoverT, setHoverT] = useState<number | null>(null); // hover time (center preview jumps to this frame + draw hover vertical line)
+  const [hover] = useState(createTimelineHover); // hover time (center preview jumps to this frame + draw hover vertical line)
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const [visibleRange, setVisibleRange] = useState({ startSec: 0, endSec: 30 });
@@ -669,7 +672,7 @@ function StudioTimelineImpl({
     const armed = scrubArmedRef.current;
     scrubEnterRef.current = null;
     scrubArmedRef.current = false;
-    setHoverT(null);
+    hover.set(null);
     if (armed) onScrub(null); // restore to the playhead (if never armed, the preview never moved, so no restore needed)
   };
   useEffect(() => () => scrubGuardCleanupRef.current?.(), []);
@@ -1133,7 +1136,10 @@ function StudioTimelineImpl({
   };
 
   const step = rulerStep(pps);
-  const ticks = Math.floor(dur / step) + 1;
+  // Only the ticks inside the (overscanned) visible window: an hour-long recording zoomed in has
+  // thousands, and the timeline re-renders on every gesture.
+  const firstTick = Math.max(0, Math.floor(visibleRange.startSec / step));
+  const lastTick = Math.min(Math.floor(dur / step), Math.ceil(visibleRange.endSec / step));
 
   // The primary narrative uses the taller scene-rail presentation when it has video. Its row is not
   // anchored: all native track types share the document's presentation order below. Visual stack
@@ -1899,7 +1905,7 @@ function StudioTimelineImpl({
               e.stopPropagation();
               const atSec = frameSecAt(e.clientX);
               framePickConsumedRef.current = true;
-              setHoverT(atSec);
+              hover.set(atSec);
               onSeek(atSec);
               onScrub(null);
               onPickFrame?.(atSec);
@@ -1936,7 +1942,7 @@ function StudioTimelineImpl({
                   hoverRaf.current = requestAnimationFrame(() => {
                     hoverRaf.current = 0;
                     const tt = frameSecAt(hoverXRef.current);
-                    setHoverT(tt);
+                    hover.set(tt);
                     onScrub(tt);
                   });
                 return;
@@ -1971,7 +1977,7 @@ function StudioTimelineImpl({
                 hoverRaf.current = requestAnimationFrame(() => {
                   hoverRaf.current = 0;
                   const tt = secAt(hoverXRef.current);
-                  setHoverT(tt); // hover line, instant feedback
+                  hover.set(tt); // hover line, instant feedback
                   if (scrubArmedRef.current) onScrub(tt); // only follow after armed: at most once per frame, center preview jumps frames
                 });
             }}
@@ -1995,7 +2001,8 @@ function StudioTimelineImpl({
                   <kbd className="border-bg/25 border-l pl-2 font-mono text-[9px] opacity-70">Esc</kbd>
                 </div>
               )}
-              {Array.from({ length: ticks }, (_, i) => {
+              {Array.from({ length: Math.max(0, lastTick - firstTick + 1) }, (_, k) => {
+                const i = firstTick + k;
                 const s = i * step;
                 return (
                   <div key={i} className="absolute bottom-0 top-0" style={{ left: x(s) }}>
@@ -2412,7 +2419,7 @@ function StudioTimelineImpl({
                           <span className="flex shrink-0 items-center gap-1.5">
                             <button
                               type="button"
-                              aria-label="−"
+                              aria-label={t('panels.zoomOut')}
                               className="h-4 w-4 rounded bg-white/10 leading-none hover:bg-white/20"
                               onClick={() => applyZoom(zoom / 1.25)}
                             >
@@ -2430,7 +2437,7 @@ function StudioTimelineImpl({
                             />
                             <button
                               type="button"
-                              aria-label="+"
+                              aria-label={t('common.zoomIn')}
                               className="h-4 w-4 rounded bg-white/10 leading-none hover:bg-white/20"
                               onClick={() => applyZoom(zoom * 1.25)}
                             >
@@ -2763,8 +2770,9 @@ function StudioTimelineImpl({
                 const k = blockKind(b);
                 const meta = { ...KIND_META[k], ...KIND_CHIP[k] };
                 const Icon = meta.icon;
-                const displayStartSec = btd?.startSec ?? b.startSec;
-                const displayDurationSec = Math.max(0, Math.min(b.durationSec, dur - displayStartSec));
+                const trim = blockResize?.id === b.id ? blockResize : null;
+                const displayStartSec = btd?.startSec ?? trim?.startSec ?? b.startSec;
+                const displayDurationSec = Math.max(0, Math.min(trim?.durationSec ?? b.durationSec, surfaceDur - displayStartSec));
                 const left = x(displayStartSec);
                 const width = Math.max(16, x(displayDurationSec));
                 // Sentence captions don't enter the timeline: captions are a pure computed output of the script (edited from the script panel / caption panel);
@@ -2862,7 +2870,7 @@ function StudioTimelineImpl({
                       <span className="text-ink truncate text-[10px] font-medium">{blockDisplayTitle(b)}</span>
                       {sel && width > 92 && (
                         <span className="text-ink-3 ml-auto shrink-0 font-mono text-[9px] tabular-nums">
-                          {b.startSec.toFixed(1)}–{(b.startSec + b.durationSec).toFixed(1)}
+                          {displayStartSec.toFixed(1)}–{(displayStartSec + displayDurationSec).toFixed(1)}
                         </span>
                       )}
                     </div>
@@ -2871,10 +2879,19 @@ function StudioTimelineImpl({
                       onPointerDown={(e) => {
                         e.stopPropagation();
                         const end = b.startSec + b.durationSec;
-                        drag(e, (cx) => {
-                          const ns = Math.max(0, Math.min(end - MIN_DUR, snap(secAt(cx), [b.startSec])));
-                          onResizeBlock(b.id, ns, end - ns);
-                        });
+                        let latest = { id: b.id, startSec: b.startSec, durationSec: b.durationSec };
+                        drag(
+                          e,
+                          (cx) => {
+                            const ns = Math.max(0, Math.min(end - MIN_DUR, snap(secAt(cx), [b.startSec])));
+                            latest = { id: b.id, startSec: ns, durationSec: end - ns };
+                            setBlockResize(latest);
+                          },
+                          (moved) => {
+                            setBlockResize(null);
+                            if (moved) onResizeBlock(b.id, latest.startSec, latest.durationSec);
+                          },
+                        );
                       }}
                       className={`absolute inset-y-0 left-0 w-1.5 cursor-ew-resize ${TIMELINE_ITEM_EDGE_RADIUS.left} ${sel ? 'bg-white/50' : 'bg-white/0 group-hover:bg-white/40'}`}
                     />
@@ -2883,6 +2900,7 @@ function StudioTimelineImpl({
                       onPointerDown={(e) => {
                         e.stopPropagation();
                         setEndResizeSec(b.startSec + b.durationSec);
+                        let latest = { id: b.id, startSec: b.startSec, durationSec: b.durationSec };
                         drag(
                           e,
                           (cx) => {
@@ -2891,9 +2909,14 @@ function StudioTimelineImpl({
                               snap(timelinePointerSecond(rawSecAt(cx), dur, true), [b.startSec + b.durationSec]),
                             );
                             setEndResizeSec(ne);
-                            onResizeBlock(b.id, b.startSec, ne - b.startSec);
+                            latest = { id: b.id, startSec: b.startSec, durationSec: ne - b.startSec };
+                            setBlockResize(latest);
                           },
-                          () => setEndResizeSec(null),
+                          (moved) => {
+                            setEndResizeSec(null);
+                            setBlockResize(null);
+                            if (moved) onResizeBlock(b.id, latest.startSec, latest.durationSec);
+                          },
                         );
                       }}
                       className={`absolute inset-y-0 right-0 w-1.5 cursor-ew-resize ${TIMELINE_ITEM_EDGE_RADIUS.right} ${sel ? 'bg-white/50' : 'bg-white/0 group-hover:bg-white/40'}`}
@@ -2944,7 +2967,7 @@ function StudioTimelineImpl({
                       {onResizeCaption && precisionControls && !disabledClipIds?.has(b.id) && (
                         <>
                           <span
-                            aria-label="Trim caption start"
+                            aria-label={t('panels.trimCaptionStart')}
                             onPointerDown={(e) => {
                               e.stopPropagation();
                               onSelectBlock(b.id, false);
@@ -2965,7 +2988,7 @@ function StudioTimelineImpl({
                             className={`absolute inset-y-0 left-0 w-1.5 cursor-ew-resize ${TIMELINE_ITEM_EDGE_RADIUS.left} ${selected ? 'bg-white/30' : 'bg-transparent group-hover:bg-white/20'}`}
                           />
                           <span
-                            aria-label="Trim caption end"
+                            aria-label={t('panels.trimCaptionEnd')}
                             onPointerDown={(e) => {
                               e.stopPropagation();
                               onSelectBlock(b.id, false);
@@ -3128,9 +3151,7 @@ function StudioTimelineImpl({
             </div>
 
             {/* Hover vertical line (spans ruler + tracks; center preview jumps to that frame in sync). */}
-            {hoverT != null && (framePickActive
-              ? <FramePickCursor second={hoverT} pps={pps} />
-              : <HoverCursor second={hoverT} pps={pps} />)}
+            <TimelineHoverLine hover={hover} pps={pps} framePick={framePickActive} />
 
             {/* Playhead: spans ruler + tracks, bright line + top dot (subscribes to the playhead store, only this component moves each frame).
                 Not drawn on an empty project — a red line hanging on empty tracks looks broken */}

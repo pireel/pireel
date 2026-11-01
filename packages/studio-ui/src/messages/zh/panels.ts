@@ -284,6 +284,8 @@ export const PANELS_ZH: Record<string, string> = {
   "panels.slipFirstFrame": "首帧",
   "panels.slipLastFrame": "尾帧",
   "panels.slipWindow": "取窗",
+  "panels.trimCaptionStart": "裁剪字幕开头",
+  "panels.trimCaptionEnd": "裁剪字幕结尾",
   "panels.slipWindowOpen": "滑动取窗:在整条素材上选择这段镜头播放的区间",
   "panels.localVideoOnly": "不支持的文件类型(支持视频/图片/音频)",
   "panels.officialPreparing": "内容准备中,敬请期待",

@@ -3,9 +3,41 @@
 /** Playhead-store-subscribed timeline overlays: only these small components re-render at 60fps during playback. */
 
 import { usePlayheadT } from './playhead';
-import type { PointerEvent as ReactPointerEvent } from 'react';
+import { useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react';
 
 const PLAYHEAD_HIT_RADIUS_PX = 8;
+
+/** The hovered timeline second, kept outside React state so following the pointer re-renders only
+ *  the guide line, never the whole timeline. */
+export interface TimelineHover {
+  get(): number | null;
+  set(second: number | null): void;
+  subscribe(listener: () => void): () => void;
+}
+
+export function createTimelineHover(): TimelineHover {
+  let second: number | null = null;
+  const listeners = new Set<() => void>();
+  return {
+    get: () => second,
+    set(next) {
+      if (next === second) return;
+      second = next;
+      listeners.forEach((listener) => listener());
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+}
+
+/** The hover guide, or the frame-pick cursor while Chat is asking for a frame. */
+export function TimelineHoverLine({ hover, pps, framePick }: { hover: TimelineHover; pps: number; framePick: boolean }) {
+  const second = useSyncExternalStore(hover.subscribe, hover.get, () => null);
+  if (second == null) return null;
+  return framePick ? <FramePickCursor second={second} pps={pps} /> : <HoverCursor second={second} pps={pps} />;
+}
 
 /** Hover guide yields inside the playhead's full-height drag target. */
 export function HoverCursor({ second, pps }: { second: number; pps: number }) {

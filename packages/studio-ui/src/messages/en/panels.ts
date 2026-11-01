@@ -300,6 +300,8 @@ export const PANELS_EN: Record<string, string> = {
   "panels.slipFirstFrame": "First frame",
   "panels.slipLastFrame": "Last frame",
   "panels.slipWindow": "Slip window",
+  "panels.trimCaptionStart": "Trim caption start",
+  "panels.trimCaptionEnd": "Trim caption end",
   "panels.slipWindowOpen": "Slip window: choose which part of the source this shot plays",
   "panels.localVideoOnly": "Unsupported file type (video, image, or audio)",
   "panels.officialPreparing": "Content coming soon",
