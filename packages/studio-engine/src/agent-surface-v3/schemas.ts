@@ -351,7 +351,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   set_clip_framing: {
     description:
-      `Decide where a clip sits in the picture. Media clips take a treatment recipe (${TREATMENT_IDS.join(' / ')}) with size, crop, scale (1–4) and subject anchorX/anchorY, or an exact transform {scale, offsetX, offsetY} and cropInsets {top,right,bottom,left} in 0–1 fractions. Graphic and text clips take box {x,y,w,h} in canvas units, a 3×3 anchor, or scale. zoom animates a push-in on a video clip on top of its framing: preset punch (eases in fast, holds), instant (cuts in), slow-push (eases across the span), in-out (returns by the end) or none to remove; atFrame is the timeline frame where it starts (default the clip start), durationFrames how long it runs or holds (default to the clip end), scale the magnification (preset default), anchorX/anchorY the point that stays still. For several clips sharing one arrangement (PiP, split, grid) use apply_layout.`,
+      `Decide where a clip sits in the picture. Media clips take a treatment recipe (${TREATMENT_IDS.join(' / ')}) with size, crop, scale (1–4) and subject anchorX/anchorY, or an exact transform {scale, offsetX, offsetY} and cropInsets {top,right,bottom,left} in 0–1 fractions. Graphic and text clips take box {x,y,w,h} in canvas units, a 3×3 anchor, or scale. zoom animates a push-in on a video clip on top of its framing: preset punch (eases in fast, holds), instant (cuts in), slow-push (eases across the span), in-out (returns by the end) or none to remove; atFrame is the timeline frame where it starts (default the clip start), durationFrames how long it runs or holds (default to the clip end), scale the magnification (preset default), anchorX/anchorY the point that stays still. pip arranges a B-roll video or image with the speaker: inset puts the picture in a corner window over the speaker, presenter shows the picture full frame with the speaker in a corner window, split / split-bottom give the picture the top (left on a wide canvas) or bottom (right) half and the speaker the other, dim frames the picture over the darkened speaker, none returns it to full frame; position and size place the window. The speaker window keeps showing the words spoken under it through later cuts and moves, and a hand-set box or keyframes on the picture replace its pip. For several graphic clips sharing one arrangement use apply_layout.`,
     inputSchema: obj({
       items: arr(obj({
         clipId: str(),
@@ -361,6 +361,11 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
         transform: obj({ scale: num('', { min: 0.05, max: 20 }), offsetX: num(), offsetY: num(), reset: bool() }),
         cropInsets: obj({ top: num('', { min: 0, max: 1 }), right: num('', { min: 0, max: 1 }), bottom: num('', { min: 0, max: 1 }), left: num('', { min: 0, max: 1 }), reset: bool() }),
         box: BOX, anchor: enumOf(PLACE_ANCHORS),
+        pip: obj({
+          layout: enumOf(['inset', 'presenter', 'split', 'split-bottom', 'dim', 'none']),
+          position: enumOf(['bottom-right', 'bottom-left', 'top-right', 'top-left'], 'Corner of the window (inset, presenter).'),
+          size: enumOf(['small', 'medium', 'large'], 'Window size (inset, presenter).'),
+        }, ['layout']),
         zoom: obj({
           preset: enumOf(ZOOM_PRESET_IDS), atFrame: FRAME('Timeline frame inside the clip where the move starts'),
           durationFrames: int('How long the move runs or holds; omit to reach the clip end.', 1),

@@ -39,7 +39,7 @@ export function patchEditorClip(
   if ((patch.box != null || patch.mediaFraming !== undefined) && current.kind !== 'media' && current.kind !== 'narrative') {
     return commandFailure(document, 'invalid-command', 'Canvas placement and framing are only valid for video and visual media clips.', { path: 'patch' });
   }
-  if ((patch.fit != null || patch.anchorX != null || patch.anchorY != null || patch.opacity != null || patch.keyframes !== undefined || patch.video !== undefined) && current.kind !== 'media') {
+  if ((patch.fit != null || patch.anchorX != null || patch.anchorY != null || patch.opacity != null || patch.keyframes !== undefined || patch.video !== undefined || patch.pipLayout !== undefined) && current.kind !== 'media') {
     return commandFailure(document, 'invalid-command', 'Visual fill, crop, opacity and keyframes are only valid for ordinary visual media clips.', { path: 'patch' });
   }
   const nextClip: TimelineClip = current.kind === 'media'
@@ -56,6 +56,7 @@ export function patchEditorClip(
         ...(patch.anchorY != null ? { anchorY: patch.anchorY } : {}),
         ...(patch.opacity != null ? { opacity: patch.opacity } : {}),
         ...(patch.keyframes === null ? { keyframes: undefined } : patch.keyframes !== undefined ? { keyframes: patch.keyframes } : {}),
+        ...(patch.pipLayout ? { pipLayout: patch.pipLayout } : {}),
       }
     : current.kind === 'narrative'
       ? {
@@ -67,6 +68,8 @@ export function patchEditorClip(
           ...(patch.mediaFraming === null ? { mediaFraming: undefined } : patch.mediaFraming ? { mediaFraming: patch.mediaFraming } : {}),
         }
       : { ...current, ...(patch.enabled != null ? { enabled: patch.enabled } : {}) };
+  // Placing the picture by hand takes it out of its layout.
+  if (nextClip.kind === 'media' && (patch.pipLayout === null || patch.box || patch.keyframes !== undefined)) delete nextClip.pipLayout;
   if (JSON.stringify(current) === JSON.stringify(nextClip)) {
     return { ok: true, document, receipt: emptyCommandReceipt('clip.patch') };
   }

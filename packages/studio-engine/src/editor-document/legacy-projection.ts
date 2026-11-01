@@ -67,7 +67,8 @@ export function projectOverlayBlock(
     id: clip.id,
     startSec: timelineFramesToSeconds(clip.startFrame, fps),
     durationSec: timelineFramesToSeconds(clip.durationFrames, fps),
-    trackIndex: Math.max(1, track.stackOrder),
+    // Index 0 is the main video; a derived layout backdrop may sit between it and the first lane.
+    trackIndex: track.stackOrder > 0 ? track.stackOrder : 1,
     ...block,
   };
 }

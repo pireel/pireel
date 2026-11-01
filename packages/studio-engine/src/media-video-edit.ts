@@ -117,6 +117,8 @@ export function applyMediaVideoSettingsPatch(
     patch: {
       mediaFraming: shot.mediaFraming ?? null,
       video: mediaVideoPropertiesFromShot(shot),
+      // A corner or split framing is its own arrangement; it replaces the clip's layout.
+      ...(clip.pipLayout && shot.treatment !== 'full' && shot.treatment !== 'punch-in' ? { pipLayout: null } : {}),
     },
   });
   if (!result.ok) {

@@ -73,7 +73,8 @@ export interface EditorAppearance {
 }
 
 export type EditorTrackType = 'visual' | 'graphics' | 'audio' | 'caption';
-export type EditorTrackRole = 'primaryNarrative' | 'broll' | 'graphics' | 'narration' | 'music' | 'sfx' | 'managedCaptions';
+/** `pipLayer` lanes hold the backdrop and speaker seat derived from clips' `pipLayout`; every commit rebuilds them. */
+export type EditorTrackRole = 'primaryNarrative' | 'broll' | 'graphics' | 'narration' | 'music' | 'sfx' | 'managedCaptions' | 'pipLayer';
 
 export interface EditorTrack {
   id: TrackId;
@@ -142,6 +143,12 @@ export type MediaVideoProperties = Pick<VideoShot, 'treatment'> & Partial<Pick<V
   | 'volumeDb' | 'audioMuted' | 'audioFadeInSec' | 'audioFadeOutSec'
 >>;
 
+export interface ClipPipLayout {
+  layout: 'inset' | 'presenter' | 'split' | 'split-bottom' | 'dim';
+  position?: 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
+  size?: 'small' | 'medium' | 'large';
+}
+
 export interface MediaTimelineClip extends TimelineClipBase {
   kind: 'media';
   assetId: AssetId;
@@ -153,6 +160,9 @@ export interface MediaTimelineClip extends TimelineClipBase {
   mediaFraming?: AtomicMediaFraming;
   /** Present for video media. Images do not acquire shot/audio semantics. */
   video?: MediaVideoProperties;
+  /** A picture-in-picture layout with the speaker. Its box, motion, backdrop and speaker seat are
+   * derived from this on every commit, so they follow later cuts and moves. */
+  pipLayout?: ClipPipLayout;
   /** Source point retained by cover-cropping. */
   anchorX?: number;
   anchorY?: number;

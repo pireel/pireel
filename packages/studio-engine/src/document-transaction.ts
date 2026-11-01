@@ -15,6 +15,7 @@
  */
 
 import { applyPatch, type Operation as JsonPatchOperation } from 'fast-json-patch';
+import { refreshClipPipLayouts, setClipPipLayout } from '@pireel/studio-engine/pip-layout';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { canonicalJson, hashSection } from '@pireel/studio-engine/stable-json';
 import type { Block, Composition, VideoShot } from '@pireel/studio-engine/composition-core';
@@ -30,6 +31,7 @@ import {
   carryCaptionEdits,
   type EditorCommand,
   type EditorCommandError,
+  type ClipPipLayout,
   type EditorDocumentV2,
   type EditorMediaAsset,
   type NarrationSecondRange,
@@ -148,6 +150,7 @@ export interface DocumentOpInputs {
   'media.videoSettings': { trackId: string; clipId: string; patch: MediaVideoSettingsPatch };
   'audio.add': WithoutDocument<AddAudioDocumentClipInput>;
   'audio.replace': WithoutDocument<ReplaceAudioDocumentClipInput>;
+  'media.pipLayout': { clipId: string; layout: ClipPipLayout | null };
   'audio.patch': WithoutDocument<AudioDocumentPatchInput>;
   'audio.move': WithoutDocument<MoveAudioDocumentClipInput>;
   'audio.remove': { clipIds: readonly string[] };
@@ -214,6 +217,7 @@ export interface DocumentOpResults {
   'media.videoSettings': { shot: VideoShot };
   'audio.add': { clipId?: string; trackId?: string; assetId?: string };
   'audio.replace': { clipId?: string; trackId?: string; assetId?: string };
+  'media.pipLayout': Record<never, never>;
   'audio.patch': Record<never, never>;
   'audio.move': { trackId?: string };
   'audio.remove': Record<never, never>;
@@ -329,6 +333,10 @@ const handlers: { [N in DocumentOpName]: Handler<N> } = {
   },
   'audio.add': (document, input) => strip(addAudioDocumentClip({ document, ...input })),
   'audio.replace': (document, input) => strip(replaceAudioDocumentClip({ document, ...input })),
+  'media.pipLayout': (document, input) => {
+    const result = setClipPipLayout(document, input);
+    return result.ok ? { ok: true, document: result.document } : { ok: false, document, error: { code: result.code, message: result.error } };
+  },
   'audio.patch': (document, input) => strip(applyAudioDocumentEdits({ document, updates: input.updates })),
   'audio.move': (document, input) => strip(moveAudioDocumentClip({ document, ...input })),
   'audio.remove': (document, input) => strip(removeAudioDocumentClips(document, input.clipIds)),
@@ -484,7 +492,7 @@ export function createDocumentTransactionId(): string {
 
 /** The same normalization every writer applies after a transaction, so two hosts converge byte for byte. */
 export function normalizeCommittedDocument(document: EditorDocumentV2): EditorDocumentV2 {
-  const prepared = freezeEditorDocumentBlockVars(prepareEditorDocumentForPersistence(document));
+  const prepared = freezeEditorDocumentBlockVars(refreshClipPipLayouts(prepareEditorDocumentForPersistence(document)));
   return pruneEmptyNonPrimaryTracks(prepared).document;
 }
 

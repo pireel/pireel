@@ -13,6 +13,7 @@ import { CoverSceneController, coverSceneFromDocument, withCoverScene, type Cove
 import { CoverSceneDialog, TimelineCoverPlaceholder, coverSceneStatus } from '@pireel/studio-ui/cover-scene-dialog';
 import { cloudBackupMedia } from '@pireel/studio-ui/cloud-media';
 import { extractThumbnails } from '@pireel/studio-engine/video-edit/thumbnails';
+import { pipLayerOwner } from '@pireel/studio-engine/pip-layout';
 import { applyProjectCover, persistProjectCover, projectCoverFromDocument, projectCoverThumbnail, ProjectCoverWriteQueue, type ProjectCover } from '@pireel/studio-ui/project-cover';
 
 /**
@@ -63,6 +64,7 @@ import {
   UserRound,
   AudioLines,
   Frame,
+  PictureInPicture2,
   Music,
   Undo2,
   Redo2,
@@ -344,6 +346,7 @@ import { CaptionStylePanel } from "@pireel/studio-ui/caption-style-panel";
 import { EditorModeSwitch } from "@pireel/studio-ui/editor-mode-switch";
 import { PersonFxPanel, type MatteState } from "@pireel/studio-ui/person-fx-panel";
 import { ShotTreatmentPanel } from "@pireel/studio-ui/shot-treatment-panel";
+import { PipLayoutPanel } from "@pireel/studio-ui/pip-layout-panel";
 import { MusicPanel } from "@pireel/studio-ui/music-panel";
 import { AvatarPanel } from "@pireel/studio-ui/avatar-panel";
 import { useAudioTracks } from "@pireel/studio-ui/use-audio-tracks";
@@ -474,6 +477,7 @@ type FloatKind =
   | "script"
   | "person"
   | "shot"
+  | "layout"
   | "code"
   | "props"
   | "anim"
@@ -680,9 +684,14 @@ export function HyperframesWorkbench({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editorDocument, probedSourceDurationsRev]);
 
+  const timelineComp = useMemo(() => {
+    const derived = new Set(editorDocument.timeline.tracks.filter((track) => track.role === "pipLayer").flatMap((track) => track.clips.map((clip) => clip.id)));
+    return derived.size ? { ...comp, blocks: comp.blocks.filter((block) => !derived.has(block.id)) } : comp;
+  }, [comp, editorDocument]);
   const timelineTrackStates = useMemo<TimelineTrackState[]>(
     () =>
-      renderPlan.tracks.map((track) => ({
+      // Layout layers are derived on every commit; the timeline shows the picture that owns them.
+      renderPlan.tracks.filter((track) => track.role !== "pipLayer").map((track) => ({
         trackId: track.id,
         timelineIndex: editorDocument.timeline.tracks.findIndex(
           (candidate) => candidate.id === track.id,
@@ -3478,6 +3487,7 @@ export function HyperframesWorkbench({
   useEffect(() => {
     if (!selectedShotId && !selectedVisualClipId && floatWin === "shot")
       setFloatWin(null);
+    if (!selectedVisualClipId && floatWin === "layout") setFloatWin(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedShotId, selectedVisualClipId, floatWin]);
   /** Open framing settings from the selected video's canvas-border toolbar. */
@@ -4832,7 +4842,9 @@ export function HyperframesWorkbench({
     setSelectedShotId(id);
     setSelectedId(null); // focus only one object at a time
   };
-  const selectVisualClip = (id: string) => {
+  const selectVisualClip = (clipId: string) => {
+    // A layout's speaker seat or backdrop is derived from its picture: picking one picks the picture.
+    const id = pipLayerOwner(editorDocumentRef.current, clipId) ?? clipId;
     setSelectedVisualClipId(id);
     setSelectedId(null);
     setSelectedShotIds(new Set());
@@ -6236,6 +6248,11 @@ export function HyperframesWorkbench({
     }
     setSelectedVisualClipId(null);
   };
+  const selectedLayoutClip = selectedVisualClipId
+    ? editorDocument.timeline.tracks
+        .flatMap((track) => track.id === editorDocument.semantics.primaryNarrativeTrackId || track.role === "pipLayer" ? [] : track.clips)
+        .find((clip): clip is MediaTimelineClip => clip.id === selectedVisualClipId && clip.kind === "media") ?? null
+    : null;
   const selectedShot =
     selectedCanvasMedia?.assetKind === "video"
       ? selectedCanvasMedia.settingsShot
@@ -8687,6 +8704,8 @@ export function HyperframesWorkbench({
                             ? t("workbench.assetMotion")
                             : floatWin === "captions"
                               ? t("panels.captions")
+                              : floatWin === "layout"
+                                ? t("panels.pipLayout")
                               : floatWin === "shot"
                                 ? (() => {
                                     const i = (comp.shots ?? []).findIndex(
@@ -8806,6 +8825,20 @@ export function HyperframesWorkbench({
                           onSetSpeed={setShotSpeed}
                         />
                       </div>
+                    )}
+                    {floatWin === "layout" && selectedLayoutClip && (
+                      <PipLayoutPanel
+                        value={selectedLayoutClip.pipLayout ?? null}
+                        canvas={{ width: comp.width, height: comp.height }}
+                        asset={(() => {
+                          const metadata = editorDocument.assets[selectedLayoutClip.assetId]?.metadata;
+                          return metadata?.width && metadata.height ? { width: metadata.width, height: metadata.height } : undefined;
+                        })()}
+                        onChange={(layout) => {
+                          const result = commit({ op: "media.pipLayout", input: { clipId: selectedLayoutClip.id, layout } });
+                          if (!result.ok) toast.error(editorErrorMessage(result.error));
+                        }}
+                      />
                     )}
                     {floatWin === "person" && (
                       <PersonFxPanel
@@ -9520,8 +9553,31 @@ export function HyperframesWorkbench({
                           )
                         }
                         toolbar={
-                          selectedCanvasMedia.assetKind === "video" ? (
+                          selectedCanvasMedia.assetKind === "video" || selectedCanvasMedia.kind === "media" ? (
                             <div className="border-line bg-panel flex items-center gap-1 rounded-lg border p-1 shadow-lg">
+                              {selectedCanvasMedia.kind === "media" && (
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    if (floatWin === "layout") setFloatWin(null);
+                                    else {
+                                      selectVisualClip(selectedCanvasMedia.clipId);
+                                      setFloatWin("layout");
+                                    }
+                                  }}
+                                  title={t("panels.pipLayout")}
+                                  aria-label={t("panels.pipLayout")}
+                                  className={`inline-flex size-7 items-center justify-center rounded ${
+                                    floatWin === "layout"
+                                      ? "bg-panel-2/35 text-ink"
+                                      : "text-ink-3 hover:bg-panel-2 hover:text-ink"
+                                  }`}
+                                >
+                                  <PictureInPicture2 size={14} />
+                                </button>
+                              )}
+                              {selectedCanvasMedia.assetKind === "video" && <>
                               <button
                                 type="button"
                                 onClick={(event) => {
@@ -9558,6 +9614,7 @@ export function HyperframesWorkbench({
                               >
                                 <AudioLines size={14} />
                               </button>
+                              </>}
                             </div>
                           ) : undefined
                         }
@@ -11140,7 +11197,7 @@ export function HyperframesWorkbench({
             {projectCover && <TimelineCoverPlaceholder cover={projectCover} onOpen={openCoverScene} />}
             <div className="min-w-0 flex-1">
           <StudioTimeline
-            comp={comp}
+            comp={timelineComp}
             density={timelineDensity}
             directorScenes={showDebug ? directorTimelineScenes : undefined}
             videoPlacements={videoPlacements}

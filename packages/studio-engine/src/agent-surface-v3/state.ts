@@ -14,6 +14,7 @@ import { componentSchemaOf, componentValuesView, type ComponentValueType } from 
 import type { DocumentLook } from '@pireel/studio-engine/look';
 import { editingSkillsOf } from '@pireel/studio-engine/editing-skills';
 import { dataEditFields } from '@pireel/studio-engine/component-props';
+import { pipLayerOwner } from '@pireel/studio-engine/pip-layout';
 import { clipPropertyDefaults, effectiveAudioClipProperties } from '@pireel/studio-engine/agent-surface-v3/clip-properties';
 
 import type {
@@ -56,6 +57,8 @@ export interface V3TrackView {
   captions?: V3CaptionsView;
   linkedClips?: number;
   totalClips?: number;
+  /** Layout layers: the pictures whose pip layout derives this lane. */
+  derivedFrom?: string[];
 }
 
 export interface V3CaptionsView {
@@ -215,7 +218,9 @@ export function renderV3Clip(clip: TimelineClip, trackId: string, trackRole?: st
         if (zoomed) view.zoom = zoomed;
       }
       stripIdentityGeometry(view, clip.mediaFraming);
-      if (clip.keyframes && (clip.keyframes.box?.length || clip.keyframes.opacity?.length)) view.keyframes = clip.keyframes;
+      // A layout derives the picture's motion; reporting its keyframes would invite hand edits that drop it.
+      if (clip.pipLayout) view.pip = clip.pipLayout;
+      else if (clip.keyframes && (clip.keyframes.box?.length || clip.keyframes.opacity?.length)) view.keyframes = clip.keyframes;
       break;
     }
     case 'graphic': {
@@ -329,6 +334,12 @@ export function renderV3State(
     if (!track.syncLocked) view.syncLocked = false;
     if (isManagedCaptionTrack(document, track)) {
       view.captions = captionsView(document, track);
+      tracks.push(view);
+      continue;
+    }
+    // Layout layers (speaker seat, backdrop) are rebuilt from their pictures' pip on every edit.
+    if (track.role === 'pipLayer') {
+      view.derivedFrom = [...new Set(track.clips.map((clip) => pipLayerOwner(document, clip.id)).filter((id): id is string => !!id))];
       tracks.push(view);
       continue;
     }

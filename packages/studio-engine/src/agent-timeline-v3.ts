@@ -18,10 +18,12 @@ import {
   secondsToTimelineFrames,
   timelineFramesToSeconds,
   type EditorCommandReceipt,
+  type ClipPipLayout,
   type EditorDocumentV2,
   type TimelineClip,
 } from '@pireel/studio-engine/editor-document';
 import { CAPTION_PRESETS, getCaptionPreset } from '@pireel/studio-engine/caption-presets';
+import { refreshClipPipLayouts, setClipPipLayout } from '@pireel/studio-engine/pip-layout';
 import { CUT_TRANSITION_EFFECTS, DIRECTIONAL_TRANSITIONS, MAX_TRANSITION_SEC, PLACE_ANCHORS, SHOT_TREATMENTS, ZOOM_PRESETS, ZOOM_SCALE_MAX, ZOOM_SCALE_MIN, applyBlockPlacement, blockId, blockKind, isSentenceCaption, placementFramingNotes, renderBlock, shotFilterCss, videoShotTimelineSpans, zoneOf, type Block, type Composition, type CutTransitionEffect, type ShotFilter, type TransitionDirection, type VideoShot } from '@pireel/studio-engine/composition-core';
 import { applyCanvasDocumentEdit } from '@pireel/studio-engine/canvas-document-edit';
 import { applyCaptionDocumentEdit, captionPatchBreaksLines } from '@pireel/studio-engine/caption-document-edit';
@@ -647,6 +649,18 @@ export function setClipFramingV3(document: EditorDocumentV2, input: Input): Agen
     }
     if (found.clip.kind !== 'narrative' && found.clip.kind !== 'media') return fail(`items[${index}] framing applies to video, image and graphic clips`);
     let touched = false;
+    if (item.pip !== undefined) {
+      const placed = ['treatment', 'box', 'transform', 'cropInsets'].filter((key) => item[key] !== undefined);
+      if (placed.length) return fail('conflicting_fields', { path: `items[${index}]`, fields: ['pip', ...placed], fix: 'pip places the picture itself; send it without treatment, box, transform or cropInsets (zoom may stay).' });
+      const pip = (item.pip && typeof item.pip === 'object' ? item.pip : {}) as Input;
+      const layout = pip.layout === 'none' ? null : { layout: pip.layout, ...(pip.position !== undefined ? { position: pip.position } : {}), ...(pip.size !== undefined ? { size: pip.size } : {}) } as ClipPipLayout;
+      const laid = setClipPipLayout(next, { clipId, layout });
+      if (!laid.ok) return fail(laid.error, { path: `items[${index}].pip`, ...(laid.code === 'invalid-command' && found.clip.kind === 'narrative' ? { fix: 'pip arranges a B-roll picture over the speaker; place the picture with add_clips role broll, then give that clip the pip.' } : {}) });
+      // Derive now, so the receipt reports where the picture landed.
+      next = refreshClipPipLayouts(laid.document);
+      updates.push({ clipId, pip: layout ?? 'none' });
+      touched = true;
+    }
     if (item.zoom !== undefined) {
       // An animated push-in is intent on the clip: preset + where it starts (timeline frame inside
       // the clip) + how long + how far; the stage and the export expand the same moves.

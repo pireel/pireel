@@ -10,6 +10,7 @@ import type {
   GraphicBlockPayload,
   AudioClipProperties,
   AudioTimelineClip,
+  ClipPipLayout,
   GraphicTimelineClip,
   NarrativeTimelineClip,
   NarrativeProperties,
@@ -83,6 +84,8 @@ export interface ClipPatch {
     box?: Array<{ frame: number; x: number; y: number; w: number; h: number }>;
     opacity?: Array<{ frame: number; value: number }>;
   } | null;
+  /** A picture-in-picture layout with the speaker; null clears it. A box or keyframes patch clears it too. */
+  pipLayout?: ClipPipLayout | null;
 }
 
 export type CanvasPatch = Pick<EditorDocumentV2['canvas'], 'width' | 'height'>;

@@ -281,3 +281,78 @@ describe('ids minted inside a transaction', () => {
     expect(new Set(textIds(loose.document)).size).toBe(2);
   });
 });
+
+describe('clip-level picture-in-picture layouts', () => {
+  const withBroll = () => {
+    const added = applyDocumentTransaction(emptyDocument(), { ops: [narration] }, ctx);
+    if (!added.ok) throw new Error(added.error.message);
+    const document = structuredClone(added.document);
+    document.assets.footage = { id: 'footage', kind: 'video', label: 'Footage', locator: { remoteUrl: 'https://cdn.test/footage.mp4' }, metadata: { width: 1920, height: 1080, durationSec: 10 } } as never;
+    document.timeline.tracks.push({ id: 'track_broll', type: 'visual', role: 'broll', name: 'B-roll', muted: true, hidden: false, locked: false, syncLocked: true, stackOrder: 1, clips: [
+      { id: 'shot', kind: 'media', assetId: 'footage', enabled: true, startFrame: 60, durationFrames: 60, sourceInSec: 0, sourceOutSec: 2, fit: 'contain' },
+    ] });
+    return document;
+  };
+  const lanes = (document: ReturnType<typeof withBroll>) => document.timeline.tracks.filter((track) => track.role === 'pipLayer');
+  const spine = (document: ReturnType<typeof withBroll>) => document.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId)!;
+
+  it('derives the speaker seat from the words under the picture, and keeps deriving it after a move', () => {
+    const laid = applyDocumentTransaction(withBroll(), { ops: [{ op: 'media.pipLayout', input: { clipId: 'shot', layout: { layout: 'presenter', position: 'top-left' } } }] }, ctx);
+    expect(laid.ok, JSON.stringify(!laid.ok && laid.error)).toBe(true);
+    if (!laid.ok) return;
+    const speaker = lanes(laid.document).find((track) => track.type === 'visual');
+    expect(speaker).toMatchObject({ type: 'visual', syncLocked: false, locked: false });
+    expect(speaker!.stackOrder).toBeGreaterThan(1);
+    const narrationAsset = (spine(laid.document).clips[0] as { assetId: string }).assetId;
+    expect(speaker!.clips).toEqual([expect.objectContaining({ assetId: narrationAsset, startFrame: 60, durationFrames: 60, sourceInSec: 2, sourceOutSec: 4 })]);
+    const shot = laid.document.timeline.tracks.find((track) => track.id === 'track_broll')!.clips[0]!;
+    expect(shot).toMatchObject({ box: { x: 0, y: 0, w: 1, h: 1 }, pipLayout: { layout: 'presenter' } });
+    const moved = applyDocumentTransaction(laid.document, { ops: [{ op: 'command', input: { command: { type: 'clip.move', trackId: 'track_broll', clipId: 'shot', startFrame: 90 } } }] }, ctx);
+    expect(moved.ok, JSON.stringify(!moved.ok && moved.error)).toBe(true);
+    if (!moved.ok) return;
+    expect(lanes(moved.document).find((track) => track.type === 'visual')!.clips).toEqual([expect.objectContaining({ startFrame: 90, sourceInSec: 3, sourceOutSec: 5 })]);
+  });
+
+  it('puts a split backdrop between the main video and the picture, and lets go when the picture is placed by hand', () => {
+    const laid = applyDocumentTransaction(withBroll(), { ops: [{ op: 'media.pipLayout', input: { clipId: 'shot', layout: { layout: 'split' } } }] }, ctx);
+    expect(laid.ok).toBe(true);
+    if (!laid.ok) return;
+    const backdrop = lanes(laid.document).find((track) => track.type === 'graphics')!;
+    expect(backdrop.stackOrder).toBeGreaterThan(0);
+    expect(backdrop.stackOrder).toBeLessThan(1);
+    expect(laid.document.timeline.tracks.indexOf(backdrop)).toBeLessThan(laid.document.timeline.tracks.findIndex((track) => track.id === 'track_broll'));
+    const placed = applyDocumentTransaction(laid.document, { ops: [{ op: 'command', input: { command: { type: 'clip.patch', trackId: 'track_broll', clipId: 'shot', patch: { box: { x: .1, y: .1, w: .5, h: .5 } } } } }] }, ctx);
+    expect(placed.ok).toBe(true);
+    if (!placed.ok) return;
+    expect(lanes(placed.document)).toEqual([]);
+    expect(placed.document.timeline.tracks.find((track) => track.id === 'track_broll')!.clips[0]).not.toHaveProperty('pipLayout');
+  });
+
+  it('gives the agent the same layouts through set_clip_framing, and reports them in get_state', async () => {
+    const { renderV3State } = await import('@pireel/studio-engine/agent-surface-v3/state');
+    const { validateV3Input } = await import('@pireel/studio-engine/agent-surface-v3/validate');
+    const input = { items: [{ clipId: 'shot', pip: { layout: 'split-bottom' } }] };
+    expect(validateV3Input('set_clip_framing', input)).toBeNull();
+    const laid = applyDocumentTransaction(withBroll(), { ops: [{ op: 'agent.timeline', input: { tool: 'set_clip_framing', input } }] }, ctx);
+    expect(laid.ok, JSON.stringify(!laid.ok && laid.error)).toBe(true);
+    if (!laid.ok) return;
+    const state = renderV3State(laid.document);
+    expect(state.tracks.find((track) => track.id === 'track_broll')!.clips![0]).toMatchObject({ pip: { layout: 'split-bottom' }, box: { x: .5, y: 0, w: .5, h: 1 } });
+    expect(state.tracks.filter((track) => track.role === 'pipLayer').map((track) => track.derivedFrom)).toEqual([['shot'], ['shot']]);
+    const conflicting = applyDocumentTransaction(withBroll(), { ops: [{ op: 'agent.timeline', input: { tool: 'set_clip_framing', input: { items: [{ clipId: 'shot', pip: { layout: 'inset' }, box: { x: 0, y: 0, w: .5, h: .5 } }] } } }] }, ctx);
+    expect(conflicting.ok).toBe(false);
+  });
+
+  it('returns the picture to full frame and refuses the story spine', () => {
+    const laid = applyDocumentTransaction(withBroll(), { ops: [{ op: 'media.pipLayout', input: { clipId: 'shot', layout: { layout: 'inset' } } }] }, ctx);
+    if (!laid.ok) throw new Error(laid.error.message);
+    const cleared = applyDocumentTransaction(laid.document, { ops: [{ op: 'media.pipLayout', input: { clipId: 'shot', layout: null } }] }, ctx);
+    if (!cleared.ok) throw new Error(cleared.error.message);
+    const shot = cleared.document.timeline.tracks.find((track) => track.id === 'track_broll')!.clips[0]!;
+    expect(shot).toMatchObject({ fit: 'cover' });
+    expect(shot).not.toHaveProperty('box');
+    expect(shot).not.toHaveProperty('keyframes');
+    const spineClip = spine(laid.document).clips[0]!.id;
+    expect(applyDocumentTransaction(laid.document, { ops: [{ op: 'media.pipLayout', input: { clipId: spineClip, layout: { layout: 'inset' } } }] }, ctx)).toMatchObject({ ok: false, error: { code: 'invalid-command' } });
+  });
+});

@@ -388,6 +388,10 @@ export const PANELS_EN: Record<string, string> = {
   "panels.selectShotTimelineFirst":
     "Select a shot in the timeline first — the toggle only affects the selected segment",
   "panels.silenceClickDelete": "Silence — click to delete",
+  "panels.pipLayout": "Layout",
+  "panels.pipSize.small": "Small",
+  "panels.pipSize.medium": "Medium",
+  "panels.pipSize.large": "Large",
   "panels.size": "Size",
   "panels.sound": "Sound",
   "panels.slide": "Slide in",
