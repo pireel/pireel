@@ -558,8 +558,6 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.preparedNSampledFrames": "Prepared {n} sampled frames",
   "workbench.projectMigrationSaveBlocked":
     "This project needs a data migration. Cloud saving is paused; your current edit remains available.",
-  "workbench.publishPrepareFailed":
-    "Failed to prepare publishing, try again later",
   "workbench.rangeDeletedMayCover":
     "That range does not overlap the current video edit",
   "workbench.rangesEmptyInvalidThose":
@@ -578,7 +576,6 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.removedTransitionSecS": "Removed the transition at {sec}s",
   "workbench.removeTransitionToSplit":
     "Cannot split inside a transition — remove the transition first",
-  "workbench.renderingPct": "Rendering {pct}%",
   "workbench.renderingPctDownloads":
     "Rendering {pct}% — downloads automatically when done",
   "workbench.rePickFile": "Re-pick file",

@@ -65,6 +65,27 @@ interface MaterialItem {
 }
 
 type KindFilter = 'all' | 'image' | 'video' | 'audio' | 'element';
+type UploadKind = 'image' | 'video' | 'audio';
+const UPLOAD_KINDS: readonly UploadKind[] = ['image', 'video', 'audio'];
+const UPLOAD_PAGE = 200;
+
+/** One page of a kind's uploads, newest first, with the cursor of the next older page; null = failed. */
+async function fetchUploadPage(kind: UploadKind, before?: { before: number; beforeId: string }): Promise<{ items: LibraryItem[]; next?: { before: number; beforeId: string } } | null> {
+  const cursor = before ? `&before=${before.before}&before_id=${encodeURIComponent(before.beforeId)}` : '';
+  try {
+    const response = await editorRequest(`/api/me/materials?tab=global&kind=${kind}&limit=${UPLOAD_PAGE}${cursor}`);
+    if (!response.ok) return null;
+    const body = (await response.json()) as { items?: MaterialItem[]; has_more?: boolean };
+    const rows = body.items ?? [];
+    const last = rows.at(-1);
+    return {
+      items: rows.map(materialToItem).filter((x): x is LibraryItem => !!x),
+      ...(body.has_more && last?.created_at ? { next: { before: last.created_at, beforeId: last.id } } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
 const KIND_FILTERS: { value: KindFilter; label: string }[] = [
   { value: 'all', label: 'panels.all' },
   { value: 'image', label: 'panels.image' },
@@ -167,6 +188,9 @@ export function CloudAssetsPanel({
   const [renaming, setRenaming] = useState<LibraryItem | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [reloadTick, setReloadTick] = useState(0);
+  /** Per kind, the cursor of the next older page (absent = everything is loaded). */
+  const [more, setMore] = useState<Partial<Record<UploadKind, { before: number; beforeId: string }>>>({});
+  const [loadingMore, setLoadingMore] = useState(false);
 
   // Uploads: fetch images/videos in parallel and merge (the API requires a single kind value).
   // reqSeq guards against races: a slower in-flight load can't overwrite a newer one.
@@ -174,20 +198,19 @@ export function CloudAssetsPanel({
   const loadUploads = useCallback((silent = false) => {
     const seq = ++reqSeq.current;
     if (!silent) setLoading(true);
-    const kinds = ['image', 'video', 'audio'] as const;
     // null = that request failed: keep what is already listed for the kind instead of emptying it
     // (a background refresh on a flaky network must not make the library look wiped).
-    const get = (k: (typeof kinds)[number]) =>
-      editorRequest(`/api/me/materials?tab=global&kind=${k}&limit=200`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((j: { items?: MaterialItem[] } | null) => j?.items ?? null)
-        .catch(() => null);
-    return Promise.all(kinds.map(get)).then((results) => {
+    return Promise.all(UPLOAD_KINDS.map((k) => fetchUploadPage(k))).then((results) => {
       if (seq !== reqSeq.current) return; // superseded by a newer load
-      setUploads((current) => kinds.flatMap((k, index) => {
-        const items = results[index];
-        return items ? items.map(materialToItem).filter((x): x is LibraryItem => !!x) : current.filter((it) => it.kind === k);
+      setUploads((current) => UPLOAD_KINDS.flatMap((k, index) => {
+        const page = results[index];
+        return page ? page.items : current.filter((it) => it.kind === k);
       }));
+      setMore((current) => Object.fromEntries(UPLOAD_KINDS.flatMap((k, index) => {
+        const page = results[index];
+        const next = page ? page.next : current[k];
+        return next ? [[k, next]] : [];
+      })));
       if (!silent) setLoading(false);
     });
   }, []);
@@ -195,6 +218,31 @@ export function CloudAssetsPanel({
   useEffect(() => {
     void loadUploads();
   }, [reloadTick, loadUploads]);
+  /** The next older page of every kind that has one, appended after what is listed. */
+  const loadMore = async () => {
+    if (loadingMore) return;
+    const seq = reqSeq.current;
+    setLoadingMore(true);
+    try {
+      const kinds = UPLOAD_KINDS.filter((k) => more[k]);
+      const results = await Promise.all(kinds.map((k) => fetchUploadPage(k, more[k])));
+      if (seq !== reqSeq.current || !mountedRef.current) return; // a reload replaced the list meanwhile
+      const seen = new Set(uploads.map((it) => it.id));
+      setUploads((current) => [...current, ...results.flatMap((page) => page?.items ?? []).filter((it) => !seen.has(it.id))]);
+      setMore((current) => {
+        const next = { ...current };
+        kinds.forEach((k, index) => {
+          const page = results[index];
+          if (!page) return; // failed: keep the cursor so the button can try again
+          if (page.next) next[k] = page.next;
+          else delete next[k];
+        });
+        return next;
+      });
+    } finally {
+      if (mountedRef.current) setLoadingMore(false);
+    }
+  };
 
   // Videos uploaded before posters existed get one in the background, one at a time, written back
   // to the row so every later load shows an image. A failure is not retried this session.
@@ -498,6 +546,17 @@ export function CloudAssetsPanel({
           // Shared responsive grid (same as Official/Generation): compact 88px floor that
           // stretches to fill the panel; thumbnails letterbox non-16:9 media centered.
           <div className={RESPONSIVE_ASSET_CARD_GRID}>{shown.map(gridCard)}</div>
+        )}
+        {!loading && Object.keys(more).length > 0 && (
+          <button
+            type="button"
+            onClick={() => void loadMore()}
+            disabled={loadingMore}
+            className="border-line text-ink-3 hover:text-ink hover:bg-panel-2/20 mt-2 inline-flex h-7 w-full items-center justify-center gap-1.5 rounded-md border text-[11px] disabled:opacity-50"
+          >
+            {loadingMore && <Loader2 size={11} className="animate-spin" />}
+            {t('panels.loadMoreAssets')}
+          </button>
         )}
       </div>
 

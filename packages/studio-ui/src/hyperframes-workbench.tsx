@@ -174,6 +174,7 @@ import { runtimeTranscriptsFollowingDocument } from '@pireel/studio-ui/runtime-t
 import { transcriptInputsFor, type DocumentOp } from '@pireel/studio-engine/document-transaction';
 import { applyEditorDocumentPersistenceMetadata } from '@pireel/studio-engine/project-document';
 import { DocumentCommitter, fieldCoalesce, type CommitUndo } from '@pireel/studio-ui/document-commit';
+import { sourceAnchorAt, timelineSecForAnchor } from '@pireel/studio-ui/source-anchor';
 import type { PlaybookSnapshot } from "@pireel/studio-engine/brand-playbook";
 import { ProjectSync, localPendingTransactionStore, type ProjectSyncDeps, type ProjectSyncSections } from '@pireel/studio-ui/project-sync';
 
@@ -1908,7 +1909,6 @@ export function HyperframesWorkbench({
   );
   const {
     exporting,
-    publishing,
     exportPct,
     exportVideo,
     cancelExport,
@@ -1922,6 +1922,8 @@ export function HyperframesWorkbench({
     audioExportRef,
     denoiseExportRef,
     prepareExportAssets,
+    // Read at export time; projectOutputs is declared further down.
+    outputTitle: () => projectOutputs.outputsRef.current.active.title,
   });
   // Agent export task (export action:start / action:status): compose + browser download runs via exportVideo, this only tracks task state;
   // exportPct mirrored into a ref for the progress query inside runStudioTool (the switch closure can't read state)
@@ -6897,7 +6899,7 @@ export function HyperframesWorkbench({
   ].sort((a, b) => a.order - b.order || a.createdAt - b.createdAt);
   const switchOutput = (id: string) => {
     // A switch resets the editor and drops the source file under a running render.
-    if (exporting || publishing || agentExportRef.current.running) {
+    if (exporting || agentExportRef.current.running) {
       toast.info(t("workbench.switchBlockedByExport"));
       return;
     }
@@ -6924,7 +6926,7 @@ export function HyperframesWorkbench({
   // A version with no duration is empty (no video / no content) and is never part of a batch export.
   const batchExportableOutputs = outputTabs.filter((o) => o.durationSec);
   const openBatchExport = () => {
-    if (outputBatch?.running || exporting || publishing) return;
+    if (outputBatch?.running || exporting) return;
     setOutputBatch(null);
     setBatchSelected(new Set(batchExportableOutputs.map((o) => o.id)));
     setBatchExportOpen(true);
@@ -6946,7 +6948,7 @@ export function HyperframesWorkbench({
     const ids = batchExportableOutputs
       .filter((o) => batchSelected.has(o.id))
       .map((o) => o.id);
-    if (!ids.length || outputBatch?.running || exporting || publishing) return;
+    if (!ids.length || outputBatch?.running || exporting) return;
     outputBatchCancelRef.current = false;
     setPlaying(false);
     setOutputBatch({
@@ -6958,6 +6960,7 @@ export function HyperframesWorkbench({
       failedIds: [],
     });
     const opts = exportOpts;
+    const startedOn = activeOutputIdRef.current;
     void (async () => {
       const doneIds: string[] = [];
       const failedIds: string[] = [];
@@ -6986,6 +6989,8 @@ export function HyperframesWorkbench({
             : s,
         );
       }
+      // Back to the version the user was editing, not whichever one was exported last.
+      if (activeOutputIdRef.current !== startedOn) await switchOutputFnRef.current(startedOn);
       setOutputBatch((s) => (s ? { ...s, running: false, currentId: null } : s));
     })();
   };
@@ -7120,6 +7125,10 @@ export function HyperframesWorkbench({
       ? { kind: 'block', trackIndex: freeTrack(compRef.current.blocks, at, dur) }
       : broll?.kind === 'visual' ? { kind: 'visual', trackId: broll.trackId } : { kind: 'new' };
     setPendingGenerations((items) => [...items, { id, startSec: at, endSec: at + dur, label, lane, inLibrary: kind !== 'mg' }]);
+    // The words the selection covered, not their current second: edits made while this generates
+    // (a cut earlier in the video) move the words, and the result follows them.
+    const anchor = sourceAnchorAt(editorDocumentRef.current, at);
+    const landing = () => (anchor && timelineSecForAnchor(editorDocumentRef.current, anchor)) ?? at;
     try {
       if (kind === 'mg') {
         // Same path as the chat's Motion Graphic: canvas-true geometry, director scene and the
@@ -7132,7 +7141,7 @@ export function HyperframesWorkbench({
       if (kind === 'sfx') {
         const result = await generateAudioForRange(projectId, prompt, request);
         registerGeneratedAssets([{ jobId: result.jobId, index: 0, kind: 'audio', key: result.key, mime: result.mime, prompt, createdAt: Date.now(), ...(result.durationSec ? { durationSec: result.durationSec } : {}) }]);
-        const clipId = await audioOps.mountAudioFromUrl(result.url, prompt.slice(0, 24), { startSec: at });
+        const clipId = await audioOps.mountAudioFromUrl(result.url, prompt.slice(0, 24), { startSec: landing() });
         if (clipId) setSelectedAudioId(clipId);
         toast.success(t('captions.generatedInserted', span));
         return;
@@ -7140,8 +7149,9 @@ export function HyperframesWorkbench({
       const result = await generateVisualForRange(projectId, prompt, request);
       const mediaKind = kind === 'video' ? 'video' : 'image';
       registerGeneratedAssets([{ jobId: result.jobId, index: 0, kind: mediaKind, key: result.key, mime: result.mime, prompt, createdAt: Date.now() }]);
-      if (kind === 'sticker') await insertPanelMedia({ type: 'image', url: result.url }, prompt.slice(0, 24), at, undefined, dur);
-      else await insertLibraryClipAt({ type: mediaKind, url: result.url, label: prompt.slice(0, 24) }, at, { target: brollTargetForRange(editorDocumentRef.current, at, at + dur), mode: "overwrite", fitSec: dur });
+      const placed = landing();
+      if (kind === 'sticker') await insertPanelMedia({ type: 'image', url: result.url }, prompt.slice(0, 24), placed, undefined, dur);
+      else await insertLibraryClipAt({ type: mediaKind, url: result.url, label: prompt.slice(0, 24) }, placed, { target: brollTargetForRange(editorDocumentRef.current, placed, placed + dur), mode: "overwrite", fitSec: dur });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -8954,19 +8964,17 @@ export function HyperframesWorkbench({
                     <button
                       type="button"
                       onClick={() => setExportOpen(true)}
-                      disabled={exporting || publishing || !hasContent || whiteboardScene && !sceneCanExport}
+                      disabled={exporting || !hasContent || whiteboardScene && !sceneCanExport}
                       className="border-accent bg-accent text-accent-foreground hover:bg-accent/90 inline-flex shrink-0 items-center gap-1.5 rounded-l-md border px-2.5 py-1.5 text-[12px] font-medium transition-colors disabled:opacity-50"
                     >
-                      {exporting || publishing ? (
+                      {exporting ? (
                         <Loader2 size={14} className="animate-spin" />
                       ) : (
                         <FileVideo size={14} />
                       )}{" "}
                       {exporting
                         ? t("workbench.exportingPctShort", { pct: exportPct })
-                        : publishing
-                          ? t("workbench.renderingPct", { pct: exportPct })
-                          : t("workbench.export")}
+                        : t("workbench.export")}
                     </button>
                   </TooltipTrigger>
                   <TooltipContent>{t("tools.export_video.label")}</TooltipContent>
@@ -8975,7 +8983,7 @@ export function HyperframesWorkbench({
                   <DropdownMenuTrigger asChild>
                     <button
                       type="button"
-                      disabled={exporting || publishing || whiteboardScene && !sceneCanExport}
+                      disabled={exporting || whiteboardScene && !sceneCanExport}
                       title={t("workbench.moreExportOptions")}
                       aria-label={t("workbench.moreExportOptions")}
                       className="border-accent bg-accent text-accent-foreground hover:bg-accent/90 -ml-px inline-flex shrink-0 items-center justify-center self-stretch rounded-r-md border border-l-accent-foreground/20 px-1.5 transition-colors disabled:opacity-50 data-[state=open]:bg-accent/90"
@@ -9120,7 +9128,7 @@ export function HyperframesWorkbench({
                   )}
                 </DialogContent>
               </Dialog>
-              {((exporting && !exportOpen) || publishing) && (
+              {exporting && !exportOpen && (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button

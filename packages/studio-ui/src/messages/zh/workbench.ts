@@ -513,7 +513,6 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.preparedNSampledFrames": "备好 {n} 帧采样",
   "workbench.projectMigrationSaveBlocked":
     "项目数据版本需要迁移，已暂停云端保存；当前编辑内容仍保留。",
-  "workbench.publishPrepareFailed": "发布准备失败，稍后重试",
   "workbench.rangeDeletedMayCover": "这个区间没有命中当前视频剪辑",
   "workbench.rangesEmptyInvalidThose":
     "ranges 为空/不合法,或这些区间在成片里已不存在",
@@ -528,7 +527,6 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.removedCaptions": "已移除字幕",
   "workbench.removedTransitionSecS": "已移除 {sec}s 处的转场",
   "workbench.removeTransitionToSplit": "转场覆盖区内不能分割——先移除转场",
-  "workbench.renderingPct": "合成 {pct}%",
   "workbench.renderingPctDownloads": "合成中 {pct}%，完成后自动下载",
   "workbench.rePickFile": "重新选择文件",
   "workbench.replacedText": "已替换为「{text}」",

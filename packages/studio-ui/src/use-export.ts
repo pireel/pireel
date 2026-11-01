@@ -2,15 +2,12 @@
 
 /**
  * Export the finished video: dialog options (resolution/fps/format) → **client-side compositing** →
- * auto download. Publishing goes through publishVideo instead.
+ * auto download.
  *
  * - **Client-side compositing only** (zero local upload, frame-exact with the preview, full insert-clip/
  *   framing coverage). No WebCodecs or missing local video → honest error (no longer silently handed to
  *   server render — after canvas-ization it produced an all-black video track, was never validated, deprecated).
  * - Result cache: comp + source fingerprint + export options all unchanged → don't re-composite, just re-download the last result.
- * - Publish (publishVideo): upload the **finished video** to R2 for a public direct link fed to the publish
- *   center (source video never uploaded; the finished video can be). Triggered on demand (only when "Publish"
- *   is clicked), same content not re-uploaded. 200MB cap (presign) — honest error if exceeded.
  */
 
 import { useRef, useState, type MutableRefObject } from 'react';
@@ -22,7 +19,6 @@ import {
   editorDocumentRenderPlan,
   videoTrackShots,
 } from '@pireel/studio-engine/composition';
-import { studioProviders } from '@pireel/studio-engine/providers';
 import { fileSig } from '@pireel/studio-ui/media-ai';
 import { ExportCanceled, type ExportRenderOpts, clientExportVideo } from '@pireel/studio-ui/client-export';
 import { t, tEnglish } from '@pireel/studio-ui/i18n';
@@ -32,8 +28,6 @@ import { supplementalVisualMedia } from '@pireel/studio-ui/visual-render-plan';
 import type { AudioExportEntry } from '@pireel/studio-ui/audio-export-payload';
 import { clipAudioMasks, exportAudioMasks } from '@pireel/studio-ui/export-word-masks';
 
-/** presign's hard cap (413 past it); intercept early to give a human message. */
-const MAX_PUBLISH_BYTES = 200 * 1024 * 1024;
 
 /** Trigger a browser download (blob stays in the cache ref; the URL is revoked once done). */
 export function downloadBlob(blob: Blob, name: string) {
@@ -94,7 +88,13 @@ async function deliverBlob(blob: Blob, name: string, sinkUrl?: string): Promise<
 }
 
 const stamp = () => new Date().toISOString().slice(11, 19).replace(/:/g, '');
-const filenameFor = (o: ExportRenderOpts) => t('common.exportFilename', { res: o.res, stamp: stamp(), format: o.format });
+/** The file is named after the version it came from, so a batch of versions can be told apart. */
+const filenameFor = (o: ExportRenderOpts, title?: string) => {
+  const name = [...(title ?? '')].map((char) => (char.charCodeAt(0) < 32 || '\\/:*?"<>|'.includes(char) ? '-' : char)).join('').replace(/-+/g, '-').replace(/\s+/g, ' ').trim().slice(0, 60);
+  return name
+    ? t('common.exportFilenameTitled', { title: name, res: o.res, stamp: stamp(), format: o.format })
+    : t('common.exportFilename', { res: o.res, stamp: stamp(), format: o.format });
+};
 
 export function useStudioExport(deps: {
   compRef: MutableRefObject<Composition>;
@@ -111,16 +111,16 @@ export function useStudioExport(deps: {
    *  Right after an output switch the runtime is still restoring sources asynchronously; exporting
    *  before that finishes silently drops the clips whose source is not ready yet (a PIP video). */
   prepareExportAssets?: (document: EditorDocumentV2) => Promise<void>;
+  /** The active version's title, read when an export starts. */
+  outputTitle?: () => string | undefined;
 }) {
-  const { compRef, documentRef, resolveAssetUrl, videoFileRef, clipFilesRef, audioExportRef, denoiseExportRef, prepareExportAssets } = deps;
+  const { compRef, documentRef, resolveAssetUrl, videoFileRef, clipFilesRef, audioExportRef, denoiseExportRef, prepareExportAssets, outputTitle } = deps;
   const [exporting, setExporting] = useState(false);
-  const [publishing, setPublishing] = useState(false);
+  /** Synchronous busy flag: the state above only updates on the next render, and preparing assets
+   *  awaits before it is set, so a second click could otherwise start a second export. */
+  const busyRef = useRef(false);
   const [exportPct, setExportPct] = useState(0);
-  // Public direct link after the finished video is uploaded (R2): the data source for the "Publish"
-  // entry. The client-composited local blob has no public link; this only has a value after publishVideo uploads
-  const [publishUrl, setPublishUrl] = useState<string | null>(null);
   const exportCancelRef = useRef(false); // User clicked "Cancel export": stop compositing and unlock the UI
-  const uploadedExportRef = useRef<{ key: string; url: string } | null>(null); // Upload result (same content not re-uploaded)
   /** Last-result cache: key = comp + source fingerprint + options. Unchanged → re-download/publish directly, don't re-composite. */
   const lastExportRef = useRef<{ key: string; blob?: Blob; opts: ExportRenderOpts } | null>(null);
 
@@ -187,7 +187,15 @@ export function useStudioExport(deps: {
    *  Returns a result for the agent export tools (export action:start / action:status): on success includes the
    *  saved filename and how the file was delivered. */
   async function exportVideo(opts: ExportRenderOpts, sinkUrl?: string): Promise<{ ok: boolean; filename?: string; error?: string } & Partial<ExportDelivery>> {
-    if (exporting || publishing) return { ok: false, error: tEnglish('common.exportAlreadyProgress') };
+    if (busyRef.current) return { ok: false, error: tEnglish('common.exportAlreadyProgress') };
+    busyRef.current = true;
+    try {
+      return await runExport(opts, sinkUrl);
+    } finally {
+      busyRef.current = false;
+    }
+  }
+  async function runExport(opts: ExportRenderOpts, sinkUrl?: string): Promise<{ ok: boolean; filename?: string; error?: string } & Partial<ExportDelivery>> {
     // Every referenced local source must be resolvable BEFORE the plan is read, or the plan omits
     // the clip (batch export right after an output switch used to lose the picture-in-picture video).
     await prepareExportAssets?.(documentRef.current);
@@ -204,7 +212,7 @@ export function useStudioExport(deps: {
       toast.error(noExportReason(c, plan));
       return { ok: false, error: noExportReason(c, plan) };
     }
-    const name = filenameFor(opts);
+    const name = filenameFor(opts, outputTitle?.());
     setExporting(true);
     setExportPct(0);
     exportCancelRef.current = false;
@@ -233,69 +241,16 @@ export function useStudioExport(deps: {
     }
   }
 
-  /** Publish = composite the finished video client-side → upload to R2 for a public direct link → light up publishUrl (source video never uploaded, finished video can be).
-   *  Triggered on demand (only runs when "Publish" is clicked); if the same content was uploaded before, reuse the last link. Returns the public URL (null on failure/cancel). */
-  async function publishVideo(opts: ExportRenderOpts): Promise<string | null> {
-    const c = compRef.current;
-    const document = documentRef.current;
-    const plan = editorDocumentRenderPlan(document, { resolveAssetUrl });
-    if (plan.durationFrames === 0) {
-      toast.error(t('common.nothingToExport'));
-      return null;
-    }
-    if (exporting || publishing) return null;
-    if (!canClientExport(c, plan)) {
-      toast.error(noExportReason(c, plan));
-      return null;
-    }
-    setPublishing(true);
-    setExportPct(0);
-    exportCancelRef.current = false;
-    try {
-      const audio = await (audioExportRef?.current?.() ?? Promise.resolve(null));
-      const key = exportKey(document, plan, opts, audio);
-      if (uploadedExportRef.current?.key === key) {
-        // Same content already uploaded: reuse the direct link
-        setPublishUrl(uploadedExportRef.current.url);
-        return uploadedExportRef.current.url;
-      }
-      const blob = await renderBlob(c, plan, key, opts, audio);
-      if (blob.size > MAX_PUBLISH_BYTES) {
-        toast.error(t('common.exportTooLargeToPublish'));
-        return null;
-      }
-      toast.success(t('common.uploadingExport'));
-      const { url } = await studioProviders().uploads.upload(blob, { contentType: blob.type || 'video/mp4', filename: filenameFor(opts) });
-      uploadedExportRef.current = { key, url };
-      setPublishUrl(url);
-      return url;
-    } catch (e) {
-      if (e instanceof ExportCanceled) toast.info(t('common.canceled'));
-      else {
-        console.warn('[studio] publish upload failed', e);
-        toast.error(t('workbench.publishPrepareFailed'));
-      }
-      return null;
-    } finally {
-      setPublishing(false);
-    }
-  }
-
   return {
     exporting,
-    publishing,
     exportPct,
     exportVideo,
-    publishVideo,
-    publishUrl,
     cancelExport: () => {
       exportCancelRef.current = true;
     },
-    /** On source swap, clear the result cache and publish link (the key already includes the source fingerprint so it won't mis-hit; clearing is to free blob memory). */
+    /** On source swap, clear the result cache (the key already includes the source fingerprint so it won't mis-hit; clearing is to free blob memory). */
     resetExport: () => {
       lastExportRef.current = null;
-      uploadedExportRef.current = null;
-      setPublishUrl(null);
     },
   };
 }
