@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useRef, useState, type RefObject } from 'react';
-import { CalendarDays, Check, CircleUserRound, Info, Loader2, ShieldCheck, Trash2 } from 'lucide-react';
+import { CalendarDays, Check, CircleUserRound, Info, Loader2, Trash2 } from 'lucide-react';
 import { TriggerPopover, type TriggerPopoverHandle } from '@pireel/ui/trigger-popover';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@pireel/ui/dialog';
 import { toast } from '@pireel/ui/toast';
@@ -214,18 +214,12 @@ function SkillMarketDetailDialog({
                 </dd>
               </div>
               <div className="border-line border-b px-3.5 py-3">
-                <dt className="text-ink-4 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.08em]">
-                  <ShieldCheck size={12} /> {t('chatGen.skill.detail.version')}
-                </dt>
-                <dd className="text-ink mt-1 text-[12.5px] font-medium">v{market.version}</dd>
-              </div>
-              <div className="border-line border-r px-3.5 py-3">
                 <dt className="text-ink-4 text-[10px] font-medium uppercase tracking-[0.08em]">
                   {t('chatGen.skill.detail.visibility')}
                 </dt>
                 <dd className="text-ink mt-1 text-[12.5px] font-medium">{visibilityLabel(market.visibility)}</dd>
               </div>
-              <div className="px-3.5 py-3">
+              <div className="col-span-2 px-3.5 py-3">
                 <dt className="text-ink-4 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.08em]">
                   <CalendarDays size={12} />
                   {market.publishedAt ? t('chatGen.skill.detail.publishedAt') : t('chatGen.skill.detail.updatedAt')}

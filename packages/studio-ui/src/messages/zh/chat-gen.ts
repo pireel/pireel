@@ -299,6 +299,7 @@ export const CHATGEN_ZH: Record<string, string> = {
   'chatGen.firstPass.pausesCut': '{n} 处',
   'chatGen.firstPass.captionsBrand': '品牌字幕样式',
   'chatGen.firstPass.captionsDefault': '默认样式',
+  'chatGen.firstPass.captionsSkill': 'Skill 样式',
   'chatGen.firstPass.denoised': '已开启',
   'chatGen.firstPass.logoPlaced': '已加上',
   'chatGen.firstPass.loudnessSet': '{lufs} LUFS',

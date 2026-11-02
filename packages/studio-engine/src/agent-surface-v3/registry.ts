@@ -23,11 +23,6 @@ export const CHAT_SERVER_EXECUTED_TOOLS = new Set(['list_skills', 'read_skill', 
 export interface V3ToolSpec {
   id: string;
   group: V3ToolGroup;
-  /** Public contract for reusable Studio Skills. A missing contract means the tool is an
-   *  implementation detail: Skill authors describe the intent instead of depending on its current
-   *  name or payload. Stable contracts are append-only within one version; a breaking change needs a
-   *  new capability id or a higher version with an explicit compatibility path. */
-  skillContract?: { version: number; stability: 'stable' | 'experimental' };
   /** Runs only inside Studio Chat: it needs an in-app card, or it serves the in-app model only
    *  (external agents bring their own model and do that work themselves). */
   chatOnly?: boolean;
@@ -39,11 +34,11 @@ export interface V3ToolSpec {
 
 export const V3_TOOLS: readonly V3ToolSpec[] = [
   // ---- state (7)
-  { id: 'get_state', group: 'state', skillContract: { version: 1, stability: 'stable' } },
-  { id: 'get_transcript', group: 'state', charges: true, skillContract: { version: 1, stability: 'stable' } },
+  { id: 'get_state', group: 'state' },
+  { id: 'get_transcript', group: 'state', charges: true },
   { id: 'search_media', group: 'state' },
-  { id: 'inspect_media', group: 'state', charges: true, skillContract: { version: 1, stability: 'stable' } },
-  { id: 'inspect_timeline', group: 'state', skillContract: { version: 1, stability: 'stable' } },
+  { id: 'inspect_media', group: 'state', charges: true },
+  { id: 'inspect_timeline', group: 'state' },
   { id: 'get_beat_grid', group: 'state' },
   // In-app agent only: external agents bring their own model and look at the material themselves.
   { id: 'get_facts', group: 'state', chatOnly: true },
@@ -57,28 +52,28 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   { id: 'get_icons', group: 'assets', serverDirect: true },
   { id: 'create_browser_handoff', group: 'assets', serverDirect: true },
   // ---- clips and tracks (15)
-  { id: 'add_clips', group: 'clips', skillContract: { version: 1, stability: 'stable' } },
+  { id: 'add_clips', group: 'clips' },
   // The deterministic montage assembler as a visible capability (it used to be a hidden client-side rewrite of add_clips).
   { id: 'assemble_from_review', group: 'clips' },
-  { id: 'insert_clips', group: 'clips', skillContract: { version: 1, stability: 'stable' } },
-  { id: 'move_clips', group: 'clips', skillContract: { version: 1, stability: 'stable' } },
-  { id: 'remove_clips', group: 'clips', skillContract: { version: 1, stability: 'stable' } },
-  { id: 'split_clips', group: 'clips', skillContract: { version: 1, stability: 'stable' } },
-  { id: 'ripple_delete_ranges', group: 'clips', skillContract: { version: 1, stability: 'stable' } },
-  { id: 'set_clip_properties', group: 'clips', skillContract: { version: 1, stability: 'stable' } },
-  { id: 'swap_clip_media', group: 'clips', skillContract: { version: 1, stability: 'stable' } },
-  { id: 'set_clip_framing', group: 'clips', skillContract: { version: 1, stability: 'stable' } },
-  { id: 'apply_layout', group: 'clips', skillContract: { version: 1, stability: 'stable' } },
+  { id: 'insert_clips', group: 'clips' },
+  { id: 'move_clips', group: 'clips' },
+  { id: 'remove_clips', group: 'clips' },
+  { id: 'split_clips', group: 'clips' },
+  { id: 'ripple_delete_ranges', group: 'clips' },
+  { id: 'set_clip_properties', group: 'clips' },
+  { id: 'swap_clip_media', group: 'clips' },
+  { id: 'set_clip_framing', group: 'clips' },
+  { id: 'apply_layout', group: 'clips' },
   { id: 'set_keyframes', group: 'clips' },
   { id: 'manage_tracks', group: 'clips' },
   { id: 'manage_clip_links', group: 'clips' },
-  { id: 'add_transition', group: 'clips', skillContract: { version: 1, stability: 'stable' } },
-  { id: 'set_canvas', group: 'clips', skillContract: { version: 1, stability: 'stable' } },
+  { id: 'add_transition', group: 'clips' },
+  { id: 'set_canvas', group: 'clips' },
   // ---- speech (5)
   { id: 'rough_cut', group: 'speech', charges: true },
-  { id: 'remove_silence', group: 'speech', skillContract: { version: 1, stability: 'stable' } },
-  { id: 'remove_words', group: 'speech', skillContract: { version: 1, stability: 'stable' } },
-  { id: 'mask_words', group: 'speech', skillContract: { version: 1, stability: 'stable' } },
+  { id: 'remove_silence', group: 'speech' },
+  { id: 'remove_words', group: 'speech' },
+  { id: 'mask_words', group: 'speech' },
   { id: 'denoise_audio', group: 'speech' },
   // ---- components and text (9; confirmation list is a session tool)
   { id: 'compose_component', group: 'components' },
@@ -86,8 +81,8 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   { id: 'place_graphics', group: 'components' },
   { id: 'set_confirm_list', group: 'session' },
   { id: 'apply_component', group: 'components', charges: true },
-  { id: 'set_texts', group: 'components', skillContract: { version: 1, stability: 'stable' } },
-  { id: 'set_captions', group: 'components', skillContract: { version: 1, stability: 'stable' } },
+  { id: 'set_texts', group: 'components' },
+  { id: 'set_captions', group: 'components' },
   { id: 'set_whiteboard', group: 'components' },
   { id: 'read_brand', group: 'components' },
   { id: 'bake_component', group: 'components' },
@@ -96,7 +91,7 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   { id: 'generate_cover', group: 'generation', chatOnly: true, charges: true },
   { id: 'generate_image', group: 'generation', serverDirect: true, charges: true },
   { id: 'generate_video', group: 'generation', serverDirect: true, charges: true },
-  { id: 'generate_audio', group: 'generation', serverDirect: true, charges: true, skillContract: { version: 1, stability: 'stable' } },
+  { id: 'generate_audio', group: 'generation', serverDirect: true, charges: true },
   { id: 'generate_speech', group: 'generation', serverDirect: true, charges: true },
   { id: 'generate_foley', group: 'generation', charges: true },
   { id: 'lip_sync', group: 'generation', serverDirect: true, charges: true },
