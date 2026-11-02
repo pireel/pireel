@@ -13,6 +13,7 @@ import { resolveEditingRunConfig } from '@pireel/studio-engine/editing-run-confi
 import { EditingTaskCard } from '@pireel/studio-ui/editing-task-card';
 import { displayEditingTask, hasCurrentDirectorPreview, isInteractiveEditingTool, messagesForTask, unresolvedTaskFailure } from '@pireel/studio-ui/editing-task-progress';
 import { coverStillToRun, needsEditingReview, reviewEditingTask } from '@pireel/studio-ui/editing-task-review';
+import { toolInputObject } from '@pireel/studio-ui/tool-input';
 import { ROUGH_CUT_TOOL, messageTurnCredits, toolNameOfPart, type RoughCutReplyMeta } from '@pireel/studio-ui/first-pass-card';
 import { NextSteps, splitNextSteps } from '@pireel/studio-ui/chat-next-steps';
 import { FINE_CUT_SKILLS, firstPassStartupHint, type FineCutSkill } from '@pireel/studio-ui/first-pass';
@@ -312,7 +313,7 @@ export function ChatThread({
     async onToolCall({ toolCall }) {
       const id = toolCall.toolName;
       if (CHAT_SERVER_EXECUTED_TOOLS.has(id)) return;
-      const requestedInput = (toolCall.input ?? {}) as Record<string, unknown>;
+      const requestedInput = toolInputObject(toolCall.input);
       const task = latestTask(messagesRef.current);
       const ledger = turnLedgerRef.current;
       const v3 = V3_TOOL_IDS.has(id);
@@ -395,7 +396,7 @@ export function ChatThread({
           }
         }
         const result = reviewEditingTask(task, requestedInput, fineCutClips(), getDocument?.());
-        if (!result.ok) { publishSuccess({ ok: false, error: result.error, ...(result.missing ? { data: { missing: result.missing } } : {}) }); return; }
+        if (!result.ok) { publishSuccess({ ok: false, error: result.error, data: { problems: result.problems, ...(result.missing ? { missing: result.missing } : {}) } }); return; }
         updateTask(task.id, current => ({ ...current, review: result.review }));
         publishSuccess({ ok: true, summary: 'Editing result checked', data: { review: result.review, taskIncomplete: !result.review.completed } });
         return;

@@ -23,11 +23,22 @@ export function needsEditingReview(task: ChatTask): boolean {
   return (task.mode === 'one-click' || isWhiteboardDirectorTask(task)) && (!!task.directorPlanRequired || !!task.config?.brand || requestedEditFeatures(task).length > 0 || needsBrandCover(task));
 }
 
-/** Validate completion against actual timeline evidence, not the model's claim that it added a feature. */
-export function reviewEditingTask(task: ChatTask, input: Record<string, unknown>, evidence: EditingEvidence, document?: EditorDocumentV2): { ok: true; review: EditingTaskReview } | { ok: false; error: string; missing?: string[] } {
-  if (task.mode !== 'one-click' && !isWhiteboardDirectorTask(task)) return { ok: false, error: 'finish_edit is for a whole-video editing task.' };
-  if (evidence.emptyMusicTracks?.length) return { ok: false, error: `Remove unused empty music tracks before finishing: ${evidence.emptyMusicTracks.join(', ')}. Create music lanes with actual placed audio, not pending suggestions.` };
-  if (!isWhiteboardDirectorTask(task) && (!task.roughCut || task.roughCut.report.steps.some(step => ['pending', 'running', 'failed'].includes(step.status)))) return { ok: false, error: 'Complete the unfinished rough-cut steps first; preserve completed checkpoints.' };
+export type EditingTaskReviewOutcome = { ok: true; review: EditingTaskReview } | { ok: false; error: string; problems: string[]; missing?: string[] };
+
+/** A refusal listing every problem, so one more finish_edit can fix them all. */
+function refused(problems: string[], missing: string[] = []): EditingTaskReviewOutcome {
+  const error = problems.length === 1 ? problems[0]! : `Fix all of these, then call finish_edit once:\n${problems.map((problem, index) => `${index + 1}. ${problem}`).join('\n')}`;
+  return { ok: false, error, problems, ...(missing.length ? { missing } : {}) };
+}
+
+/** Validate completion against actual timeline evidence, not the model's claim that it added a feature.
+ *  Every problem is reported at once: one at a time burns the retry budget on the next one. */
+export function reviewEditingTask(task: ChatTask, input: Record<string, unknown>, evidence: EditingEvidence, document?: EditorDocumentV2): EditingTaskReviewOutcome {
+  if (task.mode !== 'one-click' && !isWhiteboardDirectorTask(task)) return refused(['finish_edit is for a whole-video editing task.']);
+  const problems: string[] = [];
+  const missing: string[] = [];
+  if (evidence.emptyMusicTracks?.length) problems.push(`Remove unused empty music tracks before finishing: ${evidence.emptyMusicTracks.join(', ')}. Create music lanes with actual placed audio, not pending suggestions.`);
+  if (!isWhiteboardDirectorTask(task) && (!task.roughCut || task.roughCut.report.steps.some(step => ['pending', 'running', 'failed'].includes(step.status)))) problems.push('Complete the unfinished rough-cut steps first; preserve completed checkpoints.');
   if (isWhiteboardDirectorTask(task) && document) {
     const composition = projectDocumentToComposition(document);
     const primary = document.timeline.tracks.find(track => track.id === document.semantics.primaryNarrativeTrackId);
@@ -44,35 +55,44 @@ export function reviewEditingTask(task: ChatTask, input: Record<string, unknown>
       if (clip.kind === 'narrative' && clip.properties?.audioMuted || clip.kind === 'media' && clip.video?.audioMuted) intact=false;
       sourceCursor=clip.sourceOutSec;frameCursor=clip.startFrame+clip.durationFrames;
     }
-    if (!intact || Math.abs(sourceCursor-(sourceDuration ?? 0)) > 1/document.canvas.fps) return { ok:false,error:'Preserve the complete original narration, order, speed and audible primary track for this whiteboard task.' };
-    const end = frameCursor/document.canvas.fps;
-    if (!whiteboardSceneReady(composition.blocks, document.canvas.width, document.canvas.height, end)) return { ok: false, error: 'The whiteboard must cover the entire original narration at the selected aspect before finishing.' };
+    if (!intact || Math.abs(sourceCursor-(sourceDuration ?? 0)) > 1/document.canvas.fps) problems.push('Preserve the complete original narration, order, speed and audible primary track for this whiteboard task.');
+    else if (!whiteboardSceneReady(composition.blocks, document.canvas.width, document.canvas.height, frameCursor/document.canvas.fps)) problems.push('The whiteboard must cover the entire original narration at the selected aspect before finishing.');
   }
   const director = task.directorPlanRequired || task.directorPlan ? reviewDirectorPlan(task, input, document) : undefined;
-  if (director && !director.ok) return director;
+  if (director && !director.ok) problems.push(...director.problems);
   const coverResult = reviewBrandCover(task, input.cover, document);
-  if (!coverResult.ok) return coverResult;
+  if (!coverResult.ok) {
+    problems.push(coverResult.error);
+    if (coverResult.missing) missing.push(...coverResult.missing);
+  }
   const wanted = requestedEditFeatures(task);
   const raw = Array.isArray(input.features) ? input.features as Record<string, unknown>[] : [];
-  const missing = wanted.filter(feature => !raw.some(item => item?.feature === feature));
-  if (missing.length) return { ok: false, error: 'Account for every enabled feature before finishing.', missing };
+  const unaccounted = wanted.filter(feature => !raw.some(item => item?.feature === feature));
+  if (unaccounted.length) {
+    problems.push(`Account for every enabled feature: ${unaccounted.join(', ')}.`);
+    missing.push(...unaccounted);
+  }
   const items: EditingTaskReview['items'] = [];
-  const reviewed = raw.some(item => item?.feature === 'transitions') ? [...wanted, 'transitions' as const] : wanted;
+  const reviewed = (raw.some(item => item?.feature === 'transitions') ? [...wanted, 'transitions' as const] : wanted).filter(feature => !unaccounted.includes(feature));
   for (const feature of reviewed) {
     const row = raw.find(item => item?.feature === feature)!;
     const reason = typeof row.reason === 'string' ? row.reason.trim() : '';
-    if (!['applied', 'not_needed', 'blocked'].includes(String(row.status)) || reason.length < 8) return { ok: false, error: `Give a concrete content-based reason for ${feature}.` };
+    if (!['applied', 'not_needed', 'blocked'].includes(String(row.status)) || reason.length < 8) { problems.push(`Give a concrete content-based reason for ${feature}.`); continue; }
     const count = evidence[feature]?.length ?? 0;
     // A music bed is not a sound effect: without saying so, a model that laid music keeps re-adding it.
-    if (row.status === 'applied' && !count) return { ok: false, error: feature === 'sound'
-      ? 'sound counts sound effects on an effects lane; a music bed on the music lane is not one. Add effects where points land, or report sound as not_needed or blocked with the content-based reason.'
-      : `${feature} is absent from the current timeline. Apply it or report why it is blocked/not needed.` };
-    if (row.status === 'not_needed' && feature === 'b-roll' && /没有.{0,8}素材|无.{0,4}素材|no (?:available |supporting |usable )?(?:media|assets|footage)/i.test(reason)) return { ok: false, error: 'An empty library is a sourcing gap, not a content-based reason to skip B-roll. Search or generate when authorized, or report blocked.' };
-    if (row.status !== 'blocked' && (typeof row.atFrame !== 'number' || !Number.isInteger(row.atFrame) || row.atFrame < 0)) return { ok: false, error: `Name the timeline moment evaluated for ${feature} with atFrame.` };
+    if (row.status === 'applied' && !count) {
+      problems.push(feature === 'sound'
+        ? 'sound counts sound effects on an effects lane; a music bed on the music lane is not one. Add effects where points land, or report sound as not_needed or blocked with the content-based reason.'
+        : `${feature} is absent from the current timeline. Apply it or report why it is blocked/not needed.`);
+      continue;
+    }
+    if (row.status === 'not_needed' && feature === 'b-roll' && /没有.{0,8}素材|无.{0,4}素材|no (?:available |supporting |usable )?(?:media|assets|footage)/i.test(reason)) { problems.push('An empty library is a sourcing gap, not a content-based reason to skip B-roll. Search or generate when authorized, or report blocked.'); continue; }
+    if (row.status !== 'blocked' && (typeof row.atFrame !== 'number' || !Number.isInteger(row.atFrame) || row.atFrame < 0)) { problems.push(`Name the timeline moment evaluated for ${feature} with atFrame.`); continue; }
     items.push({ feature, status: row.status as EditingTaskReview['items'][number]['status'], reason, count, ...(typeof row.atFrame === 'number' ? { atFrame: row.atFrame } : {}) });
   }
   const brandApplication = typeof input.brandApplication === 'string' ? input.brandApplication.trim() : '';
-  if (task.config?.brand && brandApplication.length < 12) return { ok: false, error: 'Explain the concrete visual choices applied from the selected brand, not just its name.' };
+  if (task.config?.brand && brandApplication.length < 12) problems.push('Explain the concrete visual choices applied from the selected brand, not just its name.');
+  if (problems.length || !coverResult.ok || (director && !director.ok)) return refused(problems, missing);
   return { ok: true, review: { completed: items.every(item => item.status !== 'blocked') && (director?.completed ?? true) && coverResult.cover?.status !== 'blocked', items, ...(coverResult.cover ? { cover: coverResult.cover } : {}), ...(director ? { director: { revision: task.directorPlan!.revision, summary: director.summary, beats: director.beats } } : {}), ...(brandApplication ? { brandApplication } : {}) } };
 }
 

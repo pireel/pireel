@@ -58,26 +58,37 @@ export function saveEditingDirectorPlan(task: ChatTask, input: Record<string, un
 }
 
 /** Completed claims reference real clips at that passage, not just a global MG count. */
-export function reviewDirectorPlan(task: ChatTask, input: Record<string, unknown>, document?: EditorDocumentV2): { ok: true; beats: DirectorBeatResult[]; summary: string; completed: boolean } | { ok: false; error: string } {
+export function reviewDirectorPlan(task: ChatTask, input: Record<string, unknown>, document?: EditorDocumentV2): { ok: true; beats: DirectorBeatResult[]; summary: string; completed: boolean } | { ok: false; error: string; problems: string[] } {
   const plan = task.directorPlan;
-  if (!plan || !document) return { ok: false, error: 'Save the current task’s director plan and review the timeline before finishing.' };
-  if (input.planRevision !== plan.revision) return { ok: false, error: 'Review the current director plan revision.' };
-  if (!prose(input.editorialReview, 12)) return { ok: false, error: 'Review the actual opening, progression, pacing and brand coherence, and fix defects before finishing.' };
-  if (!Array.isArray(input.beats) || input.beats.length !== plan.beats.length) return { ok: false, error: 'Report the result of every planned beat.' };
+  const refuse = (problems: string[]) => ({ ok: false as const, error: problems.join(' '), problems });
+  if (!plan || !document) return refuse(['Save the current task’s director plan and review the timeline before finishing.']);
+  // Every problem at once: a refusal that names one at a time burns the retry budget on the next one.
+  const problems: string[] = [];
+  if (input.planRevision !== plan.revision) problems.push(`Review the current director plan revision (planRevision ${plan.revision}).`);
+  if (!prose(input.editorialReview, 12)) problems.push('Review the actual opening, progression, pacing and brand coherence, and fix defects before finishing.');
+  const rows = Array.isArray(input.beats) ? input.beats as (DirectorBeatResult | null)[] : [];
+  if (rows.length !== plan.beats.length) problems.push(`Report the result of every planned beat (${plan.beats.length}).`);
   const clips = visibleClips(document);
   const beats: DirectorBeatResult[] = [];
   for (const beat of plan.beats) {
-    const matches = input.beats.filter((value: DirectorBeatResult | null) => value?.beatId === beat.id);
-    const row = matches[0] as DirectorBeatResult | undefined;
-    if (matches.length !== 1 || !row || !['applied', 'kept', 'changed', 'blocked'].includes(row.status) || !prose(row.result) || !Array.isArray(row.clipIds)) return { ok: false, error: `Account for beat ${beat.id} with a concrete outcome and any changed decision.` };
+    const matches = rows.filter((value) => value?.beatId === beat.id);
+    const row = matches[0] ?? undefined;
+    if (matches.length !== 1 || !row || !['applied', 'kept', 'changed', 'blocked'].includes(row.status) || !prose(row.result) || !Array.isArray(row.clipIds)) {
+      problems.push(`Account for beat ${beat.id} once, with a concrete outcome and any changed decision.`);
+      continue;
+    }
     const windows = directorBeatWindows(beat, document);
     const atPassage = clips.filter(clip => windows.some(w => clip.startFrame < w.endFrame && clip.startFrame + clip.durationFrames > w.startFrame)).map(clip => clip.id);
     const elsewhere = row.clipIds.filter(id => !atPassage.includes(id));
     // Name the ids that miss and the clips that are there: a bare refusal leaves the model guessing which of its ids is wrong.
-    if (row.status !== 'blocked' && (!row.clipIds.length || elsewhere.length)) return { ok: false, error: `Beat ${beat.id} needs real enabled clips at its current source-anchored placement.${elsewhere.length ? ` Not at that passage: ${elsewhere.join(', ')}.` : ''} Clips there now: ${atPassage.join(', ') || 'none'}. If removed or unresolved, revise the plan or report blocked.` };
+    if (row.status !== 'blocked' && (!row.clipIds.length || elsewhere.length)) {
+      problems.push(`Beat ${beat.id} needs real enabled clips at its current source-anchored placement.${elsewhere.length ? ` Not at that passage: ${elsewhere.join(', ')}.` : ''} Clips there now: ${atPassage.join(', ') || 'none'}. If removed or unresolved, revise the plan or report blocked.`);
+      continue;
+    }
     beats.push({ beatId: beat.id, status: row.status, result: row.result.trim(), clipIds: row.clipIds.filter(id => typeof id === 'string') });
   }
-  return { ok: true, beats, summary: input.editorialReview.trim(), completed: beats.every(beat => beat.status !== 'blocked') };
+  if (problems.length) return refuse(problems);
+  return { ok: true, beats, summary: (input.editorialReview as string).trim(), completed: beats.every(beat => beat.status !== 'blocked') };
 }
 
 export function directorPlanToolBlock(task: ChatTask | undefined, id: string, mutates: boolean, input?: Record<string, unknown>): string | undefined {
