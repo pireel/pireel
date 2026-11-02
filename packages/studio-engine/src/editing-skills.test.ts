@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderV3State } from '@pireel/studio-engine/agent-surface-v3/state';
+import { V3_CHAT_TOOL_IDS, V3_MCP_TOOL_IDS } from '@pireel/studio-engine/agent-surface-v3/registry';
 import { editingSkillsHint } from '@pireel/studio-engine/editing-skills';
 import { emptyEditorDocumentV2 } from '@pireel/studio-engine/editor-document';
 import { applyEditorCommand } from '@pireel/studio-engine/editor-document/commands/dispatcher';
@@ -29,5 +30,14 @@ describe('editing skills', () => {
     expect(hint).toContain('read_skill video-graphics');
     expect(hint).toContain('read_skill speech-cleanup');
     expect(hint).not.toContain('captions');
+  });
+
+  it('never name a tool the surface does not attach', () => {
+    expect(editingSkillsHint(['cover'], V3_CHAT_TOOL_IDS)).toContain('generate_cover');
+    const mcp = editingSkillsHint(['cover'], V3_MCP_TOOL_IDS);
+    expect(mcp).not.toContain('generate_cover');
+    expect(mcp).toContain('offer it as a next step');
+    const document = applyEditorCommand(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }), { type: 'editingSkills.set', ids: ['cover'] }).document;
+    expect(JSON.stringify(renderV3State(document, { tools: V3_MCP_TOOL_IDS }).editingSkills)).not.toContain('generate_cover');
   });
 });

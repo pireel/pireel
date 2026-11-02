@@ -10,10 +10,13 @@ export interface EditingSkill {
   id: string;
   /** For the agent: what this switch asks for and where the craft is. */
   instruction: string;
+  /** A tool the instruction depends on; where it is not attached, `otherwise` is said instead. */
+  requires?: string;
+  otherwise?: string;
 }
 
 export const EDITING_SKILLS = [
-  { id: 'cover', instruction: 'Automatically create one cover in the independent cover scene (generate_cover). Enabling this capability authorizes cover analysis and generation without another confirmation. Keep cover prompts, frames and results out of the main chat. Where generate_cover is not attached, offer the cover as a next step instead.' },
+  { id: 'cover', instruction: 'Automatically create one cover in the independent cover scene (generate_cover). Enabling this capability authorizes cover analysis and generation without another confirmation. Keep cover prompts, frames and results out of the main chat.', requires: 'generate_cover', otherwise: 'A cover for this video. It is made in Pireel Studio; offer it as a next step.' },
   { id: 'graphics', instruction: 'Motion graphics designed for this video, timed to the speech (read_skill video-graphics).' },
   { id: 'captions', instruction: 'Word-synced captions (set_captions).' },
   { id: 'rough-cut', instruction: 'Cut filler words, false starts, failed retakes and dead air while keeping the meaning: rough_cut makes the first pass; read_skill speech-cleanup for judgment beyond it.' },
@@ -33,15 +36,19 @@ export const EDITING_SKILL_IDS: readonly EditingSkillId[] = EDITING_SKILLS.map((
 export const isEditingSkillId = (value: unknown): value is EditingSkillId =>
   typeof value === 'string' && (EDITING_SKILL_IDS as readonly string[]).includes(value);
 
-/** The switched-on skills, in catalog order. */
-export function editingSkillsOf(ids: readonly string[] | undefined): EditingSkill[] {
+/** The switched-on skills, in catalog order, as the agent reads them: given the tools attached on
+ *  its surface, an instruction that needs a missing tool is replaced by its fallback. */
+export function editingSkillsOf(ids: readonly string[] | undefined, tools?: ReadonlySet<string>): { id: string; instruction: string }[] {
   const on = new Set(ids ?? []);
-  return EDITING_SKILLS.filter((skill) => on.has(skill.id));
+  return EDITING_SKILLS.filter((skill) => on.has(skill.id)).map((skill: EditingSkill) => ({
+    id: skill.id,
+    instruction: skill.requires && tools && !tools.has(skill.requires) && skill.otherwise ? skill.otherwise : skill.instruction,
+  }));
 }
 
 /** One note for an agent turn: which skills are on and how they apply. Empty when none is on. */
-export function editingSkillsHint(ids: readonly string[] | undefined): string {
-  const on = editingSkillsOf(ids);
+export function editingSkillsHint(ids: readonly string[] | undefined, tools?: ReadonlySet<string>): string {
+  const on = editingSkillsOf(ids, tools);
   if (!on.length) return '';
   return [
     'Editing capabilities enabled for this project. Use them when useful for a whole-video edit, not as quotas or a requirement to add something from every category. For a narrow request, do only what was asked. The current explicit request takes precedence over brand defaults.',

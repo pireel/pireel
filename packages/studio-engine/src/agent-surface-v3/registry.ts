@@ -119,6 +119,8 @@ export const V3_TOOL_LIMIT = 63;
 export const V3_TOOL_IDS: ReadonlySet<string> = new Set(V3_TOOLS.map((tool) => tool.id));
 /** Studio Chat uses inline questions; the legacy publishing checklist remains MCP-compatible. */
 export const V3_CHAT_TOOL_IDS: ReadonlySet<string> = new Set([...V3_TOOL_IDS].filter(id => id !== 'set_confirm_list'));
+/** What an external agent gets: everything but the chat-only tools. */
+export const V3_MCP_TOOL_IDS: ReadonlySet<string> = new Set(V3_TOOLS.filter((tool) => !tool.chatOnly).map((tool) => tool.id));
 
 
 /** v3 tools that never change the output (reads, searches, inspection, skills, preview, session queries). */

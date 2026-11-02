@@ -61,7 +61,7 @@ import {
   STUDIO_CREATE_SKILL_ACTION,
   latestStudioMetaAction,
 } from "@pireel/studio-engine/skill-actions";
-import { CHAT_SERVER_EXECUTED_TOOLS, v3ToolCanMutate, V3_TOOL_IDS } from "@pireel/studio-engine/agent-surface-v3/registry";
+import { CHAT_SERVER_EXECUTED_TOOLS, v3ToolCanMutate, V3_CHAT_TOOL_IDS, V3_TOOL_IDS } from "@pireel/studio-engine/agent-surface-v3/registry";
 import {
   CHAT_ACTION_PILL_CLASS,
   CHAT_PILL_ICON_CLASS,
@@ -319,14 +319,10 @@ export function ChatThread({
       const canMutate = v3ToolCanMutate(id);
       // What a refusal adds once the same call or the same tool keeps failing in this turn: refused
       // results (ok:false) count as much as errors, and reading state in between does not reset it.
+      // Model-facing, so English whatever the UI language (AGENTS.md: text sent to a model stays in code).
       const loopNote = (recorded: { repeatedFailureCount: number; toolFailureCount: number }) => {
-        const zh = studioLocale().toLowerCase().startsWith("zh");
-        if (recorded.repeatedFailureCount >= 2) return zh
-          ? `（完全相同的调用已连续失败 ${recorded.repeatedFailureCount} 次，重试不会成功：改用回执里的真实 id 与参数，或放弃该操作直接收尾。）`
-          : ` (This identical call has now failed ${recorded.repeatedFailureCount} times in a row; retrying cannot succeed. Use the real ids and parameters from receipts, or drop this operation and finish.)`;
-        if (recorded.toolFailureCount >= 2) return zh
-          ? `（${id} 本轮已失败 ${recorded.toolFailureCount} 次，换措辞重试无效：按错误提示改参数或先改时间线；改不了就别再调用它，直接用文字告诉用户卡在哪里。）`
-          : ` (${id} has failed ${recorded.toolFailureCount} times this turn; rewording it does not help. Change what the error names, in the input or on the timeline, or stop calling this tool and tell the user in plain text what blocks it.)`;
+        if (recorded.repeatedFailureCount >= 2) return ` (This identical call has now failed ${recorded.repeatedFailureCount} times in a row; retrying cannot succeed. Use the real ids and parameters from receipts, or drop this operation and finish.)`;
+        if (recorded.toolFailureCount >= 2) return ` (${id} has failed ${recorded.toolFailureCount} times this turn; rewording it does not help. Change what the error names, in the input or on the timeline, or stop calling this tool and tell the user in plain text what blocks it.)`;
         return '';
       };
       const publishSuccess = (output: Record<string, unknown>) => {
@@ -368,7 +364,7 @@ export function ChatThread({
         const result = saveEditingDirectorPlan(task, requestedInput, document);
         if (!result.ok) { publishSuccess(result); return; }
         updateTask(task.id, current => ({ ...current, directorPlan: result.plan, review: undefined }));
-        publishSuccess({ ok: true, summary: studioLocale().startsWith('zh') ? t('ui.chatThread.planSaved') : 'Editing direction saved', data: { plan: result.plan, next: 'Execute this plan now. Resolve source anchors against the current timeline after structural cuts; no approval stop.' } });
+        publishSuccess({ ok: true, summary: 'Editing direction saved', data: { plan: result.plan, next: 'Execute this plan now. Resolve source anchors against the current timeline after structural cuts; no approval stop.' } });
         return;
       }
       // A tool refused this often in one turn is not run again: the model reports the blocker instead.
@@ -386,16 +382,14 @@ export function ChatThread({
         const result = reviewEditingTask(task, requestedInput, fineCutClips(), getDocument?.());
         if (!result.ok) { publishSuccess({ ok: false, error: result.error, ...(result.missing ? { data: { missing: result.missing } } : {}) }); return; }
         updateTask(task.id, current => ({ ...current, review: result.review }));
-        publishSuccess({ ok: true, summary: studioLocale().startsWith('zh') ? t('ui.chatThread.editChecked') : 'Editing result checked', data: { review: result.review, taskIncomplete: !result.review.completed } });
+        publishSuccess({ ok: true, summary: 'Editing result checked', data: { review: result.review, taskIncomplete: !result.review.completed } });
         return;
       }
       if (id === "undo" && shouldBlockStudioTurnUndo(ledger)) {
         publishSuccess({
           ok: true,
           skipped: true,
-          summary: studioLocale().toLowerCase().startsWith("zh")
-            ? t('ui.chatThread.undoSkipped')
-            : "The previous operation failed without changing the timeline, so undo was skipped.",
+          summary: "The previous operation failed without changing the timeline, so undo was skipped.",
           data: { skipped: true, reason: "previous-mutation-failed", didMutate: false },
         });
         return;
@@ -738,7 +732,7 @@ export function ChatThread({
         continuing ? resumeTaskHint(task) : options.hint ?? "",
         mentionedIds.length ? `Referenced elements in this message (use these ids directly): ${JSON.stringify(mentionedIds)}` : "",
         localAssetContext,
-        continuing ? editingSkillsHint(task.skills) : projectEditedRef.current ? "" : editingSkillsHint(editingSkillsRef.current),
+        continuing ? editingSkillsHint(task.skills, V3_CHAT_TOOL_IDS) : projectEditedRef.current ? "" : editingSkillsHint(editingSkillsRef.current, V3_CHAT_TOOL_IDS),
       ].filter(Boolean).join("\n");
       const metadata = {
         task,

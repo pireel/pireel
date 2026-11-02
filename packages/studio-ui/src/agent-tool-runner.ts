@@ -77,7 +77,7 @@ import {
   type SceneVisualReviewPhase,
 } from '@pireel/studio-engine/scene-visual-qa';
 import type { V3ClipKind } from '@pireel/studio-engine/agent-surface-v3/context';
-import { V3_TOOL_IDS } from '@pireel/studio-engine/agent-surface-v3/registry';
+import { V3_CHAT_TOOL_IDS, V3_MCP_TOOL_IDS, V3_TOOL_IDS } from '@pireel/studio-engine/agent-surface-v3/registry';
 import { transcriptTargets } from '@pireel/studio-engine/agent-timeline-v3';
 import { validateV3Input } from '@pireel/studio-engine/agent-surface-v3/validate';
 import { describeStepFailure } from '@pireel/studio-engine/agent-surface-v3/receipt-errors';
@@ -4134,7 +4134,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         const before = documentRef.current;
         if (name === 'get_state') {
           const window = args.window && typeof args.window === 'object' ? (args.window as { tracks?: string[]; fromFrame?: number; toFrame?: number }) : undefined;
-          const state = renderV3State(before, window ? { window } : {});
+          const state = renderV3State(before, { ...(window ? { window } : {}), tools: stepSurface === 'chat' ? V3_CHAT_TOOL_IDS : V3_MCP_TOOL_IDS });
           // The project library lives in the device index until a save merges it into the document;
           // the agent must see unplaced footage here or it goes hunting through cloud scopes.
           const knownSigs = new Set(Object.values(before.assets).map((asset) => asset.locator.localSig).filter(Boolean));

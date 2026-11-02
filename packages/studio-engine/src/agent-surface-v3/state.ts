@@ -306,7 +306,8 @@ export function documentDurationFrames(document: EditorDocumentV2): number {
 /** The get_state shape. `window` narrows tracks and frames; truncated tracks report totalClips. */
 export function renderV3State(
   document: EditorDocumentV2,
-  options: { window?: { tracks?: string[]; fromFrame?: number; toFrame?: number } } = {},
+  /** `tools`: what the caller's surface attaches, so editing-switch notes never name a missing tool. */
+  options: { window?: { tracks?: string[]; fromFrame?: number; toFrame?: number }; tools?: ReadonlySet<string> } = {},
 ): V3StateView {
   const window = options.window;
   const wanted = window?.tracks?.length ? new Set(window.tracks) : null;
@@ -392,7 +393,7 @@ export function renderV3State(
     })),
     semantics: { primaryTrackId: document.semantics.primaryNarrativeTrackId, sceneIds: document.semantics.scenes.map((scene) => scene.id) },
     ...(document.semantics.handoff?.length ? { confirmList: document.semantics.handoff.map(({ id, kind, text, status, answer }) => ({ id, kind, text, status, ...(answer ? { answer } : {}) })) } : {}),
-    ...(document.semantics.editingSkills?.length ? { editingSkills: editingSkillsOf(document.semantics.editingSkills) } : {}),
+    ...(document.semantics.editingSkills?.length ? { editingSkills: editingSkillsOf(document.semantics.editingSkills, options.tools) } : {}),
     fonts: webFontCatalog(),
   };
 }
