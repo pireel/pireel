@@ -13,10 +13,10 @@ export interface EditingSkill {
 }
 
 export const EDITING_SKILLS = [
-  { id: 'cover', instruction: 'Automatically create one cover in the independent cover scene (generate_cover). Enabling this capability authorizes cover analysis and generation without another confirmation. Keep cover prompts, frames and results out of the main chat.' },
+  { id: 'cover', instruction: 'Automatically create one cover in the independent cover scene (generate_cover). Enabling this capability authorizes cover analysis and generation without another confirmation. Keep cover prompts, frames and results out of the main chat. Where generate_cover is not attached, offer the cover as a next step instead.' },
   { id: 'graphics', instruction: 'Motion graphics designed for this video, timed to the speech (read_skill video-graphics).' },
   { id: 'captions', instruction: 'Word-synced captions (set_captions).' },
-  { id: 'rough-cut', instruction: 'Cut filler words, false starts, failed retakes and dead air while keeping the meaning (read_skill speech-cleanup).' },
+  { id: 'rough-cut', instruction: 'Cut filler words, false starts, failed retakes and dead air while keeping the meaning: rough_cut makes the first pass; read_skill speech-cleanup for judgment beyond it.' },
   { id: 'voice-cleanup', instruction: 'Cleaner narration: remove background noise (denoise_audio).' },
   { id: 'b-roll', instruction: 'B-roll where the speech names something that can be shown: the creator\'s own media first, then stock (search_assets). Follow the normal generation approval policy when new footage is needed (read_skill talking-head-edit).' },
   { id: 'sound', instruction: 'Sound effects where a point lands. Add background music only when requested (read_skill audio-and-music).' },

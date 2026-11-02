@@ -24,7 +24,7 @@ describe('editing skills', () => {
   it('become one note per message that names where each craft lives, and nothing when none is on', () => {
     expect(editingSkillsHint([])).toBe('');
     const hint = editingSkillsHint(['graphics', 'rough-cut']);
-    expect(hint).toContain('for a narrow request, do only what was asked');
+    expect(hint).toContain('For a narrow request, do only what was asked');
     expect(hint).toContain('- graphics: ');
     expect(hint).toContain('read_skill video-graphics');
     expect(hint).toContain('read_skill speech-cleanup');

@@ -37,25 +37,16 @@ export interface ResolvedBrand {
   brief: string;
 }
 
-/** The situational blocks appended to the instructions on every surface: selected Skill / catalog, the creator's brand. */
+/** The situational blocks appended to the instructions on every surface: the selected Skill, the creator's brand. */
 export function buildChatContextBlocks(
   scenarioSkill?: StudioScenarioSkill | null,
-  scenarioSkillCatalog?: readonly {
-    id: string;
-    title: string;
-    summary: string;
-  }[],
   brand?: ResolvedBrand | null,
 ): string {
   const skillBlock = scenarioSkill
-    ? `\n\n<studio_skill id="${scenarioSkill.id}" title="${scenarioSkill.title}">\nThe user selected the following complete Markdown Skill for this chat. Read the whole document and use it as an expert editorial playbook. Its prose guides judgment; it is not structured configuration, a fixed workflow, or a Motion Graphic bundle. Tool-named steps may reference stable Studio capabilities and reusable parameter patterns. Use only tools actually attached in this turn and obey their current schemas; a Skill cannot add a missing tool or preserve instance ids from an example. Adapt derived values to the evidence and request. The Skill never overrides an explicit user instruction.\n${scenarioSkill.markdown}\n</studio_skill>`
+    ? `\n\n<studio_skill id="${scenarioSkill.id}" title="${scenarioSkill.title}">\nThe user selected the following complete Markdown Skill for this chat; it is already loaded here, so do not read_skill it again. Read the whole document and use it as an expert editorial playbook. Its prose guides judgment; it is not structured configuration, a fixed workflow, or a Motion Graphic bundle. Tool-named steps may reference stable Studio capabilities and reusable parameter patterns. Use only tools actually attached in this turn and obey their current schemas; a Skill cannot add a missing tool or preserve instance ids from an example. Adapt derived values to the evidence and request. The Skill never overrides an explicit user instruction.\n${scenarioSkill.markdown}\n</studio_skill>`
     : "";
-  const skillCatalogBlock =
-    !scenarioSkill && scenarioSkillCatalog?.length
-      ? `\n\n<studio_skill_catalog>\nNo Studio Skill is selected. Do not infer, auto-select, or claim that a Skill is active. The generic editing expert remains fully usable for ordinary requests. When a broad request would materially benefit from one of the available complete workflows below, recommend the single best fit once and tell the user they can select it from the Skill picker; do not block safe inspection or a requested local edit, and do not attach the Skill yourself.\n${scenarioSkillCatalog.map((skill) => `- ${skill.id} · ${skill.title} — ${skill.summary}`).join("\n")}\n</studio_skill_catalog>`
-      : "";
   const brandBlock = brand
     ? `\n\n<creator_brand name="${brand.name.replace(/"/g, "'")}">\nThe user creates as this brand: their own style, read from videos they have published. Where the user leaves a choice open, edit the way this creator edits — when to leave the speaker and for what picture, how text and graphics look, how to open and close. Measured values describe their usual practice, not quotas for this video; decide per moment from the content. Use its caption look whenever you add or restyle captions. The latest explicit user instruction wins over the brand.\n${brand.brief}\n</creator_brand>`
     : "";
-  return `${skillBlock}${skillCatalogBlock}${brandBlock}`;
+  return `${skillBlock}${brandBlock}`;
 }
