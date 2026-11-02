@@ -104,3 +104,35 @@ describe('playback token lookup', () => {
     expect(activeTranscriptTokenIndex([], 0)).toBe(-1);
   });
 });
+
+describe('removed source in the captions script', () => {
+  it('keeps cut words and pauses at their cut, struck through and restorable', async () => {
+    const { document, assetId } = fixture();
+    const trackId = document.semantics.primaryNarrativeTrackId!;
+    // Cut "世界。" with the pause before it (source 0.4–3.9 s) and the head word "你好".
+    const cut = applyEditorCommand(document, { type: 'range.remove', trackId, startFrame: 12, endFrame: 117, mode: 'ripple', includeLinked: true });
+    expect(cut.ok).toBe(true);
+    if (!cut.ok) throw new Error(cut.error.message);
+    const { transcriptRemovals } = await import('./transcript-editor-model');
+    const removals = transcriptRemovals(cut.document);
+    expect(removals).toHaveLength(1);
+    expect(removals[0]).toMatchObject({ assetId, atSec: 0.4, parts: [
+      { kind: 'pause', text: '' },
+      { kind: 'word', text: '世界。', sourceStart: 2, sourceEnd: 3.8 },
+    ] });
+    const paragraphs = transcriptParagraphs(cut.document, transcriptTokens(cut.document), [], removals);
+    const order = paragraphs.flatMap((paragraph) => paragraph.items.map((item) => item.type === 'word' ? item.token.text : item.type === 'removed' ? `~${item.removal.parts.map((part) => part.text || 'pause').join('')}~` : 'pause'));
+    expect(order.slice(0, 3)).toEqual(['你好', '~pause世界。~', '这是']);
+
+    // Restoring the word puts it back at its cut; only the pause stays removed.
+    const { insertNarrativeAssetRange } = await import('@pireel/studio-engine/composition');
+    const removal = removals[0]!;
+    const neighbour = cut.document.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === removal.clipId)!;
+    const restored = insertNarrativeAssetRange({ document: cut.document, assetId, clipId: 'restored', atSec: removal.atSec, sourceInSec: 2, sourceOutSec: 3.8,
+      properties: (neighbour as unknown as { properties: never }).properties, transcriptSectionId: removal.sectionId, coalesceAdjacent: true });
+    expect(restored.ok).toBe(true);
+    if (!restored.ok) throw new Error('restore failed');
+    expect(transcriptTokens(restored.document).map((token) => token.text)).toEqual(['你好', '世界。', '这是', '第二句。']);
+    expect(transcriptRemovals(restored.document).flatMap((entry) => entry.parts.map((part) => part.kind))).toEqual(['pause']);
+  });
+});

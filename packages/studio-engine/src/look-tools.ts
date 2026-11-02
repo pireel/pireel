@@ -47,8 +47,12 @@ function listFieldOutsideRows(schema: unknown): { prop: string; field: string } 
 export function setLookV3(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const raw = input.look && typeof input.look === 'object' && !Array.isArray(input.look) ? (input.look as Input) : null;
   if (!raw) return fail('missing_field', { path: 'look', fix: 'Pass look: { css, pieces: [{ id, label, source, propsSchema }], notes }.' });
+  const previous = document.appearance.look;
+  if (!previous && typeof raw.css !== 'string') return fail('missing_field', { path: 'look.css', fix: 'The first look needs its stylesheet: pass look.css with the pieces.' });
+  const removed = Array.isArray(raw.removePieces) ? raw.removePieces.filter((id): id is string => typeof id === 'string') : [];
   // Pieces arrive as a list (the tool contract has no free-form maps); stored keyed by id.
   let pieces = raw.pieces;
+  if (pieces === undefined && previous) pieces = [];
   if (Array.isArray(pieces)) {
     const keyed: Record<string, unknown> = {};
     for (const [index, entry] of pieces.entries()) {
@@ -66,19 +70,30 @@ export function setLookV3(document: EditorDocumentV2, input: Input): AgentTimeli
       if (stray) return fail('invalid_value', { path: `look.pieces[${index}].propsSchema.${stray.prop}.items.properties.${stray.field}`, fix: `List rows carry only ${COMPONENT_ROW_FIELDS.join(', ')}; carry ${stray.field} in one of them.` });
       keyed[id] = { label: piece.label, source: piece.source, ...(propsSchema && typeof propsSchema === 'object' ? { propsSchema } : {}) };
     }
-    pieces = keyed;
+    // An existing look is updated in place: the pieces sent replace those ids, the rest stay, and
+    // css, fonts and notes keep their values unless sent.
+    pieces = previous
+      ? { ...Object.fromEntries(Object.entries(previous.pieces).filter(([id]) => !removed.includes(id))), ...keyed }
+      : keyed;
   }
-  const candidate = { ...raw, pieces, id: string(raw.id) ?? lookIdFor(raw) };
+  const merged: Input = previous
+    ? {
+      css: typeof raw.css === 'string' ? raw.css : previous.css,
+      ...(raw.notes !== undefined ? { notes: raw.notes } : previous.notes ? { notes: previous.notes } : {}),
+      ...(raw.fonts !== undefined ? { fonts: raw.fonts } : previous.fonts ? { fonts: previous.fonts } : {}),
+    }
+    : { css: raw.css, ...(raw.notes !== undefined ? { notes: raw.notes } : {}), ...(raw.fonts !== undefined ? { fonts: raw.fonts } : {}) };
+  const candidate = { ...merged, pieces, id: string(raw.id) ?? lookIdFor({ ...merged, pieces }) };
   const checked = normalizeLook(candidate);
   if (!checked.look) {
     return fail('invalid_look', {
       issues: checked.issues,
-      fix: 'Fix exactly the listed issues and call set_look again with the whole look.',
+      fix: 'Fix exactly the listed issues and call set_look again with only what changes (the pieces to fix, css if it changes).',
     });
   }
   const look = checked.look;
   const syntaxIssues = Object.entries(look.pieces).flatMap(([id, piece]) => lookSourceSyntaxIssues(piece.source, `look.pieces.${id}.source`));
-  if (syntaxIssues.length) return fail('invalid_look', { issues: syntaxIssues, fix: 'Correct the JavaScript syntax and submit the complete look again. The previous look has been preserved.' });
+  if (syntaxIssues.length) return fail('invalid_look', { issues: syntaxIssues, fix: 'Correct the JavaScript syntax and send those pieces again. The previous look has been preserved.' });
   const patched = patchEditorAppearance(document, { look });
   if (!patched.ok) return fail(patched.error?.message ?? 'look was not applied');
   // Instances of pieces the new look no longer has would render empty: name them.

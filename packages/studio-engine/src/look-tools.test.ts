@@ -111,6 +111,30 @@ describe('video-level template tools', () => {
   });
 });
 
+describe('set_look updates an existing look in place', () => {
+  it('replaces only the pieces sent, keeps css, fonts and notes, and drops removePieces', () => {
+    const first = setLook(withSpeech(), [
+      { id: 'item-card', label: 'Item card', source: card, propsSchema: '{"title":{"type":"string"}}' },
+      { id: 'stat', label: 'Stat', source: card, propsSchema: '{"title":{"type":"string"}}' },
+    ]).document!;
+    const tweaked = card.replace('<b>', '<strong>').replace('</b>', '</strong>');
+    const updated = runAgentTimelineTool(first, 'set_look', { look: { pieces: [{ id: 'item-card', label: 'Item card', source: tweaked, propsSchema: '{"title":{"type":"string"}}' }] } });
+    expect(updated.ok, JSON.stringify(updated)).toBe(true);
+    const look = updated.document!.appearance.look!;
+    expect(look.pieces['item-card']!.source).toBe(tweaked);
+    expect(look.pieces.stat!.source).toBe(card);
+    expect(look.css).toBe('.x { color: red; }');
+    expect(look.notes).toBe('Red means a count.');
+    expect(look.id).not.toBe(first.appearance.look!.id);
+    const restyled = runAgentTimelineTool(updated.document!, 'set_look', { look: { css: '.x { color: blue; }', removePieces: ['stat'] } });
+    expect(Object.keys(restyled.document!.appearance.look!.pieces)).toEqual(['item-card']);
+    expect(restyled.document!.appearance.look!.css).toBe('.x { color: blue; }');
+  });
+  it('asks for the stylesheet when there is no look yet', () => {
+    expect(runAgentTimelineTool(withSpeech(), 'set_look', { look: { pieces: [{ id: 'item-card', source: card }] } })).toMatchObject({ ok: false, error: 'missing_field', data: { path: 'look.css' } });
+  });
+});
+
 describe('authored function syntax feedback', () => {
   it('rejects incomplete code at submission and preserves the prior look', () => {
     const current=setLook(withSpeech()).document!;

@@ -69,6 +69,7 @@ export const CAPTIONS_ZH: Record<string, string> = {
   'captions.animateSelection': '动效',
   'captions.moreSelectionActions': '更多选段操作',
   'captions.restoreSelection': '恢复选中词',
+  'captions.restoreRemovedAll': '恢复这处删掉的全部内容',
   'captions.maskSelectionAudio': '遮蔽选中声音',
   'captions.maskSelectionText': '遮蔽选中字幕',
   'captions.generateMG': '生成 MG 动态图形',

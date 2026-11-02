@@ -1337,10 +1337,21 @@ export function getTranscriptV3(document: EditorDocumentV2, input: Input): Agent
       return { frames: [Math.round(c.startFrame + (from - c.sourceInSec) * scale), Math.round(c.startFrame + (to - c.sourceInSec) * scale)], clipped: missing };
     };
     // Key words read back in set_captions.highlights vocabulary: "style" or the fixed #RRGGBB.
+    // A word carries what the model edits with: its id, its text, where it plays (frames) and its
+    // row address; the source asset is named once for the list, and source seconds stay out (every
+    // word edit takes ids, every placement takes frames).
     const listed = { ...found, words: found.words.map((word) => {
       const decoration = (document.semantics.transcripts[word.assetId]?.[word.sentenceIndex] as AsrSegment | undefined)?.wordDecorations?.[String(word.wordIndex)];
       const placed = word.cut ? undefined : framesOf(word.assetId, word.start, word.end);
-      return { ...word, ...(placed ? { startFrame: placed.frames[0], endFrame: placed.frames[1], ...(placed.clipped ? { clipped: true } : {}) } : {}), ...(decoration?.highlight ? { highlight: decoration.color ?? 'style' } : {}) };
+      return {
+        id: word.id,
+        text: word.text,
+        ...(placed ? { startFrame: placed.frames[0], endFrame: placed.frames[1], ...(placed.clipped ? { clipped: true } : {}) } : {}),
+        sentenceIndex: word.sentenceIndex,
+        wordIndex: word.wordIndex,
+        ...(word.cut ? { cut: true } : {}),
+        ...(decoration?.highlight ? { highlight: decoration.color ?? 'style' } : {}),
+      };
     }) };
     return {
       ok: true,

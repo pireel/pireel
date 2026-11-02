@@ -69,6 +69,7 @@ export const CAPTIONS_EN: Record<string, string> = {
   'captions.animateSelection': 'Animate',
   'captions.moreSelectionActions': 'More selection actions',
   'captions.restoreSelection': 'Restore selected words',
+  'captions.restoreRemovedAll': 'Restore everything cut here',
   'captions.maskSelectionAudio': 'Mask selected audio',
   'captions.maskSelectionText': 'Mask selected captions',
   'captions.generateMG': 'Generate motion graphic',

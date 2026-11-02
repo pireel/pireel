@@ -519,8 +519,9 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
     const kitBase = isLookTemplate(b.templateId)
       ? {
           ...b,
-          // A look instance builds itself in its box: the piece reads the box size from ctx.
-          slots: { ...b.slots, piece: lookPieceOf(b.templateId), boxW: Math.round((b.box?.w ?? 1) * W), boxH: Math.round((b.box?.h ?? 1) * H) },
+          // A look instance builds itself in its layout box (the content box when a resize or a fit
+          // scaled it without reflow, else the box): the piece reads that size from ctx.
+          slots: { ...b.slots, piece: lookPieceOf(b.templateId), boxW: Math.round(((b.contentBox ?? b.box)?.w ?? 1) * W), boxH: Math.round(((b.contentBox ?? b.box)?.h ?? 1) * H) },
         }
       : b.templateId.startsWith('kit:')
       ? {

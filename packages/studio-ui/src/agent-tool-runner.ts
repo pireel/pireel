@@ -69,6 +69,9 @@ import { compactAssetSearchElementResults, searchAssetLibrary } from '@pireel/st
 import { mediaSearchTranscriptsFromDocument, searchProjectMedia } from '@pireel/studio-engine/media-search';
 import { type StudioToolResult, TAB_CANNOT_SERVE_ERRORS, wrapAgentTranscript } from '@pireel/studio-engine/prompts';
 import { rejectStableFramingSplits, visualGeometryForAgent, visualTimelineForAgent } from '@pireel/studio-engine/visual-types';
+import { setLookV3 } from '@pireel/studio-engine/look-tools';
+import type { LookIssue } from '@pireel/studio-engine/look';
+import { checkLookPieces, componentSettledAtSec, fitLookInstances, type LookFitDeps, type LookFitReport } from './look-fit';
 import { formatDirectorSceneContext, resolveDirectorSceneContext } from '@pireel/studio-engine/semantic-scenes';
 import {
   auditSceneVisualStructure,
@@ -319,13 +322,23 @@ function canonicalRenderTimeline(
   };
 }
 
-/** When a component's entrance has played out: a couple of seconds in (retimed by its own motion
- *  speed and delay), never past its last frame. */
-export function componentSettledAtSec(block: Pick<Block, 'startSec' | 'durationSec' | 'motion'>): number {
-  const speed = block.motion?.speed && block.motion.speed > 0 ? block.motion.speed : 1;
-  const settle = (block.motion?.delaySec ?? 0) + 2.2 / speed;
-  const last = Math.max(0, block.durationSec - 0.05);
-  return Math.round((block.startSec + Math.min(settle, last * 0.9)) * 100) / 100;
+export { componentSettledAtSec } from './look-fit';
+
+/** Which look graphics a successful call may have moved, resized or restyled: 'all' after a new
+ *  look, the placed or edited ids otherwise, null when the call touched none. */
+function lookFitTargets(name: string, args: Record<string, unknown>, data: unknown, document: EditorDocumentV2): readonly string[] | 'all' | null {
+  const lookIds = new Set(document.timeline.tracks.flatMap((track) => track.clips.flatMap((clip) => (
+    clip.kind === 'graphic' && clip.block.templateId.startsWith('look:') ? [clip.id] : []
+  ))));
+  if (!lookIds.size) return null;
+  if (name === 'set_look') return 'all';
+  const ids = name === 'place_graphics'
+    ? ((data && typeof data === 'object' ? (data as { clipIds?: unknown }).clipIds : []) as unknown[])
+    : name === 'set_clip_properties' && Array.isArray(args.items)
+      ? (args.items as Array<{ clipId?: unknown }>).map((item) => item?.clipId)
+      : [];
+  const touched = ids.filter((id): id is string => typeof id === 'string' && lookIds.has(id));
+  return touched.length ? touched : null;
 }
 
 /** The finished component as it lands on the picture — the same render as export, handed back with
@@ -4158,6 +4171,20 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           ...(placementAssets && (name === 'add_clips' || name === 'insert_clips') ? { placementAssets } : {}),
           ...(stepSurface === 'chat' && (name === 'compose_component') ? { surface: 'chat' } : {}),
         };
+        // A look is test-rendered before it lands: pieces that break the words contract are refused
+        // while the previous look stays in place.
+        let lookNotes: LookIssue[] = [];
+        if (name === 'set_look') {
+          const candidate = setLookV3(before, callArgs);
+          const look = candidate.ok ? candidate.document?.appearance.look : undefined;
+          if (look) {
+            const checked = await checkLookPieces(look, before.canvas).catch(() => null);
+            if (checked?.hard.length) {
+              return { ok: false, error: 'invalid_look', data: { issues: checked.hard, fix: 'Fix the listed pieces and send only those pieces again; the previous look is unchanged.' } };
+            }
+            lookNotes = checked?.soft ?? [];
+          }
+        }
         const undoDepth = ctx.undoStackRef.current.length;
         // Progress rides under the v3 name so the feed renders one card.
         const reportAsV3: StudioToolRunInternalOptions['reportProgress'] = (text, frac, extra) => setToolProgress({ id: name, text, ...(frac != null ? { frac } : {}), ...(extra ?? {}) });
@@ -4176,6 +4203,24 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           const failure = describeStepFailure(name, args, result.error, { kindOf: (id) => kinds.get(id), hasAsset: (id) => !!before.assets[id] }, result.data);
           return { ok: false, error: failure.error, ...(failure.fix ? { fix: failure.fix } : {}), data: { ...(result.data && typeof result.data === 'object' && !Array.isArray(result.data) ? result.data : {}), ...(failure.unknownIds ? { unknownIds: failure.unknownIds } : {}), detail: failure.detail } };
         }
+        // Graphics are fitted to the picture by program (readable, off the face and captions, inside
+        // their box) before anyone looks at them; the receipt says what moved.
+        const fitTargets = lookFitTargets(name, args, result.data, documentRef.current);
+        if (fitTargets) {
+          const deps: LookFitDeps = {
+            document: () => documentRef.current,
+            renderTimeline: () => canonicalRenderTimeline(ctx.compRef.current, documentRef.current, ctx.resolveAssetUrl),
+            videoFile: ctx.videoFileRef.current,
+            clipFiles: ctx.clipFilesRef.current,
+            patch: (updates) => ctx.commit({ op: 'overlay.patch', input: { updates } }, { undo: 'none' }).ok,
+          };
+          const fitted: LookFitReport[] | null = await fitLookInstances(deps, fitTargets === 'all' ? undefined : fitTargets).catch((error) => {
+            console.warn('[look-fit] skipped', error);
+            return null;
+          });
+          if (fitted?.length) result = { ...result, data: { ...(result.data as Record<string, unknown> | undefined), fitted } };
+        }
+        if (lookNotes.length) result = { ...result, data: { ...(result.data as Record<string, unknown> | undefined), lookNotes } };
         if (name === 'place_graphics') {
           // Each placed instance comes back as a still at its settled moment on the real picture.
           const placedIds = ((result.data && typeof result.data === 'object' ? (result.data as { clipIds?: unknown }).clipIds : []) as unknown[])

@@ -7070,6 +7070,7 @@ export function HyperframesWorkbench({
   // Script-panel scissors (cut/restore/replace-word/extract) — see use-script-cut.ts.
   const {
     cutTimelineRanges,
+    restoreTimelineRanges,
     maskTimelineScriptWords,
     decorateTimelineScriptWords,
     asrBusy,
@@ -7171,6 +7172,7 @@ export function HyperframesWorkbench({
           onExtract={transcriptControls.onExtract}
           onSeek={(sec) => { setPlaying(false); applyT(Math.max(0, sec)); locateTimeline(true); }}
           onCut={cutTimelineRanges}
+          onRestore={restoreTimelineRanges}
           onEdit={(cueEdits) => {
             const result = commit({ op: 'captions.edit', input: { cueEdits } });
             if (!result.ok) toast.error(editorErrorMessage(result.error));

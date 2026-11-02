@@ -521,10 +521,10 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   set_look: {
     description:
-      'Write this output\'s look: its own visual system and the few parametric pieces every graphic of the video is an instance of. Replaces the previous look; instances keep their props and re-render. css is a plain stylesheet that applies inside pieces only (:root means the look). Each piece source is a function expression `function (props, ctx) { return { html, animate(tl, el, ctx) { … } }; }` — html is the markup, animate builds GSAP motion on the paused timeline tl (local time 0 = instance start), el is the piece host, ctx = { width, height (px of the box), duration, words }. Every frame must depend on time only: no timers, clock or randomness; no network, storage, scripts, iframes, video or canvas; no external stylesheets or @font-face. Faces come from fonts: they define var(--font-display) and var(--font-body) inside pieces (the body face is also the pieces’ default type) and ship with the export; never write a font-family name literally. propsSchema (JSON Schema properties) declares what can be edited without regenerating. A rejection lists exact issues; fix those and send the whole look again.',
+      'Write this output\'s look: its own visual system and the few parametric pieces every graphic of the video is an instance of. Replaces the previous look; instances keep their props and re-render. css is a plain stylesheet that applies inside pieces only (:root means the look). Each piece source is a function expression `function (props, ctx) { return { html, animate(tl, el, ctx) { … } }; }` — html is the markup, animate builds GSAP motion on the paused timeline tl (local time 0 = instance start), el is the piece host, ctx = { width, height (px of the box), duration, words }. Every frame must depend on time only: no timers, clock or randomness; no network, storage, scripts, iframes, video or canvas; no external stylesheets or @font-face. Faces come from fonts: they define var(--font-display) and var(--font-body) inside pieces (the body face is also the pieces’ default type) and ship with the export; never write a font-family name literally. propsSchema (JSON Schema properties) declares what can be edited without regenerating. Every word a graphic shows comes from its props: a text prop always appears in the markup, an empty one renders nothing (a default applies only when the prop is absent), and this video\'s wording is never written into the source. Each piece is test-rendered before the look is accepted. Once a look exists, a call updates it in place: the pieces you send replace those ids, the others stay, css, fonts and notes keep their values unless sent, and removePieces drops pieces. A rejection lists exact issues; send only the pieces (or css) that fix them.',
     inputSchema: obj({
       look: obj({
-        css: str('The stylesheet.'),
+        css: str('The stylesheet. Required for the first look; later calls send it only to change it.'),
         pieces: arr(obj({
           id: str('Lowercase words joined by hyphens, e.g. item-card.'),
           label: str('Name shown to people.'),
@@ -536,12 +536,13 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
           display: str('Headline face: web:<id> from get_state.fonts, google:<Family> from search_assets kind font, or local:<family>.'),
           body: str('Face for the rest of the type, same ids.'),
         }),
-      }, ['css', 'pieces']),
+        removePieces: arr(str('A piece id.'), { description: 'Pieces of the current look to drop.' }),
+      }, []),
     }, ['look']),
   },
   place_graphics: {
     description:
-      'Place instances of the look\'s pieces on the graphics tracks: each item is a piece, its props, a box in canvas units (0–1; omit for the full frame) and its time in frames. anchor ties an instance to a spoken word (from get_transcript) so it follows later cuts; words gives the piece the spoken words it should land on, in seconds from the instance start. The receipt returns the new clip ids and a still of each at its settled moment on the real picture. Change words, place or time later with set_clip_properties (props, box) and move_clips; no regeneration.',
+      'Place instances of the look\'s pieces on the graphics tracks: each item is a piece, its props, a box in canvas units (0–1; omit for the full frame) and its time in frames. anchor ties an instance to a spoken word (from get_transcript) so it follows later cuts; words gives the piece the spoken words it should land on, in seconds from the instance start. Each instance is then measured as rendered and fitted by the program: text under the readable size is enlarged, an instance over the speaker\'s face or the captions moves to the nearest free area (shrinking a little only when nothing else fits), and a box its content spills out of is widened; fitted in the receipt lists what changed and anything still wrong. The receipt returns the new clip ids and a still of each at its settled moment on the real picture. Change words, place or time later with set_clip_properties (props, box) and move_clips; no regeneration.',
     inputSchema: obj({
       items: arr(obj({
         pieceId: str('A piece of the current look.'),

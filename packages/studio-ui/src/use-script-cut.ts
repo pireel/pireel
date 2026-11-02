@@ -30,6 +30,7 @@ import { applyCaptionTextEdits } from '@pireel/studio-engine/caption-text-edit';
 import { type DocumentOp, transcriptInputsFor } from '@pireel/studio-engine/document-transaction';
 import type { DocumentCommitter } from '@pireel/studio-ui/document-commit';
 import type { ScriptCut, ScriptMaskTarget, TimelineMaskTarget, TimelineScriptCut } from '@pireel/studio-ui/script-panel';
+import type { TranscriptRestore } from '@pireel/studio-ui/transcript-editor';
 import { t } from '@pireel/studio-ui/i18n';
 import { editorErrorMessage } from '@pireel/studio-ui/editor-error';
 
@@ -128,6 +129,49 @@ export function useScriptCut(deps: ScriptCutDeps) {
       0,
     );
     applyT(Math.max(0, Math.min(tRef.current, Math.max(0, endFrame / captions.document.canvas.fps - 0.05))));
+    toast.success(t('workbench.msgUndoHint', { msg }));
+  };
+  /** The captions script's restore: put cut source back at its cut on the story track, next to the
+   *  kept clip it continues (merging with it when the source meets), in the same transcript section. */
+  const restoreTimelineRanges = (restores: TranscriptRestore[], msg: string) => {
+    if (!restores.length) return;
+    let document = documentRef.current;
+    const ops: DocumentOp[] = [];
+    // Latest first, so an earlier insertion never shifts a later cut's position.
+    for (const restore of [...restores].sort((left, right) => right.atSec - left.atSec || right.range[0] - left.range[0])) {
+      const neighbour = document.timeline.tracks.flatMap((track) => track.clips)
+        .find((clip): clip is NarrativeTimelineClip => clip.id === restore.clipId && clip.kind === 'narrative');
+      if (!neighbour || restore.range[1] - restore.range[0] < 0.01) continue;
+      const input = {
+        assetId: restore.assetId,
+        clipId: shotId(),
+        atSec: restore.atSec,
+        sourceInSec: restore.range[0],
+        sourceOutSec: restore.range[1],
+        properties: neighbour.properties,
+        ...(neighbour.box ? { box: neighbour.box } : {}),
+        ...(neighbour.mediaFraming ? { mediaFraming: neighbour.mediaFraming } : {}),
+        transcriptSectionId: restore.sectionId,
+        coalesceAdjacent: true,
+      };
+      const edit = insertNarrativeAssetRange({ document, ...input });
+      if (!edit.ok) {
+        toast.error(editorErrorMessage(edit.error));
+        return;
+      }
+      document = edit.document;
+      ops.push({ op: 'narrative.insertRange', input });
+    }
+    if (!ops.length) {
+      toast.info(t('workbench.contentAlreadyInVideo'));
+      return;
+    }
+    const landed = commit(ops);
+    if (!landed.ok) {
+      toast.error(editorErrorMessage(landed.error));
+      return;
+    }
+    setSelectedShotId(null);
     toast.success(t('workbench.msgUndoHint', { msg }));
   };
   /** The script panel's scissors: delete a batch of (source, source-time range) (shared by delete-sentence / delete-silence
@@ -543,6 +587,7 @@ export function useScriptCut(deps: ScriptCutDeps) {
     cutSrcRanges,
     cutTimelineRanges,
     restoreSrcRanges,
+    restoreTimelineRanges,
     replaceScriptWord,
     maskScriptWords,
     maskTimelineScriptWords,

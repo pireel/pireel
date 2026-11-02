@@ -690,6 +690,122 @@ export async function captureCompositionFrame(opts: {
 
 /** Audio goes through the 48 kHz timeline mixer (instead of per-sample passthrough) when anything must
  *  be summed or rewritten; a whole-mix loudness setting needs its master stage even for plain 1× narration. */
+/** What a placed block draws at one moment, measured on the export render (canvas px). */
+export interface MeasuredOverlayBlock {
+  /** Text, solid fills and images: what must stay readable and clear of the speaker. */
+  ink: { x: number; y: number; w: number; h: number } | null;
+  /** Everything painted, translucent fills and gradients included. */
+  paint: { x: number; y: number; w: number; h: number } | null;
+  /** Smallest and largest rendered text (after every scale), canvas px. */
+  minFontPx: number | null;
+  maxFontPx: number | null;
+}
+
+type MeasuredRect = NonNullable<MeasuredOverlayBlock['ink']>;
+
+function colorAlpha(color: string): number {
+  const value = color.trim();
+  if (!value || value === 'transparent') return 0;
+  const slash = /\/\s*([\d.]+%?)\s*\)$/.exec(value);
+  if (slash) return slash[1]!.endsWith('%') ? parseFloat(slash[1]!) / 100 : parseFloat(slash[1]!);
+  const rgba = /^rgba\(([^)]+)\)$/.exec(value);
+  if (rgba) {
+    const parts = rgba[1]!.split(/[\s,]+/).filter(Boolean);
+    return parts.length >= 4 ? parseFloat(parts[3]!) : 1;
+  }
+  return 1;
+}
+
+function measureBlockElement(win: Window & typeof globalThis, root: HTMLElement, container: HTMLElement): MeasuredOverlayBlock {
+  const origin = root.getBoundingClientRect();
+  let ink: MeasuredRect | null = null;
+  let paint: MeasuredRect | null = null;
+  let minFontPx = Infinity;
+  let maxFontPx = 0;
+  const grow = (current: MeasuredRect | null, r: DOMRect): MeasuredRect => {
+    const rect = { x: r.left - origin.left, y: r.top - origin.top, w: r.width, h: r.height };
+    if (!current) return rect;
+    const x = Math.min(current.x, rect.x);
+    const y = Math.min(current.y, rect.y);
+    return { x, y, w: Math.max(current.x + current.w, rect.x + rect.w) - x, h: Math.max(current.y + current.h, rect.y + rect.h) - y };
+  };
+  const opacity = new Map<Element, number>();
+  const opacityOf = (el: Element): number => {
+    const known = opacity.get(el);
+    if (known !== undefined) return known;
+    const cs = win.getComputedStyle(el);
+    const own = cs.visibility === 'hidden' || cs.display === 'none' ? 0 : parseFloat(cs.opacity || '1');
+    const value = (Number.isFinite(own) ? own : 1) * (el === container || !el.parentElement ? 1 : opacityOf(el.parentElement));
+    opacity.set(el, value);
+    return value;
+  };
+  const elements = container.querySelectorAll('*');
+  for (const el of elements) {
+    if (el instanceof win.SVGElement && !(el instanceof win.SVGSVGElement)) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 0.5 || r.height < 0.5) continue;
+    const alpha = opacityOf(el);
+    if (alpha < 0.1) continue;
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'img' || tag === 'svg') { ink = grow(ink, r); paint = grow(paint, r); continue; }
+    const cs = win.getComputedStyle(el);
+    const fill = colorAlpha(cs.backgroundColor) * alpha;
+    const border = ['Top', 'Right', 'Bottom', 'Left'].some((side) => parseFloat(cs.getPropertyValue(`border-${side.toLowerCase()}-width`)) > 0
+      && colorAlpha(cs.getPropertyValue(`border-${side.toLowerCase()}-color`)) * alpha > 0.3);
+    if (fill >= 0.35) ink = grow(ink, r);
+    if (fill > 0.05 || border || (cs.backgroundImage && cs.backgroundImage !== 'none')) paint = grow(paint, r);
+  }
+  const walker = container.ownerDocument.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  const range = container.ownerDocument.createRange();
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (!node.nodeValue?.trim()) continue;
+    const parent = node.parentElement;
+    if (!parent || parent.tagName === 'STYLE' || parent.tagName === 'SCRIPT') continue;
+    const alpha = opacityOf(parent);
+    if (alpha < 0.1) continue;
+    range.selectNodeContents(node);
+    for (const r of range.getClientRects()) {
+      if (r.width < 0.5 || r.height < 0.5) continue;
+      paint = grow(paint, r);
+      if (alpha >= 0.3) ink = grow(ink, r);
+    }
+    if (alpha < 0.3) continue;
+    const size = parseFloat(win.getComputedStyle(parent).fontSize);
+    const html = parent as HTMLElement;
+    const shown = parent.getBoundingClientRect().height;
+    const scale = typeof html.offsetHeight === 'number' && html.offsetHeight > 0 && shown > 0 ? shown / html.offsetHeight : 1;
+    if (size > 0) { minFontPx = Math.min(minFontPx, size * scale); maxFontPx = Math.max(maxFontPx, size * scale); }
+  }
+  return { ink, paint, minFontPx: Number.isFinite(minFontPx) ? Math.round(minFontPx * 10) / 10 : null, maxFontPx: maxFontPx > 0 ? Math.round(maxFontPx * 10) / 10 : null };
+}
+
+/** Measure placed blocks on the same render as export: each at its own moment, after fonts load. */
+export async function measureOverlayBlocks(opts: {
+  comp: Composition;
+  videoPlacements?: readonly VideoShotTimelinePlacement[];
+  visualMediaClips?: readonly SupplementalVisualMediaClip[];
+  probes: readonly { blockId: string; atSec: number }[];
+}): Promise<Record<string, MeasuredOverlayBlock>> {
+  const out: Record<string, MeasuredOverlayBlock> = {};
+  if (!opts.probes.length) return out;
+  assertExportableComposition(opts.comp);
+  const overlay = await createOverlay(injectPreviewRuntime(assembleHtml(opts.comp, undefined, opts.videoPlacements, opts.visualMediaClips)), opts.comp.width, opts.comp.height);
+  try {
+    // Seeking shows each block once, so the faces it uses start loading; measure after they arrive.
+    for (const probe of opts.probes) overlay.win.__hfPreview!.seekTimelines(probe.atSec);
+    await overlay.doc.fonts.ready;
+    for (const probe of opts.probes) {
+      overlay.win.__hfPreview!.seekTimelines(probe.atSec);
+      const container = overlay.doc.getElementById(probe.blockId);
+      if (!container) continue;
+      out[probe.blockId] = measureBlockElement(overlay.win as unknown as Window & typeof globalThis, overlay.root, (container.querySelector('[data-hf-content]') as HTMLElement | null) ?? container);
+    }
+  } finally {
+    overlay.dispose();
+  }
+  return out;
+}
+
 export function exportNeedsTimelineMix(input: { loudness: boolean; clips: boolean; visualVideos: number; tones: number; clipMaskBeep: boolean; unencodableSource: boolean; retimed: boolean }): boolean {
   return input.loudness || input.clips || input.visualVideos > 0 || input.tones > 0 || input.clipMaskBeep || input.unencodableSource || input.retimed;
 }

@@ -16,7 +16,7 @@ import type { CaptionCueEdit } from '@pireel/studio-engine/caption-document-edit
 import type { WordDecorationPatch } from '@pireel/studio-engine/word-decorations';
 import { DEFAULT_MASK_TEXT, type WordMaskPatch } from '@pireel/studio-engine/word-masks';
 import { TranscriptSelectionBar, type TimelineMaskTarget, type TimelineScriptCut, type TranscriptAddKind } from './script-panel';
-import { activeTranscriptTokenIndex, transcriptParagraphs, transcriptSelectionEdits, transcriptTokens, type TranscriptToken } from './transcript-editor-model';
+import { activeTranscriptTokenIndex, transcriptParagraphs, transcriptRemovals, transcriptSelectionEdits, transcriptTokens, type TranscriptRemoval, type TranscriptToken } from './transcript-editor-model';
 import { t } from './i18n';
 import { CaptionsToolbarContext, TRANSCRIPT_TOOL_CLASS, TRANSCRIPT_TOOL_LABEL_CLASS, TRANSCRIPT_TOOLBAR_CLASS } from './captions-toolbar-slot';
 import { playhead } from './playhead';
@@ -27,7 +27,18 @@ const CONTEXT_CHARS = 6000;
 type TranscriptSelection = { left: number; top: number } & (
   | { kind: 'words'; tokens: TranscriptToken[] }
   | { kind: 'pause'; pause: TranscriptPause }
+  | { kind: 'removed'; removal: TranscriptRemoval; part: TranscriptRemoval['parts'][number] }
 );
+
+/** A cut source range to put back: where its kept neighbour sits and what it continues. */
+export interface TranscriptRestore {
+  trackId: string;
+  clipId: string;
+  assetId: string;
+  sectionId: string;
+  atSec: number;
+  range: [number, number];
+}
 
 function selectionPosition(rect: DOMRect, desiredWidth = 480) {
   const width = Math.min(desiredWidth, window.innerWidth - 24);
@@ -40,7 +51,7 @@ interface TranslationPiece { text: string; mine: boolean }
 /** Rows per auto highlight request (the service takes at most 400). */
 const AUTO_HIGHLIGHT_BATCH = 200;
 
-export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, playing, active = true, extracting, onExtract, onSeek, onCut, onEdit, onDecorate, onMask, onAddAtRange, addKinds, autoHighlight }: {
+export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, playing, active = true, extracting, onExtract, onSeek, onCut, onRestore, onEdit, onDecorate, onMask, onAddAtRange, addKinds, autoHighlight }: {
   document: EditorDocumentV2;
   currentTimeSec: number;
   playing: boolean;
@@ -49,6 +60,8 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
   onExtract: () => void;
   onSeek: (time: number) => void;
   onCut: (cuts: TimelineScriptCut[], message: string) => void;
+  /** Put cut source back at its cut (absent: removed source is shown but not restorable here). */
+  onRestore?: (restores: TranscriptRestore[], message: string) => void;
   onEdit: (edits: CaptionCueEdit[]) => boolean;
   onDecorate: (targets: TimelineMaskTarget[], patch: WordDecorationPatch, replaceHighlights?: TimelineMaskTarget[]) => void;
   onMask: (targets: TimelineMaskTarget[], patch: WordMaskPatch, message: string) => void;
@@ -61,7 +74,9 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
   const tokens = useMemo(() => transcriptTokens(document), [document]);
   // Only pauses the cleanup would shorten are worth a label; shorter ones are natural breaths.
   const pauses = useMemo(() => transcriptPauses(document).filter((pause) => pause.endSec - pause.startSec > CLEANUP_PAUSE_OVER_SEC + 1e-7), [document]);
-  const paragraphs = useMemo(() => transcriptParagraphs(document, tokens, pauses), [document, tokens, pauses]);
+  // What cuts took out stays in the script, struck through at its cut, so it can be put back.
+  const removals = useMemo(() => transcriptRemovals(document), [document]);
+  const paragraphs = useMemo(() => transcriptParagraphs(document, tokens, pauses, removals), [document, tokens, pauses, removals]);
   const byId = useMemo(() => new Map(tokens.map((token) => [token.id, token])), [tokens]);
   const styleHighlight = captionHighlightColor(document.appearance.captionStyle ?? {});
   // With a translation line on, each section shows its sentences' translations under the source text.
@@ -297,7 +312,7 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
       className="min-h-0 flex-1 overflow-y-auto px-4 pb-8 pt-3 outline-none"
       onMouseDown={(event) => {
         if (event.button !== 0) return;
-        if ((event.target as HTMLElement).closest('[data-transcript-pause]')) return;
+        if ((event.target as HTMLElement).closest('[data-transcript-pause], [data-transcript-removed]')) return;
         selectingRef.current = true;
         suppressClickRef.current = false;
         setSelection(null); setDrafts(null);
@@ -311,6 +326,7 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
       onScroll={() => {
         if (selectingRef.current || !selection || drafts) return;
         if (selection.kind === 'words') { readSelection(); return; }
+        if (selection.kind === 'removed') { setSelection(null); return; }
         const element = listRef.current?.querySelector<HTMLElement>(`[data-transcript-pause="${CSS.escape(selection.pause.id)}"]`);
         if (element) { const position = selectionPosition(element.getBoundingClientRect(), 220); setSelection((previous) => previous?.kind === 'pause' ? { ...previous, ...position } : previous); }
       }}>
@@ -328,6 +344,21 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
         <p className="text-ink whitespace-pre-wrap break-words text-[16px] font-normal leading-[2.05] tracking-[0.015em]">
         {!paragraph.items.length && <span className="text-ink-4 text-[12px]" data-transcript-section-heading>{t('captions.sectionNoSpeech')}</span>}
         {paragraph.items.map((item, index) => {
+          if (item.type === 'removed') {
+            const removal = item.removal;
+            return <span key={removal.id} data-transcript-removed={removal.id}>
+              {removal.parts.map((part, partIndex) => {
+                const picked = selection?.kind === 'removed' && selection.part === part;
+                return <button key={partIndex} type="button" title={onRestore ? t('panels.deletedClickRestore') : undefined} aria-pressed={picked}
+                  onClick={(event) => { close(); if (onRestore) setSelection({ kind: 'removed', removal, part, ...selectionPosition(event.currentTarget.getBoundingClientRect(), 220) }); }}
+                  className={part.kind === 'pause'
+                    ? `mx-0.5 inline rounded px-1 align-baseline font-mono text-[10.5px] leading-6 tabular-nums line-through ${picked ? 'bg-ink/15 text-ink-2' : 'text-ink-4 hover:bg-ink/10'}`
+                    : `inline rounded-sm p-0 align-baseline line-through decoration-1 ${picked ? 'bg-ink/15 text-ink-2' : 'text-ink-4/80 hover:text-ink-3'}`}>
+                  {part.kind === 'pause' ? `${(part.sourceEnd - part.sourceStart).toFixed(2)}s` : part.text}
+                </button>;
+              })}
+            </span>;
+          }
           if (item.type === 'pause') {
             const pause = item.pause;
             const sec = (pause.endSec - pause.startSec).toFixed(2);
@@ -378,6 +409,23 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
         </div>
         <div className="text-ink-4 text-[10.5px]">{t('captions.captionCopyHint')}</div>
         <button type="button" disabled={drafts.some((draft) => !draft.text?.trim())} onClick={() => { if (onEdit(drafts)) close(); }} className="bg-primary text-primary-foreground self-end rounded px-3 py-1.5 text-[12px] disabled:opacity-40">{t('panels.ok')}</button>
+      </div> : selection.kind === 'removed' ? <div className="flex flex-col items-stretch gap-0.5">
+        {onRestore && <>
+          <button type="button" className="hover:bg-panel-2 rounded px-2.5 py-1.5 text-left text-[12px]" onClick={() => {
+            const { removal, part } = selection;
+            onRestore([{ trackId: removal.trackId, clipId: removal.clipId, assetId: removal.assetId, sectionId: removal.sectionId, atSec: removal.atSec, range: [part.sourceStart, part.sourceEnd] }],
+              part.kind === 'pause' ? t('panels.restoredSecSSilence', { sec: (part.sourceEnd - part.sourceStart).toFixed(2) }) : t('panels.restoredWord', { word: part.text }));
+            close();
+          }}>{selection.part.kind === 'pause' ? t('panels.restoreSilenceSecS', { sec: (selection.part.sourceEnd - selection.part.sourceStart).toFixed(2) }) : t('panels.restoreWord', { word: selection.part.text })}</button>
+          {selection.removal.parts.length > 1 && <button type="button" className="hover:bg-panel-2 rounded px-2.5 py-1.5 text-left text-[12px]" onClick={() => {
+            const { removal } = selection;
+            const first = removal.parts[0]!;
+            const last = removal.parts.at(-1)!;
+            onRestore([{ trackId: removal.trackId, clipId: removal.clipId, assetId: removal.assetId, sectionId: removal.sectionId, atSec: removal.atSec, range: [first.sourceStart, last.sourceEnd] }],
+              t('panels.restoredWord', { word: joinWords(removal.parts.filter((part) => part.kind === 'word').map((part) => part.text)) || `${(last.sourceEnd - first.sourceStart).toFixed(2)}s` }));
+            close();
+          }}>{t('captions.restoreRemovedAll')}</button>}
+        </>}
       </div> : selection.kind === 'pause' ? <TranscriptSelectionBar
         key={selection.pause.id}
         kind="pause" text="" canEdit={false}
