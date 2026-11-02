@@ -77,6 +77,17 @@ export function reviewEditingTask(task: ChatTask, input: Record<string, unknown>
 }
 
 
+/** The harness runs the enabled cover itself when finish_edit arrives before any cover scene ran.
+ *  An existing scene (running, ready, stale or failed) is left to the review: a stale or failed
+ *  cover is a paid retry, which waits for the model's or the user's decision. */
+export function coverStillToRun(task: ChatTask, document: EditorDocumentV2 | undefined, input: Record<string, unknown>): boolean {
+  if (!needsBrandCover(task) || !document) return false;
+  if (document.semantics.editingSkills && !document.semantics.editingSkills.includes('cover')) return false;
+  const declared = (input.cover as { status?: unknown } | undefined)?.status;
+  if (declared === 'skipped' || declared === 'blocked') return false;
+  return !coverSceneFromDocument(document);
+}
+
 export function needsBrandCover(task: ChatTask): boolean {
   return task.mode === 'one-click' && !!(task.config?.skills.includes('cover') || task.skills.includes('cover'));
 }

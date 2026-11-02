@@ -16,7 +16,7 @@ export interface EditingSkill {
 }
 
 export const EDITING_SKILLS = [
-  { id: 'cover', instruction: 'Automatically create one cover in the independent cover scene (generate_cover). Enabling this capability authorizes cover analysis and generation without another confirmation. Keep cover prompts, frames and results out of the main chat.', requires: 'generate_cover', otherwise: 'A cover for this video. It is made in Pireel Studio; offer it as a next step.' },
+  { id: 'cover', instruction: 'Automatically create one cover in the independent cover scene (generate_cover). Enabling this capability authorizes cover analysis and generation without another confirmation. Keep cover prompts, frames and results out of the main chat; finish_edit starts it if it has not run.', requires: 'generate_cover', otherwise: 'A cover for this video. It is made in Pireel Studio; offer it as a next step.' },
   { id: 'graphics', instruction: 'Motion graphics designed for this video, timed to the speech (read_skill video-graphics).' },
   { id: 'captions', instruction: 'Word-synced captions (set_captions).' },
   { id: 'rough-cut', instruction: 'Cut filler words, false starts, failed retakes and dead air while keeping the meaning: rough_cut makes the first pass; read_skill speech-cleanup for judgment beyond it.' },

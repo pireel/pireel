@@ -1,5 +1,5 @@
-import { studioProviders } from '@pireel/studio-engine/providers';
 'use client';
+import { studioProviders } from '@pireel/studio-engine/providers';
 
 import { alignFileToSig, deleteLocalVideo, loadLocalVideo, saveLocalStream, saveLocalVideo } from './local-media';
 import { fileNameFromSig, sigSize } from '@pireel/studio-ui/media';

@@ -1,5 +1,5 @@
-import { editorRequest } from '@pireel/studio-ui/host-request';
 "use client";
+import { editorRequest } from '@pireel/studio-ui/host-request';
 import { alreadyStarted, firstEditMessage, firstMessageEditsFootage, footageToEdit, startWithRoughCut, sceneAgentState } from '@pireel/studio-ui/agent-startup';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@pireel/ui/tooltip';
 import { EditingSkillSwitches } from '@pireel/studio-ui/editing-skills';
@@ -12,7 +12,7 @@ import { editingSkillsHint } from '@pireel/studio-engine/editing-skills';
 import { resolveEditingRunConfig } from '@pireel/studio-engine/editing-run-config';
 import { EditingTaskCard } from '@pireel/studio-ui/editing-task-card';
 import { displayEditingTask, hasCurrentDirectorPreview, isInteractiveEditingTool, messagesForTask, unresolvedTaskFailure } from '@pireel/studio-ui/editing-task-progress';
-import { needsEditingReview, reviewEditingTask } from '@pireel/studio-ui/editing-task-review';
+import { coverStillToRun, needsEditingReview, reviewEditingTask } from '@pireel/studio-ui/editing-task-review';
 import { ROUGH_CUT_TOOL, messageTurnCredits, toolNameOfPart, type RoughCutReplyMeta } from '@pireel/studio-ui/first-pass-card';
 import { NextSteps, splitNextSteps } from '@pireel/studio-ui/chat-next-steps';
 import { FINE_CUT_SKILLS, firstPassStartupHint, type FineCutSkill } from '@pireel/studio-ui/first-pass';
@@ -378,6 +378,21 @@ export function ChatThread({
         if (!task || !fineCutClips) { publishError('No active editing task or timeline evidence.'); return; }
         if (task.directorPlanRequired && !hasCurrentDirectorPreview(messagesForTask(effectiveStudioTurnMessages(messagesRef.current, ledger), task.id))) {
           publishSuccess({ ok: false, error: 'Inspect meaningful rendered timeline frames after the final edit, then assess the result against the saved director plan before finishing.' }); return;
+        }
+        // The enabled cover is the harness's step, not something the model must remember.
+        if (coverStillToRun(task, getDocument?.(), requestedInput)) {
+          const ctrl = new AbortController();
+          toolAbortsRef.current.add(ctrl);
+          setActiveTools(toolAbortsRef.current.size);
+          if (userStoppedRef.current) ctrl.abort();
+          try {
+            await runToolRef.current("run_v3", { name: 'generate_cover', args: {} }, { signal: ctrl.signal, surface: "chat" as const, coverRequested: false });
+          } catch {
+            /* the review below reports the cover as unfinished */
+          } finally {
+            toolAbortsRef.current.delete(ctrl);
+            setActiveTools(toolAbortsRef.current.size);
+          }
         }
         const result = reviewEditingTask(task, requestedInput, fineCutClips(), getDocument?.());
         if (!result.ok) { publishSuccess({ ok: false, error: result.error, ...(result.missing ? { data: { missing: result.missing } } : {}) }); return; }
