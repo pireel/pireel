@@ -10,6 +10,8 @@ export interface DocumentAddressedWord extends TranscriptWord {
   assetId: string;
   sentenceIndex: number;
   wordIndex: number;
+  /** Listed with includeCut: the word plays nowhere now (its id still restores it). */
+  cut?: true;
 }
 
 export interface DocumentWordQuery {
@@ -24,6 +26,8 @@ export interface DocumentWordQuery {
   toSec?: number;
   offset?: number;
   limit?: number;
+  /** Also list words that no clip plays any more, marked cut. */
+  includeCut?: boolean;
 }
 
 /** Whether a transcript carries measured word timing ('measured'), only sentence timing so its
@@ -149,12 +153,12 @@ export function listDocumentAddressedWords(
   const from = Number.isFinite(query.fromSec) ? query.fromSec! : -Infinity;
   const to = Number.isFinite(query.toSec) ? query.toSec! : Infinity;
   // A word survives when any placed clip of its asset still plays it (any lane).
-  const matching = assetWords(assetId, segments).filter((word) => (
-    (!sentenceSet || sentenceSet.has(word.sentenceIndex))
-    && word.end > from
-    && word.start < to
-    && ranges.some((range) => word.end > range.start + 0.03 && word.start < range.end - 0.03)
-  ));
+  const plays = (word: DocumentAddressedWord) => ranges.some((range) => word.end > range.start + 0.03 && word.start < range.end - 0.03);
+  const matching = assetWords(assetId, segments).flatMap((word): DocumentAddressedWord[] => {
+    if ((sentenceSet && !sentenceSet.has(word.sentenceIndex)) || word.end <= from || word.start >= to) return [];
+    if (plays(word)) return [word];
+    return query.includeCut ? [{ ...word, cut: true }] : [];
+  });
   const offset = Number.isInteger(query.offset) ? Math.max(0, query.offset!) : 0;
   const limit = Number.isInteger(query.limit) ? Math.max(1, Math.min(1000, query.limit!)) : 300;
   const words = matching.slice(offset, offset + limit);

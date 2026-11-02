@@ -34,6 +34,17 @@ const instance: Block = {
 const comp = (): Composition => ({ ...emptyComposition(), width: 1080, height: 1920, look, blocks: [instance] });
 
 describe('look validation', () => {
+  it('takes its faces as font ids: tokens inside pieces, a linked stylesheet, and no literal font loading', () => {
+    const withFonts = normalizeLook({ ...look, fonts: { display: 'web:smiley-sans', body: 'sans' } }).look!;
+    expect(withFonts.fonts).toEqual({ display: 'web:smiley-sans', body: 'sans' });
+    const head = lookHeadHtml(withFonts);
+    expect(head).toMatch(/--font-display: [^;]*Smiley Sans/);
+    expect(head).toContain('font-family: var(--font-body)');
+    expect(assembleHtml({ ...comp(), look: withFonts })).toMatch(/<link href="[^"]*smiley-sans[^"]*" rel="stylesheet"/);
+    expect(normalizeLook({ ...look, fonts: { display: 'Smiley Sans' } }).issues).toEqual([expect.objectContaining({ path: 'look.fonts.display' })]);
+    expect(normalizeLook({ ...look, fonts: { title: 'web:smiley-sans' } }).issues).toEqual([expect.objectContaining({ path: 'look.fonts.title' })]);
+  });
+
   it('accepts a well-formed look and rejects what breaks the runtime boundary or purity', () => {
     expect(normalizeLook(look).look).toMatchObject({ id: 'look-1', pieces: { 'item-card': { label: 'Item card' } } });
     const bad = normalizeLook({

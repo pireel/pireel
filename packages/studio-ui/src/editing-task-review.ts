@@ -86,7 +86,7 @@ export function reviewEditingTask(task: ChatTask, input: Record<string, unknown>
         : `${feature} is absent from the current timeline. Apply it or report why it is blocked/not needed.`);
       continue;
     }
-    if (row.status === 'not_needed' && feature === 'b-roll' && /没有.{0,8}素材|无.{0,4}素材|no (?:available |supporting |usable )?(?:media|assets|footage)/i.test(reason)) { problems.push('An empty library is a sourcing gap, not a content-based reason to skip B-roll. Search or generate when authorized, or report blocked.'); continue; }
+    if (row.status === 'not_needed' && feature === 'b-roll' && !brollContentReason(reason)) { problems.push('An empty library is a sourcing gap, not a content-based reason to skip B-roll. Search or generate when authorized, or report blocked.'); continue; }
     if (row.status !== 'blocked' && (typeof row.atFrame !== 'number' || !Number.isInteger(row.atFrame) || row.atFrame < 0)) { problems.push(`Name the timeline moment evaluated for ${feature} with atFrame.`); continue; }
     items.push({ feature, status: row.status as EditingTaskReview['items'][number]['status'], reason, count, ...(typeof row.atFrame === 'number' ? { atFrame: row.atFrame } : {}) });
   }
@@ -96,6 +96,17 @@ export function reviewEditingTask(task: ChatTask, input: Record<string, unknown>
   return { ok: true, review: { completed: items.every(item => item.status !== 'blocked') && (director?.completed ?? true) && coverResult.cover?.status !== 'blocked', items, ...(coverResult.cover ? { cover: coverResult.cover } : {}), ...(director ? { director: { revision: task.directorPlan!.revision, summary: director.summary, beats: director.beats } } : {}), ...(brandApplication ? { brandApplication } : {}) } };
 }
 
+const SOURCING_GAP = /没有.{0,8}素材|无.{0,4}素材|no (?:available |supporting |usable )?(?:media|assets|footage)/i;
+
+const CONSEQUENCE = /^\s*(?:所以|因此|因而|于是|故|so\b|therefore|hence|thus)/i;
+
+/** A B-roll skip stands on content: an empty library alone is a sourcing gap, but saying so beside
+ *  a content reason is honest context, so only the clauses about sourcing (and what follows from
+ *  them) are set aside before looking for the reason. */
+function brollContentReason(reason: string): boolean {
+  const rest = reason.split(/[，。；;,.!?！？\n]+/).filter((clause) => !SOURCING_GAP.test(clause) && !CONSEQUENCE.test(clause)).join(' ').trim();
+  return rest.length >= 8;
+}
 
 /** The harness runs the enabled cover itself when finish_edit arrives before any cover scene ran.
  *  An existing scene (running, ready, stale or failed) is left to the review: a stale or failed

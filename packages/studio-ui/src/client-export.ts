@@ -61,6 +61,7 @@ import {
   videoTrackShots,
   videoShotTimelineSpans,
 } from '@pireel/studio-engine/composition';
+import { lookFontIds } from '@pireel/studio-engine/look';
 import { BACKDROP_DIM, backdropBlurPx, backdropSampleSize } from '@pireel/studio-engine/source-framing';
 import { decodeAudioFile } from './audio-decode';
 import {
@@ -114,6 +115,7 @@ function compositionFontIds(comp: Composition): unknown[] {
     ...comp.blocks.flatMap((block) => componentPropsFontIds(block)),
     comp.captionStyle?.font,
     comp.captionStyle?.sub?.font,
+    ...lookFontIds(comp.look),
   ];
 }
 

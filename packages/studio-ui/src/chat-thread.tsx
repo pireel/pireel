@@ -5,7 +5,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@piree
 import { EditingSkillSwitches } from '@pireel/studio-ui/editing-skills';
 
 import { ChatCoverEntry } from '@pireel/studio-ui/chat-cover-controls';
-import { directorPlanToolBlock, saveEditingDirectorPlan, withDirectorInstruction } from '@pireel/studio-ui/editing-director-plan';
+import { directorPlanForModel, directorPlanToolBlock, saveEditingDirectorPlan, withDirectorInstruction } from '@pireel/studio-ui/editing-director-plan';
 import { DEFAULT_STUDIO_AGENT_MODEL, studioAgentModelId, type StudioAgentModelId } from '@pireel/studio-engine/agent-models';
 
 import { editingSkillsHint } from '@pireel/studio-engine/editing-skills';
@@ -365,7 +365,7 @@ export function ChatThread({
         const result = saveEditingDirectorPlan(task, requestedInput, document);
         if (!result.ok) { publishSuccess(result); return; }
         updateTask(task.id, current => ({ ...current, directorPlan: result.plan, review: undefined }));
-        publishSuccess({ ok: true, summary: 'Editing direction saved', data: { plan: result.plan, next: 'Execute this plan now. Resolve source anchors against the current timeline after structural cuts; no approval stop.' } });
+        publishSuccess({ ok: true, summary: 'Editing direction saved', data: { plan: directorPlanForModel(result.plan), next: 'Execute this plan now. Resolve source anchors against the current timeline after structural cuts; no approval stop.' } });
         return;
       }
       // A tool refused this often in one turn is not run again: the model reports the blocker instead.

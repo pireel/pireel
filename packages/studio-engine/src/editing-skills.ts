@@ -21,7 +21,7 @@ export const EDITING_SKILLS = [
   { id: 'captions', instruction: 'Word-synced captions (set_captions).' },
   { id: 'rough-cut', instruction: 'Cut filler words, false starts, failed retakes and dead air while keeping the meaning: rough_cut makes the first pass; read_skill speech-cleanup for judgment beyond it.' },
   { id: 'voice-cleanup', instruction: 'Cleaner narration: remove background noise (denoise_audio).' },
-  { id: 'b-roll', instruction: 'B-roll where the speech names something that can be shown: the creator\'s own media first, then stock (search_assets). Follow the normal generation approval policy when new footage is needed (read_skill talking-head-edit).' },
+  { id: 'b-roll', instruction: 'B-roll where the speech names something that can be shown: the creator\'s own media first, then stock (search_assets). New footage follows the Generation approval rule.' },
   { id: 'sound', instruction: 'Sound effects where a point lands. Add background music only when requested (read_skill audio-and-music).' },
 ] as const satisfies readonly EditingSkill[];
 

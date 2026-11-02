@@ -16,6 +16,7 @@
  */
 
 import { registerTemplate, type Slots } from './composition-core';
+import { displayTextFontCss, isDisplayTextFontId } from './display-text-presets';
 
 export const LOOK_TEMPLATE_PREFIX = 'look:';
 
@@ -36,6 +37,17 @@ export interface DocumentLook {
   pieces: Record<string, LookPiece>;
   /** The author's own statement of the system (what colours mean, where graphics live…). */
   notes?: string;
+  /** Faces the look uses, as font ids (web:, google:, local: or a built-in): they define
+   *  var(--font-display) / var(--font-body) inside pieces and are linked for preview and export. */
+  fonts?: LookFonts;
+}
+
+export const LOOK_FONT_ROLES = ['display', 'body'] as const;
+export type LookFonts = Partial<Record<typeof LOOK_FONT_ROLES[number], string>>;
+
+/** Every font id a look renders with, for stylesheet links and export embedding. */
+export function lookFontIds(look: DocumentLook | undefined): string[] {
+  return look?.fonts ? LOOK_FONT_ROLES.flatMap((role) => look.fonts?.[role] ? [look.fonts[role]!] : []) : [];
 }
 
 export const LOOK_LIMITS = { pieces: 12, sourceChars: 20_000, cssChars: 40_000, notesChars: 4_000 } as const;
@@ -113,14 +125,32 @@ export function normalizeLook(value: unknown): { look: DocumentLook; issues: [] 
       };
     }
   }
+  const fonts: LookFonts = {};
+  if (raw.fonts !== undefined) {
+    const fontsRaw = raw.fonts && typeof raw.fonts === 'object' && !Array.isArray(raw.fonts) ? (raw.fonts as Record<string, unknown>) : null;
+    if (!fontsRaw) issues.push({ path: 'look.fonts', message: 'fonts is { display?, body? } of font ids' });
+    for (const [role, value] of Object.entries(fontsRaw ?? {})) {
+      if (!(LOOK_FONT_ROLES as readonly string[]).includes(role)) issues.push({ path: `look.fonts.${role}`, message: 'fonts has only display and body' });
+      else if (value === undefined || value === null || value === '') continue;
+      else if (!isDisplayTextFontId(value) || value === 'preset') issues.push({ path: `look.fonts.${role}`, message: 'not a font id: web:<id> from get_state.fonts, google:<Family> from search_assets kind font, local:<family>, sans, serif or mono' });
+      else fonts[role as keyof LookFonts] = value;
+    }
+  }
   if (issues.length) return { look: null, issues };
   const notes = typeof raw.notes === 'string' && raw.notes.trim() ? raw.notes.trim().slice(0, LOOK_LIMITS.notesChars) : undefined;
-  return { look: { id, css, pieces, ...(notes ? { notes } : {}) }, issues: [] };
+  return { look: { id, css, pieces, ...(notes ? { notes } : {}), ...(Object.keys(fonts).length ? { fonts } : {}) }, issues: [] };
 }
 
-/** `:root` in the authored stylesheet means "the whole look": inside the scope that is the host. */
-function scopedCss(css: string): string {
-  return `@scope (.look-piece) {\n${css.replace(/:root\b/g, ':scope')}\n}`;
+/** `:root` in the authored stylesheet means "the whole look": inside the scope that is the host.
+ *  The look's faces come first as tokens (the body face also becomes the pieces' own type), so the
+ *  author's stylesheet can use and override them. */
+function scopedCss(css: string, fonts: LookFonts | undefined): string {
+  const display = fonts?.display ? displayTextFontCss(fonts.display) : null;
+  const body = fonts?.body ? displayTextFontCss(fonts.body) : null;
+  const tokens = display || body
+    ? `:scope { ${display ? `--font-display: ${display}; ` : ''}${body ? `--font-body: ${body}; font-family: var(--font-body); ` : ''}}\n`
+    : '';
+  return `@scope (.look-piece) {\n${tokens}${css.replace(/:root\b/g, ':scope')}\n}`;
 }
 
 /** The look's part of the document head: its stylesheet (scoped to piece hosts) and the piece registry. */
@@ -144,7 +174,7 @@ window.__look.run = function (pieceId, props, el, tl, ctx) {
     if (built.animate) built.animate(tl, el, ctx);
   } catch (e) { console.warn('[look] piece failed', pieceId, e); }
 };`.replace(/<\/script/gi, '<\\/script');
-  return `<style data-look="${look.id.replace(/[^\w-]/g, '')}">\n${scopedCss(look.css).replace(/<\/style/gi, '<\\/style')}\n</style>\n<script>\n${script}\n</script>\n`;
+  return `<style data-look="${look.id.replace(/[^\w-]/g, '')}">\n${scopedCss(look.css, look.fonts).replace(/<\/style/gi, '<\\/style')}\n</style>\n<script>\n${script}\n</script>\n`;
 }
 
 const num = (value: unknown, fallback: number) => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback);

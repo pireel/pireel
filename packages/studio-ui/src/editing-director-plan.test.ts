@@ -4,7 +4,7 @@ import { compositionToEditorDocument, emptyComposition } from '@pireel/studio-en
 import { emptyPlaybook, playbookSnapshot } from '@pireel/studio-engine/brand-playbook';
 import { resolveEditingRunConfig } from '@pireel/studio-engine/editing-run-config';
 import { firstNarrativeAssetId } from '@pireel/studio-engine/editor-document/read-model';
-import { directorBeatWindows, directorPlanToolBlock, saveEditingDirectorPlan, reviewDirectorPlan, withDirectorInstruction } from '@pireel/studio-ui/editing-director-plan';
+import { directorBeatWindows, directorPlanForModel, directorPlanToolBlock, saveEditingDirectorPlan, reviewDirectorPlan, withDirectorInstruction } from '@pireel/studio-ui/editing-director-plan';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { EditingTaskCard } from '@pireel/studio-ui/editing-task-card';
@@ -60,18 +60,60 @@ describe('brand-informed director plan', () => {
     expect(resumeTaskHint(restored)).toContain(planned.directorPlan.brandTreatment);
     expect(editingTaskRows(restored, restored.roughCut?.report, messages, false).planning?.status).toBe('done');
   });
-  it('keeps source anchors valid after a passage moves and refuses unrelated timeline evidence', () => {
+  it('reads each beat’s clips from the timeline, following the passage when it moves', () => {
     const { document, planned, review } = fixture();
     const clip = document.timeline.tracks.flatMap(track => track.clips).find(clip => clip.id === 'speaker')!;
     clip.startFrame += 300;
     expect(directorBeatWindows(planned.directorPlan.beats[0], document)[0].startFrame).toBeGreaterThanOrEqual(300);
     expect(reviewDirectorPlan(planned, review, document)).toMatchObject({ ok: true, completed: true });
-    const refused = reviewDirectorPlan(planned, { ...review, beats: [{ ...review.beats[0], clipIds: [...review.beats[0].clipIds, 'invented'] }] }, document);
-    // The refusal names the id that misses and the clips actually at the passage, so the next call can be right.
-    expect(refused).toMatchObject({ ok: false, error: expect.stringContaining('Not at that passage: invented.') });
-    expect(refused).toMatchObject({ error: expect.stringContaining('speaker') });
+    // Applied with nothing at the passage: refused, naming where the passage is now.
+    const applied = { ...review, beats: [{ beatId: 'annual-card', status: 'applied', result: '在年卡出现时补了权益说明的图形。' }] };
+    const refused = reviewDirectorPlan(planned, applied, document);
+    expect(refused).toMatchObject({ ok: false, error: expect.stringContaining('nothing was added, reframed, restored, cut or emphasised at its passage') });
+    // A graphic that lands just after the words still belongs to the beat; one far away does not.
+    const [window] = directorBeatWindows(planned.directorPlan.beats[0], document);
+    const fps = document.canvas.fps;
+    const place = (atFrame: number) => runAgentTimelineTool(document, 'set_texts', { items: [{ text: '两场大会门票', startFrame: atFrame, durationFrames: fps }] }).document!;
+    const near = place(Math.round(window!.endFrame + fps));
+    expect(reviewDirectorPlan(planned, applied, near)).toMatchObject({ ok: true, beats: [{ beatId: 'annual-card', clipIds: [expect.any(String)] }] });
+    expect(reviewDirectorPlan(planned, applied, place(Math.round(window!.endFrame + 4 * fps))).ok).toBe(false);
+    // The passage gone: kept is no longer true; changed or blocked is.
     clip.enabled = false;
-    expect(reviewDirectorPlan(planned, review, document).ok).toBe(false);
+    expect(reviewDirectorPlan(planned, review, document)).toMatchObject({ ok: false, error: expect.stringContaining('no longer in the video') });
+    expect(reviewDirectorPlan(planned, { ...review, beats: [{ ...review.beats[0], status: 'changed', result: '这段口播被剪掉，年卡改在价格段落里展示。' }] }, document).ok).toBe(true);
+    // Cutting the passage's own speech after the plan was saved is work done there.
+    expect(reviewDirectorPlan(planned, applied, document).ok).toBe(true);
+  });
+  it('takes a quote as transcribed or as it plays now, and shows the passage when neither matches', () => {
+    const { task, document: original, input } = fixture();
+    const assetId = input.beats[0]!.assetId;
+    original.semantics.transcripts[assetId] = [{ start: 2, end: 5, text: '这张，呃，年卡包含两场大会门票。', words: [
+      { text: '这张，', start: 2, end: 2.4 }, { text: '呃，', start: 2.5, end: 2.8 }, { text: '年卡', start: 3, end: 3.4 }, { text: '包含两场大会门票。', start: 3.5, end: 5 },
+    ] }];
+    const cut = runAgentTimelineTool(original, 'remove_words', { ranges: [[2.45, 2.95]], keepGapSec: 0 });
+    if (!cut.ok || !cut.document) throw new Error(JSON.stringify(cut));
+    const document = cut.document;
+    const quoting = (quote: string) => saveEditingDirectorPlan(task, { ...input, beats: [{ ...input.beats[0]!, quote }] }, document);
+    expect(quoting('这张，呃，年卡').ok).toBe(true);
+    expect(quoting('这张年卡包含').ok).toBe(true);
+    expect(quoting('年卡包含三场')).toMatchObject({ ok: false, error: expect.stringContaining('这张，呃，年卡包含两场大会门票') });
+    const saved = quoting('这张年卡');
+    if (!saved.ok) throw new Error(saved.error);
+    expect(saved.plan.beats[0]!.coveredAtSave).toBeDefined();
+    expect(directorPlanForModel(saved.plan).beats[0]).not.toHaveProperty('coveredAtSave');
+  });
+  it('plans a passage the rough cut removed and counts its restoration as applied', () => {
+    const { task, document, input } = fixture();
+    const speaker = document.timeline.tracks.flatMap(track => track.clips).find(clip => clip.id === 'speaker')!;
+    speaker.enabled = false;
+    const saved = saveEditingDirectorPlan(task, input, document);
+    expect(saved.ok).toBe(true);
+    if (!saved.ok) return;
+    const planned = { ...task, directorPlan: saved.plan };
+    const restored = { planRevision: 1, editorialReview: '恢复了被误剪的年卡说明，节奏保持品牌的克制。', beats: [{ beatId: 'annual-card', status: 'applied', result: '把粗剪误删的年卡权益说明放回原位。' }] };
+    expect(reviewDirectorPlan(planned, restored, document).ok).toBe(false);
+    speaker.enabled = true;
+    expect(reviewDirectorPlan(planned, restored, document)).toMatchObject({ ok: true, completed: true });
   });
   it('requires the current revision and all beat outcomes; blockers cannot be called complete', () => {
     const { task, planned, document, input, review } = fixture();

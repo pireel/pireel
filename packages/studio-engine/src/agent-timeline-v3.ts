@@ -131,6 +131,9 @@ function clipRowToPlacement(document: EditorDocumentV2, row: Input, index: numbe
     if (!(end > start)) return fail('invalid_value', { path: `${path}[${index}].words`, fix: 'The last word must end after the first word starts.' });
     item.sourceInSec = start;
     item.sourceOutSec = end;
+    // A spoken passage chosen by its words is speech: it goes back on the story spine unless the
+    // call names another lane (left to the default it lands muted on a B-roll lane).
+    if (!string(item.role) && !string(item.trackId) && document.assets[assetId]?.kind === 'video') item.role = 'primary';
   }
   if (startFrame !== undefined) {
     if (!isFrame(startFrame)) return fail(`${path}[${index}].startFrame must be an integer frame ≥ 0`);
@@ -238,6 +241,16 @@ export function addClipsV3(document: EditorDocumentV2, input: Input, mode: 'over
     receipts.push(...(placed.receipts ?? []));
     Object.assign(data, placed.data as Record<string, unknown>);
     summaries.unshift(placed.summary ?? '');
+    // Speech placed on the story spine (a restored passage, say) gets its caption rows too, the
+    // way removing spine clips relays them; shifting the existing cues alone leaves it uncaptioned.
+    const spine = next.timeline.tracks.find((track) => track.id === next.semantics.primaryNarrativeTrackId);
+    const createdIds = new Set(Array.isArray(data.clipIds) ? data.clipIds as string[] : []);
+    if (next.semantics.managedCaptionTrackId && spine?.clips.some((clip) => createdIds.has(clip.id))) {
+      const relaid = applyEditorCommand(next, { type: 'captions.relay' });
+      if (!relaid.ok) return fail(relaid.error.message, relaid.error);
+      next = relaid.document;
+      receipts.push(relaid.receipt);
+    }
   }
   if (!summaries.length) return fail('clips is required', { fix: 'Pass clips: [{assetId, role?, startFrame?, …}] (or duplicate: [{clipId, startFrame?}] on add_clips).' });
   return mutation(next, summaries.filter(Boolean).join('; '), receipts, data);
@@ -966,7 +979,10 @@ function captionCorrections(document: EditorDocumentV2, rows: unknown[], clipId:
 /** Key words by transcript row and exact phrase: the same row numbers as corrections, so a model
  *  never copies long word ids. A phrase missing from its row fails the whole call with the row text. */
 function captionHighlights(document: EditorDocumentV2, highlights: Input, clipId: string | undefined): AgentTimelineOutcome {
-  const color = highlights.clear === true ? 'off' : highlights.color === undefined ? 'style' : highlights.color;
+  // clear with items replaces the key words: clear them all, then highlight the items.
+  const rawItems = Array.isArray(highlights.items) ? highlights.items : [];
+  const replace = highlights.clear === true && rawItems.length > 0;
+  const color = highlights.clear === true && !replace ? 'off' : highlights.color === undefined ? 'style' : highlights.color;
   if (color !== 'style' && color !== 'off' && !(typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color))) {
     return fail('invalid_value', { path: 'highlights.color', value: color, fix: 'Use "style" (follow the caption highlight color), #RRGGBB, or "off" to clear.' });
   }
@@ -977,23 +993,29 @@ function captionHighlights(document: EditorDocumentV2, highlights: Input, clipId
   if (!segments?.length) return fail('no transcript for this source — read get_transcript first');
   const patch: WordDecorationPatch = color === 'off' ? { highlight: null, color: null } : { highlight: 'color', color: color === 'style' ? null : color as string };
   const targets: { sentenceIndex: number; wordIndex: number }[] = [];
-  if (highlights.clear === true) {
+  let base = segments;
+  if (replace) {
+    const decorated: { sentenceIndex: number; wordIndex: number }[] = [];
+    segments.forEach((segment, sentenceIndex) => Object.keys(segment.wordDecorations ?? {}).forEach((key) => decorated.push({ sentenceIndex, wordIndex: Number(key) })));
+    base = decorated.length ? applyWordDecorations(segments, decorated, { highlight: null, color: null }) : segments;
+  }
+  if (highlights.clear === true && !replace) {
     segments.forEach((segment, sentenceIndex) => Object.keys(segment.wordDecorations ?? {}).forEach((key) => targets.push({ sentenceIndex, wordIndex: Number(key) })));
   } else {
-    const items = (Array.isArray(highlights.items) ? highlights.items : []).map((row) => { const value = (row ?? {}) as Input; return { index: Number(value.index), text: typeof value.text === 'string' ? value.text.trim() : '' }; });
+    const items = rawItems.map((row) => { const value = (row ?? {}) as Input; return { index: Number(value.index), text: typeof value.text === 'string' ? value.text.trim() : '' }; });
     if (!items.length || items.some((item) => !Number.isInteger(item.index) || item.index < 0 || !item.text)) {
       return fail('invalid_value', { path: 'highlights.items', fix: 'items are {index, text}: index is the get_transcript row, text the exact word(s) copied from that row.' });
     }
     for (const item of items) {
-      const segment = segments[item.index];
-      if (!segment) return fail(`index out of range: ${item.index} (this transcript has ${segments.length} rows)`);
+      const segment = base[item.index];
+      if (!segment) return fail(`index out of range: ${item.index} (this transcript has ${base.length} rows)`);
       const found = phraseWordIndexes(rowWords(segment), item.text);
       if (!found) return fail('invalid_value', { path: 'highlights.items', value: item, fix: `"${item.text}" is not in row ${item.index}: ${JSON.stringify(segment.captionText ?? segment.text)}. Copy the words exactly from that row.` });
       for (const wordIndex of found) targets.push({ sentenceIndex: item.index, wordIndex });
     }
   }
   if (!targets.length) return { ok: true, summary: 'No key words to clear' };
-  const next = applyWordDecorations(segments, targets, patch);
+  const next = applyWordDecorations(base, targets, patch);
   const edit = applyCaptionDocumentEdit({
     document: { ...document, semantics: { ...document.semantics, transcripts: { ...document.semantics.transcripts, [assetId]: next } } },
     mainTranscript: null,
@@ -1001,7 +1023,7 @@ function captionHighlights(document: EditorDocumentV2, highlights: Input, clipId
   });
   if (!edit.ok) return fail(edit.error.message, { code: edit.error.code, trackIds: edit.error.trackIds });
   const n = targets.length;
-  return mutation(edit.document, color === 'off' ? `Cleared highlight on ${n} word${n === 1 ? '' : 's'}` : `Highlighted ${n} key word${n === 1 ? '' : 's'} (${color === 'style' ? 'caption highlight color' : color})`, edit.receipts);
+  return mutation(edit.document, replace ? `Replaced the key words: highlighted ${n} word${n === 1 ? '' : 's'}` : color === 'off' ? `Cleared highlight on ${n} word${n === 1 ? '' : 's'}` : `Highlighted ${n} key word${n === 1 ? '' : 's'} (${color === 'style' ? 'caption highlight color' : color})`, edit.receipts);
 }
 
 function captionTranslations(document: EditorDocumentV2, translations: Input, clipId: string | undefined): AgentTimelineOutcome {
@@ -1289,13 +1311,36 @@ export function getTranscriptV3(document: EditorDocumentV2, input: Input): Agent
       ...(isFrame(input.toFrame) ? { toSec: framesToSec(input.toFrame, fps) } : {}),
       ...(Number.isInteger(input.offset) ? { offset: input.offset as number } : {}),
       ...(Number.isInteger(input.limit) ? { limit: input.limit as number } : {}),
+      // Rows asked for by index list their cut words too, so a wrongly cut passage restores by words.
+      ...(Array.isArray(input.segmentIndexes) ? { includeCut: true } : {}),
     };
     const found = listDocumentAddressedWords(document, query);
     if ('error' in found) return fail(found.error);
+    // Where each word plays now, in timeline frames, so placements never derive frames from source
+    // seconds. The story spine first; a word playing nowhere has no frames.
+    const playing = document.timeline.tracks
+      .slice()
+      .sort((a, b) => Number(b.id === document.semantics.primaryNarrativeTrackId) - Number(a.id === document.semantics.primaryNarrativeTrackId))
+      .filter((track) => !track.hidden)
+      .flatMap((track) => track.clips.filter((clip) => clip.enabled && 'assetId' in clip && 'sourceInSec' in clip && typeof clip.sourceInSec === 'number' && typeof clip.sourceOutSec === 'number' && clip.sourceOutSec > clip.sourceInSec));
+    type Playing = (typeof playing)[number] & { assetId: string; sourceInSec: number; sourceOutSec: number };
+    // A word a cut runs through still plays in part: its frames are the part that plays, and it is
+    // marked clipped so a chopped onset or tail is visible (and restorable) rather than silent.
+    const framesOf = (assetId: string, start: number, end: number): { frames: [number, number]; clipped: boolean } | undefined => {
+      const overlapping = (playing as Playing[]).filter((c) => c.assetId === assetId && end > c.sourceInSec + 0.03 && start < c.sourceOutSec - 0.03);
+      const c = overlapping[0];
+      if (!c) return undefined;
+      const scale = c.durationFrames / (c.sourceOutSec - c.sourceInSec);
+      const from = Math.max(start, c.sourceInSec);
+      const to = Math.min(end, c.sourceOutSec);
+      const missing = [[start, from], [to, end]].some(([a, b]) => b! - a! > 0.05 && !overlapping.some((other) => other.sourceInSec <= a! + 0.01 && other.sourceOutSec >= b! - 0.01));
+      return { frames: [Math.round(c.startFrame + (from - c.sourceInSec) * scale), Math.round(c.startFrame + (to - c.sourceInSec) * scale)], clipped: missing };
+    };
     // Key words read back in set_captions.highlights vocabulary: "style" or the fixed #RRGGBB.
     const listed = { ...found, words: found.words.map((word) => {
       const decoration = (document.semantics.transcripts[word.assetId]?.[word.sentenceIndex] as AsrSegment | undefined)?.wordDecorations?.[String(word.wordIndex)];
-      return decoration?.highlight ? { ...word, highlight: decoration.color ?? 'style' } : word;
+      const placed = word.cut ? undefined : framesOf(word.assetId, word.start, word.end);
+      return { ...word, ...(placed ? { startFrame: placed.frames[0], endFrame: placed.frames[1], ...(placed.clipped ? { clipped: true } : {}) } : {}), ...(decoration?.highlight ? { highlight: decoration.color ?? 'style' } : {}) };
     }) };
     return {
       ok: true,

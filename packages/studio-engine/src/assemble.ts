@@ -26,7 +26,7 @@ import {
   videoFrameTimelineBody,
 } from './composition-core';
 import { GL_MIXER_SRC, TRANSITION_GLSL, glDirection } from './transition-gl';
-import { isLookTemplate, lookHeadHtml, lookPieceOf } from './look';
+import { isLookTemplate, lookFontIds, lookHeadHtml, lookPieceOf } from './look';
 import { SOURCE_BACKDROP_FUNCTION, SOURCE_DRAW_RECT_FUNCTION } from './source-framing';
 import { compositionVisualLayerPlan, type SupplementalVisualMediaClip } from './visual-layer-plan';
 import { BLOCK_TEXT_BASELINE_PX } from './block-typography';
@@ -809,6 +809,7 @@ export function assembleHtml(
     comp.captionStyle?.sub?.font,
     ...comp.blocks.map((block) => block.slots?.fontFamily),
     ...comp.blocks.flatMap((block) => componentPropsFontIds(block)),
+    ...lookFontIds(comp.look),
   ]).map((href) => `<link href="${href}" rel="stylesheet" />\n`).join('');
   return `<!doctype html>
 <html lang="zh">
