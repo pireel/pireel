@@ -26,6 +26,8 @@ export interface V3ToolSpec {
   /** Runs only inside Studio Chat: it needs an in-app card, or it serves the in-app model only
    *  (external agents bring their own model and do that work themselves). */
   chatOnly?: boolean;
+  /** Only for external agents: Studio Chat has its own card or flow for the same job. */
+  mcpOnly?: boolean;
   /** Answered directly by the server on the MCP surface (no open tab needed). */
   serverDirect?: boolean;
   /** Carries the literal charge marker in its description. */
@@ -79,7 +81,7 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   { id: 'compose_component', group: 'components' },
   { id: 'set_look', group: 'components' },
   { id: 'place_graphics', group: 'components' },
-  { id: 'set_confirm_list', group: 'session' },
+  { id: 'set_confirm_list', group: 'session', mcpOnly: true },
   { id: 'apply_component', group: 'components', charges: true },
   { id: 'set_texts', group: 'components' },
   { id: 'set_captions', group: 'components' },
@@ -99,6 +101,8 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   // ---- skills, interaction, session (6)
   { id: 'list_skills', group: 'session', serverDirect: true },
   { id: 'read_skill', group: 'session', serverDirect: true },
+  // Studio Chat saves through its Create Skill action, behind an approval card.
+  { id: 'save_user_skill', group: 'session', serverDirect: true, mcpOnly: true },
   { id: 'preview', group: 'session' },
   { id: 'undo', group: 'session' },
   { id: 'ask_user', group: 'session', chatOnly: true },
@@ -108,12 +112,12 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
 ];
 
 
-// Includes cover generation and the on-demand whiteboard tool.
-export const V3_TOOL_LIMIT = 63;
+// Includes cover generation, the on-demand whiteboard tool and saving a Skill over MCP.
+export const V3_TOOL_LIMIT = 64;
 
 export const V3_TOOL_IDS: ReadonlySet<string> = new Set(V3_TOOLS.map((tool) => tool.id));
-/** Studio Chat uses inline questions; the legacy publishing checklist remains MCP-compatible. */
-export const V3_CHAT_TOOL_IDS: ReadonlySet<string> = new Set([...V3_TOOL_IDS].filter(id => id !== 'set_confirm_list'));
+/** What Studio Chat gets: everything but the tools only external agents use. */
+export const V3_CHAT_TOOL_IDS: ReadonlySet<string> = new Set(V3_TOOLS.filter((tool) => !tool.mcpOnly).map((tool) => tool.id));
 /** What an external agent gets: everything but the chat-only tools. */
 export const V3_MCP_TOOL_IDS: ReadonlySet<string> = new Set(V3_TOOLS.filter((tool) => !tool.chatOnly).map((tool) => tool.id));
 

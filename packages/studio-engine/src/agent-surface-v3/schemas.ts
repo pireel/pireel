@@ -741,6 +741,17 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       'Read one Studio Skill as a complete Markdown playbook by exact id from list_skills. Apply it as editorial judgment over these tools; it never introduces tools of its own. speech-cleanup is the official decision policy for filler, retake and dead-air cuts.',
     inputSchema: obj({ id: str('Exact skill id.') }, ['id']),
   },
+  save_user_skill: {
+    description:
+      'Save a private Skill made from this session\'s finished edit, so the next video can be made in the same style. read_skill create-skill-from-conversation first and follow it; call this once, only after the user explicitly approved the draft. A refusal names what to fix (a taken name, instance data, a tool that no longer exists); fix exactly that and call again.',
+    inputSchema: obj({
+      title: { type: 'string', maxLength: 80, description: "Name in the user's language; it must differ from their existing Skills." },
+      summary: { type: 'string', maxLength: 300, description: "One short line in the user's language." },
+      description: { type: 'string', maxLength: 500, description: "What it makes and when to use it, in the user's language." },
+      defaultPrompt: { type: 'string', maxLength: 500, description: "Optional first message filled into Chat when the Skill is picked, in the user's language; never sent by itself." },
+      body: { type: 'string', maxLength: 32000, description: 'The Skill in Markdown, written freely.' },
+    }, ['title', 'description', 'body']),
+  },
   preview: {
     description:
       'Steer what the user sees in the open Studio tab: focus selects an element and moves the playhead to it (do this after creating or changing something visible); seek moves the playhead to a frame; play runs the preview from frame (to toFrame); pause stops it. Needs an open tab.',
