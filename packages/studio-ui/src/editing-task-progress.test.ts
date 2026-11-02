@@ -152,9 +152,9 @@ it('shows branded cover work and preserves its delivery after reload', () => {
   const covered: ChatTask = { ...task, skills: [...task.skills, 'cover'], config: { ...config, skills: [...config.skills, 'cover'], brand: { ...config.brand!, blocks: { cover: { design: 'A strong portrait with a concise headline.' } } } } };
   const row = (current: ChatTask, messages: UIMessage[] = []) => editingTaskRows(current, report, messages, false).finishing.find(item => item.id === 'cover');
   expect(row(covered)?.status).toBe('pending');
-  const generation: UIMessage = { id: 'cover', role: 'assistant', parts: [{ type: 'dynamic-tool', toolName: 'generate_image', toolCallId: 'cover', state: 'output-available', input: { purpose: 'cover' }, output: { ok: true, data: { ids: ['cover-job'] } } }] };
+  const generation: UIMessage = { id: 'cover', role: 'assistant', parts: [{ type: 'dynamic-tool', toolName: 'generate_cover', toolCallId: 'cover', state: 'output-available', input: {}, output: { ok: true, data: { status: 'generating' } } }] };
   expect(row(covered, [generation])?.status).toBe('running');
-  const delivered: ChatTask = { ...covered, state: 'done', review: { completed: true, items: [], cover: { status: 'generated', reason: '封面已核对，标题与本视频内容一致。', url: 'https://cdn.example/cover.png' } } };
+  const delivered: ChatTask = { ...covered, state: 'done', review: { completed: true, items: [], cover: { status: 'generated', reason: '封面已核对，标题与本视频内容一致。' } } };
   expect(row(JSON.parse(JSON.stringify(delivered)))?.status).toBe('done');
   setStudioLocale('zh');
   const html = renderToStaticMarkup(createElement(EditingTaskCard, { task: delivered, messages: [], live: false, credits: 0, onContinue() {} }));

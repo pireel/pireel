@@ -383,7 +383,7 @@ export function ChatThread({
         if (task.directorPlanRequired && !hasCurrentDirectorPreview(messagesForTask(effectiveStudioTurnMessages(messagesRef.current, ledger), task.id))) {
           publishSuccess({ ok: false, error: 'Inspect meaningful rendered timeline frames after the final edit, then assess the result against the saved director plan before finishing.' }); return;
         }
-        const result = reviewEditingTask(task, requestedInput, fineCutClips(), getDocument?.(), messagesForTask(effectiveStudioTurnMessages(messagesRef.current, ledger), task.id));
+        const result = reviewEditingTask(task, requestedInput, fineCutClips(), getDocument?.());
         if (!result.ok) { publishSuccess({ ok: false, error: result.error, ...(result.missing ? { data: { missing: result.missing } } : {}) }); return; }
         updateTask(task.id, current => ({ ...current, review: result.review }));
         publishSuccess({ ok: true, summary: studioLocale().startsWith('zh') ? t('ui.chatThread.editChecked') : 'Editing result checked', data: { review: result.review, taskIncomplete: !result.review.completed } });

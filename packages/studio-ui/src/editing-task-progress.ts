@@ -88,7 +88,7 @@ export function editingTaskRows(task: ChatTask, report: FirstPassReport | undefi
   }
   if (needsBrandCover(task)) {
     const cover = task.review?.cover;
-    const coverCalls = tools.filter(part => toolIdOf(part) === 'generate_cover' || toolIdOf(part) === 'generate_image' && (part as { input?: { purpose?: string } }).input?.purpose === 'cover');
+    const coverCalls = tools.filter(part => toolIdOf(part) === 'generate_cover');
     const failed = unresolvedTaskFailure([{ id: 'cover', role: 'assistant', parts: coverCalls }]);
     finishing.push({ id: 'cover', status: cover?.status === 'generated' ? 'done' : cover?.status === 'skipped' ? 'skipped' : cover?.status === 'blocked' ? 'failed' : failed ? 'failed' : working && coverCalls.length ? 'running' : 'pending', reason: cover?.reason });
   }

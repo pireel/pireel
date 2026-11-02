@@ -1,5 +1,4 @@
 import { coverSceneFromDocument, coverSceneInput } from '@pireel/studio-ui/cover-scene';
-import type { UIMessage } from 'ai';
 import { reviewDirectorPlan, type DirectorBeatResult } from '@pireel/studio-ui/editing-director-plan';
 import type { EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import { isWhiteboardDirectorTask, type ChatTask } from '@pireel/studio-ui/chat-task';
@@ -13,7 +12,7 @@ export type EditReviewFeature = typeof EDIT_REVIEW_FEATURES[number];
 export interface EditingTaskReview {
   completed: boolean;
   brandApplication?: string;
-  cover?: { status: 'generated' | 'blocked' | 'skipped'; reason: string; jobId?: string; assetId?: string; url?: string };
+  cover?: { status: 'generated' | 'blocked' | 'skipped'; reason: string; jobId?: string };
   director?: { revision: number; summary: string; beats: DirectorBeatResult[] };
   items: { feature: EditReviewFeature; status: 'applied' | 'not_needed' | 'blocked'; reason: string; atFrame?: number; count: number }[];
 }
@@ -25,7 +24,7 @@ export function needsEditingReview(task: ChatTask): boolean {
 }
 
 /** Validate completion against actual timeline evidence, not the model's claim that it added a feature. */
-export function reviewEditingTask(task: ChatTask, input: Record<string, unknown>, evidence: EditingEvidence, document?: EditorDocumentV2, messages: readonly UIMessage[] = []): { ok: true; review: EditingTaskReview } | { ok: false; error: string; missing?: string[] } {
+export function reviewEditingTask(task: ChatTask, input: Record<string, unknown>, evidence: EditingEvidence, document?: EditorDocumentV2): { ok: true; review: EditingTaskReview } | { ok: false; error: string; missing?: string[] } {
   if (task.mode !== 'one-click' && !isWhiteboardDirectorTask(task)) return { ok: false, error: 'finish_edit is for a whole-video editing task.' };
   if (evidence.emptyMusicTracks?.length) return { ok: false, error: `Remove unused empty music tracks before finishing: ${evidence.emptyMusicTracks.join(', ')}. Create music lanes with actual placed audio, not pending suggestions.` };
   if (!isWhiteboardDirectorTask(task) && (!task.roughCut || task.roughCut.report.steps.some(step => ['pending', 'running', 'failed'].includes(step.status)))) return { ok: false, error: 'Complete the unfinished rough-cut steps first; preserve completed checkpoints.' };
@@ -51,7 +50,7 @@ export function reviewEditingTask(task: ChatTask, input: Record<string, unknown>
   }
   const director = task.directorPlanRequired || task.directorPlan ? reviewDirectorPlan(task, input, document) : undefined;
   if (director && !director.ok) return director;
-  const coverResult = reviewBrandCover(task, input.cover, document, messages);
+  const coverResult = reviewBrandCover(task, input.cover, document);
   if (!coverResult.ok) return coverResult;
   const wanted = requestedEditFeatures(task);
   const raw = Array.isArray(input.features) ? input.features as Record<string, unknown>[] : [];
@@ -82,8 +81,8 @@ export function needsBrandCover(task: ChatTask): boolean {
   return task.mode === 'one-click' && !!(task.config?.skills.includes('cover') || task.skills.includes('cover'));
 }
 
-/** A separate delivery: match a cover job from this task to its settled, registered image. */
-function reviewBrandCover(task: ChatTask, value: unknown, document: EditorDocumentV2 | undefined, messages: readonly UIMessage[]): { ok: true; cover?: EditingTaskReview['cover'] } | { ok: false; error: string; missing?: string[] } {
+/** A separate delivery: the cover scene's outcome, or the reason it did not run. */
+function reviewBrandCover(task: ChatTask, value: unknown, document: EditorDocumentV2 | undefined): { ok: true; cover?: EditingTaskReview['cover'] } | { ok: false; error: string; missing?: string[] } {
   if (!needsBrandCover(task)) return { ok: true };
   if (document?.semantics.editingSkills && !document.semantics.editingSkills.includes('cover')) return { ok: true, cover: { status: 'skipped', reason: t('ui.editingReview.coverOff') } };
   const scene = document ? coverSceneFromDocument(document) : null;
@@ -101,17 +100,6 @@ function reviewBrandCover(task: ChatTask, value: unknown, document: EditorDocume
     if (!/(?:不要|无需|不需要|不用|别)(?:.{0,8})(?:封面|缩略图)|(?:no|without|skip|omit|do not|don’t|don't)(?:.{0,24})(?:cover|thumbnail)/i.test(task.goal)) return { ok: false, error: 'The selected brand includes a cover. Generate it or report blocked; do not silently skip it.' };
     return { ok: true, cover: { status: 'skipped', reason } };
   }
-  if (row.status !== 'generated' || typeof row.jobId !== 'string' || typeof row.assetId !== 'string') return { ok: false, error: 'A generated cover needs its actual jobId and registered image assetId.' };
-  const parts = messages.flatMap(message => message.role === 'assistant' ? message.parts : []).map(part => part as { type: string; toolName?: string; state?: string; input?: Record<string, unknown>; output?: { ok?: boolean; data?: { ids?: string[]; jobs?: { id: string; status: string; assets?: { key?: string; url?: string; mime?: string }[] }[]; images?: { ref: string }[] } } });
-  const succeeded = parts.filter(part => part.state === 'output-available' && part.output?.ok !== false);
-  const named = (part: typeof parts[number], name: string) => part.type === `tool-${name}` || part.type === 'dynamic-tool' && part.toolName === name;
-  const started = succeeded.some(part => named(part, 'generate_image') && part.input?.purpose === 'cover' && part.output?.data?.ids?.includes(row.jobId as string));
-  const settledAt = succeeded.findLastIndex(part => named(part, 'inspect_media') && part.input?.mode === 'generation' && part.output?.data?.jobs?.some(job => job.id === row.jobId));
-  const job = succeeded[settledAt]?.output?.data?.jobs?.find(job => job.id === row.jobId);
-  const asset = document?.assets[row.assetId];
-  const output = job?.status === 'succeeded' && asset?.kind === 'image' ? job.assets?.find(output => (!output.mime || output.mime.startsWith('image/')) && (output.key && asset.locator.cloudKey === output.key || output.url && asset.locator.remoteUrl === output.url)) : undefined;
-  if (!started || !output?.url || !/^https?:\/\//i.test(output.url)) return { ok: false, error: 'The cover is not a succeeded image generation from this task registered in this output. Check generation status, register its image, or report blocked.' };
-  const inspected = succeeded.some((part, index) => index > settledAt && named(part, 'inspect_media') && part.input?.mode === 'frames' && part.output?.data?.images?.some(image => image.ref === row.assetId));
-  if (!inspected) return { ok: false, error: 'Inspect the actual cover image for headline, subject identity and brand style before finishing.' };
-  return { ok: true, cover: { status: 'generated', reason, jobId: row.jobId, assetId: row.assetId, url: output.url } };
+  // A generated cover only comes from the cover scene, which is read above.
+  return { ok: false, error: 'Call generate_cover for the enabled cover before finishing; completion reads its scene. Report blocked only when it cannot run.', missing: ['cover'] };
 }
