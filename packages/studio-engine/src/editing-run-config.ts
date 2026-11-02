@@ -1,7 +1,6 @@
 import { brandEditingSkills, brandPreferences } from '@pireel/studio-engine/brand-preferences';
 import { fixedBrandConfiguration, type PlaybookSnapshot } from '@pireel/studio-engine/brand-playbook';
 import { EDITING_SKILL_IDS } from '@pireel/studio-engine/editing-skills';
-import type { SkillCaptionSetting, SkillSettings } from '@pireel/studio-engine/skill-format';
 export const HOME_VIDEO_EDITING_SKILL = 'talking-head-edit';
 
 /** Immutable input to one editing task. Brand presence never selects a different executor. */
@@ -11,19 +10,15 @@ export interface EditingRunConfig {
   pauses: 'tight' | 'moderate' | 'natural';
   visual: { headlines: boolean; zoom: boolean; /** Legacy saved tasks only; not an enabled feature. */ transitions?: boolean };
   steps: Record<'transcribe' | 'pauses' | 'cleanup' | 'captions' | 'denoise' | 'logo' | 'loudness', boolean>;
-  /** The caption look of the task's custom Skill, where the brand sets none. */
-  captions?: SkillCaptionSetting;
 }
 
-/** A custom Skill's settings are defaults under the brand: the brand's pacing and captions win. */
-export function resolveEditingRunConfig(input: { brand?: PlaybookSnapshot | null; skills?: readonly string[]; pauses?: EditingRunConfig['pauses']; skill?: SkillSettings }): EditingRunConfig {
+export function resolveEditingRunConfig(input: { brand?: PlaybookSnapshot | null; skills?: readonly string[]; pauses?: EditingRunConfig['pauses'] }): EditingRunConfig {
   const brand = input.brand ? fixedBrandConfiguration(structuredClone(input.brand)) : null;
   const skills = EDITING_SKILL_IDS.filter(id => (input.skills ?? (brand ? brandEditingSkills(brand) : ['rough-cut', 'captions'])).includes(id));
   const on = new Set(skills);
-  const pauses = input.pauses ?? brand?.blocks.sound?.pauses ?? input.skill?.pauses ?? 'moderate';
-  const captions = brand?.blocks.captions?.on ? undefined : input.skill?.captions;
+  const pauses = input.pauses ?? brand?.blocks.sound?.pauses ?? 'moderate';
   const visual = brand ? brandPreferences(brand) : { headlines: false, zoom: false };
-  return { brand, skills, pauses, ...(captions ? { captions } : {}), visual: { headlines: visual.headlines, zoom: visual.zoom }, steps: {
+  return { brand, skills, pauses, visual: { headlines: visual.headlines, zoom: visual.zoom }, steps: {
     transcribe: on.has('rough-cut') || on.has('captions'),
     pauses: on.has('rough-cut') && (brand?.preferences?.pauses ?? pauses !== 'natural'),
     cleanup: on.has('rough-cut') && (brand?.preferences?.cleanup ?? true),

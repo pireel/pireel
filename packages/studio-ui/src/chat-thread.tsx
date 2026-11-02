@@ -10,7 +10,7 @@ import { DEFAULT_STUDIO_AGENT_MODEL, studioAgentModelId, type StudioAgentModelId
 
 import { editingSkillsHint } from '@pireel/studio-engine/editing-skills';
 import { resolveEditingRunConfig } from '@pireel/studio-engine/editing-run-config';
-import { detectSkillSettings, lookToolInput, measureSkillStyle, type SkillSettings } from '@pireel/studio-engine/skill-format';
+import { detectSkillSettings, measureSkillStyle } from '@pireel/studio-engine/skill-format';
 import { EditingTaskCard } from '@pireel/studio-ui/editing-task-card';
 import { displayEditingTask, hasCurrentDirectorPreview, isInteractiveEditingTool, messagesForTask, unresolvedTaskFailure } from '@pireel/studio-ui/editing-task-progress';
 import { coverStillToRun, needsEditingReview, reviewEditingTask } from '@pireel/studio-ui/editing-task-review';
@@ -240,15 +240,12 @@ export function ChatThread({
   }, [saveSnapshot]);
   const skillRef = useRef(skillId);
   skillRef.current = skillId;
-  // The selected custom Skill's settings: applied by program when a task starts with it.
-  const skillSettingsRef = useRef<SkillSettings | undefined>(undefined);
-  skillSettingsRef.current = scenarioSkills.find((skill) => skill.id === skillId)?.settings;
   const scenarioSkillsRef = useRef(scenarioSkills);
   scenarioSkillsRef.current = scenarioSkills;
   const getDocumentRef = useRef(getDocument);
   getDocumentRef.current = getDocument;
-  /** What a Skill made from this conversation carries by program: the style its finished edit shows
-   *  (settings, look, measured numbers), and the custom Skill it started from. */
+  /** What Create Skill writes from: the style values and numbers the finished edit shows, and the
+   *  custom Skill the conversation ran with. */
   const skillDraftContext = () => {
     const document = getDocumentRef.current?.();
     const task = latestTask(messagesRef.current);
@@ -262,7 +259,6 @@ export function ChatThread({
     const base = scenarioSkillsRef.current.find((skill) => skill.id === skillRef.current && skill.custom);
     return {
       settings,
-      ...(document?.appearance.look ? { look: document.appearance.look } : {}),
       ...(document ? { measure: measureSkillStyle(document) } : {}),
       ...(base ? { basedOn: { id: base.id, title: base.title } } : {}),
     };
@@ -762,7 +758,7 @@ export function ChatThread({
       const outputId = (getBodyRef.current().output as { id?: string } | undefined)?.id;
       if (continuing?.outputId && continuing.outputId !== outputId) { setTaskResumeError(true); return false; }
       setTaskResumeError(false);
-      const config = continuing?.config ?? resolveEditingRunConfig({ brand: projectBrandRef.current, skills: continuing?.mode === 'one-click' ? continuing.skills : editingSkillsRef.current, ...(skillSettingsRef.current ? { skill: skillSettingsRef.current } : {}) });
+      const config = continuing?.config ?? resolveEditingRunConfig({ brand: projectBrandRef.current, skills: continuing?.mode === 'one-click' ? continuing.skills : editingSkillsRef.current });
       const source = localAssetIndex?.find(asset => asset.kind === 'video' || !asset.kind);
       const task: ChatTask = continuing ? { ...resumeEditingTask(continuing), config, skillId: continuing.skillId ?? skillRef.current, review: undefined, agentModel: agentModelRef.current, reviewRequired: continuing.reviewRequired || continuing.mode === 'one-click', state: 'running' } : {
         id: mid('task'), ...(outputId ? { outputId } : {}), goal: draftParts.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n'),
@@ -786,12 +782,6 @@ export function ChatThread({
         ...(options.studioAction ? { studioAction: options.studioAction, skillDraft: skillDraftContext() } : {}),
         ...(startTool ? { startTool } : {}),
       };
-      // A custom Skill's look is installed before its first whole-video task, so the edit's graphics
-      // are instances of it from the start.
-      const skillLook = !continuing && options.startTool ? scenarioSkillsRef.current.find((skill) => skill.id === skillRef.current)?.look : undefined;
-      if (skillLook && !getDocumentRef.current?.()?.appearance.look) {
-        await runToolRef.current("run_v3", { name: "set_look", args: { look: lookToolInput(skillLook) } }, { surface: "chat" as const }).catch(() => undefined);
-      }
       const userMessage: UIMessage = {
         id: mid("user"), role: "user", metadata,
         parts: draftParts.map((part) =>
@@ -956,12 +946,11 @@ export function ChatThread({
 
   const switchSkill = useCallback((nextSkillId: StudioScenarioSkillId) => {
     applySkill(nextSkillId);
-    const picked = nextSkillId === STUDIO_AUTO_SKILL_ID ? undefined : scenarioSkills.find((skill) => skill.id === nextSkillId);
-    composerRef.current?.applySkillPrompt(picked?.defaultPrompt ?? null);
-    // A custom Skill's editing switches become the switches; the creator can still change them.
-    const switches = picked?.settings?.switches;
-    if (switches && !projectEditedRef.current) onEditingSkills?.(switches);
-  }, [applySkill, scenarioSkills, onEditingSkills]);
+    const defaultPrompt = nextSkillId === STUDIO_AUTO_SKILL_ID
+      ? null
+      : scenarioSkills.find((skill) => skill.id === nextSkillId)?.defaultPrompt ?? null;
+    composerRef.current?.applySkillPrompt(defaultPrompt);
+  }, [applySkill, scenarioSkills]);
   // A Skill picked in the composer: switching away from the project's Skill, or onto one that would drop
   // the project's brand, asks first.
   const [pendingSkill, setPendingSkill] = useState<StudioScenarioSkillId | null>(null);

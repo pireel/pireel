@@ -8,8 +8,6 @@
 
 import { createContext, useContext, type ComponentType } from 'react';
 import type { Composition, EditorDocumentV2, MediaRef } from '@pireel/studio-engine/composition';
-import type { SkillSettings } from '@pireel/studio-engine/skill-format';
-import type { DocumentLook } from '@pireel/studio-engine/look';
 import type { PanelDragAsset, PanelMediaAsset } from './asset-card';
 import type { GenElementResult } from './element-history';
 
@@ -49,10 +47,6 @@ export interface StudioScenarioSkillOption {
   custom?: boolean;
   /** Market listing metadata used by the picker detail view. Markdown is intentionally absent. */
   market?: StudioSkillMarketMetadata;
-  /** A custom Skill's settings, applied by program when it is picked and when a task starts with it. */
-  settings?: SkillSettings;
-  /** A custom Skill's motion-graphics look, installed when a whole-video task starts with it. */
-  look?: DocumentLook;
 }
 
 export interface StudioCustomScenarioSkillManager {

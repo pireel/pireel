@@ -3040,7 +3040,6 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               document: () => documentRef.current,
               brand: opts?.roughCut?.config ? opts.roughCut.config.brand : semantics.brand ?? null,
               skills: opts?.roughCut?.skills ?? semantics.editingSkills ?? [],
-              ...(opts?.roughCut?.config?.captions ? { skillCaptions: opts.roughCut.config.captions } : {}),
               tool: (name, args, stepSignal) => runStudioTool(ctx, name, args, { surface, ...(stepSignal ?? signal ? { signal: stepSignal ?? signal } : {}) }),
               setUsageSink: (sink) => { if (ctx.usageSinkRef) ctx.usageSinkRef.current = sink; },
               applyCaptionPreset: (preset, style) => ctx.applyCaptionPreset(preset, style),
@@ -3055,7 +3054,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               measureLoudness: async (file) => (await import('@pireel/studio-ui/audio-decode')).streamVideoLoudness(file),
             };
             const outcome = await runFirstPass(host, (next) => { report(next.summary ?? t('tools.rough_cut.busy'), undefined, { report: next }); opts?.roughCut?.onProgress?.(next); }, {
-              ...(steps?.length ? { steps } : {}), ...(pauses ?? opts?.roughCut?.config?.pauses ? { pauses: pauses ?? opts?.roughCut?.config?.pauses } : {}), ...(signal ? { signal } : {}), onLateUsage: opts?.roughCut?.onLateUsage, resume: opts?.roughCut?.resume,
+              ...(steps?.length ? { steps } : {}), ...(pauses ? { pauses } : {}), ...(signal ? { signal } : {}), onLateUsage: opts?.roughCut?.onLateUsage, resume: opts?.roughCut?.resume,
             });
             return {
               ok: true,

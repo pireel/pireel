@@ -2,7 +2,6 @@ import type {CaptionStyle, EditorDocumentV2} from '@pireel/studio-engine/composi
 import type {PlaybookSnapshot} from '@pireel/studio-engine/brand-playbook';
 import type {WorkflowUsage} from '@pireel/studio-engine/workflow';
 import type {EditingRunConfig} from '@pireel/studio-engine/editing-run-config';
-import type {SkillCaptionSetting} from '@pireel/studio-engine/skill-format';
 import type {studioProviders} from '@pireel/studio-engine/providers';
 
 
@@ -100,8 +99,6 @@ export interface FirstPassHost {
   document(): EditorDocumentV2;
   brand: PlaybookSnapshot | null;
   skills: readonly string[];
-  /** The caption look of the task's custom Skill (used where the brand sets none). */
-  skillCaptions?: SkillCaptionSetting;
   /** Runs one agent tool (the same executor the agent uses, so every step is an undoable edit). A stop
    *  signal ends its analysis early; its edit itself always lands whole or not at all. */
   tool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<FirstPassToolResult>;

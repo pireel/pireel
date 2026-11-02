@@ -299,7 +299,6 @@ export const CHATGEN_EN: Record<string, string> = {
   'chatGen.firstPass.pausesCut': '{n} cut',
   'chatGen.firstPass.captionsBrand': 'Brand style',
   'chatGen.firstPass.captionsDefault': 'Default style',
-  'chatGen.firstPass.captionsSkill': 'Skill style',
   'chatGen.firstPass.denoised': 'On',
   'chatGen.firstPass.logoPlaced': 'Added',
   'chatGen.firstPass.loudnessSet': '{lufs} LUFS',
