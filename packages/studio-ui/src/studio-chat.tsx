@@ -19,7 +19,7 @@ import type { StudioAgentModelId } from '@pireel/studio-engine/agent-models';
  * This file keeps the public types + the multi-session shell.
  */
 
-import type { PlaybookSnapshot } from "@pireel/studio-engine/brand-playbook";
+import type { PlaybookSnapshot } from "@pireel/studio-engine/project-brand-metadata";
 import type { HandoffItem } from '@pireel/studio-engine/editor-document/types';
 import type { ConfirmAnswer } from '@pireel/studio-ui/confirm-list';
 import type { GenerationIntent } from "@pireel/studio-ui/chat-generation-intent";

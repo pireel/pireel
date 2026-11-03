@@ -1,5 +1,4 @@
-import { brandEditingSkills, brandPreferences } from '@pireel/studio-engine/brand-preferences';
-import { fixedBrandConfiguration, type PlaybookSnapshot } from '@pireel/studio-engine/brand-playbook';
+import { brandEditingSkills, brandPreferences, type PlaybookSnapshot } from '@pireel/studio-engine/project-brand-metadata';
 import { EDITING_SKILL_IDS } from '@pireel/studio-engine/editing-skills';
 export const HOME_VIDEO_EDITING_SKILL = 'talking-head-edit';
 
@@ -12,8 +11,15 @@ export interface EditingRunConfig {
   steps: Record<'transcribe' | 'pauses' | 'cleanup' | 'captions' | 'denoise' | 'logo' | 'loudness', boolean>;
 }
 
+/** Transition decisions belong to the main editing prompt; a stored brand's retired switch is dropped. */
+function withoutRetiredSwitches(brand: PlaybookSnapshot): PlaybookSnapshot {
+  if (!brand.preferences || !Object.hasOwn(brand.preferences, 'transitions')) return brand;
+  const { transitions: _retired, ...preferences } = brand.preferences;
+  return { ...brand, preferences };
+}
+
 export function resolveEditingRunConfig(input: { brand?: PlaybookSnapshot | null; skills?: readonly string[]; pauses?: EditingRunConfig['pauses'] }): EditingRunConfig {
-  const brand = input.brand ? fixedBrandConfiguration(structuredClone(input.brand)) : null;
+  const brand = input.brand ? withoutRetiredSwitches(structuredClone(input.brand)) : null;
   const skills = EDITING_SKILL_IDS.filter(id => (input.skills ?? (brand ? brandEditingSkills(brand) : ['rough-cut', 'captions'])).includes(id));
   const on = new Set(skills);
   const pauses = input.pauses ?? brand?.blocks.sound?.pauses ?? 'moderate';

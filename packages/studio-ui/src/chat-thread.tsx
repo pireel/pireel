@@ -34,7 +34,7 @@ import {
 } from "react";
 import { ChevronRight, Info, X } from "lucide-react";
 import { ConfirmDialog } from "@pireel/ui/confirm-dialog";
-import { brandSkillOf, skillTakesBrand } from "@pireel/studio-engine/brand-playbook";
+import { brandSkillOf, skillTakesBrand } from "@pireel/studio-engine/project-brand-metadata";
 import { describeGenerationIntentLine } from "@pireel/studio-ui/chat-generation-intent";
 import { useChat } from "@ai-sdk/react";
 import {

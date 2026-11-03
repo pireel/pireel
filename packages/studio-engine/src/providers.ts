@@ -17,6 +17,20 @@ import type { EditorDocumentV2 } from '@pireel/studio-engine/editor-document';
 import type { AssetSearchDocument } from '@pireel/studio-engine/asset-search';
 
 /** One block-generation request (the same shape the BYO brief is assembled from). */
+/** A title the hosted service planned for a new video, in frame percentages. */
+export interface PlannedTitle {
+  text: string;
+  startSec: number;
+  durationSec: number;
+  /** Box in percent of the frame. */
+  box: { xPct: number; yPct: number; widthPct: number; heightPct: number };
+  color: string;
+  /** Plate colour behind the text; null = text straight on the picture. */
+  plate: string | null;
+  /** Text height in percent of the frame height. */
+  sizePct: number;
+}
+
 export interface StudioOperationOptions {
   signal?: AbortSignal; onUsage?: (usage: import('@pireel/studio-engine/usage').WorkflowUsage) => void;
   /** Selective caption coloring; separate from active-word animations and headline graphics. */
@@ -146,7 +160,7 @@ export interface StudioProviders {
   bridgeUrl?: string;
   mediaProxyUrl?: (url: string) => string;
   /** Reusable brand presets. Each project explicitly selects its own snapshot; manage opens the library. */
-  brands?: { list: () => Promise<import('@pireel/studio-engine/brand-playbook').BrandPlaybook[]>; manage?: () => void };
+  brands?: { list: () => Promise<import('@pireel/studio-engine/project-brand-metadata').BrandPlaybook[]>; manage?: () => void };
   workflowEnvironment?: () => Promise<{ scope: string; revision: string }>;
   composer: BlockComposer;
   transcriber: Transcriber;
@@ -184,7 +198,7 @@ export interface StudioProviders {
   speechCleanup?: (segments: { start: number; end: number; text: string; words?: { text: string; start: number; end: number }[] }[], options?: StudioOperationOptions) => Promise<{ cuts: { seg: number; text: string; keep: number; kind: 'retake' | 'false-start' | 'crew-talk'; range: [number, number] }[]; sensitive: { seg: number; text: string; range: [number, number] }[]; unsure: { seg: number; text: string; note: string }[] }>;
   /** Writes a one-click edit's titles from the brand's layout prompt: words, timing, place and look, for
    *  this video's lines (hosted LLM). */
-  brandTitles?: (input: { rows: { index: number; text: string; startSec: number }[]; durationSec: number; guide: string; canvas: { width: number; height: number } }, options?: StudioOperationOptions) => Promise<{ titles: import('@pireel/studio-engine/brand-edit-params').PlannedTitle[] }>;
+  brandTitles?: (input: { rows: { index: number; text: string; startSec: number }[]; durationSec: number; guide: string; canvas: { width: number; height: number } }, options?: StudioOperationOptions) => Promise<{ titles: PlannedTitle[] }>;
   /** Plans where a one-click edit places the platform's moves (punch-ins, transitions), following the brand's
    *  prompt within the platform ceiling (hosted LLM). Picks are phrases of the given rows. */
   editPlan?: (input: { rows: { index: number; text: string; startSec: number }[]; durationSec: number; guide: string; moves: { kind: 'punch_in' | 'transition'; variants: string[]; max: number }[] }, options?: StudioOperationOptions) => Promise<{ picks: { kind: 'punch_in' | 'transition'; index: number; text: string; variant: string; scale?: number }[] }>;

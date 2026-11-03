@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { runAgentTimelineTool } from '@pireel/studio-engine/agent-timeline';
 import { compositionToEditorDocument, emptyComposition } from '@pireel/studio-engine/composition';
-import { emptyPlaybook, playbookSnapshot } from '@pireel/studio-engine/brand-playbook';
+import type { PlaybookSnapshot } from '@pireel/studio-engine/project-brand-metadata';
 import { resolveEditingRunConfig } from '@pireel/studio-engine/editing-run-config';
 import { firstNarrativeAssetId } from '@pireel/studio-engine/editor-document/read-model';
 import { directorBeatWindows, directorPlanForModel, directorPlanToolBlock, saveEditingDirectorPlan, reviewDirectorPlan, withDirectorInstruction } from '@pireel/studio-ui/editing-director-plan';
@@ -13,12 +13,13 @@ import { reviewEditingTask } from '@pireel/studio-ui/editing-task-review';
 import { latestTask, resumeTaskHint, type ChatTask } from '@pireel/studio-ui/chat-task';
 import { sanitizeRestored } from '@pireel/studio-ui/chat-thread-store';
 import { editingTaskRows } from '@pireel/studio-ui/editing-task-progress';
+const emptySnapshot = (id: string, name: string): PlaybookSnapshot => ({ schema: 3, id, name, version: 1, method: 'manual', blocks: {} });
 
 function fixture() {
   const document = compositionToEditorDocument({ projectId: 'p-test', videoSig: 'sig', composition: { ...emptyComposition(), video: { url: 'blob:test', durationSec: 10 }, shots: [{ id: 'speaker', srcStart: 0, srcEnd: 10, treatment: 'full' }] } }).document;
   const assetId = firstNarrativeAssetId(document)!;
   document.semantics.transcripts[assetId] = [{ start: 2, end: 5, text: '这张年卡包含两场大会门票。' }];
-  const brand = playbookSnapshot(emptyPlaybook('brand', '克制讲解'));
+  const brand = emptySnapshot('brand', '克制讲解');
   const config = resolveEditingRunConfig({ brand, skills: ['rough-cut', 'captions'] });
   const task: ChatTask = { id: 'edit', mode: 'one-click', state: 'running', goal: '讲清楚礼盒的价值', skills: config.skills, config, directorPlanRequired: true, reviewRequired: true,
     roughCut: { callId: 'rough', report: { state: 'done', credits: 0, steps: [{ id: 'transcribe', status: 'done' }, { id: 'cleanup', status: 'done' }, { id: 'captions', status: 'done' }] } } };

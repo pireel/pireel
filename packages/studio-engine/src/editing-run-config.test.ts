@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { emptyPlaybook, playbookSnapshot } from '@pireel/studio-engine/brand-playbook';
+import type { PlaybookSnapshot } from '@pireel/studio-engine/project-brand-metadata';
 import { resolveEditingRunConfig } from '@pireel/studio-engine/editing-run-config';
+const emptySnapshot = (id: string, name: string): PlaybookSnapshot => ({ schema: 3, id, name, version: 1, method: 'manual', blocks: {} });
 
 describe('editing task configuration', () => {
   it('uses the same execution steps with or without a brand for equivalent choices', () => {
-    const brand = playbookSnapshot(emptyPlaybook('brand', 'Brand'));
+    const brand = emptySnapshot('brand', 'Brand');
     brand.blocks.captions = { on: true, style: { color: '#ffcc00' } };
     const skills = ['rough-cut', 'captions'];
     expect(resolveEditingRunConfig({ brand, skills }).steps).toEqual(resolveEditingRunConfig({ brand: null, skills }).steps);
@@ -12,7 +13,7 @@ describe('editing task configuration', () => {
     expect(Object.values(resolveEditingRunConfig({ skills: [] }).steps)).not.toContain(true);
   });
   it('freezes the selected brand and per-edit choices for a resumable task', () => {
-    const brand = playbookSnapshot(emptyPlaybook('brand', 'Brand'));
+    const brand = emptySnapshot('brand', 'Brand');
     brand.blocks.captions = { on: true, style: { color: '#ffcc00' } };
     brand.preferences = { cleanup: false, pauses: true, zoom: true };
     const config = resolveEditingRunConfig({ brand, skills: ['rough-cut', 'captions'] });
@@ -26,7 +27,7 @@ describe('editing task configuration', () => {
 
 it('leaves transition decisions to the main prompt regardless of legacy brand switches', () => {
   for (const transitions of [true, false]) {
-    const brand = playbookSnapshot(emptyPlaybook('b', 'Brand'));
+    const brand = emptySnapshot('b', 'Brand');
     brand.preferences = { transitions };
     const config = resolveEditingRunConfig({ brand });
     expect(config.visual).not.toHaveProperty('transitions');

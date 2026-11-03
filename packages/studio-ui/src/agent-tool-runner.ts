@@ -1,5 +1,5 @@
 import { editorRequest } from '@pireel/studio-ui/host-request';
-import { brandGraphicsStyle } from '@pireel/studio-engine/brand-playbook';
+import { brandGraphicsStyle } from '@pireel/studio-engine/project-brand-metadata';
 import { adaptiveGeneratedVideoSpec } from '@pireel/studio-engine/generated-video-spec';
 /**
  * Agent tool dispatcher: executes the studio's agent tools (chat + external MCP bridge) against the live

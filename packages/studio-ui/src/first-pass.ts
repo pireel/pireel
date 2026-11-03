@@ -1,5 +1,5 @@
 import type {CaptionStyle, EditorDocumentV2} from '@pireel/studio-engine/composition';
-import type {PlaybookSnapshot} from '@pireel/studio-engine/brand-playbook';
+import type {PlaybookSnapshot} from '@pireel/studio-engine/project-brand-metadata';
 import type {WorkflowUsage} from '@pireel/studio-engine/workflow';
 import type {EditingRunConfig} from '@pireel/studio-engine/editing-run-config';
 import type {studioProviders} from '@pireel/studio-engine/providers';

@@ -1,7 +1,6 @@
 "use client";
 import { editorRequest } from '@pireel/studio-ui/host-request';
-import { brandGraphicsStyle } from '@pireel/studio-engine/brand-playbook';
-import { brandEditingSkills } from '@pireel/studio-engine/brand-preferences';
+import { brandEditingSkills, brandGraphicsStyle } from '@pireel/studio-engine/project-brand-metadata';
 import { loadCoverBrandReferences } from '@pireel/studio-ui/cover-brand-references';
 import { pickImageModel } from '@pireel/studio-engine/image-generation-settings';
 import { ScenePreviewTransport } from "@pireel/studio-ui/scene-preview-transport";
@@ -175,7 +174,7 @@ import { transcriptInputsFor, type DocumentOp } from '@pireel/studio-engine/docu
 import { applyEditorDocumentPersistenceMetadata } from '@pireel/studio-engine/project-document';
 import { DocumentCommitter, fieldCoalesce, type CommitUndo } from '@pireel/studio-ui/document-commit';
 import { sourceAnchorAt, timelineSecForAnchor } from '@pireel/studio-ui/source-anchor';
-import type { PlaybookSnapshot } from "@pireel/studio-engine/brand-playbook";
+import type { PlaybookSnapshot } from "@pireel/studio-engine/project-brand-metadata";
 import { ProjectSync, localPendingTransactionStore, type ProjectSyncDeps, type ProjectSyncSections } from '@pireel/studio-ui/project-sync';
 
 /** Constant speed of a placed video clip = source seconds per timeline second (1 = natural). */

@@ -1,12 +1,23 @@
 import { normalizeImageSettings, imageGenerationParams } from '@pireel/studio-engine/image-generation-settings';
 import type { EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import { primaryNarrativeClips } from '@pireel/studio-engine/composition';
-import { parseCoverPlan } from '@pireel/studio-engine/brand-cover';
 import { canonicalJson, hashSection } from '@pireel/studio-engine/stable-json';
-import { activeBrandCover, brandCoverReferenceKeys } from '@pireel/studio-engine/brand-playbook';
+import { activeBrandCover, brandCoverReferenceKeys } from '@pireel/studio-engine/project-brand-metadata';
 import { retainedCoverFrame, coverFrameIdentity, type CoverSourceFrame } from '@pireel/studio-ui/cover-frame-selection';
 import { projectCoverFromDocument, type ProjectCover } from '@pireel/studio-ui/project-cover';
 import type { GenJob, StartResult } from '@pireel/studio-ui/gen-api';
+
+/** The hosted cover plan, as the 'cover-plan' analysis answers it: the image prompt and the picked still. */
+export function parseCoverPlan(raw: string, count: number): { prompt: string; pick: number } {
+  const fail = (path: string, value: unknown): never => { throw new Error(`cover output breaks the contract: ${path} = ${JSON.stringify(value)?.slice(0, 160)}`); };
+  let value: Record<string, unknown>;
+  try { value = JSON.parse(/\{[\s\S]*\}/.exec(raw)?.[0] ?? raw) as Record<string, unknown>; } catch { return fail('json', raw.slice(0, 200)); }
+  const prompt = typeof value.prompt === 'string' ? value.prompt.trim() : '';
+  if (prompt.length < 40 || prompt.length > 16000) fail('prompt', value.prompt);
+  const pick = value.pick;
+  if (!(Number.isInteger(pick) && (pick as number) >= 0 && (pick as number) < count)) fail('pick', pick);
+  return { prompt, pick: pick as number };
+}
 
 export interface CoverScene {
   version: 1; runId: string; inputFingerprint?: string; contextFingerprint?: string; startedAt?: number; phase: 'planning' | 'prepared' | 'starting' | 'generating' | 'ready' | 'failed';

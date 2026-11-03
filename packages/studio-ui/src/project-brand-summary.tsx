@@ -1,7 +1,6 @@
 import { Popover } from 'radix-ui';
 import { ChevronDown, Palette } from 'lucide-react';
-import { type PlaybookSnapshot } from '@pireel/studio-engine/brand-playbook';
-import { brandPreferences } from '@pireel/studio-engine/brand-preferences';
+import { brandPreferences, type PlaybookSnapshot } from '@pireel/studio-engine/project-brand-metadata';
 import { t } from './i18n';
 
 export function ProjectBrandSummary({ brand }: { brand: PlaybookSnapshot | null | undefined }) {

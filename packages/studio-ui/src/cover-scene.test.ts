@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import { compositionToEditorDocument, emptyComposition } from '@pireel/studio-engine/composition';
-import { emptyPlaybook, playbookSnapshot } from '@pireel/studio-engine/brand-playbook';
-import { playbookAgentBrief } from '@pireel/studio-engine/brand-edit-params';
+import type { PlaybookSnapshot } from '@pireel/studio-engine/project-brand-metadata';
 import { CoverSceneController, videoCoverAspect, coverSceneFromDocument, coverSceneInput, withCoverScene, type CoverSceneHost } from '@pireel/studio-ui/cover-scene';
+const emptySnapshot = (id: string, name: string): PlaybookSnapshot => ({ schema: 3, id, name, version: 1, method: 'manual', blocks: {} });
 
 function fixture() {
   let document = compositionToEditorDocument({ projectId: 'cover', videoSig: 'sig', composition: { ...emptyComposition(), video: { url: 'blob:source', durationSec: 12 }, shots: [{ id: 'speaker', srcStart: 2, srcEnd: 6, treatment: 'full' }] } }).document;
   const assetId = Object.keys(document.assets)[0];
   document.semantics.transcripts[assetId] = [{ start: 0, end: 1, text: 'Deleted wrong take' }, { start: 2, end: 6, text: 'Keep this useful explanation' }];
-  const brand = playbookSnapshot(emptyPlaybook('b', 'Brand')); brand.blocks.cover = { referenceKeys: [] }; brand.preferences = { cover: true }; brand.settings = { cover: { prompt: 'SPECIAL COVER DESIGN: black type on white. Choose the current speaker’s clear face.' } }; document.semantics.brand = brand;
+  const brand = emptySnapshot('b', 'Brand'); brand.blocks.cover = { referenceKeys: [] }; brand.preferences = { cover: true }; brand.settings = { cover: { prompt: 'SPECIAL COVER DESIGN: black type on white. Choose the current speaker’s clear face.' } }; document.semantics.brand = brand;
   const analyze = vi.fn(async (_body: Record<string, unknown>) => JSON.stringify({ prompt: 'SPECIAL COVER DESIGN: black type on white. Use this video’s own speaker as the reference, with generous negative space and the words Useful explanation. Preserve identity and add no unsupported claims.', pick: 0 }));
   const start = vi.fn(async (_params: Record<string, unknown>) => ({ ok: true as const, ids: ['new-cover-job'] }));
   const poll = vi.fn(async () => ({ id: 'new-cover-job', status: 'succeeded' as const, prompt: 'Prompt stays outside chat', createdAt: 1, assets: [{ key: 'uploads/cover.jpg', url: 'https://cdn.example/cover.jpg', mime: 'image/jpeg' }] }));
@@ -24,7 +24,6 @@ describe('independent cover workflow', () => {
     expect(f.start.mock.calls[0][0]).toMatchObject({ model_id: 'nano-banana', n: 1, reference_images: ['https://private.example/current-speaker.jpg'] });
     expect(JSON.stringify(result)).not.toMatch(/SPECIAL|http|Useful|frame/);
     expect(coverSceneFromDocument(f.document())?.prompt).toContain('SPECIAL COVER DESIGN');
-    expect(playbookAgentBrief(f.document().semantics.brand!)).not.toContain('SPECIAL COVER DESIGN');
     expect(await f.controller.refresh()).toEqual({ status: 'ready', available: true });
     expect(coverSceneFromDocument(f.document())?.images[0].url).toBe('https://cdn.example/cover.jpg');
   });

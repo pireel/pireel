@@ -1,6 +1,6 @@
 import type { EditorDocumentV2, HandoffItem } from '@pireel/studio-engine/editor-document/types';
 import { EDITING_SKILL_IDS, isEditingSkillId } from '@pireel/studio-engine/editing-skills';
-import { brandSkillOf, skillTakesBrand, validatePlaybookSnapshot, type PlaybookSnapshot } from '@pireel/studio-engine/brand-playbook';
+import { brandSkillOf, readPlaybookSnapshot, skillTakesBrand, type PlaybookSnapshot } from '@pireel/studio-engine/project-brand-metadata';
 import { commandFailure, emptyCommandReceipt, type EditorCommandResult } from '@pireel/studio-engine/editor-document/commands/types';
 
 /** The creator's answer to one confirm-list item: confirmed as is, or changed with their words. */
@@ -36,7 +36,7 @@ export function setEditingSkills(document: EditorDocumentV2, ids: readonly strin
 export function setProjectBrand(document: EditorDocumentV2, brand: PlaybookSnapshot | null): EditorCommandResult {
   let next: PlaybookSnapshot | null = null;
   if (brand !== null) {
-    try { next = validatePlaybookSnapshot(brand); } catch (error) {
+    try { next = readPlaybookSnapshot(brand); } catch (error) {
       return commandFailure(document, 'invalid-command', error instanceof Error ? error.message : 'Brand is invalid.', { path: 'brand' });
     }
   }
