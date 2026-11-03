@@ -37,6 +37,8 @@ interface Props {
   sourceVolume?: number;
   onTime: (time: number) => void;
   onPlaying: (playing: boolean) => void;
+  /** A rebuilt document is on screen (its first frame arrived). */
+  onShown?: () => void;
 }
 
 /** The independent scenes use the workbench's resident decoder and assembled canvas runtime, mounted
@@ -142,6 +144,7 @@ export const SceneCanvasPreview = forwardRef<SceneCanvasHandle, Props>(function 
         priming.current = null;
         active.current = index;
         setVisible(index);
+        current.current.onShown?.();
         if (previous !== index) {
           frames.current[previous]?.contentWindow?.postMessage({ type: 'hf:pause' }, '*');
           ready.current[previous] = false;
@@ -177,6 +180,7 @@ export const SceneCanvasPreview = forwardRef<SceneCanvasHandle, Props>(function 
         active.current = index;
         setVisible(index);
         priming.current = null;
+        current.current.onShown?.();
       }
       eng.refresh();
     };

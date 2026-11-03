@@ -331,7 +331,8 @@ export const PREVIEW_RUNTIME = `
     var fits = {};
     comps().forEach(function (el) {
       var id = el.getAttribute('data-composition-id');
-      if (id === 'root' || id === 'vid') return;
+      // Picture layers carry their framing in their own transform; autofit (text overflow) must not reset it.
+      if (id === 'root' || id === 'vid' || el.hasAttribute('data-hf-visual-clip')) return;
       var t = fitTarget(el);
       var cw = t.clientWidth, ch = t.clientHeight;
       if (!cw || !ch) return;

@@ -19,6 +19,14 @@ export interface FrameGeom {
   /** GRID_W×GRID_H occupancy (1 = person). */
   occ: Uint8Array;
 }
+/** Every prominent face in one frame, normalized on the source frame, with how open its mouth is
+ *  (0 closed … 1 wide; null when the landmarks could not be read). */
+export interface FacesFrame {
+  t: number;
+  faces: { x: number; y: number; w: number; h: number; mouth: number | null;
+    /** What the face and hair look like: a grid of average colours (RGB, 0–255) over the head and shoulders, to tell people apart across shots. */
+    look?: number[] }[];
+}
 export interface SafeZone {
   /** Largest placeable empty rects (largest first, normalized). */
   rects: NRect[];

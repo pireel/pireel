@@ -18,12 +18,12 @@
 // mediabunny / @mediapipe/tasks-vision are heavy and only needed after "user picked a video + ran visual analysis":
 // always dynamic-import, keep them out of the /studio initial bundle. Type imports don't enter the bundle.
 import type { FaceDetector, FaceLandmarker, ImageSegmenter } from '@mediapipe/tasks-vision';
-import { GRID_H, GRID_W, type FrameGeom, type NRect, type SafeZone, safeZoneForRange } from '@pireel/studio-engine/geometry-math';
+import { GRID_H, GRID_W, type FacesFrame, type FrameGeom, type NRect, type SafeZone, safeZoneForRange } from '@pireel/studio-engine/geometry-math';
 import { isMouthVisiblyOpen, type EditorialFaceObservation } from '@pireel/studio-engine/mouth-state';
 import { frameStabilityScore, type FrameMotionVector, type FrameQualityObservation } from '@pireel/studio-engine/visual-quality';
 import { t } from './i18n';
 
-export type { NRect, FrameGeom, SafeZone } from '@pireel/studio-engine/geometry-math';
+export type { NRect, FrameGeom, FacesFrame, SafeZone } from '@pireel/studio-engine/geometry-math';
 export { safeZoneForRange } from '@pireel/studio-engine/geometry-math';
 
 const GEOM_FPS = 2;
@@ -40,6 +40,14 @@ const EDITORIAL_FACE_MODEL = '/mediapipe/blaze_face_full_range.tflite';
 const FACE_LANDMARKER_MODEL = '/mediapipe/face_landmarker.task';
 const EDITORIAL_FACE_LONG_EDGE = 720;
 const EDITORIAL_FACE_CROP_SIZE = 256;
+/** analyzeFacesAtTimes: the frame size faces are read at, and the least detection score kept. */
+const PEOPLE_FACE_LONG_EDGE = 1280;
+const PEOPLE_FACE_MIN_SCORE = 0.6;
+/** findPictureCut: the least change between two frames (mean per colour channel, 0–255) that is a cut. */
+const PICTURE_CUT_CHANGE = 20;
+/** The grid a face's look is averaged over: head and shoulders, 4 across, 6 down. */
+const LOOK_COLUMNS = 4;
+const LOOK_ROWS = 6;
 
 interface MP {
   seg: ImageSegmenter;
@@ -423,6 +431,130 @@ function measureFrameQuality(
  * Returns null on failure/not-ready; the caller skips that frame.
  * Closes the passed-in bitmap either way (it was transferred via postMessage and isn't returned).
  */
+/**
+ * Every prominent face at each time and how open each mouth is, for telling who is speaking when
+ * several people share the frame. Faces under 30% of the largest one's area (background people)
+ * and beyond the four largest are left out. Local only: no network or model calls.
+ */
+export async function analyzeFacesAtTimes(file: File, requestedTimes: readonly number[], options: { onProgress?: (fraction: number) => void } = {}): Promise<FacesFrame[]> {
+  const stamps = [...new Set(requestedTimes.filter((time) => Number.isFinite(time) && time >= 0).map((time) => Math.round(time * 1_000) / 1_000))].sort((a, b) => a - b);
+  if (!stamps.length) return [];
+  const [landmarker, faceDetector] = await Promise.all([loadFaceLandmarker(), loadEditorialFaceDetector()]);
+  if (!faceDetector) return [];
+  const { ALL_FORMATS, BlobSource, Input, VideoSampleSink } = await import('mediabunny');
+  const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
+  try {
+    const track = await input.getPrimaryVideoTrack();
+    if (!track) return [];
+    const vw = track.displayWidth || 720;
+    const vh = track.displayHeight || 1280;
+    // Several people share the frame, so each face is small: read it at up to 1280 px, not 720.
+    const scale = Math.min(1, PEOPLE_FACE_LONG_EDGE / Math.max(vw, vh));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(8, Math.round(vw * scale));
+    canvas.height = Math.max(8, Math.round(vh * scale));
+    const ctx = canvas.getContext('2d');
+    const faceCanvas = document.createElement('canvas');
+    faceCanvas.width = EDITORIAL_FACE_CROP_SIZE;
+    faceCanvas.height = EDITORIAL_FACE_CROP_SIZE;
+    const faceCtx = faceCanvas.getContext('2d');
+    const lookCanvas = document.createElement('canvas'); lookCanvas.width = LOOK_COLUMNS; lookCanvas.height = LOOK_ROWS;
+    const lookCtx = lookCanvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx || !faceCtx || !lookCtx) return [];
+    const t0 = Math.max(0, await input.getFirstTimestamp());
+    const sink = new VideoSampleSink(track);
+    const frames: FacesFrame[] = [];
+    for await (const sample of sink.samplesAtTimestamps(stamps.map((stamp) => stamp + t0))) {
+      if (!sample) continue;
+      const t = sample.timestamp - t0;
+      sample.draw(ctx as unknown as CanvasRenderingContext2D, 0, 0, canvas.width, canvas.height);
+      sample.close();
+      // Only confident faces: a cluttered set (a screen, knees, a poster) otherwise adds a face that comes and goes.
+      const boxes = faceDetector.detect(canvas).detections.flatMap((detection): PixelFaceBox[] => {
+        const box = detection.boundingBox;
+        if (!box || box.width <= 0 || box.height <= 0 || (detection.categories?.[0]?.score ?? 1) < PEOPLE_FACE_MIN_SCORE) return [];
+        return [{ x: box.originX, y: box.originY, w: box.width, h: box.height, area: (box.width * box.height) / Math.max(1, canvas.width * canvas.height) }];
+      }).sort((left, right) => right.area - left.area);
+      const floor = boxes[0] ? Math.max(0.0015, boxes[0].area * 0.3) : Infinity;
+      const faces: FacesFrame['faces'] = [];
+      const kept = boxes.filter((entry) => entry.area >= floor).slice(0, 4);
+      for (const box of kept) {
+        // The look is the head and shoulders in proportion to the face, so a close-up and a wide shot of one person compare.
+        const lookX = Math.max(0, box.x - box.w * 0.25); const lookY = Math.max(0, box.y - box.h * 0.4);
+        const lookW = Math.min(canvas.width - lookX, box.w * 1.5); const lookH = Math.min(canvas.height - lookY, box.h * 2.6);
+        lookCtx.drawImage(canvas, lookX, lookY, lookW, lookH, 0, 0, LOOK_COLUMNS, LOOK_ROWS);
+        const pixels = lookCtx.getImageData(0, 0, LOOK_COLUMNS, LOOK_ROWS).data;
+        const look = Array.from({ length: LOOK_COLUMNS * LOOK_ROWS }, (_, cell) => [pixels[cell * 4]!, pixels[cell * 4 + 1]!, pixels[cell * 4 + 2]!]).flat();
+        const crop = expandedSquareCrop(box, canvas.width, canvas.height);
+        let mouth: number | null = null;
+        // Mouths tell people apart; a face alone in the picture is the one speaking, so it needs no reading.
+        if (landmarker && kept.length > 1) {
+          faceCtx.clearRect(0, 0, faceCanvas.width, faceCanvas.height);
+          faceCtx.drawImage(canvas, crop.x, crop.y, crop.size, crop.size, 0, 0, faceCanvas.width, faceCanvas.height);
+          const result = landmarker.detect(faceCanvas);
+          const jaw = result.faceBlendshapes[0]?.categories.find((category) => category.categoryName.replace(/[_-]/g, '').toLowerCase() === 'jawopen')?.score;
+          const marks = result.faceLandmarks[0];
+          // Lips parting, against the face's height (forehead to chin), which a turned head does not shrink:
+          // it shows speech in a small face, where the jaw-open score barely moves until the mouth opens wide.
+          const height = marks?.[10] && marks[152] ? landmarkDistance(marks[10], marks[152]) : 0;
+          const aperture = marks?.[13] && marks[14] && height > 0.001 ? landmarkDistance(marks[13], marks[14]) / height : null;
+          mouth = aperture ?? (typeof jaw === 'number' ? jaw : null);
+        }
+        faces.push({ x: box.x / canvas.width, y: box.y / canvas.height, w: box.w / canvas.width, h: box.h / canvas.height, mouth, look });
+      }
+      frames.push({ t, faces });
+      options.onProgress?.(frames.length / stamps.length);
+    }
+    return frames;
+  } catch (error) {
+    console.warn('[studio/geometry] faces scan failed:', error instanceof Error ? error.message : String(error));
+    return [];
+  } finally {
+    await input.dispose();
+  }
+}
+
+/**
+ * The exact moment the picture cuts to another shot within [from, to] (seconds): every frame in the
+ * window is compared with the one before at a thumbnail's size, and the biggest change, when it is
+ * a real change of picture, is the cut. Returns the cut frame's time, or null when nothing cuts.
+ */
+export async function findPictureCut(file: File, from: number, to: number): Promise<number | null> {
+  if (!(to > from)) return null;
+  const { ALL_FORMATS, BlobSource, Input, VideoSampleSink } = await import('mediabunny');
+  const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
+  try {
+    const track = await input.getPrimaryVideoTrack();
+    if (!track) return null;
+    const canvas = document.createElement('canvas'); canvas.width = 32; canvas.height = 18;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return null;
+    const t0 = Math.max(0, await input.getFirstTimestamp());
+    const sink = new VideoSampleSink(track);
+    let previous: Uint8ClampedArray | null = null;
+    let best: { t: number; change: number } | null = null;
+    for await (const sample of sink.samples(Math.max(0, from) + t0, to + t0)) {
+      const t = sample.timestamp - t0;
+      sample.draw(ctx as unknown as CanvasRenderingContext2D, 0, 0, canvas.width, canvas.height);
+      sample.close();
+      const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      if (previous) {
+        let sum = 0;
+        for (let index = 0; index < pixels.length; index += 4) sum += Math.abs(pixels[index]! - previous[index]!) + Math.abs(pixels[index + 1]! - previous[index + 1]!) + Math.abs(pixels[index + 2]! - previous[index + 2]!);
+        const change = sum / (pixels.length / 4) / 3;
+        if (!best || change > best.change) best = { t, change };
+      }
+      previous = pixels;
+    }
+    return best && best.change >= PICTURE_CUT_CHANGE ? Math.round(best.t * 1000) / 1000 : null;
+  } catch (error) {
+    console.warn('[studio/geometry] cut scan failed:', error instanceof Error ? error.message : String(error));
+    return null;
+  } finally {
+    await input.dispose();
+  }
+}
+
 export async function segmentPersonMask(src: ImageBitmap, stream?: import('./person-matte').MatteStream): Promise<ImageBitmap | null> {
   try {
     const { matteMask } = await import('./person-matte');

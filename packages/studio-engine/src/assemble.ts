@@ -621,6 +621,23 @@ export function withMotionTiming(body: string, motion: Block['motion']): string 
   return `var __hfInner = gsap.timeline();\n(function (tl) {\n${body}\n})(__hfInner);\n__hfInner.timeScale(${speed});\ntl.add(__hfInner, ${delay});`;
 }
 
+/**
+ * The CSS object-position that crops a cover-fitted picture the way export does (sourceDrawRect): the
+ * anchor is kept as near the box's middle as the picture allows. CSS instead puts the anchor at the
+ * same fraction of the box, which matches only at 0, ½ and 1.
+ */
+function coverPosition(visual: SupplementalVisualMediaClip, box: { w: number; h: number }, width: number, height: number, axis: 'x' | 'y'): number {
+  const anchor = Math.max(0, Math.min(1, (axis === 'x' ? visual.anchorX : visual.anchorY) ?? 0.5));
+  if (visual.fit !== 'cover' || !visual.sourceWidth || !visual.sourceHeight) return anchor;
+  const boxWidth = box.w * width; const boxHeight = box.h * height;
+  const fit = Math.max(boxWidth / visual.sourceWidth, boxHeight / visual.sourceHeight);
+  const frame = axis === 'x' ? boxWidth : boxHeight;
+  const content = (axis === 'x' ? visual.sourceWidth : visual.sourceHeight) * fit;
+  if (content - frame < 0.5) return anchor;
+  const offset = Math.min(0, Math.max(frame - content, frame / 2 - anchor * content));
+  return offset / (frame - content);
+}
+
 export function assembleHtml(
   comp: Composition,
   gsapSrc = '/vendor/gsap.min.js',
@@ -677,7 +694,7 @@ export function assembleHtml(
     const box = visual.box ?? { x: 0, y: 0, w: 1, h: 1 };
     const framing = mediaFramingTransformVars(visual.mediaFraming ?? IDENTITY_MEDIA_FRAMING);
     const mediaStyle = `position:absolute;left:${n(box.x * 100)}%;top:${n(box.y * 100)}%;width:${n(box.w * 100)}%;height:${n(box.h * 100)}%;` +
-      `object-fit:${visual.fit};object-position:${n((visual.anchorX ?? 0.5) * 100)}% ${n((visual.anchorY ?? 0.5) * 100)}%;opacity:${n(visual.opacity ?? 1)};` +
+      `object-fit:${visual.fit};object-position:${n(coverPosition(visual, box, W, H, 'x') * 100)}% ${n(coverPosition(visual, box, W, H, 'y') * 100)}%;opacity:${n(visual.opacity ?? 1)};` +
       `transform:translate(${n(framing.xPercent)}%,${n(framing.yPercent)}%) scale(${n(framing.scale)});transform-origin:center center;` +
       `clip-path:${framing.clipPath};border-radius:${n(framing.borderRadius)}px;filter:${shotFilterCss(visual.filter)};will-change:left,top,width,height,transform,clip-path,filter;`;
     if (visual.kind === 'image') {
