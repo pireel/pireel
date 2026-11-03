@@ -15,7 +15,9 @@
  */
 import type { BufferTarget as BufferTargetType } from 'mediabunny';
 
-export async function extractAudio(file: File): Promise<Blob> {
+/** `range`: only this part of the picture's timeline, in seconds from the picture's first frame; the
+ *  extracted audio then starts at `range.start`. */
+export async function extractAudio(file: File, range?: { start: number; end: number }): Promise<Blob> {
   const { ALL_FORMATS, BlobSource, BufferTarget, Conversion, Input, Mp4OutputFormat, Output, QUALITY_MEDIUM } =
     await import('mediabunny');
   const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
@@ -24,9 +26,12 @@ export async function extractAudio(file: File): Promise<Blob> {
     if (!audioTrack) throw new Error('The video has no audio track — cannot extract audio');
 
     const output = new Output({ format: new Mp4OutputFormat(), target: new BufferTarget() });
+    // Trim times are on the file's own clock, which starts where the picture's first frame is stamped.
+    const first = range ? Math.max(0, await input.getFirstTimestamp()) : 0;
     const conversion = await Conversion.init({
       input,
       output,
+      ...(range ? { trim: { start: first + range.start, end: first + range.end } } : {}),
       video: { discard: true },
       audio: { codec: 'aac', bitrate: QUALITY_MEDIUM },
     });

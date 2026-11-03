@@ -141,15 +141,17 @@ async function transcribeFileOnce(file: File, opts?: TranscribeOptions): Promise
  * The browser's part of a server-run transcription: extract the speech, upload it, and report how far
  * the audio track sits from the picture's zero (the server adds it to every time). null = no audio.
  */
-export async function prepareSpeechAudio(file: File, opts?: { signal?: AbortSignal; onPhase?: (phase: 'checking' | 'extracting' | 'uploading') => void }): Promise<{ key: string; offset: number } | null> {
+/** `range`: only that part of the video, in its own seconds; recognized times then still read on the video's clock. */
+export async function prepareSpeechAudio(file: File, opts?: { signal?: AbortSignal; onPhase?: (phase: 'checking' | 'extracting' | 'uploading') => void; range?: { start: number; end: number } }): Promise<{ key: string; offset: number } | null> {
   opts?.onPhase?.('checking');
   const probe = await probeVideoFile(file).catch(() => null);
   if (probe && !probe.hasAudio) return null;
   opts?.signal?.throwIfAborted(); opts?.onPhase?.('extracting');
-  const audio = await extractAudio(file);
+  const audio = await extractAudio(file, opts?.range);
   opts?.signal?.throwIfAborted(); opts?.onPhase?.('uploading');
   const { key } = await studioProviders().uploads.upload(audio, { contentType: audio.type || 'audio/mp4', filename: 'studio-audio.m4a' });
-  return { key, offset: await audioPlaybackOffset(file) };
+  // A trimmed extract starts at the range's start on the picture's clock.
+  return { key, offset: opts?.range ? opts.range.start : await audioPlaybackOffset(file) };
 }
 
 
