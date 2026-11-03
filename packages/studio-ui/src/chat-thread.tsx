@@ -4,7 +4,6 @@ import { alreadyStarted, firstEditMessage, firstMessageEditsFootage, footageToEd
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@pireel/ui/tooltip';
 import { EditingSkillSwitches } from '@pireel/studio-ui/editing-skills';
 
-import { ChatCoverEntry } from '@pireel/studio-ui/chat-cover-controls';
 import { directorPlanForModel, directorPlanToolBlock, saveEditingDirectorPlan, withDirectorInstruction } from '@pireel/studio-ui/editing-director-plan';
 import { DEFAULT_STUDIO_AGENT_MODEL, studioAgentModelId, type StudioAgentModelId } from '@pireel/studio-engine/agent-models';
 
@@ -1493,7 +1492,6 @@ export function ChatThread({
           onCancel={() => setPendingSkill(null)}
           onConfirm={() => { if (pendingSkill !== null) switchSkill(pendingSkill); setPendingSkill(null); }}
         />
-        {onOpenCover && <ChatCoverEntry cover={projectCover} disabled={coverApplying} onGenerate={onOpenCover} />}
         <Composer
           placeholder={t("chatGen.sayWhatAddChange")}
           agentModel={agentModel}

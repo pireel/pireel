@@ -17,6 +17,7 @@
 
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeftRight, Clapperboard, Eye, EyeOff, Film, GalleryHorizontal, Loader2, Music, Plus, VideoOff, Volume2, VolumeX } from 'lucide-react';
+import { transitionIcon } from './transition-icons';
 import {
   type Block,
   type BlockKind,
@@ -248,7 +249,7 @@ interface StudioTimelineProps {
   srcLive?: (src: string) => boolean;
   loadingSourceClipIds?: ReadonlySet<string>;
   /** Transition lane (under the story spine): items placed by time, independent of cuts. */
-  transitions?: ReadonlyArray<{ id: string; startSec: number; endSec: number; label: string }>;
+  transitions?: ReadonlyArray<{ id: string; startSec: number; endSec: number; label: string; effect?: string }>;
   selectedTransitionId?: string | null;
   onSelectTransition?: (id: string | null) => void;
   /** Drag end on a transition: its new start and length (seconds). */
@@ -3113,6 +3114,10 @@ function StudioTimelineImpl({
                   {(transitions ?? []).map((item) => {
                     const live = transitionDrag?.id === item.id ? transitionDrag : { startSec: item.startSec, durationSec: item.endSec - item.startSec };
                     const selected = selectedTransitionId === item.id;
+                    const width = x(live.startSec + live.durationSec) - x(live.startSec);
+                    // Below this the label gives way to the type's icon alone.
+                    const roomy = width >= 56;
+                    const TransitionGlyph = transitionIcon(item.effect);
                     return (
                       <div
                         key={item.id}
@@ -3120,12 +3125,23 @@ function StudioTimelineImpl({
                         title={item.label}
                         onPointerDown={(event) => beginTransitionDrag(event, item, 'move')}
                         onClick={(event) => event.stopPropagation()}
-                        className={`absolute top-0 flex h-full cursor-grab items-center overflow-hidden rounded text-[10px] text-accent-foreground active:cursor-grabbing ${selected ? 'bg-accent ring-accent/50 ring-2' : 'bg-accent/65 hover:bg-accent/85'}`}
-                        style={{ left: x(live.startSec), width: Math.max(6, x(live.startSec + live.durationSec) - x(live.startSec)) }}
+                        className={`group absolute top-0 flex h-full cursor-grab items-center overflow-hidden rounded-md text-[10px] font-medium text-accent-foreground shadow-sm active:cursor-grabbing ${selected ? 'bg-accent ring-accent/50 ring-2' : 'bg-accent/70 hover:bg-accent/90'}`}
+                        style={{ left: x(live.startSec), width: Math.max(6, width) }}
                       >
-                        <span className="pointer-events-none min-w-0 truncate px-2">{item.label}</span>
-                        <span onPointerDown={(event) => beginTransitionDrag(event, item, 'l')} className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize" />
-                        <span onPointerDown={(event) => beginTransitionDrag(event, item, 'r')} className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize" />
+                        <span className={`pointer-events-none flex min-w-0 flex-1 items-center gap-1 ${roomy ? 'px-2.5' : 'justify-center px-0.5'}`}>
+                          {width >= 16 && <TransitionGlyph size={11} className="shrink-0" aria-hidden />}
+                          {roomy && <span className="min-w-0 truncate">{item.label}</span>}
+                        </span>
+                        {(['l', 'r'] as const).map((side) => (
+                          <span
+                            key={side}
+                            data-transition-grip={side}
+                            onPointerDown={(event) => beginTransitionDrag(event, item, side)}
+                            className={`absolute inset-y-0 ${side === 'l' ? 'left-0' : 'right-0'} flex w-2 cursor-ew-resize items-center justify-center bg-black/15 transition-opacity ${selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                          >
+                            <span className="h-1/2 max-h-2.5 w-0.5 rounded-full bg-current opacity-80" />
+                          </span>
+                        ))}
                       </div>
                     );
                   })}

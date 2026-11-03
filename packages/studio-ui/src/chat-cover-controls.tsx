@@ -26,10 +26,3 @@ export function CoverApplyButton({ cover, appliedKey, onApply, disabled }: { cov
     {error && <p role="alert" className="text-destructive px-2 py-1 text-xs leading-relaxed">{error}</p>}
   </div>;
 }
-
-export function ChatCoverEntry({ cover, disabled, onGenerate }: { cover?: ProjectCover | null; disabled?: boolean; onGenerate: () => void }) {
-  return <div className="mb-2 flex min-w-0 items-center gap-2">
-    {cover && <button type="button" onClick={onGenerate} className="text-ink-3 flex min-w-0 items-center gap-1.5 text-xs"><img src={cover.url} alt={t('ui.chatCoverControls.currentCover')} className="h-7 w-7 rounded-sm object-contain" />{t('ui.chatCoverControls.currentCover')}</button>}
-    <button type="button" disabled={disabled} onClick={onGenerate} className="text-ink-2 hover:bg-line ml-auto inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs disabled:opacity-40"><ImageIcon size={13} />{t('ui.chatCoverControls.generateCover')}</button>
-  </div>;
-}

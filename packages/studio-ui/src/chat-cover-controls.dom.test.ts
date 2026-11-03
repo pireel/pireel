@@ -2,7 +2,7 @@
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ChatCoverEntry, CoverApplyButton } from '@pireel/studio-ui/chat-cover-controls';
+import { CoverApplyButton } from '@pireel/studio-ui/chat-cover-controls';
 import { setStudioLocale } from '@pireel/studio-ui/i18n';
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const roots: ReturnType<typeof createRoot>[] = [];
@@ -11,15 +11,6 @@ afterEach(() => { roots.splice(0).forEach(root => act(() => root.unmount())); do
 const cover = { url: 'https://cdn.example/cover.png', key: 'cover.png', label: 'Cover' };
 
 describe('cover interactions', () => {
-  it('starts an explicit cover request and shows the persisted current selection', () => {
-    setStudioLocale('zh'); const generate = vi.fn();
-    const { host } = mount(createElement(ChatCoverEntry, { cover, onGenerate: generate }));
-    act(() => [...host.querySelectorAll('button')].find(button => button.textContent === '生成封面')!.click());
-    expect(generate).toHaveBeenCalledTimes(1);
-    expect(host.querySelector('img')?.src).toBe(cover.url);
-    expect(host.textContent).toContain('当前封面');
-
-  });
   it('shows applying, prevents duplicate writes and confirms only after the save completes', async () => {
     setStudioLocale('zh'); let resolve!: () => void;
     const apply = vi.fn(() => new Promise<void>(done => { resolve = done; }));
@@ -40,11 +31,5 @@ describe('cover interactions', () => {
     await act(async () => { host.querySelector('button')!.click(); });
     expect(apply).toHaveBeenCalledTimes(2);
     expect(host.querySelector('[role=alert]')).toBeNull();
-  });
-  it('localizes the actions in English and disables generation during another task', () => {
-    setStudioLocale('en'); const onGenerate = vi.fn();
-    const { host } = mount(createElement(ChatCoverEntry, { disabled: true, onGenerate }));
-    act(() => host.querySelector('button')!.click());
-    expect(onGenerate).not.toHaveBeenCalled(); expect(host.textContent).toContain('Generate cover');
   });
 });
