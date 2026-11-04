@@ -1083,6 +1083,38 @@ describe('remove_clips and swap_clip_media (v3)', () => {
     expect(out.summary).not.toContain('rippled');
   });
 
+  it('moving a spine clip reorders the spine and closes up behind it', () => {
+    const document = project();
+    const later = runAgentTimelineTool(document, 'move_clips', { items: [{ clipId: 's1', startFrame: 130 }] });
+    expect(later.ok, JSON.stringify(later)).toBe(true);
+    expect(spine(later.document!)).toEqual([['s2', 0, 60], ['s3', 60, 120], ['s1', 120, 180]]);
+    const before = runAgentTimelineTool(document, 'move_clips', { items: [{ clipId: 's3', startFrame: 60 }] });
+    expect(spine(before.document!)).toEqual([['s1', 0, 60], ['s3', 60, 120], ['s2', 120, 180]]);
+    const narration = before.document!.timeline.tracks.find((track) => track.role === 'narration')!.clips[0]!;
+    expect(narration.startFrame).toBe(0);
+  });
+
+  it('script captions over a voice-over follow the narration, not the picture', () => {
+    let document = project();
+    document = { ...document, semantics: { ...document.semantics, transcripts: { ...document.semantics.transcripts, voice: [
+      { start: 0, end: 2, text: '第一句话说完了' },
+      { start: 3, end: 6, text: '第二句话要长一些才说完' },
+    ] } } };
+    // The picture repeats a source: captions must not repeat with it.
+    document = runAgentTimelineTool(document, 'swap_clip_media', { clipId: 's3', assetId: 'v' }).document!;
+    const out = runAgentTimelineTool(document, 'set_captions', { on: true, script: '第一句话说完了\n第二句话\n要长一些才说完' });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    const doc = out.document!;
+    expect(doc.semantics.managedCaptionSource).toEqual({ mode: 'track', trackId: doc.timeline.tracks.find((track) => track.role === 'narration')!.id });
+    const rows = doc.semantics.transcripts.voice!;
+    expect(rows.map((row) => row.text)).toEqual(['第一句话说完了', '第二句话', '要长一些才说完']);
+    expect(rows[0]).toMatchObject({ start: 0, end: 2 });
+    expect(rows[1]!.start).toBe(3);
+    expect(rows[2]!.end).toBe(6);
+    const cues = doc.timeline.tracks.find((track) => track.id === doc.semantics.managedCaptionTrackId)!.clips;
+    expect(cues.map((cue) => cue.startFrame)).toEqual([0, 90, 123]);
+  });
+
   it('swap_clip_media keeps the slot and refuses unknown or incompatible assets', () => {
     const document = project();
     const swapped = runAgentTimelineTool(document, 'swap_clip_media', { clipId: 's2', assetId: 'v2' });

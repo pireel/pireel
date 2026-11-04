@@ -51,7 +51,7 @@ import { resolveCaptionSentenceEdits } from '@pireel/studio-engine/caption-sente
 import { captionYPctForCanvas } from '@pireel/studio-engine/delivery-safety';
 import { isDisplayTextFontId } from '@pireel/studio-engine/display-text-presets';
 import { resolveWebFontReference, webFontCatalogHint } from '@pireel/studio-engine/font-library';
-import { planScriptCaptionSegments, splitScriptLines } from '@pireel/studio-engine/script-captions';
+import { planNarrationScriptSegments, planScriptCaptionSegments, splitScriptLines } from '@pireel/studio-engine/script-captions';
 import { narrationRowMarks } from '@pireel/studio-engine/trim';
 import { applyWordDecorations, type WordDecorationPatch } from '@pireel/studio-engine/word-decorations';
 import { phraseWordIndexes, rowWords } from '@pireel/studio-engine/caption-highlights';
@@ -274,6 +274,9 @@ export function moveClipsV3(document: EditorDocumentV2, input: Input): AgentTime
       receipts.push(...edit.receipts);
       continue;
     }
+    const spineId = next.semantics.primaryNarrativeTrackId;
+    // A spine clip linked to another lane keeps its partners' timing, so it moves as placed.
+    const onSpine = found.track.id === spineId && (!string(item.trackId) || string(item.trackId) === spineId) && !found.clip.linkGroupId;
     const moved = applyEditorCommand(next, {
       type: 'clip.move', trackId: found.track.id, clipId: found.clip.id,
       startFrame: item.startFrame,
@@ -281,21 +284,25 @@ export function moveClipsV3(document: EditorDocumentV2, input: Input): AgentTime
       includeLinked: input.includeLinked !== false,
     });
     if (!moved.ok) return fail(moved.error.message, moved.error);
-    next = moved.document;
+    // On the story spine a move is a reorder: the clip lands before the first spine clip starting at
+    // or after its new start, and the spine closes up, so it never leaves a hole or covers a shot.
+    next = onSpine ? packPrimaryNarrative(moved.document, found.clip.id) : moved.document;
     receipts.push(moved.receipt);
   }
   return mutation(next, `Moved ${items.length} clip${items.length === 1 ? '' : 's'}`, receipts);
 }
 
-/** Close every gap on the story spine by moving later spine clips earlier; other lanes stay put. */
-function packPrimaryNarrative(document: EditorDocumentV2): EditorDocumentV2 {
+/** Close every gap on the story spine by moving later spine clips earlier; other lanes stay put.
+ *  `firstOnTie` names a clip that goes before any clip starting on the same frame (a moved clip). */
+function packPrimaryNarrative(document: EditorDocumentV2, firstOnTie?: string): EditorDocumentV2 {
   const trackId = document.semantics.primaryNarrativeTrackId;
   let changed = false;
   const tracks = document.timeline.tracks.map((track) => {
     if (track.id !== trackId) return track;
     let cursor = 0;
+    const tie = (id: string) => (id === firstOnTie ? 0 : 1);
     const clips = [...track.clips]
-      .sort((left, right) => left.startFrame - right.startFrame || left.id.localeCompare(right.id))
+      .sort((left, right) => left.startFrame - right.startFrame || tie(left.id) - tie(right.id) || left.id.localeCompare(right.id))
       .map((clip) => {
         const packed = clip.startFrame === cursor ? clip : { ...clip, startFrame: cursor };
         if (packed !== clip) changed = true;
@@ -1143,20 +1150,30 @@ export function setCaptionsV3(document: EditorDocumentV2, input: Input): AgentTi
   if (script) {
     const lines = splitScriptLines(script);
     if (!lines.length) return fail('script is empty: provide the lines to show');
-    const trackId = next.semantics.primaryNarrativeTrackId;
-    const primary = trackId ? next.timeline.tracks.find((track) => track.id === trackId) : undefined;
+    // A voice-over says the script: its lines follow the narration's clock, not the picture's.
+    const narrationTrack = next.timeline.tracks.find((track) => track.role === 'narration' && !track.muted
+      && track.clips.some((clip) => clip.kind === 'audio' && clip.enabled !== false));
+    const spineId = next.semantics.primaryNarrativeTrackId;
+    const primary = spineId ? next.timeline.tracks.find((track) => track.id === spineId) : undefined;
     const shots = [...(primary?.clips ?? [])]
       .filter((clip) => clip.kind === 'narrative' && clip.enabled !== false)
       .sort((left, right) => left.startFrame - right.startFrame)
       .map((clip) => (clip.kind === 'narrative' ? { src: clip.assetId, srcStart: clip.sourceInSec, srcEnd: clip.sourceOutSec } : { srcStart: 0, srcEnd: 0 }));
-    if (!trackId || !shots.length) return fail('no picture clips on the timeline can carry captions: assemble the picture first');
-    const plan = planScriptCaptionSegments(shots, lines);
+    const voice = narrationTrack ? [...narrationTrack.clips]
+      .filter((clip) => clip.kind === 'audio' && clip.enabled !== false)
+      .sort((left, right) => left.startFrame - right.startFrame)
+      .flatMap((clip) => (clip.kind === 'audio' ? [{ src: clip.assetId, srcStart: clip.sourceInSec, srcEnd: clip.sourceOutSec ?? clip.sourceInSec + clip.durationFrames / next.canvas.fps, timing: next.semantics.transcripts[clip.assetId] }] : [])) : [];
+    const trackId = voice.length ? narrationTrack!.id : spineId;
+    if (!trackId || (!voice.length && !shots.length)) return fail('no picture clips on the timeline can carry captions: assemble the picture first');
+    const plan = voice.length ? planNarrationScriptSegments(voice, lines) : planScriptCaptionSegments(shots, lines);
+    // Narration transcripts are written directly: the caption sync only takes picture-lane sources.
+    const carrier = voice.length ? { ...next, semantics: { ...next.semantics, transcripts: { ...next.semantics.transcripts, ...plan.clips } } } : next;
     const edit = applyCaptionDocumentEdit({
-      document: next,
+      document: carrier,
       patch: { on: true, ...(preset ? { preset, color: undefined, bg: undefined } : {}), ...patch },
       source: { mode: 'track', trackId },
       mainTranscript: null,
-      clipTranscripts: plan.clips,
+      clipTranscripts: voice.length ? {} : plan.clips,
     });
     if (!edit.ok) return fail(edit.error.message, { code: edit.error.code, trackIds: edit.error.trackIds });
     const captionTrack = edit.document.semantics.managedCaptionTrackId ? edit.document.timeline.tracks.find((track) => track.id === edit.document.semantics.managedCaptionTrackId) : undefined;

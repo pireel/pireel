@@ -305,7 +305,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   move_clips: {
     description:
-      'Move clips to new start frames, optionally onto another compatible track. Linked partners move by the same delta unless includeLinked=false. Anchored graphics keep following their anchor; move the anchor clip instead of the graphic when the footage moves.',
+      'Move clips to new start frames, optionally onto another compatible track. On the story spine a move reorders: the clip lands before the first spine clip starting at or after startFrame and the spine closes up behind it, never leaving a gap or covering another clip; speech, captions and graphics keep their positions. Linked partners move by the same delta unless includeLinked=false. Anchored graphics keep following their anchor; move the anchor clip instead of the graphic when the footage moves.',
     inputSchema: obj({
       items: arr(obj({ clipId: str(), startFrame: FRAME('New start'), trackId: str('Destination track.') }, ['clipId', 'startFrame']), { minItems: 1 }),
       includeLinked: bool(),
@@ -608,7 +608,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       preset: enumOf(CAPTION_PRESET_IDS, `Caption look: ${CAPTION_LOOKS}. em-*/ln-* are legacy looks kept for existing projects.`), animation: enumOf(CAPTION_ANIMATION_IDS, `Caption motion, independent of the look: ${CAPTION_MOTIONS}.`), highlightColor: str('#RRGGBB color for the words the animation emphasizes (karaoke, marker, underline, pulse, bounce, glow); "animation" restores the animation\'s own color.'), yPct: num('', { min: 0, max: 100 }), scale: num('', { min: 0.5, max: 2 }),
       font: str('Caption font: sans | serif | mono | web:<library id from get_state.fonts> or that font’s display name (web:lxgw-wenkai or 霞鹜文楷) | google:<Family from search_assets kind font> | local:<family>; "preset" restores the preset\'s own font.'),
       highlights: obj({ items: arr(obj({ index: num('Transcript row.', { min: 0 }), text: str('Exact word(s) from that row.') }, ['index', 'text'])), color: str('"style" (default) | #RRGGBB | "off"'), clear: bool(), assetId: str('Transcript owner; default the caption source.') }),
-      script: str('Silent montage only (no spoken transcript): the caption copy, one line per caption, timed across the placed picture by character share; the copy becomes the transcript truth of those clips.'),
+      script: str('The caption copy, one line per caption, for picture without spoken transcript. Over a voice-over lane the lines follow the narration: timed by the speech timing it already has (generated speech carries it), else by character share across the clip. Without one they are timed across the placed picture by character share and become the transcript truth of those clips.'),
       source: obj({ trackId: str(), clipId: str(), assetId: str('A placed, transcribed asset; resolved to the clip or track that plays it.') }),
       clipId: str('corrections / translations: an inserted clip’s transcript instead of the main narration.'),
       corrections: arr(obj({ index: int('Transcript row.'), text: str('Complete corrected sentence.') }, ['index', 'text'])),

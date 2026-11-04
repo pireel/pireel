@@ -1,7 +1,7 @@
 import type { AsrSegment } from './build-blocks';
 
 /**
- * Script captions for a silent montage.
+ * Script captions for a silent montage, or over a voice-over lane (planNarrationScriptSegments).
  *
  * Managed captions derive from transcript truth attached to PLACED clips (speech on the timeline).
  * A product montage cut to a user-supplied copy has no speech, but it has the same need: sentence
@@ -94,6 +94,78 @@ export function planScriptCaptionSegments(
     const segment: AsrSegment = { start: sourceStart, end: sourceEnd, text };
     if (shot.src) (plan.clips[shot.src] ??= []).push(segment);
     else plan.main.push(segment);
+    plan.lineCount += 1;
+  });
+  return plan;
+}
+
+export interface NarrationScriptClip {
+  /** The narration asset (transcript key). */
+  src: string;
+  srcStart: number;
+  srcEnd: number;
+  /** Speech timing already known for this asset (synthesis subtitles or ASR), on its source clock. */
+  timing?: readonly AsrSegment[];
+}
+
+interface ReadingKnot { clip: number; weight: number; start: number; end: number; startAt: number; endAt: number }
+
+/**
+ * Script captions over a voice-over lane. The lines are the same speech the narration says, so they
+ * follow the narration's clock, never the picture's: each line is placed by its reading position in
+ * the script, mapped onto the speech timing the narration already has (sentence rows from synthesis
+ * subtitles or ASR) and, where it has none, spread by length across the clip. A line stays inside
+ * the clip its midpoint falls in; segments are written on each narration asset's source clock.
+ */
+export function planNarrationScriptSegments(
+  clips: readonly NarrationScriptClip[],
+  lines: readonly string[],
+): ScriptCaptionPlan {
+  const plan: ScriptCaptionPlan = { main: [], clips: {}, lineCount: 0 };
+  const usable = clips.filter((clip) => Number.isFinite(clip.srcStart) && Number.isFinite(clip.srcEnd) && clip.srcEnd > clip.srcStart);
+  if (!usable.length || !lines.length) return plan;
+  // Reading spans: each known sentence inside the clip; a clip without timing is one span.
+  const spans = usable.map((clip, index) => {
+    const rows = (clip.timing ?? [])
+      .filter((row) => row.end > clip.srcStart && row.start < clip.srcEnd && row.text.trim())
+      .map((row) => ({ clip: index, start: Math.max(row.start, clip.srcStart), end: Math.min(row.end, clip.srcEnd), weight: lineWeight(row.text) }))
+      .sort((left, right) => left.start - right.start);
+    return rows.length ? rows : [{ clip: index, start: clip.srcStart, end: clip.srcEnd, weight: 0 }];
+  });
+  const known = spans.flat().filter((span) => span.weight > 0);
+  const rate = known.length ? known.reduce((sum, span) => sum + span.weight, 0) / Math.max(0.001, known.reduce((sum, span) => sum + span.end - span.start, 0)) : 1;
+  let cursor = 0;
+  const knots: ReadingKnot[] = spans.flat().map((span) => {
+    const weight = span.weight || Math.max(0.001, (span.end - span.start) * rate);
+    const knot = { clip: span.clip, weight, start: span.start, end: span.end, startAt: cursor, endAt: cursor + weight };
+    cursor += weight;
+    return knot;
+  });
+  const lineWeights = lines.map(lineWeight);
+  const scale = cursor / lineWeights.reduce((sum, weight) => sum + weight, 0);
+  // Reading position → source second inside the span that holds it (a position on a span edge reads
+  // as the start of the next span for a line start, the end of the previous one for a line end).
+  const knotAt = (at: number, edge: 'start' | 'end') => knots.find((knot) => (edge === 'start' ? at < knot.endAt : at <= knot.endAt)) ?? knots[knots.length - 1]!;
+  const timeIn = (knot: ReadingKnot, at: number) => knot.start + (knot.end - knot.start) * Math.min(1, Math.max(0, (at - knot.startAt) / (knot.endAt - knot.startAt)));
+  let position = 0;
+  const lastBySrc = new Map<string, number>();
+  lines.forEach((text, index) => {
+    const from = position;
+    const to = index === lines.length - 1 ? cursor : position + lineWeights[index]! * scale;
+    position = to;
+    const home = knotAt((from + to) / 2, 'start');
+    const clip = usable[home.clip]!;
+    const first = knotAt(from, 'start');
+    const last = knotAt(to, 'end');
+    let start = first.clip === home.clip ? timeIn(first, from) : clip.srcStart;
+    let end = last.clip === home.clip ? timeIn(last, to) : clip.srcEnd;
+    const previousEnd = lastBySrc.get(clip.src);
+    // Rows that touch read as one sentence downstream: keep each line its own row.
+    if (previousEnd != null && start < previousEnd + 0.02) start = previousEnd + 0.02;
+    if (end - start < MIN_LINE_SEC) end = Math.min(clip.srcEnd, start + MIN_LINE_SEC);
+    start = round3(start); end = round3(Math.max(end, start + 0.05));
+    lastBySrc.set(clip.src, end);
+    (plan.clips[clip.src] ??= []).push({ start, end, text });
     plan.lineCount += 1;
   });
   return plan;
