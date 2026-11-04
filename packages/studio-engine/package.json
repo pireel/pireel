@@ -12,7 +12,9 @@
   "sideEffects": [
     "**/templates.ts",
     "**/templates.js",
-    "**/look.ts"
+    "**/look.ts",
+    "**/editor-product-commands.ts",
+    "**/editor-product-commands.js"
   ],
   "license": "AGPL-3.0-only",
   "dependencies": {
