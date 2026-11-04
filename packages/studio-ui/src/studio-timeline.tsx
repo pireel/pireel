@@ -691,11 +691,14 @@ function StudioTimelineImpl({
     pps,
     endResizeSec ?? undefined,
   );
-  const W = Math.max(320, surfaceDur * pps);
+  // An empty timeline spans the panel, so its drop target reads as the whole track rather than a stub.
+  const [viewportPx, setViewportPx] = useState(0);
+  const W = Math.max(320, surfaceDur * pps, dur > 0 ? 0 : viewportPx - GUTTER - EDGE_PAD * 2);
   const x = useCallback((s: number) => s * pps, [pps]);
   const updateVisibleRange = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
+    setViewportPx(el.clientWidth);
     const contentLeft = GUTTER + EDGE_PAD;
     const viewportSec = Math.max(1, (el.clientWidth - GUTTER) / pps);
     const rawStart = Math.max(0, (el.scrollLeft - contentLeft) / pps);
@@ -1283,7 +1286,8 @@ function StudioTimelineImpl({
   const rowTops = new Map<TimelineLaneKey, number>();
   let rowCursor = 0;
   // The transition lane sits right under the story spine and shifts every lane below it.
-  const showTransitionLane = !!onChangeTransition && displayTracks.includes(0);
+  // Transitions sit between pieces of the story: no lane until there is one.
+  const showTransitionLane = !!onChangeTransition && displayTracks.includes(0) && dur > 0;
   const TRANSITION_ROW_H = Math.max(18, Math.round(ROW_H * 0.62));
   let transitionLaneTop = 0;
   displayTracks.forEach((track, index) => {
@@ -1860,7 +1864,9 @@ function StudioTimelineImpl({
                     <span className="flex h-4 w-4 items-center justify-center" aria-hidden>
                       <Icon size={13} className={meta.dot} />
                     </span>
-                    {track === 0 && onToggleVideoMute ? (
+                    {track === 0 && dur <= 0 ? (
+                      <span className="h-4 w-4" aria-hidden />
+                    ) : track === 0 && onToggleVideoMute ? (
                       <MuteToggle muted={!!videoMuted} onToggle={onToggleVideoMute} />
                     ) : audioId && nativeTrack && onToggleTrackMute ? (
                       <MuteToggle muted={nativeTrack.muted} onToggle={() => onToggleTrackMute(nativeTrack.trackId)} />
@@ -1871,7 +1877,9 @@ function StudioTimelineImpl({
                     ) : (
                       <span className="h-4 w-4" aria-hidden />
                     )}
-                    {track === 0 && onToggleVideoHidden ? (
+                    {track === 0 && dur <= 0 ? (
+                      <span className="h-4 w-4" aria-hidden />
+                    ) : track === 0 && onToggleVideoHidden ? (
                       <VisibilityToggle hidden={!!videoHidden} onToggle={onToggleVideoHidden} />
                     ) : nativeTrack && onToggleTrackHidden ? (
                       <VisibilityToggle hidden={nativeTrack.hidden} onToggle={() => onToggleTrackHidden(nativeTrack.trackId)} />
@@ -2068,17 +2076,17 @@ function StudioTimelineImpl({
                   {sceneSpans.length === 0 && (
                     <div
                       data-empty-main-track-placeholder
-                      className={`pointer-events-none absolute top-3 bottom-2 left-2 flex items-center overflow-hidden border border-dashed px-3 transition-colors ${TIMELINE_ITEM_RADIUS} ${assetDragging && assetDragKind === 'video' ? 'border-accent/70 bg-accent/10 text-accent-ink' : 'border-line/80 bg-panel/45 text-ink-4'}`}
-                      style={{ width: Math.max(220, Math.min(420, W - 16)) }}
+                      className={`pointer-events-none absolute ${sceneRail ? 'top-3 bottom-2' : 'inset-y-1'} left-2 flex items-center justify-center overflow-hidden border border-dashed px-3 transition-colors ${TIMELINE_ITEM_RADIUS} ${assetDragging && assetDragKind === 'video' ? 'border-accent/70 bg-accent/10 text-accent-ink' : 'border-line/80 bg-panel/45 text-ink-4'}`}
+                      style={{ width: Math.max(220, W - 16) }}
                     >
-                      <span className="relative mr-2 flex h-7 w-7 shrink-0 items-center justify-center rounded-sm bg-ink/6">
-                        <Film size={14} />
+                      {/* Sized to the row: the empty story lane is a short row until a video gives it the tall rail. */}
+                      <span className="relative mr-2 flex aspect-square h-full max-h-7 shrink-0 items-center justify-center rounded-sm bg-ink/6">
+                        <Film size={sceneRail ? 14 : 12} />
                         <Plus size={8} strokeWidth={2.5} className="bg-panel absolute -right-0.5 -bottom-0.5 rounded-full" />
                       </span>
                       <span className="truncate text-[10px] font-medium tracking-wide">
                         {t(assetDragging && assetDragKind === 'video' ? 'panels.releaseVideoOnPrimaryTrack' : 'panels.emptyPrimaryTrackDropVideo')}
                       </span>
-                      <span className="ml-3 h-px min-w-8 flex-1 bg-current opacity-15" />
                     </div>
                   )}
                   {/* Scene cards (shot clips, semi-transparent so the filmstrip shows through): index + current-scene highlight.

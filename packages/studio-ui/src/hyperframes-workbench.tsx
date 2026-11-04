@@ -11194,7 +11194,7 @@ export function HyperframesWorkbench({
         {/* Multi-track timeline */}
         <div data-studio-timeline data-cap-keep inert={manualEditingLocked} hidden={timelineCollapsed || whiteboardScene} className="shrink-0 overflow-hidden rounded-b-sm">
           <div className="flex min-w-0">
-            <TimelineCoverPlaceholder cover={projectCover} busy={coverApplying || coverScene?.phase === 'planning' || coverScene?.phase === 'starting' || coverScene?.phase === 'generating'} onOpen={openCoverScene} />
+            {(hasContent || projectCover) && <TimelineCoverPlaceholder cover={projectCover} busy={coverApplying || coverScene?.phase === 'planning' || coverScene?.phase === 'starting' || coverScene?.phase === 'generating'} onOpen={openCoverScene} />}
             <div className="min-w-0 flex-1">
           <StudioTimeline
             comp={timelineComp}
