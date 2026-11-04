@@ -36,7 +36,7 @@ export function mediaCacheEvictionPlan(entries: MediaCacheEntry[], estimate: Sto
 }
 
 const sessions = new Set<Map<string, () => void>>();
-const useLock = (key: string) => `studio:media-cache:use:${key}`;
+const inUseLockName = (key: string) => `studio:media-cache:use:${key}`;
 
 /** Every file touched by an open editor stays pinned until that editor closes. Web Locks also
  * protect readers in other tabs, and the browser releases locks if a tab crashes. */
@@ -53,18 +53,18 @@ export function protectMediaCacheEntry(key: string): void {
     let release!: () => void;
     const untilClosed = new Promise<void>(resolve => { release = resolve; });
     held.set(key, release);
-    void navigator.locks.request(useLock(key), { mode: 'shared' }, () => untilClosed).catch(() => {});
+    void navigator.locks.request(inUseLockName(key), { mode: 'shared' }, () => untilClosed).catch(() => {});
   }
 }
 
 export async function withMediaCacheRead<T>(key: string, work: () => Promise<T>): Promise<T> {
   protectMediaCacheEntry(key);
   if (typeof navigator === 'undefined' || !navigator.locks) return work();
-  return navigator.locks.request(useLock(key), { mode: 'shared' }, work);
+  return navigator.locks.request(inUseLockName(key), { mode: 'shared' }, work);
 }
 
 /** Without cross-tab coordination, do not automatically delete files. */
 export async function evictUnusedMediaEntry(key: string, remove: () => Promise<number>): Promise<number> {
   if (typeof navigator === 'undefined' || !navigator.locks) return 0;
-  return navigator.locks.request(useLock(key), { mode: 'exclusive', ifAvailable: true }, lock => lock ? remove() : Promise.resolve(0));
+  return navigator.locks.request(inUseLockName(key), { mode: 'exclusive', ifAvailable: true }, lock => lock ? remove() : Promise.resolve(0));
 }

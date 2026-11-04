@@ -1,5 +1,8 @@
 "use client";
+import { useEffect, useState } from "react";
+import { confirm } from "@pireel/ui/confirm";
 import { editorRequest } from '@pireel/studio-ui/host-request';
+import { studioLocale, t } from './i18n';
 
 export interface CurrentUser {
   user_id: string;
@@ -8,6 +11,8 @@ export interface CurrentUser {
   name: string | null;
   role?: string;
   balance?: number;
+  /** False when the host sells plans and this account is not a paying member; absent elsewhere (everything open). */
+  member?: boolean;
 }
 
 export interface CurrentUserBalance {
@@ -79,4 +84,21 @@ export function invalidateCurrentUser(): void {
   cached = undefined;
   pending = null;
   balancePending = null;
+}
+
+/** Whether member-only features are open for this account: closed only when the host says it is not a member. */
+export function useMemberFeatures(): boolean {
+  const [member, setMember] = useState(() => cached?.member !== false);
+  useEffect(() => {
+    let alive = true;
+    void loadCurrentUser().then((user) => { if (alive) setMember(user?.member !== false); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  return member;
+}
+
+/** A member-only feature was chosen by a non-member: say so, and offer the plans page. */
+export async function offerMembership(feature: string): Promise<void> {
+  const go = await confirm({ title: t('workbench.memberOnlyTitle', { feature }), description: t('workbench.memberOnlyBody'), confirmLabel: t('workbench.memberOnlyPlans') });
+  if (go) window.open(`/${studioLocale()}/pricing`, '_blank', 'noopener');
 }

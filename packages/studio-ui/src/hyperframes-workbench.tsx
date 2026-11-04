@@ -35,6 +35,7 @@ import {
   Pause,
   FileVideo,
   FolderOutput,
+  Crown,
   Code2,
   Loader2,
   Wand2,
@@ -257,7 +258,7 @@ import { studioProviders } from "@pireel/studio-engine/providers";
 import { ensureTemplatesRegistered } from "@pireel/studio-engine/templates";
 import { DeferredEffectDisposer } from "@pireel/studio-ui/cloud-project-save";
 import { DeferredActivation } from "@pireel/studio-ui/deferred-activation";
-import { loadCurrentUser } from "@pireel/studio-ui/current-user";
+import { loadCurrentUser, offerMembership, useMemberFeatures } from "@pireel/studio-ui/current-user";
 import {
   StudioTimeline,
   DEFAULT_PPS,
@@ -8913,6 +8914,8 @@ export function HyperframesWorkbench({
 
   /** Export for other editors: timeline XML + media + transparent graphics + subtitles, one zip. */
   const [nleExport, setNleExport] = useState<NleExportState | null>(null);
+  // Batch export and export for other editors are member features (the host says who is a member).
+  const memberFeatures = useMemberFeatures();
   const nleCancelRef = useRef(false);
   const startNleExport = async () => {
     if (nleExport?.phase === "running") return;
@@ -8999,19 +9002,21 @@ export function HyperframesWorkbench({
                   >
                     <DropdownMenuItem
                       disabled={!batchExportableOutputs.length}
-                      onSelect={openBatchExport}
+                      onSelect={() => { if (memberFeatures) openBatchExport(); else void offerMembership(t("workbench.batchExport")); }}
                       className="text-[12px]"
                     >
                       <Layers size={13} />
                       {t("workbench.batchExport")}
+                      {!memberFeatures && <Crown size={12} className="ml-auto text-amber-500" aria-label={t("workbench.membershipFeature")} />}
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       disabled={!hasContent || nleExport?.phase === "running"}
-                      onSelect={() => void startNleExport()}
+                      onSelect={() => { if (memberFeatures) void startNleExport(); else void offerMembership(t("workbench.exportForEditors")); }}
                       className="text-[12px]"
                     >
                       <FolderOutput size={13} />
                       {t("workbench.exportForEditors")}
+                      {!memberFeatures && <Crown size={12} className="ml-auto text-amber-500" aria-label={t("workbench.membershipFeature")} />}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
