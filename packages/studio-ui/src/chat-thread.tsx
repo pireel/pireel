@@ -11,7 +11,7 @@ import { editingSkillsHint } from '@pireel/studio-engine/editing-skills';
 import { resolveEditingRunConfig } from '@pireel/studio-engine/editing-run-config';
 import { detectSkillSettings, measureSkillStyle } from '@pireel/studio-engine/skill-format';
 import { EditingTaskCard } from '@pireel/studio-ui/editing-task-card';
-import { displayEditingTask, hasCurrentDirectorPreview, isInteractiveEditingTool, messagesForTask, unresolvedTaskFailure } from '@pireel/studio-ui/editing-task-progress';
+import { displayEditingTask, hasCurrentDirectorPreview, isInteractiveEditingTool, isRequestStepTool, messagesForTask, unresolvedTaskFailure } from '@pireel/studio-ui/editing-task-progress';
 import { composeReviewPending, coverStillToRun, needsDirectorPlan, needsEditingReview, reviewEditingTask, taskTakesReview } from '@pireel/studio-ui/editing-task-review';
 import { toolInputObject } from '@pireel/studio-ui/tool-input';
 import { ROUGH_CUT_TOOL, messageTurnCredits, toolNameOfPart, type RoughCutReplyMeta } from '@pireel/studio-ui/first-pass-card';
@@ -74,6 +74,7 @@ import {
 import {
   renderToolPart,
   renderToolPartGroup,
+  StepLine,
   toolStatus,
   WorkingOn,
   type ToolPartLike,
@@ -1348,7 +1349,14 @@ export function ChatThread({
                           part.type.startsWith("tool-") ||
                           part.type === "dynamic-tool"
                         )
-                          if (!isInteractiveEditingTool(toolNameOfPart(part), !!wholeVideo)) return null;
+                          if (!isInteractiveEditingTool(toolNameOfPart(part), !!wholeVideo)) {
+                            // A finished slow step stays as one line; a run of the same step shows its last.
+                            const id = toolNameOfPart(part);
+                            if (wholeVideo || !isRequestStepTool(id)) return null;
+                            const nextTool = parts.slice(idx + 1).find((later) => later.type.startsWith("tool-") || later.type === "dynamic-tool");
+                            if (nextTool && toolNameOfPart(nextTool) === id) return null;
+                            return <StepLine key={key} part={part as never} />;
+                          }
                         if (
                           part.type.startsWith("tool-") ||
                           part.type === "dynamic-tool"

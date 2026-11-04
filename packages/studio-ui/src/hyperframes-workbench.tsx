@@ -492,6 +492,25 @@ const CAPTION_DERIVE_MAX_CHAIN = 8;
 const OUTPUT_ANCHOR_TOOLS = new Set(["get_state", "manage_project"]);
 
 /** The cover signature last uploaded for a project, remembered across opens (null when unknown). */
+/** Interactions that could change the timeline; scrolling (wheel, scrollbar, touch pan) is not one. */
+const TIMELINE_EDIT_EVENTS = ['pointerdown', 'mousedown', 'click', 'dblclick', 'contextmenu', 'keydown', 'dragstart', 'dragover', 'drop'] as const;
+
+/** While the agent edits, the timeline stays scrollable but takes no edits: the events above stop at
+ *  its container before any handler sees them (stopping propagation leaves native scrolling alone). */
+function useScrollOnlyWhile(locked: boolean) {
+  const [element, setElement] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!locked || !element) return;
+    const stop = (event: Event) => {
+      event.stopPropagation();
+      if (event.type === 'dragover' || event.type === 'drop') event.preventDefault();
+    };
+    for (const type of TIMELINE_EDIT_EVENTS) element.addEventListener(type, stop, true);
+    return () => { for (const type of TIMELINE_EDIT_EVENTS) element.removeEventListener(type, stop, true); };
+  }, [locked, element]);
+  return setElement;
+}
+
 function readCoverPushedSig(key: string): string | null {
   try {
     return localStorage.getItem(key);
@@ -1716,6 +1735,7 @@ export function HyperframesWorkbench({
   const manualEditingLocked = coverSceneBusy || coverApplying || chatBusy || bridgeToolsInFlight > 0 || workflowBusy;
   const manualEditingLockedRef = useRef(manualEditingLocked);
   manualEditingLockedRef.current = manualEditingLocked;
+  const timelineGuardRef = useScrollOnlyWhile(manualEditingLocked);
   const bridgeOutputAnchorRef = useRef<{ id: string; title: string } | null>(null);
   // Export (state + submit/poll/cancel) — see use-export.ts
   /** Files for locally-inserted clips (key = blob URL; the two split halves share one src so they share naturally):
@@ -11203,7 +11223,7 @@ export function HyperframesWorkbench({
 
         {/* Caption style popover: reuses CaptionsPanel wholesale; clicking a style applies globally, click outside / Esc dismisses */}
         {/* Multi-track timeline */}
-        <div data-studio-timeline data-cap-keep inert={manualEditingLocked} hidden={timelineCollapsed || whiteboardScene} className="shrink-0 overflow-hidden rounded-b-sm">
+        <div ref={timelineGuardRef} data-studio-timeline data-cap-keep aria-disabled={manualEditingLocked || undefined} hidden={timelineCollapsed || whiteboardScene} className="shrink-0 overflow-hidden rounded-b-sm">
           <div className="flex min-w-0">
             {(hasContent || projectCover) && <TimelineCoverPlaceholder cover={projectCover} busy={coverApplying || coverScene?.phase === 'planning' || coverScene?.phase === 'starting' || coverScene?.phase === 'generating'} onOpen={openCoverScene} />}
             <div className="min-w-0 flex-1">

@@ -115,6 +115,21 @@ export function WorkingOn({ part }: { part?: ToolPartLike }) {
   return <ThinkingDots label={prog?.text ? `${t(def.label)} · ${prog.text}` : t(def.label)} />;
 }
 
+/** A finished slow step of a request, kept as one quiet line: what ran and what it found. */
+export function StepLine({ part }: { part: ToolPartLike }) {
+  const id = toolIdOf(part);
+  const def = id ? studioToolDefFor(id) : undefined;
+  const st = toolStatus(part);
+  if (!def || st.kind === 'running') return null;
+  return (
+    <div className="text-ink-3 flex min-w-0 items-center gap-1.5 text-[12px]">
+      {st.kind === 'error' ? <X size={12} className="shrink-0" /> : <Check size={12} className="shrink-0" />}
+      <span className="shrink-0">{t(def.label)}</span>
+      {st.text && st.text !== t('chatGen.done') && <span className="min-w-0 truncate">· {st.text}</span>}
+    </div>
+  );
+}
+
 function ToolBadge({ def, part, children, quiet }: { def: StudioToolDef; part: ToolPartLike; children?: React.ReactNode; quiet?: boolean }) {
   const st = toolStatus(part);
   const prog = useToolProgress(def.id);

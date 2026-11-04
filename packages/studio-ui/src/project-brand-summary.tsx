@@ -24,14 +24,15 @@ export function ProjectBrandPicker({ brand, disabled, onChange }: {
       </button>
     </DropdownMenuTrigger>
     <DropdownMenuContent side="top" align="start" sideOffset={6} className="studio-scope z-[100] min-w-52 max-w-[calc(100vw-2rem)]">
-      {options === null
-        ? <DropdownMenuItem disabled>{t('ui.projectBrandSummary.loading')}</DropdownMenuItem>
-        : options.map((option) => <DropdownMenuItem key={option.id} onSelect={() => { if (option.id !== brand?.id || option.version !== brand.version) onChange(option); }}>
-          <span className="min-w-0 flex-1 truncate">{option.name}</span>{brand?.id === option.id && <Check size={14} />}
-        </DropdownMenuItem>)}
-      <DropdownMenuItem onSelect={() => { if (brand) onChange(null); }}>
-        <span className="flex-1">{t('ui.projectBrandSummary.noBrand')}</span>{!brand && <Check size={14} />}
-      </DropdownMenuItem>
+      {/* The brand list scrolls on its own, so Manage stays in reach. Choosing the checked brand
+          again clears it: no brand is simply nothing checked. */}
+      <div className="max-h-60 overflow-y-auto">
+        {options === null
+          ? <DropdownMenuItem disabled>{t('ui.projectBrandSummary.loading')}</DropdownMenuItem>
+          : options.map((option) => <DropdownMenuItem key={option.id} onSelect={() => onChange(brand?.id === option.id ? null : option)}>
+            <span className="min-w-0 flex-1 truncate">{option.name}</span>{brand?.id === option.id && <Check size={14} />}
+          </DropdownMenuItem>)}
+      </div>
       {provider.manage && <>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => provider.manage!()}><Plus size={14} />{t('ui.projectBrandSummary.manageBrands')}</DropdownMenuItem>
