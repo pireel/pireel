@@ -431,8 +431,9 @@ export function ChatThread({
         }
         const result = reviewEditingTask(task, requestedInput, fineCutClips(), getDocument?.());
         if (!result.ok) { publishSuccess({ ok: false, error: result.error, data: { problems: result.problems, ...(result.missing ? { missing: result.missing } : {}) } }); return; }
-        updateTask(task.id, current => ({ ...current, review: result.review }));
-        publishSuccess({ ok: true, summary: 'Editing result checked', data: { review: result.review, taskIncomplete: !result.review.completed } });
+        updateTask(task.id, current => ({ ...current, review: result.review, ...(result.review.notes ? { reviewNoted: true } : {}) }));
+        // A note is advice delivered once with the passed review; a later finish_edit does not repeat it.
+        publishSuccess({ ok: true, summary: 'Editing result checked', data: { review: result.review, taskIncomplete: !result.review.completed, ...(result.review.notes ? { next: `${result.review.notes.join(' ')} The edit is accepted as it is; if you change the timeline for this, call finish_edit once more afterwards (the note is not repeated).` } : {}) } });
         return;
       }
       if (id === "undo" && shouldBlockStudioTurnUndo(ledger)) {

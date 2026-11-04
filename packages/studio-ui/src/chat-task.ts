@@ -29,6 +29,8 @@ export interface ChatTask {
    *  a script, a voice-over): once it has cut something, it ends with finish_edit's review like a
    *  whole-video edit, without a rough cut. */
   compose?: boolean;
+  /** The passed review already carried its advisory notes; later reviews do not repeat them. */
+  reviewNoted?: boolean;
   state: 'running' | 'paused' | 'partial' | 'done';
   fineCut?: { state: "running" | "done"; items: FineCutItem[] };
   fineCutBaseline?: Record<FineCutSkill, string[]>;

@@ -49,4 +49,19 @@ describe('a video built from scratch', () => {
     expect(composeReviewPending({ ...compose([]), review: { completed: true, items: [] } }, true)).toBe(false);
     expect(composeReviewPending({ ...compose([]), compose: undefined }, true)).toBe(false);
   });
+
+  it('notes, once and without refusing, a narration that outlasts the picture', () => {
+    const empty = emptyEditorDocumentV2({ fps: 30 });
+    const spineId = empty.semantics.primaryNarrativeTrackId!;
+    const document = { ...empty, timeline: { ...empty.timeline, tracks: [
+      ...empty.timeline.tracks.map(track => track.id === spineId ? { ...track, clips: [{ id: 's1', startFrame: 0, durationFrames: 300 }] } : track),
+      { id: 'voice', name: 'Narration', role: 'narration', type: 'audio', order: 1, clips: [{ id: 'n1', startFrame: 0, durationFrames: 390 }] },
+    ] } } as never;
+    const features = { features: [{ feature: 'graphics', status: 'applied', reason: '六处观点花字落在口播重点', atFrame: 60 }] };
+    const first = reviewEditingTask(compose([]), features, evidence, document);
+    expect(first.ok).toBe(true);
+    expect(first.ok && first.review.notes?.[0]).toContain('ends at 10s but the narration runs to 13s');
+    const again = reviewEditingTask({ ...compose([]), reviewNoted: true }, features, evidence, document);
+    expect(again.ok && again.review.notes).toBeUndefined();
+  });
 });

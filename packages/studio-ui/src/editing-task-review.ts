@@ -15,6 +15,8 @@ export interface EditingTaskReview {
   cover?: { status: 'generated' | 'blocked' | 'skipped'; reason: string; jobId?: string };
   director?: { revision: number; summary: string; beats: DirectorBeatResult[] };
   items: { feature: EditReviewFeature; status: 'applied' | 'not_needed' | 'blocked'; reason: string; atFrame?: number; count: number }[];
+  /** Advisory findings: reported once with the passed review, never a reason to refuse it. */
+  notes?: string[];
 }
 export function requestedEditFeatures(task: ChatTask): EditReviewFeature[] {
   return EDIT_REVIEW_FEATURES.filter(id => id === 'transitions' ? false : id === 'zoom' ? task.config?.visual?.zoom : task.skills.includes(id) || id === 'graphics' && task.config?.visual?.headlines);
@@ -113,7 +115,20 @@ export function reviewEditingTask(task: ChatTask, input: Record<string, unknown>
   const brandApplication = typeof input.brandApplication === 'string' ? input.brandApplication.trim() : '';
   if (task.config?.brand && brandApplication.length < 12) problems.push('Explain the concrete visual choices applied from the selected brand, not just its name.');
   if (problems.length || !coverResult.ok || (director && !director.ok)) return refused(problems, missing);
-  return { ok: true, review: { completed: items.every(item => item.status !== 'blocked') && (director?.completed ?? true) && coverResult.cover?.status !== 'blocked', items, ...(coverResult.cover ? { cover: coverResult.cover } : {}), ...(director ? { director: { revision: task.directorPlan!.revision, summary: director.summary, beats: director.beats } } : {}), ...(brandApplication ? { brandApplication } : {}) } };
+  const notes = document && !task.reviewNoted ? reviewNotes(document) : [];
+  return { ok: true, review: { ...(notes.length ? { notes } : {}), completed: items.every(item => item.status !== 'blocked') && (director?.completed ?? true) && coverResult.cover?.status !== 'blocked', items, ...(coverResult.cover ? { cover: coverResult.cover } : {}), ...(director ? { director: { revision: task.directorPlan!.revision, summary: director.summary, beats: director.beats } } : {}), ...(brandApplication ? { brandApplication } : {}) } };
+}
+
+/** A voice-over that outlasts the picture plays its tail over nothing. Only noted: an ending held on
+ *  audio can be intended, so the model decides (or asks), and the review does not run again for it. */
+function reviewNotes(document: EditorDocumentV2): string[] {
+  const fps = document.canvas.fps;
+  const end = (clips: readonly { startFrame: number; durationFrames: number; enabled?: boolean }[]) => clips.reduce((last, clip) => clip.enabled === false ? last : Math.max(last, clip.startFrame + clip.durationFrames), 0);
+  const picture = end(document.timeline.tracks.find(track => track.id === document.semantics.primaryNarrativeTrackId)?.clips ?? []);
+  const voice = end(document.timeline.tracks.filter(track => track.role === 'narration' && !track.muted).flatMap(track => track.clips));
+  if (!picture || voice - picture < Math.round(fps / 2)) return [];
+  const sec = (frames: number) => Math.round(frames / fps * 10) / 10;
+  return [`The picture ends at ${sec(picture)}s but the narration runs to ${sec(voice)}s, so its last ${sec(voice - picture)}s plays over no picture. Unless that is intended, extend or add footage to cover it; otherwise tell the user in your reply.`];
 }
 
 function documentHasCaptions(document: EditorDocumentV2): boolean {
