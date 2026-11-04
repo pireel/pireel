@@ -19,6 +19,11 @@ export interface EditingTaskReview {
 export function requestedEditFeatures(task: ChatTask): EditReviewFeature[] {
   return EDIT_REVIEW_FEATURES.filter(id => id === 'transitions' ? false : id === 'zoom' ? task.config?.visual?.zoom : task.skills.includes(id) || id === 'graphics' && task.config?.visual?.headlines);
 }
+/** Whether a task plans before it edits: a whole whiteboard always does; a one-click edit only when it asks
+ *  for creative work (graphics, B-roll, sound, zoom). Cleanup, captions and covers need no plan. */
+export function needsDirectorPlan(task: Pick<ChatTask, 'skills' | 'config'>, start: { oneClick: boolean; wholeWhiteboard: boolean }): boolean {
+  return start.wholeWhiteboard || (start.oneClick && requestedEditFeatures(task as ChatTask).length > 0);
+}
 export function needsEditingReview(task: ChatTask): boolean {
   return (task.mode === 'one-click' || isWhiteboardDirectorTask(task)) && (!!task.directorPlanRequired || !!task.config?.brand || requestedEditFeatures(task).length > 0 || needsBrandCover(task));
 }

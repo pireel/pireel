@@ -12,7 +12,7 @@ import { resolveEditingRunConfig } from '@pireel/studio-engine/editing-run-confi
 import { detectSkillSettings, measureSkillStyle } from '@pireel/studio-engine/skill-format';
 import { EditingTaskCard } from '@pireel/studio-ui/editing-task-card';
 import { displayEditingTask, hasCurrentDirectorPreview, isInteractiveEditingTool, messagesForTask, unresolvedTaskFailure } from '@pireel/studio-ui/editing-task-progress';
-import { coverStillToRun, needsEditingReview, reviewEditingTask } from '@pireel/studio-ui/editing-task-review';
+import { coverStillToRun, needsDirectorPlan, needsEditingReview, reviewEditingTask } from '@pireel/studio-ui/editing-task-review';
 import { toolInputObject } from '@pireel/studio-ui/tool-input';
 import { ROUGH_CUT_TOOL, messageTurnCredits, toolNameOfPart, type RoughCutReplyMeta } from '@pireel/studio-ui/first-pass-card';
 import { NextSteps, splitNextSteps } from '@pireel/studio-ui/chat-next-steps';
@@ -762,7 +762,8 @@ export function ChatThread({
       const task: ChatTask = continuing ? { ...resumeEditingTask(continuing), config, skillId: continuing.skillId ?? skillRef.current, review: undefined, agentModel: agentModelRef.current, reviewRequired: continuing.reviewRequired || continuing.mode === 'one-click', state: 'running' } : {
         id: mid('task'), ...(outputId ? { outputId } : {}), goal: draftParts.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n'),
         skills: options.startTool ? config.skills : [],
-        config, skillId: skillRef.current, agentModel: agentModelRef.current, reviewRequired: !!options.startTool || !!options.wholeWhiteboard, directorPlanRequired: !!options.startTool || !!options.wholeWhiteboard,
+        config, skillId: skillRef.current, agentModel: agentModelRef.current, reviewRequired: !!options.startTool || !!options.wholeWhiteboard,
+        directorPlanRequired: needsDirectorPlan({ skills: config.skills, config }, { oneClick: !!options.startTool, wholeWhiteboard: !!options.wholeWhiteboard }),
         ...((options.startTool || options.wholeWhiteboard) && source ? { source: { name: source.label, ...(source.durationSec != null ? { durationSec: source.durationSec } : {}), ...(source.posterKey ? { posterKey: source.posterKey } : {}) } } : {}),
         mode: options.startTool ? 'one-click' : 'request', state: 'running',
       };

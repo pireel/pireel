@@ -1,6 +1,6 @@
 /** Public Agent choices. Provider credentials and billing stay on the host. */
 export const STUDIO_AGENT_MODELS = [
-  { id: 'auto', label: 'Auto', version: 'Opus + DeepSeek' },
+  { id: 'auto', label: 'Auto', version: 'Sonnet + DeepSeek' },
   { id: 'deepseek', label: 'DeepSeek', version: 'V4.1 Flash' },
   { id: 'opus', label: 'Opus', version: '5.5' },
   { id: 'sonnet', label: 'Sonnet', version: '5.5' },
