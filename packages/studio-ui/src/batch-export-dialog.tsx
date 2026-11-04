@@ -132,7 +132,6 @@ export function BatchExportDialog({
           </div>
         ) : (
           <div className="flex flex-col gap-3">
-            <p className="text-ink-4 text-[11px] leading-relaxed">{t('workbench.batchExportHint')}</p>
             {outputs.length ? (
               <>
                 <label className="border-line flex cursor-pointer items-center gap-2 border-b pb-2 text-[12px]">

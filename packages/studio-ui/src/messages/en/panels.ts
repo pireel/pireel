@@ -562,7 +562,6 @@ export const PANELS_EN: Record<string, string> = {
   "editingSkills.b_roll.name": "Auto B-roll",
   "workbench.exportForEditors": "Export for other editors",
   "nleExport.title": "Export for other editors",
-  "nleExport.subtitle": "One zip with the timeline (Premiere, DaVinci Resolve, Final Cut), every media file it uses, the graphics as transparent movies and the captions, ready to keep editing.",
   "nleExport.stage.media": "Collecting media",
   "nleExport.stage.graphics": "Rendering graphics as transparent movies",
   "nleExport.stage.package": "Packing",

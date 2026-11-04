@@ -536,7 +536,6 @@ export const PANELS_ZH: Record<string, string> = {
   "editingSkills.b_roll.name": "自动 B-roll",
   "workbench.exportForEditors": "导出到其他剪辑软件",
   "nleExport.title": "导出到其他剪辑软件",
-  "nleExport.subtitle": "打包成一个 zip：时间线工程（Premiere、达芬奇、Final Cut）、用到的全部素材、渲染好的透明图形和字幕，解压后可以继续剪。",
   "nleExport.stage.media": "正在收集素材",
   "nleExport.stage.graphics": "正在把动态图形渲染成透明视频",
   "nleExport.stage.package": "正在打包",

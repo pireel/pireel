@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ImageIcon, Loader2 } from 'lucide-react';
 import { useQuote } from '@pireel/studio-ui/use-quote';
 import { ButtonCreditCost } from './credit-cost';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@pireel/ui/dialog';
+import { Dialog, DialogContent, DialogTitle } from '@pireel/ui/dialog';
 import { CoverFrameTimeline } from '@pireel/studio-ui/cover-frame-timeline';
 import { SceneMediaCard } from '@pireel/studio-ui/media-picker';
 import { CoverApplyButton } from '@pireel/studio-ui/chat-cover-controls';
@@ -93,8 +93,8 @@ export function CoverSceneDialog({ open, scene, applied, busy, canvas, onClose, 
     try { await onSaveDraft({ sourceFrame: coverFrameIdentity(frame) }); } catch { setDraftFrame(null); setError(t('ui.coverSceneDialog.frameSelectionWasNot')); } finally { setSavingReference(false); }
   };
   const failure = scene?.error === 'cover_brand_reference_unavailable' ? t('ui.coverSceneDialog.couldNotLoadBrand') : scene?.error === 'cover_insufficient_credits' ? t('ui.coverSceneDialog.notEnoughCreditsTop') : scene?.error === 'cover_source_unavailable' ? t('ui.coverSceneDialog.importRestoreCurrentVideo') : t('ui.coverSceneDialog.coverPreparationGenerationDid');
-  return <Dialog open={open} onOpenChange={value => { if (!value) onClose(); }}><DialogContent className="studio-scope bg-bg border-line flex h-[min(820px,calc(100vh-3rem))] w-[min(1200px,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none">
-    <div className="border-line border-b px-6 py-4 pr-12"><DialogTitle className="text-ink text-lg font-semibold">{t('ui.coverSceneDialog.cover')}</DialogTitle><DialogDescription className="text-ink-3 mt-1 text-xs">{t('ui.coverSceneDialog.generateCompleteCoverFrom')}</DialogDescription></div>
+  return <Dialog open={open} onOpenChange={value => { if (!value) onClose(); }}><DialogContent aria-describedby={undefined} className="studio-scope bg-bg border-line flex h-[min(820px,calc(100vh-3rem))] w-[min(1200px,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none">
+    <div className="border-line border-b px-6 py-4 pr-12"><DialogTitle className="text-ink text-lg font-semibold">{t('ui.coverSceneDialog.cover')}</DialogTitle></div>
     <div className="grid min-h-0 flex-1 grid-cols-[minmax(300px,370px)_minmax(0,1fr)] max-sm:grid-cols-1">
       <div aria-label={t('ui.coverSceneDialog.coverSettings')} className="border-line flex min-h-0 flex-col gap-3 overflow-y-auto border-r p-5">
         <div className="flex items-center justify-between gap-2"><label htmlFor="cover-full-prompt" className="text-ink text-sm font-medium">{t('ui.coverSceneDialog.fullPrompt')}</label><button type="button" disabled={pending} onClick={async () => { setError(''); try { await onPrepare(true); } catch { setError(failure); } }} className="text-ink-3 text-xs underline underline-offset-4 disabled:opacity-40">{t('ui.coverSceneDialog.rewriteFromContext')}</button></div>
@@ -112,7 +112,6 @@ export function CoverSceneDialog({ open, scene, applied, busy, canvas, onClose, 
               <img src={scene.referenceImage.url} alt={t('ui.coverSceneDialog.layoutReferenceImage')} className="h-full w-full object-contain" />
             </SceneMediaCard></div>}
           </div>
-          <p className="text-ink-4 mt-2 text-[11px] leading-5">{t('ui.coverSceneDialog.sourceFrameDefinesIdentity')}</p>
         </section>
         <ImageGenerationFields value={settings} models={models} disabled={pending} onChange={next => { setModelId(next.modelId); setSize(next.size); setQuality(next.quality); void onSaveDraft(next).catch(() => setError(t('ui.coverSceneDialog.settingsWereNotSaved'))); }} />
         <div className="bg-bg sticky bottom-0 z-10 shrink-0 space-y-2 py-2">

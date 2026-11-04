@@ -49,7 +49,6 @@ export function CaptionStylePanel({ styleCtl, active, generating, onPickPreset, 
         <PresetGroup title={t('captions.basicGroup')} presets={CAPTION_STYLE_PRESETS} current={active ? main.preset : undefined} onPick={pickMain} />
       </div>}
       {section === 'animation' && <div data-caption-animation>
-        <p className="text-ink-4 mb-3 text-[11px] leading-relaxed">{t('captions.animationHint')}</p>
         <div className="grid grid-cols-2 gap-2">
           {CAPTION_ANIMATIONS.map(effect => <button
             key={effect.id} type="button" title={t(effect.name)} aria-pressed={animation === effect.id}

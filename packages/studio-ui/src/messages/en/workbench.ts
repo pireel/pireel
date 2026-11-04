@@ -718,7 +718,6 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.batchExportAll": "Export all {n}",
   "workbench.outputsSelected": "{n} selected",
   "workbench.cancelBatchExport": "Cancel batch export",
-  "workbench.batchExportHint": "Pick the outputs to export. They render and download one after another.",
   "workbench.batchExportProgress": "{done}/{total} · current {pct}%",
   "workbench.batchExportSummary": "{done} done, {failed} failed",
   "workbench.batchExportNoOutputs": "No outputs to export",

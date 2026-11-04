@@ -4,7 +4,7 @@
 
 import { CheckCircle2, Loader2 } from 'lucide-react';
 import type { NleNote } from '@pireel/studio-engine/nle-export/index';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@pireel/ui/dialog';
+import { Dialog, DialogContent, DialogTitle } from '@pireel/ui/dialog';
 import type { NleExportStage } from './nle-export-package';
 import { t } from './i18n';
 
@@ -21,9 +21,8 @@ export function NleExportDialog({ state, onCancel, onClose }: {
   const running = state?.phase === 'running';
   return (
     <Dialog open={!!state} onOpenChange={(open) => { if (!open && !running) onClose(); }}>
-      <DialogContent className="bg-panel border-line w-[min(440px,calc(100vw-2rem))] gap-0 p-5">
+      <DialogContent aria-describedby={undefined} className="bg-panel border-line w-[min(440px,calc(100vw-2rem))] gap-0 p-5">
         <DialogTitle className="text-ink text-[15px]">{t('nleExport.title')}</DialogTitle>
-        <DialogDescription className="text-ink-3 mt-1 text-[12px] leading-relaxed">{t('nleExport.subtitle')}</DialogDescription>
         {state?.phase === 'running' && (
           <div className="mt-5">
             <div className="text-ink-2 flex items-center gap-2 text-[12px]">

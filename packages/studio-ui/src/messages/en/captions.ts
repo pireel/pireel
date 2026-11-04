@@ -46,7 +46,6 @@ export const CAPTIONS_EN: Record<string, string> = {
   'captions.pendingImage': 'Generating image',
   'captions.animationTab': 'Animation',
   'captions.appearanceHint': 'Choose typography, outlines and plates. Your animation stays unchanged.',
-  'captions.animationHint': 'Apply motion to the caption layer. Manual highlights are preserved.',
   'captions.wholeCaptionMotion': 'Caption motion',
   'captions.bundledEmphasis': 'Word emphasis',
   'captions.classicStyles': 'Classic styles',

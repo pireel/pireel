@@ -46,7 +46,6 @@ export const CAPTIONS_ZH: Record<string, string> = {
   'captions.pendingImage': '图片生成中',
   'captions.animationTab': '动效',
   'captions.appearanceHint': '选择字体、描边与底板组合，保留当前动效。',
-  'captions.animationHint': '独立应用到整组字幕；手动高亮保留。',
   'captions.wholeCaptionMotion': '整句动效',
   'captions.bundledEmphasis': '词语强调',
   'captions.classicStyles': '经典样式',
