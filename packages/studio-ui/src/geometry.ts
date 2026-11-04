@@ -262,6 +262,13 @@ export async function analyzeMouthAtTimes(
         ? landmarkDistance(upperLip, lowerLip) / mouthWidth
         : null;
       const signals = { jawOpenScore: jaw, lipApertureRatio };
+      // Turn from the camera: the nose tip sits between the cheek edges when the face is frontal.
+      const nose = landmarks?.[1];
+      const leftCheek = landmarks?.[234];
+      const rightCheek = landmarks?.[454];
+      const toLeft = nose && leftCheek ? landmarkDistance(nose, leftCheek) : 0;
+      const toRight = nose && rightCheek ? landmarkDistance(nose, rightCheek) : 0;
+      const yaw = toLeft + toRight > 0.001 ? (toLeft - toRight) / (toLeft + toRight) : null;
       observations.push({
         timeSec,
         faceDetected: true,
@@ -270,6 +277,8 @@ export async function analyzeMouthAtTimes(
         visiblyOpen: isMouthVisiblyOpen(signals),
         prominentFaceCount,
         backgroundFaceCount,
+        faceHeight: primary.h / canvas.height,
+        yaw,
       });
     }
     return observations;
@@ -355,7 +364,7 @@ function measureFrameQuality(
   qualityCtx: CanvasRenderingContext2D,
   previousLuma: Float32Array | null,
   previousMotion: FrameMotionVector | null,
-): { sharpness: number; exposure: number; stability: number; luma: Float32Array; motion: FrameMotionVector | null } {
+): { sharpness: number; exposure: number; stability: number; luma: Float32Array; motion: FrameMotionVector | null; mean: number; change: number | null } {
   qualityCtx.drawImage(canvas, 0, 0, qualityCanvas.width, qualityCanvas.height);
   const rgba = qualityCtx.getImageData(0, 0, qualityCanvas.width, qualityCanvas.height).data;
   const width = qualityCanvas.width;
@@ -395,6 +404,7 @@ function measureFrameQuality(
 
   let stability = 1;
   let motion: FrameMotionVector | null = null;
+  let change: number | null = null;
   if (previousLuma && previousLuma.length === luma.length) {
     let bestDx = 0;
     let bestDy = 0;
@@ -421,8 +431,9 @@ function measureFrameQuality(
     // Smooth pans/tracking shots keep a consistent motion vector. Handheld shake reverses or
     // changes direction abruptly, so temporal consistency carries more weight than raw movement.
     stability = frameStabilityScore(motion, previousMotion, bestError);
+    change = bestError;
   }
-  return { sharpness, exposure, stability, luma, motion };
+  return { sharpness, exposure, stability, luma, motion, mean, change };
 }
 
 /**
@@ -743,11 +754,15 @@ export async function analyzeQualityAtTimes(
       sample.draw(ctx as unknown as CanvasRenderingContext2D, 0, 0, canvas.width, canvas.height);
       sample.close();
       const measured = measureFrameQuality(canvas, qualityCanvas, qualityCtx, previousLuma, previousMotion);
+      const longEdge = Math.max(qualityCanvas.width, qualityCanvas.height);
       quality.push({
         timeSec,
         sharpness: measured.sharpness,
         exposure: measured.exposure,
         stability: measured.stability,
+        brightness: measured.mean,
+        ...(measured.motion ? { motion: { dx: measured.motion.dx / longEdge, dy: measured.motion.dy / longEdge } } : {}),
+        ...(measured.change != null ? { change: measured.change } : {}),
       });
       previousLuma = measured.luma;
       previousMotion = measured.motion;

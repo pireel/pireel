@@ -4,7 +4,7 @@ import { runAgentTimelineTool } from '@pireel/studio-engine/agent-timeline';
 import { compileMontage, fitMontage, narrationCutSlots, type MontageFitShot, type MontageFrameSignal } from './montage-plan';
 
 const still = (overrides: Partial<MontageFrameSignal> = {}): MontageFrameSignal => ({
-  shake: 0, pan: 0, people: 1, face: true, front: true, faceH: 0.15, mouth: 0.05, sharp: 0, bright: 120, cut: false, ...overrides,
+  shake: 0, pan: 0, people: 1, face: true, front: true, faceH: 0.15, mouth: 0.05, sharp: 0, bright: 0.47, cut: false, ...overrides,
 });
 
 /** Deterministic pseudo-random numbers, so a failing case can be replayed. */
@@ -51,7 +51,7 @@ describe('fitMontage', () => {
       const shots: MontageFitShot[] = lengths.map((length) => {
         const from = random() * 20;
         const span = length + 0.5 + random() * 4;
-        const signals = Array.from({ length: Math.round(span * 10) }, () => still({ shake: random() * 4, people: random() < 0.2 ? 2 : 1, mouth: random() * 0.3 }));
+        const signals = Array.from({ length: Math.round(span * 10) }, () => still({ shake: random() * 0.025, people: random() < 0.2 ? 2 : 1, mouth: random() * 0.3 }));
         return { range: [from, from + span], want: 'any', signals };
       });
       const result = fitMontage({ endSec, cuts, shots, fps, signalFps: 10 });
@@ -75,7 +75,7 @@ describe('fitMontage', () => {
   });
 
   it('chooses the steady, silent stretch and honours a face-first opening', () => {
-    const shaky = Array.from({ length: 30 }, () => still({ shake: 8 }));
+    const shaky = Array.from({ length: 30 }, () => still({ shake: 0.05 }));
     const calm = Array.from({ length: 30 }, () => still());
     const talking = Array.from({ length: 30 }, (_, index) => still({ mouth: index % 2 ? 0.3 : 0.02 }));
     const backFirst = [...Array.from({ length: 20 }, () => still({ face: false, front: false, faceH: 0 })), ...calm];

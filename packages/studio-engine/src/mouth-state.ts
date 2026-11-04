@@ -14,6 +14,11 @@ export interface EditorialFaceObservation extends MouthStateSignals {
   prominentFaceCount: number;
   /** Smaller detected faces that remain background context rather than co-subjects. */
   backgroundFaceCount: number;
+  /** The primary face's height as a share of the frame height. */
+  faceHeight?: number;
+  /** How far the primary face turns from the camera, -1 (full left) to 1 (full right); 0 is frontal.
+   *  Null when the landmarks could not be read. */
+  yaw?: number | null;
 }
 
 export type EditorialFaceGateIssue = 'open-mouth' | 'multiple-people' | 'technical-risk';

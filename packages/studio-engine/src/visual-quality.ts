@@ -10,6 +10,13 @@ export interface FrameQualityObservation {
   subjectPresence?: number;
   /** Horizontal visual-center alignment of the detected subject in [0, 1]; not technical quality. */
   subjectCenteredness?: number;
+  /** Camera move since the previous sample, as a share of the frame's long edge (absent on the first). */
+  motion?: FrameMotionVector;
+  /** Mean luma in [0, 1]. */
+  brightness?: number;
+  /** What still differs from the previous sample once the camera move is taken out, in [0, 1]: a
+   *  hard cut inside the source shows as a spike. */
+  change?: number;
 }
 
 export interface VisualQualityWindow {

@@ -27,11 +27,12 @@ export function narrationCutSlots(words: readonly { text: string; start: number;
   return slots;
 }
 
-/** One sampled frame of a source range (see montage-signals in the UI package for how it is measured). */
+/** One sampled frame of a source range (montage-signals.ts builds these from local analysis). */
 export interface MontageFrameSignal {
-  /** Change of the camera's own velocity between frames (shake); a steady pan scores 0. */
+  /** Change of the camera's own velocity between samples (shake), as a share of the frame's long
+   *  edge; a steady pan scores 0. */
   shake: number;
-  /** Size of the camera move between frames (a whip pan is large). */
+  /** Size of the camera move between samples, as a share of the long edge (a whip pan is large). */
   pan: number;
   /** People large enough to matter in frame. */
   people: number;
@@ -41,7 +42,7 @@ export interface MontageFrameSignal {
   faceH: number;
   /** Mouth opening of a face big enough to read, else null (talking shows as it changing). */
   mouth: number | null;
-  /** Detail and light, relative within the source. */
+  /** Detail relative within the source (a z-score) and mean luma in [0, 1]. */
   sharp: number;
   bright: number;
   /** A hard cut inside the source lands on this frame. */
@@ -89,8 +90,9 @@ function windowScore(shot: MontageFitShot, at: number, frames: number): number {
   if (window.slice(1).some((frame) => frame.cut)) return -Infinity;
   if (shot.firstFace && !(window[0]!.front && window[0]!.faceH >= 0.12)) return -Infinity;
   const mean = (pick: (frame: MontageFrameSignal) => number, rows = window) => rows.reduce((sum, frame) => sum + pick(frame), 0) / rows.length;
-  const motion = mean((frame) => frame.shake) / 2 + mean((frame) => Math.max(0, frame.pan - 6)) / 4;
-  const edges = (mean((frame) => frame.shake, window.slice(0, 3)) + mean((frame) => frame.shake, window.slice(-3))) / 4;
+  // Calibrated on 10 fps samples: shake of 1/80 of the frame per sample costs as much as a talking mouth.
+  const motion = 80 * mean((frame) => frame.shake) + 40 * mean((frame) => Math.max(0, frame.pan - 0.0375));
+  const edges = 40 * (mean((frame) => frame.shake, window.slice(0, 3)) + mean((frame) => frame.shake, window.slice(-3)));
   const crowd = mean((frame) => Math.max(0, frame.people - 1));
   const want = shot.want ?? 'any';
   const absent = want === 'none' || want === 'any' ? 0 : mean((frame) => (frame.people === 0 && !frame.face ? 1 : 0));
@@ -100,7 +102,7 @@ function windowScore(shot: MontageFitShot, at: number, frames: number): number {
     for (let index = 1; index < mouths.length; index += 1) talk += Math.abs(mouths[index]! - mouths[index - 1]!);
     talk /= mouths.length - 1;
   }
-  const dark = Math.max(0, (70 - mean((frame) => frame.bright)) / 40);
+  const dark = Math.max(0, (0.275 - mean((frame) => frame.bright)) * 6.4);
   const sharp = mean((frame) => frame.sharp);
   const asked = want === 'front' ? mean((frame) => (frame.front ? 1 : 0)) + 2 * mean((frame) => frame.faceH)
     : want === 'side' ? 0.6 * mean((frame) => (frame.face ? 1 : 0))
