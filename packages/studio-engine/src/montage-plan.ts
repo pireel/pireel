@@ -52,12 +52,28 @@ export interface MontageFrameSignal {
 /** What a beat asked to see: a face toward the camera, a profile, a back, nobody, or anything. */
 export type MontageWant = 'front' | 'side' | 'back' | 'none' | 'any';
 
+/**
+ * The floor for a film's first frame: never black or mid-cut; a subject in frame; for a portrait-led
+ * film, a clear face toward the camera.
+ */
+export type OpeningRule = 'subject' | 'face';
+export type OpeningIssue = 'black' | 'cut' | 'no-subject' | 'no-face';
+
+export function openingFrameIssues(frame: MontageFrameSignal, rule: OpeningRule): OpeningIssue[] {
+  const issues: OpeningIssue[] = [];
+  if (frame.bright < 0.08) issues.push('black');
+  if (frame.cut) issues.push('cut');
+  if (rule === 'face' && !(frame.front && frame.faceH >= 0.12)) issues.push('no-face');
+  if (rule === 'subject' && frame.people === 0 && !frame.face && frame.sharp < -1) issues.push('no-subject');
+  return issues;
+}
+
 export interface MontageFitShot {
   /** The source range (seconds) the plan gave this beat; the window is chosen inside it. */
   range: [number, number];
   want?: MontageWant;
-  /** The opening frame must be a clear frontal face (a showcase hook). */
-  firstFace?: boolean;
+  /** What the window's first frame must show (the opening shot of a film): see openingFrameIssues. */
+  opening?: OpeningRule;
   /** Frames sampled at `signalFps` from range[0]; without them every window scores the same. */
   signals?: readonly MontageFrameSignal[];
 }
@@ -88,7 +104,7 @@ function windowScore(shot: MontageFitShot, at: number, frames: number): number {
   const window = all.slice(at, at + frames);
   if (!window.length) return 0;
   if (window.slice(1).some((frame) => frame.cut)) return -Infinity;
-  if (shot.firstFace && !(window[0]!.front && window[0]!.faceH >= 0.12)) return -Infinity;
+  if (shot.opening && openingFrameIssues(window[0]!, shot.opening).length) return -Infinity;
   const mean = (pick: (frame: MontageFrameSignal) => number, rows = window) => rows.reduce((sum, frame) => sum + pick(frame), 0) / rows.length;
   // Calibrated on 10 fps samples: shake of 1/80 of the frame per sample costs as much as a talking mouth.
   const motion = 80 * mean((frame) => frame.shake) + 40 * mean((frame) => Math.max(0, frame.pan - 0.0375));

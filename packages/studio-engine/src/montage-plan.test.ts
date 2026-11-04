@@ -92,7 +92,7 @@ describe('fitMontage', () => {
     expect(result.shots[0]!.sourceInSec).toBeGreaterThanOrEqual(13);
     expect(result.shots[1]!.sourceInSec).toBeGreaterThanOrEqual(1.9);
     expect(result.shots[1]!.sourceInSec).toBeLessThanOrEqual(2.2);
-    const opening = fitMontage({ endSec: 2, fps: 30, signalFps: 10, cuts: [], shots: [{ range: [0, 5], signals: backFirst, firstFace: true }] });
+    const opening = fitMontage({ endSec: 2, fps: 30, signalFps: 10, cuts: [], shots: [{ range: [0, 5], signals: backFirst, opening: 'face' }] });
     expect(opening.ok && opening.shots[0]!.sourceInSec).toBeGreaterThanOrEqual(2);
   });
 
