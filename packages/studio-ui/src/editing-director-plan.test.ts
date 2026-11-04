@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { runAgentTimelineTool } from '@pireel/studio-engine/agent-timeline';
+import { packStorySpine } from '@pireel/studio-engine/story-spine';
 import { compositionToEditorDocument, emptyComposition } from '@pireel/studio-engine/composition';
 import type { PlaybookSnapshot } from '@pireel/studio-engine/project-brand-metadata';
 import { resolveEditingRunConfig } from '@pireel/studio-engine/editing-run-config';
@@ -72,9 +73,11 @@ describe('brand-informed director plan', () => {
     const refused = reviewDirectorPlan(planned, applied, document);
     expect(refused).toMatchObject({ ok: false, error: expect.stringContaining('nothing was added, reframed, restored, cut or emphasised at its passage') });
     // A graphic that lands just after the words still belongs to the beat; one far away does not.
-    const [window] = directorBeatWindows(planned.directorPlan.beats[0], document);
+    // (Any edit closes the gap left before the spine above, so measure on the closed spine.)
+    const whole = packStorySpine(document);
+    const [window] = directorBeatWindows(planned.directorPlan.beats[0], whole);
     const fps = document.canvas.fps;
-    const place = (atFrame: number) => runAgentTimelineTool(document, 'set_texts', { items: [{ text: '两场大会门票', startFrame: atFrame, durationFrames: fps }] }).document!;
+    const place = (atFrame: number) => runAgentTimelineTool(whole, 'set_texts', { items: [{ text: '两场大会门票', startFrame: atFrame, durationFrames: fps }] }).document!;
     const near = place(Math.round(window!.endFrame + fps));
     expect(reviewDirectorPlan(planned, applied, near)).toMatchObject({ ok: true, beats: [{ beatId: 'annual-card', clipIds: [expect.any(String)] }] });
     expect(reviewDirectorPlan(planned, applied, place(Math.round(window!.endFrame + 4 * fps))).ok).toBe(false);

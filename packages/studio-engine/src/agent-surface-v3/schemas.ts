@@ -77,7 +77,7 @@ const CLIP_PROPERTY_FIELD_SCHEMAS: Record<ClipPropertyKey, Schema> = {
   source: SOURCE_RANGE,
   durationFrames: int('New duration in frames.', 1),
   speed: num('', { min: 0.25, max: 4 }),
-  ripple: bool('speed on the spine: shift later material (default true).'),
+  ripple: bool('speed on the spine: shift later material (default true); false keeps the clip\'s slot and plays less (slower) or more (faster) of its source.'),
   volumeDb: num('', { min: -60, max: 20 }),
   mute: bool(),
   fades: FADES,

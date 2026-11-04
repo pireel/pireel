@@ -1094,6 +1094,17 @@ describe('remove_clips and swap_clip_media (v3)', () => {
     expect(narration.startFrame).toBe(0);
   });
 
+  it('an unrippled speed change on the spine keeps the slot and plays less source', () => {
+    const document = project();
+    const out = runAgentTimelineTool(document, 'set_clip_properties', { items: [{ clipId: 's2', speed: 0.5, ripple: false }] });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    expect(spine(out.document!)).toEqual([['s1', 0, 60], ['s2', 60, 120], ['s3', 120, 180]]);
+    const slowed = out.document!.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId)!.clips.find((clip) => clip.id === 's2') as { sourceInSec: number; sourceOutSec: number };
+    expect([slowed.sourceInSec, slowed.sourceOutSec]).toEqual([2, 3]);
+    const rippled = runAgentTimelineTool(document, 'set_clip_properties', { items: [{ clipId: 's2', speed: 0.5 }] });
+    expect(spine(rippled.document!)).toEqual([['s1', 0, 60], ['s2', 60, 180], ['s3', 180, 240]]);
+  });
+
   it('script captions over a voice-over follow the narration, not the picture', () => {
     let document = project();
     document = { ...document, semantics: { ...document.semantics, transcripts: { ...document.semantics.transcripts, voice: [

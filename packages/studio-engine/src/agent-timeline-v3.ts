@@ -51,6 +51,7 @@ import { resolveCaptionSentenceEdits } from '@pireel/studio-engine/caption-sente
 import { captionYPctForCanvas } from '@pireel/studio-engine/delivery-safety';
 import { isDisplayTextFontId } from '@pireel/studio-engine/display-text-presets';
 import { resolveWebFontReference, webFontCatalogHint } from '@pireel/studio-engine/font-library';
+import { packStorySpine } from '@pireel/studio-engine/story-spine';
 import { planNarrationScriptSegments, planScriptCaptionSegments, splitScriptLines } from '@pireel/studio-engine/script-captions';
 import { narrationRowMarks } from '@pireel/studio-engine/trim';
 import { applyWordDecorations, type WordDecorationPatch } from '@pireel/studio-engine/word-decorations';
@@ -275,8 +276,7 @@ export function moveClipsV3(document: EditorDocumentV2, input: Input): AgentTime
       continue;
     }
     const spineId = next.semantics.primaryNarrativeTrackId;
-    // A spine clip linked to another lane keeps its partners' timing, so it moves as placed.
-    const onSpine = found.track.id === spineId && (!string(item.trackId) || string(item.trackId) === spineId) && !found.clip.linkGroupId;
+    const onSpine = found.track.id === spineId && (!string(item.trackId) || string(item.trackId) === spineId);
     const moved = applyEditorCommand(next, {
       type: 'clip.move', trackId: found.track.id, clipId: found.clip.id,
       startFrame: item.startFrame,
@@ -286,32 +286,10 @@ export function moveClipsV3(document: EditorDocumentV2, input: Input): AgentTime
     if (!moved.ok) return fail(moved.error.message, moved.error);
     // On the story spine a move is a reorder: the clip lands before the first spine clip starting at
     // or after its new start, and the spine closes up, so it never leaves a hole or covers a shot.
-    next = onSpine ? packPrimaryNarrative(moved.document, found.clip.id) : moved.document;
+    next = onSpine ? packStorySpine(moved.document, found.clip.id) : moved.document;
     receipts.push(moved.receipt);
   }
   return mutation(next, `Moved ${items.length} clip${items.length === 1 ? '' : 's'}`, receipts);
-}
-
-/** Close every gap on the story spine by moving later spine clips earlier; other lanes stay put.
- *  `firstOnTie` names a clip that goes before any clip starting on the same frame (a moved clip). */
-function packPrimaryNarrative(document: EditorDocumentV2, firstOnTie?: string): EditorDocumentV2 {
-  const trackId = document.semantics.primaryNarrativeTrackId;
-  let changed = false;
-  const tracks = document.timeline.tracks.map((track) => {
-    if (track.id !== trackId) return track;
-    let cursor = 0;
-    const tie = (id: string) => (id === firstOnTie ? 0 : 1);
-    const clips = [...track.clips]
-      .sort((left, right) => left.startFrame - right.startFrame || tie(left.id) - tie(right.id) || left.id.localeCompare(right.id))
-      .map((clip) => {
-        const packed = clip.startFrame === cursor ? clip : { ...clip, startFrame: cursor };
-        if (packed !== clip) changed = true;
-        cursor += clip.durationFrames;
-        return packed;
-      });
-    return changed ? { ...track, clips } : track;
-  });
-  return changed ? { ...document, timeline: { ...document.timeline, tracks } } : document;
 }
 
 /** Replace a clip's media while keeping its slot: timing, framing, level, fades and keyframes stay. */
@@ -363,7 +341,7 @@ export function removeClipsV3(document: EditorDocumentV2, input: Input): AgentTi
     // The story spine has no gaps: what follows a removed spine clip plays earlier. Only the spine
     // moves — speech, captions and graphics keep their timeline positions (ripple_delete_ranges is
     // the edit that takes a span out of every lane).
-    next = packPrimaryNarrative(next);
+    next = packStorySpine(next);
     const relaid = applyEditorCommand(next, { type: 'captions.relay' });
     if (!relaid.ok) return fail(relaid.error.message, relaid.error);
     next = relaid.document;

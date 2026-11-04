@@ -33,6 +33,7 @@ import type { TranscriptSegment } from '@pireel/studio-engine/project-dto';
 import { canvasSizeFollowingFirstVideo } from '@pireel/studio-engine/editing-primitives';
 import { applyNarrationDocumentEdit } from '@pireel/studio-engine/narration-document-edit';
 import { planNarrationCuts } from '@pireel/studio-engine/editor-document/narration-cut-planner';
+import { keepStorySpineWhole } from '@pireel/studio-engine/story-spine';
 import { firstNarrativeAssetId } from '@pireel/studio-engine/editor-document/read-model';
 import { dominantTimelineSpeechTrack } from '@pireel/studio-engine/editor-document/commands/managed-captions';
 import { documentWordRanges, documentWordRangesToTimeline, resolveDocumentWordIds } from '@pireel/studio-engine/editor-document/transcript-address';
@@ -1094,6 +1095,18 @@ export function setVideoSpeed(document: EditorDocumentV2, input: Input): AgentTi
     const found = locatedClip(next, target.clip.id);
     if (!found || (found.clip.kind !== 'narrative' && found.clip.kind !== 'media')) return fail(`video clip not found: ${target.clip.id}`);
     const sourceDurationSec = found.clip.sourceOutSec - found.clip.sourceInSec;
+    if (found.clip.kind === 'narrative' && input.ripple === false) {
+      // The spine never overlaps itself: without ripple a spine clip keeps its slot and plays less
+      // (or more) of its source at the new speed.
+      const sourceOutSec = Math.round((found.clip.sourceInSec + (found.clip.durationFrames / next.canvas.fps) * speed) * 1000) / 1000;
+      const available = next.assets[found.clip.assetId]?.metadata.durationSec;
+      if (typeof available === 'number' && sourceOutSec > available + 1e-3) return fail(`${found.clip.id} has ${Math.max(0, available - found.clip.sourceInSec).toFixed(2)}s of source after its in point; at ${speed}x its slot needs ${(sourceOutSec - found.clip.sourceInSec).toFixed(2)}s — ripple it instead, or pick a lower speed`);
+      const kept = applyEditorCommand(next, { type: 'clip.patch', trackId: found.track.id, clipId: found.clip.id, patch: { sourceOutSec } });
+      if (!kept.ok) return fail(kept.error.message, kept.error);
+      next = kept.document;
+      receipts.push(kept.receipt);
+      continue;
+    }
     const retimed = applyEditorCommand(next, {
       type: 'clip.retime',
       trackId: found.track.id,
@@ -1817,6 +1830,15 @@ function removeWords(document: EditorDocumentV2, input: Input): AgentTimelineOut
 }
 
 export function runAgentTimelineTool(document: EditorDocumentV2, tool: string, input: Input): AgentTimelineOutcome {
+  const outcome = runTimelineToolOnce(document, tool, input);
+  if (!outcome.ok || !outcome.document || outcome.document === document) return outcome;
+  // Whatever the tool did, the story spine stays one unbroken run (story-spine.ts).
+  const whole = keepStorySpineWhole(document, outcome.document);
+  if (!whole.ok) return fail(whole.error);
+  return whole.document === outcome.document ? outcome : { ...outcome, document: whole.document, receipts: [...(outcome.receipts ?? []), ...whole.receipts] };
+}
+
+function runTimelineToolOnce(document: EditorDocumentV2, tool: string, input: Input): AgentTimelineOutcome {
   const v3 = runV3DocumentTool(document, tool, input);
   if (v3) return v3;
   switch (tool) {
