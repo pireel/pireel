@@ -97,13 +97,10 @@ export interface BrandPlaybook {
 }
 export type PlaybookSnapshot = Omit<BrandPlaybook, 'source'>;
 
-/** The Studio Skills a brand can belong to: only talking-head videos for now. A project on any other
- *  Skill (or the creator's own) is edited without a brand. */
-export const BRAND_SKILL_IDS: readonly string[] = ['talking-head-edit'];
+/** The Skill a brand made without one belongs to (a brand brings it to a project on no Skill yet). */
 export const DEFAULT_BRAND_SKILL_ID = 'talking-head-edit';
 /** The Skill a brand belongs to (brands made before skills were recorded are talking-head brands). */
 export const brandSkillOf = (brand: Pick<BrandPlaybook, 'skillId'>) => brand.skillId ?? DEFAULT_BRAND_SKILL_ID;
-export const skillTakesBrand = (skillId: string | undefined) => !!skillId && BRAND_SKILL_IDS.includes(skillId);
 
 type BrandSettings = Pick<BrandPlaybook, 'blocks' | 'skills' | 'preferences' | 'media'>;
 

@@ -25,6 +25,10 @@ export interface ChatTask {
   directorPlan?: EditingDirectorPlan;
   source?: { name: string; durationSec?: number; posterKey?: string };
   mode: 'one-click' | 'request';
+  /** A request that builds the whole video from the project's media on an unedited timeline (footage,
+   *  a script, a voice-over): once it has cut something, it ends with finish_edit's review like a
+   *  whole-video edit, without a rough cut. */
+  compose?: boolean;
   state: 'running' | 'paused' | 'partial' | 'done';
   fineCut?: { state: "running" | "done"; items: FineCutItem[] };
   fineCutBaseline?: Record<FineCutSkill, string[]>;

@@ -24,7 +24,7 @@ import {
 } from "@pireel/ui/trigger-popover";
 import type { StudioScenarioSkillId } from "@pireel/studio-engine/scenario-skills";
 import { ChatSkillPicker } from "@pireel/studio-ui/chat-skill-picker";
-import { ProjectBrandSummary } from '@pireel/studio-ui/project-brand-summary';
+import { ProjectBrandPicker, ProjectBrandSummary } from '@pireel/studio-ui/project-brand-summary';
 import {
   appendChatPillRemoveIcon,
   CHAT_ACTION_PILL_CLASS,
@@ -86,6 +86,7 @@ export function Composer({
   onCreateScenarioSkill,
   onDeleteScenarioSkill,
   projectBrand,
+  onProjectBrand,
   onPickSkill,
   agentModel,
   onPickAgentModel,
@@ -112,6 +113,7 @@ export function Composer({
   onPickSkill: (id: StudioScenarioSkillId) => void;
   /** The project's brand and how to switch it (hidden without a brand provider). */
   projectBrand?: StudioChatProps["projectBrand"];
+  onProjectBrand?: StudioChatProps["onProjectBrand"];
   /** Visual direction attached to the current session. */
   /** Art-direction catalog rendered in the unified visual-style dialog. */
   timelineFramePickActive: boolean;
@@ -708,7 +710,9 @@ export function Composer({
 
   return (
     <>
-      <div className="mb-1 flex min-w-0 items-center"><ProjectBrandSummary brand={projectBrand} /></div>
+      <div className="mb-1 flex min-w-0 items-center">{onProjectBrand
+        ? <ProjectBrandPicker brand={projectBrand} disabled={status === "streaming" || status === "submitted"} onChange={onProjectBrand} />
+        : <ProjectBrandSummary brand={projectBrand} />}</div>
       <div className="border-line bg-panel-2/35 focus-within:border-ink-4 relative rounded-md border transition-colors">
         <div className="relative">
           {empty && !studioActionActive && (

@@ -277,7 +277,6 @@ export const CHATGEN_EN: Record<string, string> = {
   'chatGen.brand.switch': 'Switch',
   'chatGen.skill.confirmTitle': "Switch this project's Skill?",
   'chatGen.skill.confirmBody': 'Later edits follow “{name}”. What is already edited stays as it is.',
-  'chatGen.skill.confirmDropsBrand': "This Skill takes no brand, so the project's brand “{brand}” is dropped.",
   'chatGen.resumeOriginalOutput': 'Switch back to this task’s original output before resuming.',
   'chatGen.checkpointFailed': 'Could not save progress on this device. Keep this page open until cloud sync finishes.',
   'chatGen.firstPass.sourceChanged': 'The main video changed. Return to the original video to resume this task.',

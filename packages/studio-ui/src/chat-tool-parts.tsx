@@ -8,6 +8,7 @@ import { type StudioToolDef, type StudioToolResult } from '@pireel/studio-engine
 import { studioToolDefFor } from '@pireel/studio-ui/v3-tool-defs';
 import type { Composition } from '@pireel/studio-engine/composition';
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
+import { ThinkingDots } from '@pireel/studio-ui/chat-format';
 import { useToolProgress } from '@pireel/studio-ui/tool-progress';
 import { CutListCard, cutRowsOf } from '@pireel/studio-ui/chat-cut-list';
 import { GraphicsPreviewBody } from '@pireel/studio-ui/chat-graphics-card';
@@ -102,6 +103,16 @@ export function toolStatus(part: ToolPartLike): { kind: 'running' | 'done' | 'er
     return { kind: 'done', text: out?.summary?.slice(0, 60) || t('chatGen.done') };
   }
   return { kind: 'running', text: t('chatGen.running') };
+}
+
+/** What a request is doing while its tool cards stay hidden: the running tool's name and live progress
+ *  in place of a bare "thinking", so a long step (reviewing footage, generating speech) never looks idle. */
+export function WorkingOn({ part }: { part?: ToolPartLike }) {
+  const id = part ? toolIdOf(part) : '';
+  const def = id ? studioToolDefFor(id) : undefined;
+  const prog = useToolProgress(id);
+  if (!part || !def || toolStatus(part).kind !== 'running') return <ThinkingDots />;
+  return <ThinkingDots label={prog?.text ? `${t(def.label)} · ${prog.text}` : t(def.label)} />;
 }
 
 function ToolBadge({ def, part, children, quiet }: { def: StudioToolDef; part: ToolPartLike; children?: React.ReactNode; quiet?: boolean }) {

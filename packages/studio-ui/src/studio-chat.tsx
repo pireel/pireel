@@ -143,6 +143,8 @@ export interface StudioChatProps {
   getDocument?: () => import('@pireel/studio-engine/composition').EditorDocumentV2;
   /** This project's chosen brand snapshot. Null or undefined means no brand; no account fallback. */
   projectBrand?: PlaybookSnapshot | null;
+  /** The creator picks the project's brand in the chat; later edits follow it. */
+  onProjectBrand?: (brand: PlaybookSnapshot | null) => void;
   /** The Studio Skill the project is edited as (undefined: never set — the thread's own pick applies),
    *  and how a pick in the chat is written back to the project. */
   projectSkillId?: string;
@@ -210,6 +212,7 @@ export const StudioChat = memo(
       fineCutClips,
       projectEdited,
       projectBrand,
+      onProjectBrand,
       projectSkillId,
       projectAgentModel,
       onProjectSkill,
@@ -497,6 +500,7 @@ export const StudioChat = memo(
           fineCutClips={fineCutClips}
           projectEdited={projectEdited}
           projectBrand={projectBrand}
+          onProjectBrand={onProjectBrand}
           projectSkillId={projectSkillId}
           onProjectSkill={onProjectSkill}
           editingSkills={editingSkills}

@@ -1289,6 +1289,10 @@ export function transcriptTargets(document: EditorDocumentV2, input: Input): { a
   }
   if (!ids.size) {
     for (const clip of primaryNarrativeClips(document)) ids.add(clip.assetId);
+    // A voice-over on its own lane (narration over muted footage) is the video's speech too.
+    for (const track of document.timeline.tracks) if (track.role === 'narration' && !track.muted) {
+      for (const clip of track.clips) if ('assetId' in clip && clip.assetId) ids.add(clip.assetId);
+    }
     if (!ids.size) for (const [id, segments] of Object.entries(document.semantics.transcripts)) if (segments.length) ids.add(id);
   }
   return { assetIds: [...ids] };

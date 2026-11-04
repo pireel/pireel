@@ -253,7 +253,7 @@ export interface EditorSemanticState {
    *  brand never restyle the project. null = picked to edit without a brand; absent = never set. */
   brand?: PlaybookSnapshot | null;
   /** The Studio Skill (kind of video) this project is edited as; 'auto' = none; absent = never set.
-   *  A brand only goes with a Skill that takes brands (brand-playbook BRAND_SKILL_IDS). */
+   *  Any Skill edits with the project's brand. */
   skillId?: string;
   /** Initial Agent model chosen when this project was created; saved chats keep their own selection. */
   agentModel?: 'auto' | 'deepseek' | 'opus' | 'sonnet' | 'gpt-sol';

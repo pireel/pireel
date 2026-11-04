@@ -6,6 +6,7 @@ import { applyCaptionDocumentEdit } from '@pireel/studio-engine/caption-document
 import { audioClipDefaults } from '@pireel/studio-engine/audio-tracks';
 import { emptyEditorDocumentV2, parseEditorDocumentV2, projectV2ToLegacyComposition } from '@pireel/studio-engine/editor-document';
 import { resizeNarrativeTimelineClip, resizeVisualTimelineClip, runAgentTimelineTool, slipNarrativeTimelineClip } from '@pireel/studio-engine/agent-timeline';
+import { transcriptTargets } from '@pireel/studio-engine/agent-timeline-v3';
 import { directorPlanFromDocument, withDirectorPlanInSemantics } from '@pireel/studio-engine/director-plan-artifact';
 import { sceneDesignsFromDocument, withSceneDesignsInSemantics } from '@pireel/studio-engine/scene-design';
 
@@ -84,6 +85,16 @@ describe('shared agent timeline atoms', () => {
     if (!captions.ok) return;
     expect(captions.document.semantics.managedCaptionSource).toEqual({ mode: 'track', trackId: narration.id });
     expect(captions.document.timeline.tracks.find((track) => track.role === 'managedCaptions')!.clips.length).toBeGreaterThan(0);
+  });
+
+  it('keeps a synthesizer\'s measured sentence timing over the script spread, and reads the narration lane by default', () => {
+    const registered = runAgentTimelineTool(emptyEditorDocumentV2({ fps: 30 }), 'register_media', {
+      assets: [{ id: 'tts-2', kind: 'audio', url: 'https://cdn.example/tts2.mp3', durationSec: 4, transcriptText: '第一句。第二句。',
+        transcript: [{ start: 0.2, end: 1.1, text: '第一句。' }, { start: 1.6, end: 3.8, text: '第二句。' }] }],
+    });
+    expect(registered.document!.semantics.transcripts['tts-2']).toEqual([{ start: 0.2, end: 1.1, text: '第一句。' }, { start: 1.6, end: 3.8, text: '第二句。' }]);
+    const placed = runAgentTimelineTool(registered.document!, 'add_clips', { clips: [{ assetId: 'tts-2', role: 'narration', startFrame: 0 }] });
+    expect(transcriptTargets(placed.document!, {}).assetIds).toEqual(['tts-2']);
   });
 
   it('starts narration above source level and caps a new music bed below it', () => {

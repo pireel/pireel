@@ -1,6 +1,7 @@
 import type { EditorDocumentV2, HandoffItem } from '@pireel/studio-engine/editor-document/types';
 import { EDITING_SKILL_IDS, isEditingSkillId } from '@pireel/studio-engine/editing-skills';
-import { brandSkillOf, readPlaybookSnapshot, skillTakesBrand, type PlaybookSnapshot } from '@pireel/studio-engine/project-brand-metadata';
+import { brandSkillOf, readPlaybookSnapshot, type PlaybookSnapshot } from '@pireel/studio-engine/project-brand-metadata';
+import { STUDIO_AUTO_SKILL_ID } from '@pireel/studio-engine/scenario-skills/types';
 import { commandFailure, emptyCommandReceipt, type EditorCommandResult } from '@pireel/studio-engine/editor-document/commands/types';
 
 /** The creator's answer to one confirm-list item: confirmed as is, or changed with their words. */
@@ -32,7 +33,7 @@ export function setEditingSkills(document: EditorDocumentV2, ids: readonly strin
 
 /** The brand the project is edited with (a copy of it), or null to edit without one. Editing skills are
  *  left as they are: switching brand changes how later edits look, never what was switched on. A brand
- *  brings its Skill when the project is not on a Skill that takes brands. */
+ *  brings its Skill only to a project on no Skill yet (or Auto); any other Skill stays and takes the brand. */
 export function setProjectBrand(document: EditorDocumentV2, brand: PlaybookSnapshot | null): EditorCommandResult {
   let next: PlaybookSnapshot | null = null;
   if (brand !== null) {
@@ -40,16 +41,16 @@ export function setProjectBrand(document: EditorDocumentV2, brand: PlaybookSnaps
       return commandFailure(document, 'invalid-command', error instanceof Error ? error.message : 'Brand is invalid.', { path: 'brand' });
     }
   }
-  const skillId = next && !skillTakesBrand(document.semantics.skillId) ? brandSkillOf(next) : document.semantics.skillId;
+  const current = document.semantics.skillId;
+  const skillId = next && (current === undefined || current === STUDIO_AUTO_SKILL_ID) ? brandSkillOf(next) : current;
   if (document.semantics.brand !== undefined && JSON.stringify(document.semantics.brand) === JSON.stringify(next) && skillId === document.semantics.skillId) return { ok: true, document, receipt: emptyCommandReceipt('brand.set') };
   return { ok: true, document: { ...document, semantics: { ...document.semantics, brand: next, ...(skillId !== undefined ? { skillId } : {}) } }, receipt: emptyCommandReceipt('brand.set') };
 }
 
-/** The Studio Skill the project is edited as ('auto' for none). A Skill that takes no brand — the
- *  creator's own, or one that is not about talking heads — leaves the project without one. */
+/** The Studio Skill the project is edited as ('auto' for none). The project's brand stays: any Skill,
+ *  the creator's own included, edits with it. */
 export function setProjectSkill(document: EditorDocumentV2, skillId: string): EditorCommandResult {
   if (typeof skillId !== 'string' || !skillId.trim() || skillId.length > 120) return commandFailure(document, 'invalid-command', 'Skill id is required.', { path: 'skillId' });
-  const brand = skillTakesBrand(skillId) ? document.semantics.brand : document.semantics.brand === undefined ? undefined : null;
-  if (document.semantics.skillId === skillId && brand === document.semantics.brand) return { ok: true, document, receipt: emptyCommandReceipt('skill.set') };
-  return { ok: true, document: { ...document, semantics: { ...document.semantics, skillId, ...(brand !== undefined ? { brand } : {}) } }, receipt: emptyCommandReceipt('skill.set') };
+  if (document.semantics.skillId === skillId) return { ok: true, document, receipt: emptyCommandReceipt('skill.set') };
+  return { ok: true, document: { ...document, semantics: { ...document.semantics, skillId } }, receipt: emptyCommandReceipt('skill.set') };
 }

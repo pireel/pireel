@@ -138,6 +138,8 @@ export const COMPONENTS_ZH: Record<string, string> = {
   'ui.projectBrandSummary.denoise': '降噪',
   'ui.projectBrandSummary.graphics': '动态图形',
   'ui.projectBrandSummary.headlines': '花字',
+  'ui.projectBrandSummary.loading': '加载中…',
+  'ui.projectBrandSummary.manageBrands': '管理我的品牌',
   'ui.projectBrandSummary.noBrand': '未使用品牌',
   'ui.projectBrandSummary.projectBrand': '项目品牌',
   'ui.projectBrandSummary.projectBrandNamed': '项目品牌：{name}',

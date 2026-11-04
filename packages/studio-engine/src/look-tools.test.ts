@@ -27,7 +27,7 @@ describe('video-level template tools', () => {
   it('set_look refuses a list field no tool call can fill, naming the fields a row can carry', () => {
     const rows = '{"rows":{"type":"array","items":{"type":"object","properties":{"label":{"type":"string"},"unit":{"type":"string"}}}}}';
     const refused = setLook(withSpeech(), [{ id: 'price-card', label: 'Price', source: card, propsSchema: rows }]);
-    expect(refused).toMatchObject({ ok: false, error: 'invalid_value', data: { path: 'look.pieces[0].propsSchema.rows.items.properties.unit', fix: expect.stringContaining('text, note, label, value, trend') } });
+    expect(refused).toMatchObject({ ok: false, error: 'invalid_value', data: { path: 'look.pieces[0].propsSchema.rows.items.properties.unit', fix: expect.stringContaining('text, note, label, value, trend, emphasis') } });
     expect(setLook(withSpeech(), [{ id: 'price-card', label: 'Price', source: card, propsSchema: rows.replace('"unit"', '"note"') }]).ok).toBe(true);
   });
   it('set_look stores the look (pieces as a list, schema as JSON text) and refuses one that breaks the runtime', () => {

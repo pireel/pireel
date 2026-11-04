@@ -3,7 +3,8 @@ export const COMPONENT_PROPERTY_MAX_ROWS = 32;
 export const COMPONENT_PROPERTY_MAX_FIELDS = 16;
 export const COMPONENT_PROPERTY_MAX_TEXT = 4000;
 /** The fields an agent's tool call can give a list row: its contract has no free-form maps. */
-export const COMPONENT_ROW_FIELDS = ['text', 'note', 'label', 'value', 'trend'] as const;
+/** emphasis: a boolean that marks one row (a key word in a line of words) for the piece to stress. */
+export const COMPONENT_ROW_FIELDS = ['text', 'note', 'label', 'value', 'trend', 'emphasis'] as const;
 export const isComponentPropertyScalar = (value: unknown): boolean =>
   typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))
   || (typeof value === 'string' && value.length <= COMPONENT_PROPERTY_MAX_TEXT);

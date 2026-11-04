@@ -12,11 +12,11 @@ import { resolveEditingRunConfig } from '@pireel/studio-engine/editing-run-confi
 import { detectSkillSettings, measureSkillStyle } from '@pireel/studio-engine/skill-format';
 import { EditingTaskCard } from '@pireel/studio-ui/editing-task-card';
 import { displayEditingTask, hasCurrentDirectorPreview, isInteractiveEditingTool, messagesForTask, unresolvedTaskFailure } from '@pireel/studio-ui/editing-task-progress';
-import { coverStillToRun, needsDirectorPlan, needsEditingReview, reviewEditingTask } from '@pireel/studio-ui/editing-task-review';
+import { composeReviewPending, coverStillToRun, needsDirectorPlan, needsEditingReview, reviewEditingTask, taskTakesReview } from '@pireel/studio-ui/editing-task-review';
 import { toolInputObject } from '@pireel/studio-ui/tool-input';
 import { ROUGH_CUT_TOOL, messageTurnCredits, toolNameOfPart, type RoughCutReplyMeta } from '@pireel/studio-ui/first-pass-card';
 import { NextSteps, splitNextSteps } from '@pireel/studio-ui/chat-next-steps';
-import { FINE_CUT_SKILLS, firstPassStartupHint, type FineCutSkill } from '@pireel/studio-ui/first-pass';
+import { documentIsEdited, FINE_CUT_SKILLS, firstPassStartupHint, type FineCutSkill } from '@pireel/studio-ui/first-pass';
 import { latestTask, taskOf, patchTask, resumeTaskHint, resumeEditingTask, unfinishedRoughCut, withTaskUsage, type ChatTask } from "@pireel/studio-ui/chat-task";
 import { cachedChatThread } from "@pireel/studio-ui/chat-thread-cache";
 import { recordTaskUsage, subscribeTaskUsage } from "@pireel/studio-ui/chat-task-usage";
@@ -34,7 +34,6 @@ import {
 } from "react";
 import { ChevronRight, Info, X } from "lucide-react";
 import { ConfirmDialog } from "@pireel/ui/confirm-dialog";
-import { brandSkillOf, skillTakesBrand } from "@pireel/studio-engine/project-brand-metadata";
 import { describeGenerationIntentLine } from "@pireel/studio-ui/chat-generation-intent";
 import { useChat } from "@ai-sdk/react";
 import {
@@ -76,6 +75,7 @@ import {
   renderToolPart,
   renderToolPartGroup,
   toolStatus,
+  WorkingOn,
   type ToolPartLike,
 } from "@pireel/studio-ui/chat-tool-parts";
 import { Composer, type ComposerHandle } from "@pireel/studio-ui/chat-composer";
@@ -114,6 +114,8 @@ import type { LocalAssetIndexEntry } from "@pireel/studio-engine/project-dto";
 const USER_BUBBLE_CLASS = "group-[.is-user]:bg-secondary/35";
 /** Refusals of one tool in a turn after which it is not run again in that turn. */
 const STUDIO_TOOL_FAILURES_PER_TURN = 5;
+/** A request that builds the whole video from scratch ends with the same review as a whole-video edit. */
+const COMPOSE_TASK_HINT = 'This request builds the whole video from the project media. When the cut is complete, inspect_timeline meaningful frames of the result, fix what looks wrong, then call finish_edit with each of graphics, b-roll, sound, zoom and transitions you evaluated.';
 
 export function ChatThread({
   projectId,
@@ -140,6 +142,7 @@ export function ChatThread({
   fineCutClips,
   projectEdited,
   projectBrand,
+  onProjectBrand,
   projectSkillId,
   onProjectSkill,
   editingSkills,
@@ -179,6 +182,7 @@ export function ChatThread({
   getDocument?: StudioChatProps["getDocument"];
   startPrompt?: StudioChatProps["startPrompt"];
   projectBrand?: StudioChatProps["projectBrand"];
+  onProjectBrand?: StudioChatProps["onProjectBrand"];
   projectSkillId?: StudioChatProps["projectSkillId"];
   onProjectSkill?: StudioChatProps["onProjectSkill"];
   onStartPromptSent?: StudioChatProps["onStartPromptSent"];
@@ -400,8 +404,15 @@ export function ChatThread({
       if (planBlock) { publishSuccess({ ok: false, error: planBlock }); return; }
       if (id === 'finish_edit') {
         if (!task || !fineCutClips) { publishError('No active editing task or timeline evidence.'); return; }
-        if (task.directorPlanRequired && !hasCurrentDirectorPreview(messagesForTask(effectiveStudioTurnMessages(messagesRef.current, ledger), task.id))) {
-          publishSuccess({ ok: false, error: 'Inspect meaningful rendered timeline frames after the final edit, then assess the result against the saved director plan before finishing.' }); return;
+        // A request has no whole-video checklist: the call is harmless, not a failure that leaves the task unfinished.
+        if (!taskTakesReview(task)) {
+          publishSuccess({ ok: true, skipped: true, summary: 'Nothing to review', data: { skipped: true, reason: 'request-task', next: 'A request needs no final review: report the result to the user.' } });
+          return;
+        }
+        if ((task.directorPlanRequired || task.compose) && !hasCurrentDirectorPreview(messagesForTask(effectiveStudioTurnMessages(messagesRef.current, ledger), task.id))) {
+          publishSuccess({ ok: false, error: task.directorPlanRequired
+            ? 'Inspect meaningful rendered timeline frames after the final edit, then assess the result against the saved director plan before finishing.'
+            : 'Inspect meaningful rendered timeline frames (inspect_timeline) after the final edit, fix what looks wrong, then finish.' }); return;
         }
         // The enabled cover is the harness's step, not something the model must remember.
         if (coverStillToRun(task, getDocument?.(), requestedInput)) {
@@ -759,17 +770,23 @@ export function ChatThread({
       setTaskResumeError(false);
       const config = continuing?.config ?? resolveEditingRunConfig({ brand: projectBrandRef.current, skills: continuing?.mode === 'one-click' ? continuing.skills : editingSkillsRef.current });
       const source = localAssetIndex?.find(asset => asset.kind === 'video' || !asset.kind);
+      // A request on an empty story track with media to hand is how a video gets built from scratch here.
+      const startDocument = getDocumentRef.current?.();
+      const compose = !continuing && !options.startTool && !options.wholeWhiteboard && !!startDocument
+        && !startDocument.timeline.tracks.find((track) => track.id === startDocument.semantics.primaryNarrativeTrackId)?.clips.length
+        && (Object.keys(startDocument.assets).length > 0 || !!localAssetIndex?.length);
       const task: ChatTask = continuing ? { ...resumeEditingTask(continuing), config, skillId: continuing.skillId ?? skillRef.current, review: undefined, agentModel: agentModelRef.current, reviewRequired: continuing.reviewRequired || continuing.mode === 'one-click', state: 'running' } : {
         id: mid('task'), ...(outputId ? { outputId } : {}), goal: draftParts.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n'),
         skills: options.startTool ? config.skills : [],
         config, skillId: skillRef.current, agentModel: agentModelRef.current, reviewRequired: !!options.startTool || !!options.wholeWhiteboard,
         directorPlanRequired: needsDirectorPlan({ skills: config.skills, config }, { oneClick: !!options.startTool, wholeWhiteboard: !!options.wholeWhiteboard }),
         ...((options.startTool || options.wholeWhiteboard) && source ? { source: { name: source.label, ...(source.durationSec != null ? { durationSec: source.durationSec } : {}), ...(source.posterKey ? { posterKey: source.posterKey } : {}) } } : {}),
-        mode: options.startTool ? 'one-click' : 'request', state: 'running',
+        mode: options.startTool ? 'one-click' : 'request', ...(compose ? { compose: true } : {}), state: 'running',
       };
       const startTool = continuing?.mode === 'one-click' && (!continuing.roughCut || unfinishedRoughCut(continuing)) ? ROUGH_CUT_TOOL : options.startTool;
       const mentionHint = [
         continuing ? resumeTaskHint(task) : options.hint ?? "",
+        compose ? COMPOSE_TASK_HINT : "",
         mentionedIds.length ? `Referenced elements in this message (use these ids directly): ${JSON.stringify(mentionedIds)}` : "",
         localAssetContext,
         continuing ? editingSkillsHint(task.skills, V3_CHAT_TOOL_IDS) : projectEditedRef.current ? "" : editingSkillsHint(editingSkillsRef.current, V3_CHAT_TOOL_IDS),
@@ -830,7 +847,8 @@ export function ChatThread({
     if (lastAssistantMessageIsCompleteWithToolCalls({ messages: messagesRef.current })) return;
     if (last.parts.some(part => ['input-streaming', 'input-available'].includes((part as { state?: string }).state ?? ''))) return;
     const fine = fineCutFor(last, task, false);
-    const state = unfinishedRoughCut(task) || task.reviewRequired && needsEditingReview(task) && !task.review?.completed || unresolvedTaskFailure(messagesForTask(messagesRef.current, task.id)) || !assistantTurnEndedWithAnswer(last) ? 'partial' : 'done';
+    const built = !!getDocumentRef.current && documentIsEdited(getDocumentRef.current()!);
+    const state = unfinishedRoughCut(task) || task.reviewRequired && needsEditingReview(task) && !task.review?.completed || composeReviewPending(task, built) || unresolvedTaskFailure(messagesForTask(messagesRef.current, task.id)) || !assistantTurnEndedWithAnswer(last) ? 'partial' : 'done';
     updateTask(task.id, current => ({ ...current, state, ...(fine ? { fineCut: fine } : {}) }));
   }, [busy, status, messages]);
 
@@ -951,18 +969,16 @@ export function ChatThread({
       : scenarioSkills.find((skill) => skill.id === nextSkillId)?.defaultPrompt ?? null;
     composerRef.current?.applySkillPrompt(defaultPrompt);
   }, [applySkill, scenarioSkills]);
-  // A Skill picked in the composer: switching away from the project's Skill, or onto one that would drop
-  // the project's brand, asks first.
+  // A Skill picked in the composer: switching away from the project's Skill asks first.
   const [pendingSkill, setPendingSkill] = useState<StudioScenarioSkillId | null>(null);
   const pickSkill = useCallback((nextSkillId: StudioScenarioSkillId) => {
     const leavesSkill = !!projectSkillId && projectSkillId !== STUDIO_AUTO_SKILL_ID;
-    const dropsBrand = !!projectBrand && !skillTakesBrand(nextSkillId);
-    if (onProjectSkillRef.current && nextSkillId !== skillRef.current && (leavesSkill || dropsBrand)) {
+    if (onProjectSkillRef.current && nextSkillId !== skillRef.current && leavesSkill) {
       setPendingSkill(nextSkillId);
       return;
     }
     switchSkill(nextSkillId);
-  }, [projectSkillId, projectBrand, switchSkill]);
+  }, [projectSkillId, switchSkill]);
 
   // Expose "one-tap film" progress + selected pill to the workbench.
   useImperativeHandle(
@@ -1375,7 +1391,7 @@ export function ChatThread({
                               });
                         return null;
                       })}
-                      {!wholeVideo && (thinking || busy && isLast && !lastTextLive && !isInteractiveEditingTool(toolNameOfPart(lastPart ?? { type: '' }), false)) && <ThinkingDots />}
+                      {!wholeVideo && (thinking || busy && isLast && !lastTextLive && !isInteractiveEditingTool(toolNameOfPart(lastPart ?? { type: '' }), false)) && <WorkingOn part={thinking || !isLast ? undefined : lastPart} />}
                       {!wholeVideo && emptyCompletedAssistant && !['paused', 'partial'].includes(messageTask?.state ?? '') && (
                         <div className="border-line bg-panel-2 flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[12px]">
                           <X size={12} className="shrink-0 text-destructive" />
@@ -1484,10 +1500,8 @@ export function ChatThread({
         <ConfirmDialog
           open={pendingSkill !== null}
           title={t("chatGen.skill.confirmTitle")}
-          description={pendingSkill === null ? undefined : [
-            t("chatGen.skill.confirmBody", { name: pendingSkill === STUDIO_AUTO_SKILL_ID ? t("chatGen.skill.auto.title") : scenarioSkills.find((skill) => skill.id === pendingSkill)?.title ?? pendingSkill }),
-            projectBrand && !skillTakesBrand(pendingSkill) ? t("chatGen.skill.confirmDropsBrand", { brand: projectBrand.name }) : "",
-          ].filter(Boolean).join(" ")}
+          description={pendingSkill === null ? undefined
+            : t("chatGen.skill.confirmBody", { name: pendingSkill === STUDIO_AUTO_SKILL_ID ? t("chatGen.skill.auto.title") : scenarioSkills.find((skill) => skill.id === pendingSkill)?.title ?? pendingSkill })}
           confirmLabel={t("chatGen.brand.switch")}
           cancelLabel={t("panels.cancel")}
           onCancel={() => setPendingSkill(null)}
@@ -1512,6 +1526,7 @@ export function ChatThread({
           onDeleteScenarioSkill={onDeleteScenarioSkill}
           onPickSkill={pickSkill}
           projectBrand={projectBrand}
+          onProjectBrand={onProjectBrand}
           timelineFramePickActive={timelineFramePickActive}
           timelineFramePickBusy={timelineFramePickBusy}
           timelineFramePickAvailable={timelineFramePickAvailable}

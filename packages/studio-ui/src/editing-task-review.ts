@@ -25,7 +25,7 @@ export function needsDirectorPlan(task: Pick<ChatTask, 'skills' | 'config'>, sta
   return start.wholeWhiteboard || (start.oneClick && requestedEditFeatures(task as ChatTask).length > 0);
 }
 export function needsEditingReview(task: ChatTask): boolean {
-  return (task.mode === 'one-click' || isWhiteboardDirectorTask(task)) && (!!task.directorPlanRequired || !!task.config?.brand || requestedEditFeatures(task).length > 0 || needsBrandCover(task));
+  return taskTakesReview(task) && (!!task.directorPlanRequired || !!task.config?.brand || requestedEditFeatures(task).length > 0 || needsBrandCover(task));
 }
 
 export type EditingTaskReviewOutcome = { ok: true; review: EditingTaskReview } | { ok: false; error: string; problems: string[]; missing?: string[] };
@@ -36,14 +36,26 @@ function refused(problems: string[], missing: string[] = []): EditingTaskReviewO
   return { ok: false, error, problems, ...(missing.length ? { missing } : {}) };
 }
 
+/** Only a whole-video edit (or a whiteboard director task) has a checklist for finish_edit to review. */
+export function taskTakesReview(task: ChatTask): boolean {
+  return task.mode === 'one-click' || isWhiteboardDirectorTask(task) || !!task.compose;
+}
+
+/** A built-from-scratch request is unfinished until its review passed, once it put anything on the timeline. */
+export function composeReviewPending(task: ChatTask, built: boolean): boolean {
+  return !!task.compose && built && !task.review?.completed;
+}
+
 /** Validate completion against actual timeline evidence, not the model's claim that it added a feature.
  *  Every problem is reported at once: one at a time burns the retry budget on the next one. */
 export function reviewEditingTask(task: ChatTask, input: Record<string, unknown>, evidence: EditingEvidence, document?: EditorDocumentV2): EditingTaskReviewOutcome {
-  if (task.mode !== 'one-click' && !isWhiteboardDirectorTask(task)) return refused(['finish_edit is for a whole-video editing task.']);
+  if (!taskTakesReview(task)) return refused(['finish_edit is for a whole-video editing task.']);
   const problems: string[] = [];
   const missing: string[] = [];
   if (evidence.emptyMusicTracks?.length) problems.push(`Remove unused empty music tracks before finishing: ${evidence.emptyMusicTracks.join(', ')}. Create music lanes with actual placed audio, not pending suggestions.`);
-  if (!isWhiteboardDirectorTask(task) && (!task.roughCut || task.roughCut.report.steps.some(step => ['pending', 'running', 'failed'].includes(step.status)))) problems.push('Complete the unfinished rough-cut steps first; preserve completed checkpoints.');
+  if (!isWhiteboardDirectorTask(task) && !task.compose && (!task.roughCut || task.roughCut.report.steps.some(step => ['pending', 'running', 'failed'].includes(step.status)))) problems.push('Complete the unfinished rough-cut steps first; preserve completed checkpoints.');
+  // Captions switched on for the project are part of a video built from scratch.
+  if (task.compose && document && task.config?.skills.includes('captions') && !documentHasCaptions(document)) problems.push('Captions are switched on for this project but the video has none: lay them with set_captions (from the narration, or its script) before finishing.');
   if (isWhiteboardDirectorTask(task) && document) {
     const composition = projectDocumentToComposition(document);
     const primary = document.timeline.tracks.find(track => track.id === document.semantics.primaryNarrativeTrackId);
@@ -78,7 +90,10 @@ export function reviewEditingTask(task: ChatTask, input: Record<string, unknown>
     missing.push(...unaccounted);
   }
   const items: EditingTaskReview['items'] = [];
-  const reviewed = (raw.some(item => item?.feature === 'transitions') ? [...wanted, 'transitions' as const] : wanted).filter(feature => !unaccounted.includes(feature));
+  // A built-from-scratch request switched nothing on: every feature it reports is checked the same way.
+  const reviewed = task.compose
+    ? EDIT_REVIEW_FEATURES.filter(feature => raw.some(item => item?.feature === feature))
+    : (raw.some(item => item?.feature === 'transitions') ? [...wanted, 'transitions' as const] : wanted).filter(feature => !unaccounted.includes(feature));
   for (const feature of reviewed) {
     const row = raw.find(item => item?.feature === feature)!;
     const reason = typeof row.reason === 'string' ? row.reason.trim() : '';
@@ -99,6 +114,11 @@ export function reviewEditingTask(task: ChatTask, input: Record<string, unknown>
   if (task.config?.brand && brandApplication.length < 12) problems.push('Explain the concrete visual choices applied from the selected brand, not just its name.');
   if (problems.length || !coverResult.ok || (director && !director.ok)) return refused(problems, missing);
   return { ok: true, review: { completed: items.every(item => item.status !== 'blocked') && (director?.completed ?? true) && coverResult.cover?.status !== 'blocked', items, ...(coverResult.cover ? { cover: coverResult.cover } : {}), ...(director ? { director: { revision: task.directorPlan!.revision, summary: director.summary, beats: director.beats } } : {}), ...(brandApplication ? { brandApplication } : {}) } };
+}
+
+function documentHasCaptions(document: EditorDocumentV2): boolean {
+  const id = document.semantics.managedCaptionTrackId;
+  return !!id && !!document.timeline.tracks.find(track => track.id === id)?.clips.length;
 }
 
 const SOURCING_GAP = /没有.{0,8}素材|无.{0,4}素材|no (?:available |supporting |usable )?(?:media|assets|footage)/i;

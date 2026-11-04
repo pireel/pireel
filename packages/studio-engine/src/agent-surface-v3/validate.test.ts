@@ -6,7 +6,7 @@ describe('validateV3Input', () => {
   it('names the stray field inside a list prop instead of saying the value fits nothing', () => {
     const rows = [{ label: 'VIP', value: '1999', unit: 'CNY' }];
     expect(validateV3Input('place_graphics', { items: [{ pieceId: 'price', startFrame: 0, durationFrames: 30, props: [{ key: 'rows', value: rows }] }] })).toMatchObject({
-      error: 'unknown_field', path: 'items[0].props[0].value[0].unit', allowed: ['text', 'note', 'label', 'value', 'trend'],
+      error: 'unknown_field', path: 'items[0].props[0].value[0].unit', allowed: ['text', 'note', 'label', 'value', 'trend', 'emphasis'],
     });
     expect(validateV3Input('place_graphics', { items: [{ pieceId: 'price', startFrame: 0, durationFrames: 30, props: [{ key: 'title', value: { text: 'x' } }] }] })).toMatchObject({
       error: 'invalid_value', fix: expect.stringContaining(' or an array of objects'),

@@ -2832,21 +2832,34 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const speechInput = { ...speechArgs, text, voiceId, ...(instruction ? { instruction } : {}) };
             const speechResult = (asset: CachedTtsAsset, reused: boolean) => {
               if (asset.key) registerGeneratedEntry(generatedAssetIndexEntry({ jobId: asset.id, index: 0, kind: 'audio', key: asset.key, mime: asset.mime, prompt: text, createdAt: Date.now(), durationSec: asset.durationSec }, t('panels.music')));
-              return speechReceipt(asset, reused);
+              // The narration is registered here with its exact script and the synthesizer's sentence
+              // timing, so placing it is one add_clips and captions read it without a transcription —
+              // nothing depends on the model copying the receipt's fields into register_media.
+              const registered = commit({ op: 'agent.timeline', input: { tool: 'register_media', input: { assets: [{
+                id: asset.id, kind: 'audio', url: asset.url, ...(asset.key ? { cloudKey: asset.key } : {}), ...(asset.label ? { label: asset.label } : {}),
+                durationSec: asset.durationSec, transcriptText: asset.transcriptText, ...(asset.transcript?.length ? { transcript: asset.transcript } : {}),
+              }] } } }, { undo: 'none' });
+              return speechReceipt(asset, reused, registered.ok);
             };
-            const speechReceipt = (asset: CachedTtsAsset, reused: boolean) => ({
-              ok: true as const,
-              summary: t(reused ? 'workbench.speechReused' : 'workbench.speechGenerated'),
-              data: {
-                asset: { id: asset.id, kind: asset.kind, url: asset.url, mime: asset.mime, transcriptText: asset.transcriptText, durationSec: asset.durationSec, estimatedDurationSec: asset.estimatedDurationSec, ...(asset.label ? { label: asset.label } : {}) },
-                model: asset.model,
-                voiceId: asset.voiceId,
-                voiceLabel: asset.voiceLabel,
-                charCount: asset.charCount,
-                estimatedDurationSec: asset.estimatedDurationSec,
-                next: `asset.durationSec is the measured synthesized-audio duration and is authoritative; estimatedDurationSec was only the pre-generation estimate. For timeline narration, pass the returned asset fields unchanged to register_media, then call add_clips with role=narration.${asset.durationSec > 15 ? ' For lip_sync, split the performance into deliberate <=15s sections.' : ` For lip_sync, use durationSec approximately ${Math.max(4, Math.min(15, Math.ceil(asset.durationSec)))}.`}`,
-              },
-            });
+            const speechReceipt = (asset: CachedTtsAsset, reused: boolean, registered: boolean) => {
+              const lipSync = asset.durationSec > 15 ? ' For lip_sync, split the performance into deliberate <=15s sections.' : ` For lip_sync, use durationSec approximately ${Math.max(4, Math.min(15, Math.ceil(asset.durationSec)))}.`;
+              return {
+                ok: true as const,
+                summary: t(reused ? 'workbench.speechReused' : 'workbench.speechGenerated'),
+                data: {
+                  asset: { id: asset.id, kind: asset.kind, url: asset.url, mime: asset.mime, ...(registered ? {} : { transcriptText: asset.transcriptText }), durationSec: asset.durationSec, estimatedDurationSec: asset.estimatedDurationSec, ...(asset.label ? { label: asset.label } : {}) },
+                  ...(registered ? { registered: true, transcript: asset.transcript?.length ? 'measured sentence timing' : 'script spread over the duration' } : {}),
+                  model: asset.model,
+                  voiceId: asset.voiceId,
+                  voiceLabel: asset.voiceLabel,
+                  charCount: asset.charCount,
+                  estimatedDurationSec: asset.estimatedDurationSec,
+                  next: registered
+                    ? `Already registered in this project as asset ${asset.id} with its exact script and transcript: place it with add_clips {assetId:"${asset.id}", role:"narration"} — do not register_media it again, and captions need no get_transcript. asset.durationSec is the measured duration.${lipSync}`
+                    : `asset.durationSec is the measured synthesized-audio duration and is authoritative; estimatedDurationSec was only the pre-generation estimate. For timeline narration, pass the returned asset fields unchanged to register_media, then call add_clips with role=narration.${lipSync}`,
+                },
+              };
+            };
             try {
               // Same script + same voice/delivery = same audio: reuse the already-uploaded result
               // instead of paying the provider once per debugging rerun. A HEAD probe guards
@@ -2868,7 +2881,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 ...(signal ? { signal } : {}),
               });
               const body = (await res.json().catch(() => ({}))) as {
-                asset?: { id: string; kind: 'audio'; key: string; url: string; mime: string; label?: string | null; model: string; voiceId: string; voiceLabel: string; transcriptText: string; charCount: number; durationSec: number; estimatedDurationSec: number };
+                asset?: { id: string; kind: 'audio'; key: string; url: string; mime: string; label?: string | null; model: string; voiceId: string; voiceLabel: string; transcriptText: string; charCount: number; durationSec: number; estimatedDurationSec: number; transcript?: Array<{ start: number; end: number; text: string }> };
                 error?: string;
                 detail?: string;
               };
@@ -4151,9 +4164,12 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           // The project library lives in the device index until a save merges it into the document;
           // the agent must see unplaced footage here or it goes hunting through cloud scopes.
           const knownSigs = new Set(Object.values(before.assets).map((asset) => asset.locator.localSig).filter(Boolean));
+          // A generated file the project already registered (narration from generate_speech) is the
+          // same media: listing its library entry too hands the agent a second id for it.
+          const knownKeys = new Set(Object.values(before.assets).map((asset) => asset.locator.cloudKey).filter(Boolean));
           for (const entry of ctx.localAssetIndexRef?.current ?? []) {
             const id = entry.assetId;
-            if (!id || before.assets[id] || knownSigs.has(entry.contentSig)) continue;
+            if (!id || before.assets[id] || knownSigs.has(entry.contentSig) || (entry.cloudKey && knownKeys.has(entry.cloudKey))) continue;
             state.assets.push({ id, kind: entry.kind ?? 'video', ...(entry.label ? { label: entry.label } : {}), library: true });
           }
           const outputs = ctx.listProjectOutputs?.();

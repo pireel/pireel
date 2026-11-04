@@ -277,7 +277,6 @@ export const CHATGEN_ZH: Record<string, string> = {
   'chatGen.brand.switch': '切换',
   'chatGen.skill.confirmTitle': '切换这个项目的 Skill？',
   'chatGen.skill.confirmBody': '后续剪辑按「{name}」进行；已经剪好的部分不会自动改。',
-  'chatGen.skill.confirmDropsBrand': '这个 Skill 不使用品牌，项目的品牌「{brand}」会取消。',
   'chatGen.resumeOriginalOutput': '请先切回这次任务原来的成片，再继续剪辑。',
   'chatGen.checkpointFailed': '本机进度保存失败，请保持页面打开，等待云端同步。',
   'chatGen.firstPass.sourceChanged': '当前主视频已更换，请回到原视频后继续这次任务。',

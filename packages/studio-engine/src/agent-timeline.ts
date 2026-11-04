@@ -233,7 +233,8 @@ export function importAssets(document: EditorDocumentV2, input: Input): AgentTim
       const value = segment as Partial<TranscriptSegment>;
       return Number.isFinite(value.start) && Number.isFinite(value.end) && typeof value.text === 'string' && value.end! > value.start!;
     }) : [];
-    const generated = exactText ? transcriptFromExactText(exactText, metadata.durationSec ?? 1) : supplied;
+    // Measured sentence timing (a synthesizer's own) wins; an exact script alone is spread over the duration.
+    const generated = supplied.length ? supplied : exactText ? transcriptFromExactText(exactText, metadata.durationSec ?? 1) : [];
     if (generated.length) transcripts = { ...transcripts, [requestedId]: generated };
     imported.push(requestedId);
   }

@@ -18,7 +18,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { groupOf, kitComponents, kitSurfaceSwatches, type PropertyGroup } from '@pireel/studio-engine/kit-templates';
 import type { Block } from '@pireel/studio-engine/composition';
-import { GripVertical, Plus, X } from 'lucide-react';
+import { GripVertical, Highlighter, Plus, X } from 'lucide-react';
 import { t } from './i18n';
 import { ACCENT_SWATCHES, ColorControl, INK_SWATCHES, OPTION_OFF, OPTION_ON, PROP_INPUT, PropRow, PropSlider } from './prop-controls';
 
@@ -193,9 +193,11 @@ function RowList({
   const props = Object.entries(field.items?.properties ?? {});
   const inputs = props.filter(([, rf]) => (rf.type === 'string' || rf.type === 'number') && !Array.isArray(rf.enum));
   const toggles = props.filter(([, rf]) => Array.isArray(rf.enum) && rf.enum.length <= 4);
+  const flags = props.filter(([, rf]) => rf.type === 'boolean');
   const blankRow = () => Object.fromEntries([
     ...inputs.map(([rk, rf]) => [rk, rf.type === 'number' ? (rf.minimum ?? 0) : '']),
     ...toggles.map(([rk, rf]) => [rk, rf.default ?? rf.enum![0]]),
+    ...flags.map(([rk, rf]) => [rk, rf.default === true]),
   ]);
   const canAdd = field.maxItems === undefined || rows.length < field.maxItems;
   const setRow = (index: number, patch: Record<string, unknown>) => onChange(rows.map((r, i) => (i === index ? { ...r, ...patch } : r)));
@@ -260,6 +262,16 @@ function RowList({
                   className={`hover:bg-panel-2/70 flex h-8 w-7 shrink-0 items-center justify-center rounded-md transition-colors ${current === 'none' ? 'text-ink-4' : 'text-ink'}`}
                 >
                   {GLYPH_FIELDS.has(rk) ? <OptionGlyph field={rk} opt={current} /> : <span className="text-[10.5px]">{word}</span>}
+                </button>
+              );
+            })}
+            {flags.map(([rk, rf]) => {
+              const on = row[rk] === true;
+              const name = rf.title ?? labelOf(rk);
+              return (
+                <button key={rk} type="button" aria-pressed={on} aria-label={name} title={name} onClick={() => setRow(index, { [rk]: !on })}
+                  className={`hover:bg-panel-2/70 flex h-8 w-7 shrink-0 items-center justify-center rounded-md transition-colors ${on ? 'text-accent' : 'text-ink-4'}`}>
+                  <Highlighter size={13} />
                 </button>
               );
             })}

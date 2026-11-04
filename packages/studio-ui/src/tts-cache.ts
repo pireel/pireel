@@ -46,6 +46,8 @@ export interface CachedTtsAsset {
   charCount: number;
   durationSec: number;
   estimatedDurationSec: number;
+  /** Sentence timing the synthesizer measured (seconds on the audio's clock). */
+  transcript?: Array<{ start: number; end: number; text: string }>;
 }
 
 /** Canonical, order-insensitive key over every acoustic-relevant request field. */

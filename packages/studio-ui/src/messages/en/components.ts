@@ -138,6 +138,8 @@ export const COMPONENTS_EN: Record<string, string> = {
   'ui.projectBrandSummary.denoise': 'Denoise',
   'ui.projectBrandSummary.graphics': 'Graphics',
   'ui.projectBrandSummary.headlines': 'Headlines',
+  'ui.projectBrandSummary.loading': 'Loading…',
+  'ui.projectBrandSummary.manageBrands': 'Manage my brands',
   'ui.projectBrandSummary.noBrand': 'No brand',
   'ui.projectBrandSummary.projectBrand': 'Project brand',
   'ui.projectBrandSummary.projectBrandNamed': 'Project brand: {name}',

@@ -1,7 +1,44 @@
+import { useState } from 'react';
 import { Popover } from 'radix-ui';
-import { ChevronDown, Palette } from 'lucide-react';
-import { brandPreferences, type PlaybookSnapshot } from '@pireel/studio-engine/project-brand-metadata';
+import { Check, ChevronDown, Palette, Plus } from 'lucide-react';
+import { brandPreferences, type BrandPlaybook, type PlaybookSnapshot } from '@pireel/studio-engine/project-brand-metadata';
+import { studioProviders } from '@pireel/studio-engine/providers';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@pireel/ui/dropdown-menu';
 import { t } from './i18n';
+
+/** The project's brand: the creator picks one of their brands or none, and later edits follow it. The
+ *  list loads each time the menu opens, so a brand made in another tab shows up. */
+export function ProjectBrandPicker({ brand, disabled, onChange }: {
+  brand: PlaybookSnapshot | null | undefined;
+  disabled?: boolean;
+  onChange: (brand: PlaybookSnapshot | null) => void;
+}) {
+  const provider = studioProviders().brands;
+  const [options, setOptions] = useState<BrandPlaybook[] | null>(null);
+  if (!provider) return <ProjectBrandSummary brand={brand} />;
+  const load = () => { void provider.list().then((list) => setOptions(list), () => setOptions([])); };
+  return <DropdownMenu onOpenChange={(open) => { if (open) load(); }}>
+    <DropdownMenuTrigger asChild disabled={disabled}>
+      <button type="button" aria-label={t('ui.projectBrandSummary.projectBrand')} className="text-ink-2 hover:bg-panel-2 flex max-w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] disabled:pointer-events-none disabled:opacity-40">
+        <Palette size={13} className="shrink-0" /><span className="truncate">{brand ? brand.name : t('ui.projectBrandSummary.noBrand')}</span><ChevronDown size={12} className="shrink-0" />
+      </button>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent side="top" align="start" sideOffset={6} className="studio-scope z-[100] min-w-52 max-w-[calc(100vw-2rem)]">
+      {options === null
+        ? <DropdownMenuItem disabled>{t('ui.projectBrandSummary.loading')}</DropdownMenuItem>
+        : options.map((option) => <DropdownMenuItem key={option.id} onSelect={() => { if (option.id !== brand?.id || option.version !== brand.version) onChange(option); }}>
+          <span className="min-w-0 flex-1 truncate">{option.name}</span>{brand?.id === option.id && <Check size={14} />}
+        </DropdownMenuItem>)}
+      <DropdownMenuItem onSelect={() => { if (brand) onChange(null); }}>
+        <span className="flex-1">{t('ui.projectBrandSummary.noBrand')}</span>{!brand && <Check size={14} />}
+      </DropdownMenuItem>
+      {provider.manage && <>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => provider.manage!()}><Plus size={14} />{t('ui.projectBrandSummary.manageBrands')}</DropdownMenuItem>
+      </>}
+    </DropdownMenuContent>
+  </DropdownMenu>;
+}
 
 export function ProjectBrandSummary({ brand }: { brand: PlaybookSnapshot | null | undefined }) {
   if (!brand) return <span className="text-ink-4 px-1 text-[11px]">{t('ui.projectBrandSummary.noBrand')}</span>;
