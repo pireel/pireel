@@ -161,7 +161,7 @@ export function clearCaptionTranslations(segs: AsrSegment[]): AsrSegment[] {
  *  per-cue subs are dropped (translations are regenerable; ranges no longer line up after merging). */
 export function desegmentCues(segs: AsrSegment[]): AsrSegment[] {
   if (!segs.some((s) => s.cue)) return segs;
-  const SENT_END = /[。.!?!?…]\s*$/;
+  const SENT_END = /[。.!！?？…]\s*$/;
   const out: AsrSegment[] = [];
   let acc: AsrSegment[] = []; // cue pieces accumulated for the sentence being rebuilt
   const flush = () => {

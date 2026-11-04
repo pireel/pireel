@@ -272,7 +272,7 @@ export function chunkWords(words: FxWord[], size: number): FxWord[][] {
 export const CAPTION_LINE_UNITS = 13;
 /** Visual width: CJK≈1, Latin/digit≈0.5. */
 const visualWidth = (t: string) => [...t].reduce((a, ch) => a + (ch.charCodeAt(0) > 0x2e7f ? 1 : 0.5), 0);
-export const PUNCT_END = /[,。,.!?!?;;、::…]$/;
+export const PUNCT_END = /[,，。.．!！?？;；、:：…]$/;
 
 /**
  * Balanced line-breaking core: the sentence takes the fewest lines that fit, and the breaks are
@@ -320,10 +320,14 @@ export function chunkWordsBalanced<W extends { text: string }>(words: W[], limit
     for (let k = count, to = n; k > 0 && to > 0; k--) { const from = back[k]![to]!; out.unshift(words.slice(from, to)); to = from; }
     return { out, cost: cost[count]![n]! };
   };
-  const fewest = layout(lines);
-  if (!breakCost || lines + 1 > n) return fewest.out;
-  const more = layout(lines + 1);
-  return more.cost + limit * 0.3 < fewest.cost ? more.out : fewest.out;
+  let best = layout(lines);
+  if (!breakCost) return best.out;
+  // Up to two more lines when they avoid bad breaks; each extra line costs 0.3 of a line.
+  for (let extra = 1; extra <= 2 && lines + extra <= n; extra++) {
+    const more = layout(lines + extra);
+    if (more.cost + limit * 0.3 * extra < best.cost) best = { ...more, cost: more.cost + limit * 0.3 * extra };
+  }
+  return best.out;
 }
 
 /** Coarse visual-unit measure (CJK=1/Latin=0.5): the fallback when there's no font-size context. */

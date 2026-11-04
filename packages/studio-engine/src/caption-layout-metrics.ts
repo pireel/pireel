@@ -67,14 +67,39 @@ export function captionLineSegments<W extends FxWord>(
     for (let at = 0; at < rows.length; at += preset.stack.maxRows) out.push(rows.slice(at, at + preset.stack.maxRows).flat().flatMap((group) => group.members));
     return out;
   }
-  return chunkWordsBalanced(groups, m.availablePx, m.widthOf, (left, right) => lineBreakCost(left.text, right.text) * m.availablePx)
+  const enclosed = enclosedBreaks(groups.map((group) => group.text));
+  const nested = new Set(groups.filter((_, index) => enclosed.has(index)));
+  return chunkWordsBalanced(groups, m.availablePx, m.widthOf, (left, right) => (lineBreakCost(left.text, right.text) + (nested.has(left) ? ENCLOSED_BREAK_COST : 0)) * m.availablePx)
     .map((line) => line.flatMap((group) => group.members));
+}
+
+/** Breaking inside a title, quote or aside (《奥德|赛》) reads as a broken name: it costs more than a line. */
+const ENCLOSED_BREAK_COST = 1.5;
+const OPENERS = '《“‘「『（(【〈';
+const CLOSERS = '》”’」』）)】〉';
+
+/** Indexes of the words after which a break would fall inside a bracket or quote pair. Straight
+ *  quotes ("…") toggle; a pair left open by the text (a typo) stops counting at its sentence end. */
+function enclosedBreaks(texts: readonly string[]): Set<number> {
+  const inside = new Set<number>();
+  let depth = 0;
+  let straight = false;
+  texts.forEach((text, index) => {
+    for (const ch of text) {
+      if (OPENERS.includes(ch)) depth += 1;
+      else if (CLOSERS.includes(ch)) depth = Math.max(0, depth - 1);
+      else if (ch === '"') straight = !straight;
+      else if (/[。！？!?]/u.test(ch)) { depth = 0; straight = false; }
+    }
+    if (depth > 0 || straight) inside.add(index);
+  });
+  return inside;
 }
 
 const NUMERAL_END = /[\p{N}零〇一二三四五六七八九十百千万亿两]$/u;
 const NUMERAL_START = /^[\p{N}零〇一二三四五六七八九十百千万亿]/u;
 /** Particles that only ever follow what they attach to; a line never opens with one. */
-const CJK_TRAILING = /^[的了吗呢啊吧呀哦嘛么着过得地们]/u;
+const CJK_TRAILING = /^(?:[的了吗呢啊吧呀哦嘛么们]|[着过得地]$)/u;
 /**
  * How bad a line break between two dictionary words reads, as a share of the line width. Numbers
  * stay whole and with the unit or measure after them; a line does not open with a particle; a lone
@@ -88,10 +113,11 @@ export function lineBreakCost(left: string, right: string): number {
   let cost = 0;
   if (NUMERAL_END.test(before) && NUMERAL_START.test(after)) cost += 0.6;
   else if (NUMERAL_END.test(before) && /^\p{Script=Han}/u.test(after)) cost += 0.35;
-  if (CJK_TRAILING.test(after)) cost += 0.3;
+  // 着/过/得/地 count only standing alone: 得到, 过去 and 地方 are words that merely start with one.
+  if (CJK_TRAILING.test(after.replace(/[^\p{L}\p{N}]/gu, ''))) cost += 0.6;
   // Two lone characters side by side are usually one word the dictionary does not know (极|客).
   if (loneHan(left) && loneHan(right)) cost += 1;
-  else if (loneHan(left) || loneHan(right)) cost += 0.2;
+  else if (loneHan(left) || loneHan(right)) cost += 0.5;
   return cost;
 }
 
