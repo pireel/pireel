@@ -1,6 +1,7 @@
 import { useId, type ReactNode } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@pireel/ui/select';
 import { Switch } from '@pireel/ui/switch';
+import { SimpleMultiSelect } from '@pireel/ui/simple-multi-select';
 
 /** Shared presentation only; scene and workflow owners retain their own persistence. */
 export function SceneSelect<T extends string>({ label, ariaLabel = label, value, options, onChange, disabled = false, footer, portalOwner }: {
@@ -17,6 +18,18 @@ export function SceneSelect<T extends string>({ label, ariaLabel = label, value,
       <SelectTrigger aria-label={ariaLabel} className="border-line bg-bg h-8 w-48 max-w-full text-xs shadow-none hover:bg-panel-2"><SelectValue /></SelectTrigger>
       <SelectContent data-scene-select-owner={portalOwner} className={`studio-scope max-h-72 ${portalOwner ? 'z-[140]' : ''}`}>{options.map(option => <SelectItem key={option.value} value={option.value} disabled={option.disabled}>{option.label}</SelectItem>)}{footer && <div className="border-line mt-1 border-t pt-1">{footer}</div>}</SelectContent>
     </Select>
+  </div>;
+}
+
+/** A settings row choosing several options at once (SimpleMultiSelect, sized like SceneSelect). */
+export function SceneMultiSelect<T extends string>({ label, ariaLabel = label, value, options, onToggle, disabled = false, separator = ', ' }: {
+  label: string; ariaLabel?: string; value: readonly T[]; options: readonly { value: T; label: string }[];
+  onToggle: (option: T, checked: boolean) => void; disabled?: boolean; separator?: string;
+}) {
+  return <div className="text-ink flex min-w-0 flex-wrap items-center justify-between gap-3 text-xs">
+    <span>{label}</span>
+    <SimpleMultiSelect ariaLabel={ariaLabel} value={value} options={options} onToggle={onToggle} disabled={disabled} separator={separator}
+      className="border-line bg-bg h-8 w-48 max-w-full py-0 text-xs" contentClassName="studio-scope text-xs" />
   </div>;
 }
 
