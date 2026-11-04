@@ -55,8 +55,8 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   { id: 'create_browser_handoff', group: 'assets', serverDirect: true },
   // ---- clips and tracks (15)
   { id: 'add_clips', group: 'clips' },
-  // The deterministic montage assembler as a visible capability (it used to be a hidden client-side rewrite of add_clips).
-  { id: 'assemble_from_review', group: 'clips' },
+  // A montage's picture by plan (to the voice-over, or to a length): beats, mode and hook out; picks in; windows and cuts fitted locally.
+  { id: 'plan_montage', group: 'clips' },
   { id: 'insert_clips', group: 'clips' },
   { id: 'move_clips', group: 'clips' },
   { id: 'remove_clips', group: 'clips' },

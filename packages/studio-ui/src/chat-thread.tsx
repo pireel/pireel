@@ -32,7 +32,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { ChevronRight, Info, X } from "lucide-react";
+import { ChevronRight, X } from "lucide-react";
 import { ConfirmDialog } from "@pireel/ui/confirm-dialog";
 import { describeGenerationIntentLine } from "@pireel/studio-ui/chat-generation-intent";
 import { useChat } from "@ai-sdk/react";
@@ -81,7 +81,6 @@ import {
 } from "@pireel/studio-ui/chat-tool-parts";
 import { Composer, type ComposerHandle } from "@pireel/studio-ui/chat-composer";
 import {
-  assistantEditorialCapacityShortfall,
   assistantHasOpenOrInterruptedInteraction,
   assistantTurnEndedWithAnswer,
   assistantMessageHasRenderableOutput,
@@ -1189,9 +1188,6 @@ export function ChatThread({
                 status === "ready" &&
                 !emptyCompletedAssistant &&
                 assistantMessageSuggestsContinuation(m);
-              const editorialCapacityShortfall = m.role === "assistant" && (!isLast || status === "ready")
-                ? assistantEditorialCapacityShortfall(m)
-                : null;
               const originTask = taskOf([...messages.slice(0, mi)].reverse().find(item => item.role === 'user'));
               const savedTask = originTask ? [...messages].reverse().map(taskOf).find(task => task?.id === originTask.id) ?? originTask : undefined;
               const messageTask = savedTask ? displayEditingTask(savedTask, messagesForTask(messages, savedTask.id)) : undefined;
@@ -1435,14 +1431,6 @@ export function ChatThread({
                           steps={parts.flatMap((part) => (part.type === "text" ? splitNextSteps((part as { text?: string }).text ?? "").steps : [])).slice(0, 3)}
                           onPick={fillRequest}
                         />
-                      )}
-                      {editorialCapacityShortfall !== null && (
-                        <div className="border-line bg-panel-2 text-ink-3 flex items-start gap-2 rounded-md border px-2.5 py-2 text-[12px] leading-relaxed">
-                          <Info size={13} className="mt-0.5 shrink-0 text-accent-ink" />
-                          <span>
-                            {t("chatGen.editorialCapacityShortfall", { s: editorialCapacityShortfall })}
-                          </span>
-                        </div>
                       )}
                     </div>
                   </div>

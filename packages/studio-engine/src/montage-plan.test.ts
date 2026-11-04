@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { emptyEditorDocumentV2 } from '@pireel/studio-engine/editor-document';
 import { runAgentTimelineTool } from '@pireel/studio-engine/agent-timeline';
-import { compileMontage, fitMontage, narrationCutSlots, type MontageFitShot, type MontageFrameSignal } from './montage-plan';
+import { compileMontage, evenBeats, fitMontage, montageFitFromPicks, narrationBeats, narrationCutSlots, type MontageFitShot, type MontageFrameSignal } from './montage-plan';
 
 const still = (overrides: Partial<MontageFrameSignal> = {}): MontageFrameSignal => ({
   shake: 0, pan: 0, people: 1, face: true, front: true, faceH: 0.15, mouth: 0.05, sharp: 0, bright: 0.47, cut: false, ...overrides,
@@ -127,5 +127,60 @@ describe('compileMontage', () => {
     expect(spine.map((clip) => [clip.startFrame, clip.durationFrames])).toEqual([[0, Math.round(fitted.cuts[0]! * 30)], [Math.round(fitted.cuts[0]! * 30), Math.round(fitted.cuts[1]! * 30) - Math.round(fitted.cuts[0]! * 30)], [Math.round(fitted.cuts[1]! * 30), 189 - Math.round(fitted.cuts[1]! * 30)]]);
     expect(spine.every((clip) => clip.kind === 'narrative' && clip.properties?.audioMuted === true)).toBe(true);
     expect(compileMontage(document, [{ assetId: 'a', sourceInSec: 18, startSec: 0, endSec: 4 }])).toMatchObject({ ok: false });
+  });
+});
+
+describe('narration beats and picks', () => {
+  const project = () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', { assets: [
+      { id: 'a', kind: 'video', url: 'https://cdn.example/a.mp4', durationSec: 20 },
+      { id: 'voice', kind: 'audio', url: 'https://cdn.example/voice.mp3', durationSec: 6, transcript: [
+        { start: 0.2, end: 2.3, text: '最近去看了，看着看着。' },
+        { start: 2.6, end: 5.8, text: '突然觉得自己，好像也进入了。' },
+      ] },
+    ] }).document!;
+    return runAgentTimelineTool(document, 'add_clips', { clips: [{ role: 'narration', assetId: 'voice', startFrame: 15 }] }).document!;
+  };
+
+  it('splits the voice-over into clauses on the timeline', () => {
+    const beats = narrationBeats(project());
+    expect(beats.ok).toBe(true);
+    if (!beats.ok) return;
+    expect(beats.endSec).toBeCloseTo(6.5, 6);
+    expect(beats.beats.map((beat) => beat.text)).toEqual(['最近去看了，', '看着看着。', '突然觉得自己，', '好像也进入了。']);
+    expect(beats.beats[0]!.startSec).toBeCloseTo(0.7, 6);
+    expect(beats.beats.every((beat, index) => !index || beat.startSec >= beats.beats[index - 1]!.endSec)).toBe(true);
+  });
+
+  it('turns ordered picks into cut slots, and names what is wrong with bad ones', () => {
+    const document = project();
+    const beats = narrationBeats(document);
+    if (!beats.ok) throw new Error(beats.error);
+    const good = montageFitFromPicks(document, beats.beats, beats.endSec, [
+      { beats: [0, 1], assetId: 'a', source: [0, 4], want: 'front' },
+      { beats: [2, 3], assetId: 'a', source: [6, 11] },
+    ], 'face');
+    expect(good.ok).toBe(true);
+    if (good.ok) {
+      expect(good.cuts).toEqual([{ from: beats.beats[1]!.endSec, to: beats.beats[2]!.startSec }]);
+      expect(good.shots[0]).toMatchObject({ opening: 'face', want: 'front' });
+    }
+    expect(montageFitFromPicks(document, beats.beats, beats.endSec, [{ beats: [0, 1], assetId: 'a', source: [0, 4] }, { beats: [3, 3], assetId: 'a', source: [5, 8] }])).toMatchObject({ ok: false, error: expect.stringContaining('beat 2 comes next') });
+    expect(montageFitFromPicks(document, beats.beats, beats.endSec, [{ beats: [0, 3], assetId: 'a', source: [15, 25] }])).toMatchObject({ ok: false, error: expect.stringContaining('20.00s long') });
+    expect(montageFitFromPicks(document, beats.beats, beats.endSec, [{ beats: [0, 2], assetId: 'a', source: [0, 9] }])).toMatchObject({ ok: false, error: expect.stringContaining('stop at beat 2') });
+  });
+});
+
+describe('a montage cut to a length', () => {
+  it('slices even beats whose cuts may move a little either way', () => {
+    const beats = evenBeats(12);
+    expect(beats).toHaveLength(5);
+    expect(beats[4]!.endSec).toBeCloseTo(12, 9);
+    expect(beats[0]!.flex).toBeCloseTo(0.4, 9);
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', { assets: [{ id: 'a', kind: 'video', url: 'https://cdn.example/a.mp4', durationSec: 30 }] }).document!;
+    const planned = montageFitFromPicks(document, beats, 12, [{ beats: [0, 1], assetId: 'a', source: [0, 6] }, { beats: [2, 4], assetId: 'a', source: [10, 19] }]);
+    expect(planned.ok && planned.cuts).toEqual([{ from: beats[1]!.endSec - 0.4, to: beats[1]!.endSec + 0.4 }]);
   });
 });

@@ -1,5 +1,6 @@
 import type { EditorDocumentV2 } from '@pireel/studio-engine/editor-document';
 import { runAgentTimelineTool, type AgentTimelineOutcome } from '@pireel/studio-engine/agent-timeline';
+import { wordsFromText } from '@pireel/studio-engine/caption-fx';
 
 /**
  * Picture laid to a voice-over. The narration fixes the length and where cuts may fall; a plan says
@@ -254,4 +255,97 @@ export function compileMontage(document: EditorDocumentV2, shots: readonly Monta
     .reduce((last, clip) => Math.max(last, clip.startFrame + clip.durationFrames), 0);
   if (end !== frames[frames.length - 1]) return { ok: false, error: `placed spine ends at frame ${end}, expected ${frames[frames.length - 1]}` };
   return { ...placed, summary: `Laid ${shots.length} shots to the narration` };
+}
+
+/** One clause of the narration on the timeline: the unit a pick spans and a cut may follow. A beat
+ *  of a montage without voice-over has no text and lets its closing cut move by `flex` seconds. */
+export interface MontageBeat { index: number; text: string; startSec: number; endSec: number; flex?: number }
+
+/** Even beats for a montage cut to a length rather than a voice: about `beatSec` each, every cut free
+ *  to move a little so it can land where the footage is cleanest. */
+export function evenBeats(targetSec: number, beatSec = 2.5): MontageBeat[] {
+  const count = Math.max(1, Math.round(targetSec / beatSec));
+  const length = targetSec / count;
+  return Array.from({ length: count }, (_, index) => ({ index, text: '', startSec: index * length, endSec: (index + 1) * length, flex: Math.min(0.4, length / 4) }));
+}
+
+/**
+ * The narration's clauses on the timeline (the voice-over lane's transcript mapped through its clips),
+ * and where the voice ends. A clause ends at clause-ending punctuation; the gap before the next clause
+ * is the pause a cut may land in.
+ */
+export function narrationBeats(document: EditorDocumentV2): { ok: true; endSec: number; beats: MontageBeat[] } | { ok: false; error: string } {
+  const fps = document.canvas.fps;
+  const lane = document.timeline.tracks.find((track) => track.role === 'narration' && !track.muted && track.clips.some((clip) => clip.kind === 'audio' && clip.enabled !== false));
+  if (!lane) return { ok: false, error: 'no voice-over on the timeline: place the narration first (generate_speech, then add_clips role narration)' };
+  const words: { text: string; start: number; end: number }[] = [];
+  let endSec = 0;
+  for (const clip of [...lane.clips].sort((left, right) => left.startFrame - right.startFrame)) {
+    if (clip.kind !== 'audio' || clip.enabled === false) continue;
+    const offset = clip.startFrame / fps - clip.sourceInSec;
+    const out = clip.sourceOutSec ?? clip.sourceInSec + clip.durationFrames / fps;
+    endSec = Math.max(endSec, (clip.startFrame + clip.durationFrames) / fps);
+    for (const segment of document.semantics.transcripts[clip.assetId] ?? []) {
+      // A sentence without word timing is spread by reading length, as captions do.
+      for (const word of segment.words?.length ? segment.words : wordsFromText(segment.text, segment.start, segment.end)) {
+        if (word.end <= clip.sourceInSec || word.start >= out) continue;
+        words.push({ text: word.text, start: Math.max(word.start, clip.sourceInSec) + offset, end: Math.min(word.end, out) + offset });
+      }
+    }
+  }
+  if (!words.length) return { ok: false, error: 'the narration has no transcript yet: read it with get_transcript first' };
+  const beats: MontageBeat[] = [];
+  let open: typeof words = [];
+  const close = () => {
+    if (!open.length) return;
+    beats.push({ index: beats.length, text: open.map((word) => word.text).join(''), startSec: open[0]!.start, endSec: open[open.length - 1]!.end });
+    open = [];
+  };
+  for (const word of words) {
+    open.push(word);
+    if (narrationCutSlots([word, word]).length) close();
+  }
+  close();
+  return { ok: true, endSec, beats };
+}
+
+/** A pick: which beats one piece of footage covers, from which source range, showing what. */
+export interface MontagePick { beats: [number, number]; assetId: string; source: [number, number]; want?: MontageWant }
+
+/**
+ * Check picks against the beats (in order, every beat covered exactly once, each source range inside
+ * its asset) and turn them into the fitter's input: one cut slot per pick boundary, in the pause
+ * after the pick's last beat. The first pick carries the opening rule.
+ */
+export function montageFitFromPicks(
+  document: EditorDocumentV2,
+  beats: readonly MontageBeat[],
+  endSec: number,
+  picks: readonly MontagePick[],
+  opening?: OpeningRule,
+): { ok: true; cuts: MontageCutSlot[]; shots: MontageFitShot[] } | { ok: false; error: string } {
+  if (!picks.length) return { ok: false, error: 'no picks' };
+  let next = 0;
+  for (const [index, pick] of picks.entries()) {
+    const [from, to] = pick.beats;
+    if (from !== next) return { ok: false, error: `picks[${index}] starts at beat ${from}; beat ${next} comes next (picks cover the beats in order, each beat once)` };
+    if (to < from || to >= beats.length) return { ok: false, error: `picks[${index}].beats [${from}, ${to}] is outside beats 0–${beats.length - 1}` };
+    const asset = document.assets[pick.assetId];
+    if (!asset || asset.kind !== 'video') return { ok: false, error: `picks[${index}].assetId ${pick.assetId} is not a video in this project` };
+    const [inSec, outSec] = pick.source;
+    if (!(outSec > inSec) || inSec < 0) return { ok: false, error: `picks[${index}].source [${inSec}, ${outSec}] is not a range` };
+    const available = asset.metadata.durationSec;
+    if (typeof available === 'number' && outSec > available + 1e-3) return { ok: false, error: `picks[${index}].source ends at ${outSec}s; ${pick.assetId} is ${available.toFixed(2)}s long` };
+    next = to + 1;
+  }
+  if (next !== beats.length) return { ok: false, error: `the picks stop at beat ${next - 1}; the narration has ${beats.length} beats (0–${beats.length - 1})` };
+  const cuts = picks.slice(0, -1).map((pick) => {
+    const last = beats[pick.beats[1]]!;
+    const following = beats[pick.beats[1] + 1]!;
+    if (last.flex) return { from: last.endSec - last.flex, to: last.endSec + last.flex };
+    return { from: last.endSec, to: Math.max(last.endSec, following.startSec) };
+  });
+  const shots = picks.map((pick, index): MontageFitShot => ({ range: pick.source, ...(pick.want ? { want: pick.want } : {}), ...(index === 0 && opening ? { opening } : {}) }));
+  if (endSec <= 0) return { ok: false, error: 'the narration has no length' };
+  return { ok: true, cuts, shots };
 }

@@ -12,14 +12,14 @@ import type { StudioToolDef } from '@pireel/studio-engine/prompts';
 const CARD_TOOLS = new Set([
   'get_transcript', 'get_facts', 'inspect_media', 'inspect_timeline', 'import_media', 'rough_cut', 'remove_silence', 'denoise_audio',
   'compose_component', 'apply_component', 'place_graphics', 'bake_component', 'generate_cover', 'generate_image', 'generate_video', 'generate_audio', 'generate_speech',
-  'generate_foley', 'lip_sync', 'export', 'preview', 'assemble_from_review', 'manage_voices',
+  'generate_foley', 'lip_sync', 'export', 'preview', 'plan_montage', 'manage_voices',
 ]);
 
 const ICONS: Record<string, string> = {
   get_state: '🗂️', get_transcript: '📝', search_media: '🔎', inspect_media: '🔍', inspect_timeline: '🎞️', get_beat_grid: '🥁', get_facts: '📏',
   manage_project: '📁', search_assets: '🗃️', register_media: '📎', import_media: '📥', organize_media: '🗂️', prepare_local_asset: '📎',
   get_icons: '🔣', create_browser_handoff: '🌐',
-  add_clips: '➕', assemble_from_review: '🧮', insert_clips: '➕', move_clips: '↔️', remove_clips: '🗑️', split_clips: '✂️',
+  add_clips: '➕', plan_montage: '🎬', insert_clips: '➕', move_clips: '↔️', remove_clips: '🗑️', split_clips: '✂️',
   ripple_delete_ranges: '✂️', set_clip_properties: '🎚️', swap_clip_media: '🔁', set_clip_framing: '🖼️', apply_layout: '📐', set_keyframes: '⏱️',
   manage_tracks: '🛤️', manage_clip_links: '🔗', add_transition: '🌫️', set_canvas: '🖥️',
   rough_cut: '✂️', remove_silence: '🤫', remove_words: '✂️', mask_words: '🔇', denoise_audio: '🎧',

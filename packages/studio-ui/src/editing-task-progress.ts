@@ -16,7 +16,7 @@ export function isInteractiveEditingTool(id: string, wholeVideo: boolean): boole
 }
 /** Slow steps a request keeps as a one-line record once they finish (their cards stay hidden):
  *  the user watched them run, so they should not vanish. Quick reads and edits leave no line. */
-const REQUEST_STEP_TOOLS = new Set(['inspect_media', 'inspect_timeline', 'get_transcript', 'get_facts', 'assemble_from_review', 'organize_media', 'rough_cut']);
+const REQUEST_STEP_TOOLS = new Set(['inspect_media', 'inspect_timeline', 'get_transcript', 'get_facts', 'plan_montage', 'organize_media', 'rough_cut']);
 export function isRequestStepTool(id: string): boolean {
   return REQUEST_STEP_TOOLS.has(id);
 }

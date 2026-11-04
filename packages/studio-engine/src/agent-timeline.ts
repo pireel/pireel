@@ -34,6 +34,7 @@ import { canvasSizeFollowingFirstVideo } from '@pireel/studio-engine/editing-pri
 import { applyNarrationDocumentEdit } from '@pireel/studio-engine/narration-document-edit';
 import { planNarrationCuts } from '@pireel/studio-engine/editor-document/narration-cut-planner';
 import { keepStorySpineWhole } from '@pireel/studio-engine/story-spine';
+import { compileMontage, type MontageCompileShot } from '@pireel/studio-engine/montage-plan';
 import { firstNarrativeAssetId } from '@pireel/studio-engine/editor-document/read-model';
 import { dominantTimelineSpeechTrack } from '@pireel/studio-engine/editor-document/commands/managed-captions';
 import { documentWordRanges, documentWordRangesToTimeline, resolveDocumentWordIds } from '@pireel/studio-engine/editor-document/transcript-address';
@@ -1848,6 +1849,8 @@ function runTimelineToolOnce(document: EditorDocumentV2, tool: string, input: In
     case 'get_beat_grid': return getBeatGrid(document, input);
     case 'remove_words': return removeWords(document, input);
     case 'set_whiteboard': return setWhiteboard(document, input);
+    // Internal (plan_montage writes its fitted picks through it): not a model-facing tool.
+    case 'lay_montage': return compileMontage(document, Array.isArray(input.shots) ? input.shots as MontageCompileShot[] : []);
     default: return fail(`unsupported timeline tool: ${tool}`);
   }
 }

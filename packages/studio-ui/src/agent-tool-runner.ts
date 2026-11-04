@@ -138,7 +138,11 @@ import {
   askEditorialQuestion,
 } from '@pireel/studio-ui/editorial-review';
 import { openingContendersFor, recordOpeningComparison, recordReviewedSource, reviewedSourcesFor } from '@pireel/studio-ui/editorial-review-store';
-import { buildAssemblyFromReview } from '@pireel/studio-ui/editorial-assembly-tool';
+import { evenBeats, fitMontage, montageFitFromPicks, narrationBeats, type MontagePick, type MontageWant } from '@pireel/studio-engine/montage-plan';
+import { classifyEditMode, EDIT_MODES, type EditMode } from '@pireel/studio-engine/edit-mode';
+import { chooseHook, openingCheck } from '@pireel/studio-engine/hook-plan';
+import { MONTAGE_SIGNAL_FPS, measureMontageSignals } from '@pireel/studio-ui/montage-signals';
+import { healReviewedSourceId } from '@pireel/studio-ui/editorial-assembly-tool';
 import { type ExportRenderOpts, captureCompositionFrame } from '@pireel/studio-ui/client-export';
 import { compositionRenderView } from '@pireel/studio-ui/composition-render-view';
 import type { StudioChatHandle } from '@pireel/studio-ui/studio-chat';
@@ -1534,7 +1538,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
       try {
         const documentInspect = toolId !== 'inspect_media' || input.mode === undefined || input.mode === 'metadata' || input.mode === 'component';
         if (AGENT_TIMELINE_TOOL_IDS.has(toolId) && documentInspect) {
-          let timelineInput = input;
+          const timelineInput = input;
           if (toolId === 'get_transcript') {
             // The engine reads stored transcripts; sources that were never transcribed are transcribed
             // here first (device bytes or the cloud copy), and a library asset that is not in the
@@ -1557,28 +1561,6 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               if (stored && !needsMeasure) continue;
               const transcribed = await transcribeForAgent({ assetId, ...(needsMeasure ? { measuredTiming: true } : {}) });
               if (!transcribed.ok) return transcribed;
-            }
-          }
-          if (toolId === 'add_clips' && input.__replacePrimaryTrack === true) {
-            const { __replacePrimaryTrack: _privateReplace, ...publicInput } = input;
-            timelineInput = publicInput;
-            const primaryTrack = documentRef.current.timeline.tracks.find((track) => (
-              track.id === documentRef.current.semantics.primaryNarrativeTrackId
-            ));
-            if (primaryTrack?.clips.length) {
-              const cleared = commit({ op: 'command', input: { command: {
-                type: 'clips.remove',
-                trackId: primaryTrack.id,
-                clipIds: primaryTrack.clips.map((clip) => clip.id),
-                includeLinked: false,
-              } } }, { undo: 'none' });
-              if (!cleared.ok) {
-                return {
-                  ok: false,
-                  error: editorErrorMessage(cleared.error),
-                  data: { code: cleared.error.code, trackIds: cleared.error.trackIds },
-                };
-              }
             }
           }
           if (toolId === 'remove_words' || toolId === 'mask_words' || toolId === 'set_captions') {
@@ -3179,66 +3161,98 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             setSelectedShotId(null);
             return withDelta({ ok: true, summary: t('workbench.undidLastStep') + (stack.length ? t('workbench.nMoreUndoSteps', { n: stack.length }) : '') });
           }
-          case 'assemble_from_review': {
-            const requestedPool = Array.isArray(input.assetIds) ? new Set(input.assetIds.map(String)) : null;
-            const sources = reviewedSourcesFor(projectId).filter((source) => !requestedPool || requestedPool.has(source.assetId));
-            if (!sources.length) {
-              return { ok: false, error: 'No reviewed sources in this session. Run inspect_media mode:editorial on the candidate footage first (a repeat review of the same files is served from cache at no charge).', data: { reason: 'no_reviewed_sources' } };
-            }
+          case 'plan_montage': {
             const doc = documentRef.current;
             const fps = doc.canvas.fps;
-            const narrationEndSec = doc.timeline.tracks
-              .filter((track) => track.role === 'narration' && !track.muted)
-              .flatMap((track) => track.clips.filter((clip) => clip.kind === 'audio' && clip.enabled).map((clip) => (clip.startFrame + clip.durationFrames) / fps))
-              .reduce((latest, end) => Math.max(latest, end), 0);
-            const explicitTarget = Number.isInteger(input.targetDurationFrames) && (input.targetDurationFrames as number) > 0 ? (input.targetDurationFrames as number) / fps : Number.NaN;
-            const targetDurationSec = Number.isFinite(explicitTarget) && explicitTarget > 0 ? explicitTarget : narrationEndSec;
-            if (!(targetDurationSec > 0)) {
-              return { ok: false, error: 'No picture target: place the narration first, or pass targetDurationFrames for a silent montage.', data: { reason: 'no_target' } };
+            const voiced = narrationBeats(doc);
+            const targetSec = Number(input.targetSec);
+            const narration = voiced.ok
+              ? voiced
+              : Number.isFinite(targetSec) && targetSec >= 1
+                ? { ok: true as const, endSec: targetSec, beats: evenBeats(targetSec) }
+                : null;
+            if (!narration) return { ok: false, error: `${!voiced.ok ? voiced.error : 'no beats'}; for a montage with no voice-over, pass targetSec.`, data: { reason: 'no_narration' } };
+            const sources = reviewedSourcesFor(projectId);
+            if (!sources.length) {
+              return { ok: false, error: 'No reviewed footage in this session. Run inspect_media mode:editorial on the candidate footage first (a repeat review of the same files is served from cache at no charge).', data: { reason: 'no_reviewed_sources' } };
             }
-            const rows = (Array.isArray(input.clips) ? input.clips : [])
+            const userMode = typeof input.mode === 'string' && (EDIT_MODES as readonly string[]).includes(input.mode) ? input.mode as EditMode : undefined;
+            const accepted = sources.map((source) => ({ assetId: source.assetId, candidates: source.candidates.filter((candidate) => candidate.verdict !== 'reject') }));
+            const mode = classifyEditMode({ ...(userMode ? { userMode } : {}), sources: accepted });
+            const hook = chooseHook({ mode: mode.mode, narrationLocked: voiced.ok || Number.isFinite(targetSec), sourceSoundLeads: false });
+            if (input.action !== 'apply') {
+              const pool = accepted.flatMap((source) => source.candidates.map((candidate) => ({
+                assetId: source.assetId,
+                source: [candidate.startSec, candidate.endSec],
+                verdict: candidate.verdict,
+                role: candidate.contentRole,
+                ...(candidate.facing ? { facing: candidate.facing } : {}),
+                ...(candidate.log ? { size: candidate.log.shotSize, look: candidate.log.wardrobe.slice(0, 60), setting: candidate.log.setting.slice(0, 60) } : {}),
+                action: candidate.action.slice(0, 80),
+              })));
+              return {
+                ok: true,
+                summary: `${narration.beats.length} beats · ${mode.mode}`,
+                data: {
+                  narrationEndSec: Math.round(narration.endSec * 1000) / 1000,
+                  beats: narration.beats.map((beat) => ({ index: beat.index, text: beat.text, sec: [Math.round(beat.startSec * 100) / 100, Math.round(beat.endSec * 100) / 100] })),
+                  mode,
+                  hook,
+                  pool,
+                  openingContenders: openingContendersFor(projectId),
+                  next: `Pick footage for every beat in order (group 1–3 clauses into a pick of about 1–4 s; the pick's source range must be longer than its beats so the window can move), then call plan_montage action "apply". The first pick opens the film: its first frame must show ${hook.opening === 'face' ? 'a clear face toward the camera' : 'its subject, never a black or blurred frame'}.${hook.textHook ? ' The picture does not say what the script says: plan a hook line from the script over the opening.' : ''}`,
+                },
+              };
+            }
+            const picks: MontagePick[] = (Array.isArray(input.picks) ? input.picks : [])
               .filter((row): row is Record<string, unknown> => !!row && typeof row === 'object' && !Array.isArray(row))
               .map((row) => ({
-                assetId: String(row.assetId ?? ''),
-                ...(Number.isInteger(row.startFrame) ? { startSec: (row.startFrame as number) / fps } : {}),
-                ...(Array.isArray(row.source) && Number.isFinite(Number(row.source[0])) ? { sourceInSec: Number(row.source[0]) } : {}),
-                ...(Array.isArray(row.source) && Number.isFinite(Number(row.source[1])) ? { sourceOutSec: Number(row.source[1]) } : {}),
+                beats: [Number((row.beats as unknown[] | undefined)?.[0]), Number((row.beats as unknown[] | undefined)?.[1])] as [number, number],
+                // A model sometimes mangles a long asset id; a near-miss of one reviewed source is that source.
+                assetId: healReviewedSourceId(String(row.assetId ?? ''), new Set(sources.map((source) => source.assetId))) ?? String(row.assetId ?? ''),
+                source: [Number((row.source as unknown[] | undefined)?.[0]), Number((row.source as unknown[] | undefined)?.[1])] as [number, number],
+                ...(typeof row.want === 'string' ? { want: row.want as MontageWant } : {}),
               }));
-            const built = buildAssemblyFromReview({ sources, opening: openingContendersFor(projectId), rows, targetDurationSec, fps });
-            if ('error' in built) {
-              const detail = built.error === 'unreviewed_source'
-                ? `clips[] names ${built.assetId}, which has no editorial review in this session; review it first or leave it out.`
-                : built.error === 'range_required'
-                  ? `clips[] row for ${built.assetId} needs source [inSec, outSec] inside an accepted range.`
-                  : built.error === 'no_target'
-                    ? 'No picture target.'
-                    : 'No accepted ranges in the reviewed pool.';
-              return { ok: false, error: detail, data: { reason: built.error } };
+            const planned = montageFitFromPicks(doc, narration.beats, narration.endSec, picks, hook.opening);
+            if (!planned.ok) return { ok: false, error: planned.error };
+            // Measure every pick's range locally; a source without local bytes is fitted from its range start.
+            const unmeasured: string[] = [];
+            for (const [index, pick] of picks.entries()) {
+              report(`Measuring ${index + 1}/${picks.length}`, index / picks.length);
+              const asset = doc.assets[pick.assetId]!;
+              const bytes = await race(assetBytes(asset));
+              if (!bytes.file) { unmeasured.push(pick.assetId); continue; }
+              const signals = await race(measureMontageSignals(bytes.file, pick.source[0], pick.source[1]));
+              planned.shots[index] = { ...planned.shots[index]!, signals };
             }
-            const undoDepth = undoStackRef.current.length;
-            const placed = await runStudioToolInner(ctx, 'add_clips', built.input, opts);
-            // One tool, one undo step: this case and the delegated add_clips both snapshotted the same document.
-            if (undoStackRef.current.length > undoDepth && undoStackRef.current.at(-1) === undoStackRef.current.at(-2)) undoStackRef.current.pop();
-            if (!placed.ok) return placed;
-            const placedData = placed.data && typeof placed.data === 'object' && !Array.isArray(placed.data) ? placed.data as Record<string, unknown> : {};
-            const { coverage } = built;
-            // A fresh cut is watched from its first frame. Trimming the old picture below the playhead
-            // had been leaving it clamped at the new end, so the user landed on the last frame instead.
+            const fitted = fitMontage({ endSec: narration.endSec, cuts: planned.cuts, shots: planned.shots, fps, signalFps: MONTAGE_SIGNAL_FPS });
+            if (!fitted.ok) {
+              const failing = fitted.shots.map((index) => ({ pick: index, beats: picks[index]?.beats }));
+              return { ok: false, error: `${fitted.error}. Nothing was placed.`, data: { failing } };
+            }
+            const laid = commit({ op: 'agent.timeline', input: { tool: 'lay_montage', input: {
+              shots: fitted.shots.map((shot, index) => ({ assetId: picks[index]!.assetId, sourceInSec: shot.sourceInSec, startSec: shot.startSec, endSec: shot.endSec })),
+            } } }, { undo: 'none' });
+            if (!laid.ok) return { ok: false, error: laid.error.message };
+            const first = planned.shots[0]?.signals?.[Math.round((fitted.shots[0]!.sourceInSec - picks[0]!.source[0]) * MONTAGE_SIGNAL_FPS)];
+            const openingIssues = first ? openingCheck(first, hook.opening) : [];
+            // A fresh cut is watched from its first frame.
             if (!playingRef.current) applyT(0.01);
             return {
               ok: true,
-              summary: `Assembled ${built.placed.length} clips · ${coverage.actualDurationSec}s of ${coverage.targetDurationSec}s`,
+              summary: `Laid ${picks.length} picks to ${Math.round(narration.endSec * 10) / 10}s${voiced.ok ? ' of narration' : ''}`,
               data: {
-                ...placedData,
-                coverage,
-                placed: built.placed,
-                ...(built.notes.length ? { notes: built.notes } : {}),
-                ...(coverage.covered ? {} : { remaining: built.remaining.slice(0, 40) }),
-                note: coverage.covered
-                  ? 'The picture covers the target at natural speed; the primary track was replaced. Change specific clips with remove/trim/move; a repeat call with a new ordered list rebuilds it.'
-                  : built.remaining.length
-                    ? `Your picks cover ${coverage.actualDurationSec}s of ${coverage.targetDurationSec}s (${coverage.shortfallSec}s open). Nothing was chosen for you: remaining lists the unused accepted ranges with their notes — add your picks and call again with the complete ordered list, or tell the user what is missing.`
-                    : `Your picks cover ${coverage.actualDurationSec}s of ${coverage.targetDurationSec}s and the reviewed pool has nothing left; ask the user for more footage or a shorter script.`,
+                placed: fitted.shots.map((shot, index) => ({
+                  beats: picks[index]!.beats,
+                  assetId: picks[index]!.assetId,
+                  source: [Math.round(shot.sourceInSec * 1000) / 1000, Math.round((shot.sourceInSec + shot.endSec - shot.startSec) * 1000) / 1000],
+                  frames: [Math.round(shot.startSec * fps), Math.round(shot.endSec * fps)],
+                })),
+                mode: mode.mode,
+                hook: { kind: hook.kind, textHook: hook.textHook },
+                ...(openingIssues.length ? { openingIssues } : {}),
+                ...(unmeasured.length ? { unmeasured: [...new Set(unmeasured)] } : {}),
+                next: `The primary track is laid at natural speed and ends ${voiced.ok ? 'with the narration' : `at ${narration.endSec}s`}.${hook.textHook ? ' Add the hook line over the opening (set_texts, the first 2–3 s, clear of the face).' : ''}${openingIssues.length ? ` The opening frame fails: ${openingIssues.join(', ')} — give the first pick another range.` : ''} Captions, graphics and music come next; change a single pick by calling apply again with the full list.`,
               },
             };
           }

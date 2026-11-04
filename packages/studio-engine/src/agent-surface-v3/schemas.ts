@@ -1,3 +1,4 @@
+import { EDIT_MODES } from '@pireel/studio-engine/edit-mode';
 import { WHITEBOARD_MEDIA_LIMITS } from '@pireel/studio-engine/whiteboard-workflow';
 import { CAPTION_ANIMATIONS, CAPTION_ANIMATION_IDS } from '@pireel/studio-engine/caption-animations';
 import { DEFAULT_TRANSITION_SEC } from '@pireel/studio-engine/editor-document/transitions';
@@ -49,6 +50,7 @@ export const VOICE_LANGUAGES = ['zh', 'yue', 'en', 'pt', 'ko', 'es', 'ja', 'id',
 
 const FRAME = (what: string) => int(`${what}, integer timeline frame (fps from get_state).`);
 const FRAMES_RANGE = arr({ type: 'integer', minimum: 0 }, { minItems: 2, maxItems: 2, description: 'Half-open [startFrame, endFrame) in timeline frames.' });
+const MONTAGE_WANTS = ['front', 'side', 'back', 'none', 'any'] as const;
 const SOURCE_RANGE = arr({ type: 'number', minimum: 0 }, { minItems: 2, maxItems: 2, description: 'Source seconds [inSec, outSec].' });
 const WORD_SPAN = arr(str(), { minItems: 1, maxItems: 2, description: '[firstWordId, lastWordId] from get_transcript words: the clip plays exactly the source span those words cover; assetId is inferred from the ids.' });
 const BOX = obj({
@@ -280,14 +282,20 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       targetDurationFrames: FRAME('Picture target length when no narration defines it (a silent montage cut to a user spec); ignored while narration is on the timeline'),
     }),
   },
-  assemble_from_review: {
+  plan_montage: {
     description:
-      'Build the primary picture track from your ordered picks (montage work; B-roll over a talking head is add_clips). clips[] come from inspect_media mode:editorial — source [inSec,outSec] inside accepted ranges — and are placed exactly as written, in that order, at natural speed; the current primary picture is replaced (one undo step). Nothing is chosen for you: what your picks do not cover stays open. Target = targetDurationFrames, else the narration on the timeline. Receipt: coverage {targetDurationSec, actualDurationSec, shortfallSec, covered}, placed[] (each clip with its review evidence), notes[] where a pick disagrees with the review (outside accepted bounds, inside a rejected range, a sub-second flash — yours to keep or change), and when short, remaining[] — the unused accepted ranges with score, action and facing — so you add picks and call again with the complete ordered list, or tell the user the pool is short. Omit clips to start from the review\'s opening choice.',
+      'Build the primary picture of a montage by plan: laid to the voice-over on the timeline, or, with none, cut to targetSec. action "outline" returns the beats (the clauses of the narration with timeline seconds; without narration, even slots of about 2.5 s whose cuts may move), how the reviewed pool should be cut (mode, read from the editorial reviews; a mode the user named wins), the opening hook, and the reviewed ranges. action "apply" takes picks that cover every beat in order, each {beats [first, last], assetId, source [inSec, outSec] inside an accepted range and longer than its beats, want}; it measures each range locally, takes its cleanest window, settles every cut in the pause between clauses, and writes the whole primary track at natural speed, ending with the narration (or at targetSec), in one undo step; the current primary picture is replaced. A beat its range cannot hold is reported by index: give it a longer range or other material. Nothing is slowed, stretched or looped to fill time.',
     inputSchema: obj({
-      clips: arr(obj({ assetId: str(), startFrame: FRAME('Start'), source: SOURCE_RANGE }, ['assetId'])),
-      assetIds: arr(str('Restrict the pool to these reviewed sources.')),
-      targetDurationFrames: FRAME('Picture length when no narration is on the timeline'),
-    }),
+      action: enumOf(['outline', 'apply']),
+      mode: enumOf(EDIT_MODES, 'The way to cut the user asked for; omit to read it from the pool.'),
+      targetSec: num('Picture length in seconds for a montage with no voice-over; ignored while narration is on the timeline.', { min: 1 }),
+      picks: arr(obj({
+        beats: arr(int('Beat index from outline.', 0), { minItems: 2, maxItems: 2, description: '[first, last] beat this footage covers.' }),
+        assetId: str(),
+        source: SOURCE_RANGE,
+        want: enumOf(MONTAGE_WANTS, 'What the window should show: a face toward the camera, a profile, a back, nobody, or anything.'),
+      }, ['beats', 'assetId', 'source']), { minItems: 1 }),
+    }, ['action']),
   },
   insert_clips: {
     description:

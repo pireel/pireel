@@ -1,7 +1,6 @@
 import type { UIMessage } from 'ai';
 import { describe, expect, it } from 'vitest';
 import {
-  assistantEditorialCapacityShortfall,
   assistantHasOpenOrInterruptedInteraction,
   assistantMessageHasRenderableOutput,
   assistantMessageSuggestsContinuation,
@@ -310,16 +309,6 @@ describe('analyze visual card context', () => {
       input: { assetId: 'asset-internal-123' },
       output: { ok: true, data: { label: '海边回眸.mov' } },
     })).toBe('海边回眸.mov');
-  });
-});
-
-describe('editorial capacity notice', () => {
-  it('returns one material shortfall from the latest assemble_from_review receipt without blocking the result', () => {
-    const covered = { type: 'tool-assemble_from_review', toolCallId: 'a1', state: 'output-available', input: {}, output: { ok: true, data: { result: { coverage: { targetDurationSec: 54, actualDurationSec: 53.6 } } } } };
-    const short = { type: 'tool-assemble_from_review', toolCallId: 'a2', state: 'output-available', input: {}, output: { ok: true, data: { coverage: { targetDurationSec: 54, actualDurationSec: 36 } } } };
-    expect(assistantEditorialCapacityShortfall(assistant([covered] as UIMessage['parts']))).toBeNull();
-    expect(assistantEditorialCapacityShortfall(assistant([covered, short] as UIMessage['parts']))).toBe(18);
-    expect(assistantEditorialCapacityShortfall(assistant([short, covered] as UIMessage['parts']))).toBeNull();
   });
 });
 

@@ -2,7 +2,7 @@ import type { EditorialCandidateReview } from '@pireel/studio-engine/editorial-c
 
 /**
  * Reviewed sources of the current session, per project. Filled by inspect_media mode:editorial
- * (single or batch) as reviews complete; read by assemble_from_review and by the add_clips review
+ * (single or batch) as reviews complete; read by plan_montage and by the add_clips review
  * guard. The persistent review cache (editorial-review-cache) makes a repeated inspect_media free,
  * so after a reload the honest path is to run the review again rather than trust stale memory.
  */

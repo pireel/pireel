@@ -388,29 +388,6 @@ function compactAssistantMessageForModel(message: UIMessage): UIMessage {
   };
 }
 
-/** Return only a material shortage after assemble_from_review has finished. Presentation metadata,
- * never a gate: the best available edit remains complete and the user decides whether to add footage. */
-export function assistantEditorialCapacityShortfall(message: UIMessage): number | null {
-  if (message.role !== 'assistant') return null;
-  let latest: { targetDurationSec: number; actualDurationSec: number } | null = null;
-  for (const part of message.parts ?? []) {
-    const candidate = part as { type?: string; state?: string; output?: unknown };
-    if (candidate.type !== 'tool-assemble_from_review' || candidate.state !== 'output-available') continue;
-    const output = candidate.output as { ok?: unknown; data?: { coverage?: unknown; result?: { coverage?: unknown } } } | undefined;
-    if (output?.ok !== true) continue;
-    const coverage = (output.data?.coverage ?? output.data?.result?.coverage) as { targetDurationSec?: unknown; actualDurationSec?: unknown } | undefined;
-    const targetDurationSec = Number(coverage?.targetDurationSec);
-    const actualDurationSec = Number(coverage?.actualDurationSec);
-    if (Number.isFinite(targetDurationSec) && targetDurationSec > 0 && Number.isFinite(actualDurationSec)) {
-      latest = { targetDurationSec, actualDurationSec };
-    }
-  }
-  if (!latest) return null;
-  const shortfallSec = Math.max(0, latest.targetDurationSec - latest.actualDurationSec);
-  const toleranceSec = Math.max(1, latest.targetDurationSec * 0.03);
-  return shortfallSec > toleranceSec ? Math.round(shortfallSec * 10) / 10 : null;
-}
-
 export function normalizeStoredThreads(value: unknown, availableSkillIds: readonly string[] = []): StoredThread[] {
   if (!Array.isArray(value)) return [];
   const available = new Set(availableSkillIds);
