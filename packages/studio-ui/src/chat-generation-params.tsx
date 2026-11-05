@@ -47,7 +47,7 @@ function PopButton({ icon, title, active, disabled, children }: { icon: ReactNod
     // A select inside the panel portals its option list to <body>; clicks there still belong to the panel.
     const ownsMenu = (element: Element | null) => {
       const owner = element?.closest('[data-scene-select-owner]')?.getAttribute('data-scene-select-owner');
-      return !!owner && !!panelRef.current?.querySelector(`[data-scene-select-scope="${CSS.escape(owner)}"]`);
+      return !!owner && Array.from(panelRef.current?.querySelectorAll('[data-scene-select-scope]') ?? []).some((scope) => scope.getAttribute('data-scene-select-scope') === owner);
     };
     const onDoc = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
