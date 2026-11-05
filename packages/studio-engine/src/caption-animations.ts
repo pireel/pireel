@@ -29,8 +29,12 @@ export function captionAnimationId(style: { preset?: string; animation?: string 
 export function animatedCaptionPreset(preset: CaptionPreset, animation?: string): CaptionPreset {
   if (!isCaptionAnimation(animation)) return preset;
   const effect: Partial<CaptionPreset> = CAPTION_ANIMATIONS.find(item => item.id === animation)!;
-  return { ...preset, mode: effect.wordMotion || effect.emphasis || effect.deco ? 'emphasis' : 'line',
-    motion: effect.motion, wordMotion: effect.wordMotion, emphasis: effect.emphasis, deco: effect.deco, decoColor: effect.decoColor };
+  const mode = effect.wordMotion || effect.emphasis || effect.deco ? 'emphasis' : 'line';
+  // A motion with no word effect of its own keeps the look's accent: key words stay that color
+  // (em-green under "none" highlights green, not the default yellow). A line caption never
+  // recolors the spoken word, so the accent only reaches highlighted words.
+  return { ...preset, mode,
+    motion: effect.motion, wordMotion: effect.wordMotion, emphasis: effect.emphasis ?? (mode === 'line' ? preset.emphasis : undefined), deco: effect.deco, decoColor: effect.decoColor };
 }
 
 /** Color for emphasized words: the user's highlight override, else the animation's own color.

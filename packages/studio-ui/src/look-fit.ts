@@ -6,11 +6,11 @@
  */
 
 import type { Block, Composition, NormBox, SupplementalVisualMediaClip, VideoShot, VideoShotTimelinePlacement } from '@pireel/studio-engine/composition';
-import { sourceDrawRect, videoShotTimelineSpans, videoTrackShots } from '@pireel/studio-engine/composition';
+import { resolveShotMediaFraming, sourceDrawRect, videoShotTimelineSpans, videoTrackShots } from '@pireel/studio-engine/composition';
 import type { EditorDocumentV2 } from '@pireel/studio-engine/editor-document/types';
 import { documentCaptionsOn } from '@pireel/studio-engine/editor-document/caption-state';
 import { captionBandRects } from '@pireel/studio-engine/facts';
-import { fitGraphic, headRectFromFace, type GraphicObstacle, type PxRect } from '@pireel/studio-engine/graphic-fit';
+import { fitGraphic, headRectFromFace, mediaWindowBox, type GraphicObstacle, type PxRect } from '@pireel/studio-engine/graphic-fit';
 import { LOOK_TEMPLATE_PREFIX, lookHeadHtml, type DocumentLook, type LookIssue } from '@pireel/studio-engine/look';
 import { lookPieceContractIssues, lookPieceProbes, type LookProbeRender } from '@pireel/studio-engine/look-contract';
 import { measureOverlayBlocks } from './client-export';
@@ -144,24 +144,31 @@ function sourceFaces(file: File, fromSec: number, toSec: number): Promise<PxRect
   return hit;
 }
 
-/** The speaker's head over a stretch of the timeline, in canvas px — one rect per sampled moment. */
-async function headsDuring(
+/** What of the speaker a graphic must stay off over a stretch of the timeline, in canvas px: the
+ *  head of a frame-filling speaker (one rect per sampled moment), or the whole window of a shrunk
+ *  or split one. */
+async function speakerDuring(
   comp: Composition,
   placements: readonly VideoShotTimelinePlacement[] | undefined,
   deps: Pick<LookFitDeps, 'videoFile' | 'clipFiles'>,
   startSec: number,
   endSec: number,
-): Promise<PxRect[]> {
+): Promise<GraphicObstacle[]> {
   const W = comp.width;
   const H = comp.height;
-  const out: PxRect[] = [];
+  const out: GraphicObstacle[] = [];
   for (const span of videoShotTimelineSpans(videoTrackShots(comp), placements)) {
     const from = Math.max(startSec, span.editedStart);
     const to = Math.min(endSec, span.editedEnd);
     if (to - from < 0.05) continue;
     const shot = span.clip as VideoShot;
-    // A shrunk or split speaker sits in its own window; only a frame-filling one is mapped here.
-    if (shot.treatment !== 'full' && shot.treatment !== 'punch-in') continue;
+    // A shrunk or split speaker sits in its own window: the window is the obstacle (a chart moved
+    // off the captions used to land on a corner speaker).
+    if (shot.treatment !== 'full' && shot.treatment !== 'punch-in') {
+      const window = mediaWindowBox(resolveShotMediaFraming(shot));
+      if (window.w > 0 && window.h > 0 && window.w * window.h < 0.95) out.push({ x: window.x * W, y: window.y * H, w: window.w * W, h: window.h * H, kind: 'speaker' });
+      continue;
+    }
     const file = shot.src ? deps.clipFiles.get(shot.src) ?? null : deps.videoFile;
     if (!file) continue;
     const dims = await sourceDims(file);
@@ -175,7 +182,7 @@ async function headsDuring(
     for (const face of await sourceFaces(file, srcFrom, srcTo)) {
       const x = mapX(face.x);
       const y = mapY(face.y);
-      out.push(headRectFromFace({ x, y, w: mapX(face.x + face.w) - x, h: mapY(face.y + face.h) - y }));
+      out.push({ ...headRectFromFace({ x, y, w: mapX(face.x + face.w) - x, h: mapY(face.y + face.h) - y }), kind: 'face' });
     }
   }
   return out;
@@ -260,7 +267,7 @@ export async function fitLookInstances(deps: LookFitDeps, clipIds?: readonly str
     for (const clip of targets) {
       const measure = measured[clip.id];
       if (!measure) continue;
-      const heads = await headsDuring(comp, timeline.placements, deps, clip.startSec, clip.startSec + clip.durationSec);
+      const speaker = await speakerDuring(comp, timeline.placements, deps, clip.startSec, clip.startSec + clip.durationSec);
       const neighbours = others
         .filter((other) => other.id !== clip.id && other.startSec < clip.startSec + clip.durationSec && clip.startSec < other.startSec + other.durationSec)
         .flatMap((other) => { const ink = placed.get(other.id) ?? other.ink; return ink ? [{ ...ink, kind: 'graphic' as const }] : []; });
@@ -268,7 +275,7 @@ export async function fitLookInstances(deps: LookFitDeps, clipIds?: readonly str
         canvas: { width: comp.width, height: comp.height },
         geometry: { box: clip.block.box ?? { x: 0, y: 0, w: 1, h: 1 }, contentBox: clip.block.contentBox, scale: clip.block.scale, fitScale: clip.block.fitScale },
         measure,
-        obstacles: [...heads.map((head) => ({ ...head, kind: 'face' as const })), ...captions, ...neighbours],
+        obstacles: [...speaker, ...captions, ...neighbours],
         grow: round === 0,
       });
       if (fit.geometry && measure.ink) placed.set(clip.id, movedInk(measure.ink, clip.block, fit.geometry, comp.width, comp.height));

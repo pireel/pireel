@@ -602,6 +602,32 @@ export function setClipPropertiesV3(document: EditorDocumentV2, input: Input): A
   return mutation(next, `Updated ${items.length} clip${items.length === 1 ? '' : 's'}${notes.length ? ` (${notes.join('; ')})` : ''}`, receipts);
 }
 
+/** How far a scaled, contain-fitted picture can move before the canvas shows past its edge. The
+ *  layer fills `fit` of the canvas on an axis; scaled by `scale` around the anchor, its centre moves
+ *  (0.5 − anchor)·scale layers, so the anchor stays within 0.5 ± (scale·fit − 1)/(2·scale·fit).
+ *  Returns the clamped anchors that changed, and notes for the agent. */
+export function fillFraming(framing: { scale: number; anchorX: number; anchorY: number }, sourceWidth: number, sourceHeight: number, canvasWidth: number, canvasHeight: number): { anchorX?: number; anchorY?: number; notes: string[] } {
+  const fit = Math.min(canvasWidth / sourceWidth, canvasHeight / sourceHeight);
+  const axes = { anchorX: (sourceWidth * fit) / canvasWidth, anchorY: (sourceHeight * fit) / canvasHeight };
+  const out: { anchorX?: number; anchorY?: number; notes: string[] } = { notes: [] };
+  const round = (value: number) => Math.round(value * 1000) / 1000;
+  for (const axis of ['anchorX', 'anchorY'] as const) {
+    const covered = framing.scale * axes[axis];
+    if (covered < 0.999) {
+      out.notes.push(`scale ${framing.scale} leaves the canvas uncovered ${axis === 'anchorX' ? 'left and right' : 'above and below'}; scale ≥ ${Math.ceil((1 / axes[axis]) * 100) / 100} fills it`);
+      if (framing[axis] !== 0.5) out[axis] = 0.5;
+      continue;
+    }
+    const reach = (covered - 1) / (2 * covered);
+    const clamped = round(Math.min(0.5 + reach, Math.max(0.5 - reach, framing[axis])));
+    if (Math.abs(clamped - framing[axis]) > 0.0005) {
+      out[axis] = clamped;
+      out.notes.push(`${axis} ${framing[axis]} would show the canvas past the picture's edge; held at ${clamped} (range ${round(0.5 - reach)}–${round(0.5 + reach)} at scale ${framing.scale})`);
+    }
+  }
+  return out;
+}
+
 export function setClipFramingV3(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const items = Array.isArray(input.items) ? (input.items as Input[]) : [];
   if (!items.length) return fail('items is required', { fix: 'Pass items: [{clipId, treatment? | box? | transform? | cropInsets?}].' });
@@ -705,12 +731,24 @@ export function setClipFramingV3(document: EditorDocumentV2, input: Input): Agen
       const shots = allVideoShots(next);
       const row: Input = { shotId: clipId };
       for (const key of recipe) row[key] = item[key];
-      const applied = applyShotFramingInput({ ...c, shots }, { updates: [row] }, shots);
+      let applied = applyShotFramingInput({ ...c, shots }, { updates: [row] }, shots);
       if ('error' in applied) return fail(applied.error);
+      // Keep the picture over the whole canvas: an anchor past the fill range shows the canvas
+      // behind the footage (black bands on a punched-in landscape shot in a portrait frame).
+      const asset = 'assetId' in found.clip ? next.assets[found.clip.assetId] : undefined;
+      const framed = applied.updates[0]?.framing;
+      const fill = framed && !framed.coordinateSpace && asset?.metadata.width && asset.metadata.height
+        ? fillFraming(framed, asset.metadata.width, asset.metadata.height, next.canvas.width, next.canvas.height)
+        : undefined;
+      if (fill?.anchorX !== undefined || fill?.anchorY !== undefined) {
+        const clamped = { ...row, scale: framed!.scale, anchorX: fill.anchorX ?? framed!.anchorX, anchorY: fill.anchorY ?? framed!.anchorY };
+        applied = applyShotFramingInput({ ...c, shots }, { updates: [clamped] }, shots);
+        if ('error' in applied) return fail(applied.error);
+      }
       const native = applyVideoClipSettingsPatches(next, applied.patches.map(({ shotId, patch }) => ({ clipId: shotId, patch: { framing: patch } })));
       if (!native.ok) return fail(native.error, native.data);
       next = native.document;
-      updates.push(...applied.updates);
+      updates.push(...applied.updates.map((update) => (fill?.notes.length ? { ...update, notes: fill.notes } : update)));
       touched = true;
     }
     if (item.transform && typeof item.transform === 'object') {
@@ -1175,6 +1213,11 @@ export function setCaptionsV3(document: EditorDocumentV2, input: Input): AgentTi
     next = edit.document; receipts.push(...edit.receipts);
     const style = documentCaptionStyle(next);
     summaries.push(`${turningOn ? 'Captions on' : 'Captions adjusted'}: ${getCaptionPreset(style.preset).name}`);
+    // A clamped position must say so: an unchanged layer otherwise reads as an edit that did not land.
+    if (yPct != null && isFiniteNumber(input.yPct) && yPct !== input.yPct) {
+      summaries.push(`yPct ${input.yPct} is below this canvas's caption safe area (platform buttons cover it); placed at ${yPct}`);
+      data.yPct = yPct;
+    }
   }
 
   if (Array.isArray(input.corrections) && input.corrections.length) {

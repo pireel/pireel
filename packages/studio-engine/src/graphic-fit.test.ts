@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { fitGraphic, headRectFromFace, minReadableGraphicFontPx } from './graphic-fit';
+import { atomicMediaFramingFromTreatment } from './composition-core';
+import { fitGraphic, headRectFromFace, mediaWindowBox, minReadableGraphicFontPx } from './graphic-fit';
 
 const canvas = { width: 1080, height: 1920 };
 const head = { ...headRectFromFace({ x: 300, y: 700, w: 480, h: 400 }), kind: 'face' as const };
@@ -114,5 +115,22 @@ describe('fitGraphic growth limits', () => {
     });
     expect(fit.geometry).toBeNull();
     expect(fit.unresolved).toEqual([expect.stringContaining('smallest text is 20px')]);
+  });
+
+  it('keeps a chart pushed off the captions out of a corner speaker\'s window', () => {
+    const window = mediaWindowBox(atomicMediaFramingFromTreatment('corner-tr', 40));
+    expect(window.x + window.w).toBeCloseTo(0.98, 2);
+    expect(window.y).toBeCloseTo(0.02, 2);
+    const speaker = { x: window.x * 1080, y: window.y * 1920, w: window.w * 1080, h: window.h * 1920, kind: 'speaker' as const };
+    const captions = { x: 60, y: 1300, w: 960, h: 260, kind: 'captions' as const };
+    // A wide chart sitting on the captions: up would land it in the window, so it goes the other way or shrinks.
+    const ink = { x: 70, y: 1150, w: 940, h: 400 };
+    const fit = fitGraphic({ canvas, geometry: { box: { x: 0.06, y: 0.59, w: 0.88, h: 0.22 } }, measure: { ink, paint: ink, minFontPx: 40 }, obstacles: [speaker, captions] });
+    expect(fit.geometry).not.toBeNull();
+    const box = fit.geometry!.box;
+    const placed = { x: box.x * 1080, y: box.y * 1920, w: box.w * 1080, h: box.h * 1920 };
+    const overlaps = (a: typeof placed, b: typeof placed) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+    expect(overlaps(placed, speaker)).toBe(false);
+    expect(overlaps(placed, captions)).toBe(false);
   });
 });

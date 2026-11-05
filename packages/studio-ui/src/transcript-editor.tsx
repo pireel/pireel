@@ -1,6 +1,6 @@
 'use client';
 
-import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { Fragment, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, Highlighter, Loader2, Scissors, ScrollText, X } from 'lucide-react';
 import { managedCaptionLineRows, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
@@ -349,13 +349,16 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
             return <span key={removal.id} data-transcript-removed={removal.id}>
               {removal.parts.map((part, partIndex) => {
                 const picked = selection?.kind === 'removed' && selection.part === part;
-                return <button key={partIndex} type="button" title={onRestore ? t('panels.deletedClickRestore') : undefined} aria-pressed={picked}
+                const previous = removal.parts[partIndex - 1];
+                // Struck words keep their spacing, like the live words around them.
+                const gap = previous?.kind === 'word' && part.kind === 'word' && latinJoin(previous.text, part.text) ? ' ' : '';
+                return <Fragment key={partIndex}>{gap}<button type="button" title={onRestore ? t('panels.deletedClickRestore') : undefined} aria-pressed={picked}
                   onClick={(event) => { close(); if (onRestore) setSelection({ kind: 'removed', removal, part, ...selectionPosition(event.currentTarget.getBoundingClientRect(), 220) }); }}
                   className={part.kind === 'pause'
                     ? `mx-0.5 inline rounded px-1 align-baseline font-mono text-[10.5px] leading-6 tabular-nums line-through ${picked ? 'bg-ink/15 text-ink-2' : 'text-ink-4 hover:bg-ink/10'}`
                     : `inline rounded-sm p-0 align-baseline line-through decoration-1 ${picked ? 'bg-ink/15 text-ink-2' : 'text-ink-4/80 hover:text-ink-3'}`}>
                   {part.kind === 'pause' ? `${(part.sourceEnd - part.sourceStart).toFixed(2)}s` : part.text}
-                </button>;
+                </button></Fragment>;
               })}
             </span>;
           }

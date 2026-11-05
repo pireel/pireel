@@ -43,7 +43,18 @@ export interface GraphicGeometry {
   fitScale?: number;
 }
 
-export type GraphicObstacleKind = 'face' | 'captions' | 'graphic';
+/** speaker = a shrunk or split speaker's window: the whole picture of them, not only their face. */
+export type GraphicObstacleKind = 'face' | 'speaker' | 'captions' | 'graphic';
+
+/** Where a shot's picture lands on the canvas, normalized: its crop window scaled around the
+ *  canvas centre, then offset (the order the preview and export apply them in). */
+export function mediaWindowBox(framing: { transform: { scale: number; offsetX: number; offsetY: number }; crop: { top: number; right: number; bottom: number; left: number } }): NormBox {
+  const { scale, offsetX, offsetY } = framing.transform;
+  const at = (u: number, offset: number) => 0.5 + (u - 0.5) * scale + offset;
+  const x0 = at(framing.crop.left, offsetX);
+  const y0 = at(framing.crop.top, offsetY);
+  return { x: x0, y: y0, w: at(1 - framing.crop.right, offsetX) - x0, h: at(1 - framing.crop.bottom, offsetY) - y0 };
+}
 
 export interface GraphicObstacle extends PxRect {
   kind: GraphicObstacleKind;

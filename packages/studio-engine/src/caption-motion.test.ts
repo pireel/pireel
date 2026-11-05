@@ -105,4 +105,14 @@ describe('independent appearance and animation', () => {
     expect(spoken.innerHtml).toContain('--word-highlight:#123456'); // chosen color wins
     expect(spoken.timelineBody).toMatch(/-w2 \.t'/); // every spoken word pulses
   });
+  it('keeps the look\'s accent on key words under a motion with no word color', () => {
+    const block = captionBlocksFromAsr(source)[0]!;
+    const words = [{ text: '你好', start: 0, end: 0.5, decoration: { highlight: 'color' as const } }, { text: '世界', start: 0.6, end: 1.2 }];
+    const green = CAPTION_PRESETS.find((preset) => preset.id === 'em-green')!.emphasis!;
+    for (const animation of ['none', 'fade', 'pop']) {
+      const rendered = renderBlock({ ...block, slots: { ...block.slots, words, preset: 'em-green', animation, cue: true } });
+      expect(rendered.innerHtml).toContain(`--word-highlight:${green}`);
+      expect(rendered.timelineBody).not.toContain(green); // the spoken word is not recolored
+    }
+  });
 });
