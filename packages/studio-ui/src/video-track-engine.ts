@@ -24,7 +24,7 @@ import { studioProviders } from '@pireel/studio-engine/providers';
  * source again (the original createImageBitmap(video) path).
  */
 
-import type { ShotPreciseFraming } from '@pireel/studio-engine/composition';
+import { isSourceSplit, transitionHandleTime, type ShotPreciseFraming } from '@pireel/studio-engine/composition';
 import { type MaskedAudioRange, type WordAudioMask, maskedAudioAt } from '@pireel/studio-engine/word-masks';
 import { ALL_FORMATS, BlobSource, Input, type InputAudioTrack, UrlSource } from 'mediabunny';
 import { FrameCursor, SourceFrameDecoder, decodableMediaUrl } from './video-frame-decoder';
@@ -137,6 +137,8 @@ export interface FrameInfo {
 }
 
 const EPS = 0.04;
+/** How far a shot boundary stored to the millisecond can sit from its frame's own time. */
+const FRAME_EDGE_SEC = 0.001;
 
 /** Removing a playing media element from the DOM does not reliably stop its audio. Pause it before
  * releasing the node so a transient preview respec cannot leave an orphan narration playing beside
@@ -410,8 +412,9 @@ export class VideoTrackEngine {
     warm(this.cursorFor(next.key, this.mainSlot(nx)), next.srcStart);
     if (!window) return;
     const rateIn = segmentSourceRate(next, this.starts[nx]!, this.ends[nx]!);
-    warm(this.cursorFor(next.key, 'pre'), next.srcStart - lead * rateIn);
-    warm(this.cursorFor(seg.key, 'post'), seg.srcEnd);
+    const split = isSourceSplit(seg, next, seg.key === next.key);
+    warm(this.cursorFor(next.key, 'pre'), transitionHandleTime('pre', next, lead, rateIn, split));
+    warm(this.cursorFor(seg.key, 'post'), transitionHandleTime('post', seg, 0, 1, split));
   }
 
   /** Read a source's narration sound from its bytes (the Web Audio clock's input). */
@@ -1221,9 +1224,8 @@ export class VideoTrackEngine {
     const otherIndex = pre ? w.iB : w.iA;
     const seg = this.segs[otherIndex]!;
     const rate = segmentSourceRate(seg, this.starts[otherIndex]!, this.ends[otherIndex]!);
-    const srcT = pre
-      ? Math.max(0, seg.srcStart - (w.cut - t) * rate)
-      : seg.srcEnd + (t - w.cut) * rate;
+    const split = isSourceSplit(this.segs[w.iA]!, this.segs[w.iB]!, this.segs[w.iA]!.key === this.segs[w.iB]!.key);
+    const srcT = transitionHandleTime(pre ? 'pre' : 'post', seg, pre ? w.cut - t : t - w.cut, rate, split);
     return { seg, srcT, side: pre ? 'pre' : 'post' };
   }
 
@@ -1393,31 +1395,33 @@ export class VideoTrackEngine {
     const otherCursor = other ? this.cursorFor(other.seg.key, other.side) : null;
     if (!otherCursor && this.lastPush && this.lastPush.key === seg.key && Math.abs(this.lastPush.srcT - srcT) < 1 / 60) return;
     this.bitmapInflight = true;
-    const grabMain: Promise<ImageBitmap | null> = cursor
-      ? cursor.frameAt(srcT).then((frame) => (frame ? createImageBitmap(frame.canvas) : null))
-      : this.displayBitmap(el!);
+    // Each picture carries the source time it shows: its framing is that frame's shot (shotOfFrame).
+    const grabMain: Promise<{ bmp: ImageBitmap; at: number } | null> = cursor
+      ? cursor.frameAt(srcT).then(async (frame) => (frame ? { bmp: await createImageBitmap(frame.canvas), at: frame.timestamp } : null))
+      : this.displayBitmap(el!).then((bmp) => ({ bmp, at: srcT }));
     const grabOther: Promise<{ bmp: ImageBitmap; w: number; h: number } | null> = otherCursor && other
       ? otherCursor.frameAt(other.srcT).then(async (frame) => (frame ? { bmp: await createImageBitmap(frame.canvas), w: frame.width, h: frame.height } : null)).catch(() => null)
       : Promise.resolve(null);
     Promise.all([grabMain, grabOther]).then(
-      ([bmp, second]) => {
-        if (!bmp || requestGen !== this.seekGen || requestIdx !== this.curIdx) {
+      ([main, second]) => {
+        if (!main || requestGen !== this.seekGen || requestIdx !== this.curIdx) {
           // superseded (a newer seek took the cursor) or stale: the newer request pushes
-          bmp?.close();
+          main?.bmp.close();
           second?.bmp.close();
           this.finishBitmapPush();
           return;
         }
         this.lastPush = { key: seg.key, srcT };
+        const shown = this.shotOfFrame(requestIdx, main.at);
         this.onFrame?.(
-          bmp,
+          main.bmp,
           {
             t,
             elKey: seg.elKey,
             srcT,
             sourceWidth: dims.w,
             sourceHeight: dims.h,
-            ...(seg.framing ? { framing: seg.framing } : {}),
+            ...(shown.framing ? { framing: shown.framing } : {}),
             ...(second && other?.seg.framing ? { framing2: other.seg.framing } : {}),
             ...(second ? { sourceWidth2: second.w, sourceHeight2: second.h } : {}),
           },
@@ -1429,6 +1433,21 @@ export class VideoTrackEngine {
         this.finishBitmapPush();
       },
     );
+  }
+
+  /**
+   * The shot a frame belongs to, by the source time it shows. Where one source is split at a camera
+   * change (isSourceSplit), the playing position can sit a frame past the cut, or the handoff come a
+   * frame early (EPS): the frame of the next shot must not wear this shot's framing, nor the reverse.
+   * A boundary stored to the millisecond lies within a millisecond of its frame.
+   */
+  private shotOfFrame(i: number, at: number): EngineSeg {
+    const seg = this.segs[i]!;
+    const before = this.segs[i - 1];
+    const after = this.segs[i + 1];
+    if (before && at < seg.srcStart - FRAME_EDGE_SEC && isSourceSplit(before, seg, before.key === seg.key)) return before;
+    if (after && at >= seg.srcEnd - FRAME_EDGE_SEC && isSourceSplit(seg, after, seg.key === after.key)) return after;
+    return seg;
   }
 
   /** Element picture path (no decoder for this source). Produce a bitmap in the video's display

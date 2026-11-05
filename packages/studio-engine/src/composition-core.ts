@@ -487,6 +487,28 @@ export function transitionWindows(
     .sort((left, right) => left.start - right.start);
 }
 
+/** Two clips this close in their source (seconds) are one stretch of it, split at the cut between them. */
+const SPLIT_TOLERANCE_SEC = 0.02;
+
+/** Whether B picks up the same source exactly where A leaves it: a split, as at a camera change found in
+ *  a long recording. Then neither has handles of its own (past A's end is B's picture, before B's start
+ *  is A's), and a transition over the cut holds each side's edge frame instead. */
+export function isSourceSplit(a: { srcEnd: number }, b: { srcStart: number }, sameSource: boolean): boolean {
+  return sameSource && Math.abs(a.srcEnd - b.srcStart) <= SPLIT_TOLERANCE_SEC;
+}
+
+/**
+ * The source time a cut transition shows of the side that is not playing, `over` seconds of film from
+ * the cut: before it, B's lead-in before its start; after it, A's tail past its end. Clips split from
+ * one stretch of source (isSourceSplit) hold their edge frames: B's first, A's last.
+ */
+export function transitionHandleTime(side: 'pre' | 'post', seg: { srcStart: number; srcEnd: number }, over: number, rate: number, split: boolean): number {
+  if (side === 'pre') return split ? seg.srcStart : Math.max(0, seg.srcStart - over * rate);
+  return split ? Math.max(seg.srcStart, seg.srcEnd - HELD_FRAME_SEC) : seg.srcEnd + over * rate;
+}
+/** Just inside A's end: its last frame, not the next one. */
+const HELD_FRAME_SEC = 0.001;
+
 /** Three color-grade params (numeric factors, 1 = no change; undefined treated as 1). */
 export interface ShotFilter {
   brightness?: number;

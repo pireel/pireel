@@ -13,7 +13,7 @@
  */
 
 import { type GlMixer, createGlMixer, glDirection } from '@pireel/studio-engine/transition-gl';
-import { sourceDrawRect, type CutTransitionEffect, type ShotPreciseFraming, type TransitionDirection } from '@pireel/studio-engine/composition';
+import { sourceDrawRect, transitionHandleTime, type CutTransitionEffect, type ShotPreciseFraming, type TransitionDirection } from '@pireel/studio-engine/composition';
 import { disposeSourceRig, type SourceRig, openSource, sampleAt } from './export-video-source';
 
 export interface BakeSpec {
@@ -32,6 +32,8 @@ export interface BakeSpec {
   rateB?: number;
   framingA?: ShotPreciseFraming;
   framingB?: ShotPreciseFraming;
+  /** A and B are one stretch of the same source split at the cut: each side holds its edge frame (isSourceSplit). */
+  split?: boolean;
   /** Canvas (comp) size — bake renders at 0.5×. */
   compW: number;
   compH: number;
@@ -74,8 +76,11 @@ export async function bakeTransitionWindow(spec: BakeSpec, cancelled?: () => boo
   const rateB = spec.rateB ?? 1;
   try {
     const liveA = await open(spec.fileA, spec.aEnd - spec.pre * rateA, spec.aEnd);
-    const ghostB = await open(spec.fileB, spec.bStart - spec.pre * rateB, spec.bStart);
-    const ghostA = await open(spec.fileA, spec.aEnd, spec.aEnd + spec.post * rateA);
+    // The handle streams reach a little past the edge: a split holds B's first frame and A's last.
+    const ghostB = await open(spec.fileB, spec.bStart - spec.pre * rateB, spec.bStart + 0.1 * rateB);
+    const ghostA = await open(spec.fileA, spec.aEnd - 0.1 * rateA, spec.aEnd + spec.post * rateA);
+    const segA = { srcStart: spec.aEnd - spec.pre * rateA, srcEnd: spec.aEnd };
+    const segB = { srcStart: spec.bStart, srcEnd: spec.bStart + spec.post * rateB };
     const liveB = await open(spec.fileB, spec.bStart, spec.bStart + spec.post * rateB);
     const [dx, dy] = glDirection(spec.dir);
     const frames: Blob[] = [];
@@ -100,10 +105,10 @@ export async function bakeTransitionWindow(spec: BakeSpec, cancelled?: () => boo
       haveF =
         (pre
           ? await drawSide(liveA, spec.aEnd - (spec.cut - t) * rateA, stageF, spec.framingA)
-          : await drawSide(ghostA, spec.aEnd + (t - spec.cut) * rateA, stageF, spec.framingA)) || haveF;
+          : await drawSide(ghostA, transitionHandleTime('post', segA, t - spec.cut, rateA, !!spec.split), stageF, spec.framingA)) || haveF;
       haveT =
         (pre
-          ? await drawSide(ghostB, spec.bStart - (spec.cut - t) * rateB, stageT, spec.framingB)
+          ? await drawSide(ghostB, transitionHandleTime('pre', segB, spec.cut - t, rateB, !!spec.split), stageT, spec.framingB)
           : await drawSide(liveB, spec.bStart + (t - spec.cut) * rateB, stageT, spec.framingB)) || haveT;
       if (!haveF || !haveT) return null; // can't even sample the first frame: this window can't be baked (media boundary)
       if (!mixer.render(stageF, stageT, spec.effect, p, dx, dy, `f${i}`, `t${i}`)) return null;

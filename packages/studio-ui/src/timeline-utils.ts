@@ -177,19 +177,30 @@ export function stripTiles(strip: FilmstripFrame[], srcStart: number, srcEnd: nu
   if (!strip.length || tileDur <= 0 || srcEnd <= srcStart) return [];
   const tiles: { left: number; url: string }[] = [];
   for (let k = Math.floor(srcStart / tileDur); k * tileDur < srcEnd; k++) {
-    const srcT = (k + 0.5) * tileDur;
-    let url = strip[0]!.url;
-    let bd = Infinity;
-    for (const f of strip) {
-      const d = Math.abs(f.t - srcT);
-      if (d < bd) {
-        bd = d;
-        url = f.url;
-      }
-    }
-    tiles.push({ left: (k * tileDur - srcStart) * pps, url });
+    tiles.push({ left: (k * tileDur - srcStart) * pps, url: stripFrameWithin(strip, (k + 0.5) * tileDur, srcStart, srcEnd).url });
   }
   return tiles;
+}
+
+/**
+ * The strip frame a tile shows: the one nearest the tile's middle, but from the clip's own source range.
+ * A tile at either end of a clip is cut by its edge, so its middle can lie outside the clip; where the
+ * clip ends at a camera change, that picture is the shot next door. A clip too short to hold a strip
+ * frame of its own falls back to the nearest one.
+ */
+function stripFrameWithin(strip: FilmstripFrame[], srcT: number, srcStart: number, srcEnd: number): FilmstripFrame {
+  const target = Math.min(Math.max(srcT, srcStart), srcEnd);
+  let closest: FilmstripFrame | null = null;
+  let distance = Number.POSITIVE_INFINITY;
+  for (const frame of strip) {
+    if (frame.t < srcStart || frame.t >= srcEnd) continue;
+    const candidate = Math.abs(frame.t - target);
+    if (candidate < distance) { closest = frame; distance = candidate; }
+  }
+  if (closest) return closest;
+  closest = strip[0]!;
+  for (const frame of strip) if (Math.abs(frame.t - target) < Math.abs(closest.t - target)) closest = frame;
+  return closest;
 }
 
 /** Keep filmstrip DOM proportional to the viewport, not the project duration. Cards remain mounted
@@ -227,20 +238,10 @@ export function visibleStripTiles(
   const last = Math.min(sourceLast, visibleLast);
   const tiles: { left: number; width: number; url: string }[] = [];
   for (let k = first; k <= last; k++) {
-    const srcT = (k + 0.5) * step;
-    let closest = strip[0]!;
-    let distance = Number.POSITIVE_INFINITY;
-    for (const frame of strip) {
-      const candidate = Math.abs(frame.t - srcT);
-      if (candidate < distance) {
-        closest = frame;
-        distance = candidate;
-      }
-    }
     tiles.push({
       left: ((k * step - srcStart) / sourceRate) * pps,
       width: tileDur * pps,
-      url: closest.url,
+      url: stripFrameWithin(strip, (k + 0.5) * step, srcStart, srcEnd).url,
     });
   }
   return tiles;

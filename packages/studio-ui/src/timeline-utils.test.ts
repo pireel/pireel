@@ -8,6 +8,7 @@ import {
   timelineResizeSurfaceDuration,
   timelineSourceResizeEnd,
   timelinePlacementOverlaps,
+  stripTiles,
   visibleStripTiles,
 } from './timeline-utils';
 
@@ -85,6 +86,15 @@ describe('visibleStripTiles', () => {
     const fast = visibleStripTiles(strip, 0, 3, 1, 50, 10, 10, 11.5, 11.5);
     expect(fast.map((tile) => tile.width)).toEqual([50, 50]);
     expect(fast.at(-1)!.left + fast.at(-1)!.width).toBeGreaterThanOrEqual(75);
+  });
+
+  it('shows only the clip\'s own picture in the tiles cut by its edges', () => {
+    // A strip every 0.5 s; a clip from 238.834 to 240.917 between two camera changes, 1 s tiles.
+    const strip = Array.from({ length: 20 }, (_, index) => ({ t: 236 + index * 0.5, url: `frame-${236 + index * 0.5}` }));
+    const tiles = visibleStripTiles(strip, 238.834, 240.917, 1, 50, 43.867, 43.867, 45.95, 45.95);
+    // Tile middles 238.5 and 240.5 … the first lies before the clip: it shows the clip's first frame instead.
+    expect(tiles.map((tile) => tile.url)).toEqual(['frame-239', 'frame-239.5', 'frame-240.5']);
+    expect(stripTiles(strip, 238.834, 240.917, 1, 50).map((tile) => tile.url)).toEqual(['frame-239', 'frame-239.5', 'frame-240.5']);
   });
 
   it('continues one strip across the halves of a split slowed clip', () => {

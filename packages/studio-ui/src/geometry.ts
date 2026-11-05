@@ -45,6 +45,31 @@ const PEOPLE_FACE_LONG_EDGE = 1280;
 const PEOPLE_FACE_MIN_SCORE = 0.6;
 /** findPictureCut: the least change between two frames (mean per colour channel, 0–255) that is a cut. */
 const PICTURE_CUT_CHANGE = 20;
+/** Frames either side of the biggest change that still change this much of it belong to the same transition. */
+const PICTURE_TRANSITION_SHARE = 0.1;
+
+/**
+ * The cut among a run of frame-to-frame changes (each frame against the one before): the biggest
+ * change, when it is a real change of picture, moved back to the first frame of the transition it is
+ * part of. A hard cut stands alone (its neighbours barely change), so it stays on its own frame.
+ */
+export function pictureCutFrame(changes: readonly { t: number; change: number }[]): number | null {
+  let peak = -1;
+  for (let index = 0; index < changes.length; index += 1) if (peak < 0 || changes[index]!.change > changes[peak]!.change) peak = index;
+  if (peak < 0 || changes[peak]!.change < PICTURE_CUT_CHANGE) return null;
+  let first = peak;
+  while (first > 0 && changes[first - 1]!.change >= changes[peak]!.change * PICTURE_TRANSITION_SHARE) first -= 1;
+  return frameTimeMs(changes[first]!.t);
+}
+
+/**
+ * A frame's time in whole milliseconds, never before the frame: a clip that starts there must show
+ * this frame, and a player shows the frame at or before the time it is asked for. At 24 fps a frame
+ * sits at 238.8333… s; rounded to 238.833 it would open on the frame before (the previous shot).
+ */
+function frameTimeMs(t: number): number {
+  return Math.ceil(Math.round(t * 1e6) / 1e3) / 1000;
+}
 /** The grid a face's look is averaged over: head and shoulders, 4 across, 6 down. */
 const LOOK_COLUMNS = 4;
 const LOOK_ROWS = 6;
@@ -528,7 +553,9 @@ export async function analyzeFacesAtTimes(file: File, requestedTimes: readonly n
 /**
  * The exact moment the picture cuts to another shot within [from, to] (seconds): every frame in the
  * window is compared with the one before at a thumbnail's size, and the biggest change, when it is
- * a real change of picture, is the cut. Returns the cut frame's time, or null when nothing cuts.
+ * a real change of picture, is the cut. A wipe or a dissolve changes the picture over several frames:
+ * the cut is the first of them, so the new shot's clip carries the whole transition and the old one
+ * ends on a clean frame. Returns that frame's time, or null when nothing cuts.
  */
 export async function findPictureCut(file: File, from: number, to: number): Promise<number | null> {
   if (!(to > from)) return null;
@@ -543,7 +570,7 @@ export async function findPictureCut(file: File, from: number, to: number): Prom
     const t0 = Math.max(0, await input.getFirstTimestamp());
     const sink = new VideoSampleSink(track);
     let previous: Uint8ClampedArray | null = null;
-    let best: { t: number; change: number } | null = null;
+    const changes: { t: number; change: number }[] = [];
     for await (const sample of sink.samples(Math.max(0, from) + t0, to + t0)) {
       const t = sample.timestamp - t0;
       sample.draw(ctx as unknown as CanvasRenderingContext2D, 0, 0, canvas.width, canvas.height);
@@ -552,12 +579,11 @@ export async function findPictureCut(file: File, from: number, to: number): Prom
       if (previous) {
         let sum = 0;
         for (let index = 0; index < pixels.length; index += 4) sum += Math.abs(pixels[index]! - previous[index]!) + Math.abs(pixels[index + 1]! - previous[index + 1]!) + Math.abs(pixels[index + 2]! - previous[index + 2]!);
-        const change = sum / (pixels.length / 4) / 3;
-        if (!best || change > best.change) best = { t, change };
+        changes.push({ t, change: sum / (pixels.length / 4) / 3 });
       }
       previous = pixels;
     }
-    return best && best.change >= PICTURE_CUT_CHANGE ? Math.round(best.t * 1000) / 1000 : null;
+    return pictureCutFrame(changes);
   } catch (error) {
     console.warn('[studio/geometry] cut scan failed:', error instanceof Error ? error.message : String(error));
     return null;

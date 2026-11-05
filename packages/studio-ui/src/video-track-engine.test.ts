@@ -349,3 +349,22 @@ describe('VideoTrackEngine WebCodecs picture', () => {
   });
 
 });
+
+describe('framing follows the frame shown', () => {
+  it('gives a frame past a camera cut the next shot\'s framing, and a frame before it the shot before', () => {
+    const engine = new VideoTrackEngine();
+    // A long recording split at camera changes (24 fps): the cut frame 5732 sits at 238.8333… s.
+    engine.setSegments([
+      { key: 'main', elKey: 'main', srcStart: 229.625, srcEnd: 238.834, framing: { scale: 1, anchorX: 0.5, anchorY: 0.5, coordinateSpace: 'source-normalized' } },
+      { key: 'main', elKey: 'main', srcStart: 238.834, srcEnd: 240.917, framing: { scale: 2, anchorX: 0.4, anchorY: 0.5, coordinateSpace: 'source-normalized' } },
+      { key: 'main', elKey: 'main', srcStart: 300, srcEnd: 302 },
+    ]);
+    const shotOf = (i: number, at: number) => (engine as unknown as { shotOfFrame(i: number, at: number): { srcStart: number } }).shotOfFrame(i, at).srcStart;
+    expect(shotOf(0, 5731 / 24)).toBe(229.625);
+    expect(shotOf(0, 5732 / 24)).toBe(238.834); // still playing A, but the frame is B's
+    expect(shotOf(1, 5731 / 24)).toBe(229.625); // handed over early, but the frame is A's
+    expect(shotOf(1, 5732 / 24)).toBe(238.834);
+    expect(shotOf(1, 240.95)).toBe(238.834); // the next clip is elsewhere in the source: no split
+    engine.dispose();
+  });
+});

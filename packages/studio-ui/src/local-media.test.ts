@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { setStudioProviders, unavailableProviders } from '@pireel/studio-engine/providers';
 import { durableFileSig, fileSig } from '@pireel/studio-ui/media';
-import { alignFileToSig, loadLocalVideo, maintainLocalMediaCache, markLocalMediaSynced, resolveAssetBytes, resolveAssetPreview, saveLocalStream, saveLocalVideo } from './local-media';
-import { beginMediaCacheSession } from './local-media-cache';
+import { alignFileToSig, clearIdleLocalMedia, loadLocalVideo, makeRoomInLocalMediaCache, markLocalMediaSynced, resolveAssetBytes, resolveAssetPreview, saveLocalStream, saveLocalVideo } from './local-media';
+import { MEDIA_CACHE_IDLE_MS, openMediaCachePage } from './local-media-cache';
 
 class MemoryFileHandle {
   readonly kind = 'file' as const;
@@ -135,15 +135,18 @@ describe('device byte cache', () => {
     const old = new File(['a'.repeat(40)], 'old.mp4', { lastModified: 1 });
     const pending = new File(['b'.repeat(40)], 'pending.mp4', { lastModified: 2 });
     const active = new File(['c'.repeat(40)], 'active.mp4', { lastModified: 3 });
+    const importing = openMediaCachePage();
     for (const file of [old, pending, active]) await saveLocalVideo(file, fileSig(file));
     await markLocalMediaSynced(fileSig(old)); await markLocalMediaSynced(fileSig(active));
+    importing();
     now += 600_000;
-    const release = beginMediaCacheSession();
+    const release = openMediaCachePage();
     await loadLocalVideo(fileSig(active));
-    now += 600_000; // An open file remains protected even beyond the recent-read guard.
+    now += 600_000;
     Object.assign(navigator.storage, { estimate: async () => ({ usage: 950, quota: 1000 }) });
     try {
-      expect(await maintainLocalMediaCache(0, true)).toBe(40);
+      // Out of room: the media used longest ago goes, but not what an open page has read.
+      expect(await makeRoomInLocalMediaCache(0, true)).toBe(40);
       expect(await loadLocalVideo(fileSig(old))).toBeNull();
       expect(await (await loadLocalVideo(fileSig(pending)))?.text()).toBe('b'.repeat(40));
       expect(await (await loadLocalVideo(fileSig(active)))?.text()).toBe('c'.repeat(40));
@@ -155,6 +158,39 @@ describe('device byte cache', () => {
       expect(fetch).toHaveBeenCalledTimes(1);
       expect([...dir.files.keys()].filter(name => name.endsWith('.meta.json'))).toHaveLength(3);
     } finally { release(); }
+  });
+  it('clears media nobody opened for a week, except what an open page still holds', async () => {
+    installMemoryOpfs();
+    let now = 1_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const held = new Map<string, number>();
+    const locks = { request: async (name: string, options: LockOptions | ((lock: object) => unknown), callback?: (lock: object | null) => unknown) => {
+      const config = typeof options === 'function' ? {} : options;
+      const work = typeof options === 'function' ? options : callback!;
+      if (config.ifAvailable && held.has(name)) return work(null!);
+      held.set(name, (held.get(name) ?? 0) + 1);
+      try { return await work({ name }); } finally { const n = held.get(name)! - 1; if (n) held.set(name, n); else held.delete(name); }
+    } };
+    Object.assign(navigator, { locks });
+    const stale = new File(['s'.repeat(30)], 'stale.mp4', { lastModified: 1 });
+    const open = new File(['o'.repeat(30)], 'open.mp4', { lastModified: 2 });
+    const recent = new File(['r'.repeat(30)], 'recent.mp4', { lastModified: 3 });
+    const importing = openMediaCachePage();
+    for (const file of [stale, open]) { await saveLocalVideo(file, fileSig(file)); await markLocalMediaSynced(fileSig(file)); }
+    importing();
+    const page = openMediaCachePage();
+    try {
+      await loadLocalVideo(fileSig(open));
+      now += MEDIA_CACHE_IDLE_MS - 86_400_000;
+      const later = openMediaCachePage();
+      await saveLocalVideo(recent, fileSig(recent)); await markLocalMediaSynced(fileSig(recent));
+      later();
+      now += 2 * 86_400_000;
+      expect(await clearIdleLocalMedia()).toBe(30);
+      expect(await loadLocalVideo(fileSig(stale))).toBeNull();
+      expect(await (await loadLocalVideo(fileSig(open)))?.text()).toBe('o'.repeat(30));
+      expect(await (await loadLocalVideo(fileSig(recent)))?.text()).toBe('r'.repeat(30));
+    } finally { page(); }
   });
   it('gives different content distinct durable identities even when file metadata is identical', async () => {
     const first = new File(['AAAA'], 'clip.mp4', { type: 'video/mp4', lastModified: 7 });

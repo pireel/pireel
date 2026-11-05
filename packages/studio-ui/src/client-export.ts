@@ -46,6 +46,8 @@ import {
   type VideoShotTimelinePlacement,
   assembleHtml,
   transitionWindows,
+  transitionHandleTime,
+  isSourceSplit,
   displayTextLocalFontFamily,
   parseClipInset,
   localImageLocator,
@@ -1014,7 +1016,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     const gctx = ghostC.getContext('2d')!;
     // A window that hands over at a spine cut decodes the other side; one without a cut plays the
     // effect on the running picture (both sides are the current frame).
-    const trsX: { start: number; end: number; cut: number | null; effect: string; dir: string; preKey?: string; postKey?: string; segA?: ExpSeg; segB?: ExpSeg }[] = [];
+    const trsX: { start: number; end: number; cut: number | null; effect: string; dir: string; preKey?: string; postKey?: string; segA?: ExpSeg; segB?: ExpSeg; split?: boolean }[] = [];
     for (const tr of opts.primaryVisualHidden ? [] : transitionWindows(opts.comp.transitions, shots, opts.videoPlacements)) {
       if (tr.cut == null) {
         trsX.push({ start: tr.start, end: tr.end, cut: null, effect: tr.effect, dir: tr.dir });
@@ -1038,8 +1040,9 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       const rateA = segmentSourceRate(segA, segA.timelineStart, segA.timelineEnd);
       const rateB = segmentSourceRate(segB, segB.timelineStart, segB.timelineEnd);
       rigs.set(preKey, await openSource(fB, Math.max(0, segB.srcStart - (tr.cut - tr.start) * rateB), segB.srcStart + 0.2 * rateB));
-      rigs.set(postKey, await openSource(fA, segA.srcEnd, segA.srcEnd + (tr.end - tr.cut + 0.2) * rateA));
-      trsX.push({ start: tr.start, end: tr.end, cut: tr.cut, effect: tr.effect, dir: tr.dir, preKey, postKey, segA, segB });
+      // A split's tail holds A's last frame, just inside its end: the stream starts a little before it.
+      rigs.set(postKey, await openSource(fA, Math.max(0, segA.srcEnd - 0.1 * rateA), segA.srcEnd + (tr.end - tr.cut + 0.2) * rateA));
+      trsX.push({ start: tr.start, end: tr.end, cut: tr.cut, effect: tr.effect, dir: tr.dir, preKey, postKey, segA, segB, split: isSourceSplit(segA, segB, fA === fB) });
     }
     // gl-transitions mixer (output resolution; not built if there are no transitions)
     const mixer = trsX.length ? createGlMixer(outW, outH) : null;
@@ -1123,7 +1126,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       const gRig = handover ? rigs.get(pre ? handover.preKey! : handover.postKey!) : undefined;
       const gRate = gseg ? segmentSourceRate(gseg, gseg.timelineStart, gseg.timelineEnd) : 1;
       const gSrcT = handover && gseg
-        ? (pre ? Math.max(0, gseg.srcStart - (handover.cut! - t) * gRate) : gseg.srcEnd + (t - handover.cut!) * gRate)
+        ? transitionHandleTime(pre ? 'pre' : 'post', gseg, pre ? handover.cut! - t : t - handover.cut!, gRate, !!handover.split)
         : 0;
       const visualSamplesP = Promise.all(visualVideos.map(async (visual) => {
         if (t < visual.startSec - 1e-6 || t >= visual.endSec - 1e-6) return null;

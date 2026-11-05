@@ -19,7 +19,7 @@
 import { studioProviders } from '@pireel/studio-engine/providers';
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-types';
 import { fileMatchesSig, fileNameFromSig, fileSig, isContentSig, rememberDurableFileSig, sigSize } from '@pireel/studio-ui/media';
-import { additionalMediaCacheEntries, beginMediaCacheSession, evictUnusedMediaEntry, mediaCacheEvictionPlan, MEDIA_CACHE_RECENT_MS, withMediaCacheRead, type AdditionalMediaCacheEntry, type MediaCacheEntry } from './local-media-cache';
+import { additionalMediaCacheEntries, evictUnusedMediaEntry, idleMediaCacheEntries, mediaCacheEvictionPlan, openMediaCachePage, protectMediaCacheEntry, withMediaCacheRead, type AdditionalMediaCacheEntry, type MediaCacheEntry } from './local-media-cache';
 
 const DIR = 'local-videos';
 // Automatic eviction is byte-budgeted and requires a confirmed cloud copy; file counts never
@@ -158,11 +158,10 @@ async function writeStoredMeta(dir: FileSystemDirectoryHandle, key: string, meta
   else await write();
 }
 
-let lastCacheSweep = 0;
-/** Silent, budget-triggered reclamation. No metadata or cloud objects are removed from projects. */
-export async function maintainLocalMediaCache(incomingBytes = 0, force = false): Promise<number> {
+/** Clear cached media, one entry at a time and only while no page holds it. One sweep runs at a time
+ *  across tabs; offline nothing is cleared, since cleared media comes back from the cloud. */
+async function sweepLocalMedia(choose: (entries: (MediaCacheEntry | AdditionalMediaCacheEntry)[], estimate: StorageEstimate) => { candidates: MediaCacheEntry[]; reclaimBytes: number }): Promise<number> {
   if (typeof navigator === 'undefined' || !navigator.locks || navigator.onLine === false) return 0;
-  if (!force && incomingBytes < 16 * 1024 ** 2 && Date.now() - lastCacheSweep < 60_000) return 0;
   try {
     return await navigator.locks.request('studio:media-cache:sweep', { ifAvailable: true }, async lock => {
       if (!lock) return 0;
@@ -178,7 +177,7 @@ export async function maintainLocalMediaCache(incomingBytes = 0, force = false):
         } catch { /* Missing/partial entries are never assumed recoverable. */ }
       }
       const estimate = await navigator.storage?.estimate?.().catch(() => ({})) ?? {};
-      const plan = mediaCacheEvictionPlan(entries, estimate, incomingBytes, force);
+      const plan = choose(entries, estimate);
       let reclaimed = 0;
       for (const entry of plan.candidates) {
         if (reclaimed >= plan.reclaimBytes) break;
@@ -186,9 +185,9 @@ export async function maintainLocalMediaCache(incomingBytes = 0, force = false):
           const extra = entry as AdditionalMediaCacheEntry;
           if (extra.remove) return extra.remove();
           if (!dir) return 0;
-          // Recheck after taking the lock: another tab may just have accessed this file.
+          // Recheck after taking the lock: the cloud must still hold it, and nobody may have opened it since.
           const latest = await readStoredMeta(dir, entry.key);
-          if (!latest?.cache?.cloudConfirmed || latest.cache.lastAccess >= Date.now() - MEDIA_CACHE_RECENT_MS) return 0;
+          if (!latest?.cache?.cloudConfirmed || latest.cache.lastAccess > entry.lastAccess) return 0;
           try {
             await dir.removeEntry(entry.key);
             await dir.removeEntry(`${entry.key}.meta.json`).catch(() => {});
@@ -196,10 +195,19 @@ export async function maintainLocalMediaCache(incomingBytes = 0, force = false):
           } catch { return 0; }
         });
       }
-      lastCacheSweep = Date.now();
       return reclaimed;
     });
   } catch { return 0; }
+}
+
+/** Make room for new media: what was used longest ago goes first. `force` after a write ran out of space. */
+export function makeRoomInLocalMediaCache(incomingBytes = 0, force = false): Promise<number> {
+  return sweepLocalMedia((entries, estimate) => mediaCacheEvictionPlan(entries, estimate, incomingBytes, force));
+}
+
+/** Clear media nobody has opened for a week. */
+export function clearIdleLocalMedia(): Promise<number> {
+  return sweepLocalMedia(entries => ({ candidates: idleMediaCacheEntries(entries), reclaimBytes: Infinity }));
 }
 
 /** Called only after an authoritative upload acknowledgement or successful cloud retrieval. */
@@ -216,12 +224,11 @@ export async function markLocalMediaSynced(sig: string): Promise<void> {
   } catch { /* A missing cache remains a cloud-only file. */ }
 }
 
-/** Opening an editor protects every file it reads, and periodically reclaims inactive history. */
-export function startLocalMediaCacheSession(): () => void {
-  const release = beginMediaCacheSession();
-  const startup = setTimeout(() => { void maintainLocalMediaCache(); }, 0);
-  const timer = setInterval(() => { void maintainLocalMediaCache(); }, 60_000);
-  return () => { clearTimeout(startup); clearInterval(timer); release(); };
+/** A page that edits media opens here: what it reads stays cached while it is open, and closing it
+ *  clears media nobody has opened for a week. */
+export function openLocalMediaPage(): () => void {
+  const close = openMediaCachePage();
+  return () => { close(); void clearIdleLocalMedia(); };
 }
 
 async function dirHandle(): Promise<FileSystemDirectoryHandle | null> {
@@ -257,9 +264,9 @@ export function fileOrigin(file: File): string | undefined {
 
 export async function saveLocalVideo(file: File, sig: string, options?: SaveLocalVideoOptions): Promise<boolean> {
   return withMediaCacheRead(await sigKey(sig), async () => {
-    await maintainLocalMediaCache(await hasLocalVideo(sig) ? 0 : file.size);
+    await makeRoomInLocalMediaCache(await hasLocalVideo(sig) ? 0 : file.size);
     if (await writeLocalVideo(file, sig, options)) return true;
-    if (await maintainLocalMediaCache(file.size, true)) return writeLocalVideo(file, sig, options);
+    if (await makeRoomInLocalMediaCache(file.size, true)) return writeLocalVideo(file, sig, options);
     return false;
   });
 }
@@ -353,8 +360,11 @@ export async function saveLocalStream(
   sig: string,
   options: SaveLocalStreamOptions,
 ): Promise<File> {
-  return withMediaCacheRead(await sigKey(sig), async () => {
-    await maintainLocalMediaCache(await hasLocalVideo(sig) ? 0 : options.expectedSize ?? sigSize(sig) ?? 0);
+  const key = await sigKey(sig);
+  // The file handed back reads from the cache: it stays while the page that asked is open.
+  protectMediaCacheEntry(key);
+  return withMediaCacheRead(key, async () => {
+    await makeRoomInLocalMediaCache(await hasLocalVideo(sig) ? 0 : options.expectedSize ?? sigSize(sig) ?? 0);
     return writeLocalStream(stream, sig, options);
   });
 }
@@ -512,7 +522,10 @@ async function loadFromDeviceProvider(sig: string): Promise<File | null> {
 /** Device-only lanes: OPFS cache → desktop provider → legacy granted handle. Never prompts, never
  * touches the network. Use resolveAssetBytes when the cloud copy is an acceptable source. */
 export async function loadLocalVideo(sig: string): Promise<File | null> {
-  return withMediaCacheRead(await sigKey(sig), async () => (await loadFromOpfs(sig)) ?? (await loadFromDeviceProvider(sig)) ?? loadFromLegacyHandle(sig));
+  const key = await sigKey(sig);
+  // The file handed back reads from the cache: it stays while the page that asked is open.
+  protectMediaCacheEntry(key);
+  return withMediaCacheRead(key, async () => (await loadFromOpfs(sig)) ?? (await loadFromDeviceProvider(sig)) ?? loadFromLegacyHandle(sig));
 }
 
 export interface ResolveAssetBytesOptions {

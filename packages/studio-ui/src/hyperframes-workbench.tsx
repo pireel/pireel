@@ -158,6 +158,7 @@ import {
   MAX_TRANSITION_SEC,
   CUT_TRANSITION_EFFECTS,
   transitionWindows,
+  isSourceSplit,
   totalDuration,
   hasTimelineContent,
   hasVideoTrackContent,
@@ -226,7 +227,7 @@ import {
   markFileOrigin,
   resolveAssetBytes,
   saveLocalVideo,
-  startLocalMediaCacheSession,
+  openLocalMediaPage,
 } from "@pireel/studio-ui/local-media";
 import { assetUploadQueue } from "@pireel/studio-ui/asset-upload-queue";
 import { LocalAssetRuntime } from "@pireel/studio-ui/local-asset-runtime";
@@ -549,7 +550,7 @@ export function HyperframesWorkbench({
   const [sceneDetails, setSceneDetails] = useState(false);
   const [sceneState, setSceneState] = useState<SceneAgentState>('idle');
   const sceneModeRef = useRef(false);
-  useEffect(() => startLocalMediaCacheSession(), [projectId]);
+  useEffect(() => openLocalMediaPage(), [projectId]);
   const [workflowOpen, setWorkflowOpen] = useState(!!initialWorkflowId);
   const [workflowEntryId] = useState(initialWorkflowId === "talking-head" ? "captions" : initialWorkflowId ?? "captions");
   const WorkflowEntry = shell.WorkflowEntry;
@@ -2170,6 +2171,7 @@ export function HyperframesWorkbench({
         rateB,
         ...(framingA ? { framingA } : {}),
         ...(framingB ? { framingB } : {}),
+        split: isSourceSplit(A, B, fileA === fileB),
         compW: c.width,
         compH: c.height,
       });
