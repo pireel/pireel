@@ -52,6 +52,33 @@ describe('zoom presets', () => {
     expect(reset.vars).toMatchObject({ scale: 1, xPercent: 0, yPercent: 0 });
   });
 
+  it('glides the framing across a transition window instead of changing it at the cut', () => {
+    const window = { id: 'tr', start: 3.7, end: 4.3, cut: 4, effect: 'circleopen' as const, dir: 'left' as const };
+    const differing: VideoShot[] = [
+      { id: 'a', srcStart: 0, srcEnd: 4, treatment: 'punch-in' },
+      { id: 'b', srcStart: 4, srcEnd: 8, treatment: 'full' },
+    ];
+    const plain = play(videoFrameTimelineBody(differing)).find((call) => call.m === 'to')!;
+    expect(plain.at).toBe(4);
+    const glided = play(videoFrameTimelineBody(differing, undefined, [window])).find((call) => call.m === 'to')!;
+    expect(glided.at).toBeCloseTo(3.7, 6);
+    expect(glided.vars.duration).toBeCloseTo(0.6, 6);
+
+    // A push-in that ends zoomed: no snap at the cut. Same framing on both sides → ease out across the window.
+    const zoomed: VideoShot[] = [
+      { id: 'a', srcStart: 0, srcEnd: 4, treatment: 'full', zoom: { preset: 'punch', atSec: 1, scale: 1.3 } },
+      { id: 'b', srcStart: 4, srcEnd: 8, treatment: 'full' },
+    ];
+    const calls = play(videoFrameTimelineBody(zoomed, undefined, [window]));
+    expect(calls.some((call) => call.m === 'set' && Math.abs(call.at - 4) < 1e-6)).toBe(false);
+    const ease = calls.find((call) => call.m === 'to' && Math.abs(call.at - 3.7) < 1e-6)!;
+    expect(ease.vars).toMatchObject({ scale: 1, xPercent: 0, yPercent: 0 });
+    // Different framing on the far side: its glide alone carries the layer out of the zoom.
+    const both = play(videoFrameTimelineBody([zoomed[0]!, { ...zoomed[1]!, treatment: 'punch-in' }], undefined, [window]));
+    expect(both.filter((call) => Math.abs(call.at - 3.7) < 1e-6)).toHaveLength(1);
+    expect(both.some((call) => call.m === 'set' && Math.abs(call.at - 4) < 1e-6)).toBe(false);
+  });
+
   it('clamps the magnification and ignores a zoom on an empty span', () => {
     expect(zoomScaleAt({ preset: 'instant', atSec: 0, scale: 40 }, 1, 5)).toBe(4);
     expect(zoomMoves({ preset: 'punch', atSec: 0, scale: 1.3 }, 0)).toEqual([]);

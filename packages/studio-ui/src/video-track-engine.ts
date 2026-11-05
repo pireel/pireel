@@ -9,8 +9,10 @@ import { studioProviders } from '@pireel/studio-engine/providers';
  * just a <canvas>, frames pushed over via ImageBitmap postMessage (zero-copy transfer); audio
  * comes straight from the parent element (the active source is unmuted).
  *
- * Master clock = the active source element's currentTime while footage is present, with a
- * timeline rAF clock for graphics/audio-only regions. Boundary handoff / dead-window skipping use a debuggable TS implementation here
+ * Master clock = the narration's Web Audio clock (narration-audio.ts): the narration is rendered
+ * from the bytes and scheduled sample-accurately, so a jump cut costs nothing. When that path is not
+ * available (no AudioContext, a source WebCodecs cannot read), the active source element's
+ * currentTime is the clock as before, with a timeline rAF clock for graphics/audio-only regions. Boundary handoff / dead-window skipping use a debuggable TS implementation here
  * (port and retirement of the old VIDEO_TRIM_SHIM state machine). Caption/HTML blocks are
  * still DOM/GSAP in the iframe — during playback the parent sends hf:seekTimelines every frame
  * to align; the edit surface is unchanged.
@@ -24,7 +26,10 @@ import { studioProviders } from '@pireel/studio-engine/providers';
 
 import type { ShotPreciseFraming } from '@pireel/studio-engine/composition';
 import { type MaskedAudioRange, type WordAudioMask, maskedAudioAt } from '@pireel/studio-engine/word-masks';
-import { FrameCursor, SourceFrameDecoder } from './video-frame-decoder';
+import { ALL_FORMATS, BlobSource, Input, type InputAudioTrack, UrlSource } from 'mediabunny';
+import { FrameCursor, SourceFrameDecoder, decodableMediaUrl } from './video-frame-decoder';
+import { MIX_RATE, PcmStream } from './export-audio-mix';
+import { NarrationPlayer, NarrationRenderer, type NarrationSeg } from './narration-audio';
 import {
   segmentSourceRate,
   segmentSourceTimeAt,
@@ -147,6 +152,28 @@ function releaseMediaElement(el: HTMLMediaElement): void {
   el.remove();
 }
 
+/** Open a source's primary sound for reading as PCM. `ready` with no track = the source is silent;
+ *  `unsupported` = it cannot be demuxed or decoded here. */
+async function openAudioTrack(source: File | string): Promise<{ state: 'ready' | 'unsupported'; input: Input | null; track: InputAudioTrack | null }> {
+  let input: Input | null = null;
+  try {
+    input = new Input({
+      source: typeof source === 'string' ? new UrlSource(decodableMediaUrl(source)) : new BlobSource(source),
+      formats: ALL_FORMATS,
+    });
+    const track = await input.getPrimaryAudioTrack();
+    if (!track) return { state: 'ready', input, track: null };
+    if (!(await track.canDecode())) {
+      void input.dispose();
+      return { state: 'unsupported', input: null, track: null };
+    }
+    return { state: 'ready', input, track };
+  } catch {
+    void input?.dispose();
+    return { state: 'unsupported', input: null, track: null };
+  }
+}
+
 export class VideoTrackEngine {
   private host: HTMLDivElement | null = null;
   private els = new Map<string, HTMLVideoElement>();
@@ -173,6 +200,22 @@ export class VideoTrackEngine {
   private bitmapStages = new WeakMap<HTMLVideoElement, HTMLCanvasElement>();
   private lastPush: { key: string; srcT: number } | null = null;
   private seekGen = 0;
+  /** Narration sound per source, read from its bytes for the Web Audio clock. `track: null` = no sound;
+   *  `unsupported` = cannot be decoded here, so playback stays on the element clock. */
+  private narrationTracks = new Map<string, { state: 'opening' | 'ready' | 'unsupported'; input: Input | null; track: InputAudioTrack | null }>();
+  /** Narration dubs (denoise bakes) read the same way, keyed by source. */
+  private dubTracks = new Map<string, { url: string; state: 'opening' | 'ready' | 'unsupported'; input: Input | null; track: InputAudioTrack | null }>();
+  private narration: { renderer: NarrationRenderer; player: NarrationPlayer; out: GainNode } | null = null;
+  /** Playback runs on the narration's Web Audio clock (false = element clock). */
+  private audioClock = false;
+  /** The context would not start (no user gesture reached it): stay on the element clock. */
+  private audioClockRefused = false;
+  private clockGen = 0;
+  /** The cut whose incoming shot's first frame was decoded ahead (see prewarmNext). */
+  private prewarmed = '';
+  /** Latest picture time pushed inside a transition window while playing (-1 outside one): keeps the
+   *  window's picture moving forward only. */
+  private pictureFloor = -1;
   /** Cut transition table (film seconds): inside a window the frame push carries the other side's picture. */
   private trs: { start: number; cut: number; end: number }[] = [];
   // WebCodecs picture side. One decoder per source (opened when the source is set; `null` once open
@@ -275,6 +318,7 @@ export class VideoTrackEngine {
         this.els.delete(key);
       }
       this.dropDecoder(key);
+      this.dropNarrationTrack(key);
       this.srcIds.delete(key);
       const u = this.urls.get(key);
       if (u) {
@@ -285,11 +329,14 @@ export class VideoTrackEngine {
     }
     if (this.srcIds.get(key) === source) {
       if (role === 'segment' && !prev) this.createElement(key);
+      if (role === 'segment' && !this.narrationTracks.has(key)) this.openNarrationTrack(key, source);
       return; // idempotent: same File reference / same URL
     }
     this.srcIds.set(key, source);
     this.dropDecoder(key);
     this.openDecoder(key, source);
+    this.dropNarrationTrack(key);
+    if (role === 'segment') this.openNarrationTrack(key, source);
     if (prev) {
       const url = this.elementUrl(key);
       if (prev.dataset.hfSrcTag === url) return; // idempotent
@@ -334,6 +381,114 @@ export class VideoTrackEngine {
     v.dataset.hfSrcTag = url;
     this.ensureHost().appendChild(v);
     this.els.set(key, v);
+  }
+
+  /** Neighbouring shots read through alternating positions, so the next shot's first frame can be
+   *  decoded ahead of its cut while the current one plays (see prewarmNext). */
+  private mainSlot(i: number): 'main0' | 'main1' {
+    return i % 2 ? 'main1' : 'main0';
+  }
+
+  /** Close to the end of the playing shot, decode the next shot's first frame on its own read
+   *  position: at the cut the picture is already there instead of a fresh mid-GOP decode (12–36 ms). */
+  private prewarmNext(idx: number, t: number): void {
+    const end = this.ends[idx];
+    if (end == null) return;
+    const nx = this.playableAt(end + 1e-6);
+    if (nx < 0 || nx === idx || Math.abs(this.starts[nx]! - end) > 1e-3) return;
+    const seg = this.segs[idx]!;
+    const next = this.segs[nx]!;
+    // A transition on this cut reads both sides: its incoming lead-in from the window start, the
+    // outgoing tail from the cut. Decode those first frames ahead too.
+    const window = this.trs.find((tr) => Math.abs(tr.cut - end) < 0.05 && end - tr.start > 1e-3);
+    const lead = window ? end - window.start : 0;
+    if (end - lead - t > 0.6) return;
+    const mark = `${nx}@${next.key}@${next.srcStart}`;
+    if (this.prewarmed === mark) return;
+    this.prewarmed = mark;
+    const warm = (cursor: FrameCursor | null, srcT: number) => void cursor?.frameAt(Math.max(0, srcT)).catch(() => null);
+    warm(this.cursorFor(next.key, this.mainSlot(nx)), next.srcStart);
+    if (!window) return;
+    const rateIn = segmentSourceRate(next, this.starts[nx]!, this.ends[nx]!);
+    warm(this.cursorFor(next.key, 'pre'), next.srcStart - lead * rateIn);
+    warm(this.cursorFor(seg.key, 'post'), seg.srcEnd);
+  }
+
+  /** Read a source's narration sound from its bytes (the Web Audio clock's input). */
+  private openNarrationTrack(key: string, source: File | string): void {
+    const entry: { state: 'opening' | 'ready' | 'unsupported'; input: Input | null; track: InputAudioTrack | null } = { state: 'opening', input: null, track: null };
+    this.narrationTracks.set(key, entry);
+    void openAudioTrack(source).then((opened) => {
+      if (this.narrationTracks.get(key) !== entry) {
+        void opened.input?.dispose();
+        return;
+      }
+      Object.assign(entry, opened);
+      this.trace(key, `narration sound ${opened.state}${opened.track ? ` ${opened.track.sampleRate}Hz` : ''}`);
+      this.narration?.renderer.resetSource(key);
+    });
+  }
+
+  private dropNarrationTrack(key: string): void {
+    const entry = this.narrationTracks.get(key);
+    if (!entry) return;
+    this.narrationTracks.delete(key);
+    void entry.input?.dispose();
+    this.narration?.renderer.resetSource(key);
+  }
+
+  /** The PCM a shot of this source plays: its dub when one is mounted and readable, else its own sound. */
+  private narrationPcm = (key: string, from: number, to: number) => {
+    const dub = this.dubTracks.get(key);
+    const track = dub?.state === 'ready' ? dub.track : this.narrationTracks.get(key)?.track;
+    return track ? new PcmStream(track, Math.max(0, from), to) : null;
+  };
+
+  private narrationSegs(): NarrationSeg[] {
+    return this.segs.map((seg, i) => ({
+      key: seg.key,
+      srcStart: seg.srcStart,
+      srcEnd: seg.srcEnd,
+      timelineStart: this.starts[i]!,
+      timelineEnd: this.ends[i]!,
+      ...(seg.gain != null ? { gain: Math.max(0, seg.gain) } : {}),
+      ...(seg.fadeAt ? { fadeAt: seg.fadeAt } : {}),
+    }));
+  }
+
+  /** The Web Audio clock can carry this playback: a running-capable context, every shot's picture
+   *  from a decoder and its sound read from the bytes. */
+  private canUseAudioClock(): boolean {
+    if (this.audioClockRefused || !audioContextCtor() || !this.segs.length) return false;
+    for (const seg of this.segs) {
+      if (!this.decoderFor(seg.key)) return false;
+      if (this.narrationTracks.get(seg.key)?.state !== 'ready') return false;
+      if (this.dubTracks.get(seg.key)?.state === 'unsupported') return false;
+    }
+    return true;
+  }
+
+  private ensureNarration(): { renderer: NarrationRenderer; player: NarrationPlayer; out: GainNode } | null {
+    if (this.narration) return this.narration;
+    const ctx = this.context();
+    if (!ctx) return null;
+    const out = ctx.createGain();
+    const target = this.output();
+    if (target) out.connect(target);
+    this.routed.add(out);
+    const renderer = new NarrationRenderer(this.narrationPcm);
+    renderer.setSegments(this.narrationSegs());
+    for (const [key, ranges] of this.audioMasks) renderer.setMasks(key, ranges);
+    const player = new NarrationPlayer(ctx, () => out, renderer, () => this.total);
+    this.narration = { renderer, player, out };
+    return this.narration;
+  }
+
+  /** Push the shot table to the narration renderer; a playing clock splices the new sound in. */
+  private syncNarration(splice: boolean): void {
+    if (!this.narration) return;
+    this.narration.renderer.setSegments(this.narrationSegs());
+    if (splice && this.audioClock && this.playing) void this.narration.player.splice();
   }
 
   /** Open the WebCodecs decoder for a source. Until it resolves (or when it cannot decode this file),
@@ -389,7 +544,7 @@ export class VideoTrackEngine {
   }
 
   /** A read position on a source's decoder; null while the decoder is not (or cannot be) open. */
-  private cursorFor(key: string, side: 'main' | 'pre' | 'post'): FrameCursor | null {
+  private cursorFor(key: string, side: 'main0' | 'main1' | 'pre' | 'post'): FrameCursor | null {
     const decoder = this.decoderFor(key);
     if (!decoder) return null;
     const cursorKey = `${key}::${side}`;
@@ -490,6 +645,7 @@ export class VideoTrackEngine {
         return a?.scale !== b?.scale || a?.anchorX !== b?.anchorX || a?.anchorY !== b?.anchorY || a?.coordinateSpace !== b?.coordinateSpace;
       });
       this.segs = segs;
+      this.syncNarration(true);
       const cur = this.segs[this.curIdx];
       const el = cur && this.els.get(cur.key);
       if (el && !el.muted) this.setElGain(el, this.segGain(this.curIdx)); // audible immediately, no wait for the next tick
@@ -511,6 +667,7 @@ export class VideoTrackEngine {
     }
     this.segmentTotal = maxEnd;
     this.total = Math.max(this.segmentTotal, this.timelineTotal);
+    this.syncNarration(false);
     this.curIdx = -1; // segment table changed: recompute the active one
     // segment table changed mid-playback (delete/trim/insert while playing): the rAF loop only knows
     // curIdx, and without re-locating it spins dead — restart playback from the current film time
@@ -595,6 +752,10 @@ export class VideoTrackEngine {
     if (ranges.length) this.audioMasks.set(key, ranges);
     else this.audioMasks.delete(key);
     if (!this.audioMasks.size) this.setBeep(false);
+    if (this.narration) {
+      this.narration.renderer.setMasks(key, ranges);
+      if (this.audioClock && this.playing) void this.narration.player.splice();
+    }
   }
 
   private maskAt(key: string, srcT: number): WordAudioMask | null {
@@ -670,6 +831,7 @@ export class VideoTrackEngine {
   /** Mount/swap/remove a source's narration dub (baked processed audio, same source-seconds timeline).
    *  Same-url is idempotent; url change swaps the element src in place (re-blend after a strength change). */
   setNarrationDub(key: string, url: string | null): void {
+    this.syncDubTrack(key, url);
     const cur = this.dubs.get(key);
     if (!url) {
       if (cur) {
@@ -683,6 +845,7 @@ export class VideoTrackEngine {
         this.seek(this.tEdited);
         return;
       }
+      if (this.audioClock) return; // the dub track's removal re-renders the narration (syncDubTrack)
       const active = this.segs[this.curIdx];
       const el = active && active.key === key ? this.els.get(key) : undefined;
       if (el) {
@@ -707,6 +870,36 @@ export class VideoTrackEngine {
       this.dubs.set(key, { el: a, url });
     }
     if (!this.playing) this.seek(this.tEdited); // re-run activation so muting/dub parking take effect
+  }
+
+  /** The dub as PCM for the Web Audio clock: once readable it replaces the source's sound; a playing
+   *  clock splices the change in. */
+  private syncDubTrack(key: string, url: string | null): void {
+    const cur = this.dubTracks.get(key);
+    if (cur && cur.url === url) return;
+    if (cur) {
+      this.dubTracks.delete(key);
+      void cur.input?.dispose();
+    }
+    const changed = () => {
+      if (!this.narration) return;
+      this.narration.renderer.resetSource(key);
+      if (this.audioClock && this.playing) void this.narration.player.splice();
+    };
+    if (!url) {
+      if (cur) changed();
+      return;
+    }
+    const entry: { url: string; state: 'opening' | 'ready' | 'unsupported'; input: Input | null; track: InputAudioTrack | null } = { url, state: 'opening', input: null, track: null };
+    this.dubTracks.set(key, entry);
+    void openAudioTrack(url).then((opened) => {
+      if (this.dubTracks.get(key) !== entry) {
+        void opened.input?.dispose();
+        return;
+      }
+      Object.assign(entry, opened);
+      changed();
+    });
   }
 
   /** Dub sync for the active source (called from activate/seek/tick): the video element stays the clock,
@@ -737,7 +930,10 @@ export class VideoTrackEngine {
     if (this.actx) return this.actx;
     const Ctor = audioContextCtor();
     if (!Ctor) return null;
-    try { this.actx = new Ctor(); } catch { return null; }
+    // The narration is rendered at MIX_RATE: a context at the same rate plays its chunks without resampling.
+    try { this.actx = new Ctor({ sampleRate: MIX_RATE }); } catch {
+      try { this.actx = new Ctor(); } catch { return null; }
+    }
     return this.actx;
   }
 
@@ -996,6 +1192,29 @@ export class VideoTrackEngine {
       });
   }
 
+  /**
+   * The time a transition window's picture is drawn for. The playback clock may lead the element
+   * (the seek onto B at the cut stalls it, and a baked window free-wheels), so a window driven by the
+   * clock shows B's opening frames before the element has played them, and the element plays them
+   * again once the window ends: the cut "plays twice". While playing, a window follows the media
+   * time instead, forward only, holding its frame while the element catches up.
+   */
+  private pictureTime(t: number, mediaT: number): number {
+    if (!this.playing) {
+      this.pictureFloor = -1;
+      return t;
+    }
+    const at = Math.min(t, mediaT);
+    const w = this.transitionWinAt(at);
+    if (!w || at < w.start) {
+      this.pictureFloor = -1;
+      const ahead = this.transitionWinAt(t);
+      return ahead && t >= ahead.start ? at : t; // the clock entered a window the media hasn't reached yet
+    }
+    this.pictureFloor = Math.max(this.pictureFloor, at);
+    return this.pictureFloor;
+  }
+
   /** The "other side" of a cut transition at t: which segment, its source time, and the read position to use. */
   private transitionOtherAt(t: number, w: { start: number; cut: number; end: number; iA: number; iB: number }): { seg: EngineSeg; srcT: number; side: 'pre' | 'post' } {
     const pre = t < w.cut;
@@ -1122,12 +1341,13 @@ export class VideoTrackEngine {
     const seg = this.segs[this.curIdx];
     if (!seg) return;
     const el = this.els.get(seg.key);
-    const cursor = this.cursorFor(seg.key, 'main');
+    const cursor = this.cursorFor(seg.key, this.mainSlot(this.curIdx));
     if (!cursor && (!el || el.readyState < 2 || !el.videoWidth)) return;
     const dims = this.sourceDims(seg.key, el);
     if (!dims) return;
     const srcT = srcTOverride ?? (el && !el.error ? el.currentTime : segmentSourceTimeAt(seg, this.tEdited, this.starts[this.curIdx]!, this.ends[this.curIdx]!));
-    const t = tOverride ?? segmentTimelineTimeAt(seg, srcT, this.starts[this.curIdx]!, this.ends[this.curIdx]!);
+    const mediaT = segmentTimelineTimeAt(seg, srcT, this.starts[this.curIdx]!, this.ends[this.curIdx]!);
+    const t = this.pictureTime(tOverride ?? mediaT, mediaT);
     // inside the transition window (excluding warm-up), carry the other side's picture; skip dedup (the other side is moving, push even if the main frame is same-position)
     const w = this.transitionWinAt(t);
     const inWin = !!w && t >= w.start;
@@ -1252,7 +1472,12 @@ export class VideoTrackEngine {
 
   /** Paused seek: park the active element, push the frame for the new position, align every layer. */
   seek(t: number): void {
+    if (this.playing && this.audioClock) {
+      this.play(t); // a seek while playing restarts the sound at the new position
+      return;
+    }
     const gen = ++this.seekGen;
+    this.pictureFloor = -1;
     this.tEdited = Math.max(0, Math.min(this.total, t));
     this.tSmooth = this.tEdited;
     this.layerLastPush.clear(); // an explicit seek re-pushes every layer (a fresh document has blank canvases)
@@ -1291,6 +1516,8 @@ export class VideoTrackEngine {
   play(t: number): void {
     this.tEdited = Math.max(0, Math.min(this.total, t));
     this.playing = true;
+    if (this.playOnAudioClock()) return;
+    this.stopAudioClock();
     const i = this.playableAt(this.tEdited);
     if (i >= 0) this.trace(this.segs[i]!.key, `play t=${this.tEdited.toFixed(2)}`);
     if (i < 0) {
@@ -1382,6 +1609,7 @@ export class VideoTrackEngine {
         if (this.audioMasks.size || this.maskActive) this.applyMask(sg.key, el, ct, dubbedNow);
         this.pushFrame(ts);
         this.pushLayers(ts);
+        this.prewarmNext(idx, ts);
         // segment-end detection, three checks: (1) reached segment end; (2) element fires ended;
         // (3) stall backstop — streaming webm duration is estimated via Infinity-seek and may be too
         // high (measured 4.0 vs data ending at 3.92), so the element neither fires ended nor reaches
@@ -1438,10 +1666,96 @@ export class VideoTrackEngine {
     this.raf = requestAnimationFrame(loop);
   }
 
+  /**
+   * Playback on the narration's Web Audio clock. The elements stay silent and paused; the clock is
+   * the edited time being heard, so the picture follows the sound with no seek at any cut.
+   */
+  private playOnAudioClock(): boolean {
+    if (!this.canUseAudioClock()) return false;
+    const nar = this.ensureNarration();
+    const ctx = this.actx;
+    if (!nar || !ctx) return false;
+    if (ctx.state === 'suspended') void ctx.resume(); // inside the play gesture
+    if (this.raf) cancelAnimationFrame(this.raf);
+    this.raf = 0;
+    const gen = ++this.clockGen;
+    this.audioClock = true;
+    this.maskActive = null;
+    for (const el of this.els.values()) {
+      el.muted = true;
+      if (!el.paused) el.pause();
+    }
+    for (const dub of this.dubs.values()) if (!dub.el.paused) dub.el.pause();
+    const t0 = this.tEdited;
+    this.tSmooth = t0;
+    this.pictureFloor = -1;
+    this.prewarmed = '';
+    this.trace(this.segs[Math.max(0, this.segIndexAt(t0))]?.key ?? 'main', `play (audio clock) t=${t0.toFixed(2)}`);
+    this.showAt(t0, true);
+    this.syncAudioClips(t0, true, true);
+    void nar.player.start(t0).then(async (started) => {
+      if (!started || gen !== this.clockGen) return;
+      // A context that does not run (no gesture reached it) would hold the clock forever: fall back.
+      const deadline = performance.now() + 600;
+      while (ctx.state !== 'running' && performance.now() < deadline) await new Promise((r) => setTimeout(r, 30));
+      if (ctx.state === 'running' || gen !== this.clockGen || !this.playing) return;
+      console.warn('[studio] the audio context did not start; preview sound falls back to the media elements');
+      this.audioClockRefused = true;
+      this.stopAudioClock();
+      this.play(this.tEdited);
+    });
+    const loop = () => {
+      if (!this.playing || gen !== this.clockGen) return;
+      const heard = nar.player.now();
+      const t = heard ?? this.tEdited;
+      this.tEdited = t;
+      this.tSmooth = t;
+      this.onTick?.(t);
+      this.syncAudioClips(t, true);
+      this.updateBeep();
+      this.showAt(t, false);
+      this.pushLayers(t);
+      if (t >= this.total - 1e-6) {
+        this.pause();
+        this.tEdited = this.total;
+        this.onTick?.(this.total);
+        this.onEnded?.();
+        return;
+      }
+      this.raf = requestAnimationFrame(loop);
+    };
+    this.raf = requestAnimationFrame(loop);
+    return true;
+  }
+
+  /** The picture for edited time t on the audio clock: the shot covering t (blank in a gap). */
+  private showAt(t: number, force: boolean): void {
+    const i = this.playableAt(t);
+    if (i < 0) {
+      if (this.curIdx >= 0 || force) this.enterBlank(t);
+      return;
+    }
+    if (i !== this.curIdx || force) {
+      this.curIdx = i;
+      this.lastPush = null;
+    }
+    const seg = this.segs[i]!;
+    this.pushFrame(t, segmentSourceTimeAt(seg, t, this.starts[i]!, this.ends[i]!));
+    this.prewarmNext(i, t);
+  }
+
+  private stopAudioClock(): void {
+    if (!this.audioClock) return;
+    this.audioClock = false;
+    this.clockGen += 1;
+    this.narration?.player.stop();
+  }
+
   pause(): void {
     this.playing = false;
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
+    this.stopAudioClock();
     this.maskActive = null;
     this.clipBeep = false;
     this.setBeep(false);
@@ -1467,6 +1781,12 @@ export class VideoTrackEngine {
       releaseMediaElement(c.el);
     }
     this.audioClips.clear();
+    this.narration?.player.stop();
+    this.narration = null;
+    for (const entry of this.narrationTracks.values()) void entry.input?.dispose();
+    this.narrationTracks.clear();
+    for (const entry of this.dubTracks.values()) void entry.input?.dispose();
+    this.dubTracks.clear();
     this.routed.clear(); this.bus = null;
     void this.actx?.close().catch(() => {});
     this.actx = null;

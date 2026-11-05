@@ -266,6 +266,34 @@ describe('VideoTrackEngine WebCodecs picture', () => {
     expect((decoder as unknown as { close: ReturnType<typeof vi.fn> }).close).toHaveBeenCalled();
   });
 
+  it('draws a playing transition window at the media time, forward only, so the cut never replays', () => {
+    const engine = new VideoTrackEngine();
+    engine.setSegments([
+      { key: 'a', elKey: 'clip_1', srcStart: 1, srcEnd: 3, timelineStart: 0, timelineEnd: 2 },
+      { key: 'a', elKey: 'clip_2', srcStart: 7, srcEnd: 9, timelineStart: 2, timelineEnd: 4 },
+    ]);
+    engine.setTransitions([{ start: 1.75, cut: 2, end: 2.25 }]);
+    const internals = engine as unknown as { playing: boolean; pictureTime: (t: number, mediaT: number) => number };
+    const pictureAt = (t: number, mediaT: number) => internals.pictureTime.call(engine, t, mediaT);
+    // Paused (seek/scrub): the requested time wins, backwards included.
+    expect(pictureAt(2.1, 2)).toBe(2.1);
+    internals.playing = true;
+    // Outside any window the clock is untouched.
+    expect(pictureAt(1, 0.95)).toBe(1);
+    // The clock entered the window before the media: draw the media time (still outside).
+    expect(pictureAt(1.8, 1.7)).toBe(1.7);
+    expect(pictureAt(1.9, 1.85)).toBe(1.85);
+    // The seek onto B stalls the element at the cut while the clock runs on: hold the cut frame.
+    expect(pictureAt(2.1, 2)).toBe(2);
+    expect(pictureAt(2.2, 2)).toBe(2);
+    // The clock has left the window but the media has not: keep drawing the window.
+    expect(pictureAt(2.3, 2.1)).toBe(2.1);
+    // Never step back inside the window.
+    expect(pictureAt(2.32, 2.05)).toBe(2.1);
+    expect(pictureAt(2.6, 2.4)).toBe(2.6);
+    engine.dispose();
+  });
+
   it('drives overlay layers on their own canvases and clears them outside their window', async () => {
     const { decoder, cursors } = fakeDecoder(640, 360);
     vi.spyOn(SourceFrameDecoder, 'open').mockResolvedValue(decoder);

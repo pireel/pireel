@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyEditorCommand, emptyEditorDocumentV2, parseEditorDocumentV2, type EditorDocumentV2, type NarrativeTimelineClip, type TimelineTransition } from '../editor-document';
-import { transitionSlotAt, transitionsAfterInsertion, transitionsAfterRangeRemoval, transitionsAfterRetime } from './transitions';
+import { spineCuts, transitionAtNearestCut, transitionCut, transitionSlotAt, transitionsAfterInsertion, transitionsAfterRangeRemoval, transitionsAfterRetime } from './transitions';
 
 const t = (id: string, startFrame: number, durationFrames: number): TimelineTransition => ({ id, startFrame, durationFrames, effect: 'fade' });
 
@@ -17,6 +17,38 @@ function spine(transIn?: NarrativeTimelineClip['properties']['transIn']): Editor
 }
 
 describe('transition lane', () => {
+  it('lands a pick on the cut nearest the playhead, centred and clamped to its clips', () => {
+    const document = spine();
+    expect(spineCuts(document)).toEqual([{ frame: 90, from: 0, to: 180 }]);
+    expect(transitionAtNearestCut(document, 10)).toEqual({ kind: 'insert', startFrame: 81, durationFrames: 18 });
+    expect(transitionAtNearestCut(document, 170, 400)).toEqual({ kind: 'insert', startFrame: 0, durationFrames: 180 });
+  });
+
+  it('names the cut a transition hands over at, only when it lies strictly inside', () => {
+    const cuts = spineCuts(spine());
+    expect(transitionCut(cuts, t('on', 81, 18))).toEqual({ frame: 90, from: 0, to: 180 });
+    expect(transitionCut(cuts, t('touching', 90, 12))).toBeNull();
+  });
+
+  it('replaces the transition already on that cut, re-centring one that only touches it', () => {
+    const document = spine();
+    document.timeline.transitions = [t('on', 80, 20)];
+    expect(transitionAtNearestCut(document, 0)).toEqual({ kind: 'replace', id: 'on' });
+    document.timeline.transitions = [t('edge', 90, 12)];
+    expect(transitionAtNearestCut(document, 0)).toEqual({ kind: 'replace', id: 'edge', timing: { startFrame: 84, durationFrames: 12 } });
+  });
+
+  it('keeps clear of neighbouring transitions and reports a missing cut', () => {
+    const document = spine();
+    document.timeline.transitions = [t('left', 70, 15)];
+    expect(transitionAtNearestCut(document, 90)).toEqual({ kind: 'insert', startFrame: 85, durationFrames: 14 });
+    document.timeline.transitions = [t('left', 70, 20), t('right', 90, 10)];
+    expect(transitionAtNearestCut(document, 90)).toEqual({ kind: 'none', reason: 'no-room' });
+    const primary = document.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId)!;
+    primary.clips[1] = { ...primary.clips[1]!, enabled: false };
+    expect(transitionAtNearestCut(document, 90)).toEqual({ kind: 'none', reason: 'no-cut' });
+  });
+
   it('queues a new transition after the ones already at the playhead', () => {
     expect(transitionSlotAt([], 30)).toBe(30);
     expect(transitionSlotAt([t('x', 20, 20), t('y', 40, 10)], 30)).toBe(50);

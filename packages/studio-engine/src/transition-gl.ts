@@ -12,10 +12,10 @@
  */
 
 import type { CutTransitionEffect } from './composition-core';
+import { GALLERY_GLSL } from './transition-gl-gallery';
 
-/** effect id → transition GLSL (gl-transitions spec: implement vec4 transition(vec2 uv),
- *  with getFromColor/getToColor/progress/ratio/direction available). */
-export const TRANSITION_GLSL: Record<CutTransitionEffect, string> = {
+/** The first ten, hand-tuned from the gallery (edge softness tightened for real footage). */
+const TUNED_GLSL = {
   // fade (gre)
   fade: `vec4 transition(vec2 uv){ return mix(getFromColor(uv), getToColor(uv), progress); }`,
   // fadecolor (gre) — baked to black
@@ -43,7 +43,7 @@ vec4 transition(vec2 uv){
 const vec2 wcenter = vec2(0.5, 0.5);
 const float wsmoothness = 0.1; // upstream default 0.5 = half-screen feather, reads as a dissolve on real footage — tighten it to feel like a wipe
 vec4 transition(vec2 uv){
-  vec2 v = normalize(direction);
+  vec2 v = normalize(-direction); // the mixer's direction points against the travel: the edge moves with the incoming shot
   v /= abs(v.x) + abs(v.y);
   float d = v.x * wcenter.x + v.y * wcenter.y;
   float m =
@@ -151,6 +151,10 @@ vec4 transition(vec2 p){
   return mix(getFromColor(p + doffset(progress, p.x, 0.0)), getToColor(p + doffset(1.0 - progress, p.x, 3.14)), progress);
 }`,
 };
+
+/** effect id → transition GLSL (gl-transitions spec: implement vec4 transition(vec2 uv),
+ *  with getFromColor/getToColor/progress/ratio/direction available). */
+export const TRANSITION_GLSL: Record<CutTransitionEffect, string> = { ...TUNED_GLSL, ...GALLERY_GLSL };
 
 /**
  * WebGL mixer (ES5 function source, single source): (W, H, defs) => { canvas, render } | null.

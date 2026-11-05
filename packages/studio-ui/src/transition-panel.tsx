@@ -2,7 +2,7 @@
 
 /**
  * Transition panel (opened from a timeline cut hotspot/zone, hosted in the shared popover): the effect
- * set = ten picks from the gl-transitions gallery, sharing the exact shader source with preview/export
+ * set = picks from the gl-transitions gallery, sharing the exact shader source with preview/export
  * (GL_MIXER_SRC in transition-gl.ts). Each card is a canvas running the real shader over two **real
  * photos** — static freeze at the midpoint, looping start-to-end on hover (matching the
  * gl-transitions.com/gallery interaction). All cards share one WebGL mixer (canvas contexts are capped;
@@ -35,6 +35,30 @@ const HINTS: Record<CutTransitionEffect, string> = {
   rotatescale: 'panels.rotateScaleSwap',
   glitch: 'panels.glitchColorFringing',
   dreamy: 'panels.wavyFloat',
+  flash: 'panels.flashThroughWhite',
+  blur: 'panels.blurOutBlurIn',
+  slide: 'panels.nextShotSlidesOver',
+  whippan: 'panels.fastPanMotionBlur',
+  zoominout: 'panels.zoomInOutThrough',
+  camerashake: 'panels.cameraShakeImpact',
+  whipspin: 'panels.fastSpinMotionBlur',
+  stretchslide: 'panels.stretchSlideBounce',
+  clockwipe: 'panels.clockHandSweep',
+  heart: 'panels.heartShapeOpens',
+  eyeblink: 'panels.eyelidsCloseOpen',
+  squares: 'panels.randomSquaresAppear',
+  pixelize: 'panels.pixelateAndBack',
+  cube: 'panels.rotatingCubeFaces',
+  doorway: 'panels.doubleDoorsOpen',
+  pageflip: 'panels.bookPageTurns',
+  popin: 'panels.cardPopsIn',
+  bloom: 'panels.softGlowFloods',
+  lightleak: 'panels.filmLightLeak',
+  grayscale: 'panels.throughGrayscale',
+  vhs: 'panels.vhsTrackingNoise',
+  tvoff: 'panels.oldTvSwitchOff',
+  swirl: 'panels.swirlAroundCenter',
+  ripple: 'panels.waterDropRipples',
 };
 
 const CW = 168;
@@ -132,7 +156,7 @@ export function TransitionPanel({
   direction: TransitionDirection;
   /** A transition is selected on the lane (its effect is highlighted; its direction can be changed here). */
   selected: boolean;
-  /** Every pick inserts a new transition at the playhead; replacing one means deleting it first. */
+  /** A pick lands on the cut nearest the playhead, replacing a transition already there. */
   onPick: (effect: CutTransitionEffect, direction?: TransitionDirection) => void;
   /** Direction of the selected directional transition. */
   onDirection: (direction: TransitionDirection) => void;

@@ -29,7 +29,7 @@ import { applyProjectCover, persistProjectCover, projectCoverFromDocument, proje
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type ComponentType } from "react";
 import type { EditorCommand } from "@pireel/studio-engine/editor-document/commands/types";
-import { DEFAULT_TRANSITION_SEC, transitionSlotAt } from "@pireel/studio-engine/editor-document/transitions";
+import { spineCuts, transitionAtNearestCut, transitionCut } from "@pireel/studio-engine/editor-document/transitions";
 import { useLocale } from "use-intl";
 import {
   Play,
@@ -266,6 +266,7 @@ import {
   MIN_PPS,
   MAX_PPS,
   type TimelineTrackState,
+  type TimelineTransitionItem,
 } from "@pireel/studio-ui/studio-timeline";
 import {
   isTimelineDensity,
@@ -2505,6 +2506,7 @@ export function HyperframesWorkbench({
               body: videoFrameTimelineBody(
                 renderComposition.shots ?? [],
                 renderVideoPlacements,
+                transitionWindows(renderComposition.transitions, renderComposition.shots ?? [], renderVideoPlacements),
               ),
             });
           }
@@ -2782,6 +2784,7 @@ export function HyperframesWorkbench({
             body: videoFrameTimelineBody(
               comp.shots ?? [],
               renderVideoPlacements,
+              transitionWindows(comp.transitions, comp.shots ?? [], renderVideoPlacements),
             ),
           });
           markBuilt();
@@ -3554,30 +3557,50 @@ export function HyperframesWorkbench({
     if (!result.ok) toast.error(editorErrorMessage(result.error));
     return result.ok;
   };
-  /** A panel pick always inserts at the playhead (after any transition already there); to replace
-   *  one, the user deletes it first. */
+  /** A panel pick lands on the spine cut nearest the playhead, centred on it; a transition already
+   *  on that cut is replaced. */
   const pickTransition = (effect: CutTransitionEffect, direction?: TransitionDirection) => {
     const document = editorDocumentRef.current;
     const fps = document.canvas.fps;
-    const list = document.timeline.transitions ?? [];
-    const startFrame = transitionSlotAt(list, Math.round(tRef.current * fps));
-    const next = list.filter((transition) => transition.startFrame >= startFrame).sort((left, right) => left.startFrame - right.startFrame)[0];
-    const durationFrames = Math.min(Math.round(DEFAULT_TRANSITION_SEC * fps), next ? next.startFrame - startFrame : Number.POSITIVE_INFINITY);
-    if (durationFrames < 1) {
-      toast.error(t("workbench.noRoomForTransition"));
+    const placed = transitionAtNearestCut(document, Math.round(tRef.current * fps));
+    if (placed.kind === "none") {
+      toast.error(t(placed.reason === "no-cut" ? "workbench.noCutForTransition" : "workbench.noRoomForTransition"));
       return;
     }
-    const id = `transition_${shotId()}`;
-    if (commitTransition({ type: "transitions.insert", transition: { id, startFrame, durationFrames, effect, ...(direction ? { direction } : {}) } })) {
-      setSelectedTransitionId(id);
-      setSelectedId(null);
-      setSelectedShotId(null);
-      if (!playing) applyT(startFrame / fps);
-    }
+    const id = placed.kind === "replace" ? placed.id : `transition_${shotId()}`;
+    const ok = placed.kind === "replace"
+      ? commitTransition({ type: "transitions.patch", id, patch: { effect, direction, ...placed.timing } })
+      : commitTransition({ type: "transitions.insert", transition: { id, startFrame: placed.startFrame, durationFrames: placed.durationFrames, effect, ...(direction ? { direction } : {}) } });
+    if (!ok) return;
+    setSelectedTransitionId(id);
+    setSelectedId(null);
+    setSelectedShotId(null);
+    const startFrame = placed.kind === "insert"
+      ? placed.startFrame
+      : placed.timing?.startFrame ?? document.timeline.transitions?.find((transition) => transition.id === id)?.startFrame;
+    if (!playing && startFrame !== undefined) applyT(startFrame / fps);
   };
+  const timelineTransitions = useMemo((): TimelineTransitionItem[] => {
+    const fps = editorDocument.canvas.fps;
+    const cuts = spineCuts(editorDocument);
+    return (editorDocument.timeline.transitions ?? []).map((transition) => {
+      const cut = transitionCut(cuts, transition);
+      return {
+        id: transition.id,
+        startSec: transition.startFrame / fps,
+        endSec: (transition.startFrame + transition.durationFrames) / fps,
+        label: t(CUT_TRANSITION_EFFECTS.find((effect) => effect.id === transition.effect)?.name ?? "tools.add_transition.label"),
+        effect: transition.effect,
+        ...(cut ? { cut: { atSec: cut.frame / fps, minSec: cut.from / fps, maxSec: cut.to / fps } } : {}),
+      };
+    });
+  }, [editorDocument]);
   const changeTransitionTiming = (id: string, next: { startSec: number; durationSec: number }) => {
     const fps = editorDocumentRef.current.canvas.fps;
-    commitTransition({ type: "transitions.patch", id, patch: { startFrame: Math.max(0, Math.round(next.startSec * fps)), durationFrames: Math.max(1, Math.round(next.durationSec * fps)) } });
+    // Round both edges, not the length: a window centred on a cut stays centred in frames.
+    const startFrame = Math.max(0, Math.round(next.startSec * fps));
+    const endFrame = Math.round((next.startSec + next.durationSec) * fps);
+    commitTransition({ type: "transitions.patch", id, patch: { startFrame, durationFrames: Math.max(1, endFrame - startFrame) } });
   };
   const removeSelectedTransition = () => {
     const id = selectedTransitionIdRef.current;
@@ -11263,13 +11286,7 @@ export function HyperframesWorkbench({
             shotSourceDurations={shotSourceDurations}
             clipPendingAt={clipPending}
             pendingRanges={pendingGenerations}
-            transitions={(editorDocument.timeline.transitions ?? []).map((transition) => ({
-              id: transition.id,
-              startSec: transition.startFrame / editorDocument.canvas.fps,
-              endSec: (transition.startFrame + transition.durationFrames) / editorDocument.canvas.fps,
-              label: t(CUT_TRANSITION_EFFECTS.find((effect) => effect.id === transition.effect)?.name ?? "tools.add_transition.label"),
-              effect: transition.effect,
-            }))}
+            transitions={timelineTransitions}
             selectedTransitionId={selectedTransitionId}
             onSelectTransition={selectTransition}
             onChangeTransition={changeTransitionTiming}

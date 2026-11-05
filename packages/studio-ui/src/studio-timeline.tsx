@@ -83,6 +83,17 @@ export { DEFAULT_PPS, MAX_PPS, MIN_PPS } from './timeline-utils';
 /** Professional NLEs keep a permanent bottom drop zone instead of inserting a temporary dashed row. */
 const VISUAL_TRACK_DROP_ZONE_H = 38;
 
+/** A transition on the lane. `cut` is the spine cut it hands over at: resizing keeps it centred
+ *  there, within the two shots (`min`–`max`). */
+export interface TimelineTransitionItem {
+  id: string;
+  startSec: number;
+  endSec: number;
+  label: string;
+  effect?: string;
+  cut?: { atSec: number; minSec: number; maxSec: number };
+}
+
 export interface TimelineTrackState {
   trackId: string;
   timelineIndex: number;
@@ -248,8 +259,8 @@ interface StudioTimelineProps {
   /** Per-asset missing-source UI: are this clip source's bytes reachable? Default live. */
   srcLive?: (src: string) => boolean;
   loadingSourceClipIds?: ReadonlySet<string>;
-  /** Transition lane (under the story spine): items placed by time, independent of cuts. */
-  transitions?: ReadonlyArray<{ id: string; startSec: number; endSec: number; label: string; effect?: string }>;
+  /** Transition lane (under the story spine): items placed by time; one on a cut resizes around it. */
+  transitions?: ReadonlyArray<TimelineTransitionItem>;
   selectedTransitionId?: string | null;
   onSelectTransition?: (id: string | null) => void;
   /** Drag end on a transition: its new start and length (seconds). */
@@ -1655,7 +1666,7 @@ function StudioTimelineImpl({
   const laneDropActive = dropActive || !!trackDrag || !!shotDrag || !!blockTrackDrag || !!visualClipDrag;
   // Transition lane drag: live geometry while a block moves or resizes; committed on release.
   const [transitionDrag, setTransitionDrag] = useState<{ id: string; startSec: number; durationSec: number } | null>(null);
-  const beginTransitionDrag = (event: React.PointerEvent, item: { id: string; startSec: number; endSec: number }, mode: 'move' | 'l' | 'r') => {
+  const beginTransitionDrag = (event: React.PointerEvent, item: TimelineTransitionItem, mode: 'move' | 'l' | 'r') => {
     if (event.button !== 0) return;
     event.stopPropagation();
     event.preventDefault();
@@ -1673,7 +1684,14 @@ function StudioTimelineImpl({
       const dt = (move.clientX - x0) / pps;
       if (Math.abs(move.clientX - x0) > 2) moved = true;
       if (mode === 'move') next = { startSec: clamp(s0 + dt, floor, ceiling - d0), durationSec: d0 };
-      else if (mode === 'r') next = { startSec: s0, durationSec: clamp(d0 + dt, 0.1, Math.min(MAX_TRANSITION_SEC, ceiling - s0)) };
+      else if (item.cut) {
+        // On a cut either edge resizes both sides alike: the handover stays in the middle.
+        const at = item.cut.atSec;
+        const edge = mode === 'l' ? s0 + dt : s0 + d0 + dt;
+        const room = Math.min(MAX_TRANSITION_SEC / 2, at - Math.max(floor, item.cut.minSec), Math.min(ceiling, item.cut.maxSec) - at);
+        const half = clamp(Math.abs(edge - at), Math.min(0.05, room), room);
+        next = { startSec: at - half, durationSec: half * 2 };
+      } else if (mode === 'r') next = { startSec: s0, durationSec: clamp(d0 + dt, 0.1, Math.min(MAX_TRANSITION_SEC, ceiling - s0)) };
       else {
         const start = clamp(s0 + dt, Math.max(floor, s0 + d0 - MAX_TRANSITION_SEC), s0 + d0 - 0.1);
         next = { startSec: start, durationSec: s0 + d0 - start };

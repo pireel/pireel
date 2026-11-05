@@ -124,7 +124,7 @@ export interface MixSeg {
 /** Sequential PCM reader over one source's audio samples: monotonic srcT only (matches how the
  *  edited timeline walks each source), linear resample to the mix grid, mono→stereo spread,
  *  >2ch keeps the first two. Gaps in the sample stream read as silence. */
-class PcmStream {
+export class PcmStream {
   private it: AsyncIterator<AudioSample>;
   private cur: { data: Float32Array; start: number; rate: number; ch: number; frames: number } | null = null;
   private done = false;
@@ -235,7 +235,7 @@ export const TONE_HZ = 1000;
 export const TONE_LEVEL = 0.22;
 export const TONE_RAMP_SEC = 0.008;
 
-function toneGainAt(tone: MixTone, t: number): number {
+export function toneGainAt(tone: MixTone, t: number): number {
   const local = t - tone.timelineStart;
   const len = tone.timelineEnd - tone.timelineStart;
   if (local < 0 || local >= len) return 0;

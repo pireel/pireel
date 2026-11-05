@@ -58,6 +58,16 @@ function seamCaptionYPct(seam: number, scale: number | undefined, height: number
 }
 
 /** `backdrop`: fill the frame around a source that does not cover it with its own blurred picture (Composition.backdrop). */
+/** Only the shaders this document plays go into it: the whole set is tens of kilobytes of GLSL. */
+function usedTransitionGlsl(transitions: readonly { effect: string }[]): Record<string, string> {
+  const used: Record<string, string> = {};
+  for (const { effect } of transitions) {
+    const glsl = (TRANSITION_GLSL as Record<string, string>)[effect];
+    if (glsl) used[effect] = glsl;
+  }
+  return used;
+}
+
 export function videoFrameShim(transitions: { s: number; e: number; cut: number; effect: string; dx: number; dy: number }[], backdrop = false): string {
   return `window.__parentClock = true; // clock/decode/audio run in the parent-layer engine; this doc doesn't self-drive
 (function(){
@@ -68,7 +78,7 @@ export function videoFrameShim(transitions: { s: number; e: number; cut: number;
   var W = c.width, H = c.height;
   var TRS = ${JSON.stringify(transitions)};
   var MIX = null;
-  try { MIX = (${GL_MIXER_SRC})(W, H, ${JSON.stringify(TRANSITION_GLSL)}); } catch (eM) {}
+  try { MIX = (${GL_MIXER_SRC})(W, H, ${JSON.stringify(usedTransitionGlsl(transitions))}); } catch (eM) {}
   var liveBmp = null, ghostBmp = null, liveFraming = null, ghostFraming = null;
   var liveSourceW = 0, liveSourceH = 0, ghostSourceW = 0, ghostSourceH = 0;
   var lastT = -1, ghostAtT = -1, bakedWinCut = -1;
@@ -176,18 +186,10 @@ export function videoFrameShim(transitions: { s: number; e: number; cut: number;
   window.__vidSrc = null;
   window.addEventListener('message', function (e) {
     var d = e.data || {};
-    if (d.type === 'hf:seekTimelines') {
-      // play/scrub clock: recomposite by clock only near transition windows (motion keeps going even if ghost frames briefly cut off)
-      try {
-        var st = Number(d.t);
-        if (st >= 0 && liveBmp) {
-          for (var gi = 0; gi < TRS.length; gi++) {
-            if (st >= TRS[gi].s - 0.1 && st <= TRS[gi].e) { render(st); break; }
-          }
-        }
-      } catch (errS) {}
-      return;
-    }
+    // hf:seekTimelines carries the playback clock, which may lead the picture (the engine holds a
+    // transition window's picture at the media time). Transition progress follows hf:frame alone:
+    // recompositing by the clock in between made it run ahead and snap back at the cut.
+    if (d.type === 'hf:seekTimelines') return;
     if (d.type === 'hf:clearFrame') {
       try { if (liveBmp && liveBmp.close) liveBmp.close(); } catch (errCL) {}
       try { if (ghostBmp && ghostBmp.close) ghostBmp.close(); } catch (errCG) {}
@@ -667,9 +669,10 @@ export function assembleHtml(
         `style="position:absolute;left:0;top:0;width:100%;height:100%;transform-origin:center center;will-change:left,top,width,height,transform;"></canvas>`,
     );
     // Frame-receive shim + parent-clock marker (the runtime uses it to not self-drive the clock, see PREVIEW_RUNTIME); the cut-transition table is baked into the shim
+    const windows = transitionWindows(comp.transitions, placedVideoShots, videoPlacements);
     scripts.push(
       videoFrameShim(
-        transitionWindows(comp.transitions, placedVideoShots, videoPlacements).map((tr) => {
+        windows.map((tr) => {
           const [dx, dy] = glDirection(tr.dir);
           return { s: tr.start, e: tr.end, cut: tr.cut ?? -1, effect: tr.effect, dx, dy };
         }),
@@ -677,7 +680,7 @@ export function assembleHtml(
       ),
     );
     // Framing timeline (in final-cut time) registered to vid → transforms applied to the canvas element, one canvas absorbing every segment's framing
-    const frameBody = videoFrameTimelineBody(placedVideoShots, videoPlacements);
+    const frameBody = videoFrameTimelineBody(placedVideoShots, videoPlacements, windows);
     if (frameBody) {
       scripts.push(timelineScript('vid', frameBody));
     }

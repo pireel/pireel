@@ -12,7 +12,7 @@ import { COMPONENT_PROPERTY_MAX_ROWS, COMPONENT_PROPERTY_MAX_FIELDS, COMPONENT_P
  */
 
 import { CAPTION_LOOK_HINTS, CAPTION_PRESETS } from '@pireel/studio-engine/caption-presets';
-import { CUT_TRANSITION_EFFECTS, MAX_TRANSITION_SEC, PLACE_ANCHORS, SHOT_TREATMENTS, ZOOM_PRESETS, ZOOM_SCALE_MAX, ZOOM_SCALE_MIN } from '@pireel/studio-engine/composition-core';
+import { CUT_TRANSITION_EFFECTS, DIRECTIONAL_TRANSITIONS, MAX_TRANSITION_SEC, PLACE_ANCHORS, SHOT_TREATMENTS, ZOOM_PRESETS, ZOOM_SCALE_MAX, ZOOM_SCALE_MIN } from '@pireel/studio-engine/composition-core';
 import { DISPLAY_TEXT_ANIMATION_IDS, DISPLAY_TEXT_PRESETS } from '@pireel/studio-engine/display-text-presets';
 import { MG_BAKE_ROUTE, MG_RUNTIME_CAPABILITIES } from '@pireel/studio-engine/prompts/block-system';
 import { CLIP_PROPERTIES, CLIP_PROPERTY_REDIRECTS, clipPropertySummary, type ClipPropertyKey } from '@pireel/studio-engine/agent-surface-v3/clip-properties';
@@ -424,7 +424,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   add_transition: {
     description:
-      `Place, restyle or remove a transition on the transition lane. Transitions are placed by time and need no cut: one that spans a story-spine cut hands the footage over there; elsewhere the effect plays on the running picture. atFrame adds one there (queued right after any transition already at that frame; ${DEFAULT_TRANSITION_SEC}s by default, at most ${MAX_TRANSITION_SEC}s, shortened to the room before the next one). id (from get_state transitions) changes that transition — effect, direction, atFrame to move it, durationFrames — and effect none removes it. effect is one of ${TRANSITION_EFFECT_IDS.join(' / ')}; direction applies to directional / directionalwipe. Transitions never overlap.`,
+      `Place, restyle or remove a transition on the transition lane. Transitions are placed by time and need no cut: one that spans a story-spine cut hands the footage over there; elsewhere the effect plays on the running picture. atFrame adds one there (queued right after any transition already at that frame; ${DEFAULT_TRANSITION_SEC}s by default, at most ${MAX_TRANSITION_SEC}s, shortened to the room before the next one). id (from get_state transitions) changes that transition — effect, direction, atFrame to move it, durationFrames — and effect none removes it. effect is one of ${TRANSITION_EFFECT_IDS.join(' / ')}; direction applies to ${[...DIRECTIONAL_TRANSITIONS].join(' / ')}. Transitions never overlap.`,
     inputSchema: obj({
       atFrame: FRAME('Where to add it, or where to move the one named by id'),
       id: str('A transition from get_state transitions, to change or remove.'),

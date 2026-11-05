@@ -329,8 +329,34 @@ export interface ShotFramingPatch {
   resetPrecision?: boolean;
 }
 
-/** Cut transition: the handoff effect between two shots' content. Effect set = 10 picks from the gl-transitions gallery (id matches upstream shader name,
- *  GLSL itself in transition-gl.ts; preview/export/panel share one WebGL compositor). */
+/** The picks baked from the gallery in transition-gl-gallery.ts. */
+export type GalleryTransitionEffect =
+  | 'slide'
+  | 'whippan'
+  | 'whipspin'
+  | 'zoominout'
+  | 'camerashake'
+  | 'stretchslide'
+  | 'flash'
+  | 'blur'
+  | 'bloom'
+  | 'lightleak'
+  | 'grayscale'
+  | 'pixelize'
+  | 'squares'
+  | 'clockwipe'
+  | 'heart'
+  | 'eyeblink'
+  | 'cube'
+  | 'doorway'
+  | 'pageflip'
+  | 'popin'
+  | 'swirl'
+  | 'ripple'
+  | 'vhs'
+  | 'tvoff';
+/** Cut transition: the handoff effect between two shots' content. Effect set = picks from the gl-transitions gallery
+ *  (GLSL in transition-gl.ts and transition-gl-gallery.ts; preview/export/panel share one WebGL compositor). */
 export type CutTransitionEffect =
   | 'fade'
   | 'fadeblack'
@@ -341,7 +367,8 @@ export type CutTransitionEffect =
   | 'crosszoom'
   | 'rotatescale'
   | 'glitch'
-  | 'dreamy';
+  | 'dreamy'
+  | GalleryTransitionEffect;
 /** Motion direction for push/slide (B's travel direction; up = entering upward, i.e. from the bottom edge). */
 export type TransitionDirection = 'up' | 'down' | 'left' | 'right';
 export interface CutTransition {
@@ -361,20 +388,45 @@ export interface CompositionTransition {
   direction?: TransitionDirection;
 }
 export const MAX_TRANSITION_SEC = 4;
+/** Panel order: the everyday ones first, then by kind (motion, shape, 3D, light and tone, stylized). */
 export const CUT_TRANSITION_EFFECTS: { id: CutTransitionEffect; name: string }[] = [
   { id: 'fade', name: 'common.dissolve' },
   { id: 'fadeblack', name: 'common.dipBlack' },
+  { id: 'flash', name: 'common.flash' },
+  { id: 'blur', name: 'common.defocus' },
   { id: 'directional', name: 'common.push' },
+  { id: 'slide', name: 'common.slideOver' },
+  { id: 'whippan', name: 'common.whipPan' },
   { id: 'directionalwipe', name: 'common.wipe' },
-  { id: 'circleopen', name: 'common.circle' },
-  { id: 'windowslice', name: 'common.blinds' },
+  { id: 'zoominout', name: 'common.zoomThrough' },
   { id: 'crosszoom', name: 'common.crossZoom' },
+  { id: 'camerashake', name: 'common.shake' },
+  { id: 'whipspin', name: 'common.whipSpin' },
   { id: 'rotatescale', name: 'common.rotate' },
+  { id: 'stretchslide', name: 'common.stretchSlide' },
+  { id: 'circleopen', name: 'common.circle' },
+  { id: 'clockwipe', name: 'common.clockWipe' },
+  { id: 'heart', name: 'common.heartWipe' },
+  { id: 'eyeblink', name: 'common.blink' },
+  { id: 'windowslice', name: 'common.blinds' },
+  { id: 'squares', name: 'common.squares' },
+  { id: 'pixelize', name: 'common.pixelate' },
+  { id: 'cube', name: 'common.cube' },
+  { id: 'doorway', name: 'common.doorway' },
+  { id: 'pageflip', name: 'common.pageTurn' },
+  { id: 'popin', name: 'common.popIn' },
+  { id: 'bloom', name: 'common.bloom' },
+  { id: 'lightleak', name: 'common.lightLeak' },
+  { id: 'grayscale', name: 'common.fadeToGray' },
   { id: 'glitch', name: 'common.glitch' },
+  { id: 'vhs', name: 'common.vhs' },
+  { id: 'tvoff', name: 'common.tvOff' },
+  { id: 'swirl', name: 'common.swirl' },
+  { id: 'ripple', name: 'common.ripple' },
   { id: 'dreamy', name: 'common.wave' },
 ];
 /** Direction-bearing effects (panel shows direction buttons for these). */
-export const DIRECTIONAL_TRANSITIONS: ReadonlySet<CutTransitionEffect> = new Set(['directional', 'directionalwipe']);
+export const DIRECTIONAL_TRANSITIONS: ReadonlySet<CutTransitionEffect> = new Set(['directional', 'directionalwipe', 'slide', 'whippan', 'stretchslide']);
 
 export interface VideoShotTimelinePlacement {
   shotId: string;
@@ -1037,12 +1089,23 @@ export function videoFrameKeyframes(shots: VideoShot[], placements?: readonly Vi
   return final;
 }
 
-export function videoFrameTimelineBody(shots: VideoShot[], placements?: readonly VideoShotTimelinePlacement[]): string {
+/**
+ * `transitions`: the windows that hand over at a spine cut. The framing lives on the one video layer
+ * both sides of the mix share, so a framing change that started at the cut (or a push-in snapping
+ * back there) moved the whole mix halfway through: the effect visibly jumped. On such a cut the
+ * framing glides across the window instead.
+ */
+export function videoFrameTimelineBody(
+  shots: VideoShot[],
+  placements?: readonly VideoShotTimelinePlacement[],
+  transitions?: readonly TransitionWindow[],
+): string {
   const sp = placedShotSpans(shots, placements);
   if (sp.length === 0) return '';
   const total = sp[sp.length - 1]!.editedEnd;
   const final = videoFrameKeyframes(shots, placements);
   if (!final.length) return '';
+  const windowAt = (at: number) => transitions?.find((window) => window.cut != null && Math.abs(window.cut - at) < 1e-3);
 
   const lines: string[] = [
     `tl.set('#vidEl', ${mediaFramingVars(final[0]!.mediaFraming)}, 0);`,
@@ -1050,15 +1113,17 @@ export function videoFrameTimelineBody(shots: VideoShot[], placements?: readonly
   ];
   for (let i = 1; i < final.length; i++) {
     const gap = (final[i + 1]?.at ?? total) - final[i]!.at;
-    const dur = Math.max(0.2, Math.min(0.5, gap - 0.05));
-    lines.push(`tl.to('#vidEl', Object.assign({ duration: ${n(dur)}, ease: 'power2.inOut' }, ${mediaFramingVars(final[i]!.mediaFraming)}), ${n(final[i]!.at)});`);
+    const window = windowAt(final[i]!.at);
+    const dur = window ? Math.max(1e-3, window.end - window.start) : Math.max(0.2, Math.min(0.5, gap - 0.05));
+    const from = window ? window.start : final[i]!.at;
+    lines.push(`tl.to('#vidEl', Object.assign({ duration: ${n(dur)}, ease: 'power2.inOut' }, ${mediaFramingVars(final[i]!.mediaFraming)}), ${n(from)});`);
     const previousBox = final[i - 1]!.box;
     const nextBox = final[i]!.box;
     const sameBox = (previousBox?.x ?? 0) === (nextBox?.x ?? 0)
       && (previousBox?.y ?? 0) === (nextBox?.y ?? 0)
       && (previousBox?.w ?? 1) === (nextBox?.w ?? 1)
       && (previousBox?.h ?? 1) === (nextBox?.h ?? 1);
-    if (!sameBox) lines.push(`tl.to('#vidEl', Object.assign({ duration: ${n(dur)}, ease: 'power2.inOut' }, ${shotPlacementVars(nextBox)}), ${n(final[i]!.at)});`);
+    if (!sameBox) lines.push(`tl.to('#vidEl', Object.assign({ duration: ${n(dur)}, ease: 'power2.inOut' }, ${shotPlacementVars(nextBox)}), ${n(from)});`);
   }
   // Animated push-ins: tweens on top of the shot's static framing, in edited time. The move ends
   // inside its own clip (an explicit set at the clip end restores the static framing, so a deduped
@@ -1077,7 +1142,15 @@ export function videoFrameTimelineBody(shots: VideoShot[], placements?: readonly
       if (move.duration <= 0) lines.push(`tl.set('#vidEl', ${vars(move.scale)}, ${at});`);
       else lines.push(`tl.to('#vidEl', Object.assign({ duration: ${n(move.duration)}, ease: '${move.ease}' }, ${vars(move.scale)}), ${at});`);
     }
-    if (moves[moves.length - 1]!.scale !== 1) lines.push(`tl.set('#vidEl', ${vars(1)}, ${n(editedEnd)});`);
+    if (moves[moves.length - 1]!.scale !== 1) {
+      const window = windowAt(editedEnd);
+      // On a transition the next shot's framing glide (when it differs) already carries the layer
+      // out of the zoom; otherwise ease back to this framing across the window rather than snap.
+      if (!window) lines.push(`tl.set('#vidEl', ${vars(1)}, ${n(editedEnd)});`);
+      else if (!final.some((key) => Math.abs(key.at - editedEnd) < 1e-3)) {
+        lines.push(`tl.to('#vidEl', Object.assign({ duration: ${n(Math.max(1e-3, window.end - window.start))}, ease: 'power2.inOut' }, ${vars(1)}), ${n(window.start)});`);
+      }
+    }
   }
   // Color-grade keyframes (deduped independently of framing): jump-cut semantics — swap at the cut (set), no transition tween.
   // No grading anywhere = no lines emitted; if any, neutral segments emit a 'none' reset, otherwise the prior shot's filter leaks into the next.

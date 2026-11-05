@@ -1,4 +1,5 @@
 import { CUT_TRANSITION_EFFECTS, MAX_TRANSITION_SEC, type CutTransitionEffect, type TransitionDirection } from '../composition-core';
+import { primaryNarrativeTrack } from './create';
 import type { EditorDocumentV2, NarrativeTimelineClip, TimelineTransition } from './types';
 
 /**
@@ -26,6 +27,71 @@ export function transitionSlotAt(list: readonly TimelineTransition[], atFrame: n
     if (transition.startFrame <= start && transitionEnd(transition) > start) start = transitionEnd(transition);
   }
   return start;
+}
+
+/** A cut on the story spine: two enabled primary-lane clips meeting at `frame` (the rule
+ *  `transitionWindows` hands over at). `from`/`to` bound the two clips, so a window stays on them. */
+export interface SpineCut {
+  frame: number;
+  from: number;
+  to: number;
+}
+
+export function spineCuts(document: EditorDocumentV2): SpineCut[] {
+  const clips = (primaryNarrativeTrack(document)?.clips ?? [])
+    .filter((clip) => clip.kind === 'narrative' && clip.enabled)
+    .sort((left, right) => left.startFrame - right.startFrame);
+  const cuts: SpineCut[] = [];
+  for (let index = 1; index < clips.length; index++) {
+    const previous = clips[index - 1]!;
+    const clip = clips[index]!;
+    if (previous.startFrame + previous.durationFrames === clip.startFrame) {
+      cuts.push({ frame: clip.startFrame, from: previous.startFrame, to: clip.startFrame + clip.durationFrames });
+    }
+  }
+  return cuts;
+}
+
+/** The spine cut a transition hands over at: strictly inside it, the one nearest its middle. */
+export function transitionCut(cuts: readonly SpineCut[], transition: TimelineTransition): SpineCut | null {
+  const middle = transition.startFrame + transition.durationFrames / 2;
+  return cuts
+    .filter((cut) => cut.frame > transition.startFrame && cut.frame < transitionEnd(transition))
+    .reduce<SpineCut | null>((best, cut) => (!best || Math.abs(cut.frame - middle) < Math.abs(best.frame - middle) ? cut : best), null);
+}
+
+export type TransitionAtCut =
+  | { kind: 'insert'; startFrame: number; durationFrames: number }
+  /** `timing` is set when the one already there only touched the cut and gets re-centred on it. */
+  | { kind: 'replace'; id: string; timing?: { startFrame: number; durationFrames: number } }
+  | { kind: 'none'; reason: 'no-cut' | 'no-room' };
+
+/** Where a transition picked at `atFrame` goes: centred on the spine cut nearest to it, clamped to
+ *  the two clips and the neighbouring transitions. A transition already on that cut is replaced. */
+export function transitionAtNearestCut(document: EditorDocumentV2, atFrame: number, wantedFrames = Math.round(DEFAULT_TRANSITION_SEC * document.canvas.fps)): TransitionAtCut {
+  const cut = spineCuts(document).reduce<SpineCut | null>(
+    (best, candidate) => (!best || Math.abs(candidate.frame - atFrame) < Math.abs(best.frame - atFrame) ? candidate : best),
+    null,
+  );
+  if (!cut) return { kind: 'none', reason: 'no-cut' };
+  const list = document.timeline.transitions ?? [];
+  const onCut = list.filter((transition) => transition.startFrame <= cut.frame && transitionEnd(transition) >= cut.frame);
+  const existing = onCut.find((transition) => transition.startFrame < cut.frame && transitionEnd(transition) > cut.frame) ?? onCut[0];
+  const others = list.filter((transition) => transition !== existing);
+  const left = Math.max(cut.from, ...others.filter((transition) => transitionEnd(transition) <= cut.frame).map(transitionEnd));
+  const right = Math.min(cut.to, ...others.filter((transition) => transition.startFrame >= cut.frame).map((transition) => transition.startFrame));
+  const centred = (frames: number) => {
+    const before = Math.min(Math.floor(frames / 2), cut.frame - left);
+    const after = Math.min(frames - Math.floor(frames / 2), right - cut.frame);
+    return before >= 1 && after >= 1 ? { startFrame: cut.frame - before, durationFrames: before + after } : null;
+  };
+  if (existing) {
+    if (existing.startFrame < cut.frame && transitionEnd(existing) > cut.frame) return { kind: 'replace', id: existing.id };
+    const timing = centred(Math.max(2, existing.durationFrames));
+    return timing ? { kind: 'replace', id: existing.id, timing } : { kind: 'none', reason: 'no-room' };
+  }
+  const timing = centred(Math.max(2, wantedFrames));
+  return timing ? { kind: 'insert', ...timing } : { kind: 'none', reason: 'no-room' };
 }
 
 /** Ripple removal of [start, end): later items move up, items inside are dropped, straddlers shrink. */
