@@ -10,7 +10,7 @@ import type { SceneAgentState } from '@pireel/studio-ui/agent-startup';
 
 import { coverFrameRanges, coverFrameAtTime, retainedCoverFrame, type CoverSourceFrame, type CoverFrameStripData } from '@pireel/studio-ui/cover-frame-selection';
 import { CoverSceneController, coverSceneFromDocument, withCoverScene, type CoverGenerateOptions, type CoverDraftPatch } from '@pireel/studio-ui/cover-scene';
-import { CoverSceneDialog, TimelineCoverPlaceholder, coverSceneStatus } from '@pireel/studio-ui/cover-scene-dialog';
+import { CoverSceneDialog, TimelineCoverButton, coverSceneStatus } from '@pireel/studio-ui/cover-scene-dialog';
 import { cloudBackupMedia } from '@pireel/studio-ui/cloud-media';
 import { extractThumbnails } from '@pireel/studio-engine/video-edit/thumbnails';
 import { pipLayerOwner } from '@pireel/studio-engine/pip-layout';
@@ -1148,9 +1148,8 @@ export function HyperframesWorkbench({
   }, [projectId, chatPersistence]);
   const [pps, setPps] = useState(DEFAULT_PPS); // timeline zoom (px/sec), controlled by the ruler slider
   const [timelineSnapEnabled, setTimelineSnapEnabled] = useState(true);
-  // Timeline row density. A remembered choice wins; otherwise the agent's embedded view starts
-  // compact (the timeline is a readout there and the canvas needs the room) and the editor starts
-  // comfortable.
+  // Timeline row density. A remembered choice wins; otherwise it starts compact so the canvas
+  // gets the room.
   const [timelineDensity, setTimelineDensityState] = useState<TimelineDensity>(() => {
     try {
       const stored = typeof localStorage !== "undefined" ? localStorage.getItem(TIMELINE_DENSITY_STORAGE_KEY) : null;
@@ -1158,7 +1157,7 @@ export function HyperframesWorkbench({
     } catch {
       /* storage unavailable: fall through to the default */
     }
-    return agentView ? "compact" : "comfortable";
+    return "compact";
   });
   // Collapsed timeline: only the transport bar stays; the tracks fold away so the preview gets the room.
   const [timelineCollapsed, setTimelineCollapsed] = useState(() => {
@@ -10907,7 +10906,15 @@ export function HyperframesWorkbench({
         {whiteboardScene && <ScenePreviewTransport duration={hasContent ? duration : 0} playing={playing} onToggle={togglePlaybackFromUserGesture} onSeek={time => { setPlaying(false); applyT(time); }} />}
         {/* Transport bar. On narrow windows (≤1280) button text must not wrap: when space is short the whole bar scrolls horizontally, don't let "safe zone" stack into three lines */}
         <TooltipProvider delayDuration={200}>
-          <div style={whiteboardScene ? { display: "none" } : undefined} className="bg-panel flex items-center gap-3 overflow-x-auto py-1 pl-4 whitespace-nowrap [&>button]:shrink-0">
+          <div style={whiteboardScene ? { display: "none" } : undefined} className="bg-panel flex items-center gap-3 overflow-x-auto py-1 pl-2 whitespace-nowrap [&>button]:shrink-0">
+            {(hasContent || projectCover) && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <TimelineCoverButton cover={projectCover} busy={coverApplying || coverScene?.phase === 'planning' || coverScene?.phase === 'starting' || coverScene?.phase === 'generating'} onOpen={openCoverScene} />
+                </TooltipTrigger>
+                <TooltipContent>{t(projectCover ? "ui.coverSceneDialog.currentCover" : "ui.coverSceneDialog.addCover")}</TooltipContent>
+              </Tooltip>
+            )}
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -11247,9 +11254,6 @@ export function HyperframesWorkbench({
         {/* Caption style popover: reuses CaptionsPanel wholesale; clicking a style applies globally, click outside / Esc dismisses */}
         {/* Multi-track timeline */}
         <div ref={timelineGuardRef} data-studio-timeline data-cap-keep aria-disabled={manualEditingLocked || undefined} hidden={timelineCollapsed || whiteboardScene} className="shrink-0 overflow-hidden rounded-b-sm">
-          <div className="flex min-w-0">
-            {(hasContent || projectCover) && <TimelineCoverPlaceholder cover={projectCover} busy={coverApplying || coverScene?.phase === 'planning' || coverScene?.phase === 'starting' || coverScene?.phase === 'generating'} onOpen={openCoverScene} />}
-            <div className="min-w-0 flex-1">
           <StudioTimeline
             comp={timelineComp}
             density={timelineDensity}
@@ -11292,8 +11296,6 @@ export function HyperframesWorkbench({
             onChangeTransition={changeTransitionTiming}
             {...timelineCbs}
           />
-            </div>
-          </div>
         </div>
 
         {/* Test hook: narration script + visual analysis (read-only) */}

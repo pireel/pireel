@@ -74,13 +74,25 @@ describe('visibleStripTiles', () => {
     expect(visible.at(-1)?.left).toBe(2_500);
   });
 
-  it('stretches source-time tiles across a slowed timeline clip', () => {
-    const strip = Array.from({ length: 4 }, (_, index) => ({ t: index + 0.5, url: `frame-${index}` }));
-    const visible = visibleStripTiles(strip, 0, 3.3, 1, 50, 42.7, 42.7, 48.5, 48.5);
-    expect(visible).toHaveLength(4);
-    expect(visible[0]).toMatchObject({ left: 0, url: 'frame-0' });
-    expect(visible[0]!.width).toBeCloseTo(87.88, 1);
-    expect(visible.at(-1)!.left + visible.at(-1)!.width).toBeGreaterThan(290);
+  it('keeps tiles square on a slowed or sped-up clip and samples the source by its speed', () => {
+    const strip = Array.from({ length: 12 }, (_, index) => ({ t: index * 0.25, url: `frame-${index}` }));
+    // 3 s of source slowed to 6 s of timeline at 50 px/s, 1 s tiles: six 50 px tiles, half a source second apart.
+    const slow = visibleStripTiles(strip, 0, 3, 1, 50, 10, 10, 16, 16);
+    expect(slow.map((tile) => tile.width)).toEqual(Array(6).fill(50));
+    expect(slow.map((tile) => tile.left)).toEqual([0, 50, 100, 150, 200, 250]);
+    expect(slow.map((tile) => tile.url)).toEqual(['frame-1', 'frame-3', 'frame-5', 'frame-7', 'frame-9', 'frame-11']);
+    // The same source at 2× covers 1.5 s of timeline: two tiles of the same size.
+    const fast = visibleStripTiles(strip, 0, 3, 1, 50, 10, 10, 11.5, 11.5);
+    expect(fast.map((tile) => tile.width)).toEqual([50, 50]);
+    expect(fast.at(-1)!.left + fast.at(-1)!.width).toBeGreaterThanOrEqual(75);
+  });
+
+  it('continues one strip across the halves of a split slowed clip', () => {
+    const strip = Array.from({ length: 12 }, (_, index) => ({ t: index * 0.25, url: `frame-${index}` }));
+    const whole = visibleStripTiles(strip, 0, 3, 1, 50, 0, 0, 6, 6);
+    const right = visibleStripTiles(strip, 1.5, 3, 1, 50, 3, 3, 6, 6);
+    expect(right.map((tile) => tile.url)).toEqual(whole.slice(3).map((tile) => tile.url));
+    expect(right[0]!.left).toBe(0);
   });
 });
 

@@ -50,6 +50,8 @@ import {
   MIN_PPS,
   SHOT_GAP,
   TIMELINE_ITEM_EDGE_RADIUS,
+  TIMELINE_ITEM_FRAME,
+  trimHandleClass,
   TIMELINE_ITEM_RADIUS,
   TIMELINE_METRICS,
   type TimelineDensity,
@@ -136,7 +138,7 @@ export interface TimelineBlockTrackTarget {
 
 interface StudioTimelineProps {
   comp: Composition;
-  /** Row density; compact is the agent view's default (see TIMELINE_METRICS). */
+  /** Row density (see TIMELINE_METRICS); the workbench starts compact. */
   density?: TimelineDensity;
   /** Admin/debug-only Director Plan intervals. Omit for the ordinary editing timeline. */
   directorScenes?: readonly TimelineDirectorScene[];
@@ -1297,8 +1299,8 @@ function StudioTimelineImpl({
   const rowTops = new Map<TimelineLaneKey, number>();
   let rowCursor = 0;
   // The transition lane sits right under the story spine and shifts every lane below it.
-  // Transitions sit between pieces of the story: no lane until there is one.
-  const showTransitionLane = !!onChangeTransition && displayTracks.includes(0) && dur > 0;
+  // Only once there is a transition: an empty lane is just a placeholder row (they are added from the panel).
+  const showTransitionLane = !!onChangeTransition && !!transitions?.length && displayTracks.includes(0) && dur > 0;
   const TRANSITION_ROW_H = Math.max(18, Math.round(ROW_H * 0.62));
   let transitionLaneTop = 0;
   displayTracks.forEach((track, index) => {
@@ -1916,7 +1918,6 @@ function StudioTimelineImpl({
             </div>
           </div>
 
-          {/* Breathing room: the first block's selection ring bleeds 2px left; without it, it slips under the sticky gutter and gets clipped (same on the right, see trailing spacer) */}
           <div className="shrink-0" style={{ width: EDGE_PAD }} />
 
           {/* Right: ruler + tracks + playhead */}
@@ -2187,8 +2188,8 @@ function StudioTimelineImpl({
                           onDoubleClick={(e) => e.stopPropagation()}
                           aria-label={t('panels.sceneNShotName', { n: i + 1, name: t(TREATMENT_NAME[shot.treatment] ?? shot.treatment) })}
                           aria-disabled={!enabled}
-                          className={`group/shot bg-ink/10 absolute overflow-hidden text-left ${TIMELINE_ITEM_RADIUS} ${!enabled ? 'opacity-45 grayscale ' : ''}${
-                            dragged ? 'opacity-30 ring-1 ring-white/10' : sel ? 'transition ring-2 ring-accent/70' : 'transition ring-1 ring-white/10 hover:ring-accent/40'
+                          className={`group/shot bg-ink/10 absolute overflow-hidden text-left ${TIMELINE_ITEM_RADIUS} ${TIMELINE_ITEM_FRAME} ${!enabled ? 'opacity-45 grayscale ' : ''}${
+                            dragged ? 'opacity-30 after:outline-1 after:-outline-offset-1 after:outline-white/10' : sel ? 'transition after:outline-1 after:-outline-offset-1 after:outline-accent-ink' : 'transition after:outline-1 after:-outline-offset-1 after:outline-white/10 hover:after:outline-accent/40'
                           }`}
                           style={{ left: x(displayStart), width: w, top: SCENE_PAD_T, height: H0 - SCENE_PAD_T - SCENE_PAD_B }}
                         >
@@ -2310,7 +2311,7 @@ function StudioTimelineImpl({
                                   },
                                 );
                               }}
-                              className={`absolute inset-y-0 z-20 w-2 cursor-ew-resize transition-colors ${edge === 'left' ? `left-0 ${TIMELINE_ITEM_EDGE_RADIUS.left}` : `right-0 ${TIMELINE_ITEM_EDGE_RADIUS.right}`} ${sel ? 'bg-white/55' : 'bg-white/0 group-hover/shot:bg-white/55'}`}
+                              className={`absolute inset-y-0 z-20 w-2 cursor-ew-resize transition-colors ${edge === 'left' ? `left-0 ${TIMELINE_ITEM_EDGE_RADIUS.left}` : `right-0 ${TIMELINE_ITEM_EDGE_RADIUS.right}`} ${trimHandleClass(sel, 'bg-accent-ink', 'group-hover/shot')}`}
                             />
                           ))}
                         </button>
@@ -2576,7 +2577,7 @@ function StudioTimelineImpl({
                     data-visual-track-id={track.trackId}
                     data-visual-clip-id={clip.clipId}
                     aria-disabled={!clip.enabled}
-                    className={`bg-ink/10 group absolute overflow-hidden text-left ${TIMELINE_ITEM_RADIUS} ${!clip.enabled ? 'opacity-45 grayscale ' : ''}${live ? 'opacity-30 ring-1 ring-white/10' : selected ? 'transition ring-2 ring-accent/70' : 'transition ring-1 ring-white/10 hover:ring-accent/40'}`}
+                    className={`bg-ink/10 group absolute overflow-hidden text-left ${TIMELINE_ITEM_RADIUS} ${TIMELINE_ITEM_FRAME} ${!clip.enabled ? 'opacity-45 grayscale ' : ''}${live ? 'opacity-30 after:outline-1 after:-outline-offset-1 after:outline-white/10' : selected ? 'transition after:outline-1 after:-outline-offset-1 after:outline-accent-ink' : 'transition after:outline-1 after:-outline-offset-1 after:outline-white/10 hover:after:outline-accent/40'}`}
                     style={{ left, width, top, height: VISUAL_VIDEO_CLIP_H }}
                     onClick={(event) => {
                       event.stopPropagation();
@@ -2703,7 +2704,7 @@ function StudioTimelineImpl({
                             },
                           );
                         }}
-                        className={`absolute inset-y-0 z-10 w-1.5 cursor-ew-resize transition-colors ${edge === 'left' ? `left-0 ${TIMELINE_ITEM_EDGE_RADIUS.left}` : `right-0 ${TIMELINE_ITEM_EDGE_RADIUS.right}`} ${selected ? 'bg-white/50' : 'bg-white/0 group-hover:bg-white/40'}`}
+                        className={`absolute inset-y-0 z-10 w-1.5 cursor-ew-resize transition-colors ${edge === 'left' ? `left-0 ${TIMELINE_ITEM_EDGE_RADIUS.left}` : `right-0 ${TIMELINE_ITEM_EDGE_RADIUS.right}`} ${trimHandleClass(selected, 'bg-accent-ink')}`}
                       />
                     ))}
                   </div>
@@ -2817,7 +2818,7 @@ function StudioTimelineImpl({
                     key={b.id}
                     aria-disabled={disabledClipIds?.has(b.id)}
                     data-block-selection-keep={sel ? '' : undefined}
-                    className={`group absolute overflow-hidden ring-1 ${TIMELINE_ITEM_RADIUS} ${disabledClipIds?.has(b.id) ? 'opacity-45 grayscale ' : ''}${crossing ? 'z-40 shadow-lg ring-2 brightness-110' : 'transition'} ${sel ? meta.chipSel : meta.chip}`}
+                    className={`group absolute overflow-hidden ${TIMELINE_ITEM_RADIUS} ${TIMELINE_ITEM_FRAME} ${disabledClipIds?.has(b.id) ? 'opacity-45 grayscale ' : ''}${crossing ? 'z-40 shadow-lg brightness-110' : 'transition'} after:outline-1 after:-outline-offset-1 ${sel ? meta.chipSel : meta.chip}`}
                     style={{ left, width, top, height: ROW_H - 8 }}
                     onClick={(e) => e.stopPropagation()} // chip is selected via pointer; block bubbling so the background doesn't clear it
                     onDoubleClick={(e) => {
@@ -2920,7 +2921,7 @@ function StudioTimelineImpl({
                           },
                         );
                       }}
-                      className={`absolute inset-y-0 left-0 w-1.5 cursor-ew-resize ${TIMELINE_ITEM_EDGE_RADIUS.left} ${sel ? 'bg-white/50' : 'bg-white/0 group-hover:bg-white/40'}`}
+                      className={`absolute inset-y-0 left-0 w-1.5 cursor-ew-resize ${TIMELINE_ITEM_EDGE_RADIUS.left} ${trimHandleClass(sel, meta.handle)}`}
                     />
                     {/* Right trim */}
                     <span
@@ -2946,7 +2947,7 @@ function StudioTimelineImpl({
                           },
                         );
                       }}
-                      className={`absolute inset-y-0 right-0 w-1.5 cursor-ew-resize ${TIMELINE_ITEM_EDGE_RADIUS.right} ${sel ? 'bg-white/50' : 'bg-white/0 group-hover:bg-white/40'}`}
+                      className={`absolute inset-y-0 right-0 w-1.5 cursor-ew-resize ${TIMELINE_ITEM_EDGE_RADIUS.right} ${trimHandleClass(sel, meta.handle)}`}
                     />
                   </div>
                 );
@@ -2975,7 +2976,7 @@ function StudioTimelineImpl({
                     <div
                       key={b.id}
                       aria-disabled={disabledClipIds?.has(b.id)}
-                      className={`group absolute overflow-hidden bg-rose-500/12 ring-1 transition hover:bg-rose-500/20 ${selected ? 'ring-rose-400/60' : 'ring-rose-400/25'} ${TIMELINE_ITEM_RADIUS} ${disabledClipIds?.has(b.id) ? 'opacity-45 grayscale' : ''}`}
+                      className={`group absolute overflow-hidden bg-rose-500/12 ${TIMELINE_ITEM_FRAME} transition hover:bg-rose-500/20 ${selected ? 'after:outline-1 after:-outline-offset-1 after:outline-rose-600 dark:after:outline-rose-400' : 'after:outline-1 after:-outline-offset-1 after:outline-rose-400/25'} ${TIMELINE_ITEM_RADIUS} ${disabledClipIds?.has(b.id) ? 'opacity-45 grayscale' : ''}`}
                       style={{ left: x(preview.startSec), width, top: rowTop(captionLane) + 4, height: ROW_H - 8 }}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -3012,7 +3013,7 @@ function StudioTimelineImpl({
                                 },
                               );
                             }}
-                            className={`absolute inset-y-0 left-0 w-1.5 cursor-ew-resize ${TIMELINE_ITEM_EDGE_RADIUS.left} ${selected ? 'bg-white/30' : 'bg-transparent group-hover:bg-white/20'}`}
+                            className={`absolute inset-y-0 left-0 w-1.5 cursor-ew-resize ${TIMELINE_ITEM_EDGE_RADIUS.left} ${trimHandleClass(selected, 'bg-rose-600 dark:bg-rose-400')}`}
                           />
                           <span
                             aria-label={t('panels.trimCaptionEnd')}
@@ -3039,7 +3040,7 @@ function StudioTimelineImpl({
                                 },
                               );
                             }}
-                            className={`absolute inset-y-0 right-0 w-1.5 cursor-ew-resize ${TIMELINE_ITEM_EDGE_RADIUS.right} ${selected ? 'bg-white/30' : 'bg-transparent group-hover:bg-white/20'}`}
+                            className={`absolute inset-y-0 right-0 w-1.5 cursor-ew-resize ${TIMELINE_ITEM_EDGE_RADIUS.right} ${trimHandleClass(selected, 'bg-rose-600 dark:bg-rose-400')}`}
                           />
                         </>
                       )}
@@ -3151,7 +3152,7 @@ function StudioTimelineImpl({
                         title={item.label}
                         onPointerDown={(event) => beginTransitionDrag(event, item, 'move')}
                         onClick={(event) => event.stopPropagation()}
-                        className={`group absolute top-0 flex h-full cursor-grab items-center overflow-hidden rounded-md text-[10px] font-medium text-accent-foreground shadow-sm active:cursor-grabbing ${selected ? 'bg-accent ring-accent/50 ring-2' : 'bg-accent/70 hover:bg-accent/90'}`}
+                        className={`group absolute top-0 flex h-full cursor-grab items-center overflow-hidden rounded-md ${TIMELINE_ITEM_FRAME} text-[10px] font-medium text-accent-foreground shadow-sm active:cursor-grabbing ${selected ? 'bg-accent after:outline-ink after:outline-1 after:-outline-offset-1' : 'bg-accent/70 hover:bg-accent/90'}`}
                         style={{ left: x(live.startSec), width: Math.max(6, width) }}
                       >
                         <span className={`pointer-events-none flex min-w-0 flex-1 items-center gap-1 ${roomy ? 'px-2.5' : 'justify-center px-0.5'}`}>
@@ -3199,9 +3200,8 @@ function StudioTimelineImpl({
                 Not drawn on an empty project — a red line hanging on empty tracks looks broken */}
             {(hasVideoLane || comp.blocks.length > 0 || audioClips.length > 0) && <PlayheadCursor pps={pps} onPointerDown={onPlayheadPointerDown} />}
           </div>
-
-          {/* Right breathing room: the last block's selection ring bleed isn't clipped by the scroll container's right edge */}
           <div className="shrink-0" style={{ width: EDGE_PAD }} />
+
         </div>
       </div>
     </div>

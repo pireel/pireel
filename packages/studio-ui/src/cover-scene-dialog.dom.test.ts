@@ -10,7 +10,7 @@ restoreHttpHost(() => setStudioProviders(previousHttpHost));
 import { act, createElement, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CoverSceneDialog, CoverToolCard, TimelineCoverPlaceholder } from '@pireel/studio-ui/cover-scene-dialog';
+import { CoverSceneDialog, CoverToolCard, TimelineCoverButton } from '@pireel/studio-ui/cover-scene-dialog';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { setStudioLocale } from '@pireel/studio-ui/i18n';
 import type { CoverScene } from '@pireel/studio-ui/cover-scene';
@@ -31,7 +31,7 @@ async function mount(component: ReturnType<typeof createElement>) { const host =
 describe('independent cover scene interaction', () => {
   it('automatically prepares the full prompt and reference on open, without generating an image or showing title/auto controls', async () => {
     const generate = vi.fn(async () => {}); const prepare = vi.fn(async () => {});
-    function Harness() { const [open, setOpen] = useState(false); return createElement('div', {}, createElement(TimelineCoverPlaceholder, { cover: null, onOpen: () => setOpen(true) }), createElement(CoverSceneDialog, { ...inputs, open, scene: { ...scene, phase: 'prepared' }, applied: null, busy: false, onClose: () => setOpen(false), onPrepare: prepare, onGenerate: generate, onApply: async () => {} })); }
+    function Harness() { const [open, setOpen] = useState(false); return createElement('div', {}, createElement(TimelineCoverButton, { cover: null, onOpen: () => setOpen(true) }), createElement(CoverSceneDialog, { ...inputs, open, scene: { ...scene, phase: 'prepared' }, applied: null, busy: false, onClose: () => setOpen(false), onPrepare: prepare, onGenerate: generate, onApply: async () => {} })); }
     const host = await mount(createElement(Harness));
     await act(async () => host.querySelector('button')!.click());
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 125)); });
@@ -111,16 +111,16 @@ describe('independent cover scene interaction', () => {
     expect(html).toContain('封面已生成'); expect(html).toContain('打开封面');
     expect(html).not.toMatch(/PRIVATE|https:|<img/);
   });
-  it('opens the scene from an untimed timeline-front placeholder', async () => {
-    const open = vi.fn(); const host = await mount(createElement(TimelineCoverPlaceholder, { cover: image, onOpen: open }));
+  it('opens the scene from the transport bar\'s cover button', async () => {
+    const open = vi.fn(); const host = await mount(createElement(TimelineCoverButton, { cover: image, onOpen: open }));
     act(() => host.querySelector('button')!.click()); expect(open).toHaveBeenCalledTimes(1);
     expect(host.querySelector('[data-timeline-cover-placeholder]')).not.toBeNull();
     expect(host.querySelector('img')?.getAttribute('src')).toBe(image.url);
   });
-  it('stays at the head of the timeline before any cover, as the place to add one', async () => {
-    const open = vi.fn(); const host = await mount(createElement(TimelineCoverPlaceholder, { cover: null, busy: true, onOpen: open }));
+  it('stays in the transport bar before any cover, as the place to add one', async () => {
+    const open = vi.fn(); const host = await mount(createElement(TimelineCoverButton, { cover: null, busy: true, onOpen: open }));
     expect(host.querySelector('img')).toBeNull();
-    expect(host.textContent).toContain('添加封面');
+    expect(host.textContent).toContain('封面');
     expect(host.querySelector('.animate-spin')).not.toBeNull();
     act(() => host.querySelector('button')!.click()); expect(open).toHaveBeenCalledTimes(1);
   });

@@ -22,7 +22,7 @@ import {
   audioClipWindow,
   audioTrimPatch,
 } from '@pireel/studio-engine/composition';
-import { AUDIO_ROW_H, TIMELINE_ITEM_EDGE_RADIUS, TIMELINE_ITEM_RADIUS } from './timeline-utils';
+import { AUDIO_ROW_H, TIMELINE_ITEM_EDGE_RADIUS, TIMELINE_ITEM_RADIUS, trimHandleClass } from './timeline-utils';
 import { fadeBodyPath, waveBars } from './timeline-wave';
 import { t } from './i18n';
 
@@ -158,7 +158,7 @@ function AudioLaneImpl({ trackId, rowH = AUDIO_ROW_H, clips, disabledIds, dur, s
             aria-disabled={disabledIds?.has(clip.id)}
             aria-label={clip.label || t('panels.musicBed')}
             className={`group/aud text-ink absolute top-0.5 cursor-grab overflow-hidden border active:cursor-grabbing ${TIMELINE_ITEM_RADIUS} ${disabledIds?.has(clip.id) ? 'opacity-45 grayscale ' : ''}${
-              selected ? 'border-accent ring-accent/40 z-10 ring-1' : 'border-accent/40'
+              selected ? 'border-accent-ink z-10' : 'border-accent-ink/40'
             }`}
             style={{
               left: px(w.start),
@@ -306,7 +306,7 @@ function AudioLaneImpl({ trackId, rowH = AUDIO_ROW_H, clips, disabledIds, dur, s
                   );
                 }}
                 className={`absolute inset-y-0 w-1.5 cursor-ew-resize ${edge === 'left' ? `left-0 ${TIMELINE_ITEM_EDGE_RADIUS.left}` : `right-0 ${TIMELINE_ITEM_EDGE_RADIUS.right}`} ${
-                  selected ? 'bg-white/50' : 'bg-white/0 group-hover/aud:bg-white/40'
+                  trimHandleClass(selected, 'bg-accent-ink', 'group-hover/aud')
                 }`}
               />
             ))}
@@ -340,7 +340,7 @@ function AudioLaneImpl({ trackId, rowH = AUDIO_ROW_H, clips, disabledIds, dur, s
                     style={{ left: kx - 7, top: CHIP_LABEL_H + KNEE_LANE_Y - 7, width: 14, height: 14 }}
                   >
                     <span
-                      className="border-accent block rounded-full border-2 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.45)]"
+                      className="border-accent-ink bg-canvas block rounded-full border-2 shadow-[0_1px_3px_rgba(0,0,0,0.45)]"
                       style={{ width: KNEE_SIZE, height: KNEE_SIZE }}
                     />
                   </span>

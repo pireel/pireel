@@ -1,7 +1,7 @@
 import { editorRequest } from '@pireel/studio-ui/host-request';
 import { pickImageModel, normalizeImageSettings, imageGenerationParams } from '@pireel/studio-engine/image-generation-settings';
 import { ImageGenerationFields } from '@pireel/studio-ui/image-generation-fields';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ComponentProps } from 'react';
 import { ImageIcon, Loader2 } from 'lucide-react';
 import { useQuote } from '@pireel/studio-ui/use-quote';
 import { ButtonCreditCost } from './credit-cost';
@@ -21,16 +21,14 @@ export function coverSceneStatus(scene?: CoverScene | null): string {
 export function CoverToolCard({ scene, onOpen }: { scene?: CoverScene | null; onOpen?: () => void }) {
   return <div className="border-line rounded-md border px-3 py-2"><div className="text-ink-2 flex items-center gap-2 text-xs"><ImageIcon size={14} /><span>{coverSceneStatus(scene)}</span>{onOpen && <button type="button" onClick={onOpen} className="text-ink ml-auto underline underline-offset-4">{t('ui.coverSceneDialog.openCover')}</button>}</div></div>;
 }
-/** The cover at the head of the timeline: always there, so it is where a cover is made and changed. */
-export function TimelineCoverPlaceholder({ cover, busy, onOpen }: { cover: ProjectCover | null; busy?: boolean; onOpen: () => void }) {
-  return <button type="button" data-timeline-cover-placeholder onClick={onOpen} aria-label={t('ui.coverSceneDialog.coverPlaceholderOpenCover')}
-    className="group border-line bg-panel text-ink-3 hover:text-ink-2 flex w-[76px] shrink-0 flex-col items-center gap-1.5 border-r px-2 py-2.5 text-[11px] focus-visible:outline-accent focus-visible:outline-2 focus-visible:-outline-offset-2">
-    <span>{t('ui.coverSceneDialog.cover')}</span>
-    <span className={`bg-canvas group-hover:ring-accent/60 relative flex w-full flex-1 items-center justify-center overflow-hidden rounded-sm transition group-hover:ring-2 ${cover ? '' : 'border-line border border-dashed'}`}>
-      {cover ? <img src={cover.url} alt={t('ui.coverSceneDialog.currentCover')} className="absolute inset-0 h-full w-full object-contain" />
-        : <span className="flex flex-col items-center gap-1 px-1 text-center text-[10px] leading-tight"><ImageIcon size={16} aria-hidden />{t('ui.coverSceneDialog.addCover')}</span>}
-      {busy && <span className="absolute inset-0 flex items-center justify-center bg-black/45 text-white"><Loader2 size={16} className="animate-spin" aria-hidden /></span>}
-    </span>
+/** The cover, first in the transport bar: always there, so it is where a cover is made and changed. */
+export function TimelineCoverButton({ cover, busy, onOpen, className, ...rest }: { cover: ProjectCover | null; busy?: boolean; onOpen: () => void } & Omit<ComponentProps<'button'>, 'onClick'>) {
+  // Spreads the rest so a tooltip trigger can attach its ref and handlers.
+  return <button {...rest} type="button" data-timeline-cover-placeholder onClick={onOpen} aria-label={t('ui.coverSceneDialog.coverPlaceholderOpenCover')}
+    className={`text-ink-3 hover:text-ink hover:ring-accent/60 relative inline-flex h-8 shrink-0 items-center justify-center gap-1 overflow-hidden rounded-sm text-[11px] transition hover:ring-2 focus-visible:outline-accent focus-visible:outline-2 ${cover ? 'bg-canvas w-12' : 'border-line border border-dashed px-2'} ${className ?? ''}`}>
+    {cover ? <img src={cover.url} alt={t('ui.coverSceneDialog.currentCover')} className="absolute inset-0 h-full w-full object-cover" />
+      : <><ImageIcon size={14} aria-hidden />{t('ui.coverSceneDialog.cover')}</>}
+    {busy && <span className="absolute inset-0 flex items-center justify-center bg-black/45 text-white"><Loader2 size={14} className="animate-spin" aria-hidden /></span>}
   </button>;
 }
 const timeLabel = (seconds: number) => `${Math.floor(seconds / 60)}:${(seconds % 60).toFixed(2).padStart(5, '0')}`;

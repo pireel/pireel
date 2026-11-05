@@ -52,8 +52,8 @@ export function isTimelineDensity(value: unknown): value is TimelineDensity {
   return value === 'comfortable' || value === 'compact';
 }
 export const GUTTER = 68; // fixed columns: track kind + mute + visibility
+export const EDGE_PAD = 4; // half the playhead's head: at 0 s (and at the end) it would otherwise slip under the sticky gutter (or the scroll edge)
 export const CAP_LANE = -1; // "caption lane" sentinel track number: read-only, no drag/reorder, not in z-reorder, not in marquee; real track numbers are always >=0
-export const EDGE_PAD = 12; // breathing room between gutter and content: keeps the first block's outset selection ring from being clipped by the sticky gutter
 export const SHOT_GAP = 2; // hairline gap between shot cards (taken off the right edge, left edge stays time-accurate)
 export const MIN_PPS = 2; // min zoom: ~2px/s, shows minute scale (1 min ~= 120px, ticks go by minutes)
 export const MAX_PPS = 260;
@@ -146,10 +146,28 @@ export function packedPrimaryPlacement(
 /** One compact radius for every piece of content placed on a timeline lane. Keep the matching
  * edge-handle radii here too, so video, graphics, captions and audio cannot drift independently. */
 export const TIMELINE_ITEM_RADIUS = 'rounded-sm';
+/** A clip card's border and selection frame are drawn on its ::after, above its own positioned
+ *  content: an outline on the card itself is painted under its absolutely placed thumbnails, which
+ *  hid the frame's top edge. Colour and width classes go on as after:outline-*. */
+export const TIMELINE_ITEM_FRAME = 'after:pointer-events-none after:absolute after:inset-0 after:z-[25] after:rounded-[inherit]';
 export const TIMELINE_ITEM_EDGE_RADIUS = {
   left: 'rounded-l-sm',
   right: 'rounded-r-sm',
 } as const;
+/** Trim handles at a clip's edges. Selected: filled with the selection colour (so the frame reads
+ *  as one piece with thicker ends) and a grip line in the panel colour; hovered: a neutral ink tint.
+ *  Both come from theme tokens, so they read on light and dark themes and over any thumbnail.
+ *  `hover` is the group-hover variant of the card that owns the handle. */
+const TRIM_HANDLE_HOVER = {
+  'group-hover': 'bg-transparent group-hover:bg-ink/35',
+  'group-hover/shot': 'bg-transparent group-hover/shot:bg-ink/35',
+  'group-hover/aud': 'bg-transparent group-hover/aud:bg-ink/35',
+} as const;
+export function trimHandleClass(selected: boolean, tone: string, hover: keyof typeof TRIM_HANDLE_HOVER = 'group-hover'): string {
+  return selected
+    ? `${tone} after:absolute after:inset-y-1/4 after:left-1/2 after:w-0.5 after:-translate-x-1/2 after:rounded-full after:bg-panel`
+    : TRIM_HANDLE_HOVER[hover];
+}
 
 /** Source-time-anchored filmstrip window (like a mainstream editor): tile k always covers source time
  *  [k,k+1)*tileDur; take tiles that intersect the window [srcStart,srcEnd). First tile's left
@@ -176,7 +194,8 @@ export function stripTiles(strip: FilmstripFrame[], srcStart: number, srcEnd: nu
 
 /** Keep filmstrip DOM proportional to the viewport, not the project duration. Cards remain mounted
  * for editing geometry, but their image tiles are created only when their timeline span is visible
- * (with the caller's overscan already included in visibleStart/visibleEnd). */
+ * (with the caller's overscan already included in visibleStart/visibleEnd). `tileDur` is the
+ * timeline seconds one tile spans on screen. */
 export function visibleStripTiles(
   strip: FilmstripFrame[],
   srcStart: number,
@@ -192,21 +211,23 @@ export function visibleStripTiles(
   const sourceDurationSec = srcEnd - srcStart;
   const timelineDurationSec = timelineEndSec - timelineStartSec;
   if (timelineDurationSec <= 0) return [];
-  // Video speed is represented canonically by source duration / timeline duration. Mapping tile
-  // geometry through that rate keeps a slowed or sped-up clip's filmstrip covering the same edited
-  // range as preview/export instead of drawing only source-duration seconds and leaving a blank tail.
+  // Video speed is source duration / timeline duration. Tiles keep their on-screen size at any
+  // speed (every card shows the same picture shape); the speed changes how much source one tile
+  // stands for, so a slowed clip shows more tiles of nearby frames, a sped-up one fewer, far apart.
+  // The grid stays anchored on source time so the halves of a split clip continue one strip.
   const sourceRate = sourceDurationSec / timelineDurationSec;
-  const sourceFirst = Math.floor(srcStart / tileDur);
-  const sourceLast = Math.ceil(srcEnd / tileDur) - 1;
+  const step = tileDur * sourceRate; // source seconds per tile
+  const sourceFirst = Math.floor(srcStart / step);
+  const sourceLast = Math.ceil(srcEnd / step) - 1;
   const visibleSourceStart = srcStart + (visibleStartSec - timelineStartSec) * sourceRate;
   const visibleSourceEnd = srcStart + (visibleEndSec - timelineStartSec) * sourceRate;
-  const visibleFirst = Math.ceil((visibleSourceStart - tileDur) / tileDur);
-  const visibleLast = Math.floor(visibleSourceEnd / tileDur);
+  const visibleFirst = Math.ceil((visibleSourceStart - step) / step);
+  const visibleLast = Math.floor(visibleSourceEnd / step);
   const first = Math.max(sourceFirst, visibleFirst);
   const last = Math.min(sourceLast, visibleLast);
   const tiles: { left: number; width: number; url: string }[] = [];
   for (let k = first; k <= last; k++) {
-    const srcT = (k + 0.5) * tileDur;
+    const srcT = (k + 0.5) * step;
     let closest = strip[0]!;
     let distance = Number.POSITIVE_INFINITY;
     for (const frame of strip) {
@@ -217,8 +238,8 @@ export function visibleStripTiles(
       }
     }
     tiles.push({
-      left: ((k * tileDur - srcStart) / sourceRate) * pps,
-      width: (tileDur / sourceRate) * pps,
+      left: ((k * step - srcStart) / sourceRate) * pps,
+      width: tileDur * pps,
       url: closest.url,
     });
   }
@@ -226,14 +247,14 @@ export function visibleStripTiles(
 }
 
 /** Timeline chip category background colors (base label/icon/dot live in shared kind-meta.ts). */
-export const KIND_CHIP: Record<BlockKind, { chip: string; chipSel: string }> = {
-  caption: { chip: 'bg-rose-500/15 ring-rose-400/30 hover:bg-rose-500/25', chipSel: 'bg-rose-500/30 ring-2 ring-rose-400' },
-  title: { chip: 'bg-amber-500/15 ring-amber-400/30 hover:bg-amber-500/25', chipSel: 'bg-amber-500/30 ring-2 ring-amber-400' },
-  stat: { chip: 'bg-emerald-500/15 ring-emerald-400/30 hover:bg-emerald-500/25', chipSel: 'bg-emerald-500/30 ring-2 ring-emerald-400' },
-  list: { chip: 'bg-sky-500/15 ring-sky-400/30 hover:bg-sky-500/25', chipSel: 'bg-sky-500/30 ring-2 ring-sky-400' },
-  transition: { chip: 'bg-violet-500/15 ring-violet-400/30 hover:bg-violet-500/25', chipSel: 'bg-violet-500/30 ring-2 ring-violet-400' },
-  media: { chip: 'bg-teal-500/15 ring-teal-400/30 hover:bg-teal-500/25', chipSel: 'bg-teal-500/30 ring-2 ring-teal-400' },
-  custom: { chip: 'bg-slate-400/15 ring-slate-300/30 hover:bg-slate-400/25', chipSel: 'bg-slate-400/30 ring-2 ring-slate-400' },
+export const KIND_CHIP: Record<BlockKind, { chip: string; chipSel: string; handle: string }> = {
+  caption: { chip: 'bg-rose-500/15 after:outline-rose-400/30 hover:bg-rose-500/25', chipSel: 'bg-rose-500/30 after:outline-rose-600 dark:after:outline-rose-400', handle: 'bg-rose-600 dark:bg-rose-400' },
+  title: { chip: 'bg-amber-500/15 after:outline-amber-400/30 hover:bg-amber-500/25', chipSel: 'bg-amber-500/30 after:outline-amber-600 dark:after:outline-amber-400', handle: 'bg-amber-600 dark:bg-amber-400' },
+  stat: { chip: 'bg-emerald-500/15 after:outline-emerald-400/30 hover:bg-emerald-500/25', chipSel: 'bg-emerald-500/30 after:outline-emerald-600 dark:after:outline-emerald-400', handle: 'bg-emerald-600 dark:bg-emerald-400' },
+  list: { chip: 'bg-sky-500/15 after:outline-sky-400/30 hover:bg-sky-500/25', chipSel: 'bg-sky-500/30 after:outline-sky-600 dark:after:outline-sky-400', handle: 'bg-sky-600 dark:bg-sky-400' },
+  transition: { chip: 'bg-violet-500/15 after:outline-violet-400/30 hover:bg-violet-500/25', chipSel: 'bg-violet-500/30 after:outline-violet-600 dark:after:outline-violet-400', handle: 'bg-violet-600 dark:bg-violet-400' },
+  media: { chip: 'bg-teal-500/15 after:outline-teal-400/30 hover:bg-teal-500/25', chipSel: 'bg-teal-500/30 after:outline-teal-600 dark:after:outline-teal-400', handle: 'bg-teal-600 dark:bg-teal-400' },
+  custom: { chip: 'bg-slate-400/15 after:outline-slate-300/30 hover:bg-slate-400/25', chipSel: 'bg-slate-400/30 after:outline-slate-600 dark:after:outline-slate-400', handle: 'bg-slate-600 dark:bg-slate-400' },
 };
 export const TREATMENT_NAME: Record<string, string> = Object.fromEntries(SHOT_TREATMENTS.map((t) => [t.id, t.name]));
 
