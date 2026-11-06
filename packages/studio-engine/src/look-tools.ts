@@ -177,6 +177,7 @@ export function placeGraphicsV3(document: EditorDocumentV2, input: Input): Agent
       trackIndex: freeGraphicsStackOrder(next, startSec, durationSec),
       box,
       label: (string(item.label) ?? look.pieces[pieceId]!.label).slice(0, 24),
+      ...(item.fit === false ? { autoFit: false as const } : {}),
     };
     const inserted = insertOverlayDocumentClip({ document: next, block, ...(string(item.trackId) ? { toTrackId: string(item.trackId)! } : {}) });
     if (!inserted.ok) return fail(inserted.error.message, inserted.error);

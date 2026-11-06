@@ -159,7 +159,8 @@ export function fitGraphic(input: GraphicFitInput): GraphicFitResult {
   const valid = (inkRect: PxRect, paintRect: PxRect): boolean => {
     if (!fullBleed && (paintRect.x < -tolerance || paintRect.x + paintRect.w > W + tolerance)) return false;
     if (paintRect.y < -tolerance || paintRect.y + paintRect.h > H + tolerance) return false;
-    if (ink && (inkRect.x < safe.x - tolerance || inkRect.x + inkRect.w > safe.x + safe.w + tolerance
+    // A full-width panel's fill reaches the edges by design; the safe margins guard loose marks.
+    if (ink && !fullBleed && (inkRect.x < safe.x - tolerance || inkRect.x + inkRect.w > safe.x + safe.w + tolerance
       || inkRect.y < safe.y - tolerance || inkRect.y + inkRect.h > safe.y + safe.h + tolerance)) return false;
     return !obstacles.some((o) => intersects(inkRect, o));
   };
@@ -181,8 +182,8 @@ export function fitGraphic(input: GraphicFitInput): GraphicFitResult {
     for (const dx0 of dxs) {
       for (const dy0 of dys) {
         // Then pull it inside the frame (ink inside the safe area, paint inside the canvas).
-        let dx = dx0 + (ink ? axisClamp(subject.x + dx0, subject.w, safe.x, safe.w) : 0);
-        let dy = dy0 + (ink ? axisClamp(subject.y + dy0, subject.h, safe.y, safe.h) : 0);
+        let dx = dx0 + (ink && !fullBleed ? axisClamp(subject.x + dx0, subject.w, safe.x, safe.w) : 0);
+        let dy = dy0 + (ink && !fullBleed ? axisClamp(subject.y + dy0, subject.h, safe.y, safe.h) : 0);
         if (!fullBleed) dx += axisClamp(painted.x + dx, painted.w, 0, W);
         dy += axisClamp(painted.y + dy, painted.h, 0, H);
         if (!valid(shift(subject, dx, dy), shift(painted, dx, dy))) continue;
@@ -220,7 +221,7 @@ export function fitGraphic(input: GraphicFitInput): GraphicFitResult {
   if (!placement) {
     // Nothing clears every obstacle: keep the size, stay inside the frame, and say what is left.
     const kinds = [...new Set(input.obstacles.filter((o) => ink && intersects(ink, inflate(o, margin))).map((o) => o.kind))];
-    placement = { g: 1, dx: ink ? axisClamp(ink.x, ink.w, safe.x, safe.w) : 0, dy: ink ? axisClamp(ink.y, ink.h, safe.y, safe.h) : 0 };
+    placement = { g: 1, dx: ink && !fullBleed ? axisClamp(ink.x, ink.w, safe.x, safe.w) : 0, dy: ink && !fullBleed ? axisClamp(ink.y, ink.h, safe.y, safe.h) : 0 };
     if (kinds.length) unresolved.push(`still covers the ${kinds.join(' and ')}: no free area fits it, even ${Math.round(MIN_SHRINK * 100)}% size; move or shorten it`);
   }
   const { g, dx, dy } = placement;

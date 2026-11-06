@@ -228,6 +228,8 @@ function lookClips(document: EditorDocumentV2, only?: ReadonlySet<string>): Look
   const fps = document.canvas.fps;
   return document.timeline.tracks.flatMap((track) => track.clips.flatMap((clip) => {
     if (clip.kind !== 'graphic' || !clip.enabled || !clip.block.templateId.startsWith(LOOK_TEMPLATE_PREFIX)) return [];
+    // Placed as designed (place_graphics fit:false): the program leaves it alone.
+    if (clip.block.autoFit === false) return [];
     if (only && !only.has(clip.id)) return [];
     const startSec = clip.startFrame / fps;
     const durationSec = clip.durationFrames / fps;

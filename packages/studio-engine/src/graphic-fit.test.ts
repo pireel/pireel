@@ -82,6 +82,28 @@ describe('fitGraphic', () => {
     expect(fit.unresolved[0]).toContain('still covers the face');
   });
 
+  it('keeps a full-width panel full width: its fill reaches the sides by design', () => {
+    // A solid lower-half panel, clear of the face and with captions off, used to shrink to ~93% only
+    // because its fill crossed the side margins meant for loose marks.
+    const fit = fitGraphic({
+      canvas,
+      geometry: { box: { x: 0, y: 0.55, w: 1, h: 0.45 } },
+      measure: { ink: { x: 0, y: 1056, w: 1080, h: 864 }, paint: { x: 0, y: 1056, w: 1080, h: 864 }, minFontPx: 60 },
+      obstacles: [{ ...headRectFromFace({ x: 300, y: 450, w: 400, h: 330 }), kind: 'face' as const }],
+    });
+    expect(fit).toEqual({ geometry: null, changes: [], unresolved: [] });
+  });
+
+  it('still moves a full-width panel off the face', () => {
+    const fit = fitGraphic({
+      canvas,
+      geometry: { box: { x: 0, y: 0.3, w: 1, h: 0.3 } },
+      measure: { ink: { x: 0, y: 576, w: 1080, h: 576 }, paint: { x: 0, y: 576, w: 1080, h: 576 }, minFontPx: 60 },
+      obstacles: [head],
+    });
+    expect(fit.changes.join(' ')).toMatch(/clear the face/);
+  });
+
   it('lets a background wash sit over the speaker', () => {
     const fit = fitGraphic({
       canvas,

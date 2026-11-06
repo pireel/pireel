@@ -92,6 +92,31 @@ describe('video-level template tools', () => {
     expect(reopened.document.semantics.handoff![1]).toEqual({ id: 'confirm-2', kind: 'voice', text: '用你的克隆声音配旁白？', status: 'open' });
     expect(applyEditorCommand(reopened.document, { type: 'handoff.patch', id: 'nope', status: 'confirmed' }).ok).toBe(false);
   });
+  it('fit:false places an instance as designed, and a box set later drops the geometry an earlier fit wrote', () => {
+    const document = setLook(withSpeech()).document!;
+    const placed = runAgentTimelineTool(document, 'place_graphics', { items: [
+      { pieceId: 'item-card', props: [{ key: 'title', value: 'A' }], box: { x: 0, y: 0.55, w: 1, h: 0.45 }, startFrame: 0, durationFrames: 60, fit: false },
+      { pieceId: 'item-card', props: [{ key: 'title', value: 'B' }], startFrame: 0, durationFrames: 60 },
+    ] });
+    expect(placed.ok, JSON.stringify(placed)).toBe(true);
+    const [kept, fitted] = (placed.data as { clipIds: string[] }).clipIds;
+    const blockOf = (doc: typeof document, id: string) => (doc.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === id) as unknown as { block: Block }).block;
+    expect(blockOf(placed.document!, kept!).autoFit).toBe(false);
+    expect(blockOf(placed.document!, fitted!).autoFit).toBeUndefined();
+
+    // What a fit writes: a layout rect and a scale under the window.
+    const asFitted = runAgentTimelineTool(placed.document!, 'set_clip_properties', { items: [{ clipId: fitted!, box: { x: 0.04, y: 0.55, w: 0.92, h: 0.42 } }] }).document!;
+    const withGeometry = { ...asFitted, timeline: { ...asFitted.timeline, tracks: asFitted.timeline.tracks.map((track) => ({ ...track, clips: track.clips.map((clip) => (
+      clip.id === fitted ? { ...clip, block: { ...(clip as unknown as { block: Block }).block, contentBox: { x: 0.04, y: 0.55, w: 1, h: 0.45 }, scale: 0.926 } } : clip
+    )) })) } } as typeof document;
+    const reset = runAgentTimelineTool(withGeometry, 'set_clip_properties', { items: [{ clipId: fitted!, box: { x: 0, y: 0.55, w: 1, h: 0.45 } }] });
+    expect(reset.ok, JSON.stringify(reset)).toBe(true);
+    const block = blockOf(reset.document!, fitted!);
+    expect(block.box).toEqual({ x: 0, y: 0.55, w: 1, h: 0.45 });
+    expect(block.contentBox).toBeUndefined();
+    expect(block.scale).toBeUndefined();
+  });
+
   it('an instance edits through the piece schema: set_clip_properties, get_state and the component contract', () => {
     const schema = JSON.stringify({ title: { type: 'string', title: '标题' }, price: { type: 'integer', title: '价格', default: 0 } });
     const document = setLook(withSpeech(), [{ id: 'item-card', label: 'Item card', source: card, propsSchema: schema }]).document!;

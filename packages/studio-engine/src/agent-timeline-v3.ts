@@ -565,7 +565,9 @@ export function setClipPropertiesV3(document: EditorDocumentV2, input: Input): A
     if (item.box !== undefined) {
       if (!mediaBox(item.box)) return fail(`items[${index}].box must be a positive normalized rect inside the canvas`);
       if (overlay) {
-        const edit = applyOverlayDocumentEdits({ document: next, updates: [{ clipId, block: { box: mediaBox(item.box)! } }] });
+        // A box set by hand is the new layout: the piece lays out in it again, so the geometry an
+        // earlier fit wrote (its layout rect and scale) must not carry over and shrink it.
+        const edit = applyOverlayDocumentEdits({ document: next, updates: [{ clipId, block: { box: mediaBox(item.box)!, contentBox: undefined, scale: undefined, fitScale: undefined } }] });
         if (!edit.ok) return fail(edit.error.message, { code: edit.error.code, trackIds: edit.error.trackIds });
         next = edit.document; receipts.push(...edit.receipts); changes += 1;
       } else common.box = item.box;
@@ -757,6 +759,17 @@ export function setClipFramingV3(document: EditorDocumentV2, input: Input): Agen
       next = edit.document;
       updates.push(...edit.updates);
       touched = true;
+      // A transform moves the picture inside its current framing; a split or corner recipe's crop
+      // stays. Say so, since a plain transform is often what was meant.
+      if (item.treatment === undefined && item.cropInsets === undefined) {
+        const framed = next.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === clipId) as { properties?: { treatment?: string }; mediaFraming?: { crop?: { top: number; right: number; bottom: number; left: number } } } | undefined;
+        const recipe = framed?.properties?.treatment;
+        const crop = framed?.mediaFraming?.crop;
+        const kept = crop ? (['top', 'right', 'bottom', 'left'] as const).filter((side) => crop[side] > 0.001).map((side) => `${side} ${Math.round(crop[side] * 100)}%`) : [];
+        if (recipe && recipe !== 'full' && recipe !== 'punch-in' && kept.length) {
+          updates.push({ clipId, note: `transform applied on top of ${recipe}, whose crop (${kept.join(', ')}) stays; for a plain transform send cropInsets {reset:true} with it, or set treatment full first` });
+        }
+      }
     }
     if (item.cropInsets && typeof item.cropInsets === 'object') {
       const edit = applyMediaCropInput(next, { items: [{ clipId, ...(item.cropInsets as Input) }] });
@@ -1399,7 +1412,11 @@ export function getTranscriptV3(document: EditorDocumentV2, input: Input): Agent
       ok: true,
       summary: `Listed ${listed.words.length} transcript words`,
       data: listed.wordTiming === 'estimated'
-        ? { ...listed, hint: 'word timing is ESTIMATED from sentence timing (script-backed source, not yet measured); the studio tab can measure it — call get_transcript {assetId} there before exact word edits' }
+        ? { ...listed, hint: document.assets[listed.assetId]?.metadata?.transcriptText
+          // Script-backed speech (generated narration): the tab measures it on a words read.
+          ? 'word timing is ESTIMATED from sentence timing (script-backed source, not yet measured); the studio tab can measure it — call get_transcript {assetId} there before exact word edits'
+          // A recording whose transcript arrived without word timing: a words read does not change it.
+          : 'word timing is ESTIMATED from sentence timing: this transcript came without word timing. Cuts inside a sentence can clip a word, so cut at sentence ends or leave air; for exact word timing, import the file again with the current import helper (it keeps the recognizer\'s word timing).' }
         : listed,
     };
   }

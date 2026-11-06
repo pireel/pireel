@@ -46,3 +46,28 @@ describe('set_clip_framing keeps a punched-in picture over the canvas', () => {
     expect(JSON.stringify(written.data)).not.toContain('would show the canvas');
   });
 });
+
+describe('set_clip_framing on a split clip', () => {
+  function portraitSpine() {
+    let document = emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', { assets: [
+      { id: 'cam', kind: 'video', url: 'https://cdn.example/cam.mp4', durationSec: 10, width: 1080, height: 1920, hasAudio: true },
+    ] }).document!;
+    return runAgentTimelineTool(document, 'add_clips', { clips: [{ id: 'spine', assetId: 'cam', role: 'primary', startFrame: 0, durationFrames: 150 }] }).document!;
+  }
+  const spineOf = (document: ReturnType<typeof portraitSpine>) => renderV3State(document).tracks.flatMap((track) => track.clips ?? []).find((clip) => clip.id === 'spine') as { treatment?: string; framing?: { crop?: Record<string, number> } };
+
+  it('says a transform keeps the split crop, and cropInsets reset drops it', () => {
+    const split = runAgentTimelineTool(portraitSpine(), 'set_clip_framing', { items: [{ clipId: 'spine', treatment: 'split-b' }] }).document!;
+    const moved = runAgentTimelineTool(split, 'set_clip_framing', { items: [{ clipId: 'spine', transform: { offsetY: -0.15, scale: 1 } }] });
+    expect(moved.ok, JSON.stringify(moved)).toBe(true);
+    expect(JSON.stringify(moved.data)).toContain('whose crop (top 25%, bottom 25%) stays');
+    expect(spineOf(moved.document!).framing?.crop).toMatchObject({ top: 0.25, bottom: 0.25 });
+
+    const plain = runAgentTimelineTool(split, 'set_clip_framing', { items: [{ clipId: 'spine', transform: { offsetY: -0.15, scale: 1 }, cropInsets: { reset: true } }] });
+    expect(plain.ok, JSON.stringify(plain)).toBe(true);
+    expect(JSON.stringify(plain.data)).not.toContain('stays');
+    const crop = spineOf(plain.document!).framing?.crop ?? {};
+    expect(Object.values(crop).every((value) => value === 0)).toBe(true);
+  });
+});

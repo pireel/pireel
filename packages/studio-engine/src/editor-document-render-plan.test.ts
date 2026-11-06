@@ -83,10 +83,28 @@ describe('EditorDocumentV2 render plan', () => {
       { shotId: 'a', startSec: 1, endSec: 3 },
       { shotId: 'b', startSec: 4, endSec: 6 },
     ];
-    expect(videoFrameTimelineBody(shots, placements)).toMatch(/\), 4\);/);
+    expect(videoFrameTimelineBody(shots, placements)).toMatch(/[)}], 4\);/);
     const lane = [{ id: 'tr', startSec: 2.75, durationSec: 0.5, effect: 'fade' as const }];
     expect(transitionWindows(lane, shots, placements)).toMatchObject([{ start: 2.75, end: 3.25, cut: null }]);
     expect(transitionWindows(lane, shots, [placements[0]!, { ...placements[1]!, startSec: 3, endSec: 5 }])).toMatchObject([{ cut: 3 }]);
+  });
+
+  it('switches framing at a real cut and glides only across one continuous take', () => {
+    // A jump cut (the source skips 8 → 20) with a punch-in: the new framing is there on the cut frame.
+    const jump: VideoShot[] = [
+      { id: 'a', srcStart: 0, srcEnd: 8, treatment: 'full' },
+      { id: 'b', srcStart: 20, srcEnd: 24, treatment: 'punch-in' },
+    ];
+    const cut = videoFrameTimelineBody(jump, [{ shotId: 'a', startSec: 0, endSec: 8 }, { shotId: 'b', startSec: 8, endSec: 12 }]);
+    expect(cut).toMatch(/tl\.set\('#vidEl', \{ scale: 1\.221[^}]*\}, 8\);/);
+    expect(cut).not.toContain("tl.to('#vidEl'");
+    // The same take split only to reframe (8 → 8): the change still glides like a camera move.
+    const take: VideoShot[] = [
+      { id: 'a', srcStart: 0, srcEnd: 8, treatment: 'full' },
+      { id: 'b', srcStart: 8, srcEnd: 12, treatment: 'punch-in' },
+    ];
+    const glide = videoFrameTimelineBody(take, [{ shotId: 'a', startSec: 0, endSec: 8 }, { shotId: 'b', startSec: 8, endSec: 12 }]);
+    expect(glide).toMatch(/tl\.to\('#vidEl', Object\.assign\(\{ duration: 0\.5, ease: 'power2\.inOut' \}, \{ scale: 1\.221/);
   });
 
   it('places the primary video box independently from source framing', () => {

@@ -62,6 +62,10 @@ export interface Block {
   /** autofit scale factor (<1): measured by the preview when content overflows box; assembleHtml applies transform:scale to #blockId,
    *  preview and export same-source. Default/≈1 = no scale. From sample-composition's measureFit → workbench applyFits. */
   fitScale?: number;
+  /** false = placed as designed: the program does not fit this graphic to the picture (no text
+   *  enlarging, no moving off the face or captions, no shrinking), e.g. a deliberate full-width panel.
+   *  Default = fitted after it is placed or its look changes (graphic-fit.ts). */
+  autoFit?: false;
   /** Component backdrop background (CSS color): fills a solid base + overrides this block's --panel/--paper. Default = transparent over the frame. */
   bg?: string;
   /** Component border color (CSS color): container draws a 3px solid line (box blocks get rounded corners). Default = no border. */
@@ -1128,6 +1132,14 @@ export function videoFrameTimelineBody(
   const final = videoFrameKeyframes(shots, placements);
   if (!final.length) return '';
   const windowAt = (at: number) => transitions?.find((window) => window.cut != null && Math.abs(window.cut - at) < 1e-3);
+  // A framing change where the picture itself cuts (the source jumps, or another file starts) switches
+  // at the cut: gliding there makes the new shot drift for a moment. On one continuous take (a split
+  // made only to reframe) the change glides, like a camera move.
+  const continuousAt = (at: number) => {
+    const before = sp.find((span) => Math.abs(span.editedEnd - at) < 1e-3)?.clip as VideoShot | undefined;
+    const after = sp.find((span) => Math.abs(span.editedStart - at) < 1e-3)?.clip as VideoShot | undefined;
+    return !!before && !!after && (before.src ?? '') === (after.src ?? '') && Math.abs(before.srcEnd - after.srcStart) < 0.05;
+  };
 
   const lines: string[] = [
     `tl.set('#vidEl', ${mediaFramingVars(final[0]!.mediaFraming)}, 0);`,
@@ -1136,16 +1148,20 @@ export function videoFrameTimelineBody(
   for (let i = 1; i < final.length; i++) {
     const gap = (final[i + 1]?.at ?? total) - final[i]!.at;
     const window = windowAt(final[i]!.at);
+    const hardCut = !window && !continuousAt(final[i]!.at);
     const dur = window ? Math.max(1e-3, window.end - window.start) : Math.max(0.2, Math.min(0.5, gap - 0.05));
     const from = window ? window.start : final[i]!.at;
-    lines.push(`tl.to('#vidEl', Object.assign({ duration: ${n(dur)}, ease: 'power2.inOut' }, ${mediaFramingVars(final[i]!.mediaFraming)}), ${n(from)});`);
+    if (hardCut) lines.push(`tl.set('#vidEl', ${mediaFramingVars(final[i]!.mediaFraming)}, ${n(from)});`);
+    else lines.push(`tl.to('#vidEl', Object.assign({ duration: ${n(dur)}, ease: 'power2.inOut' }, ${mediaFramingVars(final[i]!.mediaFraming)}), ${n(from)});`);
     const previousBox = final[i - 1]!.box;
     const nextBox = final[i]!.box;
     const sameBox = (previousBox?.x ?? 0) === (nextBox?.x ?? 0)
       && (previousBox?.y ?? 0) === (nextBox?.y ?? 0)
       && (previousBox?.w ?? 1) === (nextBox?.w ?? 1)
       && (previousBox?.h ?? 1) === (nextBox?.h ?? 1);
-    if (!sameBox) lines.push(`tl.to('#vidEl', Object.assign({ duration: ${n(dur)}, ease: 'power2.inOut' }, ${shotPlacementVars(nextBox)}), ${n(from)});`);
+    if (!sameBox) lines.push(hardCut
+      ? `tl.set('#vidEl', ${shotPlacementVars(nextBox)}, ${n(from)});`
+      : `tl.to('#vidEl', Object.assign({ duration: ${n(dur)}, ease: 'power2.inOut' }, ${shotPlacementVars(nextBox)}), ${n(from)});`);
   }
   // Animated push-ins: tweens on top of the shot's static framing, in edited time. The move ends
   // inside its own clip (an explicit set at the clip end restores the static framing, so a deduped
