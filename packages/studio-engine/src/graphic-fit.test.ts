@@ -104,6 +104,19 @@ describe('fitGraphic', () => {
     expect(fit.changes.join(' ')).toMatch(/clear the face/);
   });
 
+  it('moves a full-width panel only up or down, never out of the frame sideways', () => {
+    // Another graphic over its upper half: sideways it could only leave the frame.
+    const fit = fitGraphic({
+      canvas,
+      geometry: { box: { x: 0, y: 0.6, w: 1, h: 0.3 } },
+      measure: { ink: { x: 0, y: 1152, w: 1080, h: 576 }, paint: { x: 0, y: 1152, w: 1080, h: 576 }, minFontPx: 60 },
+      obstacles: [{ x: 100, y: 1100, w: 880, h: 200, kind: 'graphic' }],
+    });
+    const box = fit.geometry?.box;
+    expect(fit.changes.join(' ')).not.toMatch(/left|right/);
+    if (box) expect(box.x).toBe(0);
+  });
+
   it('lets a background wash sit over the speaker', () => {
     const fit = fitGraphic({
       canvas,

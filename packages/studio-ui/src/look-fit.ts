@@ -190,6 +190,13 @@ async function speakerDuring(
 
 type LookClip = { id: string; startSec: number; durationSec: number; block: Block };
 
+/** On screen together: graphics that only meet at a frame boundary are not (frame times are
+ *  fractions of a second, so their seconds can overlap by a rounding error). */
+export function onScreenTogether(a: { startSec: number; durationSec: number }, b: { startSec: number; durationSec: number }): boolean {
+  const EPS = 1e-4;
+  return a.startSec < b.startSec + b.durationSec - EPS && b.startSec < a.startSec + a.durationSec - EPS;
+}
+
 /** Where a graphic's ink lands after a fit: the same similarity transform its layout went through. */
 function movedInk(ink: PxRect, block: Block, next: { box: NormBox; contentBox: NormBox; scale: number }, W: number, H: number): PxRect {
   const layout = block.contentBox ?? block.box ?? { x: 0, y: 0, w: 1, h: 1 };
@@ -211,7 +218,7 @@ async function measureOthers(
   const fps = document.canvas.fps;
   const all = document.timeline.tracks.flatMap((track) => track.clips.flatMap((clip) => (
     clip.kind === 'graphic' && clip.enabled ? [{ id: clip.id, startSec: clip.startFrame / fps, durationSec: clip.durationFrames / fps, block: clip.block }] : []
-  ))).filter((clip) => targets.some((target) => target.id !== clip.id && clip.startSec < target.startSec + target.durationSec && target.startSec < clip.startSec + clip.durationSec));
+  ))).filter((clip) => targets.some((target) => target.id !== clip.id && onScreenTogether(clip, target)));
   const missing = all.filter((clip) => !measured[clip.id]);
   const extra = missing.length
     ? await measureOverlayBlocks({
@@ -271,7 +278,7 @@ export async function fitLookInstances(deps: LookFitDeps, clipIds?: readonly str
       if (!measure) continue;
       const speaker = await speakerDuring(comp, timeline.placements, deps, clip.startSec, clip.startSec + clip.durationSec);
       const neighbours = others
-        .filter((other) => other.id !== clip.id && other.startSec < clip.startSec + clip.durationSec && clip.startSec < other.startSec + other.durationSec)
+        .filter((other) => other.id !== clip.id && onScreenTogether(other, clip))
         .flatMap((other) => { const ink = placed.get(other.id) ?? other.ink; return ink ? [{ ...ink, kind: 'graphic' as const }] : []; });
       const fit = fitGraphic({
         canvas: { width: comp.width, height: comp.height },

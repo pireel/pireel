@@ -174,6 +174,8 @@ export function fitGraphic(input: GraphicFitInput): GraphicFitResult {
       if (!intersects(subject, o)) continue;
       dys.add(o.y - (subject.y + subject.h));
       dys.add(o.y + o.h - subject.y);
+      // A full-width panel only moves up or down: sideways it would leave the frame.
+      if (fullBleed) continue;
       dxs.add(o.x - (subject.x + subject.w));
       dxs.add(o.x + o.w - subject.x);
     }

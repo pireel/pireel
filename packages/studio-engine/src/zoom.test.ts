@@ -52,6 +52,20 @@ describe('zoom presets', () => {
     expect(reset.vars).toMatchObject({ scale: 1, xPercent: 0, yPercent: 0 });
   });
 
+  it('a push-in ending at a hard cut leaves the next shot its own framing', () => {
+    // a pushes in, then a jump cut (source 4 → 10) to a punched-in b, and c continues b's take.
+    const shots: VideoShot[] = [
+      { id: 'a', srcStart: 0, srcEnd: 4, treatment: 'full', zoom: { preset: 'slow-push', atSec: 0, scale: 1.15 } },
+      { id: 'b', srcStart: 10, srcEnd: 14, treatment: 'punch-in' },
+      { id: 'c', srcStart: 14, srcEnd: 18, treatment: 'punch-in' },
+    ];
+    const calls = play(videoFrameTimelineBody(shots));
+    const atCut = calls.filter((call) => Math.abs(call.at - 4) < 1e-6);
+    // The last write at the cut is b's framing, not a's framing restored over it.
+    expect(atCut.at(-1)).toMatchObject({ m: 'set', vars: { scale: 1.221 } });
+    expect(calls.some((call) => call.at > 4 && call.vars.scale === 1)).toBe(false);
+  });
+
   it('glides the framing across a transition window instead of changing it at the cut', () => {
     const window = { id: 'tr', start: 3.7, end: 4.3, cut: 4, effect: 'circleopen' as const, dir: 'left' as const };
     const differing: VideoShot[] = [

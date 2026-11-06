@@ -1184,7 +1184,9 @@ export function videoFrameTimelineBody(
       const window = windowAt(editedEnd);
       // On a transition the next shot's framing glide (when it differs) already carries the layer
       // out of the zoom; otherwise ease back to this framing across the window rather than snap.
-      if (!window) lines.push(`tl.set('#vidEl', ${vars(1)}, ${n(editedEnd)});`);
+      // A framing keyframe at the cut sets the next shot's whole framing; restoring this one there
+      // too would land after it and carry this framing into the next shots.
+      if (!window) { if (!final.some((key) => Math.abs(key.at - editedEnd) < 1e-3)) lines.push(`tl.set('#vidEl', ${vars(1)}, ${n(editedEnd)});`); }
       else if (!final.some((key) => Math.abs(key.at - editedEnd) < 1e-3)) {
         lines.push(`tl.to('#vidEl', Object.assign({ duration: ${n(Math.max(1e-3, window.end - window.start))}, ease: 'power2.inOut' }, ${vars(1)}), ${n(window.start)});`);
       }
