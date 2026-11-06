@@ -42,7 +42,7 @@ function wordSourceSpan(word: { start: number; end: number }): { start: number; 
  * One piece of media owns each word. A cut that lands inside a word leaves both sides playing a
  * piece of it; the caption must not show the word twice, nor drop it because a remainder was
  * short. The owner is the range playing the word's midpoint, else the one playing most of it
- * (more than a cut sliver); nobody when the whole word was removed.
+ * (over a third of the word, more than a cut sliver); nobody when the whole word was removed.
  */
 export function chooseWordOwner<T extends { start: number; end: number }>(ranges: readonly T[], word: { start: number; end: number }): T | null {
   const span = wordSourceSpan(word);
@@ -50,7 +50,9 @@ export function chooseWordOwner<T extends { start: number; end: number }>(ranges
   const byMid = ranges.find((range) => mid >= range.start && mid < range.end);
   if (byMid) return byMid;
   let best: T | null = null;
-  let bestOverlap = CUT_WORD_MAX_SEC;
+  // The midpoint was cut away: a remainder counts only when it is a real share of the word, not the
+  // sliver a cut near the word's edge leaves (that sliver would show a word nobody hears).
+  let bestOverlap = Math.max(CUT_WORD_MAX_SEC, (span.end - span.start) * 0.34);
   for (const range of ranges) {
     const overlap = Math.min(span.end, range.end) - Math.max(span.start, range.start);
     if (overlap > bestOverlap) { best = range; bestOverlap = overlap; }
