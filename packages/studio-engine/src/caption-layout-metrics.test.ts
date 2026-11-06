@@ -68,6 +68,22 @@ describe('captionLineSegments', () => {
     expect(longest(1.5)).toBeLessThan(longest(1));
   });
 
+  it('breaks a long phrase where the speaker pauses rather than at the most balanced point', () => {
+    const text = '正确的做法是先调研目标用户在哪里';
+    const pauseAfter = text.indexOf('是'); // 正确的做法是 | 先调研目标用户在哪里
+    const timed = (gapSec: number) => [...text].map((ch, index) => {
+      const start = index * 0.2 + (index > pauseAfter ? gapSec : 0);
+      return { text: ch, start, end: start + 0.2 };
+    });
+    const layout = (gapSec: number) => lineTexts(captionLineSegments(groupAsrWords(text, timed(gapSec)), getCaptionPreset('ln-clean'), 40, 1, 1080, { measureText: () => null }));
+    const even = layout(0);
+    const paused = layout(0.3);
+    expect(even.length).toBeGreaterThan(1);
+    expect(paused.join('')).toBe(text);
+    expect(paused[0]).toBe('正确的做法是');
+    expect(even[0]).not.toBe('正确的做法是');
+  });
+
   it('keeps numbers, particles and words the dictionary does not know off line edges', () => {
     expect(lineBreakCost('一千', '九百')).toBeGreaterThan(0.5);
     expect(lineBreakCost('五十', '毫克')).toBeGreaterThan(0);

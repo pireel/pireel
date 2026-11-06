@@ -251,7 +251,7 @@ function renderCaption(slots: Slots, id: string): Rendered {
  */
 
 /** Timeline-owned motion stays deterministic when seeking and during export. */
-function captionEntrance(selector: string, motion: CaptionPreset['motion'], at: number, duration: number): string | null {
+function captionEntrance(selector: string, motion: CaptionPreset['motion'], at: number, duration: number, plate?: string): string | null {
   if (!motion || motion === 'typewriter') return null;
   // Travel is in canvas px (1080-wide reference); a few percent of the frame reads on a phone.
   const from = motion === 'rise' ? { opacity: 0, y: 36 }
@@ -261,7 +261,14 @@ function captionEntrance(selector: string, motion: CaptionPreset['motion'], at: 
     : { opacity: 0 };
   const to = { opacity: 1, ...(motion === 'rise' ? { y: 0 } : motion === 'pop' ? { scale: 1 } : motion === 'slide' ? { x: 0 } : motion === 'blur' ? { filter: 'blur(0px)' } : {}),
     duration: Math.max(0.02, Math.min(0.24, duration * 0.4)), ease: motion === 'pop' ? 'back.out(1.5)' : 'power2.out', immediateRender: false };
-  return `tl.fromTo('${selector}', ${JSON.stringify(from)}, ${JSON.stringify(to)}, ${n(at)});`;
+  const tween = (target: string, a: object, b: object) => `tl.fromTo('${target}', ${JSON.stringify(a)}, ${JSON.stringify(b)}, ${n(at)});`;
+  if (!plate) return tween(selector, from, to);
+  // The plate is drawn by a container around the lines: it fades in with them. Fading only the lines
+  // left the plate fully drawn while the words were still transparent — an empty bubble at every cue change.
+  const { opacity: _from, ...move } = from;
+  const { opacity: _to, ...moveTo } = to;
+  const fade = tween(plate, { opacity: 0 }, { opacity: 1, duration: to.duration, ease: to.ease, immediateRender: false });
+  return Object.keys(move).length ? `${fade}\n${tween(selector, move, moveTo)}` : fade;
 }
 
 function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xPct: number, wPct: number, scale: number, id: string, hPct = 0, sub?: string, subStyle?: { yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number }, canvasW = 1080, ov: { color?: string; bg?: string | null; bold?: boolean; font?: string; emphasis?: string; accentColor?: string; strokeColor?: string; strokeWidth?: number } = {}, subOv: { animation?: string; preset?: string; color?: string; bg?: string | null; bold?: boolean; font?: string } = {}, cue = false): Rendered {
@@ -403,7 +410,7 @@ ${rowCss}
     lines.push(`gsap.set('#${id} .w', { opacity: 0 });`);
     words.forEach((word, index) => lines.push(`tl.set('#${id}-w${index}', { opacity: 1 }, ${n(Math.max(0, word.start - start))});`));
   } else if (cue) {
-    const entrance = captionEntrance(`#${id} .cap-line`, p.motion, 0, captionDuration);
+    const entrance = captionEntrance(`#${id} .cap-line`, p.motion, 0, captionDuration, pill ? `#${id} .cap-stack` : undefined);
     if (entrance) lines.push(entrance);
   } else {
     segs.forEach((group, index) => {

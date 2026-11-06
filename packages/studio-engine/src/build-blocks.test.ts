@@ -268,6 +268,22 @@ describe('cue 块渲染(静态单行,不轮播)', () => {
     expect(rb.innerHtml).toContain('cap-stack');
     expect(rb.timelineBody).not.toContain('autoAlpha: 0'); // 多行也不轮播
   });
+  it('a plated cue fades its plate in with the words, so no empty bubble shows at a cue change', () => {
+    const cues = displayCues(oneShot(4), [{ start: 0, end: 4, text: '就是分享真实的案例' }], {});
+    const block = captionBlocksFromAsr(cues)[0]!;
+    for (const animation of ['fade', 'pop']) {
+      const body = renderBlock({ ...block, slots: { ...block.slots, preset: 'art-bubble-line', animation } }).timelineBody;
+      // The stack draws the plate; it starts transparent with the words.
+      expect(body).toMatch(/cap-stack', \{"opacity":0\}/);
+      // The lines keep only their motion; a second opacity on them would dim the words twice.
+      expect(body).not.toMatch(/cap-line', \{"opacity":0/);
+    }
+    expect(renderBlock({ ...block, slots: { ...block.slots, preset: 'art-bubble-line', animation: 'pop' } }).timelineBody).toMatch(/cap-line', \{"scale":0.82\}/);
+    // Without a plate on the stack the lines fade as before.
+    const plain = renderBlock({ ...block, slots: { ...block.slots, preset: 'ln-clean', animation: 'fade' } }).timelineBody;
+    expect(plain).toMatch(/cap-line', \{"opacity":0\}/);
+    expect(plain).not.toContain('cap-stack');
+  });
   it('legacy 整句块(无 cue 标记)保持旧轮播路径:多段 + 时间线切换', () => {
     const legacy: AsrSegment[] = [{ start: 0, end: 10, text: '这是一个非常非常长的句子它应该在渲染的时候被拆成好几段轮播展示' }];
     const r = renderBlock(captionBlocksFromAsr(legacy)[0]!);

@@ -69,8 +69,23 @@ export function captionLineSegments<W extends FxWord>(
   }
   const enclosed = enclosedBreaks(groups.map((group) => group.text));
   const nested = new Set(groups.filter((_, index) => enclosed.has(index)));
-  return chunkWordsBalanced(groups, m.availablePx, m.widthOf, (left, right) => (lineBreakCost(left.text, right.text) + (nested.has(left) ? ENCLOSED_BREAK_COST : 0)) * m.availablePx)
+  return chunkWordsBalanced(groups, m.availablePx, m.widthOf, (left, right) => (lineBreakCost(left.text, right.text) + (nested.has(left) ? ENCLOSED_BREAK_COST : 0)
+    - pauseBreakBonus(left.members[left.members.length - 1]!, right.members[0]!)) * m.availablePx)
     .map((line) => line.flatMap((group) => group.members));
+}
+
+/** A pause this long or longer earns the full bonus. */
+const PAUSE_FULL_SEC = 0.35;
+const PAUSE_BONUS = 0.6;
+/**
+ * Where the speaker pauses is where a line reads as a phrase: a measured gap between two words
+ * lowers the cost of breaking there, as a share of the line width. Without it a long phrase split at
+ * the most balanced point (先调研目标|用户在哪里). Estimated word times leave no gaps, so they keep
+ * the plain layout.
+ */
+export function pauseBreakBonus(left: { end: number }, right: { start: number }): number {
+  const gap = right.start - left.end;
+  return Number.isFinite(gap) && gap > 0.04 ? Math.min(1, gap / PAUSE_FULL_SEC) * PAUSE_BONUS : 0;
 }
 
 /** Breaking inside a title, quote or aside (《奥德|赛》) reads as a broken name: it costs more than a line. */
