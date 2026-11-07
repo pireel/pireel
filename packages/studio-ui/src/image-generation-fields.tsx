@@ -21,11 +21,10 @@ export function ImageGenerationFields({ value, models, onChange, disabled = fals
   const update = (patch: Partial<ImageSettings>) => onChange(normalizeImageSettings({ ...current, ...patch }));
   return <div className="space-y-3" data-image-generation-fields={owner}>
     {showModel && <SceneSelect portalOwner={owner} label={t('ui.imageGenerationFields.imageModel')} value={current.modelId} options={models.map(model => ({ value: model.id, label: model.name }))} onChange={modelId => update({ modelId })} disabled={disabled || !models.length} />}
-    <div className="grid grid-cols-2 gap-3">
-      <SceneSelect portalOwner={owner} label={t('ui.imageGenerationFields.aspectRatio')} value={selected.aspect} options={ratios.map(value => ({ value, label: value }))} onChange={aspect => update({ size: (choices.find(choice => choice.aspect === aspect && choice.tier === selected.tier) ?? choices.find(choice => choice.aspect === aspect))!.value })} disabled={disabled} />
-      {pixelSizes ? <SceneSelect portalOwner={owner} label={t('ui.imageGenerationFields.resolution')} value={current.size} options={tiers.map(choice => ({ value: choice.value, label: `${choice.tier} · ${choice.resolution}` }))} onChange={size => update({ size })} disabled={disabled || tiers.length < 2} />
-        : quality && <SceneSelect portalOwner={owner} label={t('ui.imageGenerationFields.resolution')} value={current.quality} options={quality.options} onChange={quality => update({ quality })} disabled={disabled || quality.options.length < 2} />}
-    </div>
+    {/* One setting per row, label beside its choice, like every scene settings form. */}
+    <SceneSelect portalOwner={owner} label={t('ui.imageGenerationFields.aspectRatio')} value={selected.aspect} options={ratios.map(value => ({ value, label: value }))} onChange={aspect => update({ size: (choices.find(choice => choice.aspect === aspect && choice.tier === selected.tier) ?? choices.find(choice => choice.aspect === aspect))!.value })} disabled={disabled} />
+    {pixelSizes ? <SceneSelect portalOwner={owner} label={t('ui.imageGenerationFields.resolution')} value={current.size} options={tiers.map(choice => ({ value: choice.value, label: `${choice.tier} · ${choice.resolution}` }))} onChange={size => update({ size })} disabled={disabled || tiers.length < 2} />
+      : quality && <SceneSelect portalOwner={owner} label={t('ui.imageGenerationFields.resolution')} value={current.quality} options={quality.options} onChange={quality => update({ quality })} disabled={disabled || quality.options.length < 2} />}
     {pixelSizes && quality && <SceneSelect portalOwner={owner} label={t('ui.imageGenerationFields.quality')} value={current.quality} options={quality.options.map(option => ({ ...option, label: QUALITY_NAMED.has(option.value) ? t(`ui.quality.${option.value}`) : option.label }))} onChange={quality => update({ quality })} disabled={disabled} />}
   </div>;
 }
