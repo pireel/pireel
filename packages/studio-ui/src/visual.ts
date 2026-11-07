@@ -10,6 +10,7 @@ import { editorRequest } from '@pireel/studio-ui/host-request';
  */
 
 import { detectScenes } from '@pireel/studio-engine/video-edit/scene-detection';
+import { FOOTAGE_FRAME, analysisSegmentsFromCuts, capSegments, footageWindows } from '@pireel/studio-engine/video-edit/footage-windows';
 import { extractThumbnails } from '@pireel/studio-engine/video-edit/thumbnails';
 import { type NRect, type SafeZone, analyzeGeometryAndQuality, analyzeGeometryRange, analyzeQualityAtTimes, geomNote, safeZoneForRange } from '@pireel/studio-ui/geometry';
 import { type DerivedPalette, extractPalette } from '@pireel/studio-ui/palette';
@@ -21,7 +22,6 @@ export type { VisualLabel, VisualSegment, VisualTimeline } from '@pireel/studio-
 import type { VisualLabel, VisualSegment, VisualTimeline } from '@pireel/studio-engine/visual-types';
 
 const MAX_VLM = 8; // VLM (paid) cost cap: segments are NOT dropped; only this many points are sampled to the VLM, other segments inherit semantics from the nearest
-const MAX_SEMANTIC_SPAN_SEC = 12; // a long take with no hard cuts still needs action/content observations across time
 const VLM_CONCURRENCY = 2; // Avoid bursting every sampled frame into the same pinned upstream at once.
 const CAPTION_RESERVE = 0.16; // fixed bottom 16% reserved for captions (don't detect original captions: the start often has none, and captions get added to the bottom in post)
 const DEFAULT_LABEL: VisualLabel = { content: 'talkinghead', person: 'center', safe: 'full', hasText: false, desc: '' };
@@ -95,57 +95,23 @@ async function blobToBase64(blob: Blob): Promise<{ base64: string; mime: string 
   return { base64: btoa(bin), mime: blob.type || 'image/jpeg' };
 }
 
-/** Real cuts -> analysis segments. Long takes are subdivided only for observation coverage;
- * `VisualTimeline.cuts` remains the source of truth for actual edit boundaries. */
-export function analysisSegmentsFromCuts(cuts: number[], durationSec: number): { start: number; end: number }[] {
-  const inner = cuts.filter((t) => t > 0.3 && t < durationSec - 0.1).sort((a, b) => a - b);
-  const bounds = [0, ...inner, durationSec];
-  const segs: { start: number; end: number }[] = [];
-  for (let i = 0; i < bounds.length - 1; i++) {
-    const start = bounds[i]!;
-    const end = bounds[i + 1]!;
-    const span = end - start;
-    if (span <= 0.4) continue;
-    const pieces = Math.max(1, Math.ceil(span / MAX_SEMANTIC_SPAN_SEC));
-    for (let piece = 0; piece < pieces; piece++) {
-      segs.push({
-        start: start + (span * piece) / pieces,
-        end: start + (span * (piece + 1)) / pieces,
-      });
-    }
-  }
-  return segs.length ? segs : [{ start: 0, end: durationSec }];
-}
+export { analysisSegmentsFromCuts };
 
-/** Seconds a cut-away holds (the B-roll planner's longest shot). */
-const FOOTAGE_SHOT_SEC = 5;
 /** Footage shot: its window on the source and three frames across it (start, middle, end). */
 export interface FootageShot { start: number; end: number; frames: { base64: string; mime: string }[] }
 /**
- * Footage for cut-aways, cheaply (no geometry or quality pass): its shots — scene cuts, long takes
- * split — at most `maxShots`, each as the five-second window a cut-away would use from its middle,
- * with frames at its start, middle and end so a description can say what happens in it.
+ * Footage for cut-aways, cheaply (no geometry or quality pass): the windows `footageWindows` picks
+ * from its scene cuts, with their frames. The measuring service picks the same windows from frames
+ * ffmpeg decodes (services/brand-measure/node/footage.ts).
  */
 export async function prepareFootageShots(file: File, durationSec: number, maxShots = MAX_VLM): Promise<FootageShot[]> {
-  const cuts = (await detectScenes(file).catch(() => [])).map((cut) => cut.timestamp).filter((t) => t > 0.3 && t < durationSec - 0.1);
-  const windows = capSegments(analysisSegmentsFromCuts(cuts, durationSec), maxShots).map((segment) => {
-    const length = Math.min(FOOTAGE_SHOT_SEC, segment.end - segment.start);
-    const start = segment.start + (segment.end - segment.start - length) / 2;
-    return { start, end: start + length };
-  });
-  const stamps = windows.flatMap((window) => [0.15, 0.5, 0.85].map((at) => window.start + (window.end - window.start) * at));
-  const thumbs = await extractThumbnails(file, stamps, { width: 448 });
+  const cuts = (await detectScenes(file).catch(() => [])).map((cut) => cut.timestamp);
+  const windows = footageWindows(cuts, durationSec, maxShots);
+  const thumbs = await extractThumbnails(file, windows.flatMap((window) => window.frames), FOOTAGE_FRAME);
   try {
     const frames = await Promise.all(thumbs.map(async (thumb) => ({ timestamp: thumb.timestamp, ...(await blobToBase64(thumb.blob)) })));
-    return windows.map((window) => ({ ...window, frames: frames.filter((frame) => frame.timestamp >= window.start - 0.05 && frame.timestamp <= window.end + 0.05).map(({ base64, mime }) => ({ base64, mime })) })).filter((shot) => shot.frames.length);
+    return windows.map(({ start, end }) => ({ start, end, frames: frames.filter((frame) => frame.timestamp >= start - 0.05 && frame.timestamp <= end + 0.05).map(({ base64, mime }) => ({ base64, mime })) })).filter((shot) => shot.frames.length);
   } finally { thumbs.forEach((thumb) => URL.revokeObjectURL(thumb.url)); }
-}
-
-/** Too many segments -> evenly pick max of them (preserving boundary distribution). Only used to pick "VLM sampling points", not to drop segments themselves. */
-function capSegments<T>(segs: T[], max: number): T[] {
-  if (segs.length <= max) return segs;
-  const step = segs.length / max;
-  return Array.from({ length: max }, (_, i) => segs[Math.floor(i * step)]!);
 }
 
 /** Person bbox -> which side of the frame (for framing direction). null / tiny occupancy = none (no person / pure scenery). */

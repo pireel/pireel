@@ -67,6 +67,34 @@ export function consolidateSceneCuts(
   }
   return out;
 }
+/** How the detector samples a video by default: frames per second, and the square they are scaled to. */
+export const SCENE_SAMPLE = { fps: 5, size: 64 } as const;
+
+/**
+ * The cut detector without a decoder: feed it the sampled frames in order (RGBA pixels, any one size)
+ * and read the consolidated cuts. The page feeds it frames it decodes itself; the measuring service
+ * feeds it frames from ffmpeg, so both cut a file the same way.
+ */
+export function sceneCutDetector(opts: { threshold?: number } = {}) {
+  const threshold = opts.threshold ?? 27;
+  const raw: SceneCut[] = [];
+  let prev: HsvFrame | null = null;
+  return {
+    add(timestamp: number, rgba: Uint8ClampedArray | Uint8Array) {
+      const curr = rgbaToHsv(rgba);
+      if (prev) {
+        const score = hsvFrameScore(prev, curr);
+        if (score > threshold) raw.push({ timestamp, score });
+      }
+      prev = curr;
+    },
+    /** `sampleIntervalSec`: the spacing of the frames fed in (runs closer than that are motion). */
+    cuts(sampleIntervalSec: number, cutOpts: { minSceneLenSec?: number } = {}): SceneCut[] {
+      return consolidateSceneCuts(raw, sampleIntervalSec, cutOpts);
+    },
+  };
+}
+
 export async function detectScenes(
   file: File,
   opts: {
@@ -81,9 +109,8 @@ export async function detectScenes(
     onProgress?: (p: number) => void;
   } = {},
 ): Promise<SceneCut[]> {
-  const sampleFps = opts.sampleFps ?? 5;
-  const threshold = opts.threshold ?? 27;
-  const size = opts.thumbSize ?? 64;
+  const sampleFps = opts.sampleFps ?? SCENE_SAMPLE.fps;
+  const size = opts.thumbSize ?? SCENE_SAMPLE.size;
 
   const { ALL_FORMATS, BlobSource, Input, VideoSampleSink } = await import('mediabunny');
   const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
@@ -102,8 +129,7 @@ export async function detectScenes(
     const canvas = new OffscreenCanvas(size, size);
     const ctx = canvas.getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D;
 
-    const cuts: SceneCut[] = [];
-    let prev: HsvFrame | null = null;
+    const detector = sceneCutDetector({ threshold: opts.threshold });
     let idx = 0;
 
     for await (const sample of sink.samplesAtTimestamps(timestamps)) {
@@ -113,18 +139,12 @@ export async function detectScenes(
       // try/finally: any throw in the per-frame analysis must not leak the sample.
       try {
         sample.draw(ctx, 0, 0, size, size);
-        const imageData = ctx.getImageData(0, 0, size, size);
-        const curr = rgbaToHsv(imageData.data);
-        if (prev) {
-          const score = hsvFrameScore(prev, curr);
-          if (score > threshold) cuts.push({ timestamp: sample.timestamp - t0, score });
-        }
-        prev = curr;
+        detector.add(sample.timestamp - t0, ctx.getImageData(0, 0, size, size).data);
       } finally {
         sample.close();
       }
     }
-    return consolidateSceneCuts(cuts, interval, { minSceneLenSec: opts.minSceneLenSec });
+    return detector.cuts(interval, { minSceneLenSec: opts.minSceneLenSec });
   } finally {
     await input.dispose();
   }
@@ -146,7 +166,7 @@ export function cutsToSegments(cuts: SceneCut[], duration: number): SceneSegment
 
 type HsvFrame = { h: Uint8Array; s: Uint8Array; v: Uint8Array };
 
-function rgbaToHsv(rgba: Uint8ClampedArray): HsvFrame {
+function rgbaToHsv(rgba: Uint8ClampedArray | Uint8Array): HsvFrame {
   const n = rgba.length >> 2;
   const h = new Uint8Array(n);
   const s = new Uint8Array(n);

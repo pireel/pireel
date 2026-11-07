@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { consolidateSceneCuts } from './scene-detection';
+import { consolidateSceneCuts, sceneCutDetector } from './scene-detection';
 
 const at = (timestamp: number, score: number) => ({ timestamp, score });
 const INTERVAL = 0.2; // 5 fps sampling
@@ -28,5 +28,25 @@ describe('consolidateSceneCuts', () => {
     // 1.0 / 1.2 / 1.4 form one run: 1.0 and 1.4 are spikes over the 20 between them, but 1.4 is
     // within 0.5s of 1.0 and is dropped; 2.0 is far enough.
     expect(cuts.map((c) => c.timestamp)).toEqual([1.0, 2.0]);
+  });
+});
+
+describe('sceneCutDetector', () => {
+  const solid = (r: number, g: number, b: number) => {
+    const rgba = new Uint8Array(64 * 64 * 4);
+    for (let i = 0; i < rgba.length; i += 4) rgba.set([r, g, b, 255], i);
+    return rgba;
+  };
+
+  it('cuts where the picture changes, from frames fed in by any decoder', () => {
+    const detector = sceneCutDetector();
+    for (let i = 0; i < 10; i++) detector.add(i * INTERVAL, i < 5 ? solid(200, 40, 40) : solid(30, 60, 220));
+    expect(detector.cuts(INTERVAL).map((c) => c.timestamp)).toEqual([5 * INTERVAL]);
+  });
+
+  it('finds nothing in a still picture', () => {
+    const detector = sceneCutDetector();
+    for (let i = 0; i < 10; i++) detector.add(i * INTERVAL, solid(90, 90, 90));
+    expect(detector.cuts(INTERVAL)).toEqual([]);
   });
 });
