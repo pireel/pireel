@@ -60,18 +60,103 @@ export function captionLineSegments<W extends FxWord>(
 ): W[][] {
   const m = groupedMetrics(lineMetrics(words, preset, widthPct, scale, canvasWidth, options));
   const groups = lexicalWordGroups(words).map((members) => ({ text: joinWords(members.map((word) => word.text)), members }));
+  const members = (gs: readonly WordGroup<W>[]) => gs.flatMap((group) => group.members);
+  // A caption holds whole clauses: clauses that fit together share a caption, and only a clause too
+  // long for one caption is split, on its own. Packing by width alone ran a caption across clause
+  // ends (他不在这个 | 圈子，他根本), whatever the size, and in two-row looks just as much.
+  const out: W[][] = [];
+  const share = breakShare(groups);
+  const width = (gs: readonly WordGroup<W>[]) => gs.reduce((total, group) => total + m.widthOf(group), 0);
   if (preset.stack) {
-    // Artistic stack: one segment = what fits in maxRows rows; the renderer re-plans its rows.
-    const rows = stackRows(groups, preset.stack, m);
-    const out: W[][] = [];
-    for (let at = 0; at < rows.length; at += preset.stack.maxRows) out.push(rows.slice(at, at + preset.stack.maxRows).flat().flatMap((group) => group.members));
+    // Artistic stack: one caption = what fits in maxRows rows; the renderer plans the same rows.
+    const stack = preset.stack;
+    const fitsCaption = (gs: WordGroup<W>[]) => planStackRows(gs, stack, m, share) !== null;
+    let caption: WordGroup<W>[] = [];
+    for (const clause of clauseRuns(groups)) {
+      if (caption.length && fitsCaption([...caption, ...clause])) { caption.push(...clause); continue; }
+      if (caption.length) out.push(members(caption));
+      caption = [];
+      if (fitsCaption(clause)) { caption = [...clause]; continue; }
+      // Too long for one caption: the fewest even parts that each fit, so no word is left alone.
+      const room = Array.from({ length: stack.maxRows }, (_, row) => stackRowCapacity(stack, m, row)).reduce((a, b) => a + b, 0);
+      let parts: WordGroup<W>[][] | null = null;
+      for (const fill of [1, 0.9, 0.8, 0.7]) {
+        const tried = chunkWordsBalanced(clause, room * fill, m.widthOf, (left, right) => share(left, right) * room);
+        if (tried.every(fitsCaption)) { parts = tried; break; }
+      }
+      if (parts) for (const part of parts) out.push(members(part));
+      else {
+        const rows = stackRows(clause, stack, m);
+        for (let at = 0; at < rows.length; at += stack.maxRows) out.push(members(rows.slice(at, at + stack.maxRows).flat()));
+      }
+    }
+    if (caption.length) out.push(members(caption));
     return out;
   }
+  const fits = (gs: readonly WordGroup<W>[]) => width(gs) <= m.availablePx + 1e-6;
+  let line: WordGroup<W>[] = [];
+  for (const clause of clauseRuns(groups)) {
+    if (line.length && fits([...line, ...clause])) { line.push(...clause); continue; }
+    if (line.length) out.push(members(line));
+    line = [];
+    if (fits(clause)) { line = [...clause]; continue; }
+    // Longer than a line: split this clause alone, at its best breaks.
+    for (const part of chunkWordsBalanced(clause, m.availablePx, m.widthOf, (left, right) => share(left, right) * m.availablePx)) out.push(members(part));
+  }
+  if (line.length) out.push(members(line));
+  return out;
+}
+
+/** What breaking between two dictionary words costs, as a share of a line: the reading rules, a
+ *  break inside a bracket or quote, and less where the speaker pauses. */
+function breakShare<G extends { text: string; members: readonly FxWord[] }>(groups: readonly G[]): (left: G, right: G) => number {
   const enclosed = enclosedBreaks(groups.map((group) => group.text));
   const nested = new Set(groups.filter((_, index) => enclosed.has(index)));
-  return chunkWordsBalanced(groups, m.availablePx, m.widthOf, (left, right) => (lineBreakCost(left.text, right.text) + (nested.has(left) ? ENCLOSED_BREAK_COST : 0)
-    - pauseBreakBonus(left.members[left.members.length - 1]!, right.members[0]!)) * m.availablePx)
-    .map((line) => line.flatMap((group) => group.members));
+  return (left, right) => lineBreakCost(left.text, right.text) + (nested.has(left) ? ENCLOSED_BREAK_COST : 0)
+    - pauseBreakBonus(left.members[left.members.length - 1]!, right.members[0]!);
+}
+
+/** Width a stacked look's row holds at this size. */
+function stackRowCapacity(stack: CaptionStack, m: { availablePx: number }, row: number): number {
+  return Math.min(stack.rowEm * BASE_CAPTION_FONT_PX, m.availablePx) / captionStackScale(stack, row);
+}
+
+/** A row that ends after punctuation reads as a phrase; worth this share of a row. */
+const PUNCT_ROW_BONUS = 0.3;
+/**
+ * The rows of one caption in a stacked look: one row when it fits, else the two-row split that keeps
+ * the rows even and breaks where it reads best. Filling the first row before the second left a word
+ * alone underneath (看你这个挣钱 | 了，). Null when it needs more rows than the look has.
+ */
+function planStackRows<G extends { text: string }>(groups: readonly G[], stack: CaptionStack, m: LineMetrics<G>, share: (left: G, right: G) => number): G[][] | null {
+  const widths = groups.map((group) => m.widthOf(group));
+  const total = widths.reduce((a, b) => a + b, 0);
+  const first = stackRowCapacity(stack, m, 0);
+  if (total <= first + 1e-6) return [[...groups]];
+  if (stack.maxRows < 2) return null;
+  const second = stackRowCapacity(stack, m, 1);
+  let best = -1;
+  let bestScore = Infinity;
+  let left = 0;
+  for (let at = 1; at < groups.length; at++) {
+    left += widths[at - 1]!;
+    if (left > first + 1e-6 || total - left > second + 1e-6) continue;
+    const score = Math.abs(left / first - (total - left) / second) + share(groups[at - 1]!, groups[at]!) - (PUNCT_END.test(groups[at - 1]!.text) ? PUNCT_ROW_BONUS : 0);
+    if (score < bestScore) { bestScore = score; best = at; }
+  }
+  return best < 0 ? null : [groups.slice(0, best), groups.slice(best)];
+}
+
+/** Runs of dictionary words, each ending after punctuation (a clause), or at the end. */
+function clauseRuns<G extends { text: string }>(groups: readonly G[]): G[][] {
+  const runs: G[][] = [];
+  let run: G[] = [];
+  for (const group of groups) {
+    run.push(group);
+    if (PUNCT_END.test(group.text)) { runs.push(run); run = []; }
+  }
+  if (run.length) runs.push(run);
+  return runs;
 }
 
 /** A pause this long or longer earns the full bonus. */
@@ -147,7 +232,9 @@ export function captionStackRows<W extends FxWord>(
 ): W[][] {
   if (!preset.stack) return [];
   const groups = lexicalWordGroups(words).map((members) => ({ text: joinWords(members.map((word) => word.text)), members }));
-  return stackRows(groups, preset.stack, groupedMetrics(lineMetrics(words, preset, widthPct, scale, canvasWidth, options)))
+  const m = groupedMetrics(lineMetrics(words, preset, widthPct, scale, canvasWidth, options));
+  // The same rows the caption was cut for; a caption cut elsewhere (a manual layout) may need more.
+  return (planStackRows(groups, preset.stack, m, breakShare(groups)) ?? stackRows(groups, preset.stack, m))
     .map((row) => row.flatMap((group) => group.members));
 }
 
@@ -171,6 +258,9 @@ export function lexicalWordGroups<W extends FxWord>(words: readonly W[]): W[][] 
     // rest of it joins that group, so no line breaks in the middle of 不在.
     const continuing = excess > 0 && groups.length > 0;
     excess = 0;
+    // Punctuation the recognizer gave as words of its own (看你这个挣钱了 | ， | 那) ends the word
+    // before it: a line never opens with a comma, and the clause ends where the mark is.
+    while (!continuing && groups.length && next < words.length && !alnumCount(words[next]!.text)) groups[groups.length - 1]!.push(words[next++]!);
     const group: W[] = continuing ? groups.pop()! : [];
     let got = 0;
     while (next < words.length && (got < want || !group.length)) {

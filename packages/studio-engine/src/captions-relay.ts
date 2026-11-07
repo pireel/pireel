@@ -262,7 +262,13 @@ export function speechPhraseChunks<W extends { text: string; start: number; end:
     // The length cap waits up to one more second rather than split two lone Han characters (口|播).
     const span = next ? next.end - current[0]!.start : 0;
     const overLong = span > 6 && !(span <= 7 && loneHan(word.text) && loneHan(next!.text));
-    if (!next || sentenceEnd || next.start - word.end >= 0.5 || overLong) {
+    const paused = !!next && next.start - word.end >= 0.5;
+    if (overLong && !sentenceEnd && !paused) {
+      // Too long to read as one phrase: end it at its last clause, not in the middle of one (搞|一个).
+      const clauseEnd = current.findLastIndex((item, at) => at < current.length - 1 && PUNCT_END.test(item.text));
+      if (clauseEnd >= 0) { result.push(current.slice(0, clauseEnd + 1)); current = current.slice(clauseEnd + 1); return; }
+    }
+    if (!next || sentenceEnd || paused || overLong) {
       result.push(current); current = [];
     }
   });

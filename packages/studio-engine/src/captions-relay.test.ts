@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AsrSegment } from './build-blocks';
-import { chooseWordOwner, mappedCaptionSegs } from './captions-relay';
+import { chooseWordOwner, mappedCaptionSegs, speechPhraseChunks } from './captions-relay';
 import type { VideoShot } from './composition';
 
 const shot = (id: string, srcStart: number, srcEnd: number): VideoShot => ({ id, srcStart, srcEnd, treatment: 'full' });
@@ -67,5 +67,16 @@ describe('chooseWordOwner after a cut near a word edge', () => {
     expect(chooseWordOwner([{ start: 1.86, end: 5 }], word)).toEqual({ start: 1.86, end: 5 });
     // The midpoint plays: always its owner.
     expect(chooseWordOwner([{ start: 1.8, end: 5 }], word)).toEqual({ start: 1.8, end: 5 });
+  });
+});
+
+describe('speechPhraseChunks', () => {
+  it('ends a phrase that runs too long at its last clause, not in the middle of one', () => {
+    const text = '看你这个挣钱了，那另外一个独立开发者，他也会去马上去搞一个。';
+    const words = [...text].map((ch, index) => ({ text: ch, start: index * 0.25, end: index * 0.25 + 0.25 }));
+    const phrases = speechPhraseChunks(words).map((phrase) => phrase.map((word) => word.text).join(''));
+    expect(phrases.join('')).toBe(text);
+    expect(phrases.length).toBeGreaterThan(1);
+    for (const phrase of phrases.slice(0, -1)) expect(phrase).toMatch(/[，。]$/);
   });
 });
