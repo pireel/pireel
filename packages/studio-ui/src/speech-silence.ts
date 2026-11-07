@@ -193,11 +193,15 @@ export function planSpeechSilenceCuts(
   return cuts;
 }
 
-async function analyzeSpeechActivity(file: File, onProgress?: (done: number, total: number) => void): Promise<SpeechActivityAnalysis> {
-  const decoded = await decodeVideoAudio(file);
-  if (!decoded) return { durationSec: 0, frames: [] };
-  const pcm = await toMono(decoded, ANALYSIS_RATE);
-  const durationSec = pcm.length / ANALYSIS_RATE;
+/** The rate the speech activity is read at (mono). */
+export const SPEECH_ACTIVITY_RATE = ANALYSIS_RATE;
+
+/**
+ * Voice and energy, 10 ms at a time, from mono PCM at SPEECH_ACTIVITY_RATE fed in any number of
+ * pieces: the page feeds the audio it decoded at once, the measuring service the stream ffmpeg
+ * decodes, so both read the same frames. `finish` closes the last partial frame and frees RNNoise.
+ */
+export async function speechActivityReader() {
   const { default: factory } = await import('@jitsi/rnnoise-wasm/dist/rnnoise-sync');
   const mod = await factory();
   const state = mod._rnnoise_create();
@@ -205,37 +209,54 @@ async function analyzeSpeechActivity(file: File, onProgress?: (done: number, tot
   const outputPointer = mod._malloc(FRAME_SAMPLES * 4);
   const inputFrame = new Float32Array(FRAME_SAMPLES);
   const frames: SpeechActivityFrame[] = [];
+  let filled = 0; let squareSum = 0; let samples = 0; let closed = false;
+  const flush = () => {
+    if (!filled) return;
+    inputFrame.fill(0, filled);
+    mod.HEAPF32.set(inputFrame, inputPointer >> 2);
+    const voiceProbability = mod._rnnoise_process_frame(state, outputPointer, inputPointer);
+    const fromSample = samples - filled;
+    frames.push({ fromSec: fromSample / ANALYSIS_RATE, toSec: samples / ANALYSIS_RATE, voiceProbability, rms: Math.sqrt(squareSum / filled) });
+    filled = 0; squareSum = 0;
+  };
+  return {
+    frames,
+    /** Add the next samples; the number of frames read so far. */
+    push(pcm: Float32Array): number {
+      for (let index = 0; index < pcm.length; index++) {
+        const sample = pcm[index]!;
+        squareSum += sample * sample;
+        inputFrame[filled++] = sample * 32767; // RNNoise uses float values in the int16 range.
+        samples += 1;
+        if (filled === FRAME_SAMPLES) flush();
+      }
+      return frames.length;
+    },
+    finish(): SpeechActivityAnalysis {
+      if (!closed) {
+        closed = true; flush();
+        mod._free(inputPointer); mod._free(outputPointer); mod._rnnoise_destroy(state);
+      }
+      return { durationSec: samples / ANALYSIS_RATE, frames };
+    },
+  };
+}
+
+async function analyzeSpeechActivity(file: File, onProgress?: (done: number, total: number) => void): Promise<SpeechActivityAnalysis> {
+  const decoded = await decodeVideoAudio(file);
+  if (!decoded) return { durationSec: 0, frames: [] };
+  const pcm = await toMono(decoded, ANALYSIS_RATE);
+  const reader = await speechActivityReader();
   try {
     const frameCount = Math.ceil(pcm.length / FRAME_SAMPLES);
+    const step = FRAME_SAMPLES * YIELD_EVERY_FRAMES;
     onProgress?.(0, frameCount);
-    for (let frameIndex = 0; frameIndex < frameCount; frameIndex++) {
-      const offset = frameIndex * FRAME_SAMPLES;
-      const sampleCount = Math.min(FRAME_SAMPLES, pcm.length - offset);
-      let squareSum = 0;
-      for (let sampleIndex = 0; sampleIndex < FRAME_SAMPLES; sampleIndex++) {
-        const sample = sampleIndex < sampleCount ? pcm[offset + sampleIndex]! : 0;
-        if (sampleIndex < sampleCount) squareSum += sample * sample;
-        inputFrame[sampleIndex] = sample * 32767; // RNNoise uses float values in the int16 range.
-      }
-      mod.HEAPF32.set(inputFrame, inputPointer >> 2);
-      const voiceProbability = mod._rnnoise_process_frame(state, outputPointer, inputPointer);
-      frames.push({
-        fromSec: offset / ANALYSIS_RATE,
-        toSec: Math.min(durationSec, (offset + sampleCount) / ANALYSIS_RATE),
-        voiceProbability,
-        rms: sampleCount ? Math.sqrt(squareSum / sampleCount) : 0,
-      });
-      if (frameIndex % YIELD_EVERY_FRAMES === YIELD_EVERY_FRAMES - 1) {
-        onProgress?.(frameIndex + 1, frameCount);
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
+    for (let offset = 0; offset < pcm.length; offset += step) {
+      onProgress?.(reader.push(pcm.subarray(offset, Math.min(pcm.length, offset + step))), frameCount);
+      await new Promise((resolve) => setTimeout(resolve, 0));
     }
-    return { durationSec, frames };
-  } finally {
-    mod._free(inputPointer);
-    mod._free(outputPointer);
-    mod._rnnoise_destroy(state);
-  }
+  } finally { reader.finish(); }
+  return reader.finish();
 }
 
 /** Analyze once per live File, then re-plan cheaply for different pause/padding settings. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { planSpeechSilenceCuts, resolveSpeechSilenceOptions, summarizeLocalSpeechAudio, type SpeechActivityFrame } from './speech-silence';
+import { planSpeechSilenceCuts, resolveSpeechSilenceOptions, SPEECH_ACTIVITY_RATE, speechActivityReader, summarizeLocalSpeechAudio, type SpeechActivityFrame } from './speech-silence';
 
 function frames(...runs: { from: number; to: number; voiceProbability: number; rms: number }[]): SpeechActivityFrame[] {
   return runs.flatMap((run) => {
@@ -96,5 +96,21 @@ describe('speech silence planner', () => {
       { from: 1, to: 1.4, voiceProbability: 0.9, rms: 0.1 },
       { from: 1.4, to: 3, voiceProbability: 0.03, rms: 0.07 },
     ), 3)).toMatchObject({ classification: 'speech-likely', speechLikely: true, speechSec: 0.4 });
+  });
+});
+
+describe('speech activity reader', () => {
+  // 1.234 s of a tone that fades out, at the reader's rate: an uneven last frame on purpose.
+  const pcm = Float32Array.from({ length: Math.round(SPEECH_ACTIVITY_RATE * 1.234) }, (_, index) => Math.sin(index / 9) * 0.4 * (1 - index / (SPEECH_ACTIVITY_RATE * 1.3)));
+
+  it('reads the same frames however the audio is split', async () => {
+    const whole = await speechActivityReader(); whole.push(pcm);
+    const pieces = await speechActivityReader();
+    for (let offset = 0, size = 1; offset < pcm.length; offset += size, size = (size * 7) % 4999 + 1) pieces.push(pcm.subarray(offset, offset + size));
+    const a = whole.finish(); const b = pieces.finish();
+    expect(b.durationSec).toBeCloseTo(1.234, 3);
+    expect(b.frames).toHaveLength(Math.ceil(pcm.length / 480));
+    expect(b.frames).toEqual(a.frames);
+    expect(b.frames.at(-1)!.toSec).toBeCloseTo(b.durationSec, 6);
   });
 });
