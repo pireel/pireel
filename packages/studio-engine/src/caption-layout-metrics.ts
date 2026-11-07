@@ -167,8 +167,11 @@ export function lexicalWordGroups<W extends FxWord>(words: readonly W[]): W[][] 
     if (!want) continue;
     if (excess >= want) { excess -= want; continue; }
     want -= excess;
+    // The last recognizer word ended inside this dictionary word (他不|在这个 over 他|不在|这个): the
+    // rest of it joins that group, so no line breaks in the middle of 不在.
+    const continuing = excess > 0 && groups.length > 0;
     excess = 0;
-    const group: W[] = [];
+    const group: W[] = continuing ? groups.pop()! : [];
     let got = 0;
     while (next < words.length && (got < want || !group.length)) {
       got += alnumCount(words[next]!.text);

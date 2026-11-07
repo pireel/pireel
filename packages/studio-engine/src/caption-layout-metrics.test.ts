@@ -33,6 +33,9 @@ describe('captionLineSegments', () => {
     // A recognizer word spanning several dictionary words stays whole.
     const coarse = [{ text: '我们看看', start: 0, end: 1 }, { text: '里面', start: 1, end: 2 }];
     expect(lexicalWordGroups(coarse)).toEqual([[coarse[0]], [coarse[1]]]);
+    // Recognizer words that cut a dictionary word in two (他不|在这个 over 他|不在|这个) stay together.
+    const across = ['目标', '用户', '他不', '在这个', '圈子，'].map((text, index) => ({ text, start: index * 0.3, end: index * 0.3 + 0.3 }));
+    expect(lexicalWordGroups(across).map((group) => group.map((word) => word.text).join('|'))).toEqual(['目标', '用户', '他不|在这个', '圈子，']);
   });
 
   it('never breaks a line or stacked row inside a dictionary word', () => {
