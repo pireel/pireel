@@ -1176,6 +1176,8 @@ export function setCaptionsV3(document: EditorDocumentV2, input: Input): AgentTi
   }
   const script = typeof input.script === 'string' ? input.script.trim() : '';
   const styling = input.on === true || !!preset || Object.keys(patch).length > 0 || !!captionSource || !!script;
+  /** The layer was laid or restyled with this call's position. */
+  let placed = false;
 
   if (script) {
     const lines = splitScriptLines(script);
@@ -1211,6 +1213,7 @@ export function setCaptionsV3(document: EditorDocumentV2, input: Input): AgentTi
     next = edit.document; receipts.push(...edit.receipts);
     summaries.push(`Captions laid from the script: ${plan.lineCount} lines`);
     data.source = 'script'; data.lines = plan.lineCount;
+    placed = true;
   } else if (styling && input.on !== false) {
     const turningOn = input.on === true || !!preset || !!captionSource;
     const stylePatch = { ...(turningOn ? { on: true } : {}), ...(preset ? { preset, color: undefined, bg: undefined } : {}), ...patch };
@@ -1227,11 +1230,13 @@ export function setCaptionsV3(document: EditorDocumentV2, input: Input): AgentTi
     next = edit.document; receipts.push(...edit.receipts);
     const style = documentCaptionStyle(next);
     summaries.push(`${turningOn ? 'Captions on' : 'Captions adjusted'}: ${getCaptionPreset(style.preset).name}`);
-    // A clamped position must say so: an unchanged layer otherwise reads as an edit that did not land.
-    if (yPct != null && isFiniteNumber(input.yPct) && yPct !== input.yPct) {
-      summaries.push(`yPct ${input.yPct} is below this canvas's caption safe area (platform buttons cover it); placed at ${yPct}`);
-      data.yPct = yPct;
-    }
+    placed = true;
+  }
+  // A clamped position must say so, whichever way the captions were laid: an unchanged layer otherwise
+  // reads as an edit that did not land.
+  if (placed && yPct != null && isFiniteNumber(input.yPct) && yPct !== input.yPct) {
+    summaries.push(`yPct ${input.yPct} is below this canvas's caption safe area (platform buttons cover it); placed at ${yPct}, the lowest allowed`);
+    data.yPct = yPct;
   }
 
   if (Array.isArray(input.corrections) && input.corrections.length) {

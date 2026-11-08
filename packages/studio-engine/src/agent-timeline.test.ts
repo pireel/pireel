@@ -1231,6 +1231,17 @@ describe('remove_clips and swap_clip_media (v3)', () => {
     expect(zooms[1]!.fromScale).toBeCloseTo(1 + 0.15 * 0.5, 4);
   });
 
+  it('script captions say when their position was moved into the safe area', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'set_canvas', { width: 1080, height: 1920 }).document ?? document;
+    document = runAgentTimelineTool(document, 'register_media', { assets: [{ id: 'v', kind: 'video', url: 'https://cdn.example/v.mp4', durationSec: 20, hasAudio: true }] }).document!;
+    document = runAgentTimelineTool(document, 'add_clips', { clips: [{ id: 's1', role: 'primary', assetId: 'v', startFrame: 0, source: [0, 10] }] }).document!;
+    const out = runAgentTimelineTool(document, 'set_captions', { on: true, script: '第一句\n第二句', yPct: 80 });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    expect(out.summary).toContain('placed at');
+    expect((out.data as { yPct?: number }).yPct).toBeLessThan(80);
+  });
+
   it('a sound shorter than 0.2 s plays whole and stays editable', () => {
     let document = project();
     document = runAgentTimelineTool(document, 'register_media', { assets: [{ id: 'tick', kind: 'audio', url: 'https://cdn.example/tick.mp3', durationSec: 0.093 }] }).document!;
