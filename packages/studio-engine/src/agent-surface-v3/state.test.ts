@@ -178,6 +178,23 @@ describe('documentDelta', () => {
     ]);
   });
 
+  it('places each span cut out of one clip where it left, not all at one frame', () => {
+    const before = base();
+    const after = base();
+    // Two words cut inside c1 (source 5–6s and 12–13s): c1 keeps 0–5s, two new pieces play the rest.
+    after.timeline.tracks[0]!.clips = [
+      narrative('c1', 0, 150, { sourceInSec: 0, sourceOutSec: 5 }),
+      narrative('c1b', 150, 180, { sourceInSec: 6, sourceOutSec: 12 }),
+      narrative('c1c', 330, 210, { sourceInSec: 13, sourceOutSec: 20 }),
+      narrative('c2', 540, 600), narrative('c3', 1140, 600),
+    ];
+    const delta = documentDelta(before, after)!;
+    expect(delta.removedSource).toEqual([
+      { clipId: 'c1', assetId: 'a1', source: [5, 6], fromFrame: 150 },
+      { clipId: 'c1', assetId: 'a1', source: [12, 13], fromFrame: 330 },
+    ]);
+  });
+
   it('describes caption layer removal and restyle without enumerating cues', () => {
     const before = base();
     const removed = base();

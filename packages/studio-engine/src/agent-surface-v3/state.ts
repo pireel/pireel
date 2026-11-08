@@ -497,16 +497,23 @@ export function documentDelta(before: EditorDocumentV2, after: EditorDocumentV2)
     const trackId = beforeClips.get(entry.clipId)?.trackId;
     const kept = [...afterClips.entries()].flatMap(([otherId, other]) => {
       const src = other.trackId === trackId && (otherId === entry.clipId || !beforeClips.has(otherId)) ? sourceOf(other.clip) : null;
-      return src && src[0] === entry.assetId ? [[src[1], src[2]] as [number, number]] : [];
-    }).sort((a, b) => a[0] - b[0]);
+      return src && src[0] === entry.assetId ? [{ in: src[1], out: src[2], from: other.clip.startFrame, to: other.clip.startFrame + other.clip.durationFrames }] : [];
+    }).sort((a, b) => a.in - b.in);
     let pieces: Array<[number, number]> = [entry.source];
-    for (const [keptIn, keptOut] of kept) {
+    for (const { in: keptIn, out: keptOut } of kept) {
       pieces = pieces.flatMap(([a, b]) => keptOut <= a || keptIn >= b ? [[a, b] as [number, number]] : [
         ...(keptIn > a ? [[a, keptIn] as [number, number]] : []),
         ...(keptOut < b ? [[keptOut, b] as [number, number]] : []),
       ]);
     }
-    return pieces.filter(([a, b]) => (b - a) * before.canvas.fps >= 1).map((source) => ({ ...entry, source: [round3(source[0]), round3(source[1])] as [number, number] }));
+    // Each span left at its own place: right after the kept piece it followed, else right before
+    // the kept piece that follows it, so re-inserting it at fromFrame puts it back where it was.
+    const near = (x: number, y: number) => Math.abs(x - y) < 0.002;
+    return pieces.filter(([a, b]) => (b - a) * before.canvas.fps >= 1).map((source) => ({
+      ...entry,
+      source: [round3(source[0]), round3(source[1])] as [number, number],
+      fromFrame: kept.find((piece) => near(piece.out, source[0]))?.to ?? kept.find((piece) => near(piece.in, source[1]))?.from ?? entry.fromFrame,
+    }));
   });
   if (leftTimeline.length) delta.removedSource = leftTimeline;
   if (removedTracks.length || createdTracks.length) notes.push('Track set changed — track order values may have moved; re-read get_state only before a manage_tracks order call, not for clip edits.');
