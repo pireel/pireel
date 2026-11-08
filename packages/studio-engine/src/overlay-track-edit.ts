@@ -11,6 +11,7 @@ import {
 } from './editor-document';
 import type { Block } from './composition-core';
 import { applyOverlayDocumentEdits, type OverlayDocumentEditResult } from './overlay-document-edit';
+import { freeOverlayStackOrder } from './editor-document/read-model';
 import { assignClipToBestDirectorScene, assignClipToSemanticScene } from './semantic-scenes';
 
 type OverlayDocumentEditFailure = Extract<OverlayDocumentEditResult, { ok: false }>;
@@ -276,19 +277,55 @@ export function moveOverlayDocumentClip(input: MoveOverlayDocumentClipInput): Ov
   return { ok: true, document: moved.document, receipts: [...target.receipts, ...cleared.receipts, moved.receipt] };
 }
 
+/**
+ * Before an agent's timing edit lands, a graphic whose new span would cover another clip on its lane
+ * moves to a lane free for that span (the lowest existing one, else a new lane), so the edit never
+ * trims or removes the other clip. A user dragging on the timeline places with overwrite instead;
+ * that goes through the lower-level APIs, in plain view. Returns the document unchanged when nothing
+ * is in the way.
+ */
+export function clearOverlayRetimePath(
+  document: EditorDocumentV2,
+  clipId: string,
+  timing: { startSec?: number; durationSec?: number },
+): { ok: true; document: EditorDocumentV2; receipts: EditorCommandReceipt[]; relocated: boolean } | OverlayDocumentEditFailure {
+  const fps = document.canvas.fps;
+  const sourceTrack = document.timeline.tracks.find((track) => track.clips.some((clip) => clip.id === clipId));
+  const clip = sourceTrack?.clips.find((entry) => entry.id === clipId);
+  if (!sourceTrack || !clip || clip.kind !== 'graphic' || sourceTrack.type !== 'graphics') return { ok: true, document, receipts: [], relocated: false };
+  const start = timing.startSec != null ? secondsToTimelineFrames(timing.startSec, fps) : clip.startFrame;
+  const length = timing.durationSec != null ? positiveDurationFrames(timing.durationSec, fps) : clip.durationFrames;
+  const end = start + length;
+  const clashes = (track: (typeof document.timeline.tracks)[number]) => track.clips.some((other) => other.id !== clipId && other.startFrame < end && other.startFrame + other.durationFrames > start);
+  if (!clashes(sourceTrack)) return { ok: true, document, receipts: [], relocated: false };
+  const free = document.timeline.tracks
+    .filter((track) => track.type === 'graphics' && !track.locked && track.stackOrder >= 2 && !clashes(track))
+    .sort((left, right) => left.stackOrder - right.stackOrder)[0];
+  const order = freeOverlayStackOrder(document, start, length, sourceTrack.stackOrder);
+  const target = insertTargetTrack(document, free ? { toTrackId: free.id } : { newTrack: { id: uniqueTrackId(document, order), stackOrder: order } });
+  if (!target.ok) return target;
+  const moved = applyEditorCommand(target.document, { type: 'overlay.move', clipId, toTrackId: target.trackId });
+  if (!moved.ok) return { ok: false, document, error: moved.error };
+  return { ok: true, document: moved.document, receipts: [...target.receipts, moved.receipt], relocated: true };
+}
+
 /** Retime an overlay and then move it to the lowest existing free graphics lane. This is deliberately
  * opt-in at the command surface: agent-authored timing repairs should not leave sparse track towers,
  * while a user's direct vertical track drag remains an explicit layer choice. */
 export function retimeOverlayDocumentClip(input: RetimeOverlayDocumentClipInput): OverlayDocumentEditResult {
-  const edited = applyOverlayDocumentEdits({
-    document: input.document,
+  const path = clearOverlayRetimePath(input.document, input.clipId, input);
+  if (!path.ok) return path;
+  const timed = applyOverlayDocumentEdits({
+    document: path.document,
     updates: [{
       clipId: input.clipId,
       ...(input.startSec != null ? { startSec: input.startSec } : {}),
       ...(input.durationSec != null ? { durationSec: input.durationSec } : {}),
     }],
   });
-  if (!edited.ok || input.compact === false) return edited;
+  if (!timed.ok) return { ok: false, document: input.document, error: timed.error };
+  const edited: OverlayDocumentEditResult = { ok: true, document: timed.document, receipts: [...path.receipts, ...timed.receipts] };
+  if (input.compact === false) return edited;
 
   const sourceTrack = edited.document.timeline.tracks.find((track) => track.clips.some((clip) => clip.id === input.clipId));
   const sourceClip = sourceTrack?.clips.find((clip) => clip.id === input.clipId);

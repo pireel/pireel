@@ -205,6 +205,27 @@ describe('shared agent timeline atoms', () => {
     expect((echo.data as { clipIds: string[] }).clipIds).toEqual(['line-echo']);
   });
 
+  it('lengthening a graphic onto the next one moves it to a free lane and leaves the next one whole', () => {
+    const document = emptyEditorDocumentV2({ fps: 30 });
+    const placed = runAgentTimelineTool(document, 'set_texts', { items: [
+      { id: 'g1', text: '标题一', startFrame: 60, durationFrames: 120 },
+      { id: 'g2', text: '标题二', startFrame: 180, durationFrames: 60 },
+    ] }).document!;
+    const where = (doc: typeof placed) => Object.fromEntries(doc.timeline.tracks.flatMap((track) => track.clips.map((clip) => [clip.id, [track.id, clip.startFrame, clip.startFrame + clip.durationFrames]])));
+    for (const [tool, input] of [
+      ['set_clip_properties', { items: [{ clipId: 'g1', durationFrames: 200 }] }],
+      ['set_texts', { items: [{ id: 'g1', durationFrames: 200 }] }],
+    ] as const) {
+      const out = runAgentTimelineTool(placed, tool, input);
+      expect(out.ok, JSON.stringify(out)).toBe(true);
+      const after = where(out.document!);
+      expect(after.g2, tool).toEqual(where(placed).g2);
+      expect(after.g1![1], tool).toBe(60);
+      expect(after.g1![2], tool).toBe(260);
+      expect(after.g1![0], tool).not.toBe(after.g2![0]);
+    }
+  });
+
   it('creates a requested track once under that id, reuses it, and never overwrites a text already there', () => {
     const document = emptyEditorDocumentV2({ fps: 30 });
     const placed = runAgentTimelineTool(document, 'set_texts', { items: [

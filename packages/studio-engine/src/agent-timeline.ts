@@ -4,7 +4,7 @@ import { WHITEBOARD_AUTHORING_REFERENCES, type WhiteboardAuthoringReference } fr
 import { AUDIO_DEFAULT_DB } from '@pireel/studio-engine/audio-tracks';
 import { applyAudioDocumentEdits, ensureFreeAudioDocumentTrack } from '@pireel/studio-engine/audio-document-edit';
 import { applyOverlayDocumentEdits } from '@pireel/studio-engine/overlay-document-edit';
-import { insertOverlayDocumentClip } from '@pireel/studio-engine/overlay-track-edit';
+import { clearOverlayRetimePath, insertOverlayDocumentClip } from '@pireel/studio-engine/overlay-track-edit';
 import { titleBlock } from '@pireel/studio-engine/block-factory';
 import type { Block } from '@pireel/studio-engine/composition-core';
 import { WHITEBOARD_FONT_ID, WHITEBOARD_TEMPLATE_ID, checkWhiteboardDoc, whiteboardDurationSec } from '@pireel/studio-engine/whiteboard-block';
@@ -1667,9 +1667,18 @@ export function updateTexts(document: EditorDocumentV2, input: Input): AgentTime
       } } : {}),
     });
   }
-  const edited = applyOverlayDocumentEdits({ document, updates });
+  // A text moved or lengthened onto another clip changes lane instead of cutting into it.
+  let laned = document;
+  const laneReceipts: EditorCommandReceipt[] = [];
+  for (const update of updates) {
+    if (update.startSec === undefined && update.durationSec === undefined) continue;
+    const path = clearOverlayRetimePath(laned, update.clipId, update);
+    if (!path.ok) return fail(path.error.message, path.error);
+    laned = path.document; laneReceipts.push(...path.receipts);
+  }
+  const edited = applyOverlayDocumentEdits({ document: laned, updates });
   if (!edited.ok) return fail(edited.error.message, edited.error);
-  return mutation(edited.document, `Updated ${items.length} text clip${items.length === 1 ? '' : 's'}`, edited.receipts);
+  return mutation(edited.document, `Updated ${items.length} text clip${items.length === 1 ? '' : 's'}`, [...laneReceipts, ...edited.receipts]);
 }
 
 const WHITEBOARD_FIX = 'Pass doc (the board document; describe: true returns its format) and, for a new board, startFrame; pass id to replace an existing whiteboard clip.';
@@ -1708,14 +1717,12 @@ export function setWhiteboard(document: EditorDocumentV2, input: Input): AgentTi
     if (existing.clip.kind !== 'graphic' || existing.clip.block.templateId !== WHITEBOARD_TEMPLATE_ID) {
       return fail('wrong_kind', { path: 'id', value: id, fix: 'id must name a whiteboard clip; omit it to create a new board.' });
     }
+    const timing = { ...(startFrame !== undefined ? { startSec: timelineFramesToSeconds(startFrame as number, fps) } : {}), durationSec };
+    const path = clearOverlayRetimePath(document, existing.clip.id, timing);
+    if (!path.ok) return fail(path.error.message, path.error);
     const edited = applyOverlayDocumentEdits({
-      document,
-      updates: [{
-        clipId: existing.clip.id,
-        ...(startFrame !== undefined ? { startSec: timelineFramesToSeconds(startFrame as number, fps) } : {}),
-        durationSec,
-        block: { slots: { ...existing.clip.block.slots, ...slots } },
-      }],
+      document: path.document,
+      updates: [{ clipId: existing.clip.id, ...timing, block: { slots: { ...existing.clip.block.slots, ...slots } } }],
     });
     if (!edited.ok) return fail(edited.error.message, edited.error);
     return mutation(edited.document, summaryOf('Replaced', existing.clip.id), edited.receipts, { clipId: existing.clip.id, durationFrames: positiveDurationFrames(durationSec, fps) });
