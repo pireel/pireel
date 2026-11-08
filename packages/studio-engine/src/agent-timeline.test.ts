@@ -1218,6 +1218,19 @@ describe('remove_clips and swap_clip_media (v3)', () => {
     expect(at(tail.document!)).toMatchObject({ s1: [0, 240], head: [30, 120], inside: [150, 210], after: [340, 400] });
   });
 
+  it('splitting a clip mid push-in leaves each piece its own part of the move', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', { assets: [{ id: 'v', kind: 'video', url: 'https://cdn.example/v.mp4', durationSec: 60 }] }).document!;
+    document = runAgentTimelineTool(document, 'add_clips', { clips: [{ id: 's1', role: 'primary', assetId: 'v', startFrame: 0, source: [0, 10] }] }).document!;
+    document = runAgentTimelineTool(document, 'set_clip_framing', { items: [{ clipId: 's1', zoom: { preset: 'slow-push', atFrame: 30, durationFrames: 240 } }] }).document!;
+    const split = runAgentTimelineTool(document, 'split_clips', { items: [{ clipId: 's1', atFrame: 150 }] });
+    expect(split.ok, JSON.stringify(split)).toBe(true);
+    const zooms = split.document!.timeline.tracks[0]!.clips.map((clip) => (clip as { properties: { zoom?: Record<string, number> } }).properties.zoom);
+    expect(zooms[0]).toMatchObject({ atSec: 1, durationSec: 8 });
+    expect(zooms[1]).toMatchObject({ atSec: 0, durationSec: 4 });
+    expect(zooms[1]!.fromScale).toBeCloseTo(1 + 0.15 * 0.5, 4);
+  });
+
   it('a sound shorter than 0.2 s plays whole and stays editable', () => {
     let document = project();
     document = runAgentTimelineTool(document, 'register_media', { assets: [{ id: 'tick', kind: 'audio', url: 'https://cdn.example/tick.mp3', durationSec: 0.093 }] }).document!;

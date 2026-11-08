@@ -198,9 +198,13 @@ export type ZoomPreset = 'punch' | 'instant' | 'slow-push' | 'in-out';
 export interface ShotZoom {
   preset: ZoomPreset;
   atSec: number;
-  /** Move length. Absent: the move runs (or holds) to the end of the clip. */
+  /** Move length. Absent: the move runs (or holds) to the end of the clip. A move longer than its clip
+   *  is cut where the clip ends, at its own pace. */
   durationSec?: number;
   scale: number;
+  /** Where the move starts (1 = the static framing). A clip cut from a moving one continues from the
+   *  scale it had at the cut. */
+  fromScale?: number;
   anchorX?: number;
   anchorY?: number;
 }
@@ -226,8 +230,9 @@ export function zoomMoves(zoom: ShotZoom | undefined, clipLenSec: number): ZoomM
   if (!zoom || !(clipLenSec > 0)) return [];
   const scale = clamp(Number.isFinite(zoom.scale) ? zoom.scale : 1, ZOOM_SCALE_MIN, ZOOM_SCALE_MAX);
   const at = clamp(Number.isFinite(zoom.atSec) ? zoom.atSec : 0, 0, clipLenSec);
+  // An explicit length keeps the move's pace when the clip is shorter: the clip simply ends mid-move.
   const end = zoom.durationSec != null && Number.isFinite(zoom.durationSec) && zoom.durationSec > 0
-    ? Math.min(clipLenSec, at + zoom.durationSec)
+    ? at + zoom.durationSec
     : clipLenSec;
   const span = Math.max(0, end - at);
   const holdsToEnd = end >= clipLenSec - 1e-6;
@@ -265,7 +270,7 @@ function zoomEase(ease: ZoomEase, p: number): number {
  * moves the stage timeline plays. */
 export function zoomScaleAt(zoom: ShotZoom | undefined, localSec: number, clipLenSec: number): number {
   const moves = zoomMoves(zoom, clipLenSec);
-  let value = 1;
+  let value = zoomStartScale(zoom);
   for (const move of moves) {
     if (localSec < move.at) break;
     const from = value;
@@ -274,6 +279,36 @@ export function zoomScaleAt(zoom: ShotZoom | undefined, localSec: number, clipLe
     if (progress < 1) break;
   }
   return value;
+}
+
+/** The multiplier a clip's zoom starts from: its fromScale, else the static framing (1). */
+export function zoomStartScale(zoom: ShotZoom | undefined): number {
+  return zoom?.fromScale != null && Number.isFinite(zoom.fromScale) ? clamp(zoom.fromScale, 1, ZOOM_SCALE_MAX) : 1;
+}
+
+/**
+ * The zoom of the part [fromSec, toSec) of a clip `clipLenSec` long, in that part's own time, so a
+ * trimmed or split clip plays exactly the frames it played before: a move cut at the tail stops there
+ * at its own pace, a move already under way at the head continues from the scale it had reached
+ * (fromScale), one already over holds where it ended, and one that never reaches the part is gone.
+ */
+export function zoomForClipSpan(zoom: ShotZoom | undefined, clipLenSec: number, fromSec: number, toSec: number): ShotZoom | undefined {
+  if (!zoom || !(clipLenSec > 0)) return zoom;
+  const at = clamp(Number.isFinite(zoom.atSec) ? zoom.atSec : 0, 0, clipLenSec);
+  const explicit = zoom.durationSec != null && Number.isFinite(zoom.durationSec) && zoom.durationSec > 0;
+  // Moves whose pace follows the clip's length are pinned to the length they had.
+  const paced = zoom.preset === 'slow-push' || zoom.preset === 'in-out';
+  const length = explicit ? zoom.durationSec! : paced ? Math.max(0, clipLenSec - at) : undefined;
+  const end = length != null ? at + length : clipLenSec;
+  const { durationSec: _length, fromScale: _from, ...rest } = zoom;
+  // Steady through the whole part (the move starts after it, or ended before it): hold that scale.
+  const hold = (value: number): ShotZoom | undefined => (value > 1 + 1e-4 ? { ...rest, preset: 'instant', atSec: 0, scale: value } : undefined);
+  if (at >= toSec) return hold(zoomStartScale(zoom));
+  const value = zoomScaleAt(zoom, fromSec, clipLenSec);
+  if (end <= fromSec) return hold(value);
+  const shifted: ShotZoom = { ...zoom, atSec: Math.max(0, at - fromSec), ...(length != null ? { durationSec: end - Math.max(at, fromSec) } : {}) };
+  if (at < fromSec) shifted.fromScale = value;
+  return shifted;
 }
 
 /** Percent shift that keeps the anchor point still while the layer scale goes from `base` to `total`. */
@@ -1175,6 +1210,9 @@ export function videoFrameTimelineBody(
       const total = r4(base.scale * multiplier);
       return `{ scale: ${n(total)}, xPercent: ${n(r4(base.xPercent + zoomAnchorShiftPercent(shot.zoom!.anchorX, base.scale, total)))}, yPercent: ${n(r4(base.yPercent + zoomAnchorShiftPercent(shot.zoom!.anchorY, base.scale, total)))} }`;
     };
+    // A clip cut from a moving one starts at the scale it had reached.
+    const start = zoomStartScale(shot.zoom);
+    if (start !== 1) lines.push(`tl.set('#vidEl', ${vars(start)}, ${n(editedStart)});`);
     for (const move of moves) {
       const at = n(editedStart + move.at);
       if (move.duration <= 0) lines.push(`tl.set('#vidEl', ${vars(move.scale)}, ${at});`);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { videoFrameTimelineBody, zoomMoves, zoomScaleAt, type ShotZoom, type VideoShot } from './composition-core';
+import { videoFrameTimelineBody, zoomForClipSpan, zoomMoves, zoomScaleAt, zoomStartScale, type ShotZoom, type VideoShot } from './composition-core';
 
 /** Play the emitted timeline body against a GSAP-shaped recorder. */
 function play(body: string): Array<{ m: 'set' | 'to'; vars: Record<string, unknown>; at: number }> {
@@ -96,5 +96,37 @@ describe('zoom presets', () => {
   it('clamps the magnification and ignores a zoom on an empty span', () => {
     expect(zoomScaleAt({ preset: 'instant', atSec: 0, scale: 40 }, 1, 5)).toBe(4);
     expect(zoomMoves({ preset: 'punch', atSec: 0, scale: 1.3 }, 0)).toEqual([]);
+  });
+});
+
+describe('a trimmed or split clip plays the zoom frames it played before', () => {
+  const same = (zoom: ShotZoom, length: number, from: number, to: number) => {
+    const part = zoomForClipSpan(zoom, length, from, to);
+    for (let t = from; t < to; t += 0.1) expect(zoomScaleAt(part, t - from, to - from), `${zoom.preset} [${from},${to}) at ${t.toFixed(1)}`).toBeCloseTo(zoomScaleAt(zoom, t, length), 4);
+  };
+  const cases: ShotZoom[] = [
+    { preset: 'slow-push', atSec: 1, scale: 1.15 },
+    { preset: 'slow-push', atSec: 1, durationSec: 4, scale: 1.2 },
+    { preset: 'instant', atSec: 2, scale: 1.25 },
+    { preset: 'instant', atSec: 2, durationSec: 3, scale: 1.25 },
+    { preset: 'punch', atSec: 0.5, scale: 1.25 },
+  ];
+  it('the head part, the tail part and a middle part all match', () => {
+    for (const zoom of cases) {
+      same(zoom, 10, 0, 5);
+      same(zoom, 10, 5, 10);
+      same(zoom, 10, 3, 7);
+      same(zoom, 10, 0.2, 9.5);
+    }
+  });
+  it('a part the move never reaches has no zoom; one after a return to the framing has none either', () => {
+    expect(zoomForClipSpan({ preset: 'slow-push', atSec: 6, scale: 1.15 }, 10, 0, 5)).toBeUndefined();
+    expect(zoomForClipSpan({ preset: 'instant', atSec: 1, durationSec: 2, scale: 1.25 }, 10, 5, 10)).toBeUndefined();
+  });
+  it('a split mid-push continues from the scale reached', () => {
+    const second = zoomForClipSpan({ preset: 'slow-push', atSec: 1, scale: 1.15 }, 9, 5, 9)!;
+    expect(second.atSec).toBe(0);
+    expect(second.fromScale).toBeCloseTo(1 + 0.15 * 0.5, 4);
+    expect(zoomStartScale(second)).toBeCloseTo(1.075, 4);
   });
 });

@@ -24,6 +24,7 @@ import {
   shotFilterCss,
   videoTrackShots,
   videoFrameTimelineBody,
+  zoomStartScale,
 } from './composition-core';
 import { GL_MIXER_SRC, TRANSITION_GLSL, glDirection } from './transition-gl';
 import { isLookTemplate, lookFontIds, lookHeadHtml, lookPieceOf } from './look';
@@ -748,7 +749,7 @@ export function assembleHtml(
         const total = Math.round(framing.scale * multiplier * 10000) / 10000;
         return `{scale:${n(total)},xPercent:${n(framing.xPercent + zoomAnchorShiftPercent(visual.zoom!.anchorX, framing.scale, total))},yPercent:${n(framing.yPercent + zoomAnchorShiftPercent(visual.zoom!.anchorY, framing.scale, total))}}`;
       };
-      motion.push(`tl.set(el,${zoomVars(1)},0);`);
+      motion.push(`tl.set(el,${zoomVars(zoomStartScale(visual.zoom))},0);`);
       for (const move of moves) {
         if (move.duration <= 0) motion.push(`tl.set(el,${zoomVars(move.scale)},${n(move.at)});`);
         else motion.push(`tl.to(el,Object.assign({duration:${n(move.duration)},ease:'${move.ease}'},${zoomVars(move.scale)}),${n(move.at)});`);

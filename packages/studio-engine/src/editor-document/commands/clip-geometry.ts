@@ -5,6 +5,24 @@ import type {
   TimelineClip,
 } from '../types';
 import { seedTranscriptSection } from '../../transcript-sections';
+import { zoomForClipSpan } from '../../composition-core';
+
+/** A video clip cut down to the part [fromFrame, toFrame) of itself keeps the zoom of that part. */
+function withZoomOfPart<C extends TimelineClip>(clip: C, original: TimelineClip, fromFrame: number, toFrame: number, fps: number): C {
+  const length = original.durationFrames / fps;
+  const part = (zoom: Parameters<typeof zoomForClipSpan>[0]) => zoomForClipSpan(zoom, length, fromFrame / fps, toFrame / fps);
+  if (clip.kind === 'narrative' && clip.properties.zoom) {
+    const zoom = part(clip.properties.zoom);
+    const { zoom: _old, ...properties } = clip.properties;
+    return { ...clip, properties: zoom ? { ...properties, zoom } : properties };
+  }
+  if (clip.kind === 'media' && clip.video?.zoom) {
+    const zoom = part(clip.video.zoom);
+    const { zoom: _old, ...video } = clip.video;
+    return { ...clip, video: zoom ? { ...video, zoom } : video };
+  }
+  return clip;
+}
 
 export interface ClipRangeEdit {
   clips: TimelineClip[];
@@ -52,7 +70,7 @@ function withoutIncomingTransition(clip: NarrativeTimelineClip): NarrativeTimeli
 
 function withTrimmedTail(clip: TimelineClip, durationFrames: number, fps: number): TimelineClip {
   if (clip.kind === 'narrative' || clip.kind === 'media') {
-    return { ...clip, durationFrames, sourceOutSec: sourceAtFrame(clip, durationFrames, fps) };
+    return withZoomOfPart({ ...clip, durationFrames, sourceOutSec: sourceAtFrame(clip, durationFrames, fps) }, clip, 0, durationFrames, fps);
   }
   if (clip.kind === 'audio') {
     return { ...clip, durationFrames, sourceOutSec: sourceAtFrame(clip, durationFrames, fps) };
@@ -76,14 +94,14 @@ function withTrimmedHead(
     ...(rightLinkGroupId ? { linkGroupId: rightLinkGroupId } : {}),
   };
   if (clip.kind === 'narrative') {
-    return withoutIncomingTransition({
+    return withZoomOfPart(withoutIncomingTransition({
       ...clip,
       ...placement,
       sourceInSec: sourceAtFrame(clip, removedHeadFrames, fps),
-    });
+    }), clip, removedHeadFrames, removedHeadFrames + durationFrames, fps);
   }
   if (clip.kind === 'media') {
-    return { ...clip, ...placement, sourceInSec: sourceAtFrame(clip, removedHeadFrames, fps) };
+    return withZoomOfPart({ ...clip, ...placement, sourceInSec: sourceAtFrame(clip, removedHeadFrames, fps) }, clip, removedHeadFrames, removedHeadFrames + durationFrames, fps);
   }
   if (clip.kind === 'audio') {
     return { ...clip, ...placement, sourceInSec: sourceAtFrame(clip, removedHeadFrames, fps) };
