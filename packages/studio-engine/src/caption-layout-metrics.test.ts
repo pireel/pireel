@@ -33,6 +33,12 @@ describe('captionLineSegments', () => {
     // A recognizer word spanning several dictionary words stays whole.
     const coarse = [{ text: '我们看看', start: 0, end: 1 }, { text: '里面', start: 1, end: 2 }];
     expect(lexicalWordGroups(coarse)).toEqual([[coarse[0]], [coarse[1]]]);
+    // Punctuation the recognizer gave as a word of its own ends the word before it.
+    const marks = ['看你', '这个', '挣钱', '了', '，', '那', '另外', '。'].map((text, index) => ({ text, start: index * 0.3, end: index * 0.3 + 0.3 }));
+    expect(lexicalWordGroups(marks).map((group) => group.map((word) => word.text).join('|'))).toEqual(['看你', '这个', '挣钱', '了|，', '那', '另外|。']);
+    // Recognizer words that cut a dictionary word in two (他不|在这个 over 他|不在|这个) stay together.
+    const across = ['目标', '用户', '他不', '在这个', '圈子，'].map((text, index) => ({ text, start: index * 0.3, end: index * 0.3 + 0.3 }));
+    expect(lexicalWordGroups(across).map((group) => group.map((word) => word.text).join('|'))).toEqual(['目标', '用户', '他不|在这个', '圈子，']);
   });
 
   it('never breaks a line or stacked row inside a dictionary word', () => {
@@ -66,6 +72,50 @@ describe('captionLineSegments', () => {
     const longest = (scale: number) => Math.max(...lineTexts(captionStackRows(words, getCaptionPreset('art-beast'), 80, scale, 1080, { measureText: () => null })).map(row => row.length));
     expect(longest(.5)).toBeGreaterThan(longest(1));
     expect(longest(1.5)).toBeLessThan(longest(1));
+  });
+
+  it('keeps whole clauses in one caption and splits only a clause too long for one, whatever the size', () => {
+    const text = '看你这个挣钱了，那另外一个独立开发者，他也会去马上去搞一个。';
+    const words = groupAsrWords(text, perChar(text));
+    const clauses = ['看你这个挣钱了，', '那另外一个独立开发者，', '他也会去马上去搞一个。'];
+    // A caption that ends inside a clause must not carry the start of the next one.
+    const crossesClause = (captions: string[]) => captions.some((caption) => {
+      const end = text.indexOf(caption) + caption.length;
+      const inside = clauses.findIndex((clause) => { const at = text.indexOf(clause); return end > at && end < at + clause.length; });
+      return inside >= 0 && clauses.slice(inside + 1).some((clause) => caption.includes(clause.slice(0, 2)));
+    });
+    for (const preset of ['style-outline', 'art-bubble', 'art-ribbon']) {
+      for (const scale of [1, 1.15, 1.3]) {
+        const captions = lineTexts(captionLineSegments(words, getCaptionPreset(preset), 56, scale, 1080, { measureText: () => null }));
+        expect(captions.join('')).toBe(text);
+        expect(crossesClause(captions)).toBe(false);
+      }
+    }
+    // A two-row look shows a clause that fits two rows as one caption.
+    expect(lineTexts(captionLineSegments(words, getCaptionPreset('art-bubble'), 56, 1, 1080, { measureText: () => null }))).toContain('看你这个挣钱了，');
+  });
+
+  it('balances the two rows of a stacked caption instead of leaving a word alone underneath', () => {
+    const words = groupAsrWords('看你这个挣钱了，', perChar('看你这个挣钱了，'));
+    const rows = lineTexts(captionStackRows(words, getCaptionPreset('art-bubble'), 56, 1, 1080, { measureText: () => null }));
+    expect(rows.join('')).toBe('看你这个挣钱了，');
+    for (const row of rows) expect(row.replace(/[，。]/g, '').length).toBeGreaterThan(1);
+  });
+
+  it('breaks a long phrase where the speaker pauses rather than at the most balanced point', () => {
+    const text = '正确的做法是先调研目标用户在哪里';
+    const pauseAfter = text.indexOf('是'); // 正确的做法是 | 先调研目标用户在哪里
+    const timed = (gapSec: number) => [...text].map((ch, index) => {
+      const start = index * 0.2 + (index > pauseAfter ? gapSec : 0);
+      return { text: ch, start, end: start + 0.2 };
+    });
+    const layout = (gapSec: number) => lineTexts(captionLineSegments(groupAsrWords(text, timed(gapSec)), getCaptionPreset('ln-clean'), 40, 1, 1080, { measureText: () => null }));
+    const even = layout(0);
+    const paused = layout(0.3);
+    expect(even.length).toBeGreaterThan(1);
+    expect(paused.join('')).toBe(text);
+    expect(paused[0]).toBe('正确的做法是');
+    expect(even[0]).not.toBe('正确的做法是');
   });
 
   it('keeps numbers, particles and words the dictionary does not know off line edges', () => {
