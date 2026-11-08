@@ -61,6 +61,31 @@ function assetSourceRanges(document: EditorDocumentV2, assetId: string): { start
   return out;
 }
 
+/**
+ * What a source still says on the timeline: each transcript row cut down to the words some enabled
+ * clip still plays (any lane), with `rows` naming the stored row each one came from. Rows nothing
+ * plays are left out. Anything that judges the speech as it now stands (which take is a repeat of
+ * which) reads this, never the whole recording, so a take already cut cannot pass for the one kept.
+ */
+export function playingTranscript(document: EditorDocumentV2, assetId: string): { segments: AsrSegment[]; rows: number[] } {
+  const ranges = assetSourceRanges(document, assetId);
+  const plays = (start: number, end: number) => ranges.some((range) => end > range.start + 0.03 && start < range.end - 0.03);
+  const segments: AsrSegment[] = [];
+  const rows: number[] = [];
+  ((document.semantics.transcripts[assetId] ?? []) as AsrSegment[]).forEach((segment, row) => {
+    if (!segment.words?.length) {
+      if (plays(segment.start, segment.end)) { segments.push(segment); rows.push(row); }
+      return;
+    }
+    const words = segment.words.filter((word) => plays(word.start, word.end));
+    if (!words.length) return;
+    const whole = words.length === segment.words.length;
+    segments.push(whole ? segment : { ...segment, start: words[0]!.start, end: words[words.length - 1]!.end, text: joinWords(words.map((word) => word.text)), words });
+    rows.push(row);
+  });
+  return { segments, rows };
+}
+
 /** Resolve which asset a word query addresses: explicit asset, a track's dominant speech clip, a placed
  *  clip on any lane, or (default) the first primary narrative clip. */
 export function resolveWordQueryAsset(document: EditorDocumentV2, query: Pick<DocumentWordQuery, 'assetId' | 'trackId' | 'shotId'>): { assetId: string } | { error: string } {

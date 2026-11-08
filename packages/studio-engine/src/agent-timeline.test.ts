@@ -7,6 +7,7 @@ import { audioClipDefaults } from '@pireel/studio-engine/audio-tracks';
 import { emptyEditorDocumentV2, parseEditorDocumentV2, projectV2ToLegacyComposition } from '@pireel/studio-engine/editor-document';
 import { resizeNarrativeTimelineClip, resizeVisualTimelineClip, runAgentTimelineTool, slipNarrativeTimelineClip } from '@pireel/studio-engine/agent-timeline';
 import { transcriptTargets } from '@pireel/studio-engine/agent-timeline-v3';
+import { playingTranscript } from '@pireel/studio-engine/editor-document/transcript-address';
 import { directorPlanFromDocument, withDirectorPlanInSemantics } from '@pireel/studio-engine/director-plan-artifact';
 import { sceneDesignsFromDocument, withSceneDesignsInSemantics } from '@pireel/studio-engine/scene-design';
 
@@ -1148,6 +1149,25 @@ describe('remove_clips and swap_clip_media (v3)', () => {
     expect(read({ fromFrame: 0, toFrame: 60 }).map((word) => word.text)).toEqual(['gamma']);
     // A window over the whole timeline lists the words in the order they play.
     expect(read({ fromFrame: 0, toFrame: 120 }).map((word) => [word.text, word.startFrame])).toEqual([['gamma', 9], ['alpha', 66], ['beta', 84]]);
+  });
+
+  it('the playing transcript holds only what the timeline still plays, by stored row', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', { assets: [{ id: 'v', kind: 'video', url: 'https://cdn.example/v.mp4', durationSec: 30 }] }).document!;
+    // Row 0 (first take) is cut; row 1 plays whole; row 2 plays its first two words only.
+    document = runAgentTimelineTool(document, 'add_clips', { clips: [
+      { id: 'b', role: 'primary', assetId: 'v', startFrame: 0, source: [3, 6] },
+      { id: 'c', role: 'primary', assetId: 'v', startFrame: 90, source: [7, 8.1] },
+    ] }).document!;
+    const w = (text: string, start: number, end: number) => ({ text, start, end });
+    document = { ...document, semantics: { ...document.semantics, transcripts: { ...document.semantics.transcripts, v: [
+      { start: 0, end: 2, text: '正确的做法呢', words: [w('正确的', 0, 1), w('做法呢', 1, 2)] },
+      { start: 3, end: 5, text: '正确的做法呢', words: [w('正确的', 3, 4), w('做法呢', 4, 5)] },
+      { start: 7, end: 9.5, text: '先选段再清理', words: [w('先', 7, 7.5), w('选段', 7.5, 8), w('再清理', 8.2, 9.5)] },
+    ] } } };
+    const { segments, rows } = playingTranscript(document, 'v');
+    expect(rows).toEqual([1, 2]);
+    expect(segments.map((segment) => [segment.text, segment.start, segment.end])).toEqual([['正确的做法呢', 3, 5], ['先选段', 7, 8]]);
   });
 
   it('a sound shorter than 0.2 s plays whole and stays editable', () => {

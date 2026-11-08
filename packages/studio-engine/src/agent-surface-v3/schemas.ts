@@ -482,7 +482,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   remove_silence: {
     description:
-      'Remove dead air from the narration by analysing the actual audio — no transcript needed, so run it first when tightening pacing. rough_cut already trims pauses: after it, run this only for tighter pacing than it left. minimumPauseSec (0.25–3, default 0.4) is the shortest pause treated as dead air; speechPaddingSec (0–0.5, default 0.15) stays on each edge next to speech. Overlays, captions and later material re-lay.',
+      'Remove dead air from the narration by analysing the actual audio — no transcript needed, so run it first when tightening pacing. rough_cut already trims pauses: after it, run this only for tighter pacing than it left. minimumPauseSec (0.25–3, default 0.4) is the shortest pause treated as dead air; speechPaddingSec (0–0.5, default 0.15) stays on each edge next to speech. The quiet at a clip edge you chose inside the recording stays (it is that cut’s breath); to tighten it, retrim the clip. Overlays, captions and later material re-lay.',
     inputSchema: obj({
       minimumPauseSec: num('', { min: 0.25, max: 3 }),
       speechPaddingSec: num('', { min: 0, max: 0.5 }),

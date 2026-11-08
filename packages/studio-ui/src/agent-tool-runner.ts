@@ -3080,6 +3080,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               transcriptSegments: documentRef.current.semantics.transcripts[assetId] ?? [],
               transcriptProtection: 'all',
               bridgeSpeechlessIslandSec: 0.5,
+              // A breath an edit left at a cut point it chose is that edit's, not dead air.
+              keepChosenEdges: true,
             });
             const sourceRanges = plan.sourceRanges;
             const edited = plan.timelineRanges.map((range) => ({ from: range.fromSec, to: range.toSec }));

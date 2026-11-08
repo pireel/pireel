@@ -1,5 +1,5 @@
 import type { TranscriptSegment } from '@pireel/studio-engine/project-types';
-import { narrativeTimelineRangesForAssetSourceRange, type NarrativeTimelineRange } from './read-model';
+import { narrativeTimelineRangesForAssetSourceRange, primaryNarrativeClips, type NarrativeTimelineRange } from './read-model';
 import type { EditorDocumentV2 } from './types';
 
 export interface NarrationSourceRange {
@@ -24,6 +24,12 @@ export interface NarrationCutPlanInput {
   /** Absorb a short native-clip edge only when transcript protection allows it. */
   clipEdgeSnapSec?: number;
   minimumTimelineRangeSec?: number;
+  /**
+   * Keep the silence an edit left next to a cut point it chose: where a clip starts or ends inside the
+   * source, the quiet run touching that edge is part of that edit (a breath, a beat before the next
+   * line). Clip edges at the very start or end of the recording are raw footage and stay cuttable.
+   */
+  keepChosenEdges?: boolean;
 }
 
 export interface NarrationCutPlan {
@@ -94,6 +100,28 @@ function normalizeSourceRanges(
   return normalized;
 }
 
+/** Candidate silences without the quiet run touching a cut point an edit chose (keepChosenEdges). */
+function withoutChosenEdgeAir(document: EditorDocumentV2, assetId: string, ranges: readonly NarrationSourceRange[]): NarrationSourceRange[] {
+  const length = document.assets[assetId]?.metadata.durationSec;
+  const edge = 0.05;
+  const starts: number[] = [];
+  const ends: number[] = [];
+  for (const clip of primaryNarrativeClips(document)) {
+    if (clip.assetId !== assetId || !clip.enabled) continue;
+    if (clip.sourceInSec > edge) starts.push(clip.sourceInSec);
+    const out = clip.sourceOutSec;
+    if (typeof out === 'number' && (length == null || out < length - edge)) ends.push(out);
+  }
+  return ranges.flatMap((range) => {
+    let { fromSec, toSec } = range;
+    // A run from a clip's chosen start into the clip: only the part before the start may go.
+    for (const at of starts) if (fromSec <= at + edge && toSec > at) toSec = Math.min(toSec, at);
+    // A run reaching a clip's chosen end: only the part after the end may go.
+    for (const at of ends) if (fromSec < at && toSec >= at - edge) fromSec = Math.max(fromSec, at);
+    return toSec > fromSec ? [{ fromSec, toSec }] : [];
+  });
+}
+
 /**
  * The single source-clock policy for narration cleanup. Detection tools provide candidates; this
  * planner normalizes them, protects transcript speech, absorbs safe clip-edge slivers, and maps the
@@ -113,9 +141,10 @@ export function planNarrationCuts(
   // Without transcript evidence, fail closed rather than erasing a genuine short utterance.
   const bridgeSpeechlessIslandSec = speechRanges.length ? requestedBridge : 0;
   const protection = input.transcriptProtection ?? 'none';
+  const candidates = input.keepChosenEdges ? withoutChosenEdgeAir(document, input.assetId, input.sourceRanges.filter(finiteRange)) : input.sourceRanges;
   const protectedCandidates = protection === 'all'
-    ? subtractProtectedSpeech(input.sourceRanges.filter(finiteRange), speechRanges)
-    : input.sourceRanges;
+    ? subtractProtectedSpeech(candidates.filter(finiteRange), speechRanges)
+    : candidates;
   const sourceRanges = normalizeSourceRanges(protectedCandidates, speechRanges, bridgeSpeechlessIslandSec);
   const clipEdgeSnapSec = Number.isFinite(input.clipEdgeSnapSec)
     ? Math.max(0, input.clipEdgeSnapSec ?? 0)

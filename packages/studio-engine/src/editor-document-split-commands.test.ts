@@ -102,6 +102,28 @@ describe('V2 clip split commands', () => {
       .toBeCloseTo(0.112, 3);
   });
 
+  it('keeps the silence an edit left at a cut point it chose', () => {
+    const document = documentWithGap();
+    document.assets.main!.metadata.durationSec = 60;
+    // Two passages picked from a 60 s recording, each with a breath left before and after its words.
+    document.timeline.tracks[0]!.clips = [
+      { id: 'a', kind: 'narrative', assetId: 'main', startFrame: 0, durationFrames: 120, sourceInSec: 10, sourceOutSec: 14, properties: { treatment: 'full' }, enabled: true },
+      { id: 'b', kind: 'narrative', assetId: 'main', startFrame: 120, durationFrames: 150, sourceInSec: 30, sourceOutSec: 35, properties: { treatment: 'full' }, enabled: true },
+    ];
+    document.semantics.transcripts.main = [
+      { start: 10.6, end: 13.5, text: '第一段', words: [{ text: '第一段', start: 10.6, end: 13.5 }] },
+      { start: 30.4, end: 32, text: '第二段', words: [{ text: '第二段', start: 30.4, end: 32 }] },
+      { start: 33.5, end: 34.4, text: '接着说', words: [{ text: '接着说', start: 33.5, end: 34.4 }] },
+    ];
+    // Silence detected over the whole recording: the air at each chosen edge, and a pause inside b.
+    const sourceRanges = [{ fromSec: 9, toSec: 10.6 }, { fromSec: 13.5, toSec: 15 }, { fromSec: 29, toSec: 30.4 }, { fromSec: 32, toSec: 33.5 }, { fromSec: 34.4, toSec: 36 }];
+    const plan = planNarrationCuts(document, { assetId: 'main', sourceRanges, transcriptProtection: 'all', keepChosenEdges: true });
+    // Only the pause inside b is still cut on the timeline.
+    expect(plan.timelineRanges.map((range) => [range.sourceFromSec, range.sourceToSec])).toEqual([[32, 33.5]]);
+    // Without the rule, the air at the edges goes too.
+    expect(planNarrationCuts(document, { assetId: 'main', sourceRanges, transcriptProtection: 'all' }).timelineRanges.length).toBeGreaterThan(1);
+  });
+
   it('plans transcript-protected silence cleanup through one normalized cut policy', () => {
     const document = documentWithGap();
     document.timeline.tracks[0]!.clips = [{
