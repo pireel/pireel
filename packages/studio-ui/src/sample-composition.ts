@@ -327,12 +327,21 @@ export const PREVIEW_RUNTIME = `
     }
     return isFinite(smallest) ? smallest : 0;
   }
+  // Autofit measures the block as laid out, not as animated: entrance moves (a stamp scaled up before it
+  // lands, a panel pushed in from outside) are transforms, and an overflow they cause is not one the
+  // finished block has. Transforms are switched off only while measuring; nothing paints in between.
+  var measuringStyle = document.createElement('style');
+  measuringStyle.textContent = '[data-hf-measuring] [data-composition-id] *{transform:none!important;translate:none!important;scale:none!important;rotate:none!important}';
+  (document.head || document.documentElement).appendChild(measuringStyle);
   function measureFit() {
     var fits = {};
+    document.documentElement.setAttribute('data-hf-measuring', '');
     comps().forEach(function (el) {
       var id = el.getAttribute('data-composition-id');
       // Picture layers carry their framing in their own transform; autofit (text overflow) must not reset it.
       if (id === 'root' || id === 'vid' || el.hasAttribute('data-hf-visual-clip')) return;
+      // Placed with fit:false: kept at the size it was given (a stale fit is cleared).
+      if (el.hasAttribute('data-hf-nofit')) { fits[id] = 1; return; }
       var t = fitTarget(el);
       var cw = t.clientWidth, ch = t.clientHeight;
       if (!cw || !ch) return;
@@ -343,8 +352,9 @@ export const PREVIEW_RUNTIME = `
       var smallestFontPx = smallestTextFontPx(t);
       var readableFloor = smallestFontPx > 0 ? Math.min(1, minReadableFontPx / smallestFontPx) : 0;
       fits[id] = Math.floor(Math.max(rawFit, readableFloor) * 100) / 100; // quantize to 0.01 to de-jitter
-      applyFit(id, fits[id]); // apply in place
     });
+    document.documentElement.removeAttribute('data-hf-measuring');
+    Object.keys(fits).forEach(function (id) { applyFit(id, fits[id]); }); // apply in place, after measuring
     fpost({ type: 'fit', fits: fits });
   }
   function triggerFit() { try { requestAnimationFrame(function () { requestAnimationFrame(measureFit); }); } catch (e) { measureFit(); } }

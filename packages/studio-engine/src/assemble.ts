@@ -551,7 +551,8 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
     const { html: innerHtml } = compileComponentStyles(rendered.innerHtml, b.id);
     const { timelineBody } = rendered;
     // autofit: when content overflows, scale the whole thing to just fit the box (measured empirically), preview = export
-    const fit = b.fitScale && b.fitScale < 0.999 ? `transform:scale(${n(b.fitScale)});transform-origin:center center;` : '';
+    // A block placed with fit:false keeps the size it was given: no measured fit applies to it.
+    const fit = b.autoFit !== false && b.fitScale && b.fitScale < 0.999 ? `transform:scale(${n(b.fitScale)});transform-origin:center center;` : '';
     // Uniform content scaling: CSS scale property (around center), doesn't affect layout (autofit's scrollWidth measure stays uncontaminated),
     // and doesn't enter the transform chain (won't be overwritten by the autofit transform)
     const scaleCss = typeof b.scale === 'number' && Math.abs(b.scale - 1) > 0.005 ? `scale:${n(b.scale)};` : '';
@@ -578,7 +579,7 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
     const propsCss = propValues ? componentPropsInlineCss(propSpecs, propValues) : '';
     const propsAttrs = propValues ? ` ${componentPropsAttrs(propSpecs, propValues)}` : '';
     const attrs =
-      `id="${b.id}" data-composition-id="${b.id}" ${b.box ? 'data-hf-box="1" ' : ''}` +
+      `id="${b.id}" data-composition-id="${b.id}" ${b.box ? 'data-hf-box="1" ' : ''}${b.autoFit === false ? 'data-hf-nofit="1" ' : ''}` +
       authoredDuration +
       `data-start="${n(b.startSec)}" data-duration="${n(b.durationSec)}" data-track-index="${b.trackIndex}" ` +
       `data-width="${W}" data-height="${H}"${propsAttrs}`;
