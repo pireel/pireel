@@ -1150,6 +1150,18 @@ describe('remove_clips and swap_clip_media (v3)', () => {
     expect(read({ fromFrame: 0, toFrame: 120 }).map((word) => [word.text, word.startFrame])).toEqual([['gamma', 9], ['alpha', 66], ['beta', 84]]);
   });
 
+  it('a sound shorter than 0.2 s plays whole and stays editable', () => {
+    let document = project();
+    document = runAgentTimelineTool(document, 'register_media', { assets: [{ id: 'tick', kind: 'audio', url: 'https://cdn.example/tick.mp3', durationSec: 0.093 }] }).document!;
+    const placed = runAgentTimelineTool(document, 'add_clips', { clips: [{ id: 't1', role: 'sfx', assetId: 'tick', startFrame: 30 }] });
+    expect(placed.ok, JSON.stringify(placed)).toBe(true);
+    const clip = placed.document!.timeline.tracks.flatMap((track) => track.clips).find((entry) => entry.id === 't1') as { sourceInSec: number; sourceOutSec: number };
+    expect(clip.sourceOutSec).toBeLessThanOrEqual(0.093);
+    // A level change on it (alone or in a batch) is not refused for its length.
+    const louder = runAgentTimelineTool(placed.document!, 'set_clip_properties', { items: [{ clipId: 't1', volumeDb: -6 }, { clipId: 'n1', volumeDb: 2 }] });
+    expect(louder.ok, JSON.stringify(louder)).toBe(true);
+  });
+
   it('swap_clip_media keeps the slot and refuses unknown or incompatible assets', () => {
     const document = project();
     const swapped = runAgentTimelineTool(document, 'swap_clip_media', { clipId: 's2', assetId: 'v2' });

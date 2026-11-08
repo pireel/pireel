@@ -1,8 +1,8 @@
 /** Native audio clip transactions shared by manual panels, browser agents and offline MCP. */
 
 import {
-  AUDIO_MIN_LEN_SEC,
   audioClipDefaults,
+  audioMinLenSec,
   patchAudioClip,
   splitAudioClipAt,
   type AudioClip,
@@ -254,7 +254,7 @@ function audioTimelineClip(document: EditorDocumentV2, input: AudioClip):
   const defaults = audioClipDefaults(normalized);
   const knownOut = Number.isFinite(defaults.outSec) ? defaults.outSec : undefined;
   const durationSec = knownOut == null ? undefined : (knownOut - defaults.inSec) / defaults.speed;
-  if (durationSec != null && durationSec < AUDIO_MIN_LEN_SEC) {
+  if (durationSec != null && durationSec < audioMinLenSec(normalized)) {
     return failure(document, 'invalid-range', 'Audio clip is shorter than the minimum timeline duration.', { path: 'clip.durationSec' });
   }
   const reused = existingAsset(document, normalized);
@@ -425,7 +425,7 @@ export function applyAudioDocumentEdits(input: AudioDocumentPatchInput): AudioDo
     const defaults = audioClipDefaults(normalized);
     const knownOut = Number.isFinite(defaults.outSec) ? defaults.outSec : undefined;
     const durationSec = knownOut == null ? undefined : (knownOut - defaults.inSec) / defaults.speed;
-    if (durationSec != null && durationSec < AUDIO_MIN_LEN_SEC) {
+    if (durationSec != null && durationSec < audioMinLenSec(normalized)) {
       return failure(input.document, 'invalid-range', 'Audio trim must leave at least 0.2 seconds.', { path: `updates[${index}].patch` });
     }
     updates.push({

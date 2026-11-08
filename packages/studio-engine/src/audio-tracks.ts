@@ -61,6 +61,13 @@ export const AUDIO_SPEED_MIN = 0.5;
 export const AUDIO_SPEED_MAX = 2;
 /** Shortest a clip may be trimmed to, in TIMELINE seconds. */
 export const AUDIO_MIN_LEN_SEC = 0.2;
+/** Shortest this clip may be, in timeline seconds: AUDIO_MIN_LEN_SEC, or all of a sound that is
+ *  shorter than that (a 0.09 s tick plays whole; it is never padded past its own end). */
+export function audioMinLenSec(c: AudioClip): number {
+  const inSec = Math.max(0, c.inSec ?? 0);
+  const rest = c.durationSec != null && Number.isFinite(c.durationSec) ? (c.durationSec - inSec) / Math.max(AUDIO_SPEED_MIN, Math.min(AUDIO_SPEED_MAX, c.speed ?? 1)) : Infinity;
+  return Math.max(0, Math.min(AUDIO_MIN_LEN_SEC, rest - 1e-6));
+}
 
 export function audioFadeDefaults(role: AudioClipRole | undefined): { fadeInSec: number; fadeOutSec: number } {
   // AudioClip predates role-aware V2 tracks; an absent role is a legacy music bed.

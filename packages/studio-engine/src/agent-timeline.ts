@@ -387,7 +387,9 @@ function placementFor(document: EditorDocumentV2, asset: EditorMediaAsset, item:
       : asset.metadata.durationSec != null
         ? asset.metadata.durationSec - sourceInSec
         : 5;
-  const requestedDuration = Number.isFinite(explicitDurationSec) ? explicitDurationSec : Math.max(0.2, inferredDuration);
+  // At least 0.2 s, but never past the end of a sound or video shorter than that (a 0.09 s tick plays whole).
+  const remaining = asset.kind !== 'image' && asset.metadata.durationSec != null ? asset.metadata.durationSec - sourceInSec : Number.POSITIVE_INFINITY;
+  const requestedDuration = Number.isFinite(explicitDurationSec) ? explicitDurationSec : Math.min(Math.max(0.2, inferredDuration), remaining);
   if (requestedDuration <= 0) return fail('durationSec must be positive');
   const durationFrames = positiveDurationFrames(requestedDuration, document.canvas.fps);
   const id = uniqueId(string(item.id) ?? `clip_${asset.id}`, used);
