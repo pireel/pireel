@@ -20,7 +20,7 @@ import {
   videoTrackShots,
 } from '@pireel/studio-engine/composition';
 import { fileSig } from '@pireel/studio-ui/media-ai';
-import { ExportCanceled, type ExportRenderOpts, clientExportVideo } from '@pireel/studio-ui/client-export';
+import { ExportCanceled, type ExportRenderOpts, clientExportVideo, measureExportLoudness } from '@pireel/studio-ui/client-export';
 import { t, tEnglish } from '@pireel/studio-ui/i18n';
 import { compositionRenderView } from '@pireel/studio-ui/composition-render-view';
 import { primaryNarrativeRenderPlan } from '@pireel/studio-ui/primary-render-plan';
@@ -150,18 +150,11 @@ export function useStudioExport(deps: {
   const noExportReason = (c: Composition, plan: ReturnType<typeof editorDocumentRenderPlan>) =>
     needsMainSource(c, plan) && !videoFileRef.current ? t('common.localSourceVideoMissing') : t('workbench.browserCannotExport');
 
-  /** Get the finished-video blob for the current content: use the cache on hit, otherwise composite once client-side (reports progress, cancelable). */
-  const renderBlob = async (
-    c: Composition,
-    plan: ReturnType<typeof editorDocumentRenderPlan>,
-    key: string,
-    opts: ExportRenderOpts,
-    audio: AudioExportEntry[] | null,
-  ): Promise<Blob> => {
-    const cached = lastExportRef.current;
-    if (cached && cached.key === key && cached.blob) return cached.blob;
+  /** What the export composites: the render view of the composition and every source, mask and clip it
+   *  sounds and shows. The video export and the loudness of its mix read the same input. */
+  const exportInput = (c: Composition, plan: ReturnType<typeof editorDocumentRenderPlan>, audio: AudioExportEntry[] | null) => {
     const primary = primaryNarrativeRenderPlan(plan);
-    const blob = await clientExportVideo({
+    return {
       comp: compositionRenderView(c, plan),
       videoPlacements: primary.activePlacements,
       primaryVisualHidden: primary.hidden,
@@ -174,6 +167,33 @@ export function useStudioExport(deps: {
       denoise: denoiseExportRef?.current?.() ?? null,
       audioMasks: exportAudioMasks(documentRef.current, c),
       clipMasks: clipAudioMasks(documentRef.current),
+    };
+  };
+
+  /** Integrated loudness (LUFS) of the timeline as it would export now, before the project's loudness
+   *  gain: the mix of every audible clip at its own level. Null when nothing sounds. */
+  const measureMixLoudness = async (): Promise<number | null> => {
+    await prepareExportAssets?.(documentRef.current);
+    const c = compRef.current;
+    const plan = editorDocumentRenderPlan(documentRef.current, { resolveAssetUrl });
+    if (plan.durationFrames === 0) return null;
+    if (!canClientExport(c, plan)) throw new Error(noExportReason(c, plan));
+    const audio = await (audioExportRef?.current?.() ?? Promise.resolve(null));
+    return measureExportLoudness(exportInput(c, plan, audio));
+  };
+
+  /** Get the finished-video blob for the current content: use the cache on hit, otherwise composite once client-side (reports progress, cancelable). */
+  const renderBlob = async (
+    c: Composition,
+    plan: ReturnType<typeof editorDocumentRenderPlan>,
+    key: string,
+    opts: ExportRenderOpts,
+    audio: AudioExportEntry[] | null,
+  ): Promise<Blob> => {
+    const cached = lastExportRef.current;
+    if (cached && cached.key === key && cached.blob) return cached.blob;
+    const blob = await clientExportVideo({
+      ...exportInput(c, plan, audio),
       render: opts,
       onProgress: (done, total) => setExportPct(Math.round((done / total) * 100)),
       shouldCancel: () => exportCancelRef.current,
@@ -245,6 +265,7 @@ export function useStudioExport(deps: {
     exporting,
     exportPct,
     exportVideo,
+    measureMixLoudness,
     cancelExport: () => {
       exportCancelRef.current = true;
     },

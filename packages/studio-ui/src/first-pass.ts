@@ -110,9 +110,9 @@ export interface FirstPassHost {
   /** Commits a whole-document change (the logo) or a command; false when the editor refused it. */
   replaceDocument(document: EditorDocumentV2): boolean;
   patchLoudness(loudness: { targetLufs: number; gainDb: number }): boolean;
-  /** The main video's bytes, for measuring its loudness. */
-  primaryFile(): Promise<Blob | null>;
-  measureLoudness(file: Blob): Promise<number | null>;
+  /** Integrated loudness (LUFS) of the timeline's mix as it would export now, before the loudness gain:
+   *  voice, music and effects at their own levels. Null when nothing sounds. */
+  measureMixLoudness(): Promise<number | null>;
   /** Flush document changes before publishing a completed checkpoint. */
   persist?(): Promise<void>;
 }

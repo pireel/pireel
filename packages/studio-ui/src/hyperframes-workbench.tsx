@@ -1933,6 +1933,7 @@ export function HyperframesWorkbench({
     exporting,
     exportPct,
     exportVideo,
+    measureMixLoudness,
     cancelExport,
     resetExport,
   } = useStudioExport({
@@ -7392,6 +7393,7 @@ export function HyperframesWorkbench({
     agentExportRef,
     exportPctRef,
     exportVideo,
+    measureMixLoudness,
     chatRef,
   };
   const persistToolMutation = async (

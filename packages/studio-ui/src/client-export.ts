@@ -66,6 +66,7 @@ import {
 import { lookFontIds } from '@pireel/studio-engine/look';
 import { BACKDROP_DIM, backdropBlurPx, backdropSampleSize } from '@pireel/studio-engine/source-framing';
 import { decodeAudioFile } from './audio-decode';
+import { LoudnessMeter, loudnessGainDb } from '@pireel/studio-engine/loudness-lufs';
 import {
   type MixTone, mixAudioTrack } from './export-audio-mix';
 import { type MaskedAudioRange, maskedAudioAt } from '@pireel/studio-engine/word-masks';
@@ -812,25 +813,25 @@ export function exportNeedsTimelineMix(input: { loudness: boolean; clips: boolea
   return input.loudness || input.clips || input.visualVideos > 0 || input.tones > 0 || input.clipMaskBeep || input.unencodableSource || input.retimed;
 }
 
-export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
+/** What the export reads its sound and picture from: the edited segment table (and the beeps its word
+ *  masks lay), the supplemental visual videos, and an open input per source (a denoised source reads
+ *  its baked sound). The video export and the loudness of its mix both read this, so they hear the same. */
+interface ExportSources {
+  shots: ReturnType<typeof videoTrackShots>;
+  durationSec: number;
+  segs: ExpSeg[];
+  tones: MixTone[];
+  visualMediaClips: SupplementalVisualMediaClip[];
+  visualVideos: SupplementalVisualMediaClip[];
+  visualVideoKeys: Map<string, string>;
+  rigs: Map<string, SourceRig>;
+  /** Each source's bytes, by segment key. */
+  files: Map<string, File>;
+  dispose(): void;
+}
+
+async function openExportSources(opts: ClientExportOpts): Promise<ExportSources> {
   const { comp, videoFile, clipFiles } = opts;
-  assertExportableComposition(comp);
-  const render = opts.render ?? DEFAULT_RENDER_OPTS;
-  const FPS = render.fps;
-  const W = comp.width;
-  const H = comp.height;
-  // Output size: res=short side, downscale only, never upscale; layout/framing all still computed
-  // in comp coordinates, one setTransform scales at the canvas end.
-  // Width and height each rounded to even (encoder requires it) → Sx/Sy computed independently, no black bars from sub-pixel diff
-  const even = (x: number) => Math.max(2, Math.round(x / 2) * 2);
-  // res=output short-side pixels. Upscaling to 4K relies on the vector layer re-rasterizing at target
-  // resolution (svgOpen's viewBox) + the source video drawImage scaling straight from native frames to
-  // output (no 1080 intermediate). Cap at 4× as a safety net against canvas/memory blowup (dropdown max 2160=2×).
-  const k = Math.min(4, render.res / Math.min(W, H));
-  const outW = even(W * k);
-  const outH = even(H * k);
-  const Sx = outW / W;
-  const Sy = outH / H;
   const shots = videoTrackShots(comp);
   const durationSec = Math.max(0.5, opts.timelineDurationSec ?? totalDuration(comp));
 
@@ -896,12 +897,10 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     }
     files.set(key, await visualFile);
   }
-  const visualImageBitmaps = await loadVisualImageBitmaps(visualMediaClips);
 
   // Per-source sequential sample stream: start = earliest time this source is used, end = latest
   const rigs = new Map<string, SourceRig>();
   const dnInputs: Input[] = [];
-  let overlay: Overlay;
   try {
     for (const [key, file] of files) {
       const mine = segs.filter((s) => s.key === key);
@@ -930,13 +929,164 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       }
     }
 
+
+  } catch (error) {
+    for (const rig of rigs.values()) disposeSourceRig(rig);
+    for (const input of dnInputs) void input.dispose();
+    throw error;
+  }
+  return {
+    shots, durationSec, segs, tones, visualMediaClips, visualVideos, visualVideoKeys, rigs, files,
+    dispose: () => {
+      for (const rig of rigs.values()) disposeSourceRig(rig);
+      for (const input of dnInputs) void input.dispose();
+    },
+  };
+}
+
+/** The export's sound, mixed on the 48 kHz timeline: narration segments, visual-lane videos, audio-lane
+ *  clips and beeps. `master` brings the whole mix to the project's loudness (then the limiter); without
+ *  it the mix is what the loudness is measured on. */
+async function mixExportAudio(
+  opts: ClientExportOpts,
+  sources: ExportSources,
+  push: (sample: AudioSample) => Promise<void>,
+  master?: { gainDb: number },
+): Promise<void> {
+  const { segs, visualVideoKeys, visualVideos, rigs, durationSec } = sources;
+  const allTones = [...sources.tones];
+  const audioTracks = new Map<string, NonNullable<SourceRig['audio']>>();
+  for (const [key, r] of rigs) if (r.audio && !key.startsWith('g_')) audioTracks.set(key, r.audio);
+  const clips: { clip: AudioClip; buffer: AudioBuffer; masks?: readonly MaskedAudioRange[] }[] = [];
+  for (const a of opts.audio ?? []) {
+    const masks = opts.clipMasks?.get(a.clip.id);
+    clips.push({ clip: a.clip, buffer: await decodeAudioFile(a.file), ...(masks?.length ? { masks } : {}) });
+  }
+  const supplementalAudioSegs = supplementalVisualAudioMixSegments(visualVideos).map((segment) => {
+    const masks = opts.clipMasks?.get(segment.clipId);
+    const timelineLen = segment.timelineEnd - segment.timelineStart;
+    const fadeAt = masks?.length && segment.gain > 0
+      ? maskedSegmentEnvelope(masks, segment.sourceInSec, segment.sourceOutSec, timelineLen, segment.fadeAt)
+      : segment.fadeAt;
+    if (masks?.length && segment.gain > 0) {
+      const rate = (segment.sourceOutSec - segment.sourceInSec) / Math.max(1e-6, timelineLen);
+      for (const range of masks) {
+        if (range.audio !== 'beep') continue;
+        const a = Math.max(range.start, segment.sourceInSec);
+        const b = Math.min(range.end, segment.sourceOutSec);
+        if (b <= a) continue;
+        allTones.push({ timelineStart: segment.timelineStart + (a - segment.sourceInSec) / rate, timelineEnd: segment.timelineStart + (b - segment.sourceInSec) / rate });
+      }
+    }
+    return {
+      srcStart: segment.sourceInSec,
+      srcEnd: segment.sourceOutSec,
+      key: visualVideoKeys.get(segment.clipId)!,
+      timelineStart: segment.timelineStart,
+      timelineEnd: segment.timelineEnd,
+      gain: segment.gain,
+      ...(fadeAt ? { fadeAt } : {}),
+    };
+  });
+  await mixAudioTrack({
+    segs: [
+      ...segs.map((s) => ({
+        srcStart: s.srcStart,
+        srcEnd: s.srcEnd,
+        key: s.key,
+        timelineStart: s.timelineStart,
+        timelineEnd: s.timelineEnd,
+        gain: s.gain ?? 1,
+        fadeAt: s.fadeAt,
+      })),
+      ...supplementalAudioSegs,
+    ],
+    audioTracks,
+    clips,
+    totalSec: durationSec,
+    tones: allTones,
+    ...(master ? { master } : {}),
+    push,
+  });
+}
+
+/**
+ * Integrated loudness (LUFS) of the mix this export would encode, before the master gain: every audible
+ * segment, visual-lane video, audio-lane clip (at its own level) and beep, mixed exactly as the export
+ * mixes them. The project's loudness gain is set from this, so it brings the finished video to its
+ * target rather than the raw recording. Null when the timeline has no sound.
+ */
+export async function measureExportLoudness(opts: ClientExportOpts): Promise<number | null> {
+  assertExportableComposition(opts.comp);
+  const sources = await openExportSources(opts);
+  try {
+    return await mixLoudness(opts, sources);
+  } finally {
+    sources.dispose();
+  }
+}
+
+/** The mix's integrated loudness, mixed by mixExportAudio without a master gain; null when silent. */
+async function mixLoudness(opts: ClientExportOpts, sources: ExportSources): Promise<number | null> {
+  let meter: LoudnessMeter | null = null;
+  await mixExportAudio(opts, sources, async (sample) => {
+    try {
+      const channels = sample.numberOfChannels;
+      meter ??= new LoudnessMeter(sample.sampleRate, channels);
+      meter.push(Array.from({ length: channels }, (_, plane) => {
+        const data = new Float32Array(sample.numberOfFrames);
+        sample.copyTo(data, { planeIndex: plane, format: 'f32-planar' });
+        return data;
+      }));
+    } finally {
+      sample.close();
+    }
+  });
+  const lufs = meter ? (meter as LoudnessMeter).integrated() : -Infinity;
+  return Number.isFinite(lufs) ? lufs : null;
+}
+
+/** The master gain the export applies: measured on this very mix, so whatever changed since the gain
+ *  was stored (music added, a clip turned down) still lands on the target. The stored gain stands when
+ *  the mix is silent. */
+async function exportMasterGainDb(opts: ClientExportOpts, sources: ExportSources, loudness: { targetLufs: number; gainDb: number }): Promise<number> {
+  const measured = await mixLoudness(opts, sources);
+  const gainDb = measured === null ? loudness.gainDb : loudnessGainDb(measured, loudness.targetLufs) ?? loudness.gainDb;
+  console.info(`[export] mix ${measured === null ? 'silent' : `${measured.toFixed(1)} LUFS`} → master ${gainDb >= 0 ? '+' : ''}${gainDb} dB for ${loudness.targetLufs} LUFS (stored ${loudness.gainDb >= 0 ? '+' : ''}${loudness.gainDb} dB)`);
+  return gainDb;
+}
+
+export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
+  const { comp, videoFile, clipFiles } = opts;
+  assertExportableComposition(comp);
+  const render = opts.render ?? DEFAULT_RENDER_OPTS;
+  const FPS = render.fps;
+  const W = comp.width;
+  const H = comp.height;
+  // Output size: res=short side, downscale only, never upscale; layout/framing all still computed
+  // in comp coordinates, one setTransform scales at the canvas end.
+  // Width and height each rounded to even (encoder requires it) → Sx/Sy computed independently, no black bars from sub-pixel diff
+  const even = (x: number) => Math.max(2, Math.round(x / 2) * 2);
+  // res=output short-side pixels. Upscaling to 4K relies on the vector layer re-rasterizing at target
+  // resolution (svgOpen's viewBox) + the source video drawImage scaling straight from native frames to
+  // output (no 1080 intermediate). Cap at 4× as a safety net against canvas/memory blowup (dropdown max 2160=2×).
+  const k = Math.min(4, render.res / Math.min(W, H));
+  const outW = even(W * k);
+  const outH = even(H * k);
+  const Sx = outW / W;
+  const Sy = outH / H;
+  const sources = await openExportSources(opts);
+  const { shots, durationSec, segs, tones, visualMediaClips, visualVideos, visualVideoKeys, rigs, files } = sources;
+  let visualImageBitmaps: Awaited<ReturnType<typeof loadVisualImageBitmaps>> | undefined;
+  let overlay: Overlay;
+  try {
+    visualImageBitmaps = await loadVisualImageBitmaps(visualMediaClips);
     // Overlay document + asset inlining
     overlay = await createOverlay(injectPreviewRuntime(assembleHtml(comp, undefined, opts.videoPlacements, opts.visualMediaClips)), W, H);
     applyPrimaryOverlayVisibility(overlay, opts.primaryVisualHidden);
   } catch (error) {
-    for (const rig of rigs.values()) disposeSourceRig(rig);
-    for (const input of dnInputs) void input.dispose();
-    disposeVisualImageBitmaps(visualImageBitmaps);
+    sources.dispose();
+    if (visualImageBitmaps) disposeVisualImageBitmaps(visualImageBitmaps);
     throw error;
   }
   try {
@@ -1289,59 +1439,8 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     // Per-shot volume: gain 1 passes samples through untouched (byte-identical to before the feature existed); gain 0 contributes
     // nothing (a timestamp gap decodes as silence, same as a source without audio); anything between rewrites PCM (same shotGain as preview).
     if (audioSource && needsTimelineMix) {
-      const audioTracks = new Map<string, NonNullable<SourceRig['audio']>>();
-      for (const [key, r] of rigs) if (r.audio && !key.startsWith('g_')) audioTracks.set(key, r.audio);
-      const clips: { clip: AudioClip; buffer: AudioBuffer; masks?: readonly MaskedAudioRange[] }[] = [];
-      for (const a of opts.audio ?? []) {
-        const masks = opts.clipMasks?.get(a.clip.id);
-        clips.push({ clip: a.clip, buffer: await decodeAudioFile(a.file), ...(masks?.length ? { masks } : {}) });
-      }
-      const supplementalAudioSegs = supplementalVisualAudioMixSegments(visualVideos).map((segment) => {
-        const masks = opts.clipMasks?.get(segment.clipId);
-        const timelineLen = segment.timelineEnd - segment.timelineStart;
-        const fadeAt = masks?.length && segment.gain > 0
-          ? maskedSegmentEnvelope(masks, segment.sourceInSec, segment.sourceOutSec, timelineLen, segment.fadeAt)
-          : segment.fadeAt;
-        if (masks?.length && segment.gain > 0) {
-          const rate = (segment.sourceOutSec - segment.sourceInSec) / Math.max(1e-6, timelineLen);
-          for (const range of masks) {
-            if (range.audio !== 'beep') continue;
-            const a = Math.max(range.start, segment.sourceInSec);
-            const b = Math.min(range.end, segment.sourceOutSec);
-            if (b <= a) continue;
-            tones.push({ timelineStart: segment.timelineStart + (a - segment.sourceInSec) / rate, timelineEnd: segment.timelineStart + (b - segment.sourceInSec) / rate });
-          }
-        }
-        return {
-          srcStart: segment.sourceInSec,
-          srcEnd: segment.sourceOutSec,
-          key: visualVideoKeys.get(segment.clipId)!,
-          timelineStart: segment.timelineStart,
-          timelineEnd: segment.timelineEnd,
-          gain: segment.gain,
-          ...(fadeAt ? { fadeAt } : {}),
-        };
-      });
-      await mixAudioTrack({
-        segs: [
-          ...segs.map((s) => ({
-            srcStart: s.srcStart,
-            srcEnd: s.srcEnd,
-            key: s.key,
-            timelineStart: s.timelineStart,
-            timelineEnd: s.timelineEnd,
-            gain: s.gain ?? 1,
-            fadeAt: s.fadeAt,
-          })),
-          ...supplementalAudioSegs,
-        ],
-        audioTracks,
-        clips,
-        totalSec: durationSec,
-        tones,
-        ...(comp.audioLoudness ? { master: { gainDb: comp.audioLoudness.gainDb } } : {}),
-        push: (sample) => audioSource.add(sample).then(() => sample.close()),
-      });
+      const master = comp.audioLoudness ? { gainDb: await exportMasterGainDb(opts, sources, comp.audioLoudness) } : undefined;
+      await mixExportAudio(opts, sources, (sample) => audioSource.add(sample).then(() => sample.close()), master);
     } else if (audioSource) {
       for (const s of segs) {
         const rig = rigs.get(s.key);
@@ -1365,8 +1464,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     const buf = (output.target as BufferTarget).buffer!;
     return new Blob([buf], { type: render.format === 'webm' ? 'video/webm' : render.format === 'mov' ? 'video/quicktime' : 'video/mp4' });
   } finally {
-    for (const rig of rigs.values()) disposeSourceRig(rig);
-    for (const input of dnInputs) void input.dispose();
+    sources.dispose();
     disposeVisualImageBitmaps(visualImageBitmaps);
     overlay.dispose();
   }

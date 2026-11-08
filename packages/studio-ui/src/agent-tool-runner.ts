@@ -510,6 +510,8 @@ export interface AgentToolCtx {
   agentExportRef: MutableRefObject<AgentExportJob>;
   exportPctRef: MutableRefObject<number>;
   exportVideo: (opts: ExportRenderOpts, sinkUrl?: string) => Promise<{ ok: boolean; filename?: string; error?: string; delivered?: 'local_sink' | 'browser_download'; sinkError?: string }>;
+  /** Loudness (LUFS) of the timeline's mix as it would export now, before the loudness gain. */
+  measureMixLoudness: () => Promise<number | null>;
   // Frames + chat handle
   chatRef: MutableRefObject<StudioChatHandle | null>;
   /** Receives the usage of paid calls tools make (transcription) while a caller listens; null otherwise. */
@@ -3041,12 +3043,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               captionsOn: () => !!documentRef.current.appearance.captionStyle?.on,
               replaceDocument: (next) => commit({ op: 'document.replace', input: { document: next } }).ok,
               patchLoudness: (loudness) => commit({ op: 'command', input: { command: { type: 'processing.patch', patch: { loudness } } } }).ok,
-              primaryFile: async () => {
-                const assetId = firstNarrativeAssetId(documentRef.current);
-                const asset = assetId ? documentRef.current.assets[assetId] : undefined;
-                return asset ? (await assetBytes(asset)).file : null;
-              },
-              measureLoudness: async (file) => (await import('@pireel/studio-ui/audio-decode')).streamVideoLoudness(file),
+              measureMixLoudness: () => ctx.measureMixLoudness(),
             };
             const outcome = await runFirstPass(host, (next) => { report(next.summary ?? t('tools.rough_cut.busy'), undefined, { report: next }); opts?.roughCut?.onProgress?.(next); }, {
               ...(steps?.length ? { steps } : {}), ...(pauses ? { pauses } : {}), ...(signal ? { signal } : {}), onLateUsage: opts?.roughCut?.onLateUsage, resume: opts?.roughCut?.resume,

@@ -73,6 +73,9 @@ export interface V3CaptionsView {
 export interface V3StateView {
   canvas: { width: number; height: number; fps: number };
   durationFrames: number;
+  /** Whole-mix loudness: the export measures the mix it encodes and gains it to targetLufs (then a
+   *  limiter); gainDb is the gain the preview plays, measured when loudness was last set. */
+  loudness?: { targetLufs: number; gainDb: number };
   tracks: V3TrackView[];
   /** The transition lane: effects placed by time, independent of cuts (add_transition vocabulary). */
   transitions?: V3TransitionView[];
@@ -381,6 +384,7 @@ export function renderV3State(
   return {
     canvas: { width: document.canvas.width, height: document.canvas.height, fps: document.canvas.fps },
     durationFrames: documentDurationFrames(document),
+    ...(document.processing?.loudness ? { loudness: { targetLufs: document.processing.loudness.targetLufs, gainDb: document.processing.loudness.gainDb } } : {}),
     tracks,
     ...(document.timeline.transitions?.length ? { transitions: transitionsView(document) } : {}),
     assets: Object.values(document.assets).map((asset) => ({
