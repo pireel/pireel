@@ -1169,20 +1169,35 @@ export function setClipPatches(document: EditorDocumentV2, input: Input): AgentT
       const oldTimelineDurationSec = timelineFramesToSeconds(found.clip.durationFrames, next.canvas.fps);
       const playbackSpeed = oldTimelineDurationSec > 0 ? oldSourceDurationSec / oldTimelineDurationSec : 1;
       const newDurationFrames = positiveDurationFrames((sourceOutSec - sourceInSec) / Math.max(0.01, playbackSpeed), next.canvas.fps);
-      if (newDurationFrames !== found.clip.durationFrames) {
+      // On the story spine each edge moves time where it is: a new out-point gains or gives up frames at
+      // the clip's end, a new in-point at its start, and every sync-locked lane follows at that same
+      // place (a graphic over a trimmed head is cut with it; one inside the clip stays on its words).
+      // Other clips keep their start and change at the tail.
+      const ripple = found.clip.kind === 'narrative';
+      const framesPerSourceSec = found.clip.durationFrames / Math.max(1e-6, oldSourceDurationSec);
+      const headFrames = ripple ? Math.round((found.clip.sourceInSec - sourceInSec) * framesPerSourceSec) : 0;
+      const steps = ripple
+        ? [{ durationFrames: newDurationFrames - headFrames }, { durationFrames: newDurationFrames, head: true }]
+        : [{ durationFrames: newDurationFrames }];
+      for (const step of steps) {
+        const current = locatedClip(next, clipId!);
+        if (!current) return fail(`items[${index}] clip not found after source-range retime`);
+        if (step.durationFrames === current.clip.durationFrames || step.durationFrames <= 0) continue;
+        const rippleFromFrame = step.head ? current.clip.startFrame + Math.max(0, current.clip.durationFrames - step.durationFrames) : undefined;
         const retimed = applyEditorCommand(next, {
           type: 'clip.retime',
-          trackId: found.track.id,
-          clipId: found.clip.id,
-          durationFrames: newDurationFrames,
-          ripple: found.clip.kind === 'narrative',
+          trackId: current.track.id,
+          clipId: current.clip.id,
+          durationFrames: step.durationFrames,
+          ripple,
+          ...(rippleFromFrame !== undefined ? { rippleFromFrame } : {}),
         });
         if (!retimed.ok) return fail(retimed.error.message, retimed.error);
         next = retimed.document;
         receipts.push(retimed.receipt);
-        found = locatedClip(next, clipId!);
-        if (!found) return fail(`items[${index}] clip not found after source-range retime`);
       }
+      found = locatedClip(next, clipId!);
+      if (!found) return fail(`items[${index}] clip not found after source-range retime`);
       visualSourceChanged = true;
     } else if (patchesVisualSource && found.clip.kind !== 'audio') {
       return fail(`items[${index}] sourceInSec/sourceOutSec require a video or audio clip`);

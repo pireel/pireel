@@ -1191,6 +1191,33 @@ describe('remove_clips and swap_clip_media (v3)', () => {
     expect(segments.map((segment) => [segment.text, segment.start, segment.end])).toEqual([['正确的做法呢', 3, 5], ['先选段', 7, 8]]);
   });
 
+  it('a new in-point on the spine moves time at the clip head, and graphics follow there', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', { assets: [{ id: 'v', kind: 'video', url: 'https://cdn.example/v.mp4', durationSec: 60 }] }).document!;
+    document = runAgentTimelineTool(document, 'add_clips', { clips: [
+      { id: 's1', role: 'primary', assetId: 'v', startFrame: 0, source: [5, 15] },
+      { id: 's2', role: 'primary', assetId: 'v', startFrame: 300, source: [20, 30] },
+    ] }).document!;
+    // Over the head (30–120), inside the clip on its words (150–210), and on the next clip (400–460).
+    document = runAgentTimelineTool(document, 'set_texts', { items: [
+      { id: 'head', text: '开头', startFrame: 30, durationFrames: 90 },
+      { id: 'inside', text: '中间', startFrame: 150, durationFrames: 60 },
+      { id: 'after', text: '后面', startFrame: 400, durationFrames: 60 },
+    ] }).document!;
+    const at = (doc: typeof document) => Object.fromEntries(doc.timeline.tracks.flatMap((track) => track.clips.map((clip) => [clip.id, [clip.startFrame, clip.startFrame + clip.durationFrames]])));
+    // Trim 2 s off the head: frames 0–60 leave every sync-locked lane.
+    const trimmed = runAgentTimelineTool(document, 'set_clip_properties', { items: [{ clipId: 's1', source: [7, 15] }] });
+    expect(trimmed.ok, JSON.stringify(trimmed)).toBe(true);
+    expect(at(trimmed.document!)).toMatchObject({ s1: [0, 240], s2: [240, 540], head: [0, 60], inside: [90, 150], after: [340, 400] });
+    // Give the head 1 s more: 30 frames open at the clip start.
+    const opened = runAgentTimelineTool(document, 'set_clip_properties', { items: [{ clipId: 's1', source: [4, 15] }] });
+    expect(opened.ok, JSON.stringify(opened)).toBe(true);
+    expect(at(opened.document!)).toMatchObject({ s1: [0, 330], s2: [330, 630], head: [60, 150], inside: [180, 240], after: [430, 490] });
+    // A new out-point still changes time at the end only.
+    const tail = runAgentTimelineTool(document, 'set_clip_properties', { items: [{ clipId: 's1', source: [5, 13] }] });
+    expect(at(tail.document!)).toMatchObject({ s1: [0, 240], head: [30, 120], inside: [150, 210], after: [340, 400] });
+  });
+
   it('a sound shorter than 0.2 s plays whole and stays editable', () => {
     let document = project();
     document = runAgentTimelineTool(document, 'register_media', { assets: [{ id: 'tick', kind: 'audio', url: 'https://cdn.example/tick.mp3', durationSec: 0.093 }] }).document!;
