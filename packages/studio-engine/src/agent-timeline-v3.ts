@@ -35,6 +35,7 @@ import { applyNarrationSplitCommands, normalizeNarrationSplitPoints } from '@pir
 import { applyOverlayDocumentEdits, removeOverlayDocumentClips } from '@pireel/studio-engine/overlay-document-edit';
 import { applyVideoClipSettingsPatches, mediaVideoClipEntries } from '@pireel/studio-engine/media-video-edit';
 import { duplicateOverlayDocumentClip, retimeOverlayDocumentClip } from '@pireel/studio-engine/overlay-track-edit';
+import { blockInItsBox } from '@pireel/studio-engine/assemble';
 import { editorDocumentRenderPlan } from '@pireel/studio-engine/editor-document/render-plan';
 import { firstNarrativeAssetId, freeOverlayStackOrder, narrativeAtTimelineSecond, primaryNarrativeClips } from '@pireel/studio-engine/editor-document/read-model';
 import { projectNarrativeShots, projectOverlayBlockById } from '@pireel/studio-engine/editor-document/legacy-projection';
@@ -1460,9 +1461,10 @@ export function inspectMediaV3(document: EditorDocumentV2, input: Input): AgentT
     const block = projectOverlayBlockById(document, ids[0]!);
     if (!block) return fail(`graphic clip not found: ${ids[0]}`, { unknownIds: ids });
     const slots = block.slots as { innerHtml?: unknown; timelineBody?: unknown };
+    // Rendered in its box, as export and preview render it, so the ctx read back is the one it gets.
     const rendered = block.templateId === 'custom'
       ? { innerHtml: String(slots.innerHtml ?? ''), timelineBody: String(slots.timelineBody ?? '') }
-      : renderBlock(block);
+      : renderBlock(blockInItsBox(block, document.canvas.width, document.canvas.height));
     const cap = (text: string, n: number) => (text.length > n ? `${text.slice(0, n)}\n…(truncated, ${text.length} chars total)` : text);
     const fps = document.canvas.fps;
     return {

@@ -511,35 +511,38 @@ export function blockBackdrop(comp: Composition, atSec: number): 'footage' | 'pa
   return treatment === 'full' || treatment === 'punch-in' ? 'footage' : 'page';
 }
 
+/**
+ * A block with the size it renders at baked into its slots: look pieces read their layout box from
+ * ctx (the content box when a resize or a fit scaled it without reflow, else the box), kit blocks
+ * their box and canvas. Rendering for export or preview and reading a block back share this, so a
+ * read-back shows the ctx the block really gets. `backdrop`: what a kit block sits on (default kept).
+ */
+export function blockInItsBox(b: Block, W: number, H: number, backdrop?: string): Block {
+  if (isLookTemplate(b.templateId)) {
+    return { ...b, slots: { ...b.slots, piece: lookPieceOf(b.templateId), boxW: Math.round(((b.contentBox ?? b.box)?.w ?? 1) * W), boxH: Math.round(((b.contentBox ?? b.box)?.h ?? 1) * H) } };
+  }
+  if (!b.templateId.startsWith('kit:')) return b;
+  return {
+    ...b,
+    slots: {
+      ...b.slots,
+      boxW: Math.round((b.box?.w ?? 0.86) * W),
+      boxH: Math.round((b.box?.h ?? 0.3) * H),
+      canvasW: W,
+      canvasH: H,
+      // A preview can pin it (library cards sit on a light checker, not footage).
+      ...(b.slots.backdrop === 'page' || b.slots.backdrop === 'footage' ? {} : backdrop ? { backdrop } : {}),
+    },
+  };
+}
+
 function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof resolveCaptionStyle> | undefined): { html: string; timelineBody: string } {
   const { width: W, height: H } = comp;
 
     // State-first bilingual gate: the translation line renders ONLY while captionStyle.sub.lang is set.
     // Translations live in the transcript (and get baked into slots.sub by the relay), but without the
     // language state they stay dormant — turning translation off hides them without destroying content.
-    // Kit blocks derive HTML at render time — bake the sizing context (box/canvas px)
-    // into slots here, where the composition's dimensions are known.
-    const kitBase = isLookTemplate(b.templateId)
-      ? {
-          ...b,
-          // A look instance builds itself in its layout box (the content box when a resize or a fit
-          // scaled it without reflow, else the box): the piece reads that size from ctx.
-          slots: { ...b.slots, piece: lookPieceOf(b.templateId), boxW: Math.round(((b.contentBox ?? b.box)?.w ?? 1) * W), boxH: Math.round(((b.contentBox ?? b.box)?.h ?? 1) * H) },
-        }
-      : b.templateId.startsWith('kit:')
-      ? {
-          ...b,
-          slots: {
-            ...b.slots,
-            boxW: Math.round((b.box?.w ?? 0.86) * W),
-            boxH: Math.round((b.box?.h ?? 0.3) * H),
-            canvasW: W,
-            canvasH: H,
-            // A preview can pin it (library cards sit on a light checker, not footage).
-            backdrop: b.slots.backdrop === 'page' || b.slots.backdrop === 'footage' ? b.slots.backdrop : blockBackdrop(comp, b.startSec),
-          },
-        }
-      : b;
+    const kitBase = blockInItsBox(b, W, H, blockBackdrop(comp, b.startSec));
     const capBase = isSentenceCaption(kitBase)
       ? { ...kitBase, slots: { ...kitBase.slots, canvasW: comp.width, ...(comp.captionStyle?.sub?.lang ? {} : { sub: undefined }) } }
       : kitBase;
