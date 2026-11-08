@@ -1,7 +1,7 @@
 /** Shared caption line measurement for cue generation and final rendering. */
 
 import type { FxWord } from './caption-fx';
-import { PUNCT_END, alnumCount, chunkWordsBalanced, estWordEm, joinWords, latinJoin, loneHan, measureTextPx, segmentTokens } from './caption-fx';
+import { PUNCT_END, agreedWordSpans, alnumCount, chunkWordsBalanced, estWordEm, joinWords, latinJoin, loneHan, measureTextPx, segmentTokens } from './caption-fx';
 import {
   BASE_CAPTION_FONT_PX,
   CAPTION_WEIGHT_BOLD,
@@ -239,44 +239,17 @@ export function captionStackRows<W extends FxWord>(
 }
 
 /**
- * Recognizer words grouped into dictionary words, so a caption line never breaks inside one.
- * Chinese recognizers often time single characters (「什」「么」); ICU segmentation of the joined
- * sentence says which of them belong together. Letters and digits are the alignment currency, as in
- * groupAsrWords; a recognizer word spanning several dictionary words simply covers all of them.
+ * Recognizer words grouped into dictionary words, so a caption line never breaks inside one: the
+ * same agreed-boundary rule as groupAsrWords (agreedWordSpans), over the sentence the words spell.
+ * Transcripts stored before words were grouped on arrival still time single characters (「什」「么」).
  */
 export function lexicalWordGroups<W extends FxWord>(words: readonly W[]): W[][] {
   if (words.length < 2) return words.map((word) => [word]);
-  const groups: W[][] = [];
-  let next = 0;
-  let excess = 0;
-  for (const token of segmentTokens(joinWords(words.map((word) => word.text)))) {
-    let want = alnumCount(token);
-    if (!want) continue;
-    if (excess >= want) { excess -= want; continue; }
-    want -= excess;
-    // The last recognizer word ended inside this dictionary word (他不|在这个 over 他|不在|这个): the
-    // rest of it joins that group, so no line breaks in the middle of 不在.
-    const continuing = excess > 0 && groups.length > 0;
-    excess = 0;
-    // Punctuation the recognizer gave as words of its own (看你这个挣钱了 | ， | 那) ends the word
-    // before it: a line never opens with a comma, and the clause ends where the mark is.
-    while (!continuing && groups.length && next < words.length && !alnumCount(words[next]!.text)) groups[groups.length - 1]!.push(words[next++]!);
-    const group: W[] = continuing ? groups.pop()! : [];
-    let got = 0;
-    while (next < words.length && (got < want || !group.length)) {
-      got += alnumCount(words[next]!.text);
-      group.push(words[next++]!);
-    }
-    if (!group.length) break;
-    excess = Math.max(0, got - want);
-    groups.push(group);
-  }
-  // Anything the segmentation did not account for (trailing punctuation words) joins the last group.
-  while (next < words.length) {
-    if (groups.length) groups[groups.length - 1]!.push(words[next++]!);
-    else groups.push([words[next++]!]);
-  }
-  return groups;
+  // Words alone do not say where the sentence had spaces, so Latin words keep theirs (one two); Latin
+  // a recognizer spelled out letter by letter is joined on arrival, where the sentence is known.
+  const tokens = segmentTokens(joinWords(words.map((word) => word.text)));
+  const spans = agreedWordSpans(words.map((word) => alnumCount(word.text)), tokens.map(alnumCount));
+  return spans ? spans.map(([from, to]) => words.slice(from, to)) : words.map((word) => [word]);
 }
 
 interface WordGroup<W> { text: string; members: W[] }

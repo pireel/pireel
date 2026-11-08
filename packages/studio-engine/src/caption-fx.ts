@@ -230,30 +230,79 @@ function alignByCharacters(toks: string[], flat: { text: string; start: number; 
   return out.length ? out : null;
 }
 
-/** Merge complete ASR tokens only. Never invent sub-token time or match by length alone; text the
- *  tokens do not spell out exactly is aligned character by character (alignByCharacters). */
+/**
+ * Words grouped where two segmentations of the same speech agree. `wordCounts` and `tokenCounts` are
+ * the letters+digits of each recognizer word and each dictionary word, in order; a span ends only at
+ * a boundary both have. So a recognizer word spanning several dictionary words stays whole (买了 over
+ * 买|了), and recognizer pieces of one dictionary word come together (B|o|l|t, 8|0|0|0, 什|么). Words
+ * with no letters or digits (punctuation the recognizer gave on its own) end the span before them.
+ * Returns [from, to) word ranges, or null when the two do not count the same characters.
+ */
+export function agreedWordSpans(wordCounts: readonly number[], tokenCounts: readonly number[]): Array<[number, number]> | null {
+  const sum = (counts: readonly number[]) => counts.reduce((total, count) => total + count, 0);
+  if (!wordCounts.length || sum(wordCounts) !== sum(tokenCounts)) return null;
+  const tokenEnds = new Set<number>();
+  tokenCounts.reduce((at, count) => { tokenEnds.add(at + count); return at + count; }, 0);
+  const spans: Array<[number, number]> = [];
+  let from = 0;
+  let at = 0;
+  for (let index = 0; index < wordCounts.length; index++) {
+    // A word with nothing to count joins the span before it (or the first span, at the start).
+    if (!wordCounts[index]) {
+      if (index === from) { if (spans.length) { spans[spans.length - 1]![1] = index + 1; from = index + 1; } }
+      continue;
+    }
+    at += wordCounts[index]!;
+    if (tokenEnds.has(at)) {
+      // Punctuation words right after the boundary stay with it.
+      let to = index + 1;
+      while (to < wordCounts.length && !wordCounts[to]) to++;
+      spans.push([from, to]);
+      from = to;
+      index = to - 1;
+    }
+  }
+  if (from < wordCounts.length) {
+    if (spans.length) spans[spans.length - 1]![1] = wordCounts.length;
+    else spans.push([from, wordCounts.length]);
+  }
+  return spans;
+}
+
+/**
+ * Recognizer words as the words of the sentence. Where the sentence and the words spell the same
+ * letters and digits, they are grouped at the boundaries both agree on (agreedWordSpans): each group
+ * reads as the sentence writes it and keeps the true start of its first word and end of its last,
+ * never a time invented inside a word. Text the words do not spell out is aligned character by
+ * character (alignByCharacters); unrelated text leaves the words as they are.
+ */
 export function groupAsrWords(text: string, asr: { text: string; start: number; end: number }[]): FxWord[] {
   const flat = asr.filter((w) => w.text.trim() && Number.isFinite(w.start) && Number.isFinite(w.end) && w.end > w.start)
     .map((w) => ({ ...w, text: w.text.trim() }));
   const toks = segmentTokens(text);
   if (!flat.length || !toks.length) return flat;
   if (alignmentText(text) !== flat.map((w) => alignmentText(w.text)).join('')) return alignByCharacters(toks, flat) ?? flat;
+  const tokenCounts = toks.map((tok) => alignmentText(tok).length);
+  const spans = agreedWordSpans(flat.map((w) => alignmentText(w.text).length), tokenCounts);
+  if (!spans) return flat;
+  // Each span's text is the sentence's own tokens over the same characters.
   const out: FxWord[] = [];
-  let i = 0;
-  for (const tk of toks) {
-    const want = alignmentText(tk);
-    if (!want) { if (out.length) out[out.length - 1]!.text += tk; continue; }
-    const first = i;
-    let got = '';
-    while (i < flat.length && got.length < want.length) {
-      got += alignmentText(flat[i++]!.text);
-      if (!want.startsWith(got)) return flat;
+  let token = 0;
+  let counted = 0;
+  for (const [from, to] of spans) {
+    const want = flat.slice(from, to).reduce((total, w) => total + alignmentText(w.text).length, 0);
+    const parts: string[] = [];
+    let got = 0;
+    while (token < toks.length && (got < want || (!tokenCounts[token] && parts.length))) {
+      got += tokenCounts[token]!;
+      parts.push(toks[token++]!);
     }
-    if (got !== want || first === i) return flat;
-    while (i < flat.length && !alignmentText(flat[i]!.text)) i++;
-    out.push({ text: tk, start: flat[first]!.start, end: flat[i - 1]!.end });
+    counted += got;
+    if (!parts.length) { if (out.length) out[out.length - 1]!.end = flat[to - 1]!.end; continue; }
+    out.push({ text: joinWords(parts), start: flat[from]!.start, end: flat[to - 1]!.end });
   }
-  return i === flat.length ? out : flat;
+  while (token < toks.length && out.length) out[out.length - 1]!.text += toks[token++]!;
+  return counted === tokenCounts.reduce((total, count) => total + count, 0) ? out : flat;
 }
 
 function round3(x: number): number {
