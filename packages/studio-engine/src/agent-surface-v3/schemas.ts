@@ -189,7 +189,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   manage_project: {
     description:
-      'Choose what you are editing. scope=project: list, switch, create or rename cloud projects (the newest-touched project is active). scope=output (default): list, create an empty deliverable, duplicate one (the versioning primitive: copy, then edit the copy), switch, rename or delete inside the active project. Switching returns the new get_state; clip and track ids are output-local, so never carry ids across a switch. Works without an open Studio tab.',
+      'Choose what you are editing. scope=project: list, switch, create or rename cloud projects (the newest-touched project is active). scope=output (default): list, create an empty deliverable, duplicate one (the versioning primitive: copy, then edit the copy), switch, rename or delete inside the active project. Switching returns the new get_state; clip and track ids are output-local, so never carry ids across a switch. Project actions and listing outputs work without an open Studio tab; creating, duplicating, switching, renaming or deleting an output needs one (create_browser_handoff opens it).',
     inputSchema: obj({
       scope: enumOf(['project', 'output']),
       action: enumOf(['list', 'create', 'duplicate', 'switch', 'rename', 'delete']),
@@ -231,7 +231,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   import_media: {
     description:
-      'Bring LOCAL files into the open Studio tab. Call with no arguments to receive a short-lived import token and the exact base_url, then run the bundled import helper with them and the file paths; bytes stream into the tab and stay device-local. The helper returns registrations — place them with add_clips. Never replace this with a cloud upload. The sig/filename fields are the helper’s registration call, not yours.',
+      'Bring LOCAL files into the project. Call with no arguments to receive a short-lived import token and the exact base_url, then run the bundled import helper with them and the file paths; it uploads each file to the user’s Pireel cloud media library (instant when the same bytes are already there) and registers it in the project — no Studio tab needed. The helper returns registrations — place them with add_clips. Never upload the files any other way. The sig/filename fields are the helper’s registration call, not yours.',
     inputSchema: obj({
       sig: str('Helper only: content signature of already-staged bytes.'),
       filename: str('Helper only.'),
