@@ -28,6 +28,10 @@ export interface DocumentWordQuery {
   limit?: number;
   /** Also list words that no clip plays any more, marked cut. */
   includeCut?: boolean;
+  /** Keep only the words this accepts, before paging (e.g. where they play on the timeline). */
+  where?: (word: DocumentAddressedWord) => boolean;
+  /** List in this order instead of the source's, before paging (e.g. timeline order). */
+  orderBy?: (word: DocumentAddressedWord) => number;
 }
 
 /** Whether a transcript carries measured word timing ('measured'), only sentence timing so its
@@ -156,9 +160,14 @@ export function listDocumentAddressedWords(
   const plays = (word: DocumentAddressedWord) => ranges.some((range) => word.end > range.start + 0.03 && word.start < range.end - 0.03);
   const matching = assetWords(assetId, segments).flatMap((word): DocumentAddressedWord[] => {
     if ((sentenceSet && !sentenceSet.has(word.sentenceIndex)) || word.end <= from || word.start >= to) return [];
+    if (query.where && !query.where(word)) return [];
     if (plays(word)) return [word];
     return query.includeCut ? [{ ...word, cut: true }] : [];
   });
+  if (query.orderBy) {
+    const key = new Map(matching.map((word) => [word, query.orderBy!(word)]));
+    matching.sort((left, right) => key.get(left)! - key.get(right)!);
+  }
   const offset = Number.isInteger(query.offset) ? Math.max(0, query.offset!) : 0;
   const limit = Number.isInteger(query.limit) ? Math.max(1, Math.min(1000, query.limit!)) : 300;
   const words = matching.slice(offset, offset + limit);

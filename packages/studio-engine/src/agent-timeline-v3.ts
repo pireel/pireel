@@ -1357,20 +1357,6 @@ export function getTranscriptV3(document: EditorDocumentV2, input: Input): Agent
     if (!Object.values(document.semantics.transcripts).some((segments) => segments.length)) return fail('no transcript stored yet — call get_transcript (segments) first so the source is transcribed');
     if (input.fromFrame !== undefined && !isFrame(input.fromFrame)) return fail('fromFrame must be an integer frame ≥ 0');
     if (input.toFrame !== undefined && !isFrame(input.toFrame)) return fail('toFrame must be an integer frame ≥ 0');
-    const query = {
-      ...(string(input.clipId) ? { shotId: string(input.clipId) } : {}),
-      ...(string(input.assetId) ? { assetId: string(input.assetId) } : {}),
-      ...(string(input.trackId) ? { trackId: string(input.trackId) } : {}),
-      ...(Array.isArray(input.segmentIndexes) ? { sentenceIndexes: input.segmentIndexes.map(Number).filter(Number.isInteger) } : {}),
-      ...(isFrame(input.fromFrame) ? { fromSec: framesToSec(input.fromFrame, fps) } : {}),
-      ...(isFrame(input.toFrame) ? { toSec: framesToSec(input.toFrame, fps) } : {}),
-      ...(Number.isInteger(input.offset) ? { offset: input.offset as number } : {}),
-      ...(Number.isInteger(input.limit) ? { limit: input.limit as number } : {}),
-      // Rows asked for by index list their cut words too, so a wrongly cut passage restores by words.
-      ...(Array.isArray(input.segmentIndexes) ? { includeCut: true } : {}),
-    };
-    const found = listDocumentAddressedWords(document, query);
-    if ('error' in found) return fail(found.error);
     // Where each word plays now, in timeline frames, so placements never derive frames from source
     // seconds. The story spine first; a word playing nowhere has no frames.
     const playing = document.timeline.tracks
@@ -1391,6 +1377,27 @@ export function getTranscriptV3(document: EditorDocumentV2, input: Input): Agent
       const missing = [[start, from], [to, end]].some(([a, b]) => b! - a! > 0.05 && !overlapping.some((other) => other.sourceInSec <= a! + 0.01 && other.sourceOutSec >= b! - 0.01));
       return { frames: [Math.round(c.startFrame + (from - c.sourceInSec) * scale), Math.round(c.startFrame + (to - c.sourceInSec) * scale)], clipped: missing };
     };
+    const fromFrame = isFrame(input.fromFrame) ? input.fromFrame as number : 0;
+    const toFrame = isFrame(input.toFrame) ? input.toFrame as number : Number.POSITIVE_INFINITY;
+    const windowed = isFrame(input.fromFrame) || isFrame(input.toFrame);
+    const query = {
+      ...(string(input.clipId) ? { shotId: string(input.clipId) } : {}),
+      ...(string(input.assetId) ? { assetId: string(input.assetId) } : {}),
+      ...(string(input.trackId) ? { trackId: string(input.trackId) } : {}),
+      ...(Array.isArray(input.segmentIndexes) ? { sentenceIndexes: input.segmentIndexes.map(Number).filter(Number.isInteger) } : {}),
+      // The window is in timeline frames: a word is in it where it plays now, not where it sits in
+      // the source (which no longer lines up once the timeline is cut or reordered).
+      ...(windowed ? { where: (word: { assetId: string; start: number; end: number }) => {
+        const placed = framesOf(word.assetId, word.start, word.end);
+        return !!placed && placed.frames[1] > fromFrame && placed.frames[0] < toFrame;
+      }, orderBy: (word: { assetId: string; start: number; end: number }) => framesOf(word.assetId, word.start, word.end)?.frames[0] ?? 0 } : {}),
+      ...(Number.isInteger(input.offset) ? { offset: input.offset as number } : {}),
+      ...(Number.isInteger(input.limit) ? { limit: input.limit as number } : {}),
+      // Rows asked for by index list their cut words too, so a wrongly cut passage restores by words.
+      ...(Array.isArray(input.segmentIndexes) ? { includeCut: true } : {}),
+    };
+    const found = listDocumentAddressedWords(document, query);
+    if ('error' in found) return fail(found.error);
     // Key words read back in set_captions.highlights vocabulary: "style" or the fixed #RRGGBB.
     // A word carries what the model edits with: its id, its text, where it plays (frames) and its
     // row address; the source asset is named once for the list, and source seconds stay out (every

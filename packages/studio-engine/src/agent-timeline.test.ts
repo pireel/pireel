@@ -1126,6 +1126,30 @@ describe('remove_clips and swap_clip_media (v3)', () => {
     expect(cues.map((cue) => cue.startFrame)).toEqual([0, 90, 123]);
   });
 
+  it('a words window in frames finds the words playing there, after cuts and reordering', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', { assets: [{ id: 'v', kind: 'video', url: 'https://cdn.example/v.mp4', durationSec: 30 }] }).document!;
+    // The timeline plays source 10–12s first, then 0–2s; source 2–10s is cut.
+    document = runAgentTimelineTool(document, 'add_clips', { clips: [
+      { id: 'late', role: 'primary', assetId: 'v', startFrame: 0, source: [10, 12] },
+      { id: 'early', role: 'primary', assetId: 'v', startFrame: 60, source: [0, 2] },
+    ] }).document!;
+    document = { ...document, semantics: { ...document.semantics, transcripts: { ...document.semantics.transcripts, v: [
+      { start: 0, end: 1.5, text: 'alpha beta', words: [{ text: 'alpha', start: 0.2, end: 0.6 }, { text: 'beta', start: 0.8, end: 1.2 }] },
+      { start: 2.5, end: 3, text: 'gone', words: [{ text: 'gone', start: 2.5, end: 2.9 }] },
+      { start: 10.2, end: 11, text: 'gamma', words: [{ text: 'gamma', start: 10.3, end: 10.8 }] },
+    ] } } };
+    const read = (input: Record<string, unknown>) => {
+      const out = runAgentTimelineTool(document, 'get_transcript', { granularity: 'words', ...input });
+      expect(out.ok, JSON.stringify(out)).toBe(true);
+      return (out.data as { words: Array<{ text: string; startFrame: number }> }).words;
+    };
+    expect(read({ fromFrame: 60, toFrame: 120 }).map((word) => word.text)).toEqual(['alpha', 'beta']);
+    expect(read({ fromFrame: 0, toFrame: 60 }).map((word) => word.text)).toEqual(['gamma']);
+    // A window over the whole timeline lists the words in the order they play.
+    expect(read({ fromFrame: 0, toFrame: 120 }).map((word) => [word.text, word.startFrame])).toEqual([['gamma', 9], ['alpha', 66], ['beta', 84]]);
+  });
+
   it('swap_clip_media keeps the slot and refuses unknown or incompatible assets', () => {
     const document = project();
     const swapped = runAgentTimelineTool(document, 'swap_clip_media', { clipId: 's2', assetId: 'v2' });
