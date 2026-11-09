@@ -13,6 +13,14 @@ export type AssetSearchScope = 'all' | 'mine' | 'cloud' | 'official';
 export type AssetSearchKind = 'all' | 'image' | 'video' | 'audio' | 'element';
 export type AssetDocumentScope = Exclude<AssetSearchScope, 'all'>;
 export type AssetDocumentKind = Exclude<AssetSearchKind, 'all'>;
+/** What a search narrows to: a kind, or the official stickers (images whose origin is a sticker). */
+export type AssetSearchFilter = AssetSearchKind | 'sticker';
+export function assetSearchFilter(raw: unknown): AssetSearchFilter {
+  return raw === 'image' || raw === 'video' || raw === 'audio' || raw === 'element' || raw === 'sticker' ? raw : 'all';
+}
+export function matchesAssetFilter(document: Pick<AssetSearchDocument, 'kind' | 'origin'>, filter: AssetSearchFilter): boolean {
+  return filter === 'all' || (filter === 'sticker' ? document.origin === 'sticker' : document.kind === filter);
+}
 
 export interface AssetSearchDocument {
   assetId: string;
@@ -53,7 +61,7 @@ export interface AssetSearchDocument {
 export interface AssetSearchQuery {
   query: string;
   scope?: AssetSearchScope;
-  kind?: AssetSearchKind;
+  kind?: AssetSearchFilter;
   limit?: number;
 }
 
@@ -66,7 +74,7 @@ export interface AssetSearchResponse {
   indexVersion: number;
   query: string;
   scope: AssetSearchScope;
-  kind: AssetSearchKind;
+  kind: AssetSearchFilter;
   results: AssetSearchResult[];
   coverage: {
     total: number;
@@ -292,13 +300,13 @@ export function searchAssetLibrary(
   const query = typeof input.query === 'string' ? input.query.trim().slice(0, 200) : '';
   if (!query) return { error: 'query required' };
   const scope: AssetSearchScope = input.scope === 'mine' || input.scope === 'cloud' || input.scope === 'official' ? input.scope : 'all';
-  const kind: AssetSearchKind = input.kind === 'image' || input.kind === 'video' || input.kind === 'audio' || input.kind === 'element' ? input.kind : 'all';
+  const kind = assetSearchFilter(input.kind);
   const limit = Math.min(Math.max(Math.round(Number(input.limit) || 12), 1), 30);
   const queryNorm = normalize(query);
   const queryCompact = compact(query);
   const queryTerms = terms(query);
 
-  const filtered = documents.filter((doc) => (scope === 'all' || doc.scope === scope) && (kind === 'all' || doc.kind === kind));
+  const filtered = documents.filter((doc) => (scope === 'all' || doc.scope === scope) && matchesAssetFilter(doc, kind));
   const results = filtered
     .map((doc): AssetSearchResult | null => {
       const matchedFields: string[] = [];

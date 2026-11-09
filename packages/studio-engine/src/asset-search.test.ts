@@ -95,3 +95,14 @@ describe('sound effects pack', () => {
     }
   });
 });
+
+describe('the sticker filter', () => {
+  it('narrows to official stickers, not every image, and says so', () => {
+    const sticker: AssetSearchDocument = { assetId: 'sticker:heart', scope: 'official', kind: 'image', origin: 'sticker', label: '爱心 heart', createdAt: 0, locator: { url: 'https://cdn.example/heart.png' } };
+    const photo: AssetSearchDocument = { assetId: 'up_heart', scope: 'cloud', kind: 'image', origin: 'upload', label: 'heart shaped cake', createdAt: 1, locator: { url: 'https://cdn.example/cake.png' } };
+    const result = searchAssetLibrary([sticker, photo], { query: 'heart', kind: 'sticker' });
+    if ('error' in result) throw new Error(result.error);
+    expect(result.kind).toBe('sticker');
+    expect(result.results.map((entry) => entry.assetId)).toEqual(['sticker:heart']);
+  });
+});
