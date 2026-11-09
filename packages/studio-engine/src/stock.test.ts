@@ -7,15 +7,17 @@ afterEach(() => {
 });
 
 describe('stock 归一(Pexels)', () => {
-  it('图:large2x 做正片、medium 做缩略', () => {
+  it('图:原图缩到长边 2560 做正片(报实际尺寸)、medium 做缩略;没原图用 large2x', () => {
     const it_ = normalizePexelsPhoto({
       id: 1,
       width: 4000,
       height: 6000,
       photographer: 'Ann',
-      src: { large2x: 'https://x/2x.jpg', medium: 'https://x/m.jpg' },
+      src: { original: 'https://x/o.jpg', large2x: 'https://x/2x.jpg', medium: 'https://x/m.jpg' },
     })!;
-    expect(it_).toMatchObject({ id: 'px_1', type: 'image', url: 'https://x/2x.jpg', thumb: 'https://x/m.jpg', author: 'Ann', provider: 'pexels' });
+    expect(it_).toMatchObject({ id: 'px_1', type: 'image', thumb: 'https://x/m.jpg', author: 'Ann', provider: 'pexels', width: 1707, height: 2560 });
+    expect(new URL(it_.url).searchParams.get('h')).toBe('2560');
+    expect(normalizePexelsPhoto({ id: 11, width: 4000, height: 6000, src: { large2x: 'https://x/2x.jpg', medium: 'https://x/m.jpg' } })!.url).toBe('https://x/2x.jpg');
     expect(it_).toMatchObject({
       sourceUrl: 'https://www.pexels.com/photo/1/',
       license: { name: 'Pexels License', url: 'https://www.pexels.com/license/' },
@@ -24,7 +26,7 @@ describe('stock 归一(Pexels)', () => {
   it('图:缺可用尺寸 → null', () => {
     expect(normalizePexelsPhoto({ id: 2, width: 0, height: 0, src: {} })).toBeNull();
   });
-  it('视频:挑「高度 ≥720 里最小」的 mp4,不拉 4K', () => {
+  it('视频:挑「短边 ≥1080 里最小」的 mp4,不拉 4K', () => {
     const v = normalizePexelsVideo({
       id: 3,
       width: 3840,
@@ -39,10 +41,24 @@ describe('stock 归一(Pexels)', () => {
         { link: 'https://x/240.mp4', file_type: 'video/mp4', height: 240, width: 426 },
       ],
     })!;
-    expect(v.url).toBe('https://x/720.mp4');
+    expect(v.url).toBe('https://x/1080.mp4');
     expect(v.durationSec).toBe(12);
     expect(v.type).toBe('video');
     expect(v.sourceUrl).toBe('https://www.pexels.com/video/3/');
+  });
+  it('视频:竖版按短边挑,不会拿 540 宽的版本', () => {
+    const v = normalizePexelsVideo({
+      id: 6,
+      width: 2160,
+      height: 3840,
+      image: 'https://x/p.jpg',
+      video_files: [
+        { link: 'https://x/540x960.mp4', file_type: 'video/mp4', width: 540, height: 960 },
+        { link: 'https://x/1080x1920.mp4', file_type: 'video/mp4', width: 1080, height: 1920 },
+        { link: 'https://x/2160x3840.mp4', file_type: 'video/mp4', width: 2160, height: 3840 },
+      ],
+    })!;
+    expect(v).toMatchObject({ url: 'https://x/1080x1920.mp4', width: 1080, height: 1920 });
   });
   it('视频:全低清 → 取最大档;没 poster → null', () => {
     const v = normalizePexelsVideo({
@@ -73,14 +89,15 @@ describe('stock 归一(Pixabay)', () => {
     const it_ = normalizePixabayPhoto({ id: 10, webformatURL: 'https://p/s.png', user: 'Eve' }, 'sticker')!;
     expect(it_).toMatchObject({ id: 'pb_10', type: 'sticker', url: 'https://p/s.png' });
   });
-  it('视频:medium 优先,缺 thumbnail 用 tiny 的;都没有 → null', () => {
+  it('视频:短边够 1080 的最小档,没有就取最大档;缺 thumbnail 用 tiny 的;都没有 → null', () => {
     const v = normalizePixabayVideo({
       id: 8,
       duration: 30,
       user: 'Dee',
-      videos: { medium: { url: 'https://p/m.mp4', width: 1280, height: 720 }, tiny: { thumbnail: 'https://p/t.jpg' } },
+      videos: { medium: { url: 'https://p/m.mp4', width: 1280, height: 720 }, large: { url: 'https://p/l.mp4', width: 1920, height: 1080 }, tiny: { thumbnail: 'https://p/t.jpg' } },
     })!;
-    expect(v).toMatchObject({ id: 'pb_8', url: 'https://p/m.mp4', thumb: 'https://p/t.jpg', durationSec: 30 });
+    expect(v).toMatchObject({ id: 'pb_8', url: 'https://p/l.mp4', thumb: 'https://p/t.jpg', durationSec: 30 });
+    expect(normalizePixabayVideo({ id: 12, videos: { medium: { url: 'https://p/m.mp4', width: 1280, height: 720 }, tiny: { thumbnail: 'https://p/t.jpg' } } })!.url).toBe('https://p/m.mp4');
     expect(normalizePixabayVideo({ id: 9, videos: { medium: { url: 'https://p/m.mp4' } } })).toBeNull();
   });
 });
@@ -180,4 +197,13 @@ describe('stock 在线搜索', () => {
     expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   } finally { vi.unstubAllGlobals(); vi.unstubAllEnvs(); }
+});
+
+describe('stock results carry what the provider says they show', () => {
+  it('names a result from its alt text, page slug, tags or file title', () => {
+    expect(normalizePexelsPhoto({ id: 1, width: 10, height: 10, alt: 'Miners panning for gold in a river', src: { large2x: 'https://x/2x.jpg' } })!.title).toBe('Miners panning for gold in a river');
+    expect(normalizePexelsVideo({ id: 857195, width: 1920, height: 1080, url: 'https://www.pexels.com/video/a-man-walking-on-the-beach-857195/', image: 'https://x/p.jpg', video_files: [{ link: 'https://x/a.mp4', file_type: 'video/mp4', height: 1080, width: 1920 }] })!.title).toBe('a man walking on the beach');
+    expect(normalizePixabayPhoto({ id: 7, tags: 'gold, river, panning', largeImageURL: 'https://p/l.jpg' })!.title).toBe('gold, river, panning');
+    expect(normalizePexelsPhoto({ id: 2, width: 10, height: 10, src: { large2x: 'https://x/2x.jpg' } })!.title).toBeUndefined();
+  });
 });

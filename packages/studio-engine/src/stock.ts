@@ -43,6 +43,9 @@ export interface StockItem {
   /** Ready-to-display credit for search/import receipts. */
   credit: string;
   byteSize?: number;
+  /** What the provider says the picture shows (its alt text, tags or file title): the asset's name in
+   *  a library, where the words it was searched with would misdescribe it. */
+  title?: string;
 }
 
 export interface StockPage {
@@ -63,6 +66,7 @@ interface PexelsPhoto {
   url?: string;
   photographer?: string;
   photographer_url?: string;
+  alt?: string;
   src?: { original?: string; large2x?: string; large?: string; medium?: string };
 }
 interface PexelsVideoFile {
@@ -92,8 +96,35 @@ const PIXABAY_LICENSE: StockLicense = {
   url: 'https://pixabay.com/service/license-summary/',
 };
 
+/** A provider's own words for what a picture shows, trimmed to a library name; undefined when none. */
+function titleOf(text: string | undefined): string | undefined {
+  const clean = (text ?? '').replace(/\s+/g, ' ').trim().slice(0, 100);
+  return clean || undefined;
+}
+/** Pexels video pages are named for their content: /video/a-man-walking-on-the-beach-857195/. */
+const pexelsVideoTitle = (url: string | undefined) => titleOf(url?.match(/\/video\/([a-z0-9-]+?)-\d+\/?$/i)?.[1]?.replace(/-/g, ' '));
+
+/** Longest side a stock picture is fetched at: full quality for a 4K frame, never the camera original. */
+const STOCK_IMAGE_MAX_SIDE = 2560;
+
+/** The variant that fills a 1080 frame either way up: the smallest whose short side reaches 1080
+ *  (height alone picked 540-wide files for vertical video), else the largest there is. */
+function variantForFrame<T extends { width?: number; height?: number }>(variants: readonly T[]): T | undefined {
+  const short = (v: T) => (v.width && v.height ? Math.min(v.width, v.height) : v.height ?? v.width ?? 0);
+  const enough = variants.filter((v) => short(v) >= 1080).sort((a, b) => short(a) - short(b));
+  return enough[0] ?? [...variants].sort((a, b) => short(b) - short(a))[0];
+}
+
 export function normalizePexelsPhoto(p: PexelsPhoto): StockItem | null {
-  const url = p.src?.large2x ?? p.src?.original ?? p.src?.large;
+  // The original, scaled down by the Pexels CDN to STOCK_IMAGE_MAX_SIDE: large2x stops at 1300 px tall,
+  // so a portrait photo came back at 866x1300 while the result reported its full size.
+  const scale = p.width > 0 && p.height > 0 ? Math.min(1, STOCK_IMAGE_MAX_SIDE / Math.max(p.width, p.height)) : 1;
+  const original = p.src?.original ? (() => {
+    const sized = new URL(p.src.original);
+    sized.search = new URLSearchParams({ auto: 'compress', cs: 'tinysrgb', fit: 'max', w: String(STOCK_IMAGE_MAX_SIDE), h: String(STOCK_IMAGE_MAX_SIDE) }).toString();
+    return sized.toString();
+  })() : undefined;
+  const url = original ?? p.src?.large2x ?? p.src?.large;
   const thumb = p.src?.medium ?? p.src?.large ?? url;
   if (!url || !thumb) return null;
   const author = p.photographer ?? '';
@@ -102,22 +133,22 @@ export function normalizePexelsPhoto(p: PexelsPhoto): StockItem | null {
     type: 'image',
     thumb,
     url,
-    width: p.width,
-    height: p.height,
+    width: original ? Math.round(p.width * scale) : p.width,
+    height: original ? Math.round(p.height * scale) : p.height,
     author,
     provider: 'pexels',
     sourceUrl: p.url ?? `https://www.pexels.com/photo/${p.id}/`,
     license: PEXELS_LICENSE,
     credit: author ? `Photo by ${author} on Pexels` : 'Photo from Pexels',
+    ...(titleOf(p.alt) ? { title: titleOf(p.alt) } : {}),
   };
 }
 
-/** Video variant pick: prefer the smallest mp4 with height ≥720 (enough for a 1080 vertical PiP, don't waste bandwidth on 4K); fall back to the largest. */
+/** Video variant pick: enough for a full 1080 frame either way up, not 4K (variantForFrame). */
 export function normalizePexelsVideo(v: PexelsVideo): StockItem | null {
   const mp4s = (v.video_files ?? []).filter((f) => f.link && (f.file_type ?? '').includes('mp4') && f.height);
   if (!mp4s.length || !v.image) return null;
-  const good = mp4s.filter((f) => (f.height ?? 0) >= 720).sort((a, b) => (a.height ?? 0) - (b.height ?? 0));
-  const pick = good[0] ?? mp4s.sort((a, b) => (b.height ?? 0) - (a.height ?? 0))[0]!;
+  const pick = variantForFrame(mp4s)!;
   return {
     id: `px_${v.id}`,
     type: 'video',
@@ -131,6 +162,7 @@ export function normalizePexelsVideo(v: PexelsVideo): StockItem | null {
     sourceUrl: v.url ?? `https://www.pexels.com/video/${v.id}/`,
     license: PEXELS_LICENSE,
     credit: v.user?.name ? `Video by ${v.user.name} on Pexels` : 'Video from Pexels',
+    ...(pexelsVideoTitle(v.url) ? { title: pexelsVideoTitle(v.url) } : {}),
   };
 }
 
@@ -199,12 +231,13 @@ export function normalizePixabayPhoto(p: PixabayPhoto, type: 'image' | 'sticker'
     sourceUrl: p.pageURL ?? `https://pixabay.com/images/id-${p.id}/`,
     license: PIXABAY_LICENSE,
     credit: author ? `${type === 'sticker' ? 'Graphic' : 'Image'} by ${author} on Pixabay` : `${type === 'sticker' ? 'Graphic' : 'Image'} from Pixabay`,
+    ...(titleOf(p.tags) ? { title: titleOf(p.tags) } : {}),
   };
 }
 
 export function normalizePixabayVideo(v: PixabayVideo): StockItem | null {
-  // medium (≈720-1080) is enough; else step up to large, then down to small
-  const pick = v.videos?.medium ?? v.videos?.large ?? v.videos?.small;
+  const variants = [v.videos?.small, v.videos?.medium, v.videos?.large].filter((variant): variant is PixabayVideoVariant => !!variant?.url);
+  const pick = variantForFrame(variants);
   const thumb = pick?.thumbnail ?? v.videos?.tiny?.thumbnail;
   if (!pick?.url || !thumb) return null;
   return {
@@ -220,6 +253,7 @@ export function normalizePixabayVideo(v: PixabayVideo): StockItem | null {
     sourceUrl: v.pageURL ?? `https://pixabay.com/videos/id-${v.id}/`,
     license: PIXABAY_LICENSE,
     credit: v.user ? `Video by ${v.user} on Pixabay` : 'Video from Pixabay',
+    ...(titleOf(v.tags) ? { title: titleOf(v.tags) } : {}),
   };
 }
 
@@ -273,6 +307,11 @@ const commonsLicenseAllowed = (name: string): boolean => {
   return value.includes('public domain') || value.includes('cc0') || value.startsWith('cc by');
 };
 
+/** A Commons file's own name: its object name, else the file title without "File:" and extension. */
+function wikimediaTitle(page: WikimediaPage, metadata: Record<string, { value?: string } | undefined>): string | undefined {
+  return titleOf(stripHtml(metadata.ObjectName?.value)) ?? titleOf(page.title?.replace(/^File:/i, '').replace(/\.[a-z0-9]{2,5}$/i, '').replace(/_/g, ' '));
+}
+
 export function normalizeWikimediaPage(page: WikimediaPage, requestedKind: StockKind): StockItem | null {
   const info = page.imageinfo?.[0];
   if (!page.pageid || !info?.url || !info.width || !info.height) return null;
@@ -304,6 +343,7 @@ export function normalizeWikimediaPage(page: WikimediaPage, requestedKind: Stock
     sourceUrl: info.descriptionurl ?? `https://commons.wikimedia.org/?curid=${page.pageid}`,
     license: { name: licenseName, url: licenseUrl },
     credit: author ? `${mediaLabel} by ${author} on Wikimedia Commons` : `${mediaLabel} from Wikimedia Commons`,
+    ...(wikimediaTitle(page, metadata) ? { title: wikimediaTitle(page, metadata) } : {}),
   };
 }
 
