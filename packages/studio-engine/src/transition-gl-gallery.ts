@@ -709,7 +709,7 @@ vec4 bgColor (vec2 p, vec2 pfr, vec2 pto) {
 
 // p : the position
 // persp : the perspective in [ 0, 1 ]
-// center : the xcenter in [0, 1] \ 0.5 excluded
+// center : the xcenter in [0, 1], 0.5 excluded
 vec2 xskew (vec2 p, float persp, float center) {
   float x = mix(p.x, 1.0-p.x, center);
   return (

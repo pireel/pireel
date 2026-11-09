@@ -51,7 +51,7 @@ function distribute(text: string, weights: readonly number[]): string[] | null {
 /** Characters a caption shows: CJK one by one, a Latin word or number whole, each with the
  *  punctuation after it (so a mark at a cut stays with the words before it). */
 function units(text: string): string[] {
-  return text.match(/(?:[\p{Script=Latin}\p{N}'’.\-]+|[^\s\p{P}])\p{P}*|\p{P}+/gu) ?? [];
+  return text.match(/(?:[\p{Script=Latin}\p{N}'’.-]+|[^\s\p{P}])\p{P}*|\p{P}+/gu) ?? [];
 }
 const visibleLength = (text: string) => text.replace(/\s+/g, '').length;
 
