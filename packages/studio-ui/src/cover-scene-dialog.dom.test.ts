@@ -42,7 +42,7 @@ describe('independent cover scene interaction', () => {
     expect(document.body.textContent).not.toContain('封面标题');
     expect(document.querySelector('input[type=checkbox]')).toBeNull();
     expect(generate).not.toHaveBeenCalled();
-    const button = [...document.querySelectorAll('[role=dialog] button')].find(button => button.textContent === '生成封面') as HTMLButtonElement;
+    const button = [...document.querySelectorAll('[role=dialog] button')].find(button => button.textContent?.startsWith('生成封面')) as HTMLButtonElement;
     await act(async () => button.click());
     expect(generate).toHaveBeenCalledWith(expect.objectContaining({ prompt: scene.prompt, sourceFrame: scene.sourceFrame }));
   });
@@ -54,7 +54,7 @@ describe('independent cover scene interaction', () => {
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 125)); });
     expect(save).toHaveBeenLastCalledWith({ sourceFrame: { assetId: 'speaker', sourceSec: 5, timelineSec: 3 } });
     expect(inputs.onPreviewFrame).toHaveBeenLastCalledWith({ assetId: 'speaker', sourceSec: 5 });
-    const button = [...document.querySelectorAll('[role=dialog] button')].find(button => button.textContent === '生成封面') as HTMLButtonElement;
+    const button = [...document.querySelectorAll('[role=dialog] button')].find(button => button.textContent?.startsWith('生成封面')) as HTMLButtonElement;
     await act(async () => button.click());
     expect(generate).toHaveBeenCalledWith(expect.objectContaining({ sourceFrame: { assetId: 'speaker', sourceSec: 5, timelineSec: 3 } }));
   });
