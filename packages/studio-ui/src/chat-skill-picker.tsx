@@ -64,18 +64,6 @@ function SkillGlyph({ id, compact = false }: { id: StudioScenarioSkillId; compac
           <circle cx="12" cy="18.5" r="1" stroke={accent} />
         </svg>
       );
-    case 'long-to-shorts':
-      return (
-        <svg {...common}>
-          <rect x="2.5" y="3" width="7" height="18" rx="1.8" />
-          <path d="m4.7 6.3 2.7 1.8-2.7 1.8zM4.5 13h3M4.5 16h2M9.5 12h3" />
-          <path d="M12.5 12c1.5 0 1.2-6.5 3.2-6.5H18M12.5 12H18M12.5 12c1.5 0 1.2 6.5 3.2 6.5H18" />
-          <rect x="18" y="3.5" width="3.5" height="4" rx="1" />
-          <rect x="18" y="10" width="3.5" height="4" rx="1" />
-          <rect x="18" y="16.5" width="3.5" height="4" rx="1" />
-          <circle cx="12.5" cy="12" r="1.15" stroke={accent} />
-        </svg>
-      );
     case 'montage-edit':
       return (
         <svg {...common}>
@@ -90,36 +78,6 @@ function SkillGlyph({ id, compact = false }: { id: StudioScenarioSkillId; compac
           <circle cx="12" cy="11.5" r="1" stroke={accent} />
         </svg>
       );
-    case 'batch-remix':
-      return (
-        <svg {...common}>
-          <rect x="2.5" y="8.5" width="6" height="7" rx="1.5" />
-          <path d="m4.8 10.6 2.2 1.4-2.2 1.4zM8.5 12h3" />
-          <path d="M11.5 12c2 0 1.2-6.5 4-6.5H17M11.5 12H17M11.5 12c2 0 1.2 6.5 4 6.5H17" />
-          <rect x="17" y="3.5" width="5" height="4" rx="1" />
-          <rect x="17.5" y="9.5" width="4.5" height="5" rx="1" />
-          <rect x="18" y="16" width="3.5" height="5" rx="1" />
-          <circle cx="11.5" cy="12" r="1.2" stroke={accent} />
-        </svg>
-      );
-    case 'commerce-video':
-      return (
-        <svg {...common}>
-          <path d="M4.5 6h5v14h-5zM5.5 3.5h3V6M6 10h2v4H6z" />
-          <path d="M10.5 12h4M13 10l2 2-2 2" />
-          <path d="M15.5 9.5h6l-1 5h-4zM16.5 17.5h.1M20 17.5h.1" />
-          <path d="M17 7.5 16.2 6M19 7V5M21 7.5 21.8 6" stroke={accent} strokeWidth="2" />
-        </svg>
-      );
-    case 'product-demo':
-      return (
-        <svg {...common}>
-          <rect x="2.5" y="3" width="19" height="18" rx="2" />
-          <path d="M2.5 7h19M5 5h.1M7 5h.1M9 5h.1M11 9v10" />
-          <path d="M5 11h3.5v6H5zM6 9.5h1.5V11M13.5 10h5M13.5 13h4M13.5 16h2.5" />
-          <path d="m18.2 15.2 2.8 1.6-1.7.5-.7 1.6z" stroke={accent} strokeWidth="1.9" />
-        </svg>
-      );
     case 'short-video-ad-remix':
       return (
         <svg {...common}>
@@ -129,15 +87,6 @@ function SkillGlyph({ id, compact = false }: { id: StudioScenarioSkillId; compac
           <path d="m10.6 10.3 2.8 2.4M13.4 10.3l-2.8 2.4" />
           <path d="M14.5 11.5c1.5 0 .9-6 3.1-6H19M14.5 11.5H19M14.5 11.5c1.5 0 .9 6 3.1 6H19" strokeDasharray="1.3 1.7" />
           <path d="m19.5 4 1 1.5L22 6l-1.5.5-1 1.5-1-1.5L17 6l1.5-.5zM18 11.5c1.2-1.2 2.4-1.2 3.5 0M18 17.5c1.1-1.5 2.3-1.5 3.5 0" />
-        </svg>
-      );
-    case 'video-cover-design':
-      return (
-        <svg {...common}>
-          <rect x="4" y="2.5" width="16" height="19" rx="1.8" />
-          <path d="M6.5 7V5h2M15.5 5h2v2M6.5 17v2h2M15.5 19h2v-2" />
-          <circle cx="12" cy="8" r="2.2" stroke={accent} strokeWidth="1.9" />
-          <path d="m7 14 3-3 2.3 2.2 2.1-2 2.6 2.8M8 16.5h8M9.5 18.5h5" />
         </svg>
       );
     default:
