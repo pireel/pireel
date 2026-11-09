@@ -226,6 +226,15 @@ describe('shared agent timeline atoms', () => {
     }
   });
 
+  it('a graphic given a box by hand stays where it was put', () => {
+    const placed = runAgentTimelineTool(emptyEditorDocumentV2({ fps: 30 }), 'set_texts', { items: [{ id: 'g1', text: '标题', startFrame: 0, durationFrames: 60 }] }).document!;
+    const out = runAgentTimelineTool(placed, 'set_clip_properties', { items: [{ clipId: 'g1', box: { x: 0.1, y: 0.05, w: 0.8, h: 0.2 } }] });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    const clip = out.document!.timeline.tracks.flatMap((track) => track.clips).find((entry) => entry.id === 'g1') as { block: { box: unknown; autoFit?: false } };
+    expect(clip.block.box).toEqual({ x: 0.1, y: 0.05, w: 0.8, h: 0.2 });
+    expect(clip.block.autoFit).toBe(false);
+  });
+
   it('creates a requested track once under that id, reuses it, and never overwrites a text already there', () => {
     const document = emptyEditorDocumentV2({ fps: 30 });
     const placed = runAgentTimelineTool(document, 'set_texts', { items: [

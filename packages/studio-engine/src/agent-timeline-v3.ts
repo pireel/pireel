@@ -567,8 +567,9 @@ export function setClipPropertiesV3(document: EditorDocumentV2, input: Input): A
       if (!mediaBox(item.box)) return fail(`items[${index}].box must be a positive normalized rect inside the canvas`);
       if (overlay) {
         // A box set by hand is the new layout: the piece lays out in it again, so the geometry an
-        // earlier fit wrote (its layout rect and scale) must not carry over and shrink it.
-        const edit = applyOverlayDocumentEdits({ document: next, updates: [{ clipId, block: { box: mediaBox(item.box)!, contentBox: undefined, scale: undefined, fitScale: undefined } }] });
+        // earlier fit wrote (its layout rect and scale) must not carry over and shrink it. It is also a
+        // deliberate placement, as place_graphics fit:false: the program no longer moves or scales it.
+        const edit = applyOverlayDocumentEdits({ document: next, updates: [{ clipId, block: { box: mediaBox(item.box)!, contentBox: undefined, scale: undefined, fitScale: undefined, autoFit: false } }] });
         if (!edit.ok) return fail(edit.error.message, { code: edit.error.code, trackIds: edit.error.trackIds });
         next = edit.document; receipts.push(...edit.receipts); changes += 1;
       } else common.box = item.box;
