@@ -4,6 +4,8 @@
 
 [English](README.md) · 简体中文
 
+https://github.com/user-attachments/assets/df0d4182-4d29-4eee-9722-d89280f3b622
+
 ## 运行示例应用
 
 ```bash

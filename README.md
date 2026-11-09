@@ -4,6 +4,8 @@ An embeddable video editor preserving the original Pireel workbench: canvas, tim
 
 English · [简体中文](README.zh-CN.md)
 
+https://github.com/user-attachments/assets/33e01643-d849-41a1-a6e0-d28180bf1d30
+
 ## Run the example
 
 ```bash
