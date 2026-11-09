@@ -46,6 +46,25 @@ describe('NarrationRenderer', () => {
     expect(opens).toEqual(['a@0.95', 'a@1.15']);
   });
 
+  it('closes a reader it replaces or drops, so no decoded sample is left unclosed', async () => {
+    const closed: string[] = [];
+    let n = 0;
+    const open: OpenPcmReader = (key, from) => {
+      const name = `${key}#${n++}@${from.toFixed(2)}`;
+      return { read: async () => {}, close: () => { closed.push(name); } };
+    };
+    const renderer = new NarrationRenderer(open);
+    renderer.setSegments(jumpCut);
+    await renderer.render(0, MIX_RATE / 2);
+    await renderer.render(0.2, MIX_RATE / 2); // a seek: the first reader is replaced
+    expect(closed).toEqual(['a#0@0.95']);
+    renderer.setSegments([jumpCut[1]!]); // the first shot leaves the timeline
+    expect(closed).toEqual(['a#0@0.95', 'a#1@1.15']);
+    await renderer.render(2, MIX_RATE / 2);
+    renderer.dispose();
+    expect(closed).toHaveLength(3);
+  });
+
   it('applies shot gain and fades, silences masked words and lays a tone on beeped ones', async () => {
     const renderer = new NarrationRenderer(clockSource());
     renderer.setSegments([{ ...jumpCut[0]!, gain: 0.5, fadeAt: (local) => (local < 0.1 ? 0 : 1) }]);

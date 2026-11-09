@@ -34,6 +34,8 @@ export interface NarrationSeg {
 /** Sequential PCM over one source: `read` adds [srcT0, srcT0 + frames / MIX_RATE) into `out`. */
 export interface PcmReader {
   read(srcT0: number, frames: number, out: Float32Array, outOffset: number, gainAt: (k: number) => number, sourceRate?: number): Promise<void>;
+  /** Stop reading; the samples decoded ahead are closed. */
+  close?(): void;
 }
 
 /** Opens a reader over [from, to) source seconds of a source's narration sound; null = no sound. */
@@ -63,7 +65,7 @@ export class NarrationRenderer {
   setSegments(segs: readonly NarrationSeg[]): void {
     this.segs = [...segs];
     const live = new Set(this.segs.map(segSig));
-    for (const sig of this.readers.keys()) if (!live.has(sig)) this.readers.delete(sig);
+    for (const sig of this.readers.keys()) if (!live.has(sig)) this.dropReader(sig);
     for (const sig of this.stretched.keys()) if (!live.has(sig.slice(0, sig.lastIndexOf('#')))) this.stretched.delete(sig);
     this.rebuildTones();
   }
@@ -78,14 +80,25 @@ export class NarrationRenderer {
   /** The source's sound changed underneath (a dub mounted or removed): drop what was read from it. */
   resetSource(key: string, open?: OpenPcmReader): void {
     if (open) this.open = open;
-    for (const sig of this.readers.keys()) if (sig.startsWith(`${key}|`)) this.readers.delete(sig);
+    for (const sig of this.readers.keys()) if (sig.startsWith(`${key}|`)) this.dropReader(sig);
     for (const sig of this.stretched.keys()) if (sig.startsWith(`${key}|`)) this.stretched.delete(sig);
   }
 
   setOpener(open: OpenPcmReader): void {
     this.open = open;
-    this.readers.clear();
+    for (const sig of [...this.readers.keys()]) this.dropReader(sig);
     this.stretched.clear();
+  }
+
+  /** Close every reader (the renderer is going away). */
+  dispose(): void {
+    for (const sig of [...this.readers.keys()]) this.dropReader(sig);
+    this.stretched.clear();
+  }
+
+  private dropReader(sig: string): void {
+    this.readers.get(sig)?.reader?.close?.();
+    this.readers.delete(sig);
   }
 
   /** Beeped words on the narration become tones on the timeline (same mapping as the export). */
@@ -122,6 +135,7 @@ export class NarrationRenderer {
     const cur = this.readers.get(sig);
     // Forward continues the running decode; anything else (a seek, a re-render after an edit) restarts.
     if (cur && srcT >= cur.next - 0.5 / MIX_RATE && srcT < cur.next + 0.25) return cur.reader;
+    cur?.reader?.close?.();
     const reader = this.open(seg.key, Math.max(0, srcT - 0.05), seg.srcEnd + 0.1);
     this.readers.set(sig, { reader, next: srcT });
     return reader;

@@ -1801,6 +1801,7 @@ export class VideoTrackEngine {
     }
     this.audioClips.clear();
     this.narration?.player.stop();
+    this.narration?.renderer.dispose();
     this.narration = null;
     for (const entry of this.narrationTracks.values()) void entry.input?.dispose();
     this.narrationTracks.clear();

@@ -133,6 +133,15 @@ export class PcmStream {
     this.it = new AudioSampleSink(track).samples(from, to)[Symbol.asyncIterator]();
   }
 
+  /** Stop reading: the decoder closes the samples it decoded ahead. A reader dropped without this
+   *  leaves them for the garbage collector ("AudioSample was garbage collected without first being closed"). */
+  close(): void {
+    if (this.done) return;
+    this.done = true;
+    this.cur = null;
+    void this.it.return?.();
+  }
+
   private async advanceTo(srcT: number): Promise<void> {
     while (!this.done && (!this.cur || srcT >= this.cur.start + this.cur.frames / this.cur.rate)) {
       const { value, done } = await this.it.next();
@@ -246,7 +255,18 @@ export function toneGainAt(tone: MixTone, t: number): number {
 }
 
 /** Mix narration segments + audio clips into the output audio track. push receives ready samples in order. */
-export async function mixAudioTrack(args: {
+export async function mixAudioTrack(args: MixAudioTrackArgs): Promise<void> {
+  // Every source reader it opens is closed when the mix ends, however it ends.
+  const opened: PcmStream[] = [];
+  const openPcm = (track: InputAudioTrack, from: number, to: number) => { const reader = new PcmStream(track, from, to); opened.push(reader); return reader; };
+  try {
+    await mixAudioTrackWith(args, openPcm);
+  } finally {
+    for (const reader of opened) reader.close();
+  }
+}
+
+type MixAudioTrackArgs = {
   segs: MixSeg[];
   /** Per-source audio track (absent = source has no audio). */
   audioTracks: Map<string, InputAudioTrack>;
@@ -259,7 +279,9 @@ export async function mixAudioTrack(args: {
   tones?: MixTone[];
   /** Whole-mix loudness: master gain then the lookahead limiter, in place of the soft clip. */
   master?: { gainDb: number };
-}): Promise<void> {
+};
+
+async function mixAudioTrackWith(args: MixAudioTrackArgs, openPcm: (track: InputAudioTrack, from: number, to: number) => PcmStream): Promise<void> {
   const { segs, audioTracks, totalSec, push } = args;
   const tones = [...(args.tones ?? [])];
   const stretch = args.stretch ?? defaultTimeStretch;
@@ -286,7 +308,7 @@ export async function mixAudioTrack(args: {
     const srcFrames = Math.round((s.srcEnd - s.srcStart) * MIX_RATE);
     if (srcFrames <= 0) continue;
     const interleaved = new Float32Array(srcFrames * MIX_CH);
-    await new PcmStream(track, Math.max(0, s.srcStart - 0.1), s.srcEnd + 0.1).read(s.srcStart, srcFrames, interleaved, 0, () => 1, 1);
+    await openPcm(track, Math.max(0, s.srcStart - 0.1), s.srcEnd + 0.1).read(s.srcStart, srcFrames, interleaved, 0, () => 1, 1);
     const channels = Array.from({ length: MIX_CH }, (_, c) => {
       const ch = new Float32Array(srcFrames);
       for (let k = 0; k < srcFrames; k++) ch[k] = interleaved[k * MIX_CH + c]!;
@@ -301,7 +323,7 @@ export async function mixAudioTrack(args: {
     if (!mine.length) continue;
     const from = Math.min(...mine.map((s) => s.srcStart));
     const to = Math.max(...mine.map((s) => s.srcEnd));
-    readers.set(key, new PcmStream(track, Math.max(0, from - 0.1), to + 0.1));
+    readers.set(key, openPcm(track, Math.max(0, from - 0.1), to + 0.1));
   }
   // Per-clip envelope precompute (same audioClipGainAt as preview) — from the ORIGINAL clip, whose
   // timeline span already reflects its speed; the read side may swap in a pre-stretched copy.
