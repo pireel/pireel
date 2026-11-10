@@ -155,7 +155,7 @@ export async function prepareSpeechAudio(file: File, opts?: { signal?: AbortSign
 }
 
 
-/** Upload the full source clip only at export time, returning an https URL the render service can fetch. */
+/** Upload the full source clip and return its https URL. */
 export async function uploadVideoFile(file: File): Promise<string> {
   const { url } = await studioProviders().uploads.upload(file, { contentType: file.type || 'video/mp4', filename: file.name || 'studio-video.mp4' });
   return url;

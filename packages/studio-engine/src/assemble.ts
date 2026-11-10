@@ -929,22 +929,3 @@ window.addEventListener('message',function(e){var d=e&&e.data;if(!d||d.type!=='h
   // afterwards only matters for media (video currentTime), which a single-block preview has none of.
   return html;
 }
-
-/**
- * The composition HTML for BAKING one component to a transparent video (cloud render → VP8-alpha
- * WebM). The block alone, on the project canvas, transparent ground, with its GSAP timeline `tl`
- * intact so the render service plays it across the full duration — no preview boot-pause, no rAF
- * loop wrapper (those are for the browser preview; the renderer drives the timeline itself). Render
- * it at the project canvas size and overlay the result at 0,0: the block keeps its exact box, so the
- * bake is pixel-identical to what the timeline shows. Duration/fps come from the caller (block
- * durationSec, comp fps).
- */
-export function bakeCompositionHtml(comp: Composition, block: Block): string {
-  const mini = previewMiniComp(comp, block);
-  const html = assembleHtml(mini, './vendor/gsap.min.js');
-  // The cloud renderer drives the root composition timeline. Browser previews seek each block
-  // themselves; exporting only that child leaves entrance animations paused at their hidden state.
-  const rootTimeline = `<script>(function(){var child=window.__timelines[${JSON.stringify(block.id)}];var root=gsap.timeline({paused:true});if(child){child.to({},{duration:${n(block.durationSec)}},0);child.paused(false);root.add(child,0);}root.to({},{duration:${n(block.durationSec)}},0);window.__timelines.root=root;})();</script>`;
-  return html.replace('</head>', `<style>html, body, #root { ${TRANSPARENT_CSS} }</style></head>`)
-    .replace('</body>', `${rootTimeline}</body>`);
-}

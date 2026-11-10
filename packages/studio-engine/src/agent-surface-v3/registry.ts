@@ -77,7 +77,7 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   { id: 'remove_words', group: 'speech' },
   { id: 'mask_words', group: 'speech' },
   { id: 'denoise_audio', group: 'speech' },
-  // ---- components and text (9; confirmation list is a session tool)
+  // ---- components and text (8; confirmation list is a session tool)
   { id: 'compose_component', group: 'components' },
   { id: 'set_look', group: 'components' },
   { id: 'place_graphics', group: 'components' },
@@ -87,7 +87,6 @@ export const V3_TOOLS: readonly V3ToolSpec[] = [
   { id: 'set_captions', group: 'components' },
   { id: 'set_whiteboard', group: 'components' },
   { id: 'read_brand', group: 'components' },
-  { id: 'bake_component', group: 'components' },
   // ---- generation (8)
   { id: 'list_models', group: 'generation', serverDirect: true },
   { id: 'generate_cover', group: 'generation', chatOnly: true, charges: true },

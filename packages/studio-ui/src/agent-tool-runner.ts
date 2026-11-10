@@ -29,7 +29,6 @@ import {
   type VideoShot,
   applyOverlayDocumentEdits,
   planNarrationCuts,
-  bakeCompositionHtml,
   blockId,
   blockKind,
   compReceiptDelta,
@@ -2129,74 +2128,6 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               return { ok: true, summary: `${mode} analysis of ${sources.length} sources`, data: { sources, note: `${mode} analysis ran once per source; each entry carries that source's result.` }, ...(images.length ? { images } : {}) };
             }
             return { ok: false, error: 'invalid_value', data: { path: 'mode', value: input.mode, allowed: ['metadata', 'frames', 'component', 'generation', 'geometry', 'semantic', 'editorial', 'brief', 'labels'] } };
-          }
-          case 'bake_component': {
-            // Freeze a graphic component into a transparent video clip: assemble the single-block
-            // composition, cloud-render it (VP8-alpha WebM — the browser can't encode alpha itself),
-            // then register the result and overlay it full-frame at the component's frames. The block
-            // keeps its box inside the rendered canvas, so a full-frame overlay is pixel-identical.
-            const b = findBlock(input.clipId ?? input.blockId);
-            if (!b) return { ok: false, error: tEnglish('workbench.elementNotFoundIds') };
-            if (blockKind(b) !== 'custom' && !b.templateId.startsWith('kit:')) return { ok: false, error: tEnglish('workbench.bakeNotComponent') };
-            if (genIdsRef.current.has(b.id)) return { ok: false, error: tEnglish('workbench.blockGeneratingWaitFinish') };
-            const canvas = canvasSize();
-            const fps = canvas.fps;
-            const html = bakeCompositionHtml(compRef.current, b);
-            report?.(t('workbench.bakeRendering'));
-            let job: { id?: string; status?: string; output?: { url?: string | null; durationSec?: number }; error?: { message?: string } };
-            try {
-              const res = await editorRequest('/api/render/bake', {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ html, width: canvas.width, height: canvas.height, durationSec: b.durationSec, fps }),
-                ...(opts?.signal ? { signal: opts.signal } : {}),
-              });
-              if (!res.ok) {
-                const j = (await res.json().catch(() => ({}))) as { error?: string };
-                return { ok: false, error: typeof j.error === 'string' ? j.error : t('workbench.bakeFailed') };
-              }
-              job = await res.json();
-            } catch (e) {
-              if (e instanceof DOMException && e.name === 'AbortError') throw e;
-              return { ok: false, error: tEnglish('workbench.bakeFailed') };
-            }
-            const jobId = job.id;
-            if (!jobId) return { ok: false, error: tEnglish('workbench.bakeFailed') };
-            // Poll to completion (a render is ~1–3 min); the bridge card timeout covers it.
-            for (let i = 0; i < 160 && job.status !== 'done' && job.status !== 'failed' && job.status !== 'canceled'; i++) {
-              await new Promise((r) => setTimeout(r, 2500));
-              if (opts?.signal?.aborted) throw new DOMException('aborted', 'AbortError');
-              report?.(t('workbench.bakeRendering'));
-              try {
-                const s = await editorRequest(`/api/render/${encodeURIComponent(jobId)}`, { ...(opts?.signal ? { signal: opts.signal } : {}) });
-                if (!s.ok) return { ok: false, error: `${t('workbench.bakeFailed')} (HTTP ${s.status})` };
-                job = await s.json();
-              } catch (e) {
-                if (e instanceof DOMException && e.name === 'AbortError') throw e;
-              }
-            }
-            if (job.status !== 'done' || !job.output?.url) return { ok: false, error: job.error?.message || t('workbench.bakeFailed') };
-            // Register the render as a video asset, then overlay it full-frame at the block's window.
-            // A long render must not replace a component the user edited/deleted while waiting.
-            const currentBlock = findBlock(b.id);
-            if (!currentBlock || JSON.stringify(currentBlock) !== JSON.stringify(b)
-              || canvasSize().width !== canvas.width || canvasSize().height !== canvas.height
-              || canvasSize().fps !== fps) {
-              return { ok: false, error: 'The component or canvas changed while baking; retry with the current component.' };
-            }
-            const originalTrack = documentRef.current.timeline.tracks.find((track) => track.clips.some((clip) => clip.id === b.id));
-            const originalClip = originalTrack?.clips.find((clip) => clip.id === b.id);
-            if (!originalTrack || !originalClip) return { ok: false, error: tEnglish('workbench.bakeFailed') };
-            const assetId = `bake_${b.id}_${jobId}`;
-            if (originalTrack.locked) return { ok: false, error: 'The component track is locked.' };
-            // Registers the render and swaps the clip in place as one operation: removing/reinserting
-            // would prune an empty lane and detach scene/clip anchors; the same identity keeps them.
-            const baked = commit({ op: 'overlay.bakeToMedia', input: { clipId: b.id, asset: {
-              id: assetId, label: bname(b), url: job.output.url, durationSec: job.output.durationSec ?? b.durationSec, width: canvas.width, height: canvas.height,
-            } } }, { undo: 'none' });
-            if (!baked.ok) return { ok: false, error: baked.error.message || t('workbench.bakeFailed') };
-            const { startFrame, durationFrames } = baked;
-            return { ok: true, summary: t('workbench.bakedName', { name: bname(b) }), data: { assetId, startFrame, durationFrames } };
           }
           case 'search_assets': {
             if (input.kind === 'font') {
