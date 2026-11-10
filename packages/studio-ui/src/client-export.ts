@@ -210,7 +210,9 @@ function overlayFontText(overlay: Overlay, comp: Composition): string {
 function createOverlay(html: string, w: number, h: number): Promise<Overlay> {
   return new Promise((resolve, reject) => {
     const iframe = document.createElement('iframe');
-    iframe.style.cssText = `position:absolute;left:-200vw;top:0;width:${w}px;height:${h}px;border:0;`;
+    // Off-screen by its own width: a fixed -200vw left a canvas wider than two windows (a 4K
+    // project, or any project in a narrow window) showing as a white strip at the page's left edge.
+    iframe.style.cssText = `position:absolute;left:${-(w + 1000)}px;top:0;width:${w}px;height:${h}px;border:0;`;
     iframe.srcdoc = html;
     iframe.addEventListener('load', () => {
       void (async () => {

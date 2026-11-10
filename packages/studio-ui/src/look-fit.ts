@@ -47,7 +47,8 @@ function inertTimeline(): unknown {
 function loadFrame(html: string, width: number, height: number): Promise<HTMLIFrameElement> {
   return new Promise((resolve) => {
     const iframe = document.createElement('iframe');
-    iframe.style.cssText = `position:absolute;left:-200vw;top:0;width:${width}px;height:${height}px;border:0;`;
+    // Off-screen by its own width (see createOverlay in client-export.ts): never by the window's.
+    iframe.style.cssText = `position:absolute;left:${-(width + 1000)}px;top:0;width:${width}px;height:${height}px;border:0;`;
     iframe.srcdoc = html;
     iframe.addEventListener('load', () => resolve(iframe), { once: true });
     document.body.appendChild(iframe);
