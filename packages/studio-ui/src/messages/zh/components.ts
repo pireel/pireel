@@ -50,6 +50,7 @@ export const COMPONENTS_ZH: Record<string, string> = {
   'ui.coverSceneDialog.editCompleteCoverGeneration': '编辑完整的封面生图提示词',
   'ui.coverSceneDialog.frameSelectionWasNot': '选帧未保存，请重试。',
   'ui.coverSceneDialog.fullPrompt': '完整提示词',
+  'ui.coverSceneDialog.promptFirst': '先写封面的提示词',
   'ui.coverSceneDialog.generateCover': '生成封面',
   'ui.coverSceneDialog.generatedCoverAppearsHere': '生成的封面会显示在这里',
   'ui.coverSceneDialog.importRestoreCurrentVideo': '请导入或恢复当前视频。',

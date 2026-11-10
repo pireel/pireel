@@ -4,7 +4,8 @@ import { ImageGenerationFields } from '@pireel/studio-ui/image-generation-fields
 import { useEffect, useRef, useState, type ComponentProps } from 'react';
 import { ImageIcon, Loader2 } from 'lucide-react';
 import { useQuote } from '@pireel/studio-ui/use-quote';
-import { ButtonCreditCost } from './credit-cost';
+import { ButtonCreditCost, CreditShortNote } from './credit-cost';
+import { offerCredits, useCreditGate } from './current-user';
 import { Dialog, DialogContent, DialogTitle } from '@pireel/ui/dialog';
 import { CoverFrameTimeline } from '@pireel/studio-ui/cover-frame-timeline';
 import { SceneMediaCard } from '@pireel/studio-ui/media-picker';
@@ -82,6 +83,10 @@ export function CoverSceneDialog({ open, scene, applied, busy, canvas, onClose, 
   }, [open, selectedAsset, selectedSourceSec, onPreviewFrame]);
   const settings = normalizeImageSettings({ modelId, size: size || scene?.size || videoCoverAspect(canvas), quality });
   const credits = useQuote({ toolId: 'image-gen', modelId: open ? modelId : '', params: { n: 1, ...imageGenerationParams(settings), reference_count: 1 + (scene?.brandReferences?.length ?? 0) + (scene?.referenceImage ? 1 : 0) } });
+  const gate = useCreditGate(credits === null ? null : { credits }, pending);
+  // A cover the server could not pay for (it reports it on the scene) offers the plans once.
+  const creditsFailed = scene?.phase === 'failed' && scene.error === 'cover_insufficient_credits';
+  useEffect(() => { if (open && creditsFailed) void offerCredits(); }, [open, creditsFailed]);
   const choices = [...(scene?.images ?? []), ...(scene?.history ?? []), ...(applied ? [applied] : [])];
   const images = [...new Map(choices.map(image => [image.key, image])).values()];
   const main = images.find(image => image.key === selectedKey) ?? images[0];
@@ -113,7 +118,12 @@ export function CoverSceneDialog({ open, scene, applied, busy, canvas, onClose, 
         </section>
         <ImageGenerationFields value={settings} models={models} disabled={pending} onChange={next => { setModelId(next.modelId); setSize(next.size); setQuality(next.quality); void onSaveDraft(next).catch(() => setError(t('ui.coverSceneDialog.settingsWereNotSaved'))); }} />
         <div className="bg-bg sticky bottom-0 z-10 shrink-0 space-y-2 py-2">
-        <button type="button" disabled={pending || !modelId || !prompt.trim() || !selectedFrame || !referenceUrl || readingFrame} onClick={async () => { if (!selectedFrame) return; setError(''); try { await onGenerate({ regenerate: true, prompt, sourceFrame: coverFrameIdentity(selectedFrame), ...settings }); } catch { setError(failure); } }} className="bg-primary text-primary-foreground inline-flex w-full h-10 shrink-0 items-center justify-center gap-2 rounded-md text-sm disabled:opacity-40">{pending && <Loader2 size={14} className="animate-spin" />}{scene?.phase === 'planning' ? t('ui.coverSceneDialog.preparingPromptReference') : pending ? t('ui.coverSceneDialog.creating') : <>{t('ui.coverSceneDialog.generateCover')}<ButtonCreditCost cost={credits === null ? null : { credits }} /></>}</button>
+        {!pending && <CreditShortNote gate={gate} />}
+        <button type="button" disabled={pending || !modelId || !selectedFrame || !referenceUrl || readingFrame} onClick={async () => {
+          if (!selectedFrame) return;
+          if (!prompt.trim()) { setError(t('ui.coverSceneDialog.promptFirst')); return; }
+          if (gate.short) { void gate.offer(); return; }
+          setError(''); try { await onGenerate({ regenerate: true, prompt, sourceFrame: coverFrameIdentity(selectedFrame), ...settings }); } catch { setError(failure); } }} className="bg-primary text-primary-foreground inline-flex w-full h-10 shrink-0 items-center justify-center gap-2 rounded-md text-sm disabled:opacity-40">{pending && <Loader2 size={14} className="animate-spin" />}{scene?.phase === 'planning' ? t('ui.coverSceneDialog.preparingPromptReference') : pending ? t('ui.coverSceneDialog.creating') : <>{t('ui.coverSceneDialog.generateCover')}<ButtonCreditCost cost={credits === null ? null : { credits }} /></>}</button>
         {(error || scene?.phase === 'failed') && <p role="alert" className="text-destructive text-xs leading-5">{error || failure}</p>}
         </div>
       </div>

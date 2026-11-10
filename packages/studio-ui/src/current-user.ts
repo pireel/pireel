@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { confirm } from "@pireel/ui/confirm";
 import { editorRequest } from '@pireel/studio-ui/host-request';
 import { studioLocale, t } from './i18n';
+import type { CreditCost } from './credit-cost';
 
 export interface CurrentUser {
   user_id: string;
@@ -100,5 +101,44 @@ export function useMemberFeatures(): boolean {
 /** A member-only feature was chosen by a non-member: say so, and offer the plans page. */
 export async function offerMembership(feature: string): Promise<void> {
   const go = await confirm({ title: t('workbench.memberOnlyTitle', { feature }), description: t('workbench.memberOnlyBody'), confirmLabel: t('workbench.memberOnlyPlans') });
+  if (go) window.open(`/${studioLocale()}/pricing`, '_blank', 'noopener');
+}
+
+/** The account has fewer credits than a generation needs (HTTP 402): the page offers the plans. */
+export class CreditsShort extends Error {}
+
+export interface CreditGate {
+  /** The balance is known and below what the generation needs. */
+  short: boolean;
+  need: number | null;
+  balance: number | null;
+  /** The plans dialog, with the numbers when they are known. */
+  offer(): Promise<void>;
+}
+
+/**
+ * Whether the account can pay for a generation of `cost`, known before the click. The balance is
+ * read again whenever `refresh` changes (pass the busy flag: it is read after every run). Never
+ * short where the host does not sell credits (no balance) or while the price is unknown.
+ */
+export function useCreditGate(cost: CreditCost | null | undefined, refresh?: unknown): CreditGate {
+  const [balance, setBalance] = useState<number | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void loadCurrentUserBalance().then((value) => { if (alive) setBalance(value ? value.balance : null); }).catch(() => {});
+    return () => { alive = false; };
+  }, [refresh]);
+  const need = cost ? ('min' in cost ? cost.min : cost.credits) : null;
+  return { short: need !== null && balance !== null && need > balance, need, balance, offer: () => offerCredits(need ?? undefined, balance ?? undefined) };
+}
+
+/** A generation needs more credits than the account has: say how many, and offer the plans page. */
+export async function offerCredits(need?: number, balance?: number): Promise<void> {
+  const known = need !== undefined && balance !== undefined;
+  const go = await confirm({
+    title: t('workbench.creditsShortTitle'),
+    description: known ? t('workbench.creditsShortBody', { need, balance }) : t('workbench.creditsShortBodyPlain'),
+    confirmLabel: t('workbench.memberOnlyPlans'),
+  });
   if (go) window.open(`/${studioLocale()}/pricing`, '_blank', 'noopener');
 }

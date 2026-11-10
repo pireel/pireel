@@ -50,6 +50,7 @@ export const COMPONENTS_EN: Record<string, string> = {
   'ui.coverSceneDialog.editCompleteCoverGeneration': 'Edit the complete cover-generation prompt',
   'ui.coverSceneDialog.frameSelectionWasNot': 'Frame selection was not saved. Please retry.',
   'ui.coverSceneDialog.fullPrompt': 'Full prompt',
+  'ui.coverSceneDialog.promptFirst': 'Write the prompt for the cover first',
   'ui.coverSceneDialog.generateCover': 'Generate cover',
   'ui.coverSceneDialog.generatedCoverAppearsHere': 'Your generated cover appears here',
   'ui.coverSceneDialog.importRestoreCurrentVideo': 'Import or restore the current video.',
