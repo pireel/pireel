@@ -117,7 +117,8 @@ export interface CreditGate {
 }
 
 /**
- * Whether the account can pay for a generation of `cost`, known before the click. The balance is
+ * Whether the account can pay for a generation of `cost`, so the click opens the plans dialog
+ * instead of starting; nothing is shown before the click. The balance is
  * read again whenever `refresh` changes (pass the busy flag: it is read after every run). Never
  * short where the host does not sell credits (no balance) or while the price is unknown.
  */

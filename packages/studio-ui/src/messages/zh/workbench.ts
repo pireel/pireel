@@ -125,7 +125,6 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.creditsShortTitle": "积分不够了",
   "workbench.creditsShortBody": "这次生成需要 {need} 积分，你还剩 {balance} 积分。开通会员后回到这里继续。",
   "workbench.creditsShortBodyPlain": "剩余积分不够这次生成。开通会员后回到这里继续。",
-  "workbench.creditsShortLine": "需要 {need} 积分，还剩 {balance} 积分",
   "workbench.voiceCloneCost": "{credits} 积分",
   "workbench.voiceDesignCost": "{credits} 积分",
   "workbench.voiceDeployingShort": "正在提取声音特征…",

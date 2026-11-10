@@ -130,7 +130,6 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.creditsShortTitle": "Not enough credits",
   "workbench.creditsShortBody": "This generation needs {need} credits and you have {balance}. Choose a plan, then come back here to continue.",
   "workbench.creditsShortBodyPlain": "You don't have enough credits left for this generation. Choose a plan, then come back here to continue.",
-  "workbench.creditsShortLine": "Needs {need} credits, you have {balance}",
   "workbench.voiceCloneCost": "{credits} credits",
   "workbench.voiceDesignCost": "{credits} credits",
   "workbench.voiceDeployingShort": "Extracting voice characteristics…",

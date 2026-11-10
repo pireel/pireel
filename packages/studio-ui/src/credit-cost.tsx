@@ -1,5 +1,5 @@
 import { t } from './i18n';
-import { CreditsShort, offerCredits, type CreditGate } from './current-user';
+import { CreditsShort, offerCredits } from './current-user';
 
 /** What one generation costs: an exact price, an estimate, a starting price (more may follow), a range, or a ceiling. */
 export type CreditCost =
@@ -18,15 +18,6 @@ export function creditCostText(cost: CreditCost): string {
 export function ButtonCreditCost({ cost }: { cost: CreditCost | null | undefined }) {
   if (!cost) return null;
   return <span className="font-normal tabular-nums opacity-70">· {creditCostText(cost)}</span>;
-}
-
-/** Beside a generate button the balance cannot pay for: how far short, and the plans. Nothing otherwise. */
-export function CreditShortNote({ gate, className = '' }: { gate: CreditGate; className?: string }) {
-  if (!gate.short) return null;
-  return <p role="status" className={`text-ink-3 text-xs ${className}`}>
-    {t('workbench.creditsShortLine', { need: gate.need ?? 0, balance: gate.balance ?? 0 })}
-    <button type="button" className="text-ink ml-2 underline" onClick={() => void gate.offer()}>{t('workbench.memberOnlyPlans')}</button>
-  </p>;
 }
 
 /** A 402 answer as the error a generation throws; `offerCreditsFor` turns it into the plans dialog. */

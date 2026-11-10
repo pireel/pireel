@@ -4,7 +4,7 @@ import { ImageGenerationFields } from '@pireel/studio-ui/image-generation-fields
 import { useEffect, useRef, useState, type ComponentProps } from 'react';
 import { ImageIcon, Loader2 } from 'lucide-react';
 import { useQuote } from '@pireel/studio-ui/use-quote';
-import { ButtonCreditCost, CreditShortNote } from './credit-cost';
+import { ButtonCreditCost } from './credit-cost';
 import { offerCredits, useCreditGate } from './current-user';
 import { Dialog, DialogContent, DialogTitle } from '@pireel/ui/dialog';
 import { CoverFrameTimeline } from '@pireel/studio-ui/cover-frame-timeline';
@@ -118,7 +118,6 @@ export function CoverSceneDialog({ open, scene, applied, busy, canvas, onClose, 
         </section>
         <ImageGenerationFields value={settings} models={models} disabled={pending} onChange={next => { setModelId(next.modelId); setSize(next.size); setQuality(next.quality); void onSaveDraft(next).catch(() => setError(t('ui.coverSceneDialog.settingsWereNotSaved'))); }} />
         <div className="bg-bg sticky bottom-0 z-10 shrink-0 space-y-2 py-2">
-        {!pending && <CreditShortNote gate={gate} />}
         <button type="button" disabled={pending || !modelId || !selectedFrame || !referenceUrl || readingFrame} onClick={async () => {
           if (!selectedFrame) return;
           if (!prompt.trim()) { setError(t('ui.coverSceneDialog.promptFirst')); return; }
