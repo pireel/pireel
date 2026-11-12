@@ -308,7 +308,7 @@ import {
 
 import { useGenerationLock } from "@pireel/studio-ui/use-generation-lock";
 import { useMediaAnalysis } from "@pireel/studio-ui/use-media-analysis";
-import { downloadBlob, useStudioExport } from "@pireel/studio-ui/use-export";
+import { canChooseExportFile, downloadBlob, useStudioExport } from "@pireel/studio-ui/use-export";
 import { buildNlePackage, NleExportCanceled } from "@pireel/studio-ui/nle-export-package";
 import { NleExportDialog, type NleExportState } from "@pireel/studio-ui/nle-export-dialog";
 import {
@@ -9172,15 +9172,19 @@ export function HyperframesWorkbench({
                           setExportOpts((o) => ({ ...o, format }))
                         }
                       />
-                      <p className="text-ink-4 text-[11px] leading-relaxed">
-                        {t("workbench.downloadsAutomaticallyWhenExport")}
-                      </p>
+                      {!canChooseExportFile() && (
+                        <p className="text-ink-4 text-[11px] leading-relaxed">
+                          {t("workbench.downloadsAutomaticallyWhenExport")}
+                        </p>
+                      )}
                       <button
                         type="button"
                         onClick={() => {
-                          // Keep the dialog to show progress, close only when compositing ends (done/failed/cancelled)
-                          void exportVideo(exportOpts).finally(() =>
-                            setExportOpen(false),
+                          // Keep the dialog to show progress, close only when compositing ends (done/failed/cancelled).
+                          // Closing the save dialog without picking a file starts nothing: the options stay open.
+                          void exportVideo(exportOpts, undefined, { chooseFile: true }).then(
+                            (result) => { if (!result.dismissed) setExportOpen(false); },
+                            () => setExportOpen(false),
                           );
                         }}
                         className="bg-primary text-primary-foreground inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-[13px] font-medium hover:opacity-90"

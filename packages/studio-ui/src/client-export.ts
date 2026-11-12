@@ -25,7 +25,6 @@ import {
   AudioSampleSink,
   AudioSampleSource,
   BlobSource,
-  BufferTarget,
   CanvasSource,
   Input,
   MovOutputFormat,
@@ -81,6 +80,7 @@ import {
   type SampledVisualVideo,
 } from './export-visual-media';
 import { disposeSourceRig, openSource, sampleAt, type SourceRig } from './export-video-source';
+import { exportAudioPacketLimit, exportVideoPacketLimit, openExportFileSink, type ExportFileSink } from './export-file-sink';
 import { createGlMixer, glDirection } from '@pireel/studio-engine/transition-gl';
 import { injectPreviewRuntime } from './sample-composition';
 import { materializeRemoteMedia } from './remote-media';
@@ -466,6 +466,9 @@ export interface ClientExportOpts {
   clipMasks?: Map<string, readonly MaskedAudioRange[]> | null;
   /** Resolution/fps/format (default 1080p·30·MP4). */
   render?: ExportRenderOpts;
+  /** The file the user picked in the save dialog: the export is written there as it encodes.
+   *  Absent, it goes to a private file (or memory, where the browser has no file storage). */
+  saveTo?: FileSystemFileHandle | null;
   onProgress?: (done: number, total: number) => void;
   shouldCancel?: () => boolean;
 }
@@ -1081,6 +1084,9 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
   const { shots, durationSec, segs, tones, visualMediaClips, visualVideos, visualVideoKeys, rigs, files } = sources;
   let visualImageBitmaps: Awaited<ReturnType<typeof loadVisualImageBitmaps>> | undefined;
   let overlay: Overlay;
+  // The file is written while it encodes (see export-file-sink): `sink` is where, `output` the muxer.
+  let sink: ExportFileSink | undefined;
+  let output: Output | undefined;
   try {
     visualImageBitmaps = await loadVisualImageBitmaps(visualMediaClips);
     // Overlay document + asset inlining
@@ -1116,10 +1122,17 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     canvas.height = outH;
     const ctx = canvas.getContext('2d')!;
 
-    const outFormat = render.format === 'webm' ? new WebMOutputFormat() : render.format === 'mov' ? new MovOutputFormat() : new Mp4OutputFormat();
-    const output = new Output({ format: outFormat, target: new BufferTarget() });
+    const total = Math.max(1, Math.round(durationSec * FPS));
+    const mime = render.format === 'webm' ? 'video/webm' : render.format === 'mov' ? 'video/quicktime' : 'video/mp4';
+    sink = await openExportFileSink({ mime, extension: render.format, saveTo: opts.saveTo });
+    // A file written as it encodes still gets its index at the front (plays while it downloads, like
+    // the in-memory file did): the muxer reserves room for it, sized by each track's packet limit.
+    const reserveIndex = sink.streamed && render.format !== 'webm';
+    const container = reserveIndex ? { fastStart: 'reserve' as const } : {};
+    const outFormat = render.format === 'webm' ? new WebMOutputFormat() : render.format === 'mov' ? new MovOutputFormat(container) : new Mp4OutputFormat(container);
+    output = new Output({ format: outFormat, target: sink.target });
     const videoSource = new CanvasSource(canvas, { codec: render.format === 'webm' ? 'vp9' : 'avc', bitrate: QUALITY_HIGH });
-    output.addVideoTrack(videoSource, { frameRate: FPS });
+    output.addVideoTrack(videoSource, { frameRate: FPS, ...(reserveIndex ? { maximumPacketCount: exportVideoPacketLimit(total) } : {}) });
     const withClips = !!opts.audio?.length;
     const clipMaskBeep = [...(opts.clipMasks?.values() ?? [])].some((ranges) => ranges.some((range) => range.audio === 'beep'));
     // Browser AAC encoders take 44.1/48 kHz mono or stereo only; a source outside that (phone memos,
@@ -1134,8 +1147,40 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       || visualVideos.some((visual) => !visual.muted && rigs.get(visualVideoKeys.get(visual.clipId)!)?.audio);
     // webm container can't hold aac, so audio switches to opus for that format
     const audioSource = anyAudio ? new AudioSampleSource({ codec: render.format === 'webm' ? 'opus' : 'aac', bitrate: QUALITY_MEDIUM }) : null;
-    if (audioSource) output.addAudioTrack(audioSource);
+    if (audioSource) output.addAudioTrack(audioSource, reserveIndex ? { maximumPacketCount: exportAudioPacketLimit(durationSec) } : {});
     await output.start();
+
+    // Sound first. The muxer holds every packet back until each track has delivered one, so with the
+    // picture first a whole video waited in memory for the first audio packet; the sound of an hour
+    // is a few dozen megabytes, and once the first frame arrives everything goes straight to the file.
+    // Audio clips or a non-1× native placement use the 48k timeline mixer; exact 1× narration without
+    // lane clips keeps the cheaper timestamp-only passthrough.
+    // Per-shot volume: gain 1 passes samples through untouched (byte-identical to before the feature existed); gain 0 contributes
+    // nothing (a timestamp gap decodes as silence, same as a source without audio); anything between rewrites PCM (same shotGain as preview).
+    if (audioSource && needsTimelineMix) {
+      const master = comp.audioLoudness ? { gainDb: await exportMasterGainDb(opts, sources, comp.audioLoudness) } : undefined;
+      await mixExportAudio(opts, sources, (sample) => audioSource.add(sample).then(() => sample.close()), master);
+    } else if (audioSource) {
+      for (const s of segs) {
+        const rig = rigs.get(s.key);
+        const gain = s.gain ?? 1;
+        if (rig?.audio && gain > 0) {
+          const asink = new AudioSampleSink(rig.audio);
+          const flat = gain === 1 && !s.fadeAt;
+          for await (const sample of asink.samples(s.srcStart, s.srcEnd)) {
+            if (opts.shouldCancel?.()) { sample.close(); throw new ExportCanceled(); }
+            const base = sample.timestamp - s.srcStart; // segment-local seconds at this buffer's start
+            const out = flat ? sample : scaleAudioSample(sample, (off) => gain * (s.fadeAt ? s.fadeAt(base + off) : 1));
+            out.setTimestamp(Math.max(0, s.timelineStart + (sample.timestamp - s.srcStart)));
+            await audioSource.add(out);
+            if (out !== sample) out.close();
+            sample.close();
+          }
+        }
+      }
+    }
+    // The sound is complete: the muxer need not wait on this track again.
+    audioSource?.close();
 
     // Edited time → segment + time within source. Native gaps return the blank sentinel; they do
     // not freeze the previous frame or jump forward to the next clip.
@@ -1232,7 +1277,6 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       serializeBrowserOverlayElements(overlay.root, overlay.doc, fullOverlayPass ? undefined : layer.blocks)
     ));
 
-    const total = Math.max(1, Math.round(durationSec * FPS));
     // Overlay frame cache: during tween gaps / static caption periods the serialized string is identical
     // frame to frame → reuse the previous frame's bitmap, skipping parse and rasterization of the whole
     // data URI (with inlined fonts, MB-scale — the bulk of export time).
@@ -1436,35 +1480,13 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       );
     }
 
-    // Audio track. Audio clips or a non-1× native placement use the 48k timeline mixer; exact 1×
-    // narration without lane clips keeps the cheaper timestamp-only passthrough.
-    // Per-shot volume: gain 1 passes samples through untouched (byte-identical to before the feature existed); gain 0 contributes
-    // nothing (a timestamp gap decodes as silence, same as a source without audio); anything between rewrites PCM (same shotGain as preview).
-    if (audioSource && needsTimelineMix) {
-      const master = comp.audioLoudness ? { gainDb: await exportMasterGainDb(opts, sources, comp.audioLoudness) } : undefined;
-      await mixExportAudio(opts, sources, (sample) => audioSource.add(sample).then(() => sample.close()), master);
-    } else if (audioSource) {
-      for (const s of segs) {
-        const rig = rigs.get(s.key);
-        const gain = s.gain ?? 1;
-        if (rig?.audio && gain > 0) {
-          const asink = new AudioSampleSink(rig.audio);
-          const flat = gain === 1 && !s.fadeAt;
-          for await (const sample of asink.samples(s.srcStart, s.srcEnd)) {
-            const base = sample.timestamp - s.srcStart; // segment-local seconds at this buffer's start
-            const out = flat ? sample : scaleAudioSample(sample, (off) => gain * (s.fadeAt ? s.fadeAt(base + off) : 1));
-            out.setTimestamp(Math.max(0, s.timelineStart + (sample.timestamp - s.srcStart)));
-            await audioSource.add(out);
-            if (out !== sample) out.close();
-            sample.close();
-          }
-        }
-      }
-    }
-
     await output.finalize();
-    const buf = (output.target as BufferTarget).buffer!;
-    return new Blob([buf], { type: render.format === 'webm' ? 'video/webm' : render.format === 'mov' ? 'video/quicktime' : 'video/mp4' });
+    return await sink.finish();
+  } catch (error) {
+    // Stop the encoders and the muxer, then drop the partial file: nothing half-written is left behind.
+    if (output && output.state !== 'finalized' && output.state !== 'canceled') await output.cancel().catch(() => {});
+    await sink?.discard();
+    throw error;
   } finally {
     sources.dispose();
     disposeVisualImageBitmaps(visualImageBitmaps);

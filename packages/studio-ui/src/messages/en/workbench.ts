@@ -272,8 +272,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.deleteSelection": "Delete selection",
   "workbench.deleteThisImage": "Delete this image",
   "workbench.downloadsAutomaticallyWhenExport":
-    "Downloads automatically when the export finishes; if nothing changed, the last export is downloaded directly.",
-  "workbench.dragMove": "Drag to move",
+    "Downloads automatically when the export finishes; if nothing changed, the last export is downloaded directly.",  "workbench.dragMove": "Drag to move",
   "workbench.dragResizePanel": "Drag to resize the panel",
   "workbench.dragRotateHoldShift": "Drag to rotate (hold Shift to snap to 15°)",
   "workbench.duplicatedNameSecS": 'Duplicated "{name}" to {sec}s',

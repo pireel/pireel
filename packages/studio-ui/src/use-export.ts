@@ -2,7 +2,8 @@
 
 /**
  * Export the finished video: dialog options (resolution/fps/format) → **client-side compositing** →
- * auto download.
+ * the file. Where the browser has a save dialog, the user picks the file first and the export is
+ * written into it as it encodes; elsewhere it is written to private storage and downloaded.
  *
  * - **Client-side compositing only** (zero local upload, frame-exact with the preview, full insert-clip/
  *   framing coverage). No WebCodecs or missing local video → honest error (no longer silently handed to
@@ -27,6 +28,7 @@ import { primaryNarrativeRenderPlan } from '@pireel/studio-ui/primary-render-pla
 import { supplementalVisualMedia } from '@pireel/studio-ui/visual-render-plan';
 import type { AudioExportEntry } from '@pireel/studio-ui/audio-export-payload';
 import { clipAudioMasks, exportAudioMasks } from '@pireel/studio-ui/export-word-masks';
+import { exportFileReadable, exportSavedToChosenFile, releaseExportFile } from '@pireel/studio-ui/export-file-sink';
 
 
 /** Trigger a browser download (blob stays in the cache ref; the URL is revoked once done). */
@@ -60,9 +62,69 @@ export function downloadName(url: string, fallback: string) {
 }
 
 export interface ExportDelivery {
-  delivered: 'local_sink' | 'browser_download';
+  /** `saved_file`: written to the file the user picked in the save dialog. */
+  delivered: 'local_sink' | 'browser_download' | 'saved_file';
   /** Set when a sink was requested but the PUT failed (delivery fell back to the browser download). */
   sinkError?: string;
+}
+
+/** How an export was started. */
+export interface ExportStart {
+  /** The user pressed Export themselves: ask where to save before encoding, where the browser can. */
+  chooseFile?: boolean;
+}
+
+const EXPORT_MIME = { mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm' } as const;
+
+type SaveFilePicker = (options: {
+  suggestedName?: string;
+  id?: string;
+  startIn?: string;
+  types?: { accept: Record<string, string[]> }[];
+}) => Promise<FileSystemFileHandle>;
+
+/** True where the browser can ask for a file to save into (Chrome and Edge on desktop). */
+export const canChooseExportFile = () =>
+  typeof window !== 'undefined' && typeof (window as unknown as { showSaveFilePicker?: SaveFilePicker }).showSaveFilePicker === 'function';
+
+/**
+ * Ask where to save. The dialog only opens straight from a click, so this runs before anything slow.
+ * `canceled` = the user closed the dialog; null = no dialog here (or it refused to open): the export
+ * is downloaded instead.
+ */
+async function chooseExportFile(name: string, format: ExportRenderOpts['format']): Promise<FileSystemFileHandle | 'canceled' | null> {
+  if (!canChooseExportFile()) return null;
+  try {
+    return await (window as unknown as { showSaveFilePicker: SaveFilePicker }).showSaveFilePicker({
+      suggestedName: name,
+      id: 'pireel-export',
+      startIn: 'downloads',
+      types: [{ accept: { [EXPORT_MIME[format]]: [`.${format}`] } }],
+    });
+  } catch (error) {
+    return error instanceof DOMException && error.name === 'AbortError' ? 'canceled' : null;
+  }
+}
+
+/** Copy a finished export into the file the user picked, without holding it in memory. */
+async function writeExportTo(handle: FileSystemFileHandle, blob: Blob): Promise<void> {
+  const writable = await handle.createWritable();
+  try {
+    await blob.stream().pipeTo(writable);
+  } catch (error) {
+    await writable.abort().catch(() => {});
+    throw error;
+  }
+}
+
+const isOutOfSpace = (error: unknown) => error instanceof DOMException && error.name === 'QuotaExceededError';
+
+/** The save dialog creates the file as soon as a new name is confirmed. When the export did not end
+ *  up in it, an empty file is all that is there: take it away again. */
+async function dropEmptyChosenFile(handle: FileSystemFileHandle): Promise<void> {
+  try {
+    if ((await handle.getFile()).size === 0) await (handle as FileSystemFileHandle & { remove?: () => Promise<void> }).remove?.();
+  } catch { /* not ours to tidy */ }
 }
 
 /** Hand the finished blob over: to the local sink when one was requested (agent-driven
@@ -121,8 +183,13 @@ export function useStudioExport(deps: {
   const busyRef = useRef(false);
   const [exportPct, setExportPct] = useState(0);
   const exportCancelRef = useRef(false); // User clicked "Cancel export": stop compositing and unlock the UI
-  /** Last-result cache: key = comp + source fingerprint + options. Unchanged → re-download/publish directly, don't re-composite. */
-  const lastExportRef = useRef<{ key: string; blob?: Blob; opts: ExportRenderOpts } | null>(null);
+  /** Last-result cache: key = comp + source fingerprint + options. Unchanged → re-download/publish directly, don't re-composite.
+   *  `handle` is the file the user saved it to, when the export was written there. */
+  const lastExportRef = useRef<{ key: string; blob?: Blob; opts: ExportRenderOpts; handle?: FileSystemFileHandle } | null>(null);
+  const forgetLastExport = () => {
+    releaseExportFile(lastExportRef.current?.blob);
+    lastExportRef.current = null;
+  };
 
   /** Canonical document + runtime source fingerprints + options. Runtime URLs stay outside V2
    *  persistence, so they are included separately to invalidate a cached export after asset recovery. */
@@ -182,40 +249,66 @@ export function useStudioExport(deps: {
     return measureExportLoudness(exportInput(c, plan, audio));
   };
 
-  /** Get the finished-video blob for the current content: use the cache on hit, otherwise composite once client-side (reports progress, cancelable). */
+  /** Composite the current content once client-side (reports progress, cancelable), written to
+   *  `saveTo` when the user picked a file. The result replaces the kept export. */
   const renderBlob = async (
     c: Composition,
     plan: ReturnType<typeof editorDocumentRenderPlan>,
     key: string,
     opts: ExportRenderOpts,
     audio: AudioExportEntry[] | null,
+    saveTo: FileSystemFileHandle | null,
   ): Promise<Blob> => {
-    const cached = lastExportRef.current;
-    if (cached && cached.key === key && cached.blob) return cached.blob;
+    forgetLastExport();
     const blob = await clientExportVideo({
       ...exportInput(c, plan, audio),
       render: opts,
+      saveTo,
       onProgress: (done, total) => setExportPct(Math.round((done / total) * 100)),
       shouldCancel: () => exportCancelRef.current,
     });
-    lastExportRef.current = { key, blob, opts };
+    lastExportRef.current = { key, blob, opts, ...(saveTo && exportSavedToChosenFile(blob) ? { handle: saveTo } : {}) };
     return blob;
   };
 
-  /** Export = client compositing + delivery (local sink when requested, browser download otherwise).
+  /** The kept export, when it is this very content and its file can still be read. */
+  const keptExport = async (key: string) => {
+    const kept = lastExportRef.current;
+    if (!kept || kept.key !== key || !kept.blob) return null;
+    if (await exportFileReadable(kept.blob)) return { blob: kept.blob, handle: kept.handle };
+    forgetLastExport();
+    return null;
+  };
+
+  type ExportResult = { ok: boolean; filename?: string; error?: string; /** The user closed the save dialog: nothing started. */ dismissed?: boolean } & Partial<ExportDelivery>;
+
+  /** Export = client compositing + delivery (the file the user picks, a local sink when requested,
+   *  the browser download otherwise).
    *  Unsupported → honest error (no longer silently routed to server render that produces a black clip).
    *  Returns a result for the agent export tools (export action:start / action:status): on success includes the
    *  saved filename and how the file was delivered. */
-  async function exportVideo(opts: ExportRenderOpts, sinkUrl?: string): Promise<{ ok: boolean; filename?: string; error?: string } & Partial<ExportDelivery>> {
+  async function exportVideo(opts: ExportRenderOpts, sinkUrl?: string, start?: ExportStart): Promise<ExportResult> {
     if (busyRef.current) return { ok: false, error: tEnglish('common.exportAlreadyProgress') };
     busyRef.current = true;
+    let saveTo: FileSystemFileHandle | null = null;
+    let result: ExportResult | undefined;
     try {
-      return await runExport(opts, sinkUrl);
+      // The save dialog must open straight from the click, so it comes before preparing anything —
+      // but only for an export that can start (the same checks run again on the prepared plan).
+      if (start?.chooseFile && !sinkUrl && typeof window !== 'undefined' && 'VideoEncoder' in window
+        && editorDocumentRenderPlan(documentRef.current, { resolveAssetUrl }).durationFrames > 0) {
+        const picked = await chooseExportFile(filenameFor(opts, outputTitle?.()), opts.format);
+        if (picked === 'canceled') return { ok: false, error: tEnglish('common.exportWasCanceled'), dismissed: true };
+        saveTo = picked;
+      }
+      result = await runExport(opts, sinkUrl, saveTo);
+      return result;
     } finally {
+      if (saveTo && result?.delivered !== 'saved_file') await dropEmptyChosenFile(saveTo);
       busyRef.current = false;
     }
   }
-  async function runExport(opts: ExportRenderOpts, sinkUrl?: string): Promise<{ ok: boolean; filename?: string; error?: string } & Partial<ExportDelivery>> {
+  async function runExport(opts: ExportRenderOpts, sinkUrl: string | undefined, saveTo: FileSystemFileHandle | null): Promise<ExportResult> {
     // Every referenced local source must be resolvable BEFORE the plan is read, or the plan omits
     // the clip (batch export right after an output switch used to lose the picture-in-picture video).
     await prepareExportAssets?.(documentRef.current);
@@ -239,12 +332,29 @@ export function useStudioExport(deps: {
     try {
       const audio = await (audioExportRef?.current?.() ?? Promise.resolve(null));
       const key = exportKey(document, plan, opts, audio);
-      if (lastExportRef.current?.key === key && lastExportRef.current.blob) {
+      const kept = await keptExport(key);
+      if (kept && saveTo) {
+        // Same content as last time: copy the kept file to where the user wants it now.
+        const alreadyThere = !!kept.handle && await saveTo.isSameEntry(kept.handle).catch(() => false);
+        const copied = alreadyThere || await writeExportTo(saveTo, kept.blob).then(() => true, (error) => {
+          if (isOutOfSpace(error)) throw error;
+          return false; // the kept file went away under us: composite again below
+        });
+        if (copied) {
+          toast.success(t('common.exportCompleteSaved'));
+          return { ok: true, filename: saveTo.name, delivered: 'saved_file' };
+        }
+        forgetLastExport();
+      } else if (kept) {
         toast.success(t('common.downloadedPreviousExport'));
-        const delivery = await deliverBlob(lastExportRef.current.blob, name, sinkUrl);
+        const delivery = await deliverBlob(kept.blob, name, sinkUrl);
         return { ok: true, filename: name, ...delivery };
       }
-      const blob = await renderBlob(c, plan, key, opts, audio);
+      const blob = await renderBlob(c, plan, key, opts, audio, saveTo);
+      if (saveTo && exportSavedToChosenFile(blob)) {
+        toast.success(t('common.exportCompleteSaved'));
+        return { ok: true, filename: saveTo.name, delivered: 'saved_file' };
+      }
       const delivery = await deliverBlob(blob, name, sinkUrl);
       toast.success(delivery.delivered === 'local_sink' ? t('common.exportCompleteDelivered') : t('common.exportCompleteDownloadStarted'));
       return { ok: true, filename: name, ...delivery };
@@ -254,6 +364,10 @@ export function useStudioExport(deps: {
         return { ok: false, error: tEnglish('common.exportWasCanceled') };
       }
       console.warn('[studio] client export failed', e);
+      if (isOutOfSpace(e)) {
+        toast.error(t('common.exportNoSpace'));
+        return { ok: false, error: tEnglish('common.exportNoSpace') };
+      }
       toast.error(t('common.exportFailedTryAgain'));
       return { ok: false, error: e instanceof Error ? e.message : t('common.exportFailed') };
     } finally {
@@ -269,9 +383,7 @@ export function useStudioExport(deps: {
     cancelExport: () => {
       exportCancelRef.current = true;
     },
-    /** On source swap, clear the result cache (the key already includes the source fingerprint so it won't mis-hit; clearing is to free blob memory). */
-    resetExport: () => {
-      lastExportRef.current = null;
-    },
+    /** On source swap, clear the result cache (the key already includes the source fingerprint so it won't mis-hit; clearing frees the kept file). */
+    resetExport: forgetLastExport,
   };
 }

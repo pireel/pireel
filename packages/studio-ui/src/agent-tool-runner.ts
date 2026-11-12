@@ -403,7 +403,7 @@ export interface AgentExportJob {
   running: boolean;
   filename: string | null;
   error: string | null;
-  delivered?: 'local_sink' | 'browser_download';
+  delivered?: 'local_sink' | 'browser_download' | 'saved_file';
   sinkError?: string;
 }
 
@@ -508,7 +508,7 @@ export interface AgentToolCtx {
   // Export
   agentExportRef: MutableRefObject<AgentExportJob>;
   exportPctRef: MutableRefObject<number>;
-  exportVideo: (opts: ExportRenderOpts, sinkUrl?: string) => Promise<{ ok: boolean; filename?: string; error?: string; delivered?: 'local_sink' | 'browser_download'; sinkError?: string }>;
+  exportVideo: (opts: ExportRenderOpts, sinkUrl?: string) => Promise<{ ok: boolean; filename?: string; error?: string; delivered?: 'local_sink' | 'browser_download' | 'saved_file'; sinkError?: string }>;
   /** Loudness (LUFS) of the timeline's mix as it would export now, before the loudness gain. */
   measureMixLoudness: () => Promise<number | null>;
   // Frames + chat handle

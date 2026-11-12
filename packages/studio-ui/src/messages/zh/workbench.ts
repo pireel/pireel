@@ -249,8 +249,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.deleteSelection": "删除选中",
   "workbench.deleteThisImage": "删除这张图",
   "workbench.downloadsAutomaticallyWhenExport":
-    "导出完成后自动下载；内容和选项都没变时直接下载上次的成片。",
-  "workbench.dragMove": "拖动移动",
+    "导出完成后自动下载；内容和选项都没变时直接下载上次的成片。",  "workbench.dragMove": "拖动移动",
   "workbench.dragResizePanel": "拖动调整面板宽度",
   "workbench.dragRotateHoldShift": "拖动旋转（按住 Shift 吸附 15°）",
   "workbench.duplicatedNameSecS": "已复制「{name}」到 {sec}s",
