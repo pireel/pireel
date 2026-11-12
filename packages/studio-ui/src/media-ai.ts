@@ -6,6 +6,7 @@ export {type ProbedFile,fileSig,isContentSig,sigSize,durableFileSig,rememberDura
 
 
 import { groupAsrWords } from '@pireel/studio-engine/caption-fx';
+import { sourceTooLong } from '@pireel/studio-engine/source-length';
 
 
 /**
@@ -80,6 +81,8 @@ async function transcribeFileOnce(file: File, opts?: TranscribeOptions): Promise
     return [];
   }
   const durationSec = probe?.durationSec;
+  // Said before the audio is extracted and uploaded: the server refuses a recording this long.
+  if (sourceTooLong(durationSec)) throw new Error(t('common.videoOver2Hours'));
   phase('extracting');
   const audio = await extractAudio(file);
   phase('uploading');

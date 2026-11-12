@@ -96,6 +96,7 @@ export const COMMON_EN: Record<string, string> = {
   'common.titleCard': 'Title card',
   'common.transcribing': 'Transcribing…',
   'common.transcriptionRequestFailedHttp': 'Transcription request failed (HTTP {status}) — try again in a moment',
+  'common.videoOver2Hours': 'This video is over 2 hours. Trim it and upload again.',
   'common.untitledProject': 'Untitled project',
   'common.nothingToExport': 'Add a clip, graphic, or audio track before exporting',
   'common.uploadBeforeExport': 'Add video to the active output before exporting',

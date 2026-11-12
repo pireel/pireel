@@ -96,6 +96,7 @@ export const COMMON_ZH: Record<string, string> = {
   'common.titleCard': '标题卡',
   'common.transcribing': '提取口播稿…',
   'common.transcriptionRequestFailedHttp': 'ASR 请求失败(HTTP {status})',
+  'common.videoOver2Hours': '视频超过 2 小时，请裁短后再上传。',
   'common.untitledProject': '未命名项目',
   'common.nothingToExport': '先添加片段、动态图形或音频再导出',
   'common.uploadBeforeExport': '先为当前成片添加视频再导出',
