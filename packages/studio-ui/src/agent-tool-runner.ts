@@ -29,6 +29,7 @@ import {
   type VideoShot,
   applyOverlayDocumentEdits,
   planNarrationCuts,
+  transcriptPauseRanges,
   blockId,
   blockKind,
   compReceiptDelta,
@@ -68,7 +69,7 @@ import { compactAssetSearchElementResults, searchAssetLibrary } from '@pireel/st
 import { mediaSearchTranscriptsFromDocument, searchProjectMedia } from '@pireel/studio-engine/media-search';
 import { type StudioToolResult, TAB_CANNOT_SERVE_ERRORS, wrapAgentTranscript } from '@pireel/studio-engine/prompts';
 import { rejectStableFramingSplits, visualGeometryForAgent, visualTimelineForAgent } from '@pireel/studio-engine/visual-types';
-import { setLookV3 } from '@pireel/studio-engine/look-tools';
+import { refusedLookFix, setLookV3 } from '@pireel/studio-engine/look-tools';
 import type { LookIssue } from '@pireel/studio-engine/look';
 import { checkLookPieces, componentSettledAtSec, fitLookInstances, type LookFitDeps, type LookFitReport } from './look-fit';
 import { formatDirectorSceneContext, resolveDirectorSceneContext } from '@pireel/studio-engine/semantic-scenes';
@@ -157,7 +158,7 @@ import { collectAssetSearchDocuments } from '@pireel/studio-ui/asset-search-coll
 import { getLocalVisualModelSnapshot } from '@pireel/studio-ui/local-visual-search-model';
 import {
   assessLocalSpeechAudio,
-  detectSpeechSilenceCuts,
+  detectSpeechSilence,
   resolveSpeechSilenceOptions,
 } from '@pireel/studio-ui/speech-silence';
 import { withEditableBlockGeometry } from '@pireel/studio-ui/editable-block-geometry';
@@ -3001,11 +3002,19 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               minimumPauseSec: Number(input.minimumPauseSec),
               speechPaddingSec: Number(input.speechPaddingSec),
             });
-            const detectedRanges = await race(detectSpeechSilenceCuts(file, settings));
+            const heard = await race(detectSpeechSilence(file, settings));
+            const transcriptSegments = documentRef.current.semantics.transcripts[assetId] ?? [];
+            // No speech heard in a recording that has a transcript: the sound could not be analysed
+            // here, which is not the same as having no pauses. A 44-minute talk once came back
+            // "nothing to trim" this way, with 134 s of pauses left in. The transcript's own gaps
+            // stand in, and the receipt says so.
+            const fromTranscript = !heard.heardSpeech ? transcriptPauseRanges(transcriptSegments, settings) : [];
+            const basis: 'sound' | 'transcript' = fromTranscript.length ? 'transcript' : 'sound';
+            const detectedRanges = basis === 'transcript' ? fromTranscript : heard.cuts;
             const plan = planNarrationCuts(documentRef.current, {
               assetId,
               sourceRanges: detectedRanges,
-              transcriptSegments: documentRef.current.semantics.transcripts[assetId] ?? [],
+              transcriptSegments,
               transcriptProtection: 'all',
               bridgeSpeechlessIslandSec: 0.5,
               // A breath an edit left at a cut point it chose is that edit's, not dead air.
@@ -3017,7 +3026,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               return {
                 ok: true,
                 summary: t('workbench.noRemovableDeadAir'),
-                data: { cuts: [], removedTotalSec: 0, sourceRanges, settings },
+                data: { cuts: [], removedTotalSec: 0, sourceRanges, settings, basis },
               };
             }
             const seams: CutSeamEntry[] = edited.map((range) => ({ at: range.from, len: range.to - range.from }));
@@ -3032,7 +3041,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             return withDelta({
               ok: true,
               summary: t('workbench.removedDeadAir', { n: cuts.length, sec: removedTotalSec.toFixed(1) }),
-              data: { cuts, removedTotalSec, sourceRanges, settings },
+              data: { cuts, removedTotalSec, sourceRanges, settings, basis },
             });
           }
           case 'denoise_audio': {
@@ -4140,7 +4149,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           if (look) {
             const checked = await checkLookPieces(look, before.canvas).catch(() => null);
             if (checked?.hard.length) {
-              return { ok: false, error: 'invalid_look', data: { issues: checked.hard, fix: 'Fix the listed pieces and send only those pieces again; the previous look is unchanged.' } };
+              return { ok: false, error: 'invalid_look', data: { issues: checked.hard, fix: refusedLookFix(callArgs) } };
             }
             lookNotes = checked?.soft ?? [];
           }

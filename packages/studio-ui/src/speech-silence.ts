@@ -267,6 +267,26 @@ async function analyzeSpeechActivity(file: File, onProgress?: (done: number, tot
   return reader.finish();
 }
 
+/**
+ * The pauses to cut, and whether any speech was heard at all. A recording in which none was heard
+ * (its sound could not be decoded, or the voice detector found nothing) gives no cuts for a
+ * different reason than one without pauses: the caller must not report it as "nothing to trim".
+ */
+export async function detectSpeechSilence(file: File, options: SpeechSilenceOptions = {}): Promise<{ cuts: SpeechSilenceCut[]; heardSpeech: boolean }> {
+  let pending = activityCache.get(file);
+  if (!pending) {
+    pending = analyzeSpeechActivity(file, options.onProgress);
+    activityCache.set(file, pending);
+    void pending.catch(() => activityCache.delete(file));
+  }
+  const analysis = await pending;
+  options.onProgress?.(analysis.frames.length, analysis.frames.length);
+  return {
+    cuts: planSpeechSilenceCuts(analysis.frames, analysis.durationSec, options),
+    heardSpeech: analysis.frames.some((frame) => frame.voiceProbability >= SPEECH_REFERENCE_THRESHOLD && frame.rms > 0),
+  };
+}
+
 /** Analyze once per live File, then re-plan cheaply for different pause/padding settings. */
 export async function detectSpeechSilenceCuts(file: File, options: SpeechSilenceOptions = {}): Promise<SpeechSilenceCut[]> {
   let pending = activityCache.get(file);

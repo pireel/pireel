@@ -171,3 +171,47 @@ export function planNarrationCuts(
     .sort((left, right) => right.fromSec - left.fromSec);
   return { sourceRanges, timelineRanges };
 }
+
+/**
+ * The pauses of a recording as its transcript shows them: the gaps between one word's end and the
+ * next word's start that last at least `minimumPauseSec`, each shortened by `speechPaddingSec` at
+ * both ends so the words keep their air. Less exact than listening (word edges are the
+ * recognizer's), so it stands in only when the sound itself could not be analysed.
+ */
+export function transcriptPauseRanges(
+  segments: readonly TranscriptSegment[],
+  options: { minimumPauseSec: number; speechPaddingSec: number },
+): NarrationSourceRange[] {
+  const words = transcriptSpeechRanges(segments).sort((left, right) => left.fromSec - right.fromSec);
+  const out: NarrationSourceRange[] = [];
+  let spokenUntil = words[0]?.toSec ?? 0;
+  for (const word of words.slice(1)) {
+    if (word.fromSec - spokenUntil >= options.minimumPauseSec) {
+      const range = { fromSec: spokenUntil + options.speechPaddingSec, toSec: word.fromSec - options.speechPaddingSec };
+      if (range.toSec - range.fromSec > 0.05) out.push(range);
+    }
+    spokenUntil = Math.max(spokenUntil, word.toSec);
+  }
+  return out;
+}
+
+/**
+ * The pauses still in the edit: inside each story clip of a recording, the gaps between words that
+ * last at least `overSec`. What a pause trim is judged by: a step that ran and left minutes of dead
+ * air did not do its work, whatever it reported.
+ */
+export function pausesLeftInEdit(document: EditorDocumentV2, assetId: string, overSec: number): { count: number; totalSec: number; longestSec: number } {
+  const words = transcriptSpeechRanges((document.semantics.transcripts[assetId] ?? []) as TranscriptSegment[]).sort((left, right) => left.fromSec - right.fromSec);
+  const left = { count: 0, totalSec: 0, longestSec: 0 };
+  for (const clip of primaryNarrativeClips(document)) {
+    if (clip.assetId !== assetId || clip.enabled === false) continue;
+    let spokenUntil: number | null = null;
+    for (const word of words) {
+      if (word.toSec <= clip.sourceInSec || word.fromSec >= clip.sourceOutSec) continue;
+      const gap = spokenUntil === null ? 0 : word.fromSec - spokenUntil;
+      if (gap >= overSec) { left.count += 1; left.totalSec += gap; left.longestSec = Math.max(left.longestSec, gap); }
+      spokenUntil = Math.max(spokenUntil ?? 0, word.toSec);
+    }
+  }
+  return { count: left.count, totalSec: Math.round(left.totalSec * 10) / 10, longestSec: Math.round(left.longestSec * 10) / 10 };
+}
