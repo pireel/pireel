@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { Fragment, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, Highlighter, Loader2, Scissors, ScrollText, X } from 'lucide-react';
 import { managedCaptionLineRows, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
@@ -16,7 +16,7 @@ import type { CaptionCueEdit } from '@pireel/studio-engine/caption-document-edit
 import type { WordDecorationPatch } from '@pireel/studio-engine/word-decorations';
 import { DEFAULT_MASK_TEXT, type WordMaskPatch } from '@pireel/studio-engine/word-masks';
 import { TranscriptSelectionBar, type TimelineMaskTarget, type TimelineScriptCut, type TranscriptAddKind } from './script-panel';
-import { activeTranscriptTokenIndex, transcriptParagraphs, transcriptRemovals, transcriptSelectionEdits, transcriptTokens, type TranscriptRemoval, type TranscriptToken } from './transcript-editor-model';
+import { activeTranscriptTokenIndex, transcriptParagraphs, transcriptRemovals, transcriptSelectionEdits, transcriptTokens, type TranscriptParagraph, type TranscriptRemoval, type TranscriptToken } from './transcript-editor-model';
 import { t } from './i18n';
 import { CaptionsToolbarContext, TRANSCRIPT_TOOL_CLASS, TRANSCRIPT_TOOL_LABEL_CLASS, TRANSCRIPT_TOOLBAR_CLASS } from './captions-toolbar-slot';
 import { playhead } from './playhead';
@@ -50,6 +50,97 @@ interface TranslationPiece { text: string; mine: boolean }
 
 /** Rows per auto highlight request (the service takes at most 400). */
 const AUTO_HIGHLIGHT_BATCH = 200;
+
+/** What a section may ask of the editor; one object for the editor's life, so sections stay memoised. */
+interface SectionActions {
+  seek: (sec: number) => void;
+  close: () => void;
+  select: (selection: TranscriptSelection) => void;
+  wordClick: (token: TranscriptToken) => void;
+}
+
+/**
+ * One section of the script. Memoised on what it shows, and that leaves the playhead out: a section
+ * can hold a quarter of an hour of words, so what plays now is marked on its elements by the editor
+ * (`data-transcript-active`) instead of rendering them all again. A selection reaches a section
+ * only while it is in it.
+ */
+const TranscriptSection = memo(function TranscriptSection({ paragraph, index, selection, translation, translationLang, styleHighlight, canRestore, actions }: {
+  paragraph: TranscriptParagraph;
+  index: number;
+  /** The open selection while it is in this section, else null. */
+  selection: TranscriptSelection | null;
+  translation: (TranslationPiece[] | null)[] | undefined;
+  translationLang: string | undefined;
+  styleHighlight: string;
+  canRestore: boolean;
+  actions: SectionActions;
+}) {
+  const selectedIds = new Set(selection?.kind === 'words' ? selection.tokens.map((token) => token.id) : []);
+  return <section data-transcript-section={paragraph.id} className="border-line/60 mb-5 border-b pb-5 last:mb-0 last:border-b-0">
+    <button type="button" data-transcript-section-heading
+      onClick={() => actions.seek(paragraph.startSec)}
+      className="text-ink-4 hover:text-ink data-[transcript-active=true]:text-ink mb-2 flex items-center gap-2 text-[10.5px] data-[transcript-active=true]:font-medium">
+      <span>{t('captions.transcriptParagraph', { n: index + 1 })}</span>
+      <span className="font-mono tabular-nums">{Math.floor(paragraph.startSec / 60)}:{String(Math.floor(paragraph.startSec % 60)).padStart(2, '0')}</span>
+    </button>
+    <p className="text-ink whitespace-pre-wrap break-words text-[16px] font-normal leading-[2.05] tracking-[0.015em]">
+    {!paragraph.items.length && <span className="text-ink-4 text-[12px]" data-transcript-section-heading>{t('captions.sectionNoSpeech')}</span>}
+    {paragraph.items.map((item, itemIndex) => {
+      if (item.type === 'removed') {
+        const removal = item.removal;
+        return <span key={removal.id} data-transcript-removed={removal.id}>
+          {removal.parts.map((part, partIndex) => {
+            const picked = selection?.kind === 'removed' && selection.part === part;
+            const previous = removal.parts[partIndex - 1];
+            // Struck words keep their spacing, like the live words around them.
+            const gap = previous?.kind === 'word' && part.kind === 'word' && latinJoin(previous.text, part.text) ? ' ' : '';
+            return <Fragment key={partIndex}>{gap}<button type="button" title={canRestore ? t('panels.deletedClickRestore') : undefined} aria-pressed={picked}
+              onClick={(event) => { actions.close(); if (canRestore) actions.select({ kind: 'removed', removal, part, ...selectionPosition(event.currentTarget.getBoundingClientRect(), 220) }); }}
+              className={part.kind === 'pause'
+                ? `mx-0.5 inline rounded px-1 align-baseline font-mono text-[10.5px] leading-6 tabular-nums line-through ${picked ? 'bg-ink/15 text-ink-2' : 'text-ink-4 hover:bg-ink/10'}`
+                : `inline rounded-sm p-0 align-baseline line-through decoration-1 ${picked ? 'bg-ink/15 text-ink-2' : 'text-ink-4/80 hover:text-ink-3'}`}>
+              {part.kind === 'pause' ? `${(part.sourceEnd - part.sourceStart).toFixed(2)}s` : part.text}
+            </button></Fragment>;
+          })}
+        </span>;
+      }
+      if (item.type === 'pause') {
+        const pause = item.pause;
+        const sec = (pause.endSec - pause.startSec).toFixed(2);
+        const picked = selection?.kind === 'pause' && selection.pause.id === pause.id;
+        return <button key={pause.id} type="button" data-transcript-pause={pause.id} data-transcript-selected={picked || undefined}
+          aria-label={t('captions.selectPause', { sec })} title={t('captions.selectPause', { sec })} aria-pressed={picked}
+          onClick={(event) => { actions.close(); actions.seek(pause.startSec); actions.select({ kind: 'pause', pause, ...selectionPosition(event.currentTarget.getBoundingClientRect(), 220) }); }}
+          className={`mx-1 inline-flex items-center rounded px-1.5 align-baseline font-mono text-[10.5px] leading-6 tabular-nums hover:bg-ink/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring bg-panel-2/35 text-ink-3 data-[transcript-active=true]:bg-ink/15 data-[transcript-active=true]:text-ink`}>{sec}s</button>;
+      }
+      const token = item.token;
+      const picked = selectedIds.has(token.id);
+      const nextItem = paragraph.items[itemIndex + 1];
+      const next = nextItem?.type === 'word' ? nextItem.token : undefined;
+      const space = next && /[A-Za-z0-9.,!?;:'")\]%]$/.test(token.text) && /^[A-Za-z0-9('"[$]/.test(next.text);
+      return <span key={token.id}>
+        <span data-transcript-token={token.id} data-transcript-selected={picked || undefined}
+          title={token.decoration?.animation ? t(token.decoration.animation === 'pop' ? 'captions.animationPop' : 'captions.animationRise') : undefined}
+          onClick={() => actions.wordClick(token)}
+          style={!picked && token.decoration?.highlight === 'color' ? { color: token.decoration.color ?? styleHighlight } : token.decoration?.highlight === 'underline' ? { textDecorationColor: token.decoration.color ?? styleHighlight } : undefined}
+          className={`cursor-text rounded-sm py-[2px] ${token.decoration?.highlight === 'underline' ? 'underline decoration-2 underline-offset-4' : ''} ${token.decoration?.animation || token.masked ? 'decoration-ink-4 border-ink-4/50 border-b border-dotted' : ''}`}
+        >{token.text}</span>{space ? ' ' : ''}
+      </span>;
+    })}
+    </p>
+    {translation && <p data-transcript-translation lang={translationLang}
+      className="border-line/60 text-ink-4 mt-2 border-l-2 pl-3 text-[13px] leading-relaxed">
+      {translation.map((entry, entryIndex) => <span key={entryIndex}>
+        {entryIndex > 0 ? ' ' : ''}
+        {entry ? entry.map((piece, pieceIndex) => <span key={pieceIndex}>
+          {pieceIndex > 0 && latinJoin(entry[pieceIndex - 1]!.text, piece.text) ? ' ' : ''}
+          <span className={piece.mine ? 'text-ink-2' : entry.some((other) => other.mine) ? 'text-ink-4/60' : 'text-ink-3'}>{piece.text}</span>
+        </span>) : <span className="italic">{t('captions.notTranslated')}</span>}
+      </span>)}
+    </p>}
+  </section>;
+});
 
 export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, playing, active = true, extracting, onExtract, onSeek, onCut, onRestore, onEdit, onDecorate, onMask, onAddAtRange, addKinds, autoHighlight }: {
   document: EditorDocumentV2;
@@ -203,9 +294,42 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
     }
   }, [activeToken, playing, selection, active]);
   const selectedTokens = selection?.kind === 'words' ? selection.tokens : [];
-  const selectedIds = new Set(selectedTokens.map((token) => token.id));
+  // What plays now is marked on the elements themselves. Runs after every render: one that
+  // replaced the words leaves new elements unmarked, and finding three is cheap next to rendering.
+  const litRef = useRef<Element[]>([]);
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const at = (span: { startSec: number; endSec: number }) => currentTimeSec >= span.startSec && currentTimeSec < span.endSec;
+    const selectors = [
+      ...tokens.filter(at).map((token) => `[data-transcript-token="${CSS.escape(token.id)}"]`),
+      ...pauses.filter(at).map((pause) => `[data-transcript-pause="${CSS.escape(pause.id)}"]`),
+      ...paragraphs.filter(at).map((paragraph) => `[data-transcript-section="${CSS.escape(paragraph.id)}"] > [data-transcript-section-heading]`),
+    ];
+    const lit = selectors.flatMap((selector) => { const element = list.querySelector(selector); return element ? [element] : []; });
+    for (const element of litRef.current) if (!lit.includes(element)) element.removeAttribute('data-transcript-active');
+    for (const element of lit) element.setAttribute('data-transcript-active', 'true');
+    litRef.current = lit;
+  });
+  const sectionOf = useMemo(() => {
+    const out = new Map<string, string>();
+    for (const paragraph of paragraphs) for (const item of paragraph.items) out.set(item.type === 'word' ? `w:${item.token.id}` : item.type === 'pause' ? `p:${item.pause.id}` : `r:${item.removal.id}`, paragraph.id);
+    return out;
+  }, [paragraphs]);
+  const selectionSections = new Set(!selection ? [] : selection.kind === 'words' ? selection.tokens.map((token) => sectionOf.get(`w:${token.id}`))
+    : [sectionOf.get(selection.kind === 'pause' ? `p:${selection.pause.id}` : `r:${selection.removal.id}`)]);
   const targets = selectedTokens.flatMap((token) => Array.from({ length: token.w1 - token.w0 + 1 }, (_, i) => ({ assetId: token.assetId, si: token.si, wi: token.w0 + i })));
   const close = () => { setSelection(null); setDrafts(null); window.getSelection()?.removeAllRanges(); };
+  const [sectionActions] = useState((): SectionActions => ({
+    seek: (sec) => seekRef.current(sec),
+    close: () => { setSelection(null); setDrafts(null); window.getSelection()?.removeAllRanges(); },
+    select: (next) => setSelection(next),
+    wordClick: (token) => {
+      if (suppressClickRef.current) { suppressClickRef.current = false; return; }
+      if (window.getSelection()?.toString().trim()) return;
+      seekRef.current(token.startSec);
+    },
+  }));
   // Metadata/style commits may replace the document while a user is selecting. Only changes
   // to the displayed words or their timing invalidate that selection.
   const transcriptIdentity = useMemo(() => JSON.stringify({ words: tokens.map(({ id, text, startSec, endSec }) => [id, text, startSec, endSec]), pauses: pauses.map(({ id, startSec, endSec }) => [id, startSec, endSec]) }), [tokens, pauses]);
@@ -285,8 +409,8 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
   const longPauses = useMemo(() => pauses.filter((pause) => pause.endSec - pause.startSec > CLEANUP_PAUSE_OVER_SEC + 1e-7), [pauses]);
   const silences = useMemo(() => longPauses.flatMap((pause) => transcriptPauseCuts(pause, CLEANUP_PAUSE_KEEP_SEC)), [longPauses]);
   const silenceSec = longPauses.reduce((total, pause) => total + pause.endSec - pause.startSec - CLEANUP_PAUSE_KEEP_SEC, 0);
-  const fillers = tokens.filter((token) => isFillerWord(token.text)
-    && document.semantics.transcripts[token.assetId]?.[token.si]?.words?.length);
+  const fillers = useMemo(() => tokens.filter((token) => isFillerWord(token.text)
+    && document.semantics.transcripts[token.assetId]?.[token.si]?.words?.length), [tokens, document]);
 
   return <div className="relative flex min-h-0 flex-1 flex-col" data-transcript-editor>
     <div className={TRANSCRIPT_TOOLBAR_CLASS}>
@@ -334,75 +458,10 @@ export function TranscriptEditor({ document, currentTimeSec: pausedTimeSec, play
         <ScrollText size={24} />{t('panels.noTranscriptYetTranscribe')}
         <button type="button" disabled={extracting} onClick={onExtract} className="bg-primary text-primary-foreground rounded-md px-3 py-1.5 disabled:opacity-40">{t('captions.extractCaptions')}</button>
       </div>}
-      {paragraphs.map((paragraph, paragraphIndex) => <section key={paragraph.id} data-transcript-section={paragraph.id} className="border-line/60 mb-5 border-b pb-5 last:mb-0 last:border-b-0">
-        <button type="button" data-transcript-section-heading
-          onClick={() => onSeek(paragraph.startSec)}
-          className={`mb-2 flex items-center gap-2 text-[10.5px] ${currentTimeSec >= paragraph.startSec && currentTimeSec < paragraph.endSec ? 'text-ink font-medium' : 'text-ink-4 hover:text-ink'}`}>
-          <span>{t('captions.transcriptParagraph', { n: paragraphIndex + 1 })}</span>
-          <span className="font-mono tabular-nums">{Math.floor(paragraph.startSec / 60)}:{String(Math.floor(paragraph.startSec % 60)).padStart(2, '0')}</span>
-        </button>
-        <p className="text-ink whitespace-pre-wrap break-words text-[16px] font-normal leading-[2.05] tracking-[0.015em]">
-        {!paragraph.items.length && <span className="text-ink-4 text-[12px]" data-transcript-section-heading>{t('captions.sectionNoSpeech')}</span>}
-        {paragraph.items.map((item, index) => {
-          if (item.type === 'removed') {
-            const removal = item.removal;
-            return <span key={removal.id} data-transcript-removed={removal.id}>
-              {removal.parts.map((part, partIndex) => {
-                const picked = selection?.kind === 'removed' && selection.part === part;
-                const previous = removal.parts[partIndex - 1];
-                // Struck words keep their spacing, like the live words around them.
-                const gap = previous?.kind === 'word' && part.kind === 'word' && latinJoin(previous.text, part.text) ? ' ' : '';
-                return <Fragment key={partIndex}>{gap}<button type="button" title={onRestore ? t('panels.deletedClickRestore') : undefined} aria-pressed={picked}
-                  onClick={(event) => { close(); if (onRestore) setSelection({ kind: 'removed', removal, part, ...selectionPosition(event.currentTarget.getBoundingClientRect(), 220) }); }}
-                  className={part.kind === 'pause'
-                    ? `mx-0.5 inline rounded px-1 align-baseline font-mono text-[10.5px] leading-6 tabular-nums line-through ${picked ? 'bg-ink/15 text-ink-2' : 'text-ink-4 hover:bg-ink/10'}`
-                    : `inline rounded-sm p-0 align-baseline line-through decoration-1 ${picked ? 'bg-ink/15 text-ink-2' : 'text-ink-4/80 hover:text-ink-3'}`}>
-                  {part.kind === 'pause' ? `${(part.sourceEnd - part.sourceStart).toFixed(2)}s` : part.text}
-                </button></Fragment>;
-              })}
-            </span>;
-          }
-          if (item.type === 'pause') {
-            const pause = item.pause;
-            const sec = (pause.endSec - pause.startSec).toFixed(2);
-            const active = currentTimeSec >= pause.startSec && currentTimeSec < pause.endSec;
-            const picked = selection?.kind === 'pause' && selection.pause.id === pause.id;
-            return <button key={pause.id} type="button" data-transcript-pause={pause.id} data-transcript-selected={picked || undefined}
-              aria-label={t('captions.selectPause', { sec })} title={t('captions.selectPause', { sec })} aria-pressed={picked}
-              onClick={(event) => { close(); onSeek(pause.startSec); setSelection({ kind: 'pause', pause, ...selectionPosition(event.currentTarget.getBoundingClientRect(), 220) }); }}
-              className={`mx-1 inline-flex items-center rounded px-1.5 align-baseline font-mono text-[10.5px] leading-6 tabular-nums hover:bg-ink/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${active ? 'bg-ink/15 text-ink' : 'bg-panel-2/35 text-ink-3'}`}>{sec}s</button>;
-          }
-          const token = item.token;
-          const picked = selectedIds.has(token.id);
-          const active = currentTimeSec >= token.startSec && currentTimeSec < token.endSec;
-          const nextItem = paragraph.items[index + 1];
-          const next = nextItem?.type === 'word' ? nextItem.token : undefined;
-          const space = next && /[A-Za-z0-9.,!?;:'")\]%]$/.test(token.text) && /^[A-Za-z0-9('"[$]/.test(next.text);
-          return <span key={token.id}>
-            <span data-transcript-token={token.id} data-transcript-selected={picked || undefined} data-transcript-active={active || undefined}
-              title={token.decoration?.animation ? t(token.decoration.animation === 'pop' ? 'captions.animationPop' : 'captions.animationRise') : undefined}
-              onClick={() => {
-                if (suppressClickRef.current) { suppressClickRef.current = false; return; }
-                if (window.getSelection()?.toString().trim()) return;
-                onSeek(token.startSec);
-              }}
-              style={!picked && token.decoration?.highlight === 'color' ? { color: token.decoration.color ?? styleHighlight } : token.decoration?.highlight === 'underline' ? { textDecorationColor: token.decoration.color ?? styleHighlight } : undefined}
-              className={`cursor-text rounded-sm py-[2px] ${token.decoration?.highlight === 'underline' ? 'underline decoration-2 underline-offset-4' : ''} ${token.decoration?.animation || token.masked ? 'decoration-ink-4 border-ink-4/50 border-b border-dotted' : ''}`}
-            >{token.text}</span>{space ? ' ' : ''}
-          </span>;
-        })}
-        </p>
-        {sectionTranslations.has(paragraph.id) && <p data-transcript-translation lang={translationLang}
-          className="border-line/60 text-ink-4 mt-2 border-l-2 pl-3 text-[13px] leading-relaxed">
-          {sectionTranslations.get(paragraph.id)!.map((entry, entryIndex) => <span key={entryIndex}>
-            {entryIndex > 0 ? ' ' : ''}
-            {entry ? entry.map((piece, pieceIndex) => <span key={pieceIndex}>
-              {pieceIndex > 0 && latinJoin(entry[pieceIndex - 1]!.text, piece.text) ? ' ' : ''}
-              <span className={piece.mine ? 'text-ink-2' : entry.some((other) => other.mine) ? 'text-ink-4/60' : 'text-ink-3'}>{piece.text}</span>
-            </span>) : <span className="italic">{t('captions.notTranslated')}</span>}
-          </span>)}
-        </p>}
-      </section>)}
+      {paragraphs.map((paragraph, paragraphIndex) => <TranscriptSection key={paragraph.id} paragraph={paragraph} index={paragraphIndex}
+        selection={selection && selectionSections.has(paragraph.id) ? selection : null}
+        translation={sectionTranslations.get(paragraph.id)} translationLang={translationLang}
+        styleHighlight={styleHighlight} canRestore={!!onRestore} actions={sectionActions} />)}
     </div>
     {selection && createPortal(<div data-transcript-toolbar data-script-pop className="border-line bg-panel text-ink fixed z-[100] rounded-lg border p-1.5 shadow-xl" style={{ left: selection.left, top: selection.top, width: 'max-content', maxWidth: 'calc(100vw - 24px)' }}>
       {drafts ? <div className="flex w-[min(360px,calc(100vw-40px))] flex-col gap-2 p-1">
