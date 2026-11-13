@@ -3,6 +3,8 @@ import parse from 'css-tree/parser';
 import type { StyleSheet } from 'css-tree';
 import { compileComponentStyles } from './component-styles';
 import { assembleHtml } from './assemble';
+import { captionBlocksFromAsr } from './build-blocks';
+import { ensureTemplatesRegistered } from './templates';
 
 function styleRoot(html: string) { return parse(/<style[^>]*>([\s\S]*?)<\/style>/.exec(html)![1]!) as StyleSheet; }
 
@@ -57,6 +59,41 @@ describe('renderer-owned component styles', () => {
       expect(root.children.first).toMatchObject({ type: 'Atrule', name: 'scope' });
       expect(result.html).not.toContain('body{');
     }
+  });
+  it('writes a sheet anchored to the component root as plain rules under the root, without @scope', () => {
+    const input = '<style>#cap .cap-root{position:absolute}#cap .w>.t::after,#cap .w.sp:hover{color:red}#cap{--ink:red}.theme #cap b{color:blue}</style>';
+    const result = compileComponentStyles(input, 'cap');
+    expect(result.warnings).toEqual([]);
+    expect(result.html).toBe('<style>[id="cap"] .cap-root{position:absolute}[id="cap"] .w>.t::after,[id="cap"] .w.sp:hover{color:red}[id="cap"]{--ink:red}.theme [id="cap"] b{color:blue}</style>');
+    // Reopened source, and source compiled when every sheet was wrapped, land on the same text.
+    expect(compileComponentStyles(result.html, 'cap')).toEqual(result);
+    expect(compileComponentStyles('<style>@scope ([id="cap"]){:scope .cap-root{position:absolute}:scope .w>.t::after,:scope .w.sp:hover{color:red}:scope{--ink:red}.theme :scope b{color:blue}}</style>', 'cap').html).toBe(result.html);
+  });
+  it('keeps @scope for anything that could reach outside the component or needs the scope to stay inside', () => {
+    for (const css of [
+      '#cap .w{color:red}.label{color:blue}', // a selector without the root
+      '#cap~.next{color:red}', // a sibling of the root
+      '#cap+.next .w{color:red}',
+      '#cap :is(.a,.b){color:red}', // a functional pseudo-class
+      '#cap .w:not(.sp){color:red}',
+      '@media (min-width:1px){#cap .w{color:red}}', // a grouping rule
+      '#cap .w{color:red;.t{color:blue}}', // a nested rule
+      '#cap .w{color:red}@keyframes spin{to{rotate:1turn}}',
+    ]) {
+      const result = compileComponentStyles(`<style>${css}</style>`, 'cap');
+      const root = styleRoot(result.html);
+      expect(root.children.size, css).toBe(1);
+      expect(root.children.first, css).toMatchObject({ type: 'Atrule', name: 'scope' });
+      expect(compileComponentStyles(result.html, 'cap'), css).toEqual(result);
+    }
+  });
+  it('gives the built-in captions plain rules: no scope per caption in the assembled document', () => {
+    ensureTemplatesRegistered();
+    const blocks = captionBlocksFromAsr([{ start: 0, end: 2, text: '第一句字幕' }, { start: 2, end: 4, text: '第二句字幕' }]);
+    const html = assembleHtml({ width: 1920, height: 1080, theme: 'general', video: null, shots: [], blocks });
+    expect(blocks.length).toBeGreaterThan(0);
+    expect(html).not.toContain('@scope');
+    for (const block of blocks) expect(html).toContain(`[id="${block.id}"] .cap-line{`);
   });
   it('applies the same isolation to the actual assembled preview/export document', () => {
     const html = assembleHtml({ width: 640, height: 360, theme: 'general', video: null, shots: [], blocks: [

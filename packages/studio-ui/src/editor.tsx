@@ -6,6 +6,7 @@ import { UiI18nProvider, uiMessagesForLocale } from '@pireel/ui/i18n';
 import { Toaster } from '@pireel/ui/toast';
 import { studioProviders, setStudioProviders, unavailableProviders, type StudioProviders } from '@pireel/studio-engine/providers';
 import { HyperframesWorkbench } from './hyperframes-workbench';
+import { useEditorPageMark } from './editor-page-mark';
 import { StudioShellProvider, type StudioShell } from './shell-context';
 import { setStudioLocale, studioLocale } from './i18n';
 
@@ -23,6 +24,7 @@ export interface PireelEditorProps {
 /** The original full editor, packaged for embedding. Product pages and presets are host extensions. */
 export function PireelEditor({ projectId, locale = 'zh', providers = LOCAL_SERVICES, extensions = NO_EXTENSIONS, className = 'h-full w-full min-h-0' }: PireelEditorProps) {
   const [ready, setReady] = useState(false);
+  useEditorPageMark();
   useEffect(() => {
     const previous = studioProviders(); const previousLocale = studioLocale();
     setStudioProviders(providers); setStudioLocale(locale); setReady(true);

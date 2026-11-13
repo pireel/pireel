@@ -71,13 +71,17 @@ body:has(.landing-editorial) {
   background-size: auto, 9px 9px, 13px 13px;
 }
 
-/* Studio follows the saved site theme, including menus rendered through portals. */
+/* Studio follows the saved site theme, including menus rendered through portals: an
+ * .editorial-theme element inside an editor surface, or anywhere on a page that has one (the
+ * surface marks <body>, see editor-page-mark.ts). Not `body:has(…) .editorial-theme`: a :has() in
+ * an ancestor position restyles the whole page on every node added or removed. */
 html:not(.dark) .pireel-editor-theme,
 html:not(.dark) body:has(.pireel-editor-theme),
-html:not(.dark) body:has(.pireel-editor-theme) .editorial-theme,
+html:not(.dark) .pireel-editor-theme .editorial-theme,
 html:not(.dark) .studio-editorial,
 html:not(.dark) body:has(.studio-editorial),
-html:not(.dark) body:has(.studio-editorial) .editorial-theme {
+html:not(.dark) .studio-editorial .editorial-theme,
+html:not(.dark) body[data-editor-page] .editorial-theme {
   color-scheme: light;
   --color-accent-ink: var(--color-brand-text);
   --color-bg: #e8e8e4;

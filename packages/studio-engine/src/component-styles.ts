@@ -9,9 +9,42 @@ export interface ComponentStyleResult { html: string; warnings: string[] }
 const cache = new Map<string, ComponentStyleResult>();
 const MAX_CACHE_ENTRIES = 32;
 
+const PLAIN_SELECTOR_PARTS = new Set(['TypeSelector', 'ClassSelector', 'IdSelector', 'AttributeSelector', 'PseudoClassSelector', 'PseudoElementSelector', 'Combinator']);
+
+/**
+ * Whether the sheet confines itself: only plain style rules, each selector naming the component
+ * root (`:scope`) and stepping only down from it (descendant and child combinators, no functional
+ * pseudo-classes, nothing nested or grouped). Every built-in caption and legacy `#id …` sheet is
+ * like this. With `:scope` spelled as the root's own attribute selector such a sheet matches the
+ * same elements with the same specificity as it does inside @scope.
+ */
+function anchoredToRoot(sheet: StyleSheet): boolean {
+  let anchored = true;
+  sheet.children.forEach((node) => {
+    if (node.type !== 'Rule' || node.prelude.type !== 'SelectorList') { anchored = false; return; }
+    node.block.children.forEach((child) => { if (child.type !== 'Declaration') anchored = false; });
+    node.prelude.children.forEach((selector) => {
+      if (selector.type !== 'Selector') { anchored = false; return; }
+      let rooted = false;
+      selector.children.forEach((part) => {
+        if (!PLAIN_SELECTOR_PARTS.has(part.type)) anchored = false;
+        else if (part.type === 'Combinator' && part.name !== ' ' && part.name !== '>') anchored = false;
+        else if ((part.type === 'PseudoClassSelector' || part.type === 'PseudoElementSelector') && part.children) anchored = false;
+        else if (part.type === 'PseudoClassSelector' && part.name.toLowerCase() === 'scope') rooted = true;
+      });
+      if (!rooted) anchored = false;
+    });
+  });
+  return anchored;
+}
+
 /** The rendering boundary owns CSS scope. Source can use local selectors; legacy #id selectors
- * remain valid. CSS syntax is parsed once, empty rules are discarded, and native @scope confines
- * every selector to the component subtree (including selector lists and nested grouping rules). */
+ * remain valid. CSS syntax is parsed once, empty rules are discarded, and every selector is confined
+ * to the component subtree (including selector lists and nested grouping rules): by native @scope,
+ * or, for a sheet that already anchors each selector to the component root, by that root's own
+ * attribute selector. The browser weighs every @scope against every element it restyles, so one
+ * per caption (1,470 of them in a 44-minute talk) cost gigabytes each time the document was
+ * styled; the plain rules cost nothing. */
 export function compileComponentStyles(html: string, componentId: string): ComponentStyleResult {
   const key = `${componentId}\0${html}`;
   const hit = cache.get(key);
@@ -53,21 +86,37 @@ export function compileComponentStyles(html: string, componentId: string): Compo
       walk(sheet, { visit: 'Raw', leave(node, item, list) {
         if (discarded.has(node) && item && list) list.remove(item);
       } });
+      if (sheet.children.isEmpty) return '';
+      const wrapper = parse(`@scope ${anchor}{}`) as StyleSheet;
+      const scope = wrapper.children.first;
+      if (scope?.type !== 'Atrule' || !scope.block) throw new Error('Unable to construct component scope');
+      // Source that was compiled before comes back in its own wrapper: take the rules out of it.
+      const existing = sheet.children.size === 1 ? sheet.children.first : undefined;
+      if (existing?.type === 'Atrule' && existing.name === 'scope' && existing.prelude && existing.block && scope.prelude
+        && generate(existing.prelude) === generate(scope.prelude)) sheet.children = existing.block.children as StyleSheet['children'];
       // Inside @scope, a legacy #component selector does not select the scoping root.
-      // Rebase only that ID selector in the AST; local child IDs, declaration hashes and
-      // quoted strings must keep their original meaning. This also repairs built-in captions.
+      // Rebase only that ID selector in the AST (and the attribute form this compiler writes);
+      // local child IDs, declaration hashes and quoted strings must keep their original meaning.
+      // This also repairs built-in captions.
       walk(sheet, { visit: 'IdSelector', enter(node, item) {
         if (node.name === componentId && item) {
           item.data = { type: 'PseudoClassSelector', name: 'scope', children: null };
         }
       } });
+      walk(sheet, { visit: 'AttributeSelector', enter(node, item) {
+        if (node.name.name === 'id' && node.matcher === '=' && node.value && (node.value.type === 'String' ? node.value.value : node.value.name) === componentId && !node.flags && item) {
+          item.data = { type: 'PseudoClassSelector', name: 'scope', children: null };
+        }
+      } });
       if (sheet.children.isEmpty) return '';
-      const wrapper = parse(`@scope ${anchor}{}`) as StyleSheet;
-      const scope = wrapper.children.first;
-      if (scope?.type !== 'Atrule' || !scope.block) throw new Error('Unable to construct component scope');
-      const existing = sheet.children.size === 1 ? sheet.children.first : undefined;
-      if (existing?.type === 'Atrule' && existing.name === 'scope' && existing.prelude && scope.prelude
-        && generate(existing.prelude) === generate(scope.prelude)) return `<style${attributes}>${generate(sheet)}</style>`;
+      if (anchoredToRoot(sheet)) {
+        walk(sheet, { visit: 'PseudoClassSelector', enter(node, item) {
+          if (node.name.toLowerCase() === 'scope' && !node.children && item) {
+            item.data = { type: 'AttributeSelector', name: { type: 'Identifier', name: 'id' }, matcher: '=', value: { type: 'String', value: componentId }, flags: null };
+          }
+        } });
+        return `<style${attributes}>${generate(sheet)}</style>`;
+      }
       scope.block.children = sheet.children;
       return `<style${attributes}>${generate(wrapper)}</style>`;
     } catch (error) {
