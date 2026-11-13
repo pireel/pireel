@@ -9,7 +9,11 @@ import type { SupplementalVisualMediaClip } from '@pireel/studio-engine/visual-l
 const engines = vi.hoisted(() => [] as any[]);
 const stages = vi.hoisted(() => [] as any[]);
 vi.mock('./preview-stage-host', () => ({ PreviewStageHost: class {
-  srcdoc = ''; onMessage: ((event: unknown) => void) | null = null; dispose = vi.fn();
+  // Like the real stage: every assignment mounts the document, the same text included.
+  mounts = 0; private text = '';
+  get srcdoc() { return this.text; }
+  set srcdoc(html: string) { this.text = html; this.mounts += 1; }
+  onMessage: ((event: unknown) => void) | null = null; dispose = vi.fn();
   contentWindow = { postMessage: vi.fn() };
   constructor(readonly element: HTMLDivElement) { stages.push(this); }
 } }));
@@ -80,5 +84,65 @@ it('uses the workbench canvas, keeps its decoder through edits, and primes repla
     await act(async () => root.unmount());
     expect(eng.dispose).toHaveBeenCalledOnce();
     expect(stages.every(stage => stage.dispose.mock.calls.length > 0)).toBe(true);
+  } finally { element.remove(); vi.restoreAllMocks(); vi.useRealTimers(); vi.unstubAllGlobals(); }
+});
+
+it('announces a picture asked for again: the one on screen, and the one the hidden stage still holds', async () => {
+  vi.useFakeTimers(); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  stages.length = 0;
+  const element = document.createElement('div'); document.body.append(element);
+  const root = createRoot(element);
+  const source = new File(['source'], 'source.mp4');
+  const files = new Map([['blob:source', source]]);
+  const onShown = vi.fn();
+  // Three pictures that differ in the document: the same footage under three canvas shapes.
+  const picture = (height: number) => ({ ...emptyComposition(), width: 640, height, video: { url: 'blob:source', durationSec: 10 }, shots: [{ id: 'source', src: 'blob:source', srcStart: 0, srcEnd: 10, treatment: 'full' as const }] });
+  const show = async (height: number) => {
+    await act(async () => root.render(createElement(SceneCanvasPreview, { composition: picture(height), visuals: [], files, duration: 10, volume: 1, onTime: vi.fn(), onPlaying: vi.fn(), onShown })));
+    await act(async () => vi.advanceTimersByTime(110));
+  };
+  const firstFrame = async (stage: any) => {
+    await act(async () => stage.onMessage({ source: stage.contentWindow, data: { type: 'pong', nonce: 'boot' } }));
+    await act(async () => engines.at(-1).onFrame({ close: vi.fn() }, { t: 0, srcT: 0, elKey: 'clip_source' }));
+  };
+  try {
+    await show(360);
+    const [first] = stages;
+    await firstFrame(first);
+    expect(onShown).toHaveBeenCalledTimes(1);
+
+    await show(480);
+    const second = stages[1];
+    await firstFrame(second);
+    expect(onShown).toHaveBeenCalledTimes(2);
+    expect(second.element.style.opacity).toBe('1');
+
+    // The same picture again, as a new composition object: nothing mounts, and it is announced.
+    const mounted = [first.mounts, second.mounts];
+    await show(480);
+    expect([first.mounts, second.mounts]).toEqual(mounted);
+    expect(onShown).toHaveBeenCalledTimes(3);
+    expect(second.element.style.opacity).toBe('1');
+
+    // A third picture takes the other place (a new stage: the first one's was let go above); the
+    // second is now the hidden one.
+    await show(600);
+    const third = stages.at(-1)!;
+    expect(third).not.toBe(second);
+    await firstFrame(third);
+    expect(onShown).toHaveBeenCalledTimes(4);
+    expect(third.element.style.opacity).toBe('1');
+
+    // Back to the second picture: the hidden stage still holds that very document. It is mounted
+    // afresh, and its first frame brings it up. (It used to mount nothing and wait for good.)
+    const before = second.mounts;
+    await show(480);
+    expect(second.mounts).toBe(before + 1);
+    expect(second.element.style.opacity).toBe('0');
+    await firstFrame(second);
+    expect(onShown).toHaveBeenCalledTimes(5);
+    expect(second.element.style.opacity).toBe('1');
+    expect(third.element.style.opacity).toBe('0');
+    await act(async () => root.unmount());
   } finally { element.remove(); vi.restoreAllMocks(); vi.useRealTimers(); vi.unstubAllGlobals(); }
 });

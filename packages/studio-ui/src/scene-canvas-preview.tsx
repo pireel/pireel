@@ -240,11 +240,29 @@ export const SceneCanvasPreview = forwardRef<SceneCanvasHandle, Props>(function 
     const timer = setTimeout(() => {
       const visuals = props.visuals.map(visual => visual.kind === 'image' && props.files.has(visual.source) ? { ...visual, source: 'pireel-local-image:' + encodeURIComponent(visual.clipId).replace(/[!'()*]/g, char => '%' + char.charCodeAt(0).toString(16).toUpperCase()) } : visual);
       const html = injectPreviewRuntime(assembleHtml(props.composition, undefined, props.placements, visuals));
-      if (html === documents.current[active.current]) return;
+      if (html === documents.current[active.current]) {
+        // The picture asked for is the one on screen: a choice that comes out the same (a framing
+        // that changes nothing for this footage), or a change undone before its replacement was up.
+        // No first frame will arrive to announce it, so it is announced here; without this the
+        // caller's "changing" mark stayed up for good. A replacement still on its way is dropped.
+        const other = 1 - active.current;
+        if (documents.current[other] && priming.current !== active.current) {
+          if (priming.current === other) priming.current = null;
+          ready.current[other] = false;
+          setDocs(previous => { const next: [string, string] = [...previous]; next[other] = ''; return next; });
+        }
+        if (priming.current === null && ready.current[active.current]) current.current.onShown?.();
+        return;
+      }
       const index = documents.current[active.current] ? 1 - active.current : active.current;
       ready.current[index] = false;
       priming.current = null;
       bindings.current[index] = props;
+      // The hidden stage may already hold this very document: the picture of two changes ago, asked
+      // for again (a framing choice switched away from and back, or two choices that come out the
+      // same). Assigning the same text mounts nothing, so no first frame ever announced it and the
+      // old picture stayed up with the caller's "changing" mark. Mount it afresh.
+      if (documents.current[index] === html) { const stage = frames.current[index]; if (stage) stage.srcdoc = html; return; }
       setDocs(previous => { const next: [string, string] = [...previous]; next[index] = html; return next; });
     }, 100);
     return () => clearTimeout(timer);
