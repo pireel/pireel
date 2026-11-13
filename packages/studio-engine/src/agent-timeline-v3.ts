@@ -1,3 +1,4 @@
+import { COLD_OPEN_MAX_SEC, introducedFindings } from './timeline-audit';
 import { isCaptionAnimation, CAPTION_ANIMATION_IDS, captionAnimationId } from '@pireel/studio-engine/caption-animations';
 import { DEFAULT_TRANSITION_SEC, maxTransitionFrames, transitionSlotAt } from '@pireel/studio-engine/editor-document/transitions';
 /**
@@ -192,6 +193,31 @@ function duplicateGraphic(document: EditorDocumentV2, clipId: string, startFrame
   return { ...mutation(edit.document, `Duplicated "${blockName(block)}"`, edit.receipts, { newClipId }), newClipId };
 }
 
+/**
+ * Refuses a placement that leaves the edit structurally wrong, where the call that caused it can
+ * still be told what to do instead. Seen in a real one-click edit: the recording was added onto the
+ * story spine over the speech already there (a passage then played twice, with a sliver of the old
+ * clip between), and again onto the B-roll lane over itself.
+ */
+function placementFault(before: EditorDocumentV2, after: EditorDocumentV2, mode: 'overwrite' | 'ripple'): AgentTimelineOutcome | null {
+  const introduced = introducedFindings(before, after, ['spine-repeat', 'self-overlay']).filter((finding) => finding.severity === 'error');
+  const overlay = introduced.filter((finding) => finding.code === 'self-overlay');
+  if (overlay.length) {
+    return fail('recording_over_itself', {
+      findings: overlay.map((finding) => finding.message),
+      fix: 'Nothing was placed. The story spine already shows this recording at that moment; B-roll is other footage. To show the speaker closer or reframed, change the spine clip itself: set_clip_framing for a crop or position, set_keyframes for a push-in.',
+    });
+  }
+  const repeats = introduced.filter((finding) => finding.code === 'spine-repeat');
+  if (!repeats.length) return null;
+  return fail('repeats_spine_speech', {
+    findings: repeats.map((finding) => finding.message),
+    fix: mode === 'overwrite'
+      ? 'Nothing was placed. add_clips on the primary role laid the recording over speech that is already on the story spine, so a passage would play twice. To bring back a cut passage, use insert_clips with words [firstWordId, lastWordId] (the cut words\' ids from get_transcript granularity=words with segmentIndexes): it opens time for the passage and carries its captions. To drop a passage use remove_words.'
+      : `Nothing was placed. This would play speech twice that is already on the story spine. A cold open is one line of at most ${COLD_OPEN_MAX_SEC} s at frame 0; to bring back a cut passage, insert only the cut words (their ids are listed by get_transcript granularity=words with segmentIndexes), not words that still play.`,
+  });
+}
+
 export function addClipsV3(document: EditorDocumentV2, input: Input, mode: 'overwrite' | 'ripple'): AgentTimelineOutcome {
   const fps = document.canvas.fps;
   let next = document;
@@ -239,6 +265,8 @@ export function addClipsV3(document: EditorDocumentV2, input: Input, mode: 'over
     }
     const placed = placeClips(next, call, mode);
     if (!placed.ok || !placed.document) return placed;
+    const fault = placementFault(next, placed.document, mode);
+    if (fault) return fault;
     next = placed.document;
     receipts.push(...(placed.receipts ?? []));
     Object.assign(data, placed.data as Record<string, unknown>);

@@ -1,3 +1,4 @@
+import { introducedFindings } from './timeline-audit';
 /**
  * Agent tools for video-level templates (look.ts):
  *  - set_look: write the output's look — its visual system and parametric pieces;
@@ -44,6 +45,39 @@ function listFieldOutsideRows(schema: unknown): { prop: string; field: string } 
   return undefined;
 }
 
+/** The class names a stylesheet has rules for (read from its selectors, not from values). */
+export function styledClassNames(css: string): Set<string> {
+  const out = new Set<string>();
+  const bare = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  for (const selector of bare.matchAll(/([^{}]+)\{/g)) {
+    if (selector[1]!.trim().startsWith('@')) continue;
+    for (const name of selector[1]!.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)) out.add(name[1]!);
+  }
+  return out;
+}
+
+/** The class names a piece's markup wears (literal ones; a class built from a prop is not listed). */
+export function pieceClassNames(pieceSource: string): Set<string> {
+  const out = new Set<string>();
+  for (const attribute of pieceSource.matchAll(/class=\\?["']([^"'\\]*)/g)) {
+    for (const name of attribute[1]!.split(/\s+/)) if (/^-?[_a-zA-Z][\w-]*$/.test(name)) out.add(name);
+  }
+  return out;
+}
+
+/**
+ * What a refused set_look tells the model to do next: nothing of the call was kept. In a real edit a
+ * look arrived with its full stylesheet and one faulty piece; the refusal asked for "only those
+ * pieces again", the model sent that piece alone, and the stylesheet of the refused call (2,277
+ * characters, over the 297 of the look it had) was never sent again: every graphic of the video
+ * rendered as bare white text.
+ */
+export function refusedLookFix(input: Input): string {
+  const raw = input.look && typeof input.look === 'object' && !Array.isArray(input.look) ? (input.look as Input) : {};
+  const sent = [typeof raw.css === 'string' ? 'css' : '', Array.isArray(raw.pieces) && raw.pieces.length ? 'pieces' : '', raw.fonts !== undefined ? 'fonts' : '', raw.notes !== undefined ? 'notes' : ''].filter(Boolean);
+  return `Nothing from this call was saved (${sent.join(', ') || 'no field'} included); the look is as it was before it. Call set_look again with everything this call carried${typeof raw.css === 'string' ? ', the css too,' : ''} and the listed issues fixed.`;
+}
+
 export function setLookV3(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const raw = input.look && typeof input.look === 'object' && !Array.isArray(input.look) ? (input.look as Input) : null;
   if (!raw) return fail('missing_field', { path: 'look', fix: 'Pass look: { css, pieces: [{ id, label, source, propsSchema }], notes }.' });
@@ -83,17 +117,37 @@ export function setLookV3(document: EditorDocumentV2, input: Input): AgentTimeli
       ...(raw.fonts !== undefined ? { fonts: raw.fonts } : previous.fonts ? { fonts: previous.fonts } : {}),
     }
     : { css: raw.css, ...(raw.notes !== undefined ? { notes: raw.notes } : {}), ...(raw.fonts !== undefined ? { fonts: raw.fonts } : {}) };
+  // Pieces are merged by id, but css is the whole stylesheet: a call that sends only the rules it
+  // wants to change would strip every other piece bare (white text, no panel, no marker), and the
+  // instances already on the timeline with it. Refuse a stylesheet that drops the rules of classes
+  // the pieces still wear; the complete stylesheet is what changes a look.
+  if (previous && typeof raw.css === 'string' && pieces && typeof pieces === 'object') {
+    const before = styledClassNames(previous.css);
+    const after = styledClassNames(raw.css);
+    const lost = new Map<string, string[]>();
+    for (const [id, piece] of Object.entries(pieces as Record<string, { source?: unknown }>)) {
+      const names = [...pieceClassNames(typeof piece?.source === 'string' ? piece.source : '')].filter((name) => before.has(name) && !after.has(name));
+      if (names.length) lost.set(id, names);
+    }
+    if (lost.size) {
+      return fail('invalid_look', {
+        issues: [...lost].map(([id, names]) => ({ path: 'look.css', message: `piece ${id} loses its rules for ${names.map((name) => `.${name}`).join(', ')}` })),
+        fix: 'css replaces the whole stylesheet (pieces merge by id, css does not). Send the complete stylesheet with these rules kept, or leave css out to keep the current one. The previous look has been preserved.',
+      });
+    }
+  }
+  const nothingSaved = refusedLookFix(input);
   const candidate = { ...merged, pieces, id: string(raw.id) ?? lookIdFor({ ...merged, pieces }) };
   const checked = normalizeLook(candidate);
   if (!checked.look) {
     return fail('invalid_look', {
       issues: checked.issues,
-      fix: 'Fix exactly the listed issues and call set_look again with only what changes (the pieces to fix, css if it changes).',
+      fix: nothingSaved,
     });
   }
   const look = checked.look;
   const syntaxIssues = Object.entries(look.pieces).flatMap(([id, piece]) => lookSourceSyntaxIssues(piece.source, `look.pieces.${id}.source`));
-  if (syntaxIssues.length) return fail('invalid_look', { issues: syntaxIssues, fix: 'Correct the JavaScript syntax and send those pieces again. The previous look has been preserved.' });
+  if (syntaxIssues.length) return fail('invalid_look', { issues: syntaxIssues, fix: `Correct the JavaScript syntax. ${nothingSaved}` });
   const patched = patchEditorAppearance(document, { look });
   if (!patched.ok) return fail(patched.error?.message ?? 'look was not applied');
   // Instances of pieces the new look no longer has would render empty: name them.
@@ -104,8 +158,23 @@ export function setLookV3(document: EditorDocumentV2, input: Input): AgentTimeli
   return mutation(patched.document, `Look ${look.id}: ${Object.keys(look.pieces).length} piece(s)`, [patched.receipt], {
     lookId: look.id,
     pieces: Object.fromEntries(Object.entries(look.pieces).map(([id, piece]) => [id, piece.label])),
+    ...unstyledPieces(look),
     ...(orphaned.length ? { orphanedClipIds: orphaned, note: 'These instances name pieces this look no longer has; they render empty until re-placed or removed.' } : {}),
   });
+}
+
+/** Pieces most of whose classes the stylesheet has no rule for: they would render as bare text. */
+function unstyledPieces(look: { css: string; pieces: Record<string, { source: string }> }): { unstyled?: Record<string, string[]>; unstyledNote?: string } {
+  const styled = styledClassNames(look.css);
+  const bare: Record<string, string[]> = {};
+  for (const [id, piece] of Object.entries(look.pieces)) {
+    const names = [...pieceClassNames(piece.source)];
+    const missing = names.filter((name) => !styled.has(name));
+    if (names.length >= 2 && missing.length * 2 > names.length) bare[id] = missing.map((name) => `.${name}`);
+  }
+  return Object.keys(bare).length
+    ? { unstyled: bare, unstyledNote: 'The stylesheet has no rule for most of these pieces\' classes: they render as bare text. Send the complete css with their rules.' }
+    : {};
 }
 
 /** A word in a transcript the instance should follow through later cuts. */
@@ -196,6 +265,15 @@ export function placeGraphicsV3(document: EditorDocumentV2, input: Input): Agent
       };
     }
     clipIds.push(id);
+  }
+  // A graphic placed again where the same one already shows (a retried or resumed run) would sit
+  // on screen twice. The first stays; the call is told how to change it.
+  const doubled = introducedFindings(document, next, ['graphic-duplicate']);
+  if (doubled.length) {
+    return fail('graphic_already_placed', {
+      findings: doubled.map((finding) => `${finding.message} (existing ${finding.clipIds.find((id) => !clipIds.includes(id)) ?? finding.clipIds[0]})`),
+      fix: 'Nothing was placed. The same graphic is already on screen at that time. Change the existing clip with set_clip_properties (props, box, durationFrames) or move_clips, or remove_clips it before placing a replacement; leave these items out and place the rest.',
+    });
   }
   return mutation(next, `Placed ${clipIds.length} graphic${clipIds.length === 1 ? '' : 's'}`, receipts, { clipIds });
 }

@@ -64,4 +64,20 @@ describe('a video built from scratch', () => {
     const again = reviewEditingTask({ ...compose([]), reviewNoted: true }, features, evidence, document);
     expect(again.ok && again.review.notes).toBeUndefined();
   });
+
+  it('refuses to finish while speech plays twice, and passes a clean timeline', () => {
+    const empty = emptyEditorDocumentV2({ fps: 30 });
+    const spineId = empty.semantics.primaryNarrativeTrackId!;
+    const clip = (id: string, startFrame: number, durationFrames: number, sourceInSec: number) => ({ id, kind: 'narrative', assetId: 'talk', enabled: true, startFrame, durationFrames, sourceInSec, sourceOutSec: sourceInSec + durationFrames / 30, properties: { treatment: 'full' } });
+    const build = (clips: unknown[]) => ({ ...empty,
+      semantics: { ...empty.semantics, transcripts: { talk: Array.from({ length: 40 }, (_, at) => ({ start: at, end: at + 1, text: `w${at}`, words: [{ text: `w${at}`, start: at + 0.1, end: at + 0.9 }] })) } },
+      timeline: { ...empty.timeline, tracks: empty.timeline.tracks.map(track => track.id === spineId ? { ...track, clips } : track) } }) as never;
+    const features = { features: [{ feature: 'graphics', status: 'applied', reason: '六处观点花字落在口播重点', atFrame: 60 }] };
+    const broken = reviewEditingTask(compose([]), features, evidence, build([clip('a', 0, 300, 0), clip('again', 300, 150, 4), clip('b', 450, 300, 10)]));
+    expect(broken.ok).toBe(false);
+    expect(!broken.ok && broken.error).toContain('The timeline has faults a viewer sees');
+    expect(!broken.ok && broken.error).toContain('is spoken at 0:00.0 and again at 0:10.0 (clips a, again)');
+    expect(reviewEditingTask(compose([]), features, evidence, build([clip('a', 0, 300, 0), clip('b', 300, 300, 10)])).ok).toBe(true);
+  });
+
 });

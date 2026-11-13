@@ -5,6 +5,7 @@ import { isWhiteboardDirectorTask, type ChatTask } from '@pireel/studio-ui/chat-
 import { projectDocumentToComposition } from '@pireel/studio-engine/project-document';
 import { whiteboardSceneReady } from '@pireel/studio-ui/whiteboard-scene-result';
 import type { EditingEvidence } from '@pireel/studio-ui/first-pass';
+import { auditTimeline } from '@pireel/studio-engine/timeline-audit';
 import { t } from './i18n';
 
 export const EDIT_REVIEW_FEATURES = ['graphics', 'b-roll', 'sound', 'zoom', 'transitions'] as const;
@@ -77,6 +78,15 @@ export function reviewEditingTask(task: ChatTask, input: Record<string, unknown>
     if (!intact || Math.abs(sourceCursor-(sourceDuration ?? 0)) > 1/document.canvas.fps) problems.push('Preserve the complete original narration, order, speed and audible primary track for this whiteboard task.');
     else if (!whiteboardSceneReady(composition.blocks, document.canvas.width, document.canvas.height, frameCursor/document.canvas.fps)) problems.push('The whiteboard must cover the entire original narration at the selected aspect before finishing.');
   }
+  // What a viewer would see at once is read from the timeline, whatever the model reports: speech
+  // that plays twice, the recording laid over itself, a graphic on screen twice or without its
+  // styling. Each is named with its place so one more pass can repair them all.
+  const findings = document ? auditTimeline(document) : [];
+  const faults = findings.filter((finding) => finding.severity === 'error');
+  if (faults.length) {
+    const shown = faults.slice(0, 12).map((finding) => `${finding.message} (clips ${finding.clipIds.slice(0, 4).join(', ')})`);
+    problems.push(`The timeline has faults a viewer sees. Repair them before finishing: ${shown.join('; ')}${faults.length > shown.length ? `; and ${faults.length - shown.length} more` : ''}.`);
+  }
   const director = task.directorPlanRequired || task.directorPlan ? reviewDirectorPlan(task, input, document) : undefined;
   if (director && !director.ok) problems.push(...director.problems);
   const coverResult = reviewBrandCover(task, input.cover, document);
@@ -115,7 +125,7 @@ export function reviewEditingTask(task: ChatTask, input: Record<string, unknown>
   const brandApplication = typeof input.brandApplication === 'string' ? input.brandApplication.trim() : '';
   if (task.config?.brand && brandApplication.length < 12) problems.push('Explain the concrete visual choices applied from the selected brand, not just its name.');
   if (problems.length || !coverResult.ok || (director && !director.ok)) return refused(problems, missing);
-  const notes = document && !task.reviewNoted ? reviewNotes(document) : [];
+  const notes = document && !task.reviewNoted ? [...reviewNotes(document), ...findings.filter((finding) => finding.severity === 'warning').slice(0, 8).map((finding) => `Worth a look: ${finding.message}.`)] : [];
   return { ok: true, review: { ...(notes.length ? { notes } : {}), completed: items.every(item => item.status !== 'blocked') && (director?.completed ?? true) && coverResult.cover?.status !== 'blocked', items, ...(coverResult.cover ? { cover: coverResult.cover } : {}), ...(director ? { director: { revision: task.directorPlan!.revision, summary: director.summary, beats: director.beats } } : {}), ...(brandApplication ? { brandApplication } : {}) } };
 }
 
