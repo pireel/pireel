@@ -4,7 +4,7 @@
  */
 
 import { regionGridFromRgba, regionsByShot, type RegionGrid, type ShotRegions } from '@pireel/studio-engine/facts';
-import { decodeAudioFile, decodeVideoAudio } from './audio-decode';
+import { decodeAudioFile, videoSoundLevelDb } from './audio-decode';
 import { measureBufferLoudnessDb } from './loudness';
 import { assessLocalSpeechAudio, type LocalSpeechAudioAssessment } from './speech-silence';
 
@@ -75,11 +75,11 @@ export function measureSound(file: File): Promise<SoundFacts> {
   let pending = soundCache.get(file);
   if (!pending) {
     pending = (async () => {
-      const [assessment, buffer] = await Promise.all([
+      // A video's sound is measured as it is read; only an audio clip is decoded whole.
+      const [assessment, levelDb] = await Promise.all([
         assessLocalSpeechAudio(file),
-        (file.type.startsWith('audio/') ? decodeAudioFile(file) : decodeVideoAudio(file)).catch(() => null),
+        (file.type.startsWith('audio/') ? decodeAudioFile(file).then(measureBufferLoudnessDb) : videoSoundLevelDb(file)).catch(() => null),
       ]);
-      const levelDb = buffer ? measureBufferLoudnessDb(buffer) : null;
       return {
         hasAudio: assessment.hasAudio,
         levelDb: levelDb == null ? null : Math.round(levelDb * 10) / 10,

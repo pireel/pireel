@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ComplexFft,
   DFN3,
+  chunkedEnhancer,
   createDfn3State,
   erbWidths,
   shiftLookahead,
@@ -88,5 +89,115 @@ describe('DeepFilterNet3 signal pipeline', () => {
     expect(state.meanNorm[31]).toBeCloseTo(-90, 5);
     expect(state.unitNorm[0]).toBeCloseTo(0.001, 6);
     expect(state.unitNorm[95]).toBeCloseTo(0.0001, 6);
+  });
+});
+
+describe('long input enhanced in pieces', () => {
+  // A stand-in for the model: what it returns depends on where a sample sits in its chunk, so a
+  // chunk cut at the wrong place, or a seam joined differently, changes the result.
+  const enhance = async (samples: Float32Array) => samples.map((value, index) => value * 0.5 + (index % 977) * 1e-4);
+  const RATE = 1000; // a 45 s chunk is 45 000 samples: an hour of schedule in a small array
+
+  /** The schedule as it was written over a whole array: the reference the fed-in version must match. */
+  async function wholeArray(dry: Float32Array): Promise<Float32Array> {
+    const chunkSamples = DFN3.chunkSeconds * RATE;
+    if (dry.length <= chunkSamples) return enhance(dry);
+    const overlap = Math.max(1, Math.floor((DFN3.overlapMs * RATE) / 1000));
+    const hop = chunkSamples - overlap;
+    const numChunks = Math.max(2, Math.ceil((dry.length - overlap) / hop));
+    const evenChunk = Math.max(overlap + 1, Math.floor((dry.length + overlap * (numChunks - 1) + numChunks - 1) / numChunks));
+    const evenHop = evenChunk - overlap;
+    const out = new Float32Array(dry.length);
+    let written = 0;
+    let prevTail: Float32Array | null = null;
+    let offset = 0;
+    const push = (data: Float32Array) => { const n = Math.min(data.length, out.length - written); out.set(data.subarray(0, n), written); written += n; };
+    while (offset < dry.length) {
+      const enhanced = await enhance(dry.subarray(offset, Math.min(offset + evenChunk, dry.length)));
+      if (!prevTail) {
+        const keepEnd = Math.max(0, enhanced.length - overlap);
+        push(enhanced.subarray(0, keepEnd));
+        prevTail = enhanced.slice(keepEnd);
+      } else {
+        const effective = Math.min(overlap, enhanced.length, prevTail.length);
+        const mixed = new Float32Array(effective);
+        for (let i = 0; i < effective; i += 1) {
+          const tt = i / Math.max(effective - 1, 1);
+          mixed[i] = prevTail[i]! * Math.cos((tt * Math.PI) / 2) + enhanced[i]! * Math.sin((tt * Math.PI) / 2);
+        }
+        push(mixed);
+        if (prevTail.length > effective) push(prevTail.subarray(effective));
+        const midEnd = Math.max(effective, enhanced.length - overlap);
+        push(enhanced.subarray(effective, midEnd));
+        prevTail = enhanced.slice(midEnd);
+      }
+      offset += evenHop;
+      if (dry.length - offset < overlap * 2) break;
+    }
+    if (prevTail) push(prevTail);
+    return out;
+  }
+
+  /** The largest difference between two tracks, sample for sample; a different length is infinitely far. */
+  const apart = (a: Float32Array, b: Float32Array) => {
+    if (a.length !== b.length) return Infinity;
+    let worst = 0;
+    for (let i = 0; i < a.length; i++) worst = Math.max(worst, Math.abs(a[i]! - b[i]!));
+    return worst;
+  };
+
+  const recording = (seconds: number) => Float32Array.from({ length: Math.round(seconds * RATE) }, (_, index) => Math.sin(index / 37) * 0.6);
+
+  async function inPieces(dry: Float32Array, pieceOf: (index: number) => number, announced = dry.length) {
+    const parts: Float32Array[] = [];
+    const progress: number[] = [];
+    let largestWrite = 0;
+    const enhancer = chunkedEnhancer(announced, enhance, (samples) => { parts.push(samples.slice()); largestWrite = Math.max(largestWrite, samples.length); }, (fraction) => progress.push(fraction), RATE);
+    for (let offset = 0, index = 0; offset < dry.length; index += 1) {
+      const size = pieceOf(index);
+      await enhancer.push(dry.subarray(offset, offset + size));
+      offset += size;
+    }
+    await enhancer.finish();
+    const out = new Float32Array(parts.reduce((sum, part) => sum + part.length, 0));
+    let at = 0;
+    for (const part of parts) { out.set(part, at); at += part.length; }
+    return { out, progress, largestWrite };
+  }
+
+  it('gives sample for sample what the whole-array schedule gave, at every length', async () => {
+    for (const seconds of [0.3, 12, 45, 45.001, 46, 89.5, 90, 300.7, 44 * 60 + 0.2]) {
+      const dry = recording(seconds);
+      const expected = await wholeArray(dry);
+      const { out } = await inPieces(dry, (index) => (index * 7919) % 2048 + 1);
+      expect(out.length, `${seconds}s`).toBe(dry.length);
+      expect(apart(out, expected), `${seconds}s`).toBe(0);
+    }
+  }, 30_000);
+
+  it('does not depend on how the input is cut, down to one piece', async () => {
+    const dry = recording(200);
+    const expected = await wholeArray(dry);
+    expect(apart((await inPieces(dry, () => dry.length)).out, expected)).toBe(0);
+    expect(apart((await inPieces(dry, () => 1024)).out, expected)).toBe(0);
+    expect(apart((await inPieces(dry, (index) => (index % 2 ? 100_000 : 3))).out, expected)).toBe(0);
+  });
+
+  it('never writes more than a chunk at a time and reports progress to the end', async () => {
+    const { progress, largestWrite } = await inPieces(recording(600), () => 4096);
+    expect(largestWrite).toBeLessThanOrEqual(DFN3.chunkSeconds * RATE);
+    expect(progress.at(-1)).toBe(1);
+    expect(progress.length).toBeGreaterThan(10);
+    expect(progress.every((value, index) => index === 0 || value >= progress[index - 1]!)).toBe(true);
+  });
+
+  it('pads a track that ends early with silence and ignores what runs past its length', async () => {
+    const dry = recording(100);
+    const short = await inPieces(dry.subarray(0, 80_000), () => 5000, dry.length);
+    const padded = new Float32Array(dry.length);
+    padded.set(dry.subarray(0, 80_000));
+    expect(apart(short.out, await wholeArray(padded))).toBe(0);
+    const long = await inPieces(recording(130), () => 5000, dry.length);
+    expect(apart(long.out, await wholeArray(dry))).toBe(0);
   });
 });

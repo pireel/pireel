@@ -25,7 +25,7 @@ import type { CommitUndo, DocumentCommitter } from '@pireel/studio-ui/document-c
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { toast } from '@pireel/ui/toast';
 import type { EngineAudioClip, VideoTrackEngine } from '@pireel/studio-ui/video-track-engine';
-import { decodeAudioFile, decodeVideoAudio } from '@pireel/studio-ui/audio-decode';
+import { decodeAudioFile, videoSoundLevelDb, videoSoundPeaks } from '@pireel/studio-ui/audio-decode';
 import { bgmAutoVolumeDb, measureBufferLoudnessDb } from '@pireel/studio-ui/loudness';
 import { fileSig } from '@pireel/studio-ui/media-ai';
 import { peaksOf } from '@pireel/studio-ui/audio-peaks';
@@ -114,8 +114,7 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     if (narrDbRef.current?.sig === sig) return narrDbRef.current.db;
     let db: number | null = null;
     try {
-      const buf = await decodeVideoAudio(f);
-      db = buf ? measureBufferLoudnessDb(buf) : null;
+      db = await videoSoundLevelDb(f);
     } catch {
       /* no audio track / decode failure → default clip level */
     }
@@ -383,9 +382,9 @@ export function useAudioTracks(deps: AudioTracksDeps) {
       const generation = runtimeGenerationRef.current;
       void (async () => {
         try {
-          const buf = await decodeVideoAudio(j.file);
-          if (buf && generation === runtimeGenerationRef.current) {
-            setSourcePeaks((m) => new Map(m).set(j.key, { peaks: peaksOf(buf), durationSec: buf.duration }));
+          const sound = await videoSoundPeaks(j.file);
+          if (sound && generation === runtimeGenerationRef.current) {
+            setSourcePeaks((m) => new Map(m).set(j.key, sound));
           }
         } catch {
           /* source without an audio track / decode failure: the strip just stays empty */

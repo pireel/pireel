@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { mixSoundToSpeech, speechLevelProfile, normalizeSound } from './sfx-mix';
+import { mixSoundToSpeech, speechLevelProfile, speechLevelReader, normalizeSound } from './sfx-mix';
 const sine = (seconds: number, level: number, rate = 48000, hz = 440) => Float32Array.from({ length: Math.round(seconds * rate) }, (_, i) => level * Math.sin(2 * Math.PI * hz * i / rate));
 const rms = (pcm: Float32Array) => Math.sqrt(pcm.reduce((sum, n) => sum + n * n, 0) / pcm.length);
 it('normalizes source files and adapts effects to nearby narration instead of copying a fixed dB', () => {
@@ -43,4 +43,15 @@ it('preserves measured recipe pre-roll while legacy files still trim leading sil
   expect(legacy.length).toBeLessThan(rate / 2);
   expect(preserved.slice(0, rate / 5).every(v => Math.abs(v) < .00001)).toBe(true);
   expect(Math.max(...preserved.slice(rate / 4, rate / 4 + 1000))).toBeGreaterThan(.01);
+});
+it('builds the same speech profile from pieces as from the whole track', () => {
+  const left = sine(7.31, .3); left.fill(0, 48000 * 2, 48000 * 3); const right = sine(7.31, .12, 48000, 330);
+  const whole = speechLevelProfile([left, right], 48000);
+  const reader = speechLevelReader(left.length, 48000);
+  for (let offset = 0, size = 1; offset < left.length; offset += size, size = (size * 7) % 4099 + 1) reader.push([left.subarray(offset, offset + size), right.subarray(offset, offset + size)]);
+  reader.push([new Float32Array(5000).fill(.9)]); // past the stated length: ignored
+  const read = reader.profile();
+  expect(read.durationSec).toBe(whole.durationSec); expect(read.referenceRms).toBe(whole.referenceRms);
+  expect(Array.from(read.rms)).toEqual(Array.from(whole.rms)); expect(read.peaks.length).toBe(whole.peaks.length);
+  expect(read.peaks.every((value, index) => value === whole.peaks[index])).toBe(true);
 });

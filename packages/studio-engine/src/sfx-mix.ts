@@ -3,20 +3,37 @@ import { t } from './i18n';
 export const SFX_MIX_VERSION = 'speech-relative-4';
 export interface SpeechLevelProfile { rms: Float32Array; peaks: Float32Array; durationSec: number; referenceRms: number }
 const percentile = (values: number[], q: number) => values.length ? values.sort((a, b) => a - b)[Math.min(values.length - 1, Math.floor(values.length * q))] : 0;
+/** The profile built while the sound is read: `length` samples in all, handed over in any number of
+ *  pieces (one array per channel). Only the 100 ms energies and 1 ms peaks are kept, so an hour of
+ *  speech costs a few megabytes. `profile` closes it; samples past `length` are ignored. */
+export function speechLevelReader(length: number, sampleRate: number) {
+  if (!(sampleRate > 0) || !(length > 0)) throw new Error(t('engine.sfxMix.voiceUnreadable'));
+  const rms = new Float32Array(Math.ceil(length / sampleRate * 10)); const counts = new Uint32Array(rms.length);
+  const peaks = new Float32Array(Math.ceil(length / sampleRate * 1000));
+  let at = 0;
+  return {
+    push(channels: readonly Float32Array[]) {
+      const count = channels[0]?.length ?? 0;
+      for (let j = 0; j < count && at < length; j++, at++) {
+        const r = Math.floor(at / sampleRate * 10); const p = Math.floor(at / sampleRate * 1000);
+        for (const channel of channels) {
+          const value = Number.isFinite(channel[j]) ? channel[j] : 0;
+          rms[r] += value * value; counts[r]++; peaks[p] = Math.max(peaks[p], Math.abs(value));
+        }
+      }
+    },
+    profile(): SpeechLevelProfile {
+      const levels = rms.map((sum, index) => Math.sqrt(sum / Math.max(1, counts[index])));
+      return { rms: levels, peaks, durationSec: length / sampleRate, referenceRms: percentile(Array.from(levels).filter(value => value > .003), .65) || .04 };
+    },
+  };
+}
 /** Stereo-safe energy and 1ms peak bounds, without retaining a second full audio buffer. */
 export function speechLevelProfile(channels: readonly Float32Array[], sampleRate: number): SpeechLevelProfile {
   if (!channels.length || !(sampleRate > 0) || !channels[0].length) throw new Error(t('engine.sfxMix.voiceUnreadable'));
-  const length = channels[0].length; const rms = new Float32Array(Math.ceil(length / sampleRate * 10)); const counts = new Uint32Array(rms.length);
-  const peaks = new Float32Array(Math.ceil(length / sampleRate * 1000));
-  for (let i = 0; i < length; i++) {
-    const r = Math.floor(i / sampleRate * 10); const p = Math.floor(i / sampleRate * 1000);
-    for (const channel of channels) {
-      const value = Number.isFinite(channel[i]) ? channel[i] : 0;
-      rms[r] += value * value; counts[r]++; peaks[p] = Math.max(peaks[p], Math.abs(value));
-    }
-  }
-  for (let i = 0; i < rms.length; i++) rms[i] = Math.sqrt(rms[i] / Math.max(1, counts[i]));
-  return { rms, peaks, durationSec: length / sampleRate, referenceRms: percentile(Array.from(rms).filter(value => value > .003), .65) || .04 };
+  const reader = speechLevelReader(channels[0].length, sampleRate);
+  reader.push(channels);
+  return reader.profile();
 }
 export function normalizeSound(pcm: Float32Array, rate: number, maxDurationSec = 1.5, preserveTiming = false): Float32Array {
   if (!pcm.length) throw new Error(t('engine.sfxMix.empty'));

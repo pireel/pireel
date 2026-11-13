@@ -7,11 +7,11 @@
  * policy stays testable without a browser or wasm runtime.
  */
 
-import { decodeVideoAudio, toMono } from './audio-decode';
+import { monoAtRate, readVideoSound } from './audio-decode';
 
 const ANALYSIS_RATE = 48_000;
 const FRAME_SAMPLES = 480; // RNNoise contract: 10 ms at 48 kHz.
-const YIELD_EVERY_FRAMES = 200;
+const REPORT_EVERY_FRAMES = 200; // progress every two seconds of sound, not every decoded packet
 const DEFAULT_MINIMUM_PAUSE_SEC = 0.4;
 const DEFAULT_SPEECH_PADDING_SEC = 0.15;
 const DEFAULT_BRIDGE_GAP_SEC = 0.05;
@@ -198,7 +198,7 @@ export const SPEECH_ACTIVITY_RATE = ANALYSIS_RATE;
 
 /**
  * Voice and energy, 10 ms at a time, from mono PCM at SPEECH_ACTIVITY_RATE fed in any number of
- * pieces: the page feeds the audio it decoded at once, the measuring service the stream ffmpeg
+ * pieces: the page feeds each packet as it decodes, the measuring service the stream ffmpeg
  * decodes, so both read the same frames. `finish` closes the last partial frame and frees RNNoise.
  */
 export async function speechActivityReader() {
@@ -242,19 +242,27 @@ export async function speechActivityReader() {
   };
 }
 
+/**
+ * The soundtrack goes to the reader as it is decoded, so a long recording is never held whole
+ * (decoded and mixed down it was ~35 MB a minute). The audio is fed whether or not anyone listens
+ * for progress.
+ */
 async function analyzeSpeechActivity(file: File, onProgress?: (done: number, total: number) => void): Promise<SpeechActivityAnalysis> {
-  const decoded = await decodeVideoAudio(file);
-  if (!decoded) return { durationSec: 0, frames: [] };
-  const pcm = await toMono(decoded, ANALYSIS_RATE);
   const reader = await speechActivityReader();
   try {
-    const frameCount = Math.ceil(pcm.length / FRAME_SAMPLES);
-    const step = FRAME_SAMPLES * YIELD_EVERY_FRAMES;
-    onProgress?.(0, frameCount);
-    for (let offset = 0; offset < pcm.length; offset += step) {
-      onProgress?.(reader.push(pcm.subarray(offset, Math.min(pcm.length, offset + step))), frameCount);
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
+    const shape = await readVideoSound(file, (found) => {
+      const frameCount = Math.ceil(((found.frames / found.sampleRate) * ANALYSIS_RATE) / FRAME_SAMPLES);
+      const mono = monoAtRate(found.sampleRate, ANALYSIS_RATE);
+      let reported = 0;
+      onProgress?.(0, frameCount);
+      return (channels) => {
+        const done = reader.push(mono(channels));
+        if (done - reported < REPORT_EVERY_FRAMES) return;
+        reported = done;
+        onProgress?.(Math.min(done, frameCount), frameCount);
+      };
+    });
+    if (!shape) return { durationSec: 0, frames: [] };
   } finally { reader.finish(); }
   return reader.finish();
 }

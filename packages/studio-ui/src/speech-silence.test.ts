@@ -1,5 +1,21 @@
-import { describe, expect, it } from 'vitest';
-import { planSpeechSilenceCuts, resolveSpeechSilenceOptions, SPEECH_ACTIVITY_RATE, speechActivityReader, summarizeLocalSpeechAudio, type SpeechActivityFrame } from './speech-silence';
+import { describe, expect, it, vi } from 'vitest';
+
+// A recording's soundtrack, stood in for by the samples each test file carries: handed over in
+// uneven pieces, as a decoder would.
+const soundtracks = new WeakMap<Blob, { sampleRate: number; pcm: Float32Array }>();
+vi.mock('./audio-decode', async (original) => ({
+  ...(await original<typeof import('./audio-decode')>()),
+  readVideoSound: async (file: Blob, open: (shape: { sampleRate: number; channels: number; frames: number }) => (channels: Float32Array[]) => void) => {
+    const sound = soundtracks.get(file);
+    if (!sound) return null;
+    const shape = { sampleRate: sound.sampleRate, channels: 1, frames: sound.pcm.length };
+    const push = open(shape);
+    for (let offset = 0, size = 1024; offset < sound.pcm.length; offset += size, size = (size * 7) % 2048 + 1) push([sound.pcm.slice(offset, offset + size)]);
+    return shape;
+  },
+}));
+
+import { assessLocalSpeechAudio, detectSpeechSilenceCuts, planSpeechSilenceCuts, resolveSpeechSilenceOptions, SPEECH_ACTIVITY_RATE, speechActivityReader, summarizeLocalSpeechAudio, type SpeechActivityFrame } from './speech-silence';
 
 function frames(...runs: { from: number; to: number; voiceProbability: number; rms: number }[]): SpeechActivityFrame[] {
   return runs.flatMap((run) => {
@@ -112,5 +128,39 @@ describe('speech activity reader', () => {
     expect(b.frames).toHaveLength(Math.ceil(pcm.length / 480));
     expect(b.frames).toEqual(a.frames);
     expect(b.frames.at(-1)!.toSec).toBeCloseTo(b.durationSec, 6);
+  });
+});
+
+describe('speech activity of a recording', () => {
+  const recording = (sampleRate: number, seconds: number) => {
+    const file = new File(['x'], 'talk.mp4', { type: 'video/mp4' });
+    soundtracks.set(file, { sampleRate, pcm: Float32Array.from({ length: Math.round(sampleRate * seconds) }, (_, index) => Math.sin(index / 9) * 0.4) });
+    return file;
+  };
+
+  it('reads the sound when nobody listens for progress', async () => {
+    const heard = await assessLocalSpeechAudio(recording(SPEECH_ACTIVITY_RATE, 3));
+    expect(heard.hasAudio).toBe(true);
+    expect(heard.audibleSec).toBeCloseTo(3, 1);
+  });
+
+  it('reports progress up to the whole length, a few times rather than once per piece', async () => {
+    const calls: [number, number][] = [];
+    await detectSpeechSilenceCuts(recording(SPEECH_ACTIVITY_RATE, 12), { onProgress: (done, total) => calls.push([done, total]) });
+    expect(calls[0]).toEqual([0, 1200]);
+    expect(calls.at(-1)).toEqual([1200, 1200]);
+    expect(calls.length).toBeGreaterThan(3);
+    expect(calls.length).toBeLessThan(12);
+    expect(calls.every(([done], index) => index === 0 || done >= calls[index - 1]![0])).toBe(true);
+  });
+
+  it('reads a 44.1 kHz recording at its real length', async () => {
+    const heard = await assessLocalSpeechAudio(recording(44_100, 2));
+    expect(heard.hasAudio).toBe(true);
+    expect(heard.audibleSec).toBeCloseTo(2, 1);
+  });
+
+  it('calls a file without a soundtrack silent', async () => {
+    expect((await assessLocalSpeechAudio(new File(['x'], 'mute.mp4'))).classification).toBe('no-audio');
   });
 });

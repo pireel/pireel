@@ -2,10 +2,10 @@
  * Narration-denoise orchestration (main source, v1): watches comp.audioDenoise, bakes on demand,
  * and keeps the engine's dub channel + the export substitution payload in sync.
  *
- * Bake ladder (each step cached, so knob turns never repeat inference):
- *   extractAudio(videoFile)  →  dry PCM (decode 48k mono)
- *   dry → RNNoise wet PCM     →  wet WAV cached in OPFS by source sig (`dnwet:<sig>`)
- *   dry + wet @ strength      →  blended WAV (in-memory File; rebuilt in seconds on strength change)
+ * The bake itself is denoise-bake.ts: the sound is read, denoised and written a piece at a time, so
+ * the length of the recording does not decide the memory. Each step is kept on this device:
+ *   the denoised voice, once per source (a knob turn never repeats the model);
+ *   the blend at one strength, so a project opened again decodes nothing.
  * The blended file is what BOTH ends consume: preview via engine.setNarrationDub('main', url),
  * export via the audio-track substitution in client-export. One file, identical sound.
  */
@@ -15,10 +15,9 @@ import type { Composition, EditorDocumentV2 } from '@pireel/studio-engine/compos
 import type { DocumentCommitter } from '@pireel/studio-ui/document-commit';
 import { toast } from '@pireel/ui/toast';
 import type { VideoTrackEngine } from '@pireel/studio-ui/video-track-engine';
-import { DENOISE_RATE, blendPcm, decodeMono48k, denoiseWetPcm, encodeWavMono } from '@pireel/studio-ui/denoise';
-import { decodeVideoAudio, toMono } from '@pireel/studio-ui/audio-decode';
+import { bakeCleanedVoice, cleanedVoiceMixKey } from '@pireel/studio-ui/denoise-bake';
 import { fileSig } from '@pireel/studio-ui/media';
-import { loadLocalVideo, saveLocalVideo } from '@pireel/studio-ui/local-media';
+import { deleteLocalVideo } from '@pireel/studio-ui/local-media';
 import { t } from '@pireel/studio-ui/i18n';
 import { editorErrorMessage } from '@pireel/studio-ui/editor-error';
 
@@ -44,9 +43,12 @@ export function useDenoise(deps: DenoiseDeps) {
   /** Blended output of the last successful bake: what preview plays and export substitutes. */
   const blendedRef = useRef<{ sig: string; strength: number; file: File; url: string } | null>(null);
   const runIdRef = useRef(0);
+  /** Stops the bake in flight when a newer one starts or the editor closes. */
+  const bakeAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => () => {
     runIdRef.current += 1;
+    bakeAbortRef.current?.abort();
     const blended = blendedRef.current;
     if (blended) URL.revokeObjectURL(blended.url);
     blendedRef.current = null;
@@ -109,10 +111,15 @@ export function useDenoise(deps: DenoiseDeps) {
     }
     setStatus('baking');
     setProgress(0);
+    bakeAbortRef.current?.abort();
+    const abort = bakeAbortRef.current = new AbortController();
     try {
-      const dryBuf = await decodeVideoAudio(f);
+      const blendedFile = await bakeCleanedVoice(f, sig, strength, {
+        signal: abort.signal,
+        onProgress: (p) => { if (runId === runIdRef.current) setProgress(p); },
+      });
       if (runId !== runIdRef.current) return;
-      if (!dryBuf) {
+      if (!blendedFile) {
         // A picture with no sound is a plain fact, not a processing failure: say so and leave the
         // knob as it is, so a later sound-bearing source still gets its bake.
         const previous = blendedRef.current;
@@ -122,24 +129,12 @@ export function useDenoise(deps: DenoiseDeps) {
         toast.info(t('workbench.denoiseNoAudio'));
         return;
       }
-      const dry = await toMono(dryBuf, DENOISE_RATE);
-      if (runId !== runIdRef.current) return;
-      // wet: OPFS cache by source sig (+ engine tag) — inference runs once per source ever
-      const wetKey = `dnwet:dfn3:${sig}`;
-      let wet: Float32Array | null = null;
-      const wetCached = await loadLocalVideo(wetKey);
-      if (wetCached) wet = await decodeMono48k(wetCached);
-      if (!wet) {
-        wet = await denoiseWetPcm(dry, (p) => {
-          if (runId === runIdRef.current) setProgress(p);
-        });
-        if (runId !== runIdRef.current) return;
-        void saveLocalVideo(new File([encodeWavMono(wet)], 'wet.wav', { type: 'audio/wav' }), wetKey);
-      }
-      if (runId !== runIdRef.current) return;
-      const blendedFile = new File([encodeWavMono(blendPcm(dry, wet, strength))], 'denoised.wav', { type: 'audio/wav' });
       const prev = blendedRef.current;
-      if (prev) URL.revokeObjectURL(prev.url);
+      if (prev) {
+        URL.revokeObjectURL(prev.url);
+        // The blend at the strength just left is not kept: one per source is enough.
+        if (prev.sig === sig && prev.strength !== strength) void deleteLocalVideo(cleanedVoiceMixKey(prev.sig, prev.strength));
+      }
       blendedRef.current = { sig, strength, file: blendedFile, url: URL.createObjectURL(blendedFile) };
       setStatus('ready');
     } catch (e) {

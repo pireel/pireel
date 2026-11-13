@@ -424,40 +424,61 @@ async function enhanceCore(samples: Float32Array, state: Dfn3State, fft: Complex
   return trimEnd > trimStart ? raw.slice(trimStart, trimEnd) : new Float32Array(0);
 }
 
-/** Enhance mono 48 kHz PCM. Chunks long input (45 s, 500 ms equal-power crossfade) with the STFT
- *  and normalization state carried across seams; graphs reset their recurrent state per chunk. */
-export async function dfn3Enhance(dry: Float32Array, onProgress?: (fraction: number) => void, sources?: Dfn3ModelSources): Promise<Float32Array> {
-  const sessions = await loadSessions(sources);
-  const fft = new ComplexFft(DFN3.fftSize);
-  const state = createDfn3State();
-  const rate = DFN3.sampleRate;
+/** Takes mono samples in any number of pieces; `finish` flushes what is left. */
+export interface ChunkedEnhancer {
+  /** The next samples. Resolves once they are taken, which may wait on a chunk being enhanced. */
+  push(samples: Float32Array): Promise<void>;
+  /** After the last sample: enhances the remainder and writes out exactly `total` samples. */
+  finish(): Promise<void>;
+}
+
+/**
+ * The long-input schedule, fed in pieces: `total` samples are enhanced in equal chunks of at most
+ * 45 s that overlap by 500 ms, and the overlaps are joined with an equal-power crossfade. Only one
+ * chunk of input and one overlap of output are ever held, so the length of the recording does not
+ * decide the memory: `write` receives the enhanced sound in order, `total` samples in all (short
+ * input is padded with silence, extra input ignored). `enhance` is one chunk through the model.
+ */
+export function chunkedEnhancer(
+  total: number,
+  enhance: (samples: Float32Array) => Promise<Float32Array>,
+  write: (samples: Float32Array) => void | Promise<void>,
+  onProgress?: (fraction: number) => void,
+  rate: number = DFN3.sampleRate,
+): ChunkedEnhancer {
   const chunkSamples = DFN3.chunkSeconds * rate;
-  if (dry.length <= chunkSamples) {
-    const out = await enhanceCore(dry, state, fft, sessions);
-    onProgress?.(1);
-    return out;
-  }
+  const single = total <= chunkSamples;
   const overlap = Math.max(1, Math.floor((DFN3.overlapMs * rate) / 1000));
-  const hop = chunkSamples - overlap;
-  const numChunks = Math.max(2, Math.ceil((dry.length - overlap) / hop));
-  const evenChunk = Math.max(overlap + 1, Math.floor((dry.length + overlap * (numChunks - 1) + numChunks - 1) / numChunks));
-  const evenHop = evenChunk - overlap;
-  const out = new Float32Array(dry.length);
+  const numChunks = single ? 1 : Math.max(2, Math.ceil((total - overlap) / (chunkSamples - overlap)));
+  const chunkSize = single ? total : Math.max(overlap + 1, Math.floor((total + overlap * (numChunks - 1) + numChunks - 1) / numChunks));
+  const hop = chunkSize - overlap;
+  const buffer = new Float32Array(chunkSize);
+  let filled = 0; // samples of the current chunk in `buffer`
+  let offset = 0; // where the current chunk starts in the input
+  let taken = 0; // input samples accepted so far
   let written = 0;
   let prevTail: Float32Array | null = null;
-  let offset = 0;
   let chunkIndex = 0;
-  const push = (data: Float32Array) => {
-    const n = Math.min(data.length, out.length - written);
-    out.set(data.subarray(0, n), written);
-    written += n;
+  let closed = total <= 0;
+
+  const emit = async (data: Float32Array) => {
+    const count = Math.min(data.length, total - written);
+    if (count <= 0) return;
+    written += count;
+    await write(data.subarray(0, count));
   };
-  while (offset < dry.length) {
-    const end = Math.min(offset + evenChunk, dry.length);
-    const enhanced = await enhanceCore(dry.subarray(offset, end), state, fft, sessions);
+
+  /** Enhance the chunk in `buffer` and write what no later chunk can still change. */
+  const runChunk = async () => {
+    const enhanced = await enhance(buffer.subarray(0, filled));
+    if (single) {
+      await emit(enhanced);
+      closed = true;
+      return;
+    }
     if (!prevTail) {
       const keepEnd = Math.max(0, enhanced.length - overlap);
-      push(enhanced.subarray(0, keepEnd));
+      await emit(enhanced.subarray(0, keepEnd));
       prevTail = enhanced.slice(keepEnd);
     } else {
       const effective = Math.min(overlap, enhanced.length, prevTail.length);
@@ -466,19 +487,72 @@ export async function dfn3Enhance(dry: Float32Array, onProgress?: (fraction: num
         const tt = i / Math.max(effective - 1, 1);
         mixed[i] = prevTail[i]! * Math.cos((tt * Math.PI) / 2) + enhanced[i]! * Math.sin((tt * Math.PI) / 2);
       }
-      push(mixed);
-      if (prevTail.length > effective) push(prevTail.subarray(effective));
+      await emit(mixed);
+      if (prevTail.length > effective) await emit(prevTail.subarray(effective));
       const midEnd = Math.max(effective, enhanced.length - overlap);
-      push(enhanced.subarray(effective, midEnd));
+      await emit(enhanced.subarray(effective, midEnd));
       prevTail = enhanced.slice(midEnd);
     }
     chunkIndex += 1;
     onProgress?.(Math.min(0.99, chunkIndex / numChunks));
-    offset += evenHop;
-    if (dry.length - offset < overlap * 2) break;
+    offset += hop;
+    // What is left would be shorter than two overlaps: the chunk just done already covered it.
+    if (offset >= total || total - offset < overlap * 2) {
+      closed = true;
+      return;
+    }
+    buffer.copyWithin(0, hop, filled);
+    filled -= hop;
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
-  }
-  if (prevTail) push(prevTail);
-  onProgress?.(1);
+  };
+
+  const push = async (samples: Float32Array) => {
+    let read = 0;
+    while (read < samples.length && !closed && taken < total) {
+      const want = Math.min(chunkSize, total - offset) - filled;
+      const count = Math.min(want, samples.length - read, total - taken);
+      buffer.set(samples.subarray(read, read + count), filled);
+      filled += count; read += count; taken += count;
+      if (filled === Math.min(chunkSize, total - offset)) await runChunk();
+    }
+  };
+
+  return {
+    push,
+    async finish() {
+      // Shorter than announced: the rest is silence, as a whole-track buffer would have held.
+      const quiet = new Float32Array(Math.min(chunkSize, 1 << 16));
+      while (!closed && taken < total) await push(quiet.subarray(0, Math.min(quiet.length, total - taken)));
+      if (prevTail) await emit(prevTail);
+      prevTail = null;
+      while (written < total) await emit(quiet.subarray(0, Math.min(quiet.length, total - written)));
+      onProgress?.(1);
+    },
+  };
+}
+
+/**
+ * DeepFilterNet3 over `total` mono 48 kHz samples fed in pieces (see chunkedEnhancer): the STFT and
+ * normalization state carry across chunk seams; the graphs reset their recurrent state per chunk.
+ */
+export async function dfn3Enhancer(
+  total: number,
+  write: (samples: Float32Array) => void | Promise<void>,
+  onProgress?: (fraction: number) => void,
+  sources?: Dfn3ModelSources,
+): Promise<ChunkedEnhancer> {
+  const sessions = await loadSessions(sources);
+  const fft = new ComplexFft(DFN3.fftSize);
+  const state = createDfn3State();
+  return chunkedEnhancer(total, (samples) => enhanceCore(samples, state, fft, sessions), write, onProgress);
+}
+
+/** Enhance mono 48 kHz PCM held whole (short clips, tests). A recording is fed through dfn3Enhancer. */
+export async function dfn3Enhance(dry: Float32Array, onProgress?: (fraction: number) => void, sources?: Dfn3ModelSources): Promise<Float32Array> {
+  const out = new Float32Array(dry.length);
+  let written = 0;
+  const enhancer = await dfn3Enhancer(dry.length, (samples) => { out.set(samples, written); written += samples.length; }, onProgress, sources);
+  await enhancer.push(dry);
+  await enhancer.finish();
   return out;
 }
