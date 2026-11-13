@@ -2766,13 +2766,14 @@ export function HyperframesWorkbench({
               (x, y) => domIndexOf(x.id) - domIndexOf(y.id),
             ))
               sendNode(nb.id, true);
-            if (
-              patchable.added.length ||
-              patchable.pairs.some(
-                (p) => p.geom || p.style || p.replace || p.slots || p.kitProps || p.props,
-              )
-            )
-              postPreview({ type: "hf:measureFit" });
+            // Only what the patch touched can fit differently now.
+            const refit = [
+              ...patchable.added.map((block) => block.id),
+              ...patchable.pairs
+                .filter((p) => p.geom || p.style || p.replace || p.slots || p.kitProps || p.props)
+                .map((p) => p.b.id),
+            ];
+            if (refit.length) postPreview({ type: "hf:measureFit", ids: refit });
             markBuilt();
             return;
           }

@@ -49,14 +49,16 @@ export function runtimeTranscriptsFollowingDocument(
     if (!segments?.length) continue;
     for (const alias of aliases) {
       if (!(alias in nextClips) && !seeded.has(alias)) continue;
-      if (canonicalJson(nextClips[alias] ?? null) === canonicalJson(segments)) continue;
+      // The copy is usually the document's own array (it was adopted from it): no need to read an
+      // hour of words twice to learn that.
+      if (nextClips[alias] === segments || canonicalJson(nextClips[alias] ?? null) === canonicalJson(segments)) continue;
       nextClips[alias] = segments;
       clipsChanged = true;
     }
   }
   const mainId = firstNarrativeAssetId(document);
   const main = mainId ? (document.semantics.transcripts[mainId] as AsrSegment[] | undefined) : undefined;
-  const mainChanged = !!main?.length && canonicalJson(current.main ?? null) !== canonicalJson(main);
+  const mainChanged = !!main?.length && current.main !== main && canonicalJson(current.main ?? null) !== canonicalJson(main);
   if (!clipsChanged && !mainChanged) return null;
   return { main: mainChanged ? main! : current.main, clips: clipsChanged ? nextClips : current.clips };
 }

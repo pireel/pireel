@@ -523,6 +523,11 @@ export function relayManagedCaptionTrack(
     .filter((candidate) => candidate.id !== trackId)
     .flatMap((candidate) => candidate.clips.map((clip) => clip.id)));
   const reusedPreviousIds = new Set<string>();
+  // Where the picture and sound end. The same for every cue, and a pass over every clip of the
+  // project: found once here, not once per cue.
+  const materialEndFrame = document.timeline.tracks
+    .filter((candidate) => candidate.type !== 'caption')
+    .reduce((end, candidate) => candidate.clips.reduce((inner, clip) => Math.max(inner, clip.startFrame + clip.durationFrames), end), 0);
   const clips: CaptionTimelineClip[] = blocks.map((block, index) => {
     const ref = block.slots.ref as CueRef | undefined;
     const assetId = ref?.src ? assetBySourceKey.get(ref.src) : firstSpeechAssetId;
@@ -550,9 +555,6 @@ export function relayManagedCaptionTrack(
     // ASR word timings can run past the end of the audio they describe; a cue that outlives the
     // picture and narration would extend the output by a few silent frames (observed: 1588 → 1597)
     // and send the agent chasing a phantom tail. Cues end where the material ends.
-    const materialEndFrame = document.timeline.tracks
-      .filter((candidate) => candidate.type !== 'caption')
-      .reduce((end, candidate) => candidate.clips.reduce((inner, clip) => Math.max(inner, clip.startFrame + clip.durationFrames), end), 0);
     const unboundedEndFrame = Math.max(startFrame + 1, derivedEndFrame + (timingOverride?.endOffsetFrames ?? 0));
     const endFrame = materialEndFrame > startFrame ? Math.min(unboundedEndFrame, materialEndFrame) : unboundedEndFrame;
     return {
