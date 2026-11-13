@@ -36,7 +36,21 @@ export interface ChatTask {
   fineCutBaseline?: Record<FineCutSkill, string[]>;
   roughCut?: { callId: string; report: FirstPassReport };
   lateUsage?: Record<string, number>;
+  /** Every tool call of this task as the editor ran it, in order: where the time of a long edit
+   *  went. Saved with the thread; the model never reads it. */
+  toolTimings?: ChatToolTiming[];
 }
+
+/** One tool call: which tool, when it started (epoch ms), how long until its receipt, and whether it succeeded. */
+export interface ChatToolTiming {
+  tool: string;
+  at: number;
+  ms: number;
+  ok: boolean;
+}
+
+/** A long edit makes about a hundred calls; the list keeps the latest of a task that makes far more. */
+export const MAX_TASK_TOOL_TIMINGS = 400;
 
 /** Only the scene's explicit whole-video launch opts into the no-cut director workflow. */
 export function isWhiteboardDirectorTask(task: ChatTask | undefined): boolean {
@@ -56,6 +70,35 @@ export function patchTask(messages: UIMessage[], id: string, patch: (task: ChatT
   const at = messages.findLastIndex(message => message.role === 'user' && taskOf(message)?.id === id);
   if (at < 0) return messages;
   return messages.map((message, index) => index === at ? { ...message, metadata: { ...(message.metadata as object), task: patch(taskOf(message)!) } } : message);
+}
+
+/** The timings each task of a thread already holds, by task id (its latest continuation's). */
+export function taskToolTimings(messages: readonly UIMessage[]): Map<string, ChatToolTiming[]> {
+  const out = new Map<string, ChatToolTiming[]>();
+  for (const message of messages) {
+    const task = message.role === 'user' ? taskOf(message) : undefined;
+    if (task?.toolTimings?.length) out.set(task.id, task.toolTimings);
+  }
+  return out;
+}
+
+/**
+ * The messages as they are saved: each task's timings are set to what it held when the thread was
+ * opened followed by what was measured since. They are set, not appended, so saving a copy that
+ * already carries them adds nothing twice; and the live messages never receive them, so writing a
+ * timing cannot disturb a turn in progress.
+ */
+export function withToolTimings(
+  messages: UIMessage[],
+  held: ReadonlyMap<string, readonly ChatToolTiming[]>,
+  measured: ReadonlyMap<string, readonly ChatToolTiming[]>,
+): UIMessage[] {
+  let out = messages;
+  for (const [taskId, timings] of measured) {
+    if (!timings.length) continue;
+    out = patchTask(out, taskId, (current) => ({ ...current, toolTimings: [...(held.get(taskId) ?? []), ...timings].slice(-MAX_TASK_TOOL_TIMINGS) }));
+  }
+  return out;
 }
 
 export function withTaskUsage(task: ChatTask, callId: string, usage: WorkflowUsage): ChatTask {

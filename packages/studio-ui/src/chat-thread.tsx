@@ -17,7 +17,7 @@ import { toolInputObject } from '@pireel/studio-ui/tool-input';
 import { ROUGH_CUT_TOOL, messageTurnCredits, toolNameOfPart, type RoughCutReplyMeta } from '@pireel/studio-ui/first-pass-card';
 import { NextSteps, splitNextSteps } from '@pireel/studio-ui/chat-next-steps';
 import { documentIsEdited, FINE_CUT_SKILLS, firstPassStartupHint, type FineCutSkill } from '@pireel/studio-ui/first-pass';
-import { latestTask, taskOf, patchTask, resumeTaskHint, resumeEditingTask, unfinishedRoughCut, withTaskUsage, type ChatTask } from "@pireel/studio-ui/chat-task";
+import { latestTask, taskOf, patchTask, resumeTaskHint, resumeEditingTask, unfinishedRoughCut, taskToolTimings, withTaskUsage, withToolTimings, type ChatTask, type ChatToolTiming } from "@pireel/studio-ui/chat-task";
 import { cachedChatThread } from "@pireel/studio-ui/chat-thread-cache";
 import { recordTaskUsage, subscribeTaskUsage } from "@pireel/studio-ui/chat-task-usage";
 import { collapsedComponentRetryIndexes, studioToolFailureText } from '@pireel/studio-ui/chat-component-retries';
@@ -237,9 +237,14 @@ export function ChatThread({
   const [agentModel, setAgentModel] = useState<StudioAgentModelId>(() => studioAgentModelId(initialAgentModel ?? latestTask(initialMessages)?.agentModel ?? (initialMessages.length ? 'deepseek' : DEFAULT_STUDIO_AGENT_MODEL)));
   const agentModelRef = useRef(agentModel);
   const modelSelectedRef = useRef(initialAgentModel !== undefined);
+  // How long each tool call took, by task, since this thread was opened: joined to the task in
+  // every save (after what the task held at opening), never written into the live messages.
+  const toolTimingsRef = useRef(new Map<string, ChatToolTiming[]>());
+  const heldToolTimingsRef = useRef<Map<string, ChatToolTiming[]> | null>(null);
+  if (!heldToolTimingsRef.current) heldToolTimingsRef.current = taskToolTimings(initialMessages);
   const onSnapshot = useCallback((messages: UIMessage[], skill: StudioScenarioSkillId) => {
     if (!messages.length && !modelSelectedRef.current) return;
-    saveSnapshot(messages, skill, agentModelRef.current);
+    saveSnapshot(withToolTimings(messages, heldToolTimingsRef.current!, toolTimingsRef.current), skill, agentModelRef.current);
   }, [saveSnapshot]);
   const skillRef = useRef(skillId);
   skillRef.current = skillId;
@@ -340,8 +345,16 @@ export function ChatThread({
     async onToolCall({ toolCall }) {
       const id = toolCall.toolName;
       if (CHAT_SERVER_EXECUTED_TOOLS.has(id)) return;
+      const startedAt = Date.now();
       const requestedInput = toolInputObject(toolCall.input);
       const task = latestTask(messagesRef.current);
+      // Measured to the receipt, refusals included: the wait the next model call sees.
+      const noteTiming = (ok: boolean) => {
+        if (!task) return;
+        const timings = toolTimingsRef.current.get(task.id) ?? [];
+        timings.push({ tool: id, at: startedAt, ms: Date.now() - startedAt, ok });
+        toolTimingsRef.current.set(task.id, timings);
+      };
       const ledger = turnLedgerRef.current;
       const v3 = V3_TOOL_IDS.has(id);
       const canMutate = v3ToolCanMutate(id);
@@ -363,6 +376,7 @@ export function ChatThread({
           canMutate,
         });
         if (output.ok === false && typeof output.error === 'string') output = { ...output, error: output.error + loopNote(recorded) };
+        noteTiming(output.ok !== false);
         addToolOutput({ tool: id, toolCallId: toolCall.toolCallId, output });
         const saved = effectiveStudioTurnMessages(messagesRef.current, ledger);
         onSnapshot(compactStudioChatMessages(saved), skillRef.current);
@@ -378,6 +392,7 @@ export function ChatThread({
         });
         // Say so on the receipt the moment a loop starts instead of letting it burn the turn budget.
         errorText += loopNote(recorded);
+        noteTiming(false);
         addToolOutput({
           tool: id,
           toolCallId: toolCall.toolCallId,

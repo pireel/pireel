@@ -20,7 +20,11 @@ export type FirstPassStepId = typeof FIRST_PASS_STEPS[number];
 
 export type FirstPassStepStatus = 'pending' | 'running' | 'done' | 'skipped' | 'failed';
 
-export interface FirstPassStep { id: FirstPassStepId; status: FirstPassStepStatus; detail?: string }
+export interface FirstPassStep {
+  id: FirstPassStepId; status: FirstPassStepStatus; detail?: string;
+  /** How long the step took, once it ended (done, skipped or failed): where a slow rough cut's time went. */
+  ms?: number;
+}
 
 /** The skills the agent applies after the first pass, each shown with what it added. */
 export const FINE_CUT_SKILLS = ['graphics', 'b-roll', 'sound'] as const;

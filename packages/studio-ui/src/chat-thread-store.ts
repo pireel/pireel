@@ -344,9 +344,17 @@ export function withStepBoundaries(parts: UIMessage['parts']): UIMessage['parts'
   return out;
 }
 
+/** A task's tool timings are a record for people; a request does not carry them. */
+function withoutToolTimings(message: UIMessage): UIMessage {
+  const metadata = message.metadata as { task?: { toolTimings?: unknown } } | undefined;
+  if (!metadata?.task?.toolTimings) return message;
+  const { toolTimings: _timings, ...task } = metadata.task;
+  return { ...message, metadata: { ...metadata, task } };
+}
+
 export function compactStudioChatMessagesForModel(messages: UIMessage[]): UIMessage[] {
   return messages.flatMap((message) => {
-    if (message.role !== 'assistant') return [message];
+    if (message.role !== 'assistant') return [withoutToolTimings(message)];
     const compacted = compactAssistantMessageForModel(message);
     // A reply that held only UI cards so far (the first pass, before the agent answers) is not history.
     return compacted.parts.some((part) => part.type !== 'step-start') ? [compacted] : [];
