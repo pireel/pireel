@@ -130,6 +130,26 @@ describe('buildInlineFonts', () => {
     ]);
     expect(rules[0]!.css).toContain('font-weight:400;src:url(data:font/woff2;base64,AQID)');
   });
+
+  it('asks for a subset cut to a short text, unless the caller takes the standing chunks', async () => {
+    const css = "@font-face{font-family:'Noto Sans SC';font-style:normal;font-weight:400;src:url(https://fonts.gstatic.com/a.woff2) format('woff2');unicode-range:U+4E00-4EFF;}";
+    const requested: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      requested.push(String(input));
+      return String(input).includes('fonts.googleapis.com') ? new Response(css, { status: 200 }) : new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+    }));
+
+    // The address may be wrapped by the media proxy, which encodes it.
+    const cutToText = (url: string) => /[?&]text=/.test(decodeURIComponent(url));
+    await buildInlineFonts('中');
+    expect(requested.some(cutToText)).toBe(true);
+
+    requested.length = 0;
+    const rules = await buildInlineFonts('中', undefined, [], [], { exactSubset: false });
+    // The same request whatever the text: a frame-by-frame caller fetches it once.
+    expect(requested.some(cutToText)).toBe(false);
+    expect(rules).toHaveLength(1);
+  });
 });
 
 describe('fontWarmups', () => {

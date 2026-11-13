@@ -3916,7 +3916,8 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
       }
       case 'inspect_timeline': {
         const fps = documentRef.current.canvas.fps;
-        const captureAt = async (atSec: number): Promise<StudioToolResult> => {
+        // The picture is stored while the next frame is captured: `image` settles later.
+        const captureAt = async (atSec: number): Promise<StudioToolResult & { stored?: Promise<NonNullable<StudioToolResult['image']>> }> => {
           // The external agent's "eye": capture a frame via the same render pipeline as export (BYO self-checks visuals after writing a block)
           const renderTimeline = canonicalRenderTimeline(compRef.current, ctx.documentRef.current, ctx.resolveAssetUrl);
           const at = Math.min(Math.max(0, atSec), renderTimeline.durationSec);
@@ -3934,7 +3935,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
               burnLabel: label,
               maxDim: 720, // the model reads a frame at ≤1024 tokens whatever its size; 720 keeps captions legible and the stored thread small
             });
-            const frameImage = await cloudToolFrame(shot.dataUrl, { width: shot.width, height: shot.height });
+            const stored = cloudToolFrame(shot.dataUrl, { width: shot.width, height: shot.height });
             // What the image SHOWS mapped back to what the agent can EDIT: overlay blocks visible at this
             // moment (with screen zone), the shot it lands in, and whether the caption layer is on
             const visBlocks = renderTimeline.composition.blocks
@@ -3964,9 +3965,9 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             return {
               ok: true,
               summary: t('workbench.capturedFrameSecS', { sec: Math.round(at * 10) / 10 }),
-              image: frameImage,
+              stored,
               data: { atSec: at, width: shot.width, height: shot.height, burnedLabel: label, visible },
-            } as StudioToolResult;
+            };
           } catch (e) {
             return { ok: false, error: tEnglish('workbench.frameCaptureFailedMessage', { message: e instanceof Error ? e.message : String(e) }) };
           }
@@ -3985,15 +3986,16 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           frames = [...new Set(Array.from({ length: count }, (_, index) => Math.min(to - 1, Math.round(from + step * (index + 0.5)))))];
         }
         if (frames) {
-          const images: NonNullable<StudioToolResult['images']> = [];
+          const storing: Array<Promise<NonNullable<StudioToolResult['image']>>> = [];
           const captured: Array<Record<string, unknown>> = [];
           for (const frame of frames) {
-            const shot = await captureAt(frame / fps);
+            const { stored, ...shot } = await captureAt(frame / fps);
             if (!shot.ok) return { ...shot, data: { ...(shot.data && typeof shot.data === 'object' ? shot.data as Record<string, unknown> : {}), frame, captured } };
-            if (shot.image) images.push(shot.image);
+            if (stored) storing.push(stored);
             const shotData = (shot.data ?? {}) as Record<string, unknown>;
             captured.push({ frame, ...shotData });
           }
+          const images: NonNullable<StudioToolResult['images']> = await Promise.all(storing);
           return { ok: true, summary: `Captured ${captured.length} frame${captured.length === 1 ? '' : 's'}`, images, data: { frames: captured } };
         }
         input = { ...input, ...(Number.isFinite(Number(input.maxFrames)) ? { maxMoments: Number(input.maxFrames) } : {}) };
@@ -4041,7 +4043,8 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             expected: string;
             visible: unknown;
           }> = [];
-          const images: NonNullable<StudioToolResult['images']> = [];
+          // Each picture is stored while the next frame is captured.
+          const storing: Array<Promise<NonNullable<StudioToolResult['images']>[number]>> = [];
           for (let index = 0; index < selected.length; index++) {
             const moment = selected[index]!;
             const label = `${Math.round(moment.atSec * 10) / 10}s · ${moment.phase}`;
@@ -4080,8 +4083,9 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
                 captionsOn: documentCaptionsOn(documentRef.current),
               },
             });
-            images.push(await cloudToolFrame(shot.dataUrl, { width: shot.width, height: shot.height }));
+            storing.push(cloudToolFrame(shot.dataUrl, { width: shot.width, height: shot.height }));
           }
+          const images: NonNullable<StudioToolResult['images']> = await Promise.all(storing);
           const reviewedSceneIds = new Set(selected.map((moment) => moment.sceneId));
           const structuralIssues = auditSceneVisualStructure(documentRef.current)
             .filter((issue) => reviewedSceneIds.has(issue.sceneId));

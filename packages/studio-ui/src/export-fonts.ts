@@ -410,6 +410,12 @@ export async function buildInlineFonts(
   log: (m: string) => void = () => {},
   localFamilies: string[] = [],
   webFontIds: string[] = [],
+  options: {
+    /** Ask for a subset cut to exactly these characters when there are few enough (the default).
+     *  False takes the standing chunk files instead: a caller that draws one frame after another,
+     *  each with its own few characters, would otherwise fetch a new subset for every frame. */
+    exactSubset?: boolean;
+  } = {},
 ): Promise<InlineFontRule[]> {
   const t0 = performance.now();
   // DOM textContent keeps formatting newlines even when the composition has no visible text.
@@ -438,7 +444,7 @@ export async function buildInlineFonts(
   // charset too large (URL limit) or request fails → fall back to the unicode-range hit method (old behavior).
   const uniq = [...new Set([...(glyphText + glyphText.toUpperCase() + glyphText.toLowerCase())])].join('');
   let res: Response | null = null;
-  if (uniq.length > 0 && uniq.length <= 600) {
+  if (options.exactSubset !== false && uniq.length > 0 && uniq.length <= 600) {
     res = await fetchFont(`${FONT_CSS_URL}&text=${encodeURIComponent(uniq)}`);
     if (res) log(`font exact subset: ${uniq.length} chars`);
   }

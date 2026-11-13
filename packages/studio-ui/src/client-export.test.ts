@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { EMPTY_VIDEO_GROUND, paintExportFrameBase } from './client-export';
+import type { Composition } from '@pireel/studio-engine/composition';
+import { EMPTY_VIDEO_GROUND, compositionAtMoment, compositionAtMoments, paintExportFrameBase } from './client-export';
 
 type Pixel = string | null;
 type FakeLayer = { pixels: Pixel[] };
@@ -90,5 +91,34 @@ describe('client export frame compositing', () => {
     );
 
     expect(frame.pixels).toEqual(['theme', 'video']);
+  });
+});
+
+describe('compositionAtMoment', () => {
+  const block = (id: string, startSec: number, durationSec: number) => ({ id, startSec, durationSec });
+  const comp = { width: 1920, height: 1080, theme: 'dark', shots: [{ id: 's1' }], blocks: [block('title', 10, 5), block('caption-1', 0, 4), block('caption-2', 12, 3), block('late', 600, 4)] } as unknown as Composition;
+
+  it('keeps the blocks on screen at that moment, in their order, and everything else of the composition', () => {
+    const shown = compositionAtMoment(comp, 12.5);
+    expect(shown.blocks.map((entry) => entry.id)).toEqual(['title', 'caption-2']);
+    expect(shown.shots).toBe(comp.shots);
+    expect(shown.theme).toBe('dark');
+    expect(comp.blocks).toHaveLength(4);
+  });
+
+  it('keeps a block whose first or last instant is the frame', () => {
+    expect(compositionAtMoment(comp, 10).blocks.map((entry) => entry.id)).toContain('title');
+    expect(compositionAtMoment(comp, 15).blocks.map((entry) => entry.id)).toContain('title');
+    expect(compositionAtMoment(comp, 300).blocks).toEqual([]);
+  });
+
+  it('keeps the blocks on screen at any of several moments, each once', () => {
+    expect(compositionAtMoments(comp, [2, 12.5, 12.6]).blocks.map((entry) => entry.id)).toEqual(['title', 'caption-1', 'caption-2']);
+    expect(compositionAtMoments(comp, []).blocks).toEqual([]);
+  });
+
+  it('is the composition itself when every block is on screen', () => {
+    const short = { ...comp, blocks: [block('a', 0, 5), block('b', 1, 5)] } as unknown as Composition;
+    expect(compositionAtMoment(short, 2)).toBe(short);
   });
 });

@@ -336,9 +336,17 @@ interface OverlayPainter {
  * Every face is decoded before the first real frame (see fontWarmups): two passes with a short
  * pause, the first triggers the lazy font loads, the second confirms they are held.
  */
-async function overlayPainter(overlay: Overlay, comp: Composition, W: number, H: number, outW: number, outH: number): Promise<OverlayPainter> {
+async function overlayPainter(
+  overlay: Overlay, comp: Composition, W: number, H: number, outW: number, outH: number,
+  fonts: {
+    exactSubset?: boolean;
+    /** Warm every face at once. Right for a single frame, whose faces are a few small chunks; an
+     *  export warms them one by one, because a long video's faces are megabytes each. */
+    warmTogether?: boolean;
+  } = {},
+): Promise<OverlayPainter> {
   const text = overlayFontText(overlay, comp);
-  const rules = await buildInlineFonts(text, undefined, compositionLocalFontFamilies(comp), compositionWebFontIds(comp));
+  const rules = await buildInlineFonts(text, undefined, compositionLocalFontFamilies(comp), compositionWebFontIds(comp), { exactSubset: fonts.exactSubset });
   const open = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgOpen(W, H, outW, outH, '').slice(0, -STYLE_CLOSE.length));
   const sheet = encodeURIComponent(`\n${overlay.headCss}\n#root{background:transparent !important;}${STYLE_CLOSE}`);
   const close = encodeURIComponent(SVG_CLOSE);
@@ -353,7 +361,7 @@ async function overlayPainter(overlay: Overlay, comp: Composition, W: number, H:
   };
 
   const warm: HTMLImageElement[] = [];
-  for (const face of fontWarmups(rules, text)) {
+  const warmFace = async (face: { rules: InlineFontRule[]; markup: string }) => {
     const uri = address(face.rules, face.markup);
     try {
       await rasterize(uri);
@@ -362,7 +370,9 @@ async function overlayPainter(overlay: Overlay, comp: Composition, W: number, H:
     } catch {
       // a warm-up that fails to decode must never block the export itself
     }
-  }
+  };
+  if (fonts.warmTogether) await Promise.all(fontWarmups(rules, text).map(warmFace));
+  else for (const face of fontWarmups(rules, text)) await warmFace(face);
 
   const styleOf = (element: Element, pseudo?: string) => overlay.win.getComputedStyle(element, pseudo);
   let sheets = -1;
@@ -536,6 +546,26 @@ export interface CapturedCompositionFrame {
   localSimilarityFingerprint?: ReviewFrameFingerprint;
 }
 
+/** Blocks this close to a captured moment are kept with it. A block draws nothing outside its own
+ *  span; the margin only spares a frame on a block's first or last instant from rounding. */
+const CAPTURE_BLOCK_MARGIN_SEC = 1;
+
+/**
+ * The composition as one frame needs it: only the blocks on screen at `atSec`. A capture builds a
+ * document for a single frame, and the whole overlay of a long talk (1,470 captions and every font
+ * face their text asks for) cost about three seconds of building and font warm-up per frame that
+ * showed two of those blocks.
+ */
+export function compositionAtMoment(comp: Composition, atSec: number): Composition {
+  return compositionAtMoments(comp, [atSec]);
+}
+
+/** The same for several moments: the blocks on screen at any of them, in their order. */
+export function compositionAtMoments(comp: Composition, atSecs: readonly number[]): Composition {
+  const blocks = comp.blocks.filter((block) => atSecs.some((atSec) => atSec >= block.startSec - CAPTURE_BLOCK_MARGIN_SEC && atSec < block.startSec + block.durationSec + CAPTURE_BLOCK_MARGIN_SEC));
+  return blocks.length === comp.blocks.length ? comp : { ...comp, blocks };
+}
+
 export async function captureCompositionFrame(opts: {
   comp: Composition;
   videoPlacements?: readonly VideoShotTimelinePlacement[];
@@ -562,6 +592,9 @@ export async function captureCompositionFrame(opts: {
   const outW = even(W * k);
   const outH = even(H * k);
   const t = Math.max(0, Math.min(opts.timelineDurationSec ?? totalDuration(comp), opts.atSec));
+  // The overlay document and its fonts are built from what this frame shows; the footage below
+  // still reads the whole composition.
+  const shown = compositionAtMoment(comp, t);
 
   // Find which edited segment t falls in (same logic as export's segAt), open only that one source
   let rig: SourceRig | null = null;
@@ -619,7 +652,7 @@ export async function captureCompositionFrame(opts: {
   };
   let overlay: Overlay;
   try {
-    overlay = await createOverlay(injectPreviewRuntime(assembleHtml(comp, undefined, opts.videoPlacements, opts.visualMediaClips)), W, H);
+    overlay = await createOverlay(injectPreviewRuntime(assembleHtml(shown, undefined, opts.videoPlacements, opts.visualMediaClips)), W, H);
     applyPrimaryOverlayVisibility(overlay, opts.primaryVisualHidden);
   } catch (error) {
     disposeCaptureSources();
@@ -627,7 +660,9 @@ export async function captureCompositionFrame(opts: {
   }
   try {
     await inlineImages(overlay.root);
-    const painter = await overlayPainter(overlay, comp, W, H, outW, outH);
+    // One frame's text is a handful of characters, different for every frame: the standing chunk
+    // files (what the editor draws the same text with, and already fetched) serve them all.
+    const painter = await overlayPainter(overlay, shown, W, H, outW, outH, { exactSubset: false, warmTogether: true });
     overlay.win.__hfPreview!.seekTimelines(t);
     await overlay.win.__pireelWhiteboardFlush?.();
     const el = overlay.doc.getElementById('vidEl');
@@ -636,7 +671,7 @@ export async function captureCompositionFrame(opts: {
       'data:image/svg+xml;charset=utf-8,' +
         encodeURIComponent(svgOpen(W, H, outW, outH, overlay.headCss) + `<div xmlns="http://www.w3.org/1999/xhtml" id="root"></div>` + SVG_CLOSE),
     );
-    const visualLayers = browserVisualLayerPlan(comp, activeVisuals, opts.videoPlacements);
+    const visualLayers = browserVisualLayerPlan(shown, activeVisuals, opts.videoPlacements);
     const fullOverlayPass = personMatteCompositingActive(comp, opts.videoPlacements);
     const overlayImages = await Promise.all(visualLayers.flatMap((layer) => {
       if (layer.kind !== 'html') return [];
@@ -834,15 +869,26 @@ export async function measureOverlayBlocks(opts: {
   const out: Record<string, MeasuredOverlayBlock> = {};
   if (!opts.probes.length) return out;
   assertExportableComposition(opts.comp);
-  const overlay = await createOverlay(injectPreviewRuntime(assembleHtml(opts.comp, undefined, opts.videoPlacements, opts.visualMediaClips)), opts.comp.width, opts.comp.height);
+  // Built from the blocks on screen at the moments probed. Fitting three titles of a long talk
+  // built its whole overlay (1,470 captions) two or three times over: seconds for each call.
+  const shown = compositionAtMoments(opts.comp, opts.probes.map((probe) => probe.atSec));
+  const overlay = await createOverlay(injectPreviewRuntime(assembleHtml(shown, undefined, opts.videoPlacements, opts.visualMediaClips)), opts.comp.width, opts.comp.height);
   try {
-    // Seeking shows each block once, so the faces it uses start loading; measure after they arrive.
-    for (const probe of opts.probes) overlay.win.__hfPreview!.seekTimelines(probe.atSec);
-    await overlay.doc.fonts.ready;
+    // A block is measured in the faces it is drawn with. A face starts loading when text in it is
+    // laid out, not when its block is shown: seeking past every block and then waiting once waited
+    // for nothing (no layout had run), and a block was measured in the fallback face or the real
+    // one by chance, so the same edit fitted a graphic differently from one run to the next. Each
+    // block is laid out at its moment and its faces are waited for, until none is still on its way.
     for (const probe of opts.probes) {
       overlay.win.__hfPreview!.seekTimelines(probe.atSec);
       const container = overlay.doc.getElementById(probe.blockId);
       if (!container) continue;
+      for (let pass = 0; pass < 4; pass += 1) {
+        container.getBoundingClientRect();
+        await overlay.doc.fonts.ready;
+        container.getBoundingClientRect();
+        if (overlay.doc.fonts.status === 'loaded') break;
+      }
       out[probe.blockId] = measureBlockElement(overlay.win as unknown as Window & typeof globalThis, overlay.root, (container.querySelector('[data-hf-content]') as HTMLElement | null) ?? container);
     }
   } finally {
