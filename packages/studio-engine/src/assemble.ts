@@ -1,5 +1,5 @@
 import { BASE_CAPTION_FONT_PX } from './caption-presets';
-import { compileComponentStyles } from './component-styles';
+import { SHARED_SHEET_ATTRIBUTE, compileComponentStyles, sharedSheetPlaceholder } from './component-styles';
 /**
  * Assembly layer: stitch a Composition into a complete Hyperframes document (preview iframe and export share the same source).
  * Depends on the template registry being ready — always go through the './composition' barrel externally (it imports './templates' first).
@@ -536,7 +536,31 @@ export function blockInItsBox(b: Block, W: number, H: number, backdrop?: string)
   };
 }
 
-function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof resolveCaptionStyle> | undefined): { html: string; timelineBody: string } {
+/** The sheets the blocks of one document have in common: each one's rules, and how many blocks carry it. */
+type SharedSheets = Map<string, { css: string; uses: number }>;
+
+/**
+ * Settles where each keyed sheet lives once every block is assembled: one carried by two or more
+ * blocks goes to the document once (returned for the head) and its placeholders go; one that a
+ * single block carries goes back into that block, where it was.
+ */
+function placeSharedSheets(body: string[], shared: SharedSheets): string {
+  let head = '';
+  const inline = new Map<string, string>();
+  for (const [key, sheet] of shared) {
+    if (sheet.uses > 1) head += sheet.css;
+    else inline.set(key, sheet.css);
+  }
+  const mark = new RegExp(sharedSheetPlaceholder('([\\w-]+)'), 'g');
+  const prefix = sharedSheetPlaceholder('').slice(0, 5);
+  for (let index = 0; index < body.length; index += 1) {
+    if (!body[index]!.includes(prefix)) continue;
+    body[index] = body[index]!.replace(mark, (_mark, key: string) => (inline.has(key) ? `<style>${inline.get(key)}</style>` : ''));
+  }
+  return head;
+}
+
+function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof resolveCaptionStyle> | undefined, shared?: SharedSheets): { html: string; timelineBody: string; sheetKeys?: string[] } {
   const { width: W, height: H } = comp;
 
     // State-first bilingual gate: the translation line renders ONLY while captionStyle.sub.lang is set.
@@ -551,7 +575,16 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
         ? { ...capBase, slots: { ...capBase.slots, preset: cs.preset, ...(cs.animation != null ? { animation: cs.animation } : {}), ...(cs.sub?.animation != null ? { subAnimation: cs.sub.animation } : {}), yPct: typeof capBase.slots.splitSeam === 'number' ? seamCaptionYPct(capBase.slots.splitSeam, cs.scale, comp.height) : cs.yPct, xPct: cs.xPct ?? 50, wPct: cs.wPct ?? 56, scale: cs.scale, ...(cs.hPct ? { hPct: cs.hPct } : {}), ...(cs.color != null ? { color: cs.color } : {}), ...(cs.emphasis != null ? { emphasis: cs.emphasis } : {}), ...(cs.bg !== undefined ? { bg: cs.bg } : {}), ...(cs.bold != null ? { bold: cs.bold } : {}), ...(cs.font != null ? { font: cs.font } : {}), ...(cs.accentColor != null ? { accentColor: cs.accentColor } : {}), ...(cs.strokeColor != null ? { strokeColor: cs.strokeColor } : {}), ...(cs.strokeWidth != null ? { strokeWidth: cs.strokeWidth } : {}), ...(cs.sub?.preset != null ? { subPreset: cs.sub.preset } : {}), ...(cs.sub?.color != null ? { subColor: cs.sub.color } : {}), ...(cs.sub?.bg !== undefined ? { subBg: cs.sub.bg } : {}), ...(cs.sub?.bold != null ? { subBold: cs.sub.bold } : {}), ...(cs.sub?.font != null ? { subFont: cs.sub.font } : {}), ...(cs.sub?.yPct != null ? { subYPct: cs.sub.yPct } : {}), ...(cs.sub?.xPct != null ? { subXPct: cs.sub.xPct } : {}), ...(cs.sub?.wPct != null ? { subWPct: cs.sub.wPct } : {}), ...(cs.sub?.scale != null ? { subScale: cs.sub.scale } : {}), ...(cs.sub?.hPct != null ? { subHPct: cs.sub.hPct } : {}) } }
         : capBase;
     const rendered = renderBlock(rb);
-    const { html: innerHtml } = compileComponentStyles(rendered.innerHtml, b.id);
+    // A whole document shares equal sheets between its blocks; a block assembled on its own (the
+    // in-place patch channel) keeps its sheet with it, anchored on its id.
+    const compiled = compileComponentStyles(rendered.innerHtml, b.id, { share: !!shared });
+    const innerHtml = compiled.html;
+    for (const sheet of compiled.sheets ?? []) {
+      const known = shared!.get(sheet.key);
+      if (known) known.uses += 1;
+      else shared!.set(sheet.key, { css: sheet.css, uses: 1 });
+    }
+    const sheetAttr = compiled.sheets?.length ? ` ${SHARED_SHEET_ATTRIBUTE}="${compiled.sheets.map((sheet) => sheet.key).join(' ')}"` : '';
     const { timelineBody } = rendered;
     // autofit: when content overflows, scale the whole thing to just fit the box (measured empirically), preview = export
     // A block placed with fit:false keeps the size it was given: no measured fit applies to it.
@@ -560,7 +593,8 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
     // and doesn't enter the transform chain (won't be overwritten by the autofit transform)
     const scaleCss = typeof b.scale === 'number' && Math.abs(b.scale - 1) > 0.005 ? `scale:${n(b.scale)};` : '';
     // Component background (set by the user on the floating bar): see helpers blockBgCss/customHasSurface (the in-place patch channel reuses the same logic)
-    const hasSurface = customHasSurface(b.templateId, innerHtml);
+    // The surface is read from the rules too, wherever they ended up.
+    const hasSurface = customHasSurface(b.templateId, innerHtml + (compiled.sheets ?? []).map((sheet) => sheet.css).join(''));
     const bgCss = b.bg ? blockBgCss(b.bg, hasSurface) : '';
     // Border/opacity/radius/rotation are applied to the outermost container (= the framing box)
     const frame: string[] = [];
@@ -585,7 +619,7 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
       `id="${b.id}" data-composition-id="${b.id}" ${b.box ? 'data-hf-box="1" ' : ''}${b.autoFit === false ? 'data-hf-nofit="1" ' : ''}` +
       authoredDuration +
       `data-start="${n(b.startSec)}" data-duration="${n(b.durationSec)}" data-track-index="${b.trackIndex}" ` +
-      `data-width="${W}" data-height="${H}"${propsAttrs}`;
+      `data-width="${W}" data-height="${H}"${propsAttrs}${sheetAttr}`;
     // Frozen look (Block.vars): the block's insertion-time tokens, scoped to it, override #root's live
     // theme vars — a later theme mount recolors #root (and future blocks) but never this one. Emitted
     // inside the container so the in-place patch channel (hf:blockAdd/hf:blockHtml) carries it too.
@@ -613,7 +647,7 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
       const pe = isSentenceCaption(b) ? 'pointer-events:none;' : '';
       html = `<div class="comp" ${attrs} style="position:absolute;${propsCss}inset:0;${pe}${bgCss}${frame.join('')}${scaleCss}${fit}">\n${varsTag}${innerHtml}\n</div>`;
     }
-    return { html, timelineBody: withMotionTiming(timelineBody, b.motion) };
+    return { html, timelineBody: withMotionTiming(timelineBody, b.motion), ...(compiled.sheets?.length ? { sheetKeys: compiled.sheets.map((sheet) => sheet.key) } : {}) };
 }
 
 /**
@@ -788,8 +822,11 @@ export function assembleHtml(
   // Global caption style: at render time it overrides sentence captions' preset/position/scale; the block's own slots are untouched
   // (style is global state, not baked into the block). RESOLVED here — storage is sparse, defaults come from the resolver.
   const cs = comp.captionStyle ? resolveCaptionStyle(comp) : undefined;
+  const sharedSheets: SharedSheets = new Map();
+  const keyed: Array<{ at: number; block: Block; keys: string[] }> = [];
   const renderOne = (b: Block) => {
-    const r = assembleBlockWith(b, comp, cs);
+    const r = assembleBlockWith(b, comp, cs, sharedSheets);
+    if (r.sheetKeys) keyed.push({ at: body.length, block: b, keys: r.sheetKeys });
     body.push(r.html);
     scripts.push(timelineScript(b.id, r.timelineBody));
   };
@@ -837,6 +874,16 @@ export function assembleHtml(
     ...comp.blocks.flatMap((block) => componentPropsFontIds(block)),
     ...lookFontIds(comp.look),
   ]).map((href) => `<link href="${href}" rel="stylesheet" />\n`).join('');
+  // After the document's own styles, so a block's rules still follow them as they did from inside
+  // the block. Export reads the head's styles into every overlay image, so the shared sheet travels.
+  // A block that shares nothing is put back as it assembles on its own, sheet and all: the document
+  // then holds the very fragment the patch channel would send for it.
+  for (const entry of keyed) {
+    if (!entry.keys.every((key) => sharedSheets.get(key)?.uses === 1)) continue;
+    body[entry.at] = assembleBlockWith(entry.block, comp, cs).html;
+    for (const key of entry.keys) sharedSheets.delete(key);
+  }
+  const sharedCss = placeSharedSheets(body, sharedSheets);
   return `<!doctype html>
 <html lang="zh">
 <head>
@@ -857,7 +904,7 @@ ${webFontLinks}<style>
   .hf-ph-plus { font-size:96px; font-weight:300; line-height:1; }
   .hf-ph-tip { font-size:34px; text-align:center; line-height:1.3; font-family:var(--font-body); }
 </style>
-${lookHeadHtml(comp.look)}</head>
+${lookHeadHtml(comp.look)}${sharedCss ? `<style data-hf-shared-sheets>${sharedCss}</style>\n` : ''}</head>
 <body>
 <div id="root" data-composition-id="root" data-start="0" data-width="${W}" data-height="${H}">
 ${body.join('\n')}

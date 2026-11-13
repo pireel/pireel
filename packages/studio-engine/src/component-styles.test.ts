@@ -87,13 +87,48 @@ describe('renderer-owned component styles', () => {
       expect(compileComponentStyles(result.html, 'cap'), css).toEqual(result);
     }
   });
-  it('gives the built-in captions plain rules: no scope per caption in the assembled document', () => {
+  it('gives the built-in captions plain rules, and one copy of them for all the captions of a document', () => {
     ensureTemplatesRegistered();
-    const blocks = captionBlocksFromAsr([{ start: 0, end: 2, text: '第一句字幕' }, { start: 2, end: 4, text: '第二句字幕' }]);
+    const blocks = captionBlocksFromAsr([{ start: 0, end: 2, text: 'one caption' }, { start: 2, end: 4, text: 'another caption' }, { start: 4, end: 6, text: 'a third' }]);
     const html = assembleHtml({ width: 1920, height: 1080, theme: 'general', video: null, shots: [], blocks });
-    expect(blocks.length).toBeGreaterThan(0);
+    expect(blocks.length).toBe(3);
     expect(html).not.toContain('@scope');
-    for (const block of blocks) expect(html).toContain(`[id="${block.id}"] .cap-line{`);
+    // One sheet in the head, anchored on its key; every caption carries the key and no sheet of its own.
+    const key = /data-hf-sheet="([\w-]+)"/.exec(html)![1]!;
+    expect(html.split(`[data-hf-sheet~="${key}"] .cap-line{`).length - 1).toBe(1);
+    expect(html.indexOf('data-hf-shared-sheets')).toBeLessThan(html.indexOf('</head>'));
+    for (const block of blocks) {
+      expect(html).toContain(`id="${block.id}" data-composition-id="${block.id}"`);
+      expect(html).not.toContain(`[id="${block.id}"]`);
+    }
+    expect(html.split(`data-hf-sheet="${key}"`).length - 1).toBe(3);
+    expect(html.split('<style').length - 1).toBe(2); // the document's own and the shared one
+  });
+  it('leaves a sheet with its block when no other block has the same, or when it loads something by address', () => {
+    ensureTemplatesRegistered();
+    const custom = (id: string, css: string) => ({ id, templateId: 'custom', startSec: 0, durationSec: 2, trackIndex: 1, slots: { innerHtml: `<b class="label">${id}</b><style>${css}</style>`, timelineBody: '' } });
+    const lone = assembleHtml({ width: 640, height: 360, theme: 'general', video: null, shots: [], blocks: [custom('a', '#a .label{color:red}'), custom('b', '#b .label{color:blue}')] });
+    expect(lone).toContain('[id="a"] .label{color:red}');
+    expect(lone).toContain('[id="b"] .label{color:blue}');
+    expect(lone).not.toContain('data-hf-sheet');
+    const same = assembleHtml({ width: 640, height: 360, theme: 'general', video: null, shots: [], blocks: [custom('a', '#a .label{color:red}'), custom('b', '#b .label{color:red}')] });
+    expect(same.split('.label{color:red}').length - 1).toBe(1);
+    expect(same).not.toContain('[id="a"]');
+    const pictures = assembleHtml({ width: 640, height: 360, theme: 'general', video: null, shots: [], blocks: [custom('a', '#a .label{background:url(x.png)}'), custom('b', '#b .label{background:url(x.png)}')] });
+    expect(pictures).toContain('[id="a"] .label{background:url(x.png)}');
+    expect(pictures).toContain('[id="b"] .label{background:url(x.png)}');
+  });
+  it('keys a shared sheet by its rules: the same for any component, different when a rule differs', () => {
+    const first = compileComponentStyles('<i class="x">a</i><style>#one .x{color:red}</style>', 'one', { share: true });
+    const second = compileComponentStyles('<i class="x">b</i><style>#two .x{color:red}</style>', 'two', { share: true });
+    const other = compileComponentStyles('<i class="x">c</i><style>#three .x{color:blue}</style>', 'three', { share: true });
+    expect(first.sheets).toHaveLength(1);
+    expect(first.sheets![0]).toEqual(second.sheets![0]);
+    expect(first.sheets![0]!.css).toBe(`[data-hf-sheet~="${first.sheets![0]!.key}"] .x{color:red}`);
+    expect(first.html).not.toContain('<style');
+    expect(other.sheets![0]!.key).not.toBe(first.sheets![0]!.key);
+    // Without the option nothing changes: the sheet stays in the markup, anchored on the id.
+    expect(compileComponentStyles('<i class="x">a</i><style>#one .x{color:red}</style>', 'one').html).toContain('<style>[id="one"] .x{color:red}</style>');
   });
   it('applies the same isolation to the actual assembled preview/export document', () => {
     const html = assembleHtml({ width: 640, height: 360, theme: 'general', video: null, shots: [], blocks: [

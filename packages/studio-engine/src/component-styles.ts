@@ -4,8 +4,24 @@ import parse from 'css-tree/parser';
 import generate from 'css-tree/generator';
 import walk from 'css-tree/walker';
 import type { CssNode, StyleSheet } from 'css-tree';
+import { hashSection } from './stable-json';
 
-export interface ComponentStyleResult { html: string; warnings: string[] }
+/** A stylesheet lifted out of a component so that every component with the same one can use one copy. */
+export interface SharedComponentSheet {
+  /** Names the sheet by its content: equal rules give an equal key. */
+  key: string;
+  /** The rules, anchored on `[data-hf-sheet~="<key>"]` in place of the component's own id. */
+  css: string;
+}
+export interface ComponentStyleResult {
+  html: string;
+  warnings: string[];
+  /** With `share`: the sheets taken out of `html`. Each left `sharedSheetPlaceholder(key)` where its
+   *  style element was, and the component's root must carry every key in `data-hf-sheet`. */
+  sheets?: SharedComponentSheet[];
+}
+export const SHARED_SHEET_ATTRIBUTE = 'data-hf-sheet';
+export const sharedSheetPlaceholder = (key: string): string => `<!--hf-sheet:${key}-->`;
 const cache = new Map<string, ComponentStyleResult>();
 const MAX_CACHE_ENTRIES = 32;
 
@@ -44,12 +60,20 @@ function anchoredToRoot(sheet: StyleSheet): boolean {
  * or, for a sheet that already anchors each selector to the component root, by that root's own
  * attribute selector. The browser weighs every @scope against every element it restyles, so one
  * per caption (1,470 of them in a 44-minute talk) cost gigabytes each time the document was
- * styled; the plain rules cost nothing. */
-export function compileComponentStyles(html: string, componentId: string): ComponentStyleResult {
-  const key = `${componentId}\0${html}`;
+ * styled; the plain rules cost nothing.
+ *
+ * Even plain, a rule per caption is a rule the browser tries on every word of every caption: 1,470
+ * captions with the same eight rules were 11,760 rules, and each restyle of the document paid for
+ * all of them. With `share`, a sheet anchored to its root is instead keyed by its own text and
+ * handed back apart from the markup, anchored on the key, so a document holds it once for all the
+ * components that carry it (see assembleHtml). A sheet that loads something by address stays with
+ * its component: export rewrites those addresses component by component. */
+export function compileComponentStyles(html: string, componentId: string, options: { share?: boolean } = {}): ComponentStyleResult {
+  const key = `${options.share ? 'shared' : 'own'}\0${componentId}\0${html}`;
   const hit = cache.get(key);
   if (hit) return hit;
   const warnings: string[] = [];
+  const sheets: SharedComponentSheet[] = [];
   const anchor = `([id=${JSON.stringify(componentId)}])`;
   const scopedHtml = html.replace(/<style\b([^>]*)>([\s\S]*?)<\/style>/gi, (_tag, attributes: string, css: string) => {
     try {
@@ -110,11 +134,20 @@ export function compileComponentStyles(html: string, componentId: string): Compo
       } });
       if (sheet.children.isEmpty) return '';
       if (anchoredToRoot(sheet)) {
+        // Spelled with :scope the text is the same for every component with these rules: that is the key.
+        const portable = generate(sheet);
+        const shared = options.share && !attributes.trim() && !/url\(/i.test(portable) ? hashSection(portable).replaceAll('.', '-') : null;
         walk(sheet, { visit: 'PseudoClassSelector', enter(node, item) {
           if (node.name.toLowerCase() === 'scope' && !node.children && item) {
-            item.data = { type: 'AttributeSelector', name: { type: 'Identifier', name: 'id' }, matcher: '=', value: { type: 'String', value: componentId }, flags: null };
+            item.data = shared
+              ? { type: 'AttributeSelector', name: { type: 'Identifier', name: SHARED_SHEET_ATTRIBUTE }, matcher: '~=', value: { type: 'String', value: shared }, flags: null }
+              : { type: 'AttributeSelector', name: { type: 'Identifier', name: 'id' }, matcher: '=', value: { type: 'String', value: componentId }, flags: null };
           }
         } });
+        if (shared) {
+          if (!sheets.some((entry) => entry.key === shared)) sheets.push({ key: shared, css: generate(sheet) });
+          return sharedSheetPlaceholder(shared);
+        }
         return `<style${attributes}>${generate(sheet)}</style>`;
       }
       scope.block.children = sheet.children;
@@ -126,7 +159,7 @@ export function compileComponentStyles(html: string, componentId: string): Compo
       return '';
     }
   });
-  const result = { html: scopedHtml, warnings };
+  const result: ComponentStyleResult = options.share ? { html: scopedHtml, warnings, sheets } : { html: scopedHtml, warnings };
   if (html.length <= 64_000) {
     if (cache.size >= MAX_CACHE_ENTRIES) cache.delete(cache.keys().next().value!);
     cache.set(key, result);

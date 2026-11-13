@@ -331,12 +331,17 @@ export const PREVIEW_RUNTIME = `
   // lands, a panel pushed in from outside) are transforms, and an overflow they cause is not one the
   // finished block has. Transforms are switched off only while measuring; nothing paints in between.
   var measuringStyle = document.createElement('style');
-  measuringStyle.textContent = '[data-hf-measuring] [data-composition-id] *{transform:none!important;translate:none!important;scale:none!important;rotate:none!important}';
+  measuringStyle.textContent = '[data-hf-measuring] [data-composition-id] *,[data-composition-id][data-hf-measuring] *{transform:none!important;translate:none!important;scale:none!important;rotate:none!important}';
   (document.head || document.documentElement).appendChild(measuringStyle);
-  function measureFit() {
+  // ids names the blocks to measure (the ones a patch touched); without it every block is. Marking
+  // the whole document restyles all of it, twice, which on an hour of captions is seconds: a patch
+  // that moved one block marks that block alone.
+  function measureFit(ids) {
     var fits = {};
-    document.documentElement.setAttribute('data-hf-measuring', '');
-    comps().forEach(function (el) {
+    var only = ids && ids.length ? ids.map(function (id) { return document.querySelector('[data-composition-id="' + id + '"]'); }).filter(Boolean) : null;
+    if (only) only.forEach(function (el) { el.setAttribute('data-hf-measuring', ''); });
+    else document.documentElement.setAttribute('data-hf-measuring', '');
+    (only || comps()).forEach(function (el) {
       var id = el.getAttribute('data-composition-id');
       // Picture layers carry their framing in their own transform; autofit (text overflow) must not reset it.
       if (id === 'root' || id === 'vid' || el.hasAttribute('data-hf-visual-clip')) return;
@@ -353,11 +358,12 @@ export const PREVIEW_RUNTIME = `
       var readableFloor = smallestFontPx > 0 ? Math.min(1, minReadableFontPx / smallestFontPx) : 0;
       fits[id] = Math.floor(Math.max(rawFit, readableFloor) * 100) / 100; // quantize to 0.01 to de-jitter
     });
-    document.documentElement.removeAttribute('data-hf-measuring');
+    if (only) only.forEach(function (el) { el.removeAttribute('data-hf-measuring'); });
+    else document.documentElement.removeAttribute('data-hf-measuring');
     Object.keys(fits).forEach(function (id) { applyFit(id, fits[id]); }); // apply in place, after measuring
     fpost({ type: 'fit', fits: fits });
   }
-  function triggerFit() { try { requestAnimationFrame(function () { requestAnimationFrame(measureFit); }); } catch (e) { measureFit(); } }
+  function triggerFit(ids) { var run = function () { measureFit(ids); }; try { requestAnimationFrame(function () { requestAnimationFrame(run); }); } catch (e) { run(); } }
 
   window.__hfPreview = { seek: seek, seekTimelines: seekTimelines, play: play, pause: pause, clock: clock, duration: duration, measureFit: measureFit };
 
@@ -545,7 +551,7 @@ export const PREVIEW_RUNTIME = `
         }
       } catch (err) {}
     }
-    else if (d.type === 'hf:measureFit') { triggerFit(); } // re-measure autofit after a geometry-only parent commit (a smaller box overflows and needs scaling)
+    else if (d.type === 'hf:measureFit') { triggerFit(d.ids); } // re-measure autofit after a geometry-only parent commit (a smaller box overflows and needs scaling)
     else if (d.type === 'hf:measure' && d.id) {
       // measure a block's visible content rect (for the caption selection box: caption lines are laid out by CSS inside the iframe, the parent can only measure).
       // the caption box is the *global-style* handle (user's intent), so measure the first segment as a representative position, don't jump with the current word
@@ -662,6 +668,8 @@ export const PREVIEW_RUNTIME = `
         var bhEl = document.getElementById(String(d.blockId));
         if (bhEl && bhEl.classList.contains('comp')) {
           var bhHost = bhEl.querySelector('[data-hf-content]') || bhEl;
+          // The new content brings its own rules: the block no longer answers to a sheet it shared.
+          bhEl.removeAttribute('data-hf-sheet');
           bhHost.innerHTML = String(d.innerHtml || '');
           if (window.__timelines && window.__timelines[d.blockId]) {
             try { window.__timelines[d.blockId].kill(); } catch (e1) {}
