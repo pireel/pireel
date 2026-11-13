@@ -307,6 +307,25 @@ describe('EditorDocument V2 managed caption command', () => {
     expect(result.receipt).toMatchObject({ affectedTrackIds: ['managed-captions'], createdClipIds: ['capd_emainasset_0_0', 'capd_emainasset_0_1'] });
   });
 
+  it('ends a cue where the next one starts: no frame shows two captions', () => {
+    const document = documentWithCaptions();
+    // Two sentences that meet at 0.70 s. Start and length rounded apart put the first cue's end on
+    // frame 22 (11 + 11) and the second's start on frame 21.
+    document.semantics.transcripts['main-asset'] = [
+      { start: 0.35, end: 0.7, text: 'one two.', words: [{ text: 'one', start: 0.35, end: 0.52 }, { text: 'two.', start: 0.52, end: 0.7 }] },
+      { start: 0.7, end: 1.4, text: 'three four.', words: [{ text: 'three', start: 0.7, end: 1 }, { text: 'four.', start: 1, end: 1.4 }] },
+    ];
+    document.timeline.tracks[0]!.clips = [narrative({ durationFrames: 60, sourceInSec: 0, sourceOutSec: 2 })];
+    const result = applyEditorCommand(document, { type: 'captions.relay' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const cues = [...result.document.timeline.tracks.find((candidate) => candidate.id === 'managed-captions')!.clips].sort((a, b) => a.startFrame - b.startFrame);
+    expect(cues.length).toBeGreaterThan(1);
+    cues.forEach((cue, index) => {
+      const next = cues[index + 1];
+      if (next) expect(cue.startFrame + cue.durationFrames).toBeLessThanOrEqual(next.startFrame);
+    });
+  });
   it('clears stale managed captions when the primary lane is deliberately empty', () => {
     const document = documentWithCaptions();
     document.timeline.tracks[0]!.clips = [];

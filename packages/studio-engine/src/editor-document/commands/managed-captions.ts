@@ -1,6 +1,6 @@
 import { captionBlocksFromAsr, type AsrSegment, type CueRef } from '../../build-blocks';
 import { chooseWordOwner, displayCuesFromMappedSegs, mapTranscriptSegsToEdited } from '../../captions-relay';
-import { positiveDurationFrames, secondsToTimelineFrames, timelineFramesToSeconds } from '../time';
+import { secondsToTimelineFrames, timelineFramesToSeconds } from '../time';
 import type {
   AudioTimelineClip,
   CaptionSourceRef,
@@ -550,7 +550,10 @@ export function relayManagedCaptionTrack(
       ? previous.timingOverride
       : undefined;
     const derivedStartFrame = secondsToTimelineFrames(block.startSec, document.canvas.fps);
-    const derivedEndFrame = derivedStartFrame + positiveDurationFrames(block.durationSec, document.canvas.fps);
+    // The end is the cue's own end, rounded to a frame by itself. Start and length rounded apart
+    // can land one frame past the next cue's start, and for that frame two captions show at once
+    // (121 of 1,470 cues in a 44-minute talk).
+    const derivedEndFrame = Math.max(derivedStartFrame + 1, secondsToTimelineFrames(block.startSec + block.durationSec, document.canvas.fps));
     const startFrame = Math.max(0, derivedStartFrame + (timingOverride?.startOffsetFrames ?? 0));
     // ASR word timings can run past the end of the audio they describe; a cue that outlives the
     // picture and narration would extend the output by a few silent frames (observed: 1588 → 1597)
