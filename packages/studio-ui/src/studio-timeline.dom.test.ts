@@ -4,7 +4,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { emptyComposition, type Block } from '@pireel/studio-engine/composition';
 import { setStudioLocale } from '@pireel/studio-ui/i18n';
-import { StudioTimeline } from '@pireel/studio-ui/studio-timeline';
+import { StudioTimeline, TIMELINE_RENDERER_STORAGE_KEY } from '@pireel/studio-ui/studio-timeline';
 
 const block = { id: 'title', templateId: 'custom', slots: {}, startSec: 1, durationSec: 2, trackIndex: 1, label: 'Title' } as Block;
 
@@ -14,6 +14,8 @@ describe('timeline block trims', () => {
   beforeEach(() => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     setStudioLocale('en');
+    // This is the DOM timeline's test: it is no longer the one drawn by default.
+    window.localStorage.setItem(TIMELINE_RENDERER_STORAGE_KEY, 'dom');
     HTMLElement.prototype.setPointerCapture = vi.fn();
     host = document.createElement('div');
     document.body.append(host);

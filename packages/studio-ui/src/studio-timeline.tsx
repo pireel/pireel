@@ -16,7 +16,9 @@
  */
 
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeftRight, Clapperboard, Eye, EyeOff, Film, GalleryHorizontal, Loader2, Music, Plus, VideoOff, Volume2, VolumeX } from 'lucide-react';
+import { ArrowLeftRight, Clapperboard, Film, GalleryHorizontal, Loader2, Music, Plus, VideoOff, Volume2 } from 'lucide-react';
+import { MuteToggle, VisibilityToggle } from './timeline-track-toggles';
+import { StudioTimelineCanvas } from './studio-timeline-canvas';
 import { transitionIcon } from './transition-icons';
 import {
   type Block,
@@ -136,7 +138,7 @@ export interface TimelineBlockTrackTarget {
   stackOrder: number;
 }
 
-interface StudioTimelineProps {
+export interface StudioTimelineProps {
   comp: Composition;
   /** Row density (see TIMELINE_METRICS); the workbench starts compact. */
   density?: TimelineDensity;
@@ -276,11 +278,35 @@ interface StudioTimelineProps {
 
 /** memo: callback props have stable identity via the workbench's useStableCallbacks; timeline-irrelevant
  *  state changes in the workbench (export progress / panel switch / generating state) no longer re-render this big tree. comp changes still render as usual. */
-export const StudioTimeline = memo(StudioTimelineImpl);
+const StudioTimelineDom = memo(StudioTimelineImpl);
+const StudioTimelineOnCanvas = memo(StudioTimelineCanvas);
 
-/** Track mute toggle (track header): the NLE speaker icon, in front of the track it silences. Mute is a
- *  TRACK property here rather than a per-clip one — "quiet the music while I listen to the cut" is a
- *  statement about a track, and per-item silencing is already the level slider's bottom stop. */
+export const TIMELINE_RENDERER_STORAGE_KEY = 'pireel.studio.timelineRenderer';
+/**
+ * Which timeline draws: the canvas one (studio-timeline-canvas.tsx). This file's DOM timeline, whose
+ * every click re-renders and lays out each clip of the project, is kept to compare against until it
+ * is removed: `?timeline=dom` on the address brings it back and is remembered, `?timeline=canvas`
+ * returns to the default.
+ */
+export function timelineRenderer(): 'dom' | 'canvas' {
+  if (typeof window === 'undefined') return 'canvas';
+  // The address decides on its own: a browser that refuses to store the choice (full or blocked
+  // storage) still gets the timeline it was asked for.
+  const asked = new URLSearchParams(window.location.search).get('timeline');
+  try {
+    if (asked === 'canvas' || asked === 'dom') window.localStorage.setItem(TIMELINE_RENDERER_STORAGE_KEY, asked);
+    else return window.localStorage.getItem(TIMELINE_RENDERER_STORAGE_KEY) === 'dom' ? 'dom' : 'canvas';
+  } catch {
+    // Not stored; the address still answers below.
+  }
+  return asked === 'dom' ? 'dom' : 'canvas';
+}
+
+export function StudioTimeline(props: StudioTimelineProps) {
+  const [renderer] = useState(timelineRenderer);
+  return renderer === 'canvas' ? <StudioTimelineOnCanvas {...props} /> : <StudioTimelineDom {...props} />;
+}
+
 /** Missing-source strip: the shot stays editable (cut/trim/delete all cloud-backed), only its frames
  *  can't render on this device — hatched fill + label instead of a blank/misleading filmstrip. */
 function MissingStrip({ loading = false }: { loading?: boolean }) {
@@ -289,44 +315,6 @@ function MissingStrip({ loading = false }: { loading?: boolean }) {
       {loading ? <Loader2 size={11} className="text-ink-4 shrink-0 animate-spin" /> : <VideoOff size={11} className="text-ink-4 shrink-0" />}
       <span className="text-ink-4 truncate text-[9px]">{t(loading ? 'workbench.srcLoading' : 'workbench.srcMissing')}</span>
     </div>
-  );
-}
-
-function MuteToggle({ muted, onToggle }: { muted: boolean; onToggle: () => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={muted}
-      aria-label={muted ? t('panels.unmuteTrack') : t('panels.muteTrack')}
-      onPointerDown={(e) => e.stopPropagation()} // the row itself starts a track drag
-      onClick={(e) => {
-        e.stopPropagation();
-        onToggle();
-      }}
-      className={`hover:bg-panel-2/20 flex h-4 w-4 items-center justify-center rounded transition ${muted ? 'text-accent-ink' : 'text-ink-4 hover:text-ink-2'}`}
-    >
-      {muted ? <VolumeX size={12} /> : <Volume2 size={12} />}
-    </button>
-  );
-}
-
-function VisibilityToggle({ hidden, onToggle }: { hidden: boolean; onToggle: () => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={!hidden}
-      aria-label={hidden ? t('panels.showTrack') : t('panels.hideTrack')}
-      onPointerDown={(event) => event.stopPropagation()}
-      onClick={(event) => {
-        event.stopPropagation();
-        onToggle();
-      }}
-      className={`hover:bg-panel-2/20 flex h-4 w-4 items-center justify-center rounded transition ${hidden ? 'text-accent-ink' : 'text-ink-4 hover:text-ink-2'}`}
-    >
-      {hidden ? <EyeOff size={12} /> : <Eye size={12} />}
-    </button>
   );
 }
 
