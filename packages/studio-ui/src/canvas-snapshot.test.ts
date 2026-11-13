@@ -1,6 +1,27 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
-import { serializeBrowserOverlayElements, withCanvasSnapshots } from './browser-visual-layer-plan';
+import { browserOverlayElements, serializeBrowserOverlayElements, withCanvasSnapshots } from './browser-visual-layer-plan';
+import { fontRequestsIn } from './export-fonts';
+
+describe('the elements one overlay pass draws', () => {
+  it('are the ones it serializes: the named blocks, or all of them, without the hidden', () => {
+    const root = document.createElement('div');
+    root.id = 'root';
+    root.innerHTML = '<div id="b1"><span style="font-family:Head;font-weight:700">One</span><style>#b1{color:red}</style></div>'
+      + '<div id="b2" style="visibility:hidden">Two</div><div id="b3">Three</div>';
+    document.body.appendChild(root);
+    expect(browserOverlayElements(root, document).map((element) => element.id)).toEqual(['b1', 'b3']);
+    expect(browserOverlayElements(root, document, [{ id: 'b3' }, { id: 'b2' }, { id: 'gone' }]).map((element) => element.id)).toEqual(['b3']);
+    expect(serializeBrowserOverlayElements(root, document, [{ id: 'b1' }, { id: 'b2' }])).not.toContain('Two');
+    // The text those elements draw, by the style it is drawn in; a stylesheet's own text is not drawn.
+    const styleOf = (element: Element) => ({ fontFamily: (element as HTMLElement).style.fontFamily || 'Body', fontWeight: (element as HTMLElement).style.fontWeight || '400', fontStyle: 'normal' });
+    expect(fontRequestsIn(browserOverlayElements(root, document), styleOf)).toEqual([
+      { families: ['Head'], weight: 700, style: 'normal', text: 'One' },
+      { families: ['Body'], weight: 400, style: 'normal', text: 'Three' },
+    ]);
+    root.remove();
+  });
+});
 
 describe('canvas snapshots in exported overlays', () => {
   it('replaces each canvas with an image of its current pixels, keeping its attributes', () => {

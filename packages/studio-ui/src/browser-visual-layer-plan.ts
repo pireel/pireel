@@ -34,6 +34,19 @@ export function browserVisualLayerPlan(
   ];
 }
 
+/** The elements one pass draws: one HTML track's blocks, or everything for the person-matte pass,
+ *  without those the timeline has hidden. */
+export function browserOverlayElements(
+  root: HTMLElement,
+  document: Document,
+  blocks?: readonly { id: string }[],
+): HTMLElement[] {
+  const elements = blocks
+    ? blocks.map((block) => document.getElementById(block.id)).filter((element): element is HTMLElement => !!element)
+    : [...root.children] as HTMLElement[];
+  return elements.filter((element) => element.style.visibility !== 'hidden');
+}
+
 /** Serialize either one HTML-track pass or the complete person-matte overlay pass. */
 export function serializeBrowserOverlayElements(
   root: HTMLElement,
@@ -44,11 +57,7 @@ export function serializeBrowserOverlayElements(
   const shell = serializer.serializeToString(root.cloneNode(false));
   const open = shell.endsWith('/>') ? `${shell.slice(0, -2)}>` : shell.slice(0, shell.lastIndexOf('</'));
   let result = open;
-  const elements = blocks
-    ? blocks.map((block) => document.getElementById(block.id)).filter((element): element is HTMLElement => !!element)
-    : [...root.children] as HTMLElement[];
-  for (const element of elements) {
-    if (element.style.visibility === 'hidden') continue;
+  for (const element of browserOverlayElements(root, document, blocks)) {
     result += serializer.serializeToString(withCanvasSnapshots(element, document));
   }
   return `${result}</div>`;

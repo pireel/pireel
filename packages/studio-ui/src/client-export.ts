@@ -84,12 +84,13 @@ import { exportAudioPacketLimit, exportVideoPacketLimit, openExportFileSink, typ
 import { createGlMixer, glDirection } from '@pireel/studio-engine/transition-gl';
 import { injectPreviewRuntime } from './sample-composition';
 import { materializeRemoteMedia } from './remote-media';
-import { buildInlineFontCss, warmupFontMarkup } from './export-fonts';
+import { buildInlineFonts, documentGeneratesText, fontRequestsIn, fontRulesFor, fontWarmups, type InlineFontRule } from './export-fonts';
 import { webFontIdOf } from '@pireel/studio-engine/font-library';
 import { googleFontRowOf } from '@pireel/studio-engine/google-fonts';
 import { componentPropsFontIds } from '@pireel/studio-engine/component-props';
 import { t } from './i18n';
 import {
+  browserOverlayElements,
   browserVisualLayerPlan,
   personMatteCompositingActive,
   serializeBrowserOverlayElements,
@@ -305,9 +306,10 @@ function svgOpen(lw: number, lh: number, dw: number, dh: number, css: string): s
     `<svg xmlns="http://www.w3.org/2000/svg" width="${dw}" height="${dh}" viewBox="0 0 ${lw} ${lh}">` +
     `<foreignObject width="100%" height="100%">` +
     `<div xmlns="http://www.w3.org/1999/xhtml" style="width:${lw}px;height:${lh}px;position:relative;overflow:hidden;">` +
-    `<style>${css}</style>`
+    `<style>${css}${STYLE_CLOSE}`
   );
 }
+const STYLE_CLOSE = `</style>`;
 const SVG_CLOSE = `</div></foreignObject></svg>`;
 
 async function rasterize(uri: string): Promise<HTMLImageElement> {
@@ -317,21 +319,64 @@ async function rasterize(uri: string): Promise<HTMLImageElement> {
   return img;
 }
 
-/** Decode every inlined face before the first real frame (see warmupFontMarkup). Two passes with a
- *  short pause: the first triggers the lazy font loads, the second confirms they are cached; the
- *  cost is two throwaway rasterizations per export. */
-async function warmInlineFonts(css: string, text: string, W: number, H: number, outW: number, outH: number): Promise<void> {
-  const markup = warmupFontMarkup(css, text);
-  if (!markup) return;
-  const uri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgOpen(W, H, outW, outH, css) + markup + SVG_CLOSE);
-  for (let pass = 0; pass < 2; pass += 1) {
+/** Draws the overlay's markup as images for one export or capture. */
+interface OverlayPainter {
+  /** The image of `markup`, the serialized form of `elements` as they stand right now. */
+  draw(markup: string, elements: readonly Element[]): Promise<HTMLImageElement>;
+  /** The warm-up images. Keeping them keeps every font rule decoded until the painter is let go. */
+  warm: HTMLImageElement[];
+}
+
+/**
+ * The painter of one overlay. An image's address holds its whole stylesheet, fonts included, and
+ * stays in memory as long as the image does; a long talk's fonts are over 10 MB while the markup of
+ * one change is a few KB. So an image carries only the font rules its own text asks for, read from
+ * the live elements' computed styles. The shell, the stylesheet and each rule are encoded once.
+ *
+ * Every face is decoded before the first real frame (see fontWarmups): two passes with a short
+ * pause, the first triggers the lazy font loads, the second confirms they are held.
+ */
+async function overlayPainter(overlay: Overlay, comp: Composition, W: number, H: number, outW: number, outH: number): Promise<OverlayPainter> {
+  const text = overlayFontText(overlay, comp);
+  const rules = await buildInlineFonts(text, undefined, compositionLocalFontFamilies(comp), compositionWebFontIds(comp));
+  const open = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgOpen(W, H, outW, outH, '').slice(0, -STYLE_CLOSE.length));
+  const sheet = encodeURIComponent(`\n${overlay.headCss}\n#root{background:transparent !important;}${STYLE_CLOSE}`);
+  const close = encodeURIComponent(SVG_CLOSE);
+  const encoded = new Map<InlineFontRule, string>();
+  const address = (picked: readonly InlineFontRule[], markup: string) => {
+    const fonts = picked.map((rule) => {
+      let piece = encoded.get(rule);
+      if (piece === undefined) encoded.set(rule, (piece = encodeURIComponent(rule.css)));
+      return piece;
+    });
+    return open + fonts.join('%0A') + sheet + encodeURIComponent(markup) + close;
+  };
+
+  const warm: HTMLImageElement[] = [];
+  for (const face of fontWarmups(rules, text)) {
+    const uri = address(face.rules, face.markup);
     try {
       await rasterize(uri);
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      warm.push(await rasterize(uri));
     } catch {
-      return; // a warm-up that fails to decode must never block the export itself
+      // a warm-up that fails to decode must never block the export itself
     }
-    if (pass === 0) await new Promise((resolve) => setTimeout(resolve, 120));
   }
+
+  const styleOf = (element: Element, pseudo?: string) => overlay.win.getComputedStyle(element, pseudo);
+  let sheets = -1;
+  let generated = false;
+  return {
+    warm,
+    draw(markup, elements) {
+      if (overlay.doc.styleSheets.length !== sheets) {
+        sheets = overlay.doc.styleSheets.length;
+        generated = documentGeneratesText(overlay.doc);
+      }
+      return rasterize(address(fontRulesFor(rules, fontRequestsIn(elements, styleOf, generated)), markup));
+    },
+  };
 }
 
 /** Canonical ground for composition pixels not covered by video, graphics, or a theme surface. */
@@ -582,14 +627,7 @@ export async function captureCompositionFrame(opts: {
   }
   try {
     await inlineImages(overlay.root);
-    const fontCss = await buildInlineFontCss(
-      overlayFontText(overlay, comp),
-      undefined,
-      compositionLocalFontFamilies(comp),
-      compositionWebFontIds(comp),
-    );
-    const css = `${fontCss}\n${overlay.headCss}\n#root{background:transparent !important;}`;
-    await warmInlineFonts(css, overlayFontText(overlay, comp), W, H, outW, outH);
+    const painter = await overlayPainter(overlay, comp, W, H, outW, outH);
     overlay.win.__hfPreview!.seekTimelines(t);
     await overlay.win.__pireelWhiteboardFlush?.();
     const el = overlay.doc.getElementById('vidEl');
@@ -600,15 +638,14 @@ export async function captureCompositionFrame(opts: {
     );
     const visualLayers = browserVisualLayerPlan(comp, activeVisuals, opts.videoPlacements);
     const fullOverlayPass = personMatteCompositingActive(comp, opts.videoPlacements);
-    const overlayImages = await Promise.all(visualLayers.flatMap((layer) => layer.kind === 'html'
-      ? [rasterize(
-          'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
-            svgOpen(W, H, outW, outH, css)
-            + serializeBrowserOverlayElements(overlay.root, overlay.doc, fullOverlayPass ? undefined : layer.blocks)
-            + SVG_CLOSE,
-          ),
-        )]
-      : []));
+    const overlayImages = await Promise.all(visualLayers.flatMap((layer) => {
+      if (layer.kind !== 'html') return [];
+      const blocks = fullOverlayPass ? undefined : layer.blocks;
+      return [painter.draw(
+        serializeBrowserOverlayElements(overlay.root, overlay.doc, blocks),
+        browserOverlayElements(overlay.root, overlay.doc, blocks),
+      )];
+    }));
 
     const canvas = document.createElement('canvas');
     canvas.width = outW;
@@ -1099,18 +1136,9 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
   }
   try {
     await inlineImages(overlay.root);
-    const fontCss = await buildInlineFontCss(
-      overlayFontText(overlay, comp),
-      undefined,
-      compositionLocalFontFamilies(comp),
-      compositionWebFontIds(comp),
-    );
-    const css = `${fontCss}\n${overlay.headCss}\n#root{background:transparent !important;}`;
-    await warmInlineFonts(css, overlayFontText(overlay, comp), W, H, outW, outH);
     // Layout coordinate system is always comp's W×H (font-size calibration unchanged); device size =
     // output outW×outH → vectors rasterize crisply at 4K
-    const preEnc = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgOpen(W, H, outW, outH, css));
-    const postEnc = encodeURIComponent(SVG_CLOSE);
+    const painter = await overlayPainter(overlay, comp, W, H, outW, outH);
     // Theme background bitmap (once): empty root goes through the same rasterization pipeline (also at output resolution)
     const bg = await rasterize(
       'data:image/svg+xml;charset=utf-8,' +
@@ -1273,13 +1301,14 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     const visualLayers = browserVisualLayerPlan(comp, visualMediaClips, opts.videoPlacements);
     const htmlLayers = visualLayers.filter((layer): layer is Extract<CompositionVisualLayer, { kind: 'html' }> => layer.kind === 'html');
     const fullOverlayPass = personMatteCompositingActive(comp, opts.videoPlacements);
+    const layerBlocks = (layer: (typeof htmlLayers)[number]) => (fullOverlayPass ? undefined : layer.blocks);
     const serializeHtmlLayers = () => htmlLayers.map((layer) => (
-      serializeBrowserOverlayElements(overlay.root, overlay.doc, fullOverlayPass ? undefined : layer.blocks)
+      serializeBrowserOverlayElements(overlay.root, overlay.doc, layerBlocks(layer))
     ));
 
     // Overlay frame cache: during tween gaps / static caption periods the serialized string is identical
     // frame to frame → reuse the previous frame's bitmap, skipping parse and rasterization of the whole
-    // data URI (with inlined fonts, MB-scale — the bulk of export time).
+    // data URI (with its inlined fonts — the bulk of export time).
     const lastSerials = htmlLayers.map(() => '');
     const lastOverlayImages = htmlLayers.map<HTMLImageElement | null>(() => null);
     // Overlap encoding with next-frame prep: CanvasSource.add grabs the frame synchronously on call, and
@@ -1310,7 +1339,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
         if (!hot) return Promise.resolve(lastOverlayImages[index]!);
         tm.rasterN++;
         const s0 = performance.now();
-        return rasterize(preEnc + encodeURIComponent(serial) + postEnc)
+        return painter.draw(serial, browserOverlayElements(overlay.root, overlay.doc, layerBlocks(htmlLayers[index]!)))
           .then((img) => ((tm.raster += performance.now() - s0), img));
       }));
 
@@ -1521,10 +1550,7 @@ export async function renderGraphicFramesPng(opts: {
   const overlay = await createOverlay(injectPreviewRuntime(assembleHtml(comp)), W, H);
   try {
     await inlineImages(overlay.root);
-    const text = overlayFontText(overlay, comp);
-    const fontCss = await buildInlineFontCss(text, undefined, compositionLocalFontFamilies(comp), compositionWebFontIds(comp));
-    const css = `${fontCss}\n${overlay.headCss}\n#root{background:transparent !important;}`;
-    await warmInlineFonts(css, text, W, H, W, H);
+    const painter = await overlayPainter(overlay, comp, W, H, W, H);
     const canvas = document.createElement('canvas');
     canvas.width = W;
     canvas.height = H;
@@ -1544,7 +1570,7 @@ export async function renderGraphicFramesPng(opts: {
           frames.push(frames[frames.length - 1]!);
         } else {
           lastMarkup = markup;
-          const image = await rasterize('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgOpen(W, H, W, H, css) + markup + SVG_CLOSE));
+          const image = await painter.draw(markup, browserOverlayElements(overlay.root, overlay.doc, [{ id: job.blockId }]));
           ctx.clearRect(0, 0, W, H);
           ctx.drawImage(image, 0, 0);
           const png = await new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('PNG encoding failed'))), 'image/png'));

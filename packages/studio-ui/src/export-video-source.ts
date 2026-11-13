@@ -19,6 +19,13 @@ export interface SourceRig {
   sh: number;
 }
 
+/**
+ * Each rig opens the file for itself, also when dozens of clips are cut from one recording. Sharing
+ * one Input between them saves the per-reader sample index, but then a read sometimes never
+ * returned: the export's audio mix stalled at the start of a later clip in 7 of 19 runs of a
+ * 38-clip, 44-minute project, and in none of 8 with one Input per rig. The cause inside the shared
+ * reader was not found, so do not share it without finding it.
+ */
 export async function openSource(file: File, from: number, to: number): Promise<SourceRig> {
   const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
   const video = await input.getPrimaryVideoTrack();
