@@ -1314,8 +1314,9 @@ export function maskWordsV3(document: EditorDocumentV2, input: Input): AgentTime
 
 const asAsr = (segments: TranscriptSegment[] | undefined): AsrSegment[] => desegmentCues((segments ?? []) as AsrSegment[]);
 
-/** Narrative sources with cut marks, or a plain per-asset listing: source seconds either way. */
-function formatTranscript(document: EditorDocumentV2, assetIds: readonly string[]): string {
+/** Narrative sources with cut marks, or a plain per-asset listing: source seconds either way.
+ *  With `only`, just those rows of each source, under their own numbers. */
+function formatTranscript(document: EditorDocumentV2, assetIds: readonly string[], only?: ReadonlySet<number>): string {
   const rd = (x: number) => Math.round(x * 10) / 10;
   // Key words read back as highlights.items would write them: runs of marked words from the row.
   const keys = (segment: TranscriptSegment) => {
@@ -1341,12 +1342,16 @@ function formatTranscript(document: EditorDocumentV2, assetIds: readonly string[
       const shots = narrativeShots.filter((shot) => spineClips.some((clip) => clip.id === shot.id));
       const marks = narrationRowMarks(segments, shots, () => true, asset?.metadata.durationSec);
       const rows = segments.map((segment, index) => `  ${index}. [${rd(segment.start)}–${rd(segment.end)}s] ${marks.rows[index]!.prefix}${copy(segment)}${marks.rows[index]!.gapNote}`);
-      const lines = [...(marks.head ? [`  ${marks.head}`] : []), ...rows, ...(marks.tail ? [`  ${marks.tail}`] : [])];
-      const head = `NARRATIVE SOURCE ${label} (asset ${assetId}; clips ${spineClips.map((clip) => clip.id).join(', ')}; its own source seconds)`;
+      const lines = only
+        ? rows.filter((_, index) => only.has(index))
+        : [...(marks.head ? [`  ${marks.head}`] : []), ...rows, ...(marks.tail ? [`  ${marks.tail}`] : [])];
+      const head = `NARRATIVE SOURCE ${label} (asset ${assetId}; clips ${spineClips.map((clip) => clip.id).join(', ')}; its own source seconds${only ? `; ${lines.length} of ${rows.length} rows` : ''})`;
       parts.push(segments.length ? `${head}:\n${lines.join('\n')}` : `${head}: (no transcript stored)`);
     } else {
-      const head = `${(asset?.kind ?? 'media').toUpperCase()} TRANSCRIPT ${label} (asset ${assetId}; source-file seconds)`;
-      parts.push(segments.length ? `${head}:\n${segments.map((segment, index) => `  ${index}. [${rd(segment.start)}–${rd(segment.end)}s] ${copy(segment)}`).join('\n')}` : `${head}: (no speech)`);
+      const rows = segments.map((segment, index) => `  ${index}. [${rd(segment.start)}–${rd(segment.end)}s] ${copy(segment)}`);
+      const lines = only ? rows.filter((_, index) => only.has(index)) : rows;
+      const head = `${(asset?.kind ?? 'media').toUpperCase()} TRANSCRIPT ${label} (asset ${assetId}; source-file seconds${only ? `; ${lines.length} of ${rows.length} rows` : ''})`;
+      parts.push(segments.length ? `${head}:\n${lines.join('\n')}` : `${head}: (no speech)`);
     }
   }
   return parts.join('\n\n');
@@ -1468,11 +1473,19 @@ export function getTranscriptV3(document: EditorDocumentV2, input: Input): Agent
   const stored = targets.assetIds.filter((id) => Object.prototype.hasOwnProperty.call(document.semantics.transcripts, id));
   if (!stored.length) return fail('transcript_missing', { assetIds: targets.assetIds, fix: 'These sources are not transcribed yet; the studio tab transcribes them when get_transcript runs there.' });
   const segments = stored.reduce((sum, id) => sum + (document.semantics.transcripts[id]?.length ?? 0), 0);
+  // Rows named by number come back alone. A read that asked for thirty sentences used to get all
+  // 337 (the list was honoured for words only): 28,000 characters the conversation then carried.
+  const asked = Array.isArray(input.segmentIndexes) ? input.segmentIndexes.map(Number).filter((index) => Number.isInteger(index) && index >= 0) : [];
+  const only = asked.length ? new Set(asked) : undefined;
+  if (only && !stored.some((id) => [...only].some((index) => index < (document.semantics.transcripts[id]?.length ?? 0)))) {
+    return fail('invalid_value', { path: 'segmentIndexes', value: asked.slice(0, 12), fix: `No such sentence row: this transcript has rows 0–${Math.max(0, ...stored.map((id) => (document.semantics.transcripts[id]?.length ?? 0) - 1))}.` });
+  }
+  const read = only ? stored.reduce((sum, id) => sum + [...only].filter((index) => index < (document.semantics.transcripts[id]?.length ?? 0)).length, 0) : segments;
   return {
     ok: true,
-    summary: segments ? `Read ${segments} transcript segments` : 'No speech in the selected source',
+    summary: !segments ? 'No speech in the selected source' : only ? `Read ${read} of ${segments} transcript segments` : `Read ${segments} transcript segments`,
     data: {
-      transcript: formatTranscript(document, stored),
+      transcript: formatTranscript(document, stored, only),
       assetIds: stored,
       ...(targets.assetIds.length > stored.length ? { untranscribedAssetIds: targets.assetIds.filter((id) => !stored.includes(id)) } : {}),
     },

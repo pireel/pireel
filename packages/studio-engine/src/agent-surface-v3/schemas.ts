@@ -117,7 +117,7 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
       assetId: str('Speech-bearing asset; omit for the source the captions follow (the audible source with the most words — the narration over muted footage).'),
       clipId: str('Narrow to the source behind this clip.'),
       trackId: str('Narrow to one track; for words, its speech clip with the most words picks the source.'),
-      segmentIndexes: arr({ type: 'integer', minimum: 0 }, { description: 'words only: sentence rows to expand.' }),
+      segmentIndexes: arr({ type: 'integer', minimum: 0 }, { description: 'Sentence rows by number: with segments, only these rows are returned (read the rest once, then come back for the rows you need); with words, the rows to expand.' }),
       fromFrame: FRAME('words only: window start'),
       toFrame: FRAME('words only: window end (exclusive)'),
       offset: int('words only: paging offset.'),

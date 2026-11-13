@@ -1179,6 +1179,25 @@ describe('remove_clips and swap_clip_media (v3)', () => {
     expect(read({ fromFrame: 0, toFrame: 60 }).map((word) => word.text)).toEqual(['gamma']);
     // A window over the whole timeline lists the words in the order they play.
     expect(read({ fromFrame: 0, toFrame: 120 }).map((word) => [word.text, word.startFrame])).toEqual([['gamma', 9], ['alpha', 66], ['beta', 84]]);
+
+    // A segments read of named rows returns those rows, under their own numbers, not the transcript.
+    const whole = runAgentTimelineTool(document, 'get_transcript', {});
+    expect(whole.summary).toBe('Read 3 transcript segments');
+    const some = runAgentTimelineTool(document, 'get_transcript', { granularity: 'segments', segmentIndexes: [2, 0] });
+    expect(some.summary).toBe('Read 2 of 3 transcript segments');
+    const text = (some.data as { transcript: string }).transcript;
+    expect(text).toContain('2 of 3 rows');
+    expect(text).toMatch(/\n {2}0\. .*alpha beta/);
+    expect(text).toMatch(/\n {2}2\. .*gamma/);
+    expect(text).not.toContain('gone');
+    expect(text.length).toBeLessThan((whole.data as { transcript: string }).transcript.length);
+    // A plain library asset's transcript is narrowed the same way.
+    const library = { ...document, timeline: { ...document.timeline, tracks: document.timeline.tracks.map((track) => ({ ...track, clips: [] })) } } as typeof document;
+    const listed = (runAgentTimelineTool(library, 'get_transcript', { assetId: 'v', segmentIndexes: [1] }).data as { transcript: string }).transcript;
+    expect(listed).toContain('gone');
+    expect(listed).not.toContain('alpha');
+    // Rows that do not exist are refused with the range that does.
+    expect(runAgentTimelineTool(document, 'get_transcript', { segmentIndexes: [9] })).toMatchObject({ ok: false, error: 'invalid_value', data: { path: 'segmentIndexes' } });
   });
 
   it('the playing transcript holds only what the timeline still plays, by stored row', () => {
