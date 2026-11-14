@@ -8,6 +8,7 @@ configureHttpHost(() => {
 restoreHttpHost(() => setStudioProviders(previousHttpHost));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  exportResolutionCap,
   invalidateCurrentUser,
   loadCurrentUser,
   loadCurrentUserBalance,
@@ -191,5 +192,24 @@ describe("loadCurrentUserBalance", () => {
       balance: 100,
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("exportResolutionCap", () => {
+  beforeEach(() => invalidateCurrentUser());
+  afterEach(() => {
+    invalidateCurrentUser();
+    vi.unstubAllGlobals();
+  });
+
+  it("reads the account's export limit, and none when the host sets none or nobody is signed in", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ user_id: "u", auth_method: "session", member: false, export_max_res: 720 })));
+    expect(await exportResolutionCap()).toBe(720);
+    invalidateCurrentUser();
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ user_id: "u", auth_method: "session", member: true })));
+    expect(await exportResolutionCap()).toBeNull();
+    invalidateCurrentUser();
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "unauthorized" }, { status: 401 })));
+    expect(await exportResolutionCap()).toBeNull();
   });
 });

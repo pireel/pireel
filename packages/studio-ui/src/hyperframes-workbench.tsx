@@ -259,7 +259,7 @@ import { studioProviders } from "@pireel/studio-engine/providers";
 import { ensureTemplatesRegistered } from "@pireel/studio-engine/templates";
 import { DeferredEffectDisposer } from "@pireel/studio-ui/cloud-project-save";
 import { DeferredActivation } from "@pireel/studio-ui/deferred-activation";
-import { loadCurrentUser, offerMembership, useMemberFeatures } from "@pireel/studio-ui/current-user";
+import { loadCurrentUser, offerMembership, useExportResolutionCap, useMemberFeatures } from "@pireel/studio-ui/current-user";
 import {
   StudioTimeline,
   DEFAULT_PPS,
@@ -1959,6 +1959,8 @@ export function HyperframesWorkbench({
   const [exportOpen, setExportOpen] = useState(false);
   const [exportOpts, setExportOpts] =
     useState<ExportRenderOpts>(DEFAULT_RENDER_OPTS);
+  // A free account's largest export (the sizes above it carry a crown); the export itself holds to it too.
+  const exportCap = useExportResolutionCap();
 
   // Timeline duration is independent from the video segment table: an empty primary track may
   // still contain graphics/audio, and those regions need a real parent-side playback clock.
@@ -9139,7 +9141,7 @@ export function HyperframesWorkbench({
                     <div className="flex flex-col gap-3">
                       <ExportOptRow
                         label={t("chatGen.resolution")}
-                        value={exportOpts.res}
+                        value={exportCap ? Math.min(exportOpts.res, exportCap) : exportOpts.res}
                         options={[
                           [2160, "4K"],
                           [1440, "2K"],
@@ -9148,6 +9150,9 @@ export function HyperframesWorkbench({
                           [540, "540p"],
                         ]}
                         onPick={(res) => setExportOpts((o) => ({ ...o, res }))}
+                        locked={(res) => !!exportCap && res > exportCap}
+                        // The export dialog closes first: its modal layer would leave the offer unclickable.
+                        onLocked={(_res, text) => { setExportOpen(false); void offerMembership(t("workbench.exportAtResolution", { res: text }), t("workbench.exportAboveCapBody", { cap: exportCap ?? 0 })); }}
                       />
                       <ExportOptRow
                         label={t("workbench.frameRate")}

@@ -51,8 +51,10 @@ export function ConfirmDialog({
   if (!open) return null;
 
   return (
+    // pointer-events-auto: a modal dialog still open underneath turns pointer events off on the
+    // page, and the confirm (outside it) must stay clickable.
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40"
+      className="pointer-events-auto fixed inset-0 z-[100] flex items-center justify-center bg-black/40"
       onClick={onCancel}
     >
       <div

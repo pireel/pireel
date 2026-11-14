@@ -4,7 +4,7 @@
  *  export dialog option rows, and the ][ bracket cut icon. */
 
 import { useEffect, useRef, useState } from 'react';
-import { Squircle } from 'lucide-react';
+import { Crown, Squircle } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@pireel/ui/tooltip';
 import type { Block } from '@pireel/studio-engine/composition';
 import { t } from './i18n';
@@ -60,32 +60,41 @@ export function TimeReadout({ duration }: { duration: number }) {
   );
 }
 
-/** One option row in the export dialog: label + single-select chips. */
+/** One option row in the export dialog: label + single-select chips. A `locked` option (above the
+ *  account's plan) carries a crown and calls `onLocked` instead of being picked. */
 export function ExportOptRow<T extends string | number>({
   label,
   value,
   options,
   onPick,
+  locked,
+  onLocked,
 }: {
   label: string;
   value: T;
   options: [T, string][];
   onPick: (v: T) => void;
+  locked?: (v: T) => boolean;
+  onLocked?: (v: T, text: string) => void;
 }) {
   return (
     <div className="flex items-start gap-2">
       <span className="text-ink-3 w-12 shrink-0 text-[12px]">{label}</span>
       <div className="flex min-w-0 flex-1 flex-wrap gap-1.5">
-        {options.map(([v, text]) => (
-          <button
-            key={String(v)}
-            type="button"
-            onClick={() => onPick(v)}
-            className={`rounded-md border px-2.5 py-1 text-[12px] ${v === value ? 'border-accent bg-accent/10 text-accent-ink' : 'border-line text-ink-3 hover:text-ink'}`}
-          >
-            {text}
-          </button>
-        ))}
+        {options.map(([v, text]) => {
+          const closed = !!locked?.(v);
+          return (
+            <button
+              key={String(v)}
+              type="button"
+              onClick={() => (closed ? onLocked?.(v, text) : onPick(v))}
+              className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[12px] ${v === value ? 'border-accent bg-accent/10 text-accent-ink' : 'border-line text-ink-3 hover:text-ink'}`}
+            >
+              {text}
+              {closed && <Crown size={11} className="text-amber-500" aria-label={t('workbench.membershipFeature')} />}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

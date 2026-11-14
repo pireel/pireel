@@ -1147,7 +1147,10 @@ async function exportMasterGainDb(opts: ClientExportOpts, sources: ExportSources
 export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
   const { comp, videoFile, clipFiles } = opts;
   assertExportableComposition(comp);
-  const render = opts.render ?? DEFAULT_RENDER_OPTS;
+  // The account's export limit holds whatever size was asked for (a page's choice, an agent's export).
+  const cap = await (await import('./current-user')).exportResolutionCap().catch(() => null);
+  const asked = opts.render ?? DEFAULT_RENDER_OPTS;
+  const render = cap && asked.res > cap ? { ...asked, res: cap } : asked;
   const FPS = render.fps;
   const W = comp.width;
   const H = comp.height;

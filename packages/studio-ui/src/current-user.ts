@@ -14,6 +14,10 @@ export interface CurrentUser {
   balance?: number;
   /** False when the host sells plans and this account is not a paying member; absent elsewhere (everything open). */
   member?: boolean;
+  /** The largest video this account may export or download (short side, px); absent = no limit. */
+  export_max_res?: number;
+  /** Where upgrading starts: a path on the host below the language (absent: its plans page). */
+  upgrade_path?: string;
 }
 
 export interface CurrentUserBalance {
@@ -98,10 +102,35 @@ export function useMemberFeatures(): boolean {
   return member;
 }
 
-/** A member-only feature was chosen by a non-member: say so, and offer the plans page. */
-export async function offerMembership(feature: string): Promise<void> {
-  const go = await confirm({ title: t('workbench.memberOnlyTitle', { feature }), description: t('workbench.memberOnlyBody'), confirmLabel: t('workbench.memberOnlyPlans') });
-  if (go) window.open(`/${studioLocale()}/pricing`, '_blank', 'noopener');
+const exportCapOf = (user: CurrentUser | null | undefined) => typeof user?.export_max_res === 'number' && user.export_max_res > 0 ? user.export_max_res : null;
+
+/** The account's export limit (short side, px), or null when it has none or nobody is signed in. */
+export async function exportResolutionCap(): Promise<number | null> {
+  return exportCapOf(await loadCurrentUser().catch(() => null));
+}
+
+/** The account's export limit for a page to mark the sizes above it; null while unknown or unlimited. */
+export function useExportResolutionCap(): number | null {
+  const [cap, setCap] = useState(() => exportCapOf(cached));
+  useEffect(() => {
+    let alive = true;
+    void loadCurrentUser().then((user) => { if (alive) setCap(exportCapOf(user)); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  return cap;
+}
+
+/** Where upgrading starts for this account: the host's own path, else its plans page. */
+function upgradeUrl() {
+  const path = cached?.upgrade_path;
+  return `/${studioLocale()}${typeof path === 'string' && path.startsWith('/') && !path.startsWith('//') ? path : '/pricing'}`;
+}
+
+/** A member-only feature was chosen by a non-member: say so, and offer the upgrade. `body` says what
+ *  the plan brings for this feature (the plain membership line otherwise). */
+export async function offerMembership(feature: string, body?: string): Promise<void> {
+  const go = await confirm({ title: t('workbench.memberOnlyTitle', { feature }), description: body ?? t('workbench.memberOnlyBody'), confirmLabel: t(cached?.upgrade_path ? 'workbench.memberOnlyUpgrade' : 'workbench.memberOnlyPlans') });
+  if (go) window.open(upgradeUrl(), '_blank', 'noopener');
 }
 
 /** The account has fewer credits than a generation needs (HTTP 402): the page offers the plans. */
