@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { emptyEditorDocumentV2 } from './index';
-import { pausesLeftInEdit, transcriptPauseRanges } from './narration-cut-planner';
+import { pausesLeftInEdit, spineSlivers, transcriptPauseRanges } from './narration-cut-planner';
 
 const word = (text: string, start: number, end: number) => ({ text, start, end });
 const segment = (words: ReturnType<typeof word>[]) => ({ start: words[0]!.start, end: words.at(-1)!.end, text: words.map((entry) => entry.text).join(''), words });
@@ -54,5 +54,41 @@ describe('pausesLeftInEdit', () => {
   it('does not count a pause that a cut took out', () => {
     // The 1 → 3 pause is trimmed to a breath, and the 5 → 11 one is cut out whole.
     expect(pausesLeftInEdit(build([[0, 1.2], [2.8, 5.2], [10.8, 12]]), 'talk', 0.8)).toEqual({ count: 0, totalSec: 0, longestSec: 0 });
+  });
+});
+
+describe('spineSlivers', () => {
+  const build = (clips: Array<[number, number]>, words = [word('这是', 0, 1), word('做。', 1.6, 2), word('最后', 5, 5.6), word('一句', 5.7, 6.5)]) => {
+    const document = emptyEditorDocumentV2({ fps: 30 });
+    document.semantics.transcripts.talk = [segment(words)] as never;
+    let frame = 0;
+    document.timeline.tracks[0]!.clips = clips.map(([sourceInSec, sourceOutSec], index) => {
+      const durationFrames = Math.round((sourceOutSec - sourceInSec) * 30);
+      const clip = { id: `c${index}`, kind: 'narrative', assetId: 'talk', startFrame: frame, durationFrames, enabled: true, sourceInSec, sourceOutSec, properties: { treatment: 'full' } };
+      frame += durationFrames;
+      return clip;
+    }) as never;
+    return document;
+  };
+
+  it('finds what two cuts left between them: the tail of a word, a frame of nothing', () => {
+    // 0–1 plays; the tail of "做。" (1.97–2.0) and an empty instant (3.0–3.1) are left between cuts; 5–6.5 plays.
+    expect(spineSlivers(build([[0, 1], [1.97, 2], [3, 3.1], [5, 6.5]]))).toEqual([
+      { clipId: 'c1', startFrame: 30, endFrame: 31 },
+      { clipId: 'c2', startFrame: 31, endFrame: 34 },
+    ]);
+  });
+
+  it('leaves a short clip that plays a whole word, and one that continues its neighbour', () => {
+    // "做。" whole, between two cuts: it is speech, however short.
+    expect(spineSlivers(build([[0, 1], [1.58, 2.02], [5, 6.5]]))).toEqual([]);
+    // A split made on purpose: 5.6–5.7 continues 5–5.6 and runs on into 5.7–6.5.
+    expect(spineSlivers(build([[0, 1], [5, 5.6], [5.6, 5.7], [5.7, 6.5]]))).toEqual([]);
+  });
+
+  it('judges nothing without word timing', () => {
+    const document = build([[0, 1], [1.97, 2], [5, 6.5]]);
+    document.semantics.transcripts.talk = [{ start: 0, end: 6.5, text: 'no word timing' }] as never;
+    expect(spineSlivers(document)).toEqual([]);
   });
 });

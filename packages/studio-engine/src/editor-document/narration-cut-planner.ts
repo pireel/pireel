@@ -215,3 +215,48 @@ export function pausesLeftInEdit(document: EditorDocumentV2, assetId: string, ov
   }
   return { count: left.count, totalSec: Math.round(left.totalSec * 10) / 10, longestSec: Math.round(left.longestSec * 10) / 10 };
 }
+
+/** A remnant is shorter than this, in seconds. */
+const SLIVER_MAX_SEC = 0.5;
+/** How far a word's recognised edge may sit outside a clip and the word still count as inside it. */
+const SLIVER_WORD_EDGE_SEC = 0.03;
+/** Source seconds two neighbouring clips may be apart and still play on as one. */
+const SLIVER_JOIN_SEC = 0.05;
+
+/**
+ * What cuts left between them on the story spine: a clip under half a second that plays no whole
+ * word, with a cut on both sides. Two cuts made apart (a pause trimmed, then a retake removed next to
+ * it) leave a frame or a few of the word one of them took: the tail of "做。", the first instant of
+ * the next sentence. It is heard as a click, and seen as a flash. Returned as timeline frame
+ * ranges, ready to be cut out.
+ *
+ * Left alone: a clip that plays a whole word however short, one that continues its neighbour (a
+ * split made on purpose), and any clip of a recording whose transcript has no word timing.
+ */
+export function spineSlivers(document: EditorDocumentV2): { clipId: string; startFrame: number; endFrame: number }[] {
+  const fps = document.canvas.fps;
+  const spine = primaryNarrativeClips(document).filter((clip) => clip.enabled !== false);
+  const wordsOf = new Map<string, NarrationSourceRange[] | null>();
+  const words = (assetId: string) => {
+    if (!wordsOf.has(assetId)) {
+      const segments = (document.semantics.transcripts[assetId] ?? []) as TranscriptSegment[];
+      wordsOf.set(assetId, segments.length && segments.every((segment) => segment.words?.length) ? transcriptSpeechRanges(segments) : null);
+    }
+    return wordsOf.get(assetId)!;
+  };
+  const out: { clipId: string; startFrame: number; endFrame: number }[] = [];
+  spine.forEach((clip, index) => {
+    if (clip.durationFrames / fps >= SLIVER_MAX_SEC) return;
+    const timed = words(clip.assetId);
+    if (!timed) return;
+    const before = spine[index - 1];
+    const after = spine[index + 1];
+    const joinsBefore = !!before && before.assetId === clip.assetId && Math.abs(before.sourceOutSec - clip.sourceInSec) <= SLIVER_JOIN_SEC;
+    const joinsAfter = !!after && after.assetId === clip.assetId && Math.abs(after.sourceInSec - clip.sourceOutSec) <= SLIVER_JOIN_SEC;
+    if (joinsBefore || joinsAfter) return;
+    const wholeWord = timed.some((word) => word.fromSec >= clip.sourceInSec - SLIVER_WORD_EDGE_SEC && word.toSec <= clip.sourceOutSec + SLIVER_WORD_EDGE_SEC);
+    if (wholeWord) return;
+    out.push({ clipId: clip.id, startFrame: clip.startFrame, endFrame: clip.startFrame + clip.durationFrames });
+  });
+  return out;
+}
