@@ -164,6 +164,7 @@ import {
 import { withEditableBlockGeometry } from '@pireel/studio-ui/editable-block-geometry';
 import { placementPercentToBox } from '@pireel/studio-engine/overlay-placement';
 import { generatedAssetIndexEntry, generatedRecordsFromJobs, getStudioSpaceId, listStudioGens, pollCreation, startGeneration, type GenJob } from '@pireel/studio-ui/gen-api';
+import { isStockAssetSig, stockAssetIndexEntry, type StockRegistrationLike } from '@pireel/studio-engine/generated-assets';
 import { componentFontSlot, displayFontContext, isDisplayTextFontId } from '@pireel/studio-engine/display-text-presets';
 import { searchFontsTool } from '@pireel/studio-engine/font-search-tool';
 import { describeAudioTargets, resolveAudioTarget } from '@pireel/studio-engine/audio-target';
@@ -1420,6 +1421,14 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
         const imported = await runStockTool('import', input.stock as Record<string, unknown>, signal);
         if (!imported.ok || !imported.data?.registration) return imported;
         input = { assets: [imported.data.registration] };
+      }
+      // Stock registered with a stored copy joins the project's media directory (from this import,
+      // or handed over by an external agent's): Materials lists it, and the device keeps its copy.
+      if (toolId === 'register_media' && Array.isArray(input.assets)) {
+        for (const asset of input.assets as StockRegistrationLike[]) {
+          const entry = asset && typeof asset === 'object' && isStockAssetSig((asset as { localSig?: unknown }).localSig) ? stockAssetIndexEntry(asset, Date.now()) : null;
+          if (entry) registerGeneratedEntry(entry);
+        }
       }
       if (toolId === 'add_clips' || toolId === 'insert_clips' || toolId === 'swap_clip_media') {
         const referencedAssetIds = [

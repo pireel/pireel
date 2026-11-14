@@ -82,3 +82,69 @@ export function mergeProjectLibraryEntries(
   const seen = new Set<string>();
   return [...fresh.filter((entry) => !seen.has(entry.assetId) && seen.add(entry.assetId)), ...existing];
 }
+
+/** The directory identity of an imported stock file: opaque like a generated file's, addressed by
+ *  where its copy is stored. */
+export const stockAssetSig = (cloudKey: string) => `stock:${cloudKey}`;
+export const isStockAssetSig = (sig: unknown): sig is string => typeof sig === 'string' && sig.startsWith('stock:');
+
+/** What a stock import hands to register_media (the fields the directory needs). */
+export interface StockRegistrationLike {
+  id: string;
+  kind?: string;
+  cloudKey?: string;
+  label?: string;
+  width?: number;
+  height?: number;
+  durationSec?: number;
+}
+
+/**
+ * Stock footage an agent searched and imported, as a project media-directory entry. It used to be
+ * registered in the document by its address alone: Materials did not list it, and the timeline drew
+ * its thumbnails over the network every time it scrolled into view. As a directory entry with a
+ * stored copy it is listed like any other file of the project and read from the device once fetched.
+ * Null without a stored copy (an older import kept by its address only).
+ */
+export function stockAssetIndexEntry(registration: StockRegistrationLike, createdAt: number): LocalAssetIndexEntry | null {
+  if (!registration.id || !registration.cloudKey) return null;
+  const sig = stockAssetSig(registration.cloudKey);
+  const kind = registration.kind === 'image' || registration.kind === 'audio' ? registration.kind : 'video';
+  return {
+    assetId: registration.id,
+    contentSig: sig,
+    sig,
+    cloudKey: registration.cloudKey,
+    label: (registration.label ?? '').trim().slice(0, 120) || registration.id,
+    kind,
+    w: registration.width ?? null,
+    h: registration.height ?? null,
+    ...(registration.durationSec ? { durationSec: registration.durationSec } : {}),
+    createdAt,
+  };
+}
+
+/** A document asset, as far as adopting stock needs it. */
+interface AdoptableAsset {
+  id: string;
+  kind: string;
+  label?: string;
+  locator: { localSig?: string; cloudKey?: string; remoteUrl?: string };
+  metadata?: { tags?: readonly string[]; width?: number; height?: number; durationSec?: number };
+}
+
+/**
+ * Stock in a document from before it became project media: kept by its stored copy's address, with
+ * no device identity. Each comes back with the identity to register it under and its directory
+ * entry. An asset that already has a device identity, or no stored copy, is left as it is.
+ */
+export function adoptableStockAssets(assets: Readonly<Record<string, AdoptableAsset>>, createdAt: number): { id: string; kind: string; localSig: string; entry: LocalAssetIndexEntry }[] {
+  return Object.values(assets).flatMap((asset) => {
+    const cloudKey = asset.locator.cloudKey;
+    if (!cloudKey || asset.locator.localSig) return [];
+    const stock = asset.metadata?.tags?.includes('online-stock') || /^uploads\/[^/]+\/stock\//.test(cloudKey);
+    if (!stock) return [];
+    const entry = stockAssetIndexEntry({ id: asset.id, kind: asset.kind, cloudKey, label: asset.label, width: asset.metadata?.width, height: asset.metadata?.height, durationSec: asset.metadata?.durationSec }, createdAt);
+    return entry ? [{ id: asset.id, kind: asset.kind, localSig: entry.contentSig, entry }] : [];
+  });
+}

@@ -325,6 +325,7 @@ import {
   DialogTitle,
 } from "@pireel/ui/dialog";
 import { generatedAssetIndexEntry, generatedRecordsFromJobs, listStudioGens, startGeneration, pollCreation, type GeneratedAssetRecord } from "@pireel/studio-ui/gen-api";
+import { adoptableStockAssets } from "@pireel/studio-engine/generated-assets";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -8253,6 +8254,20 @@ export function HyperframesWorkbench({
       cancelled = true;
     };
   }, [projectId, localAssetIndexSyncReady, registerGeneratedAssets]);
+  // Stock an agent imported before it became project media (in the document by its stored copy's
+  // address alone) joins the directory and gets its device identity: Materials lists it, and the
+  // timeline reads its thumbnails from the device instead of over the network. Nothing to undo.
+  const adoptedStockRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!localAssetIndexSyncReady || !projectId || adoptedStockRef.current === projectId) return;
+    adoptedStockRef.current = projectId;
+    const adopt = adoptableStockAssets(editorDocumentRef.current.assets, Date.now());
+    if (!adopt.length) return;
+    const known = new Set(localAssetIndexRef.current.map((entry) => entry.assetId));
+    const fresh = adopt.map((item) => item.entry).filter((entry) => !known.has(entry.assetId));
+    if (fresh.length) changeLocalAssetIndex([...fresh, ...localAssetIndexRef.current]);
+    commit({ op: "agent.timeline", input: { tool: "register_media", input: { assets: adopt.map(({ id, kind, localSig }) => ({ id, kind, localSig })) } } }, { undo: "none" });
+  }, [projectId, localAssetIndexSyncReady, changeLocalAssetIndex, commit, editorDocumentRef]);
   // Cloud self-heal: assets imported before cloud-by-default (or whose upload never finished) are
   // uploaded as soon as this device can read their bytes. Device-only lanes: no prompts, no network.
   useEffect(() => {
