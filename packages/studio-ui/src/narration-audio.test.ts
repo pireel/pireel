@@ -155,6 +155,28 @@ describe('NarrationPlayer', () => {
     expect(player.now()).toBeNull();
   });
 
+  it('reports a sound that stops decoding while playing instead of leaving the failure unhandled', async () => {
+    const { ctx } = fakeContext();
+    let reads = 0;
+    const failing: OpenPcmReader = (key, from, to) => {
+      const inner = clockSource()(key, from, to)!;
+      return { read: async (...args) => { if (++reads > 1) throw new Error('InternalAudioDecoderCocoa decoding failed'); return inner.read(...args); } };
+    };
+    const renderer = new NarrationRenderer(failing);
+    renderer.setSegments(jumpCut);
+    const player = new NarrationPlayer(ctx, () => ({}) as AudioNode, renderer, () => 4);
+    const errors: unknown[] = [];
+    player.onError = (error) => errors.push(error);
+    expect(await player.start(0)).toBe(true);
+    await settle();
+    expect(errors).toHaveLength(1);
+    expect((errors[0] as Error).message).toContain('decoding failed');
+    // A failure at the start itself rejects start(), for the caller to fall back.
+    reads = 1;
+    await expect(player.start(0)).rejects.toThrow('decoding failed');
+    player.stop();
+  });
+
   it('splices a fresh render in at a sample boundary ahead of the playhead after an edit', async () => {
     const { ctx, nodes } = fakeContext();
     const renderer = new NarrationRenderer(clockSource());

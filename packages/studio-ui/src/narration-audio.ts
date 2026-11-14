@@ -277,6 +277,9 @@ export class NarrationPlayer {
   private rendering: Promise<unknown> = Promise.resolve();
   private timer: ReturnType<typeof setInterval> | null = null;
   readonly stats: NarrationPlayerStats = { late: 0, scheduled: 0 };
+  /** The sound could not be read while playing (a decoder the browser refuses partway, a reader
+   *  closed under it). Called once per failure of the current playback; start() rejects instead. */
+  onError: ((error: unknown) => void) | null = null;
 
   constructor(
     private ctx: PlayerContext,
@@ -350,6 +353,8 @@ export class NarrationPlayer {
         this.queuedUntil = t + pcm.length / MIX_CH / MIX_RATE;
         return;
       }
+    } catch (error) {
+      if (gen === this.gen) this.onError?.(error);
     } finally {
       if (gen === this.gen) {
         this.splicing = false;
@@ -383,6 +388,8 @@ export class NarrationPlayer {
         this.enqueue(pcm, at);
         this.queuedUntil = t + pcm.length / MIX_CH / MIX_RATE;
       }
+    } catch (error) {
+      if (gen === this.gen) this.onError?.(error);
     } finally {
       if (gen === this.gen) this.pumping = false;
     }

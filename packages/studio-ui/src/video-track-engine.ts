@@ -483,6 +483,7 @@ export class VideoTrackEngine {
     renderer.setSegments(this.narrationSegs());
     for (const [key, ranges] of this.audioMasks) renderer.setMasks(key, ranges);
     const player = new NarrationPlayer(ctx, () => out, renderer, () => this.total);
+    player.onError = (error) => this.narrationFailed(this.clockGen, error);
     this.narration = { renderer, player, out };
     return this.narration;
   }
@@ -1712,7 +1713,10 @@ export class VideoTrackEngine {
     this.trace(this.segs[Math.max(0, this.segIndexAt(t0))]?.key ?? 'main', `play (audio clock) t=${t0.toFixed(2)}`);
     this.showAt(t0, true);
     this.syncAudioClips(t0, true, true);
-    void nar.player.start(t0).then(async (started) => {
+    void nar.player.start(t0).catch((error: unknown) => {
+      this.narrationFailed(gen, error);
+      return false;
+    }).then(async (started) => {
       if (!started || gen !== this.clockGen) return;
       // A context that does not run (no gesture reached it) would hold the clock forever: fall back.
       const deadline = performance.now() + 600;
@@ -1761,6 +1765,21 @@ export class VideoTrackEngine {
     const seg = this.segs[i]!;
     this.pushFrame(t, segmentSourceTimeAt(seg, t, this.starts[i]!, this.ends[i]!));
     this.prewarmNext(i, t);
+  }
+
+  /**
+   * The narration could not be read while playing on the audio clock (iOS Safari refuses some sound
+   * partway: "InternalAudioDecoderCocoa decoding failed"). The picture would hold still with no
+   * sound, so playback goes on on the media elements. A reader closed under it (the source went
+   * away, the player closed) is not a failure.
+   */
+  private narrationFailed(gen: number, error: unknown): void {
+    if (gen !== this.clockGen || !this.audioClock || !this.playing) return;
+    if (error instanceof Error && error.name === 'InputDisposedError') return;
+    console.warn('[studio] preview sound could not be read; it falls back to the media elements', error);
+    this.audioClockRefused = true;
+    this.stopAudioClock();
+    this.play(this.tEdited);
   }
 
   private stopAudioClock(): void {
