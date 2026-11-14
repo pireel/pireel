@@ -214,7 +214,6 @@ import {
 import { beatsForWindow } from "@pireel/studio-engine/captions-relay";
 import {
   type FilmstripFrame,
-  type FilmstripSourceRange,
   durableFileSig,
   fileSig,
   probeVideoFile,
@@ -1120,7 +1119,6 @@ export function HyperframesWorkbench({
   /** Insert-source transcripts (key = shot.src, sentence times = that source file's own timeline). All sources transcribed when opening the captions / smart-cut panels. */
   const [clipAsr, setClipAsr] = useState<Record<string, AsrSegment[]>>({});
   const [filmstrip, setFilmstrip] = useState<FilmstripFrame[]>([]);
-  const [timelineFilmstripDemand, setTimelineFilmstripDemand] = useState<Record<string, FilmstripSourceRange[]>>({});
   useEffect(() => {
     let cancelled = false;
     migrateLegacyDraft();
@@ -6838,7 +6836,8 @@ export function HyperframesWorkbench({
     reconnectIndexedSource,
     insertLibraryClipAt,
     clipPending,
-    clipStrips,
+    clipStripsStore,
+    demandFilmstrip,
     resetRuntime: resetClipRuntime,
   } = useClipInsert({
     projectId,
@@ -6857,7 +6856,6 @@ export function HyperframesWorkbench({
     ensureClipTranscripts,
     backupMediaToCloud,
     runTool: (toolId, input) => runToolRef.current(toolId, input),
-    filmstripDemand: timelineFilmstripDemand,
   });
   const resetForOutputChange = useCallback(() => {
     setPlaying(false);
@@ -11276,8 +11274,8 @@ export function HyperframesWorkbench({
             selectedVisualClipId={selectedVisualClipId}
             selectedBlockIds={selectedBlockIds}
             filmstrip={filmstrip}
-            clipStrips={clipStrips}
-            onFilmstripDemandChange={setTimelineFilmstripDemand}
+            clipStripsStore={clipStripsStore}
+            onFilmstripDemandChange={demandFilmstrip}
             mainLive
             srcLive={srcLive}
             loadingSourceClipIds={loadingSourceClipIds}

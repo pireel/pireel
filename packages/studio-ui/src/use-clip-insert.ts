@@ -7,6 +7,7 @@
  */
 
 import { type MutableRefObject, useCallback, useEffect, useRef, useState } from 'react';
+import { createClipStripsStore } from '@pireel/studio-ui/clip-strips-store';
 import { toast } from '@pireel/ui/toast';
 import {
   type Composition,
@@ -112,7 +113,6 @@ export interface ClipInsertDeps {
   ensureClipTranscripts: () => Promise<void>;
   backupMediaToCloud: (file: File, sig: string, kind: 'video' | 'clip') => void;
   runTool: (toolId: string, input: Record<string, unknown>) => Promise<unknown>;
-  filmstripDemand?: Readonly<Record<string, readonly FilmstripSourceRange[]>>;
 }
 
 export function useClipInsert(deps: ClipInsertDeps) {
@@ -120,7 +120,6 @@ export function useClipInsert(deps: ClipInsertDeps) {
     projectId, compRef, clipFilesRef, cloudMediaRef, clipAsrRef, documentRef, localAssetIndexRef, commit, republishDocument,
     rememberAssetUrl, setSelectedId, setSelectedShotId, applyT, ensureClipTranscripts,
     backupMediaToCloud, runTool,
-    filmstripDemand = {},
   } = deps;
   const videoMetaOf = async (url: string): Promise<{ dur: number; w: number; h: number } | null> => {
     for (let i = 0; i < 3; i++) {
@@ -159,9 +158,14 @@ export function useClipInsert(deps: ClipInsertDeps) {
    *  only to the main video; clips extract one set per **source**, shared by all clips of the same source — split/delete
    *  just change the span, no re-extract (extracting by shot.id once meant a split's right half was a new id, re-extracting
    *  the whole thing, a visibly flickering filmstrip redraw on large files). */
-  const [clipStrips, setClipStrips] = useState<Record<string, FilmstripFrame[]>>({});
+  // Held in a store, not in state: thumbnails arrive while the timeline scrolls, and only the
+  // timeline draws them (clip-strips-store.ts).
+  const [clipStripsStore] = useState(createClipStripsStore);
   const clipStripsRef = useRef<Record<string, FilmstripFrame[]>>({});
-  clipStripsRef.current = clipStrips;
+  const setClipStrips = useCallback((next: Record<string, FilmstripFrame[]> | ((current: Record<string, FilmstripFrame[]>) => Record<string, FilmstripFrame[]>)) => {
+    clipStripsRef.current = typeof next === 'function' ? next(clipStripsRef.current) : next;
+    clipStripsStore.set(clipStripsRef.current);
+  }, [clipStripsStore]);
   const clipStripAliveRef = useRef(true);
   const clipStripGenerationRef = useRef(0);
   const clipStripReqRef = useRef<Map<string, Set<number>>>(new Map()); // source-time buckets already requested (incl. in progress)
@@ -175,22 +179,24 @@ export function useClipInsert(deps: ClipInsertDeps) {
         for (const frame of frames) URL.revokeObjectURL(frame.url);
       }
       clipStripsRef.current = {};
+      clipStripsStore.set({});
       requests.clear();
     };
-  }, []);
+  }, [clipStripsStore]);
   const resetRuntime = useCallback(() => {
     clipStripGenerationRef.current += 1;
     for (const frames of Object.values(clipStripsRef.current)) {
       for (const frame of frames) URL.revokeObjectURL(frame.url);
     }
-    clipStripsRef.current = {};
     clipStripReqRef.current.clear();
     setClipStrips({});
     setClipPending(null);
-  }, []);
+  }, [setClipStrips]);
   const createClipObjectUrl = (file: Blob): string | null =>
     clipStripAliveRef.current ? URL.createObjectURL(file) : null;
-  useEffect(() => {
+  /** The timeline asks for the thumbnails of what it shows (and is about to): called as it scrolls,
+   *  so it sets no state; what is already asked for is not asked for again. */
+  const demandFilmstrip = useCallback((filmstripDemand: Readonly<Record<string, readonly FilmstripSourceRange[]>>) => {
     for (const [src, ranges] of Object.entries(filmstripDemand)) {
       const requested = clipStripReqRef.current.get(src) ?? new Set<number>();
       clipStripReqRef.current.set(src, requested);
@@ -242,7 +248,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
         }
       })();
     }
-  }, [clipFilesRef, filmstripDemand]);
+  }, [clipFilesRef, setClipStrips]);
   /** Nearest explicit V2 boundary, including leading/inter-clip gaps. */
   const nearestShotBound = (document: EditorDocumentV2, t: number) => {
     let at = 0;
@@ -668,5 +674,5 @@ export function useClipInsert(deps: ClipInsertDeps) {
       setClipPending(null);
     }
   };
-  return { videoDurationOf, insertClipCore, reconnectIndexedSource, insertLibraryClipAt, clipPending, clipStrips, resetRuntime };
+  return { videoDurationOf, insertClipCore, reconnectIndexedSource, insertLibraryClipAt, clipPending, clipStripsStore, demandFilmstrip, resetRuntime };
 }

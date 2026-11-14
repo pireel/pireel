@@ -19,6 +19,7 @@ import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } fro
 import { ArrowLeftRight, Clapperboard, Film, GalleryHorizontal, Loader2, Music, Plus, VideoOff, Volume2 } from 'lucide-react';
 import { MuteToggle, VisibilityToggle } from './timeline-track-toggles';
 import { StudioTimelineCanvas } from './studio-timeline-canvas';
+import { useClipStrips, type ClipStripsStore } from '@pireel/studio-ui/clip-strips-store';
 import { transitionIcon } from './transition-icons';
 import {
   type Block,
@@ -256,6 +257,9 @@ export interface StudioTimelineProps {
   onOpenMusicPanel?: () => void;
   /** Filmstrips for externally inserted clips (shotId -> frames, t = the clip's own source time). */
   clipStrips?: Record<string, FilmstripFrame[]>;
+  /** The same thumbnails as a store the timeline subscribes to: they then arrive without the
+   *  editor around it rendering. Wins over `clipStrips`. */
+  clipStripsStore?: ClipStripsStore;
   /** Visible timeline window translated into source-clock thumbnail demand. */
   onFilmstripDemandChange?: (demand: Record<string, FilmstripSourceRange[]>) => void;
   /** Per-asset missing-source UI: is the main source's File loaded this session? Default true (hosts without the signal). */
@@ -302,9 +306,15 @@ export function timelineRenderer(): 'dom' | 'canvas' {
   return asked === 'dom' ? 'dom' : 'canvas';
 }
 
+/** The DOM timeline draws thumbnails as elements, so it renders when they arrive. */
+function StudioTimelineDomWithStrips(props: StudioTimelineProps) {
+  const strips = useClipStrips(props.clipStripsStore);
+  return <StudioTimelineDom {...props} clipStrips={props.clipStripsStore ? strips as Record<string, FilmstripFrame[]> : props.clipStrips} />;
+}
+
 export function StudioTimeline(props: StudioTimelineProps) {
   const [renderer] = useState(timelineRenderer);
-  return renderer === 'canvas' ? <StudioTimelineOnCanvas {...props} /> : <StudioTimelineDom {...props} />;
+  return renderer === 'canvas' ? <StudioTimelineOnCanvas {...props} /> : <StudioTimelineDomWithStrips {...props} />;
 }
 
 /** Missing-source strip: the shot stays editable (cut/trim/delete all cloud-backed), only its frames

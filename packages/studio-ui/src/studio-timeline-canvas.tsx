@@ -20,6 +20,7 @@
  * transitions, reordering lanes, marquee selection, dropping assets from a panel, and the slip panel.
  */
 
+import { useClipStrips } from '@pireel/studio-ui/clip-strips-store';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeftRight, Film, GalleryHorizontal, Music, Volume2, VolumeX } from 'lucide-react';
 import { AUDIO_FADE_MAX_SEC, type BlockKind, MAX_TRANSITION_SEC, audioClipDefaults, audioClipWindow, audioTrimPatch, totalDuration } from '@pireel/studio-engine/composition';
@@ -246,7 +247,7 @@ export function StudioTimelineCanvas(props: StudioTimelineProps) {
       slip: { can: (shotId) => !!p.onSlipShot && (p.shotSourceDurations?.get(shotId) ?? 0) > 0, open: now.slipPanel },
       selectedShots: p.selectedShotIds, selectedBlocks: p.selectedBlockIds, selectedVisualId: p.selectedVisualClipId ?? null,
       selectedAudioId: p.selectedAudioId ?? null, selectedTransitionId: p.selectedTransitionId ?? null, disabledIds: p.disabledClipIds,
-      filmstrip: p.filmstrip ?? [], clipStrips: p.clipStrips ?? {}, sourcePeaks: p.sourcePeaks, audioPeaks: p.audioPeaks,
+      filmstrip: p.filmstrip ?? [], clipStrips: p.clipStripsStore?.get() ?? p.clipStrips ?? {}, sourcePeaks: p.sourcePeaks, audioPeaks: p.audioPeaks,
       mainLive: p.mainLive ?? true, sourceLive: p.srcLive, image, kindIcon: (kind) => { const icon = now.kindIcons.get(kind); return icon?.complete ? icon : null; },
       icon: (name) => { const glyph = now.glyphs.get(name); return glyph?.complete ? glyph : null; }, audioMute: !!p.onToggleAudioClipMute,
       labels: { video: t('panels.video'), image: t('panels.image'), captions: t('panels.captions'), music: t('panels.musicBed'), missing: t('workbench.srcMissing'), dropAudio: t('panels.dropAudioHere'), emptySpine: t('panels.emptyPrimaryTrackDropVideo'), dropOnSpine: t('panels.releaseVideoOnPrimaryTrack'), inserting: t('common.inserting'), blockTitle: (item) => blockDisplayTitle(item.block) },
@@ -543,6 +544,8 @@ export function StudioTimelineCanvas(props: StudioTimelineProps) {
   };
   const slipShot = slipPanel ? layout.byKind.shot.find((item) => item.id === slipPanel) : undefined;
   const slipSourceSec = slipShot ? shotSourceDurations?.get(slipShot.id) : undefined;
+  // The slip panel draws its strip as elements: while it is open it follows the thumbnails as they arrive.
+  const slipStrips = useClipStrips(slipShot ? props.clipStripsStore : undefined);
 
   const pressShot = (event: React.PointerEvent, item: ItemOf<'shot'>, at: Point, edge: Edge | null, additive: boolean) => {
     const { shot } = item;
@@ -1109,6 +1112,10 @@ export function StudioTimelineCanvas(props: StudioTimelineProps) {
     onFilmstripDemandChange(demand);
   }, [onFilmstripDemandChange, layout, visibleRange, shotSourceDurations]);
 
+  // Thumbnails that arrive are painted; nothing renders for them.
+  const stripsStore = props.clipStripsStore;
+  useEffect(() => stripsStore?.subscribe(() => { painted.current.stale = true; requestPaint(); }), [stripsStore, requestPaint]);
+
   const onScroll = () => {
     const host = scrollRef.current;
     if (!host) return;
@@ -1172,7 +1179,7 @@ export function StudioTimelineCanvas(props: StudioTimelineProps) {
         {slipShot && slipSourceSec && onSlipShot && scrollRef.current && (
           <TimelineSlipPanel
             shot={{ id: slipShot.id, srcStart: slipShot.shot.srcStart, srcEnd: slipShot.shot.srcEnd }} startSec={slipShot.startSec} endSec={slipShot.endSec}
-            sourceDurationSec={slipSourceSec} strip={(slipShot.shot.src ? props.clipStrips?.[slipShot.shot.src] : props.filmstrip) ?? []} pps={pps} host={scrollRef.current}
+            sourceDurationSec={slipSourceSec} strip={(slipShot.shot.src ? (props.clipStripsStore ? slipStrips : props.clipStrips)?.[slipShot.shot.src] : props.filmstrip) ?? []} pps={pps} host={scrollRef.current}
             onLive={(next) => slipLive(slipShot, next)} onSlip={(deltaSec) => onSlipShot(slipShot.id, deltaSec)}
             onTrim={onResizeShot ? (edge, atSec) => onResizeShot(slipShot.id, edge, atSec) : undefined}
             onClose={() => setSlipPanel(null)}
