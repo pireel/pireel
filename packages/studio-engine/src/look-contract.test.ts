@@ -37,6 +37,44 @@ describe('look piece words contract', () => {
     expect(issues.hard.map((issue) => issue.message)).toEqual([expect.stringContaining('an empty "items" still shows "包包水杯"')]);
   });
 
+  describe('a prop that marks part of another prop', () => {
+    // A title with one of its words highlighted: "head" shows; "kick" names the part of it to mark.
+    const markup = (p: Record<string, unknown>, mark: boolean) => {
+      const head = String(p.head ?? '');
+      const word = String(p.kick ?? '');
+      const at = mark && word ? head.indexOf(word) : -1;
+      const title = at < 0 ? head : `${head.slice(0, at)}<span class="mark">${word}</span>${head.slice(at + word.length)}`;
+      return { text: `${head} ${((p.items as { text: string }[]) ?? []).map((row) => row.text).join(' ')}`, html: `<div class="title">${title}</div>` };
+    };
+    const check = (mark: boolean) => {
+      const [probe] = lookPieceProbes(lookOf({}));
+      return lookPieceContractIssues(probe!, Object.fromEntries(Object.entries(probe!.variants).map(([name, props]) => [name, markup(props, mark)])));
+    };
+
+    it('renders each text prop holding a part of every other text prop', () => {
+      const [probe] = lookPieceProbes(lookOf({}));
+      const head = probe!.markers.head![0]!;
+      expect(probe!.variants['within:kick:head']).toMatchObject({ kick: head.slice(1, -1), head });
+      expect(head).toContain(String(probe!.variants['within:kick:head']!.kick));
+      // A list is not a word to mark with.
+      expect(Object.keys(probe!.variants).some((name) => name.startsWith('within:items:'))).toBe(false);
+    });
+
+    it('passes it: it never shows as text of its own, and the markup changes where it matches', () => {
+      expect(check(true).hard).toEqual([]);
+    });
+
+    it('still refuses a prop the piece ignores, and says what a text prop may do', () => {
+      const messages = check(false).hard.map((issue) => issue.message);
+      expect(messages).toEqual([expect.stringContaining('prop "kick" never shows')]);
+      expect(messages[0]).toContain('marks a part of another text prop');
+    });
+
+    it('refuses it when the renderer gives no markup to compare', () => {
+      expect(render(lookOf({}), (p) => `${p.head} ${((p.items as { text: string }[]) ?? []).map((row) => row.text).join(' ')}`).hard.map((issue) => issue.message)).toEqual([expect.stringContaining('prop "kick" never shows')]);
+    });
+  });
+
   it('reports a piece that throws', () => {
     const [probe] = lookPieceProbes(lookOf({}));
     expect(lookPieceContractIssues(probe!, { base: { error: 'x is undefined' } }).hard[0]!.message).toContain('x is undefined');

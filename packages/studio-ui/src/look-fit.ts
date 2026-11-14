@@ -81,7 +81,7 @@ export async function checkLookPieces(look: DocumentLook, canvas: { width: numbe
           const built = make(props, ctx) ?? {};
           el.innerHTML = built.html ?? '';
           try { built.animate?.(inertTimeline(), el, ctx); } catch { /* motion is not the words contract */ }
-          renders[variant] = { text: el.innerText ?? '' };
+          renders[variant] = { text: el.innerText ?? '', html: el.innerHTML };
         } catch (error) {
           renders[variant] = { error: error instanceof Error ? error.message : String(error) };
         }
