@@ -559,6 +559,7 @@ export const PANELS_ZH: Record<string, string> = {
   "editingSkills.sound.name": "音效",
   "editingSkills.b_roll.name": "自动 B-roll",
   "workbench.exportForEditors": "导出到其他剪辑软件",
+  "workbench.downloadCaptionsSrt": "下载字幕（SRT）",
   "nleExport.title": "导出到其他剪辑软件",
   "nleExport.stage.media": "正在收集素材",
   "nleExport.stage.graphics": "正在把动态图形渲染成透明视频",

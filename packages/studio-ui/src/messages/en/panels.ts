@@ -585,6 +585,7 @@ export const PANELS_EN: Record<string, string> = {
   "editingSkills.sound.name": "Sound effects",
   "editingSkills.b_roll.name": "Auto B-roll",
   "workbench.exportForEditors": "Export for other editors",
+  "workbench.downloadCaptionsSrt": "Download captions (SRT)",
   "nleExport.title": "Export for other editors",
   "nleExport.stage.media": "Collecting media",
   "nleExport.stage.graphics": "Rendering graphics as transparent movies",

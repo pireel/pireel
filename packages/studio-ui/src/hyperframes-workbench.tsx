@@ -309,6 +309,7 @@ import { useGenerationLock } from "@pireel/studio-ui/use-generation-lock";
 import { useMediaAnalysis } from "@pireel/studio-ui/use-media-analysis";
 import { canChooseExportFile, downloadBlob, useStudioExport } from "@pireel/studio-ui/use-export";
 import { buildNlePackage, NleExportCanceled } from "@pireel/studio-ui/nle-export-package";
+import { toSrt } from "@pireel/studio-engine/nle-export/index";
 import { NleExportDialog, type NleExportState } from "@pireel/studio-ui/nle-export-dialog";
 import {
   DEFAULT_RENDER_OPTS,
@@ -8970,6 +8971,25 @@ export function HyperframesWorkbench({
                   </div>
                 )}</>;
 
+  /** The captions as an SRT file, and the translated line as a second one when there is one. Every plan. */
+  const captionsForSrt = captionsOn ? transcriptControls.rows : [];
+  const downloadCaptionsSrt = () => {
+    if (!captionsForSrt.length) return;
+    const cue = (start: number, dur: number | undefined, text: string) => ({ startSec: start, endSec: start + (dur ?? 2), text });
+    const base = (projectOutputs.outputs.active.title || t("workbench.untitledOutput")).replace(/[\\/:*?"<>|]+/g, "-");
+    const save = (text: string, file: string) => {
+      const url = URL.createObjectURL(new Blob([text], { type: "application/x-subrip" }));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = file;
+      anchor.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+    save(toSrt(captionsForSrt.map((row) => cue(row.editedStart, row.dur, row.text))), `${base}.srt`);
+    const translated = captionsForSrt.flatMap((row) => (row.sub ? [cue(row.editedStart, row.dur, row.sub)] : []));
+    if (translated.length) save(toSrt(translated), `${base}-translation.srt`);
+  };
+
   /** Export for other editors: timeline XML + media + transparent graphics + subtitles, one zip. */
   const [nleExport, setNleExport] = useState<NleExportState | null>(null);
   // Batch export and export for other editors are member features (the host says who is a member).
@@ -9075,6 +9095,14 @@ export function HyperframesWorkbench({
                       <FolderOutput size={13} />
                       {t("workbench.exportForEditors")}
                       {!memberFeatures && <Crown size={12} className="ml-auto text-amber-500" aria-label={t("workbench.membershipFeature")} />}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      disabled={!captionsForSrt.length}
+                      onSelect={downloadCaptionsSrt}
+                      className="text-[12px]"
+                    >
+                      <Captions size={13} />
+                      {t("workbench.downloadCaptionsSrt")}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
