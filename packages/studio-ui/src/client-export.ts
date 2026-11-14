@@ -107,6 +107,34 @@ export interface ExportRenderOpts {
 }
 export const DEFAULT_RENDER_OPTS: ExportRenderOpts = { res: 1080, fps: 30, format: 'mp4' };
 
+/** How far ahead in a recording the next clip may start and still be read by the same run: what lies
+ *  between is decoded and passed over, cheap for the pauses a rough cut removes, wasteful for a jump. */
+const RUN_MAX_GAP_SEC = 20;
+/** Rounding at a seam: a run's reader only goes forward, so a clip starting any earlier than where
+ *  the last one ended (it would get a later frame) opens a run of its own. */
+const RUN_OVERLAP_SEC = 1e-3;
+
+/**
+ * Which reader reads each story clip, in timeline order: clips cut from one recording that follow
+ * each other forward in it share a run, one reader decoding straight through, as the main source
+ * always was (what lies between two clips is decoded and passed over). A reader per clip held the
+ * recording's whole sample index once per clip: 413 clips of a 44-minute file filled the tab before
+ * the first exported minute. A clip that goes back in its recording, or skips more than
+ * RUN_MAX_GAP_SEC ahead, starts a new run. Answers clip key (clip_<id>) → run key (its first clip's).
+ */
+export function exportReaderRuns(clips: readonly { id: string; src: string; srcStart: number; srcEnd: number }[]): Map<string, string> {
+  const open = new Map<string, { key: string; srcEnd: number }>();
+  const runOf = new Map<string, string>();
+  for (const clip of clips) {
+    const run = open.get(clip.src);
+    const joins = !!run && clip.srcStart >= run.srcEnd - RUN_OVERLAP_SEC && clip.srcStart - run.srcEnd <= RUN_MAX_GAP_SEC;
+    const key = joins ? run!.key : `clip_${clip.id}`;
+    open.set(clip.src, { key, srcEnd: joins ? Math.max(run!.srcEnd, clip.srcEnd) : clip.srcEnd });
+    runOf.set(`clip_${clip.id}`, key);
+  }
+  return runOf;
+}
+
 function assertExportableComposition(comp: Composition): void {
   const issues = validateComposition(comp);
   if (issues.length) throw new Error(`Invalid composition: ${issues.slice(0, 3).map((issue) => `${issue.path} ${issue.message}`).join('; ')}`);
@@ -929,6 +957,11 @@ async function openExportSources(opts: ClientExportOpts): Promise<ExportSources>
   const files = new Map<string, File>();
   if (videoFile) files.set('main', videoFile);
   const spans = videoShotTimelineSpans(shots, opts.videoPlacements);
+  /** A clip's own key (clip_<shotId>) → the key of the run that reads it (denoise is given per clip). */
+  const runOf = exportReaderRuns(spans.flatMap(({ clip }) => {
+    const s = clip as (typeof shots)[number] & { src?: string };
+    return s.src ? [{ id: s.id, src: s.src, srcStart: s.srcStart, srcEnd: s.srcEnd }] : [];
+  }));
   for (let i = 0; i < spans.length; i++) {
     const s = spans[i]!.clip as (typeof shots)[number] & { src?: string; filter?: ShotFilter };
     const filterCss = shotFilterCss(s.filter);
@@ -966,9 +999,10 @@ async function openExportSources(opts: ClientExportOpts): Promise<ExportSources>
       segs.push({ srcStart: s.srcStart, srcEnd: s.srcEnd, key, ...placement, ...filter, ...gain, ...fade, ...framing });
       continue;
     }
-    segs.push({ srcStart: s.srcStart, srcEnd: s.srcEnd, key, ...placement, ...filter, ...gain, ...fade, ...framing });
-    if (!files.has(key)) {
-      files.set(key, await loadExportVideoFile(s.src, clipFiles));
+    const runKey = runOf.get(key) ?? key;
+    segs.push({ srcStart: s.srcStart, srcEnd: s.srcEnd, key: runKey, ...placement, ...filter, ...gain, ...fade, ...framing });
+    if (!files.has(runKey)) {
+      files.set(runKey, await loadExportVideoFile(s.src, clipFiles));
     }
   }
   const visualMediaClips = [...(opts.visualMediaClips ?? [])];
@@ -1005,9 +1039,13 @@ async function openExportSources(opts: ClientExportOpts): Promise<ExportSources>
 
     // Denoise substitution: swap the source's audio track for the baked blend (same source seconds)
     if (opts.denoise) {
-      for (const [key, f] of opts.denoise) {
+      const swapped = new Set<string>();
+      for (const [clipKey, f] of opts.denoise) {
+        // Given per clip; every clip of a run reads the same source, so its run takes it once.
+        const key = runOf.get(clipKey) ?? clipKey;
         const rig = rigs.get(key);
-        if (!rig) continue;
+        if (!rig || swapped.has(key)) continue;
+        swapped.add(key);
         const input = new Input({ source: new BlobSource(f), formats: ALL_FORMATS });
         const at = await input.getPrimaryAudioTrack();
         if (at) {

@@ -1,6 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import type { Composition } from '@pireel/studio-engine/composition';
-import { EMPTY_VIDEO_GROUND, compositionAtMoment, compositionAtMoments, paintExportFrameBase } from './client-export';
+import { EMPTY_VIDEO_GROUND, compositionAtMoment, compositionAtMoments, exportReaderRuns, paintExportFrameBase } from './client-export';
+
+describe('exportReaderRuns', () => {
+  it('reads clips that go forward through one recording with one reader, and opens another on a jump back, a far skip or another file', () => {
+    const runs = exportReaderRuns([
+      { id: 'a', src: 'rec', srcStart: 0, srcEnd: 5 },
+      { id: 'b', src: 'rec', srcStart: 5.8, srcEnd: 9 }, // a pause cut out
+      { id: 'c', src: 'broll', srcStart: 2, srcEnd: 4 }, // another file between them
+      { id: 'd', src: 'rec', srcStart: 9, srcEnd: 12 }, // the recording goes on where it left off
+      { id: 'e', src: 'rec', srcStart: 3, srcEnd: 4 }, // a repeat from earlier: back in the recording
+      { id: 'f', src: 'rec', srcStart: 4.5, srcEnd: 6 },
+      { id: 'g', src: 'rec', srcStart: 40, srcEnd: 41 }, // far ahead
+    ]);
+    expect(Object.fromEntries(runs)).toEqual({ clip_a: 'clip_a', clip_b: 'clip_a', clip_c: 'clip_c', clip_d: 'clip_a', clip_e: 'clip_e', clip_f: 'clip_e', clip_g: 'clip_g' });
+  });
+});
 
 type Pixel = string | null;
 type FakeLayer = { pixels: Pixel[] };
