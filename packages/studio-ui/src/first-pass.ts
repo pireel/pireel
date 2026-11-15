@@ -137,11 +137,13 @@ export interface RoughCutExecution {
  *  before its steps were through, and the clips each fine-cut skill had when it ended. */
 export interface FirstPassOutcome { report: FirstPassReport; note: string; stopped: boolean; baseline: Record<FineCutSkill, string[]> }
 let runner: ((...args:Parameters<typeof runFirstPass>)=>Promise<FirstPassOutcome>) | undefined;
-let startupHint: (creative: boolean) => string = () => '';
-export function setFirstPassRunner(value: typeof runner, hint: string | ((creative: boolean) => string) = '') { runner = value; startupHint = typeof hint === 'string' ? () => hint : hint; }
-/** The note a one-click edit's first message carries. `creative`: the edit switched on work that is
- *  planned (graphics, B-roll, sound, zoom); without it the rough cut is the whole edit. */
-export const firstPassStartupHint = (creative = true) => startupHint(creative);
+/** What a one-click edit is once its rough cut is through: the whole edit (clean), followed by the
+ *  creator's own words (request), or the start of a video the agent directs (creative switches on). */
+export type OneClickEditKind = 'clean' | 'request' | 'creative';
+let startupHint: (kind: OneClickEditKind) => string = () => '';
+export function setFirstPassRunner(value: typeof runner, hint: string | ((kind: OneClickEditKind) => string) = '') { runner = value; startupHint = typeof hint === 'string' ? () => hint : hint; }
+/** The note a one-click edit's first message carries, for whenever the agent reads the thread. */
+export const firstPassStartupHint = (kind: OneClickEditKind = 'creative') => startupHint(kind);
 export async function runFirstPass(host: FirstPassHost, onUpdate: (report: FirstPassReport) => void, options: { steps?: readonly FirstPassStepId[]; pauses?: 'tight' | 'moderate' | 'natural'; signal?: AbortSignal; onLateUsage?: (usage: WorkflowUsage) => void; resume?: FirstPassReport } = {}): Promise<FirstPassOutcome>{
  if(!runner)throw new Error('This host has not configured an automatic editing workflow.');
  return runner(host,onUpdate,options);

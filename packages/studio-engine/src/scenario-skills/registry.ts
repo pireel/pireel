@@ -6,7 +6,8 @@ import {
 
 // default_prompt: optional suggested first message a host may prefill into chat when the
 // Skill is selected. The engine ignores it beyond parsing; hosts read it from attributes.
-const ALLOWED_FRONTMATTER_KEYS = new Set(['name', 'description', 'default_prompt']);
+// agent: `director` when the Skill's method is directing a whole video (StudioScenarioSkill.directs).
+const ALLOWED_FRONTMATTER_KEYS = new Set(['name', 'description', 'default_prompt', 'agent']);
 
 function unquote(value: string): string {
   const trimmed = value.trim();
@@ -53,12 +54,14 @@ export function parseStudioScenarioSkill(raw: string): StudioScenarioSkill {
   const title = body.match(/^#\s+(.+)$/m)?.[1]?.trim();
   if (!title) throw new Error(`Studio Skill ${id} needs an H1 title`);
   if (body.length < 400) throw new Error(`Studio Skill ${id} is too thin to guide expert judgment`);
+  if (attributes.agent !== undefined && attributes.agent !== 'director') throw new Error(`Studio Skill ${id}: agent must be "director" when given`);
 
   return {
     id,
     title,
     description: attributes.description,
     markdown: body,
+    ...(attributes.agent === 'director' ? { directs: true as const } : {}),
   };
 }
 

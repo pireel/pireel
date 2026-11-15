@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { UIMessage } from 'ai';
-import { alreadyStarted, firstEditMessage, firstMessageEditsFootage, footageToEdit, sceneAgentState, startWithRoughCut } from '@pireel/studio-ui/agent-startup';
+import { directingOffers, takenDirectingOffer, alreadyStarted, firstEditMessage, firstMessageEditsFootage, footageToEdit, sceneAgentState, startWithRoughCut } from '@pireel/studio-ui/agent-startup';
 import { compositionToEditorDocument, emptyComposition } from '@pireel/studio-engine/composition';
 import { t } from '@pireel/studio-ui/i18n';
 const request = (state: string): UIMessage => ({ id: 'u', role: 'user', parts: [{ type: 'text', text: 'make a board' }], metadata: { task: { id: 'task', goal: 'make a board', mode: 'request', state } } });
@@ -40,5 +40,20 @@ describe('scene startup and progress', () => {
     expect(sceneAgentState([request('partial')], false, false)).toBe('attention');
     expect(sceneAgentState([request('running')], true, false)).toBe('running');
     expect(sceneAgentState([request('done')], false, false)).toBe('done');
+  });
+});
+
+describe('the whole-video offers after a clean edit', () => {
+  it('start that work only when the creator sends the offer they picked', () => {
+    const [broll, graphics] = directingOffers();
+    expect(broll).toMatchObject({ features: ['b-roll'] });
+    expect(graphics).toMatchObject({ features: ['graphics'] });
+    // Sent as offered, or with more said around it.
+    expect(takenDirectingOffer(broll!.text, broll!.text)).toEqual(broll);
+    expect(takenDirectingOffer(graphics!.text, `${graphics!.text}，配色跟我的衣服走`)).toEqual(graphics);
+    // Nothing picked, the box rewritten, or a step the agent suggested: an ordinary request.
+    expect(takenDirectingOffer(null, broll!.text)).toBeUndefined();
+    expect(takenDirectingOffer(broll!.text, '把第一句话删掉')).toBeUndefined();
+    expect(takenDirectingOffer('给整条视频垫一层背景音乐', '给整条视频垫一层背景音乐')).toBeUndefined();
   });
 });

@@ -16,6 +16,9 @@ export interface StudioScenarioSkill {
   description: string;
   /** Complete SKILL.md body, including its H1. Never reduce this to structured options. */
   markdown: string;
+  /** The Skill's method is directing a whole video (frontmatter `agent: director`): a task run with
+   *  it is handed to the agent to direct from start to finish, on the model that work needs. */
+  directs?: true;
 }
 
 /** Read-only runtime view assembled by the OSS baseline, a host, or extension packages. */

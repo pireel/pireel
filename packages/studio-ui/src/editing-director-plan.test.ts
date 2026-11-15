@@ -5,7 +5,7 @@ import { compositionToEditorDocument, emptyComposition } from '@pireel/studio-en
 import type { PlaybookSnapshot } from '@pireel/studio-engine/project-brand-metadata';
 import { resolveEditingRunConfig } from '@pireel/studio-engine/editing-run-config';
 import { firstNarrativeAssetId } from '@pireel/studio-engine/editor-document/read-model';
-import { beginEditingPlan, directorBeatWindows, directorPlanForModel, directorPlanToolBlock, saveEditingDirectorPlan, reviewDirectorPlan, withDirectorInstruction } from '@pireel/studio-ui/editing-director-plan';
+import { directorBeatWindows, directorPlanForModel, directorPlanToolBlock, readDirectorBeats, saveEditingDirectorPlan, reviewDirectorPlan, withDirectorInstruction } from '@pireel/studio-ui/editing-director-plan';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { EditingTaskCard } from '@pireel/studio-ui/editing-task-card';
@@ -35,23 +35,40 @@ function fixture() {
 }
 
 describe('brand-informed director plan', () => {
-  it('requires rough-cut completion, authentic source quotes and concrete brand treatment', () => {
+  it('requires rough-cut completion and authentic source quotes; the brand treatment is the agent\'s to give', () => {
     const { task, input, document } = fixture();
     expect(saveEditingDirectorPlan({ ...task, roughCut: undefined }, input, document).ok).toBe(false);
-    expect(saveEditingDirectorPlan(task, { ...input, brandTreatment: '' }, document).ok).toBe(false);
+    const plain = saveEditingDirectorPlan(task, { ...input, brandTreatment: '' }, document);
+    expect(plain.ok).toBe(true);
+    if (plain.ok) expect(plain.plan).not.toHaveProperty('brandTreatment');
     expect(saveEditingDirectorPlan(task, { ...input, beats: [{ ...input.beats[0], quote: '保证十倍收益' }] }, document).ok).toBe(false);
     expect(saveEditingDirectorPlan(task, { ...input, beats: [{ ...input.beats[0], sourceInSec: 30, sourceOutSec: 35 }] }, document).ok).toBe(false);
     expect(saveEditingDirectorPlan(task, { ...input, beats: [input.beats[0], input.beats[0]] }, document).ok).toBe(false);
     expect(saveEditingDirectorPlan(task, input, document).ok).toBe(true);
     expect(saveEditingDirectorPlan({ ...task, config: { ...task.config!, brand: null } }, { ...input, brandTreatment: undefined }, document).ok).toBe(true);
   });
-  it('allows read-only preparation and fixed rough cut, but gates execution until the plan is saved', () => {
+  it('never holds a creative edit back for a plan', () => {
     const { task, planned } = fixture();
-    expect(directorPlanToolBlock(task, 'rough_cut', true)).toBeUndefined();
-    expect(directorPlanToolBlock(task, 'inspect_media', false)).toBeUndefined();
-    expect(directorPlanToolBlock(task, 'apply_component', true)).toContain('save_edit_plan');
-    expect(directorPlanToolBlock(planned, 'apply_component', true)).toBeUndefined();
-    expect(directorPlanToolBlock({ ...task, directorPlanRequired: undefined }, 'apply_component', true)).toBeUndefined();
+    for (const [tool, mutates] of [['rough_cut', true], ['inspect_media', false], ['apply_component', true], ['add_clips', true]] as const) {
+      expect(directorPlanToolBlock(task, tool, mutates)).toBeUndefined();
+      expect(directorPlanToolBlock(planned, tool, mutates)).toBeUndefined();
+    }
+  });
+  it('reads what each planned passage got from the timeline, with the agent\'s words only as detail', () => {
+    const { document, planned } = fixture();
+    // Nothing added at the passage: it was kept, whatever is claimed.
+    expect(readDirectorBeats(planned.directorPlan, { beats: [{ beatId: 'annual-card', status: 'applied', result: '补了权益说明。' }] }, document)).toEqual([{ beatId: 'annual-card', status: 'kept', result: '补了权益说明。', clipIds: [] }]);
+    expect(readDirectorBeats(planned.directorPlan, {}, document)).toEqual([{ beatId: 'annual-card', status: 'kept', result: '', clipIds: [] }]);
+    // Something placed there reads as applied, without a report.
+    const whole = packStorySpine(document);
+    const [window] = directorBeatWindows(planned.directorPlan.beats[0], whole);
+    const placed = runAgentTimelineTool(whole, 'set_texts', { items: [{ text: '两场大会门票', startFrame: Math.round(window!.startFrame), durationFrames: whole.canvas.fps }] }).document!;
+    expect(readDirectorBeats(planned.directorPlan, {}, placed)).toMatchObject([{ status: 'applied', clipIds: [expect.any(String)] }]);
+    // Blocked is the agent's to say; a passage no longer in the video reads as changed.
+    expect(readDirectorBeats(planned.directorPlan, { beats: [{ beatId: 'annual-card', status: 'blocked', result: '实物特写没有找到。' }] }, placed)).toMatchObject([{ status: 'blocked' }]);
+    const evidence = { graphics: [], 'b-roll': [], sound: [] };
+    expect(reviewEditingTask(planned, {}, evidence, placed)).toMatchObject({ ok: true, review: { completed: true, director: { revision: 1, beats: [{ status: 'applied' }] } } });
+    expect(reviewEditingTask(planned, { beats: [{ beatId: 'annual-card', status: 'blocked', result: '实物特写没有找到。' }] }, evidence, placed)).toMatchObject({ ok: true, review: { completed: false } });
   });
   it('survives refresh and resume without resetting the completed planning stage', () => {
     const { planned } = fixture();
@@ -190,41 +207,27 @@ describe('whole-whiteboard directing without destructive cleanup', () => {
   });
 });
 
-describe('a plan asked for in words', () => {
+describe('a plan outside a one-click edit', () => {
   const asked = (): ChatTask => ({ id: 'ask', mode: 'request', state: 'running', goal: '给整条视频配上画面', skills: [], config: resolveEditingRunConfig({ skills: ['rough-cut', 'captions'] }) });
-  it('turns the request into a planned task with exactly what was named', () => {
-    const begun = beginEditingPlan(asked(), { begin: true, features: ['b-roll', 'captions', 'b-roll'] });
-    expect(begun).toMatchObject({ ok: true, features: ['b-roll'], patch: { planned: true, directorPlanRequired: true, reviewRequired: true, skills: ['b-roll'] } });
-    expect(beginEditingPlan(asked(), { begin: true }).ok).toBe(false);
-    expect(beginEditingPlan(asked(), { begin: true, features: ['captions'] }).ok).toBe(false);
-  });
-  it('leaves an edit that already plans as it is, and refuses one that cannot plan', () => {
-    const { task } = fixture();
-    expect(beginEditingPlan({ ...task, skills: ['graphics'] }, { begin: true, features: ['sound'] })).toEqual({ ok: true, features: ['graphics'], patch: {} });
-    // A one-click edit started with cleanup only stays unplanned; so does a video built from media.
-    expect(beginEditingPlan({ ...task, directorPlanRequired: false }, { begin: true, features: ['b-roll'] }).ok).toBe(false);
-    expect(beginEditingPlan({ ...asked(), compose: true }, { begin: true, features: ['b-roll'] }).ok).toBe(false);
-  });
-  it('saves its plan without a rough cut, gates editing until then, and is reviewed on what it named', () => {
+  it('is not saved for an ordinary request, which is never held back for one either', () => {
     const { input, document } = fixture();
     const before = asked();
-    // Not begun: an ordinary request neither plans nor is held back.
-    expect(saveEditingDirectorPlan(before, { ...input, brandTreatment: undefined }, document).ok).toBe(false);
+    expect(saveEditingDirectorPlan(before, { ...input, brandTreatment: undefined }, document)).toMatchObject({ ok: false, error: expect.stringContaining('edit directly') });
     expect(directorPlanToolBlock(before, 'add_clips', true)).toBeUndefined();
     expect(reviewEditingTask(before, { features: [] }, { clips: {} } as never, document).ok).toBe(false);
-
-    const begun = beginEditingPlan(before, { begin: true, features: ['b-roll'] });
-    if (!begun.ok) throw new Error(begun.error);
-    const task = { ...before, ...begun.patch };
-    expect(directorPlanToolBlock(task, 'add_clips', true)).toContain('This request is planned');
-    expect(directorPlanToolBlock(task, 'get_transcript', false)).toBeUndefined();
+  });
+  it('is saved without a rough cut for a task an earlier client handed over, and checked on what it named', () => {
+    const { input, document } = fixture();
+    // As saved by that client: the request named B-roll.
+    const task: ChatTask = { ...asked(), planned: true, directorPlanRequired: true, reviewRequired: true, skills: ['b-roll'] };
+    expect(directorPlanToolBlock(task, 'add_clips', true)).toBeUndefined();
+    // Without a plan the edit is checked all the same.
+    expect(reviewEditingTask(task, {}, { clips: {} } as never, document)).toMatchObject({ ok: true, review: { items: [{ feature: 'b-roll', status: 'not_needed', count: 0 }] } });
     const saved = saveEditingDirectorPlan(task, { ...input, brandTreatment: undefined }, document);
     expect(saved.ok).toBe(true);
     if (!saved.ok) return;
-    expect(directorPlanToolBlock({ ...task, directorPlan: saved.plan }, 'add_clips', true)).toBeUndefined();
-    // The review asks about B-roll (named), not about what the project or a brand would switch on.
+    // The check reads B-roll (named), not what the project or a brand would switch on, and says once that none is there.
     const review = reviewEditingTask({ ...task, directorPlan: saved.plan }, { features: [] }, { clips: {} } as never, document);
-    expect(review.ok).toBe(false);
-    if (!review.ok) expect(review.missing).toEqual(['b-roll']);
+    expect(review).toMatchObject({ ok: true, review: { items: [{ feature: 'b-roll', status: 'not_needed', count: 0 }], notes: expect.arrayContaining([expect.stringContaining('b-roll was asked for')]) } });
   });
 });

@@ -1,5 +1,5 @@
 import type { UIMessage } from 'ai';
-import { taskOf, unfinishedRoughCut, type ChatTask } from '@pireel/studio-ui/chat-task';
+import { isWhiteboardDirectorTask, taskOf, unfinishedRoughCut, type ChatTask } from '@pireel/studio-ui/chat-task';
 import { v3ToolCanMutate } from '@pireel/studio-engine/agent-surface-v3/registry';
 import type { FirstPassReport, FirstPassStepStatus, FineCutItem } from '@pireel/studio-ui/first-pass';
 import { needsBrandCover, needsEditingReview } from '@pireel/studio-ui/editing-task-review';
@@ -69,7 +69,8 @@ export function editingTaskRows(task: ChatTask, report: FirstPassReport | undefi
   if (cleanup.length) rough.push({ id: 'cleanup', status: cleanup.some(step => step.status === 'failed') ? 'failed' : cleanup.some(step => step.status === 'running') ? normalize('running') : cleanup.every(step => step.status === 'done') ? 'done' : 'pending', detail: cleanup.find(step => step.status === 'running')?.id });
   const finishing: EditingProgressRow[] = steps.filter(step => ['captions', 'denoise', 'logo', 'loudness'].includes(step.id) && step.status !== 'skipped').map(step => ({ id: step.id, status: normalize(step.status) }));
   const tools = messages.flatMap(message => message.role === 'assistant' ? message.parts.filter(part => toolIdOf(part)) : []);
-  const planning: EditingProgressRow | undefined = task.directorPlanRequired || task.directorPlan ? {
+  // A whole whiteboard always plans; any other edit shows the direction its agent chose to save.
+  const planning: EditingProgressRow | undefined = isWhiteboardDirectorTask(task) || task.directorPlan ? {
     id: 'planning', status: task.directorPlan ? 'done' : working && (task.skillId === 'whiteboard-explainer' || !!report && !report.steps.some(step => ['pending', 'running', 'failed'].includes(step.status))) ? 'running' : 'pending',
   } : undefined;
   for (const id of ['graphics', 'b-roll', 'sound']) {

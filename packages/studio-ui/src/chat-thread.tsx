@@ -1,10 +1,10 @@
 "use client";
 import { editorRequest } from '@pireel/studio-ui/host-request';
-import { alreadyStarted, firstEditMessage, firstMessageEditsFootage, footageToEdit, startWithRoughCut, sceneAgentState } from '@pireel/studio-ui/agent-startup';
+import { alreadyStarted, directingOffers, firstEditMessage, firstMessageEditsFootage, footageToEdit, startWithRoughCut, sceneAgentState, takenDirectingOffer } from '@pireel/studio-ui/agent-startup';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@pireel/ui/tooltip';
 import { EditingSkillSwitches } from '@pireel/studio-ui/editing-skills';
 
-import { directorPlanForModel, directorPlanToolBlock, beginEditingPlan, saveEditingDirectorPlan, withDirectorInstruction } from '@pireel/studio-ui/editing-director-plan';
+import { directorPlanForModel, directorPlanToolBlock, saveEditingDirectorPlan, withDirectorInstruction } from '@pireel/studio-ui/editing-director-plan';
 import { DEFAULT_STUDIO_AGENT_MODEL, studioAgentModelId, type StudioAgentModelId } from '@pireel/studio-engine/agent-models';
 
 import { editingSkillsHint } from '@pireel/studio-engine/editing-skills';
@@ -16,8 +16,8 @@ import { composeReviewPending, coverStillToRun, needsDirectorPlan, needsEditingR
 import { toolInputObject } from '@pireel/studio-ui/tool-input';
 import { ROUGH_CUT_TOOL, messageTurnCredits, toolNameOfPart, type RoughCutReplyMeta } from '@pireel/studio-ui/first-pass-card';
 import { NextSteps, splitNextSteps } from '@pireel/studio-ui/chat-next-steps';
-import { documentIsEdited, FINE_CUT_SKILLS, firstPassStartupHint, type FineCutSkill } from '@pireel/studio-ui/first-pass';
-import { latestTask, taskOf, patchTask, resumeTaskHint, resumeEditingTask, unfinishedRoughCut, taskToolTimings, withTaskUsage, withToolTimings, type ChatTask, type ChatToolTiming } from "@pireel/studio-ui/chat-task";
+import { documentIsEdited, FINE_CUT_SKILLS, firstPassStartupHint, type FineCutSkill, type FirstPassReport, type RoughCutExecution } from '@pireel/studio-ui/first-pass';
+import { isWhiteboardDirectorTask, latestTask, taskOf, patchTask, resumeTaskHint, resumeEditingTask, unfinishedRoughCut, taskToolTimings, withTaskUsage, withToolTimings, type ChatTask, type ChatToolTiming } from "@pireel/studio-ui/chat-task";
 import { cachedChatThread } from "@pireel/studio-ui/chat-thread-cache";
 import { recordTaskUsage, subscribeTaskUsage } from "@pireel/studio-ui/chat-task-usage";
 import { collapsedComponentRetryIndexes, studioToolFailureText } from '@pireel/studio-ui/chat-component-retries';
@@ -231,6 +231,10 @@ export function ChatThread({
   editingSkillsRef.current = editingSkills;
   const projectEditedRef = useRef(projectEdited);
   projectEditedRef.current = projectEdited;
+  const fineCutClipsRef = useRef(fineCutClips);
+  fineCutClipsRef.current = fineCutClips;
+  const localAssetIndexRef = useRef(localAssetIndex);
+  localAssetIndexRef.current = localAssetIndex;
   const composerRef = useRef<ComposerHandle | null>(null);
   // The project's Skill when it has one; a project that never set one keeps this thread's own pick.
   const [skillId, setSkillId] = useState<StudioScenarioSkillId>((projectSkillId as StudioScenarioSkillId | undefined) ?? initialSkillId);
@@ -405,18 +409,10 @@ export function ChatThread({
       if (id === 'save_edit_plan') {
         const document = getDocument?.();
         if (!task || !document) { publishSuccess({ ok: false, error: 'No active editing task or timeline.' }); return; }
-        // The creator asked in words for creative work across the video: the request becomes a planned task.
-        if (requestedInput.begin === true) {
-          const begun = beginEditingPlan(task, requestedInput);
-          if (!begun.ok) { publishSuccess(begun); return; }
-          updateTask(task.id, current => ({ ...current, ...begun.patch }));
-          publishSuccess({ ok: true, summary: 'Planning started', data: { planning: true, features: begun.features, next: 'Plan before changing the video: read the transcript, inspect the relevant footage and the project brand, then call save_edit_plan with the direction and beats. No approval stop.' } });
-          return;
-        }
         const result = saveEditingDirectorPlan(task, requestedInput, document);
         if (!result.ok) { publishSuccess(result); return; }
         updateTask(task.id, current => ({ ...current, directorPlan: result.plan, review: undefined }));
-        publishSuccess({ ok: true, summary: 'Editing direction saved', data: { plan: directorPlanForModel(result.plan, document), next: 'Execute this plan now. Each beat\'s frames say where its passage plays on the timeline as it is now: place that beat\'s work inside them. After a structural cut, restore or move they are stale: resolve the passage against the current timeline again. No approval stop.' } });
+        publishSuccess({ ok: true, summary: 'Editing direction saved', data: { plan: directorPlanForModel(result.plan, document), next: 'Each beat\'s frames say where its passage plays on the timeline as it is now: place that beat\'s work inside them. After a structural cut, restore or move they are stale: resolve the passage against the current timeline again. Go on, with no approval stop.' } });
         return;
       }
       // A tool refused this often in one turn is not run again: the model reports the blocker instead.
@@ -441,26 +437,7 @@ export function ChatThread({
           const pending = reviewEditingTask(task, requestedInput, fineCutClips(), getDocument?.());
           publishSuccess(pending.ok ? { ok: false, error: look } : { ok: false, error: `${pending.error}\nAfter fixing this: ${look}`, data: { problems: pending.problems, ...(pending.missing ? { missing: pending.missing } : {}) } }); return;
         }
-        // The enabled cover is the harness's step, not something the model must remember.
-        if (coverStillToRun(task, getDocument?.(), requestedInput)) {
-          const ctrl = new AbortController();
-          toolAbortsRef.current.add(ctrl);
-          setActiveTools(toolAbortsRef.current.size);
-          if (userStoppedRef.current) ctrl.abort();
-          try {
-            await runToolRef.current("run_v3", { name: 'generate_cover', args: {} }, { signal: ctrl.signal, surface: "chat" as const, coverRequested: false });
-          } catch {
-            /* the review below reports the cover as unfinished */
-          } finally {
-            toolAbortsRef.current.delete(ctrl);
-            setActiveTools(toolAbortsRef.current.size);
-          }
-        }
-        const result = reviewEditingTask(task, requestedInput, fineCutClips(), getDocument?.());
-        if (!result.ok) { publishSuccess({ ok: false, error: result.error, data: { problems: result.problems, ...(result.missing ? { missing: result.missing } : {}) } }); return; }
-        updateTask(task.id, current => ({ ...current, review: result.review, ...(result.review.notes ? { reviewNoted: true } : {}) }));
-        // A note is advice delivered once with the passed review; a later finish_edit does not repeat it.
-        publishSuccess({ ok: true, summary: 'Editing result checked', data: { review: result.review, taskIncomplete: !result.review.completed, ...(result.review.notes ? { next: `${result.review.notes.join(' ')} The edit is accepted as it is; if you change the timeline for this, call finish_edit once more afterwards (the note is not repeated).` } : {}) } });
+        publishSuccess(await finishEdit(task.id, requestedInput));
         return;
       }
       if (id === "undo" && shouldBlockStudioTurnUndo(ledger)) {
@@ -487,20 +464,7 @@ export function ChatThread({
           signal: ctrl.signal,
           surface: "chat" as const,
           ...(id === 'generate_cover' ? { coverRequested: task?.mode === 'request' } : {}),
-          ...(id === ROUGH_CUT_TOOL && task ? { roughCut: {
-            resume: task.roughCut?.report,
-            ...(task.mode === 'one-click' ? { skills: task.skills, config: task.config } : {}),
-            onProgress: (report: import('@pireel/studio-ui/first-pass').FirstPassReport) => updateTask(task.id, current => {
-              if (current.roughCut && current.roughCut.callId !== toolCall.toolCallId && current.roughCut.callId !== task.roughCut?.callId) return current;
-              const source = localAssetIndex?.find(asset => asset.assetId === report.sourceAssetId);
-              return { ...current, roughCut: { callId: toolCall.toolCallId, report }, ...(source ? { source: { name: source.label, durationSec: source.durationSec ?? undefined, posterKey: source.posterKey } } : {}) };
-            }),
-            onLateUsage: (usage: import('@pireel/studio-engine/usage').WorkflowUsage) => {
-              if (!projectId) return;
-              const saved = recordTaskUsage({ projectId, threadId, taskId: task.id, callId: toolCall.toolCallId, usage });
-              if (saved) onSnapshot(saved.messages, saved.skillId ?? skillRef.current);
-            },
-          } } : {}),
+          ...(id === ROUGH_CUT_TOOL && task ? { roughCut: roughCutHooks(task, toolCall.toolCallId) } : {}),
           ...((task?.skillId ?? skillRef.current) !== STUDIO_AUTO_SKILL_ID ? { skillId: task?.skillId ?? skillRef.current } : {}),
         };
         const executionInput = withDirectorInstruction(task, id, requestedInput, getDocument?.());
@@ -534,6 +498,94 @@ export function ChatThread({
       }
     },
   });
+
+  const taskById = (id: string) => [...messagesRef.current].reverse().map(taskOf).find(task => task?.id === id);
+  /** What a rough cut reports back to its task while it runs: the checklist, and usage billed late. */
+  const roughCutHooks = (task: ChatTask, callId: string): RoughCutExecution => ({
+    resume: task.roughCut?.report,
+    ...(task.mode === 'one-click' ? { skills: task.skills, config: task.config } : {}),
+    onProgress: (report: FirstPassReport) => updateTask(task.id, current => {
+      if (current.roughCut && current.roughCut.callId !== callId && current.roughCut.callId !== task.roughCut?.callId) return current;
+      const source = localAssetIndexRef.current?.find(asset => asset.assetId === report.sourceAssetId);
+      return { ...current, roughCut: { callId, report }, ...(source ? { source: { name: source.label, durationSec: source.durationSec ?? undefined, posterKey: source.posterKey } } : {}) };
+    }),
+    onLateUsage: (usage: import('@pireel/studio-engine/usage').WorkflowUsage) => {
+      if (!projectId) return;
+      const saved = recordTaskUsage({ projectId, threadId, taskId: task.id, callId, usage });
+      if (saved) onSnapshot(saved.messages, saved.skillId ?? skillRef.current);
+    },
+  });
+  /** A step the editor starts itself (the rough cut, a cover): it counts as work under way and the
+   *  stop button ends it, like a tool the agent called. */
+  const runOwnStep = async <T,>(work: (signal: AbortSignal) => Promise<T>): Promise<T> => {
+    const ctrl = new AbortController();
+    toolAbortsRef.current.add(ctrl);
+    setActiveTools(toolAbortsRef.current.size);
+    if (userStoppedRef.current) ctrl.abort();
+    try { return await work(ctrl.signal); } finally {
+      toolAbortsRef.current.delete(ctrl);
+      setActiveTools(toolAbortsRef.current.size);
+    }
+  };
+  /** The end of an edit: an enabled cover that has not run is made, then the timeline is checked.
+   *  The agent's finish_edit and the editor's own check when a turn ends are this one step. */
+  const finishEdit = async (taskId: string, input: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    const clips = fineCutClipsRef.current;
+    const started = taskById(taskId);
+    if (!started || !clips) return { ok: false, error: 'No active editing task or timeline evidence.' };
+    // The enabled cover is the editor's step, not something the model must remember; when it
+    // fails, the check below reports the cover as unfinished.
+    if (coverStillToRun(started, getDocumentRef.current?.(), input)) {
+      await runOwnStep(signal => runToolRef.current("run_v3", { name: 'generate_cover', args: {} }, { signal, surface: "chat" as const, coverRequested: false })).catch(() => undefined);
+    }
+    const result = reviewEditingTask(taskById(taskId) ?? started, input, clips(), getDocumentRef.current?.());
+    if (!result.ok) return { ok: false, error: result.error, data: { problems: result.problems, ...(result.missing ? { missing: result.missing } : {}) } };
+    updateTask(taskId, current => ({ ...current, review: result.review, unresolved: undefined, ...(result.review.notes ? { reviewNoted: true } : {}) }));
+    // A note is advice delivered once with the passed check; a later finish_edit does not repeat it.
+    return { ok: true, summary: 'Editing result checked', data: { review: result.review, taskIncomplete: !result.review.completed, ...(result.review.notes ? { next: `${result.review.notes.join(' ')} The edit is accepted as it is; if you change the timeline for this, call finish_edit once more afterwards (the note is not repeated).` } : {}) } };
+  };
+  /** A one-click edit starts with the rough cut, and the editor runs it: fixed steps need no model.
+   *  With only cleanup switched on and nothing asked in words the edit ends there (the editor's check
+   *  follows, as after any turn); otherwise the agent is called with the receipt already in the thread. */
+  const runDirectEdit = async (taskId: string, handOff: boolean) => {
+    const callId = mid("call"), messageId = mid("assistant");
+    const write = (parts: unknown[]) => {
+      const next = [...messagesRef.current.filter(message => message.id !== messageId), { id: messageId, role: "assistant", parts } as unknown as UIMessage];
+      messagesRef.current = next;
+      setMessages(next);
+      // These parts are the editor's own: the continuation safety net does not send them to the model.
+      autoResumedRef.current = `${messageId}:${parts.length}`;
+      onSnapshot(compactStudioChatMessages(next), skillRef.current);
+    };
+    const call = (state: Record<string, unknown>) => [{ type: "step-start" }, { type: `tool-${ROUGH_CUT_TOOL}`, toolCallId: callId, input: {}, ...state }];
+    // What the creator may want next is theirs to ask for: offered as requests, never started here.
+    const offers = { type: "text", text: directingOffers().map(offer => `<next>${offer.text}</next>`).join("\n") };
+    const task = taskById(taskId)!;
+    // Continued after its rough cut was through: only the ending is left.
+    if (task.roughCut && !unfinishedRoughCut(task)) { write([{ type: "step-start" }, offers]); return; }
+    write(call({ state: "input-available" }));
+    const startedAt = Date.now();
+    const skill = task.skillId ?? skillRef.current;
+    let out: Awaited<ReturnType<StudioChatProps["runTool"]>>;
+    try {
+      out = await runOwnStep(signal => runToolRef.current("run_v3", { name: ROUGH_CUT_TOOL, args: {} }, { signal, surface: "chat" as const, roughCut: roughCutHooks(task, callId), ...(skill !== STUDIO_AUTO_SKILL_ID ? { skillId: skill } : {}) }));
+    } catch (error) {
+      out = { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+    const timings = toolTimingsRef.current.get(taskId) ?? [];
+    timings.push({ tool: ROUGH_CUT_TOOL, at: startedAt, ms: Date.now() - startedAt, ok: out.ok });
+    toolTimingsRef.current.set(taskId, timings);
+    const data = out.ok ? out.data as { report?: FirstPassReport; baseline?: Record<FineCutSkill, string[]> } | undefined : undefined;
+    if (data?.baseline) updateTask(taskId, current => ({ ...current, fineCutBaseline: current.fineCutBaseline ?? data.baseline }));
+    const receipt = call(out.ok ? { state: "output-available", output: out } : { state: "output-error", errorText: studioToolFailureText(out.error ?? t("chatGen.executionFailed"), out.data, out) });
+    write(receipt);
+    if (userStoppedRef.current) return; // the stop already paused the task
+    if (data?.report?.state !== 'done') { updateTask(taskId, current => ({ ...current, state: 'partial' })); return; }
+    if (handOff) { void sendMessage(); return; }
+    write([...receipt, { type: "step-start" }, offers]);
+  };
+  const runDirectEditRef = useRef(runDirectEdit);
+  runDirectEditRef.current = runDirectEdit;
 
   useEffect(() => subscribeTaskUsage(event => {
     if (event.projectId !== projectId || event.threadId !== threadId) return;
@@ -734,8 +786,13 @@ export function ChatThread({
       options: {
         preserveAutoRecoveryAttempt?: boolean;
         studioAction?: typeof STUDIO_CREATE_SKILL_ACTION;
-        /** The tool this message's first step must call (a one-click edit starts with the rough cut). */
+        /** A one-click edit: it starts with the rough cut, which the editor runs itself. */
         startTool?: string;
+        /** The one-click edit's message also carries the creator's own words. */
+        asked?: boolean;
+        /** The creator took one of the editor's whole-video offers: this creative work is handed to
+         *  the agent to direct across the video. */
+        direct?: readonly string[];
         /** Explicit initial whiteboard generation; local follow-up edits do not opt in. */
         wholeWhiteboard?: boolean;
         resume?: ChatTask;
@@ -790,7 +847,10 @@ export function ChatThread({
         draftParts.flatMap((part) => (part.type === "text" ? [...part.text.matchAll(/@([A-Za-z0-9_:./-]+)/g)].map((m) => m[1]!) : [])),
       )];
       // The switched-on skills shape the project's first edit; once it is edited, the creator asks in words.
-      const continuing = options.resume ?? (/^(继续|继续剪辑|继续粗剪|continue|resume)[。.!！]?$/i.test(typeof draft === 'string' ? draft.trim() : '') && latestTask(messagesRef.current)?.state !== 'done' ? latestTask(messagesRef.current) : undefined);
+      // "Continue", typed as the whole message, resumes the task that is not finished (the box hands
+      // the message over as parts, a caller as a string).
+      const typed = draftParts.every(part => part.type === 'text') ? draftParts.map(part => part.type === 'text' ? part.text : '').join('').trim() : '';
+      const continuing = options.resume ?? (/^(继续|继续剪辑|继续粗剪|continue|resume)[。.!！]?$/i.test(typed) && latestTask(messagesRef.current)?.state !== 'done' ? latestTask(messagesRef.current) : undefined);
       const outputId = (getBodyRef.current().output as { id?: string } | undefined)?.id;
       if (continuing?.outputId && continuing.outputId !== outputId) { setTaskResumeError(true); return false; }
       setTaskResumeError(false);
@@ -803,20 +863,21 @@ export function ChatThread({
         && (Object.keys(startDocument.assets).length > 0 || !!localAssetIndex?.length);
       const task: ChatTask = continuing ? { ...resumeEditingTask(continuing), config, skillId: continuing.skillId ?? skillRef.current, review: undefined, agentModel: agentModelRef.current, reviewRequired: continuing.reviewRequired || continuing.mode === 'one-click', state: 'running' } : {
         id: mid('task'), ...(outputId ? { outputId } : {}), goal: draftParts.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n'),
-        skills: options.startTool ? config.skills : [],
-        config, skillId: skillRef.current, agentModel: agentModelRef.current, reviewRequired: !!options.startTool || !!options.wholeWhiteboard,
-        directorPlanRequired: needsDirectorPlan({ skills: config.skills, config }, { oneClick: !!options.startTool, wholeWhiteboard: !!options.wholeWhiteboard }),
+        skills: options.startTool ? config.skills : options.direct ? [...options.direct] : [],
+        config, skillId: skillRef.current, agentModel: agentModelRef.current, reviewRequired: !!options.startTool || !!options.wholeWhiteboard || !!options.direct,
+        directorPlanRequired: !!options.direct || needsDirectorPlan({ skills: config.skills, config }, { oneClick: !!options.startTool, wholeWhiteboard: !!options.wholeWhiteboard }),
+        ...(options.direct ? { planned: true } : {}),
         ...((options.startTool || options.wholeWhiteboard) && source ? { source: { name: source.label, ...(source.durationSec != null ? { durationSec: source.durationSec } : {}), ...(source.posterKey ? { posterKey: source.posterKey } : {}) } } : {}),
-        mode: options.startTool ? 'one-click' : 'request', ...(compose ? { compose: true } : {}), state: 'running',
+        mode: options.startTool ? 'one-click' : 'request', ...(compose ? { compose: true } : {}), ...(options.startTool && options.asked ? { asked: true } : {}), state: 'running',
       };
       const startTool = continuing?.mode === 'one-click' && (!continuing.roughCut || unfinishedRoughCut(continuing)) ? ROUGH_CUT_TOOL : options.startTool;
       const mentionHint = [
-        // A one-click edit is told what it is: planned creative work, or the rough cut alone.
-        continuing ? resumeTaskHint(task) : options.startTool === ROUGH_CUT_TOOL ? firstPassStartupHint(!!task.directorPlanRequired) : "",
+        // A one-click edit is told what it is: the video to direct, the rough cut and a request, or the rough cut alone.
+        continuing ? resumeTaskHint(task) : options.startTool === ROUGH_CUT_TOOL ? firstPassStartupHint(task.directorPlanRequired ? 'creative' : task.asked ? 'request' : 'clean') : "",
         compose ? COMPOSE_TASK_HINT : "",
         mentionedIds.length ? `Referenced elements in this message (use these ids directly): ${JSON.stringify(mentionedIds)}` : "",
         localAssetContext,
-        continuing ? editingSkillsHint(task.skills, V3_CHAT_TOOL_IDS) : projectEditedRef.current ? "" : editingSkillsHint(editingSkillsRef.current, V3_CHAT_TOOL_IDS),
+        continuing ? editingSkillsHint(task.skills, V3_CHAT_TOOL_IDS) : options.direct ? editingSkillsHint(options.direct, V3_CHAT_TOOL_IDS) : projectEditedRef.current ? "" : editingSkillsHint(editingSkillsRef.current, V3_CHAT_TOOL_IDS),
       ].filter(Boolean).join("\n");
       const metadata = {
         task,
@@ -824,7 +885,6 @@ export function ChatThread({
         ...(mentionHint ? { mentionHint } : {}),
         ...(timelineFrames.length ? { timelineFrames } : {}),
         ...(options.studioAction ? { studioAction: options.studioAction, skillDraft: skillDraftContext() } : {}),
-        ...(startTool ? { startTool } : {}),
       };
       const userMessage: UIMessage = {
         id: mid("user"), role: "user", metadata,
@@ -841,12 +901,20 @@ export function ChatThread({
       };
       messagesRef.current = [...messagesRef.current, userMessage];
       onSnapshot(compactStudioChatMessages(messagesRef.current), skillRef.current);
+      // A clean one-click edit stopped before its check has nothing for the agent: the editor ends it.
+      const ownEnding = continuing?.mode === 'one-click' && !continuing.directorPlanRequired && !continuing.asked && !continuing.review && !continuing.unresolved?.length;
+      if (startTool === ROUGH_CUT_TOOL || ownEnding) {
+        setMessages(messagesRef.current);
+        void runDirectEditRef.current(task.id, !!task.directorPlanRequired || !!task.asked);
+        return true;
+      }
       void sendMessage(userMessage);
       return true;
     },
-    [elements, localAssetIndex, sendMessage, status, onSnapshot],
+    [elements, localAssetIndex, sendMessage, setMessages, status, onSnapshot],
   );
 
+  const ownCheckRef = useRef("");
   // Fine-cut rows describe observed additions. Zero additions remain unfulfilled, never inferred unnecessary.
   const fineCutFor = (message: UIMessage, task: ChatTask | undefined, live: boolean): RoughCutReplyMeta['fineCut'] => {
     if (task?.mode !== 'one-click') return undefined;
@@ -873,14 +941,29 @@ export function ChatThread({
     if (last?.role !== 'assistant') return;
     if (lastAssistantMessageIsCompleteWithToolCalls({ messages: messagesRef.current })) return;
     if (last.parts.some(part => ['input-streaming', 'input-available'].includes((part as { state?: string }).state ?? ''))) return;
-    const fine = fineCutFor(last, task, false);
     const built = !!getDocumentRef.current && documentIsEdited(getDocumentRef.current()!);
+    // The editor checks a finished edit itself when the agent did not ask for the check (or was
+    // never called): once per ending. What it refuses is kept for the continuation.
+    const ending = `${last.id}:${last.parts.length}`;
+    if ((task.reviewRequired && needsEditingReview(task) || composeReviewPending(task, built)) && !task.review && !isWhiteboardDirectorTask(task) && !unfinishedRoughCut(task)
+      && ownCheckRef.current !== ending && assistantTurnEndedWithAnswer(last) && !unresolvedTaskFailure(messagesForTask(messagesRef.current, task.id))) {
+      ownCheckRef.current = ending;
+      void finishEdit(task.id, {}).then(checked => {
+        if (checked.ok !== false) return;
+        const problems = (checked.data as { problems?: string[] } | undefined)?.problems;
+        updateTask(task.id, current => ({ ...current, unresolved: problems?.length ? problems : [String(checked.error)] }));
+      });
+      return;
+    }
+    const fine = fineCutFor(last, task, false);
     const state = unfinishedRoughCut(task) || task.reviewRequired && needsEditingReview(task) && !task.review?.completed || composeReviewPending(task, built) || unresolvedTaskFailure(messagesForTask(messagesRef.current, task.id)) || !assistantTurnEndedWithAnswer(last) ? 'partial' : 'done';
     updateTask(task.id, current => ({ ...current, state, ...(fine ? { fineCut: fine } : {}) }));
   }, [busy, status, messages]);
 
   // A next step goes at the end of the message being written, to edit and send.
+  const pickedStepRef = useRef<string | null>(null);
   const fillRequest = useCallback((request: string) => {
+    pickedStepRef.current = request;
     composerRef.current?.insertText(request);
   }, []);
 
@@ -904,7 +987,8 @@ export function ChatThread({
     // With nothing switched on (no brand) the message is the creator's own request, not a one-click edit.
     const roughCut = startWithRoughCut(skillRef.current) && resolveEditingRunConfig({ brand: projectBrandRef.current, skills: editingSkillsRef.current }).skills.length > 0;
     if (alreadyStarted(messagesRef.current, startPrompt, roughCut)) { onStartPromptSent?.(); return; }
-    void run(startPrompt, roughCut ? { startTool: ROUGH_CUT_TOOL } : { wholeWhiteboard: skillRef.current === 'whiteboard-explainer' }).then(sent => {
+    // The home writes the creator's own words on a second line, after the edit's fixed sentence.
+    void run(startPrompt, roughCut ? { startTool: ROUGH_CUT_TOOL, asked: startPrompt.trim().includes('\n') } : { wholeWhiteboard: skillRef.current === 'whiteboard-explainer' }).then(sent => {
       if (sent) onStartPromptSent?.(); else startSentRef.current = false;
     });
   }, [startPrompt, status, run, onStartPromptSent]);
@@ -1092,8 +1176,14 @@ export function ChatThread({
   // Why one-click edit cannot start yet, shown on hover; the rerender that brings footage clears it.
   const startBlocked = !footageToEdit(getDocument?.()) ? t('chatGen.importVideoFirst') : !shownEditingSkills.length ? t('chatGen.turnOnASkill') : '';
   const submit = useCallback((draft: string | StudioChatDraftPart[]) => {
+    // One of the editor's whole-video offers, taken: that work is handed to the agent to direct.
+    const sent = typeof draft === 'string' ? draft : draft.map(part => part.type === 'text' ? part.text : '').join('');
+    const offer = takenDirectingOffer(pickedStepRef.current, sent);
+    pickedStepRef.current = null;
+    if (offer) return run(draft, { direct: offer.features });
     if (!firstMessageEditsFootage(getDocument?.(), messagesRef.current, skillRef.current, shownEditingSkills)) return run(draft);
-    return run(firstEditMessage(typeof draft === 'string' ? [{ type: 'text', text: draft }] : draft), { startTool: ROUGH_CUT_TOOL });
+    const parts: StudioChatDraftPart[] = typeof draft === 'string' ? [{ type: 'text', text: draft }] : draft;
+    return run(firstEditMessage(parts), { startTool: ROUGH_CUT_TOOL, asked: parts.some(part => part.type !== 'text' || !!part.text.trim()) });
   }, [run, getDocument, shownEditingSkills]);
   // One-click edit takes the path a video handed over from the Studio home takes, whatever the box holds.
   const startEdit = useCallback(() => run(firstEditMessage([]), { startTool: ROUGH_CUT_TOOL }), [run]);
@@ -1182,7 +1272,7 @@ export function ChatThread({
               }
               // Dead-zone detection: stream still running, but the last visible part is neither a "running tool" (its card animates itself)
               // nor "growing text" (the tokens are their own feedback) → show thinking dots, don't let the view freeze
-              const busy = status === "submitted" || status === "streaming";
+              const busy = status === "submitted" || status === "streaming" || activeTools > 0;
               const isLast = mi === messages.length - 1;
               const vis = parts.filter((p) => p.type !== "step-start");
               const lastPart = vis[vis.length - 1];

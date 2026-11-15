@@ -33,8 +33,9 @@ describe('a video built from scratch', () => {
     expect(taskTakesReview(compose([]))).toBe(true);
     const done = reviewEditingTask(compose([]), { features: [{ feature: 'graphics', status: 'applied', reason: '六处观点花字落在口播重点', atFrame: 60 }] }, evidence, emptyEditorDocumentV2({ fps: 30 }));
     expect(done).toMatchObject({ ok: true, review: { completed: true, items: [{ feature: 'graphics', status: 'applied' }] } });
+    // A claim puts nothing on the timeline: what is not there reads as left out.
     const claimed = reviewEditingTask(compose([]), { features: [{ feature: 'sound', status: 'applied', reason: '加了转场音效点', atFrame: 30 }] }, evidence, emptyEditorDocumentV2({ fps: 30 }));
-    expect(claimed.ok).toBe(false);
+    expect(claimed).toMatchObject({ ok: true, review: { items: [{ feature: 'sound', status: 'not_needed', count: 0 }] } });
   });
 
   it('asks for the captions the project switched on', () => {

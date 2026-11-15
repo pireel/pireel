@@ -190,6 +190,8 @@ export const CHATGEN_ZH: Record<string, string> = {
   'chatGen.generationSettings': '生成参数',
   'chatGen.editWithSwitches': '按本次剪辑设置，把这条视频剪成成片。',
   'chatGen.requestedChanges': '本次要求：',
+  'chatGen.cleanEdit.nextBroll': '给整条视频配上 B-roll',
+  'chatGen.cleanEdit.nextGraphics': '给整条视频加上动态图形',
   'chatGen.startEdit': '一键剪辑',
   'chatGen.importVideoFirst': '先导入视频',
   'chatGen.turnOnASkill': '至少开启一项剪辑技能',

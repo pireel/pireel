@@ -452,10 +452,8 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
     }),
   },
   save_edit_plan: {
-    description: 'Persist the whole-video direction, source-anchored beats and scene-specific material inventory without editing the timeline. Follow the active scene Skill for preparation and creative decisions. Ordinary one-click tasks require completed rough_cut; source-preserving whole-whiteboard tasks require entities instead. A successful save hands off to execution automatically. Reuse on resume; revising the plan invalidates its previous completion review. A request in words for creative work across the whole video starts with {begin: true, features} alone, before any reading or editing: planning then follows as its workflow phase.',
+    description: 'Save the direction of a video you are directing and its source-anchored passages without editing the timeline; the receipt returns where each passage plays on the timeline now. Optional when you direct a whole video: save a plan when a direction should survive a long edit or an interruption, revise it when the direction changes. A whole whiteboard must save one before authoring (follow its scene Skill; entities are required there).',
     inputSchema: obj({
-      begin: bool('Start planning a request the creator made in words for creative work across the whole video. Send it with features only; the plan itself is saved by a later call.'),
-      features: arr(enumOf(['graphics', 'b-roll', 'sound', 'zoom']), { description: 'With begin: what the creator asked for across the video, and nothing they did not.' }),
       direction: str('Concise, content-specific whole-video direction in the creator’s language: opening, progression, pace and ending.'),
       entities: arr(obj({
         id: str(), name: str('Exact person/company/object/product/event identity.'),
@@ -472,15 +470,15 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
     }),
   },
   finish_edit: {
-    description: 'Finish a whole-video edit after checking its enabled features against the actual timeline. Required for branded/fine-cut work. When cover is enabled and no cover scene has run, this runs it first; completion reads the independent scene’s actual outcome. Main chat must not carry cover prompts, frames or image results. A pending or failed scene keeps cover work unfinished. Include every enabled graphics (headlines count as graphics), B-roll, sound and zoom feature, and transitions when you added any. Applied features must exist in the timeline. For not_needed give a concrete content reason and the moment evaluated; lack of source media is not a reason to skip B-roll. Unfinished generation or unavailable assets are blocked, never completed. For a saved director plan, inspect meaningful rendered frames after the last edit and include planRevision, every beat’s outcome, and an editorialReview of opening, progression, rhythm and brand coherence. What happened at each beat’s passage is read from the timeline: a beat reported applied needs something added, reframed, restored, cut or given caption emphasis there since the plan was saved. This records the outcome without modifying the video.',
+    description: 'End a whole-video edit. The editor checks the timeline for faults a viewer would see (speech playing twice, the recording laid over itself, a graphic doubled or unstyled, an empty music lane) and for unfinished rough-cut steps, and refuses while any remain, naming them all. With a cover enabled and none made yet it makes the cover first. What each enabled capability and each planned passage got is read from the timeline, not from this call: send features only for a capability you left out or could not complete, with the reason (blocked keeps the edit unfinished for the creator to continue). After placing visuals, look at the frames that matter (inspect_timeline) before calling this. This records the outcome without modifying the video. A whole whiteboard reports as its scene Skill says: planRevision, every beat, editorialReview and each enabled feature.',
     inputSchema: obj({
       cover: { ...obj({ status: enumOf(['generated', 'blocked', 'skipped']), reason: str('Actual cover outcome in the creator’s language. skipped only when the user explicitly excludes covers.'), jobId: str('Not used after generate_cover.'), assetId: str('Not used after generate_cover.') }, ['status', 'reason']), description: 'Usually omit: completion reads the cover scene. Give it only to report skipped (the user explicitly excluded a cover) or blocked (with the reason it cannot run).' },
-      planRevision: int('Revision returned by save_edit_plan. Required when a director plan exists.', 1),
-      editorialReview: str('Concrete assessment of the actual opening, progression, rhythm and brand coherence against the plan. Fix visible defects first.'),
+      planRevision: int('Whole whiteboard: the revision returned by save_edit_plan.', 1),
+      editorialReview: str('Whole whiteboard: concrete assessment of the actual opening, progression, rhythm and brand coherence against the plan.'),
       beats: arr(obj({ beatId: str('Saved plan beat id.'), status: enumOf(['applied', 'kept', 'changed', 'blocked'], 'applied: something was added, reframed, restored, cut or given caption emphasis at the passage; kept: the passage stays as it was, on purpose; changed: the decision changed (say to what); blocked: it could not be done.'), result: str('What viewers now see; explain adaptations or blockers. Use the creator’s language.') }, ['beatId', 'status', 'result'])),
-      brandApplication: str('For a branded edit, describe concrete typography, visual treatment and pacing choices that carry its style into this video.'),
-      features: arr(obj({ feature: enumOf(['graphics', 'b-roll', 'sound', 'zoom', 'transitions']), status: enumOf(['applied', 'not_needed', 'blocked']), reason: str('Short content-based explanation in the creator’s language.'), atFrame: int('Timeline frame evaluated; required unless status is blocked.', 0) }, ['feature', 'status', 'reason'])),
-    }, ['features']),
+      brandApplication: str('Optional: the concrete typography, visual treatment and pacing choices that carry the brand into this video.'),
+      features: arr(obj({ feature: enumOf(['graphics', 'b-roll', 'sound', 'zoom', 'transitions']), status: enumOf(['applied', 'not_needed', 'blocked'], 'not_needed: left out on purpose; blocked: could not be completed.'), reason: str('Why, in the creator’s language.'), atFrame: int('Whole whiteboard: the timeline frame evaluated.', 0) }, ['feature', 'status', 'reason'])),
+    }),
   },
   remove_silence: {
     description:

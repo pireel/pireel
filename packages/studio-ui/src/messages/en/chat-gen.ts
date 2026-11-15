@@ -190,6 +190,8 @@ export const CHATGEN_EN: Record<string, string> = {
   'chatGen.generationSettings': 'Generation settings',
   'chatGen.editWithSwitches': 'Edit this video into a finished cut with these editing settings.',
   'chatGen.requestedChanges': 'Requested changes:',
+  'chatGen.cleanEdit.nextBroll': 'Add B-roll across the whole video',
+  'chatGen.cleanEdit.nextGraphics': 'Add motion graphics across the whole video',
   'chatGen.startEdit': 'One-click edit',
   'chatGen.importVideoFirst': 'Import a video first',
   'chatGen.turnOnASkill': 'Turn on at least one editing skill',

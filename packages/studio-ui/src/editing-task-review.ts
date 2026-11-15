@@ -1,5 +1,5 @@
 import { coverSceneFromDocument, coverSceneInput } from '@pireel/studio-ui/cover-scene';
-import { reviewDirectorPlan, type DirectorBeatResult } from '@pireel/studio-ui/editing-director-plan';
+import { readDirectorBeats, reviewDirectorPlan, type DirectorBeatResult } from '@pireel/studio-ui/editing-director-plan';
 import type { EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import { isWhiteboardDirectorTask, type ChatTask } from '@pireel/studio-ui/chat-task';
 import { projectDocumentToComposition } from '@pireel/studio-engine/project-document';
@@ -26,7 +26,7 @@ export function requestedEditFeatures(task: ChatTask): EditReviewFeature[] {
 }
 /** Whether a task plans from its start: a whole whiteboard always does; a one-click edit only when it
  *  switched on creative work (graphics, B-roll, sound, zoom). Cleanup, captions and covers need no plan.
- *  A request plans when the creator asks for that work across the video in words (beginEditingPlan). */
+ *  An ordinary request draws up none. */
 export function needsDirectorPlan(task: Pick<ChatTask, 'skills' | 'config'>, start: { oneClick: boolean; wholeWhiteboard: boolean }): boolean {
   return start.wholeWhiteboard || (start.oneClick && requestedEditFeatures(task as ChatTask).length > 0);
 }
@@ -52,7 +52,10 @@ export function composeReviewPending(task: ChatTask, built: boolean): boolean {
   return !!task.compose && built && !task.review?.completed;
 }
 
-/** Validate completion against actual timeline evidence, not the model's claim that it added a feature.
+/** The end of an edit, checked against the timeline. What refuses it is what a viewer or the creator
+ *  would meet: an unfinished rough cut, faults on the timeline, a cover that is owed. What each
+ *  switched-on capability and each planned passage got is read from the timeline; the model only adds
+ *  why something was left out or could not be done. A whole whiteboard keeps its own accounting.
  *  Every problem is reported at once: one at a time burns the retry budget on the next one. */
 export function reviewEditingTask(task: ChatTask, input: Record<string, unknown>, evidence: EditingEvidence, document?: EditorDocumentV2): EditingTaskReviewOutcome {
   if (!taskTakesReview(task)) return refused(['finish_edit is for a whole-video editing task.']);
@@ -90,7 +93,8 @@ export function reviewEditingTask(task: ChatTask, input: Record<string, unknown>
     const shown = faults.slice(0, 12).map((finding) => `${finding.message} (clips ${finding.clipIds.slice(0, 4).join(', ')})`);
     problems.push(`The timeline has faults a viewer sees. Repair them before finishing: ${shown.join('; ')}${faults.length > shown.length ? `; and ${faults.length - shown.length} more` : ''}.`);
   }
-  const director = task.directorPlanRequired || task.directorPlan ? reviewDirectorPlan(task, input, document) : undefined;
+  const whiteboard = isWhiteboardDirectorTask(task);
+  const director = whiteboard && (task.directorPlanRequired || task.directorPlan) ? reviewDirectorPlan(task, input, document) : undefined;
   if (director && !director.ok) problems.push(...director.problems);
   const coverResult = reviewBrandCover(task, input.cover, document);
   if (!coverResult.ok) {
@@ -99,6 +103,30 @@ export function reviewEditingTask(task: ChatTask, input: Record<string, unknown>
   }
   const wanted = requestedEditFeatures(task);
   const raw = Array.isArray(input.features) ? input.features as Record<string, unknown>[] : [];
+  if (!whiteboard) {
+    if (problems.length || !coverResult.ok) return refused(problems, missing);
+    // Read, not reported: a capability counts as applied when the timeline holds it.
+    const listed = EDIT_REVIEW_FEATURES.filter(feature => wanted.includes(feature) || raw.some(item => item?.feature === feature));
+    const read: EditingTaskReview['items'] = listed.map(feature => {
+      const row = raw.find(item => item?.feature === feature);
+      const count = evidence[feature]?.length ?? 0;
+      return { feature, status: row?.status === 'blocked' ? 'blocked' : count ? 'applied' : 'not_needed', reason: typeof row?.reason === 'string' ? row.reason.trim() : '', count, ...(typeof row?.atFrame === 'number' ? { atFrame: row.atFrame } : {}) };
+    });
+    const beats = task.directorPlan && document ? readDirectorBeats(task.directorPlan, input, document) : undefined;
+    const silent = read.filter(item => wanted.includes(item.feature) && !item.count && !item.reason).map(item => item.feature);
+    const advice = document && !task.reviewNoted ? [
+      ...(silent.length ? [`${silent.join(', ')} ${silent.length > 1 ? 'were' : 'was'} asked for and nothing of it is in the video. If that is your decision, tell the creator why in your reply; otherwise add it.`] : []),
+      ...reviewNotes(document), ...findings.filter((finding) => finding.severity === 'warning').slice(0, 8).map((finding) => `Worth a look: ${finding.message}.`),
+    ] : [];
+    const applied = typeof input.brandApplication === 'string' ? input.brandApplication.trim() : '';
+    return { ok: true, review: {
+      ...(advice.length ? { notes: advice } : {}),
+      completed: read.every(item => item.status !== 'blocked') && (beats?.every(beat => beat.status !== 'blocked') ?? true) && coverResult.cover?.status !== 'blocked',
+      items: read, ...(coverResult.cover ? { cover: coverResult.cover } : {}),
+      ...(beats ? { director: { revision: task.directorPlan!.revision, summary: '', beats } } : {}),
+      ...(applied ? { brandApplication: applied } : {}),
+    } };
+  }
   const unaccounted = wanted.filter(feature => !raw.some(item => item?.feature === feature));
   if (unaccounted.length) {
     problems.push(`Account for every enabled feature: ${unaccounted.join(', ')}.`);

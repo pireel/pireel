@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import type { UIMessage } from 'ai';
 import { Check, Film, Loader2, Minus, X } from 'lucide-react';
 import { imageThumb } from '@pireel/ui/image-url';
-import type { ChatTask } from '@pireel/studio-ui/chat-task';
+import { isWhiteboardDirectorTask, type ChatTask } from '@pireel/studio-ui/chat-task';
 import type { FineCutItem, FirstPassReport } from '@pireel/studio-ui/first-pass';
 import { editingTaskRows, type EditingProgressRow } from '@pireel/studio-ui/editing-task-progress';
 import { useToolProgress } from '@pireel/studio-ui/tool-progress';
@@ -42,7 +42,7 @@ export function EditingTaskCard({ task, messages, live, fine, credits, startedAt
     </li>)}</ul>
   </section>;
   const active = [...rows.rough, ...(rows.planning ? [rows.planning] : []), ...rows.finishing].find(row => row.status === 'running');
-  const showFinishing = (!task.directorPlanRequired || !!task.directorPlan) && (rows.rough.every(row => row.status === 'done') || rows.finishing.some(row => ['running', 'done', 'failed'].includes(row.status)));
+  const showFinishing = (!isWhiteboardDirectorTask(task) || !!task.directorPlan) && (rows.rough.every(row => row.status === 'done') || rows.finishing.some(row => ['running', 'done', 'failed'].includes(row.status)));
   const seconds = startedAt ? Math.max(0, Math.floor((now - startedAt) / 1000)) : 0;
   return <div className="w-full space-y-3" aria-label={t('ui.editingTaskCard.editingProgress')}>
     {task.source && <div className="border-line flex items-center gap-3 rounded-xl border px-3 py-2.5">
@@ -59,7 +59,7 @@ export function EditingTaskCard({ task, messages, live, fine, credits, startedAt
         <details><summary className="text-ink-3 cursor-pointer">{t('ui.editingTaskCard.sceneDirection')}</summary>
           <ul className="mt-3 space-y-3">{task.directorPlan.beats.map(beat => {
             const result = task.review?.director?.beats.find(item => item.beatId === beat.id);
-            return <li key={beat.id}><p className="text-ink font-medium">“{beat.quote}”</p><p className="mt-1">{beat.direction}</p>{result && <p className={result.status === 'blocked' ? 'text-destructive mt-1' : 'text-ink-4 mt-1'}>{result.result}</p>}</li>;
+            return <li key={beat.id}><p className="text-ink font-medium">“{beat.quote}”</p><p className="mt-1">{beat.direction}</p>{result?.result && <p className={result.status === 'blocked' ? 'text-destructive mt-1' : 'text-ink-4 mt-1'}>{result.result}</p>}</li>;
           })}</ul>
         </details>
       </div>}

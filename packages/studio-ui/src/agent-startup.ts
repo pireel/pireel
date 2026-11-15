@@ -25,6 +25,18 @@ export function firstEditMessage(parts: readonly StudioChatDraftPart[]): StudioC
   const asked = parts.filter(part => part.type !== 'text' || part.text.trim());
   return [{ type: 'text', text: t('chatGen.editWithSwitches') + (asked.length ? `\n${t('chatGen.requestedChanges')} ` : '') }, ...asked];
 }
+/** The whole-video work the editor itself offers once a clean edit is through, with the creative
+ *  work each names. They are requests the creator may take, never started for them. */
+export const directingOffers = (): { text: string; features: string[] }[] => [
+  { text: t('chatGen.cleanEdit.nextBroll'), features: ['b-roll'] },
+  { text: t('chatGen.cleanEdit.nextGraphics'), features: ['graphics'] },
+];
+/** The offer the creator took: the one they picked, when what they then sent still carries it (as
+ *  offered, or with more said around it). Sending something else is an ordinary request. */
+export function takenDirectingOffer(picked: string | null, sent: string): { text: string; features: string[] } | undefined {
+  if (!picked || !sent.includes(picked)) return undefined;
+  return directingOffers().find(offer => offer.text === picked);
+}
 export function alreadyStarted(messages: readonly UIMessage[], prompt: string, roughCut: boolean): boolean {
   return messages.some(message => message.role === 'user' && (taskOf(message)?.goal === prompt || (roughCut && taskOf(message)?.mode === 'one-click')));
 }

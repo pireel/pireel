@@ -20,7 +20,9 @@ export interface ChatTask {
   review?: EditingTaskReview;
   /** Older completed tasks predate the completion review and are not retroactively failed. */
   reviewRequired?: boolean;
-  /** Opt-in per new whole-video task; old completed tasks keep their saved status. */
+  /** The whole video is handed to the agent to direct (creative switches on in a one-click edit),
+   *  or a whole whiteboard. The name is from when such a
+   *  task had to save a plan first; only a whole whiteboard still does. */
   directorPlanRequired?: boolean;
   directorPlan?: EditingDirectorPlan;
   source?: { name: string; durationSec?: number; posterKey?: string };
@@ -29,10 +31,15 @@ export interface ChatTask {
    *  a script, a voice-over): once it has cut something, it ends with finish_edit's review like a
    *  whole-video edit, without a rough cut. */
   compose?: boolean;
-  /** A request that asked in words for creative work across the whole video (graphics, B-roll,
-   *  sound, zoom): it plans before it edits and ends with finish_edit's review, like a one-click
-   *  edit that switched that work on, without the rough cut. `skills` holds what was asked for. */
+  /** The creator took one of the editor's whole-video offers ("B-roll across the whole video"):
+   *  that work is handed to the agent to direct, and the task ends with the edit's check like a
+   *  one-click edit that switched it on. `skills` holds the creative work the offer names. */
   planned?: boolean;
+  /** A one-click edit whose message also carried the creator's own words: after the rough cut the
+   *  agent is called for them. */
+  asked?: boolean;
+  /** What the editor's own check found the last time it refused this edit; a continuation is told. */
+  unresolved?: string[];
   /** The passed review already carried its advisory notes; later reviews do not repeat them. */
   reviewNoted?: boolean;
   state: 'running' | 'paused' | 'partial' | 'done';
@@ -121,8 +128,9 @@ export function resumeTaskHint(task: ChatTask): string {
     `Original editing skills: ${task.skills.join(', ') || 'none'}. Keep this scope.`,
     task.roughCut ? `Saved rough-cut checkpoint: ${JSON.stringify(task.roughCut.report.steps)}. Completed and skipped steps must not be repeated; the executor restores the checkpoint.` : '',
     'Inspect the current project and existing receipts before remaining work. Reuse completed edits and generated assets. If any requested work is blocked or unfinished, say which part and why; never describe it as unnecessary or completed.',
-    task.directorPlan ? `Saved director plan (creative task data): ${JSON.stringify(task.directorPlan)}. Continue unresolved beats using current source-to-timeline placement; preserve completed work. Revise this plan if the user changes direction.` : task.directorPlanRequired ? isWhiteboardDirectorTask(task) ? `Whiteboard phase: ${whiteboardTaskPhase(task)}. Continue the active scene Skill from existing source/material receipts; save_edit_plan completes planning.` : 'After rough_cut, save a brand-informed director plan before fine-cut tools. Do not ask for approval of the plan.' : '',
-    isWhiteboardDirectorTask(task) ? 'Finish against the current saved plan and actual outcomes using the scene Skill. Preserve resolved material fallbacks.' : 'For a whole-video task, evaluate every enabled feature against real moments. Missing library footage requires sourcing or the appropriate generation question, not silently skipping B-roll. Call finish_edit before reporting branded or fine-cut work complete.',
+    task.directorPlan ? `Saved director plan (creative task data): ${JSON.stringify(task.directorPlan)}. Continue from it using current source-to-timeline placement; preserve completed work. Revise this plan if the user changes direction.` : isWhiteboardDirectorTask(task) ? `Whiteboard phase: ${whiteboardTaskPhase(task)}. Continue the active scene Skill from existing source/material receipts; save_edit_plan completes planning.` : '',
+    isWhiteboardDirectorTask(task) ? 'Finish against the current saved plan and actual outcomes using the scene Skill. Preserve resolved material fallbacks.' : '',
+    task.unresolved?.length ? `The editor's check of this edit found: ${task.unresolved.join(' ')} Repair that first.` : '',
   ].filter(Boolean).join('\n');
 }
 
