@@ -20,10 +20,13 @@ export interface EditingTaskReview {
   notes?: string[];
 }
 export function requestedEditFeatures(task: ChatTask): EditReviewFeature[] {
+  // Asked for in words: exactly what the request named, whatever the project's switches or brand say.
+  if (task.planned) return EDIT_REVIEW_FEATURES.filter(id => id !== 'transitions' && task.skills.includes(id));
   return EDIT_REVIEW_FEATURES.filter(id => id === 'transitions' ? false : id === 'zoom' ? task.config?.visual?.zoom : task.skills.includes(id) || id === 'graphics' && task.config?.visual?.headlines);
 }
-/** Whether a task plans before it edits: a whole whiteboard always does; a one-click edit only when it asks
- *  for creative work (graphics, B-roll, sound, zoom). Cleanup, captions and covers need no plan. */
+/** Whether a task plans from its start: a whole whiteboard always does; a one-click edit only when it
+ *  switched on creative work (graphics, B-roll, sound, zoom). Cleanup, captions and covers need no plan.
+ *  A request plans when the creator asks for that work across the video in words (beginEditingPlan). */
 export function needsDirectorPlan(task: Pick<ChatTask, 'skills' | 'config'>, start: { oneClick: boolean; wholeWhiteboard: boolean }): boolean {
   return start.wholeWhiteboard || (start.oneClick && requestedEditFeatures(task as ChatTask).length > 0);
 }
@@ -41,7 +44,7 @@ function refused(problems: string[], missing: string[] = []): EditingTaskReviewO
 
 /** Only a whole-video edit (or a whiteboard director task) has a checklist for finish_edit to review. */
 export function taskTakesReview(task: ChatTask): boolean {
-  return task.mode === 'one-click' || isWhiteboardDirectorTask(task) || !!task.compose;
+  return task.mode === 'one-click' || isWhiteboardDirectorTask(task) || !!task.compose || !!task.planned;
 }
 
 /** A built-from-scratch request is unfinished until its review passed, once it put anything on the timeline. */
@@ -56,7 +59,7 @@ export function reviewEditingTask(task: ChatTask, input: Record<string, unknown>
   const problems: string[] = [];
   const missing: string[] = [];
   if (evidence.emptyMusicTracks?.length) problems.push(`Remove unused empty music tracks before finishing: ${evidence.emptyMusicTracks.join(', ')}. Create music lanes with actual placed audio, not pending suggestions.`);
-  if (!isWhiteboardDirectorTask(task) && !task.compose && (!task.roughCut || task.roughCut.report.steps.some(step => ['pending', 'running', 'failed'].includes(step.status)))) problems.push('Complete the unfinished rough-cut steps first; preserve completed checkpoints.');
+  if (!isWhiteboardDirectorTask(task) && !task.compose && !task.planned && (!task.roughCut || task.roughCut.report.steps.some(step => ['pending', 'running', 'failed'].includes(step.status)))) problems.push('Complete the unfinished rough-cut steps first; preserve completed checkpoints.');
   // Captions switched on for the project are part of a video built from scratch.
   if (task.compose && document && task.config?.skills.includes('captions') && !documentHasCaptions(document)) problems.push('Captions are switched on for this project but the video has none: lay them with set_captions (from the narration, or its script) before finishing.');
   if (isWhiteboardDirectorTask(task) && document) {

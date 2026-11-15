@@ -29,6 +29,10 @@ export interface ChatTask {
    *  a script, a voice-over): once it has cut something, it ends with finish_edit's review like a
    *  whole-video edit, without a rough cut. */
   compose?: boolean;
+  /** A request that asked in words for creative work across the whole video (graphics, B-roll,
+   *  sound, zoom): it plans before it edits and ends with finish_edit's review, like a one-click
+   *  edit that switched that work on, without the rough cut. `skills` holds what was asked for. */
+  planned?: boolean;
   /** The passed review already carried its advisory notes; later reviews do not repeat them. */
   reviewNoted?: boolean;
   state: 'running' | 'paused' | 'partial' | 'done';

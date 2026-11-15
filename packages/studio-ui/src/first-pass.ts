@@ -137,9 +137,11 @@ export interface RoughCutExecution {
  *  before its steps were through, and the clips each fine-cut skill had when it ended. */
 export interface FirstPassOutcome { report: FirstPassReport; note: string; stopped: boolean; baseline: Record<FineCutSkill, string[]> }
 let runner: ((...args:Parameters<typeof runFirstPass>)=>Promise<FirstPassOutcome>) | undefined;
-let startupHint='';
-export function setFirstPassRunner(value: typeof runner, hint='') { runner=value;startupHint=hint; }
-export const firstPassStartupHint=()=>startupHint;
+let startupHint: (creative: boolean) => string = () => '';
+export function setFirstPassRunner(value: typeof runner, hint: string | ((creative: boolean) => string) = '') { runner = value; startupHint = typeof hint === 'string' ? () => hint : hint; }
+/** The note a one-click edit's first message carries. `creative`: the edit switched on work that is
+ *  planned (graphics, B-roll, sound, zoom); without it the rough cut is the whole edit. */
+export const firstPassStartupHint = (creative = true) => startupHint(creative);
 export async function runFirstPass(host: FirstPassHost, onUpdate: (report: FirstPassReport) => void, options: { steps?: readonly FirstPassStepId[]; pauses?: 'tight' | 'moderate' | 'natural'; signal?: AbortSignal; onLateUsage?: (usage: WorkflowUsage) => void; resume?: FirstPassReport } = {}): Promise<FirstPassOutcome>{
  if(!runner)throw new Error('This host has not configured an automatic editing workflow.');
  return runner(host,onUpdate,options);

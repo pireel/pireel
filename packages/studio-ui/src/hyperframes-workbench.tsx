@@ -1,6 +1,6 @@
 "use client";
 import { editorRequest } from '@pireel/studio-ui/host-request';
-import { brandEditingSkills, brandGraphicsStyle } from '@pireel/studio-engine/project-brand-metadata';
+import { brandGraphicsStyle, brandStartingSkills } from '@pireel/studio-engine/project-brand-metadata';
 import { resolveEditingRunConfig } from '@pireel/studio-engine/editing-run-config';
 import { loadCoverBrandReferences } from '@pireel/studio-ui/cover-brand-references';
 import { pickImageModel } from '@pireel/studio-engine/image-generation-settings';
@@ -8551,7 +8551,7 @@ export function HyperframesWorkbench({
     const semantics = committer.document.semantics;
     const ops: DocumentOp[] = [];
     if (semantics.brand === undefined) ops.push({ op: 'command', input: { command: { type: 'brand.set', brand: null } } });
-    if (semantics.editingSkills === undefined && semantics.brand) ops.push({ op: 'command', input: { command: { type: 'editingSkills.set', ids: brandEditingSkills(semantics.brand) } } });
+    if (semantics.editingSkills === undefined && semantics.brand) ops.push({ op: 'command', input: { command: { type: 'editingSkills.set', ids: brandStartingSkills(semantics.brand) } } });
     if (ops.length) commit(ops, { origin: 'system', undo: 'none' });
   }, [bootDataReady, projectId, displaced, comp.brand, comp.editingSkills]);
   /** The brand picked in the chat: later edits follow it. Before the first edit the editing switches also

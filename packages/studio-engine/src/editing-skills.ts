@@ -33,6 +33,14 @@ export const BRAND_EDITING_SKILL_IDS: readonly EditingSkillId[] = ['cover', 'gra
 
 export const EDITING_SKILL_IDS: readonly EditingSkillId[] = EDITING_SKILLS.map((skill) => skill.id);
 
+/** Skills that put pictures in the video the creator did not shoot: designed motion graphics, and
+ *  footage that is searched or generated. A brand says how they look, never that an edit gets them:
+ *  every edit starts with them off, and the creator switches them on for that edit. */
+export const OPT_IN_EDITING_SKILL_IDS: readonly EditingSkillId[] = ['graphics', 'b-roll'];
+
+export const withoutOptInSkills = (ids: readonly string[]): string[] =>
+  ids.filter((id) => !(OPT_IN_EDITING_SKILL_IDS as readonly string[]).includes(id));
+
 export const isEditingSkillId = (value: unknown): value is EditingSkillId =>
   typeof value === 'string' && (EDITING_SKILL_IDS as readonly string[]).includes(value);
 

@@ -1,4 +1,4 @@
-import { brandEditingSkills, brandPreferences, type PlaybookSnapshot } from '@pireel/studio-engine/project-brand-metadata';
+import { brandPreferences, brandStartingSkills, type PlaybookSnapshot } from '@pireel/studio-engine/project-brand-metadata';
 import { EDITING_SKILL_IDS } from '@pireel/studio-engine/editing-skills';
 export const HOME_VIDEO_EDITING_SKILL = 'talking-head-edit';
 
@@ -20,7 +20,8 @@ function withoutRetiredSwitches(brand: PlaybookSnapshot): PlaybookSnapshot {
 
 export function resolveEditingRunConfig(input: { brand?: PlaybookSnapshot | null; skills?: readonly string[]; pauses?: EditingRunConfig['pauses'] }): EditingRunConfig {
   const brand = input.brand ? withoutRetiredSwitches(structuredClone(input.brand)) : null;
-  const skills = EDITING_SKILL_IDS.filter(id => (input.skills ?? (brand ? brandEditingSkills(brand) : ['rough-cut', 'captions'])).includes(id));
+  // Not chosen yet: the brand's own, less motion graphics and B-roll (the creator switches those on).
+  const skills = EDITING_SKILL_IDS.filter(id => (input.skills ?? (brand ? brandStartingSkills(brand) : ['rough-cut', 'captions'])).includes(id));
   const on = new Set(skills);
   const pauses = input.pauses ?? brand?.blocks.sound?.pauses ?? 'moderate';
   const visual = brand ? brandPreferences(brand) : { headlines: false, zoom: false };

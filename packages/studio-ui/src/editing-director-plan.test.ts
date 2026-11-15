@@ -5,7 +5,7 @@ import { compositionToEditorDocument, emptyComposition } from '@pireel/studio-en
 import type { PlaybookSnapshot } from '@pireel/studio-engine/project-brand-metadata';
 import { resolveEditingRunConfig } from '@pireel/studio-engine/editing-run-config';
 import { firstNarrativeAssetId } from '@pireel/studio-engine/editor-document/read-model';
-import { directorBeatWindows, directorPlanForModel, directorPlanToolBlock, saveEditingDirectorPlan, reviewDirectorPlan, withDirectorInstruction } from '@pireel/studio-ui/editing-director-plan';
+import { beginEditingPlan, directorBeatWindows, directorPlanForModel, directorPlanToolBlock, saveEditingDirectorPlan, reviewDirectorPlan, withDirectorInstruction } from '@pireel/studio-ui/editing-director-plan';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { EditingTaskCard } from '@pireel/studio-ui/editing-task-card';
@@ -105,6 +105,10 @@ describe('brand-informed director plan', () => {
     if (!saved.ok) throw new Error(saved.error);
     expect(saved.plan.beats[0]!.coveredAtSave).toBeDefined();
     expect(directorPlanForModel(saved.plan).beats[0]).not.toHaveProperty('coveredAtSave');
+    // With the document, the model is told where the passage plays now, in timeline frames.
+    const placed = directorPlanForModel(saved.plan, document).beats[0] as { frames?: number[][] };
+    expect(placed.frames?.length).toBeGreaterThan(0);
+    expect(placed.frames!.every(([start, end]) => Number.isInteger(start) && Number.isInteger(end) && end! > start!)).toBe(true);
   });
   it('plans a passage the rough cut removed and counts its restoration as applied', () => {
     const { task, document, input } = fixture();
@@ -183,5 +187,44 @@ describe('whole-whiteboard directing without destructive cleanup', () => {
     const shortened=structuredClone(applied.document!);const primary=shortened.timeline.tracks.find(t=>t.id===shortened.semantics.primaryNarrativeTrackId)!;primary.clips[0].durationFrames=270;if('sourceOutSec' in primary.clips[0])primary.clips[0].sourceOutSec=9;
     expect(reviewEditingTask(saved,{...review,features:[]},evidence,shortened).ok).toBe(false);
     expect(saveEditingDirectorPlan(whiteboard,{...input,beats:[{...input.beats[0],quote:'不存在的口播文字'}]},document).ok).toBe(false);
+  });
+});
+
+describe('a plan asked for in words', () => {
+  const asked = (): ChatTask => ({ id: 'ask', mode: 'request', state: 'running', goal: '给整条视频配上画面', skills: [], config: resolveEditingRunConfig({ skills: ['rough-cut', 'captions'] }) });
+  it('turns the request into a planned task with exactly what was named', () => {
+    const begun = beginEditingPlan(asked(), { begin: true, features: ['b-roll', 'captions', 'b-roll'] });
+    expect(begun).toMatchObject({ ok: true, features: ['b-roll'], patch: { planned: true, directorPlanRequired: true, reviewRequired: true, skills: ['b-roll'] } });
+    expect(beginEditingPlan(asked(), { begin: true }).ok).toBe(false);
+    expect(beginEditingPlan(asked(), { begin: true, features: ['captions'] }).ok).toBe(false);
+  });
+  it('leaves an edit that already plans as it is, and refuses one that cannot plan', () => {
+    const { task } = fixture();
+    expect(beginEditingPlan({ ...task, skills: ['graphics'] }, { begin: true, features: ['sound'] })).toEqual({ ok: true, features: ['graphics'], patch: {} });
+    // A one-click edit started with cleanup only stays unplanned; so does a video built from media.
+    expect(beginEditingPlan({ ...task, directorPlanRequired: false }, { begin: true, features: ['b-roll'] }).ok).toBe(false);
+    expect(beginEditingPlan({ ...asked(), compose: true }, { begin: true, features: ['b-roll'] }).ok).toBe(false);
+  });
+  it('saves its plan without a rough cut, gates editing until then, and is reviewed on what it named', () => {
+    const { input, document } = fixture();
+    const before = asked();
+    // Not begun: an ordinary request neither plans nor is held back.
+    expect(saveEditingDirectorPlan(before, { ...input, brandTreatment: undefined }, document).ok).toBe(false);
+    expect(directorPlanToolBlock(before, 'add_clips', true)).toBeUndefined();
+    expect(reviewEditingTask(before, { features: [] }, { clips: {} } as never, document).ok).toBe(false);
+
+    const begun = beginEditingPlan(before, { begin: true, features: ['b-roll'] });
+    if (!begun.ok) throw new Error(begun.error);
+    const task = { ...before, ...begun.patch };
+    expect(directorPlanToolBlock(task, 'add_clips', true)).toContain('This request is planned');
+    expect(directorPlanToolBlock(task, 'get_transcript', false)).toBeUndefined();
+    const saved = saveEditingDirectorPlan(task, { ...input, brandTreatment: undefined }, document);
+    expect(saved.ok).toBe(true);
+    if (!saved.ok) return;
+    expect(directorPlanToolBlock({ ...task, directorPlan: saved.plan }, 'add_clips', true)).toBeUndefined();
+    // The review asks about B-roll (named), not about what the project or a brand would switch on.
+    const review = reviewEditingTask({ ...task, directorPlan: saved.plan }, { features: [] }, { clips: {} } as never, document);
+    expect(review.ok).toBe(false);
+    if (!review.ok) expect(review.missing).toEqual(['b-roll']);
   });
 });

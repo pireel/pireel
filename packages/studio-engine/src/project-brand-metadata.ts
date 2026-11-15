@@ -4,7 +4,7 @@
  * analysis, validation, prompts and execution live in the hosted product.
  */
 import type { CaptionStyle } from './composition-core';
-import { BRAND_EDITING_SKILL_IDS } from './editing-skills';
+import { BRAND_EDITING_SKILL_IDS, withoutOptInSkills } from './editing-skills';
 export const PLAYBOOK_SCHEMA = 3;
 export const BRAND_PREFERENCE_IDS = ['cover','pauses','cleanup','denoise','broll','graphics','sound','zoom','headlines','logo','intro','outro','music','loudness'] as const;
 export const BRAND_PROMPT_FEATURES = ['cover','headlines','broll','graphics','sound','zoom'] as const;
@@ -133,6 +133,10 @@ export function brandEditingSkills(brand: BrandSettings): string[] {
     ...(p.broll ? ['b-roll'] : []), ...(p.sound ? ['sound'] : []),
   ];
 }
+
+/** The skills an edit with this brand starts with: the brand's, without the ones only the creator
+ *  switches on (motion graphics, B-roll). */
+export const brandStartingSkills = (brand: BrandSettings): string[] => withoutOptInSkills(brandEditingSkills(brand));
 
 type ConfiguredBrand = Pick<BrandPlaybook, 'blocks' | 'preferences' | 'skills' | 'media' | 'settings'>;
 

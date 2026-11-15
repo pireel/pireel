@@ -34,3 +34,21 @@ it('leaves transition decisions to the main prompt regardless of legacy brand sw
     expect(config.brand?.preferences).not.toHaveProperty('transitions');
   }
 });
+
+describe('what an edit starts with', () => {
+  const styled = () => {
+    const brand = emptySnapshot('b', 'Brand');
+    brand.blocks.captions = { on: true };
+    brand.skills = ['graphics', 'rough-cut', 'b-roll', 'sound'];
+    return brand;
+  };
+  it('leaves motion graphics and B-roll off until the creator switches them on, whatever the brand uses', () => {
+    expect(resolveEditingRunConfig({ brand: styled() }).skills).toEqual(['captions', 'rough-cut', 'sound']);
+    // No creative work asked for by the brand alone: the brand keeps its own settings.
+    expect(resolveEditingRunConfig({ brand: styled() }).brand?.skills).toEqual(['graphics', 'rough-cut', 'b-roll', 'sound']);
+  });
+  it('keeps them once they are switched on', () => {
+    expect(resolveEditingRunConfig({ brand: styled(), skills: ['rough-cut', 'graphics', 'b-roll'] }).skills).toEqual(['graphics', 'rough-cut', 'b-roll']);
+    expect(resolveEditingRunConfig({ skills: ['b-roll'] }).skills).toEqual(['b-roll']);
+  });
+});

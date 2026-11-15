@@ -4,7 +4,7 @@ import { alreadyStarted, firstEditMessage, firstMessageEditsFootage, footageToEd
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@pireel/ui/tooltip';
 import { EditingSkillSwitches } from '@pireel/studio-ui/editing-skills';
 
-import { directorPlanForModel, directorPlanToolBlock, saveEditingDirectorPlan, withDirectorInstruction } from '@pireel/studio-ui/editing-director-plan';
+import { directorPlanForModel, directorPlanToolBlock, beginEditingPlan, saveEditingDirectorPlan, withDirectorInstruction } from '@pireel/studio-ui/editing-director-plan';
 import { DEFAULT_STUDIO_AGENT_MODEL, studioAgentModelId, type StudioAgentModelId } from '@pireel/studio-engine/agent-models';
 
 import { editingSkillsHint } from '@pireel/studio-engine/editing-skills';
@@ -287,7 +287,8 @@ export function ChatThread({
           ...(skillRef.current !== STUDIO_AUTO_SKILL_ID
             ? { skillId: skillRef.current }
             : {}),
-          ...(projectBrandRef.current !== undefined ? { brand: projectBrandRef.current } : {}),
+          // With a brand, the switches go along: they say whether its motion graphics and B-roll are on.
+          ...(projectBrandRef.current !== undefined ? { brand: projectBrandRef.current, ...(projectBrandRef.current ? { editingSkills: resolveEditingRunConfig({ brand: projectBrandRef.current, skills: editingSkillsRef.current }).skills } : {}) } : {}),
         }),
         prepareSendMessagesRequest: ({
           body,
@@ -404,10 +405,18 @@ export function ChatThread({
       if (id === 'save_edit_plan') {
         const document = getDocument?.();
         if (!task || !document) { publishSuccess({ ok: false, error: 'No active editing task or timeline.' }); return; }
+        // The creator asked in words for creative work across the video: the request becomes a planned task.
+        if (requestedInput.begin === true) {
+          const begun = beginEditingPlan(task, requestedInput);
+          if (!begun.ok) { publishSuccess(begun); return; }
+          updateTask(task.id, current => ({ ...current, ...begun.patch }));
+          publishSuccess({ ok: true, summary: 'Planning started', data: { planning: true, features: begun.features, next: 'Plan before changing the video: read the transcript, inspect the relevant footage and the project brand, then call save_edit_plan with the direction and beats. No approval stop.' } });
+          return;
+        }
         const result = saveEditingDirectorPlan(task, requestedInput, document);
         if (!result.ok) { publishSuccess(result); return; }
         updateTask(task.id, current => ({ ...current, directorPlan: result.plan, review: undefined }));
-        publishSuccess({ ok: true, summary: 'Editing direction saved', data: { plan: directorPlanForModel(result.plan), next: 'Execute this plan now. Resolve source anchors against the current timeline after structural cuts; no approval stop.' } });
+        publishSuccess({ ok: true, summary: 'Editing direction saved', data: { plan: directorPlanForModel(result.plan, document), next: 'Execute this plan now. Each beat\'s frames say where its passage plays on the timeline as it is now: place that beat\'s work inside them. After a structural cut, restore or move they are stale: resolve the passage against the current timeline again. No approval stop.' } });
         return;
       }
       // A tool refused this often in one turn is not run again: the model reports the blocker instead.
@@ -425,9 +434,12 @@ export function ChatThread({
           return;
         }
         if ((task.directorPlanRequired || task.compose) && !hasCurrentDirectorPreview(messagesForTask(effectiveStudioTurnMessages(messagesRef.current, ledger), task.id))) {
-          publishSuccess({ ok: false, error: task.directorPlanRequired
+          const look = task.directorPlanRequired
             ? 'Inspect meaningful rendered timeline frames after the final edit, then assess the result against the saved director plan before finishing.'
-            : 'Inspect meaningful rendered timeline frames (inspect_timeline) after the final edit, fix what looks wrong, then finish.' }); return;
+            : 'Inspect meaningful rendered timeline frames (inspect_timeline) after the final edit, fix what looks wrong, then finish.';
+          // What the review would refuse anyway is named in the same answer: fix it first, then look once.
+          const pending = reviewEditingTask(task, requestedInput, fineCutClips(), getDocument?.());
+          publishSuccess(pending.ok ? { ok: false, error: look } : { ok: false, error: `${pending.error}\nAfter fixing this: ${look}`, data: { problems: pending.problems, ...(pending.missing ? { missing: pending.missing } : {}) } }); return;
         }
         // The enabled cover is the harness's step, not something the model must remember.
         if (coverStillToRun(task, getDocument?.(), requestedInput)) {
@@ -726,8 +738,6 @@ export function ChatThread({
         startTool?: string;
         /** Explicit initial whiteboard generation; local follow-up edits do not opt in. */
         wholeWhiteboard?: boolean;
-        /** A note for the agent ahead of the message (one-click edit context). */
-        hint?: string;
         resume?: ChatTask;
       } = {},
     ): Promise<boolean> => {
@@ -801,7 +811,8 @@ export function ChatThread({
       };
       const startTool = continuing?.mode === 'one-click' && (!continuing.roughCut || unfinishedRoughCut(continuing)) ? ROUGH_CUT_TOOL : options.startTool;
       const mentionHint = [
-        continuing ? resumeTaskHint(task) : options.hint ?? "",
+        // A one-click edit is told what it is: planned creative work, or the rough cut alone.
+        continuing ? resumeTaskHint(task) : options.startTool === ROUGH_CUT_TOOL ? firstPassStartupHint(!!task.directorPlanRequired) : "",
         compose ? COMPOSE_TASK_HINT : "",
         mentionedIds.length ? `Referenced elements in this message (use these ids directly): ${JSON.stringify(mentionedIds)}` : "",
         localAssetContext,
@@ -893,7 +904,7 @@ export function ChatThread({
     // With nothing switched on (no brand) the message is the creator's own request, not a one-click edit.
     const roughCut = startWithRoughCut(skillRef.current) && resolveEditingRunConfig({ brand: projectBrandRef.current, skills: editingSkillsRef.current }).skills.length > 0;
     if (alreadyStarted(messagesRef.current, startPrompt, roughCut)) { onStartPromptSent?.(); return; }
-    void run(startPrompt, roughCut ? { startTool: ROUGH_CUT_TOOL, hint: firstPassStartupHint() } : { wholeWhiteboard: skillRef.current === 'whiteboard-explainer' }).then(sent => {
+    void run(startPrompt, roughCut ? { startTool: ROUGH_CUT_TOOL } : { wholeWhiteboard: skillRef.current === 'whiteboard-explainer' }).then(sent => {
       if (sent) onStartPromptSent?.(); else startSentRef.current = false;
     });
   }, [startPrompt, status, run, onStartPromptSent]);
@@ -1082,10 +1093,10 @@ export function ChatThread({
   const startBlocked = !footageToEdit(getDocument?.()) ? t('chatGen.importVideoFirst') : !shownEditingSkills.length ? t('chatGen.turnOnASkill') : '';
   const submit = useCallback((draft: string | StudioChatDraftPart[]) => {
     if (!firstMessageEditsFootage(getDocument?.(), messagesRef.current, skillRef.current, shownEditingSkills)) return run(draft);
-    return run(firstEditMessage(typeof draft === 'string' ? [{ type: 'text', text: draft }] : draft), { startTool: ROUGH_CUT_TOOL, hint: firstPassStartupHint() });
+    return run(firstEditMessage(typeof draft === 'string' ? [{ type: 'text', text: draft }] : draft), { startTool: ROUGH_CUT_TOOL });
   }, [run, getDocument, shownEditingSkills]);
   // One-click edit takes the path a video handed over from the Studio home takes, whatever the box holds.
-  const startEdit = useCallback(() => run(firstEditMessage([]), { startTool: ROUGH_CUT_TOOL, hint: firstPassStartupHint() }), [run]);
+  const startEdit = useCallback(() => run(firstEditMessage([]), { startTool: ROUGH_CUT_TOOL }), [run]);
 
   return (
     <>

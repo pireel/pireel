@@ -63,8 +63,25 @@ export function directorBeatWindows(beat: EditingDirectorPlan['beats'][number], 
   });
 }
 
+/** The creative work a request can ask for across the whole video. */
+export const PLANNED_REQUEST_FEATURES = ['graphics', 'b-roll', 'sound', 'zoom'] as const;
+
+/** What starts a plan: a switch that is on (a one-click edit) or the creator asking in words. This is
+ *  the second: the agent names what was asked for across the video, and the request becomes a planned
+ *  task. Returns what to merge into the task; nothing when it already plans. */
+export function beginEditingPlan(task: ChatTask, input: Record<string, unknown>): { ok: true; features: string[]; patch: Partial<ChatTask> } | { ok: false; error: string } {
+  if (task.directorPlanRequired) return { ok: true, features: PLANNED_REQUEST_FEATURES.filter(id => task.skills.includes(id)), patch: {} };
+  if (task.mode !== 'request' || task.compose) return { ok: false, error: task.compose
+    ? 'A video built from the project media needs no plan: build it, then finish_edit reviews it.'
+    : 'This edit was started with cleanup only, so nothing is planned in it. Finish it; creative work is asked for in a new message.' };
+  const asked = Array.isArray(input.features) ? input.features : [];
+  const features = PLANNED_REQUEST_FEATURES.filter(id => asked.includes(id));
+  if (!features.length) return { ok: false, error: `Name what the creator asked for across the video in features: one or more of ${PLANNED_REQUEST_FEATURES.join(', ')}.` };
+  return { ok: true, features, patch: { planned: true, directorPlanRequired: true, reviewRequired: true, skills: [...new Set([...task.skills, ...features])] } };
+}
+
 export function saveEditingDirectorPlan(task: ChatTask, input: Record<string, unknown>, document: EditorDocumentV2): { ok: true; plan: EditingDirectorPlan } | { ok: false; error: string } {
-  if (!isWhiteboardDirectorTask(task) && (task.mode !== 'one-click' || !task.roughCut || unfinishedRoughCut(task))) return { ok: false, error: 'Complete the fixed rough_cut before saving the director plan.' };
+  if (!isWhiteboardDirectorTask(task) && !task.planned && (task.mode !== 'one-click' || !task.roughCut || unfinishedRoughCut(task))) return { ok: false, error: 'Complete the fixed rough_cut before saving the director plan.' };
   if (!prose(input.direction)) return { ok: false, error: 'Give a concrete whole-video direction: opening, progression, rhythm and ending, in the creator’s language.' };
   if (task.config?.brand && !prose(input.brandTreatment, 12)) return { ok: false, error: 'Explain how this project’s brand changes the story rhythm, visual language and sound choices before planning beats.' };
   if (!Array.isArray(input.beats) || !input.beats.length || input.beats.length > 80) return { ok: false, error: 'Plan the meaningful passages with 1–80 source-anchored beats; there is no fixed visual quota.' };
@@ -98,8 +115,13 @@ export function saveEditingDirectorPlan(task: ChatTask, input: Record<string, un
 }
 
 /** The saved plan as the model reads it back: what it decided, without the harness's bookkeeping. */
-export function directorPlanForModel(plan: EditingDirectorPlan): EditingDirectorPlan {
-  return { ...plan, beats: plan.beats.map(({ coveredAtSave: _coveredAtSave, ...beat }) => beat) };
+/** The plan as the model reads it. With the document, each beat also says where its passage plays on
+ *  the timeline now (`frames`, one range per piece of it still in the video), so a picture or graphic
+ *  for the beat is placed there instead of being worked out from source seconds. */
+export function directorPlanForModel(plan: EditingDirectorPlan, document?: EditorDocumentV2): EditingDirectorPlan {
+  return { ...plan, beats: plan.beats.map(({ coveredAtSave: _coveredAtSave, ...beat }) => document
+    ? { ...beat, frames: directorBeatWindows(beat, document).map(window => [Math.round(window.startFrame), Math.round(window.endFrame)]) }
+    : beat) };
 }
 
 /** Completed claims reference real clips at that passage, not just a global MG count. */
@@ -186,6 +208,7 @@ export function directorPlanToolBlock(task: ChatTask | undefined, id: string, mu
   if (isWhiteboardDirectorTask(task)) return whiteboardToolBlock(task, id, mutates, input);
   if (id === 'set_whiteboard' && input?.describe === true) return;
   if (!task?.directorPlanRequired || task.directorPlan || id === 'rough_cut' || id === 'save_edit_plan' || (!mutates && id !== 'compose_component')) return;
+  if (task.planned) return 'This request is planned: read the transcript, inspect the footage and project brand, then call save_edit_plan before changing the video. Continue automatically after saving; no plan approval is needed.';
   return 'Before fine-cut execution, finish rough_cut, read the retained transcript, inspect the footage and project brand, then call save_edit_plan. Continue automatically after saving; no plan approval is needed.';
 }
 
