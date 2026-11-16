@@ -21,7 +21,7 @@ import {
 import {
   prepareEditorDocumentForPersistence,
 } from '@pireel/studio-engine/project-document';
-import { canonicalJson, hashSection } from '@pireel/studio-engine/stable-json';
+import { canonicalEqual, canonicalHash, canonicalJson, hashSection } from '@pireel/studio-engine/stable-json';
 export {
   sanitizeProjectContext,
   STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION,
@@ -29,7 +29,7 @@ export {
   type StudioProjectContext,
 } from '@pireel/studio-engine/project-context';
 
-export { canonicalJson, hashSection } from '@pireel/studio-engine/stable-json';
+export { canonicalEqual, canonicalHash, canonicalJson, hashSection } from '@pireel/studio-engine/stable-json';
 
 /** Transcript sentence (source seconds; same shape as the client AsrSegment, declared independently here to avoid a lib→features reverse dependency). */
 export interface TranscriptSegment {
@@ -320,7 +320,7 @@ export function buildSaveWire(
   const hashes: SectionHashes = {
     context: contextCanon != null
       ? hashSection(contextCanon)
-      : (acked?.hashes.context ?? hashSection(canonicalJson(sanitizeProjectContext(null)))),
+      : (acked?.hashes.context ?? canonicalHash(sanitizeProjectContext(null))),
     // Absent cover = preserve (same contract as title): covers now travel as bytes through
     // ProjectStore.saveCover, so a payload without the field must not read as "cover cleared"
     // nor emit a fake no-op section against a server row that holds a cover key.
@@ -451,7 +451,7 @@ function applySectionPatch(base: unknown, ops: Operation[], verifyHash?: string)
     const doc = base && typeof base === 'object' ? base : {};
     // mutateDocument=false: don't touch the object read from the DB; banPrototypeModifications blocks __proto__ by default
     const result = applyPatch(doc as object, ops, true, false).newDocument as unknown;
-    if (verifyHash && hashSection(canonicalJson(result)) !== verifyHash) return null;
+    if (verifyHash && canonicalHash(result) !== verifyHash) return null;
     return result;
   } catch {
     return null;
@@ -491,7 +491,7 @@ export function mergeSaveIntoRow(
     const patched = applySectionPatch(context, p.contextPatch);
     if (patched === null) return null;
     const prepared = sanitizeProjectContext(patched);
-    if (hashSection(canonicalJson(prepared)) !== p.contextHash) return null;
+    if (canonicalHash(prepared) !== p.contextHash) return null;
     context = prepared;
   }
 
@@ -567,6 +567,6 @@ export function applyProjectSave(
     rejected: replay.rejected.map(({ id, error }) => ({ id, error })),
     // By content, not identity: a relay that rebuilt an identical document must not push a history entry.
     documentChanged: (replay.changed || merged.document !== replay.document)
-      && canonicalJson(merged.document) !== canonicalJson(existing.document),
+      && !canonicalEqual(merged.document, existing.document),
   };
 }

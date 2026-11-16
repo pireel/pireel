@@ -1,11 +1,11 @@
 import type { AsrSegment } from '../build-blocks';
 import type { EditorDocumentV2, NarrativeTimelineClip } from './types';
 import { firstNarrativeAssetId } from './read-model';
-import { canonicalJson } from '../stable-json';
+import { canonicalEqual } from '../stable-json';
 
 /** By content: a stored copy comes back from jsonb with reordered keys and must not read as a change. */
 function sameTranscript(left: readonly AsrSegment[] | undefined, right: readonly AsrSegment[]): boolean {
-  return left === right || canonicalJson(left ?? []) === canonicalJson(right);
+  return left === right || canonicalEqual(left ?? [], right);
 }
 
 /** Reuse translation and selected-word styling when the spoken sentence is unchanged. Cue copy

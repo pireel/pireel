@@ -2,6 +2,7 @@
 
 import type { AsrSegment } from './build-blocks';
 import { applyCaptionTextEdits, removeCaptionCues } from './caption-text-edit';
+import { canonicalEqual } from './stable-json';
 import {
   clearManagedCaptionLayout,
   lockManagedCaptionLayout,
@@ -120,7 +121,9 @@ export type CaptionDocumentEditResult =
  * document without changing its content must therefore hand back the caller's own object. */
 function settleUnchanged(input: EditorDocumentV2, output: EditorDocumentV2): EditorDocumentV2 {
   if (output === input) return output;
-  return JSON.stringify(output) === JSON.stringify(input) ? input : output;
+  // Read part by part, skipping what the two share: writing both documents out to compare them
+  // was the cost of every caption relay.
+  return canonicalEqual(output, input) ? input : output;
 }
 
 function uniqueTrackId(document: EditorDocumentV2): string {

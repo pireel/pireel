@@ -171,7 +171,7 @@ import {
   displayTextPreset,
   titleBlock,
 } from "@pireel/studio-engine/composition";
-import { canonicalJson } from '@pireel/studio-engine/stable-json';
+import { canonicalEqual } from '@pireel/studio-engine/stable-json';
 import { runtimeTranscriptsFollowingDocument } from '@pireel/studio-ui/runtime-transcripts';
 import { transcriptInputsFor, type DocumentOp } from '@pireel/studio-engine/document-transaction';
 import { applyEditorDocumentPersistenceMetadata } from '@pireel/studio-engine/project-document';
@@ -8491,7 +8491,7 @@ export function HyperframesWorkbench({
     const metadata = livePersistenceMetadataRef.current;
     const current = editorDocumentRef.current;
     const folded = applyEditorDocumentPersistenceMetadata({ projectId, document: current, ...metadata });
-    if (canonicalJson(folded) === canonicalJson(current)) return;
+    if (canonicalEqual(folded, current)) return;
     commit({ op: "document.foldMetadata", input: metadata }, { origin: "system", undo: "none" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bootDataReady, projectId, editorDocument, cloudMediaRev, localAssetIndexRev, videoFile]);

@@ -39,10 +39,35 @@ export function transcriptTimelineTime(clip: SpeechTimelineClip, time: number, f
 export function transcriptTokens(document: EditorDocumentV2): TranscriptToken[] {
   const fps = document.canvas.fps;
   const trackByClip = new Map(document.timeline.tracks.flatMap((track) => track.clips.map((clip) => [clip.id, track.id] as const)));
+  // Each segment's words and the stretch of source their midpoints cover, read once per source. A
+  // clip shows a word whose midpoint it plays, so it skips every segment outside its own range:
+  // going through all of them for each clip was clips × segments of maps and lists (a recording
+  // cut into 413 clips built 130,000 of each on every edit).
+  const readSegments = new Map<string, Array<{ words: NonNullable<AsrSegment['words']>; firstMid: number; lastMid: number }>>();
+  const segmentsOf = (assetId: string) => {
+    let read = readSegments.get(assetId);
+    if (!read) {
+      read = (document.semantics.transcripts[assetId] as AsrSegment[] ?? []).map((segment) => {
+        const words = segment.words?.length ? segment.words : wordsFromText(segment.text, segment.start, segment.end);
+        let firstMid = Infinity;
+        let lastMid = -Infinity;
+        for (const word of words) {
+          const mid = (word.start + word.end) / 2;
+          if (mid < firstMid) firstMid = mid;
+          if (mid > lastMid) lastMid = mid;
+        }
+        return { words, firstMid, lastMid };
+      });
+      readSegments.set(assetId, read);
+    }
+    return read;
+  };
   return selectedSpeechClips(document).flatMap((clip) => {
     const [from, to] = transcriptSourceRange(clip, fps);
+    const read = segmentsOf(clip.assetId);
     return (document.semantics.transcripts[clip.assetId] as AsrSegment[] ?? []).flatMap((segment, si) => {
-      const words = segment.words?.length ? segment.words : wordsFromText(segment.text, segment.start, segment.end);
+      const { words, firstMid, lastMid } = read[si]!;
+      if (!(lastMid >= from && firstMid < to)) return [];
       const visible = (index: number) => {
         const word = words[index]!;
         const mid = (word.start + word.end) / 2;

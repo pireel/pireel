@@ -121,6 +121,15 @@ describe('mono at another rate for sound that is heard', () => {
     expect(resampler.flush()).toHaveLength(0);
   });
 
+  it('hands out its own samples: the reader writes the next piece into the array it was given', () => {
+    const resampler = monoResampler(48_000, 48_000);
+    const piece = Float32Array.of(0.2, 0.4);
+    const kept = resampler.push([piece]);
+    piece.set([0.9, -0.9]); // the next piece of the track arrives in the same array
+    expect([...kept]).toEqual([Float32Array.of(0.2)[0], Float32Array.of(0.4)[0]]);
+    expect([...resampler.push([piece])]).toEqual([Float32Array.of(0.9)[0], Float32Array.of(-0.9)[0]]);
+  });
+
   it('keeps a tone in time and at its level from 44.1 kHz to 48 kHz', () => {
     const out = through([sine(44_100, 2, 1000)], 44_100, 48_000);
     expect(Math.abs(out.length - 96_000)).toBeLessThanOrEqual(1);

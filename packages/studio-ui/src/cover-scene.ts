@@ -1,7 +1,7 @@
 import { normalizeImageSettings, imageGenerationParams } from '@pireel/studio-engine/image-generation-settings';
 import type { EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import { primaryNarrativeClips } from '@pireel/studio-engine/composition';
-import { canonicalJson, hashSection } from '@pireel/studio-engine/stable-json';
+import { canonicalHash } from '@pireel/studio-engine/stable-json';
 import { activeBrandCover, brandCoverReferenceKeys } from '@pireel/studio-engine/project-brand-metadata';
 import { retainedCoverFrame, coverFrameIdentity, type CoverSourceFrame } from '@pireel/studio-ui/cover-frame-selection';
 import { projectCoverFromDocument, type ProjectCover } from '@pireel/studio-ui/project-cover';
@@ -95,7 +95,7 @@ export function coverSceneInput(document: EditorDocumentV2) {
     for (const range of ranges) { if (offset < range.end - range.start) return range.start + offset; offset -= range.end - range.start; }
     return Math.max(0, (ranges.at(-1)?.end ?? 0) - 0.05);
   });
-  return { fingerprint: hashSection(canonicalJson({ lines, ranges, assetId, cover: document.semantics.brand ? activeBrandCover(document.semantics.brand) : undefined, canvas: { width: document.canvas.width, height: document.canvas.height } })), assetId, lines, times, size: videoCoverAspect(document.canvas) };
+  return { fingerprint: canonicalHash({ lines, ranges, assetId, cover: document.semantics.brand ? activeBrandCover(document.semantics.brand) : undefined, canvas: { width: document.canvas.width, height: document.canvas.height } }), assetId, lines, times, size: videoCoverAspect(document.canvas) };
 }
 
 export interface CoverSceneHost {
@@ -147,7 +147,7 @@ export class CoverSceneController {
     const document = this.host.document(); const input = coverSceneInput(document);
     const previous = coverSceneFromDocument(document);
     const context = this.host.context?.() ?? {};
-    const contextFingerprint = hashSection(canonicalJson(context));
+    const contextFingerprint = canonicalHash(context);
     if (previous && ['starting', 'generating'].includes(previous.phase)) return coverSceneSummary(previous);
     const reusable = previous?.inputFingerprint === input.fingerprint && previous.contextFingerprint === contextFingerprint && previous.promptVersion === 2 && !!previous.prompt && !!previous.sourceFrame && retainedCoverFrame(document, previous.sourceFrame);
     const keys = coverBrandKeys(document);

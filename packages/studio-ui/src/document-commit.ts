@@ -26,7 +26,7 @@ import {
   type DocumentTransaction,
   type DocumentTransactionOrigin,
 } from '@pireel/studio-engine/document-transaction';
-import { canonicalJson, hashSection } from '@pireel/studio-engine/stable-json';
+import { canonicalEqual, canonicalHash, canonicalJson } from '@pireel/studio-engine/stable-json';
 import { diffOps } from '@pireel/studio-engine/project-dto';
 import { withDeterministicIds } from '@pireel/studio-engine/deterministic-ids';
 
@@ -44,7 +44,7 @@ export function fieldCoalesce(scope: string, before: unknown, after: unknown): {
   const record = (value: unknown): Record<string, unknown> =>
     value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
   const changed = (a: Record<string, unknown>, b: Record<string, unknown>) =>
-    [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((key) => canonicalJson(a[key] ?? null) !== canonicalJson(b[key] ?? null)).sort();
+    [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((key) => !canonicalEqual(a[key] ?? null, b[key] ?? null)).sort();
   const a = record(before);
   const b = record(after);
   let keys = changed(a, b);
@@ -159,7 +159,7 @@ export class DocumentCommitter {
     // usually change nothing; identity cannot tell, and a no-op transaction would still bump the
     // server version and push a history entry.
     const unchanged = normalized === before
-      || (origin === 'system' && canonicalJson(normalized) === canonicalJson(before));
+      || (origin === 'system' && canonicalEqual(normalized, before));
     const next = unchanged ? before : normalized;
     if (unchanged && !options.runtimeComposition) return { ...last, document: before };
     if (origin === 'user' || origin === 'agent') this.deps.onBeforeMutation?.();
@@ -255,13 +255,18 @@ const PATCH_WORTH_RATIO = 0.5;
 export function restoreOp(before: EditorDocumentV2, after: EditorDocumentV2): DocumentOp {
   const replace: DocumentOp = { op: 'document.replace', input: { document: after } };
   let patch: ReturnType<typeof diffOps>;
+  let afterLength: number;
   try {
-    patch = diffOps(JSON.parse(canonicalJson(before)), JSON.parse(canonicalJson(after)));
+    // Each document is written once: the patch is made from the two texts, and the size it is
+    // weighed against is the second one's.
+    const afterJson = canonicalJson(after);
+    afterLength = afterJson.length;
+    patch = diffOps(JSON.parse(canonicalJson(before)), JSON.parse(afterJson));
   } catch {
     return replace;
   }
-  if (!patch.length || JSON.stringify(patch).length > canonicalJson(after).length * PATCH_WORTH_RATIO) return replace;
-  return { op: 'document.patch', input: { baseHash: hashSection(canonicalJson(before)), patch } };
+  if (!patch.length || JSON.stringify(patch).length > afterLength * PATCH_WORTH_RATIO) return replace;
+  return { op: 'document.patch', input: { baseHash: canonicalHash(before), patch } };
 }
 
 /** True when an operation failed only because its target is gone (safe to ignore on replay). */

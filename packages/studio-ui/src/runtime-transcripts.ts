@@ -1,7 +1,7 @@
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import type { Composition, EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import { firstNarrativeAssetId } from '@pireel/studio-engine/editor-document';
-import { canonicalJson } from '@pireel/studio-engine/stable-json';
+import { canonicalEqual } from '@pireel/studio-engine/stable-json';
 
 export interface RuntimeTranscripts {
   /** The first narrative asset's transcript, as the script panel and caption relay read it. */
@@ -51,14 +51,14 @@ export function runtimeTranscriptsFollowingDocument(
       if (!(alias in nextClips) && !seeded.has(alias)) continue;
       // The copy is usually the document's own array (it was adopted from it): no need to read an
       // hour of words twice to learn that.
-      if (nextClips[alias] === segments || canonicalJson(nextClips[alias] ?? null) === canonicalJson(segments)) continue;
+      if (nextClips[alias] === segments || canonicalEqual(nextClips[alias] ?? null, segments)) continue;
       nextClips[alias] = segments;
       clipsChanged = true;
     }
   }
   const mainId = firstNarrativeAssetId(document);
   const main = mainId ? (document.semantics.transcripts[mainId] as AsrSegment[] | undefined) : undefined;
-  const mainChanged = !!main?.length && current.main !== main && canonicalJson(current.main ?? null) !== canonicalJson(main);
+  const mainChanged = !!main?.length && current.main !== main && !canonicalEqual(current.main ?? null, main);
   if (!clipsChanged && !mainChanged) return null;
   return { main: mainChanged ? main! : current.main, clips: clipsChanged ? nextClips : current.clips };
 }

@@ -11,7 +11,7 @@ import type { EditorDocumentV2 } from '@pireel/studio-engine/editor-document';
 import { validateStudioProposalBudget } from '@pireel/studio-engine/agent-execution-budget';
 import { validateComposition } from '@pireel/studio-engine/editing-primitives';
 import { compReceiptDelta, type ReceiptDelta } from '@pireel/studio-engine/receipt-delta';
-import { canonicalJson, hashSection } from '@pireel/studio-engine/stable-json';
+import { canonicalHash } from '@pireel/studio-engine/stable-json';
 
 export type AnalysisJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 export type EditProposalStatus = 'ready' | 'applied' | 'discarded';
@@ -155,10 +155,9 @@ export function compositionRevision(
   comp: Composition,
   options: { projectVersion?: number | null; sourceFingerprint?: string | null } = {},
 ): CompositionRevision {
-  const canonical = canonicalJson(revisionPayload(comp, options.sourceFingerprint));
   return {
     projectVersion: options.projectVersion ?? null,
-    compositionHash: hashSection(canonical),
+    compositionHash: canonicalHash(revisionPayload(comp, options.sourceFingerprint)),
   };
 }
 
@@ -166,10 +165,9 @@ export function editorDocumentRevision(
   document: EditorDocumentV2,
   options: { projectVersion?: number | null; sourceFingerprint?: string | null } = {},
 ): CompositionRevision {
-  const canonical = canonicalJson(editorDocumentRevisionPayload(document, options.sourceFingerprint));
   return {
     projectVersion: options.projectVersion ?? null,
-    compositionHash: hashSection(canonical),
+    compositionHash: canonicalHash(editorDocumentRevisionPayload(document, options.sourceFingerprint)),
   };
 }
 

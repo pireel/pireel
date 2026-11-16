@@ -17,7 +17,7 @@
 import { applyPatch, type Operation as JsonPatchOperation } from 'fast-json-patch';
 import { refreshClipPipLayouts, setClipPipLayout } from '@pireel/studio-engine/pip-layout';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
-import { canonicalJson, hashSection } from '@pireel/studio-engine/stable-json';
+import { canonicalHash } from '@pireel/studio-engine/stable-json';
 import type { Block, Composition, VideoShot } from '@pireel/studio-engine/composition-core';
 import type { ProjectCloudMediaIndex } from '@pireel/studio-engine/project-dto';
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-context';
@@ -278,7 +278,7 @@ const strip = <T extends { ok: boolean; document: EditorDocumentV2 }>(result: T)
 const handlers: { [N in DocumentOpName]: Handler<N> } = {
   'document.replace': (_document, input) => ({ ok: true, document: input.document }),
   'document.patch': (document, input) => {
-    if (hashSection(canonicalJson(document)) !== input.baseHash) {
+    if (canonicalHash(document) !== input.baseHash) {
       return fail(document, 'stale-base', 'The patch was made against a document this host does not hold') as DocumentOpOutcome<'document.patch'>;
     }
     let patched: unknown;

@@ -80,7 +80,7 @@ export interface SoundShape {
   frames: number;
 }
 
-/** Takes the next piece of a soundtrack: one array per channel. */
+/** Takes the next piece of a soundtrack: one array per channel, valid for the length of the call. */
 export type SoundReceiver = (channels: Float32Array[]) => void | Promise<void>;
 
 /**
@@ -95,12 +95,19 @@ export type SoundReceiver = (channels: Float32Array[]) => void | Promise<void>;
  * piece is decoded, so a slow consumer (denoising) never has the rest of the track queued behind
  * it. The loop hands the main thread back every few milliseconds, like decodeVideoAudio. Null
  * without an audio track or without a single sample.
+ *
+ * A piece is the receiver's only until it returns (or its promise settles): the same arrays carry
+ * the next one. A receiver that keeps samples copies them.
  */
 export async function readVideoSound(
   file: Blob,
   open: (shape: SoundShape) => SoundReceiver | Promise<SoundReceiver>,
 ): Promise<SoundShape | null> {
-  const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
+  // The file is read in the slices asked for, not as one forward stream: sound is a thin thread
+  // through a recording, and a stream carries the picture between its packets along (a 580 MB
+  // recording passed through whole, a few hundred megabytes of it waiting to be collected at any
+  // moment). Measured on that recording: the same samples in the same time.
+  const input = new Input({ source: new BlobSource(file, { useStreamReader: false }), formats: ALL_FORMATS });
   try {
     const track = await input.getPrimaryAudioTrack();
     if (!track) return null;
@@ -112,26 +119,32 @@ export async function readVideoSound(
     let next = 0;
     let any = false;
     let since = performance.now();
+    // The arrays every piece is handed over in. A recording is a packet every ~20 ms: an array per
+    // channel for each (and one more to unpack it) came to two gigabytes over a 44-minute track,
+    // made faster than they were collected, so opening such a project held hundreds of megabytes of
+    // them at once.
+    let held: Float32Array[] = [];
     for await (const sample of new AudioSampleSink(track).samples()) {
       const frames = sample.numberOfFrames;
       const srcCh = sample.numberOfChannels;
-      const data = new Float32Array(frames * srcCh);
-      sample.copyTo(data, { planeIndex: 0, format: 'f32' });
       const at = Math.round(sample.timestamp * rate);
+      const skip = Math.max(0, next - at); // overlap with what was already handed over
+      const length = frames - skip;
+      if (length > 0) {
+        if ((held[0]?.length ?? 0) < length) held = Array.from({ length: chCount }, () => new Float32Array(length));
+        // Each channel straight from the packet, in the one conversion every decoder supports.
+        for (let c = 0; c < chCount; c++) {
+          sample.copyTo(held[c]!, { planeIndex: srcCh === 1 ? 0 : Math.min(c, srcCh - 1), format: 'f32-planar', frameOffset: skip, frameCount: length });
+        }
+      }
       sample.close();
       while (at > next) { // a gap, a second at a time so a long one is never one allocation
         const quiet = Math.min(rate, at - next);
         await push(Array.from({ length: chCount }, () => new Float32Array(quiet)));
         next += quiet;
       }
-      const skip = Math.max(0, next - at); // overlap with what was already handed over
-      if (skip < frames) {
-        await push(Array.from({ length: chCount }, (_, c) => {
-          const sc = srcCh === 1 ? 0 : Math.min(c, srcCh - 1);
-          const out = new Float32Array(frames - skip);
-          for (let i = 0; i < out.length; i++) out[i] = data[(i + skip) * srcCh + sc]!;
-          return out;
-        }));
+      if (length > 0) {
+        await push(held[0]!.length === length ? held : held.map((channel) => channel.subarray(0, length)));
         next = at + frames;
         any = true;
       }
@@ -182,7 +195,8 @@ export async function streamVideoLoudness(file: Blob): Promise<number | null> {
  * Mono at `toRate` from the pieces of a track at `fromRate`, piece by piece: the mean of the
  * channels, with linear interpolation between samples when the rates differ (the reading side of
  * speech detection and level, not anything that is heard). State carries across calls, so the
- * output is one continuous signal however the input was cut up.
+ * output is one continuous signal however the input was cut up. A single channel already at the
+ * rate comes back as the array that was given, so it is read before the next piece, never kept.
  */
 export function monoAtRate(fromRate: number, toRate: number): (channels: readonly Float32Array[]) => Float32Array {
   const ratio = fromRate / toRate;
@@ -237,7 +251,9 @@ export function monoResampler(fromRate: number, toRate: number): { push(channels
     for (const channel of channels) for (let i = 0; i < length; i++) mono[i]! += channel[i]! / channels.length;
     return mono;
   };
-  if (fromRate === toRate) return { push: mean, flush: () => new Float32Array(0) };
+  // What comes out is kept by whoever asked (queued for the blend, written to the file), and a
+  // single channel would otherwise go out as the reader's own array, which carries the next piece.
+  if (fromRate === toRate) return { push: (channels) => (channels.length <= 1 ? mean(channels).slice() : mean(channels)), flush: () => new Float32Array(0) };
 
   const step = fromRate / toRate; // input samples per output sample
   const cutoff = Math.min(1, toRate / fromRate);

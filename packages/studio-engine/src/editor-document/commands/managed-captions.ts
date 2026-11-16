@@ -1,5 +1,6 @@
 import { captionBlocksFromAsr, type AsrSegment, type CueRef } from '../../build-blocks';
 import { chooseWordOwner, displayCuesFromMappedSegs, mapTranscriptSegsToEdited } from '../../captions-relay';
+import { canonicalEqual } from '../../stable-json';
 import { secondsToTimelineFrames, timelineFramesToSeconds } from '../time';
 import type {
   AudioTimelineClip,
@@ -478,29 +479,46 @@ export function relayManagedCaptionTrack(
   const assetBySourceKey = new Map<string, string>();
   // A cut inside a word leaves two clips each playing a piece of it. Exactly one clip captions
   // the word: the one playing its midpoint, else the one playing most of it (see chooseWordOwner).
-  const wordOwner = new Map<string, string>();
+  // Each clip's words are set aside here, by segment, in one pass over the transcript. A clip that
+  // instead looked through every word of the recording for its own made the relay cost clips ×
+  // words: a 44-minute recording cut into 413 clips copied three million words (0.9 GB) each time.
+  type OwnedWord = NonNullable<AsrSegment['words']>[number] & { si: number };
+  const ownedWords = new Map<string, Map<number, OwnedWord[]>>();
+  /** Segments that carry no words, per asset: a clip captions the ones its source range touches. */
+  const wordlessSegments = new Map<string, number[]>();
   for (const assetId of new Set(speechClips.map((clip) => clip.assetId))) {
     const ranges = speechClips.filter((clip) => clip.assetId === assetId).map((clip) => ({ ...sourceRange(clip, document.canvas.fps), clipId: clip.id }));
-    (document.semantics.transcripts[assetId] ?? []).forEach((segment, segmentIndex) => {
-      (segment.words ?? []).forEach((word, wordIndex) => {
+    const wordless: number[] = [];
+    ((document.semantics.transcripts[assetId] ?? []) as AsrSegment[]).forEach((segment, segmentIndex) => {
+      if (!segment.words?.length) { wordless.push(segmentIndex); return; }
+      segment.words.forEach((word, wordIndex) => {
         const owner = chooseWordOwner(ranges, word);
-        if (owner) wordOwner.set(`${assetId}:${segmentIndex}:${wordIndex}`, owner.clipId);
+        if (!owner) return;
+        let bySegment = ownedWords.get(owner.clipId);
+        if (!bySegment) ownedWords.set(owner.clipId, bySegment = new Map());
+        let words = bySegment.get(segmentIndex);
+        if (!words) bySegment.set(segmentIndex, words = []);
+        words.push({ ...word, si: wordIndex });
       });
     });
+    wordlessSegments.set(assetId, wordless);
   }
   const mapped = speechClips.flatMap((clip) => {
     const assetId = clip.assetId;
-    const segments = document.semantics.transcripts[assetId] ?? [];
+    const segments = (document.semantics.transcripts[assetId] ?? []) as AsrSegment[];
     const sourceKey = sourceKeys.get(assetId) ?? document.assets[assetId]?.locator.remoteUrl ?? `blob:pireel-offline/${assetId}`;
     assetBySourceKey.set(sourceKey, assetId);
     const range = sourceRange(clip, document.canvas.fps);
-    return (segments as AsrSegment[]).flatMap((segment, segmentIndex) => {
-      const sourceWords = (segment.words ?? []).map((word, wordIndex) => ({ ...word, si: wordIndex }));
-      const words = sourceWords.filter((word) => wordOwner.get(`${assetId}:${segmentIndex}:${word.si}`) === clip.id);
-      if (sourceWords.length && !words.length) return [];
-      if (!sourceWords.length && (segment.end <= range.start || segment.start >= range.end)) return [];
+    const owned = ownedWords.get(clip.id);
+    const segmentIndexes = [
+      ...(owned?.keys() ?? []),
+      ...(wordlessSegments.get(assetId) ?? []).filter((index) => segments[index]!.end > range.start && segments[index]!.start < range.end),
+    ].sort((left, right) => left - right);
+    return segmentIndexes.flatMap((segmentIndex) => {
+      const segment = segments[segmentIndex]!;
+      const words = owned?.get(segmentIndex);
       return mapTranscriptSegsToEdited(
-        [{ ...segment, ...(sourceWords.length ? { words } : {}) } as AsrSegment],
+        [{ ...segment, ...(words ? { words } : {}) } as AsrSegment],
         (sourceSec) => sourceSecToTimelineSec(clip, sourceSec, document.canvas.fps),
         sourceKey,
       ).map((mappedSegment) => ({ ...mappedSegment, ref: { ...mappedSegment.ref, seg: segmentIndex } }));
@@ -585,8 +603,8 @@ export function relayManagedCaptionTrack(
     };
   });
   if (
-    JSON.stringify(track.clips) === JSON.stringify(clips)
-    && JSON.stringify(document.semantics.managedCaptionSource) === JSON.stringify(persistedSelection)
+    canonicalEqual(track.clips, clips)
+    && canonicalEqual(document.semantics.managedCaptionSource, persistedSelection)
   ) {
     return { ok: true, document, receipt: emptyCommandReceipt('captions.relay') };
   }

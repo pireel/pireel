@@ -15,8 +15,7 @@ import type { DocumentTransaction } from '@pireel/studio-engine/document-transac
 import {
   ackedFromDto,
   buildSaveWire,
-  canonicalJson,
-  hashSection,
+  canonicalHash,
   type AckedSections,
   type ProjectCommitAck,
   type StudioProjectDto,
@@ -167,7 +166,7 @@ export class ProjectSync {
       baseVersion: project.version,
       applied: [],
       rejected: [],
-      documentHash: hashSection(canonicalJson(project.document)),
+      documentHash: canonicalHash(project.document),
       project,
     };
     this.deps.onAck(ack, { diverged: true, pending: [...this.pending], project });
@@ -191,7 +190,7 @@ export class ProjectSync {
       return;
     }
     const versionAtSend = this.knownVersion;
-    const hashAtSend = hashSection(canonicalJson(this.deps.getDocument()));
+    const hashAtSend = canonicalHash(this.deps.getDocument());
     const pendingAtSend = this.pending.length;
 
     let result: ProjectSyncSendResult;
