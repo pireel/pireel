@@ -1,6 +1,6 @@
-# Pireel editor component
+# Pireel: open-source AI video editor
 
-An embeddable video editor preserving the original Pireel workbench: canvas, timeline, transcript, properties, assets, AI chat and editing tools. There is no separate simplified UI.
+An open-source AI video editor you can run on its own or embed in your app: the full Pireel workbench with canvas, timeline, transcript, captions, assets, AI chat and editing tools. Export an MP4, or a timeline for Premiere Pro and DaVinci Resolve.
 
 English · [简体中文](README.zh-CN.md)
 
