@@ -86,6 +86,31 @@ export function playingTranscript(document: EditorDocumentV2, assetId: string): 
   return { segments, rows };
 }
 
+/**
+ * Where a stretch of a source plays on the timeline now, in frames: the one way a spoken word
+ * becomes a timeline position, so no placement derives frames from source seconds (they stop
+ * matching the timeline at the first cut). The story spine first; undefined when no clip plays the
+ * stretch. A cut that runs through it leaves the frames of the part that plays, marked clipped.
+ */
+export function sourceSpanFrames(document: EditorDocumentV2): (assetId: string, start: number, end: number) => { frames: [number, number]; clipped: boolean } | undefined {
+  type Playing = { assetId: string; sourceInSec: number; sourceOutSec: number; startFrame: number; durationFrames: number };
+  const playing = document.timeline.tracks
+    .slice()
+    .sort((a, b) => Number(b.id === document.semantics.primaryNarrativeTrackId) - Number(a.id === document.semantics.primaryNarrativeTrackId))
+    .filter((track) => !track.hidden)
+    .flatMap((track) => track.clips.filter((clip) => clip.enabled && 'assetId' in clip && 'sourceInSec' in clip && typeof clip.sourceInSec === 'number' && typeof clip.sourceOutSec === 'number' && clip.sourceOutSec > clip.sourceInSec)) as unknown as Playing[];
+  return (assetId, start, end) => {
+    const overlapping = playing.filter((clip) => clip.assetId === assetId && end > clip.sourceInSec + 0.03 && start < clip.sourceOutSec - 0.03);
+    const clip = overlapping[0];
+    if (!clip) return undefined;
+    const scale = clip.durationFrames / (clip.sourceOutSec - clip.sourceInSec);
+    const from = Math.max(start, clip.sourceInSec);
+    const to = Math.min(end, clip.sourceOutSec);
+    const missing = [[start, from], [to, end]].some(([a, b]) => b! - a! > 0.05 && !overlapping.some((other) => other.sourceInSec <= a! + 0.01 && other.sourceOutSec >= b! - 0.01));
+    return { frames: [Math.round(clip.startFrame + (from - clip.sourceInSec) * scale), Math.round(clip.startFrame + (to - clip.sourceInSec) * scale)], clipped: missing };
+  };
+}
+
 /** Resolve which asset a word query addresses: explicit asset, a track's dominant speech clip, a placed
  *  clip on any lane, or (default) the first primary narrative clip. */
 export function resolveWordQueryAsset(document: EditorDocumentV2, query: Pick<DocumentWordQuery, 'assetId' | 'trackId' | 'shotId'>): { assetId: string } | { error: string } {

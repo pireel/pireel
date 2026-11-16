@@ -18,6 +18,10 @@ import { insertOverlayDocumentClip } from '@pireel/studio-engine/overlay-track-e
 import { lookSourceSyntaxIssues } from '@pireel/studio-engine/look-source-syntax';
 import { LOOK_TEMPLATE_PREFIX, normalizeLook } from '@pireel/studio-engine/look';
 import { COMPONENT_ROW_FIELDS } from '@pireel/studio-engine/component-property-input';
+import { phraseWordIndexes } from '@pireel/studio-engine/caption-highlights';
+import { wordsFromText } from '@pireel/studio-engine/caption-fx';
+import { resolveWordQueryAsset, sourceSpanFrames } from '@pireel/studio-engine/editor-document/transcript-address';
+import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 
 type Input = Record<string, unknown>;
 
@@ -195,12 +199,88 @@ function wordAnchor(document: EditorDocumentV2, raw: unknown, path: string): Tim
   return { type: 'word', assetId, segmentIndex, wordIndex, offsetFrames };
 }
 
+/** How long an instance stays after the last of its words when no length is given. */
+const HOLD_AFTER_WORDS_SEC = 0.8;
+
+interface SpokenPlacement {
+  anchor: TimelineAnchor;
+  startFrame: number;
+  /** Where the last of the words ends. */
+  endFrame: number;
+  /** The words as the piece receives them: seconds from the instance start. */
+  words: { text: string; start: number; end: number }[];
+}
+
+/**
+ * The spoken words an instance lands on, named the way set_captions highlights names words: a
+ * transcript row and the exact words copied from it. Resolved to where those words play now, so
+ * the caller does no arithmetic between source seconds and timeline frames (rows are timed in
+ * source seconds, which stop matching the timeline at the first cut).
+ */
+function spokenPlacement(
+  document: EditorDocumentV2,
+  raw: unknown,
+  path: string,
+  framesOf: ReturnType<typeof sourceSpanFrames>,
+): SpokenPlacement | AgentTimelineOutcome {
+  const value = raw && typeof raw === 'object' ? (raw as Input) : {};
+  const index = Number(value.index);
+  const text = typeof value.text === 'string' ? value.text.trim() : '';
+  if (!Number.isInteger(index) || index < 0 || !text) {
+    return fail('invalid_value', { path, fix: 'on is { index, text }: index is the get_transcript row, text the exact word(s) copied from that row.' });
+  }
+  const owner = resolveWordQueryAsset(document, string(value.assetId) ? { assetId: string(value.assetId)! } : {});
+  if ('error' in owner) return fail('unknown_id', { path: `${path}.assetId`, fix: owner.error });
+  const rows = (document.semantics.transcripts[owner.assetId] ?? []) as AsrSegment[];
+  const segment = rows[index];
+  if (!segment) return fail('unknown_id', { path: `${path}.index`, value: index, fix: `This transcript has ${rows.length} rows; read them with get_transcript.` });
+  const rowWords = segment.words?.length ? segment.words : wordsFromText(segment.text, segment.start, segment.end);
+  const found = phraseWordIndexes(rowWords, text);
+  if (!found) {
+    return fail('invalid_value', { path: `${path}.text`, value: text, fix: `"${text}" is not in row ${index}: ${JSON.stringify(segment.captionText ?? segment.text)}. Copy the words exactly from that row.` });
+  }
+  // Every occurrence in the row comes back together: take the first one the cut still plays.
+  const runs: number[][] = [];
+  for (const wordIndex of found) {
+    const last = runs[runs.length - 1];
+    if (last && last[last.length - 1] === wordIndex - 1) last.push(wordIndex);
+    else runs.push([wordIndex]);
+  }
+  for (const run of runs) {
+    const placed = run.flatMap((wordIndex) => {
+      const word = rowWords[wordIndex]!;
+      const at = framesOf(owner.assetId, word.start, word.end);
+      return at ? [{ wordIndex, text: word.text, frames: at.frames }] : [];
+    });
+    if (!placed.length) continue;
+    const startFrame = placed[0]!.frames[0];
+    const fps = document.canvas.fps;
+    return {
+      anchor: { type: 'word', assetId: owner.assetId, segmentIndex: index, wordIndex: placed[0]!.wordIndex, offsetFrames: 0 },
+      startFrame,
+      endFrame: Math.max(...placed.map((word) => word.frames[1])),
+      words: placed.map((word) => ({ text: word.text, start: Math.max(0, (word.frames[0] - startFrame) / fps), end: Math.max(0, (word.frames[1] - startFrame) / fps) })),
+    };
+  }
+  return fail('words_not_playing', { path, value: text, fix: `Row ${index} holds "${text}", but the cut no longer plays those words. Quote words that still play (get_transcript shows what each row keeps), or restore them first.` });
+}
+
+/** Where the picture and sound end: a graphic that starts after it would never be seen. */
+function contentEndFrame(document: EditorDocumentV2): number {
+  return Math.max(0, ...document.timeline.tracks.flatMap((track) => track.clips.flatMap((clip) => (
+    clip.kind === 'narrative' || clip.kind === 'media' || clip.kind === 'audio' ? [clip.startFrame + clip.durationFrames] : []
+  ))));
+}
+
 export function placeGraphicsV3(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const look = document.appearance.look;
   if (!look) return fail('no_look', { fix: 'Write the look first with set_look; graphics are instances of its pieces.' });
   const items = Array.isArray(input.items) ? (input.items as Input[]) : [];
-  if (!items.length) return fail('missing_field', { path: 'items', fix: 'Pass items: [{ pieceId, props, box, startFrame, durationFrames }].' });
+  if (!items.length) return fail('missing_field', { path: 'items', fix: 'Pass items: [{ pieceId, props, box, on: { index, text } }].' });
   const fps = document.canvas.fps;
+  const framesOf = sourceSpanFrames(document);
+  const contentEnd = contentEndFrame(document);
+  const placed: Array<{ clipId: string; frames: [number, number]; on?: string }> = [];
   let next = document;
   const receipts = [];
   const clipIds: string[] = [];
@@ -212,8 +292,21 @@ export function placeGraphicsV3(document: EditorDocumentV2, input: Input): Agent
     if (!pieceId || !look.pieces[pieceId]) {
       return fail('unknown_id', { path: `${path}.pieceId`, value: pieceId, fix: `Pieces in the current look: ${Object.keys(look.pieces).join(', ')}.` });
     }
-    if (!isFrame(item.startFrame)) return fail('invalid_value', { path: `${path}.startFrame`, fix: 'An integer timeline frame ≥ 0.' });
-    if (!isFrame(item.durationFrames, 1)) return fail('invalid_value', { path: `${path}.durationFrames`, fix: 'An integer frame count ≥ 1.' });
+    // Named by its words, the program finds where they play; a frame is for a moment nobody speaks.
+    const spoken = item.on === undefined ? null : spokenPlacement(next, item.on, `${path}.on`, framesOf);
+    if (spoken && 'ok' in spoken) return spoken;
+    if (!spoken && !isFrame(item.startFrame)) {
+      return fail('invalid_value', { path: `${path}.startFrame`, fix: 'Say which words it lands on with on: { index, text } (the get_transcript row and the exact words copied from it); the program finds their frames. startFrame, an integer timeline frame ≥ 0, is for a moment nobody speaks.' });
+    }
+    if (item.durationFrames !== undefined && !isFrame(item.durationFrames, 1)) return fail('invalid_value', { path: `${path}.durationFrames`, fix: 'An integer frame count ≥ 1.' });
+    if (!spoken && item.durationFrames === undefined) return fail('missing_field', { path: `${path}.durationFrames`, fix: 'An integer frame count ≥ 1 (it can be left out only with on, where the instance lasts through its words plus a hold).' });
+    const startFrame = spoken ? spoken.startFrame : (item.startFrame as number);
+    const durationFrames = item.durationFrames !== undefined
+      ? (item.durationFrames as number)
+      : Math.max(1, spoken!.endFrame - startFrame) + Math.round(HOLD_AFTER_WORDS_SEC * fps);
+    if (!spoken && contentEnd > 0 && startFrame >= contentEnd) {
+      return fail('after_the_end', { path: `${path}.startFrame`, value: startFrame, fix: `The video ends at frame ${contentEnd}. Transcript rows are timed in source seconds, which are not timeline frames once the recording is cut: place it with on: { index, text } and the program finds where those words play now.` });
+    }
     const boxRaw = item.box && typeof item.box === 'object' ? (item.box as Input) : null;
     const box = boxRaw ? { x: Number(boxRaw.x), y: Number(boxRaw.y), w: Number(boxRaw.w), h: Number(boxRaw.h) } : { x: 0, y: 0, w: 1, h: 1 };
     if (![box.x, box.y, box.w, box.h].every(Number.isFinite) || box.w <= 0 || box.h <= 0) {
@@ -230,11 +323,11 @@ export function placeGraphicsV3(document: EditorDocumentV2, input: Input): Agent
           ? [{ text: w.text, start: Number(w.start), end: Number(w.end) }]
           : [];
       })
-      : [];
-    const anchor = item.anchor === undefined ? null : wordAnchor(next, item.anchor, `${path}.anchor`);
+      : spoken ? spoken.words : [];
+    const anchor = spoken ? spoken.anchor : item.anchor === undefined ? null : wordAnchor(next, item.anchor, `${path}.anchor`);
     if (anchor && 'ok' in anchor) return anchor;
-    const startSec = (item.startFrame as number) / fps;
-    const durationSec = (item.durationFrames as number) / fps;
+    const startSec = startFrame / fps;
+    const durationSec = durationFrames / fps;
     const id = uniqueId(string(item.id) ?? blockId('look'), used);
     used.add(id);
     const block: Block = {
@@ -265,6 +358,7 @@ export function placeGraphicsV3(document: EditorDocumentV2, input: Input): Agent
       };
     }
     clipIds.push(id);
+    placed.push({ clipId: id, frames: [startFrame, startFrame + durationFrames], ...(spoken ? { on: spoken.words.map((word) => word.text).join('') } : {}) });
   }
   // A graphic placed again where the same one already shows (a retried or resumed run) would sit
   // on screen twice. The first stays; the call is told how to change it.
@@ -275,7 +369,7 @@ export function placeGraphicsV3(document: EditorDocumentV2, input: Input): Agent
       fix: 'Nothing was placed. The same graphic is already on screen at that time. Change the existing clip with set_clip_properties (props, box, durationFrames) or move_clips, or remove_clips it before placing a replacement; leave these items out and place the rest.',
     });
   }
-  return mutation(next, `Placed ${clipIds.length} graphic${clipIds.length === 1 ? '' : 's'}`, receipts, { clipIds });
+  return mutation(next, `Placed ${clipIds.length} graphic${clipIds.length === 1 ? '' : 's'}`, receipts, { clipIds, placed });
 }
 
 const HANDOFF_KINDS = new Set(['fact', 'music', 'voice']);

@@ -550,20 +550,21 @@ export const V3_TOOL_SCHEMAS: Record<string, V3ToolSchema> = {
   },
   place_graphics: {
     description:
-      'Place instances of the look\'s pieces on the graphics tracks: each item is a piece, its props, a box in canvas units (0–1; omit for the full frame) and its time in frames. anchor ties an instance to a spoken word (from get_transcript) so it follows later cuts; words gives the piece the spoken words it should land on, in seconds from the instance start. Each instance is then measured as rendered and fitted by the program (unless fit is false): text under the readable size is enlarged, an instance over the speaker\'s face or the captions moves to the nearest free area (shrinking a little only when nothing else fits), and a box its content spills out of is widened; fitted in the receipt lists what changed and anything still wrong. The receipt returns the new clip ids and a still of each at its settled moment on the real picture. Change words, place or time later with set_clip_properties (props, box) and move_clips; no regeneration.',
+      'Place instances of the look\'s pieces on the graphics tracks: each item is a piece, its props, a box in canvas units (0–1; omit for the full frame) and the spoken words it lands on. on names those words as set_captions highlights does: index is the get_transcript row, text the exact word(s) copied from that row. The program finds where they play now, so you compute nothing: the instance starts on the first of them, lasts through the last plus a short hold (or durationFrames), is tied to them, and the piece gets their times as ctx.words. Transcript rows are timed in source seconds, which are not timeline frames once the recording is cut; never turn them into startFrame. startFrame with durationFrames is only for a moment nobody speaks (a title before the first word, a card over music). The receipt lists where each instance landed (placed: clipId, frames, on). Each instance is then measured as rendered and fitted by the program (unless fit is false): text under the readable size is enlarged, an instance over the speaker\'s face or the captions moves to the nearest free area (shrinking a little only when nothing else fits), and a box its content spills out of is widened; fitted in the receipt lists what changed and anything still wrong. The receipt returns the new clip ids and a still of each at its settled moment on the real picture. Change words, place or time later with set_clip_properties (props, box) and move_clips; no regeneration.',
     inputSchema: obj({
       items: arr(obj({
         pieceId: str('A piece of the current look.'),
         props: arr(obj({ key: str('Prop name from the piece\'s propsSchema.'), value: PROPERTY_VALUE }, ['key', 'value']), { description: 'The piece\'s props.' }),
         box: obj({ x: num('Left, 0–1.'), y: num('Top, 0–1.'), w: num('Width, 0–1.'), h: num('Height, 0–1.') }),
-        startFrame: FRAME('Instance start'),
-        durationFrames: int('Length in frames.', 1),
+        on: obj({ index: int('Transcript row from get_transcript.', 0), text: str('The exact word(s) copied from that row.'), assetId: str('Transcribed source; default the narration.') }, ['index', 'text']),
+        startFrame: FRAME('Instance start, only without on'),
+        durationFrames: int('Length in frames. With on it may be left out: through the last word plus a hold.', 1),
         anchor: obj({ assetId: str('Transcribed source.'), segmentIndex: int('Transcript row.', 0), wordIndex: int('Word in the row.', 0), offsetFrames: int('Frames after the word.') }),
-        words: arr(obj({ text: str(), start: num('Seconds from the instance start.'), end: num('Seconds from the instance start.') }), { description: 'Spoken words the piece lands on.' }),
+        words: arr(obj({ text: str(), start: num('Seconds from the instance start.'), end: num('Seconds from the instance start.') }), { description: 'Spoken words the piece lands on; filled from on when left out.' }),
         label: str('Name shown on the timeline.'),
         id: str('Optional id to mint.'),
         fit: bool('false keeps this instance exactly where and as large as you placed it, for a deliberate layout such as a full-width panel: the program then neither enlarges its text nor moves or shrinks it off the face or the captions, now or when the look changes. Default true.'),
-      }, ['pieceId', 'startFrame', 'durationFrames']), { minItems: 1 }),
+      }, ['pieceId']), { minItems: 1 }),
     }, ['items']),
   },
   set_confirm_list: {

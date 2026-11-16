@@ -42,7 +42,7 @@ import { firstNarrativeAssetId, freeOverlayStackOrder, narrativeAtTimelineSecond
 import { projectNarrativeShots, projectOverlayBlockById } from '@pireel/studio-engine/editor-document/legacy-projection';
 import { documentCaptionsOn, documentCaptionStyle } from '@pireel/studio-engine/editor-document/caption-state';
 import { clipCapabilityContext, clipFieldRefusal } from '@pireel/studio-engine/agent-surface-v3/clip-properties';
-import { listDocumentAddressedWords, resolveDocumentWordIds } from '@pireel/studio-engine/editor-document/transcript-address';
+import { listDocumentAddressedWords, resolveDocumentWordIds, sourceSpanFrames } from '@pireel/studio-engine/editor-document/transcript-address';
 import { patchNarrativeClips } from '@pireel/studio-engine/editor-document/commands/narrative-patch';
 import { projectDocumentToComposition } from '@pireel/studio-engine/project-document';
 import { STUDIO_AGENT_EXECUTION_LIMITS } from '@pireel/studio-engine/agent-execution-budget';
@@ -1398,25 +1398,10 @@ export function getTranscriptV3(document: EditorDocumentV2, input: Input): Agent
     if (input.fromFrame !== undefined && !isFrame(input.fromFrame)) return fail('fromFrame must be an integer frame ≥ 0');
     if (input.toFrame !== undefined && !isFrame(input.toFrame)) return fail('toFrame must be an integer frame ≥ 0');
     // Where each word plays now, in timeline frames, so placements never derive frames from source
-    // seconds. The story spine first; a word playing nowhere has no frames.
-    const playing = document.timeline.tracks
-      .slice()
-      .sort((a, b) => Number(b.id === document.semantics.primaryNarrativeTrackId) - Number(a.id === document.semantics.primaryNarrativeTrackId))
-      .filter((track) => !track.hidden)
-      .flatMap((track) => track.clips.filter((clip) => clip.enabled && 'assetId' in clip && 'sourceInSec' in clip && typeof clip.sourceInSec === 'number' && typeof clip.sourceOutSec === 'number' && clip.sourceOutSec > clip.sourceInSec));
-    type Playing = (typeof playing)[number] & { assetId: string; sourceInSec: number; sourceOutSec: number };
-    // A word a cut runs through still plays in part: its frames are the part that plays, and it is
-    // marked clipped so a chopped onset or tail is visible (and restorable) rather than silent.
-    const framesOf = (assetId: string, start: number, end: number): { frames: [number, number]; clipped: boolean } | undefined => {
-      const overlapping = (playing as Playing[]).filter((c) => c.assetId === assetId && end > c.sourceInSec + 0.03 && start < c.sourceOutSec - 0.03);
-      const c = overlapping[0];
-      if (!c) return undefined;
-      const scale = c.durationFrames / (c.sourceOutSec - c.sourceInSec);
-      const from = Math.max(start, c.sourceInSec);
-      const to = Math.min(end, c.sourceOutSec);
-      const missing = [[start, from], [to, end]].some(([a, b]) => b! - a! > 0.05 && !overlapping.some((other) => other.sourceInSec <= a! + 0.01 && other.sourceOutSec >= b! - 0.01));
-      return { frames: [Math.round(c.startFrame + (from - c.sourceInSec) * scale), Math.round(c.startFrame + (to - c.sourceInSec) * scale)], clipped: missing };
-    };
+    // seconds. The story spine first; a word playing nowhere has no frames. A word a cut runs through
+    // still plays in part: its frames are the part that plays, and it is marked clipped so a chopped
+    // onset or tail is visible (and restorable) rather than silent.
+    const framesOf = sourceSpanFrames(document);
     const fromFrame = isFrame(input.fromFrame) ? input.fromFrame as number : 0;
     const toFrame = isFrame(input.toFrame) ? input.toFrame as number : Number.POSITIVE_INFINITY;
     const windowed = isFrame(input.fromFrame) || isFrame(input.toFrame);

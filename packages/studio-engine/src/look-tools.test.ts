@@ -72,6 +72,40 @@ describe('video-level template tools', () => {
       .toMatchObject({ ok: false, error: 'invalid_value' });
   });
 
+  it('place_graphics lands an instance on the quoted words, where they play now', () => {
+    // The recording is cut: what plays starts one second into the source, so a row's source
+    // seconds are no longer timeline time, and the opening row plays nowhere.
+    let document = emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', { assets: [{ id: 'cam', kind: 'video', url: 'https://cdn.example/cam.mp4', durationSec: 10, width: 1080, height: 1920, hasAudio: true }] }).document!;
+    document = runAgentTimelineTool(document, 'add_clips', { clips: [{ id: 'spine', assetId: 'cam', role: 'primary', startFrame: 0, source: [1, 10] }] }).document!;
+    document = { ...document, semantics: { ...document.semantics, transcripts: { cam: [
+      { start: 0.2, end: 0.8, text: '开场', words: [{ text: '开场', start: 0.2, end: 0.8 }] },
+      { start: 1, end: 3, text: '价值一千九百九十九', words: [{ text: '价值', start: 1, end: 1.4 }, { text: '一千九百九十九', start: 1.4, end: 2.6 }] },
+    ] as never } } };
+    document = setLook(document).document!;
+    const item = { pieceId: 'item-card', props: [{ key: 'title', value: '1999' }], box: { x: 0.05, y: 0.08, w: 0.9, h: 0.1 } };
+    const placed = runAgentTimelineTool(document, 'place_graphics', { items: [{ ...item, on: { index: 1, text: '一千九百九十九' } }] });
+    expect(placed.ok, JSON.stringify(placed)).toBe(true);
+    const clipId = (placed.data as { clipIds: string[] }).clipIds[0]!;
+    const clip = placed.document!.timeline.tracks.flatMap((track) => track.clips).find((candidate) => candidate.id === clipId)!;
+    // Source 1.4–2.6 s plays at frames 12–48; it stays 0.8 s after the last word.
+    expect(clip).toMatchObject({ kind: 'graphic', startFrame: 12, durationFrames: 60, anchor: { type: 'word', assetId: 'cam', segmentIndex: 1, wordIndex: 1 } });
+    expect((clip as { block: { slots: Record<string, unknown> } }).block.slots.words).toEqual([{ text: '一千九百九十九', start: 0, end: 1.2 }]);
+    expect((placed.data as { placed: unknown[] }).placed).toEqual([{ clipId, frames: [12, 72], on: '一千九百九十九' }]);
+    // A given length is kept; the start still comes from the words, whatever frame was sent with them.
+    const timed = runAgentTimelineTool(document, 'place_graphics', { items: [{ ...item, on: { index: 1, text: '价值' }, startFrame: 200, durationFrames: 45 }] });
+    expect((timed.data as { placed: Array<{ frames: number[] }> }).placed[0]!.frames).toEqual([0, 45]);
+    expect(runAgentTimelineTool(document, 'place_graphics', { items: [{ ...item, on: { index: 1, text: '两千' } }] }))
+      .toMatchObject({ ok: false, error: 'invalid_value', data: { fix: expect.stringContaining('价值一千九百九十九') } });
+    expect(runAgentTimelineTool(document, 'place_graphics', { items: [{ ...item, on: { index: 0, text: '开场' } }] }))
+      .toMatchObject({ ok: false, error: 'words_not_playing' });
+    // Source seconds sent as frames land past the end of the video: refused, with the way out.
+    expect(runAgentTimelineTool(document, 'place_graphics', { items: [{ ...item, startFrame: 9000, durationFrames: 30 }] }))
+      .toMatchObject({ ok: false, error: 'after_the_end', data: { fix: expect.stringContaining('on: { index, text }') } });
+    expect(runAgentTimelineTool(document, 'place_graphics', { items: [item] }))
+      .toMatchObject({ ok: false, error: 'invalid_value', data: { path: 'items[0].startFrame' } });
+  });
+
   it('set_confirm_list stores facts, music and voice to confirm, and keeps answers across rewrites', () => {
     const listed = runAgentTimelineTool(withSpeech(), 'set_confirm_list', { items: [
       { id: 'claim', kind: 'fact', text: '「完全不打药」是否属实', ref: 'c17' },
