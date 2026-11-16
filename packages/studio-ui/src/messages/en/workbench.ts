@@ -651,6 +651,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.splitPlayhead": "Split at the playhead",
   "workbench.splitNPoints": "Split at {n} timeline points",
   "workbench.startExport": "Start export",
+  "workbench.exportCoverFirst": "Open on the cover",
   "workbench.stopRendering": "Stop rendering",
   "workbench.subject": "Subject",
   "workbench.syncContent": "Sync content",

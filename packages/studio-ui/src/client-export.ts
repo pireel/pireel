@@ -104,6 +104,29 @@ export interface ExportRenderOpts {
   res: number;
   fps: number;
   format: 'mp4' | 'mov' | 'webm';
+  /** Open the video on the project's cover: where a video is posted, its first frame is what is
+   *  shown for it. Off unless the creator switches it on; without a cover it changes nothing. */
+  cover?: boolean;
+}
+
+/** How long an exported video shows its cover before the picture: long enough to be the frame a
+ *  platform takes for the video, short enough to pass as a cut. The sound is not moved. */
+export const EXPORT_COVER_SEC = 0.1;
+
+/** The cover over the whole frame: all of it visible, on black where its shape differs from the video's. */
+function paintCover(ctx: CanvasRenderingContext2D, cover: ImageBitmap, width: number, height: number): void {
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.filter = 'none';
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, width, height);
+  const scale = Math.min(width / cover.width, height / cover.height);
+  const w = cover.width * scale;
+  const h = cover.height * scale;
+  ctx.drawImage(cover, (width - w) / 2, (height - h) / 2, w, h);
+  ctx.restore();
 }
 export const DEFAULT_RENDER_OPTS: ExportRenderOpts = { res: 1080, fps: 30, format: 'mp4' };
 
@@ -547,6 +570,8 @@ export interface ClientExportOpts {
   audioMasks?: Map<string, readonly MaskedAudioRange[]> | null;
   /** Word masks keyed by timeline clip id, for visual-lane videos and audio-lane clips (see clipAudioMasks). */
   clipMasks?: Map<string, readonly MaskedAudioRange[]> | null;
+  /** The cover's image, when the export is to open on it (see ExportRenderOpts.cover). */
+  cover?: Blob | null;
   /** Resolution/fps/format (default 1080p·30·MP4). */
   render?: ExportRenderOpts;
   /** The file the user picked in the save dialog: the export is written there as it encodes.
@@ -1436,6 +1461,10 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     // Per-phase timing (parallel phases each track their own wall clock, so the sum can exceed total wall time): data shows where the bottleneck is
     const tm = { prep: 0, raster: 0, video: 0, draw: 0, enc: 0, rasterN: 0 };
     const expT0 = performance.now();
+    // The cover is painted over the first frames as they are composed: nothing is inserted, so the
+    // sound, the captions and the length stay exactly as they are.
+    let coverImage = opts.cover ? await createImageBitmap(opts.cover) : null;
+    const coverFrames = Math.max(1, Math.round(EXPORT_COVER_SEC * FPS));
     for (let i = 0; i < total; i++) {
       if (opts.shouldCancel?.()) throw new ExportCanceled();
       const t = i / FPS;
@@ -1598,6 +1627,10 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
         }
         tm.draw += performance.now() - d0;
       } finally { releaseMattes(); }
+      if (coverImage) {
+        paintCover(ctx, coverImage, outW, outH);
+        if (i + 1 >= coverFrames) { coverImage.close(); coverImage = null; }
+      }
       const e0 = performance.now();
       if (pendingAdd) await pendingAdd; // Previous frame's encode backpressure: only awaited here, so the next frame is already being prepared during encoding
       pendingAdd = videoSource.add(t, 1 / FPS);

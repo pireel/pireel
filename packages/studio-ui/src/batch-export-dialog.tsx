@@ -7,6 +7,7 @@ import type { ExportRenderOpts } from './client-export';
 import { t } from './i18n';
 import type { ProjectOutputTab } from './project-output-switcher';
 import { ExportOptRow } from './workbench-controls';
+import { SceneSwitch } from './scene-form-controls';
 
 /** Sequential batch export progress (one output at a time through the ordinary switch→export pipeline). */
 export interface OutputBatchState {
@@ -199,6 +200,8 @@ export function BatchExportDialog({
               ]}
               onPick={(format) => onOptsChange({ ...opts, format })}
             />
+            {/* A version without a cover exports as it is. */}
+            <SceneSwitch label={t('workbench.exportCoverFirst')} checked={!!opts.cover} onChange={(cover) => onOptsChange({ ...opts, cover })} />
             <button
               type="button"
               disabled={!selectedCount}

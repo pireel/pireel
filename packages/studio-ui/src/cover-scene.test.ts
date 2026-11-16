@@ -235,3 +235,77 @@ it('keeps a saved cover ratio when reopening even if it differs from the video',
   await f.controller.generate();
   expect(f.start.mock.calls[0][0].size).toBe('1:1');
 });
+
+describe('opening the cover', () => {
+  it('asks no model and reads no candidate frames: an empty prompt and a frame to look at', async () => {
+    const f = fixture();
+    expect(await f.controller.open()).toEqual({ status: 'prepared', available: false });
+    const scene = coverSceneFromDocument(f.document())!;
+    expect(scene).toMatchObject({ phase: 'prepared', prompt: '', sourceSelection: 'auto', sourceFrame: { assetId: f.assetId } });
+    expect(scene.sourceFrame!.sourceSec).toBeGreaterThanOrEqual(2);
+    expect(scene.sourceFrame!.sourceSec).toBeLessThan(6);
+    expect(f.analyze).not.toHaveBeenCalled();
+    expect(f.host.candidates).not.toHaveBeenCalled();
+    expect(f.start).not.toHaveBeenCalled();
+  });
+
+  it('starts from the frame the creator is looking at when that moment is in the video', async () => {
+    const f = fixture();
+    await f.controller.open({ assetId: f.assetId, sourceSec: 4.5, timelineSec: 2.5 });
+    expect(coverSceneFromDocument(f.document())!.sourceFrame).toEqual({ assetId: f.assetId, sourceSec: 4.5, timelineSec: 2.5 });
+    const cut = fixture();
+    await cut.controller.open({ assetId: cut.assetId, sourceSec: 0.5 }); // a moment that was cut away
+    expect(coverSceneFromDocument(cut.document())!.sourceFrame!.sourceSec).toBeGreaterThanOrEqual(2);
+  });
+
+  it('keeps the prompt and the chosen frame as they were left, and writes nothing when nothing changed', async () => {
+    const f = fixture(); await f.controller.prepare();
+    const written = coverSceneFromDocument(f.document())!;
+    const save = vi.spyOn(f.host, 'save');
+    // The video has been edited since the prompt was written: opening still does not rewrite it.
+    f.document().semantics.transcripts[f.assetId] = [{ start: 2, end: 6, text: 'A different explanation altogether' }];
+    await new CoverSceneController(f.host).open({ assetId: f.assetId, sourceSec: 5 });
+    const opened = coverSceneFromDocument(f.document())!;
+    expect(opened.prompt).toBe(written.prompt);
+    expect(opened.sourceFrame).toEqual(written.sourceFrame);
+    expect(f.analyze).toHaveBeenCalledTimes(1);
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('generates from a prompt the creator typed, verbatim, without a model writing one', async () => {
+    const f = fixture(); await f.controller.open();
+    const prompt = 'White background, the speaker on the right, three words of black type on the left.';
+    await f.controller.generate({ regenerate: true, prompt, sourceFrame: { assetId: f.assetId, sourceSec: 3 } });
+    expect(f.analyze).not.toHaveBeenCalled();
+    expect(f.start.mock.calls[0]![0].prompt).toBe(prompt);
+    expect(f.host.reference).toHaveBeenLastCalledWith(f.assetId, 3, undefined);
+    expect(coverSceneFromDocument(f.document())).toMatchObject({ phase: 'generating', prompt, promptVersion: 2 });
+  });
+
+  it('still writes the prompt itself when an agent asks for a cover nobody wrote one for', async () => {
+    const f = fixture(); await f.controller.open();
+    await f.controller.generate();
+    expect(f.analyze).toHaveBeenCalledTimes(1);
+    expect(String(f.start.mock.calls[0]![0].prompt)).toContain('SPECIAL COVER DESIGN');
+  });
+
+  it('writes the prompt when the creator asks, and picks the frame unless they chose one', async () => {
+    const f = fixture(); await f.controller.open({ assetId: f.assetId, sourceSec: 5 });
+    await f.controller.prepare({ rewrite: true });
+    const scene = coverSceneFromDocument(f.document())!;
+    expect(f.analyze).toHaveBeenCalledTimes(1);
+    expect(scene.prompt).toContain('SPECIAL COVER DESIGN');
+    expect(scene.sourceSelection).toBe('auto');
+    await f.controller.updateDraft({ sourceFrame: { assetId: f.assetId, sourceSec: 4 } });
+    await f.controller.prepare({ rewrite: true });
+    expect(coverSceneFromDocument(f.document())!.sourceFrame).toMatchObject({ sourceSec: 4 });
+  });
+
+  it('clears an earlier attempt that never finished instead of leaving the cover waiting on it', async () => {
+    const f = fixture(); await f.controller.open();
+    await f.host.save({ ...coverSceneFromDocument(f.document())!, phase: 'planning' });
+    await new CoverSceneController(f.host).open();
+    expect(coverSceneFromDocument(f.document())!.phase).toBe('prepared');
+  });
+});
+

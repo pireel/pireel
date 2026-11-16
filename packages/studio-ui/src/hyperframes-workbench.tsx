@@ -8,11 +8,11 @@ import { ScenePreviewTransport } from "@pireel/studio-ui/scene-preview-transport
 import { whiteboardSceneReady } from '@pireel/studio-ui/whiteboard-scene-result';
 import type { SceneAgentState } from '@pireel/studio-ui/agent-startup';
 
-import { coverFrameRanges, coverFrameAtTime, retainedCoverFrame, type CoverSourceFrame, type CoverFrameStripData } from '@pireel/studio-ui/cover-frame-selection';
+import { coverFrameRanges, coverFrameAtTime, overviewOrder, retainedCoverFrame, type CoverSourceFrame, type CoverFrameStripData } from '@pireel/studio-ui/cover-frame-selection';
 import { CoverSceneController, coverSceneFromDocument, withCoverScene, type CoverGenerateOptions, type CoverDraftPatch } from '@pireel/studio-ui/cover-scene';
 import { CoverSceneDialog, TimelineCoverButton, coverSceneStatus } from '@pireel/studio-ui/cover-scene-dialog';
 import { cloudBackupMedia } from '@pireel/studio-ui/cloud-media';
-import { extractThumbnails } from '@pireel/studio-engine/video-edit/thumbnails';
+import { extractThumbnails, extractThumbnailsFromUrl } from '@pireel/studio-engine/video-edit/thumbnails';
 import { pipLayerOwner } from '@pireel/studio-engine/pip-layout';
 import { applyProjectCover, persistProjectCover, projectCoverFromDocument, projectCoverThumbnail, ProjectCoverWriteQueue, type ProjectCover } from '@pireel/studio-ui/project-cover';
 
@@ -414,6 +414,7 @@ import {
   type MediaCanvasBox,
 } from "@pireel/studio-ui/media-box";
 import { blockDisplayTitle } from "@pireel/studio-ui/block-display-title";
+import { SceneSwitch } from "@pireel/studio-ui/scene-form-controls";
 import {
   AtPlayhead,
   BracketCutIcon,
@@ -1997,6 +1998,10 @@ export function HyperframesWorkbench({
     audioExportRef,
     denoiseExportRef,
     prepareExportAssets,
+    exportCover: async (document) => {
+      const cover = projectCoverFromDocument(document);
+      return cover ? (await materializeRemoteMedia(cover.url, { name: 'cover.png', type: 'image/png' })).file : null;
+    },
     // Read at export time; projectOutputs is declared further down.
     outputTitle: () => projectOutputs.outputsRef.current.active.title,
   });
@@ -3161,14 +3166,21 @@ export function HyperframesWorkbench({
   const projectOutputs = useProjectOutputs(getActiveOutputState);
   const coverScene = coverSceneFromDocument(editorDocument);
   const coverOutputId = projectOutputs.outputs.active.id;
-  const loadCoverSource = useCallback(async (assetId: string) => {
+  /** Frames of a recording for the cover. From the file when it is on this device; otherwise read
+   *  from where it is kept, a few bytes around each frame. Picking a cover frame used to bring the
+   *  whole recording down first: half a gigabyte before the strip showed anything. */
+  const coverFrames = useCallback(async (assetId: string, times: number[], options: Parameters<typeof extractThumbnails>[2]) => {
     const asset = editorDocumentRef.current.assets[assetId];
     if (!asset || asset.kind !== 'video') throw new Error('cover_source_unavailable');
-    if (asset.locator.localSig) { const file = await loadLocalVideo(asset.locator.localSig); if (file) return file; }
-    if (assetId === firstNarrativeAssetId(editorDocumentRef.current) && videoFileRef.current) return videoFileRef.current;
+    const onDevice = (asset.locator.localSig ? await loadLocalVideo(asset.locator.localSig) : null)
+      ?? (assetId === firstNarrativeAssetId(editorDocumentRef.current) ? videoFileRef.current : null);
+    if (onDevice) return extractThumbnails(onDevice, times, options);
     const url = resolveAssetUrl(asset);
     if (!url) throw new Error('cover_source_unavailable');
-    return (await materializeRemoteMedia(url, { name: asset.label || 'video.mp4', type: 'video/mp4' })).file;
+    const held = url.startsWith('blob:') ? clipFilesRef.current.get(url) : undefined;
+    if (held) return extractThumbnails(held, times, options);
+    if (url.startsWith('blob:')) throw new Error('cover_source_unavailable');
+    return extractThumbnailsFromUrl(studioProviders().mediaProxyUrl?.(url) ?? `/api/media/fetch?url=${encodeURIComponent(url)}`, times, options);
   }, [editorDocumentRef, resolveAssetUrl]);
   const coverController = useMemo(() => new CoverSceneController({
     document: () => {
@@ -3183,9 +3195,17 @@ export function HyperframesWorkbench({
       await projectSyncRef.current?.flush();
     },
     candidates: async (assetId, times, signal) => {
-      const file = await loadCoverSource(assetId);
       const wanted = [...times].sort((a, b) => a - b);
-      const frames = await extractThumbnails(file, wanted, { width: 360, quality: 0.8 });
+      // Several moments to choose among are taken at keyframes inside each clip's own footage, and
+      // each candidate is the very frame that was looked at. One moment is the creator's own choice
+      // and is read exactly.
+      const several = wanted.length > 1;
+      const ranges = coverFrameRanges(editorDocumentRef.current).filter(range => range.assetId === assetId);
+      const kept = wanted.map((sec): readonly [number, number] => {
+        const range = ranges.find(candidate => sec >= candidate.sourceInSec && sec < candidate.sourceOutSec);
+        return range ? [range.sourceInSec, range.sourceOutSec] : [sec, sec];
+      });
+      const frames = await coverFrames(assetId, wanted, { width: 360, quality: 0.8, ...(several ? { keyframes: true, within: kept } : {}) });
       try {
         const candidates = []; const remaining = [...wanted];
         for (const frame of frames) {
@@ -3193,8 +3213,8 @@ export function HyperframesWorkbench({
           const bytes = new Uint8Array(await frame.blob.arrayBuffer());
           let binary = ''; for (const byte of bytes) binary += String.fromCharCode(byte);
           const at = remaining.reduce((best, sec, i) => Math.abs(sec - frame.timestamp) < Math.abs(remaining[best]! - frame.timestamp) ? i : best, 0);
-          const sourceSec = remaining.splice(at, 1)[0];
-          if (sourceSec !== undefined) candidates.push({ sourceSec, base64: btoa(binary) });
+          const asked = remaining.splice(at, 1)[0];
+          if (asked !== undefined) candidates.push({ sourceSec: several ? frame.timestamp : asked, base64: btoa(binary) });
         }
         return candidates;
       } finally { frames.forEach(frame => URL.revokeObjectURL(frame.url)); }
@@ -3206,8 +3226,7 @@ export function HyperframesWorkbench({
       return data.text;
     },
     reference: async (assetId, sec, signal) => {
-      const file = await loadCoverSource(assetId);
-      const frames = await extractThumbnails(file, [sec], { width: 1440, quality: 0.92 });
+      const frames = await coverFrames(assetId, [sec], { width: 1440, quality: 0.92 });
       try {
         if (!frames[0]) throw new Error('cover_source_unavailable');
         signal?.throwIfAborted();
@@ -3229,7 +3248,7 @@ export function HyperframesWorkbench({
       const data = await response.json() as { models?: { id: string }[] };
       return pickImageModel(data.models ?? []);
     },
-  }), [committer, coverOutputId, editorDocumentRef, loadCoverSource, projectId, projectOutputs.outputsRef]);
+  }), [committer, coverOutputId, editorDocumentRef, coverFrames, projectId, projectOutputs.outputsRef]);
   const generateCoverScene = useCallback(async (options: CoverGenerateOptions = {}, signal?: AbortSignal) => {
     setCoverSceneBusy(true);
     try { return await coverController.generate(options, signal); }
@@ -3245,42 +3264,67 @@ export function HyperframesWorkbench({
     timer = window.setTimeout(() => void poll(), 4000);
     return () => { alive = false; window.clearTimeout(timer); };
   }, [coverController, coverScene?.phase, coverScene?.jobId, editorDocumentRef]);
+  /** Opening the cover readies its draft without a model, looking at the frame under the playhead
+   *  the first time; `rewrite` is the creator asking for the prompt to be written. */
   const prepareCoverScene = useCallback(async (rewrite = false) => {
     setCoverSceneBusy(true);
-    try { return await coverController.prepare({ rewrite }); }
+    try {
+      if (rewrite) return await coverController.prepare({ rewrite: true });
+      const document = editorDocumentRef.current;
+      // At the very start the playhead is just where it rests, not a choice of frame.
+      const looking = tRef.current > 0.2 ? coverFrameAtTime(coverFrameRanges(document), tRef.current, document.canvas.fps) : null;
+      return await coverController.open(looking);
+    }
     finally { setCoverSceneBusy(false); }
-  }, [coverController]);
+  }, [coverController, editorDocumentRef]);
   const saveCoverDraft = useCallback((patch: CoverDraftPatch) => coverController.updateDraft(patch), [coverController]);
   const previewCoverFrame = useCallback(async (frame: CoverSourceFrame): Promise<Blob> => {
     if (!retainedCoverFrame(editorDocumentRef.current, frame)) throw new Error('cover_frame_not_retained');
-    const file = await loadCoverSource(frame.assetId);
-    const frames = await extractThumbnails(file, [frame.sourceSec], { width: 1440, quality: 0.92 });
+    const frames = await coverFrames(frame.assetId, [frame.sourceSec], { width: 1440, quality: 0.92 });
     try { if (!frames[0]) throw new Error('cover_source_unavailable'); return frames[0].blob; }
     finally { frames.forEach(frame => URL.revokeObjectURL(frame.url)); }
-  }, [editorDocumentRef, loadCoverSource]);
-  const loadCoverFrames = useCallback(async (): Promise<CoverFrameStripData> => {
+  }, [editorDocumentRef, coverFrames]);
+  /** The strip the cover's frame is chosen along. It is usable at once (its ranges are the
+   *  document's) and its pictures arrive one by one. They are keyframes near each spot, kept
+   *  inside the clip's own footage: the strip is for finding one's way, and the frame chosen is read
+   *  exactly when it is chosen. Exact pictures decoded seconds of footage each. */
+  const loadCoverFrames = useCallback(async (onUpdate?: (data: CoverFrameStripData) => void, signal?: AbortSignal): Promise<CoverFrameStripData> => {
     const document = editorDocumentRef.current; const ranges = coverFrameRanges(document); const fps = document.canvas.fps;
     const durationSec = Math.max(0, ...ranges.map(range => range.endSec));
     const count = Math.min(24, Math.max(8, Math.ceil(durationSec / 5)));
-    const anchors = Array.from({ length: count }, (_, i) => coverFrameAtTime(ranges, Math.max(0, durationSec - 1 / fps) * i / Math.max(1, count - 1), fps)).filter((frame): frame is CoverSourceFrame => !!frame);
+    // Read spread over the whole video first, then in between: a recording that is not on this
+    // device gives a picture about every second, and the strip is an overview after a handful.
+    const anchors = overviewOrder(count).map(i => coverFrameAtTime(ranges, Math.max(0, durationSec - 1 / fps) * i / Math.max(1, count - 1), fps)).filter((frame): frame is CoverSourceFrame => !!frame);
     const grouped = new Map<string, CoverSourceFrame[]>();
     for (const frame of anchors) grouped.set(frame.assetId, [...(grouped.get(frame.assetId) ?? []), frame]);
     const frames: CoverFrameStripData['frames'] = [];
+    const strip = (loading: boolean): CoverFrameStripData => ({ frames: [...frames].sort((a, b) => a.timelineSec - b.timelineSec), ranges, durationSec, fps, count, loading });
+    onUpdate?.(strip(true));
     for (const [assetId, group] of grouped) {
-      const file = await loadCoverSource(assetId);
-      group.sort((a, b) => a.sourceSec - b.sourceSec);
-      const thumbnails = await extractThumbnails(file, group.map(frame => frame.sourceSec), { width: 240, quality: 0.72 });
-      try {
-        const unmatched = [...group];
-        for (const thumbnail of thumbnails) {
-          const bytes = new Uint8Array(await thumbnail.blob.arrayBuffer()); let binary = ''; for (const byte of bytes) binary += String.fromCharCode(byte);
-          const closest = unmatched.reduce((best, frame, index) => Math.abs(frame.sourceSec - thumbnail.timestamp) < Math.abs(unmatched[best]!.sourceSec - thumbnail.timestamp) ? index : best, 0);
-          const anchor = unmatched.splice(closest, 1)[0]; if (anchor) frames.push({ ...anchor, timelineSec: anchor.timelineSec ?? 0, url: `data:image/jpeg;base64,${btoa(binary)}` });
-        }
-      } finally { thumbnails.forEach(thumbnail => URL.revokeObjectURL(thumbnail.url)); }
+      if (signal?.aborted) break;
+      const kept = group.map((frame): readonly [number, number] => {
+        const range = ranges.find(candidate => candidate.assetId === assetId && frame.sourceSec >= candidate.sourceInSec && frame.sourceSec < candidate.sourceOutSec);
+        return range ? [range.sourceInSec, range.sourceOutSec] : [frame.sourceSec, frame.sourceSec];
+      });
+      const unmatched = [...group];
+      let placing = Promise.resolve();
+      const thumbnails = await coverFrames(assetId, group.map(frame => frame.sourceSec), {
+        width: 240, quality: 0.72, keyframes: true, within: kept, signal,
+        onThumb: (thumbnail) => {
+          placing = placing.then(async () => {
+            const bytes = new Uint8Array(await thumbnail.blob.arrayBuffer()); let binary = ''; for (const byte of bytes) binary += String.fromCharCode(byte);
+            const closest = unmatched.reduce((best, frame, index) => Math.abs(frame.sourceSec - thumbnail.timestamp) < Math.abs(unmatched[best]!.sourceSec - thumbnail.timestamp) ? index : best, 0);
+            const anchor = unmatched.splice(closest, 1)[0];
+            if (!anchor) return;
+            frames.push({ ...anchor, timelineSec: anchor.timelineSec ?? 0, url: `data:image/jpeg;base64,${btoa(binary)}` });
+            onUpdate?.(strip(true));
+          });
+        },
+      });
+      try { await placing; } finally { thumbnails.forEach(thumbnail => URL.revokeObjectURL(thumbnail.url)); }
     }
-    return { frames: frames.sort((a, b) => a.timelineSec - b.timelineSec), ranges, durationSec, fps };
-  }, [editorDocumentRef, loadCoverSource]);
+    return strip(false);
+  }, [editorDocumentRef, coverFrames]);
   const openCoverScene = useCallback(() => setCoverSceneOpen(true), []);
   const onApplyCover = useCallback(async (cover: ProjectCover) => {
     if (coverApplyingRef.current) throw new Error('cover_apply_failed');
@@ -3309,6 +3353,21 @@ export function HyperframesWorkbench({
       setCoverApplying(false);
     }
   }, [committer, coverWriteQueue, projectId, projectOutputs.outputsRef, editorDocumentRef]);
+  /** A frame of the video as the cover, nothing generated: read at full size, kept where covers are
+   *  kept, then applied the way a generated cover is. */
+  const applyCoverFrame = useCallback(async (frame: CoverSourceFrame): Promise<ProjectCover> => {
+    if (!retainedCoverFrame(editorDocumentRef.current, frame)) throw new Error('cover_image_unavailable');
+    const frames = await coverFrames(frame.assetId, [frame.sourceSec], { width: 1920, quality: 0.92 }).catch((cause) => { throw new Error('cover_image_unavailable', { cause }); });
+    try {
+      if (!frames[0]) throw new Error('cover_image_unavailable');
+      let stored: { url: string; key: string };
+      try { stored = await studioProviders().uploads.upload(frames[0].blob, { contentType: 'image/jpeg', filename: 'cover-frame.jpg' }); }
+      catch (cause) { throw new Error('cover_upload_failed', { cause }); }
+      const cover: ProjectCover = { url: stored.url, key: stored.key, label: t('ui.coverSceneDialog.videoFrame') };
+      await onApplyCover(cover);
+      return cover;
+    } finally { frames.forEach(taken => URL.revokeObjectURL(taken.url)); }
+  }, [coverFrames, editorDocumentRef, onApplyCover]);
   useEffect(() => {
     const chosen = projectCover;
     if (chosen) {
@@ -9332,6 +9391,13 @@ export function HyperframesWorkbench({
                           setExportOpts((o) => ({ ...o, format }))
                         }
                       />
+                      {projectCover && (
+                        <SceneSwitch
+                          label={t("workbench.exportCoverFirst")}
+                          checked={!!exportOpts.cover}
+                          onChange={(cover) => setExportOpts((o) => ({ ...o, cover }))}
+                        />
+                      )}
                       {!canChooseExportFile() && (
                         <p className="text-ink-4 text-[11px] leading-relaxed">
                           {t("workbench.downloadsAutomaticallyWhenExport")}
@@ -9421,7 +9487,7 @@ export function HyperframesWorkbench({
           },
         }}
       />}
-      <CoverSceneDialog canvas={editorDocument.canvas} open={coverSceneOpen} scene={coverScene} applied={projectCover} busy={coverSceneBusy || coverApplying} onClose={() => setCoverSceneOpen(false)} onPrepare={prepareCoverScene} onSaveDraft={saveCoverDraft} onLoadFrames={loadCoverFrames} onPreviewFrame={previewCoverFrame} onGenerate={generateCoverScene} onApply={onApplyCover} />
+      <CoverSceneDialog canvas={editorDocument.canvas} open={coverSceneOpen} scene={coverScene} applied={projectCover} busy={coverSceneBusy || coverApplying} onClose={() => setCoverSceneOpen(false)} onPrepare={prepareCoverScene} onSaveDraft={saveCoverDraft} onLoadFrames={loadCoverFrames} onPreviewFrame={previewCoverFrame} onGenerate={generateCoverScene} onApply={onApplyCover} onApplyFrame={applyCoverFrame} />
       {/* Entry boot layer: heavy-resource warmup + project-data double gate, covers the whole workbench (incl. the chat bar), self-unmounts when done */}
       <StudioBootOverlay dataReady={bootDataReady} />
       <header data-studio-header data-block-selection-keep data-cap-keep className="bg-canvas flex h-11 shrink-0 items-center justify-between gap-3 rounded-sm px-3">

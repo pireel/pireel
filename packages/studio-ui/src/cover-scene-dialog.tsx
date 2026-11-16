@@ -2,7 +2,7 @@ import { editorRequest } from '@pireel/studio-ui/host-request';
 import { pickImageModel, normalizeImageSettings, imageGenerationParams } from '@pireel/studio-engine/image-generation-settings';
 import { ImageGenerationFields } from '@pireel/studio-ui/image-generation-fields';
 import { useEffect, useRef, useState, type ComponentProps } from 'react';
-import { ImageIcon, Loader2 } from 'lucide-react';
+import { ImageIcon, Loader2, Sparkles } from 'lucide-react';
 import { useQuote } from '@pireel/studio-ui/use-quote';
 import { ButtonCreditCost } from './credit-cost';
 import { offerCredits, useCreditGate } from './current-user';
@@ -32,17 +32,22 @@ export function TimelineCoverButton({ cover, busy, onOpen, className, ...rest }:
     {busy && <span className="absolute inset-0 flex items-center justify-center bg-black/45 text-white"><Loader2 size={14} className="animate-spin" aria-hidden /></span>}
   </button>;
 }
+/** In the preview's list of pictures: the frame chosen from the video itself, not a generated cover. */
+const FRAME = 'frame';
 const timeLabel = (seconds: number) => `${Math.floor(seconds / 60)}:${(seconds % 60).toFixed(2).padStart(5, '0')}`;
 
-export function CoverSceneDialog({ open, scene, applied, busy, canvas, onClose, onPrepare, onSaveDraft, onLoadFrames, onPreviewFrame, onGenerate, onApply }: {
+export function CoverSceneDialog({ open, scene, applied, busy, canvas, onClose, onPrepare, onSaveDraft, onLoadFrames, onPreviewFrame, onGenerate, onApply, onApplyFrame }: {
   open: boolean; scene: CoverScene | null; applied: ProjectCover | null; busy: boolean; canvas?: { width: number; height: number };
   onClose(): void;
   onPrepare(rewrite?: boolean): Promise<unknown>;
   onSaveDraft(patch: CoverDraftPatch): Promise<unknown>;
-  onLoadFrames(): Promise<CoverFrameStripData>;
+  /** The strip to choose a frame along. `onUpdate` hears it as it fills: empty at once, then with each picture. */
+  onLoadFrames(onUpdate?: (data: CoverFrameStripData) => void, signal?: AbortSignal): Promise<CoverFrameStripData>;
   onPreviewFrame(frame: CoverSourceFrame): Promise<Blob>;
   onGenerate(options: CoverGenerateOptions): Promise<unknown>;
   onApply(cover: ProjectCover): Promise<void>;
+  /** Make this frame of the video the cover as it is, nothing generated. Answers with the cover it became. */
+  onApplyFrame(frame: CoverSourceFrame): Promise<ProjectCover>;
 }) {
   const [models, setModels] = useState<{ id: string; name: string }[]>([]);
   const [modelId, setModelId] = useState(''); const [size, setSize] = useState(''); const [quality, setQuality] = useState('');
@@ -57,9 +62,11 @@ export function CoverSceneDialog({ open, scene, applied, busy, canvas, onClose, 
   useEffect(() => {
     if (!open) return;
     let alive = true; setError(''); setStrip(null);
-    void callbacks.current.onPrepare().catch(() => { if (alive) setError(t('ui.coverSceneDialog.couldNotPreparePrompt')); });
-    void callbacks.current.onLoadFrames().then(data => { if (alive) setStrip(data); }).catch(() => { if (alive) setError(t('ui.coverSceneDialog.restoreSourceVideoLoad')); });
-    return () => { alive = false; };
+    const closing = new AbortController();
+    // Opening asks no model for anything: the draft as it was left, and a frame to look at.
+    void callbacks.current.onPrepare().catch(() => { if (alive) setError(t('ui.coverSceneDialog.coverPreparationGenerationDid')); });
+    void callbacks.current.onLoadFrames(data => { if (alive) setStrip(data); }, closing.signal).then(data => { if (alive) setStrip(data); }).catch(() => { if (alive) setError(t('ui.coverSceneDialog.restoreSourceVideoLoad')); });
+    return () => { alive = false; closing.abort(); };
   }, [open]);
   useEffect(() => {
     if (!open) return; let alive = true;
@@ -89,7 +96,10 @@ export function CoverSceneDialog({ open, scene, applied, busy, canvas, onClose, 
   useEffect(() => { if (open && creditsFailed) void offerCredits(); }, [open, creditsFailed]);
   const choices = [...(scene?.images ?? []), ...(scene?.history ?? []), ...(applied ? [applied] : [])];
   const images = [...new Map(choices.map(image => [image.key, image])).values()];
-  const main = images.find(image => image.key === selectedKey) ?? images[0];
+  // The chosen frame is a cover too: it is what the preview shows until something is generated, and
+  // again whenever a frame is being chosen, so it can be applied as it is.
+  const showFrame = selectedKey === FRAME || !images.length;
+  const main = showFrame ? undefined : images.find(image => image.key === selectedKey) ?? images[0];
   const at = strip ? coverFrameTime(strip.ranges, selectedFrame) : 0;
   const saveFrame = async (frame: CoverSourceFrame) => {
     setDraftFrame(frame); setError(''); setSavingReference(true);
@@ -100,8 +110,8 @@ export function CoverSceneDialog({ open, scene, applied, busy, canvas, onClose, 
     <div className="border-line border-b px-6 py-4 pr-12"><DialogTitle className="text-ink text-lg font-semibold">{t('ui.coverSceneDialog.cover')}</DialogTitle></div>
     <div className="grid min-h-0 flex-1 grid-cols-[minmax(300px,370px)_minmax(0,1fr)] max-sm:grid-cols-1">
       <div aria-label={t('ui.coverSceneDialog.coverSettings')} className="border-line flex min-h-0 flex-col gap-3 overflow-y-auto border-r p-5">
-        <div className="flex items-center justify-between gap-2"><label htmlFor="cover-full-prompt" className="text-ink text-sm font-medium">{t('ui.coverSceneDialog.fullPrompt')}</label><button type="button" disabled={pending} onClick={async () => { setError(''); try { await onPrepare(true); } catch { setError(failure); } }} className="text-ink-3 text-xs underline underline-offset-4 disabled:opacity-40">{t('ui.coverSceneDialog.rewriteFromContext')}</button></div>
-        <textarea id="cover-full-prompt" value={prompt} disabled={pending} onChange={event => setPrompt(event.target.value)} onBlur={() => { if (prompt.trim() && prompt !== scenePrompt) void onSaveDraft({ prompt }).catch(() => setError(t('ui.coverSceneDialog.promptWasNotSaved'))); }} placeholder={pending ? t('ui.coverSceneDialog.preparingCompletePromptFrom') : t('ui.coverSceneDialog.editCompleteCoverGeneration')} className="border-line bg-canvas min-h-[150px] flex-1 resize-none rounded-md border p-3 text-sm leading-6" />
+        <div className="flex items-center justify-between gap-2"><label htmlFor="cover-full-prompt" className="text-ink text-sm font-medium">{t('ui.coverSceneDialog.fullPrompt')}</label><button type="button" disabled={pending} onClick={async () => { setError(''); try { await onPrepare(true); } catch { setError(failure); } }} className="border-line text-ink-2 hover:text-ink hover:bg-panel-2 inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs disabled:opacity-40">{scene?.phase === 'planning' ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}{t(prompt.trim() ? 'ui.coverSceneDialog.rewriteWithAi' : 'ui.coverSceneDialog.writeWithAi')}</button></div>
+        <textarea id="cover-full-prompt" value={prompt} disabled={pending} onChange={event => setPrompt(event.target.value)} onBlur={() => { if (prompt.trim() && prompt !== scenePrompt) void onSaveDraft({ prompt }).catch(() => setError(t('ui.coverSceneDialog.promptWasNotSaved'))); }} placeholder={scene?.phase === 'planning' ? t('ui.coverSceneDialog.preparingCompletePromptFrom') : t('ui.coverSceneDialog.editCompleteCoverGeneration')} className="border-line bg-canvas min-h-[150px] flex-1 resize-none rounded-md border p-3 text-sm leading-6" />
         <section aria-label={t('ui.coverSceneDialog.referenceImage')} className="shrink-0">
           <div className="text-ink mb-2 text-xs">{t('ui.coverSceneDialog.referenceImages')}</div>
           <div className="flex flex-wrap gap-3">
@@ -127,11 +137,12 @@ export function CoverSceneDialog({ open, scene, applied, busy, canvas, onClose, 
         </div>
       </div>
       <div className="bg-canvas flex min-h-0 min-w-0 flex-col gap-3 p-5">
-        {strip ? <CoverFrameTimeline strip={strip} at={at} disabled={pending} onPreview={setDraftFrame} onCancel={() => setDraftFrame(null)} onCommit={frame => void saveFrame(frame)} /> : <p className="text-ink-4 py-4 text-xs">{t('ui.coverSceneDialog.loadingVideoFrames')}</p>}
+        {strip ? <CoverFrameTimeline strip={strip} at={at} disabled={pending} onPreview={frame => { setDraftFrame(frame); setSelectedKey(FRAME); }} onCancel={() => setDraftFrame(null)} onCommit={frame => void saveFrame(frame)} /> : <p className="text-ink-4 py-4 text-xs">{t('ui.coverSceneDialog.loadingVideoFrames')}</p>}
         <div className="text-ink-3 text-xs">{t('ui.coverSceneDialog.coverPreview')}</div>
-        <div className="flex min-h-0 flex-1 items-center justify-center">{main ? <img src={main.url} alt={t('ui.coverSceneDialog.coverPreview')} className="h-full max-h-full w-full object-contain" /> : <div className="text-ink-4 text-center text-sm"><ImageIcon size={28} className="mx-auto mb-3" />{t('ui.coverSceneDialog.generatedCoverAppearsHere')}</div>}</div>
+        <div className="flex min-h-0 flex-1 items-center justify-center">{main ? <img src={main.url} alt={t('ui.coverSceneDialog.coverPreview')} className="h-full max-h-full w-full object-contain" /> : referenceUrl ? <img src={referenceUrl} alt={t('ui.coverSceneDialog.videoFrame')} className="h-full max-h-full w-full object-contain" /> : <div className="text-ink-4 text-center text-sm">{selectedFrame ? <Loader2 size={24} className="mx-auto animate-spin" /> : <><ImageIcon size={28} className="mx-auto mb-3" />{t('ui.coverSceneDialog.generatedCoverAppearsHere')}</>}</div>}</div>
+        {!main && selectedFrame && referenceUrl && <div className="flex items-center gap-3"><span className="text-ink-3 mr-auto text-xs">{t('ui.coverSceneDialog.videoFrame')} · {timeLabel(at)}</span><CoverApplyButton cover={{ key: `${FRAME}:${selectedFrame.assetId}:${selectedFrame.sourceSec}`, url: referenceUrl, label: t('ui.coverSceneDialog.videoFrame') }} appliedKey={applied?.key} disabled={pending || readingFrame} onApply={async () => { const cover = await onApplyFrame(coverFrameIdentity(selectedFrame)); setSelectedKey(cover.key); }} /></div>}
         {main && <div className="flex items-center gap-3"><a href={main.url} target="_blank" rel="noreferrer" className="text-ink-3 mr-auto text-xs underline underline-offset-4">{t('ui.coverSceneDialog.openOriginal')}</a><button type="button" disabled={pending || scene?.referenceImage?.key === main.key} onClick={async () => { setSavingReference(true); setError(''); try { await onSaveDraft({ referenceImage: main }); setDraftFrame(null); } catch { setError(t('ui.coverSceneDialog.referenceWasNotSaved')); } finally { setSavingReference(false); } }} className="border-line text-ink rounded-md border px-3 py-2 text-xs disabled:opacity-40">{scene?.referenceImage?.key === main.key ? t('ui.coverSceneDialog.usingAsReference') : t('ui.coverSceneDialog.useAsReference')}</button><CoverApplyButton cover={main} appliedKey={applied?.key} onApply={onApply} disabled={pending} /></div>}
-        {images.length > 1 && <div className="flex shrink-0 gap-2 overflow-x-auto">{images.map(image => <button key={image.key} type="button" aria-label={image.label} className="border-line h-12 w-16 shrink-0 overflow-hidden rounded-sm border" onClick={() => { setSelectedKey(image.key); }}><img src={image.url} alt={image.label} className="h-full w-full object-contain" /></button>)}</div>}
+        {images.length > 0 && <div className="flex shrink-0 gap-2 overflow-x-auto">{referenceUrl && <button type="button" aria-label={t('ui.coverSceneDialog.videoFrame')} title={t('ui.coverSceneDialog.videoFrame')} className={`h-12 w-16 shrink-0 overflow-hidden rounded-sm border ${showFrame ? 'border-accent' : 'border-line'}`} onClick={() => setSelectedKey(FRAME)}><img src={referenceUrl} alt="" className="h-full w-full object-contain" /></button>}{images.map(image => <button key={image.key} type="button" aria-label={image.label} className="border-line h-12 w-16 shrink-0 overflow-hidden rounded-sm border" onClick={() => { setSelectedKey(image.key); }}><img src={image.url} alt={image.label} className="h-full w-full object-contain" /></button>)}</div>}
       </div>
     </div>
   </DialogContent></Dialog>;

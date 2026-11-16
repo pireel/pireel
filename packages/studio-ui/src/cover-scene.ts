@@ -1,7 +1,7 @@
 import { normalizeImageSettings, imageGenerationParams } from '@pireel/studio-engine/image-generation-settings';
 import type { EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import { primaryNarrativeClips } from '@pireel/studio-engine/composition';
-import { canonicalHash } from '@pireel/studio-engine/stable-json';
+import { canonicalEqual, canonicalHash } from '@pireel/studio-engine/stable-json';
 import { activeBrandCover, brandCoverReferenceKeys } from '@pireel/studio-engine/project-brand-metadata';
 import { retainedCoverFrame, coverFrameIdentity, type CoverSourceFrame } from '@pireel/studio-ui/cover-frame-selection';
 import { projectCoverFromDocument, type ProjectCover } from '@pireel/studio-ui/project-cover';
@@ -114,11 +114,61 @@ export interface CoverSceneHost {
 
 export interface CoverGenerateOptions { regenerate?: boolean; prompt?: string; sourceFrame?: CoverSourceFrame; modelId?: string; size?: string; quality?: string }
 
-/** Draft preparation and image production are separate; opening a scene prepares editable inputs. */
+/**
+ * Three separate things: opening the cover (no model: the draft as it was left, with a reference
+ * frame to look at straight away), writing its prompt (`prepare`: a model reads the video and
+ * picks a frame, when the creator asks or an agent needs a prompt nobody wrote), and producing
+ * the image (`generate`).
+ */
 export class CoverSceneController {
   private running: Promise<ReturnType<typeof coverSceneSummary>> | null = null;
   private preparing: Promise<ReturnType<typeof coverSceneSummary>> | null = null;
   constructor(private readonly host: CoverSceneHost) {}
+  /**
+   * What the cover needs to be worked on, without asking a model for anything. The prompt stays as
+   * the creator last had it (empty the first time). The reference frame is the saved one while
+   * that moment is still in the video, else `suggested` (where the creator is looking), else an
+   * early moment of the main recording.
+   */
+  open(suggested?: CoverSourceFrame | null, signal?: AbortSignal) {
+    if (this.running) return this.running;
+    if (this.preparing) return this.preparing;
+    this.preparing = this.openDraft(suggested, signal).finally(() => { this.preparing = null; });
+    return this.preparing;
+  }
+  private async openDraft(suggested?: CoverSourceFrame | null, signal?: AbortSignal) {
+    const document = this.host.document(); const previous = coverSceneFromDocument(document);
+    if (previous && ['starting', 'generating'].includes(previous.phase)) return coverSceneSummary(previous);
+    const input = coverSceneInput(document);
+    const context = this.host.context?.() ?? {};
+    const kept = previous?.sourceFrame && retainedCoverFrame(document, previous.sourceFrame) ? previous.sourceFrame : undefined;
+    const sourceFrame = kept
+      ?? (suggested && retainedCoverFrame(document, suggested) ? coverFrameIdentity(suggested) : undefined)
+      ?? (input.assetId ? { assetId: input.assetId, sourceSec: input.times[0]! } : undefined);
+    const keys = coverBrandKeys(document);
+    const saved = previous?.brandReferences ?? [];
+    let brandReferences = saved; let error: string | undefined;
+    if (saved.length !== keys.length || saved.some((ref, index) => ref.key !== keys[index])) {
+      try { brandReferences = (await this.loadBrandReferences(keys, signal)).map(({ key, url }) => ({ key, url })); }
+      catch { error = 'cover_brand_reference_unavailable'; }
+    }
+    if (!sourceFrame) error ??= 'cover_source_unavailable';
+    // A prompt written before prompts were kept whole is not shown as if it were one.
+    const written = !!previous?.prompt && previous.promptVersion === 2;
+    const prompt = !written ? '' : previous!.identityGuidanceVersion === 3 ? previous!.prompt : replaceLegacyIdentityGuidance(previous!.prompt, context.locale);
+    const scene: CoverScene = {
+      ...(previous ?? { version: 1 as const, runId: crypto.randomUUID(), headline: [], images: [], history: [], modelId: '' }),
+      size: previous?.size || input.size,
+      // An earlier attempt's failure is not the state of the cover being opened now.
+      phase: error ? 'failed' : previous?.phase === 'ready' && previous.images.length ? 'ready' : 'prepared',
+      prompt, promptVersion: written ? 2 : undefined, identityGuidanceVersion: written ? 3 : undefined,
+      sourceFrame, sourceSelection: kept ? previous!.sourceSelection : 'auto',
+      brandReferences, error,
+    };
+    // Opening writes nothing when there is nothing to write: no edit, no save, for looking at a cover.
+    if (!previous || !canonicalEqual(previous, scene)) await this.host.save(scene);
+    return coverSceneSummary(coverSceneFromDocument(this.host.document()));
+  }
   prepare(options: { rewrite?: boolean } = {}, signal?: AbortSignal) {
     if (this.running) return this.running;
     if (this.preparing) return this.preparing;
@@ -204,15 +254,19 @@ export class CoverSceneController {
     signal?.throwIfAborted(); return result;
   }
   private async run(options: CoverGenerateOptions, signal?: AbortSignal) {
-    await (this.preparing ?? this.prepareDraft({}, signal));
+    if (this.preparing) await this.preparing;
+    // A prompt handed in is the creator's own: the draft is only made ready around it. Without one
+    // (an agent asking for a cover) the prompt is written first.
+    await (options.prompt !== undefined ? this.openDraft(options.sourceFrame, signal) : this.prepareDraft({}, signal));
     const document = this.host.document(); const draft = coverSceneFromDocument(document);
-    if (!draft?.prompt || !draft.sourceFrame || !draft.promptVersion || draft.error === 'cover_brand_reference_unavailable') return coverSceneSummary(draft);
-    const prompt = options.prompt ?? draft.prompt;
-    const sourceFrame = coverFrameIdentity(options.sourceFrame ?? draft.sourceFrame);
+    const prompt = options.prompt ?? draft?.prompt ?? '';
+    const chosen = options.sourceFrame ?? draft?.sourceFrame;
+    if (!draft || !chosen || (options.prompt === undefined && (!draft.prompt || !draft.promptVersion)) || draft.error === 'cover_brand_reference_unavailable') return coverSceneSummary(draft);
+    const sourceFrame = coverFrameIdentity(chosen);
     if (!prompt.trim() || prompt.length > 16000) throw new Error('cover_invalid_prompt');
     if (!retainedCoverFrame(document, sourceFrame)) throw new Error('cover_frame_not_retained');
     const settings = normalizeImageSettings({ modelId: options.modelId || draft.modelId || await this.host.defaultModel(), size: options.size || draft.size, quality: options.quality ?? draft.quality });
-    let scene: CoverScene = { ...draft, runId: crypto.randomUUID(), phase: 'prepared', prompt, sourceFrame, ...(options.sourceFrame ? { sourceSelection: 'manual' } : {}), ...settings, images: [], history: [...new Map([...draft.images, ...draft.history].map(image => [image.key, image])).values()].slice(0, 12), error: undefined };
+    let scene: CoverScene = { ...draft, runId: crypto.randomUUID(), phase: 'prepared', prompt, promptVersion: 2, identityGuidanceVersion: draft.identityGuidanceVersion ?? 3, sourceFrame, ...(options.sourceFrame ? { sourceSelection: 'manual' } : {}), ...settings, images: [], history: [...new Map([...draft.images, ...draft.history].map(image => [image.key, image])).values()].slice(0, 12), error: undefined };
     await this.host.save(scene);
     let startSettled = false;
     try {

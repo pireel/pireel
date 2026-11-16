@@ -597,6 +597,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.splitPlayhead": "已在播放头剪开",
   "workbench.splitNPoints": "已在时间轴的 {n} 个位置切分",
   "workbench.startExport": "开始导出",
+  "workbench.exportCoverFirst": "封面作为首帧",
   "workbench.stopRendering": "停止合成",
   "workbench.subject": "主体",
   "workbench.syncContent": "同步内容",

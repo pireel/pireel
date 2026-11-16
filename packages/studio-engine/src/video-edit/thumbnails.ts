@@ -9,6 +9,24 @@ interface ThumbOpts {
   quality?: number;
   /** Called on each extracted frame (incremental rendering: thumbnails appear as they decode, no need to wait for the whole video) */
   onThumb?: (thumb: Thumbnail) => void;
+  /**
+   * Take each picture from a keyframe near its time instead of the exact moment. An exact frame is
+   * decoded as a run from the keyframe before it (seconds of footage each, at full size); a keyframe
+   * is one frame. For pictures that only have to be near the moment: a strip to find one's way along.
+   * Two times that share a keyframe give one picture, so fewer may come back than were asked for.
+   * The pictures are read one at a time, in the order asked for, each handed to `onThumb` as soon as
+   * it is ready: where finding a keyframe is a round trip (a recording read over the network) the
+   * first shows after one of them instead of after all.
+   */
+  keyframes?: boolean;
+  /** Stops a keyframe read between two pictures (the strip was closed). */
+  signal?: AbortSignal;
+  /**
+   * With `keyframes`: the source range each picture must stay inside, by index (a clip's kept
+   * footage, so a strip never shows what was cut). The keyframe before the time when that is inside
+   * the range, else the next one, else the exact moment.
+   */
+  within?: ReadonlyArray<readonly [number, number]>;
 }
 
 /** Core: given a mediabunny Source (Blob or Url), extract frames at the given timestamps and render JPEG. */
@@ -40,9 +58,8 @@ async function extractFromSource(
     const ctx = canvas.getContext('2d') as OffscreenCanvasRenderingContext2D;
 
     const out: Thumbnail[] = [];
-    const sampleTimes = firstFrame ? [await track.getFirstTimestamp()] : timestamps.map((t) => t + t0);
-    for await (const sample of sink.samplesAtTimestamps(sampleTimes)) {
-      if (!sample) continue;
+    const picture = async (sample: Awaited<ReturnType<typeof sink.getSample>>) => {
+      if (!sample) return;
       // try/finally: convertToBlob awaits between draw and close — a throw there (or in onThumb)
       // must not leak the sample ("VideoSample was garbage collected without being closed").
       try {
@@ -58,7 +75,31 @@ async function extractFromSource(
       } finally {
         sample.close();
       }
+    };
+    const sampleTimes = firstFrame ? [await track.getFirstTimestamp()] : timestamps.map((t) => t + t0);
+    if (!firstFrame && opts.keyframes) {
+      const { EncodedPacketSink } = await import('mediabunny');
+      const packets = new EncodedPacketSink(track);
+      const taken = new Set<number>();
+      for (let index = 0; index < sampleTimes.length && !opts.signal?.aborted; index += 1) {
+        const at = sampleTimes[index]!;
+        const range = opts.within?.[index];
+        const from = range ? range[0] + t0 : -Infinity;
+        const to = range ? range[1] + t0 : Infinity;
+        const key = await packets.getKeyPacket(at, { metadataOnly: true });
+        let near = at;
+        if (key && key.timestamp >= from) near = key.timestamp;
+        else {
+          const next = key ? await packets.getNextKeyPacket(key, { metadataOnly: true }) : null;
+          if (next && next.timestamp < to) near = next.timestamp;
+        }
+        if (taken.has(near)) continue;
+        taken.add(near);
+        await picture(await sink.getSample(near));
+      }
+      return out;
     }
+    for await (const sample of sink.samplesAtTimestamps(sampleTimes)) await picture(sample);
     return out;
   } finally {
     await input.dispose();

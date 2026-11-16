@@ -3,7 +3,8 @@ import { primaryNarrativeClips, type EditorDocumentV2 } from '@pireel/studio-eng
 export interface CoverSourceFrame { assetId: string; sourceSec: number; timelineSec?: number }
 export interface CoverFrameRange { assetId: string; startSec: number; endSec: number; sourceInSec: number; sourceOutSec: number }
 export interface CoverFrameSample extends CoverSourceFrame { timelineSec: number; url: string }
-export interface CoverFrameStripData { frames: CoverFrameSample[]; ranges: CoverFrameRange[]; durationSec: number; fps: number }
+/** `count` is how many pictures the strip will hold; while `loading` they are still arriving, in order. */
+export interface CoverFrameStripData { frames: CoverFrameSample[]; ranges: CoverFrameRange[]; durationSec: number; fps: number; count?: number; loading?: boolean }
 
 export function coverFrameRanges(document: EditorDocumentV2): CoverFrameRange[] {
   return primaryNarrativeClips(document).filter(clip => clip.enabled && document.assets[clip.assetId]?.kind === 'video').map(clip => ({ assetId: clip.assetId, startSec: clip.startFrame / document.canvas.fps, endSec: (clip.startFrame + clip.durationFrames) / document.canvas.fps, sourceInSec: clip.sourceInSec, sourceOutSec: clip.sourceOutSec })).sort((a, b) => a.startSec - b.startSec);
@@ -24,6 +25,29 @@ export function coverFrameTime(ranges: readonly CoverFrameRange[], frame?: Cover
   if (!frame) return 0;
   const range = ranges.find(range => range.assetId === frame.assetId && frame.sourceSec >= range.sourceInSec && frame.sourceSec < range.sourceOutSec && (frame.timelineSec === undefined || frame.timelineSec >= range.startSec && frame.timelineSec < range.endSec));
   return range ? range.startSec + (frame.sourceSec - range.sourceInSec) / (range.sourceOutSec - range.sourceInSec) * (range.endSec - range.startSec) : 0;
+}
+
+/**
+ * The order to read `count` pictures of a strip in so that it is an overview from the first few:
+ * the two ends, the middle, the quarters, and so on down. Every index once.
+ */
+export function overviewOrder(count: number): number[] {
+  if (count <= 0) return [];
+  const order = count > 1 ? [0, count - 1] : [0];
+  const taken = new Set(order);
+  let spans: Array<[number, number]> = [[0, count - 1]];
+  while (order.length < count) {
+    const next: Array<[number, number]> = [];
+    for (const [from, to] of spans) {
+      if (to - from < 2) continue;
+      const mid = Math.floor((from + to) / 2);
+      if (!taken.has(mid)) { taken.add(mid); order.push(mid); }
+      next.push([from, mid], [mid, to]);
+    }
+    if (!next.length) break;
+    spans = next;
+  }
+  return order;
 }
 
 /** Thumbnail URLs are runtime-only; persist just the media identity and exact selected moment. */

@@ -177,10 +177,12 @@ export function useStudioExport(deps: {
    *  Right after an output switch the runtime is still restoring sources asynchronously; exporting
    *  before that finishes silently drops the clips whose source is not ready yet (a PIP video). */
   prepareExportAssets?: (document: EditorDocumentV2) => Promise<void>;
+  /** The project's cover image, for an export that opens on it. Null when the project has none. */
+  exportCover?: (document: EditorDocumentV2) => Promise<Blob | null>;
   /** The active version's title, read when an export starts. */
   outputTitle?: () => string | undefined;
 }) {
-  const { compRef, documentRef, resolveAssetUrl, videoFileRef, clipFilesRef, audioExportRef, denoiseExportRef, prepareExportAssets, outputTitle } = deps;
+  const { compRef, documentRef, resolveAssetUrl, videoFileRef, clipFilesRef, audioExportRef, denoiseExportRef, prepareExportAssets, exportCover, outputTitle } = deps;
   const [exporting, setExporting] = useState(false);
   /** Synchronous busy flag: the state above only updates on the next render, and preparing assets
    *  awaits before it is set, so a second click could otherwise start a second export. */
@@ -272,10 +274,12 @@ export function useStudioExport(deps: {
     opts: ExportRenderOpts,
     audio: AudioExportEntry[] | null,
     saveTo: FileSystemFileHandle | null,
+    cover: Blob | null,
   ): Promise<Blob> => {
     forgetLastExport();
     const blob = await clientExportVideo({
       ...exportInput(c, plan, audio),
+      cover,
       render: opts,
       saveTo,
       onProgress: (done, total) => setExportPct(Math.round((done / total) * 100)),
@@ -367,7 +371,17 @@ export function useStudioExport(deps: {
         const delivery = await deliverBlob(kept.blob, name, sinkUrl);
         return { ok: true, filename: name, ...delivery };
       }
-      const blob = await renderBlob(c, plan, key, opts, audio, saveTo);
+      // Asked to open on the cover and the cover cannot be read: say so rather than leave it out.
+      let cover: Blob | null = null;
+      if (opts.cover) {
+        try { cover = await exportCover?.(document) ?? null; }
+        catch (error) {
+          console.warn('[studio] export cover unreadable', error);
+          toast.error(t('common.exportCoverUnreadable'));
+          return { ok: false, error: tEnglish('common.exportCoverUnreadable') };
+        }
+      }
+      const blob = await renderBlob(c, plan, key, opts, audio, saveTo, cover);
       if (saveTo && exportSavedToChosenFile(blob)) {
         toast.success(t('common.exportCompleteSaved'));
         return { ok: true, filename: saveTo.name, delivered: 'saved_file' };

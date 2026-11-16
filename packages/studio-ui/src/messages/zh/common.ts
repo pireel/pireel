@@ -58,6 +58,7 @@ export const COMMON_ZH: Record<string, string> = {
   'common.exportNoSpace': '空间不够，没能导出。清出一些空间后再试',
   'common.exportFailed': '导出失败',
   'common.exportFailedTryAgain': '导出失败，稍后重试',
+  'common.exportCoverUnreadable': '封面没有读取成功，请重试，或关掉「封面作为首帧」再导出',
   'common.exportFilename': '成片-{res}p-{stamp}.{format}',
   'common.exportFilenameTitled': '{title}-{res}p-{stamp}.{format}',
   'common.exportWasCanceled': '导出被取消',

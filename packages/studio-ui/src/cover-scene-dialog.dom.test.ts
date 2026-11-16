@@ -25,6 +25,7 @@ const inputs = {
   onPrepare: vi.fn(async () => {}), onSaveDraft: vi.fn(async () => {}),
   onLoadFrames: vi.fn(async () => ({ fps: 30, durationSec: 4, ranges: [{ assetId: 'speaker', startSec: 0, endSec: 4, sourceInSec: 2, sourceOutSec: 6 }], frames: [{ assetId: 'speaker', sourceSec: 2, timelineSec: 0, url: 'data:image/jpeg;base64,first' }, { assetId: 'speaker', sourceSec: 5, timelineSec: 3, url: 'data:image/jpeg;base64,last' }] })),
   onPreviewFrame: vi.fn(async (_frame: { assetId: string; sourceSec: number }) => new Blob(['frame'], { type: 'image/jpeg' })),
+  onApplyFrame: vi.fn(async (_frame: { assetId: string; sourceSec: number }) => ({ key: 'uploads/frame.jpg', url: 'https://cdn.example/frame.jpg', label: 'Frame' })),
 };
 async function mount(component: ReturnType<typeof createElement>) { const host = document.createElement('div'); document.body.append(host); const root = createRoot(host); roots.push(root); await act(async () => root.render(component)); return host; }
 
@@ -123,5 +124,31 @@ describe('independent cover scene interaction', () => {
     expect(host.textContent).toContain('封面');
     expect(host.querySelector('.animate-spin')).not.toBeNull();
     act(() => host.querySelector('button')!.click()); expect(open).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the chosen frame as the cover', () => {
+  it('previews the frame before anything is generated and applies it as it is', async () => {
+    const applyFrame = vi.fn(async (_frame: { assetId: string; sourceSec: number }) => ({ key: 'uploads/frame.jpg', url: 'https://cdn.example/frame.jpg', label: 'Frame' }));
+    const generate = vi.fn(async () => {});
+    await mount(createElement(CoverSceneDialog, { ...inputs, open: true, scene: { ...scene, phase: 'prepared', prompt: '', images: [], history: [] }, applied: null, busy: false, onClose: () => {}, onGenerate: generate, onApply: async () => {}, onApplyFrame: applyFrame }));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 125)); });
+    // The preview is the frame itself, with nothing generated yet.
+    expect(document.querySelector('[role=dialog] img[alt="视频画面"]')).not.toBeNull();
+    expect(document.body.textContent).not.toContain('生成的封面会显示在这里');
+    const apply = [...document.querySelectorAll('[role=dialog] button')].find(button => button.textContent?.includes('应用为封面')) as HTMLButtonElement;
+    await act(async () => apply.click());
+    expect(applyFrame).toHaveBeenCalledWith({ assetId: 'speaker', sourceSec: 2, timelineSec: 0 });
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it('keeps a generated cover in the preview and offers the frame beside it', async () => {
+    await mount(createElement(CoverSceneDialog, { ...inputs, open: true, scene, applied: null, busy: false, onClose: () => {}, onGenerate: async () => {}, onApply: async () => {} }));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 125)); });
+    expect(document.querySelector('[role=dialog] img[alt="封面预览"]')?.getAttribute('src')).toBe('https://cdn.example/new.jpg');
+    const frame = document.querySelector('[role=dialog] button[aria-label="视频画面"]') as HTMLButtonElement;
+    await act(async () => frame.click());
+    expect(document.querySelector('[role=dialog] img[alt="封面预览"]')).toBeNull();
+    expect(document.querySelector('[role=dialog] img[alt="视频画面"]')).not.toBeNull();
   });
 });

@@ -21,7 +21,11 @@ export function CoverFrameTimeline({ strip, at, disabled, onPreview, onCommit, o
     return () => { observer.disconnect(); element.removeEventListener('wheel', wheel); };
   }, []);
   const duration = Math.max(strip.durationSec, 1 / strip.fps);
-  const pps = Math.max(width - 16, strip.frames.length * 72) / duration * zoom;
+  // Laid out for the pictures it will hold, so it does not stretch as they arrive.
+  const planned = strip.count ?? strip.frames.length;
+  const pps = Math.max(width - 16, planned * 72) / duration * zoom;
+  // Pictures arrive spread over the whole video first and fill in between: until a tile's own
+  // comes it shows the nearest one there is, so the strip is an overview from the first few.
   const step = rulerStep(pps); const max = Math.max(0, duration - 1 / strip.fps);
   const select = (seconds: number, commit = false) => { const frame = coverFrameAtTime(strip.ranges, seconds, strip.fps); if (frame) { drag.current = frame; onPreview(frame); if (commit) { onCommit(frame); drag.current = null; } } };
   const seek = (clientX: number) => {
@@ -44,7 +48,7 @@ export function CoverFrameTimeline({ strip, at, disabled, onPreview, onCommit, o
         onPointerCancel={() => { drag.current = null; onCancel(); }}
         onKeyDown={event => { if (disabled) return; const times: Record<string, number> = { ArrowLeft: at - 1 / strip.fps, ArrowRight: at + 1 / strip.fps, Home: 0, End: max, PageUp: at - 1, PageDown: at + 1 }; if (event.key in times) { event.preventDefault(); select(times[event.key], true); } }}>
         <div className="border-line bg-panel text-ink-4 relative border-b text-[9px]" style={{ height: RULER_H }}>{Array.from({ length: Math.ceil(duration / step) }, (_, index) => <div key={index} className="absolute inset-y-0" style={{ left: index * step * pps }}><span className="absolute left-1 top-0.5 tabular-nums">{fmtTick(index * step)}</span><div className="bg-line absolute bottom-0 h-1.5 w-px" /><div className="bg-line/60 absolute bottom-0 h-[3px] w-px" style={{ left: step * pps / 2 }} /></div>)}</div>
-        <div className="relative my-2 h-14 overflow-hidden rounded-sm">{Array.from({ length: Math.ceil(duration * pps / 72) }, (_, index) => { const second = (index * 72 + 36) / pps; const frame = strip.frames.reduce<typeof strip.frames[number] | undefined>((best, item) => !best || Math.abs(item.timelineSec - second) < Math.abs(best.timelineSec - second) ? item : best, undefined); return frame ? <img key={index} src={frame.url} alt="" draggable={false} className="pointer-events-none absolute h-full object-cover" style={{ left: index * 72, width: Math.min(72, duration * pps - index * 72) }} /> : null; })}</div>
+        <div className="relative my-2 h-14 overflow-hidden rounded-sm">{Array.from({ length: Math.ceil(duration * pps / 72) }, (_, index) => { const second = (index * 72 + 36) / pps; const frame = strip.frames.reduce<typeof strip.frames[number] | undefined>((best, item) => !best || Math.abs(item.timelineSec - second) < Math.abs(best.timelineSec - second) ? item : best, undefined); return frame ? <img key={index} src={frame.url} alt="" draggable={false} className="pointer-events-none absolute h-full object-cover" style={{ left: index * 72, width: Math.min(72, duration * pps - index * 72) }} /> : <div key={index} className="bg-panel-2 pointer-events-none absolute h-full animate-pulse" style={{ left: index * 72, width: Math.min(72, duration * pps - index * 72) - 1 }} />; })}</div>
         <div data-cover-frame-playhead className="pointer-events-none absolute inset-y-0 w-0.5 bg-rose" style={{ left: at * pps }}><div className="absolute top-0 -left-[3px] h-0 w-0 border-x-4 border-t-[6px] border-x-transparent border-t-rose" /></div>
       </div>
     </div>

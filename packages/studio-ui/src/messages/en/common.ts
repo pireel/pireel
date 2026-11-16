@@ -58,6 +58,7 @@ export const COMMON_EN: Record<string, string> = {
   'common.exportNoSpace': 'Not enough space to finish the export. Free up some space and try again.',
   'common.exportFailed': 'Export failed',
   'common.exportFailedTryAgain': 'Export failed — try again in a moment',
+  'common.exportCoverUnreadable': 'The cover could not be read. Try again, or export without "Open on the cover".',
   'common.exportFilename': 'export-{res}p-{stamp}.{format}',
   'common.exportFilenameTitled': '{title}-{res}p-{stamp}.{format}',
   'common.exportWasCanceled': 'The export was canceled',
