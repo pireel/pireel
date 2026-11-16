@@ -35,6 +35,7 @@ export function AssetsPanel({
   hasMainSource,
   onDeleteAsset,
   isSrcLive,
+  loadingSigs,
   onReconnectSource,
   onInsert,
   onInsertClip,
@@ -72,6 +73,8 @@ export function AssetsPanel({
   onDeleteAsset?: (src: string | null) => void;
   /** Per-asset liveness of a track source's bytes (workbench-held Files) — drives "My"'s restore cards. */
   isSrcLive?: (url: string) => boolean;
+  /** Signatures of the sources the editor is fetching for this project right now. */
+  loadingSigs?: ReadonlySet<string>;
   /** Per-asset reconnect for a missing track source (null = main). */
   onReconnectSource?: (src: string | null, sig?: string | null) => void;
   onInsert: (asset: MediaRef, label?: string, dims?: { w: number; h: number }) => void;
@@ -138,6 +141,7 @@ export function AssetsPanel({
           hasMainSource={hasMainSource}
           onDeleteAsset={onDeleteAsset}
           isSrcLive={isSrcLive}
+          loadingSigs={loadingSigs}
           onReconnectSource={onReconnectSource}
           onInsert={onInsert}
           onInsertClip={onInsertClip}

@@ -15,7 +15,7 @@
  * shot cut points / block, caption and audio edges / playhead.
  */
 
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeftRight, Clapperboard, Film, GalleryHorizontal, Loader2, Music, Plus, VideoOff, Volume2 } from 'lucide-react';
 import { MuteToggle, VisibilityToggle } from './timeline-track-toggles';
 import { StudioTimelineCanvas } from './studio-timeline-canvas';
@@ -83,7 +83,7 @@ import { WAVE_FLOOR_DB, fadeBodyPath, waveBars } from './timeline-wave';
 import { DirectorSceneStrip, DIRECTOR_SCENE_STRIP_H, type TimelineDirectorScene } from './director-scene-strip';
 import type { TimelineInsertMode, TimelineMediaDropTarget, TimelineVisualDropTarget } from './timeline-asset-drop';
 
-export { DEFAULT_PPS, MAX_PPS, MIN_PPS } from './timeline-utils';
+export { DEFAULT_PPS, MAX_PPS, MIN_PPS, fitPps } from './timeline-utils';
 
 /** Professional NLEs keep a permanent bottom drop zone instead of inserting a temporary dashed row. */
 const VISUAL_TRACK_DROP_ZONE_H = 38;
@@ -167,6 +167,10 @@ export interface StudioTimelineProps {
   /** Zoom (px/sec) is controlled: value and setter both come from the transport slider. */
   pps: number;
   onPps: React.Dispatch<React.SetStateAction<number>>;
+  /** How far out the wheel may zoom: MIN_PPS, or less when the whole timeline only fits below it. */
+  minPps?: number;
+  /** Each increment = show the timeline from its start (the zoom was just set to fit the width). */
+  fitSignal?: number;
   /** Global direct-manipulation magnet. Off means exact free placement with no edge/second snapping. */
   snapEnabled?: boolean;
   /** Inspector-style Chat frame picking: hover previews the real timeline, click returns one exact frame. */
@@ -341,6 +345,8 @@ function StudioTimelineImpl({
   selectedVisualClipId,
   selectedBlockIds,
   filmstrip,
+  minPps = MIN_PPS,
+  fitSignal = 0,
   pps,
   onPps,
   snapEnabled = true,
@@ -1045,6 +1051,14 @@ function StudioTimelineImpl({
     });
   }, [drag, dur, onSeek, rawSecAt, snapPlayhead]);
 
+  const minPpsRef = useRef(minPps);
+  minPpsRef.current = minPps;
+  // Fit to width: the zoom is already set, the view goes back to the start.
+  const firstFitRef = useRef(true);
+  useLayoutEffect(() => {
+    if (firstFitRef.current) { firstFitRef.current = false; return; }
+    if (scrollRef.current) scrollRef.current.scrollLeft = 0;
+  }, [fitSignal]);
   // Cmd + wheel zoom (zoom value is controlled by the transport slider)
   useEffect(() => {
     const el = scrollRef.current;
@@ -1052,7 +1066,7 @@ function StudioTimelineImpl({
     const onWheel = (ev: WheelEvent) => {
       if (!ev.ctrlKey && !ev.metaKey) return;
       ev.preventDefault();
-      onPps((p) => Math.max(MIN_PPS, Math.min(MAX_PPS, p * (ev.deltaY < 0 ? 1.1 : 0.9))));
+      onPps((p) => Math.max(minPpsRef.current, Math.min(MAX_PPS, p * (ev.deltaY < 0 ? 1.1 : 0.9))));
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);

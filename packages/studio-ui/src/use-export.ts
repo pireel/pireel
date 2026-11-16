@@ -21,7 +21,7 @@ import {
   videoTrackShots,
 } from '@pireel/studio-engine/composition';
 import { fileSig } from '@pireel/studio-ui/media-ai';
-import { ExportCanceled, type ExportRenderOpts, clientExportVideo, measureExportLoudness } from '@pireel/studio-ui/client-export';
+import { ExportCanceled, type ExportRenderOpts, type ExportStage, clientExportVideo, measureExportLoudness } from '@pireel/studio-ui/client-export';
 import { t, tEnglish } from '@pireel/studio-ui/i18n';
 import { compositionRenderView } from '@pireel/studio-ui/composition-render-view';
 import { primaryNarrativeRenderPlan } from '@pireel/studio-ui/primary-render-plan';
@@ -158,6 +158,10 @@ const filenameFor = (o: ExportRenderOpts, title?: string) => {
     : t('common.exportFilename', { res: o.res, stamp: stamp(), format: o.format });
 };
 
+/** How much of an export's progress the sound stands for. A 44-minute edit spent 25 s on its sound
+ *  (and 17 s before that getting ready) out of an export of about 400 s. */
+const SOUND_SHARE_PCT = 10;
+
 export function useStudioExport(deps: {
   compRef: MutableRefObject<Composition>;
   documentRef: MutableRefObject<EditorDocumentV2>;
@@ -181,7 +185,17 @@ export function useStudioExport(deps: {
   /** Synchronous busy flag: the state above only updates on the next render, and preparing assets
    *  awaits before it is set, so a second click could otherwise start a second export. */
   const busyRef = useRef(false);
-  const [exportPct, setExportPct] = useState(0);
+  /** Frames written, as a percentage of the picture. */
+  const [framesPct, setExportPct] = useState(0);
+  /** What the running export is doing, and how far that part is. The sound of a whole video is
+   *  written before its first frame, so a long one would sit at 0% of its frames for a while. */
+  const [exportStage, setExportStage] = useState<{ stage: ExportStage; pct: number }>({ stage: 'preparing', pct: 0 });
+  /** One figure for the whole export: the sound takes the first part of it, the picture the rest. */
+  const exportPct = exportStage.stage === 'preparing'
+    ? 0
+    : exportStage.stage === 'sound'
+      ? Math.round((exportStage.pct * SOUND_SHARE_PCT) / 100)
+      : SOUND_SHARE_PCT + Math.round((framesPct * (100 - SOUND_SHARE_PCT)) / 100);
   const exportCancelRef = useRef(false); // User clicked "Cancel export": stop compositing and unlock the UI
   /** Last-result cache: key = comp + source fingerprint + options. Unchanged → re-download/publish directly, don't re-composite.
    *  `handle` is the file the user saved it to, when the export was written there. */
@@ -265,6 +279,7 @@ export function useStudioExport(deps: {
       render: opts,
       saveTo,
       onProgress: (done, total) => setExportPct(Math.round((done / total) * 100)),
+      onStage: (stage, fraction) => setExportStage({ stage, pct: Math.round(fraction * 100) }),
       shouldCancel: () => exportCancelRef.current,
     });
     lastExportRef.current = { key, blob, opts, ...(saveTo && exportSavedToChosenFile(blob) ? { handle: saveTo } : {}) };
@@ -309,27 +324,29 @@ export function useStudioExport(deps: {
     }
   }
   async function runExport(opts: ExportRenderOpts, sinkUrl: string | undefined, saveTo: FileSystemFileHandle | null): Promise<ExportResult> {
-    // Every referenced local source must be resolvable BEFORE the plan is read, or the plan omits
-    // the clip (batch export right after an output switch used to lose the picture-in-picture video).
-    await prepareExportAssets?.(documentRef.current);
-    const c = compRef.current;
-    // Snapshot the canonical document once. Edits made while encoding belong to the next export;
-    // they must not change placements under an already-computed cache key.
-    const document = documentRef.current;
-    const plan = editorDocumentRenderPlan(document, { resolveAssetUrl });
-    if (plan.durationFrames === 0) {
-      toast.error(t('common.nothingToExport'));
-      return { ok: false, error: tEnglish('common.nothingToExport') };
-    }
-    if (!canClientExport(c, plan)) {
-      toast.error(noExportReason(c, plan));
-      return { ok: false, error: noExportReason(c, plan) };
-    }
-    const name = filenameFor(opts, outputTitle?.());
+    // Shown as exporting from the first moment: getting the footage ready can take a while too.
     setExporting(true);
     setExportPct(0);
+    setExportStage({ stage: 'preparing', pct: 0 });
     exportCancelRef.current = false;
     try {
+      // Every referenced local source must be resolvable BEFORE the plan is read, or the plan omits
+      // the clip (batch export right after an output switch used to lose the picture-in-picture video).
+      await prepareExportAssets?.(documentRef.current);
+      const c = compRef.current;
+      // Snapshot the canonical document once. Edits made while encoding belong to the next export;
+      // they must not change placements under an already-computed cache key.
+      const document = documentRef.current;
+      const plan = editorDocumentRenderPlan(document, { resolveAssetUrl });
+      if (plan.durationFrames === 0) {
+        toast.error(t('common.nothingToExport'));
+        return { ok: false, error: tEnglish('common.nothingToExport') };
+      }
+      if (!canClientExport(c, plan)) {
+        toast.error(noExportReason(c, plan));
+        return { ok: false, error: noExportReason(c, plan) };
+      }
+      const name = filenameFor(opts, outputTitle?.());
       const audio = await (audioExportRef?.current?.() ?? Promise.resolve(null));
       const key = exportKey(document, plan, opts, audio);
       const kept = await keptExport(key);
@@ -378,6 +395,7 @@ export function useStudioExport(deps: {
   return {
     exporting,
     exportPct,
+    exportStage: exportStage.stage,
     exportVideo,
     measureMixLoudness,
     cancelExport: () => {

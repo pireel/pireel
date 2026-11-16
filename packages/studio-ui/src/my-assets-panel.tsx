@@ -63,6 +63,7 @@ import {
 import { audioCoverUrl, fileMatchesSig, fileNameFromSig } from '@pireel/studio-ui/media';
 import { storeVideoPoster } from '@pireel/studio-ui/video-poster';
 import { resolveAssetBytes, resolveAssetPreview } from '@pireel/studio-ui/local-media';
+import { useMediaDownload } from '@pireel/studio-ui/media-downloads';
 import { assetUploadQueue, type AssetUploadState } from '@pireel/studio-ui/asset-upload-queue';
 import {
   localAssetIndexEntry,
@@ -148,14 +149,29 @@ function LocalVisualSearchLoading() {
 
 /** Asset whose bytes are reachable nowhere yet (legacy import that never reached the cloud, or a
  * cloud retrieval still in flight): click = pick the original file once, after which it uploads. */
-function RestoreTile({ label, kind = 'video', busy, onRestore, onRename, onDelete }: { label: string; kind?: LocalKind; busy?: boolean; onRestore: () => void; onRename?: () => void; onDelete: () => void }) {
+/** A source that is not on this device. While it is on its way (the editor is fetching it, or
+ *  the bytes are arriving) the tile says so and how far it is; only a source that really is not
+ *  coming asks to be imported again. */
+function RestoreTile({ label, kind = 'video', sig, busy, loading, onRestore, onRename, onDelete }: { label: string; kind?: LocalKind; sig?: string | null; busy?: boolean; loading?: boolean; onRestore: () => void; onRename?: () => void; onDelete: () => void }) {
   const Icon = kind === 'image' ? ImageIcon : kind === 'audio' ? Music : Clapperboard;
+  const download = useMediaDownload(sig);
+  const coming = !!download || !!loading;
+  const working = coming || !!busy;
   return (
-    <div className="border-line hover:border-accent group relative w-full overflow-hidden rounded-md border border-dashed transition">
-      <button type="button" disabled={busy} onClick={onRestore} title={busy ? undefined : t('panels.localReconnect')} className="block w-full text-left disabled:opacity-70">
-        <div className="bg-panel-2 flex aspect-video flex-col items-center justify-center gap-1">
-          {busy ? <Loader2 size={16} className="text-ink-4 animate-spin" /> : <Icon size={16} className="text-ink-4" />}
-          <span className="text-ink-4 text-[10px]">{busy ? t('common.loading') : t('panels.needsReimport')}</span>
+    <div className={`border-line group relative w-full overflow-hidden rounded-md border border-dashed transition ${working ? '' : 'hover:border-accent'}`}>
+      <button type="button" disabled={working} onClick={onRestore} title={working ? undefined : t('panels.localReconnect')} className="block w-full text-left disabled:opacity-70">
+        <div className="bg-panel-2 relative flex aspect-video flex-col items-center justify-center gap-1">
+          {working ? <Loader2 size={16} className="text-ink-4 animate-spin" /> : <Icon size={16} className="text-ink-4" />}
+          <span className="text-ink-4 text-[10px]">
+            {coming
+              ? download?.fraction != null ? t('panels.downloadingPct', { pct: Math.round(download.fraction * 100) }) : t('panels.downloading')
+              : busy ? t('panels.loading') : t('panels.needsReimport')}
+          </span>
+          {download?.fraction != null && (
+            <span className="bg-line absolute inset-x-2 bottom-1.5 h-0.5 overflow-hidden rounded-full">
+              <span className="bg-accent block h-full rounded-full transition-[width] duration-300 ease-out" style={{ width: `${Math.round(download.fraction * 100)}%` }} />
+            </span>
+          )}
         </div>
         <div className="text-ink-3 h-6 truncate px-1.5 py-1 text-[10px] leading-4">{label}</div>
       </button>
@@ -240,6 +256,7 @@ export function MyAssetsPanel({
   hasMainSource,
   onDeleteAsset,
   isSrcLive,
+  loadingSigs,
   onReconnectSource,
   onInsert,
   onInsertClip,
@@ -267,6 +284,8 @@ export function MyAssetsPanel({
   onDeleteAsset?: (src: string | null, sig?: string | null) => boolean | void;
   /** Per-asset liveness of a track source's bytes in this session (workbench-held Files). */
   isSrcLive?: (url: string) => boolean;
+  /** Signatures of the sources the editor is fetching for this project right now. */
+  loadingSigs?: ReadonlySet<string>;
   /** Per-asset reconnect for a track source whose bytes are missing (cache/cloud → re-pick). null = main. */
   onReconnectSource?: (src: string | null, sig?: string | null) => void;
   /** Stage-side insert (media block) — fallback when no onInsertClip is wired. */
@@ -1000,6 +1019,7 @@ export function MyAssetsPanel({
                 <div key={it.id} className="group relative">
                   <AssetCard
                     item={it}
+                    loading={!!it.sig && loadingSigs?.has(it.sig)}
                     playing={it.kind === 'audio' && audioPlaying === it.insertUrl}
                     onActivate={() => activate(it)}
                     onInsert={() => insertOf(it)}
@@ -1029,6 +1049,7 @@ export function MyAssetsPanel({
                   <AssetCard
                     key={c.it.id}
                     item={c.it}
+                    loading={!!c.it.sig && loadingSigs?.has(c.it.sig)}
                     onActivate={() => activate(c.it)}
                     onInsert={() => insertOf(c.it)}
                     onRename={c.it.sig && registryCountByContent.get(c.it.sig) === 1
@@ -1046,6 +1067,8 @@ export function MyAssetsPanel({
                   <RestoreTile
                     key={c.it.id}
                     label={c.it.label}
+                    sig={c.it.sig}
+                    loading={!!c.it.sig && loadingSigs?.has(c.it.sig)}
                     onRestore={() => onReconnectSource?.(c.src, c.it.sig)}
                     onRename={c.it.sig && registryCountByContent.get(c.it.sig) === 1
                       ? (() => {
@@ -1063,6 +1086,8 @@ export function MyAssetsPanel({
                   key={`restore:${e.assetId}`}
                   label={e.label}
                   kind={e.kind ?? 'video'}
+                  sig={e.contentSig}
+                  loading={loadingSigs?.has(e.contentSig)}
                   busy={resolving.has(e.assetId)}
                   onRestore={() => void reconnect(e)}
                   onRename={() => beginRename(e.assetId, e.contentSig, e.label, e.kind ?? 'video')}

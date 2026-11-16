@@ -21,6 +21,7 @@ import type { Composition, MediaRef } from '@pireel/studio-engine/composition';
 import type { GenElementResult } from './element-history';
 import { componentPreviewAspect, componentPreviewModel, LibraryComponentPreview } from './component-preview';
 import { t } from './i18n';
+import { useMediaDownload } from './media-downloads';
 
 /** Compact card grid shared by asset and generation libraries.
  * The 88px floor lets the padded generation panel keep three compact columns at its default width. */
@@ -187,10 +188,22 @@ function firstFrameUrl(url: string | undefined): string | undefined {
  *  Even when a poster image exists, a metadata-only <video> is the duration source. */
 function VideoTile({ item: it, menuOffset = false }: { item: LibraryItem; menuOffset?: boolean }) {
   const [dur, setDur] = useState<number | null>(null);
+  const [unreadable, setUnreadable] = useState(false);
+  const [posterShown, setPosterShown] = useState(false);
+  // Until its picture arrives (the poster, or without one the video's own first frame) the tile
+  // would be an empty box: it turns while it waits.
+  const waiting = !unreadable && (it.thumbSrc ? !posterShown : dur == null);
   return (
     <div className="bg-panel-2 relative aspect-video w-full overflow-hidden">
       {it.thumbSrc ? (
-        <img src={imageThumb(it.thumbSrc, 'strip')} alt={it.label} className="h-full w-full object-contain" loading="lazy" />
+        <img
+          src={imageThumb(it.thumbSrc, 'strip')}
+          alt={it.label}
+          className="h-full w-full object-contain"
+          loading="lazy"
+          onLoad={() => setPosterShown(true)}
+          onError={() => setUnreadable(true)}
+        />
       ) : null}
       <video
         src={firstFrameUrl(it.insertUrl)}
@@ -198,8 +211,14 @@ function VideoTile({ item: it, menuOffset = false }: { item: LibraryItem; menuOf
         muted
         playsInline
         onLoadedMetadata={(e) => setDur(e.currentTarget.duration)}
+        onError={() => setUnreadable(true)}
         className={it.thumbSrc ? 'hidden' : 'h-full w-full object-contain'}
       />
+      {waiting ? (
+        <span className="absolute inset-0 flex items-center justify-center">
+          <Loader2 size={16} className="text-ink-4 animate-spin" />
+        </span>
+      ) : null}
       <DurBadge sec={dur} menuOffset={menuOffset} />
     </div>
   );
@@ -340,9 +359,12 @@ export function AssetCard({
   onUseAsReference,
   dragProps,
   insertLabel,
+  loading = false,
 }: {
   item: LibraryItem;
   playing?: boolean;
+  /** The editor is fetching this media for the timeline right now. */
+  loading?: boolean;
   onActivate: () => void;
   onInsert: () => void;
   /** Arm image generation with this asset as a reference (image/video assets). */
@@ -356,6 +378,10 @@ export function AssetCard({
 }) {
   const audio = it.kind === 'audio';
   const hasOptionsMenu = Boolean(onRename || onUseAsReference);
+  // The card may already show (it has an address to preview from) while the media itself is still
+  // coming down to this device for the timeline: it says so, with how far along it is once known.
+  const download = useMediaDownload(it.sig);
+  const coming = !!download || loading;
   return (
     <div className="bg-panel ring-line hover:ring-line-2 group relative w-full overflow-hidden rounded-lg ring-1 transition-shadow hover:shadow-[0_4px_14px_rgb(0_0_0/0.08)]">
       <button
@@ -375,6 +401,17 @@ export function AssetCard({
         )}
         <div className="text-ink-2 border-line h-6 truncate border-t px-2 py-1 text-[11px] leading-4">{it.label}</div>
       </button>
+      {coming ? (
+        <span className="pointer-events-none absolute inset-x-0 bottom-6 top-0 flex flex-col items-center justify-center gap-1 bg-black/45 text-[10px] text-white">
+          <Loader2 size={15} className="animate-spin" />
+          {download?.fraction != null ? t('panels.downloadingPct', { pct: Math.round(download.fraction * 100) }) : t('panels.downloading')}
+          {download?.fraction != null ? (
+            <span className="absolute inset-x-2 bottom-1.5 h-0.5 overflow-hidden rounded-full bg-white/30">
+              <span className="block h-full rounded-full bg-white transition-[width] duration-300 ease-out" style={{ width: `${Math.round(download.fraction * 100)}%` }} />
+            </span>
+          ) : null}
+        </span>
+      ) : null}
       {/* Action chrome sits inside the thumb area (label strip is h-6 below). Video/audio move the
           duration badge left when the top-right options menu is present. */}
       {hasOptionsMenu ? (

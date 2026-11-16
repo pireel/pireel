@@ -67,7 +67,7 @@ const GLYPHS = [
 export function StudioTimelineCanvas(props: StudioTimelineProps) {
   // What only a frame reads (selection, thumbnails, peaks) is taken from `props` when it is painted.
   const {
-    comp, density = 'comfortable', videoPlacements, timelineDurationSec, playing, locateSignal, locateNear, pps, onPps, snapEnabled = true,
+    comp, density = 'comfortable', videoPlacements, timelineDurationSec, playing, locateSignal, locateNear, pps, onPps, minPps = MIN_PPS, fitSignal = 0, snapEnabled = true,
     framePickActive = false, framePickFps = 30, onPickFrame, onSeek, onScrub, onSelectShot, onSelectBlock, onDeselectAll,
     onSelectVisualClip, videoMuted, onToggleVideoMute, videoHidden, onToggleVideoHidden,
     audioMuted, onToggleAudioMute, trackStates, onToggleTrackMute, onToggleTrackHidden,
@@ -248,9 +248,9 @@ export function StudioTimelineCanvas(props: StudioTimelineProps) {
       selectedShots: p.selectedShotIds, selectedBlocks: p.selectedBlockIds, selectedVisualId: p.selectedVisualClipId ?? null,
       selectedAudioId: p.selectedAudioId ?? null, selectedTransitionId: p.selectedTransitionId ?? null, disabledIds: p.disabledClipIds,
       filmstrip: p.filmstrip ?? [], clipStrips: p.clipStripsStore?.get() ?? p.clipStrips ?? {}, sourcePeaks: p.sourcePeaks, audioPeaks: p.audioPeaks,
-      mainLive: p.mainLive ?? true, sourceLive: p.srcLive, image, kindIcon: (kind) => { const icon = now.kindIcons.get(kind); return icon?.complete ? icon : null; },
+      mainLive: p.mainLive ?? true, sourceLive: p.srcLive, loadingIds: p.loadingSourceClipIds, image, kindIcon: (kind) => { const icon = now.kindIcons.get(kind); return icon?.complete ? icon : null; },
       icon: (name) => { const glyph = now.glyphs.get(name); return glyph?.complete ? glyph : null; }, audioMute: !!p.onToggleAudioClipMute,
-      labels: { video: t('panels.video'), image: t('panels.image'), captions: t('panels.captions'), music: t('panels.musicBed'), missing: t('workbench.srcMissing'), dropAudio: t('panels.dropAudioHere'), emptySpine: t('panels.emptyPrimaryTrackDropVideo'), dropOnSpine: t('panels.releaseVideoOnPrimaryTrack'), inserting: t('common.inserting'), blockTitle: (item) => blockDisplayTitle(item.block) },
+      labels: { video: t('panels.video'), image: t('panels.image'), captions: t('panels.captions'), music: t('panels.musicBed'), missing: t('workbench.srcMissing'), loading: t('workbench.srcLoading'), dropAudio: t('panels.dropAudioHere'), emptySpine: t('panels.emptyPrimaryTrackDropVideo'), dropOnSpine: t('panels.releaseVideoOnPrimaryTrack'), inserting: t('common.inserting'), blockTitle: (item) => blockDisplayTitle(item.block) },
     };
     if (context) {
       paintTimeline(context, state);
@@ -1018,6 +1018,8 @@ export function StudioTimelineCanvas(props: StudioTimelineProps) {
   const zoomAnchor = useRef<{ second: number; x: number } | null>(null);
   const ppsRef = useRef(pps);
   ppsRef.current = pps;
+  const minPpsRef = useRef(minPps);
+  minPpsRef.current = minPps;
   useEffect(() => {
     const host = scrollRef.current;
     if (!host) return;
@@ -1027,7 +1029,7 @@ export function StudioTimelineCanvas(props: StudioTimelineProps) {
       // Where the pointer is across the visible lanes: the second there keeps that place.
       const x = event.clientX - host.getBoundingClientRect().left - GUTTER;
       zoomAnchor.current = { second: Math.max(0, (x - EDGE_PAD + host.scrollLeft) / ppsRef.current), x };
-      onPps((current) => Math.max(MIN_PPS, Math.min(MAX_PPS, current * (event.deltaY < 0 ? 1.1 : 0.9))));
+      onPps((current) => Math.max(minPpsRef.current, Math.min(MAX_PPS, current * (event.deltaY < 0 ? 1.1 : 0.9))));
     };
     host.addEventListener('wheel', onWheel, { passive: false });
     return () => host.removeEventListener('wheel', onWheel);
@@ -1038,6 +1040,12 @@ export function StudioTimelineCanvas(props: StudioTimelineProps) {
     zoomAnchor.current = null;
     if (anchor && host) host.scrollLeft = Math.max(0, EDGE_PAD + anchor.second * pps - anchor.x);
   }, [pps]);
+  // Fit to width: the zoom is already set, the view goes back to the start.
+  const firstFit = useRef(true);
+  useLayoutEffect(() => {
+    if (firstFit.current) { firstFit.current = false; return; }
+    if (scrollRef.current) scrollRef.current.scrollLeft = 0;
+  }, [fitSignal]);
 
   // ---- following the playhead -------------------------------------------------------------------
   const follow = useRef({ on: true, programmaticUntil: 0, lastLeft: 0 });

@@ -3,12 +3,13 @@
 /** Small self-contained workbench UI bits: floating-toolbar corner-radius control, transport time readout,
  *  export dialog option rows, and the ][ bracket cut icon. */
 
-import { useEffect, useRef, useState } from 'react';
-import { Crown, Squircle } from 'lucide-react';
+import { memo, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { Crown, Loader2, Squircle } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@pireel/ui/tooltip';
 import type { Block } from '@pireel/studio-engine/composition';
 import { t } from './i18n';
 import { usePlayheadT } from './playhead';
+import { mediaDownloads } from './media-downloads';
 
 /** "Corner radius" control on the floating toolbar (shared by layout blocks / media cards). Rotation uses the bottom rotate handle, not here.
  *  Live slider: onRadius previews while dragging (parent directly sets iframe border-radius), commits to Block on release. */
@@ -49,6 +50,75 @@ export function CardShapeControls({ block, onRadius }: { block: Block; onRadius:
     </span>
   );
 }
+
+/** Over the picture while footage of this project is still coming down to this device: the
+ *  picture is blank because of that, and says so, with how far along it is once that is known. */
+export function SourceDownloadNotice({ sigs }: { sigs: ReadonlySet<string> }) {
+  // A figure only for a single download: several at once finish and start at different moments,
+  // and one number for them would jump about.
+  const percent = useSyncExternalStore(mediaDownloads.subscribe, () => {
+    if (sigs.size !== 1) return -1;
+    const [sig] = sigs;
+    const fraction = mediaDownloads.get(sig!)?.fraction;
+    return fraction != null ? Math.round(fraction * 100) : -1;
+  }, () => -1);
+  if (!sigs.size) return null;
+  return (
+    <div className="pointer-events-none absolute left-1/2 top-1/2 z-[60] flex -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 rounded-full bg-black/60 px-3 py-1.5 text-[12px] text-white">
+      <Loader2 size={13} className="animate-spin" />
+      {percent >= 0 ? t('workbench.srcDownloadingPct', { pct: percent }) : t('workbench.srcLoading')}
+    </div>
+  );
+}
+
+/** Fit to width: the timeline's two ends pushed out to the edges of the view. Same line weight as the cut brackets beside it. */
+export function FitWidthIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M1.5 2.5 V11.5" />
+      <path d="M12.5 2.5 V11.5" />
+      <path d="M4 7 H10" />
+      <path d="M5.8 5.2 L4 7 L5.8 8.8" />
+      <path d="M8.2 5.2 L10 7 L8.2 8.8" />
+    </svg>
+  );
+}
+
+/** Renders what depends on where the playhead is: only this re-renders while it moves, and what
+ *  it returns re-renders only when the answer changes (give it memoized children). */
+export function AtPlayhead({ children }: { children: (seconds: number) => ReactNode }) {
+  return <>{children(usePlayheadT())}</>;
+}
+
+/** Trim to the playhead, each side enabled only when there is something on that side to cut. */
+export const TrimButtons = memo(function TrimButtons({ left, right, onTrim, leftLabel, rightLabel }: {
+  left: boolean;
+  right: boolean;
+  onTrim: (side: 'left' | 'right') => void;
+  leftLabel: string;
+  rightLabel: string;
+}) {
+  return (
+    <>
+      {(['left', 'right'] as const).map((side) => (
+        <Tooltip key={side}>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={() => onTrim(side)}
+              disabled={side === 'left' ? !left : !right}
+              aria-label={side === 'left' ? leftLabel : rightLabel}
+              className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40"
+            >
+              <BracketCutIcon dashed={side} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{side === 'left' ? leftLabel : rightLabel}</TooltipContent>
+        </Tooltip>
+      ))}
+    </>
+  );
+});
 
 /** Transport time readout: subscribes to the playhead store, so during playback only this small component re-renders each frame. */
 export function TimeReadout({ duration }: { duration: number }) {

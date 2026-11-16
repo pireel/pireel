@@ -58,6 +58,19 @@ export const SHOT_GAP = 2; // hairline gap between shot cards (taken off the rig
 export const MIN_PPS = 2; // min zoom: ~2px/s, shows minute scale (1 min ~= 120px, ticks go by minutes)
 export const MAX_PPS = 260;
 export const DEFAULT_PPS = 78;
+
+/**
+ * The zoom at which a timeline of `durationSec` exactly fills lanes `viewportPx` wide (the scroll
+ * area, fixed columns included). Below MIN_PPS for a long video on a narrow window: fitting is the
+ * one way under that floor. Null when there is nothing to fit or the width is not known yet.
+ */
+export function fitPps(durationSec: number, viewportPx: number): number | null {
+  // A playhead at the very end still counts as on screen (the view keeps 8 px clear of its right
+  // edge), so going to the end of a fitted timeline does not scroll it.
+  const lanes = viewportPx - GUTTER - EDGE_PAD * 2 - 8;
+  if (!(durationSec > 0) || !(lanes > 0)) return null;
+  return Math.max(0.01, Math.min(MAX_PPS, lanes / durationSec));
+}
 export const MIN_DUR = 0.3;
 export const SNAP_PX = 8;
 
@@ -261,9 +274,9 @@ export const TREATMENT_NAME: Record<string, string> = Object.fromEntries(SHOT_TR
 
 /** Adaptive ruler step: keep each cell >= ~64px. */
 export function rulerStep(pps: number): number {
-  const steps = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
+  const steps = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600, 7200];
   for (const s of steps) if (s * pps >= 64) return s;
-  return 1200;
+  return 14400;
 }
 
 /** Tick label: mm:ss for >=60s, otherwise Xs. */

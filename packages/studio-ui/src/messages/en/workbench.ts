@@ -227,10 +227,9 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.localPersistenceUnavailable":
     "This media works in the current session, but local recovery storage is unavailable. You may need to select it again after reloading.",
   "workbench.srcMissing": "Media unavailable",
-  "workbench.srcLoading": "Loading media",
+  "workbench.srcLoading": "Downloading media…",
+  "workbench.srcDownloadingPct": "Downloading media {pct}%",
   "workbench.canvasRatio": "Canvas ratio",
-  "workbench.localVideoUseTrack":
-    "Drop local videos on the timeline — stage picture-in-picture does not support local video files yet",
   "workbench.ratioCustom": "Custom",
   "workbench.collapseTimeline": "Collapse timeline",
   "workbench.expandTimeline": "Expand timeline",
@@ -579,7 +578,10 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.removeTransitionToSplit":
     "Cannot split inside a transition — remove the transition first",
   "workbench.renderingPctDownloads":
-    "Rendering {pct}% — downloads automatically when done",
+    "Exporting the picture {pct}%. It downloads when done.",
+  "workbench.exportPreparing": "Getting your footage ready",
+  "workbench.exportPreparingShort": "Preparing",
+  "workbench.exportSoundPct": "Processing the sound {pct}%",
   "workbench.rePickFile": "Re-pick file",
   "workbench.replacedText": 'Replaced with "{text}"',
   "workbench.updatedNCaptionLines": "Updated {n} caption lines",
@@ -754,6 +756,11 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.zoomInTimelineLabel": "Zoom in the timeline",
   "workbench.zoomOutTimeline": "Zoom out timeline",
   "workbench.zoomOutTimelineLabel": "Zoom out the timeline",
+  "workbench.fitTimeline": "Fit to width",
+  "workbench.jumpToStart": "Go to the start",
+  "workbench.jumpToStartKey": "Go to the start (Home)",
+  "workbench.jumpToEnd": "Go to the end",
+  "workbench.jumpToEndKey": "Go to the end (End)",
   "workbench.timelineAutoSnap": "Primary track auto snap",
   "workbench.timelineAutoSnapOn":
     "Primary auto snap is on. Clips stay packed continuously from the start.",

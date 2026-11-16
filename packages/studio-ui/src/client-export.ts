@@ -553,8 +553,15 @@ export interface ClientExportOpts {
    *  Absent, it goes to a private file (or memory, where the browser has no file storage). */
   saveTo?: FileSystemFileHandle | null;
   onProgress?: (done: number, total: number) => void;
+  /** What the export is doing before and while frames are written, and how far that part is (0..1).
+   *  The sound of the whole video is written before its first frame, so a long video spends a while
+   *  here with no frame to count. */
+  onStage?: (stage: ExportStage, fraction: number) => void;
   shouldCancel?: () => boolean;
 }
+
+/** The parts of an export, in order: reading what it needs, the sound, then the picture frame by frame. */
+export type ExportStage = 'preparing' | 'sound' | 'picture';
 
 export class ExportCanceled extends Error {
   constructor() {
@@ -1152,11 +1159,13 @@ export async function measureExportLoudness(opts: ClientExportOpts): Promise<num
   }
 }
 
-/** The mix's integrated loudness, mixed by mixExportAudio without a master gain; null when silent. */
-async function mixLoudness(opts: ClientExportOpts, sources: ExportSources): Promise<number | null> {
+/** The mix's integrated loudness, mixed by mixExportAudio without a master gain; null when silent.
+ *  `onMixed` is told how far into the timeline the mix has got, in seconds. */
+async function mixLoudness(opts: ClientExportOpts, sources: ExportSources, onMixed?: (timelineSec: number) => void): Promise<number | null> {
   let meter: LoudnessMeter | null = null;
   await mixExportAudio(opts, sources, async (sample) => {
     try {
+      onMixed?.(sample.timestamp);
       const channels = sample.numberOfChannels;
       meter ??= new LoudnessMeter(sample.sampleRate, channels);
       meter.push(Array.from({ length: channels }, (_, plane) => {
@@ -1175,8 +1184,8 @@ async function mixLoudness(opts: ClientExportOpts, sources: ExportSources): Prom
 /** The master gain the export applies: measured on this very mix, so whatever changed since the gain
  *  was stored (music added, a clip turned down) still lands on the target. The stored gain stands when
  *  the mix is silent. */
-async function exportMasterGainDb(opts: ClientExportOpts, sources: ExportSources, loudness: { targetLufs: number; gainDb: number }): Promise<number> {
-  const measured = await mixLoudness(opts, sources);
+async function exportMasterGainDb(opts: ClientExportOpts, sources: ExportSources, loudness: { targetLufs: number; gainDb: number }, onMixed?: (timelineSec: number) => void): Promise<number> {
+  const measured = await mixLoudness(opts, sources, onMixed);
   const gainDb = measured === null ? loudness.gainDb : loudnessGainDb(measured, loudness.targetLufs) ?? loudness.gainDb;
   console.info(`[export] mix ${measured === null ? 'silent' : `${measured.toFixed(1)} LUFS`} → master ${gainDb >= 0 ? '+' : ''}${gainDb} dB for ${loudness.targetLufs} LUFS (stored ${loudness.gainDb >= 0 ? '+' : ''}${loudness.gainDb} dB)`);
   return gainDb;
@@ -1204,6 +1213,15 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
   const outH = even(H * k);
   const Sx = outW / W;
   const Sy = outH / H;
+  // Reported when the whole percent changes: the sound arrives a few milliseconds at a time.
+  let reported = '';
+  const stage = (name: ExportStage, fraction = 0) => {
+    const percent = Math.round(Math.max(0, Math.min(1, fraction)) * 100);
+    if (reported === `${name}:${percent}`) return;
+    reported = `${name}:${percent}`;
+    opts.onStage?.(name, percent / 100);
+  };
+  stage('preparing');
   const sources = await openExportSources(opts);
   const { shots, durationSec, segs, tones, visualMediaClips, visualVideos, visualVideoKeys, rigs, files } = sources;
   let visualImageBitmaps: Awaited<ReturnType<typeof loadVisualImageBitmaps>> | undefined;
@@ -1272,10 +1290,21 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     // lane clips keeps the cheaper timestamp-only passthrough.
     // Per-shot volume: gain 1 passes samples through untouched (byte-identical to before the feature existed); gain 0 contributes
     // nothing (a timestamp gap decodes as silence, same as a source without audio); anything between rewrites PCM (same shotGain as preview).
+    const soundSpan = Math.max(0.001, durationSec);
     if (audioSource && needsTimelineMix) {
-      const master = comp.audioLoudness ? { gainDb: await exportMasterGainDb(opts, sources, comp.audioLoudness) } : undefined;
-      await mixExportAudio(opts, sources, (sample) => audioSource.add(sample).then(() => sample.close()), master);
+      stage('sound');
+      // With a loudness target the mix runs twice: once to measure it, once to write it.
+      const measured = !!comp.audioLoudness;
+      const master = comp.audioLoudness
+        ? { gainDb: await exportMasterGainDb(opts, sources, comp.audioLoudness, (sec) => stage('sound', (sec / soundSpan) * 0.5)) }
+        : undefined;
+      await mixExportAudio(opts, sources, (sample) => {
+        const part = sample.timestamp / soundSpan;
+        stage('sound', measured ? 0.5 + part * 0.5 : part);
+        return audioSource.add(sample).then(() => sample.close());
+      }, master);
     } else if (audioSource) {
+      stage('sound');
       for (const s of segs) {
         const rig = rigs.get(s.key);
         const gain = s.gain ?? 1;
@@ -1287,6 +1316,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
             const base = sample.timestamp - s.srcStart; // segment-local seconds at this buffer's start
             const out = flat ? sample : scaleAudioSample(sample, (off) => gain * (s.fadeAt ? s.fadeAt(base + off) : 1));
             out.setTimestamp(Math.max(0, s.timelineStart + (sample.timestamp - s.srcStart)));
+            stage('sound', out.timestamp / soundSpan);
             await audioSource.add(out);
             if (out !== sample) out.close();
             sample.close();
@@ -1296,6 +1326,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     }
     // The sound is complete: the muxer need not wait on this track again.
     audioSource?.close();
+    stage('picture');
 
     // Edited time → segment + time within source. Native gaps return the blank sentinel; they do
     // not freeze the previous frame or jump forward to the next clip.

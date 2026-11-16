@@ -48,6 +48,8 @@ import {
   ArrowLeft,
   Minus,
   Plus,
+  SkipBack,
+  SkipForward,
   Download,
   X,
   GripVertical,
@@ -265,6 +267,7 @@ import {
   DEFAULT_PPS,
   MIN_PPS,
   MAX_PPS,
+  fitPps,
   type TimelineTrackState,
   type TimelineTransitionItem,
 } from "@pireel/studio-ui/studio-timeline";
@@ -336,6 +339,7 @@ import { BatchExportDialog, type OutputBatchState } from "@pireel/studio-ui/batc
 import { KIT_INSERT_DURATION, kitSampleProps } from "@pireel/studio-ui/kit-ui";
 import { wordsFromText } from "@pireel/studio-engine/caption-fx";
 import { AssetsPanel, type GenType, type PanelDragAsset } from "@pireel/studio-ui/assets-panel";
+import type { PanelMediaAsset } from "@pireel/studio-ui/asset-card";
 import { useStudioShell } from "@pireel/studio-ui/shell-context";
 import { workflowDocumentRevision } from "@pireel/studio-ui/editor-workflow-host";
 import { TranscriptEditor } from "@pireel/studio-ui/transcript-editor";
@@ -411,10 +415,14 @@ import {
 } from "@pireel/studio-ui/media-box";
 import { blockDisplayTitle } from "@pireel/studio-ui/block-display-title";
 import {
+  AtPlayhead,
   BracketCutIcon,
   CardShapeControls,
   ExportOptRow,
+  FitWidthIcon,
+  SourceDownloadNotice,
   TimeReadout,
+  TrimButtons,
 } from "@pireel/studio-ui/workbench-controls";
 import {
   type AgentExportJob,
@@ -1244,6 +1252,39 @@ export function HyperframesWorkbench({
   const duration = renderPlan.durationSec;
   const hasVideoTrack = renderPlan.narrative.length > 0;
   const hasContent = renderPlan.durationFrames > 0;
+  // The zoom runs from the whole timeline filling the lanes (the slider's left end) to single
+  // frames (its right end): fitting is a place on the slider, not a zoom apart from it.
+  const [timelineHost, setTimelineHost] = useState<HTMLElement | null>(null);
+  const [timelineViewPx, setTimelineViewPx] = useState(0);
+  useEffect(() => {
+    if (!timelineHost) return;
+    const read = () => setTimelineViewPx(timelineHost.clientWidth);
+    read();
+    const observer = new ResizeObserver(read);
+    observer.observe(timelineHost);
+    return () => observer.disconnect();
+  }, [timelineHost]);
+  const timelineFitPps = fitPps(duration, timelineViewPx);
+  /** The slider's left end: the fit. A video of a few seconds would fit at a zoom with nothing left
+   *  above it, so its left end stops at half the maximum. */
+  const minPps = timelineFitPps == null ? MIN_PPS : Math.min(timelineFitPps, MAX_PPS / 2);
+  // At the left end the timeline stays fitted while the window is resized or the video gets
+  // longer or shorter; anywhere else the zoom is the user's and only kept above the left end.
+  const zoomFittedRef = useRef(false);
+  useEffect(() => {
+    if (timelineFitPps == null) return; // nothing to fit, or the timeline is folded away: the zoom waits
+    if (zoomFittedRef.current ? pps !== minPps : pps < minPps) setPps(minPps);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the left end itself moves
+  }, [minPps]);
+  useEffect(() => {
+    if (timelineFitPps != null) zoomFittedRef.current = pps <= minPps * 1.001;
+  }, [pps, minPps, timelineFitPps]);
+  const [fitSignal, setFitSignal] = useState(0);
+  const fitTimeline = () => {
+    if (timelineFitPps == null) return;
+    setPps(Math.max(minPps, timelineFitPps));
+    setFitSignal((n) => n + 1);
+  };
   const hasSplitSelection =
     !!selectedAudioId ||
     !!selectedVisualClipId ||
@@ -1737,6 +1778,10 @@ export function HyperframesWorkbench({
   const manualEditingLockedRef = useRef(manualEditingLocked);
   manualEditingLockedRef.current = manualEditingLocked;
   const timelineGuardRef = useScrollOnlyWhile(manualEditingLocked);
+  const timelineHostRef = useCallback((node: HTMLElement | null) => {
+    timelineGuardRef(node);
+    setTimelineHost(node);
+  }, [timelineGuardRef]);
   const bridgeOutputAnchorRef = useRef<{ id: string; title: string } | null>(null);
   // Export (state + submit/poll/cancel) — see use-export.ts
   /** Files for locally-inserted clips (key = blob URL; the two split halves share one src so they share naturally):
@@ -1879,6 +1924,12 @@ export function HyperframesWorkbench({
         ? [clip.id] : [];
     }),
   )), [editorDocument, localAssetRuntime, localRuntimeRev]);
+  /** The same sources by signature, for the media panel's cards and the notice over the picture.
+   *  Only what the timeline plays: media that is merely in the library is never fetched here, and
+   *  would read as loading for ever. */
+  const loadingSourceSigs = useMemo(() => new Set(referencedLocalMedia(editorDocument).flatMap((asset) =>
+    localAssetRuntime.status(asset) === 'loading' ? [asset.locator.localSig!] : [],
+  )), [editorDocument, localAssetRuntime, localRuntimeRev, referencedLocalMedia]);
   // Persistence metadata is folded into V2 synchronously without coupling the live-document module
   // to workbench feature refs. No transcripts here: this is a render-time snapshot, and the runtime
   // transcript copies follow the document one effect later (see "Runtime transcript refs follow the
@@ -1932,6 +1983,7 @@ export function HyperframesWorkbench({
   const {
     exporting,
     exportPct,
+    exportStage,
     exportVideo,
     measureMixLoudness,
     cancelExport,
@@ -4272,11 +4324,13 @@ export function HyperframesWorkbench({
     closeFloat: () => void;
     undo: () => void;
     redo: () => void;
+    jumpPlayhead: (to: "start" | "end") => void;
     floatWin: FloatKind | null;
   }>({
     deleteSelection: () => false,
     closeCode: () => {},
     closeFloat: () => {},
+    jumpPlayhead: () => {},
     undo: () => {},
     redo: () => {},
     floatWin: null,
@@ -4392,6 +4446,12 @@ export function HyperframesWorkbench({
           const D = totalDuration(compRef.current);
           applyT(Math.max(0, Math.min(D, tRef.current + step)));
         }
+        return;
+      }
+      if (e.key === "Home" || e.key === "End") {
+        if (!hasTimelineContent(compRef.current)) return;
+        e.preventDefault();
+        keysRef.current.jumpPlayhead(e.key === "Home" ? "start" : "end");
         return;
       }
       if (e.key !== "Delete" && e.key !== "Backspace") return;
@@ -5391,13 +5451,11 @@ export function HyperframesWorkbench({
    *  atSec: landing time when dropped on the timeline (default = playhead). */
   /** Media entering an overlay block: the sandboxed preview cannot resolve parent blob URLs and
    * blob refs die on refresh. Device-local images therefore persist a durable local locator and are
-   * transferred to the preview only at runtime. Local videos belong on a media track. */
+   * transferred to the preview only at runtime. Local videos belong on a media track: callers place
+   * them with placeLocalVideo before they get here. */
   const stageMediaOf = async (media: MediaRef & { sig?: string | null }): Promise<MediaRef | null> => {
     if (!media.url.startsWith("blob:")) return media;
-    if (media.type === "video") {
-      toast.info(t("workbench.localVideoUseTrack"));
-      return null;
-    }
+    if (media.type === "video") return null;
     if (!media.sig) {
       toast.error(t("workbench.localAssetUnreachable"));
       return null;
@@ -5406,6 +5464,24 @@ export function HyperframesWorkbench({
     // export resolves the same durable locator from OPFS; project JSON never embeds image bytes.
     return { type: 'image', url: localImageLocator(media.sig) };
   };
+  const isLocalVideo = (media: MediaRef) => media.type === "video" && media.url.startsWith("blob:");
+  /** A video kept on this device, dropped on the picture or picked for it: it cannot sit in a
+   * graphic card, so it goes where it can play, on a picture lane over the story from that moment
+   * (the lowest free one, else a new lane), or as the story itself when nothing is on it yet. */
+  const placeLocalVideo = async (media: PanelMediaAsset, atSec: number) => {
+    const document = editorDocumentRef.current;
+    const story = document.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId);
+    if (!story?.clips.length) {
+      await insertLibraryClipAt(media, atSec);
+      return;
+    }
+    const startSec = Math.max(0, Math.round(atSec * 10) / 10);
+    const durationSec = (await videoDurationOf(media.url)) ?? 5;
+    await insertLibraryClipAt(media, startSec, {
+      target: brollTargetForRange(editorDocumentRef.current, startSec, startSec + durationSec),
+      mode: "overwrite",
+    });
+  };
   const insertPanelMedia = async (
     mediaIn: MediaRef,
     label?: string,
@@ -5413,6 +5489,10 @@ export function HyperframesWorkbench({
     knownDims?: { w: number; h: number },
     durationSec?: number,
   ) => {
+    if (isLocalVideo(mediaIn)) {
+      await placeLocalVideo({ ...mediaIn, ...(label ? { label } : {}), ...(knownDims ? { dims: knownDims } : {}) }, atSec ?? tRef.current);
+      return;
+    }
     const media = await stageMediaOf(mediaIn);
     if (!media) return;
     const startSec = Math.max(0, Math.round((atSec ?? tRef.current) * 10) / 10);
@@ -5526,6 +5606,10 @@ export function HyperframesWorkbench({
     const nx = (e.clientX - rect.left) / rect.width;
     const ny = (e.clientY - rect.top) / rect.height;
     const tNow = tRef.current;
+    if (a.type === "video" && isLocalVideo(a)) {
+      await placeLocalVideo(a, tNow);
+      return;
+    }
     const hit = compRef.current.blocks
       .filter(
         (b) =>
@@ -6362,12 +6446,32 @@ export function HyperframesWorkbench({
     }
     return false;
   };
+  /** The playhead to the first or the last moment of the timeline, brought into view if it was off screen. */
+  const jumpPlayhead = (to: "start" | "end") => {
+    if (playingRef.current) setPlaying(false);
+    applyT(to === "start" ? 0 : totalDuration(compRef.current));
+    locateTimeline(true);
+  };
+  /** Whether trimming that side at this moment would cut anything: the playhead is inside the
+   *  selected sound, or inside a clip of the story with at least a frame on that side. */
+  const canTrimAt = (side: "left" | "right", now: number): boolean => {
+    if (selectedAudioId) {
+      const clip = (comp.audioTracks ?? []).find((candidate) => candidate.id === selectedAudioId);
+      if (!clip) return false;
+      const sounding = audioClipWindow(clip, totalDuration(comp));
+      return now > sounding.start + 0.05 && now < sounding.end - 0.05;
+    }
+    const range = narrativeTrimRangeAtTimelineSecond(editorDocument, now, side);
+    return !!range && range.toSec - range.fromSec > 0.5 / editorDocument.canvas.fps;
+  };
+  const { trimFromToolbar } = useStableCallbacks({ trimFromToolbar: (side: "left" | "right") => { trimAtPlayhead(side); } });
   keysRef.current = {
     deleteSelection,
     closeCode: () => setFloatWin(null),
     closeFloat: () => setFloatWin(null),
     undo: undoLast,
     redo: redoLast,
+    jumpPlayhead,
     floatWin,
   };
   // Undo/redo button enabled state: every stack change comes with a document re-render, so refs have no visible lag.
@@ -7257,6 +7361,7 @@ export function HyperframesWorkbench({
           hasMainSource={false}
           onDeleteAsset={deleteAssetSource}
           isSrcLive={srcLive}
+          loadingSigs={loadingSourceSigs}
           onReconnectSource={(src, sig) => void reconnectSource(src, sig)}
           onInsert={(m, l, d) => { const { at, dur } = rangeFor(addTarget); setAddTarget(null); void insertPanelMedia(m, l, at, d, dur); }}
           onInsertClip={(a) => insertLibraryOverRange(addTarget, a)}
@@ -8677,6 +8782,7 @@ export function HyperframesWorkbench({
                     hasMainSource={false}
                     onDeleteAsset={deleteAssetSource}
                     isSrcLive={srcLive}
+                    loadingSigs={loadingSourceSigs}
                     onReconnectSource={(src, sig) =>
                       void reconnectSource(src, sig)
                     }
@@ -9070,7 +9176,7 @@ export function HyperframesWorkbench({
                         <FileVideo size={14} />
                       )}{" "}
                       {exporting
-                        ? t("workbench.exportingPctShort", { pct: exportPct })
+                        ? exportStage === "preparing" ? t("workbench.exportPreparingShort") : t("workbench.exportingPctShort", { pct: exportPct })
                         : t("workbench.export")}
                     </button>
                   </TooltipTrigger>
@@ -9159,15 +9265,22 @@ export function HyperframesWorkbench({
                     // Export dialog stays open: progress lives here, only "cancel export" can close it (overlay/Esc are blocked)
                     <div className="flex flex-col gap-3">
                       <div className="bg-line h-1.5 overflow-hidden rounded-full">
-                        <div
-                          className="bg-accent h-full rounded-full transition-[width] duration-300 ease-out"
-                          style={{ width: `${exportPct}%` }}
-                        />
+                        {exportStage === "preparing" ? (
+                          // Nothing to count yet: the bar is alive without claiming a figure.
+                          <div className="bg-accent h-full w-1/3 animate-pulse rounded-full" />
+                        ) : (
+                          <div
+                            className="bg-accent h-full rounded-full transition-[width] duration-300 ease-out"
+                            style={{ width: `${exportPct}%` }}
+                          />
+                        )}
                       </div>
                       <p className="text-ink-3 text-[12px]">
-                        {t("workbench.renderingPctDownloads", {
-                          pct: exportPct,
-                        })}
+                        {exportStage === "preparing"
+                          ? t("workbench.exportPreparing")
+                          : exportStage === "sound"
+                            ? t("workbench.exportSoundPct", { pct: exportPct })
+                            : t("workbench.renderingPctDownloads", { pct: exportPct })}
                       </p>
                       <button
                         type="button"
@@ -9396,6 +9509,7 @@ export function HyperframesWorkbench({
                 ref={previewAreaRef}
                 className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center"
               >
+                <SourceDownloadNotice sigs={loadingSourceSigs} />
                 {/* Canvas-ratio picker (bottom-right): the ratio is a project decision seeded by the first
               inserted source. Default media re-fits inside the new canvas; manually transformed media
               keeps its relative centre and is scaled uniformly, so source pixels never deform. */}
@@ -10974,6 +11088,20 @@ export function HyperframesWorkbench({
               <TooltipTrigger asChild>
                 <button
                   type="button"
+                  onClick={() => jumpPlayhead("start")}
+                  disabled={!hasContent}
+                  aria-label={t("workbench.jumpToStart")}
+                  className="text-ink-3 hover:text-ink hover:bg-panel-2 shrink-0 rounded p-1 disabled:opacity-40"
+                >
+                  <SkipBack size={14} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{t("workbench.jumpToStartKey")}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
                   onClick={togglePlaybackFromUserGesture}
                   disabled={!hasContent}
                   className="bg-primary text-primary-foreground inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full disabled:opacity-40"
@@ -10991,6 +11119,20 @@ export function HyperframesWorkbench({
               <TooltipContent>
                 {playing ? t("workbench.pauseSpace") : t("workbench.playSpace")}
               </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => jumpPlayhead("end")}
+                  disabled={!hasContent}
+                  aria-label={t("workbench.jumpToEnd")}
+                  className="text-ink-3 hover:text-ink hover:bg-panel-2 shrink-0 rounded p-1 disabled:opacity-40"
+                >
+                  <SkipForward size={14} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{t("workbench.jumpToEndKey")}</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -11064,34 +11206,17 @@ export function HyperframesWorkbench({
                 </TooltipTrigger>
                 <TooltipContent>{t("workbench.split")}</TooltipContent>
               </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={() => trimAtPlayhead("left")}
-                    disabled={!hasVideoTrack && !selectedAudioId}
-                    aria-label={t("workbench.trimLeft")}
-                    className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40"
-                  >
-                    <BracketCutIcon dashed="left" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>{t("workbench.trimLeft")}</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={() => trimAtPlayhead("right")}
-                    disabled={!hasVideoTrack && !selectedAudioId}
-                    aria-label={t("workbench.trimRight")}
-                    className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40"
-                  >
-                    <BracketCutIcon dashed="right" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>{t("workbench.trimRight")}</TooltipContent>
-              </Tooltip>
+              <AtPlayhead>
+                {(now) => (
+                  <TrimButtons
+                    left={canTrimAt("left", now)}
+                    right={canTrimAt("right", now)}
+                    onTrim={trimFromToolbar}
+                    leftLabel={t("workbench.trimLeft")}
+                    rightLabel={t("workbench.trimRight")}
+                  />
+                )}
+              </AtPlayhead>
             </div>
             {/* Delete selection: works for shots/components alike (same guard as the Delete key: don't delete while generating / keep at least one shot) */}
             <Tooltip>
@@ -11234,14 +11359,27 @@ export function HyperframesWorkbench({
             </Tooltip>
             {/* Timeline zoom: − thin slider + (borderless, vertically centered) */}
             <div className="text-ink-3 flex shrink-0 items-center gap-2">
+              {/* Fit sits at the slider's left end, where it is on the slider. */}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
-                    onClick={() =>
-                      setPps((p) => Math.max(MIN_PPS, Math.round(p / 1.4)))
-                    }
-                    disabled={pps <= MIN_PPS}
+                    onClick={fitTimeline}
+                    disabled={timelineFitPps == null}
+                    aria-label={t("workbench.fitTimeline")}
+                    className="hover:text-ink hover:bg-panel-2 mr-0.5 flex items-center rounded p-1 disabled:opacity-40"
+                  >
+                    <FitWidthIcon />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{t("workbench.fitTimeline")}</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => setPps((p) => Math.max(minPps, p / 1.4))}
+                    disabled={pps <= minPps * 1.001}
                     aria-label={t("workbench.zoomOutTimeline")}
                     className="hover:text-ink flex items-center disabled:opacity-40"
                   >
@@ -11252,13 +11390,15 @@ export function HyperframesWorkbench({
                   {t("workbench.zoomOutTimelineLabel")}
                 </TooltipContent>
               </Tooltip>
+              {/* An even step of the slider is an even ratio of zoom: the range runs from a whole
+                  hour on screen to single frames. */}
               <input
                 type="range"
-                min={MIN_PPS}
-                max={MAX_PPS}
-                step={1}
-                value={pps}
-                onChange={(e) => setPps(Number(e.target.value))}
+                min={Math.log(minPps)}
+                max={Math.log(MAX_PPS)}
+                step={0.01}
+                value={Math.log(Math.max(minPps, Math.min(MAX_PPS, pps)))}
+                onChange={(e) => setPps(Math.max(minPps, Math.min(MAX_PPS, Math.exp(Number(e.target.value)))))}
                 className="zoom-range w-24"
                 aria-label={t("workbench.timelineZoom")}
               />
@@ -11266,9 +11406,7 @@ export function HyperframesWorkbench({
                 <TooltipTrigger asChild>
                   <button
                     type="button"
-                    onClick={() =>
-                      setPps((p) => Math.min(MAX_PPS, Math.round(p * 1.4)))
-                    }
+                    onClick={() => setPps((p) => Math.min(MAX_PPS, p * 1.4))}
                     disabled={pps >= MAX_PPS}
                     aria-label={t("workbench.zoomInTimeline")}
                     className="hover:text-ink flex items-center disabled:opacity-40"
@@ -11308,7 +11446,7 @@ export function HyperframesWorkbench({
 
         {/* Caption style popover: reuses CaptionsPanel wholesale; clicking a style applies globally, click outside / Esc dismisses */}
         {/* Multi-track timeline */}
-        <div ref={timelineGuardRef} data-studio-timeline data-cap-keep aria-disabled={manualEditingLocked || undefined} hidden={timelineCollapsed || whiteboardScene} className="shrink-0 overflow-hidden rounded-b-sm">
+        <div ref={timelineHostRef} data-studio-timeline data-cap-keep aria-disabled={manualEditingLocked || undefined} hidden={timelineCollapsed || whiteboardScene} className="shrink-0 overflow-hidden rounded-b-sm">
           <StudioTimeline
             comp={timelineComp}
             density={timelineDensity}
@@ -11318,6 +11456,8 @@ export function HyperframesWorkbench({
             playing={playing}
             locateSignal={locateSignal}
             locateNear={locateNear}
+            minPps={minPps}
+            fitSignal={fitSignal}
             selectedShotIds={selectedShotIds}
             selectedVisualClipId={selectedVisualClipId}
             selectedBlockIds={selectedBlockIds}

@@ -17,6 +17,7 @@
  */
 
 import { studioProviders } from '@pireel/studio-engine/providers';
+import { endMediaDownload, noteMediaDownload } from '@pireel/studio-ui/media-downloads';
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-types';
 import { fileMatchesSig, fileNameFromSig, fileSig, isContentSig, rememberDurableFileSig, sigSize } from '@pireel/studio-ui/media';
 import { additionalMediaCacheEntries, evictUnusedMediaEntry, idleMediaCacheEntries, mediaCacheEvictionPlan, openMediaCachePage, protectMediaCacheEntry, withMediaCacheRead, type AdditionalMediaCacheEntry, type MediaCacheEntry } from './local-media-cache';
@@ -322,6 +323,7 @@ async function consumeLocalStream(
   stream: ReadableStream<Uint8Array<ArrayBuffer>>,
   expectedSize: number | null,
   write?: (chunk: Uint8Array<ArrayBuffer>) => Promise<void>,
+  onReceived?: (received: number) => void,
 ): Promise<number> {
   const reader = stream.getReader();
   let received = 0;
@@ -330,6 +332,7 @@ async function consumeLocalStream(
       const { done, value } = await reader.read();
       if (done) break;
       received += value.byteLength;
+      onReceived?.(received);
       if (expectedSize != null && received > expectedSize) {
         throw new Error(
           `local fetch size mismatch: expected ${expectedSize}, received more than ${expectedSize}`,
@@ -363,19 +366,27 @@ export async function saveLocalStream(
   const key = await sigKey(sig);
   // The file handed back reads from the cache: it stays while the page that asked is open.
   protectMediaCacheEntry(key);
-  return withMediaCacheRead(key, async () => {
-    await makeRoomInLocalMediaCache(await hasLocalVideo(sig) ? 0 : options.expectedSize ?? sigSize(sig) ?? 0);
-    return writeLocalStream(stream, sig, options);
-  });
+  // Shown as downloading from here until the last byte is on the device (or the attempt fails).
+  noteMediaDownload(sig, 0, options.expectedSize ?? sigSize(sig) ?? null);
+  try {
+    return await withMediaCacheRead(key, async () => {
+      await makeRoomInLocalMediaCache(await hasLocalVideo(sig) ? 0 : options.expectedSize ?? sigSize(sig) ?? 0);
+      return writeLocalStream(stream, sig, options);
+    });
+  } finally {
+    endMediaDownload(sig);
+  }
 }
 
 async function writeLocalStream(stream: ReadableStream<Uint8Array<ArrayBuffer>>, sig: string, options: SaveLocalStreamOptions): Promise<File> {
+  const total = options.expectedSize ?? sigSize(sig) ?? null;
+  const arrived = (received: number) => noteMediaDownload(sig, received, total);
   const dir = await dirHandle();
   if (!dir) {
     // Private browsing/embedded webviews may expose no OPFS. Cloud bytes must still be usable;
     // the cache is optional, so retain this retrieval in a session File instead.
     const chunks: BlobPart[] = [];
-    await consumeLocalStream(stream, options.expectedSize ?? null, async (chunk) => { chunks.push(chunk); });
+    await consumeLocalStream(stream, options.expectedSize ?? null, async (chunk) => { chunks.push(chunk); }, arrived);
     return alignFileToSig(new File(chunks, options.name || 'import', { type: options.type || 'application/octet-stream' }), sig);
   }
 
@@ -400,7 +411,7 @@ async function writeLocalStream(stream: ReadableStream<Uint8Array<ArrayBuffer>>,
       /* missing entry */
     }
     if (existing?.size === expectedSize) {
-      await consumeLocalStream(stream, expectedSize);
+      await consumeLocalStream(stream, expectedSize, undefined, arrived);
       await writeStoredMeta(dir, key, meta);
       return markFileOrigin(alignFileToSig(new File([existing], meta.name, { type: meta.type, lastModified: meta.lastModified }), sig), 'opfs-existing');
     }
@@ -412,7 +423,7 @@ async function writeLocalStream(stream: ReadableStream<Uint8Array<ArrayBuffer>>,
   try {
     await consumeLocalStream(stream, expectedSize, async (chunk) => {
       await writable.write(chunk);
-    });
+    }, arrived);
     await writable.close();
     closed = true;
     await writeStoredMeta(dir, key, meta);

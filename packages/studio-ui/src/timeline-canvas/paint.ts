@@ -92,6 +92,8 @@ export interface TimelinePaintState {
   audioPeaks?: ReadonlyMap<string, Float32Array>;
   mainLive: boolean;
   sourceLive?: (source: string) => boolean;
+  /** Clips whose source is still on its way to this device: not gone, just not here yet. */
+  loadingIds?: ReadonlySet<string>;
   /** A picture by address; null until it has loaded (the loader asks for another frame then). */
   image(url: string): CanvasImageSource | null;
   kindIcon(kind: BlockKind): CanvasImageSource | null;
@@ -99,7 +101,7 @@ export interface TimelinePaintState {
   icon(name: string): CanvasImageSource | null;
   /** Audio clips have a mute switch here. */
   audioMute: boolean;
-  labels: { video: string; image: string; captions: string; music: string; missing: string; dropAudio: string; emptySpine: string; dropOnSpine: string; inserting: string; blockTitle(item: Extract<TimelineItem, { kind: 'block' }>): string };
+  labels: { video: string; image: string; captions: string; music: string; missing: string; loading: string; dropAudio: string; emptySpine: string; dropOnSpine: string; inserting: string; blockTitle(item: Extract<TimelineItem, { kind: 'block' }>): string };
 }
 
 /** Where second zero sits on the canvas, and where the lanes begin under the sticky ruler. */
@@ -194,7 +196,7 @@ function frame(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h
 /** A video card: its thumbnails over its own audio band. */
 function videoCard(
   ctx: CanvasRenderingContext2D, state: TimelinePaintState, box: { x: number; y: number; w: number; h: number },
-  clip: { startSec: number; endSec: number; sourceIn: number; sourceOut: number; strip: readonly FilmstripFrame[]; still?: string; live: boolean; peaksKey?: string; volumeDb: number; muted: boolean; envelope?: (fraction: number) => number },
+  clip: { startSec: number; endSec: number; sourceIn: number; sourceOut: number; strip: readonly FilmstripFrame[]; still?: string; live: boolean; loading?: boolean; peaksKey?: string; volumeDb: number; muted: boolean; envelope?: (fraction: number) => number },
 ) {
   const { colors, metrics, pps } = state;
   const filmH = box.h - metrics.sceneWaveH;
@@ -209,7 +211,7 @@ function videoCard(
     ctx.font = `400 9px ${colors.font}`;
     ctx.fillStyle = colors.ink4;
     ctx.textAlign = 'center';
-    ctx.fillText(fit(ctx, state.labels.missing, box.w - 8), box.x + box.w / 2, box.y + box.h / 2);
+    ctx.fillText(fit(ctx, clip.loading ? state.labels.loading : state.labels.missing, box.w - 8), box.x + box.w / 2, box.y + box.h / 2);
     ctx.textAlign = 'left';
   } else if (clip.still) {
     const image = state.image(clip.still);
@@ -336,7 +338,7 @@ const held = state.edit.items;
     if (live?.faint) ctx.globalAlpha = 0.3;
     videoCard(ctx, state, box, {
       startSec: live?.startSec ?? item.startSec, endSec: live?.endSec ?? item.endSec, sourceIn: live?.sourceIn ?? shot.srcStart, sourceOut: live?.sourceOut ?? shot.srcEnd,
-      strip: shot.src ? state.clipStrips[shot.src] ?? [] : state.filmstrip, live: shot.src ? state.sourceLive?.(shot.src) ?? true : state.mainLive,
+      strip: shot.src ? state.clipStrips[shot.src] ?? [] : state.filmstrip, live: shot.src ? state.sourceLive?.(shot.src) ?? true : state.mainLive, loading: state.loadingIds?.has(shot.id),
       peaksKey: shot.src ?? 'main', volumeDb: shot.audioMuted ? WAVE_FLOOR_DB : shot.volumeDb ?? 0, muted: !!shot.audioMuted,
       envelope: faded ? (fraction) => shotFadeAt(shot, fraction * span, span) : undefined,
     });
@@ -367,6 +369,7 @@ const held = state.edit.items;
       strip: clip.kind === 'image' ? [] : clip.usePrimaryFilmstrip ? state.filmstrip : (clip.source ? state.clipStrips[clip.source] : undefined) ?? [],
       still: clip.kind === 'image' ? clip.source : undefined,
       live: clip.kind === 'image' || (clip.usePrimaryFilmstrip ? state.mainLive : !clip.source || (state.sourceLive?.(clip.source) ?? true)),
+      loading: state.loadingIds?.has(clip.clipId),
       peaksKey: clip.kind === 'video' ? (clip.usePrimaryFilmstrip ? 'main' : clip.source) : undefined, volumeDb: 0, muted: false,
     });
     if (clip.kind === 'image' && box.w > 46) badge(ctx, clip.label || state.labels.image, box.x + 4, box.y + box.h - 18, box.w, colors);
