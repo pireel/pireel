@@ -7,7 +7,7 @@
 
 import type { ComponentType } from 'react';
 import { AudioLines, Captions, Film, ImageIcon, Scissors, Shapes, Volume2 } from 'lucide-react';
-import { EDITING_SKILLS, type EditingSkillId } from '@pireel/studio-engine/editing-skills';
+import { EDITING_SKILLS, OPT_IN_EDITING_SKILL_IDS, visualsOn, withVisuals, type EditingSkillId } from '@pireel/studio-engine/editing-skills';
 import { Switch } from '@pireel/ui/switch';
 import { t } from '@pireel/studio-ui/i18n';
 
@@ -37,19 +37,26 @@ export function EditingSkillTile({ id, size = 28, ring, z }: { id: EditingSkillI
 export const editingSkillName = (id: EditingSkillId) => t(`editingSkills.${id.replace(/-/g, '_')}.name`);
 const name = editingSkillName;
 
-/** The editing skills as switches, for a project whose footage is not yet edited. */
+/** Graphics and B-roll as the creator names them together: one switch, one line of a checklist. */
+export const visualsName = () => t('editingSkills.visuals.name');
+
+/** The editing skills as switches, for a project whose footage is not yet edited. Graphics and
+ *  B-roll are one switch here (the first of the two holds its place): it sets both. */
 export function EditingSkillSwitches({ value, onChange, disabled }: { value: readonly string[]; onChange: (ids: string[]) => void; disabled?: boolean }) {
-  const toggle = (id: EditingSkillId, on: boolean) => onChange(EDITING_SKILLS.map((skill) => skill.id).filter((skill) => skill === id ? on : value.includes(skill)));
+  const [visuals, ...otherVisuals] = OPT_IN_EDITING_SKILL_IDS;
+  const rows = EDITING_SKILLS.map((skill) => skill.id).filter((id) => !otherVisuals.includes(id)).map((id) => (id === visuals
+    ? { id, label: visualsName(), on: visualsOn(value), set: (on: boolean) => onChange(withVisuals(value, on)) }
+    : { id, label: name(id), on: value.includes(id), set: (on: boolean) => onChange(EDITING_SKILLS.map((skill) => skill.id).filter((skill) => (skill === id ? on : value.includes(skill)))) }));
   return (
     <section aria-label={t('editingSkills.title')} className="w-full max-w-[360px] px-2">
       <h3 className="text-ink-3 mb-1.5 px-1 text-[11px] font-medium">{t('editingSkills.title')}</h3>
       <ul className="flex flex-col">
-        {EDITING_SKILLS.map(({ id }) => (
+        {rows.map(({ id, label, on, set }) => (
           <li key={id}>
             <label className="hover:bg-panel-2/60 flex cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5">
               <EditingSkillTile id={id} size={26} />
-              <span className="text-ink-2 min-w-0 flex-1 truncate text-[12.5px]">{name(id)}</span>
-              <Switch checked={value.includes(id)} disabled={disabled} aria-label={name(id)} onCheckedChange={(on) => toggle(id, on)} />
+              <span className="text-ink-2 min-w-0 flex-1 truncate text-[12.5px]">{label}</span>
+              <Switch checked={on} disabled={disabled} aria-label={label} onCheckedChange={set} />
             </label>
           </li>
         ))}

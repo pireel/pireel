@@ -1,7 +1,7 @@
 import { Check, Loader2, Minus, X } from "lucide-react";
 import type { UIMessage } from "ai";
-import type { FineCutItem, FirstPassReport, FirstPassStepStatus } from "@pireel/studio-ui/first-pass";
-import { editingSkillName } from "@pireel/studio-ui/editing-skills";
+import { shownFineCutItems, type FineCutItem, type FirstPassReport, type FirstPassStepStatus } from "@pireel/studio-ui/first-pass";
+import { editingSkillName, visualsName } from "@pireel/studio-ui/editing-skills";
 import { useToolProgress } from "@pireel/studio-ui/tool-progress";
 import { t } from "@pireel/studio-ui/i18n";
 
@@ -118,10 +118,10 @@ export function FirstPassCard({ report, live, fineCut, fineCutLive, lateCredits,
         <>
           <div className="text-ink border-line mt-2.5 mb-1.5 border-t pt-2 font-medium">{t("chatGen.firstPass.fineCutTitle")}</div>
           <ul className="flex flex-col gap-1">
-            {fineCut.items.map((item) => (
+            {shownFineCutItems(fineCut.items).map((item) => (
               <li key={item.id} className="flex items-center gap-2">
                 <span className="flex size-4 shrink-0 items-center justify-center">{ICON[FINE_ICON[fineStatus(item.status)]]}</span>
-                <span className={item.status === "done" || item.status === "running" ? "text-ink-2" : "text-ink-4"}>{editingSkillName(item.id)}</span>
+                <span className={item.status === "done" || item.status === "running" ? "text-ink-2" : "text-ink-4"}>{item.id === "visuals" ? visualsName() : editingSkillName(item.id)}</span>
                 <span className="text-ink-3 ml-auto pl-2">
                   {(item.status === "not-needed" || item.status === "not-added")
                     ? t("chatGen.firstPass.notAdded")

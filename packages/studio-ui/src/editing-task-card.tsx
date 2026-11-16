@@ -25,7 +25,7 @@ export function EditingTaskCard({ task, messages, live, fine, credits, startedAt
     planning: t('ui.editingTaskCard.directingEdit'),
     pauses: t('ui.editingTaskCard.trimmingPauses'), captions: t('ui.editingTaskCard.addingCaptions'),
     denoise: t('ui.editingTaskCard.cleaningUpNarration'), logo: t('ui.editingTaskCard.addingLogo'), loudness: t('ui.editingTaskCard.balancingAudio'),
-    graphics: t('ui.editingTaskCard.designingVisuals'), 'b-roll': t('ui.editingTaskCard.gatheringBRoll'), sound: t('ui.editingTaskCard.addingSoundEffects'), zoom: t('ui.editingTaskCard.autoZoom'), transitions: t('ui.editingTaskCard.transitions'), review: t('ui.editingTaskCard.checkingPreview'), cover: t('ui.editingTaskCard.creatingBrandCover'),
+    graphics: t('ui.editingTaskCard.designingVisuals'), 'b-roll': t('ui.editingTaskCard.gatheringBRoll'), visuals: t('ui.editingTaskCard.addingVisuals'), sound: t('ui.editingTaskCard.addingSoundEffects'), zoom: t('ui.editingTaskCard.autoZoom'), transitions: t('ui.editingTaskCard.transitions'), review: t('ui.editingTaskCard.checkingPreview'), cover: t('ui.editingTaskCard.creatingBrandCover'),
   };
   const card = (title: string, entries: EditingProgressRow[]) => entries.length > 0 && <section aria-label={title} className="bg-panel-2/60 border-line rounded-xl border px-4 py-3.5">
     <h3 className="text-ink-3 mb-3 text-xs font-medium">{title}</h3>

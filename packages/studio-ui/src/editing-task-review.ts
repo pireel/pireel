@@ -113,7 +113,10 @@ export function reviewEditingTask(task: ChatTask, input: Record<string, unknown>
       return { feature, status: row?.status === 'blocked' ? 'blocked' : count ? 'applied' : 'not_needed', reason: typeof row?.reason === 'string' ? row.reason.trim() : '', count, ...(typeof row?.atFrame === 'number' ? { atFrame: row.atFrame } : {}) };
     });
     const beats = task.directorPlan && document ? readDirectorBeats(task.directorPlan, input, document) : undefined;
-    const silent = read.filter(item => wanted.includes(item.feature) && !item.count && !item.reason).map(item => item.feature);
+    // Graphics and B-roll are one decision: a video that took one of them owes no account of the other.
+    const visuals = read.filter(item => item.feature === 'graphics' || item.feature === 'b-roll');
+    const hasVisuals = visuals.some(item => item.count > 0);
+    const silent = read.filter(item => wanted.includes(item.feature) && !item.count && !item.reason && !(hasVisuals && visuals.includes(item))).map(item => item.feature);
     const advice = document && !task.reviewNoted ? [
       ...(silent.length ? [`${silent.join(', ')} ${silent.length > 1 ? 'were' : 'was'} asked for and nothing of it is in the video. If that is your decision, tell the creator why in your reply; otherwise add it.`] : []),
       ...reviewNotes(document), ...findings.filter((finding) => finding.severity === 'warning').slice(0, 8).map((finding) => `Worth a look: ${finding.message}.`),

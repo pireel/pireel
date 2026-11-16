@@ -106,9 +106,22 @@ export function editingTaskRows(task: ChatTask, report: FirstPassReport | undefi
     const last = inspections.at(-1) as { state?: string; output?: { ok?: boolean } };
     finishing.push({ id: 'review', status: working ? 'running' : last?.state === 'output-error' || last?.output?.ok === false ? 'failed' : last?.state === 'output-available' ? 'done' : 'pending' });
   }
-  return { rough, planning, finishing: finishing.map(row => {
+  return { rough, planning, finishing: mergeVisualRows(finishing.map(row => {
     const reviewed = task.review?.items.find(item => item.feature === row.id);
     if (working) return row;
     return reviewed ? { ...row, status: reviewed.status === 'applied' ? 'done' as const : reviewed.status === 'blocked' ? 'failed' as const : 'skipped' as const, reason: reviewed.reason, count: reviewed.count } : row;
-  }) };
+  })) };
+}
+
+/** Graphics and B-roll are one line for the creator when both are on: the edit chose between them,
+ *  so what counts is that the video got its pictures, not that it got some of each. */
+function mergeVisualRows(rows: EditingProgressRow[]): EditingProgressRow[] {
+  const pair = rows.filter(row => row.id === 'graphics' || row.id === 'b-roll');
+  if (pair.length < 2) return rows;
+  const any = (status: FirstPassStepStatus) => pair.some(row => row.status === status);
+  const status: FirstPassStepStatus = any('running') ? 'running' : any('done') ? 'done' : any('failed') ? 'failed' : any('pending') ? 'pending' : 'skipped';
+  const count = pair.reduce((sum, row) => sum + (row.count ?? 0), 0);
+  const reason = status === 'done' ? undefined : pair.find(row => row.reason)?.reason;
+  const merged: EditingProgressRow = { id: 'visuals', status, ...(count ? { count } : {}), ...(reason ? { reason } : {}) };
+  return rows.flatMap(row => row.id === pair[0]!.id ? [merged] : row.id === pair[1]!.id ? [] : [row]);
 }

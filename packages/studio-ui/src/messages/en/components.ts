@@ -98,6 +98,7 @@ export const COMPONENTS_EN: Record<string, string> = {
   'ui.editingTaskCard.editingVideo': 'Editing your video',
   'ui.editingTaskCard.fineCut': 'Fine cut',
   'ui.editingTaskCard.gatheringBRoll': 'Gathering B-roll',
+  'ui.editingTaskCard.addingVisuals': 'Adding visuals',
   'ui.editingTaskCard.incomplete': 'Incomplete',
   'ui.editingTaskCard.notAdded': 'Not added',
   'ui.editingTaskCard.preparingVideo': 'Preparing your video',

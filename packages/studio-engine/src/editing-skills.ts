@@ -41,6 +41,22 @@ export const OPT_IN_EDITING_SKILL_IDS: readonly EditingSkillId[] = ['graphics', 
 export const withoutOptInSkills = (ids: readonly string[]): string[] =>
   ids.filter((id) => !(OPT_IN_EDITING_SKILL_IDS as readonly string[]).includes(id));
 
+const isVisualSkill = (id: string) => (OPT_IN_EDITING_SKILL_IDS as readonly string[]).includes(id);
+
+/**
+ * For the creator the two are one switch: what goes on screen besides the speaker. Graphics and
+ * pictures compete for the same seconds, so an edit decides them together. The project still records
+ * both ids: an entry that offers only one of them (a B-roll tool page) keeps meaning what it says.
+ */
+export const visualsOn = (ids: readonly string[] | undefined): boolean => (ids ?? []).some(isVisualSkill);
+
+/** The skills with both visual ones switched together, in catalog order. */
+export const withVisuals = (ids: readonly string[], on: boolean): EditingSkillId[] =>
+  EDITING_SKILL_IDS.filter((id) => (isVisualSkill(id) ? on : ids.includes(id)));
+
+/** What both switched on asks for: one decision, not two quotas. */
+const VISUALS_INSTRUCTION = 'Graphics and pictures for this video, decided together in one list of what each passage shows (read_skill talking-head-edit, One list for graphics and pictures). Designed graphics: read_skill video-graphics. Pictures: where each comes from follows what it must do there. Neither kind is owed: a video may take only one of them, and a passage that needs neither stays on the speaker. New footage follows the Generation approval rule.';
+
 export const isEditingSkillId = (value: unknown): value is EditingSkillId =>
   typeof value === 'string' && (EDITING_SKILL_IDS as readonly string[]).includes(value);
 
@@ -58,8 +74,14 @@ export function editingSkillsOf(ids: readonly string[] | undefined, tools?: Read
 export function editingSkillsHint(ids: readonly string[] | undefined, tools?: ReadonlySet<string>): string {
   const on = editingSkillsOf(ids, tools);
   if (!on.length) return '';
+  // Both visual skills on read as one line: two lines read as two things to deliver.
+  const both = OPT_IN_EDITING_SKILL_IDS.every((id) => on.some((skill) => skill.id === id));
+  const lines = on.flatMap((skill) => {
+    if (!both || !isVisualSkill(skill.id)) return [`- ${skill.id}: ${skill.instruction}`];
+    return skill.id === OPT_IN_EDITING_SKILL_IDS[0] ? [`- ${OPT_IN_EDITING_SKILL_IDS.join(' + ')}: ${VISUALS_INSTRUCTION}`] : [];
+  });
   return [
     'Editing capabilities enabled for this project. Use them when useful for a whole-video edit, not as quotas or a requirement to add something from every category. For a narrow request, do only what was asked. The current explicit request takes precedence over brand defaults.',
-    ...on.map((skill) => `- ${skill.id}: ${skill.instruction}`),
+    ...lines,
   ].join('\n');
 }

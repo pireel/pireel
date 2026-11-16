@@ -560,6 +560,7 @@ export const PANELS_ZH: Record<string, string> = {
   "editingSkills.voice_cleanup.name": "口播降噪",
   "editingSkills.sound.name": "音效",
   "editingSkills.b_roll.name": "自动 B-roll",
+  "editingSkills.visuals.name": "配画面",
   "workbench.exportForEditors": "导出到其他剪辑软件",
   "workbench.downloadCaptionsSrt": "下载字幕（SRT）",
   "nleExport.title": "导出到其他剪辑软件",

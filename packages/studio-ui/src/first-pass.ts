@@ -35,6 +35,17 @@ export type EditingEvidence = Record<FineCutSkill, string[]> & { zoom?: string[]
 
 export interface FineCutItem { id: FineCutSkill; status: 'running' | 'done' | 'not-needed' | 'not-added' | 'stopped'; count: number }
 
+/** The checklist as the creator reads it: graphics and B-roll are one line when both are on, since
+ *  the edit chose between them. What is stored stays per skill. */
+export type ShownFineCutItem = Omit<FineCutItem, 'id'> & { id: FineCutSkill | 'visuals' };
+export function shownFineCutItems(items: readonly FineCutItem[]): ShownFineCutItem[] {
+  const pair = items.filter(item => item.id === 'graphics' || item.id === 'b-roll');
+  if (pair.length < 2) return [...items];
+  const status = pair.find(item => item.status === 'running')?.status ?? pair.find(item => item.status === 'done')?.status ?? pair[0]!.status;
+  const merged: ShownFineCutItem = { id: 'visuals', status, count: pair.reduce((sum, item) => sum + item.count, 0) };
+  return items.flatMap((item): ShownFineCutItem[] => item.id === pair[0]!.id ? [merged] : item.id === pair[1]!.id ? [] : [item]);
+}
+
 /** The checklist as the rough cut's card shows it (live progress, then the tool receipt). "stopped": the
  *  creator stopped it; the steps still pending can run again. */
 export interface FirstPassReport {

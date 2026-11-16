@@ -98,6 +98,7 @@ export const COMPONENTS_ZH: Record<string, string> = {
   'ui.editingTaskCard.editingVideo': '正在剪辑',
   'ui.editingTaskCard.fineCut': '精剪',
   'ui.editingTaskCard.gatheringBRoll': '搭配素材',
+  'ui.editingTaskCard.addingVisuals': '配画面',
   'ui.editingTaskCard.incomplete': '未完成',
   'ui.editingTaskCard.notAdded': '未添加',
   'ui.editingTaskCard.preparingVideo': '准备视频',
