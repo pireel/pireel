@@ -1847,9 +1847,23 @@ export function HyperframesWorkbench({
       const entry = localAssetIndexRef.current.find(
         (item) => item.contentSig === sig && item.kind === "image",
       );
-      return entry ? resolveAssetBytes(entry, { projectId }) : null;
+      // The document's own image carries its stored copy too. The media directory may not list it
+      // yet when the canvas first asks (a cloud project opened on a device that never had the
+      // bytes), and this is asked once per document load: without it the canvas kept a broken image.
+      const asset = Object.values(editorDocumentRef.current.assets).find(
+        (item) => item.kind === "image" && item.locator.localSig === sig,
+      );
+      const cloudKey = entry?.cloudKey ?? asset?.locator.cloudKey;
+      if (!entry && !cloudKey) return null;
+      return resolveAssetBytes({
+        ...entry,
+        assetId: entry?.assetId ?? asset!.id,
+        contentSig: sig,
+        cloudKey,
+        label: entry?.label ?? asset?.label ?? sig,
+      }, { projectId });
     },
-    [projectId],
+    [projectId, editorDocumentRef],
   );
   const [localRuntimeRev, setLocalRuntimeRev] = useState(0);
   const localAssetRuntime = useMemo(() => new LocalAssetRuntime({
